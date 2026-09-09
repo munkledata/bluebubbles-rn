@@ -283,10 +283,49 @@ describe('endpoint shapes: send / action acks (NOT bare Messages)', () => {
     expect(ack.guid).toBeUndefined();
   });
 
+  it('sendText preserves a bounded server-owned RCS attempt identity', async () => {
+    const fx = {
+      guid: 'temp-rcs-attempt',
+      viaPrivateApi: false,
+      attemptGuid: 'attempt-rcs-1122-3344',
+      clientAttemptGeneration: 7,
+    };
+    const post = jest.fn(async (_path: string, schema: z.ZodType, options: unknown) => {
+      void options;
+      return schema.parseAsync(fx);
+    });
+    const ack = await sendText({ post } as unknown as HttpClient, {
+      chatGuid: 'RCS;-;conversation-1',
+      tempGuid: 'temp-rcs-attempt',
+      clientAttemptGeneration: 7,
+      message: 'hi',
+    });
+
+    expect(ack.attemptGuid).toBe('attempt-rcs-1122-3344');
+    expect(ack.clientAttemptGeneration).toBe(7);
+    expect(SendAck.safeParse({ ...fx, attemptGuid: '' }).success).toBe(false);
+    expect(SendAck.safeParse({ ...fx, attemptGuid: 'x'.repeat(129) }).success).toBe(false);
+    expect(SendAck.safeParse({ ...fx, clientAttemptGeneration: 0 }).success).toBe(false);
+    expect(SendAck.safeParse({ ...fx, clientAttemptGeneration: 2_147_483_648 }).success).toBe(
+      false,
+    );
+    expect(post).toHaveBeenCalledWith(
+      '/message/text',
+      SendAck,
+      expect.objectContaining({
+        json: expect.objectContaining({ clientAttemptGeneration: 7 }),
+      }),
+    );
+  });
+
   it('unsendMessage parses the { unsent: true } status object (not a Message)', async () => {
     const fx = fixture('unsendAck.gator.json');
     expect(UnsendAck.safeParse(fx).success).toBe(true);
-    const ack = await unsendMessage(httpReturning(fx), { chatGuid: 'c1', messageGuid: 'm1' });
+    const ack = await unsendMessage(httpReturning(fx), {
+      chatGuid: 'c1',
+      messageGuid: 'm1',
+      partIndex: 0,
+    });
     expect(ack.unsent).toBe(true);
   });
 });
@@ -324,6 +363,7 @@ describe('endpoint shapes: device registration', () => {
     expect(await registerDevice(httpReturning({ id: 'dev-9' }), 'Phone', 'tok')).toEqual({
       id: 'dev-9',
       pushEncryptionType: null,
+      pushEncryptionIdentity: null,
     });
   });
 });

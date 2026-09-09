@@ -105,7 +105,7 @@ Features include:
 
 Gator requires a separately installed and configured companion server. Some features require a compatible server version or private server APIs. Gator is not affiliated with, endorsed by, or sponsored by Apple.
 
-Messages and other app records are stored in a SQLCipher-encrypted database on this device. Downloaded or staged attachments, caches, wallpapers and backgrounds, and structured diagnostic logs are ordinary unencrypted files in Gator's app-private storage. Copies saved—or images automatically exported—to Photos or the Gator album are separate plaintext copies in shared media storage and remain until you delete them there.
+Messages and other app records are stored in a SQLCipher-encrypted database on this device. Downloaded or staged attachments, caches, wallpapers and backgrounds, and structured diagnostic logs are ordinary unencrypted files in Gator's app-private storage. Copies saved—or images automatically exported—to Photos or the Gator album are separate plaintext copies in shared media storage and remain until you delete them there. An image delivered while Gator is closed or in the background may remain only in Gator's app-private cache; the automatic Photos or Gator album copy is not retried.
 
 App Lock is a foreground screen gate. It does not make the database key biometric-bound, encrypt files, or block screenshots, screen recording, or every task-switcher snapshot.
 

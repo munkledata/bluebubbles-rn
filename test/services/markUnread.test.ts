@@ -32,6 +32,7 @@ import { createTestDb } from '../support/testDb';
 // Hoisted jest.mock factories may only reference `mock`-prefixed vars.
 let mockDb: AppDatabase;
 let mockPrivateApiEnabled = true;
+let mockSendReadReceipts = true;
 let mockSettingsHydrated = true;
 const mockHydrate = jest.fn(async () => {
   mockSettingsHydrated = true;
@@ -52,7 +53,7 @@ jest.mock('@state/featureSettingsStore', () => ({
   useFeatureSettingsStore: {
     getState: () => ({
       privateApiEnabled: mockPrivateApiEnabled,
-      sendReadReceipts: true,
+      sendReadReceipts: mockSendReadReceipts,
       hydrated: mockSettingsHydrated,
       hydrate: mockHydrate,
     }),
@@ -112,6 +113,7 @@ beforeEach(() => {
   mockMarkChatUnread.mockReset().mockResolvedValue({});
   mockMarkChatRead.mockReset().mockResolvedValue({});
   mockPrivateApiEnabled = true;
+  mockSendReadReceipts = true;
   mockSettingsHydrated = true;
   mockHydrate.mockClear();
   (ensureDatabase as jest.Mock).mockClear();
@@ -275,6 +277,21 @@ describe('markUnread', () => {
     expect(readMarker(raw, guid)).toBeNull(); // the local flip still lands
   });
 
+  it('keeps the local unread flip but sends nothing when hydration cannot complete', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    const guid = 'iMessage;-;+15551234567';
+    await seedChat(db, guid);
+    mockSettingsHydrated = false;
+    mockHydrate.mockImplementationOnce(async () => undefined);
+
+    await markUnread(guid);
+
+    expect(mockSettingsHydrated).toBe(false);
+    expect(readMarker(raw, guid)).toBeNull();
+    expect(mockMarkChatUnread).not.toHaveBeenCalled();
+  });
+
   it('the Private API master toggle OFF skips the server call (local flip still lands)', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
@@ -328,7 +345,7 @@ describe('markRead', () => {
     mockSettingsHydrated = false;
     mockHydrate.mockImplementationOnce(async () => {
       mockSettingsHydrated = true;
-      mockPrivateApiEnabled = false;
+      mockSendReadReceipts = false;
     });
 
     await markRead(guid);
@@ -336,6 +353,31 @@ describe('markRead', () => {
     expect(mockHydrate).toHaveBeenCalledTimes(1);
     expect(mockMarkChatRead).not.toHaveBeenCalled();
     expect(readMarker(raw, guid)).toBe('m1'); // own badge still clears
+  });
+
+  it('keeps the local read marker and never resolves a client when hydration fails closed', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    const guid = 'iMessage;-;+15551234567';
+    const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
+    await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
+    const chatId = (await getChatIdByGuid(db, guid))!;
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'm-fail-closed', text: 'hi', isFromMe: false, dateCreated: 1000 })],
+      () => chatId,
+      hm,
+    );
+    mockSettingsHydrated = false;
+    mockHydrate.mockImplementationOnce(async () => undefined);
+    const resolveReceiptTransport = jest.fn(async () => null);
+
+    await markRead(guid, undefined, { resolveReceiptTransport });
+
+    expect(mockSettingsHydrated).toBe(false);
+    expect(readMarker(raw, guid)).toBe('m-fail-closed');
+    expect(resolveReceiptTransport).not.toHaveBeenCalled();
+    expect(mockMarkChatRead).not.toHaveBeenCalled();
   });
 
   it('is a no-op for a chat this device has never seen', async () => {
@@ -362,6 +404,33 @@ describe('markRead', () => {
     expect(readMarker(raw, guid)).toBeNull();
     expect(mockHydrate).toHaveBeenCalledTimes(1);
     expect(mockMarkChatRead).toHaveBeenCalledWith({ __http: true }, guid);
+  });
+
+  it('keeps the local marker when killed-process receipt authorization is unavailable', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    const guid = 'iMessage;-;+15551234567';
+    const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
+    await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
+    const chatId = (await getChatIdByGuid(db, guid))!;
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'm-local', text: 'hi', isFromMe: false, dateCreated: 1000 })],
+      () => chatId,
+      hm,
+    );
+    let markerAtResolution: string | null = null;
+    const resolveReceiptTransport = jest.fn(async () => {
+      markerAtResolution = readMarker(raw, guid);
+      throw new Error('SecureStore unavailable');
+    });
+
+    await expect(markRead(guid, undefined, { resolveReceiptTransport })).resolves.toBeUndefined();
+
+    expect(readMarker(raw, guid)).toBe('m-local');
+    expect(markerAtResolution).toBe('m-local');
+    expect(resolveReceiptTransport).toHaveBeenCalledTimes(1);
+    expect(mockMarkChatRead).not.toHaveBeenCalled();
   });
 
   it('waits out a rolling-back replacement before choosing the committed newest message', async () => {

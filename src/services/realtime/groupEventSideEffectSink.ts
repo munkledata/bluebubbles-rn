@@ -6,8 +6,8 @@ import { isChatBackgroundChangeEvent } from '@utils';
 /**
  * Decorates an inner EventSink: after the DB write, detects an incoming chat-background
  * change/removal group event (itemType 3, groupActionType 4 = changed, 6 = removed) and triggers a
- * wallpaper refetch via the injected `refetchBackground` (bound to `ensureSyncedBackground(http,
- * db, guid)` in the composition root).
+ * wallpaper refetch via the injected `refetchBackground` (bound to the authorized realtime
+ * synced-background entry point in the composition root).
  *
  * Why a thin injected sink, not DbEventSink: refetching is a NETWORK + DB side effect, and per the
  * EventRouter rule (AGENTS.md) DB-write logic lives in `DbEventSink` while connection/UI/network
@@ -27,7 +27,10 @@ import { isChatBackgroundChangeEvent } from '@utils';
 export class GroupEventSideEffectSink implements EventSink {
   constructor(
     private readonly inner: EventSink,
-    private readonly refetchBackground: (chatGuid: string) => void | Promise<void>,
+    private readonly refetchBackground: (
+      chatGuid: string,
+      accountGeneration?: number,
+    ) => void | Promise<void>,
   ) {}
 
   async onEvent(
@@ -54,11 +57,11 @@ export class GroupEventSideEffectSink implements EventSink {
       return;
     }
 
-    // Do not make Disconnect wait for a full wallpaper transfer. This detached work must capture a
-    // fresh account-generation guard in the injected implementation: the shorter-lived delivery
-    // context is revoked as soon as durable event settlement finishes.
+    // Do not make Disconnect wait for a full wallpaper transfer. Carry only the originating
+    // account identity—not the shorter-lived attempt liveness—so the injected implementation can
+    // capture a fresh guard that survives event settlement without adopting a replacement account.
     void Promise.resolve()
-      .then(() => this.refetchBackground(chatGuid))
+      .then(() => this.refetchBackground(chatGuid, context.generation))
       .catch((e: unknown) => {
         logger.warn('[groupEvent] chat-background refetch failed', e);
       });

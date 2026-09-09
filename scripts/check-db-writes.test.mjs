@@ -1448,7 +1448,7 @@ test('certifies exactly the reviewed direct incoming-ingress edge nodes', () => 
     (finding) => finding.detectedContext === 'incoming-ingress-delegation',
   );
 
-  assert.equal(ingress.length, 23);
+  assert.equal(ingress.length, 29);
   assert.deepEqual(
     Object.fromEntries(
       [...new Set(ingress.map((finding) => finding.path))]
@@ -1458,10 +1458,31 @@ test('certifies exactly the reviewed direct incoming-ingress edge nodes', () => 
     {
       'app/(app)/chat/[guid].tsx': 1,
       'src/features/conversations/devSeed.ts': 5,
-      'src/services/notifications/fcmMessaging.ts': 7,
+      'src/services/notifications/fcmMessaging.ts': 9,
       'src/services/notifications/registerFcmBackgroundHandler.ts': 1,
-      'src/services/realtimeControl.ts': 9,
+      'src/services/realtimeControl.ts': 13,
     },
+  );
+  // The reviewed extension is closed over two durable locked-V3 admission handoffs and the two
+  // exact foreground-intent resume wrappers. Their stable IDs make the 25 -> 29 increase explicit.
+  assert.deepEqual(
+    ingress
+      .map((finding) => finding.id)
+      .filter((id) =>
+        [
+          'src/services/notifications/fcmMessaging.ts#deliver:mutator-call:e737f4b3c52e',
+          'src/services/realtimeControl.ts#persistAuthenticatedLockedFcmV3Event:mutator-call:f8c87fb52b5f',
+          'src/services/realtimeControl.ts#resumeRealtime:mutator-call:3bd87f6c9e52',
+          'src/services/realtimeControl.ts#resumeRealtimeAfterCredentialUpgrade:mutator-call:bd79318d30a2',
+        ].includes(id),
+      )
+      .sort(),
+    [
+      'src/services/notifications/fcmMessaging.ts#deliver:mutator-call:e737f4b3c52e',
+      'src/services/realtimeControl.ts#persistAuthenticatedLockedFcmV3Event:mutator-call:f8c87fb52b5f',
+      'src/services/realtimeControl.ts#resumeRealtime:mutator-call:3bd87f6c9e52',
+      'src/services/realtimeControl.ts#resumeRealtimeAfterCredentialUpgrade:mutator-call:bd79318d30a2',
+    ],
   );
   assert.equal(ingress.filter((finding) => finding.operation === 'mutator-reference').length, 2);
   assert.ok(
@@ -1617,6 +1638,68 @@ test('certifies exactly the reviewed error-report ownership and outer lifecycle 
   );
 });
 
+fullOnlyTest('rejects the reviewed foreground, headless, and key-overlap weakenings', () => {
+  const root = incomingIngressFixture();
+  const cases = [
+    {
+      label: 'foreground realtime intent ownership always succeeds',
+      path: 'src/services/realtimeControl.ts',
+      before:
+        'return realtimeForegroundDesired && realtimeForegroundIntentEpoch === expectedEpoch;',
+      after: 'return true;',
+    },
+    {
+      label: 'headless effect window consumes the native cleanup margin',
+      path: 'src/services/background/realtimeHeadlessEffects.ts',
+      before: 'export const REALTIME_HEADLESS_EFFECT_WINDOW_MS = 40_000;',
+      after: 'export const REALTIME_HEADLESS_EFFECT_WINDOW_MS = 100_000;',
+    },
+    {
+      label: 'FCM previous-key local overlap expands to one year',
+      path: 'src/core/realtime/fcmEncryption.ts',
+      before:
+        'export const FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS = 24 * 60 * 60 * 1_000 + 10 * 60 * 1_000;',
+      after: 'export const FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS = 365 * 24 * 60 * 60 * 1_000;',
+    },
+  ];
+
+  try {
+    const baseline = scanDbWrites({ root });
+    assert.equal(
+      baseline.filter((finding) => finding.detectedContext === 'incoming-ingress-delegation')
+        .length,
+      29,
+      'focused hostile fixture must exercise the live positive certificate',
+    );
+    for (const mutation of cases) {
+      const file = resolve(root, mutation.path);
+      const original = readFileSync(file, 'utf8');
+      try {
+        replaceFixtureSource(root, mutation.path, mutation.before, mutation.after);
+        const findings = scanDbWrites({ root });
+        assert.equal(
+          findings.filter((finding) => finding.detectedContext === 'incoming-ingress-delegation')
+            .length,
+          0,
+          mutation.label,
+        );
+        assert.ok(
+          findings.some(
+            (finding) =>
+              finding.target.endsWith('src/services/realtimeControl.ts#dispatchRealtimeEvent') &&
+              finding.detectedContext === 'unresolved',
+          ),
+          mutation.label,
+        );
+      } finally {
+        writeFileSync(file, original);
+      }
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 fullOnlyTest(
   'error-report outer lifecycle proof fails closed when an exact handoff is redirected',
   () => {
@@ -1733,18 +1816,19 @@ test('certifies exactly the reviewed notification presentation and reminder-effe
       'src/services/notifications/notifeeService.ts#cancelFaceTimeNotification.<callback:4ef3145a64>:mutator-call:dd3a6cf045a8',
       'src/services/notifications/notifeeService.ts#cancelFaceTimeNotificationNow:mutator-call:22faf30a92fa',
       'src/services/notifications/notifeeService.ts#postFaceTimeNotification:mutator-call:61526340fc91',
-      'src/services/notifications/notifeeService.ts#postNotification.<callback:3a468d9c93>:mutator-call:12d78e0bda2f',
+      'src/services/notifications/notifeeService.ts#postNotification.<callback:8bc766ee78>:mutator-call:51a350ad5620',
       'src/services/notifications/notifeeService.ts#postNotificationNow:mutator-call:3715d5ebf0b8',
       'src/services/notifications/notifeeService.ts#postNotificationNow:mutator-call:a1fe19482506',
       'src/services/notifications/notifeeService.ts#postSendFailureNotification.<callback:733692bd31>:mutator-call:69ad00d25654',
       'src/services/notifications/notifeeService.ts#prepareNotificationPresentationState.<callback:2d26413326>.<callback:aaa5db8dfb>:mutator-call:49cfa621c037',
       'src/services/notifications/notifeeService.ts#prepareNotificationPresentationStateNow:mutator-call:636ff0e2c483',
-      'src/services/notifications/notifeeService.ts#repairMissingFutureReminderTriggers:mutator-call:2e4db01772b0',
+      'src/services/notifications/notifeeService.ts#prepareNotificationPresentationStateNow:mutator-call:d69db4ac60cd',
+      'src/services/notifications/notifeeService.ts#sanitizeCurrentDisplayedReminders:mutator-call:eaf56e29329b',
       'src/services/notifications/notifeeService.ts#sanitizeDisplayedNotifications:mutator-call:1a0c7f4aa6a7',
       'src/services/notifications/notifeeService.ts#sanitizeDisplayedNotifications:mutator-call:fc0ca0b8b11a',
       'src/services/notifications/notifeeService.ts#sanitizeLegacyNotificationPayloadsIfPresent:mutator-call:9e429c36e49b',
-      'src/services/notifications/notifeeService.ts#sanitizeLegacyNotificationPayloadsIfPresent:mutator-call:e82c1c7ba163',
       'src/services/notifications/notifeeService.ts#sanitizeLegacyNotificationPayloadsIfPresent:mutator-call:e85e19312cb9',
+      'src/services/notifications/notifeeService.ts#sanitizeLegacyNotificationPayloadsIfPresent:mutator-call:e85e19312cb9:2',
       'src/services/notifications/notifeeService.ts#sanitizeTriggerNotifications:mutator-call:fd918617393f',
       'src/services/notifications/notifeeService.ts#sanitizedFaceTimeNotification:mutator-call:89a00ac79465',
       'src/services/notifications/notifeeService.ts#sanitizedNotification:mutator-call:0c7b1862fc9e',
@@ -1753,25 +1837,25 @@ test('certifies exactly the reviewed notification presentation and reminder-effe
   assert.deepEqual(
     createReminderTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:6f7507c0ae>.<callback:8aa1abdd3a>:mutator-call:74ab19e0d1ee',
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:6f7507c0ae>:mutator-call:331f4ed00ce9',
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:6f7507c0ae>:mutator-call:516c0ff5660a',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:722548534e>.<callback:8aa1abdd3a>:mutator-call:0757a3beb09f',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:722548534e>:mutator-call:03737ea89e3a',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:722548534e>:mutator-call:22be9c89e2da',
     ].sort(),
   );
   assert.deepEqual(
     scheduleReminderMoveTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:6f7507c0ae>.<callback:63ddd06ef2>:mutator-call:bcd082c58a78',
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:6f7507c0ae>:mutator-call:2192dc48d599',
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:6f7507c0ae>:mutator-call:e9106648ae6e',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:722548534e>.<callback:63ddd06ef2>:mutator-call:c942702ee702',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:722548534e>:mutator-call:0c134e4aedd9',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:722548534e>:mutator-call:715f896a04cf',
     ].sort(),
   );
   assert.deepEqual(
     rescheduleReminderMoveTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:d65374144e>.<callback:e57c656026>:mutator-call:fc889821acbc',
-      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:d65374144e>:mutator-call:40f7376d4664',
-      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:d65374144e>:mutator-call:50c902933fef',
+      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:3444f7c0ea>.<callback:e57c656026>:mutator-call:79dcc8e4ff6e',
+      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:3444f7c0ea>:mutator-call:94b476307dbb',
+      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:3444f7c0ea>:mutator-call:b76bd9f2556f',
     ].sort(),
   );
   assert.deepEqual(
@@ -1995,6 +2079,12 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       finding.symbol.startsWith('handleSendFailure') &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
   );
+  const unavailableTargetRetirementTransaction = findings.filter(
+    (finding) =>
+      finding.path === 'src/services/send/sendOutcome.ts' &&
+      finding.symbol.startsWith('retireUnavailableMessageTarget') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
+  );
   const successTransactions = findings.filter(
     (finding) =>
       finding.path === 'src/services/send/sendOutcome.ts' &&
@@ -2003,6 +2093,8 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
         finding.target ===
           'src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction' ||
+        finding.target ===
+          'src/db/repositories/outgoing.ts#reconcileOutgoingAttemptAckWithinTransaction' ||
         finding.target ===
           'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction' ||
         (finding.detectedContext === 'withDbTransaction' &&
@@ -2095,46 +2187,67 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/notifications/actions.ts#handleNotificationAction.<callback:383ea8d776>:mutator-call:f5e067703ee5',
       'src/services/notifications/actions.ts#handleNotificationActionForAccount:mutator-call:6c2fa704827f',
       'src/services/notifications/actions.ts#handleNotificationActionForAccount:mutator-call:d1008c7afb46',
-      'src/services/notifications/actions.ts#loveMessage:mutator-call:dc1cf7c0e191',
-      'src/services/notifications/actions.ts#replyTo:mutator-call:a4a5d51a8f95',
-      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:181ea993ff>:mutator-call:fcca55f5e353',
+      'src/services/notifications/actions.ts#loveMessage:mutator-call:3891092a2706',
+      'src/services/notifications/actions.ts#replyTo:mutator-call:16685310e2e9',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:217b993890>:mutator-call:e29e08b5718a',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:49d47bc9dc>:mutator-call:ad52ad6af0e9',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:49d47bc9dc>:mutator-call:ad52ad6af0e9:2',
-      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:e6daa15e91>:mutator-call:a1862003ebf3',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:2e3d7266513e',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:b12265a94c42',
-      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:091ee2e61ccd',
-      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:f3987a155aed',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:6fa16d3d19>.<callback:7b52abff34>:mutator-call:699373b78c98',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:e7bd01875e>:mutator-call:45e09bb6f5a8',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.authorizeTarget:mutator-call:9a263ef84bb1',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retireTarget.<callback:603c120868>:mutator-call:8116c446048a',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow:mutator-call:676a94da498c',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow:mutator-call:676a94da498c:2',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow:mutator-call:676a94da498c:3',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow:mutator-call:676a94da498c:4',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueue.<callback:29840cb4df>:mutator-call:38f56b01ae85',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueue:mutator-call:0a114e0f6425',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody:mutator-call:492bba910ec0',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage.authorizeTarget:mutator-call:8a0a6b874f37',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:7b145a63f68d',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:d63151141c20',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:ded649d365f0',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:e3781fe57bc4',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-reference:44978000bc73',
+      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:6e5f31342b9a',
+      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:76a6eb6cb3d5',
+      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:76a6eb6cb3d5:2',
+      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:94ed03d73c45',
+      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:f095dc2ef480',
+      'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:0383d1f78e53',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:4722f6c1c506',
+      'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:519577ae83e1',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:e8547c9b8ebc',
-      'src/services/send/sendService.ts#sendTextMessage:mutator-call:04c64cabafc4',
-      'src/services/send/sendService.ts#sendTextMessage:mutator-call:2a25e55b8b30',
-      'src/services/send/sendService.ts#sendTextMessage:mutator-call:bdeed6c57910',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:190d8d6370e4',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:31d10cdc7448',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:3bef99e14355',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:d67f792bc542',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:e3462acdb37d',
     ].sort(),
   );
   assert.deepEqual(
     outgoingAttachmentInsertTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:be9e092e28>:mutator-call:64e0c86ab356',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:be9e092e28>:mutator-call:dd1ad3915782',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:416a9b797aaf',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:80f38074242e',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:6c96a954ed>:mutator-call:037aaedb148a',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:6c96a954ed>:mutator-call:136a59f3358e',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:398f7cb81e9c',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:54e02d7d2f49',
     ].sort(),
   );
   assert.deepEqual(
     outgoingContactInsertTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendContactService.ts#sendContactMessage.<callback:579fb0f07b>:mutator-call:9d87cf90b13e',
-      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:27797dbe4479',
-      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:63d697dcdb18',
+      'src/services/send/sendContactService.ts#sendContactMessage.<callback:68fa4f1fa0>:mutator-call:9da6d7acd614',
+      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:207634ff49af',
+      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:72360c3ad6df',
     ].sort(),
   );
   assert.deepEqual(
     outgoingQueueClaimTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:fd2e59ed90>.<callback:ef896ff493>:mutator-call:3273a288d180',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:fd2e59ed90>:mutator-call:7b452e2c0efa',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:fd2e59ed90>:mutator-call:a62d23d465c7',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:8568475ef9>.<callback:31e029392f>:mutator-call:31d4d25a13ab',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:8568475ef9>:mutator-call:6f65564873d7',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:8568475ef9>:mutator-call:8adfafbe99d4',
     ].sort(),
   );
   assert.deepEqual(
@@ -2148,17 +2261,17 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
   assert.deepEqual(
     outgoingReactionInsertTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendReactionService.ts#sendReactionMessage.<callback:231f270bbc>:mutator-call:4e14abb383dd',
-      'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:db4b17e74d03',
-      'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:2ccefa35e477',
+      'src/services/send/sendReactionService.ts#sendReactionMessage.<callback:a98676016c>:mutator-call:398d81c9b1cc',
+      'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:ada2234d31e0',
+      'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:e0fb0f4943f8',
     ].sort(),
   );
   assert.deepEqual(
     outgoingTextInsertTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendService.ts#sendTextMessage.<callback:3940f52b1d>:mutator-call:b8808f288fd5',
-      'src/services/send/sendService.ts#sendTextMessage:mutator-call:03948a377dc5',
-      'src/services/send/sendService.ts#sendTextMessage:mutator-call:e72ad74ae84c',
+      'src/services/send/sendService.ts#sendTextMessage.<callback:7974d32845>:mutator-call:6ec500bcfbe9',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:0d1b2054e6a1',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:69fe1c02d86d',
     ].sort(),
   );
   assert.deepEqual(
@@ -2166,8 +2279,11 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
     [
       'src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:697c6fbfc2>:mutator-call:3094df649745',
       'src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:a142c06cb1>:mutator-call:83fb7347f21a',
+      'src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:bf68fd4b15>:mutator-call:49d1e686b3d7',
       'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:337ad594df75',
       'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:7859b6c0463a',
+      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:8e03f0f2514e',
+      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:c0da22a68cc9',
       'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:c1122a9108a5',
       'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:e0d100734a46',
     ].sort(),
@@ -2175,9 +2291,17 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
   assert.deepEqual(
     failureTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendOutcome.ts#handleSendFailure.<callback:8a7e90a9b5>:mutator-call:cbfdaadfa96f',
-      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:95eb83c8fd28',
-      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:adfe95b7e2a5',
+      'src/services/send/sendOutcome.ts#handleSendFailure.<callback:43c72cee33>:mutator-call:157c2fd07289',
+      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:0aee8bce4b6f',
+      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:56c815c4b441',
+    ].sort(),
+  );
+  assert.deepEqual(
+    unavailableTargetRetirementTransaction.map((finding) => finding.id).sort(),
+    [
+      'src/services/send/sendOutcome.ts#retireUnavailableMessageTarget.<callback:593c789d89>:mutator-call:4804567ad3f6',
+      'src/services/send/sendOutcome.ts#retireUnavailableMessageTarget:mutator-call:11809b34a662',
+      'src/services/send/sendOutcome.ts#retireUnavailableMessageTarget:mutator-call:8a99473da7bd',
     ].sort(),
   );
 });
@@ -2265,23 +2389,31 @@ test('certifies exactly the reviewed deferred-send service delegation edges', ()
       'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:129221ae16e0',
       'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:2d6c1d03bc6e',
       'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:3dac61ecbedb',
-      'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:68251a41df7a',
-      'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:fe7c5860f178',
+      'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:5eb8b21bfb27',
+      'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:8080ee272e67',
+      'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:8080ee272e67:2',
+      'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:d03c79eca4a4',
       'src/services/send/scheduleService.ts#runDueScheduled:mutator-reference:28e61216ad29',
-      'src/services/send/sendEditService.ts#sendEdit.<callback:71e546f9ee>:mutator-call:58af46e14a80',
-      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:a6eb301d978e',
-      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:a6eb301d978e:2',
-      'src/services/send/sendEditService.ts#sendUnsend.<callback:837ccd781d>:mutator-call:9ba6d956947c',
-      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:9f4270c480f8',
-      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:9f4270c480f8:2',
+      'src/services/send/scheduleService.ts#scheduleTextMessage:mutator-call:56f2f66dc208',
+      'src/services/send/scheduleService.ts#scheduleTextMessage:mutator-call:56f2f66dc208:2',
+      'src/services/send/sendEditService.ts#sendEdit.<callback:cee4f3aecd>:mutator-call:96fbefa9a803',
+      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:18190c10a3a7',
+      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:18190c10a3a7:2',
+      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:18190c10a3a7:3',
+      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:e76fdd58c0ef',
+      'src/services/send/sendEditService.ts#sendUnsend.<callback:e9d709b4f5>:mutator-call:b72f3c0fdd17',
+      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:d616627ba85d',
+      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:e72a95e45dea',
+      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:e72a95e45dea:2',
+      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:e72a95e45dea:3',
     ].sort(),
   );
   assert.deepEqual(
     editApplyTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendEditService.ts#sendEditOnce.<callback:2e1345eb02>:mutator-call:a1a20f9ed038',
-      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:7b44b7789938',
-      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:b26ddcfe9197',
+      'src/services/send/sendEditService.ts#sendEditOnce.<callback:e84e4358bd>:mutator-call:5f8def4fe9ee',
+      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:c06cf93330ce',
+      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:c53a326b6dd5',
     ].sort(),
   );
   assert.deepEqual(
@@ -2295,25 +2427,24 @@ test('certifies exactly the reviewed deferred-send service delegation edges', ()
   assert.deepEqual(
     unsendApplyTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendEditService.ts#sendUnsendOnce.<callback:9b6c16c1d0>:mutator-call:5691003cf12c',
-      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:053735d4ade9',
-      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:a7367d0cdccd',
+      'src/services/send/sendEditService.ts#sendUnsendOnce.<callback:f40315bf84>:mutator-call:a79ca93d4d72',
+      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:580043de2d5c',
+      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:ca09c10da247',
     ].sort(),
   );
   assert.deepEqual(
     unsendRevertTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendEditService.ts#revertOptimisticUnsend.<callback:ce6ae5122c>:mutator-call:d66c9a3fba2f',
-      'src/services/send/sendEditService.ts#revertOptimisticUnsend:mutator-call:74c66704d912',
-      'src/services/send/sendEditService.ts#revertOptimisticUnsend:mutator-call:7d69e3e3aa4b',
+      'src/services/send/sendEditService.ts#revertOptimisticUnsend.<callback:dbbeb4ecfb>:mutator-call:d47f88b21b88',
+      'src/services/send/sendEditService.ts#revertOptimisticUnsend:mutator-call:98db85aad231',
+      'src/services/send/sendEditService.ts#revertOptimisticUnsend:mutator-call:ca930e9a0ed6',
     ].sort(),
   );
   assert.deepEqual(
     scheduledInsertTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/scheduleService.ts#scheduleTextMessage.<callback:bcbf452138>:mutator-call:ef3b92e88431',
-      'src/services/send/scheduleService.ts#scheduleTextMessage:mutator-call:31eb04a40935',
-      'src/services/send/scheduleService.ts#scheduleTextMessage:mutator-call:c6c6102cb4ec',
+      'src/services/send/scheduleService.ts#scheduleTextMessage.insert.<callback:2230f77330>:mutator-call:65fa9a45d877',
+      'src/services/send/scheduleService.ts#scheduleTextMessage.insert:mutator-call:f6392efa123b',
     ].sort(),
   );
 });
@@ -2339,8 +2470,8 @@ test('certifies the exact residual repository delegations after explicit-owner c
   );
 
   assert.equal(devFixtures.length, 17);
-  assert.equal(intentionalBoundaries.length, 26);
-  assert.equal(scheduledStateMachine.length, 9);
+  assert.equal(intentionalBoundaries.length, 35);
+  assert.equal(scheduledStateMachine.length, 12);
   assert.deepEqual(
     findings.map((finding) => finding.id).sort(),
     [
@@ -2349,13 +2480,14 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/db/repositories/errorReports.ts#insertErrorReport:mutator-call:184b64238855',
       'src/db/repositories/maintenance.ts#clearLocalCache:mutator-call:5111af2df56f',
       'src/db/repositories/maintenance.ts#clearLocalCache:mutator-call:e64441bf4d7f',
+      'src/db/repositories/messageTargets.ts#isPendingUnsendTargetAvailable:mutator-call:280d92fbf22d',
       'src/db/repositories/scheduled.ts#reconcileServerScheduled:mutator-call:6df044728f30',
       'src/features/conversations/devSeed.ts#devEditFake.<callback:5de2143777>:mutator-call:22334d03d1f3',
-      'src/features/conversations/devSeed.ts#devSendFake.<callback:3603f2d977>:mutator-call:5f9f1755f5ee',
+      'src/features/conversations/devSeed.ts#devSendFake.<callback:afb6e663ad>:mutator-call:02860e861312',
       'src/features/conversations/devSeed.ts#devSendFakeImage.<callback:daefab75bd>:mutator-call:149c3a85dd8b',
       'src/features/conversations/devSeed.ts#devSendFakeReaction.<callback:6d65226469>:mutator-call:46a3d5cbab9e',
-      'src/features/conversations/devSeed.ts#devSendFakeReply.<callback:2fcb797864>:mutator-call:9ad22db2d4df',
-      'src/features/conversations/devSeed.ts#devUnsendFake.<callback:0403b8ef33>:mutator-call:1c3853448684',
+      'src/features/conversations/devSeed.ts#devSendFakeReply.<callback:b7005c9592>:mutator-call:7ce6f05a395b',
+      'src/features/conversations/devSeed.ts#devUnsendFake.<callback:63759d66d5>:mutator-call:e9407914db8f',
       'src/features/conversations/devSeed.ts#queueDevSendReconcile.<callback:a529712610>.reconcile:mutator-call:e5846ec828a7',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:263f9a2cf920',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:2d1329c7ad6c',
@@ -2382,6 +2514,7 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/services/realtime/incomingEventDrain.ts#IncomingEventDrain.processClaim:mutator-call:3cf169c31a85',
       'src/services/realtime/incomingEventDrain.ts#IncomingEventDrain.processClaim:mutator-call:6cc62ed5573d',
       'src/services/realtime/incomingEventDrain.ts#IncomingEventDrain.processClaim:mutator-call:b0a846e7dfb7',
+      'src/services/realtime/incomingEventDrain.ts#IncomingEventDrain.processClaim:mutator-call:f36bbcf61ec1',
       'src/services/realtime/incomingEventDrain.ts#durableContext.markDbAppliedWithinTransaction:mutator-call:737d7a3d436b',
       'src/services/send/index.ts#syncScheduledFromServer.<callback:c129c31bd8>:mutator-call:1a675a1023a2',
       'src/services/send/index.ts#syncScheduledFromServer.<callback:c129c31bd8>:mutator-call:73312ae182ae',
@@ -2389,13 +2522,124 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/services/send/scheduleService.ts#runDueScheduled.writeTerminal:mutator-call:934d3ba3156d',
       'src/services/send/scheduleService.ts#runDueScheduled.writeTerminal:mutator-call:ae2537472d84',
       'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:3dac61ecbedb',
-      'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:fe7c5860f178',
-      'src/services/send/sendService.ts#sendTextMessage:mutator-call:04c64cabafc4',
+      'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:8080ee272e67',
+      'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:8080ee272e67:2',
+      'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:d03c79eca4a4',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.authorizeTarget:mutator-call:9a263ef84bb1',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage.authorizeTarget:mutator-call:8a0a6b874f37',
+      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:f095dc2ef480',
+      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:e76fdd58c0ef',
+      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:d616627ba85d',
+      'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:0383d1f78e53',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:190d8d6370e4',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:3bef99e14355',
+      'src/db/repositories/outgoing.ts#reconcileExactOutgoingAttemptSuccessWithinTransaction:mutator-call:e0ea8d72f9a8',
       'src/services/sync/engine.ts#syncAllChats:mutator-call:d025e1f31f26',
       'src/services/sync/engine.ts#syncChatMessageRange:mutator-call:34deba18cbca',
       'src/services/sync/engine.ts#syncSingleChat:mutator-call:3c8efb8e47a5',
-      'src/services/syncControl.ts#runSync:mutator-call:1c0575e425d1',
-      'src/services/syncControl.ts#runSync:mutator-call:3cf984fb6208',
+      'src/services/syncControl.ts#runSync:mutator-call:e5fb2e948fee',
+      'src/services/syncControl.ts#runSync:mutator-call:f1a10c34bde9',
+    ].sort(),
+  );
+});
+
+test('certifies exactly the reviewed coordinated-delegation path additions', () => {
+  const reviewedPaths = new Set([
+    'app/(app)/server-management.tsx',
+    'src/db/repositories/messageTargets.ts',
+    'src/features/conversations/useChatScheduledCatchup.ts',
+    'src/services/background/realtimePrerequisiteRecovery.ts',
+    'src/services/credentialUpgrade.ts',
+  ]);
+  const findings = scanProjectDbWrites().filter((finding) => reviewedPaths.has(finding.path));
+
+  assert.deepEqual(
+    findings.map(({ id, detectedContext }) => [id, detectedContext]).sort(),
+    [
+      [
+        'app/(app)/server-management.tsx#ServerManagementScreen.<callback:7bf4151522>:mutator-call:6b73b09a1510',
+        'coordinated-delegation',
+      ],
+      [
+        'app/(app)/server-management.tsx#ServerManagementScreen.<callback:f06986b185>:mutator-call:7417ee3fbf38',
+        'coordinated-delegation',
+      ],
+      [
+        'app/(app)/server-management.tsx#ServerManagementScreen.onDiscardCredential:mutator-call:cff6cdb98796',
+        'coordinated-delegation',
+      ],
+      [
+        'app/(app)/server-management.tsx#ServerManagementScreen.onSubmitCredential:mutator-call:f08dd1db40ef',
+        'coordinated-delegation',
+      ],
+      [
+        'src/db/repositories/messageTargets.ts#isMessageTargetAvailable:mutator-call:8cb753549069',
+        'transaction-coordinator',
+      ],
+      [
+        'src/db/repositories/messageTargets.ts#isPendingUnsendTargetAvailable:mutator-call:280d92fbf22d',
+        'coordinated-delegation',
+      ],
+      [
+        'src/db/repositories/messageTargets.ts#resolveMessageTarget:mutator-call:58d44bbb756a',
+        'transaction-coordinator',
+      ],
+      [
+        'src/db/repositories/messageTargets.ts#resolvePendingUnsendTarget:mutator-call:e492825f2b0e',
+        'transaction-coordinator',
+      ],
+      [
+        'src/features/conversations/useChatScheduledCatchup.ts#useChatScheduledCatchup.<callback:0489268c8c>.<callback:9669f9a50a>:mutator-call:4f04ac7c873d',
+        'coordinated-delegation',
+      ],
+      [
+        'src/features/conversations/useChatScheduledCatchup.ts#useChatScheduledCatchup.<callback:0489268c8c>.tick:mutator-call:81661530f32e',
+        'coordinated-delegation',
+      ],
+      [
+        'src/features/conversations/useChatScheduledCatchup.ts#useChatScheduledCatchup.<callback:0489268c8c>:mutator-call:b43fff54eb99',
+        'coordinated-delegation',
+      ],
+      [
+        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:ef6c73d2e3>:mutator-call:33836f5be583',
+        'coordinated-delegation',
+      ],
+      [
+        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:ef6c73d2e3>:mutator-call:388a47c488a4',
+        'coordinated-delegation',
+      ],
+      [
+        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:ef6c73d2e3>:mutator-call:c34bd13e0b20',
+        'coordinated-delegation',
+      ],
+      [
+        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:ef6c73d2e3>:mutator-call:db9e859c0747',
+        'coordinated-delegation',
+      ],
+      [
+        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:ef6c73d2e3>:mutator-call:de8c9a13c5f0',
+        'coordinated-delegation',
+      ],
+      [
+        'src/services/credentialUpgrade.ts#beginScopedCredentialUpgrade:mutator-call:9eca083a6ce1',
+        'coordinated-delegation',
+      ],
+      [
+        'src/services/credentialUpgrade.ts#discardScopedCredentialUpgradeCandidate:mutator-call:ab2e71099acf',
+        'coordinated-delegation',
+      ],
+      [
+        'src/services/credentialUpgrade.ts#resumeScopedCredentialUpgrade:mutator-call:1fdf0f274b9d',
+        'coordinated-delegation',
+      ],
+      [
+        'src/services/credentialUpgrade.ts#runCredentialUpgrade.<callback:c120dd0889>:mutator-call:5869dbf25d5d',
+        'coordinated-delegation',
+      ],
+      [
+        'src/services/credentialUpgrade.ts#runCredentialUpgrade:mutator-call:0f7c20945957',
+        'coordinated-delegation',
+      ],
     ].sort(),
   );
 });
@@ -2458,16 +2702,19 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
       'src/services/send/index.ts#editScheduled.<callback:f519119574>:mutator-call:3e0d7582bc2c:2',
       'src/services/send/index.ts#editScheduled.<callback:f519119574>:mutator-call:b3039aaa43d0',
       'src/services/send/index.ts#editScheduled.<callback:f519119574>:mutator-call:bdc77bdcd522',
-      'src/services/send/index.ts#fireDueScheduled.<callback:0a6836762d>:mutator-call:7402c4c31861',
+      'src/services/send/index.ts#fireDueScheduled.<callback:5c87ee99e7>:mutator-call:60a4834011d2',
       'src/services/send/index.ts#fireDueScheduledWithDevelopmentSender.<callback:0d6a663823>:mutator-call:a9efdbe22d70',
-      'src/services/send/index.ts#pickAndSendContact.<callback:4a34f6e20d>:mutator-call:3494b022ac25',
-      'src/services/send/index.ts#react.<callback:2a9e50aa06>:mutator-call:51ae9ba2c80c',
-      'src/services/send/index.ts#reply.<callback:71e1a6d749>:mutator-call:908fdc946655',
-      'src/services/send/index.ts#schedule.<callback:ec99a4a3ef>:mutator-call:7f1fac39c380',
-      'src/services/send/index.ts#send.<callback:a9b9e4712f>:mutator-call:68982b8cb319',
-      'src/services/send/index.ts#sendContactCard.<callback:7880c0d756>:mutator-call:5ae33ad44a99',
-      'src/services/send/index.ts#sendImage.<callback:3e5d127268>:mutator-call:e13c9737cd25',
-      'src/services/send/index.ts#sendImages.<callback:644cd98236>.<callback:293c535c7f>:mutator-call:148a999c74e6',
+      'src/services/send/index.ts#pickAndSendContact.<callback:9bcfe7b86a>:mutator-call:a2100e00af93',
+      'src/services/send/index.ts#react.<callback:8681fdf18d>:mutator-call:8e63998325e5',
+      'src/services/send/index.ts#recoverOutgoing:mutator-call:addf824cadbb',
+      'src/services/send/index.ts#reply.<callback:61780df257>:mutator-call:d79714059aab',
+      'src/services/send/index.ts#retry.<callback:1a00c72a23>:mutator-call:5d13fb57c4c7',
+      'src/services/send/index.ts#schedule.<callback:f60bffc979>:mutator-call:29e6d7bb7f61',
+      'src/services/send/index.ts#send.<callback:f1b1c50eab>:mutator-call:4ab68665c262',
+      'src/services/send/index.ts#sendContactCard.<callback:4de55a3dfc>:mutator-call:6b3aa4db6f03',
+      'src/services/send/index.ts#sendImage.<callback:cb0dce58ca>:mutator-call:3f3c0bb5866e',
+      'src/services/send/index.ts#sendImages.<callback:b21823580a>.<callback:fe2d832948>:mutator-call:14eea9ad558f',
+      'src/services/send/index.ts#sendTextAttachment.<callback:d665192176>:mutator-call:db5414457e2a',
       'src/services/send/index.ts#syncScheduledFromServer.<callback:c129c31bd8>:mutator-call:1a675a1023a2',
       'src/services/send/index.ts#syncScheduledFromServer.<callback:c129c31bd8>:mutator-call:73312ae182ae',
     ].sort(),
@@ -2484,9 +2731,9 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
   assert.deepEqual(
     retryClaimTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#retry.<callback:eca51ea93a>.<callback:4478d45b13>:mutator-call:32d6ff39e45d',
-      'src/services/send/index.ts#retry.<callback:eca51ea93a>:mutator-call:3092ba25376d',
-      'src/services/send/index.ts#retry.<callback:eca51ea93a>:mutator-call:e8b1ba719cf4',
+      'src/services/send/index.ts#retry.<callback:1a00c72a23>.<callback:26e204e71c>:mutator-call:066b0679e70e',
+      'src/services/send/index.ts#retry.<callback:1a00c72a23>:mutator-call:84ec968a40da',
+      'src/services/send/index.ts#retry.<callback:1a00c72a23>:mutator-call:b6a7770a4683',
     ].sort(),
   );
   assert.deepEqual(
@@ -2514,7 +2761,7 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
       'src/services/send/index.ts#editScheduled.<callback:f519119574>.persistPatch:mutator-call:9a5e1dfb2592',
     ].sort(),
   );
-  assert.equal(sendFrontDoorFindings.length, 34);
+  assert.equal(sendFrontDoorFindings.length, 37);
 });
 
 test('certifies exactly the reviewed conversation-action delegation edges', () => {
@@ -2552,11 +2799,11 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
     delegated.map((finding) => finding.id).sort(),
     [
       'src/features/conversations/devSeed.ts#devEditFake.<callback:5de2143777>:mutator-call:22334d03d1f3',
-      'src/features/conversations/devSeed.ts#devSendFake.<callback:3603f2d977>:mutator-call:5f9f1755f5ee',
+      'src/features/conversations/devSeed.ts#devSendFake.<callback:afb6e663ad>:mutator-call:02860e861312',
       'src/features/conversations/devSeed.ts#devSendFakeImage.<callback:daefab75bd>:mutator-call:149c3a85dd8b',
       'src/features/conversations/devSeed.ts#devSendFakeReaction.<callback:6d65226469>:mutator-call:46a3d5cbab9e',
-      'src/features/conversations/devSeed.ts#devSendFakeReply.<callback:2fcb797864>:mutator-call:9ad22db2d4df',
-      'src/features/conversations/devSeed.ts#devUnsendFake.<callback:0403b8ef33>:mutator-call:1c3853448684',
+      'src/features/conversations/devSeed.ts#devSendFakeReply.<callback:b7005c9592>:mutator-call:7ce6f05a395b',
+      'src/features/conversations/devSeed.ts#devUnsendFake.<callback:63759d66d5>:mutator-call:e9407914db8f',
       'src/features/conversations/devSeed.ts#queueDevSendReconcile.<callback:a529712610>.reconcile:mutator-call:e5846ec828a7',
       'src/features/conversations/devSeed.ts#queueDevSendReconcile.<callback:a529712610>:mutator-reference:7993eb4dd862',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:263f9a2cf920',
@@ -2584,17 +2831,17 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
   assert.deepEqual(
     markReadTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/chatActions.ts#markRead.<callback:4923a4cef3>.<callback:f2c8eca326>:mutator-call:5beeafb66653',
-      'src/services/chatActions.ts#markRead.<callback:4923a4cef3>:mutator-call:dfec54e681be',
-      'src/services/chatActions.ts#markRead.<callback:4923a4cef3>:mutator-call:fcc9aef62714',
+      'src/services/chatActions.ts#markRead.<callback:68c7d29d71>.<callback:f2c8eca326>:mutator-call:2a7928c76405',
+      'src/services/chatActions.ts#markRead.<callback:68c7d29d71>:mutator-call:1e8d5154d0de',
+      'src/services/chatActions.ts#markRead.<callback:68c7d29d71>:mutator-call:8ad9952c932f',
     ].sort(),
   );
   assert.deepEqual(
     markUnreadTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/chatActions.ts#markUnread.<callback:dbe9d133c5>.<callback:add0a7f05b>:mutator-call:d8cbd79b8427',
-      'src/services/chatActions.ts#markUnread.<callback:dbe9d133c5>:mutator-call:01f6d1879a3c',
-      'src/services/chatActions.ts#markUnread.<callback:dbe9d133c5>:mutator-call:6019b26b2128',
+      'src/services/chatActions.ts#markUnread.<callback:df8a151083>.<callback:add0a7f05b>:mutator-call:4b56371166c7',
+      'src/services/chatActions.ts#markUnread.<callback:df8a151083>:mutator-call:cb00e86ea5fd',
+      'src/services/chatActions.ts#markUnread.<callback:df8a151083>:mutator-call:ff399be009ca',
     ].sort(),
   );
   assert.deepEqual(
@@ -2632,13 +2879,22 @@ test('certifies exactly the reviewed sync delegation edges', () => {
       finding.symbol.startsWith('runSyncedBackgroundRequest.') &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
   );
+  const finalRepairMarkerTransaction = findings.filter(
+    (finding) =>
+      finding.path === 'src/services/syncControl.ts' &&
+      finding.symbol === 'runSync' &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target.startsWith('src/services/syncControl.ts#runSync.<callback:')),
+  );
 
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
     [
+      'src/services/background/backgroundSync.ts#executeBackgroundSyncTask.drainOutgoing:mutator-call:2eed2d18717e',
       'src/services/background/backgroundSync.ts#executeBackgroundSyncTask.synchronize:mutator-call:23a950f7cc3a',
-      'src/services/background/backgroundSync.ts#recoverAndDrainBackgroundSchedules.<callback:c05c5f67e9>:mutator-call:d0fa0a16f072',
-      'src/services/sync/engine.ts#fullSync:mutator-call:9cbcacf70584',
+      'src/services/background/backgroundSync.ts#recoverAndDrainBackgroundSchedules.<callback:bb391a2ee5>:mutator-call:a0022079e125',
+      'src/services/sync/engine.ts#fullSync:mutator-call:c1a685cf20b7',
       'src/services/sync/engine.ts#fullSync:mutator-call:e0e0072c3545',
       'src/services/sync/engine.ts#syncAllChats:mutator-call:d025e1f31f26',
       'src/services/sync/engine.ts#syncChatMessageRange:mutator-call:34deba18cbca',
@@ -2646,22 +2902,28 @@ test('certifies exactly the reviewed sync delegation edges', () => {
       'src/services/sync/engine.ts#syncSingleChat:mutator-call:3c8efb8e47a5',
       'src/services/syncControl.ts#ensureChatSynced.<callback:910670867e>:mutator-call:c1b6e98cef19',
       'src/services/syncControl.ts#runSync:mutator-call:15ffb54cca3e',
-      'src/services/syncControl.ts#runSync:mutator-call:1c0575e425d1',
-      'src/services/syncControl.ts#runSync:mutator-call:3cf984fb6208',
+      'src/services/syncControl.ts#runSync:mutator-call:15ffb54cca3e:2',
       'src/services/syncControl.ts#runSync:mutator-call:471d6b8fb139',
       'src/services/syncControl.ts#runSync:mutator-call:60ab7d89146f',
       'src/services/syncControl.ts#runSync:mutator-call:62e252e57364',
-      'src/services/syncControl.ts#runSync:mutator-call:62e252e57364:2',
-      'src/services/syncControl.ts#runSync:mutator-call:ab6c20d59676',
-      'src/services/syncControl.ts#runSync:mutator-call:c0d8b5d51637',
+      'src/services/syncControl.ts#runSync:mutator-call:6635d9ca8da5',
       'src/services/syncControl.ts#runSync:mutator-call:cad4b657fd83',
-      'src/services/syncControl.ts#runSync:mutator-call:cad4b657fd83:2',
-      'src/services/syncControl.ts#runSync:mutator-call:e410b409f997',
+      'src/services/syncControl.ts#runSync:mutator-call:e5fb2e948fee',
+      'src/services/syncControl.ts#runSync:mutator-call:ecdced85c5c2',
+      'src/services/syncControl.ts#runSync:mutator-call:f1a10c34bde9',
       'src/services/syncControl.ts#runSync:mutator-call:f2bc335e17da',
+      'src/services/syncControl.ts#runSync:mutator-call:f2bc335e17da:2',
       'src/services/syncControl.ts#startFullRepair.<callback:a019ed9cf6>:mutator-call:7349d6139eeb',
       'src/services/syncControl.ts#startSync.<callback:4c2f340da4>:mutator-call:7042cc5b18c2',
-      'src/services/syncControl.ts#startTargetedChatRepair.<callback:a243d0b024>:mutator-call:dfe6a528cca3',
-      'src/services/syncControl.ts#startTargetedChatRepair.<callback:a243d0b024>:mutator-call:fd59b1934680',
+      'src/services/syncControl.ts#startTargetedChatRepair.<callback:91c5cfd2af>:mutator-call:49a79397a62e',
+      'src/services/syncControl.ts#startTargetedChatRepair.<callback:91c5cfd2af>:mutator-call:be3392d89cc1',
+    ].sort(),
+  );
+  assert.deepEqual(
+    finalRepairMarkerTransaction.map((finding) => finding.id).sort(),
+    [
+      'src/services/syncControl.ts#runSync:mutator-call:60df5f182f2b',
+      'src/services/syncControl.ts#runSync:mutator-call:75893d5cf0b4',
     ].sort(),
   );
   assert.deepEqual(
@@ -2801,9 +3063,11 @@ test('certifies exactly the reviewed attachment-download delegation boundary', (
       'app/(app)/media/[guid].tsx#MediaViewer:mutator-reference:f2d99eef8eea',
       'src/services/download/downloadService.ts#ensureDownloaded:mutator-call:aacca386ab26',
       'src/services/download/downloadService.ts#ensureDownloadedOutcome:mutator-call:b92371d908fb',
-      'src/services/download/index.ts#download:mutator-call:ff62716582b2',
+      'src/services/download/index.ts#download:mutator-call:31f3d4057a6a',
       'src/services/download/index.ts#downloadScope.reserveCache:mutator-call:9a68094fc094',
       'src/services/download/index.ts#downloadScope.reuseCache:mutator-call:18cfc11c39e4',
+      'src/services/download/index.ts#downloadWithClient:mutator-call:9b2b0d3d3d27',
+      'src/services/download/index.ts#downloadWithFetcher:mutator-call:240f9d6148ae',
       'src/services/download/index.ts#redownload:mutator-call:e09cebc88e10',
       'src/services/download/index.ts#runDownload.<callback:f07558eb37>.<callback:795e53be0d>:mutator-call:cab0a3e0fcab',
       'src/services/download/index.ts#runDownload:mutator-call:ea7e1163b248',
@@ -2832,7 +3096,7 @@ test('certifies exactly the reviewed attachment-download delegation boundary', (
       'src/ui/attachments/VideoPlayer.tsx#VideoPlayer:mutator-reference:53bdc004099c',
     ].sort(),
   );
-  assert.equal(delegated.length, 38);
+  assert.equal(delegated.length, 40);
   assert.equal(
     findings.some((finding) => finding.symbol.includes('runTrackedDownloadTransaction')),
     false,
@@ -2940,6 +3204,7 @@ test('certifies exactly the reviewed outer-lifecycle delegation boundary', () =>
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
     [
+      'app/(app)/_layout.tsx#ConnectedAppLayout.<callback:2f0bceb3e7>.<callback:cff4117220>:mutator-call:172d1d5cd379',
       'app/(app)/_layout.tsx#ConnectedAppLayout.<callback:2f0bceb3e7>.<callback:cff4117220>:mutator-call:9c6ba7fb690a',
       'app/(setup)/manual.tsx#Manual.submit:mutator-call:5e0818285fda',
       'app/(setup)/manual.tsx#Manual:mutator-reference:cb409be66510',
@@ -2970,12 +3235,17 @@ test('certifies exactly the reviewed outer-lifecycle delegation boundary', () =>
       'src/services/bootstrap.ts#startForget:mutator-call:976b6c7c71bc',
       'src/services/bootstrap.ts#wipeLocalCache:mutator-call:80814999e829',
       'src/services/bootstrap.ts#wipeLocalCache:mutator-call:972629a8899e',
+      'src/services/lock.ts#completeUnlock:mutator-call:9644c273a5cd',
       'src/services/lock.ts#completeUnlock:mutator-call:97831ab6c576',
       'src/services/realtimeControl.ts#approveNewServerUrl.reconnect:mutator-call:8f17c75f698b',
-      'src/services/realtimeControl.ts#resumeRealtime:mutator-call:602dd63b9e5a',
+      'src/services/realtimeControl.ts#dispatchWithContext:mutator-call:723b4235f7f7',
+      'src/services/realtimeControl.ts#finishRealtimeRecoveryCollector:mutator-call:3b450803c536',
+      'src/services/realtimeControl.ts#resumeDesiredRealtime.<callback:edf3121ba2>:mutator-call:ab508913e108',
+      'src/services/realtimeControl.ts#resumeDesiredRealtime:mutator-call:2c6798b642a8',
+      'src/services/realtimeControl.ts#startRealtime.<callback:edf3121ba2>:mutator-call:3cd6e7e8d376',
     ].sort(),
   );
-  assert.equal(delegated.length, 33);
+  assert.equal(delegated.length, 39);
 
   for (const suffix of [
     '8c40f7e0add0',
@@ -3587,6 +3857,7 @@ test('certifies exactly the DB-03B2B2 active-migration-death boundary', () => {
     'src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathPreparePhase:mutator-call:bdcec4c50149',
     'src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathPreparePhase:mutator-call:bf77a4004308',
     'src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathRecoveryPhase:mutator-call:02c4d2f06909',
+    'src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathRecoveryPhase:mutator-call:0c820ea64f11',
     'src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathRecoveryPhase:mutator-call:1485d9175c3e',
     'src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathRecoveryPhase:mutator-call:52ec4f1e8a66',
     'src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathRecoveryPhase:mutator-call:c2f4a2e3929b',
@@ -3599,7 +3870,7 @@ test('certifies exactly the DB-03B2B2 active-migration-death boundary', () => {
     'src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:9bc5c78844a2',
   ]);
   assert.equal(direct.length, 34);
-  assert.equal(delegated.length, 16);
+  assert.equal(delegated.length, 17);
 });
 
 test('certifies exactly the DB-02C runtime-concurrency writes and exclusive handoffs', () => {
@@ -3677,12 +3948,14 @@ test('certifies exactly the DB-02C runtime-concurrency writes and exclusive hand
       'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:sql-insert:9266b8d70936',
       'src/services/boot/devDbRelaunchContract.ts#finishRuntimeConcurrencyFailure:mutator-call:997d9112a0e0',
       'src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathRecoveryPhase:mutator-call:1485d9175c3e',
+      'src/services/boot/devDbRelaunchContract.ts#runBackupRestoreRecoveryPhase:mutator-call:8da0c9a64d0f',
       'src/services/boot/devDbRelaunchContract.ts#runRecoveryPhase:mutator-call:ea193e30ffcb',
       'src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyPhase:mutator-call:301e5cdc6904',
       'src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyPhase:mutator-call:ba293dc8a9a8',
       'src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyPhase:mutator-call:e21f80c86ea7',
       'src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyPhase:mutator-reference:fec6f21ca7fe',
       'src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyRecoveryPhase:mutator-call:2697cff60054',
+      'src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyRecoveryPhase:mutator-call:403659181e9f',
       'src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyRecoveryPhase:mutator-call:716ab824be25',
       'src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyRecoveryPhase:mutator-call:85dc498ee8c3',
       'src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyRecoveryPhase:mutator-call:d25f21ea1dbf',
@@ -3699,9 +3972,297 @@ test('certifies exactly the DB-02C runtime-concurrency writes and exclusive hand
   assert.equal(
     certified.filter((finding) => finding.detectedContext === 'throwaway-database-delegation')
       .length,
-    45,
+    47,
   );
-  assert.equal(certified.length, 58);
+  assert.equal(certified.length, 60);
+});
+
+test('certifies exactly the BACKUP-02 restore-abort writes and exclusive handoffs', () => {
+  const findings = scanProjectDbWrites();
+  const databaseSymbols = new Set([
+    'cleanupDbBackupRestoreSelfTestDatabase',
+    'runDbBackupRestoreSelfTest',
+  ]);
+  const serviceSymbols = new Set([
+    'finishBackupRestoreFailure',
+    'runBackupRestorePhase',
+    'runBackupRestoreRecoveryPhase',
+  ]);
+  const startTargets = new Set([
+    'src/services/boot/devDbRelaunchContract.ts#runBackupRestorePhase',
+    'src/services/boot/devDbRelaunchContract.ts#runBackupRestoreRecoveryPhase',
+  ]);
+  const certified = findings.filter(
+    (finding) =>
+      (finding.path === 'src/db/database.ts' && databaseSymbols.has(finding.symbol)) ||
+      finding.path === 'src/services/boot/dbBackupRestoreWave.ts' ||
+      (finding.path === 'src/services/boot/devDbRelaunchContract.ts' &&
+        (serviceSymbols.has(finding.symbol) ||
+          finding.target === 'src/db/database.ts#cleanupDbBackupRestoreSelfTestDatabase' ||
+          (finding.symbol === 'startDevDbRelaunchContractIfRequested' &&
+            startTargets.has(finding.target)))),
+  );
+
+  assert.deepEqual(
+    certified.map((finding) => finding.id).sort(),
+    [
+      'src/db/database.ts#cleanupDbBackupRestoreSelfTestDatabase:native-database-delete:5681e65487a3',
+      'src/db/database.ts#runDbBackupRestoreSelfTest:mutator-call:5136ad3d3514',
+      'src/db/database.ts#runDbBackupRestoreSelfTest:mutator-call:5136ad3d3514:2',
+      'src/db/database.ts#runDbBackupRestoreSelfTest:mutator-call:61c903cd5df5',
+      'src/db/database.ts#runDbBackupRestoreSelfTest:sql-pragma:0633c398afec',
+      'src/db/database.ts#runDbBackupRestoreSelfTest:sql-pragma:0d39686d0196',
+      'src/db/database.ts#runDbBackupRestoreSelfTest:sql-pragma:393dadd9a15d',
+      'src/db/database.ts#runDbBackupRestoreSelfTest:sql-pragma:54c11a09ee78',
+      'src/db/database.ts#runDbBackupRestoreSelfTest:sql-pragma:ca31be8c7204',
+      'src/services/boot/dbBackupRestoreWave.ts#count:raw-dynamic:6f394c5ac20a',
+      'src/services/boot/dbBackupRestoreWave.ts#dropFaultTrigger:mutator-call:3f51204be524',
+      'src/services/boot/dbBackupRestoreWave.ts#dropFaultTrigger:mutator-call:da616667e33c',
+      'src/services/boot/dbBackupRestoreWave.ts#dropFaultTrigger:raw-dynamic:6c62449e4c75',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:0fcd2d2f5094',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:0fcd2d2f5094:2',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:105813101b72',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:1a10c3ca4f56',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:1a10c3ca4f56:2',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:1da9191d9e9a',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:293e014fc561',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:36b06cf976dc',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:3a35f836e17c',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:3b85e66136cf',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:417b82c280c6',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:4a262ec5b929',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:4bcc56ea4cd8',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:5fc18d376832',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:72897b3d1d3f',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:76ff5573094a',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:789a035b74f6',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:91505eff66b4',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:91505eff66b4:2',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:af5f9360c89c',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:e08041276f2c',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:mutator-call:f68b4e575308',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:raw-dynamic:5e90223b1071',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:sql-insert:039be53fec3f',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:sql-insert:28b766c0be7c',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:sql-insert:67175c5380b5',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:sql-insert:bb4f28985f61',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:sql-insert:cf9f22c3f511',
+      'src/services/boot/dbBackupRestoreWave.ts#runDbBackupRestoreWave:sql-insert:e3d6c9840426',
+      'src/services/boot/dbBackupRestoreWave.ts#temporaryRestoreTablesAreAbsent:mutator-call:a3304ceda8bf',
+      'src/services/boot/devDbRelaunchContract.ts#finishBackupRestoreFailure:mutator-call:a63ea47fdca6',
+      'src/services/boot/devDbRelaunchContract.ts#runActiveMigrationDeathRecoveryPhase:mutator-call:0c820ea64f11',
+      'src/services/boot/devDbRelaunchContract.ts#runBackupRestorePhase:mutator-call:281d7b3f29c0',
+      'src/services/boot/devDbRelaunchContract.ts#runBackupRestorePhase:mutator-call:394ff8c0456a',
+      'src/services/boot/devDbRelaunchContract.ts#runBackupRestorePhase:mutator-call:a7a343fab774',
+      'src/services/boot/devDbRelaunchContract.ts#runBackupRestorePhase:mutator-reference:3890e4a1eb8f',
+      'src/services/boot/devDbRelaunchContract.ts#runBackupRestoreRecoveryPhase:mutator-call:1791242f86b2',
+      'src/services/boot/devDbRelaunchContract.ts#runBackupRestoreRecoveryPhase:mutator-call:67d077287ee6',
+      'src/services/boot/devDbRelaunchContract.ts#runBackupRestoreRecoveryPhase:mutator-call:8465976c6969',
+      'src/services/boot/devDbRelaunchContract.ts#runBackupRestoreRecoveryPhase:mutator-call:8da0c9a64d0f',
+      'src/services/boot/devDbRelaunchContract.ts#runBackupRestoreRecoveryPhase:mutator-call:bcbcfed9a0f1',
+      'src/services/boot/devDbRelaunchContract.ts#runRecoveryPhase:mutator-call:c084bbaff508',
+      'src/services/boot/devDbRelaunchContract.ts#runRuntimeConcurrencyRecoveryPhase:mutator-call:403659181e9f',
+      'src/services/boot/devDbRelaunchContract.ts#runWalWriteDeathRecoveryPhase:mutator-call:58f81ca33316',
+      'src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:2fed8ffa350e',
+      'src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:a58c761484a5',
+      'src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested:mutator-call:cce7b441b1d1',
+    ].sort(),
+  );
+  assert.equal(
+    certified.filter((finding) => finding.detectedContext === 'throwaway-database').length,
+    18,
+  );
+  assert.equal(
+    certified.filter((finding) => finding.detectedContext === 'throwaway-database-delegation')
+      .length,
+    42,
+  );
+  assert.equal(certified.length, 60);
+});
+
+fullOnlyTest('BACKUP-02 restore-abort proof fails closed on native and lifetime drift', () => {
+  const approvedCounts = (findings) => {
+    const databaseSymbols = new Set([
+      'cleanupDbBackupRestoreSelfTestDatabase',
+      'runDbBackupRestoreSelfTest',
+    ]);
+    const serviceSymbols = new Set([
+      'finishBackupRestoreFailure',
+      'runBackupRestorePhase',
+      'runBackupRestoreRecoveryPhase',
+    ]);
+    const startTargets = new Set([
+      'src/services/boot/devDbRelaunchContract.ts#runBackupRestorePhase',
+      'src/services/boot/devDbRelaunchContract.ts#runBackupRestoreRecoveryPhase',
+    ]);
+    const certified = findings.filter(
+      (finding) =>
+        (finding.path === 'src/db/database.ts' && databaseSymbols.has(finding.symbol)) ||
+        finding.path === 'src/services/boot/dbBackupRestoreWave.ts' ||
+        (finding.path === 'src/services/boot/devDbRelaunchContract.ts' &&
+          (serviceSymbols.has(finding.symbol) ||
+            finding.target === 'src/db/database.ts#cleanupDbBackupRestoreSelfTestDatabase' ||
+            (finding.symbol === 'startDevDbRelaunchContractIfRequested' &&
+              startTargets.has(finding.target)))),
+    );
+    return {
+      direct: certified.filter((finding) => finding.detectedContext === 'throwaway-database')
+        .length,
+      delegated: certified.filter(
+        (finding) => finding.detectedContext === 'throwaway-database-delegation',
+      ).length,
+    };
+  };
+  const cases = [
+    {
+      label: 'fixed backup filename redirected to production',
+      path: 'src/db/database.ts',
+      before: "const DB_BACKUP_RESTORE_SELF_TEST_NAME = 'driver-backup-restore-selftest.db';",
+      after: "const DB_BACKUP_RESTORE_SELF_TEST_NAME = 'gator.db';",
+    },
+    {
+      label: 'backup migrations receive the production raw singleton',
+      path: 'src/db/database.ts',
+      before:
+        'const expectedMigrationNames = dbBackupRestoreMigrationNames();\n' +
+        '    const appliedMigrations = await runMigrations(opRunner(activeHandle));',
+      after:
+        'const expectedMigrationNames = dbBackupRestoreMigrationNames();\n' +
+        '    const appliedMigrations = await runMigrations(opRunner(rawDb!));',
+    },
+    {
+      label: 'near-limit fixture target drifts',
+      path: 'src/services/boot/dbBackupRestoreWave.ts',
+      before: 'const TARGET_PLAINTEXT_BYTES = BACKUP_LIMITS.plaintextBytes - 4 * 1024;',
+      after: 'const TARGET_PLAINTEXT_BYTES = BACKUP_LIMITS.plaintextBytes - 8 * 1024;',
+    },
+    {
+      label: 'native SecretBox provider is bypassed',
+      path: 'src/services/boot/dbBackupRestoreWave.ts',
+      before: 'const box = await getSecretBox();',
+      after: 'const box = {} as never;',
+    },
+    {
+      label: 'faulting restore no longer claims before its successor',
+      path: 'src/services/boot/dbBackupRestoreWave.ts',
+      before: 'const faultingRestore = restoreBackup(db, opened);',
+      after: 'const faultingRestore = Promise.resolve().then(() => restoreBackup(db, opened));',
+    },
+    {
+      label: 'production restore defers its synchronous transaction claim',
+      path: 'src/services/backup/backup.ts',
+      before:
+        '  const applied = await withDbTransaction(\n' +
+        '    db,\n' +
+        '    (context) => restorePreparedBackupWithinTransaction(context, prepared),\n' +
+        '    ownershipGuard,\n' +
+        '  );',
+      after:
+        '  const applied = await Promise.resolve().then(() =>\n' +
+        '    withDbTransaction(\n' +
+        '      db,\n' +
+        '      (context) => restorePreparedBackupWithinTransaction(context, prepared),\n' +
+        '      ownershipGuard,\n' +
+        '    ),\n' +
+        '  );',
+    },
+    {
+      label: 'faulting restore nests the global transaction owner',
+      path: 'src/services/boot/dbBackupRestoreWave.ts',
+      before: 'const faultingRestore = restoreBackup(db, opened);',
+      after:
+        'const faultingRestore = withDbTransaction(db, async () => restoreBackup(db, opened));',
+    },
+    {
+      label: 'restore and successor settlement barrier is omitted',
+      path: 'src/services/boot/dbBackupRestoreWave.ts',
+      before:
+        'const [restoreOutcome, successorOutcome] = await Promise.allSettled([\n' +
+        '      faultingRestore,\n' +
+        '      queuedSuccessor,\n' +
+        '    ]);',
+      after:
+        'void Promise.allSettled([faultingRestore, queuedSuccessor]);\n' +
+        "    const restoreOutcome = { status: 'rejected', reason: new Error(FAULT_MESSAGE) } as const;\n" +
+        "    const successorOutcome = { status: 'fulfilled' } as const;",
+    },
+    {
+      label: 'backup wave gains another runtime consumer',
+      path: 'src/services/boot/dbBackupRestoreWave.ts',
+      transform(source) {
+        return `${source}\nexport const escapedBackupRestoreWave = runDbBackupRestoreWave;\n`;
+      },
+    },
+    {
+      label: 'folder membership can move ahead of earlier restore domains',
+      path: 'src/db/repositories/backup.ts',
+      transform(source) {
+        const membershipBlock =
+          '      await db.run(sql`\n' +
+          '        INSERT OR IGNORE INTO custom_folder_members (folder_id, chat_guid)\n' +
+          '        SELECT folder_id, chat_guid\n' +
+          '          FROM temp.gator_backup_restored_folder_members\n' +
+          '         ORDER BY folder_id ASC, chat_guid ASC\n' +
+          '      `);';
+        const transactionStart = '  return runInTransactionContext(context, async (db) => {\n';
+        const functionStart = source.indexOf(
+          'export function restorePreparedBackupWithinTransaction(',
+        );
+        assert.ok(functionStart >= 0, 'restorePreparedBackupWithinTransaction source not found');
+        const prefix = source.slice(0, functionStart);
+        const target = source
+          .slice(functionStart)
+          .replace(`${membershipBlock}\n\n`, '')
+          .replace(transactionStart, `${transactionStart}${membershipBlock}\n\n`);
+        assert.notEqual(target, source.slice(functionStart), 'membership block did not move');
+        return prefix + target;
+      },
+    },
+    {
+      label: 'final fixed-file cleanup is bypassed',
+      path: 'src/db/database.ts',
+      before: 'checks.databaseCleanup = cleanupDbBackupRestoreSelfTestDatabase();',
+      after: 'checks.databaseCleanup = true;',
+    },
+    {
+      label: 'backup request is dispatched into another relaunch lane',
+      path: 'src/services/boot/devDbRelaunchContract.ts',
+      before: "if (mode.kind === 'prepare') activeDbRelaunchContract = runBackupRestorePhase();",
+      after:
+        "if (mode.kind === 'prepare') activeDbRelaunchContract = runRuntimeConcurrencyPhase();",
+    },
+    {
+      label: 'backup marker prefix drifts from the host protocol',
+      path: 'src/services/boot/devDbRelaunchContract.ts',
+      before: "const DB_BACKUP_RESTORE_MARKER_PREFIX = 'GATOR_DB_BACKUP_RESTORE_V1 ';",
+      after: "const DB_BACKUP_RESTORE_MARKER_PREFIX = 'GATOR_DB_BACKUP_RESTORE_V2 ';",
+    },
+  ];
+
+  const root = incomingIngressFixture();
+  try {
+    assert.deepEqual(approvedCounts(scanDbWrites({ root })), { direct: 18, delegated: 42 });
+    for (const mutation of cases) {
+      const file = resolve(root, mutation.path);
+      const original = readFileSync(file, 'utf8');
+      try {
+        if (mutation.transform) {
+          writeFileSync(file, mutation.transform(original));
+        } else {
+          replaceFixtureSource(root, mutation.path, mutation.before, mutation.after);
+        }
+        assert.deepEqual(
+          approvedCounts(scanDbWrites({ root })),
+          { direct: 0, delegated: 0 },
+          mutation.label,
+        );
+      } finally {
+        writeFileSync(file, original);
+      }
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 fullOnlyTest(
@@ -3797,8 +4358,10 @@ fullOnlyTest(
       {
         label: 'image-send callee detaches its optimistic DB owner',
         path: 'src/services/send/sendAttachmentService.ts',
-        before: '    await withDbTransaction(\n      db,\n      async (context) => {',
-        after: '    void withDbTransaction(\n      db,\n      async (context) => {',
+        before:
+          '    const inserted = await withDbTransaction(\n      db,\n      async (context) => {',
+        after:
+          '    const inserted = void withDbTransaction(\n      db,\n      async (context) => {',
       },
       {
         label: 'sync contact bypass helper detaches its reachable DB work',
@@ -3810,9 +4373,17 @@ fullOnlyTest(
         label: 'realtime sink constructor installs a detached default hook',
         path: 'src/services/realtime/dbEventSink.ts',
         before:
-          '    private readonly onMessageStored?: (messageId: number) => void | Promise<void>,',
+          '    private readonly onMessageStored?: (\n' +
+          '      messageId: number,\n' +
+          '      source: EventSource,\n' +
+          '      context?: EventDeliveryContext,\n' +
+          '    ) => void | Promise<void>,',
         after:
-          '    private readonly onMessageStored: (messageId: number) => void | Promise<void> = async () => undefined,',
+          '    private readonly onMessageStored: (\n' +
+          '      messageId: number,\n' +
+          '      source: EventSource,\n' +
+          '      context?: EventDeliveryContext,\n' +
+          '    ) => void | Promise<void> = async () => undefined,',
       },
       {
         label: 'runtime send enables the production OS-notice namespace',
@@ -3823,22 +4394,25 @@ fullOnlyTest(
       {
         label: 'production image send enters the harness-only notice-suppression lane',
         path: 'src/services/send/index.ts',
-        before: '        undefined,\n        pasteOwnership,\n      );',
+        before: '        undefined,\n        pasteOwnership,\n        (tempGuid) => {',
         after:
           "        { failureNoticeMode: 'suppressed' },\n" +
           '        pasteOwnership,\n' +
-          '      );',
+          '        (tempGuid) => {',
       },
       {
         label: 'production image send drops the reviewed paste-ownership preparer',
         path: 'src/services/send/index.ts',
-        before: '        pasteOwnership,\n      );',
-        after: '        undefined,\n      );',
+        before: '        pasteOwnership,\n        (tempGuid) => {',
+        after: '        undefined,\n        (tempGuid) => {',
       },
       {
         label: 'production success call hides notice suppression inside a spread',
         path: 'src/services/send/sendService.ts',
-        before: '    await reconcileSendOutcome(db, tempGuid, server, now, effectiveCommitGuard);',
+        before:
+          '    await reconcileSendOutcome(db, tempGuid, server, now, effectiveCommitGuard, {\n' +
+          '      attemptOwnerToken: attemptOwnerToken ?? undefined,\n' +
+          '    });',
         after:
           '    await reconcileSendOutcome(\n' +
           '      ...([\n' +
@@ -3847,7 +4421,7 @@ fullOnlyTest(
           '        server,\n' +
           '        now,\n' +
           '        effectiveCommitGuard,\n' +
-          "        { failureNoticeMode: 'suppressed' },\n" +
+          "        { attemptOwnerToken: attemptOwnerToken ?? undefined, failureNoticeMode: 'suppressed' },\n" +
           '      ] as const),\n' +
           '    );',
       },
@@ -3863,6 +4437,7 @@ fullOnlyTest(
           '      args.chatGuid,\n' +
           '      undefined,\n' +
           '      effectiveCommitGuard,\n' +
+          '      { attemptOwnerToken: attemptOwnerToken ?? undefined },\n' +
           '    );',
         after:
           '    await handleSendFailure.apply(null, [\n' +
@@ -3873,15 +4448,16 @@ fullOnlyTest(
           '      args.chatGuid,\n' +
           '      undefined,\n' +
           '      effectiveCommitGuard,\n' +
-          "      { failureNoticeMode: 'suppressed' },\n" +
+          "      { attemptOwnerToken: attemptOwnerToken ?? undefined, failureNoticeMode: 'suppressed' },\n" +
           '    ]);',
       },
       {
         label: 'success outcome ignores OS-notice suppression',
         path: 'src/services/send/sendOutcome.ts',
         before:
-          "  if (options?.failureNoticeMode !== 'suppressed') {\n    await clearFailedSendNotice(",
-        after: '  if (true) {\n    await clearFailedSendNotice(',
+          "  if (\n    (disposition === 'sent' || disposition === 'missing') &&\n    options?.failureNoticeMode !== 'suppressed'\n  ) {\n    await clearFailedSendNotice(",
+        after:
+          "  if (disposition === 'sent' || disposition === 'missing') {\n    await clearFailedSendNotice(",
       },
       {
         label: 'failure outcome ignores OS-notice suppression',
@@ -3919,7 +4495,7 @@ fullOnlyTest(
 
     const root = incomingIngressFixture();
     try {
-      assert.deepEqual(approvedCounts(scanDbWrites({ root })), { direct: 13, delegated: 45 });
+      assert.deepEqual(approvedCounts(scanDbWrites({ root })), { direct: 13, delegated: 47 });
       for (const mutation of cases) {
         const file = resolve(root, mutation.path);
         const original = readFileSync(file, 'utf8');
@@ -4631,7 +5207,7 @@ fullOnlyTest(
         walDirect: 33,
         walDelegated: 13,
         activeDirect: 34,
-        activeDelegated: 16,
+        activeDelegated: 17,
         history: 39,
       });
       const throwawayContexts = new Set(['throwaway-database', 'throwaway-database-delegation']);
@@ -4912,7 +5488,7 @@ fullOnlyTest('driver adapter proof fails closed on forwarding, escape, and scope
         replaceFixtureSource(
           root,
           'src/db/database.ts',
-          "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0045_backup_export_indexes' as const;",
+          "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0047_message_retraction_topology' as const;",
           "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0039_message_error_message' as const;",
         );
       },
@@ -5393,12 +5969,14 @@ test('certifies exactly the reviewed account-transition delegation boundary', ()
     ].sort(),
   );
   assert.equal(delegated.length, 5);
-  for (const suffix of ['a9efdbe22d70', '602dd63b9e5a']) {
-    assert.equal(
-      findings.find((finding) => finding.id.endsWith(suffix))?.detectedContext,
-      'coordinated-delegation',
-    );
-  }
+  assert.equal(
+    findings.find((finding) => finding.id.endsWith('a9efdbe22d70'))?.detectedContext,
+    'coordinated-delegation',
+  );
+  assert.equal(
+    findings.find((finding) => finding.id.endsWith('3bd87f6c9e52'))?.detectedContext,
+    'incoming-ingress-delegation',
+  );
 });
 
 fullOnlyTest('account-transition proof fails closed when one exact handoff is redirected', () => {
@@ -5799,11 +6377,20 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoingRetry.ts#markMessageSendErrorWithinTransaction:drizzle-update:254ffd3887c5',
       'src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction:drizzle-delete:8425f72e3b86',
       'src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction:drizzle-delete:8425f72e3b86:2',
-      'src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction:sql-update:21d3ccc056b3',
+      'src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction:sql-update:86063b6a6c9b',
+      'src/db/repositories/outgoing.ts#markOutgoingSentNoGuidWithinTransaction:sql-update:c5ec75981f8f',
+      'src/db/repositories/outgoingRetry.ts#claimOutgoingForSendWithinTransaction:drizzle-update:4bee2195a91e',
+      'src/db/repositories/outgoingRetry.ts#claimOutgoingForSendWithinTransaction:drizzle-update:4bee2195a91e:2',
       'src/db/repositories/outgoingRetry.ts#claimOutgoingForSendWithinTransaction:drizzle-update:7f620d3bb4f5',
-      'src/db/repositories/outgoingRetry.ts#claimOutgoingForSendWithinTransaction:sql-update:25d36f3569c3',
-      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:sql-update:1365bab7e11e',
-      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:sql-update:74de183f35c6',
+      'src/db/repositories/outgoingRetry.ts#claimOutgoingForSendWithinTransaction:drizzle-update:7f620d3bb4f5:2',
+      'src/db/repositories/outgoingRetry.ts#claimOutgoingForSendWithinTransaction:sql-update:67eaad07e164',
+      'src/db/repositories/outgoingRetry.ts#claimOutgoingForSendWithinTransaction:sql-update:dec41de4d57c',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:drizzle-update:7bbea9e0b4c6',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:drizzle-update:bf7b74884a04',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:drizzle-update:bf7b74884a04:2',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:sql-update:59013bfa2e13',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:sql-update:8331c562b8bf',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:sql-update:d829b7a21431',
       'src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction:drizzle-insert:5374f7183358',
       'src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction:drizzle-insert:eca25accb829',
       'src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction:drizzle-insert:fc8d72883c5b',
@@ -5818,18 +6405,20 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/messages.ts#deleteMessageLocalWithinTransaction.<callback:4315b7c2a1>:mutator-call:8f577f345052',
       'src/db/repositories/messages.ts#deleteMessageLocalWithinTransaction:drizzle-delete:d78d925090ff',
       'src/db/repositories/messages.ts#applyLocalEditWithinTransaction:drizzle-update:a52bab6f4d6f',
-      'src/db/repositories/messages.ts#applyLocalUnsendWithinTransaction:drizzle-update:e31d64188078',
+      'src/db/repositories/messages.ts#applyLocalUnsendWithinTransaction:drizzle-update:48649e2b1746',
       'src/db/repositories/messages.ts#revertLocalEditWithinTransaction:sql-update:61bd18cc4a5f',
-      'src/db/repositories/messages.ts#revertLocalUnsendWithinTransaction:sql-update:b1fe717be3ae',
+      'src/db/repositories/messages.ts#revertLocalUnsendWithinTransaction:sql-update:27eeadb5f695',
       'src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction.<callback:a1e7b9de6b>:mutator-call:d5204e46c499',
       'src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction:drizzle-delete:2cde35e0f6d4',
       'src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction:sql-update:1320d8a402de',
-      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:7038d35d21>:mutator-call:17a4a16e0a8e',
-      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:7038d35d21>:mutator-call:4f9ad23d68e9',
-      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:7038d35d21>:mutator-call:53202ca06801',
+      'src/db/repositories/outgoing.ts#reconcileExactOutgoingAttemptSuccessWithinTransaction:mutator-call:e0ea8d72f9a8',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:26be0b1670>:mutator-call:00574102b188',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:26be0b1670>:mutator-call:a51102a0c114',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:26be0b1670>:mutator-call:bad50ebad51d',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction:drizzle-delete:0bd89180f0e1',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction:drizzle-delete:3374b727a87f',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction:drizzle-update:caa13f78f819',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction:drizzle-update:caa13f78f819:2',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction:sql-update:fb0297907ce8',
       'src/db/repositories/chats.ts#setChatUnreadLocalWithinTransaction:drizzle-update:bc72f0e85266',
       'src/db/repositories/sync.ts#setSyncMarkerWithinTransaction:drizzle-update:7582ca63d697',
@@ -5837,13 +6426,13 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/backup/backup.ts#buildBackup:mutator-call:50677029090e',
       'src/services/backup/backup.ts#buildBackupWithCustomFolders:mutator-call:6eca578bbb50',
       'src/services/backup/backupService.ts#buildCurrentBackup.<callback:2bd1ecedc4>:mutator-call:3ea042f4e17e',
-      'src/services/backup/backupService.ts#restoreCurrentBackup.<callback:bdb49d16ac>:mutator-call:7143c8024e48',
+      'src/services/backup/backupService.ts#restoreCurrentBackup.<callback:93bf63133c>:mutator-call:27d17cbc08f6',
       'src/services/chat/groupManagement.ts#renameGroupChat.<callback:c13ecdb63a>:mutator-call:2e89e3325c50',
       'src/services/chat/groupManagement.ts#updateGroupParticipant.<callback:50428f1bde>:mutator-call:4e81064f65bb',
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 91);
+  assert.equal(selected.length, 102);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [
@@ -5911,9 +6500,9 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
   assert.deepEqual(
     sendSuccessOwnerTransactions.map((finding) => finding.id).sort(),
     [
-      'src/db/repositories/outgoing.ts#markOutgoingSentNoGuid.<callback:a142c06cb1>:mutator-call:c476b9568e57',
-      'src/db/repositories/outgoing.ts#markOutgoingSentNoGuid:mutator-call:7b31765b5cbe',
-      'src/db/repositories/outgoing.ts#markOutgoingSentNoGuid:mutator-call:9e7cb9dc1fb3',
+      'src/db/repositories/outgoing.ts#markOutgoingSentNoGuid.<callback:032122e18d>:mutator-call:07e5137a050a',
+      'src/db/repositories/outgoing.ts#markOutgoingSentNoGuid:mutator-call:c4172f69161a',
+      'src/db/repositories/outgoing.ts#markOutgoingSentNoGuid:mutator-call:d9dedcf418e8',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess.<callback:a142c06cb1>:mutator-call:dd151c6d7808',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess.<callback:350f3c11ce>:mutator-call:466aed95663c',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:43b965ef483f',
@@ -5925,9 +6514,9 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
   assert.deepEqual(
     retryClaimTransactions.map((finding) => finding.id).sort(),
     [
-      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry.<callback:e9bf331847>:mutator-call:4b8448a9e2d5',
-      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry:mutator-call:0ef007da403c',
-      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry:mutator-call:abe11442dbc6',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry.<callback:7da63d797b>:mutator-call:6d8d66f7449c',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry:mutator-call:4bb5e2d3a680',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry:mutator-call:b718e1c9d6f4',
     ].sort(),
   );
   assert.deepEqual(
@@ -5997,9 +6586,9 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
   assert.deepEqual(
     applyLocalUnsendTransactions.map((finding) => finding.id).sort(),
     [
-      'src/db/repositories/messages.ts#applyLocalUnsend.<callback:6a0c9830c6>:mutator-call:16a53eb65fd1',
-      'src/db/repositories/messages.ts#applyLocalUnsend:mutator-call:4fef908e0de8',
-      'src/db/repositories/messages.ts#applyLocalUnsend:mutator-call:a3df4279d248',
+      'src/db/repositories/messages.ts#applyLocalUnsend.<callback:11057ec3bc>:mutator-call:c0ba6b7961f7',
+      'src/db/repositories/messages.ts#applyLocalUnsend:mutator-call:a2bb71d3173b',
+      'src/db/repositories/messages.ts#applyLocalUnsend:mutator-call:e61ef8e802ac',
     ].sort(),
   );
   assert.deepEqual(
@@ -6013,9 +6602,9 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
   assert.deepEqual(
     revertLocalUnsendTransactions.map((finding) => finding.id).sort(),
     [
-      'src/db/repositories/messages.ts#revertLocalUnsend.<callback:cd36f36705>:mutator-call:7038feb61aed',
-      'src/db/repositories/messages.ts#revertLocalUnsend:mutator-call:2e8d7955a2c2',
-      'src/db/repositories/messages.ts#revertLocalUnsend:mutator-call:d67d4e187ef6',
+      'src/db/repositories/messages.ts#revertLocalUnsend.<callback:c5ee555dd6>:mutator-call:9a40a139e444',
+      'src/db/repositories/messages.ts#revertLocalUnsend:mutator-call:0cad95bcc0f4',
+      'src/db/repositories/messages.ts#revertLocalUnsend:mutator-call:76b9fc4dfb2e',
     ].sort(),
   );
   assert.equal(
@@ -6028,561 +6617,609 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
   );
 });
 
+function incomingIngressMutationCases() {
+  return [
+    {
+      label: 'unadopted supplied-context tracking',
+      path: 'src/services/realtimeControl.ts',
+      before: '? await runTrackedRealtimeWork(context,',
+      after: '? runTrackedRealtimeWork(context,',
+    },
+    {
+      label: 'original context forwarded instead of adopted lease',
+      path: 'src/services/realtimeControl.ts',
+      before: 'source,\n          lease,\n          capturedOccurrence,',
+      after: 'source,\n          context,\n          capturedOccurrence,',
+    },
+    {
+      label: 'recovery collector completion is detached',
+      path: 'src/services/realtimeControl.ts',
+      before: 'await finishRealtimeRecoveryCollector(recoveryCollector, runtime);',
+      after: 'void finishRealtimeRecoveryCollector(recoveryCollector, runtime);',
+    },
+    {
+      label: 'recovered-event retry drops its runtime and account fence',
+      path: 'src/services/realtimeControl.ts',
+      before:
+        'isCurrent: () => ownsAttempt && accountLease.isCurrent() && realtimeRuntimeInstance === runtime,',
+      after: 'isCurrent: () => true,',
+    },
+    {
+      label: 'locked intake persistence bypass',
+      path: 'src/services/realtimeControl.ts',
+      before: 'canPersist: canPersistRealtimeEvent,',
+      after: 'canPersist: () => true,',
+    },
+    {
+      label: 'DEV proof gate bypass',
+      path: 'src/services/realtimeControl.ts',
+      before: 'const allowed = context.isCurrent() && isDevServer() && !realtimeIntakeLocked();',
+      after: 'const allowed = true;',
+    },
+    {
+      label: 'runtime router retained across account generation',
+      path: 'src/services/realtimeControl.ts',
+      before: 'sharedRouterInstance = null;',
+      after: 'void sharedRouterInstance;',
+    },
+    {
+      label: 'no-op realtime sink composition',
+      path: 'src/services/realtimeControl.ts',
+      transform: (source) => {
+        const start = source.indexOf(
+          'function realtimeSink(db: AppDatabase, accountGeneration: number): EventSink {',
+        );
+        const marker = '\n}\n\n// One normalizer/sink chain per account generation.';
+        const end = source.indexOf(marker, start);
+        assert.notEqual(start, -1);
+        assert.notEqual(end, -1);
+        return `${source.slice(0, start)}function realtimeSink(db: AppDatabase, accountGeneration: number): EventSink {\n  void db;\n  void accountGeneration;\n  return { handle: async () => undefined };\n}${source.slice(end + 2)}`;
+      },
+    },
+    {
+      label: 'decoy digest backend injected into intake',
+      path: 'src/services/realtimeControl.ts',
+      before: 'new IncomingEventDrain(db, router, expoDigestBackend, {',
+      after: 'new IncomingEventDrain(db, router, { sha256: async (input) => input }, {',
+    },
+    {
+      label: 'generation invalidation subscription disabled',
+      path: 'src/services/realtime/deliveryCoordinator.ts',
+      before: 'if (!acceptingDeliveries || generation !== accountGeneration) {',
+      after: 'if (true) {',
+    },
+    {
+      label: 'captured account lease never expires',
+      path: 'src/services/realtime/deliveryCoordinator.ts',
+      before:
+        'isCurrent: () => acceptedAtCapture && acceptingDeliveries && generation === accountGeneration,',
+      after: 'isCurrent: () => true,',
+    },
+    {
+      label: 'captured account lease shadows generation state',
+      path: 'src/services/realtime/deliveryCoordinator.ts',
+      before: 'export function captureRealtimeDeliveryLease(): RealtimeDeliveryLease {',
+      after:
+        'export function captureRealtimeDeliveryLease(accountGeneration = 0, acceptingDeliveries = true): RealtimeDeliveryLease {',
+    },
+    {
+      label: 'pause leaves the retired account generation current',
+      path: 'src/services/realtime/deliveryCoordinator.ts',
+      before: '    accountGeneration += 1;',
+      after: '    void accountGeneration;',
+    },
+    {
+      label: 'resume resurrects the original account generation',
+      path: 'src/services/realtime/deliveryCoordinator.ts',
+      before: 'export function resumeRealtimeDeliveries(): void {\n  acceptingDeliveries = true;',
+      after:
+        'export function resumeRealtimeDeliveries(): void {\n  accountGeneration = 0;\n  acceptingDeliveries = true;',
+    },
+    {
+      label: 'generation listener map discards subscriptions',
+      path: 'src/services/realtime/deliveryCoordinator.ts',
+      before: 'const generationInvalidationListeners = new Map<number, Set<() => void>>();',
+      after:
+        'class DroppingListenerMap extends Map<number, Set<() => void>> { override set(): this { return this; } }\nconst generationInvalidationListeners = new DroppingListenerMap();',
+    },
+    {
+      label: 'generation listener map is overwritten after initialization',
+      path: 'src/services/realtime/deliveryCoordinator.ts',
+      before: 'const generationInvalidationListeners = new Map<number, Set<() => void>>();',
+      after:
+        'const generationInvalidationListeners = new Map<number, Set<() => void>>();\ngenerationInvalidationListeners.set = () => generationInvalidationListeners;',
+    },
+    {
+      label: 'admitted-delivery set discards registrations',
+      path: 'src/services/realtime/deliveryCoordinator.ts',
+      before: 'const admittedDeliveries = new Set<Promise<void>>();',
+      after:
+        'class DroppingDeliverySet extends Set<Promise<void>> { override add(): this { return this; } }\nconst admittedDeliveries = new DroppingDeliverySet();',
+    },
+    {
+      label: 'tracked work skips teardown registration',
+      path: 'src/services/realtime/deliveryCoordinator.ts',
+      before: '  admittedDeliveries.add(drainSlot);',
+      after: '  void admittedDeliveries;',
+    },
+    {
+      label: 'tracked failure never settles its teardown slot',
+      path: 'src/services/realtime/deliveryCoordinator.ts',
+      before: '  void result.then(finishTracking, finishTracking);',
+      after: '  void result.then(finishTracking);',
+    },
+    {
+      label: 'pause does not await admitted deliveries',
+      path: 'src/services/realtime/deliveryCoordinator.ts',
+      before: '  await Promise.all([...admittedDeliveries]);',
+      after: '  await Promise.all([]);',
+    },
+    {
+      label: 'optional socket durable handler',
+      path: 'src/services/realtime/socketService.ts',
+      before: 'handler: RawRealtimeEventHandler,',
+      after: 'handler?: RawRealtimeEventHandler,',
+    },
+    {
+      label: 'socket account lease accessor always reports current',
+      path: 'src/services/realtime/socketService.ts',
+      before: 'private accountLease: RealtimeDeliveryLease | null = null;',
+      after:
+        'private get accountLease(): RealtimeDeliveryLease | null { return { generation: 0, isCurrent: () => true }; }\n  private set accountLease(_value: RealtimeDeliveryLease | null) {}',
+    },
+    {
+      label: 'socket lifecycle callback decoy',
+      path: 'src/services/realtime/socketService.ts',
+      before: 'this.socket.on(event, (data: unknown) => {',
+      after: 'if (false) this.socket.on(event, (data: unknown) => {',
+    },
+    {
+      label: 'socket server event loop disabled',
+      path: 'src/services/realtime/socketService.ts',
+      before: 'for (const event of SERVER_EVENTS) {',
+      after: 'for (const event of []) {',
+    },
+    {
+      label: 'socket escalation keeps retired lifecycle current',
+      path: 'src/services/realtime/socketService.ts',
+      before:
+        '      this.lifecycleGeneration += 1;\n      lifecycleGeneration = this.lifecycleGeneration;',
+      after:
+        '      void this.lifecycleGeneration;\n      lifecycleGeneration = this.lifecycleGeneration;',
+    },
+    {
+      label: 'socket escalation silently changes the approved origin',
+      path: 'src/services/realtime/socketService.ts',
+      before: '      this.lifecycleGeneration += 1;',
+      after:
+        "      this.origin = 'https://unapproved.example';\n      this.lifecycleGeneration += 1;",
+    },
+    {
+      label: 'socket fallback nonce uses a shadowed Date',
+      path: 'src/services/realtime/socketService.ts',
+      before: 'let processSocketOpenSequence = 0;',
+      after: 'const Date = { now: () => 0 };\nlet processSocketOpenSequence = 0;',
+    },
+    {
+      label: 'socket fallback nonce uses a shadowed Math',
+      path: 'src/services/realtime/socketService.ts',
+      before: 'let processSocketOpenSequence = 0;',
+      after:
+        'const Math = { random: () => 0, floor: globalThis.Math.floor, max: globalThis.Math.max, min: globalThis.Math.min, round: globalThis.Math.round };\nlet processSocketOpenSequence = 0;',
+    },
+    {
+      label: 'dispatcher re-reads caller payload after FIFO wait',
+      path: 'src/services/realtime/incomingEventDispatcher.ts',
+      before: 'return await this.persist(\n          event,',
+      after: 'return await this.persist(\n          snapshotIncomingEvent(eventName, rawData),',
+    },
+    {
+      label: 'dispatcher rewrites the snapshot after FIFO wait',
+      path: 'src/services/realtime/incomingEventDispatcher.ts',
+      before: '      await previous;\n      try {',
+      after:
+        '      await previous;\n      event = snapshotIncomingEvent(eventName, rawData);\n      try {',
+    },
+    {
+      label: 'dispatcher skips its FIFO predecessor',
+      path: 'src/services/realtime/incomingEventDispatcher.ts',
+      before: '      await previous;\n      try {',
+      after: '      void previous;\n      try {',
+    },
+    {
+      label: 'dispatcher releases its FIFO slot before admission',
+      path: 'src/services/realtime/incomingEventDispatcher.ts',
+      before: '    const admission = (async () => {',
+      after: '    release();\n    const admission = (async () => {',
+    },
+    {
+      label: 'dispatcher FIFO resolver is not retained',
+      path: 'src/services/realtime/incomingEventDispatcher.ts',
+      before: '      release = resolve;',
+      after: '      void resolve;',
+    },
+    {
+      label: 'dispatcher FIFO slot is not released in finally',
+      path: 'src/services/realtime/incomingEventDispatcher.ts',
+      before: '        release();',
+      after: '        void release;',
+    },
+    {
+      label: 'dispatcher FIFO uses a shadowed Promise constructor',
+      path: 'src/services/realtime/incomingEventDispatcher.ts',
+      before: 'export class DurableRealtimeDispatcher {',
+      after: 'const Promise = globalThis.Promise;\nexport class DurableRealtimeDispatcher {',
+    },
+    {
+      label: 'dispatcher snapshot helper becomes asynchronous',
+      path: 'src/core/realtime/incomingEventCodec.ts',
+      before: 'export function snapshotIncomingEvent(',
+      after: 'export async function snapshotIncomingEvent(',
+    },
+    {
+      label: 'dispatcher persistence guard always permits admission',
+      path: 'src/services/realtime/incomingEventDispatcher.ts',
+      before:
+        "      const allowed =\n        !this.stopped &&\n        (!context || context.isCurrent()) &&\n        (persistenceMode === 'locked-fcm-v3'\n          ? event.type !== 'new-server'\n          : !this.options.canPersist || this.options.canPersist(event));",
+      after: '      const allowed = true;',
+    },
+    {
+      label: 'normal enqueue receives a different guard',
+      path: 'src/services/realtime/incomingEventDispatcher.ts',
+      before: 'result = await enqueueIncomingEvent(this.db, encoded.envelope, guard, this.now);',
+      after:
+        'result = await enqueueIncomingEvent(this.db, encoded.envelope, () => true, this.now);',
+    },
+    {
+      label: 'atomic DEV enqueue receives a different guard',
+      path: 'src/services/realtime/incomingEventDispatcher.ts',
+      before:
+        '          { now: receivedAt, clock: this.now, leaseToken: devLeaseToken },\n          guard,\n        );',
+      after:
+        '          { now: receivedAt, clock: this.now, leaseToken: devLeaseToken },\n          () => true,\n        );',
+    },
+    {
+      label: 'public capture returns caller-owned payload data',
+      path: 'src/core/realtime/incomingEventCodec.ts',
+      before: 'return { eventName: canonical.eventName, rawData: JSON.parse(canonical.payload) };',
+      after: 'return { eventName: canonical.eventName, rawData };',
+    },
+    {
+      label: 'dispatcher snapshot reuses the caller-owned payload',
+      path: 'src/core/realtime/incomingEventCodec.ts',
+      before:
+        'return captured ? normalizeRealtimeEvent(captured.eventName, captured.rawData) : null;',
+      after: 'return captured ? normalizeRealtimeEvent(eventName, rawData) : null;',
+    },
+    {
+      label: 'public capture uses a shadowed JSON parser',
+      path: 'src/core/realtime/incomingEventCodec.ts',
+      before: 'export function captureIncomingEvent(',
+      after:
+        'const JSON = { parse: (value: string): unknown => value };\nexport function captureIncomingEvent(',
+    },
+    {
+      label: 'dispatcher retirement leaves its drain running',
+      path: 'src/services/realtime/incomingEventDispatcher.ts',
+      before: '  dispose(): void {\n    this.stopped = true;\n    this.drain.dispose();\n  }',
+      after: '  dispose(): void {}',
+    },
+    {
+      label: 'runtime reset skips dispatcher retirement',
+      path: 'src/services/realtimeControl.ts',
+      before: '  current.dispatcher.dispose();',
+      after: '  void current.dispatcher;',
+    },
+    {
+      label: 'drain retirement leaves its scheduled wake running',
+      path: 'src/services/realtime/incomingEventDrain.ts',
+      before: '  dispose(): void {\n    this.stopped = true;\n    this.cancelWakeTimer();\n  }',
+      after: '  dispose(): void {}',
+    },
+    {
+      label: 'drain wake cancellation is disabled',
+      path: 'src/services/realtime/incomingEventDrain.ts',
+      before:
+        '  private cancelWakeTimer(): void {\n    if (this.wakeTimer == null) return;\n    (this.options.cancelWake ?? clearTimeout)(this.wakeTimer);\n    this.wakeTimer = null;\n  }',
+      after: '  private cancelWakeTimer(): void {}',
+    },
+    {
+      label: 'drain wake cancellation uses a shadowed clearTimeout',
+      path: 'src/services/realtime/incomingEventDrain.ts',
+      before: 'export const INCOMING_EVENT_DELIVERY_TIMEOUT_MS = 90_000;',
+      after:
+        'const clearTimeout = (_handle: ReturnType<typeof setTimeout>): void => {};\nexport const INCOMING_EVENT_DELIVERY_TIMEOUT_MS = 90_000;',
+    },
+    {
+      label: 'FCM defaults unlocked',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: 'let locked = true;',
+      after: 'let locked = false;',
+    },
+    {
+      label: 'FCM V2 migration state read is bypassed',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: '    encryptionState = await readFcmDeviceEncryptionState(vault);',
+      after: "    encryptionState = { kind: 'absent' };",
+    },
+    {
+      label: 'FCM V2 state read loses its post-await lease check',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before:
+        '  if (!lease.isCurrent()) return;\n\n  // No random-key state means there is no authenticated receive key.',
+      after:
+        '  void lease;\n\n  // No random-key state means there is no authenticated receive key.',
+    },
+    {
+      label: 'FCM V2 revoked state is treated as usable',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: "encryptionState.kind !== 'valid' || encryptionState.state.status === 'revoked'",
+      after: "encryptionState.kind !== 'valid'",
+    },
+    {
+      label: 'FCM V2 origin binding is bypassed',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: '  if (!currentOrigin || encryptionState.state.origin !== currentOrigin) {',
+      after: '  if (false) {',
+    },
+    {
+      label: 'FCM V2 envelope gate allows a downgrade',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before:
+        "  if (!encrypted || encryptionType !== FCM_V2_ENCRYPTION_TYPE || typeof body !== 'string') {",
+      after: "  if (typeof body !== 'string') {",
+    },
+    {
+      label: 'FCM V2 decrypt omits event-name authenticated data',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before:
+        '    plaintext = await decryptFcmV2Payload(body, encryptionState.state.key, eventName);',
+      after:
+        "    plaintext = await decryptFcmV2Payload(body, encryptionState.state.key, 'constant-event');",
+    },
+    {
+      label: 'FCM V2 decrypt loses its post-await lease check',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: '  if (!lease.isCurrent()) return;\n  if (lockedContext) {',
+      after: '  void lease;\n  if (lockedContext) {',
+    },
+    {
+      label: 'FCM V2 dispatch uses unauthenticated outer data',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before:
+        "  await dispatchRealtimeEvent(eventName, plaintext, 'fcm', lease, delivery.occurrence);",
+      after: "  await dispatchRealtimeEvent(eventName, body, 'fcm', lease, delivery.occurrence);",
+    },
+    {
+      label: 'lease-token crypto call resolves to a constant decoy',
+      path: 'src/services/realtimeControl.ts',
+      transform: (source) =>
+        source
+          .replace(
+            "import * as Crypto from 'expo-crypto';",
+            "import * as RealCrypto from 'expo-crypto';\nconst Crypto = { randomUUID: () => 'constant-token' };",
+          )
+          .replace(
+            'const fallbackOccurrenceNamespace = Crypto.randomUUID();',
+            'const fallbackOccurrenceNamespace = RealCrypto.randomUUID();',
+          ),
+    },
+    {
+      label: 'digest crypto call resolves to an identity decoy',
+      path: 'src/services/realtime/expoDigestBackend.ts',
+      transform: (source) =>
+        source.replace(
+          "import * as Crypto from 'expo-crypto';",
+          "import * as RealCrypto from 'expo-crypto';\nvoid RealCrypto;\nconst Crypto = { digest: async (_algorithm: unknown, bytes: Uint8Array) => bytes, CryptoDigestAlgorithm: { SHA256: 'SHA-256' } };",
+        ),
+    },
+    {
+      label: 'FCM later callback bypasses the admission tail',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: 'const previous = fcmAdmissionTail;',
+      after: 'const previous = Promise.resolve();',
+    },
+    {
+      label: 'FCM admission tail uses a shadowed never-settling Promise',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: 'let fcmAdmissionTail: Promise<void> = Promise.resolve();',
+      after:
+        'const Promise = { resolve: (): globalThis.Promise<void> => new globalThis.Promise<void>(() => undefined) };\nlet fcmAdmissionTail: Promise<void> = Promise.resolve();',
+    },
+    {
+      label: 'FCM receipt clock and process nonce use a shadowed Date',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: 'const fcmProcessOccurrenceNonce =',
+      after: 'const Date = { now: () => 0 };\nconst fcmProcessOccurrenceNonce =',
+    },
+    {
+      label: 'FCM process nonce uses a shadowed Math',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: 'const fcmProcessOccurrenceNonce =',
+      after: 'const Math = { random: () => 0 };\nconst fcmProcessOccurrenceNonce =',
+    },
+    {
+      label: 'FCM capture yields before reserving FIFO position',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: 'const delivery = captureFcmDelivery(msg, backgroundReceivedAt);',
+      after:
+        'const delivery = await Promise.resolve(captureFcmDelivery(msg, backgroundReceivedAt));',
+    },
+    {
+      label: 'FCM headless effect deadline is detached from callback receipt',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: '        deadlineAt: headlessEffectDeadlineAt,',
+      after: '        deadlineAt: Number.MAX_SAFE_INTEGER,',
+    },
+    {
+      label: 'FCM tracking invocation evaluates a yielding extra argument',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      transform: (source) =>
+        source.replace(
+          '        headlessEffectCompletion = collection.close();\n      }\n    });',
+          '        headlessEffectCompletion = collection.close();\n      }\n    }, await Promise.resolve());',
+        ),
+    },
+    {
+      label: 'FCM failure poisons the admission tail',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before:
+        '    fcmAdmissionTail = tracked.then(\n      () => undefined,\n      () => undefined,\n    );',
+      after: '    fcmAdmissionTail = tracked.then(() => undefined);',
+    },
+    {
+      label: 'FCM queued callback skips its post-wait lease check',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before:
+        '      await previous;\n      if (!lease.isCurrent()) return;\n      if (headlessEffectDeadlineAt == null) {',
+      after:
+        '      await previous;\n      void lease;\n      if (headlessEffectDeadlineAt == null) {',
+    },
+    {
+      label: 'detached headless handler',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: "await handleIncomingFcm(msg, 'background', receivedAt);",
+      after: "void handleIncomingFcm(msg, 'background', receivedAt);",
+    },
+    {
+      label: 'conditional background registration',
+      path: 'src/services/notifications/registerFcmBackgroundHandler.ts',
+      before: 'setBackgroundMessageHandler(getMessaging(), handleBackgroundFcm);',
+      after: 'if (false) setBackgroundMessageHandler(getMessaging(), handleBackgroundFcm);',
+    },
+    {
+      label: 'second background registration overrides the durable handler',
+      path: 'src/services/notifications/registerFcmBackgroundHandler.ts',
+      transform: (source) =>
+        `${source}\nsetBackgroundMessageHandler(getMessaging(), async () => undefined);\n`,
+    },
+    {
+      label: 'killed-app entry import removed',
+      path: 'index.js',
+      before: "import './src/services/notifications/registerFcmBackgroundHandler';",
+      after: "import './src/services/notifications/fcmPayload';",
+    },
+    {
+      label: 'bundle entry no longer points at index',
+      path: 'package.json',
+      before: '"main": "index.js"',
+      after: '"main": "expo-router/entry"',
+    },
+    {
+      label: 'DEV helper fails open in release',
+      path: 'src/utils/isDev.ts',
+      before: "  if (typeof __DEV__ === 'undefined' || !__DEV__) return false;",
+      after: '  return true;',
+    },
+    {
+      label: 'lock helper always reports unlocked',
+      path: 'src/services/notifications/lockGate.ts',
+      transform: (source) =>
+        source.replace(
+          /export function effectivelyLocked\([\s\S]*?\n}\n$/,
+          'export function effectivelyLocked(lock: any, appLockEnabled: boolean, now = Date.now()): boolean {\n  void lock; void appLockEnabled; void now;\n  return false;\n}\n',
+        ),
+    },
+    {
+      label: 'FCM session helper always reports active',
+      path: 'src/services/notifications/fcmSessionGate.ts',
+      transform: (source) =>
+        source.replace(
+          /export async function readFcmSessionState\([\s\S]*?\n}\n$/,
+          "export async function readFcmSessionState(vault: any, revocationMarker: any): Promise<FcmSessionState> {\n  void vault; void revocationMarker;\n  return 'active';\n}\n",
+        ),
+    },
+    {
+      label: 'active session marker aliases the writing state',
+      path: 'src/core/secure/vault.ts',
+      before: "  active: 'active',",
+      after: "  active: 'writing',",
+    },
+    {
+      label: 'DEV seed owner guard removed',
+      path: 'src/features/conversations/devSeed.ts',
+      before:
+        'export async function injectMessage(accountLease: RealtimeDeliveryLease): Promise<void> {\n  if (!isDevServer()) return;',
+      after:
+        'export async function injectMessage(accountLease: RealtimeDeliveryLease): Promise<void> {',
+    },
+    {
+      label: 'chat DEV callback loses its release gate',
+      path: 'app/(app)/chat/[guid].tsx',
+      before: 'if (!isDevServer() || !accountLease.isCurrent()) return;',
+      after: 'if (!accountLease.isCurrent()) return;',
+    },
+    {
+      label: 'rotation proposal bypasses the canonical snapshot',
+      path: 'src/services/realtimeControl.ts',
+      before: 'const normalized = snapshotIncomingEvent(captured.eventName, captured.rawData);',
+      after: 'const normalized = snapshotIncomingEvent(eventName, rawData);',
+    },
+    {
+      label: 'rotation approval handoff is detached',
+      path: 'src/services/realtimeControl.ts',
+      before: '    await applyNewServerUrl(normalized.url, context);',
+      after: '    void applyNewServerUrl(normalized.url, context);',
+    },
+    {
+      label: 'rotation event is allowed into durable persistence',
+      path: 'src/services/realtimeControl.ts',
+      before: "  if (event.type !== 'new-server') return true;",
+      after: '  return true;',
+    },
+    {
+      label: 'escaped public dispatcher reference',
+      path: 'src/services/realtimeControl.ts',
+      transform: (source) =>
+        `${source}\nexport const escapedIncomingDispatch = dispatchRealtimeEvent;\n`,
+    },
+    {
+      label: 'raw writer added under protected admission owner',
+      path: 'src/services/realtimeControl.ts',
+      before: '  const receivedAt = occurrence?.receivedAt ?? Date.now();',
+      after:
+        "  await db.execute('DELETE FROM messages');\n  const receivedAt = occurrence?.receivedAt ?? Date.now();",
+    },
+  ];
+}
+
+test('incoming-ingress hostile mutation fixtures match current source', () => {
+  const root = incomingIngressFixture();
+  try {
+    for (const mutation of incomingIngressMutationCases()) {
+      const source = readFileSync(resolve(root, mutation.path), 'utf8');
+      if (mutation.transform) {
+        assert.notEqual(
+          mutation.transform(source),
+          source,
+          `${mutation.label}: transform changed no text`,
+        );
+      } else {
+        assert.ok(source.includes(mutation.before), `${mutation.label}: mutation source not found`);
+        assert.notEqual(
+          source.replace(mutation.before, mutation.after),
+          source,
+          `${mutation.label}: replacement changed no text`,
+        );
+      }
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 fullOnlyTest(
   'incoming-ingress certificate fails closed on admission, lock, snapshot, and escape mutations',
   () => {
     const root = incomingIngressFixture();
-    const cases = [
-      {
-        label: 'unadopted supplied-context tracking',
-        path: 'src/services/realtimeControl.ts',
-        before: '? await runTrackedRealtimeWork(context,',
-        after: '? runTrackedRealtimeWork(context,',
-      },
-      {
-        label: 'original context forwarded instead of adopted lease',
-        path: 'src/services/realtimeControl.ts',
-        before: 'source,\n          lease,\n          capturedOccurrence,',
-        after: 'source,\n          context,\n          capturedOccurrence,',
-      },
-      {
-        label: 'locked intake persistence bypass',
-        path: 'src/services/realtimeControl.ts',
-        before: 'canPersist: canPersistRealtimeEvent,',
-        after: 'canPersist: () => true,',
-      },
-      {
-        label: 'DEV proof gate bypass',
-        path: 'src/services/realtimeControl.ts',
-        before: 'const allowed = context.isCurrent() && isDevServer() && !realtimeIntakeLocked();',
-        after: 'const allowed = true;',
-      },
-      {
-        label: 'runtime router retained across account generation',
-        path: 'src/services/realtimeControl.ts',
-        before: 'sharedRouterInstance = null;',
-        after: 'void sharedRouterInstance;',
-      },
-      {
-        label: 'no-op realtime sink composition',
-        path: 'src/services/realtimeControl.ts',
-        transform: (source) => {
-          const start = source.indexOf('function realtimeSink(db: AppDatabase): EventSink {');
-          const marker = '\n}\n\n// One normalizer/sink chain per account generation.';
-          const end = source.indexOf(marker, start);
-          assert.notEqual(start, -1);
-          assert.notEqual(end, -1);
-          return `${source.slice(0, start)}function realtimeSink(db: AppDatabase): EventSink {\n  void db;\n  return { handle: async () => undefined };\n}${source.slice(end + 2)}`;
-        },
-      },
-      {
-        label: 'decoy digest backend injected into intake',
-        path: 'src/services/realtimeControl.ts',
-        before: 'new IncomingEventDrain(db, router, expoDigestBackend, {',
-        after: 'new IncomingEventDrain(db, router, { sha256: async (input) => input }, {',
-      },
-      {
-        label: 'generation invalidation subscription disabled',
-        path: 'src/services/realtime/deliveryCoordinator.ts',
-        before: 'if (!acceptingDeliveries || generation !== accountGeneration) {',
-        after: 'if (true) {',
-      },
-      {
-        label: 'captured account lease never expires',
-        path: 'src/services/realtime/deliveryCoordinator.ts',
-        before:
-          'isCurrent: () => acceptedAtCapture && acceptingDeliveries && generation === accountGeneration,',
-        after: 'isCurrent: () => true,',
-      },
-      {
-        label: 'captured account lease shadows generation state',
-        path: 'src/services/realtime/deliveryCoordinator.ts',
-        before: 'export function captureRealtimeDeliveryLease(): RealtimeDeliveryLease {',
-        after:
-          'export function captureRealtimeDeliveryLease(accountGeneration = 0, acceptingDeliveries = true): RealtimeDeliveryLease {',
-      },
-      {
-        label: 'pause leaves the retired account generation current',
-        path: 'src/services/realtime/deliveryCoordinator.ts',
-        before: '    accountGeneration += 1;',
-        after: '    void accountGeneration;',
-      },
-      {
-        label: 'resume resurrects the original account generation',
-        path: 'src/services/realtime/deliveryCoordinator.ts',
-        before: 'export function resumeRealtimeDeliveries(): void {\n  acceptingDeliveries = true;',
-        after:
-          'export function resumeRealtimeDeliveries(): void {\n  accountGeneration = 0;\n  acceptingDeliveries = true;',
-      },
-      {
-        label: 'generation listener map discards subscriptions',
-        path: 'src/services/realtime/deliveryCoordinator.ts',
-        before: 'const generationInvalidationListeners = new Map<number, Set<() => void>>();',
-        after:
-          'class DroppingListenerMap extends Map<number, Set<() => void>> { override set(): this { return this; } }\nconst generationInvalidationListeners = new DroppingListenerMap();',
-      },
-      {
-        label: 'generation listener map is overwritten after initialization',
-        path: 'src/services/realtime/deliveryCoordinator.ts',
-        before: 'const generationInvalidationListeners = new Map<number, Set<() => void>>();',
-        after:
-          'const generationInvalidationListeners = new Map<number, Set<() => void>>();\ngenerationInvalidationListeners.set = () => generationInvalidationListeners;',
-      },
-      {
-        label: 'admitted-delivery set discards registrations',
-        path: 'src/services/realtime/deliveryCoordinator.ts',
-        before: 'const admittedDeliveries = new Set<Promise<void>>();',
-        after:
-          'class DroppingDeliverySet extends Set<Promise<void>> { override add(): this { return this; } }\nconst admittedDeliveries = new DroppingDeliverySet();',
-      },
-      {
-        label: 'tracked work skips teardown registration',
-        path: 'src/services/realtime/deliveryCoordinator.ts',
-        before: '  admittedDeliveries.add(drainSlot);',
-        after: '  void admittedDeliveries;',
-      },
-      {
-        label: 'tracked failure never settles its teardown slot',
-        path: 'src/services/realtime/deliveryCoordinator.ts',
-        before: '  void result.then(finishTracking, finishTracking);',
-        after: '  void result.then(finishTracking);',
-      },
-      {
-        label: 'pause does not await admitted deliveries',
-        path: 'src/services/realtime/deliveryCoordinator.ts',
-        before: '  await Promise.all([...admittedDeliveries]);',
-        after: '  await Promise.all([]);',
-      },
-      {
-        label: 'optional socket durable handler',
-        path: 'src/services/realtime/socketService.ts',
-        before: 'handler: RawRealtimeEventHandler,',
-        after: 'handler?: RawRealtimeEventHandler,',
-      },
-      {
-        label: 'socket account lease accessor always reports current',
-        path: 'src/services/realtime/socketService.ts',
-        before: 'private accountLease: RealtimeDeliveryLease | null = null;',
-        after:
-          'private get accountLease(): RealtimeDeliveryLease | null { return { generation: 0, isCurrent: () => true }; }\n  private set accountLease(_value: RealtimeDeliveryLease | null) {}',
-      },
-      {
-        label: 'socket lifecycle callback decoy',
-        path: 'src/services/realtime/socketService.ts',
-        before: 'this.socket.on(event, (data: unknown) => {',
-        after: 'if (false) this.socket.on(event, (data: unknown) => {',
-      },
-      {
-        label: 'socket server event loop disabled',
-        path: 'src/services/realtime/socketService.ts',
-        before: 'for (const event of SERVER_EVENTS) {',
-        after: 'for (const event of []) {',
-      },
-      {
-        label: 'socket escalation keeps retired lifecycle current',
-        path: 'src/services/realtime/socketService.ts',
-        before:
-          '      this.lifecycleGeneration += 1;\n      lifecycleGeneration = this.lifecycleGeneration;',
-        after:
-          '      void this.lifecycleGeneration;\n      lifecycleGeneration = this.lifecycleGeneration;',
-      },
-      {
-        label: 'socket escalation silently changes the approved origin',
-        path: 'src/services/realtime/socketService.ts',
-        before: '      this.lifecycleGeneration += 1;',
-        after:
-          "      this.origin = 'https://unapproved.example';\n      this.lifecycleGeneration += 1;",
-      },
-      {
-        label: 'socket fallback nonce uses a shadowed Date',
-        path: 'src/services/realtime/socketService.ts',
-        before: 'let processSocketOpenSequence = 0;',
-        after: 'const Date = { now: () => 0 };\nlet processSocketOpenSequence = 0;',
-      },
-      {
-        label: 'socket fallback nonce uses a shadowed Math',
-        path: 'src/services/realtime/socketService.ts',
-        before: 'let processSocketOpenSequence = 0;',
-        after:
-          'const Math = { random: () => 0, floor: globalThis.Math.floor, max: globalThis.Math.max, min: globalThis.Math.min, round: globalThis.Math.round };\nlet processSocketOpenSequence = 0;',
-      },
-      {
-        label: 'dispatcher re-reads caller payload after FIFO wait',
-        path: 'src/services/realtime/incomingEventDispatcher.ts',
-        before: 'return await this.persist(\n          event,',
-        after: 'return await this.persist(\n          snapshotIncomingEvent(eventName, rawData),',
-      },
-      {
-        label: 'dispatcher rewrites the snapshot after FIFO wait',
-        path: 'src/services/realtime/incomingEventDispatcher.ts',
-        before: '      await previous;\n      try {',
-        after:
-          '      await previous;\n      event = snapshotIncomingEvent(eventName, rawData);\n      try {',
-      },
-      {
-        label: 'dispatcher skips its FIFO predecessor',
-        path: 'src/services/realtime/incomingEventDispatcher.ts',
-        before: '      await previous;\n      try {',
-        after: '      void previous;\n      try {',
-      },
-      {
-        label: 'dispatcher releases its FIFO slot before admission',
-        path: 'src/services/realtime/incomingEventDispatcher.ts',
-        before: '    const admission = (async () => {',
-        after: '    release();\n    const admission = (async () => {',
-      },
-      {
-        label: 'dispatcher FIFO resolver is not retained',
-        path: 'src/services/realtime/incomingEventDispatcher.ts',
-        before: '      release = resolve;',
-        after: '      void resolve;',
-      },
-      {
-        label: 'dispatcher FIFO slot is not released in finally',
-        path: 'src/services/realtime/incomingEventDispatcher.ts',
-        before: '        release();',
-        after: '        void release;',
-      },
-      {
-        label: 'dispatcher FIFO uses a shadowed Promise constructor',
-        path: 'src/services/realtime/incomingEventDispatcher.ts',
-        before: 'export class DurableRealtimeDispatcher {',
-        after: 'const Promise = globalThis.Promise;\nexport class DurableRealtimeDispatcher {',
-      },
-      {
-        label: 'dispatcher snapshot helper becomes asynchronous',
-        path: 'src/core/realtime/incomingEventCodec.ts',
-        before: 'export function snapshotIncomingEvent(',
-        after: 'export async function snapshotIncomingEvent(',
-      },
-      {
-        label: 'dispatcher persistence guard always permits admission',
-        path: 'src/services/realtime/incomingEventDispatcher.ts',
-        before:
-          '      const allowed =\n        !this.stopped &&\n        (!context || context.isCurrent()) &&\n        (!this.options.canPersist || this.options.canPersist(event));',
-        after: '      const allowed = true;',
-      },
-      {
-        label: 'normal enqueue receives a different guard',
-        path: 'src/services/realtime/incomingEventDispatcher.ts',
-        before: 'result = await enqueueIncomingEvent(this.db, encoded.envelope, guard, this.now);',
-        after:
-          'result = await enqueueIncomingEvent(this.db, encoded.envelope, () => true, this.now);',
-      },
-      {
-        label: 'atomic DEV enqueue receives a different guard',
-        path: 'src/services/realtime/incomingEventDispatcher.ts',
-        before:
-          '          { now: receivedAt, clock: this.now, leaseToken: devLeaseToken },\n          guard,\n        );',
-        after:
-          '          { now: receivedAt, clock: this.now, leaseToken: devLeaseToken },\n          () => true,\n        );',
-      },
-      {
-        label: 'public capture returns caller-owned payload data',
-        path: 'src/core/realtime/incomingEventCodec.ts',
-        before:
-          'return { eventName: canonical.eventName, rawData: JSON.parse(canonical.payload) };',
-        after: 'return { eventName: canonical.eventName, rawData };',
-      },
-      {
-        label: 'dispatcher snapshot reuses the caller-owned payload',
-        path: 'src/core/realtime/incomingEventCodec.ts',
-        before:
-          'return captured ? normalizeRealtimeEvent(captured.eventName, captured.rawData) : null;',
-        after: 'return captured ? normalizeRealtimeEvent(eventName, rawData) : null;',
-      },
-      {
-        label: 'public capture uses a shadowed JSON parser',
-        path: 'src/core/realtime/incomingEventCodec.ts',
-        before: 'export function captureIncomingEvent(',
-        after:
-          'const JSON = { parse: (value: string): unknown => value };\nexport function captureIncomingEvent(',
-      },
-      {
-        label: 'dispatcher retirement leaves its drain running',
-        path: 'src/services/realtime/incomingEventDispatcher.ts',
-        before: '  dispose(): void {\n    this.stopped = true;\n    this.drain.dispose();\n  }',
-        after: '  dispose(): void {}',
-      },
-      {
-        label: 'runtime reset skips dispatcher retirement',
-        path: 'src/services/realtimeControl.ts',
-        before: '  current.dispatcher.dispose();',
-        after: '  void current.dispatcher;',
-      },
-      {
-        label: 'drain retirement leaves its scheduled wake running',
-        path: 'src/services/realtime/incomingEventDrain.ts',
-        before: '  dispose(): void {\n    this.stopped = true;\n    this.cancelWakeTimer();\n  }',
-        after: '  dispose(): void {}',
-      },
-      {
-        label: 'drain wake cancellation is disabled',
-        path: 'src/services/realtime/incomingEventDrain.ts',
-        before:
-          '  private cancelWakeTimer(): void {\n    if (this.wakeTimer == null) return;\n    (this.options.cancelWake ?? clearTimeout)(this.wakeTimer);\n    this.wakeTimer = null;\n  }',
-        after: '  private cancelWakeTimer(): void {}',
-      },
-      {
-        label: 'drain wake cancellation uses a shadowed clearTimeout',
-        path: 'src/services/realtime/incomingEventDrain.ts',
-        before: 'export const INCOMING_EVENT_DELIVERY_TIMEOUT_MS = 90_000;',
-        after:
-          'const clearTimeout = (_handle: ReturnType<typeof setTimeout>): void => {};\nexport const INCOMING_EVENT_DELIVERY_TIMEOUT_MS = 90_000;',
-      },
-      {
-        label: 'FCM defaults unlocked',
-        path: 'src/services/notifications/fcmMessaging.ts',
-        before: 'let locked = true;',
-        after: 'let locked = false;',
-      },
-      {
-        label: 'FCM V2 migration state read is bypassed',
-        path: 'src/services/notifications/fcmMessaging.ts',
-        before: '    encryptionState = await readFcmDeviceEncryptionState(vault);',
-        after: "    encryptionState = { kind: 'absent' };",
-      },
-      {
-        label: 'FCM V2 state read loses its post-await lease check',
-        path: 'src/services/notifications/fcmMessaging.ts',
-        before:
-          '  if (!lease.isCurrent()) return;\n\n  // A present record means this installation began V2 migration.',
-        after: '  void lease;\n\n  // A present record means this installation began V2 migration.',
-      },
-      {
-        label: 'FCM V2 revoked state is treated as usable',
-        path: 'src/services/notifications/fcmMessaging.ts',
-        before: "encryptionState.kind !== 'valid' || encryptionState.state.status === 'revoked'",
-        after: "encryptionState.kind !== 'valid'",
-      },
-      {
-        label: 'FCM V2 origin binding is bypassed',
-        path: 'src/services/notifications/fcmMessaging.ts',
-        before: '    if (!currentOrigin || encryptionState.state.origin !== currentOrigin) {',
-        after: '    if (false) {',
-      },
-      {
-        label: 'FCM V2 envelope gate allows a downgrade',
-        path: 'src/services/notifications/fcmMessaging.ts',
-        before:
-          "    if (!encrypted || encryptionType !== FCM_V2_ENCRYPTION_TYPE || typeof body !== 'string') {",
-        after: "    if (typeof body !== 'string') {",
-      },
-      {
-        label: 'FCM V2 decrypt omits event-name authenticated data',
-        path: 'src/services/notifications/fcmMessaging.ts',
-        before:
-          '      plaintext = await decryptFcmV2Payload(body, encryptionState.state.key, eventName);',
-        after:
-          "      plaintext = await decryptFcmV2Payload(body, encryptionState.state.key, 'constant-event');",
-      },
-      {
-        label: 'FCM V2 decrypt loses its post-await lease check',
-        path: 'src/services/notifications/fcmMessaging.ts',
-        before:
-          '    if (!lease.isCurrent()) return;\n    // V2 authenticates only `eventName` in the current server foundation.',
-        after:
-          '    void lease;\n    // V2 authenticates only `eventName` in the current server foundation.',
-      },
-      {
-        label: 'FCM V2 dispatch uses unauthenticated outer data',
-        path: 'src/services/notifications/fcmMessaging.ts',
-        before:
-          "    await dispatchRealtimeEvent(eventName, plaintext, 'fcm', lease, delivery.occurrence);",
-        after:
-          "    await dispatchRealtimeEvent(eventName, body, 'fcm', lease, delivery.occurrence);",
-      },
-      {
-        label: 'lease-token crypto call resolves to a constant decoy',
-        path: 'src/services/realtimeControl.ts',
-        transform: (source) =>
-          source
-            .replace(
-              "import * as Crypto from 'expo-crypto';",
-              "import * as RealCrypto from 'expo-crypto';\nconst Crypto = { randomUUID: () => 'constant-token' };",
-            )
-            .replace(
-              'const fallbackOccurrenceNamespace = Crypto.randomUUID();',
-              'const fallbackOccurrenceNamespace = RealCrypto.randomUUID();',
-            ),
-      },
-      {
-        label: 'digest crypto call resolves to an identity decoy',
-        path: 'src/services/realtime/expoDigestBackend.ts',
-        transform: (source) =>
-          source.replace(
-            "import * as Crypto from 'expo-crypto';",
-            "import * as RealCrypto from 'expo-crypto';\nvoid RealCrypto;\nconst Crypto = { digest: async (_algorithm: unknown, bytes: Uint8Array) => bytes, CryptoDigestAlgorithm: { SHA256: 'SHA-256' } };",
-          ),
-      },
-      {
-        label: 'FCM later callback bypasses the admission tail',
-        path: 'src/services/notifications/fcmMessaging.ts',
-        before: 'const previous = fcmAdmissionTail;',
-        after: 'const previous = Promise.resolve();',
-      },
-      {
-        label: 'FCM admission tail uses a shadowed never-settling Promise',
-        path: 'src/services/notifications/fcmMessaging.ts',
-        before: 'let fcmAdmissionTail: Promise<void> = Promise.resolve();',
-        after:
-          'const Promise = { resolve: (): globalThis.Promise<void> => new globalThis.Promise<void>(() => undefined) };\nlet fcmAdmissionTail: Promise<void> = Promise.resolve();',
-      },
-      {
-        label: 'FCM receipt clock and process nonce use a shadowed Date',
-        path: 'src/services/notifications/fcmMessaging.ts',
-        before: 'const fcmProcessOccurrenceNonce =',
-        after: 'const Date = { now: () => 0 };\nconst fcmProcessOccurrenceNonce =',
-      },
-      {
-        label: 'FCM process nonce uses a shadowed Math',
-        path: 'src/services/notifications/fcmMessaging.ts',
-        before: 'const fcmProcessOccurrenceNonce =',
-        after: 'const Math = { random: () => 0 };\nconst fcmProcessOccurrenceNonce =',
-      },
-      {
-        label: 'FCM capture yields before reserving FIFO position',
-        path: 'src/services/notifications/fcmMessaging.ts',
-        before: 'const delivery = captureFcmDelivery(msg);',
-        after: 'const delivery = await Promise.resolve(captureFcmDelivery(msg));',
-      },
-      {
-        label: 'FCM tracking invocation evaluates a yielding extra argument',
-        path: 'src/services/notifications/fcmMessaging.ts',
-        before: '    const tracked = runTrackedRealtimeDelivery(async (lease) => {',
-        after: '    const tracked = runTrackedRealtimeDelivery(async (lease) => {',
-        transform: (source) =>
-          source.replace(
-            '      await deliverRespectingLock(delivery, source, lease);\n    });',
-            '      await deliverRespectingLock(delivery, source, lease);\n    }, await Promise.resolve());',
-          ),
-      },
-      {
-        label: 'FCM failure poisons the admission tail',
-        path: 'src/services/notifications/fcmMessaging.ts',
-        before:
-          '    fcmAdmissionTail = tracked.then(\n      () => undefined,\n      () => undefined,\n    );',
-        after: '    fcmAdmissionTail = tracked.then(() => undefined);',
-      },
-      {
-        label: 'FCM queued callback skips its post-wait lease check',
-        path: 'src/services/notifications/fcmMessaging.ts',
-        before: '      if (!lease.isCurrent()) return;\n      await deliverRespectingLock',
-        after: '      await Promise.resolve();\n      await deliverRespectingLock',
-      },
-      {
-        label: 'detached headless handler',
-        path: 'src/services/notifications/fcmMessaging.ts',
-        before: "await handleIncomingFcm(msg, 'background');",
-        after: "void handleIncomingFcm(msg, 'background');",
-      },
-      {
-        label: 'conditional background registration',
-        path: 'src/services/notifications/registerFcmBackgroundHandler.ts',
-        before: 'setBackgroundMessageHandler(getMessaging(), handleBackgroundFcm);',
-        after: 'if (false) setBackgroundMessageHandler(getMessaging(), handleBackgroundFcm);',
-      },
-      {
-        label: 'second background registration overrides the durable handler',
-        path: 'src/services/notifications/registerFcmBackgroundHandler.ts',
-        transform: (source) =>
-          `${source}\nsetBackgroundMessageHandler(getMessaging(), async () => undefined);\n`,
-      },
-      {
-        label: 'killed-app entry import removed',
-        path: 'index.js',
-        before: "import './src/services/notifications/registerFcmBackgroundHandler';",
-        after: "import './src/services/notifications/fcmPayload';",
-      },
-      {
-        label: 'bundle entry no longer points at index',
-        path: 'package.json',
-        before: '"main": "index.js"',
-        after: '"main": "expo-router/entry"',
-      },
-      {
-        label: 'DEV helper fails open in release',
-        path: 'src/utils/isDev.ts',
-        before: "  if (typeof __DEV__ === 'undefined' || !__DEV__) return false;",
-        after: '  return true;',
-      },
-      {
-        label: 'lock helper always reports unlocked',
-        path: 'src/services/notifications/lockGate.ts',
-        transform: (source) =>
-          source.replace(
-            /export function effectivelyLocked\([\s\S]*?\n}\n$/,
-            'export function effectivelyLocked(lock: any, appLockEnabled: boolean, now = Date.now()): boolean {\n  void lock; void appLockEnabled; void now;\n  return false;\n}\n',
-          ),
-      },
-      {
-        label: 'FCM session helper always reports active',
-        path: 'src/services/notifications/fcmSessionGate.ts',
-        transform: (source) =>
-          source.replace(
-            /export async function readFcmSessionState\([\s\S]*?\n}\n$/,
-            "export async function readFcmSessionState(vault: any, revocationMarker: any): Promise<FcmSessionState> {\n  void vault; void revocationMarker;\n  return 'active';\n}\n",
-          ),
-      },
-      {
-        label: 'active session marker aliases the writing state',
-        path: 'src/core/secure/vault.ts',
-        before: "  active: 'active',",
-        after: "  active: 'writing',",
-      },
-      {
-        label: 'DEV seed owner guard removed',
-        path: 'src/features/conversations/devSeed.ts',
-        before:
-          'export async function injectMessage(accountLease: RealtimeDeliveryLease): Promise<void> {\n  if (!isDevServer()) return;',
-        after:
-          'export async function injectMessage(accountLease: RealtimeDeliveryLease): Promise<void> {',
-      },
-      {
-        label: 'chat DEV callback loses its release gate',
-        path: 'app/(app)/chat/[guid].tsx',
-        before: 'if (!isDevServer() || !accountLease.isCurrent()) return;',
-        after: 'if (!accountLease.isCurrent()) return;',
-      },
-      {
-        label: 'rotation proposal bypasses the canonical snapshot',
-        path: 'src/services/realtimeControl.ts',
-        before: 'const normalized = snapshotIncomingEvent(captured.eventName, captured.rawData);',
-        after: 'const normalized = snapshotIncomingEvent(eventName, rawData);',
-      },
-      {
-        label: 'rotation approval handoff is detached',
-        path: 'src/services/realtimeControl.ts',
-        before: '    await applyNewServerUrl(normalized.url, context);',
-        after: '    void applyNewServerUrl(normalized.url, context);',
-      },
-      {
-        label: 'rotation event is allowed into durable persistence',
-        path: 'src/services/realtimeControl.ts',
-        before: "  if (event.type !== 'new-server') return true;",
-        after: '  return true;',
-      },
-      {
-        label: 'escaped public dispatcher reference',
-        path: 'src/services/realtimeControl.ts',
-        transform: (source) =>
-          `${source}\nexport const escapedIncomingDispatch = dispatchRealtimeEvent;\n`,
-      },
-      {
-        label: 'raw writer added under protected admission owner',
-        path: 'src/services/realtimeControl.ts',
-        before: '  const receivedAt = occurrence?.receivedAt ?? Date.now();',
-        after:
-          "  await db.execute('DELETE FROM messages');\n  const receivedAt = occurrence?.receivedAt ?? Date.now();",
-      },
-    ];
+    const cases = incomingIngressMutationCases();
 
     try {
       const baseline = scanDbWrites({ root });
       assert.equal(
         baseline.filter((finding) => finding.detectedContext === 'incoming-ingress-delegation')
           .length,
-        23,
+        29,
         'incoming-ingress fixture must exercise the live positive certificate',
       );
       for (const mutation of cases) {
@@ -6590,11 +7227,16 @@ fullOnlyTest(
         const original = readFileSync(file, 'utf8');
         try {
           if (mutation.transform) {
-            writeFileSync(file, mutation.transform(original));
+            const transformed = mutation.transform(original);
+            assert.notEqual(transformed, original, `${mutation.label}: transform changed no text`);
+            writeFileSync(file, transformed);
           } else {
             replaceFixtureSource(root, mutation.path, mutation.before, mutation.after);
           }
-          const findings = scanDbWrites({ root });
+          let findings;
+          assert.doesNotThrow(() => {
+            findings = scanDbWrites({ root });
+          }, mutation.label);
           assert.equal(
             findings.filter((finding) => finding.detectedContext === 'incoming-ingress-delegation')
               .length,

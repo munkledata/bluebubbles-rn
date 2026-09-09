@@ -69,6 +69,24 @@ function seedChat(raw: Database.Database, guid: string): void {
   raw.prepare('INSERT INTO chats(guid) VALUES (?)').run(guid);
 }
 
+function seedReactionTarget(raw: Database.Database, chatGuid: string): void {
+  const chat = raw.prepare('SELECT id FROM chats WHERE guid = ?').get(chatGuid) as { id: number };
+  raw
+    .prepare(
+      `INSERT INTO messages(guid, chat_id, text, date_created, message_part_topology)
+       VALUES ('target-message', ?, 'target', 1, ?)`,
+    )
+    .run(
+      chat.id,
+      JSON.stringify({
+        complete: true,
+        originalPartIndexes: [0],
+        currentParts: [{ index: 0, kind: 'text' }],
+        attachmentOwnership: [],
+      }),
+    );
+}
+
 function outgoingAtNetworkStart(raw: Database.Database, wireChatGuid: string): NetworkSnapshot {
   const row = raw
     .prepare(
@@ -144,12 +162,16 @@ function startSend(
   chatGuid: string,
   onNetwork: (snapshot: NetworkSnapshot) => Promise<void> | void,
 ): Promise<{ tempGuid: string }> {
-  const http = {
+  let http!: HttpClient;
+  http = {
     post: async (_path: string, _schema: unknown, options?: { json?: unknown }) => {
       const body = (options?.json ?? {}) as { chatGuid?: string };
       await onNetwork(outgoingAtNetworkStart(raw, body.chatGuid ?? 'missing'));
       return { guid: `real-${kind}`, viaPrivateApi: true };
     },
+    pinTransport: () => http,
+    isTransportCurrent: () => true,
+    assertTransportCurrent: () => undefined,
   } as unknown as HttpClient;
 
   if (kind === 'text') {
@@ -167,7 +189,7 @@ function startSend(
     return sendReactionMessage(
       db,
       http,
-      { chatGuid, targetGuid: 'target-message', reaction: 'love' },
+      { chatGuid, targetGuid: 'target-message', reaction: 'love', partIndex: 0 },
       1_000,
     );
   }
@@ -187,6 +209,7 @@ describe('outgoing chat identity is resolved by the optimistic insert owner', ()
       const targetGuid = 'target-chat';
       seedChat(raw, targetGuid);
       seedChat(raw, 'decoy-chat');
+      if (kind === 'reaction') seedReactionTarget(raw, targetGuid);
       const lookup = watchChatResolution(db, raw);
       const neighbour = await holdDeletedChatUntilRollback(db, raw, targetGuid);
       const network: NetworkSnapshot[] = [];
@@ -280,8 +303,12 @@ describe('outgoing chat identity is resolved by the optimistic insert owner', ()
           }),
         ).outcome;
         expect(result.kind).toBe('rejected');
-        if (result.kind === 'rejected') expect(String(result.error)).toContain('unknown chat');
-        expect(lookup.inTransactions).toEqual([true]);
+        if (result.kind === 'rejected') {
+          expect(String(result.error)).toContain(
+            kind === 'reaction' ? 'selected message part' : 'unknown chat',
+          );
+        }
+        expect(lookup.inTransactions).toEqual(kind === 'reaction' ? [] : [true]);
         expect(network).toEqual([]);
         expect(count(raw, 'messages')).toBe(0);
         expect(count(raw, 'attachments')).toBe(0);
@@ -360,19 +387,24 @@ describe('outgoing chat identity is resolved by the optimistic insert owner', ()
     expect(await claimScheduled(db, scheduledId)).toBe(true);
     const lookup = watchChatResolution(db, raw, scheduledId);
     const network: NetworkSnapshot[] = [];
+    let scheduledHttp!: HttpClient;
+    scheduledHttp = {
+      post: async (_path: string, _schema: unknown, options?: { json?: unknown }) => {
+        const body = (options?.json ?? {}) as { chatGuid?: string };
+        network.push(outgoingAtNetworkStart(raw, body.chatGuid ?? 'missing'));
+        expect(
+          raw.prepare('SELECT status FROM scheduled_messages WHERE id = ?').get(scheduledId),
+        ).toEqual({ status: 'sent' });
+        return { guid: 'real-scheduled', viaPrivateApi: true };
+      },
+      pinTransport: () => scheduledHttp,
+      isTransportCurrent: () => true,
+      assertTransportCurrent: () => undefined,
+    } as unknown as HttpClient;
     try {
       await sendTextMessage(
         db,
-        {
-          post: async (_path: string, _schema: unknown, options?: { json?: unknown }) => {
-            const body = (options?.json ?? {}) as { chatGuid?: string };
-            network.push(outgoingAtNetworkStart(raw, body.chatGuid ?? 'missing'));
-            expect(
-              raw.prepare('SELECT status FROM scheduled_messages WHERE id = ?').get(scheduledId),
-            ).toEqual({ status: 'sent' });
-            return { guid: 'real-scheduled', viaPrivateApi: true };
-          },
-        } as unknown as HttpClient,
+        scheduledHttp,
         { chatGuid: 'scheduled-chat', text: 'scheduled identity' },
         2_000,
         undefined,

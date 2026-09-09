@@ -9,48 +9,61 @@ import {
   Share,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { serverApi } from '@core/api';
 import { isUnimplementedEndpoint } from '@core/api/errors';
+import { isScopedDeviceCredential } from '@core/secure';
 import { buildSetupQr } from '@features/setup/qr';
-import { cancelFullRepair, http, startFullRepair, startSync } from '@/services';
+import {
+  beginScopedCredentialUpgrade,
+  cancelFullRepair,
+  discardScopedCredentialUpgradeCandidate,
+  http,
+  inspectScopedCredentialUpgradeStatus,
+  startFullRepair,
+  startSync,
+} from '@/services';
 import {
   captureRealtimeDeliveryLease,
-  runTrackedRealtimeWork,
   subscribeRealtimeGenerationInvalidation,
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
-import { useSessionStore } from '@state/sessionStore';
+import {
+  captureSessionTransportLease,
+  type SessionTransportLease,
+  useSessionStore,
+} from '@state/sessionStore';
 import { useSyncStore, type SyncRepairStatus } from '@state/syncStore';
 import { InfoRow, PairingQr, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
 
 /**
- * Read-only queries do not hold Disconnect open. Their generation-specific cache key isolates the
- * eventual TanStack Query commit; this guard also turns a late old-account result/error into null
- * so the retired screen cannot render it or copy it into app-wide state.
+ * Read-only queries do not hold Disconnect open. Their account-generation and transport-revision
+ * cache keys isolate the eventual TanStack Query commit; this guard also turns a late result/error
+ * from a retired account or server URL into null.
  */
-async function readForAccount<T>(
-  lease: RealtimeDeliveryLease,
-  read: () => Promise<T>,
+async function readForTransport<T>(
+  accountLease: RealtimeDeliveryLease,
+  expectedTransportRevision: number,
+  read: (transportLease: SessionTransportLease) => Promise<T>,
 ): Promise<T | null> {
-  if (!lease.isCurrent()) return null;
+  if (!accountLease.isCurrent()) return null;
+  const transportLease = captureSessionTransportLease();
+  if (transportLease.revision !== expectedTransportRevision || !transportLease.isCurrent()) {
+    return null;
+  }
   try {
-    const value = await read();
-    return lease.isCurrent() ? value : null;
+    const value = await read(transportLease);
+    return accountLease.isCurrent() && transportLease.isCurrent() ? value : null;
   } catch (error) {
-    if (!lease.isCurrent()) return null;
+    if (!accountLease.isCurrent() || !transportLease.isCurrent()) return null;
     throw error;
   }
 }
 
 type ModalAnimationType = 'none' | 'slide';
-
-interface LogsModalState {
-  text: string;
-  animationType: ModalAnimationType;
-}
 
 function useReduceMotionPreferenceRef(): React.RefObject<boolean | null> {
   const reduceMotion = useRef<boolean | null>(null);
@@ -92,19 +105,20 @@ function repairStatusCopy(status: SyncRepairStatus, phase: string | null): strin
   if (status === 'running') return phase ?? 'Running';
   if (status === 'cancelling') return 'Stopping after current request';
   if (status === 'cancelled') return 'Stopped — safe to restart';
-  if (status === 'done') return 'Complete';
+  if (status === 'done') return phase ?? 'Complete';
   return 'Failed — safe to restart';
 }
 
-/** F-9: server administration — status, restarts, update check, manual sync, logs, stats. */
+/** Server status, local-cache maintenance, pairing, sync, and read-only statistics. */
 export default function ServerManagementScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
   const reduceMotion = useReduceMotionPreferenceRef();
   const serverInfo = useSessionStore((s) => s.serverInfo);
-  const setServerInfo = useSessionStore((s) => s.setServerInfo);
+  const setServerInfoForTransport = useSessionStore((s) => s.setServerInfoForTransport);
   const origin = useSessionStore((s) => s.origin);
   const password = useSessionStore((s) => s.password);
+  const transportRevision = useSessionStore((s) => s.transportRevision);
   const syncStatus = useSyncStore((s) => s.status);
   // Select each primitive separately — an object-returning selector `(s) => ({...})` allocates a
   // fresh object every render, which useSyncExternalStore reads as a changed snapshot → infinite
@@ -121,8 +135,13 @@ export default function ServerManagementScreen(): React.JSX.Element {
   const [accountRetired, setAccountRetired] = useState(() => !accountLease.isCurrent());
 
   const [busy, setBusy] = useState<string | null>(null); // label of the in-flight action
-  const [logsModal, setLogsModal] = useState<LogsModalState | null>(null);
   const [qrModal, setQrModal] = useState<ModalAnimationType | null>(null);
+  const [credentialModal, setCredentialModal] = useState<ModalAnimationType | null>(null);
+  const [credentialText, setCredentialText] = useState('');
+  const [credentialIssue, setCredentialIssue] = useState<string | null>(null);
+  const [credentialSaved, setCredentialSaved] = useState(false);
+  const [credentialDiscardable, setCredentialDiscardable] = useState(false);
+  const [credentialWorking, setCredentialWorking] = useState(false);
 
   // The lease revokes callbacks synchronously, but currentness is not reactive. Force an old
   // mounted route to unmount credential/log subtrees as soon as its account generation retires.
@@ -130,22 +149,56 @@ export default function ServerManagementScreen(): React.JSX.Element {
     () =>
       subscribeRealtimeGenerationInvalidation(accountLease.generation, () => {
         setAccountRetired(true);
-        setLogsModal(null);
         setQrModal(null);
+        setCredentialModal(null);
+        setCredentialText('');
+        setCredentialIssue(null);
+        setCredentialSaved(false);
+        setCredentialDiscardable(false);
+        setCredentialWorking(false);
       }),
     [accountLease],
   );
 
   const accountCurrent = !accountRetired && accountLease.isCurrent();
+  const legacyCredentialSession =
+    accountCurrent && !!password && !isScopedDeviceCredential(password);
+  const scopedCredentialSession =
+    accountCurrent && !!password && isScopedDeviceCredential(password);
 
-  // The pairing payload embeds the PASSWORD — build it in memory only, never log it,
-  // and only hand it to the reveal-gated PairingQr inside the modal.
+  // The journal, rather than component memory, owns retry visibility. This makes a candidate
+  // created before process death immediately visible and discardable without pasting it again.
+  useEffect(() => {
+    let current = true;
+    if (!legacyCredentialSession) {
+      return () => {
+        current = false;
+      };
+    }
+    void inspectScopedCredentialUpgradeStatus().then((status) => {
+      if (
+        !current ||
+        !accountLease.isCurrent() ||
+        useSessionStore.getState().transportRevision !== transportRevision
+      ) {
+        return;
+      }
+      setCredentialSaved(status.kind === 'candidate' || status.kind === 'in-progress');
+      setCredentialDiscardable(status.kind === 'candidate');
+    });
+    return () => {
+      current = false;
+    };
+  }, [accountLease, legacyCredentialSession, transportRevision]);
+
+  // A legacy pairing payload embeds the shared password. A scoped credential belongs to this
+  // device alone, so never offer it as a reusable QR or hand it to the QR subtree at all.
   let pairingPayload: string | null = null;
-  if (accountCurrent && origin && password) {
+  if (accountCurrent && origin && password && !isScopedDeviceCredential(password)) {
     try {
       pairingPayload = buildSetupQr(origin, password);
     } catch {
-      pairingPayload = null; // malformed origin — the modal shows the "connect first" copy
+      pairingPayload = null; // A malformed origin leaves the sharing action unavailable.
     }
   }
 
@@ -153,9 +206,9 @@ export default function ServerManagementScreen(): React.JSX.Element {
   // reachability check must not mask a down server by silently retrying, and
   // `staleTime: 0` makes every visit re-probe instead of showing a cached answer.
   const pingQuery = useQuery({
-    queryKey: ['server', 'ping', accountLease.generation],
+    queryKey: ['server', 'ping', accountLease.generation, transportRevision],
     queryFn: ({ signal }) =>
-      readForAccount(accountLease, async () => {
+      readForTransport(accountLease, transportRevision, async () => {
         const t0 = Date.now();
         await serverApi.ping(http, signal);
         return Date.now() - t0;
@@ -172,75 +225,46 @@ export default function ServerManagementScreen(): React.JSX.Element {
         ? false
         : null;
 
-  // Statistics ARE served on the password path (admin-command dispatcher) — loaded on mount.
-  // On total failure we flag an INLINE error in the section (no modal alert); a partial result
-  // (some channels missing on an older server) still shows the numbers it could load.
+  // Statistics use the typed password-authenticated snapshot route, with an older-server fallback.
+  // A total failure is shown inline rather than as a modal interruption.
   const statsQuery = useQuery({
-    queryKey: ['server', 'stats', accountLease.generation],
+    queryKey: ['server', 'stats', accountLease.generation, transportRevision],
     queryFn: ({ signal }) =>
-      readForAccount(accountLease, () => serverApi.serverStatTotals(http, signal)),
+      readForTransport(accountLease, transportRevision, () =>
+        serverApi.serverStatTotals(http, signal, {
+          allowLegacyFallback: !scopedCredentialSession,
+        }),
+      ),
   });
   const totals = accountLease.isCurrent() ? (statsQuery.data ?? null) : null;
   const statsError = accountLease.isCurrent() && statsQuery.isError;
-  // All-channels-404 (no dispatcher, or a reverse proxy blocking /admin/*) is surfaced as
-  // Unimplemented by serverStatTotals — show honest copy instead of blaming the connection.
+  // A typed-route 404 followed by an unavailable legacy fallback is surfaced as unsupported.
   const statsUnsupported = statsError && isUnimplementedEndpoint(statsQuery.error);
 
   // Refresh the cached server info (version / macOS / private-API). On a hydrated boot the
   // `connected` action never ran, so the session store still has serverInfo=null → "Unknown";
   // fetching it here populates the STATUS section (and the app-wide `privateApiEnabled` gate).
   const infoQuery = useQuery({
-    queryKey: ['server', 'info', accountLease.generation],
-    queryFn: ({ signal }) => readForAccount(accountLease, () => serverApi.serverInfo(http, signal)),
+    queryKey: ['server', 'info', accountLease.generation, transportRevision],
+    queryFn: ({ signal }) =>
+      readForTransport(accountLease, transportRevision, async (requestTransport) => {
+        const info = await serverApi.serverInfo(http, signal);
+        return {
+          info,
+          origin: requestTransport.origin,
+          revision: requestTransport.revision,
+        };
+      }),
   });
   const latestServerInfo = infoQuery.data;
   useEffect(() => {
-    if (latestServerInfo && accountLease.isCurrent()) setServerInfo(latestServerInfo);
-  }, [accountLease, latestServerInfo, setServerInfo]);
-
-  // Distinguish "this server doesn't support the action" from a real connection failure so
-  // the copy isn't misleading (the old code blamed every 404 on the connection).
-  const failCopy = (label: string, e: unknown): string =>
-    isUnimplementedEndpoint(e)
-      ? `${label} isn’t supported on this server.`
-      : `Couldn’t ${label.toLowerCase()}. Check your connection.`;
-
-  // Run an admin action with an in-flight guard; reports the outcome.
-  const run = (label: string, fn: () => Promise<unknown>, okMsg: string): void => {
-    if (busy || !accountLease.isCurrent()) return;
-    setBusy(label);
-    void (async () => {
-      try {
-        await runTrackedRealtimeWork(accountLease, async (activeLease) => {
-          if (!activeLease.isCurrent()) return;
-          await fn();
-          if (activeLease.isCurrent()) showDialog('Server', okMsg);
-        });
-      } catch (e) {
-        if (accountLease.isCurrent()) showDialog('Server', failCopy(label, e));
-      } finally {
-        if (accountLease.isCurrent()) setBusy(null);
-      }
-    })();
-  };
-
-  const confirmThen = (
-    label: string,
-    message: string,
-    fn: () => Promise<unknown>,
-    okMsg: string,
-    destructive = false,
-  ): void => {
-    if (!accountLease.isCurrent()) return;
-    showDialog(label, message, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: label,
-        style: destructive ? 'destructive' : 'default',
-        onPress: () => run(label, fn, okMsg),
-      },
-    ]);
-  };
+    if (!latestServerInfo?.origin || !accountLease.isCurrent()) return;
+    setServerInfoForTransport(
+      latestServerInfo.origin,
+      latestServerInfo.revision,
+      latestServerInfo.info,
+    );
+  }, [accountLease, latestServerInfo, setServerInfoForTransport]);
 
   const onLoadStats = (): void => {
     if (busy || !accountLease.isCurrent()) return;
@@ -249,32 +273,6 @@ export default function ServerManagementScreen(): React.JSX.Element {
     void statsQuery.refetch().finally(() => {
       if (accountLease.isCurrent()) setBusy(null);
     });
-  };
-
-  const onViewLogs = (): void => {
-    if (busy || !accountLease.isCurrent()) return;
-    setBusy('View Logs');
-    void (async () => {
-      try {
-        await runTrackedRealtimeWork(accountLease, async (activeLease) => {
-          if (!activeLease.isCurrent()) return;
-          const res = await serverApi.serverLogs(http, 500);
-          if (activeLease.isCurrent()) {
-            const nextModal = {
-              text: res.trim() ? res : 'No recent log lines.',
-              animationType: modalAnimationFor(reduceMotion.current),
-            };
-            setLogsModal((current) => current ?? nextModal);
-          }
-        });
-      } catch (e) {
-        if (accountLease.isCurrent()) {
-          showDialog('Server', failCopy('Fetch logs', e));
-        }
-      } finally {
-        if (accountLease.isCurrent()) setBusy(null);
-      }
-    })();
   };
 
   const onSyncNow = (): void => {
@@ -315,6 +313,149 @@ export default function ServerManagementScreen(): React.JSX.Element {
   const onShareUrl = (): void => {
     if (!origin || !accountLease.isCurrent()) return;
     void Share.share({ message: origin }).catch(() => {});
+  };
+
+  const closeCredentialModal = (): void => {
+    if (credentialWorking) return;
+    setCredentialModal(null);
+    setCredentialText('');
+    setCredentialIssue(null);
+  };
+
+  const onSubmitCredential = async (): Promise<void> => {
+    if (credentialWorking || !accountLease.isCurrent()) return;
+    const candidate = credentialText.trim();
+    if (!isScopedDeviceCredential(candidate)) {
+      setCredentialIssue('That doesn’t look like a complete paired-client credential.');
+      return;
+    }
+
+    // Never retain the bearer in component state once secure adoption has started.
+    setCredentialText('');
+    setCredentialIssue(null);
+    setCredentialSaved(false);
+    setCredentialDiscardable(false);
+    setCredentialWorking(true);
+    try {
+      const outcome = await beginScopedCredentialUpgrade(candidate);
+      if (!accountLease.isCurrent()) return;
+      if (outcome.kind === 'adopted' || outcome.kind === 'adopted-cleanup-pending') {
+        setCredentialModal(null);
+        showDialog(
+          'Device paired',
+          outcome.kind === 'adopted'
+            ? 'This phone now uses its own paired-client credential.'
+            : 'This phone is paired. Secure cleanup will finish automatically after the next reconnect.',
+        );
+        return;
+      }
+      if (outcome.kind === 'retry') {
+        if (outcome.stage === 'candidate-validation' || outcome.stage === 'adoption') {
+          setCredentialSaved(true);
+          setCredentialDiscardable(outcome.stage === 'candidate-validation');
+          setCredentialIssue(
+            outcome.stage === 'candidate-validation'
+              ? 'The credential was saved securely, but the server could not verify it. Gator will retry when it reconnects.'
+              : 'The credential was saved securely, but the server could not finish pairing. Gator will retry when it reconnects.',
+          );
+          return;
+        }
+        const status = await inspectScopedCredentialUpgradeStatus();
+        if (!accountLease.isCurrent()) return;
+        const confirmedSaved = status.kind === 'candidate' || status.kind === 'in-progress';
+        setCredentialSaved(confirmedSaved);
+        setCredentialDiscardable(status.kind === 'candidate');
+        setCredentialIssue(
+          confirmedSaved
+            ? 'The credential is saved securely, but this phone could not finish the secure update. Gator will retry when it reconnects.'
+            : 'The secure update did not finish, and Gator could not confirm that the credential was saved. Return to the Mac dashboard and try again.',
+        );
+        return;
+      }
+      if (outcome.kind === 'unsupported') {
+        setCredentialSaved(true);
+        setCredentialDiscardable(true);
+        setCredentialIssue(
+          outcome.reason === 'scoped-credentials'
+            ? 'This server does not support paired-client credentials yet. Update the server, or revoke and remove the saved credential below.'
+            : 'This server must support identity-protected push notifications before this credential can be used. Update the server, or revoke and remove it below.',
+        );
+        return;
+      }
+      if (outcome.kind === 'conflict') {
+        const status = await inspectScopedCredentialUpgradeStatus();
+        if (!accountLease.isCurrent()) return;
+        setCredentialSaved(status.kind === 'candidate' || status.kind === 'in-progress');
+        setCredentialDiscardable(status.kind === 'candidate');
+        setCredentialIssue(
+          'Another credential is already saved for this phone. Gator will finish it automatically, or you can try to revoke and remove it below.',
+        );
+        return;
+      }
+      if (outcome.kind === 'busy') {
+        setCredentialIssue('Another secure connection change is in progress. Try again shortly.');
+        return;
+      }
+      if (outcome.kind === 'revoked') {
+        setCredentialIssue('This account is being disconnected. Reconnect it before pairing.');
+        return;
+      }
+      if (outcome.kind === 'quarantined') {
+        setCredentialIssue(
+          'Pairing stopped because the saved secure state did not match this server session. Reconnect the server before trying again.',
+        );
+        return;
+      }
+      setCredentialIssue(
+        'Pairing stopped because the account changed. Reopen this screen to try again.',
+      );
+    } finally {
+      if (accountLease.isCurrent()) setCredentialWorking(false);
+    }
+  };
+
+  const onDiscardCredential = async (): Promise<void> => {
+    if (credentialWorking || !accountLease.isCurrent()) return;
+    setCredentialWorking(true);
+    try {
+      const outcome = await discardScopedCredentialUpgradeCandidate();
+      if (!accountLease.isCurrent()) return;
+      if (outcome.kind === 'discarded' || outcome.kind === 'idle') {
+        setCredentialSaved(false);
+        setCredentialDiscardable(false);
+        setCredentialIssue(null);
+        setCredentialModal(null);
+        showDialog(
+          'Credential removed',
+          'The credential is no longer authorized on the server and was removed from this phone. This phone still uses the shared server password.',
+        );
+        return;
+      }
+      if (outcome.kind === 'conflict') {
+        setCredentialDiscardable(false);
+        setCredentialIssue(
+          'Pairing has already changed secure push state, so it can no longer be discarded. Gator will safely retry it.',
+        );
+        return;
+      }
+      if (outcome.kind === 'retry' && outcome.stage === 'candidate-revocation') {
+        setCredentialSaved(true);
+        setCredentialDiscardable(true);
+        setCredentialIssue(
+          'The server could not confirm that the credential was revoked, so Gator kept its secure copy. Try again when the server is reachable. If it keeps failing, revoke it in the Mac dashboard, then tap this button again.',
+        );
+        return;
+      }
+      if (outcome.kind === 'busy') {
+        setCredentialIssue('Another secure connection change is in progress. Try again shortly.');
+        return;
+      }
+      setCredentialIssue(
+        'The saved credential could not be discarded safely. It remains protected.',
+      );
+    } finally {
+      if (accountLease.isCurrent()) setCredentialWorking(false);
+    }
   };
 
   // A retired screen must not adopt account B's store values before Expo Router unmounts it.
@@ -390,62 +531,39 @@ export default function ServerManagementScreen(): React.JSX.Element {
               if (accountLease.isCurrent()) router.push('/server-health');
             }}
           />
-          <ActionRow
-            label="Show Pairing QR"
-            onPress={() => {
-              if (accountLease.isCurrent()) {
-                const animationType = modalAnimationFor(reduceMotion.current);
-                setQrModal((current) => current ?? animationType);
-              }
-            }}
-          />
-          <ActionRow
-            label="Restart iMessage"
-            disabled={!!busy}
-            busy={busy === 'Restart iMessage'}
-            onPress={() =>
-              confirmThen(
-                'Restart iMessage',
-                'Relaunch the Messages app on the Mac?',
-                () => serverApi.restartImessage(http),
-                'Messages is restarting.',
-              )
-            }
-          />
-          <ActionRow
-            label="Restart Services"
-            disabled={!!busy}
-            busy={busy === 'Restart Services'}
-            onPress={() =>
-              confirmThen(
-                'Restart Services',
-                'Soft-restart the server services (Private API + tunnel)?',
-                () => serverApi.softRestart(http),
-                'Services are restarting.',
-              )
-            }
-          />
-          <ActionRow
-            label="Restart Server"
-            destructive
-            disabled={!!busy}
-            busy={busy === 'Restart Server'}
-            onPress={() =>
-              confirmThen(
-                'Restart Server',
-                'Fully restart the server process? This will briefly drop your connection.',
-                () => serverApi.hardRestart(http),
-                'The server is restarting — reconnecting shortly.',
-                true,
-              )
-            }
-          />
-          <ActionRow
-            label="View Server Logs"
-            disabled={!!busy}
-            busy={busy === 'View Logs'}
-            onPress={onViewLogs}
-          />
+          {pairingPayload ? (
+            <ActionRow
+              label={credentialSaved ? 'Finish Device Pairing' : 'Pair This Device'}
+              disabled={credentialWorking}
+              busy={credentialWorking}
+              onPress={() => {
+                if (accountLease.isCurrent()) {
+                  setCredentialIssue(
+                    credentialSaved
+                      ? credentialDiscardable
+                        ? 'A credential is saved securely. Gator will retry it automatically, or you can revoke and discard it below.'
+                        : 'Pairing has already changed secure push state, so it cannot be discarded. Gator will retry it automatically.'
+                      : null,
+                  );
+                  const animationType = modalAnimationFor(reduceMotion.current);
+                  setCredentialModal((current) => current ?? animationType);
+                }
+              }}
+            />
+          ) : scopedCredentialSession ? (
+            <InfoRow label="Device credential" value="Active" />
+          ) : null}
+          {pairingPayload ? (
+            <ActionRow
+              label="Show Pairing QR"
+              onPress={() => {
+                if (accountLease.isCurrent()) {
+                  const animationType = modalAnimationFor(reduceMotion.current);
+                  setQrModal((current) => current ?? animationType);
+                }
+              }}
+            />
+          ) : null}
         </SettingsSection>
 
         <SettingsSection label="LOCAL CACHE REPAIR" style={styles.gap}>
@@ -503,17 +621,13 @@ export default function ServerManagementScreen(): React.JSX.Element {
 
         <SettingsSection label="STATISTICS" style={styles.gap}>
           <InfoRow label="Messages" value={statVal(totals?.messages)} />
-          <InfoRow label="Chats" value={statVal(totals?.chats)} />
-          <InfoRow label="iMessage Numbers" value={statVal(totals?.handles)} />
-          <InfoRow label="Attachments" value={statVal(totals?.attachments)} />
           <InfoRow label="Photos" value={statVal(totals?.images)} />
           <InfoRow label="Videos" value={statVal(totals?.videos)} />
-          <InfoRow label="Locations" value={statVal(totals?.locations)} />
           {statsError ? (
             <View style={styles.row}>
               <Text style={[styles.errorText, { color: theme.color.destructive }]}>
                 {statsUnsupported
-                  ? 'This server doesn’t expose statistics. It may be an older version, or a proxy may be blocking its admin endpoints.'
+                  ? 'This server doesn’t expose statistics. It may be an older version, or a proxy may be blocking its statistics endpoint.'
                   : 'Couldn’t load statistics. Check your connection, then tap Refresh.'}
               </Text>
             </View>
@@ -529,7 +643,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
 
       {/* Conditionally rendered (not just visible=false) so PairingQr fully unmounts on close,
           dropping any revealed QR state along with it. */}
-      {accountCurrent && qrModal ? (
+      {accountCurrent && pairingPayload && qrModal ? (
         <Modal
           visible
           animationType={qrModal}
@@ -555,31 +669,85 @@ export default function ServerManagementScreen(): React.JSX.Element {
         </Modal>
       ) : null}
 
-      {accountCurrent && logsModal ? (
+      {/* Unmounting clears the secret TextInput and its native backing view. The credential itself
+          is never rendered after submit; only the secure journal retains a retryable candidate. */}
+      {legacyCredentialSession && credentialModal ? (
         <Modal
           visible
-          animationType={logsModal.animationType}
-          onRequestClose={() => setLogsModal(null)}
-          testID="server-logs-modal"
+          animationType={credentialModal}
+          onRequestClose={closeCredentialModal}
+          testID="device-credential-modal"
         >
           <Screen>
             <ScreenHeader
-              title="Server Logs"
+              title="Pair This Device"
               right={
                 <Pressable
-                  onPress={() => setLogsModal(null)}
+                  onPress={closeCredentialModal}
+                  disabled={credentialWorking}
                   hitSlop={8}
                   accessibilityRole="button"
-                  accessibilityLabel="Close server logs"
+                  accessibilityLabel="Close device pairing"
                 >
-                  <Text style={[styles.done, { color: theme.color.tint }]}>Done</Text>
+                  <Text
+                    style={[
+                      styles.done,
+                      { color: theme.color.tint, opacity: credentialWorking ? 0.4 : 1 },
+                    ]}
+                  >
+                    Done
+                  </Text>
                 </Pressable>
               }
             />
-            <ScrollView contentContainerStyle={styles.logBody} horizontal={false}>
-              <Text style={[styles.logText, { color: theme.color.secondaryLabel }]} selectable>
-                {logsModal.text}
+            <ScrollView
+              contentContainerStyle={styles.credentialContent}
+              keyboardShouldPersistTaps="handled"
+            >
+              <Text style={[styles.credentialDescription, { color: theme.color.secondaryLabel }]}>
+                On your Mac, open the local Gator dashboard and create a device credential. The Mac
+                shows it only once; paste it here so this phone can stop using the shared password.
               </Text>
+              <SettingsSection>
+                <TextInput
+                  value={credentialText}
+                  onChangeText={(value) => {
+                    setCredentialText(value);
+                    if (credentialIssue && !credentialSaved) setCredentialIssue(null);
+                  }}
+                  placeholder="Paired-client credential"
+                  placeholderTextColor={theme.color.tertiaryLabel}
+                  accessibilityLabel="Paired-client credential"
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  spellCheck={false}
+                  maxLength={128}
+                  editable={!credentialWorking && !credentialSaved}
+                  style={[styles.credentialInput, { color: theme.color.label }]}
+                />
+              </SettingsSection>
+              {credentialIssue ? (
+                <Text style={[styles.credentialIssue, { color: theme.color.destructive }]}>
+                  {credentialIssue}
+                </Text>
+              ) : null}
+              {credentialSaved && credentialDiscardable ? (
+                <ActionRow
+                  label="Revoke and Remove Credential"
+                  disabled={credentialWorking}
+                  busy={credentialWorking}
+                  destructive
+                  onPress={() => void onDiscardCredential()}
+                />
+              ) : !credentialSaved ? (
+                <ActionRow
+                  label="Use Credential"
+                  disabled={credentialWorking || !credentialText.trim()}
+                  busy={credentialWorking}
+                  onPress={() => void onSubmitCredential()}
+                />
+              ) : null}
             </ScrollView>
           </Screen>
         </Modal>
@@ -638,7 +806,9 @@ const styles = StyleSheet.create({
   repairDescription: { fontSize: 14, lineHeight: 20 },
   repairLog: { paddingHorizontal: 16, paddingTop: 4, paddingBottom: 8, gap: 4 },
   repairLogLine: { fontSize: 12, lineHeight: 17 },
+  credentialContent: { padding: 16, gap: 16 },
+  credentialDescription: { fontSize: 15, lineHeight: 21 },
+  credentialInput: { paddingHorizontal: 16, paddingVertical: 14, fontSize: 16 },
+  credentialIssue: { fontSize: 14, lineHeight: 20 },
   done: { fontSize: 17, textAlign: 'right' },
-  logBody: { padding: 14 },
-  logText: { fontSize: 11, fontFamily: 'Menlo', lineHeight: 16 },
 });

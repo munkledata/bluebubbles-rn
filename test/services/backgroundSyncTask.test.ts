@@ -12,6 +12,9 @@ const mockRegisterTaskAsync = jest.fn(async () => undefined);
 const mockIsTaskRegisteredAsync = jest.fn(async () => true);
 const mockGetStatusAsync = jest.fn(async () => 'available');
 const mockFlushPersistentLogs = jest.fn(async () => true);
+const mockKvGet = jest.fn<Promise<string | null>, [unknown, string]>(async () => null);
+const mockRunErrorReportQueue = jest.fn(async () => ({ eligible: 0, uploaded: 0 }));
+const mockReconcileMessageNotifications = jest.fn(async () => undefined);
 
 let task: (() => Promise<unknown>) | undefined;
 
@@ -38,7 +41,7 @@ jest.mock('@core/secure', () => ({
   },
 }));
 jest.mock('@db/repositories', () => ({
-  kvGet: jest.fn(async () => null),
+  kvGet: mockKvGet,
 }));
 jest.mock('@state/featureSettingsStore', () => ({
   ERROR_REPORTING_CONSENT_KEY: 'diagnostics.errorReportingConsent.v1',
@@ -54,10 +57,13 @@ jest.mock('@/services/clients', () => ({
 }));
 jest.mock('@/services/databaseControl', () => ({ ensureDatabase: jest.fn() }));
 jest.mock('@/services/errors/errorReportQueueService', () => ({
-  runErrorReportQueue: jest.fn(async () => ({ eligible: 0, uploaded: 0 })),
+  runErrorReportQueue: mockRunErrorReportQueue,
 }));
 jest.mock('@/services/logging/fileLogSink', () => ({
   flushPersistentLogsForHeadlessCompletion: mockFlushPersistentLogs,
+}));
+jest.mock('@/services/notifications/notifeeService', () => ({
+  reconcileMessageNotificationsWithDatabase: mockReconcileMessageNotifications,
 }));
 jest.mock('@/services/realtime/deliveryCoordinator', () => ({
   captureRealtimeDeliveryLease: jest.fn(() => ({ generation: 1, isCurrent: () => true })),
@@ -100,6 +106,7 @@ beforeEach(() => {
   mockIsTaskRegisteredAsync.mockResolvedValue(true);
   mockGetStatusAsync.mockResolvedValue('available');
   mockFlushPersistentLogs.mockResolvedValue(true);
+  mockKvGet.mockResolvedValue(null);
   mockRunBackgroundSync.mockResolvedValue({ result: 'success', reason: 'completed' });
   mockRunTrackedRealtimeWork.mockImplementation(async (_scope, run) => {
     await run();
@@ -141,13 +148,59 @@ describe('the Expo background task adapter', () => {
     expect(config.getPassword()).toBe('vault-secret');
   });
 
-  it('passes explicit page/row caps and a current-account guard to schedule recovery', async () => {
+  it('does not let the retired legacy toggle authorize a background diagnostic upload', async () => {
     const db = { name: 'db' };
     const client = { name: 'http' };
     const scope = { generation: 9, isCurrent: () => true };
+    mockKvGet.mockImplementation(async (_db, key) =>
+      key === 'diagnostics.errorReporting' ? '1' : null,
+    );
+    mockRunBackgroundSync.mockImplementationOnce(async (deps) => {
+      await deps.flushDiagnostics(db, client, { supports_error_log_upload: true }, scope);
+      return { result: 'success', reason: 'completed' };
+    });
+
+    await task?.();
+
+    expect(mockKvGet).toHaveBeenCalledTimes(1);
+    expect(mockKvGet).toHaveBeenCalledWith(db, 'diagnostics.errorReportingConsent.v1');
+    expect(mockRunErrorReportQueue).not.toHaveBeenCalled();
+  });
+
+  it('allows a background diagnostic upload only with an explicit versioned grant', async () => {
+    const db = { name: 'db' };
+    const client = { name: 'http' };
+    const scope = { generation: 9, isCurrent: () => true };
+    mockKvGet.mockResolvedValueOnce('granted');
+    mockRunBackgroundSync.mockImplementationOnce(async (deps) => {
+      await deps.flushDiagnostics(db, client, { supports_error_log_upload: true }, scope);
+      return { result: 'success', reason: 'completed' };
+    });
+
+    await task?.();
+
+    expect(mockRunErrorReportQueue).toHaveBeenCalledTimes(1);
+    expect(mockRunErrorReportQueue).toHaveBeenCalledWith(
+      db,
+      client,
+      expect.any(Number),
+      {},
+      scope,
+      expect.objectContaining({
+        isUploadAllowed: expect.any(Function),
+        signal: expect.any(AbortSignal),
+      }),
+    );
+  });
+
+  it('passes explicit page/row caps and a current-account guard to schedule recovery', async () => {
+    const db = { name: 'db' };
+    const client = { name: 'http' };
+    const serverInfo = { server_version: '1.9.0', private_api: true };
+    const scope = { generation: 9, isCurrent: () => true };
     mockRunBackgroundSync.mockImplementationOnce(async (deps) => {
       await deps.synchronize(db, client, '1.9.0', scope);
-      await deps.recoverAndDrainSchedules(db, client, scope);
+      await deps.recoverAndDrainSchedules(db, client, scope, serverInfo);
       await deps.drainOutgoing(db, client, scope);
       return { result: 'success', reason: 'completed' };
     });
@@ -167,6 +220,7 @@ describe('the Expo background task adapter', () => {
         shouldAbort: expect.any(Function),
       }),
     );
+    expect(mockReconcileMessageNotifications).toHaveBeenCalledWith(db, scope);
     expect(mockRunDueScheduled).toHaveBeenCalledWith(
       db,
       client,
@@ -174,7 +228,15 @@ describe('the Expo background task adapter', () => {
       undefined,
       scope,
       BACKGROUND_SCHEDULE_MAX_ROWS,
+      expect.any(Function),
     );
+    const capabilitySourceFactory = (
+      mockRunDueScheduled.mock.calls[0] as unknown[] | undefined
+    )?.[6] as (() => unknown) | undefined;
+    expect(capabilitySourceFactory?.()).toEqual({
+      kind: 'fixed',
+      serverInfo,
+    });
     expect(mockRunOutgoingQueue).toHaveBeenCalledWith(
       db,
       client,
@@ -183,6 +245,7 @@ describe('the Expo background task adapter', () => {
       scope,
       BACKGROUND_OUTGOING_MAX_ROWS,
       BACKGROUND_ATTACHMENT_UPLOAD_TIMEOUT_MS,
+      undefined,
     );
   });
 

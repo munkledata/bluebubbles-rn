@@ -23,6 +23,7 @@ import { AppDialog, AppToast, ErrorBoundary, ThemeProvider, useTheme } from '@ui
 import { showToast } from '@ui/toast/toastStore';
 import { servicePresentationAdapter } from '@ui/servicePresentation';
 import { buildDarkNavigationTheme, DARK_STATUS_BAR_STYLE } from '@ui/theme/dark-navigation-theme';
+import { createI18n } from '@utils/i18n';
 
 function hasForegroundAuthority(): boolean {
   return AppState.currentState === 'active';
@@ -56,10 +57,12 @@ function ThemedStack(): React.JSX.Element {
  * unmounts the protected route/dialog tree while the choice is unknown or locked, so even React
  * Native Modals (which use a separate Android window) cannot remain visible above it. A cold UI
  * launch therefore does not render stored data before unlock. This does not make the SecureStore
- * key user-auth-bound; the separate locked FCM policy also refuses to open the DB and leaves the
- * event for post-unlock sync.
+ * key user-auth-bound. Locked legacy/V2 FCM still leaves recovery to post-unlock sync; authenticated,
+ * active-bound V3 may only enqueue into SQLCipher and cannot read, claim, route, or present content
+ * before unlock.
  */
 export default function RootLayout(): React.JSX.Element {
+  const appTextDirection = useMemo(() => createI18n().direction, []);
   const bootState = useForegroundBootState();
   const locked = useLockStore((s) => s.locked);
   const lockHydrated = useLockStore((s) => s.hydrated);
@@ -177,7 +180,7 @@ export default function RootLayout(): React.JSX.Element {
 
   return (
     <ErrorBoundary>
-      <SafeAreaProvider>
+      <SafeAreaProvider style={{ direction: appTextDirection }}>
         <QueryClientProvider client={queryClient}>
           <ThemeProvider renderWithFallbackTheme>
             <StatusBar style={DARK_STATUS_BAR_STYLE} />

@@ -45,6 +45,7 @@ let mockGuid = GUID;
 let mockFocus: string | undefined;
 let mockFocusDate: string | undefined;
 let mockRouteKey = 'chat-route-1';
+let mockMessagePreview: EnrichedMessage | null = null;
 
 /** Latest props each probe was rendered with — tests read/invoke these. */
 const mockCaptured: {
@@ -208,6 +209,7 @@ jest.mock('@db/repositories', () => ({
   getChatIdByGuid: jest.fn(async () => null),
   getChatParticipants: jest.fn(async () => []),
   getFirstUnreadInChat: jest.fn(async () => null),
+  getMessagePreviewByGuid: jest.fn(async () => mockMessagePreview),
   isChatHiddenByDeletion: jest.fn(async () => false),
   kvGet: jest.fn(async () => null),
 }));
@@ -242,11 +244,42 @@ jest.mock('@/services/send', () => ({
   pickAndSendContact: jest.fn(),
   react: jest.fn(),
   recoverOutgoing: jest.fn().mockResolvedValue({ eligible: 0, sent: 0 }),
-  reply: jest.fn(),
+  reply: jest.fn(
+    (
+      _args: unknown,
+      _lease: unknown,
+      _reportIssue: unknown,
+      onQueued?: (tempGuid: string) => void,
+    ) => {
+      onQueued?.('temp-reply');
+      return Promise.resolve({ tempGuid: 'temp-reply' });
+    },
+  ),
   schedule: jest.fn().mockResolvedValue(undefined),
-  send: jest.fn(),
+  send: jest.fn(
+    (
+      _args: unknown,
+      _lease: unknown,
+      _reportIssue: unknown,
+      onQueued?: (tempGuid: string) => void,
+    ) => {
+      onQueued?.('temp-send');
+      return Promise.resolve({ tempGuid: 'temp-send' });
+    },
+  ),
   sendImage: jest.fn(),
   sendImages: jest.fn().mockResolvedValue(null),
+  sendTextAttachment: jest.fn(
+    (
+      _args: unknown,
+      _lease: unknown,
+      _reportIssue: unknown,
+      onQueued?: (tempGuid: string) => void,
+    ) => {
+      onQueued?.('temp-combined');
+      return Promise.resolve({ tempGuid: 'temp-combined' });
+    },
+  ),
   unsend: jest.fn(),
 }));
 
@@ -281,7 +314,9 @@ import {
   reply,
   schedule,
   send,
+  sendImage,
   sendImages,
+  sendTextAttachment,
 } from '@/services/send';
 // eslint-disable-next-line import/first
 import { showToast } from '@ui';
@@ -370,7 +405,10 @@ beforeEach(() => {
   mockInsetBottom = 0;
   mockKbVisible = false;
   mockVoiceRecorderProps = undefined;
-  useSessionStore.setState({ serverInfo: null });
+  mockMessagePreview = null;
+  useSessionStore.setState({
+    serverInfo: { version: 'legacy-test', supports_message_part_topology: false } as any,
+  });
   useTypingStore.setState({ typing: {} });
   useMessagesMock.mockReturnValue({
     data: [],
@@ -403,6 +441,23 @@ async function run(fn: () => void): Promise<void> {
   await act(async () => {
     fn();
   });
+}
+
+/**
+ * A long-pressed row necessarily belongs to the route's reactive window in production. Keep that
+ * invariant in this route-level mock so the retraction guard can distinguish a current row from a
+ * row that was genuinely deleted or redacted after selection.
+ */
+async function longPressMessage(msg: EnrichedMessage): Promise<void> {
+  mockMessagePreview = msg;
+  useMessagesMock.mockReturnValue({
+    data: [msg],
+    error: null,
+    isCurrentWindow: true,
+    isLoading: false,
+    refreshWindow: mockRefreshWindow,
+  });
+  await run(() => mockCaptured.list!.onLongPressMessage(msg));
 }
 
 interface Deferred<T> {
@@ -588,7 +643,7 @@ describe('ChatScreen — long-press → SelectedMessage mapping', () => {
         reactionRow({ baseType: 'emoji', emoji: '🎉', isFromMe: 1 }), // emoji mine → myEmojis, NOT mine
       ],
     });
-    await run(() => mockCaptured.list!.onLongPressMessage(msg));
+    await longPressMessage(msg);
 
     const sel = mockCaptured.overlay!.selected;
     expect(sel.guid).toBe('m7');
@@ -600,9 +655,7 @@ describe('ChatScreen — long-press → SelectedMessage mapping', () => {
 
   it('flags a temp (optimistic) message via the temp- guid prefix', async () => {
     await renderWithTheme(<ChatScreen />);
-    await run(() =>
-      mockCaptured.list!.onLongPressMessage(makeMsg({ guid: 'temp-abc', isFromMe: 1 })),
-    );
+    await longPressMessage(makeMsg({ guid: 'temp-abc', isFromMe: 1 }));
     expect(mockCaptured.overlay!.selected.isTemp).toBe(true);
     expect(mockCaptured.overlay!.selected.isFromMe).toBe(true);
   });
@@ -617,10 +670,8 @@ describe('ChatScreen — long-press → SelectedMessage mapping', () => {
         ],
       },
     };
-    await run(() =>
-      mockCaptured.list!.onLongPressMessage(
-        makeMsg({ guid: 'm9', dateEdited: 2, messageSummaryInfo: JSON.stringify(info) }),
-      ),
+    await longPressMessage(
+      makeMsg({ guid: 'm9', dateEdited: 2, messageSummaryInfo: JSON.stringify(info) }),
     );
     const sel = mockCaptured.overlay!.selected;
     expect(sel.isEdited).toBe(true);
@@ -630,7 +681,7 @@ describe('ChatScreen — long-press → SelectedMessage mapping', () => {
 
   it('leaves isEdited false and messageSummaryInfo null for an un-edited message', async () => {
     await renderWithTheme(<ChatScreen />);
-    await run(() => mockCaptured.list!.onLongPressMessage(makeMsg({ guid: 'm1' })));
+    await longPressMessage(makeMsg({ guid: 'm1' }));
     expect(mockCaptured.overlay!.selected.isEdited).toBe(false);
     expect(mockCaptured.overlay!.selected.messageSummaryInfo).toBeNull();
   });
@@ -639,7 +690,7 @@ describe('ChatScreen — long-press → SelectedMessage mapping', () => {
 describe('ChatScreen — onReact routing (real react() path)', () => {
   it('routes a classic tapback to react() with no emoji', async () => {
     await renderWithTheme(<ChatScreen />);
-    await run(() => mockCaptured.list!.onLongPressMessage(makeMsg({ guid: 'm1', text: 'hey' })));
+    await longPressMessage(makeMsg({ guid: 'm1', text: 'hey' }));
     await run(() => mockCaptured.overlay!.onReact('love'));
     expect(react).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -656,7 +707,7 @@ describe('ChatScreen — onReact routing (real react() path)', () => {
 
   it('routes an arbitrary-emoji tapback to react() carrying the glyph', async () => {
     await renderWithTheme(<ChatScreen />);
-    await run(() => mockCaptured.list!.onLongPressMessage(makeMsg({ guid: 'm1' })));
+    await longPressMessage(makeMsg({ guid: 'm1' }));
     await run(() => mockCaptured.overlay!.onReact('emoji', '🎉'));
     expect(react).toHaveBeenCalledWith(
       expect.objectContaining({ reaction: 'emoji', emoji: '🎉', targetGuid: 'm1' }),
@@ -667,6 +718,40 @@ describe('ChatScreen — onReact routing (real react() path)', () => {
 });
 
 describe('ChatScreen — send routing', () => {
+  it('offers and routes one iMessage attachment-plus-text send only when the server advertises it', async () => {
+    useSessionStore.setState({
+      serverInfo: {
+        private_api: true,
+        supports_imessage_text_with_attachment: true,
+      } as any,
+    });
+    await renderWithTheme(<ChatScreen />);
+    expect(mockCaptured.composer!.onSendTextAttachment).toEqual(expect.any(Function));
+
+    const item = {
+      uri: 'file:///caption.jpg',
+      name: 'caption.jpg',
+      mimeType: 'image/jpeg',
+      size: 42,
+    };
+    await expect(mockCaptured.composer!.onSendTextAttachment('caption', item)).resolves.toBe(true);
+    expect(sendTextAttachment).toHaveBeenCalledWith(
+      {
+        chatGuid: GUID,
+        image: item,
+        text: 'caption',
+        service: 'iMessage',
+        selectedMessageGuid: undefined,
+        partIndex: undefined,
+      },
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+      presentSendIssue,
+      expect.any(Function),
+    );
+    expect(send).not.toHaveBeenCalled();
+    expect(sendImages).not.toHaveBeenCalled();
+  });
+
   it('gives the composer synchronous capacity and account-owner guards', async () => {
     await renderWithTheme(<ChatScreen />);
     expect(mockCaptured.composer!.canSubmit).toBe(hasLogicalSendCapacity);
@@ -685,6 +770,7 @@ describe('ChatScreen — send routing', () => {
       { chatGuid: GUID, text: 'hello', effectId: undefined },
       expect.objectContaining({ isCurrent: expect.any(Function) }),
       presentSendIssue,
+      expect.any(Function),
     );
     expect(reply).not.toHaveBeenCalled();
   });
@@ -702,23 +788,30 @@ describe('ChatScreen — send routing', () => {
       },
       expect.objectContaining({ isCurrent: expect.any(Function) }),
       presentSendIssue,
+      expect.any(Function),
     );
   });
 
   it('threads the mounted account lease through DEV text and reply sends', async () => {
     mockIsDevServer.mockReturnValue(true);
     await renderWithTheme(<ChatScreen />);
-    await run(() => mockCaptured.composer!.onSend('plain-dev'));
+    const plainAdmission = mockCaptured.composer!.onSend('plain-dev') as Promise<boolean>;
+    await expect(plainAdmission).resolves.toBe(false);
     const accountLease = (devSendFake as jest.Mock).mock.calls[0]![3];
-    expect(devSendFake).toHaveBeenCalledWith(GUID, 'plain-dev', undefined, accountLease);
+    expect(devSendFake).toHaveBeenCalledWith(
+      GUID,
+      'plain-dev',
+      undefined,
+      accountLease,
+      expect.any(Function),
+    );
 
-    await run(() =>
-      mockCaptured.list!.onLongPressMessage(
-        makeMsg({ guid: 'reply-target', text: 'question', senderName: 'Alice' }),
-      ),
+    await longPressMessage(
+      makeMsg({ guid: 'reply-target', text: 'question', senderName: 'Alice' }),
     );
     await run(() => mockCaptured.overlay!.onReply());
-    await run(() => mockCaptured.composer!.onSend('reply-dev'));
+    const replyAdmission = mockCaptured.composer!.onSend('reply-dev') as Promise<boolean>;
+    await expect(replyAdmission).resolves.toBe(false);
     expect(devSendFakeReply).toHaveBeenCalledWith(
       GUID,
       'reply-dev',
@@ -726,6 +819,7 @@ describe('ChatScreen — send routing', () => {
       0,
       undefined,
       accountLease,
+      expect.any(Function),
     );
     expect(accountLease).toEqual(expect.objectContaining({ isCurrent: expect.any(Function) }));
   });
@@ -785,6 +879,45 @@ describe('ChatScreen — send routing', () => {
     expect(showDialog).not.toHaveBeenCalled();
   });
 
+  it('carries the selected exact message part through the contact picker', async () => {
+    useSessionStore.setState({
+      serverInfo: {
+        supports_send_contact: true,
+        supports_message_part_topology: true,
+      } as any,
+    });
+    const target = makeMsg({
+      guid: 'contact-reply-target',
+      messagePartTopology: JSON.stringify({
+        complete: true,
+        originalPartIndexes: [2],
+        currentParts: [{ index: 2, kind: 'text' }],
+        attachmentOwnership: [],
+      }),
+    });
+    (pickAndSendContact as jest.Mock).mockImplementationOnce((...args: unknown[]) => {
+      const onQueued = args[4] as ((tempGuid: string) => void) | undefined;
+      onQueued?.('temp-contact-reply');
+      return Promise.resolve({ tempGuid: 'temp-contact-reply' });
+    });
+    await renderWithTheme(<ChatScreen />);
+    await longPressMessage(target);
+    await run(() => mockCaptured.overlay!.onReply());
+
+    await run(() => mockCaptured.composer!.onPickContact());
+
+    await waitFor(() =>
+      expect(pickAndSendContact).toHaveBeenCalledWith(
+        GUID,
+        expect.objectContaining({ isCurrent: expect.any(Function) }),
+        presentSendIssue,
+        { replyToGuid: 'contact-reply-target', replyToPartIndex: 2 },
+        expect.any(Function),
+      ),
+    );
+    await waitFor(() => expect(mockCaptured.composer!.replyTo).toBeNull());
+  });
+
   it('wires microphone denial and native-request errors to recovery dialogs', async () => {
     await renderWithTheme(<ChatScreen />);
     await run(() => mockCaptured.composer!.onStartVoice());
@@ -802,16 +935,59 @@ describe('ChatScreen — send routing', () => {
       'Microphone access is unavailable. Try again or enable it in system settings.',
     );
   });
+
+  it('accepts a voice recording only after its durable queue callback', async () => {
+    let markQueued!: (tempGuid: string) => void;
+    let finishOperation!: (value: { tempGuid: string }) => void;
+    (sendImage as jest.Mock).mockImplementationOnce(
+      (
+        _args: unknown,
+        _lease: unknown,
+        _reportIssue: unknown,
+        onQueued: (tempGuid: string) => void,
+      ) => {
+        markQueued = onQueued;
+        return new Promise((resolve) => {
+          finishOperation = resolve;
+        });
+      },
+    );
+    await renderWithTheme(<ChatScreen />);
+    await run(() => mockCaptured.composer!.onStartVoice());
+    await waitFor(() => expect(mockVoiceRecorderProps).toBeDefined());
+
+    const admission = mockVoiceRecorderProps!.onSend('file:///cache/voice.m4a') as Promise<boolean>;
+    let settled = false;
+    void admission.then(() => {
+      settled = true;
+    });
+    await act(async () => Promise.resolve());
+    expect(settled).toBe(false);
+    expect(sendImage).toHaveBeenCalledWith(
+      {
+        chatGuid: GUID,
+        image: {
+          uri: 'file:///cache/voice.m4a',
+          name: 'voice.m4a',
+          mimeType: 'audio/mp4',
+          size: 0,
+        },
+      },
+      expect.anything(),
+      presentSendIssue,
+      expect.any(Function),
+    );
+
+    markQueued('temp-voice');
+    await expect(admission).resolves.toBe(true);
+    finishOperation({ tempGuid: 'temp-voice' });
+  });
 });
 
 describe('ChatScreen — reply flow', () => {
   it('selecting Reply sets the composer replyTo, and sending routes to reply()', async () => {
     await renderWithTheme(<ChatScreen />);
-    await run(() =>
-      mockCaptured.list!.onLongPressMessage(
-        makeMsg({ guid: 'm1', text: 'hey', senderName: 'Alice' }),
-      ),
-    );
+    await longPressMessage(makeMsg({ guid: 'm1', text: 'hey', senderName: 'Alice' }));
     await run(() => mockCaptured.overlay!.onReply());
 
     expect(mockCaptured.composer!.replyTo).toEqual(
@@ -829,19 +1005,40 @@ describe('ChatScreen — reply flow', () => {
       },
       expect.objectContaining({ isCurrent: expect.any(Function) }),
       presentSendIssue,
+      expect.any(Function),
     );
     expect(send).not.toHaveBeenCalled();
-    // replyTo is cleared after the reply is sent.
+    // The mocked queue handoff fires synchronously, so the durable reply owns the draft now.
     expect(mockCaptured.composer!.replyTo).toBeNull();
+  });
+
+  it('retains the reply target and reports a failure before queue admission', async () => {
+    const loggerWarn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const failure = new Error('server-info unavailable');
+    try {
+      (reply as jest.Mock).mockRejectedValueOnce(failure);
+      await renderWithTheme(<ChatScreen />);
+      await longPressMessage(makeMsg({ guid: 'm1', text: 'hey', senderName: 'Alice' }));
+      await run(() => mockCaptured.overlay!.onReply());
+
+      const admitted = await mockCaptured.composer!.onSend('keep my reply');
+
+      expect(admitted).toBe(false);
+      expect(mockCaptured.composer!.replyTo).toEqual(expect.objectContaining({ guid: 'm1' }));
+      expect(showToast).toHaveBeenCalledWith(
+        'Couldn’t queue that reply. Your draft is still here—try again when connected',
+      );
+      expect(loggerWarn).toHaveBeenCalledWith('[chat] reply queue admission failed', failure);
+    } finally {
+      loggerWarn.mockRestore();
+    }
   });
 });
 
 describe('ChatScreen — edit flow', () => {
   it('selecting Edit prefills the composer, and confirming routes to editText()', async () => {
     await renderWithTheme(<ChatScreen />);
-    await run(() =>
-      mockCaptured.list!.onLongPressMessage(makeMsg({ guid: 'm1', text: 'original', isFromMe: 1 })),
-    );
+    await longPressMessage(makeMsg({ guid: 'm1', text: 'original', isFromMe: 1 }));
     await run(() => mockCaptured.overlay!.onEdit());
     expect(mockCaptured.composer!.editingText).toBe('original');
 
@@ -1374,14 +1571,22 @@ describe('ChatScreen — keyboard avoidance contract', () => {
     const NAV_BAR = 48;
     mockInsetBottom = NAV_BAR;
     await renderWithTheme(<ChatScreen />);
-    await run(() => mockCaptured.list!.onLongPressMessage(makeMsg({ guid: 'm1' })));
+    await longPressMessage(makeMsg({ guid: 'm1' }));
     await run(() => mockCaptured.overlay!.onSelect());
     const bar = (await screen.findByText('1 selected')).parent;
     const flat = Object.assign({}, ...[bar?.props.style].flat(Infinity).filter(Boolean));
     expect(flat.paddingBottom).toBe(NAV_BAR + 14);
 
     mockKbVisible = true;
-    await run(() => mockCaptured.list!.onToggleSelect(makeMsg({ guid: 'm2' })));
+    const secondMessage = makeMsg({ guid: 'm2' });
+    useMessagesMock.mockReturnValue({
+      data: [mockMessagePreview!, secondMessage],
+      error: null,
+      isCurrentWindow: true,
+      isLoading: false,
+      refreshWindow: mockRefreshWindow,
+    });
+    await run(() => mockCaptured.list!.onToggleSelect(secondMessage));
     const barUp = (await screen.findByText('2 selected')).parent;
     const flatUp = Object.assign({}, ...[barUp?.props.style].flat(Infinity).filter(Boolean));
     expect(flatUp.paddingBottom).toBe(14);
@@ -1391,7 +1596,7 @@ describe('ChatScreen — keyboard avoidance contract', () => {
     await renderWithTheme(<ChatScreen />);
     const composerInstance = mockCaptured.composer!.__instance;
 
-    await run(() => mockCaptured.list!.onLongPressMessage(makeMsg({ guid: 'm1' })));
+    await longPressMessage(makeMsg({ guid: 'm1' }));
     await run(() => mockCaptured.overlay!.onSelect());
     expect(await screen.findByText('1 selected')).toBeTruthy();
     expect(mockCaptured.composer!.__instance).toBe(composerInstance);
@@ -1450,10 +1655,10 @@ describe('ChatScreen — stable composer callbacks (Composer memo contract)', ()
       });
 
       expect(showToast).toHaveBeenCalledWith(
-        'Couldn’t send one or more attachments—add the missing file again',
+        'Couldn’t queue one or more attachments. They’re still in your composer—try again when connected',
       );
       expect(loggerWarn).toHaveBeenCalledTimes(1);
-      expect(loggerWarn).toHaveBeenCalledWith('[chat] attachment send rejected', failure);
+      expect(loggerWarn).toHaveBeenCalledWith('[chat] attachment queue admission failed', failure);
     } finally {
       loggerWarn.mockRestore();
     }
@@ -1595,7 +1800,7 @@ describe('ChatScreen — attachment share/save routing (via @/services/media)', 
   it('routes Save to saveAttachmentsToPhotos with the attachment paths and reports the count', async () => {
     (saveAttachmentsToPhotos as jest.Mock).mockResolvedValue({ status: 'saved', saved: 1 });
     await renderWithTheme(<ChatScreen />);
-    await run(() => mockCaptured.list!.onLongPressMessage(withAttachment()));
+    await longPressMessage(withAttachment());
     await run(() => mockCaptured.overlay!.onSave());
     await waitFor(() =>
       expect(saveAttachmentsToPhotos).toHaveBeenCalledWith(
@@ -1609,7 +1814,7 @@ describe('ChatScreen — attachment share/save routing (via @/services/media)', 
   it('shares a downloaded attachment file via shareAttachment', async () => {
     (shareAttachment as jest.Mock).mockResolvedValue({ ok: true });
     await renderWithTheme(<ChatScreen />);
-    await run(() => mockCaptured.list!.onLongPressMessage(withAttachment()));
+    await longPressMessage(withAttachment());
     await run(() => mockCaptured.overlay!.onShare());
     await waitFor(() =>
       expect(shareAttachment).toHaveBeenCalledWith(
@@ -1627,16 +1832,14 @@ describe('ChatScreen — attachment share/save routing (via @/services/media)', 
   it('reports a failed share honestly instead of blaming a missing download', async () => {
     (shareAttachment as jest.Mock).mockResolvedValue({ ok: false, reason: 'failed' });
     await renderWithTheme(<ChatScreen />);
-    await run(() =>
-      mockCaptured.list!.onLongPressMessage(
-        makeMsg({
-          guid: 'm9',
-          text: null,
-          attachments: [
-            { guid: 'a1', localPath: 'file:///docs/a1.jpg', mimeType: 'image/jpeg' },
-          ] as never,
-        }),
-      ),
+    await longPressMessage(
+      makeMsg({
+        guid: 'm9',
+        text: null,
+        attachments: [
+          { guid: 'a1', localPath: 'file:///docs/a1.jpg', mimeType: 'image/jpeg' },
+        ] as never,
+      }),
     );
     await run(() => mockCaptured.overlay!.onShare());
     await waitFor(() => expect(showDialog).toHaveBeenCalled());
@@ -1654,7 +1857,7 @@ describe('ChatScreen — attachment share/save routing (via @/services/media)', 
       .mockResolvedValue({ action: 'dismissedAction' });
     (shareAttachment as jest.Mock).mockResolvedValue({ ok: false, reason: 'failed' });
     await renderWithTheme(<ChatScreen />);
-    await run(() => mockCaptured.list!.onLongPressMessage(withAttachment())); // text: 'hey'
+    await longPressMessage(withAttachment()); // text: 'hey'
     await run(() => mockCaptured.overlay!.onShare());
     await waitFor(() => expect(showDialog).toHaveBeenCalled());
     expect(rnShare).not.toHaveBeenCalled();
@@ -1665,7 +1868,7 @@ describe('ChatScreen — attachment share/save routing (via @/services/media)', 
     const response = deferred<{ ok: false; reason: 'failed' }>();
     (shareAttachment as jest.Mock).mockReturnValueOnce(response.promise);
     await renderWithTheme(<ChatScreen />);
-    await run(() => mockCaptured.list!.onLongPressMessage(withAttachment()));
+    await longPressMessage(withAttachment());
     await run(() => mockCaptured.overlay!.onShare());
     await waitFor(() => expect(shareAttachment).toHaveBeenCalledTimes(1));
 
@@ -1683,7 +1886,7 @@ describe('ChatScreen — attachment share/save routing (via @/services/media)', 
     const response = deferred<{ status: 'saved'; saved: number }>();
     (saveAttachmentsToPhotos as jest.Mock).mockReturnValueOnce(response.promise);
     await renderWithTheme(<ChatScreen />);
-    await run(() => mockCaptured.list!.onLongPressMessage(withAttachment()));
+    await longPressMessage(withAttachment());
     await run(() => mockCaptured.overlay!.onSave());
     await waitFor(() => expect(saveAttachmentsToPhotos).toHaveBeenCalledTimes(1));
 
@@ -1701,7 +1904,7 @@ describe('ChatScreen — attachment share/save routing (via @/services/media)', 
     (shareAttachment as jest.Mock).mockResolvedValueOnce({ ok: true });
     (saveAttachmentsToPhotos as jest.Mock).mockResolvedValueOnce({ status: 'saved', saved: 1 });
     await renderWithTheme(<ChatScreen />);
-    await run(() => mockCaptured.list!.onLongPressMessage(withAttachment()));
+    await longPressMessage(withAttachment());
     const oldShare = mockCaptured.overlay!.onShare as () => void;
     const oldSave = mockCaptured.overlay!.onSave as () => void;
 
@@ -1767,7 +1970,13 @@ describe('ChatScreen — scheduled-message ticker', () => {
     await renderWithTheme(<ChatScreen />);
     await waitFor(() => expect(fireDueScheduledWithDevelopmentSender).toHaveBeenCalledTimes(1));
     const accountLease = (fireDueScheduledWithDevelopmentSender as jest.Mock).mock.calls[0]![1];
-    expect(devSendFake).toHaveBeenCalledWith('plain-chat', 'plain', undefined, accountLease);
+    expect(devSendFake).toHaveBeenCalledWith(
+      'plain-chat',
+      'plain',
+      undefined,
+      accountLease,
+      expect.any(Function),
+    );
     expect(devSendFakeReply).toHaveBeenCalledWith(
       'reply-chat',
       'reply',
@@ -1775,6 +1984,7 @@ describe('ChatScreen — scheduled-message ticker', () => {
       2,
       undefined,
       accountLease,
+      expect.any(Function),
     );
   });
 

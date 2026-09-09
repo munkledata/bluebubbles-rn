@@ -1,9 +1,10 @@
 import { useRouter } from 'expo-router';
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useSyncStore } from '@state/syncStore';
 import { Button, Screen, useTheme } from '@ui';
+import { createI18n } from '@utils/i18n';
 
 /**
  * First-run sync progress. Shown right after a successful connect (scan/manual) so the user sees
@@ -17,6 +18,7 @@ export default function Syncing(): React.JSX.Element {
   const status = useSyncStore((s) => s.status);
   const chats = useSyncStore((s) => s.chats);
   const messages = useSyncStore((s) => s.messages);
+  const i18n = useMemo(() => createI18n(), []);
 
   // Auto-advance to the explicit permission choices a beat after the sync finishes.
   useEffect(() => {
@@ -47,17 +49,27 @@ export default function Syncing(): React.JSX.Element {
             <ActivityIndicator size="large" color={theme.color.tint} />
           )}
           <Text style={[styles.title, { color: theme.color.label }]}>
-            {done ? 'Sync complete' : errored ? 'Sync had trouble' : 'Syncing your messages…'}
+            {i18n.text(
+              done ? 'sync.title.complete' : errored ? 'sync.title.error' : 'sync.title.progress',
+            )}
           </Text>
           <Text style={[styles.detail, { color: theme.color.secondaryLabel }]}>
             {errored
-              ? 'Some messages may still be catching up — you can continue and they’ll fill in.'
-              : `${chats.toLocaleString()} chats · ${messages.toLocaleString()} messages`}
+              ? i18n.text('sync.detail.error')
+              : `${i18n.count(
+                  chats,
+                  'sync.count.chat.one',
+                  'sync.count.chat.other',
+                )}${i18n.text('sync.count.separator')}${i18n.count(
+                  messages,
+                  'sync.count.message.one',
+                  'sync.count.message.other',
+                )}`}
           </Text>
         </View>
 
         <Button
-          title={done ? 'Continue' : 'Continue in Background'}
+          title={i18n.text(done ? 'sync.action.continue' : 'sync.action.background')}
           onPress={() => router.replace('/permissions')}
         />
       </View>

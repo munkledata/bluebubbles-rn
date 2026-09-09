@@ -196,21 +196,22 @@ const contactFor = (args: OutgoingInsertFixture) => ({
   emails: [{ label: 'work', address: `${args.tempGuid}@example.test` }],
 });
 
-function insertOutgoingFixture(
+async function insertOutgoingFixture(
   db: AppDatabase,
   kind: OutgoingInsertKind,
   args: OutgoingInsertFixture,
 ): Promise<void> {
   if (kind === 'text') {
-    return insertOutgoingText(db, {
+    await insertOutgoingText(db, {
       ...args,
       selectedMessageGuid: selectedGuidFor(args),
       threadOriginatorGuid: threadGuidFor(args),
       effectId: effectFor(args),
       subject: subjectFor(args),
     });
+    return;
   }
-  return insertOutgoingContact(db, {
+  await insertOutgoingContact(db, {
     ...args,
     contact: contactFor(args),
     selectedMessageGuid: selectedGuidFor(args),
@@ -1964,7 +1965,7 @@ describe('markOutgoingSentNoGuid — transaction ownership', () => {
       });
     });
 
-    expect(outcome).toEqual({ kind: 'resolved', value: undefined });
+    expect(outcome).toEqual({ kind: 'resolved', value: 'sent' });
     expect(raw.prepare('SELECT value FROM kv WHERE key = ?').get(phantomKey)).toBeUndefined();
     expect(msgState(raw, tempGuid)).toEqual({ s: 'sent', e: 0 });
     expect(queueCount(raw, tempGuid)).toBe(0);
@@ -2008,7 +2009,7 @@ describe('markOutgoingSentNoGuid — transaction ownership', () => {
     expect(msgState(raw, tempGuid)).toEqual({ s: 'sending', e: 0 });
     expect(queueCount(raw, tempGuid)).toBe(1);
 
-    await expect(markOutgoingSentNoGuid(db, tempGuid, () => true)).resolves.toBeUndefined();
+    await expect(markOutgoingSentNoGuid(db, tempGuid, () => true)).resolves.toBe('sent');
     expect(msgState(raw, tempGuid)).toEqual({ s: 'sent', e: 0 });
     expect(queueCount(raw, tempGuid)).toBe(0);
   });
@@ -2046,7 +2047,7 @@ describe('markOutgoingSentNoGuid — transaction ownership', () => {
     expect(queueCount(raw, tempGuid)).toBe(1);
 
     raw.exec('DROP TRIGGER reject_no_guid_queue_delete');
-    await expect(markOutgoingSentNoGuid(db, tempGuid)).resolves.toBeUndefined();
+    await expect(markOutgoingSentNoGuid(db, tempGuid)).resolves.toBe('sent');
     expect(msgState(raw, tempGuid)).toEqual({ s: 'sent', e: 0 });
     expect(queueCount(raw, tempGuid)).toBe(0);
   });
@@ -2112,7 +2113,14 @@ describe('markOutgoingSentNoGuid — transaction ownership', () => {
 
     let helperSettled = false;
     let helperOutcome:
-      Promise<{ kind: 'resolved'; value: void } | { kind: 'rejected'; error: unknown }> | undefined;
+      | Promise<
+          | {
+              kind: 'resolved';
+              value: Awaited<ReturnType<typeof markOutgoingSentNoGuid>>;
+            }
+          | { kind: 'rejected'; error: unknown }
+        >
+      | undefined;
     try {
       helperOutcome = markOutgoingSentNoGuid(db, tempGuid)
         .then(
@@ -2137,7 +2145,7 @@ describe('markOutgoingSentNoGuid — transaction ownership', () => {
 
       releaseDelete();
       const [outcome] = await Promise.all([helperOutcome, deleteFinished]);
-      expect(outcome).toEqual({ kind: 'resolved', value: undefined });
+      expect(outcome).toEqual({ kind: 'resolved', value: 'missing' });
       expect(raw.inTransaction).toBe(false);
       expect(msgState(raw, tempGuid)).toBeUndefined();
       expect(queueCount(raw, tempGuid)).toBe(0);
@@ -2202,7 +2210,7 @@ describe('sticky-error and ladder-ownership guards are IN the write', () => {
    * separate "is there a queue row?" SELECT meant that when the ack landed between the read and the
    * write, the UPDATE matched nothing, reported nothing, and the re-enqueue was never reached.
    */
-  it('applyServerSendError re-enqueues when the ladder is gone, instead of silently doing nothing', async () => {
+  it('applyServerSendError fails closed when a queue-less text payload cannot be reconstructed', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seedChat(db, 'c1');
     await insertOutgoingText(db, {
@@ -2219,20 +2227,21 @@ describe('sticky-error and ladder-ownership guards are IN the write', () => {
     await applyServerSendError(db, 'temp-reenq', 502, 5_000_000, true);
 
     expect(msgState(raw, 'temp-reenq')).toEqual({ s: 'error', e: 502 });
-    const q = raw
-      .prepare("SELECT kind, attempts a FROM outgoing_queue WHERE temp_guid='temp-reenq'")
-      .get() as { kind: string; a: number };
-    expect(q).toMatchObject({ kind: 'text', a: 1 });
+    expect(queueCount(raw, 'temp-reenq')).toBe(0);
   });
 
   it('keeps a public server-error re-enqueue out of a rolling-back neighbour', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seedChat(db, 'c1');
-    await insertOutgoingText(db, {
+    await insertOutgoingAttachment(db, {
       tempGuid: 'temp-queued-server-error',
+      attachmentGuid: 'temp-queued-server-error-att',
       chatId,
       chatGuid: 'c1',
-      text: 'relay after rollback',
+      localPath: 'file:///relay-after-rollback.jpg',
+      mimeType: 'image/jpeg',
+      transferName: 'relay-after-rollback.jpg',
+      totalBytes: 10,
       now: 1,
     });
     raw

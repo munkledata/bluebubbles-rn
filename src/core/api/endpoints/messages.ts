@@ -23,18 +23,31 @@ export const ServerMessageSearchList = z
 
 /**
  * The Gator write ops (send/react/attachment) return a `SendResult`, NOT a Message:
- * `{ guid?: string, viaPrivateApi: boolean }`. `guid` is the REAL message GUID on the
- * Private-API path (the ack) and is ABSENT on the AppleScript fallback (plain text only).
- * We parse only what we consume — the optional guid — and tolerate the extra `viaPrivateApi`.
+ * `{ guid?: string, viaPrivateApi: boolean, attemptGuid?: string }`. `guid` is the REAL message
+ * GUID on the Private-API path (the ack) and is ABSENT on the AppleScript fallback (plain text
+ * only). Newer RCS servers add `attemptGuid`: the server-owned identity for this admitted send,
+ * used to reject a delayed failure from an older retry. It remains optional for old servers.
  */
 export const SendAck = z
-  .object({ guid: z.string().nullish(), viaPrivateApi: z.boolean().nullish() })
+  .object({
+    guid: z.string().nullish(),
+    viaPrivateApi: z.boolean().nullish(),
+    attemptGuid: z.string().min(1).max(128).nullish(),
+    clientAttemptGeneration: z.number().int().min(1).max(2_147_483_647).nullish(),
+  })
   .loose();
 export type SendAck = z.infer<typeof SendAck>;
 
 /** `unsend-message` returns a status object `{ unsent: true }`, not a Message. */
 export const UnsendAck = z.object({ unsent: z.boolean().nullish() }).loose();
 export type UnsendAck = z.infer<typeof UnsendAck>;
+
+function requireMessagePartIndex(partIndex: number): number {
+  if (!Number.isSafeInteger(partIndex) || partIndex < 0 || partIndex > 10_000) {
+    throw new RangeError('A message action needs an exact part index from 0 through 10000');
+  }
+  return partIndex;
+}
 
 /** GET /api/v1/chat/{guid}/message — messages for a chat, newest first. */
 export async function chatMessages(
@@ -69,6 +82,8 @@ export interface SendTextParams {
   chatGuid: string;
   /** Client-generated temp GUID for optimistic send + reconciliation. */
   tempGuid: string;
+  /** Local request generation echoed by attempt-aware RCS success/error events. */
+  clientAttemptGeneration?: number;
   message: string;
   subject?: string;
   /** Reply target. */
@@ -92,20 +107,28 @@ export interface SendTextParams {
  * blank send). We keep `message` on the params and map it to `text` on the wire here.
  */
 export function sendText(http: HttpClient, params: SendTextParams): Promise<SendAck> {
+  if (
+    params.selectedMessageGuid === '' ||
+    (params.selectedMessageGuid !== undefined && params.partIndex === undefined) ||
+    (params.selectedMessageGuid === undefined && params.partIndex !== undefined)
+  ) {
+    throw new RangeError('A reply requires both selectedMessageGuid and partIndex');
+  }
+  const partIndex =
+    params.partIndex === undefined ? undefined : requireMessagePartIndex(params.partIndex);
   return http.post('/message/text', SendAck, {
     captureErrorDetail: true,
     json: {
       chatGuid: params.chatGuid,
       tempGuid: params.tempGuid,
+      clientAttemptGeneration: params.clientAttemptGeneration,
       method: params.method ?? 'private-api',
       text: params.message,
       subject: params.subject,
       selectedMessageGuid: params.selectedMessageGuid,
       // Plain sends have no target part. Keep the key absent unless this is a reply so the
       // ordinary send-message wire shape remains unchanged.
-      ...(params.selectedMessageGuid && params.partIndex !== undefined
-        ? { partIndex: params.partIndex }
-        : {}),
+      ...(params.selectedMessageGuid && partIndex !== undefined ? { partIndex } : {}),
       effectId: params.effectId,
       // Only sent when non-empty so the server keeps the plain send-message path otherwise.
       mentions: params.mentions?.length ? params.mentions : undefined,
@@ -128,6 +151,8 @@ export interface SendContactParams {
   chatGuid: string;
   /** Client-generated temp GUID for optimistic send + reconciliation. */
   tempGuid: string;
+  /** Local request generation echoed by attempt-aware RCS success/error events. */
+  clientAttemptGeneration?: number;
   firstName?: string;
   lastName?: string;
   organization?: string;
@@ -137,6 +162,8 @@ export interface SendContactParams {
   effectId?: string;
   /** Reply target. */
   selectedMessageGuid?: string;
+  /** Reply target part. Meaningful only when `selectedMessageGuid` is present. */
+  partIndex?: number;
 }
 
 /**
@@ -149,11 +176,21 @@ export interface SendContactParams {
  * phone, or email" refinement isn't tripped by an all-empty body.
  */
 export function sendContact(http: HttpClient, params: SendContactParams): Promise<SendAck> {
+  if (
+    params.selectedMessageGuid === '' ||
+    (params.selectedMessageGuid !== undefined && params.partIndex === undefined) ||
+    (params.selectedMessageGuid === undefined && params.partIndex !== undefined)
+  ) {
+    throw new RangeError('A contact reply requires both selectedMessageGuid and partIndex');
+  }
+  const partIndex =
+    params.partIndex === undefined ? undefined : requireMessagePartIndex(params.partIndex);
   return http.post('/message/contact', SendAck, {
     captureErrorDetail: true,
     json: {
       chatGuid: params.chatGuid,
       tempGuid: params.tempGuid,
+      clientAttemptGeneration: params.clientAttemptGeneration,
       firstName: params.firstName,
       lastName: params.lastName,
       organization: params.organization,
@@ -162,6 +199,7 @@ export function sendContact(http: HttpClient, params: SendContactParams): Promis
       subject: params.subject,
       effectId: params.effectId,
       selectedMessageGuid: params.selectedMessageGuid,
+      ...(params.selectedMessageGuid && partIndex !== undefined ? { partIndex } : {}),
     },
   });
 }
@@ -321,8 +359,8 @@ export interface SendReactionParams {
   reaction: string;
   /** The glyph for an 'emoji'/'-emoji' tapback. REQUIRED then; must be ABSENT for classic types. */
   emoji?: string;
-  /** Target part for multipart messages; defaults to 0. */
-  partIndex?: number;
+  /** Exact target part for multipart messages, including an explicit 0 on legacy servers. */
+  partIndex: number;
 }
 
 /**
@@ -344,7 +382,7 @@ export function sendReaction(http: HttpClient, params: SendReactionParams): Prom
       // The server REJECTS reactionEmoji on classic tapbacks (and requires it on
       // 'emoji'/'-emoji'), so the key must be ABSENT — not null — unless a glyph is given.
       ...(params.emoji ? { reactionEmoji: params.emoji } : {}),
-      partIndex: params.partIndex ?? 0,
+      partIndex: requireMessagePartIndex(params.partIndex),
     },
   });
 }
@@ -357,7 +395,7 @@ export interface EditMessageParams {
   editedMessage: string;
   /** Shown on un-updated devices; mirrors the Flutter client. */
   backwardsCompatibilityMessage: string;
-  partIndex?: number;
+  partIndex: number;
 }
 
 /**
@@ -374,7 +412,7 @@ export function editMessage(http: HttpClient, p: EditMessageParams): Promise<Sen
       chatGuid: p.chatGuid,
       editedText: p.editedMessage,
       backwardsCompatText: p.backwardsCompatibilityMessage,
-      partIndex: p.partIndex ?? 0,
+      partIndex: requireMessagePartIndex(p.partIndex),
     },
   });
 }
@@ -383,7 +421,7 @@ export interface UnsendMessageParams {
   /** Chat the message lives in — the server REQUIRES this (min 1). */
   chatGuid: string;
   messageGuid: string;
-  partIndex?: number;
+  partIndex: number;
 }
 
 /**
@@ -395,6 +433,6 @@ export interface UnsendMessageParams {
  */
 export function unsendMessage(http: HttpClient, p: UnsendMessageParams): Promise<UnsendAck> {
   return http.post(`/message/${encodeURIComponent(p.messageGuid)}/unsend`, UnsendAck, {
-    json: { chatGuid: p.chatGuid, partIndex: p.partIndex ?? 0 },
+    json: { chatGuid: p.chatGuid, partIndex: requireMessagePartIndex(p.partIndex) },
   });
 }

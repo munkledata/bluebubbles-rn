@@ -1,5 +1,6 @@
 import React, { useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { isAggregateRetractionTombstone } from '@core/messages/retraction';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import {
@@ -148,7 +149,7 @@ export const MessageRow = React.memo(function MessageRow({
   // bubble of a consecutive run (the tail); earlier bubbles in the run reserve the same gutter so
   // they stay aligned. Own messages + 1:1 chats need no avatar (it's obvious who's talking).
   const showAvatar = isGroup && msg.isFromMe !== 1;
-  const isEdited = !msg.dateRetracted && !!msg.dateEdited;
+  const isEdited = !isAggregateRetractionTombstone(msg) && !!msg.dateEdited;
 
   const headerNode = header ? (
     <Text style={[styles.sender, overlay, pill ? [styles.senderPill, pill] : null]}>

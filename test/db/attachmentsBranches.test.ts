@@ -11,6 +11,7 @@ import {
   getChatIdByGuid,
   insertOutgoingAttachment,
   type InsertOutgoingAttachmentArgs,
+  type OutgoingInsertResult,
   listAttachmentsByMessageIds,
   listChatAttachmentsByKind,
   listChatImageAttachmentsByAttachmentGuid,
@@ -398,7 +399,10 @@ describe('insertOutgoingAttachment — transaction owner and async lifetime', ()
     if (observationError) throw observationError;
 
     expect(neighbour).toEqual({ kind: 'resolved' });
-    expect(helper).toEqual({ kind: 'resolved', value: undefined });
+    expect(helper).toEqual({
+      kind: 'resolved',
+      value: { attemptOwnerToken: null },
+    });
     expectExactOutgoingAttachmentRows(raw, args, newerDate);
   });
 
@@ -440,7 +444,9 @@ describe('insertOutgoingAttachment — transaction owner and async lifetime', ()
     expect(latestMessageDate(raw, chatId)).toBeNull();
 
     raw.exec('DROP TRIGGER reject_outgoing_attachment_chat_update');
-    await expect(insertOutgoingAttachment(db, args)).resolves.toBeUndefined();
+    await expect(insertOutgoingAttachment(db, args)).resolves.toEqual({
+      attemptOwnerToken: null,
+    });
     expectExactOutgoingAttachmentRows(raw, args, args.now);
   });
 
@@ -524,7 +530,10 @@ describe('insertOutgoingAttachment — transaction owner and async lifetime', ()
 
     let helperSettled = false;
     let helperOutcome:
-      Promise<{ kind: 'resolved'; value: void } | { kind: 'rejected'; error: unknown }> | undefined;
+      | Promise<
+          { kind: 'resolved'; value: OutgoingInsertResult } | { kind: 'rejected'; error: unknown }
+        >
+      | undefined;
     try {
       helperOutcome = insertOutgoingAttachment(db, args)
         .then(
@@ -591,7 +600,10 @@ describe('insertOutgoingAttachment — transaction owner and async lifetime', ()
 
       stages.chat.release();
       const [outcome] = await Promise.all([helperOutcome, stages.chat.finished]);
-      expect(outcome).toEqual({ kind: 'resolved', value: undefined });
+      expect(outcome).toEqual({
+        kind: 'resolved',
+        value: { attemptOwnerToken: null },
+      });
       expect(helperSettled).toBe(true);
       expect(raw.inTransaction).toBe(false);
       expectExactOutgoingAttachmentRows(raw, args, args.now);

@@ -21,11 +21,21 @@ export const accountRevocationMarker = new ExpoAccountRevocationMarker();
 export const http = new HttpClient({
   getOrigin: sessionAccessors.getOrigin,
   getPassword: sessionAccessors.getPassword,
+  getTransportRevision: sessionAccessors.getTransportRevision,
 });
+
+/** A fixed credential tuple for setup validation or one authorized headless task. */
+export function fixedCredentialClient(
+  origin: string,
+  password: string,
+  isCurrent?: () => boolean,
+): HttpClient {
+  return new HttpClient({ getOrigin: () => origin, getPassword: () => password }, isCurrent);
+}
 
 /** A throwaway client for validating candidate credentials during setup. */
 export function candidateClient(origin: string, password: string): HttpClient {
-  return new HttpClient({ getOrigin: () => origin, getPassword: () => password });
+  return fixedCredentialClient(origin, password);
 }
 
 // ── Authenticated encryption (XChaCha20-Poly1305 + Argon2id) ───────────────────

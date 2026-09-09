@@ -5,6 +5,13 @@ import pkg from './package.json';
 const DEVELOPMENT_ANDROID_ARCHITECTURES = 'arm64-v8a,x86_64';
 const androidArchitectures =
   process.env.GATOR_ANDROID_ARCHITECTURES ?? DEVELOPMENT_ANDROID_ARCHITECTURES;
+const rnFetchEscapeHatch = process.env.EXPO_PUBLIC_USE_RN_FETCH?.trim().toLowerCase();
+
+if (rnFetchEscapeHatch === '1' || rnFetchEscapeHatch === 'true') {
+  throw new Error(
+    'EXPO_PUBLIC_USE_RN_FETCH must remain disabled so authenticated redirects fail before a follow-up request',
+  );
+}
 
 /**
  * Expo app config (Android-only target, iOS-styled UI).

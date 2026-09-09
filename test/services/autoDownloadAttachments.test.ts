@@ -9,11 +9,26 @@
 // under ts-jest). We drive listAttachmentsByMessageIds directly and never touch a real DB.
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
 jest.mock('@db/repositories', () => ({ listAttachmentsByMessageIds: jest.fn() }));
-jest.mock('@/services/download/index', () => ({ download: jest.fn() }));
+jest.mock('@/services/download/index', () => ({
+  download: jest.fn(),
+  downloadWithClient: jest.fn(),
+}));
+jest.mock('@/services/background/authorizedRealtimeTransport', () => ({
+  resolveAuthorizedRealtimeTransport: jest.fn(),
+}));
+jest.mock('@/services/download/attachmentCacheRecovery', () => ({
+  isAttachmentCacheRecoveryReady: jest.fn(),
+  recoverAttachmentCache: jest.fn(),
+}));
 jest.mock('@/services/media', () => ({ saveImageToLibrary: jest.fn() }));
 
 import { listAttachmentsByMessageIds } from '@db/repositories';
-import { download } from '@/services/download/index';
+import { download, downloadWithClient } from '@/services/download/index';
+import { resolveAuthorizedRealtimeTransport } from '@/services/background/authorizedRealtimeTransport';
+import {
+  isAttachmentCacheRecoveryReady,
+  recoverAttachmentCache,
+} from '@/services/download/attachmentCacheRecovery';
 import { saveImageToLibrary } from '@/services/media';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useToastStore } from '@ui/toast/toastStore';
@@ -24,12 +39,17 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 import {
   autoDownloadMessageAttachments,
+  autoDownloadMessageAttachmentsForRealtimeEvent,
   MAX_AUTO_DOWNLOAD_BYTES_PER_MESSAGE,
   MAX_AUTO_DOWNLOAD_FILES_PER_MESSAGE,
 } from '@/services/download/autoDownloadAttachments';
 
 const mockList = listAttachmentsByMessageIds as jest.Mock;
 const mockDownload = download as jest.Mock;
+const mockDownloadWithClient = downloadWithClient as jest.Mock;
+const mockResolveTransport = resolveAuthorizedRealtimeTransport as jest.Mock;
+const mockCacheReady = isAttachmentCacheRecoveryReady as jest.Mock;
+const mockRecoverCache = recoverAttachmentCache as jest.Mock;
 const mockSave = saveImageToLibrary as jest.Mock;
 const db = {} as never;
 
@@ -50,6 +70,10 @@ beforeEach(() => {
   servicePresentationAdapter.resetSession();
   mockList.mockReset();
   mockDownload.mockReset().mockResolvedValue('file:///dl/a1.jpg');
+  mockDownloadWithClient.mockReset().mockResolvedValue('file:///dl/a1.jpg');
+  mockResolveTransport.mockReset();
+  mockCacheReady.mockReset().mockReturnValue(true);
+  mockRecoverCache.mockReset().mockResolvedValue({ status: 'ready' });
   mockSave.mockReset().mockResolvedValue('saved');
   useFeatureSettingsStore.setState({
     hydrated: true,
@@ -96,6 +120,7 @@ describe('autoDownloadMessageAttachments', () => {
     expect(mockList).toHaveBeenCalledWith(db, [1], MAX_AUTO_DOWNLOAD_FILES_PER_MESSAGE, {
       excludeDeletedMessages: true,
       excludePluginPayloads: true,
+      excludeRetractedAttachments: true,
     });
     expect(mockDownload).not.toHaveBeenCalled();
   });
@@ -117,6 +142,106 @@ describe('autoDownloadMessageAttachments', () => {
       MAX_AUTO_DOWNLOAD_BYTES_PER_MESSAGE,
     );
     expect(mockSave).not.toHaveBeenCalled();
+  });
+
+  it('binds a realtime auto-download to its authorized task-local client', async () => {
+    const taskHttp = { task: 'http' };
+    const taskLease = { generation: 73, isCurrent: () => true };
+    mockResolveTransport.mockResolvedValue({ http: taskHttp, lease: taskLease });
+    mockList.mockResolvedValue(new Map([[1, [imageRow()]]]));
+
+    await autoDownloadMessageAttachmentsForRealtimeEvent(db, 1, 73);
+
+    expect(mockResolveTransport).toHaveBeenCalledWith(73);
+    expect(mockDownloadWithClient).toHaveBeenCalledWith(
+      taskHttp,
+      expect.objectContaining({ guid: 'a1' }),
+      'automatic',
+      taskLease,
+      expect.any(Function),
+      MAX_AUTO_DOWNLOAD_BYTES_PER_MESSAGE,
+    );
+    expect(mockDownload).not.toHaveBeenCalled();
+  });
+
+  it('composes a bounded headless-effect lifetime with the authorized transport lease', async () => {
+    let effectCurrent = true;
+    const taskLease = { generation: 73, isCurrent: () => true };
+    mockResolveTransport.mockResolvedValue({ http: { task: 'http' }, lease: taskLease });
+    mockList.mockResolvedValue(new Map([[1, [imageRow()]]]));
+
+    await autoDownloadMessageAttachmentsForRealtimeEvent(db, 1, 73, {
+      isEffectCurrent: () => effectCurrent,
+    });
+
+    const composedLease = mockDownloadWithClient.mock.calls[0]?.[3] as
+      { generation: number; isCurrent(): boolean } | undefined;
+    expect(composedLease).toEqual(
+      expect.objectContaining({ generation: 73, isCurrent: expect.any(Function) }),
+    );
+    expect(composedLease).not.toBe(taskLease);
+    expect(composedLease?.isCurrent()).toBe(true);
+    effectCurrent = false;
+    expect(composedLease?.isCurrent()).toBe(false);
+  });
+
+  it('keeps a bounded headless download in app cache without a non-cancellable Photos write', async () => {
+    const taskLease = { generation: 73, isCurrent: () => true };
+    mockResolveTransport.mockResolvedValue({ http: { task: 'http' }, lease: taskLease });
+    mockList.mockResolvedValue(new Map([[1, [imageRow()]]]));
+    useFeatureSettingsStore.setState({ autoDownloadDestination: 'album' });
+
+    const outcome = await autoDownloadMessageAttachmentsForRealtimeEvent(db, 1, 73, {
+      allowExternalMediaSave: false,
+    });
+
+    expect(mockDownloadWithClient).toHaveBeenCalledTimes(1);
+    expect(mockSave).not.toHaveBeenCalled();
+    expect(outcome).toEqual({ savedImages: 0, destination: null });
+  });
+
+  it('recovers a fresh killed-process cache before starting its task-local download', async () => {
+    const taskHttp = { task: 'http' };
+    const taskLease = { generation: 73, isCurrent: () => true };
+    mockResolveTransport.mockResolvedValue({ http: taskHttp, lease: taskLease });
+    mockCacheReady.mockReturnValue(false);
+    mockList.mockResolvedValue(new Map([[1, [imageRow()]]]));
+
+    await autoDownloadMessageAttachmentsForRealtimeEvent(db, 1, 73);
+
+    expect(mockRecoverCache).toHaveBeenCalledWith(db, taskLease);
+    expect(mockDownloadWithClient).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not recover the cache when persisted settings disable auto-download', async () => {
+    const taskLease = { generation: 73, isCurrent: () => true };
+    mockResolveTransport.mockResolvedValue({ http: { task: 'http' }, lease: taskLease });
+    mockCacheReady.mockReturnValue(false);
+    useFeatureSettingsStore.setState({ autoDownloadAttachments: false });
+
+    await autoDownloadMessageAttachmentsForRealtimeEvent(db, 1, 73);
+
+    expect(mockRecoverCache).not.toHaveBeenCalled();
+    expect(mockList).not.toHaveBeenCalled();
+    expect(mockDownloadWithClient).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['stale recovery', () => Promise.resolve({ status: 'stale' })],
+    ['failed recovery', () => Promise.reject(new Error('native scan unavailable'))],
+  ])('does not download after %s', async (_description, recovery) => {
+    const taskLease = { generation: 73, isCurrent: () => true };
+    mockResolveTransport.mockResolvedValue({ http: { task: 'http' }, lease: taskLease });
+    mockCacheReady.mockReturnValue(false);
+    mockRecoverCache.mockReturnValueOnce(recovery());
+    mockList.mockResolvedValue(new Map([[1, [imageRow()]]]));
+
+    await expect(autoDownloadMessageAttachmentsForRealtimeEvent(db, 1, 73)).resolves.toEqual({
+      savedImages: 0,
+      destination: null,
+    });
+
+    expect(mockDownloadWithClient).not.toHaveBeenCalled();
   });
 
   it('returns an album-save outcome for the mounted UI to batch into one toast', async () => {

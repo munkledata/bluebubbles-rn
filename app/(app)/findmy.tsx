@@ -120,7 +120,14 @@ export default function FindMyScreen(): React.JSX.Element {
         title="Find My"
         onBack={() => router.back()}
         right={
-          <Pressable onPress={() => void refresh()} hitSlop={8} disabled={refreshing}>
+          <Pressable
+            onPress={() => void refresh()}
+            hitSlop={8}
+            disabled={refreshing}
+            accessibilityRole="button"
+            accessibilityLabel="Refresh Find My"
+            accessibilityState={{ disabled: refreshing, busy: refreshing }}
+          >
             <Text numberOfLines={1} style={[styles.refresh, { color: theme.color.tint }]}>
               {refreshing ? 'Refreshing…' : 'Refresh'}
             </Text>
@@ -132,7 +139,14 @@ export default function FindMyScreen(): React.JSX.Element {
 
       <View style={[styles.tabs, { borderBottomColor: theme.color.separator }]}>
         {(['devices', 'items', 'people'] as const).map((t) => (
-          <Pressable key={t} onPress={() => setTab(t)} style={styles.tab}>
+          <Pressable
+            key={t}
+            onPress={() => setTab(t)}
+            style={styles.tab}
+            accessibilityRole="tab"
+            accessibilityLabel={t === 'devices' ? 'Devices' : t === 'items' ? 'Items' : 'People'}
+            accessibilityState={{ selected: tab === t }}
+          >
             <Text
               style={[
                 styles.tabText,
@@ -224,6 +238,8 @@ function DeviceRow({
     <Pressable
       onPress={point.visible ? onFocus : undefined}
       disabled={!point.visible}
+      accessible={false}
+      importantForAccessibility="no"
       style={[styles.row, { borderBottomColor: theme.color.separator }]}
     >
       <View style={styles.rowText}>
@@ -234,7 +250,12 @@ function DeviceRow({
         </Text>
       </View>
       {point.visible ? (
-        <Pressable onPress={() => onOpenLocation(point, name)} hitSlop={10}>
+        <Pressable
+          onPress={() => onOpenLocation(point, name)}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel={`Open ${name} in Maps`}
+        >
           <Text style={[styles.chev, { color: theme.color.tint }]}>Open ↗</Text>
         </Pressable>
       ) : null}
@@ -260,6 +281,8 @@ function FriendRow({
     <Pressable
       onPress={point.visible ? onFocus : undefined}
       disabled={!point.visible}
+      accessible={false}
+      importantForAccessibility="no"
       style={[styles.row, { borderBottomColor: theme.color.separator }]}
     >
       <View style={styles.rowText}>
@@ -267,7 +290,12 @@ function FriendRow({
         <Text style={[styles.sub, { color: theme.color.secondaryLabel }]}>{detail}</Text>
       </View>
       {point.visible ? (
-        <Pressable onPress={() => onOpenLocation(point, name)} hitSlop={10}>
+        <Pressable
+          onPress={() => onOpenLocation(point, name)}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel={`Open ${name} in Maps`}
+        >
           <Text style={[styles.chev, { color: theme.color.tint }]}>Open ↗</Text>
         </Pressable>
       ) : null}

@@ -22,6 +22,8 @@ export type SecretKey =
   | 'automationToken'
   // One crash-safe record for the per-device FCM key plus pending/active/revoked migration state.
   | 'fcmPushEncryptionV2'
+  // One bounded journal for crash-safe shared-password -> scoped-credential adoption.
+  | 'serverCredentialUpgrade'
   // App-lock enabled flag. Lives OUTSIDE the encrypted DB so boot can decide whether
   // to show the UI gate before the database is initialized — hence the vault, not kv.
   | 'appLockEnabled';

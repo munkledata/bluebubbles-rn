@@ -58,22 +58,21 @@ Deliver this as three independent slices:
    previews. Text, subjects, ordinary attachments, and actually rendered URL cards take precedence.
    Raw bundle identifiers are never displayed or opened, and extension payload attachments remain
    hidden even when a lean notification omitted their hidden flag.
-2. `FEAT-03B` preserves bounded `partCount` and associated-message part identity through live
-   ingestion, sync, persistence, and retry. Parse exactly one outer `p:<n>/` or `bp:<n>/` prefix;
-   strip the helper's legacy `bp:<guid>` attachment wrapper while keeping its part unknown; unknown
-   identity stays distinct from the real part zero. For an aggregate bubble, resolve the
-   common attachment-caption text part from the visible attachment count only when `partCount`
-   proves that index exists; otherwise retain the legacy part-zero fallback. Replies, reactions,
-   edits, unsend, local scheduling, and retry payloads carry that resolved part. Reaction removal
-   prefers the part stored on the user's active reaction, and aggregate display keeps the newest
-   same-sender/kind reaction without discarding its removal target. Until the server exposes stable
-   normalized per-part topology and incoming reply-part identity, this remains a compatibility path
-   rather than proof of every Apple multipart layout. Unsend requests target the resolved part, but
-   local presentation intentionally keeps the existing aggregate tombstone: partial visual
-   preservation also affects inbox eligibility, search, notifications, and attachment-cache
-   ownership, so it needs one later shared classifier backed by live topology evidence.
-3. `FEAT-03C` adds text-plus-attachment sending only behind an explicit negotiated capability with
-   one logical optimistic/retry identity and truthful disablement on older servers.
+2. `FEAT-03B` preserves bounded `partCount`, normalized exact part topology, attachment ownership,
+   and associated-message part identity through live ingestion, sync, persistence, and retry. Migration
+   `0047_message_retraction_topology` stores that durable evidence. Parse exactly one outer `p:<n>/`
+   or `bp:<n>/` prefix and preserve a normalized received reply/reaction part. Complete topology is
+   authoritative; malformed or incomplete topology fails closed, and only a proven older server may
+   use the narrow legacy part-zero compatibility rule. Replies, reactions, edits, unsend, supported
+   iMessage contact-card replies, local scheduling, optimistic rows, and retry payloads carry the resolved target. A
+   shared classifier uses complete topology to preserve only proven surviving text and attachments across
+   bubbles, inbox/search, notifications, and attachment-cache ownership. RCS reactions may use part
+   zero only for a proven whole `rcs-*` message; that exception must not enable RCS reply threading,
+   edits, or unsend.
+3. `FEAT-03C` sends one attachment plus its text only behind the matching chat-service capability,
+   with one logical optimistic/retry identity and truthful disablement on older servers. RCS and
+   iMessage capabilities remain independent: support for one service must never be inferred for the
+   other, and authored text/attachment/reply state stays in the composer until durable queue admission.
 
 <a id="feat-04"></a>
 
@@ -196,3 +195,40 @@ it separate from the account-wide active-alias setting. Unsupported servers show
 Extract the selected user-facing strings, use locale-aware dates, numbers, and plurals, define a
 translation/versioning workflow, and audit RTL, long strings, layout, and screen-reader output before
 claiming multilingual support.
+
+The selected first-release surface is the first-run setup journey under `app/(setup)`. Keep English as
+the required source catalog and access it through the typed boundary in `src/utils/i18n.ts`. A contributor
+adds or changes the English key in the same change as its screen, formats numbers separately, and never
+passes names, message bodies, server errors, URLs, credentials, or other runtime data through a pseudo-text
+transform. Technical tokens may use an explicitly reviewed non-transforming catalog entry when altering the
+token would make a test unsafe or misleading.
+
+Catalog keys are stable identifiers once released. Rename or delete one only with every call site in the same
+change; backports add keys rather than repurposing an existing key with unrelated meaning. A future translated
+catalog must declare its supported locale and plural behavior alongside the English key set, and CI must reject
+missing or extra keys before that locale is advertised. Until then, unsupported locales deliberately use English
+text with locale-aware number formatting.
+
+`en-XA` provides deterministic accenting plus at least 30% proportional expansion of each nonempty catalog literal;
+`ar-XB` provides mirrored catalog text plus an RTL direction signal. These are development audit tools, not advertised
+translations. Each converted screen must be checked for pseudo text without transforming runtime values; the
+release-level task additionally requires native RTL layout, long-string/dynamic-font review, and screen-reader proof
+on Android.
+
+`FEAT-08A` extracts the Syncing screen's prose and fixes its English `1 chat` / `1 message` grammar. `FEAT-08B`
+extracts Manual Connection's fixed prose while keeping its URL/scheme tokens, typed credentials, and live session
+error outside pseudo transformation. `FEAT-08C` extracts the Connect choice screen and preserves both accessible
+navigation actions. Manual and Connect interpolate a reviewed exact `Gator Server` value while transforming only the
+surrounding pseudo sentence. `FEAT-08D` extracts normal and DEV-only Welcome copy, with the Gator brand kept exact when
+its surrounding recovery sentence is pseudo-localized. `FEAT-08E` extracts Permissions route copy and adds fail-closed
+placeholder formatting: pseudo-locales transform only literal catalog segments while app-name and locale-formatted
+count replacements remain exact. `FEAT-08F` extracts Scan's route-owned copy while treating raw QR credentials plus
+session errors as untransformed data. Its parser now emits one of four typed codes plus a fixed non-presentational
+message; Scan maps those codes exhaustively and never reads parser prose or passes raw QR data into formatting. Its
+paired builder also emits a typed fixed error rather than English presentation prose. All six routes are host-green
+foundations. `FEAT-08G` extracts the shared Contacts rationale/recovery/settings helper used by setup, Settings, and
+Send Contact; each operation resolves one current locale while preserving its session fences. `FEAT-08H` makes
+`en-XA` a meaningful deterministic long-string stress tool and applies the resolved direction to the safe-area app
+root once per mount, covering route and non-route content without persistent `I18nManager` mutation. Exact Android
+Hermes pseudo-locale activation, native-stack/camera/modal/TextInput RTL behavior, maximum-font-scale layout, and
+TalkBack reading order remain device-only evidence and keep the parent open.

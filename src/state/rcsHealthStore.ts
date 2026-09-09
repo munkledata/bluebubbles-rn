@@ -3,12 +3,14 @@ import { create } from 'zustand';
 /**
  * Holds the most-recent Gator RCS-bridge (`rcs-alert`) alert so the Server Health screen can show
  * whether the bridge is healthy, phone-offline, or disconnected (cookies expired). This is the
- * app's ONLY live RCS-health signal: the sidecar's rich `/status` block is admin-only (loopback
+ * app's primary live RCS-health signal: the sidecar's rich `/status` block is admin-only (loopback
  * dashboard), so a remote app can't poll it — it learns of bridge trouble from these socket alerts.
+ * A server-confirmed in-app re-auth may record the recovery-equivalent `BROWSER_ACTIVE` signal so
+ * the alert that prompted the request does not remain visible after a verified reconnection.
  *
  * Latest-alert-wins: a recovery alert (e.g. PHONE_RESPONDING_AGAIN, BROWSER_ACTIVE) overwrites a
  * prior warning, which `deriveRcsHealth` maps back to healthy. Best-effort + ephemeral (not
- * persisted): a fresh connection starts from "no alert seen" = healthy.
+ * persisted): a fresh connection starts from "no alert seen" = unknown.
  */
 interface RcsHealthState {
   /** The `alertType` from the last `rcs-alert` event, or null if none seen this session. */

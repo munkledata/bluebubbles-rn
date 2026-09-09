@@ -211,6 +211,11 @@ function removeRepairMessagesWithinTransaction(
                WHERE reminder.message_guid = ${candidate.guid}
             )`,
             sql`NOT EXISTS (
+              SELECT 1 FROM chats rcs_chat
+               WHERE rcs_chat.id = ${candidate.chatId}
+                 AND rcs_chat.guid LIKE 'RCS;-;%'
+            )`,
+            sql`NOT EXISTS (
               SELECT 1 FROM attachments child
                WHERE child.message_id = ${candidate.id}
             )`,
@@ -283,8 +288,10 @@ function removeRepairAttachmentsWithinTransaction(
             eq(attachments.messageId, candidate.messageId),
             sql`EXISTS (
               SELECT 1 FROM messages parent
+              JOIN chats parent_chat ON parent_chat.id = parent.chat_id
                WHERE parent.id = ${candidate.messageId}
                  AND parent.guid = ${candidate.messageGuid}
+                 AND parent_chat.guid NOT LIKE 'RCS;-;%'
                  AND parent.date_deleted IS NULL
                  AND (parent.send_state IS NULL OR parent.send_state = 'sent')
                  AND NOT (
@@ -421,8 +428,9 @@ function retireRepairChatWithinTransaction(
 }
 
 /**
- * Retire only exact rows exposed before the two server crawls. The caller must first prove both
- * complete views agree; this function deliberately knows nothing about network completeness.
+ * Retire only exact rows exposed before the server crawl. The caller must first prove that complete
+ * view was stable; this function deliberately knows nothing about network completeness. RCS rows
+ * remain outside absence authority because the server cache is intentionally bounded.
  */
 export async function reconcileFullRepairPruneExposure(
   db: AppDatabase,
@@ -471,6 +479,7 @@ export async function reconcileFullRepairPruneExposure(
   let chatShellsRetired = 0;
   let chatsPreservedForLocalWork = 0;
   for (const row of exposure.chats) {
+    if (row.guid.startsWith('RCS;-;')) continue;
     if (view.chatGuids.has(row.guid)) continue;
     const outcome = await withDbTransaction(
       db,

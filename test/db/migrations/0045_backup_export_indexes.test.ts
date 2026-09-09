@@ -55,7 +55,11 @@ describe('migration 0045_backup_export_indexes', () => {
       raw.prepare('INSERT INTO chats (guid) VALUES (?)').run('chat-ordinary-before-0045');
 
       stopBefore0045.value = false;
-      await expect(runMigrations(runner)).resolves.toEqual([MIGRATION_NAME]);
+      await expect(runMigrations(runner)).resolves.toEqual([
+        MIGRATION_NAME,
+        '0046_message_send_attempt_owner',
+        '0047_message_retraction_topology',
+      ]);
 
       expect(indexColumns(raw, 'themes_backup_export_idx')).toEqual(['is_preset', 'id']);
       expect(indexColumns(raw, 'chats_backup_export_idx')).toEqual(['id']);

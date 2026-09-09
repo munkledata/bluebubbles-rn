@@ -8,12 +8,17 @@ import {
   type EventDeliveryContext,
   type NormalizedEvent,
 } from '@core/realtime';
-import { INCOMING_EVENT_LEASE_MS, enqueueIncomingEvent } from '@db/repositories';
+import {
+  INCOMING_EVENT_DEPENDENCY_RETRY_MS,
+  INCOMING_EVENT_LEASE_MS,
+  INCOMING_EVENT_MAX_ATTEMPTS,
+  enqueueIncomingEvent,
+} from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import { buildMessageIntents } from '@/services/notifications/intents';
 import { IncomingEventDrain } from '@/services/realtime/incomingEventDrain';
 import { effectivelyLocked } from '@/services/notifications/lockGate';
-import { DbEventSink } from '@/services/realtime/dbEventSink';
+import { DbEventSink, RealtimeMessageChatUnavailableError } from '@/services/realtime/dbEventSink';
 import { NotifyingEventSink } from '@/services/realtime/notifyingEventSink';
 import { createTestDb } from '../support/testDb';
 
@@ -201,6 +206,88 @@ describe('incoming event drain', () => {
     expect(raw.prepare(`SELECT state, payload FROM incoming_event_queue`).get()).toEqual({
       state: 'completed',
       payload: null,
+    });
+  });
+
+  it('defers an expected dependency repeatedly without spending poison attempts, until expiry', async () => {
+    const { db, raw } = await createTestDb();
+    await enqueue(db, message('drain-dependency'));
+    const expiresAt = (
+      raw.prepare(`SELECT expires_at AS expiresAt FROM incoming_event_queue`).get() as {
+        expiresAt: number;
+      }
+    ).expiresAt;
+    let clock = START;
+    let leaseCounter = 0;
+    const permanentFailure = jest.fn();
+    const dependencyDeferred = jest.fn();
+    const handler = {
+      handleNormalized: jest.fn(async () => {
+        if (clock === expiresAt - 1) clock = expiresAt;
+        throw new RealtimeMessageChatUnavailableError('private-message', 'private-chat');
+      }),
+    };
+    const drain = new IncomingEventDrain(db, handler, digest, {
+      now: () => clock,
+      makeLeaseToken: () => `dependency-lease-${++leaseCounter}`,
+      scheduleContinuation: jest.fn(),
+      scheduleWake: jest.fn(() => 1 as unknown as ReturnType<typeof setTimeout>),
+      cancelWake: jest.fn(),
+      onPermanentFailure: permanentFailure,
+      onDependencyDeferred: dependencyDeferred,
+    });
+
+    for (let wait = 0; wait < INCOMING_EVENT_MAX_ATTEMPTS + 2; wait += 1) {
+      await drain.kick(lease());
+      const row = raw
+        .prepare(
+          `SELECT state, payload, attempts, claim_version AS claimVersion,
+                  next_attempt_at AS nextAttemptAt, last_error_code AS lastErrorCode
+             FROM incoming_event_queue`,
+        )
+        .get() as {
+        state: string;
+        payload: string | null;
+        attempts: number;
+        claimVersion: number;
+        nextAttemptAt: number;
+        lastErrorCode: string | null;
+      };
+      expect(row).toEqual({
+        state: 'pending',
+        payload: expect.any(String),
+        attempts: 0,
+        claimVersion: wait + 1,
+        nextAttemptAt: clock + INCOMING_EVENT_DEPENDENCY_RETRY_MS,
+        lastErrorCode: 'dependency-pending',
+      });
+      clock = row.nextAttemptAt;
+    }
+
+    expect(handler.handleNormalized).toHaveBeenCalledTimes(INCOMING_EVENT_MAX_ATTEMPTS + 2);
+    expect(dependencyDeferred).toHaveBeenCalledTimes(INCOMING_EVENT_MAX_ATTEMPTS + 2);
+    expect(permanentFailure).not.toHaveBeenCalled();
+
+    // The dependency path refunds attempts, not lifetime. A claim that crosses the original
+    // 24-hour expiry is still terminal and payload-scrubbed.
+    clock = expiresAt - 1;
+    await drain.kick(lease());
+    expect(permanentFailure).toHaveBeenCalledWith('new-message', expect.any(Object));
+    expect(
+      raw
+        .prepare(
+          `SELECT state, payload, attempts, next_attempt_at AS nextAttemptAt,
+                  terminal_at AS terminalAt, last_error_code AS lastErrorCode
+             FROM incoming_event_queue`,
+        )
+        .get(),
+    ).toEqual({
+      state: 'poisoned',
+      payload: null,
+      attempts: 0,
+      nextAttemptAt: 0,
+      terminalAt: expiresAt,
+      lastErrorCode: 'expired',
     });
   });
 

@@ -10,6 +10,10 @@ import type { SyncCursor } from '@core/sync';
 export interface SyncApi {
   /** Server version, used to pick the incremental cursor mode. */
   serverVersion(signal?: AbortSignal): Promise<string>;
+  /** Begin/finish a server-side stability proof around destructive full repair. */
+  beginRepairSnapshot?(signal?: AbortSignal): Promise<{ token: string; expiresAt: number }>;
+  finishRepairSnapshot?(token: string, signal?: AbortSignal): Promise<void>;
+  cancelRepairSnapshot?(token: string, signal?: AbortSignal): Promise<void>;
   /** One exact chat for targeted repair; optional only for legacy/test adapters. */
   fetchChat?(chatGuid: string, signal?: AbortSignal): Promise<Chat>;
   fetchChats(offset: number, limit: number, signal?: AbortSignal): Promise<Chat[]>;

@@ -6,6 +6,7 @@ import { asRecurrence, nextOccurrence, type Recurrence } from '@core/schedule';
 import { logger } from '@core/secure';
 import {
   claimDueScheduled,
+  deferScheduledClaim,
   insertScheduledWithinTransaction,
   listDueScheduled,
   markScheduledFailed,
@@ -13,11 +14,20 @@ import {
   rearmScheduled,
   resetStuckScheduled,
   ScheduledOutgoingClaimLostError,
+  ScheduledOutgoingTargetUnavailableError,
+  MessageTargetCapabilityUnknownError,
+  type MessageTargetServerAuthorization,
   type ScheduledRow,
   type ScheduledTextHandoverTransition,
 } from '@db/repositories';
-import { withDbTransaction } from '@db/transaction';
+import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
+import {
+  messageTargetCommitGuard,
+  messageTargetServerAuthorization,
+  resolveRcsAttemptOwnership,
+  type RcsCapabilitySource,
+} from './rcsAttemptCapability';
 import { sendTextMessage } from './sendService';
 
 export interface ScheduleArgs {
@@ -100,6 +110,15 @@ function recoveryBatchRows(maxRows?: number): number {
   return Math.floor(maxRows);
 }
 
+function targetAuthorizationForSource(
+  source: RcsCapabilitySource | undefined,
+  accountScope?: ScheduledOperationScope,
+): MessageTargetServerAuthorization | undefined {
+  const sourceCurrent = (): boolean =>
+    (accountScope?.isCurrent() ?? true) && (source?.kind !== 'session' || source.isCurrent());
+  return messageTargetServerAuthorization(source?.serverInfo, sourceCurrent);
+}
+
 async function recoverInterruptedScheduledRows(
   db: AppDatabase,
   accountScope: ScheduledOperationScope | undefined,
@@ -174,6 +193,7 @@ export async function scheduleTextMessage(
   http: HttpClient,
   args: ScheduleArgs,
   accountScope?: ScheduledOperationScope,
+  capabilitySource?: RcsCapabilitySource,
 ): Promise<{ id: number; serverId: string | null }> {
   assertScheduledScope(accountScope);
   const commitGuard = accountScope ? () => accountScope.isCurrent() : undefined;
@@ -197,11 +217,36 @@ export async function scheduleTextMessage(
     }
   }
   assertScheduledScope(accountScope);
-  const id = await withDbTransaction(
-    db,
-    (context) => insertScheduledWithinTransaction(context, { ...args, serverId }),
-    commitGuard,
-  );
+  let serverAuthorization = targetAuthorizationForSource(capabilitySource, accountScope);
+  const insert = () =>
+    withDbTransaction(
+      db,
+      (context) =>
+        insertScheduledWithinTransaction(context, { ...args, serverId }, serverAuthorization),
+      messageTargetCommitGuard(commitGuard, serverAuthorization),
+    );
+  let id: number;
+  try {
+    id = await insert();
+  } catch (error) {
+    if (!(error instanceof MessageTargetCapabilityUnknownError) || !args.selectedMessageGuid) {
+      throw error;
+    }
+    const capability = await resolveRcsAttemptOwnership(
+      http,
+      args.chatGuid,
+      commitGuard ?? (() => true),
+      capabilitySource,
+      { requireServerInfo: true },
+    );
+    serverAuthorization = messageTargetServerAuthorization(
+      capability.serverInfo,
+      () =>
+        (accountScope?.isCurrent() ?? true) &&
+        (capabilitySource?.kind !== 'session' || capabilitySource.isCurrent()),
+    );
+    id = await insert();
+  }
   assertScheduledScope(accountScope);
   return { id, serverId };
 }
@@ -246,6 +291,8 @@ export async function runDueScheduled(
   sender?: Sender,
   accountScope?: ScheduledOperationScope,
   maxRows?: number,
+  /** Capture foreground cache provenance or fixed task-local info for each physical handoff. */
+  captureCapabilitySource?: () => RcsCapabilitySource | undefined,
 ): Promise<number> {
   assertScheduledScope(accountScope);
   await ensureScheduledRecovery(db, accountScope, maxRows);
@@ -265,13 +312,62 @@ export async function runDueScheduled(
     // the row returned by that claim, so an intervening edit cannot send stale text or a future/
     // server-owned occurrence.
     let m: ScheduledRow | null;
+    const capabilitySource = captureCapabilitySource?.();
+    let serverAuthorization = targetAuthorizationForSource(capabilitySource, accountScope);
     try {
-      m = await claimDueScheduled(db, candidate.id, now, commitGuard);
+      m = await claimDueScheduled(
+        db,
+        candidate.id,
+        now,
+        messageTargetCommitGuard(commitGuard, serverAuthorization),
+        serverAuthorization,
+      );
     } catch (error) {
-      // A scope revoked inside the claim transaction reports the scheduler's public session error,
-      // while an unrelated database failure keeps its original diagnostic.
-      assertScheduledScope(accountScope);
-      throw error;
+      if (error instanceof MessageTargetCapabilityUnknownError && candidate.selectedMessageGuid) {
+        let capability;
+        try {
+          capability = await resolveRcsAttemptOwnership(
+            http,
+            candidate.chatGuid,
+            commitGuard ?? (() => true),
+            capabilitySource,
+            { requireServerInfo: true },
+          );
+        } catch {
+          assertScheduledScope(accountScope);
+          // Capability discovery is temporary eligibility, not a send attempt.
+          continue;
+        }
+        serverAuthorization = messageTargetServerAuthorization(
+          capability.serverInfo,
+          () =>
+            (accountScope?.isCurrent() ?? true) &&
+            (capabilitySource?.kind !== 'session' || capabilitySource.isCurrent()),
+        );
+        try {
+          m = await claimDueScheduled(
+            db,
+            candidate.id,
+            now,
+            messageTargetCommitGuard(commitGuard, serverAuthorization),
+            serverAuthorization,
+          );
+        } catch (claimError) {
+          assertScheduledScope(accountScope);
+          if (
+            claimError instanceof MessageTargetCapabilityUnknownError ||
+            claimError instanceof DbCommitGuardRejectedError
+          ) {
+            continue;
+          }
+          throw claimError;
+        }
+      } else {
+        // A scope revoked inside the claim transaction reports the scheduler's public session error,
+        // while an unrelated database failure keeps its original diagnostic.
+        assertScheduledScope(accountScope);
+        throw error;
+      }
     }
     if (!m) continue;
     assertScheduledScope(accountScope);
@@ -344,6 +440,8 @@ export async function runDueScheduled(
           Date.now(),
           recordAtomicHandover,
           { scheduledId: m.id, transition, commitGuard },
+          undefined,
+          captureCapabilitySource?.(),
         );
       }
       assertScheduledScope(accountScope);
@@ -354,10 +452,21 @@ export async function runDueScheduled(
       assertScheduledScope(accountScope);
       // A throw BEFORE the handover is an ordinary send failure: release/retire the row.
       if (!settled) {
+        if (
+          e instanceof MessageTargetCapabilityUnknownError ||
+          e instanceof DbCommitGuardRejectedError
+        ) {
+          await deferScheduledClaim(db, m.id, commitGuard);
+          continue;
+        }
         // A compare-and-set miss means this runner no longer owns the scheduled row. Do not
         // overwrite its newer state with a failure transition.
         if (e instanceof ScheduledOutgoingClaimLostError) {
           logger.debug('[sched] outgoing handoff skipped after scheduled claim changed');
+          continue;
+        }
+        if (e instanceof ScheduledOutgoingTargetUnavailableError) {
+          logger.debug('[sched] scheduled reply retired after its target became unavailable');
           continue;
         }
 

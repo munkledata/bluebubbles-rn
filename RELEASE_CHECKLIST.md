@@ -9,7 +9,23 @@ history and is not executable evidence for a replacement candidate. Do not copy 
 build into this file. Section 0 is the next private Internal Testing gate; Sections 1–7 remain the
 broader Closed/Open/Production release gate.
 
-Current locally promoted candidate — static artifact proof only; no Play, server, or device result:
+Current release-candidate status — **OPEN; no uploadable candidate exists.** Source changes made after
+the 2026-09-04 freeze supersede the former v59 artifact below. It must not be uploaded, submitted, or
+installed as the replacement, and cannot be credited toward any replacement source, artifact, Play,
+or device gate.
+
+A replacement must be built as a new local production AAB and then frozen from its release receipts.
+Do not claim that replacement exists until all of these fields are recorded from the same run:
+
+- Version/build number: `[OPEN]`
+- Exact source and release commits: `[OPEN]`
+- Release run and local AAB: `[OPEN]`
+- AAB size/SHA-256: `[OPEN]`
+- Upload certificate SHA-256: `[OPEN — reverify from the replacement]`
+- Tester/device/Android versions and test date: `[OPEN]`
+
+Superseded v59 candidate — historical static artifact proof only; no result transfers to a
+replacement:
 
 - Version/build number: `0.1.43 (versionCode 59)`
 - Source commit: `7a3aa2058ad1bea4252379b2ea3df285e1fd94ef`
@@ -21,6 +37,10 @@ Current locally promoted candidate — static artifact proof only; no Play, serv
 - Build provenance: local EAS production build on 2026-09-04; Gradle `BUILD SUCCESSFUL`; validation and local promotion passed; no hosted build or submission
 - Tester/device/Android versions: `[OPEN]`
 - Test date: `[OPEN]`
+
+The v59 build, validation, promotion, signing, manifest, and package-inspection records are retained
+only to explain what happened on 2026-09-04. Any checklist item that requires the exact candidate,
+AAB, install, Play delivery, or device behavior must be repeated for the replacement.
 
 Superseded pre-WebView-removal candidate — static artifact proof only; do not upload, submit, or use
 it as current runtime, package-removal, Play, or device evidence because it predates `4fca556`:
@@ -62,7 +82,8 @@ Open, or Production promotion, or earlier if Play flags the internal app.
       build phase cannot submit; the separate submit phase previews by default and requires `--execute`,
       an interactive candidate-specific phrase, and reviewed operator approval.
 - [ ] Play Console confirms no Closed, Open, or Production release is active before submission.
-- [x] Version/build, source and release commits, AAB SHA-256, and build provenance are recorded above.
+- [ ] The replacement version/build, source and release commits, AAB SHA-256, upload certificate,
+      and build provenance are recorded above. The superseded v59 record does not satisfy this gate.
 - [ ] Tester devices, Android versions, and test date are recorded above.
 - [ ] The intended tester list, opt-in link, feedback destination, and named response owner work.
 - [ ] Testers use a stable non-production server/setup path and no production-user data or credentials.
@@ -112,33 +133,37 @@ GOOGLE_SERVICES_JSON=./test/fixtures/google-services.ci.json \
   ./node_modules/.bin/expo export --platform android --output-dir dist-ci
 ```
 
-- [x] The workflow supply-chain, architecture-boundary, and secret-hygiene guards pass their tests
-      and live scans.
-- [x] Both complete Jest runs pass; neither has order-dependent failures or unexpected console noise.
-- [x] Expo dependency validation and the local pinned Doctor pass 20/20. The isolated EAS worker's
-      19/20 local-module-directory advisory is retained; Gradle and AAB inspection prove all four
-      owned modules compiled and were packaged.
-- [x] Full and production dependency audits have no unreviewed high/critical advisory.
-- [x] The production Android Expo export completes with `__DEV__` false.
-- [x] The lockfile is unchanged after the clean install.
+- [ ] On the frozen replacement source, the workflow supply-chain, architecture-boundary, and
+      secret-hygiene guards pass their tests and live scans.
+- [ ] Both replacement-source Jest runs pass; neither has order-dependent failures or unexpected
+      console noise.
+- [ ] Expo dependency validation and the local pinned Doctor pass 20/20 on the replacement source.
+      Clean native autolinking, compilation, tests, and AAB inspection prove all five owned modules
+      are present; an older EAS-worker module-directory advisory supplies no replacement credit.
+- [ ] Full and production dependency audits have no unreviewed high/critical advisory on the frozen
+      lockfile; every remaining lower-severity advisory has a recorded disposition.
+- [ ] The replacement production Android Expo export completes with `__DEV__` false.
+- [ ] The replacement lockfile is unchanged after its clean install.
 
 ## 3. Environment and credentials
 
 - [x] `GOOGLE_SERVICES_JSON` is configured as an EAS **file** variable in the `development`,
       `preview`, and `production` environments and matches the Android application id.
 - [ ] A non-secret smoke variable proves that each named EAS environment selects the intended values.
-- [x] No `.env`, Firebase config, signing key, service-account file, password, token, or local build
-      artifact is present in the uploaded source bundle.
-- [x] The managed Android upload-signing credential produced the exact candidate and is not stored in
-      Git.
+- [ ] No `.env`, Firebase config, signing key, service-account file, password, token, or local build
+      artifact is present in the replacement uploaded source bundle.
+- [ ] The managed Android upload-signing credential produces the replacement candidate, its
+      certificate is recorded above, and the credential is not stored in Git. The superseded v59
+      signing result is historical only.
 - [ ] Play submission credentials and live Console access are available to the release owner.
 - [ ] Production error reporting is either deliberately disabled or uses a reviewed redacting sink;
       there is no hidden telemetry or placeholder credential.
 
 ## 4. Clean native candidate
 
-Do not rebuild or silently rerun the frozen candidate recorded above. For a later replacement, run
-each phase separately and review its receipt before continuing:
+Do not rebuild, submit, or silently reuse the superseded v59 candidate recorded above. Build the
+replacement as a new local production AAB, running each phase separately and reviewing its receipt
+before continuing:
 
 ```sh
 npm run release:android:preflight -- --version <x.y.z> --source <full-sha>
@@ -161,6 +186,12 @@ their recorded state. Reconciliation never invokes EAS or submits an artifact.
 
 Build from a clean generated Android project. CI must perform the equivalent checks before release:
 
+The Android CI job fixes `GRADLE_USER_HOME` outside the checkout and supplies exact
+`-ffile-prefix-map` plus `-fdebug-prefix-map` flags for both the checkout and Gradle cache, mapping
+them to `/gator/source` and `/gator/gradle`. The release runner creates equivalent owner-only,
+run-scoped directories beneath `/private/tmp`; do not inherit a caller-selected Gradle home, C/C++
+flags, or retained EAS local-build workspace.
+
 ```sh
 GOOGLE_SERVICES_JSON=./test/fixtures/google-services.ci.json \
   npx expo prebuild --platform android --clean --no-install
@@ -169,32 +200,49 @@ cd android
 ./gradlew \
   :gator-paste-input:compileDebugKotlin \
   :gator-share-shortcuts:compileDebugKotlin \
+  :gator-bounded-document:compileDebugKotlin \
   :gator-bounded-download:compileDebugKotlin \
   :gator-screen-security:compileDebugKotlin \
-  :app:assembleDebug \
   --no-daemon
+./gradlew \
+  :gator-paste-input:testDebugUnitTest \
+  :gator-share-shortcuts:testDebugUnitTest \
+  :gator-bounded-document:testDebugUnitTest \
+  :gator-bounded-download:testDebugUnitTest \
+  :expo-file-system:testDebugUnitTest \
+  --no-daemon
+./gradlew :app:assembleDebug --no-daemon
 ./gradlew :app:bundleRelease --no-daemon
 cd ..
+npm run check:android-native-paths
 npm run check:android-build
 ```
 
-- [x] All four local Expo modules are discovered by autolinking and compile through Expo's aggregate
-      Android module during the app builds.
-- [x] The candidate is a new signed native build; this project does not currently ship
+- [ ] All five local Expo modules are discovered by autolinking and compile through Expo's aggregate
+      Android module during the replacement app build.
+- [ ] Every discovered release/RelWithDebInfo native compiler command contains exactly one correct
+      source and Gradle file/debug prefix map; the checker rejects missing, duplicate, conflicting,
+      stale, symlinked, or wrong-tree evidence before AAB validation.
+- [ ] The replacement candidate is a new signed native build; this project does not currently ship
       `expo-updates` or EAS update channels.
-- [x] The release bundle/export completes with production behavior (`__DEV__` false).
-- [x] The generated entry still registers FCM, notification, and background tasks before
+- [ ] The replacement release bundle/export completes with production behavior (`__DEV__` false).
+- [ ] The replacement generated entry registers FCM, notification, and background tasks before
       `expo-router/entry`.
-- [x] The final AAB manifest, not only `app.config.ts`, passes the permission/share-target/headless
-      guard.
-- [x] `WRITE_CONTACTS`, `READ_MEDIA_AUDIO`, `SCHEDULE_EXACT_ALARM`, `USE_EXACT_ALARM`,
+- [ ] The replacement AAB manifest, not only `app.config.ts`, passes the
+      permission/share-target/headless guard.
+- [ ] `WRITE_CONTACTS`, `READ_MEDIA_AUDIO`, `SCHEDULE_EXACT_ALARM`, `USE_EXACT_ALARM`,
       `USE_FULL_SCREEN_INTENT`, and `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` are absent from the AAB.
 - [ ] Every remaining dangerous permission maps to a visible feature and a runtime request.
-- [x] The AAB hash at the top of this file was computed after validation and local promotion.
+- [ ] The replacement AAB hash at the top of this file is computed after validation and local
+      promotion.
 - [ ] The byte-identical hashed AAB is the artifact uploaded to Play after separate approval.
 
 ## 5. Network and security smoke tests
 
+- [ ] On the exact candidate, 301/302/303/307/308 responses are rejected before a second request for
+      ordinary JSON API traffic, raw multipart traffic, and legacy upload traffic. Test same-origin,
+      cross-origin, and HTTPS-to-HTTP destinations and prove no request body or credential reaches
+      the redirect target.
 - [ ] Connect to a valid public-CA HTTPS server; verify server info/full sync, one live socket event,
       one upload, and one download.
 - [ ] An untrusted/self-signed certificate is rejected unless Android itself trusts its issuer.
@@ -205,19 +253,21 @@ npm run check:android-build
       persist, contact, or send credentials to another origin or downgrade HTTPS. An approved
       rotation displays both origins and requires foreground confirmation, a freshly entered
       password, and separate cleartext consent when applicable; interruption cannot mix old/new
-      credentials. The v59 candidate's exact source is `7a3aa2058ad1bea4252379b2ea3df285e1fd94ef`,
-      which contains the host flow from `8564b34` plus post-v57 removal commit `9046e27`; exact
-      Android network and SecureStore behavior remains unproven.
+      credentials. The superseded v59 candidate's exact source was
+      `7a3aa2058ad1bea4252379b2ea3df285e1fd94ef`, which contains the host flow from `8564b34` plus
+      post-v57 removal commit `9046e27`; this historical fact supplies no replacement credit, and
+      exact Android network and SecureStore behavior remains unproven.
 - [ ] URL previews make no automatic third-party request. Exercise server `payloadData`, an upgraded
       exact-key legacy-cache row, and an uncached URL; none may fetch HTML or artwork, and only an
       explicit tap may hand the URL to the external browser. Record proxy/network-capture evidence.
 - [ ] Find My and any other WebView surface passes its hostile-input, navigation, and real-device
       network checks, or is disabled in the candidate.
-- [x] The clean isolated build, guarded autolinking, and exact-v59-AAB inspection confirm that the
-      app-owned `react-native-webview` package/native registration is absent: packaged DEX omits
-      `Lcom/reactnativecommunity/webview/RNCWebViewPackage;`. Expo’s transitive
-      `@expo/dom-webview`/`DomWebViewModule` remains framework-owned and is not evidence of a
-      reachable product surface.
+- [ ] The replacement clean isolated build, guarded autolinking, and exact-AAB inspection confirm
+      that the app-owned `react-native-webview` package/native registration is absent. The
+      superseded v59 packaged DEX omitted
+      `Lcom/reactnativecommunity/webview/RNCWebViewPackage;`, but that historical inspection does not
+      satisfy this gate. Expo’s transitive `@expo/dom-webview`/`DomWebViewModule` remains
+      framework-owned and is not evidence of a reachable product surface.
 - [ ] Logs never expose message text, server URLs, credentials, or raw internal identifiers;
       notifications, channels, and alarms honor App Lock's generic-notification boundary, while
       Recents and screenshots honor its protected-screen boundary without leaking identity or message
@@ -226,7 +276,8 @@ npm run check:android-build
 ## 6. Android/device matrix
 
 Before device work begins, `DEVICE-01` must create a candidate-specific matrix for the exact
-`gator-release-0.1.43-v59-e108ad7.aab` candidate.
+replacement AAB recorded at the top of this file. The superseded
+`gator-release-0.1.43-v59-e108ad7.aab` must not be used.
 At minimum:
 
 - [ ] Fresh install and upgrade from the latest shipped build both boot and preserve intended data.
@@ -249,6 +300,9 @@ At minimum:
       display sizes pass. The store listing makes no light/system-theme promise.
 - [ ] Permission denial, restricted battery settings handoff, offline/reconnect, low-storage, and
       process-death paths fail visibly and recover.
+- [ ] The exact candidate's backup picker/provider path accepts a near-limit document, rejects an
+      oversized stream even when the provider lies about size, times out a stalled provider, cancels
+      without continuing work, deletes every partial copy, and leaves the UI responsive.
 
 ### Historical pre-v57 DEV host evidence
 
@@ -290,7 +344,7 @@ These four DEV results stop at the then-current migration head `0038`; they do n
   `DB-03C1-SCHEDULED-ANDROID-CI` remains open until one genuine `event=schedule` run passes and its reports are
   validated.
 
-### Current v59 candidate native/device proof
+### Replacement candidate native/device proof
 
 - [ ] The exact release candidate and a supported physical device repeat the native contract and
       pass the crypto self-test, fresh install plus an actual signed prior-build install-over,

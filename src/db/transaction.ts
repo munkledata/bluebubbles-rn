@@ -43,6 +43,27 @@ export class DbCommitGuardRejectedError extends Error {
   }
 }
 
+/** A repair lost its exclusive write sequence before its next transaction could begin. */
+export class DbWriteFenceRejectedError extends Error {
+  constructor() {
+    super('database write fence observed interleaved work');
+    this.name = 'DbWriteFenceRejectedError';
+  }
+}
+
+export interface DbWriteFence {
+  /** Pass this exact guard to every transaction owned by the fenced operation. */
+  readonly commitGuard: DbCommitGuard;
+}
+
+interface DbWriteFenceState {
+  readonly baseGuard?: DbCommitGuard;
+  expectedRelease: number;
+  valid: boolean;
+}
+
+const dbWriteFenceStates = new WeakMap<DbCommitGuard, DbWriteFenceState>();
+
 function assertCommitAllowed(guard?: DbCommitGuard): void {
   if (guard && !guard()) throw new DbCommitGuardRejectedError();
 }
@@ -164,6 +185,40 @@ async function claimWriteLock(): Promise<() => void> {
 }
 
 /**
+ * Capture an optimistic sequence over the shared DB queue without retaining the lock.
+ *
+ * Transactions carrying this fence may run in bounded batches. Any transaction or write-lock
+ * holder that does not carry the same guard advances the release count, so the next fenced transaction
+ * rejects before BEGIN. This detects interleaving without holding the mutex across network work.
+ */
+export async function captureDbWriteFence(baseGuard?: DbCommitGuard): Promise<DbWriteFence> {
+  const release = await claimWriteLock();
+  let state: DbWriteFenceState | undefined;
+  try {
+    assertCommitAllowed(baseGuard);
+    state = { baseGuard, expectedRelease: lockReleases, valid: true };
+    const commitGuard = (): boolean =>
+      state!.valid && (state!.baseGuard === undefined || state!.baseGuard());
+    dbWriteFenceStates.set(commitGuard, state);
+    return Object.freeze({ commitGuard });
+  } finally {
+    release();
+    if (state?.valid) state.expectedRelease = lockReleases;
+  }
+}
+
+function admitDbWriteFence(commitGuard?: DbCommitGuard): DbWriteFenceState | undefined {
+  if (!commitGuard) return undefined;
+  const state = dbWriteFenceStates.get(commitGuard);
+  if (!state) return undefined;
+  if (!state.valid || state.expectedRelease !== lockReleases) {
+    state.valid = false;
+    throw new DbWriteFenceRejectedError();
+  }
+  return state;
+}
+
+/**
  * Serialize database work that must not run inside — or alongside — anyone's transaction, WITHOUT
  * opening a SQL transaction of its own.
  *
@@ -190,9 +245,11 @@ export async function withDbTransaction<T>(
   commitGuard?: DbCommitGuard,
 ): Promise<T> {
   const release = await claimWriteLock();
+  let admittedFence: DbWriteFenceState | undefined;
   // The release lives in a finally that also wraps the BEGIN: if BEGIN itself throws (or the
   // driver rejects before it), an un-released lock would wedge every subsequent write forever.
   try {
+    admittedFence = admitDbWriteFence(commitGuard);
     // The caller may have waited behind another transaction longer than account teardown's bounded
     // drain. Re-check immediately after acquiring the mutex, before touching the shared database.
     assertCommitAllowed(commitGuard);
@@ -216,6 +273,7 @@ export async function withDbTransaction<T>(
     }
   } finally {
     release();
+    if (admittedFence?.valid) admittedFence.expectedRelease = lockReleases;
   }
 }
 

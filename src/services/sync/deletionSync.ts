@@ -9,7 +9,7 @@ import {
   kvSetWithinTransaction,
   markMessageDeletedWithinTransaction,
 } from '@db/repositories';
-import { withDbTransaction } from '@db/transaction';
+import { withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import type { SyncApi } from './types';
 
@@ -144,6 +144,8 @@ export interface DeletionSyncOptions {
   pageSize?: number;
   /** Stop before the next request/write when this account no longer owns the run. */
   shouldAbort?: () => boolean;
+  /** Exact guarded DB owner when deletion catch-up participates in a full-repair fence. */
+  commitGuard?: DbCommitGuard;
   /** Cancel the active deletion request/retry wait. */
   signal?: AbortSignal;
 }
@@ -209,7 +211,7 @@ export async function syncDeletedMessages(
         ? Math.min(Math.floor(opts.pageSize), DELETION_SYNC_PAGE_SIZE)
         : 0;
   const shouldContinue = (): boolean => !(opts.shouldAbort?.() ?? false);
-  const commitGuard = opts.shouldAbort ? shouldContinue : undefined;
+  const commitGuard = opts.commitGuard ?? (opts.shouldAbort ? shouldContinue : undefined);
   if (!shouldContinue() || maxPages === 0 || pageSize === 0) return 0;
 
   // The read takes the same global owner as writes. It cannot observe a neighbouring transaction's

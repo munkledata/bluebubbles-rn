@@ -1,18 +1,28 @@
-import { serverApi } from '@core/api';
-import { isCleartext, sanitizeServerAddress } from '@core/config';
+import { deviceCredentialsApi, serverApi } from '@core/api';
+import { isCleartext, sanitizeServerAddress, strictServerOrigin } from '@core/config';
 import { FCM_ENABLED } from '@core/realtime';
 import {
   CREDENTIAL_REMOVAL_FAILURE_MESSAGE,
   hasActiveServerSession,
+  inspectCredentialUpgradeJournal,
+  isScopedDeviceCredential,
   logger,
   memoryLogSink,
+  revokedCredentialUpgradeJournal,
+  serializeCredentialUpgradeJournal,
   SERVER_SESSION_STATE,
 } from '@core/secure';
 import { clearLocalCache, listReminders, localCacheDirty } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { areCriticalSettingsHydrated, hydrateAllStores } from '@state/hydrateStores';
-import { useSessionStore } from '@state/sessionStore';
-import { accountRevocationMarker, candidateClient, http, vault } from './clients';
+import { captureSessionTransportLease, useSessionStore } from '@state/sessionStore';
+import {
+  accountRevocationMarker,
+  candidateClient,
+  fixedCredentialClient,
+  http,
+  vault,
+} from './clients';
 import { fileLogSink } from './logging/fileLogSink';
 import { retireFcmDeviceEncryptionState } from './notifications/fcmEncryptionState';
 import { connectToServer } from './connection';
@@ -58,6 +68,8 @@ const FCM_TOKEN_RETIREMENT_FAILURE_MESSAGE =
   'Push notification retirement for the previous connection could not be confirmed.';
 const FCM_KEY_RETIREMENT_FAILURE_MESSAGE =
   'Push encryption-key retirement for the previous connection could not be confirmed.';
+const CREDENTIAL_UPGRADE_RETIREMENT_FAILURE_MESSAGE =
+  'Scoped credential retirement for the previous connection could not be confirmed.';
 const REALTIME_DRAIN_FAILURE_MESSAGE =
   'In-flight account work from the previous connection did not stop in time.';
 const SYNC_DRAIN_FAILURE_MESSAGE =
@@ -149,6 +161,8 @@ let lastSuccessfulForgetEpoch = -1;
 let foregroundDeliveryDrain: Promise<void> | null = null;
 /** A timed-out SecureStore candidate may have one native mutation still settling. */
 let connectCandidateQuarantine: Promise<void> | null = null;
+/** Every active candidate commit, including the pre-timeout window Disconnect must join. */
+let activeConnectCandidate: Promise<void> | null = null;
 /** A first SQLCipher open cannot be safely replaced while its native promise is still pending. */
 let connectDatabaseQuarantine: Promise<void> | null = null;
 /** Public Disconnect revokes the one explicit Connect even before that attempt captures an epoch. */
@@ -164,6 +178,17 @@ function quarantineConnectCandidate(operation: Promise<unknown>): void {
   connectCandidateQuarantine = quarantine;
   void quarantine.then(() => {
     if (connectCandidateQuarantine === quarantine) connectCandidateQuarantine = null;
+  });
+}
+
+function trackConnectCandidate(operation: Promise<unknown>): void {
+  const tracked = operation.then(
+    () => undefined,
+    () => undefined,
+  );
+  activeConnectCandidate = tracked;
+  void tracked.then(() => {
+    if (activeConnectCandidate === tracked) activeConnectCandidate = null;
   });
 }
 
@@ -284,9 +309,13 @@ function connectedForegroundAttempt(
 
 /** Put boot on the setup route without interpreting an I/O failure as permission to erase data. */
 function quarantineSessionRestore(
-  inspection: Extract<DurableSessionInspection, { kind: 'unavailable' }>,
+  inspection: Extract<DurableSessionInspection, { kind: 'unavailable' | 'upgrade-quarantined' }>,
 ): void {
-  if (inspection.source === 'marker') {
+  if (inspection.kind === 'upgrade-quarantined') {
+    logger.warn('[boot] credential-upgrade recovery is quarantined', {
+      reason: inspection.reason,
+    });
+  } else if (inspection.source === 'marker') {
     logger.warn('[boot] account revocation marker unreadable — session restore blocked');
   } else {
     logger.warn(
@@ -330,7 +359,7 @@ async function recoverAttachmentCacheForActivation(
 async function resolveBootSession(
   inspection: DurableSessionInspection,
 ): Promise<ForegroundSessionSnapshot | null> {
-  if (inspection.kind === 'unavailable') {
+  if (inspection.kind === 'unavailable' || inspection.kind === 'upgrade-quarantined') {
     quarantineSessionRestore(inspection);
     return null;
   }
@@ -383,8 +412,12 @@ export async function inspectForegroundBootSession(
   const inspection = await inspectDurableServerSession(vault, accountRevocationMarker);
   requireForegroundAttemptCurrent(placeholder, context.stageSignal);
 
-  if (inspection.kind === 'unavailable') {
-    if (inspection.source === 'marker') {
+  if (inspection.kind === 'unavailable' || inspection.kind === 'upgrade-quarantined') {
+    if (inspection.kind === 'upgrade-quarantined') {
+      logger.warn('[boot] credential-upgrade recovery is quarantined', {
+        reason: inspection.reason,
+      });
+    } else if (inspection.source === 'marker') {
       logger.warn('[boot] account revocation marker unreadable — session restore blocked');
     } else {
       logger.warn(
@@ -396,7 +429,7 @@ export async function inspectForegroundBootSession(
     throw new ForegroundBootOperationalError(
       'durable-session-unavailable',
       ACCOUNT_STATE_UNAVAILABLE_MESSAGE,
-      { cause: inspection.error },
+      { cause: inspection.kind === 'unavailable' ? inspection.error : undefined },
     );
   }
 
@@ -603,13 +636,19 @@ export async function activateForegroundBootSession(
 
   void runSearchTextBackfillOnce(deliveryLease);
   const serverInfoLease = captureRealtimeDeliveryLease();
+  const serverInfoTransport = captureSessionTransportLease();
   void serverApi
     .serverInfo(http)
     .then((info) => {
-      if (serverInfoLease.isCurrent()) useSessionStore.getState().setServerInfo(info);
+      if (!serverInfoLease.isCurrent() || !serverInfoTransport.origin) return;
+      useSessionStore
+        .getState()
+        .setServerInfoForTransport(serverInfoTransport.origin, serverInfoTransport.revision, info);
     })
     .catch((error) => {
-      if (serverInfoLease.isCurrent()) logger.debug('[boot] server-info refresh failed', error);
+      if (serverInfoLease.isCurrent() && serverInfoTransport.isCurrent()) {
+        logger.debug('[boot] server-info refresh failed', error);
+      }
     });
   void startSync().catch((error) => {
     if (!deliveryLease.isCurrent()) return;
@@ -718,13 +757,23 @@ export async function hydrateSession(): Promise<void> {
     // Settings' Version/macOS/Private-API rows stayed blank on every relaunch. Re-fetch it in
     // the background so those screens populate — best-effort, never blocks boot.
     const serverInfoLease = captureRealtimeDeliveryLease();
+    const serverInfoTransport = captureSessionTransportLease();
     void serverApi
       .serverInfo(http)
       .then((info) => {
-        if (serverInfoLease.isCurrent()) useSessionStore.getState().setServerInfo(info);
+        if (!serverInfoLease.isCurrent() || !serverInfoTransport.origin) return;
+        useSessionStore
+          .getState()
+          .setServerInfoForTransport(
+            serverInfoTransport.origin,
+            serverInfoTransport.revision,
+            info,
+          );
       })
       .catch((e) => {
-        if (serverInfoLease.isCurrent()) logger.debug('[boot] server-info refresh failed', e);
+        if (serverInfoLease.isCurrent() && serverInfoTransport.isCurrent()) {
+          logger.debug('[boot] server-info refresh failed', e);
+        }
       });
     void startSync();
     void startRealtime();
@@ -740,9 +789,13 @@ export async function hydrateSession(): Promise<void> {
 let connectInFlight = false;
 
 function unavailableConnectionMessage(
-  inspection: Extract<DurableSessionInspection, { kind: 'unavailable' }>,
+  inspection: Extract<DurableSessionInspection, { kind: 'unavailable' | 'upgrade-quarantined' }>,
 ): string {
-  if (inspection.source === 'marker') {
+  if (inspection.kind === 'upgrade-quarantined') {
+    logger.warn('[connect] credential-upgrade recovery is quarantined', {
+      reason: inspection.reason,
+    });
+  } else if (inspection.source === 'marker') {
     logger.warn('[connect] account revocation marker unreadable — candidate blocked');
   } else {
     logger.warn('[connect] secure session state unreadable — candidate blocked', inspection.error);
@@ -773,7 +826,9 @@ async function prepareCandidateConnection(
 ): Promise<string | null | typeof CANDIDATE_GATE_CANCELLED> {
   const inspection = await inspectDurableServerSession(vault, accountRevocationMarker);
   if (!isAuthorized()) return CANDIDATE_GATE_CANCELLED;
-  if (inspection.kind === 'unavailable') return unavailableConnectionMessage(inspection);
+  if (inspection.kind === 'unavailable' || inspection.kind === 'upgrade-quarantined') {
+    return unavailableConnectionMessage(inspection);
+  }
 
   if (
     inspection.kind === 'empty' ||
@@ -837,7 +892,7 @@ export async function connect(
     return;
   }
   if (!password) {
-    store.failed('Please enter your server password.');
+    store.failed('Please enter your server password or paired-client credential.');
     return;
   }
 
@@ -955,6 +1010,7 @@ export async function connect(
       revocationMarker: accountRevocationMarker,
       isAttemptCurrent,
     });
+    trackConnectCandidate(candidateOperation);
     const candidateResult = await settleWithinDeadline(
       candidateOperation,
       CONNECT_CANDIDATE_DEADLINE_MS,
@@ -1087,11 +1143,106 @@ export async function connect(
   }
 }
 
+interface ScopedCredentialRevocationTarget {
+  readonly origin: string;
+  readonly credential: string;
+}
+
+interface ScopedCredentialRevocationSnapshot {
+  readonly targets: readonly ScopedCredentialRevocationTarget[];
+}
+
+function liveScopedCredentialRevocationTarget(): ScopedCredentialRevocationTarget | null {
+  const session = useSessionStore.getState();
+  const origin = strictServerOrigin(session.origin);
+  if (!origin || !isScopedDeviceCredential(session.password)) return null;
+  return Object.freeze({ origin, credential: session.password });
+}
+
+/** Capture every scoped bearer in local custody before retirement; never infer or log identity. */
+async function captureScopedCredentialRevocationTargets(
+  liveTarget: ScopedCredentialRevocationTarget | null,
+): Promise<ScopedCredentialRevocationSnapshot> {
+  const [storedOrigin, storedCredential, storedUpgrade] = await Promise.all([
+    vault.get('serverAddress'),
+    vault.get('serverPassword'),
+    vault.get('serverCredentialUpgrade'),
+  ]);
+  const targets: ScopedCredentialRevocationTarget[] = liveTarget ? [liveTarget] : [];
+  const remember = (target: ScopedCredentialRevocationTarget): void => {
+    if (
+      !targets.some(
+        (stored) => stored.origin === target.origin && stored.credential === target.credential,
+      )
+    ) {
+      targets.push(Object.freeze(target));
+    }
+  };
+  const upgrade = inspectCredentialUpgradeJournal(storedUpgrade);
+  if (upgrade.kind === 'invalid') {
+    throw new Error('credential-upgrade revocation custody is invalid');
+  }
+  if (upgrade.kind === 'valid' && upgrade.journal.phase !== 'revoked') {
+    remember({
+      origin: upgrade.journal.origin,
+      credential: upgrade.journal.candidateCredential,
+    });
+  }
+  const origin = strictServerOrigin(storedOrigin);
+  // Deliberately accept an exact scoped tuple under `forgotten`: that is the retry custody left by
+  // a prior network failure. Other non-active states are safe too because the independent/session
+  // revocation gates, not this snapshot, decide whether a credential may be used normally.
+  if (origin && isScopedDeviceCredential(storedCredential)) {
+    remember({ origin, credential: storedCredential });
+  }
+  return Object.freeze({ targets: Object.freeze(targets) });
+}
+
+/** Replace credential-bearing upgrade custody with the verified keyless terminal marker. */
+async function writeCredentialUpgradeRevokedTombstone(): Promise<void> {
+  const serialized = serializeCredentialUpgradeJournal(revokedCredentialUpgradeJournal());
+  await vault.set('serverCredentialUpgrade', serialized);
+  if ((await vault.get('serverCredentialUpgrade')) !== serialized) {
+    throw new Error('credential-upgrade revocation tombstone was not confirmed');
+  }
+}
+
+/** Confirm server retirement without ever treating a still-authorized 403/5xx bearer as gone. */
+async function revokeScopedCredentialRemotely(
+  target: ScopedCredentialRevocationTarget,
+): Promise<void> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SCOPED_SELF_REVOKE_DEADLINE_MS);
+  try {
+    const result = await deviceCredentialsApi.revokeSelf(
+      fixedCredentialClient(target.origin, target.credential),
+      controller.signal,
+    );
+    if (!result.deviceRemoved) {
+      logger.warn('[forget] scoped credential revoked but its server push row needs admin cleanup');
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function revokeAllScopedCredentials(
+  targets: readonly ScopedCredentialRevocationTarget[],
+): Promise<void> {
+  const outcomes = await Promise.allSettled(targets.map(revokeScopedCredentialRemotely));
+  const failed = outcomes.find((outcome) => outcome.status === 'rejected');
+  if (failed?.status === 'rejected') throw failed.reason;
+}
+
 /**
  * Retire the correlated SecureStore tuple monotonically: tombstone, deletes, then empty-overwrite
- * fallback. The independent marker decides whether the caller may bound this chain safely.
+ * fallback. The independent marker decides whether the caller may bound this chain safely. The
+ * separate upgrade journal is retired only after its tracked writers drain below.
  */
-async function retireDurableCredentials(independentlyRevoked: boolean): Promise<Error | null> {
+async function retireDurableCredentials(
+  independentlyRevoked: boolean,
+  preserveCredentialTuple = false,
+): Promise<Error | null> {
   let tombstoneWritten = false;
   try {
     await vault.set('serverSessionState', SERVER_SESSION_STATE.forgotten);
@@ -1099,6 +1250,11 @@ async function retireDurableCredentials(independentlyRevoked: boolean): Promise<
   } catch (error) {
     logger.warn('[forget] session tombstone write failed', error);
   }
+
+  // A scoped bearer whose server revocation is not confirmed remains encrypted retry custody, not
+  // an active session. At least one independent durable gate must exist before keeping it. If both
+  // gates failed, fall through to the destructive removal path so a restart cannot reactivate it.
+  if (preserveCredentialTuple && (tombstoneWritten || independentlyRevoked)) return null;
 
   const cleared = await Promise.allSettled([
     vault.delete('serverAddress'),
@@ -1129,6 +1285,19 @@ async function retireDurableCredentials(independentlyRevoked: boolean): Promise<
     }
   }
   return null;
+}
+
+/** Erase retry custody only after every scoped bearer is confirmed revoked, then leave a marker. */
+async function finishScopedCredentialRetirement(
+  snapshot: ScopedCredentialRevocationSnapshot,
+  credentialTupleWasPreserved: boolean,
+  independentlyRevoked: boolean,
+): Promise<void> {
+  if (snapshot.targets.length > 0) await revokeAllScopedCredentials(snapshot.targets);
+  await writeCredentialUpgradeRevokedTombstone();
+  if (!credentialTupleWasPreserved) return;
+  const removalFailure = await retireDurableCredentials(independentlyRevoked);
+  if (removalFailure) throw removalFailure;
 }
 
 interface DatabaseAccountCleanupResult {
@@ -1205,6 +1374,10 @@ async function runForget(invalidateForegroundBoot: boolean): Promise<void> {
   // bootstrap checks it again before publishing Connected/starting account work.
   connectionAttemptEpoch += 1;
   const forgetEpoch = connectionAttemptEpoch;
+  // Capture this synchronously with revocation. A candidate that has not reached its 45-second
+  // timeout can still have an already-issued SecureStore write in native code; clearing only its
+  // JS authorization flag does not cancel that write.
+  const connectCandidateAtRevocation = activeConnectCandidate ?? connectCandidateQuarantine;
   if (invalidateForegroundBoot) invalidateForegroundBootForAccountTransition();
   invalidateAttachmentCacheRecoveryReadiness();
   // Close admission before the first await, then drain anything admitted just before the tap.
@@ -1223,6 +1396,11 @@ async function runForget(invalidateForegroundBoot: boolean): Promise<void> {
   } catch (e) {
     logger.warn('[forget] independent account revocation marker write failed', e);
   }
+
+  // Capture the live bearer before resetting Zustand. The authoritative SecureStore snapshot must
+  // wait until tracked adoption writers drain below, or it could miss a candidate that lands after
+  // a concurrent read and then overwrite that live authority with the keyless tombstone.
+  const liveScopedTarget = liveScopedCredentialRevocationTarget();
 
   // A Zustand subscriber or native teardown callback is application code and can throw
   // synchronously. Isolate every volatile step so one broken observer cannot skip session
@@ -1308,10 +1486,11 @@ async function runForget(invalidateForegroundBoot: boolean): Promise<void> {
     throw new Error(ACCOUNT_CLEANUP_QUARANTINE_FAILURE_MESSAGE);
   }
 
-  // A timed-out candidate can have one already-issued SecureStore mutation still in native code.
-  // Wait before this sweep so it cannot land behind our deletes. If it misses the bound, keep the
-  // marker closed, finish the best-effort wipe, and reject so a later cleanup repeats after it stops.
-  const candidateQuarantine = connectCandidateQuarantine;
+  // A candidate can have one already-issued SecureStore mutation still in native code, regardless
+  // of whether it has reached its public timeout. Wait before this sweep so it cannot land behind
+  // our deletes. If it misses the bound, keep the marker closed, finish the best-effort wipe, and
+  // reject so a later cleanup repeats after it stops.
+  const candidateQuarantine = connectCandidateAtRevocation;
   const candidateDrained =
     !candidateQuarantine ||
     (await withDeadline(candidateQuarantine, FOREGROUND_DELIVERY_CLEANUP_DEADLINE_MS));
@@ -1322,11 +1501,15 @@ async function runForget(invalidateForegroundBoot: boolean): Promise<void> {
     logger.warn('[forget] timed-out connection candidate is still settling');
   }
 
+  let credentialUpgradeRetirementFailure: Error | null = null;
+
   // SecureStore has no multi-key transaction. When the independent marker succeeded, this entire
   // monotonic retirement chain may be bounded: a late delete cannot reactivate A, and quarantine
   // prevents B until it settles plus a fresh full sweep passes. If the marker failed, never race a
   // timer—the vault chain is the only killed-process revocation proof and must remain awaited.
-  const credentialRetirement = retireDurableCredentials(independentlyRevoked);
+  // Preserve the tuple until the post-drain snapshot proves whether it is server-revocation
+  // custody. The `forgotten`/independent marker makes it inactive immediately.
+  const credentialRetirement = retireDurableCredentials(independentlyRevoked, true);
   let durableCredentialFailure: Error | null;
   if (independentlyRevoked) {
     const retirement = await settleWithinDeadline(
@@ -1350,9 +1533,10 @@ async function runForget(invalidateForegroundBoot: boolean): Promise<void> {
 
   // Firebase registration belongs to the OLD server even though the token itself lives in the
   // Firebase installation, not our DB/vault. Invalidating the installation token makes the token A
-  // knows unusable; server-side removal may still be added later as defense in depth. Do this after
-  // both durable revocation gates are closed, and treat native/import failure as incomplete account
-  // cleanup: the local wipe continues, but connect B cannot validate until a retry succeeds.
+  // knows unusable. For a scoped session, the exact server principal is also self-revoked below
+  // after tracked registration work drains. Do this after both durable revocation gates are closed,
+  // and treat native/import failure as incomplete account cleanup: the local wipe continues, but
+  // connect B cannot validate until a retry succeeds.
   let fcmTokenRetirementFailure: Error | null = null;
   if (FCM_ENABLED) {
     const retirement = (async (): Promise<void> => {
@@ -1378,6 +1562,72 @@ async function runForget(invalidateForegroundBoot: boolean): Promise<void> {
     // account actions and scheduled sends that can carry network/DB work. Still perform the sweep;
     // do not authorize B until a later retry proves every old slot idle and wipes once more.
     logger.warn('[forget] realtime delivery drain timed out — next connection remains blocked');
+  }
+
+  let scopedCredentialRetirement: Promise<DeadlineSettlement<void>> | null = null;
+  if (realtimeDrained && candidateDrained) {
+    // SecureStore is not internally serialized. Take the authoritative view only after every
+    // tracked adoption writer has settled, and bound the native read independently of the wipe.
+    const scopedCredentialSnapshot = captureScopedCredentialRevocationTargets(liveScopedTarget);
+    const snapshotResult = await settleWithinDeadline(
+      scopedCredentialSnapshot,
+      SCOPED_CREDENTIAL_CAPTURE_DEADLINE_MS,
+    );
+    if (snapshotResult.kind === 'value') {
+      // The session is already durably inactive, but its encrypted scoped bearer remains retry
+      // custody. Confirm server revocation first; only then erase it and replace the upgrade journal
+      // with the keyless terminal marker. Run beside the local data wipe, with a strict outer bound.
+      const retirement = finishScopedCredentialRetirement(
+        snapshotResult.value,
+        true,
+        independentlyRevoked,
+      );
+      scopedCredentialRetirement = settleWithinDeadline(
+        retirement,
+        SCOPED_CREDENTIAL_RETIREMENT_DEADLINE_MS,
+        () => quarantineAccountCleanup(retirement),
+      );
+    } else {
+      credentialUpgradeRetirementFailure = new Error(CREDENTIAL_UPGRADE_RETIREMENT_FAILURE_MESSAGE);
+      logger.warn('[forget] scoped credential snapshot was unavailable', {
+        reason: snapshotResult.kind,
+        ...(snapshotResult.kind === 'error'
+          ? {
+              errorName:
+                snapshotResult.error instanceof Error ? snapshotResult.error.name : 'UnknownError',
+            }
+          : {}),
+      });
+      if (snapshotResult.kind === 'timeout') {
+        const lateRetirement = Promise.all([
+          scopedCredentialSnapshot,
+          credentialRetirement.then((failure) => {
+            if (failure) throw failure;
+          }),
+        ]).then(([lateSnapshot]) =>
+          finishScopedCredentialRetirement(lateSnapshot, true, independentlyRevoked),
+        );
+        quarantineAccountCleanup(lateRetirement);
+      }
+    }
+  } else {
+    // A suspended adoption writer or timed-out connection commit could still create new custody.
+    // Keep B blocked and take the only authoritative snapshot after both writers and the initial
+    // `forgotten` mutation settle. In particular, a late scoped `serverPassword` write must retain
+    // its already-written origin long enough for this fixed-client revocation.
+    const lateRetirement = Promise.all([
+      realtimeIdle,
+      candidateQuarantine ?? Promise.resolve(),
+      credentialRetirement.then((failure) => {
+        if (failure) throw failure;
+      }),
+    ])
+      .then(() => captureScopedCredentialRevocationTargets(liveScopedTarget))
+      .then((lateSnapshot) =>
+        finishScopedCredentialRetirement(lateSnapshot, true, independentlyRevoked),
+      );
+    quarantineAccountCleanup(lateRetirement);
+    credentialUpgradeRetirementFailure = new Error(CREDENTIAL_UPGRADE_RETIREMENT_FAILURE_MESSAGE);
   }
 
   // Registration owns SecureStore writes and is part of the realtime drain. Retire its key only
@@ -1528,6 +1778,24 @@ async function runForget(invalidateForegroundBoot: boolean): Promise<void> {
     logger.warn('[forget] could not clear Direct Share shortcuts', e);
   }
 
+  // The local credential/database/media wipe above ran independently of server availability.
+  // Consume only the bounded retirement result now. A failure leaves the exact bearer encrypted
+  // under `forgotten`, so the next cleanup can retry instead of orphaning live server authority.
+  if (scopedCredentialRetirement) {
+    const result = await scopedCredentialRetirement;
+    if (result.kind !== 'value') {
+      credentialUpgradeRetirementFailure = new Error(CREDENTIAL_UPGRADE_RETIREMENT_FAILURE_MESSAGE);
+      logger.warn('[forget] scoped credential self-revocation was not confirmed', {
+        reason: result.kind,
+        ...(result.kind === 'error'
+          ? {
+              errorName: result.error instanceof Error ? result.error.name : 'UnknownError',
+            }
+          : {}),
+      });
+    }
+  }
+
   // Logs are account-scoped diagnostics too. Clear them LAST, after every cleanup step that can
   // log, then attempt at most a generic development-only warning after the buffer reset. Bound
   // native filesystem I/O so the local wipe cannot hang forever; an incomplete clear keeps B
@@ -1552,6 +1820,7 @@ async function runForget(invalidateForegroundBoot: boolean): Promise<void> {
   // idempotent cleanup before validating B. Any development log happens only AFTER A's buffers reset.
   const cleanupFailure =
     durableCredentialFailure ??
+    credentialUpgradeRetirementFailure ??
     candidateDrainFailure ??
     inMemoryCleanupFailure ??
     fcmTokenRetirementFailure ??
@@ -1782,11 +2051,18 @@ const SYNC_DRAIN_DEADLINE_MS = 20_000;
 const ACCOUNT_CLEANUP_JOIN_DEADLINE_MS = 5_000;
 /** The filesystem revocation marker makes a late monotonic SecureStore retirement safe to quarantine. */
 const CREDENTIAL_CLEANUP_DEADLINE_MS = 5_000;
+/** Reading encrypted retry custody cannot be allowed to strand the local privacy wipe. */
+const SCOPED_CREDENTIAL_CAPTURE_DEADLINE_MS = 5_000;
+/** Abort each server self-revocation promptly; 403/5xx remain unconfirmed and retryable. */
+const SCOPED_SELF_REVOKE_DEADLINE_MS = 5_000;
+/** Outer bound covers remote abort plus the final SecureStore tombstone/delete operations. */
+const SCOPED_CREDENTIAL_RETIREMENT_DEADLINE_MS =
+  SCOPED_SELF_REVOKE_DEADLINE_MS + CREDENTIAL_CLEANUP_DEADLINE_MS;
 /** A late token delete could retire account B's token, so it remains quarantined after this bound. */
 const FCM_TOKEN_RETIREMENT_DEADLINE_MS = 5_000;
 /** A late tombstone write could retire account B's key, so it remains quarantined after this bound. */
 const FCM_KEY_RETIREMENT_DEADLINE_MS = 5_000;
-/** DB open + reminder retirement + confirmed two-pass wipe may be slow, but never unbounded. */
+/** DB open + reminder retirement + confirmed stable-view repair may be slow, but never unbounded. */
 const DATABASE_CLEANUP_DEADLINE_MS = 30_000;
 /** Realtime work is DB/native presentation only; long downloads run outside this drain. */
 const REALTIME_DRAIN_DEADLINE_MS = 5_000;

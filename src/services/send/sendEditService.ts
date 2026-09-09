@@ -4,18 +4,25 @@ import { plainTextFromAttributedBody } from '@core/richtext';
 import {
   applyLocalEditWithinTransaction,
   applyLocalUnsendWithinTransaction,
+  explicitMessageTargetPart,
+  MessageTargetUnavailableError,
+  resolveMessageTarget,
+  resolveMessageTargetWithinTransaction,
+  resolvePendingUnsendTarget,
   revertLocalEditWithinTransaction,
   revertLocalUnsendWithinTransaction,
+  type MessageTargetServerAuthorization,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
+import { messageTargetCommitGuard } from './rcsAttemptCapability';
 
 export interface SendEditArgs {
   messageGuid: string;
   newText: string;
   /** Chat the message lives in (server-required). Resolved from the DB row when omitted. */
   chatGuid?: string;
-  /** Message part to edit; defaults to part 0 when omitted. */
+  /** Exact message part to edit. Legacy part zero must still be supplied explicitly. */
   partIndex?: number;
 }
 
@@ -96,15 +103,37 @@ async function sendEditOnce(
   args: SendEditArgs,
   now: number,
   commitGuard?: DbCommitGuard,
+  serverAuthorization?: MessageTargetServerAuthorization,
 ): Promise<{ ok: boolean }> {
+  const targetPart = explicitMessageTargetPart(args.messageGuid, args.partIndex);
+  if (!targetPart) throw new MessageTargetUnavailableError();
+  const target = {
+    chatGuid: args.chatGuid,
+    messageGuid: targetPart.messageGuid,
+    partIndex: targetPart.partIndex,
+    partKind: 'text' as const,
+    serverAuthorization,
+  };
+  const targetCommitGuard = messageTargetCommitGuard(commitGuard, serverAuthorization);
   // Snapshot + optimistic write share one DB owner. This prevents a bare shared-connection read
   // from capturing another transaction's uncommitted value before the write queues behind it.
-  const prev = await withDbTransaction(
+  const admission = await withDbTransaction(
     db,
-    (context) => applyLocalEditWithinTransaction(context, args.messageGuid, args.newText, now),
-    commitGuard,
+    async (context) => {
+      const resolvedTarget = await resolveMessageTargetWithinTransaction(context, target);
+      if (!resolvedTarget) return null;
+      const previous = await applyLocalEditWithinTransaction(
+        context,
+        resolvedTarget.messageGuid,
+        args.newText,
+        now,
+      );
+      return previous ? { previous, resolvedTarget } : null;
+    },
+    targetCommitGuard,
   );
-  if (!prev) return { ok: false };
+  if (!admission) return { ok: false };
+  const { previous: prev, resolvedTarget: admittedTarget } = admission;
 
   // Disconnect can retire this account immediately after COMMIT. Avoid both stale rich-body work
   // and an old-account request through a successor account's credential boundary.
@@ -120,7 +149,7 @@ async function sendEditOnce(
   if (!chatGuid) {
     await revertOptimisticEdit(
       db,
-      args.messageGuid,
+      admittedTarget.messageGuid,
       restoreText,
       prev.dateEdited,
       now,
@@ -131,6 +160,31 @@ async function sendEditOnce(
     return { ok: false };
   }
 
+  // Sync can retract or replace the selected part after the optimistic edit commits. Re-read the
+  // durable topology at the final request boundary and keep any newer DB truth if authorization
+  // was lost; restoring the old snapshot here could reveal content a concurrent retraction hid.
+  let finalTarget;
+  try {
+    finalTarget = await resolveMessageTarget(db, { ...target, chatGuid }, targetCommitGuard);
+  } catch (error) {
+    if (error instanceof DbCommitGuardRejectedError) {
+      await revertOptimisticEdit(
+        db,
+        admittedTarget.messageGuid,
+        restoreText,
+        prev.dateEdited,
+        now,
+        prev.attributedBody,
+        args.newText,
+        commitGuard,
+      );
+    }
+    throw error;
+  }
+  if (!finalTarget) {
+    return { ok: false };
+  }
+
   let accepted = false;
   try {
     // The server returns the sender's send ack `{ guid? }`. A present guid is the
@@ -138,10 +192,10 @@ async function sendEditOnce(
     // soft failure and revert (edits require the Private API, so no guid = no edit).
     const ack = await editMessage(http, {
       chatGuid,
-      messageGuid: args.messageGuid,
+      messageGuid: finalTarget.messageGuid,
       editedMessage: args.newText,
       backwardsCompatibilityMessage: `Edited to: “${args.newText}”`,
-      partIndex: args.partIndex ?? 0,
+      partIndex: finalTarget.partIndex,
     });
     accepted = Boolean(ack.guid);
   } catch {
@@ -155,7 +209,7 @@ async function sendEditOnce(
   // `prev.dateEdited` is passed through rather than `?? 0` — literal 0 is a real predecessor.
   await revertOptimisticEdit(
     db,
-    args.messageGuid,
+    admittedTarget.messageGuid,
     restoreText,
     prev.dateEdited,
     now,
@@ -172,13 +226,14 @@ export function sendEdit(
   args: SendEditArgs,
   now: number = Date.now(),
   commitGuard?: DbCommitGuard,
+  serverAuthorization?: MessageTargetServerAuthorization,
 ): Promise<{ ok: boolean }> {
   // Capture the key synchronously. Callers own their argument object and may mutate/reuse it after
   // admission; queue cleanup must still address the exact slot this operation claimed.
   const messageGuid = args.messageGuid;
   const queuedArgs = { ...args, messageGuid };
   return queueMessageMutation(db, messageGuid, () =>
-    sendEditOnce(db, http, queuedArgs, now, commitGuard),
+    sendEditOnce(db, http, queuedArgs, now, commitGuard, serverAuthorization),
   );
 }
 
@@ -186,7 +241,7 @@ export interface SendUnsendArgs {
   messageGuid: string;
   /** Chat the message lives in (server-required). Resolved from the DB row when omitted. */
   chatGuid?: string;
-  /** Message part to retract; defaults to part 0 when omitted. */
+  /** Exact message part to retract. Legacy part zero must still be supplied explicitly. */
   partIndex?: number;
 }
 
@@ -196,12 +251,23 @@ function revertOptimisticUnsend(
   messageGuid: string,
   appliedAt: number,
   previousDateRetracted: number | null,
+  previousRetractionState: string | null,
+  previousPendingRetractionPartIndex: number | null,
+  expectedAppliedPartIndex: number,
   commitGuard?: DbCommitGuard,
 ): Promise<boolean> {
   return withDbTransaction(
     db,
     (context) =>
-      revertLocalUnsendWithinTransaction(context, messageGuid, appliedAt, previousDateRetracted),
+      revertLocalUnsendWithinTransaction(
+        context,
+        messageGuid,
+        appliedAt,
+        previousDateRetracted,
+        previousRetractionState,
+        previousPendingRetractionPartIndex,
+        expectedAppliedPartIndex,
+      ),
     commitGuard,
   );
 }
@@ -213,15 +279,37 @@ async function sendUnsendOnce(
   args: SendUnsendArgs,
   now: number,
   commitGuard?: DbCommitGuard,
+  serverAuthorization?: MessageTargetServerAuthorization,
 ): Promise<{ ok: boolean }> {
+  const targetPart = explicitMessageTargetPart(args.messageGuid, args.partIndex);
+  if (!targetPart) throw new MessageTargetUnavailableError();
+  const partIndex = targetPart.partIndex;
+  const target = {
+    chatGuid: args.chatGuid,
+    messageGuid: targetPart.messageGuid,
+    partIndex,
+    serverAuthorization,
+  };
+  const targetCommitGuard = messageTargetCommitGuard(commitGuard, serverAuthorization);
   // Row existence, committed predecessor, owning chat and optimistic write share one DB owner.
   // An explicit route chat may override the snapshotted chat, but never bypass a missing row.
-  const previous = await withDbTransaction(
+  const admission = await withDbTransaction(
     db,
-    (context) => applyLocalUnsendWithinTransaction(context, args.messageGuid, now),
-    commitGuard,
+    async (context) => {
+      const resolvedTarget = await resolveMessageTargetWithinTransaction(context, target);
+      if (!resolvedTarget) return null;
+      const previous = await applyLocalUnsendWithinTransaction(
+        context,
+        resolvedTarget.messageGuid,
+        now,
+        partIndex,
+      );
+      return previous ? { previous, resolvedTarget } : null;
+    },
+    targetCommitGuard,
   );
-  if (!previous) return { ok: false };
+  if (!admission) return { ok: false };
+  const { previous, resolvedTarget: admittedTarget } = admission;
 
   // Disconnect can retire this account immediately after COMMIT. Do not start an old-account
   // request through whatever credential boundary a successor account installs.
@@ -229,7 +317,40 @@ async function sendUnsendOnce(
 
   const chatGuid = args.chatGuid ?? previous.chatGuid;
   if (!chatGuid) {
-    await revertOptimisticUnsend(db, args.messageGuid, now, previous.dateRetracted, commitGuard);
+    await revertOptimisticUnsend(
+      db,
+      admittedTarget.messageGuid,
+      now,
+      previous.dateRetracted,
+      previous.retractionState,
+      previous.pendingRetractionPartIndex,
+      partIndex,
+      commitGuard,
+    );
+    return { ok: false };
+  }
+
+  // The optimistic write intentionally makes the ordinary classifier fail closed. Its exact
+  // durable pending-part fence is therefore the only authorization accepted at the POST boundary.
+  let finalTarget;
+  try {
+    finalTarget = await resolvePendingUnsendTarget(db, { ...target, chatGuid }, targetCommitGuard);
+  } catch (error) {
+    if (error instanceof DbCommitGuardRejectedError) {
+      await revertOptimisticUnsend(
+        db,
+        admittedTarget.messageGuid,
+        now,
+        previous.dateRetracted,
+        previous.retractionState,
+        previous.pendingRetractionPartIndex,
+        partIndex,
+        commitGuard,
+      );
+    }
+    throw error;
+  }
+  if (!finalTarget) {
     return { ok: false };
   }
 
@@ -239,8 +360,8 @@ async function sendUnsendOnce(
     // 2xx that didn't actually unsend → revert the local retraction).
     const ack = await unsendMessage(http, {
       chatGuid,
-      messageGuid: args.messageGuid,
-      partIndex: args.partIndex ?? 0,
+      messageGuid: finalTarget.messageGuid,
+      partIndex,
     });
     accepted = ack.unsent === true;
   } catch {
@@ -252,7 +373,16 @@ async function sendUnsendOnce(
   // Compare-and-set, not a blind clear: a lost response can still be followed by a differently
   // stamped server echo. Keeping this outside the HTTP catch ensures a rejected/failed DB owner is
   // never caught and attempted a second time.
-  await revertOptimisticUnsend(db, args.messageGuid, now, previous.dateRetracted, commitGuard);
+  await revertOptimisticUnsend(
+    db,
+    admittedTarget.messageGuid,
+    now,
+    previous.dateRetracted,
+    previous.retractionState,
+    previous.pendingRetractionPartIndex,
+    partIndex,
+    commitGuard,
+  );
   return { ok: false };
 }
 
@@ -262,12 +392,13 @@ export function sendUnsend(
   args: SendUnsendArgs,
   now: number = Date.now(),
   commitGuard?: DbCommitGuard,
+  serverAuthorization?: MessageTargetServerAuthorization,
 ): Promise<{ ok: boolean }> {
   // Capture every caller-owned input synchronously, including the clock marker. The full lifecycle
   // then shares the exact same per-row queue as edit, while each DB callback stays HTTP-free.
   const messageGuid = args.messageGuid;
   const queuedArgs = { ...args, messageGuid };
   return queueMessageMutation(db, messageGuid, () =>
-    sendUnsendOnce(db, http, queuedArgs, now, commitGuard),
+    sendUnsendOnce(db, http, queuedArgs, now, commitGuard, serverAuthorization),
   );
 }

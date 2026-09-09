@@ -41,6 +41,8 @@ export interface SelectedMessage {
   myEmojis?: string[];
   /** Exact stored target part for each own reaction, keyed by reactionKindKey. */
   myReactionParts?: Readonly<Record<string, number>>;
+  /** RCS can react to a whole confirmed message even though it has no Apple part topology. */
+  canReact?: boolean;
   /** Best available Apple part represented by this aggregate bubble. */
   targetPartIndex?: number;
   dateCreated: number | null; // for the "recent" edit/unsend gate
@@ -51,6 +53,8 @@ export interface SelectedMessage {
   dateEdited?: number | null;
   senderService?: string | null;
   isRetracted: boolean;
+  /** Internal proof that retires this frozen menu snapshot after a live retraction change. */
+  sourceRetractionFingerprint?: string;
   /** The message carries an edit marker (dateEdited) → offers "View Edit History". Distinct from
    *  the own-recent Edit/Unsend gate: you can view the history of ANY edited message. */
   isEdited: boolean;
@@ -238,13 +242,19 @@ export function MessageActionsOverlay({
   const selectedBodyText = selected?.bodyText ?? selected?.text ?? '';
   const hasText = selectedBodyText.trim().length > 0;
   const hasAttachments = (selected?.attachments?.length ?? 0) > 0;
-  const canTargetServerMessage = !!selected && !selected.isTemp;
+  const canReactToServerMessage =
+    !!selected &&
+    !selected.isTemp &&
+    (selected.canReact === true || selected.targetPartIndex != null);
+  const canReplyToServerMessage =
+    !!selected && !selected.isTemp && selected.targetPartIndex != null;
 
   const canEditUnsend =
     !!selected &&
     selected.isFromMe &&
     !selected.isRetracted &&
     !selected.isTemp &&
+    selected.targetPartIndex != null &&
     selected.dateCreated != null &&
     // The action menu is explicitly time-sensitive; this snapshot gates a 15-minute server rule.
     // eslint-disable-next-line react-hooks/purity
@@ -322,7 +332,7 @@ export function MessageActionsOverlay({
   );
 
   const emojiInputNode =
-    canTargetServerMessage && showEmojiInput ? (
+    canReactToServerMessage && showEmojiInput ? (
       <TextInput
         value={emojiDraft}
         onChangeText={setEmojiDraft}
@@ -342,7 +352,7 @@ export function MessageActionsOverlay({
   // Assemble the action list once. Server-target actions require a confirmed message; the
   // remaining action gates and order stay unchanged.
   const actions: ActionDef[] = [];
-  if (canTargetServerMessage) actions.push({ key: 'reply', label: 'Reply', onPress: onReply });
+  if (canReplyToServerMessage) actions.push({ key: 'reply', label: 'Reply', onPress: onReply });
   if (hasText) actions.push({ key: 'copy', label: 'Copy', onPress: onCopy });
   if (hasText || hasAttachments)
     actions.push({ key: 'forward', label: 'Forward', onPress: onForward });
@@ -410,7 +420,7 @@ export function MessageActionsOverlay({
       screen: { width: win.width, height: win.height },
       insets: { top: insets.top, bottom: insets.bottom },
       isFromMe: selected.isFromMe,
-      barHeight: canTargetServerMessage ? BAR_HEIGHT : 0,
+      barHeight: canReactToServerMessage ? BAR_HEIGHT : 0,
       gap: GAP,
       sideInset: SIDE_INSET,
     });
@@ -446,7 +456,7 @@ export function MessageActionsOverlay({
           />
         </Animated.View>
         {/* Floating tapback bar, hugging the bubble's near top corner. */}
-        {canTargetServerMessage ? (
+        {canReactToServerMessage ? (
           <Animated.View
             style={[styles.floatBar, sideStyle, { top: place.barTop, maxWidth }, popStyle]}
           >
@@ -473,7 +483,7 @@ export function MessageActionsOverlay({
     body = (
       <Pressable style={styles.backdrop} onPress={onClose}>
         <View style={[styles.sheet, { paddingBottom: insets.bottom + 12 }]}>
-          {canTargetServerMessage ? (
+          {canReactToServerMessage ? (
             <>
               <View style={[styles.picker, { backgroundColor: theme.color.secondaryBackground }]}>
                 {pickerButtons}

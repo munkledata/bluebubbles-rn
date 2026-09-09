@@ -160,6 +160,26 @@
       "upgradeTest": "test/db/migrations/0045_backup_export_indexes.test.ts",
       "schemaEvidence": "src/db/schema.ts",
       "cacheWipeEvidence": "N/A: index only; no persistent rows"
+    },
+    {
+      "number": 46,
+      "name": "0046_message_send_attempt_owner",
+      "task": "PUSH-RETRY-01",
+      "branchPr": "master",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0046_message_send_attempt_owner.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 47,
+      "name": "0047_message_retraction_topology",
+      "task": "FEAT-03B",
+      "branchPr": "master",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0047_message_retraction_topology.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
     }
   ]
 }

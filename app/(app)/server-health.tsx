@@ -12,8 +12,9 @@ import {
 } from 'react-native';
 import { serverApi } from '@core/api';
 import { isUnimplementedEndpoint } from '@core/api/errors';
-import type { RcsStatus, ServerAlert } from '@core/api/endpoints/server';
-import { deriveRcsHealth, deriveRcsHealthFromStatus, type RcsSeverity } from '@core/realtime';
+import type { ServerAlert } from '@core/api/endpoints/server';
+import { deriveRcsHealth, RCS_ALERT_TYPES, type RcsSeverity } from '@core/realtime';
+import { isScopedDeviceCredential } from '@core/secure';
 import { http } from '@/services';
 import {
   captureRealtimeDeliveryLease,
@@ -21,7 +22,11 @@ import {
   subscribeRealtimeGenerationInvalidation,
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
-import { useSessionStore } from '@state/sessionStore';
+import {
+  captureSessionTransportLease,
+  type SessionTransportLease,
+  useSessionStore,
+} from '@state/sessionStore';
 import { useRcsHealthStore } from '@state/rcsHealthStore';
 import { showToast } from '@ui/toast';
 import { InfoRow, NavRow, NoteRow, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
@@ -30,19 +35,37 @@ const yesNo = (v: boolean | null | undefined): string => (v == null ? '—' : v 
 const okBad = (v: boolean | null | undefined): string =>
   v == null ? '—' : v ? 'Connected' : 'Not connected';
 
-/** See ServerManagementScreen: reads use an isolated cache key and discard late old-account data. */
-async function readForAccount<T>(
-  lease: RealtimeDeliveryLease,
-  read: () => Promise<T>,
+/**
+ * Isolate a health read to both the account and the exact approved server URL that started it.
+ * The revision also lives in the query key; this final fence turns a delayed old-URL result/error
+ * into null instead of letting it populate even that retired cache entry.
+ */
+async function readForTransport<T>(
+  accountLease: RealtimeDeliveryLease,
+  expectedTransportRevision: number,
+  read: (transportLease: SessionTransportLease) => Promise<T>,
 ): Promise<T | null> {
-  if (!lease.isCurrent()) return null;
+  if (!accountLease.isCurrent()) return null;
+  const transportLease = captureSessionTransportLease();
+  if (transportLease.revision !== expectedTransportRevision || !transportLease.isCurrent()) {
+    return null;
+  }
   try {
-    const value = await read();
-    return lease.isCurrent() ? value : null;
+    const value = await read(transportLease);
+    return accountLease.isCurrent() && transportLease.isCurrent() ? value : null;
   } catch (error) {
-    if (!lease.isCurrent()) return null;
+    if (!accountLease.isCurrent() || !transportLease.isCurrent()) return null;
     throw error;
   }
+}
+
+function privateApiState(
+  available: unknown,
+  enabled: boolean | null | undefined,
+  connected: boolean | null | undefined,
+): string {
+  if (available === false) return 'Unavailable';
+  return enabled === false ? 'Disabled' : okBad(connected);
 }
 
 function formatUptime(ms: number | null | undefined): string {
@@ -57,14 +80,21 @@ function formatUptime(ms: number | null | undefined): string {
 }
 
 /** Server Health / diagnostics — surfaces the server's read-only status channels so the user can
- *  see helper connectivity, Find My key state, push config, tunnel/TLS, uptime, and alerts. */
+ *  see helper connectivity, Find My key state, push config, connection/TLS, uptime, and alerts. */
 export default function ServerHealthScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
   const serverInfo = useSessionStore((s) => s.serverInfo);
+  const password = useSessionStore((s) => s.password);
+  const transportRevision = useSessionStore((s) => s.transportRevision);
   const [accountLease] = useState(() => captureRealtimeDeliveryLease());
   const [accountRetired, setAccountRetired] = useState(() => !accountLease.isCurrent());
-  const healthQueryPrefix = ['server', 'health', accountLease.generation] as const;
+  const healthQueryPrefix = [
+    'server',
+    'health',
+    accountLease.generation,
+    transportRevision,
+  ] as const;
   const alertsQueryKey = [...healthQueryPrefix, 'alerts'] as const;
   const [clearingAlerts, setClearingAlerts] = useState(false);
 
@@ -79,13 +109,12 @@ export default function ServerHealthScreen(): React.JSX.Element {
     [accountLease],
   );
   const accountCurrent = !accountRetired && accountLease.isCurrent();
+  const scopedCredentialSession = accountCurrent && isScopedDeviceCredential(password);
   // RCS bridge (Google Messages): the capability boolean gates the section (absent on older
-  // servers → hidden). The rich, accurate health block comes from the NON-admin `get-rcs-status`
-  // channel (fetched below); the live `rcs-alert` socket event is kept as an immediacy override so
-  // a fresh alert updates the card between refetches.
+  // servers → hidden). The detailed status route is local-admin-only, so remote clients use the
+  // capability plus the latest live `rcs-alert` signal instead of attempting an impossible read.
   const rcsCapability = accountCurrent ? serverInfo?.rcs : undefined;
   const rcsLastAlert = useRcsHealthStore((s) => s.lastAlertType);
-  const rcsLastAlertAt = useRcsHealthStore((s) => s.lastAlertAt);
 
   // Each read is its own query — a failure just leaves that card at "—" (data stays undefined),
   // never blocks the rest. The `?? null` coercions matter: most of these endpoints can resolve
@@ -96,124 +125,124 @@ export default function ServerHealthScreen(): React.JSX.Element {
       {
         queryKey: [...healthQueryPrefix, 'private-api'],
         queryFn: ({ signal }) =>
-          readForAccount(
+          readForTransport(
             accountLease,
+            transportRevision,
             async () => (await serverApi.privateApiStatus(http, signal)) ?? null,
           ),
       },
       {
         queryKey: [...healthQueryPrefix, 'env'],
         queryFn: ({ signal }) =>
-          readForAccount(
+          readForTransport(
             accountLease,
+            transportRevision,
             async () => (await serverApi.serverEnv(http, signal)) ?? null,
           ),
       },
       {
         queryKey: [...healthQueryPrefix, 'findmy-keys'],
         queryFn: ({ signal }) =>
-          readForAccount(
+          readForTransport(
             accountLease,
+            transportRevision,
             async () => (await serverApi.findMyKeysStatus(http, signal)) ?? null,
           ),
       },
       {
         queryKey: [...healthQueryPrefix, 'fcm'],
+        enabled: !scopedCredentialSession,
         queryFn: ({ signal }) =>
-          readForAccount(
+          readForTransport(
             accountLease,
+            transportRevision,
             async () => (await serverApi.fcmStatus(http, signal)) ?? null,
-          ),
-      },
-      {
-        queryKey: [...healthQueryPrefix, 'zrok'],
-        queryFn: ({ signal }) =>
-          readForAccount(
-            accountLease,
-            async () => (await serverApi.zrokStatus(http, signal)) ?? null,
           ),
       },
       {
         queryKey: [...healthQueryPrefix, 'public-ip'],
         queryFn: ({ signal }) =>
-          readForAccount(accountLease, () => serverApi.publicIp(http, signal)),
+          readForTransport(accountLease, transportRevision, () => serverApi.publicIp(http, signal)),
       },
       {
         queryKey: [...healthQueryPrefix, 'tls'],
         queryFn: ({ signal }) =>
-          readForAccount(
+          readForTransport(
             accountLease,
+            transportRevision,
             async () => (await serverApi.tlsStatus(http, signal)) ?? null,
           ),
       },
       {
         queryKey: [...healthQueryPrefix, 'admin'],
         queryFn: ({ signal }) =>
-          readForAccount(
+          readForTransport(
             accountLease,
+            transportRevision,
             async () => (await serverApi.adminStatus(http, signal)) ?? null,
           ),
       },
       {
         queryKey: alertsQueryKey,
+        enabled: !scopedCredentialSession,
         queryFn: ({ signal }) =>
-          readForAccount(accountLease, () => serverApi.serverAlerts(http, signal)),
-      },
-      // Older servers lack the `get-rcs-status` channel (reject / `[]` sentinel → schema fail):
-      // the query stays errored so the RCS row degrades to the capability-only signal.
-      {
-        queryKey: [...healthQueryPrefix, 'rcs'],
-        queryFn: ({ signal }) =>
-          readForAccount(
-            accountLease,
-            async () => (await serverApi.rcsStatus(http, signal)) ?? null,
+          readForTransport(accountLease, transportRevision, () =>
+            serverApi.serverAlerts(http, signal),
           ),
       },
     ],
   });
-  const [paQ, envQ, keysQ, fcmQ, zrokQ, ipQ, tlsQ, adminQ, alertsQ, rcsQ] = healthQueries;
+  const [paQ, envQ, keysQ, fcmQ, ipQ, tlsQ, adminQ, alertsQ] = healthQueries;
   const visibleServerInfo = accountCurrent ? serverInfo : null;
   const pa = accountCurrent ? paQ.data : null;
   const env = accountCurrent ? envQ.data : null;
   const keys = accountCurrent ? keysQ.data : null;
-  const fcm = accountCurrent ? fcmQ.data : null;
-  const zrok = accountCurrent ? zrokQ.data : null;
+  const fcm = accountCurrent && !scopedCredentialSession ? fcmQ.data : null;
   const ip = accountCurrent ? (ipQ.data ?? null) : null;
   const tls = accountCurrent ? tlsQ.data : null;
   const admin = accountCurrent ? adminQ.data : null;
-  const alerts = accountCurrent ? (alertsQ.data ?? []) : [];
-  // The live `get-rcs-status` block + when it last resolved (to decide whether a socket alert is
-  // fresher than the fetch). No data = channel unavailable (older server) → capability-only.
-  const rcs = accountCurrent ? (rcsQ.data ?? null) : null;
-  const rcsFetchedAt = accountCurrent && rcsQ.dataUpdatedAt > 0 ? rcsQ.dataUpdatedAt : null;
-  const refreshing = accountCurrent && healthQueries.some((q) => q.isFetching);
+  const alerts = accountCurrent && !scopedCredentialSession ? (alertsQ.data ?? null) : null;
+  const alertsPlaceholder = scopedCredentialSession
+    ? 'Mac dashboard only'
+    : alertsQ.isError && isUnimplementedEndpoint(alertsQ.error)
+      ? 'Unavailable'
+      : '—';
+  const attemptedHealthQueries = scopedCredentialSession
+    ? healthQueries.filter((_query, index) => index !== 3 && index !== 7)
+    : healthQueries;
+  const refreshing = accountCurrent && attemptedHealthQueries.some((q) => q.isFetching);
   // True when EVERY read failed → the server isn't answering the health channels at all (offline
   // or too old). Shown as a banner so an empty screen reads as a server issue, not an app bug.
-  const allFailed = accountCurrent && healthQueries.every((q) => q.isError);
-  // Every failure was a dispatcher 404 (remapped to Unimplemented): the server predates the admin
-  // dispatcher, or a reverse proxy blocks /admin/* — a config problem, not connectivity.
-  const allUnsupported = allFailed && healthQueries.every((q) => isUnimplementedEndpoint(q.error));
+  const allFailed = accountCurrent && attemptedHealthQueries.every((q) => q.isError);
+  // Every typed route and its older-server fallback was absent. That is version/proxy
+  // compatibility, not proof that the server is offline.
+  const allUnsupported =
+    allFailed && attemptedHealthQueries.every((q) => isUnimplementedEndpoint(q.error));
 
   const load = useCallback((): void => {
     if (!accountLease.isCurrent()) return;
     void queryClient.invalidateQueries({
-      queryKey: ['server', 'health', accountLease.generation],
+      queryKey: ['server', 'health', accountLease.generation, transportRevision],
     });
-  }, [accountLease, queryClient]);
+  }, [accountLease, queryClient, transportRevision]);
 
   const onClearAlerts = (): void => {
-    if (clearingAlerts || !accountLease.isCurrent()) return;
+    if (clearingAlerts || scopedCredentialSession || !accountLease.isCurrent()) return;
+    const requestTransport = captureSessionTransportLease();
+    if (requestTransport.revision !== transportRevision || !requestTransport.isCurrent()) return;
     setClearingAlerts(true);
     void (async () => {
       try {
         await runTrackedRealtimeWork(accountLease, async (activeLease) => {
-          if (!activeLease.isCurrent()) return;
+          if (!activeLease.isCurrent() || !requestTransport.isCurrent()) return;
           await serverApi.clearServerAlerts(http);
-          if (!activeLease.isCurrent()) return;
+          if (!activeLease.isCurrent() || !requestTransport.isCurrent()) return;
           queryClient.setQueryData<ServerAlert[]>(alertsQueryKey, []);
         });
       } catch {
-        if (accountLease.isCurrent()) showToast('Could not clear server alerts.');
+        if (accountLease.isCurrent() && requestTransport.isCurrent()) {
+          showToast('Could not clear server alerts.');
+        }
       } finally {
         if (accountLease.isCurrent()) setClearingAlerts(false);
       }
@@ -262,7 +291,7 @@ export default function ServerHealthScreen(): React.JSX.Element {
             <View style={[styles.banner, { backgroundColor: theme.color.secondaryBackground }]}>
               <Text style={[styles.hint, { color: theme.color.destructive }]}>
                 {allUnsupported
-                  ? 'This server doesn’t expose health reporting. It may be an older version, or a proxy may be blocking its admin endpoints.'
+                  ? 'This server doesn’t expose health reporting. It may be an older version, or a proxy may be blocking its health endpoints.'
                   : 'The server isn’t responding to health checks. It may be offline, or running an older version that doesn’t report these details.'}
               </Text>
             </View>
@@ -270,11 +299,11 @@ export default function ServerHealthScreen(): React.JSX.Element {
           <SettingsSection label="PRIVATE API">
             <InfoRow
               label="Messages helper"
-              value={pa?.enabled === false ? 'Disabled' : okBad(pa?.connected)}
+              value={privateApiState(pa?.available, pa?.enabled, pa?.connected)}
             />
             <InfoRow
               label="FaceTime helper"
-              value={pa?.ft_enabled === false ? 'Disabled' : okBad(pa?.ft_connected)}
+              value={privateApiState(pa?.ft_available, pa?.ft_enabled, pa?.ft_connected)}
             />
           </SettingsSection>
 
@@ -288,7 +317,10 @@ export default function ServerHealthScreen(): React.JSX.Element {
           </SettingsSection>
 
           <SettingsSection label="PUSH (FCM)" style={styles.gap}>
-            <InfoRow label="Configured" value={yesNo(fcm?.configured)} />
+            <InfoRow
+              label="Configured"
+              value={scopedCredentialSession ? 'Mac dashboard only' : yesNo(fcm?.configured)}
+            />
             {fcm?.projectId ? <InfoRow label="Project" value={fcm.projectId} /> : null}
           </SettingsSection>
 
@@ -303,11 +335,7 @@ export default function ServerHealthScreen(): React.JSX.Element {
           </SettingsSection>
 
           <SettingsSection label="CONNECTION" style={styles.gap}>
-            <InfoRow
-              label="Tunnel (zrok)"
-              value={zrok?.running ? 'Running' : zrok?.available ? 'Available' : 'Off'}
-            />
-            {zrok?.url ? <InfoRow label="Tunnel URL" value={zrok.url} /> : null}
+            <InfoRow label="Proxy" value={visibleServerInfo?.proxy_service ?? 'Direct'} />
             <InfoRow label="Public IP" value={ip ?? '—'} />
             <InfoRow
               label="TLS"
@@ -320,17 +348,17 @@ export default function ServerHealthScreen(): React.JSX.Element {
           {rcsCapability == null ? null : (
             <RcsBridgeSection
               capability={rcsCapability}
-              status={rcs}
-              statusFetchedAt={rcsFetchedAt}
               lastAlertType={rcsLastAlert}
-              lastAlertAt={rcsLastAlertAt}
               onReauthed={load}
               accountLease={accountLease}
+              transportRevision={transportRevision}
             />
           )}
 
           <SettingsSection label="ALERTS" style={styles.gap}>
-            {alerts.length === 0 ? (
+            {alerts == null ? (
+              <InfoRow label="Server alerts" value={alertsPlaceholder} />
+            ) : alerts.length === 0 ? (
               <InfoRow label="Server alerts" value="None" />
             ) : (
               alerts.map((a) => (
@@ -341,7 +369,7 @@ export default function ServerHealthScreen(): React.JSX.Element {
                 </View>
               ))
             )}
-            {alerts.length > 0 ? (
+            {alerts != null && alerts.length > 0 ? (
               <NavRow
                 label={clearingAlerts ? 'Clearing Alerts…' : 'Clear Alerts'}
                 chevron={false}
@@ -379,47 +407,23 @@ function severityColor(severity: RcsSeverity, theme: ReturnType<typeof useTheme>
   }
 }
 
-/** The RCS bridge (Google Messages) status row. Only rendered when the server advertises the `rcs`
- *  capability. Prefers the live `get-rcs-status` block (accurate enabled/paired/connected/
- *  phoneResponding, plus phoneID) as the source of truth, with the live `rcs-alert` socket signal
- *  as an immediacy override when it's fresher than the last fetch — so a fresh alert updates the
- *  card between refetches, and a dashboard re-auth recovers on the next refetch (connected flips
- *  back true) with NO recovery alert needed. Falls back to the capability-only signal when the
- *  channel is unavailable (older server). The auth fix lives on the Mac server dashboard (a cookie
- *  paste), not in the app. */
+/** The RCS bridge (Google Messages) status row. The detailed status route is local-admin-only, so
+ *  the remote app uses the advertised capability plus the latest live socket alert. */
 function RcsBridgeSection({
   capability,
-  status,
-  statusFetchedAt,
   lastAlertType,
-  lastAlertAt,
   onReauthed,
   accountLease,
+  transportRevision,
 }: {
   capability: boolean;
-  status: RcsStatus;
-  statusFetchedAt: number | null;
   lastAlertType: string | null;
-  lastAlertAt: number | null;
   onReauthed: () => void;
   accountLease: RealtimeDeliveryLease;
+  transportRevision: number;
 }): React.JSX.Element {
   const theme = useTheme();
-  // A socket alert is an immediacy override only when it arrived AFTER the block was fetched —
-  // otherwise a stale alert would defeat the block's reauth-recovery.
-  const freshAlert =
-    lastAlertType != null &&
-    lastAlertAt != null &&
-    statusFetchedAt != null &&
-    lastAlertAt > statusFetchedAt
-      ? lastAlertType
-      : null;
-  const health =
-    status != null
-      ? deriveRcsHealthFromStatus(status, freshAlert)
-      : // No block (older server / fetch failed): degrade to the capability + last-alert signal.
-        deriveRcsHealth(capability, lastAlertType);
-  const phoneID = status?.phoneID;
+  const health = deriveRcsHealth(capability, lastAlertType);
   return (
     <SettingsSection label="RCS BRIDGE" style={styles.gap}>
       <View style={styles.row}>
@@ -432,9 +436,14 @@ function RcsBridgeSection({
           {health.status}
         </Text>
       </View>
-      {phoneID ? <InfoRow label="Phone" value={phoneID} /> : null}
       {health.detail ? <NoteRow text={health.detail} /> : null}
-      {capability ? <RcsReconnectRow onDone={onReauthed} accountLease={accountLease} /> : null}
+      {capability ? (
+        <RcsReconnectRow
+          onDone={onReauthed}
+          accountLease={accountLease}
+          transportRevision={transportRevision}
+        />
+      ) : null}
     </SettingsSection>
   );
 }
@@ -450,21 +459,36 @@ function RcsBridgeSection({
 function RcsReconnectRow({
   onDone,
   accountLease,
+  transportRevision,
 }: {
   onDone: () => void;
   accountLease: RealtimeDeliveryLease;
+  transportRevision: number;
 }): React.JSX.Element {
   const theme = useTheme();
   const [busy, setBusy] = useState(false);
 
   const run = useCallback(async () => {
     if (busy || !accountLease.isCurrent()) return;
+    const requestTransport = captureSessionTransportLease();
+    if (requestTransport.revision !== transportRevision || !requestTransport.isCurrent()) return;
     setBusy(true);
     try {
       await runTrackedRealtimeWork(accountLease, async (activeLease) => {
-        if (!activeLease.isCurrent()) return;
+        if (!activeLease.isCurrent() || !requestTransport.isCurrent()) return;
+        const healthBeforeRequest = useRcsHealthStore.getState();
         const res = await serverApi.rcsReauthNow(http);
-        if (!activeLease.isCurrent()) return;
+        if (!activeLease.isCurrent() || !requestTransport.isCurrent()) return;
+        // A confirmed connection supersedes only the GAIA auth alert that prompted this request.
+        // It does not prove a phone-offline/fatal condition recovered, and it must not overwrite a
+        // newer socket signal that arrived while the request was in flight.
+        if (
+          res.connected &&
+          healthBeforeRequest.lastAlertType === RCS_ALERT_TYPES.gaiaLoggedOut &&
+          useRcsHealthStore.getState() === healthBeforeRequest
+        ) {
+          useRcsHealthStore.getState().setAlert(RCS_ALERT_TYPES.browserActive);
+        }
         // Be honest about the three distinct outcomes — "staged" is NOT a success yet.
         showToast(
           res.staged
@@ -476,11 +500,13 @@ function RcsReconnectRow({
         onDone();
       });
     } catch {
-      if (accountLease.isCurrent()) showToast('Could not reconnect the RCS bridge.');
+      if (accountLease.isCurrent() && requestTransport.isCurrent()) {
+        showToast('Could not reconnect the RCS bridge.');
+      }
     } finally {
       if (accountLease.isCurrent()) setBusy(false);
     }
-  }, [accountLease, busy, onDone]);
+  }, [accountLease, busy, onDone, transportRevision]);
 
   return (
     <Pressable onPress={run} disabled={busy} style={styles.row} accessibilityRole="button">

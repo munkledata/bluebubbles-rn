@@ -34,7 +34,20 @@ async function seed(db: AppDatabase) {
   const chatId = map.get('c1')!;
   await upsertMessages(
     db,
-    [Message.parse({ guid: 'mt', text: 'hi', dateCreated: 100, handle: { address: 'a@x.com' } })],
+    [
+      Message.parse({
+        guid: 'mt',
+        text: 'hi',
+        dateCreated: 100,
+        handle: { address: 'a@x.com' },
+        messagePartTopology: {
+          complete: true,
+          originalPartIndexes: [0],
+          currentParts: [{ index: 0, kind: 'text' }],
+          attachmentOwnership: [],
+        },
+      }),
+    ],
     () => chatId,
     hm,
   );
@@ -59,6 +72,7 @@ describe('sendReactionMessage — emoji tapbacks', () => {
         targetGuid: 'mt',
         reaction: 'emoji',
         emoji: '🔥',
+        partIndex: 0,
         selectedMessageText: 'hi',
       },
     );
@@ -84,7 +98,7 @@ describe('sendReactionMessage — emoji tapbacks', () => {
         body = json as Record<string, unknown>;
         return { guid: 'real-unreact', dateCreated: 1000 };
       }),
-      { chatGuid: 'c1', targetGuid: 'mt', reaction: '-emoji', emoji: '🔥' },
+      { chatGuid: 'c1', targetGuid: 'mt', reaction: '-emoji', emoji: '🔥', partIndex: 0 },
     );
     expect(body).toMatchObject({ reactionType: '-emoji', reactionEmoji: '🔥' });
   });
@@ -99,7 +113,7 @@ describe('sendReactionMessage — emoji tapbacks', () => {
         body = json as Record<string, unknown>;
         return { guid: 'real-love', dateCreated: 1000 };
       }),
-      { chatGuid: 'c1', targetGuid: 'mt', reaction: 'love' },
+      { chatGuid: 'c1', targetGuid: 'mt', reaction: 'love', partIndex: 0 },
     );
     expect(body).toMatchObject({ reactionType: 'love' });
     expect(Object.keys(body!)).not.toContain('reactionEmoji');
@@ -115,7 +129,7 @@ describe('sendReactionMessage — emoji tapbacks', () => {
       fakeHttp(async () => {
         throw new Error('network down');
       }),
-      { chatGuid: 'c1', targetGuid: 'mt', reaction: 'emoji', emoji: '🫡' },
+      { chatGuid: 'c1', targetGuid: 'mt', reaction: 'emoji', emoji: '🫡', partIndex: 0 },
     );
     const q = one(raw, "SELECT payload FROM outgoing_queue WHERE kind = 'reaction'");
     expect(JSON.parse(q.payload as string)).toMatchObject({ reaction: 'emoji', emoji: '🫡' });

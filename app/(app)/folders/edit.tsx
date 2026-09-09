@@ -330,6 +330,7 @@ export default function ConversationFolderEditScreen(): React.JSX.Element {
             <>
               <TextField
                 label="Folder name"
+                accessibilityLabel="Folder name"
                 value={draft}
                 onChangeText={(value) => {
                   setDraft(value);

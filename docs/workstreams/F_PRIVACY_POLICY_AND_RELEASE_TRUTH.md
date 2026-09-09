@@ -102,6 +102,12 @@ source. A private project must not advertise an inherited third-party license as
 
 This decision precedes the final license/notices links in `SUPPORT-01`.
 
+Current host milestone (2026-09-07): Settings opens a local notices screen backed by the root
+project terms and confirmed third-party notice. A deterministic source inventory covers the current
+production lockfile, tracked artwork, local native modules, and build plugins. Its strict release
+check deliberately remains red until exact-AAB dependency/font/model/native-library coverage,
+provenance review, applicable notice review, and owner/legal approval are complete.
+
 <a id="file-01a"></a>
 
 ## `FILE-01A` — truthful plaintext-file boundary
@@ -202,6 +208,11 @@ behavior must describe the same choice.
 Show the installed app version and build separately from the connected server version. Link the
 privacy disclosure, approved license/notices, support destination, and diagnostic controls without
 implying that one version identifies the other. Final license/notices wiring follows `LEGAL-01`.
+
+Current host milestone (2026-09-07): About distinguishes app/build/server identities and links local,
+offline privacy/data-use and project/notices screens. The notices are technical evidence, not final
+legal approval. A real owner-approved support/contact destination and exact-candidate verification
+remain open.
 
 <a id="store-00"></a>
 

@@ -16,31 +16,46 @@ _Initial baseline generated 2026-07-01 from a bidirectional API/feature reconcil
 **Original 2026-07-01 baseline:** 44 surface items matched on both sides (the core messaging, sync,
 group management, FaceTime, Find My, stats, and restart/logs flows all lined up).
 
-## 🟡 Partial (updated 2026-09-04) — multipart message-part identity (`FEAT-03B`)
+## 🟡 Source-aligned (2026-09-07) — atomic full-repair snapshot (`RECOVERY-01`)
 
-The Gator send routes accept `partIndex` for ordinary text replies, reactions, edits, and unsend,
-and serialized messages expose a bounded aggregate `partCount`. The RN compatibility slice now
-preserves that count, derives associated-message parts from one outer `p:<n>/` or `bp:<n>/` link,
-normalizes the helper's legacy `bp:<guid>` attachment wrapper without inventing a part, and carries
-a resolved target through optimistic rows, retries, local scheduled replies, and action requests.
-Reaction removal uses its persisted part rather than guessing from the bubble.
+The app and Gator server now share a version-1 repair lease around one all-history crawl. The server
+ties the lease to one authenticated owner and process, samples the same long-lived Apple `chat.db`
+connection plus configuration authority, and requires the token on chat, chat-message, and
+deleted-message pages. Each successful page echoes the exact token after validation; the app pins
+one transport identity and rejects any missing or different echo before the server's one-shot finish
+can authorize local absence reconciliation. Server restart, process/worker/origin rotation, source
+change, expiry, unavailable `chat.db`, and RCS-enabled reads all fail closed.
 
-Unsend sends the resolved part to Gator, but the current local optimistic and post-echo presentation
-remains an aggregate tombstone. Preserving only the remaining visible parts cannot be implemented
-safely in the bubble alone: inbox/search/notification eligibility and attachment-cache ownership
-also treat `dateRetracted` as row-wide, and a later sync may omit enough content to make the removed
-part ambiguous. A shared aggregate-retraction classifier therefore remains separate follow-up work.
+The client also fences every participating local database owner from exposure capture through the
+final marker commit. Existing tombstone, draft, outgoing, reminder, customization, and late-row
+protections remain, and local RCS rows are excluded from absence pruning. An older server receives
+one additive refresh with no prune or marker replacement and is labeled limited instead of claiming
+a complete repair. This is host/source alignment only; the authoritative work plan keeps
+`RECOVERY-01` open for a matching packaged deployment and real Mac/Android cancellation,
+session-switch, RCS-refusal, and final database comparison evidence.
 
-This is not full cross-repository multipart parity. The normalized server message does not expose a
-stable per-part topology or incoming `thread_originator_part`, so the client can identify the common
-attachments-first caption layout only when the aggregate count proves it. Apple part identifiers can
-also change after edits, unsends, or gallery collapse. The app endpoint and server route, gateway, and
-helper request now preserve `selectedMessageGuid` plus an optional outer `partIndex` for mention-bearing
-replies. A focused operation test proves a nonzero reply part survives the complete host-side path and
-that an ordinary mention send invents neither reply field. This is source proof only: the current production
-server has retired the Private API helper, so no live Mac dispatch is claimed. Exact arbitrary layouts and
-received reply parts remain open for an additive server topology contract plus device observation; ambiguous
-older payloads keep the compatible part-zero fallback rather than inventing an identity.
+## 🟡 Source-aligned (updated 2026-09-08) — multipart topology and combined sends (`FEAT-03`)
+
+The app and Gator server now share a bounded normalized per-part topology and exact received-message
+reply/reaction part identity. Migration `0047_message_retraction_topology` persists the topology and
+attachment ownership needed to resolve actions. Complete topology is authoritative; malformed or partial
+topology fails closed, while an explicitly older server can retain the narrow legacy compatibility path.
+The shared retraction classifier preserves proven surviving text and attachments consistently across the
+bubble, inbox, search, notification, and attachment-cache surfaces instead of treating every partial unsend
+as an empty message.
+
+Reply, reaction, edit, unsend, scheduling, optimistic insertion, and retry carry the resolved target.
+Supported iMessage contact-card replies preserve `selectedMessageGuid` and its exact `partIndex` through durable
+admission and the endpoint. Google Messages reactions deliberately target a proven `rcs-*` message as the whole
+message at part zero; that exception does not enable unsupported RCS reply threading. For combined sending, RCS text
+plus one attachment travels under `supports_rcs_text_with_attachment` as one logical optimistic/retry identity and
+older servers fail closed. The separate iMessage capability is not inferred from RCS support.
+
+Focused host suites exercise the app and server contracts, including capability fallback, target preservation,
+survivor presentation, and whole-message RCS reactions. This is source evidence only: a matching staged server
+and packaged Android candidate still need to prove the complete cross-repository path. The iMessage combined-send
+positive also remains blocked by server follow-up `FP-006`, so authoritative task `FEAT-03` remains
+**IN_PROGRESS** and no device proof is claimed here.
 
 ## 🟡 Source-aligned (2026-09-04) — capability-gated global message search (`FEAT-05C`)
 
@@ -72,8 +87,16 @@ The top gaps have since been wired app-side against capabilities the server alre
 
 - **`message-send-error`** — the app now subscribes (SERVER_EVENTS), normalizes it (EventRouter → `NormalizedEvent`), and `DbEventSink` routes it through `applyServerSendErrorWithinTransaction` inside the event's existing durable transaction: bubble error badge, attempts-bump when the optimistic queue row still exists, and an automatic re-enqueue only when the server marks the failure **`retryable: true`**. Manual retry remains available only when an exact queue payload exists. For pushed RCS failures, bbd now sets `retryable` only for a proven pre-dispatch refusal: loopback `ECONNREFUSED` or lifecycle rejection before fetch. Timeouts, resets, sidecar HTTP failures, post-dispatch shutdown, and delivery-phase `failed` frames whose dispatch outcome may be ambiguous remain non-retryable. Older servers omit the flag → bubble-only, as before. Unit-tested both sides (`dbEventSink.test.ts` / bbd `attachmentUploadRoutes.test.ts`, `rcsSender.test.ts`); full design in `docs/RCS_SEND_RELIABILITY.md`.
   **Durable fanout update (2026-09-04; current-server client path host-green, end-to-end FCM device proof open):** server commit `e55f1210` now gives each admitted physical RCS attempt one immutable UUID `attemptGuid`, combines it with the logical `tempGuid` in an opaque sidecar `tmpID`, and retains the echoed correlation by exact physical-phone namespace plus message id. Duplicate requests retain the same attempt id; an exact delivery failure releases only that generation so a genuine retry gets a new id and a delayed old failure cannot evict it from the server. One logical DTO is reused across authenticated socket, webhook, and attempt-aware FCM before transport-specific serialization/encryption. Managed-device FCM requires `messages:write`; unmanaged legacy push rows retain the existing shared-password compatibility policy. A canonical per-device key encrypts the DTO; without one, FCM receives only the event type plus empty-object metadata, never temp/chat/attempt ids in plaintext. `PUSH-CRYPTO-01A` now gives the app a host-green current-server `AEAD_GCM_V2_DEVICE` enrollment/decryption path, so this attempt payload is eligible for device testing. Matching deployment, killed-app convergence, and the broader authenticated identity/replay protocol remain open under the parent `PUSH-CRYPTO-01`. Legacy temp-only failures remain socket/webhook-only. Host coverage proves the server composition contract, restart recovery, re-pair isolation, release races, authorization, and logical fanout equality. A paired phone and matching release still need to prove Google text/media echo at the supported `tmpID` length, destination-registration identity, and the documented crash-before-first-frame boundary. Two client tails remain: a queue-less post-ack delivery error cannot be manually retried, and a first old-attempt event delayed until after a newer attempt is not fenced against that bubble because the app does not persist current-attempt ownership. Automatic A → B evidence must use a certified pre-dispatch `retryable: true` failure, and only a replay of an already-processed A is currently deduplicated. The client continues to move a cancelled temp message's deletion-ledger marker and records every learned temp→real mapping in a bounded encrypted local alias table, so stale user actions can resolve after purge/re-ingest. A content-only echo cannot reconstruct a mapping that was never learned; the server attempt id makes failure copies exact but does not invent that missing temp→real mapping.
+  **Active-attempt ownership update (2026-09-07; host/source verified, device proof open):** this supersedes the delayed-A ownership limitation immediately above. A modern RCS send resolves the server capability before inserting its optimistic row and enables ownership only when `supports_rcs_send_attempt_ownership` is explicitly true. The app then correlates each physical send with the complete `{tempGuid, attemptGuid, clientAttemptGeneration}` tuple. Migration `0046_message_send_attempt_owner` durably stores the monotonic generation, pending state, and active attempt; retries use a compare-and-swap guard (the update succeeds only while the expected owner is still current). HTTP acknowledgements, live echoes, and send-error events reconcile only against that exact owner. Partial or malformed correlation fails closed, an old attempt cannot overwrite a newer one, and idempotent replay remains safe even after the bounded temp-to-real alias is pruned because one unambiguous active-attempt match can recover its owner. The server forwards `clientAttemptGeneration` through listener, composition, and fanout boundaries, and an RCS new-chat acknowledgement now also returns its `tempGuid`. Focused app/server host checks cover those paths, but this is not a shipped or release claim. `PUSH-RETRY-01` remains open until a matching deployed server and real phone prove the A → B races across HTTP, socket, and FCM, including killed-process/restart boundaries. One deliberate limitation also remains: after acknowledgement removes the exact queue payload, a queue-less retry can be reconstructed only for a message with a local attachment. Contact cards, mention metadata, and other non-attachment payloads are not recreated from the lossy message row; they fail closed and require a fresh user send.
 - **`new-server`** (tunnel-URL rotation) — the post-v56 RT-01A host flow now intercepts every instruction before database access. Invalid and downgrade attempts fail closed; an eligible foreign origin is held only in process memory and requires a foreground, unlocked approval modal, a freshly entered password, and separate cleartext consent when applicable. The candidate is validated before an exclusive, session-guarded credential commit and socket replacement. Exact Android traffic-capture and SecureStore interruption proof remains open, so this does not apply to frozen v56.
-- **Server Health screen** (Settings › SERVER › "Server Health…", and from Server Management) — surfaces the previously-untapped **remote-readable diagnostics** the server already exposed: Private-API helper connectivity (Messages + FaceTime), Find My key-import status (`get-findmy-keys-status` + `get-env` `findmyNeedsKeys`, explaining empty Find My tabs), push/FCM config (`get-fcm-status`), environment/uptime (`get-env` + `/admin/status`), tunnel + public IP + TLS (`get-zrok-status`/`get-public-ip`/`get-tls-status`), and the server alert log (`get-alerts` + Clear). No server change needed — all channels were already password-accessible. **DEPLOYMENT CAVEAT (2026-07-23):** a reverse proxy in front of the server must pass `POST /api/v1/admin/command` + `GET /api/v1/admin/status` through — prod Caddy's blanket `/api/v1/admin/*` 404 hardening silently killed BOTH this screen and Server Management's statistics (all their reads ride the dispatcher); fixed with a narrow path+method allow (admin-only writes stay blocked at the proxy AND token-gated server-side). The app now remaps a dispatcher-route 404 to `UnimplementedEndpointError`, so the screens say "unsupported/blocked" instead of blaming the connection (`adminCommand`/`adminStatus` in `endpoints/server.ts`).
+- **Server Health screen** (Settings › SERVER › "Server Health…", and from Server Management) — surfaces password-authenticated, remote-readable diagnostics for Private API, Find My key state, FCM, environment, uptime, proxy/TLS state, public IP, and alerts. **Contract correction (2026-09-08):** current servers are read through the typed `/private-api/status`, `/server/environment`, `/notifications/fcm/status`, `/tls/status`, `/alerts`, `/admin/findmy/keys/status`, `/admin/network/public-ip`, and `/admin/status` routes. Statistics use `/statistics/snapshot`. The retired dispatcher is attempted only after a typed-route 404 for older servers; zrok-specific presentation and the unsupported remote restart/log controls were removed. Proxy identity now comes from `/server/info`. The current public Caddy policy still blocks the two typed `/admin` reads (Find My keys and public IP), and its backend is older than these routes. Deploy the current server first, then allow only those two exact authenticated GET paths before the `/api/v1/admin/*` 404 rule—never the wildcard. All non-admin typed reads already pass through the proxy.
+  Current typed responses are validated against strict schemas. A malformed HTTP 200 fails closed;
+  the retired dispatcher is tried only when the typed request itself throws an `ApiError` whose
+  status is exactly 404, so authentication, transport, and validation failures are not masked.
+  Private-API `available: false` is presented as Unavailable. The detailed RCS status route is
+  local-admin-only; the phone uses the `/server/info` capability plus the latest live `rcs-alert`.
+  The empty-body `/rcs/reauth-now` action accepts only the strict applied-or-staged result and sends
+  no phone-held Google credential.
 
 ## ✅ Closed (2026-07-17) — chat.db schema-gap features
 
@@ -216,8 +239,9 @@ continuation, additive v2 durable-ledger continuation, atomic app adoption, and 
 cross-repository response fixtures are implemented. Exact-device proof keeps the parent task open.
 
 A `message-deleted` event arriving while the app was dead or app-locked used to be lost because the
-locked FCM path never touches the database. Boot/reconnect catch-up now closes that ordinary
-transport gap:
+legacy locked FCM path did not durably admit it. Authenticated, active-bound V3 can now enqueue only
+the canonical event into SQLCipher while locked; it does not read/decrypt, claim, route, or apply that
+row until unlock. Boot/reconnect catch-up still closes the legacy and refused/expired transport gap:
 
 - **Server** (`bluebubbles-server`): legacy `GET /api/v1/message/deleted?after=<unixMs>` retains
   `{ deleted }`, and existing `continuation=1`/`v1.*` callers keep the frozen v1 keyset behavior.
@@ -319,7 +343,7 @@ remain useful context, but the `PARITY-01` register that follows is the current 
 - **`imessage-aliases-removed`** — the app is fully wired to handle it (listener + notification), but the **Gator server has no detection source** for Apple-ID alias deregistration (not even declared in `DomainEvents`; 0 hits server-wide). The app handler is harmless + forward-compatible with an upstream server that does emit it; adding a fake server emission with no real source would be misleading. Left as app-ready.
 - **`scheduled-message-update`** — the app now prefers server-side scheduling for eligible one-shot messages and uses local rows for replies, recurrence, offline, and older-server fallback. The signal is still unwired, so a server-side change made elsewhere does not live-refresh the app's hybrid schedule list. Track that explicit parity decision under `PARITY-01` rather than calling the whole model local-only.
 - **`group-icon-changed` / `group-icon-removed`** — the app renders group avatars as **participant collages** (`GroupAvatar`) and does not display a server-supplied custom group photo, so there's nothing to refresh. Wiring it would be a no-op until group-photo display is added. Deferred with the (still-open) group-photo feature.
-- **The remaining admin / config surface** (set-config/get-config writes, TLS/zrok/VAPID/Cloudflare **management**, webhooks, FCM **setup**, device purge) — still untapped by design: either **local-console-only** (403 to remote app clients) or **low mobile value**. The read-only **diagnostics** subset (private-API/keys/push/env/tunnel/TLS/alerts) is now surfaced by the **Server Health screen** (see Closed above). What remains are the _write_/management ops, which belong on the trusted local server console, not a remote app.
+- **The remaining admin / config surface** (set-config/get-config writes, TLS/zrok/VAPID/Cloudflare **management**, webhooks, FCM **setup**, device purge) — still untapped by design: either **local-console-only** (403 to remote app clients) or **low mobile value**. The read-only **diagnostics** subset (Private API, keys, push, environment, proxy/TLS, public IP, and alerts) is now surfaced by the **Server Health screen** (see Closed above). What remains are the _write_/management ops, which belong on the trusted local server console, not a remote app.
 
 ### `PARITY-01` authoritative disposition register — approved 2026-08-27
 

@@ -2,14 +2,11 @@ import * as BackgroundTask from 'expo-background-task';
 import * as TaskManager from 'expo-task-manager';
 import { HttpClient } from '@core/api/http';
 import * as serverApi from '@core/api/endpoints/server';
+import type { ServerInfo } from '@core/models/serverInfo';
 import { logger } from '@core/secure';
 import { kvGet } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
-import {
-  ERROR_REPORTING_CONSENT_KEY,
-  LEGACY_ERROR_REPORTING_KEY,
-  useFeatureSettingsStore,
-} from '@state/featureSettingsStore';
+import { ERROR_REPORTING_CONSENT_KEY, useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { accountRevocationMarker, vault } from '../clients';
 import { ensureDatabase } from '../databaseControl';
 import { runErrorReportQueue } from '../errors/errorReportQueueService';
@@ -21,6 +18,10 @@ import {
 } from '../realtime/deliveryCoordinator';
 import { expoAttachmentUploader, expoFileExists } from '../send/attachmentUpload';
 import { runOutgoingQueue, type OutgoingQueueIO } from '../send/outgoingQueueService';
+import {
+  fixedRcsCapabilitySource,
+  messageTargetServerAuthorization,
+} from '../send/rcsAttemptCapability';
 import { runDueScheduled } from '../send/scheduleService';
 import { httpSyncApi, incrementalSync } from '../sync';
 import { runTrackedSync } from '../syncControl';
@@ -56,26 +57,40 @@ function asRealtimeLease(scope: BackgroundAccountScope): RealtimeDeliveryLease {
   return scope;
 }
 
+async function reconcileBackgroundMessageNotifications(
+  db: AppDatabase,
+  scope: BackgroundAccountScope,
+): Promise<void> {
+  const { reconcileMessageNotificationsWithDatabase } =
+    await import('../notifications/notifeeService');
+  await reconcileMessageNotificationsWithDatabase(db, asRealtimeLease(scope));
+}
+
 /** Hand due local schedules to the outgoing queue; the runner owns its once-per-generation recovery. */
 async function recoverAndDrainBackgroundSchedules(
   db: AppDatabase,
   http: HttpClient,
   scope: BackgroundAccountScope,
+  serverInfo: ServerInfo,
 ): Promise<void> {
   const lease = asRealtimeLease(scope);
   await runTrackedRealtimeWork(lease, async () => {
     if (!lease.isCurrent()) return;
-    await runDueScheduled(db, http, Date.now(), undefined, lease, BACKGROUND_SCHEDULE_MAX_ROWS);
+    await runDueScheduled(
+      db,
+      http,
+      Date.now(),
+      undefined,
+      lease,
+      BACKGROUND_SCHEDULE_MAX_ROWS,
+      () => fixedRcsCapabilitySource(serverInfo),
+    );
   });
 }
 
 /** Versioned consent is read from this account's DB; missing/corrupt/denied is a safe no-op. */
 async function hasDurableErrorReportingConsent(db: AppDatabase): Promise<boolean> {
-  const [consent, legacyConsent] = await Promise.all([
-    kvGet(db, ERROR_REPORTING_CONSENT_KEY),
-    kvGet(db, LEGACY_ERROR_REPORTING_KEY),
-  ]);
-  return consent === 'granted' || (consent == null && legacyConsent === '1');
+  return (await kvGet(db, ERROR_REPORTING_CONSENT_KEY)) === 'granted';
 }
 
 /** Upload at most the queue service's one bounded batch, with immediate in-process opt-out abort. */
@@ -133,9 +148,10 @@ export async function executeBackgroundSyncTask(): Promise<BackgroundTask.Backgr
           maxPages: BACKGROUND_SYNC_MAX_PAGES,
           shouldAbort: () => !scope.isCurrent(),
         });
+        if (scope.isCurrent()) await reconcileBackgroundMessageNotifications(db, scope);
       },
       recoverAndDrainSchedules: recoverAndDrainBackgroundSchedules,
-      drainOutgoing: async (db, client, scope) => {
+      drainOutgoing: async (db, client, scope, info) => {
         await runOutgoingQueue(
           db,
           client,
@@ -144,6 +160,7 @@ export async function executeBackgroundSyncTask(): Promise<BackgroundTask.Backgr
           asRealtimeLease(scope),
           BACKGROUND_OUTGOING_MAX_ROWS,
           BACKGROUND_ATTACHMENT_UPLOAD_TIMEOUT_MS,
+          messageTargetServerAuthorization(info, () => scope.isCurrent()),
         );
       },
       flushDiagnostics: (db, client, info, scope) =>

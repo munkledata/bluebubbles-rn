@@ -11,11 +11,15 @@ function MediaThumb({
   att,
   kind,
   glyph,
+  position,
+  total,
   onPress,
 }: {
   att: AttachmentRow;
   kind: 'photo' | 'video';
   glyph: string;
+  position: number;
+  total: number;
   onPress?: () => void;
 }): React.JSX.Element {
   const theme = useTheme();
@@ -44,7 +48,9 @@ function MediaThumb({
       // showed five naked play arrows. secondaryBackground is distinct from background in EVERY
       // preset, so the fallback (and an undownloaded photo) always reads as a tile.
       style={[styles.thumb, { backgroundColor: theme.color.secondaryBackground }]}
-      accessibilityRole="image"
+      accessibilityRole="imagebutton"
+      accessibilityLabel={`Shared ${kind} ${position} of ${total}`}
+      accessibilityState={{ disabled: !safeOnPress }}
     >
       {showImage ? (
         <Image
@@ -115,12 +121,14 @@ export function MediaSections({
             Photos · {photos.length}
           </Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.strip}>
-            {photos.map((a) => (
+            {photos.map((a, index) => (
               <MediaThumb
                 key={a.guid}
                 att={a}
                 kind="photo"
                 glyph="🖼"
+                position={index + 1}
+                total={photos.length}
                 onPress={() => onOpenMedia(a.guid)}
               />
             ))}
@@ -133,12 +141,14 @@ export function MediaSections({
             Videos · {videos.length}
           </Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.strip}>
-            {videos.map((a) => (
+            {videos.map((a, index) => (
               <MediaThumb
                 key={a.guid}
                 att={a}
                 kind="video"
                 glyph="▶"
+                position={index + 1}
+                total={videos.length}
                 onPress={() => onOpenMedia(a.guid)}
               />
             ))}
@@ -181,10 +191,12 @@ export function MediaSections({
                 <Text style={[styles.rowLabel, { color: theme.color.label }]}>Links</Text>
                 <Text style={rowValueStyle}>{links.length}</Text>
               </View>
-              {links.slice(0, 5).map((l) => (
+              {links.slice(0, 5).map((l, index) => (
                 <Pressable
                   key={l.messageGuid}
                   onPress={() => void onOpenLink(l.url)}
+                  accessibilityRole="link"
+                  accessibilityLabel={`Shared link ${index + 1}: ${l.url}`}
                   style={[
                     styles.row,
                     {

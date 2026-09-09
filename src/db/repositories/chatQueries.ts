@@ -8,6 +8,7 @@ import {
   chatUnreadCountSql,
   chatVisible,
   inboxFilterSql,
+  messageHasVisibleContentSql,
   type InboxArchiveFilter,
   type InboxSenderFilter,
 } from './chatVisibility';
@@ -98,6 +99,14 @@ export interface InboxPage {
   hasMore: boolean;
 }
 
+export interface InboxSearchOptions {
+  query: string;
+  /** Bounded conversation GUIDs whose visible message content matched the same query. */
+  messageMatchGuids?: readonly string[];
+  /** Search surfaces render at most 50 conversation tiles. */
+  limit?: number;
+}
+
 export interface CustomFolderInboxPage extends InboxPage {
   folder: CustomFolderRow;
   /** Visible chat rows in the complete folder, not only the currently loaded prefix. */
@@ -107,6 +116,9 @@ export interface CustomFolderInboxPage extends InboxPage {
 }
 
 const MAX_CUSTOM_FOLDER_SEARCH_CODE_POINTS = 128;
+const INBOX_SEARCH_CANDIDATE_PAGE_SIZE = 128;
+const MAX_INBOX_SEARCH_RESULTS = 50;
+const MAX_INBOX_MESSAGE_MATCH_GUIDS = 300;
 
 interface CustomFolderSearchCandidate {
   guid: string;
@@ -116,6 +128,13 @@ interface CustomFolderSearchCandidate {
   style: number | null;
   participantCount: number;
   participantNames: string | null;
+}
+
+interface InboxSearchCandidate extends CustomFolderSearchCandidate {
+  id: number;
+  isPinned: number;
+  pinOrder: number | null;
+  latestMessageDate: number | null;
 }
 
 function requireCustomFolderId(folderId: number): void {
@@ -212,11 +231,12 @@ async function queryChatsForInbox(
          WHERE a.message_id = l.id
            AND l.balloon_bundle_id IS NULL
            AND a.hide_attachment = 0
+           AND a.is_retracted = 0
            AND a.emoji_image_short_description IS NOT NULL
          ORDER BY a.id ASC LIMIT 1) AS lastAttachmentDescription,
       CASE WHEN l.balloon_bundle_id IS NULL THEN
         EXISTS(SELECT 1 FROM attachments a
-                 WHERE a.message_id = l.id AND a.hide_attachment = 0)
+                 WHERE a.message_id = l.id AND a.hide_attachment = 0 AND a.is_retracted = 0)
       ELSE 0 END AS lastHasVisibleAttachments,
       (SELECT COUNT(*) FROM chat_handles ch WHERE ch.chat_id = c.id) AS participantCount,
       (SELECT group_concat(COALESCE(h.display_name, h.address), ', ' ORDER BY h.id)
@@ -241,7 +261,7 @@ async function queryChatsForInbox(
     LEFT JOIN messages l ON l.id = (
       SELECT m.id FROM messages m
        WHERE m.chat_id = c.id AND m.associated_message_type IS NULL
-         AND m.date_retracted IS NULL AND m.date_deleted IS NULL
+         AND ${messageHasVisibleContentSql('m')} AND m.date_deleted IS NULL
        ORDER BY m.date_created DESC, m.id DESC LIMIT 1
     )
     ORDER BY p.is_pinned DESC, p.pin_sort ASC, p.date_sort DESC, p.id DESC
@@ -279,6 +299,142 @@ export async function listChatsForInboxPage(
     limit: limit + 1,
   });
   return { rows: rows.slice(0, limit), hasMore: rows.length > limit };
+}
+
+function compareInboxSearchCandidates(
+  left: InboxSearchCandidate,
+  right: InboxSearchCandidate,
+): number {
+  if (left.isPinned !== right.isPinned) return left.isPinned === 1 ? -1 : 1;
+
+  if (left.isPinned === 1) {
+    if (left.pinOrder == null && right.pinOrder != null) return 1;
+    if (left.pinOrder != null && right.pinOrder == null) return -1;
+    if (left.pinOrder != null && right.pinOrder != null && left.pinOrder !== right.pinOrder) {
+      return left.pinOrder < right.pinOrder ? -1 : 1;
+    }
+  } else {
+    if (left.latestMessageDate == null && right.latestMessageDate != null) return 1;
+    if (left.latestMessageDate != null && right.latestMessageDate == null) return -1;
+    if (
+      left.latestMessageDate != null &&
+      right.latestMessageDate != null &&
+      left.latestMessageDate !== right.latestMessageDate
+    ) {
+      return left.latestMessageDate > right.latestMessageDate ? -1 : 1;
+    }
+  }
+
+  if (left.id === right.id) return 0;
+  return left.id > right.id ? -1 : 1;
+}
+
+function normalizeInboxSearch(input: string): string {
+  if (typeof input !== 'string') throw new TypeError('Inbox search must be text.');
+  const normalized = Array.from(input.normalize('NFC').trim())
+    .slice(0, MAX_CUSTOM_FOLDER_SEARCH_CODE_POINTS)
+    .join('');
+  return Array.from(normalized).length >= 2 ? normalized : '';
+}
+
+function boundedMessageMatchSet(guids: readonly string[] | undefined): Set<string> {
+  const bounded = new Set<string>();
+  for (const guid of guids ?? []) {
+    if (typeof guid === 'string' && guid.length > 0) bounded.add(guid);
+    if (bounded.size >= MAX_INBOX_MESSAGE_MATCH_GUIDS) break;
+  }
+  return bounded;
+}
+
+/**
+ * Search active inbox identities without retaining/decorating the entire inbox. Candidate reads
+ * use the immutable AUTOINCREMENT chat id as their cursor, so pin/date changes cannot make paging
+ * skip or duplicate an id. A starting high-water mark prevents sustained inserts from extending
+ * one refresh forever; the reactive subscriber schedules a new refresh for later inserts.
+ *
+ * This deliberately remains a full lightweight scan for a query with few matches. Each native
+ * bridge result is capped at 128 candidates, only the best `limit + 1` matches are retained, and
+ * only the first `limit` identities receive the expensive preview/unread decoration.
+ */
+export async function searchChatsForInboxPage(
+  db: AppDatabase,
+  opts: InboxSearchOptions,
+): Promise<InboxPage> {
+  const query = normalizeInboxSearch(opts.query);
+  if (!query) return { rows: [], hasMore: false };
+
+  const requested = opts.limit ?? MAX_INBOX_SEARCH_RESULTS;
+  const limit = Number.isFinite(requested)
+    ? Math.min(MAX_INBOX_SEARCH_RESULTS, Math.max(1, Math.floor(requested)))
+    : MAX_INBOX_SEARCH_RESULTS;
+  const retainedLimit = limit + 1;
+  const foldedQuery = query.toLowerCase();
+  const messageMatchGuids = boundedMessageMatchSet(opts.messageMatchGuids);
+  const horizonRows = await db.all<{ maxId: number | null }>(sql`
+    SELECT MAX(id) AS maxId FROM chats
+  `);
+  const highWater = horizonRows[0]?.maxId ?? 0;
+  if (!Number.isSafeInteger(highWater) || highWater < 0) {
+    throw new Error('Inbox search high-water id is invalid.');
+  }
+  if (highWater === 0) return { rows: [], hasMore: false };
+
+  let cursor = 0;
+  const retained: InboxSearchCandidate[] = [];
+  while (cursor < highWater) {
+    const candidates = await db.all<InboxSearchCandidate>(sql`
+      SELECT c.id, c.guid, c.chat_identifier AS chatIdentifier,
+             c.display_name AS displayName, c.custom_name AS customName, c.style,
+             c.is_pinned AS isPinned, c.pin_order AS pinOrder,
+             c.latest_message_date AS latestMessageDate,
+             (SELECT COUNT(*) FROM chat_handles ch
+               WHERE ch.chat_id = c.id) AS participantCount,
+             (SELECT group_concat(COALESCE(h.display_name, h.address), ', ' ORDER BY h.id)
+                FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+               WHERE ch.chat_id = c.id) AS participantNames
+        FROM chats c
+       WHERE c.id > ${cursor} AND c.id <= ${highWater}
+         AND c.is_archived = 0
+         AND c.is_pinned IN (0, 1)
+         AND ${chatVisible('c')}
+       ORDER BY c.id ASC
+       LIMIT ${INBOX_SEARCH_CANDIDATE_PAGE_SIZE}
+    `);
+    if (candidates.length === 0) break;
+
+    for (const candidate of candidates) {
+      if (!Number.isSafeInteger(candidate.id) || candidate.id <= cursor) {
+        throw new Error('Inbox search candidate cursor is invalid.');
+      }
+      const nameMatches = `${resolveTitle(candidate)} ${candidate.participantNames ?? ''}`
+        .normalize('NFC')
+        .toLowerCase()
+        .includes(foldedQuery);
+      if (!nameMatches && !messageMatchGuids.has(candidate.guid)) continue;
+      retained.push(candidate);
+      retained.sort(compareInboxSearchCandidates);
+      if (retained.length > retainedLimit) retained.pop();
+    }
+
+    const nextCursor = candidates[candidates.length - 1]!.id;
+    if (!Number.isSafeInteger(nextCursor) || nextCursor <= cursor || nextCursor > highWater) {
+      throw new Error('Inbox search candidate cursor did not advance.');
+    }
+    cursor = nextCursor;
+    if (candidates.length < INBOX_SEARCH_CANDIDATE_PAGE_SIZE) break;
+  }
+
+  const selectedGuids = retained.slice(0, limit).map((candidate) => candidate.guid);
+  const rows =
+    selectedGuids.length === 0
+      ? []
+      : await queryChatsForInbox(db, {
+          archive: 'active',
+          sender: 'any',
+          chatGuids: selectedGuids,
+          limit,
+        });
+  return { rows, hasMore: retained.length > limit };
 }
 
 /**

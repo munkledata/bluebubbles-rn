@@ -1,17 +1,33 @@
 import { CameraView, useCameraPermissions, type BarcodeScanningResult } from 'expo-camera';
 import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { connect } from '@/services';
-import { parseSetupQr } from '@features/setup/qr';
+import { parseSetupQr, SetupQrParseError, type SetupQrParseErrorCode } from '@features/setup/qr';
 import { useSessionStore } from '@state/sessionStore';
 import { Button, Screen, useTheme } from '@ui';
+import { createI18n, type I18n, type TranslationKey } from '@utils/i18n';
+
+const SCAN_ERROR_KEYS = {
+  empty: 'scan.error.empty',
+  'invalid-json': 'scan.error.invalidJson',
+  'invalid-shape': 'scan.error.invalidShape',
+  'missing-credentials': 'scan.error.missingCredentials',
+} satisfies Record<SetupQrParseErrorCode, TranslationKey>;
+
+function scanErrorText(i18n: I18n, error: unknown): string {
+  if (!(error instanceof SetupQrParseError)) return i18n.text('scan.error.invalid');
+  return i18n.format(SCAN_ERROR_KEYS[error.code], {
+    appName: i18n.text('welcome.brand'),
+  });
+}
 
 export default function Scan(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const i18n = useMemo(() => createI18n(), []);
   const [permission, requestPermission] = useCameraPermissions();
   const scanned = useRef(false);
   const [scanError, setScanError] = useState<string | null>(null);
@@ -31,8 +47,8 @@ export default function Scan(): React.JSX.Element {
       scanned.current = true;
       setScanError(null);
       void connect(origin, password);
-    } catch (e) {
-      setScanError(e instanceof Error ? e.message : 'Invalid QR code.');
+    } catch (error) {
+      setScanError(scanErrorText(i18n, error));
     }
   };
 
@@ -49,13 +65,18 @@ export default function Scan(): React.JSX.Element {
             { paddingTop: insets.top + 64, paddingBottom: insets.bottom + 24 },
           ]}
         >
-          <Text style={[styles.permTitle, { color: theme.color.label }]}>Camera access needed</Text>
-          <Text style={[styles.permText, { color: theme.color.secondaryLabel }]}>
-            Allow camera access to scan your server’s setup QR code.
+          <Text style={[styles.permTitle, { color: theme.color.label }]}>
+            {i18n.text('scan.permission.title')}
           </Text>
-          <Button title="Grant Camera Access" onPress={() => void requestPermission()} />
+          <Text style={[styles.permText, { color: theme.color.secondaryLabel }]}>
+            {i18n.text('scan.permission.message')}
+          </Text>
           <Button
-            title="Enter Manually"
+            title={i18n.text('scan.permission.action.grant')}
+            onPress={() => void requestPermission()}
+          />
+          <Button
+            title={i18n.text('scan.action.manual')}
             variant="plain"
             onPress={() => router.replace('/manual')}
             style={styles.spaced}
@@ -79,7 +100,9 @@ export default function Scan(): React.JSX.Element {
         style={[styles.overlay, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]}
       >
         <Text style={styles.hint}>
-          {status === 'connecting' ? 'Connecting…' : 'Point your camera at the server QR code'}
+          {i18n.text(
+            status === 'connecting' ? 'scan.status.connecting' : 'scan.instruction.pointCamera',
+          )}
         </Text>
         <View style={styles.reticle} />
         {message ? <Text style={styles.error}>{message}</Text> : <View />}

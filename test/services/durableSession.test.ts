@@ -52,6 +52,20 @@ describe('durable foreground session inspection', () => {
     },
   );
 
+  it('quarantines an invalid credential-upgrade journal without changing stored credentials', async () => {
+    const vault = await readyVault();
+    await vault.set('serverCredentialUpgrade', 'not-json');
+
+    await expect(inspectDurableServerSession(vault, clearMarker())).resolves.toEqual({
+      kind: 'upgrade-quarantined',
+      reason: 'invalid-journal',
+    });
+    await expect(vault.get('serverSessionState')).resolves.toBe(SERVER_SESSION_STATE.active);
+    await expect(vault.get('serverAddress')).resolves.toBe('https://gator.example');
+    await expect(vault.get('serverPassword')).resolves.toBe('private-password');
+    await expect(vault.get('serverCredentialUpgrade')).resolves.toBe('not-json');
+  });
+
   it.each([
     [SERVER_SESSION_STATE.writing, 'https://gator.example', 'private-password'],
     [SERVER_SESSION_STATE.forgotten, 'https://gator.example', 'private-password'],

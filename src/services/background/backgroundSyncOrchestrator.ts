@@ -1,6 +1,7 @@
 import { strictServerOrigin } from '@core/config';
 import {
   readAccountRevocationState,
+  resolveCredentialUpgrade,
   SERVER_SESSION_STATE,
   type AccountRevocationMarker,
   type SecureVault,
@@ -67,8 +68,14 @@ export interface BackgroundSyncDependencies<Database, Client, ServerInfo> {
     db: Database,
     client: Client,
     scope: BackgroundAccountScope,
+    serverInfo: ServerInfo,
   ): Promise<void>;
-  drainOutgoing(db: Database, client: Client, scope: BackgroundAccountScope): Promise<void>;
+  drainOutgoing(
+    db: Database,
+    client: Client,
+    scope: BackgroundAccountScope,
+    serverInfo: ServerInfo,
+  ): Promise<void>;
   /** Best-effort only. The production implementation proves durable consent before uploading. */
   flushDiagnostics?(
     db: Database,
@@ -100,12 +107,14 @@ export async function inspectBackgroundSession(
   let storedOrigin: string | null;
   let password: string | null;
   let appLockEnabled: string | null;
+  let credentialUpgrade: string | null;
   try {
-    [sessionState, storedOrigin, password, appLockEnabled] = await Promise.all([
+    [sessionState, storedOrigin, password, appLockEnabled, credentialUpgrade] = await Promise.all([
       vault.get('serverSessionState'),
       vault.get('serverAddress'),
       vault.get('serverPassword'),
       vault.get('appLockEnabled'),
+      vault.get('serverCredentialUpgrade'),
     ]);
   } catch {
     return { kind: 'unavailable' };
@@ -117,21 +126,33 @@ export async function inspectBackgroundSession(
 
   const hasOrigin = !!storedOrigin;
   const hasPassword = !!password;
-  if (sessionState === null && !hasOrigin && !hasPassword) return { kind: 'empty' };
-
   const activeState = sessionState === null || sessionState === SERVER_SESSION_STATE.active;
+  const canonicalOrigin = activeState && storedOrigin ? strictServerOrigin(storedOrigin) : null;
+  const completeSession = activeState && canonicalOrigin && password;
+  const upgrade = resolveCredentialUpgrade(
+    credentialUpgrade,
+    completeSession ? { origin: canonicalOrigin, credential: password! } : null,
+  );
+  if (upgrade.kind === 'revoked') return { kind: 'revoked' };
+  if (upgrade.kind === 'quarantined') return { kind: 'unsafe' };
+  if (sessionState === null && !hasOrigin && !hasPassword && upgrade.kind === 'none') {
+    return { kind: 'empty' };
+  }
+
   if (
     !activeState ||
-    !storedOrigin ||
-    !password ||
+    !canonicalOrigin ||
+    !completeSession ||
+    !upgrade.session ||
     (appLockEnabled !== null && appLockEnabled !== 'false' && appLockEnabled !== 'true')
   ) {
     return { kind: 'unsafe' };
   }
-  const origin = strictServerOrigin(storedOrigin);
-  if (!origin) return { kind: 'unsafe' };
   if (appLockEnabled === 'true') return { kind: 'locked' };
-  return { kind: 'ready', session: { origin, password } };
+  return {
+    kind: 'ready',
+    session: { origin: upgrade.session.origin, password: upgrade.session.credential },
+  };
 }
 
 function stoppedOutcome(
@@ -276,11 +297,16 @@ export async function runBackgroundSync<Database, Client, ServerInfo>(
     // ticker cannot reset another runner's live claim. Give this already-small phase the pure
     // account scope, then enforce the wake budget at its boundary; expiring that same scope
     // mid-claim would turn a normal deadline into a false crash remnant.
-    await deps.recoverAndDrainSchedules(context.db, context.client, accountScope);
+    await deps.recoverAndDrainSchedules(
+      context.db,
+      context.client,
+      accountScope,
+      context.serverInfo,
+    );
 
     const afterSchedules = stoppedOutcome(baseScope, deps.revocationMarker, budgetExpired);
     if (afterSchedules) return afterSchedules;
-    await deps.drainOutgoing(context.db, context.client, budgetScope);
+    await deps.drainOutgoing(context.db, context.client, budgetScope, context.serverInfo);
   } catch (error) {
     const stopped = stoppedAfterFailure();
     if (stopped) return stopped;

@@ -12,12 +12,12 @@
  * the Node libsodium backend (cheap Argon2id params for speed).
  */
 import { SecretBox } from '@core/crypto';
+import { logger } from '@core/secure';
 import { kvGet, kvSet } from '@db/repositories';
 import { getDatabase } from '@db/database';
 import type { AppDatabase } from '@db/types';
 import { createLibsodiumBackend } from '../support/libsodiumBackend';
 import { createTestDb } from '../support/testDb';
-import { BACKUP_LIMITS } from '@/services/backup/backupSchema';
 
 // ---- in-file mocks ---------------------------------------------------------
 
@@ -68,6 +68,13 @@ jest.mock('expo-sharing', () => ({
 jest.mock('expo-constants', () => ({ expoConfig: { version: '1.2.3' } }));
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
 
+const mockHydrateAllStores = jest.fn(
+  async (_options?: { readonly shouldCommit?: () => boolean }): Promise<void> => undefined,
+);
+jest.mock('@state/hydrateStores', () => ({
+  hydrateAllStores: mockHydrateAllStores,
+}));
+
 const cheapArgon = { opsLimit: 1, memLimit: 8 * 1024 * 1024 };
 const mockGetSecretBox = jest.fn(
   async () => new SecretBox(await createLibsodiumBackend(), cheapArgon),
@@ -82,7 +89,6 @@ import {
   BackupPassphraseRejectedError,
   exportEncryptedBackup,
   importBackupAuto,
-  readPickedBackupCopy,
 } from '@/services/backup/backupService';
 // eslint-disable-next-line import/first
 import {
@@ -94,6 +100,7 @@ import {
 const mockShare = Sharing.shareAsync as jest.Mock;
 const mockAvailable = Sharing.isAvailableAsync as jest.Mock;
 const mockGetDatabase = getDatabase as jest.Mock;
+const loggerWarnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
 
 /** A composer draft: the key embeds the counterparty's number, the value is unsent text. */
 const DRAFT_KEY = 'draft.iMessage;-;+15555550123';
@@ -145,6 +152,8 @@ beforeEach(() => {
   mockAvailable.mockReset().mockResolvedValue(true);
   mockShare.mockReset().mockResolvedValue(undefined);
   mockGetDatabase.mockReset();
+  mockHydrateAllStores.mockReset().mockResolvedValue(undefined);
+  loggerWarnSpy.mockClear();
   mockGetSecretBox
     .mockReset()
     .mockImplementation(async () => new SecretBox(await createLibsodiumBackend(), cheapArgon));
@@ -160,9 +169,9 @@ const theFile = (): MockFile => {
   return MockFile.instances[0]!;
 };
 
-// ---- account ownership + picked-file cleanup -------------------------------
+// ---- account ownership ------------------------------------------------------
 
-describe('backup account ownership / picked-file cleanup', () => {
+describe('backup account ownership', () => {
   it('does not let a delayed A build open an export after Disconnect', async () => {
     const realDb = await seedDb();
     const readStarted = deferred<void>();
@@ -207,73 +216,6 @@ describe('backup account ownership / picked-file cleanup', () => {
       resumeRealtimeDeliveries();
       await pending.catch(() => undefined);
     }
-  });
-
-  it('deletes a late picker cache copy without holding the Disconnect drain', async () => {
-    const readFinished = deferred<string>();
-    MockFile.textImpl = () => readFinished.promise;
-    const oldScreenLease = captureRealtimeDeliveryLease();
-
-    const pending = readPickedBackupCopy('file:///cache/picked.gatorbackup', oldScreenLease);
-    await waitUntil(() => MockFile.instances.length === 1);
-
-    // Reading a user-selected file is not a DB/native account mutation, so teardown stays free.
-    await expect(pauseRealtimeDeliveries()).resolves.toBeUndefined();
-    resumeRealtimeDeliveries();
-    readFinished.resolve('  encrypted old-account backup  ');
-
-    await expect(pending).rejects.toBeInstanceOf(BackupAccountChangedError);
-    expect(theFile().exists).toBe(false);
-    expect(theFile().deletes).toBe(1);
-  });
-
-  it('keeps account-change cancellation authoritative when picker-cache deletion fails', async () => {
-    const readFinished = deferred<string>();
-    MockFile.textImpl = () => readFinished.promise;
-    const oldScreenLease = captureRealtimeDeliveryLease();
-
-    const pending = readPickedBackupCopy('file:///cache/picked.gatorbackup', oldScreenLease);
-    await waitUntil(() => MockFile.instances.length === 1);
-    await pauseRealtimeDeliveries();
-    resumeRealtimeDeliveries();
-    MockFile.deleteError = new Error('cache entry was already reclaimed');
-    readFinished.resolve('encrypted old-account backup');
-
-    await expect(pending).rejects.toBeInstanceOf(BackupAccountChangedError);
-  });
-
-  it('normalizes a picker read failure that arrives after account retirement', async () => {
-    let rejectRead!: (error: unknown) => void;
-    MockFile.textImpl = () =>
-      new Promise<string>((_resolve, reject) => {
-        rejectRead = reject;
-      });
-    const oldScreenLease = captureRealtimeDeliveryLease();
-
-    const pending = readPickedBackupCopy('file:///cache/picked.gatorbackup', oldScreenLease);
-    const outcome = pending.then(
-      () => null,
-      (error: unknown) => error,
-    );
-    await waitUntil(() => MockFile.textCalls === 1);
-    await pauseRealtimeDeliveries();
-    resumeRealtimeDeliveries();
-    rejectRead(new Error('old picker read failed'));
-
-    await expect(outcome).resolves.toBeInstanceOf(BackupAccountChangedError);
-    expect(theFile().exists).toBe(false);
-    expect(theFile().deletes).toBe(1);
-  });
-
-  it('rejects an oversized picked file before reading it and deletes the private copy', async () => {
-    MockFile.nextSize = BACKUP_LIMITS.fileBytes + 1;
-
-    await expect(readPickedBackupCopy('file:///cache/hostile.gatorbackup')).rejects.toThrow(
-      'backup-input-limit:file-too-large',
-    );
-    expect(MockFile.textCalls).toBe(0);
-    expect(theFile().exists).toBe(false);
-    expect(theFile().deletes).toBe(1);
   });
 });
 
@@ -418,12 +360,81 @@ describe('exportEncryptedBackup / importBackupAuto', () => {
     const res = await importBackupAuto(sealed, 'river-lantern-orbit-92');
     expect(res.kv).toBeGreaterThanOrEqual(1);
     expect(await kvGet(fresh.db, 'theme.preset')).toBe('nord');
+    expect(mockHydrateAllStores).toHaveBeenCalledTimes(1);
+    expect(mockHydrateAllStores.mock.calls[0]?.[0]?.shouldCommit?.()).toBe(true);
     // The secret never round-trips — it was filtered out at build time.
     expect(await kvGet(fresh.db, 'server.password')).toBeNull();
     // Nor does the draft, nor the source device's deletion watermark: restoring a newer
     // watermark would make this install skip the deletions it has not caught up on.
     expect(await kvGet(fresh.db, DRAFT_KEY)).toBeNull();
     expect(await kvGet(fresh.db, 'sync.deletionsSyncedAt')).toBeNull();
+  });
+
+  it('keeps post-restore hydration guarded and visible to account teardown', async () => {
+    const hydration = deferred<void>();
+    mockHydrateAllStores.mockReturnValueOnce(hydration.promise);
+    const fresh = await createTestDb();
+    mockGetDatabase.mockReturnValue(fresh.db);
+    const oldScreenLease = captureRealtimeDeliveryLease();
+    const pending = importBackupAuto(
+      JSON.stringify({
+        version: 1,
+        exportedAt: 1_000,
+        kv: [{ key: 'theme.preset', value: 'nord' }],
+        themes: [],
+        chatCustomizations: [],
+      }),
+      '',
+      oldScreenLease,
+    );
+
+    try {
+      await waitUntil(() => mockHydrateAllStores.mock.calls.length === 1);
+      expect(await kvGet(fresh.db, 'theme.preset')).toBe('nord');
+      const options = mockHydrateAllStores.mock.calls[0]?.[0];
+      expect(options?.shouldCommit?.()).toBe(true);
+
+      let drained = false;
+      const drain = pauseRealtimeDeliveries().then(() => {
+        drained = true;
+      });
+      await Promise.resolve();
+      expect(drained).toBe(false);
+      expect(options?.shouldCommit?.()).toBe(false);
+
+      hydration.resolve();
+      await drain;
+      resumeRealtimeDeliveries();
+      await expect(pending).rejects.toBeInstanceOf(BackupAccountChangedError);
+    } finally {
+      hydration.resolve();
+      resumeRealtimeDeliveries();
+      await pending.catch(() => undefined);
+    }
+  });
+
+  it('keeps a committed restore successful when live-state hydration rejects', async () => {
+    mockHydrateAllStores.mockRejectedValueOnce(new Error('registry failed'));
+    const fresh = await createTestDb();
+    mockGetDatabase.mockReturnValue(fresh.db);
+
+    await expect(
+      importBackupAuto(
+        JSON.stringify({
+          version: 1,
+          exportedAt: 1_000,
+          kv: [{ key: 'theme.preset', value: 'nord' }],
+          themes: [],
+          chatCustomizations: [],
+        }),
+        '',
+      ),
+    ).resolves.toMatchObject({ kv: 1 });
+    expect(await kvGet(fresh.db, 'theme.preset')).toBe('nord');
+    expect(loggerWarnSpy).toHaveBeenCalledWith(
+      '[backup] restored settings hydration failed',
+      expect.objectContaining({ message: 'registry failed' }),
+    );
   });
 
   it('rejects a wrong passphrase (tamper/auth failure surfaces, nothing restored)', async () => {

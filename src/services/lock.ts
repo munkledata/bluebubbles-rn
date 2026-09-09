@@ -13,9 +13,10 @@ import { reconcileMessageNotificationGroup } from './notifications/notifeeServic
 // The lock setting lives in the vault (NOT the encrypted DB) so it's readable at
 // cold boot before the foreground app opens the DB. When lock is on, the foreground coordinator
 // defers DB/session initialization until `unlockForegroundBoot(renderedRunId)` follows auth.
-// The SecureStore key is deliberately not user-auth-bound. The locked FCM path still refuses to
-// open the DB and posts a generic notice, but the key itself has no biometric custody boundary.
-// App Lock is therefore a foreground/policy gate, not extra at-rest encryption.
+// The SecureStore key is deliberately not user-auth-bound. Locked legacy/V2 FCM still avoids the
+// DB; authenticated, active-bound V3 may only enqueue into SQLCipher and cannot read, claim, route,
+// or present content before unlock. The key itself has no biometric custody boundary, so App Lock
+// remains a foreground/policy gate rather than extra at-rest encryption.
 
 export class InvalidAppLockSettingError extends Error {
   constructor() {

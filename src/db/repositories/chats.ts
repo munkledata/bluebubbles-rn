@@ -10,7 +10,12 @@ import {
 import type { AppDatabase } from '../types';
 import { dedupeBy } from './_shared';
 import { getChatIdByGuid } from './chatQueries';
-import { chatVisible, inboxFilterSql, type InboxSenderFilter } from './chatVisibility';
+import {
+  chatVisible,
+  inboxFilterSql,
+  messageHasVisibleContentSql,
+  type InboxSenderFilter,
+} from './chatVisibility';
 import { linkHandlesToContacts } from './contacts';
 import { handleMapKey, upsertHandlesWithinTransaction } from './handles';
 import { DRAFT_KV_PREFIX, FULL_REPAIR_RETIRED_CHAT_KV_PREFIX } from './maintenance';
@@ -533,7 +538,8 @@ export function clearSupersededTombstonesWithinTransaction(
      WHERE id IN (${inList}) AND deleted_at IS NOT NULL
        AND EXISTS (SELECT 1 FROM messages dm
                     WHERE dm.chat_id = chats.id AND dm.date_deleted IS NULL
-                      AND dm.associated_message_type IS NULL AND dm.date_retracted IS NULL
+                      AND dm.associated_message_type IS NULL
+                      AND ${messageHasVisibleContentSql('dm')}
                       AND dm.date_created > chats.deleted_at)
   `);
   });

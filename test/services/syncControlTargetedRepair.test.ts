@@ -16,6 +16,7 @@ const mockWithDbTransaction = jest.fn();
 const mockCaptureRealtimeDeliveryLease = jest.fn();
 const mockSubscribeRealtimeGenerationInvalidation = jest.fn();
 const mockHttpSyncApi = jest.fn();
+const mockReconcileMessageNotifications = jest.fn(async () => undefined);
 const mockDb = { testId: 'targeted-repair-db' };
 const mockApi = { testId: 'targeted-repair-api' };
 const mockTransactionContext = { testId: 'targeted-repair-transaction' };
@@ -51,6 +52,9 @@ jest.mock('@/services/download/attachmentCacheCoordinator', () => ({
     retireInactiveEntries: jest.fn(async () => undefined),
     drainDueRetirements: jest.fn(async () => undefined),
   },
+}));
+jest.mock('@/services/notifications/notifeeService', () => ({
+  reconcileMessageNotificationsWithDatabase: mockReconcileMessageNotifications,
 }));
 jest.mock('@/services/realtime/deliveryCoordinator', () => ({
   captureRealtimeDeliveryLease: mockCaptureRealtimeDeliveryLease,
@@ -121,6 +125,7 @@ beforeEach(async () => {
 
   mockEnsureDatabase.mockResolvedValue(mockDb);
   mockHttpSyncApi.mockReturnValue(mockApi);
+  mockReconcileMessageNotifications.mockResolvedValue(undefined);
   mockCaptureRealtimeDeliveryLease.mockReturnValue(mockLease);
   mockSubscribeRealtimeGenerationInvalidation.mockImplementation(
     (generation: number, listener: () => void) => {
@@ -199,6 +204,7 @@ it('validates before publishing work and runs one exact bounded repair for concu
   );
   expect(mockGetSyncMarker).not.toHaveBeenCalled();
   expect(mockSetSyncMarkerWithinTransaction).not.toHaveBeenCalled();
+  expect(mockReconcileMessageNotifications).toHaveBeenCalledWith(mockDb, mockLease);
   await awaitSyncIdle();
   expect(mockInvalidationReleases[0]).toHaveBeenCalledTimes(1);
 });

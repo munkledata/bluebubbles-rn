@@ -19,8 +19,8 @@ import {
 export const RELAUNCH_MARKER_PREFIX = 'GATOR_DB_RELAUNCH_V1 ';
 export const RELAUNCH_SUITE = 'android-db-relaunch';
 export const RELAUNCH_SCHEMA = 1;
-export const RELAUNCH_MIGRATION_COUNT = 45;
-export const RELAUNCH_MIGRATION_HEAD = '0045_backup_export_indexes';
+export const RELAUNCH_MIGRATION_COUNT = 47;
+export const RELAUNCH_MIGRATION_HEAD = '0047_message_retraction_topology';
 export const PREPARE_CHECKS = Object.freeze([
   'requestValid',
   'preCleanup',
@@ -252,6 +252,66 @@ export const RUNTIME_CONCURRENCY_FAILURE_CODES = Object.freeze([
   'state-cleanup',
   'internal',
 ]);
+export const BACKUP_RESTORE_MARKER_PREFIX = 'GATOR_DB_BACKUP_RESTORE_V1 ';
+export const BACKUP_RESTORE_SUITE = 'android-backup-restore';
+export const BACKUP_RESTORE_SCHEMA = 1;
+export const BACKUP_RESTORE_CHECKS = Object.freeze([
+  'requestValid',
+  'runStatePersisted',
+  'preCleanup',
+  'encryptedOpen',
+  'migrationLedger',
+  'plaintextNearLimit',
+  'bb2Envelope',
+  'nativeSeal',
+  'nativeOpen',
+  'lateFaultObserved',
+  'kvRolledBack',
+  'themesRolledBack',
+  'chatRolledBack',
+  'foldersRolledBack',
+  'tempTablesCleaned',
+  'retrySucceeded',
+  'successorWrite',
+  'foreignKeys',
+  'integrity',
+  'databaseClosed',
+  'databaseCleanup',
+  'stateCleanup',
+]);
+export const BACKUP_RESTORE_HOST_CHECKS = Object.freeze([
+  'processAlive',
+  'processStopped',
+  'privateStateClean',
+]);
+export const BACKUP_RESTORE_FAILURE_CODES = Object.freeze([
+  'request-invalid',
+  'phase-invalid',
+  'interrupted-run',
+  'orphaned-state',
+  'run-state',
+  'pre-cleanup',
+  'encrypted-open',
+  'migration-ledger',
+  'plaintext-near-limit',
+  'bb2-envelope',
+  'native-seal',
+  'native-open',
+  'late-fault-observed',
+  'kv-rolled-back',
+  'themes-rolled-back',
+  'chat-rolled-back',
+  'folders-rolled-back',
+  'temp-tables-cleaned',
+  'retry-succeeded',
+  'successor-write',
+  'foreign-keys',
+  'integrity',
+  'database-closed',
+  'database-cleanup',
+  'state-cleanup',
+  'internal',
+]);
 
 const DEV_CLIENT_URL =
   'exp+bluegreengatorappsmessages://expo-development-client/?url=http%3A%2F%2F127.0.0.1%3A8081';
@@ -267,10 +327,12 @@ const RUNTIME_CONCURRENCY_REPORT_DIR = resolve(
   ROOT,
   'android/app/build/reports/db-runtime-concurrency',
 );
+const BACKUP_RESTORE_REPORT_DIR = resolve(ROOT, 'android/app/build/reports/backup-restore');
 const REQUEST_FILE = 'files/.gator-db-relaunch-request-v1';
 const WAL_WRITE_DEATH_REQUEST_FILE = 'files/.gator-db-wal-write-death-request-v1';
 const ACTIVE_MIGRATION_DEATH_REQUEST_FILE = 'files/.gator-db-active-migration-death-request-v1';
 const RUNTIME_CONCURRENCY_REQUEST_FILE = 'files/.gator-db-runtime-concurrency-request-v1';
+const BACKUP_RESTORE_REQUEST_FILE = 'files/.gator-db-backup-restore-request-v1';
 export const MIGRATION_RELAUNCH_PRIVATE_TEST_FILES = Object.freeze([
   REQUEST_FILE,
   'files/.gator-db-relaunch-preparing-v1',
@@ -309,11 +371,20 @@ export const RUNTIME_CONCURRENCY_PRIVATE_TEST_FILES = Object.freeze([
   'databases/driver-runtime-concurrency-selftest.db-wal',
   'databases/driver-runtime-concurrency-selftest.db-shm',
 ]);
+export const BACKUP_RESTORE_PRIVATE_TEST_FILES = Object.freeze([
+  BACKUP_RESTORE_REQUEST_FILE,
+  'files/.gator-db-backup-restore-running-v1',
+  'databases/driver-backup-restore-selftest.db',
+  'databases/driver-backup-restore-selftest.db-journal',
+  'databases/driver-backup-restore-selftest.db-wal',
+  'databases/driver-backup-restore-selftest.db-shm',
+]);
 export const RELAUNCH_PRIVATE_TEST_FILES = Object.freeze([
   ...MIGRATION_RELAUNCH_PRIVATE_TEST_FILES,
   ...WAL_WRITE_DEATH_PRIVATE_TEST_FILES,
   ...ACTIVE_MIGRATION_DEATH_PRIVATE_TEST_FILES,
   ...RUNTIME_CONCURRENCY_PRIVATE_TEST_FILES,
+  ...BACKUP_RESTORE_PRIVATE_TEST_FILES,
 ]);
 export const CREATE_RELAUNCH_REQUEST_ADB_ARGS = Object.freeze([
   'shell',
@@ -342,6 +413,13 @@ export const CREATE_RUNTIME_CONCURRENCY_REQUEST_ADB_ARGS = Object.freeze([
   APP_PACKAGE,
   'touch',
   RUNTIME_CONCURRENCY_REQUEST_FILE,
+]);
+export const CREATE_BACKUP_RESTORE_REQUEST_ADB_ARGS = Object.freeze([
+  'shell',
+  'run-as',
+  APP_PACKAGE,
+  'touch',
+  BACKUP_RESTORE_REQUEST_FILE,
 ]);
 export const READ_WAL_WRITE_DEATH_SIZE_ADB_ARGS = Object.freeze([
   'shell',
@@ -398,24 +476,35 @@ const FORBIDDEN_RELAUNCH_MARKER_PREFIXES = Object.freeze([
   WAL_WRITE_DEATH_MARKER_PREFIX,
   ACTIVE_MIGRATION_DEATH_MARKER_PREFIX,
   RUNTIME_CONCURRENCY_MARKER_PREFIX,
+  BACKUP_RESTORE_MARKER_PREFIX,
 ]);
 const FORBIDDEN_WAL_WRITE_DEATH_MARKER_PREFIXES = Object.freeze([
   ...SINGLE_PROCESS_MARKER_PREFIXES,
   RELAUNCH_MARKER_PREFIX,
   ACTIVE_MIGRATION_DEATH_MARKER_PREFIX,
   RUNTIME_CONCURRENCY_MARKER_PREFIX,
+  BACKUP_RESTORE_MARKER_PREFIX,
 ]);
 const FORBIDDEN_ACTIVE_MIGRATION_DEATH_MARKER_PREFIXES = Object.freeze([
   ...SINGLE_PROCESS_MARKER_PREFIXES,
   RELAUNCH_MARKER_PREFIX,
   WAL_WRITE_DEATH_MARKER_PREFIX,
   RUNTIME_CONCURRENCY_MARKER_PREFIX,
+  BACKUP_RESTORE_MARKER_PREFIX,
 ]);
 const FORBIDDEN_RUNTIME_CONCURRENCY_MARKER_PREFIXES = Object.freeze([
   ...SINGLE_PROCESS_MARKER_PREFIXES,
   RELAUNCH_MARKER_PREFIX,
   WAL_WRITE_DEATH_MARKER_PREFIX,
   ACTIVE_MIGRATION_DEATH_MARKER_PREFIX,
+  BACKUP_RESTORE_MARKER_PREFIX,
+]);
+const FORBIDDEN_BACKUP_RESTORE_MARKER_PREFIXES = Object.freeze([
+  ...SINGLE_PROCESS_MARKER_PREFIXES,
+  RELAUNCH_MARKER_PREFIX,
+  WAL_WRITE_DEATH_MARKER_PREFIX,
+  ACTIVE_MIGRATION_DEATH_MARKER_PREFIX,
+  RUNTIME_CONCURRENCY_MARKER_PREFIX,
 ]);
 
 function compactToolOutput(value, serial) {
@@ -932,6 +1021,99 @@ export function validateRuntimeConcurrencyMarker(value) {
   };
 }
 
+function assertBackupRestorePlainObject(value, label, code = 'invalid-backup-restore-marker') {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    throw new HarnessError(code, `${label} must be an object.`);
+  }
+}
+
+function assertBackupRestoreExactKeys(
+  value,
+  expected,
+  label,
+  code = 'invalid-backup-restore-marker',
+) {
+  const actual = Object.keys(value).sort();
+  const wanted = [...expected].sort();
+  if (actual.length !== wanted.length || actual.some((key, index) => key !== wanted[index])) {
+    throw new HarnessError(code, `${label} fields do not match the finite contract.`);
+  }
+}
+
+function validateBackupRestoreFailureCode(value) {
+  if (!BACKUP_RESTORE_FAILURE_CODES.includes(value)) {
+    throw new HarnessError(
+      'invalid-backup-restore-marker',
+      'Backup-restore failureCode is not part of the finite contract.',
+    );
+  }
+  return value;
+}
+
+/** Validate one terminal, privacy-bounded BACKUP-02 marker. */
+export function validateBackupRestoreMarker(value) {
+  assertBackupRestorePlainObject(value, 'Backup-restore marker');
+  if (value.schema !== BACKUP_RESTORE_SCHEMA || value.suite !== BACKUP_RESTORE_SUITE) {
+    throw new HarnessError(
+      'invalid-backup-restore-marker',
+      'Backup-restore marker identity is invalid.',
+    );
+  }
+  if (value.status !== 'pass' && value.status !== 'fail') {
+    throw new HarnessError(
+      'invalid-backup-restore-marker',
+      'Backup-restore status must be pass or fail.',
+    );
+  }
+  assertBackupRestoreExactKeys(
+    value,
+    value.status === 'pass'
+      ? ['schema', 'suite', 'status', 'migrationCount', 'migrationHead', 'checks']
+      : ['schema', 'suite', 'status', 'migrationCount', 'migrationHead', 'checks', 'failureCode'],
+    'Backup-restore marker',
+  );
+  if (
+    value.migrationCount !== RELAUNCH_MIGRATION_COUNT ||
+    value.migrationHead !== RELAUNCH_MIGRATION_HEAD
+  ) {
+    throw new HarnessError(
+      'invalid-backup-restore-marker',
+      'Backup-restore migration count or head does not match the reviewed contract.',
+    );
+  }
+  assertBackupRestorePlainObject(value.checks, 'Backup-restore checks');
+  assertBackupRestoreExactKeys(value.checks, BACKUP_RESTORE_CHECKS, 'Backup-restore checks');
+  const checks = Object.fromEntries(
+    BACKUP_RESTORE_CHECKS.map((name) => {
+      if (typeof value.checks[name] !== 'boolean') {
+        throw new HarnessError(
+          'invalid-backup-restore-marker',
+          `Backup-restore check ${name} must be boolean.`,
+        );
+      }
+      return [name, value.checks[name]];
+    }),
+  );
+  const allPassed = Object.values(checks).every(Boolean);
+  if ((value.status === 'pass') !== allPassed) {
+    throw new HarnessError(
+      'inconsistent-backup-restore-marker',
+      'Backup-restore status does not agree with its check booleans.',
+    );
+  }
+  return {
+    schema: BACKUP_RESTORE_SCHEMA,
+    suite: BACKUP_RESTORE_SUITE,
+    status: value.status,
+    migrationCount: RELAUNCH_MIGRATION_COUNT,
+    migrationHead: RELAUNCH_MIGRATION_HEAD,
+    checks,
+    ...(value.status === 'fail'
+      ? { failureCode: validateBackupRestoreFailureCode(value.failureCode) }
+      : {}),
+  };
+}
+
 function parseThreadtimeLine(line) {
   const match =
     /^\s*\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+\s+(\d+)\s+\d+\s+[VDIWEF]\s+[^:]+:\s?(.*)$/.exec(line);
@@ -1230,6 +1412,63 @@ export function extractRuntimeConcurrencyMarkers(logText, expectedPids = []) {
   });
 }
 
+/** Extract one terminal BACKUP-02 marker from its exclusive process lane. */
+export function extractBackupRestoreMarkers(logText, expectedPids = []) {
+  const payloads = [];
+  for (const line of String(logText).split(/\r?\n/)) {
+    if (FORBIDDEN_BACKUP_RESTORE_MARKER_PREFIXES.some((prefix) => line.includes(prefix))) {
+      throw new HarnessError(
+        'wrong-db-contract-marker',
+        'Another DB contract ran during the exclusive backup-restore lane.',
+      );
+    }
+    if (!line.includes(BACKUP_RESTORE_MARKER_PREFIX)) continue;
+    const parsedLine = parseThreadtimeLine(line);
+    if (!parsedLine) {
+      throw new HarnessError(
+        'invalid-marker-process',
+        'Backup-restore marker did not include a valid threadtime process identity.',
+      );
+    }
+    const markerIndex = parsedLine.message.indexOf(BACKUP_RESTORE_MARKER_PREFIX);
+    if (markerIndex < 0) continue;
+    const expectedPid = expectedPids[payloads.length];
+    if (expectedPid !== undefined && parsedLine.pid !== expectedPid) {
+      throw new HarnessError(
+        'wrong-marker-process',
+        'Backup-restore marker was emitted by the wrong app process.',
+      );
+    }
+    const payload = parsedLine.message
+      .slice(markerIndex + BACKUP_RESTORE_MARKER_PREFIX.length)
+      .trim();
+    if (!payload || payload.length > MAX_MARKER_JSON_CHARS) {
+      throw new HarnessError(
+        'invalid-backup-restore-marker',
+        'Backup-restore marker payload is empty or too large.',
+      );
+    }
+    payloads.push(payload);
+  }
+  if (payloads.length > 1) {
+    throw new HarnessError(
+      'duplicate-backup-restore-marker',
+      'Too many backup-restore markers were emitted.',
+    );
+  }
+  return payloads.map((payload) => {
+    try {
+      return validateBackupRestoreMarker(JSON.parse(payload));
+    } catch (error) {
+      if (error instanceof HarnessError) throw error;
+      throw new HarnessError(
+        'invalid-backup-restore-marker',
+        'Backup-restore marker is not valid JSON.',
+      );
+    }
+  });
+}
+
 export function logsAfterRelaunchBoundary(logText, boundary) {
   if (!boundary.startsWith(LOGCAT_BOUNDARY_PREFIX)) {
     throw new HarnessError('invalid-log-boundary', 'The DB relaunch log boundary is invalid.');
@@ -1387,6 +1626,33 @@ async function waitForRuntimeConcurrencyMarker({
   throw new HarnessError(
     'runtime-concurrency-result-timeout',
     `No runtime-concurrency marker arrived within ${String(timeoutMs)} ms.`,
+  );
+}
+
+async function waitForBackupRestoreMarker({
+  readLogs,
+  getProcessIdentity,
+  expectedIdentity,
+  timeoutMs = MARKER_TIMEOUT_MS,
+  pollMs = POLL_MS,
+  now = Date.now,
+  sleep = delay,
+}) {
+  const deadline = now() + timeoutMs;
+  while (now() <= deadline) {
+    const markers = extractBackupRestoreMarkers(await readLogs(), [expectedIdentity.pid]);
+    if (markers.length === 1) return markers[0];
+    if (!sameProcessIdentity(await getProcessIdentity(), expectedIdentity)) {
+      throw new HarnessError(
+        'app-process-exited',
+        'The Gator process changed before emitting its backup-restore marker.',
+      );
+    }
+    await sleep(pollMs);
+  }
+  throw new HarnessError(
+    'backup-restore-result-timeout',
+    `No backup-restore marker arrived within ${String(timeoutMs)} ms.`,
   );
 }
 
@@ -1783,6 +2049,77 @@ export async function executeRuntimeConcurrencySequence(operations, timing = {})
   }
 }
 
+/** Dependency-injected one-launch BACKUP-02 proof; host tests never need adb. */
+export async function executeBackupRestoreSequence(operations, timing = {}) {
+  const {
+    resetTestState,
+    createRequest,
+    launchApp,
+    stopApp,
+    readLogs,
+    getProcessIdentity,
+    verifyPrivateStateClean,
+  } = operations;
+  let primaryError;
+  let processStopped = false;
+  try {
+    await resetTestState();
+    await createRequest();
+    await launchApp();
+    const processIdentity = await waitForProcess(getProcessIdentity, timing);
+    const result = await waitForBackupRestoreMarker({
+      readLogs,
+      getProcessIdentity,
+      expectedIdentity: processIdentity,
+      ...timing,
+    });
+    if (!sameProcessIdentity(await getProcessIdentity(), processIdentity)) {
+      throw new HarnessError(
+        'app-process-exited',
+        'The Gator process changed while emitting its backup-restore marker.',
+      );
+    }
+    if ((await verifyPrivateStateClean()) !== true) {
+      throw new HarnessError(
+        'backup-restore-state-remained',
+        'Disposable backup-restore state remained before fallback cleanup.',
+      );
+    }
+    await stopApp();
+    await waitForNoProcess(getProcessIdentity, timing);
+    processStopped = true;
+    const finalMarkers = extractBackupRestoreMarkers(await readLogs(), [processIdentity.pid]);
+    if (finalMarkers.length !== 1 || JSON.stringify(finalMarkers[0]) !== JSON.stringify(result)) {
+      throw new HarnessError(
+        'backup-restore-result-changed',
+        'The sealed backup-restore log did not retain exactly one matching result.',
+      );
+    }
+    return {
+      result,
+      hostChecks: { processAlive: true, processStopped: true, privateStateClean: true },
+    };
+  } catch (error) {
+    primaryError = error;
+    throw error;
+  } finally {
+    let finalizationError;
+    if (!processStopped) {
+      try {
+        await stopApp();
+      } catch (error) {
+        finalizationError = error;
+      }
+    }
+    try {
+      await resetTestState();
+    } catch (error) {
+      finalizationError ??= error;
+    }
+    if (!primaryError && finalizationError) throw finalizationError;
+  }
+}
+
 export function buildPrivacySafeArtifact(outcome, target, recordedAt = new Date()) {
   const ready = validateRelaunchMarker(outcome.ready);
   const final = outcome.final ? validateRelaunchMarker(outcome.final) : undefined;
@@ -2036,6 +2373,56 @@ export function buildRuntimeConcurrencyPrivacySafeArtifact(
   };
 }
 
+export function buildBackupRestorePrivacySafeArtifact(outcome, target, recordedAt = new Date()) {
+  const result = validateBackupRestoreMarker(outcome.result);
+  assertBackupRestorePlainObject(
+    outcome.hostChecks,
+    'Backup-restore host checks',
+    'invalid-backup-restore-artifact',
+  );
+  assertBackupRestoreExactKeys(
+    outcome.hostChecks,
+    BACKUP_RESTORE_HOST_CHECKS,
+    'Backup-restore host checks',
+    'invalid-backup-restore-artifact',
+  );
+  const hostChecks = Object.fromEntries(
+    BACKUP_RESTORE_HOST_CHECKS.map((name) => {
+      if (typeof outcome.hostChecks[name] !== 'boolean') {
+        throw new HarnessError(
+          'invalid-backup-restore-artifact',
+          `Backup-restore host check ${name} must be boolean.`,
+        );
+      }
+      return [name, outcome.hostChecks[name]];
+    }),
+  );
+  if (BACKUP_RESTORE_HOST_CHECKS.some((name) => hostChecks[name] !== true)) {
+    throw new HarnessError(
+      'invalid-backup-restore-artifact',
+      'Backup-restore host checks do not prove the terminal one-launch sequence.',
+    );
+  }
+  const safeTarget = parseTargetMetadata({
+    packageDump: `versionCode=${String(target.versionCode)}\nversionName=${target.versionName}`,
+    androidApi: target.androidApi,
+    abi: target.abi,
+  });
+  return {
+    schema: BACKUP_RESTORE_SCHEMA,
+    suite: BACKUP_RESTORE_SUITE,
+    recordedAt: recordedAt.toISOString(),
+    package: APP_PACKAGE,
+    target: safeTarget,
+    status: result.status,
+    migrationCount: result.migrationCount,
+    migrationHead: result.migrationHead,
+    checks: result.checks,
+    hostChecks,
+    ...(result.status === 'fail' ? { failureCode: result.failureCode } : {}),
+  };
+}
+
 function reportPath(recordedAt) {
   const stamp = recordedAt.toISOString().replace(/[:.]/g, '-');
   return resolve(REPORT_DIR, `android-db-relaunch-${stamp}.json`);
@@ -2092,6 +2479,22 @@ function runtimeConcurrencyReportPath(recordedAt) {
 function writeRuntimeConcurrencyArtifact(outcome, target, recordedAt = new Date()) {
   const artifact = buildRuntimeConcurrencyPrivacySafeArtifact(outcome, target, recordedAt);
   const path = runtimeConcurrencyReportPath(recordedAt);
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(artifact, null, 2)}\n`, {
+    encoding: 'utf8',
+    flag: 'wx',
+  });
+  return path;
+}
+
+function backupRestoreReportPath(recordedAt) {
+  const stamp = recordedAt.toISOString().replace(/[:.]/g, '-');
+  return resolve(BACKUP_RESTORE_REPORT_DIR, `android-backup-restore-${stamp}.json`);
+}
+
+function writeBackupRestoreArtifact(outcome, target, recordedAt = new Date()) {
+  const artifact = buildBackupRestorePrivacySafeArtifact(outcome, target, recordedAt);
+  const path = backupRestoreReportPath(recordedAt);
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, `${JSON.stringify(artifact, null, 2)}\n`, {
     encoding: 'utf8',
@@ -2561,6 +2964,81 @@ export async function runAndroidDbRuntimeConcurrency() {
   return { path, outcome };
 }
 
+export async function runAndroidBackupRestore() {
+  runCommand('adb', ['version'], { code: 'adb-unavailable', label: 'adb' });
+  const deviceOutput = runCommand('adb', ['devices'], {
+    code: 'adb-devices-failed',
+    label: 'adb devices',
+  });
+  const serial = selectAdbDevice(parseAdbDevices(deviceOutput), process.env.ANDROID_SERIAL);
+  const installedPath = runAdb(serial, ['shell', 'pm', 'path', APP_PACKAGE], {
+    code: 'app-not-installed',
+    label: 'Installed Gator package check',
+  });
+  if (!installedPath.startsWith('package:')) {
+    throw new HarnessError('app-not-installed', 'The Gator Android package is not installed.');
+  }
+  const target = parseTargetMetadata({
+    packageDump: runAdb(serial, ['shell', 'dumpsys', 'package', APP_PACKAGE], {
+      code: 'target-metadata-unavailable',
+      label: 'Installed Gator version check',
+    }),
+    androidApi: runAdb(serial, ['shell', 'getprop', 'ro.build.version.sdk'], {
+      code: 'target-metadata-unavailable',
+      label: 'Android API check',
+    }),
+    abi: runAdb(serial, ['shell', 'getprop', 'ro.product.cpu.abi'], {
+      code: 'target-metadata-unavailable',
+      label: 'Android ABI check',
+    }),
+  });
+  runAdb(serial, ['shell', 'run-as', APP_PACKAGE, 'true'], {
+    code: 'app-not-debuggable',
+    label: 'Debuggable Gator package check',
+  });
+  await checkMetro();
+  runAdb(serial, ['reverse', 'tcp:8081', 'tcp:8081'], {
+    code: 'adb-reverse-failed',
+    label: 'adb reverse for Metro',
+  });
+
+  const logBoundary = `${LOGCAT_BOUNDARY_PREFIX}${randomUUID()}`;
+  runAdb(serial, ['shell', 'log', '-p', 'i', '-t', 'GatorDbHarness', logBoundary], {
+    code: 'log-boundary-failed',
+    label: 'Backup-restore log boundary',
+  });
+  const outcome = await executeBackupRestoreSequence({
+    resetTestState: () => resetTestState(serial),
+    createRequest: () =>
+      runAdb(serial, CREATE_BACKUP_RESTORE_REQUEST_ADB_ARGS, {
+        code: 'request-create-failed',
+        label: 'Backup-restore request creation',
+      }),
+    launchApp: () => launchApp(serial),
+    stopApp: () => stopApp(serial),
+    verifyPrivateStateClean: () => privateTestStateClean(serial, BACKUP_RESTORE_PRIVATE_TEST_FILES),
+    readLogs: () =>
+      logsAfterRelaunchBoundary(
+        runAdb(
+          serial,
+          ['logcat', '-d', '-v', 'threadtime', 'GatorDbHarness:I', 'ReactNativeJS:I', '*:S'],
+          { code: 'logcat-read-failed', label: 'filtered Gator logcat' },
+        ),
+        logBoundary,
+      ),
+    getProcessIdentity: () => currentProcessIdentity(serial),
+  });
+
+  const path = writeBackupRestoreArtifact(outcome, target);
+  if (outcome.result.status !== 'pass') {
+    throw new HarnessError(
+      'backup-restore-contract-failed',
+      `Android backup-restore contract failed [${outcome.result.failureCode}]. Safe artifact: ${path}`,
+    );
+  }
+  return { path, outcome };
+}
+
 export function parseRelaunchHarnessMode(args) {
   const mode = args[0];
   if (
@@ -2568,11 +3046,12 @@ export function parseRelaunchHarnessMode(args) {
     (mode !== undefined &&
       mode !== '--active-wal-write-death' &&
       mode !== '--active-migration-death' &&
-      mode !== '--runtime-concurrency')
+      mode !== '--runtime-concurrency' &&
+      mode !== '--backup-restore')
   ) {
     throw new HarnessError(
       'invalid-harness-arguments',
-      'Use no argument for migration relaunch, --active-wal-write-death for active WAL, --active-migration-death for active migration, or --runtime-concurrency for the one-launch DB-02C wave.',
+      'Use no argument for migration relaunch, --active-wal-write-death for active WAL, --active-migration-death for active migration, --runtime-concurrency for DB-02C, or --backup-restore for the one-launch BACKUP-02 proof.',
     );
   }
   return mode;
@@ -2591,6 +3070,9 @@ export async function main(args = process.argv.slice(2)) {
   } else if (mode === '--runtime-concurrency') {
     ({ path } = await runAndroidDbRuntimeConcurrency());
     label = 'Android DB runtime-concurrency';
+  } else if (mode === '--backup-restore') {
+    ({ path } = await runAndroidBackupRestore());
+    label = 'Android backup-restore';
   } else {
     ({ path } = await runAndroidDbRelaunch());
     label = 'Android DB relaunch';

@@ -7,6 +7,8 @@ import { MIGRATIONS } from './migrations';
 import { handles } from './schema';
 import type {
   AppDatabase,
+  DbBackupRestoreWaveChecks,
+  DbBackupRestoreWaveRunner,
   DbRuntimeConcurrencyWaveChecks,
   DbRuntimeConcurrencyWaveRunner,
 } from './types';
@@ -161,8 +163,8 @@ export function getRawDatabase(): RawDb {
 const DRIVER_SELF_TEST_DB_NAME = 'driver-selftest.db';
 const DRIVER_SELF_TEST_KEY_BYTES = 32;
 const DRIVER_SELF_TEST_REACTIVE_TIMEOUT_MS = 5_000;
-const DRIVER_SELF_TEST_MIGRATION_COUNT = 45 as const;
-const DRIVER_SELF_TEST_MIGRATION_HEAD = '0045_backup_export_indexes' as const;
+const DRIVER_SELF_TEST_MIGRATION_COUNT = 47 as const;
+const DRIVER_SELF_TEST_MIGRATION_HEAD = '0047_message_retraction_topology' as const;
 const DRIVER_SELF_TEST_PARTIAL_MIGRATION_COUNT = 29;
 const DRIVER_HISTORY_SELF_TEST_DB_NAME = 'driver-history-selftest.db';
 const DRIVER_HISTORY_SELF_TEST_KEY = 'db-03b2a-public-throwaway-key-v1';
@@ -1749,8 +1751,8 @@ const DB_RUNTIME_CONCURRENCY_SELF_TEST_NAME = 'driver-runtime-concurrency-selfte
 // These public DEV-only keys protect no user data and open only the fixed disposable file above.
 const DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_A = 'db-02c-public-throwaway-key-a-v1';
 const DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_B = 'db-02c-public-throwaway-key-b-v1';
-const DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_COUNT = 45 as const;
-const DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_HEAD = '0045_backup_export_indexes' as const;
+const DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_COUNT = 47 as const;
+const DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_HEAD = '0047_message_retraction_topology' as const;
 const DB_RUNTIME_CONCURRENCY_SENTINEL_KEY = 'gator-db-runtime-wave-sentinel';
 const DB_RUNTIME_CONCURRENCY_SENTINEL_VALUE = 'committed';
 
@@ -2009,6 +2011,235 @@ export async function runDbRuntimeConcurrencySelfTest(
   return { status: 'fail', checks, failureCode: failureCode ?? 'internal' };
 }
 
+const DB_BACKUP_RESTORE_SELF_TEST_NAME = 'driver-backup-restore-selftest.db';
+// This public DEV-only key protects no user data and opens only the fixed disposable file above.
+const DB_BACKUP_RESTORE_SELF_TEST_KEY = 'backup-02-public-throwaway-key-v1';
+const DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_COUNT = 47 as const;
+const DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_HEAD = '0047_message_retraction_topology' as const;
+
+export interface DbBackupRestoreDatabaseChecks extends DbBackupRestoreWaveChecks {
+  readonly preCleanup: boolean;
+  readonly encryptedOpen: boolean;
+  readonly migrationLedger: boolean;
+  readonly foreignKeys: boolean;
+  readonly integrity: boolean;
+  readonly databaseClosed: boolean;
+  readonly databaseCleanup: boolean;
+}
+
+export type DbBackupRestoreDatabaseFailureCode =
+  | 'pre-cleanup'
+  | 'encrypted-open'
+  | 'migration-ledger'
+  | 'plaintext-near-limit'
+  | 'bb2-envelope'
+  | 'native-seal'
+  | 'native-open'
+  | 'late-fault-observed'
+  | 'kv-rolled-back'
+  | 'themes-rolled-back'
+  | 'chat-rolled-back'
+  | 'folders-rolled-back'
+  | 'temp-tables-cleaned'
+  | 'retry-succeeded'
+  | 'successor-write'
+  | 'foreign-keys'
+  | 'integrity'
+  | 'database-closed'
+  | 'database-cleanup'
+  | 'internal';
+
+export type DbBackupRestoreDatabaseResult =
+  | {
+      readonly status: 'pass';
+      readonly checks: DbBackupRestoreDatabaseChecks;
+    }
+  | {
+      readonly status: 'fail';
+      readonly checks: DbBackupRestoreDatabaseChecks;
+      readonly failureCode: DbBackupRestoreDatabaseFailureCode;
+    };
+
+type MutableDbBackupRestoreDatabaseChecks = {
+  -readonly [K in keyof DbBackupRestoreDatabaseChecks]: DbBackupRestoreDatabaseChecks[K];
+};
+
+function emptyDbBackupRestoreDatabaseChecks(): MutableDbBackupRestoreDatabaseChecks {
+  return {
+    preCleanup: false,
+    encryptedOpen: false,
+    migrationLedger: false,
+    plaintextNearLimit: false,
+    bb2Envelope: false,
+    nativeSeal: false,
+    nativeOpen: false,
+    lateFaultObserved: false,
+    kvRolledBack: false,
+    themesRolledBack: false,
+    chatRolledBack: false,
+    foldersRolledBack: false,
+    tempTablesCleaned: false,
+    retrySucceeded: false,
+    successorWrite: false,
+    foreignKeys: false,
+    integrity: false,
+    databaseClosed: false,
+    databaseCleanup: false,
+  };
+}
+
+/** Delete only the fixed BACKUP-02 disposable file; this cannot address the production DB. */
+export function cleanupDbBackupRestoreSelfTestDatabase(): boolean {
+  let cleanup: RawDb | undefined;
+  try {
+    cleanup = open({ name: DB_BACKUP_RESTORE_SELF_TEST_NAME });
+    cleanup.delete();
+    return true;
+  } catch {
+    try {
+      cleanup?.close();
+    } catch {
+      // The finite false result remains authoritative for this fixed disposable filename.
+    }
+    return false;
+  }
+}
+
+function dbBackupRestoreMigrationNames(): string[] {
+  const names = MIGRATIONS.map((migration) => migration.name);
+  requireDriverContract(
+    names.length === DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_COUNT &&
+      names[0] === '0001_init' &&
+      names[DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_COUNT - 1] ===
+        DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_HEAD &&
+      new Set(names).size === DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_COUNT,
+  );
+  return names;
+}
+
+function firstDbBackupRestoreWaveFailure(
+  checks: DbBackupRestoreWaveChecks,
+): DbBackupRestoreDatabaseFailureCode | undefined {
+  if (!checks.plaintextNearLimit) return 'plaintext-near-limit';
+  if (!checks.bb2Envelope) return 'bb2-envelope';
+  if (!checks.nativeSeal) return 'native-seal';
+  if (!checks.nativeOpen) return 'native-open';
+  if (!checks.lateFaultObserved) return 'late-fault-observed';
+  if (!checks.kvRolledBack) return 'kv-rolled-back';
+  if (!checks.themesRolledBack) return 'themes-rolled-back';
+  if (!checks.chatRolledBack) return 'chat-rolled-back';
+  if (!checks.foldersRolledBack) return 'folders-rolled-back';
+  if (!checks.tempTablesCleaned) return 'temp-tables-cleaned';
+  if (!checks.retrySucceeded) return 'retry-succeeded';
+  if (!checks.successorWrite) return 'successor-write';
+  return undefined;
+}
+
+/**
+ * Run BACKUP-02 against one fixed disposable SQLCipher database before ordinary foreground boot.
+ *
+ * The service callback receives only an adapted, fully migrated throwaway database. The exclusive
+ * host harness owns the timeout by stopping this process; JavaScript must never race a timed-out
+ * native SQLite operation with close/delete cleanup.
+ */
+export async function runDbBackupRestoreSelfTest(
+  runWave: DbBackupRestoreWaveRunner,
+): Promise<DbBackupRestoreDatabaseResult> {
+  const checks = emptyDbBackupRestoreDatabaseChecks();
+  let phase: DbBackupRestoreDatabaseFailureCode = 'internal';
+  let failureCode: DbBackupRestoreDatabaseFailureCode | undefined;
+  let handle: RawDb | undefined;
+
+  try {
+    phase = 'pre-cleanup';
+    requireDriverContract(cleanupDbBackupRestoreSelfTestDatabase());
+    checks.preCleanup = true;
+
+    phase = 'encrypted-open';
+    handle = open({
+      name: DB_BACKUP_RESTORE_SELF_TEST_NAME,
+      encryptionKey: DB_BACKUP_RESTORE_SELF_TEST_KEY,
+    });
+    const activeHandle = handle;
+    await activeHandle.execute('PRAGMA foreign_keys = ON');
+    await activeHandle.execute('SELECT count(*) FROM sqlite_master');
+    checks.encryptedOpen = true;
+
+    phase = 'migration-ledger';
+    const expectedMigrationNames = dbBackupRestoreMigrationNames();
+    const appliedMigrations = await runMigrations(opRunner(activeHandle));
+    const ledger = extractRows(
+      await activeHandle.execute('SELECT name FROM _migrations ORDER BY name'),
+    );
+    requireDriverContract(
+      hasExactStringColumn(
+        appliedMigrations.map((name) => ({ name })),
+        'name',
+        expectedMigrationNames,
+      ) && hasExactStringColumn(ledger, 'name', expectedMigrationNames),
+    );
+    checks.migrationLedger = true;
+
+    phase = 'internal';
+    const waveChecks = await runWave(
+      drizzle(drizzleAdapter(activeHandle)) as unknown as AppDatabase,
+    );
+    checks.plaintextNearLimit = waveChecks.plaintextNearLimit === true;
+    checks.bb2Envelope = waveChecks.bb2Envelope === true;
+    checks.nativeSeal = waveChecks.nativeSeal === true;
+    checks.nativeOpen = waveChecks.nativeOpen === true;
+    checks.lateFaultObserved = waveChecks.lateFaultObserved === true;
+    checks.kvRolledBack = waveChecks.kvRolledBack === true;
+    checks.themesRolledBack = waveChecks.themesRolledBack === true;
+    checks.chatRolledBack = waveChecks.chatRolledBack === true;
+    checks.foldersRolledBack = waveChecks.foldersRolledBack === true;
+    checks.tempTablesCleaned = waveChecks.tempTablesCleaned === true;
+    checks.retrySucceeded = waveChecks.retrySucceeded === true;
+    checks.successorWrite = waveChecks.successorWrite === true;
+    failureCode = firstDbBackupRestoreWaveFailure(checks);
+
+    activeHandle.close();
+    handle = undefined;
+    const reopened = open({
+      name: DB_BACKUP_RESTORE_SELF_TEST_NAME,
+      encryptionKey: DB_BACKUP_RESTORE_SELF_TEST_KEY,
+      readOnly: true,
+    });
+    try {
+      phase = 'foreign-keys';
+      await reopened.execute('PRAGMA foreign_keys = ON');
+      const foreignKeys = extractRows(await reopened.execute('PRAGMA foreign_keys'));
+      const violations = extractRows(await reopened.execute('PRAGMA foreign_key_check'));
+      requireDriverContract(foreignKeys[0]?.foreign_keys === 1 && violations.length === 0);
+      checks.foreignKeys = true;
+
+      phase = 'integrity';
+      const integrity = extractRows(await reopened.execute('PRAGMA integrity_check'));
+      requireDriverContract(integrity.length === 1 && integrity[0]?.integrity_check === 'ok');
+      checks.integrity = true;
+    } finally {
+      phase = 'database-closed';
+      reopened.close();
+    }
+    checks.databaseClosed = true;
+  } catch {
+    failureCode ??= phase;
+  } finally {
+    try {
+      handle?.close();
+    } catch {
+      failureCode ??= 'internal';
+    }
+    checks.databaseCleanup = cleanupDbBackupRestoreSelfTestDatabase();
+    if (!checks.databaseCleanup) failureCode = 'database-cleanup';
+  }
+
+  if (!failureCode && Object.values(checks).every(Boolean)) {
+    return { status: 'pass', checks };
+  }
+  return { status: 'fail', checks, failureCode: failureCode ?? 'internal' };
+}
+
 const DB_PROCESS_RELAUNCH_SELF_TEST_NAME = 'driver-relaunch-selftest.db';
 // This is deliberately a public, compile-time DEV test key. It never protects production data and
 // never enters the account vault; its only purpose is to let two fresh app processes open the same
@@ -2018,8 +2249,8 @@ const DB_PROCESS_RELAUNCH_SELF_TEST_SENTINEL = 'driver-relaunch-continuity-v1';
 const DB_PROCESS_RELAUNCH_SELF_TEST_PARTIAL_MIGRATION_COUNT = 29;
 const DB_PROCESS_RELAUNCH_SELF_TEST_PARTIAL_MIGRATION_HEAD = '0029_chats_deleted_at';
 const DB_PROCESS_RELAUNCH_SELF_TEST_RETRY_MIGRATION_START = '0030_attachment_cache_entries';
-const DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_COUNT = 45 as const;
-const DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_HEAD = '0045_backup_export_indexes' as const;
+const DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_COUNT = 47 as const;
+const DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_HEAD = '0047_message_retraction_topology' as const;
 
 export interface DbProcessRelaunchPrepareChecks {
   preCleanup: boolean;
@@ -2863,8 +3094,8 @@ const DB_ACTIVE_MIGRATION_DEATH_SELF_TEST_KEY = 'db-03b2b2-public-throwaway-key-
 const DB_ACTIVE_MIGRATION_DEATH_PREFIX_COUNT = 37;
 const DB_ACTIVE_MIGRATION_DEATH_PREFIX_HEAD = '0037_purge_legacy_redacted_mode_setting' as const;
 const DB_ACTIVE_MIGRATION_DEATH_TARGET = '0038_scrub_reaction_selected_message_text' as const;
-const DB_ACTIVE_MIGRATION_DEATH_HEAD = '0045_backup_export_indexes' as const;
-const DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT = 45 as const;
+const DB_ACTIVE_MIGRATION_DEATH_HEAD = '0047_message_retraction_topology' as const;
+const DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT = 47 as const;
 const DB_ACTIVE_MIGRATION_DEATH_TARGET_COUNT = 128;
 const DB_ACTIVE_MIGRATION_DEATH_SELECTED_TEXT_LENGTH = 8_192;
 const DB_ACTIVE_MIGRATION_DEATH_TARGET_SQL = `UPDATE outgoing_queue

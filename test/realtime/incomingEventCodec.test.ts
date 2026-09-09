@@ -199,6 +199,48 @@ describe('incoming event envelope codec', () => {
     expect(fcm.envelope.source).toBe('fcm');
   });
 
+  it('does not let malformed correlation suppress a later exact copy of a new message', async () => {
+    const base = {
+      guid: 'correlation-copy-guid',
+      text: 'same message',
+      isFromMe: true,
+      chats: [{ guid: 'correlation-copy-chat' }],
+    };
+    const malformed = normalized('new-message', { ...base, tempGuid: 'temp-partial' });
+    const exact = normalized('new-message', {
+      ...base,
+      tempGuid: 'temp-partial',
+      attemptGuid: 'attempt-exact',
+      clientAttemptGeneration: 2,
+    });
+    const malformedCopy = await encodeIncomingEvent(
+      malformed,
+      metadata('fcm', 'malformed-copy'),
+      digest,
+    );
+    const exactSocket = await encodeIncomingEvent(
+      exact,
+      metadata('socket', 'exact-socket'),
+      digest,
+    );
+    const exactFcm = await encodeIncomingEvent(exact, metadata('fcm', 'exact-fcm'), digest);
+
+    expect(exactSocket.envelope.eventKey).not.toBe(malformedCopy.envelope.eventKey);
+    expect(exactFcm.envelope.eventKey).toBe(exactSocket.envelope.eventKey);
+    const reparsed = await verifyAndParseIncomingEvent(
+      {
+        schemaVersion: malformedCopy.envelope.schemaVersion,
+        eventName: malformedCopy.envelope.eventName,
+        payload: malformedCopy.envelope.payload,
+        payloadDigest: malformedCopy.envelope.payloadDigest,
+      },
+      digest,
+    );
+    expect(reparsed.type).toBe('new-message');
+    if (reparsed.type !== 'new-message') throw new Error('unexpected reparsed event type');
+    expect(reparsed.message.sendAttemptCorrelationInvalid).toBe(true);
+  });
+
   it('gives capped and full copies of one ordinary message one key but distinct payload digests', async () => {
     const full = normalized('new-message', {
       guid: 'same-guid',
@@ -285,6 +327,7 @@ describe('incoming event envelope codec', () => {
           },
         ],
       },
+      true,
     ],
     [
       'message update',
@@ -312,10 +355,11 @@ describe('incoming event envelope codec', () => {
         messageSummaryInfo: null,
         payloadData: null,
       },
+      false,
     ],
   ])(
-    'deduplicates the real rich-socket and lean-FCM %s serializers semantically',
-    async (_label, eventName, richRaw, leanRaw) => {
+    'uses a fail-closed semantic identity for rich-socket and lean-FCM %s serializers',
+    async (_label, eventName, richRaw, leanRaw, expectSameKey) => {
       const socket = await encodeIncomingEvent(
         normalized(eventName, richRaw),
         metadata('socket', 'socket-serializer-copy'),
@@ -328,7 +372,15 @@ describe('incoming event envelope codec', () => {
       );
 
       expect(fcm.envelope.payloadDigest).not.toBe(socket.envelope.payloadDigest);
-      expect(fcm.envelope.eventKey).toBe(socket.envelope.eventKey);
+      if (expectSameKey) {
+        expect(fcm.envelope.eventKey).toBe(socket.envelope.eventKey);
+      } else {
+        // Edit/retraction summary and exact part topology are transport-asymmetric but security
+        // relevant. Without an authenticated occurrence id, retaining two variants is safer than
+        // suppressing an unsend and lets the richer topology revision apply. V3 serverEventId
+        // separately deduplicates authenticated FCM redelivery and cross-type occurrence reuse.
+        expect(fcm.envelope.eventKey).not.toBe(socket.envelope.eventKey);
+      }
       expect(fcm.envelope.orderingKey).toBe(socket.envelope.orderingKey);
     },
   );
@@ -467,21 +519,77 @@ describe('incoming event envelope codec', () => {
     const first = await encodeIncomingEvent(event, metadata('fcm', 'fcm-message-1'), digest);
     const retry = await encodeIncomingEvent(event, metadata('fcm', 'fcm-message-1'), digest);
     const secondClick = await encodeIncomingEvent(event, metadata('fcm', 'fcm-message-2'), digest);
-    const serverSocket = await encodeIncomingEvent(
+    const serverFirstFcm = await encodeIncomingEvent(
       event,
-      { ...metadata('socket', 'socket-copy'), serverEventId: 'shared-event-1' },
+      { ...metadata('fcm', 'provider-copy-1'), serverEventId: 'shared-event-1' },
       digest,
     );
-    const serverFcm = await encodeIncomingEvent(
+    const serverRetryFcm = await encodeIncomingEvent(
       event,
-      { ...metadata('fcm', 'fcm-copy'), serverEventId: 'shared-event-1' },
+      { ...metadata('fcm', 'provider-copy-2'), serverEventId: 'shared-event-1' },
       digest,
     );
 
     expect(retry.envelope.eventKey).toBe(first.envelope.eventKey);
     expect(secondClick.envelope.eventKey).not.toBe(first.envelope.eventKey);
-    expect(serverFcm.envelope.eventKey).toBe(serverSocket.envelope.eventKey);
-    expect(serverFcm.identityQuality).toBe('exact');
+    expect(serverRetryFcm.envelope.eventKey).toBe(serverFirstFcm.envelope.eventKey);
+    expect(serverRetryFcm.identityQuality).toBe('exact');
+  });
+
+  it('treats one authenticated server occurrence as unique across event types', async () => {
+    const created = normalized('new-message', {
+      guid: 'same-authenticated-occurrence',
+      text: 'first projection',
+      chats: [{ guid: 'codec-chat' }],
+    });
+    const deleted = normalized('message-deleted', {
+      guid: 'same-authenticated-occurrence',
+      chatGuid: 'codec-chat',
+      dateDeleted: RECEIVED_AT - 1,
+    });
+    const exactOccurrence = {
+      ...metadata('fcm', 'provider-copy'),
+      serverEventId: 'fcm3:scoped-authenticated-occurrence',
+    } as const;
+
+    const exactCreated = await encodeIncomingEvent(created, exactOccurrence, digest);
+    const exactDeleted = await encodeIncomingEvent(deleted, exactOccurrence, digest);
+    const contentCreated = await encodeIncomingEvent(
+      created,
+      metadata('socket', 'socket-create'),
+      digest,
+    );
+    const contentDeleted = await encodeIncomingEvent(
+      deleted,
+      metadata('socket', 'socket-delete'),
+      digest,
+    );
+
+    expect(exactDeleted.envelope.eventKey).toBe(exactCreated.envelope.eventKey);
+    expect(exactDeleted.envelope.payloadDigest).not.toBe(exactCreated.envelope.payloadDigest);
+    expect(exactDeleted.envelope.eventName).not.toBe(exactCreated.envelope.eventName);
+    expect(contentDeleted.envelope.eventKey).not.toBe(contentCreated.envelope.eventKey);
+  });
+
+  it('clamps durable expiry to the authenticated deadline and rejects an already-expired one', async () => {
+    const authenticatedExpiresAt = RECEIVED_AT + 1_234;
+    const encoded = await encodeIncomingEvent(
+      normalized('new-message'),
+      { ...metadata('fcm', 'provider-expiry'), authenticatedExpiresAt },
+      digest,
+    );
+
+    expect(encoded.envelope.expiresAt).toBe(authenticatedExpiresAt);
+    await expect(
+      encodeIncomingEvent(
+        normalized('new-message'),
+        {
+          ...metadata('fcm', 'provider-expired'),
+          authenticatedExpiresAt: RECEIVED_AT,
+        },
+        digest,
+      ),
+    ).rejects.toMatchObject({ code: 'invalid-metadata' });
   });
 
   it('deduplicates socket/FCM send-error copies by a real attempt guid, never by tempGuid alone', async () => {
@@ -517,6 +625,14 @@ describe('incoming event envelope codec', () => {
       error: 22,
       retryable: true,
     });
+    const correctedExplicitAttempt = normalized('message-send-error', {
+      attemptGuid: 'server-attempt-1',
+      clientAttemptGeneration: 2,
+      guid: 'temp-send-error',
+      tempGuid: 'temp-send-error',
+      error: 22,
+      retryable: true,
+    });
     const socket = await encodeIncomingEvent(
       attemptOne,
       metadata('socket', 'socket:error'),
@@ -545,6 +661,11 @@ describe('incoming event envelope codec', () => {
       metadata('socket', 'socket:explicit-later'),
       digest,
     );
+    const correctedExplicit = await encodeIncomingEvent(
+      correctedExplicitAttempt,
+      metadata('socket', 'socket:explicit-corrected'),
+      digest,
+    );
 
     expect(fcm.envelope.eventKey).toBe(socket.envelope.eventKey);
     expect(later.envelope.eventKey).not.toBe(socket.envelope.eventKey);
@@ -552,6 +673,7 @@ describe('incoming event envelope codec', () => {
     expect(explicitFcm.envelope.eventKey).toBe(explicitSocket.envelope.eventKey);
     expect(explicitSocket.identityQuality).toBe('exact');
     expect(explicitLater.envelope.eventKey).not.toBe(explicitSocket.envelope.eventKey);
+    expect(correctedExplicit.envelope.eventKey).not.toBe(explicitSocket.envelope.eventKey);
   });
 
   it('keeps equal transport-local occurrence spellings in separate source namespaces', async () => {

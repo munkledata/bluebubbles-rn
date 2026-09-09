@@ -11,8 +11,9 @@ import {
 } from '../transaction';
 import type { AppDatabase } from '../types';
 import { dedupeBy } from './_shared';
-import { chatVisible } from './chatVisibility';
+import { chatVisible, messageHasVisibleContentSql } from './chatVisibility';
 import { requireChatIdByGuidWithinTransaction } from './chats';
+import type { OutgoingInsertResult } from './outgoing';
 
 /**
  * Transaction-only attachment ingestion. Temp-row identity/local-path reconciliation and the
@@ -135,6 +136,10 @@ export interface AttachmentRow {
   hasLivePhoto: number;
   isSticker: number;
   hideAttachment: number;
+  /** Exact original Apple part owner when a complete topology proved it. */
+  messagePartIndex?: number | null;
+  /** 1 when that part was retracted or aggregate attachment visibility is uncertain. */
+  isRetracted?: number;
   /**
    * Genmoji (macOS 15.1+): the image content identifier (presence → render inline emoji-sized) and
    * the natural-language description (alt text / notification + preview fallback). Both NULL on
@@ -167,6 +172,10 @@ export interface ListAttachmentsByMessageIdsOptions {
   excludeDeletedMessages?: boolean;
   /** Omit private Apple Messages extension payloads even when a lean event missed their hide bit. */
   excludePluginPayloads?: boolean;
+  /** Omit rows explicitly marked hidden without rejecting their whole balloon owner. */
+  excludeHiddenAttachments?: boolean;
+  /** Omit only retracted/uncertain attachment parts while retaining proven partial content. */
+  excludeRetractedAttachments?: boolean;
 }
 
 export async function listAttachmentsByMessageIds(
@@ -188,12 +197,19 @@ export async function listAttachmentsByMessageIds(
   const pluginPayloadFilter = options.excludePluginPayloads
     ? sql`AND a.hide_attachment = 0 AND m.balloon_bundle_id IS NULL`
     : sql``;
+  const hiddenAttachmentFilter = options.excludeHiddenAttachments
+    ? sql`AND a.hide_attachment = 0`
+    : sql``;
+  const retractedAttachmentFilter = options.excludeRetractedAttachments
+    ? sql`AND a.is_retracted = 0 AND ${messageHasVisibleContentSql('m')}`
+    : sql``;
   const rows = await db.all<AttachmentRow>(sql`
     SELECT
       a.id, a.guid, a.message_id AS messageId, a.mime_type AS mimeType,
       a.transfer_name AS transferName, a.total_bytes AS totalBytes,
       a.height, a.width, a.blurhash, a.has_live_photo AS hasLivePhoto,
       a.is_sticker AS isSticker, a.hide_attachment AS hideAttachment,
+      a.message_part_index AS messagePartIndex, a.is_retracted AS isRetracted,
       a.emoji_image_content_identifier AS emojiImageContentIdentifier,
       a.emoji_image_short_description AS emojiImageShortDescription,
       a.local_path AS localPath,
@@ -204,6 +220,8 @@ export async function listAttachmentsByMessageIds(
     WHERE a.message_id IN (${inList})
       ${deletedMessageFilter}
       ${pluginPayloadFilter}
+      ${hiddenAttachmentFilter}
+      ${retractedAttachmentFilter}
     ORDER BY a.id ASC
     LIMIT ${rowLimit ?? -1}
   `);
@@ -230,6 +248,7 @@ interface StickerMessageRow {
   stickerMessageGuid: string;
   stickerMessageId: number;
   targetGuid: string;
+  targetPart?: number | null;
   isFromMe: number;
   dateCreated: number;
 }
@@ -266,13 +285,23 @@ export async function listStickersForTargets(
       m.guid AS stickerMessageGuid,
       m.id AS stickerMessageId,
       m.associated_message_guid AS targetGuid,
+      m.associated_message_part AS targetPart,
       m.is_from_me AS isFromMe,
       m.date_created AS dateCreated
     FROM messages m
     WHERE m.associated_message_guid IN (${inList})
       AND m.associated_message_type = ${STICKER_ASSOCIATED_TYPE}
       AND m.date_deleted IS NULL
-      AND m.date_retracted IS NULL
+      AND ${messageHasVisibleContentSql('m')}
+      AND (
+        m.retraction_state IS NULL OR m.retraction_state <> 'partial'
+        OR EXISTS (
+          SELECT 1 FROM attachments visible_sticker
+           WHERE visible_sticker.message_id = m.id
+             AND visible_sticker.hide_attachment = 0
+             AND visible_sticker.is_retracted = 0
+        )
+      )
     ORDER BY m.date_created ASC, m.id ASC
   `);
   if (rows.length === 0) return out;
@@ -282,6 +311,8 @@ export async function listStickersForTargets(
   const attsByMessage = await listAttachmentsByMessageIds(
     db,
     rows.map((r) => r.stickerMessageId),
+    undefined,
+    { excludeHiddenAttachments: true, excludeRetractedAttachments: true },
   );
 
   for (const r of rows) {
@@ -304,8 +335,9 @@ async function queryAttachmentByGuid(
 ): Promise<AttachmentRow | null> {
   const visibilityFilter = visibleOnly
     ? sql`AND a.hide_attachment = 0
+          AND a.is_retracted = 0
           AND m.balloon_bundle_id IS NULL
-          AND m.date_retracted IS NULL
+          AND ${messageHasVisibleContentSql('m')}
           AND m.date_deleted IS NULL`
     : sql``;
   const rows = await db.all<AttachmentRow>(sql`
@@ -372,8 +404,9 @@ export async function listChatImageAttachmentsByAttachmentGuid(
       AND a.mime_type LIKE 'image/%'
       AND a.is_sticker = 0
       AND a.hide_attachment = 0
+      AND a.is_retracted = 0
       AND m.balloon_bundle_id IS NULL
-      AND m.date_retracted IS NULL
+      AND ${messageHasVisibleContentSql('m')}
       AND m.date_deleted IS NULL
     ORDER BY m.date_created ASC, a.id ASC
   `);
@@ -450,8 +483,9 @@ export async function listChatDocumentAttachmentsPage(
       AND ${chatVisible('c')}
       AND a.is_sticker = 0
       AND a.hide_attachment = 0
+      AND a.is_retracted = 0
       AND m.balloon_bundle_id IS NULL
-      AND m.date_retracted IS NULL
+      AND ${messageHasVisibleContentSql('m')}
       AND m.date_deleted IS NULL
       AND (
         c.deleted_at IS NULL
@@ -500,8 +534,9 @@ export async function listChatAttachmentsByKind(
     WHERE c.guid = ${chatGuid}
       AND a.is_sticker = 0
       AND a.hide_attachment = 0
+      AND a.is_retracted = 0
       AND m.balloon_bundle_id IS NULL
-      AND m.date_retracted IS NULL
+      AND ${messageHasVisibleContentSql('m')}
       AND m.date_deleted IS NULL
     ORDER BY m.date_created DESC, a.id DESC
     LIMIT ${limit * 4}
@@ -532,7 +567,7 @@ export async function listChatAttachmentsByKind(
     JOIN chats c ON c.id = m.chat_id
     WHERE c.guid = ${chatGuid}
       AND m.text LIKE '%http%'
-      AND m.date_retracted IS NULL
+      AND ${messageHasVisibleContentSql('m')}
       AND m.date_deleted IS NULL
       AND m.associated_message_type IS NULL
     ORDER BY m.date_created DESC, m.id DESC
@@ -573,13 +608,19 @@ export interface InsertOutgoingAttachmentArgs {
   width?: number;
   height?: number;
   now: number;
+  /** Optional caption owned by this same message, attachment, queue row, and retry identity. */
+  text?: string;
+  selectedMessageGuid?: string;
+  partIndex?: number;
+  /** Current server promises exact RCS success/failure attempt correlation for this send. */
+  attemptAware?: boolean;
 }
 
 /** Transaction-only body for one optimistic outgoing attachment insert. */
 export function insertOutgoingAttachmentWithinTransaction(
   context: DbTransactionContext,
   args: InsertOutgoingAttachmentArgs,
-): Promise<void> {
+): Promise<OutgoingInsertResult> {
   return runInTransactionContext(context, async (db) => {
     const chatId = await requireChatIdByGuidWithinTransaction(context, args.chatGuid);
     await db.insert(messages).values({
@@ -587,8 +628,14 @@ export function insertOutgoingAttachmentWithinTransaction(
       chatId,
       isFromMe: true,
       dateCreated: args.now,
+      text: args.text ?? null,
       hasAttachments: true,
+      partCount: args.text ? 2 : null,
+      threadOriginatorGuid: args.selectedMessageGuid ?? null,
+      threadOriginatorPart: args.selectedMessageGuid ? (args.partIndex ?? null) : null,
       sendState: 'sending',
+      attemptOwnerPending: args.attemptAware === true,
+      attemptOwnerGeneration: args.attemptAware === true ? 1 : 0,
       error: 0,
     });
     const inserted = await db
@@ -610,7 +657,13 @@ export function insertOutgoingAttachmentWithinTransaction(
       tempGuid: args.tempGuid,
       chatGuid: args.chatGuid,
       kind: 'attachment',
-      payload: JSON.stringify({ attachmentGuid: args.attachmentGuid, localPath: args.localPath }),
+      payload: JSON.stringify({
+        attachmentGuid: args.attachmentGuid,
+        localPath: args.localPath,
+        text: args.text,
+        selectedMessageGuid: args.selectedMessageGuid,
+        partIndex: args.selectedMessageGuid ? args.partIndex : undefined,
+      }),
     });
     await db
       .update(chats)
@@ -618,6 +671,9 @@ export function insertOutgoingAttachmentWithinTransaction(
         latestMessageDate: sql`MAX(${args.now}, COALESCE(${chats.latestMessageDate}, ${args.now}))`,
       })
       .where(eq(chats.id, chatId));
+    return {
+      attemptOwnerToken: args.attemptAware === true ? { generation: 1 } : null,
+    };
   });
 }
 
@@ -625,8 +681,8 @@ export function insertOutgoingAttachmentWithinTransaction(
 export async function insertOutgoingAttachment(
   db: AppDatabase,
   args: InsertOutgoingAttachmentArgs,
-): Promise<void> {
-  await withDbTransaction(db, (context) =>
+): Promise<OutgoingInsertResult> {
+  return withDbTransaction(db, (context) =>
     insertOutgoingAttachmentWithinTransaction(context, args),
   );
 }
@@ -646,12 +702,13 @@ export function updateAttachmentLocalPathWithinTransaction(
     UPDATE attachments
        SET local_path = ${localPath}
      WHERE guid = ${attachmentGuid}
+       AND is_retracted = 0
        AND EXISTS (
          SELECT 1 FROM messages m
          JOIN chats c ON c.id = m.chat_id
           WHERE m.id = attachments.message_id
             AND m.date_deleted IS NULL
-            AND m.date_retracted IS NULL
+            AND ${messageHasVisibleContentSql('m')}
             AND (
               c.deleted_at IS NULL
               OR (m.date_created IS NOT NULL AND m.date_created > c.deleted_at)
@@ -683,12 +740,13 @@ export function replaceVisibleAttachmentLocalPathWithinTransaction(
        SET local_path = ${input.replacementLocalPath}
      WHERE guid = ${input.attachmentGuid}
        AND local_path = ${input.expectedLocalPath}
+       AND is_retracted = 0
        AND EXISTS (
          SELECT 1 FROM messages m
          JOIN chats c ON c.id = m.chat_id
           WHERE m.id = attachments.message_id
             AND m.date_deleted IS NULL
-            AND m.date_retracted IS NULL
+            AND ${messageHasVisibleContentSql('m')}
             AND (
               c.deleted_at IS NULL
               OR (m.date_created IS NOT NULL AND m.date_created > c.deleted_at)

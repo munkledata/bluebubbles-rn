@@ -25,6 +25,8 @@ export interface DurableRealtimeDispatcherOptions {
   readonly makeTransportOccurrenceId: (source: EventSource) => string;
   /** Explicit composition-root opt-in for the DEV process-death proof seam. Defaults closed. */
   readonly allowDevPersistWithoutDrain?: boolean;
+  /** Explicit composition-root opt-in for authenticated V3 intake while App Lock blocks draining. */
+  readonly allowLockedFcmV3PersistWithoutDrain?: boolean;
   /** Security/feature eligibility that must reject before encrypted persistence. */
   readonly canPersist?: (event: NormalizedEvent) => boolean;
   readonly requestRecovery?: (
@@ -51,6 +53,8 @@ export interface DevPersistedIncomingEvent {
   readonly queueId: number;
   readonly claim: ClaimedIncomingEvent;
 }
+
+type PersistenceMode = 'ordinary' | 'locked-fcm-v3';
 
 /**
  * One durable-before-effect intake boundary shared by socket, unlocked FCM, and dev injection.
@@ -145,6 +149,40 @@ export class DurableRealtimeDispatcher {
     });
   }
 
+  /**
+   * Commit one already-authenticated V3 FCM event without claiming, draining, recovering, or
+   * presenting it. This is the narrow App Lock exception: SQLCipher may accept encrypted-at-rest
+   * intake, while every content effect remains blocked until the ordinary unlock resume path.
+   */
+  persistLockedFcmV3WithoutDrain(
+    eventName: string,
+    rawData: unknown,
+    context: EventDeliveryContext,
+    occurrence: EventOccurrenceMetadata,
+    receivedAt = this.now(),
+  ): Promise<EnqueueIncomingEventResult | null> {
+    if (
+      this.options.allowLockedFcmV3PersistWithoutDrain !== true ||
+      !occurrence.serverEventId?.startsWith('fcm3:') ||
+      occurrence.authenticatedExpiresAt === undefined
+    ) {
+      return Promise.resolve(null);
+    }
+    return this.queuePersistence(
+      eventName,
+      rawData,
+      'fcm',
+      context,
+      occurrence,
+      undefined,
+      receivedAt,
+      'locked-fcm-v3',
+    ).then((admission) => {
+      if (!admission || !admission.isCurrent()) return null;
+      return admission.result;
+    });
+  }
+
   private queuePersistence(
     eventName: string,
     rawData: unknown,
@@ -153,6 +191,7 @@ export class DurableRealtimeDispatcher {
     occurrence?: EventOccurrenceMetadata,
     devLeaseToken?: string,
     receivedAt = this.now(),
+    persistenceMode: PersistenceMode = 'ordinary',
   ): Promise<Admission | null> {
     // Claim a FIFO slot before the first await. The tail itself never rejects, so one bad envelope
     // cannot poison every later transport callback.
@@ -175,6 +214,7 @@ export class DurableRealtimeDispatcher {
       ? {
           serverEventId: occurrence.serverEventId,
           transportOccurrenceId: occurrence.transportOccurrenceId,
+          authenticatedExpiresAt: occurrence.authenticatedExpiresAt,
         }
       : undefined;
     const admission = (async () => {
@@ -195,6 +235,7 @@ export class DurableRealtimeDispatcher {
           context,
           capturedOccurrence,
           devLeaseToken,
+          persistenceMode,
         );
       } finally {
         // The FIFO protects only normalization/hash/persistence. Required effects may be slow, but
@@ -213,6 +254,7 @@ export class DurableRealtimeDispatcher {
     context?: EventDeliveryContext,
     occurrence?: EventOccurrenceMetadata,
     devLeaseToken?: string,
+    persistenceMode: PersistenceMode = 'ordinary',
   ): Promise<Admission | null> {
     if (this.stopped || (context && !context.isCurrent())) return null;
     // Security eligibility is dynamic (App Lock can engage while SHA-256 or the write mutex is
@@ -224,7 +266,9 @@ export class DurableRealtimeDispatcher {
       const allowed =
         !this.stopped &&
         (!context || context.isCurrent()) &&
-        (!this.options.canPersist || this.options.canPersist(event));
+        (persistenceMode === 'locked-fcm-v3'
+          ? event.type !== 'new-server'
+          : !this.options.canPersist || this.options.canPersist(event));
       if (!allowed) admissionRevoked = true;
       return allowed;
     };
@@ -240,6 +284,7 @@ export class DurableRealtimeDispatcher {
           serverEventId: occurrence?.serverEventId,
           transportOccurrenceId:
             occurrence?.transportOccurrenceId ?? this.options.makeTransportOccurrenceId(source),
+          authenticatedExpiresAt: occurrence?.authenticatedExpiresAt,
         },
         this.digest,
       );
@@ -343,6 +388,15 @@ export class DurableRealtimeDispatcher {
         }
         return null;
       case 'poisoned':
+        await this.drain.kick(context);
+        if (!isCurrent()) return null;
+        await this.requestRecovery(conflictRecovery, 'intake-poisoned', isCurrent, context);
+        logger.warn('[incomingEvents] intake refused an event', {
+          event: event.type,
+          reason: result.reason,
+        });
+        return null;
+      case 'capacity-rejected':
         await this.drain.kick(context);
         if (!isCurrent()) return null;
         await this.requestRecovery(conflictRecovery, 'intake-poisoned', isCurrent, context);

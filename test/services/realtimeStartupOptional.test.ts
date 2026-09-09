@@ -24,6 +24,11 @@ type MockDeliveryContext = {
   durableEvent?: object;
 };
 type MockAttachmentCacheRetirement = (context?: MockDeliveryContext) => Promise<void> | void;
+type MockMessageStored = (
+  messageId: number,
+  source: 'socket' | 'fcm' | 'dev',
+  context?: MockDeliveryContext,
+) => Promise<void> | void;
 type MockNotificationIntent = {
   kind: string;
   chatGuid?: string;
@@ -35,18 +40,25 @@ type MockNotifyIntent = (
 ) => void | Promise<void>;
 type MockGroupBackgroundRefetch = (
   chatGuid: string,
-  context?: MockDeliveryContext,
+  accountGeneration?: number,
 ) => void | Promise<void>;
 let mockNotifyIntent: MockNotifyIntent | undefined;
 let mockGroupBackgroundRefetch: MockGroupBackgroundRefetch | undefined;
 let mockAttachmentCacheRetirement: MockAttachmentCacheRetirement | undefined;
+let mockMessageStored: MockMessageStored | undefined;
 const mockPostNotification = jest.fn<Promise<void>, [MockNotificationIntent, MockDeliveryContext?]>(
   async () => undefined,
 );
 const mockChatHasKnownSender = jest.fn<Promise<boolean>, [unknown, string]>(async () => true);
-const mockEnsureSyncedBackground = jest.fn<Promise<void>, [unknown, unknown, string]>(
-  async () => undefined,
-);
+const mockEnsureSyncedBackgroundForRealtimeEvent = jest.fn<
+  Promise<void>,
+  [unknown, string, number?]
+>(async () => undefined);
+const mockAutoDownloadForRealtimeEvent = jest.fn(async () => ({
+  savedImages: 0,
+  destination: null,
+}));
+const mockAdoptRealtimeHeadlessEffect = jest.fn();
 const mockSocketConnect = jest.fn();
 const mockSocketDisconnect = jest.fn();
 const mockSocketRetryConnection = jest.fn(() => true);
@@ -128,7 +140,11 @@ const mockQueueHealth = jest.fn(async () => ({
   poisoned: 0,
 }));
 const mockMaybeResumeSync = jest.fn();
-const mockStartSync = jest.fn<Promise<void>, []>(async () => undefined);
+const mockResumeScopedCredentialUpgrade = jest.fn(async () => ({ kind: 'idle' as const }));
+const mockRecoverRealtimePrerequisite = jest.fn<
+  Promise<'recovered' | 'unavailable' | 'stale' | 'timed-out'>,
+  [unknown, { kind: string; chatGuid?: string }, number]
+>(async () => 'recovered');
 const mockAttachmentCacheScope = { testId: 'realtime-attachment-cache-scope' };
 const mockCreateAttachmentCacheAccountScope = jest.fn<
   typeof mockAttachmentCacheScope,
@@ -141,6 +157,8 @@ const mockDrainDueRetirements = jest.fn<Promise<void>, [unknown, { scope: unknow
   async () => undefined,
 );
 let mockDispatcherOptions: { allowDevPersistWithoutDrain?: boolean } | undefined;
+let mockDrainOptions:
+  { onDependencyDeferred?: (context?: MockDeliveryContext) => void } | undefined;
 let mockSession = {
   status: 'connected',
   origin: 'https://server.example',
@@ -180,6 +198,7 @@ jest.mock('@core/realtime', () => ({
 jest.mock('@db/repositories', () => ({
   chatHasKnownSender: mockChatHasKnownSender,
   getIncomingEventQueueHealth: mockQueueHealth,
+  INCOMING_EVENT_DEPENDENCY_RETRY_MS: 5_000,
 }));
 jest.mock('@state/faceTimeStore', () => ({
   useFaceTimeStore: { getState: () => ({ ring: jest.fn(), dismissIncoming: jest.fn() }) },
@@ -228,19 +247,24 @@ jest.mock('@/services/clients', () => ({
     }),
   },
 }));
-jest.mock('@/services/backgrounds/syncedBackground', () => ({
-  ensureSyncedBackground: mockEnsureSyncedBackground,
+jest.mock('@/services/credentialUpgrade', () => ({
+  resumeScopedCredentialUpgrade: mockResumeScopedCredentialUpgrade,
+}));
+jest.mock('@/services/backgrounds/realtimeSyncedBackground', () => ({
+  ensureSyncedBackgroundForRealtimeEvent: mockEnsureSyncedBackgroundForRealtimeEvent,
+}));
+jest.mock('@/services/background/realtimePrerequisiteRecovery', () => ({
+  recoverRealtimePrerequisite: mockRecoverRealtimePrerequisite,
+}));
+jest.mock('@/services/background/realtimeHeadlessEffects', () => ({
+  adoptRealtimeHeadlessEffect: mockAdoptRealtimeHeadlessEffect,
 }));
 jest.mock('@/services/databaseControl', () => ({ ensureDatabase: mockEnsureDatabase }));
 jest.mock('@/services/syncControl', () => ({
   maybeResumeSync: mockMaybeResumeSync,
-  startSync: mockStartSync,
 }));
 jest.mock('@/services/download/autoDownloadAttachments', () => ({
-  autoDownloadMessageAttachments: jest.fn(async () => ({
-    savedImages: 0,
-    destination: null,
-  })),
+  autoDownloadMessageAttachmentsForRealtimeEvent: mockAutoDownloadForRealtimeEvent,
 }));
 jest.mock('@/services/download/attachmentCacheAccountScope', () => ({
   createAttachmentCacheAccountScope: mockCreateAttachmentCacheAccountScope,
@@ -273,10 +297,11 @@ jest.mock('@/services/realtime/dbEventSink', () => ({
   DbEventSink: class {
     constructor(
       _db: unknown,
-      _onMessageStored?: unknown,
+      onMessageStored?: MockMessageStored,
       onAttachmentCacheRetirement?: MockAttachmentCacheRetirement,
       onRecoveryNeeded?: typeof mockRecoveryRequest,
     ) {
+      mockMessageStored = onMessageStored;
       mockAttachmentCacheRetirement = onAttachmentCacheRetirement;
       mockRecoveryRequest = onRecoveryNeeded;
     }
@@ -317,7 +342,11 @@ for (const moduleName of [
 }
 
 jest.mock('@/services/realtime/incomingEventDrain', () => ({
-  IncomingEventDrain: class {},
+  IncomingEventDrain: class {
+    constructor(_db: unknown, _handler: unknown, _digest: unknown, options: unknown) {
+      mockDrainOptions = options as typeof mockDrainOptions;
+    }
+  },
 }));
 jest.mock('@/services/realtime/incomingEventDispatcher', () => ({
   DurableRealtimeDispatcher: class {
@@ -401,9 +430,11 @@ beforeEach(() => {
   mockStopSocketLifecycleObservation.mockClear();
   mockRecoveryRequest = undefined;
   mockDispatcherOptions = undefined;
+  mockDrainOptions = undefined;
   mockNotifyIntent = undefined;
   mockGroupBackgroundRefetch = undefined;
   mockAttachmentCacheRetirement = undefined;
+  mockMessageStored = undefined;
   mockFeatureHydrate.mockReset().mockResolvedValue(undefined);
   mockFeatureState = {
     hydrated: true,
@@ -413,7 +444,14 @@ beforeEach(() => {
   };
   mockPostNotification.mockReset().mockResolvedValue(undefined);
   mockChatHasKnownSender.mockReset().mockResolvedValue(true);
-  mockEnsureSyncedBackground.mockReset().mockResolvedValue(undefined);
+  mockResumeScopedCredentialUpgrade.mockReset().mockResolvedValue({ kind: 'idle' });
+  mockEnsureSyncedBackgroundForRealtimeEvent.mockReset().mockResolvedValue(undefined);
+  mockRecoverRealtimePrerequisite.mockReset().mockResolvedValue('recovered');
+  mockAutoDownloadForRealtimeEvent.mockReset().mockResolvedValue({
+    savedImages: 0,
+    destination: null,
+  });
+  mockAdoptRealtimeHeadlessEffect.mockReset().mockReturnValue({ status: 'absent' });
   mockSession = {
     status: 'connected',
     origin: 'https://server.example',
@@ -468,6 +506,13 @@ async function startAndCaptureAttachmentCacheRetirement(): Promise<MockAttachmen
   return mockAttachmentCacheRetirement;
 }
 
+async function startAndCaptureMessageStored(): Promise<MockMessageStored> {
+  await startFreshRealtime();
+  if (!mockMessageStored)
+    throw new Error('DbEventSink did not capture its message-stored callback');
+  return mockMessageStored;
+}
+
 async function startAndCaptureGroupBackgroundRefetch(): Promise<MockGroupBackgroundRefetch> {
   await startFreshRealtime();
   if (!mockGroupBackgroundRefetch) {
@@ -495,26 +540,78 @@ function deliveryContext(durable = true): {
 }
 
 describe('realtime detached side-effect ownership', () => {
+  it('adopts background-FCM auto-download into its bounded callback lifetime', async () => {
+    const onMessageStored = await startAndCaptureMessageStored();
+    const delivered = deliveryContext();
+    const context = { ...delivered.context, generation: 0 };
+    mockAdoptRealtimeHeadlessEffect.mockImplementationOnce(
+      (
+        _generation: number,
+        _key: string,
+        effect: (lifetime: MockDeliveryContext) => Promise<unknown>,
+      ) => ({
+        status: 'adopted',
+        task: effect({ generation: context.generation, isCurrent: () => true }),
+      }),
+    );
+
+    await onMessageStored(417, 'fcm', context);
+
+    expect(mockAdoptRealtimeHeadlessEffect).toHaveBeenCalledWith(
+      context.generation,
+      'auto-download:417',
+      expect.any(Function),
+    );
+    expect(mockAutoDownloadForRealtimeEvent).toHaveBeenCalledWith(
+      expect.any(Object),
+      417,
+      expect.any(Number),
+      expect.objectContaining({
+        isEffectCurrent: expect.any(Function),
+        allowExternalMediaSave: false,
+      }),
+    );
+  });
+
+  it('does not escape an expired background callback into a fresh detached download', async () => {
+    const onMessageStored = await startAndCaptureMessageStored();
+    const delivered = deliveryContext();
+    const context = { ...delivered.context, generation: 0 };
+    mockAdoptRealtimeHeadlessEffect.mockReturnValueOnce({ status: 'rejected' });
+
+    await onMessageStored(418, 'fcm', context);
+
+    expect(mockAdoptRealtimeHeadlessEffect).toHaveBeenCalledWith(
+      context.generation,
+      'auto-download:418',
+      expect.any(Function),
+    );
+    expect(mockAutoDownloadForRealtimeEvent).not.toHaveBeenCalled();
+  });
+
   it('starts wallpaper refresh with a fresh account lease, not the retiring attempt context', async () => {
     const started = deferred<void>();
     const finish = deferred<void>();
-    mockEnsureSyncedBackground.mockImplementationOnce(async () => {
+    mockEnsureSyncedBackgroundForRealtimeEvent.mockImplementationOnce(async () => {
       started.resolve(undefined);
       await finish.promise;
     });
     const refetchBackground = await startAndCaptureGroupBackgroundRefetch();
     const { context, retire } = deliveryContext();
 
-    const run = Promise.resolve(refetchBackground('chat-background-lease', context));
+    const run = Promise.resolve(refetchBackground('chat-background-lease', context.generation));
     await started.promise;
     retire();
     finish.resolve(undefined);
     await expect(run).resolves.toBeUndefined();
 
     expect(context.isCurrent()).toBe(false);
-    expect(mockEnsureSyncedBackground).toHaveBeenCalledTimes(1);
-    expect(mockEnsureSyncedBackground.mock.calls[0]).toHaveLength(3);
-    expect(mockEnsureSyncedBackground.mock.calls[0]?.[2]).toBe('chat-background-lease');
+    expect(mockEnsureSyncedBackgroundForRealtimeEvent).toHaveBeenCalledTimes(1);
+    expect(mockEnsureSyncedBackgroundForRealtimeEvent.mock.calls[0]).toHaveLength(3);
+    expect(mockEnsureSyncedBackgroundForRealtimeEvent.mock.calls[0]?.[1]).toBe(
+      'chat-background-lease',
+    );
+    expect(mockEnsureSyncedBackgroundForRealtimeEvent.mock.calls[0]?.[2]).toBe(73);
   });
 });
 
@@ -715,7 +812,7 @@ describe('startRealtime optional setup containment', () => {
     expect(mockDrainDueRetirements).not.toHaveBeenCalled();
   });
 
-  it('forces explicit account recovery without changing reconnect throttling', async () => {
+  it('uses task-local account recovery without changing reconnect throttling', async () => {
     jest.resetModules();
     const { resumeRealtime, startRealtime } = await import('@/services/realtimeControl');
     await startRealtime();
@@ -726,11 +823,131 @@ describe('startRealtime optional setup containment', () => {
     await mockRecoveryRequest(null, context);
     await settle();
 
-    expect(mockStartSync).toHaveBeenCalledTimes(1);
+    expect(mockRecoverRealtimePrerequisite).toHaveBeenCalledWith(
+      expect.anything(),
+      { kind: 'sync-account' },
+      0,
+      expect.objectContaining({
+        isAllowed: expect.any(Function),
+        subscribeInvalidation: expect.any(Function),
+      }),
+    );
     expect(mockMaybeResumeSync).not.toHaveBeenCalled();
 
     await resumeRealtime();
     expect(mockMaybeResumeSync).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['delay-first', 'recovery-first'] as const)(
+    'keeps FCM alive until both recovery and its due delay complete (%s)',
+    async (order) => {
+      jest.useFakeTimers();
+      try {
+        const recovery = deferred<'recovered'>();
+        mockRecoverRealtimePrerequisite.mockReturnValueOnce(recovery.promise);
+        mockDurableHandle.mockImplementationOnce(async (...args: unknown[]) => {
+          if (!mockRecoveryRequest)
+            throw new Error('DB sink did not register its recovery callback');
+          await mockRecoveryRequest('cHeadlessRecovery', args[3] as MockDeliveryContext);
+          mockDrainOptions?.onDependencyDeferred?.(args[3] as MockDeliveryContext);
+        });
+        jest.resetModules();
+        const { dispatchRealtimeEvent } = await import('@/services/realtimeControl');
+
+        let settled = false;
+        const dispatch = dispatchRealtimeEvent(
+          'new-message',
+          { guid: 'headless-recovery' },
+          'fcm',
+        ).then(() => {
+          settled = true;
+        });
+        await settle();
+
+        expect(mockRecoverRealtimePrerequisite).toHaveBeenCalledWith(
+          expect.anything(),
+          { kind: 'sync-chat', chatGuid: 'cHeadlessRecovery' },
+          0,
+          expect.objectContaining({
+            isAllowed: expect.any(Function),
+            subscribeInvalidation: expect.any(Function),
+          }),
+        );
+        expect(settled).toBe(false);
+        expect(mockDurableResume).not.toHaveBeenCalled();
+
+        if (order === 'delay-first') {
+          jest.advanceTimersByTime(5_000);
+          await settle();
+          expect(mockDurableResume).not.toHaveBeenCalled();
+          recovery.resolve('recovered');
+        } else {
+          recovery.resolve('recovered');
+          await settle();
+          jest.advanceTimersByTime(4_999);
+          await settle();
+          expect(mockDurableResume).not.toHaveBeenCalled();
+          jest.advanceTimersByTime(1);
+        }
+        await expect(dispatch).resolves.toBeUndefined();
+        expect(mockDurableResume).toHaveBeenCalledWith(
+          expect.objectContaining({ generation: 0, isCurrent: expect.any(Function) }),
+        );
+      } finally {
+        jest.useRealTimers();
+      }
+    },
+  );
+
+  it('cancels an FCM dependency delay when the account generation retires', async () => {
+    jest.useFakeTimers();
+    try {
+      mockDurableHandle.mockImplementationOnce(async (...args: unknown[]) => {
+        if (!mockRecoveryRequest) throw new Error('DB sink did not register its recovery callback');
+        await mockRecoveryRequest('cRetiredRecovery', args[3] as MockDeliveryContext);
+        mockDrainOptions?.onDependencyDeferred?.(args[3] as MockDeliveryContext);
+      });
+      jest.resetModules();
+      const { dispatchRealtimeEvent } = await import('@/services/realtimeControl');
+      const { pauseRealtimeDeliveries, resumeRealtimeDeliveries } =
+        await import('@/services/realtime/deliveryCoordinator');
+      const dispatch = dispatchRealtimeEvent('new-message', { guid: 'retired-recovery' }, 'fcm');
+      await settle();
+
+      const retirement = pauseRealtimeDeliveries();
+      await expect(dispatch).resolves.toBeUndefined();
+      await expect(retirement).resolves.toBeUndefined();
+      expect(mockDurableResume).not.toHaveBeenCalled();
+      resumeRealtimeDeliveries();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('retries a wait-only FCM dependency without starting network recovery', async () => {
+    jest.useFakeTimers();
+    try {
+      mockDurableHandle.mockImplementationOnce(async (...args: unknown[]) => {
+        mockDrainOptions?.onDependencyDeferred?.(args[3] as MockDeliveryContext);
+      });
+      jest.resetModules();
+      const { dispatchRealtimeEvent } = await import('@/services/realtimeControl');
+      const dispatch = dispatchRealtimeEvent(
+        'message-send-error',
+        { guid: 'wait-only-dependency' },
+        'fcm',
+      );
+      await settle();
+
+      expect(mockRecoverRealtimePrerequisite).not.toHaveBeenCalled();
+      expect(mockDurableResume).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(5_000);
+
+      await expect(dispatch).resolves.toBeUndefined();
+      expect(mockDurableResume).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('does not connect a stale startup after realtime pauses while the database opens', async () => {
@@ -740,12 +957,101 @@ describe('startRealtime optional setup containment', () => {
     const { pauseRealtime, startRealtime } = await import('@/services/realtimeControl');
 
     const startup = startRealtime();
+    await settle();
     expect(mockEnsureDatabase).toHaveBeenCalledTimes(1);
     pauseRealtime();
     databaseOpen.resolve({});
 
     await expect(startup).resolves.toBeUndefined();
     expect(mockSocketConnect).not.toHaveBeenCalled();
+  });
+
+  it('does not open the database after a foreground pause wins during credential recovery', async () => {
+    const credentialRecovery = deferred<{ kind: 'idle' }>();
+    mockResumeScopedCredentialUpgrade.mockReturnValueOnce(credentialRecovery.promise);
+    jest.resetModules();
+    const { pauseRealtime, startRealtime } = await import('@/services/realtimeControl');
+
+    const startup = startRealtime();
+    await settle();
+    expect(mockResumeScopedCredentialUpgrade).toHaveBeenCalledWith({ restartRealtime: false });
+    expect(mockEnsureDatabase).not.toHaveBeenCalled();
+
+    pauseRealtime();
+    credentialRecovery.resolve({ kind: 'idle' });
+
+    await expect(startup).resolves.toBeUndefined();
+    expect(mockEnsureDatabase).not.toHaveBeenCalled();
+    expect(mockSocketConnect).not.toHaveBeenCalled();
+  });
+
+  it('does not let an older startup continue under a later foreground resume intent', async () => {
+    const sharedCredentialRecovery = deferred<{ kind: 'idle' }>();
+    mockResumeScopedCredentialUpgrade.mockReturnValue(sharedCredentialRecovery.promise);
+    jest.resetModules();
+    const realtime = await import('@/services/realtimeControl');
+
+    const firstStartup = realtime.startRealtime();
+    await settle();
+    expect(mockResumeScopedCredentialUpgrade).toHaveBeenCalledTimes(1);
+    expect(mockEnsureDatabase).not.toHaveBeenCalled();
+
+    realtime.pauseRealtime();
+    const currentResume = realtime.resumeRealtime();
+    await settle();
+    expect(mockResumeScopedCredentialUpgrade).toHaveBeenCalledTimes(2);
+    expect(mockEnsureDatabase).not.toHaveBeenCalled();
+    expect(mockSocketConnect).not.toHaveBeenCalled();
+
+    sharedCredentialRecovery.resolve({ kind: 'idle' });
+    await expect(Promise.all([firstStartup, currentResume])).resolves.toEqual([
+      undefined,
+      undefined,
+    ]);
+
+    expect(mockResumeScopedCredentialUpgrade).toHaveBeenCalledTimes(2);
+    expect(mockEnsureDatabase).toHaveBeenCalledTimes(2);
+    expect(mockSocketConnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('reopens a foreground startup after credential recovery pauses only its old transport', async () => {
+    jest.resetModules();
+    const realtime = await import('@/services/realtimeControl');
+    mockResumeScopedCredentialUpgrade.mockImplementationOnce(async () => {
+      realtime.pauseRealtimeForCredentialUpgrade();
+      return { kind: 'idle' };
+    });
+
+    await expect(realtime.startRealtime()).resolves.toBeUndefined();
+
+    expect(mockEnsureDatabase).toHaveBeenCalledTimes(1);
+    expect(mockSocketConnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let credential recovery claim a new foreground intent after a real pause', async () => {
+    jest.resetModules();
+    const realtime = await import('@/services/realtimeControl');
+
+    realtime.pauseRealtime();
+    await expect(realtime.resumeRealtimeAfterCredentialUpgrade()).resolves.toBeUndefined();
+
+    expect(mockResumeScopedCredentialUpgrade).not.toHaveBeenCalled();
+    expect(mockEnsureDatabase).not.toHaveBeenCalled();
+    expect(mockSocketConnect).not.toHaveBeenCalled();
+  });
+
+  it('restarts a credential-paused foreground transport without recursively recovering credentials', async () => {
+    jest.resetModules();
+    const realtime = await import('@/services/realtimeControl');
+    await realtime.startRealtime();
+    realtime.pauseRealtimeForCredentialUpgrade();
+    jest.clearAllMocks();
+
+    await expect(realtime.resumeRealtimeAfterCredentialUpgrade()).resolves.toBeUndefined();
+
+    expect(mockResumeScopedCredentialUpgrade).not.toHaveBeenCalled();
+    expect(mockEnsureDatabase).toHaveBeenCalledTimes(2);
+    expect(mockSocketConnect).toHaveBeenCalledTimes(1);
   });
 
   it('retires the certified socket open when a transport observer pauses startup re-entrantly', async () => {

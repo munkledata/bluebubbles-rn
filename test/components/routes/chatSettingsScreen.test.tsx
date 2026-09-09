@@ -58,6 +58,7 @@ function makeLease(generation: number, current = true): MockLease {
 let mockAccountLease = makeLease(73);
 let mockGuid = 'iMessage;-;chat-settings-private-guid';
 let mockMuteType: 'mute' | null = null;
+let mockCustomColor: string | null = null;
 let mockPendingReactiveGuid: string | null = null;
 const mockInvalidationListeners = new Map<number, Set<() => void>>();
 let reduceMotionListener: ((enabled: boolean) => void) | undefined;
@@ -172,23 +173,7 @@ function retainConfiguredPress(node: { props: Record<string, unknown> }): () => 
 }
 
 function defaultColorSwatch(): NonNullable<ReturnType<typeof screen.getByText>['parent']> {
-  const marker = screen.getAllByText('✕').find((node) => {
-    const style = node.parent?.props.style;
-    return (
-      Array.isArray(style) &&
-      style.some(
-        (value) =>
-          value !== null &&
-          typeof value === 'object' &&
-          'width' in value &&
-          value.width === 36 &&
-          'height' in value &&
-          value.height === 36,
-      )
-    );
-  });
-  if (!marker?.parent) throw new Error('Expected the default bubble-color swatch');
-  return marker.parent;
+  return screen.getByRole('radio', { name: 'Default bubble color' });
 }
 
 function privateCanaries(): string[] {
@@ -335,7 +320,7 @@ jest.mock('@features/conversations/useChatHeader', () => ({
         chatIdentifier: 'private-chat-identifier',
         displayName: source.serverTitle,
         customName: source.customTitle,
-        customColor: null,
+        customColor: mockCustomColor,
         muteType: mockMuteType,
         style: 43,
         participantCount: 2,
@@ -594,6 +579,7 @@ beforeEach(() => {
   });
   mockGuid = CHAT_GUID;
   mockMuteType = null;
+  mockCustomColor = null;
   mockPendingReactiveGuid = null;
   mockAccountLease = makeLease(73);
   mockInvalidationListeners.clear();
@@ -798,7 +784,7 @@ describe('ChatSettingsScreen source and account ownership', () => {
     expect(JSON.stringify(view.toJSON())).toContain(source.mediaUri);
     expect(JSON.stringify(view.toJSON())).toContain(source.blurhash);
 
-    await fireEvent.press(screen.getByRole('image'));
+    await fireEvent.press(screen.getByRole('imagebutton', { name: 'Shared photo 1 of 1' }));
     expect(mockPush).toHaveBeenCalledWith(`/media/${encodeURIComponent(source.mediaGuid)}`);
     await fireEvent.press(screen.getByRole('button', { name: 'Shared documents, 1' }));
     expect(mockPush).toHaveBeenCalledWith(`/documents/${encodeURIComponent(guid)}`);
@@ -847,7 +833,9 @@ describe('ChatSettingsScreen source and account ownership', () => {
 
   it('key-remounts pending B without retained A data and revokes A callbacks across A to B to A', async () => {
     const view = await renderWithTheme(<ChatSettingsScreen />);
-    const oldMedia = retainConfiguredPress(screen.getByRole('image'));
+    const oldMedia = retainConfiguredPress(
+      screen.getByRole('imagebutton', { name: 'Shared photo 1 of 1' }),
+    );
     const oldDocuments = retainConfiguredPress(
       screen.getByRole('button', { name: 'Shared documents, 1' }),
     );
@@ -924,7 +912,7 @@ describe('ChatSettingsScreen source and account ownership', () => {
     expect(mockPush).not.toHaveBeenCalled();
     expect(mockSafeOpenUrl).not.toHaveBeenCalled();
 
-    await fireEvent.press(screen.getByRole('image'));
+    await fireEvent.press(screen.getByRole('imagebutton', { name: 'Shared photo 1 of 1' }));
     await fireEvent.press(screen.getByRole('button', { name: 'Shared documents, 1' }));
     await fireEvent.press(screen.getByText(PRIVATE_LINK));
     expect(mockPush).toHaveBeenCalledWith(`/media/${encodeURIComponent(MEDIA_GUID)}`);
@@ -941,7 +929,7 @@ describe('ChatSettingsScreen source and account ownership', () => {
     expectPrivateCanariesAbsent(stale.toJSON());
     expect(mockUseChatHeader).not.toHaveBeenCalled();
     expect(mockReactiveHookCall).not.toHaveBeenCalled();
-    expect(screen.queryByRole('image')).toBeNull();
+    expect(screen.queryByRole('imagebutton', { name: 'Shared photo 1 of 1' })).toBeNull();
     await fireEvent.press(screen.getByRole('button', { name: 'Back' }));
     expect(mockBack).toHaveBeenCalledTimes(1);
 
@@ -950,14 +938,16 @@ describe('ChatSettingsScreen source and account ownership', () => {
     mockAccountLease = makeLease(74);
     await renderWithTheme(<ChatSettingsScreen />);
     expect(screen.getByDisplayValue(PRIVATE_CUSTOM_TITLE_B)).toBeTruthy();
-    await fireEvent.press(screen.getByRole('image'));
+    await fireEvent.press(screen.getByRole('imagebutton', { name: 'Shared photo 1 of 1' }));
     expect(mockPush).toHaveBeenCalledWith(`/media/${encodeURIComponent(MEDIA_GUID_B)}`);
   });
 
   it('automatically retires a mounted account and leaves retained controls inert', async () => {
     const oldLease = mockAccountLease;
     const view = await renderWithTheme(<ChatSettingsScreen />);
-    const oldMedia = retainConfiguredPress(screen.getByRole('image'));
+    const oldMedia = retainConfiguredPress(
+      screen.getByRole('imagebutton', { name: 'Shared photo 1 of 1' }),
+    );
     const oldLink = retainConfiguredPress(screen.getByText(PRIVATE_LINK).parent!);
     await fireEvent.press(screen.getByText('Chat Theme…'));
     const oldApplyTheme = retainConfiguredPress(
@@ -1850,11 +1840,45 @@ describe('ChatSettingsScreen source and account ownership', () => {
     }
   });
 
-  it('guards an exact active Color write in one committed A transaction', async () => {
-    await renderWithTheme(<ChatSettingsScreen />);
+  it('names bubble-color radios, exposes selection, and preserves exact color writes', async () => {
+    const view = await renderWithTheme(<ChatSettingsScreen />);
 
+    const expectedNames = [
+      'Default bubble color',
+      'Blue bubble color',
+      'Green bubble color',
+      'Purple bubble color',
+      'Pink bubble color',
+      'Orange bubble color',
+      'Slate blue bubble color',
+    ];
+    expect(screen.getAllByRole('radio')).toHaveLength(expectedNames.length);
+    for (const accessibleName of expectedNames) {
+      expect(screen.getByRole('radio', { name: accessibleName })).toBeTruthy();
+    }
+    expect(defaultColorSwatch().props.accessibilityState).toMatchObject({ selected: true });
+    expect(defaultColorSwatch().props.hitSlop).toBe(6);
+
+    mockCustomColor = '#AF52DE';
+    await view.rerender(<ChatSettingsScreen />);
+    expect(defaultColorSwatch().props.accessibilityState).toMatchObject({ selected: false });
+    expect(
+      screen.getByRole('radio', { name: 'Purple bubble color' }).props.accessibilityState,
+    ).toMatchObject({ selected: true });
+
+    await fireEvent.press(screen.getByRole('radio', { name: 'Blue bubble color' }));
+    await waitFor(() =>
+      expect(mockSetChatCustomizationWithinTransaction).toHaveBeenCalledWith(
+        expect.any(Object),
+        CHAT_GUID,
+        { customColor: '#1982FC' },
+      ),
+    );
+    await waitFor(() => expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE', 'COMMIT']));
+
+    mockSetChatCustomizationWithinTransaction.mockClear();
+    mockDatabase.run.mockClear();
     await fireEvent.press(defaultColorSwatch());
-
     await waitFor(() =>
       expect(mockSetChatCustomizationWithinTransaction).toHaveBeenCalledWith(
         expect.any(Object),

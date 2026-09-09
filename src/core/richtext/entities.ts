@@ -75,7 +75,7 @@ export interface MessageDateEntity extends MessageEntityBase {
   year: number;
   month: number;
   day: number;
-  /** UTC all-day bounds for Android's calendar draft intent. */
+  /** Canonical UTC bounds used to validate this parsed calendar date at the action boundary. */
   startUtcMs: number;
   endUtcMs: number;
 }

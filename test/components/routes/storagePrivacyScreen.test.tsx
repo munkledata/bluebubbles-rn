@@ -59,6 +59,10 @@ describe('StoragePrivacyScreen', () => {
     expect(screen.getByText(/image or other Android\/Expo-managed caches/)).toBeTruthy();
     expect(screen.getByText(/automatically exported to Photos or the Gator album/)).toBeTruthy();
     expect(screen.getByText(/shared media storage/)).toBeTruthy();
+    expect(
+      screen.getByText(/closed or in the background.*downloaded only to Gator’s private cache/),
+    ).toBeTruthy();
+    expect(screen.getByText(/does not create or later retry.*Photos or Gator album/)).toBeTruthy();
     expect(screen.getByText(/app logs before another account can connect/)).toBeTruthy();
     expect(
       screen.getByText(/limits its ordinary downloaded-attachment cache to 2 GiB/),

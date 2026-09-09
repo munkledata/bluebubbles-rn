@@ -168,7 +168,8 @@ export default function SettingsScreen(): React.JSX.Element {
   const SECTIONS = {
     theme: 'theme appearance oled dark gator custom presets colors',
     contacts: 'contacts sync names photos address book',
-    general: 'general app lock biometric reminders backup find my location',
+    general:
+      'general app lock biometric secure screen screenshot recording capture reminders backup find my location',
     messaging: 'messaging private api typing indicators read receipts subject lines',
     conversation: 'conversation message view send with return enter delivery timestamps',
     chatlist:
@@ -183,7 +184,7 @@ export default function SettingsScreen(): React.JSX.Element {
     server:
       'server connection live updates connecting reconnecting offline retry management restart logs statistics health diagnostics private api find my keys push uptime alerts account alias apple id imessage start chats using',
     about:
-      'about app version build server version macos private api disconnect forget app logs debug diagnostics',
+      'about app version build server version macos private api disconnect forget app logs debug diagnostics privacy data storage legal license notices third-party internal testing',
   } as const;
   const match = (terms: string): boolean => q.length === 0 || terms.includes(q);
   const anyMatch = Object.values(SECTIONS).some(match);
@@ -669,7 +670,7 @@ export default function SettingsScreen(): React.JSX.Element {
                   dimmed={!autoDownload}
                 />
               ))}
-              <NoteRow text="A copy is saved outside the app. Photos permission is requested the first time. Images always appear in chats regardless." />
+              <NoteRow text="Images always appear in chats. When selected, Photos and Gator Album copies are best effort while Gator is open. An image delivered while Gator is closed or in the background may remain only in Gator’s private cache; its outside copy is not automatically retried. Photos permission is requested when an outside copy is first attempted." />
             </SettingsSection>
           </>
         )}
@@ -735,6 +736,16 @@ export default function SettingsScreen(): React.JSX.Element {
             <InfoRow
               label="Private API"
               value={visibleServerInfo?.private_api ? 'Enabled' : 'Disabled'}
+            />
+            <NavRow
+              label="Privacy & Data Use…"
+              onPress={() => router.push('/storage-privacy')}
+              accessibilityLabel="View privacy and data use"
+            />
+            <NavRow
+              label="Legal & Third-Party Notices…"
+              onPress={() => router.push('/legal-notices')}
+              accessibilityLabel="View legal and third-party notices"
             />
             <NavRow
               label="App Logs…"

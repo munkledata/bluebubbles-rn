@@ -128,6 +128,34 @@ describe('IncomingFaceTimeOverlay — ring content', () => {
     expect(screen.queryByText('FaceTime Audio…')).toBeNull();
   });
 
+  it('lets caller and action text grow without fixed-height controls', async () => {
+    useFaceTimeStore.setState({ incoming: INCOMING });
+    await renderWithTheme(<IncomingFaceTimeOverlay />);
+
+    const caller = screen.getByText(PRIVATE_CALLER);
+    expect(caller.props.numberOfLines).toBe(3);
+    expect(StyleSheet.flatten(caller.props.style)).toMatchObject({
+      flexShrink: 1,
+      textAlign: 'center',
+    });
+
+    const decline = screen.getByRole('button', { name: 'Decline FaceTime call' });
+    const buttonStyle = StyleSheet.flatten(decline.props.style);
+    expect(buttonStyle).toMatchObject({
+      minWidth: 76,
+      minHeight: 76,
+      maxWidth: '42%',
+      paddingHorizontal: 12,
+      paddingVertical: 12,
+    });
+    expect(buttonStyle.width).toBeUndefined();
+    expect(buttonStyle.height).toBeUndefined();
+    expect(StyleSheet.flatten(screen.getByText('Decline').props.style)).toMatchObject({
+      flexShrink: 1,
+      textAlign: 'center',
+    });
+  });
+
   it('shows the audio subtitle for an audio-only call', async () => {
     useFaceTimeStore.setState({ incoming: { ...INCOMING, isAudio: true } });
     await renderWithTheme(<IncomingFaceTimeOverlay />);

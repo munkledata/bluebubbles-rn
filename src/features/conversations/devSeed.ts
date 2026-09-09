@@ -497,6 +497,7 @@ export async function devSendFake(
   text: string,
   effectId: string | undefined,
   accountLease: RealtimeDeliveryLease,
+  onQueued?: () => Promise<void> | void,
 ): Promise<void> {
   await runDevAccountWrite(accountLease, async () => {
     const db = getDatabase();
@@ -510,6 +511,7 @@ export async function devSendFake(
       delivered: true,
       accountLease,
     });
+    if (accountLease.isCurrent()) await onQueued?.();
   });
 }
 
@@ -562,12 +564,12 @@ export async function devEditFake(
 /** DEV: locally retract a message (no server) so the bubble becomes the tombstone. */
 export async function devUnsendFake(
   messageGuid: string,
-  _partIndex: number | undefined,
+  partIndex: number | undefined,
   accountLease: RealtimeDeliveryLease,
 ): Promise<void> {
   await runDevAccountWrite(accountLease, async () => {
     if (!accountLease.isCurrent()) return;
-    await applyLocalUnsend(getDatabase(), messageGuid, Date.now());
+    await applyLocalUnsend(getDatabase(), messageGuid, Date.now(), partIndex ?? 0);
   });
 }
 
@@ -579,6 +581,7 @@ export async function devSendFakeReply(
   partIndex: number | undefined,
   effectId: string | undefined,
   accountLease: RealtimeDeliveryLease,
+  onQueued?: () => Promise<void> | void,
 ): Promise<void> {
   await runDevAccountWrite(accountLease, async () => {
     const db = getDatabase();
@@ -602,6 +605,7 @@ export async function devSendFakeReply(
       delivered: true,
       accountLease,
     });
+    if (accountLease.isCurrent()) await onQueued?.();
   });
 }
 

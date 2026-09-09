@@ -66,12 +66,22 @@ afterEach(async () => {
 
 function upload(
   http: HttpClient,
-  options: { timeoutMs?: number } = {},
+  options: {
+    timeoutMs?: number;
+    clientAttemptGeneration?: number;
+    text?: string;
+    selectedMessageGuid?: string;
+    partIndex?: number;
+  } = {},
 ): ReturnType<typeof expoAttachmentUploader> {
   return expoAttachmentUploader({
     http,
     chatGuid: 'chat-1',
     tempGuid: 'temp-1',
+    clientAttemptGeneration: options.clientAttemptGeneration,
+    text: options.text,
+    selectedMessageGuid: options.selectedMessageGuid,
+    partIndex: options.partIndex,
     attachmentGuid: 'att-1',
     name: 'photo.jpg',
     uri: 'file:///photo.jpg',
@@ -86,6 +96,24 @@ async function flushMicrotasks(count = 8): Promise<void> {
 }
 
 describe('native attachment upload account scope', () => {
+  it.each([301, 302, 303, 307, 308])(
+    'rejects redirect status %i instead of accepting a native follow-up result',
+    async (status) => {
+      mockUploadAsync.mockResolvedValueOnce({ status, body: '' });
+      const http = new HttpClient({
+        getOrigin: () => 'https://old.example',
+        getPassword: () => 'old-password',
+      });
+
+      const run = upload(http);
+      finishFileCheck({ exists: true });
+
+      await expect(run).rejects.toMatchObject({ kind: 'server_error', status });
+      expect(mockCreateUploadTask).toHaveBeenCalledTimes(1);
+      expect(mockRemoveSubscription).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('projects a bounded server rejection detail without logging the raw body', async () => {
     const privateDetail = 'Recipient person@example.com could not be reached.';
     mockUploadAsync.mockResolvedValueOnce({
@@ -148,7 +176,12 @@ describe('native attachment upload account scope', () => {
       getPassword: () => password,
     });
 
-    const run = upload(http);
+    const run = upload(http, {
+      clientAttemptGeneration: 7,
+      text: 'caption',
+      selectedMessageGuid: 'reply-target',
+      partIndex: 2,
+    });
     expect(mockGetInfoAsync).toHaveBeenCalledWith('file:///photo.jpg');
     expect(uploadRegistry.size).toBe(1);
 
@@ -162,6 +195,31 @@ describe('native attachment upload account scope', () => {
     expect(url).toBe('https://old.example/api/v1/message/attachment/upload');
     expect(options.headers.Authorization).toBe('Bearer old-password');
     expect(options.headers.Authorization).not.toContain('new-password');
+    expect(options.parameters.clientAttemptGeneration).toBe('7');
+    expect(options.parameters.text).toBe('caption');
+    expect(options.parameters.selectedMessageGuid).toBe('reply-target');
+    expect(options.parameters.partIndex).toBe('2');
+    expect(uploadRegistry.size).toBe(0);
+  });
+
+  it('does not start a pinned native task after the transport rotates during file preflight', async () => {
+    let origin = 'https://old.example';
+    let transportRevision = 1;
+    const http = new HttpClient({
+      getOrigin: () => origin,
+      getPassword: () => 'password',
+      getTransportRevision: () => transportRevision,
+    });
+
+    const run = upload(http.pinTransport());
+    expect(mockGetInfoAsync).toHaveBeenCalledWith('file:///photo.jpg');
+
+    origin = 'https://new.example';
+    transportRevision += 1;
+    finishFileCheck({ exists: true });
+
+    await expect(run).rejects.toMatchObject({ kind: 'cancelled' });
+    expect(mockCreateUploadTask).not.toHaveBeenCalled();
     expect(uploadRegistry.size).toBe(0);
   });
 

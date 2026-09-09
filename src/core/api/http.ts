@@ -23,12 +23,24 @@ const MAX_TIMER_MS = 2_147_483_647;
 const RESPONSE_DECODE_BLOCK_BYTES = 64 * 1024;
 const MAX_RESPONSE_STREAM_CHUNKS = 16_384;
 const MAX_CONSECUTIVE_EMPTY_CHUNKS = 16;
+const REPAIR_SNAPSHOT_HEADER = 'x-gator-repair-snapshot';
+const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+interface RequiredResponseHeader {
+  readonly name: string;
+  readonly value: string;
+}
 
 export interface HttpClientConfig {
   /** Current server origin, e.g. "https://abc.ngrok.io". May change on failover. */
   getOrigin: () => string;
   /** Server password (the legacy "guid"). Header by default; URL only in explicit legacy mode. */
   getPassword: () => string | undefined;
+  /**
+   * Optional monotonic identity for transports whose origin/password can rotate back to an older
+   * value. Fixed/candidate clients may omit it; the session-bound app client supplies it.
+   */
+  getTransportRevision?: () => number;
   /** Optional user-defined headers (ported from settings.customHeaders). */
   getCustomHeaders?: () => Record<string, string>;
   /**
@@ -92,12 +104,14 @@ export interface HttpTransportSnapshot extends HttpUrlBuilder {
   readonly headers: Readonly<Record<string, string>>;
   readonly authMode: HttpAuthMode;
   readonly password: string | undefined;
+  readonly transportRevision: number | undefined;
 }
 
 interface RequestSnapshot {
   readonly url: string;
   readonly headers: Readonly<Record<string, string>>;
   readonly search: URLSearchParams;
+  readonly transportRevision: number | undefined;
 }
 
 function sameStringRecord(
@@ -127,8 +141,19 @@ function sameSearchParams(left: URLSearchParams, right: URLSearchParams): boolea
 function sameRequestSnapshot(left: RequestSnapshot, right: RequestSnapshot): boolean {
   return (
     left.url === right.url &&
+    left.transportRevision === right.transportRevision &&
     sameStringRecord(left.headers, right.headers) &&
     sameSearchParams(left.search, right.search)
+  );
+}
+
+function sameTransportIdentity(left: HttpTransportSnapshot, right: HttpTransportSnapshot): boolean {
+  return (
+    left.origin === right.origin &&
+    left.authMode === right.authMode &&
+    left.password === right.password &&
+    left.transportRevision === right.transportRevision &&
+    sameStringRecord(left.headers, right.headers)
   );
 }
 
@@ -353,8 +378,16 @@ async function readBoundedResponseText(
 export class HttpClient {
   private readonly responseByteLimit: number;
   private readonly timeoutMs: number;
+  private readonly transportStillCurrent?: () => boolean;
+  private readonly requiredResponseHeader?: RequiredResponseHeader;
 
-  constructor(private readonly cfg: HttpClientConfig) {
+  constructor(
+    private readonly cfg: HttpClientConfig,
+    transportStillCurrent?: () => boolean,
+    requiredResponseHeader?: RequiredResponseHeader,
+  ) {
+    this.transportStillCurrent = transportStillCurrent;
+    this.requiredResponseHeader = requiredResponseHeader;
     const responseByteLimit = cfg.responseByteLimit ?? DEFAULT_MAX_JSON_RESPONSE_BYTES;
     if (
       !Number.isSafeInteger(responseByteLimit) ||
@@ -468,6 +501,37 @@ export class HttpClient {
   }
 
   /**
+   * Freeze one origin/auth/custom-header identity for a multi-request operation.
+   *
+   * Each request also checks the source client, so a tunnel, account, or credential rotation
+   * cancels the operation instead of silently moving later pages to another server identity.
+   */
+  pinTransport(): HttpClient {
+    return this.createPinnedClient();
+  }
+
+  /** True for a live client, or while a pinned client's exact source transport remains current. */
+  isTransportCurrent(): boolean {
+    return this.transportStillCurrent?.() ?? true;
+  }
+
+  /** Fail before a transport-scoped native effect starts if its pinned source has been replaced. */
+  assertTransportCurrent(): void {
+    if (!this.isTransportCurrent()) {
+      throw new ApiError('cancelled', 'Request configuration changed during pinned operation');
+    }
+  }
+
+  /** Add the server-issued repair token to every request on an already-pinned crawl client. */
+  bindRepairSnapshot(token: string): HttpClient {
+    if (!UUID_V4.test(token)) throw new RangeError('repair snapshot token must be a UUID');
+    return this.createPinnedClient(
+      { [REPAIR_SNAPSHOT_HEADER]: token },
+      { name: REPAIR_SNAPSHOT_HEADER, value: token },
+    );
+  }
+
+  /**
    * Capture a coherent origin/auth/header view for a native transport.
    *
    * `buildUrl` is bound to the captured origin. In explicit legacy mode it also appends the
@@ -479,6 +543,7 @@ export class HttpClient {
     // snapshot; Object.freeze then prevents either our code or a native adapter from changing it.
     const origin = this.cfg.getOrigin();
     const password = this.cfg.getPassword();
+    const transportRevision = this.cfg.getTransportRevision?.();
     const useHeaderAuth = this.useHeaderAuth();
     const onLegacyAuth = this.cfg.onLegacyAuth;
     const headers = Object.freeze(this.buildHeadersFor(password, useHeaderAuth));
@@ -494,8 +559,47 @@ export class HttpClient {
       headers,
       authMode: useHeaderAuth ? 'header' : 'legacy-query',
       password,
+      transportRevision,
       buildUrl,
     });
+  }
+
+  private createPinnedClient(
+    additionalHeaders: Readonly<Record<string, string>> = {},
+    requiredResponseHeader = this.requiredResponseHeader,
+  ): HttpClient {
+    const transport = this.snapshotTransport();
+    const transportRevision = transport.transportRevision;
+    const parentGuard = this.transportStillCurrent;
+    const fixedHeaders: Record<string, string> = { ...transport.headers };
+    for (const [name, value] of Object.entries(additionalHeaders)) {
+      for (const existing of Object.keys(fixedHeaders)) {
+        if (existing.toLowerCase() === name.toLowerCase()) delete fixedHeaders[existing];
+      }
+      fixedHeaders[name] = value;
+    }
+    Object.freeze(fixedHeaders);
+    const transportStillCurrent = (): boolean => {
+      if (parentGuard && !parentGuard()) return false;
+      return sameTransportIdentity(transport, this.snapshotTransport());
+    };
+    return new HttpClient(
+      {
+        getOrigin: () => transport.origin,
+        getPassword: () => transport.password,
+        ...(transportRevision === undefined
+          ? {}
+          : { getTransportRevision: () => transportRevision }),
+        getCustomHeaders: () => fixedHeaders,
+        useHeaderAuth: () => transport.authMode === 'header',
+        timeoutMs: this.timeoutMs,
+        fetch: this.cfg.fetch,
+        responseByteLimit: this.responseByteLimit,
+        onLegacyAuth: this.cfg.onLegacyAuth,
+      },
+      transportStillCurrent,
+      requiredResponseHeader,
+    );
   }
 
   /**
@@ -514,6 +618,7 @@ export class HttpClient {
       url: this.buildUrlForOrigin(transport.origin, path),
       headers: transport.headers,
       search: this.buildSearch(query, transport.password, useHeaderAuth),
+      transportRevision: transport.transportRevision,
     };
   }
 
@@ -523,6 +628,7 @@ export class HttpClient {
     schema: S,
     opts: RequestOptions,
   ): Promise<z.infer<S>> {
+    this.assertTransportCurrent();
     const initialRequest = this.snapshotRequest(path, opts.query);
 
     // Multipart uploads take a SEPARATE path: RN's raw `fetch` streams a FormData file part from
@@ -542,6 +648,7 @@ export class HttpClient {
     let firstAttempt = true;
     const run = async (): Promise<z.infer<S>> => {
       if (opts.signal?.aborted) throw callerCancellationError(opts.signal);
+      this.assertTransportCurrent();
       const request = firstAttempt ? initialRequest : this.snapshotRequest(path, opts.query);
       firstAttempt = false;
       if (!sameRequestSnapshot(initialRequest, request)) {
@@ -560,6 +667,7 @@ export class HttpClient {
             headers: { ...headers },
             searchParams: new URLSearchParams(search),
             json: opts.json,
+            redirect: 'error',
             signal: requestController.signal,
             timeout: this.timeoutMs,
             retry: 0,
@@ -630,6 +738,7 @@ export class HttpClient {
           method,
           headers: { ...headers },
           body: opts.form,
+          redirect: 'error',
           signal: requestController.signal,
         });
       } catch (err) {
@@ -667,6 +776,18 @@ export class HttpClient {
     cancelRequest?: (reason: string) => void,
     captureErrorDetail = false,
   ): Promise<z.infer<S>> {
+    if (
+      response.ok &&
+      this.requiredResponseHeader != null &&
+      response.headers.get(this.requiredResponseHeader.name) !== this.requiredResponseHeader.value
+    ) {
+      cancelResponseBody(response, 'repair response acknowledgement is missing', cancelRequest);
+      throw new ApiError(
+        'parse_error',
+        'Server did not acknowledge the repair snapshot page',
+        response.status,
+      );
+    }
     if (!response.ok) {
       let serverDetail: string | undefined;
       const mediaType = response.headers

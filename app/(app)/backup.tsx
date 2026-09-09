@@ -7,8 +7,8 @@ import {
   exportEncryptedBackup,
   importBackupAuto,
   isBackupAccountChangedError,
-  readPickedBackupCopy,
 } from '@/services/backup/backupService';
+import { readPickedBackupDocument } from '@/services/backup/pickedBackupDocument';
 import {
   BACKUP_LIMITS,
   getNewBackupPassphraseIssue,
@@ -26,33 +26,56 @@ import { NavRow, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
 interface BackupDocumentPickerModule {
   getDocumentAsync(options: { type: string[]; copyToCacheDirectory: boolean }): Promise<{
     canceled: boolean;
-    assets: Array<{ uri: string }> | null;
+    assets: Array<{ uri: string; size?: number | null }> | null;
   }>;
 }
 
 type BackupDocumentPickerLoader = () => Promise<BackupDocumentPickerModule>;
+type BackupDocumentReader = (
+  uri: string,
+  claimedSize?: number | null,
+  signal?: AbortSignal,
+) => Promise<string>;
 
 /**
- * Open the account-neutral picker, then always clean up any private cache copy it returns. The
- * loader is injectable solely to make the delayed Android return deterministic in Node tests.
+ * Open the account-neutral picker without making an unbounded private cache copy, then stream the
+ * provider URI through Gator's native byte/deadline boundary. Account retirement cancels the
+ * native stream and discards its result. The seams are injectable solely to make a delayed Android
+ * return deterministic in Node tests.
  */
 export async function pickBackupFileForLease(
   lease: RealtimeDeliveryLease,
   loadPicker: BackupDocumentPickerLoader = () => import('expo-document-picker'),
+  readDocument: BackupDocumentReader = readPickedBackupDocument,
 ): Promise<string | null> {
   const DocumentPicker = await loadPicker();
   if (!lease.isCurrent()) return null;
   const result = await DocumentPicker.getDocumentAsync({
     // .gatorbackup has no registered MIME, so allow any file and validate on restore.
     type: ['application/json', 'application/octet-stream', '*/*'],
-    copyToCacheDirectory: true,
+    copyToCacheDirectory: false,
   });
   if (result.canceled || !result.assets?.[0]) return null;
+  if (!lease.isCurrent()) return null;
 
-  // The picker created this private copy before returning control. Even if the lease retired while
-  // Android's UI was open, readPickedBackupCopy must receive it so its finally block deletes it.
-  const content = await readPickedBackupCopy(result.assets[0].uri, lease);
-  return lease.isCurrent() ? content : null;
+  const abortController = new AbortController();
+  const unsubscribe = subscribeRealtimeGenerationInvalidation(lease.generation, () => {
+    abortController.abort();
+  });
+  try {
+    if (!lease.isCurrent()) return null;
+    const content = await readDocument(
+      result.assets[0].uri,
+      result.assets[0].size,
+      abortController.signal,
+    );
+    return lease.isCurrent() ? content : null;
+  } catch (error) {
+    if (!lease.isCurrent()) return null;
+    throw error;
+  } finally {
+    unsubscribe();
+  }
 }
 
 function passphraseIssueMessage(issue: NewBackupPassphraseIssue): string {

@@ -28,10 +28,12 @@ export interface IncomingEventMetadata {
   readonly source: EventSource;
   /** Local intake clock, never a caller/server timestamp. */
   readonly receivedAt: number;
-  /** Future authenticated server occurrence id shared by socket + FCM copies. */
+  /** Exact authenticated occurrence id; currently supplied by identity-bound V3 FCM. */
   readonly serverEventId?: string;
   /** Current transport-local occurrence id (FCM message id or socket connection+sequence). */
   readonly transportOccurrenceId?: string;
+  /** Authenticated transport deadline which may shorten, but never extend, the local event TTL. */
+  readonly authenticatedExpiresAt?: number;
 }
 
 /** Core-owned shape that intentionally mirrors, but does not import, the DB repository input. */
@@ -212,7 +214,11 @@ export async function encodeIncomingEvent(
   const order = orderingDescriptor(snapshotEvent, snapshotMetadata);
   const eventKeyDigest = await digestDescriptor(digest, 'event-key', identity.value);
   const orderingKeyDigest = await digestDescriptor(digest, 'ordering-key', order.value);
-  const expiresAt = snapshotMetadata.receivedAt + ttlMs(snapshotEvent);
+  const localExpiresAt = snapshotMetadata.receivedAt + ttlMs(snapshotEvent);
+  const expiresAt = Math.min(
+    localExpiresAt,
+    snapshotMetadata.authenticatedExpiresAt ?? localExpiresAt,
+  );
   if (!Number.isSafeInteger(expiresAt)) throw new IncomingEventCodecError('invalid-metadata');
 
   return {
@@ -222,7 +228,9 @@ export async function encodeIncomingEvent(
       source: snapshotMetadata.source,
       payload: canonical.payload,
       payloadDigest,
-      eventKey: `ie1:${canonical.eventName}:${eventKeyDigest}`,
+      eventKey: snapshotMetadata.serverEventId
+        ? `ie1:server-event:${eventKeyDigest}`
+        : `ie1:${canonical.eventName}:${eventKeyDigest}`,
       orderingKey: `io1:${order.domain}:${orderingKeyDigest}`,
       receivedAt: snapshotMetadata.receivedAt,
       expiresAt,
@@ -305,7 +313,10 @@ function identityDescriptor(
 } {
   if (metadata.serverEventId) {
     return {
-      value: ['server-event', event.type, metadata.serverEventId],
+      // An authenticated occurrence is unique across its complete scope, not once per event type.
+      // A server bug that reuses it for another event therefore becomes one fail-closed key
+      // conflict instead of a second effect.
+      value: ['server-event', metadata.serverEventId],
       quality: 'exact',
       recovery: recoveryFor(event),
     };
@@ -318,13 +329,20 @@ function identityDescriptor(
           // RCS add/remove/re-add deltas deliberately reuse one synthetic guid. Project only the
           // semantic delta fields: socket and FCM serializers intentionally differ in rich
           // hydration, so a full payload digest would execute the same reaction twice.
-          value: ['reaction-delta', event.message.guid, reactionRevisionProjection(event.message)],
+          value: [
+            'reaction-delta',
+            event.message.guid,
+            reactionRevisionProjection(event.message),
+            sendAttemptCorrelationProjection(event.message),
+          ],
           quality: 'content-revision',
           recovery: recoveryFor(event),
         };
       }
       return {
-        value: ['new-message', event.message.guid],
+        // A malformed first copy must not suppress a later valid socket/FCM copy with the exact
+        // ownership tuple. Valid cross-transport copies still project to the same identity.
+        value: ['new-message', event.message.guid, sendAttemptCorrelationProjection(event.message)],
         quality: 'exact',
         recovery: recoveryFor(event),
       };
@@ -387,11 +405,18 @@ function identityDescriptor(
     case 'message-send-error': {
       const explicitAttemptGuid = nonEmptyString(event.payload.attemptGuid);
       if (explicitAttemptGuid) {
+        const clientAttemptGeneration =
+          event.payload.clientAttemptGeneration ?? event.payload.message?.clientAttemptGeneration;
+        const exactCorrelation =
+          nonEmptyString(event.payload.tempGuid) && clientAttemptGeneration != null
+            ? ['exact', event.payload.tempGuid, clientAttemptGeneration]
+            : ['incomplete'];
         return {
           // Current additive contract: one immutable id is generated when a real dispatch is
-          // admitted and reused for every socket/FCM/webhook/redelivery copy of that attempt.
-          // A later retry gets a new id even though it deliberately reuses tempGuid.
-          value: ['message-send-error-attempt', explicitAttemptGuid],
+          // admitted and reused for every socket/FCM/webhook/redelivery copy of that attempt. Keep
+          // an incomplete tuple in a separate namespace so it cannot suppress a corrected exact
+          // copy. A later retry gets a new id even though it deliberately reuses tempGuid.
+          value: ['message-send-error-attempt', explicitAttemptGuid, exactCorrelation],
           quality: 'exact',
           recovery: { kind: 'none' },
         };
@@ -539,6 +564,10 @@ function updateRevisionProjection(message: Message): unknown {
     dateDelivered: message.dateDelivered,
     dateEdited: message.dateEdited,
     dateRetracted: message.dateRetracted,
+    messageSummaryInfo: message.messageSummaryInfo,
+    messageSummaryInfoInvalid: message.messageSummaryInfoInvalid,
+    messagePartTopology: message.messagePartTopology,
+    messagePartTopologyInvalid: message.messagePartTopologyInvalid,
     error: message.error,
     isSent: message.isSent,
     isScheduled: message.isScheduled,
@@ -566,6 +595,18 @@ function updateRevisionProjection(message: Message): unknown {
     groupTitle: message.groupTitle,
     otherHandle: message.otherHandle,
   };
+}
+
+function sendAttemptCorrelationProjection(message: Message): unknown {
+  if (message.sendAttemptCorrelationInvalid === true) return ['invalid'];
+  if (
+    message.tempGuid != null &&
+    message.attemptGuid != null &&
+    message.clientAttemptGeneration != null
+  ) {
+    return ['exact', message.tempGuid, message.attemptGuid, message.clientAttemptGeneration];
+  }
+  return null;
 }
 
 function reactionRevisionProjection(message: Message): unknown {
@@ -628,6 +669,13 @@ function assertMetadata(metadata: IncomingEventMetadata): void {
     if (!serverEventId || utf8Encode(serverEventId).byteLength > MAX_OCCURRENCE_ID_BYTES) {
       throw new IncomingEventCodecError('invalid-metadata');
     }
+  }
+  if (
+    metadata.authenticatedExpiresAt !== undefined &&
+    (!Number.isSafeInteger(metadata.authenticatedExpiresAt) ||
+      metadata.authenticatedExpiresAt <= metadata.receivedAt)
+  ) {
+    throw new IncomingEventCodecError('invalid-metadata');
   }
 }
 

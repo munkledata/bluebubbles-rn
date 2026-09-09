@@ -12,6 +12,7 @@ import {
   listChatsForInbox,
   listChatsForInboxPage,
   markMessageDeleted,
+  searchChatsForInboxPage,
   upsertChats,
   upsertHandles,
   upsertMessages,
@@ -76,6 +77,64 @@ async function seedChat(
 }
 
 describe('listChatsForInbox', () => {
+  it('searches lightweight identity pages past 128 rows and decorates only the ordered result cap', async () => {
+    const t = await createTestDb();
+    const insert = t.raw.prepare(`
+      INSERT INTO chats (
+        guid, chat_identifier, display_name, style, is_archived, is_pinned,
+        pin_order, latest_message_date, deleted_at
+      ) VALUES (?, ?, ?, 45, ?, ?, ?, ?, ?)
+    `);
+    t.raw.transaction(() => {
+      insert.run('early', 'early', 'Café early', 0, 0, null, 10, null);
+      for (let index = 0; index < 130; index += 1) {
+        insert.run(
+          `noise-${index}`,
+          `noise-${index}`,
+          `Noise ${index}`,
+          0,
+          0,
+          null,
+          100 + index,
+          null,
+        );
+      }
+      // Decomposed accent proves stored names and the normalized query compare canonically.
+      insert.run('late-title', 'late-title', 'Cafe\u0301 late', 0, 0, null, 5_000, null);
+      insert.run('pinned-title', 'pinned-title', 'Café pin', 0, 1, 0, 1, null);
+      insert.run('message-only', 'message-only', 'Unrelated', 0, 0, null, 4_000, null);
+      insert.run('archived-match', 'archived-match', 'Café archived', 1, 0, null, 9_000, null);
+      insert.run('deleted-match', 'deleted-match', 'Café deleted', 0, 0, null, 8_000, 1);
+    })();
+
+    await expect(
+      searchChatsForInboxPage(t.db, {
+        query: 'café',
+        messageMatchGuids: ['message-only'],
+        limit: 10,
+      }),
+    ).resolves.toMatchObject({
+      rows: [
+        { guid: 'pinned-title' },
+        { guid: 'late-title' },
+        { guid: 'message-only' },
+        { guid: 'early' },
+      ],
+      hasMore: false,
+    });
+
+    await expect(
+      searchChatsForInboxPage(t.db, {
+        query: 'café',
+        messageMatchGuids: ['message-only'],
+        limit: 3,
+      }),
+    ).resolves.toMatchObject({
+      rows: [{ guid: 'pinned-title' }, { guid: 'late-title' }, { guid: 'message-only' }],
+      hasMore: true,
+    });
+  });
+
   it('round-trips versioned filters and defaults malformed or unknown choices independently', () => {
     const filters: InboxFilters = {
       read: 'unread',

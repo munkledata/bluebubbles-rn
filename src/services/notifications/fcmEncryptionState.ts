@@ -1,4 +1,5 @@
 import {
+  FCM_PUSH_ENCRYPTION_TYPE_V3,
   inspectFcmDeviceEncryptionState,
   revokedFcmDeviceEncryptionState,
   serializeFcmDeviceEncryptionState,
@@ -24,12 +25,17 @@ export async function writeFcmDeviceEncryptionState(
 
 /**
  * Replace an old account's key with a keyless tombstone. Retaining the tombstone records that this
- * installation entered V2, so a later reconnect cannot silently fall back to legacy plaintext/V1.
+ * installation entered random-key push encryption, so a later reconnect cannot silently fall back
+ * to an absent, unauthenticated receive state.
  * The caller must run this only after account-scoped registration/delivery work has drained;
  * otherwise a late pending/active write could resurrect the old key after this overwrite.
  */
 export async function retireFcmDeviceEncryptionState(secureVault: SecureVault): Promise<void> {
   const current = await readFcmDeviceEncryptionState(secureVault);
   if (current.kind === 'absent') return;
-  await writeFcmDeviceEncryptionState(secureVault, revokedFcmDeviceEncryptionState());
+  const encryptionType =
+    current.kind === 'valid' && current.state.encryptionType === FCM_PUSH_ENCRYPTION_TYPE_V3
+      ? FCM_PUSH_ENCRYPTION_TYPE_V3
+      : undefined;
+  await writeFcmDeviceEncryptionState(secureVault, revokedFcmDeviceEncryptionState(encryptionType));
 }

@@ -1,7 +1,7 @@
 # Gator RN — Data Caching Architecture
 
 _Reference notes, generated 2026-06-24 from a code-verified subsystem audit; realtime/push boundary
-updated 2026-09-04._
+updated 2026-09-07._
 
 ## TL;DR
 
@@ -49,9 +49,10 @@ FTS5 search index.
   `getOrCreateDbKey` generates 32 random bytes hex-encoded to 64 chars on first run.
   `resolveDbKey` completes an interrupted rotation; `rotateDbKey` is a 4-step crash-safe
   `PRAGMA rekey` sequence.
-- `requireAuthentication` is intentionally **OFF** so a headless locked FCM push can still
-  decrypt the DB. `keychainAccessible: WHEN_UNLOCKED` is iOS-only and **inert on Android**
-  (not an at-rest custody guarantee).
+- `requireAuthentication` is intentionally **OFF** so an authenticated, active-bound V3 headless push
+  can enqueue into SQLCipher while App Lock is active. It cannot read, claim, route, or apply content
+  until unlock. `keychainAccessible: WHEN_UNLOCKED` is iOS-only and **inert on Android** (not an
+  at-rest custody guarantee).
 
 ### 3. Sync write path + persisted cursor
 
@@ -83,8 +84,16 @@ FTS5 search index.
   envelope, derives its canonical occurrence identity, and persists it to the encrypted
   `incoming_event_queue` **before** any domain or presentation effect. A bounded token/version-
   fenced lease then routes the normalized event through `EventRouter`/`DbEventSink`; the DB phase is
-  checkpointed in its domain transaction and presentation retries read current DB truth. Locked FCM
-  is the deliberate no-DB exception and posts only a generic notice.
+  checkpointed in its domain transaction and presentation retries read current DB truth. A locked,
+  authenticated V2 delivery before its exclusive 2027-02-01 cutoff remains the deliberate no-DB
+  exception and may post only a generic notice. Authenticated, active-bound V3 may only enqueue into
+  SQLCipher; it cannot read, claim, route, or apply queued content before unlock, and only a newly
+  admitted row can produce the generic notice. Absent/V1/plaintext/invalid delivery posts nothing.
+- A background-FCM message commit synchronously queues its keyed attachment app-cache effect under
+  the native callback. The collector starts deduplicated factories sequentially after dispatch and
+  notification presentation, awaits them outside account teardown, and revokes them at an absolute
+  40-second-from-receipt deadline with at most two seconds of cooperative cleanup. This bound does
+  not cover the earlier delivery or final log flush and is not a durable process-death retry.
 - Does **not** advance the sync marker — the next incrementalSync re-fetches the overlap and
   the idempotent upsert + `GuidDeduper` absorb it.
 
@@ -127,6 +136,10 @@ content_rowid='id')`, created in migration 0001, kept current by AFTER INSERT/DE
   a verified `*.part` file,
   concurrency-capped at a configurable limit (default `DEFAULT_MAX_CONCURRENT_DOWNLOADS = 2`,
   adjustable up to `MAX_CONCURRENT_DOWNLOADS_LIMIT = 6`), with per-guid dedup of concurrent calls.
+- Unlocked background FCM may make one bounded best-effort app-cache attempt after the message DB
+  commit. It deliberately does not invoke `expo-media-library`, whose Photos write has no abort
+  signal. A Gallery/Gator Album preference is therefore neither fulfilled nor durably retried on
+  that headless path; a future durable receipt or cancellable native worker must own that copy.
 - Before native work can create a destination, the coordinator durably reserves the transfer's
   maximum bytes. The global ordinary-attachment cache is limited to **2 GiB / 4,096 files** and
   preserves at least **512 MiB free**. Deterministic least-recently-used eviction protects files
@@ -188,8 +201,9 @@ value TEXT)`.
 ## Data flow
 
 - **In:** server → sync engine **or** eligible unlocked FCM/socket → encrypted durable queue →
-  `EventRouter` / guarded upserts → DB tables → adapter flush. Locked FCM posts a generic notice
-  without opening the DB.
+  `EventRouter` / guarded upserts → DB tables → adapter flush. A locked, authenticated pre-cutoff V2
+  delivery may post only a generic notice without opening the DB. Authenticated, active-bound V3
+  may enqueue into SQLCipher while locked, but the queue stays unread and undrained until unlock.
 - **Out:** DB write → flush → reactive subscription fires → re-query → React state → UI.
 
 ---
@@ -215,20 +229,18 @@ value TEXT)`.
   server-supplied message `payloadData` or an exact-key legacy `url_previews` row; a cache miss stays
   a raw externally opened link, and no path mounts remote artwork. A future proxy/native bounded-fetch
   design is tracked in the master work plan.
-- **Encrypted FCM payloads (AES-GCM)** — `PUSH-CRYPTO-01A` adds the host-verified current-server
-  `AEAD_GCM_V2_DEVICE` path: the app requests a per-device key from Expo Crypto's secure random API,
-  saves it as pending before enrollment, requires the server's exact acknowledgement, and then
-  decrypts strict V2 frames with the event type as authenticated associated data before durable
-  intake. Legacy V1/plaintext delivery remains available only when no migration state has ever
-  existed; a pending, active, invalid, or revoked record fails closed rather than downgrading.
-  Current server source sends only the event type plus `{}` when no V2 key is enrolled. Android
-  SecureStore, native crypto, killed-process delivery, and a matching deployed server still require
-  device proof under parent `PUSH-CRYPTO-01`; authenticated device/account identity, replay defense,
-  remote revocation/staged migration, and HTTPS protection for enrollment also remain open. After an
-  unsupported/bad frame or locked delivery, server-state-backed message content may catch up on a
-  later sync. One-time events such as `message-send-error` are not reconstructed by ordinary sync
-  and are lost unless another live transport delivers them. Locked delivery posts only a generic
-  notice.
+- **Encrypted FCM payloads (AES-GCM)** — the app generates a random per-device key, persists it
+  before enrollment, and requires an exact server acknowledgement. Password-derived V1 and
+  plaintext receive are retired even when no state exists. Random-key `AEAD_GCM_V2_DEVICE` remains
+  encrypted compatibility only before the exclusive **2027-02-01T00:00:00Z** cutoff; its event type
+  is authenticated, and a locked notice is posted only after the frame authenticates. Scoped
+  sessions require identity-bound V3, which binds installation, principal, device, occurrence,
+  event, and expiry. V3 keys rotate at 30 days; a crash-safe, stable rotation request accepts the
+  immediately previous key only through the earlier server/local deadline. A pending, active,
+  rotating, invalid, or revoked record never silently downgrades. Android SecureStore/native crypto,
+  killed-process delivery, and the matching deployed server still require physical-device proof.
+  After unsupported or bad input, server-state-backed message content may catch up on later sync;
+  one-time events such as `message-send-error` may be lost without another live transport.
 - **Backups** — new encrypted v3 backups carry allow-listed settings, user themes, per-chat
   customizations, and custom-folder name/order/badge/membership data. Folder membership uses the
   same portable service/kind/stable-identifier/participant evidence as chat-customization restore;
@@ -259,10 +271,12 @@ value TEXT)`.
   and persisted app logs last, while deliberately retaining the reusable DB key and OS-evictable
   cache. A required cleanup failure keeps the next connection blocked so the idempotent sweep can
   retry; the release device matrix must still inspect the exact native candidate.
-- **App-lock is a UI/policy gate, not at-rest key custody (Android).** Foreground boot and the
-  locked headless FCM path both defer opening the DB; the latter posts a generic notice and catches
-  up after unlock. However, the SecureStore-held key itself is not biometric-bound, and an unlocked
-  headless wake can open the DB.
+- **App-lock is a UI/policy gate, not at-rest key custody (Android).** Foreground boot defers opening
+  the DB. A locked, authenticated pre-cutoff V2 delivery avoids it and may post only a generic
+  notice; absent/V1/plaintext/invalid delivery posts nothing. Authenticated, active-bound V3 alone
+  may enqueue into SQLCipher, with no queued-content read or effect before unlock. The
+  SecureStore-held key is not biometric-bound, and an unlocked headless wake can open the DB
+  normally.
 - **FTS5 indexes only `text`** — but edited/SMS messages, whose body arrives in `attributedBody`
   with an empty `text` column, now have `text` populated from the decoded attributedBody at upsert
   (plus a one-time boot backfill for already-cached history), so they **are** full-text searchable.

@@ -223,6 +223,8 @@ export default function ThemesScreen(): React.JSX.Element {
               openEditor(null);
             }}
             hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel="Create custom theme"
           >
             <Text style={[styles.add, { color: theme.color.tint }]}>＋</Text>
           </Pressable>
@@ -239,6 +241,11 @@ export default function ThemesScreen(): React.JSX.Element {
           {visibleRows.map((row, i) => {
             const storedTokens = safeParseTokens(row.tokens);
             const available = isDarkThemeTokens(storedTokens);
+            const applyLabel = available
+              ? `Apply ${row.name}`
+              : storedTokens
+                ? `${row.name}, light theme unavailable`
+                : `${row.name}, theme unavailable`;
             return (
               <View
                 key={row.id}
@@ -252,6 +259,12 @@ export default function ThemesScreen(): React.JSX.Element {
               >
                 <Pressable
                   style={styles.rowMain}
+                  accessibilityRole="button"
+                  accessibilityLabel={applyLabel}
+                  accessibilityHint={
+                    available ? undefined : 'Shows why this theme can’t be applied'
+                  }
+                  accessibilityState={{ selected: row.id === visibleActiveId }}
                   onPress={() => {
                     if (!accountLease.isCurrent()) return;
                     if (!storedTokens) {
@@ -275,7 +288,13 @@ export default function ThemesScreen(): React.JSX.Element {
                   </Text>
                 </Pressable>
                 {row.id === visibleActiveId ? (
-                  <Text style={[styles.check, { color: theme.color.tint }]}>✓</Text>
+                  <Text
+                    accessible={false}
+                    importantForAccessibility="no"
+                    style={[styles.check, { color: theme.color.tint }]}
+                  >
+                    ✓
+                  </Text>
                 ) : null}
                 <Pressable
                   onPress={() => {
@@ -283,10 +302,18 @@ export default function ThemesScreen(): React.JSX.Element {
                   }}
                   hitSlop={8}
                   style={styles.action}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Edit ${row.name}`}
                 >
                   <Text style={[styles.actionText, { color: theme.color.tint }]}>Edit</Text>
                 </Pressable>
-                <Pressable onPress={() => onDelete(row)} hitSlop={8} style={styles.action}>
+                <Pressable
+                  onPress={() => onDelete(row)}
+                  hitSlop={8}
+                  style={styles.action}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Delete ${row.name}`}
+                >
                   <Text style={[styles.actionText, { color: theme.color.destructive }]}>
                     Delete
                   </Text>
@@ -297,7 +324,12 @@ export default function ThemesScreen(): React.JSX.Element {
         </View>
 
         {visibleActiveId != null ? (
-          <Pressable onPress={onRevert} style={styles.revert}>
+          <Pressable
+            onPress={onRevert}
+            style={styles.revert}
+            accessibilityRole="button"
+            accessibilityLabel="Revert to built-in preset"
+          >
             <Text style={[styles.revertText, { color: theme.color.tint }]}>
               Revert to built-in preset
             </Text>

@@ -4,7 +4,14 @@
   "private_api": true,
   "proxy_service": "zrok",
   "supports_header_auth": true,
+  "supports_scoped_device_credentials": true,
   "supports_fcm_device_encryption": true,
+  "supports_fcm_push_encryption_v3": true,
+  "supports_fcm_push_key_rotation": true,
+  "supports_rcs_send_attempt_ownership": true,
+  "supports_rcs_text_with_attachment": true,
+  "supports_imessage_text_with_attachment": false,
+  "supports_message_part_topology": true,
   "supports_message_deleted": true,
   "supports_message_search": true
 }

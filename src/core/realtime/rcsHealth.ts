@@ -6,8 +6,9 @@
  * `adminOnly` (loopback dashboard only — a remote password-authed client gets 403), so the only
  * app-reachable RCS signals are (1) the `ServerInfo.rcs` capability boolean and (2) the live
  * `rcs-alert` socket event, whose `alertType` this maps to a severity + user-facing copy. The
- * cookie re-auth that fixes an expired session happens on the Mac dashboard (a Firefox cookie
- * paste), so the actionable message points there — the phone app cannot perform the fix.
+ * phone never receives Google credentials. When the server advertises RCS support, the Health
+ * screen can ask the server to re-authenticate with its own Firefox cookies; fatal startup and
+ * pairing work still belongs on the Mac dashboard.
  */
 
 /** Severity buckets, aligned with the Server Health status colours (ok / warn / error / off). */
@@ -42,8 +43,8 @@ export const RCS_ALERT_TYPES = {
  * (older server, or the fetch failed).
  *
  * - `enabled=false` → `off` ("RCS bridge: off").
- * - auth expired / fatal listen error → `error`, pointing at the dashboard re-auth (the phone
- *   cannot fix it).
+ * - auth expired → `error`, pointing at the in-app server-owned re-auth action.
+ * - fatal listen error → `error`, pointing at the dashboard for diagnosis.
  * - phone not responding → `warn` (the Android phone must be online).
  * - browser inactive → `warn` (the bridge idled; it should reconnect on its own).
  * - a benign/recovery alert (phone-responding-again, browser-active, battery-low, an unknown
@@ -82,11 +83,16 @@ export function deriveRcsHealth(
 function mapAlert(alertType: string | null | undefined): RcsHealthDisplay | null {
   switch (alertType) {
     case RCS_ALERT_TYPES.gaiaLoggedOut:
+      return {
+        severity: 'error',
+        status: 'Disconnected',
+        detail: 'RCS bridge disconnected — tap Re-authenticate below.',
+      };
     case RCS_ALERT_TYPES.listenFatal:
       return {
         severity: 'error',
         status: 'Disconnected',
-        detail: 'RCS bridge disconnected — re-authenticate on the server dashboard.',
+        detail: 'RCS bridge stopped unexpectedly — check the server dashboard.',
       };
     case RCS_ALERT_TYPES.phoneNotResponding:
       return {
@@ -176,13 +182,13 @@ export function deriveRcsHealthFromStatus(
     return { severity: 'warn', status: 'Starting', detail: 'RCS bridge is starting…' };
   }
 
-  // Disconnected / auth-expired: paired but the connection is down. Points at the dashboard
-  // re-auth (the phone can't fix a Google cookie expiry).
+  // Disconnected / auth-expired: paired but the connection is down. The phone asks the server to
+  // retry with the server's own Firefox cookies; those credentials never leave the Mac.
   if (s.paired && s.connected === false) {
     return {
       severity: 'error',
       status: 'Disconnected',
-      detail: 'RCS bridge disconnected — re-authenticate on the server dashboard.',
+      detail: 'RCS bridge disconnected — tap Re-authenticate below.',
     };
   }
 

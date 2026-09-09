@@ -1,3 +1,5 @@
+/* eslint-disable import/first -- native-module mocks must exist before the module under test loads. */
+
 interface NativeMessage {
   data?: Record<string, string>;
   messageId?: string;
@@ -54,8 +56,10 @@ jest.mock('@/services/notifications/fcmPayload', () => ({
   rehydrateFcmEnvelopeChatGuid: jest.fn((value: string) => value),
 }));
 jest.mock('@/services/notifications/fcmDecrypt', () => ({
-  FCM_ENCRYPTION_TYPE: 'aes-gcm',
-  decryptFcmPayload: jest.fn(async () => '{}'),
+  FCM_V2_ENCRYPTION_TYPE: 'AEAD_GCM_V2_DEVICE',
+  FCM_V3_ENCRYPTION_TYPE: 'AEAD_GCM_V3_IDENTITY',
+  decryptFcmV2Payload: jest.fn(async () => '{}'),
+  decryptFcmV3Payload: jest.fn(async () => ({ plaintext: '{}', identity: {} })),
 }));
 jest.mock('@/services/notifications/fcmSessionGate', () => ({
   readFcmSessionState: mockReadFcmSessionState,

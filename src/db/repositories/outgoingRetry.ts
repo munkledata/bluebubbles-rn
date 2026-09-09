@@ -1,4 +1,5 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
+import { isRcsChatGuid } from '@utils/chat';
 import { messages, outgoingQueue } from '../schema';
 import {
   runInTransactionContext,
@@ -7,6 +8,16 @@ import {
   type DbTransactionContext,
 } from '../transaction';
 import type { AppDatabase } from '../types';
+import {
+  MAX_SEND_ATTEMPT_OWNER_GENERATION,
+  recordMessageGuidAliasWithinTransaction,
+  type SendAttemptOwnerToken,
+} from './outgoingAttemptOwnership';
+import {
+  isMessageTargetAvailableWithinTransaction,
+  queuedMessageTarget,
+  type MessageTargetServerAuthorization,
+} from './messageTargets';
 import {
   OUTGOING_GRACE_MS,
   OUTGOING_LEASE_MS,
@@ -28,9 +39,10 @@ import {
  * The attempts bump is a compare-and-set on the value we read (`AND attempts = <read>`), so a
  * concurrent bump/retire wins outright and is reported as "not owned" instead of being clobbered.
  */
-export async function reconcileOutgoingErrorWithinTransaction(
+async function reconcileOutgoingErrorForMessageWithinTransaction(
   context: DbTransactionContext,
   tempGuid: string,
+  messageGuid: string,
   errorCode: number,
   now: number = Date.now(),
   errorMessage?: string | null,
@@ -44,7 +56,7 @@ export async function reconcileOutgoingErrorWithinTransaction(
     }>(sql`
         SELECT q.attempts, m.send_state AS sendState, m.error AS currentError,
                m.error_message AS currentErrorMessage
-          FROM outgoing_queue q LEFT JOIN messages m ON m.guid = q.temp_guid
+          FROM outgoing_queue q LEFT JOIN messages m ON m.guid = ${messageGuid}
          WHERE q.temp_guid = ${tempGuid} LIMIT 1`);
     const current = cur[0];
     const prior = current?.attempts;
@@ -56,7 +68,7 @@ export async function reconcileOutgoingErrorWithinTransaction(
           error: errorCode,
           ...(errorMessage === undefined ? {} : { errorMessage }),
         })
-        .where(eq(messages.guid, tempGuid));
+        .where(eq(messages.guid, messageGuid));
       return false;
     }
     // This is the legacy/temp-only duplicate defense. Modern attemptGuid copies are deduplicated
@@ -66,7 +78,7 @@ export async function reconcileOutgoingErrorWithinTransaction(
     // `sending`/error=0, making its next failure distinguishable again.
     if (prior > 0 && current.sendState === 'error' && current.currentError === errorCode) {
       if (errorMessage !== undefined && current.currentErrorMessage !== errorMessage) {
-        await db.update(messages).set({ errorMessage }).where(eq(messages.guid, tempGuid));
+        await db.update(messages).set({ errorMessage }).where(eq(messages.guid, messageGuid));
       }
       return true;
     }
@@ -77,13 +89,68 @@ export async function reconcileOutgoingErrorWithinTransaction(
         error: errorCode,
         ...(errorMessage === undefined ? {} : { errorMessage }),
       })
-      .where(eq(messages.guid, tempGuid));
+      .where(eq(messages.guid, messageGuid));
     const attempts = prior + 1;
     const bumped = await db.all<{ id: number }>(sql`
         UPDATE outgoing_queue SET attempts = ${attempts}, next_retry_at = ${now + outgoingBackoffMs(attempts)}
          WHERE temp_guid = ${tempGuid} AND attempts = ${prior}
         RETURNING id`);
     return bumped.length > 0;
+  });
+}
+
+/**
+ * Transaction-only local/HTTP failure. A modern caller supplies the token captured before its
+ * request; a delayed failure may mutate only while that exact generation is still pending.
+ */
+export async function reconcileOutgoingErrorWithinTransaction(
+  context: DbTransactionContext,
+  tempGuid: string,
+  errorCode: number,
+  now: number = Date.now(),
+  errorMessage?: string | null,
+  attemptOwnerToken?: SendAttemptOwnerToken,
+): Promise<boolean> {
+  return runInTransactionContext(context, async (db) => {
+    const direct = await db.all<{
+      guid: string;
+      pending: number;
+      generation: number;
+    }>(sql`
+      SELECT guid, attempt_owner_pending AS pending,
+             attempt_owner_generation AS generation
+        FROM messages
+       WHERE guid = ${tempGuid}
+       LIMIT 1
+    `);
+    const aliased = direct[0]
+      ? []
+      : await db.all<{ guid: string; pending: number; generation: number }>(sql`
+          SELECT m.guid, m.attempt_owner_pending AS pending,
+                 m.attempt_owner_generation AS generation
+            FROM message_guid_aliases a
+            JOIN messages m ON m.guid = a.canonical_guid
+           WHERE a.alias_guid = ${tempGuid}
+           LIMIT 1
+        `);
+    const owner = direct[0] ?? aliased[0];
+    if (attemptOwnerToken) {
+      if (!owner || owner.pending === 0 || owner.generation !== attemptOwnerToken.generation) {
+        return false;
+      }
+    } else if (owner && owner.generation > 0) {
+      // Mode is captured at optimistic insert. A modern row never silently downgrades merely
+      // because a caller lost its token or current capability discovery is unavailable.
+      return false;
+    }
+    return reconcileOutgoingErrorForMessageWithinTransaction(
+      context,
+      tempGuid,
+      owner?.guid ?? tempGuid,
+      errorCode,
+      now,
+      errorMessage,
+    );
   });
 }
 
@@ -95,11 +162,19 @@ export async function reconcileOutgoingError(
   now: number = Date.now(),
   commitGuard?: DbCommitGuard,
   errorMessage?: string | null,
+  attemptOwnerToken?: SendAttemptOwnerToken,
 ): Promise<boolean> {
   return withDbTransaction(
     db,
     (context) =>
-      reconcileOutgoingErrorWithinTransaction(context, tempGuid, errorCode, now, errorMessage),
+      reconcileOutgoingErrorWithinTransaction(
+        context,
+        tempGuid,
+        errorCode,
+        now,
+        errorMessage,
+        attemptOwnerToken,
+      ),
     commitGuard,
   );
 }
@@ -172,8 +247,10 @@ function requeueCycleKey(tempGuid: string, scope: string | number): string {
  * immediate-ack contract: the server acks instantly, relays to Google in the background, and
  * reports a send-phase failure via `message-send-error` with `retryable: true`. By then the ack
  * already deleted the queue row, so without this the "picture failed after the ack" case cannot be
- * retried from the current manual action. Rebuilds a queue row from the message (+ attachment) rows
- * only when the server certifies that dispatch never began.
+ * retried from the current manual action. Rebuilds an ATTACHMENT queue row from the message and
+ * attachment rows only when the server certifies that dispatch never began. Text/contact payloads
+ * are not reconstructable here: the message table loses contact-card kind and mention metadata, so
+ * guessing could resend a contact as its display name or silently drop mentions.
  *
  * Returns null (caller falls back to bubble-only error) when: the guid isn't a temp- row
  * anymore (promoted rows can't be re-sent), it's a reaction (never flagged retryable by the
@@ -186,6 +263,7 @@ async function reEnqueueOutgoingFromMessageWithinTransaction(
   tempGuid: string,
   now: number,
   scope: string | number = 'process',
+  messageGuid: string = tempGuid,
 ): Promise<RequeueCommitEffect | null> {
   return runInTransactionContext(context, async (db) => {
     const cycleKey = requeueCycleKey(tempGuid, scope);
@@ -193,20 +271,16 @@ async function reEnqueueOutgoingFromMessageWithinTransaction(
     if ((requeueCycles.get(cycleKey) ?? 0) >= MAX_REQUEUE_CYCLES) return null;
     const rows = await db.all<{
       id: number;
-      text: string | null;
-      subject: string | null;
-      threadOriginatorGuid: string | null;
-      threadOriginatorPart: number | null;
-      expressiveSendStyleId: string | null;
       chatGuid: string | null;
+      text: string | null;
+      selectedMessageGuid: string | null;
+      partIndex: number | null;
     }>(sql`
-      SELECT m.id, m.text, m.subject,
-             m.thread_originator_guid AS threadOriginatorGuid,
-             m.thread_originator_part AS threadOriginatorPart,
-             m.expressive_send_style_id AS expressiveSendStyleId,
-             c.guid AS chatGuid
+      SELECT m.id, c.guid AS chatGuid, m.text,
+             m.thread_originator_guid AS selectedMessageGuid,
+             m.thread_originator_part AS partIndex
       FROM messages m JOIN chats c ON c.id = m.chat_id
-      WHERE m.guid = ${tempGuid} AND m.associated_message_type IS NULL
+      WHERE m.guid = ${messageGuid} AND m.associated_message_type IS NULL
         AND m.date_deleted IS NULL LIMIT 1`);
     const msg = rows[0];
     if (!msg?.chatGuid) return null;
@@ -217,29 +291,25 @@ async function reEnqueueOutgoingFromMessageWithinTransaction(
     const att = await db.all<{ guid: string; localPath: string | null }>(sql`
       SELECT guid, local_path AS localPath FROM attachments
       WHERE message_id = ${msg.id} AND guid LIKE '%-att' LIMIT 1`);
-    let kind: 'text' | 'attachment';
-    let payload: string;
     const firstAtt = att[0];
-    if (firstAtt) {
-      if (!firstAtt.localPath) return null; // nothing on disk to re-upload
-      kind = 'attachment';
-      payload = JSON.stringify({ attachmentGuid: firstAtt.guid, localPath: firstAtt.localPath });
-    } else {
-      kind = 'text';
-      payload = JSON.stringify({
-        message: msg.text ?? '',
-        selectedMessageGuid: msg.threadOriginatorGuid ?? undefined,
-        partIndex: msg.threadOriginatorGuid ? (msg.threadOriginatorPart ?? undefined) : undefined,
-        effectId: msg.expressiveSendStyleId ?? undefined,
-        subject: msg.subject ?? undefined,
-      });
-    }
+    if (!firstAtt?.localPath) return null; // unsafe/absent payload or nothing on disk to re-upload
+    const payload = JSON.stringify({
+      attachmentGuid: firstAtt.guid,
+      localPath: firstAtt.localPath,
+      ...(msg.text ? { text: msg.text } : {}),
+      ...(msg.selectedMessageGuid
+        ? {
+            selectedMessageGuid: msg.selectedMessageGuid,
+            ...(msg.partIndex == null ? {} : { partIndex: msg.partIndex }),
+          }
+        : {}),
+    });
     // attempts starts at 1: the failed background relay WAS attempt one, and attempts>=1 also
     // bypasses the fresh-row grace window so the ladder re-fires on the next drain tick.
     await db.insert(outgoingQueue).values({
       tempGuid,
       chatGuid: msg.chatGuid,
-      kind,
+      kind: 'attachment',
       payload,
       attempts: 1,
       nextRetryAt: now + outgoingBackoffMs(1),
@@ -262,8 +332,30 @@ async function reEnqueueOutgoingFromMessageWithinTransaction(
   });
 }
 
+export type ServerSendErrorDisposition =
+  /** The failure owned this bubble and existing error/retry behavior was applied. */
+  | 'applied'
+  /** A newer request is in flight but has not acknowledged its server-owned attempt id yet. */
+  | 'attempt-owner-pending'
+  /** A modern row was targeted without the complete server correlation triple. */
+  | 'attempt-identity-missing'
+  /** The bubble has a different (or deliberately unowned legacy) active attempt. */
+  | 'stale-attempt'
+  /** No local message or live queue matched this candidate guid. */
+  | 'unmatched';
+
+/** Complete capable-RCS correlation triple copied from the server event. */
+export interface ServerSendAttemptIdentity {
+  readonly tempGuid: string;
+  readonly attemptGuid: string;
+  readonly clientAttemptGeneration: number;
+}
+
 export interface ServerSendErrorTransactionResult {
+  /** True for an applied, deferred-pending, or safely handled stale candidate. */
   matched: boolean;
+  /** Lets the durable-event owner retry only the unresolved request-to-ack window. */
+  disposition: ServerSendErrorDisposition;
   /** Invoke only after the SQL transaction commits; idempotent and null if no cycle began. */
   onCommitted: RequeueCommitEffect | null;
 }
@@ -291,24 +383,150 @@ export async function applyServerSendErrorWithinTransaction(
   retryable = false,
   requeueScope: string | number = 'process',
   errorMessage?: string | null,
+  attemptIdentity?: ServerSendAttemptIdentity,
 ): Promise<ServerSendErrorTransactionResult> {
-  return runInTransactionContext(context, async (_db) => {
+  return runInTransactionContext(context, async (db) => {
+    type AttemptOwnerRow = {
+      guid: string;
+      activeSendAttemptGuid: string | null;
+      attemptOwnerPending: number;
+      attemptOwnerGeneration: number;
+    };
+    const findOwner = async (
+      tempGuid: string,
+      fallbackGuid: string,
+    ): Promise<AttemptOwnerRow | null> => {
+      const direct = await db.all<AttemptOwnerRow>(sql`
+        SELECT guid, active_send_attempt_guid AS activeSendAttemptGuid,
+               attempt_owner_pending AS attemptOwnerPending,
+               attempt_owner_generation AS attemptOwnerGeneration
+          FROM messages
+         WHERE guid = ${tempGuid}
+         LIMIT 1
+      `);
+      if (direct[0]) return direct[0];
+      const aliased = await db.all<AttemptOwnerRow>(sql`
+        SELECT m.guid, m.active_send_attempt_guid AS activeSendAttemptGuid,
+               m.attempt_owner_pending AS attemptOwnerPending,
+               m.attempt_owner_generation AS attemptOwnerGeneration
+          FROM message_guid_aliases a
+          JOIN messages m ON m.guid = a.canonical_guid
+         WHERE a.alias_guid = ${tempGuid}
+         LIMIT 1
+      `);
+      if (aliased[0]) return aliased[0];
+      if (fallbackGuid !== tempGuid) {
+        const fallback = await db.all<AttemptOwnerRow>(sql`
+          SELECT guid, active_send_attempt_guid AS activeSendAttemptGuid,
+                 attempt_owner_pending AS attemptOwnerPending,
+                 attempt_owner_generation AS attemptOwnerGeneration
+            FROM messages
+           WHERE guid = ${fallbackGuid}
+           LIMIT 1
+        `);
+        if (fallback[0]) return fallback[0];
+      }
+      return null;
+    };
+
+    let queueGuid = guid;
+    let targetGuid = guid;
+    if (attemptIdentity) {
+      if (
+        !attemptIdentity.tempGuid ||
+        !attemptIdentity.attemptGuid ||
+        !Number.isInteger(attemptIdentity.clientAttemptGeneration) ||
+        attemptIdentity.clientAttemptGeneration < 1 ||
+        attemptIdentity.clientAttemptGeneration > MAX_SEND_ATTEMPT_OWNER_GENERATION
+      ) {
+        return { matched: true, disposition: 'attempt-identity-missing', onCommitted: null };
+      }
+      let owner = await findOwner(attemptIdentity.tempGuid, guid);
+      let recoveredAfterAliasPrune = false;
+      if (!owner) {
+        // A bounded alias may have been pruned before a delayed failure arrives. Recover only when
+        // the exact active attempt identifies one and only one canonical row; ambiguity fails closed.
+        const activeOwners = await db.all<AttemptOwnerRow>(sql`
+          SELECT guid, active_send_attempt_guid AS activeSendAttemptGuid,
+                 attempt_owner_pending AS attemptOwnerPending,
+                 attempt_owner_generation AS attemptOwnerGeneration
+            FROM messages
+           WHERE active_send_attempt_guid = ${attemptIdentity.attemptGuid}
+           LIMIT 2
+        `);
+        owner = activeOwners.length === 1 ? activeOwners[0] : null;
+        recoveredAfterAliasPrune = owner != null;
+      }
+      if (!owner) return { matched: false, disposition: 'unmatched', onCommitted: null };
+      if (recoveredAfterAliasPrune) {
+        // A retry row keeps the original temp identity. Restore its bounded lookup before rebuilding
+        // that row, otherwise the later claim cannot find the canonical owner and sends without the
+        // generation token that its acknowledgement requires.
+        await recordMessageGuidAliasWithinTransaction(
+          context,
+          attemptIdentity.tempGuid,
+          owner.guid,
+        );
+      }
+      queueGuid = attemptIdentity.tempGuid;
+      targetGuid = owner.guid;
+      if (owner.attemptOwnerPending !== 0) {
+        if (owner.attemptOwnerGeneration !== attemptIdentity.clientAttemptGeneration) {
+          return { matched: true, disposition: 'attempt-owner-pending', onCommitted: null };
+        }
+        const installed = await db.all<{ id: number }>(sql`
+          UPDATE messages
+             SET active_send_attempt_guid = ${attemptIdentity.attemptGuid},
+                 attempt_owner_pending = 0
+           WHERE guid = ${owner.guid}
+             AND attempt_owner_pending = 1
+             AND attempt_owner_generation = ${attemptIdentity.clientAttemptGeneration}
+          RETURNING id
+        `);
+        if (installed.length === 0) {
+          return { matched: true, disposition: 'attempt-owner-pending', onCommitted: null };
+        }
+      } else if (owner.activeSendAttemptGuid !== attemptIdentity.attemptGuid) {
+        return { matched: true, disposition: 'stale-attempt', onCommitted: null };
+      }
+    } else {
+      const owner = await findOwner(guid, guid);
+      if (owner?.attemptOwnerGeneration && owner.attemptOwnerGeneration > 0) {
+        return { matched: true, disposition: 'attempt-identity-missing', onCommitted: null };
+      }
+      targetGuid = owner?.guid ?? guid;
+    }
     // The bump IS the "is a ladder still alive?" test. Asking first with a SELECT and then
     // committing to that branch lost the whole retryable path when the ack deleted the queue row in
     // between (three awaits wide): the UPDATE matched nothing, reported nothing, and the re-enqueue
     // below was never reached — the one case this machinery exists for, downgraded to bubble-only.
     if (
-      await reconcileOutgoingErrorWithinTransaction(context, guid, errorCode, now, errorMessage)
+      await reconcileOutgoingErrorForMessageWithinTransaction(
+        context,
+        queueGuid,
+        targetGuid,
+        errorCode,
+        now,
+        errorMessage,
+      )
     ) {
-      return { matched: true, onCommitted: null };
+      return { matched: true, disposition: 'applied', onCommitted: null };
     }
     const onCommitted = retryable
-      ? await reEnqueueOutgoingFromMessageWithinTransaction(context, guid, now, requeueScope)
+      ? await reEnqueueOutgoingFromMessageWithinTransaction(
+          context,
+          queueGuid,
+          now,
+          requeueScope,
+          targetGuid,
+        )
       : null;
+    const matched =
+      (await markMessageSendErrorWithinTransaction(context, targetGuid, errorCode, errorMessage)) ||
+      onCommitted != null;
     return {
-      matched:
-        (await markMessageSendErrorWithinTransaction(context, guid, errorCode, errorMessage)) ||
-        onCommitted != null,
+      matched,
+      disposition: matched ? 'applied' : 'unmatched',
       onCommitted,
     };
   });
@@ -323,6 +541,7 @@ export async function applyServerSendError(
   retryable = false,
   requeueScope: string | number = 'process',
   errorMessage?: string | null,
+  attemptIdentity?: ServerSendAttemptIdentity,
 ): Promise<boolean> {
   const result = await withDbTransaction(db, (context) =>
     applyServerSendErrorWithinTransaction(
@@ -333,6 +552,7 @@ export async function applyServerSendError(
       retryable,
       requeueScope,
       errorMessage,
+      attemptIdentity,
     ),
   );
   result.onCommitted?.();
@@ -383,26 +603,123 @@ export async function listRetryableOutgoing(
  * the visible flip lets manual Try Again overlap the drain, while a flip without its lease can be
  * claimed by a second drain.
  */
+export interface OutgoingSendClaim {
+  readonly claimed: boolean;
+  /** Present only for a row that was born in attempt-aware mode. */
+  readonly attemptOwnerToken?: SendAttemptOwnerToken;
+}
+
 export function claimOutgoingForSendWithinTransaction(
   context: DbTransactionContext,
   id: number,
   clock: () => number,
-): Promise<boolean> {
+  serverAuthorization?: MessageTargetServerAuthorization,
+): Promise<OutgoingSendClaim> {
   return runInTransactionContext(context, async (db) => {
     // Read AFTER acquiring the process-wide lock. A timestamp captured before a long queue wait
     // can make the two-minute lease expire as soon as it commits, allowing a second sender in.
     const now = clock();
-    const rows = await db.all<{ tempGuid: string }>(sql`
+    const rows = await db.all<{
+      tempGuid: string;
+      chatGuid: string;
+      kind: string;
+      payload: string;
+    }>(sql`
         UPDATE outgoing_queue SET next_retry_at = ${now + OUTGOING_LEASE_MS}
         WHERE id = ${id} AND next_retry_at <= ${now}
-        RETURNING temp_guid AS tempGuid`);
+        RETURNING temp_guid AS tempGuid, chat_guid AS chatGuid, kind, payload`);
     const claimed = rows[0];
-    if (!claimed) return false;
-    await db
-      .update(messages)
-      .set({ sendState: 'sending', error: 0, errorMessage: null })
-      .where(and(eq(messages.guid, claimed.tempGuid), eq(messages.sendState, 'error')));
-    return true;
+    if (!claimed) return { claimed: false };
+
+    const direct = await db.all<{ guid: string; generation: number }>(sql`
+      SELECT guid, attempt_owner_generation AS generation
+        FROM messages
+       WHERE guid = ${claimed.tempGuid}
+       LIMIT 1
+    `);
+    const aliased = direct[0]
+      ? []
+      : await db.all<{ guid: string; generation: number }>(sql`
+          SELECT m.guid, m.attempt_owner_generation AS generation
+            FROM message_guid_aliases a
+            JOIN messages m ON m.guid = a.canonical_guid
+           WHERE a.alias_guid = ${claimed.tempGuid}
+           LIMIT 1
+    `);
+    const owner = direct[0] ?? aliased[0];
+    if (!owner) {
+      // A queue row without its direct/aliased message cannot prove whether it was born in modern
+      // attempt-aware mode. Retire it before returning so the caller can never POST it through the
+      // tokenless legacy path; later rows in the same drain remain eligible to make progress.
+      await db
+        .update(outgoingQueue)
+        .set({ attempts: OUTGOING_MAX_ATTEMPTS })
+        .where(eq(outgoingQueue.id, id));
+      return { claimed: false };
+    }
+
+    const queuedTarget = queuedMessageTarget(claimed.kind, claimed.payload);
+    const unsupportedRcsReply =
+      queuedTarget.kind === 'target' &&
+      claimed.kind !== 'reaction' &&
+      isRcsChatGuid(claimed.chatGuid);
+    const targetAvailable =
+      !unsupportedRcsReply &&
+      (queuedTarget.kind === 'none' ||
+        (queuedTarget.kind === 'target' &&
+          (await isMessageTargetAvailableWithinTransaction(context, {
+            chatGuid: claimed.chatGuid,
+            messageGuid: queuedTarget.messageGuid,
+            partIndex: queuedTarget.partIndex,
+            allowRcsWholeMessage: claimed.kind === 'reaction' && isRcsChatGuid(claimed.chatGuid),
+            serverAuthorization,
+          }))));
+    if (!targetAvailable) {
+      // Target loss is permanent for this queued attempt. Keep the capped ladder so the failed
+      // bubble remains user-removable, and update the resolved canonical owner when an alias exists.
+      await db
+        .update(outgoingQueue)
+        .set({ attempts: OUTGOING_MAX_ATTEMPTS })
+        .where(eq(outgoingQueue.id, id));
+      await db
+        .update(messages)
+        .set({ sendState: 'error', error: 1, errorMessage: null })
+        .where(eq(messages.guid, owner.guid));
+      return { claimed: false };
+    }
+
+    if (owner.generation === 0) {
+      // Generation zero is a durable legacy-mode marker. Never upgrade it based on today's
+      // capability advertisement; an old cached response cannot supply modern correlation.
+      await db
+        .update(messages)
+        .set({ sendState: 'sending', error: 0, errorMessage: null })
+        .where(eq(messages.guid, owner.guid));
+      return { claimed: true };
+    }
+    if (owner.generation >= MAX_SEND_ATTEMPT_OWNER_GENERATION) {
+      throw new Error('send attempt ownership generation exhausted');
+    }
+
+    const advanced = await db.all<{ generation: number }>(sql`
+      UPDATE messages
+         SET send_state = 'sending', error = 0, error_message = NULL,
+             attempt_owner_pending = 1,
+             attempt_owner_generation = attempt_owner_generation + 1
+       WHERE guid = ${owner.guid}
+         AND attempt_owner_generation = ${owner.generation}
+         AND attempt_owner_generation < ${MAX_SEND_ATTEMPT_OWNER_GENERATION}
+      RETURNING attempt_owner_generation AS generation
+    `);
+    if (!advanced[0]) {
+      // Keep the lease and generation in one all-or-nothing transaction. A partial claim would
+      // suppress the real owner for two minutes without giving this request a valid fence.
+      throw new Error('outgoing send attempt owner changed during claim');
+    }
+    return {
+      claimed: true,
+      attemptOwnerToken: { generation: advanced[0].generation },
+    };
   });
 }
 
@@ -417,11 +734,12 @@ export async function claimOutgoingForSend(
   clock: () => number,
   commitGuard?: DbCommitGuard,
 ): Promise<boolean> {
-  return withDbTransaction(
+  const result = await withDbTransaction(
     db,
     (context) => claimOutgoingForSendWithinTransaction(context, id, clock),
     commitGuard,
   );
+  return result.claimed;
 }
 
 /** Halves of an optimistic send that lost their partner (see {@link countOutgoingQueueHealth}). */
@@ -435,8 +753,9 @@ export interface OutgoingQueueHealth {
    */
   strandedSending: number;
   /**
-   * Queue rows whose optimistic message is gone. Each will be re-sent blind on the next drain,
-   * with no bubble anywhere to show for it — including a send the user explicitly cancelled.
+   * Queue rows whose optimistic message is gone and has no retained temp-to-canonical alias that
+   * resolves to an existing message. Each will be re-sent blind on the next drain, with no bubble
+   * anywhere to show for it — including a send the user explicitly cancelled.
    */
   orphanQueueRows: number;
 }
@@ -464,6 +783,12 @@ export async function countOutgoingQueueHealth(db: AppDatabase): Promise<Outgoin
       ) AS strandedSending,
       (SELECT COUNT(*) FROM outgoing_queue q
         WHERE NOT EXISTS (SELECT 1 FROM messages m WHERE m.guid = q.temp_guid)
+          AND NOT EXISTS (
+            SELECT 1
+              FROM message_guid_aliases a
+              JOIN messages m ON m.guid = a.canonical_guid
+             WHERE a.alias_guid = q.temp_guid
+          )
       ) AS orphanQueueRows`);
   return rows[0] ?? { strandedSending: 0, orphanQueueRows: 0 };
 }

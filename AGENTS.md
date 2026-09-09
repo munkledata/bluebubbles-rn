@@ -34,21 +34,21 @@ in the relevant document under `docs/`, then link to it here if future agents mu
 
 ## Read the relevant reference before editing
 
-| Area                                 | Current references                                              |
-| ------------------------------------ | --------------------------------------------------------------- |
-| Frozen DB-02A handoff                | `docs/DB_02A_CURRENT.md`                                        |
-| Session late-result ownership        | `docs/REL_004_LATE_RESULT_INVENTORY.md`                         |
-| Session teardown barrier             | `docs/REL_005A_TEARDOWN_INVENTORY.md`                           |
-| Authoritative plan and audit history | `docs/WORK_PLAN_2026-08-03.md`, `AUDIT_REPORT.md`               |
-| Phase/release dependencies           | `docs/PHASE-DEPENDENCIES.md`, `RELEASE_CHECKLIST.md`            |
-| App/server event and API parity      | `docs/APP_SERVER_PARITY.md`                                     |
-| Device proof runbook and history      | `docs/STORE_01G_INTERNAL_TESTING_RUNBOOK.md`, `docs/DEVICE_VERIFICATION_CHECKLIST.md`, `docs/SPIKES.md` |
-| Push/headless delivery               | `docs/PUSH_DELIVERY.md`                                         |
-| Upload behavior                      | `docs/UPLOAD_PROGRESS.md`                                       |
-| Attachment cache                     | `docs/CACHE_ARCHITECTURE.md`                                    |
-| Share intake                         | `docs/SHARE_INTENT_RELIABILITY.md`                              |
-| Session/account isolation            | `docs/SESSION_SCOPED_STATE_INVENTORY.md`                        |
-| Historical UI-test rollouts           | `docs/COMPONENT_TESTING_PLAN.md`, `docs/UI_COVERAGE_70_PLAN.md` |
+| Area                                 | Current references                                                                                      |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------- |
+| Frozen DB-02A handoff                | `docs/DB_02A_CURRENT.md`                                                                                |
+| Session late-result ownership        | `docs/REL_004_LATE_RESULT_INVENTORY.md`                                                                 |
+| Session teardown barrier             | `docs/REL_005A_TEARDOWN_INVENTORY.md`                                                                   |
+| Authoritative plan and audit history | `docs/WORK_PLAN_2026-08-03.md`, `AUDIT_REPORT.md`                                                       |
+| Phase/release dependencies           | `docs/PHASE-DEPENDENCIES.md`, `RELEASE_CHECKLIST.md`                                                    |
+| App/server event and API parity      | `docs/APP_SERVER_PARITY.md`                                                                             |
+| Device proof runbook and history     | `docs/STORE_01G_INTERNAL_TESTING_RUNBOOK.md`, `docs/DEVICE_VERIFICATION_CHECKLIST.md`, `docs/SPIKES.md` |
+| Push/headless delivery               | `docs/PUSH_DELIVERY.md`                                                                                 |
+| Upload behavior                      | `docs/UPLOAD_PROGRESS.md`                                                                               |
+| Attachment cache                     | `docs/CACHE_ARCHITECTURE.md`                                                                            |
+| Share intake                         | `docs/SHARE_INTENT_RELIABILITY.md`                                                                      |
+| Session/account isolation            | `docs/SESSION_SCOPED_STATE_INVENTORY.md`                                                                |
+| Historical UI-test rollouts          | `docs/COMPONENT_TESTING_PLAN.md`, `docs/UI_COVERAGE_70_PLAN.md`                                         |
 
 ## Architecture contracts
 
@@ -57,7 +57,8 @@ in the relevant document under `docs/`, then link to it here if future agents mu
 - `src/core/` is platform-free: no React, React Native, Expo, Zustand, native DB, feature, state,
   or UI imports. `npm run check:architecture` enforces this.
 - The encrypted DB is the source of truth. UI observes it; network and eligible realtime events write
-  through it. A locked FCM wake is the deliberate no-DB generic-notice exception.
+  through it. A locked legacy or V2 FCM wake is the deliberate no-DB generic-notice exception;
+  authenticated, active-bound V3 is durably admitted before its generic notice.
 - `HttpClient` is the only credential-injection boundary. Do not create another password transport.
 - `EventRouter` is the only realtime normalization entry point. New server events require the
   constant, normalized variant, normalization case, and the appropriate injected sink.
@@ -117,8 +118,9 @@ but its affected-row count is not portable. Use`RETURNING` or a builder when own
 
 ### Durable data rules
 
-- `incoming_event_queue` is the durable-before-effect path for socket, eligible unlocked FCM, and
-  DEV events. Claims are bounded/fenced; the DB-applied marker joins the exact domain transaction.
+- `incoming_event_queue` is the durable-before-effect path for socket, eligible unlocked FCM,
+  authenticated active-bound locked V3, and DEV events. Claims are bounded/fenced; the DB-applied
+  marker joins the exact domain transaction.
 - Local message/chat deletion uses tombstones, not hard row deletion. Preserve deletion ledgers,
   read-floor handoff, alias promotion, and the shared visibility predicate.
 - Replacing sets is add-then-prune, never truncate-then-refill. Readers may observe same-connection

@@ -130,7 +130,7 @@ describe('GroupEventSideEffectSink', () => {
       context,
     );
     await Promise.resolve();
-    expect(refetch).toHaveBeenCalledWith('chat-1');
+    expect(refetch).toHaveBeenCalledWith('chat-1', 7);
 
     attemptCurrent = false;
     releaseRefetch();

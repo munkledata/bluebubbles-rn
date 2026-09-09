@@ -1,5 +1,8 @@
 import { z } from 'zod/v4';
 
+/** Hard client ceiling even if a malformed server advertises a larger caption allowance. */
+export const MAX_SEND_ATTACHMENT_TEXT_BYTES = 65_536;
+
 /**
  * Subset of GET /api/v1/server/info used for version gating and discovery.
  *
@@ -19,8 +22,20 @@ export const ServerInfo = z
     proxy_service: z.string().nullish(),
     /** Whether the server accepts header-based auth (rebuild requirement). */
     supports_header_auth: z.boolean().nullish(),
+    /** Whether this server accepts per-device, scoped, independently revocable credentials. */
+    supports_scoped_device_credentials: z.boolean().nullish(),
     /** Whether device registration accepts and acknowledges a random per-device FCM key. */
     supports_fcm_device_encryption: z.boolean().nullish(),
+    /** Whether a scoped client can enroll the final identity-bound V3 push scheme. */
+    supports_fcm_push_encryption_v3: z.boolean().nullish(),
+    /** Whether V3 registration supports versioned, idempotent in-place push-key rotation. */
+    supports_fcm_push_key_rotation: z.boolean().nullish(),
+    /**
+     * Whether RCS acknowledgements and success/error events carry one exact server-owned physical
+     * attempt identity. Only this explicit capability enables client-side attempt-owner fencing;
+     * older servers keep the legacy temp-guid/content reconciliation path.
+     */
+    supports_rcs_send_attempt_ownership: z.boolean().nullish(),
     /**
      * Whether the server can detect message deletions (macOS "Recently Deleted") and emit the
      * `message-deleted` event. Additive; absent/false on older servers, which simply never emit the
@@ -41,6 +56,12 @@ export const ServerInfo = z
      * composer's "Contact" affordance on this so it never offers a send the server can't fulfil.
      */
     supports_send_contact: z.boolean().nullish(),
+    /** Whether the RCS media route consumes body text in the same logical send. */
+    supports_rcs_text_with_attachment: z.boolean().nullish(),
+    /** Whether the currently connected iMessage helper consumes text with the attachment. */
+    supports_imessage_text_with_attachment: z.boolean().nullish(),
+    /** Whether message payloads can carry bounded, exact Apple multipart topology. */
+    supports_message_part_topology: z.boolean().nullish(),
     /**
      * Whether the server can read/modify the signed-in iMessage account — the `icloud/account`
      * endpoints (Apple ID, display name, and the send-from alias picker) that require the Private-API

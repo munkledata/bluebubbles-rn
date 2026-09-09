@@ -48,6 +48,23 @@ describe('sessionAccessors.messageSearchSupported', () => {
   });
 });
 
+describe('sessionAccessors.messagePartTopologySupported', () => {
+  beforeEach(() => useSessionStore.setState({ serverInfo: null }));
+
+  it('is true only when the server explicitly advertises exact part topology', () => {
+    expect(sessionAccessors.messagePartTopologySupported()).toBe(false);
+    useSessionStore.setState({ serverInfo: ServerInfo.parse({ version: '1.9.0' }) });
+    expect(sessionAccessors.messagePartTopologySupported()).toBe(false);
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({
+        version: '1.9.0',
+        supports_message_part_topology: true,
+      }),
+    });
+    expect(sessionAccessors.messagePartTopologySupported()).toBe(true);
+  });
+});
+
 /**
  * The `supports_icloud_account` capability (iMessage-account F#8). The Settings "iMessage Account"
  * row gates on this accessor; false in every shape except a server that explicitly advertises it.
@@ -76,5 +93,39 @@ describe('sessionAccessors.icloudAccountSupported', () => {
       serverInfo: ServerInfo.parse({ version: '1.9.0', supports_icloud_account: true }),
     });
     expect(sessionAccessors.icloudAccountSupported()).toBe(true);
+  });
+});
+
+describe('session transport-scoped server info', () => {
+  it('rejects an A -> B -> A stale result, accepts the current revision, and clears info on hydration', () => {
+    const originalInfo = ServerInfo.parse({ version: '1.0.0' });
+    const rotatedInfo = ServerInfo.parse({ version: '2.0.0' });
+    const returnedInfo = ServerInfo.parse({ version: '3.0.0' });
+    const staleInfo = ServerInfo.parse({ version: 'stale' });
+    const currentInfo = ServerInfo.parse({ version: 'current' });
+
+    useSessionStore.getState().connected('https://a.example', 'password', originalInfo);
+    const staleRevision = useSessionStore.getState().transportRevision;
+
+    useSessionStore.getState().rotateOrigin('https://b.example', rotatedInfo);
+    useSessionStore.getState().rotateOrigin('https://a.example', returnedInfo);
+    const currentRevision = useSessionStore.getState().transportRevision;
+
+    expect(
+      useSessionStore
+        .getState()
+        .setServerInfoForTransport('https://a.example', staleRevision, staleInfo),
+    ).toBe(false);
+    expect(useSessionStore.getState().serverInfo).toBe(returnedInfo);
+
+    expect(
+      useSessionStore
+        .getState()
+        .setServerInfoForTransport('https://a.example', currentRevision, currentInfo),
+    ).toBe(true);
+    expect(useSessionStore.getState().serverInfo).toBe(currentInfo);
+
+    useSessionStore.getState().hydrated({ origin: 'https://a.example', password: 'password' });
+    expect(useSessionStore.getState().serverInfo).toBeNull();
   });
 });

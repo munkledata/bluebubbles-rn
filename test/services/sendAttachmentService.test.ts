@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
 import type { SendAck } from '@core/api/endpoints/messages';
 import type { HttpClient } from '@core/api/http';
-import { Chat, Message } from '@core/models';
+import { Chat, Message, ServerInfo } from '@core/models';
 import { logger } from '@core/secure';
 import {
   reconcileEchoByContent,
@@ -28,9 +28,15 @@ import {
   resumeRealtimeDeliveries,
   runTrackedRealtimeWork,
 } from '@/services/realtime/deliveryCoordinator';
+import { fixedRcsCapabilitySource } from '@/services/send/rcsAttemptCapability';
 import { createTestDb as createBaseTestDb } from '../support/testDb';
 
-const dummyHttp = {} as unknown as HttpClient;
+let dummyHttp!: HttpClient;
+dummyHttp = {
+  pinTransport: () => dummyHttp,
+  isTransportCurrent: () => true,
+  assertTransportCurrent: () => undefined,
+} as unknown as HttpClient;
 const openedDatabases: Database.Database[] = [];
 
 async function createTestDb() {
@@ -77,6 +83,33 @@ async function seedChat(db: AppDatabase, guid: string) {
   const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
   await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], handles);
 }
+
+async function seedReplyTarget(db: AppDatabase) {
+  const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
+  const chats = await upsertChats(
+    db,
+    [Chat.parse({ guid: 'c1', participants: [{ address: 'a@x.com' }] })],
+    handles,
+  );
+  await upsertMessages(
+    db,
+    [
+      Message.parse({
+        guid: 'reply-target',
+        text: 'reply target',
+        dateCreated: 900,
+        messagePartTopology: {
+          complete: true,
+          originalPartIndexes: [2],
+          currentParts: [{ index: 2, kind: 'text' }],
+          attachmentOwnership: [],
+        },
+      }),
+    ],
+    () => chats.get('c1')!,
+    handles,
+  );
+}
 const one = (raw: Database.Database, sql: string) =>
   raw.prepare(sql).get() as Record<string, unknown>;
 
@@ -112,6 +145,134 @@ async function echoMessageWithAttachment(
 }
 
 describe('sendImageMessage', () => {
+  it('rejects an attachment-only RCS reply before DB, cache, or upload work', async () => {
+    const { db, raw } = await createTestDb();
+    const protect = jest.spyOn(attachmentCacheCoordinator, 'protect');
+    const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+
+    await expect(
+      sendImageMessage(
+        db,
+        dummyHttp,
+        {
+          chatGuid: 'RCS;-;thread-1',
+          image: IMG,
+          // A stale caller cannot bypass the guard with the wrong service label.
+          service: 'iMessage',
+          selectedMessageGuid: 'rcs-target',
+          partIndex: 0,
+        },
+        up.upload,
+      ),
+    ).rejects.toThrow('This server cannot send an RCS media reply.');
+
+    expect(protect).not.toHaveBeenCalled();
+    expect(up.captured).toBeUndefined();
+    expect((one(raw, 'SELECT COUNT(*) c FROM messages') as { c: number }).c).toBe(0);
+    expect((one(raw, 'SELECT COUNT(*) c FROM attachments') as { c: number }).c).toBe(0);
+    expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
+  });
+
+  it('queues one iMessage identity for one attachment plus text and carries it through upload', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await seedReplyTarget(db);
+    const onQueued = jest.fn();
+    const up = fakeUploader(async (args) => {
+      expect(args).toMatchObject({
+        chatGuid: 'c1',
+        text: 'caption',
+        selectedMessageGuid: 'reply-target',
+        partIndex: 2,
+      });
+      const provisional = one(
+        raw,
+        `SELECT m.guid, m.text, m.part_count AS partCount,
+                m.thread_originator_guid AS replyGuid,
+                m.thread_originator_part AS replyPart,
+                q.kind, q.payload
+           FROM messages m
+           JOIN outgoing_queue q ON q.temp_guid = m.guid`,
+      );
+      expect(provisional).toMatchObject({
+        guid: args.tempGuid,
+        text: 'caption',
+        partCount: 2,
+        replyGuid: 'reply-target',
+        replyPart: 2,
+        kind: 'attachment',
+      });
+      expect(JSON.parse(String(provisional.payload))).toEqual({
+        attachmentGuid: args.attachmentGuid,
+        localPath: IMG.uri,
+        text: 'caption',
+        selectedMessageGuid: 'reply-target',
+        partIndex: 2,
+      });
+      return { guid: 'real-combined-message', viaPrivateApi: true };
+    });
+
+    await sendImageMessage(
+      db,
+      dummyHttp,
+      {
+        chatGuid: 'c1',
+        image: IMG,
+        text: 'caption',
+        service: 'iMessage',
+        selectedMessageGuid: 'reply-target',
+        partIndex: 2,
+      },
+      up.upload,
+      1_000,
+      undefined,
+      undefined,
+      undefined,
+      onQueued,
+      fixedRcsCapabilitySource(
+        ServerInfo.parse({
+          version: '1.0.0',
+          private_api: true,
+          supports_imessage_text_with_attachment: true,
+        }),
+      ),
+    );
+
+    expect(onQueued).toHaveBeenCalledTimes(1);
+    expect(onQueued).toHaveBeenCalledWith(up.captured?.tempGuid);
+    expect((one(raw, 'SELECT COUNT(*) c FROM messages') as { c: number }).c).toBe(2);
+    expect((one(raw, 'SELECT COUNT(*) c FROM attachments') as { c: number }).c).toBe(1);
+    expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
+  });
+
+  it('fails closed before DB, cache, or upload work when the server omits combined-send support', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const protect = jest.spyOn(attachmentCacheCoordinator, 'protect');
+    const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+
+    await expect(
+      sendImageMessage(
+        db,
+        dummyHttp,
+        { chatGuid: 'c1', image: IMG, text: 'keep me', service: 'iMessage' },
+        up.upload,
+        1_000,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        fixedRcsCapabilitySource(ServerInfo.parse({ version: '1.0.0', private_api: true })),
+      ),
+    ).rejects.toThrow('This server cannot send text with an attachment for this chat service.');
+
+    expect(protect).not.toHaveBeenCalled();
+    expect(up.captured).toBeUndefined();
+    expect((one(raw, 'SELECT COUNT(*) c FROM messages') as { c: number }).c).toBe(0);
+    expect((one(raw, 'SELECT COUNT(*) c FROM attachments') as { c: number }).c).toBe(0);
+    expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
+  });
+
   it('fails before DB/network work when cache retirement already owns the source path', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');

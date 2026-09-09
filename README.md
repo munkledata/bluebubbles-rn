@@ -132,8 +132,10 @@ the EAS profiles intentionally have no update-channel fields.
   copies, and image or other Android/Expo-managed caches are ordinary plaintext files in Android
   app-private storage.
   Files explicitly saved—or images automatically exported—to Photos/the Gator album are plaintext
-  copies in Android shared media storage and are not removed by disconnect or uninstall. Settings →
-  Storage & File Privacy explains cleanup and backup behavior.
+  copies in Android shared media storage and are not removed by disconnect or uninstall. An image
+  delivered while Gator is closed or in the background may remain only in the app-private cache;
+  that automatic shared-media copy is not retried. Settings → Storage & File Privacy explains
+  cleanup and backup behavior.
 - **Backups:** the current UI encrypts settings/customization backups with a user passphrase before
   writing the temporary share file, then deletes that temporary file after sharing.
 - **Transport TLS:** HTTPS uses Android’s normal certificate and hostname validation. There is no

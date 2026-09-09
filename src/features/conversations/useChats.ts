@@ -18,7 +18,7 @@ import { createRowIdentityCache } from './rowIdentity';
 const TABLES = ['messages', 'chats', 'chat_handles', 'handles'];
 
 export interface UseChatsOptions {
-  /** Omit for the legacy unbounded search projection; visible list screens always pass 50. */
+  /** Production list surfaces pass 50; omission remains compatibility-only. */
   pageSize?: number;
   archive?: InboxArchiveFilter;
   sender?: InboxSenderFilter;

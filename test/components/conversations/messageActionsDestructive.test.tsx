@@ -22,10 +22,12 @@
  * The hook is driven directly (renderHook); `showDialog` is captured so the confirm button can be
  * pressed, and every native/service leaf is mocked.
  */
+import { useState } from 'react';
 import { renderHook, act, waitFor } from '../support/renderWithTheme';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
 
 const mockIsDevServer = jest.fn(() => false);
+let mockTopologySupported: boolean | null = false;
 
 jest.mock('expo-router', () => ({ useRouter: () => ({ push: jest.fn() }) }));
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn() }));
@@ -42,6 +44,9 @@ jest.mock('@features/conversations/devSeed', () => ({
   devUnsendFake: jest.fn(),
 }));
 jest.mock('@utils/isDev', () => ({ isDevServer: () => mockIsDevServer() }));
+jest.mock('@state/sessionStore', () => ({
+  useMessagePartTopologySupported: () => mockTopologySupported,
+}));
 jest.mock('@ui/conversations/pickReminderTime', () => ({ pickReminderTime: jest.fn() }));
 jest.mock('@/services/send', () => ({
   discardMessage: jest.fn(async () => {}),
@@ -107,23 +112,28 @@ const msg = (guid: string, sendState: string | null): EnrichedMessage =>
 
 const rect = { x: 0, y: 0, width: 10, height: 10 };
 
-async function mount(messages: EnrichedMessage[]) {
+async function mount(messages: EnrichedMessage[], guid = 'iMessage;-;+15550001111') {
   const setReplyTo = jest.fn();
-  const hook = await renderHook(() =>
-    useMessageActions({
-      guid: 'iMessage;-;+15550001111',
-      messages,
-      chatTitle: 'Alice',
-      setReplyTo,
-      setEditing: jest.fn(),
-    }),
-  );
+  const hook = await renderHook(() => {
+    const [liveMessages, setLiveMessages] = useState(messages);
+    return {
+      ...useMessageActions({
+        guid,
+        messages: liveMessages,
+        chatTitle: 'Alice',
+        setReplyTo,
+        setEditing: jest.fn(),
+      }),
+      setLiveMessages,
+    };
+  });
   return { ...hook, setReplyTo };
 }
 
 beforeEach(() => {
   jest.clearAllMocks();
   mockIsDevServer.mockReturnValue(false);
+  mockTopologySupported = false;
   mockPickReminderTime.mockResolvedValue(2_000);
   mockScheduleMessageReminder.mockResolvedValue(1);
   dialogs.length = 0;
@@ -185,6 +195,60 @@ describe('useMessageActions — DEV reaction account scope', () => {
     expect(setReplyTo).toHaveBeenNthCalledWith(1, expectedReply);
     expect(setReplyTo).toHaveBeenNthCalledWith(2, expectedReply);
   });
+
+  it.each([
+    {
+      caseName: 'legacy part-zero targeting',
+      topologySupported: false,
+      topology: null,
+    },
+    {
+      caseName: 'exact message-part topology',
+      topologySupported: true,
+      topology: JSON.stringify({
+        complete: true,
+        originalPartIndexes: [4],
+        currentParts: [{ index: 4, kind: 'text' }],
+        attachmentOwnership: [],
+      }),
+    },
+  ])(
+    'allows a whole-message RCS reaction but no reply with $caseName',
+    async ({ topologySupported, topology }) => {
+      mockTopologySupported = topologySupported;
+      const target = {
+        ...msg('rcs-message-a', null),
+        messagePartTopology: topology,
+      } as EnrichedMessage;
+      const { result, setReplyTo } = await mount([target], 'RCS;-;thread-1');
+      await act(async () => {
+        result.current.onLongPressMessage(target, rect);
+      });
+
+      expect(result.current.selected?.canReact).toBe(true);
+      expect(result.current.selected?.targetPartIndex).toBeUndefined();
+
+      await act(async () => {
+        result.current.onReact('love');
+        result.current.onReplyToSelected();
+        result.current.onSwipeReply(target);
+      });
+
+      expect(react).toHaveBeenCalledWith(
+        {
+          chatGuid: 'RCS;-;thread-1',
+          targetGuid: 'rcs-message-a',
+          reaction: 'love',
+          emoji: undefined,
+          partIndex: 0,
+          selectedMessageText: 'hi',
+        },
+        expect.objectContaining({ isCurrent: expect.any(Function) }),
+        expect.any(Function),
+      );
+      expect(setReplyTo).not.toHaveBeenCalled();
+    },
+  );
 
   it('keeps a lean interactive payload out of attachment actions and reply previews', async () => {
     const target = {
@@ -254,6 +318,32 @@ describe('useMessageActions — DEV reaction account scope', () => {
     expect(react).not.toHaveBeenCalled();
     expect(devSendFakeReaction).not.toHaveBeenCalled();
     expect(setReplyTo).not.toHaveBeenCalled();
+  });
+
+  it('retires a frozen action snapshot when a live retraction arrives', async () => {
+    const target = msg('message-retracted-live', null);
+    const { result } = await mount([target]);
+    await act(async () => {
+      result.current.onLongPressMessage(target, rect);
+    });
+    expect(result.current.selected?.guid).toBe(target.guid);
+
+    await act(async () => {
+      result.current.setLiveMessages([
+        { ...target, dateRetracted: 2_000, retractionState: 'unknown' },
+      ] as EnrichedMessage[]);
+    });
+    expect(result.current.selected).toBeNull();
+
+    await act(async () => {
+      result.current.onReact('love');
+      result.current.onSwipeReply({
+        ...target,
+        dateRetracted: 2_000,
+        retractionState: 'unknown',
+      } as EnrichedMessage);
+    });
+    expect(react).not.toHaveBeenCalled();
   });
 });
 

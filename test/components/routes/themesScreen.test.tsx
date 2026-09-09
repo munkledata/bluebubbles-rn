@@ -219,6 +219,63 @@ async function closeEditor(): Promise<void> {
 }
 
 describe('ThemesScreen reduced motion', () => {
+  it('exposes uniquely named theme-management controls and the active selection', async () => {
+    mockListCustomThemes.mockResolvedValue([
+      ROW,
+      {
+        ...ROW,
+        id: 8,
+        name: 'Light Theme',
+        mode: 'light',
+        tokens: JSON.stringify({ ...gatorTheme, mode: 'light' }),
+      },
+      { ...ROW, id: 9, name: 'Corrupt Theme', tokens: '{' },
+    ]);
+    await renderWithTheme(<ThemesScreen />);
+
+    expect(await screen.findByRole('button', { name: 'Create custom theme' })).toBeTruthy();
+    await act(async () => {
+      useThemeStore.setState({ customThemeId: 7, customTokens: gatorTheme });
+    });
+    expect(
+      screen.getByRole('button', { name: 'Apply Account A Theme' }).props.accessibilityState,
+    ).toMatchObject({ selected: true });
+    expect(
+      screen.getByRole('button', { name: 'Light Theme, light theme unavailable' }).props
+        .accessibilityState,
+    ).toMatchObject({ selected: false });
+    expect(
+      screen.getByRole('button', { name: 'Light Theme, light theme unavailable' }).props
+        .accessibilityHint,
+    ).toBe('Shows why this theme can’t be applied');
+    expect(
+      screen.getByRole('button', { name: 'Corrupt Theme, theme unavailable' }).props
+        .accessibilityHint,
+    ).toBe('Shows why this theme can’t be applied');
+    expect(screen.getByRole('button', { name: 'Edit Account A Theme' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Edit Light Theme' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Delete Account A Theme' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Delete Corrupt Theme' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Revert to built-in preset' })).toBeTruthy();
+
+    await fireEvent.press(
+      screen.getByRole('button', { name: 'Light Theme, light theme unavailable' }),
+    );
+    await fireEvent.press(screen.getByRole('button', { name: 'Corrupt Theme, theme unavailable' }));
+    expect(mockShowDialog).toHaveBeenNthCalledWith(
+      1,
+      'Light theme unavailable',
+      expect.stringContaining('can’t be applied while Gator is dark-only'),
+    );
+    expect(mockShowDialog).toHaveBeenNthCalledWith(
+      2,
+      'Theme',
+      'This theme is corrupted and can’t be applied.',
+    );
+    expect(mockGetCustomThemeByIdWithinTransaction).not.toHaveBeenCalled();
+    expect(mockKvSetWithinTransaction).not.toHaveBeenCalled();
+  });
+
   it('latches an unresolved opening at none and applies later false only after reopening', async () => {
     const preference = deferred<boolean>();
     mockIsReduceMotionEnabled.mockReturnValue(preference.promise);

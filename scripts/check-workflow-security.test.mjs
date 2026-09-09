@@ -18,6 +18,10 @@ const toolchainGuardStep = [
   '        run: node scripts/check-toolchain.mjs',
 ].join('\n');
 const installStep = ['      - name: Install dependencies', '        run: npm ci'].join('\n');
+const androidNativePathGuardStep = [
+  '      - name: Verify Android native path hygiene',
+  '        run: npm run check:android-native-paths',
+].join('\n');
 
 function errorsFor(
   workflowMutation = workflow,
@@ -536,6 +540,47 @@ test('requires the fail-closed database write approval guard after dependency in
   assert.ok(errorsFor(duplicateSteps).some((error) => error.includes('"steps" exactly once')));
 });
 
+test('requires a separate fail-closed fast database-write suite immediately after approval', () => {
+  const fastStep = [
+    '      - name: Fast database-write scanner suite',
+    '        run: npm run check:db-writes:fast',
+  ].join('\n');
+
+  const wrongCommand = workflow.replace(
+    'npm run check:db-writes:fast',
+    'node scripts/check-db-writes.mjs --report',
+  );
+  assert.notEqual(wrongCommand, workflow);
+  assert.ok(errorsFor(wrongCommand).some((error) => error.includes('must run exactly once')));
+
+  const conditional = workflow.replace(
+    fastStep,
+    `${fastStep.split('\n')[0]}\n        if: false\n${fastStep.split('\n')[1]}`,
+  );
+  assert.notEqual(conditional, workflow);
+  assert.ok(errorsFor(conditional).some((error) => error.includes('may contain only')));
+
+  const ignored = workflow.replace(
+    fastStep,
+    `${fastStep.split('\n')[0]}\n        continue-on-error: true\n${fastStep.split('\n')[1]}`,
+  );
+  assert.notEqual(ignored, workflow);
+  assert.ok(errorsFor(ignored).some((error) => error.includes('may contain only')));
+
+  const missing = workflow.replace(`${fastStep}\n\n`, '');
+  assert.notEqual(missing, workflow);
+  assert.ok(errorsFor(missing).some((error) => error.includes('exactly once')));
+
+  const moved = workflow
+    .replace(`${fastStep}\n\n`, '')
+    .replace(
+      '      - name: Audit production dependencies',
+      `${fastStep}\n\n      - name: Audit production dependencies`,
+    );
+  assert.notEqual(moved, workflow);
+  assert.ok(errorsFor(moved).some((error) => error.includes('must immediately follow')));
+});
+
 test('requires the exact fail-closed UI coverage gate after dependency install', () => {
   const step = [
     '      - name: Unit tests and UI coverage gate',
@@ -610,6 +655,58 @@ test('requires the Android build job', () => {
   const mutated = workflow.replace('\n  android:\n', '\n  android-disabled:\n');
   assert.notEqual(mutated, workflow, 'the Android job mutation must change the fixture');
   assert.ok(errorsFor(mutated).some((error) => error.includes('Android build job')));
+});
+
+test('pins the Android Gradle home and native compiler path maps', () => {
+  const changedGradleHome = workflow.replace(
+    '      GRADLE_USER_HOME: /var/tmp/gator-gradle',
+    '      GRADLE_USER_HOME: /home/runner/.gradle',
+  );
+  assert.notEqual(changedGradleHome, workflow);
+  assert.ok(
+    errorsFor(changedGradleHome).some((error) =>
+      error.includes('native path-scrubbing environment'),
+    ),
+  );
+
+  for (const flag of [
+    '-ffile-prefix-map=${{ github.workspace }}=/gator/source',
+    '-fdebug-prefix-map=${{ github.workspace }}=/gator/source',
+    '-ffile-prefix-map=/var/tmp/gator-gradle=/gator/gradle',
+    '-fdebug-prefix-map=/var/tmp/gator-gradle=/gator/gradle',
+  ]) {
+    for (const occurrence of [0, 1]) {
+      const mutated = replaceOccurrence(
+        workflow,
+        flag,
+        `${flag}-weakened`,
+        occurrence,
+        `${flag} mutation`,
+      );
+      assert.ok(
+        errorsFor(mutated).some((error) => error.includes('native path-scrubbing environment')),
+        `${flag} occurrence ${occurrence + 1} must fail closed`,
+      );
+    }
+  }
+
+  for (const variable of ['CFLAGS', 'CXXFLAGS']) {
+    const mutated = workflow.replace(`      ${variable}: >-`, `      ${variable}: ''`);
+    assert.notEqual(mutated, workflow, `${variable} mutation must change the fixture`);
+    assert.ok(
+      errorsFor(mutated).some((error) => error.includes('native path-scrubbing environment')),
+      `${variable} must fail closed`,
+    );
+  }
+
+  const extraFlag = workflow.replace(
+    '      CXXFLAGS: >-',
+    '      UNREVIEWED_NATIVE_FLAGS: -g\n      CXXFLAGS: >-',
+  );
+  assert.notEqual(extraFlag, workflow);
+  assert.ok(
+    errorsFor(extraFlag).some((error) => error.includes('native path-scrubbing environment')),
+  );
 });
 
 test('requires a clean Expo Android prebuild', () => {
@@ -711,6 +808,19 @@ test('requires the local bounded-download Kotlin compile task', () => {
   );
 });
 
+test('requires the local bounded-document Kotlin compile task', () => {
+  const mutated = workflow.replace(
+    ':gator-bounded-document:compileDebugKotlin',
+    ':gator-bounded-document:tasks',
+  );
+  assert.notEqual(mutated, workflow, 'the bounded-document mutation must change the fixture');
+  assert.ok(
+    errorsFor(mutated).some((error) =>
+      error.includes(':gator-bounded-document:compileDebugKotlin'),
+    ),
+  );
+});
+
 test('requires the local screen-security Kotlin compile task', () => {
   const mutated = workflow.replace(
     ':gator-screen-security:compileDebugKotlin',
@@ -722,10 +832,108 @@ test('requires the local screen-security Kotlin compile task', () => {
   );
 });
 
+test('requires every local native module unit-test task that has test sources', () => {
+  for (const task of [
+    ':gator-paste-input:testDebugUnitTest',
+    ':gator-share-shortcuts:testDebugUnitTest',
+    ':gator-bounded-document:testDebugUnitTest',
+    ':gator-bounded-download:testDebugUnitTest',
+    ':expo-file-system:testDebugUnitTest',
+  ]) {
+    const mutated = workflow.replace(task, `${task.slice(0, task.lastIndexOf(':'))}:tasks`);
+    assert.notEqual(mutated, workflow, `${task} mutation must change the fixture`);
+    assert.ok(
+      errorsFor(mutated).some((error) => error.includes(task)),
+      `${task} must fail closed`,
+    );
+  }
+});
+
+test('requires the exact blocking native test step immediately before packaging', () => {
+  const stepName = '      - name: Test local native modules';
+  const step = [
+    stepName,
+    '        working-directory: android',
+    '        run: >-',
+    '          ./gradlew',
+    '          :gator-paste-input:testDebugUnitTest',
+    '          :gator-share-shortcuts:testDebugUnitTest',
+    '          :gator-bounded-document:testDebugUnitTest',
+    '          :gator-bounded-download:testDebugUnitTest',
+    '          :expo-file-system:testDebugUnitTest',
+    '          --no-daemon',
+  ].join('\n');
+  for (const control of ['if: false', 'continue-on-error: true']) {
+    const mutated = workflow.replace(stepName, `${stepName}\n        ${control}`);
+    assert.notEqual(mutated, workflow, `${control} mutation must change the fixture`);
+    assert.ok(
+      errorsFor(mutated).some((error) =>
+        error.includes('exact reviewed "Test local native modules"'),
+      ),
+      `${control} must fail closed`,
+    );
+  }
+
+  const moved = workflow
+    .replace(`${step}\n\n`, '')
+    .replace('      - name: Bundle release AAB', `${step}\n\n      - name: Bundle release AAB`);
+  assert.notEqual(moved, workflow);
+  assert.ok(errorsFor(moved).some((error) => error.includes('compile, test, and then package')));
+});
+
 test('requires the release AAB bundle task', () => {
   const mutated = workflow.replace(':app:bundleRelease', ':app:tasks');
   assert.notEqual(mutated, workflow, 'the bundleRelease mutation must change the fixture');
   assert.ok(errorsFor(mutated).some((error) => error.includes('release AAB in its own')));
+});
+
+test('requires the exact blocking native path guard immediately after the release bundle', () => {
+  const wrongCommand = workflow.replace(
+    '        run: npm run check:android-native-paths',
+    '        run: npm --version',
+  );
+  assert.notEqual(wrongCommand, workflow);
+  assert.ok(errorsFor(wrongCommand).some((error) => error.includes('check:android-native-paths')));
+
+  for (const control of ['if: false', 'continue-on-error: true']) {
+    const mutated = workflow.replace(
+      '      - name: Verify Android native path hygiene',
+      `      - name: Verify Android native path hygiene\n        ${control}`,
+    );
+    assert.notEqual(mutated, workflow, `${control} mutation must change the fixture`);
+    assert.ok(
+      errorsFor(mutated).some((error) =>
+        error.includes('exact reviewed "Verify Android native path hygiene"'),
+      ),
+      `${control} must fail closed`,
+    );
+  }
+
+  const moved = workflow
+    .replace(`${androidNativePathGuardStep}\n\n`, '')
+    .replace(
+      '      - name: Bundle release AAB',
+      `${androidNativePathGuardStep}\n\n      - name: Bundle release AAB`,
+    );
+  assert.notEqual(moved, workflow);
+  assert.ok(
+    errorsFor(moved).some((error) =>
+      error.includes('immediately after the release bundle and before packaged Android'),
+    ),
+  );
+
+  const movedAfterArtifactGuard = workflow
+    .replace(`${androidNativePathGuardStep}\n\n`, '')
+    .replace(
+      '      - name: Retain debug APK for scheduled database checks',
+      `${androidNativePathGuardStep}\n\n      - name: Retain debug APK for scheduled database checks`,
+    );
+  assert.notEqual(movedAfterArtifactGuard, workflow);
+  assert.ok(
+    errorsFor(movedAfterArtifactGuard).some((error) =>
+      error.includes('immediately after the release bundle and before packaged Android'),
+    ),
+  );
 });
 
 test('requires debug and release packaging to use separate Gradle invocations', () => {

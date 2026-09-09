@@ -1,6 +1,8 @@
 import {
   readAccountRevocationState,
+  resolveCredentialUpgrade,
   SERVER_SESSION_STATE,
+  type CredentialUpgradeQuarantineReason,
   type AccountRevocationMarker,
   type SecureVault,
 } from '@core/secure';
@@ -17,12 +19,17 @@ export type DurableSessionInspection =
   | { readonly kind: 'empty' }
   | { readonly kind: 'revoked' }
   | { readonly kind: 'cleanup-required' }
+  | {
+      readonly kind: 'upgrade-quarantined';
+      readonly reason: CredentialUpgradeQuarantineReason;
+    }
   | { readonly kind: 'unavailable'; readonly source: 'marker' | 'vault'; readonly error?: unknown };
 
 interface StoredServerSession {
   readonly sessionState: string | null;
   readonly origin: string | null;
   readonly password: string | null;
+  readonly credentialUpgrade: string | null;
 }
 
 /**
@@ -43,12 +50,13 @@ export async function inspectDurableServerSession(
 
   let session: StoredServerSession;
   try {
-    const [sessionState, origin, password] = await Promise.all([
+    const [sessionState, origin, password, credentialUpgrade] = await Promise.all([
       vault.get('serverSessionState'),
       vault.get('serverAddress'),
       vault.get('serverPassword'),
+      vault.get('serverCredentialUpgrade'),
     ]);
-    session = { sessionState, origin, password };
+    session = { sessionState, origin, password, credentialUpgrade };
   } catch (error) {
     return { kind: 'unavailable', source: 'vault', error };
   }
@@ -59,18 +67,29 @@ export async function inspectDurableServerSession(
 
   const hasOrigin = !!session.origin;
   const hasPassword = !!session.password;
-  if (session.sessionState === null && !hasOrigin && !hasPassword) return { kind: 'empty' };
-  if (
+  const completeSession =
     (session.sessionState === null || session.sessionState === SERVER_SESSION_STATE.active) &&
     session.origin &&
-    session.password
-  ) {
+    session.password;
+  const upgrade = resolveCredentialUpgrade(
+    session.credentialUpgrade,
+    completeSession ? { origin: session.origin!, credential: session.password! } : null,
+  );
+  if (upgrade.kind === 'revoked') return { kind: 'revoked' };
+  if (upgrade.kind === 'quarantined') {
+    return { kind: 'upgrade-quarantined', reason: upgrade.reason };
+  }
+  if (session.sessionState === null && !hasOrigin && !hasPassword && upgrade.kind === 'none') {
+    return { kind: 'empty' };
+  }
+  if (completeSession && upgrade.session) {
     return {
       kind: 'ready',
       session: Object.freeze({
-        sessionState: session.sessionState,
-        origin: session.origin,
-        password: session.password,
+        sessionState:
+          session.sessionState === SERVER_SESSION_STATE.active ? SERVER_SESSION_STATE.active : null,
+        origin: upgrade.session.origin,
+        password: upgrade.session.credential,
       }),
     };
   }

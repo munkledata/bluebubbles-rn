@@ -126,13 +126,17 @@ describe('StepperRow', () => {
       />,
     );
     expect(screen.getByText('2')).toBeTruthy();
+    const decrement = screen.getByRole('button', { name: 'Fewer parallel downloads' });
+    const increment = screen.getByRole('button', { name: 'More parallel downloads' });
+    expect(decrement.props.accessibilityState).toEqual({ disabled: false });
+    expect(increment.props.accessibilityState).toEqual({ disabled: false });
     // Two presses in one test: await each act scope (an un-awaited pair overlaps act()
     // under React 19 and corrupts every later test in the file — see AGENTS.md).
     await act(async () => {
-      fireEvent.press(screen.getByLabelText('Fewer parallel downloads'));
+      fireEvent.press(decrement);
     });
     await act(async () => {
-      fireEvent.press(screen.getByLabelText('More parallel downloads'));
+      fireEvent.press(increment);
     });
     expect(onDecrement).toHaveBeenCalledTimes(1);
     expect(onIncrement).toHaveBeenCalledTimes(1);
@@ -152,7 +156,12 @@ describe('StepperRow', () => {
         incrementLabel="More messages per chat"
       />,
     );
-    fireEvent.press(screen.getByLabelText('Fewer messages per chat'));
+    const decrement = screen.getByRole('button', { name: 'Fewer messages per chat' });
+    expect(decrement.props.accessibilityState).toEqual({ disabled: true });
+    expect(
+      screen.getByRole('button', { name: 'More messages per chat' }).props.accessibilityState,
+    ).toEqual({ disabled: false });
+    fireEvent.press(decrement);
     expect(onDecrement).not.toHaveBeenCalled();
   });
 });

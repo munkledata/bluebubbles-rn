@@ -1,6 +1,7 @@
 import { sql } from 'drizzle-orm';
 import type { AppDatabase } from '@db/types';
 import { kvSetWithinTransaction, NOTIFICATION_ROUTE_KV_PREFIX } from '@db/repositories';
+import { messageHasVisibleContentSql } from '@db/repositories/chatVisibility';
 import { withDbTransaction, type DbCommitGuard } from '@db/transaction';
 
 /**
@@ -54,6 +55,25 @@ interface DurableReminderTriggerRow {
   messageDate: number | null;
 }
 
+/**
+ * Current encrypted-DB truth for one Android MessagingStyle history line. Native history stores
+ * only the opaque local ids, so reconciliation never needs to move a server GUID through Android.
+ */
+export interface MessageNotificationTruth {
+  messageId: number;
+  chatId: number;
+  notificationEligible: number;
+  retractionState: string | null;
+  dateRetracted: number | null;
+  messagePartTopology: string | null;
+  text: string | null;
+  subject: string | null;
+  hasAttachments: number;
+  hasVisibleAttachments: number;
+  attachmentDescription: string | null;
+  balloonBundleId: string | null;
+}
+
 export interface ResolvedNotificationData {
   [key: string]: unknown;
   chatGuid?: string;
@@ -69,6 +89,8 @@ const SAFE_CHAT_NOTIFICATION_PREFIX = 'gator-message-';
 const SAFE_SEND_FAILURE_NOTIFICATION_PREFIX = 'gator-send-failure-';
 const SAFE_REMINDER_NOTIFICATION_PREFIX = 'gator-reminder-';
 const SAFE_FACETIME_NOTIFICATION_PREFIX = 'gator-facetime-';
+export const MAX_MESSAGE_NOTIFICATION_TRUTH_IDS = 512;
+const MESSAGE_NOTIFICATION_TRUTH_QUERY_CHUNK = 100;
 const RANDOM_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_REMINDER_ID = new RegExp(
   `^${SAFE_REMINDER_NOTIFICATION_PREFIX}(?:message-\\d+|row-\\d+|random-${RANDOM_UUID.source.slice(1, -1)})-\\d+$`,
@@ -137,6 +159,87 @@ export async function localRouteForMessageGuid(
 }
 
 /**
+ * Resolve a bounded set of Android-owned local message ids against current encrypted-DB truth.
+ * Missing ids are deliberately omitted: the caller treats missing as hidden and removes the line.
+ */
+export async function listMessageNotificationTruth(
+  messageIds: readonly number[],
+  db?: AppDatabase,
+): Promise<MessageNotificationTruth[]> {
+  const uniqueIds = [...new Set(messageIds)];
+  if (
+    uniqueIds.length > MAX_MESSAGE_NOTIFICATION_TRUTH_IDS ||
+    uniqueIds.some((id) => !Number.isSafeInteger(id) || id <= 0)
+  ) {
+    throw new RangeError('message notification truth ids exceed their safety bound');
+  }
+  if (uniqueIds.length === 0) return [];
+
+  const database = db ?? (await notificationDatabase());
+  const truth: MessageNotificationTruth[] = [];
+  for (
+    let offset = 0;
+    offset < uniqueIds.length;
+    offset += MESSAGE_NOTIFICATION_TRUTH_QUERY_CHUNK
+  ) {
+    const chunk = uniqueIds.slice(offset, offset + MESSAGE_NOTIFICATION_TRUTH_QUERY_CHUNK);
+    const inList = sql.join(
+      chunk.map((id) => sql`${id}`),
+      sql`, `,
+    );
+    const rows = await database.all<MessageNotificationTruth>(sql`
+      SELECT m.id AS messageId,
+             m.chat_id AS chatId,
+             CASE WHEN
+               m.is_from_me = 0
+               AND m.associated_message_type IS NULL
+               AND ${messageHasVisibleContentSql('m')}
+               AND m.date_deleted IS NULL
+               AND m.date_created > COALESCE(
+                 (SELECT lm.date_created
+                    FROM messages lm
+                   WHERE lm.guid = c.last_read_message_guid),
+                 0
+               )
+               AND (c.deleted_at IS NULL OR m.date_created > c.deleted_at)
+               AND (c.mute_type IS NULL OR c.mute_type <> 'mute')
+             THEN 1 ELSE 0 END AS notificationEligible,
+             m.retraction_state AS retractionState,
+             m.date_retracted AS dateRetracted,
+             m.message_part_topology AS messagePartTopology,
+             m.text,
+             m.subject,
+             m.has_attachments AS hasAttachments,
+             CASE WHEN m.balloon_bundle_id IS NULL THEN
+               EXISTS(
+                 SELECT 1
+                   FROM attachments a
+                  WHERE a.message_id = m.id
+                    AND COALESCE(a.hide_attachment, 0) = 0
+                    AND a.is_retracted = 0
+               )
+             ELSE 0 END AS hasVisibleAttachments,
+             (SELECT a.emoji_image_short_description
+                FROM attachments a
+               WHERE a.message_id = m.id
+                 AND m.balloon_bundle_id IS NULL
+                 AND COALESCE(a.hide_attachment, 0) = 0
+                 AND a.is_retracted = 0
+                 AND a.emoji_image_short_description IS NOT NULL
+               ORDER BY a.id ASC
+               LIMIT 1) AS attachmentDescription,
+             m.balloon_bundle_id AS balloonBundleId
+        FROM messages m
+        JOIN chats c ON c.id = m.chat_id
+       WHERE m.id IN (${inList})
+       ORDER BY m.id ASC
+    `);
+    truth.push(...rows);
+  }
+  return truth;
+}
+
+/**
  * Re-check current encrypted-DB truth immediately before a failed-send notice is derived or posted.
  * A durable retry must not resurrect a notice after success, retry admission, or local deletion.
  */
@@ -158,7 +261,7 @@ export async function localFailedMessageRoute(
        AND m.is_from_me = 1
        AND m.send_state = 'error'
        AND m.date_deleted IS NULL
-       AND m.date_retracted IS NULL
+       AND ${messageHasVisibleContentSql('m')}
      LIMIT 1
   `);
   const row = rows[0];

@@ -5,6 +5,7 @@ import { Chat } from '@core/models';
 import { logger } from '@core/secure';
 import {
   listReactionsByMessageGuids,
+  MessageTargetUnavailableError,
   upsertChats,
   upsertHandles,
   upsertMessages,
@@ -39,9 +40,37 @@ async function seed(db: AppDatabase) {
   const chatId = map.get('c1')!;
   await upsertMessages(
     db,
-    [Message.parse({ guid: 'mt', text: 'hi', dateCreated: 100, handle: { address: 'a@x.com' } })],
+    [
+      Message.parse({
+        guid: 'mt',
+        text: 'hi',
+        dateCreated: 100,
+        handle: { address: 'a@x.com' },
+        messagePartTopology: {
+          complete: true,
+          originalPartIndexes: [2],
+          currentParts: [{ index: 2, kind: 'text' }],
+          attachmentOwnership: [],
+        },
+      }),
+    ],
     () => chatId,
     hm,
+  );
+}
+
+async function seedWholeMessageRcsTarget(db: AppDatabase) {
+  const handles = await upsertHandles(db, [{ address: '+15550001111' }]);
+  const chats = await upsertChats(
+    db,
+    [Chat.parse({ guid: 'RCS;-;thread-1', participants: [{ address: '+15550001111' }] })],
+    handles,
+  );
+  await upsertMessages(
+    db,
+    [Message.parse({ guid: 'rcs-message-1', text: 'RCS body', dateCreated: 100 })],
+    () => chats.get('RCS;-;thread-1')!,
+    handles,
   );
 }
 
@@ -79,6 +108,53 @@ describe('sendReactionMessage', () => {
     expect((await listReactionsByMessageGuids(db, ['mt'])).get('mt')).toHaveLength(1);
   });
 
+  it('targets a confirmed RCS message as whole-message part zero without Apple topology', async () => {
+    const { db, raw } = await createTestDb();
+    await seedWholeMessageRcsTarget(db);
+    let body: Record<string, unknown> | undefined;
+
+    await sendReactionMessage(
+      db,
+      fakeHttp(async (json) => {
+        body = json as Record<string, unknown>;
+        return { guid: 'real-rcs-reaction', dateCreated: 1_000 };
+      }),
+      {
+        chatGuid: 'RCS;-;thread-1',
+        targetGuid: 'rcs-message-1',
+        reaction: 'love',
+        partIndex: 0,
+      },
+    );
+
+    expect(body).toMatchObject({
+      messageGuid: 'rcs-message-1',
+      reactionType: 'love',
+      partIndex: 0,
+    });
+    expect(
+      one(
+        raw,
+        "SELECT associated_message_guid g, associated_message_part p FROM messages WHERE guid='real-rcs-reaction'",
+      ),
+    ).toMatchObject({ g: 'rcs-message-1', p: 0 });
+
+    await expect(
+      sendReactionMessage(
+        db,
+        fakeHttp(async () => {
+          throw new Error('an invalid RCS part must not reach HTTP');
+        }),
+        {
+          chatGuid: 'RCS;-;thread-1',
+          targetGuid: 'rcs-message-1',
+          reaction: 'like',
+          partIndex: 1,
+        },
+      ),
+    ).rejects.toBeInstanceOf(MessageTargetUnavailableError);
+  });
+
   it('rolls back a mid-insert account change before HTTP and lets a fresh lease send', async () => {
     const { db, raw } = await createTestDb();
     await seed(db);
@@ -114,6 +190,7 @@ describe('sendReactionMessage', () => {
             targetGuid: 'mt',
             reaction: 'emoji',
             emoji: '🫡',
+            partIndex: 2,
             selectedMessageText: 'private quoted body',
           },
           1_000,
@@ -167,6 +244,7 @@ describe('sendReactionMessage', () => {
               targetGuid: 'mt',
               reaction: 'emoji',
               emoji: '🫡',
+              partIndex: 2,
               selectedMessageText: 'private quoted body',
             },
             2_000,
@@ -185,6 +263,7 @@ describe('sendReactionMessage', () => {
         selectedMessageGuid: 'mt',
         reaction: 'emoji',
         emoji: '🫡',
+        partIndex: 2,
       });
       expect(localState?.payload).not.toContain('private quoted body');
       expect(requestBody).toMatchObject({
@@ -208,15 +287,58 @@ describe('sendReactionMessage', () => {
     }
   });
 
+  it('does not reinterpret a revoked success settlement as a transport failure', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const { db, raw } = await createTestDb();
+    await seed(db);
+    resumeRealtimeDeliveries();
+    const lease = captureRealtimeDeliveryLease();
+    let drain: Promise<void> | undefined;
+
+    try {
+      const oldSend = runTrackedRealtimeWork(lease, (activeLease) =>
+        sendReactionMessage(
+          db,
+          fakeHttp(async () => {
+            drain = pauseRealtimeDeliveries();
+            return { guid: 'late-reaction', dateCreated: 1_000 };
+          }),
+          { chatGuid: 'c1', targetGuid: 'mt', reaction: 'love', partIndex: 2 },
+          1_000,
+          () => activeLease.isCurrent(),
+        ),
+      );
+
+      await expect(oldSend).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+      if (!drain) throw new Error('reaction acknowledgement did not retire the account lease');
+      await drain;
+
+      expect(warn).not.toHaveBeenCalled();
+      expect(
+        one(raw, "SELECT send_state s FROM messages WHERE associated_message_guid='mt'"),
+      ).toEqual({ s: 'sending' });
+      expect(one(raw, 'SELECT COUNT(*) c FROM outgoing_queue').c).toBe(1);
+    } finally {
+      if (drain) await drain;
+      resumeRealtimeDeliveries();
+      warn.mockRestore();
+    }
+  });
+
   it('toggles off when the same type is sent then removed', async () => {
     const { db } = await createTestDb();
     await seed(db);
     const ok = fakeHttp(async () => ({ guid: `r${Math.random()}`, dateCreated: 1 }));
-    await sendReactionMessage(db, ok, { chatGuid: 'c1', targetGuid: 'mt', reaction: 'love' }, 1000);
     await sendReactionMessage(
       db,
       ok,
-      { chatGuid: 'c1', targetGuid: 'mt', reaction: '-love' },
+      { chatGuid: 'c1', targetGuid: 'mt', reaction: 'love', partIndex: 2 },
+      1000,
+    );
+    await sendReactionMessage(
+      db,
+      ok,
+      { chatGuid: 'c1', targetGuid: 'mt', reaction: '-love', partIndex: 2 },
       2000,
     );
     expect((await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? []).toHaveLength(0);
@@ -231,7 +353,7 @@ describe('sendReactionMessage', () => {
       fakeHttp(async () => {
         throw new ApiError('server_error', 'boom', 500);
       }),
-      { chatGuid: 'c1', targetGuid: 'mt', reaction: 'like' },
+      { chatGuid: 'c1', targetGuid: 'mt', reaction: 'like', partIndex: 2 },
     );
     expect(
       (
@@ -257,7 +379,7 @@ describe('sendReactionMessage', () => {
     await sendReactionMessage(
       db,
       fakeHttp(async () => ({ guid: 'r', dateCreated: 9999 })),
-      { chatGuid: 'c1', targetGuid: 'mt', reaction: 'love' },
+      { chatGuid: 'c1', targetGuid: 'mt', reaction: 'love', partIndex: 2 },
     );
     const after = (
       one(raw, "SELECT latest_message_date d FROM chats WHERE guid='c1'") as { d: number | null }

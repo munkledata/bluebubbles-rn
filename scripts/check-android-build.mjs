@@ -2,9 +2,15 @@
 
 import { Buffer } from 'node:buffer';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import {
+  extractZipEntry,
+  readAabArchiveSnapshot,
+  REVIEWED_ANDROID_ABSOLUTE_PATH_EXCEPTIONS,
+  scanZipArchiveForSensitiveMetadata,
+} from './legal-aab-inventory.mjs';
 
 const DEFAULT_DEBUG_MANIFESTS = [
   'android/app/build/intermediates/merged_manifest/debug/processDebugMainManifest/AndroidManifest.xml',
@@ -19,9 +25,17 @@ const DEFAULT_RELEASE_MANIFESTS = [
 const DEFAULT_RELEASE_BUNDLE = 'android/app/build/outputs/bundle/release/app-release.aab';
 const PACKAGED_MANIFEST_ENTRY = 'base/manifest/AndroidManifest.xml';
 const PACKAGED_SHORTCUTS_ENTRY = 'base/res/xml/shortcuts.xml';
-const PACKAGED_DEX_PATTERN = 'base/dex/*.dex';
+const PACKAGED_DEX_PATTERN = /^base\/dex\/[^/]+\.dex$/;
+const MAX_PACKAGED_DEX_BYTES = 256 * 1024 * 1024;
 const ANDROID_NAMESPACE = 'http://schemas.android.com/apk/res/android';
 const FORBIDDEN_INBOUND_SHARE_DEX_MARKERS = ['ExpoShareIntent', 'expo/modules/shareintent'];
+const EXPO_FILE_SYSTEM_VERSION = '57.0.6';
+const PATCH_PACKAGE_VERSION = '8.0.1';
+const EXPO_FILE_SYSTEM_PATCH_PATH = `patches/expo-file-system+${EXPO_FILE_SYSTEM_VERSION}.patch`;
+const EXPO_FILE_SYSTEM_LEGACY_ANDROID_PATH =
+  'node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemLegacyModule.kt';
+const EXPO_FILE_SYSTEM_REDIRECT_TEST_PATH =
+  'node_modules/expo-file-system/android/src/test/java/expo/modules/filesystem/legacy/FileSystemLegacyRedirectPolicyTest.kt';
 
 // These exact product-owned runtime values bind an AAB to the pinned-shortcut retirement added in
 // 9d97eab. Generic ShortcutManager method names are deliberately excluded because AndroidX itself
@@ -61,6 +75,106 @@ export const FORBIDDEN_PERMISSIONS = [
   'android.permission.ACCESS_NOTIFICATION_POLICY',
   'android.permission.USE_FULL_SCREEN_INTENT',
 ];
+
+function countOccurrences(source, needle) {
+  if (typeof source !== 'string' || needle.length === 0) return 0;
+  return source.split(needle).length - 1;
+}
+
+/**
+ * Keep the SDK 57 upload redirect repair durable across installs and native builds.
+ *
+ * Expo file-system ships a prebuilt Android AAR, so merely patching its Kotlin source is inert.
+ * The exact package must remain pinned, patch-package must restore the source after npm ci, and
+ * Expo autolinking must compile that source instead of resolving the bundled AAR.
+ */
+export function validateExpoFileSystemRedirectContainment({
+  packageJson,
+  packageLock,
+  patchSource,
+  legacyModuleSource,
+  appConfigSource,
+}) {
+  const errors = [];
+  if (packageJson?.dependencies?.['expo-file-system'] !== EXPO_FILE_SYSTEM_VERSION) {
+    errors.push(`expo-file-system must be pinned exactly to ${EXPO_FILE_SYSTEM_VERSION}`);
+  }
+  if (
+    packageLock?.packages?.['']?.dependencies?.['expo-file-system'] !== EXPO_FILE_SYSTEM_VERSION
+  ) {
+    errors.push(
+      `package-lock root must pin expo-file-system exactly to ${EXPO_FILE_SYSTEM_VERSION}`,
+    );
+  }
+  if (
+    packageLock?.packages?.['node_modules/expo-file-system']?.version !== EXPO_FILE_SYSTEM_VERSION
+  ) {
+    errors.push(`package-lock must resolve expo-file-system ${EXPO_FILE_SYSTEM_VERSION}`);
+  }
+  if (packageJson?.devDependencies?.['patch-package'] !== PATCH_PACKAGE_VERSION) {
+    errors.push(`patch-package must be pinned exactly to ${PATCH_PACKAGE_VERSION}`);
+  }
+  if (packageLock?.packages?.['']?.devDependencies?.['patch-package'] !== PATCH_PACKAGE_VERSION) {
+    errors.push(`package-lock root must pin patch-package exactly to ${PATCH_PACKAGE_VERSION}`);
+  }
+  if (packageLock?.packages?.['node_modules/patch-package']?.version !== PATCH_PACKAGE_VERSION) {
+    errors.push(`package-lock must resolve patch-package ${PATCH_PACKAGE_VERSION}`);
+  }
+  const postinstallSteps = String(packageJson?.scripts?.postinstall ?? '')
+    .split(/\s*&&\s*/)
+    .filter(Boolean);
+  if (!postinstallSteps.includes('patch-package')) {
+    errors.push('package.json postinstall must run patch-package');
+  }
+
+  const sourceBuild = packageJson?.expo?.autolinking?.android?.buildFromSource;
+  if (
+    !Array.isArray(sourceBuild) ||
+    sourceBuild.filter((name) => name === 'expo-file-system').length !== 1
+  ) {
+    errors.push('Expo Android autolinking must build expo-file-system from source exactly once');
+  }
+
+  const builder = legacyModuleSource?.match(
+    /val builder = OkHttpClient\.Builder\(\)([\s\S]*?)client = builder\.build\(\)/,
+  )?.[1];
+  if (!builder || countOccurrences(builder, '.followRedirects(false)') !== 1) {
+    errors.push('legacy expo-file-system OkHttp builder must disable redirects exactly once');
+  }
+  if (!builder || countOccurrences(builder, '.followSslRedirects(false)') !== 1) {
+    errors.push('legacy expo-file-system OkHttp builder must disable SSL redirects exactly once');
+  }
+
+  if (
+    !patchSource?.includes(`a/${EXPO_FILE_SYSTEM_LEGACY_ANDROID_PATH}`) ||
+    !patchSource.includes('+          .followRedirects(false)') ||
+    !patchSource.includes('+          .followSslRedirects(false)')
+  ) {
+    errors.push(`${EXPO_FILE_SYSTEM_PATCH_PATH} must carry both legacy OkHttp redirect flags`);
+  }
+  const nativeProofMarkers = [
+    'a/node_modules/expo-file-system/android/build.gradle',
+    `b/${EXPO_FILE_SYSTEM_REDIRECT_TEST_PATH}`,
+    "+  testImplementation 'com.squareup.okhttp3:mockwebserver:4.9.2'",
+    '+      val statuses = listOf(301, 302, 303, 307, 308)',
+    '+      assertEquals(0, trap.requestCount)',
+    '+  fun `redirect policy preserves successful request progress`() {',
+    '+  fun `redirect policy preserves active call cancellation`() {',
+  ];
+  if (nativeProofMarkers.some((marker) => !patchSource?.includes(marker))) {
+    errors.push(
+      `${EXPO_FILE_SYSTEM_PATCH_PATH} must carry the redirect trap, progress, and cancellation native proof`,
+    );
+  }
+  if (
+    !appConfigSource?.includes('process.env.EXPO_PUBLIC_USE_RN_FETCH') ||
+    !appConfigSource.includes("rnFetchEscapeHatch === '1'") ||
+    !appConfigSource.includes("rnFetchEscapeHatch === 'true'")
+  ) {
+    errors.push('app config must reject the EXPO_PUBLIC_USE_RN_FETCH redirect escape hatch');
+  }
+  return errors;
+}
 
 // Expo's dev-client overlay legitimately needs this in a debuggable build. It remains forbidden
 // in the release manifest and packaged AAB, which are the artifacts shipped to users.
@@ -381,40 +495,6 @@ export function validatePackagedAndroidBundle({ manifestProto, shortcutsProto, d
   return errors;
 }
 
-function readBundleEntry(bundlePath, entryPath, maxBuffer = 16 * 1024 * 1024) {
-  const result = spawnSync('unzip', ['-p', bundlePath, entryPath], {
-    encoding: null,
-    maxBuffer,
-  });
-  if (result.error) {
-    throw new Error(`could not run unzip: ${result.error.message}`);
-  }
-  if (result.status !== 0 || !result.stdout || result.stdout.length === 0) {
-    const detail = result.stderr?.toString('utf8').trim();
-    throw new Error(
-      `could not read ${entryPath} from AAB${detail ? `: ${detail}` : ` (unzip exit ${String(result.status)})`}`,
-    );
-  }
-  return result.stdout;
-}
-
-function listBundleEntries(bundlePath) {
-  const result = spawnSync('unzip', ['-Z1', bundlePath], {
-    encoding: 'utf8',
-    maxBuffer: 16 * 1024 * 1024,
-  });
-  if (result.error) {
-    throw new Error(`could not run unzip: ${result.error.message}`);
-  }
-  if (result.status !== 0) {
-    const detail = result.stderr?.trim();
-    throw new Error(
-      `could not list AAB entries${detail ? `: ${detail}` : ` (unzip exit ${String(result.status)})`}`,
-    );
-  }
-  return new Set(result.stdout.split(/\r?\n/).filter(Boolean));
-}
-
 /**
  * Inspect one built Android App Bundle without requiring a generated native tree.
  *
@@ -422,17 +502,51 @@ function listBundleEntries(bundlePath) {
  * as the full Android build guard, then returns only the finite identity fields needed to bind an
  * artifact to its release record.
  */
-export function inspectPackagedAndroidBundle(bundlePath) {
-  const bundleEntries = listBundleEntries(bundlePath);
-  const manifestProto = readBundleEntry(bundlePath, PACKAGED_MANIFEST_ENTRY);
+export function inspectPackagedAndroidBundle(
+  bundlePath,
+  { reviewedSensitiveMetadataExceptions = REVIEWED_ANDROID_ABSOLUTE_PATH_EXCEPTIONS } = {},
+) {
+  const snapshot = readAabArchiveSnapshot(bundlePath);
+  const sensitiveMetadataFindings = scanZipArchiveForSensitiveMetadata(
+    snapshot.bytes,
+    snapshot.archive,
+    { reviewedExceptions: reviewedSensitiveMetadataExceptions },
+  );
+  if (sensitiveMetadataFindings.length > 0) {
+    throw new Error(
+      [
+        'packaged AAB contains forbidden absolute user-directory metadata:',
+        ...sensitiveMetadataFindings.map((finding) => `- ${finding.path}: ${finding.rule}`),
+      ].join('\n'),
+    );
+  }
+
+  const manifestEntry = snapshot.archive.entries.find(
+    (entry) => entry.path === PACKAGED_MANIFEST_ENTRY && !entry.directory,
+  );
+  if (!manifestEntry) throw new Error(`could not read ${PACKAGED_MANIFEST_ENTRY} from AAB`);
+  const manifestProto = extractZipEntry(snapshot.bytes, manifestEntry, 16 * 1024 * 1024);
+  const shortcutsEntry = snapshot.archive.entries.find(
+    (entry) => entry.path === PACKAGED_SHORTCUTS_ENTRY && !entry.directory,
+  );
+  const dexEntries = snapshot.archive.entries
+    .filter((entry) => PACKAGED_DEX_PATTERN.test(entry.path) && !entry.directory)
+    .sort((left, right) => left.path.localeCompare(right.path, 'en-US'));
+  const totalDexBytes = dexEntries.reduce((total, entry) => total + entry.uncompressedBytes, 0);
+  if (dexEntries.length === 0 || totalDexBytes === 0 || totalDexBytes > MAX_PACKAGED_DEX_BYTES) {
+    throw new Error('packaged DEX entries are missing, empty, or exceed the 256 MiB limit');
+  }
   const errors = validatePackagedAndroidBundle({
     manifestProto,
-    shortcutsProto: bundleEntries.has(PACKAGED_SHORTCUTS_ENTRY)
-      ? readBundleEntry(bundlePath, PACKAGED_SHORTCUTS_ENTRY)
+    shortcutsProto: shortcutsEntry
+      ? extractZipEntry(snapshot.bytes, shortcutsEntry, 16 * 1024 * 1024)
       : undefined,
     // The package/lock/autolinking checks prevent a clean build from linking the removed module.
     // This additionally rejects a stale or otherwise contaminated release artifact.
-    dexBytes: readBundleEntry(bundlePath, PACKAGED_DEX_PATTERN, 256 * 1024 * 1024),
+    dexBytes: Buffer.concat(
+      dexEntries.map((entry) => extractZipEntry(snapshot.bytes, entry, MAX_PACKAGED_DEX_BYTES)),
+      totalDexBytes,
+    ),
   });
   if (errors.length > 0) throw new Error(errors.map((error) => `- ${error}`).join('\n'));
 
@@ -605,12 +719,19 @@ export function runAndroidBuildCheck({
   releaseBundlePath,
 } = {}) {
   const packageJson = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'));
+  const packageLock = JSON.parse(readFileSync(resolve(root, 'package-lock.json'), 'utf8'));
   const entrySource = readFileSync(resolve(root, 'index.js'), 'utf8');
   const manifests = [
     ['debug', selectArtifactPath(root, debugManifestPath, DEFAULT_DEBUG_MANIFESTS)],
     ['release', selectArtifactPath(root, releaseManifestPath, DEFAULT_RELEASE_MANIFESTS)],
   ];
-  const errors = [];
+  const errors = validateExpoFileSystemRedirectContainment({
+    packageJson,
+    packageLock,
+    patchSource: readFileSync(resolve(root, EXPO_FILE_SYSTEM_PATCH_PATH), 'utf8'),
+    legacyModuleSource: readFileSync(resolve(root, EXPO_FILE_SYSTEM_LEGACY_ANDROID_PATH), 'utf8'),
+    appConfigSource: readFileSync(resolve(root, 'app.config.ts'), 'utf8'),
+  }).map((error) => `network redirect containment: ${error}`);
 
   for (const [label, path] of manifests) {
     if (!existsSync(path)) {

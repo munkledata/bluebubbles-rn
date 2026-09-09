@@ -168,8 +168,9 @@ describe('Composer paste', () => {
     await waitFor(() => expect(onSendAttachments).toHaveBeenCalledWith([PASTED_PDF]));
   });
 
-  it('sends a pasted file through the normal attachment path, alongside typed text', async () => {
-    const { onSend, onSendAttachments } = await renderComposer();
+  it('sends pasted media plus typed text through one combined callback', async () => {
+    const onSendTextAttachment = jest.fn(() => true);
+    const { onSend, onSendAttachments } = await renderComposer({ onSendTextAttachment });
     await fireInputLayout();
     await waitFor(() => expect(mockPaste.fire).not.toBeNull());
 
@@ -180,8 +181,17 @@ describe('Composer paste', () => {
     await waitFor(() => expect(screen.getByLabelText('Send message')).toBeTruthy());
 
     fireEvent.press(screen.getByLabelText('Send message'));
-    await waitFor(() => expect(onSendAttachments).toHaveBeenCalledWith([PASTED_IMAGE]));
-    expect(onSend).toHaveBeenCalledWith('look at this', undefined, undefined, undefined);
+    await waitFor(() =>
+      expect(onSendTextAttachment).toHaveBeenCalledWith(
+        'look at this',
+        PASTED_IMAGE,
+        undefined,
+        undefined,
+        undefined,
+      ),
+    );
+    expect(onSendAttachments).not.toHaveBeenCalled();
+    expect(onSend).not.toHaveBeenCalled();
   });
 
   it('stages several files from one paste', async () => {

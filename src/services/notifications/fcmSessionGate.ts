@@ -1,6 +1,7 @@
 import {
-  hasActiveServerSession,
   readAccountRevocationState,
+  resolveCredentialUpgrade,
+  SERVER_SESSION_STATE,
   type AccountRevocationMarker,
   type SecureVault,
 } from '@core/secure';
@@ -22,12 +23,27 @@ export async function readFcmSessionState(
   if (revocation === 'revoked') return 'forgotten';
 
   try {
-    const [sessionState, address, password] = await Promise.all([
+    const [sessionState, address, password, credentialUpgrade] = await Promise.all([
       vault.get('serverSessionState'),
       vault.get('serverAddress'),
       vault.get('serverPassword'),
+      vault.get('serverCredentialUpgrade'),
     ]);
-    return hasActiveServerSession(sessionState, address, password) ? 'active' : 'forgotten';
+    const revocationAfter = readAccountRevocationState(revocationMarker);
+    if (revocationAfter === 'unavailable') return 'unavailable';
+    if (revocationAfter === 'revoked') return 'forgotten';
+
+    const completeSession =
+      (sessionState === null || sessionState === SERVER_SESSION_STATE.active) &&
+      address &&
+      password;
+    const upgrade = resolveCredentialUpgrade(
+      credentialUpgrade,
+      completeSession ? { origin: address!, credential: password! } : null,
+    );
+    if (upgrade.kind === 'quarantined') return 'unavailable';
+    if (upgrade.kind === 'revoked') return 'forgotten';
+    return completeSession && upgrade.session ? 'active' : 'forgotten';
   } catch {
     return 'unavailable';
   }

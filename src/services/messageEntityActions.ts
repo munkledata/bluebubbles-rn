@@ -11,6 +11,19 @@ const CALENDAR_INSERT_ACTION = 'android.intent.action.INSERT';
 const CALENDAR_EVENTS_URI = 'content://com.android.calendar/events';
 const CALENDAR_EVENT_MIME = 'vnd.android.cursor.dir/event';
 
+export function localCalendarDraftBounds(date: Pick<MessageDateEntity, 'year' | 'month' | 'day'>): {
+  beginTime: number;
+  endTime: number;
+} {
+  // Android calendar apps interpret intent timestamps in the device timezone even for an all-day
+  // draft. Passing UTC midnight shifts the visible day backward west of UTC. Construct each local
+  // midnight independently so DST transitions still end on the next local calendar date.
+  return {
+    beginTime: new Date(date.year, date.month - 1, date.day).getTime(),
+    endTime: new Date(date.year, date.month - 1, date.day + 1).getTime(),
+  };
+}
+
 export type MessageEntityActionRequest =
   | { action: 'open-url'; entity: MessageUrlEntity }
   | { action: 'dial-phone'; entity: MessagePhoneEntity }
@@ -33,14 +46,15 @@ const defaultDependencies: MessageEntityActionDependencies = {
   },
   openCalendarDraft: async (date) => {
     const IntentLauncher = await import('expo-intent-launcher');
+    const { beginTime, endTime } = localCalendarDraftBounds(date);
     await IntentLauncher.startActivityAsync(CALENDAR_INSERT_ACTION, {
       data: CALENDAR_EVENTS_URI,
       type: CALENDAR_EVENT_MIME,
       // These are Android CalendarContract's fixed extra names. No action, URI, title, or other
       // private message text is accepted from the peer-controlled entity.
       extra: {
-        beginTime: date.startUtcMs,
-        endTime: date.endUtcMs,
+        beginTime,
+        endTime,
         allDay: true,
       },
     });

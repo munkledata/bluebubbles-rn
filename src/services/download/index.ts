@@ -1,4 +1,5 @@
 import * as Crypto from 'expo-crypto';
+import type { HttpClient } from '@core/api';
 import { getDatabase } from '@db/database';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
@@ -42,8 +43,9 @@ export function setAttachmentFetcher(f: AttachmentFetcher): void {
   developmentFetcher = f;
 }
 
-function attachmentFetcherForInvocation(): AttachmentFetcher {
-  return isDevServer() && developmentFetcher ? developmentFetcher : productionFetcher;
+function attachmentFetcherForInvocation(taskHttp?: HttpClient): AttachmentFetcher {
+  if (isDevServer() && developmentFetcher) return developmentFetcher;
+  return taskHttp ? expoFetcher(taskHttp) : productionFetcher;
 }
 
 // RCS media often 404s only TRANSIENTLY: the picture frame can reach the server before its
@@ -93,6 +95,43 @@ export function download(
   maxBytesOverride?: number,
 ): Promise<string | null> {
   const ownerFetcher = attachmentFetcherForInvocation();
+  return downloadWithFetcher(
+    ownerFetcher,
+    att,
+    mode,
+    deliveryLease,
+    onVerifiedBytes,
+    maxBytesOverride,
+  );
+}
+
+/** Killed-process/realtime variant whose fetcher is bound to one authorized task-local client. */
+export function downloadWithClient(
+  client: HttpClient,
+  att: AttachmentRow,
+  mode: AttachmentDownloadMode,
+  deliveryLease: RealtimeDeliveryLease,
+  onVerifiedBytes?: (bytes: number) => void,
+  maxBytesOverride?: number,
+): Promise<string | null> {
+  return downloadWithFetcher(
+    attachmentFetcherForInvocation(client),
+    att,
+    mode,
+    deliveryLease,
+    onVerifiedBytes,
+    maxBytesOverride,
+  );
+}
+
+function downloadWithFetcher(
+  ownerFetcher: AttachmentFetcher,
+  att: AttachmentRow,
+  mode: AttachmentDownloadMode,
+  deliveryLease: RealtimeDeliveryLease,
+  onVerifiedBytes?: (bytes: number) => void,
+  maxBytesOverride?: number,
+): Promise<string | null> {
   const scope = downloadScope(deliveryLease, ownerFetcher);
   const key = retryKey(att.guid, scope);
   // A forced copy-on-write replacement owns both the damaged source pin and the terminal viewer

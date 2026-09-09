@@ -23,7 +23,12 @@ jest.mock('expo-crypto', () => ({
   getRandomBytes: (length: number) => new Uint8Array(length).fill(9),
 }));
 
-const dummyHttp = {} as HttpClient;
+let dummyHttp!: HttpClient;
+dummyHttp = {
+  pinTransport: () => dummyHttp,
+  isTransportCurrent: () => true,
+  assertTransportCurrent: () => undefined,
+} as unknown as HttpClient;
 const IMAGE = {
   uri: 'file:///db02c-stress.jpg',
   name: 'db02c-stress.jpg',

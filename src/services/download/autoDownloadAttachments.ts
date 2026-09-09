@@ -1,5 +1,6 @@
 import { logger } from '@core/secure';
 import type { EventDeliveryContext } from '@core/realtime';
+import type { HttpClient } from '@core/api';
 import { listAttachmentsByMessageIds } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
@@ -20,13 +21,19 @@ export interface AutoDownloadOutcome {
 
 const NO_SAVED_IMAGES: AutoDownloadOutcome = { savedImages: 0, destination: null };
 
+interface AutoDownloadExecutionOptions {
+  /** Native Photos writes have no cancellation signal and are therefore foreground-only. */
+  readonly allowExternalMediaSave?: boolean;
+}
+
 /**
  * Auto-download an incoming message's image attachments on the INGESTION path (called from
  * DbEventSink after a new/updated message is persisted), so pictures are ready before the chat is
  * opened. Bounded to images via {@link shouldAutoDownload}; honors the "Only on Wi-Fi" flag; and,
  * per the `autoDownloadDestination` setting, files a copy into the device gallery / a "Gator" album
- * and returns a typed save count for the mounted UI to present. Headless delivery simply ignores
- * that presentation-only result.
+ * and returns a typed save count for the mounted UI to present. A bounded background-FCM caller
+ * disables the external Photos copy because expo-media-library offers no cancellation signal; it
+ * persists only the app-cache file and returns no presentation outcome.
  *
  * Native modules (expo-network / the download fetcher / expo-media-library) are LAZILY imported and
  * only after the early returns, so this module's static import graph stays Node-safe (DbEventSink is
@@ -36,6 +43,8 @@ export async function autoDownloadMessageAttachments(
   db: AppDatabase,
   messageId: number,
   context?: EventDeliveryContext,
+  taskHttp?: HttpClient,
+  options: AutoDownloadExecutionOptions = {},
 ): Promise<AutoDownloadOutcome> {
   const lease: RealtimeDeliveryLease = context ?? captureRealtimeDeliveryLease();
   let savedImages = 0;
@@ -63,6 +72,7 @@ export async function autoDownloadMessageAttachments(
         await listAttachmentsByMessageIds(db, [messageId], MAX_AUTO_DOWNLOAD_FILES_PER_MESSAGE, {
           excludeDeletedMessages: true,
           excludePluginPayloads: true,
+          excludeRetractedAttachments: true,
         })
       ).get(messageId) ?? [];
     if (!lease.isCurrent()) return NO_SAVED_IMAGES;
@@ -92,10 +102,32 @@ export async function autoDownloadMessageAttachments(
     if (autoDownloadOnWifiOnly && !(await onWifi())) return NO_SAVED_IMAGES;
     if (!lease.isCurrent()) return NO_SAVED_IMAGES;
 
-    const { download } = await import('./index');
+    if (taskHttp) {
+      // Normal foreground boot repairs the persistent cache ledger before downloads. Killed-process
+      // FCM ingestion skips that gate, so join the same bounded recovery only after settings,
+      // attachment eligibility, and network policy prove that this message needs a transfer.
+      const { isAttachmentCacheRecoveryReady, recoverAttachmentCache } =
+        await import('./attachmentCacheRecovery');
+      if (!isAttachmentCacheRecoveryReady(lease)) {
+        try {
+          const recovery = await recoverAttachmentCache(db, lease);
+          if (recovery.status !== 'ready' || !lease.isCurrent()) return NO_SAVED_IMAGES;
+        } catch (error) {
+          if (lease.isCurrent()) {
+            logger.debug('[autoDownload] attachment cache recovery unavailable', error);
+          }
+          return NO_SAVED_IMAGES;
+        }
+      }
+      if (!lease.isCurrent()) return NO_SAVED_IMAGES;
+    }
+
+    const { download, downloadWithClient } = await import('./index');
     // Only pull expo-media-library when we actually need to save a copy outside the app.
     const galleryDestination: AutoDownloadOutcome['destination'] =
-      autoDownloadDestination === 'app' ? null : autoDownloadDestination;
+      options.allowExternalMediaSave === false || autoDownloadDestination === 'app'
+        ? null
+        : autoDownloadDestination;
     const saveImageToLibrary =
       galleryDestination === null ? null : (await import('@/services/media')).saveImageToLibrary;
 
@@ -105,14 +137,13 @@ export async function autoDownloadMessageAttachments(
       if (actualDownloadedBytes >= MAX_AUTO_DOWNLOAD_BYTES_PER_MESSAGE) break;
       const remainingBytes = MAX_AUTO_DOWNLOAD_BYTES_PER_MESSAGE - actualDownloadedBytes;
       let verifiedBytes = 0;
-      const path = await download(
-        att,
-        'automatic',
-        lease,
-        (bytes) => {
-          verifiedBytes = bytes;
-        },
-        remainingBytes,
+      const onVerifiedBytes = (bytes: number): void => {
+        verifiedBytes = bytes;
+      };
+      const path = await (
+        taskHttp
+          ? downloadWithClient(taskHttp, att, 'automatic', lease, onVerifiedBytes, remainingBytes)
+          : download(att, 'automatic', lease, onVerifiedBytes, remainingBytes)
       ).catch(() => null);
       if (path) actualDownloadedBytes += verifiedBytes;
       // Stickers are still DOWNLOADED — the in-bubble overlay needs the file — but they are never
@@ -143,6 +174,35 @@ export async function autoDownloadMessageAttachments(
     logger.debug('[autoDownload] ingest auto-download failed', e);
     return lease.isCurrent() ? { savedImages, destination: savedDestination } : NO_SAVED_IMAGES;
   }
+}
+
+/** Resolve a task-local transport for a detached socket/FCM ingestion auto-download. */
+export async function autoDownloadMessageAttachmentsForRealtimeEvent(
+  db: AppDatabase,
+  messageId: number,
+  expectedAccountGeneration: number,
+  options: {
+    readonly isEffectCurrent?: () => boolean;
+    readonly allowExternalMediaSave?: boolean;
+  } = {},
+): Promise<AutoDownloadOutcome> {
+  if (options.isEffectCurrent?.() === false) return NO_SAVED_IMAGES;
+  // Keep the durable-session/native imports out of this module's static graph. DbEventSink's host
+  // tests import the base orchestration without ever needing an Android background transport.
+  const { resolveAuthorizedRealtimeTransport } =
+    await import('../background/authorizedRealtimeTransport');
+  const transport = await resolveAuthorizedRealtimeTransport(expectedAccountGeneration);
+  if (!transport || options.isEffectCurrent?.() === false) return NO_SAVED_IMAGES;
+  const effectCurrent = options.isEffectCurrent;
+  const lease: RealtimeDeliveryLease = effectCurrent
+    ? Object.freeze({
+        generation: transport.lease.generation,
+        isCurrent: () => transport.lease.isCurrent() && effectCurrent(),
+      })
+    : transport.lease;
+  return autoDownloadMessageAttachments(db, messageId, lease, transport.http, {
+    allowExternalMediaSave: options.allowExternalMediaSave,
+  });
 }
 
 /** True only on a Wi-Fi connection. Can't-determine (or no native module) → false, so an enabled

@@ -51,6 +51,7 @@ function wire(
     canDrain?: () => boolean;
     onEffect?: (event: NormalizedEvent) => void | Promise<void>;
     allowDevPersistWithoutDrain?: boolean;
+    allowLockedFcmV3PersistWithoutDrain?: boolean;
     now?: () => number;
   } = {},
 ) {
@@ -88,6 +89,7 @@ function wire(
     now,
     makeTransportOccurrenceId: (source) => `${source}:${++occurrence}`,
     allowDevPersistWithoutDrain: options.allowDevPersistWithoutDrain,
+    allowLockedFcmV3PersistWithoutDrain: options.allowLockedFcmV3PersistWithoutDrain,
     canPersist: options.canPersist,
     requestRecovery: recoveries,
   });
@@ -95,6 +97,178 @@ function wire(
 }
 
 describe('durable realtime dispatcher', () => {
+  it('keeps locked V3 persistence closed unless composition explicitly opts in', async () => {
+    const { db, raw } = await createTestDb();
+    const { dispatcher, effects } = wire(db, raw);
+
+    await expect(
+      dispatcher.persistLockedFcmV3WithoutDrain(
+        'new-message',
+        rawMessage('closed-locked-v3-seam'),
+        currentLease(),
+        {
+          serverEventId: 'fcm3:closed-locked-v3-seam',
+          transportOccurrenceId: 'provider-closed',
+          authenticatedExpiresAt: NOW + 1_000,
+        },
+      ),
+    ).resolves.toBeNull();
+
+    expect(effects).toHaveLength(0);
+    expect(
+      (raw.prepare(`SELECT COUNT(*) AS count FROM incoming_event_queue`).get() as { count: number })
+        .count,
+    ).toBe(0);
+  });
+
+  it('persists one locked V3 occurrence across recreated runtimes and never replays its effect', async () => {
+    const { db, raw } = await createTestDb();
+    const firstRuntime = wire(db, raw, {
+      allowLockedFcmV3PersistWithoutDrain: true,
+    });
+    const occurrence = {
+      serverEventId: 'fcm3:accepted-locked-v3-occurrence',
+      transportOccurrenceId: 'provider-accepted',
+      authenticatedExpiresAt: NOW + 1_000,
+    } as const;
+
+    await expect(
+      firstRuntime.dispatcher.persistLockedFcmV3WithoutDrain(
+        'new-message',
+        rawMessage('accepted-locked-v3'),
+        currentLease(),
+        occurrence,
+      ),
+    ).resolves.toMatchObject({ status: 'enqueued' });
+
+    firstRuntime.dispatcher.dispose();
+    const recoveryRuntime = wire(db, raw, {
+      allowLockedFcmV3PersistWithoutDrain: true,
+    });
+    await expect(
+      recoveryRuntime.dispatcher.persistLockedFcmV3WithoutDrain(
+        'new-message',
+        rawMessage('accepted-locked-v3'),
+        currentLease(),
+        occurrence,
+      ),
+    ).resolves.toMatchObject({ status: 'duplicate', state: 'pending' });
+
+    expect(firstRuntime.effects).toHaveLength(0);
+    expect(recoveryRuntime.effects).toHaveLength(0);
+    expect(recoveryRuntime.recoveries).not.toHaveBeenCalled();
+    expect(raw.prepare(`SELECT state, attempts FROM incoming_event_queue`).get()).toEqual({
+      state: 'pending',
+      attempts: 0,
+    });
+
+    await recoveryRuntime.dispatcher.resume(currentLease());
+    await recoveryRuntime.dispatcher.resume(currentLease());
+
+    expect(recoveryRuntime.effects).toHaveLength(1);
+    expect(raw.prepare(`SELECT state, payload, attempts FROM incoming_event_queue`).get()).toEqual({
+      state: 'completed',
+      payload: null,
+      attempts: 1,
+    });
+
+    recoveryRuntime.dispatcher.dispose();
+    const replayRuntime = wire(db, raw, {
+      allowLockedFcmV3PersistWithoutDrain: true,
+    });
+    await expect(
+      replayRuntime.dispatcher.persistLockedFcmV3WithoutDrain(
+        'new-message',
+        rawMessage('accepted-locked-v3'),
+        currentLease(),
+        occurrence,
+      ),
+    ).resolves.toMatchObject({ status: 'duplicate', state: 'completed' });
+    await replayRuntime.dispatcher.resume(currentLease());
+
+    expect(replayRuntime.effects).toHaveLength(0);
+    expect(replayRuntime.recoveries).not.toHaveBeenCalled();
+    replayRuntime.dispatcher.dispose();
+  });
+
+  it('turns reuse of one authenticated occurrence across event types into one inert conflict', async () => {
+    const { db, raw } = await createTestDb();
+    const { dispatcher, effects, recoveries } = wire(db, raw, {
+      allowLockedFcmV3PersistWithoutDrain: true,
+    });
+    const occurrence = {
+      serverEventId: 'fcm3:cross-type-authenticated-occurrence',
+      transportOccurrenceId: 'provider-cross-type',
+      authenticatedExpiresAt: NOW + 1_000,
+    } as const;
+
+    await expect(
+      dispatcher.persistLockedFcmV3WithoutDrain(
+        'new-message',
+        rawMessage('cross-type-message'),
+        currentLease(),
+        occurrence,
+      ),
+    ).resolves.toMatchObject({ status: 'enqueued' });
+    await expect(
+      dispatcher.persistLockedFcmV3WithoutDrain(
+        'message-deleted',
+        { guid: 'cross-type-message', chatGuid: 'dispatcher-chat', dateDeleted: NOW },
+        currentLease(),
+        occurrence,
+      ),
+    ).resolves.toMatchObject({ status: 'key-conflict' });
+
+    expect(effects).toHaveLength(0);
+    expect(recoveries).not.toHaveBeenCalled();
+    expect(
+      (raw.prepare(`SELECT COUNT(*) AS count FROM incoming_event_queue`).get() as { count: number })
+        .count,
+    ).toBe(1);
+
+    await dispatcher.resume(currentLease());
+    expect(effects).toHaveLength(1);
+    expect(effects[0]?.type).toBe('new-message');
+  });
+
+  it('never drains a locked V3 row after its authenticated expiry', async () => {
+    const { db, raw } = await createTestDb();
+    let now = NOW;
+    const { dispatcher, effects, recoveries } = wire(db, raw, {
+      allowLockedFcmV3PersistWithoutDrain: true,
+      now: () => now,
+    });
+
+    await expect(
+      dispatcher.persistLockedFcmV3WithoutDrain(
+        'new-message',
+        rawMessage('expires-while-locked'),
+        currentLease(),
+        {
+          serverEventId: 'fcm3:expires-while-locked',
+          transportOccurrenceId: 'provider-expiring',
+          authenticatedExpiresAt: NOW + 10,
+        },
+      ),
+    ).resolves.toMatchObject({ status: 'enqueued' });
+    expect(raw.prepare(`SELECT expires_at AS expiresAt FROM incoming_event_queue`).get()).toEqual({
+      expiresAt: NOW + 10,
+    });
+
+    now = NOW + 11;
+    await dispatcher.resume(currentLease());
+
+    expect(effects).toHaveLength(0);
+    expect(recoveries).not.toHaveBeenCalled();
+    expect(
+      raw
+        .prepare(
+          `SELECT state, payload, last_error_code AS lastErrorCode FROM incoming_event_queue`,
+        )
+        .get(),
+    ).toEqual({ state: 'poisoned', payload: null, lastErrorCode: 'expired' });
+  });
+
   it('keeps the DEV persist-without-drain seam closed unless composition explicitly opts in', async () => {
     const { db, raw } = await createTestDb();
     const { dispatcher, effects } = wire(db, raw);

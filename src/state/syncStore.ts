@@ -30,6 +30,7 @@ interface SyncState {
   noteRepair: (phase: string, message: string) => void;
   requestRepairCancel: () => void;
   finishRepair: () => void;
+  finishRepairLimited: () => void;
   cancelRepair: (message?: string) => void;
   failRepair: (message: string) => void;
   /** Account teardown: clear status, counts, and any previous-server error copy. */
@@ -96,6 +97,17 @@ export const useSyncStore = create<SyncState>((set) => ({
       repairStatus: 'done',
       repairPhase: 'Repair complete',
       repairLog: appendRepairLog(state.repairLog, 'Repair completed successfully.'),
+    })),
+  finishRepairLimited: () =>
+    set((state) => ({
+      status: 'done',
+      error: null,
+      repairStatus: 'done',
+      repairPhase: 'Refresh complete (limited)',
+      repairLog: appendRepairLog(
+        state.repairLog,
+        'Refreshed all available server data. No chat, message, or attachment was removed merely because it was absent, and the existing sync marker was kept.',
+      ),
     })),
   cancelRepair: (message = 'Repair stopped. Run it again to restart the full download.') =>
     set((state) => ({

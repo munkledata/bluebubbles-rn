@@ -1,14 +1,15 @@
 import { Linking } from 'react-native';
+import { createI18n, type I18n } from '@utils/i18n';
 import { showDialog } from '../dialog/dialogStore';
 
 type ContactsPurpose = 'sync' | 'share';
 
-function rationale(purpose: ContactsPurpose): string {
-  const use =
+function rationale(i18n: I18n, purpose: ContactsPurpose): string {
+  const key =
     purpose === 'sync'
-      ? 'show saved names and photos in conversations'
-      : 'let you choose a device contact to send as a contact card';
-  return `Gator can read your device contacts to ${use}. This is optional. You can still type phone numbers and email addresses without allowing Contacts access.`;
+      ? 'contactsPermission.dialog.rationale.message.sync'
+      : 'contactsPermission.dialog.rationale.message.share';
+  return i18n.format(key, { appName: i18n.text('welcome.brand') });
 }
 
 /** Explain optional Contacts access before the caller is allowed to launch Android's prompt. */
@@ -18,24 +19,35 @@ export function showContactsPermissionRationale(options: {
   onContinue: () => void;
 }): void {
   if (!options.isCurrent()) return;
-  showDialog('Allow Contacts access?', rationale(options.purpose), [
-    { text: 'Not Now', style: 'cancel' },
-    {
-      text: 'Continue',
-      onPress: () => {
-        if (options.isCurrent()) options.onContinue();
+  const i18n = createI18n();
+  showDialog(
+    i18n.text('contactsPermission.dialog.rationale.title'),
+    rationale(i18n, options.purpose),
+    [
+      { text: i18n.text('contactsPermission.action.notNow'), style: 'cancel' },
+      {
+        text: i18n.text('contactsPermission.action.continue'),
+        onPress: () => {
+          if (options.isCurrent()) options.onContinue();
+        },
       },
-    },
-  ]);
+    ],
+  );
 }
 
 export async function openContactsPermissionSettings(isCurrent: () => boolean): Promise<void> {
   if (!isCurrent()) return;
+  const i18n = createI18n();
   try {
     await Linking.openSettings();
   } catch {
     if (isCurrent()) {
-      showDialog('Contacts', 'Couldn’t open Android app settings. Open Settings and select Gator.');
+      showDialog(
+        i18n.text('permissions.section.contacts'),
+        i18n.format('contactsPermission.dialog.settingsFailed.message', {
+          appName: i18n.text('welcome.brand'),
+        }),
+      );
     }
   }
 }
@@ -47,22 +59,24 @@ export function showContactsPermissionRecovery(options: {
   onTryAgain: () => void;
 }): void {
   if (!options.isCurrent()) return;
+  const i18n = createI18n();
+  const appName = i18n.text('welcome.brand');
   const action = options.canAskAgain
     ? {
-        text: 'Try Again',
+        text: i18n.text('contactsPermission.action.tryAgain'),
         onPress: () => {
           if (options.isCurrent()) options.onTryAgain();
         },
       }
     : {
-        text: 'Open Settings',
+        text: i18n.text('contactsPermission.action.openSettings'),
         onPress: () => void openContactsPermissionSettings(options.isCurrent),
       };
   showDialog(
-    'Contacts access denied',
+    i18n.text('contactsPermission.dialog.denied.title'),
     options.canAskAgain
-      ? 'Gator still works without Contacts access. You can try again or keep typing phone numbers and email addresses manually.'
-      : 'Android won’t show the Contacts prompt again. Gator still works with manually typed phone numbers and email addresses; to enable contacts, open Gator’s app settings.',
-    [{ text: 'Not Now', style: 'cancel' }, action],
+      ? i18n.format('contactsPermission.dialog.denied.message.retry', { appName })
+      : i18n.format('contactsPermission.dialog.denied.message.settings', { appName }),
+    [{ text: i18n.text('contactsPermission.action.notNow'), style: 'cancel' }, action],
   );
 }

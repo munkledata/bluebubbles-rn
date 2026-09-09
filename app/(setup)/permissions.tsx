@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -25,26 +25,35 @@ import {
 } from '@ui/permissions/contactsPermission';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { Button, Screen, useTheme } from '@ui';
+import { createI18n, type I18n } from '@utils/i18n';
 
 type NotificationUiState = NotificationPermissionState | 'loading' | 'unavailable';
 type ContactsUiState =
   | ContactsPermissionState
   | { readonly status: 'loading' | 'unavailable'; readonly canAskAgain: false };
 
-const notificationLabel = (state: NotificationUiState): string => {
-  if (state === 'granted') return 'Enabled';
-  if (state === 'denied') return 'Denied — open Android settings to enable';
-  if (state === 'not-determined') return 'Not enabled yet';
-  return state === 'loading' ? 'Checking…' : 'Status unavailable';
+const notificationLabel = (i18n: I18n, state: NotificationUiState): string => {
+  if (state === 'granted') return i18n.text('permissions.status.enabled');
+  if (state === 'denied') return i18n.text('permissions.status.notificationDeniedSettings');
+  if (state === 'not-determined') return i18n.text('permissions.status.notificationNotEnabled');
+  return i18n.text(
+    state === 'loading' ? 'permissions.status.checking' : 'permissions.status.unavailable',
+  );
 };
 
-const contactsLabel = (state: ContactsUiState): string => {
-  if (state.status === 'granted') return 'Allowed';
-  if (state.status === 'undetermined') return 'Optional — not requested';
+const contactsLabel = (i18n: I18n, state: ContactsUiState): string => {
+  if (state.status === 'granted') return i18n.text('permissions.status.allowed');
+  if (state.status === 'undetermined') return i18n.text('permissions.status.contactsOptional');
   if (state.status === 'denied') {
-    return state.canAskAgain ? 'Denied — you can try again' : 'Denied — enable in Android settings';
+    return i18n.text(
+      state.canAskAgain
+        ? 'permissions.status.contactsDeniedRetry'
+        : 'permissions.status.contactsDeniedSettings',
+    );
   }
-  return state.status === 'loading' ? 'Checking…' : 'Status unavailable';
+  return i18n.text(
+    state.status === 'loading' ? 'permissions.status.checking' : 'permissions.status.unavailable',
+  );
 };
 
 /** First-connect permission choices. Native prompts only follow the matching explicit button. */
@@ -52,6 +61,7 @@ export default function PermissionsScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const i18n = useMemo(() => createI18n(), []);
   const [accountLease] = useState<RealtimeDeliveryLease>(() => captureRealtimeDeliveryLease());
   const mountedRef = useRef(true);
   const [notification, setNotification] = useState<NotificationUiState>('loading');
@@ -101,8 +111,10 @@ export default function PermissionsScreen(): React.JSX.Element {
     } catch {
       if (isCurrent()) {
         showDialog(
-          'Notifications',
-          'Couldn’t open Android notification settings. Open Settings and select Gator.',
+          i18n.text('permissions.section.notifications'),
+          i18n.format('permissions.dialog.notificationSettingsFailed.message', {
+            appName: i18n.text('welcome.brand'),
+          }),
         );
       }
     }
@@ -126,7 +138,10 @@ export default function PermissionsScreen(): React.JSX.Element {
     } catch {
       if (isCurrent()) {
         setNotification('unavailable');
-        showDialog('Notifications', 'Android notification access is unavailable. Try again later.');
+        showDialog(
+          i18n.text('permissions.section.notifications'),
+          i18n.text('permissions.dialog.notificationsUnavailable.message'),
+        );
       }
     } finally {
       if (isCurrent()) setNotificationBusy(false);
@@ -141,8 +156,16 @@ export default function PermissionsScreen(): React.JSX.Element {
       if (!isCurrent()) return;
       setContacts({ status: 'granted', canAskAgain: true });
       showDialog(
-        'Contacts synced',
-        `Read ${result.contacts} contacts, matched ${result.matched}. You can sync again from Settings.`,
+        i18n.text('permissions.dialog.contactsSynced.title'),
+        i18n.format(
+          result.contacts === 1
+            ? 'permissions.dialog.contactsSynced.message.one'
+            : 'permissions.dialog.contactsSynced.message.other',
+          {
+            contacts: i18n.number(result.contacts),
+            matched: i18n.number(result.matched),
+          },
+        ),
       );
     } catch (error) {
       if (!isCurrent()) return;
@@ -155,7 +178,10 @@ export default function PermissionsScreen(): React.JSX.Element {
         });
       } else {
         setContacts({ status: 'unavailable', canAskAgain: false });
-        showDialog('Contacts', 'Contacts could not be synced. You can try again from Settings.');
+        showDialog(
+          i18n.text('permissions.section.contacts'),
+          i18n.text('permissions.dialog.contactsFailed.message'),
+        );
       }
     } finally {
       if (isCurrent()) setContactsBusy(false);
@@ -181,8 +207,10 @@ export default function PermissionsScreen(): React.JSX.Element {
     } catch {
       if (isCurrent()) {
         showDialog(
-          'Couldn’t save this choice',
-          'Gator kept this step open so it won’t be skipped. Try Continue again.',
+          i18n.text('permissions.dialog.saveFailed.title'),
+          i18n.format('permissions.dialog.saveFailed.message', {
+            appName: i18n.text('welcome.brand'),
+          }),
         );
       }
     } finally {
@@ -193,16 +221,16 @@ export default function PermissionsScreen(): React.JSX.Element {
 
   const notificationButton =
     notification === 'granted' || notification === 'denied'
-      ? 'Open Notification Settings'
+      ? i18n.text('permissions.action.openNotificationSettings')
       : notification === 'not-determined'
-        ? 'Enable Notifications'
-        : 'Check Again';
+        ? i18n.text('permissions.action.enableNotifications')
+        : i18n.text('permissions.action.checkAgain');
   const contactsButton =
     contacts.status === 'granted'
-      ? 'Sync Again'
+      ? i18n.text('permissions.action.syncAgain')
       : contacts.status === 'denied' && !contacts.canAskAgain
-        ? 'Open App Settings'
-        : 'Sync Contacts';
+        ? i18n.text('permissions.action.openAppSettings')
+        : i18n.text('permissions.action.syncContacts');
 
   return (
     <Screen grouped>
@@ -215,25 +243,27 @@ export default function PermissionsScreen(): React.JSX.Element {
       >
         <View style={styles.header}>
           <Text style={[styles.title, { color: theme.color.label }]}>
-            Choose what Gator can access
+            {i18n.format('permissions.title', { appName: i18n.text('welcome.brand') })}
           </Text>
           <Text style={[styles.intro, { color: theme.color.secondaryLabel }]}>
-            Both choices are optional. Gator keeps working if you choose Not Now or deny either
-            Android prompt.
+            {i18n.format('permissions.intro', { appName: i18n.text('welcome.brand') })}
           </Text>
         </View>
 
         <View style={[styles.card, { backgroundColor: theme.color.secondaryBackground }]}>
-          <Text style={[styles.cardTitle, { color: theme.color.label }]}>Notifications</Text>
+          <Text style={[styles.cardTitle, { color: theme.color.label }]}>
+            {i18n.text('permissions.section.notifications')}
+          </Text>
           <Text style={[styles.copy, { color: theme.color.secondaryLabel }]}>
-            Allow notifications to see new messages, calls, reminders, and send failures while Gator
-            is not open.
+            {i18n.format('permissions.notifications.copy', {
+              appName: i18n.text('welcome.brand'),
+            })}
           </Text>
           <Text
             accessibilityRole="text"
             style={[styles.status, { color: theme.color.tertiaryLabel }]}
           >
-            {notificationLabel(notification)}
+            {notificationLabel(i18n, notification)}
           </Text>
           <Button
             title={notificationButton}
@@ -245,16 +275,17 @@ export default function PermissionsScreen(): React.JSX.Element {
         </View>
 
         <View style={[styles.card, { backgroundColor: theme.color.secondaryBackground }]}>
-          <Text style={[styles.cardTitle, { color: theme.color.label }]}>Contacts</Text>
+          <Text style={[styles.cardTitle, { color: theme.color.label }]}>
+            {i18n.text('permissions.section.contacts')}
+          </Text>
           <Text style={[styles.copy, { color: theme.color.secondaryLabel }]}>
-            Allow Contacts access to show saved names and photos. You can always start a message by
-            typing a phone number or email address instead.
+            {i18n.text('permissions.contacts.copy')}
           </Text>
           <Text
             accessibilityRole="text"
             style={[styles.status, { color: theme.color.tertiaryLabel }]}
           >
-            {contactsLabel(contacts)}
+            {contactsLabel(i18n, contacts)}
           </Text>
           <Button
             title={contactsButton}
@@ -266,7 +297,7 @@ export default function PermissionsScreen(): React.JSX.Element {
         </View>
 
         <Button
-          title="Continue to Messages"
+          title={i18n.text('permissions.action.continue')}
           loading={continueBusy}
           onPress={() => void onContinue()}
         />

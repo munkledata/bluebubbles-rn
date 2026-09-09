@@ -162,18 +162,22 @@ describe('VoiceRecorder permissions', () => {
     expect(record).not.toHaveBeenCalled();
   });
 
-  it('stops an active recording and sends its URI exactly once', async () => {
+  it('keeps a stopped recording for retry until queue admission succeeds', async () => {
     mockRequestRecordingPermissionsAsync.mockResolvedValueOnce({ granted: true });
     const stop = jest.fn().mockResolvedValue(undefined);
     const record = jest.fn();
     const prepareToRecordAsync = jest.fn().mockResolvedValue(undefined);
-    mockUseAudioRecorder.mockReturnValueOnce({
+    mockUseAudioRecorder.mockReturnValue({
       prepareToRecordAsync,
       record,
       stop,
       uri: 'file://voice.m4a',
     });
-    const onSend = jest.fn();
+    let resolveFirstAdmission!: (accepted: boolean) => void;
+    const firstAdmission = new Promise<boolean>((resolve) => {
+      resolveFirstAdmission = resolve;
+    });
+    const onSend = jest.fn().mockReturnValueOnce(firstAdmission).mockResolvedValueOnce(true);
     const onClose = jest.fn();
 
     await renderWithTheme(<VoiceRecorder onClose={onClose} onSend={onSend} />);
@@ -191,13 +195,25 @@ describe('VoiceRecorder permissions', () => {
     expect(prepareToRecordAsync).toHaveBeenCalledTimes(1);
     expect(stop).toHaveBeenCalledTimes(1);
     expect(onSend).toHaveBeenCalledTimes(1);
-    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
 
     await act(async () => {
-      fireEvent.press(screen.getByText('Send'));
+      resolveFirstAdmission(false);
+      await firstAdmission;
     });
+    expect(screen.getByText('Try Again')).toBeTruthy();
+    expect(
+      screen.getByText('It wasn’t queued. You can try again without re-recording.'),
+    ).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(screen.getByText('Try Again'));
+    });
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+
     expect(stop).toHaveBeenCalledTimes(1);
-    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(onSend).toHaveBeenCalledTimes(2);
+    expect(onSend).toHaveBeenNthCalledWith(2, 'file://voice.m4a');
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

@@ -10,11 +10,13 @@ import {
   discardOutgoingMessageWithinTransaction,
   getScheduledById,
   listServerScheduledPruneExposure,
+  MessageTargetCapabilityUnknownError,
+  MessageTargetUnavailableError,
   reconcileServerScheduled,
   updateScheduledWithinTransaction,
   type UpdateScheduledPatch,
 } from '@db/repositories';
-import { withDbTransaction } from '@db/transaction';
+import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import { http } from '../clients';
 import { sendTextMessage, type SendTextArgs } from './sendService';
 import { sendReactionMessage, type SendReactionArgs } from './sendReactionService';
@@ -26,7 +28,11 @@ import {
   ScheduledSessionChangedError,
   type ScheduleArgs,
 } from './scheduleService';
-import { sendImageMessage, type PickedImage } from './sendAttachmentService';
+import {
+  sendImageMessage,
+  type AttachmentTextService,
+  type PickedImage,
+} from './sendAttachmentService';
 import { sendContactMessage, hasContactContent, type ContactCard } from './sendContactService';
 import { pickContact } from '../contacts/contactsService';
 import {
@@ -43,12 +49,27 @@ import { isAttachmentCacheRecoveryReady } from '../download/attachmentCacheRecov
 import { logicalSendQueue, LogicalSendQueueCapacityError } from './logicalSendQueue';
 import { clearFailedSendNotice } from './sendFailureNotice';
 import { createOutgoingPasteOwnershipPreparer } from './outgoingPasteOwnership';
+import {
+  captureSessionRcsCapabilityLease,
+  messageTargetCommitGuard,
+  messageTargetServerAuthorization,
+} from './rcsAttemptCapability';
 
 export { isContactsPermissionDeniedError } from '../contacts/contactsService';
 export { runOutgoingQueue, type OutgoingQueueIO } from './outgoingQueueService';
 
 export type SendOperationIssue = 'queue-capacity';
 export type SendIssueReporter = (issue: SendOperationIssue) => void;
+/** UI handoff fired only after the optimistic row and outgoing queue row are durable. */
+export type SendQueuedObserver = (tempGuid: string) => void;
+export interface AttachmentQueueAdmission {
+  /** Stable source identity captured before the async send starts. */
+  uri: string;
+  /** True only after this attachment's optimistic message + queue transaction committed. */
+  queued: boolean;
+  tempGuid?: string;
+}
+export type AttachmentQueueAdmissionObserver = (admission: AttachmentQueueAdmission) => void;
 
 export type ManualRetryResult =
   | 'retried'
@@ -161,6 +182,13 @@ async function runUiAccountOperation<T>(
     return result;
   } catch (error) {
     if (!lease.isCurrent()) return null;
+    if (
+      error instanceof MessageTargetUnavailableError ||
+      error instanceof MessageTargetCapabilityUnknownError ||
+      error instanceof DbCommitGuardRejectedError
+    ) {
+      return null;
+    }
     if (error instanceof LogicalSendQueueCapacityError) {
       try {
         reportIssue?.('queue-capacity');
@@ -180,7 +208,11 @@ export const outgoingQueueIO: OutgoingQueueIO = {
 };
 
 export { generateTempGuid, sendTextMessage, type SendTextArgs } from './sendService';
-export { sendImageMessage, type PickedImage } from './sendAttachmentService';
+export {
+  sendImageMessage,
+  type AttachmentTextService,
+  type PickedImage,
+} from './sendAttachmentService';
 export {
   sendContactMessage,
   contactDisplayName,
@@ -199,6 +231,7 @@ export function sendImage(
   },
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
   reportIssue?: SendIssueReporter,
+  onQueued?: SendQueuedObserver,
 ): Promise<{
   tempGuid: string;
 } | null> {
@@ -223,8 +256,67 @@ export function sendImage(
         () => accountLease.isCurrent(),
         undefined,
         pasteOwnership,
+        (tempGuid) => {
+          try {
+            if (accountLease.isCurrent()) onQueued?.(tempGuid);
+          } catch (error) {
+            logger.warn('[send] optional queue observer failed', error);
+          }
+        },
+        captureSessionRcsCapabilityLease(),
       );
     },
+    'logical-send',
+    reportIssue,
+  );
+}
+
+/**
+ * UI-facing one-attachment + text send. Both authored pieces cross the DB handoff and every retry
+ * under one temp guid; capability refusal happens before native ownership or optimistic mutation.
+ */
+export function sendTextAttachment(
+  args: {
+    chatGuid: string;
+    image: PickedImage;
+    text: string;
+    service: AttachmentTextService;
+    selectedMessageGuid?: string;
+    partIndex?: number;
+  },
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+  reportIssue?: SendIssueReporter,
+  onQueued?: SendQueuedObserver,
+): Promise<{ tempGuid: string } | null> {
+  const snapshot = {
+    ...args,
+    image: snapshotPickedImage(args.image),
+  };
+  const pasteOwnership = createOutgoingPasteOwnershipPreparer(
+    createAttachmentCacheAccountScope(accountLease),
+    () => isAttachmentCacheRecoveryReady(accountLease),
+  );
+  return runUiAccountOperation(
+    accountLease,
+    () =>
+      sendImageMessage(
+        getDatabase(),
+        http,
+        snapshot,
+        expoAttachmentUploader,
+        Date.now(),
+        () => accountLease.isCurrent(),
+        undefined,
+        pasteOwnership,
+        (tempGuid) => {
+          try {
+            if (accountLease.isCurrent()) onQueued?.(tempGuid);
+          } catch (error) {
+            logger.warn('[send] optional queue observer failed', error);
+          }
+        },
+        captureSessionRcsCapabilityLease(),
+      ),
     'logical-send',
     reportIssue,
   );
@@ -238,6 +330,7 @@ export function sendImages(
   },
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
   reportIssue?: SendIssueReporter,
+  onAdmission?: AttachmentQueueAdmissionObserver,
 ): Promise<{ tempGuid: string }[] | null> {
   const snapshot = {
     chatGuid: args.chatGuid,
@@ -252,18 +345,41 @@ export function sendImages(
     async () => {
       const db = getDatabase();
       const settled = await Promise.allSettled(
-        snapshot.images.map((image) =>
-          sendImageMessage(
-            db,
-            http,
-            { chatGuid: snapshot.chatGuid, image },
-            expoAttachmentUploader,
-            Date.now(),
-            () => accountLease.isCurrent(),
-            undefined,
-            pasteOwnership,
-          ),
-        ),
+        snapshot.images.map(async (image) => {
+          let queued = false;
+          try {
+            return await sendImageMessage(
+              db,
+              http,
+              { chatGuid: snapshot.chatGuid, image },
+              expoAttachmentUploader,
+              Date.now(),
+              () => accountLease.isCurrent(),
+              undefined,
+              pasteOwnership,
+              (tempGuid) => {
+                queued = true;
+                try {
+                  if (accountLease.isCurrent()) {
+                    onAdmission?.({ uri: image.uri, queued: true, tempGuid });
+                  }
+                } catch (error) {
+                  logger.warn('[send] optional attachment admission observer failed', error);
+                }
+              },
+              captureSessionRcsCapabilityLease(),
+            );
+          } catch (error) {
+            if (!queued && accountLease.isCurrent()) {
+              try {
+                onAdmission?.({ uri: image.uri, queued: false });
+              } catch (observerError) {
+                logger.warn('[send] optional attachment admission observer failed', observerError);
+              }
+            }
+            throw error;
+          }
+        }),
       );
       // Promise.all rejects as soon as ONE item fails and would release the account drain while the
       // other native uploads keep running. Wait for every operation we started, then preserve the
@@ -285,13 +401,27 @@ export function send(
   args: SendTextArgs,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
   reportIssue?: SendIssueReporter,
+  onQueued?: SendQueuedObserver,
 ): Promise<{ tempGuid: string } | null> {
   const snapshot = snapshotSendTextArgs(args);
   return runUiAccountOperation(
     accountLease,
     () =>
-      sendTextMessage(getDatabase(), http, snapshot, Date.now(), undefined, undefined, () =>
-        accountLease.isCurrent(),
+      sendTextMessage(
+        getDatabase(),
+        http,
+        snapshot,
+        Date.now(),
+        (tempGuid) => {
+          try {
+            if (accountLease.isCurrent()) onQueued?.(tempGuid);
+          } catch (error) {
+            logger.warn('[send] optional queue observer failed', error);
+          }
+        },
+        undefined,
+        () => accountLease.isCurrent(),
+        captureSessionRcsCapabilityLease(),
       ),
     'logical-send',
     reportIssue,
@@ -304,9 +434,11 @@ export function sendContactCard(
     chatGuid: string;
     contact: ContactCard;
     replyToGuid?: string;
+    replyToPartIndex?: number;
   },
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
   reportIssue?: SendIssueReporter,
+  onQueued?: SendQueuedObserver,
 ): Promise<{
   tempGuid: string;
 } | null> {
@@ -314,6 +446,7 @@ export function sendContactCard(
     chatGuid: args.chatGuid,
     contact: snapshotContactCard(args.contact),
     replyToGuid: args.replyToGuid,
+    replyToPartIndex: args.replyToPartIndex,
   };
   return runUiAccountOperation(
     accountLease,
@@ -325,9 +458,18 @@ export function sendContactCard(
           chatGuid: snapshot.chatGuid,
           contact: snapshot.contact,
           selectedMessageGuid: snapshot.replyToGuid,
+          partIndex: snapshot.replyToPartIndex,
         },
         Date.now(),
         () => accountLease.isCurrent(),
+        captureSessionRcsCapabilityLease(),
+        (tempGuid) => {
+          try {
+            if (accountLease.isCurrent()) onQueued?.(tempGuid);
+          } catch (error) {
+            logger.warn('[send] optional queue observer failed', error);
+          }
+        },
       ),
     'logical-send',
     reportIssue,
@@ -345,8 +487,11 @@ export async function pickAndSendContact(
   chatGuid: string,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
   reportIssue?: SendIssueReporter,
+  replyTarget?: Readonly<{ replyToGuid: string; replyToPartIndex: number }>,
+  onQueued?: SendQueuedObserver,
 ): Promise<{ tempGuid: string } | null> {
   if (!accountLease.isCurrent()) return null;
+  const targetSnapshot = replyTarget ? { ...replyTarget } : undefined;
   // The native picker may sit open for minutes, but has not touched account data yet. Keep it
   // outside the Disconnect drain, then validate the screen's PRE-picker lease before admitting the
   // actual DB/send operation. This avoids either failure mode: blocking account cleanup on an OS
@@ -363,8 +508,25 @@ export async function pickAndSendContact(
   return runUiAccountOperation(
     accountLease,
     () =>
-      sendContactMessage(getDatabase(), http, { chatGuid, contact: snapshot }, Date.now(), () =>
-        accountLease.isCurrent(),
+      sendContactMessage(
+        getDatabase(),
+        http,
+        {
+          chatGuid,
+          contact: snapshot,
+          selectedMessageGuid: targetSnapshot?.replyToGuid,
+          partIndex: targetSnapshot?.replyToPartIndex,
+        },
+        Date.now(),
+        () => accountLease.isCurrent(),
+        captureSessionRcsCapabilityLease(),
+        (tempGuid) => {
+          try {
+            if (accountLease.isCurrent()) onQueued?.(tempGuid);
+          } catch (error) {
+            logger.warn('[send] optional queue observer failed', error);
+          }
+        },
       ),
     'logical-send',
     reportIssue,
@@ -380,10 +542,21 @@ export function react(
   const snapshot = { ...args };
   return runUiAccountOperation(
     accountLease,
-    () =>
-      sendReactionMessage(getDatabase(), http, snapshot, Date.now(), () =>
-        accountLease.isCurrent(),
-      ),
+    () => {
+      const capability = captureSessionRcsCapabilityLease();
+      const serverAuthorization = messageTargetServerAuthorization(
+        capability?.serverInfo,
+        () => accountLease.isCurrent() && capability?.isCurrent() === true,
+      );
+      return sendReactionMessage(
+        getDatabase(),
+        http,
+        snapshot,
+        Date.now(),
+        () => accountLease.isCurrent(),
+        serverAuthorization,
+      );
+    },
     'logical-send',
     reportIssue,
   );
@@ -401,6 +574,7 @@ export function reply(
   },
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
   reportIssue?: SendIssueReporter,
+  onQueued?: SendQueuedObserver,
 ): Promise<{
   tempGuid: string;
 } | null> {
@@ -419,9 +593,16 @@ export function reply(
           effectId: snapshot.effectId,
         },
         Date.now(),
-        undefined,
+        (tempGuid) => {
+          try {
+            if (accountLease.isCurrent()) onQueued?.(tempGuid);
+          } catch (error) {
+            logger.warn('[send] optional queue observer failed', error);
+          }
+        },
         undefined,
         () => accountLease.isCurrent(),
+        captureSessionRcsCapabilityLease(),
       ),
     'logical-send',
     reportIssue,
@@ -440,9 +621,21 @@ export function editText(
 ): Promise<{
   ok: boolean;
 } | null> {
-  return runUiAccountOperation(accountLease, () =>
-    sendEdit(getDatabase(), http, args, Date.now(), () => accountLease.isCurrent()),
-  );
+  return runUiAccountOperation(accountLease, () => {
+    const capability = captureSessionRcsCapabilityLease();
+    const serverAuthorization = messageTargetServerAuthorization(
+      capability?.serverInfo,
+      () => accountLease.isCurrent() && capability?.isCurrent() === true,
+    );
+    return sendEdit(
+      getDatabase(),
+      http,
+      args,
+      Date.now(),
+      () => accountLease.isCurrent(),
+      serverAuthorization,
+    );
+  });
 }
 
 /** UI-facing unsend/retract of a sent message. */
@@ -450,9 +643,21 @@ export function unsend(
   args: { messageGuid: string; chatGuid?: string; partIndex?: number },
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<{ ok: boolean } | null> {
-  return runUiAccountOperation(accountLease, () =>
-    sendUnsend(getDatabase(), http, args, Date.now(), () => accountLease.isCurrent()),
-  );
+  return runUiAccountOperation(accountLease, () => {
+    const capability = captureSessionRcsCapabilityLease();
+    const serverAuthorization = messageTargetServerAuthorization(
+      capability?.serverInfo,
+      () => accountLease.isCurrent() && capability?.isCurrent() === true,
+    );
+    return sendUnsend(
+      getDatabase(),
+      http,
+      args,
+      Date.now(),
+      () => accountLease.isCurrent(),
+      serverAuthorization,
+    );
+  });
 }
 
 /** UI-facing: store a message to send later (server-side when possible). */
@@ -460,9 +665,10 @@ export function schedule(
   args: ScheduleArgs,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<{ id: number; serverId: string | null }> {
-  return runScheduledAccountOperation(accountLease, () =>
-    scheduleTextMessage(getDatabase(), http, args, accountLease),
-  );
+  return runScheduledAccountOperation(accountLease, () => {
+    const capability = captureSessionRcsCapabilityLease();
+    return scheduleTextMessage(getDatabase(), http, args, accountLease, capability);
+  });
 }
 
 /**
@@ -641,7 +847,15 @@ export async function fireDueScheduled(now = Date.now()): Promise<number> {
   const accountLease = captureRealtimeDeliveryLease();
   try {
     return await runScheduledAccountOperation(accountLease, () =>
-      runDueScheduled(getDatabase(), http, now, undefined, accountLease),
+      runDueScheduled(
+        getDatabase(),
+        http,
+        now,
+        undefined,
+        accountLease,
+        undefined,
+        captureSessionRcsCapabilityLease,
+      ),
     );
   } catch (error) {
     if (error instanceof ScheduledSessionChangedError) return 0;
@@ -715,7 +929,21 @@ export async function recoverOutgoing(
   // Before the drain, so the counts describe what the last session left behind rather than what
   // this one just repaired. Gated to the first call, which is the boot drain.
   await reportQueueHealthOnce();
-  return runOutgoingQueue(getDatabase(), http, outgoingQueueIO, now, accountLease);
+  const capability = captureSessionRcsCapabilityLease();
+  const serverAuthorization = messageTargetServerAuthorization(
+    capability?.serverInfo,
+    () => accountLease.isCurrent() && capability?.isCurrent() === true,
+  );
+  return runOutgoingQueue(
+    getDatabase(),
+    http,
+    outgoingQueueIO,
+    now,
+    accountLease,
+    undefined,
+    undefined,
+    serverAuthorization,
+  );
 }
 
 /**
@@ -750,10 +978,21 @@ export async function retry(
       accountLease,
       async (): Promise<ManualRetryResult> => {
         const db = getDatabase();
-        const { claim, row } = await withDbTransaction(
+        const capability = captureSessionRcsCapabilityLease();
+        const serverAuthorization = messageTargetServerAuthorization(
+          capability?.serverInfo,
+          () => accountLease.isCurrent() && capability?.isCurrent() === true,
+        );
+        const { claim, row, attemptOwnerToken } = await withDbTransaction(
           db,
-          (context) => claimFailedOutgoingForRetryWithinTransaction(context, tempGuid, Date.now),
-          () => accountLease.isCurrent(),
+          (context) =>
+            claimFailedOutgoingForRetryWithinTransaction(
+              context,
+              tempGuid,
+              Date.now,
+              serverAuthorization,
+            ),
+          messageTargetCommitGuard(() => accountLease.isCurrent(), serverAuthorization),
         );
         if (!accountLease.isCurrent()) return 'stale';
         if (claim !== 'claimed' || !row) {
@@ -771,6 +1010,9 @@ export async function retry(
           row,
           () => Date.now(),
           accountLease,
+          undefined,
+          attemptOwnerToken,
+          serverAuthorization,
         );
         if (!accountLease.isCurrent()) return 'stale';
         // Retired for good: the attachment's on-disk file is gone, so no re-send can ever work. The
@@ -793,6 +1035,12 @@ export async function retry(
     // Disconnect may have revoked this retry while a DB/native await was in flight. An A-account
     // failure must not surface as a toast in B's newly connected UI (or as a misleading warning).
     if (!accountLease.isCurrent()) return 'stale';
+    if (
+      e instanceof MessageTargetCapabilityUnknownError ||
+      e instanceof DbCommitGuardRejectedError
+    ) {
+      return 'failed';
+    }
     // A DB/driver failure in the claim itself. The automatic ladder still owns the row.
     logger.warn('[send] manual retry failed', e);
     return 'failed';

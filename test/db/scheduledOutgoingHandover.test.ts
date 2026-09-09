@@ -4,6 +4,7 @@ import {
   handoverScheduledTextToOutgoing,
   insertScheduled,
   ScheduledOutgoingClaimLostError,
+  ScheduledOutgoingTargetUnavailableError,
   type InsertOutgoingTextArgs,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError } from '@db/transaction';
@@ -23,11 +24,26 @@ async function createFixture(options: { serverId?: string } = {}): Promise<Fixtu
     .prepare('INSERT INTO chats (guid, latest_message_date) VALUES (?, ?)')
     .run('c1', 100);
   const chatId = Number(inserted.lastInsertRowid);
+  raw
+    .prepare(
+      `INSERT INTO messages(guid, chat_id, text, date_created, message_part_topology)
+       VALUES ('reply-guid', ?, 'target', 1, ?)`,
+    )
+    .run(
+      chatId,
+      JSON.stringify({
+        complete: true,
+        originalPartIndexes: [0],
+        currentParts: [{ index: 0, kind: 'text' }],
+        attachmentOwnership: [],
+      }),
+    );
   const scheduledId = await insertScheduled(db, {
     chatGuid: 'c1',
     text: 'scheduled text',
     scheduledFor: 1_000,
     selectedMessageGuid: 'reply-guid',
+    selectedMessagePartIndex: 0,
     serverId: options.serverId,
   });
   return { db, raw, chatId, scheduledId };
@@ -41,12 +57,35 @@ function outgoing(chatId: number, overrides: Partial<InsertOutgoingTextArgs> = {
     text: 'scheduled text',
     now: 2_000,
     selectedMessageGuid: 'reply-guid',
+    partIndex: 0,
     threadOriginatorGuid: 'reply-guid',
     ...overrides,
   } satisfies InsertOutgoingTextArgs;
 }
 
 describe('scheduled → outgoing repository handoff', () => {
+  it('retires a directly handed-off targeted RCS schedule without creating outgoing work', async () => {
+    const { db, raw, chatId, scheduledId } = await createFixture();
+    expect(await claimScheduled(db, scheduledId)).toBe(true);
+    raw
+      .prepare('UPDATE scheduled_messages SET chat_guid = ? WHERE id = ?')
+      .run('RCS;-;thread-1', scheduledId);
+
+    await expect(
+      handoverScheduledTextToOutgoing(db, {
+        scheduledId,
+        outgoing: outgoing(chatId, { chatGuid: 'RCS;-;thread-1' }),
+        transition: { kind: 'sent' },
+      }),
+    ).rejects.toBeInstanceOf(ScheduledOutgoingTargetUnavailableError);
+
+    expect(await getScheduledById(db, scheduledId)).toMatchObject({ status: 'error' });
+    expect(raw.prepare('SELECT COUNT(*) AS count FROM outgoing_queue').get()).toEqual({ count: 0 });
+    expect(
+      raw.prepare("SELECT COUNT(*) AS count FROM messages WHERE guid = 'temp-handoff'").get(),
+    ).toEqual({ count: 0 });
+  });
+
   it('commits a one-shot terminal state with its optimistic message and queue row', async () => {
     const { db, raw, chatId, scheduledId } = await createFixture();
     expect(await claimScheduled(db, scheduledId)).toBe(true);
@@ -74,6 +113,7 @@ describe('scheduled → outgoing repository handoff', () => {
       payload: JSON.stringify({
         message: 'scheduled text',
         selectedMessageGuid: 'reply-guid',
+        partIndex: 0,
       }),
     });
     expect(
@@ -81,7 +121,8 @@ describe('scheduled → outgoing repository handoff', () => {
         .prepare(
           `SELECT guid, chat_id AS chatId, text, date_created AS dateCreated,
                   send_state AS sendState, thread_originator_guid AS threadOriginatorGuid
-             FROM messages`,
+             FROM messages
+            WHERE guid = 'temp-handoff'`,
         )
         .get(),
     ).toEqual({
@@ -116,7 +157,9 @@ describe('scheduled → outgoing repository handoff', () => {
         .get(scheduledId),
     ).toEqual({ status: 'pending', scheduledFor: 50_000, attempts: 0 });
     expect(raw.prepare('SELECT COUNT(*) AS count FROM outgoing_queue').get()).toEqual({ count: 1 });
-    expect(raw.prepare('SELECT COUNT(*) AS count FROM messages').get()).toEqual({ count: 1 });
+    expect(
+      raw.prepare("SELECT COUNT(*) AS count FROM messages WHERE guid = 'temp-handoff'").get(),
+    ).toEqual({ count: 1 });
   });
 
   it('throws a typed claim-lost error and writes no outgoing state when the row is not claimed', async () => {
@@ -132,7 +175,9 @@ describe('scheduled → outgoing repository handoff', () => {
 
     expect((await getScheduledById(db, scheduledId))?.status).toBe('pending');
     expect(raw.prepare('SELECT COUNT(*) AS count FROM outgoing_queue').get()).toEqual({ count: 0 });
-    expect(raw.prepare('SELECT COUNT(*) AS count FROM messages').get()).toEqual({ count: 0 });
+    expect(
+      raw.prepare("SELECT COUNT(*) AS count FROM messages WHERE guid = 'temp-handoff'").get(),
+    ).toEqual({ count: 0 });
     expect(
       raw.prepare('SELECT latest_message_date AS latest FROM chats WHERE id = ?').get(chatId),
     ).toEqual({ latest: 100 });
@@ -181,7 +226,9 @@ describe('scheduled → outgoing repository handoff', () => {
     expect(inserts).toBe(2);
     expect((await getScheduledById(db, scheduledId))?.status).toBe('sending');
     expect(raw.prepare('SELECT COUNT(*) AS count FROM outgoing_queue').get()).toEqual({ count: 0 });
-    expect(raw.prepare('SELECT COUNT(*) AS count FROM messages').get()).toEqual({ count: 0 });
+    expect(
+      raw.prepare("SELECT COUNT(*) AS count FROM messages WHERE guid = 'temp-handoff'").get(),
+    ).toEqual({ count: 0 });
   });
 
   it('rolls every handoff write back when the account commit guard is revoked before commit', async () => {
@@ -207,7 +254,9 @@ describe('scheduled → outgoing repository handoff', () => {
     expect(checks).toBe(3);
     expect((await getScheduledById(db, scheduledId))?.status).toBe('sending');
     expect(raw.prepare('SELECT COUNT(*) AS count FROM outgoing_queue').get()).toEqual({ count: 0 });
-    expect(raw.prepare('SELECT COUNT(*) AS count FROM messages').get()).toEqual({ count: 0 });
+    expect(
+      raw.prepare("SELECT COUNT(*) AS count FROM messages WHERE guid = 'temp-handoff'").get(),
+    ).toEqual({ count: 0 });
     expect(
       raw.prepare('SELECT latest_message_date AS latest FROM chats WHERE id = ?').get(chatId),
     ).toEqual({ latest: 100 });

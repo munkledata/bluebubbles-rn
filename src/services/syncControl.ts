@@ -1,3 +1,4 @@
+import { isUnimplementedEndpoint } from '@core/api/errors';
 import { logger } from '@core/secure';
 import type { SyncMarker } from '@core/sync';
 import {
@@ -9,7 +10,12 @@ import {
   setSyncMarkerWithinTransaction,
   type FullRepairPruneExposure,
 } from '@db/repositories';
-import { withDbTransaction } from '@db/transaction';
+import {
+  captureDbWriteFence,
+  DbWriteFenceRejectedError,
+  withDbTransaction,
+  type DbCommitGuard,
+} from '@db/transaction';
 import { sessionAccessors, useSessionStore } from '@state/sessionStore';
 import { useSyncStore } from '@state/syncStore';
 import { useSyncSettingsStore } from '@state/syncSettingsStore';
@@ -27,13 +33,13 @@ import {
   fullSync,
   httpSyncApi,
   incrementalSync,
-  sameFullSyncServerView,
   syncAllChats,
   syncChatMessageRange,
   syncChatMessages,
   syncSingleChat,
   syncDeletedMessages,
   type FullSyncServerView,
+  type SyncApi,
 } from './sync';
 
 /**
@@ -87,6 +93,16 @@ const targetedRepairByKey = new Map<string, TargetedRepairRun>();
 let lastSyncAt = 0;
 const RESUME_MIN_INTERVAL_MS = 10_000;
 const TARGETED_CHAT_REPAIR_MAX_MESSAGES = 500;
+
+/** Keep the sync graph React-free until a completed write pass actually needs native cleanup. */
+async function reconcileSyncedMessageNotifications(
+  db: import('@db/types').AppDatabase,
+  accountLease: RealtimeDeliveryLease,
+): Promise<void> {
+  const { reconcileMessageNotificationsWithDatabase } =
+    await import('./notifications/notifeeService');
+  await reconcileMessageNotificationsWithDatabase(db, accountLease);
+}
 
 /** Resolve once every currently-published run has STOPPED (settled), however it settled. */
 function settledAll(runs: Array<Promise<void> | null>): Promise<unknown> {
@@ -349,6 +365,11 @@ function startTargetedChatRepair(
 
     if (stopped()) throw new Error('Conversation repair stopped because the account changed.');
 
+    await reconcileSyncedMessageNotifications(db, lease).catch((error) => {
+      if (!stopped()) logger.warn('[sync] repaired notification history cleanup failed', error);
+    });
+    if (stopped()) throw new Error('Conversation repair stopped because the account changed.');
+
     return {
       messages: history.messages,
       historyExhausted: history.exhausted,
@@ -472,6 +493,13 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
   let outcome: SyncRunOutcome = 'running';
   let failureMessage = 'Sync failed';
   let rebuiltRepairMarker: SyncMarker | null = null;
+  let repairSnapshotToken: string | null = null;
+  let cancelRepairSnapshot: ((token: string, signal?: AbortSignal) => Promise<void>) | undefined;
+  let finishRepairSnapshot: ((token: string, signal?: AbortSignal) => Promise<void>) | undefined;
+  let repairCommitGuard: DbCommitGuard | undefined;
+  let repairCandidateView: FullSyncServerView | null = null;
+  let repairLimited = false;
+  let syncDb: import('@db/types').AppDatabase | null = null;
   const repairReconciliation: {
     exposure: FullRepairPruneExposure | null;
     confirmedView: FullSyncServerView | null;
@@ -483,6 +511,7 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
       return;
     }
     const db = await ensureDatabase();
+    syncDb = db;
     if (shouldAbort()) {
       outcome = stoppedOutcome();
       return;
@@ -501,6 +530,15 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
       return;
     }
     const api = httpSyncApi(http);
+    let repairTransport: ReturnType<typeof http.pinTransport> | null = null;
+    let repairControlApi: SyncApi | null = null;
+    let initialSyncApi = api;
+    if (repair) {
+      repairTransport = http.pinTransport();
+      repairControlApi = httpSyncApi(repairTransport);
+      cancelRepairSnapshot = repairControlApi.cancelRepairSnapshot;
+      finishRepairSnapshot = repairControlApi.finishRepairSnapshot;
+    }
     if (repair) sync.beginRepair();
     else sync.begin();
 
@@ -527,10 +565,38 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
       // demand when a chat is opened, so a cap only bounds the first bulk pass.
       const perChat = useSyncSettingsStore.getState().messagesPerChat;
       if (repair) {
-        repairReconciliation.exposure = await captureFullRepairPruneExposure(
-          db,
-          () => !shouldAbort(),
+        if (
+          repairTransport == null ||
+          repairControlApi?.beginRepairSnapshot == null ||
+          finishRepairSnapshot == null
+        ) {
+          throw new Error('Full repair requires a newer compatible Gator server.');
+        }
+        sync.noteRepair(
+          'Opening a stable server view',
+          'The server must remain unchanged until the all-history download finishes.',
         );
+        let lease: { token: string; expiresAt: number } | null = null;
+        try {
+          lease = await repairControlApi.beginRepairSnapshot(options.signal);
+        } catch (error) {
+          if (!isUnimplementedEndpoint(error)) throw error;
+          repairLimited = true;
+          initialSyncApi = repairControlApi;
+          sync.noteRepair(
+            'Compatibility refresh',
+            'This server cannot prove an atomic snapshot. Data will be refreshed without absence cleanup or replacing the sync marker.',
+          );
+        }
+        if (lease != null) {
+          repairSnapshotToken = lease.token;
+          repairCommitGuard = (await captureDbWriteFence(() => !shouldAbort())).commitGuard;
+          repairReconciliation.exposure = await captureFullRepairPruneExposure(
+            db,
+            repairCommitGuard,
+          );
+          initialSyncApi = httpSyncApi(repairTransport.bindRepairSnapshot(lease.token));
+        }
         if (shouldAbort()) {
           outcome = stoppedOutcome();
           return;
@@ -541,11 +607,12 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
         view: FullSyncServerView | null;
         marker: SyncMarker | null;
       } = { view: null, marker: null };
-      let result = await fullSync(db, api, {
+      const result = await fullSync(db, initialSyncApi, {
         onProgress: (p) => {
           if (!shouldAbort()) sync.progress(p);
         },
         shouldAbort,
+        commitGuard: repair ? repairCommitGuard : undefined,
         // Pass zero rather than omitting it: zero is the user's explicit "All" choice, while an
         // absent engine option deliberately keeps the conservative 100-message default.
         // A repair is explicitly a FULL re-download, independent of the first-install tuning.
@@ -573,44 +640,11 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
           throw new Error('Repair finished without a server-derived sync marker.');
         }
         sync.noteRepair(
-          'Confirming a stable server view',
-          'A second complete pass must match before stale local rows can be removed.',
+          'Checking missed deletions',
+          'Applying any deletions missed while the app was offline before the refresh finishes.',
         );
-        const secondRepair: {
-          view: FullSyncServerView | null;
-          marker: SyncMarker | null;
-        } = { view: null, marker: null };
-        result = await fullSync(db, api, {
-          onProgress: (p) => {
-            if (!shouldAbort()) sync.progress(p);
-          },
-          shouldAbort,
-          maxMessagesPerChat: 0,
-          failOnChatError: true,
-          commitMarker: false,
-          signal: options.signal,
-          onServerMarker: (nextMarker) => {
-            secondRepair.marker = nextMarker;
-          },
-          onServerView: (view) => {
-            secondRepair.view = view;
-          },
-        });
-        if (shouldAbort()) {
-          outcome = stoppedOutcome();
-          return;
-        }
-        if (secondRepair.marker == null || secondRepair.view == null) {
-          throw new Error('Repair validation finished without a complete server view.');
-        }
-        if (!sameFullSyncServerView(firstRepair.view, secondRepair.view)) {
-          throw new Error(
-            'The server changed while repair was reading it. Restart repair to avoid removing current data.',
-          );
-        }
-        rebuiltRepairMarker = secondRepair.marker;
-        repairReconciliation.confirmedView = secondRepair.view;
-        sync.noteRepair('Reconciling deletions', 'Chat and message download finished.');
+        rebuiltRepairMarker = firstRepair.marker;
+        repairCandidateView = firstRepair.view;
       } else {
         sync.done(result);
       }
@@ -644,9 +678,10 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
       if (!shouldAbort()) sync.done(result);
     }
 
-    // R1 deletion catch-up: apply `message-deleted` events missed while the app was dead or
-    // app-locked (the locked FCM path never touches the DB — see DbEventSink). Runs AFTER the
-    // chat/message sync so tombstones land on freshly-synced rows. Gated on the server's
+    // R1 deletion catch-up: apply `message-deleted` events missed by legacy/refused/expired FCM
+    // while the app was dead or locked. Authenticated, active-bound V3 can now queue one such event
+    // in SQLCipher, but does not apply it before unlock. This catch-up runs AFTER chat/message sync so
+    // tombstones land on freshly-synced rows. Gated on the server's
     // `supports_message_deleted` capability (older servers would 404); best-effort — a failure
     // must never flip the sync status, which `sync.done` already reported above.
     //
@@ -654,32 +689,27 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
     // are account-guarded, so an old run cannot recreate continuation state after
     // `clearLocalCache`.
     if (!shouldAbort()) {
-      const deletionCatchup = syncDeletedMessages(db, api, {
+      const deletionCatchup = syncDeletedMessages(db, repair ? initialSyncApi : api, {
         supported: sessionAccessors.messageDeletedSupported(),
         shouldAbort,
+        commitGuard: repair ? repairCommitGuard : undefined,
         signal: options.signal,
       });
       if (repair) await deletionCatchup;
       else await deletionCatchup.catch((e) => logger.debug('[sync] deletion catch-up failed', e));
-      if (!shouldAbort()) {
+      if (!repair && !shouldAbort()) {
         const retireInactive = attachmentCacheCoordinator.retireInactiveEntries(db, {
           scope: attachmentCacheScope,
         });
-        if (repair) await retireInactive;
-        else {
-          await retireInactive.catch((error) =>
-            logger.debug('[sync] deleted-message cache retirement deferred', error),
-          );
-        }
+        await retireInactive.catch((error) =>
+          logger.debug('[sync] deleted-message cache retirement deferred', error),
+        );
         const drainRetirements = attachmentCacheCoordinator.drainDueRetirements(db, {
           scope: attachmentCacheScope,
         });
-        if (repair) await drainRetirements;
-        else {
-          await drainRetirements.catch((error) =>
-            logger.debug('[sync] deleted-message cache cleanup deferred', error),
-          );
-        }
+        await drainRetirements.catch((error) =>
+          logger.debug('[sync] deleted-message cache cleanup deferred', error),
+        );
       }
     }
     if (shouldAbort()) {
@@ -687,14 +717,35 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
       return;
     }
     if (repair) {
+      if (repairLimited) {
+        outcome = 'completed';
+        return;
+      }
+      const token = repairSnapshotToken;
+      if (token == null || finishRepairSnapshot == null) {
+        throw new Error('Repair lost its stable server-view token.');
+      }
+      sync.noteRepair(
+        'Verifying the stable server view',
+        'Confirming that every page came from one unchanged server process.',
+      );
+      await finishRepairSnapshot(token, options.signal);
+      // Keep the token available to finally until finish succeeds. If the response is lost after
+      // the server consumes it, the best-effort cancel is harmless; otherwise it frees the lease.
+      repairSnapshotToken = null;
+      if (shouldAbort()) {
+        outcome = stoppedOutcome();
+        return;
+      }
+      repairReconciliation.confirmedView = repairCandidateView;
       const repairExposure = repairReconciliation.exposure;
       const confirmedRepairView = repairReconciliation.confirmedView;
-      if (repairExposure == null || confirmedRepairView == null) {
+      if (repairExposure == null || confirmedRepairView == null || repairCommitGuard == null) {
         throw new Error('Repair finished without a confirmed reconciliation view.');
       }
       sync.noteRepair(
         'Removing stale local rows',
-        'The two complete server passes matched; only pre-existing absent rows are eligible.',
+        'The server stayed unchanged; only pre-existing absent rows are eligible.',
       );
       const reconciliation = await reconcileFullRepairPruneExposure(
         db,
@@ -704,20 +755,12 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
           messageGuids: new Set(confirmedRepairView.messages.keys()),
           attachmentGuidsByMessage: confirmedRepairView.attachmentsByMessage,
         },
-        () => !shouldAbort(),
+        repairCommitGuard,
       );
       if (shouldAbort()) {
         outcome = stoppedOutcome();
         return;
       }
-      // Reconciliation can orphan cached attachment paths. Let the existing short DB owners mark
-      // and settle those exact files; all native delete work remains outside their transactions.
-      await attachmentCacheCoordinator.retireInactiveEntries(db, {
-        scope: attachmentCacheScope,
-      });
-      await attachmentCacheCoordinator.drainDueRetirements(db, {
-        scope: attachmentCacheScope,
-      });
       sync.noteRepair(
         'Finalizing local cache',
         `Removed ${reconciliation.messagesRemoved} messages, ${reconciliation.attachmentsRemoved} attachments, and ${reconciliation.chatsRemoved} chats; retained ${reconciliation.chatShellsRetired} customized chat shells and ${reconciliation.chatsPreservedForLocalWork} chats with local work.`,
@@ -731,12 +774,20 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
       await withDbTransaction(
         db,
         (context) => setSyncMarkerWithinTransaction(context, finalRepairMarker),
-        () => !shouldAbort(),
+        repairCommitGuard,
       );
       // Once the guarded commit returns, the repair is complete. A cancel tap racing immediately
       // after this terminal commit is too late and correctly resolves to Complete, not Cancelled.
       outcome = 'completed';
       sync.noteRepair('Repair complete', 'Installed the rebuilt server-derived sync marker.');
+      // Reconciliation can orphan cached attachment paths. Cleanup is safe after the marker and
+      // deliberately best-effort; native file work must not extend the repair's DB write fence.
+      await attachmentCacheCoordinator
+        .retireInactiveEntries(db, { scope: attachmentCacheScope })
+        .catch((error) => logger.debug('[sync] repair cache retirement deferred', error));
+      await attachmentCacheCoordinator
+        .drainDueRetirements(db, { scope: attachmentCacheScope })
+        .catch((error) => logger.debug('[sync] repair cache cleanup deferred', error));
       return;
     }
     outcome = 'completed';
@@ -746,11 +797,31 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
     if (cancelled()) outcome = 'cancelled';
     else if (sessionEnded()) outcome = 'stale';
     else {
-      failureMessage = e instanceof Error ? e.message : 'Sync failed';
+      failureMessage =
+        e instanceof DbWriteFenceRejectedError
+          ? 'Local messages changed while repair was running. Restart repair to try again safely.'
+          : e instanceof Error
+            ? e.message
+            : 'Sync failed';
       outcome = 'failed';
       if (!repair) sync.fail(failureMessage);
     }
   } finally {
+    const abandonedSnapshotToken = repairSnapshotToken;
+    repairSnapshotToken = null;
+    if (abandonedSnapshotToken != null && cancelRepairSnapshot != null) {
+      // Do not forward the repair's signal here: user cancellation has already aborted it, but
+      // releasing the server lease is still useful. The pinned transport independently rejects a
+      // session/origin change, and server expiry remains the fallback if that happens.
+      await cancelRepairSnapshot(abandonedSnapshotToken).catch((error) =>
+        logger.debug('[sync] repair snapshot cleanup deferred to server expiry', error),
+      );
+    }
+    if (outcome === 'completed' && syncDb != null && !shouldAbort()) {
+      await reconcileSyncedMessageNotifications(syncDb, accountLease).catch((error) => {
+        if (!shouldAbort()) logger.warn('[sync] notification history cleanup failed', error);
+      });
+    }
     // Resolve device contacts onto handles so chats — especially GROUPS — show contact names
     // instead of raw phone numbers in the inbox/headers. Fire-and-forget with its own catch:
     // a denied contacts permission (or any IO error) must NOT affect the message-sync status.
@@ -762,8 +833,10 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
     // Never let an old account publish into a replacement account's global store. A same-epoch
     // lease retirement (for example a transport rotation) is still useful feedback to this account.
     if (repair && sessionAccessors.getEpoch() === epochAtStart) {
-      if (outcome === 'completed') sync.finishRepair();
-      else if (outcome === 'cancelled') sync.cancelRepair();
+      if (outcome === 'completed') {
+        if (repairLimited) sync.finishRepairLimited();
+        else sync.finishRepair();
+      } else if (outcome === 'cancelled') sync.cancelRepair();
       else if (outcome === 'failed') sync.failRepair(failureMessage);
       else if (outcome === 'stale') {
         sync.cancelRepair('Repair stopped because the connection changed. Restart it to continue.');

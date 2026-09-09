@@ -95,6 +95,7 @@ export const FaceTimeStatusPayload = z
 export const AliasesRemovedPayload = z.object({ aliases: z.array(z.string()) }).loose();
 
 const OptionalSendErrorId = z.string().min(1).nullish();
+const OptionalSendAttemptGuid = z.string().min(1).max(128).nullish();
 // Optional prose must never invalidate the authoritative send failure. Project it during
 // normalization so durable incoming-event payloads cannot retain the raw server string.
 const OptionalServerErrorDetail = z.preprocess(projectServerErrorDetail, z.string().optional());
@@ -102,6 +103,7 @@ const OptionalServerErrorDetail = z.preprocess(projectServerErrorDetail, z.strin
 const SendErrorMessagePayload = z
   .object({
     guid: OptionalSendErrorId,
+    clientAttemptGeneration: z.number().int().min(1).max(2_147_483_647).nullish(),
     error: z.union([z.number(), z.string()]).nullish(),
     /** Additive prose projected before durable intake; the DB sink repeats the projection. */
     errorMessage: OptionalServerErrorDetail,
@@ -117,7 +119,9 @@ const SendErrorMessagePayload = z
 export const MessageSendErrorPayload = z
   .object({
     /** Server-owned identity for one admitted dispatch attempt, shared by every fanout when present. */
-    attemptGuid: OptionalSendErrorId,
+    attemptGuid: OptionalSendAttemptGuid,
+    /** Client-side request generation echoed through the server's durable RCS correlation. */
+    clientAttemptGeneration: z.number().int().min(1).max(2_147_483_647).nullish(),
     guid: OptionalSendErrorId,
     tempGuid: OptionalSendErrorId,
     messageGuid: OptionalSendErrorId,

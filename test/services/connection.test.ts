@@ -1,8 +1,11 @@
 import { ApiError } from '@core/api/errors';
 import {
   ACCOUNT_REVOCATION_CLEAR_FAILURE_MESSAGE,
+  createCredentialUpgradeCandidate,
   InMemoryVault,
   logger,
+  revokedCredentialUpgradeJournal,
+  serializeCredentialUpgradeJournal,
   SERVER_SESSION_STATE,
   type AccountRevocationMarker,
   type SecureVault,
@@ -10,6 +13,7 @@ import {
 import { connectToServer } from '@/services/connection';
 
 const upToDate = { server_version: '1.9.5' };
+const SCOPED_CREDENTIAL = `bbd_device_v1_${'A'.repeat(43)}`;
 let revoked = false;
 const revocationMarker: AccountRevocationMarker = {
   isRevoked: () => revoked,
@@ -47,6 +51,89 @@ describe('connectToServer', () => {
       ['serverPassword', 'pw'],
       ['serverSessionState', SERVER_SESSION_STATE.active],
     ]);
+  });
+
+  it('atomically clears only a confirmed revoked upgrade tombstone for a fresh session', async () => {
+    const vault = new InMemoryVault();
+    await vault.set(
+      'serverCredentialUpgrade',
+      serializeCredentialUpgradeJournal(revokedCredentialUpgradeJournal()),
+    );
+
+    await expect(
+      connectToServer('https://srv', SCOPED_CREDENTIAL, {
+        fetchServerInfo: async () => upToDate,
+        vault,
+        revocationMarker,
+      }),
+    ).resolves.toMatchObject({ ok: true });
+
+    expect(await vault.get('serverCredentialUpgrade')).toBeNull();
+    expect(await vault.get('serverSessionState')).toBe(SERVER_SESSION_STATE.active);
+  });
+
+  it('fails closed when upgrade-state removal is unconfirmed or a live candidate exists', async () => {
+    const revoked = serializeCredentialUpgradeJournal(revokedCredentialUpgradeJournal());
+    const backing = new InMemoryVault();
+    await backing.set('serverCredentialUpgrade', revoked);
+    const noOpDelete: SecureVault = {
+      get: (key) => backing.get(key),
+      set: (key, value) => backing.set(key, value),
+      delete: async () => undefined,
+    };
+
+    await expect(
+      connectToServer('https://srv', SCOPED_CREDENTIAL, {
+        fetchServerInfo: async () => upToDate,
+        vault: noOpDelete,
+        revocationMarker,
+      }),
+    ).resolves.toMatchObject({ ok: false, kind: 'unknown' });
+    expect(await backing.get('serverSessionState')).toBe(SERVER_SESSION_STATE.writing);
+    expect(await backing.get('serverCredentialUpgrade')).toBe(revoked);
+
+    const liveCandidate = new InMemoryVault();
+    const candidate = createCredentialUpgradeCandidate(
+      'https://srv',
+      'legacy-password',
+      SCOPED_CREDENTIAL,
+    );
+    await liveCandidate.set(
+      'serverCredentialUpgrade',
+      serializeCredentialUpgradeJournal(candidate),
+    );
+    const deleteCandidate = jest.spyOn(liveCandidate, 'delete');
+
+    await expect(
+      connectToServer('https://srv', 'replacement-password', {
+        fetchServerInfo: async () => upToDate,
+        vault: liveCandidate,
+        revocationMarker,
+      }),
+    ).resolves.toMatchObject({ ok: false, kind: 'unknown' });
+    expect(deleteCandidate).not.toHaveBeenCalled();
+    expect(await liveCandidate.get('serverSessionState')).toBeNull();
+  });
+
+  it('fails before activation when credential-upgrade preflight cannot be read', async () => {
+    const backing = new InMemoryVault();
+    const vault: SecureVault = {
+      get: async (key) => {
+        if (key === 'serverCredentialUpgrade') throw new Error('Keystore read failed');
+        return backing.get(key);
+      },
+      set: (key, value) => backing.set(key, value),
+      delete: (key) => backing.delete(key),
+    };
+
+    await expect(
+      connectToServer('https://srv', 'pw', {
+        fetchServerInfo: async () => upToDate,
+        vault,
+        revocationMarker,
+      }),
+    ).resolves.toMatchObject({ ok: false, kind: 'unknown' });
+    expect(await backing.get('serverSessionState')).toBeNull();
   });
 
   it('does not start credential persistence when Disconnect revokes an in-flight validation', async () => {

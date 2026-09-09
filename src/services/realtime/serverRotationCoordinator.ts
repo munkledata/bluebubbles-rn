@@ -52,6 +52,11 @@ export class ServerRotationCoordinator {
     return () => this.listeners.delete(listener);
   };
 
+  /** A claimed durable rotation must finish before another credential transition can start. */
+  hasInProgressTransition(): boolean {
+    return this.inProgress !== null;
+  }
+
   offer(
     rawCandidate: string,
     currentOrigin: string | null,

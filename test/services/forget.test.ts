@@ -89,6 +89,13 @@ const retireFcmDeviceEncryptionState = jest.fn(async (): Promise<void> => undefi
 const serverInfo = jest.fn(async (): Promise<import('@core/models').ServerInfo> => ({
   server_version: undefined,
 }));
+const revokeSelf = jest.fn(async () => ({
+  revoked: true,
+  deviceId: 'cae7303f-a9a3-4f3f-bfe8-5664aa36e72a',
+  deviceRemoved: true,
+}));
+const scopedHttp = Object.freeze({ kind: 'fixed-scoped-http' });
+const fixedCredentialClient = jest.fn(() => scopedHttp);
 type MockRealtimeIssue = {
   stage: 'notifications' | 'fcm';
   level: 'degraded';
@@ -180,7 +187,10 @@ let mockCachedDirectoryExists = false;
 let mockCachedDirectoryDeleteFailure = false;
 
 // `@core/api` pulls `ky`, which ships ESM only and is not in the node project's transform set.
-jest.mock('@core/api', () => ({ serverApi: { serverInfo } }));
+jest.mock('@core/api', () => ({
+  deviceCredentialsApi: { revokeSelf },
+  serverApi: { serverInfo },
+}));
 jest.mock('@db/repositories', () => ({ clearLocalCache, localCacheDirty, listReminders }));
 jest.mock('@core/realtime', () => ({
   get FCM_ENABLED(): boolean {
@@ -206,6 +216,7 @@ jest.mock('@/services/clients', () => ({
   },
   http: {},
   candidateClient,
+  fixedCredentialClient,
   runCryptoSelfTest: jest.fn(),
 }));
 jest.mock('@/services/databaseControl', () => ({
@@ -266,10 +277,18 @@ jest.mock('expo-file-system', () => ({
 
 // Jest needs these mock factories installed before the module under test is imported.
 /* eslint-disable import/first */
+import { ApiError } from '@core/api/errors';
 import { useSessionStore } from '@state/sessionStore';
 import { useDownloadStore } from '@state/downloadStore';
 import { useUploadStore } from '@state/uploadStore';
-import { ERROR_DIAGNOSTIC_SITES, logger, memoryLogSink, SERVER_SESSION_STATE } from '@core/secure';
+import {
+  createCredentialUpgradeCandidate,
+  ERROR_DIAGNOSTIC_SITES,
+  logger,
+  memoryLogSink,
+  serializeCredentialUpgradeJournal,
+  SERVER_SESSION_STATE,
+} from '@core/secure';
 import {
   activateForegroundBootSession,
   connect,
@@ -351,6 +370,12 @@ beforeEach(async () => {
   clearFileLogs.mockResolvedValue(true);
   retireFcmDeviceEncryptionState.mockReset().mockResolvedValue(undefined);
   serverInfo.mockReset().mockResolvedValue({ server_version: undefined });
+  revokeSelf.mockReset().mockResolvedValue({
+    revoked: true,
+    deviceId: 'cae7303f-a9a3-4f3f-bfe8-5664aa36e72a',
+    deviceRemoved: true,
+  });
+  fixedCredentialClient.mockReset().mockReturnValue(scopedHttp);
   startSync.mockReset().mockResolvedValue(undefined);
   startRealtime.mockReset().mockResolvedValue(undefined);
   connectToServer.mockReset();
@@ -372,11 +397,11 @@ afterEach(() => {
 function productionBootContext(): {
   readonly context: BootStageContext;
   readonly reportIssue: jest.Mock;
-  readonly disposers: Array<() => void | Promise<void>>;
+  readonly disposers: (() => void | Promise<void>)[];
 } {
   const controller = new AbortController();
   const reportIssue = jest.fn();
-  const disposers: Array<() => void | Promise<void>> = [];
+  const disposers: (() => void | Promise<void>)[] = [];
   return {
     context: {
       runId: 41,
@@ -406,7 +431,36 @@ async function productionBootAttempt(context: BootStageContext): Promise<Foregro
   return outcome.session;
 }
 
+function seedQuarantinedCredentialUpgradeSession(): void {
+  vaultValues.set('serverSessionState', SERVER_SESSION_STATE.active);
+  vaultValues.set('serverAddress', 'https://old.example');
+  vaultValues.set('serverPassword', 'hunter2');
+  vaultValues.set('serverCredentialUpgrade', 'not-json');
+}
+
 describe('foreground boot production adapters', () => {
+  it('fails a quarantined credential upgrade closed without opening or wiping account data', async () => {
+    seedQuarantinedCredentialUpgradeSession();
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const { context } = productionBootContext();
+
+    await expect(inspectForegroundBootSession(context)).rejects.toMatchObject({
+      name: 'ForegroundBootOperationalError',
+      code: 'durable-session-unavailable',
+      userMessage: expect.stringMatching(/No saved data was changed/i),
+    });
+
+    expect(pauseRealtimeDeliveries).toHaveBeenCalledTimes(1);
+    expect(ensureDatabase).not.toHaveBeenCalled();
+    expect(markerMarkRevoked).not.toHaveBeenCalled();
+    expect(clearLocalCache).not.toHaveBeenCalled();
+    expect(vaultSet).not.toHaveBeenCalled();
+    expect(vaultDelete).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith('[boot] credential-upgrade recovery is quarantined', {
+      reason: 'invalid-journal',
+    });
+  });
+
   it('runs the real adapter chain with guarded critical settings, ordered admission, and one lease', async () => {
     const { context, disposers } = productionBootContext();
     const attempt = await productionBootAttempt(context);
@@ -539,6 +593,44 @@ describe('foreground boot production adapters', () => {
 });
 
 describe('hydrateSession() — correlated SecureStore state', () => {
+  it('fails legacy hydration closed on a quarantined credential upgrade without wiping it', async () => {
+    seedQuarantinedCredentialUpgradeSession();
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+    await expect(hydrateSession()).resolves.toBeUndefined();
+
+    expect(useSessionStore.getState()).toMatchObject({
+      status: 'error',
+      origin: null,
+      password: null,
+      error: expect.stringMatching(/No saved data was changed/i),
+    });
+    expect(ensureDatabase).not.toHaveBeenCalled();
+    expect(markerMarkRevoked).not.toHaveBeenCalled();
+    expect(clearLocalCache).not.toHaveBeenCalled();
+    expect(vaultSet).not.toHaveBeenCalled();
+    expect(vaultDelete).not.toHaveBeenCalled();
+    expect(vaultValues.get('serverCredentialUpgrade')).toBe('not-json');
+  });
+
+  it('blocks a new connection on a quarantined credential upgrade without auto-wiping it', async () => {
+    seedQuarantinedCredentialUpgradeSession();
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+    await expect(connect('https://new.example', 'new-secret')).resolves.toBeUndefined();
+
+    expect(useSessionStore.getState()).toMatchObject({
+      status: 'error',
+      error: expect.stringMatching(/No saved data was changed/i),
+    });
+    expect(connectToServer).not.toHaveBeenCalled();
+    expect(markerMarkRevoked).not.toHaveBeenCalled();
+    expect(clearLocalCache).not.toHaveBeenCalled();
+    expect(vaultSet).not.toHaveBeenCalled();
+    expect(vaultDelete).not.toHaveBeenCalled();
+    expect(vaultValues.get('serverCredentialUpgrade')).toBe('not-json');
+  });
+
   it('lets a coordinator-owned residual cleanup reach setup without invalidating itself', async () => {
     vaultValues.set('serverSessionState', SERVER_SESSION_STATE.forgotten);
     vaultValues.set('serverAddress', 'https://old.example');
@@ -594,7 +686,8 @@ describe('hydrateSession() — correlated SecureStore state', () => {
       origin: null,
       password: null,
     });
-    expect(vaultGet).not.toHaveBeenCalled();
+    expect(vaultGet).toHaveBeenCalledTimes(4);
+    expect(clearLocalCache).toHaveBeenCalledTimes(1);
     expect(startSync).not.toHaveBeenCalled();
     expect(startRealtime).not.toHaveBeenCalled();
   });
@@ -1396,14 +1489,14 @@ describe('hydrateSession() — correlated SecureStore state', () => {
     ];
     let readCount = 0;
     vaultGet.mockImplementation(async (key: string) => {
-      const inspection = Math.min(Math.floor(readCount / 3), sessions.length - 1);
+      const inspection = Math.min(Math.floor(readCount / 4), sessions.length - 1);
       readCount += 1;
       return sessions[inspection]?.[key as keyof (typeof sessions)[number]] ?? null;
     });
 
     await hydrateSession();
 
-    expect(vaultGet).toHaveBeenCalledTimes(6);
+    expect(vaultGet).toHaveBeenCalledTimes(8);
     expect(resumeRealtimeDeliveries).not.toHaveBeenCalled();
     expect(startSync).not.toHaveBeenCalled();
     expect(startRealtime).not.toHaveBeenCalled();
@@ -1902,16 +1995,22 @@ describe('hydrateSession() — correlated SecureStore state', () => {
     for (let i = 0; i < 200 && releaseAddressWrite == null; i += 1) await Promise.resolve();
     expect(releaseAddressWrite).toEqual(expect.any(Function));
 
-    // The candidate's address write is still suspended. Teardown is allowed to finish, but its
-    // synchronous marker/epoch remain authoritative if the already-started native write lands late.
-    await forget();
+    // The candidate's address write is still suspended. Disconnect closes authorization
+    // immediately, but now also joins this pre-timeout commit before taking its final vault
+    // snapshot so a scoped password could never land after the cleanup.
+    let wipeSettled = false;
+    const wipe = forget().then(() => {
+      wipeSettled = true;
+    });
+    await flushMicrotasks();
     expect(accountRevoked).toBe(true);
-    expect(vaultValues.get('serverSessionState')).toBe(SERVER_SESSION_STATE.forgotten);
+    expect(wipeSettled).toBe(false);
+    expect(vaultValues.get('serverSessionState')).toBe(SERVER_SESSION_STATE.writing);
 
     releaseAddressWrite();
-    await candidate;
+    await Promise.all([candidate, wipe]);
 
-    expect(vaultValues.get('serverAddress')).toBe('https://candidate.example');
+    expect(vaultValues.get('serverAddress')).toBeUndefined();
     expect(vaultValues.get('serverPassword')).toBeUndefined();
     expect(vaultValues.get('serverSessionState')).toBe(SERVER_SESSION_STATE.forgotten);
     expect(markerClear).not.toHaveBeenCalled();
@@ -1920,8 +2019,7 @@ describe('hydrateSession() — correlated SecureStore state', () => {
     expect(startSync).not.toHaveBeenCalled();
     expect(startRealtime).not.toHaveBeenCalled();
 
-    // A restart sees the marker first and re-runs the idempotent wipe rather than restoring the
-    // late address as a session.
+    // A restart still sees the terminal marker and cannot restore the cancelled candidate.
     await hydrateSession();
     expect(vaultValues.get('serverAddress')).toBeUndefined();
     expect(useSessionStore.getState().status).toBe('unauthenticated');
@@ -1950,12 +2048,16 @@ describe('hydrateSession() — correlated SecureStore state', () => {
           }),
       );
     let holdVaultReads = false;
+    let heldInspectionReads = 0;
     let releaseVaultReads!: () => void;
     const vaultReadGate = new Promise<void>((resolve) => {
       releaseVaultReads = resolve;
     });
     vaultGet.mockImplementation(async (key: string) => {
-      if (holdVaultReads) await vaultReadGate;
+      if (holdVaultReads && heldInspectionReads < 4) {
+        heldInspectionReads += 1;
+        await vaultReadGate;
+      }
       return vaultValues.get(key) ?? null;
     });
     connectToServer.mockResolvedValue({
@@ -1969,8 +2071,8 @@ describe('hydrateSession() — correlated SecureStore state', () => {
     for (let i = 0; i < 200 && releaseFirstWipe == null; i += 1) await Promise.resolve();
     holdVaultReads = true;
     releaseFirstWipe();
-    for (let i = 0; i < 500 && vaultGet.mock.calls.length < 3; i += 1) await Promise.resolve();
-    expect(vaultGet).toHaveBeenCalledTimes(3);
+    for (let i = 0; i < 500 && heldInspectionReads < 4; i += 1) await Promise.resolve();
+    expect(heldInspectionReads).toBe(4);
 
     const secondWipe = forget();
     for (let i = 0; i < 200 && releaseSecondWipe == null; i += 1) await Promise.resolve();
@@ -2028,6 +2130,288 @@ describe('hydrateSession() — correlated SecureStore state', () => {
 });
 
 describe('forget() — a vault failure must not abort the Disconnect', () => {
+  it('retains a scoped bearer after a generic 401 and retries until exact success', async () => {
+    const scopedCredential = `bbd_device_v1_${'R'.repeat(43)}`;
+    vaultValues.set('serverSessionState', SERVER_SESSION_STATE.active);
+    vaultValues.set('serverAddress', 'https://old.example');
+    vaultValues.set('serverPassword', scopedCredential);
+    useSessionStore.setState({
+      status: 'connected',
+      origin: 'https://old.example',
+      password: scopedCredential,
+    });
+    revokeSelf
+      .mockImplementationOnce(async () => {
+        expect(vaultValues.get('serverSessionState')).toBe(SERVER_SESSION_STATE.forgotten);
+        expect(vaultValues.get('serverPassword')).toBe(scopedCredential);
+        expect(vaultValues.has('serverCredentialUpgrade')).toBe(false);
+        throw ApiError.fromStatus(401, 'proxy unauthorized');
+      })
+      .mockResolvedValueOnce({
+        revoked: false,
+        deviceId: 'cae7303f-a9a3-4f3f-bfe8-5664aa36e72a',
+        deviceRemoved: true,
+      });
+
+    await expect(forget()).rejects.toThrow(
+      'Scoped credential retirement for the previous connection could not be confirmed.',
+    );
+
+    expect(fixedCredentialClient).toHaveBeenCalledWith('https://old.example', scopedCredential);
+    expect(revokeSelf).toHaveBeenCalledWith(
+      scopedHttp,
+      expect.objectContaining({ aborted: false }),
+    );
+    expect(vaultValues.get('serverSessionState')).toBe(SERVER_SESSION_STATE.forgotten);
+    expect(vaultValues.get('serverAddress')).toBe('https://old.example');
+    expect(vaultValues.get('serverPassword')).toBe(scopedCredential);
+    expect(vaultValues.has('serverCredentialUpgrade')).toBe(false);
+    expect(clearLocalCache).toHaveBeenCalledTimes(1);
+
+    await flushMicrotasks();
+    await expect(forget()).resolves.toBeUndefined();
+
+    expect(fixedCredentialClient).toHaveBeenCalledTimes(2);
+    expect(fixedCredentialClient).toHaveBeenLastCalledWith('https://old.example', scopedCredential);
+    expect(revokeSelf).toHaveBeenCalledTimes(2);
+    expect(vaultValues.get('serverCredentialUpgrade')).toBe('{"version":1,"phase":"revoked"}');
+    expect(vaultValues.has('serverAddress')).toBe(false);
+    expect(vaultValues.has('serverPassword')).toBe(false);
+    expect(useSessionStore.getState()).toMatchObject({
+      status: 'unauthenticated',
+      origin: null,
+      password: null,
+    });
+    expect(clearLocalCache).toHaveBeenCalledTimes(2);
+  });
+
+  it('bounds a hung scoped-custody read, wipes locally, then finishes its quarantined cleanup', async () => {
+    jest.useFakeTimers();
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const scopedCredential = `bbd_device_v1_${'S'.repeat(43)}`;
+    vaultValues.set('serverSessionState', SERVER_SESSION_STATE.active);
+    vaultValues.set('serverAddress', 'https://old.example');
+    vaultValues.set('serverPassword', scopedCredential);
+    useSessionStore.setState({
+      status: 'connected',
+      origin: 'https://old.example',
+      password: scopedCredential,
+    });
+    let releaseAddressRead: (() => void) | undefined;
+    let holdAddressRead = true;
+    try {
+      vaultGet.mockImplementation(async (key: string) => {
+        if (key === 'serverAddress' && holdAddressRead) {
+          holdAddressRead = false;
+          await new Promise<void>((resolve) => {
+            releaseAddressRead = resolve;
+          });
+        }
+        return vaultValues.get(key) ?? null;
+      });
+
+      const run = forget();
+      for (let index = 0; index < 200 && releaseAddressRead == null; index += 1) {
+        await Promise.resolve();
+      }
+      expect(releaseAddressRead).toEqual(expect.any(Function));
+      expect(useSessionStore.getState()).toMatchObject({ origin: null, password: null });
+
+      const rejected = expect(run).rejects.toThrow(
+        'Scoped credential retirement for the previous connection could not be confirmed.',
+      );
+      await jest.advanceTimersByTimeAsync(5_000);
+      await rejected;
+
+      expect(clearLocalCache).toHaveBeenCalledTimes(1);
+      expect(revokeSelf).not.toHaveBeenCalled();
+      expect(vaultValues.get('serverSessionState')).toBe(SERVER_SESSION_STATE.forgotten);
+      expect(vaultValues.get('serverPassword')).toBe(scopedCredential);
+
+      releaseAddressRead?.();
+      await flushMicrotasks(100);
+
+      expect(revokeSelf).toHaveBeenCalledTimes(1);
+      expect(vaultValues.get('serverCredentialUpgrade')).toBe('{"version":1,"phase":"revoked"}');
+      expect(vaultValues.has('serverAddress')).toBe(false);
+      expect(vaultValues.has('serverPassword')).toBe(false);
+    } finally {
+      releaseAddressRead?.();
+      await flushMicrotasks(100);
+      jest.useRealTimers();
+    }
+  });
+
+  it('takes its candidate snapshot after an admitted upgrade writer drains', async () => {
+    const scopedCredential = `bbd_device_v1_${'T'.repeat(43)}`;
+    vaultValues.set('serverSessionState', SERVER_SESSION_STATE.active);
+    vaultValues.set('serverAddress', 'https://old.example');
+    vaultValues.set('serverPassword', 'hunter2');
+    let releaseRealtime: (() => void) | undefined;
+    pauseRealtimeDeliveries.mockImplementationOnce(() => {
+      if (mockDeliveriesAccepting) {
+        mockDeliveriesAccepting = false;
+        mockDeliveryGeneration += 1;
+      }
+      return new Promise<void>((resolve) => {
+        releaseRealtime = resolve;
+      });
+    });
+
+    const run = forget();
+    for (let index = 0; index < 200 && releaseRealtime == null; index += 1) {
+      await Promise.resolve();
+    }
+    expect(releaseRealtime).toEqual(expect.any(Function));
+    expect(revokeSelf).not.toHaveBeenCalled();
+
+    vaultValues.set(
+      'serverCredentialUpgrade',
+      serializeCredentialUpgradeJournal(
+        createCredentialUpgradeCandidate('https://old.example', 'hunter2', scopedCredential),
+      ),
+    );
+    releaseRealtime?.();
+    await expect(run).resolves.toBeUndefined();
+
+    expect(fixedCredentialClient).toHaveBeenCalledWith('https://old.example', scopedCredential);
+    expect(revokeSelf).toHaveBeenCalledTimes(1);
+    expect(vaultValues.get('serverCredentialUpgrade')).toBe('{"version":1,"phase":"revoked"}');
+  });
+
+  it('waits for a timed-out connection commit before snapshotting its late scoped bearer', async () => {
+    jest.useFakeTimers();
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const scopedCredential = `bbd_device_v1_${'U'.repeat(43)}`;
+    let releasePasswordWrite: (() => void) | undefined;
+    try {
+      useSessionStore.getState().reset();
+      connectToServer.mockImplementationOnce(
+        async (
+          origin: string,
+          password: string,
+          deps: {
+            isAttemptCurrent?: () => boolean;
+            vault: { set: (key: string, value: string) => Promise<void> };
+          },
+        ) => {
+          await deps.vault.set('serverSessionState', SERVER_SESSION_STATE.writing);
+          await deps.vault.set('serverAddress', origin);
+          await new Promise<void>((resolve) => {
+            releasePasswordWrite = resolve;
+          });
+          await deps.vault.set('serverPassword', password);
+          return deps.isAttemptCurrent?.() === false
+            ? { ok: false, kind: 'cancelled' as const, message: 'cancelled' }
+            : { ok: true as const, serverInfo: { server_version: 'candidate' } };
+        },
+      );
+
+      const candidate = connect('https://candidate.example', scopedCredential);
+      for (let index = 0; index < 200 && releasePasswordWrite == null; index += 1) {
+        await Promise.resolve();
+      }
+      expect(releasePasswordWrite).toEqual(expect.any(Function));
+      await jest.advanceTimersByTimeAsync(45_000);
+      await candidate;
+
+      const wipe = forget();
+      const rejected = expect(wipe).rejects.toThrow(
+        'Scoped credential retirement for the previous connection could not be confirmed.',
+      );
+      await jest.advanceTimersByTimeAsync(5_000);
+      await rejected;
+
+      expect(revokeSelf).not.toHaveBeenCalled();
+      expect(vaultValues.get('serverAddress')).toBe('https://candidate.example');
+      expect(vaultValues.has('serverPassword')).toBe(false);
+
+      releasePasswordWrite?.();
+      await flushMicrotasks(100);
+
+      expect(fixedCredentialClient).toHaveBeenCalledWith(
+        'https://candidate.example',
+        scopedCredential,
+      );
+      expect(revokeSelf).toHaveBeenCalledTimes(1);
+      expect(vaultValues.get('serverCredentialUpgrade')).toBe('{"version":1,"phase":"revoked"}');
+      expect(vaultValues.has('serverAddress')).toBe(false);
+      expect(vaultValues.has('serverPassword')).toBe(false);
+    } finally {
+      releasePasswordWrite?.();
+      await flushMicrotasks(100);
+      jest.useRealTimers();
+    }
+  });
+
+  it('joins an active connection commit before snapshotting its late scoped bearer', async () => {
+    jest.useFakeTimers();
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const scopedCredential = `bbd_device_v1_${'V'.repeat(43)}`;
+    let releasePasswordWrite: (() => void) | undefined;
+    try {
+      useSessionStore.getState().reset();
+      vaultSet.mockImplementation(async (key: string, value: string) => {
+        if (key === 'serverPassword' && value === scopedCredential) {
+          await new Promise<void>((resolve) => {
+            releasePasswordWrite = resolve;
+          });
+        }
+        vaultValues.set(key, value);
+      });
+      connectToServer.mockImplementationOnce(
+        async (
+          origin: string,
+          password: string,
+          deps: {
+            isAttemptCurrent?: () => boolean;
+            vault: { set: (key: string, value: string) => Promise<void> };
+          },
+        ) => {
+          await deps.vault.set('serverSessionState', SERVER_SESSION_STATE.writing);
+          await deps.vault.set('serverAddress', origin);
+          await deps.vault.set('serverPassword', password);
+          return deps.isAttemptCurrent?.() === false
+            ? { ok: false, kind: 'cancelled' as const, message: 'cancelled' }
+            : { ok: true as const, serverInfo: { server_version: 'candidate' } };
+        },
+      );
+
+      const candidate = connect('https://candidate.example', scopedCredential);
+      for (let index = 0; index < 200 && releasePasswordWrite == null; index += 1) {
+        await Promise.resolve();
+      }
+      expect(releasePasswordWrite).toEqual(expect.any(Function));
+
+      const wipe = forget();
+      const rejected = expect(wipe).rejects.toThrow(
+        'Scoped credential retirement for the previous connection could not be confirmed.',
+      );
+      await jest.advanceTimersByTimeAsync(5_000);
+      await rejected;
+
+      expect(revokeSelf).not.toHaveBeenCalled();
+      expect(vaultValues.get('serverAddress')).toBe('https://candidate.example');
+
+      releasePasswordWrite?.();
+      await candidate;
+      await flushMicrotasks(100);
+
+      expect(fixedCredentialClient).toHaveBeenCalledWith(
+        'https://candidate.example',
+        scopedCredential,
+      );
+      expect(revokeSelf).toHaveBeenCalledTimes(1);
+      expect(vaultValues.get('serverCredentialUpgrade')).toBe('{"version":1,"phase":"revoked"}');
+      expect(vaultValues.has('serverAddress')).toBe(false);
+      expect(vaultValues.has('serverPassword')).toBe(false);
+    } finally {
+      releasePasswordWrite?.();
+      await flushMicrotasks(100);
+      jest.useRealTimers();
+    }
+  });
+
   it('publishes the singleflight promise before synchronous cancellation can re-enter', async () => {
     let reentered: Promise<void> | undefined;
     uploadRegistry.add('reentrant-disconnect', {
@@ -2328,6 +2712,8 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
     expect(useSessionStore.getState().password).toBeNull();
     expect(clearLocalCache).not.toHaveBeenCalled();
 
+    for (let i = 0; i < 200 && releaseTombstone == null; i += 1) await Promise.resolve();
+    expect(releaseTombstone).toEqual(expect.any(Function));
     releaseTombstone();
     await expect(run).resolves.toBeUndefined();
     expect(clearLocalCache).toHaveBeenCalledTimes(1);
@@ -2550,6 +2936,7 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
       );
 
       releaseRealtime();
+      await flushMicrotasks();
       await connect('https://new.example', 'new-secret');
       expect(retireFcmDeviceEncryptionState).toHaveBeenCalledTimes(1);
       expect(clearLocalCache).toHaveBeenCalledTimes(2);
@@ -2672,7 +3059,7 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
     );
   });
 
-  it('uses the independent marker when every SecureStore retirement operation fails', async () => {
+  it('keeps the independent marker closed when every SecureStore retirement operation fails', async () => {
     jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     vaultValues.set('serverSessionState', SERVER_SESSION_STATE.active);
     vaultValues.set('serverAddress', 'https://old.example');
@@ -2680,7 +3067,9 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
     vaultSet.mockRejectedValue(new Error('Keystore write unavailable'));
     vaultDelete.mockRejectedValue(new Error('Keystore delete unavailable'));
 
-    await expect(forget()).resolves.toBeUndefined();
+    await expect(forget()).rejects.toThrow(
+      'Scoped credential retirement for the previous connection could not be confirmed.',
+    );
 
     expect(accountRevoked).toBe(true);
     expect(clearLocalCache).toHaveBeenCalledTimes(1);

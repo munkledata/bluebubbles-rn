@@ -178,7 +178,9 @@ export function StepperRow({
           onPress={onDecrement}
           disabled={!canDecrement}
           hitSlop={8}
+          accessibilityRole="button"
           accessibilityLabel={decrementLabel}
+          accessibilityState={{ disabled: !canDecrement }}
         >
           <Text
             style={[
@@ -194,7 +196,9 @@ export function StepperRow({
           onPress={onIncrement}
           disabled={!canIncrement}
           hitSlop={8}
+          accessibilityRole="button"
           accessibilityLabel={incrementLabel}
+          accessibilityState={{ disabled: !canIncrement }}
         >
           <Text
             style={[

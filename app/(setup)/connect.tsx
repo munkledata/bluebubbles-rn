@@ -1,12 +1,15 @@
 import { useRouter } from 'expo-router';
+import { useMemo } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, Screen, useTheme } from '@ui';
+import { createI18n } from '@utils/i18n';
 
 export default function Connect(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const i18n = useMemo(() => createI18n(), []);
 
   return (
     <Screen>
@@ -17,15 +20,19 @@ export default function Connect(): React.JSX.Element {
         ]}
       >
         <View style={styles.header}>
-          <Text style={[styles.title, { color: theme.color.label }]}>Connect</Text>
+          <Text style={[styles.title, { color: theme.color.label }]}>
+            {i18n.text('connect.title')}
+          </Text>
           <Text style={[styles.subtitle, { color: theme.color.secondaryLabel }]}>
-            Scan the QR code shown on your Gator Server, or enter the URL and password manually.
+            {i18n.format('connect.subtitle', {
+              serverName: i18n.text('product.serverName'),
+            })}
           </Text>
         </View>
         <View style={styles.actions}>
-          <Button title="Scan QR Code" onPress={() => router.push('/scan')} />
+          <Button title={i18n.text('connect.action.scan')} onPress={() => router.push('/scan')} />
           <Button
-            title="Enter Manually"
+            title={i18n.text('connect.action.manual')}
             variant="tinted"
             onPress={() => router.push('/manual')}
             style={styles.spaced}

@@ -1,6 +1,7 @@
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import Constants from 'expo-constants';
+import { logger } from '@core/secure';
 import { getDatabase } from '@db/database';
 import { getSecretBox } from '../clients';
 import {
@@ -8,8 +9,8 @@ import {
   runTrackedRealtimeWork,
   type RealtimeDeliveryLease,
 } from '../realtime/deliveryCoordinator';
+import { hydrateAllStores } from '@state/hydrateStores';
 import {
-  assertBackupFileSize,
   assertBackupSourceTextWithinLimit,
   buildBackupWithCustomFolders,
   openBackup,
@@ -90,8 +91,8 @@ async function buildCurrentBackup(now: number, lease: RealtimeDeliveryLease): Pr
 }
 
 /**
- * Apply the complete mutation in one teardown-visible slot. The low-level restore uses the same
- * immutable lease as a last-moment commit guard for every account-owned restored row.
+ * Apply the complete mutation and refresh its live settings in one teardown-visible slot. The
+ * low-level restore and each store hydration use the same immutable lease as their commit guard.
  */
 async function restoreCurrentBackup(
   backup: Backup,
@@ -103,8 +104,25 @@ async function restoreCurrentBackup(
       assertCurrent(activeLease);
       const db = getDatabase();
       assertCurrent(activeLease);
-      restored.value = await restoreBackup(db, backup, () => activeLease.isCurrent());
+      const result = await restoreBackup(db, backup, () => activeLease.isCurrent());
       assertCurrent(activeLease);
+      const reportHydrationError = (error: unknown): void => {
+        if (activeLease.isCurrent()) {
+          logger.warn('[backup] restored settings hydration failed', error);
+        }
+      };
+      try {
+        await hydrateAllStores({
+          shouldCommit: () => activeLease.isCurrent(),
+          onError: reportHydrationError,
+        });
+      } catch (error) {
+        // The DB restore is already committed. A programming failure in the refresh registry must
+        // not turn that successful restore into a misleading passphrase/backup error in the UI.
+        reportHydrationError(error);
+      }
+      assertCurrent(activeLease);
+      restored.value = result;
     });
     if (outcome === 'paused' || restored.value === undefined) throw new BackupAccountChangedError();
     assertCurrent(lease);
@@ -128,30 +146,6 @@ function deleteGeneratedFile(file: File): void {
   } catch {
     // Cleanup is best-effort. In particular, never replace BackupAccountChangedError in a finally:
     // the retired screen must stay quiet even if Android has already reclaimed its picker cache.
-  }
-}
-
-/**
- * Read the private cache copy produced by DocumentPicker and always remove it. File IO is not
- * account mutation, so this deliberately stays outside the teardown drain; the immutable screen
- * lease rejects a result that returns after Disconnect.
- */
-export async function readPickedBackupCopy(
-  uri: string,
-  lease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
-): Promise<string> {
-  const file = new File(uri);
-  try {
-    assertCurrent(lease);
-    // `File.text()` has no streaming/capped form. Stat the private picker copy first so a hostile
-    // document cannot be materialized as an unbounded JS string.
-    assertBackupFileSize(file.size);
-    const content = await awaitCurrent(lease, file.text());
-    // Defend against a stale/inaccurate stat (or a file changed between stat and read).
-    assertBackupSourceTextWithinLimit(content);
-    return content.trim();
-  } finally {
-    deleteGeneratedFile(file);
   }
 }
 

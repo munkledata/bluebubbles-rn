@@ -1,15 +1,17 @@
 import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { startDevFixtureSession } from '@features/conversations/devFixtureSession';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { Button, Screen, useTheme } from '@ui';
+import { createI18n } from '@utils/i18n';
 
 export default function Welcome(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const i18n = useMemo(() => createI18n(), []);
   const mountedRef = useRef(true);
   const devStartedRef = useRef(false);
   const [devBusy, setDevBusy] = useState(false);
@@ -31,7 +33,10 @@ export default function Welcome(): React.JSX.Element {
       if (mountedRef.current) router.replace('/home');
     } catch {
       if (mountedRef.current) {
-        showDialog('Developer fixtures', 'Gator could not prepare the local fixture session.');
+        showDialog(
+          i18n.text('welcome.dev.dialog.title'),
+          `${i18n.text('welcome.brand')}${i18n.text('welcome.dev.dialog.messageSuffix')}`,
+        );
       }
     } finally {
       devStartedRef.current = false;
@@ -49,15 +54,21 @@ export default function Welcome(): React.JSX.Element {
       >
         <View style={styles.hero}>
           <Image source={require('../../assets/icon.png')} style={styles.logo} />
-          <Text style={[styles.title, { color: theme.color.label }]}>Gator</Text>
+          <Text style={[styles.title, { color: theme.color.label }]}>
+            {i18n.text('welcome.brand')}
+          </Text>
           <Text style={[styles.subtitle, { color: theme.color.secondaryLabel }]}>
-            Your Mac’s messages, on Android.
+            {i18n.text('welcome.subtitle')}
           </Text>
         </View>
-        <Button title="Get Started" disabled={devBusy} onPress={() => router.push('/connect')} />
+        <Button
+          title={i18n.text('welcome.action.start')}
+          disabled={devBusy}
+          onPress={() => router.push('/connect')}
+        />
         {__DEV__ ? (
           <Button
-            title="Dev: seed & open inbox"
+            title={i18n.text('welcome.dev.action')}
             variant="tinted"
             loading={devBusy}
             onPress={() => void devSeedAndOpen()}

@@ -37,7 +37,7 @@ export function IncomingFaceTimeOverlay(): React.JSX.Element | null {
   return (
     <View style={[StyleSheet.absoluteFill, styles.container, { paddingTop: insets.top + 80 }]}>
       <View style={styles.info}>
-        <Text style={styles.name} numberOfLines={1}>
+        <Text style={styles.name} numberOfLines={3}>
           {name}
         </Text>
         <Text style={styles.subtitle}>{subtitle}</Text>
@@ -76,19 +76,35 @@ const styles = StyleSheet.create({
     elevation: 16,
     zIndex: 110,
     justifyContent: 'space-between',
+    paddingHorizontal: 16,
   },
-  info: { alignItems: 'center', gap: 8 },
-  name: { color: '#fff', fontSize: 30, fontWeight: '600', maxWidth: '90%' },
-  subtitle: { color: '#EBEBF599', fontSize: 17 },
-  row: { flexDirection: 'row', justifyContent: 'space-evenly', alignItems: 'center' },
+  info: { alignItems: 'center', gap: 8, flexShrink: 1, minHeight: 0 },
+  name: {
+    color: '#fff',
+    fontSize: 30,
+    fontWeight: '600',
+    maxWidth: '90%',
+    flexShrink: 1,
+    textAlign: 'center',
+  },
+  subtitle: { color: '#EBEBF599', fontSize: 17, flexShrink: 1, textAlign: 'center' },
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'space-evenly',
+    alignItems: 'center',
+    flexShrink: 0,
+  },
   btn: {
-    width: 76,
-    height: 76,
+    minWidth: 76,
+    minHeight: 76,
+    maxWidth: '42%',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
     borderRadius: 38,
     alignItems: 'center',
     justifyContent: 'center',
   },
   decline: { backgroundColor: '#FF3B30' },
   answer: { backgroundColor: '#34C759' },
-  btnText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  btnText: { color: '#fff', fontSize: 15, fontWeight: '600', flexShrink: 1, textAlign: 'center' },
 });

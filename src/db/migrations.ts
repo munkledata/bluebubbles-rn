@@ -848,4 +848,68 @@ export const MIGRATIONS: Migration[] = [
            OR is_pinned = 1 OR is_archived = 1`,
     ],
   },
+  {
+    // An attempt-aware RCS failure may arrive over socket/FCM after a later retry has begun. Keep
+    // the server-owned physical-attempt identity beside the optimistic bubble, plus an explicit
+    // pending bit for the request-to-ack window where the new identity is not known yet.
+    name: '0046_message_send_attempt_owner',
+    statements: [
+      `ALTER TABLE messages
+         ADD COLUMN active_send_attempt_guid TEXT
+         CONSTRAINT messages_active_send_attempt_guid_bounded
+         CHECK (active_send_attempt_guid IS NULL
+                OR length(active_send_attempt_guid) BETWEEN 1 AND 128)`,
+      `ALTER TABLE messages
+         ADD COLUMN attempt_owner_pending INTEGER NOT NULL DEFAULT 0
+         CONSTRAINT messages_attempt_owner_pending_boolean
+         CHECK (typeof(attempt_owner_pending) = 'integer'
+                AND attempt_owner_pending IN (0, 1))`,
+      `ALTER TABLE messages
+         ADD COLUMN attempt_owner_generation INTEGER NOT NULL DEFAULT 0
+         CONSTRAINT messages_attempt_owner_generation_valid
+         CHECK (typeof(attempt_owner_generation) = 'integer'
+                AND attempt_owner_generation BETWEEN 0 AND 2147483647)`,
+    ],
+  },
+  {
+    // FEAT-03B: persist one conservative aggregate retraction result and exact server-proven part
+    // ownership. Existing rows stay on the legacy date marker; future classified writes can keep a
+    // surviving part visible while hiding only the attachments whose original part was retracted.
+    name: '0047_message_retraction_topology',
+    statements: [
+      `ALTER TABLE messages
+         ADD COLUMN retraction_state TEXT
+         CONSTRAINT messages_retraction_state_valid
+         CHECK (retraction_state IS NULL
+                OR retraction_state IN ('intact', 'partial', 'fully-retracted', 'unknown'))`,
+      `ALTER TABLE messages
+         ADD COLUMN message_part_topology TEXT
+         CONSTRAINT messages_part_topology_bounded
+         CHECK (message_part_topology IS NULL OR (
+           length(CAST(message_part_topology AS BLOB)) BETWEEN 2 AND 1048576
+           AND instr(message_part_topology, char(0)) = 0
+         ))`,
+      `ALTER TABLE messages
+         ADD COLUMN pending_retraction_part_index INTEGER
+         CONSTRAINT messages_pending_retraction_part_index_valid
+         CHECK (pending_retraction_part_index IS NULL OR (
+           typeof(pending_retraction_part_index) = 'integer'
+           AND pending_retraction_part_index BETWEEN 0 AND 10000
+         ))`,
+      `ALTER TABLE attachments
+         ADD COLUMN message_part_index INTEGER
+         CONSTRAINT attachments_message_part_index_valid
+         CHECK (message_part_index IS NULL OR (
+           typeof(message_part_index) = 'integer'
+           AND message_part_index BETWEEN 0 AND 10000
+         ))`,
+      `ALTER TABLE attachments
+         ADD COLUMN is_retracted INTEGER NOT NULL DEFAULT 0
+         CONSTRAINT attachments_is_retracted_boolean
+         CHECK (typeof(is_retracted) = 'integer' AND is_retracted IN (0, 1))`,
+      // Reminder copies outlive later message updates and cannot be mapped back to one surviving
+      // part. FEAT-03 adopts generic reminders, so remove every pre-migration plaintext copy.
+      `UPDATE reminders SET message_preview = NULL, sender_name = NULL`,
+    ],
+  },
 ];

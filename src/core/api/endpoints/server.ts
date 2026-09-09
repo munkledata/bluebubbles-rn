@@ -17,12 +17,10 @@ export function serverInfo(http: HttpClient, signal?: AbortSignal): Promise<Serv
 }
 
 // ---- Server management (F-9) ----
-// Gator routes admin operations through one password-authed dispatch endpoint,
-// `POST /api/v1/admin/command` with `{ channel, data? }`. READ/STATUS channels (statistics,
-// status) are served on the normal password path; DESTRUCTIVE channels (reinject-helper /
-// "restart Messages", config writes, TLS, …) are gated to the trusted LOCAL admin console and
-// return 403 to a remote client — so restart / logs / update-check are NOT available from the
-// app and stay stubbed below. Statistics ARE available and are wired to the dispatcher.
+// Current Gator servers expose typed password-authenticated routes for statistics and health.
+// Older Gator builds used `POST /api/v1/admin/command`; those reads retain a narrow compatibility
+// fallback below, used only when the typed route itself returns 404. Restart/log operations still
+// use the dispatcher because they do not yet have equivalent password-authenticated typed routes.
 
 /**
  * Invoke a Gator admin-command channel over the password-authed dispatcher. The server wraps
@@ -48,12 +46,21 @@ export async function adminCommand<T>(
   }
 }
 
-/**
- * True: restart (iMessage / services / server) and log-fetch are wired to the password-authed
- * admin-command dispatcher, so the UI shows the ACTIONS section. Update-check is the one action
- * that stays unimplemented on the Gator fork (`checkUpdate` still rejects and isn't surfaced).
- */
-export const SERVER_MANAGEMENT_SUPPORTED = true;
+/** Prefer a typed route; use its retired dispatcher equivalent only when that route is absent. */
+async function typedRouteOrLegacy<T>(
+  typedRequest: () => Promise<T>,
+  legacyRequest: () => Promise<T>,
+): Promise<T> {
+  try {
+    return await typedRequest();
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) return legacyRequest();
+    throw e;
+  }
+}
+
+/** Current Gator has no password-authenticated remote restart or log-reading routes. */
+export const SERVER_MANAGEMENT_SUPPORTED = false;
 
 /** Generic server ack — the restart channels return `{ success, ... }`. */
 const ServerAck = z.unknown();
@@ -86,37 +93,29 @@ export const checkUpdate = (_http: HttpClient): Promise<UpdateCheck> =>
 
 export interface StatTotals {
   messages: number;
-  chats: number;
-  handles: number;
-  attachments: number;
   images: number;
   videos: number;
-  locations: number;
 }
 
-// The dispatcher's stat channels: get-message-count / get-chat-count / get-handle-count → a
-// plain number; the media counts (attachment/image/video/location) → [{ media_count }].
+const StatisticsSnapshot = z
+  .object({
+    range: z.literal('all-time'),
+    after: z.null(),
+    messageCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    imageCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    videoCount: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    topGroup: z.string().max(2_048),
+    bestFriend: z.string().max(2_048),
+  })
+  .strict();
+
+// Retired dispatcher fallback: message count is a number; media counts are [{ media_count }].
 const MediaCount = z.array(z.object({ media_count: z.number() }).loose()).nullish();
-// Tolerate the dispatcher's `[]` unknown-channel sentinel (an older server without a given count
-// channel): accept a number OR an array, and `asCount` coerces a non-number to 0 — so version
-// skew degrades gracefully instead of throwing and breaking the whole stats fetch.
 const CountNum = z.union([z.number(), z.array(z.unknown())]).nullish();
 const asCount = (v: number | unknown[] | null | undefined): number =>
   typeof v === 'number' ? v : 0;
 
-/**
- * Server statistics via the admin-command dispatcher (password-authed): total messages, chats,
- * handles, and attachment counts (all / image / video / location). These channels are NOT
- * admin-only, so a remote client can read them.
- */
-export async function serverStatTotals(
-  http: HttpClient,
-  signal?: AbortSignal,
-): Promise<StatTotals> {
-  // Per-channel resilience: one failing count channel (e.g. an older server missing it) must NOT
-  // blank the whole table. Each call is swallowed to null and coerced to 0 below. But if EVERY
-  // channel fails, the server isn't answering at all — throw so the caller can show "unavailable"
-  // instead of a misleading all-zeros table.
+async function legacyServerStatTotals(http: HttpClient, signal?: AbortSignal): Promise<StatTotals> {
   let anyOk = false;
   let sawOtherError = false;
   const settle = async <T>(p: Promise<T>): Promise<T | null> => {
@@ -130,28 +129,48 @@ export async function serverStatTotals(
       return null;
     }
   };
-  const [messages, chats, handles, attachments, images, videos, locations] = await Promise.all([
+  const [messages, images, videos] = await Promise.all([
     settle(adminCommand(http, 'get-message-count', CountNum, undefined, signal)),
-    settle(adminCommand(http, 'get-chat-count', CountNum, undefined, signal)),
-    settle(adminCommand(http, 'get-handle-count', CountNum, undefined, signal)),
-    settle(adminCommand(http, 'get-chat-attachment-count', MediaCount, undefined, signal)),
     settle(adminCommand(http, 'get-chat-image-count', MediaCount, undefined, signal)),
     settle(adminCommand(http, 'get-chat-video-count', MediaCount, undefined, signal)),
-    settle(adminCommand(http, 'get-chat-location-count', MediaCount, undefined, signal)),
   ]);
-  // Every channel failed. If ALL failures were the dispatcher-404 remap, re-throw as
-  // Unimplemented so the screen can say "unsupported" instead of "check your connection".
   if (!anyOk && !sawOtherError) throw new UnimplementedEndpointError('/admin/command');
   if (!anyOk) throw new Error('Server statistics unavailable');
   return {
     messages: asCount(messages),
-    chats: asCount(chats),
-    handles: asCount(handles),
-    attachments: attachments?.[0]?.media_count ?? 0,
     images: images?.[0]?.media_count ?? 0,
     videos: videos?.[0]?.media_count ?? 0,
-    locations: locations?.[0]?.media_count ?? 0,
   };
+}
+
+export interface ServerStatTotalsOptions {
+  /** Scoped clients must not turn a missing typed route into an admin-command attempt. */
+  readonly allowLegacyFallback?: boolean;
+}
+
+/** All-time message/photo/video totals, with an opt-out dispatcher fallback for scoped clients. */
+export async function serverStatTotals(
+  http: HttpClient,
+  signal?: AbortSignal,
+  options: ServerStatTotalsOptions = {},
+): Promise<StatTotals> {
+  try {
+    const snapshot = await http.post('/statistics/snapshot', StatisticsSnapshot, {
+      json: { range: 'all-time' },
+      signal,
+    });
+    return {
+      messages: snapshot.messageCount,
+      images: snapshot.imageCount,
+      videos: snapshot.videoCount,
+    };
+  } catch (error) {
+    if (!(error instanceof ApiError && error.status === 404)) throw error;
+    if (options.allowLegacyFallback === false) {
+      throw new UnimplementedEndpointError('/statistics/snapshot');
+    }
+    return legacyServerStatTotals(http, signal);
+  }
 }
 
 /** The `get-logs` channel returns `{ logs: string }` (a newline-joined, timestamped tail). */
@@ -163,8 +182,9 @@ export function serverLogs(http: HttpClient, count = 500): Promise<string> {
 }
 
 // ---- Server health / diagnostics ----
-// All read-only admin-command channels below are NOT in the server's ADMIN_ONLY_CHANNELS, so a
-// remote password-authed client (the app) can read them. They back the Server Health screen.
+// Each read prefers the current typed password-authenticated route. The old dispatcher channel is
+// reached only after a typed-route 404, which preserves compatibility without masking auth,
+// transport, or response-validation failures.
 
 /** Messages + FaceTime Private-API helper connectivity. */
 const PrivateApiStatus = z
@@ -176,12 +196,58 @@ const PrivateApiStatus = z
   })
   .loose()
   .nullish();
+const TypedPrivateApiStatus = z
+  .object({
+    available: z.boolean(),
+    connected: z.boolean(),
+    enabled: z.boolean(),
+    unavailable_reason: z.literal('trusted_helper_unavailable').nullable(),
+    ft_available: z.boolean(),
+    ft_connected: z.boolean(),
+    ft_enabled: z.boolean(),
+    ft_unavailable_reason: z.literal('trusted_helper_unavailable').nullable(),
+  })
+  .strict()
+  .superRefine((status, context) => {
+    for (const target of [
+      {
+        available: status.available,
+        connected: status.connected,
+        reason: status.unavailable_reason,
+        path: 'unavailable_reason',
+      },
+      {
+        available: status.ft_available,
+        connected: status.ft_connected,
+        reason: status.ft_unavailable_reason,
+        path: 'ft_unavailable_reason',
+      },
+    ] as const) {
+      if (target.connected && !target.available) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [target.path],
+          message: 'a connected helper must be available',
+        });
+      }
+      if ((target.reason === null) !== target.available) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [target.path],
+          message: 'availability and unavailable reason must agree',
+        });
+      }
+    }
+  });
 export type PrivateApiStatus = z.infer<typeof PrivateApiStatus>;
 export const privateApiStatus = (
   http: HttpClient,
   signal?: AbortSignal,
 ): Promise<PrivateApiStatus> =>
-  adminCommand(http, 'get-private-api-status', PrivateApiStatus, undefined, signal);
+  typedRouteOrLegacy<PrivateApiStatus>(
+    () => http.get('/private-api/status', TypedPrivateApiStatus, { signal }),
+    () => adminCommand(http, 'get-private-api-status', PrivateApiStatus, undefined, signal),
+  );
 
 /** Server environment: version, platform, node, and Find My / macOS capability flags. */
 const ServerEnv = z
@@ -194,9 +260,21 @@ const ServerEnv = z
   })
   .loose()
   .nullish();
+const TypedServerEnv = z
+  .object({
+    version: z.string().min(1).max(128),
+    platform: z.string().min(1).max(64),
+    node: z.string().min(1).max(128),
+    findmyNeedsKeys: z.boolean(),
+    isMinMonterey: z.boolean(),
+  })
+  .strict();
 export type ServerEnv = z.infer<typeof ServerEnv>;
 export const serverEnv = (http: HttpClient, signal?: AbortSignal): Promise<ServerEnv> =>
-  adminCommand(http, 'get-env', ServerEnv, undefined, signal);
+  typedRouteOrLegacy<ServerEnv>(
+    () => http.get('/server/environment', TypedServerEnv, { signal }),
+    () => adminCommand(http, 'get-env', ServerEnv, undefined, signal),
+  );
 
 /** Find My decryption-key import status (per key: present + valid). */
 const KeyState = z.object({ present: z.boolean().nullish(), valid: z.boolean().nullish() }).loose();
@@ -204,12 +282,30 @@ const FindMyKeysStatus = z
   .object({ LocalStorage: KeyState.nullish(), FMIP: KeyState.nullish(), FMF: KeyState.nullish() })
   .loose()
   .nullish();
+const TypedKeyState = z
+  .object({ present: z.boolean(), valid: z.boolean() })
+  .strict()
+  .superRefine((status, context) => {
+    if (status.valid && !status.present) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['valid'],
+        message: 'a valid Find My key must be present',
+      });
+    }
+  });
+const TypedFindMyKeysStatus = z
+  .object({ LocalStorage: TypedKeyState, FMIP: TypedKeyState, FMF: TypedKeyState })
+  .strict();
 export type FindMyKeysStatus = z.infer<typeof FindMyKeysStatus>;
 export const findMyKeysStatus = (
   http: HttpClient,
   signal?: AbortSignal,
 ): Promise<FindMyKeysStatus> =>
-  adminCommand(http, 'get-findmy-keys-status', FindMyKeysStatus, undefined, signal);
+  typedRouteOrLegacy<FindMyKeysStatus>(
+    () => http.get('/admin/findmy/keys/status', TypedFindMyKeysStatus, { signal }),
+    () => adminCommand(http, 'get-findmy-keys-status', FindMyKeysStatus, undefined, signal),
+  );
 
 /** FCM (push) configuration status. */
 const FcmStatus = z
@@ -221,9 +317,36 @@ const FcmStatus = z
   })
   .loose()
   .nullish();
+const TypedFcmStatus = z
+  .object({
+    configured: z.boolean(),
+    projectId: z.string().min(1).max(256).nullable(),
+    clientEmail: z.string().min(1).max(512).nullable(),
+    oauthClientConfigured: z.boolean(),
+  })
+  .strict()
+  .superRefine((status, context) => {
+    if ((status.projectId === null) !== (status.clientEmail === null)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['projectId'],
+        message: 'projectId and clientEmail must both be present or both be null',
+      });
+    }
+    if (status.configured && status.projectId === null) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['configured'],
+        message: 'configured FCM status requires an account identity',
+      });
+    }
+  });
 export type FcmStatus = z.infer<typeof FcmStatus>;
 export const fcmStatus = (http: HttpClient, signal?: AbortSignal): Promise<FcmStatus> =>
-  adminCommand(http, 'get-fcm-status', FcmStatus, undefined, signal);
+  typedRouteOrLegacy<FcmStatus>(
+    () => http.get('/notifications/fcm/status', TypedFcmStatus, { signal }),
+    () => adminCommand(http, 'get-fcm-status', FcmStatus, undefined, signal),
+  );
 
 /** zrok tunnel status (running + public URL). */
 const ZrokStatus = z
@@ -238,43 +361,35 @@ export type ZrokStatus = z.infer<typeof ZrokStatus>;
 export const zrokStatus = (http: HttpClient, signal?: AbortSignal): Promise<ZrokStatus> =>
   adminCommand(http, 'get-zrok-status', ZrokStatus, undefined, signal);
 
-/**
- * RCS bridge (Google Messages) live status via the NON-admin `get-rcs-status` channel (registered
- * like `get-zrok-status`, so a remote password-authed client CAN read it). A disabled bridge →
- * `{ enabled:false, running:false, paired:false, connected:false, phoneResponding:false,
- * state:"disabled" }`. `lastAlert` is the raw alertType (`GAIA_LOGGED_OUT`, `PHONE_NOT_RESPONDING`,
- * `BROWSER_INACTIVE*`, …). Older servers without the channel make `adminCommand` reject or return
- * the dispatcher's `[]` unknown-channel sentinel (which fails this object schema) — the caller
- * swallows both and degrades to the capability-only RCS row.
- */
-const RcsStatus = z
+/** The bridge accepted the server-owned Firefox cookies immediately. */
+const RcsReauthAppliedResult = z
   .object({
-    enabled: z.boolean().nullish(),
-    running: z.boolean().nullish(),
-    paired: z.boolean().nullish(),
-    connected: z.boolean().nullish(),
-    phoneResponding: z.boolean().nullish(),
-    state: z.string().nullish(),
-    phoneID: z.string().nullish(),
-    browserActive: z.boolean().nullish(),
-    lastAlert: z.string().nullish(),
+    reauthed: z.literal(true),
+    ok: z.literal(true),
+    staged: z.undefined().optional(),
+    connected: z.boolean(),
+    stale: z.boolean(),
+    message: z.string(),
   })
-  .loose()
-  .nullish();
-export type RcsStatus = z.infer<typeof RcsStatus>;
-export const rcsStatus = (http: HttpClient, signal?: AbortSignal): Promise<RcsStatus> =>
-  adminCommand(http, 'get-rcs-status', RcsStatus, undefined, signal);
+  .strict();
+
+/** The server safely staged the cookies because the bridge was not running yet. */
+const RcsReauthStagedResult = z
+  .object({
+    reauthed: z.literal(false),
+    staged: z.literal(true),
+    ok: z.undefined().optional(),
+    connected: z.literal(false),
+    stale: z.boolean(),
+    message: z.string(),
+  })
+  .strict();
 
 /** Result of asking the server to re-authenticate the RCS bridge with its own cookies. */
-const RcsReauthResult = z
-  .object({
-    reauthed: z.boolean().nullish(),
-    staged: z.boolean().nullish(),
-    connected: z.boolean().nullish(),
-    stale: z.boolean().nullish(),
-    message: z.string().nullish(),
-  })
-  .loose();
+const RcsReauthResult = z.discriminatedUnion('reauthed', [
+  RcsReauthAppliedResult,
+  RcsReauthStagedResult,
+]);
 export type RcsReauthResult = z.infer<typeof RcsReauthResult>;
 
 /**
@@ -291,14 +406,187 @@ export const rcsReauthNow = (http: HttpClient): Promise<RcsReauthResult> =>
 
 /** The server's detected public IP (or null). */
 const PublicIp = z.object({ ip: z.string().nullish() }).loose().nullish();
-export const publicIp = (http: HttpClient, signal?: AbortSignal): Promise<string | null> =>
-  adminCommand(http, 'get-public-ip', PublicIp, undefined, signal).then((r) => r?.ip ?? null);
+const BLOCKED_IPV4_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [0x00000000, 8],
+  [0x0a000000, 8],
+  [0x64400000, 10],
+  [0x7f000000, 8],
+  [0xa9fe0000, 16],
+  [0xac100000, 12],
+  [0xc0000000, 24],
+  [0xc0000200, 24],
+  [0xc01fc400, 24],
+  [0xc034c100, 24],
+  [0xc0586300, 24],
+  [0xc0a80000, 16],
+  [0xc0af3000, 24],
+  [0xc6120000, 15],
+  [0xc6336400, 24],
+  [0xcb007100, 24],
+  [0xe0000000, 3],
+];
 
-/** Active TLS/cert info (loose — domain/expiry/issuer/mode vary by mode). */
+function isCanonicalGloballyPublicIpv4(value: string): boolean {
+  const parts = value.split('.');
+  if (parts.length !== 4) return false;
+
+  let numeric = 0;
+  for (const part of parts) {
+    if (!/^(?:0|[1-9][0-9]{0,2})$/.test(part)) return false;
+    const octet = Number(part);
+    if (octet > 255) return false;
+    numeric = numeric * 256 + octet;
+  }
+
+  const address = numeric >>> 0;
+  return !BLOCKED_IPV4_RANGES.some(([network, prefix]) => {
+    const mask = (0xffffffff << (32 - prefix)) >>> 0;
+    return (address & mask) >>> 0 === (network & mask) >>> 0;
+  });
+}
+
+const TypedPublicIp = z
+  .object({
+    ip: z
+      .string()
+      .refine(isCanonicalGloballyPublicIpv4, 'public IPv4 address is invalid')
+      .nullable(),
+  })
+  .strict();
+export const publicIp = (http: HttpClient, signal?: AbortSignal): Promise<string | null> =>
+  typedRouteOrLegacy(
+    () => http.get('/admin/network/public-ip', TypedPublicIp, { signal }),
+    () => adminCommand(http, 'get-public-ip', PublicIp, undefined, signal),
+  ).then((r) => r?.ip ?? null);
+
+/** Active TLS/certificate information. */
 const TlsStatus = z.record(z.string(), z.unknown()).nullish();
+const TlsMode = z.enum(['self-signed', 'letsencrypt', 'custom']);
+const TlsCertificateExpiry = z
+  .string()
+  .length(24)
+  .datetime()
+  .refine((value) => {
+    try {
+      return new Date(value).toISOString() === value;
+    } catch {
+      return false;
+    }
+  }, 'certificate expiry must be a canonical ISO timestamp');
+const TypedTlsStatus = z
+  .object({
+    configuredEnabled: z.boolean(),
+    configuredPort: z.number().int().min(1).max(65_535),
+    configuredMode: TlsMode,
+    configuredCertificateSource: TlsMode,
+    serving: z.boolean(),
+    boundPort: z.number().int().min(1).max(65_535).nullable(),
+    effectiveCertificateSource: TlsMode.nullable(),
+    certificate: z
+      .object({
+        domain: z.string().max(2_048).nullable(),
+        certExpiry: TlsCertificateExpiry.nullable(),
+        issuer: z.string().max(8_192).nullable(),
+        subjectAltName: z.string().max(32_768).nullable(),
+      })
+      .strict()
+      .nullable(),
+    fallback: z.boolean(),
+    degraded: z.boolean(),
+    restartRequired: z.boolean(),
+  })
+  .strict()
+  .superRefine((status, context) => {
+    const liveFields = [
+      status.boundPort !== null,
+      status.effectiveCertificateSource !== null,
+      status.certificate !== null,
+    ];
+    if (
+      (status.serving && !liveFields.every(Boolean)) ||
+      (!status.serving && liveFields.some(Boolean))
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['serving'],
+        message: 'serving status and active listener fields must agree',
+      });
+    }
+    if (!status.serving && status.fallback) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['fallback'],
+        message: 'a fallback certificate requires a serving listener',
+      });
+    }
+    if (status.fallback && status.effectiveCertificateSource !== 'self-signed') {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['effectiveCertificateSource'],
+        message: 'fallback material must be self-signed',
+      });
+    }
+    if (status.fallback && !status.degraded) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['degraded'],
+        message: 'fallback material is a degraded recovery state',
+      });
+    }
+    if (
+      status.configuredCertificateSource !== status.configuredMode &&
+      status.configuredCertificateSource !== 'custom'
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['configuredCertificateSource'],
+        message: 'only complete custom certificate paths may override the configured mode',
+      });
+    }
+    if (status.configuredEnabled !== status.serving && !status.restartRequired) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['restartRequired'],
+        message: 'configured and effective listener enablement differ',
+      });
+    }
+    if (status.serving && status.boundPort !== status.configuredPort && !status.restartRequired) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['restartRequired'],
+        message: 'configured and bound listener ports differ',
+      });
+    }
+    if (
+      status.serving &&
+      status.effectiveCertificateSource !== status.configuredCertificateSource &&
+      !status.restartRequired
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['restartRequired'],
+        message: 'configured and effective certificate sources differ',
+      });
+    }
+  });
 export type TlsStatus = z.infer<typeof TlsStatus>;
 export const tlsStatus = (http: HttpClient, signal?: AbortSignal): Promise<TlsStatus> =>
-  adminCommand(http, 'get-tls-status', TlsStatus, undefined, signal);
+  typedRouteOrLegacy<TlsStatus>(
+    () =>
+      http.get('/tls/status', TypedTlsStatus, { signal }).then((status) => ({
+        ...status,
+        // Compatibility aliases for the existing health presentation while retaining every
+        // canonical typed field for future callers.
+        enabled: status.configuredEnabled,
+        mode: status.serving
+          ? (status.effectiveCertificateSource ?? status.configuredMode)
+          : status.configuredEnabled
+            ? 'not-serving'
+            : 'off',
+        domain: status.certificate?.domain ?? null,
+      })),
+    () => adminCommand(http, 'get-tls-status', TlsStatus, undefined, signal),
+  );
 
 /** In-memory server alert log. */
 const ServerAlert = z
@@ -312,16 +600,37 @@ const ServerAlert = z
   .loose();
 export type ServerAlert = z.infer<typeof ServerAlert>;
 const ServerAlerts = z.array(ServerAlert).nullish();
+const TypedServerAlert = z
+  .object({
+    id: z.string().min(1).max(256),
+    type: z.string().min(1).max(64),
+    value: z.string().max(16_384),
+    created: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    isRead: z.boolean(),
+  })
+  .strict();
+const TypedServerAlerts = z.object({ alerts: z.array(TypedServerAlert) }).strict();
+const ClearServerAlertsResult = z
+  .object({ removed: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) })
+  .strict();
 export const serverAlerts = (http: HttpClient, signal?: AbortSignal): Promise<ServerAlert[]> =>
-  adminCommand(http, 'get-alerts', ServerAlerts, undefined, signal).then((a) => a ?? []);
+  typedRouteOrLegacy<ServerAlert[]>(
+    () => http.get('/alerts', TypedServerAlerts, { signal }).then((r) => r.alerts),
+    () => adminCommand(http, 'get-alerts', ServerAlerts, undefined, signal).then((a) => a ?? []),
+  );
 export const clearServerAlerts = (http: HttpClient): Promise<unknown> =>
-  adminCommand(http, 'clear-alerts', z.unknown());
+  typedRouteOrLegacy<unknown>(
+    () => http.delete('/alerts', ClearServerAlertsResult),
+    () => adminCommand(http, 'clear-alerts', z.unknown()),
+  );
 
 /** GET /admin/status — server version + uptime (ms). */
 const AdminStatus = z
-  .object({ version: z.string().nullish(), uptimeMs: z.number().nullish() })
-  .loose()
-  .nullish();
+  .object({
+    version: z.string().min(1),
+    uptimeMs: z.number().int().nonnegative(),
+  })
+  .strict();
 export type AdminStatus = z.infer<typeof AdminStatus>;
 export async function adminStatus(http: HttpClient, signal?: AbortSignal): Promise<AdminStatus> {
   try {

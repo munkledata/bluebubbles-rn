@@ -34,13 +34,38 @@ interface SessionState {
    * already running against the same account and the same local DB.
    */
   epoch: number;
+  /**
+   * Monotonic identity for the currently approved HTTP transport. Unlike {@link epoch}, this also
+   * changes for an approved same-account origin rotation. Keeping it separate lets account-scoped
+   * work survive a tunnel change while transport-scoped work detects A -> B -> A rotations that
+   * would otherwise look identical from the URL and password alone.
+   */
+  transportRevision: number;
 
   /** Result of boot hydration (credentials found or not). */
   hydrated: (creds: { origin: string; password: string } | null) => void;
   beginConnecting: () => void;
   connected: (origin: string, password: string, info: ServerInfo) => void;
-  /** Refresh just the cached server info (e.g. on a hydrated boot, where `connected` never ran). */
-  setServerInfo: (info: ServerInfo) => void;
+  /**
+   * Publish an async server-info response only if the exact transport that requested it is still
+   * current. Returns false when a newer hydration/connection/origin rotation won the race.
+   */
+  setServerInfoForTransport: (
+    expectedOrigin: string,
+    expectedTransportRevision: number,
+    info: ServerInfo,
+  ) => boolean;
+  /**
+   * Replace only the credential for this exact connected transport after a durable in-place
+   * adoption. The account/DB identity stays the same, while the transport revision changes so
+   * every old password-bearing HTTP continuation is retired.
+   */
+  replaceCredentialForTransport: (
+    expectedOrigin: string,
+    expectedCredential: string,
+    expectedTransportRevision: number,
+    credential: string,
+  ) => boolean;
   /** Publish an already-validated and durably committed origin rotation without replacing account. */
   rotateOrigin: (origin: string, info: ServerInfo) => void;
   failed: (message: string) => void;
@@ -55,6 +80,7 @@ export const useSessionStore = create<SessionState>((set) => ({
   serverInfo: null,
   error: null,
   epoch: 0,
+  transportRevision: 0,
 
   hydrated: (creds) =>
     set((s) =>
@@ -63,15 +89,19 @@ export const useSessionStore = create<SessionState>((set) => ({
             status: 'connected',
             origin: creds.origin,
             password: creds.password,
+            serverInfo: null,
             error: null,
             epoch: s.epoch + 1,
+            transportRevision: s.transportRevision + 1,
           }
         : {
             status: 'unauthenticated',
             origin: null,
             password: null,
+            serverInfo: null,
             error: null,
             epoch: s.epoch + 1,
+            transportRevision: s.transportRevision + 1,
           },
     ),
   beginConnecting: () => set({ status: 'connecting', error: null }),
@@ -83,9 +113,50 @@ export const useSessionStore = create<SessionState>((set) => ({
       serverInfo: info,
       error: null,
       epoch: s.epoch + 1,
+      transportRevision: s.transportRevision + 1,
     })),
-  setServerInfo: (info) => set({ serverInfo: info }),
-  rotateOrigin: (origin, info) => set({ origin, serverInfo: info }),
+  setServerInfoForTransport: (expectedOrigin, expectedTransportRevision, info) => {
+    let published = false;
+    set((s) => {
+      if (s.origin !== expectedOrigin || s.transportRevision !== expectedTransportRevision) {
+        return s;
+      }
+      published = true;
+      return { serverInfo: info };
+    });
+    return published;
+  },
+  replaceCredentialForTransport: (
+    expectedOrigin,
+    expectedCredential,
+    expectedTransportRevision,
+    credential,
+  ) => {
+    let replaced = false;
+    set((s) => {
+      if (
+        s.status !== 'connected' ||
+        s.origin !== expectedOrigin ||
+        s.password !== expectedCredential ||
+        s.transportRevision !== expectedTransportRevision
+      ) {
+        return s;
+      }
+      replaced = true;
+      return {
+        password: credential,
+        error: null,
+        transportRevision: s.transportRevision + 1,
+      };
+    });
+    return replaced;
+  },
+  rotateOrigin: (origin, info) =>
+    set((s) => ({
+      origin,
+      serverInfo: info,
+      transportRevision: s.transportRevision + 1,
+    })),
   failed: (message) => set({ status: 'error', error: message }),
   reset: () =>
     set((s) => ({
@@ -95,19 +166,44 @@ export const useSessionStore = create<SessionState>((set) => ({
       serverInfo: null,
       error: null,
       epoch: s.epoch + 1,
+      transportRevision: s.transportRevision + 1,
     })),
 }));
+
+export interface SessionTransportLease {
+  readonly origin: string | null;
+  readonly revision: number;
+  isCurrent(): boolean;
+}
+
+/** Capture the exact approved transport without turning a same-account rotation into a logout. */
+export function captureSessionTransportLease(): SessionTransportLease {
+  const { origin, transportRevision: revision } = useSessionStore.getState();
+  return Object.freeze({
+    origin,
+    revision,
+    isCurrent: (): boolean => {
+      const current = useSessionStore.getState();
+      return current.origin === origin && current.transportRevision === revision;
+    },
+  });
+}
 
 /** Synchronous accessors for non-React code (the HttpClient auth hooks). */
 export const sessionAccessors = {
   getOrigin: (): string => useSessionStore.getState().origin ?? '',
   /** The current session instance's id — see {@link SessionState.epoch}. */
   getEpoch: (): number => useSessionStore.getState().epoch,
+  /** The current HTTP transport id; also changes on approved same-account origin rotation. */
+  getTransportRevision: (): number => useSessionStore.getState().transportRevision,
   getPassword: (): string | undefined => useSessionStore.getState().password ?? undefined,
   /** Whether the connected server has the Gator Private API enabled. */
   privateApiEnabled: (): boolean => !!useSessionStore.getState().serverInfo?.private_api,
   /** Whether the connected server's Gator RCS bridge is enabled (absent/false → off). */
   rcsEnabled: (): boolean => !!useSessionStore.getState().serverInfo?.rcs,
+  /** Whether this server supplies exact RCS success/error attempt correlation. */
+  rcsSendAttemptOwnershipSupported: (): boolean =>
+    useSessionStore.getState().serverInfo?.supports_rcs_send_attempt_ownership === true,
   /**
    * Whether the connected server can emit `message-deleted` (macOS "Recently Deleted"; schema gap
    * 6). Absent/false on older servers. Informational for now — the DbEventSink tombstones deletions
@@ -118,6 +214,9 @@ export const sessionAccessors = {
   /** Whether the connected server can run the bounded message-text search endpoint. */
   messageSearchSupported: (): boolean =>
     !!useSessionStore.getState().serverInfo?.supports_message_search,
+  /** Whether this server supplies exact multipart topology for safe action targeting. */
+  messagePartTopologySupported: (): boolean =>
+    useSessionStore.getState().serverInfo?.supports_message_part_topology === true,
   /** Whether the connected server can build + send a contact card (`send-contact`). */
   sendContactSupported: (): boolean =>
     !!useSessionStore.getState().serverInfo?.supports_send_contact,
@@ -143,6 +242,27 @@ export const useMessageSearchSupported = (): boolean =>
 /** React hook: can the server send a contact card? (Gate the composer's "Contact" affordance.) */
 export const useSendContactSupported = (): boolean =>
   useSessionStore((s) => !!s.serverInfo?.supports_send_contact);
+
+/** Can this exact chat service send one attachment and its text as a single message? */
+export const useSendAttachmentTextSupported = (service: string | null | undefined): boolean =>
+  useSessionStore((s) => {
+    if (service === 'RCS') {
+      return s.serverInfo?.rcs === true && s.serverInfo.supports_rcs_text_with_attachment === true;
+    }
+    if (service === 'iMessage') {
+      return (
+        s.serverInfo?.private_api === true &&
+        s.serverInfo.supports_imessage_text_with_attachment === true
+      );
+    }
+    return false;
+  });
+
+/** Old servers may use the compatibility part-zero heuristic; capable servers must prove topology. */
+export const useMessagePartTopologySupported = (): boolean | null =>
+  useSessionStore((s) =>
+    s.serverInfo == null ? null : s.serverInfo.supports_message_part_topology === true,
+  );
 
 /** React hook: does the server expose the iMessage-account endpoints? (Gate the Settings row.) */
 export const useIcloudAccountSupported = (): boolean =>

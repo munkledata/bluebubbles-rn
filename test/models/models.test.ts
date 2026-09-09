@@ -7,7 +7,11 @@ import {
   parseMessageSummaryInfo,
   parsePayloadData,
 } from '@core/models';
-import { editedPartFromSummary, resolveTargetPartIndex } from '@core/messages/partIndex';
+import {
+  editedPartFromSummary,
+  resolveExactMessageTargetPartIndex,
+  resolveTargetPartIndex,
+} from '@core/messages/partIndex';
 
 describe('Message model', () => {
   it('parses a minimal message and coerces string timestamps', () => {
@@ -50,6 +54,85 @@ describe('Message model', () => {
     expect(resolveTargetPartIndex({ attachmentCount: 2, hasText: false, partCount: 3 })).toBe(0);
     expect(editedPartFromSummary({ editedParts: { '2': [] } })).toBe(2);
     expect(editedPartFromSummary({ editedParts: { '1': [], '2': [] } })).toBeNull();
+  });
+
+  it('targets only one exact rendered part on a topology-capable server', () => {
+    const topology = {
+      complete: true as const,
+      originalPartIndexes: [3],
+      currentParts: [{ index: 3, kind: 'text' as const }],
+      attachmentOwnership: [],
+    };
+    expect(
+      resolveExactMessageTargetPartIndex({
+        attachmentCount: 0,
+        hasText: true,
+        partCount: 1,
+        topology,
+        topologySupported: true,
+        visibleAttachmentGuids: [],
+      }),
+    ).toBe(3);
+    expect(
+      resolveExactMessageTargetPartIndex({
+        attachmentCount: 1,
+        hasText: true,
+        partCount: 2,
+        topology: {
+          complete: true,
+          originalPartIndexes: [3, 4],
+          currentParts: [
+            { index: 3, kind: 'text' },
+            { index: 4, kind: 'attachment', attachmentGuids: ['a'] },
+          ],
+          attachmentOwnership: [{ attachmentGuid: 'a', partIndex: 4 }],
+        },
+        topologySupported: true,
+        visibleAttachmentGuids: ['a'],
+      }),
+    ).toBeUndefined();
+    expect(
+      resolveExactMessageTargetPartIndex({
+        attachmentCount: 0,
+        hasText: true,
+        partCount: 1,
+        topology: null,
+        topologySupported: null,
+        visibleAttachmentGuids: [],
+      }),
+    ).toBeUndefined();
+    expect(
+      resolveExactMessageTargetPartIndex({
+        attachmentCount: 2,
+        hasText: true,
+        partCount: 3,
+        topology: null,
+        topologySupported: false,
+        visibleAttachmentGuids: ['a', 'b'],
+      }),
+    ).toBe(2);
+  });
+
+  it('marks an aggregate topology above the one-megabyte storage bound invalid', () => {
+    const repeatedGuids = Array.from(
+      { length: 256 },
+      (_, index) => `${index}-${'topology-byte-bound'.repeat(3)}`,
+    );
+    const message = Message.parse({
+      guid: 'oversized-topology',
+      messagePartTopology: {
+        complete: false,
+        originalPartIndexes: Array.from({ length: 128 }, (_, index) => index),
+        currentParts: Array.from({ length: 128 }, (_, index) => ({
+          index,
+          kind: 'unknown',
+          attachmentGuids: repeatedGuids,
+        })),
+        attachmentOwnership: [],
+      },
+    });
+    expect(message.messagePartTopology).toBeUndefined();
+    expect(message.messagePartTopologyInvalid).toBe(true);
   });
 
   it('accepts and preserves a well-formed messageSummaryInfo (edit history + retracted parts)', () => {

@@ -92,6 +92,30 @@ describe('reconcileSendOutcome', () => {
     expect(mockClearFailedSendNotice).toHaveBeenCalledWith(db, 'temp-bbbb0000', undefined);
   });
 
+  it('does not let partial modern correlation consume a generation-zero outgoing row', async () => {
+    const { db, raw } = await createTestDb();
+    const tempGuid = 'temp-partial-modern-ack';
+    await seedOutgoing(db, tempGuid, 1000);
+    expect(
+      raw
+        .prepare('SELECT attempt_owner_generation AS generation FROM messages WHERE guid = ?')
+        .get(tempGuid),
+    ).toEqual({ generation: 0 });
+
+    for (const partialAck of [
+      { guid: tempGuid, attemptGuid: 'attempt-without-generation' },
+      { guid: tempGuid, clientAttemptGeneration: 1 },
+    ]) {
+      await expect(reconcileSendOutcome(db, tempGuid, partialAck, 1000)).rejects.toEqual(
+        expect.objectContaining<Partial<ApiError>>({ kind: 'parse_error' }),
+      );
+    }
+
+    expect(msgRow(raw, tempGuid)?.s).toBe('sending');
+    expect(queueCount(raw)).toBe(1);
+    expect(mockClearFailedSendNotice).not.toHaveBeenCalled();
+  });
+
   it('can suppress OS notice cancellation while retaining the durable success outcome', async () => {
     const { db, raw } = await createTestDb();
     await seedOutgoing(db, 'temp-harness-success', 1000);

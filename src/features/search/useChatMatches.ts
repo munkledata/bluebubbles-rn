@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getDatabase } from '@db/database';
-import { searchChatGuidsByMessage, type InboxRow } from '@db/repositories';
-import { useChats } from '@features/conversations/useChats';
-import { type ReactiveState } from '@db/useReactiveQuery';
-import { resolveTitle } from '@utils';
+import { searchChatGuidsByMessage, searchChatsForInboxPage, type InboxRow } from '@db/repositories';
+import { useReactiveQuery, type ReactiveState } from '@db/useReactiveQuery';
+import { createRowIdentityCache } from '@features/conversations/rowIdentity';
 import {
   captureRealtimeDeliveryLease,
   subscribeRealtimeGenerationInvalidation,
@@ -11,27 +10,26 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 import { isGlobalSearchQueryValid, normalizeGlobalSearchQuery } from './query';
 
-const NO_MESSAGE_MATCHES = new Set<string>();
+const TABLES = ['messages', 'chats', 'chat_handles', 'handles'];
 
-interface MessageMatchResult {
-  generation: number;
+interface SettledChatSearch {
+  key: string;
   term: string;
-  guids: Set<string>;
+}
+
+interface ChatMatchEnvelope {
+  key: string;
+  rows: InboxRow[];
 }
 
 /**
- * Filters the loaded (non-archived) inbox rows to those matching a query. A chat always matches when
- * the term is in its resolved title or participant names. When `contentMatches` is true (the inbox
- * top-bar), it ALSO matches chats with a message body hit (FTS over the local index, incl. decoded
- * edited/SMS — debounced), so the inbox filter finds a conversation by something said in it.
+ * Reactive, bounded-result conversation search. A chat matches when the term is in its resolved
+ * title/participants. When `contentMatches` is true (the inbox top-bar), visible message-body FTS
+ * hits are unioned in after the same 200 ms settled-input delay.
  *
- * The search page passes `contentMatches: false` for its "Chats" section: there, a chat should only
- * appear when its NAME/people match (a "jump to this conversation" shortcut). Message-content
- * matches belong in that page's "Messages" section, where the snippet shows the actual hit — so the
- * Chats section never lists a chat whose visible preview doesn't explain why it's there.
- *
- * Passes through `useChats`'s reactive state (one subscription) with `data` filtered; an empty query
- * returns all rows (what the inbox wants).
+ * The search page passes `contentMatches: false` for its "Chats" section because body hits are
+ * rendered separately with their matching snippets. Short/empty input is deliberately idle and
+ * returns `[]`; this hook's only production caller does not use it as an inbox data source.
  */
 export function useChatMatches(
   query: string,
@@ -43,14 +41,17 @@ export function useChatMatches(
   const [retiredGeneration, setRetiredGeneration] = useState<number | null>(() =>
     accountLease.isCurrent() ? null : accountLease.generation,
   );
+  const [reconcile] = useState(() => createRowIdentityCache<InboxRow>((row) => row.guid));
+  const [settled, setSettled] = useState<SettledChatSearch | null>(null);
   const accountCurrent = retiredGeneration !== accountLease.generation && accountLease.isCurrent();
-  const state = useChats(false, {
-    enabled: accountCurrent,
-    ownerGeneration: accountLease.generation,
-  });
   const term = normalizeGlobalSearchQuery(query);
   const validQuery = isGlobalSearchQueryValid(term);
-  const [messageMatchResult, setMessageMatchResult] = useState<MessageMatchResult | null>(null);
+  const searchKey = JSON.stringify([accountLease.generation, term, contentMatches]);
+  const committedSearchKeyRef = useRef(searchKey);
+  // A previously settled A must not become current on the first A -> empty -> A render. The effect
+  // commits each input key and clears its old marker before the timer can settle; this render-time
+  // comparison masks the old marker immediately, before that effect runs.
+  const searchKeyChanged = committedSearchKeyRef.current !== searchKey;
 
   useEffect(
     () =>
@@ -61,56 +62,60 @@ export function useChatMatches(
   );
 
   useEffect(() => {
-    if (!accountCurrent || !contentMatches || !validQuery) return;
+    const inputChanged = committedSearchKeyRef.current !== searchKey;
+    committedSearchKeyRef.current = searchKey;
+    if (inputChanged) {
+      // The render-time ref gate masks the first changed-key render; clearing state here keeps it
+      // masked through unrelated rerenders until this key's full debounce actually settles.
+      setSettled(null);
+    }
+    if (!accountCurrent || !validQuery) return;
     let cancelled = false;
-    const t = setTimeout(() => {
-      searchChatGuidsByMessage(getDatabase(), term)
-        .then((guids) => {
-          if (!cancelled && accountLease.isCurrent()) {
-            setMessageMatchResult({
-              generation: accountLease.generation,
-              term,
-              guids: new Set(guids),
-            });
-          }
-        })
-        .catch(() => {
-          if (!cancelled && accountLease.isCurrent()) {
-            setMessageMatchResult({
-              generation: accountLease.generation,
-              term,
-              guids: new Set(),
-            });
-          }
-        });
+    const timer = setTimeout(() => {
+      if (!cancelled && accountLease.isCurrent()) setSettled({ key: searchKey, term });
     }, 200);
     return () => {
       cancelled = true;
-      clearTimeout(t);
+      clearTimeout(timer);
     };
-  }, [accountCurrent, accountLease, contentMatches, term, validQuery]);
+  }, [accountCurrent, accountLease, searchKey, term, validQuery]);
 
-  // A result only applies to the exact term that produced it. Short/disabled/new queries derive
-  // an empty set immediately, instead of synchronously clearing state in an effect after render.
-  const msgMatchGuids =
+  const queryEnabled =
     accountCurrent &&
-    contentMatches &&
     validQuery &&
-    messageMatchResult?.generation === accountLease.generation &&
-    messageMatchResult.term === term
-      ? messageMatchResult.guids
-      : NO_MESSAGE_MATCHES;
+    !searchKeyChanged &&
+    settled?.key === searchKey &&
+    settled.term === term;
+  const state = useReactiveQuery<ChatMatchEnvelope>(
+    async () => {
+      const db = getDatabase();
+      let messageMatchGuids: string[] = [];
+      if (contentMatches) {
+        try {
+          messageMatchGuids = await searchChatGuidsByMessage(db, term);
+        } catch {
+          // Conversation-name search remains useful when the optional local FTS read fails.
+        }
+      }
+      if (!accountLease.isCurrent()) return { key: searchKey, rows: [] };
+      const page = await searchChatsForInboxPage(db, {
+        query: term,
+        messageMatchGuids,
+        limit: 50,
+      });
+      return { key: searchKey, rows: reconcile(page.rows) };
+    },
+    TABLES,
+    [searchKey],
+    { enabled: queryEnabled },
+  );
 
-  const data = useMemo(() => {
-    const all = accountCurrent ? (state.data ?? []) : [];
-    const normalizedTerm = term.toLowerCase();
-    if (!normalizedTerm) return all;
-    return all.filter(
-      (r) =>
-        `${resolveTitle(r)} ${r.participantNames ?? ''}`.toLowerCase().includes(normalizedTerm) ||
-        msgMatchGuids.has(r.guid),
-    );
-  }, [accountCurrent, state.data, term, msgMatchGuids]);
-
-  return accountCurrent ? { ...state, data } : { data: [], isLoading: false, error: null };
+  if (!accountCurrent || !validQuery) return { data: [], isLoading: false, error: null };
+  if (!queryEnabled) return { data: [], isLoading: true, error: null };
+  const current = state.data?.key === searchKey ? state.data : null;
+  return {
+    data: current?.rows ?? [],
+    isLoading: state.isLoading || (current == null && state.error == null),
+    error: state.error,
+  };
 }

@@ -1,6 +1,13 @@
 /** Keep Android-owned per-chat preview state useful without allowing it to grow without bound. */
 export const MAX_MESSAGE_NOTIFICATION_HISTORY = 6;
+export const MAX_MESSAGE_NOTIFICATION_TEXT_CODE_POINTS = 512;
+export const MAX_MESSAGE_NOTIFICATION_TEXT_BYTES = 2_048;
+export const MAX_MESSAGE_NOTIFICATION_LABEL_CODE_POINTS = 128;
+export const MAX_MESSAGE_NOTIFICATION_LABEL_BYTES = 512;
+export const MAX_MESSAGE_NOTIFICATION_AVATAR_URI_BYTES = 4_096;
 export const MESSAGE_HISTORY_IDS_KEY = 'messageHistoryIds';
+
+const encoder = new TextEncoder();
 
 export interface MessageNotificationHistoryEntry {
   /** Opaque, device-local SQLite row id. Never a server GUID or address. */
@@ -11,17 +18,114 @@ export interface MessageNotificationHistoryEntry {
   avatarUri?: string;
 }
 
-function validEntry(entry: MessageNotificationHistoryEntry): boolean {
-  return (
-    Number.isSafeInteger(entry.messageId) &&
-    entry.messageId > 0 &&
-    typeof entry.text === 'string' &&
-    entry.text.length > 0 &&
-    Number.isFinite(entry.timestamp) &&
-    typeof entry.senderName === 'string' &&
-    entry.senderName.length > 0 &&
-    (entry.avatarUri == null || (typeof entry.avatarUri === 'string' && entry.avatarUri.length > 0))
+/** Build a whole-code-point prefix without encoding or normalizing an arbitrarily large input. */
+function boundedPrefix(value: string, maxCodePoints: number, maxBytes: number): string {
+  let result = '';
+  let codePoints = 0;
+  let bytes = 0;
+  for (const codePoint of value) {
+    if (codePoints >= maxCodePoints) break;
+    const nextBytes = encoder.encode(codePoint).byteLength;
+    if (bytes + nextBytes > maxBytes) break;
+    result += codePoint;
+    codePoints += 1;
+    bytes += nextBytes;
+  }
+  return result;
+}
+
+function boundedNormalizedPrefix(
+  value: unknown,
+  maxCodePoints: number,
+  maxBytes: number,
+  trim: boolean,
+): string | undefined {
+  if (typeof value !== 'string' || value.length === 0) return undefined;
+  let result = boundedPrefix(value, maxCodePoints, maxBytes);
+  try {
+    result = result.normalize('NFC');
+  } catch {
+    return undefined;
+  }
+  if (trim) result = result.trim();
+  result = boundedPrefix(result, maxCodePoints, maxBytes);
+  return result.length > 0 ? result : undefined;
+}
+
+/** Notification preview text keeps its whitespace but never crosses the native bridge unbounded. */
+export function normalizeMessageNotificationText(value: unknown): string | undefined {
+  return boundedNormalizedPrefix(
+    value,
+    MAX_MESSAGE_NOTIFICATION_TEXT_CODE_POINTS,
+    MAX_MESSAGE_NOTIFICATION_TEXT_BYTES,
+    false,
   );
+}
+
+/** Sender labels are presentation-only and trim padding that adds no useful identity. */
+export function normalizeMessageNotificationLabel(value: unknown): string | undefined {
+  return boundedNormalizedPrefix(
+    value,
+    MAX_MESSAGE_NOTIFICATION_LABEL_CODE_POINTS,
+    MAX_MESSAGE_NOTIFICATION_LABEL_BYTES,
+    true,
+  );
+}
+
+export function normalizeMessageNotificationTitle(value: unknown): string | undefined {
+  return normalizeMessageNotificationLabel(value);
+}
+
+/** Never truncate or normalize a URI: either preserve the exact reference or omit it. */
+export function normalizeMessageNotificationAvatarUri(value: unknown): string | undefined {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    value.length > MAX_MESSAGE_NOTIFICATION_AVATAR_URI_BYTES ||
+    value.trim().length === 0
+  ) {
+    return undefined;
+  }
+  return encoder.encode(value).byteLength <= MAX_MESSAGE_NOTIFICATION_AVATAR_URI_BYTES
+    ? value
+    : undefined;
+}
+
+export function normalizeMessageNotificationHistoryEntry(
+  entry: MessageNotificationHistoryEntry,
+): MessageNotificationHistoryEntry | null {
+  if (
+    !Number.isSafeInteger(entry.messageId) ||
+    entry.messageId <= 0 ||
+    !Number.isFinite(entry.timestamp)
+  ) {
+    return null;
+  }
+  const text = normalizeMessageNotificationText(entry.text);
+  const senderName = normalizeMessageNotificationLabel(entry.senderName);
+  if (!text || !senderName) return null;
+  const avatarUri = normalizeMessageNotificationAvatarUri(entry.avatarUri);
+  return {
+    messageId: entry.messageId,
+    text,
+    timestamp: entry.timestamp,
+    senderName,
+    ...(avatarUri ? { avatarUri } : {}),
+  };
+}
+
+/** Normalize, deduplicate, deterministically order, and cap any native-facing history. */
+export function normalizeMessageNotificationHistory(
+  entries: readonly MessageNotificationHistoryEntry[],
+): MessageNotificationHistoryEntry[] {
+  const byId = new Map<number, MessageNotificationHistoryEntry>();
+  for (const entry of entries) {
+    const normalized = normalizeMessageNotificationHistoryEntry(entry);
+    if (normalized) byId.set(normalized.messageId, normalized);
+  }
+  return [...byId.values()]
+    .sort((left, right) => left.timestamp - right.timestamp || left.messageId - right.messageId)
+    .slice(-MAX_MESSAGE_NOTIFICATION_HISTORY);
 }
 
 /** Replace duplicate deliveries, order deterministically, and retain only the newest six lines. */
@@ -29,22 +133,16 @@ export function mergeMessageNotificationHistory(
   existing: readonly MessageNotificationHistoryEntry[],
   incoming: MessageNotificationHistoryEntry,
 ): MessageNotificationHistoryEntry[] {
-  const byId = new Map<number, MessageNotificationHistoryEntry>();
-  for (const entry of existing) {
-    if (validEntry(entry)) byId.set(entry.messageId, entry);
-  }
-  if (validEntry(incoming)) byId.set(incoming.messageId, incoming);
-
-  return [...byId.values()]
-    .sort((left, right) => left.timestamp - right.timestamp || left.messageId - right.messageId)
-    .slice(-MAX_MESSAGE_NOTIFICATION_HISTORY);
+  return normalizeMessageNotificationHistory([...existing, incoming]);
 }
 
 export function removeMessageFromNotificationHistory(
   existing: readonly MessageNotificationHistoryEntry[],
   messageId: number,
 ): MessageNotificationHistoryEntry[] {
-  return existing.filter((entry) => validEntry(entry) && entry.messageId !== messageId);
+  return normalizeMessageNotificationHistory(existing).filter(
+    (entry) => entry.messageId !== messageId,
+  );
 }
 
 /** Encode only local integer ids; line text/name remain in Android's normal MessagingStyle array. */

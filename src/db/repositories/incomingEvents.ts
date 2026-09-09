@@ -20,12 +20,20 @@ export const INCOMING_EVENT_PENDING_BYTE_BUDGET = 16 * 1024 * 1024;
 export const INCOMING_EVENT_MAX_PENDING_AGE_MS = 24 * 60 * 60 * 1000;
 /** Payload-cleared success/poison receipts suppress duplicates for seven days. */
 export const INCOMING_EVENT_TERMINAL_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
-/** Independent receipt count bound; pending rows have their own count bound above. */
-export const INCOMING_EVENT_TERMINAL_CAPACITY = 2_000;
+/**
+ * Protect terminal receipts through the longest valid V3 envelope plus accepted future-clock skew.
+ */
+export const INCOMING_EVENT_REPLAY_RECEIPT_MIN_AGE_MS = 24 * 60 * 60 * 1000 + 5 * 60 * 1000;
+/** Hard row/receipt bound; the stricter pending count and byte bounds still apply independently. */
+export const INCOMING_EVENT_RECEIPT_CAPACITY = 2_000;
+/** Backwards-compatible name retained for diagnostics and existing callers. */
+export const INCOMING_EVENT_TERMINAL_CAPACITY = INCOMING_EVENT_RECEIPT_CAPACITY;
 /** A claim increments attempts, so five process deaths also stop a poison envelope. */
 export const INCOMING_EVENT_MAX_ATTEMPTS = 5;
 /** One event delivery should finish quickly; a crashed owner becomes reclaimable after two minutes. */
 export const INCOMING_EVENT_LEASE_MS = 120_000;
+/** Expected local dependencies are polled briefly; an acknowledgement also kicks the drain. */
+export const INCOMING_EVENT_DEPENDENCY_RETRY_MS = 5_000;
 /** Keep one drain bounded even if a large backlog is already due. */
 export const INCOMING_EVENT_MAX_CLAIM_BATCH = 25;
 /** Prevent one synchronous SQLite result from materializing the full 16 MiB pending budget. */
@@ -76,7 +84,8 @@ export type EnqueueIncomingEventResult =
       readonly status: 'poisoned';
       readonly id: number;
       readonly reason: 'expired' | 'payload-too-large' | 'queue-full';
-    };
+    }
+  | { readonly status: 'capacity-rejected'; readonly reason: 'receipt-capacity' };
 
 export type EnqueueAndClaimIncomingEventResult =
   | { readonly status: 'queue-not-empty' }
@@ -127,6 +136,8 @@ export type FailIncomingEventResult =
       readonly nextAttemptAt: number;
     }
   | { readonly status: 'poisoned'; readonly attempts: number };
+
+export type DeferIncomingEventForDependencyResult = FailIncomingEventResult;
 
 export interface IncomingEventQueueHealth {
   readonly pending: number;
@@ -273,24 +284,62 @@ async function terminalizeExpiredOrExhausted(
   });
 }
 
-/** Delete old/excess terminal receipts without ever evicting pending work. */
+/**
+ * Delete old/excess terminal receipts without evicting pending work or a still-valid replay receipt.
+ *
+ * Existing databases can temporarily exceed the current hard bound. Only receipts older than every
+ * valid V3 replay window may be removed; protected rows fail new intake closed until a slot is safe.
+ */
 async function trimTerminalReceipts(context: DbTransactionContext, now: number): Promise<void> {
   await runInTransactionContext(context, async (db) => {
     const oldestAllowed = Math.max(0, now - INCOMING_EVENT_TERMINAL_MAX_AGE_MS);
     await db.run(sql`
-      WITH ranked_terminal AS (
-        SELECT id,
-               ROW_NUMBER() OVER (ORDER BY terminal_at DESC, id DESC) AS newest_rank
-          FROM incoming_event_queue
-         WHERE state IN ('completed', 'poisoned')
-           AND terminal_at >= ${oldestAllowed}
-      ), retained_terminal AS (
-        SELECT id FROM ranked_terminal
-         WHERE newest_rank <= ${INCOMING_EVENT_TERMINAL_CAPACITY}
-      )
       DELETE FROM incoming_event_queue
        WHERE state IN ('completed', 'poisoned')
-         AND id NOT IN (SELECT id FROM retained_terminal)`);
+         AND terminal_at <= ${now - INCOMING_EVENT_REPLAY_RECEIPT_MIN_AGE_MS}
+         AND terminal_at < ${oldestAllowed}`);
+    await db.run(sql`
+      WITH overflow AS (
+        SELECT MAX(COUNT(*) - ${INCOMING_EVENT_RECEIPT_CAPACITY}, 0) AS rows
+          FROM incoming_event_queue
+      ), removable AS (
+        SELECT id
+          FROM incoming_event_queue
+         WHERE state IN ('completed', 'poisoned')
+           AND terminal_at <= ${now - INCOMING_EVENT_REPLAY_RECEIPT_MIN_AGE_MS}
+         ORDER BY terminal_at ASC, id ASC
+         LIMIT (SELECT rows FROM overflow)
+      )
+      DELETE FROM incoming_event_queue
+       WHERE id IN (SELECT id FROM removable)`);
+  });
+}
+
+/** Reserve one bounded durable-receipt slot without sacrificing live replay protection. */
+async function ensureIncomingEventReceiptSlot(
+  context: DbTransactionContext,
+  now: number,
+): Promise<boolean> {
+  return runInTransactionContext(context, async (db) => {
+    const counts = await db.all<{ rows: number }>(sql`
+      SELECT COUNT(*) AS rows FROM incoming_event_queue`);
+    const occupied = counts[0]?.rows ?? 0;
+    if (occupied < INCOMING_EVENT_RECEIPT_CAPACITY) return true;
+
+    const slotsNeeded = occupied - INCOMING_EVENT_RECEIPT_CAPACITY + 1;
+    await db.run(sql`
+      DELETE FROM incoming_event_queue
+       WHERE id IN (
+         SELECT id
+           FROM incoming_event_queue
+          WHERE state IN ('completed', 'poisoned')
+            AND terminal_at <= ${now - INCOMING_EVENT_REPLAY_RECEIPT_MIN_AGE_MS}
+          ORDER BY terminal_at ASC, id ASC
+          LIMIT ${slotsNeeded}
+       )`);
+    const after = await db.all<{ rows: number }>(sql`
+      SELECT COUNT(*) AS rows FROM incoming_event_queue`);
+    return (after[0]?.rows ?? 0) < INCOMING_EVENT_RECEIPT_CAPACITY;
   });
 }
 
@@ -325,6 +374,44 @@ async function enqueuePreparedIncomingEvent(
 ): Promise<EnqueueIncomingEventResult> {
   return runInTransactionContext(context, async (db) => {
     const { payloadBytes, schemaVersion } = prepared;
+    const existingBeforeAdmission = await db.all<{
+      id: number;
+      payloadDigest: string;
+      orderingKey: string;
+      schemaVersion: number;
+      eventName: string;
+      source: EventSource;
+      state: IncomingEventState;
+    }>(sql`
+      SELECT id,
+             payload_digest AS payloadDigest,
+             ordering_key AS orderingKey,
+             schema_version AS schemaVersion,
+             event_name AS eventName,
+             source,
+             state
+        FROM incoming_event_queue
+       WHERE event_key = ${event.eventKey}
+       LIMIT 1`);
+    const existingRow = existingBeforeAdmission[0];
+    if (existingRow) {
+      return existingRow.payloadDigest === event.payloadDigest &&
+        existingRow.orderingKey === event.orderingKey &&
+        existingRow.schemaVersion === schemaVersion &&
+        existingRow.eventName === event.eventName
+        ? { status: 'duplicate', id: existingRow.id, state: existingRow.state }
+        : {
+            status: 'key-conflict',
+            id: existingRow.id,
+            existingSource: existingRow.source,
+            existingState: existingRow.state,
+          };
+    }
+
+    if (!(await ensureIncomingEventReceiptSlot(context, now))) {
+      return { status: 'capacity-rejected', reason: 'receipt-capacity' };
+    }
+
     const intakePoison =
       payloadBytes > INCOMING_EVENT_MAX_PAYLOAD_BYTES
         ? 'payload-too-large'
@@ -740,6 +827,68 @@ export async function failIncomingEvent(
                  WHEN expires_at <= ${now} THEN 'expired' ELSE ${errorCode} END
          WHERE id = ${claim.id}
            AND state = 'pending'
+           AND lease_token = ${claim.leaseToken}
+           AND claim_version = ${claim.claimVersion}
+        RETURNING state, attempts, next_attempt_at AS nextAttemptAt`);
+      const row = rows[0];
+      if (!row) return { status: 'stale' };
+      if (row.state === 'poisoned') {
+        await trimTerminalReceipts(context, now);
+        return { status: 'poisoned', attempts: row.attempts };
+      }
+      return {
+        status: 'retry-scheduled',
+        attempts: row.attempts,
+        nextAttemptAt: row.nextAttemptAt,
+      };
+    },
+    guard,
+  );
+}
+
+/**
+ * Return one exact lease to a short dependency retry without spending its poison-attempt budget.
+ *
+ * Claims increment `attempts` before delivery so a process death is bounded. This settlement is
+ * different: the handler proved that it stopped only because a known local prerequisite is still
+ * pending, so it gives that just-added attempt back. The original event expiry remains the hard
+ * lifetime bound, and the exact token + version fence prevents a late worker from releasing a
+ * successor's lease.
+ */
+export async function deferIncomingEventForDependency(
+  db: AppDatabase,
+  claim: IncomingEventClaimIdentity,
+  guard: DbCommitGuard,
+  clock: IncomingEventClock = Date.now,
+): Promise<DeferIncomingEventForDependencyResult> {
+  validateClaimIdentity(claim);
+  return withDbTransaction(
+    db,
+    async (context) => {
+      const now = sampleIncomingEventClock(clock);
+      const retryAt = now + INCOMING_EVENT_DEPENDENCY_RETRY_MS;
+      assertTimestamp(retryAt, 'dependencyNextAttemptAt');
+      const rows = await db.all<{
+        state: IncomingEventState;
+        attempts: number;
+        nextAttemptAt: number;
+      }>(sql`
+        UPDATE incoming_event_queue
+           SET state = CASE WHEN expires_at <= ${now} THEN 'poisoned' ELSE 'pending' END,
+               payload = CASE WHEN expires_at <= ${now} THEN NULL ELSE payload END,
+               attempts = attempts - 1,
+               next_attempt_at = CASE
+                 WHEN expires_at <= ${now} THEN 0
+                 ELSE MIN(expires_at, ${retryAt})
+               END,
+               lease_token = NULL,
+               lease_expires_at = 0,
+               terminal_at = CASE WHEN expires_at <= ${now} THEN ${now} ELSE NULL END,
+               last_error_code = CASE
+                 WHEN expires_at <= ${now} THEN 'expired' ELSE 'dependency-pending' END
+         WHERE id = ${claim.id}
+           AND state = 'pending'
+           AND attempts >= 1
            AND lease_token = ${claim.leaseToken}
            AND claim_version = ${claim.claimVersion}
         RETURNING state, attempts, next_attempt_at AS nextAttemptAt`);

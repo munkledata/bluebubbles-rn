@@ -3,12 +3,27 @@ import { sendText, type MessageMention } from '@core/api/endpoints/messages';
 import {
   handoverScheduledTextToOutgoing,
   insertOutgoingTextWithinTransaction,
+  explicitMessageTargetPart,
+  MessageTargetUnavailableError,
+  resolveMessageTarget,
+  resolveMessageTargetWithinTransaction,
   type ScheduledTextHandoverTransition,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
-import { sessionAccessors } from '@state/sessionStore';
-import { handleSendFailure, reconcileSendOutcome } from './sendOutcome';
+import { isRcsChatGuid } from '@utils/chat';
+import {
+  messageTargetCommitGuard,
+  messageTargetServerAuthorization,
+  resolveRcsAttemptOwnership,
+  type RcsCapabilitySource,
+} from './rcsAttemptCapability';
+import {
+  handleSendFailure,
+  reconcileSendOutcome,
+  retireUnavailableMessageTarget,
+} from './sendOutcome';
+import { pinSendTransport } from './sendTransport';
 
 /**
  * Pick the send method (mirrors Flutter http_service): effects/replies/edits REQUIRE the
@@ -74,46 +89,93 @@ export async function sendTextMessage(
    * the queue row and a still-'sending' scheduled row alive, and the next launch re-sent one and
    * re-fired the other.
    */
-  onQueued?: () => Promise<void> | void,
+  onQueued?: (tempGuid: string) => Promise<void> | void,
   scheduledHandover?: ScheduledTextHandover,
   ordinaryCommitGuard?: DbCommitGuard,
+  /** Explicit provenance for foreground cache data or already-proven task-local server info. */
+  capabilitySource?: RcsCapabilitySource,
 ): Promise<{ tempGuid: string }> {
+  const targetPart = explicitMessageTargetPart(args.selectedMessageGuid, args.partIndex);
+  const target = targetPart
+    ? {
+        chatGuid: args.chatGuid,
+        messageGuid: targetPart.messageGuid,
+        partIndex: targetPart.partIndex,
+      }
+    : null;
+  // The Google Messages bridge sends ordinary RCS text and ignores Apple's reply identity.
+  // Reject stale/direct callers before capability lookup, durable admission, or scheduled handoff.
+  if (target && isRcsChatGuid(args.chatGuid)) {
+    throw new Error('This server cannot send an RCS threaded reply.');
+  }
   const tempGuid = generateTempGuid();
+  const effectiveCommitGuard = scheduledHandover?.commitGuard ?? ordinaryCommitGuard;
+  const transport = pinSendTransport(http, effectiveCommitGuard);
+  const capability = await resolveRcsAttemptOwnership(
+    transport.http,
+    args.chatGuid,
+    transport.admissionGuard,
+    capabilitySource,
+    { requireServerInfo: target != null },
+  );
+  const authorizedTarget = target
+    ? {
+        ...target,
+        serverAuthorization: messageTargetServerAuthorization(
+          capability.serverInfo,
+          transport.admissionGuard,
+        ),
+      }
+    : null;
+  const targetCommitGuard = messageTargetCommitGuard(
+    effectiveCommitGuard,
+    authorizedTarget?.serverAuthorization,
+  );
   const outgoing = {
     tempGuid,
     chatGuid: args.chatGuid,
     text: args.text,
     now,
-    selectedMessageGuid: args.selectedMessageGuid,
-    partIndex: args.selectedMessageGuid ? args.partIndex : undefined,
+    selectedMessageGuid: target?.messageGuid,
+    partIndex: target?.partIndex,
     // A reply targets the selected message; persist it locally so the optimistic
     // bubble shows its quote before the server echo.
-    threadOriginatorGuid: args.selectedMessageGuid,
+    threadOriginatorGuid: target?.messageGuid,
     effectId: args.effectId,
     // Persist the subject so the optimistic bubble shows it before the server echo.
     subject: args.subject,
     // Into the queue payload only, so a crash-recovery resend keeps the spans.
     mentions: args.mentions,
+    attemptAware: capability.attemptAware,
   };
-  const effectiveCommitGuard = scheduledHandover?.commitGuard ?? ordinaryCommitGuard;
-  if (scheduledHandover) {
-    await handoverScheduledTextToOutgoing(
-      db,
-      {
-        scheduledId: scheduledHandover.scheduledId,
-        transition: scheduledHandover.transition,
-        outgoing,
-      },
-      scheduledHandover.commitGuard,
-    );
-  } else {
-    await withDbTransaction(
-      db,
-      (context) => insertOutgoingTextWithinTransaction(context, outgoing),
-      effectiveCommitGuard,
-    );
-  }
-  await onQueued?.();
+  const { attemptOwnerToken } = scheduledHandover
+    ? await handoverScheduledTextToOutgoing(
+        db,
+        {
+          scheduledId: scheduledHandover.scheduledId,
+          transition: scheduledHandover.transition,
+          outgoing,
+        },
+        transport.admissionGuard,
+        authorizedTarget?.serverAuthorization,
+      )
+    : await withDbTransaction(
+        db,
+        async (context) => {
+          const resolvedTarget = authorizedTarget
+            ? await resolveMessageTargetWithinTransaction(context, authorizedTarget)
+            : null;
+          if (authorizedTarget && !resolvedTarget) throw new MessageTargetUnavailableError();
+          return insertOutgoingTextWithinTransaction(context, {
+            ...outgoing,
+            selectedMessageGuid: resolvedTarget?.messageGuid,
+            partIndex: resolvedTarget?.partIndex,
+            threadOriginatorGuid: resolvedTarget?.messageGuid,
+          });
+        },
+        transport.admissionGuard,
+      );
+  await onQueued?.(tempGuid);
 
   // The guarded handoff may have committed just before Disconnect revoked this account. Re-check
   // synchronously at the network boundary so account A's text can never start a request using
@@ -124,23 +186,34 @@ export async function sendTextMessage(
   }
 
   try {
+    const finalTarget = authorizedTarget
+      ? await resolveMessageTarget(db, authorizedTarget, targetCommitGuard)
+      : null;
+    if (authorizedTarget && !finalTarget) {
+      await retireUnavailableMessageTarget(db, tempGuid, targetCommitGuard);
+      return { tempGuid };
+    }
+    transport.assertNetworkCurrent();
     // Subject lines + mentions, like replies/effects, are Private-API-only features.
     const method = chooseSendMethod(
-      !!args.selectedMessageGuid || !!args.effectId || !!args.subject || !!args.mentions?.length,
-      sessionAccessors.privateApiEnabled(),
+      target != null || !!args.effectId || !!args.subject || !!args.mentions?.length,
+      capability.serverInfo?.private_api === true,
     );
-    const server = await sendText(http, {
+    const server = await sendText(transport.http, {
       chatGuid: args.chatGuid,
       tempGuid,
+      clientAttemptGeneration: attemptOwnerToken?.generation,
       message: args.text,
-      selectedMessageGuid: args.selectedMessageGuid,
-      partIndex: args.selectedMessageGuid ? args.partIndex : undefined,
+      selectedMessageGuid: finalTarget?.messageGuid,
+      partIndex: finalTarget?.partIndex,
       effectId: args.effectId,
       subject: args.subject,
       mentions: args.mentions,
       method,
     });
-    await reconcileSendOutcome(db, tempGuid, server, now, effectiveCommitGuard);
+    await reconcileSendOutcome(db, tempGuid, server, now, effectiveCommitGuard, {
+      attemptOwnerToken: attemptOwnerToken ?? undefined,
+    });
   } catch (e) {
     if (e instanceof DbCommitGuardRejectedError) throw e;
     await handleSendFailure(
@@ -151,6 +224,7 @@ export async function sendTextMessage(
       args.chatGuid,
       undefined,
       effectiveCommitGuard,
+      { attemptOwnerToken: attemptOwnerToken ?? undefined },
     );
   }
 

@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
+import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 
@@ -10,10 +11,12 @@ import {
   FORBIDDEN_COMMUNITY_WEBVIEW_DEX_MARKERS,
   FORBIDDEN_LEGACY_SHORTCUT_PUBLISHER_DEX_MARKERS,
   FORBIDDEN_PERMISSIONS,
+  inspectPackagedAndroidBundle,
   REQUIRED_PINNED_SHORTCUT_CLEANUP_DEX_MARKERS,
   REQUIRED_PERMISSIONS,
   runAndroidBuildCheck,
   validateAndroidBuild,
+  validateExpoFileSystemRedirectContainment,
   validateHeadlessEntry,
   validatePackagedAndroidBundle,
 } from './check-android-build.mjs';
@@ -159,6 +162,80 @@ import './src/services/download/registerBoundedNativeDownloadCleanup';
 import 'expo-router/entry';
 `;
 
+const redirectContainmentPackageJson = {
+  main: 'index.js',
+  scripts: { postinstall: 'patch-package' },
+  dependencies: { 'expo-file-system': '57.0.6' },
+  devDependencies: { 'patch-package': '8.0.1' },
+  expo: { autolinking: { android: { buildFromSource: ['expo-file-system'] } } },
+};
+const redirectContainmentPackageLock = {
+  packages: {
+    '': {
+      dependencies: { 'expo-file-system': '57.0.6' },
+      devDependencies: { 'patch-package': '8.0.1' },
+    },
+    'node_modules/expo-file-system': { version: '57.0.6' },
+    'node_modules/patch-package': { version: '8.0.1' },
+  },
+};
+const redirectContainmentPatchSource = `
+diff --git a/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemLegacyModule.kt b/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemLegacyModule.kt
++          .followRedirects(false)
++          .followSslRedirects(false)
+diff --git a/node_modules/expo-file-system/android/build.gradle b/node_modules/expo-file-system/android/build.gradle
++  testImplementation 'com.squareup.okhttp3:mockwebserver:4.9.2'
+diff --git a/node_modules/expo-file-system/android/src/test/java/expo/modules/filesystem/legacy/FileSystemLegacyRedirectPolicyTest.kt b/node_modules/expo-file-system/android/src/test/java/expo/modules/filesystem/legacy/FileSystemLegacyRedirectPolicyTest.kt
++      val statuses = listOf(301, 302, 303, 307, 308)
++      assertEquals(0, trap.requestCount)
++  fun \`redirect policy preserves successful request progress\`() {
++  fun \`redirect policy preserves active call cancellation\`() {
+`;
+const redirectContainmentLegacyModuleSource = `
+val builder = OkHttpClient.Builder()
+  .followRedirects(false)
+  .followSslRedirects(false)
+client = builder.build()
+`;
+const redirectContainmentAppConfigSource = `
+const rnFetchEscapeHatch = process.env.EXPO_PUBLIC_USE_RN_FETCH?.trim().toLowerCase();
+if (rnFetchEscapeHatch === '1' || rnFetchEscapeHatch === 'true') throw new Error();
+`;
+
+function redirectContainmentInput(overrides = {}) {
+  return {
+    packageJson: structuredClone(redirectContainmentPackageJson),
+    packageLock: structuredClone(redirectContainmentPackageLock),
+    patchSource: redirectContainmentPatchSource,
+    legacyModuleSource: redirectContainmentLegacyModuleSource,
+    appConfigSource: redirectContainmentAppConfigSource,
+    ...overrides,
+  };
+}
+
+function writeRedirectContainmentFixture(root) {
+  const input = redirectContainmentInput();
+  mkdirSync(join(root, 'patches'), { recursive: true });
+  mkdirSync(
+    join(
+      root,
+      'node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy',
+    ),
+    { recursive: true },
+  );
+  writeFileSync(join(root, 'package.json'), JSON.stringify(input.packageJson));
+  writeFileSync(join(root, 'package-lock.json'), JSON.stringify(input.packageLock));
+  writeFileSync(join(root, 'app.config.ts'), input.appConfigSource);
+  writeFileSync(join(root, 'patches/expo-file-system+57.0.6.patch'), input.patchSource);
+  writeFileSync(
+    join(
+      root,
+      'node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemLegacyModule.kt',
+    ),
+    input.legacyModuleSource,
+  );
+}
+
 function cleanupDexFixture({ omitRequiredMarker, extraMarkers = [] } = {}) {
   return Buffer.from(
     [
@@ -183,6 +260,124 @@ function validate(overrides = {}) {
 test('accepts the expected manifest and headless entry order', () => {
   assert.deepEqual(REQUIRED_PERMISSIONS, intendedPermissions);
   assert.deepEqual(validate(), []);
+});
+
+test('accepts the pinned Expo file-system redirect containment chain', () => {
+  assert.deepEqual(validateExpoFileSystemRedirectContainment(redirectContainmentInput()), []);
+});
+
+test('rejects drift anywhere in the Expo file-system redirect containment chain', () => {
+  const mutations = [
+    {
+      label: 'dependency pin',
+      mutate(input) {
+        input.packageJson.dependencies['expo-file-system'] = '~57.0.6';
+      },
+      error: 'expo-file-system must be pinned exactly',
+    },
+    {
+      label: 'lockfile resolution',
+      mutate(input) {
+        input.packageLock.packages['node_modules/expo-file-system'].version = '57.0.7';
+      },
+      error: 'package-lock must resolve expo-file-system',
+    },
+    {
+      label: 'lockfile root dependency pin',
+      mutate(input) {
+        input.packageLock.packages[''].dependencies['expo-file-system'] = '~57.0.6';
+      },
+      error: 'package-lock root must pin expo-file-system exactly',
+    },
+    {
+      label: 'patch-package pin',
+      mutate(input) {
+        input.packageJson.devDependencies['patch-package'] = '^8.0.1';
+      },
+      error: 'patch-package must be pinned exactly',
+    },
+    {
+      label: 'lockfile patch-package resolution',
+      mutate(input) {
+        input.packageLock.packages['node_modules/patch-package'].version = '8.0.0';
+      },
+      error: 'package-lock must resolve patch-package',
+    },
+    {
+      label: 'postinstall hook',
+      mutate(input) {
+        input.packageJson.scripts.postinstall = 'node scripts/noop.mjs';
+      },
+      error: 'postinstall must run patch-package',
+    },
+    {
+      label: 'source-build selection',
+      mutate(input) {
+        input.packageJson.expo.autolinking.android.buildFromSource = [];
+      },
+      error: 'must build expo-file-system from source exactly once',
+    },
+    {
+      label: 'duplicate source-build selection',
+      mutate(input) {
+        input.packageJson.expo.autolinking.android.buildFromSource.push('expo-file-system');
+      },
+      error: 'must build expo-file-system from source exactly once',
+    },
+    {
+      label: 'runtime redirect flag',
+      mutate(input) {
+        input.legacyModuleSource = input.legacyModuleSource.replace(
+          '  .followRedirects(false)\n',
+          '',
+        );
+      },
+      error: 'must disable redirects exactly once',
+    },
+    {
+      label: 'runtime SSL redirect flag',
+      mutate(input) {
+        input.legacyModuleSource = input.legacyModuleSource.replace(
+          '  .followSslRedirects(false)\n',
+          '',
+        );
+      },
+      error: 'must disable SSL redirects exactly once',
+    },
+    {
+      label: 'package patch',
+      mutate(input) {
+        input.patchSource = input.patchSource.replace('+          .followRedirects(false)\n', '');
+      },
+      error: 'must carry both legacy OkHttp redirect flags',
+    },
+    {
+      label: 'native redirect trap proof',
+      mutate(input) {
+        input.patchSource = input.patchSource.replace(
+          '+      assertEquals(0, trap.requestCount)\n',
+          '',
+        );
+      },
+      error: 'must carry the redirect trap, progress, and cancellation native proof',
+    },
+    {
+      label: 'React Native fetch escape hatch',
+      mutate(input) {
+        input.appConfigSource = '';
+      },
+      error: 'must reject the EXPO_PUBLIC_USE_RN_FETCH',
+    },
+  ];
+
+  for (const { label, mutate, error } of mutations) {
+    const input = redirectContainmentInput();
+    mutate(input);
+    assert.ok(
+      validateExpoFileSystemRedirectContainment(input).some((message) => message.includes(error)),
+      `${label} must fail closed`,
+    );
+  }
 });
 
 test('validates the headless entry order without generated Android artifacts', () => {
@@ -472,6 +667,9 @@ function writeTestAab(
     communityWebViewMarker,
     legacyPublisherMarker,
     omitRequiredCleanupMarker,
+    absoluteUserPath,
+    sensitiveArchiveEntry,
+    sensitiveArchiveContents,
   } = {},
 ) {
   const staging = join(root, 'bundle-staging');
@@ -480,6 +678,7 @@ function writeTestAab(
   rmSync(absolutePath, { force: true });
   mkdirSync(join(staging, 'base', 'manifest'), { recursive: true });
   mkdirSync(join(staging, 'base', 'dex'), { recursive: true });
+  mkdirSync(join(staging, 'base', 'assets'), { recursive: true });
   writeFileSync(
     join(staging, 'base', 'manifest', 'AndroidManifest.xml'),
     encodeXmlDocument(manifestNode),
@@ -497,6 +696,19 @@ function writeTestAab(
       ],
     }),
   );
+  writeFileSync(
+    join(staging, 'base', 'assets', 'app.config'),
+    JSON.stringify({
+      android: {
+        googleServicesFile: absoluteUserPath ?? './.gator-release/google-services.json',
+      },
+    }),
+  );
+  if (sensitiveArchiveEntry) {
+    const sensitivePath = join(staging, sensitiveArchiveEntry);
+    mkdirSync(dirname(sensitivePath), { recursive: true });
+    writeFileSync(sensitivePath, sensitiveArchiveContents);
+  }
   if (includeForbiddenShareTarget) {
     mkdirSync(join(staging, 'base', 'res', 'xml'), { recursive: true });
     writeFileSync(
@@ -504,7 +716,7 @@ function writeTestAab(
       encodeXmlDocument(forbiddenShareTargetNode()),
     );
   }
-  const result = spawnSync('zip', ['-q', '-r', absolutePath, 'base'], {
+  const result = spawnSync('zip', ['-q', '-X', '-r', absolutePath, 'base'], {
     cwd: staging,
     encoding: 'utf8',
   });
@@ -525,7 +737,7 @@ test('artifact runner inspects both variants and the final release AAB contents'
 
   try {
     mkdirSync(join(root, 'artifacts'));
-    writeFileSync(join(root, 'package.json'), JSON.stringify({ main: 'index.js' }));
+    writeRedirectContainmentFixture(root);
     writeFileSync(join(root, 'index.js'), entrySource);
     writeFileSync(join(root, debugManifestPath), manifest);
     writeFileSync(
@@ -544,6 +756,46 @@ test('artifact runner inspects both variants and the final release AAB contents'
 
     writeTestAab(root, releaseBundlePath);
     assert.doesNotThrow(() => runAndroidBuildCheck(options));
+
+    const privateUsername = 'private-person';
+    const privateRemainder = 'private-checkout';
+    writeTestAab(root, releaseBundlePath, {
+      absoluteUserPath: `/Users/${privateUsername}/${privateRemainder}/google-services.json`,
+    });
+    assert.throws(
+      () => runAndroidBuildCheck(options),
+      (error) => {
+        assert.match(error.message, /base\/assets\/app\.config: absolute-user-directory/);
+        assert.equal(error.message.includes(privateUsername), false);
+        assert.equal(error.message.includes(privateRemainder), false);
+        return true;
+      },
+    );
+
+    const reviewedPath = 'base/lib/arm64-v8a/libfixture.so';
+    const reviewedContents = Buffer.from('reviewed upstream path /home/runner/work/fixture');
+    const reviewedException = {
+      path: reviewedPath,
+      rule: 'absolute-user-directory',
+      sha256: createHash('sha256').update(reviewedContents).digest('hex'),
+      review: 'example.invalid:fixture:1.0.0',
+    };
+    writeTestAab(root, releaseBundlePath, {
+      sensitiveArchiveEntry: reviewedPath,
+      sensitiveArchiveContents: reviewedContents,
+    });
+    assert.throws(
+      () =>
+        inspectPackagedAndroidBundle(join(root, releaseBundlePath), {
+          reviewedSensitiveMetadataExceptions: [],
+        }),
+      /absolute-user-directory/,
+    );
+    assert.doesNotThrow(() =>
+      inspectPackagedAndroidBundle(join(root, releaseBundlePath), {
+        reviewedSensitiveMetadataExceptions: [reviewedException],
+      }),
+    );
 
     writeTestAab(root, releaseBundlePath, {
       omitRequiredCleanupMarker: REQUIRED_PINNED_SHORTCUT_CLEANUP_DEX_MARKERS[0],

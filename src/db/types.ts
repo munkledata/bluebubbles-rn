@@ -35,3 +35,22 @@ export type DbRuntimeConcurrencyWaveRunner = (
   db: AppDatabase,
   options: DbRuntimeConcurrencyWaveOptions,
 ) => Promise<DbRuntimeConcurrencyWaveChecks>;
+
+/** Finite, privacy-safe results produced by the disposable BACKUP-02 native restore wave. */
+export interface DbBackupRestoreWaveChecks {
+  readonly plaintextNearLimit: boolean;
+  readonly bb2Envelope: boolean;
+  readonly nativeSeal: boolean;
+  readonly nativeOpen: boolean;
+  readonly lateFaultObserved: boolean;
+  readonly kvRolledBack: boolean;
+  readonly themesRolledBack: boolean;
+  readonly chatRolledBack: boolean;
+  readonly foldersRolledBack: boolean;
+  readonly tempTablesCleaned: boolean;
+  readonly retrySucceeded: boolean;
+  readonly successorWrite: boolean;
+}
+
+/** The service wave receives only the already-migrated disposable database. */
+export type DbBackupRestoreWaveRunner = (db: AppDatabase) => Promise<DbBackupRestoreWaveChecks>;

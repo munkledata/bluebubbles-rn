@@ -1,4 +1,6 @@
 import { useCallback, useState } from 'react';
+import { isAggregateRetractionTombstone } from '@core/messages/retraction';
+import { parseMessagePartTopology } from '@core/models';
 import { getDatabase } from '@db/database';
 import {
   getChatIdByGuid,
@@ -45,6 +47,10 @@ interface SettledMessageWindow {
   error: Error | null;
   messages: EnrichedMessage[] | null;
   requestKey: string;
+}
+
+function replyPreviewKey(guid: string, partIndex: number | null | undefined): string {
+  return JSON.stringify([guid, partIndex ?? null]);
 }
 
 function getMessageWindowRequestKey(
@@ -106,7 +112,9 @@ export function useMessages(
         // DB; listAttachmentsByMessageIds filters by `message_id IN`, so passing every id simply
         // returns nothing for text-only messages.
         const ids = msgs.map((m) => m.id);
-        const attByMsg = await listAttachmentsByMessageIds(db, ids);
+        const attByMsg = await listAttachmentsByMessageIds(db, ids, undefined, {
+          excludeRetractedAttachments: true,
+        });
         const guids = msgs.map((m) => m.guid);
         const reactionsByGuid = await listReactionsByMessageGuids(db, guids);
         // Stickers target a message the same way a reaction does, so they key off the same guid list.
@@ -116,29 +124,59 @@ export function useMessages(
         const stickersByGuid = await listStickersForTargets(db, guids);
 
         // Reply originals: dedupe the target guids, fetch each once.
-        const replyGuids = [
-          ...new Set(msgs.map((m) => m.threadOriginatorGuid).filter((g): g is string => !!g)),
-        ];
+        const replyTargets = new Map<string, { guid: string; partIndex: number | null }>();
+        for (const message of msgs) {
+          if (!message.threadOriginatorGuid) continue;
+          const target = {
+            guid: message.threadOriginatorGuid,
+            partIndex: message.threadOriginatorPart ?? null,
+          };
+          replyTargets.set(replyPreviewKey(target.guid, target.partIndex), target);
+        }
         const previews = new Map<string, MessagePreview>();
         await Promise.all(
-          replyGuids.map(async (g) => {
-            const p = await getMessagePreviewByGuid(db, g);
-            if (p) previews.set(g, p);
+          [...replyTargets].map(async ([key, target]) => {
+            const preview = await getMessagePreviewByGuid(db, target.guid, target.partIndex);
+            if (preview) previews.set(key, preview);
           }),
         );
 
         return {
           error: null,
           messages: reconcile(
-            msgs.map((m) => ({
-              ...m,
-              attachments: attByMsg.get(m.id) ?? [],
-              reactions: reactionsByGuid.get(m.guid) ?? [],
-              stickers: stickersByGuid.get(m.guid) ?? [],
-              replyPreview: m.threadOriginatorGuid
-                ? (previews.get(m.threadOriginatorGuid) ?? null)
-                : null,
-            })),
+            msgs.map((m) => {
+              const topology = parseMessagePartTopology(m.messagePartTopology);
+              const visibleParts =
+                m.retractionState === 'partial'
+                  ? new Set(topology?.currentParts.map((part) => part.index) ?? [])
+                  : null;
+              const aggregateRetracted = isAggregateRetractionTombstone(m);
+              const reactions = aggregateRetracted
+                ? []
+                : (reactionsByGuid.get(m.guid) ?? []).filter(
+                    (reaction) =>
+                      visibleParts == null ||
+                      (reaction.targetPart != null && visibleParts.has(reaction.targetPart)),
+                  );
+              const stickers = aggregateRetracted
+                ? []
+                : (stickersByGuid.get(m.guid) ?? []).filter(
+                    (sticker) =>
+                      visibleParts == null ||
+                      (sticker.targetPart != null && visibleParts.has(sticker.targetPart)),
+                  );
+              return {
+                ...m,
+                attachments: attByMsg.get(m.id) ?? [],
+                reactions,
+                stickers,
+                replyPreview: m.threadOriginatorGuid
+                  ? (previews.get(
+                      replyPreviewKey(m.threadOriginatorGuid, m.threadOriginatorPart),
+                    ) ?? null)
+                  : null,
+              };
+            }),
           ),
           requestKey,
         };

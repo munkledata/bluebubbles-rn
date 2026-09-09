@@ -105,7 +105,10 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
           <Text style={textStyle}>
             Attachments you save to Photos—and images automatically exported to Photos or the Gator
             album when that setting is enabled—are separate copies in Android’s shared media
-            storage. Other apps with media access can see them.
+            storage. Other apps with media access can see them. An image delivered while Gator is
+            closed or in the background may instead be downloaded only to Gator’s private cache.
+            That background attempt does not create or later retry the extra Photos or Gator album
+            copy, even when automatic export is enabled.
           </Text>
         </SettingsSection>
 

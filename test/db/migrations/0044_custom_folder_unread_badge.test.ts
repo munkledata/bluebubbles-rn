@@ -34,6 +34,8 @@ describe('migration 0044_custom_folder_unread_badge', () => {
       await expect(runMigrations(runner)).resolves.toEqual([
         MIGRATION_NAME,
         '0045_backup_export_indexes',
+        '0046_message_send_attempt_owner',
+        '0047_message_retraction_topology',
       ]);
       expect(
         raw

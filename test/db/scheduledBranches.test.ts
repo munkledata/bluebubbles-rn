@@ -32,6 +32,27 @@ const rawServerId = (raw: Database.Database, id: number): string | null =>
     }
   ).s;
 
+function insertHistoricalReplySchedule(
+  raw: Database.Database,
+  args: { chatGuid: string; text: string; scheduledFor: number; selectedMessageGuid: string },
+): number {
+  const inserted = raw
+    .prepare(
+      `INSERT INTO scheduled_messages(chat_guid, payload, scheduled_for, status)
+       VALUES (?, ?, ?, 'pending')`,
+    )
+    .run(
+      args.chatGuid,
+      JSON.stringify({
+        text: args.text,
+        selectedMessageGuid: args.selectedMessageGuid,
+        selectedMessagePartIndex: 0,
+      }),
+      args.scheduledFor,
+    );
+  return Number(inserted.lastInsertRowid);
+}
+
 describe('scheduled reads', () => {
   it('listScheduledByChat returns only that chat’s pending rows, soonest first', async () => {
     const { db } = await createTestDb();
@@ -43,9 +64,9 @@ describe('scheduled reads', () => {
   });
 
   it('getScheduledById returns null for a missing id and maps the payload for a real one', async () => {
-    const { db } = await createTestDb();
+    const { db, raw } = await createTestDb();
     expect(await getScheduledById(db, 999)).toBeNull();
-    const id = await insertScheduled(db, {
+    const id = insertHistoricalReplySchedule(raw, {
       chatGuid: 'cA',
       text: 'hey',
       scheduledFor: 50,
@@ -154,8 +175,8 @@ describe('reconcileServerScheduled', () => {
 
 describe('updateScheduled — status-guarded edit', () => {
   it('edits text + time on a pending row, preserving the reply target', async () => {
-    const { db } = await createTestDb();
-    const id = await insertScheduled(db, {
+    const { db, raw } = await createTestDb();
+    const id = insertHistoricalReplySchedule(raw, {
       chatGuid: 'cA',
       text: 'a',
       scheduledFor: 100,

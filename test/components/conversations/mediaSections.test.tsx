@@ -112,11 +112,11 @@ describe('MediaSections', () => {
     expect(screen.getByText('SHARED MEDIA')).toBeTruthy();
     expect(screen.getByText('Photos · 2')).toBeTruthy();
     expect(screen.getByText('Videos · 1')).toBeTruthy();
-    const thumbs = screen.getAllByRole('image');
+    const thumbs = screen.getAllByRole('imagebutton');
     expect(thumbs).toHaveLength(3);
-    fireEvent.press(thumbs[0]!);
+    fireEvent.press(screen.getByRole('imagebutton', { name: 'Shared photo 1 of 2' }));
     await waitFor(() => expect(onOpenMedia).toHaveBeenCalledWith('p-1'));
-    fireEvent.press(thumbs[2]!);
+    fireEvent.press(screen.getByRole('imagebutton', { name: 'Shared video 1 of 1' }));
     await waitFor(() => expect(onOpenMedia).toHaveBeenCalledWith('v-1'));
   });
 
@@ -134,7 +134,7 @@ describe('MediaSections', () => {
     );
     expect(screen.getByText('Documents')).toBeTruthy();
     expect(screen.getByText('Links')).toBeTruthy();
-    fireEvent.press(screen.getByText('https://example.com/a'));
+    fireEvent.press(screen.getByRole('link', { name: 'Shared link 1: https://example.com/a' }));
     await waitFor(() => expect(onOpenLink).toHaveBeenCalledTimes(1));
     expect(onOpenLink).toHaveBeenCalledWith('https://example.com/a');
   });
@@ -175,7 +175,11 @@ describe('MediaSections', () => {
       />,
     );
 
-    fireEvent.press(screen.getByText('https://override.example.invalid/private-path'));
+    fireEvent.press(
+      screen.getByRole('link', {
+        name: 'Shared link 1: https://override.example.invalid/private-path',
+      }),
+    );
     await waitFor(() => expect(onOpenLink).toHaveBeenCalledTimes(1));
     expect(onOpenLink).toHaveBeenCalledWith('https://override.example.invalid/private-path');
   });
@@ -269,7 +273,8 @@ describe('MediaSections', () => {
     );
 
     expect(mockProtectPath).toHaveBeenCalledWith('file:///cache/retiring.mp4');
-    const tile = screen.getByRole('image');
+    const tile = screen.getByRole('imagebutton', { name: 'Shared video 1 of 1' });
+    expect(tile.props.accessibilityState).toMatchObject({ disabled: true });
     fireEvent.press(tile);
     expect(onOpenMedia).not.toHaveBeenCalled();
   });
@@ -304,7 +309,7 @@ describe('MediaSections — fallback tile stays visible in every shipped preset'
         { preset },
       );
 
-      const tile = screen.getAllByRole('image')[0];
+      const tile = screen.getAllByRole('imagebutton')[0];
       const style = StyleSheet.flatten(tile!.props.style) as { backgroundColor?: string };
       expect(style.backgroundColor).toBe(tokens.secondaryBackground);
       // The actual regression: a tile the same colour as the page is an invisible tile.

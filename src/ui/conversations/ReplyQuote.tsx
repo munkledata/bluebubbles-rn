@@ -44,6 +44,7 @@ export function ReplyQuote({
     hasVisibleAttachments: preview.hasVisibleAttachments,
     attachmentDescription: preview.attachmentDescription,
     balloonBundleId: preview.balloonBundleId,
+    isRetracted: preview.isRetracted,
   });
 
   return (

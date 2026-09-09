@@ -1,7 +1,26 @@
 import { eq, inArray, sql } from 'drizzle-orm';
-import type { Attachment, Message } from '@core/models';
+import {
+  classifyMessageRetraction,
+  isExactMessagePartTopology,
+  MAX_RETRACTION_PART_INDEX,
+  type MessageRetractionClassification,
+  type MessageRetractionState,
+} from '@core/messages/retraction';
+import {
+  parseMessagePartTopology,
+  parseMessageSummaryInfo,
+  type Attachment,
+  type Message,
+} from '@core/models';
 import { plainTextFromAttributedBody } from '@core/richtext';
-import { chatHandles, chats, messageDeletionLedger, messages, outgoingQueue } from '../schema';
+import {
+  attachments as attachmentRows,
+  chatHandles,
+  chats,
+  messageDeletionLedger,
+  messages,
+  outgoingQueue,
+} from '../schema';
 import {
   runInTransactionContext,
   withDbTransaction,
@@ -13,6 +32,188 @@ import { dedupeBy } from './_shared';
 import { upsertAttachmentsWithinTransaction } from './attachments';
 import { clearSupersededTombstonesWithinTransaction } from './chats';
 import { handleMapKey } from './handles';
+
+type PersistedRetractionState = Exclude<MessageRetractionState, 'intact'>;
+
+interface IncomingRetractionProjection {
+  state: PersistedRetractionState | null;
+  classification: MessageRetractionClassification | null;
+  dateRetracted: number | null;
+  topologyText: string | null;
+  summaryText: string | null;
+}
+
+interface ExistingRetractionProjection {
+  retractionState: string | null;
+  dateRetracted: number | null;
+  messagePartTopology: string | null;
+  messageSummaryInfo: string | null;
+  pendingRetractionPartIndex: number | null;
+}
+
+const INVALID_TOPOLOGY_SENTINEL = JSON.stringify({
+  complete: false,
+  originalPartIndexes: [],
+  currentParts: [],
+  attachmentOwnership: [],
+});
+
+function retractedPartSet(parts: readonly number[] | null | undefined): Set<number> | null {
+  if (!parts?.length) return null;
+  const result = new Set<number>();
+  for (const part of parts) {
+    if (!Number.isSafeInteger(part) || part < 0 || part > MAX_RETRACTION_PART_INDEX) {
+      return null;
+    }
+    result.add(part);
+  }
+  return result;
+}
+
+function isSuperset(candidate: ReadonlySet<number>, prior: ReadonlySet<number>): boolean {
+  for (const part of prior) {
+    if (!candidate.has(part)) return false;
+  }
+  return true;
+}
+
+function shouldAcceptRetractionProjection(
+  state: PersistedRetractionState,
+  incomingParts: ReadonlySet<number> | null,
+  existing: ExistingRetractionProjection | undefined,
+): boolean {
+  if (!existing?.retractionState || existing.retractionState === 'intact') return true;
+  if (existing.retractionState === 'fully-retracted') return false;
+
+  const existingParts = retractedPartSet(
+    parseMessageSummaryInfo(existing.messageSummaryInfo)?.retractedParts,
+  );
+  if (existing.pendingRetractionPartIndex != null) {
+    // An optimistic local unsend owns this transition. Only exact server evidence that includes the
+    // requested part may reveal survivors and retire the pending fence.
+    return (
+      (state === 'partial' || state === 'fully-retracted') &&
+      incomingParts?.has(existing.pendingRetractionPartIndex) === true &&
+      (existingParts == null || isSuperset(incomingParts, existingParts))
+    );
+  }
+
+  if (state !== 'partial') return true;
+  // Partial is the only transition that can reveal content. It must monotonically include every
+  // part already known retracted; an unknown row with no such proof remains fail-closed.
+  return existingParts != null && isSuperset(incomingParts ?? new Set(), existingParts);
+}
+
+function laterRetractionDate(
+  existingDate: number | null | undefined,
+  incomingDate: number | null | undefined,
+): number | null {
+  const validIncoming =
+    incomingDate != null && Number.isSafeInteger(incomingDate) && incomingDate >= 0
+      ? incomingDate
+      : null;
+  if (existingDate == null) return validIncoming;
+  if (validIncoming == null) return existingDate;
+  return Math.max(existingDate, validIncoming);
+}
+
+function incomingRetractionProjection(
+  message: Message,
+  existing: ExistingRetractionProjection | undefined,
+): IncomingRetractionProjection {
+  const retractedParts = message.messageSummaryInfo?.retractedParts;
+  const hasRetractionSignal =
+    message.messageSummaryInfoInvalid === true ||
+    message.dateRetracted != null ||
+    (retractedParts?.length ?? 0) > 0;
+  if (!hasRetractionSignal) {
+    return {
+      state: null,
+      classification: null,
+      dateRetracted: null,
+      // Exact topology is useful before any retraction: replies, reactions and a later unsend all
+      // target the original Apple part index. Keep valid ordinary-message proof and edit history.
+      topologyText:
+        message.messagePartTopologyInvalid === true
+          ? INVALID_TOPOLOGY_SENTINEL
+          : !message.messagePartTopology
+            ? null
+            : JSON.stringify(message.messagePartTopology),
+      summaryText: message.messageSummaryInfo ? JSON.stringify(message.messageSummaryInfo) : null,
+    };
+  }
+
+  const classification =
+    message.messageSummaryInfoInvalid === true || message.messagePartTopologyInvalid === true
+      ? classifyMessageRetraction({
+          dateRetracted: message.dateRetracted,
+          retractedParts: 'invalid',
+        })
+      : classifyMessageRetraction({
+          dateRetracted: message.dateRetracted,
+          retractedParts,
+          topology: message.messagePartTopology,
+        });
+  const state: PersistedRetractionState =
+    classification.state === 'intact' ? 'unknown' : classification.state;
+  const incomingParts = retractedPartSet(retractedParts);
+  if (!shouldAcceptRetractionProjection(state, incomingParts, existing)) {
+    return {
+      state: null,
+      classification: null,
+      // Keep the fail-closed state/topology, but a newer server marker must still break the local
+      // optimistic revert CAS. Otherwise a lost HTTP response followed by a date-only echo could
+      // restore content the server already retracted.
+      dateRetracted: laterRetractionDate(existing?.dateRetracted, message.dateRetracted),
+      topologyText: null,
+      summaryText: null,
+    };
+  }
+
+  const topologyText =
+    state === 'unknown' && existing?.messagePartTopology
+      ? existing.messagePartTopology
+      : message.messagePartTopologyInvalid === true
+        ? INVALID_TOPOLOGY_SENTINEL
+        : message.messagePartTopology
+          ? JSON.stringify(message.messagePartTopology)
+          : null;
+
+  const existingParts = retractedPartSet(
+    parseMessageSummaryInfo(existing?.messageSummaryInfo)?.retractedParts,
+  );
+  const safeRetractedParts = new Set(incomingParts ?? []);
+  if (state === 'unknown') {
+    for (const part of existingParts ?? []) safeRetractedParts.add(part);
+  }
+  let summaryText: string | null = null;
+  if (message.messageSummaryInfo || safeRetractedParts.size > 0) {
+    const editedParts =
+      state === 'partial' && classification?.topologyComplete
+        ? Object.fromEntries(
+            Object.entries(message.messageSummaryInfo?.editedParts ?? {}).filter(([part]) => {
+              const partIndex = Number(part);
+              return (
+                Number.isSafeInteger(partIndex) &&
+                classification.provenVisibleTextPartIndexes.has(partIndex)
+              );
+            }),
+          )
+        : {};
+    summaryText = JSON.stringify({
+      ...(Object.keys(editedParts).length > 0 ? { editedParts } : {}),
+      ...(safeRetractedParts.size > 0 ? { retractedParts: [...safeRetractedParts] } : {}),
+    });
+  }
+
+  return {
+    state,
+    classification,
+    dateRetracted: laterRetractionDate(existing?.dateRetracted, message.dateRetracted),
+    topologyText,
+    summaryText,
+  };
+}
 
 /**
  * Transaction-only message ingestion body. `resolveChatId` maps a message to its local chat id;
@@ -45,6 +246,11 @@ export function upsertMessagesWithinTransaction(
         guid: messages.guid,
         chatId: messages.chatId,
         dateCreated: messages.dateCreated,
+        retractionState: messages.retractionState,
+        dateRetracted: messages.dateRetracted,
+        messagePartTopology: messages.messagePartTopology,
+        messageSummaryInfo: messages.messageSummaryInfo,
+        pendingRetractionPartIndex: messages.pendingRetractionPartIndex,
       })
       .from(messages)
       .where(
@@ -55,6 +261,13 @@ export function upsertMessagesWithinTransaction(
       );
     const movedLocations = existingLocations.filter(
       (row) => destinationChatByGuid.get(row.guid) !== row.chatId,
+    );
+    const existingLocationByGuid = new Map(existingLocations.map((row) => [row.guid, row]));
+    const retractionByGuid = new Map(
+      withChat.map(({ m }) => [
+        m.guid,
+        incomingRetractionProjection(m, existingLocationByGuid.get(m.guid)),
+      ]),
     );
 
     // Read retained deletion knowledge BEFORE the insert so an out-of-order/backfilled message is
@@ -75,15 +288,27 @@ export function upsertMessagesWithinTransaction(
       .insert(messages)
       .values(
         withChat.map(({ m, chatId }) => {
+          const retraction = retractionByGuid.get(m.guid)!;
           // Edited and SMS messages arrive with an empty `text` column — their body lives in the
           // attributedBody typedstream. Decode it into `text` so the message is full-text searchable
           // (FTS indexes only `text`) and previews/replies show the words. The server-side decode now
           // populates `m.text` directly; this is the local fallback for anything it didn't.
-          const attributedBody = m.attributedBody ? JSON.stringify(m.attributedBody) : null;
-          const text =
+          const decodedAttributedBody = m.attributedBody ? JSON.stringify(m.attributedBody) : null;
+          const decodedText =
             m.text && m.text.length > 0
               ? m.text
-              : plainTextFromAttributedBody(attributedBody) || null;
+              : plainTextFromAttributedBody(decodedAttributedBody) || null;
+          const aggregateHidden =
+            retraction.state === 'fully-retracted' || retraction.state === 'unknown';
+          // Retraction topology proves part identity, not that a legacy/malicious rich body was
+          // sanitized. The capable server supplies only its rebuilt top-level text for a partial.
+          const attributedBody = retraction.state ? null : decodedAttributedBody;
+          const text =
+            aggregateHidden || (retraction.state === 'partial' && !m.text?.length)
+              ? null
+              : retraction.state === 'partial'
+                ? m.text
+                : decodedText;
           return {
             guid: m.guid,
             originalRowId: m.originalROWID ?? null,
@@ -92,14 +317,17 @@ export function upsertMessagesWithinTransaction(
               ? (handleIdByKey.get(handleMapKey(m.handle)) ?? null)
               : null,
             text,
-            subject: m.subject ?? null,
+            subject: retraction.state ? null : (m.subject ?? null),
             attributedBody,
             isFromMe: m.isFromMe ?? false,
             dateCreated: m.dateCreated ?? null,
             dateRead: m.dateRead ?? null,
             dateDelivered: m.dateDelivered ?? null,
             dateEdited: m.dateEdited ?? null,
-            dateRetracted: m.dateRetracted ?? null,
+            dateRetracted: retraction.dateRetracted,
+            retractionState: retraction.state,
+            messagePartTopology: retraction.topologyText,
+            pendingRetractionPartIndex: null,
             dateDeleted: deletionByGuid.get(m.guid) ?? null,
             // The server omits `hasAttachments`; infer it from the hydrated attachments array so the
             // flag stays accurate for reply-quote previews (the image read path no longer relies on it).
@@ -138,11 +366,15 @@ export function upsertMessagesWithinTransaction(
             // Apple edit history / unsent parts, stored as a JSON TEXT blob (parsed shape). NULL when
             // the message isn't edited/retracted (the server omits the key), so the COALESCE-preserve
             // on conflict (below) can't wipe a previously-stored history.
-            messageSummaryInfo: m.messageSummaryInfo ? JSON.stringify(m.messageSummaryInfo) : null,
+            messageSummaryInfo: retraction.summaryText,
             // Apple rich-link preview (URL balloons), stored as JSON TEXT. NULL when the server
             // omits it (non-URL message, placeholder, old server) so the COALESCE-preserve on
             // conflict (below) can't wipe previously-stored metadata.
-            payloadData: m.payloadData ? JSON.stringify(m.payloadData) : null,
+            payloadData: retraction.state
+              ? null
+              : m.payloadData
+                ? JSON.stringify(m.payloadData)
+                : null,
             // Messages extension identity (Digital Touch, handwriting, third-party apps). NULL
             // when omitted so a lean receipt/re-sync cannot wipe a value learned earlier.
             balloonBundleId: m.balloonBundleId ?? null,
@@ -161,13 +393,28 @@ export function upsertMessagesWithinTransaction(
           // attributedBody fallback above), so `excluded.text` carries the new body on a re-sync.
           // COALESCE-preserve so a later event that legitimately omits text (e.g. a delivery/read
           // receipt) can't blank out a good body — text is never intentionally cleared to empty.
-          text: sql`COALESCE(NULLIF(excluded.text, ''), ${messages.text})`,
+          text: sql`CASE
+          WHEN excluded.retraction_state IN ('fully-retracted', 'unknown') THEN NULL
+          WHEN excluded.retraction_state = 'partial' THEN excluded.text
+          WHEN ${messages.retractionState} IS NOT NULL THEN ${messages.text}
+          ELSE COALESCE(NULLIF(excluded.text, ''), ${messages.text})
+        END`,
+          // Subjects do not carry independent part identity. A partial/full/unknown retraction must
+          // therefore clear the old subject rather than risk retaining text from the removed part.
+          subject: sql`CASE
+          WHEN excluded.retraction_state IS NOT NULL THEN NULL
+          WHEN ${messages.retractionState} IS NOT NULL THEN ${messages.subject}
+          ELSE COALESCE(excluded.subject, ${messages.subject})
+        END`,
           // MessageBubble prefers the rich body over `text`, so an incoming rich replacement always
           // wins. A newer dated plain-text edit must instead CLEAR the old rich body or that stale
           // wording keeps rendering over the new searchable text. Preserve on every other NULL:
           // lean FCM duplicates and receipt-shaped updates use attributedBody:null to mean "not
           // included", and an equal edit timestamp cannot prove that the plain projection is newer.
           attributedBody: sql`CASE
+          WHEN excluded.retraction_state IN ('fully-retracted', 'unknown') THEN NULL
+          WHEN excluded.retraction_state = 'partial' THEN NULL
+          WHEN ${messages.retractionState} IS NOT NULL THEN ${messages.attributedBody}
           WHEN excluded.attributed_body IS NOT NULL THEN excluded.attributed_body
           WHEN NULLIF(excluded.text, '') IS NOT NULL
             AND excluded.date_edited IS NOT NULL
@@ -203,6 +450,20 @@ export function upsertMessagesWithinTransaction(
           dateDelivered: sql`COALESCE(excluded.date_delivered, ${messages.dateDelivered})`,
           dateEdited: sql`COALESCE(excluded.date_edited, ${messages.dateEdited})`,
           dateRetracted: sql`COALESCE(excluded.date_retracted, ${messages.dateRetracted})`,
+          retractionState: sql`COALESCE(excluded.retraction_state, ${messages.retractionState})`,
+          // Only exact server evidence can retire the optimistic part fence. Unknown or stale
+          // projections keep it so a late page cannot reveal the part the user just retracted.
+          pendingRetractionPartIndex: sql`CASE
+          WHEN excluded.retraction_state IN ('partial', 'fully-retracted') THEN NULL
+          ELSE ${messages.pendingRetractionPartIndex}
+        END`,
+          // A retraction result owns its exact topology snapshot, including NULL on a fail-closed
+          // date-only update. Outside that path, only an explicitly supplied topology refreshes it.
+          messagePartTopology: sql`CASE
+          WHEN excluded.retraction_state IS NOT NULL THEN excluded.message_part_topology
+          WHEN ${messages.retractionState} IS NOT NULL THEN ${messages.messagePartTopology}
+          ELSE COALESCE(excluded.message_part_topology, ${messages.messagePartTopology})
+        END`,
           // Deletion is local durable knowledge, not a MessageV1 field. `excluded.date_deleted`
           // comes only from message_deletion_ledger above; keep the later timestamp if an existing
           // tombstone and retained marker differ after an upgrade or out-of-order repeat.
@@ -250,11 +511,19 @@ export function upsertMessagesWithinTransaction(
           // overwrite-WHEN-PRESENT (COALESCE) captures it; and a later flagless re-upsert (a
           // delivery/read receipt, or a live event whose leaner projection omits the blob) then can't
           // wipe the stored timeline. Same reasoning as the group-event metadata above.
-          messageSummaryInfo: sql`COALESCE(excluded.message_summary_info, ${messages.messageSummaryInfo})`,
+          messageSummaryInfo: sql`CASE
+          WHEN excluded.retraction_state IS NOT NULL THEN excluded.message_summary_info
+          WHEN ${messages.retractionState} IS NOT NULL THEN ${messages.messageSummaryInfo}
+          ELSE COALESCE(excluded.message_summary_info, ${messages.messageSummaryInfo})
+        END`,
           // Rich-link metadata: COALESCE-preserve for the same reason as messageSummaryInfo —
           // absence never means "the preview was removed" (a delivery/read-receipt re-upsert or a
           // leaner live projection just omits the blob), so overwrite-when-present only.
-          payloadData: sql`COALESCE(excluded.payload_data, ${messages.payloadData})`,
+          payloadData: sql`CASE
+          WHEN excluded.retraction_state IS NOT NULL THEN NULL
+          WHEN ${messages.retractionState} IS NOT NULL THEN ${messages.payloadData}
+          ELSE COALESCE(excluded.payload_data, ${messages.payloadData})
+        END`,
           // The extension identity is immutable for a message. Preserve it when a receipt-shaped
           // update omits the field, while allowing a later hydrated sync to fill an earlier NULL.
           balloonBundleId: sql`COALESCE(excluded.balloon_bundle_id, ${messages.balloonBundleId})`,
@@ -349,6 +618,62 @@ export function upsertMessagesWithinTransaction(
       }
     }
     await upsertAttachmentsWithinTransaction(context, attRows);
+
+    // Retraction visibility is committed with the message body and attachment upsert. Start every
+    // classified aggregate hidden, then reveal only GUIDs whose exact original owner survives a
+    // complete topology. Stale attachment rows omitted by the latest payload therefore fail closed.
+    for (const { m } of withChat) {
+      const messageId = map.get(m.guid);
+      const retraction = retractionByGuid.get(m.guid);
+      const existing = existingLocationByGuid.get(m.guid);
+      const durableState = retraction?.state ?? existing?.retractionState;
+      if (messageId == null) continue;
+
+      const ownership = new Map<string, number>();
+      const durableTopologyText =
+        retraction?.state != null
+          ? retraction.topologyText
+          : existing?.retractionState != null
+            ? existing.messagePartTopology
+            : (retraction?.topologyText ?? existing?.messagePartTopology);
+      const topology = parseMessagePartTopology(durableTopologyText);
+      const exactTopology = isExactMessagePartTopology(topology) ? topology : null;
+      if (exactTopology) {
+        for (const entry of exactTopology.attachmentOwnership) {
+          ownership.set(entry.attachmentGuid, entry.partIndex);
+        }
+      }
+      const ownerCases = [...ownership].map(
+        ([attachmentGuid, partIndex]) => sql`WHEN ${attachmentGuid} THEN ${partIndex}`,
+      );
+      const currentAttachmentParts = new Set(
+        exactTopology?.currentParts
+          .filter((part) => part.kind === 'attachment')
+          .map((part) => part.index) ?? [],
+      );
+      const visibleGuids = [...ownership]
+        .filter(([, partIndex]) => currentAttachmentParts.has(partIndex))
+        .map(([guid]) => guid);
+      const messagePartIndex =
+        ownerCases.length > 0
+          ? sql`CASE ${attachmentRows.guid} ${sql.join(ownerCases, sql` `)} ELSE NULL END`
+          : sql`NULL`;
+      const isRetracted =
+        durableState === 'partial' && visibleGuids.length > 0
+          ? sql`CASE WHEN ${attachmentRows.guid} IN (${sql.join(
+              visibleGuids.map((guid) => sql`${guid}`),
+              sql`, `,
+            )}) THEN 0 ELSE 1 END`
+          : durableState === 'partial' ||
+              durableState === 'fully-retracted' ||
+              durableState === 'unknown'
+            ? sql`1`
+            : sql`0`;
+      await db
+        .update(attachmentRows)
+        .set({ messagePartIndex, isRetracted })
+        .where(eq(attachmentRows.messageId, messageId));
+    }
 
     // Refresh denormalized latest_message_date for touched chats. Exclude DELETED (tombstoned) rows
     // from the MAX so a re-sync of a still-in-Recently-Deleted row can't re-inflate the chat's inbox
@@ -587,6 +912,10 @@ export async function applyLocalEdit(
 export interface LocalUnsendSnapshot {
   /** Exact stored marker to restore if the server does not accept this unsend. */
   dateRetracted: number | null;
+  /** Exact durable classifier state paired with the marker. */
+  retractionState: string | null;
+  /** Exact predecessor fence, restored if this optimistic request fails. */
+  pendingRetractionPartIndex: number | null;
   chatGuid: string | null;
 }
 
@@ -602,14 +931,27 @@ export function applyLocalUnsendWithinTransaction(
   context: DbTransactionContext,
   guid: string,
   now: number,
+  partIndex: number = 0,
 ): Promise<LocalUnsendSnapshot | null> {
   return runInTransactionContext(context, async (db) => {
+    if (
+      !Number.isSafeInteger(partIndex) ||
+      partIndex < 0 ||
+      partIndex > MAX_RETRACTION_PART_INDEX
+    ) {
+      throw new RangeError(`Invalid retraction part index: ${String(partIndex)}`);
+    }
     const rows = await db.all<{
       id: number;
       dateRetracted: number | null;
+      retractionState: string | null;
+      pendingRetractionPartIndex: number | null;
       chatGuid: string | null;
     }>(sql`
-      SELECT m.id AS id, m.date_retracted AS dateRetracted, c.guid AS chatGuid
+      SELECT m.id AS id, m.date_retracted AS dateRetracted,
+             m.retraction_state AS retractionState,
+             m.pending_retraction_part_index AS pendingRetractionPartIndex,
+             c.guid AS chatGuid
         FROM messages m
         LEFT JOIN chats c ON c.id = m.chat_id
        WHERE m.guid = ${guid}
@@ -617,10 +959,22 @@ export function applyLocalUnsendWithinTransaction(
     `);
     const previous = rows[0];
     if (!previous) return null;
+    // One nullable fence can safely represent only one accepted request awaiting its server echo.
+    // Do not replace it with a second target: a B-only echo could otherwise reveal pending part A.
+    if (previous.pendingRetractionPartIndex != null) return null;
 
-    await db.update(messages).set({ dateRetracted: now }).where(eq(messages.id, previous.id));
+    await db
+      .update(messages)
+      .set({
+        dateRetracted: now,
+        retractionState: 'unknown',
+        pendingRetractionPartIndex: partIndex,
+      })
+      .where(eq(messages.id, previous.id));
     return {
       dateRetracted: previous.dateRetracted,
+      retractionState: previous.retractionState,
+      pendingRetractionPartIndex: previous.pendingRetractionPartIndex,
       chatGuid: previous.chatGuid,
     };
   });
@@ -631,8 +985,11 @@ export async function applyLocalUnsend(
   db: AppDatabase,
   guid: string,
   now: number,
+  partIndex: number = 0,
 ): Promise<LocalUnsendSnapshot | null> {
-  return withDbTransaction(db, (context) => applyLocalUnsendWithinTransaction(context, guid, now));
+  return withDbTransaction(db, (context) =>
+    applyLocalUnsendWithinTransaction(context, guid, now, partIndex),
+  );
 }
 
 /**
@@ -726,13 +1083,27 @@ export function revertLocalUnsendWithinTransaction(
   guid: string,
   appliedAt: number,
   previousDateRetracted?: number | null,
+  previousRetractionState?: string | null,
+  previousPendingRetractionPartIndex?: number | null,
+  expectedAppliedPartIndex?: number,
 ): Promise<boolean> {
   return runInTransactionContext(context, async (db) => {
     // `undefined` is the legacy three-argument call; a production snapshot is always number|null.
     const restoreDateRetracted = previousDateRetracted === undefined ? null : previousDateRetracted;
+    const restoreRetractionState = previousRetractionState ?? null;
+    const restorePendingRetractionPartIndex = previousPendingRetractionPartIndex ?? null;
+    const enforceAppliedPartIndex = expectedAppliedPartIndex === undefined ? 0 : 1;
     const rows = await db.all<{ id: number }>(
-      sql`UPDATE messages SET date_retracted = ${restoreDateRetracted}
+      sql`UPDATE messages
+             SET date_retracted = ${restoreDateRetracted},
+                 retraction_state = ${restoreRetractionState},
+                 pending_retraction_part_index = ${restorePendingRetractionPartIndex}
           WHERE guid = ${guid} AND date_retracted = ${appliedAt}
+            AND retraction_state = 'unknown'
+            AND (
+              ${enforceAppliedPartIndex} = 0
+              OR pending_retraction_part_index = ${expectedAppliedPartIndex ?? null}
+            )
           RETURNING id`,
     );
     return rows.length > 0;
@@ -745,9 +1116,20 @@ export async function revertLocalUnsend(
   guid: string,
   appliedAt: number,
   previousDateRetracted?: number | null,
+  previousRetractionState?: string | null,
+  previousPendingRetractionPartIndex?: number | null,
+  expectedAppliedPartIndex?: number,
 ): Promise<boolean> {
   return withDbTransaction(db, (context) =>
-    revertLocalUnsendWithinTransaction(context, guid, appliedAt, previousDateRetracted),
+    revertLocalUnsendWithinTransaction(
+      context,
+      guid,
+      appliedAt,
+      previousDateRetracted,
+      previousRetractionState,
+      previousPendingRetractionPartIndex,
+      expectedAppliedPartIndex,
+    ),
   );
 }
 

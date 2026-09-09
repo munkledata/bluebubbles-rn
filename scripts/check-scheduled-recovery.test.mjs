@@ -13,14 +13,38 @@ import {
 } from './check-scheduled-recovery.mjs';
 
 const validSource = `
-  export async function runDueScheduled(db, http, now, sender, accountScope, maxRows) {
+  export async function runDueScheduled(db, http, now, sender, accountScope, maxRows, captureCapabilitySource?) {
     assertScheduledScope(accountScope);
     await ensureScheduledRecovery(db, accountScope, maxRows);
     assertScheduledScope(accountScope);
     const commitGuard = accountScope ? () => accountScope.isCurrent() : undefined;
     const due = await listDueScheduled(db, now, maxRows, true);
     for (const candidate of due) {
-      const m = await claimDueScheduled(db, candidate.id, now, commitGuard);
+      let m;
+      const capabilitySource = captureCapabilitySource?.();
+      let serverAuthorization = targetAuthorizationForSource(capabilitySource, accountScope);
+      try {
+        m = await claimDueScheduled(
+          db,
+          candidate.id,
+          now,
+          messageTargetCommitGuard(commitGuard, serverAuthorization),
+          serverAuthorization,
+        );
+      } catch (error) {
+        const capability = await resolveRcsAttemptOwnership();
+        serverAuthorization = messageTargetServerAuthorization(
+          capability.serverInfo,
+          () => capabilitySource?.isCurrent() ?? true,
+        );
+        m = await claimDueScheduled(
+          db,
+          candidate.id,
+          now,
+          messageTargetCommitGuard(commitGuard, serverAuthorization),
+          serverAuthorization,
+        );
+      }
       if (!m) continue;
       const recurrence = asRecurrence(m.recurrence);
       const transition = recurrence
@@ -46,6 +70,8 @@ const validSource = `
           Date.now(),
           recordAtomicHandover,
           { scheduledId: m.id, transition, commitGuard },
+          undefined,
+          captureCapabilitySource?.(),
         );
       }
     }
@@ -54,36 +80,99 @@ const validSource = `
 `;
 
 const validSendServiceSource = `
-  export async function sendTextMessage(db, http, args, now, onQueued, scheduledHandover, ordinaryCommitGuard?) {
-    const outgoing = { text: args.text };
+  export async function sendTextMessage(db, http, args, now, onQueued, scheduledHandover, ordinaryCommitGuard?, capabilitySource?) {
+    const targetPart = explicitMessageTargetPart(args.selectedMessageGuid, args.partIndex);
+    const target = targetPart
+      ? { chatGuid: args.chatGuid, messageGuid: targetPart.messageGuid, partIndex: targetPart.partIndex }
+      : null;
+    if (target && isRcsChatGuid(args.chatGuid)) {
+      throw new Error('This server cannot send an RCS threaded reply.');
+    }
+    const tempGuid = generateTempGuid();
     const effectiveCommitGuard = scheduledHandover?.commitGuard ?? ordinaryCommitGuard;
-    if (scheduledHandover) {
-      await handoverScheduledTextToOutgoing(
+    const transport = pinSendTransport(http, effectiveCommitGuard);
+    const capability = await resolveRcsAttemptOwnership(
+      transport.http,
+      args.chatGuid,
+      transport.admissionGuard,
+      capabilitySource,
+      { requireServerInfo: target != null },
+    );
+    const authorizedTarget = target
+      ? {
+          ...target,
+          serverAuthorization: messageTargetServerAuthorization(
+            capability.serverInfo,
+            transport.admissionGuard,
+          ),
+        }
+      : null;
+    const targetCommitGuard = messageTargetCommitGuard(
+      effectiveCommitGuard,
+      authorizedTarget?.serverAuthorization,
+    );
+    const outgoing = {
+      text: args.text,
+      selectedMessageGuid: target?.messageGuid,
+      partIndex: target?.partIndex,
+      attemptAware: capability.attemptAware,
+    };
+    const { attemptOwnerToken } = scheduledHandover
+      ? await handoverScheduledTextToOutgoing(
         db,
         {
           scheduledId: scheduledHandover.scheduledId,
           transition: scheduledHandover.transition,
           outgoing,
         },
-        scheduledHandover.commitGuard,
-      );
-    } else {
-      await withDbTransaction(
+        transport.admissionGuard,
+        authorizedTarget?.serverAuthorization,
+      )
+      : await withDbTransaction(
         db,
-        (context) => insertOutgoingTextWithinTransaction(context, outgoing),
-        effectiveCommitGuard,
+        async (context) => {
+          const resolvedTarget = authorizedTarget
+            ? await resolveMessageTargetWithinTransaction(context, authorizedTarget)
+            : null;
+          if (authorizedTarget && !resolvedTarget) throw new MessageTargetUnavailableError();
+          return insertOutgoingTextWithinTransaction(context, {
+            ...outgoing,
+            selectedMessageGuid: resolvedTarget?.messageGuid,
+            partIndex: resolvedTarget?.partIndex,
+            threadOriginatorGuid: resolvedTarget?.messageGuid,
+          });
+        },
+        transport.admissionGuard,
       );
-    }
-    await onQueued?.();
+    await onQueued?.(tempGuid);
     if (effectiveCommitGuard && !effectiveCommitGuard()) {
       throw new DbCommitGuardRejectedError();
     }
     try {
-      const server = await sendText(http, args);
-      await reconcileSendOutcome(db, tempGuid, server, now, effectiveCommitGuard);
+      const finalTarget = authorizedTarget
+        ? await resolveMessageTarget(db, authorizedTarget, targetCommitGuard)
+        : null;
+      if (authorizedTarget && !finalTarget) {
+        await retireUnavailableMessageTarget(db, tempGuid, targetCommitGuard);
+        return { tempGuid };
+      }
+      transport.assertNetworkCurrent();
+      const method = chooseSendMethod(false, capability.serverInfo?.private_api === true);
+      const server = await sendText(transport.http, {
+        ...args,
+        clientAttemptGeneration: attemptOwnerToken?.generation,
+        selectedMessageGuid: finalTarget?.messageGuid,
+        partIndex: finalTarget?.partIndex,
+        method,
+      });
+      await reconcileSendOutcome(db, tempGuid, server, now, effectiveCommitGuard, {
+        attemptOwnerToken: attemptOwnerToken ?? undefined,
+      });
     } catch (e) {
       if (e instanceof DbCommitGuardRejectedError) throw e;
-      await handleSendFailure(db, tempGuid, e, 'send', args.chatGuid, undefined, effectiveCommitGuard);
+      await handleSendFailure(db, tempGuid, e, 'send', args.chatGuid, undefined, effectiveCommitGuard, {
+        attemptOwnerToken: attemptOwnerToken ?? undefined,
+      });
     }
   }
 `;
@@ -126,6 +215,12 @@ const expectedFindings = [
     target: 'src/db/repositories/scheduled.ts#claimDueScheduled',
   },
   {
+    path: 'src/services/send/scheduleService.ts',
+    symbol: 'runDueScheduled',
+    operation: 'mutator-call',
+    target: 'src/db/repositories/scheduled.ts#claimDueScheduled',
+  },
+  {
     path: 'src/services/send/sendService.ts',
     symbol: 'sendTextMessage',
     operation: 'mutator-call',
@@ -144,6 +239,29 @@ test('accepts one early, unconditional recovery barrier and the reviewed product
   assert.deepEqual(scheduledHandoffSourceErrors(validSendServiceSource), []);
   assert.deepEqual(scheduledRecoveryCallGraphErrors(expectedFindings), []);
   assert.deepEqual(scheduledRunnerUsageErrors(validRunnerSources), []);
+});
+
+test('rejects a removed, weakened, or post-admission RCS threaded-target barrier', () => {
+  const barrier = `    if (target && isRcsChatGuid(args.chatGuid)) {
+      throw new Error('This server cannot send an RCS threaded reply.');
+    }
+`;
+  const removed = replaceOnce(validSendServiceSource, barrier, '');
+  assert.match(scheduledHandoffSourceErrors(removed).join('\n'), /RCS threaded target/);
+
+  const weakened = replaceOnce(
+    validSendServiceSource,
+    'isRcsChatGuid(args.chatGuid)',
+    'isRcsChatGuid(args.selectedMessageGuid)',
+  );
+  assert.match(scheduledHandoffSourceErrors(weakened).join('\n'), /RCS threaded target/);
+
+  const postAdmission = replaceOnce(
+    replaceOnce(validSendServiceSource, barrier, ''),
+    '    await onQueued?.(tempGuid);',
+    `${barrier}    await onQueued?.(tempGuid);`,
+  );
+  assert.match(scheduledHandoffSourceErrors(postAdmission).join('\n'), /RCS threaded target/);
 });
 
 test('rejects a removed recovery barrier', () => {
@@ -171,11 +289,11 @@ test('rejects recovery moved after due-list and claim work', () => {
   const delayed = validSource
     .replace('    await ensureScheduledRecovery(db, accountScope, maxRows);\n', '')
     .replace(
-      '      const m = await claimDueScheduled(db, candidate.id, now, commitGuard);',
-      '      const m = await claimDueScheduled(db, candidate.id, now, commitGuard);\n      await ensureScheduledRecovery(db, accountScope, maxRows);',
+      '    const due = await listDueScheduled(db, now, maxRows, true);',
+      '    const due = await listDueScheduled(db, now, maxRows, true);\n    await ensureScheduledRecovery(db, accountScope, maxRows);',
     );
   const errors = scheduledRecoverySourceErrors(delayed).join('\n');
-  assert.match(errors, /unconditional top-level/);
+  assert.match(errors, /only the initial account-scope assertion/);
   assert.match(errors, /before due-list or claim/);
 });
 
@@ -197,8 +315,8 @@ test('rejects extra, aliased, or escaped reset ownership', () => {
   assert.match(scheduledRecoveryCallGraphErrors(escaped).join('\n'), /aliases are forbidden/);
 });
 
-test('rejects a second production claim owner or a missing atomic handoff owner', () => {
-  const secondClaim = [
+test('rejects an extra production claim owner or a missing atomic handoff owner', () => {
+  const extraClaim = [
     ...expectedFindings,
     {
       path: 'src/services/send/other.ts',
@@ -207,14 +325,14 @@ test('rejects a second production claim owner or a missing atomic handoff owner'
       target: 'src/db/repositories/scheduled.ts#claimDueScheduled',
     },
   ];
-  assert.match(scheduledRecoveryCallGraphErrors(secondClaim).join('\n'), /exactly one/);
+  assert.match(scheduledRecoveryCallGraphErrors(extraClaim).join('\n'), /exactly 2/);
   assert.match(
-    scheduledRecoveryCallGraphErrors(expectedFindings.slice(0, 2)).join('\n'),
+    scheduledRecoveryCallGraphErrors(expectedFindings.slice(0, 3)).join('\n'),
     /handoverScheduledTextToOutgoing.*found 0/,
   );
 
   const oldClaim = expectedFindings.map((finding, index) =>
-    index === 1
+    index === 1 || index === 2
       ? { ...finding, target: 'src/db/repositories/scheduled.ts#claimScheduled' }
       : finding,
   );
@@ -241,41 +359,46 @@ test('rejects every production use or escape of the older broad claim helper', (
 
 test('accepts a renamed authoritative claim-result variable', () => {
   const renamed = validSource
-    .replace(
-      'const m = await claimDueScheduled(db, candidate.id, now, commitGuard);',
-      'const claimedRow = await claimDueScheduled(db, candidate.id, now, commitGuard);',
-    )
+    .replace('      let m;', '      let claimedRow;')
+    .replaceAll('m = await claimDueScheduled(', 'claimedRow = await claimDueScheduled(')
     .replaceAll('m.', 'claimedRow.')
     .replace('if (!m)', 'if (!claimedRow)');
   assert.deepEqual(scheduledRecoverySourceErrors(renamed), []);
 });
 
-test('accepts a directly assigned claimed row when claim revocation is translated in a try block', () => {
-  const guardedClaim = validSource.replace(
-    '      const m = await claimDueScheduled(db, candidate.id, now, commitGuard);',
-    `      let m;
-      try {
-        m = await claimDueScheduled(db, candidate.id, now, commitGuard);
-      } catch (error) {
-        assertScheduledScope(accountScope);
-        throw error;
-      }`,
-  );
-  assert.deepEqual(scheduledRecoverySourceErrors(guardedClaim), []);
+test('accepts the two direct claimed-row assignments in the guarded retry flow', () => {
+  assert.deepEqual(scheduledRecoverySourceErrors(validSource), []);
 });
 
 test('rejects omitted or misbound authoritative-claim inputs', () => {
-  const exactClaim = 'claimDueScheduled(db, candidate.id, now, commitGuard)';
+  const exactClaim = `claimDueScheduled(
+          db,
+          candidate.id,
+          now,
+          messageTargetCommitGuard(commitGuard, serverAuthorization),
+          serverAuthorization,
+        )`;
   const regressions = [
-    'claimDueScheduled(db, candidate.id, now)',
-    'claimDueScheduled(db, candidate.id, now, undefined)',
-    'claimDueScheduled(db, candidate.id, Date.now(), commitGuard)',
-    'claimDueScheduled(db, candidate.chatGuid, now, commitGuard)',
+    `claimDueScheduled(
+          db,
+          candidate.id,
+          now,
+          messageTargetCommitGuard(commitGuard, serverAuthorization),
+        )`,
+    `claimDueScheduled(
+          db,
+          candidate.id,
+          now,
+          commitGuard,
+          serverAuthorization,
+        )`,
+    exactClaim.replace('          now,', '          Date.now(),'),
+    exactClaim.replace('          candidate.id,', '          candidate.chatGuid,'),
   ];
   for (const regression of regressions) {
     assert.match(
       scheduledRecoverySourceErrors(validSource.replace(exactClaim, regression)).join('\n'),
-      /claimDueScheduled must be exactly/,
+      /both claimDueScheduled calls must be exactly/,
     );
   }
 });
@@ -385,7 +508,7 @@ test('rejects an ordinary send without the direct atomic handoff', () => {
     .replace('          recordAtomicHandover,', '          settle,')
     .replace('          { scheduledId: m.id, transition, commitGuard },\n', '');
   const errors = scheduledRecoverySourceErrors(ordinary).join('\n');
-  assert.match(errors, /exactly six arguments/);
+  assert.match(errors, /exactly eight arguments/);
   assert.match(errors, /recordAtomicHandover/);
   assert.match(errors, /sixth argument must be the direct atomic handoff object/);
 });
@@ -409,6 +532,44 @@ test('rejects a conditional or indirect atomic handoff', () => {
   assert.match(
     scheduledRecoverySourceErrors(indirect).join('\n'),
     /sixth argument must be the direct atomic handoff object/,
+  );
+});
+
+test('requires the scheduled production send to capture capability from the current owner', () => {
+  const missingSource = validSource.replace(
+    '          captureCapabilitySource?.(),',
+    '          undefined,',
+  );
+  assert.match(
+    scheduledRecoverySourceErrors(missingSource).join('\n'),
+    /optional capability-source result/,
+  );
+
+  const aliasedSource = validSource.replace(
+    '          captureCapabilitySource?.(),',
+    '          capabilitySource,',
+  );
+  assert.match(
+    scheduledRecoverySourceErrors(aliasedSource).join('\n'),
+    /optional capability-source result/,
+  );
+
+  const fallbackSource = validSource.replace(
+    '          captureCapabilitySource?.(),',
+    '          captureCapabilitySource?.() ?? capabilitySource,',
+  );
+  assert.match(
+    scheduledRecoverySourceErrors(fallbackSource).join('\n'),
+    /optional capability-source result/,
+  );
+
+  const reboundAfterDiscovery = validSource.replace(
+    '        serverAuthorization = messageTargetServerAuthorization(',
+    '        capabilitySource = captureCapabilitySource?.() ?? capabilitySource;\n        serverAuthorization = messageTargetServerAuthorization(',
+  );
+  assert.match(
+    scheduledRecoverySourceErrors(reboundAfterDiscovery).join('\n'),
+    /scheduled capability source may not be/,
   );
 });
 
@@ -456,50 +617,44 @@ test('the reviewed runDueScheduled AST fingerprint fails closed on otherwise-unc
   );
 });
 
-test('rejects an unreachable, nested, or reassigned scheduled-handoff branch', () => {
+test('rejects a malformed, non-awaited, or reassigned ownership handoff', () => {
   const unreachable = validSendServiceSource.replace(
-    'if (scheduledHandover) {',
-    'if (scheduledHandover && false) {',
+    'const { attemptOwnerToken } = scheduledHandover',
+    'const { attemptOwnerToken } = scheduledHandover && false',
   );
-  assert.match(scheduledHandoffSourceErrors(unreachable).join('\n'), /top-level if/);
+  assert.match(scheduledHandoffSourceErrors(unreachable).join('\n'), /exact top-level/);
 
-  const nested = validSendServiceSource
-    .replace('    if (scheduledHandover) {', '    if (enabled) {\n      if (scheduledHandover) {')
-    .replace(
-      `    } else {
-      await withDbTransaction(
-        db,
-        (context) => insertOutgoingTextWithinTransaction(context, outgoing),
-        effectiveCommitGuard,
-      );
-    }`,
-      `      } else {
-        await withDbTransaction(
-          db,
-          (context) => insertOutgoingTextWithinTransaction(context, outgoing),
-          effectiveCommitGuard,
-        );
-      }
-    }`,
-    );
-  assert.match(scheduledHandoffSourceErrors(nested).join('\n'), /top-level if/);
+  const notAwaited = validSendServiceSource.replace(
+    '? await handoverScheduledTextToOutgoing(',
+    '? handoverScheduledTextToOutgoing(',
+  );
+  assert.match(scheduledHandoffSourceErrors(notAwaited).join('\n'), /exact top-level/);
 
   const reassigned = validSendServiceSource.replace(
-    '    if (scheduledHandover) {',
-    '    scheduledHandover = undefined;\n    if (scheduledHandover) {',
+    '    const { attemptOwnerToken } = scheduledHandover',
+    '    scheduledHandover = undefined;\n    const { attemptOwnerToken } = scheduledHandover',
   );
   assert.match(scheduledHandoffSourceErrors(reassigned).join('\n'), /may not be reassigned/);
+
+  const tokenReassigned = validSendServiceSource.replace(
+    '    await onQueued?.(tempGuid);',
+    '    attemptOwnerToken = undefined;\n    await onQueued?.(tempGuid);',
+  );
+  assert.match(
+    scheduledHandoffSourceErrors(tokenReassigned).join('\n'),
+    /attempt-owner token may not/,
+  );
 });
 
 test('rejects moving or removing the queue handoff and pre-network account guard', () => {
-  const withoutQueued = validSendServiceSource.replace('    await onQueued?.();\n', '');
+  const withoutQueued = validSendServiceSource.replace('    await onQueued?.(tempGuid);\n', '');
   assert.match(scheduledHandoffSourceErrors(withoutQueued).join('\n'), /onQueued/);
 
   const queuedAfterNetwork = validSendServiceSource
-    .replace('    await onQueued?.();\n', '')
+    .replace('    await onQueued?.(tempGuid);\n', '')
     .replace(
-      '    const server = await sendText(http, args);',
-      '    const server = await sendText(http, args);\n    await onQueued?.();',
+      '      const server = await sendText(transport.http, {',
+      '      await onQueued?.(tempGuid);\n      const server = await sendText(transport.http, {',
     );
   assert.match(scheduledHandoffSourceErrors(queuedAfterNetwork).join('\n'), /onQueued/);
 
@@ -512,30 +667,40 @@ test('rejects moving or removing the queue handoff and pre-network account guard
   );
   const guardErrors = scheduledHandoffSourceErrors(withoutGuard).join('\n');
   assert.match(guardErrors, /commit-guard rejection/);
-  assert.match(guardErrors, /network call must occur after/);
+  assert.match(guardErrors, /one sendText call must follow/);
 });
 
 test('rejects an unguarded public insert or a malformed ordinary transaction owner', () => {
-  const owner = `      await withDbTransaction(
-        db,
-        (context) => insertOutgoingTextWithinTransaction(context, outgoing),
-        effectiveCommitGuard,
-      );`;
   const publicInsert = validSendServiceSource.replace(
-    owner,
-    '      await insertOutgoingText(db, outgoing);',
+    `        async (context) => {
+          const resolvedTarget = authorizedTarget
+            ? await resolveMessageTargetWithinTransaction(context, authorizedTarget)
+            : null;
+          if (authorizedTarget && !resolvedTarget) throw new MessageTargetUnavailableError();
+          return insertOutgoingTextWithinTransaction(context, {
+            ...outgoing,
+            selectedMessageGuid: resolvedTarget?.messageGuid,
+            partIndex: resolvedTarget?.partIndex,
+            threadOriginatorGuid: resolvedTarget?.messageGuid,
+          });
+        },`,
+    '        async () => insertOutgoingText(db, outgoing),',
   );
   assert.match(scheduledHandoffSourceErrors(publicInsert).join('\n'), /ordinary text/);
 
   const wrongGuard = validSendServiceSource.replace(
-    owner,
-    owner.replace('effectiveCommitGuard,', 'ordinaryCommitGuard,'),
+    `        },
+        transport.admissionGuard,
+      );`,
+    `        },
+        ordinaryCommitGuard,
+      );`,
   );
   assert.match(scheduledHandoffSourceErrors(wrongGuard).join('\n'), /ordinary text/);
 
   const rawDatabase = validSendServiceSource.replace(
-    'insertOutgoingTextWithinTransaction(context, outgoing)',
-    'insertOutgoingTextWithinTransaction(db, outgoing)',
+    'insertOutgoingTextWithinTransaction(context, {',
+    'insertOutgoingTextWithinTransaction(db, {',
   );
   assert.match(scheduledHandoffSourceErrors(rawDatabase).join('\n'), /ordinary text/);
 });
@@ -548,14 +713,18 @@ test('rejects changed guard precedence, settlement propagation, or ownership-err
   assert.match(scheduledHandoffSourceErrors(wrongPrecedence).join('\n'), /effectiveCommitGuard/);
 
   const unguardedOutcome = validSendServiceSource.replace(
-    'reconcileSendOutcome(db, tempGuid, server, now, effectiveCommitGuard)',
-    'reconcileSendOutcome(db, tempGuid, server, now, undefined)',
+    `reconcileSendOutcome(db, tempGuid, server, now, effectiveCommitGuard, {
+        attemptOwnerToken: attemptOwnerToken ?? undefined,
+      })`,
+    `reconcileSendOutcome(db, tempGuid, server, now, undefined, {
+        attemptOwnerToken: attemptOwnerToken ?? undefined,
+      })`,
   );
   assert.match(scheduledHandoffSourceErrors(unguardedOutcome).join('\n'), /success and failure/);
 
   const unguardedFailure = validSendServiceSource.replace(
-    "handleSendFailure(db, tempGuid, e, 'send', args.chatGuid, undefined, effectiveCommitGuard)",
-    "handleSendFailure(db, tempGuid, e, 'send', args.chatGuid, undefined, undefined)",
+    "handleSendFailure(db, tempGuid, e, 'send', args.chatGuid, undefined, effectiveCommitGuard, {",
+    "handleSendFailure(db, tempGuid, e, 'send', args.chatGuid, undefined, undefined, {",
   );
   assert.match(scheduledHandoffSourceErrors(unguardedFailure).join('\n'), /success and failure/);
 
@@ -564,10 +733,128 @@ test('rejects changed guard precedence, settlement propagation, or ownership-err
     '',
   );
   assert.match(scheduledHandoffSourceErrors(swallowedOwnershipLoss).join('\n'), /rethrown before/);
+
+  const wrongCapabilityGuard = validSendServiceSource.replace(
+    '      transport.admissionGuard,\n      capabilitySource,',
+    '      effectiveCommitGuard,\n      capabilitySource,',
+  );
+  assert.match(scheduledHandoffSourceErrors(wrongCapabilityGuard).join('\n'), /capability/);
+
+  const missingAttemptAware = validSendServiceSource.replace(
+    'attemptAware: capability.attemptAware,',
+    'attemptAware: false,',
+  );
+  assert.match(scheduledHandoffSourceErrors(missingAttemptAware).join('\n'), /capability/);
+
+  const missingRequestGeneration = validSendServiceSource.replace(
+    'clientAttemptGeneration: attemptOwnerToken?.generation',
+    'clientAttemptGeneration: undefined',
+  );
+  assert.match(scheduledHandoffSourceErrors(missingRequestGeneration).join('\n'), /sendText/);
+
+  const missingOutcomeToken = validSendServiceSource.replace(
+    'attemptOwnerToken: attemptOwnerToken ?? undefined',
+    'attemptOwnerToken: undefined',
+  );
+  assert.match(scheduledHandoffSourceErrors(missingOutcomeToken).join('\n'), /success and failure/);
+
+  const missingFailureToken = validSendServiceSource.replace(
+    `handleSendFailure(db, tempGuid, e, 'send', args.chatGuid, undefined, effectiveCommitGuard, {
+        attemptOwnerToken: attemptOwnerToken ?? undefined,`,
+    `handleSendFailure(db, tempGuid, e, 'send', args.chatGuid, undefined, effectiveCommitGuard, {
+        attemptOwnerToken: undefined,`,
+  );
+  assert.match(scheduledHandoffSourceErrors(missingFailureToken).join('\n'), /success and failure/);
+});
+
+test('keeps capability discovery, queue admission, and network dispatch on one pinned transport', () => {
+  const wrongPinGuard = validSendServiceSource.replace(
+    'pinSendTransport(http, effectiveCommitGuard)',
+    'pinSendTransport(http, ordinaryCommitGuard)',
+  );
+  assert.match(scheduledHandoffSourceErrors(wrongPinGuard).join('\n'), /pinSendTransport/);
+
+  const wrongCapabilitySource = validSendServiceSource.replace(
+    '      capabilitySource,',
+    '      undefined,',
+  );
+  assert.match(
+    scheduledHandoffSourceErrors(wrongCapabilitySource).join('\n'),
+    /attempt capability/,
+  );
+
+  const missingTargetRequirement = validSendServiceSource.replace(
+    '      { requireServerInfo: target != null },\n',
+    '',
+  );
+  assert.match(
+    scheduledHandoffSourceErrors(missingTargetRequirement).join('\n'),
+    /target-required server info/,
+  );
+
+  const wrongHandoffGuard = validSendServiceSource.replace(
+    `        },
+        transport.admissionGuard,
+        authorizedTarget?.serverAuthorization,
+      )`,
+    `        },
+        effectiveCommitGuard,
+        authorizedTarget?.serverAuthorization,
+      )`,
+  );
+  assert.match(scheduledHandoffSourceErrors(wrongHandoffGuard).join('\n'), /scheduled handoff/);
+
+  const missingHandoffAuthorization = validSendServiceSource.replace(
+    '        authorizedTarget?.serverAuthorization,',
+    '        undefined,',
+  );
+  assert.match(
+    scheduledHandoffSourceErrors(missingHandoffAuthorization).join('\n'),
+    /scheduled handoff/,
+  );
+
+  const unpinnedNetwork = validSendServiceSource.replace(
+    'sendText(transport.http, {',
+    'sendText(http, {',
+  );
+  assert.match(scheduledHandoffSourceErrors(unpinnedNetwork).join('\n'), /one sendText call/);
+
+  const missingCurrentnessCheck = validSendServiceSource.replace(
+    '      transport.assertNetworkCurrent();\n',
+    '',
+  );
+  assert.match(
+    scheduledHandoffSourceErrors(missingCurrentnessCheck).join('\n'),
+    /assertNetworkCurrent/,
+  );
+
+  const unguardedFinalTarget = validSendServiceSource.replace(
+    'resolveMessageTarget(db, authorizedTarget, targetCommitGuard)',
+    'resolveMessageTarget(db, authorizedTarget, effectiveCommitGuard)',
+  );
+  assert.match(
+    scheduledHandoffSourceErrors(unguardedFinalTarget).join('\n'),
+    /target revalidation/,
+  );
+
+  const staleWireTarget = validSendServiceSource.replace(
+    'selectedMessageGuid: finalTarget?.messageGuid,',
+    'selectedMessageGuid: target?.messageGuid,',
+  );
+  assert.match(
+    scheduledHandoffSourceErrors(staleWireTarget).join('\n'),
+    /canonical final target part/,
+  );
+
+  const staleMethodCapability = validSendServiceSource.replace(
+    'capability.serverInfo?.private_api === true',
+    'sessionAccessors.privateApiEnabled()',
+  );
+  assert.match(scheduledHandoffSourceErrors(staleMethodCapability).join('\n'), /pinned capability/);
 });
 
 test('requires the exact ordinary context-helper call graph and forbids the public fallback', () => {
-  const missingOwner = expectedFindings.slice(0, 3);
+  const missingOwner = expectedFindings.slice(0, 4);
   assert.match(scheduledRecoveryCallGraphErrors(missingOwner).join('\n'), /context insert/);
 
   const extraOwner = [
@@ -597,10 +884,10 @@ test('the reviewed sendTextMessage AST fingerprint rejects an early aliased netw
   const expectedBodyHash = scheduledSendTextBodyHash(validSendServiceSource);
   assert.deepEqual(scheduledHandoffSourceErrors(validSendServiceSource, { expectedBodyHash }), []);
   const earlyNetwork = validSendServiceSource.replace(
-    '    if (scheduledHandover) {',
+    '    const { attemptOwnerToken } = scheduledHandover',
     `    const earlyNetwork = sendText;
     await earlyNetwork(http, args);
-    if (scheduledHandover) {`,
+    const { attemptOwnerToken } = scheduledHandover`,
   );
   assert.match(
     scheduledHandoffSourceErrors(earlyNetwork, { expectedBodyHash }).join('\n'),
@@ -609,14 +896,22 @@ test('the reviewed sendTextMessage AST fingerprint rejects an early aliased netw
 });
 
 test('requires every reviewed production runner call to carry its explicit account scope', () => {
-  const rawCall = 'runDueScheduled(getDatabase(), http, now, undefined, accountLease)';
+  const rawCall = `runDueScheduled(
+        getDatabase(),
+        http,
+        now,
+        undefined,
+        accountLease,
+        undefined,
+        captureSessionRcsCapabilityLease,
+      )`;
   const missingScope = mutateRunnerSource('src/services/send/index.ts', (source) =>
-    replaceOnce(source, rawCall, 'runDueScheduled(getDatabase(), http, now, undefined)'),
+    replaceOnce(source, rawCall, rawCall.replace('        accountLease,\n', '')),
   );
   assert.match(scheduledRunnerUsageErrors(missingScope).join('\n'), /explicit accountLease/);
 
   const undefinedScope = mutateRunnerSource('src/services/send/index.ts', (source) =>
-    replaceOnce(source, rawCall, 'runDueScheduled(getDatabase(), http, now, undefined, undefined)'),
+    replaceOnce(source, rawCall, rawCall.replace('        accountLease,', '        undefined,')),
   );
   assert.match(scheduledRunnerUsageErrors(undefinedScope).join('\n'), /explicit accountLease/);
 
@@ -626,24 +921,44 @@ test('requires every reviewed production runner call to carry its explicit accou
   assert.match(scheduledRunnerUsageErrors(optionalCall).join('\n'), /explicit accountLease/);
 });
 
+test('requires reviewed foreground and background scheduled capability sources', () => {
+  const foreground = mutateRunnerSource('src/services/send/index.ts', (source) =>
+    replaceOnce(source, '        captureSessionRcsCapabilityLease,', '        () => undefined,'),
+  );
+  assert.match(scheduledRunnerUsageErrors(foreground).join('\n'), /capability-source factory/);
+
+  const background = mutateRunnerSource('src/services/background/backgroundSync.ts', (source) =>
+    replaceOnce(
+      source,
+      '      () => fixedRcsCapabilitySource(serverInfo),',
+      '      () => fixedRcsCapabilitySource(undefined),',
+    ),
+  );
+  assert.match(scheduledRunnerUsageErrors(background).join('\n'), /capability-source factory/);
+});
+
 test('rejects production runner aliases, escaped references, and unreviewed callers', () => {
-  const rawCall = 'runDueScheduled(getDatabase(), http, now, undefined, accountLease)';
+  const rawCall = `runDueScheduled(
+        getDatabase(),
+        http,
+        now,
+        undefined,
+        accountLease,
+        undefined,
+        captureSessionRcsCapabilityLease,
+      )`;
 
   const commentOnlyChange = mutateRunnerSource('src/services/send/index.ts', (source) =>
     replaceOnce(
       source,
       rawCall,
-      'runDueScheduled(/* formatting-stable */ getDatabase(), http, now, undefined, accountLease)',
+      rawCall.replace('runDueScheduled(', 'runDueScheduled(/* formatting-stable */'),
     ),
   );
   assert.deepEqual(scheduledRunnerUsageErrors(commentOnlyChange), []);
 
   const aliased = mutateRunnerSource('src/services/send/index.ts', (source) =>
-    replaceOnce(
-      source,
-      rawCall,
-      `(runDueScheduled)(getDatabase(), http, now, undefined, accountLease)`,
-    ),
+    replaceOnce(source, rawCall, rawCall.replace('runDueScheduled(', '(runDueScheduled)(')),
   );
   const aliasErrors = scheduledRunnerUsageErrors(aliased).join('\n');
   assert.match(aliasErrors, /references and aliases are forbidden/);
@@ -922,7 +1237,7 @@ test('rejects production runner aliases, escaped references, and unreviewed call
 test('the live repository satisfies the scheduled recovery contract', () => {
   assert.deepEqual(runScheduledRecoveryCheck(), {
     resetCalls: 1,
-    claimCalls: 1,
+    claimCalls: 2,
     handoffCalls: 1,
   });
 });

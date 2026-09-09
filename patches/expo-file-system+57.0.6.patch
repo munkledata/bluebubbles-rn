@@ -1,0 +1,160 @@
+diff --git a/node_modules/expo-file-system/android/build.gradle b/node_modules/expo-file-system/android/build.gradle
+index 334030a..b16f9aa 100644
+--- a/node_modules/expo-file-system/android/build.gradle
++++ b/node_modules/expo-file-system/android/build.gradle
+@@ -30,2 +30,3 @@ dependencies {
+   testImplementation 'junit:junit:4.13.2'
++  testImplementation 'com.squareup.okhttp3:mockwebserver:4.9.2'
+   testImplementation 'org.robolectric:robolectric:4.16'
+diff --git a/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemLegacyModule.kt b/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemLegacyModule.kt
+index 4626dac..24ae887 100644
+--- a/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemLegacyModule.kt
++++ b/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemLegacyModule.kt
+@@ -998,3 +998,5 @@ open class FileSystemLegacyModule : Module() {
+           .writeTimeout(60, TimeUnit.SECONDS)
++          .followRedirects(false)
++          .followSslRedirects(false)
+-
++
+         client = builder.build()
+diff --git a/node_modules/expo-file-system/android/src/test/java/expo/modules/filesystem/legacy/FileSystemLegacyRedirectPolicyTest.kt b/node_modules/expo-file-system/android/src/test/java/expo/modules/filesystem/legacy/FileSystemLegacyRedirectPolicyTest.kt
+new file mode 100644
+index 0000000..5851ca5
+--- /dev/null
++++ b/node_modules/expo-file-system/android/src/test/java/expo/modules/filesystem/legacy/FileSystemLegacyRedirectPolicyTest.kt
+@@ -0,0 +1,135 @@
++package expo.modules.filesystem.legacy
++
++import java.io.IOException
++import java.util.concurrent.CountDownLatch
++import java.util.concurrent.TimeUnit
++import java.util.concurrent.atomic.AtomicReference
++import okhttp3.Call
++import okhttp3.Callback
++import okhttp3.MediaType.Companion.toMediaType
++import okhttp3.OkHttpClient
++import okhttp3.Request
++import okhttp3.RequestBody.Companion.toRequestBody
++import okhttp3.Response
++import okhttp3.mockwebserver.MockResponse
++import okhttp3.mockwebserver.MockWebServer
++import okhttp3.mockwebserver.SocketPolicy
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertNotNull
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++class FileSystemLegacyRedirectPolicyTest {
++  private fun legacyClient(): OkHttpClient {
++    val getter = FileSystemLegacyModule::class.java.getDeclaredMethod("getOkHttpClient")
++    getter.isAccessible = true
++    return requireNotNull(getter.invoke(FileSystemLegacyModule()) as? OkHttpClient)
++  }
++
++  @Test
++  fun `legacy client returns redirect responses without contacting hop two`() {
++    val origin = MockWebServer()
++    val trap = MockWebServer()
++    origin.start()
++    trap.start()
++    try {
++      val client = legacyClient()
++      assertFalse(client.followRedirects)
++      assertFalse(client.followSslRedirects)
++
++      val statuses = listOf(301, 302, 303, 307, 308)
++      statuses.forEach { status ->
++        origin.enqueue(
++          MockResponse()
++            .setResponseCode(status)
++            .setHeader("Location", trap.url("/hop-2")),
++        )
++        val request = Request.Builder()
++          .url(origin.url("/hop-1/$status"))
++          .post("private upload".toRequestBody("application/octet-stream".toMediaType()))
++          .build()
++
++        client.newCall(request).execute().use { response ->
++          assertEquals(status, response.code)
++        }
++      }
++
++      assertEquals(statuses.size, origin.requestCount)
++      assertEquals(0, trap.requestCount)
++    } finally {
++      origin.shutdown()
++      trap.shutdown()
++    }
++  }
++
++  @Test
++  fun `redirect policy preserves successful request progress`() {
++    val server = MockWebServer()
++    server.enqueue(MockResponse().setResponseCode(200).setBody("{}"))
++    server.start()
++    try {
++      val payload = ByteArray(4_096) { index -> (index % 251).toByte() }
++      val progress = mutableListOf<Pair<Long, Long>>()
++      val body = CountingRequestBody(
++        payload.toRequestBody("application/octet-stream".toMediaType()),
++        object : CountingRequestListener {
++          override fun onProgress(bytesWritten: Long, contentLength: Long) {
++            progress.add(bytesWritten to contentLength)
++          }
++        },
++      )
++      val request = Request.Builder().url(server.url("/success")).post(body).build()
++
++      legacyClient().newCall(request).execute().use { response ->
++        assertEquals(200, response.code)
++      }
++
++      val recorded = server.takeRequest(5, TimeUnit.SECONDS)
++      assertNotNull(recorded)
++      assertEquals(payload.size.toLong(), recorded?.bodySize)
++      assertEquals(payload.size.toLong() to payload.size.toLong(), progress.last())
++    } finally {
++      server.shutdown()
++    }
++  }
++
++  @Test
++  fun `redirect policy preserves active call cancellation`() {
++    val server = MockWebServer()
++    server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
++    server.start()
++    try {
++      val failure = AtomicReference<IOException?>()
++      val unexpectedResponse = AtomicReference<Response?>()
++      val settled = CountDownLatch(1)
++      val request = Request.Builder()
++        .url(server.url("/cancel"))
++        .post("private upload".toRequestBody("application/octet-stream".toMediaType()))
++        .build()
++      val call = legacyClient().newCall(request)
++      call.enqueue(object : Callback {
++        override fun onFailure(call: Call, error: IOException) {
++          failure.set(error)
++          settled.countDown()
++        }
++
++        override fun onResponse(call: Call, response: Response) {
++          unexpectedResponse.set(response)
++          settled.countDown()
++        }
++      })
++
++      assertNotNull(server.takeRequest(5, TimeUnit.SECONDS))
++      call.cancel()
++
++      assertTrue(settled.await(5, TimeUnit.SECONDS))
++      assertTrue(call.isCanceled())
++      assertNotNull(failure.get())
++      assertNull(unexpectedResponse.get())
++    } finally {
++      server.shutdown()
++    }
++  }
++}

@@ -5,6 +5,7 @@ import { resolve } from 'node:path';
 import test from 'node:test';
 
 import {
+  hasUseDomDirective,
   importSpecifiers,
   runArchitectureBoundaryCheck,
   runCoreBoundaryCheck,
@@ -36,6 +37,11 @@ test('extracts static, exported, required, and dynamic module specifiers', () =>
   `);
 
   assert.deepEqual(specifiers, ['zod/v4', './thing', 'ky', '@core/models']);
+});
+
+test('recognizes only a top-level Expo DOM directive prologue', () => {
+  assert.equal(hasUseDomDirective(`'use strict'; 'use dom'; export default 1;`), true);
+  assert.equal(hasUseDomDirective(`const label = 'use dom'; export default label;`), false);
 });
 
 test('accepts Node-compatible packages and imports that stay inside core', () => {
@@ -130,25 +136,40 @@ test('the repository services currently satisfy the UI boundary', () => {
   assert.ok(result.files > 0);
 });
 
-test('rejects embedded WebView imports from production source', () => {
+test('rejects community and Expo DOM embedded WebView paths from production source', () => {
   const root = fixture({
     'index.js': `require('react-native-webview');`,
     'app/direct.tsx': `import { WebView } from 'react-native-webview'; export { WebView };`,
+    'app/dom.tsx': `'use dom'; export default function Embedded() { return <div />; }`,
+    'src/expo-dom-webview.ts': `export { WebView } from '@expo/dom-webview';`,
+    'src/expo-dom-internal.ts': `export { WebView } from 'expo/dom/internal';`,
+    'src/expo-dom-internal-js.ts': `export async function load() { return import('expo/dom/internal.js'); }`,
+    'src/expo-dom-types.ts': `import type { DOMProps } from 'expo/dom'; export type Props = DOMProps;`,
     'src/dynamic.ts': `export async function load() { return import('react-native-webview/lib/WebView'); }`,
     'src/unknown.ts': `export async function load(name) { return import(name); }`,
   });
   const files = [
     resolve(root, 'app/direct.tsx'),
+    resolve(root, 'app/dom.tsx'),
     resolve(root, 'src/dynamic.ts'),
+    resolve(root, 'src/expo-dom-internal-js.ts'),
+    resolve(root, 'src/expo-dom-internal.ts'),
+    resolve(root, 'src/expo-dom-types.ts'),
+    resolve(root, 'src/expo-dom-webview.ts'),
     resolve(root, 'src/unknown.ts'),
   ];
 
   try {
     const errors = validateEmbeddedWebViewImports({ root, files });
-    assert.equal(errors.length, 3);
+    assert.equal(errors.length, 7, JSON.stringify(errors));
     assert.ok(errors.some((error) => error.includes('app/direct.tsx')));
+    assert.ok(errors.some((error) => error.includes('app/dom.tsx')));
     assert.ok(errors.some((error) => error.includes('src/dynamic.ts')));
+    assert.ok(errors.some((error) => error.includes('src/expo-dom-internal-js.ts')));
+    assert.ok(errors.some((error) => error.includes('src/expo-dom-internal.ts')));
+    assert.ok(errors.some((error) => error.includes('src/expo-dom-webview.ts')));
     assert.ok(errors.some((error) => error.includes('src/unknown.ts')));
+    assert.ok(errors.every((error) => !error.includes('src/expo-dom-types.ts')));
     assert.throws(
       () => runEmbeddedWebViewBoundaryCheck({ root }),
       /index\.js imports disabled embedded WebView boundary/,

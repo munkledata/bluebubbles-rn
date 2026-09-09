@@ -5,6 +5,28 @@ export interface ParsedSetupQr {
   origin: string;
 }
 
+export type SetupQrParseErrorCode =
+  'empty' | 'invalid-json' | 'invalid-shape' | 'missing-credentials';
+
+/** Stable parser classification for callers that need to choose presentation copy. */
+export class SetupQrParseError extends Error {
+  override readonly name = 'SetupQrParseError';
+
+  constructor(readonly code: SetupQrParseErrorCode) {
+    super('setup-qr-parse-error');
+  }
+}
+
+/** Stable build failure for callers that need to choose presentation copy. */
+export class SetupQrBuildError extends Error {
+  override readonly name = 'SetupQrBuildError';
+  readonly code = 'missing-credentials';
+
+  constructor() {
+    super('setup-qr-build-error');
+  }
+}
+
 /**
  * Parse a Gator setup QR code.
  *
@@ -12,29 +34,29 @@ export interface ParsedSetupQr {
  * Flutter app's `jsonDecode(response)` in server_credentials.dart). We validate
  * length >= 2, then sanitize the URL into a clean origin.
  *
- * Throws with a user-facing message on any malformed input.
+ * Throws a typed, non-presentational code on malformed input; callers own user-facing copy.
  */
 export function parseSetupQr(raw: string | null | undefined): ParsedSetupQr {
   if (!raw || raw.trim().length === 0) {
-    throw new Error('No data was scanned, please try again.');
+    throw new SetupQrParseError('empty');
   }
 
   let decoded: unknown;
   try {
     decoded = JSON.parse(raw);
   } catch {
-    throw new Error('Scanned code was not a valid Gator QR code.');
+    throw new SetupQrParseError('invalid-json');
   }
 
   if (!Array.isArray(decoded) || decoded.length < 2) {
-    throw new Error('Invalid data scanned!');
+    throw new SetupQrParseError('invalid-shape');
   }
 
   const password = typeof decoded[0] === 'string' ? decoded[0] : '';
   const origin = sanitizeServerAddress(typeof decoded[1] === 'string' ? decoded[1] : null);
 
   if (!password || !origin) {
-    throw new Error('Could not detect server URL and password!');
+    throw new SetupQrParseError('missing-credentials');
   }
 
   return { password, origin };
@@ -54,7 +76,7 @@ export function parseSetupQr(raw: string | null | undefined): ParsedSetupQr {
 export function buildSetupQr(origin: string, password: string): string {
   const cleanOrigin = sanitizeServerAddress(origin);
   if (!cleanOrigin || !password) {
-    throw new Error('Server URL and password are required to build a pairing QR.');
+    throw new SetupQrBuildError();
   }
   return JSON.stringify([password, cleanOrigin]);
 }

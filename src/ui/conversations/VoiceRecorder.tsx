@@ -24,7 +24,8 @@ export function VoiceRecorder({
   onPermissionError,
 }: {
   onClose: () => void;
-  onSend: (uri: string) => void;
+  /** Only explicit `true` proves a durable queue row owns the recording; every other path retains it. */
+  onSend: (uri: string) => Promise<boolean>;
   onPermissionDenied?: () => void;
   onPermissionError?: () => void;
 }): React.JSX.Element {
@@ -32,10 +33,19 @@ export function VoiceRecorder({
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [elapsed, setElapsed] = useState(0);
   const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [recordingReady, setRecordingReady] = useState(false);
+  const [recordingActive, setRecordingActive] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [sendFailed, setSendFailed] = useState(false);
   const started = useRef(false);
   const finished = useRef(false);
+  const stopPending = useRef(false);
+  const sendPending = useRef(false);
+  const retainedUri = useRef<string | null>(null);
+  const mounted = useRef(true);
 
   useEffect(() => {
+    mounted.current = true;
     let active = true;
     void (async () => {
       let perm: Awaited<ReturnType<typeof requestRecordingPermissionsAsync>>;
@@ -43,12 +53,14 @@ export function VoiceRecorder({
         perm = await requestRecordingPermissionsAsync();
       } catch {
         if (!active || finished.current) return;
+        finished.current = true;
         onPermissionError?.();
         onClose();
         return;
       }
       if (!active || finished.current) return;
       if (!perm.granted) {
+        finished.current = true;
         onPermissionDenied?.();
         onClose();
         return;
@@ -65,41 +77,100 @@ export function VoiceRecorder({
       if (!active || finished.current) return;
       recorder.record();
       started.current = true;
+      setRecordingReady(true);
+      setRecordingActive(true);
     })();
-    const id = setInterval(() => setElapsed((e) => e + 1), 1000);
     return () => {
       active = false;
-      clearInterval(id);
       // Stop a still-running recording on unmount (system back / navigation) so the
       // encoder flushes and the native recorder is released cleanly.
-      if (started.current && !finished.current) void recorder.stop().catch(() => undefined);
+      if (started.current && !stopPending.current && !finished.current) {
+        void recorder.stop().catch(() => undefined);
+      }
+      mounted.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const finish = async (send: boolean): Promise<void> => {
-    if (finished.current) return; // idempotent — ignore a double Cancel/Send tap
+  useEffect(() => {
+    if (!recordingActive) return;
+    const id = setInterval(() => setElapsed((value) => value + 1), 1000);
+    return () => clearInterval(id);
+  }, [recordingActive]);
+
+  const stopAndRetain = async (): Promise<string | null> => {
+    if (retainedUri.current) return retainedUri.current;
+    if (!started.current || stopPending.current) return null;
+    stopPending.current = true;
+    try {
+      await recorder.stop();
+      started.current = false;
+      const uri = recorder.uri;
+      retainedUri.current = uri;
+      return uri;
+    } catch {
+      return null;
+    } finally {
+      stopPending.current = false;
+    }
+  };
+
+  const discard = async (): Promise<void> => {
+    if (finished.current || sendPending.current) return;
     finished.current = true;
-    let uri: string | null = null;
-    if (started.current) {
+    if (started.current && !stopPending.current) {
+      stopPending.current = true;
       try {
         await recorder.stop();
-        uri = recorder.uri;
       } catch {
-        /* ignore */
+        /* best-effort native release */
+      } finally {
+        started.current = false;
+        stopPending.current = false;
       }
     }
-    if (send && uri) onSend(uri);
     onClose();
   };
 
+  const send = async (): Promise<void> => {
+    if (finished.current || sendPending.current || !recordingReady) return;
+    sendPending.current = true;
+    setSubmitting(true);
+    setSendFailed(false);
+    setRecordingActive(false);
+
+    const uri = await stopAndRetain();
+    if (!mounted.current || finished.current) return;
+    let admitted = false;
+    if (uri) {
+      try {
+        admitted = (await onSend(uri)) === true;
+      } catch {
+        admitted = false;
+      }
+    }
+
+    if (!mounted.current || finished.current) return;
+    if (admitted) {
+      finished.current = true;
+      onClose();
+      return;
+    }
+
+    sendPending.current = false;
+    if (!mounted.current || finished.current) return;
+    setSubmitting(false);
+    setSendFailed(true);
+  };
+
   const requestSystemCancel = (): void => {
+    if (sendPending.current) return;
     if (confirmDiscard) {
       setConfirmDiscard(false);
       return;
     }
-    if (!started.current) {
-      void finish(false);
+    if (!started.current && !retainedUri.current) {
+      void discard();
       return;
     }
     setConfirmDiscard(true);
@@ -121,7 +192,7 @@ export function VoiceRecorder({
                 <Pressable onPress={() => setConfirmDiscard(false)} hitSlop={8}>
                   <Text style={[styles.cancel, { color: theme.color.tint }]}>Keep Recording</Text>
                 </Pressable>
-                <Pressable onPress={() => void finish(false)} hitSlop={8}>
+                <Pressable onPress={() => void discard()} hitSlop={8}>
                   <Text style={[styles.cancel, { color: theme.color.destructive }]}>Discard</Text>
                 </Pressable>
               </View>
@@ -129,18 +200,35 @@ export function VoiceRecorder({
           ) : (
             <>
               <Text style={[styles.rec, { color: theme.color.destructive }]}>
-                ● Recording {fmt(elapsed)}
+                {submitting
+                  ? 'Queueing recording…'
+                  : sendFailed
+                    ? `Recording ready ${fmt(elapsed)}`
+                    : `● Recording ${fmt(elapsed)}`}
               </Text>
+              {sendFailed ? (
+                <Text style={[styles.status, { color: theme.color.secondaryLabel }]}>
+                  It wasn’t queued. You can try again without re-recording.
+                </Text>
+              ) : null}
               <View style={styles.row}>
-                <Pressable onPress={() => void finish(false)} hitSlop={8}>
-                  <Text style={[styles.cancel, { color: theme.color.secondaryLabel }]}>Cancel</Text>
+                <Pressable onPress={() => void discard()} disabled={submitting} hitSlop={8}>
+                  <Text style={[styles.cancel, { color: theme.color.secondaryLabel }]}>
+                    {sendFailed ? 'Discard' : 'Cancel'}
+                  </Text>
                 </Pressable>
                 <Pressable
-                  onPress={() => void finish(true)}
-                  style={[styles.send, { backgroundColor: theme.color.tint }]}
+                  onPress={() => void send()}
+                  disabled={submitting || !recordingReady}
+                  accessibilityRole="button"
+                  accessibilityState={{ disabled: submitting || !recordingReady, busy: submitting }}
+                  style={[
+                    styles.send,
+                    { backgroundColor: theme.color.tint, opacity: submitting ? 0.55 : 1 },
+                  ]}
                 >
                   <Text style={[styles.sendText, { color: readableTextOn(theme.color.tint) }]}>
-                    Send
+                    {sendFailed ? 'Try Again' : submitting ? 'Queueing…' : 'Send'}
                   </Text>
                 </Pressable>
               </View>
@@ -156,6 +244,7 @@ const styles = StyleSheet.create({
   backdrop: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.4)' },
   sheet: { padding: 24, paddingBottom: 40, borderTopLeftRadius: 16, borderTopRightRadius: 16 },
   rec: { fontSize: 18, fontWeight: '600', textAlign: 'center', marginBottom: 20 },
+  status: { fontSize: 14, textAlign: 'center', marginTop: -10, marginBottom: 20 },
   confirmTitle: { fontSize: 18, fontWeight: '600', textAlign: 'center', marginBottom: 20 },
   row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   cancel: { fontSize: 16 },

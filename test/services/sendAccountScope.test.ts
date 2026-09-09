@@ -324,25 +324,33 @@ describe('UI send account lease', () => {
   });
 
   it('passes text and reply persistence guards tied to their captured leases', async () => {
+    const sendQueued = jest.fn();
+    const replyQueued = jest.fn();
     const sendLease = captureRealtimeDeliveryLease();
-    await expect(send({ chatGuid: 'chat-a', text: 'plain text' }, sendLease)).resolves.toEqual({
-      tempGuid: 'temp-text',
-    });
+    await expect(
+      send({ chatGuid: 'chat-a', text: 'plain text' }, sendLease, undefined, sendQueued),
+    ).resolves.toEqual({ tempGuid: 'temp-text' });
 
     const replyLease = captureRealtimeDeliveryLease();
     await expect(
-      reply({ chatGuid: 'chat-b', text: 'thread reply', replyToGuid: 'message-b' }, replyLease),
+      reply(
+        { chatGuid: 'chat-b', text: 'thread reply', replyToGuid: 'message-b' },
+        replyLease,
+        undefined,
+        replyQueued,
+      ),
     ).resolves.toEqual({ tempGuid: 'temp-text' });
 
     expect(mockSendText).toHaveBeenNthCalledWith(
       1,
       expect.anything(),
       expect.anything(),
-      { chatGuid: 'chat-a', text: 'plain text' },
+      { chatGuid: 'chat-a', text: 'plain text', mentions: undefined },
       expect.any(Number),
-      undefined,
+      expect.any(Function),
       undefined,
       expect.any(Function),
+      undefined,
     );
     expect(mockSendText).toHaveBeenNthCalledWith(
       2,
@@ -352,64 +360,127 @@ describe('UI send account lease', () => {
         chatGuid: 'chat-b',
         text: 'thread reply',
         selectedMessageGuid: 'message-b',
+        partIndex: undefined,
         effectId: undefined,
       },
       expect.any(Number),
-      undefined,
+      expect.any(Function),
       undefined,
       expect.any(Function),
+      undefined,
     );
     const sendGuard = mockSendText.mock.calls[0]?.[6] as (() => boolean) | undefined;
     const replyGuard = mockSendText.mock.calls[1]?.[6] as (() => boolean) | undefined;
+    const sendAdmission = mockSendText.mock.calls[0]?.[4] as
+      ((tempGuid: string) => void) | undefined;
+    const replyAdmission = mockSendText.mock.calls[1]?.[4] as
+      ((tempGuid: string) => void) | undefined;
     expect(sendGuard?.()).toBe(true);
     expect(replyGuard?.()).toBe(true);
+    sendAdmission?.('temp-send');
+    replyAdmission?.('temp-reply');
+    expect(sendQueued).toHaveBeenCalledWith('temp-send');
+    expect(replyQueued).toHaveBeenCalledWith('temp-reply');
 
     await pauseRealtimeDeliveries();
     expect(sendGuard?.()).toBe(false);
     expect(replyGuard?.()).toBe(false);
+    sendAdmission?.('late-send');
+    replyAdmission?.('late-reply');
+    expect(sendQueued).toHaveBeenCalledTimes(1);
+    expect(replyQueued).toHaveBeenCalledTimes(1);
     resumeRealtimeDeliveries();
   });
 
   it('passes both contact persistence fronts guards tied to their captured leases', async () => {
+    const directQueued = jest.fn();
+    const pickerQueued = jest.fn();
     const directLease = captureRealtimeDeliveryLease();
     await expect(
-      sendContactCard({ chatGuid: 'chat-a', contact: { firstName: 'Alice' } }, directLease),
+      sendContactCard(
+        {
+          chatGuid: 'chat-a',
+          contact: { firstName: 'Alice' },
+          replyToGuid: 'direct-target',
+          replyToPartIndex: 0,
+        },
+        directLease,
+        undefined,
+        directQueued,
+      ),
     ).resolves.toEqual({ tempGuid: 'temp-contact' });
 
     mockPickContact.mockResolvedValueOnce({ firstName: 'Bob' });
     const pickerLease = captureRealtimeDeliveryLease();
-    await expect(pickAndSendContact('chat-b', pickerLease)).resolves.toEqual({
-      tempGuid: 'temp-contact',
-    });
+    await expect(
+      pickAndSendContact(
+        'chat-b',
+        pickerLease,
+        undefined,
+        {
+          replyToGuid: 'picker-target',
+          replyToPartIndex: 2,
+        },
+        pickerQueued,
+      ),
+    ).resolves.toEqual({ tempGuid: 'temp-contact' });
 
     expect(mockSendContact).toHaveBeenNthCalledWith(
       1,
       expect.anything(),
       expect.anything(),
-      { chatGuid: 'chat-a', contact: { firstName: 'Alice' }, selectedMessageGuid: undefined },
+      {
+        chatGuid: 'chat-a',
+        contact: { firstName: 'Alice' },
+        selectedMessageGuid: 'direct-target',
+        partIndex: 0,
+      },
       expect.any(Number),
+      expect.any(Function),
+      undefined,
       expect.any(Function),
     );
     expect(mockSendContact).toHaveBeenNthCalledWith(
       2,
       expect.anything(),
       expect.anything(),
-      { chatGuid: 'chat-b', contact: { firstName: 'Bob' } },
+      {
+        chatGuid: 'chat-b',
+        contact: { firstName: 'Bob' },
+        selectedMessageGuid: 'picker-target',
+        partIndex: 2,
+      },
       expect.any(Number),
+      expect.any(Function),
+      undefined,
       expect.any(Function),
     );
     const directGuard = mockSendContact.mock.calls[0]?.[4] as (() => boolean) | undefined;
     const pickerGuard = mockSendContact.mock.calls[1]?.[4] as (() => boolean) | undefined;
+    const directAdmission = mockSendContact.mock.calls[0]?.[6] as
+      ((tempGuid: string) => void) | undefined;
+    const pickerAdmission = mockSendContact.mock.calls[1]?.[6] as
+      ((tempGuid: string) => void) | undefined;
     expect(directGuard?.()).toBe(true);
     expect(pickerGuard?.()).toBe(true);
+    directAdmission?.('temp-direct-contact');
+    pickerAdmission?.('temp-picker-contact');
+    expect(directQueued).toHaveBeenCalledWith('temp-direct-contact');
+    expect(pickerQueued).toHaveBeenCalledWith('temp-picker-contact');
 
     await pauseRealtimeDeliveries();
     expect(directGuard?.()).toBe(false);
     expect(pickerGuard?.()).toBe(false);
+    directAdmission?.('late-direct-contact');
+    pickerAdmission?.('late-picker-contact');
+    expect(directQueued).toHaveBeenCalledTimes(1);
+    expect(pickerQueued).toHaveBeenCalledTimes(1);
     resumeRealtimeDeliveries();
   });
 
   it('passes single and multi-image persistence guards tied to their captured leases', async () => {
+    const singleQueued = jest.fn();
+    const batchAdmission = jest.fn();
     const singleLease = captureRealtimeDeliveryLease();
     await expect(
       sendImage(
@@ -418,6 +489,8 @@ describe('UI send account lease', () => {
           image: { uri: 'file:///a.jpg', name: 'a.jpg', mimeType: 'image/jpeg', size: 10 },
         },
         singleLease,
+        undefined,
+        singleQueued,
       ),
     ).resolves.toEqual({ tempGuid: 'temp-image' });
 
@@ -432,6 +505,8 @@ describe('UI send account lease', () => {
           ],
         },
         batchLease,
+        undefined,
+        batchAdmission,
       ),
     ).resolves.toEqual([{ tempGuid: 'temp-image' }, { tempGuid: 'temp-image' }]);
 
@@ -446,6 +521,7 @@ describe('UI send account lease', () => {
         expect.any(Function),
         undefined,
         expect.any(Function),
+        expect.any(Function),
       ]);
     }
     const singleGuard = mockSendImage.mock.calls[0]?.[5] as (() => boolean) | undefined;
@@ -456,11 +532,27 @@ describe('UI send account lease', () => {
     expect(secondBatchGuard?.()).toBe(true);
     expect(mockSendImage.mock.calls[0]?.[7]).not.toBe(mockSendImage.mock.calls[1]?.[7]);
     expect(mockSendImage.mock.calls[1]?.[7]).toBe(mockSendImage.mock.calls[2]?.[7]);
+    const singleAdmission = mockSendImage.mock.calls[0]?.[8] as
+      ((tempGuid: string) => void) | undefined;
+    const firstBatchAdmission = mockSendImage.mock.calls[1]?.[8] as
+      ((tempGuid: string) => void) | undefined;
+    singleAdmission?.('temp-single');
+    firstBatchAdmission?.('temp-b');
+    expect(singleQueued).toHaveBeenCalledWith('temp-single');
+    expect(batchAdmission).toHaveBeenCalledWith({
+      uri: 'file:///b.jpg',
+      queued: true,
+      tempGuid: 'temp-b',
+    });
 
     await pauseRealtimeDeliveries();
     expect(singleGuard?.()).toBe(false);
     expect(firstBatchGuard?.()).toBe(false);
     expect(secondBatchGuard?.()).toBe(false);
+    singleAdmission?.('late-single');
+    firstBatchAdmission?.('late-b');
+    expect(singleQueued).toHaveBeenCalledTimes(1);
+    expect(batchAdmission).toHaveBeenCalledTimes(1);
     resumeRealtimeDeliveries();
   });
 
@@ -476,6 +568,7 @@ describe('UI send account lease', () => {
       { chatGuid: 'chat-a', targetGuid: 'message-a', reaction: 'love' },
       expect.any(Number),
       expect.any(Function),
+      undefined,
     );
     const commitGuard = mockSendReaction.mock.calls[0]?.[4] as (() => boolean) | undefined;
     expect(commitGuard?.()).toBe(true);
@@ -499,6 +592,7 @@ describe('UI send account lease', () => {
       { messageGuid: 'message-a', newText: 'updated text', chatGuid: 'chat-a' },
       expect.any(Number),
       expect.any(Function),
+      undefined,
     );
     const commitGuard = mockSendEdit.mock.calls[0]?.[4] as (() => boolean) | undefined;
     expect(commitGuard?.()).toBe(true);
@@ -519,6 +613,7 @@ describe('UI send account lease', () => {
       { messageGuid: 'message-a', chatGuid: 'chat-a' },
       expect.any(Number),
       expect.any(Function),
+      undefined,
     );
     const commitGuard = mockSendUnsend.mock.calls[0]?.[4] as (() => boolean) | undefined;
     expect(commitGuard?.()).toBe(true);
@@ -667,6 +762,7 @@ describe('UI send account lease', () => {
         emails: [{ address: 'alice@example.com', label: 'home' }],
       },
       replyToGuid: 'contact-reply',
+      replyToPartIndex: 4,
     };
     const reactionArgs = {
       chatGuid: 'reaction-chat',
@@ -708,6 +804,7 @@ describe('UI send account lease', () => {
     contactArgs.contact.phones[0]!.number = '+15559999999';
     contactArgs.contact.emails[0]!.address = 'mallory@example.com';
     contactArgs.replyToGuid = 'mutated-contact-reply';
+    contactArgs.replyToPartIndex = 9;
     reactionArgs.chatGuid = 'mutated-reaction-chat';
     reactionArgs.targetGuid = 'mutated-reaction-target';
     reactionArgs.reaction = 'dislike';
@@ -751,6 +848,7 @@ describe('UI send account lease', () => {
         emails: [{ address: 'alice@example.com', label: 'home' }],
       },
       selectedMessageGuid: 'contact-reply',
+      partIndex: 4,
     });
     expect(mockSendReaction.mock.calls[0]?.[2]).toEqual({
       chatGuid: 'reaction-chat',

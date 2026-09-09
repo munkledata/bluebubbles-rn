@@ -6,7 +6,7 @@ import {
   upsertChats,
   upsertHandles,
 } from '@db/repositories';
-import { fullSync, sameFullSyncServerView, type FullSyncServerView } from '@/services/sync/engine';
+import { fullSync, type FullSyncServerView } from '@/services/sync/engine';
 import type { SyncApi } from '@/services/sync/types';
 import { createTestDb } from '../support/testDb';
 
@@ -58,6 +58,7 @@ describe('full repair reconciliation', () => {
     const lateTombstoneChatId = seedChat('late-tombstone-chat', { latest: 500 });
     const lateReminderChatId = seedChat('late-reminder-chat', { latest: 600 });
     const lateAttachmentChatId = seedChat('late-attachment-chat', { latest: 700 });
+    const rcsChatId = seedChat('RCS;-;group;-;keep-local', { latest: 800 });
 
     insertMessage.run('source-anchor', 10, sourceChatId, 0, 100, null);
     insertMessage.run('server-last', 22, sourceChatId, 0, 200, null);
@@ -71,6 +72,9 @@ describe('full repair reconciliation', () => {
       insertMessage.run('late-attachment-message', 70, lateAttachmentChatId, 0, 700, null)
         .lastInsertRowid,
     );
+    const rcsMessageId = Number(
+      insertMessage.run('rcs-local-message', null, rcsChatId, 0, 800, null).lastInsertRowid,
+    );
     raw
       .prepare('UPDATE chats SET last_read_message_guid = ? WHERE id = ?')
       .run('server-last', sourceChatId);
@@ -80,6 +84,9 @@ describe('full repair reconciliation', () => {
     raw
       .prepare('INSERT INTO attachments (guid, message_id) VALUES (?, ?)')
       .run('late-old-attachment', lateAttachmentMessageId);
+    raw
+      .prepare('INSERT INTO attachments (guid, message_id) VALUES (?, ?)')
+      .run('rcs-local-attachment', rcsMessageId);
     raw
       .prepare(
         `INSERT INTO reminders
@@ -117,24 +124,19 @@ describe('full repair reconciliation', () => {
       fetchDeletedAfter: async () => [],
     };
     const views: FullSyncServerView[] = [];
-    const runRepairView = async (): Promise<void> => {
-      await fullSync(db, api, {
-        maxMessagesPerChat: 0,
-        failOnChatError: true,
-        commitMarker: false,
-        onServerView: (view) => views.push(view),
-      });
-    };
-    await runRepairView();
-    await runRepairView();
-    expect(views).toHaveLength(2);
-    expect(sameFullSyncServerView(views[0]!, views[1]!)).toBe(true);
-    expect(views[1]!.messages.get('server-last')).toEqual({
+    await fullSync(db, api, {
+      maxMessagesPerChat: 0,
+      failOnChatError: true,
+      commitMarker: false,
+      onServerView: (view) => views.push(view),
+    });
+    expect(views).toHaveLength(1);
+    expect(views[0]!.messages.get('server-last')).toEqual({
       chatGuid: 'server-chat',
       originalRowId: 22,
     });
 
-    // These protections land after exposure, as they can during the two long network crawls.
+    // These protections land after exposure, as they can during the long network crawl.
     raw
       .prepare('UPDATE messages SET date_deleted = ? WHERE guid = ?')
       .run(501, 'late-tombstone-message');
@@ -152,7 +154,7 @@ describe('full repair reconciliation', () => {
       .prepare('INSERT INTO attachments (guid, message_id) VALUES (?, ?)')
       .run('late-new-attachment', lateAttachmentMessageId);
 
-    const confirmed = views[1]!;
+    const confirmed = views[0]!;
     const result = await reconcileFullRepairPruneExposure(db, exposure, {
       chatGuids: new Set(confirmed.chats.keys()),
       messageGuids: new Set(confirmed.messages.keys()),
@@ -206,6 +208,15 @@ describe('full repair reconciliation', () => {
         .prepare('SELECT guid FROM attachments WHERE message_id = ? ORDER BY guid')
         .all(lateAttachmentMessageId),
     ).toEqual([{ guid: 'late-new-attachment' }, { guid: 'late-old-attachment' }]);
+    expect(
+      raw.prepare('SELECT id FROM chats WHERE guid = ?').get('RCS;-;group;-;keep-local'),
+    ).toBeDefined();
+    expect(
+      raw.prepare('SELECT id FROM messages WHERE guid = ?').get('rcs-local-message'),
+    ).toBeDefined();
+    expect(
+      raw.prepare('SELECT id FROM attachments WHERE guid = ?').get('rcs-local-attachment'),
+    ).toBeDefined();
 
     // When that customized chat later returns, clear only repair's synthetic visibility floor.
     const handles = await upsertHandles(db, []);

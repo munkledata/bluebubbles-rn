@@ -79,7 +79,9 @@ export async function ensureSyncedBackgroundForChat(
     });
     const db = opened.db;
     if (status === 'paused' || !db || !accountLease.isCurrent()) return;
-    await ensureSyncedBackground(http, db, guid, accountLease);
+    const taskHttp = http.pinTransport();
+    if (!taskHttp.isTransportCurrent()) return;
+    await ensureSyncedBackground(taskHttp, db, guid, accountLease);
   } catch (error) {
     if (accountLease.isCurrent()) {
       logger.warn('[background] synced-background startup failed', error);
@@ -183,7 +185,7 @@ async function runSyncedBackgroundRequest(
   const { http, db, guid, lease } = request;
   // Bind every native URL/header pair to the account generation that started this operation.
   // The lease checks below prevent that generation from committing after Disconnect.
-  const ownsRequest = (): boolean => lease.isCurrent() && isLatest();
+  const ownsRequest = (): boolean => lease.isCurrent() && http.isTransportCurrent() && isLatest();
   const commit = async (
     task: () => Promise<unknown>,
     onGuardRollback?: () => void,

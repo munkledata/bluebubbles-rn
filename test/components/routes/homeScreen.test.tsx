@@ -227,7 +227,13 @@ describe('Home route — boot-completion side-effects', () => {
     await waitFor(() => expect(fireDueScheduledWithDevelopmentSender).toHaveBeenCalledTimes(1));
     const accountLease = fireDueScheduledWithDevelopmentSenderMock.mock.calls[0]![1];
 
-    expect(devSendFakeMock).toHaveBeenCalledWith('plain-chat', 'plain', undefined, accountLease);
+    expect(devSendFakeMock).toHaveBeenCalledWith(
+      'plain-chat',
+      'plain',
+      undefined,
+      accountLease,
+      expect.any(Function),
+    );
     expect(devSendFakeReplyMock).toHaveBeenCalledWith(
       'reply-chat',
       'reply',
@@ -235,6 +241,7 @@ describe('Home route — boot-completion side-effects', () => {
       2,
       undefined,
       accountLease,
+      expect.any(Function),
     );
   });
 

@@ -7,6 +7,23 @@ export type InboxArchiveFilter = 'active' | 'archived' | 'all';
 export type { InboxSenderFilter } from '@core/models';
 
 /**
+ * Shared content-visibility rule for inbox/search/unread/notification readers.
+ *
+ * Migrated legacy rows fall back to the old date marker. A proven partial retraction stays visible;
+ * full and uncertain aggregates fail closed even if their historical body still exists locally.
+ */
+export function messageHasVisibleContentSql(alias: string) {
+  const m = sql.raw(alias);
+  return sql`(
+    CASE
+      WHEN ${m}.retraction_state IN ('intact', 'partial') THEN 1
+      WHEN ${m}.retraction_state IN ('fully-retracted', 'unknown') THEN 0
+      ELSE ${m}.date_retracted IS NULL
+    END
+  )`;
+}
+
+/**
  * One load-bearing definition of a qualifying unread message.
  *
  * The local-deletion floor prevents re-synced pre-delete history from becoming unread when its
@@ -21,7 +38,7 @@ function chatUnreadMessagePredicateSql(chatAlias: string, messageAlias: string) 
   const m = sql.raw(messageAlias);
   return sql`${m}.chat_id = ${c}.id AND ${m}.is_from_me = 0
     AND ${m}.associated_message_type IS NULL
-    AND ${m}.date_retracted IS NULL
+    AND ${messageHasVisibleContentSql(messageAlias)}
     AND ${m}.date_deleted IS NULL
     AND ${m}.date_created > COALESCE(
       (SELECT lm.date_created FROM messages lm WHERE lm.guid = ${c}.last_read_message_guid),
@@ -161,6 +178,6 @@ export function chatVisible(alias: string) {
   return sql`(${t}.deleted_at IS NULL OR EXISTS (
     SELECT 1 FROM messages dm
      WHERE dm.chat_id = ${t}.id AND dm.date_deleted IS NULL
-       AND dm.associated_message_type IS NULL AND dm.date_retracted IS NULL
+       AND dm.associated_message_type IS NULL AND ${messageHasVisibleContentSql('dm')}
        AND dm.date_created > ${t}.deleted_at))`;
 }

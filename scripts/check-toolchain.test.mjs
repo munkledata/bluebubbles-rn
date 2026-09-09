@@ -19,6 +19,7 @@ import {
   npmVersionFromUserAgent,
   runEnvironmentSmoke,
   validateEnvironmentSmokeWorkflowSource,
+  validateReleaseRunnerSource,
   validateResolvedEnvironmentConfig,
   validateToolchain,
 } from './check-toolchain.mjs';
@@ -739,6 +740,56 @@ test('rejects hosted or submitting drift in the phased release commands', () => 
         error.includes('release:android:build must equal the reviewed phased-release command'),
       ),
       script,
+    );
+  }
+});
+
+test('pins retained native-build evidence and rejects ambient EAS bypass controls', () => {
+  const source = readFileSync(resolve(root, 'scripts/release-android.mjs'), 'utf8');
+  assert.deepEqual(validateReleaseRunnerSource(source), []);
+
+  for (const [expected, replacement, errorMarker] of [
+    [
+      "EAS_LOCAL_BUILD_SKIP_CLEANUP: '1'",
+      "EAS_LOCAL_BUILD_SKIP_CLEANUP: '0'",
+      'retain the run-owned EAS workspace',
+    ],
+    [
+      "environment.EAS_LOCAL_BUILD_SKIP_NATIVE_BUILD = '0';",
+      "environment.EAS_LOCAL_BUILD_SKIP_NATIVE_BUILD = '1';",
+      'pin the native-build bypass off',
+    ],
+    [
+      'nativePathProof = verifyReleaseNativePathProof(nativeWorkspace, pendingPath);',
+      'nativePathProof = null;',
+      'verify the exact retained EAS native build',
+    ],
+    [
+      'artifact: buildArtifact,',
+      'artifact: null,',
+      'bind the successful build receipt to the pending AAB',
+    ],
+    [
+      'buildReceiptBinding = readBoundReleaseBuildReceipt(state, artifact);',
+      'buildReceiptBinding = null;',
+      'revalidate the build receipt before artifact validation',
+    ],
+    [
+      'receiptSha256: buildReceiptBinding.sha256,',
+      "receiptSha256: '0'.repeat(64),",
+      'carry the build receipt digest into validation',
+    ],
+    [
+      "proofError.releaseFailureCode = 'native_path_proof_failed';",
+      "proofError.releaseFailureCode = 'build_start_failed';",
+      'terminalize a failed native-path proof',
+    ],
+  ]) {
+    const mutated = source.replace(expected, replacement);
+    assert.notEqual(mutated, source, expected);
+    assert.ok(
+      validateReleaseRunnerSource(mutated).some((error) => error.includes(errorMarker)),
+      expected,
     );
   }
 });

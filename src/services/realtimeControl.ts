@@ -1,7 +1,7 @@
 import * as Crypto from 'expo-crypto';
 import { serverApi } from '@core/api';
 import { strictServerOrigin } from '@core/config';
-import { logger } from '@core/secure';
+import { inspectCredentialUpgradeJournal, logger } from '@core/secure';
 import {
   captureIncomingEvent,
   snapshotIncomingEvent,
@@ -15,7 +15,11 @@ import {
   EventRouter,
   FCM_ENABLED,
 } from '@core/realtime';
-import { chatHasKnownSender, getIncomingEventQueueHealth } from '@db/repositories';
+import {
+  chatHasKnownSender,
+  getIncomingEventQueueHealth,
+  INCOMING_EVENT_DEPENDENCY_RETRY_MS,
+} from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { useFaceTimeStore } from '@state/faceTimeStore';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
@@ -31,10 +35,15 @@ import {
   validateServerConnection,
   type ConnectResult,
 } from './connection';
-import { ensureSyncedBackground } from './backgrounds/syncedBackground';
+import { ensureSyncedBackgroundForRealtimeEvent } from './backgrounds/realtimeSyncedBackground';
+import {
+  recoverRealtimePrerequisite,
+  type RealtimePrerequisiteRecoveryOutcome,
+} from './background/realtimePrerequisiteRecovery';
+import { adoptRealtimeHeadlessEffect } from './background/realtimeHeadlessEffects';
 import { ensureDatabase } from './databaseControl';
-import { ensureChatSynced, maybeResumeSync, startSync } from './syncControl';
-import { autoDownloadMessageAttachments } from './download/autoDownloadAttachments';
+import { maybeResumeSync } from './syncControl';
+import { autoDownloadMessageAttachmentsForRealtimeEvent } from './download/autoDownloadAttachments';
 import { presentAutoDownloadOutcome } from './presentationAdapter';
 import { createAttachmentCacheAccountScope } from './download/attachmentCacheAccountScope';
 import { attachmentCacheCoordinator } from './download/attachmentCacheCoordinator';
@@ -142,6 +151,10 @@ export interface RealtimeStartupIssue {
 
 interface StartRealtimeOptions {
   readonly reportIssue?: (issue: RealtimeStartupIssue) => void;
+  /** Internal: let a foreground resume reuse its exact intent rather than superseding itself. */
+  readonly foregroundIntentEpoch?: number;
+  /** Internal: the caller already awaited the shared credential-upgrade operation. */
+  readonly credentialRecoveryAlreadySettled?: boolean;
 }
 
 function reportRealtimeStartupIssue(
@@ -183,40 +196,257 @@ function retireForegroundSocket(): void {
   }
 }
 
-const pendingRealtimeRecoveries = new Set<string>();
+interface RealtimeRecoveryJob {
+  readonly key: string;
+  readonly db: AppDatabase;
+  readonly generation: number;
+  readonly task: Promise<RealtimePrerequisiteRecoveryOutcome>;
+  references: number;
+  settled: boolean;
+}
 
-/** Schedule recovery without holding a claimed event or the account teardown barrier open. */
-function requestRealtimeRecovery(
-  recovery: IncomingEventConflictRecovery,
-  context?: EventDeliveryContext,
-): void {
-  if (recovery.kind === 'none' || (context && !context.isCurrent())) return;
-  const key = `${context?.generation ?? 0}:${
+interface RealtimeRecoveryCollector {
+  readonly db: AppDatabase;
+  readonly generation: number;
+  readonly jobs: Set<RealtimeRecoveryJob>;
+  readonly dependencyJobs: Set<RealtimeRecoveryJob>;
+  readonly dependencyDue: Promise<boolean>[];
+  dependencyRequestsAwaitingDeferral: number;
+  waitOnlyDependencyDeferred: boolean;
+}
+
+const pendingRealtimeRecoveries = new Map<AppDatabase, Map<string, RealtimeRecoveryJob>>();
+const activeRealtimeRecoveryCollectors = new Set<RealtimeRecoveryCollector>();
+const REALTIME_RECOVERY_RETRY_DRAIN_BUDGET_MS = 20_000;
+
+function recoveryKey(
+  recovery: Exclude<IncomingEventConflictRecovery, { readonly kind: 'none' }>,
+  generation: number,
+): string {
+  return `${generation}:${
     recovery.kind === 'sync-chat' ? `chat:${recovery.chatGuid}` : recovery.kind
   }`;
-  if (pendingRealtimeRecoveries.has(key)) return;
-  pendingRealtimeRecoveries.add(key);
-  void Promise.resolve()
-    .then(async () => {
-      if (context && !context.isCurrent()) return;
-      if (recovery.kind === 'sync-chat') {
-        await ensureChatSynced(recovery.chatGuid);
-      } else {
-        // Explicit durable recovery must not use the reconnect throttle: short-lived receipts can
-        // expire before a delayed retry, and full sync is what rehydrates chat read watermarks.
-        // startSync still coalesces concurrent work for the same account generation.
-        await startSync();
-      }
+}
+
+function retireRealtimeRecoveryJob(job: RealtimeRecoveryJob): void {
+  if (!job.settled || job.references !== 0) return;
+  const jobs = pendingRealtimeRecoveries.get(job.db);
+  if (jobs?.get(job.key) !== job) return;
+  jobs.delete(job.key);
+  if (jobs.size === 0) pendingRealtimeRecoveries.delete(job.db);
+}
+
+/**
+ * Start task-local prerequisite recovery immediately. An active FCM delivery adopts the job into
+ * its own native lifetime; foreground/socket delivery can rely on IncomingEventDrain's wake timer.
+ */
+function requestRealtimeRecovery(
+  db: AppDatabase,
+  recovery: IncomingEventConflictRecovery,
+  context?: EventDeliveryContext,
+  dependencyRetry = false,
+): void {
+  if (recovery.kind === 'none' || !context?.isCurrent()) return;
+  const generation = context.generation;
+  const key = recoveryKey(recovery, generation);
+  let jobs = pendingRealtimeRecoveries.get(db);
+  if (!jobs) {
+    jobs = new Map<string, RealtimeRecoveryJob>();
+    pendingRealtimeRecoveries.set(db, jobs);
+  }
+
+  let job = jobs.get(key);
+  if (!job) {
+    const accountLease = captureRealtimeDeliveryLease();
+    if (
+      accountLease.generation !== generation ||
+      !accountLease.isCurrent() ||
+      realtimeIntakeLocked()
+    ) {
+      return;
+    }
+    let created!: RealtimeRecoveryJob;
+    const task = recoverRealtimePrerequisite(db, recovery, generation, {
+      isAllowed: () => accountLease.isCurrent() && !realtimeIntakeLocked(),
+      subscribeInvalidation: (invalidate) =>
+        useLockStore.subscribe((state) => {
+          if (effectivelyLocked(state, false)) invalidate();
+        }),
     })
-    .catch((error: unknown) => {
-      if (!context || context.isCurrent()) {
+      .catch((error: unknown): RealtimePrerequisiteRecoveryOutcome => {
         logger.warn('[incomingEvents] recovery task failed', {
           kind: recovery.kind,
           errorName: error instanceof Error ? error.name : 'UnknownError',
         });
-      }
-    })
-    .finally(() => pendingRealtimeRecoveries.delete(key));
+        return 'unavailable';
+      })
+      .finally(() => {
+        created.settled = true;
+        retireRealtimeRecoveryJob(created);
+      });
+    created = {
+      key,
+      db,
+      generation,
+      task,
+      references: 0,
+      settled: false,
+    };
+    jobs.set(key, created);
+    job = created;
+  }
+
+  for (const collector of activeRealtimeRecoveryCollectors) {
+    if (collector.db !== db || collector.generation !== generation) continue;
+    if (!collector.jobs.has(job)) {
+      collector.jobs.add(job);
+      job.references += 1;
+    }
+    if (dependencyRetry) {
+      collector.dependencyJobs.add(job);
+      collector.dependencyRequestsAwaitingDeferral += 1;
+    }
+  }
+}
+
+function beginRealtimeRecoveryCollector(
+  db: AppDatabase,
+  generation: number,
+): RealtimeRecoveryCollector {
+  const collector: RealtimeRecoveryCollector = {
+    db,
+    generation,
+    jobs: new Set(),
+    dependencyJobs: new Set(),
+    dependencyDue: [],
+    dependencyRequestsAwaitingDeferral: 0,
+    waitOnlyDependencyDeferred: false,
+  };
+  activeRealtimeRecoveryCollectors.add(collector);
+  return collector;
+}
+
+function noteRealtimeDependencyDeferred(db: AppDatabase, context?: EventDeliveryContext): void {
+  if (!context?.isCurrent()) return;
+  for (const collector of activeRealtimeRecoveryCollectors) {
+    if (collector.db !== db || collector.generation !== context.generation) continue;
+    // Start from the actual DB settlement, not from the end of a possibly multi-row drain flight.
+    collector.dependencyDue.push(waitForRealtimeDependencyRetry(collector.generation));
+    if (collector.dependencyRequestsAwaitingDeferral > 0) {
+      collector.dependencyRequestsAwaitingDeferral -= 1;
+    } else {
+      collector.waitOnlyDependencyDeferred = true;
+    }
+  }
+}
+
+/** Wait the repository's exact dependency backoff, cancelling immediately on account retirement. */
+async function waitForRealtimeDependencyRetry(generation: number): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+    let releaseInvalidation = (): void => undefined;
+    const finish = (current: boolean): void => {
+      if (settled) return;
+      settled = true;
+      if (timeoutHandle != null) clearTimeout(timeoutHandle);
+      releaseInvalidation();
+      resolve(current);
+    };
+    releaseInvalidation = subscribeRealtimeGenerationInvalidation(generation, () => finish(false));
+    if (settled) return;
+    timeoutHandle = setTimeout(() => finish(true), INCOMING_EVENT_DEPENDENCY_RETRY_MS);
+  });
+}
+
+async function resumeRecoveredRealtimeEvents(
+  runtime: RealtimeRuntime,
+  generation: number,
+): Promise<void> {
+  const accountLease = captureRealtimeDeliveryLease();
+  if (
+    accountLease.generation !== generation ||
+    !accountLease.isCurrent() ||
+    realtimeRuntimeInstance !== runtime
+  ) {
+    return;
+  }
+
+  let ownsAttempt = true;
+  let timedOut = false;
+  let cancelled = false;
+  let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+  let cancelAttempt!: () => void;
+  const invalidation = new Promise<void>((resolve) => {
+    cancelAttempt = () => {
+      cancelled = true;
+      ownsAttempt = false;
+      resolve();
+    };
+  });
+  const releaseInvalidation = subscribeRealtimeGenerationInvalidation(generation, cancelAttempt);
+  const retryContext: EventDeliveryContext = {
+    generation,
+    isCurrent: () => ownsAttempt && accountLease.isCurrent() && realtimeRuntimeInstance === runtime,
+  };
+  const resume = runtime.dispatcher.resume(retryContext).catch((error: unknown) => {
+    if (retryContext.isCurrent()) {
+      logger.warn('[incomingEvents] recovered-event retry failed', {
+        errorName: error instanceof Error ? error.name : 'UnknownError',
+      });
+    }
+  });
+  const timeout = new Promise<void>((resolve) => {
+    timeoutHandle = setTimeout(() => {
+      timedOut = true;
+      ownsAttempt = false;
+      resolve();
+    }, REALTIME_RECOVERY_RETRY_DRAIN_BUDGET_MS);
+  });
+
+  try {
+    await Promise.race([resume, timeout, invalidation]);
+  } finally {
+    ownsAttempt = false;
+    if (timeoutHandle != null) clearTimeout(timeoutHandle);
+    releaseInvalidation();
+  }
+  if (timedOut && !cancelled && accountLease.isCurrent()) {
+    logger.warn('[incomingEvents] recovered-event retry exceeded its headless budget');
+  }
+}
+
+async function finishRealtimeRecoveryCollector(
+  collector: RealtimeRecoveryCollector,
+  runtime: RealtimeRuntime,
+): Promise<void> {
+  // Stop accepting new jobs before the retry. A retry of the same FIFO head reuses the retained
+  // settled job without recursively opening another recovery/retry loop.
+  activeRealtimeRecoveryCollectors.delete(collector);
+  const jobs = [...collector.jobs];
+  try {
+    // These clocks started at each successful DB deferral. Waiting here therefore produces
+    // max(recovery completion, actual defer+5s), not recovery duration plus another five seconds.
+    const dependencyDue =
+      collector.dependencyDue.length > 0
+        ? Promise.all(collector.dependencyDue).then((current) => current.every(Boolean))
+        : Promise.resolve(false);
+    const [entries, retryIsCurrent] = await Promise.all([
+      Promise.all(jobs.map(async (job) => [job, await job.task] as const)),
+      dependencyDue,
+    ]);
+    const outcomes = new Map<RealtimeRecoveryJob, RealtimePrerequisiteRecoveryOutcome>(entries);
+    const recoveredDependency =
+      collector.waitOnlyDependencyDeferred ||
+      [...collector.dependencyJobs].some((job) => outcomes.get(job) === 'recovered');
+    if (!recoveredDependency || !retryIsCurrent) return;
+    await resumeRecoveredRealtimeEvents(runtime, collector.generation);
+  } finally {
+    for (const job of jobs) {
+      job.references -= 1;
+      retireRealtimeRecoveryJob(job);
+    }
+  }
 }
 
 function realtimeIntakeLocked(): boolean {
@@ -240,7 +470,7 @@ function canPersistRealtimeEvent(event: NormalizedEvent): boolean {
 // identical regardless of how the event arrived. Outer layer routes ephemeral typing
 // events to UI state; inner layer writes the DB (source of truth) then notifies.
 let realtimeSinkInstance: EventSink | null = null;
-function realtimeSink(db: AppDatabase): EventSink {
+function realtimeSink(db: AppDatabase, accountGeneration: number): EventSink {
   realtimeSinkInstance ??= new ServerUrlEventSink(
     new RcsAlertEventSink(
       new FaceTimeEventSink(
@@ -249,9 +479,45 @@ function realtimeSink(db: AppDatabase): EventSink {
             new NotifyingEventSink(
               new DbEventSink(
                 db,
-                async (messageId) => {
+                async (messageId, source, context) => {
+                  if (source === 'fcm' && context) {
+                    if (context.generation !== accountGeneration) return;
+                    const adoption = adoptRealtimeHeadlessEffect(
+                      accountGeneration,
+                      `auto-download:${messageId}`,
+                      async (lifetime) => {
+                        const effectIsCurrent = (): boolean =>
+                          lifetime.isCurrent() && !realtimeIntakeLocked();
+                        if (!effectIsCurrent()) return;
+                        const outcome = await autoDownloadMessageAttachmentsForRealtimeEvent(
+                          db,
+                          messageId,
+                          accountGeneration,
+                          {
+                            isEffectCurrent: effectIsCurrent,
+                            // expo-media-library exposes no abort signal. Keep a killed-process
+                            // owner strictly bounded by persisting only the app-cache copy.
+                            allowExternalMediaSave: false,
+                          },
+                        );
+                        if (effectIsCurrent()) presentAutoDownloadOutcome(outcome);
+                      },
+                    );
+                    if (adoption.status === 'adopted') {
+                      await adoption.task;
+                      return;
+                    }
+                    // A matching callback exists but has expired/revoked. Never escape its bound by
+                    // capturing a fresh detached lease; a later foreground/manual path can fetch.
+                    if (adoption.status === 'rejected') return;
+                  }
                   const lease = captureRealtimeDeliveryLease();
-                  const outcome = await autoDownloadMessageAttachments(db, messageId, lease);
+                  if (!lease.isCurrent() || lease.generation !== accountGeneration) return;
+                  const outcome = await autoDownloadMessageAttachmentsForRealtimeEvent(
+                    db,
+                    messageId,
+                    accountGeneration,
+                  );
                   if (lease.isCurrent()) presentAutoDownloadOutcome(outcome);
                 },
                 async (context) => {
@@ -266,8 +532,10 @@ function realtimeSink(db: AppDatabase): EventSink {
                 },
                 (chatGuid, context) =>
                   requestRealtimeRecovery(
+                    db,
                     chatGuid ? { kind: 'sync-chat', chatGuid } : { kind: 'sync-account' },
                     context,
+                    true,
                   ),
               ),
               db,
@@ -318,9 +586,11 @@ function realtimeSink(db: AppDatabase): EventSink {
             // Chat-background changed/removed group event → refetch the synced wallpaper. Injected
             // (not run inside DbEventSink) because it's a network + DB side effect. Change-detects
             // internally, so calling it on ingestion — before the channel visibly syncs — is safe.
-            // Wallpaper transfer outlives the durable-event attempt. Omit that short-lived context
-            // so ensureSyncedBackground captures a fresh account-generation lease of its own.
-            (guid) => ensureSyncedBackground(http, db, guid),
+            // Wallpaper transfer outlives the durable-event attempt. The dedicated entry point
+            // captures a fresh account lease and pins either the connected foreground transport or
+            // the authorized durable tuple used by a killed-process FCM wake.
+            (guid, accountGeneration) =>
+              ensureSyncedBackgroundForRealtimeEvent(db, guid, accountGeneration),
           ),
           (chatGuid, display) => useTypingStore.getState().setTyping(chatGuid, display),
         ),
@@ -337,8 +607,8 @@ function realtimeSink(db: AppDatabase): EventSink {
 // One normalizer/sink chain per account generation. Durable receipts, rather than EventRouter's
 // legacy in-memory set, own cross-transport deduplication and process-death recovery.
 let sharedRouterInstance: EventRouter | null = null;
-function sharedRouter(db: AppDatabase): EventRouter {
-  sharedRouterInstance ??= new EventRouter(realtimeSink(db));
+function sharedRouter(db: AppDatabase, accountGeneration: number): EventRouter {
+  sharedRouterInstance ??= new EventRouter(realtimeSink(db, accountGeneration));
   return sharedRouterInstance;
 }
 
@@ -350,9 +620,11 @@ interface RealtimeRuntime {
 }
 
 let realtimeRuntimeInstance: RealtimeRuntime | null = null;
-// A headless bundle starts false. Foreground lifecycle calls below are the sole owner of this bit,
-// so a killed/background FCM wake may drain immediately but never keeps the process alive on a
-// dormant retry timer.
+// A headless bundle starts with neither desired nor active foreground work. Credential adoption may
+// temporarily stop the transport while preserving `desired`; a real AppState/App Lock pause clears
+// both so an older async recovery can never reopen the socket afterward.
+let realtimeForegroundDesired = false;
+let realtimeForegroundIntentEpoch = 0;
 let realtimeForegroundActive = false;
 let realtimeLifecycleEpoch = 0;
 let fallbackOccurrenceSequence = 0;
@@ -361,6 +633,16 @@ let fallbackOccurrenceNamespace: string | null = null;
 function getFallbackOccurrenceNamespace(): string {
   fallbackOccurrenceNamespace ??= Crypto.randomUUID();
   return fallbackOccurrenceNamespace;
+}
+
+function claimRealtimeForegroundIntent(): number {
+  realtimeForegroundDesired = true;
+  realtimeForegroundIntentEpoch += 1;
+  return realtimeForegroundIntentEpoch;
+}
+
+function ownsRealtimeForegroundIntent(expectedEpoch: number): boolean {
+  return realtimeForegroundDesired && realtimeForegroundIntentEpoch === expectedEpoch;
 }
 
 interface TransportHealthOwner {
@@ -437,14 +719,15 @@ function getRealtimeRuntime(
   if (existing?.db === db && existing.generation === context.generation) return existing;
   resetRealtimeRuntime();
 
-  const router = sharedRouter(db);
+  const router = sharedRouter(db, context.generation);
   const canDrainPrivateQueue = () => !realtimeIntakeLocked();
   const drain = new IncomingEventDrain(db, router, expoDigestBackend, {
     makeLeaseToken: () => Crypto.randomUUID(),
     canDrain: canDrainPrivateQueue,
     canScheduleWake: () => realtimeForegroundActive && canDrainPrivateQueue(),
+    onDependencyDeferred: (deliveryContext) => noteRealtimeDependencyDeferred(db, deliveryContext),
     onPermanentFailure: (_eventName, deliveryContext) =>
-      requestRealtimeRecovery({ kind: 'sync-account' }, deliveryContext),
+      requestRealtimeRecovery(db, { kind: 'sync-account' }, deliveryContext),
   });
   const dispatcher = new DurableRealtimeDispatcher(db, expoDigestBackend, drain, {
     makeTransportOccurrenceId: (source) =>
@@ -452,9 +735,12 @@ function getRealtimeRuntime(
     // `isDevServer()` safely handles runtimes (such as plain Node tests) where `__DEV__` does not
     // exist, and narrows the opt-in to the exact fixture session instead of every debug session.
     allowDevPersistWithoutDrain: isDevServer(),
+    // This seam is callable only through persistAuthenticatedLockedFcmV3Event below, after the
+    // FCM layer has authenticated the complete V3 identity and supplied a lock-bound context.
+    allowLockedFcmV3PersistWithoutDrain: true,
     canPersist: canPersistRealtimeEvent,
     requestRecovery: (recovery, _reason, deliveryContext) =>
-      requestRealtimeRecovery(recovery, deliveryContext),
+      requestRealtimeRecovery(db, recovery, deliveryContext),
   });
   const runtime: RealtimeRuntime = {
     db,
@@ -481,14 +767,58 @@ async function dispatchWithContext(
   if (!context.isCurrent() || realtimeIntakeLocked()) return;
   const db = await ensureDatabase();
   if (!context.isCurrent() || realtimeIntakeLocked()) return;
-  await getRealtimeRuntime(db, context)?.dispatcher.handle(
-    eventName,
-    rawData,
-    source,
+  const runtime = getRealtimeRuntime(db, context);
+  if (!runtime) return;
+  const recoveryCollector =
+    source === 'fcm' ? beginRealtimeRecoveryCollector(db, context.generation) : null;
+  try {
+    await runtime.dispatcher.handle(eventName, rawData, source, context, occurrence, receivedAt);
+  } finally {
+    if (recoveryCollector) {
+      await finishRealtimeRecoveryCollector(recoveryCollector, runtime);
+    }
+  }
+}
+
+/**
+ * Persist one authenticated V3 push while App Lock is still effective, without claiming or
+ * draining it. Opening SQLCipher here is a deliberately narrow exception: this path writes only
+ * the canonical encrypted-at-rest queue envelope and performs no router, recovery, sync, or native
+ * notification effect. Ordinary unlock/realtime startup later resumes the same durable queue.
+ */
+export async function persistAuthenticatedLockedFcmV3Event(
+  eventName: string,
+  rawData: unknown,
+  context: EventDeliveryContext,
+  occurrence: EventOccurrenceMetadata,
+): Promise<'enqueued' | 'not-enqueued'> {
+  if (
+    !context.isCurrent() ||
+    !occurrence.serverEventId?.startsWith('fcm3:') ||
+    occurrence.authenticatedExpiresAt === undefined
+  ) {
+    return 'not-enqueued';
+  }
+  const captured = captureIncomingEvent(eventName, rawData);
+  if (!captured || captured.eventName === 'new-server') return 'not-enqueued';
+  const capturedOccurrence: EventOccurrenceMetadata = {
+    serverEventId: occurrence.serverEventId,
+    transportOccurrenceId: occurrence.transportOccurrenceId,
+    receivedAt: occurrence.receivedAt,
+    authenticatedExpiresAt: occurrence.authenticatedExpiresAt,
+  };
+  const receivedAt = capturedOccurrence.receivedAt ?? Date.now();
+  const db = await ensureDatabase();
+  if (!context.isCurrent()) return 'not-enqueued';
+  const runtime = getRealtimeRuntime(db, context);
+  const result = await runtime?.dispatcher.persistLockedFcmV3WithoutDrain(
+    captured.eventName,
+    captured.rawData,
     context,
-    occurrence,
+    capturedOccurrence,
     receivedAt,
   );
+  return context.isCurrent() && result?.status === 'enqueued' ? 'enqueued' : 'not-enqueued';
 }
 
 /**
@@ -513,6 +843,7 @@ export async function dispatchRealtimeEvent(
     ? {
         serverEventId: occurrence.serverEventId,
         transportOccurrenceId: occurrence.transportOccurrenceId,
+        authenticatedExpiresAt: occurrence.authenticatedExpiresAt,
       }
     : undefined;
   const normalized = snapshotIncomingEvent(captured.eventName, captured.rawData);
@@ -520,6 +851,10 @@ export async function dispatchRealtimeEvent(
   // never put the candidate into the durable incoming-event queue. The coordinator binds the
   // dormant prompt to this account generation without holding teardown open while the user reads.
   if (normalized?.type === 'new-server') {
+    if (source === 'fcm' && occurrence?.serverEventId?.startsWith('fcm3:')) {
+      logger.warn('[incomingEvents] rejected V3 FCM server rotation');
+      return;
+    }
     await applyNewServerUrl(normalized.url, context);
     return;
   }
@@ -671,6 +1006,30 @@ export const devPush = {
 
 /** Connect the live socket and route its events into the DB. */
 export async function startRealtime(options: StartRealtimeOptions = {}): Promise<void> {
+  // Publish foreground intent before the first await. A background/App Lock pause during credential
+  // recovery clears it synchronously and must win over this older startup.
+  const foregroundIntentEpoch = options.foregroundIntentEpoch ?? claimRealtimeForegroundIntent();
+  if (!ownsRealtimeForegroundIntent(foregroundIntentEpoch) || realtimeIntakeLocked()) return;
+  if (!options.credentialRecoveryAlreadySettled) {
+    // Recover credential adoption before opening a socket or scheduling ordinary FCM registration.
+    // A resume joins an existing operation, so no newer foreground owner can pass this boundary
+    // while credential custody is still changing.
+    await import('./credentialUpgrade')
+      .then((module) => module.resumeScopedCredentialUpgrade({ restartRealtime: false }))
+      .then((outcome) => {
+        if (outcome.kind === 'quarantined') {
+          logger.warn('[credential-upgrade] realtime startup is using quarantined recovery state', {
+            reason: outcome.reason,
+          });
+        }
+      })
+      .catch((error) => {
+        logger.warn('[credential-upgrade] reconnect recovery failed', {
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+        });
+      });
+  }
+  if (!ownsRealtimeForegroundIntent(foregroundIntentEpoch) || realtimeIntakeLocked()) return;
   realtimeForegroundActive = true;
   const lifecycleEpoch = ++realtimeLifecycleEpoch;
   const db = await ensureDatabase();
@@ -678,6 +1037,7 @@ export async function startRealtime(options: StartRealtimeOptions = {}): Promise
   // reconnect a socket after pauseRealtime already closed foreground intake.
   if (
     !realtimeForegroundActive ||
+    !ownsRealtimeForegroundIntent(foregroundIntentEpoch) ||
     lifecycleEpoch !== realtimeLifecycleEpoch ||
     realtimeIntakeLocked()
   ) {
@@ -833,7 +1193,7 @@ export async function startRealtime(options: StartRealtimeOptions = {}): Promise
  * the resume a deterministic fresh reconnect (rather than waiting for socket.io to notice the dead
  * connection via a late ping-timeout). Wired to AppState in `app/(app)/_layout.tsx`.
  */
-export function pauseRealtime(): void {
+function pauseRealtimeTransport(): void {
   realtimeForegroundActive = false;
   realtimeLifecycleEpoch += 1;
   serverRotationCoordinator.cancel();
@@ -845,27 +1205,84 @@ export function pauseRealtime(): void {
   retireForegroundSocket();
 }
 
+/** A real background/App Lock pause revokes the foreground intent as well as its transport. */
+export function pauseRealtime(): void {
+  realtimeForegroundDesired = false;
+  realtimeForegroundIntentEpoch += 1;
+  pauseRealtimeTransport();
+}
+
+/** Credential adoption stops the old transport without impersonating an AppState background. */
+export function pauseRealtimeForCredentialUpgrade(): void {
+  pauseRealtimeTransport();
+}
+
 /**
  * On foreground: reconnect the socket if it isn't currently connected, and ALWAYS pull anything
  * missed while backgrounded over HTTP (fast + deterministic) instead of waiting on the socket
  * handshake or FCM. `maybeResumeSync` is coalesced/throttled, so a quick app-switch is cheap.
  */
-export async function resumeRealtime(): Promise<void> {
+async function resumeDesiredRealtime(
+  foregroundIntentEpoch: number,
+  options: { readonly credentialRecoveryAlreadySettled?: boolean } = {},
+): Promise<void> {
+  if (!ownsRealtimeForegroundIntent(foregroundIntentEpoch) || realtimeIntakeLocked()) return;
+  if (!options.credentialRecoveryAlreadySettled) {
+    await import('./credentialUpgrade')
+      .then((module) => module.resumeScopedCredentialUpgrade({ restartRealtime: false }))
+      .catch((error) => {
+        logger.warn('[credential-upgrade] foreground recovery failed', {
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+        });
+      });
+  }
+  // Credential recovery may deliberately pause the old transport while it owns the journal. Only
+  // reopen it if no real background/App Lock pause revoked the foreground request in the meantime.
+  if (!ownsRealtimeForegroundIntent(foregroundIntentEpoch) || realtimeIntakeLocked()) return;
   realtimeForegroundActive = true;
   const { origin, password } = useSessionStore.getState();
   if (!origin || !password) return;
   // Do not invalidate a healthy foreground owner's callbacks merely because another `active`
   // notification arrived (for example, after dismissing a system permission dialog). A genuine
   // restart enters startRealtime(), which advances the epoch and replaces every observer itself.
-  if (!socket || !socket.connected) await startRealtime();
-  if (!realtimeForegroundActive || realtimeIntakeLocked()) return;
+  if (!socket || !socket.connected) {
+    await startRealtime({ foregroundIntentEpoch, credentialRecoveryAlreadySettled: true });
+    if (!ownsRealtimeForegroundIntent(foregroundIntentEpoch) || realtimeIntakeLocked()) return;
+  }
+  if (
+    !realtimeForegroundActive ||
+    !ownsRealtimeForegroundIntent(foregroundIntentEpoch) ||
+    realtimeIntakeLocked()
+  ) {
+    return;
+  }
   // Even a healthy socket does not imply the prior process finished its durable queue.
   await runTrackedRealtimeDelivery(async (lease) => {
+    if (!ownsRealtimeForegroundIntent(foregroundIntentEpoch) || realtimeIntakeLocked()) return;
     const db = await ensureDatabase();
-    if (!lease.isCurrent()) return;
+    if (
+      !lease.isCurrent() ||
+      !ownsRealtimeForegroundIntent(foregroundIntentEpoch) ||
+      realtimeIntakeLocked()
+    ) {
+      return;
+    }
     await getRealtimeRuntime(db, lease)?.dispatcher.resume(lease);
   });
+  if (!ownsRealtimeForegroundIntent(foregroundIntentEpoch) || realtimeIntakeLocked()) return;
   maybeResumeSync();
+}
+
+export async function resumeRealtime(): Promise<void> {
+  const foregroundIntentEpoch = claimRealtimeForegroundIntent();
+  await resumeDesiredRealtime(foregroundIntentEpoch);
+}
+
+/** Resume an internally-paused credential transition only while foreground intent still exists. */
+export async function resumeRealtimeAfterCredentialUpgrade(): Promise<void> {
+  await resumeDesiredRealtime(realtimeForegroundIntentEpoch, {
+    credentialRecoveryAlreadySettled: true,
+  });
 }
 
 /**
@@ -895,6 +1312,20 @@ export async function applyNewServerUrl(
       strictServerOrigin(latest.origin) === current
     );
   };
+  let credentialUpgrade;
+  try {
+    credentialUpgrade = inspectCredentialUpgradeJournal(await vault.get('serverCredentialUpgrade'));
+  } catch {
+    logger.warn(
+      '[realtime] server rotation blocked because credential-upgrade state is unavailable',
+    );
+    return;
+  }
+  if (!isCurrentForegroundSession()) return;
+  if (credentialUpgrade.kind !== 'absent') {
+    logger.warn('[realtime] server rotation blocked while credential adoption is unresolved');
+    return;
+  }
   const result = serverRotationCoordinator.offer(
     url,
     current,

@@ -1,9 +1,9 @@
 import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
-import { Chat } from '@core/models';
+import { Chat, Message } from '@core/models';
 import { logger } from '@core/secure';
-import { upsertChats, upsertHandles } from '@db/repositories';
+import { upsertChats, upsertHandles, upsertMessages } from '@db/repositories';
 import { DbCommitGuardRejectedError } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import {
@@ -27,17 +27,23 @@ const noAttachmentIo: OutgoingQueueIO = {
   fileExists: () => Promise.resolve(false),
 };
 
-/** Fake HttpClient capturing the posted path + body (only `post` is used by sendContact). */
+/** Fake HttpClient capturing the posted path + body and advertising exact part topology. */
 function fakeHttp(impl: (path: string, json: unknown) => Promise<unknown>): {
   http: HttpClient;
   last: () => { path: string; json: unknown } | null;
 } {
   let last: { path: string; json: unknown } | null = null;
-  const http = {
+  let http!: HttpClient;
+  http = {
+    get: () =>
+      Promise.resolve({ version: 'test', private_api: true, supports_message_part_topology: true }),
     post: (path: string, _schema: unknown, opts: { json?: unknown }) => {
       last = { path, json: opts?.json };
       return impl(path, opts?.json);
     },
+    pinTransport: () => http,
+    isTransportCurrent: () => true,
+    assertTransportCurrent: () => undefined,
   } as unknown as HttpClient;
   return { http, last: () => last };
 }
@@ -47,6 +53,38 @@ async function seedChat(db: AppDatabase, guid: string) {
   await upsertChats(
     db,
     [Chat.parse({ guid, participants: [{ address: 'craig@apple.com' }] })],
+    handles,
+  );
+}
+
+async function seedExactTarget(
+  db: AppDatabase,
+  chatGuid: string,
+  messageGuid: string,
+  partIndex: number,
+): Promise<void> {
+  const handles = await upsertHandles(db, [{ address: 'craig@apple.com' }]);
+  const chats = await upsertChats(
+    db,
+    [Chat.parse({ guid: chatGuid, participants: [{ address: 'craig@apple.com' }] })],
+    handles,
+  );
+  await upsertMessages(
+    db,
+    [
+      Message.parse({
+        guid: messageGuid,
+        text: 'Reply target',
+        dateCreated: 1_500,
+        messagePartTopology: {
+          complete: true,
+          originalPartIndexes: [partIndex],
+          currentParts: [{ index: partIndex, kind: 'text' }],
+          attachmentOwnership: [],
+        },
+      }),
+    ],
+    () => chats.get(chatGuid)!,
     handles,
   );
 }
@@ -82,11 +120,30 @@ describe('sendContactMessage', () => {
   it('optimistically inserts then promotes temp→real on the send ack (one row, is-from-me)', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
-    const { http } = fakeHttp(async () => ({ guid: 'real-ct', viaPrivateApi: true }));
-    await sendContactMessage(db, http, {
-      chatGuid: 'c1',
-      contact: { firstName: 'Craig', lastName: 'Federighi', phones: [{ number: '+15551234567' }] },
+    const onQueued = jest.fn();
+    let queuedBeforePost = false;
+    const { http } = fakeHttp(async () => {
+      queuedBeforePost = onQueued.mock.calls.length === 1;
+      return { guid: 'real-ct', viaPrivateApi: true };
     });
+    await sendContactMessage(
+      db,
+      http,
+      {
+        chatGuid: 'c1',
+        contact: {
+          firstName: 'Craig',
+          lastName: 'Federighi',
+          phones: [{ number: '+15551234567' }],
+        },
+      },
+      Date.now(),
+      undefined,
+      undefined,
+      onQueued,
+    );
+    expect(onQueued).toHaveBeenCalledWith(expect.stringMatching(/^temp-/));
+    expect(queuedBeforePost).toBe(true);
     expect(countMessages(raw)).toBe(1);
     const row = raw
       .prepare('SELECT guid, send_state s, is_from_me f, text FROM messages')
@@ -148,6 +205,7 @@ describe('sendContactMessage', () => {
       expect(one(raw, "SELECT latest_message_date d FROM chats WHERE guid='c1'").d).toBe(321);
 
       raw.exec('DROP TRIGGER pause_contact_during_chat_update');
+      await seedExactTarget(db, 'c1', 'reply-target', 2);
       resumeRealtimeDeliveries();
       const freshLease = captureRealtimeDeliveryLease();
       const freshContact = {
@@ -175,6 +233,7 @@ describe('sendContactMessage', () => {
                 raw,
                 `SELECT m.guid AS messageGuid, m.text, m.send_state AS sendState,
                         m.date_created AS created, m.thread_originator_guid AS replyGuid,
+                        m.thread_originator_part AS replyPart,
                         q.temp_guid AS queueGuid, q.kind, q.payload,
                         c.latest_message_date AS chatDate
                    FROM messages m
@@ -187,6 +246,7 @@ describe('sendContactMessage', () => {
               chatGuid: 'c1',
               contact: freshContact,
               selectedMessageGuid: 'reply-target',
+              partIndex: 2,
             },
             2_000,
             () => lease.isCurrent(),
@@ -204,6 +264,7 @@ describe('sendContactMessage', () => {
         sendState: 'sending',
         created: 2_000,
         replyGuid: 'reply-target',
+        replyPart: 2,
         chatDate: 2_000,
       });
       expect(JSON.parse(String(optimisticState?.payload))).toEqual({
@@ -212,6 +273,7 @@ describe('sendContactMessage', () => {
         phones: [{ label: 'work', number: '+15551234000' }],
         emails: [{ label: 'home', address: 'grace@example.test' }],
         selectedMessageGuid: 'reply-target',
+        partIndex: 2,
       });
       expect(String(optimisticState?.payload)).not.toContain('private-device-contact-id');
       expect(String(optimisticState?.payload)).not.toContain('private-contact-photo');
@@ -222,6 +284,7 @@ describe('sendContactMessage', () => {
         firstName: 'Grace',
         lastName: 'Hopper',
         selectedMessageGuid: 'reply-target',
+        partIndex: 2,
       });
       expect(JSON.stringify(requestBody)).not.toContain('private-device-contact-id');
       expect(JSON.stringify(requestBody)).not.toContain('private-contact-photo');
@@ -332,11 +395,15 @@ describe('sendContactMessage — the retry re-sends a CARD, never a text message
     await sendContactMessage(db, failing, { chatGuid: 'c1', contact }, t);
 
     const posts: { path: string; json: Record<string, unknown> }[] = [];
-    const retryHttp = {
+    let retryHttp!: HttpClient;
+    retryHttp = {
       post: (path: string, _schema: unknown, opts: { json?: unknown }) => {
         posts.push({ path, json: (opts?.json ?? {}) as Record<string, unknown> });
         return Promise.resolve({ guid: 'server-guid-1' });
       },
+      pinTransport: () => retryHttp,
+      isTransportCurrent: () => true,
+      assertTransportCurrent: () => undefined,
     } as unknown as HttpClient;
 
     // The failure path schedules the backoff off real `Date.now()` (every send service omits

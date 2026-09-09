@@ -68,7 +68,15 @@ import {
   type ThemeTokens,
 } from '@ui/theme/tokens';
 /** Preset accent colors for the per-chat bubble color (plus "Default"). */
-const SWATCHES = ['#1982FC', '#34C759', '#AF52DE', '#FF2D55', '#FF9500', '#5E81AC'];
+const SWATCHES = ['#1982FC', '#34C759', '#AF52DE', '#FF2D55', '#FF9500', '#5E81AC'] as const;
+const SWATCH_NAMES: Record<(typeof SWATCHES)[number], string> = {
+  '#1982FC': 'Blue',
+  '#34C759': 'Green',
+  '#AF52DE': 'Purple',
+  '#FF2D55': 'Pink',
+  '#FF9500': 'Orange',
+  '#5E81AC': 'Slate blue',
+};
 type ChatSettingsLifetime = object;
 type PickerOperationToken = object;
 interface ChatSettingsGrant {
@@ -773,6 +781,10 @@ function ChatSettingsScreen({
           <View style={styles.swatchRow}>
             <Pressable
               onPress={() => pickColor(null)}
+              accessibilityRole="radio"
+              accessibilityLabel="Default bubble color"
+              accessibilityState={{ selected: accent == null }}
+              hitSlop={6}
               style={[
                 styles.swatch,
                 styles.defaultSwatch,
@@ -786,6 +798,10 @@ function ChatSettingsScreen({
               <Pressable
                 key={c}
                 onPress={() => pickColor(c)}
+                accessibilityRole="radio"
+                accessibilityLabel={`${SWATCH_NAMES[c]} bubble color`}
+                accessibilityState={{ selected: accent === c }}
+                hitSlop={6}
                 style={[styles.swatch, { backgroundColor: c }, accent === c && styles.swatchOn]}
               />
             ))}

@@ -1,4 +1,20 @@
-import { buildSetupQr, parseSetupQr } from '@features/setup/qr';
+import {
+  buildSetupQr,
+  parseSetupQr,
+  SetupQrBuildError,
+  SetupQrParseError,
+  type SetupQrParseErrorCode,
+} from '@features/setup/qr';
+
+function expectParseError(raw: string | null | undefined, code: SetupQrParseErrorCode): void {
+  try {
+    parseSetupQr(raw);
+    throw new Error('Expected parseSetupQr to reject malformed input.');
+  } catch (error) {
+    expect(error).toBeInstanceOf(SetupQrParseError);
+    expect(error).toMatchObject({ code });
+  }
+}
 
 describe('parseSetupQr', () => {
   it('parses a valid [password, serverURL] payload and sanitizes the origin', () => {
@@ -12,21 +28,21 @@ describe('parseSetupQr', () => {
   });
 
   it('throws on empty input', () => {
-    expect(() => parseSetupQr('')).toThrow(/No data/);
-    expect(() => parseSetupQr(null)).toThrow(/No data/);
+    expectParseError('', 'empty');
+    expectParseError(null, 'empty');
   });
 
   it('throws on non-JSON', () => {
-    expect(() => parseSetupQr('not-json')).toThrow(/valid Gator QR/);
+    expectParseError('not-json', 'invalid-json');
   });
 
   it('throws when the array is too short', () => {
-    expect(() => parseSetupQr(JSON.stringify(['only-password']))).toThrow(/Invalid data/);
+    expectParseError(JSON.stringify(['only-password']), 'invalid-shape');
   });
 
   it('throws when password or URL is missing/invalid', () => {
-    expect(() => parseSetupQr(JSON.stringify(['', 'abc.ngrok.io']))).toThrow(/Could not detect/);
-    expect(() => parseSetupQr(JSON.stringify(['pw', '']))).toThrow(/Could not detect/);
+    expectParseError(JSON.stringify(['', 'abc.ngrok.io']), 'missing-credentials');
+    expectParseError(JSON.stringify(['pw', '']), 'missing-credentials');
   });
 });
 
@@ -47,7 +63,7 @@ describe('buildSetupQr', () => {
   });
 
   it('throws when either credential is missing', () => {
-    expect(() => buildSetupQr('', 'pw')).toThrow(/required/);
-    expect(() => buildSetupQr('https://gator.example', '')).toThrow(/required/);
+    expect(() => buildSetupQr('', 'pw')).toThrow(SetupQrBuildError);
+    expect(() => buildSetupQr('https://gator.example', '')).toThrow(SetupQrBuildError);
   });
 });

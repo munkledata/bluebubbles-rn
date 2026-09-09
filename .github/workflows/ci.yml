@@ -70,6 +70,9 @@ jobs:
       - name: Database write approval guard
         run: node scripts/check-db-writes.mjs --check
 
+      - name: Fast database-write scanner suite
+        run: npm run check:db-writes:fast
+
       - name: Audit clean lockfile (all dependencies)
         run: npm audit --audit-level=high
 
@@ -122,6 +125,18 @@ jobs:
     name: Clean Android prebuild · native modules · APK + AAB
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      GRADLE_USER_HOME: /var/tmp/gator-gradle
+      CFLAGS: >-
+        -ffile-prefix-map=${{ github.workspace }}=/gator/source
+        -fdebug-prefix-map=${{ github.workspace }}=/gator/source
+        -ffile-prefix-map=/var/tmp/gator-gradle=/gator/gradle
+        -fdebug-prefix-map=/var/tmp/gator-gradle=/gator/gradle
+      CXXFLAGS: >-
+        -ffile-prefix-map=${{ github.workspace }}=/gator/source
+        -fdebug-prefix-map=${{ github.workspace }}=/gator/source
+        -ffile-prefix-map=/var/tmp/gator-gradle=/gator/gradle
+        -fdebug-prefix-map=/var/tmp/gator-gradle=/gator/gradle
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -171,8 +186,20 @@ jobs:
           ./gradlew
           :gator-paste-input:compileDebugKotlin
           :gator-share-shortcuts:compileDebugKotlin
+          :gator-bounded-document:compileDebugKotlin
           :gator-bounded-download:compileDebugKotlin
           :gator-screen-security:compileDebugKotlin
+          --no-daemon
+
+      - name: Test local native modules
+        working-directory: android
+        run: >-
+          ./gradlew
+          :gator-paste-input:testDebugUnitTest
+          :gator-share-shortcuts:testDebugUnitTest
+          :gator-bounded-document:testDebugUnitTest
+          :gator-bounded-download:testDebugUnitTest
+          :expo-file-system:testDebugUnitTest
           --no-daemon
 
       - name: Assemble debug APK
@@ -182,6 +209,9 @@ jobs:
       - name: Bundle release AAB
         working-directory: android
         run: ./gradlew :app:bundleRelease --no-daemon
+
+      - name: Verify Android native path hygiene
+        run: npm run check:android-native-paths
 
       - name: Verify debug/release manifests, release AAB, and headless entry
         run: npm run check:android-build

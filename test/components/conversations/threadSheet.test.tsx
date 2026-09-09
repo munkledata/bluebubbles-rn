@@ -18,6 +18,16 @@ jest.mock('@db/repositories', () => ({
   listThreadMessages: (...args: unknown[]) => mockListThreadMessages(...args),
 }));
 
+let reactiveCallback: (() => void) | null = null;
+const mockReactiveExecute = jest.fn(({ callback }: { callback: () => void }): (() => void) => {
+  reactiveCallback = callback;
+  return () => undefined;
+});
+const databaseMock = jest.requireMock('@db/database') as {
+  getRawDatabase?: () => { reactiveExecute: typeof mockReactiveExecute };
+};
+databaseMock.getRawDatabase = () => ({ reactiveExecute: mockReactiveExecute });
+
 interface CapturedLease {
   generation: number;
   isCurrent(): boolean;
@@ -253,6 +263,8 @@ function StatefulThread({
 describe('ThreadSheet', () => {
   beforeEach(() => {
     resetCapturedAccount();
+    reactiveCallback = null;
+    mockReactiveExecute.mockClear();
     mockListThreadMessages
       .mockReset()
       .mockImplementation(async (_db, originatorGuid: string) =>
@@ -351,6 +363,29 @@ describe('ThreadSheet', () => {
     expect(await screen.findByText('Unknown')).toBeTruthy();
     expect(screen.getByText('📎 Attachment')).toBeTruthy();
     expect(screen.getByRole('button', { name: "Jump to Unknown's message" })).toBeTruthy();
+  });
+
+  it('re-reads an open thread when a live retraction changes the messages table', async () => {
+    let currentRows = THREAD_A;
+    mockListThreadMessages.mockImplementation(async () => currentRows);
+    await renderWithTheme(
+      <ThreadSheet originatorGuid={ORIGIN_A} onClose={jest.fn()} onJump={jest.fn()} />,
+    );
+    expect(await screen.findByText(REPLY_A_TEXT)).toBeTruthy();
+    expect(reactiveCallback).not.toBeNull();
+
+    currentRows = THREAD_A.map((entry) =>
+      entry.guid === REPLY_A_GUID
+        ? { ...entry, dateRetracted: REPLY_A_TIME + 1, retractionState: 'unknown' }
+        : entry,
+    );
+    await act(async () => {
+      reactiveCallback?.();
+    });
+
+    await waitFor(() => expect(mockListThreadMessages).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByText(REPLY_A_TEXT)).toBeNull());
+    expect(screen.getByText('Message unsent')).toBeTruthy();
   });
 
   it('closes and jumps to the exact tapped message', async () => {

@@ -16,7 +16,7 @@
 import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
-import { Chat } from '@core/models';
+import { Chat, Message } from '@core/models';
 import { logger } from '@core/secure';
 import {
   getChatIdByGuid,
@@ -26,6 +26,7 @@ import {
   outgoingBackoffMs,
   upsertChats,
   upsertHandles,
+  upsertMessages,
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { runDueScheduled } from '@/services/send/scheduleService';
@@ -48,9 +49,18 @@ function deferred<T>(): Deferred<T> {
 }
 
 function fakeHttp(impl: (json: unknown) => Promise<unknown>): HttpClient {
-  return {
+  let http!: HttpClient;
+  http = {
+    get: async () => ({
+      private_api: true,
+      supports_message_part_topology: true,
+    }),
     post: (_path: string, _schema: unknown, options: { json?: unknown }) => impl(options.json),
+    pinTransport: () => http,
+    isTransportCurrent: () => true,
+    assertTransportCurrent: () => undefined,
   } as unknown as HttpClient;
+  return http;
 }
 
 const noAttachmentIo: OutgoingQueueIO = {
@@ -63,6 +73,37 @@ const noAttachmentIo: OutgoingQueueIO = {
 async function seedChat(db: AppDatabase, guid: string): Promise<void> {
   const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
   await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@b.com' }] })], handles);
+}
+
+async function seedExactTextTarget(
+  db: AppDatabase,
+  guid: string,
+  partIndex: number,
+): Promise<void> {
+  const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
+  const chats = await upsertChats(
+    db,
+    [Chat.parse({ guid: 'c1', participants: [{ address: 'a@b.com' }] })],
+    handles,
+  );
+  await upsertMessages(
+    db,
+    [
+      Message.parse({
+        guid,
+        text: 'target',
+        dateCreated: 500,
+        messagePartTopology: {
+          complete: true,
+          originalPartIndexes: [partIndex],
+          currentParts: [{ index: partIndex, kind: 'text' }],
+          attachmentOwnership: [],
+        },
+      }),
+    ],
+    () => chats.get('c1')!,
+    handles,
+  );
 }
 
 /** Run one synchronous edit after the due SELECT returns but before runDueScheduled can claim it. */
@@ -209,16 +250,23 @@ describe('runDueScheduled — production atomic handover', () => {
   it('uses text edited after the due-list snapshot instead of sending the stale payload', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
+    await seedExactTextTarget(db, 'reply-guid', 0);
     const id = await insertScheduled(db, {
       chatGuid: 'c1',
       text: 'stale text',
       scheduledFor: 1,
       selectedMessageGuid: 'reply-guid',
+      selectedMessagePartIndex: 0,
     });
     const edit = jest.fn(() => {
-      raw
-        .prepare('UPDATE scheduled_messages SET payload = ? WHERE id = ?')
-        .run(JSON.stringify({ text: 'edited text', selectedMessageGuid: 'reply-guid' }), id);
+      raw.prepare('UPDATE scheduled_messages SET payload = ? WHERE id = ?').run(
+        JSON.stringify({
+          text: 'edited text',
+          selectedMessageGuid: 'reply-guid',
+          selectedMessagePartIndex: 0,
+        }),
+        id,
+      );
     });
     const raced = raceAfterDueSnapshot(db, edit);
     const response = deferred<unknown>();
@@ -237,11 +285,18 @@ describe('runDueScheduled — production atomic handover', () => {
       expect(postedBody).toMatchObject({
         text: 'edited text',
         selectedMessageGuid: 'reply-guid',
+        partIndex: 0,
       });
       expect(raw.prepare('SELECT payload FROM outgoing_queue').get()).toEqual({
-        payload: JSON.stringify({ message: 'edited text', selectedMessageGuid: 'reply-guid' }),
+        payload: JSON.stringify({
+          message: 'edited text',
+          selectedMessageGuid: 'reply-guid',
+          partIndex: 0,
+        }),
       });
-      expect(raw.prepare('SELECT text FROM messages').get()).toEqual({ text: 'edited text' });
+      expect(raw.prepare("SELECT text FROM messages WHERE send_state = 'sending'").get()).toEqual({
+        text: 'edited text',
+      });
       expect(await getScheduledById(db, id)).toMatchObject({ status: 'sent', text: 'edited text' });
     } finally {
       response.resolve({ guid: 'real-edited', dateCreated: 2_000, dateDelivered: null });
@@ -345,11 +400,13 @@ describe('runDueScheduled — production atomic handover', () => {
   it('commits a one-shot schedule, queue row, optimistic reply, and reply metadata before HTTP resolves', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
+    await seedExactTextTarget(db, 'original-guid', 0);
     const id = await insertScheduled(db, {
       chatGuid: 'c1',
       text: 'reply later',
       scheduledFor: 1,
       selectedMessageGuid: 'original-guid',
+      selectedMessagePartIndex: 0,
     });
     const response = deferred<unknown>();
     const postStarted = deferred<void>();
@@ -378,6 +435,7 @@ describe('runDueScheduled — production atomic handover', () => {
         payload: JSON.stringify({
           message: 'reply later',
           selectedMessageGuid: 'original-guid',
+          partIndex: 0,
         }),
       });
       expect(
@@ -385,7 +443,8 @@ describe('runDueScheduled — production atomic handover', () => {
           .prepare(
             `SELECT guid, text, send_state AS sendState,
                     thread_originator_guid AS threadOriginatorGuid
-               FROM messages`,
+               FROM messages
+              WHERE send_state = 'sending'`,
           )
           .get(),
       ).toMatchObject({
@@ -397,6 +456,7 @@ describe('runDueScheduled — production atomic handover', () => {
       expect(postedBody).toMatchObject({
         text: 'reply later',
         selectedMessageGuid: 'original-guid',
+        partIndex: 0,
       });
     } finally {
       response.resolve({ guid: 'real-reply', dateCreated: 2_000, dateDelivered: null });
@@ -571,12 +631,17 @@ describe('runDueScheduled — production atomic handover', () => {
 describe('runOutgoingQueue — the backoff is stamped at the OUTCOME', () => {
   /** A failing send that burns wall-clock time, like a large upload that eventually 502s. */
   function slowFailHttp(ms: number): HttpClient {
-    return {
+    let http!: HttpClient;
+    http = {
       post: async () => {
         await new Promise((r) => setTimeout(r, ms));
         throw new ApiError('server_error', 'bridge down', 502);
       },
+      pinTransport: () => http,
+      isTransportCurrent: () => true,
+      assertTransportCurrent: () => undefined,
     } as unknown as HttpClient;
+    return http;
   }
 
   const nextRetryAt = (raw: Database.Database, tempGuid: string): number =>

@@ -103,6 +103,7 @@ function makeSelected(overrides: Partial<SelectedMessage> = {}): SelectedMessage
     senderName: 'Alice',
     mine: [],
     myEmojis: [],
+    targetPartIndex: 0,
     dateCreated: Date.now(),
     isRetracted: false,
     isEdited: false,

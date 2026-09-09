@@ -9,7 +9,15 @@ import {
   ACTIVE_MIGRATION_DEATH_PREPARE_CHECKS,
   ACTIVE_MIGRATION_DEATH_PRIVATE_TEST_FILES,
   ACTIVE_MIGRATION_DEATH_RESUME_CHECKS,
+  BACKUP_RESTORE_CHECKS,
+  BACKUP_RESTORE_FAILURE_CODES,
+  BACKUP_RESTORE_HOST_CHECKS,
+  BACKUP_RESTORE_MARKER_PREFIX,
+  BACKUP_RESTORE_PRIVATE_TEST_FILES,
+  BACKUP_RESTORE_SCHEMA,
+  BACKUP_RESTORE_SUITE,
   buildActiveMigrationDeathPrivacySafeArtifact,
+  buildBackupRestorePrivacySafeArtifact,
   buildPrivacySafeArtifact,
   buildRuntimeConcurrencyPrivacySafeArtifact,
   buildWalWriteDeathPrivacySafeArtifact,
@@ -17,14 +25,17 @@ import {
   createCrashAppAdbArgs,
   createPrivateFileAbsenceAdbArgs,
   CREATE_ACTIVE_MIGRATION_DEATH_REQUEST_ADB_ARGS,
+  CREATE_BACKUP_RESTORE_REQUEST_ADB_ARGS,
   CREATE_RELAUNCH_REQUEST_ADB_ARGS,
   CREATE_RUNTIME_CONCURRENCY_REQUEST_ADB_ARGS,
   CREATE_WAL_WRITE_DEATH_REQUEST_ADB_ARGS,
   executeActiveMigrationDeathSequence,
+  executeBackupRestoreSequence,
   executeRelaunchSequence,
   executeRuntimeConcurrencySequence,
   executeWalWriteDeathSequence,
   extractActiveMigrationDeathMarkers,
+  extractBackupRestoreMarkers,
   extractRelaunchMarkers,
   extractRuntimeConcurrencyMarkers,
   extractWalWriteDeathMarkers,
@@ -52,6 +63,7 @@ import {
   RUNTIME_CONCURRENCY_SCHEMA,
   RUNTIME_CONCURRENCY_SUITE,
   validateActiveMigrationDeathMarker,
+  validateBackupRestoreMarker,
   validateRelaunchMarker,
   validateRuntimeConcurrencyMarker,
   validateWalWriteDeathMarker,
@@ -255,6 +267,35 @@ function loggedRuntimeConcurrencyMarker(value, pid = '101') {
   return logMessage(runtimeConcurrencyMarker(value), pid);
 }
 
+function backupRestoreResult(overrides = {}) {
+  return {
+    schema: BACKUP_RESTORE_SCHEMA,
+    suite: BACKUP_RESTORE_SUITE,
+    status: 'pass',
+    migrationCount: RELAUNCH_MIGRATION_COUNT,
+    migrationHead: RELAUNCH_MIGRATION_HEAD,
+    checks: checks(BACKUP_RESTORE_CHECKS),
+    ...overrides,
+  };
+}
+
+function failingBackupRestoreResult(overrides = {}) {
+  return backupRestoreResult({
+    status: 'fail',
+    checks: checks(BACKUP_RESTORE_CHECKS, { lateFaultObserved: false }),
+    failureCode: 'late-fault-observed',
+    ...overrides,
+  });
+}
+
+function backupRestoreMarker(value) {
+  return `${BACKUP_RESTORE_MARKER_PREFIX}${JSON.stringify(value)}`;
+}
+
+function loggedBackupRestoreMarker(value, pid = '101') {
+  return logMessage(backupRestoreMarker(value), pid);
+}
+
 const target = {
   versionName: '0.1.40',
   versionCode: 52,
@@ -267,7 +308,8 @@ test('pins every supported host mode and rejects ambiguous arguments', () => {
   assert.equal(parseRelaunchHarnessMode(['--active-wal-write-death']), '--active-wal-write-death');
   assert.equal(parseRelaunchHarnessMode(['--active-migration-death']), '--active-migration-death');
   assert.equal(parseRelaunchHarnessMode(['--runtime-concurrency']), '--runtime-concurrency');
-  for (const args of [['--unknown'], ['--runtime-concurrency', '--active-wal-write-death']]) {
+  assert.equal(parseRelaunchHarnessMode(['--backup-restore']), '--backup-restore');
+  for (const args of [['--unknown'], ['--backup-restore', '--active-wal-write-death']]) {
     assert.throws(
       () => parseRelaunchHarnessMode(args),
       (error) => error instanceof HarnessError && error.code === 'invalid-harness-arguments',
@@ -280,6 +322,75 @@ test('package script exposes the exact runtime-concurrency host command', () => 
   assert.equal(
     packageJson.scripts['test:android:db:runtime-concurrency'],
     'node --test scripts/run-android-db-relaunch.test.mjs && node scripts/run-android-db-relaunch.mjs --runtime-concurrency',
+  );
+  assert.equal(
+    packageJson.scripts['test:android:backup-restore'],
+    'node --test scripts/run-android-db-relaunch.test.mjs && node scripts/run-android-db-relaunch.mjs --backup-restore',
+  );
+});
+
+test('pins BACKUP-02 queue ordering and native default-crypto prerequisites', () => {
+  const waveSource = readFileSync(
+    new URL('../src/services/boot/dbBackupRestoreWave.ts', import.meta.url),
+    'utf8',
+  );
+  const backupSource = readFileSync(
+    new URL('../src/services/backup/backup.ts', import.meta.url),
+    'utf8',
+  );
+  const clientsSource = readFileSync(
+    new URL('../src/services/clients.ts', import.meta.url),
+    'utf8',
+  );
+  const secretBoxSource = readFileSync(
+    new URL('../src/core/crypto/secretBox.ts', import.meta.url),
+    'utf8',
+  );
+  const cryptoTypesSource = readFileSync(
+    new URL('../src/core/crypto/types.ts', import.meta.url),
+    'utf8',
+  );
+  const nativeCryptoSource = readFileSync(
+    new URL('../src/native/crypto.ts', import.meta.url),
+    'utf8',
+  );
+  const backupSchemaSource = readFileSync(
+    new URL('../src/services/backup/backupSchema.ts', import.meta.url),
+    'utf8',
+  );
+
+  const restoreStart = backupSource.indexOf('export async function restoreBackup(');
+  const ownerClaim = backupSource.indexOf('const applied = await withDbTransaction(', restoreStart);
+  assert.ok(restoreStart >= 0 && ownerClaim > restoreStart);
+  assert.doesNotMatch(backupSource.slice(restoreStart, ownerClaim), /\bawait\b/);
+
+  const faultingRestore = waveSource.indexOf('const faultingRestore = restoreBackup(db, opened);');
+  const queuedSuccessor = waveSource.indexOf(
+    'const queuedSuccessor = withDbTransaction(',
+    faultingRestore,
+  );
+  const settledTogether = waveSource.indexOf('await Promise.allSettled([', queuedSuccessor);
+  assert.ok(
+    faultingRestore >= 0 && queuedSuccessor > faultingRestore && settledTogether > queuedSuccessor,
+  );
+
+  assert.match(clientsSource, /await import\('@native\/crypto'\)/);
+  assert.match(clientsSource, /new SecretBox\(await createNativeCryptoBackend\(\)\)/);
+  assert.match(
+    secretBoxSource,
+    /private readonly argon2: \{ opsLimit: number; memLimit: number \} = ARGON2_INTERACTIVE/,
+  );
+  assert.match(
+    cryptoTypesSource,
+    /ARGON2_INTERACTIVE = \{\s*opsLimit: 2,\s*memLimit: 64 \* 1024 \* 1024/,
+  );
+  assert.match(nativeCryptoSource, /sodium\.crypto_pwhash_ALG_ARGON2ID13/);
+  assert.match(backupSchemaSource, /plaintextBytes: 4 \* 1024 \* 1024/);
+  assert.match(secretBoxSource, /CHUNKED_SECRET_BOX_CHUNK_BYTES = 64 \* 1024/);
+  assert.match(backupSource, /return box\.sealChunked\(plaintext, passphrase\)/);
+  assert.match(
+    backupSource,
+    /await box\.openChunked\(encoded, passphrase, BACKUP_LIMITS\.plaintextBytes\)/,
   );
 });
 
@@ -322,13 +433,22 @@ test('pins zero-byte request creation and exact non-glob cleanup targets', () =>
     'databases/driver-runtime-concurrency-selftest.db-wal',
     'databases/driver-runtime-concurrency-selftest.db-shm',
   ]);
+  assert.deepEqual(BACKUP_RESTORE_PRIVATE_TEST_FILES, [
+    'files/.gator-db-backup-restore-request-v1',
+    'files/.gator-db-backup-restore-running-v1',
+    'databases/driver-backup-restore-selftest.db',
+    'databases/driver-backup-restore-selftest.db-journal',
+    'databases/driver-backup-restore-selftest.db-wal',
+    'databases/driver-backup-restore-selftest.db-shm',
+  ]);
   assert.deepEqual(RELAUNCH_PRIVATE_TEST_FILES, [
     ...MIGRATION_RELAUNCH_PRIVATE_TEST_FILES,
     ...WAL_WRITE_DEATH_PRIVATE_TEST_FILES,
     ...ACTIVE_MIGRATION_DEATH_PRIVATE_TEST_FILES,
     ...RUNTIME_CONCURRENCY_PRIVATE_TEST_FILES,
+    ...BACKUP_RESTORE_PRIVATE_TEST_FILES,
   ]);
-  assert.equal(RELAUNCH_PRIVATE_TEST_FILES.length, 30);
+  assert.equal(RELAUNCH_PRIVATE_TEST_FILES.length, 36);
   assert.deepEqual(CREATE_RELAUNCH_REQUEST_ADB_ARGS, [
     'shell',
     'run-as',
@@ -357,6 +477,13 @@ test('pins zero-byte request creation and exact non-glob cleanup targets', () =>
     'touch',
     'files/.gator-db-runtime-concurrency-request-v1',
   ]);
+  assert.deepEqual(CREATE_BACKUP_RESTORE_REQUEST_ADB_ARGS, [
+    'shell',
+    'run-as',
+    APP_PACKAGE,
+    'touch',
+    'files/.gator-db-backup-restore-request-v1',
+  ]);
   assert.deepEqual(CLEANUP_RELAUNCH_STATE_ADB_ARGS, [
     'shell',
     'run-as',
@@ -369,6 +496,7 @@ test('pins zero-byte request creation and exact non-glob cleanup targets', () =>
   assert.equal(CREATE_WAL_WRITE_DEATH_REQUEST_ADB_ARGS.includes('sh'), false);
   assert.equal(CREATE_ACTIVE_MIGRATION_DEATH_REQUEST_ADB_ARGS.includes('sh'), false);
   assert.equal(CREATE_RUNTIME_CONCURRENCY_REQUEST_ADB_ARGS.includes('sh'), false);
+  assert.equal(CREATE_BACKUP_RESTORE_REQUEST_ADB_ARGS.includes('sh'), false);
   assert.equal(CLEANUP_RELAUNCH_STATE_ADB_ARGS.includes('sh'), false);
   assert.equal(CLEANUP_RELAUNCH_STATE_ADB_ARGS.includes('*'), false);
   assert.equal(CLEANUP_RELAUNCH_STATE_ADB_ARGS.includes('gator.db'), false);
@@ -833,6 +961,82 @@ test('pins the exact terminal runtime-concurrency schema and finite contracts', 
   );
 });
 
+test('pins the exact terminal BACKUP-02 schema and finite contracts', () => {
+  assert.deepEqual(BACKUP_RESTORE_CHECKS, [
+    'requestValid',
+    'runStatePersisted',
+    'preCleanup',
+    'encryptedOpen',
+    'migrationLedger',
+    'plaintextNearLimit',
+    'bb2Envelope',
+    'nativeSeal',
+    'nativeOpen',
+    'lateFaultObserved',
+    'kvRolledBack',
+    'themesRolledBack',
+    'chatRolledBack',
+    'foldersRolledBack',
+    'tempTablesCleaned',
+    'retrySucceeded',
+    'successorWrite',
+    'foreignKeys',
+    'integrity',
+    'databaseClosed',
+    'databaseCleanup',
+    'stateCleanup',
+  ]);
+  assert.deepEqual(BACKUP_RESTORE_FAILURE_CODES, [
+    'request-invalid',
+    'phase-invalid',
+    'interrupted-run',
+    'orphaned-state',
+    'run-state',
+    'pre-cleanup',
+    'encrypted-open',
+    'migration-ledger',
+    'plaintext-near-limit',
+    'bb2-envelope',
+    'native-seal',
+    'native-open',
+    'late-fault-observed',
+    'kv-rolled-back',
+    'themes-rolled-back',
+    'chat-rolled-back',
+    'folders-rolled-back',
+    'temp-tables-cleaned',
+    'retry-succeeded',
+    'successor-write',
+    'foreign-keys',
+    'integrity',
+    'database-closed',
+    'database-cleanup',
+    'state-cleanup',
+    'internal',
+  ]);
+  assert.deepEqual(BACKUP_RESTORE_HOST_CHECKS, [
+    'processAlive',
+    'processStopped',
+    'privateStateClean',
+  ]);
+  assert.deepEqual(validateBackupRestoreMarker(backupRestoreResult()), backupRestoreResult());
+  assert.deepEqual(
+    validateBackupRestoreMarker(failingBackupRestoreResult()),
+    failingBackupRestoreResult(),
+  );
+  assert.throws(
+    () => validateBackupRestoreMarker({ ...backupRestoreResult(), rawError: 'private' }),
+    /finite contract/,
+  );
+  assert.throws(
+    () =>
+      validateBackupRestoreMarker(
+        failingBackupRestoreResult({ failureCode: 'raw native failure' }),
+      ),
+    /finite contract/,
+  );
+});
+
 test('extracts active-WAL markers only from their exact process sequence', () => {
   assert.deepEqual(
     extractWalWriteDeathMarkers(loggedWalWriteDeathMarker(walWriteDeathReady()), ['101']),
@@ -963,6 +1167,44 @@ test('extracts one PID-bound runtime-concurrency marker and rejects every cross-
   ]) {
     assert.throws(
       () => extractMarkers(runtimeLog),
+      (error) => error instanceof HarnessError && error.code === 'wrong-db-contract-marker',
+    );
+  }
+});
+
+test('extracts one PID-bound BACKUP-02 marker and rejects every cross-lane prefix', () => {
+  const backupLog = loggedBackupRestoreMarker(backupRestoreResult(), '101');
+  assert.deepEqual(extractBackupRestoreMarkers(backupLog, ['101']), [backupRestoreResult()]);
+  assert.throws(
+    () => extractBackupRestoreMarkers(backupLog, ['999']),
+    (error) => error instanceof HarnessError && error.code === 'wrong-marker-process',
+  );
+  assert.throws(
+    () => extractBackupRestoreMarkers(`${backupLog}\n${backupLog}`, ['101']),
+    (error) => error instanceof HarnessError && error.code === 'duplicate-backup-restore-marker',
+  );
+  for (const forbiddenLog of [
+    loggedMarker(ready()),
+    loggedWalWriteDeathMarker(walWriteDeathReady()),
+    loggedActiveMigrationDeathMarker(activeMigrationDeathReady()),
+    loggedRuntimeConcurrencyMarker(runtimeConcurrencyResult()),
+    ...['GATOR_DB_CONTRACT_V1 ', 'GATOR_DB_CONTRACT_V2 ', 'GATOR_DB_CONTRACT_V3 '].map((prefix) =>
+      logMessage(`${prefix}{}`),
+    ),
+  ]) {
+    assert.throws(
+      () => extractBackupRestoreMarkers(forbiddenLog),
+      (error) => error instanceof HarnessError && error.code === 'wrong-db-contract-marker',
+    );
+  }
+  for (const extractMarkers of [
+    extractRelaunchMarkers,
+    extractWalWriteDeathMarkers,
+    extractActiveMigrationDeathMarkers,
+    extractRuntimeConcurrencyMarkers,
+  ]) {
+    assert.throws(
+      () => extractMarkers(backupLog),
       (error) => error instanceof HarnessError && error.code === 'wrong-db-contract-marker',
     );
   }
@@ -1483,6 +1725,53 @@ test('runs one runtime-concurrency launch, rechecks its process, and proves pre-
   ]);
 });
 
+test('runs one BACKUP-02 launch, rechecks its process, and proves pre-fallback cleanup', async () => {
+  const calls = [];
+  const processIdentity = { pid: '101', startTicks: '1001' };
+  let resetCount = 0;
+  let identityChecks = 0;
+  const outcome = await executeBackupRestoreSequence({
+    resetTestState: async () => {
+      resetCount += 1;
+      calls.push(`reset-${String(resetCount)}`);
+    },
+    createRequest: async () => calls.push('request'),
+    launchApp: async () => calls.push('launch'),
+    stopApp: async () => calls.push('stop'),
+    readLogs: async () => {
+      calls.push('logs');
+      return loggedBackupRestoreMarker(backupRestoreResult(), '101');
+    },
+    getProcessIdentity: async () => {
+      identityChecks += 1;
+      calls.push(`identity-${String(identityChecks)}`);
+      return identityChecks < 3 ? processIdentity : undefined;
+    },
+    verifyPrivateStateClean: async () => {
+      calls.push('private-state');
+      return true;
+    },
+  });
+
+  assert.deepEqual(outcome, {
+    result: backupRestoreResult(),
+    hostChecks: { processAlive: true, processStopped: true, privateStateClean: true },
+  });
+  assert.deepEqual(calls, [
+    'reset-1',
+    'request',
+    'launch',
+    'identity-1',
+    'logs',
+    'identity-2',
+    'private-state',
+    'stop',
+    'identity-3',
+    'logs',
+    'reset-2',
+  ]);
+});
+
 test('runtime-concurrency rejects late duplicate and cross-lane markers after sealing logs', async () => {
   for (const [lateMarker, expectedCode] of [
     [
@@ -1548,6 +1837,43 @@ test('runtime-concurrency marker timeout still force-stops and resets exact stat
       },
     ),
     (error) => error instanceof HarnessError && error.code === 'runtime-concurrency-result-timeout',
+  );
+  assert.deepEqual(calls.slice(0, 3), ['reset-1', 'request', 'launch']);
+  assert.deepEqual(calls.slice(-2), ['stop', 'reset-2']);
+  assert.equal(calls.includes('private-state'), false);
+});
+
+test('BACKUP-02 marker timeout still force-stops and resets exact state', async () => {
+  const calls = [];
+  let now = 0;
+  let resetCount = 0;
+  await assert.rejects(
+    executeBackupRestoreSequence(
+      {
+        resetTestState: async () => {
+          resetCount += 1;
+          calls.push(`reset-${String(resetCount)}`);
+        },
+        createRequest: async () => calls.push('request'),
+        launchApp: async () => calls.push('launch'),
+        stopApp: async () => calls.push('stop'),
+        readLogs: async () => '',
+        getProcessIdentity: async () => ({ pid: '101', startTicks: '1001' }),
+        verifyPrivateStateClean: async () => {
+          calls.push('private-state');
+          return true;
+        },
+      },
+      {
+        timeoutMs: 2,
+        pollMs: 1,
+        now: () => now,
+        sleep: async (ms) => {
+          now += ms;
+        },
+      },
+    ),
+    (error) => error instanceof HarnessError && error.code === 'backup-restore-result-timeout',
   );
   assert.deepEqual(calls.slice(0, 3), ['reset-1', 'request', 'launch']);
   assert.deepEqual(calls.slice(-2), ['stop', 'reset-2']);
@@ -1706,6 +2032,53 @@ test('runtime-concurrency artifact retains only finite target, checks, and host 
       /host checks do not prove/i,
     );
   }
+});
+
+test('BACKUP-02 artifact retains only finite target, checks, and host booleans', () => {
+  const artifact = buildBackupRestorePrivacySafeArtifact(
+    {
+      result: backupRestoreResult(),
+      hostChecks: { processAlive: true, processStopped: true, privateStateClean: true },
+      passphrase: 'private-passphrase',
+      path: '/private/path',
+      rawLogs: backupRestoreMarker(backupRestoreResult()),
+    },
+    { ...target, serial: 'private-device', model: 'private-model' },
+    new Date('2026-09-08T12:34:56.000Z'),
+  );
+  assert.deepEqual(artifact, {
+    schema: 1,
+    suite: 'android-backup-restore',
+    recordedAt: '2026-09-08T12:34:56.000Z',
+    package: APP_PACKAGE,
+    target,
+    status: 'pass',
+    migrationCount: RELAUNCH_MIGRATION_COUNT,
+    migrationHead: RELAUNCH_MIGRATION_HEAD,
+    checks: checks(BACKUP_RESTORE_CHECKS),
+    hostChecks: { processAlive: true, processStopped: true, privateStateClean: true },
+  });
+  const retained = JSON.stringify(artifact);
+  for (const forbidden of [
+    'private-device',
+    'private-model',
+    'private-passphrase',
+    '/private/path',
+    BACKUP_RESTORE_MARKER_PREFIX,
+  ]) {
+    assert.equal(retained.includes(forbidden), false);
+  }
+  assert.throws(
+    () =>
+      buildBackupRestorePrivacySafeArtifact(
+        {
+          result: failingBackupRestoreResult(),
+          hostChecks: checks(BACKUP_RESTORE_HOST_CHECKS, { processStopped: false }),
+        },
+        target,
+      ),
+    /host checks do not prove/i,
+  );
 });
 
 test('active-WAL artifact retains booleans only, with no PID, size, path, key, or logs', () => {

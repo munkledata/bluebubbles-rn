@@ -39,8 +39,23 @@ async function settle(): Promise<void> {
 let mockTokenRefreshHandler: TokenRefreshHandler | undefined;
 let mockBackgroundHandler: NativeHandler | undefined;
 const mockGetToken = jest.fn(async (): Promise<string> => 'fresh-token');
-type RegisterAck = { id: string | null; pushEncryptionType: string | null };
-type PushEncryptionExtension = { type: string; key: string };
+type RegisterAck = {
+  id: string | null;
+  pushEncryptionType: string | null;
+  pushEncryptionIdentity?: {
+    serverInstallationId: string;
+    principalId: string;
+    deviceId: string;
+  } | null;
+  pushEncryptionKeyVersion?: number;
+  pushEncryptionRotationId?: string;
+  pushEncryptionPreviousKeyExpiresAt?: number;
+};
+type PushEncryptionExtension = {
+  type: string;
+  key: string;
+  rotation?: { id: string; previousKeyVersion: number };
+};
 const mockRegisterDevice = jest.fn<
   Promise<RegisterAck>,
   [unknown, string, string, PushEncryptionExtension?]
@@ -48,7 +63,13 @@ const mockRegisterDevice = jest.fn<
   id: 'device-1',
   pushEncryptionType: null,
 }));
-const mockServerInfo = jest.fn(async () => ({
+type MockServerInfo = {
+  server_version: string;
+  supports_fcm_device_encryption: boolean;
+  supports_fcm_push_encryption_v3?: boolean;
+  supports_fcm_push_key_rotation?: boolean;
+};
+const mockServerInfo = jest.fn<Promise<MockServerInfo>, []>(async () => ({
   server_version: '2.0.15',
   supports_fcm_device_encryption: false,
 }));
@@ -88,6 +109,7 @@ jest.mock('@/services/clients', () => ({
 }));
 jest.mock('@/services/realtimeControl', () => ({
   dispatchRealtimeEvent: jest.fn(async () => undefined),
+  persistAuthenticatedLockedFcmV3Event: jest.fn(async () => 'not-enqueued'),
 }));
 jest.mock('@/services/logging/fileLogSink', () => ({
   flushPersistentLogsForHeadlessCompletion: mockFlushPersistentLogs,
@@ -101,10 +123,10 @@ jest.mock('@/services/notifications/fcmPayload', () => ({
   })),
 }));
 jest.mock('@/services/notifications/fcmDecrypt', () => ({
-  FCM_ENCRYPTION_TYPE: 'aes-gcm',
   FCM_V2_ENCRYPTION_TYPE: 'AEAD_GCM_V2_DEVICE',
-  decryptFcmPayload: jest.fn(),
+  FCM_V3_ENCRYPTION_TYPE: 'AEAD_GCM_V3_IDENTITY',
   decryptFcmV2Payload: jest.fn(),
+  decryptFcmV3Payload: jest.fn(),
 }));
 jest.mock('@/services/notifications/fcmSessionGate', () => ({
   readFcmSessionState: jest.fn(async () => 'active'),
@@ -116,13 +138,24 @@ jest.mock('@/services/notifications/notifeeService', () => ({
   postLockedNotification: jest.fn(async () => undefined),
 }));
 
-import { logger } from '@core/secure';
+import {
+  createCredentialUpgradeCandidate,
+  logger,
+  revokedCredentialUpgradeJournal,
+  serializeCredentialUpgradeJournal,
+} from '@core/secure';
 import type { SecureVault } from '@core/secure';
 import {
+  activeFcmDeviceEncryptionV3State,
+  activeFcmPushKeyState,
   activeFcmDeviceEncryptionState,
+  FCM_PUSH_KEY_ROTATION_INTERVAL_MS,
+  FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS,
   FCM_DEVICE_ENCRYPTION_TYPE,
+  FCM_PUSH_ENCRYPTION_TYPE_V3,
   inspectFcmDeviceEncryptionState,
   revokedFcmDeviceEncryptionState,
+  rotatingFcmPushKeyState,
   serializeFcmDeviceEncryptionState,
 } from '@core/realtime';
 import { useSessionStore } from '@state/sessionStore';
@@ -131,7 +164,11 @@ import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
-import { registerFcmToken, startFcm } from '@/services/notifications/fcmMessaging';
+import {
+  FCM_V2_COMPATIBILITY_CUTOFF_MS,
+  registerFcmToken,
+  startFcm,
+} from '@/services/notifications/fcmMessaging';
 import { retireFcmDeviceEncryptionState } from '@/services/notifications/fcmEncryptionState';
 import '@/services/notifications/registerFcmBackgroundHandler';
 
@@ -140,6 +177,8 @@ function setConnectedSession(
   password: string,
   epoch: number,
   supportsFcmDeviceEncryption = false,
+  supportsFcmPushEncryptionV3 = false,
+  supportsFcmPushKeyRotation = false,
 ): void {
   useSessionStore.setState({
     status: 'connected',
@@ -148,6 +187,8 @@ function setConnectedSession(
     serverInfo: {
       server_version: '2.0.15',
       supports_fcm_device_encryption: supportsFcmDeviceEncryption,
+      supports_fcm_push_encryption_v3: supportsFcmPushEncryptionV3,
+      supports_fcm_push_key_rotation: supportsFcmPushKeyRotation,
     },
     error: null,
     epoch,
@@ -155,6 +196,7 @@ function setConnectedSession(
 }
 
 beforeEach(async () => {
+  jest.spyOn(Date, 'now').mockReturnValue(FCM_V2_COMPATIBILITY_CUTOFF_MS - 1);
   await pauseRealtimeDeliveries();
   resumeRealtimeDeliveries();
   setConnectedSession('https://account-a.test', 'password-a', 101);
@@ -183,7 +225,9 @@ afterEach(async () => {
 });
 
 describe('FCM registration account ownership', () => {
-  it('waits for the persistent-log barrier before a background native callback settles', async () => {
+  it('passes the callback deadline to logging and waits without turning flush failure into delivery failure', async () => {
+    const callbackStartedAt = 10_000;
+    jest.spyOn(Date, 'now').mockReturnValue(callbackStartedAt);
     const flushGate = deferred<boolean>();
     mockFlushPersistentLogs.mockReturnValueOnce(flushGate.promise);
 
@@ -196,7 +240,10 @@ describe('FCM registration account ownership', () => {
     const flushCallsWhileBlocked = mockFlushPersistentLogs.mock.calls.length;
     const settledWhileFlushBlocked = handlingProbe.isSettled();
 
-    flushGate.resolve(true);
+    // Effect work stops at 40 seconds; final persistence retains a separate 15-second window and
+    // still returns five seconds before RNFB's 60-second native callback ceiling.
+    expect(mockFlushPersistentLogs).toHaveBeenCalledWith(callbackStartedAt + 55_000);
+    flushGate.resolve(false);
     expect(flushCallsWhileBlocked).toBe(1);
     expect(settledWhileFlushBlocked).toBe(false);
     await expect(handling).resolves.toBeUndefined();
@@ -352,6 +399,545 @@ describe('FCM registration account ownership', () => {
     expect(random).toHaveBeenCalledWith(32);
   });
 
+  it('enrolls V3 only for a scoped credential and pins the exact acknowledged identity', async () => {
+    const scopedCredential = `bbd_device_v1_${'A'.repeat(43)}`;
+    const binding = {
+      serverInstallationId: '11111111-1111-4111-8111-111111111111',
+      principalId: '22222222-2222-4222-8222-222222222222',
+      deviceId: '33333333-3333-4333-8333-333333333333',
+    } as const;
+    setConnectedSession('https://account-a.test', scopedCredential, 101, true, true);
+    mockServerInfo.mockResolvedValueOnce({
+      server_version: '2.0.16',
+      supports_fcm_device_encryption: true,
+      supports_fcm_push_encryption_v3: true,
+      supports_fcm_push_key_rotation: false,
+    });
+    jest
+      .spyOn(Crypto, 'getRandomBytesAsync')
+      .mockResolvedValueOnce(Uint8Array.from({ length: 32 }, (_, index) => index));
+    mockRegisterDevice.mockResolvedValueOnce({
+      id: binding.deviceId,
+      pushEncryptionType: FCM_PUSH_ENCRYPTION_TYPE_V3,
+      pushEncryptionIdentity: binding,
+    });
+
+    await expect(registerFcmToken()).resolves.toBe('registered');
+
+    expect(mockRegisterDevice.mock.calls[0]?.[3]).toEqual({
+      type: FCM_PUSH_ENCRYPTION_TYPE_V3,
+      key: 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8',
+    });
+    expect(inspectFcmDeviceEncryptionState(vaultValues.get('fcmPushEncryptionV2') ?? null)).toEqual(
+      {
+        kind: 'valid',
+        state: activeFcmDeviceEncryptionV3State(
+          'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8',
+          binding,
+          'https://account-a.test',
+        ),
+      },
+    );
+  });
+
+  it('persists a versioned V3 candidate before initial registration and requires generation one', async () => {
+    const requestedAt = 1_700_000_000_000;
+    const scopedCredential = `bbd_device_v1_${'G'.repeat(43)}`;
+    const binding = {
+      serverInstallationId: '11111111-1111-4111-8111-111111111111',
+      principalId: '22222222-2222-4222-8222-222222222222',
+      deviceId: '33333333-3333-4333-8333-333333333333',
+    } as const;
+    jest.spyOn(Date, 'now').mockReturnValue(requestedAt);
+    setConnectedSession('https://account-a.test', scopedCredential, 101, true, true, true);
+    jest
+      .spyOn(Crypto, 'getRandomBytesAsync')
+      .mockResolvedValueOnce(Uint8Array.from({ length: 32 }, (_, index) => index));
+    mockRegisterDevice.mockImplementationOnce(async () => {
+      expect(
+        inspectFcmDeviceEncryptionState(vaultValues.get('fcmPushEncryptionV2') ?? null),
+      ).toMatchObject({
+        kind: 'valid',
+        state: { version: 3, status: 'pending', requestedAt },
+      });
+      return {
+        id: binding.deviceId,
+        pushEncryptionType: FCM_PUSH_ENCRYPTION_TYPE_V3,
+        pushEncryptionIdentity: binding,
+        pushEncryptionKeyVersion: 1,
+      };
+    });
+
+    await expect(registerFcmToken()).resolves.toBe('registered');
+
+    expect(inspectFcmDeviceEncryptionState(vaultValues.get('fcmPushEncryptionV2') ?? null)).toEqual(
+      {
+        kind: 'valid',
+        state: activeFcmPushKeyState(
+          'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8',
+          1,
+          binding,
+          'https://account-a.test',
+          requestedAt,
+        ),
+      },
+    );
+  });
+
+  it('persists one exact legacy-V3 rotation and reuses it after a lost acknowledgement', async () => {
+    const requestedAt = 1_700_000_000_000;
+    const scopedCredential = `bbd_device_v1_${'H'.repeat(43)}`;
+    const binding = {
+      serverInstallationId: '11111111-1111-4111-8111-111111111111',
+      principalId: '22222222-2222-4222-8222-222222222222',
+      deviceId: '33333333-3333-4333-8333-333333333333',
+    } as const;
+    const previousKey = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
+    const candidateKey = 'BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc';
+    const rotationId = '44444444-4444-4444-8444-444444444444';
+    const serverPreviousExpiry = requestedAt + FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS - 5 * 60_000;
+    jest.spyOn(Date, 'now').mockReturnValue(requestedAt);
+    jest
+      .spyOn(Crypto, 'getRandomBytesAsync')
+      .mockResolvedValueOnce(Uint8Array.from({ length: 32 }, () => 7));
+    jest.spyOn(Crypto, 'randomUUID').mockReturnValue(rotationId);
+    setConnectedSession('https://account-a.test', scopedCredential, 101, true, true, true);
+    vaultValues.set(
+      'fcmPushEncryptionV2',
+      serializeFcmDeviceEncryptionState(
+        activeFcmDeviceEncryptionV3State(previousKey, binding, 'https://account-a.test'),
+      ),
+    );
+    mockRegisterDevice.mockRejectedValueOnce(new Error('response lost')).mockResolvedValueOnce({
+      id: binding.deviceId,
+      pushEncryptionType: FCM_PUSH_ENCRYPTION_TYPE_V3,
+      pushEncryptionIdentity: binding,
+      pushEncryptionKeyVersion: 2,
+      pushEncryptionRotationId: rotationId,
+      pushEncryptionPreviousKeyExpiresAt: serverPreviousExpiry,
+    });
+
+    await expect(registerFcmToken()).resolves.toBe('failed');
+    expect(useSessionStore.getState().serverInfo?.supports_fcm_push_key_rotation).toBe(true);
+    expect(mockServerInfo).not.toHaveBeenCalled();
+    expect(Crypto.getRandomBytesAsync).toHaveBeenCalledTimes(1);
+    expect(Crypto.randomUUID).toHaveBeenCalledTimes(1);
+    expect(mockRegisterDevice.mock.calls[0]?.[3]).toMatchObject({
+      type: FCM_PUSH_ENCRYPTION_TYPE_V3,
+      rotation: { id: rotationId, previousKeyVersion: 1 },
+    });
+    expect(inspectFcmDeviceEncryptionState(vaultValues.get('fcmPushEncryptionV2') ?? null)).toEqual(
+      {
+        kind: 'valid',
+        state: rotatingFcmPushKeyState(
+          candidateKey,
+          previousKey,
+          1,
+          binding,
+          'https://account-a.test',
+          rotationId,
+          requestedAt,
+        ),
+      },
+    );
+
+    await expect(registerFcmToken()).resolves.toBe('registered');
+
+    const exactRegistration = {
+      type: FCM_PUSH_ENCRYPTION_TYPE_V3,
+      key: candidateKey,
+      rotation: { id: rotationId, previousKeyVersion: 1 },
+    };
+    expect(mockRegisterDevice.mock.calls[0]?.[3]).toEqual(exactRegistration);
+    expect(mockRegisterDevice.mock.calls[1]?.[3]).toEqual(exactRegistration);
+    expect(Crypto.getRandomBytesAsync).toHaveBeenCalledTimes(1);
+    expect(Crypto.randomUUID).toHaveBeenCalledTimes(1);
+    expect(inspectFcmDeviceEncryptionState(vaultValues.get('fcmPushEncryptionV2') ?? null)).toEqual(
+      {
+        kind: 'valid',
+        state: activeFcmPushKeyState(
+          candidateKey,
+          2,
+          binding,
+          'https://account-a.test',
+          requestedAt,
+          { key: previousKey, keyVersion: 1, expiresAt: serverPreviousExpiry },
+        ),
+      },
+    );
+  });
+
+  it('refreshes only an aged rotation request anchor before a first late server commit', async () => {
+    const now = 1_700_100_000_000;
+    const oldRequestedAt = now - FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS;
+    const scopedCredential = `bbd_device_v1_${'I'.repeat(43)}`;
+    const binding = {
+      serverInstallationId: '11111111-1111-4111-8111-111111111111',
+      principalId: '22222222-2222-4222-8222-222222222222',
+      deviceId: '33333333-3333-4333-8333-333333333333',
+    } as const;
+    const previousKey = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
+    const candidateKey = 'BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc';
+    const rotationId = '44444444-4444-4444-8444-444444444444';
+    const serverPreviousExpiry = now + FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS - 5 * 60_000;
+    jest.spyOn(Date, 'now').mockReturnValue(now);
+    const random = jest.spyOn(Crypto, 'getRandomBytesAsync');
+    const uuid = jest.spyOn(Crypto, 'randomUUID');
+    setConnectedSession('https://account-a.test', scopedCredential, 101, true, true, true);
+    vaultValues.set(
+      'fcmPushEncryptionV2',
+      serializeFcmDeviceEncryptionState(
+        rotatingFcmPushKeyState(
+          candidateKey,
+          previousKey,
+          1,
+          binding,
+          'https://account-a.test',
+          rotationId,
+          oldRequestedAt,
+        ),
+      ),
+    );
+    mockRegisterDevice.mockImplementationOnce(async () => {
+      expect(
+        inspectFcmDeviceEncryptionState(vaultValues.get('fcmPushEncryptionV2') ?? null),
+      ).toEqual({
+        kind: 'valid',
+        state: rotatingFcmPushKeyState(
+          candidateKey,
+          previousKey,
+          1,
+          binding,
+          'https://account-a.test',
+          rotationId,
+          now,
+          oldRequestedAt,
+        ),
+      });
+      return {
+        id: binding.deviceId,
+        pushEncryptionType: FCM_PUSH_ENCRYPTION_TYPE_V3,
+        pushEncryptionIdentity: binding,
+        pushEncryptionKeyVersion: 2,
+        pushEncryptionRotationId: rotationId,
+        pushEncryptionPreviousKeyExpiresAt: serverPreviousExpiry,
+      };
+    });
+
+    await expect(registerFcmToken()).resolves.toBe('registered');
+
+    expect(random).not.toHaveBeenCalled();
+    expect(uuid).not.toHaveBeenCalled();
+    expect(inspectFcmDeviceEncryptionState(vaultValues.get('fcmPushEncryptionV2') ?? null)).toEqual(
+      {
+        kind: 'valid',
+        state: activeFcmPushKeyState(candidateKey, 2, binding, 'https://account-a.test', now, {
+          key: previousKey,
+          keyVersion: 1,
+          expiresAt: serverPreviousExpiry,
+        }),
+      },
+    );
+  });
+
+  it('promotes an aged idempotent rotation acknowledgement without reviving the expired key', async () => {
+    const now = 1_700_100_000_000;
+    const rotationStartedAt = now - FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS;
+    const scopedCredential = `bbd_device_v1_${'K'.repeat(43)}`;
+    const binding = {
+      serverInstallationId: '11111111-1111-4111-8111-111111111111',
+      principalId: '22222222-2222-4222-8222-222222222222',
+      deviceId: '33333333-3333-4333-8333-333333333333',
+    } as const;
+    const previousKey = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
+    const candidateKey = 'BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc';
+    const rotationId = '44444444-4444-4444-8444-444444444444';
+    const expiredServerDeadline = rotationStartedAt + 24 * 60 * 60 * 1_000 + 5 * 60_000;
+    jest.spyOn(Date, 'now').mockReturnValue(now);
+    setConnectedSession('https://account-a.test', scopedCredential, 101, true, true, true);
+    vaultValues.set(
+      'fcmPushEncryptionV2',
+      serializeFcmDeviceEncryptionState(
+        rotatingFcmPushKeyState(
+          candidateKey,
+          previousKey,
+          1,
+          binding,
+          'https://account-a.test',
+          rotationId,
+          rotationStartedAt,
+        ),
+      ),
+    );
+    mockRegisterDevice.mockResolvedValueOnce({
+      id: binding.deviceId,
+      pushEncryptionType: FCM_PUSH_ENCRYPTION_TYPE_V3,
+      pushEncryptionIdentity: binding,
+      pushEncryptionKeyVersion: 2,
+      pushEncryptionRotationId: rotationId,
+      pushEncryptionPreviousKeyExpiresAt: expiredServerDeadline,
+    });
+
+    await expect(registerFcmToken()).resolves.toBe('registered');
+
+    expect(inspectFcmDeviceEncryptionState(vaultValues.get('fcmPushEncryptionV2') ?? null)).toEqual(
+      {
+        kind: 'valid',
+        state: activeFcmPushKeyState(
+          candidateKey,
+          2,
+          binding,
+          'https://account-a.test',
+          rotationStartedAt,
+        ),
+      },
+    );
+  });
+
+  it('uses a bounded timer to rotate a continuously connected scoped session at its deadline', async () => {
+    const now = 1_700_000_000_000;
+    let currentTime = now;
+    const activatedAt = now - FCM_PUSH_KEY_ROTATION_INTERVAL_MS + 24 * 60 * 60 * 1_000;
+    const rotationDeadline = activatedAt + FCM_PUSH_KEY_ROTATION_INTERVAL_MS;
+    const scopedCredential = `bbd_device_v1_${'J'.repeat(43)}`;
+    const binding = {
+      serverInstallationId: '11111111-1111-4111-8111-111111111111',
+      principalId: '22222222-2222-4222-8222-222222222222',
+      deviceId: '33333333-3333-4333-8333-333333333333',
+    } as const;
+    const currentKey = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
+    const candidateKey = 'BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc';
+    const rotationId = '44444444-4444-4444-8444-444444444444';
+    const scheduled: { callback: () => void; delay: number }[] = [];
+    jest.spyOn(Date, 'now').mockImplementation(() => currentTime);
+    jest.spyOn(global, 'clearTimeout').mockImplementation(() => undefined);
+    jest.spyOn(global, 'setTimeout').mockImplementation(((callback: () => void, delay = 0) => {
+      scheduled.push({ callback, delay });
+      return { unref: jest.fn() };
+    }) as unknown as typeof setTimeout);
+    jest
+      .spyOn(Crypto, 'getRandomBytesAsync')
+      .mockResolvedValueOnce(Uint8Array.from({ length: 32 }, () => 7));
+    jest.spyOn(Crypto, 'randomUUID').mockReturnValue(rotationId);
+    setConnectedSession('https://account-a.test', scopedCredential, 101, true, true, true);
+    vaultValues.set(
+      'fcmPushEncryptionV2',
+      serializeFcmDeviceEncryptionState(
+        activeFcmPushKeyState(currentKey, 1, binding, 'https://account-a.test', activatedAt),
+      ),
+    );
+    mockRegisterDevice.mockResolvedValueOnce({
+      id: binding.deviceId,
+      pushEncryptionType: FCM_PUSH_ENCRYPTION_TYPE_V3,
+      pushEncryptionIdentity: binding,
+      pushEncryptionKeyVersion: 1,
+    });
+
+    await expect(registerFcmToken()).resolves.toBe('registered');
+    expect(scheduled.at(-1)?.delay).toBe(24 * 60 * 60 * 1_000);
+
+    currentTime = rotationDeadline;
+    const serverPreviousExpiry = currentTime + FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS - 5 * 60_000;
+    mockRegisterDevice.mockResolvedValueOnce({
+      id: binding.deviceId,
+      pushEncryptionType: FCM_PUSH_ENCRYPTION_TYPE_V3,
+      pushEncryptionIdentity: binding,
+      pushEncryptionKeyVersion: 2,
+      pushEncryptionRotationId: rotationId,
+      pushEncryptionPreviousKeyExpiresAt: serverPreviousExpiry,
+    });
+    scheduled.at(-1)?.callback();
+    for (let index = 0; index < 50 && mockRegisterDevice.mock.calls.length < 2; index += 1) {
+      await Promise.resolve();
+    }
+    await settle();
+
+    expect(mockRegisterDevice.mock.calls[1]?.[3]).toEqual({
+      type: FCM_PUSH_ENCRYPTION_TYPE_V3,
+      key: candidateKey,
+      rotation: { id: rotationId, previousKeyVersion: 1 },
+    });
+    expect(inspectFcmDeviceEncryptionState(vaultValues.get('fcmPushEncryptionV2') ?? null)).toEqual(
+      {
+        kind: 'valid',
+        state: activeFcmPushKeyState(
+          candidateKey,
+          2,
+          binding,
+          'https://account-a.test',
+          rotationDeadline,
+          { key: currentKey, keyVersion: 1, expiresAt: serverPreviousExpiry },
+        ),
+      },
+    );
+  });
+
+  it('fails closed before V2 or plaintext registration when a scoped credential lacks V3 support', async () => {
+    const scopedCredential = `bbd_device_v1_${'C'.repeat(43)}`;
+    setConnectedSession('https://account-a.test', scopedCredential, 101, true, false);
+    mockServerInfo.mockResolvedValueOnce({
+      server_version: '2.0.16',
+      supports_fcm_device_encryption: true,
+      supports_fcm_push_encryption_v3: false,
+    });
+    const random = jest.spyOn(Crypto, 'getRandomBytesAsync');
+
+    await expect(registerFcmToken()).resolves.toBe('failed');
+
+    expect(mockRegisterDevice).not.toHaveBeenCalled();
+    expect(random).not.toHaveBeenCalled();
+    expect(vaultValues.has('fcmPushEncryptionV2')).toBe(false);
+  });
+
+  it('keeps an active V3 binding active throughout a same-binding token refresh', async () => {
+    const scopedCredential = `bbd_device_v1_${'D'.repeat(43)}`;
+    const binding = {
+      serverInstallationId: '11111111-1111-4111-8111-111111111111',
+      principalId: '22222222-2222-4222-8222-222222222222',
+      deviceId: '33333333-3333-4333-8333-333333333333',
+    } as const;
+    const active = activeFcmDeviceEncryptionV3State(
+      'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8',
+      binding,
+      'https://account-a.test',
+    );
+    const serializedActive = serializeFcmDeviceEncryptionState(active);
+    setConnectedSession('https://account-a.test', scopedCredential, 101, true, true);
+    mockServerInfo.mockResolvedValueOnce({
+      server_version: '2.0.16',
+      supports_fcm_device_encryption: true,
+      supports_fcm_push_encryption_v3: true,
+      supports_fcm_push_key_rotation: false,
+    });
+    vaultValues.set('fcmPushEncryptionV2', serializedActive);
+    const random = jest.spyOn(Crypto, 'getRandomBytesAsync');
+    mockRegisterDevice.mockImplementationOnce(async () => {
+      expect(vaultValues.get('fcmPushEncryptionV2')).toBe(serializedActive);
+      return {
+        id: binding.deviceId,
+        pushEncryptionType: FCM_PUSH_ENCRYPTION_TYPE_V3,
+        pushEncryptionIdentity: binding,
+      };
+    });
+
+    await expect(registerFcmToken()).resolves.toBe('registered');
+
+    expect(random).not.toHaveBeenCalled();
+    expect(vaultValues.get('fcmPushEncryptionV2')).toBe(serializedActive);
+  });
+
+  it('retains the active V3 binding when a token-refresh acknowledgement changes identity', async () => {
+    const scopedCredential = `bbd_device_v1_${'E'.repeat(43)}`;
+    const binding = {
+      serverInstallationId: '11111111-1111-4111-8111-111111111111',
+      principalId: '22222222-2222-4222-8222-222222222222',
+      deviceId: '33333333-3333-4333-8333-333333333333',
+    } as const;
+    const changedBinding = {
+      ...binding,
+      deviceId: '55555555-5555-4555-8555-555555555555',
+    } as const;
+    const serializedActive = serializeFcmDeviceEncryptionState(
+      activeFcmDeviceEncryptionV3State(
+        'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8',
+        binding,
+        'https://account-a.test',
+      ),
+    );
+    setConnectedSession('https://account-a.test', scopedCredential, 101, true, true);
+    mockServerInfo.mockResolvedValueOnce({
+      server_version: '2.0.16',
+      supports_fcm_device_encryption: true,
+      supports_fcm_push_encryption_v3: true,
+      supports_fcm_push_key_rotation: false,
+    });
+    vaultValues.set('fcmPushEncryptionV2', serializedActive);
+    mockRegisterDevice.mockResolvedValueOnce({
+      id: changedBinding.deviceId,
+      pushEncryptionType: FCM_PUSH_ENCRYPTION_TYPE_V3,
+      pushEncryptionIdentity: changedBinding,
+    });
+
+    await expect(registerFcmToken()).resolves.toBe('failed');
+
+    expect(vaultValues.get('fcmPushEncryptionV2')).toBe(serializedActive);
+  });
+
+  it.each([
+    [
+      'candidate',
+      serializeCredentialUpgradeJournal(
+        createCredentialUpgradeCandidate(
+          'https://account-a.test',
+          'password-a',
+          `bbd_device_v1_${'F'.repeat(43)}`,
+        ),
+      ),
+    ],
+    ['revoked', serializeCredentialUpgradeJournal(revokedCredentialUpgradeJournal())],
+  ])(
+    'leaves a valid %s credential-upgrade journal in sole control of SEC-04 recovery',
+    async (_phase, journal) => {
+      vaultValues.set('serverCredentialUpgrade', journal);
+
+      await expect(registerFcmToken()).resolves.toBe('skipped');
+
+      expect(mockGetToken).not.toHaveBeenCalled();
+      expect(mockRegisterDevice).not.toHaveBeenCalled();
+      expect(vaultValues.get('serverCredentialUpgrade')).toBe(journal);
+    },
+  );
+
+  it('reports current-session failure without mutation for an invalid upgrade journal', async () => {
+    vaultValues.set('serverCredentialUpgrade', '{"version":1,"phase":"candidate"}');
+
+    await expect(registerFcmToken()).resolves.toBe('failed');
+
+    expect(mockGetToken).not.toHaveBeenCalled();
+    expect(mockRegisterDevice).not.toHaveBeenCalled();
+    expect(vaultValues.get('serverCredentialUpgrade')).toBe('{"version":1,"phase":"candidate"}');
+  });
+
+  it('reports current-session failure when the upgrade journal cannot be read', async () => {
+    mockVaultGet.mockImplementation(async (key: string) => {
+      if (key === 'serverCredentialUpgrade') throw new Error('vault unavailable');
+      return vaultValues.get(key) ?? null;
+    });
+
+    await expect(registerFcmToken()).resolves.toBe('failed');
+
+    expect(mockGetToken).not.toHaveBeenCalled();
+    expect(mockRegisterDevice).not.toHaveBeenCalled();
+  });
+
+  it('never falls back to V2 after a V3 enrollment record exists', async () => {
+    const scopedCredential = `bbd_device_v1_${'B'.repeat(43)}`;
+    const binding = {
+      serverInstallationId: '11111111-1111-4111-8111-111111111111',
+      principalId: '22222222-2222-4222-8222-222222222222',
+      deviceId: '33333333-3333-4333-8333-333333333333',
+    } as const;
+    setConnectedSession('https://account-a.test', scopedCredential, 101, true, false);
+    mockServerInfo.mockResolvedValueOnce({
+      server_version: '2.0.16',
+      supports_fcm_device_encryption: true,
+      supports_fcm_push_encryption_v3: false,
+    });
+    vaultValues.set(
+      'fcmPushEncryptionV2',
+      serializeFcmDeviceEncryptionState(
+        activeFcmDeviceEncryptionV3State(
+          'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8',
+          binding,
+          'https://account-a.test',
+        ),
+      ),
+    );
+
+    await expect(registerFcmToken()).resolves.toBe('failed');
+    expect(mockRegisterDevice).not.toHaveBeenCalled();
+  });
+
   it('retains and reuses one pending key after a lost registration response', async () => {
     setConnectedSession('https://account-a.test', 'password-a', 101, true);
     const random = jest
@@ -380,6 +966,18 @@ describe('FCM registration account ownership', () => {
       type: FCM_DEVICE_ENCRYPTION_TYPE,
       key: firstKey,
     });
+  });
+
+  it('does not register shared-password FCM at the exclusive V2 compatibility cutoff', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(FCM_V2_COMPATIBILITY_CUTOFF_MS);
+    setConnectedSession('https://account-a.test', 'password-a', 101, true);
+    const random = jest.spyOn(Crypto, 'getRandomBytesAsync');
+
+    await expect(registerFcmToken()).resolves.toBe('failed');
+
+    expect(random).not.toHaveBeenCalled();
+    expect(mockRegisterDevice).not.toHaveBeenCalled();
+    expect(vaultValues.has('fcmPushEncryptionV2')).toBe(false);
   });
 
   it('serializes simultaneous registration calls and leaves server/local key agreement', async () => {

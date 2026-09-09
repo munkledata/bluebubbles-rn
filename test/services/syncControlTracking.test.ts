@@ -22,7 +22,17 @@ const reconcileFullRepairPruneExposure = jest.fn();
 const sameFullSyncServerView = jest.fn();
 const syncContacts = jest.fn();
 const serverVersion = jest.fn();
-const mockSyncDb = { testId: 'sync-control-db' };
+const beginRepairSnapshot = jest.fn();
+const finishRepairSnapshot = jest.fn();
+const cancelRepairSnapshot = jest.fn();
+const bindRepairSnapshot = jest.fn();
+const syncDeletedMessages = jest.fn<Promise<number>, [unknown, unknown, unknown]>(async () => 0);
+const pinnedHttp = { bindRepairSnapshot };
+const pinTransport = jest.fn(() => pinnedHttp);
+const mockSyncDb = {
+  testId: 'sync-control-db',
+  run: jest.fn<Promise<void>, [unknown]>(async () => undefined),
+};
 let mockAccountLeaseCurrent = true;
 const mockAccountLease = {
   generation: 731,
@@ -47,8 +57,11 @@ const mockRetireInactiveEntries = jest.fn<Promise<void>, [unknown, { scope: unkn
 const mockDrainDueRetirements = jest.fn<Promise<void>, [unknown, { scope: unknown }]>(
   async () => undefined,
 );
+const mockReconcileMessageNotifications = jest.fn<Promise<void>, [unknown, unknown]>(
+  async () => undefined,
+);
 
-jest.mock('@/services/clients', () => ({ http: {} }));
+jest.mock('@/services/clients', () => ({ http: { pinTransport } }));
 jest.mock('@/services/databaseControl', () => ({ ensureDatabase: mockEnsureDatabase }));
 jest.mock('@/services/contacts/contactsService', () => ({ syncContacts }));
 jest.mock('@/services/download/attachmentCacheAccountScope', () => ({
@@ -60,18 +73,27 @@ jest.mock('@/services/download/attachmentCacheCoordinator', () => ({
     drainDueRetirements: mockDrainDueRetirements,
   },
 }));
+jest.mock('@/services/notifications/notifeeService', () => ({
+  reconcileMessageNotificationsWithDatabase: mockReconcileMessageNotifications,
+}));
 jest.mock('@/services/realtime/deliveryCoordinator', () => ({
   captureRealtimeDeliveryLease: mockCaptureRealtimeDeliveryLease,
   subscribeRealtimeGenerationInvalidation: mockSubscribeRealtimeGenerationInvalidation,
 }));
 jest.mock('@/services/sync', () => ({
   fullSync,
-  httpSyncApi: () => ({ serverVersion }),
+  httpSyncApi: (transport: unknown) => ({
+    transport,
+    serverVersion,
+    beginRepairSnapshot,
+    finishRepairSnapshot,
+    cancelRepairSnapshot,
+  }),
   incrementalSync,
   sameFullSyncServerView,
   syncAllChats,
   syncChatMessages,
-  syncDeletedMessages: jest.fn(async () => 0),
+  syncDeletedMessages,
 }));
 // The stores syncControl pulls in reach `@db/database`, which loads op-sqlite's native binding.
 jest.mock('@db/database', () => ({ getDatabase: () => ({}) }));
@@ -83,6 +105,7 @@ jest.mock('@db/repositories', () => ({
 }));
 
 import type { ServerInfo } from '@core/models';
+import { UnimplementedEndpointError } from '@core/api/errors';
 import { useSessionStore } from '@state/sessionStore';
 import { useSyncStore } from '@state/syncStore';
 import {
@@ -138,6 +161,14 @@ beforeEach(() => {
   syncChatMessages.mockResolvedValue(0);
   syncContacts.mockResolvedValue({ contacts: 0, matched: 0 });
   serverVersion.mockResolvedValue('1.9.0');
+  beginRepairSnapshot.mockResolvedValue({
+    token: '00000000-0000-4000-8000-000000000001',
+    expiresAt: 1_900_000_000_000,
+  });
+  finishRepairSnapshot.mockResolvedValue(undefined);
+  cancelRepairSnapshot.mockResolvedValue(undefined);
+  bindRepairSnapshot.mockReturnValue({});
+  mockReconcileMessageNotifications.mockResolvedValue(undefined);
   useSyncStore.getState().reset();
   // The slot is keyed by the session INSTANCE it belongs to, so start each test from a fresh one
   // (`reset` mints a new epoch, so nothing a previous test parked in the slot is shareable here).
@@ -277,6 +308,76 @@ describe('runTrackedSync — the background task participates in the coalescing 
 });
 
 describe('full repair — cancellation ownership', () => {
+  it('binds one crawl, verifies it, then reconciles and installs the rebuilt marker', async () => {
+    fullSync.mockImplementation(async (_db, _api, options) => {
+      options.onServerMarker?.({ lastSyncedRowId: 42, lastSyncedTimestamp: 4_200 });
+      options.onServerView?.({
+        chats: new Map([['chat-a', 7]]),
+        messages: new Map(),
+        attachmentsByMessage: new Map(),
+      });
+      return { chats: 1, messages: 0 };
+    });
+
+    connectSession('https://repair.example');
+    await startFullRepair();
+
+    expect(beginRepairSnapshot).toHaveBeenCalledTimes(1);
+    expect(fullSync).toHaveBeenCalledTimes(1);
+    expect(bindRepairSnapshot).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000001');
+    expect(finishRepairSnapshot).toHaveBeenCalledTimes(1);
+    expect(syncDeletedMessages.mock.calls[0]?.[1]).toBe(fullSync.mock.calls[0]?.[1]);
+    expect(reconcileFullRepairPruneExposure).toHaveBeenCalledTimes(1);
+    expect(setSyncMarkerWithinTransaction).toHaveBeenCalledTimes(1);
+    expect(mockReconcileMessageNotifications).toHaveBeenCalledWith(mockSyncDb, mockAccountLease);
+    expect(beginRepairSnapshot.mock.invocationCallOrder[0]).toBeLessThan(
+      fullSync.mock.invocationCallOrder[0]!,
+    );
+    expect(fullSync.mock.invocationCallOrder[0]).toBeLessThan(
+      finishRepairSnapshot.mock.invocationCallOrder[0]!,
+    );
+    expect(finishRepairSnapshot.mock.invocationCallOrder[0]).toBeLessThan(
+      reconcileFullRepairPruneExposure.mock.invocationCallOrder[0]!,
+    );
+    expect(reconcileFullRepairPruneExposure.mock.invocationCallOrder[0]).toBeLessThan(
+      setSyncMarkerWithinTransaction.mock.invocationCallOrder[0]!,
+    );
+    expect(useSyncStore.getState()).toMatchObject({
+      repairStatus: 'done',
+      repairPhase: 'Repair complete',
+    });
+  });
+
+  it('keeps old-server refresh additive and reports its limited completion truthfully', async () => {
+    beginRepairSnapshot.mockRejectedValueOnce(
+      new UnimplementedEndpointError('/sync/repair-snapshot'),
+    );
+    fullSync.mockImplementation(async (_db, _api, options) => {
+      options.onServerMarker?.({ lastSyncedRowId: 42, lastSyncedTimestamp: 4_200 });
+      options.onServerView?.({
+        chats: new Map([['chat-a', 7]]),
+        messages: new Map(),
+        attachmentsByMessage: new Map(),
+      });
+      return { chats: 1, messages: 0 };
+    });
+
+    connectSession('https://old-repair.example');
+    await startFullRepair();
+
+    expect(fullSync).toHaveBeenCalledTimes(1);
+    expect(captureFullRepairPruneExposure).not.toHaveBeenCalled();
+    expect(bindRepairSnapshot).not.toHaveBeenCalled();
+    expect(finishRepairSnapshot).not.toHaveBeenCalled();
+    expect(reconcileFullRepairPruneExposure).not.toHaveBeenCalled();
+    expect(setSyncMarkerWithinTransaction).not.toHaveBeenCalled();
+    expect(cancelRepairSnapshot).not.toHaveBeenCalled();
+    expect(useSyncStore.getState()).toMatchObject({
+      repairStatus: 'done',
+      repairPhase: 'Refresh complete (limited)',
+    });
+  });
+
   it('aborts the active request and leaves the previous marker untouched', async () => {
     let repairOptions:
       | {
@@ -316,12 +417,37 @@ describe('full repair — cancellation ownership', () => {
     await expect(running).resolves.toBeUndefined();
 
     expect(setSyncMarkerWithinTransaction).not.toHaveBeenCalled();
+    expect(cancelRepairSnapshot).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000001');
     expect(useSyncStore.getState()).toMatchObject({
       status: 'idle',
       repairStatus: 'cancelled',
       repairPhase: 'Repair stopped',
     });
     expect(mockReleaseInvalidation).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases the server lease when snapshot finish fails', async () => {
+    fullSync.mockImplementation(async (_db, _api, options) => {
+      options.onServerMarker?.({ lastSyncedRowId: 42, lastSyncedTimestamp: 4_200 });
+      options.onServerView?.({
+        chats: new Map([['chat-a', 7]]),
+        messages: new Map(),
+        attachmentsByMessage: new Map(),
+      });
+      return { chats: 1, messages: 0 };
+    });
+    finishRepairSnapshot.mockRejectedValueOnce(new Error('snapshot finish failed'));
+
+    connectSession('https://repair.example');
+    await startFullRepair();
+
+    expect(cancelRepairSnapshot).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000001');
+    expect(reconcileFullRepairPruneExposure).not.toHaveBeenCalled();
+    expect(setSyncMarkerWithinTransaction).not.toHaveBeenCalled();
+    expect(useSyncStore.getState()).toMatchObject({
+      repairStatus: 'error',
+      repairPhase: 'Repair failed',
+    });
   });
 });
 

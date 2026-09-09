@@ -27,7 +27,12 @@ import {
   getNativeAttachmentCacheAvailableBytes,
   statNativeAttachmentCacheFile,
 } from '@native/boundedDownload';
-import { download, redownload, setAttachmentFetcher } from '@/services/download';
+import {
+  download,
+  downloadWithClient,
+  redownload,
+  setAttachmentFetcher,
+} from '@/services/download';
 import { useDownloadStore } from '@state/downloadStore';
 import { createAttachmentCacheAccountScope } from '@/services/download/attachmentCacheAccountScope';
 import {
@@ -142,6 +147,24 @@ describe('account-scoped attachment retries', () => {
     );
     expect(mockProductionDownload).toHaveBeenCalledTimes(2);
     expect(fixtureDownload).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the DEV fixture fetcher when a realtime caller supplies a task-local client', async () => {
+    const { db } = await createTestDb();
+    activeDb = db;
+    const attachment = { ...(await seedRcsAttachment(db)), service: 'iMessage' };
+    const fixtureDownload = jest.fn().mockResolvedValue({
+      localPath: 'file:///attachments/scope-attachment/fixture.jpg',
+      bytes: 1_000,
+    });
+    setAttachmentFetcher({ exists: () => false, download: fixtureDownload });
+
+    await expect(
+      downloadWithClient({} as never, attachment, 'automatic', captureRealtimeDeliveryLease()),
+    ).resolves.toBe('file:///attachments/scope-attachment/fixture.jpg');
+
+    expect(fixtureDownload).toHaveBeenCalledTimes(1);
+    expect(mockProductionDownload).not.toHaveBeenCalled();
   });
 
   it('holds an exact old-path pin while copy-on-write redownload commits a new cache path', async () => {

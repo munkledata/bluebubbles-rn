@@ -1,5 +1,12 @@
 import { z } from 'zod/v4';
 import {
+  MAX_RETRACTION_ATTACHMENT_GUID_BYTES,
+  MAX_RETRACTION_ATTACHMENTS,
+  MAX_RETRACTION_PARTS,
+  MAX_MESSAGE_PART_TOPOLOGY_BYTES,
+  type MessagePartTopology,
+} from '../messages/retraction';
+import {
   MAX_MESSAGE_PART_INDEX,
   partIndexFromAssociatedGuid,
   stripAssociatedGuidPrefix,
@@ -38,10 +45,68 @@ export type EditRevision = z.infer<typeof EditRevision>;
 export const MessageSummaryInfo = z
   .object({
     editedParts: z.record(z.string(), z.array(EditRevision)).nullish(),
-    retractedParts: z.array(z.number()).nullish(),
+    retractedParts: z
+      .array(z.number().int().min(0).max(MAX_MESSAGE_PART_INDEX))
+      .max(MAX_RETRACTION_PARTS)
+      .nullish(),
   })
   .loose();
 export type MessageSummaryInfo = z.infer<typeof MessageSummaryInfo>;
+
+const topologyUtf8Encoder = new TextEncoder();
+const TopologyAttachmentGuid = z
+  .string()
+  .min(1)
+  .max(MAX_RETRACTION_ATTACHMENT_GUID_BYTES)
+  .refine(
+    (value) =>
+      value.trim() === value &&
+      !value.includes('\0') &&
+      topologyUtf8Encoder.encode(value).byteLength <= MAX_RETRACTION_ATTACHMENT_GUID_BYTES,
+  );
+const TopologyPartIndex = z.number().int().min(0).max(MAX_MESSAGE_PART_INDEX);
+
+/** Bounded additive server contract used to prove exact Apple multipart identity. */
+export const MessagePartTopologyModel = z
+  .object({
+    complete: z.boolean(),
+    originalPartIndexes: z.array(TopologyPartIndex).max(MAX_RETRACTION_PARTS),
+    currentParts: z
+      .array(
+        z
+          .object({
+            index: TopologyPartIndex,
+            kind: z.enum(['text', 'attachment', 'unknown']),
+            attachmentGuids: z
+              .array(TopologyAttachmentGuid)
+              .max(MAX_RETRACTION_ATTACHMENTS)
+              .optional(),
+          })
+          .loose(),
+      )
+      .max(MAX_RETRACTION_PARTS),
+    attachmentOwnership: z
+      .array(
+        z
+          .object({
+            attachmentGuid: TopologyAttachmentGuid,
+            partIndex: TopologyPartIndex,
+          })
+          .loose(),
+      )
+      .max(MAX_RETRACTION_ATTACHMENTS),
+  })
+  .loose()
+  .refine((value) => {
+    try {
+      return (
+        topologyUtf8Encoder.encode(JSON.stringify(value)).byteLength <=
+        MAX_MESSAGE_PART_TOPOLOGY_BYTES
+      );
+    } catch {
+      return false;
+    }
+  }, 'message part topology exceeds the durable storage bound');
 
 /**
  * One decoded rich-link preview from a URL balloon's `payload_data` — the LPLinkMetadata the
@@ -140,11 +205,18 @@ const MessageWire = z.object({
    * Apple edit history / unsent parts (macOS 13+). Presence-driven — arrives ONLY on edited or
    * retracted messages. `messageSummaryInfo` is already in SYNC_WITH_QUERY, so existing sync/query
    * flows deliver it once this field exists (older code silently stripped it for lack of a model
-   * field). `.catch(undefined)` is the final guard: a malformed value coerces to "absent" rather
-   * than failing the whole message parse (which would stall the sync page it rides in). Persisted
-   * as JSON TEXT on the messages table; read back tolerantly via {@link parseMessageSummaryInfo}.
+   * field). The transform below records malformed input separately instead of treating it as
+   * ordinary absence: a bad retraction summary must fail closed without rejecting its whole page.
+   * Persisted as JSON TEXT on the messages table; read back tolerantly via
+   * {@link parseMessageSummaryInfo}.
    */
-  messageSummaryInfo: MessageSummaryInfo.nullish().catch(undefined),
+  messageSummaryInfo: z.unknown().nullish(),
+  messageSummaryInfoInvalid: z.literal(true).optional().catch(undefined),
+
+  /** Exact Apple multipart topology from a capable server; absent on old/lean payloads. */
+  messagePartTopology: z.unknown().nullish(),
+  /** Canonical-envelope marker: malformed topology was observed and must not regain trust. */
+  messagePartTopologyInvalid: z.literal(true).optional().catch(undefined),
 
   /**
    * Apple rich-link preview (URL balloons): the sender-fetched LPLinkMetadata, decoded
@@ -201,6 +273,20 @@ const MessageWire = z.object({
   chatGuid: z.string().nullish(),
 
   /**
+   * Exact optimistic-send correlation emitted only by capable RCS servers. The pair is transport
+   * metadata: it lets success install the physical-attempt owner without relying on content.
+   */
+  // Keep the raw values through this boundary so the transform below can distinguish genuinely
+  // absent legacy correlation from a malformed/partial modern tuple. Silently dropping a bad
+  // tuple would grant permission to fall back to content matching.
+  tempGuid: z.unknown().nullish(),
+  attemptGuid: z.unknown().nullish(),
+  clientAttemptGeneration: z.unknown().nullish(),
+  // Derived during first normalization and retained in the canonical durable envelope. Accepting
+  // only literal true is safe for a direct wire payload too: it can only disable heuristic matching.
+  sendAttemptCorrelationInvalid: z.literal(true).optional().catch(undefined),
+
+  /**
    * Reaction/threading linkage. Normalized on parse to the BARE target guid: the wire carries a
    * part prefix (`p:0/<guid>` / `bp:0/<guid>`) that the target message's own `guid` does not, so
    * without this strip an incoming reaction never matches its target and stays invisible. Applied
@@ -238,8 +324,74 @@ export const Message = MessageWire.transform((message) => {
   // Capture the part BEFORE normalizing `p:<n>/<guid>` to the bare target guid. Future servers may
   // send an explicit numeric field; a valid explicit value is authoritative when present.
   const rawAssociatedGuid = message.associatedMessageGuid;
+  const hasCorrelationInput =
+    message.sendAttemptCorrelationInvalid === true ||
+    message.tempGuid != null ||
+    message.attemptGuid != null ||
+    message.clientAttemptGeneration != null;
+  const normalizedTempGuid =
+    typeof message.tempGuid === 'string' &&
+    message.tempGuid.length >= 1 &&
+    message.tempGuid.length <= 256
+      ? message.tempGuid
+      : undefined;
+  const normalizedAttemptGuid =
+    typeof message.attemptGuid === 'string' &&
+    message.attemptGuid.length >= 1 &&
+    message.attemptGuid.length <= 128
+      ? message.attemptGuid
+      : undefined;
+  const normalizedGeneration =
+    typeof message.clientAttemptGeneration === 'number' &&
+    Number.isInteger(message.clientAttemptGeneration) &&
+    message.clientAttemptGeneration >= 1 &&
+    message.clientAttemptGeneration <= 2_147_483_647
+      ? message.clientAttemptGeneration
+      : undefined;
+  const completeCorrelation =
+    normalizedTempGuid !== undefined &&
+    normalizedAttemptGuid !== undefined &&
+    normalizedGeneration !== undefined;
+  const summaryResult = MessageSummaryInfo.safeParse(message.messageSummaryInfo);
+  const topologyResult = MessagePartTopologyModel.safeParse(message.messagePartTopology);
+  const normalizedSummary =
+    message.messageSummaryInfo == null
+      ? message.messageSummaryInfo
+      : summaryResult.success
+        ? summaryResult.data
+        : undefined;
+  const normalizedTopology =
+    message.messagePartTopology == null
+      ? message.messagePartTopology
+      : topologyResult.success
+        ? (topologyResult.data as MessagePartTopology)
+        : undefined;
+  const {
+    messageSummaryInfo: _rawMessageSummaryInfo,
+    messagePartTopology: _rawMessagePartTopology,
+    ...messageWithoutRawRetractionMetadata
+  } = message;
   return {
-    ...message,
+    ...messageWithoutRawRetractionMetadata,
+    ...(normalizedSummary == null ? {} : { messageSummaryInfo: normalizedSummary }),
+    messageSummaryInfoInvalid:
+      message.messageSummaryInfoInvalid === true ||
+      (message.messageSummaryInfo != null && !summaryResult.success)
+        ? (true as const)
+        : undefined,
+    ...(normalizedTopology == null ? {} : { messagePartTopology: normalizedTopology }),
+    messagePartTopologyInvalid:
+      message.messagePartTopologyInvalid === true ||
+      (message.messagePartTopology != null && !topologyResult.success)
+        ? (true as const)
+        : undefined,
+    // One-sided/malformed correlation is not exact, but it is also not legacy. Preserve a private
+    // marker so reconciliation can fail closed while still storing the canonical server message.
+    tempGuid: completeCorrelation ? normalizedTempGuid : undefined,
+    attemptGuid: completeCorrelation ? normalizedAttemptGuid : undefined,
+    clientAttemptGeneration: completeCorrelation ? normalizedGeneration : undefined,
+    sendAttemptCorrelationInvalid:
+      !completeCorrelation && hasCorrelationInput ? (true as const) : undefined,
     associatedMessageGuid:
       rawAssociatedGuid == null ? rawAssociatedGuid : stripAssociatedGuidPrefix(rawAssociatedGuid),
     associatedMessagePart:
@@ -247,6 +399,21 @@ export const Message = MessageWire.transform((message) => {
   };
 });
 export type Message = z.infer<typeof Message>;
+
+/** Tolerant read-back parser for the DB's `message_part_topology` JSON TEXT column. */
+export function parseMessagePartTopology(
+  raw: string | null | undefined,
+): MessagePartTopology | null {
+  if (!raw) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  const result = MessagePartTopologyModel.safeParse(parsed);
+  return result.success ? (result.data as MessagePartTopology) : null;
+}
 
 /** True when the message is a reaction (tapback) rather than standalone content. */
 export function isReaction(m: Pick<Message, 'associatedMessageType'>): boolean {

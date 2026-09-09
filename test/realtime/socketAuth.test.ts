@@ -30,7 +30,7 @@ describe('SocketService auth mode', () => {
     mockEmit.mockClear();
   });
 
-  it('secure default: sends the auth payload and no query', () => {
+  it('secure default: sends a shared password in auth.password and no query', () => {
     new SocketService(handleRawEvent).connect('https://srv', 'pw', {
       headers: { Authorization: 'Bearer pw' },
     });
@@ -38,6 +38,46 @@ describe('SocketService auth mode', () => {
     expect(opts.auth).toEqual({ password: 'pw' });
     expect(opts.query).toBeUndefined();
     expect(opts.extraHeaders).toEqual({ Authorization: 'Bearer pw' });
+  });
+
+  it('sends an exact scoped device credential in auth.token and no query', () => {
+    const token = `bbd_device_v1_${'A_-b'.repeat(10)}Abc`;
+    expect(token).toHaveLength('bbd_device_v1_'.length + 43);
+    new SocketService(handleRawEvent).connect('https://srv', token, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const opts = lastIoOptions();
+    expect(opts.auth).toEqual({ token });
+    expect(opts.query).toBeUndefined();
+    expect(opts.extraHeaders).toEqual({ Authorization: `Bearer ${token}` });
+  });
+
+  it('rejects a scoped device credential instead of leaking it through legacy query auth', () => {
+    const token = `bbd_device_v1_${'z'.repeat(43)}`;
+    const service = new SocketService(handleRawEvent);
+
+    expect(() => service.connect('https://srv', token, { legacyQueryAuth: true })).toThrow(
+      'Scoped device credentials require Socket.IO auth.token',
+    );
+    expect(mockIo).not.toHaveBeenCalled();
+  });
+
+  it('rejects an invalid scoped reconnect before retiring the existing socket', () => {
+    const service = new SocketService(handleRawEvent);
+    service.connect('https://current.example', 'current-shared-password');
+    const currentSocket = mockIo.mock.results[0]!.value as { disconnect: jest.Mock };
+    const token = `bbd_device_v1_${'q'.repeat(43)}`;
+
+    expect(() =>
+      service.connect('https://replacement.example', token, { legacyQueryAuth: true }),
+    ).toThrow('Scoped device credentials require Socket.IO auth.token');
+
+    expect(currentSocket.disconnect).not.toHaveBeenCalled();
+    expect(mockIo).toHaveBeenCalledTimes(1);
+    expect(mockIo).toHaveBeenLastCalledWith(
+      'https://current.example',
+      expect.objectContaining({ auth: { password: 'current-shared-password' } }),
+    );
   });
 
   it('legacy mode: sends a ?guid= query and no auth payload', () => {

@@ -19,9 +19,9 @@ const PUBLIC_TEXT_INSERT_TARGET = 'src/db/repositories/outgoing.ts#insertOutgoin
 const TRANSACTION_TEXT_INSERT_TARGET =
   'src/db/repositories/outgoing.ts#insertOutgoingTextWithinTransaction';
 const REVIEWED_RUN_DUE_BODY_HASH =
-  'e6259e87f1baef91ca5f55f92ada0b28604bfe628aa338b0e2c56bdcf1704d11';
+  '56ebf9e2a99a2fd8f50f5041dd403dc9d7879216565878ed6b9ff8394bed5573';
 const REVIEWED_SEND_TEXT_BODY_HASH =
-  'dd6359aeef52eef3a725a11ced96aad328317417d940e1b774d5e9c9ffc95d62';
+  '8246553a556109be0e09d45a7b186dd08672dd35e80e281426978a6142c2a1a3';
 const HOME_PATH = 'app/(app)/home.tsx';
 const CHAT_ROUTE_PATH = 'app/(app)/chat/[guid].tsx';
 const CHAT_CATCHUP_PATH = 'src/features/conversations/useChatScheduledCatchup.ts';
@@ -30,7 +30,7 @@ const BACKGROUND_SYNC_PATH = 'src/services/background/backgroundSync.ts';
 const REVIEWED_SCHEDULED_SYNTAX_HASHES = new Map([
   [
     `${SEND_COMPOSITION_PATH}#fireDueScheduled`,
-    'df82985dd8da9a2ff218aee1bae441a18b29bc0570f1181cf5f386323ab834ef',
+    '2453fc12396f1670a5a56579838a5d7da3e313348f49a39571a1fb6fff3624b7',
   ],
   [
     `${SEND_COMPOSITION_PATH}#fireDueScheduledWithDevelopmentSender`,
@@ -42,7 +42,7 @@ const REVIEWED_SCHEDULED_SYNTAX_HASHES = new Map([
   ],
   [
     `${BACKGROUND_SYNC_PATH}#recoverAndDrainBackgroundSchedules`,
-    '52405b0054b7144a559751cf3c7136b849af1ab1812401a749254afbcfaebac3',
+    '2069af4b037851a86bc475cf38aadc579093c93ebf763d305f1e5251fd554330',
   ],
   [
     `${BACKGROUND_SYNC_PATH}#asRealtimeLease`,
@@ -50,7 +50,7 @@ const REVIEWED_SCHEDULED_SYNTAX_HASHES = new Map([
   ],
   [
     `${CHAT_CATCHUP_PATH}#useChatScheduledCatchup`,
-    '57f75b6dde11ec6d426c255edbb1a1b6b0f5a1528745b881fd38c9e762cc666a',
+    '1db9602e37beb5cda84c4b31f82a8a1f90c2a70ce0ef3439f0a9eb457f33a098',
   ],
   [
     `${CHAT_ROUTE_PATH}#ChatScreen`,
@@ -58,13 +58,18 @@ const REVIEWED_SCHEDULED_SYNTAX_HASHES = new Map([
   ],
   [
     `${HOME_PATH}#Home.scheduledEffect`,
-    '2fb810524311c376ae5cdca62563f51f4fb6961e4f38107a8baa52d3edf6ea6e',
+    '1cf41a557136fa282006f2ef9fba82d785c39e94652e7d2f13a80df2c893a687',
   ],
 ]);
 const EXPECTED_SCHEDULED_CALLERS = new Map([
   [
     `runDueScheduled|${SEND_COMPOSITION_PATH}|fireDueScheduled`,
-    { argumentCount: 5, scopeIndex: 4, scope: 'accountLease' },
+    {
+      argumentCount: 7,
+      scopeIndex: 4,
+      scope: 'accountLease',
+      capabilityFactory: 'session',
+    },
   ],
   [
     `runDueScheduled|${SEND_COMPOSITION_PATH}|fireDueScheduledWithDevelopmentSender`,
@@ -72,7 +77,7 @@ const EXPECTED_SCHEDULED_CALLERS = new Map([
   ],
   [
     `runDueScheduled|${BACKGROUND_SYNC_PATH}|recoverAndDrainBackgroundSchedules`,
-    { argumentCount: 6, scopeIndex: 4, scope: 'lease' },
+    { argumentCount: 7, scopeIndex: 4, scope: 'lease', capabilityFactory: 'fixed' },
   ],
   [`fireDueScheduled|${HOME_PATH}|Home`, { argumentCount: 0 }],
   [
@@ -121,6 +126,24 @@ function callsNamed(node, names) {
   return calls;
 }
 
+function propertyCallsNamed(node, owner, name) {
+  const calls = [];
+  function visit(candidate) {
+    if (
+      ts.isCallExpression(candidate) &&
+      ts.isPropertyAccessExpression(candidate.expression) &&
+      ts.isIdentifier(candidate.expression.expression) &&
+      candidate.expression.expression.text === owner &&
+      candidate.expression.name.text === name
+    ) {
+      calls.push(candidate);
+    }
+    ts.forEachChild(candidate, visit);
+  }
+  visit(node);
+  return calls;
+}
+
 function exportedFunction(sourceFile, name) {
   const matches = sourceFile.statements.filter(
     (statement) => ts.isFunctionDeclaration(statement) && statement.name?.text === name,
@@ -159,6 +182,27 @@ function isExactTopLevelRecoveryAwait(call, body) {
 function isIdentifierArgument(call, index, expected) {
   const argument = call.arguments[index];
   return !!argument && ts.isIdentifier(argument) && argument.text === expected;
+}
+
+function isDirectOptionalZeroArgumentCall(expression, name) {
+  return (
+    !!expression &&
+    ts.isCallExpression(expression) &&
+    directCallName(expression) === name &&
+    !!expression.questionDotToken &&
+    expression.arguments.length === 0
+  );
+}
+
+function isExactMessageTargetCommitGuardCall(expression) {
+  return (
+    !!expression &&
+    ts.isCallExpression(expression) &&
+    directCallName(expression) === 'messageTargetCommitGuard' &&
+    expression.arguments.length === 2 &&
+    isIdentifierArgument(expression, 0, 'commitGuard') &&
+    isIdentifierArgument(expression, 1, 'serverAuthorization')
+  );
 }
 
 function closestForOf(node) {
@@ -231,6 +275,60 @@ function isDirectPropertyAssignment(property, name, owner) {
   );
 }
 
+function isDirectOptionalPropertyAccess(expression, owner, name) {
+  return (
+    !!expression &&
+    ts.isPropertyAccessExpression(expression) &&
+    !!expression.questionDotToken &&
+    ts.isIdentifier(expression.expression) &&
+    expression.expression.text === owner &&
+    expression.name.text === name
+  );
+}
+
+function isExactAttemptOwnerOptions(expression) {
+  if (!expression || !ts.isObjectLiteralExpression(expression)) return false;
+  if (expression.properties.length !== 1) return false;
+  const property = expression.properties[0];
+  if (
+    !property ||
+    !ts.isPropertyAssignment(property) ||
+    propertyNameText(property) !== 'attemptOwnerToken'
+  ) {
+    return false;
+  }
+  const initializer = property.initializer;
+  return (
+    ts.isBinaryExpression(initializer) &&
+    initializer.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken &&
+    ts.isIdentifier(initializer.left) &&
+    initializer.left.text === 'attemptOwnerToken' &&
+    ts.isIdentifier(initializer.right) &&
+    initializer.right.text === 'undefined'
+  );
+}
+
+function isExactTargetCapabilityOptions(expression) {
+  if (!expression || !ts.isObjectLiteralExpression(expression)) return false;
+  if (expression.properties.length !== 1) return false;
+  const property = expression.properties[0];
+  if (
+    !property ||
+    !ts.isPropertyAssignment(property) ||
+    propertyNameText(property) !== 'requireServerInfo'
+  ) {
+    return false;
+  }
+  const initializer = property.initializer;
+  return (
+    ts.isBinaryExpression(initializer) &&
+    initializer.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsToken &&
+    ts.isIdentifier(initializer.left) &&
+    initializer.left.text === 'target' &&
+    initializer.right.kind === ts.SyntaxKind.NullKeyword
+  );
+}
+
 function directResultIdentifier(call) {
   const initializer = ts.isAwaitExpression(call.parent) ? call.parent : call;
   const owner = initializer.parent;
@@ -256,7 +354,9 @@ function bindingDeclarationsNamed(node, name) {
   const declarations = [];
   function visit(candidate) {
     if (
-      (ts.isVariableDeclaration(candidate) || ts.isParameter(candidate)) &&
+      (ts.isVariableDeclaration(candidate) ||
+        ts.isParameter(candidate) ||
+        ts.isBindingElement(candidate)) &&
       ts.isIdentifier(candidate.name)
     ) {
       if (candidate.name.text === name) declarations.push(candidate);
@@ -292,7 +392,7 @@ function directExpressionRootIdentifier(expression) {
 function bindingIntegrityErrors(
   scope,
   name,
-  { allowedAssignment, forbidDirectEscape = false, label = name } = {},
+  { allowedAssignment, allowedAssignments, forbidDirectEscape = false, label = name } = {},
 ) {
   if (!scope || !name) return [];
   const errors = [];
@@ -300,6 +400,9 @@ function bindingIntegrityErrors(
   if (declarations.length !== 1) {
     errors.push(`${label} must have exactly one variable binding in its guarded scope`);
   }
+  const permittedAssignments = new Set(
+    allowedAssignments ?? (allowedAssignment ? [allowedAssignment] : []),
+  );
   let integrityViolation = false;
 
   function visit(candidate) {
@@ -308,7 +411,7 @@ function bindingIntegrityErrors(
       candidate.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
       candidate.operatorToken.kind <= ts.SyntaxKind.LastAssignment &&
       directExpressionRootIdentifier(candidate.left) === name &&
-      candidate !== allowedAssignment
+      !permittedAssignments.has(candidate)
     ) {
       integrityViolation = true;
     }
@@ -351,20 +454,22 @@ function bindingIntegrityErrors(
   return errors;
 }
 
-function claimedRowIntegrityErrors(loop, claimCall, claimedRowIdentifier) {
-  if (!loop || !claimCall || !claimedRowIdentifier) return [];
-  const awaitedClaim = ts.isAwaitExpression(claimCall.parent) ? claimCall.parent : undefined;
-  const allowedAssignment =
-    awaitedClaim &&
-    ts.isBinaryExpression(awaitedClaim.parent) &&
-    awaitedClaim.parent.right === awaitedClaim &&
-    awaitedClaim.parent.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-    ts.isIdentifier(awaitedClaim.parent.left) &&
-    awaitedClaim.parent.left.text === claimedRowIdentifier
-      ? awaitedClaim.parent
-      : undefined;
+function claimedRowIntegrityErrors(loop, claimCalls, claimedRowIdentifier) {
+  if (!loop || claimCalls.length === 0 || !claimedRowIdentifier) return [];
+  const allowedAssignments = claimCalls.flatMap((claimCall) => {
+    const awaitedClaim = ts.isAwaitExpression(claimCall.parent) ? claimCall.parent : undefined;
+    const assignment = awaitedClaim?.parent;
+    return assignment &&
+      ts.isBinaryExpression(assignment) &&
+      assignment.right === awaitedClaim &&
+      assignment.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isIdentifier(assignment.left) &&
+      assignment.left.text === claimedRowIdentifier
+      ? [assignment]
+      : [];
+  });
   return bindingIntegrityErrors(loop.statement, claimedRowIdentifier, {
-    allowedAssignment,
+    allowedAssignments,
     forbidDirectEscape: true,
     label: 'claimed row',
   });
@@ -372,6 +477,23 @@ function claimedRowIntegrityErrors(loop, claimCall, claimedRowIdentifier) {
 
 function atomicSendErrors(declaration) {
   const errors = [];
+  errors.push(
+    ...bindingIntegrityErrors(declaration, 'captureCapabilitySource', {
+      label: 'scheduled capability-source factory',
+    }),
+  );
+  const capabilitySourceParameter = declaration.parameters[6];
+  if (
+    declaration.parameters.length !== 7 ||
+    !capabilitySourceParameter ||
+    !ts.isIdentifier(capabilitySourceParameter.name) ||
+    capabilitySourceParameter.name.text !== 'captureCapabilitySource' ||
+    !capabilitySourceParameter.questionToken
+  ) {
+    errors.push(
+      'runDueScheduled must retain captureCapabilitySource as its seventh optional parameter',
+    );
+  }
   const sendCalls = callsNamed(declaration.body, new Set(['sendTextMessage']));
   if (sendCalls.length !== 1) {
     return [
@@ -399,12 +521,12 @@ function atomicSendErrors(declaration) {
   }
 
   if (
-    sendCall.arguments.length !== 6 ||
+    sendCall.arguments.length !== 8 ||
     !isIdentifierArgument(sendCall, 0, 'db') ||
     !isIdentifierArgument(sendCall, 1, 'http')
   ) {
     errors.push(
-      'production sendTextMessage must receive exactly six arguments beginning with db, http',
+      'production sendTextMessage must receive exactly eight arguments beginning with db, http',
     );
   }
   if (!isIdentifierArgument(sendCall, 4, 'recordAtomicHandover')) {
@@ -412,22 +534,57 @@ function atomicSendErrors(declaration) {
       'production sendTextMessage must use recordAtomicHandover as its direct fifth argument',
     );
   }
+  if (
+    !isIdentifierArgument(sendCall, 6, 'undefined') ||
+    !isDirectOptionalZeroArgumentCall(sendCall.arguments[7], 'captureCapabilitySource')
+  ) {
+    errors.push(
+      'production sendTextMessage must pass undefined ordinary guard and the direct optional capability-source result',
+    );
+  }
 
   const claimCalls = callsNamed(declaration.body, new Set(['claimDueScheduled']));
   const sendLoop = closestForOf(sendCall);
-  const claimCall = claimCalls.find((call) => closestForOf(call) === sendLoop);
-  const claimedRowIdentifier = claimCall ? directResultIdentifier(claimCall) : undefined;
+  const loopClaimCalls = claimCalls.filter((call) => closestForOf(call) === sendLoop);
+  const claimedRowIdentifiers = loopClaimCalls.map(directResultIdentifier);
+  const claimedRowIdentifier = claimedRowIdentifiers[0];
   const candidateRowIdentifier = forOfRowIdentifier(sendLoop);
-  if (!claimCall || !claimedRowIdentifier) {
+  if (
+    claimCalls.length !== 2 ||
+    loopClaimCalls.length !== 2 ||
+    !claimedRowIdentifier ||
+    claimedRowIdentifiers.some((name) => name !== claimedRowIdentifier)
+  ) {
     errors.push(
-      'production handoff must use the direct row returned by claimDueScheduled in the same loop',
+      'production handoff must use exactly two direct claimDueScheduled results assigned to one claimed row in the same loop',
     );
   }
-  errors.push(...claimedRowIntegrityErrors(sendLoop, claimCall, claimedRowIdentifier));
+  errors.push(...claimedRowIntegrityErrors(sendLoop, loopClaimCalls, claimedRowIdentifier));
   if (sendLoop) {
+    const authorizationCalls = callsNamed(
+      sendLoop.statement,
+      new Set(['messageTargetServerAuthorization']),
+    );
+    const authorizationAwait = authorizationCalls[0]?.parent;
+    const allowedAuthorizationAssignment =
+      authorizationCalls.length === 1 &&
+      authorizationAwait &&
+      ts.isBinaryExpression(authorizationAwait) &&
+      authorizationAwait.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isIdentifier(authorizationAwait.left) &&
+      authorizationAwait.left.text === 'serverAuthorization'
+        ? authorizationAwait
+        : undefined;
     errors.push(
       ...bindingIntegrityErrors(sendLoop, candidateRowIdentifier, {
         label: 'due candidate',
+      }),
+      ...bindingIntegrityErrors(sendLoop.statement, 'capabilitySource', {
+        label: 'scheduled capability source',
+      }),
+      ...bindingIntegrityErrors(sendLoop.statement, 'serverAuthorization', {
+        allowedAssignment: allowedAuthorizationAssignment,
+        label: 'scheduled server authorization',
       }),
       ...bindingIntegrityErrors(sendLoop.statement, 'recurrence', { label: 'recurrence' }),
       ...bindingIntegrityErrors(sendLoop.statement, 'transition', { label: 'transition' }),
@@ -440,15 +597,19 @@ function atomicSendErrors(declaration) {
     ...bindingIntegrityErrors(declaration.body, 'commitGuard', { label: 'commit guard' }),
   );
   if (
-    !claimCall ||
-    claimCall.arguments.length !== 4 ||
-    !isIdentifierArgument(claimCall, 0, 'db') ||
-    rowIdentifierFromIdAccess(claimCall.arguments[1]) !== candidateRowIdentifier ||
-    !isIdentifierArgument(claimCall, 2, 'now') ||
-    !isIdentifierArgument(claimCall, 3, 'commitGuard')
+    loopClaimCalls.length !== 2 ||
+    loopClaimCalls.some(
+      (claimCall) =>
+        claimCall.arguments.length !== 5 ||
+        !isIdentifierArgument(claimCall, 0, 'db') ||
+        rowIdentifierFromIdAccess(claimCall.arguments[1]) !== candidateRowIdentifier ||
+        !isIdentifierArgument(claimCall, 2, 'now') ||
+        !isExactMessageTargetCommitGuardCall(claimCall.arguments[3]) ||
+        !isIdentifierArgument(claimCall, 4, 'serverAuthorization'),
+    )
   ) {
     errors.push(
-      'claimDueScheduled must be exactly claimDueScheduled(db, <candidate>.id, now, commitGuard)',
+      'both claimDueScheduled calls must be exactly claimDueScheduled(db, <candidate>.id, now, messageTargetCommitGuard(commitGuard, serverAuthorization), serverAuthorization)',
     );
   }
 
@@ -621,18 +782,38 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     ...bindingIntegrityErrors(declaration, 'ordinaryCommitGuard', {
       label: 'ordinary commit-guard parameter',
     }),
+    ...bindingIntegrityErrors(declaration, 'capabilitySource', {
+      label: 'capability-source parameter',
+    }),
     ...bindingIntegrityErrors(declaration.body, 'effectiveCommitGuard', {
       label: 'effective commit guard',
     }),
+    ...bindingIntegrityErrors(declaration.body, 'transport', {
+      label: 'pinned send transport',
+    }),
+    ...bindingIntegrityErrors(declaration.body, 'capability', {
+      label: 'send capability result',
+    }),
+    ...bindingIntegrityErrors(declaration.body, 'attemptOwnerToken', {
+      label: 'attempt-owner token',
+    }),
   );
-  const finalParameter = declaration.parameters.at(-1);
+  const ordinaryCommitGuardParameter = declaration.parameters[6];
+  const capabilitySourceParameter = declaration.parameters[7];
   if (
-    !finalParameter ||
-    !ts.isIdentifier(finalParameter.name) ||
-    finalParameter.name.text !== 'ordinaryCommitGuard' ||
-    !finalParameter.questionToken
+    declaration.parameters.length !== 8 ||
+    !ordinaryCommitGuardParameter ||
+    !ts.isIdentifier(ordinaryCommitGuardParameter.name) ||
+    ordinaryCommitGuardParameter.name.text !== 'ordinaryCommitGuard' ||
+    !ordinaryCommitGuardParameter.questionToken ||
+    !capabilitySourceParameter ||
+    !ts.isIdentifier(capabilitySourceParameter.name) ||
+    capabilitySourceParameter.name.text !== 'capabilitySource' ||
+    !capabilitySourceParameter.questionToken
   ) {
-    errors.push('sendTextMessage must retain ordinaryCommitGuard as its final optional parameter');
+    errors.push(
+      'sendTextMessage must retain ordinaryCommitGuard seventh and capabilitySource final, both optional',
+    );
   }
 
   const effectiveBindings = bindingDeclarationsNamed(
@@ -656,6 +837,34 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
       'effectiveCommitGuard must be the one top-level scheduledHandover?.commitGuard ?? ordinaryCommitGuard binding',
     );
   }
+  const transportCalls = callsNamed(declaration.body, new Set(['pinSendTransport']));
+  const transportCall = transportCalls[0];
+  const transportDeclaration = transportCall?.parent;
+  const transportStatement =
+    transportDeclaration && ts.isVariableDeclaration(transportDeclaration)
+      ? transportDeclaration.parent?.parent
+      : undefined;
+  if (
+    transportCalls.length !== 1 ||
+    !transportCall ||
+    transportCall.arguments.length !== 2 ||
+    !isIdentifierArgument(transportCall, 0, 'http') ||
+    !isIdentifierArgument(transportCall, 1, 'effectiveCommitGuard') ||
+    !transportDeclaration ||
+    !ts.isVariableDeclaration(transportDeclaration) ||
+    !ts.isIdentifier(transportDeclaration.name) ||
+    transportDeclaration.name.text !== 'transport' ||
+    transportDeclaration.initializer !== transportCall ||
+    !transportStatement ||
+    !ts.isVariableStatement(transportStatement) ||
+    transportStatement.parent !== declaration.body ||
+    transportDeclaration.parent.declarations.length !== 1 ||
+    !(transportDeclaration.parent.flags & ts.NodeFlags.Const)
+  ) {
+    errors.push(
+      'transport must be the one top-level const pinSendTransport(http, effectiveCommitGuard)',
+    );
+  }
   const handoffCalls = callsNamed(declaration.body, new Set(['handoverScheduledTextToOutgoing']));
   if (handoffCalls.length !== 1) {
     return [
@@ -664,23 +873,59 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
   }
 
   const handoffCall = handoffCalls[0];
-  const handoffStatement = directAwaitedCallStatement(handoffCall);
-  const handoffBlock = handoffStatement?.parent;
-  const branch = handoffBlock?.parent;
+  const ordinaryOwnerCalls = callsNamed(declaration.body, new Set(['withDbTransaction']));
+  const ordinaryOwnerCall = ordinaryOwnerCalls[0];
+  const tokenBindings = bindingDeclarationsNamed(declaration.body, 'attemptOwnerToken').filter(
+    ts.isBindingElement,
+  );
+  const tokenBinding = tokenBindings[0];
+  const tokenPattern = tokenBinding?.parent;
+  const ownershipDeclaration = tokenPattern?.parent;
+  const ownershipConditional =
+    ownershipDeclaration &&
+    ts.isVariableDeclaration(ownershipDeclaration) &&
+    ownershipDeclaration.initializer &&
+    ts.isConditionalExpression(ownershipDeclaration.initializer)
+      ? ownershipDeclaration.initializer
+      : undefined;
+  const ownershipStatement =
+    ownershipDeclaration && ts.isVariableDeclaration(ownershipDeclaration)
+      ? ownershipDeclaration.parent?.parent
+      : undefined;
+  const handoffAwait = handoffCall.parent;
+  const ordinaryAwait = ordinaryOwnerCall?.parent;
   if (
-    !handoffStatement ||
-    !handoffBlock ||
-    !ts.isBlock(handoffBlock) ||
-    handoffBlock.statements.length !== 1 ||
-    !branch ||
-    !ts.isIfStatement(branch) ||
-    branch.parent !== declaration.body ||
-    branch.thenStatement !== handoffBlock ||
-    !ts.isIdentifier(branch.expression) ||
-    branch.expression.text !== 'scheduledHandover'
+    tokenBindings.length !== 1 ||
+    !tokenBinding ||
+    !!tokenBinding.propertyName ||
+    !!tokenBinding.dotDotDotToken ||
+    !!tokenBinding.initializer ||
+    !ts.isIdentifier(tokenBinding.name) ||
+    tokenBinding.name.text !== 'attemptOwnerToken' ||
+    !tokenPattern ||
+    !ts.isObjectBindingPattern(tokenPattern) ||
+    tokenPattern.elements.length !== 1 ||
+    !ownershipDeclaration ||
+    !ts.isVariableDeclaration(ownershipDeclaration) ||
+    !ownershipStatement ||
+    !ts.isVariableStatement(ownershipStatement) ||
+    ownershipStatement.parent !== declaration.body ||
+    ownershipDeclaration.parent.declarations.length !== 1 ||
+    !(ownershipDeclaration.parent.flags & ts.NodeFlags.Const) ||
+    !ownershipConditional ||
+    !ts.isIdentifier(ownershipConditional.condition) ||
+    ownershipConditional.condition.text !== 'scheduledHandover' ||
+    !ts.isAwaitExpression(handoffAwait) ||
+    handoffAwait.expression !== handoffCall ||
+    ownershipConditional.whenTrue !== handoffAwait ||
+    ordinaryOwnerCalls.length !== 1 ||
+    !ordinaryOwnerCall ||
+    !ts.isAwaitExpression(ordinaryAwait) ||
+    ordinaryAwait.expression !== ordinaryOwnerCall ||
+    ownershipConditional.whenFalse !== ordinaryAwait
   ) {
     errors.push(
-      'scheduled handoff must be the sole direct awaited statement in a top-level if (scheduledHandover) branch',
+      'attemptOwnerToken must come from the exact top-level scheduledHandover ? await handoff : await ordinary-owner expression',
     );
   }
 
@@ -695,7 +940,7 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     ? handoffArgs.properties
     : [];
   if (
-    handoffCall.arguments.length !== 3 ||
+    handoffCall.arguments.length !== 4 ||
     !isIdentifierArgument(handoffCall, 0, 'db') ||
     !ts.isObjectLiteralExpression(handoffArgs) ||
     handoffNames.length !== expectedHandoffNames.length ||
@@ -705,18 +950,18 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     !outgoingProperty ||
     !ts.isShorthandPropertyAssignment(outgoingProperty) ||
     outgoingProperty.name.text !== 'outgoing' ||
-    !isDirectPropertyAccess(handoffCall.arguments[2], 'scheduledHandover', 'commitGuard')
+    !isDirectPropertyAccess(handoffCall.arguments[2], 'transport', 'admissionGuard') ||
+    !isDirectOptionalPropertyAccess(
+      handoffCall.arguments[3],
+      'authorizedTarget',
+      'serverAuthorization',
+    )
   ) {
     errors.push(
-      'scheduled handoff call must directly pass db, scheduledHandover fields, outgoing, and scheduledHandover.commitGuard',
+      'scheduled handoff call must directly pass db, scheduledHandover fields, outgoing, transport.admissionGuard, and authorizedTarget?.serverAuthorization',
     );
   }
 
-  const ordinaryOwnerCalls = callsNamed(declaration.body, new Set(['withDbTransaction']));
-  const ordinaryOwnerCall = ordinaryOwnerCalls[0];
-  const ordinaryStatement = ordinaryOwnerCall
-    ? directAwaitedCallStatement(ordinaryOwnerCall)
-    : undefined;
   const transactionInsertCalls = callsNamed(
     declaration.body,
     new Set(['insertOutgoingTextWithinTransaction']),
@@ -724,64 +969,344 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
   const transactionInsertCall = transactionInsertCalls[0];
   const publicInsertCalls = callsNamed(declaration.body, new Set(['insertOutgoingText']));
   const ownerCallback = ordinaryOwnerCall?.arguments[1];
-  const callbackBody =
-    ownerCallback && ts.isArrowFunction(ownerCallback) && ts.isCallExpression(ownerCallback.body)
+  const callbackBlock =
+    ownerCallback && ts.isArrowFunction(ownerCallback) && ts.isBlock(ownerCallback.body)
       ? ownerCallback.body
       : undefined;
+  const targetResolutionCalls = callbackBlock
+    ? callsNamed(callbackBlock, new Set(['resolveMessageTargetWithinTransaction']))
+    : [];
+  const targetResolutionCall = targetResolutionCalls[0];
+  const targetResolutionAwait = targetResolutionCall?.parent;
+  const targetConditional = targetResolutionAwait?.parent;
+  const resolvedTargetDeclaration = targetConditional?.parent;
+  const resolvedTargetStatement = resolvedTargetDeclaration?.parent?.parent;
+  const unavailableStatement = callbackBlock?.statements[1];
+  const unavailableCondition =
+    unavailableStatement && ts.isIfStatement(unavailableStatement)
+      ? unavailableStatement.expression.getText(sourceFile).replace(/\s+/g, '')
+      : '';
+  const unavailableThrow =
+    unavailableStatement && ts.isIfStatement(unavailableStatement)
+      ? unavailableStatement.thenStatement
+      : undefined;
+  const insertReturn = transactionInsertCall?.parent;
+  const insertPayload = transactionInsertCall?.arguments[1];
+  const [outgoingSpread, selectedGuidProperty, partIndexProperty, threadGuidProperty] =
+    insertPayload && ts.isObjectLiteralExpression(insertPayload) ? insertPayload.properties : [];
   if (
     ordinaryOwnerCalls.length !== 1 ||
     !ordinaryOwnerCall ||
-    !ordinaryStatement ||
-    !branch ||
-    !ts.isIfStatement(branch) ||
-    !branch.elseStatement ||
-    !ts.isBlock(branch.elseStatement) ||
-    branch.elseStatement.statements.length !== 1 ||
-    ordinaryStatement.parent !== branch.elseStatement ||
     ordinaryOwnerCall.arguments.length !== 3 ||
     !isIdentifierArgument(ordinaryOwnerCall, 0, 'db') ||
-    !isIdentifierArgument(ordinaryOwnerCall, 2, 'effectiveCommitGuard') ||
+    !isDirectPropertyAccess(ordinaryOwnerCall.arguments[2], 'transport', 'admissionGuard') ||
     !ownerCallback ||
     !ts.isArrowFunction(ownerCallback) ||
-    ownerCallback.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword) ||
+    !ownerCallback.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword) ||
     ownerCallback.parameters.length !== 1 ||
     !ownerCallback.parameters[0] ||
     !ts.isIdentifier(ownerCallback.parameters[0].name) ||
     ownerCallback.parameters[0].name.text !== 'context' ||
-    !callbackBody ||
-    directCallName(callbackBody) !== 'insertOutgoingTextWithinTransaction' ||
+    !callbackBlock ||
+    callbackBlock.statements.length !== 3 ||
+    targetResolutionCalls.length !== 1 ||
+    !targetResolutionCall ||
+    targetResolutionCall.arguments.length !== 2 ||
+    !isIdentifierArgument(targetResolutionCall, 0, 'context') ||
+    !isIdentifierArgument(targetResolutionCall, 1, 'authorizedTarget') ||
+    !targetResolutionAwait ||
+    !ts.isAwaitExpression(targetResolutionAwait) ||
+    !targetConditional ||
+    !ts.isConditionalExpression(targetConditional) ||
+    !ts.isIdentifier(targetConditional.condition) ||
+    targetConditional.condition.text !== 'authorizedTarget' ||
+    targetConditional.whenTrue !== targetResolutionAwait ||
+    targetConditional.whenFalse.kind !== ts.SyntaxKind.NullKeyword ||
+    !resolvedTargetDeclaration ||
+    !ts.isVariableDeclaration(resolvedTargetDeclaration) ||
+    !ts.isIdentifier(resolvedTargetDeclaration.name) ||
+    resolvedTargetDeclaration.name.text !== 'resolvedTarget' ||
+    resolvedTargetDeclaration.initializer !== targetConditional ||
+    resolvedTargetStatement !== callbackBlock.statements[0] ||
+    unavailableCondition !== 'authorizedTarget&&!resolvedTarget' ||
+    !unavailableThrow ||
+    !ts.isThrowStatement(unavailableThrow) ||
+    !unavailableThrow.expression ||
+    !ts.isNewExpression(unavailableThrow.expression) ||
+    !ts.isIdentifier(unavailableThrow.expression.expression) ||
+    unavailableThrow.expression.expression.text !== 'MessageTargetUnavailableError' ||
+    (unavailableThrow.expression.arguments?.length ?? 0) !== 0 ||
     transactionInsertCalls.length !== 1 ||
-    transactionInsertCall !== callbackBody ||
-    callbackBody.arguments.length !== 2 ||
-    !isIdentifierArgument(callbackBody, 0, 'context') ||
-    !isIdentifierArgument(callbackBody, 1, 'outgoing') ||
+    !transactionInsertCall ||
+    !insertReturn ||
+    !ts.isReturnStatement(insertReturn) ||
+    insertReturn.expression !== transactionInsertCall ||
+    insertReturn !== callbackBlock.statements[2] ||
+    transactionInsertCall.arguments.length !== 2 ||
+    !isIdentifierArgument(transactionInsertCall, 0, 'context') ||
+    !insertPayload ||
+    !ts.isObjectLiteralExpression(insertPayload) ||
+    insertPayload.properties.length !== 4 ||
+    !outgoingSpread ||
+    !ts.isSpreadAssignment(outgoingSpread) ||
+    !ts.isIdentifier(outgoingSpread.expression) ||
+    outgoingSpread.expression.text !== 'outgoing' ||
+    !selectedGuidProperty ||
+    !ts.isPropertyAssignment(selectedGuidProperty) ||
+    propertyNameText(selectedGuidProperty) !== 'selectedMessageGuid' ||
+    !isDirectOptionalPropertyAccess(
+      selectedGuidProperty.initializer,
+      'resolvedTarget',
+      'messageGuid',
+    ) ||
+    !partIndexProperty ||
+    !ts.isPropertyAssignment(partIndexProperty) ||
+    propertyNameText(partIndexProperty) !== 'partIndex' ||
+    !isDirectOptionalPropertyAccess(partIndexProperty.initializer, 'resolvedTarget', 'partIndex') ||
+    !threadGuidProperty ||
+    !ts.isPropertyAssignment(threadGuidProperty) ||
+    propertyNameText(threadGuidProperty) !== 'threadOriginatorGuid' ||
+    !isDirectOptionalPropertyAccess(
+      threadGuidProperty.initializer,
+      'resolvedTarget',
+      'messageGuid',
+    ) ||
     publicInsertCalls.length !== 0
   ) {
     errors.push(
-      'ordinary text must use the sole direct awaited guarded withDbTransaction/context insert in the scheduled handoff else branch',
+      'ordinary text must resolve the authorized target and use the sole direct guarded context insert in the false ownership arm',
     );
   }
 
   const bodyStatements = declaration.body.statements;
-  const branchIndex = branch ? bodyStatements.indexOf(branch) : -1;
-  if (branchIndex < 1 || bodyStatements[branchIndex - 1] !== effectiveStatement) {
-    errors.push('effectiveCommitGuard must be declared immediately before the handoff branch');
+  const effectiveIndex = effectiveStatement ? bodyStatements.indexOf(effectiveStatement) : -1;
+  const capabilityCalls = callsNamed(declaration.body, new Set(['resolveRcsAttemptOwnership']));
+  const capabilityCall = capabilityCalls[0];
+  const capabilityAwait = capabilityCall?.parent;
+  const capabilityDeclaration =
+    capabilityAwait && ts.isAwaitExpression(capabilityAwait) ? capabilityAwait.parent : undefined;
+  const capabilityStatement =
+    capabilityDeclaration && ts.isVariableDeclaration(capabilityDeclaration)
+      ? capabilityDeclaration.parent?.parent
+      : undefined;
+  const targetPartCalls = callsNamed(declaration.body, new Set(['explicitMessageTargetPart']));
+  const targetPartCall = targetPartCalls[0];
+  const targetPartDeclaration = targetPartCall?.parent;
+  const targetPartStatement = targetPartDeclaration?.parent?.parent;
+  const targetBindings = bindingDeclarationsNamed(declaration.body, 'target').filter(
+    ts.isVariableDeclaration,
+  );
+  const targetBinding = targetBindings[0];
+  const targetStatement = targetBinding?.parent?.parent;
+  const rcsTargetCalls = callsNamed(declaration.body, new Set(['isRcsChatGuid']));
+  const rcsTargetCall = rcsTargetCalls[0];
+  const rcsTargetCondition = rcsTargetCall?.parent;
+  const rcsTargetStatement = rcsTargetCondition?.parent;
+  const rcsTargetBlock =
+    rcsTargetStatement && ts.isIfStatement(rcsTargetStatement)
+      ? rcsTargetStatement.thenStatement
+      : undefined;
+  const rcsTargetThrow =
+    rcsTargetBlock && ts.isBlock(rcsTargetBlock) && rcsTargetBlock.statements.length === 1
+      ? rcsTargetBlock.statements[0]
+      : undefined;
+  const rcsTargetError =
+    rcsTargetThrow && ts.isThrowStatement(rcsTargetThrow) ? rcsTargetThrow.expression : undefined;
+  const rcsTargetErrorArgument =
+    rcsTargetError && ts.isNewExpression(rcsTargetError)
+      ? rcsTargetError.arguments?.[0]
+      : undefined;
+  const authorizedTargetBindings = bindingDeclarationsNamed(
+    declaration.body,
+    'authorizedTarget',
+  ).filter(ts.isVariableDeclaration);
+  const authorizedTargetBinding = authorizedTargetBindings[0];
+  const authorizedTargetStatement = authorizedTargetBinding?.parent?.parent;
+  const targetAuthorizationCalls = callsNamed(
+    declaration.body,
+    new Set(['messageTargetServerAuthorization']),
+  );
+  const targetAuthorizationCall = targetAuthorizationCalls[0];
+  const targetCommitGuardCalls = callsNamed(
+    declaration.body,
+    new Set(['messageTargetCommitGuard']),
+  );
+  const targetCommitGuardCall = targetCommitGuardCalls[0];
+  const targetCommitGuardDeclaration = targetCommitGuardCall?.parent;
+  const targetCommitGuardStatement = targetCommitGuardDeclaration?.parent?.parent;
+  const outgoingBindings = bindingDeclarationsNamed(declaration.body, 'outgoing').filter(
+    ts.isVariableDeclaration,
+  );
+  const outgoingBinding = outgoingBindings[0];
+  const outgoingStatement = outgoingBinding?.parent?.parent;
+  const attemptAwareProperties =
+    outgoingBinding?.initializer && ts.isObjectLiteralExpression(outgoingBinding.initializer)
+      ? outgoingBinding.initializer.properties.filter(
+          (property) => propertyNameText(property) === 'attemptAware',
+        )
+      : [];
+  if (
+    capabilityCalls.length !== 1 ||
+    !capabilityCall ||
+    !capabilityAwait ||
+    !ts.isAwaitExpression(capabilityAwait) ||
+    !capabilityDeclaration ||
+    !ts.isVariableDeclaration(capabilityDeclaration) ||
+    !ts.isIdentifier(capabilityDeclaration.name) ||
+    capabilityDeclaration.name.text !== 'capability' ||
+    capabilityDeclaration.initializer !== capabilityAwait ||
+    capabilityCall.arguments.length !== 5 ||
+    !isDirectPropertyAccess(capabilityCall.arguments[0], 'transport', 'http') ||
+    !isDirectPropertyAccess(capabilityCall.arguments[1], 'args', 'chatGuid') ||
+    !isDirectPropertyAccess(capabilityCall.arguments[2], 'transport', 'admissionGuard') ||
+    !isIdentifierArgument(capabilityCall, 3, 'capabilitySource') ||
+    !isExactTargetCapabilityOptions(capabilityCall.arguments[4]) ||
+    !capabilityStatement ||
+    !ts.isVariableStatement(capabilityStatement) ||
+    capabilityStatement.parent !== declaration.body ||
+    targetPartCalls.length !== 1 ||
+    !targetPartCall ||
+    targetPartCall.arguments.length !== 2 ||
+    !isDirectPropertyAccess(targetPartCall.arguments[0], 'args', 'selectedMessageGuid') ||
+    !isDirectPropertyAccess(targetPartCall.arguments[1], 'args', 'partIndex') ||
+    !targetPartDeclaration ||
+    !ts.isVariableDeclaration(targetPartDeclaration) ||
+    !ts.isIdentifier(targetPartDeclaration.name) ||
+    targetPartDeclaration.name.text !== 'targetPart' ||
+    targetPartDeclaration.initializer !== targetPartCall ||
+    !targetPartStatement ||
+    !ts.isVariableStatement(targetPartStatement) ||
+    targetPartStatement.parent !== declaration.body ||
+    targetBindings.length !== 1 ||
+    !targetBinding ||
+    !targetBinding.initializer ||
+    !ts.isConditionalExpression(targetBinding.initializer) ||
+    !ts.isIdentifier(targetBinding.initializer.condition) ||
+    targetBinding.initializer.condition.text !== 'targetPart' ||
+    targetBinding.initializer.whenFalse.kind !== ts.SyntaxKind.NullKeyword ||
+    !targetStatement ||
+    !ts.isVariableStatement(targetStatement) ||
+    targetStatement.parent !== declaration.body ||
+    authorizedTargetBindings.length !== 1 ||
+    !authorizedTargetBinding ||
+    !authorizedTargetBinding.initializer ||
+    !ts.isConditionalExpression(authorizedTargetBinding.initializer) ||
+    !ts.isIdentifier(authorizedTargetBinding.initializer.condition) ||
+    authorizedTargetBinding.initializer.condition.text !== 'target' ||
+    authorizedTargetBinding.initializer.whenFalse.kind !== ts.SyntaxKind.NullKeyword ||
+    !authorizedTargetStatement ||
+    !ts.isVariableStatement(authorizedTargetStatement) ||
+    authorizedTargetStatement.parent !== declaration.body ||
+    targetAuthorizationCalls.length !== 1 ||
+    !targetAuthorizationCall ||
+    targetAuthorizationCall.arguments.length !== 2 ||
+    !isDirectPropertyAccess(targetAuthorizationCall.arguments[0], 'capability', 'serverInfo') ||
+    !isDirectPropertyAccess(targetAuthorizationCall.arguments[1], 'transport', 'admissionGuard') ||
+    targetCommitGuardCalls.length !== 1 ||
+    !targetCommitGuardCall ||
+    targetCommitGuardCall.arguments.length !== 2 ||
+    !isIdentifierArgument(targetCommitGuardCall, 0, 'effectiveCommitGuard') ||
+    !isDirectOptionalPropertyAccess(
+      targetCommitGuardCall.arguments[1],
+      'authorizedTarget',
+      'serverAuthorization',
+    ) ||
+    !targetCommitGuardDeclaration ||
+    !ts.isVariableDeclaration(targetCommitGuardDeclaration) ||
+    !ts.isIdentifier(targetCommitGuardDeclaration.name) ||
+    targetCommitGuardDeclaration.name.text !== 'targetCommitGuard' ||
+    targetCommitGuardDeclaration.initializer !== targetCommitGuardCall ||
+    !targetCommitGuardStatement ||
+    !ts.isVariableStatement(targetCommitGuardStatement) ||
+    targetCommitGuardStatement.parent !== declaration.body ||
+    outgoingBindings.length !== 1 ||
+    !outgoingBinding ||
+    !outgoingStatement ||
+    !ts.isVariableStatement(outgoingStatement) ||
+    outgoingStatement.parent !== declaration.body ||
+    attemptAwareProperties.length !== 1 ||
+    !attemptAwareProperties[0] ||
+    !ts.isPropertyAssignment(attemptAwareProperties[0]) ||
+    !isDirectPropertyAccess(attemptAwareProperties[0].initializer, 'capability', 'attemptAware')
+  ) {
+    errors.push(
+      'text target and attempt capability must use the pinned transport, exact target authorization, and target-required server info before storing capability.attemptAware',
+    );
+  }
+  const ownershipIndex = ownershipStatement ? bodyStatements.indexOf(ownershipStatement) : -1;
+  const targetPartIndex = targetPartStatement ? bodyStatements.indexOf(targetPartStatement) : -1;
+  const targetIndex = targetStatement ? bodyStatements.indexOf(targetStatement) : -1;
+  if (
+    rcsTargetCalls.length !== 1 ||
+    !rcsTargetCall ||
+    rcsTargetCall.arguments.length !== 1 ||
+    !isDirectPropertyAccess(rcsTargetCall.arguments[0], 'args', 'chatGuid') ||
+    !rcsTargetCondition ||
+    !ts.isBinaryExpression(rcsTargetCondition) ||
+    rcsTargetCondition.getText(sourceFile).replace(/\s+/g, '') !==
+      'target&&isRcsChatGuid(args.chatGuid)' ||
+    !rcsTargetStatement ||
+    !ts.isIfStatement(rcsTargetStatement) ||
+    rcsTargetStatement.parent !== declaration.body ||
+    bodyStatements[targetIndex + 1] !== rcsTargetStatement ||
+    !rcsTargetBlock ||
+    !ts.isBlock(rcsTargetBlock) ||
+    !rcsTargetThrow ||
+    !ts.isThrowStatement(rcsTargetThrow) ||
+    !rcsTargetError ||
+    !ts.isNewExpression(rcsTargetError) ||
+    !ts.isIdentifier(rcsTargetError.expression) ||
+    rcsTargetError.expression.text !== 'Error' ||
+    (rcsTargetError.arguments?.length ?? 0) !== 1 ||
+    !rcsTargetErrorArgument ||
+    !ts.isStringLiteral(rcsTargetErrorArgument) ||
+    rcsTargetErrorArgument.text !== 'This server cannot send an RCS threaded reply.'
+  ) {
+    errors.push(
+      'an RCS threaded target must be rejected exactly once immediately after target normalization and before capability lookup or durable admission',
+    );
+  }
+  const authorizedTargetIndex = authorizedTargetStatement
+    ? bodyStatements.indexOf(authorizedTargetStatement)
+    : -1;
+  const targetCommitGuardIndex = targetCommitGuardStatement
+    ? bodyStatements.indexOf(targetCommitGuardStatement)
+    : -1;
+  if (
+    effectiveIndex < 0 ||
+    targetPartIndex < 0 ||
+    targetIndex !== targetPartIndex + 1 ||
+    effectiveIndex <= targetIndex ||
+    bodyStatements[effectiveIndex + 1] !== transportStatement ||
+    bodyStatements[effectiveIndex + 2] !== capabilityStatement ||
+    authorizedTargetIndex !== effectiveIndex + 3 ||
+    targetCommitGuardIndex !== effectiveIndex + 4 ||
+    bodyStatements[effectiveIndex + 5] !== outgoingStatement ||
+    bodyStatements[effectiveIndex + 6] !== ownershipStatement
+  ) {
+    errors.push(
+      'target normalization, effective guard, pinned transport, capability authorization, outgoing payload, and ownership handoff must remain in reviewed order',
+    );
   }
   const onQueuedCalls = callsNamed(declaration.body, new Set(['onQueued']));
   const onQueuedCall = onQueuedCalls[0];
   const onQueuedStatement = onQueuedCall ? directAwaitedCallStatement(onQueuedCall) : undefined;
   if (
     onQueuedCalls.length !== 1 ||
+    !onQueuedCall ||
+    !onQueuedCall.questionDotToken ||
+    onQueuedCall.arguments.length !== 1 ||
+    !isIdentifierArgument(onQueuedCall, 0, 'tempGuid') ||
     !onQueuedStatement ||
-    branchIndex < 0 ||
-    bodyStatements[branchIndex + 1] !== onQueuedStatement
+    ownershipIndex < 0 ||
+    bodyStatements[ownershipIndex + 1] !== onQueuedStatement
   ) {
     errors.push(
-      'await onQueued?.() must be the first top-level statement after the handoff branch',
+      'await onQueued?.(tempGuid) must be the first top-level statement after queue ownership',
     );
   }
 
-  const guardStatement = branchIndex >= 0 ? bodyStatements[branchIndex + 2] : undefined;
+  const guardStatement = ownershipIndex >= 0 ? bodyStatements[ownershipIndex + 2] : undefined;
   const compactGuardCondition =
     guardStatement && ts.isIfStatement(guardStatement)
       ? guardStatement.expression.getText(sourceFile).replace(/\s+/g, '')
@@ -810,13 +1335,204 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
   }
 
   const networkCalls = callsNamed(declaration.body, new Set(['sendText']));
+  const networkCall = networkCalls[0];
+  let networkTryBlock = networkCall?.parent;
+  while (
+    networkTryBlock &&
+    !(
+      ts.isBlock(networkTryBlock) &&
+      ts.isTryStatement(networkTryBlock.parent) &&
+      networkTryBlock.parent.tryBlock === networkTryBlock
+    )
+  ) {
+    networkTryBlock = networkTryBlock.parent;
+  }
+  const networkAwait = networkCall?.parent;
+  const networkDeclaration =
+    networkAwait && ts.isAwaitExpression(networkAwait) ? networkAwait.parent : undefined;
+  const networkStatement =
+    networkDeclaration && ts.isVariableDeclaration(networkDeclaration)
+      ? networkDeclaration.parent?.parent
+      : undefined;
+  const currentnessCalls = propertyCallsNamed(
+    declaration.body,
+    'transport',
+    'assertNetworkCurrent',
+  );
+  const currentnessCall = currentnessCalls[0];
+  const currentnessStatement = currentnessCall?.parent;
+  const methodCalls = callsNamed(declaration.body, new Set(['chooseSendMethod']));
+  const methodCall = methodCalls[0];
+  const methodDeclaration = methodCall?.parent;
+  const methodStatement =
+    methodDeclaration && ts.isVariableDeclaration(methodDeclaration)
+      ? methodDeclaration.parent?.parent
+      : undefined;
+  const finalTargetCalls = callsNamed(declaration.body, new Set(['resolveMessageTarget']));
+  const finalTargetCall = finalTargetCalls[0];
+  const finalTargetAwait = finalTargetCall?.parent;
+  const finalTargetConditional = finalTargetAwait?.parent;
+  const finalTargetDeclaration = finalTargetConditional?.parent;
+  const finalTargetStatement = finalTargetDeclaration?.parent?.parent;
+  const unavailableTargetStatement = networkTryBlock?.statements[1];
+  const unavailableTargetCondition =
+    unavailableTargetStatement && ts.isIfStatement(unavailableTargetStatement)
+      ? unavailableTargetStatement.expression.getText(sourceFile).replace(/\s+/g, '')
+      : '';
+  const unavailableTargetBlock =
+    unavailableTargetStatement && ts.isIfStatement(unavailableTargetStatement)
+      ? unavailableTargetStatement.thenStatement
+      : undefined;
+  const retireTargetCalls = callsNamed(
+    declaration.body,
+    new Set(['retireUnavailableMessageTarget']),
+  );
+  const retireTargetCall = retireTargetCalls[0];
+  const retireTargetStatement = retireTargetCall
+    ? directAwaitedCallStatement(retireTargetCall)
+    : undefined;
+  const unavailableReturn =
+    unavailableTargetBlock && ts.isBlock(unavailableTargetBlock)
+      ? unavailableTargetBlock.statements[1]
+      : undefined;
+  const privateApiExpression = methodCall?.arguments[1]?.getText(sourceFile).replace(/\s+/g, '');
   if (
     networkCalls.length !== 1 ||
-    !networkCalls[0] ||
+    !networkCall ||
+    networkCall.arguments.length !== 2 ||
+    !isDirectPropertyAccess(networkCall.arguments[0], 'transport', 'http') ||
     !guardStatement ||
-    networkCalls[0].getStart(sourceFile) <= guardStatement.getEnd()
+    networkCall.getStart(sourceFile) <= guardStatement.getEnd() ||
+    !networkAwait ||
+    !ts.isAwaitExpression(networkAwait) ||
+    !networkDeclaration ||
+    !ts.isVariableDeclaration(networkDeclaration) ||
+    !ts.isIdentifier(networkDeclaration.name) ||
+    networkDeclaration.name.text !== 'server' ||
+    networkDeclaration.initializer !== networkAwait ||
+    !networkStatement ||
+    !ts.isVariableStatement(networkStatement) ||
+    networkStatement.parent !== networkTryBlock ||
+    currentnessCalls.length !== 1 ||
+    !currentnessCall ||
+    currentnessCall.questionDotToken ||
+    currentnessCall.arguments.length !== 0 ||
+    !currentnessStatement ||
+    !ts.isExpressionStatement(currentnessStatement) ||
+    currentnessStatement.expression !== currentnessCall ||
+    currentnessStatement.parent !== networkTryBlock ||
+    !networkTryBlock ||
+    !ts.isBlock(networkTryBlock) ||
+    finalTargetCalls.length !== 1 ||
+    !finalTargetCall ||
+    finalTargetCall.arguments.length !== 3 ||
+    !isIdentifierArgument(finalTargetCall, 0, 'db') ||
+    !isIdentifierArgument(finalTargetCall, 1, 'authorizedTarget') ||
+    !isIdentifierArgument(finalTargetCall, 2, 'targetCommitGuard') ||
+    !finalTargetAwait ||
+    !ts.isAwaitExpression(finalTargetAwait) ||
+    !finalTargetConditional ||
+    !ts.isConditionalExpression(finalTargetConditional) ||
+    !ts.isIdentifier(finalTargetConditional.condition) ||
+    finalTargetConditional.condition.text !== 'authorizedTarget' ||
+    finalTargetConditional.whenTrue !== finalTargetAwait ||
+    finalTargetConditional.whenFalse.kind !== ts.SyntaxKind.NullKeyword ||
+    !finalTargetDeclaration ||
+    !ts.isVariableDeclaration(finalTargetDeclaration) ||
+    !ts.isIdentifier(finalTargetDeclaration.name) ||
+    finalTargetDeclaration.name.text !== 'finalTarget' ||
+    finalTargetDeclaration.initializer !== finalTargetConditional ||
+    networkTryBlock.statements[0] !== finalTargetStatement ||
+    unavailableTargetCondition !== 'authorizedTarget&&!finalTarget' ||
+    !unavailableTargetBlock ||
+    !ts.isBlock(unavailableTargetBlock) ||
+    unavailableTargetBlock.statements.length !== 2 ||
+    retireTargetCalls.length !== 1 ||
+    !retireTargetCall ||
+    retireTargetCall.arguments.length !== 3 ||
+    !isIdentifierArgument(retireTargetCall, 0, 'db') ||
+    !isIdentifierArgument(retireTargetCall, 1, 'tempGuid') ||
+    !isIdentifierArgument(retireTargetCall, 2, 'targetCommitGuard') ||
+    unavailableTargetBlock.statements[0] !== retireTargetStatement ||
+    !unavailableReturn ||
+    !ts.isReturnStatement(unavailableReturn) ||
+    !unavailableReturn.expression ||
+    !ts.isObjectLiteralExpression(unavailableReturn.expression) ||
+    unavailableReturn.expression.properties.length !== 1 ||
+    !unavailableReturn.expression.properties[0] ||
+    !ts.isShorthandPropertyAssignment(unavailableReturn.expression.properties[0]) ||
+    unavailableReturn.expression.properties[0].name.text !== 'tempGuid' ||
+    networkTryBlock.statements[1] !== unavailableTargetStatement ||
+    networkTryBlock.statements[2] !== currentnessStatement ||
+    methodCalls.length !== 1 ||
+    !methodCall ||
+    methodCall.arguments.length !== 2 ||
+    !methodDeclaration ||
+    !ts.isVariableDeclaration(methodDeclaration) ||
+    !ts.isIdentifier(methodDeclaration.name) ||
+    methodDeclaration.name.text !== 'method' ||
+    methodDeclaration.initializer !== methodCall ||
+    !methodStatement ||
+    !ts.isVariableStatement(methodStatement) ||
+    methodStatement.parent !== networkTryBlock ||
+    networkTryBlock.statements[3] !== methodStatement ||
+    networkTryBlock.statements[4] !== networkStatement ||
+    privateApiExpression !== 'capability.serverInfo?.private_api===true'
   ) {
-    errors.push('the one sendText network call must occur after the effective commit guard');
+    errors.push(
+      'the one sendText call must follow exact guarded target revalidation/retirement, transport.assertNetworkCurrent, and the pinned capability method decision',
+    );
+  }
+  const networkPayload = networkCall?.arguments[1];
+  const generationProperties =
+    networkPayload && ts.isObjectLiteralExpression(networkPayload)
+      ? networkPayload.properties.filter(
+          (property) => propertyNameText(property) === 'clientAttemptGeneration',
+        )
+      : [];
+  const generationProperty = generationProperties[0];
+  const methodProperties =
+    networkPayload && ts.isObjectLiteralExpression(networkPayload)
+      ? networkPayload.properties.filter((property) => propertyNameText(property) === 'method')
+      : [];
+  const selectedGuidProperties =
+    networkPayload && ts.isObjectLiteralExpression(networkPayload)
+      ? networkPayload.properties.filter(
+          (property) => propertyNameText(property) === 'selectedMessageGuid',
+        )
+      : [];
+  const partIndexProperties =
+    networkPayload && ts.isObjectLiteralExpression(networkPayload)
+      ? networkPayload.properties.filter((property) => propertyNameText(property) === 'partIndex')
+      : [];
+  if (
+    generationProperties.length !== 1 ||
+    !generationProperty ||
+    !ts.isPropertyAssignment(generationProperty) ||
+    !isDirectOptionalPropertyAccess(
+      generationProperty.initializer,
+      'attemptOwnerToken',
+      'generation',
+    ) ||
+    methodProperties.length !== 1 ||
+    !methodProperties[0] ||
+    !ts.isShorthandPropertyAssignment(methodProperties[0]) ||
+    selectedGuidProperties.length !== 1 ||
+    !selectedGuidProperties[0] ||
+    !ts.isPropertyAssignment(selectedGuidProperties[0]) ||
+    !isDirectOptionalPropertyAccess(
+      selectedGuidProperties[0].initializer,
+      'finalTarget',
+      'messageGuid',
+    ) ||
+    partIndexProperties.length !== 1 ||
+    !partIndexProperties[0] ||
+    !ts.isPropertyAssignment(partIndexProperties[0]) ||
+    !isDirectOptionalPropertyAccess(partIndexProperties[0].initializer, 'finalTarget', 'partIndex')
+  ) {
+    errors.push(
+      'sendText must receive the attempt generation, canonical final target part, and pinned method shorthand',
+    );
   }
 
   const reconcileCalls = callsNamed(declaration.body, new Set(['reconcileSendOutcome']));
@@ -837,12 +1553,14 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
   if (
     reconcileCalls.length !== 1 ||
     !reconcileCalls[0] ||
-    reconcileCalls[0].arguments.length !== 5 ||
+    reconcileCalls[0].arguments.length !== 6 ||
     !isIdentifierArgument(reconcileCalls[0], 4, 'effectiveCommitGuard') ||
+    !isExactAttemptOwnerOptions(reconcileCalls[0].arguments[5]) ||
     failureCalls.length !== 1 ||
     !failureCall ||
-    failureCall.arguments.length !== 7 ||
+    failureCall.arguments.length !== 8 ||
     !isIdentifierArgument(failureCall, 6, 'effectiveCommitGuard') ||
+    !isExactAttemptOwnerOptions(failureCall.arguments[7]) ||
     catchClauses.length !== 1 ||
     !catchClause ||
     !catchVariable ||
@@ -864,7 +1582,7 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     catchClause.block.statements[1] !== failureStatement
   ) {
     errors.push(
-      'success and failure settlement must receive the effective guard, with ownership rejection rethrown before failure handling',
+      'success and failure settlement must receive the effective guard and attempt-owner token, with ownership rejection rethrown before failure handling',
     );
   }
 
@@ -974,12 +1692,17 @@ export function scheduledRunDueBodyHash(source) {
   return functionBodyHash(declaration, sourceFile);
 }
 
-function exactCallErrors(findings, { label, target, path, symbol }) {
+function exactCallErrors(findings, { label, target, path, symbol, count = 1 }) {
   const uses = findings.filter((finding) => finding.target === target);
-  if (uses.length !== 1)
-    return [`${label} must have exactly one production use (found ${uses.length})`];
-  const [use] = uses;
-  if (use.operation !== 'mutator-call' || use.path !== path || use.symbol !== symbol) {
+  if (uses.length !== count) {
+    const expectedCount = count === 1 ? 'one' : String(count);
+    return [`${label} must have exactly ${expectedCount} production uses (found ${uses.length})`];
+  }
+  if (
+    uses.some(
+      (use) => use.operation !== 'mutator-call' || use.path !== path || use.symbol !== symbol,
+    )
+  ) {
     return [
       `${label} must be called directly only by ${path}#${symbol}; references and aliases are forbidden`,
     ];
@@ -1035,6 +1758,7 @@ export function scheduledRecoveryCallGraphErrors(findings) {
       target: CLAIM_TARGET,
       path: SCHEDULE_SERVICE_PATH,
       symbol: 'runDueScheduled',
+      count: 2,
     }),
     ...forbiddenUseErrors(findings, {
       label: 'broad claimScheduled helper',
@@ -1113,6 +1837,34 @@ function directZeroArgumentCall(node, name) {
     !node.questionDotToken &&
     node.arguments.length === 0
   );
+}
+
+function matchesScheduledCapabilityFactory(call, kind) {
+  const factory = call.arguments[6];
+  if (kind === 'session') {
+    return (
+      isIdentifierArgument(call, 5, 'undefined') &&
+      !!factory &&
+      ts.isIdentifier(factory) &&
+      factory.text === 'captureSessionRcsCapabilityLease'
+    );
+  }
+  if (kind === 'fixed') {
+    if (
+      !factory ||
+      !ts.isArrowFunction(factory) ||
+      factory.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword) ||
+      factory.parameters.length !== 0 ||
+      !ts.isCallExpression(factory.body) ||
+      directCallName(factory.body) !== 'fixedRcsCapabilitySource' ||
+      factory.body.questionDotToken ||
+      factory.body.arguments.length !== 1
+    ) {
+      return false;
+    }
+    return isIdentifierArgument(factory.body, 0, 'serverInfo');
+  }
+  return true;
 }
 
 function hasExactMountedLease(declaration) {
@@ -1516,8 +2268,10 @@ function reviewedScheduledOwnerErrors(sourceFiles) {
     [SEND_COMPOSITION_PATH, 'http', '../clients'],
     [SEND_COMPOSITION_PATH, 'captureRealtimeDeliveryLease', '../realtime/deliveryCoordinator'],
     [SEND_COMPOSITION_PATH, 'runTrackedRealtimeWork', '../realtime/deliveryCoordinator'],
+    [SEND_COMPOSITION_PATH, 'captureSessionRcsCapabilityLease', './rcsAttemptCapability'],
     [BACKGROUND_SYNC_PATH, 'runTrackedRealtimeWork', '../realtime/deliveryCoordinator'],
     [BACKGROUND_SYNC_PATH, 'runBackgroundSync', './backgroundSyncOrchestrator'],
+    [BACKGROUND_SYNC_PATH, 'fixedRcsCapabilitySource', '../send/rcsAttemptCapability'],
   ];
   for (const [path, name, module] of requiredImports) {
     const sourceFile = sourceFiles.get(path);
@@ -1582,10 +2336,12 @@ export function scheduledRunnerUsageErrors(sources) {
         } else if (
           node.arguments.length !== expected.argumentCount ||
           node.questionDotToken ||
-          (expected.scope && !isIdentifierArgument(node, expected.scopeIndex, expected.scope))
+          (expected.scope && !isIdentifierArgument(node, expected.scopeIndex, expected.scope)) ||
+          (expected.capabilityFactory &&
+            !matchesScheduledCapabilityFactory(node, expected.capabilityFactory))
         ) {
           errors.push(
-            `${path}#${owner} must call ${symbol} with ${expected.argumentCount} arguments${expected.scope ? ` and explicit ${expected.scope} account scope` : ''}`,
+            `${path}#${owner} must call ${symbol} with ${expected.argumentCount} arguments${expected.scope ? ` and explicit ${expected.scope} account scope` : ''}${expected.capabilityFactory ? ' and the reviewed capability-source factory' : ''}`,
           );
         }
       }
@@ -1665,7 +2421,7 @@ export function runScheduledRecoveryCheck({ root = process.cwd() } = {}) {
     ...scheduledRunnerUsageErrors(productionSources(root)),
   ];
   if (errors.length > 0) throw new Error(errors.map((error) => `- ${error}`).join('\n'));
-  return { resetCalls: 1, claimCalls: 1, handoffCalls: 1 };
+  return { resetCalls: 1, claimCalls: 2, handoffCalls: 1 };
 }
 
 const invokedDirectly =

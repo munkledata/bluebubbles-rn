@@ -2,11 +2,13 @@
 
 > **STATUS (2026-08-27): RETIRED V56 PREPARATION — NOT A CURRENT OR REPLACEMENT EXECUTION MATRIX.**
 > This file preserves the prepared `0.1.40` / version-code-`56` ledger and its synthetic-safe matrix history. It
-> contains no Play or device result. Do not execute its rows, fill its result fields, or transfer any checkmark or
-> evidence to version code `57` or a future replacement.
+> contains no current or candidate-eligible Play-device result. Do not execute its historical rows, fill its result
+> fields, or transfer any checkmark or evidence to version code `57` or a future replacement. Explicitly labelled
+> local-development supporting results may be recorded separately without populating the 131 candidate result fields.
 >
-> The later frozen `0.1.41` / version-code-`57` AAB is also nonconforming because it predates `9046e27`. The current
-> local `0.1.42` / version-code-`58` candidate is recorded in [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md) §0 and
+> The later frozen `0.1.41` / version-code-`57` AAB is also nonconforming because it predates `9046e27`. The local
+> version-code-`58` and `59` builds are now superseded historical artifacts; no current uploadable candidate exists.
+> The replacement boundary is recorded in [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md) §0 and
 > [`STORE_01G_INTERNAL_TESTING_RUNBOOK.md`](./STORE_01G_INTERNAL_TESTING_RUNBOOK.md). `DEVICE-01` in
 > [`WORK_PLAN_2026-08-03.md`](./WORK_PLAN_2026-08-03.md) remains blocked until this historical matrix is replaced
 > row-by-row for that exact AAB, source/release commit, device, and Android version.
@@ -283,18 +285,23 @@ owns lock-screen presentation, and App Lock's limited generic-new-delivery behav
       Lock does not retroactively rewrite a detailed notice or reminder trigger Android already
       owns. App Lock is a UI/policy gate, not encryption-key custody; this observation does not close
       `NOTIF-02`.
-- [ ] **`STATIC/HOST`:** Retain the fail-closed source/test evidence that an unknown stored lock state
-      posts only the generic notice and that the killed handler does not open the encrypted DB on
-      the locked path. Do not manufacture vault corruption on the Play candidate or present this as
-      device proof.
+- [ ] **`STATIC/HOST`:** Retain the fail-closed source/test evidence that a locked/unknown lock state
+      never reveals content. An enrolled V2 delivery before its exclusive 2027-02-01 cutoff posts
+      only the generic notice without opening the database; absent/V1/plaintext state posts no
+      notice. Authenticated, active-bound V3 is the sole exception: it may decrypt the transport
+      frame in memory and enqueue one canonical row into SQLCipher, then posts the notice only for a new
+      durable admission. It never reads/decrypts a queued row, claims, routes, or runs a content
+      effect until unlock; invalid, replayed, expired, conflicting, poisoned, or refused V3 input has
+      no notice. Do not manufacture vault corruption on the Play candidate or present this as device
+      proof.
 
 ### 6. Plaintext, encrypted, and unsupported push branches
 
-- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Run one approved plaintext message and one
-      `AEAD_GCM_V1` encrypted-message happy path in background and ordinary killed-process states.
-      Disable App Lock before each detailed killed-process branch. Both must show the correct
-      synthetic detail while App Lock is disabled; a fresh killed wake with persisted App Lock
-      enabled belongs to the generic branch above even if the prior live process was within grace.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Run an enrolled random-key encrypted push in
+      background and ordinary killed-process states: V3 for a scoped session, or V2 only before its
+      exclusive **2027-02-01T00:00:00Z** cutoff. Disable App Lock before each detailed
+      killed-process branch. Confirm absent-state plaintext and password-derived `AEAD_GCM_V1` are
+      dropped and recovered only by foreground sync; they are no longer happy paths.
 - [ ] **`STATIC/HOST`:** Keep malformed ciphertext, wrong-key/decrypt-failure, and unsupported
       encryption branches as host/static evidence unless the staged-server owner separately approves
       a harmless, finite synthetic fixture. Their current fallback is no live presentation followed
@@ -1018,10 +1025,10 @@ This is the important one — it proves push works when the app isn't running at
       broadcasts until the user launches it again, so it cannot prove killed-process FCM delivery.
 - [ ] Send yourself a message. A notification should **still arrive** (the killed-app wake
       re-runs the FCM background handler).
-- [ ] Repeat with an **encrypted** push (server's `encryptComs` setting on): the encrypted
-      payload is decrypted on-device (AEAD_GCM_V1) and the notification arrives with real
-      content. If decryption ever fails, the message still shows up on the next foreground
-      sync — that's the intended fallback, not a silent drop.
+- [ ] Repeat with an enrolled random-key encrypted push: identity-bound V3 for a scoped session, or
+      V2 only before the exclusive **2027-02-01T00:00:00Z** compatibility cutoff. The notification
+      arrives with real content while App Lock is disabled. Absent-state plaintext/V1 must not
+      present live content; the message instead appears on the next foreground sync.
 
 ---
 
@@ -1030,7 +1037,10 @@ This is the important one — it proves push works when the app isn't running at
 Run a **dev** build (`npx expo run:android`, dev client) with Metro on port 8081. The crypto marker
 remains a manual boot-log check:
 
-- [ ] `[crypto] self-test { ok: true, detail: 'round-trip + tamper-reject OK' }`
+- [x] **LOCAL DEV SUPPORTING ONLY (2026-09-08) —**
+      `[crypto] self-test { ok: true, detail: 'round-trip + tamper-reject OK' }` was observed after
+      the current-tree debug APK booted on physical API 36 arm64 hardware. This is not exact release-
+      candidate evidence.
 
 The database checks now have deterministic ADB harnesses. With exactly one authorized device, or an
 explicit serial, run:
@@ -1041,6 +1051,7 @@ ANDROID_SERIAL=<serial> npm run test:android:db:relaunch
 ANDROID_SERIAL=<serial> npm run test:android:db:wal-write-death
 ANDROID_SERIAL=<serial> npm run test:android:db:active-migration-death
 ANDROID_SERIAL=<serial> npm run test:android:db:runtime-concurrency
+ANDROID_SERIAL=<serial> npm run test:android:backup-restore
 ```
 
 The first harness cold-launches the debuggable app, accepts exactly one finite
@@ -1063,6 +1074,30 @@ one exclusive DEV launch and the finite `GATOR_DB_RUNTIME_CONCURRENCY_V1` schema
 reopen, integrity, and cleanup checks plus all three same-process/stop/private-state host checks, and
 retains only allowlisted target/check metadata under the ignored
 `android/app/build/reports/db-runtime-concurrency/` directory.
+The backup/restore mode uses its own fixed disposable database and marker family. It requires all
+22 native seal/open, near-limit, injected-late-failure rollback, retry, integrity, close, and cleanup
+checks plus all three process/private-state host checks, and retains only allowlisted metadata under
+the ignored `android/app/build/reports/backup-restore/` directory.
+
+- [x] **LOCAL CURRENT-TREE DEV REFRESH (2026-09-08) —** A locally built debug APK on the physical
+      API-36 arm64 Samsung passed all six disposable lanes. The APK contained registry head
+      `0047_message_retraction_topology`, and all five head-bearing artifacts report that head: DB
+      contract **28/28**; relaunch **7/7 READY, 12/12 final, 3/3 host**; active-migration death
+      **11/11, 15/15, 6/6**; runtime concurrency **22/22 + 3/3 host**; and backup/restore **22/22 +
+      3/3 host**. The fixed-WAL contract, which intentionally records no migration head/count,
+      separately passed **9/9 READY, 12/12 final, 5/5 host**.
+      All **158/158** retained booleans are true in the six 2026-09-09T04:09–04:11Z privacy-safe
+      artifacts. Installed native metadata remains development-only `0.1.41`/version-code 1, so this
+      does not satisfy the exact release-candidate checkbox below or provide FEAT-03 staged-server
+      proof.
+
+      Exact artifacts: `db-relaunch/android-db-relaunch-2026-09-09T04-09-53-377Z.json`,
+                  `db-wal-write-death/android-db-wal-write-death-2026-09-09T04-10-15-041Z.json`,
+                  `db-active-migration-death/android-db-active-migration-death-2026-09-09T04-10-34-772Z.json`,
+                  `db-runtime-concurrency/android-db-runtime-concurrency-2026-09-09T04-10-52-441Z.json`,
+                  `backup-restore/android-backup-restore-2026-09-09T04-11-12-760Z.json`, and
+                  `db-contract/android-db-contract-2026-09-09T04-11-27-811Z.json` under
+                  `android/app/build/reports/`.
 
 - [x] **HISTORICAL / NOT VERSION-CODE-56 CREDIT —** Local API-35 arm64 emulator: **PASS**, schema 3,
       38 migrations at head `0038`, all 28 checks
@@ -1100,10 +1135,10 @@ retains only allowlisted target/check metadata under the ignored
       persistence, and cleans all eight fixed paths. All 11 READY, 15 final, and 6 host checks are true
       in retained artifact
       `android-db-active-migration-death-2026-08-21T09-05-01-344Z.json`.
-- [ ] **POST-V56 / FUTURE DEBUG BUILD ONLY —** DB-02C: on a supported physical Android device, run
-      `ANDROID_SERIAL=<serial> npm run test:android:db:runtime-concurrency` and require all 22 runtime
-      checks and all three host checks to be true in the retained privacy-safe artifact. Frozen
-      version code 56 predates this lane and cannot receive this evidence.
+- [x] **POST-V56 / DEBUG-BUILD CREDIT —** DB-02C: the 2026-09-08 physical API-36 run passed all
+      **22/22** runtime checks and **3/3** host checks in retained artifact
+      `android-db-runtime-concurrency-2026-09-09T04-10-52-441Z.json`. Frozen version code 56 predates
+      this lane and does not receive this evidence.
 - [ ] Parent DB-03B2B/DB-03B remains open; power-loss and torn-write recovery remain unproved.
       DB-03C/DEVICE-01 still own scheduled CI, actual signed prior-build install-over,
       production-file continuity, spontaneous process death, and repetition of the active-migration
@@ -1167,9 +1202,12 @@ production-file behavior, signed/store provenance, scheduled CI, or release/phys
 - [ ] Fully kill the app, then cold-launch it. The **lock screen appears first**, before the
       foreground app opens or renders the message database.
 - [ ] Authenticate: the app opens the database and routes you into the app normally.
-- [ ] While the UI is locked, send a killed-app push and confirm it posts only the generic locked
-      notice without opening the DB; after unlock, sync catches the event up. App Lock is a
-      foreground/policy gate, not user-auth-bound key custody or encryption for downloaded
+- [ ] While the UI is locked, send a killed-app push and confirm an enrolled V2 push before its
+      exclusive 2027-02-01 cutoff posts only the generic locked notice; absent/V1/plaintext posts no
+      notice. V2 must not open the DB. Authenticated, active-bound V3 may perform only its
+      SQLCipher enqueue and must not read/decrypt, claim, route, or apply content until unlock; a replay must
+      not re-alert. After unlock, the durable drain (with sync as fallback) catches the event up. App
+      Lock is a foreground/policy gate, not user-auth-bound key custody or encryption for downloaded
       attachments/app logs.
 - [ ] Unlock, background the app, wait longer than the configured lock timeout **without bringing
       it foreground**, then send a push. It must post only the generic locked notice; a background

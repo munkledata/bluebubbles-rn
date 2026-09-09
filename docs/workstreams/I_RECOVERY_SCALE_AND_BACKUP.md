@@ -29,6 +29,11 @@ A full repair resets only safe server-derived markers, reports progress, support
 restart, and is bound to the captured account generation. Server reconciliation must preserve local
 pins, names, wallpapers, themes, reminders, drafts, send state, and deletion tombstones. Destructive
 absence reconciliation requires a stable server view or an equivalent atomic snapshot contract.
+For the modern server, bind every chat, message, and deleted-message page to one owner/process-local
+lease and require an exact response acknowledgement before consuming its final unchanged-source
+proof. Fence all participating local DB owners against interleaving through the marker commit. RCS
+cache absence is never destructive authority until that bounded source has a complete mutation
+stamp; an older server may perform only an additive refresh without replacing the marker.
 
 <a id="recovery-02"></a>
 

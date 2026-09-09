@@ -1,14 +1,18 @@
 import { Linking } from 'react-native';
 import { faceTimeApi } from '@core/api';
+import type { HttpClient } from '@core/api/http';
 import { isFaceTimeLink } from '@core/facetime';
-import { resolveTargetPartIndex } from '@core/messages/partIndex';
+import { resolveExactMessageTargetPartIndex } from '@core/messages/partIndex';
+import { parseMessagePartTopology } from '@core/models';
 import { bodyTextFromRuns, parseAttributedRuns } from '@core/richtext';
-import { logger } from '@core/secure';
+import { logger, readAccountRevocationState } from '@core/secure';
 import { deleteReminderByNotificationId, getMessageActionPartLayoutByGuid } from '@db/repositories';
 import { withDbWriteLock } from '@db/transaction';
 import { isDevServer } from '@utils/isDev';
-import { http } from '../clients';
-import { markRead } from '../chatActions';
+import { isRcsChatGuid } from '@utils/chat';
+import { accountRevocationMarker, fixedCredentialClient, http, vault } from '../clients';
+import { inspectBackgroundSession } from '../background/backgroundSyncOrchestrator';
+import { markRead, type ReadReceiptTransport } from '../chatActions';
 import { ensureDatabase } from '../databaseControl';
 import {
   captureRealtimeDeliveryLease,
@@ -16,6 +20,12 @@ import {
   type RealtimeDeliveryLease,
 } from '../realtime/deliveryCoordinator';
 import { sendTextMessage } from '@/services/send/sendService';
+import {
+  captureSessionRcsCapabilityLease,
+  messageTargetServerAuthorization,
+  resolveRcsAttemptOwnership,
+  type RcsCapabilitySource,
+} from '@/services/send/rcsAttemptCapability';
 import { sendReactionMessage } from '@/services/send/sendReactionService';
 import { logicalSendQueue } from '@/services/send/logicalSendQueue';
 import {
@@ -43,6 +53,68 @@ const STALE_NOTIFICATION_ACTION = Symbol('stale-notification-action');
 
 function assertCurrentAccount(lease: RealtimeDeliveryLease): void {
   if (!lease.isCurrent()) throw STALE_NOTIFICATION_ACTION;
+}
+
+interface NotificationActionTransport extends ReadReceiptTransport {
+  /** DB settlement guard: account/revocation only, never transient transport currentness. */
+  accountIsCurrent(): boolean;
+  /** Present only for a foreground session whose cached capability has exact provenance. */
+  readonly capabilitySource?: RcsCapabilitySource;
+}
+
+function assertCurrentTransport(transport: NotificationActionTransport): void {
+  if (!transport.isCurrent()) throw STALE_NOTIFICATION_ACTION;
+}
+
+/**
+ * Resolve one credential identity for a notification's complete network effect.
+ *
+ * A warm process pins the connected singleton and its monotonic transport revision. A cold
+ * headless process instead re-authorizes an immutable vault tuple and never hydrates/publishes the
+ * foreground store. The separate account guard deliberately survives only transport rotation so a
+ * durable outgoing row can still settle to retryable/error instead of being stranded as sending.
+ */
+async function resolveNotificationActionTransport(
+  accountLease: RealtimeDeliveryLease,
+): Promise<NotificationActionTransport> {
+  assertCurrentAccount(accountLease);
+  const capabilitySource = captureSessionRcsCapabilityLease();
+  if (capabilitySource) {
+    const actionHttp = http.pinTransport();
+    const snapshot = actionHttp.snapshotTransport();
+    const accountIsCurrent = (): boolean => accountLease.isCurrent();
+    const isCurrent = (): boolean =>
+      accountIsCurrent() && capabilitySource.isCurrent() && actionHttp.isTransportCurrent();
+    if (
+      snapshot.origin !== capabilitySource.origin ||
+      snapshot.transportRevision !== capabilitySource.revision ||
+      !isCurrent()
+    ) {
+      throw STALE_NOTIFICATION_ACTION;
+    }
+    return Object.freeze({
+      http: actionHttp,
+      accountIsCurrent,
+      isCurrent,
+      capabilitySource,
+    });
+  }
+
+  const inspection = await inspectBackgroundSession(vault, accountRevocationMarker);
+  assertCurrentAccount(accountLease);
+  if (inspection.kind !== 'ready') {
+    throw new Error(`Headless notification transport is unavailable (${inspection.kind}).`);
+  }
+  const accountIsCurrent = (): boolean =>
+    accountLease.isCurrent() && readAccountRevocationState(accountRevocationMarker) === 'clear';
+  const actionHttp: HttpClient = fixedCredentialClient(
+    inspection.session.origin,
+    inspection.session.password,
+    accountIsCurrent,
+  );
+  const isCurrent = (): boolean => accountIsCurrent() && actionHttp.isTransportCurrent();
+  if (!isCurrent()) throw STALE_NOTIFICATION_ACTION;
+  return Object.freeze({ http: actionHttp, accountIsCurrent, isCurrent });
 }
 
 /**
@@ -160,7 +232,9 @@ async function handleNotificationActionForAccount(
       }
       case ACTION_MARK_READ:
         assertCurrentAccount(accountLease);
-        await markRead(chatGuid, accountLease);
+        await markRead(chatGuid, accountLease, {
+          resolveReceiptTransport: () => resolveNotificationActionTransport(accountLease),
+        });
         assertCurrentAccount(accountLease);
         break;
       case ACTION_LOVE: {
@@ -288,10 +362,11 @@ async function handleFaceTimeAction(
       } else {
         // Gator's answer op only acks the answer ({ answered: true }); the openable join
         // link is minted by a SEPARATE op. Answer the call, then request a link to open.
-        assertCurrentAccount(accountLease);
-        await faceTimeApi.answerFaceTime(http, uuid);
-        assertCurrentAccount(accountLease);
-        link = await faceTimeApi.createFaceTimeLink(http);
+        const transport = await resolveNotificationActionTransport(accountLease);
+        assertCurrentTransport(transport);
+        await faceTimeApi.answerFaceTime(transport.http, uuid);
+        assertCurrentTransport(transport);
+        link = await faceTimeApi.createFaceTimeLink(transport.http);
       }
       assertCurrentAccount(accountLease);
       // The link comes from the server — only open a real FaceTime link, never an
@@ -325,17 +400,24 @@ async function replyTo(
     if (isDevServer()) {
       const { devSendFake } = await import('@features/conversations/devSeed');
       assertCurrentAccount(accountLease);
-      await devSendFake(chatGuid, text, undefined, accountLease);
+      await devSendFake(chatGuid, text, undefined, accountLease, onQueued);
       assertCurrentAccount(accountLease);
-      onQueued(); // the fake write IS the durable point in dev
       return;
     }
     // ensureDatabase: a killed-app inline-reply runs headless with no prior DB open.
     assertCurrentAccount(accountLease);
     const db = await ensureDatabase();
     assertCurrentAccount(accountLease);
-    await sendTextMessage(db, http, { chatGuid, text }, Date.now(), onQueued, undefined, () =>
-      accountLease.isCurrent(),
+    const transport = await resolveNotificationActionTransport(accountLease);
+    await sendTextMessage(
+      db,
+      transport.http,
+      { chatGuid, text },
+      Date.now(),
+      onQueued,
+      undefined,
+      transport.accountIsCurrent,
+      transport.capabilitySource,
     );
     assertCurrentAccount(accountLease);
   } finally {
@@ -364,28 +446,53 @@ async function loveMessage(
       return getMessageActionPartLayoutByGuid(db, messageGuid);
     });
     assertCurrentAccount(accountLease);
-    const bodyText = layout
-      ? bodyTextFromRuns(parseAttributedRuns(layout.attributedBody, layout.text))
-      : '';
-    const partIndex = layout
-      ? resolveTargetPartIndex({
-          attachmentCount: layout.visibleAttachmentCount,
-          hasText: bodyText.trim().length > 0,
-          partCount: layout.partCount,
-        })
-      : 0;
+    // Missing/deleted/full/unknown targets are not a legacy part-zero message. The DB query returns
+    // null for all of them, so abort instead of reacting to an unrelated part or stale notification.
+    if (!layout) return;
+    const bodyText = bodyTextFromRuns(parseAttributedRuns(layout.attributedBody, layout.text));
 
     // DEV: simulate the reaction round-trip locally without a server.
     if (isDevServer()) {
+      const partIndex = resolveExactMessageTargetPartIndex({
+        attachmentCount: layout.visibleAttachmentCount,
+        hasText: bodyText.trim().length > 0,
+        partCount: layout.partCount,
+        topology: parseMessagePartTopology(layout.messagePartTopology),
+        topologySupported: false,
+        visibleAttachmentGuids: layout.visibleAttachmentGuids,
+      });
+      if (partIndex == null) return;
       const { devSendFakeReaction } = await import('@features/conversations/devSeed');
       assertCurrentAccount(accountLease);
       await devSendFakeReaction(chatGuid, messageGuid, 'love', undefined, partIndex, accountLease);
       assertCurrentAccount(accountLease);
       return;
     }
+    const transport = await resolveNotificationActionTransport(accountLease);
+    assertCurrentTransport(transport);
+    const capability = await resolveRcsAttemptOwnership(
+      transport.http,
+      chatGuid,
+      transport.accountIsCurrent,
+      transport.capabilitySource,
+      { requireServerInfo: true },
+    );
+    assertCurrentTransport(transport);
+    const partIndex =
+      isRcsChatGuid(chatGuid) && messageGuid.startsWith('rcs-')
+        ? 0
+        : resolveExactMessageTargetPartIndex({
+            attachmentCount: layout.visibleAttachmentCount,
+            hasText: bodyText.trim().length > 0,
+            partCount: layout.partCount,
+            topology: parseMessagePartTopology(layout.messagePartTopology),
+            topologySupported: capability.serverInfo?.supports_message_part_topology === true,
+            visibleAttachmentGuids: layout.visibleAttachmentGuids,
+          });
+    if (partIndex == null) return;
     await sendReactionMessage(
       db,
-      http,
+      transport.http,
       {
         chatGuid,
         targetGuid: messageGuid,
@@ -393,7 +500,8 @@ async function loveMessage(
         partIndex,
       },
       Date.now(),
-      () => accountLease.isCurrent(),
+      transport.accountIsCurrent,
+      messageTargetServerAuthorization(capability.serverInfo, transport.isCurrent),
     );
     assertCurrentAccount(accountLease);
   } finally {

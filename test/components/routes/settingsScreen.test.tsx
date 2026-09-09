@@ -145,7 +145,7 @@ const mockKvSetWithinTransaction = kvSetWithinTransaction as jest.Mock;
 
 function sqlStatementText(value: unknown): string {
   if (!value || typeof value !== 'object' || !('queryChunks' in value)) return '';
-  const chunks = (value as { queryChunks: Array<{ value?: unknown }> }).queryChunks;
+  const chunks = (value as { queryChunks: { value?: unknown }[] }).queryChunks;
   return chunks
     .flatMap((chunk) => (Array.isArray(chunk.value) ? chunk.value : []))
     .filter((part): part is string => typeof part === 'string')
@@ -246,6 +246,10 @@ describe('SettingsScreen — toggles wire to the real stores + persist', () => {
 
   it('steps the Parallel Downloads cap up through the store', async () => {
     await renderWithTheme(<SettingsScreen />);
+    expect(
+      screen.getByText(/closed or in the background.*remain only in Gator’s private cache/),
+    ).toBeTruthy();
+    expect(screen.getByText(/outside copy is not automatically retried/)).toBeTruthy();
     await act(async () => {
       fireEvent.press(screen.getByLabelText('More parallel downloads'));
     });
@@ -559,12 +563,14 @@ describe('SettingsScreen — theme presets', () => {
 describe('SettingsScreen — navigation rows', () => {
   it('routes each disclosure row via the router', async () => {
     await renderWithTheme(<SettingsScreen />);
-    const cases: Array<[string, string]> = [
+    const cases: [string, string][] = [
       ['Custom Themes…', '/themes'],
       ['Reminders', '/reminders'],
       ['Backup', '/backup'],
       ['Find My', '/findmy'],
       ['Storage & File Privacy…', '/storage-privacy'],
+      ['Privacy & Data Use…', '/storage-privacy'],
+      ['Legal & Third-Party Notices…', '/legal-notices'],
       ['Server Management…', '/server-management'],
       ['Server Health…', '/server-health'],
     ];
@@ -986,6 +992,20 @@ describe('SettingsScreen — search filter', () => {
     });
     expect(screen.getByText('CONTACTS')).toBeTruthy();
     expect(screen.queryByText('THEME')).toBeNull();
+  });
+
+  it('finds Secure Screen by its visible and descriptive terms', async () => {
+    await renderWithTheme(<SettingsScreen />);
+    const searchField = screen.getByPlaceholderText('Search settings');
+
+    for (const term of ['secure', 'screen', 'screenshot', 'recording', 'capture']) {
+      await act(async () => {
+        fireEvent.changeText(searchField, term);
+      });
+      expect(screen.getByText('GENERAL')).toBeTruthy();
+      expect(screen.getByText('Secure Screen')).toBeTruthy();
+      expect(screen.queryByText(/No settings match/)).toBeNull();
+    }
   });
 
   it('shows the no-results message when nothing matches', async () => {

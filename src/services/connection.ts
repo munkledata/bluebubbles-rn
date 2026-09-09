@@ -5,6 +5,7 @@ import { MIN_SERVER_VERSION } from '@core/config';
 import type { ServerInfo } from '@core/models';
 import {
   ACCOUNT_REVOCATION_CLEAR_FAILURE_MESSAGE,
+  inspectCredentialUpgradeJournal,
   logger,
   SERVER_SESSION_STATE,
   type AccountRevocationMarker,
@@ -103,6 +104,30 @@ export async function persistServerConnection(
   info: ServerInfo,
   deps: CredentialPersistenceDeps,
 ): Promise<ConnectResult> {
+  let expectedUpgradeJournal: string | null;
+  try {
+    expectedUpgradeJournal = await deps.vault.get('serverCredentialUpgrade');
+  } catch (err) {
+    logger.warn('[connect] credential-upgrade preflight was unavailable', err);
+    return {
+      ok: false,
+      kind: 'unknown',
+      message: 'Could not confirm the saved credential state. Please try again.',
+    };
+  }
+  if (!attemptIsCurrent(deps)) return cancelledResult();
+  const upgrade = inspectCredentialUpgradeJournal(expectedUpgradeJournal);
+  if (
+    upgrade.kind === 'invalid' ||
+    (upgrade.kind === 'valid' && upgrade.journal.phase !== 'revoked')
+  ) {
+    return {
+      ok: false,
+      kind: 'unknown',
+      message: 'A saved credential upgrade must be recovered before connecting again.',
+    };
+  }
+
   // Correlate the two independent SecureStore keys. `writing` is durable BEFORE either credential
   // changes, so a crash/rejection between them cannot make a mixed old/new pair look connected.
   // `active` is the commit marker and is written only after both credential writes succeed.
@@ -110,10 +135,25 @@ export async function persistServerConnection(
     if (!attemptIsCurrent(deps)) return cancelledResult();
     await deps.vault.set('serverSessionState', SERVER_SESSION_STATE.writing);
     if (!attemptIsCurrent(deps)) return cancelledResult();
+    // Re-read behind the writing barrier so a concurrently persisted one-time candidate can never
+    // be mistaken for the keyless revoked tombstone observed by preflight.
+    const currentUpgradeJournal = await deps.vault.get('serverCredentialUpgrade');
+    if (currentUpgradeJournal !== expectedUpgradeJournal) {
+      throw new Error('credential-upgrade journal changed during connection commit');
+    }
     await deps.vault.set('serverAddress', origin);
     if (!attemptIsCurrent(deps)) return cancelledResult();
     await deps.vault.set('serverPassword', password);
     if (!attemptIsCurrent(deps)) return cancelledResult();
+    if (upgrade.kind === 'valid') {
+      // A keyless tombstone may be retired only as part of this completely new explicit session.
+      await deps.vault.delete('serverCredentialUpgrade');
+      if (!attemptIsCurrent(deps)) return cancelledResult();
+      if ((await deps.vault.get('serverCredentialUpgrade')) !== null) {
+        throw new Error('credential-upgrade tombstone deletion was not confirmed');
+      }
+      if (!attemptIsCurrent(deps)) return cancelledResult();
+    }
     await deps.vault.set('serverSessionState', SERVER_SESSION_STATE.active);
     if (!attemptIsCurrent(deps)) return cancelledResult();
   } catch (err) {
@@ -154,7 +194,7 @@ function mapError(err: unknown): ConnectResult {
         return {
           ok: false,
           kind: 'unauthorized',
-          message: 'Authentication failed — incorrect password.',
+          message: 'Authentication failed — check the password or paired-client credential.',
         };
       case 'no_connection':
       case 'timeout':

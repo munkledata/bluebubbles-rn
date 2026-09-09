@@ -1,16 +1,19 @@
 import type Database from 'better-sqlite3';
 import { sql } from 'drizzle-orm';
 import {
+  INCOMING_EVENT_DEPENDENCY_RETRY_MS,
   INCOMING_EVENT_LEASE_MS,
   INCOMING_EVENT_MAX_CLAIM_PAYLOAD_BYTES,
   INCOMING_EVENT_MAX_ATTEMPTS,
   INCOMING_EVENT_MAX_PAYLOAD_BYTES,
   INCOMING_EVENT_PENDING_BYTE_BUDGET,
   INCOMING_EVENT_PENDING_CAPACITY,
+  INCOMING_EVENT_REPLAY_RECEIPT_MIN_AGE_MS,
   INCOMING_EVENT_TERMINAL_CAPACITY,
   INCOMING_EVENT_TERMINAL_MAX_AGE_MS,
   claimIncomingEvents,
   completeIncomingEvent as completeIncomingEventWithClock,
+  deferIncomingEventForDependency as deferIncomingEventForDependencyWithClock,
   enqueueAndClaimIncomingEventIfQueueEmpty,
   enqueueIncomingEvent as enqueueIncomingEventWithClock,
   failIncomingEvent as failIncomingEventWithClock,
@@ -150,6 +153,15 @@ function failIncomingEvent(
 ) {
   const { now, ...identity } = claim;
   return failIncomingEventWithClock(db, identity, guard, clockAt(now));
+}
+
+function deferIncomingEventForDependency(
+  db: AppDatabase,
+  claim: ReturnType<typeof exactClaim> & { now: number },
+  guard: DbCommitGuard,
+) {
+  const { now, ...identity } = claim;
+  return deferIncomingEventForDependencyWithClock(db, identity, guard, clockAt(now));
 }
 
 function maintainIncomingEvents(db: AppDatabase, now: number, guard: DbCommitGuard) {
@@ -466,6 +478,9 @@ describe('incoming event queue repository', () => {
       status: 'resolved',
       result: { status: 'enqueued', id: expect.any(Number) },
     });
+    if (outcome.status !== 'resolved' || outcome.result.status !== 'enqueued') {
+      throw new Error('expected fresh event to enqueue after the rolling-back neighbour');
+    }
     expect(
       raw.prepare(`SELECT value FROM kv WHERE key = 'incoming.neighbour'`).get(),
     ).toBeUndefined();
@@ -479,7 +494,7 @@ describe('incoming event queue repository', () => {
         .all(),
     ).toEqual([
       {
-        id: outcome.status === 'resolved' ? outcome.result.id : expect.any(Number),
+        id: outcome.result.id,
         eventKey: 'rolling-neighbour-fresh',
         state: 'pending',
         payload: '{}',
@@ -703,6 +718,7 @@ describe('incoming event queue repository', () => {
     const { db, raw } = await createTestDb();
     const first = await enqueueIncomingEvent(db, incoming('duplicate'), ALLOW, NOW);
     expect(first).toEqual({ status: 'enqueued', id: expect.any(Number) });
+    if (first.status !== 'enqueued') throw new Error('expected first event to enqueue');
 
     const duplicate = await enqueueIncomingEvent(
       db,
@@ -1798,6 +1814,107 @@ describe('incoming event queue repository', () => {
     expect(second.attempts).toBe(2);
   });
 
+  it('returns repeated dependency waits without spending the five-attempt poison budget', async () => {
+    const { db, raw } = await createTestDb();
+    const eventKey = 'dependency-wait';
+    await enqueueIncomingEvent(db, incoming(eventKey), ALLOW, NOW);
+    let claimNow = NOW;
+
+    for (let wait = 1; wait <= INCOMING_EVENT_MAX_ATTEMPTS + 2; wait += 1) {
+      const claim = onlyClaim(
+        await claimIncomingEvents(
+          db,
+          { clock: () => claimNow, leaseToken: `dependency-wait-${wait}` },
+          ALLOW,
+        ),
+      );
+      expect(claim.attempts).toBe(1);
+      expect(claim.claimVersion).toBe(wait);
+
+      const deferredAt = claimNow + 1;
+      const deferred = await deferIncomingEventForDependency(
+        db,
+        { ...exactClaim(claim), now: deferredAt },
+        ALLOW,
+      );
+      expect(deferred).toEqual({
+        status: 'retry-scheduled',
+        attempts: 0,
+        nextAttemptAt: deferredAt + INCOMING_EVENT_DEPENDENCY_RETRY_MS,
+      });
+      if (deferred.status !== 'retry-scheduled') throw new Error('expected dependency retry');
+      claimNow = deferred.nextAttemptAt;
+    }
+
+    expect(
+      raw
+        .prepare(
+          `SELECT state, payload, attempts, claim_version AS claimVersion,
+                  lease_token AS leaseToken, expires_at AS expiresAt,
+                  last_error_code AS lastErrorCode
+             FROM incoming_event_queue WHERE event_key = ?`,
+        )
+        .get(eventKey),
+    ).toEqual({
+      state: 'pending',
+      payload: '{}',
+      attempts: 0,
+      claimVersion: INCOMING_EVENT_MAX_ATTEMPTS + 2,
+      leaseToken: null,
+      expiresAt: EXPIRY,
+      lastErrorCode: 'dependency-pending',
+    });
+  });
+
+  it('keeps dependency deferral fenced to the exact lease and bounded by event expiry', async () => {
+    const { db, raw } = await createTestDb();
+    const eventKey = 'dependency-fence';
+    const expiresAt = NOW + INCOMING_EVENT_LEASE_MS * 3;
+    await enqueueIncomingEvent(db, incoming(eventKey, { receivedAt: NOW, expiresAt }), ALLOW, NOW);
+    const first = onlyClaim(
+      await claimIncomingEvents(db, { clock: () => NOW, leaseToken: 'dependency-old' }, ALLOW),
+    );
+    const reclaimed = onlyClaim(
+      await claimIncomingEvents(
+        db,
+        { clock: () => first.leaseExpiresAt, leaseToken: 'dependency-current' },
+        ALLOW,
+      ),
+    );
+
+    await expect(
+      deferIncomingEventForDependency(
+        db,
+        { ...exactClaim(first), now: first.leaseExpiresAt + 1 },
+        ALLOW,
+      ),
+    ).resolves.toEqual({ status: 'stale' });
+    expect(readClaimQueueRow(raw, eventKey)).toEqual({
+      state: 'pending',
+      payload: '{}',
+      attempts: 2,
+      claimVersion: 2,
+      leaseToken: reclaimed.leaseToken,
+      leaseExpiresAt: reclaimed.leaseExpiresAt,
+      terminalAt: null,
+      lastErrorCode: null,
+    });
+
+    await expect(
+      deferIncomingEventForDependency(db, { ...exactClaim(reclaimed), now: expiresAt }, ALLOW),
+    ).resolves.toEqual({ status: 'poisoned', attempts: 1 });
+    expect(readClaimQueueRow(raw, eventKey)).toEqual({
+      state: 'poisoned',
+      payload: null,
+      attempts: 1,
+      claimVersion: 2,
+      leaseToken: null,
+      leaseExpiresAt: 0,
+      terminalAt: expiresAt,
+      lastErrorCode: 'expired',
+    });
+  });
+
   it('poisons and scrubs a fifth claimed attempt after its worker dies', async () => {
     const { db, raw } = await createTestDb();
     await enqueueIncomingEvent(db, incoming('attempt-cap'), ALLOW, NOW);
@@ -1858,6 +1975,7 @@ describe('incoming event queue repository', () => {
       payload: JSON.stringify({ private: 'message' }),
     });
     const inserted = await enqueueIncomingEvent(db, event, ALLOW, NOW);
+    if (inserted.status !== 'enqueued') throw new Error('expected receipt fixture to enqueue');
     const claim = onlyClaim(
       await claimIncomingEvents(db, { clock: () => NOW, leaseToken: 'complete-worker' }, ALLOW),
     );
@@ -1884,6 +2002,7 @@ describe('incoming event queue repository', () => {
       payload: JSON.stringify({ private: 'corrupt message' }),
     });
     const inserted = await enqueueIncomingEvent(db, event, ALLOW, NOW);
+    if (inserted.status !== 'enqueued') throw new Error('expected poison fixture to enqueue');
     const claim = onlyClaim(
       await claimIncomingEvents(db, { clock: () => NOW, leaseToken: 'poison-worker' }, ALLOW),
     );
@@ -2150,8 +2269,10 @@ describe('incoming event queue repository', () => {
         const sqlShape = JSON.stringify(query);
         if (
           !trimDidStart &&
-          sqlShape.includes('ranked_terminal') &&
-          sqlShape.includes('retained_terminal')
+          sqlShape.includes('DELETE FROM incoming_event_queue') &&
+          sqlShape.includes("WHERE state IN ('completed', 'poisoned')") &&
+          sqlShape.includes('AND terminal_at <= ') &&
+          sqlShape.includes('AND terminal_at < ')
         ) {
           trimDidStart = true;
           return trimHeld.then(() => realRun(query)).finally(markTrimFinished);
@@ -2392,7 +2513,7 @@ describe('incoming event queue repository', () => {
     );
   });
 
-  it('prunes terminal receipts by age and keeps only the newest bounded set', async () => {
+  it('prunes only expired terminal receipts by age and capacity', async () => {
     const { db, raw } = await createTestDb();
     const maintenanceNow = INCOMING_EVENT_TERMINAL_MAX_AGE_MS + 100_000;
     const insert = raw.prepare(`
@@ -2416,7 +2537,7 @@ describe('incoming event queue repository', () => {
           `terminal:recent:${index}`,
           BASE,
           EXPIRY,
-          maintenanceNow - index,
+          maintenanceNow - INCOMING_EVENT_REPLAY_RECEIPT_MIN_AGE_MS - index,
         );
       }
     });
@@ -2433,7 +2554,7 @@ describe('incoming event queue repository', () => {
 
     await maintainIncomingEvents(db, maintenanceNow, ALLOW);
 
-    expect(queueCount(raw)).toBe(INCOMING_EVENT_TERMINAL_CAPACITY + 1);
+    expect(queueCount(raw)).toBe(INCOMING_EVENT_TERMINAL_CAPACITY);
     expect(
       raw
         .prepare(
@@ -2475,6 +2596,57 @@ describe('incoming event queue repository', () => {
         maintenanceNow,
       ),
     ).resolves.toEqual({ status: 'duplicate', id: expect.any(Number), state: 'completed' });
+  });
+
+  it('never evicts a still-valid receipt and rejects new effects when every slot is protected', async () => {
+    const { db, raw } = await createTestDb();
+    const envelopeExpiresAt = NOW + 60_000;
+    const insert = raw.prepare(`
+      INSERT INTO incoming_event_queue (
+        event_key, payload_digest, ordering_key, event_name, source, payload,
+        received_at, expires_at, state, terminal_at
+      ) VALUES (?, ?, ?, 'new-message', 'fcm', NULL, ?, ?, 'completed', ?)`);
+    const seedReceipts = raw.transaction(() => {
+      for (let index = 0; index < INCOMING_EVENT_TERMINAL_CAPACITY; index += 1) {
+        const eventKey = `protected:${index}`;
+        insert.run(eventKey, DIGEST_A, `ordering:${eventKey}`, BASE, envelopeExpiresAt, NOW);
+      }
+    });
+    seedReceipts();
+
+    await expect(enqueueIncomingEvent(db, incoming('protected-new'), ALLOW, NOW)).resolves.toEqual({
+      status: 'capacity-rejected',
+      reason: 'receipt-capacity',
+    });
+    expect(queueCount(raw)).toBe(INCOMING_EVENT_TERMINAL_CAPACITY);
+    expect(
+      raw
+        .prepare(`SELECT COUNT(*) AS count FROM incoming_event_queue WHERE expires_at > ?`)
+        .get(NOW),
+    ).toEqual({ count: INCOMING_EVENT_TERMINAL_CAPACITY });
+
+    await expect(
+      enqueueIncomingEvent(
+        db,
+        incoming('protected:0', { expiresAt: envelopeExpiresAt }),
+        ALLOW,
+        NOW,
+      ),
+    ).resolves.toEqual({ status: 'duplicate', id: expect.any(Number), state: 'completed' });
+
+    const receiptProtectionEndsAt = NOW + INCOMING_EVENT_REPLAY_RECEIPT_MIN_AGE_MS;
+    await expect(
+      enqueueIncomingEvent(
+        db,
+        incoming('after-protection-expired', {
+          receivedAt: receiptProtectionEndsAt,
+          expiresAt: receiptProtectionEndsAt + 60_000,
+        }),
+        ALLOW,
+        receiptProtectionEndsAt,
+      ),
+    ).resolves.toEqual({ status: 'enqueued', id: expect.any(Number) });
+    expect(queueCount(raw)).toBe(INCOMING_EVENT_TERMINAL_CAPACITY);
   });
 
   it('reports bounded queue health without exposing event keys or payloads', async () => {

@@ -5,6 +5,7 @@ jest.mock('@core/api', () => ({ serverApi: { ping: jest.fn(), serverInfo: jest.f
 jest.mock('@core/secure', () => ({
   ACCOUNT_REVOCATION_CLEAR_FAILURE_MESSAGE: 'Could not activate the saved server session.',
   SERVER_SESSION_STATE: { writing: 'writing', active: 'active', forgotten: 'forgotten' },
+  inspectCredentialUpgradeJournal: jest.fn(() => ({ kind: 'absent' })),
   logger: {
     debug: jest.fn(),
     info: jest.fn(),
@@ -23,7 +24,7 @@ jest.mock('@/services/backgrounds/syncedBackground', () => ({ ensureSyncedBackgr
 jest.mock('@/services/databaseControl', () => ({ ensureDatabase: jest.fn(async () => ({})) }));
 jest.mock('@/services/syncControl', () => ({ maybeResumeSync: jest.fn() }));
 jest.mock('@/services/download/autoDownloadAttachments', () => ({
-  autoDownloadMessageAttachments: jest.fn(async () => ({
+  autoDownloadMessageAttachmentsForRealtimeEvent: jest.fn(async () => ({
     savedImages: 0,
     destination: null,
   })),
@@ -314,6 +315,37 @@ describe('new-server production admission', () => {
         requiresCleartextApproval: false,
       }),
     );
+    expect(mockEnsureDatabase).not.toHaveBeenCalled();
+    expect(mockCandidateClient).not.toHaveBeenCalled();
+    expect(mockVault.set).not.toHaveBeenCalled();
+    expect(useSessionStore.getState().origin).toBe(ORIGINAL_ORIGIN);
+  });
+
+  it('rejects authenticated V3 FCM server rotation and its replay before prompt or DB use', async () => {
+    await activateForegroundSession();
+    const occurrence = {
+      serverEventId: 'fcm3:authenticated-server-rotation',
+      transportOccurrenceId: 'provider-server-rotation',
+      receivedAt: 1_800_000_000_000,
+      authenticatedExpiresAt: 1_800_000_300_000,
+    } as const;
+
+    await dispatchRealtimeEvent(
+      'new-server',
+      'HTTPS://NEXT.EXAMPLE:443/',
+      'fcm',
+      undefined,
+      occurrence,
+    );
+    await dispatchRealtimeEvent(
+      'new-server',
+      'HTTPS://NEXT.EXAMPLE:443/',
+      'fcm',
+      undefined,
+      occurrence,
+    );
+
+    expect(serverRotationCoordinator.getSnapshot()).toBeNull();
     expect(mockEnsureDatabase).not.toHaveBeenCalled();
     expect(mockCandidateClient).not.toHaveBeenCalled();
     expect(mockVault.set).not.toHaveBeenCalled();

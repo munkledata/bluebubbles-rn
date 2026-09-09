@@ -901,9 +901,21 @@ describe('MessageBubble send-error state', () => {
     // would be "iMessage Error (Code 22)").
     expect(screen.getByText('iMessage Error (Code 22)')).toBeTruthy();
 
-    const badge = screen.getByText('!');
-    fireEvent.press(badge); // press bubbles up to the badge Pressable's onPress
+    const badge = screen.getByRole('button', {
+      name: 'Message not delivered. Show options',
+    });
+    expect(badge.props.accessibilityHint).toBe('Opens failed message options');
+    fireEvent.press(badge);
     expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('exposes a non-actionable delivery failure by name instead of punctuation', async () => {
+    await renderWithTheme(
+      <MessageBubble msg={makeMsg({ isFromMe: 1, error: 22, sendState: 'error' })} showTail />,
+    );
+
+    expect(screen.getByLabelText('Message not delivered')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Message not delivered' })).toBeNull();
   });
 
   it('does not show the error UI for a received message even if error != 0', async () => {

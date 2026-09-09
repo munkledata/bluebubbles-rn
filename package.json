@@ -8,6 +8,7 @@
     "node": ">=24.19.0 <25"
   },
   "scripts": {
+    "postinstall": "patch-package",
     "start": "expo start",
     "android": "expo run:android",
     "test:android:db": "node --test scripts/run-android-db-contract.test.mjs && node scripts/run-android-db-contract.mjs",
@@ -15,6 +16,7 @@
     "test:android:db:wal-write-death": "node --test scripts/run-android-db-relaunch.test.mjs && node scripts/run-android-db-relaunch.mjs --active-wal-write-death",
     "test:android:db:active-migration-death": "node --test scripts/run-android-db-relaunch.test.mjs && node scripts/run-android-db-relaunch.mjs --active-migration-death",
     "test:android:db:runtime-concurrency": "node --test scripts/run-android-db-relaunch.test.mjs && node scripts/run-android-db-relaunch.mjs --runtime-concurrency",
+    "test:android:backup-restore": "node --test scripts/run-android-db-relaunch.test.mjs && node scripts/run-android-db-relaunch.mjs --backup-restore",
     "ios": "expo run:ios",
     "web": "expo start --web",
     "test": "jest",
@@ -31,8 +33,13 @@
     "check:secret-hygiene": "node --test scripts/check-secret-hygiene.test.mjs && node scripts/check-secret-hygiene.mjs",
     "check:error-diagnostics": "node --test scripts/check-error-diagnostics.test.mjs && node scripts/check-error-diagnostics.mjs",
     "check:migrations": "node scripts/check-migrations.mjs && node --test scripts/check-migrations.test.mjs",
-    "check:android-build": "node --test scripts/check-android-build.test.mjs && node scripts/check-android-build.mjs",
+    "check:android-build": "node --test scripts/check-android-build.test.mjs scripts/legal-aab-inventory.test.mjs && node scripts/check-android-build.mjs",
+    "check:android-native-paths": "node --test scripts/check-android-native-paths.test.mjs && node scripts/check-android-native-paths.mjs",
     "check:docs": "node --test scripts/check-docs.test.mjs && node scripts/check-docs.mjs",
+    "generate:legal-inventory": "node scripts/legal-inventory.mjs --write",
+    "check:legal-inventory": "node --test scripts/legal-inventory.test.mjs scripts/legal-aab-inventory.test.mjs && node scripts/legal-inventory.mjs --check",
+    "check:legal-release": "node scripts/legal-inventory.mjs --release-check",
+    "inspect:legal-aab": "node scripts/legal-aab-inventory.mjs",
     "doctor": "expo-doctor",
     "release:android": "node scripts/release-android.mjs help",
     "release:android:preflight": "node scripts/release-android.mjs preflight",
@@ -56,11 +63,11 @@
     "@shopify/flash-list": "2.0.2",
     "@tanstack/react-query": "^5.101.0",
     "drizzle-orm": "0.45.2",
-    "expo": "~57.0.19",
+    "expo": "~57.0.21",
     "expo-asset": "~57.0.8",
     "expo-audio": "~57.0.4",
-    "expo-background-task": "~57.0.15",
-    "expo-build-properties": "~57.0.16",
+    "expo-background-task": "~57.0.16",
+    "expo-build-properties": "~57.0.17",
     "expo-camera": "~57.0.4",
     "expo-clipboard": "~57.0.1",
     "expo-constants": "~57.0.16",
@@ -68,22 +75,22 @@
     "expo-crypto": "~57.0.2",
     "expo-dev-client": "~57.0.18",
     "expo-document-picker": "~57.0.1",
-    "expo-file-system": "~57.0.1",
+    "expo-file-system": "57.0.6",
     "expo-font": "~57.0.2",
     "expo-image": "~57.0.4",
-    "expo-image-picker": "~57.0.15",
+    "expo-image-picker": "~57.0.16",
     "expo-intent-launcher": "~57.0.1",
     "expo-linking": "~57.0.9",
     "expo-local-authentication": "~57.0.2",
     "expo-media-library": "~57.0.4",
     "expo-network": "~57.0.1",
-    "expo-router": "~57.0.18",
+    "expo-router": "~57.0.20",
     "expo-secure-store": "~57.0.3",
-    "expo-sharing": "~57.0.17",
+    "expo-sharing": "~57.0.18",
     "expo-splash-screen": "~57.0.8",
     "expo-status-bar": "~57.0.1",
     "expo-system-ui": "~57.0.3",
-    "expo-task-manager": "~57.0.15",
+    "expo-task-manager": "~57.0.16",
     "expo-video": "~57.0.3",
     "expo-web-browser": "~57.0.2",
     "jail-monkey": "3.0.0",
@@ -119,6 +126,7 @@
     "jest-expo": "~57.0.5",
     "libsodium-wrappers": "^0.7.15",
     "libsodium-wrappers-sumo": "^0.7.16",
+    "patch-package": "8.0.1",
     "prettier": "^3.3.3",
     "ts-jest": "^29.2.5",
     "typescript": "~6.0.3"
@@ -145,6 +153,13 @@
     "fts5": true
   },
   "expo": {
+    "autolinking": {
+      "android": {
+        "buildFromSource": [
+          "expo-file-system"
+        ]
+      }
+    },
     "doctor": {
       "reactNativeDirectoryCheck": {
         "listUnknownPackages": false,

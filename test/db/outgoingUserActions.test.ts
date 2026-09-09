@@ -761,6 +761,31 @@ describe('countOutgoingQueueHealth — the boot diagnostic for the two crash gap
     });
   });
 
+  it('is clean when a queued temp guid resolves to its promoted bubble through an alias', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db, 'c1');
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-promoted-health',
+      chatId,
+      chatGuid: 'c1',
+      text: 'promoted but still queued',
+      now: 100,
+    });
+    raw
+      .prepare(
+        "UPDATE messages SET guid = 'real-promoted-health' WHERE guid = 'temp-promoted-health'",
+      )
+      .run();
+    raw
+      .prepare('INSERT INTO message_guid_aliases (alias_guid, canonical_guid) VALUES (?, ?)')
+      .run('temp-promoted-health', 'real-promoted-health');
+
+    expect(await countOutgoingQueueHealth(db)).toEqual({
+      strandedSending: 0,
+      orphanQueueRows: 0,
+    });
+  });
+
   it('does NOT count a CANCELLED send, which stays "sending" on purpose with no ladder', async () => {
     const { db } = await createTestDb();
     const chatId = await seedChat(db, 'c1');

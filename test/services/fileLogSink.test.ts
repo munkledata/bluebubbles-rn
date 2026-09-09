@@ -9,6 +9,7 @@ let mockFileDeleteThrows = false;
 let mockFileWriteThrows = false;
 let mockFileWriteFailuresRemaining = 0;
 const mockFileTextStarted = jest.fn();
+const mockFileWrite = jest.fn<void, [string]>();
 
 jest.mock('expo-file-system', () => ({
   Paths: { document: '/documents' },
@@ -40,6 +41,7 @@ jest.mock('expo-file-system', () => ({
       mockFileExists = true;
     }
     write(contents: string): void {
+      mockFileWrite(contents);
       if (mockFileWriteFailuresRemaining > 0) {
         mockFileWriteFailuresRemaining -= 1;
         throw new Error('private transient write failure');
@@ -96,6 +98,7 @@ describe('FileLogSink (buffering and teardown ordering)', () => {
     mockFileWriteThrows = false;
     mockFileWriteFailuresRemaining = 0;
     mockFileTextStarted.mockClear();
+    mockFileWrite.mockClear();
   });
   afterEach(() => {
     (globalThis as { __DEV__?: boolean }).__DEV__ = previousDev;
@@ -450,6 +453,273 @@ describe('FileLogSink (buffering and teardown ordering)', () => {
     expect(sink.all()).toEqual([]);
   });
 
+  it('revokes a joined operation and suppresses a new debounce before the callback deadline returns', async () => {
+    mockFileExists = true;
+    mockFileContents = '[]';
+    const readStarted = Promise.withResolvers<void>();
+    const releaseRead = Promise.withResolvers<string>();
+    mockFileText = () => {
+      readStarted.resolve();
+      return releaseRead.promise;
+    };
+    const sink = new FileLogSink();
+
+    const initializing = sink.init();
+    const initializationFailure = expect(initializing).rejects.toThrow(
+      'persistent-log-operation-timed-out',
+    );
+    await readStarted.promise;
+    const olderJoiningFlush = sink.flush();
+    const joiningFlush = sink.flush(Date.now() + 100);
+    // This line arrives after the deadline-aware barrier began waiting. It must stay dirty without
+    // arming an ordinary timer that could write after the native callback returns.
+    sink.write('error', '[media] share failed');
+    await jest.advanceTimersByTimeAsync(100);
+
+    await expect(joiningFlush).resolves.toBe(false);
+    await expect(olderJoiningFlush).resolves.toBe(false);
+    await initializationFailure;
+    // A later explicit owner is outside the expired callback's fence and can advance the queue.
+    await expect(sink.clear()).resolves.toBe(true);
+    releaseRead.resolve('[]');
+    await Promise.resolve();
+    await jest.advanceTimersByTimeAsync(2_000);
+    expect(mockFileWrite).not.toHaveBeenCalled();
+    expect(mockFileExists).toBe(false);
+  });
+
+  it('revokes preexisting disk work when the headless barrier begins already expired', async () => {
+    mockFileExists = true;
+    mockFileContents = '[]';
+    const readStarted = Promise.withResolvers<void>();
+    const releaseRead = Promise.withResolvers<string>();
+    mockFileText = () => {
+      readStarted.resolve();
+      return releaseRead.promise;
+    };
+    const sink = new FileLogSink();
+
+    const initializing = sink.init();
+    const initializationFailure = expect(initializing).rejects.toThrow(
+      'persistent-log-operation-timed-out',
+    );
+    await readStarted.promise;
+
+    await expect(sink.flushForHeadlessCompletion(Date.now())).resolves.toBe(false);
+    await initializationFailure;
+    releaseRead.resolve('[]');
+    await Promise.resolve();
+    expect(mockFileWrite).not.toHaveBeenCalled();
+  });
+
+  it('adds a wall-clock deadline guard to disk work that was already running', async () => {
+    mockFileExists = true;
+    mockFileContents = '[]';
+    const readStarted = Promise.withResolvers<void>();
+    const releaseRead = Promise.withResolvers<string>();
+    mockFileText = () => {
+      readStarted.resolve();
+      return releaseRead.promise;
+    };
+    const sink = new FileLogSink();
+
+    const initializing = sink.init();
+    const initializationFailure = expect(initializing).rejects.toThrow(
+      'persistent-log-operation-timed-out',
+    );
+    await readStarted.promise;
+    const deadlineAt = Date.now() + 100;
+    const deadlineFlush = sink.flush(deadlineAt);
+
+    // Cross wall time and resume the old native read without dispatching the deadline timer.
+    jest.setSystemTime(deadlineAt);
+    releaseRead.resolve('[]');
+
+    await initializationFailure;
+    await expect(deadlineFlush).resolves.toBe(false);
+    expect(mockFileWrite).not.toHaveBeenCalled();
+  });
+
+  it('revokes a future disk child created by an older flush owner captured by the barrier', async () => {
+    mockFileExists = true;
+    mockFileContents = '[]';
+    const readStarted = Promise.withResolvers<void>();
+    const releaseRead = Promise.withResolvers<string>();
+    mockFileText = () => {
+      readStarted.resolve();
+      return releaseRead.promise;
+    };
+    const sink = new FileLogSink();
+
+    const initializing = sink.init();
+    await readStarted.promise;
+    const olderJoiningFlush = sink.flush();
+    const deadlineFlush = sink.flush(Date.now() + 100);
+    sink.write('warn', 'line-arriving-during-join');
+    mockOnFileConstruct = () => {
+      mockOnFileConstruct = null;
+      jest.advanceTimersByTime(100);
+    };
+    releaseRead.resolve('[]');
+
+    await expect(initializing).resolves.toEqual([]);
+    await expect(olderJoiningFlush).resolves.toBe(false);
+    await expect(deadlineFlush).resolves.toBe(false);
+    // Init owns the first rewrite. The older joiner's future child never receives mutation rights.
+    expect(mockFileWrite).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(2_000);
+    expect(mockFileWrite).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps an older headless session captured across all of its retry attempts', async () => {
+    mockFileExists = true;
+    mockFileContents = '[]';
+    const readStarted = Promise.withResolvers<void>();
+    const releaseRead = Promise.withResolvers<string>();
+    mockFileText = () => {
+      readStarted.resolve();
+      return releaseRead.promise;
+    };
+    const sink = new FileLogSink();
+
+    const initializing = sink.init();
+    const initializationFailure = expect(initializing).rejects.toThrow(
+      'persistent-log-operation-timed-out',
+    );
+    await readStarted.promise;
+    sink.write('warn', 'older-headless-session-line');
+    const olderHeadlessSession = sink.flushForHeadlessCompletion();
+    const newerDeadlineSession = sink.flushForHeadlessCompletion(Date.now() + 100);
+
+    await jest.advanceTimersByTimeAsync(100);
+
+    await initializationFailure;
+    await expect(newerDeadlineSession).resolves.toBe(false);
+    await expect(olderHeadlessSession).resolves.toBe(false);
+    // The newer callback adopted the full older session, not only its current attempt. Once the
+    // short deadline expires, the older session cannot create a fresh write on its next retry.
+    expect(mockFileWrite).not.toHaveBeenCalled();
+    releaseRead.resolve('[]');
+    await Promise.resolve();
+    await jest.advanceTimersByTimeAsync(2_000);
+    expect(mockFileWrite).not.toHaveBeenCalled();
+  });
+
+  it('preserves a later ordinary owner and its retry outside an older deadline scope', async () => {
+    mockFileExists = true;
+    mockFileContents = '[]';
+    const readStarted = Promise.withResolvers<void>();
+    const releaseRead = Promise.withResolvers<string>();
+    mockFileText = () => {
+      readStarted.resolve();
+      return releaseRead.promise;
+    };
+    const sink = new FileLogSink();
+
+    const initializing = sink.init();
+    const initializationFailure = expect(initializing).rejects.toThrow(
+      'persistent-log-operation-timed-out',
+    );
+    await readStarted.promise;
+    const deadlineFlush = sink.flush(Date.now() + 100);
+    sink.write('warn', 'later-owner-line');
+    mockFileWriteFailuresRemaining = 1;
+    const laterOrdinaryFlush = sink.flush();
+
+    await jest.advanceTimersByTimeAsync(100);
+    await expect(deadlineFlush).resolves.toBe(false);
+    await initializationFailure;
+    await expect(laterOrdinaryFlush).resolves.toBe(false);
+    releaseRead.resolve('[]');
+    await Promise.resolve();
+
+    await jest.advanceTimersByTimeAsync(1_500);
+    expect(mockFileWrite).toHaveBeenCalledTimes(2);
+    expect(mockFileContents).toContain('later-owner-line');
+  });
+
+  it('revokes queued work when the deadline expires between entry and queue registration', async () => {
+    mockFileExists = true;
+    mockFileContents = '[]';
+    const readStarted = Promise.withResolvers<void>();
+    const releaseRead = Promise.withResolvers<string>();
+    mockFileText = () => {
+      readStarted.resolve();
+      return releaseRead.promise;
+    };
+    const sink = new FileLogSink();
+
+    const initializing = sink.init();
+    const initializationFailure = expect(initializing).rejects.toThrow(
+      'persistent-log-operation-timed-out',
+    );
+    await readStarted.promise;
+    sink.write('error', '[media] share failed');
+    const now = jest.spyOn(Date, 'now').mockReturnValueOnce(100).mockReturnValue(200);
+    const flushing = sink.flush(200);
+
+    await expect(flushing).resolves.toBe(false);
+    await initializationFailure;
+    now.mockRestore();
+    releaseRead.resolve('[]');
+    await Promise.resolve();
+    await jest.advanceTimersByTimeAsync(2_000);
+
+    // The callback deadline retires both the in-flight init and the queued write before returning.
+    expect(mockFileWrite).not.toHaveBeenCalled();
+  });
+
+  it('revokes a running operation after wall-clock expiry even before its timer dispatches', async () => {
+    const sink = new FileLogSink();
+    sink.write('error', '[media] share failed');
+    const deadlineAt = Date.now() + 100;
+    mockOnFileConstruct = () => {
+      mockOnFileConstruct = null;
+      // Cross the wall-clock deadline after native setup without dispatching its timer. The final
+      // mutation guard must notice and revoke the shared scope itself.
+      jest.setSystemTime(deadlineAt);
+    };
+
+    await expect(sink.flush(deadlineAt)).resolves.toBe(false);
+
+    expect(mockFileWrite).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(2_000);
+    expect(mockFileWrite).not.toHaveBeenCalled();
+  });
+
+  it('does not begin fallback deletion when a synchronous write failure crosses the deadline', async () => {
+    mockFileExists = true;
+    mockFileContents = 'previous-safe-log';
+    mockFileWriteThrows = true;
+    const sink = new FileLogSink();
+    sink.write('warn', 'replacement-line');
+    const deadlineAt = Date.now() + 100;
+    mockFileWrite.mockImplementationOnce(() => jest.setSystemTime(deadlineAt));
+
+    await expect(sink.flush(deadlineAt)).resolves.toBe(false);
+
+    expect(mockFileExists).toBe(true);
+    expect(mockFileContents).toBe('previous-safe-log');
+  });
+
+  it('immediately retries a line written after the headless snapshot without arming debounce', async () => {
+    const sink = new FileLogSink();
+    sink.write('warn', 'before-snapshot');
+    mockOnFileConstruct = () => {
+      mockOnFileConstruct = null;
+      sink.write('warn', 'after-snapshot');
+    };
+
+    await expect(sink.flush(Date.now() + 1_000)).resolves.toBe(false);
+    expect(jest.getTimerCount()).toBe(0);
+    expect(mockFileContents).toContain('before-snapshot');
+    expect(mockFileContents).not.toContain('after-snapshot');
+
+    await expect(sink.flush(Date.now() + 1_000)).resolves.toBe(true);
+    expect(mockFileContents).toContain('before-snapshot');
+    expect(mockFileContents).toContain('after-snapshot');
+  });
+
   it('retries a failed flush and persists once native writes recover', async () => {
     const sink = new FileLogSink();
     sink.write('error', '[media] share failed');
@@ -522,25 +792,37 @@ describe('FileLogSink (buffering and teardown ordering)', () => {
   });
 
   it('retries a headless completion flush immediately without leaking a rejection', async () => {
-    const flush = jest
-      .spyOn(fileLogSink, 'flush')
-      .mockResolvedValueOnce(false)
-      .mockRejectedValueOnce(new Error('native write failed'))
-      .mockResolvedValueOnce(true);
+    const sink = new FileLogSink();
+    sink.write('error', '[media] share failed');
+    mockFileWriteFailuresRemaining = 2;
 
-    await expect(flushPersistentLogsForHeadlessCompletion()).resolves.toBe(true);
+    await expect(sink.flushForHeadlessCompletion()).resolves.toBe(true);
 
-    expect(flush).toHaveBeenCalledTimes(3);
-    flush.mockRestore();
+    expect(mockFileWrite).toHaveBeenCalledTimes(3);
+    expect(jest.getTimerCount()).toBe(0);
   });
 
   it('returns false after all three headless flush attempts fail', async () => {
-    const flush = jest.spyOn(fileLogSink, 'flush').mockResolvedValue(false);
+    const sink = new FileLogSink();
+    sink.write('error', '[media] share failed');
+    mockFileWriteThrows = true;
 
-    await expect(flushPersistentLogsForHeadlessCompletion()).resolves.toBe(false);
+    await expect(sink.flushForHeadlessCompletion()).resolves.toBe(false);
 
-    expect(flush).toHaveBeenCalledTimes(3);
-    flush.mockRestore();
+    expect(mockFileWrite).toHaveBeenCalledTimes(3);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('passes the absolute deadline into the singleton headless flush session', async () => {
+    const flush = jest.spyOn(fileLogSink, 'flushForHeadlessCompletion').mockResolvedValue(false);
+
+    try {
+      await expect(flushPersistentLogsForHeadlessCompletion(200)).resolves.toBe(false);
+      expect(flush).toHaveBeenCalledTimes(1);
+      expect(flush).toHaveBeenCalledWith(200);
+    } finally {
+      flush.mockRestore();
+    }
   });
 
   it('preserves writes made during init and flushes the merged history', async () => {
@@ -564,7 +846,7 @@ describe('FileLogSink (buffering and teardown ordering)', () => {
     await Promise.all([initializing, flushing]);
     expect(sink.all().map((entry) => entry.message)).toEqual(['new-session-line']);
     expect(
-      (JSON.parse(mockFileContents) as Array<{ message: string }>).map((entry) => entry.message),
+      (JSON.parse(mockFileContents) as { message: string }[]).map((entry) => entry.message),
     ).toEqual(['new-session-line']);
   });
 

@@ -26,8 +26,10 @@ export function createReminderWithinTransaction(
       .values({
         messageGuid: r.messageGuid,
         chatGuid: r.chatGuid,
-        messagePreview: r.messagePreview,
-        senderName: r.senderName,
+        // A reminder can fire after an unsend/retraction while the app is dead. Store no frozen
+        // plaintext copy that could outlive the authoritative encrypted message projection.
+        messagePreview: null,
+        senderName: null,
         scheduledFor: r.scheduledFor,
         notificationId: r.notificationId,
         createdAt: r.createdAt ?? null,

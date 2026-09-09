@@ -144,6 +144,19 @@ removes only the matching line; a read event may still cancel the whole chat not
 native history fails closed, and a failed replacement must not leave retracted text visible. A late
 delivery that has already fallen outside the bounded history must not re-alert unchanged content.
 
+Bound user-controlled presentation strings before every message-history or per-chat channel write
+to the native notification bridge. Message text is capped at 512 Unicode code points and 2,048 UTF-8
+bytes; sender names, conversation titles, and channel names are capped at 128 code points and 512
+bytes. Normalize those bounded prefixes to NFC, then reapply the same limits. Preserve message
+whitespace, trim labels, and use generic labels when a required value becomes empty. Avatar URIs are
+never normalized or truncated: preserve the exact URI only when it is nonblank and at most 4,096
+UTF-8 bytes, otherwise omit it. Apply the same projection when adopting existing Android history so
+an old oversized line cannot be reposted. Adopt only the shared message channel or the exact opaque
+per-chat channel derived from the notification's local chat id; a foreign or legacy channel makes the
+history malformed and follows the existing fail-closed replacement/cancellation behavior. These
+string limits do not prove a bound on a URI's decoded bitmap or Android's complete Binder payload;
+retain that native/device evidence in `NOTIF-03D`.
+
 ## Workstream sequencing
 
 Session identity and reset ownership come first: `REL-003A` → `REL-008` → `REL-003B` → `REL-004` →

@@ -19,6 +19,7 @@ const mockCompleteUnlock = jest.fn<Promise<void>, []>();
 const mockAuthenticate = jest.fn<Promise<boolean>, [string]>();
 const mockPrepareNotificationPresentationState = jest.fn<Promise<void>, []>();
 const mockLoggerWarn = jest.fn();
+let mockSafeAreaProviderStyle: unknown;
 
 jest.mock('@/services/boot/foregroundBoot', () => ({
   getForegroundBootSnapshot: () => mockGetForegroundBootSnapshot(),
@@ -57,8 +58,13 @@ jest.mock('@tanstack/react-query', () => ({
 }));
 jest.mock('@state/queryClient', () => ({ queryClient: {} }));
 
+jest.mock('@utils/i18n', () => ({ createI18n: () => ({ direction: 'rtl' }) }));
+
 jest.mock('react-native-safe-area-context', () => ({
-  SafeAreaProvider: ({ children }: { children: React.ReactNode }) => children,
+  SafeAreaProvider: ({ children, style }: { children: React.ReactNode; style?: unknown }) => {
+    mockSafeAreaProviderStyle = style;
+    return children;
+  },
   useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
 }));
 
@@ -157,6 +163,7 @@ describe('RootLayout — foreground boot presentation', () => {
     mockCompleteUnlock.mockResolvedValue(undefined);
     mockAuthenticate.mockResolvedValue(true);
     mockPrepareNotificationPresentationState.mockResolvedValue(undefined);
+    mockSafeAreaProviderStyle = undefined;
     currentAppState = 'active';
     appStateHandlers.clear();
     Object.defineProperty(AppState, 'currentState', {
@@ -190,6 +197,7 @@ describe('RootLayout — foreground boot presentation', () => {
     expect(screen.queryByText('Protected navigation stack')).toBeNull();
     expect(useThemeStore.getState().hydrated).toBe(false);
     expect(mockStartForegroundBoot).toHaveBeenCalledTimes(1);
+    expect(mockSafeAreaProviderStyle).toEqual({ direction: 'rtl' });
 
     await view.rerender(<RootLayout />);
     expect(mockStartForegroundBoot).toHaveBeenCalledTimes(1);

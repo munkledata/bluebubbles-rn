@@ -40,6 +40,60 @@ native transfer, and HTTP response. This is not a promise that the whole wake or
 native operation terminates at that instant; claim and outcome commits remain outside the transfer
 deadline.
 
+The same durable bootstrap boundary owns network effects from a killed-process notification action.
+Reply, reaction, FaceTime Answer, and an enabled read receipt use one fixed client created only after
+vault, App Lock, and revocation inspection; they never fall back to default foreground-store
+credentials. Mark Read commits its local marker before lazily resolving that client, and read/unread
+server effects fail closed unless feature settings actually hydrated. A missing native client or
+settings read therefore suppresses only the optional network effect, never the device-local state.
+
+A realtime chat-background event uses the same rule. Its detached callback carries the originating
+account generation, captures a fresh lease when it actually starts, and either pins the exact warm
+transport or constructs a guarded client from the authorized durable tuple. This lets the wallpaper
+transfer outlive its short queue attempt without adopting a replacement account. The mounted-chat
+path also pins its transport, and the synced-background service checks transport currentness before
+and after metadata, native file, and database boundaries.
+
+Ingestion attachment auto-download uses that task-local transport too. A fresh FCM process first
+joins the ordinary bounded, generation-guarded attachment-cache recovery flight because it did not
+run the foreground boot gate; stale or failed recovery keeps persistent downloads closed. The
+explicit client applies only to a real server session, while the in-app development fixture retains
+its installed synthetic fetcher.
+
+For each background FCM delivery, the app captures an absolute attachment-effect deadline of
+`receivedAt + 40 seconds`. After FIFO admission it creates a generation-bound collection.
+`DbEventSink` invokes its post-commit hook synchronously, registering an
+`auto-download:<messageId>` factory instead of starting native work. Revisions of one message share
+the keyed task. Collection close stops admission and runs factories sequentially only after durable
+dispatch and notification presentation return. The native callback awaits the result outside the
+account-teardown tracking slot. Account invalidation or deadline expiry makes the composed lease
+stale, with at most two more seconds allowed for cooperative cleanup.
+
+This is one bounded callback-owned app-cache attempt, not a durable retry. Process death after the
+database checkpoint can still lose it. The 40-second window covers only the attachment-effect tail,
+not FIFO waiting or dispatch/presentation. Final persistent-log flushing now has a separate absolute
+`receivedAt + 55 seconds` cutoff, leaving five seconds before RNFB's 60-second Android task limit.
+That barrier adopts pre-existing log operations plus its own queued write, keeps older headless
+sessions captured across every retry attempt, revokes their asynchronous mutation authority before
+returning at expiry, suppresses detached debounce/retry work, and leaves later independent Clear or
+callback owners alone. A synchronous Expo file call that already started
+cannot be interrupted, and earlier unbounded delivery can reach this finalizer after its cutoff, so
+this is not yet a whole-callback proof. Headless FCM also suppresses the external Photos copy because
+`expo-media-library` has no abort signal. A Gallery or Gator Album preference therefore needs a
+future durable receipt or cancellable native worker; storing `localPath` does not schedule that
+omitted copy later.
+
+Durable incoming-event prerequisite recovery now has its own bounded task-local runner rather than
+calling foreground `startSync`/`ensureChatSynced`. Missing chat/read/group prerequisites use an
+authorized transport, targeted chat recovery where an identity exists, and account/deletion caps
+otherwise. The incoming-event drain signals only after the row's exact five-second dependency
+deferral commits; the FCM callback owns that already-running clock, the repair, and one bounded
+retry. Account invalidation or App Lock aborts the repair and prevents a stale write.
+
+Do not infer that these specialized callers complete the parent. Exact killed-process Android
+execution remains unproven, and earlier full-callback timing plus durable Gallery/Album fulfillment
+remain open in the authoritative plan.
+
 <a id="rel-006"></a>
 
 ## `REL-006` — coherent HTTP identity across retries
@@ -51,6 +105,10 @@ new credentials with old-account work.
 
 Writes remain non-retrying by default. A new logical request captures the complete replacement
 identity rather than inheriting pieces from a previous attempt.
+
+Native URL/header consumers must carry the pinned client's currentness into their own continuation
+guard. A coherent snapshot prevents mixed credentials, but only the currentness guard prevents a
+retired snapshot from starting or publishing after an approved same-account origin rotation.
 
 <a id="rel-007"></a>
 
@@ -102,8 +160,11 @@ Implement the delivery path in four slices:
 
 Persist only canonical envelopes—never a native transport object, ciphertext frame, or
 caller-supplied digest. Socket, eligible unlocked FCM, and development injection share the same
-encoder and `EventRouter` path. Locked FCM retains the deliberate generic-notice, no-protected-DB
-exception; later sync recovers content after unlock.
+encoder and `EventRouter` path. A locked, authenticated V2 delivery before its exclusive
+2027-02-01 cutoff retains the generic-notice/no-DB exception; absent/V1/plaintext/invalid input posts
+nothing. Authenticated, active-bound V3 may enqueue only its canonical envelope into SQLCipher,
+without reading, claiming, routing, or applying queued content until unlock; later sync remains the
+fallback.
 
 The queue permits at most 1 MiB per payload, 500 pending rows, and 16 MiB of pending payloads. One
 claim is token/version-fenced, covers at most 25 rows and 2 MiB, and leases them for 120 seconds. Five
@@ -113,22 +174,43 @@ bounded receipts remain for seven days and at most 2,000 rows.
 Separate authoritative database application from presentation. The domain transaction checkpoints
 `db_applied_at`; a later notification attempt reads current database truth rather than replaying stale
 preview content. Newer message edits or deletions may converge before an older failed presentation,
-but the presentation waits for all newer domain work. Missing prerequisites request bounded recovery
-and remain retryable. Deletion cancels any corresponding Android notification.
+but the presentation waits for all newer domain work. Missing prerequisites request bounded
+task-local recovery and remain retryable. A successful dependency deferral starts its exact
+five-second due clock immediately; an active FCM callback owns the bounded repair plus one retry
+instead of returning while foreground-only sync runs detached. Deletion cancels any corresponding
+Android notification.
 
 Account-generation and App Lock checks surround intake, claim, handler work, and the final commit.
-Every physical send attempt needs one immutable, non-empty `attemptGuid` reused across socket, FCM,
-and webhook copies so temp-only or RCS send errors can be deduplicated without conflating a later
-retry.
+For servers that advertise `supports_rcs_send_attempt_ownership`, resolve that capability before
+inserting an optimistic RCS row; unknown must not silently become legacy mode. Give every physical
+send a complete `{tempGuid, attemptGuid, clientAttemptGeneration}` identity and reuse it across the
+HTTP acknowledgement, socket, eligible FCM, webhook, and send-error copies. Partial or malformed
+correlation fails closed rather than falling back to content matching.
+
+Migration `0046_message_send_attempt_owner` durably records the monotonic client generation,
+pending state, and active attempt on the optimistic message. A retry claims its next generation with
+a compare-and-swap guard, so a delayed settlement from A cannot change B's owner. Exact
+acknowledgement, live-message, and error reconciliation update only the matching owner; duplicate
+delivery is idempotent. If the bounded temp-to-real alias has already been pruned, an exact
+active-attempt lookup may recover the owner only when one row matches; missing or ambiguous matches
+remain no-ops. A recovered attachment rearm restores the bounded alias transactionally before its
+queue row is rebuilt, so the next claim finds the canonical owner and advances its generation. The
+server must carry `clientAttemptGeneration` through listener, composition, and fanout boundaries; an
+RCS new-chat acknowledgement also returns its `tempGuid` so it does not drop the logical side of the
+tuple. Its 65,536-entry client-send ledger exceeds the full 50,000-message correlation bound while
+leaving headroom for ordinary sends and fail-closed unknown outcomes; scheduled sends remain in a
+separate bounded ledger.
 
 Attempt-aware FCM acceptance depends on the coordinated `PUSH-CRYPTO-01` client migration. The
 server deliberately sends payload data only when a canonical per-device V2 key is enrolled;
 otherwise FCM receives routing type plus empty-object metadata. Socket/webhook attempt identity can
-be implemented and verified independently, but it does not prove the killed-app FCM branch.
-Exact occurrence identity also does not yet persist which attempt owns the optimistic bubble. It
-deduplicates an already-processed A replay, but a first A copy delayed until after B can still act on
-their shared tempGuid. Closing the parent requires durable active-attempt ownership as well as the
-V2 push migration; keep those implementation tails separate from server source proof.
+be implemented and verified independently, but it does not prove the killed-app FCM branch. The
+host/source implementation and focused checks now cover durable active-attempt ownership, but the
+authoritative work plan keeps the parent open until the same app and server sources are deployed and
+a real phone proves A → B ordering across HTTP, socket, and FCM, including killed-process and server
+restart boundaries. A queue-less post-ack retry also remains intentionally narrow: only a local
+attachment can reconstruct its exact payload. Contact cards, mention metadata, and other
+non-attachment payloads fail closed rather than being guessed from a lossy message row.
 
 <a id="delete-sync-01"></a>
 
@@ -250,11 +332,51 @@ clear it during account teardown.
 
 ## `PUSH-CRYPTO-01` — versioned authenticated push and replay defense
 
-Introduce this only as a coordinated app/server protocol migration. Give each device a random
-256-bit key. AEAD associated data authenticates protocol version, event/message type,
-server/account/device identity, message id, and timestamp.
+Treat this as one coordinated app/server protocol. Give each device a random 256-bit key. AEAD
+associated data authenticates protocol version, event/message type, server/account/device identity,
+cryptographic occurrence id, optional message id with explicit presence, issue time, and expiry.
 
 Claim replay ids transactionally before effects, retain them within a bounded persistent window,
 rotate or revoke keys on disconnect, and reject legacy downgrade after an account/device migrates.
 Cross-account, cross-device, wrong-key, modified-metadata, replayed, and downgraded envelopes must
 all fail closed.
+
+The implementation and acceptance sequence remains these ordered children:
+
+1. **`PUSH-CRYPTO-01A` — current-server V2 interoperability:** retain the existing
+   per-device random key, strict frame parsing, origin-bound local lifecycle, and post-migration
+   downgrade containment. This is a compatibility baseline, not the final authenticated envelope.
+2. **`PUSH-CRYPTO-01B` — shared identity and envelope contract:** use one canonical strictly ordered
+   tagged-byte encoding and byte-identical cross-language fixtures for protocol version, event type,
+   stable server-installation identity, durable account/principal identity, exact push-device
+   identity, cryptographic occurrence id, optional message id with an explicit presence marker,
+   issued time, and expiry. Enforce authoritative producers, length and lifetime bounds, canonical
+   UUID/text encoding, exact field count/order, no trailing bytes, and per-field tamper rejection. A
+   URL origin is not server identity; the server acknowledgement explicitly binds its durable scoped
+   principal and push-device identities.
+3. **`PUSH-CRYPTO-01C` — transactional replay admission:** after authenticating the complete binding,
+   message relation, and time window, derive the occurrence key from the exact
+   server/principal/device/occurrence tuple. Persist it before any notification or event effect, in
+   the same transaction as durable admission. Enforce uniqueness across that authenticated scope,
+   survive process death, and retain a bounded window that cannot evict an unexpired occurrence.
+   Duplicate, conflicting, expired, future-dated, capacity-rejected, and malformed occurrences fail
+   closed without producing an effect; locked delivery posts a generic notice only after a new
+   durable admission.
+4. **`PUSH-CRYPTO-01D` — coordinated key rotation, revocation, and migration:** negotiate V3 and
+   versioned rotation on both app and server. Persist each candidate, prior version, stable rotation
+   id, binding, and local time anchors before network commit; a retry after a lost response must
+   receive the exact durable acknowledgement. Rotate active keys on a bounded schedule, prefer the
+   current key, and accept only its immediate predecessor until the earlier app/server exclusive
+   deadline. An ordinary same-key refresh without rotation metadata preserves durable rotation state
+   but is not a rotation acknowledgement. Revoke the exact scoped device on disconnect, retain retry
+   custody if cleanup fails, isolate other devices, and permanently reject explicit, omitted-key, or
+   capability downgrade after versioned activation.
+5. **`PUSH-CRYPTO-01E` — deployed-device proof:** run the shared vectors plus exact Android/Firebase,
+   SecureStore/process-death, killed-app, replay-after-restart, cross-account, and cross-device
+   evidence against one identified app/server candidate.
+
+V2 remains a time-bounded shared-password compatibility path and never substitutes for V3 on a
+scoped credential. Do not make a one-sided identity, envelope, acknowledgement, rotation, overlap,
+or revocation change: accepting either runtime's old form as fallback would restore the downgrade.
+The authoritative work plan alone records which child gates have passed and which exact deployed
+candidate evidence remains.

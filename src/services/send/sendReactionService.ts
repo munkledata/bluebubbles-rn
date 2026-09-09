@@ -1,9 +1,22 @@
 import { sendReaction } from '@core/api/endpoints/messages';
 import type { HttpClient } from '@core/api/http';
-import { insertOutgoingReactionWithinTransaction } from '@db/repositories';
+import {
+  explicitMessageTargetPart,
+  insertOutgoingReactionWithinTransaction,
+  MessageTargetUnavailableError,
+  resolveMessageTarget,
+  resolveMessageTargetWithinTransaction,
+  type MessageTargetServerAuthorization,
+} from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
-import { handleSendFailure, reconcileSendOutcome } from './sendOutcome';
+import { isRcsChatGuid } from '@utils/chat';
+import {
+  handleSendFailure,
+  reconcileSendOutcome,
+  retireUnavailableMessageTarget,
+} from './sendOutcome';
+import { messageTargetCommitGuard } from './rcsAttemptCapability';
 import { generateTempGuid } from './sendService';
 
 export interface SendReactionArgs {
@@ -13,7 +26,7 @@ export interface SendReactionArgs {
   reaction: string;
   /** The glyph for an 'emoji'/'-emoji' tapback (required then, absent for classic types). */
   emoji?: string;
-  /** Target message part; the endpoint falls back to part 0 when omitted. */
+  /** Exact target message part. Legacy part zero must still be supplied explicitly. */
   partIndex?: number;
   selectedMessageText?: string;
 }
@@ -30,39 +43,62 @@ export async function sendReactionMessage(
   args: SendReactionArgs,
   now: number = Date.now(),
   commitGuard?: DbCommitGuard,
+  serverAuthorization?: MessageTargetServerAuthorization,
 ): Promise<{ tempGuid: string }> {
+  const targetPart = explicitMessageTargetPart(args.targetGuid, args.partIndex);
+  if (!targetPart) throw new MessageTargetUnavailableError();
+  const target = {
+    chatGuid: args.chatGuid,
+    messageGuid: targetPart.messageGuid,
+    partIndex: targetPart.partIndex,
+    serverAuthorization,
+    allowRcsWholeMessage: isRcsChatGuid(args.chatGuid),
+  };
+  const targetCommitGuard = messageTargetCommitGuard(commitGuard, serverAuthorization);
   const tempGuid = generateTempGuid();
   await withDbTransaction(
     db,
-    (context) =>
-      insertOutgoingReactionWithinTransaction(context, {
+    async (context) => {
+      const resolvedTarget = await resolveMessageTargetWithinTransaction(context, target);
+      if (!resolvedTarget) throw new MessageTargetUnavailableError();
+      return insertOutgoingReactionWithinTransaction(context, {
         tempGuid,
         chatGuid: args.chatGuid,
-        targetGuid: args.targetGuid,
+        targetGuid: resolvedTarget.messageGuid,
         reaction: args.reaction,
         emoji: args.emoji,
-        partIndex: args.partIndex,
+        partIndex: resolvedTarget.partIndex,
         selectedMessageText: args.selectedMessageText,
         now,
-      }),
-    commitGuard,
+      });
+    },
+    targetCommitGuard,
   );
 
   // The owner may have committed just before Disconnect retired this account. Do not let that old
   // continuation start a request with the next account's live credential boundary.
   if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
 
+  const finalTarget = await resolveMessageTarget(db, target, targetCommitGuard);
+  if (!finalTarget) {
+    await retireUnavailableMessageTarget(db, tempGuid, targetCommitGuard);
+    return { tempGuid };
+  }
+
   try {
     const server = await sendReaction(http, {
       chatGuid: args.chatGuid,
-      selectedMessageGuid: args.targetGuid,
+      selectedMessageGuid: finalTarget.messageGuid,
       reaction: args.reaction,
       emoji: args.emoji,
-      partIndex: args.partIndex,
+      partIndex: finalTarget.partIndex,
     });
     // Reactions require the Private API, so the ack carries the real GUID on success.
     await reconcileSendOutcome(db, tempGuid, server, now, commitGuard);
   } catch (e) {
+    // A revoked success-settlement owner must not be reinterpreted as a transport failure and
+    // followed by a second stale-account database write attempt.
+    if (e instanceof DbCommitGuardRejectedError) throw e;
     await handleSendFailure(
       db,
       tempGuid,

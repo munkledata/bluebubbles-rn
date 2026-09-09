@@ -18,14 +18,16 @@ describe('message endpoint error-detail capture', () => {
       chatGuid: 'chat-1',
       selectedMessageGuid: 'target-1',
       reaction: 'love',
+      partIndex: 0,
     });
     await editMessage(http, {
       chatGuid: 'chat-1',
       messageGuid: 'message-1',
       editedMessage: 'edited',
       backwardsCompatibilityMessage: 'Edited to “edited”',
+      partIndex: 0,
     });
-    await unsendMessage(http, { chatGuid: 'chat-1', messageGuid: 'message-1' });
+    await unsendMessage(http, { chatGuid: 'chat-1', messageGuid: 'message-1', partIndex: 0 });
 
     expect(post.mock.calls.slice(0, 3).map((call) => call[2]?.captureErrorDetail)).toEqual([
       true,

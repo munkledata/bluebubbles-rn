@@ -2,8 +2,8 @@
  * Unit tests for the Notifee presentation layer (`src/services/notifications/notifeeService.ts`).
  *
  * These functions build the exact Notifee payloads posted to the OS. The invariants pinned:
- *   - Ordinary unlocked notifications keep exact message, caller, alias, and reminder detail;
- *     App Lock alone uses the fixed content-less delivery path.
+ *   - Ordinary unlocked message/call notices keep their detail; native reminder alarms are always
+ *     generic because Android persists them outside SQLCipher.
  *   - The MESSAGING-style `person.icon` is spread CONDITIONALLY — never `icon: undefined`
  *     (AGENTS.md: passing undefined throws at displayNotification on device). No avatar means
  *     the `person` object has NO `icon` key at all.
@@ -22,6 +22,7 @@ import { claimActiveChat, resetActiveChat } from '@/services/notifications/activ
 import {
   getOrCreateFaceTimeRoute,
   listFutureReminderTriggerRoutes,
+  listMessageNotificationTruth,
 } from '@/services/notifications/notificationRouting';
 import {
   captureRealtimeDeliveryLease,
@@ -54,6 +55,15 @@ import {
   requestNotificationPermission,
   scheduleReminderNotification,
 } from '@/services/notifications/notifeeService';
+import {
+  MAX_MESSAGE_NOTIFICATION_AVATAR_URI_BYTES,
+  MAX_MESSAGE_NOTIFICATION_LABEL_BYTES,
+  MAX_MESSAGE_NOTIFICATION_LABEL_CODE_POINTS,
+  MAX_MESSAGE_NOTIFICATION_TEXT_BYTES,
+  MAX_MESSAGE_NOTIFICATION_TEXT_CODE_POINTS,
+} from '@/services/notifications/messageHistory';
+
+const notificationTextEncoder = new TextEncoder();
 
 const ALARM_IDLE = 3;
 jest.mock('react-native-notify-kit', () => ({
@@ -121,6 +131,7 @@ jest.mock('@/services/notifications/notificationRouting', () => {
   return {
     NOTIFICATION_DATA_OWNER: 'gator',
     NOTIFICATION_DATA_SCHEMA: '2',
+    MAX_MESSAGE_NOTIFICATION_TRUTH_IDS: 512,
     chatChannelIdForLocalId: (id: number) =>
       `com.bluegreengatorapps.messages.new_messages.chat.route_${id}`,
     chatNotificationId: (id: number) => `gator-message-${id}`,
@@ -166,6 +177,7 @@ jest.mock('@/services/notifications/notificationRouting', () => {
     deleteFaceTimeRoute: jest.fn(async () => undefined),
     clearNotificationRoutes: jest.fn(async () => undefined),
     listFutureReminderTriggerRoutes: jest.fn(async () => []),
+    listMessageNotificationTruth: jest.fn(async () => []),
     replacementReminderNotificationId: jest.fn(
       async (oldId: string, _messageGuid: string, time?: number) =>
         `gator-reminder-message-111-${time ?? Number(oldId.match(/(\d+)$/)?.[1] ?? 5000)}`,
@@ -214,6 +226,7 @@ const mockDeleteChannel = notifee.deleteChannel as jest.Mock;
 const mockOpenSettings = notifee.openNotificationSettings as jest.Mock;
 const mockGetOrCreateFaceTimeRoute = getOrCreateFaceTimeRoute as jest.Mock;
 const mockListFutureReminderTriggerRoutes = listFutureReminderTriggerRoutes as jest.Mock;
+const mockListMessageNotificationTruth = listMessageNotificationTruth as jest.Mock;
 const {
   clearNotificationRoutes: mockClearNotificationRoutes,
   deleteFaceTimeRoute: mockDeleteFaceTimeRoute,
@@ -292,6 +305,9 @@ function installStatefulTray(initial: Record<string, any>[] = []): {
   mockCancelAll.mockImplementation(async () => {
     tray.clear();
   });
+  mockCancelDisplayedAll.mockImplementation(async () => {
+    tray.clear();
+  });
   return {
     tray,
     restore: () => {
@@ -299,6 +315,7 @@ function installStatefulTray(initial: Record<string, any>[] = []): {
       mockDisplay.mockImplementation(async () => undefined);
       mockCancel.mockImplementation(async () => undefined);
       mockCancelAll.mockImplementation(async () => undefined);
+      mockCancelDisplayedAll.mockImplementation(async () => undefined);
     },
   };
 }
@@ -338,9 +355,32 @@ function displayedMessageChild(chatId: number, messageId: number): Record<string
   };
 }
 
+function messageTruth(
+  messageId: number,
+  chatId: number,
+  over: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    messageId,
+    chatId,
+    notificationEligible: 1,
+    retractionState: 'intact',
+    dateRetracted: null,
+    messagePartTopology: null,
+    text: `Message ${messageId}`,
+    subject: null,
+    hasAttachments: 0,
+    hasVisibleAttachments: 0,
+    attachmentDescription: null,
+    balloonBundleId: null,
+    ...over,
+  };
+}
+
 beforeEach(() => {
   resumeRealtimeDeliveries();
   resetActiveChat();
+  mockGetNotificationSettings.mockResolvedValue({ authorizationStatus: 1 });
   useLockStore.setState({
     enabled: false,
     locked: false,
@@ -348,6 +388,24 @@ beforeEach(() => {
     lastBackgrounded: null,
     timeoutMs: 30_000,
   });
+  mockListMessageNotificationTruth.mockImplementation(async (messageIds: number[]) =>
+    messageIds.map((messageId) =>
+      messageTruth(
+        messageId,
+        messageId === 110
+          ? 10
+          : messageId === 111
+            ? 11
+            : messageId === 303
+              ? 3
+              : messageId === 199
+                ? 3
+                : messageId === 909
+                  ? 9
+                  : 1,
+      ),
+    ),
+  );
 });
 
 afterEach(() => {
@@ -384,17 +442,133 @@ describe('requestNotificationPermission', () => {
   });
 });
 
+describe('postNotification permission boundary', () => {
+  const presentationIntents: NotificationIntent[] = [
+    messageIntent(),
+    { kind: 'send-failure', chatGuid: 'chat-1', messageGuid: 'msg-1' },
+    { kind: 'facetime-call', uuid: 'u-permission', callerName: 'Alice', isAudio: false },
+    { kind: 'alias-removed', aliases: ['me@example.test'] },
+    { kind: 'rcs-bridge-down', title: 'ignored', body: 'ignored' },
+    { kind: 'test-notification', title: 'ignored', body: 'ignored' },
+  ];
+
+  it.each(['denied', 'not-determined'] as const)(
+    'completes every presentation intent without native mutation when access is %s',
+    async (permission) => {
+      mockGetNotificationSettings.mockResolvedValue({
+        authorizationStatus: permission === 'denied' ? 0 : -1,
+      });
+
+      for (const intent of presentationIntents) await postNotification(intent);
+
+      expect(mockDisplay).not.toHaveBeenCalled();
+      expect(mockCreateChannel).not.toHaveBeenCalled();
+      expect(mockGetDisplayed).not.toHaveBeenCalled();
+    },
+  );
+
+  it('still runs cancellation cleanup while presentation permission is denied', async () => {
+    mockGetNotificationSettings.mockResolvedValue({ authorizationStatus: 0 });
+
+    await postNotification({ kind: 'cancel', chatGuid: 'chat-1' });
+
+    expect(mockGetNotificationSettings).not.toHaveBeenCalled();
+    expect(mockCancel).toHaveBeenCalledWith('gator-message-1');
+  });
+
+  it('propagates a permission-read failure so a durable owner can retry', async () => {
+    const failure = new Error('permission bridge unavailable');
+    mockGetNotificationSettings.mockRejectedValueOnce(failure);
+
+    await expect(postNotification(messageIntent())).rejects.toBe(failure);
+
+    expect(mockDisplay).not.toHaveBeenCalled();
+  });
+
+  it('bounds a hung permission read so queued account cleanup can still run', async () => {
+    jest.useFakeTimers();
+    try {
+      let resolvePermission!: (settings: { authorizationStatus: number }) => void;
+      mockGetNotificationSettings.mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolvePermission = resolve;
+        }),
+      );
+      const postResult = postNotification(messageIntent()).then(
+        () => null,
+        (error: unknown) => error,
+      );
+      await Promise.resolve();
+      const teardown = cancelAllNotifications();
+      await Promise.resolve();
+
+      expect(mockCancelAll).not.toHaveBeenCalled();
+      await jest.advanceTimersByTimeAsync(2_000);
+
+      await expect(postResult).resolves.toMatchObject({
+        name: 'NotificationPermissionReadTimeoutError',
+        message: 'notification permission read timed out',
+      });
+      await expect(teardown).resolves.toBeUndefined();
+      expect(mockCancelAll).toHaveBeenCalledTimes(1);
+
+      resolvePermission({ authorizationStatus: 1 });
+      await Promise.resolve();
+      expect(mockDisplay).not.toHaveBeenCalled();
+
+      mockGetNotificationSettings.mockResolvedValue({ authorizationStatus: 1 });
+      await expect(postNotification(messageIntent())).resolves.toBeUndefined();
+      expect(mockDisplay).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('contains the exact native denial at the display boundary without replaying it later', async () => {
+    const revoked = Object.assign(
+      new Error(
+        'java.lang.SecurityException: POST_NOTIFICATIONS permission is not granted. Notification was not displayed.',
+      ),
+      { name: 'java.lang.Exception' },
+    );
+    mockGetNotificationSettings.mockResolvedValueOnce({ authorizationStatus: 1 });
+    mockDisplay.mockRejectedValueOnce(revoked);
+
+    await expect(postNotification(messageIntent())).resolves.toBeUndefined();
+
+    expect(mockGetNotificationSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves retry for every other native EUNSPECIFIED failure', async () => {
+    const nativeFailure = Object.assign(new Error('notification manager unavailable'), {
+      code: 'EUNSPECIFIED',
+    });
+    mockDisplay.mockRejectedValueOnce(nativeFailure);
+
+    await expect(postNotification(messageIntent())).rejects.toBe(nativeFailure);
+    expect(mockGetNotificationSettings).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('per-chat notification channel', () => {
   it('chatChannelId derives a safe, stable id from a local integer', () => {
     expect(chatChannelId(7)).toBe(`${CHANNEL_NEW_MESSAGE}.chat.route_7`);
     expect(chatChannelId(123)).not.toMatch(/[+@;]/);
   });
 
-  it('openChatNotificationSettings creates the per-chat channel and opens its OS settings', async () => {
+  it('openChatNotificationSettings bounds the channel name and opens its OS settings', async () => {
     const guid = 'iMessage;-;+15551234567';
-    await openChatNotificationSettings(guid, 'Alice');
+    await openChatNotificationSettings(
+      guid,
+      '😀'.repeat(MAX_MESSAGE_NOTIFICATION_LABEL_CODE_POINTS + 1),
+    );
     const id = chatChannelId(99);
-    expect(mockCreateChannel).toHaveBeenCalledWith(expect.objectContaining({ id, name: 'Alice' }));
+    expect(mockCreateChannel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id,
+        name: '😀'.repeat(MAX_MESSAGE_NOTIFICATION_LABEL_CODE_POINTS),
+      }),
+    );
     expect(mockOpenSettings).toHaveBeenCalledWith(id);
   });
 
@@ -534,15 +708,12 @@ describe('postNotification — detailed message', () => {
     const second = displayedMessageChild(3, 199);
     const foreign = {
       ...displayedMessageChild(9, 909),
+      id: 'another-app-message-9',
       data: { ...displayedMessageChild(9, 909).data, gatorOwner: 'another-app' },
     };
     const state = installStatefulTray([
       first,
       foreign,
-      {
-        id: 'gator-reminder-message-101-5000',
-        data: { gatorOwner: 'gator', gatorSchema: '2', gatorKind: 'reminder', chatId: '1' },
-      },
       {
         id: 'bb-locked-messages',
         data: { gatorOwner: 'gator', gatorSchema: '2', gatorKind: 'locked' },
@@ -1067,6 +1238,293 @@ describe('postNotification — detailed message', () => {
     expect(sender.icon).toBe('file:///a.png');
   });
 
+  it('bounds incoming and adopted message history before every native post', async () => {
+    const existing = displayedMessageChild(1, 101);
+    existing.title = '😀'.repeat(MAX_MESSAGE_NOTIFICATION_LABEL_CODE_POINTS + 1);
+    existing.android.style.messages[0] = {
+      text: '😀'.repeat(MAX_MESSAGE_NOTIFICATION_TEXT_CODE_POINTS + 1),
+      timestamp: 1700000000000,
+      person: {
+        name: `  ${'e\u0301'.repeat(MAX_MESSAGE_NOTIFICATION_LABEL_CODE_POINTS + 1)}  `,
+        id: 'contact',
+        icon: `file:///${'a'.repeat(MAX_MESSAGE_NOTIFICATION_AVATAR_URI_BYTES)}`,
+      },
+    };
+    const state = installStatefulTray([existing]);
+    mockGetChannel.mockResolvedValueOnce({ importance: 4 });
+
+    try {
+      await postNotification(
+        messageIntent({
+          messageGuid: 'msg-2',
+          body: '😀'.repeat(MAX_MESSAGE_NOTIFICATION_TEXT_CODE_POINTS + 1),
+          senderName: '😀'.repeat(MAX_MESSAGE_NOTIFICATION_LABEL_CODE_POINTS + 1),
+          chatTitle: '😀'.repeat(MAX_MESSAGE_NOTIFICATION_LABEL_CODE_POINTS + 1),
+          avatarUri: `file:///${'b'.repeat(MAX_MESSAGE_NOTIFICATION_AVATAR_URI_BYTES)}`,
+          timestamp: 1700000000001,
+        }),
+      );
+
+      const posted = state.tray.get('gator-message-1')!;
+      expect(posted.data?.messageHistoryIds).toBe('101,199');
+      expect([...posted.title]).toHaveLength(MAX_MESSAGE_NOTIFICATION_LABEL_CODE_POINTS);
+      expect(notificationTextEncoder.encode(posted.title).byteLength).toBeLessThanOrEqual(
+        MAX_MESSAGE_NOTIFICATION_LABEL_BYTES,
+      );
+      expect(mockCreateChannel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          id: 'com.bluegreengatorapps.messages.new_messages.chat.route_1',
+          name: posted.title,
+        }),
+      );
+
+      const lines = posted.android.style.messages as {
+        text: string;
+        person: { name: string; icon?: string };
+      }[];
+      expect(lines).toHaveLength(2);
+      for (const line of lines) {
+        expect([...line.text].length).toBeLessThanOrEqual(
+          MAX_MESSAGE_NOTIFICATION_TEXT_CODE_POINTS,
+        );
+        expect(notificationTextEncoder.encode(line.text).byteLength).toBeLessThanOrEqual(
+          MAX_MESSAGE_NOTIFICATION_TEXT_BYTES,
+        );
+        expect([...line.person.name].length).toBeLessThanOrEqual(
+          MAX_MESSAGE_NOTIFICATION_LABEL_CODE_POINTS,
+        );
+        expect(notificationTextEncoder.encode(line.person.name).byteLength).toBeLessThanOrEqual(
+          MAX_MESSAGE_NOTIFICATION_LABEL_BYTES,
+        );
+        expect(line.person).not.toHaveProperty('icon');
+      }
+      expect(lines[0]?.person.name).toBe(lines[0]?.person.name.normalize('NFC').trim());
+
+      mockListMessageNotificationTruth.mockResolvedValueOnce([messageTruth(199, 1)]);
+      await postNotification({
+        kind: 'message-withdraw',
+        chatGuid: 'chat-1',
+        messageGuid: 'msg-1',
+      });
+      const afterWithdrawal = state.tray.get('gator-message-1')!;
+      expect(afterWithdrawal.data?.messageHistoryIds).toBe('199');
+      expect(afterWithdrawal.android?.style.messages).toHaveLength(1);
+      expect(afterWithdrawal.android?.style.messages[0]).toEqual(lines[1]);
+    } finally {
+      state.restore();
+    }
+  });
+
+  it('cancels adopted history whose channel belongs to another chat', async () => {
+    const foreignChannelHistory = displayedMessageChild(1, 101);
+    foreignChannelHistory.data.messageId = '199';
+    foreignChannelHistory.data.messageHistoryIds = '101,199';
+    foreignChannelHistory.android.channelId = chatChannelId(3);
+    foreignChannelHistory.android.style.messages.push({
+      text: 'Another line',
+      timestamp: 1700000000199,
+      person: { name: 'Contact 1', id: 'contact' },
+    });
+    const state = installStatefulTray([foreignChannelHistory]);
+
+    try {
+      await expect(
+        postNotification({
+          kind: 'message-withdraw',
+          chatGuid: 'chat-1',
+          messageGuid: 'msg-1',
+        }),
+      ).rejects.toThrow('malformed displayed message history was cancelled');
+
+      expect(mockDisplay).not.toHaveBeenCalled();
+      expect(mockCancelDisplayedAll).toHaveBeenCalledTimes(1);
+      expect(state.tray.has('gator-message-1')).toBe(false);
+    } finally {
+      state.restore();
+    }
+  });
+
+  it('silently replaces an exact partial retraction from current DB truth', async () => {
+    const state = installStatefulTray([displayedMessageChild(1, 101)]);
+    mockListMessageNotificationTruth.mockResolvedValueOnce([
+      messageTruth(101, 1, {
+        retractionState: 'partial',
+        dateRetracted: 1700000001000,
+        messagePartTopology: JSON.stringify({
+          complete: true,
+          originalPartIndexes: [0, 1],
+          currentParts: [{ index: 1, kind: 'text' }],
+          attachmentOwnership: [],
+        }),
+        text: 'surviving part only',
+      }),
+    ]);
+
+    try {
+      await postNotification({
+        kind: 'message-withdraw',
+        chatGuid: 'chat-1',
+        messageGuid: 'msg-1',
+      });
+
+      const replacement = state.tray.get('gator-message-1')!;
+      expect(replacement.body).toBe('surviving part only');
+      expect(replacement.android.style.messages[0].text).toBe('surviving part only');
+      expect(replacement.android.onlyAlertOnce).toBe(true);
+      expect(mockCancel).not.toHaveBeenCalledWith('gator-message-1');
+      expect(mockCancel).toHaveBeenCalledWith('chat-1');
+    } finally {
+      state.restore();
+    }
+  });
+
+  it.each([
+    [
+      'fully retracted',
+      messageTruth(101, 1, { notificationEligible: 0, retractionState: 'fully-retracted' }),
+    ],
+    ['unknown', messageTruth(101, 1, { notificationEligible: 0, retractionState: 'unknown' })],
+    ['read, deleted, or muted', messageTruth(101, 1, { notificationEligible: 0 })],
+    [
+      'malformed partial topology',
+      messageTruth(101, 1, {
+        retractionState: 'partial',
+        dateRetracted: 1700000001000,
+        messagePartTopology: '{malformed',
+      }),
+    ],
+  ])('removes a %s history line instead of retaining plaintext', async (_label, truth) => {
+    const state = installStatefulTray([displayedMessageChild(1, 101)]);
+    mockListMessageNotificationTruth.mockResolvedValueOnce([truth]);
+
+    try {
+      await postNotification({
+        kind: 'message-withdraw',
+        chatGuid: 'chat-1',
+        messageGuid: 'msg-1',
+      });
+
+      expect(state.tray.has('gator-message-1')).toBe(false);
+      expect(mockDisplay).not.toHaveBeenCalled();
+      expect(mockCancel).toHaveBeenCalledWith('gator-message-1');
+    } finally {
+      state.restore();
+    }
+  });
+
+  it('does not resurrect a child swiped while DB truth is loading', async () => {
+    const child = displayedMessageChild(1, 101);
+    mockGetDisplayed
+      .mockResolvedValueOnce([{ id: child.id, notification: child }])
+      .mockResolvedValueOnce([]);
+    mockListMessageNotificationTruth.mockResolvedValueOnce([
+      messageTruth(101, 1, {
+        retractionState: 'partial',
+        dateRetracted: 1700000001000,
+        messagePartTopology: JSON.stringify({
+          complete: true,
+          originalPartIndexes: [0, 1],
+          currentParts: [{ index: 1, kind: 'text' }],
+          attachmentOwnership: [],
+        }),
+        text: 'surviving part only',
+      }),
+    ]);
+
+    await postNotification({
+      kind: 'message-withdraw',
+      chatGuid: 'chat-1',
+      messageGuid: 'msg-1',
+    });
+
+    expect(mockDisplay).not.toHaveBeenCalled();
+    expect(mockCancel).not.toHaveBeenCalledWith('gator-message-1');
+    expect(mockCancel).toHaveBeenCalledWith('chat-1');
+  });
+
+  it('revalidates each child after an earlier sibling replacement awaits native work', async () => {
+    const first = displayedMessageChild(1, 101);
+    const second = displayedMessageChild(3, 199);
+    const state = installStatefulTray([first, second]);
+    const topology = JSON.stringify({
+      complete: true,
+      originalPartIndexes: [0, 1],
+      currentParts: [{ index: 1, kind: 'text' }],
+      attachmentOwnership: [],
+    });
+    mockListMessageNotificationTruth.mockResolvedValueOnce([
+      messageTruth(101, 1, {
+        retractionState: 'partial',
+        dateRetracted: 1700000001000,
+        messagePartTopology: topology,
+        text: 'first survivor',
+      }),
+      messageTruth(199, 3, {
+        retractionState: 'partial',
+        dateRetracted: 1700000001000,
+        messagePartTopology: topology,
+        text: 'second survivor',
+      }),
+    ]);
+    mockDisplay.mockImplementation(async (notification: Record<string, any>) => {
+      if (typeof notification.id === 'string') state.tray.set(notification.id, notification);
+      if (notification.id === first.id) state.tray.delete(second.id);
+    });
+
+    try {
+      await postNotification({
+        kind: 'message-withdraw',
+        chatGuid: 'chat-1',
+        messageGuid: 'msg-1',
+      });
+
+      expect(state.tray.get(first.id)?.body).toBe('first survivor');
+      expect(state.tray.has(second.id)).toBe(false);
+      expect(mockDisplay.mock.calls.map((call) => call[0].id)).toEqual([first.id]);
+    } finally {
+      state.restore();
+    }
+  });
+
+  it('cancels a partial replacement committed as its account lease is revoked', async () => {
+    const child = displayedMessageChild(1, 101);
+    const state = installStatefulTray([child]);
+    let current = true;
+    const lease = { generation: 41, isCurrent: () => current };
+    mockListMessageNotificationTruth.mockResolvedValueOnce([
+      messageTruth(101, 1, {
+        retractionState: 'partial',
+        dateRetracted: 1700000001000,
+        messagePartTopology: JSON.stringify({
+          complete: true,
+          originalPartIndexes: [0, 1],
+          currentParts: [{ index: 1, kind: 'text' }],
+          attachmentOwnership: [],
+        }),
+        text: 'late survivor',
+      }),
+    ]);
+    mockDisplay.mockImplementationOnce(async (notification: Record<string, any>) => {
+      if (typeof notification.id === 'string') state.tray.set(notification.id, notification);
+      current = false;
+    });
+
+    try {
+      await postNotification(
+        { kind: 'message-withdraw', chatGuid: 'chat-1', messageGuid: 'msg-1' },
+        lease,
+      );
+
+      expect(mockDisplay).toHaveBeenCalledWith(
+        expect.objectContaining({ id: child.id, body: 'late survivor' }),
+      );
+      expect(mockCancel).toHaveBeenCalledWith(child.id);
+      expect(state.tray.has(child.id)).toBe(false);
+    } finally {
+      state.restore();
+    }
+  });
+
   it('OMITS the person.icon key entirely when there is no avatar (never icon:undefined)', async () => {
     await postNotification(messageIntent({ avatarUri: undefined }));
     const sender = lastNotif().android?.style.messages[0].person;
@@ -1116,6 +1574,7 @@ describe('postNotification — detailed message', () => {
         ['secret plans', 'second line'],
       );
 
+      mockListMessageNotificationTruth.mockResolvedValueOnce([messageTruth(199, 1)]);
       await postNotification({
         kind: 'message-withdraw',
         chatGuid: 'chat-1',
@@ -1137,6 +1596,7 @@ describe('postNotification — detailed message', () => {
       await postNotification(messageIntent());
       let current = true;
       const lease = { generation: 27, isCurrent: () => current };
+      mockListMessageNotificationTruth.mockResolvedValueOnce([messageTruth(199, 1)]);
       mockDisplay.mockImplementationOnce(async () => {
         current = false;
         throw new Error('native replacement failed');
@@ -1150,7 +1610,7 @@ describe('postNotification — detailed message', () => {
           },
           lease,
         ),
-      ).rejects.toThrow('the old notification was cancelled');
+      ).rejects.toThrow('message notification reconciliation failed');
       expect(mockCancel).toHaveBeenCalledWith('gator-message-1');
     } finally {
       mockGetDisplayed.mockImplementation(async () => []);
@@ -1426,6 +1886,7 @@ describe('postLockedNotification', () => {
       gatorKind: 'locked',
     });
     expect(n.android?.channelId).toBe(CHANNEL_NEW_MESSAGE);
+    expect(n.android?.onlyAlertOnce).toBe(true);
   });
 
   it('drops a locked-status post whose FCM account lease was revoked in the queue', async () => {
@@ -1440,17 +1901,15 @@ describe('scheduleReminderNotification', () => {
     notificationId: 'gator-reminder-message-101-5000',
     chatGuid: 'c1',
     messageGuid: 'm1',
-    title: 'Alice',
-    body: 'call the dentist',
     scheduledFor: 5000,
   };
 
-  it('creates an INEXACT (doze-friendly) timestamp trigger honoring the body', async () => {
+  it('creates an inexact trigger with generic native presentation', async () => {
     await scheduleReminderNotification(args);
     const [payload, trigger] = mockCreateTrigger.mock.calls.at(-1)!;
     expect(payload.id).toBe('gator-reminder-message-101-5000');
-    expect(payload.title).toBe('Alice');
-    expect(payload.body).toBe('call the dentist');
+    expect(payload.title).toBe('Reminder');
+    expect(payload.body).toBe('Reminder');
     expect(payload.data).toEqual({
       gatorOwner: 'gator',
       gatorSchema: '2',
@@ -1459,10 +1918,12 @@ describe('scheduleReminderNotification', () => {
       messageId: '101',
     });
     expect(payload.android.channelId).toBe(CHANNEL_REMINDERS);
+    expect(payload.android.onlyAlertOnce).toBe(true);
     expect(payload.android.pressAction).toEqual({ id: PRESS_REMINDER, launchActivity: 'default' });
     expect(trigger.type).toBe(0); // TriggerType.TIMESTAMP
     expect(trigger.timestamp).toBe(5000);
     expect(trigger.alarmManager).toEqual({ type: ALARM_IDLE }); // SET_AND_ALLOW_WHILE_IDLE — no exact-alarm perm
+    expect(JSON.stringify(payload)).not.toMatch(/Alice|call the dentist/);
   });
 
   it('carries the message date (stringified) in data so a tap deep-links with ?focusDate', async () => {
@@ -1578,37 +2039,94 @@ describe('prepareNotificationPresentationState — startup maintenance', () => {
   });
 
   describe('ordinary startup maintenance', () => {
-    it('leaves current detailed payloads and safe channel names untouched', async () => {
+    it('rewrites a current displayed reminder generically after sanitizing triggers', async () => {
       const current = {
-        id: 'gator-message-10',
-        notification: {
-          id: 'gator-message-10',
-          title: 'Alice Current Detail',
-          body: 'CURRENT_DETAILED_BODY',
-          data: {
-            gatorOwner: 'gator',
-            gatorSchema: '2',
-            gatorKind: 'message',
-            chatId: '10',
-            messageId: '110',
-            messageDate: '1700000000000',
-          },
+        id: 'gator-reminder-message-111-5000',
+        title: 'PRIVATE_CURRENT_TITLE',
+        body: 'PRIVATE_CURRENT_PREVIEW',
+        data: {
+          gatorOwner: 'gator',
+          gatorSchema: '2',
+          gatorKind: 'reminder',
+          chatId: '11',
+          messageId: '111',
+          messageDate: '1690000000000',
+        },
+        android: {
+          channelId: CHANNEL_REMINDERS,
+          smallIcon: 'ic_stat_gator',
+          pressAction: { id: PRESS_REMINDER, launchActivity: 'default' },
         },
       };
+      const state = installStatefulTray([current]);
+
+      try {
+        await prepareNotificationPresentationState();
+
+        const rewritten = state.tray.get(current.id)!;
+        expect(rewritten).toEqual(
+          expect.objectContaining({ id: current.id, title: 'Reminder', body: 'Reminder' }),
+        );
+        expect(rewritten.android.onlyAlertOnce).toBe(true);
+        expect(JSON.stringify(rewritten)).not.toMatch(/PRIVATE_CURRENT/);
+        expect(mockCancelTriggersAll.mock.invocationCallOrder[0]).toBeLessThan(
+          mockDisplay.mock.invocationCallOrder[0]!,
+        );
+      } finally {
+        state.restore();
+      }
+    });
+
+    it('leaves current detailed payloads and safe channel names untouched', async () => {
+      const current = displayedMessageChild(10, 110);
+      current.title = 'Alice Current Detail';
+      current.body = 'CURRENT_DETAILED_BODY';
+      current.android.style.messages[0].text = 'CURRENT_DETAILED_BODY';
+      const state = installStatefulTray([current]);
       const safeChannel = `${CHANNEL_NEW_MESSAGE}.chat.route_10`;
-      mockGetDisplayed.mockResolvedValueOnce([current]);
       mockGetTriggers.mockResolvedValueOnce([]);
       mockGetChannels.mockResolvedValueOnce([
         { id: safeChannel, name: 'Alice Current Detail', importance: 4 },
       ]);
 
-      await prepareNotificationPresentationState();
+      try {
+        await prepareNotificationPresentationState();
 
-      expect(mockDisplay).not.toHaveBeenCalled();
-      expect(mockCancelDisplayedAll).not.toHaveBeenCalled();
-      expect(mockCancelTriggersAll).not.toHaveBeenCalled();
-      expect(mockDeleteChannel).not.toHaveBeenCalled();
-      expect(mockCreateChannel).not.toHaveBeenCalled();
+        expect(state.tray.get(current.id)).toBe(current);
+        expect(mockDisplay).not.toHaveBeenCalled();
+        expect(mockCancelDisplayedAll).not.toHaveBeenCalled();
+        expect(mockCancelTriggersAll).toHaveBeenCalledTimes(1);
+        expect(mockDeleteChannel).not.toHaveBeenCalled();
+        expect(mockCreateChannel).not.toHaveBeenCalled();
+      } finally {
+        state.restore();
+      }
+    });
+
+    it('removes stale message plaintext at startup without waiting for network sync', async () => {
+      const stale = displayedMessageChild(1, 101);
+      stale.body = 'RETRACTED_STARTUP_PLAINTEXT';
+      stale.android.style.messages[0].text = 'RETRACTED_STARTUP_PLAINTEXT';
+      const state = installStatefulTray([stale]);
+      mockListMessageNotificationTruth.mockResolvedValueOnce([
+        messageTruth(101, 1, {
+          notificationEligible: 0,
+          retractionState: 'fully-retracted',
+          dateRetracted: 1700000001000,
+        }),
+      ]);
+
+      try {
+        await prepareNotificationPresentationState();
+
+        expect(state.tray.has(stale.id)).toBe(false);
+        expect(mockCancel).toHaveBeenCalledWith(stale.id);
+        expect(mockCancelTriggersAll.mock.invocationCallOrder[0]).toBeLessThan(
+          mockCancel.mock.invocationCallOrder[0]!,
+        );
+      } finally {
+        state.restore();
+      }
     });
 
     it('captures admission before queueing so a paused-account call cannot attach to the resumed account', async () => {
@@ -1638,8 +2156,8 @@ describe('prepareNotificationPresentationState — startup maintenance', () => {
 
       await prepareNotificationPresentationState();
 
-      expect(mockGetDisplayed).toHaveBeenCalledTimes(1);
-      expect(mockGetTriggers).toHaveBeenCalledTimes(1);
+      expect(mockGetDisplayed).toHaveBeenCalledTimes(4);
+      expect(mockGetTriggers).toHaveBeenCalledTimes(2);
       expect(mockGetChannels).toHaveBeenCalledTimes(1);
       expect(mockCreateTrigger).toHaveBeenCalledWith(
         expect.objectContaining({ id: 'gator-reminder-message-111-7100' }),
@@ -2193,7 +2711,7 @@ describe('prepareNotificationPresentationState — startup maintenance', () => {
       'notification presentation maintenance completed with failures',
     );
 
-    expect(mockGetDisplayed).toHaveBeenCalledTimes(1);
+    expect(mockGetDisplayed).toHaveBeenCalledTimes(4);
     expect(mockGetTriggers).toHaveBeenCalledTimes(1);
     expect(mockCancelTriggersAll).toHaveBeenCalledTimes(1);
     expect(mockCancelDisplayedAll).toHaveBeenCalledTimes(1);
@@ -2211,7 +2729,7 @@ describe('prepareNotificationPresentationState — startup maintenance', () => {
       'notification presentation maintenance completed with failures',
     );
 
-    expect(mockGetDisplayed).toHaveBeenCalledTimes(1);
+    expect(mockGetDisplayed).toHaveBeenCalledTimes(4);
     expect(mockGetTriggers).toHaveBeenCalledTimes(1);
     expect(mockCancelTriggersAll).toHaveBeenCalledTimes(1);
     expect(mockCancelDisplayedAll).toHaveBeenCalledTimes(1);
@@ -2238,7 +2756,7 @@ describe('prepareNotificationPresentationState — startup maintenance', () => {
         'notification presentation maintenance completed with failures',
       );
 
-      expect(mockGetDisplayed).toHaveBeenCalledTimes(2);
+      expect(mockGetDisplayed).toHaveBeenCalledTimes(5);
       expect(mockGetTriggers).toHaveBeenCalledTimes(2);
       expect(mockCancelTriggersAll).toHaveBeenCalledTimes(1);
       expect(mockCancelDisplayedAll).toHaveBeenCalledTimes(1);
@@ -2309,7 +2827,7 @@ describe('prepareNotificationPresentationState — startup maintenance', () => {
     mockGetDisplayed.mockResolvedValueOnce([]);
 
     const maintenance = prepareNotificationPresentationState();
-    for (let i = 0; i < 10 && releaseChannels == null; i += 1) await Promise.resolve();
+    for (let i = 0; i < 100 && releaseChannels == null; i += 1) await Promise.resolve();
     const open = openChatNotificationSettings('chat-created-during-transition', 'Alice');
     await Promise.resolve();
 
@@ -2337,8 +2855,8 @@ describe('prepareNotificationPresentationState — startup maintenance', () => {
     expect(mockDeleteChannel).toHaveBeenCalledWith(legacy);
     expect(mockDeleteChannel).toHaveBeenCalledWith(deceptiveLegacy);
     expect(mockCreateChannel).not.toHaveBeenCalled();
-    expect(mockGetDisplayed).toHaveBeenCalledTimes(1);
-    expect(mockGetTriggers).toHaveBeenCalledTimes(1);
+    expect(mockGetDisplayed).toHaveBeenCalledTimes(4);
+    expect(mockGetTriggers).toHaveBeenCalledTimes(2);
   });
 
   it('contains enumeration failure, rejects precisely, and leaves the queue usable', async () => {
@@ -2430,8 +2948,8 @@ describe('prepareNotificationPresentationState — startup maintenance', () => {
     mockCancelTrigger.mockClear();
     await expect(prepareNotificationPresentationState()).resolves.toBeUndefined();
 
-    expect(mockGetTriggers).toHaveBeenCalledTimes(3);
-    expect(mockCancelTriggersAll).toHaveBeenCalledTimes(1);
+    expect(mockGetTriggers).toHaveBeenCalledTimes(4);
+    expect(mockCancelTriggersAll).toHaveBeenCalledTimes(2);
     expect(mockCreateTrigger).toHaveBeenCalledTimes(1);
     const [restored, trigger] = mockCreateTrigger.mock.calls[0]!;
     expect(restored).toEqual(
@@ -2457,7 +2975,7 @@ describe('prepareNotificationPresentationState — startup maintenance', () => {
     expect(JSON.stringify(restored)).not.toMatch(/Alice|call the dentist|reminder-old/);
   });
 
-  it('on ordinary startup creates only missing durable reminders with a guarded id handoff', async () => {
+  it('on ordinary startup sanitizes existing and missing durable reminders', async () => {
     const legacyShape = privateReminder();
     const existing = {
       notification: {
@@ -2497,25 +3015,20 @@ describe('prepareNotificationPresentationState — startup maintenance', () => {
 
     await expect(prepareNotificationPresentationState()).resolves.toBeUndefined();
 
-    expect(mockCancelTriggersAll).not.toHaveBeenCalled();
+    expect(mockCancelTriggersAll).toHaveBeenCalledTimes(1);
     expect(mockCancelTrigger).not.toHaveBeenCalled();
-    expect(mockCreateTrigger).toHaveBeenCalledTimes(1);
-    expect(mockCreateTrigger.mock.calls[0]?.[0]).toEqual(
-      expect.objectContaining({
-        id: 'gator-reminder-message-111-6000',
-        title: 'Reminder',
-        body: 'Reminder',
-      }),
-    );
-    expect(mockCreateTrigger).not.toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'gator-reminder-message-111-5000' }),
-      expect.anything(),
-    );
-    expect(mockMigrateReminderNotificationId).toHaveBeenCalledWith(
-      'reminder-old-6000',
+    expect(mockCreateTrigger).toHaveBeenCalledTimes(2);
+    expect(mockCreateTrigger.mock.calls.map((call) => call[0].id)).toEqual([
+      'gator-reminder-message-111-5000',
       'gator-reminder-message-111-6000',
-      expect.any(Function),
-    );
+    ]);
+    for (const [notification] of mockCreateTrigger.mock.calls) {
+      expect(notification).toEqual(
+        expect.objectContaining({ title: 'Reminder', body: 'Reminder' }),
+      );
+      expect(JSON.stringify(notification)).not.toMatch(/Alice|full preview stays untouched/);
+    }
+    expect(mockMigrateReminderNotificationId).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -2528,8 +3041,6 @@ describe('channel promises do not memoize a rejection', () => {
         notificationId: 'gator-reminder-message-1-9999',
         chatGuid: 'c',
         messageGuid: 'm',
-        title: 't',
-        body: 'b',
         scheduledFor: 9999,
       };
       // First attempt: createChannel rejects → schedule rejects, cache cleared (not poisoned).
@@ -2630,8 +3141,6 @@ describe('cancel helpers', () => {
       notificationId: 'gator-reminder-message-101-7300',
       chatGuid: 'c1',
       messageGuid: 'm1',
-      title: 'CURRENT_REMINDER_TITLE',
-      body: 'CURRENT_REMINDER_BODY',
       scheduledFor: 7300,
     });
     const teardownResult = cancelAllNotifications().then(
@@ -2653,8 +3162,8 @@ describe('cancel helpers', () => {
     expect(mockCreateTrigger).toHaveBeenCalledWith(
       expect.objectContaining({
         id: 'gator-reminder-message-101-7300',
-        title: 'CURRENT_REMINDER_TITLE',
-        body: 'CURRENT_REMINDER_BODY',
+        title: 'Reminder',
+        body: 'Reminder',
       }),
       expect.objectContaining({ timestamp: 7300 }),
     );
@@ -2743,9 +3252,10 @@ describe('cancel helpers', () => {
     expect(mockCancel).toHaveBeenCalledWith('chat-3');
   });
 
-  it('cancelReminderNotification cancels the trigger by id', async () => {
+  it('cancelReminderNotification cancels either a future trigger or an already displayed reminder', async () => {
     await cancelReminderNotification('reminder-abc');
-    expect(mockCancelTrigger).toHaveBeenCalledWith('reminder-abc');
+    expect(mockCancel).toHaveBeenCalledWith('reminder-abc');
+    expect(mockCancelTrigger).not.toHaveBeenCalled();
   });
 
   it('clearChatNotification queues a fire-and-forget cancel by chatGuid', async () => {

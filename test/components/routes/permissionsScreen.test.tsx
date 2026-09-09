@@ -47,6 +47,10 @@ import {
 } from '@/services/notifications/notifeeService';
 // eslint-disable-next-line import/first
 import { openContactsPermissionSettings } from '@ui/permissions/contactsPermission';
+// eslint-disable-next-line import/first
+import { showDialog } from '@ui/dialog/dialogStore';
+// eslint-disable-next-line import/first
+import { createI18n } from '@utils/i18n';
 
 const mockGetContactsPermissionState = getContactsPermissionState as jest.Mock;
 const mockSyncContacts = syncContacts as jest.Mock;
@@ -55,6 +59,7 @@ const mockGetNotificationPermissionState = getNotificationPermissionState as jes
 const mockOpenNotificationPermissionSettings = openNotificationPermissionSettings as jest.Mock;
 const mockRequestNotificationPermission = requestNotificationPermission as jest.Mock;
 const mockOpenContactsPermissionSettings = openContactsPermissionSettings as jest.Mock;
+const mockShowDialog = showDialog as jest.Mock;
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -131,6 +136,12 @@ describe('PermissionsScreen', () => {
         accountLease: expect.objectContaining({ generation: 1 }),
       }),
     );
+    await waitFor(() =>
+      expect(mockShowDialog).toHaveBeenCalledWith(
+        'Contacts synced',
+        'Read 3 contacts, matched 2. You can sync again from Settings.',
+      ),
+    );
   });
 
   it('routes denied states to Android settings without re-requesting', async () => {
@@ -155,5 +166,20 @@ describe('PermissionsScreen', () => {
     expect(mockOpenContactsPermissionSettings).toHaveBeenCalledTimes(1);
     expect(mockRequestNotificationPermission).not.toHaveBeenCalled();
     expect(mockSyncContacts).not.toHaveBeenCalled();
+  });
+
+  it('pseudo-localizes templates without transforming replacement values', () => {
+    const pseudo = createI18n('en-XA');
+    const intro = pseudo.format('permissions.intro', { appName: 'Gator' });
+    const result = pseudo.format('permissions.dialog.contactsSynced.message.other', {
+      contacts: '1,234',
+      matched: '2',
+    });
+
+    expect(intro).toContain('Gator');
+    expect(intro).not.toContain('Both choices are optional.');
+    expect(result).toContain('1,234');
+    expect(result).toContain('2');
+    expect(result).not.toContain('contacts, matched');
   });
 });

@@ -11,6 +11,63 @@ import type { AppDatabase } from '@db/types';
 import { buildMessageSnippet } from '@utils';
 import { localFailedMessageRoute } from './notificationRouting';
 
+type MessageIntent = Extract<NotificationIntent, { kind: 'message' }>;
+
+/** Build one notification line from current encrypted-DB truth after its event has committed. */
+async function buildCurrentMessageIntent(
+  db: AppDatabase,
+  message: Extract<NormalizedEvent, { type: 'new-message' | 'updated-message' }>['message'],
+  chatGuid: string,
+): Promise<MessageIntent | null> {
+  if (!(await isMessageNotificationEligible(db, message.guid))) return null;
+  const currentPreview = await getMessagePreviewByGuid(db, message.guid);
+  if (!currentPreview || currentPreview.isRetracted || currentPreview.isFromMe === 1) return null;
+  const header = await getChatHeader(db, chatGuid);
+  if (header?.muteType === 'mute') return null;
+
+  const deletedAt = header?.deletedAt;
+  if (
+    deletedAt != null &&
+    (message.associatedMessageType != null || (message.dateCreated ?? 0) <= deletedAt)
+  ) {
+    return null;
+  }
+
+  const address = currentPreview.senderAddress ?? message.handle?.address;
+  const profile = address ? await getHandleProfile(db, address) : null;
+  const senderName =
+    profile?.name ??
+    currentPreview.senderName ??
+    message.handle?.displayName ??
+    address ??
+    'Unknown';
+  const isGroup = (header?.participantCount ?? 0) > 1;
+  const chatTitle =
+    header?.displayName || (isGroup ? header?.participantNames : senderName) || senderName;
+
+  return {
+    kind: 'message',
+    chatGuid,
+    chatTitle,
+    senderName,
+    senderHandle: address ?? 'unknown',
+    avatarUri: profile?.avatar ?? undefined,
+    body:
+      buildMessageSnippet({
+        text: currentPreview.text,
+        subject: currentPreview.subject,
+        hasAttachments: currentPreview.hasAttachments,
+        hasVisibleAttachments: currentPreview.hasVisibleAttachments,
+        attachmentDescription: currentPreview.attachmentDescription,
+        balloonBundleId: currentPreview.balloonBundleId,
+        isRetracted: currentPreview.isRetracted,
+      }) || 'Message',
+    messageGuid: message.guid,
+    timestamp: currentPreview.dateCreated ?? message.dateCreated ?? Date.now(),
+    isGroup,
+  };
+}
+
 /**
  * Pure projection: a normalized event → the notifications to show/clear. Reads
  * the chat header for the title/group info. No native imports, so it is unit-tested in Node
@@ -40,85 +97,8 @@ export async function buildMessageIntents(
       if (!chatGuid || !m.guid) return [];
       // A durable notification retry must honor CURRENT DB truth, not resurrect the old envelope
       // after the user read/deleted it or the sender retracted it between attempts.
-      if (!(await isMessageNotificationEligible(db, m.guid))) return [];
-      // The row may have been edited while an earlier native presentation attempt backed off.
-      // Project the body from current DB truth, not the stale durable envelope being replayed.
-      const currentPreview = await getMessagePreviewByGuid(db, m.guid);
-      if (!currentPreview) return [];
-      const header = await getChatHeader(db, chatGuid);
-      // Honor the per-chat mute preference: a muted chat still writes the message to the DB
-      // (badge/inbox update via the reactive query) but must NOT raise a notification. The Mute
-      // switch / action sheet persists muteType='mute'; anything else (null) notifies as usual.
-      //
-      // THIS READS AS "NOT MUTED" WHENEVER THE HEADER IS NULL, which is why `getChatHeader` must
-      // stay an unfiltered identity lookup — the moment it hides any category of chat (a deletion
-      // tombstone, an archive flag), that chat's mute is silently switched off and it starts
-      // buzzing. Suppression must never treat "unknown" as "allowed"; only a genuinely unknown
-      // chat guid may fall through here, and it has no preferences to honour.
-      if (header?.muteType === 'mute') return [];
-      // A conversation the user DELETED must not raise a notification it cannot be reached from.
-      //
-      // The tombstone hides the chat from the inbox, the archived list, unknown senders and search,
-      // and it is retired only by a message that satisfies `chatVisible` — real content, newer than
-      // the stamp. A tapback or an unsent message satisfies neither, so the other party hearting an
-      // old message in a thread you deleted (they have no idea you did, and tapbacks are routine)
-      // used to fire a heads-up alert with their name and photo for a chat that stays hidden
-      // FOREVER: nothing about that event can make it findable, and the notification body is
-      // usually the bare '📎 Attachment' fallback because a tapback carries no text.
-      //
-      // The test is the same one `chatVisible` /
-      // `clearSupersededTombstonesWithinTransaction` apply, evaluated
-      // against THIS message, so the two layers cannot disagree: if the message will un-hide the
-      // chat, notify (the alert is truthful — the thread is back); if it cannot, stay silent. It is
-      // checked against the message as well as current DB truth because a qualifying DB write has
-      // already NULLed the stamp by this phase. An undated message can't out-date a stamp, so it is
-      // treated as older.
-      const deletedAt = header?.deletedAt;
-      if (
-        deletedAt != null &&
-        (m.associatedMessageType != null ||
-          m.dateRetracted != null ||
-          (m.dateCreated ?? 0) <= deletedAt)
-      ) {
-        return [];
-      }
-      // Resolve the sender's CONTACT name from the DB (the DbEventSink has already upserted +
-      // contact-linked the handle by the time this runs), matching the in-app UI. The event's
-      // `handle.displayName` is the server name (no device contact), so preferring it showed a
-      // bare phone number even when the contact is known locally.
-      const address = m.handle?.address;
-      const profile = address ? await getHandleProfile(db, address) : null;
-      const senderName = profile?.name ?? m.handle?.displayName ?? address ?? 'Unknown';
-      const isGroup = (header?.participantCount ?? 0) > 1;
-      const chatTitle =
-        header?.displayName || (isGroup ? header?.participantNames : senderName) || senderName;
-      return [
-        {
-          kind: 'message',
-          chatGuid,
-          chatTitle,
-          senderName,
-          senderHandle: m.handle?.address ?? 'unknown',
-          // The stored contact photo (file:// uri) — without it Android's expanded MessagingStyle
-          // draws a generic person-silhouette placeholder. The intent carries the ordinary avatar;
-          // the App Lock path publishes only its fixed generic notice before native presentation.
-          avatarUri: profile?.avatar ?? undefined,
-          // Resolve from current DB truth. Text/subject and real attachments win; a hidden Messages
-          // extension payload gets a fixed local label, never its raw bundle identifier.
-          body:
-            buildMessageSnippet({
-              text: currentPreview.text,
-              subject: currentPreview.subject,
-              hasAttachments: currentPreview.hasAttachments,
-              hasVisibleAttachments: currentPreview.hasVisibleAttachments,
-              attachmentDescription: currentPreview.attachmentDescription,
-              balloonBundleId: currentPreview.balloonBundleId,
-            }) || 'Message',
-          messageGuid: m.guid,
-          timestamp: m.dateCreated ?? Date.now(),
-          isGroup,
-        },
-      ];
+      const intent = await buildCurrentMessageIntent(db, m, chatGuid);
+      return intent ? [intent] : [];
     }
     case 'message-deleted': {
       // The DB tombstone is authoritative, but a notification already posted to Android is
@@ -133,16 +113,22 @@ export async function buildMessageIntents(
       // Read elsewhere → clear any pending notification for this chat.
       return [{ kind: 'cancel', chatGuid: event.payload.chatGuid }];
     case 'updated-message': {
-      // A message was UNSENT (retracted) → withdraw its delivered notification. The server fires
-      // `updated-message` for an unsend, carrying `dateRetracted` (Unix ms; non-null = unsent).
       const m = event.message;
       // Guard: any OTHER update (an edit, a delivery/read receipt) must produce NO intent — it
-      // neither raises a new notification nor cancels one. Only a retraction acts here.
-      if (m.dateRetracted == null) return [];
+      // neither raises a new notification nor cancels one. A modern partial unsend may be signaled
+      // only by `retractedParts`, so do not depend on the legacy aggregate date alone.
+      const hasRetractionSignal =
+        m.messageSummaryInfoInvalid === true ||
+        m.dateRetracted != null ||
+        (m.messageSummaryInfo?.retractedParts?.length ?? 0) > 0;
+      if (!hasRetractionSignal) return [];
       // Real FCM update payloads omit chats/chatGuid. The DB phase has already found the owner by
-      // message guid, so use the same fallback to withdraw a notification after a lean unsend.
+      // message guid, so use the same fallback after a lean unsend.
       const chatGuid = resolveMessageChatGuid(m) ?? (await getChatGuidByMessageGuid(db, m.guid));
       if (!chatGuid) return [];
+      // Reconcile the displayed child once against current encrypted-DB truth. That lets a proven
+      // partial retraction replace the same history line without raising a second alert, while
+      // full/unknown/read/deleted/muted rows are removed and never resurrected from this envelope.
       return [{ kind: 'message-withdraw', chatGuid, messageGuid: m.guid }];
     }
     case 'incoming-facetime': {

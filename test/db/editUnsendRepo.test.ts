@@ -51,10 +51,25 @@ describe('edit/unsend repo fns', () => {
       for (const prior of [4_321, 0]) {
         raw.prepare("UPDATE messages SET date_retracted = ? WHERE guid = 'm1'").run(prior);
         const previous = await applyLocalUnsend(db, 'm1', 7000);
-        expect(previous).toEqual({ dateRetracted: prior, chatGuid: 'c1' });
+        expect(previous).toEqual({
+          dateRetracted: prior,
+          retractionState: null,
+          pendingRetractionPartIndex: null,
+          chatGuid: 'c1',
+        });
         let row = (await listMessagesWithSenders(db, chatId)).find((m) => m.guid === 'm1')!;
         expect(row.dateRetracted).toBe(7000);
-        expect(await revertLocalUnsend(db, 'm1', 7000, previous?.dateRetracted)).toBe(true);
+        expect(
+          await revertLocalUnsend(
+            db,
+            'm1',
+            7000,
+            previous?.dateRetracted,
+            previous?.retractionState,
+            previous?.pendingRetractionPartIndex,
+            0,
+          ),
+        ).toBe(true);
         row = (await listMessagesWithSenders(db, chatId)).find((m) => m.guid === 'm1')!;
         expect(row.dateRetracted).toBe(prior);
       }
@@ -99,8 +114,23 @@ describe('edit/unsend repo fns', () => {
       }
 
       const retry = await applyLocalUnsend(db, 'm1', 7000);
-      expect(retry).toEqual({ dateRetracted: 4321, chatGuid: 'c1' });
-      expect(await revertLocalUnsend(db, 'm1', 7000, retry?.dateRetracted)).toBe(true);
+      expect(retry).toEqual({
+        dateRetracted: 4321,
+        retractionState: null,
+        pendingRetractionPartIndex: null,
+        chatGuid: 'c1',
+      });
+      expect(
+        await revertLocalUnsend(
+          db,
+          'm1',
+          7000,
+          retry?.dateRetracted,
+          retry?.retractionState,
+          retry?.pendingRetractionPartIndex,
+          0,
+        ),
+      ).toBe(true);
     } finally {
       raw.close();
     }
@@ -211,7 +241,6 @@ describe('messageSummaryInfo persistence (edit history)', () => {
         { date: 200, text: 'final text' },
       ],
     },
-    retractedParts: [2],
   };
 
   it('round-trips the JSON blob through write → read (JSON survives)', async () => {

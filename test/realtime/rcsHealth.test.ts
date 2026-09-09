@@ -32,14 +32,16 @@ describe('deriveRcsHealth', () => {
     expect(h.status).toBe('Connected');
   });
 
-  it('surfaces expired cookies as an error pointing at the dashboard re-auth', () => {
+  it('surfaces expired cookies as an error pointing at the in-app re-auth action', () => {
     const h = deriveRcsHealth(true, RCS_ALERT_TYPES.gaiaLoggedOut);
     expect(h.severity).toBe('error');
-    expect(h.detail).toMatch(/re-authenticate on the server dashboard/i);
+    expect(h.detail).toMatch(/tap re-authenticate below/i);
   });
 
-  it('treats a fatal listen error as an error too', () => {
-    expect(deriveRcsHealth(true, RCS_ALERT_TYPES.listenFatal).severity).toBe('error');
+  it('keeps fatal listen errors directed to the server dashboard', () => {
+    const h = deriveRcsHealth(true, RCS_ALERT_TYPES.listenFatal);
+    expect(h.severity).toBe('error');
+    expect(h.detail).toMatch(/check the server dashboard/i);
   });
 
   it('warns (phone offline) on PHONE_NOT_RESPONDING', () => {
@@ -90,11 +92,11 @@ describe('deriveRcsHealthFromStatus', () => {
     expect(h.status).toBe('Connected');
   });
 
-  it('surfaces paired-but-not-connected as an auth-expired error pointing at the dashboard', () => {
+  it('surfaces paired-but-not-connected with the in-app re-auth action', () => {
     const h = deriveRcsHealthFromStatus({ ...connected, connected: false });
     expect(h.severity).toBe('error');
     expect(h.status).toBe('Disconnected');
-    expect(h.detail).toMatch(/re-authenticate on the server dashboard/i);
+    expect(h.detail).toMatch(/tap re-authenticate below/i);
   });
 
   it('surfaces phone offline when phoneResponding is false', () => {

@@ -1,21 +1,20 @@
 /**
- * useChatMatches (src/features/search/useChatMatches.ts) — filters the loaded inbox rows to those
- * matching a query. Locked-in contract:
- *   - empty query returns ALL rows unchanged (the inbox default);
+ * useChatMatches (src/features/search/useChatMatches.ts) — runs bounded, reactive conversation
+ * search after a 200 ms settled-input delay. Locked-in contract:
+ *   - empty/short queries are idle and return no rows;
  *   - a chat matches when the term is in its resolved TITLE (via resolveTitle) or participant names;
  *   - with `contentMatches` (default true) it ALSO matches chats whose guid comes back from the
  *     debounced FTS body search (`searchChatGuidsByMessage`, 200ms);
  *   - `contentMatches: false` (the search page's Chats section) NEVER runs the body search, so a
  *     chat appears only on a name/people hit;
- *   - it passes through `useChats`'s reactive state (isLoading/error) with only `data` replaced.
+ *   - old term/account results are hidden while the current bounded query settles.
  *
- * `useChats` and `searchChatGuidsByMessage` are mocked in-file with controlled data; `resolveTitle`
- * (from @utils) runs for real so title-matching semantics are exercised end-to-end.
+ * Repository matching is mocked here; the exact paging/title/order behavior is covered by the DB
+ * repository suite.
  */
 import { renderHook, act } from '../support/renderWithTheme';
 import { useChatMatches } from '@features/search/useChatMatches';
-import { useChats } from '@features/conversations/useChats';
-import { searchChatGuidsByMessage } from '@db/repositories';
+import { searchChatGuidsByMessage, searchChatsForInboxPage } from '@db/repositories';
 import {
   captureRealtimeDeliveryLease,
   pauseRealtimeDeliveries,
@@ -24,12 +23,16 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 import { mkInboxRow } from './_fixtures';
 
-jest.mock('@features/conversations/useChats', () => ({ useChats: jest.fn() }));
-jest.mock('@db/repositories', () => ({ searchChatGuidsByMessage: jest.fn() }));
+jest.mock('@db/repositories', () => ({
+  searchChatGuidsByMessage: jest.fn(),
+  searchChatsForInboxPage: jest.fn(),
+}));
 
-const mockUseChats = useChats as jest.MockedFunction<typeof useChats>;
 const mockGuidSearch = searchChatGuidsByMessage as jest.MockedFunction<
   typeof searchChatGuidsByMessage
+>;
+const mockChatSearch = searchChatsForInboxPage as jest.MockedFunction<
+  typeof searchChatsForInboxPage
 >;
 
 const ROWS = [
@@ -49,8 +52,19 @@ async function advance(ms: number): Promise<void> {
 beforeEach(() => {
   resumeRealtimeDeliveries();
   jest.useFakeTimers();
-  mockUseChats.mockReturnValue({ data: ROWS, isLoading: false, error: null });
   mockGuidSearch.mockResolvedValue([]);
+  mockChatSearch.mockImplementation(async (_db, opts) => {
+    const folded = opts.query.normalize('NFC').toLowerCase();
+    const messageGuids = new Set(opts.messageMatchGuids ?? []);
+    const rows = ROWS.filter(
+      (row) =>
+        `${row.customName ?? row.displayName ?? ''} ${row.participantNames ?? ''}`
+          .normalize('NFC')
+          .toLowerCase()
+          .includes(folded) || messageGuids.has(row.guid),
+    );
+    return { rows, hasMore: false };
+  });
 });
 
 afterEach(() => {
@@ -59,15 +73,15 @@ afterEach(() => {
 });
 
 describe('useChatMatches', () => {
-  it('returns all rows for an empty query and passes reactive state through', async () => {
-    mockUseChats.mockReturnValue({ data: ROWS, isLoading: true, error: null });
+  it('keeps an empty query idle without starting either repository search', async () => {
     const { result } = await renderHook(({ q }: { q: string }) => useChatMatches(q), {
       initialProps: { q: '' },
     });
 
-    expect(result.current.data).toBe(ROWS);
-    expect(result.current.isLoading).toBe(true); // passed through untouched
+    expect(result.current.data).toEqual([]);
+    expect(result.current.isLoading).toBe(false);
     expect(mockGuidSearch).not.toHaveBeenCalled();
+    expect(mockChatSearch).not.toHaveBeenCalled();
   });
 
   it('matches by resolved title', async () => {
@@ -96,6 +110,11 @@ describe('useChatMatches', () => {
     expect(result.current.data).toEqual([]);
     await advance(200);
     expect(mockGuidSearch).toHaveBeenCalledWith(undefined, 'lunch');
+    expect(mockChatSearch).toHaveBeenCalledWith(undefined, {
+      query: 'lunch',
+      messageMatchGuids: ['c-2'],
+      limit: 50,
+    });
     expect(result.current.data?.map((r) => r.id)).toEqual([2]);
   });
 
@@ -108,6 +127,11 @@ describe('useChatMatches', () => {
     );
     await advance(200);
     expect(mockGuidSearch).not.toHaveBeenCalled();
+    expect(mockChatSearch).toHaveBeenCalledWith(undefined, {
+      query: 'work',
+      messageMatchGuids: [],
+      limit: 50,
+    });
     // Still name-matches row 2 ("Work").
     expect(result.current.data?.map((r) => r.id)).toEqual([2]);
   });
@@ -118,6 +142,31 @@ describe('useChatMatches', () => {
     });
     await advance(200);
     expect(result.current.data?.map((r) => r.id)).toEqual([2]);
+  });
+
+  it('debounces again when a settled query is cleared and then repeated', async () => {
+    const { result, rerender } = await renderHook(
+      ({ q }: { q: string }) => useChatMatches(q, { contentMatches: false }),
+      { initialProps: { q: 'work' } },
+    );
+    await advance(200);
+    expect(result.current.data?.map((row) => row.guid)).toEqual(['c-2']);
+    expect(mockChatSearch).toHaveBeenCalledTimes(1);
+
+    await act(async () => rerender({ q: '' }));
+    await act(async () => rerender({ q: 'work' }));
+    expect(result.current.data).toEqual([]);
+    expect(result.current.isLoading).toBe(true);
+    expect(mockChatSearch).toHaveBeenCalledTimes(1);
+
+    await advance(100);
+    await act(async () => rerender({ q: 'work' }));
+    expect(mockChatSearch).toHaveBeenCalledTimes(1);
+    await advance(99);
+    expect(mockChatSearch).toHaveBeenCalledTimes(1);
+    await advance(1);
+    expect(mockChatSearch).toHaveBeenCalledTimes(2);
+    expect(result.current.data?.map((row) => row.guid)).toEqual(['c-2']);
   });
 
   it('swallows a rejected content search and still returns name matches', async () => {
@@ -152,11 +201,10 @@ describe('useChatMatches', () => {
     const { result } = await renderHook(() =>
       useChatMatches('work', { contentMatches: false, accountLease }),
     );
+    expect(result.current.data).toEqual([]);
+    expect(result.current.isLoading).toBe(true);
+    await advance(200);
     expect(result.current.data?.map((row) => row.guid)).toEqual(['c-2']);
-    expect(mockUseChats).toHaveBeenLastCalledWith(false, {
-      enabled: true,
-      ownerGeneration: accountLease.generation,
-    });
 
     await act(async () => {
       await pauseRealtimeDeliveries();
@@ -165,10 +213,6 @@ describe('useChatMatches', () => {
     expect(result.current.data).toEqual([]);
     expect(result.current.isLoading).toBe(false);
     expect(result.current.error).toBeNull();
-    expect(mockUseChats).toHaveBeenLastCalledWith(false, {
-      enabled: false,
-      ownerGeneration: accountLease.generation,
-    });
   });
 
   it('does not reuse account A body matches when account B repeats the same query in-place', async () => {
@@ -192,10 +236,6 @@ describe('useChatMatches', () => {
     });
 
     expect(result.current.data).toEqual([]);
-    expect(mockUseChats).toHaveBeenLastCalledWith(false, {
-      enabled: true,
-      ownerGeneration: accountB.generation,
-    });
     await advance(200);
     expect(result.current.data?.map((row) => row.guid)).toEqual(['c-3']);
   });

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "assets": [
+    { "path": "assets/android-icon-background.png", "provenanceStatus": "unresolved" },
+    { "path": "assets/android-icon-foreground.png", "provenanceStatus": "unresolved" },
+    { "path": "assets/android-icon-monochrome.png", "provenanceStatus": "unresolved" },
+    { "path": "assets/favicon.png", "provenanceStatus": "unresolved" },
+    { "path": "assets/icon.png", "provenanceStatus": "unresolved" },
+    { "path": "assets/notification-avatar.png", "provenanceStatus": "unresolved" },
+    { "path": "assets/notification/ic_stat_gator-hdpi.png", "provenanceStatus": "unresolved" },
+    { "path": "assets/notification/ic_stat_gator-mdpi.png", "provenanceStatus": "unresolved" },
+    { "path": "assets/notification/ic_stat_gator-xhdpi.png", "provenanceStatus": "unresolved" },
+    { "path": "assets/notification/ic_stat_gator-xxhdpi.png", "provenanceStatus": "unresolved" },
+    { "path": "assets/notification/ic_stat_gator-xxxhdpi.png", "provenanceStatus": "unresolved" },
+    { "path": "assets/splash-icon.png", "provenanceStatus": "unresolved" },
+    { "path": "store-assets/play-feature-1024x500.png", "provenanceStatus": "unresolved" },
+    { "path": "store-assets/play-icon-512.png", "provenanceStatus": "unresolved" }
+  ],
+  "localComponents": [
+    { "path": "modules/gator-bounded-document", "provenanceStatus": "unresolved" },
+    { "path": "modules/gator-bounded-download", "provenanceStatus": "unresolved" },
+    { "path": "modules/gator-paste-input", "provenanceStatus": "unresolved" },
+    { "path": "modules/gator-screen-security", "provenanceStatus": "unresolved" },
+    { "path": "modules/gator-share-shortcuts", "provenanceStatus": "unresolved" },
+    { "path": "plugins/withArm64Only.js", "provenanceStatus": "unresolved" },
+    { "path": "plugins/withNotificationIcon.js", "provenanceStatus": "unresolved" },
+    { "path": "plugins/withShareTargets.js", "provenanceStatus": "unresolved" }
+  ]
+}

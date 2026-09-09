@@ -13,9 +13,12 @@ import {
   type TriggerNotification,
 } from './nativeNotificationAdapter';
 import type { EventDeliveryContext, NotificationIntent } from '@core/realtime';
+import { isExactMessagePartTopology } from '@core/messages/retraction';
+import { parseMessagePartTopology } from '@core/models';
 import { logger } from '@core/secure';
 import type { AppDatabase } from '@db/types';
 import { useLockStore } from '@state/lockStore';
+import { buildMessageSnippet } from '@utils';
 import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
@@ -27,7 +30,12 @@ import {
   decodeMessageHistoryIds,
   encodeMessageHistoryIds,
   mergeMessageNotificationHistory,
-  removeMessageFromNotificationHistory,
+  normalizeMessageNotificationAvatarUri,
+  normalizeMessageNotificationHistory,
+  normalizeMessageNotificationHistoryEntry,
+  normalizeMessageNotificationLabel,
+  normalizeMessageNotificationText,
+  normalizeMessageNotificationTitle,
   type MessageNotificationHistoryEntry,
 } from './messageHistory';
 import {
@@ -41,6 +49,7 @@ import {
   findFaceTimeRoute,
   getOrCreateFaceTimeRoute,
   isSafeReminderNotificationId,
+  listMessageNotificationTruth,
   listFutureReminderTriggerRoutes,
   localFailedMessageRoute,
   localRouteForGuids,
@@ -52,6 +61,8 @@ import {
   replacementReminderNotificationId,
   resolveNotificationData,
   sendFailureNotificationId,
+  MAX_MESSAGE_NOTIFICATION_TRUTH_IDS,
+  type MessageNotificationTruth,
 } from './notificationRouting';
 
 export const CHANNEL_NEW_MESSAGE = 'com.bluegreengatorapps.messages.new_messages';
@@ -212,18 +223,25 @@ function parseDisplayedMessageHistory(
     ) {
       return null;
     }
-    entries.push({
+    const entry = normalizeMessageNotificationHistoryEntry({
       messageId,
       text: line.text,
       timestamp: line.timestamp,
       senderName: line.person.name,
       ...(typeof icon === 'string' ? { avatarUri: icon } : {}),
     });
+    if (!entry) return null;
+    entries.push(entry);
   }
 
-  const title = typeof source.title === 'string' && source.title.length > 0 ? source.title : null;
+  const title = normalizeMessageNotificationTitle(source.title) ?? null;
   const channelId = source.android?.channelId;
-  if (!title || typeof channelId !== 'string' || channelId.length === 0) return null;
+  if (
+    !title ||
+    (channelId !== CHANNEL_NEW_MESSAGE && channelId !== chatChannelIdForLocalId(chatId))
+  ) {
+    return null;
+  }
   return { chatId, entries, title, channelId, isGroup: style.group === true };
 }
 
@@ -240,11 +258,13 @@ function messageNotificationFromHistory(
   history: DisplayedMessageHistory,
   options: { onlyAlertOnce?: boolean } = {},
 ): Notification {
-  const latest = history.entries.at(-1);
+  const entries = normalizeMessageNotificationHistory(history.entries);
+  const latest = entries.at(-1);
   if (!latest) throw new Error('cannot build an empty message notification history');
+  const title = normalizeMessageNotificationTitle(history.title) ?? 'Conversation';
   return {
     id: chatNotificationId(history.chatId),
-    title: history.title,
+    title,
     body: latest.text,
     data: {
       ...nativeRouteData(
@@ -252,7 +272,7 @@ function messageNotificationFromHistory(
         { chatId: history.chatId, messageId: latest.messageId },
         latest.timestamp,
       ),
-      ...messageHistoryData(history.entries),
+      ...messageHistoryData(entries),
     },
     android: {
       channelId: history.channelId,
@@ -264,7 +284,7 @@ function messageNotificationFromHistory(
         type: AndroidStyle.MESSAGING,
         person: { name: 'You', id: 'self' },
         group: history.isGroup,
-        messages: messagingStyleLines(history.entries),
+        messages: messagingStyleLines(entries),
       },
       actions: messageActions(true),
     },
@@ -498,6 +518,323 @@ async function reconcileMessageGroupNow(
   }
   if (!deliveryIsCurrent(context)) return;
   await reconcileMessageGroupFromDisplayedNow(displayed, context, excludedId);
+}
+
+interface OwnedDisplayedMessageHistory {
+  id: string;
+  history: DisplayedMessageHistory;
+}
+
+function isMessageChildIdLike(id: string | undefined): boolean {
+  return id?.startsWith('gator-message-') === true && id !== MESSAGE_GROUP_SUMMARY_ID;
+}
+
+/**
+ * Parse every app-owned message child as one exact current history. An owned-looking malformed,
+ * mismatched, or duplicate record is uncertainty rather than evidence that it is safe to retain.
+ */
+function ownedDisplayedMessageHistories(
+  displayed: readonly DisplayedNotificationSnapshot[],
+): OwnedDisplayedMessageHistory[] {
+  const buckets = new Map<string, DisplayedNotificationSnapshot[]>();
+  for (const item of displayed) {
+    const sourceId = notificationId(item.notification);
+    const displayedId = typeof item.id === 'string' && item.id.length > 0 ? item.id : undefined;
+    if (!isMessageChildIdLike(sourceId) && !isMessageChildIdLike(displayedId)) continue;
+    if (!sourceId || !displayedId || sourceId !== displayedId) {
+      throw new Error('a displayed message child has mismatched native identifiers');
+    }
+    const bucket = buckets.get(sourceId) ?? [];
+    bucket.push(item);
+    buckets.set(sourceId, bucket);
+  }
+
+  const histories: OwnedDisplayedMessageHistory[] = [];
+  for (const [id, items] of buckets) {
+    const chatId = localChatIdFromMessageNotificationId(id);
+    if (chatId == null || items.length !== 1) {
+      throw new Error('a displayed message child is malformed or duplicated');
+    }
+    const history = parseDisplayedMessageHistory(items[0]!, chatId);
+    if (!history) throw new Error('a displayed message child has malformed history');
+    histories.push({ id, history });
+  }
+  return histories;
+}
+
+async function containUncertainDisplayedMessageState(
+  message: string,
+  failures: unknown[],
+): Promise<never> {
+  try {
+    // A native tag is not exposed by notify-kit enumeration, so only the store-wide displayed
+    // sweep proves containment for an owned-looking malformed record.
+    await notifee.cancelDisplayedNotifications();
+  } catch (error) {
+    failures.push(error);
+  }
+  throw new DisplayedStateContainedError(message, failures);
+}
+
+class DisplayedStateContainedError extends Error {
+  constructor(message: string, failures: unknown[]) {
+    super(privacyError(message, failures).message);
+    this.name = 'DisplayedStateContainedError';
+  }
+}
+
+function reconciledMessageHistoryEntry(
+  entry: MessageNotificationHistoryEntry,
+  chatId: number,
+  truth: MessageNotificationTruth | undefined,
+): MessageNotificationHistoryEntry | null {
+  if (!truth || truth.chatId !== chatId || truth.notificationEligible !== 1) return null;
+
+  if (truth.retractionState === 'partial') {
+    const topology = parseMessagePartTopology(truth.messagePartTopology);
+    if (
+      !topology ||
+      !isExactMessagePartTopology(topology) ||
+      topology.currentParts.length === 0 ||
+      topology.currentParts.length >= topology.originalPartIndexes.length
+    ) {
+      return null;
+    }
+    const text =
+      normalizeMessageNotificationText(
+        buildMessageSnippet({
+          text: truth.text,
+          subject: truth.subject,
+          hasAttachments: truth.hasAttachments,
+          hasVisibleAttachments: truth.hasVisibleAttachments,
+          attachmentDescription: truth.attachmentDescription,
+          balloonBundleId: truth.balloonBundleId,
+        }),
+      ) ?? 'Message';
+    return { ...entry, text };
+  }
+
+  // A migrated row with no classifier is intact only when the legacy date marker agrees. Treat
+  // every unknown value or contradictory intact/date pair as hidden instead of guessing.
+  if (
+    (truth.retractionState === 'intact' || truth.retractionState == null) &&
+    truth.dateRetracted == null
+  ) {
+    return entry;
+  }
+  return null;
+}
+
+function reconciledMessageHistory(
+  history: DisplayedMessageHistory,
+  truthByMessageId: ReadonlyMap<number, MessageNotificationTruth>,
+): { entries: MessageNotificationHistoryEntry[]; changed: boolean } {
+  const entries: MessageNotificationHistoryEntry[] = [];
+  let changed = false;
+  for (const entry of history.entries) {
+    const next = reconciledMessageHistoryEntry(
+      entry,
+      history.chatId,
+      truthByMessageId.get(entry.messageId),
+    );
+    if (!next) {
+      changed = true;
+      continue;
+    }
+    if (next.text !== entry.text) changed = true;
+    entries.push(next);
+  }
+  return { entries, changed };
+}
+
+/**
+ * Last-moment presence check for one planned mutation. A child swiped while an earlier sibling's
+ * native replacement was awaiting must not be recreated from the batch snapshot.
+ */
+async function revalidateDisplayedMessageHistoryForMutation(
+  id: string,
+  chatId: number,
+  requestedIds: ReadonlySet<number>,
+): Promise<DisplayedMessageHistory | null> {
+  let displayed: DisplayedNotification[];
+  try {
+    displayed = await notifee.getDisplayedNotifications();
+  } catch (error) {
+    return containUncertainDisplayedMessageState(
+      'displayed message history was cancelled because mutation presence was uncertain',
+      [error],
+    );
+  }
+  const matches = displayed.filter((item) => notificationId(item.notification, item.id) === id);
+  if (matches.length === 0) return null;
+  const history = matches.length === 1 ? parseDisplayedMessageHistory(matches[0]!, chatId) : null;
+  if (!history || history.entries.some((entry) => !requestedIds.has(entry.messageId))) {
+    return containUncertainDisplayedMessageState(
+      'displayed message history changed before mutation and was cancelled',
+      [],
+    );
+  }
+  return history;
+}
+
+/** Private DB-truth reconciliation. The caller already owns the global native mutation slot. */
+async function reconcileDisplayedMessageHistoriesNow(
+  db?: AppDatabase,
+  context?: EventDeliveryContext,
+): Promise<void> {
+  if (!deliveryIsCurrent(context)) return;
+  let firstDisplayed: DisplayedNotification[];
+  try {
+    firstDisplayed = await notifee.getDisplayedNotifications();
+  } catch (error) {
+    return containUncertainDisplayedMessageState(
+      'displayed message history was cancelled because it could not be enumerated safely',
+      [error],
+    );
+  }
+  if (!deliveryIsCurrent(context)) return;
+
+  let firstHistories: OwnedDisplayedMessageHistory[];
+  try {
+    firstHistories = ownedDisplayedMessageHistories(firstDisplayed);
+  } catch (error) {
+    return containUncertainDisplayedMessageState(
+      'malformed displayed message history was cancelled',
+      [error],
+    );
+  }
+  const messageIds = firstHistories.flatMap(({ history }) =>
+    history.entries.map((entry) => entry.messageId),
+  );
+  const uniqueMessageIds = [...new Set(messageIds)];
+  if (uniqueMessageIds.length > MAX_MESSAGE_NOTIFICATION_TRUTH_IDS) {
+    return containUncertainDisplayedMessageState(
+      'displayed message history exceeded its reconciliation bound and was cancelled',
+      [],
+    );
+  }
+
+  let truthRows: MessageNotificationTruth[];
+  try {
+    truthRows = await listMessageNotificationTruth(uniqueMessageIds, db);
+  } catch (error) {
+    return containUncertainDisplayedMessageState(
+      'displayed message history was cancelled because encrypted-DB truth was unavailable',
+      [error],
+    );
+  }
+  if (!deliveryIsCurrent(context)) return;
+
+  const requestedIds = new Set(uniqueMessageIds);
+  const truthByMessageId = new Map<number, MessageNotificationTruth>();
+  for (const truth of truthRows) {
+    if (
+      !Number.isSafeInteger(truth.messageId) ||
+      !requestedIds.has(truth.messageId) ||
+      truthByMessageId.has(truth.messageId)
+    ) {
+      return containUncertainDisplayedMessageState(
+        'displayed message history was cancelled because encrypted-DB truth was malformed',
+        [],
+      );
+    }
+    truthByMessageId.set(truth.messageId, truth);
+  }
+
+  // Re-enumerate after the DB read. A child swiped while that read was in flight is absent here and
+  // is never rebuilt from the older snapshot. New/unrecognized history means our proof is stale.
+  let liveDisplayed: DisplayedNotification[];
+  try {
+    liveDisplayed = await notifee.getDisplayedNotifications();
+  } catch (error) {
+    return containUncertainDisplayedMessageState(
+      'displayed message history was cancelled because its final state was uncertain',
+      [error],
+    );
+  }
+  if (!deliveryIsCurrent(context)) return;
+
+  let liveHistories: OwnedDisplayedMessageHistory[];
+  try {
+    liveHistories = ownedDisplayedMessageHistories(liveDisplayed);
+  } catch (error) {
+    return containUncertainDisplayedMessageState(
+      'malformed displayed message history was cancelled',
+      [error],
+    );
+  }
+  for (const { history } of liveHistories) {
+    if (history.entries.some((entry) => !requestedIds.has(entry.messageId))) {
+      return containUncertainDisplayedMessageState(
+        'displayed message history changed during reconciliation and was cancelled',
+        [],
+      );
+    }
+  }
+
+  const failures: unknown[] = [];
+  let mutated = false;
+  for (const { id, history } of liveHistories) {
+    if (!deliveryIsCurrent(context)) return;
+    const planned = reconciledMessageHistory(history, truthByMessageId);
+    if (!planned.changed) continue;
+    try {
+      // Channel setup can await. Finish it before the last-moment child enumeration so there is no
+      // native wait between the proof of presence and the replacement itself.
+      if (planned.entries.length > 0) await ensureChannel();
+      if (!deliveryIsCurrent(context)) return;
+      const current = await revalidateDisplayedMessageHistoryForMutation(
+        id,
+        history.chatId,
+        requestedIds,
+      );
+      if (!deliveryIsCurrent(context)) return;
+      if (!current) continue;
+      const reconciled = reconciledMessageHistory(current, truthByMessageId);
+      if (!reconciled.changed) continue;
+      if (reconciled.entries.length === 0 || !messageGroupMutationAllowed()) {
+        await notifee.cancelNotification(id);
+        mutated = true;
+        continue;
+      }
+      await notifee.displayNotification(
+        messageNotificationFromHistory(
+          { ...current, entries: reconciled.entries },
+          { onlyAlertOnce: true },
+        ),
+      );
+      mutated = true;
+      if (!deliveryIsCurrent(context)) {
+        // The bridge may have committed just as Disconnect revoked this account. Remove the exact
+        // stable id now; account teardown's queued store-wide sweep remains the backstop.
+        try {
+          await notifee.cancelNotification(id);
+        } catch {
+          // Match reminder re-arm compensation: the authoritative teardown is already pending.
+        }
+        return;
+      }
+    } catch (error) {
+      if (error instanceof DisplayedStateContainedError) {
+        failures.push(error);
+        break;
+      }
+      // An uncertain replacement must not leave the old retracted text visible.
+      try {
+        await notifee.cancelNotification(id);
+        mutated = true;
+      } catch (cancelError) {
+        failures.push(cancelError);
+      }
+      failures.push(error);
+      break;
+    }
+  }
+  if (failures.length > 0) {
+    throw privacyError('one or more displayed message histories could not be reconciled', failures);
+  }
+  if (!deliveryIsCurrent(context) || !mutated) return;
+  await reconcileMessageGroupNow(context);
 }
 
 function markerKind(source: Notification): string | undefined {
@@ -884,6 +1221,83 @@ async function sanitizeDisplayedNotifications(context?: EventDeliveryContext): P
   }
 }
 
+/**
+ * Ordinary connected startup rewrites only displayed reminders. Message children are reconciled
+ * separately from DB truth, so this pass never copies their Android-owned private presentation.
+ */
+async function sanitizeCurrentDisplayedReminders(context?: EventDeliveryContext): Promise<void> {
+  if (!deliveryIsCurrent(context)) return;
+  let displayed: DisplayedNotification[];
+  try {
+    displayed = await notifee.getDisplayedNotifications();
+  } catch (enumerationError) {
+    try {
+      await notifee.cancelDisplayedNotifications();
+    } catch (cancelError) {
+      throw privacyError('could not enumerate or contain displayed reminders', [
+        enumerationError,
+        cancelError,
+      ]);
+    }
+    throw privacyError('displayed notifications were cancelled after reminder inspection failed', [
+      enumerationError,
+    ]);
+  }
+
+  const failures: unknown[] = [];
+  for (const item of displayed) {
+    if (!deliveryIsCurrent(context)) return;
+    if (!isReminderPayload(item.notification)) continue;
+    const oldId = notificationId(item.notification, item.id);
+    let newId: string | undefined;
+    try {
+      const reminder = await sanitizedReminderNotification(item.notification, item.id);
+      if (!reminder) throw new Error('a displayed reminder has no safe durable route');
+      newId = reminder.newId;
+      if (
+        !(await migrateReminderNotificationId(
+          reminder.oldId,
+          reminder.newId,
+          context ? () => context.isCurrent() : undefined,
+        ))
+      ) {
+        throw new Error('a displayed reminder has no durable row');
+      }
+      if (!deliveryIsCurrent(context)) return;
+      // Retire a legacy/private id before posting its generic replacement. A failure may lose this
+      // already-fired tray item, but the encrypted Reminders list remains authoritative and no
+      // private native payload is allowed to win that trade-off.
+      if (reminder.oldId !== reminder.newId) {
+        await notifee.cancelNotification(reminder.oldId);
+      }
+      if (!deliveryIsCurrent(context)) return;
+      await notifee.displayNotification(reminder.notification);
+    } catch (error) {
+      failures.push(error);
+      const ids = [...new Set([oldId, newId].filter((id): id is string => id != null))];
+      if (ids.length === 0) {
+        return containUncertainDisplayedMessageState(
+          'a displayed reminder without a cancellable id forced displayed-state containment',
+          failures,
+        );
+      }
+      for (const id of ids) {
+        try {
+          await notifee.cancelNotification(id);
+        } catch (cancelError) {
+          return containUncertainDisplayedMessageState(
+            'a displayed reminder could not be contained by id',
+            [...failures, cancelError],
+          );
+        }
+      }
+    }
+  }
+  if (failures.length > 0) {
+    throw privacyError('one or more displayed reminders could not be preserved safely', failures);
+  }
+}
+
 async function armSanitizedReminder(
   { reminder, trigger }: ReminderTriggerPlan,
   context?: EventDeliveryContext,
@@ -967,49 +1381,6 @@ async function armSanitizedReminders(
     remaining = failedPlans;
   }
   return lastFailures;
-}
-
-/**
- * Repair only the native half of future reminders that still exist in the encrypted DB.
- *
- * This ordinary boot path must be non-destructive: existing native alarms may contain the user's
- * normal full preview, so do not globally cancel/rebuild them. A durable row counts as present
- * under either its old or replacement id; otherwise create one generic safe trigger and perform
- * the same durable id hand-off/uncertain-create cleanup as the legacy migration rebuild.
- */
-async function repairMissingFutureReminderTriggers(
-  pending: TriggerNotification[],
-  context?: EventDeliveryContext,
-): Promise<void> {
-  if (!deliveryIsCurrent(context)) return;
-  const nativeIds = new Set(
-    pending
-      .map((item) => notificationId(item.notification))
-      .filter((id): id is string => id != null),
-  );
-
-  let durableReminders: Awaited<ReturnType<typeof listFutureReminderTriggerRoutes>>;
-  try {
-    durableReminders = await listFutureReminderTriggerRoutes();
-  } catch (error) {
-    throw privacyError('could not inspect durable reminders for missing native alarms', [error]);
-  }
-  if (!deliveryIsCurrent(context)) return;
-
-  const missingPlans = new Map<string, ReminderTriggerPlan>();
-  for (const durable of durableReminders) {
-    if (nativeIds.has(durable.oldId) || nativeIds.has(durable.newId)) continue;
-    const plan = sanitizedDurableReminderNotification(durable);
-    missingPlans.set(plan.reminder.newId, plan);
-  }
-
-  const failures = await armSanitizedReminders([...missingPlans.values()], context);
-  if (failures.length > 0) {
-    throw privacyError(
-      'one or more missing scheduled notifications could not be repaired',
-      failures,
-    );
-  }
 }
 
 async function sanitizeTriggerNotifications(context?: EventDeliveryContext): Promise<void> {
@@ -1136,13 +1507,12 @@ async function sanitizeLegacyNotificationPayloadsIfPresent(
     displayed.some((item) => carriesLegacyRawRoute(item.notification)) ||
     triggers.some((item) => carriesLegacyRawRoute(item.notification));
   if (!hasLegacy) {
-    // An interrupted older cleanup can cancel a native trigger before re-arming it. The durable row
-    // is still authoritative, so reuse the enumeration above and restore only absent alarms; never
-    // disturb alarms already present.
-    await repairMissingFutureReminderTriggers(triggers, context);
+    // Current schema-2 alarms can still have been created by an older build with private title/body.
+    // Rebuild every future alarm from encrypted durable rows on every connected startup.
+    await sanitizeTriggerNotifications(context);
     if (deliveryIsCurrent(context)) {
-      // Inspection-only: count already-current grouped children, but never rewrite one captured in
-      // this startup snapshot. A concurrent Android removal event performs a fresh repair.
+      // Summary-only reconciliation never rewrites a captured child, so it cannot resurrect a
+      // message the user swiped while reminder maintenance crossed the native bridge.
       await reconcileMessageGroupFromDisplayedNow(displayed, context);
     }
     return;
@@ -1213,9 +1583,8 @@ async function sanitizePerChatChannels(
 }
 
 /**
- * Keep legacy Android payload/channel cleanup and durable reminder repair together. The caller
- * already owns the native queue slot; run both idempotent maintenance halves so a failure in one
- * does not prevent the other from being tried.
+ * Keep native privacy maintenance in one FIFO slot. Future reminder triggers are sanitized first;
+ * displayed reminders are deliberately last so an alarm that fires during the pass is still swept.
  */
 async function prepareNotificationPresentationStateNow(
   context?: EventDeliveryContext,
@@ -1228,7 +1597,21 @@ async function prepareNotificationPresentationStateNow(
   }
   if (!deliveryIsCurrent(context)) return;
   try {
+    // This local DB pass does not depend on a successful network sync. It removes stale plaintext
+    // after an offline launch and runs directly in the startup operation's existing FIFO slot.
+    await reconcileDisplayedMessageHistoriesNow(undefined, context);
+  } catch (error) {
+    failures.push(error);
+  }
+  if (!deliveryIsCurrent(context)) return;
+  try {
     await sanitizePerChatChannels(false, context);
+  } catch (error) {
+    failures.push(error);
+  }
+  if (!deliveryIsCurrent(context)) return;
+  try {
+    await sanitizeCurrentDisplayedReminders(context);
   } catch (error) {
     failures.push(error);
   }
@@ -1350,6 +1733,7 @@ async function postStatusNotification(
     android: {
       channelId: CHANNEL_NEW_MESSAGE,
       smallIcon: 'ic_stat_gator',
+      ...(hidePrivate || kind === 'locked' ? { onlyAlertOnce: true } : {}),
       pressAction: { id: PRESS_OPEN, launchActivity: 'default' },
     },
   });
@@ -1377,9 +1761,10 @@ export function openChatNotificationSettings(
     if (!deliveryIsCurrent(context)) return;
     if (!route) throw new Error('cannot open notification settings for an unknown conversation');
     const id = chatChannelId(route.chatId);
+    const channelName = normalizeMessageNotificationTitle(title) ?? 'Conversation';
     await notifee.createChannel({
       id,
-      name: title || 'Conversation',
+      name: channelName,
       importance: AndroidImportance.HIGH,
     });
     if (!deliveryIsCurrent(context)) return;
@@ -1388,6 +1773,16 @@ export function openChatNotificationSettings(
 }
 
 export type NotificationPermissionState = 'not-determined' | 'denied' | 'granted';
+
+const NOTIFICATION_PERMISSION_READ_TIMEOUT_MS = 2_000;
+
+class NotificationPermissionReadTimeoutError extends Error {
+  override readonly name = 'NotificationPermissionReadTimeoutError';
+
+  constructor() {
+    super('notification permission read timed out');
+  }
+}
 
 function notificationPermissionState(status: AuthorizationStatus): NotificationPermissionState {
   if (status >= AuthorizationStatus.AUTHORIZED) return 'granted';
@@ -1400,6 +1795,22 @@ export async function getNotificationPermissionState(): Promise<NotificationPerm
   return notificationPermissionState(settings.authorizationStatus);
 }
 
+async function readNotificationPermissionWithinTimeout(): Promise<NotificationPermissionState> {
+  const nativeRead = getNotificationPermissionState();
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timeoutHandle = setTimeout(
+      () => reject(new NotificationPermissionReadTimeoutError()),
+      NOTIFICATION_PERMISSION_READ_TIMEOUT_MS,
+    );
+  });
+  try {
+    return await Promise.race([nativeRead, timeout]);
+  } finally {
+    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+  }
+}
+
 /** Request POST_NOTIFICATIONS (Android 13+) after the app has explained why. */
 export async function requestNotificationPermission(): Promise<boolean> {
   const settings = await notifee.requestPermission();
@@ -1409,6 +1820,27 @@ export async function requestNotificationPermission(): Promise<boolean> {
 /** Open this app's Android notification controls for denied/permanently denied recovery. */
 export function openNotificationPermissionSettings(): Promise<void> {
   return notifee.openNotificationSettings();
+}
+
+function isPresentationIntent(intent: NotificationIntent): boolean {
+  return (
+    intent.kind === 'message' ||
+    intent.kind === 'send-failure' ||
+    intent.kind === 'facetime-call' ||
+    intent.kind === 'alias-removed' ||
+    intent.kind === 'rcs-bridge-down' ||
+    intent.kind === 'test-notification'
+  );
+}
+
+function isPostNotificationsPermissionError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const nativeError = error as { code?: unknown; message?: unknown; name?: unknown };
+  return (
+    nativeError.message ===
+      'java.lang.SecurityException: POST_NOTIFICATIONS permission is not granted. Notification was not displayed.' &&
+    (nativeError.code === 'EUNSPECIFIED' || nativeError.name === 'java.lang.Exception')
+  );
 }
 
 /**
@@ -1426,7 +1858,21 @@ export function postNotification(
     // the actual native-mutation boundary, not only before it joined the queue, so Disconnect
     // cannot let an old account post after queued teardown.
     if (context && !context.isCurrent()) return;
-    await postNotificationNow(intent, context);
+    // Explicit OS denial is a presentation opt-out, not a failed durable message delivery. Keep
+    // cancellation/withdrawal intents ungated: those are privacy cleanup and must still run.
+    if (isPresentationIntent(intent)) {
+      const permission = await readNotificationPermissionWithinTimeout();
+      if (context && !context.isCurrent()) return;
+      if (permission !== 'granted') return;
+    }
+    try {
+      await postNotificationNow(intent, context);
+    } catch (error) {
+      // Permission can be revoked after the preflight read. Contain only notify-kit's exact
+      // POST_NOTIFICATIONS rejection. That native error is emitted only after the permission check
+      // fails at the actual display boundary, so it is authoritative even if access changes again.
+      if (!isPresentationIntent(intent) || !isPostNotificationsPermissionError(error)) throw error;
+    }
   });
 }
 
@@ -1543,12 +1989,17 @@ async function postNotificationNow(
   if (isActiveChat(intent.chatGuid)) return;
   const existingHistory = findDisplayedMessageHistory(displayed, route.chatId)?.entries ?? [];
   const replacesExistingLine = existingHistory.some((entry) => entry.messageId === route.messageId);
-  const avatarUri = intent.avatarUri ?? getGatorAvatarUri();
+  const body = normalizeMessageNotificationText(intent.body) ?? 'Message';
+  const normalizedSenderName = normalizeMessageNotificationLabel(intent.senderName);
+  const senderName = normalizedSenderName ?? 'Contact';
+  const title =
+    normalizeMessageNotificationTitle(intent.chatTitle) ?? normalizedSenderName ?? 'Conversation';
+  const avatarUri = normalizeMessageNotificationAvatarUri(intent.avatarUri ?? getGatorAvatarUri());
   const history = mergeMessageNotificationHistory(existingHistory, {
     messageId: route.messageId,
-    text: intent.body,
+    text: body,
     timestamp: intent.timestamp,
-    senderName: intent.senderName,
+    senderName,
     ...(avatarUri ? { avatarUri } : {}),
   });
   // A delayed duplicate may already have fallen outside the six-line window. In that case the
@@ -1572,7 +2023,7 @@ async function postNotificationNow(
     // current conversation title accurate.
     await notifee.createChannel({
       id: perChatId,
-      name: intent.chatTitle || 'Conversation',
+      name: title,
       importance: customChannel.importance,
     });
     if (!deliveryIsCurrent(context)) return;
@@ -1585,7 +2036,7 @@ async function postNotificationNow(
   const notification = messageNotificationFromHistory(
     {
       chatId: route.chatId,
-      title: intent.chatTitle,
+      title,
       channelId,
       isGroup: intent.isGroup,
       entries: history,
@@ -1600,111 +2051,29 @@ async function postNotificationNow(
   await reconcileMessageGroupNow(context);
 }
 
-async function cancelResolvedChatNotificationNow(
-  chatGuid: string,
-  chatId: number,
-  context?: EventDeliveryContext,
-): Promise<void> {
-  if (!deliveryIsCurrent(context)) return;
-  await notifee.cancelNotification(chatNotificationId(chatId));
-  if (!deliveryIsCurrent(context)) return;
-  // Compatibility cleanup only: new notifications never persist this raw server identifier.
-  await notifee.cancelNotification(chatGuid);
-}
-
-/** Remove one line by its opaque local id; malformed native history is contained, not guessed. */
+/** Reconcile every bounded history line from DB truth; never replay the update envelope itself. */
 async function withdrawMessageNotificationNow(
   chatGuid: string,
-  messageGuid: string,
+  _messageGuid: string,
   context?: EventDeliveryContext,
   db?: AppDatabase,
 ): Promise<void> {
   if (!deliveryIsCurrent(context)) return;
-  let route = await localRouteForGuids(chatGuid, messageGuid, db);
-  if (!deliveryIsCurrent(context)) return;
-  if (!route) {
-    // A legacy notification may still use the raw chat id even though the encrypted route is gone.
-    await notifee.cancelNotification(chatGuid);
-    await reconcileMessageGroupNow(context);
-    return;
-  }
-  if (route.messageId == null) {
-    const aliasRoute = await localRouteForMessageGuid(messageGuid, db);
-    if (!deliveryIsCurrent(context)) return;
-    if (aliasRoute?.chatId === route.chatId) route = aliasRoute;
-  }
-  if (route.messageId == null) {
-    await cancelResolvedChatNotificationNow(chatGuid, route.chatId, context);
-    await reconcileMessageGroupNow(context, chatNotificationId(route.chatId));
-    return;
-  }
-
-  let displayed: DisplayedNotification[];
+  const failures: unknown[] = [];
   try {
-    displayed = await notifee.getDisplayedNotifications();
-  } catch {
-    // Deletion/retraction privacy wins over history preservation when Android cannot enumerate.
-    await cancelResolvedChatNotificationNow(chatGuid, route.chatId, context);
-    await reconcileMessageGroupNow(context, chatNotificationId(route.chatId));
-    return;
+    await reconcileDisplayedMessageHistoriesNow(db, context);
+  } catch (error) {
+    failures.push(error);
   }
-  if (!deliveryIsCurrent(context)) return;
-
-  const id = chatNotificationId(route.chatId);
-  const matches = displayed.filter((item) => notificationId(item.notification, item.id) === id);
-  if (matches.length === 0) {
-    await notifee.cancelNotification(chatGuid);
-    await reconcileMessageGroupNow(context);
-    return;
-  }
-  const current =
-    matches.length === 1 ? parseDisplayedMessageHistory(matches[0]!, route.chatId) : null;
-  if (!current) {
-    await cancelResolvedChatNotificationNow(chatGuid, route.chatId, context);
-    await reconcileMessageGroupNow(context, id);
-    return;
-  }
-
-  const remaining = removeMessageFromNotificationHistory(current.entries, route.messageId);
-  if (remaining.length === current.entries.length) {
-    // The target is not in this chat's bounded tray history; leave unrelated lines intact.
-    await notifee.cancelNotification(chatGuid);
-    await reconcileMessageGroupNow(context);
-    return;
-  }
-  if (remaining.length === 0 || privateNotificationMustBeHidden()) {
-    await cancelResolvedChatNotificationNow(chatGuid, route.chatId, context);
-    await reconcileMessageGroupNow(context, id);
-    return;
-  }
-
-  const replacement = messageNotificationFromHistory(
-    { ...current, entries: remaining },
-    { onlyAlertOnce: true },
-  );
+  // Compatibility cleanup only: old builds used the raw chat GUID as the native id. Do this even
+  // when DB/native history reconciliation failed so a private legacy notice is not stranded.
   try {
-    await notifee.displayNotification(replacement);
-  } catch (displayError) {
-    // If Android cannot replace the notice, remove the old notice so deleted text cannot remain.
-    try {
-      // This queue slot still owns the failed old-account mutation. Containment must not be
-      // skipped merely because its delivery lease was revoked during the native await.
-      await cancelResolvedChatNotificationNow(chatGuid, route.chatId);
-    } catch (cancelError) {
-      throw privacyError('could not contain a failed message-withdrawal repost', [
-        displayError,
-        cancelError,
-      ]);
-    }
-    await reconcileMessageGroupNow(context, id);
-    throw privacyError('message-withdrawal repost failed; the old notification was cancelled', [
-      displayError,
-    ]);
+    await notifee.cancelNotification(chatGuid);
+  } catch (error) {
+    failures.push(error);
   }
-  if (!deliveryIsCurrent(context)) return;
-  await notifee.cancelNotification(chatGuid);
-  if (!deliveryIsCurrent(context)) return;
-  await reconcileMessageGroupNow(context);
+  if (failures.length > 0)
+    throw privacyError('message notification reconciliation failed', failures);
 }
 
 async function postSendFailureNotificationNow(
@@ -1833,6 +2202,26 @@ export function reconcileMessageNotificationGroup(): Promise<void> {
 }
 
 /**
+ * Reconcile Android message history against the supplied account database after a sync/repair.
+ * Registration precedes the FIFO wait so Disconnect drains an admitted reconciliation.
+ */
+export function reconcileMessageNotificationsWithDatabase(
+  db: AppDatabase,
+  context?: EventDeliveryContext,
+): Promise<void> {
+  const accountLease = context ?? captureRealtimeDeliveryLease();
+  return (async () => {
+    try {
+      await runTrackedRealtimeWork(accountLease, () =>
+        enqueueNotificationOperation(() => reconcileDisplayedMessageHistoriesNow(db, accountLease)),
+      );
+    } catch (error) {
+      if (accountLease.isCurrent()) throw error;
+    }
+  })();
+}
+
+/**
  * Repair the summary after Android itself removes a child through a body tap, swipe, or Clear All.
  * Re-enumerate instead of blindly excluding the stable id from the event: a delayed callback may
  * describe an older notice after a newer message already reused that chat id. A summary dismissal is
@@ -1904,10 +2293,11 @@ export function cancelAllNotifications(): Promise<void> {
 }
 
 /**
- * A single content-less "you have messages" notification, used when a background push
- * arrives while the app is LOCKED — we do NOT open/decrypt the DB or reveal any sender or
- * content. A fixed id keeps repeated locked pushes from stacking. Tapping opens the app to
- * the lock screen, after which sync delivers the real per-chat notifications.
+ * A single content-less "you have messages" notification used while the app is locked. This
+ * presenter never reads message content. The V3 caller authenticates and durably admits its
+ * encrypted-at-rest envelope before invoking it; the temporary pre-cutoff V2 caller also
+ * authenticates its frame first but never opens the database. A fixed id plus only-alert-once
+ * prevents repeated replacements from re-alerting.
  */
 export function postLockedNotification(context?: EventDeliveryContext): Promise<void> {
   return enqueueNotificationOperation(() =>
@@ -1992,8 +2382,6 @@ interface ReminderNotificationArgs {
   notificationId: string;
   chatGuid: string;
   messageGuid: string;
-  title: string;
-  body: string;
   scheduledFor: number;
   /** The reminded message's timestamp (ms) — carried so a tap deep-links with ?focusDate and
    *  scrolls to the message. Omitted when the message's date is unknown. */
@@ -2024,12 +2412,15 @@ async function scheduleReminderNotificationNow(args: ReminderNotificationArgs): 
     await notifee.createTriggerNotification(
       {
         id: args.notificationId,
-        title: args.title,
-        body: args.body,
+        // Android persists trigger presentation outside SQLCipher. Keep it generic; the tap route
+        // resolves the private chat/message only after the app has opened its encrypted database.
+        title: 'Reminder',
+        body: 'Reminder',
         data: nativeRouteData('reminder', route, args.messageDate),
         android: {
           channelId: CHANNEL_REMINDERS,
           smallIcon: 'ic_stat_gator',
+          onlyAlertOnce: true,
           pressAction: { id: PRESS_REMINDER, launchActivity: 'default' },
         },
       },
@@ -2042,7 +2433,10 @@ async function scheduleReminderNotificationNow(args: ReminderNotificationArgs): 
 }
 
 export function cancelReminderNotification(notificationId: string): Promise<void> {
-  return enqueueNotificationOperation(() => notifee.cancelTriggerNotification(notificationId));
+  // `cancelNotification` removes either native form that can own this id: a future trigger or a
+  // notification that has already fired. Trigger-only cancellation leaves a fired reminder in the
+  // tray after the user deletes it from Gator.
+  return enqueueNotificationOperation(() => notifee.cancelNotification(notificationId));
 }
 
 /** Fire-and-forget cancel — call when a chat is opened/read in the UI. */

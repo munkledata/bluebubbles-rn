@@ -1,8 +1,13 @@
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useNavigation, useRoute, useRouter } from 'expo-router';
 import { usePreventRemove } from 'expo-router/react-navigation';
+import {
+  isAggregateRetractionTombstone,
+  isExactMessagePartTopology,
+} from '@core/messages/retraction';
+import { parseMessagePartTopology } from '@core/models';
 import type { Recurrence } from '@core/schedule';
-import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -24,6 +29,7 @@ import { useReactiveQuery } from '@db/useReactiveQuery';
 import { dispatchRealtimeEvent, saveChatDraft, sendTyping } from '@/services';
 import { getDatabase } from '@db/database';
 import { getContactsPermissionState } from '@/services/contacts/contactsService';
+import { readMessagePreview } from '@/services/messagePreview';
 import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
@@ -38,9 +44,11 @@ import {
   send,
   sendImage,
   sendImages,
+  sendTextAttachment,
+  type AttachmentQueueAdmission,
 } from '@/services/send';
 import { logger } from '@core/secure';
-import { useSendContactSupported } from '@state/sessionStore';
+import { useSendAttachmentTextSupported, useSendContactSupported } from '@state/sessionStore';
 import {
   devEditFake,
   devInjectEffect,
@@ -103,6 +111,52 @@ interface DocumentPickerModule {
 }
 
 type DocumentPickerLoader = () => Promise<DocumentPickerModule>;
+
+/**
+ * Resolve at the DB queue handoff rather than at the much later network response. A rejection
+ * before that callback means the caller still owns the only authored copy and must retain it.
+ */
+function observeQueueAdmission(
+  start: (onQueued: () => void) => Promise<unknown>,
+  onQueued: () => void,
+  onRejectedBeforeQueue: (error: unknown) => void,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    let queued = false;
+    const markQueued = (): void => {
+      if (queued) return;
+      queued = true;
+      try {
+        onQueued();
+      } catch (error) {
+        logger.warn('[chat] queue handoff observer failed', error);
+      }
+      resolve(true);
+    };
+
+    let operation: Promise<unknown>;
+    try {
+      operation = Promise.resolve(start(markQueued));
+    } catch (error) {
+      onRejectedBeforeQueue(error);
+      resolve(false);
+      return;
+    }
+    void operation.then(
+      () => {
+        if (!queued) resolve(false);
+      },
+      (error: unknown) => {
+        if (!queued) {
+          onRejectedBeforeQueue(error);
+          resolve(false);
+        }
+        // After markQueued, the bubble + retry queue are the user-visible owner. The service logs
+        // and reconciles normal transport failures; account retirement is intentionally silent.
+      },
+    );
+  });
+}
 
 /**
  * Open the account-neutral OS picker, then accept its result only if the screen that opened it
@@ -192,6 +246,7 @@ function ChatScreenInner({
   // The chat's service for the badge, composer placeholder, and outgoing-bubble colour. Resolved
   // from the participant handle service (not just the guid prefix) so an SMS-only thread reads SMS.
   const chatService = resolveChatService(guid, header.data?.handleServices);
+  const supportsSendAttachmentText = useSendAttachmentTextSupported(chatService);
   // Search hits, reminders, unread jumps, and thread jumps all use exact message identity. The DB
   // resolves that identity to a stable (date,id) window, so null/equal timestamps cannot strand the
   // requested bubble outside the loaded context.
@@ -237,7 +292,7 @@ function ChatScreenInner({
     isCurrentWindow,
     refreshWindow,
   } = useMessages(guid, limit, anchor);
-  const messages = messagesData ?? [];
+  const messages = useMemo(() => messagesData ?? [], [messagesData]);
   // Hold the list back until the FIRST DB read resolves, so FlashList mounts WITH data. Its
   // `startRenderingFromBottom` only anchors the newest message on the INITIAL render (verified
   // against flash-list 2.0.2) — mounting empty and populating later left chats opening mid-history.
@@ -402,6 +457,54 @@ function ChatScreenInner({
     partIndex: number;
   } | null>(null);
   const [recording, setRecording] = useState(false);
+  const replyGuid = replyTo?.guid;
+  const replyTargetPartIndex = replyTo?.targetPartIndex;
+
+  // Reply previews are snapshots. Re-read the exact part whenever the live message window changes
+  // so an unsend cannot remain quoted in the composer after the authoritative DB row updates.
+  useEffect(() => {
+    if (replyGuid == null || replyTargetPartIndex == null) return;
+    let alive = true;
+    void runTrackedRealtimeWork(accountLease, async () => {
+      const preview = await readMessagePreview(replyGuid, replyTargetPartIndex);
+      if (!alive || !accountLease.isCurrent()) return;
+      setReplyTo((current) => {
+        if (current?.guid !== replyGuid || current.targetPartIndex !== replyTargetPartIndex) {
+          return current;
+        }
+        return preview?.isRetracted
+          ? null
+          : preview
+            ? { ...preview, targetPartIndex: replyTargetPartIndex }
+            : null;
+      });
+    }).catch(() => {
+      if (!alive || !accountLease.isCurrent()) return;
+      setReplyTo((current) =>
+        current?.guid === replyGuid && current.targetPartIndex === replyTargetPartIndex
+          ? null
+          : current,
+      );
+    });
+    return () => {
+      alive = false;
+    };
+  }, [accountLease, messages, replyGuid, replyTargetPartIndex]);
+
+  useEffect(() => {
+    if (!editing) return;
+    const current = messages.find((message) => message.guid === editing.guid);
+    const topology = parseMessagePartTopology(current?.messagePartTopology);
+    const editedPartSurvives =
+      current?.retractionState !== 'partial' ||
+      (isExactMessagePartTopology(topology) &&
+        topology.currentParts.some(
+          (part) => part.index === editing.partIndex && part.kind === 'text',
+        ));
+    if (current && !isAggregateRetractionTombstone(current) && editedPartSurvives) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setEditing(null);
+  }, [editing, messages]);
 
   // Dormant future bounded-share handoff. IPC-01 currently exposes no inbound Android share target,
   // so production navigation never supplies `?share=1`. If an owned bounded intake is added later,
@@ -433,6 +536,10 @@ function ChatScreenInner({
   // screen doesn't re-render the composer through fresh closures.
   const onSchedule = useCallback(
     (text: string, scheduledFor: number, recurrence?: Recurrence | null): void => {
+      if (replyTo && replyTo.targetPartIndex == null) {
+        showToast('That message part is not available to reply to yet');
+        return;
+      }
       // Capture the active reply target so a scheduled reply still threads.
       void schedule(
         {
@@ -460,7 +567,7 @@ function ChatScreenInner({
       effectId?: string,
       subject?: string,
       mentions?: { start: number; length: number; address: string }[],
-    ): void => {
+    ): void | Promise<boolean> => {
       // DEV: when on the local dev session, simulate the server round-trip so the
       // optimistic → sent flow is visible without a real Gator server.
       if (editing) {
@@ -473,31 +580,69 @@ function ChatScreenInner({
         return;
       }
       if (replyTo) {
-        const partIndex = replyTo.targetPartIndex ?? 0;
-        if (isDev())
-          void devSendFakeReply(guid, text, replyTo.guid, partIndex, effectId, accountLease);
-        else
-          void reply(
-            {
-              chatGuid: guid,
-              text,
-              replyToGuid: replyTo.guid,
-              replyToPartIndex: partIndex,
-              effectId,
-            },
+        const capturedReply = replyTo;
+        const partIndex = replyTo.targetPartIndex;
+        if (partIndex == null) {
+          showToast('That message part is not available to reply to yet');
+          return Promise.resolve(false);
+        }
+        return observeQueueAdmission(
+          (onQueued) => {
+            if (isDev()) {
+              return devSendFakeReply(
+                guid,
+                text,
+                capturedReply.guid,
+                partIndex,
+                effectId,
+                accountLease,
+                onQueued,
+              );
+            }
+            return reply(
+              {
+                chatGuid: guid,
+                text,
+                replyToGuid: capturedReply.guid,
+                replyToPartIndex: partIndex,
+                effectId,
+              },
+              accountLease,
+              presentSendIssue,
+              onQueued,
+            );
+          },
+          () => setReplyTo((current) => (current === capturedReply ? null : current)),
+          (error) => {
+            if (!accountLease.isCurrent()) return;
+            logger.warn('[chat] reply queue admission failed', error);
+            showToast(
+              'Couldn’t queue that reply. Your draft is still here—try again when connected',
+            );
+          },
+        );
+      }
+      return observeQueueAdmission(
+        (onQueued) => {
+          if (isDev()) {
+            return devSendFake(guid, text, effectId, accountLease, onQueued);
+          }
+          return send(
+            { chatGuid: guid, text, effectId, subject, mentions },
             accountLease,
             presentSendIssue,
+            onQueued,
           );
-        setReplyTo(null);
-        return;
-      }
-      if (isDev()) void devSendFake(guid, text, effectId, accountLease);
-      else
-        void send(
-          { chatGuid: guid, text, effectId, subject, mentions },
-          accountLease,
-          presentSendIssue,
-        );
+        },
+        () => undefined,
+        (error) => {
+          if (!accountLease.isCurrent()) return;
+          logger.warn('[chat] message queue admission failed', error);
+          showToast(
+            'Couldn’t queue that message. Your draft is still here—try again when connected',
+          );
+        },
+      );
     },
     [accountLease, guid, editing, replyTo, isDev],
   );
@@ -667,16 +812,124 @@ function ChatScreenInner({
 
   // The rest of the Composer's callback props, useCallback-stable for the same memo reason.
   const onSendAttachments = useCallback(
-    (items: PendingAttachment[]): void => {
-      void sendImages({ chatGuid: guid, images: items }, accountLease, presentSendIssue).catch(
+    (items: PendingAttachment[]): Promise<readonly string[]> => {
+      const expectedUris = new Set(items.map((item) => item.uri));
+      const decidedUris = new Set<string>();
+      const queuedUris = new Set<string>();
+      let reportedFailure = false;
+
+      return new Promise((resolve) => {
+        let settled = false;
+        const finish = (): void => {
+          if (settled) return;
+          settled = true;
+          resolve([...queuedUris]);
+        };
+        const onAdmission = (admission: AttachmentQueueAdmission): void => {
+          if (!accountLease.isCurrent()) return;
+          if (!expectedUris.has(admission.uri) || decidedUris.has(admission.uri)) return;
+          decidedUris.add(admission.uri);
+          if (admission.queued) queuedUris.add(admission.uri);
+          else if (!reportedFailure && accountLease.isCurrent()) {
+            reportedFailure = true;
+            showToast(
+              'Couldn’t queue one or more attachments. They’re still in your composer—try again when connected',
+            );
+          }
+          if (decidedUris.size === expectedUris.size) finish();
+        };
+
+        let operation: Promise<unknown>;
+        try {
+          operation = Promise.resolve(
+            sendImages(
+              { chatGuid: guid, images: items },
+              accountLease,
+              presentSendIssue,
+              onAdmission,
+            ),
+          );
+        } catch (error) {
+          if (accountLease.isCurrent()) {
+            logger.warn('[chat] attachment queue admission failed', error);
+            showToast(
+              'Couldn’t queue those attachments. They’re still in your composer—try again when connected',
+            );
+          }
+          finish();
+          return;
+        }
+
+        void operation.then(
+          () => finish(),
+          (error: unknown) => {
+            if (!settled && accountLease.isCurrent()) {
+              logger.warn('[chat] attachment queue admission failed', error);
+              if (!reportedFailure) {
+                showToast(
+                  'Couldn’t queue one or more attachments. They’re still in your composer—try again when connected',
+                );
+              }
+            }
+            finish();
+          },
+        );
+      });
+    },
+    [accountLease, guid],
+  );
+  const onSendTextAttachment = useCallback(
+    (
+      text: string,
+      item: PendingAttachment,
+      effectId?: string,
+      subject?: string,
+      mentions?: { start: number; length: number; address: string }[],
+    ): Promise<boolean> | false => {
+      if (chatService !== 'iMessage' && chatService !== 'RCS') return false;
+      if (effectId || subject || (mentions?.length ?? 0) > 0) {
+        showToast('Text with an attachment doesn’t support effects, subjects, or mentions yet');
+        return false;
+      }
+      if (chatService === 'RCS' && replyTo) {
+        showToast('This server can’t send an RCS media reply with text yet');
+        return false;
+      }
+      const capturedReply = replyTo;
+      if (capturedReply && capturedReply.targetPartIndex == null) {
+        showToast('That message part is not available to reply to yet');
+        return false;
+      }
+      return observeQueueAdmission(
+        (onQueued) =>
+          sendTextAttachment(
+            {
+              chatGuid: guid,
+              image: item,
+              text,
+              service: chatService,
+              selectedMessageGuid: capturedReply?.guid,
+              partIndex: capturedReply?.targetPartIndex,
+            },
+            accountLease,
+            presentSendIssue,
+            onQueued,
+          ),
+        () => {
+          if (capturedReply) {
+            setReplyTo((current) => (current === capturedReply ? null : current));
+          }
+        },
         (error) => {
           if (!accountLease.isCurrent()) return;
-          logger.warn('[chat] attachment send rejected', error);
-          showToast('Couldn’t send one or more attachments—add the missing file again');
+          logger.warn('[chat] text-attachment queue admission failed', error);
+          showToast(
+            'Couldn’t queue that text and attachment. They’re still in your composer—try again',
+          );
         },
       );
     },
-    [accountLease, guid],
+    [accountLease, chatService, guid, replyTo],
   );
   const onCancelReply = useCallback((): void => setReplyTo(null), []);
   const onCancelEdit = useCallback((): void => setEditing(null), []);
@@ -689,28 +942,84 @@ function ChatScreenInner({
     [accountLease, guid],
   );
   const onStartVoice = useCallback((): void => setRecording(true), []);
+  const onSendVoice = useCallback(
+    (uri: string): Promise<boolean> =>
+      observeQueueAdmission(
+        (onQueued) =>
+          sendImage(
+            {
+              chatGuid: guid,
+              image: {
+                uri,
+                name: uri.split('/').pop() ?? 'voice.m4a',
+                mimeType: 'audio/mp4',
+                size: 0,
+              },
+            },
+            accountLease,
+            presentSendIssue,
+            onQueued,
+          ),
+        () => undefined,
+        (error) => {
+          if (!accountLease.isCurrent()) return;
+          logger.warn('[chat] voice message queue admission failed', error);
+          showToast('Couldn’t queue that recording. It’s still here—try again when connected');
+        },
+      ),
+    [accountLease, guid],
+  );
 
   // Contact card: only offered when the server can build vCards (supports_send_contact). Explain
   // the optional Contacts grant before Android's prompt, then open the native picker and send the
   // chosen contact (optimistic bubble + reconcile inside the service).
   const supportsSendContact = useSendContactSupported();
   const runContactPicker = useCallback((): void => {
+    const capturedReply = replyTo;
+    let capturedTarget: { replyToGuid: string; replyToPartIndex: number } | undefined;
+    if (capturedReply) {
+      if (chatService === 'RCS') {
+        showToast("This server can't send an RCS contact-card reply yet");
+        return;
+      }
+      if (capturedReply.targetPartIndex == null) {
+        showToast('That message part is not available to reply to yet');
+        return;
+      }
+      capturedTarget = {
+        replyToGuid: capturedReply.guid,
+        replyToPartIndex: capturedReply.targetPartIndex,
+      };
+    }
     const attempt = (): void => {
-      pickAndSendContact(guid, accountLease, presentSendIssue).catch((e) => {
-        if (!accountLease.isCurrent()) return;
-        if (isContactsPermissionDeniedError(e)) {
-          showContactsPermissionRecovery({
-            canAskAgain: e.canAskAgain,
-            isCurrent: () => accountLease.isCurrent(),
-            onTryAgain: attempt,
-          });
-          return;
-        }
-        logger.warn('[chat] contact pick/send failed', e);
-      });
+      void observeQueueAdmission(
+        (onQueued) =>
+          pickAndSendContact(guid, accountLease, presentSendIssue, capturedTarget, onQueued),
+        () => {
+          if (!capturedReply) return;
+          setReplyTo((current) =>
+            current?.guid === capturedReply.guid &&
+            current.targetPartIndex === capturedReply.targetPartIndex
+              ? null
+              : current,
+          );
+        },
+        (e) => {
+          if (!accountLease.isCurrent()) return;
+          if (isContactsPermissionDeniedError(e)) {
+            showContactsPermissionRecovery({
+              canAskAgain: e.canAskAgain,
+              isCurrent: () => accountLease.isCurrent(),
+              onTryAgain: attempt,
+            });
+            return;
+          }
+          logger.warn('[chat] contact pick/send failed', e);
+        },
+      );
     };
     attempt();
-  }, [accountLease, guid]);
+  }, [accountLease, chatService, guid, replyTo]);
   const onPickContact = useCallback((): void => {
     void getContactsPermissionState()
       .then((permission) => {
@@ -911,6 +1220,7 @@ function ChatScreenInner({
         }
         onSend={onSend}
         onSendAttachments={onSendAttachments}
+        onSendTextAttachment={supportsSendAttachmentText ? onSendTextAttachment : undefined}
         canSubmit={hasLogicalSendCapacity}
         isSubmitOwnerCurrent={accountLease.isCurrent}
         onPickFiles={pickFiles}
@@ -1012,26 +1322,7 @@ function ChatScreenInner({
                   'Microphone access is unavailable. Try again or enable it in system settings.',
                 )
               }
-              onSend={(uri) => {
-                setRecording(false);
-                void sendImage(
-                  {
-                    chatGuid: guid,
-                    image: {
-                      uri,
-                      name: uri.split('/').pop() ?? 'voice.m4a',
-                      mimeType: 'audio/mp4',
-                      size: 0,
-                    },
-                  },
-                  accountLease,
-                  presentSendIssue,
-                ).catch((error) => {
-                  if (!accountLease.isCurrent()) return;
-                  logger.warn('[chat] voice message send rejected', error);
-                  showToast('Couldn’t send that recording—try recording it again');
-                });
-              }}
+              onSend={onSendVoice}
             />
           </Suspense>
         </LoadErrorBoundary>

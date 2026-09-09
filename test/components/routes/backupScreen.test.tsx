@@ -43,24 +43,22 @@ jest.mock('@/services/backup/backupService', () => {
     exportEncryptedBackup: jest.fn(async () => undefined),
     importBackupAuto: jest.fn(),
     isBackupAccountChangedError: () => false,
-    readPickedBackupCopy: jest.fn(),
   };
 });
+
+jest.mock('@/services/backup/pickedBackupDocument', () => ({
+  readPickedBackupDocument: jest.fn(),
+}));
 
 // eslint-disable-next-line import/first
 import BackupScreen, { pickBackupFileForLease } from '../../../app/(app)/backup';
 // eslint-disable-next-line import/first
-import {
-  exportEncryptedBackup,
-  importBackupAuto,
-  readPickedBackupCopy,
-} from '@/services/backup/backupService';
+import { exportEncryptedBackup, importBackupAuto } from '@/services/backup/backupService';
 // eslint-disable-next-line import/first
 import { showDialog } from '@ui/dialog/dialogStore';
 
 const mockExport = exportEncryptedBackup as jest.Mock;
 const mockImport = importBackupAuto as jest.Mock;
-const mockReadPickedBackupCopy = readPickedBackupCopy as jest.Mock;
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -83,7 +81,6 @@ beforeEach(() => {
   mockAccountCurrent = true;
   mockInvalidateAccount = null;
   mockExport.mockResolvedValue(undefined);
-  mockReadPickedBackupCopy.mockResolvedValue('picked-backup');
 });
 
 describe('BackupScreen passphrase boundary', () => {
@@ -199,26 +196,71 @@ describe('BackupScreen passphrase boundary', () => {
     expect(showDialog).not.toHaveBeenCalled();
   });
 
-  it('hands a delayed picker cache copy to cleanup after the account retires', async () => {
+  it('does not read a delayed provider URI after the account retires', async () => {
     const pickerResult = deferred<{
       canceled: false;
-      assets: Array<{ uri: string }>;
+      assets: { uri: string; size?: number }[];
     }>();
     const getDocumentAsync = jest.fn(() => pickerResult.promise);
+    const readDocument = jest.fn(async () => 'picked-backup');
     const lease = { generation: 7, isCurrent: () => mockAccountCurrent };
-    const pending = pickBackupFileForLease(lease, async () => ({ getDocumentAsync }));
+    const pending = pickBackupFileForLease(lease, async () => ({ getDocumentAsync }), readDocument);
     await waitFor(() => expect(getDocumentAsync).toHaveBeenCalledTimes(1));
 
     mockAccountCurrent = false;
     pickerResult.resolve({
       canceled: false,
-      assets: [{ uri: 'file:///cache/account-a.gatorbackup' }],
+      assets: [{ uri: 'content://documents/account-a.gatorbackup', size: 123 }],
     });
 
     await expect(pending).resolves.toBeNull();
-    expect(mockReadPickedBackupCopy).toHaveBeenCalledWith(
-      'file:///cache/account-a.gatorbackup',
-      lease,
+    expect(readDocument).not.toHaveBeenCalled();
+  });
+
+  it('requests no cache copy and forwards provider metadata to the bounded reader', async () => {
+    const getDocumentAsync = jest.fn(async () => ({
+      canceled: false,
+      assets: [{ uri: 'content://documents/current.gatorbackup', size: 321 }],
+    }));
+    const readDocument = jest.fn(async () => '  picked-backup  ');
+    const lease = { generation: 7, isCurrent: () => true };
+
+    await expect(
+      pickBackupFileForLease(lease, async () => ({ getDocumentAsync }), readDocument),
+    ).resolves.toBe('  picked-backup  ');
+    expect(getDocumentAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ copyToCacheDirectory: false }),
     );
+    expect(readDocument).toHaveBeenCalledWith(
+      'content://documents/current.gatorbackup',
+      321,
+      expect.anything(),
+    );
+  });
+
+  it('cancels and discards a provider read when its account retires', async () => {
+    let observedSignal: AbortSignal | undefined;
+    const readDocument = jest.fn(
+      async (_uri: string, _size?: number | null, signal?: AbortSignal) => {
+        observedSignal = signal;
+        return await new Promise<string>((_resolve, reject) => {
+          signal?.addEventListener('abort', () => reject(new Error('cancelled')), { once: true });
+        });
+      },
+    );
+    const getDocumentAsync = jest.fn(async () => ({
+      canceled: false,
+      assets: [{ uri: 'content://documents/account-a.gatorbackup', size: null }],
+    }));
+    const lease = { generation: 7, isCurrent: () => mockAccountCurrent };
+
+    const pending = pickBackupFileForLease(lease, async () => ({ getDocumentAsync }), readDocument);
+    await waitFor(() => expect(readDocument).toHaveBeenCalledTimes(1));
+
+    mockAccountCurrent = false;
+    mockInvalidateAccount?.();
+
+    await expect(pending).resolves.toBeNull();
+    expect(observedSignal?.aborted).toBe(true);
   });
 });

@@ -34,7 +34,13 @@ describe('wire contract: app zod models accept the Gator server shapes', () => {
       expect(res.data.private_api).toBe(true);
       expect(res.data.proxy_service).toBe('zrok');
       expect(res.data.supports_header_auth).toBe(true);
+      expect(res.data.supports_scoped_device_credentials).toBe(true);
+      expect(res.data.supports_fcm_push_encryption_v3).toBe(true);
+      expect(res.data.supports_fcm_push_key_rotation).toBe(true);
       expect(res.data.supports_fcm_device_encryption).toBe(true);
+      expect(res.data.supports_rcs_send_attempt_ownership).toBe(true);
+      expect(res.data.supports_rcs_text_with_attachment).toBe(true);
+      expect(res.data.supports_imessage_text_with_attachment).toBe(false);
       // Schema gap 6: the deletion-detection capability is additive and parsed as a plain boolean.
       expect(res.data.supports_message_deleted).toBe(true);
       expect(res.data.supports_message_search).toBe(true);
@@ -54,6 +60,35 @@ describe('wire contract: app zod models accept the Gator server shapes', () => {
       // messageSummaryInfo is likewise presence-driven — an un-edited message omits it entirely.
       expect(res.data.messageSummaryInfo).toBeUndefined();
     }
+  });
+
+  it('Message preserves only a complete, bounded RCS success-correlation tuple', () => {
+    const base = fixture('message.gator.json') as Record<string, unknown>;
+    const exact = Message.safeParse({
+      ...base,
+      tempGuid: 'temp-rcs-success',
+      attemptGuid: 'attempt-rcs-success',
+      clientAttemptGeneration: 4,
+    });
+    expect(exact.success).toBe(true);
+    if (exact.success) {
+      expect(exact.data.tempGuid).toBe('temp-rcs-success');
+      expect(exact.data.attemptGuid).toBe('attempt-rcs-success');
+      expect(exact.data.clientAttemptGeneration).toBe(4);
+    }
+
+    const partial = Message.parse({ ...base, tempGuid: 'temp-without-owner' });
+    expect(partial.tempGuid).toBeUndefined();
+    expect(partial.attemptGuid).toBeUndefined();
+    expect(partial.sendAttemptCorrelationInvalid).toBe(true);
+    const oversized = Message.parse({
+      ...base,
+      tempGuid: 'temp-rcs-oversized',
+      attemptGuid: 'x'.repeat(129),
+    });
+    expect(oversized.tempGuid).toBeUndefined();
+    expect(oversized.attemptGuid).toBeUndefined();
+    expect(oversized.sendAttemptCorrelationInvalid).toBe(true);
   });
 
   it('Message accepts an edited message carrying messageSummaryInfo (edit history + retracted parts)', () => {

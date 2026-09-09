@@ -10,8 +10,10 @@ import {
   upsertHandles,
 } from '@db/repositories';
 import {
+  captureDbWriteFence,
   type DbTransactionContext,
   DbTransactionContextRejectedError,
+  DbWriteFenceRejectedError,
   runInTransactionContext,
   withDbTransaction,
   withDbWriteLock,
@@ -347,6 +349,34 @@ describe('DbTransactionContext', () => {
 // on the shared connection and its whole event is lost (no row, no notification, no retry —
 // the router's rejection dies in a `void`). These tests pin the queue that prevents it.
 describe('withDbTransaction serialization', () => {
+  it('lets one fenced owner use bounded transactions and rejects it after foreign DB work', async () => {
+    const order: string[] = [];
+    const db = orderedDatabase(order);
+    const fence = await captureDbWriteFence();
+
+    await withDbTransaction(
+      db,
+      async () => {
+        order.push('fenced:first');
+      },
+      fence.commitGuard,
+    );
+    await withDbTransaction(db, async () => {
+      order.push('foreign');
+    });
+
+    await expect(
+      withDbTransaction(
+        db,
+        async () => {
+          order.push('fenced:unsafe');
+        },
+        fence.commitGuard,
+      ),
+    ).rejects.toBeInstanceOf(DbWriteFenceRejectedError);
+    expect(order).toEqual(['BEGIN', 'fenced:first', 'COMMIT', 'BEGIN', 'foreign', 'COMMIT']);
+  });
+
   it('two overlapping transactions both commit — neither call rejects', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seedChat(db, 'cTx4');

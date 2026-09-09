@@ -22,7 +22,13 @@ import { getDatabase } from '@db/database';
 import { deleteReminderByNotificationId, getMessageActionPartLayoutByGuid } from '@db/repositories';
 import { isDevServer } from '@utils/isDev';
 import { ensureDatabase } from '@/services/databaseControl';
+import { accountRevocationMarker, fixedCredentialClient, vault } from '@/services/clients';
+import { inspectBackgroundSession } from '@/services/background/backgroundSyncOrchestrator';
 import { markRead } from '@/services/chatActions';
+import {
+  captureSessionRcsCapabilityLease,
+  resolveRcsAttemptOwnership,
+} from '@/services/send/rcsAttemptCapability';
 import { sendTextMessage } from '@/services/send/sendService';
 import { sendReactionMessage } from '@/services/send/sendReactionService';
 import { devSendFake, devSendFakeReaction } from '@features/conversations/devSeed';
@@ -57,10 +63,55 @@ jest.mock('react-native-notify-kit', () => ({
 // A sentinel DB handle so we can prove ensureDatabase()'s value is threaded to the writes.
 // Must be `mock`-prefixed — jest.mock factories are hoisted and may only reference such vars.
 const mockDb = { __db: true, all: jest.fn(async (_query: unknown): Promise<unknown[]> => []) };
+const mockPinnedForegroundHttp = {
+  __pinnedHttp: true,
+  snapshotTransport: jest.fn(() => ({
+    origin: 'https://foreground.test',
+    transportRevision: 7,
+  })),
+  isTransportCurrent: jest.fn(() => true),
+};
 jest.mock('@/services/databaseControl', () => ({
   ensureDatabase: jest.fn(async () => mockDb),
 }));
-jest.mock('@/services/clients', () => ({ http: { __http: true } }));
+jest.mock('@/services/clients', () => ({
+  http: { __http: true, pinTransport: jest.fn(() => mockPinnedForegroundHttp) },
+  vault: { __vault: true },
+  accountRevocationMarker: { isRevoked: jest.fn(() => false) },
+  fixedCredentialClient: jest.fn(() => ({
+    __taskHttp: true,
+    isTransportCurrent: () => true,
+  })),
+}));
+jest.mock('@/services/background/backgroundSyncOrchestrator', () => ({
+  inspectBackgroundSession: jest.fn(async () => ({
+    kind: 'ready',
+    session: { origin: 'https://headless.test', password: 'headless-password' },
+  })),
+}));
+jest.mock('@/services/send/rcsAttemptCapability', () => ({
+  captureSessionRcsCapabilityLease: jest.fn(() => ({
+    kind: 'session',
+    origin: 'https://foreground.test',
+    revision: 7,
+    serverInfo: null,
+    isCurrent: () => true,
+    publish: () => true,
+  })),
+  resolveRcsAttemptOwnership: jest.fn(async () => ({
+    attemptAware: false,
+    serverInfo: { private_api: true, supports_message_part_topology: false },
+  })),
+  messageTargetServerAuthorization: jest.fn(
+    (info: { supports_message_part_topology?: boolean } | null, isCurrent: () => boolean) =>
+      info
+        ? {
+            allowsLegacyPartZero: info.supports_message_part_topology !== true,
+            isCurrent,
+          }
+        : undefined,
+  ),
+}));
 jest.mock('@/services/chatActions', () => ({
   markRead: jest.fn(async () => undefined),
 }));
@@ -93,7 +144,14 @@ jest.mock('@/services/send/sendReactionService', () => ({
 }));
 jest.mock('@db/repositories', () => ({
   deleteReminderByNotificationId: jest.fn(async () => undefined),
-  getMessageActionPartLayoutByGuid: jest.fn(async () => null),
+  getMessageActionPartLayoutByGuid: jest.fn(async () => ({
+    text: 'message',
+    attributedBody: null,
+    partCount: 1,
+    visibleAttachmentCount: 0,
+    messagePartTopology: null,
+    visibleAttachmentGuids: [],
+  })),
 }));
 jest.mock('@utils/isDev', () => ({ isDevServer: jest.fn(() => false) }));
 jest.mock('@core/api', () => ({
@@ -110,6 +168,11 @@ jest.mock('@features/conversations/devSeed', () => ({
 
 const mockNotifeeCancel = notifee.cancelNotification as jest.Mock;
 const mockEnsureDatabase = ensureDatabase as jest.Mock;
+const mockFixedClient = fixedCredentialClient as jest.Mock;
+const mockInspectSession = inspectBackgroundSession as jest.Mock;
+const mockCaptureCapability = captureSessionRcsCapabilityLease as jest.Mock;
+const mockResolveRcsAttemptOwnership = resolveRcsAttemptOwnership as jest.Mock;
+const mockMarkerIsRevoked = accountRevocationMarker.isRevoked as jest.Mock;
 const mockGetDatabase = getDatabase as jest.Mock;
 const mockMarkRead = markRead as jest.Mock;
 const mockSendText = sendTextMessage as jest.Mock;
@@ -220,12 +283,52 @@ describe('handleNotificationAction — reply', () => {
       expect.any(Function), // the queue handover — see the mock
       undefined,
       expect.any(Function),
+      expect.objectContaining({
+        origin: 'https://foreground.test',
+        revision: 7,
+      }),
     );
     const commitGuard = mockSendText.mock.calls[0]?.[6] as (() => boolean) | undefined;
     expect(commitGuard?.()).toBe(true);
     await pauseRealtimeDeliveries();
     expect(commitGuard?.()).toBe(false);
     resumeRealtimeDeliveries();
+    expect(mockNotifeeCancel).toHaveBeenCalledWith('gator-message-7');
+  });
+
+  it('binds a killed-process reply to one authorized task-local transport', async () => {
+    const taskHttp = { __taskHttp: 'headless', isTransportCurrent: () => true };
+    mockCaptureCapability.mockReturnValueOnce(undefined);
+    mockFixedClient.mockReturnValueOnce(taskHttp);
+    mockInspectSession.mockResolvedValueOnce({
+      kind: 'ready',
+      session: { origin: 'https://vault.example', password: 'vault-secret' },
+    });
+
+    await handleNotificationAction(
+      safeChatDetail(ACTION_REPLY, { chatGuid: 'headless-chat' }, { input: 'from the tray' }),
+    );
+
+    expect(mockInspectSession).toHaveBeenCalledWith(vault, accountRevocationMarker);
+    expect(mockFixedClient).toHaveBeenCalledWith(
+      'https://vault.example',
+      'vault-secret',
+      expect.any(Function),
+    );
+    expect(mockSendText).toHaveBeenCalledWith(
+      mockDb,
+      taskHttp,
+      { chatGuid: 'headless-chat', text: 'from the tray' },
+      expect.any(Number),
+      expect.any(Function),
+      undefined,
+      expect.any(Function),
+      undefined,
+    );
+    const commitGuard = mockSendText.mock.calls[0]?.[6] as (() => boolean) | undefined;
+    expect(commitGuard?.()).toBe(true);
+    mockMarkerIsRevoked.mockReturnValueOnce(true);
+    expect(commitGuard?.()).toBe(false);
     expect(mockNotifeeCancel).toHaveBeenCalledWith('gator-message-7');
   });
 
@@ -253,6 +356,9 @@ describe('handleNotificationAction — reply', () => {
 
   it('DEV: routes the reply through devSendFake, not the real send path', async () => {
     mockIsDevServer.mockReturnValueOnce(true);
+    mockDevSendFake.mockImplementationOnce(async (...args: unknown[]) => {
+      await (args[4] as (() => Promise<void> | void) | undefined)?.();
+    });
     await handleNotificationAction(
       safeChatDetail(ACTION_REPLY, { chatGuid: 'c1' }, { input: 'yo' }),
     );
@@ -261,8 +367,10 @@ describe('handleNotificationAction — reply', () => {
       'yo',
       undefined,
       expect.objectContaining({ generation: expect.any(Number), isCurrent: expect.any(Function) }),
+      expect.any(Function),
     );
     expect(mockSendText).not.toHaveBeenCalled();
+    expect(mockNotifeeCancel).toHaveBeenCalledWith('gator-message-7');
     // Schema-2 route resolution opens the DB; the dev send path itself does not open it again.
     expect(mockEnsureDatabase).toHaveBeenCalledTimes(1);
   });
@@ -302,10 +410,42 @@ describe('handleNotificationAction — mark-read', () => {
     expect(mockMarkRead).toHaveBeenCalledWith(
       'c9',
       expect.objectContaining({ generation: expect.any(Number), isCurrent: expect.any(Function) }),
+      expect.objectContaining({ resolveReceiptTransport: expect.any(Function) }),
     );
     expect(mockNotifeeCancel).toHaveBeenCalledWith('gator-message-7');
     expect(mockSendText).not.toHaveBeenCalled();
     expect(mockSendReaction).not.toHaveBeenCalled();
+  });
+
+  it('offers mark-read a lazy killed-process receipt transport', async () => {
+    const taskHttp = { __taskHttp: 'mark-read', isTransportCurrent: () => true };
+    let resolvedTransport: unknown;
+    mockCaptureCapability.mockReturnValueOnce(undefined);
+    mockFixedClient.mockReturnValueOnce(taskHttp);
+    mockInspectSession.mockResolvedValueOnce({
+      kind: 'ready',
+      session: { origin: 'https://vault.example', password: 'vault-secret' },
+    });
+    mockMarkRead.mockImplementationOnce(async (...args: unknown[]) => {
+      const options = args[2] as {
+        resolveReceiptTransport?: () => Promise<unknown>;
+      };
+      resolvedTransport = await options.resolveReceiptTransport?.();
+    });
+
+    await handleNotificationAction(
+      safeChatDetail(ACTION_MARK_READ, { chatGuid: 'headless-read-chat' }),
+    );
+
+    expect(mockFixedClient).toHaveBeenCalledWith(
+      'https://vault.example',
+      'vault-secret',
+      expect.any(Function),
+    );
+    expect(resolvedTransport).toEqual(
+      expect.objectContaining({ http: taskHttp, isCurrent: expect.any(Function) }),
+    );
+    expect(mockNotifeeCancel).toHaveBeenCalledWith('gator-message-7');
   });
 });
 
@@ -331,13 +471,67 @@ describe('handleNotificationAction — love (tapback)', () => {
       },
       expect.any(Number),
       expect.any(Function),
+      expect.objectContaining({ allowsLegacyPartZero: true, isCurrent: expect.any(Function) }),
     );
     const commitGuard = mockSendReaction.mock.calls[0]?.[4] as (() => boolean) | undefined;
     expect(commitGuard?.()).toBe(true);
+    const targetAuthorization = mockSendReaction.mock.calls[0]?.[5] as
+      { isCurrent(): boolean } | undefined;
+    expect(targetAuthorization?.isCurrent()).toBe(true);
+    mockPinnedForegroundHttp.isTransportCurrent.mockReturnValue(false);
+    expect(targetAuthorization?.isCurrent()).toBe(false);
+    mockPinnedForegroundHttp.isTransportCurrent.mockReturnValue(true);
     await pauseRealtimeDeliveries();
     expect(commitGuard?.()).toBe(false);
     resumeRealtimeDeliveries();
     expect(mockNotifeeCancel).toHaveBeenCalledWith('gator-message-7');
+  });
+
+  it('targets a modern RCS notification as whole-message part zero', async () => {
+    mockResolveRcsAttemptOwnership.mockResolvedValueOnce({
+      attemptAware: true,
+      serverInfo: { private_api: true, supports_message_part_topology: true },
+    });
+
+    await handleNotificationAction(
+      safeChatDetail(ACTION_LOVE, {
+        chatGuid: 'RCS;-;thread-1',
+        messageGuid: 'rcs-message-1',
+      }),
+    );
+
+    expect(mockSendReaction).toHaveBeenCalledWith(
+      mockDb,
+      expect.anything(),
+      {
+        chatGuid: 'RCS;-;thread-1',
+        targetGuid: 'rcs-message-1',
+        reaction: 'love',
+        partIndex: 0,
+      },
+      expect.any(Number),
+      expect.any(Function),
+      expect.objectContaining({ allowsLegacyPartZero: false, isCurrent: expect.any(Function) }),
+    );
+  });
+
+  it('binds killed-process Love to the authorized task-local client', async () => {
+    const taskHttp = { __taskHttp: 'love', isTransportCurrent: () => true };
+    mockCaptureCapability.mockReturnValueOnce(undefined);
+    mockFixedClient.mockReturnValueOnce(taskHttp);
+
+    await handleNotificationAction(
+      safeChatDetail(ACTION_LOVE, { chatGuid: 'c2', messageGuid: 'm2' }),
+    );
+
+    expect(mockSendReaction).toHaveBeenCalledWith(
+      mockDb,
+      taskHttp,
+      expect.objectContaining({ chatGuid: 'c2', targetGuid: 'm2', reaction: 'love' }),
+      expect.any(Number),
+      expect.any(Function),
+      expect.objectContaining({ allowsLegacyPartZero: true, isCurrent: expect.any(Function) }),
+    );
   });
 
   it('does nothing to react when the intent carried no messageGuid, but still clears', async () => {
@@ -541,6 +735,19 @@ describe('handleNotificationAction — FaceTime answer/decline', () => {
     expect(mockCreateFaceTimeLink).toHaveBeenCalled();
     expect(mockLinkingOpen).toHaveBeenCalledWith('https://facetime.apple.com/join#k=abc');
     expect(mockNotifeeCancel).toHaveBeenCalledWith('ft-u2');
+  });
+
+  it('uses one authorized task-local client for a killed-process answer and link', async () => {
+    const taskHttp = { __taskHttp: 'facetime', isTransportCurrent: () => true };
+    mockCaptureCapability.mockReturnValueOnce(undefined);
+    mockFixedClient.mockReturnValueOnce(taskHttp);
+    mockCreateFaceTimeLink.mockResolvedValueOnce('https://facetime.apple.com/join#k=headless');
+
+    await handleNotificationAction(safeFaceTimeDetail(ACTION_ANSWER_FACETIME, 'u-headless'));
+
+    expect(mockAnswerFaceTime).toHaveBeenCalledWith(taskHttp, 'u-headless');
+    expect(mockCreateFaceTimeLink).toHaveBeenCalledWith(taskHttp);
+    expect(mockLinkingOpen).toHaveBeenCalledWith('https://facetime.apple.com/join#k=headless');
   });
 
   it('answer REJECTS a non-FaceTime link from a compromised server (never openURL), still clears', async () => {

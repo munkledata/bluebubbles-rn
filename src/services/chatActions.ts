@@ -1,4 +1,5 @@
 import { chatsApi, scheduledApi } from '@core/api';
+import type { HttpClient } from '@core/api/http';
 import { logger } from '@core/secure';
 import {
   clearChatTombstoneWithinTransaction,
@@ -392,6 +393,21 @@ type MarkReadTarget =
   | { readonly chatExists: false; readonly newestReceivedGuid: null }
   | { readonly chatExists: true; readonly newestReceivedGuid: string | null };
 
+/** One authorized client for the optional best-effort server read receipt. */
+export interface ReadReceiptTransport {
+  readonly http: HttpClient;
+  isCurrent(): boolean;
+}
+
+export interface MarkReadOptions {
+  /**
+   * Resolve lazily, after the local read marker commits and only when receipts are enabled.
+   * A killed-process notification action can therefore inspect the vault without making local
+   * badge clearing depend on SecureStore or network availability.
+   */
+  resolveReceiptTransport?: () => Promise<ReadReceiptTransport | null>;
+}
+
 /** Resolve the complete local mark-read target without observing another owner's partial work. */
 function resolveMarkReadTargetWithinTransaction(
   context: DbTransactionContext,
@@ -415,6 +431,7 @@ function resolveMarkReadTargetWithinTransaction(
 export function markRead(
   chatGuid: string,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+  options: MarkReadOptions = {},
 ): Promise<void> {
   return runChatAction(accountLease, async (activeLease) => {
     // ensureDatabase, never getDatabase: the tray's "Mark as read" button runs HEADLESS on a
@@ -446,9 +463,24 @@ export function markRead(
     if (!target.chatExists) return;
     const fs = await hydratedFeatureSettings();
     assertChatActionLease(activeLease);
-    if (!fs.privateApiEnabled || !fs.sendReadReceipts) return;
+    // Hydration deliberately leaves `hydrated=false` on a DB/read failure. The module defaults are
+    // enabled for normal first use, but they are not proof of the user's persisted privacy choice.
+    if (!fs.hydrated || !fs.privateApiEnabled || !fs.sendReadReceipts) return;
+
+    let receiptTransport: ReadReceiptTransport | null;
     try {
-      await chatsApi.markChatRead(http, chatGuid);
+      receiptTransport = options.resolveReceiptTransport
+        ? await options.resolveReceiptTransport()
+        : { http, isCurrent: () => activeLease.isCurrent() };
+    } catch {
+      // The local marker is authoritative for this device. Vault/client discovery is as
+      // best-effort as the receipt request itself and must never restore the unread badge.
+      return;
+    }
+    assertChatActionLease(activeLease);
+    if (!receiptTransport?.isCurrent()) return;
+    try {
+      await chatsApi.markChatRead(receiptTransport.http, chatGuid);
     } catch {
       // Offline / not connected — the local marker still clears the badge.
     }
@@ -486,7 +518,7 @@ export function markUnread(
     if (chatGuid.startsWith('RCS;-;')) return;
     const fs = await hydratedFeatureSettings();
     assertChatActionLease(activeLease);
-    if (!fs.privateApiEnabled) return;
+    if (!fs.hydrated || !fs.privateApiEnabled) return;
     try {
       await chatsApi.markChatUnread(http, chatGuid);
     } catch (e) {

@@ -13,6 +13,7 @@ import {
   INCOMING_EVENT_MAX_CLAIM_BATCH,
   claimIncomingEvents,
   completeIncomingEvent,
+  deferIncomingEventForDependency,
   failIncomingEvent,
   getNextIncomingEventWakeAt,
   markIncomingEventDbAppliedWithinTransaction,
@@ -22,6 +23,7 @@ import {
 } from '@db/repositories';
 import { DbCommitGuardRejectedError } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
+import { IncomingEventDependencyPendingError } from './incomingEventErrors';
 
 export interface NormalizedIncomingEventHandler {
   handleNormalized(
@@ -52,6 +54,8 @@ export interface IncomingEventDrainOptions {
     eventName: string,
     context?: EventDeliveryContext,
   ) => void | Promise<void>;
+  /** Synchronous signal emitted only after an expected dependency was durably deferred. */
+  readonly onDependencyDeferred?: (context?: EventDeliveryContext) => void;
 }
 
 type ClaimOutcome = 'settled' | 'stale';
@@ -285,26 +289,40 @@ export class IncomingEventDrain {
       // observes a stale delivery instead of racing the next claim.
       delivery.revoke();
       if (!guard()) return 'stale';
-      const failure = await failIncomingEvent(
-        this.db,
-        {
-          ...identity,
-          errorCode:
-            error instanceof IncomingEventDeliveryTimeoutError
-              ? 'delivery-timeout'
-              : 'delivery-failed',
-        },
-        guard,
-        this.now,
-      );
+      const dependencyPending = error instanceof IncomingEventDependencyPendingError;
+      const failure = dependencyPending
+        ? await deferIncomingEventForDependency(this.db, identity, guard, this.now)
+        : await failIncomingEvent(
+            this.db,
+            {
+              ...identity,
+              errorCode:
+                error instanceof IncomingEventDeliveryTimeoutError
+                  ? 'delivery-timeout'
+                  : 'delivery-failed',
+            },
+            guard,
+            this.now,
+          );
+      if (dependencyPending && failure.status === 'retry-scheduled' && guard()) {
+        try {
+          this.options.onDependencyDeferred?.(context);
+        } catch (signalError) {
+          logger.warn('[incomingEvents] dependency deferral observer failed', {
+            errorName: signalError instanceof Error ? signalError.name : 'UnknownError',
+          });
+        }
+      }
       if (failure.status === 'poisoned') {
         await this.reportPermanentFailure(claim.eventName, guard, context);
       }
-      logger.warn('[incomingEvents] claimed delivery failed', {
-        event: claim.eventName,
-        outcome: failure.status,
-        errorName: error instanceof Error ? error.name : 'UnknownError',
-      });
+      if (!dependencyPending) {
+        logger.warn('[incomingEvents] claimed delivery failed', {
+          event: claim.eventName,
+          outcome: failure.status,
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+        });
+      }
     } finally {
       // The checkpoint capability belongs only to this claimed attempt. Successful settlement must
       // revoke it too, so a detached continuation cannot join and roll back an unrelated owner.

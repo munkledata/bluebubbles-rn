@@ -140,6 +140,33 @@ describe('listStickersForTargets', () => {
     expect(list[0]?.attachment?.localPath).toBe('file:///s/sa1.png');
   });
 
+  it('does not render a partial sticker whose only attachment was retracted', async () => {
+    const { db, raw } = await createTestDb();
+    const { chatId, hm } = await setup(db);
+    await sticker(db, chatId, hm, { guid: 's1', target: 'mt', date: 200, attGuid: 'sa1' });
+    raw.prepare("UPDATE messages SET retraction_state = 'partial' WHERE guid = 's1'").run();
+    raw.prepare("UPDATE attachments SET is_retracted = 1 WHERE guid = 'sa1'").run();
+
+    expect((await listStickersForTargets(db, ['mt'])).get('mt')).toBeUndefined();
+  });
+
+  it('never mounts a hidden payload beside a visible sticker image', async () => {
+    const { db, raw } = await createTestDb();
+    const { chatId, hm } = await setup(db);
+    await sticker(db, chatId, hm, { guid: 's1', target: 'mt', date: 200, attGuid: 'sa1' });
+    raw
+      .prepare(
+        `INSERT INTO attachments (guid, message_id, hide_attachment)
+         SELECT 'hidden-sticker-payload', id, 1 FROM messages WHERE guid = 's1'`,
+      )
+      .run();
+
+    const attachments = ((await listStickersForTargets(db, ['mt'])).get('mt') ?? []).map(
+      (entry) => entry.attachment?.guid,
+    );
+    expect(attachments).toEqual(['sa1']);
+  });
+
   it('orders multiple stickers oldest-first and keeps unrelated targets apart', async () => {
     const { db } = await createTestDb();
     const { chatId, hm } = await setup(db);

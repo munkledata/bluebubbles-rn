@@ -5,6 +5,7 @@ import {
   type DbTransactionContext,
 } from '../transaction';
 import type { AppDatabase } from '../types';
+import { messageHasVisibleContentSql } from './chatVisibility';
 
 /**
  * Transaction-only mutations and read-only queries for the encrypted attachment-cache ledger.
@@ -207,8 +208,9 @@ export async function listInactiveAttachmentCachePaths(
             OR m.id IS NULL
             OR (
               c.id IS NOT NULL
+              AND a.is_retracted = 0
               AND m.date_deleted IS NULL
-              AND m.date_retracted IS NULL
+              AND ${messageHasVisibleContentSql('m')}
               AND (
                 c.deleted_at IS NULL
                 OR (m.date_created IS NOT NULL AND m.date_created > c.deleted_at)

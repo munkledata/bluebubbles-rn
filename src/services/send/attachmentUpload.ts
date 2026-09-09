@@ -4,6 +4,8 @@ import { ApiError } from '@core/api/errors';
 import { parseServerErrorDetailBody } from '@core/api/serverErrorDetail';
 import { apiResponse } from '@core/models/common';
 import { logger } from '@core/secure';
+import { MessageTargetUnavailableError } from '@db/repositories';
+import { DbCommitGuardRejectedError } from '@db/transaction';
 import { uploadStoreSink } from '@state/uploadStore';
 import type { AttachmentUploader } from './sendAttachmentService';
 import { runTrackedUpload } from './trackedUpload';
@@ -69,6 +71,11 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
   http,
   chatGuid,
   tempGuid,
+  clientAttemptGeneration,
+  text,
+  selectedMessageGuid,
+  partIndex,
+  authorizeNetworkStart,
   attachmentGuid,
   name,
   uri,
@@ -84,6 +91,10 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
       `timeoutMs must be a positive safe integer no greater than ${MAX_TIMER_MS}`,
     );
   }
+
+  // Send entry points pass a pinned client. Reject a transport already superseded before even the
+  // native file stat begins; a live, unpinned client treats this as a no-op.
+  http.assertTransportCurrent();
 
   // Capture BEFORE the file pre-flight and concurrency wait. A queued upload may not open its
   // native request for minutes; reading live headers there could pair this old URL with a newly
@@ -174,6 +185,11 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
           const transfer = uploadGate.run(async () => {
             // Cancelled during pre-flight or while queued — never open a socket at all.
             if (stopReason !== null) return null;
+            const authorizedTarget = await authorizeNetworkStart?.();
+            if (stopReason !== null) return null;
+            // The approved origin can rotate while file stat or the FIFO gate is pending. This is
+            // the last await-free boundary before native code opens the socket.
+            http.assertTransportCurrent();
             const started = FileSystem.createUploadTask(
               url,
               uri,
@@ -182,7 +198,25 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
                 uploadType: FileSystem.FileSystemUploadType.MULTIPART,
                 fieldName: 'attachment',
                 mimeType,
-                parameters: { chatGuid, tempGuid, name, method: 'private-api' },
+                parameters: {
+                  chatGuid,
+                  tempGuid,
+                  name,
+                  method: 'private-api',
+                  ...(text === undefined ? {} : { text }),
+                  ...((authorizedTarget?.messageGuid ?? selectedMessageGuid) === undefined
+                    ? {}
+                    : {
+                        selectedMessageGuid: authorizedTarget?.messageGuid ?? selectedMessageGuid!,
+                      }),
+                  ...((authorizedTarget?.messageGuid ?? selectedMessageGuid) === undefined ||
+                  (authorizedTarget?.partIndex ?? partIndex) === undefined
+                    ? {}
+                    : { partIndex: String(authorizedTarget?.partIndex ?? partIndex) }),
+                  ...(clientAttemptGeneration == null
+                    ? {}
+                    : { clientAttemptGeneration: String(clientAttemptGeneration) }),
+                },
                 headers: { ...transport.headers },
               },
               ({ totalBytesSent, totalBytesExpectedToSend }) =>
@@ -204,6 +238,12 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
         `[upload] streaming upload failed err=${err instanceof Error ? err.message : String(err)}`,
       );
       if (stopReason !== null) throw stoppedError();
+      if (
+        err instanceof MessageTargetUnavailableError ||
+        err instanceof DbCommitGuardRejectedError
+      ) {
+        throw err;
+      }
       if (err instanceof ApiError && (err.kind === 'timeout' || err.kind === 'cancelled')) {
         throw err;
       }

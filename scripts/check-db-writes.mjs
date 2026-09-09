@@ -83,6 +83,7 @@ const COORDINATED_DELEGATION_PATHS = new Set([
   'app/(app)/media/[guid].tsx',
   'app/(app)/new-chat.tsx',
   'app/(app)/scheduled.tsx',
+  'app/(app)/server-management.tsx',
   'app/(app)/settings.tsx',
   'app/(setup)/manual.tsx',
   'app/(setup)/permissions.tsx',
@@ -91,8 +92,10 @@ const COORDINATED_DELEGATION_PATHS = new Set([
   'src/db/repositories/chats.ts',
   'src/db/repositories/errorReports.ts',
   'src/db/repositories/maintenance.ts',
+  'src/db/repositories/messageTargets.ts',
   'src/db/repositories/outgoing.ts',
   'src/features/conversations/devFixtureSession.ts',
+  'src/features/conversations/useChatScheduledCatchup.ts',
   'src/features/facetime/useFaceTime.ts',
   'src/services/backup/backup.ts',
   'src/services/backup/backupService.ts',
@@ -100,6 +103,7 @@ const COORDINATED_DELEGATION_PATHS = new Set([
   'src/services/bootstrap.ts',
   'src/services/chat/groupManagement.ts',
   'src/services/contacts/serverAvatars.ts',
+  'src/services/credentialUpgrade.ts',
   'src/services/databaseControl.ts',
   'src/services/errors/errorReportQueueService.ts',
   'src/services/errors/errorReportSink.ts',
@@ -128,6 +132,7 @@ const COORDINATED_DELEGATION_PATHS = new Set([
   'src/services/sync/engine.ts',
   'src/services/backgrounds/syncedBackground.ts',
   'src/services/background/backgroundSync.ts',
+  'src/services/background/realtimePrerequisiteRecovery.ts',
   'src/db/repositories/scheduled.ts',
   'src/services/download/attachmentCacheCoordinator.ts',
   'src/services/download/attachmentCacheRecovery.ts',
@@ -1050,6 +1055,7 @@ function topLevelVariable(file, name) {
 
 function singleConstDeclaration(statement, name) {
   if (
+    !statement ||
     !ts.isVariableStatement(statement) ||
     !(statement.declarationList.flags & ts.NodeFlags.Const) ||
     statement.declarationList.declarations.length !== 1
@@ -1551,16 +1557,26 @@ function dbProcessRelaunchCertificateCandidate({
   const databasePath = 'src/db/database.ts';
   const relaunchPath = 'src/services/boot/devDbRelaunchContract.ts';
   const runtimeWavePath = 'src/services/boot/dbRuntimeConcurrencyWave.ts';
+  const backupWavePath = 'src/services/boot/dbBackupRestoreWave.ts';
   const foregroundPath = 'src/services/boot/foregroundBoot.ts';
   const databaseFile = filesByPath.get(databasePath);
   const relaunchFile = filesByPath.get(relaunchPath);
   const runtimeWaveFile = filesByPath.get(runtimeWavePath);
+  const backupWaveFile = filesByPath.get(backupWavePath);
   const foregroundFile = filesByPath.get(foregroundPath);
-  if (!databaseFile || !relaunchFile || !runtimeWaveFile || !foregroundFile) return undefined;
+  if (!databaseFile || !relaunchFile || !runtimeWaveFile || !backupWaveFile || !foregroundFile) {
+    return undefined;
+  }
   if (
     createHash('sha256')
       .update(normalizedSnippet(runtimeWaveFile, runtimeWaveFile))
-      .digest('hex') !== '20b474430d8b24dab5ee93c9fe1172bbdae80532cff2fa87060b04e22ea33553'
+      .digest('hex') !== 'a1b7cb90f44e2a6106bfc69f4ad28c9637d0566e9467bd0e36b7719b4aeb0c74'
+  ) {
+    return undefined;
+  }
+  if (
+    createHash('sha256').update(normalizedSnippet(backupWaveFile, backupWaveFile)).digest('hex') !==
+    '97fad9baebf188c972e538b21edb389dbd65d7bc00767ff41ca9f4d79324076a'
   ) {
     return undefined;
   }
@@ -1571,6 +1587,11 @@ function dbProcessRelaunchCertificateCandidate({
     'dbRuntimeConcurrencyMigrationNames',
     'firstDbRuntimeConcurrencyWaveFailure',
     'runDbRuntimeConcurrencySelfTest',
+    'emptyDbBackupRestoreDatabaseChecks',
+    'cleanupDbBackupRestoreSelfTestDatabase',
+    'dbBackupRestoreMigrationNames',
+    'firstDbBackupRestoreWaveFailure',
+    'runDbBackupRestoreSelfTest',
     'emptyDbProcessRelaunchPrepareChecks',
     'emptyDbProcessRelaunchResumeChecks',
     'cleanupDbProcessRelaunchSelfTestDatabase',
@@ -1626,6 +1647,26 @@ function dbProcessRelaunchCertificateCandidate({
     [
       'runDbRuntimeConcurrencySelfTest',
       'fa80d5b3f51604fc400c64c3d0eb75c8ca91c0ff2dbc13814905109f1ffc10e8',
+    ],
+    [
+      'emptyDbBackupRestoreDatabaseChecks',
+      '2ba75431857b16b7026d043deb285b0d86502a71434dd8fb837dea460fadcd16',
+    ],
+    [
+      'cleanupDbBackupRestoreSelfTestDatabase',
+      '6c6522ad4a0f09ec130c30ea0b51d1c969bf7c0f1618490aa20e91c365ab7c9d',
+    ],
+    [
+      'dbBackupRestoreMigrationNames',
+      '5ecb57a44dc6ae358c1c0b7d6197353e62947e77ac64f4d08e5011fa93bb42c9',
+    ],
+    [
+      'firstDbBackupRestoreWaveFailure',
+      '4a9f3013469a1aef9bd9ba69a5a67246164599692925ce83aa5ceb5fbd011aeb',
+    ],
+    [
+      'runDbBackupRestoreSelfTest',
+      '90191254d8ece5ffb112610d5286d61e9cddab24442c43f77697fd66b7d91bdd',
     ],
     [
       'emptyDbProcessRelaunchPrepareChecks',
@@ -1798,12 +1839,55 @@ function dbProcessRelaunchCertificateCandidate({
       return undefined;
     }
   }
+  const backupWaveCallableNames = [
+    'emptyChecks',
+    'themeTokens',
+    'buildNearLimitBackupRestoreFixture',
+    'count',
+    'containsFault',
+    'dropFaultTrigger',
+    'temporaryRestoreTablesAreAbsent',
+    'runDbBackupRestoreWave',
+  ];
+  const backupWaveCallables = new Map(
+    backupWaveCallableNames.map((name) => [
+      name,
+      topLevelFunction(filesByPath, backupWavePath, name),
+    ]),
+  );
+  const expectedBackupWaveFingerprints = new Map([
+    ['emptyChecks', '31ee900cba841eeba128836e4be928a30afcb3421eebf170f464353b8b5aec96'],
+    ['themeTokens', '40a638c244805711052f577e9245af752acb86497ed445b44ab862d36db73868'],
+    [
+      'buildNearLimitBackupRestoreFixture',
+      '574d15afed9cfdec8391a6ba13e46085768829e94ac718b4fb1d62ca7a09a4bc',
+    ],
+    ['count', '04da8112837e41f975bb09ef7205ea81050dd24c1c167eba8914b3ba69a54ef1'],
+    ['containsFault', 'ddd95d69fa471dc9ff53b9bc7248aac8d2e997b9c3921c775048027817567f2b'],
+    ['dropFaultTrigger', 'a1dfa7c4ea273f1ccce805db6db58cb9d33c0958e5a9a32210e9b69fa764c516'],
+    [
+      'temporaryRestoreTablesAreAbsent',
+      'dbb5fa061227e478ca7117930b6413e1ff5e48a86155bc11e188fb9b332d7100',
+    ],
+    ['runDbBackupRestoreWave', 'fec59aee2ac8b3a5f784ed022141adc5835c5f8d686fdbe9800e1ca253c0782f'],
+  ]);
+  for (const [name, expected] of expectedBackupWaveFingerprints) {
+    const callable = backupWaveCallables.get(name);
+    if (
+      !callable?.body ||
+      createHash('sha256').update(normalizedSnippet(callable, backupWaveFile)).digest('hex') !==
+        expected
+    ) {
+      return undefined;
+    }
+  }
   const relaunchCallableNames = [
     'markerFile',
     'markerPresence',
     'inspectDurableMarkers',
-    'classifyRuntimeConcurrencyState',
+    'classifyOneLaunchState',
     'runtimeConcurrencyRecoveryFailureCode',
+    'backupRestoreRecoveryFailureCode',
     'standardRelaunchRecoveryFailureCode',
     'classifyScenarioState',
     'classifyStartMode',
@@ -1817,6 +1901,7 @@ function dbProcessRelaunchCertificateCandidate({
     'emptyActiveMigrationDeathPrepareMarkerChecks',
     'emptyActiveMigrationDeathFinalMarkerChecks',
     'emptyRuntimeConcurrencyMarkerChecks',
+    'emptyBackupRestoreMarkerChecks',
     'logPrepareMarker',
     'logFinalMarker',
     'logWalWriteDeathPrepareMarker',
@@ -1824,10 +1909,14 @@ function dbProcessRelaunchCertificateCandidate({
     'logActiveMigrationDeathPrepareMarker',
     'logActiveMigrationDeathFinalMarker',
     'logRuntimeConcurrencyMarker',
+    'logBackupRestoreMarker',
     'waitForHostKill',
     'finishRuntimeConcurrencyFailure',
     'runRuntimeConcurrencyPhase',
     'runRuntimeConcurrencyRecoveryPhase',
+    'finishBackupRestoreFailure',
+    'runBackupRestorePhase',
+    'runBackupRestoreRecoveryPhase',
     'finishPrepareFailure',
     'runPreparePhase',
     'finalChecksFromDatabaseResult',
@@ -1851,24 +1940,25 @@ function dbProcessRelaunchCertificateCandidate({
   const expectedRelaunchFingerprints = new Map([
     ['markerFile', 'eda1812af05ac12274d65dfd1515d39d3cce9604a5949e5d6e8757dedbf890e2'],
     ['markerPresence', '1ff240b3eb4c17304be77bf05659a48f430bb64cfd87d4d823e72b52ab0f7292'],
-    ['inspectDurableMarkers', '16a6450318ed99d112f31e62adf467b41332bdd28287559f87a202f236d83b77'],
-    [
-      'classifyRuntimeConcurrencyState',
-      '40391fc1c6edd8ece3d4cf420308cb0318df0b85ca3a51254e4bf91d8abb9208',
-    ],
+    ['inspectDurableMarkers', 'b0d9fbc5f93ca8a863b33a379da69b29c9c76e73508f4e00c37c2225cc19f3c0'],
+    ['classifyOneLaunchState', 'f228588131bb929fdc36d958016e91fc8da956bb9d7d3aa79abce73581a08485'],
     [
       'runtimeConcurrencyRecoveryFailureCode',
       '3458dbf03fd89fabfa6516d1b09ccb1507f20965a908e79bf025ae2bfc4a45e8',
+    ],
+    [
+      'backupRestoreRecoveryFailureCode',
+      '24b8870d44a8d78453a5122643f885805ca3be56754652f6b9b9275611bbb752',
     ],
     [
       'standardRelaunchRecoveryFailureCode',
       '0380fb3fa6059440f285130d422ef06765c9c27240910107746f3df78a385475',
     ],
     ['classifyScenarioState', 'dff892f0d85e2400d993e8837ac38c6aa07b4bf9c112157de5129e404de94357'],
-    ['classifyStartMode', 'c97367796603cc4a63c4261efa2b63a2b0850d7092dedc2552503f623810d070'],
+    ['classifyStartMode', '9e49c8c1fe1ffb1038aa29212e24b70b8474cdb74349e79561656380a2888a1d'],
     ['createZeroByteMarker', 'e3a4a775c111eb4efba310531ed863b7ad9d18af9aa85ad49cf5ba73d1329ae6'],
     ['deleteMarkerIfPresent', '5e846690dc0cc970d28b421b067cb4d0303d04e96fa965fc5fae174b33626dc5'],
-    ['cleanupDurableMarkers', 'ad702babce9f4b9e3a5aae7dabceb5cb4894aac4911f4de722e92148055448a7'],
+    ['cleanupDurableMarkers', 'd61f99f876eb1e4169db07d7a281c5ea47e92f9f4d92beff0d9062eaf6d7f6d7'],
     [
       'emptyPrepareMarkerChecks',
       '19a57fcc764d8a98c1903a1f61cdbdcdbdc0518adb6dcb4651de70b0f0367533',
@@ -1894,6 +1984,10 @@ function dbProcessRelaunchCertificateCandidate({
       'emptyRuntimeConcurrencyMarkerChecks',
       '3163635505446d32e6d59a8ad3829cca91335d792110532691d729b6b7429bfc',
     ],
+    [
+      'emptyBackupRestoreMarkerChecks',
+      'cfd45cd8f6ab3a766df1b91c6bc2d00b632e4873a90fe3e3b627694a1a2e9f9d',
+    ],
     ['logPrepareMarker', '77a5b04f3b046f29d31de9039ba5d7a53e9d5cbba0bca0e4c9bc2e27231c3751'],
     ['logFinalMarker', '94a635d8a3f96201f7b5201b5e326e3b045bd7ec81f4bae2ec79ef12f3c693b6'],
     [
@@ -1916,6 +2010,7 @@ function dbProcessRelaunchCertificateCandidate({
       'logRuntimeConcurrencyMarker',
       '282abf2b7573a308c799718ad952312a2d497860fb6f5880fdc5c1dec1f330ca',
     ],
+    ['logBackupRestoreMarker', '6b5576c27e7e00d889f5d0f20de4cb4e740048f66e03144c433e7f5f8dadae58'],
     ['waitForHostKill', 'c6ab060b1894631fa3bb6c8e41049159ad2412aa676b6708a489c759ac40f4bf'],
     [
       'finishRuntimeConcurrencyFailure',
@@ -1927,7 +2022,16 @@ function dbProcessRelaunchCertificateCandidate({
     ],
     [
       'runRuntimeConcurrencyRecoveryPhase',
-      '7b1be09333eacb96abfec93fd30d48ccfdced81ef2b093afcea4e5c821131a6a',
+      '407e2438ed0794c8edd120e217255135f633fee7a202a520167580bdc0601323',
+    ],
+    [
+      'finishBackupRestoreFailure',
+      '9da3d6927265f8599af739f703182594751ac403c0885486e97e9e758cc36d12',
+    ],
+    ['runBackupRestorePhase', '90b00ab2f6edbab3b4d227597f31a4f7d78e95cc39fa6986f4f5fbb943fbd78c'],
+    [
+      'runBackupRestoreRecoveryPhase',
+      '58eeaab1f996114bd10ff4d8a8de5f70b82f5177cacb3d6477784ee9d7a5f31e',
     ],
     ['finishPrepareFailure', 'c8c195872eadf73ada6062c73e9f594c2214a5ebd7ab48a781eeeabec78ce5d7'],
     ['runPreparePhase', '7f1cfda87b5c6e2363f285a78bfaf809473285a8ac0b2a896589c4d5cbf6e621'],
@@ -1936,7 +2040,7 @@ function dbProcessRelaunchCertificateCandidate({
       '79d8e8c3387379ecd02e33e728fc80149ec4b516926f3e69507876ffe231808f',
     ],
     ['runResumePhase', '85ade713071959dcd8944771c3794793682de3c15a9fbddfd79bb2feb9893828'],
-    ['runRecoveryPhase', '71732a7570d6134babcbb33be3cb7a98c57ed2fe52c430940cc101faca7a3832'],
+    ['runRecoveryPhase', '617c4f27533d4a5ede626fdcd755a4a45185c79928e649b7b8a17d9539b26ae6'],
     [
       'finishWalWriteDeathPrepareFailure',
       '39dea4bb1209fa4c632a170df1abea12deaa536d50477e5a982baaa14722e184',
@@ -1955,7 +2059,7 @@ function dbProcessRelaunchCertificateCandidate({
     ],
     [
       'runWalWriteDeathRecoveryPhase',
-      '1c117218cf3c90b6e575f5b2bd43e43fd39396097161ba3233c347212baf0105',
+      '472db32625b9e5e3041b8800824752ed310eadcdb7388454a15972f23896446f',
     ],
     [
       'finishActiveMigrationDeathPrepareFailure',
@@ -1975,16 +2079,16 @@ function dbProcessRelaunchCertificateCandidate({
     ],
     [
       'runActiveMigrationDeathRecoveryPhase',
-      '825d8ad721bb7ec93d419950ed1cd9cb7b0ebffe8193304e7272922c22d69165',
+      'c64aa538906992be091673d29f7b83ffc6be5f334a269742a6b2011dbf64cee6',
     ],
     [
       'startDevDbRelaunchContractIfRequested',
-      '33bee4d4d92e6bfe14ac5a10b79f2ddf29a50c0600a201f4818b9636bba4fabc',
+      '09118a989640a84c8196fdf51a5d1453715d54093dea98616103122267f266ad',
     ],
   ]);
   const actualRelaunchFunctions = relaunchFile.statements.filter(ts.isFunctionDeclaration);
   if (
-    relaunchFile.statements.length !== 98 ||
+    relaunchFile.statements.length !== 112 ||
     actualRelaunchFunctions.map((callable) => callable.name?.text).join('\n') !==
       relaunchCallableNames.join('\n')
   ) {
@@ -2003,7 +2107,8 @@ function dbProcessRelaunchCertificateCandidate({
   const expectedImports = [
     "import { File, Paths } from 'expo-file-system';",
     "import { logger } from '@core/secure';",
-    "import { cleanupDbActiveMigrationDeathSelfTestDatabase, cleanupDbActiveWalWriteDeathSelfTestDatabase, cleanupDbProcessRelaunchSelfTestDatabase, cleanupDbRuntimeConcurrencySelfTestDatabase, prepareDbActiveMigrationDeathSelfTest, prepareDbActiveWalWriteDeathSelfTest, prepareDbProcessRelaunchSelfTest, resumeDbActiveMigrationDeathSelfTest, resumeDbActiveWalWriteDeathSelfTest, resumeDbProcessRelaunchSelfTest, runDbRuntimeConcurrencySelfTest, type DbActiveMigrationDeathPrepareChecks, type DbActiveMigrationDeathPrepareFailureCode, type DbActiveMigrationDeathResumeFailureCode, type DbActiveMigrationDeathResumeResult, type DbActiveWalWriteDeathPrepareChecks, type DbActiveWalWriteDeathPrepareFailureCode, type DbActiveWalWriteDeathResumeFailureCode, type DbActiveWalWriteDeathResumeResult, type DbProcessRelaunchPrepareChecks, type DbProcessRelaunchPrepareFailureCode, type DbProcessRelaunchResumeFailureCode, type DbProcessRelaunchResumeResult, type DbRuntimeConcurrencyDatabaseChecks, type DbRuntimeConcurrencyDatabaseFailureCode, type DbRuntimeConcurrencyDatabaseResult, } from '@db/database';",
+    "import { cleanupDbBackupRestoreSelfTestDatabase, cleanupDbActiveMigrationDeathSelfTestDatabase, cleanupDbActiveWalWriteDeathSelfTestDatabase, cleanupDbProcessRelaunchSelfTestDatabase, cleanupDbRuntimeConcurrencySelfTestDatabase, prepareDbActiveMigrationDeathSelfTest, prepareDbActiveWalWriteDeathSelfTest, prepareDbProcessRelaunchSelfTest, resumeDbActiveMigrationDeathSelfTest, resumeDbActiveWalWriteDeathSelfTest, resumeDbProcessRelaunchSelfTest, runDbBackupRestoreSelfTest, runDbRuntimeConcurrencySelfTest, type DbActiveMigrationDeathPrepareChecks, type DbActiveMigrationDeathPrepareFailureCode, type DbActiveMigrationDeathResumeFailureCode, type DbActiveMigrationDeathResumeResult, type DbActiveWalWriteDeathPrepareChecks, type DbActiveWalWriteDeathPrepareFailureCode, type DbActiveWalWriteDeathResumeFailureCode, type DbActiveWalWriteDeathResumeResult, type DbProcessRelaunchPrepareChecks, type DbProcessRelaunchPrepareFailureCode, type DbProcessRelaunchResumeFailureCode, type DbProcessRelaunchResumeResult, type DbBackupRestoreDatabaseChecks, type DbBackupRestoreDatabaseFailureCode, type DbBackupRestoreDatabaseResult, type DbRuntimeConcurrencyDatabaseChecks, type DbRuntimeConcurrencyDatabaseFailureCode, type DbRuntimeConcurrencyDatabaseResult, } from '@db/database';",
+    "import { runDbBackupRestoreWave } from '@/services/boot/dbBackupRestoreWave';",
     "import { runDbRuntimeConcurrencyWave } from '@/services/boot/dbRuntimeConcurrencyWave';",
   ];
   if (
@@ -2025,6 +2130,7 @@ function dbProcessRelaunchCertificateCandidate({
       'DB_RUNTIME_CONCURRENCY_MARKER_PREFIX',
       [ts.NodeFlags.Const, "'GATOR_DB_RUNTIME_CONCURRENCY_V1 '"],
     ],
+    ['DB_BACKUP_RESTORE_MARKER_PREFIX', [ts.NodeFlags.Const, "'GATOR_DB_BACKUP_RESTORE_V1 '"]],
     ['DB_RELAUNCH_REQUEST_FILE', [ts.NodeFlags.Const, "'.gator-db-relaunch-request-v1'"]],
     [
       'DB_WAL_WRITE_DEATH_REQUEST_FILE',
@@ -2041,6 +2147,14 @@ function dbProcessRelaunchCertificateCandidate({
     [
       'DB_RUNTIME_CONCURRENCY_RUNNING_FILE',
       [ts.NodeFlags.Const, "'.gator-db-runtime-concurrency-running-v1'"],
+    ],
+    [
+      'DB_BACKUP_RESTORE_REQUEST_FILE',
+      [ts.NodeFlags.Const, "'.gator-db-backup-restore-request-v1'"],
+    ],
+    [
+      'DB_BACKUP_RESTORE_RUNNING_FILE',
+      [ts.NodeFlags.Const, "'.gator-db-backup-restore-running-v1'"],
     ],
     ['DB_RELAUNCH_PREPARING_FILE', [ts.NodeFlags.Const, "'.gator-db-relaunch-preparing-v1'"]],
     ['DB_RELAUNCH_READY_FILE', [ts.NodeFlags.Const, "'.gator-db-relaunch-ready-v1'"]],
@@ -2066,8 +2180,11 @@ function dbProcessRelaunchCertificateCandidate({
       'DB_ACTIVE_MIGRATION_DEATH_RESUMING_FILE',
       [ts.NodeFlags.Const, "'.gator-db-active-migration-death-resuming-v1'"],
     ],
-    ['DB_RELAUNCH_MIGRATION_COUNT', [ts.NodeFlags.Const, '45 as const']],
-    ['DB_RELAUNCH_MIGRATION_HEAD', [ts.NodeFlags.Const, "'0045_backup_export_indexes' as const"]],
+    ['DB_RELAUNCH_MIGRATION_COUNT', [ts.NodeFlags.Const, '47 as const']],
+    [
+      'DB_RELAUNCH_MIGRATION_HEAD',
+      [ts.NodeFlags.Const, "'0047_message_retraction_topology' as const"],
+    ],
     ['WAIT_FOR_HOST_PROCESS_KILL', [ts.NodeFlags.Const, 'new Promise<never>(() => undefined)']],
     ['activeDbRelaunchContract', [ts.NodeFlags.Let, undefined]],
     ['ordinaryBootClaimedProcess', [ts.NodeFlags.Let, 'false']],
@@ -2098,18 +2215,25 @@ function dbProcessRelaunchCertificateCandidate({
     ['DB_RUNTIME_CONCURRENCY_SELF_TEST_NAME', "'driver-runtime-concurrency-selftest.db'"],
     ['DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_A', "'db-02c-public-throwaway-key-a-v1'"],
     ['DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_B', "'db-02c-public-throwaway-key-b-v1'"],
-    ['DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_COUNT', '45 as const'],
-    ['DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_HEAD', "'0045_backup_export_indexes' as const"],
+    ['DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_COUNT', '47 as const'],
+    [
+      'DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_HEAD',
+      "'0047_message_retraction_topology' as const",
+    ],
     ['DB_RUNTIME_CONCURRENCY_SENTINEL_KEY', "'gator-db-runtime-wave-sentinel'"],
     ['DB_RUNTIME_CONCURRENCY_SENTINEL_VALUE', "'committed'"],
+    ['DB_BACKUP_RESTORE_SELF_TEST_NAME', "'driver-backup-restore-selftest.db'"],
+    ['DB_BACKUP_RESTORE_SELF_TEST_KEY', "'backup-02-public-throwaway-key-v1'"],
+    ['DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_COUNT', '47 as const'],
+    ['DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_HEAD', "'0047_message_retraction_topology' as const"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_NAME', "'driver-relaunch-selftest.db'"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_KEY', "'db-03b1-public-throwaway-key-v1'"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_SENTINEL', "'driver-relaunch-continuity-v1'"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_PARTIAL_MIGRATION_COUNT', '29'],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_PARTIAL_MIGRATION_HEAD', "'0029_chats_deleted_at'"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_RETRY_MIGRATION_START', "'0030_attachment_cache_entries'"],
-    ['DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_COUNT', '45 as const'],
-    ['DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_HEAD', "'0045_backup_export_indexes' as const"],
+    ['DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_COUNT', '47 as const'],
+    ['DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_HEAD', "'0047_message_retraction_topology' as const"],
     ['DB_ACTIVE_WAL_WRITE_DEATH_SELF_TEST_NAME', "'driver-wal-write-death-selftest.db'"],
     ['DB_ACTIVE_WAL_WRITE_DEATH_SELF_TEST_KEY', "'db-03b2b1-public-throwaway-key-v1'"],
     ['DB_ACTIVE_WAL_WRITE_DEATH_BASELINE', "'db-03b2b1-baseline-v1'"],
@@ -2121,8 +2245,8 @@ function dbProcessRelaunchCertificateCandidate({
     ['DB_ACTIVE_MIGRATION_DEATH_PREFIX_COUNT', '37'],
     ['DB_ACTIVE_MIGRATION_DEATH_PREFIX_HEAD', "'0037_purge_legacy_redacted_mode_setting' as const"],
     ['DB_ACTIVE_MIGRATION_DEATH_TARGET', "'0038_scrub_reaction_selected_message_text' as const"],
-    ['DB_ACTIVE_MIGRATION_DEATH_HEAD', "'0045_backup_export_indexes' as const"],
-    ['DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT', '45 as const'],
+    ['DB_ACTIVE_MIGRATION_DEATH_HEAD', "'0047_message_retraction_topology' as const"],
+    ['DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT', '47 as const'],
     ['DB_ACTIVE_MIGRATION_DEATH_TARGET_COUNT', '128'],
     ['DB_ACTIVE_MIGRATION_DEATH_SELECTED_TEXT_LENGTH', '8_192'],
     [
@@ -2156,6 +2280,9 @@ function dbProcessRelaunchCertificateCandidate({
     'dbRuntimeConcurrencyMigrationNames',
   );
   const runRuntimeConcurrencySelfTest = databaseCallables.get('runDbRuntimeConcurrencySelfTest');
+  const cleanupBackupRestore = databaseCallables.get('cleanupDbBackupRestoreSelfTestDatabase');
+  const backupRestoreMigrationNames = databaseCallables.get('dbBackupRestoreMigrationNames');
+  const runBackupRestoreSelfTest = databaseCallables.get('runDbBackupRestoreSelfTest');
   const migrationNames = databaseCallables.get('dbProcessRelaunchMigrationNames');
   const inspectPartial = databaseCallables.get('inspectDbProcessRelaunchPartialState');
   const prepare = databaseCallables.get('prepareDbProcessRelaunchSelfTest');
@@ -2180,6 +2307,9 @@ function dbProcessRelaunchCertificateCandidate({
   const runRuntimeConcurrencyRecoveryPhase = relaunchCallables.get(
     'runRuntimeConcurrencyRecoveryPhase',
   );
+  const finishBackupRestoreFailure = relaunchCallables.get('finishBackupRestoreFailure');
+  const runBackupRestorePhase = relaunchCallables.get('runBackupRestorePhase');
+  const runBackupRestoreRecoveryPhase = relaunchCallables.get('runBackupRestoreRecoveryPhase');
   const runPreparePhase = relaunchCallables.get('runPreparePhase');
   const runResumePhase = relaunchCallables.get('runResumePhase');
   const runRecoveryPhase = relaunchCallables.get('runRecoveryPhase');
@@ -2203,6 +2333,12 @@ function dbProcessRelaunchCertificateCandidate({
   const runtimeConcurrencyWave = runtimeWaveCallables.get('runDbRuntimeConcurrencyWave');
   const runtimeConcurrencyCount = runtimeWaveCallables.get('count');
   const submitOrderedCoordinatorWave = runtimeWaveCallables.get('submitOrderedCoordinatorWave');
+  const backupRestoreWave = backupWaveCallables.get('runDbBackupRestoreWave');
+  const backupRestoreCount = backupWaveCallables.get('count');
+  const dropBackupRestoreFaultTrigger = backupWaveCallables.get('dropFaultTrigger');
+  const temporaryRestoreTablesAreAbsent = backupWaveCallables.get(
+    'temporaryRestoreTablesAreAbsent',
+  );
   const withDbTransaction = topLevelFunction(
     filesByPath,
     'src/db/transaction.ts',
@@ -2219,6 +2355,21 @@ function dbProcessRelaunchCertificateCandidate({
     filesByPath,
     'src/services/send/sendAttachmentService.ts',
     'sendImageMessage',
+  );
+  const sendTextMessage = topLevelFunction(
+    filesByPath,
+    'src/services/send/sendService.ts',
+    'sendTextMessage',
+  );
+  const sendContactMessage = topLevelFunction(
+    filesByPath,
+    'src/services/send/sendContactService.ts',
+    'sendContactMessage',
+  );
+  const resendOutgoingRow = topLevelFunction(
+    filesByPath,
+    'src/services/send/outgoingQueueService.ts',
+    'resendOutgoingRow',
   );
   const reconcileSendOutcome = topLevelFunction(
     filesByPath,
@@ -2252,22 +2403,52 @@ function dbProcessRelaunchCertificateCandidate({
     'DbEventSink',
     'onEvent',
   );
+  const restoreBackup = topLevelFunction(
+    filesByPath,
+    'src/services/backup/backup.ts',
+    'restoreBackup',
+  );
+  const restorePreparedBackupWithinTransaction = topLevelFunction(
+    filesByPath,
+    'src/db/repositories/backup.ts',
+    'restorePreparedBackupWithinTransaction',
+  );
+  const resolveRcsAttemptOwnership = topLevelFunction(
+    filesByPath,
+    'src/services/send/rcsAttemptCapability.ts',
+    'resolveRcsAttemptOwnership',
+  );
+  const pinSendTransport = topLevelFunction(
+    filesByPath,
+    'src/services/send/sendTransport.ts',
+    'pinSendTransport',
+  );
   // The runtime wave retains these returned promises until disposable-handle cleanup. Pin the
-  // reviewed entry bodies plus the exact contact-link bypass and send-outcome suppression closure,
-  // so internal DB/native work cannot become detached while an outer inventory id stays unchanged.
+  // reviewed entry bodies plus the exact contact-link bypass and send-attempt ownership closure, so
+  // internal DB/native work cannot become detached while an outer inventory id stays unchanged.
   const runtimeProductionCalleeFingerprints = new Map([
-    [syncAllChats, 'e1ae59d2c2e53c2c758eddfcfaca8626e281feaae298237c5f2681f0acf33294'],
+    [syncAllChats, '31721c299f75745c0c3ea4a8a0110c3a2a656c39784fd2c6d633b25da2b0098e'],
     [linkHandlesAfterCommit, '02704855bb63dd6db55395393c6f25fa309d91fdb3aac54422c71ca86fd206b6'],
-    [sendImageMessage, '360a1f755ec516935f104ced3e5225ffc6e14b645f536be03e7b00704dca7f5d'],
-    [reconcileSendOutcome, 'c8ef12e12a7a116289e00886b0589bfe42abfa5060d7411b650fa323f0a22c8c'],
-    [handleSendFailure, 'c7aeae6c332c61990873f7513974be7fa205e35bd422acb57e1a5b6e6e903e3b'],
+    [sendImageMessage, 'e1ce38ad9d74a11e9157526d1fee7fd430e6bb9a2b27aabf3a3a29ab4e3adf07'],
+    [reconcileSendOutcome, '8829dd1fff1160b2a77b29713228232f30d1ef6ecb6d86ecadd72f8a48bb4952'],
+    [handleSendFailure, 'db45f7ee8cd8a4109c7003a87b31c4165edc15256853ab1a5aa2f7c7b3c5b0c7'],
     [
       withCurrentDeliveryTransaction,
       '08e52d3be405df405ae6ff1f66b29922b89884b05bb0378629c0b6b040ef3330',
     ],
-    [dbEventSinkConstructor, '087d0cd2cd9cde22afc602591260d35f760b01178c18ff22a5e9c9ff0b4e7fb6'],
+    [dbEventSinkConstructor, 'fc1dde2a75c07d2baa063cb4c9c28ea618ea3c0389fc63e87a97dbf003f302b7'],
     [dbEventSinkLinkContacts, 'efeff49c6e0d6e74395d05dcf5f3e1f6774decb7fec6e773ea61761d9e01d0e9'],
-    [dbEventSinkOnEvent, '30dc8ee01f193a59b8424e1324aac5acc98224209d5d153cb409d0c4ab32d691'],
+    [dbEventSinkOnEvent, '0d8b2585776b21760d2427884ce72f00d57a176bb6b352b73231d87d9ddc64de'],
+    [restoreBackup, 'f42bd7777a2afd3ffbbd067e825061a47b031efb298e4ebbacf314d559797a7c'],
+    [
+      restorePreparedBackupWithinTransaction,
+      '67dfcb0808252b825f10f5f467b59c65056061478671b3b01ec9f882c7c5699b',
+    ],
+    [
+      resolveRcsAttemptOwnership,
+      'fce77a26a501efc43bea7886017281a0e99f222f03c30e300117e051033b9951',
+    ],
+    [pinSendTransport, 'd5b3d2ce63b16eecf6c7490f69f8368de8d6847833898258a89efa0af97d2aa6'],
   ]);
   const startForegroundBoot = topLevelFunction(filesByPath, foregroundPath, 'startForegroundBoot');
   const extractRows = topLevelFunction(filesByPath, databasePath, 'extractRows');
@@ -2279,6 +2460,9 @@ function dbProcessRelaunchCertificateCandidate({
     !cleanupRuntimeConcurrency?.body ||
     !runtimeConcurrencyMigrationNames?.body ||
     !runRuntimeConcurrencySelfTest?.body ||
+    !cleanupBackupRestore?.body ||
+    !backupRestoreMigrationNames?.body ||
+    !runBackupRestoreSelfTest?.body ||
     !migrationNames?.body ||
     !inspectPartial?.body ||
     !prepare?.body ||
@@ -2295,6 +2479,9 @@ function dbProcessRelaunchCertificateCandidate({
     !finishRuntimeConcurrencyFailure?.body ||
     !runRuntimeConcurrencyPhase?.body ||
     !runRuntimeConcurrencyRecoveryPhase?.body ||
+    !finishBackupRestoreFailure?.body ||
+    !runBackupRestorePhase?.body ||
+    !runBackupRestoreRecoveryPhase?.body ||
     !runPreparePhase?.body ||
     !runResumePhase?.body ||
     !runRecoveryPhase?.body ||
@@ -2310,11 +2497,21 @@ function dbProcessRelaunchCertificateCandidate({
     !runtimeConcurrencyWave?.body ||
     !runtimeConcurrencyCount?.body ||
     !submitOrderedCoordinatorWave?.body ||
+    !backupRestoreWave?.body ||
+    !backupRestoreCount?.body ||
+    !dropBackupRestoreFaultTrigger?.body ||
+    !temporaryRestoreTablesAreAbsent?.body ||
     !withDbTransaction?.body ||
     !withDbWriteLock?.body ||
     !syncAllChats?.body ||
     !sendImageMessage?.body ||
+    !sendTextMessage?.body ||
+    !sendContactMessage?.body ||
+    !resendOutgoingRow?.body ||
     !dbEventSinkOnEvent?.body ||
+    !restoreBackup?.body ||
+    !resolveRcsAttemptOwnership?.body ||
+    !pinSendTransport?.body ||
     [...runtimeProductionCalleeFingerprints].some(
       ([callable, expected]) =>
         !callable?.body ||
@@ -2437,11 +2634,32 @@ function dbProcessRelaunchCertificateCandidate({
   ) {
     return undefined;
   }
+  const backupRestoreOpenCalls = allOpenCalls
+    .filter(
+      (call) =>
+        nodeIsInside(call, cleanupBackupRestore) || nodeIsInside(call, runBackupRestoreSelfTest),
+    )
+    .sort((left, right) => left.getStart(databaseFile) - right.getStart(databaseFile));
+  const expectedBackupRestoreOpenCalls = [
+    'open({ name: DB_BACKUP_RESTORE_SELF_TEST_NAME })',
+    'open({ name: DB_BACKUP_RESTORE_SELF_TEST_NAME, encryptionKey: DB_BACKUP_RESTORE_SELF_TEST_KEY, })',
+    'open({ name: DB_BACKUP_RESTORE_SELF_TEST_NAME, encryptionKey: DB_BACKUP_RESTORE_SELF_TEST_KEY, readOnly: true, })',
+  ];
+  if (
+    backupRestoreOpenCalls.length !== expectedBackupRestoreOpenCalls.length ||
+    backupRestoreOpenCalls.some(
+      (call, index) =>
+        normalizedSnippet(call, databaseFile) !== expectedBackupRestoreOpenCalls[index],
+    )
+  ) {
+    return undefined;
+  }
   const candidateOpenCalls = [
     ...processOpenCalls,
     ...walWriteDeathOpenCalls,
     ...activeMigrationOpenCalls,
     ...runtimeConcurrencyOpenCalls,
+    ...backupRestoreOpenCalls,
   ];
 
   const migrationCalls = edges
@@ -2514,6 +2732,26 @@ function dbProcessRelaunchCertificateCandidate({
   ).filter((call) => nodeIsInside(call, runRuntimeConcurrencySelfTest));
   const runtimeConcurrencyAdapterCall = runtimeConcurrencyAdapterCalls[0];
   const runtimeConcurrencyDrizzleCall = runtimeConcurrencyAdapterCall?.parent;
+  const backupRestoreMigrationCalls = edges
+    .filter(
+      (edge) =>
+        edge.callee === runMigrations &&
+        edge.node &&
+        nodeIsInside(edge.node, runBackupRestoreSelfTest),
+    )
+    .map((edge) => edge.node);
+  const backupRestoreRunnerFactoryCalls = directCallsToBinding(
+    databaseFile,
+    opRunner.name,
+    checker,
+  ).filter((call) => nodeIsInside(call, runBackupRestoreSelfTest));
+  const backupRestoreAdapterCalls = directCallsToBinding(
+    databaseFile,
+    drizzleAdapter.name,
+    checker,
+  ).filter((call) => nodeIsInside(call, runBackupRestoreSelfTest));
+  const backupRestoreAdapterCall = backupRestoreAdapterCalls[0];
+  const backupRestoreDrizzleCall = backupRestoreAdapterCall?.parent;
   const drizzleBinding = soleNamedImportBinding(databaseFile, 'drizzle-orm/op-sqlite', 'drizzle');
   const prefixRunner = databaseCallables.get('dbActiveMigrationPrefixRunner');
   const crashRunner = databaseCallables.get('dbActiveMigrationCrashRunner');
@@ -2590,6 +2828,25 @@ function dbProcessRelaunchCertificateCandidate({
       checker,
     ) ||
     normalizedSnippet(runtimeConcurrencyDrizzleCall, databaseFile) !==
+      'drizzle(drizzleAdapter(activeHandle))' ||
+    backupRestoreMigrationCalls.length !== 1 ||
+    backupRestoreRunnerFactoryCalls.length !== 1 ||
+    backupRestoreMigrationCalls[0]?.arguments.length !== 1 ||
+    backupRestoreMigrationCalls[0]?.arguments[0] !== backupRestoreRunnerFactoryCalls[0] ||
+    backupRestoreRunnerFactoryCalls[0]?.parent !== backupRestoreMigrationCalls[0] ||
+    !ts.isAwaitExpression(backupRestoreMigrationCalls[0]?.parent) ||
+    normalizedSnippet(backupRestoreMigrationCalls[0], databaseFile) !==
+      'runMigrations(opRunner(activeHandle))' ||
+    backupRestoreAdapterCalls.length !== 1 ||
+    !backupRestoreAdapterCall ||
+    backupRestoreAdapterCall.arguments.length !== 1 ||
+    !identifierNamed(backupRestoreAdapterCall.arguments[0], 'activeHandle') ||
+    !backupRestoreDrizzleCall ||
+    !ts.isCallExpression(backupRestoreDrizzleCall) ||
+    backupRestoreDrizzleCall.arguments.length !== 1 ||
+    backupRestoreDrizzleCall.arguments[0] !== backupRestoreAdapterCall ||
+    !sameSymbol(unwrapExpression(backupRestoreDrizzleCall.expression), drizzleBinding, checker) ||
+    normalizedSnippet(backupRestoreDrizzleCall, databaseFile) !==
       'drizzle(drizzleAdapter(activeHandle))'
   ) {
     return undefined;
@@ -2625,11 +2882,17 @@ function dbProcessRelaunchCertificateCandidate({
     extractRows.name,
     checker,
   ).filter((call) => nodeIsInside(call, runRuntimeConcurrencySelfTest));
+  const backupRestoreExtractCalls = directCallsToBinding(
+    databaseFile,
+    extractRows.name,
+    checker,
+  ).filter((call) => nodeIsInside(call, runBackupRestoreSelfTest));
   if (
     processExtractCalls.length !== 8 ||
     walWriteDeathExtractCalls.length !== 11 ||
     activeMigrationExtractCalls.length !== 15 ||
-    runtimeConcurrencyExtractCalls.length !== 4
+    runtimeConcurrencyExtractCalls.length !== 4 ||
+    backupRestoreExtractCalls.length !== 4
   ) {
     return undefined;
   }
@@ -2638,6 +2901,7 @@ function dbProcessRelaunchCertificateCandidate({
     ...walWriteDeathExtractCalls,
     ...activeMigrationExtractCalls,
     ...runtimeConcurrencyExtractCalls,
+    ...backupRestoreExtractCalls,
   ];
 
   const migrationListReferences = runtimeReferencesToBinding(
@@ -2670,16 +2934,21 @@ function dbProcessRelaunchCertificateCandidate({
   const runtimeConcurrencyMigrationReferences = migrationListReferences.filter((reference) =>
     nodeIsInside(reference, runtimeConcurrencyMigrationNames),
   );
+  const backupRestoreMigrationReferences = migrationListReferences.filter((reference) =>
+    nodeIsInside(reference, backupRestoreMigrationNames),
+  );
   const processMigrationReferences = migrationListReferences.filter(
     (reference) =>
       nodeIsInside(reference, migrationNames) ||
       nodeIsInside(reference, databaseCallables.get('dbActiveMigrationNames')) ||
-      nodeIsInside(reference, runtimeConcurrencyMigrationNames),
+      nodeIsInside(reference, runtimeConcurrencyMigrationNames) ||
+      nodeIsInside(reference, backupRestoreMigrationNames),
   );
   if (
     activeMigrationNameReferences.length !== 2 ||
     runtimeConcurrencyMigrationReferences.length !== 1 ||
-    processMigrationReferences.length !== 4 ||
+    backupRestoreMigrationReferences.length !== 1 ||
+    processMigrationReferences.length !== 5 ||
     !activeMigrationNameReferences.some(
       (reference) =>
         ts.isElementAccessExpression(reference.parent) && reference.parent.expression === reference,
@@ -2929,6 +3198,77 @@ function dbProcessRelaunchCertificateCandidate({
     startContract,
     runRuntimeConcurrencyRecoveryPhase,
   );
+  const cleanupBackupRestoreDatabaseEdges = exactCallEdges(
+    edges,
+    runBackupRestoreSelfTest,
+    cleanupBackupRestore,
+  );
+  const cleanupBackupRestoreFailureEdges = exactCallEdges(
+    edges,
+    finishBackupRestoreFailure,
+    cleanupBackupRestore,
+  );
+  const finishBackupRestoreEdges = exactCallEdges(
+    edges,
+    runBackupRestorePhase,
+    finishBackupRestoreFailure,
+  );
+  const runBackupRestoreDatabaseEdges = exactCallEdges(
+    edges,
+    runBackupRestorePhase,
+    runBackupRestoreSelfTest,
+  );
+  const cleanupOldBackupRestoreRecoveryEdges = exactCallEdges(
+    edges,
+    runRecoveryPhase,
+    cleanupBackupRestore,
+  );
+  const cleanupWalBackupRestoreRecoveryEdges = exactCallEdges(
+    edges,
+    runWalWriteDeathRecoveryPhase,
+    cleanupBackupRestore,
+  );
+  const cleanupActiveBackupRestoreRecoveryEdges = exactCallEdges(
+    edges,
+    runActiveMigrationRecoveryPhase,
+    cleanupBackupRestore,
+  );
+  const cleanupRuntimeBackupRestoreRecoveryEdges = exactCallEdges(
+    edges,
+    runRuntimeConcurrencyRecoveryPhase,
+    cleanupBackupRestore,
+  );
+  const cleanupBackupRestoreOldRecoveryEdges = exactCallEdges(
+    edges,
+    runBackupRestoreRecoveryPhase,
+    cleanup,
+  );
+  const cleanupBackupRestoreWalRecoveryEdges = exactCallEdges(
+    edges,
+    runBackupRestoreRecoveryPhase,
+    cleanupWalWriteDeath,
+  );
+  const cleanupBackupRestoreActiveRecoveryEdges = exactCallEdges(
+    edges,
+    runBackupRestoreRecoveryPhase,
+    cleanupActiveMigration,
+  );
+  const cleanupBackupRestoreRuntimeRecoveryEdges = exactCallEdges(
+    edges,
+    runBackupRestoreRecoveryPhase,
+    cleanupRuntimeConcurrency,
+  );
+  const cleanupBackupRestoreRecoveryEdges = exactCallEdges(
+    edges,
+    runBackupRestoreRecoveryPhase,
+    cleanupBackupRestore,
+  );
+  const startBackupRestoreEdges = exactCallEdges(edges, startContract, runBackupRestorePhase);
+  const startBackupRestoreRecoveryEdges = exactCallEdges(
+    edges,
+    startContract,
+    runBackupRestoreRecoveryPhase,
+  );
   const foregroundEdges = exactCallEdges(edges, startForegroundBoot, startContract);
   const expectedCleanupEdges = [
     ...cleanupPrepareEdges,
@@ -2939,6 +3279,7 @@ function dbProcessRelaunchCertificateCandidate({
     ...cleanupOldWalWriteDeathRecoveryEdges,
     ...cleanupOldActiveMigrationRecoveryEdges,
     ...cleanupRuntimeConcurrencyOldRecoveryEdges,
+    ...cleanupBackupRestoreOldRecoveryEdges,
   ];
   const expectedWalWriteDeathCleanupEdges = [
     ...cleanupWalWriteDeathPrepareEdges,
@@ -2950,6 +3291,7 @@ function dbProcessRelaunchCertificateCandidate({
     ...cleanupWalWriteDeathRecoveryEdges,
     ...cleanupWalActiveMigrationRecoveryEdges,
     ...cleanupRuntimeConcurrencyWalRecoveryEdges,
+    ...cleanupBackupRestoreWalRecoveryEdges,
   ];
   const expectedActiveMigrationCleanupEdges = [
     ...cleanupActiveMigrationPrepareEdges,
@@ -2961,6 +3303,7 @@ function dbProcessRelaunchCertificateCandidate({
     ...cleanupActiveMigrationResumeServiceEdges,
     ...cleanupActiveMigrationRecoveryEdges,
     ...cleanupRuntimeConcurrencyActiveRecoveryEdges,
+    ...cleanupBackupRestoreActiveRecoveryEdges,
   ];
   const expectedRuntimeConcurrencyCleanupEdges = [
     ...cleanupRuntimeConcurrencyDatabaseEdges,
@@ -2969,6 +3312,16 @@ function dbProcessRelaunchCertificateCandidate({
     ...cleanupWalRuntimeConcurrencyRecoveryEdges,
     ...cleanupActiveRuntimeConcurrencyRecoveryEdges,
     ...cleanupRuntimeConcurrencyRecoveryEdges,
+    ...cleanupBackupRestoreRuntimeRecoveryEdges,
+  ];
+  const expectedBackupRestoreCleanupEdges = [
+    ...cleanupBackupRestoreDatabaseEdges,
+    ...cleanupBackupRestoreFailureEdges,
+    ...cleanupOldBackupRestoreRecoveryEdges,
+    ...cleanupWalBackupRestoreRecoveryEdges,
+    ...cleanupActiveBackupRestoreRecoveryEdges,
+    ...cleanupRuntimeBackupRestoreRecoveryEdges,
+    ...cleanupBackupRestoreRecoveryEdges,
   ];
   if (
     cleanupPrepareEdges.length !== 2 ||
@@ -3061,6 +3414,27 @@ function dbProcessRelaunchCertificateCandidate({
     edges.filter((edge) => edge.callee === runRuntimeConcurrencyPhase).length !== 1 ||
     startRuntimeConcurrencyRecoveryEdges.length !== 2 ||
     edges.filter((edge) => edge.callee === runRuntimeConcurrencyRecoveryPhase).length !== 2 ||
+    cleanupBackupRestoreDatabaseEdges.length !== 2 ||
+    cleanupBackupRestoreFailureEdges.length !== 1 ||
+    cleanupOldBackupRestoreRecoveryEdges.length !== 1 ||
+    cleanupWalBackupRestoreRecoveryEdges.length !== 1 ||
+    cleanupActiveBackupRestoreRecoveryEdges.length !== 1 ||
+    cleanupRuntimeBackupRestoreRecoveryEdges.length !== 1 ||
+    cleanupBackupRestoreOldRecoveryEdges.length !== 1 ||
+    cleanupBackupRestoreWalRecoveryEdges.length !== 1 ||
+    cleanupBackupRestoreActiveRecoveryEdges.length !== 1 ||
+    cleanupBackupRestoreRuntimeRecoveryEdges.length !== 1 ||
+    cleanupBackupRestoreRecoveryEdges.length !== 1 ||
+    edges.filter((edge) => edge.callee === cleanupBackupRestore).length !==
+      expectedBackupRestoreCleanupEdges.length ||
+    finishBackupRestoreEdges.length !== 2 ||
+    edges.filter((edge) => edge.callee === finishBackupRestoreFailure).length !== 2 ||
+    runBackupRestoreDatabaseEdges.length !== 1 ||
+    edges.filter((edge) => edge.callee === runBackupRestoreSelfTest).length !== 1 ||
+    startBackupRestoreEdges.length !== 1 ||
+    edges.filter((edge) => edge.callee === runBackupRestorePhase).length !== 1 ||
+    startBackupRestoreRecoveryEdges.length !== 2 ||
+    edges.filter((edge) => edge.callee === runBackupRestoreRecoveryPhase).length !== 2 ||
     foregroundEdges.length !== 1 ||
     edges.filter((edge) => edge.callee === startContract).length !== 1
   ) {
@@ -3077,6 +3451,19 @@ function dbProcessRelaunchCertificateCandidate({
     runtimeWaveReference.caller !== runRuntimeConcurrencyPhase ||
     runtimeWaveReference.node.parent !== runRuntimeConcurrencyDatabaseEdges[0]?.node ||
     runRuntimeConcurrencyDatabaseEdges[0]?.node.arguments[0] !== runtimeWaveReference.node
+  ) {
+    return undefined;
+  }
+  const backupWaveReferences = referenceEdges.filter(
+    (reference) => reference.target === backupRestoreWave,
+  );
+  const backupWaveReference = backupWaveReferences[0];
+  if (
+    backupWaveReferences.length !== 1 ||
+    !backupWaveReference ||
+    backupWaveReference.caller !== runBackupRestorePhase ||
+    backupWaveReference.node.parent !== runBackupRestoreDatabaseEdges[0]?.node ||
+    runBackupRestoreDatabaseEdges[0]?.node.arguments[0] !== backupWaveReference.node
   ) {
     return undefined;
   }
@@ -3115,8 +3502,25 @@ function dbProcessRelaunchCertificateCandidate({
     (edge) => edge.node.arguments.length >= 6,
   );
   const optionedFailureEdges = directFailureEdges.filter((edge) => edge.node.arguments.length >= 8);
+  const hasExactOptionedEdge = (optionedEdges, owner, optionIndex, expected) =>
+    optionedEdges.some(
+      (edge) =>
+        edge.caller === owner &&
+        normalizedSnippet(edge.node.arguments[optionIndex], edge.node.getSourceFile()) === expected,
+    );
+  const hasExactNestedOptionedEdge = (optionedEdges, owner, optionIndex, expected) =>
+    optionedEdges.some(
+      (edge) =>
+        edge.caller &&
+        callableIsInside(edge.caller, owner) &&
+        normalizedSnippet(edge.node.arguments[optionIndex], edge.node.getSourceFile()) === expected,
+    );
   const runtimeSendNode = runtimeWaveSendEdges[0]?.node;
   const runtimeSendOptions = runtimeSendNode?.arguments[6];
+  const expectedProductionQueueObservers = new Set([
+    "(tempGuid) => { try { if (accountLease.isCurrent()) onQueued?.(tempGuid); } catch (error) { logger.warn('[send] optional queue observer failed', error); } }",
+    "(tempGuid) => { queued = true; try { if (accountLease.isCurrent()) { onAdmission?.({ uri: image.uri, queued: true, tempGuid }); } } catch (error) { logger.warn('[send] optional attachment admission observer failed', error); } }",
+  ]);
   const runtimeWaveCallNodes = [
     ...runtimeWaveTransactionEdges,
     ...runtimeWaveLockEdges,
@@ -3134,14 +3538,19 @@ function dbProcessRelaunchCertificateCandidate({
     runtimeWaveSyncEdges.length !== 2 ||
     runtimeWaveSendEdges.length !== 1 ||
     runtimeWaveEventEdges.length !== 1 ||
-    allSendImageEdges.length !== 3 ||
+    allSendImageEdges.length !== 4 ||
     allSendImageEdges.some((edge) => edge.node.arguments.some(ts.isSpreadElement)) ||
-    productionSendImageEdges.length !== 2 ||
+    productionSendImageEdges.length !== 3 ||
     productionSendImageEdges.some(
       (edge) =>
-        edge.node.arguments.length !== 8 ||
+        edge.node.arguments.length !== 10 ||
         !identifierNamed(edge.node.arguments[6], 'undefined') ||
-        !identifierNamed(edge.node.arguments[7], 'pasteOwnership'),
+        !identifierNamed(edge.node.arguments[7], 'pasteOwnership') ||
+        !expectedProductionQueueObservers.has(
+          normalizedSnippet(edge.node.arguments[8], edge.node.getSourceFile()),
+        ) ||
+        normalizedSnippet(edge.node.arguments[9], edge.node.getSourceFile()) !==
+          'captureSessionRcsCapabilityLease()',
     ) ||
     directReconcileEdges.length !== allReconcileEdges.length ||
     directFailureEdges.length !== allFailureEdges.length ||
@@ -3150,12 +3559,51 @@ function dbProcessRelaunchCertificateCandidate({
     !runtimeSendOptions ||
     normalizedSnippet(runtimeSendOptions, runtimeWaveFile) !==
       "{ failureNoticeMode: 'suppressed' }" ||
-    optionedReconcileEdges.length !== 1 ||
-    optionedReconcileEdges[0]?.caller !== sendImageMessage ||
-    !identifierNamed(optionedReconcileEdges[0]?.node.arguments[5], 'outcomeOptions') ||
-    optionedFailureEdges.length !== 1 ||
-    optionedFailureEdges[0]?.caller !== sendImageMessage ||
-    !identifierNamed(optionedFailureEdges[0]?.node.arguments[7], 'outcomeOptions') ||
+    optionedReconcileEdges.length !== 4 ||
+    !hasExactOptionedEdge(
+      optionedReconcileEdges,
+      sendTextMessage,
+      5,
+      '{ attemptOwnerToken: attemptOwnerToken ?? undefined, }',
+    ) ||
+    !hasExactOptionedEdge(
+      optionedReconcileEdges,
+      sendContactMessage,
+      5,
+      '{ attemptOwnerToken: attemptOwnerToken ?? undefined, }',
+    ) ||
+    !hasExactOptionedEdge(optionedReconcileEdges, sendImageMessage, 5, 'attemptOptions') ||
+    !hasExactNestedOptionedEdge(
+      optionedReconcileEdges,
+      resendOutgoingRow,
+      5,
+      '{ attemptOwnerToken, }',
+    ) ||
+    optionedFailureEdges.length !== 4 ||
+    !hasExactOptionedEdge(
+      optionedFailureEdges,
+      sendTextMessage,
+      7,
+      '{ attemptOwnerToken: attemptOwnerToken ?? undefined }',
+    ) ||
+    !hasExactOptionedEdge(
+      optionedFailureEdges,
+      sendContactMessage,
+      7,
+      '{ attemptOwnerToken: attemptOwnerToken ?? undefined, }',
+    ) ||
+    !hasExactOptionedEdge(
+      optionedFailureEdges,
+      sendImageMessage,
+      7,
+      '{ ...outcomeOptions, attemptOwnerToken: attemptOwnerToken ?? undefined, }',
+    ) ||
+    !hasExactNestedOptionedEdge(
+      optionedFailureEdges,
+      resendOutgoingRow,
+      7,
+      '{ attemptOwnerToken, }',
+    ) ||
     edges.filter((edge) => edge.callee === runtimeConcurrencyCount).length !== 15 ||
     edges.filter((edge) => edge.callee === submitOrderedCoordinatorWave).length !== 1 ||
     edges.filter((edge) => edge.callee === runtimeConcurrencyWave).length !== 0 ||
@@ -3165,11 +3613,50 @@ function dbProcessRelaunchCertificateCandidate({
     return undefined;
   }
 
+  const backupWaveOwnerIsProtected = (callable) =>
+    callable &&
+    [...backupWaveCallables.values()].some((owner) => callableIsInside(callable, owner));
+  const backupWaveEdgesTo = (callee) =>
+    edges.filter((edge) => backupWaveOwnerIsProtected(edge.caller) && edge.callee === callee);
+  const backupWaveTransactionEdges = backupWaveEdgesTo(withDbTransaction);
+  const backupWaveCountEdges = backupWaveEdgesTo(backupRestoreCount);
+  const backupWaveDropTriggerEdges = backupWaveEdgesTo(dropBackupRestoreFaultTrigger);
+  const backupWaveTempTableEdges = backupWaveEdgesTo(temporaryRestoreTablesAreAbsent);
+  const backupWaveRestoreEdges = backupWaveEdgesTo(restoreBackup);
+  const backupWaveCallNodes = [
+    ...backupWaveTransactionEdges,
+    ...backupWaveCountEdges,
+    ...backupWaveDropTriggerEdges,
+    ...backupWaveTempTableEdges,
+    ...backupWaveRestoreEdges,
+  ].map((edge) => edge.node);
+  if (
+    backupWaveTransactionEdges.length !== 4 ||
+    backupWaveCountEdges.length !== 11 ||
+    backupWaveDropTriggerEdges.length !== 2 ||
+    backupWaveTempTableEdges.length !== 2 ||
+    backupWaveRestoreEdges.length !== 2 ||
+    edges.filter((edge) => edge.callee === backupRestoreCount).length !== 11 ||
+    edges.filter((edge) => edge.callee === dropBackupRestoreFaultTrigger).length !== 2 ||
+    edges.filter((edge) => edge.callee === temporaryRestoreTablesAreAbsent).length !== 2 ||
+    edges.filter((edge) => edge.callee === backupRestoreWave).length !== 0 ||
+    backupWaveRestoreEdges.some(
+      (edge) => edge.node.arguments.length !== 2 || edge.node.arguments.some(ts.isSpreadElement),
+    ) ||
+    backupWaveCallNodes.length !== 21 ||
+    new Set(backupWaveCallNodes).size !== 21
+  ) {
+    return undefined;
+  }
+
   const protectedTargets = new Set([
     cleanup,
     cleanupRuntimeConcurrency,
     runtimeConcurrencyMigrationNames,
     runRuntimeConcurrencySelfTest,
+    cleanupBackupRestore,
+    backupRestoreMigrationNames,
+    runBackupRestoreSelfTest,
     prepare,
     resume,
     cleanupWalWriteDeath,
@@ -3198,21 +3685,27 @@ function dbProcessRelaunchCertificateCandidate({
     finishRuntimeConcurrencyFailure,
     runRuntimeConcurrencyPhase,
     runRuntimeConcurrencyRecoveryPhase,
+    finishBackupRestoreFailure,
+    runBackupRestorePhase,
+    runBackupRestoreRecoveryPhase,
     ...runtimeWaveCallables.values(),
+    ...backupWaveCallables.values(),
     startContract,
   ]);
   const expectedGlobalReferenceCounts = [
-    [cleanup, 10],
-    [cleanupRuntimeConcurrency, 8],
+    [cleanup, 11],
+    [cleanupRuntimeConcurrency, 9],
     [runRuntimeConcurrencySelfTest, 2],
     [prepare, 2],
     [resume, 2],
-    [cleanupWalWriteDeath, 11],
+    [cleanupWalWriteDeath, 12],
     [prepareWalWriteDeath, 2],
     [resumeWalWriteDeath, 2],
-    [cleanupActiveMigration, 12],
+    [cleanupActiveMigration, 13],
     [prepareActiveMigration, 2],
     [resumeActiveMigration, 2],
+    [cleanupBackupRestore, 9],
+    [runBackupRestoreSelfTest, 2],
     [startContract, 2],
   ];
   const globalReferences = runtimeReferencesToBindings(
@@ -3224,6 +3717,9 @@ function dbProcessRelaunchCertificateCandidate({
     [databaseCallables.get('emptyDbRuntimeConcurrencyDatabaseChecks'), 2],
     [runtimeConcurrencyMigrationNames, 2],
     [databaseCallables.get('firstDbRuntimeConcurrencyWaveFailure'), 2],
+    [databaseCallables.get('emptyDbBackupRestoreDatabaseChecks'), 2],
+    [backupRestoreMigrationNames, 2],
+    [databaseCallables.get('firstDbBackupRestoreWaveFailure'), 2],
     [databaseCallables.get('emptyDbActiveWalWriteDeathPrepareChecks'), 2],
     [databaseCallables.get('emptyDbActiveWalWriteDeathResumeChecks'), 2],
     [databaseCallables.get('pragmaContainsString'), 11],
@@ -3250,6 +3746,12 @@ function dbProcessRelaunchCertificateCandidate({
     runRuntimeConcurrencyPhase,
     runRuntimeConcurrencyRecoveryPhase,
     ...runtimeWaveCallables.values(),
+    cleanupBackupRestore,
+    runBackupRestoreSelfTest,
+    finishBackupRestoreFailure,
+    runBackupRestorePhase,
+    runBackupRestoreRecoveryPhase,
+    ...backupWaveCallables.values(),
   ]);
   const runtimeCapabilityOwnerIsProtected = (callable) =>
     callable && [...runtimeCapabilityOwners].some((owner) => callableIsInside(callable, owner));
@@ -3275,17 +3777,21 @@ function dbProcessRelaunchCertificateCandidate({
       (reference) =>
         typeof reference.target !== 'string' &&
         protectedTargets.has(reference.target) &&
-        reference !== runtimeWaveReference,
+        reference !== runtimeWaveReference &&
+        reference !== backupWaveReference,
     ) ||
     referenceEdges.some(
       (reference) =>
-        runtimeCapabilityOwnerIsProtected(reference.caller) && reference !== runtimeWaveReference,
+        runtimeCapabilityOwnerIsProtected(reference.caller) &&
+        reference !== runtimeWaveReference &&
+        reference !== backupWaveReference,
     ) ||
     dynamicCallbacks.some((callback) => runtimeCapabilityOwnerIsProtected(callback.caller)) ||
     dynamicDispatches.some((dispatch) => runtimeCapabilityOwnerIsProtected(dispatch.caller)) ||
     hasNonStaticModuleSpecifierOfPath(filesByPath, databasePath) ||
     hasNonStaticModuleSpecifierOfPath(filesByPath, relaunchPath) ||
-    hasNonStaticModuleSpecifierOfPath(filesByPath, runtimeWavePath)
+    hasNonStaticModuleSpecifierOfPath(filesByPath, runtimeWavePath) ||
+    hasNonStaticModuleSpecifierOfPath(filesByPath, backupWavePath)
   ) {
     return undefined;
   }
@@ -3416,6 +3922,44 @@ function dbProcessRelaunchCertificateCandidate({
     return undefined;
   }
 
+  const backupRawOwners = new Set([
+    cleanupBackupRestore,
+    runBackupRestoreSelfTest,
+    ...backupWaveCallables.values(),
+  ]);
+  const backupRawFindings = findings.filter((finding) => {
+    const callable = findingCallables.get(finding.id);
+    return (
+      callable &&
+      [...backupRawOwners].some((owner) => callableIsInside(callable, owner)) &&
+      finding.operation !== 'mutator-call'
+    );
+  });
+  const expectedBackupRawFindingSignatures = [
+    'src/db/database.ts|cleanupDbBackupRestoreSelfTestDatabase|native-database-delete|<database-file>',
+    'src/db/database.ts|runDbBackupRestoreSelfTest|sql-pragma|foreign_key_check',
+    'src/db/database.ts|runDbBackupRestoreSelfTest|sql-pragma|foreign_keys',
+    'src/db/database.ts|runDbBackupRestoreSelfTest|sql-pragma|foreign_keys',
+    'src/db/database.ts|runDbBackupRestoreSelfTest|sql-pragma|foreign_keys',
+    'src/db/database.ts|runDbBackupRestoreSelfTest|sql-pragma|integrity_check',
+    'src/services/boot/dbBackupRestoreWave.ts|count|raw-dynamic|<dynamic>',
+    'src/services/boot/dbBackupRestoreWave.ts|dropFaultTrigger|raw-dynamic|<dynamic>',
+    'src/services/boot/dbBackupRestoreWave.ts|runDbBackupRestoreWave|raw-dynamic|<dynamic>',
+    'src/services/boot/dbBackupRestoreWave.ts|runDbBackupRestoreWave|sql-insert|chats',
+    'src/services/boot/dbBackupRestoreWave.ts|runDbBackupRestoreWave|sql-insert|custom_folder_members',
+    'src/services/boot/dbBackupRestoreWave.ts|runDbBackupRestoreWave|sql-insert|custom_folders',
+    'src/services/boot/dbBackupRestoreWave.ts|runDbBackupRestoreWave|sql-insert|kv',
+    'src/services/boot/dbBackupRestoreWave.ts|runDbBackupRestoreWave|sql-insert|kv',
+    'src/services/boot/dbBackupRestoreWave.ts|runDbBackupRestoreWave|sql-insert|themes',
+  ].sort();
+  if (
+    backupRawFindings.length !== expectedBackupRawFindingSignatures.length ||
+    backupRawFindings.map(runtimeFindingSignature).sort().join('\n') !==
+      expectedBackupRawFindingSignatures.join('\n')
+  ) {
+    return undefined;
+  }
+
   const databaseCallNodes = [
     ...cleanupPrepareEdges,
     ...cleanupResumeEdges,
@@ -3432,6 +3976,8 @@ function dbProcessRelaunchCertificateCandidate({
     ...seedActiveMigrationPrepareEdges,
     ...cleanupRuntimeConcurrencyDatabaseEdges,
     ...runtimeConcurrencyMigrationCalls.map((node) => ({ node })),
+    ...cleanupBackupRestoreDatabaseEdges,
+    ...backupRestoreMigrationCalls.map((node) => ({ node })),
   ].map((edge) => edge.node);
   const orchestrationCallNodes = [
     ...cleanupFailureEdges,
@@ -3479,30 +4025,49 @@ function dbProcessRelaunchCertificateCandidate({
     ...cleanupRuntimeConcurrencyRecoveryEdges,
     ...startRuntimeConcurrencyEdges,
     ...startRuntimeConcurrencyRecoveryEdges,
+    ...cleanupOldBackupRestoreRecoveryEdges,
+    ...cleanupWalBackupRestoreRecoveryEdges,
+    ...cleanupActiveBackupRestoreRecoveryEdges,
+    ...cleanupRuntimeBackupRestoreRecoveryEdges,
+    ...cleanupBackupRestoreFailureEdges,
+    ...finishBackupRestoreEdges,
+    ...runBackupRestoreDatabaseEdges,
+    ...cleanupBackupRestoreOldRecoveryEdges,
+    ...cleanupBackupRestoreWalRecoveryEdges,
+    ...cleanupBackupRestoreActiveRecoveryEdges,
+    ...cleanupBackupRestoreRuntimeRecoveryEdges,
+    ...cleanupBackupRestoreRecoveryEdges,
+    ...startBackupRestoreEdges,
+    ...startBackupRestoreRecoveryEdges,
     { node: runtimeWaveReference.node },
     ...runtimeWaveCallNodes.map((node) => ({ node })),
+    { node: backupWaveReference.node },
+    ...backupWaveCallNodes.map((node) => ({ node })),
   ].map((edge) => edge.node);
   if (
-    databaseCallNodes.length !== 25 ||
-    new Set(databaseCallNodes).size !== 25 ||
-    orchestrationCallNodes.length !== 79 ||
-    new Set(orchestrationCallNodes).size !== 79
+    databaseCallNodes.length !== 28 ||
+    new Set(databaseCallNodes).size !== 28 ||
+    orchestrationCallNodes.length !== 117 ||
+    new Set(orchestrationCallNodes).size !== 117
   ) {
     return undefined;
   }
 
   return {
-    adapterCall: runtimeConcurrencyAdapterCall,
-    allFindingIds: new Set([...rawFindings, ...runtimeRawFindings].map((finding) => finding.id)),
+    adapterCalls: [runtimeConcurrencyAdapterCall, backupRestoreAdapterCall],
+    allFindingIds: new Set(
+      [...rawFindings, ...runtimeRawFindings, ...backupRawFindings].map((finding) => finding.id),
+    ),
     cleanup,
     databaseCallNodes,
-    drizzleCall: runtimeConcurrencyDrizzleCall,
+    drizzleCalls: [runtimeConcurrencyDrizzleCall, backupRestoreDrizzleCall],
     extractCalls,
     foregroundCall: foregroundEdges[0].node,
     migrationCalls: [
       ...migrationCalls,
       ...activeMigrationCalls,
       ...runtimeConcurrencyMigrationCalls,
+      ...backupRestoreMigrationCalls,
     ],
     migrationReferences: processMigrationReferences,
     nestedRunnerAdoptions: [
@@ -3519,11 +4084,14 @@ function dbProcessRelaunchCertificateCandidate({
     ],
     openCalls: candidateOpenCalls,
     orchestrationCallNodes,
-    rawFindingIds: new Set([...rawFindings, ...runtimeRawFindings].map((finding) => finding.id)),
+    rawFindingIds: new Set(
+      [...rawFindings, ...runtimeRawFindings, ...backupRawFindings].map((finding) => finding.id),
+    ),
     runnerFactoryCalls: [
       ...runnerFactoryCalls,
       ...activeMigrationRunnerFactoryCalls,
       ...runtimeConcurrencyRunnerFactoryCalls,
+      ...backupRestoreRunnerFactoryCalls,
     ],
     startContract,
   };
@@ -4007,10 +4575,10 @@ function driverSelfTestCertificateCandidate({
     nameState.declaration.initializer.text !== 'driver-selftest.db' ||
     !(migrationCountState.declarationList.flags & ts.NodeFlags.Const) ||
     normalizedSnippet(migrationCountState.declaration.initializer, databaseFile) !==
-      '45 as const' ||
+      '47 as const' ||
     !(migrationHeadState.declarationList.flags & ts.NodeFlags.Const) ||
     normalizedSnippet(migrationHeadState.declaration.initializer, databaseFile) !==
-      "'0045_backup_export_indexes' as const" ||
+      "'0047_message_retraction_topology' as const" ||
     !(partialMigrationCountState.declarationList.flags & ts.NodeFlags.Const) ||
     normalizedSnippet(partialMigrationCountState.declaration.initializer, databaseFile) !== '29' ||
     !(internalFailureState.declarationList.flags & ts.NodeFlags.Const) ||
@@ -4319,13 +4887,13 @@ function driverSelfTestCertificateCandidate({
   const historyOpenCallSet = new Set(historyCandidate.openCalls);
   const processOpenCallSet = new Set(processRelaunchCandidate.openCalls);
   if (
-    allOpenCalls.length !== 32 ||
+    allOpenCalls.length !== 35 ||
     productionOpenCalls.length !== 1 ||
     cleanupOpenCalls.length !== 1 ||
     selfTestOpenCalls.length !== 5 ||
     historyOpenCallSet.size !== 5 ||
     historyCandidate.openCalls.some((call) => !allOpenCalls.includes(call)) ||
-    processOpenCallSet.size !== 20 ||
+    processOpenCallSet.size !== 23 ||
     processRelaunchCandidate.openCalls.some((call) => !allOpenCalls.includes(call))
   ) {
     return undefined;
@@ -4396,7 +4964,7 @@ function driverSelfTestCertificateCandidate({
 
   const allDrizzleCalls = directCallsToBinding(databaseFile, drizzleBinding, checker);
   const selfTestDrizzleCalls = allDrizzleCalls.filter((call) => nodeIsInside(call, selfTest));
-  if (allDrizzleCalls.length !== 3 || selfTestDrizzleCalls.length !== 1) return undefined;
+  if (allDrizzleCalls.length !== 4 || selfTestDrizzleCalls.length !== 1) return undefined;
   const selfTestDrizzleCall = selfTestDrizzleCalls[0];
   const selfTestAdapterCall = selfTestDrizzleCall.arguments[0]
     ? callableCall(selfTestDrizzleCall.arguments[0], drizzleAdapter, checker)
@@ -5307,7 +5875,7 @@ function driverSelfTestCertificateCandidate({
     conflictEdges.length !== 1 ||
     edges.filter((edge) => edge.callee === expectedConflict).length !== 2 ||
     exactColumnEdges.length !== 4 ||
-    edges.filter((edge) => edge.callee === exactStringColumn).length !== 13 ||
+    edges.filter((edge) => edge.callee === exactStringColumn).length !== 15 ||
     emptyCheckCalls.length !== 2 ||
     referenceEdges.some(
       (reference) =>
@@ -5673,9 +6241,9 @@ function startupSingleFlightDelegationTargets({
     ...(driverSelfTestCandidate
       ? [unwrapExpression(driverSelfTestCandidate.drizzleCall.expression)]
       : []),
-    ...(processRelaunchCandidate
-      ? [unwrapExpression(processRelaunchCandidate.drizzleCall.expression)]
-      : []),
+    ...(processRelaunchCandidate?.drizzleCalls ?? []).map((candidate) =>
+      unwrapExpression(candidate.expression),
+    ),
   ]);
   if (
     openReferences.length !== expectedOpenReferences.size ||
@@ -5986,13 +6554,14 @@ function startupSingleFlightDelegationTargets({
 /**
  * Prove the five raw driver calls that cannot use the normal transaction-owner graph.
  *
- * The migration runner has exactly fifteen awaited call sites: the unpublished production
+ * The migration runner has exactly sixteen awaited call sites: the unpublished production
  * first-open handle, six same-process disposable probes, three relaunch probes, four
- * active-migration-death probes, and the fixed DB-02C runtime-concurrency probe. Thirteen adopt
+ * active-migration-death probes, the fixed DB-02C runtime-concurrency probe, and the fixed
+ * BACKUP-02 backup/restore probe. Fourteen adopt
  * opRunner directly; the remaining two use the exact identity-bound prefix and crash wrapper
- * triples before awaited runMigrations. The three Drizzle overrides are coordinated adapter calls:
+ * triples before awaited runMigrations. The four Drizzle overrides are coordinated adapter calls:
  * a private, exact Proxy forwards one operation to the sole op-sqlite handle used by each of the
- * three exact Drizzle clients. Any escape, detached runner call, extra override, dependency drift,
+ * four exact Drizzle clients. Any escape, detached runner call, extra override, dependency drift,
  * or newly unresolved raw write empties both sets.
  */
 function driverAdapterCertifiedCallables({
@@ -6259,8 +6828,8 @@ function driverAdapterCertifiedCallables({
   if (
     !productionRunnerCall ||
     !productionMigrationCall ||
-    expectedRunnerCalls.size !== 15 ||
-    expectedMigrationCalls.size !== 15 ||
+    expectedRunnerCalls.size !== 16 ||
+    expectedMigrationCalls.size !== 16 ||
     nestedRunnerAdoptions.length !== 2 ||
     nestedRunnerAdoptionByFactoryCall.size !== 2 ||
     runnerFactoryCalls.length !== expectedRunnerCalls.size ||
@@ -6284,7 +6853,7 @@ function driverAdapterCertifiedCallables({
         !expectedMigrationCalls.has(migrationCall)
       );
     }) ||
-    runnerFactoryReferences.length !== 16 ||
+    runnerFactoryReferences.length !== 17 ||
     runnerFactoryReferences[0] !== opRunner.name ||
     runnerFactoryReferences.slice(1).some((reference) => {
       const runnerCall = reference.parent;
@@ -6534,11 +7103,10 @@ function driverAdapterCertifiedCallables({
     ? runtimeReferencesToBinding(databaseFile, overridesDeclaration.name, checker)
     : [];
   const adapterFactoryCalls = directCallsToBinding(databaseFile, drizzleAdapter.name, checker);
+  const processAdapterCallSet = new Set(processRelaunchCandidate.adapterCalls);
   const adapterFactoryCall = sole(
     adapterFactoryCalls.filter(
-      (call) =>
-        call !== driverSelfTestCandidate.adapterCall &&
-        call !== processRelaunchCandidate.adapterCall,
+      (call) => call !== driverSelfTestCandidate.adapterCall && !processAdapterCallSet.has(call),
     ),
   );
   const adapterFactoryReferences = runtimeReferencesToBinding(
@@ -6566,19 +7134,20 @@ function driverAdapterCertifiedCallables({
     retireFailedRollbackReferences[0] !== retireFailedRollbackDeclaration.name ||
     overridesReferences.length !== 3 ||
     overridesReferences[0] !== overridesDeclaration.name ||
-    adapterFactoryCalls.length !== 3 ||
+    adapterFactoryCalls.length !== 4 ||
     !adapterFactoryCalls.includes(driverSelfTestCandidate.adapterCall) ||
-    !adapterFactoryCalls.includes(processRelaunchCandidate.adapterCall) ||
+    processAdapterCallSet.size !== 2 ||
+    processRelaunchCandidate.adapterCalls.some((call) => !adapterFactoryCalls.includes(call)) ||
     !adapterFactoryCall ||
     adapterFactoryCall.arguments.length !== 1 ||
-    adapterFactoryReferences.length !== 4 ||
+    adapterFactoryReferences.length !== 5 ||
     adapterFactoryReferences[0] !== drizzleAdapter.name ||
     !adapterFactoryReferences.includes(unwrapExpression(adapterFactoryCall.expression)) ||
     !adapterFactoryReferences.includes(
       unwrapExpression(driverSelfTestCandidate.adapterCall.expression),
     ) ||
-    !adapterFactoryReferences.includes(
-      unwrapExpression(processRelaunchCandidate.adapterCall.expression),
+    processRelaunchCandidate.adapterCalls.some(
+      (call) => !adapterFactoryReferences.includes(unwrapExpression(call.expression)),
     )
   ) {
     return empty();
@@ -7108,6 +7677,9 @@ function incomingIngressCertifiedNodes({
   const devPath = 'src/features/conversations/devSeed.ts';
   const chatPath = 'app/(app)/chat/[guid].tsx';
   const digestPath = 'src/services/realtime/expoDigestBackend.ts';
+  const headlessEffectsPath = 'src/services/background/realtimeHeadlessEffects.ts';
+  const fcmEncryptionPath = 'src/core/realtime/fcmEncryption.ts';
+  const fcmEncryptionStatePath = 'src/services/notifications/fcmEncryptionState.ts';
 
   const controlFile = filesByPath.get(controlPath);
   const dispatcherFile = filesByPath.get(dispatcherPath);
@@ -7121,6 +7693,9 @@ function incomingIngressCertifiedNodes({
   const devFile = filesByPath.get(devPath);
   const chatFile = filesByPath.get(chatPath);
   const digestFile = filesByPath.get(digestPath);
+  const headlessEffectsFile = filesByPath.get(headlessEffectsPath);
+  const fcmEncryptionFile = filesByPath.get(fcmEncryptionPath);
+  const fcmEncryptionStateFile = filesByPath.get(fcmEncryptionStatePath);
   if (
     !controlFile ||
     !dispatcherFile ||
@@ -7133,7 +7708,10 @@ function incomingIngressCertifiedNodes({
     !foregroundBootFile ||
     !devFile ||
     !chatFile ||
-    !digestFile
+    !digestFile ||
+    !headlessEffectsFile ||
+    !fcmEncryptionFile ||
+    !fcmEncryptionStateFile
   ) {
     return empty();
   }
@@ -7141,11 +7719,18 @@ function incomingIngressCertifiedNodes({
   const fn = (path, name) => topLevelFunction(filesByPath, path, name);
   const method = (path, className, name) => topLevelClassMethod(filesByPath, path, className, name);
   const dispatchRealtimeEvent = fn(controlPath, 'dispatchRealtimeEvent');
+  const persistAuthenticatedLockedFcmV3Event = fn(
+    controlPath,
+    'persistAuthenticatedLockedFcmV3Event',
+  );
   const dispatchWithContext = fn(controlPath, 'dispatchWithContext');
   const applyNewServerUrl = fn(controlPath, 'applyNewServerUrl');
   const resetRealtimeRuntime = fn(controlPath, 'resetRealtimeRuntime');
   const getRealtimeRuntime = fn(controlPath, 'getRealtimeRuntime');
   const getFallbackOccurrenceNamespace = fn(controlPath, 'getFallbackOccurrenceNamespace');
+  const beginRealtimeRecoveryCollector = fn(controlPath, 'beginRealtimeRecoveryCollector');
+  const finishRealtimeRecoveryCollector = fn(controlPath, 'finishRealtimeRecoveryCollector');
+  const resumeRecoveredRealtimeEvents = fn(controlPath, 'resumeRecoveredRealtimeEvents');
   const realtimeSink = fn(controlPath, 'realtimeSink');
   const sharedRouter = fn(controlPath, 'sharedRouter');
   const realtimeIntakeLocked = fn(controlPath, 'realtimeIntakeLocked');
@@ -7155,6 +7740,14 @@ function incomingIngressCertifiedNodes({
   const devResume = fn(controlPath, 'devResumePersistedRealtimeEvents');
   const startRealtime = fn(controlPath, 'startRealtime');
   const resumeRealtime = fn(controlPath, 'resumeRealtime');
+  const resumeDesiredRealtime = fn(controlPath, 'resumeDesiredRealtime');
+  const resumeRealtimeAfterCredentialUpgrade = fn(
+    controlPath,
+    'resumeRealtimeAfterCredentialUpgrade',
+  );
+  const claimRealtimeForegroundIntent = fn(controlPath, 'claimRealtimeForegroundIntent');
+  const ownsRealtimeForegroundIntent = fn(controlPath, 'ownsRealtimeForegroundIntent');
+  const pauseRealtime = fn(controlPath, 'pauseRealtime');
   const devPushInject = topLevelObjectMethod(filesByPath, controlPath, 'devPush', 'inject');
   const runTrackedWork = fn(coordinatorPath, 'runTrackedRealtimeWork');
   const runTrackedDelivery = fn(coordinatorPath, 'runTrackedRealtimeDelivery');
@@ -7171,6 +7764,10 @@ function incomingIngressCertifiedNodes({
     'expoDigestBackend',
     'sha256',
   );
+  const beginHeadlessEffectCollection = fn(
+    headlessEffectsPath,
+    'beginRealtimeHeadlessEffectCollection',
+  );
   const effectivelyLocked = fn('src/services/notifications/lockGate.ts', 'effectivelyLocked');
   const isLockExpired = fn('src/core/security/lockTimeout.ts', 'isLockExpired');
   const strictServerOrigin = fn('src/core/config/serverDiscovery.ts', 'strictServerOrigin');
@@ -7180,16 +7777,31 @@ function incomingIngressCertifiedNodes({
     'readAccountRevocationState',
   );
   const hasActiveServerSession = fn('src/core/secure/vault.ts', 'hasActiveServerSession');
+  const inspectCredentialUpgradeJournal = fn(
+    'src/core/secure/credentialUpgrade.ts',
+    'inspectCredentialUpgradeJournal',
+  );
+  const resolveCredentialUpgrade = fn(
+    'src/core/secure/credentialUpgrade.ts',
+    'resolveCredentialUpgrade',
+  );
   const ensureDatabase = fn('src/services/databaseControl.ts', 'ensureDatabase');
   const captureIncomingEvent = fn(codecPath, 'captureIncomingEvent');
   const snapshotIncomingEvent = fn(codecPath, 'snapshotIncomingEvent');
   const canonicalizeIncomingEvent = fn(codecPath, 'canonicalizeIncomingEvent');
+  const encodeIncomingEvent = fn(codecPath, 'encodeIncomingEvent');
+  const assertIncomingEventMetadata = fn(codecPath, 'assertMetadata');
   const normalizeRealtimeEvent = fn(routerPath, 'normalizeRealtimeEvent');
   const durableHandle = method(dispatcherPath, 'DurableRealtimeDispatcher', 'handle');
   const durablePersist = method(
     dispatcherPath,
     'DurableRealtimeDispatcher',
     'persistWithoutDrainForDev',
+  );
+  const durableLockedFcmV3Persist = method(
+    dispatcherPath,
+    'DurableRealtimeDispatcher',
+    'persistLockedFcmV3WithoutDrain',
   );
   const durableResume = method(dispatcherPath, 'DurableRealtimeDispatcher', 'resume');
   const durableDispose = method(dispatcherPath, 'DurableRealtimeDispatcher', 'dispose');
@@ -7218,19 +7830,26 @@ function incomingIngressCertifiedNodes({
     fcmPath.replace('fcmMessaging.ts', 'fcmPayload.ts'),
     'rehydrateFcmEnvelopeChatGuid',
   );
-  const decryptFcmPayload = fn(
-    fcmPath.replace('fcmMessaging.ts', 'fcmDecrypt.ts'),
-    'decryptFcmPayload',
-  );
   const decryptFcmV2Payload = fn(
     fcmPath.replace('fcmMessaging.ts', 'fcmDecrypt.ts'),
     'decryptFcmV2Payload',
   );
-  const readFcmDeviceEncryptionState = fn(
-    fcmPath.replace('fcmMessaging.ts', 'fcmEncryptionState.ts'),
-    'readFcmDeviceEncryptionState',
+  const decryptFcmV3Payload = fn(
+    fcmPath.replace('fcmMessaging.ts', 'fcmDecrypt.ts'),
+    'decryptFcmV3Payload',
   );
+  const fcmPushDecryptionKeyCandidates = fn(fcmEncryptionPath, 'fcmPushDecryptionKeyCandidates');
+  const inspectFcmDeviceEncryptionState = fn(fcmEncryptionPath, 'inspectFcmDeviceEncryptionState');
+  const decodeFcmPushEnvelopeIdentityV3 = fn(
+    'src/core/realtime/fcmPushEnvelopeIdentity.ts',
+    'decodeFcmPushEnvelopeIdentityV3',
+  );
+  const readFcmDeviceEncryptionState = fn(fcmEncryptionStatePath, 'readFcmDeviceEncryptionState');
   const deliver = fn(fcmPath, 'deliver');
+  const normalizedMessageId = fn(fcmPath, 'normalizedMessageId');
+  const v3IdentityMatchesPayload = fn(fcmPath, 'v3IdentityMatchesPayload');
+  const v3ServerEventId = fn(fcmPath, 'v3ServerEventId');
+  const authenticateFcmV3Delivery = fn(fcmPath, 'authenticateFcmV3Delivery');
   const deliverRespectingLock = fn(fcmPath, 'deliverRespectingLock');
   const handleIncomingFcm = fn(fcmPath, 'handleIncomingFcm');
   const handleBackgroundFcm = fn(fcmPath, 'handleBackgroundFcm');
@@ -7262,11 +7881,17 @@ function incomingIngressCertifiedNodes({
   const chatScreen = fn(chatPath, 'ChatScreenInner');
   const required = [
     dispatchRealtimeEvent,
+    persistAuthenticatedLockedFcmV3Event,
     dispatchWithContext,
     applyNewServerUrl,
     resetRealtimeRuntime,
     getRealtimeRuntime,
+    finishRealtimeRecoveryCollector,
+    resumeRecoveredRealtimeEvents,
     getFallbackOccurrenceNamespace,
+    beginRealtimeRecoveryCollector,
+    finishRealtimeRecoveryCollector,
+    resumeRecoveredRealtimeEvents,
     realtimeSink,
     sharedRouter,
     realtimeIntakeLocked,
@@ -7276,6 +7901,11 @@ function incomingIngressCertifiedNodes({
     devResume,
     startRealtime,
     resumeRealtime,
+    resumeDesiredRealtime,
+    resumeRealtimeAfterCredentialUpgrade,
+    claimRealtimeForegroundIntent,
+    ownsRealtimeForegroundIntent,
+    pauseRealtime,
     devPushInject,
     runTrackedWork,
     runTrackedDelivery,
@@ -7284,19 +7914,25 @@ function incomingIngressCertifiedNodes({
     resumeRealtimeDeliveries,
     subscribeRealtimeGenerationInvalidation,
     expoDigestSha256,
+    beginHeadlessEffectCollection,
     effectivelyLocked,
     isLockExpired,
     strictServerOrigin,
     isDevServer,
     readAccountRevocationState,
     hasActiveServerSession,
+    inspectCredentialUpgradeJournal,
+    resolveCredentialUpgrade,
     ensureDatabase,
     captureIncomingEvent,
     snapshotIncomingEvent,
     canonicalizeIncomingEvent,
+    encodeIncomingEvent,
+    assertIncomingEventMetadata,
     normalizeRealtimeEvent,
     durableHandle,
     durablePersist,
+    durableLockedFcmV3Persist,
     durableResume,
     durableDispose,
     queuePersistence,
@@ -7318,10 +7954,17 @@ function incomingIngressCertifiedNodes({
     storedAppLockRequiresProtection,
     parseFcmData,
     rehydrateFcmEnvelopeChatGuid,
-    decryptFcmPayload,
     decryptFcmV2Payload,
+    decryptFcmV3Payload,
+    fcmPushDecryptionKeyCandidates,
+    inspectFcmDeviceEncryptionState,
+    decodeFcmPushEnvelopeIdentityV3,
     readFcmDeviceEncryptionState,
     deliver,
+    normalizedMessageId,
+    v3IdentityMatchesPayload,
+    v3ServerEventId,
+    authenticateFcmV3Delivery,
     deliverRespectingLock,
     handleIncomingFcm,
     handleBackgroundFcm,
@@ -7355,6 +7998,12 @@ function incomingIngressCertifiedNodes({
       { name: 'context', optional: true },
       { name: 'occurrence', optional: true },
     ]) &&
+    hasExactIdentifierParameters(persistAuthenticatedLockedFcmV3Event, [
+      { name: 'eventName' },
+      { name: 'rawData' },
+      { name: 'context' },
+      { name: 'occurrence' },
+    ]) &&
     hasExactIdentifierParameters(dispatchWithContext, [
       { name: 'eventName' },
       { name: 'rawData' },
@@ -7370,8 +8019,20 @@ function incomingIngressCertifiedNodes({
     hasExactIdentifierParameters(resetRealtimeRuntime, [{ name: 'expected', optional: true }]) &&
     hasExactIdentifierParameters(getRealtimeRuntime, [{ name: 'db' }, { name: 'context' }]) &&
     hasExactIdentifierParameters(getFallbackOccurrenceNamespace, []) &&
-    hasExactIdentifierParameters(realtimeSink, [{ name: 'db' }]) &&
-    hasExactIdentifierParameters(sharedRouter, [{ name: 'db' }]) &&
+    hasExactIdentifierParameters(beginRealtimeRecoveryCollector, [
+      { name: 'db' },
+      { name: 'generation' },
+    ]) &&
+    hasExactIdentifierParameters(finishRealtimeRecoveryCollector, [
+      { name: 'collector' },
+      { name: 'runtime' },
+    ]) &&
+    hasExactIdentifierParameters(resumeRecoveredRealtimeEvents, [
+      { name: 'runtime' },
+      { name: 'generation' },
+    ]) &&
+    hasExactIdentifierParameters(realtimeSink, [{ name: 'db' }, { name: 'accountGeneration' }]) &&
+    hasExactIdentifierParameters(sharedRouter, [{ name: 'db' }, { name: 'accountGeneration' }]) &&
     hasExactIdentifierParameters(realtimeIntakeLocked, []) &&
     hasExactIdentifierParameters(canPersistRealtimeEvent, [{ name: 'event' }]) &&
     hasExactIdentifierParameters(effectivelyLocked, [
@@ -7392,6 +8053,11 @@ function incomingIngressCertifiedNodes({
       { name: 'address' },
       { name: 'password' },
     ]) &&
+    hasExactIdentifierParameters(inspectCredentialUpgradeJournal, [{ name: 'stored' }]) &&
+    hasExactIdentifierParameters(resolveCredentialUpgrade, [
+      { name: 'storedJournal' },
+      { name: 'storedSession' },
+    ]) &&
     hasExactIdentifierParameters(createDevProofContext, [{ name: 'context' }]) &&
     hasExactIdentifierParameters(devPersist, [
       { name: 'eventName' },
@@ -7408,7 +8074,10 @@ function incomingIngressCertifiedNodes({
     ]) &&
     hasExactIdentifierParameters(runTrackedDelivery, [{ name: 'task' }]) &&
     hasExactIdentifierParameters(runTrackedWork, [{ name: 'lease' }, { name: 'task' }]) &&
-    hasExactIdentifierParameters(captureFcm, [{ name: 'msg' }]) &&
+    hasExactIdentifierParameters(captureFcm, [
+      { name: 'msg' },
+      { name: 'receivedAt', defaulted: true },
+    ]) &&
     hasExactIdentifierParameters(storedAppLockRequiresProtection, [{ name: 'value' }]) &&
     hasExactIdentifierParameters(readFcmDeviceEncryptionState, [{ name: 'secureVault' }]) &&
     hasExactIdentifierParameters(decryptFcmV2Payload, [
@@ -7416,13 +8085,43 @@ function incomingIngressCertifiedNodes({
       { name: 'keyBase64Url' },
       { name: 'eventType' },
     ]) &&
-    hasExactIdentifierParameters(deliver, [{ name: 'delivery' }, { name: 'lease' }]) &&
+    hasExactIdentifierParameters(decryptFcmV3Payload, [
+      { name: 'b64Frame' },
+      { name: 'keyBase64Url' },
+      { name: 'outerEventType' },
+    ]) &&
+    hasExactIdentifierParameters(fcmPushDecryptionKeyCandidates, [
+      { name: 'state' },
+      { name: 'now' },
+    ]) &&
+    hasExactIdentifierParameters(inspectFcmDeviceEncryptionState, [{ name: 'stored' }]) &&
+    hasExactIdentifierParameters(decodeFcmPushEnvelopeIdentityV3, [{ name: 'bytes' }]) &&
+    hasExactIdentifierParameters(normalizedMessageId, [{ name: 'event' }]) &&
+    hasExactIdentifierParameters(v3IdentityMatchesPayload, [
+      { name: 'identity' },
+      { name: 'plaintext' },
+    ]) &&
+    hasExactIdentifierParameters(v3ServerEventId, [{ name: 'identity' }]) &&
+    hasExactIdentifierParameters(authenticateFcmV3Delivery, [
+      { name: 'delivery' },
+      { name: 'state' },
+      { name: 'lease' },
+    ]) &&
+    hasExactIdentifierParameters(deliver, [
+      { name: 'delivery' },
+      { name: 'lease' },
+      { name: 'lockedContext', optional: true },
+    ]) &&
     hasExactIdentifierParameters(deliverRespectingLock, [
       { name: 'delivery' },
       { name: 'source' },
       { name: 'lease' },
     ]) &&
-    hasExactIdentifierParameters(handleIncomingFcm, [{ name: 'msg' }, { name: 'source' }]) &&
+    hasExactIdentifierParameters(handleIncomingFcm, [
+      { name: 'msg' },
+      { name: 'source' },
+      { name: 'backgroundReceivedAt', optional: true },
+    ]) &&
     hasExactIdentifierParameters(handleBackgroundFcm, [{ name: 'msg' }]) &&
     hasExactIdentifierParameters(startFcm, []) &&
     hasExactIdentifierParameters(startProcessWork, []) &&
@@ -7441,6 +8140,12 @@ function incomingIngressCertifiedNodes({
       { name: 'rawData' },
     ]) &&
     hasExactIdentifierParameters(canonicalizeIncomingEvent, [{ name: 'event' }]) &&
+    hasExactIdentifierParameters(encodeIncomingEvent, [
+      { name: 'event' },
+      { name: 'metadata' },
+      { name: 'digest' },
+    ]) &&
+    hasExactIdentifierParameters(assertIncomingEventMetadata, [{ name: 'metadata' }]) &&
     hasExactIdentifierParameters(normalizeRealtimeEvent, [
       { name: 'eventName' },
       { name: 'rawData' },
@@ -7458,6 +8163,13 @@ function incomingIngressCertifiedNodes({
       { name: 'receivedAt', defaulted: true },
     ]) &&
     hasExactIdentifierParameters(durableDispose, []) &&
+    hasExactIdentifierParameters(durableLockedFcmV3Persist, [
+      { name: 'eventName' },
+      { name: 'rawData' },
+      { name: 'context' },
+      { name: 'occurrence' },
+      { name: 'receivedAt', defaulted: true },
+    ]) &&
     hasExactIdentifierParameters(queuePersistence, [
       { name: 'eventName' },
       { name: 'rawData' },
@@ -7466,6 +8178,7 @@ function incomingIngressCertifiedNodes({
       { name: 'occurrence', optional: true },
       { name: 'devLeaseToken', optional: true },
       { name: 'receivedAt', defaulted: true },
+      { name: 'persistenceMode', defaulted: true },
     ]) &&
     hasExactIdentifierParameters(persistAdmission, [
       { name: 'event' },
@@ -7474,6 +8187,7 @@ function incomingIngressCertifiedNodes({
       { name: 'context', optional: true },
       { name: 'occurrence', optional: true },
       { name: 'devLeaseToken', optional: true },
+      { name: 'persistenceMode', defaulted: true },
     ]) &&
     hasExactIdentifierParameters(drainDispose, []) &&
     hasExactIdentifierParameters(drainCancelWakeTimer, []) &&
@@ -7484,6 +8198,14 @@ function incomingIngressCertifiedNodes({
     ]) &&
     hasExactIdentifierParameters(startRealtime, [{ name: 'options', defaulted: true }]) &&
     hasExactIdentifierParameters(resumeRealtime, []) &&
+    hasExactIdentifierParameters(resumeDesiredRealtime, [
+      { name: 'foregroundIntentEpoch' },
+      { name: 'options', defaulted: true },
+    ]) &&
+    hasExactIdentifierParameters(resumeRealtimeAfterCredentialUpgrade, []) &&
+    hasExactIdentifierParameters(claimRealtimeForegroundIntent, []) &&
+    hasExactIdentifierParameters(ownsRealtimeForegroundIntent, [{ name: 'expectedEpoch' }]) &&
+    hasExactIdentifierParameters(pauseRealtime, []) &&
     hasExactIdentifierParameters(socketOpen, []) &&
     hasExactIdentifierParameters(socketEscalate, []) &&
     hasExactIdentifierParameters(socketDisconnect, []) &&
@@ -7497,8 +8219,202 @@ function incomingIngressCertifiedNodes({
       { name: 'generation' },
       { name: 'listener' },
     ]) &&
-    hasExactIdentifierParameters(expoDigestSha256, [{ name: 'input' }]);
+    hasExactIdentifierParameters(expoDigestSha256, [{ name: 'input' }]) &&
+    hasExactIdentifierParameters(beginHeadlessEffectCollection, [
+      { name: 'owner' },
+      { name: 'options' },
+    ]);
   if (!parametersAreExact) return empty();
+
+  const realtimeForegroundDesiredState = topLevelVariable(controlFile, 'realtimeForegroundDesired');
+  const realtimeForegroundIntentEpochState = topLevelVariable(
+    controlFile,
+    'realtimeForegroundIntentEpoch',
+  );
+  const realtimeForegroundDesiredWrites = realtimeForegroundDesiredState
+    ? assignmentWritesTo(controlFile, realtimeForegroundDesiredState.declaration.name, checker)
+    : [];
+  const realtimeForegroundIntentEpochWrites = realtimeForegroundIntentEpochState
+    ? assignmentWritesTo(controlFile, realtimeForegroundIntentEpochState.declaration.name, checker)
+    : [];
+  const headlessEffectWindowState = topLevelVariable(
+    headlessEffectsFile,
+    'REALTIME_HEADLESS_EFFECT_WINDOW_MS',
+  );
+  const headlessEffectCancelGraceState = topLevelVariable(
+    headlessEffectsFile,
+    'REALTIME_HEADLESS_EFFECT_CANCEL_GRACE_MS',
+  );
+  const fcmRotationLocalMaxState = topLevelVariable(
+    fcmEncryptionFile,
+    'FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS',
+  );
+  const startRealtimeCredentialPrefix = startRealtime.body.statements
+    .slice(0, 6)
+    .map((statement) => normalizedSnippet(statement, controlFile))
+    .join(' ');
+  if (
+    !realtimeForegroundDesiredState ||
+    !(realtimeForegroundDesiredState.declarationList.flags & ts.NodeFlags.Let) ||
+    realtimeForegroundDesiredState.declaration.initializer?.kind !== ts.SyntaxKind.FalseKeyword ||
+    !realtimeForegroundIntentEpochState ||
+    !(realtimeForegroundIntentEpochState.declarationList.flags & ts.NodeFlags.Let) ||
+    !realtimeForegroundIntentEpochState.declaration.initializer ||
+    !ts.isNumericLiteral(realtimeForegroundIntentEpochState.declaration.initializer) ||
+    realtimeForegroundIntentEpochState.declaration.initializer.text !== '0' ||
+    realtimeForegroundDesiredWrites.length !== 2 ||
+    !realtimeForegroundDesiredWrites.some(
+      (write) =>
+        nodeIsInside(write, claimRealtimeForegroundIntent) &&
+        normalizedSnippet(write, controlFile) === 'realtimeForegroundDesired = true',
+    ) ||
+    !realtimeForegroundDesiredWrites.some(
+      (write) =>
+        nodeIsInside(write, pauseRealtime) &&
+        normalizedSnippet(write, controlFile) === 'realtimeForegroundDesired = false',
+    ) ||
+    realtimeForegroundIntentEpochWrites.length !== 2 ||
+    !realtimeForegroundIntentEpochWrites.every(
+      (write) => normalizedSnippet(write, controlFile) === 'realtimeForegroundIntentEpoch += 1',
+    ) ||
+    !realtimeForegroundIntentEpochWrites.some((write) =>
+      nodeIsInside(write, claimRealtimeForegroundIntent),
+    ) ||
+    !realtimeForegroundIntentEpochWrites.some((write) => nodeIsInside(write, pauseRealtime)) ||
+    !headlessEffectWindowState ||
+    !(headlessEffectWindowState.declarationList.flags & ts.NodeFlags.Const) ||
+    !headlessEffectWindowState.declaration.initializer ||
+    normalizedSnippet(headlessEffectWindowState.declaration.initializer, headlessEffectsFile) !==
+      '40_000' ||
+    !headlessEffectCancelGraceState ||
+    !(headlessEffectCancelGraceState.declarationList.flags & ts.NodeFlags.Const) ||
+    !headlessEffectCancelGraceState.declaration.initializer ||
+    normalizedSnippet(
+      headlessEffectCancelGraceState.declaration.initializer,
+      headlessEffectsFile,
+    ) !== '2_000' ||
+    !fcmRotationLocalMaxState ||
+    !(fcmRotationLocalMaxState.declarationList.flags & ts.NodeFlags.Const) ||
+    !fcmRotationLocalMaxState.declaration.initializer ||
+    normalizedSnippet(fcmRotationLocalMaxState.declaration.initializer, fcmEncryptionFile) !==
+      '24 * 60 * 60 * 1_000 + 10 * 60 * 1_000' ||
+    createHash('sha256').update(startRealtimeCredentialPrefix).digest('hex') !==
+      '0679670bcde9499498ac3fc96583fd26fc5125cac521100ba6921882250f838b'
+  ) {
+    return empty();
+  }
+  if (
+    createHash('sha256')
+      .update(normalizedSnippet(claimRealtimeForegroundIntent, controlFile))
+      .digest('hex') !== 'd51eec3879f0a2cdd48c51cb63e6787d848420b80430e3d25e716c841a107fdb' ||
+    createHash('sha256')
+      .update(normalizedSnippet(ownsRealtimeForegroundIntent, controlFile))
+      .digest('hex') !== 'ddb27945dda3d6a0aa0f76d4f1930b40fceabbbee437da87e5ed531d10f760a0' ||
+    createHash('sha256').update(normalizedSnippet(pauseRealtime, controlFile)).digest('hex') !==
+      '8f09768a602789ba1e611aa87c6329c9fabdd21b88992908a5e23b509c4734f9' ||
+    createHash('sha256')
+      .update(normalizedSnippet(headlessEffectsFile, headlessEffectsFile))
+      .digest('hex') !== '4091f258a47c71cd3367ee8ac7fe0f84a0671a38863761591847f5f9f5c38da5' ||
+    createHash('sha256')
+      .update(normalizedSnippet(beginHeadlessEffectCollection, headlessEffectsFile))
+      .digest('hex') !== '98cc5f5d5f2ba3b3de00d13bd7054b12d2198aa36d945506f0eeb035adaf9325' ||
+    createHash('sha256')
+      .update(normalizedSnippet(fcmEncryptionFile, fcmEncryptionFile))
+      .digest('hex') !== '6b748275ba1a3906c4fe92115c997bfccb1f4c472794d4aa14ac67b5c147a3d3' ||
+    createHash('sha256')
+      .update(normalizedSnippet(inspectFcmDeviceEncryptionState, fcmEncryptionFile))
+      .digest('hex') !== '29386c19e5507ddef6696577bd01bc8bcae8e5ab5b783e7523eb51d6276ca47a' ||
+    createHash('sha256')
+      .update(normalizedSnippet(fcmEncryptionStateFile, fcmEncryptionStateFile))
+      .digest('hex') !== '20dc3f79c74d8776c21abc42176515de905b8ff854ae5f63fa16ef3828ba090f' ||
+    createHash('sha256')
+      .update(normalizedSnippet(readFcmDeviceEncryptionState, fcmEncryptionStateFile))
+      .digest('hex') !== '4a830c972edc247193d801a73e262b6728cd3d4a00cf3408d669ba2115143af4' ||
+    createHash('sha256')
+      .update(normalizedSnippet(finishRealtimeRecoveryCollector, controlFile))
+      .digest('hex') !== '4fb08c91c8e09bfe5c4ca02f18e5f4c459e65ffb6316b0ae980e2710033341a7' ||
+    createHash('sha256')
+      .update(normalizedSnippet(resumeRecoveredRealtimeEvents, controlFile))
+      .digest('hex') !== '80ef3d24d957a89c4af222f37519677447cc6919012917da049cb53ce438d3e7' ||
+    createHash('sha256')
+      .update(
+        normalizedSnippet(
+          inspectCredentialUpgradeJournal,
+          inspectCredentialUpgradeJournal.getSourceFile(),
+        ),
+      )
+      .digest('hex') !== '791f2e6c762e31e1a7233dcc0142e31492bbaf16fc00b51c562f90c8e26a98e3' ||
+    createHash('sha256')
+      .update(normalizedSnippet(resolveCredentialUpgrade, resolveCredentialUpgrade.getSourceFile()))
+      .digest('hex') !== 'c774650ec65ce4e9c26c7bd912142cd5ef130586f33124b83695a56c2b8c5d69' ||
+    createHash('sha256').update(normalizedSnippet(normalizedMessageId, fcmFile)).digest('hex') !==
+      '435c14ebe46d0fff259a5a840964d53d8eed929b1cd35618c88ae2c7861ac52c' ||
+    createHash('sha256')
+      .update(normalizedSnippet(v3IdentityMatchesPayload, fcmFile))
+      .digest('hex') !== '5d34b0ea3fdc4864eed42e95a00daf4df89aaedcf67a9a1606c933697640309f' ||
+    createHash('sha256').update(normalizedSnippet(v3ServerEventId, fcmFile)).digest('hex') !==
+      '88a1c1400f639875e90a0b986eb7e98d626449f6db00afd61b3b83b403308b90' ||
+    createHash('sha256')
+      .update(normalizedSnippet(authenticateFcmV3Delivery, fcmFile))
+      .digest('hex') !== '50312d5c35899dddd6151792863b57ad01ef9fed858785cba036b225e8838ba9' ||
+    createHash('sha256').update(normalizedSnippet(fcmFile, fcmFile)).digest('hex') !==
+      'e32e4407c40181b3e5dd3ffbddc58de719355a2c76a432ad4dd48de912e61c2a' ||
+    createHash('sha256').update(normalizedSnippet(deliver, fcmFile)).digest('hex') !==
+      'fc417aa35635148e71bb0c61ffea3289352ac7a7456f61af31d9c884204d6e32' ||
+    createHash('sha256').update(normalizedSnippet(deliverRespectingLock, fcmFile)).digest('hex') !==
+      '52daf032202727acad14261e9d4b4313d8e7f49fb63a23c95a9843a633bc3035' ||
+    createHash('sha256')
+      .update(
+        normalizedSnippet(
+          fcmPushDecryptionKeyCandidates,
+          fcmPushDecryptionKeyCandidates.getSourceFile(),
+        ),
+      )
+      .digest('hex') !== '012ebba3a3bdabb14cb50f4433939d2e3801b073204d442cb41bdd54dd89c947' ||
+    createHash('sha256')
+      .update(
+        normalizedSnippet(
+          decodeFcmPushEnvelopeIdentityV3.getSourceFile(),
+          decodeFcmPushEnvelopeIdentityV3.getSourceFile(),
+        ),
+      )
+      .digest('hex') !== '289479536b79536121483004ddfd247ad4e6a35b6e4cff4fd56e43ed0c748bb9' ||
+    createHash('sha256')
+      .update(
+        normalizedSnippet(decryptFcmV3Payload.getSourceFile(), decryptFcmV3Payload.getSourceFile()),
+      )
+      .digest('hex') !== 'ddeb47e6715f6f2fa9da10f39a98cdef7bfb576aacd5074783f72fd91e2a87bb' ||
+    createHash('sha256')
+      .update(normalizedSnippet(encodeIncomingEvent, encodeIncomingEvent.getSourceFile()))
+      .digest('hex') !== '1ff1ed309b321372c98c1098e56e6e8da12a29ebc5b4e326b38afa852502914c' ||
+    createHash('sha256')
+      .update(
+        normalizedSnippet(assertIncomingEventMetadata, assertIncomingEventMetadata.getSourceFile()),
+      )
+      .digest('hex') !== 'a6eac6aebbeec5ee7d7bf8f167f6e264313f558d57f5552be2cd54f362f16f7b' ||
+    createHash('sha256')
+      .update(normalizedSnippet(persistAuthenticatedLockedFcmV3Event, controlFile))
+      .digest('hex') !== '9dca41afeb5b77bfe0e54bd8c93a83f25d77a949b5f1583d7e27948fa0065994' ||
+    createHash('sha256')
+      .update(normalizedSnippet(durableLockedFcmV3Persist, dispatcherFile))
+      .digest('hex') !== 'd35bc8b57b4c3fb3b2fddb18e2c86333b9fd96a10b7e6e5a11ece9a9d4ec9088' ||
+    createHash('sha256')
+      .update(normalizedSnippet(queuePersistence, dispatcherFile))
+      .digest('hex') !== '55b31e55c9022171dfe89a1978203118ec505810274dc9fd94c49a987b04b220' ||
+    createHash('sha256')
+      .update(normalizedSnippet(persistAdmission, dispatcherFile))
+      .digest('hex') !== 'f1a40608a41609acf5d7d8bb3340dcd739210101f3077f49d9604940347a5543' ||
+    createHash('sha256')
+      .update(normalizedSnippet(resumeDesiredRealtime, controlFile))
+      .digest('hex') !== 'e48b706c0cf96cb7fd28f6ceb6ac2063af3fe449b5f36d1bc3c6f3f643f563ee' ||
+    createHash('sha256').update(normalizedSnippet(resumeRealtime, controlFile)).digest('hex') !==
+      'cc0b1cfb337b99752fe0a7056111e1f315f8b81bea6b32202b88ad78fccf1d61' ||
+    createHash('sha256')
+      .update(normalizedSnippet(resumeRealtimeAfterCredentialUpgrade, controlFile))
+      .digest('hex') !== '73ef4ec05ff1c6ce2f21750dfb494c78e4eb8214eb331beee618110fccc6d4b0'
+  ) {
+    return empty();
+  }
 
   const approved = [];
   const exactly = (values, count) => values.length === count;
@@ -7807,10 +8723,15 @@ function incomingIngressCertifiedNodes({
     '@core/secure',
     'readAccountRevocationState',
   );
-  const activeSessionBinding = namedImportBinding(
+  const credentialUpgradeBinding = namedImportBinding(
     sessionGateFile,
     '@core/secure',
-    'hasActiveServerSession',
+    'resolveCredentialUpgrade',
+  );
+  const serverSessionStateBinding = namedImportBinding(
+    sessionGateFile,
+    '@core/secure',
+    'SERVER_SESSION_STATE',
   );
   const sessionRevocationDeclaration = singleConstDeclaration(
     readFcmSessionState.body.statements[0],
@@ -7819,18 +8740,45 @@ function incomingIngressCertifiedNodes({
   const sessionRevocationCall = sessionRevocationDeclaration?.initializer
     ? callableCall(sessionRevocationDeclaration.initializer, readAccountRevocationState, checker)
     : undefined;
+  const sessionRevocationCalls = readRevocationBinding
+    ? directCallsToBinding(sessionGateFile, readRevocationBinding, checker)
+    : [];
   const sessionGateTry = readFcmSessionState.body.statements[3];
-  const sessionGateReturn =
-    sessionGateTry && ts.isTryStatement(sessionGateTry)
-      ? sessionGateTry.tryBlock.statements[1]
-      : undefined;
-  const sessionGateConditional =
-    sessionGateReturn && ts.isReturnStatement(sessionGateReturn) && sessionGateReturn.expression
-      ? unwrapExpression(sessionGateReturn.expression)
-      : undefined;
-  const activeSessionCall =
-    sessionGateConditional && ts.isConditionalExpression(sessionGateConditional)
-      ? callableCall(sessionGateConditional.condition, hasActiveServerSession, checker)
+  const sessionGateStatements =
+    sessionGateTry && ts.isTryStatement(sessionGateTry) ? sessionGateTry.tryBlock.statements : [];
+  const sessionRevocationAfterDeclaration = singleConstDeclaration(
+    sessionGateStatements[1],
+    'revocationAfter',
+  );
+  const sessionRevocationAfterCall = sessionRevocationAfterDeclaration?.initializer
+    ? callableCall(
+        sessionRevocationAfterDeclaration.initializer,
+        readAccountRevocationState,
+        checker,
+      )
+    : undefined;
+  const sessionUpgradeDeclaration = singleConstDeclaration(sessionGateStatements[5], 'upgrade');
+  const sessionUpgradeCall = sessionUpgradeDeclaration?.initializer
+    ? callableCall(sessionUpgradeDeclaration.initializer, resolveCredentialUpgrade, checker)
+    : undefined;
+  const sessionCompleteDeclaration = singleConstDeclaration(
+    sessionGateStatements[4],
+    'completeSession',
+  );
+  const activeSessionStateReferences = serverSessionStateBinding
+    ? runtimeReferencesToBinding(sessionGateFile, serverSessionStateBinding, checker)
+    : [];
+  const credentialUpgradeCalls = credentialUpgradeBinding
+    ? directCallsToBinding(sessionGateFile, credentialUpgradeBinding, checker)
+    : [];
+  const inspectedUpgradeCalls = edges.filter(
+    (edge) =>
+      edge.caller === resolveCredentialUpgrade && edge.callee === inspectCredentialUpgradeJournal,
+  );
+  const inspectedUpgradeCall = inspectedUpgradeCalls[0]?.node;
+  const sessionGateCatchReturn =
+    sessionGateTry && ts.isTryStatement(sessionGateTry) && sessionGateTry.catchClause
+      ? sessionGateTry.catchClause.block.statements[0]
       : undefined;
   if (
     effectivelyLocked.body.statements.length !== 4 ||
@@ -8090,18 +9038,65 @@ function incomingIngressCertifiedNodes({
     statementText(readFcmSessionState, 1) !==
       "if (revocation === 'unavailable') return 'unavailable';" ||
     statementText(readFcmSessionState, 2) !== "if (revocation === 'revoked') return 'forgotten';" ||
-    statementText(readFcmSessionState, 3) !==
-      "try { const [sessionState, address, password] = await Promise.all([ vault.get('serverSessionState'), vault.get('serverAddress'), vault.get('serverPassword'), ]); return hasActiveServerSession(sessionState, address, password) ? 'active' : 'forgotten'; } catch { return 'unavailable'; }" ||
     !readRevocationBinding ||
-    !activeSessionBinding ||
+    !credentialUpgradeBinding ||
+    !serverSessionStateBinding ||
+    !sessionGateTry ||
+    !ts.isTryStatement(sessionGateTry) ||
+    sessionGateTry.finallyBlock ||
+    !sessionGateTry.catchClause ||
+    sessionGateTry.catchClause.variableDeclaration ||
+    sessionGateStatements.length !== 9 ||
+    normalizedSnippet(sessionGateStatements[0], sessionGateFile) !==
+      "const [sessionState, address, password, credentialUpgrade] = await Promise.all([ vault.get('serverSessionState'), vault.get('serverAddress'), vault.get('serverPassword'), vault.get('serverCredentialUpgrade'), ]);" ||
+    normalizedSnippet(sessionGateStatements[1], sessionGateFile) !==
+      'const revocationAfter = readAccountRevocationState(revocationMarker);' ||
+    normalizedSnippet(sessionGateStatements[2], sessionGateFile) !==
+      "if (revocationAfter === 'unavailable') return 'unavailable';" ||
+    normalizedSnippet(sessionGateStatements[3], sessionGateFile) !==
+      "if (revocationAfter === 'revoked') return 'forgotten';" ||
+    normalizedSnippet(sessionGateStatements[4], sessionGateFile) !==
+      'const completeSession = (sessionState === null || sessionState === SERVER_SESSION_STATE.active) && address && password;' ||
+    normalizedSnippet(sessionGateStatements[5], sessionGateFile) !==
+      'const upgrade = resolveCredentialUpgrade( credentialUpgrade, completeSession ? { origin: address!, credential: password! } : null, );' ||
+    normalizedSnippet(sessionGateStatements[6], sessionGateFile) !==
+      "if (upgrade.kind === 'quarantined') return 'unavailable';" ||
+    normalizedSnippet(sessionGateStatements[7], sessionGateFile) !==
+      "if (upgrade.kind === 'revoked') return 'forgotten';" ||
+    normalizedSnippet(sessionGateStatements[8], sessionGateFile) !==
+      "return completeSession && upgrade.session ? 'active' : 'forgotten';" ||
+    sessionGateTry.catchClause.block.statements.length !== 1 ||
+    !sessionGateCatchReturn ||
+    normalizedSnippet(sessionGateCatchReturn, sessionGateFile) !== "return 'unavailable';" ||
     !sessionRevocationCall ||
     sessionRevocationCall.arguments.length !== 1 ||
     !snippetIs(sessionRevocationCall.arguments[0], 'revocationMarker') ||
-    !activeSessionCall ||
-    activeSessionCall.arguments.length !== 3 ||
-    !snippetIs(activeSessionCall.arguments[0], 'sessionState') ||
-    !snippetIs(activeSessionCall.arguments[1], 'address') ||
-    !snippetIs(activeSessionCall.arguments[2], 'password')
+    !sessionRevocationAfterCall ||
+    sessionRevocationAfterCall.arguments.length !== 1 ||
+    !snippetIs(sessionRevocationAfterCall.arguments[0], 'revocationMarker') ||
+    sessionRevocationCalls.length !== 2 ||
+    !sessionRevocationCalls.includes(sessionRevocationCall) ||
+    !sessionRevocationCalls.includes(sessionRevocationAfterCall) ||
+    !sessionCompleteDeclaration ||
+    activeSessionStateReferences.length !== 1 ||
+    !nodeIsInside(activeSessionStateReferences[0], sessionGateStatements[4]) ||
+    !sessionUpgradeCall ||
+    sessionUpgradeCall.arguments.length !== 2 ||
+    !snippetIs(sessionUpgradeCall.arguments[0], 'credentialUpgrade') ||
+    !snippetIs(
+      sessionUpgradeCall.arguments[1],
+      'completeSession ? { origin: address!, credential: password! } : null',
+    ) ||
+    credentialUpgradeCalls.length !== 1 ||
+    credentialUpgradeCalls[0] !== sessionUpgradeCall ||
+    inspectedUpgradeCalls.length !== 1 ||
+    !inspectedUpgradeCall ||
+    inspectedUpgradeCall.arguments.length !== 1 ||
+    !sameSymbol(
+      unwrapExpression(inspectedUpgradeCall.arguments[0]),
+      resolveCredentialUpgrade.parameters[0].name,
+      checker,
+    )
   ) {
     return empty();
   }
@@ -8275,11 +9270,11 @@ function incomingIngressCertifiedNodes({
     statementText(dispatchRealtimeEvent, 3) !==
       "if (!captured) { logger.debug('[incomingEvents] dropped invalid realtime event', { event: eventName, source }); return; }" ||
     statementText(dispatchRealtimeEvent, 4) !==
-      'const capturedOccurrence = occurrence ? { serverEventId: occurrence.serverEventId, transportOccurrenceId: occurrence.transportOccurrenceId, } : undefined;' ||
+      'const capturedOccurrence = occurrence ? { serverEventId: occurrence.serverEventId, transportOccurrenceId: occurrence.transportOccurrenceId, authenticatedExpiresAt: occurrence.authenticatedExpiresAt, } : undefined;' ||
     statementText(dispatchRealtimeEvent, 5) !==
       'const normalized = snapshotIncomingEvent(captured.eventName, captured.rawData);' ||
     statementText(dispatchRealtimeEvent, 6) !==
-      "if (normalized?.type === 'new-server') { await applyNewServerUrl(normalized.url, context); return; }" ||
+      "if (normalized?.type === 'new-server') { if (source === 'fcm' && occurrence?.serverEventId?.startsWith('fcm3:')) { logger.warn('[incomingEvents] rejected V3 FCM server rotation'); return; } await applyNewServerUrl(normalized.url, context); return; }" ||
     !rotationSnapshotCall ||
     !nodeIsInside(rotationSnapshotCall.node, dispatchRealtimeEvent.body.statements[5]) ||
     !snippetIs(
@@ -8367,21 +9362,70 @@ function incomingIngressCertifiedNodes({
   // are awaited into the one durable dispatcher instance.
   const databaseCall = sole(exactCallEdges(edges, dispatchWithContext, ensureDatabase));
   const durableHandleCall = sole(exactCallEdges(edges, dispatchWithContext, durableHandle));
+  const dispatchRuntimeDeclaration = singleConstDeclaration(
+    dispatchWithContext.body.statements[3],
+    'runtime',
+  );
+  const runtimeCall = dispatchRuntimeDeclaration?.initializer
+    ? callableCall(dispatchRuntimeDeclaration.initializer, getRealtimeRuntime, checker)
+    : undefined;
+  const recoveryCollectorDeclaration = singleConstDeclaration(
+    dispatchWithContext.body.statements[5],
+    'recoveryCollector',
+  );
+  const beginRecoveryCall = sole(
+    exactCallEdges(edges, dispatchWithContext, beginRealtimeRecoveryCollector),
+  );
+  const finishRecoveryCall = sole(
+    exactCallEdges(edges, dispatchWithContext, finishRealtimeRecoveryCollector),
+  );
   if (
-    dispatchWithContext.body.statements.length !== 4 ||
+    dispatchWithContext.body.statements.length !== 7 ||
     statementText(dispatchWithContext, 0) !==
       'if (!context.isCurrent() || realtimeIntakeLocked()) return;' ||
     statementText(dispatchWithContext, 1) !== 'const db = await ensureDatabase();' ||
     statementText(dispatchWithContext, 2) !==
       'if (!context.isCurrent() || realtimeIntakeLocked()) return;' ||
+    statementText(dispatchWithContext, 3) !== 'const runtime = getRealtimeRuntime(db, context);' ||
+    statementText(dispatchWithContext, 4) !== 'if (!runtime) return;' ||
+    statementText(dispatchWithContext, 5) !==
+      "const recoveryCollector = source === 'fcm' ? beginRealtimeRecoveryCollector(db, context.generation) : null;" ||
+    statementText(dispatchWithContext, 6) !==
+      'try { await runtime.dispatcher.handle(eventName, rawData, source, context, occurrence, receivedAt); } finally { if (recoveryCollector) { await finishRealtimeRecoveryCollector(recoveryCollector, runtime); } }' ||
     !databaseCall ||
+    !dispatchRuntimeDeclaration ||
+    !runtimeCall ||
+    runtimeCall.arguments.length !== 2 ||
+    !snippetIs(runtimeCall.arguments[0], 'db') ||
+    !snippetIs(runtimeCall.arguments[1], 'context') ||
+    !recoveryCollectorDeclaration ||
+    !beginRecoveryCall ||
+    beginRecoveryCall.node.arguments.length !== 2 ||
+    !nodeIsInside(beginRecoveryCall.node, dispatchWithContext.body.statements[5]) ||
+    !snippetIs(beginRecoveryCall.node.arguments[0], 'db') ||
+    !snippetIs(beginRecoveryCall.node.arguments[1], 'context.generation') ||
+    !finishRecoveryCall ||
+    finishRecoveryCall.node.arguments.length !== 2 ||
+    !nodeIsInside(finishRecoveryCall.node, dispatchWithContext.body.statements[6]) ||
+    !ts.isAwaitExpression(unwrapExpression(finishRecoveryCall.node.parent)) ||
+    !sameSymbol(
+      unwrapExpression(finishRecoveryCall.node.arguments[0]),
+      recoveryCollectorDeclaration.name,
+      checker,
+    ) ||
+    !sameSymbol(
+      unwrapExpression(finishRecoveryCall.node.arguments[1]),
+      dispatchRuntimeDeclaration.name,
+      checker,
+    ) ||
     !durableHandleCall ||
     !nodeIsInside(databaseCall.node, dispatchWithContext.body.statements[1]) ||
-    !nodeIsInside(durableHandleCall.node, dispatchWithContext.body.statements[3]) ||
+    !nodeIsInside(durableHandleCall.node, dispatchWithContext.body.statements[6]) ||
+    !ts.isAwaitExpression(unwrapExpression(durableHandleCall.node.parent)) ||
     !coordinatorCallbackAdoptsInvocation(durableHandleCall.node, dispatchWithContext) ||
     !snippetIs(
       durableHandleCall.node,
-      'getRealtimeRuntime(db, context)?.dispatcher.handle( eventName, rawData, source, context, occurrence, receivedAt, )',
+      'runtime.dispatcher.handle(eventName, rawData, source, context, occurrence, receivedAt)',
     )
   ) {
     return empty();
@@ -8431,8 +9475,10 @@ function incomingIngressCertifiedNodes({
   const runtimeDbParameter = getRealtimeRuntime.parameters[0];
   const runtimeContextParameter = getRealtimeRuntime.parameters[1];
   const sharedRouterDbParameter = sharedRouter.parameters[0];
+  const sharedRouterAccountGenerationParameter = sharedRouter.parameters[1];
   const sharedRouterState = topLevelVariable(controlFile, 'sharedRouterInstance');
   const realtimeSinkDbParameter = realtimeSink.parameters[0];
+  const realtimeSinkAccountGenerationParameter = realtimeSink.parameters[1];
   const realtimeSinkState = topLevelVariable(controlFile, 'realtimeSinkInstance');
   const realtimeSinkInitStatement = realtimeSink.body.statements[0];
   const realtimeSinkInit = ts.isExpressionStatement(realtimeSinkInitStatement)
@@ -8555,11 +9601,15 @@ function incomingIngressCertifiedNodes({
     : undefined;
   const dispatcherCanPersistProperty =
     dispatcherOptions && ts.isObjectLiteralExpression(dispatcherOptions)
-      ? dispatcherOptions.properties[2]
+      ? dispatcherOptions.properties[3]
       : undefined;
   const dispatcherDevProperty =
     dispatcherOptions && ts.isObjectLiteralExpression(dispatcherOptions)
       ? dispatcherOptions.properties[1]
+      : undefined;
+  const dispatcherLockedFcmV3Property =
+    dispatcherOptions && ts.isObjectLiteralExpression(dispatcherOptions)
+      ? dispatcherOptions.properties[2]
       : undefined;
   const dispatcherDevCall =
     dispatcherDevProperty && ts.isPropertyAssignment(dispatcherDevProperty)
@@ -8711,10 +9761,17 @@ function incomingIngressCertifiedNodes({
     ) ||
     sharedRouterConstruction.arguments?.length !== 1 ||
     !sharedRouterSinkCall ||
-    sharedRouterSinkCall.arguments.length !== 1 ||
+    sharedRouterSinkCall.arguments.length !== 2 ||
     !sameSymbol(
       unwrapExpression(sharedRouterSinkCall.arguments[0]),
       sharedRouterDbParameter.name,
+      checker,
+    ) ||
+    !sharedRouterAccountGenerationParameter ||
+    !realtimeSinkAccountGenerationParameter ||
+    !sameSymbol(
+      unwrapExpression(sharedRouterSinkCall.arguments[1]),
+      sharedRouterAccountGenerationParameter.name,
       checker,
     ) ||
     !ts.isReturnStatement(sharedRouterReturn) ||
@@ -8851,8 +9908,15 @@ function incomingIngressCertifiedNodes({
     !runtimeContextParameter ||
     !routerDeclaration ||
     !routerCall ||
-    routerCall.arguments.length !== 1 ||
+    routerCall.arguments.length !== 2 ||
     !sameSymbol(unwrapExpression(routerCall.arguments[0]), runtimeDbParameter.name, checker) ||
+    !ts.isPropertyAccessExpression(unwrapExpression(routerCall.arguments[1])) ||
+    unwrapExpression(routerCall.arguments[1]).name.text !== 'generation' ||
+    !sameSymbol(
+      unwrapExpression(routerCall.arguments[1]).expression,
+      runtimeContextParameter.name,
+      checker,
+    ) ||
     !canDrainCallback ||
     !ts.isArrowFunction(canDrainCallback) ||
     !hasPlainIdentifierParameters(canDrainCallback, []) ||
@@ -8875,7 +9939,7 @@ function incomingIngressCertifiedNodes({
     !sameSymbol(unwrapExpression(drainConstruction.arguments[2]), expoDigestBinding, checker) ||
     !drainOptions ||
     !ts.isObjectLiteralExpression(drainOptions) ||
-    drainOptions.properties.length !== 4 ||
+    drainOptions.properties.length !== 5 ||
     normalizedSnippet(drainOptions.properties[0], controlFile) !==
       'makeLeaseToken: () => Crypto.randomUUID()' ||
     !drainLeaseTokenProperty ||
@@ -8901,7 +9965,9 @@ function incomingIngressCertifiedNodes({
     normalizedSnippet(drainOptions.properties[2], controlFile) !==
       'canScheduleWake: () => realtimeForegroundActive && canDrainPrivateQueue()' ||
     normalizedSnippet(drainOptions.properties[3], controlFile) !==
-      "onPermanentFailure: (_eventName, deliveryContext) => requestRealtimeRecovery({ kind: 'sync-account' }, deliveryContext)" ||
+      'onDependencyDeferred: (deliveryContext) => noteRealtimeDependencyDeferred(db, deliveryContext)' ||
+    normalizedSnippet(drainOptions.properties[4], controlFile) !==
+      "onPermanentFailure: (_eventName, deliveryContext) => requestRealtimeRecovery(db, { kind: 'sync-account' }, deliveryContext)" ||
     statementText(getRealtimeRuntime, 9) !== 'realtimeRuntimeInstance = runtime;' ||
     statementText(getRealtimeRuntime, 8) !==
       'const runtime: RealtimeRuntime = { db, generation: context.generation, dispatcher, unsubscribeInvalidation: () => undefined, };' ||
@@ -8939,7 +10005,7 @@ function incomingIngressCertifiedNodes({
     ) ||
     !dispatcherOptions ||
     !ts.isObjectLiteralExpression(dispatcherOptions) ||
-    dispatcherOptions.properties.length !== 4 ||
+    dispatcherOptions.properties.length !== 5 ||
     normalizedSnippet(dispatcherOptions.properties[0], controlFile) !==
       'makeTransportOccurrenceId: (source) => `${source}:${getFallbackOccurrenceNamespace()}:${++fallbackOccurrenceSequence}`' ||
     !nodeIsInside(fallbackNamespaceGetterCall, dispatcherOptions.properties[0]) ||
@@ -8951,7 +10017,13 @@ function incomingIngressCertifiedNodes({
       'allowDevPersistWithoutDrain: isDevServer()' ||
     !dispatcherDevCall ||
     dispatcherDevCall.arguments.length !== 0 ||
-    normalizedSnippet(dispatcherOptions.properties[2], controlFile) !==
+    !dispatcherLockedFcmV3Property ||
+    !ts.isPropertyAssignment(dispatcherLockedFcmV3Property) ||
+    normalizedSnippet(dispatcherLockedFcmV3Property, controlFile) !==
+      'allowLockedFcmV3PersistWithoutDrain: true' ||
+    unwrapExpression(dispatcherLockedFcmV3Property.initializer).kind !==
+      ts.SyntaxKind.TrueKeyword ||
+    normalizedSnippet(dispatcherOptions.properties[3], controlFile) !==
       'canPersist: canPersistRealtimeEvent' ||
     !ts.isPropertyAssignment(dispatcherCanPersistProperty) ||
     !sameSymbol(
@@ -8959,8 +10031,8 @@ function incomingIngressCertifiedNodes({
       canPersistRealtimeEvent.name,
       checker,
     ) ||
-    normalizedSnippet(dispatcherOptions.properties[3], controlFile) !==
-      'requestRecovery: (recovery, _reason, deliveryContext) => requestRealtimeRecovery(recovery, deliveryContext)' ||
+    normalizedSnippet(dispatcherOptions.properties[4], controlFile) !==
+      'requestRecovery: (recovery, _reason, deliveryContext) => requestRealtimeRecovery(db, recovery, deliveryContext)' ||
     statementText(getRealtimeRuntime, 10) !==
       'runtime.unsubscribeInvalidation = subscribeRealtimeGenerationInvalidation( context.generation, () => resetRealtimeRuntime(runtime), );' ||
     !runtimeDeclaration ||
@@ -9417,7 +10489,7 @@ function incomingIngressCertifiedNodes({
     postAwaitCallerOwnedReferences.length !== 0 ||
     !capturedOccurrenceStatement ||
     normalizedSnippet(capturedOccurrenceStatement, dispatcherFile) !==
-      'const capturedOccurrence = occurrence ? { serverEventId: occurrence.serverEventId, transportOccurrenceId: occurrence.transportOccurrenceId, } : undefined;' ||
+      'const capturedOccurrence = occurrence ? { serverEventId: occurrence.serverEventId, transportOccurrenceId: occurrence.transportOccurrenceId, authenticatedExpiresAt: occurrence.authenticatedExpiresAt, } : undefined;' ||
     snapshotIncomingEvent.modifiers?.some(
       (modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword,
     ) ||
@@ -9429,7 +10501,7 @@ function incomingIngressCertifiedNodes({
     !coordinatorCallbackAdoptsInvocation(queuePersistCalls[0].node, queuePersistCalls[0].caller) ||
     !snippetIs(
       queuePersistCalls[0].node,
-      'this.persist( event, source, receivedAt, context, capturedOccurrence, devLeaseToken, )',
+      'this.persist( event, source, receivedAt, context, capturedOccurrence, devLeaseToken, persistenceMode, )',
     ) ||
     !coordinatorCallbackAdoptsInvocation(finishCalls[0].node, finishCalls[0].caller) ||
     !snippetIs(finishCalls[0].node, 'this.finishAdmission(persisted)') ||
@@ -9530,7 +10602,7 @@ function incomingIngressCertifiedNodes({
       'if (admissionRevoked) return false;' ||
     !persistAllowedDeclaration ||
     normalizedSnippet(persistGuardCallback.body.statements[1], dispatcherFile) !==
-      'const allowed = !this.stopped && (!context || context.isCurrent()) && (!this.options.canPersist || this.options.canPersist(event));' ||
+      "const allowed = !this.stopped && (!context || context.isCurrent()) && (persistenceMode === 'locked-fcm-v3' ? event.type !== 'new-server' : !this.options.canPersist || this.options.canPersist(event));" ||
     normalizedSnippet(persistGuardCallback.body.statements[2], dispatcherFile) !==
       'if (!allowed) admissionRevoked = true;' ||
     normalizedSnippet(persistGuardCallback.body.statements[3], dispatcherFile) !==
@@ -9966,6 +11038,14 @@ function incomingIngressCertifiedNodes({
     'SocketService',
   );
   const socketIoBinding = namedImportBinding(socketFile, 'socket.io-client', 'io');
+  const scopedDeviceCredentialBinding = namedImportBinding(
+    socketFile,
+    '@core/secure',
+    'isScopedDeviceCredential',
+  );
+  const scopedDeviceCredentialCalls = scopedDeviceCredentialBinding
+    ? directCallsToBinding(socketFile, scopedDeviceCredentialBinding, checker)
+    : [];
   const serverEventsBinding = namedImportBinding(socketFile, '@core/config', 'SERVER_EVENTS');
   const socketState = topLevelVariable(controlFile, 'socket');
   const socketAssignment = socketNew?.parent;
@@ -10022,7 +11102,7 @@ function incomingIngressCertifiedNodes({
   const socketTask = socketTrackedCall
     ? oneInlineCallback(socketTrackedCall.node, 1, 'lease')
     : undefined;
-  const socketConnectLeaseStatement = socketConnect.body.statements[5];
+  const socketConnectLeaseStatement = socketConnect.body.statements[6];
   const socketConnectLeaseExpression = ts.isExpressionStatement(socketConnectLeaseStatement)
     ? unwrapExpression(socketConnectLeaseStatement.expression)
     : undefined;
@@ -10145,7 +11225,11 @@ function incomingIngressCertifiedNodes({
     hasConnectedStatement.declarationList.declarations.length === 1
       ? hasConnectedStatement.declarationList.declarations[0]
       : undefined;
-  const socketOpenAssignmentStatement = socketOpen.body.statements[5];
+  const scopedDeviceCredentialDeclaration = singleConstDeclaration(
+    socketOpen.body.statements[5],
+    'scopedDeviceCredential',
+  );
+  const socketOpenAssignmentStatement = socketOpen.body.statements[6];
   const socketOpenAssignment = ts.isExpressionStatement(socketOpenAssignmentStatement)
     ? unwrapExpression(socketOpenAssignmentStatement.expression)
     : undefined;
@@ -10153,7 +11237,7 @@ function incomingIngressCertifiedNodes({
     socketOpenAssignment && ts.isBinaryExpression(socketOpenAssignment)
       ? callExpression(socketOpenAssignment.right)
       : undefined;
-  const socketConnectRegistrationStatement = socketOpen.body.statements[7];
+  const socketConnectRegistrationStatement = socketOpen.body.statements[8];
   const socketConnectRegistration = ts.isExpressionStatement(socketConnectRegistrationStatement)
     ? callExpression(socketConnectRegistrationStatement.expression)
     : undefined;
@@ -10203,7 +11287,7 @@ function incomingIngressCertifiedNodes({
     socketAssignment.operatorToken.kind !== ts.SyntaxKind.EqualsToken ||
     socketAssignment.right !== socketNew ||
     !sameSymbol(unwrapExpression(socketAssignment.left), socketState.declaration.name, checker) ||
-    socketAssignment.parent !== startRealtime.body.statements[11] ||
+    socketAssignment.parent !== startRealtime.body.statements[15] ||
     socketHandlerMembers.length !== 1 ||
     !socketHandlerField ||
     !ts.isPropertyDeclaration(socketHandlerField) ||
@@ -10262,22 +11346,29 @@ function incomingIngressCertifiedNodes({
     socketLifecycleField.modifiers?.length !== 1 ||
     socketLifecycleField.modifiers[0].kind !== ts.SyntaxKind.PrivateKeyword ||
     socketLifecycleWrites.length !== 3 ||
-    socketConnect.body.statements.length !== 8 ||
-    statementText(socketConnect, 0) !== 'this.lifecycleGeneration += 1;' ||
-    statementText(socketConnect, 1) !== 'this.retireCurrentConnection();' ||
-    statementText(socketConnect, 2) !== 'this.stopped = false;' ||
-    statementText(socketConnect, 3) !== 'this.origin = origin;' ||
-    statementText(socketConnect, 4) !== 'this.password = password;' ||
-    statementText(socketConnect, 5) !== 'this.accountLease = captureRealtimeDeliveryLease();' ||
+    socketConnect.body.statements.length !== 9 ||
+    statementText(socketConnect, 0) !==
+      "if (opts.legacyQueryAuth && isScopedDeviceCredential(password)) { throw new RangeError( 'Scoped device credentials require Socket.IO auth.token and cannot use legacy query authentication.', ); }" ||
+    !scopedDeviceCredentialBinding ||
+    scopedDeviceCredentialCalls.length !== 2 ||
+    !scopedDeviceCredentialCalls.some((call) =>
+      nodeIsInside(call, socketConnect.body.statements[0]),
+    ) ||
+    statementText(socketConnect, 1) !== 'this.lifecycleGeneration += 1;' ||
+    statementText(socketConnect, 2) !== 'this.retireCurrentConnection();' ||
+    statementText(socketConnect, 3) !== 'this.stopped = false;' ||
+    statementText(socketConnect, 4) !== 'this.origin = origin;' ||
+    statementText(socketConnect, 5) !== 'this.password = password;' ||
+    statementText(socketConnect, 6) !== 'this.accountLease = captureRealtimeDeliveryLease();' ||
     !socketConnectLeaseCall ||
     socketConnectLeaseCall.arguments.length !== 0 ||
     !socketAccountLeaseWrites.some((write) =>
-      nodeIsInside(write, socketConnect.body.statements[5]),
+      nodeIsInside(write, socketConnect.body.statements[6]),
     ) ||
-    !socketLifecycleWrites.some((write) => nodeIsInside(write, socketConnect.body.statements[0])) ||
-    statementText(socketConnect, 6) !==
+    !socketLifecycleWrites.some((write) => nodeIsInside(write, socketConnect.body.statements[1])) ||
+    statementText(socketConnect, 7) !==
       'this.opts = { ...opts, headers: opts.headers ? { ...opts.headers } : undefined };' ||
-    statementText(socketConnect, 7) !== 'this.openSocket();' ||
+    statementText(socketConnect, 8) !== 'this.openSocket();' ||
     !socketSequenceState ||
     !(socketSequenceState.declarationList.flags & ts.NodeFlags.Let) ||
     !socketSequenceState.declaration.initializer ||
@@ -10351,6 +11442,13 @@ function incomingIngressCertifiedNodes({
     hasConnectedDeclaration.name.text !== 'hasConnected' ||
     !(hasConnectedStatement.declarationList.flags & ts.NodeFlags.Let) ||
     hasConnectedDeclaration.initializer?.kind !== ts.SyntaxKind.FalseKeyword ||
+    socketOpen.body.statements.length !== 13 ||
+    !scopedDeviceCredentialDeclaration?.initializer ||
+    normalizedSnippet(scopedDeviceCredentialDeclaration.initializer, socketFile) !==
+      'isScopedDeviceCredential(this.password)' ||
+    !scopedDeviceCredentialCalls.some((call) =>
+      nodeIsInside(call, socketOpen.body.statements[5]),
+    ) ||
     !socketIoBinding ||
     !socketOpenAssignment ||
     !ts.isBinaryExpression(socketOpenAssignment) ||
@@ -10466,8 +11564,8 @@ function incomingIngressCertifiedNodes({
     ? callAccess(socketOnCall.expression)
     : undefined;
   const socketOnStatement = socketOnCall?.parent;
-  const socketLoop = ts.isForOfStatement(socketOpen.body.statements[6])
-    ? socketOpen.body.statements[6]
+  const socketLoop = ts.isForOfStatement(socketOpen.body.statements[7])
+    ? socketOpen.body.statements[7]
     : undefined;
   const socketLoopBody = socketLoop ? socketLoop.statement : undefined;
   const socketLoopDeclaration =
@@ -10585,7 +11683,7 @@ function incomingIngressCertifiedNodes({
     unwrapExpression(socketOnCall.arguments[1]) !== socketNativeCallback ||
     !snippetIs(socketOnCall.arguments[0], 'event') ||
     !sameSymbol(unwrapExpression(socketOnCall.arguments[0]), socketLoopDeclaration.name, checker) ||
-    !nodeIsInside(socketOnCall, socketOpen.body.statements[6]) ||
+    !nodeIsInside(socketOnCall, socketOpen.body.statements[7]) ||
     !ts.isBlock(socketLoopBody) ||
     socketLoopBody.statements.length !== 1 ||
     socketOnStatement !== socketLoopBody.statements[0] ||
@@ -10632,172 +11730,175 @@ function incomingIngressCertifiedNodes({
   }
   approved.push(socketReference.node);
 
-  // FCM snapshots native data before tracking; session and lock gates re-check the same lease;
-  // the locked branch posts only the generic notice and returns before durable dispatch.
-  const fcmLockTry = deliverRespectingLock.body.statements[6];
-  const fcmStateReadTry = deliver.body.statements[2];
-  const fcmStateReadStatement =
-    fcmStateReadTry && ts.isTryStatement(fcmStateReadTry)
-      ? fcmStateReadTry.tryBlock.statements[0]
-      : undefined;
-  const fcmStateReadAssignment =
-    fcmStateReadStatement && ts.isExpressionStatement(fcmStateReadStatement)
-      ? unwrapExpression(fcmStateReadStatement.expression)
-      : undefined;
-  const fcmStateReadAwait =
-    fcmStateReadAssignment && ts.isBinaryExpression(fcmStateReadAssignment)
-      ? unwrapExpression(fcmStateReadAssignment.right)
-      : undefined;
-  const fcmStateReadCall =
-    fcmStateReadAwait && ts.isAwaitExpression(fcmStateReadAwait)
-      ? callableCall(fcmStateReadAwait.expression, readFcmDeviceEncryptionState, checker)
-      : undefined;
-  const migratedEncryptionBranch = deliver.body.statements[4];
-  const migratedEncryptionBody =
-    migratedEncryptionBranch &&
-    ts.isIfStatement(migratedEncryptionBranch) &&
-    ts.isBlock(migratedEncryptionBranch.thenStatement)
-      ? migratedEncryptionBranch.thenStatement
-      : undefined;
-  const migratedOriginTry = migratedEncryptionBody?.statements[2];
-  const migratedOriginStatement =
-    migratedOriginTry && ts.isTryStatement(migratedOriginTry)
-      ? migratedOriginTry.tryBlock.statements[0]
-      : undefined;
-  const migratedOriginAssignment =
-    migratedOriginStatement && ts.isExpressionStatement(migratedOriginStatement)
-      ? unwrapExpression(migratedOriginStatement.expression)
-      : undefined;
-  const migratedOriginAwait =
-    migratedOriginAssignment && ts.isBinaryExpression(migratedOriginAssignment)
-      ? unwrapExpression(migratedOriginAssignment.right)
-      : undefined;
-  const migratedOriginCall =
-    migratedOriginAwait && ts.isAwaitExpression(migratedOriginAwait)
-      ? callExpression(migratedOriginAwait.expression)
-      : undefined;
-  const migratedOriginAccess = migratedOriginCall
-    ? callAccess(migratedOriginCall.expression)
-    : undefined;
-  const migratedDecryptTry = migratedEncryptionBody?.statements[7];
-  const migratedDecryptStatement =
-    migratedDecryptTry && ts.isTryStatement(migratedDecryptTry)
-      ? migratedDecryptTry.tryBlock.statements[0]
-      : undefined;
-  const migratedDecryptAssignment =
-    migratedDecryptStatement && ts.isExpressionStatement(migratedDecryptStatement)
-      ? unwrapExpression(migratedDecryptStatement.expression)
-      : undefined;
-  const migratedDecryptAwait =
-    migratedDecryptAssignment && ts.isBinaryExpression(migratedDecryptAssignment)
-      ? unwrapExpression(migratedDecryptAssignment.right)
-      : undefined;
-  const migratedDecryptCall =
-    migratedDecryptAwait && ts.isAwaitExpression(migratedDecryptAwait)
-      ? callableCall(migratedDecryptAwait.expression, decryptFcmV2Payload, checker)
-      : undefined;
-  const encryptedBranch = deliver.body.statements[5];
-  const supportedEncryptionBranch =
-    ts.isIfStatement(encryptedBranch) && ts.isBlock(encryptedBranch.thenStatement)
-      ? encryptedBranch.thenStatement.statements[0]
-      : undefined;
-  const supportedEncryptionBody =
-    supportedEncryptionBranch &&
-    ts.isIfStatement(supportedEncryptionBranch) &&
-    ts.isBlock(supportedEncryptionBranch.thenStatement)
-      ? supportedEncryptionBranch.thenStatement
-      : undefined;
-  const supportedEncryptionCondition =
-    supportedEncryptionBranch && ts.isIfStatement(supportedEncryptionBranch)
-      ? unwrapExpression(supportedEncryptionBranch.expression)
-      : undefined;
-  const supportedEncryptionSchemeCheck =
-    supportedEncryptionCondition &&
-    ts.isBinaryExpression(supportedEncryptionCondition) &&
-    supportedEncryptionCondition.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
-      ? unwrapExpression(supportedEncryptionCondition.left)
-      : undefined;
-  const fcmEncryptionTypeState = topLevelVariable(
-    filesByPath.get('src/services/notifications/fcmDecrypt.ts'),
-    'FCM_ENCRYPTION_TYPE',
+  // FCM is pinned as one reviewed module because its synchronous capture/FIFO ownership,
+  // authenticated V2/V3 branches, App-Lock decision, and generic-notice ordering form one
+  // inseparable native ingress boundary. Resolve every security-sensitive helper symbol as well:
+  // the source hash alone must not approve a same-named shadow or a redirected import.
+  const fcmStateReadCall = sole(exactCallEdges(edges, deliver, readFcmDeviceEncryptionState));
+  const fcmStateInspectionCall = sole(
+    exactCallEdges(edges, readFcmDeviceEncryptionState, inspectFcmDeviceEncryptionState),
   );
-  const fcmV2EncryptionTypeBinding = namedImportBinding(
+  const fcmV3AuthenticationCall = sole(exactCallEdges(edges, deliver, authenticateFcmV3Delivery));
+  const fcmV3CandidateCalls = exactCallEdges(
+    edges,
+    authenticateFcmV3Delivery,
+    fcmPushDecryptionKeyCandidates,
+  );
+  const fcmV3DecryptCall = sole(
+    exactCallEdges(edges, authenticateFcmV3Delivery, decryptFcmV3Payload),
+  );
+  const fcmV3IdentityMatchCall = sole(
+    exactCallEdges(edges, authenticateFcmV3Delivery, v3IdentityMatchesPayload),
+  );
+  const fcmV3IdentityDecodeCall = sole(
+    exactCallEdges(edges, decryptFcmV3Payload, decodeFcmPushEnvelopeIdentityV3),
+  );
+  const fcmV3ServerEventIdCall = sole(exactCallEdges(edges, deliver, v3ServerEventId));
+  const fcmV2DecryptCall = sole(exactCallEdges(edges, deliver, decryptFcmV2Payload));
+  const fcmDispatchCalls = exactCallEdges(edges, deliver, dispatchRealtimeEvent);
+  const fcmLockedAdmissionCall = sole(
+    exactCallEdges(edges, deliver, persistAuthenticatedLockedFcmV3Event),
+  );
+  const deliverCalls = exactCallEdges(edges, deliverRespectingLock, deliver);
+  const lockedDeliverCall = deliverCalls.find((edge) =>
+    snippetIs(edge.node, 'deliver(delivery, lease, lockedContext)'),
+  );
+  const unlockedDeliverCall = deliverCalls.find((edge) =>
+    snippetIs(edge.node, 'deliver(delivery, lease)'),
+  );
+  const sessionCall = sole(exactCallEdges(edges, deliverRespectingLock, readFcmSessionState));
+  const lockedNoticeCalls = exactCallEdges(edges, deliver, postLockedNotification);
+  const lockedCaptureCall = sole(
+    exactCallEdges(edges, persistAuthenticatedLockedFcmV3Event, captureIncomingEvent),
+  );
+  const lockedDatabaseCall = sole(
+    exactCallEdges(edges, persistAuthenticatedLockedFcmV3Event, ensureDatabase),
+  );
+  const lockedDispatcherCall = sole(
+    exactCallEdges(edges, persistAuthenticatedLockedFcmV3Event, durableLockedFcmV3Persist),
+  );
+  const lockedQueueCall = sole(exactCallEdges(edges, durableLockedFcmV3Persist, queuePersistence));
+  const persistEncodeCall = sole(exactCallEdges(edges, persistAdmission, encodeIncomingEvent));
+  const metadataAssertCall = sole(
+    exactCallEdges(edges, encodeIncomingEvent, assertIncomingEventMetadata),
+  );
+  const vaultBinding = namedImportBinding(fcmFile, '../clients', 'vault');
+  const accountRevocationMarkerBinding = namedImportBinding(
     fcmFile,
-    './fcmDecrypt',
-    'FCM_V2_ENCRYPTION_TYPE',
+    '../clients',
+    'accountRevocationMarker',
   );
-  const fcmV2EncryptionTypeReferences = fcmV2EncryptionTypeBinding
-    ? runtimeReferencesToBinding(fcmFile, fcmV2EncryptionTypeBinding, checker)
-    : [];
-  const captureReturn = captureFcm.body.statements[5];
-  const captureReturnObject =
-    ts.isReturnStatement(captureReturn) && captureReturn.expression
-      ? unwrapExpression(captureReturn.expression)
-      : undefined;
-  const captureParsedProperty =
-    captureReturnObject && ts.isObjectLiteralExpression(captureReturnObject)
-      ? captureReturnObject.properties[0]
-      : undefined;
-  const captureParseCall =
-    captureParsedProperty && ts.isPropertyAssignment(captureParsedProperty)
-      ? callableCall(captureParsedProperty.initializer, parseFcmData, checker)
-      : undefined;
-  const fcmSequenceState = topLevelVariable(fcmFile, 'fcmLocalOccurrenceSequence');
-  const fcmNonceState = topLevelVariable(fcmFile, 'fcmProcessOccurrenceNonce');
-  const fcmAdmissionTailState = topLevelVariable(fcmFile, 'fcmAdmissionTail');
-  const fcmNonceInitializer = fcmNonceState?.declaration.initializer
-    ? unwrapExpression(fcmNonceState.declaration.initializer)
-    : undefined;
-  const fcmNonceCalls = [];
-  if (fcmNonceInitializer) {
-    const visitNonceCalls = (node) => {
-      if (ts.isCallExpression(node)) fcmNonceCalls.push(node);
-      ts.forEachChild(node, visitNonceCalls);
-    };
-    visitNonceCalls(fcmNonceInitializer);
+  if (
+    !fcmStateReadCall ||
+    !snippetIs(fcmStateReadCall.node, 'readFcmDeviceEncryptionState(vault)') ||
+    !fcmStateInspectionCall ||
+    !snippetIs(
+      fcmStateInspectionCall.node,
+      'inspectFcmDeviceEncryptionState(await secureVault.get(FCM_PUSH_ENCRYPTION_VAULT_KEY))',
+    ) ||
+    !fcmV3AuthenticationCall ||
+    !snippetIs(
+      fcmV3AuthenticationCall.node,
+      'authenticateFcmV3Delivery(delivery, encryptionState.state, lease)',
+    ) ||
+    fcmV3CandidateCalls.length !== 2 ||
+    !fcmV3CandidateCalls.every((edge) =>
+      snippetIs(edge.node, 'fcmPushDecryptionKeyCandidates(state, Date.now())'),
+    ) ||
+    !fcmV3DecryptCall ||
+    !snippetIs(fcmV3DecryptCall.node, 'decryptFcmV3Payload(body, candidate.key, eventName)') ||
+    !fcmV3IdentityMatchCall ||
+    !snippetIs(fcmV3IdentityMatchCall.node, 'v3IdentityMatchesPayload(identity, plaintext)') ||
+    !fcmV3IdentityDecodeCall ||
+    !snippetIs(fcmV3IdentityDecodeCall.node, 'decodeFcmPushEnvelopeIdentityV3(aad)') ||
+    !fcmV3ServerEventIdCall ||
+    !snippetIs(fcmV3ServerEventIdCall.node, 'v3ServerEventId(authenticated.identity)') ||
+    !fcmV2DecryptCall ||
+    !snippetIs(
+      fcmV2DecryptCall.node,
+      'decryptFcmV2Payload(body, encryptionState.state.key, eventName)',
+    ) ||
+    fcmDispatchCalls.length !== 2 ||
+    !fcmDispatchCalls.some((edge) =>
+      snippetIs(
+        edge.node,
+        "dispatchRealtimeEvent(eventName, authenticated.plaintext, 'fcm', lease, occurrence)",
+      ),
+    ) ||
+    !fcmDispatchCalls.some((edge) =>
+      snippetIs(
+        edge.node,
+        "dispatchRealtimeEvent(eventName, plaintext, 'fcm', lease, delivery.occurrence)",
+      ),
+    ) ||
+    !fcmDispatchCalls.every(
+      (edge) =>
+        coordinatorCallbackAdoptsInvocation(edge.node, deliver) &&
+        ts.isAwaitExpression(unwrapExpression(edge.node.parent)),
+    ) ||
+    !fcmLockedAdmissionCall ||
+    !snippetIs(
+      fcmLockedAdmissionCall.node,
+      'persistAuthenticatedLockedFcmV3Event( eventName, authenticated.plaintext, lockedContext, occurrence, )',
+    ) ||
+    !coordinatorCallbackAdoptsInvocation(fcmLockedAdmissionCall.node, deliver) ||
+    deliverCalls.length !== 2 ||
+    !lockedDeliverCall ||
+    !unlockedDeliverCall ||
+    !deliverCalls.every((edge) =>
+      coordinatorCallbackAdoptsInvocation(edge.node, deliverRespectingLock),
+    ) ||
+    lockedNoticeCalls.length !== 2 ||
+    !lockedNoticeCalls.every(
+      (edge) =>
+        snippetIs(edge.node, 'postLockedNotification(lockedContext)') &&
+        ts.isAwaitExpression(unwrapExpression(edge.node.parent)),
+    ) ||
+    !sessionCall ||
+    !nodeIsInside(sessionCall.node, deliverRespectingLock.body.statements[2]) ||
+    sessionCall.node.arguments.length !== 2 ||
+    !vaultBinding ||
+    !sameSymbol(unwrapExpression(sessionCall.node.arguments[0]), vaultBinding, checker) ||
+    !accountRevocationMarkerBinding ||
+    !sameSymbol(
+      unwrapExpression(sessionCall.node.arguments[1]),
+      accountRevocationMarkerBinding,
+      checker,
+    ) ||
+    !lockedCaptureCall ||
+    !snippetIs(lockedCaptureCall.node, 'captureIncomingEvent(eventName, rawData)') ||
+    !lockedDatabaseCall ||
+    !snippetIs(lockedDatabaseCall.node, 'ensureDatabase()') ||
+    !ts.isAwaitExpression(unwrapExpression(lockedDatabaseCall.node.parent)) ||
+    !lockedDispatcherCall ||
+    !snippetIs(
+      lockedDispatcherCall.node,
+      'runtime?.dispatcher.persistLockedFcmV3WithoutDrain( captured.eventName, captured.rawData, context, capturedOccurrence, receivedAt, )',
+    ) ||
+    !ts.isAwaitExpression(unwrapExpression(lockedDispatcherCall.node.parent)) ||
+    !lockedQueueCall ||
+    !snippetIs(
+      lockedQueueCall.node,
+      "this.queuePersistence( eventName, rawData, 'fcm', context, occurrence, undefined, receivedAt, 'locked-fcm-v3', )",
+    ) ||
+    !persistEncodeCall ||
+    !snippetIs(
+      persistEncodeCall.node,
+      'encodeIncomingEvent( event, { source, receivedAt, serverEventId: occurrence?.serverEventId, transportOccurrenceId: occurrence?.transportOccurrenceId ?? this.options.makeTransportOccurrenceId(source), authenticatedExpiresAt: occurrence?.authenticatedExpiresAt, }, this.digest, )',
+    ) ||
+    !metadataAssertCall ||
+    !snippetIs(metadataAssertCall.node, 'assertMetadata(metadata)')
+  ) {
+    return empty();
   }
-  const fcmNonceDateCall = sole(
-    fcmNonceCalls.filter((call) => {
-      const access = callAccess(call.expression);
-      return access?.method === 'now' && identifierNamed(access.receiver, 'Date');
-    }),
+  approved.push(
+    ...fcmDispatchCalls.map((edge) => edge.node),
+    fcmLockedAdmissionCall.node,
+    ...deliverCalls.map((edge) => edge.node),
+    lockedDispatcherCall.node,
   );
-  const fcmNonceMathCall = sole(
-    fcmNonceCalls.filter((call) => {
-      const access = callAccess(call.expression);
-      return access?.method === 'random' && identifierNamed(access.receiver, 'Math');
-    }),
-  );
-  const fcmNonceDateAccess = fcmNonceDateCall ? callAccess(fcmNonceDateCall.expression) : undefined;
-  const fcmNonceMathAccess = fcmNonceMathCall ? callAccess(fcmNonceMathCall.expression) : undefined;
-  const fcmNonceDateSymbol = fcmNonceDateAccess
-    ? unaliasSymbol(
-        checker.getSymbolAtLocation(unwrapExpression(fcmNonceDateAccess.receiver)),
-        checker,
-      )
-    : undefined;
-  const fcmNonceMathSymbol = fcmNonceMathAccess
-    ? unaliasSymbol(
-        checker.getSymbolAtLocation(unwrapExpression(fcmNonceMathAccess.receiver)),
-        checker,
-      )
-    : undefined;
-  const fcmReceivedAtDeclaration = singleConstDeclaration(
-    captureFcm.body.statements[4],
-    'receivedAt',
-  );
-  const fcmReceivedAtCall = fcmReceivedAtDeclaration?.initializer
-    ? callExpression(fcmReceivedAtDeclaration.initializer)
-    : undefined;
-  const fcmReceivedAtAccess = fcmReceivedAtCall
-    ? callAccess(fcmReceivedAtCall.expression)
-    : undefined;
-  const fcmReceivedAtDateSymbol = fcmReceivedAtAccess
-    ? unaliasSymbol(
-        checker.getSymbolAtLocation(unwrapExpression(fcmReceivedAtAccess.receiver)),
-        checker,
-      )
-    : undefined;
+
+  const fcmAdmissionTailState = topLevelVariable(fcmFile, 'fcmAdmissionTail');
   const fcmAdmissionTailInitializer = fcmAdmissionTailState?.declaration.initializer
     ? callExpression(fcmAdmissionTailState.declaration.initializer)
     : undefined;
@@ -10810,391 +11911,39 @@ function incomingIngressCertifiedNodes({
         checker,
       )
     : undefined;
-  const fcmSequenceWrites = fcmSequenceState
-    ? assignmentWritesTo(fcmFile, fcmSequenceState.declaration.name, checker)
-    : [];
   const fcmAdmissionTailWrites = fcmAdmissionTailState
     ? assignmentWritesTo(fcmFile, fcmAdmissionTailState.declaration.name, checker)
     : [];
-  const passwordDeclaration = supportedEncryptionBody
-    ? singleConstDeclaration(supportedEncryptionBody.statements[0], 'password')
-    : undefined;
-  const passwordAwait = passwordDeclaration?.initializer
-    ? unwrapExpression(passwordDeclaration.initializer)
-    : undefined;
-  const passwordCall =
-    passwordAwait && ts.isAwaitExpression(passwordAwait)
-      ? callExpression(passwordAwait.expression)
-      : undefined;
-  const passwordAccess = passwordCall ? callAccess(passwordCall.expression) : undefined;
-  const vaultBinding = namedImportBinding(fcmFile, '../clients', 'vault');
-  const accountRevocationMarkerBinding = namedImportBinding(
-    fcmFile,
-    '../clients',
-    'accountRevocationMarker',
-  );
-  const decryptTry = supportedEncryptionBody?.statements[4];
-  const decryptStatement =
-    decryptTry && ts.isTryStatement(decryptTry) ? decryptTry.tryBlock.statements[0] : undefined;
-  const decryptAssignment =
-    decryptStatement && ts.isExpressionStatement(decryptStatement)
-      ? unwrapExpression(decryptStatement.expression)
-      : undefined;
-  const decryptAwait =
-    decryptAssignment && ts.isBinaryExpression(decryptAssignment)
-      ? unwrapExpression(decryptAssignment.right)
-      : undefined;
-  const decryptCall =
-    decryptAwait && ts.isAwaitExpression(decryptAwait)
-      ? callableCall(decryptAwait.expression, decryptFcmPayload, checker)
-      : undefined;
-  const hydratedDeclaration = supportedEncryptionBody
-    ? singleConstDeclaration(supportedEncryptionBody.statements[6], 'hydratedBody')
-    : undefined;
-  const hydrateCall = hydratedDeclaration?.initializer
-    ? callableCall(hydratedDeclaration.initializer, rehydrateFcmEnvelopeChatGuid, checker)
-    : undefined;
-  const fcmStoredLockDeclaration =
-    fcmLockTry && ts.isTryStatement(fcmLockTry)
-      ? singleConstDeclaration(fcmLockTry.tryBlock.statements[0], 'storedAppLock')
-      : undefined;
-  const fcmLockAssignmentStatement =
-    fcmLockTry && ts.isTryStatement(fcmLockTry) ? fcmLockTry.tryBlock.statements[1] : undefined;
-  const fcmLockAssignment =
-    fcmLockAssignmentStatement && ts.isExpressionStatement(fcmLockAssignmentStatement)
-      ? unwrapExpression(fcmLockAssignmentStatement.expression)
-      : undefined;
-  const fcmEffectiveLockCall =
-    fcmLockAssignment && ts.isBinaryExpression(fcmLockAssignment)
-      ? callableCall(fcmLockAssignment.right, effectivelyLocked, checker)
-      : undefined;
-  const fcmLockStateCall = fcmEffectiveLockCall?.arguments[0]
-    ? callExpression(fcmEffectiveLockCall.arguments[0])
-    : undefined;
-  const fcmLockStateAccess = fcmLockStateCall ? callAccess(fcmLockStateCall.expression) : undefined;
-  const fcmStoredLockGuardCall = fcmEffectiveLockCall?.arguments[1]
-    ? callableCall(fcmEffectiveLockCall.arguments[1], storedAppLockRequiresProtection, checker)
-    : undefined;
-  const fcmUseLockStoreBinding = namedImportBinding(fcmFile, '@state/lockStore', 'useLockStore');
-  if (
-    captureFcm.body.statements.length !== 6 ||
-    statementText(captureFcm, 0) !==
-      "const providerMessageId = typeof msg.messageId === 'string' && msg.messageId.length > 0 ? msg.messageId : null;" ||
-    statementText(captureFcm, 1) !== 'let transportOccurrenceId = providerMessageId;' ||
-    statementText(captureFcm, 2) !==
-      'if (!transportOccurrenceId) { fcmLocalOccurrenceSequence += 1; transportOccurrenceId = `fcm-local:${fcmProcessOccurrenceNonce}:${fcmLocalOccurrenceSequence}`; }' ||
-    statementText(captureFcm, 3) !== 'const data = msg.data ? { ...msg.data } : undefined;' ||
-    statementText(captureFcm, 4) !== 'const receivedAt = Date.now();' ||
-    !fcmReceivedAtCall ||
-    fcmReceivedAtCall.arguments.length !== 0 ||
-    !fcmReceivedAtAccess ||
-    fcmReceivedAtAccess.method !== 'now' ||
-    !isNativeLibSymbol(fcmReceivedAtDateSymbol) ||
-    statementText(captureFcm, 5) !==
-      'return { parsed: parseFcmData(data), occurrence: { transportOccurrenceId, receivedAt }, };' ||
-    !captureParseCall ||
-    captureParseCall.arguments.length !== 1 ||
-    !snippetIs(captureParseCall.arguments[0], 'data') ||
-    !fcmSequenceState ||
-    !(fcmSequenceState.declarationList.flags & ts.NodeFlags.Let) ||
-    !fcmSequenceState.declaration.initializer ||
-    !ts.isNumericLiteral(fcmSequenceState.declaration.initializer) ||
-    fcmSequenceState.declaration.initializer.text !== '0' ||
-    !fcmNonceState ||
-    !(fcmNonceState.declarationList.flags & ts.NodeFlags.Const) ||
-    !fcmNonceState.declaration.initializer ||
-    normalizedSnippet(fcmNonceState.declaration.initializer, fcmFile) !==
-      '`${Date.now().toString(36)}-${Math.random() .toString(36) .slice(2, 14)}`' ||
-    !fcmNonceDateCall ||
-    fcmNonceDateCall.arguments.length !== 0 ||
-    !isNativeLibSymbol(fcmNonceDateSymbol) ||
-    !fcmNonceMathCall ||
-    fcmNonceMathCall.arguments.length !== 0 ||
-    !isNativeLibSymbol(fcmNonceMathSymbol) ||
-    fcmSequenceWrites.length !== 1 ||
-    !nodeIsInside(fcmSequenceWrites[0], captureFcm.body.statements[2]) ||
-    storedAppLockRequiresProtection.body.statements.length !== 1 ||
-    statementText(storedAppLockRequiresProtection, 0) !==
-      "return value !== null && value !== 'false';" ||
-    deliver.body.statements.length !== 7 ||
-    statementText(deliver, 0) !==
-      'const { eventName, body, envelopeChatGuid, encrypted, encryptionType } = delivery.parsed;' ||
-    statementText(deliver, 1) !== 'let encryptionState;' ||
-    !fcmStateReadTry ||
-    !ts.isTryStatement(fcmStateReadTry) ||
-    !fcmStateReadTry.catchClause ||
-    fcmStateReadTry.finallyBlock ||
-    fcmStateReadTry.tryBlock.statements.length !== 1 ||
-    fcmStateReadTry.catchClause.variableDeclaration ||
-    fcmStateReadTry.catchClause.block.statements.length !== 2 ||
-    !fcmStateReadAssignment ||
-    !ts.isBinaryExpression(fcmStateReadAssignment) ||
-    fcmStateReadAssignment.operatorToken.kind !== ts.SyntaxKind.EqualsToken ||
-    !identifierNamed(fcmStateReadAssignment.left, 'encryptionState') ||
-    !fcmStateReadCall ||
-    fcmStateReadCall.arguments.length !== 1 ||
-    !vaultBinding ||
-    !sameSymbol(unwrapExpression(fcmStateReadCall.arguments[0]), vaultBinding, checker) ||
-    normalizedSnippet(fcmStateReadTry.catchClause.block.statements[0], fcmFile) !==
-      "logger.warn('[fcm] push-encryption state unavailable — push dropped');" ||
-    !ts.isReturnStatement(fcmStateReadTry.catchClause.block.statements[1]) ||
-    statementText(deliver, 3) !== 'if (!lease.isCurrent()) return;' ||
-    !migratedEncryptionBranch ||
-    !ts.isIfStatement(migratedEncryptionBranch) ||
-    normalizedSnippet(migratedEncryptionBranch.expression, fcmFile) !==
-      "encryptionState.kind !== 'absent'" ||
-    !migratedEncryptionBody ||
-    migratedEncryptionBody.statements.length !== 11 ||
-    normalizedSnippet(migratedEncryptionBody.statements[0], fcmFile) !==
-      "if (encryptionState.kind !== 'valid' || encryptionState.state.status === 'revoked') { logger.warn('[fcm] push-encryption state is not usable — push dropped'); return; }" ||
-    normalizedSnippet(migratedEncryptionBody.statements[1], fcmFile) !==
-      'let currentOrigin: string | null;' ||
-    !migratedOriginTry ||
-    !ts.isTryStatement(migratedOriginTry) ||
-    !migratedOriginTry.catchClause ||
-    migratedOriginTry.finallyBlock ||
-    migratedOriginTry.tryBlock.statements.length !== 1 ||
-    migratedOriginTry.catchClause.variableDeclaration ||
-    migratedOriginTry.catchClause.block.statements.length !== 2 ||
-    !migratedOriginAssignment ||
-    !ts.isBinaryExpression(migratedOriginAssignment) ||
-    migratedOriginAssignment.operatorToken.kind !== ts.SyntaxKind.EqualsToken ||
-    !identifierNamed(migratedOriginAssignment.left, 'currentOrigin') ||
-    !migratedOriginCall ||
-    !migratedOriginAccess ||
-    migratedOriginAccess.method !== 'get' ||
-    !sameSymbol(migratedOriginAccess.receiver, vaultBinding, checker) ||
-    migratedOriginCall.arguments.length !== 1 ||
-    !ts.isStringLiteral(unwrapExpression(migratedOriginCall.arguments[0])) ||
-    unwrapExpression(migratedOriginCall.arguments[0]).text !== 'serverAddress' ||
-    normalizedSnippet(migratedOriginTry.catchClause.block.statements[0], fcmFile) !==
-      "logger.warn('[fcm] push-encryption origin unavailable — push dropped');" ||
-    !ts.isReturnStatement(migratedOriginTry.catchClause.block.statements[1]) ||
-    normalizedSnippet(migratedEncryptionBody.statements[3], fcmFile) !==
-      'if (!lease.isCurrent()) return;' ||
-    normalizedSnippet(migratedEncryptionBody.statements[4], fcmFile) !==
-      "if (!currentOrigin || encryptionState.state.origin !== currentOrigin) { logger.warn('[fcm] push-encryption origin changed — push dropped until re-enrollment'); return; }" ||
-    normalizedSnippet(migratedEncryptionBody.statements[5], fcmFile) !==
-      "if (!encrypted || encryptionType !== FCM_V2_ENCRYPTION_TYPE || typeof body !== 'string') { logger.warn('[fcm] legacy or unsupported push rejected after V2 migration'); return; }" ||
-    !fcmV2EncryptionTypeBinding ||
-    fcmV2EncryptionTypeReferences.length !== 1 ||
-    !nodeIsInside(fcmV2EncryptionTypeReferences[0], migratedEncryptionBody.statements[5]) ||
-    normalizedSnippet(migratedEncryptionBody.statements[6], fcmFile) !== 'let plaintext: string;' ||
-    !migratedDecryptTry ||
-    !ts.isTryStatement(migratedDecryptTry) ||
-    !migratedDecryptTry.catchClause ||
-    migratedDecryptTry.finallyBlock ||
-    migratedDecryptTry.tryBlock.statements.length !== 1 ||
-    migratedDecryptTry.catchClause.block.statements.length !== 2 ||
-    !migratedDecryptAssignment ||
-    !ts.isBinaryExpression(migratedDecryptAssignment) ||
-    migratedDecryptAssignment.operatorToken.kind !== ts.SyntaxKind.EqualsToken ||
-    !identifierNamed(migratedDecryptAssignment.left, 'plaintext') ||
-    !migratedDecryptCall ||
-    migratedDecryptCall.arguments.length !== 3 ||
-    !snippetIs(migratedDecryptCall.arguments[0], 'body') ||
-    !snippetIs(migratedDecryptCall.arguments[1], 'encryptionState.state.key') ||
-    !snippetIs(migratedDecryptCall.arguments[2], 'eventName') ||
-    normalizedSnippet(migratedDecryptTry.catchClause.block.statements[0], fcmFile) !==
-      "logger.warn( '[fcm] failed to authenticate encrypted push; sync may recover server state, but a one-time event may be lost', { errorName: error instanceof Error ? error.name : 'UnknownError' }, );" ||
-    !ts.isReturnStatement(migratedDecryptTry.catchClause.block.statements[1]) ||
-    normalizedSnippet(migratedEncryptionBody.statements[8], fcmFile) !==
-      'if (!lease.isCurrent()) return;' ||
-    !ts.isReturnStatement(migratedEncryptionBody.statements[10]) ||
-    deliverRespectingLock.body.statements.length !== 10 ||
-    statementText(deliverRespectingLock, 0) !==
-      'const { eventName: receivedEvent } = delivery.parsed;' ||
-    statementText(deliverRespectingLock, 1) !==
-      "logger.event('fcm.push_received', { eventName: receivedEvent, source });" ||
-    statementText(deliverRespectingLock, 2) !==
-      'const sessionState = await readFcmSessionState(vault, accountRevocationMarker);' ||
-    statementText(deliverRespectingLock, 3) !== 'if (!lease.isCurrent()) return;' ||
-    statementText(deliverRespectingLock, 4) !==
-      "if (sessionState !== 'active') { if (sessionState === 'unavailable') { logger.warn( '[fcm] session check unavailable — push dropped; sync may recover server state, but a one-time event may be lost', ); } else { logger.debug('[fcm] push for a forgotten server — dropped'); } return; }" ||
-    statementText(deliverRespectingLock, 5) !== 'let locked = true;' ||
-    !ts.isIfStatement(encryptedBranch) ||
-    !ts.isBlock(encryptedBranch.thenStatement) ||
-    encryptedBranch.thenStatement.statements.length !== 3 ||
-    !supportedEncryptionBody ||
-    supportedEncryptionBody.statements.length !== 9 ||
-    normalizedSnippet(supportedEncryptionBody.statements[0], fcmFile) !==
-      "const password = await vault.get('serverPassword');" ||
-    normalizedSnippet(supportedEncryptionBody.statements[1], fcmFile) !==
-      'if (!lease.isCurrent()) return;' ||
-    normalizedSnippet(supportedEncryptionBody.statements[2], fcmFile) !==
-      "if (!password) { logger.warn( '[fcm] encrypted push skipped: no stored server password; sync may recover server state, but a one-time event may be lost', { event: eventName }, ); return; }" ||
-    normalizedSnippet(supportedEncryptionBody.statements[3], fcmFile) !==
-      'let plaintext: string;' ||
-    !passwordCall ||
-    !passwordAccess ||
-    passwordAccess.method !== 'get' ||
-    !vaultBinding ||
-    !sameSymbol(passwordAccess.receiver, vaultBinding, checker) ||
-    passwordCall.arguments.length !== 1 ||
-    !ts.isStringLiteral(unwrapExpression(passwordCall.arguments[0])) ||
-    unwrapExpression(passwordCall.arguments[0]).text !== 'serverPassword' ||
-    !decryptTry ||
-    !ts.isTryStatement(decryptTry) ||
-    !decryptTry.catchClause ||
-    decryptTry.finallyBlock ||
-    decryptTry.tryBlock.statements.length !== 1 ||
-    decryptTry.catchClause.block.statements.length !== 2 ||
-    !decryptAssignment ||
-    !ts.isBinaryExpression(decryptAssignment) ||
-    decryptAssignment.operatorToken.kind !== ts.SyntaxKind.EqualsToken ||
-    !identifierNamed(decryptAssignment.left, 'plaintext') ||
-    !decryptCall ||
-    decryptCall.arguments.length !== 2 ||
-    !snippetIs(decryptCall.arguments[0], 'body') ||
-    !snippetIs(decryptCall.arguments[1], 'password') ||
-    normalizedSnippet(decryptTry.catchClause.block.statements[0], fcmFile) !==
-      "logger.warn( '[fcm] failed to decrypt push; sync may recover server state, but a one-time event may be lost', e, );" ||
-    !ts.isReturnStatement(decryptTry.catchClause.block.statements[1]) ||
-    normalizedSnippet(supportedEncryptionBody.statements[5], fcmFile) !==
-      'if (!lease.isCurrent()) return;' ||
-    !hydratedDeclaration ||
-    !hydrateCall ||
-    hydrateCall.arguments.length !== 2 ||
-    !snippetIs(hydrateCall.arguments[0], 'plaintext') ||
-    !snippetIs(hydrateCall.arguments[1], 'envelopeChatGuid') ||
-    !ts.isReturnStatement(supportedEncryptionBody.statements[8]) ||
-    !ts.isTryStatement(fcmLockTry) ||
-    !fcmLockTry.catchClause ||
-    fcmLockTry.finallyBlock ||
-    fcmLockTry.tryBlock.statements.length !== 2 ||
-    normalizedSnippet(fcmLockTry.tryBlock.statements[0], fcmFile) !==
-      "const storedAppLock = await vault.get('appLockEnabled');" ||
-    normalizedSnippet(fcmLockTry.tryBlock.statements[1], fcmFile) !==
-      'locked = effectivelyLocked( useLockStore.getState(), storedAppLockRequiresProtection(storedAppLock), );' ||
-    !fcmStoredLockDeclaration ||
-    !fcmLockAssignment ||
-    !ts.isBinaryExpression(fcmLockAssignment) ||
-    fcmLockAssignment.operatorToken.kind !== ts.SyntaxKind.EqualsToken ||
-    !identifierNamed(fcmLockAssignment.left, 'locked') ||
-    !fcmEffectiveLockCall ||
-    fcmEffectiveLockCall.arguments.length !== 2 ||
-    !fcmLockStateCall ||
-    !fcmLockStateAccess ||
-    fcmLockStateAccess.method !== 'getState' ||
-    !fcmUseLockStoreBinding ||
-    !sameSymbol(fcmLockStateAccess.receiver, fcmUseLockStoreBinding, checker) ||
-    fcmLockStateCall.arguments.length !== 0 ||
-    !fcmStoredLockGuardCall ||
-    fcmStoredLockGuardCall.arguments.length !== 1 ||
-    !sameSymbol(
-      unwrapExpression(fcmStoredLockGuardCall.arguments[0]),
-      fcmStoredLockDeclaration.name,
-      checker,
-    ) ||
-    fcmLockTry.catchClause.block.statements.length !== 1 ||
-    normalizedSnippet(fcmLockTry.catchClause.block.statements[0], fcmFile) !==
-      "logger.warn('[fcm] lock-state check failed — failing closed (content-less notice)', e);" ||
-    statementText(deliverRespectingLock, 7) !== 'if (!lease.isCurrent()) return;' ||
-    statementText(deliverRespectingLock, 8) !==
-      'if (locked) { await postLockedNotification(lease); return; }' ||
-    statementText(deliverRespectingLock, 9) !== 'return deliver(delivery, lease);'
-  ) {
-    return empty();
-  }
-  const fcmDispatchCalls = exactCallEdges(edges, deliver, dispatchRealtimeEvent);
-  const migratedDispatchCall = fcmDispatchCalls.find(
-    (edge) =>
-      normalizedSnippet(edge.node, fcmFile) ===
-      "dispatchRealtimeEvent(eventName, plaintext, 'fcm', lease, delivery.occurrence)",
-  );
-  const encryptedDispatchCall = fcmDispatchCalls.find(
-    (edge) =>
-      normalizedSnippet(edge.node, fcmFile) ===
-      "dispatchRealtimeEvent(eventName, hydratedBody, 'fcm', lease, delivery.occurrence)",
-  );
-  const plaintextDispatchCall = fcmDispatchCalls.find(
-    (edge) =>
-      normalizedSnippet(edge.node, fcmFile) ===
-      "dispatchRealtimeEvent(eventName, body, 'fcm', lease, delivery.occurrence)",
-  );
-  const deliverCall = sole(exactCallEdges(edges, deliverRespectingLock, deliver));
-  const sessionCall = sole(exactCallEdges(edges, deliverRespectingLock, readFcmSessionState));
-  const lockedNoticeCall = sole(
-    exactCallEdges(edges, deliverRespectingLock, postLockedNotification),
-  );
-  if (
-    deliver.body.statements.length !== 7 ||
-    statementText(deliver, 0) !==
-      'const { eventName, body, envelopeChatGuid, encrypted, encryptionType } = delivery.parsed;' ||
-    !ts.isIfStatement(encryptedBranch) ||
-    !identifierNamed(encryptedBranch.expression, 'encrypted') ||
-    !ts.isBlock(encryptedBranch.thenStatement) ||
-    encryptedBranch.thenStatement.statements.length !== 3 ||
-    supportedEncryptionBranch !== encryptedBranch.thenStatement.statements[0] ||
-    !supportedEncryptionBranch ||
-    !ts.isIfStatement(supportedEncryptionBranch) ||
-    normalizedSnippet(supportedEncryptionBranch.expression, fcmFile) !==
-      "encryptionType === FCM_ENCRYPTION_TYPE && typeof body === 'string'" ||
-    !supportedEncryptionSchemeCheck ||
-    !ts.isBinaryExpression(supportedEncryptionSchemeCheck) ||
-    supportedEncryptionSchemeCheck.operatorToken.kind !== ts.SyntaxKind.EqualsEqualsEqualsToken ||
-    !fcmEncryptionTypeState ||
-    !sameSymbol(
-      unwrapExpression(supportedEncryptionSchemeCheck.right),
-      fcmEncryptionTypeState.declaration.name,
-      checker,
-    ) ||
-    normalizedSnippet(encryptedBranch.thenStatement.statements[1], fcmFile) !==
-      "logger.warn( '[fcm] encrypted push with unsupported scheme skipped; sync may recover server state, but a one-time event may be lost', { event: eventName, encryptionType }, );" ||
-    !ts.isReturnStatement(encryptedBranch.thenStatement.statements[2]) ||
-    !exactly(fcmDispatchCalls, 3) ||
-    !migratedDispatchCall ||
-    !encryptedDispatchCall ||
-    !plaintextDispatchCall ||
-    !nodeIsInside(migratedDispatchCall.node, migratedEncryptionBody.statements[9]) ||
-    !nodeIsInside(encryptedDispatchCall.node, supportedEncryptionBody.statements[7]) ||
-    !nodeIsInside(plaintextDispatchCall.node, deliver.body.statements[6]) ||
-    !fcmDispatchCalls.every(
-      (edge) =>
-        coordinatorCallbackAdoptsInvocation(edge.node, deliver) &&
-        [
-          "dispatchRealtimeEvent(eventName, plaintext, 'fcm', lease, delivery.occurrence)",
-          "dispatchRealtimeEvent(eventName, hydratedBody, 'fcm', lease, delivery.occurrence)",
-          "dispatchRealtimeEvent(eventName, body, 'fcm', lease, delivery.occurrence)",
-        ].includes(normalizedSnippet(edge.node, fcmFile)),
-    ) ||
-    !deliverCall ||
-    !coordinatorCallbackAdoptsInvocation(deliverCall.node, deliverRespectingLock) ||
-    !sessionCall ||
-    !nodeIsInside(sessionCall.node, deliverRespectingLock.body.statements[2]) ||
-    sessionCall.node.arguments.length !== 2 ||
-    !vaultBinding ||
-    !sameSymbol(unwrapExpression(sessionCall.node.arguments[0]), vaultBinding, checker) ||
-    !accountRevocationMarkerBinding ||
-    !sameSymbol(
-      unwrapExpression(sessionCall.node.arguments[1]),
-      accountRevocationMarkerBinding,
-      checker,
-    ) ||
-    !lockedNoticeCall ||
-    !nodeIsInside(lockedNoticeCall.node, deliverRespectingLock.body.statements[8])
-  ) {
-    return empty();
-  }
-  approved.push(...fcmDispatchCalls.map((edge) => edge.node), deliverCall.node);
-
   const fcmCaptureCall = sole(exactCallEdges(edges, handleIncomingFcm, captureFcm));
   const fcmTrackedCall = sole(exactCallEdges(edges, handleIncomingFcm, runTrackedDelivery));
   const fcmTask = fcmTrackedCall ? oneInlineCallback(fcmTrackedCall.node, 0, 'lease') : undefined;
-  const fcmLockCall = fcmTask
-    ? sole(exactCallEdges(edges, fcmTask, deliverRespectingLock))
+  const fcmLockCalls = fcmTask ? exactCallEdges(edges, fcmTask, deliverRespectingLock) : [];
+  const fcmHeadlessCollectionCall = fcmTask
+    ? sole(exactCallEdges(edges, fcmTask, beginHeadlessEffectCollection))
     : undefined;
+  const fcmHeadlessEffectTry =
+    fcmTask?.body && ts.isBlock(fcmTask.body) ? fcmTask.body.statements[4] : undefined;
   const fcmTry = handleIncomingFcm.body.statements[0];
   const fcmDeliveryDeclaration = ts.isTryStatement(fcmTry)
     ? singleConstDeclaration(fcmTry.tryBlock.statements[0], 'delivery')
     : undefined;
+  const fcmHeadlessDeadlineDeclaration = ts.isTryStatement(fcmTry)
+    ? singleConstDeclaration(fcmTry.tryBlock.statements[1], 'headlessEffectDeadlineAt')
+    : undefined;
+  const fcmHeadlessCompletionStatement = ts.isTryStatement(fcmTry)
+    ? fcmTry.tryBlock.statements[2]
+    : undefined;
+  const fcmHeadlessCompletionDeclaration =
+    fcmHeadlessCompletionStatement && ts.isVariableStatement(fcmHeadlessCompletionStatement)
+      ? fcmHeadlessCompletionStatement.declarationList.declarations[0]
+      : undefined;
   const fcmPreviousDeclaration = ts.isTryStatement(fcmTry)
-    ? singleConstDeclaration(fcmTry.tryBlock.statements[1], 'previous')
+    ? singleConstDeclaration(fcmTry.tryBlock.statements[3], 'previous')
     : undefined;
   const fcmTrackedDeclaration = ts.isTryStatement(fcmTry)
-    ? singleConstDeclaration(fcmTry.tryBlock.statements[2], 'tracked')
+    ? singleConstDeclaration(fcmTry.tryBlock.statements[4], 'tracked')
     : undefined;
-  const fcmTailStatement = ts.isTryStatement(fcmTry) ? fcmTry.tryBlock.statements[3] : undefined;
+  const fcmTailStatement = ts.isTryStatement(fcmTry) ? fcmTry.tryBlock.statements[5] : undefined;
   const fcmTailAssignment =
     fcmTailStatement && ts.isExpressionStatement(fcmTailStatement)
       ? unwrapExpression(fcmTailStatement.expression)
@@ -11204,12 +11953,24 @@ function incomingIngressCertifiedNodes({
       ? callExpression(fcmTailAssignment.right)
       : undefined;
   const fcmTailThenAccess = fcmTailThenCall ? callAccess(fcmTailThenCall.expression) : undefined;
-  const fcmResultDeclaration = ts.isTryStatement(fcmTry)
-    ? singleConstDeclaration(fcmTry.tryBlock.statements[4], 'result')
-    : undefined;
-  const fcmResultAwait = fcmResultDeclaration?.initializer
-    ? unwrapExpression(fcmResultDeclaration.initializer)
-    : undefined;
+  const fcmResultStatement = ts.isTryStatement(fcmTry) ? fcmTry.tryBlock.statements[6] : undefined;
+  const fcmResultDeclaration =
+    fcmResultStatement && ts.isVariableStatement(fcmResultStatement)
+      ? fcmResultStatement.declarationList.declarations[0]
+      : undefined;
+  const fcmResultTry = ts.isTryStatement(fcmTry) ? fcmTry.tryBlock.statements[7] : undefined;
+  const fcmResultAssignmentStatement =
+    fcmResultTry && ts.isTryStatement(fcmResultTry)
+      ? fcmResultTry.tryBlock.statements[0]
+      : undefined;
+  const fcmResultAssignment =
+    fcmResultAssignmentStatement && ts.isExpressionStatement(fcmResultAssignmentStatement)
+      ? unwrapExpression(fcmResultAssignmentStatement.expression)
+      : undefined;
+  const fcmResultAwait =
+    fcmResultAssignment && ts.isBinaryExpression(fcmResultAssignment)
+      ? unwrapExpression(fcmResultAssignment.right)
+      : undefined;
   if (
     !fcmAdmissionTailState ||
     !(fcmAdmissionTailState.declarationList.flags & ts.NodeFlags.Let) ||
@@ -11228,7 +11989,7 @@ function incomingIngressCertifiedNodes({
     !ts.isTryStatement(fcmTry) ||
     !fcmTry.catchClause ||
     fcmTry.finallyBlock ||
-    fcmTry.tryBlock.statements.length !== 6 ||
+    fcmTry.tryBlock.statements.length !== 9 ||
     fcmTry.catchClause.block.statements.length !== 1 ||
     normalizedSnippet(fcmTry.catchClause.block.statements[0], fcmFile) !==
       "logger.warn( '[fcm] push delivery failed; sync may recover server state, but a one-time event may be lost', { source, errorName: error instanceof Error ? error.name : 'UnknownError', }, );" ||
@@ -11236,12 +11997,30 @@ function incomingIngressCertifiedNodes({
     !fcmDeliveryDeclaration ||
     !fcmDeliveryDeclaration.initializer ||
     unwrapExpression(fcmDeliveryDeclaration.initializer) !== fcmCaptureCall.node ||
-    fcmCaptureCall.node.arguments.length !== 1 ||
+    fcmCaptureCall.node.arguments.length !== 2 ||
     !sameSymbol(
       unwrapExpression(fcmCaptureCall.node.arguments[0]),
       handleIncomingFcm.parameters[0].name,
       checker,
     ) ||
+    !sameSymbol(
+      unwrapExpression(fcmCaptureCall.node.arguments[1]),
+      handleIncomingFcm.parameters[2].name,
+      checker,
+    ) ||
+    !fcmHeadlessDeadlineDeclaration?.initializer ||
+    statementText({ body: fcmTry.tryBlock }, 1) !==
+      "const headlessEffectDeadlineAt = source === 'background' ? (delivery.occurrence.receivedAt ?? Date.now()) + REALTIME_HEADLESS_EFFECT_WINDOW_MS : null;" ||
+    !fcmHeadlessCompletionStatement ||
+    !ts.isVariableStatement(fcmHeadlessCompletionStatement) ||
+    !(fcmHeadlessCompletionStatement.declarationList.flags & ts.NodeFlags.Let) ||
+    fcmHeadlessCompletionStatement.declarationList.declarations.length !== 1 ||
+    !fcmHeadlessCompletionDeclaration ||
+    !ts.isIdentifier(fcmHeadlessCompletionDeclaration.name) ||
+    fcmHeadlessCompletionDeclaration.name.text !== 'headlessEffectCompletion' ||
+    fcmHeadlessCompletionDeclaration.initializer?.kind !== ts.SyntaxKind.NullKeyword ||
+    normalizedSnippet(fcmHeadlessCompletionStatement, fcmFile) !==
+      'let headlessEffectCompletion: Promise<RealtimeHeadlessEffectOutcome> | null = null;' ||
     !fcmPreviousDeclaration ||
     !fcmPreviousDeclaration.initializer ||
     !sameSymbol(
@@ -11253,11 +12032,11 @@ function incomingIngressCertifiedNodes({
     fcmTrackedCall.node.arguments.length !== 1 ||
     !fcmTrackedDeclaration ||
     unwrapExpression(fcmTrackedDeclaration.initializer) !== fcmTrackedCall.node ||
-    !nodeIsInside(fcmTrackedCall.node, fcmTry.tryBlock.statements[2]) ||
+    !nodeIsInside(fcmTrackedCall.node, fcmTry.tryBlock.statements[4]) ||
     !fcmTask ||
     !fcmTask.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword) ||
     !ts.isBlock(fcmTask.body) ||
-    fcmTask.body.statements.length !== 3 ||
+    fcmTask.body.statements.length !== 5 ||
     normalizedSnippet(fcmTask.body.statements[0], fcmFile) !== 'await previous;' ||
     !sameSymbol(
       unwrapExpression(fcmTask.body.statements[0].expression.expression),
@@ -11265,10 +12044,40 @@ function incomingIngressCertifiedNodes({
       checker,
     ) ||
     normalizedSnippet(fcmTask.body.statements[1], fcmFile) !== 'if (!lease.isCurrent()) return;' ||
-    !fcmLockCall ||
-    !coordinatorCallbackAdoptsInvocation(fcmLockCall.node, fcmTask) ||
-    !nodeIsInside(fcmLockCall.node, fcmTask.body.statements[2]) ||
-    !snippetIs(fcmLockCall.node, 'deliverRespectingLock(delivery, source, lease)') ||
+    normalizedSnippet(fcmTask.body.statements[2], fcmFile) !==
+      'if (headlessEffectDeadlineAt == null) { await deliverRespectingLock(delivery, source, lease); return; }' ||
+    normalizedSnippet(fcmTask.body.statements[3], fcmFile) !==
+      'const collection = beginRealtimeHeadlessEffectCollection(lease, { deadlineAt: headlessEffectDeadlineAt, });' ||
+    !fcmHeadlessEffectTry ||
+    !ts.isTryStatement(fcmHeadlessEffectTry) ||
+    fcmHeadlessEffectTry.catchClause ||
+    !fcmHeadlessEffectTry.finallyBlock ||
+    fcmHeadlessEffectTry.tryBlock.statements.length !== 1 ||
+    fcmHeadlessEffectTry.finallyBlock.statements.length !== 1 ||
+    normalizedSnippet(fcmHeadlessEffectTry.tryBlock.statements[0], fcmFile) !==
+      'await deliverRespectingLock(delivery, source, lease);' ||
+    normalizedSnippet(fcmHeadlessEffectTry.finallyBlock.statements[0], fcmFile) !==
+      'headlessEffectCompletion = collection.close();' ||
+    !exactly(fcmLockCalls, 2) ||
+    !fcmLockCalls.every(
+      (edge) =>
+        coordinatorCallbackAdoptsInvocation(edge.node, fcmTask) &&
+        snippetIs(edge.node, 'deliverRespectingLock(delivery, source, lease)'),
+    ) ||
+    !fcmLockCalls.some((edge) => nodeIsInside(edge.node, fcmTask.body.statements[2])) ||
+    !fcmLockCalls.some((edge) => nodeIsInside(edge.node, fcmTask.body.statements[4])) ||
+    !fcmHeadlessCollectionCall ||
+    !nodeIsInside(fcmHeadlessCollectionCall.node, fcmTask.body.statements[3]) ||
+    fcmHeadlessCollectionCall.node.arguments.length !== 2 ||
+    !sameSymbol(
+      unwrapExpression(fcmHeadlessCollectionCall.node.arguments[0]),
+      fcmTask.parameters[0].name,
+      checker,
+    ) ||
+    !snippetIs(
+      fcmHeadlessCollectionCall.node.arguments[1],
+      '{ deadlineAt: headlessEffectDeadlineAt, }',
+    ) ||
     !fcmTailAssignment ||
     !ts.isBinaryExpression(fcmTailAssignment) ||
     fcmTailAssignment.operatorToken.kind !== ts.SyntaxKind.EqualsToken ||
@@ -11290,21 +12099,56 @@ function incomingIngressCertifiedNodes({
     normalizedSnippet(fcmTailThenCall.arguments[0], fcmFile) !== '() => undefined' ||
     normalizedSnippet(fcmTailThenCall.arguments[1], fcmFile) !== '() => undefined' ||
     !fcmResultDeclaration ||
+    !fcmResultStatement ||
+    !ts.isVariableStatement(fcmResultStatement) ||
+    !(fcmResultStatement.declarationList.flags & ts.NodeFlags.Let) ||
+    fcmResultStatement.declarationList.declarations.length !== 1 ||
+    !ts.isIdentifier(fcmResultDeclaration.name) ||
+    fcmResultDeclaration.name.text !== 'result' ||
+    fcmResultDeclaration.initializer ||
+    normalizedSnippet(fcmResultStatement, fcmFile) !==
+      "let result: 'delivered' | 'paused' | undefined;" ||
+    !fcmResultTry ||
+    !ts.isTryStatement(fcmResultTry) ||
+    fcmResultTry.catchClause ||
+    !fcmResultTry.finallyBlock ||
+    fcmResultTry.tryBlock.statements.length !== 1 ||
+    fcmResultTry.finallyBlock.statements.length !== 2 ||
+    !fcmResultAssignment ||
+    !ts.isBinaryExpression(fcmResultAssignment) ||
+    fcmResultAssignment.operatorToken.kind !== ts.SyntaxKind.EqualsToken ||
+    !sameSymbol(unwrapExpression(fcmResultAssignment.left), fcmResultDeclaration.name, checker) ||
     !fcmResultAwait ||
     !ts.isAwaitExpression(fcmResultAwait) ||
     !sameSymbol(unwrapExpression(fcmResultAwait.expression), fcmTrackedDeclaration.name, checker) ||
-    normalizedSnippet(fcmTry.tryBlock.statements[5], fcmFile) !==
+    normalizedSnippet(fcmResultTry.finallyBlock.statements[0], fcmFile) !==
+      'const effectOutcome = await headlessEffectCompletion;' ||
+    normalizedSnippet(fcmResultTry.finallyBlock.statements[1], fcmFile) !==
+      "if (effectOutcome === 'deadline') { logger.warn('[fcm] headless side effects reached their bounded effect deadline'); }" ||
+    normalizedSnippet(fcmTry.tryBlock.statements[8], fcmFile) !==
       "if (result === 'paused') { logger.debug('[fcm] delivery paused during account transition', { source }); }"
   ) {
     return empty();
   }
-  approved.push(fcmLockCall.node);
+  approved.push(...fcmLockCalls.map((edge) => edge.node));
 
   // Headless delivery awaits the common handler and log flush in finally. Foreground delivery is
   // a contained void call into the same catch-owning handler. Registration remains module-top.
   const backgroundIncoming = sole(exactCallEdges(edges, handleBackgroundFcm, handleIncomingFcm));
   const backgroundFlush = sole(exactCallEdges(edges, handleBackgroundFcm, flushHeadlessLogs));
-  const backgroundTry = handleBackgroundFcm.body.statements[0];
+  const backgroundReceivedAtDeclaration = singleConstDeclaration(
+    handleBackgroundFcm.body.statements[0],
+    'receivedAt',
+  );
+  const backgroundFinalizationDeadlineDeclaration = singleConstDeclaration(
+    handleBackgroundFcm.body.statements[1],
+    'finalizationDeadlineAt',
+  );
+  const backgroundTry = handleBackgroundFcm.body.statements[2];
+  const headlessFinalizationWindow = topLevelVariable(
+    fcmFile,
+    'FCM_HEADLESS_FINALIZATION_WINDOW_MS',
+  );
   const foregroundIncoming = sole(nestedCallEdges(edges, startFcm, handleIncomingFcm));
   const foregroundCallback = foregroundIncoming?.caller;
   const foregroundRegistration = foregroundCallback?.parent;
@@ -11499,14 +12343,26 @@ function incomingIngressCertifiedNodes({
     }
     visit(file);
   }
-  const firebaseRuntimeLoad = firebaseRuntimeLoads[0];
-  const firebaseRuntimeLoadDeclaration = (() => {
-    for (let current = firebaseRuntimeLoad; current; current = current.parent) {
+  const runtimeLoadDeclaration = (runtimeLoad) => {
+    for (let current = runtimeLoad; current; current = current.parent) {
       if (ts.isVariableStatement(current)) return current;
       if (ts.isFunctionLike(current)) return undefined;
     }
     return undefined;
-  })();
+  };
+  const firebaseRuntimeLoad = firebaseRuntimeLoads.find(
+    (call) =>
+      normalizePath(relative(root, call.getSourceFile().fileName)) === 'src/services/bootstrap.ts',
+  );
+  const credentialUpgradeFirebaseRuntimeLoad = firebaseRuntimeLoads.find(
+    (call) =>
+      normalizePath(relative(root, call.getSourceFile().fileName)) ===
+      'src/services/credentialUpgrade.ts',
+  );
+  const firebaseRuntimeLoadDeclaration = runtimeLoadDeclaration(firebaseRuntimeLoad);
+  const credentialUpgradeFirebaseRuntimeLoadDeclaration = runtimeLoadDeclaration(
+    credentialUpgradeFirebaseRuntimeLoad,
+  );
   const firebaseRuntimeLoadBlock = firebaseRuntimeLoadDeclaration?.parent;
   const messagingInstanceType = backgroundMessagingCall
     ? checker.getApparentType(checker.getTypeAtLocation(backgroundMessagingCall))
@@ -11714,7 +12570,17 @@ function incomingIngressCertifiedNodes({
     }),
   );
   if (
-    handleBackgroundFcm.body.statements.length !== 1 ||
+    handleBackgroundFcm.body.statements.length !== 3 ||
+    !backgroundReceivedAtDeclaration?.initializer ||
+    statementText(handleBackgroundFcm, 0) !== 'const receivedAt = Date.now();' ||
+    !backgroundFinalizationDeadlineDeclaration?.initializer ||
+    statementText(handleBackgroundFcm, 1) !==
+      'const finalizationDeadlineAt = receivedAt + FCM_HEADLESS_FINALIZATION_WINDOW_MS;' ||
+    !headlessFinalizationWindow ||
+    !(headlessFinalizationWindow.declarationList.flags & ts.NodeFlags.Const) ||
+    !headlessFinalizationWindow.declaration.initializer ||
+    !ts.isNumericLiteral(headlessFinalizationWindow.declaration.initializer) ||
+    headlessFinalizationWindow.declaration.initializer.text !== '55000' ||
     !ts.isTryStatement(backgroundTry) ||
     backgroundTry.catchClause ||
     !backgroundTry.finallyBlock ||
@@ -11722,9 +12588,27 @@ function incomingIngressCertifiedNodes({
     backgroundTry.finallyBlock.statements.length !== 1 ||
     !backgroundIncoming ||
     !coordinatorCallbackAdoptsInvocation(backgroundIncoming.node, handleBackgroundFcm) ||
-    !snippetIs(backgroundIncoming.node, "handleIncomingFcm(msg, 'background')") ||
+    !snippetIs(backgroundIncoming.node, "handleIncomingFcm(msg, 'background', receivedAt)") ||
+    backgroundIncoming.node.arguments.length !== 3 ||
+    !sameSymbol(
+      unwrapExpression(backgroundIncoming.node.arguments[2]),
+      backgroundReceivedAtDeclaration.name,
+      checker,
+    ) ||
+    !ts.isAwaitExpression(unwrapExpression(backgroundIncoming.node.parent)) ||
     !backgroundFlush ||
     !coordinatorCallbackAdoptsInvocation(backgroundFlush.node, handleBackgroundFcm) ||
+    !snippetIs(
+      backgroundFlush.node,
+      'flushPersistentLogsForHeadlessCompletion(finalizationDeadlineAt)',
+    ) ||
+    backgroundFlush.node.arguments.length !== 1 ||
+    !sameSymbol(
+      unwrapExpression(backgroundFlush.node.arguments[0]),
+      backgroundFinalizationDeadlineDeclaration.name,
+      checker,
+    ) ||
+    !ts.isAwaitExpression(unwrapExpression(backgroundFlush.node.parent)) ||
     !foregroundIncoming ||
     !snippetIs(foregroundIncoming.node, "handleIncomingFcm(msg, 'foreground')") ||
     !ts.isVoidExpression(unwrapExpression(foregroundIncoming.node.parent)) ||
@@ -11748,7 +12632,7 @@ function incomingIngressCertifiedNodes({
     staticGetMessagingReferences.some(
       (reference) => !allowedStaticGetMessagingReferences.has(reference),
     ) ||
-    firebaseRuntimeLoads.length !== 1 ||
+    firebaseRuntimeLoads.length !== 2 ||
     hasUnexpectedFirebaseRuntimeLoad ||
     !firebaseRuntimeLoadDeclaration ||
     normalizedSnippet(
@@ -11756,6 +12640,12 @@ function incomingIngressCertifiedNodes({
       firebaseRuntimeLoadDeclaration.getSourceFile(),
     ) !==
       "const { deleteToken, getMessaging } = await import('@react-native-firebase/messaging');" ||
+    !credentialUpgradeFirebaseRuntimeLoadDeclaration ||
+    normalizedSnippet(
+      credentialUpgradeFirebaseRuntimeLoadDeclaration,
+      credentialUpgradeFirebaseRuntimeLoadDeclaration.getSourceFile(),
+    ) !==
+      "const [{ getMessaging, getToken }, stored] = await Promise.all([ import('@react-native-firebase/messaging'), readFcmDeviceEncryptionState(vault), ]);" ||
     !ts.isBlock(firebaseRuntimeLoadBlock) ||
     firebaseRuntimeLoadBlock.statements.length !== 2 ||
     firebaseRuntimeLoadBlock.statements[0] !== firebaseRuntimeLoadDeclaration ||
@@ -11778,7 +12668,7 @@ function incomingIngressCertifiedNodes({
     unwrapExpression(foregroundRegistration.arguments[1]) !== foregroundCallback ||
     !nodeIsInside(foregroundRegistration, startFcm.body.statements[0]) ||
     !ts.isTryStatement(startFcmTry) ||
-    startFcmTry.tryBlock.statements.length !== 4 ||
+    startFcmTry.tryBlock.statements.length !== 5 ||
     foregroundStatement !== startFcmTry.tryBlock.statements[1] ||
     !snippetIs(foregroundRegistration.arguments[0], 'm') ||
     !backgroundReference ||
@@ -11853,7 +12743,9 @@ function incomingIngressCertifiedNodes({
       "onMessage(m, (msg) => { void handleIncomingFcm(msg, 'foreground'); });" ||
     normalizedSnippet(startFcmTry.tryBlock.statements[2], fcmFile) !==
       'onTokenRefresh(m, () => void registerFcmToken());' ||
-    normalizedSnippet(startFcmTry.tryBlock.statements[3], fcmFile) !== "return 'ready';" ||
+    normalizedSnippet(startFcmTry.tryBlock.statements[3], fcmFile) !==
+      'scheduleFcmRotationCheck(Date.now() + FCM_ROTATION_TIMER_MAX_DELAY_MS);' ||
+    normalizedSnippet(startFcmTry.tryBlock.statements[4], fcmFile) !== "return 'ready';" ||
     normalizedSnippet(startFcmTry.catchClause.block.statements[0], fcmFile) !==
       "logger.warn('[fcm] startFcm failed — falling back to socket-only', e);" ||
     normalizedSnippet(startFcmTry.catchClause.block.statements[1], fcmFile) !== "return 'failed';"
@@ -11863,11 +12755,24 @@ function incomingIngressCertifiedNodes({
   approved.push(backgroundIncoming.node, foregroundIncoming.node, backgroundReference.node);
 
   // Recovery kicks are certified only at the exact dispatcher.resume calls inside tracked
-  // callbacks. The mixed startRealtime/resumeRealtime functions themselves remain unresolved.
+  // callbacks. Public and credential-upgrade resume entry points are exact thin delegations into
+  // the same foreground-intent-fenced owner.
   const startResumeCall = sole(nestedCallEdges(edges, startRealtime, durableResume));
-  const resumeResumeCall = sole(nestedCallEdges(edges, resumeRealtime, durableResume));
+  const resumeResumeCall = sole(nestedCallEdges(edges, resumeDesiredRealtime, durableResume));
+  const publicResumeCall = sole(exactCallEdges(edges, resumeRealtime, resumeDesiredRealtime));
+  const credentialUpgradeResumeCall = sole(
+    exactCallEdges(edges, resumeRealtimeAfterCredentialUpgrade, resumeDesiredRealtime),
+  );
+  const recoveredResumeCall = sole(
+    exactCallEdges(edges, resumeRecoveredRealtimeEvents, durableResume),
+  );
+  const finishRecoveredCall = sole(
+    exactCallEdges(edges, finishRealtimeRecoveryCollector, resumeRecoveredRealtimeEvents),
+  );
   const startRecoveryTracker = sole(exactCallEdges(edges, startRealtime, runTrackedDelivery));
-  const resumeRecoveryTracker = sole(exactCallEdges(edges, resumeRealtime, runTrackedDelivery));
+  const resumeRecoveryTracker = sole(
+    exactCallEdges(edges, resumeDesiredRealtime, runTrackedDelivery),
+  );
   const startRecoveryTask = startRecoveryTracker
     ? oneInlineCallback(startRecoveryTracker.node, 0, 'lease')
     : undefined;
@@ -11878,7 +12783,7 @@ function incomingIngressCertifiedNodes({
     ? sole(exactCallEdges(edges, resumeRecoveryTask, ensureDatabase))
     : undefined;
   const startDatabaseCall = sole(exactCallEdges(edges, startRealtime, ensureDatabase));
-  const startDatabaseDeclaration = singleConstDeclaration(startRealtime.body.statements[2], 'db');
+  const startDatabaseDeclaration = singleConstDeclaration(startRealtime.body.statements[6], 'db');
   const startDatabaseAwait = startDatabaseDeclaration?.initializer
     ? unwrapExpression(startDatabaseDeclaration.initializer)
     : undefined;
@@ -11887,14 +12792,14 @@ function incomingIngressCertifiedNodes({
       ? callExpression(startDatabaseAwait.expression)
       : undefined;
   const startLeaseDeclaration = singleConstDeclaration(
-    startRealtime.body.statements[6],
+    startRealtime.body.statements[10],
     'accountLease',
   );
   const startLeaseCall = startLeaseDeclaration?.initializer
     ? callableCall(startLeaseDeclaration.initializer, captureRealtimeDeliveryLease, checker)
     : undefined;
   const startRuntimeDeclaration = singleConstDeclaration(
-    startRealtime.body.statements[8],
+    startRealtime.body.statements[12],
     'runtime',
   );
   const startRuntimeCall = startRuntimeDeclaration?.initializer
@@ -11918,7 +12823,7 @@ function incomingIngressCertifiedNodes({
     }
     return undefined;
   })();
-  const startSocketConnectStatement = startRealtime.body.statements[12];
+  const startSocketConnectStatement = startRealtime.body.statements[16];
   const startSocketConnectCall = ts.isExpressionStatement(startSocketConnectStatement)
     ? callExpression(startSocketConnectStatement.expression)
     : undefined;
@@ -11928,20 +12833,32 @@ function incomingIngressCertifiedNodes({
   if (
     !startResumeCall ||
     !resumeResumeCall ||
+    !publicResumeCall ||
+    !credentialUpgradeResumeCall ||
+    !recoveredResumeCall ||
+    !finishRecoveredCall ||
     !snippetIs(startResumeCall.node, 'runtime.dispatcher.resume(lease)') ||
     !snippetIs(resumeResumeCall.node, 'getRealtimeRuntime(db, lease)?.dispatcher.resume(lease)') ||
+    !snippetIs(recoveredResumeCall.node, 'runtime.dispatcher.resume(retryContext)') ||
+    !snippetIs(
+      finishRecoveredCall.node,
+      'resumeRecoveredRealtimeEvents(runtime, collector.generation)',
+    ) ||
+    !ts.isAwaitExpression(unwrapExpression(finishRecoveredCall.node.parent)) ||
     !startRecoveryTracker ||
     !resumeRecoveryTracker ||
     !startRecoveryTask ||
     !resumeRecoveryTask ||
     !ts.isBlock(resumeRecoveryTask.body) ||
-    resumeRecoveryTask.body.statements.length !== 3 ||
+    resumeRecoveryTask.body.statements.length !== 4 ||
     normalizedSnippet(resumeRecoveryTask.body.statements[0], controlFile) !==
-      'const db = await ensureDatabase();' ||
+      'if (!ownsRealtimeForegroundIntent(foregroundIntentEpoch) || realtimeIntakeLocked()) return;' ||
     normalizedSnippet(resumeRecoveryTask.body.statements[1], controlFile) !==
-      'if (!lease.isCurrent()) return;' ||
+      'const db = await ensureDatabase();' ||
+    normalizedSnippet(resumeRecoveryTask.body.statements[2], controlFile) !==
+      'if ( !lease.isCurrent() || !ownsRealtimeForegroundIntent(foregroundIntentEpoch) || realtimeIntakeLocked() ) { return; }' ||
     !resumeRecoveryDatabaseCall ||
-    !nodeIsInside(resumeRecoveryDatabaseCall.node, resumeRecoveryTask.body.statements[0]) ||
+    !nodeIsInside(resumeRecoveryDatabaseCall.node, resumeRecoveryTask.body.statements[1]) ||
     !startDatabaseCall ||
     !startDatabaseDeclaration ||
     startDatabaseAwaitedCall !== startDatabaseCall.node ||
@@ -11950,11 +12867,11 @@ function incomingIngressCertifiedNodes({
     startLeaseCall.arguments.length !== 0 ||
     !startRuntimeDeclaration ||
     !startRuntimeCall ||
-    statementText(startRealtime, 3) !==
-      'if ( !realtimeForegroundActive || lifecycleEpoch !== realtimeLifecycleEpoch || realtimeIntakeLocked() ) { return; }' ||
-    statementText(startRealtime, 6) !== 'const accountLease = captureRealtimeDeliveryLease();' ||
-    statementText(startRealtime, 7) !== 'if (!accountLease.isCurrent()) return;' ||
-    statementText(startRealtime, 9) !== 'if (!runtime) return;' ||
+    statementText(startRealtime, 7) !==
+      'if ( !realtimeForegroundActive || !ownsRealtimeForegroundIntent(foregroundIntentEpoch) || lifecycleEpoch !== realtimeLifecycleEpoch || realtimeIntakeLocked() ) { return; }' ||
+    statementText(startRealtime, 10) !== 'const accountLease = captureRealtimeDeliveryLease();' ||
+    statementText(startRealtime, 11) !== 'if (!accountLease.isCurrent()) return;' ||
+    statementText(startRealtime, 13) !== 'if (!runtime) return;' ||
     !startSocketConnectCall ||
     !startSocketConnectAccess ||
     startSocketConnectAccess.method !== 'connect' ||
@@ -11974,17 +12891,30 @@ function incomingIngressCertifiedNodes({
     !sameSymbol(startResumeRuntimeRoot, startRuntimeDeclaration.name, checker) ||
     startResumeCall.caller !== startRecoveryTask ||
     resumeResumeCall.caller !== resumeRecoveryTask ||
+    !snippetIs(publicResumeCall.node, 'resumeDesiredRealtime(foregroundIntentEpoch)') ||
+    !ts.isAwaitExpression(unwrapExpression(publicResumeCall.node.parent)) ||
+    !snippetIs(
+      credentialUpgradeResumeCall.node,
+      'resumeDesiredRealtime(realtimeForegroundIntentEpoch, { credentialRecoveryAlreadySettled: true, })',
+    ) ||
+    !ts.isAwaitExpression(unwrapExpression(credentialUpgradeResumeCall.node.parent)) ||
     !startRecoveryStatement ||
     !normalizedSnippet(startRecoveryStatement, controlFile).startsWith(
       'void runTrackedRealtimeDelivery((lease) => runtime.dispatcher.resume(lease)).catch(',
     ) ||
-    !coordinatorCallbackAdoptsInvocation(resumeRecoveryTracker.node, resumeRealtime) ||
+    !coordinatorCallbackAdoptsInvocation(resumeRecoveryTracker.node, resumeDesiredRealtime) ||
     !coordinatorCallbackAdoptsInvocation(startResumeCall.node, startResumeCall.caller) ||
     !coordinatorCallbackAdoptsInvocation(resumeResumeCall.node, resumeResumeCall.caller)
   ) {
     return empty();
   }
-  approved.push(startResumeCall.node, resumeResumeCall.node);
+  approved.push(
+    startResumeCall.node,
+    resumeResumeCall.node,
+    recoveredResumeCall.node,
+    publicResumeCall.node,
+    credentialUpgradeResumeCall.node,
+  );
 
   // Closed-world boundary: adding another direct/dynamic call or reference to any protected
   // ingress capability revokes the certificate rather than silently widening the milestone.
@@ -11992,7 +12922,12 @@ function incomingIngressCertifiedNodes({
     [dispatchWithContext, dispatchCalls.map((edge) => edge.node)],
     [durableHandle, [durableHandleCall.node]],
     [durablePersist, [persistCall.node]],
-    [durableResume, [resumeProofCall.node, startResumeCall.node, resumeResumeCall.node]],
+    [durableLockedFcmV3Persist, [lockedDispatcherCall.node]],
+    [persistAuthenticatedLockedFcmV3Event, [fcmLockedAdmissionCall.node]],
+    [
+      durableResume,
+      [resumeProofCall.node, startResumeCall.node, resumeResumeCall.node, recoveredResumeCall.node],
+    ],
     [
       dispatchRealtimeEvent,
       [...fcmDispatchCalls.map((edge) => edge.node), devDispatchCall.node, chatDispatchCall.node],
@@ -12000,8 +12935,13 @@ function incomingIngressCertifiedNodes({
     [devPushInject, devOuterNodes.slice(2)],
     [devPersist, [devOuterNodes[0]]],
     [devResume, [devOuterNodes[1]]],
-    [deliver, [deliverCall.node]],
-    [deliverRespectingLock, [fcmLockCall.node]],
+    [deliver, deliverCalls.map((edge) => edge.node)],
+    [deliverRespectingLock, fcmLockCalls.map((edge) => edge.node)],
+    [beginHeadlessEffectCollection, [fcmHeadlessCollectionCall.node]],
+    [beginRealtimeRecoveryCollector, [beginRecoveryCall.node]],
+    [finishRealtimeRecoveryCollector, [finishRecoveryCall.node]],
+    [resumeRecoveredRealtimeEvents, [finishRecoveredCall.node]],
+    [resumeDesiredRealtime, [publicResumeCall.node, credentialUpgradeResumeCall.node]],
     [handleIncomingFcm, [backgroundIncoming.node, foregroundIncoming.node]],
   ]);
   for (const [target, expectedNodes] of expectedCalls) {
@@ -12059,7 +12999,7 @@ function incomingIngressCertifiedNodes({
     return empty();
   }
   const certified = new Set(approved);
-  if (approved.length !== 23 || certified.size !== 23) return empty();
+  if (approved.length !== 29 || certified.size !== 29) return empty();
 
   const protectedOwners = new Set([
     dispatchRealtimeEvent,
@@ -12113,6 +13053,8 @@ function incomingIngressCertifiedNodes({
   const allowedInternalMutatorNodes = new Set([
     ...certified,
     databaseCall.node,
+    finishRecoveryCall.node,
+    finishRecoveredCall.node,
     devPersistDatabaseCall.node,
     devResumeDatabaseCall.node,
     resumeRecoveryDatabaseCall.node,

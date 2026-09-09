@@ -37,7 +37,12 @@ const SUCCESSOR_KEY = `${PREFIX}-successor`;
 const SENTINEL_KEY = `${PREFIX}-sentinel`;
 const ROLLBACK_SIGNAL = Symbol('db-runtime-wave-rollback');
 
-const dummyHttp = {} as HttpClient;
+let dummyHttp!: HttpClient;
+dummyHttp = {
+  pinTransport: () => dummyHttp,
+  isTransportCurrent: () => true,
+  assertTransportCurrent: () => undefined,
+} as unknown as HttpClient;
 const uploadImage = {
   uri: UPLOAD_PATH,
   name: `${PREFIX}-attachment.jpg`,

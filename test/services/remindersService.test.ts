@@ -127,7 +127,7 @@ afterEach(async () => {
 describe('scheduleReminder', () => {
   it('persists a reminder + schedules a Notifee trigger', async () => {
     const { db } = await createTestDb();
-    const { scheduler, scheduled } = fakeScheduler();
+    const { scheduler, scheduled, args } = fakeScheduler();
     const id = await scheduleReminder(db, { ...base, scheduledFor: 5000, now: 1 }, scheduler);
 
     const r = await getReminderByMessageGuid(db, 'm1');
@@ -135,6 +135,14 @@ describe('scheduleReminder', () => {
     expect(r?.scheduledFor).toBe(5000);
     expect(r?.notificationId).toBe(reminderId(5000));
     expect(scheduled).toEqual([reminderId(5000)]);
+    expect(args[0]).toEqual({
+      notificationId: reminderId(5000),
+      chatGuid: 'c1',
+      messageGuid: 'm1',
+      scheduledFor: 5000,
+    });
+    expect(args[0]).not.toHaveProperty('title');
+    expect(args[0]).not.toHaveProperty('body');
   });
 
   it('replaces an existing reminder for the same message (cancel old, one row)', async () => {
@@ -422,8 +430,8 @@ describe('scheduleReminder', () => {
       expect(await getReminderByMessageGuid(db, 'm1')).toMatchObject({
         id,
         chatGuid: 'c1',
-        messagePreview: base.messagePreview,
-        senderName: base.senderName,
+        messagePreview: null,
+        senderName: null,
         scheduledFor: 6000,
         notificationId: reminderId(6000),
         createdAt: 2,

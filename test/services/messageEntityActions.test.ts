@@ -6,6 +6,7 @@ import {
   type MessageUrlEntity,
 } from '@core/richtext';
 import {
+  localCalendarDraftBounds,
   performMessageEntityAction,
   type MessageEntityActionDependencies,
 } from '@/services/messageEntityActions';
@@ -112,5 +113,33 @@ describe('message entities', () => {
       performMessageEntityAction({ action: 'dial-phone', entity: forged }, dependencies),
     ).resolves.toBe(false);
     expect(dependencies.openUrl).toHaveBeenCalledTimes(3);
+  });
+
+  it('keeps an all-day calendar draft on the parsed local calendar date', () => {
+    const originalTimezone = process.env.TZ;
+    process.env.TZ = 'America/Denver';
+    try {
+      const entity = findMessageEntities('October 15, 2026').find(
+        (candidate): candidate is MessageDateEntity => candidate.kind === 'date',
+      )!;
+      const { beginTime, endTime } = localCalendarDraftBounds(entity);
+      const begin = new Date(beginTime);
+      const end = new Date(endTime);
+
+      expect(beginTime).toBe(1_792_044_000_000);
+      expect(endTime).toBe(1_792_130_400_000);
+      expect([
+        begin.getFullYear(),
+        begin.getMonth() + 1,
+        begin.getDate(),
+        begin.getHours(),
+      ]).toEqual([2026, 10, 15, 0]);
+      expect([end.getFullYear(), end.getMonth() + 1, end.getDate(), end.getHours()]).toEqual([
+        2026, 10, 16, 0,
+      ]);
+    } finally {
+      if (originalTimezone == null) delete process.env.TZ;
+      else process.env.TZ = originalTimezone;
+    }
   });
 });

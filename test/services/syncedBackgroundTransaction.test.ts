@@ -113,6 +113,7 @@ import { createTestDb } from '../support/testDb';
 
 const http = {
   snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
+  isTransportCurrent: () => true,
 } as never;
 
 interface CurrentLease {

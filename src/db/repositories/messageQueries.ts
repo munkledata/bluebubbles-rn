@@ -1,4 +1,10 @@
 import { eq, sql, type SQL } from 'drizzle-orm';
+import {
+  isAggregateRetractionTombstone,
+  isExactMessagePartTopology,
+  MAX_RETRACTION_ATTACHMENTS,
+} from '@core/messages/retraction';
+import { parseMessagePartTopology } from '@core/models';
 import { REACTION_BASE_TYPES, STICKER_ASSOCIATED_TYPE } from '@core/reactions/reactionType';
 import { messages } from '../schema';
 import type { AppDatabase } from '../types';
@@ -7,7 +13,7 @@ import { MAX_CUSTOM_FOLDER_MEMBERS } from './customFolders';
 // The ONE definition of "this chat is not under a local deletion tombstone" — search is a reader
 // of it like the inbox is. Import the owning rule rather than restating it; chats.ts does not import
 // message queries, so this dependency stays acyclic.
-import { chatVisible } from './chatVisibility';
+import { chatVisible, messageHasVisibleContentSql } from './chatVisibility';
 
 /** Read-only message queries kept separate from mutation and transaction ownership. */
 
@@ -15,7 +21,9 @@ export interface MessageActionPartLayoutRow {
   text: string | null;
   attributedBody: string | null;
   partCount: number | null;
+  messagePartTopology: string | null;
   visibleAttachmentCount: number;
+  visibleAttachmentGuids: string[];
 }
 
 /** Minimal aggregate layout needed by a headless notification reaction action. */
@@ -23,17 +31,39 @@ export async function getMessageActionPartLayoutByGuid(
   db: AppDatabase,
   guid: string,
 ): Promise<MessageActionPartLayoutRow | null> {
-  const rows = await db.all<MessageActionPartLayoutRow>(sql`
+  const rows = await db.all<
+    Omit<MessageActionPartLayoutRow, 'visibleAttachmentCount' | 'visibleAttachmentGuids'>
+  >(sql`
     SELECT m.text, m.attributed_body AS attributedBody, m.part_count AS partCount,
-           CASE WHEN m.balloon_bundle_id IS NULL THEN
-             (SELECT COUNT(*) FROM attachments a
-               WHERE a.message_id = m.id AND COALESCE(a.hide_attachment, 0) = 0)
-           ELSE 0 END AS visibleAttachmentCount
+           m.message_part_topology AS messagePartTopology
       FROM messages m
      WHERE m.guid = ${guid} AND m.date_deleted IS NULL
+       AND ${messageHasVisibleContentSql('m')}
      LIMIT 1
   `);
-  return rows[0] ?? null;
+  const row = rows[0];
+  if (!row) return null;
+
+  const attachmentRows = await db.all<{ guid: string }>(sql`
+    SELECT a.guid
+      FROM attachments a JOIN messages m ON m.id = a.message_id
+     WHERE m.guid = ${guid}
+       AND m.balloon_bundle_id IS NULL
+       AND COALESCE(a.hide_attachment, 0) = 0
+       AND a.is_retracted = 0
+     ORDER BY a.id ASC
+     LIMIT ${MAX_RETRACTION_ATTACHMENTS + 1}
+  `);
+  // A corrupt row set above the wire/storage bound cannot be mapped exactly; abort the action.
+  if (attachmentRows.length > MAX_RETRACTION_ATTACHMENTS) return null;
+  const visibleAttachmentGuids = attachmentRows.map(
+    (attachment: { guid: string }) => attachment.guid,
+  );
+  return {
+    ...row,
+    visibleAttachmentCount: visibleAttachmentGuids.length,
+    visibleAttachmentGuids,
+  };
 }
 
 /** Messages for a chat, newest first. */
@@ -60,7 +90,7 @@ export async function searchMessages(
     sql`SELECT m.* FROM messages_fts f JOIN messages m ON m.id = f.rowid
         WHERE messages_fts MATCH ${match}
           AND ${notAnOverlayMessage()}
-          AND m.date_retracted IS NULL
+          AND ${messageHasVisibleContentSql('m')}
           AND m.date_deleted IS NULL
         ORDER BY rank LIMIT ${limit}`,
   );
@@ -124,7 +154,7 @@ export async function searchMessagesInChat(
     messages_fts MATCH ${match}
     AND c.guid = ${chatGuid}
     AND ${notAnOverlayMessage()}
-    AND m.date_retracted IS NULL
+    AND ${messageHasVisibleContentSql('m')}
     AND m.date_deleted IS NULL
     AND ${chatVisible('c')}
   `;
@@ -382,7 +412,7 @@ export async function searchMessagesEnriched(
     LEFT JOIN handles h ON h.id = m.handle_id
     WHERE messages_fts MATCH ${match}
       AND ${notAnOverlayMessage()}
-      AND m.date_retracted IS NULL
+      AND ${messageHasVisibleContentSql('m')}
       AND m.date_deleted IS NULL
       AND ${chatVisible('c')}
     ORDER BY m.date_created DESC, m.guid ASC
@@ -422,7 +452,7 @@ export async function searchMessagesEnrichedByGuids(
     LEFT JOIN handles h ON h.id = m.handle_id
     WHERE m.guid IN (${guidList})
       AND ${notAnOverlayMessage()}
-      AND m.date_retracted IS NULL
+      AND ${messageHasVisibleContentSql('m')}
       AND m.date_deleted IS NULL
       AND ${chatVisible('c')}
     ORDER BY m.date_created DESC, m.guid ASC
@@ -478,11 +508,11 @@ export async function getFirstUnreadInChat(
     SELECT guid, date_created AS dateCreated,
       (SELECT COUNT(*) FROM messages mm
         WHERE mm.chat_id = ${chatId} AND mm.is_from_me = 0 AND mm.date_created > ${readDate}
-          AND mm.associated_message_type IS NULL AND mm.date_retracted IS NULL
+          AND mm.associated_message_type IS NULL AND ${messageHasVisibleContentSql('mm')}
           AND mm.date_deleted IS NULL) AS count
     FROM messages
     WHERE chat_id = ${chatId} AND is_from_me = 0 AND date_created > ${readDate}
-      AND associated_message_type IS NULL AND date_retracted IS NULL
+      AND associated_message_type IS NULL AND ${messageHasVisibleContentSql('messages')}
       AND date_deleted IS NULL
     ORDER BY date_created ASC, id ASC LIMIT 1
   `);
@@ -517,6 +547,10 @@ export interface MessageRow {
   dateDelivered: number | null;
   dateEdited: number | null;
   dateRetracted: number | null;
+  /** Durable shared aggregate classification; null on migrated legacy/intact rows. */
+  retractionState?: string | null;
+  /** Raw bounded topology JSON, parsed only by part-aware consumers. */
+  messagePartTopology?: string | null;
   hasAttachments: number;
   // Apple "Send Later" flag (1 for a scheduled row — pending OR sent; NULL/absent otherwise).
   // Optional so hand-built test literals need not set it; the SELECT above always provides it.
@@ -551,6 +585,8 @@ export interface MessageRow {
   associatedMessageType: string | null;
   associatedMessageEmoji: string | null;
   threadOriginatorGuid: string | null;
+  /** Exact reply target part when the server supplied it. */
+  threadOriginatorPart?: number | null;
   expressiveSendStyleId: string | null;
   senderAddress: string | null;
   senderName: string | null;
@@ -581,6 +617,8 @@ const MESSAGE_ROW_SELECT = sql`
     m.subject, m.is_from_me AS isFromMe, m.date_created AS dateCreated,
     m.date_read AS dateRead, m.date_delivered AS dateDelivered, m.date_edited AS dateEdited,
     m.date_retracted AS dateRetracted,
+    m.retraction_state AS retractionState,
+    m.message_part_topology AS messagePartTopology,
     m.is_scheduled AS isScheduled,
     m.is_sent AS isSent,
     m.message_summary_info AS messageSummaryInfo,
@@ -595,6 +633,7 @@ const MESSAGE_ROW_SELECT = sql`
     m.associated_message_type AS associatedMessageType,
     m.associated_message_emoji AS associatedMessageEmoji,
     m.thread_originator_guid AS threadOriginatorGuid,
+    m.thread_originator_part AS threadOriginatorPart,
     m.expressive_send_style_id AS expressiveSendStyleId,
     m.item_type AS itemType,
     m.group_action_type AS groupActionType,
@@ -606,11 +645,12 @@ const MESSAGE_ROW_SELECT = sql`
        WHERE a.message_id = m.id
          AND m.balloon_bundle_id IS NULL
          AND a.hide_attachment = 0
+         AND a.is_retracted = 0
          AND a.emoji_image_short_description IS NOT NULL
        ORDER BY a.id ASC LIMIT 1) AS attachmentDescription,
     CASE WHEN m.balloon_bundle_id IS NULL THEN
       EXISTS(SELECT 1 FROM attachments a
-               WHERE a.message_id = m.id AND a.hide_attachment = 0)
+               WHERE a.message_id = m.id AND a.hide_attachment = 0 AND a.is_retracted = 0)
     ELSE 0 END AS hasVisibleAttachments,
     h.address AS senderAddress,
     COALESCE(h.display_name, h.address) AS senderName,
@@ -793,7 +833,7 @@ async function queryChatGuidsByMessage(
     JOIN chats c ON c.id = m.chat_id
     WHERE messages_fts MATCH ${match}
       AND ${notAnOverlayMessage()}
-      AND m.date_retracted IS NULL
+      AND ${messageHasVisibleContentSql('m')}
       AND m.date_deleted IS NULL
       AND ${chatVisible('c')}
       ${folderRestriction}
@@ -839,6 +879,10 @@ export interface MessagePreview {
   text: string | null;
   subject?: string | null;
   senderName: string | null;
+  /** Stable sender address used when a lean update must replace an existing notification. */
+  senderAddress?: string | null;
+  /** Persisted message time used when a lean update must replace an existing notification. */
+  dateCreated?: number | null;
   isFromMe: number;
   hasAttachments: number;
   // Genmoji description of the message's first Genmoji attachment (or null) — the reply-quote /
@@ -853,33 +897,117 @@ export interface MessagePreview {
   targetPartIndex?: number;
   /** 1 when at least one non-hidden attachment can render. */
   hasVisibleAttachments?: number;
+  /** The exact requested part, or the whole legacy aggregate, is no longer safely visible. */
+  isRetracted?: boolean;
 }
 
 /** A compact preview of a message by guid (for the reply quote). */
 export async function getMessagePreviewByGuid(
   db: AppDatabase,
   guid: string,
+  partIndex?: number | null,
 ): Promise<MessagePreview | null> {
-  const rows = await db.all<MessagePreview>(sql`
+  // `undefined` means the caller wants the aggregate preview. An explicit null means the caller
+  // needs one exact part but its identity is unknown, which must fail closed for partial messages.
+  const exactPartRequested = partIndex !== undefined;
+  const boundedPartIndex =
+    partIndex != null && Number.isSafeInteger(partIndex) && partIndex >= 0 && partIndex <= 10_000
+      ? partIndex
+      : null;
+  const partFilter =
+    boundedPartIndex == null
+      ? sql``
+      : sql`AND (
+          m.message_part_topology IS NULL
+          OR a.message_part_index IS ${boundedPartIndex}
+        )`;
+  const rows = await db.all<
+    MessagePreview & {
+      dateRetracted: number | null;
+      retractionState: string | null;
+      messagePartTopology: string | null;
+    }
+  >(sql`
     SELECT m.guid, m.text, m.subject, m.is_from_me AS isFromMe,
+           m.date_created AS dateCreated,
            m.has_attachments AS hasAttachments,
            m.balloon_bundle_id AS balloonBundleId,
            m.part_count AS partCount,
+           m.date_retracted AS dateRetracted,
+           m.retraction_state AS retractionState,
+           m.message_part_topology AS messagePartTopology,
            COALESCE(h.display_name, h.address) AS senderName,
+           h.address AS senderAddress,
            (SELECT a.emoji_image_short_description FROM attachments a
               WHERE a.message_id = m.id
                 AND m.balloon_bundle_id IS NULL
                 AND a.hide_attachment = 0
+                AND a.is_retracted = 0
+                ${partFilter}
                 AND a.emoji_image_short_description IS NOT NULL
               ORDER BY a.id ASC LIMIT 1) AS attachmentDescription,
            CASE WHEN m.balloon_bundle_id IS NULL THEN
              EXISTS(SELECT 1 FROM attachments a
-                      WHERE a.message_id = m.id AND a.hide_attachment = 0)
+                      WHERE a.message_id = m.id AND a.hide_attachment = 0
+                        AND a.is_retracted = 0 ${partFilter})
            ELSE 0 END AS hasVisibleAttachments
     FROM messages m LEFT JOIN handles h ON h.id = m.handle_id
     WHERE m.guid = ${guid} AND m.date_deleted IS NULL LIMIT 1
   `);
-  return rows[0] ?? null;
+  const row = rows[0];
+  if (!row) return null;
+  const aggregateRetracted = isAggregateRetractionTombstone({
+    retractionState: row.retractionState,
+    dateRetracted: row.dateRetracted,
+  });
+  const topology = parseMessagePartTopology(row.messagePartTopology);
+  const exactTopology = isExactMessagePartTopology(topology) ? topology : null;
+  const requestedPart =
+    exactPartRequested && boundedPartIndex != null
+      ? exactTopology?.currentParts.find((part) => part.index === boundedPartIndex)
+      : null;
+  const requestedPartUnavailable =
+    exactPartRequested &&
+    ((row.retractionState === 'partial' && (boundedPartIndex == null || requestedPart == null)) ||
+      (exactTopology != null && (boundedPartIndex == null || requestedPart == null)));
+  const isRetracted = aggregateRetracted || requestedPartUnavailable;
+  const {
+    dateRetracted: _dateRetracted,
+    retractionState: _state,
+    messagePartTopology: _topology,
+    ...preview
+  } = row;
+  if (isRetracted) {
+    return {
+      ...preview,
+      text: null,
+      subject: null,
+      balloonBundleId: null,
+      attachmentDescription: null,
+      hasVisibleAttachments: 0,
+      isRetracted: true,
+    };
+  }
+  if (requestedPart?.kind === 'attachment') {
+    return { ...preview, text: null, subject: null, balloonBundleId: null };
+  }
+  if (
+    requestedPart?.kind === 'text' &&
+    exactTopology != null &&
+    exactTopology.currentParts.filter((part) => part.kind === 'text').length !== 1
+  ) {
+    // The wire has only aggregate surviving text. With multiple text parts it cannot prove which
+    // words belong to this exact reply target, so show a generic quote instead of another part.
+    return {
+      ...preview,
+      text: null,
+      subject: null,
+      balloonBundleId: null,
+      attachmentDescription: null,
+      hasVisibleAttachments: 0,
+    };
+  }
+  return preview;
 }
 
 /**
@@ -941,7 +1069,7 @@ export async function isMessageNotificationEligible(
        WHERE m.guid = ${messageGuid}
          AND m.is_from_me = 0
          AND m.associated_message_type IS NULL
-         AND m.date_retracted IS NULL
+         AND ${messageHasVisibleContentSql('m')}
          AND m.date_deleted IS NULL
          AND m.date_created > COALESCE(
            (SELECT lm.date_created FROM messages lm WHERE lm.guid = c.last_read_message_guid), 0)

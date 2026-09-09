@@ -147,6 +147,14 @@ function input() {
   return screen.getByPlaceholderText('iMessage');
 }
 
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 describe('Composer — typing enables send + trimmed send + clear', () => {
   it('hides the send button until text is typed, then shows it', async () => {
     await renderWithTheme(<Composer onSend={jest.fn()} />);
@@ -230,6 +238,46 @@ describe('Composer — typing enables send + trimmed send + clear', () => {
     await fireEvent.changeText(input(), 'about to send');
     await fireEvent.press(await screen.findByLabelText('Send message'));
     await waitFor(() => expect(onDraftChange).toHaveBeenCalledWith(''));
+  });
+
+  it('retains authored fields until queue admission and ignores a duplicate tap', async () => {
+    const firstAdmission = deferred<boolean>();
+    const onSend = jest.fn(() => firstAdmission.promise);
+    const onDraftChange = jest.fn();
+    await renderWithTheme(
+      <Composer onSend={onSend} onDraftChange={onDraftChange} subjectEnabled />,
+    );
+    await fireEvent.changeText(screen.getByPlaceholderText('Subject'), 'keep subject');
+    await fireEvent.changeText(input(), 'keep this offline draft');
+    const sendButton = await screen.findByLabelText('Send message');
+
+    await fireEvent.press(sendButton);
+    await fireEvent.press(sendButton);
+
+    expect(onSend).toHaveBeenCalledTimes(1);
+    expect(input().props.value).toBe('keep this offline draft');
+    expect(screen.getByPlaceholderText('Subject').props.value).toBe('keep subject');
+    expect(screen.getByLabelText('Send message').props.accessibilityState).toEqual({
+      disabled: true,
+      busy: true,
+    });
+
+    await act(async () => firstAdmission.resolve(false));
+    await waitFor(() =>
+      expect(screen.getByLabelText('Send message').props.accessibilityState).toEqual({
+        disabled: false,
+        busy: false,
+      }),
+    );
+    expect(input().props.value).toBe('keep this offline draft');
+    expect(screen.getByPlaceholderText('Subject').props.value).toBe('keep subject');
+    expect(onDraftChange).not.toHaveBeenCalledWith('');
+
+    onSend.mockReturnValueOnce(Promise.resolve(true));
+    await fireEvent.press(screen.getByLabelText('Send message'));
+    await waitFor(() => expect(input().props.value).toBe(''));
+    expect(screen.getByPlaceholderText('Subject').props.value).toBe('');
+    expect(onDraftChange).toHaveBeenCalledWith('');
   });
 
   it('persists the draft after the typing debounce', async () => {
@@ -478,15 +526,17 @@ describe('Composer — edit mode', () => {
 });
 
 describe('Composer — staged attachments', () => {
-  it('keeps combined authored text and attachments when capacity preflight refuses both jobs', async () => {
+  it('keeps combined authored text and attachment when capacity refuses the one logical job', async () => {
     const canSubmit = jest.fn(() => false);
     const onSendAttachments = jest.fn();
+    const onSendTextAttachment = jest.fn();
     const onSend = jest.fn();
     const onDraftChange = jest.fn();
     await renderWithTheme(
       <Composer
         onSend={onSend}
         onSendAttachments={onSendAttachments}
+        onSendTextAttachment={onSendTextAttachment}
         canSubmit={canSubmit}
         onDraftChange={onDraftChange}
       />,
@@ -498,11 +548,49 @@ describe('Composer — staged attachments', () => {
 
     await fireEvent.press(screen.getByLabelText('Send message'));
 
-    expect(canSubmit).toHaveBeenCalledWith(2);
+    expect(canSubmit).toHaveBeenCalledWith(1);
     expect(onSend).not.toHaveBeenCalled();
     expect(onSendAttachments).not.toHaveBeenCalled();
+    expect(onSendTextAttachment).not.toHaveBeenCalled();
     expect(onDraftChange).not.toHaveBeenCalledWith('');
     expect(input().props.value).toBe('keep this exact draft');
+    expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(1);
+  });
+
+  it('removes only attachments whose queue rows committed', async () => {
+    const admission = deferred<readonly string[]>();
+    const onSendAttachments = jest.fn(() => admission.promise);
+    await renderWithTheme(<Composer onSend={jest.fn()} onSendAttachments={onSendAttachments} />);
+    await fireEvent.press(screen.getByLabelText('Attach photo or file'));
+    await fireEvent.press(await screen.findByLabelText('tray-pick-two'));
+    await waitFor(() => expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(2));
+
+    await fireEvent.press(screen.getByLabelText('Send message'));
+    expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(2);
+
+    await act(async () => admission.resolve([ITEM_A.uri]));
+    await waitFor(() => expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(1));
+    expect(onSendAttachments).toHaveBeenCalledWith([ITEM_A, ITEM_B]);
+  });
+
+  it('ignores a late attachment admission after the captured account retires', async () => {
+    const admission = deferred<readonly string[]>();
+    let ownerCurrent = true;
+    await renderWithTheme(
+      <Composer
+        onSend={jest.fn()}
+        onSendAttachments={() => admission.promise}
+        isSubmitOwnerCurrent={() => ownerCurrent}
+      />,
+    );
+    await fireEvent.press(screen.getByLabelText('Attach photo or file'));
+    await fireEvent.press(await screen.findByLabelText('tray-pick-a'));
+    await waitFor(() => expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(1));
+
+    await fireEvent.press(screen.getByLabelText('Send message'));
+    ownerCurrent = false;
+    await act(async () => admission.resolve([ITEM_A.uri]));
+
     expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(1);
   });
 

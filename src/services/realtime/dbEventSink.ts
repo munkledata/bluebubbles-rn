@@ -21,6 +21,7 @@ import {
   withDbTransaction,
 } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
+import { IncomingEventDependencyPendingError } from './incomingEventErrors';
 
 /** Private rollback signal for a delivery whose account generation changed mid-transaction. */
 const STALE_REALTIME_DELIVERY = Symbol('stale-realtime-delivery');
@@ -31,18 +32,14 @@ const STALE_REALTIME_DELIVERY = Symbol('stale-realtime-delivery');
  * Throwing keeps the queue receipt retryable instead of falsely marking an event complete. The
  * recovery hook can hydrate the missing chat before the drain's next attempt.
  */
-export class RealtimeMessageChatUnavailableError extends Error {
+export class RealtimeMessageChatUnavailableError extends IncomingEventDependencyPendingError {
   override readonly name = 'RealtimeMessageChatUnavailableError';
 
   constructor(
     readonly messageGuid: string,
     readonly chatGuid: string | null,
   ) {
-    super(
-      chatGuid
-        ? `Realtime message ${messageGuid} references unavailable chat ${chatGuid}`
-        : `Realtime message ${messageGuid} has no resolvable chat`,
-    );
+    super();
   }
 }
 
@@ -50,27 +47,23 @@ type GroupMutationEventType =
   'group-name-change' | 'participant-added' | 'participant-removed' | 'participant-left';
 
 /** A durable group mutation carried no chat snapshot the DB could safely apply. */
-export class RealtimeGroupMutationUnavailableError extends Error {
+export class RealtimeGroupMutationUnavailableError extends IncomingEventDependencyPendingError {
   override readonly name = 'RealtimeGroupMutationUnavailableError';
 
   constructor(readonly eventType: GroupMutationEventType) {
-    super(`Realtime ${eventType} event has no usable chat snapshot`);
+    super();
   }
 }
 
 /** A durable remote-read event arrived before its local chat/message prerequisite. */
-export class RealtimeReadStatusUnavailableError extends Error {
+export class RealtimeReadStatusUnavailableError extends IncomingEventDependencyPendingError {
   override readonly name = 'RealtimeReadStatusUnavailableError';
 
   constructor(
     readonly chatGuid: string,
     readonly reason: 'chat-unavailable' | 'message-unavailable',
   ) {
-    super(
-      reason === 'chat-unavailable'
-        ? `Realtime read status references unavailable chat ${chatGuid}`
-        : `Realtime read status for ${chatGuid} has no received message to mark read`,
-    );
+    super();
   }
 }
 
@@ -136,16 +129,20 @@ async function markDurableDbPhase(
  */
 export class DbEventSink implements EventSink {
   /**
-   * @param onMessageStored optional detached hook fired with a persisted message's row id
-   *   (new/updated message). It deliberately receives no delivery context or durable checkpoint;
-   *   long-lived work must capture its own account-generation lease. Injected by the app to trigger
-   *   attachment auto-download; left undefined in unit tests so the Node import graph never pulls
-   *   the native download/media modules.
+   * @param onMessageStored optional detached hook fired synchronously after a message commit with
+   *   its row id, source, and originating context. The hook must capture its own long-lived account
+   *   lease; production uses the source/context only to let a background-FCM collector adopt the
+   *   returned task before this method settles. Left undefined in unit tests so the Node import
+   *   graph never pulls native download/media modules.
    */
   constructor(
     private readonly db: AppDatabase,
-    private readonly onMessageStored?: (messageId: number) => void | Promise<void>,
-    /** Runs after a deletion transaction commits, never while the DB write lock is held. */
+    private readonly onMessageStored?: (
+      messageId: number,
+      source: EventSource,
+      context?: EventDeliveryContext,
+    ) => void | Promise<void>,
+    /** Runs after a deletion/retraction transaction commits, never while the DB write lock is held. */
     private readonly onAttachmentCacheRetirement?: (
       context?: EventDeliveryContext,
     ) => void | Promise<void>,
@@ -195,7 +192,7 @@ export class DbEventSink implements EventSink {
 
   async onEvent(
     event: NormalizedEvent,
-    _source: EventSource,
+    source: EventSource,
     context?: EventDeliveryContext,
   ): Promise<void> {
     if (context && !context.isCurrent()) return;
@@ -243,7 +240,7 @@ export class DbEventSink implements EventSink {
           ...embeddedChats.flatMap((c) => c.participants ?? []),
           ...(message.handle ? [message.handle] : []),
         ].map((handle) => handle.address);
-        const idMap = await withCurrentDeliveryTransaction(
+        const messageResult = await withCurrentDeliveryTransaction(
           this.db,
           context,
           async (transactionContext) => {
@@ -281,18 +278,24 @@ export class DbEventSink implements EventSink {
             // echo carries no tempGuid, so match by content and promote the `temp-…` row in place
             // (id + attachments + local_path preserved) rather than inserting a duplicate bubble.
             // Live path only — never the sync path (see reconcileEchoByContent).
-            await reconcileEchoByContent(transactionContext, message, chatId);
+            const reconciliation = await reconcileEchoByContent(
+              transactionContext,
+              message,
+              chatId,
+            );
             const stored = await upsertMessagesWithinTransaction(
               transactionContext,
               [message],
               () => chatId,
               handleMap,
             );
-            await markDurableDbPhase(transactionContext, context);
-            return stored;
+            if (reconciliation !== 'attempt-owner-pending') {
+              await markDurableDbPhase(transactionContext, context);
+            }
+            return { stored, reconciliation };
           },
         );
-        if (idMap == null) {
+        if (messageResult == null) {
           // A stale delivery also returns null, but was deliberately rolled back and needs no
           // recovery request or misleading "chat not found" diagnostic.
           if (context && !context.isCurrent()) break;
@@ -309,20 +312,41 @@ export class DbEventSink implements EventSink {
           });
           break;
         }
+        if (messageResult.reconciliation === 'attempt-owner-pending' && context?.durableEvent) {
+          // Keep this exact success queued until the newer local request installs its owner. The
+          // canonical server message was still upserted above, so history remains truthful.
+          throw new IncomingEventDependencyPendingError();
+        }
         await this.linkContactsAfterCommit(contactAddresses, context);
         // Notify the app (attachment auto-download) that this message + its rows are persisted.
         // Deliberately after COMMIT: it kicks off network/native work, which must never run with
         // the write lock held.
-        const storedId = idMap.get(message.guid);
-        // Downloads can take minutes and must not hold account teardown open. Their generation
-        // guard owns the eventual file/DB commit; this event owns only launching the best-effort
-        // task after the row committed.
+        const storedId = messageResult.stored.get(message.guid);
+        const hasRetractionSignal =
+          message.messageSummaryInfoInvalid === true ||
+          message.dateRetracted != null ||
+          (message.messageSummaryInfo?.retractedParts?.length ?? 0) > 0;
+        if (storedId != null && hasRetractionSignal && (!context || context.isCurrent())) {
+          try {
+            // Retraction can make an already-downloaded attachment unreachable. Retire it only
+            // after the visibility transaction commits; a cleanup failure is recoverable later.
+            await this.onAttachmentCacheRetirement?.(context);
+          } catch (error) {
+            logger.debug('[dbEventSink] attachment cache cleanup deferred', error);
+          }
+        }
+        // Invoke the hook synchronously so a background-FCM callback can register the returned task
+        // before this delivery settles. The task itself remains detached: downloads can take much
+        // longer than this queue attempt and must not hold its transaction or teardown slot open.
         if (storedId != null && (!context || context.isCurrent())) {
-          void Promise.resolve()
-            .then(() => this.onMessageStored?.(storedId))
-            .catch((error: unknown) => {
+          try {
+            const task = this.onMessageStored?.(storedId, source, context);
+            void Promise.resolve(task).catch((error: unknown) => {
               logger.debug('[dbEventSink] post-commit message hook failed', error);
             });
+          } catch (error) {
+            logger.debug('[dbEventSink] post-commit message hook failed', error);
+          }
         }
         break;
       }
@@ -406,10 +430,9 @@ export class DbEventSink implements EventSink {
           },
         );
         if (result == null || result === 'applied' || !context?.durableEvent) break;
-        // This event carries no remote read boundary. A chat-only message backfill cannot recover
-        // the Mac's watermark, so request the normal account sync before the short-lived receipt
-        // backs off/expires.
-        await this.requestRecovery(null, context, {
+        // The exact-chat refresh carries the Mac watermark and latest message. It is both faster
+        // and safer for this short-lived receipt than paging unrelated account history.
+        await this.requestRecovery(chatGuid, context, {
           chatGuid,
           reason: result,
           type: event.type,
@@ -434,32 +457,68 @@ export class DbEventSink implements EventSink {
         // re-arm the automatic retry ladder even though the immediate ack already consumed the
         // queue row. Absent/false (older servers, delivery-phase failures) → bubble-only.
         const retryable = p.retryable === true || embedded.retryable === true;
+        const clientAttemptGeneration =
+          p.clientAttemptGeneration ?? p.message?.clientAttemptGeneration;
+        const hasModernAttemptMetadata = p.attemptGuid != null || clientAttemptGeneration != null;
+        const attemptIdentity =
+          p.tempGuid && p.attemptGuid && clientAttemptGeneration != null
+            ? {
+                tempGuid: p.tempGuid,
+                attemptGuid: p.attemptGuid,
+                clientAttemptGeneration,
+              }
+            : undefined;
+        const incompleteAttemptIdentity = hasModernAttemptMetadata && attemptIdentity == null;
         const now = Date.now();
-        const onCommitted = await withCurrentDeliveryTransaction(
+        const sendErrorResult = await withCurrentDeliveryTransaction(
           this.db,
           context,
           async (transactionContext) => {
             let commitEffect: (() => void) | null = null;
-            for (const guid of candidates) {
-              const result = await applyServerSendErrorWithinTransaction(
-                transactionContext,
-                guid,
-                code,
-                now,
-                retryable,
-                context?.generation ?? 'direct',
-                errorMessage,
-              );
-              if (result.matched) {
-                commitEffect = result.onCommitted;
-                break;
+            let disposition:
+              | 'applied'
+              | 'attempt-owner-pending'
+              | 'attempt-identity-missing'
+              | 'stale-attempt'
+              | 'unmatched' = incompleteAttemptIdentity ? 'attempt-identity-missing' : 'unmatched';
+            if (!incompleteAttemptIdentity) {
+              for (const guid of candidates) {
+                const result = await applyServerSendErrorWithinTransaction(
+                  transactionContext,
+                  guid,
+                  code,
+                  now,
+                  retryable,
+                  context?.generation ?? 'direct',
+                  errorMessage,
+                  attemptIdentity,
+                );
+                if (result.matched) {
+                  commitEffect = result.onCommitted;
+                  disposition = result.disposition;
+                  break;
+                }
               }
             }
-            await markDurableDbPhase(transactionContext, context);
-            return commitEffect;
+            if (
+              disposition !== 'attempt-owner-pending' &&
+              disposition !== 'attempt-identity-missing'
+            ) {
+              await markDurableDbPhase(transactionContext, context);
+            }
+            return { commitEffect, disposition };
           },
         );
-        onCommitted?.();
+        if (sendErrorResult == null) break;
+        sendErrorResult.commitEffect?.();
+        if (sendErrorResult.disposition === 'attempt-owner-pending' && context?.durableEvent) {
+          throw new IncomingEventDependencyPendingError();
+        }
+        if (sendErrorResult.disposition === 'attempt-identity-missing' && context?.durableEvent) {
+          // A modern row must never fall through to the legacy temp-guid heuristic. Let the
+          // durable queue's bounded poison policy contain this malformed server event.
+          throw new Error('attempt-aware send error omitted exact correlation');
+        }
         break;
       }
       case 'group-name-change':
@@ -472,7 +531,14 @@ export class DbEventSink implements EventSink {
           .flatMap((r) => (r.success && r.data.guid.trim().length > 0 ? [r.data] : []));
         if (parsed.length === 0) {
           if (!context?.durableEvent || !context.isCurrent()) break;
-          await this.requestRecovery(null, context, { type: event.type });
+          const recoveryChatGuid = (event.payload.chats ?? [])
+            .map((raw) => {
+              if (typeof raw !== 'object' || raw == null) return null;
+              const guid = (raw as Record<string, unknown>).guid;
+              return typeof guid === 'string' && guid.trim().length > 0 ? guid.trim() : null;
+            })
+            .find((guid): guid is string => guid != null);
+          await this.requestRecovery(recoveryChatGuid ?? null, context, { type: event.type });
           throw new RealtimeGroupMutationUnavailableError(event.type);
         }
         const contactAddresses = parsed

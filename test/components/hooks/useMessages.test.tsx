@@ -5,7 +5,8 @@
  *     [chatGuid, limit, anchorGuid, anchorId, windowGeneration] as the reactive deps;
  *   - an unknown chat guid (getChatIdByGuid → null) yields [] and skips every downstream read;
  *   - enrichment wiring: each row gets its OWN attachments (by message id), reactions (by guid),
- *     and reply preview (by threadOriginatorGuid) — and only reply targets are fetched, deduped;
+ *     and reply preview (by threadOriginatorGuid + exact part) — and only reply targets are fetched,
+ *     deduped;
  *   - an exact anchor loads the centered window (listMessagesAround) instead of the recent window
  *     (listMessagesWithSenders), and the current-window proof distinguishes retained old rows.
  *
@@ -193,11 +194,13 @@ describe('useMessages', () => {
     expect(r2!.replyPreview?.guid).toBe('orig-1');
 
     // Attachment/reaction reads receive ALL ids/guids (filtering is done in SQL, not here).
-    expect(mAtt).toHaveBeenCalledWith(undefined, [1, 2]);
+    expect(mAtt).toHaveBeenCalledWith(undefined, [1, 2], undefined, {
+      excludeRetractedAttachments: true,
+    });
     expect(mReactions).toHaveBeenCalledWith(undefined, ['msg-1', 'msg-2']);
     // Only the reply target is fetched.
     expect(mPreview).toHaveBeenCalledTimes(1);
-    expect(mPreview).toHaveBeenCalledWith(undefined, 'orig-1');
+    expect(mPreview).toHaveBeenCalledWith(undefined, 'orig-1', null);
   });
 
   it('dedupes repeated reply targets into a single preview fetch', async () => {
@@ -210,7 +213,7 @@ describe('useMessages', () => {
     await waitFor(() => expect(result.current.data).toHaveLength(2));
 
     expect(mPreview).toHaveBeenCalledTimes(1);
-    expect(mPreview).toHaveBeenCalledWith(undefined, 'orig-x');
+    expect(mPreview).toHaveBeenCalledWith(undefined, 'orig-x', null);
     // Both rows resolve the same preview.
     expect(result.current.data![0]!.replyPreview?.guid).toBe('orig-x');
     expect(result.current.data![1]!.replyPreview?.guid).toBe('orig-x');

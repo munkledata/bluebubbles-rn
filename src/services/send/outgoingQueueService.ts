@@ -13,11 +13,18 @@ import {
   claimOutgoingForSendWithinTransaction,
   getAttachmentByGuid,
   listRetryableOutgoing,
+  MessageTargetCapabilityUnknownError,
+  MessageTargetUnavailableError,
+  queuedMessageTarget,
+  resolveMessageTarget,
   retireOutgoingWithinTransaction,
+  type MessageTargetServerAuthorization,
   type RetryableOutgoing,
+  type SendAttemptOwnerToken,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
+import { isRcsChatGuid } from '@utils/chat';
 import {
   runTrackedRealtimeWork,
   type RealtimeDeliveryLease,
@@ -25,6 +32,7 @@ import {
 import { handleSendFailure, reconcileSendOutcome } from './sendOutcome';
 import { notifyFailedSend } from './sendFailureNotice';
 import type { AttachmentUploader } from './sendAttachmentService';
+import { messageTargetCommitGuard } from './rcsAttemptCapability';
 
 interface TextPayload {
   message: string;
@@ -44,6 +52,9 @@ interface ReactionPayload {
 interface AttachmentPayload {
   attachmentGuid: string;
   localPath?: string;
+  text?: string;
+  selectedMessageGuid?: string;
+  partIndex?: number;
 }
 /**
  * A contact card's STRUCTURED fields (the server rebuilds the vCard). Queued under its own
@@ -57,6 +68,7 @@ interface ContactPayload {
   phones?: ContactPhone[];
   emails?: ContactEmail[];
   selectedMessageGuid?: string;
+  partIndex?: number;
 }
 
 /**
@@ -183,9 +195,64 @@ export async function resendOutgoingRow(
   clock: () => number,
   accountLease?: RealtimeDeliveryLease,
   attachmentTimeoutMs?: number,
+  attemptOwnerToken?: SendAttemptOwnerToken,
+  serverAuthorization?: MessageTargetServerAuthorization,
 ): Promise<ResendOutcome> {
   if (!accountIsCurrent(accountLease)) return 'paused';
+  const queuedTarget = queuedMessageTarget(row.kind, row.payload);
+  const target =
+    queuedTarget.kind === 'target'
+      ? {
+          chatGuid: row.chatGuid,
+          messageGuid: queuedTarget.messageGuid,
+          partIndex: queuedTarget.partIndex,
+          serverAuthorization,
+          allowRcsWholeMessage: row.kind === 'reaction' && isRcsChatGuid(row.chatGuid),
+        }
+      : null;
+  const retireTarget = async (): Promise<ResendOutcome> =>
+    (await runAccountCommit(accountLease, (guard) =>
+      retireUnsendableOutgoing(
+        db,
+        row.chatGuid,
+        row.tempGuid,
+        messageTargetCommitGuard(guard, serverAuthorization),
+      ),
+    ))
+      ? 'unsendable'
+      : 'paused';
+  if (queuedTarget.kind === 'invalid') return retireTarget();
+  // Old builds could persist a locally-threaded RCS text/media/contact send even though the
+  // Google Messages bridge discards that target. Never let a recovered row become an ordinary
+  // unthreaded send. Whole-message RCS reactions remain the only intentional exception.
+  if (queuedTarget.kind === 'target' && row.kind !== 'reaction' && isRcsChatGuid(row.chatGuid)) {
+    return retireTarget();
+  }
+  const authorizeTarget = async (): Promise<{ messageGuid: string; partIndex: number } | null> => {
+    if (!target) return null;
+    if (!accountIsCurrent(accountLease)) throw new DbCommitGuardRejectedError();
+    const resolved = await resolveMessageTarget(
+      db,
+      target,
+      accountLease ? () => accountLease.isCurrent() : undefined,
+    );
+    if (!resolved) throw new MessageTargetUnavailableError();
+    if (serverAuthorization && !serverAuthorization.isCurrent()) {
+      throw new DbCommitGuardRejectedError();
+    }
+    return { messageGuid: resolved.messageGuid, partIndex: resolved.partIndex };
+  };
   try {
+    // Bind the whole physical retry to the transport present at entry. Attachment retries perform
+    // DB and native-file awaits before upload; retaining the live client there could otherwise make
+    // an account-A row start on account B's newly selected origin/credential.
+    const retryHttp =
+      row.kind === 'text' ||
+      row.kind === 'reaction' ||
+      row.kind === 'contact' ||
+      row.kind === 'attachment'
+        ? http.pinTransport()
+        : http;
     // The row is already flipped to 'sending' — that happens in the SAME transaction as the lease
     // (see runOutgoingQueue), never here, so there is no instant in which a leased row still reads
     // 'error' for the user's "Try Again" to claim out from under this attempt.
@@ -193,38 +260,49 @@ export async function resendOutgoingRow(
     if (row.kind === 'text') {
       const p = JSON.parse(row.payload) as TextPayload;
       if (!accountIsCurrent(accountLease)) return 'paused';
-      server = await sendText(http, {
+      const resolvedTarget = await authorizeTarget();
+      retryHttp.assertTransportCurrent();
+      server = await sendText(retryHttp, {
         chatGuid: row.chatGuid,
         tempGuid: row.tempGuid,
+        clientAttemptGeneration: attemptOwnerToken?.generation,
         message: p.message,
-        selectedMessageGuid: p.selectedMessageGuid,
-        partIndex: p.selectedMessageGuid ? p.partIndex : undefined,
+        selectedMessageGuid: resolvedTarget?.messageGuid,
+        partIndex: resolvedTarget?.partIndex,
         effectId: p.effectId,
         subject: p.subject,
         mentions: p.mentions,
       });
     } else if (row.kind === 'reaction') {
       const p = JSON.parse(row.payload) as ReactionPayload;
+      if (!target) return retireTarget();
       if (!accountIsCurrent(accountLease)) return 'paused';
-      server = await sendReaction(http, {
+      const resolvedTarget = await authorizeTarget();
+      if (!resolvedTarget) return retireTarget();
+      retryHttp.assertTransportCurrent();
+      server = await sendReaction(retryHttp, {
         chatGuid: row.chatGuid,
-        selectedMessageGuid: p.selectedMessageGuid,
+        selectedMessageGuid: resolvedTarget.messageGuid,
         reaction: p.reaction,
         emoji: p.emoji,
-        partIndex: p.partIndex,
+        partIndex: resolvedTarget.partIndex,
       });
     } else if (row.kind === 'contact') {
       const p = JSON.parse(row.payload) as ContactPayload;
       if (!accountIsCurrent(accountLease)) return 'paused';
-      server = await sendContact(http, {
+      const resolvedTarget = await authorizeTarget();
+      retryHttp.assertTransportCurrent();
+      server = await sendContact(retryHttp, {
         chatGuid: row.chatGuid,
         tempGuid: row.tempGuid,
+        clientAttemptGeneration: attemptOwnerToken?.generation,
         firstName: p.firstName,
         lastName: p.lastName,
         organization: p.organization,
         phones: p.phones,
         emails: p.emails,
-        selectedMessageGuid: p.selectedMessageGuid,
+        selectedMessageGuid: resolvedTarget?.messageGuid,
+        partIndex: resolvedTarget?.partIndex,
       });
     } else if (row.kind === 'attachment') {
       // One deadline spans the queue's DB/stat preflight AND the uploader's own preflight, FIFO
@@ -259,12 +337,27 @@ export async function resendOutgoingRow(
           : 'paused';
       }
       if (!accountIsCurrent(accountLease)) return 'paused';
+      const resolvedTarget = await authorizeTarget();
+      // Keep this check and the uploader call in one synchronous turn. The uploader receives the
+      // same pinned client captured before our DB/stat awaits and snapshots its native transport.
+      retryHttp.assertTransportCurrent();
       server = await runBeforeAttachmentDeadline(
         (remainingMs) =>
           io.upload({
-            http,
+            http: retryHttp,
             chatGuid: row.chatGuid,
             tempGuid: row.tempGuid,
+            clientAttemptGeneration: attemptOwnerToken?.generation,
+            authorizeNetworkStart: target
+              ? async () => {
+                  const resolved = await authorizeTarget();
+                  if (!resolved) throw new MessageTargetUnavailableError();
+                  return resolved;
+                }
+              : undefined,
+            text: p.text,
+            selectedMessageGuid: resolvedTarget?.messageGuid,
+            partIndex: resolvedTarget?.partIndex,
             attachmentGuid: att.guid,
             name: att.transferName ?? 'attachment',
             uri,
@@ -286,14 +379,21 @@ export async function resendOutgoingRow(
     }
     if (!accountIsCurrent(accountLease)) return 'paused';
     return (await runAccountCommit(accountLease, (guard) =>
-      reconcileSendOutcome(db, row.tempGuid, server, clock(), guard),
+      reconcileSendOutcome(db, row.tempGuid, server, clock(), guard, {
+        attemptOwnerToken,
+      }),
     ))
       ? 'sent'
       : 'paused';
   } catch (e) {
     if (!accountIsCurrent(accountLease)) return 'paused';
+    if (e instanceof DbCommitGuardRejectedError) return 'paused';
+    if (e instanceof MessageTargetCapabilityUnknownError) return 'paused';
+    if (e instanceof MessageTargetUnavailableError) return retireTarget();
     return (await runAccountCommit(accountLease, (guard) =>
-      handleSendFailure(db, row.tempGuid, e, 'queue', row.chatGuid, clock(), guard),
+      handleSendFailure(db, row.tempGuid, e, 'queue', row.chatGuid, clock(), guard, {
+        attemptOwnerToken,
+      }),
     ))
       ? 'failed'
       : 'paused';
@@ -318,6 +418,7 @@ async function runOutgoingQueueBody(
   accountLease?: RealtimeDeliveryLease,
   maxRows?: number,
   attachmentTimeoutMs?: number,
+  serverAuthorization?: MessageTargetServerAuthorization,
 ): Promise<{ eligible: number; sent: number }> {
   if (!accountIsCurrent(accountLease)) return { eligible: 0, sent: 0 };
   const rows = await listRetryableOutgoing(db, now, maxRows);
@@ -344,16 +445,30 @@ async function runOutgoingQueueBody(
     // 'error' that acks without a guid (RCS tempGuid echo / AppleScript) hits
     // markOutgoingSentNoGuid's sticky-error guard, and the bubble stays errored with its queue row
     // un-bumped — so the same message re-sends on every later drain (duplicates).
-    let claimed = false;
-    const claimCommitted = await runAccountCommit(accountLease, async (guard) => {
-      claimed = await withDbTransaction(
-        db,
-        (context) => claimOutgoingForSendWithinTransaction(context, row.id, clock),
-        guard,
-      );
-    });
+    let claim: Awaited<ReturnType<typeof claimOutgoingForSendWithinTransaction>> = {
+      claimed: false,
+    };
+    let claimCommitted: boolean;
+    try {
+      claimCommitted = await runAccountCommit(accountLease, async (guard) => {
+        claim = await withDbTransaction(
+          db,
+          (context) =>
+            claimOutgoingForSendWithinTransaction(context, row.id, clock, serverAuthorization),
+          messageTargetCommitGuard(guard, serverAuthorization),
+        );
+      });
+    } catch (error) {
+      if (
+        error instanceof MessageTargetCapabilityUnknownError ||
+        error instanceof DbCommitGuardRejectedError
+      ) {
+        break;
+      }
+      throw error;
+    }
     if (!claimCommitted) break;
-    if (!claimed) continue;
+    if (!claim.claimed) continue;
     const outcome = await resendOutgoingRow(
       db,
       http,
@@ -362,6 +477,8 @@ async function runOutgoingQueueBody(
       clock,
       accountLease,
       attachmentTimeoutMs,
+      claim.attemptOwnerToken,
+      serverAuthorization,
     );
     if (outcome === 'sent') sent += 1;
     if (outcome === 'paused') break;
@@ -383,9 +500,19 @@ export async function runOutgoingQueue(
   accountLease?: RealtimeDeliveryLease,
   maxRows?: number,
   attachmentTimeoutMs?: number,
+  serverAuthorization?: MessageTargetServerAuthorization,
 ): Promise<{ eligible: number; sent: number }> {
   if (!accountLease) {
-    return runOutgoingQueueBody(db, http, io, now, undefined, maxRows, attachmentTimeoutMs);
+    return runOutgoingQueueBody(
+      db,
+      http,
+      io,
+      now,
+      undefined,
+      maxRows,
+      attachmentTimeoutMs,
+      serverAuthorization,
+    );
   }
 
   const completed: { value?: { eligible: number; sent: number } } = {};
@@ -398,6 +525,7 @@ export async function runOutgoingQueue(
       activeLease,
       maxRows,
       attachmentTimeoutMs,
+      serverAuthorization,
     );
   });
   return status === 'delivered' && completed.value ? completed.value : { eligible: 0, sent: 0 };

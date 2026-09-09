@@ -16,6 +16,39 @@ const TOOLCHAIN_GUARD_NAME = 'Verify toolchain pins';
 const TOOLCHAIN_GUARD_COMMAND = 'node scripts/check-toolchain.mjs';
 const INSTALL_NAME = 'Install dependencies';
 const INSTALL_COMMAND = 'npm ci';
+const DATABASE_WRITE_APPROVAL_NAME = 'Database write approval guard';
+const FAST_DATABASE_WRITE_TEST_NAME = 'Fast database-write scanner suite';
+const FAST_DATABASE_WRITE_TEST_COMMAND = 'npm run check:db-writes:fast';
+const ANDROID_NATIVE_PATH_GUARD_NAME = 'Verify Android native path hygiene';
+const ANDROID_NATIVE_PATH_GUARD_COMMAND = 'npm run check:android-native-paths';
+const ANDROID_NATIVE_PATH_ENV_LINES = [
+  'env:',
+  'GRADLE_USER_HOME: /var/tmp/gator-gradle',
+  'CFLAGS: >-',
+  '-ffile-prefix-map=${{ github.workspace }}=/gator/source',
+  '-fdebug-prefix-map=${{ github.workspace }}=/gator/source',
+  '-ffile-prefix-map=/var/tmp/gator-gradle=/gator/gradle',
+  '-fdebug-prefix-map=/var/tmp/gator-gradle=/gator/gradle',
+  'CXXFLAGS: >-',
+  '-ffile-prefix-map=${{ github.workspace }}=/gator/source',
+  '-fdebug-prefix-map=${{ github.workspace }}=/gator/source',
+  '-ffile-prefix-map=/var/tmp/gator-gradle=/gator/gradle',
+  '-fdebug-prefix-map=/var/tmp/gator-gradle=/gator/gradle',
+];
+const LOCAL_NATIVE_COMPILE_TASKS = [
+  ':gator-paste-input:compileDebugKotlin',
+  ':gator-share-shortcuts:compileDebugKotlin',
+  ':gator-bounded-document:compileDebugKotlin',
+  ':gator-bounded-download:compileDebugKotlin',
+  ':gator-screen-security:compileDebugKotlin',
+];
+const LOCAL_NATIVE_TEST_TASKS = [
+  ':gator-paste-input:testDebugUnitTest',
+  ':gator-share-shortcuts:testDebugUnitTest',
+  ':gator-bounded-document:testDebugUnitTest',
+  ':gator-bounded-download:testDebugUnitTest',
+  ':expo-file-system:testDebugUnitTest',
+];
 const SCHEDULED_DB_CRON = "- cron: '17 7 * * 2'";
 const SCHEDULED_DB_CONDITION =
   "if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'";
@@ -410,7 +443,7 @@ function requireSafeAuditStep(checkJob, name, command, errors) {
 }
 
 function requireDatabaseWriteApprovalGuard(checkJob, installIndex, errors) {
-  const name = 'Database write approval guard';
+  const name = DATABASE_WRITE_APPROVAL_NAME;
   const command = 'node scripts/check-db-writes.mjs --check';
   const step = extractNamedStep(checkJob, name);
   if (!step) {
@@ -435,6 +468,25 @@ function requireDatabaseWriteApprovalGuard(checkJob, installIndex, errors) {
   }
   if (/^\s*continue-on-error\s*:/m.test(step) || /\|\|\s*true/.test(step)) {
     errors.push(`"${name}" must fail the CI job when an unapproved write is found.`);
+  }
+}
+
+function requireFastDatabaseWriteTests(checkJob, errors) {
+  requireExactBlockingStep(
+    checkJob,
+    'CI check job',
+    FAST_DATABASE_WRITE_TEST_NAME,
+    FAST_DATABASE_WRITE_TEST_COMMAND,
+    errors,
+  );
+
+  const stepHeaders = topLevelStepHeaders(checkJob);
+  const approvalIndex = stepHeaders.indexOf(`- name: ${DATABASE_WRITE_APPROVAL_NAME}`);
+  const fastTestIndex = stepHeaders.indexOf(`- name: ${FAST_DATABASE_WRITE_TEST_NAME}`);
+  if (approvalIndex < 0 || fastTestIndex !== approvalIndex + 1) {
+    errors.push(
+      `"${FAST_DATABASE_WRITE_TEST_NAME}" must immediately follow the exact database write approval guard.`,
+    );
   }
 }
 
@@ -512,6 +564,7 @@ function validateCheckJob(workflow, errors) {
 
   const installIndex = check.source.indexOf('run: npm ci');
   requireDatabaseWriteApprovalGuard(check.source, installIndex, errors);
+  requireFastDatabaseWriteTests(check.source, errors);
   requireUiCoverageGate(check.source, installIndex, errors);
   const fullAuditIndex = check.source.indexOf('run: npm audit --audit-level=high');
   const productionAuditIndex = check.source.indexOf('run: npm audit --omit=dev --audit-level=high');
@@ -548,10 +601,22 @@ function validateAndroidJob(workflow, errors) {
       ['    name: Clean Android prebuild · native modules · APK + AAB', 'name'],
       ['    runs-on: ubuntu-latest', 'runs-on'],
       ['    timeout-minutes: 45', 'timeout-minutes'],
+      ['    env:', 'env'],
       ['    steps:', 'steps'],
     ]),
     errors,
   );
+
+  const androidEnvironment = extractIndentedBlock(android.source, /^    env:\s*$/)?.source;
+  const actualAndroidEnvironment = liveTrimmedLines(androidEnvironment);
+  if (
+    actualAndroidEnvironment.length !== ANDROID_NATIVE_PATH_ENV_LINES.length ||
+    actualAndroidEnvironment.some((line, index) => line !== ANDROID_NATIVE_PATH_ENV_LINES[index])
+  ) {
+    errors.push(
+      'The Android build job must declare the exact reviewed Gradle home and native path-scrubbing environment.',
+    );
+  }
 
   requireToolchainGuardBeforeInstall(android.source, 'Android CI job', errors);
 
@@ -580,15 +645,43 @@ function validateAndroidJob(workflow, errors) {
     errors,
   );
 
-  const nativeBuild = extractNamedStep(android.source, 'Compile local native modules');
-  for (const task of [
-    ':gator-paste-input:compileDebugKotlin',
-    ':gator-share-shortcuts:compileDebugKotlin',
-    ':gator-bounded-download:compileDebugKotlin',
-    ':gator-screen-security:compileDebugKotlin',
-  ]) {
+  const nativeBuildName = 'Compile local native modules';
+  const nativeBuild = requireExactNamedStep(
+    android.source,
+    nativeBuildName,
+    [
+      'working-directory: android',
+      'run: >-',
+      './gradlew',
+      ...LOCAL_NATIVE_COMPILE_TASKS,
+      '--no-daemon',
+    ],
+    errors,
+    'The Android build job',
+  );
+  for (const task of LOCAL_NATIVE_COMPILE_TASKS) {
     if (!hasStandaloneLine(nativeBuild, task)) {
       errors.push(`The Android job must run the native build task ${task}.`);
+    }
+  }
+
+  const nativeTestName = 'Test local native modules';
+  const nativeTests = requireExactNamedStep(
+    android.source,
+    nativeTestName,
+    [
+      'working-directory: android',
+      'run: >-',
+      './gradlew',
+      ...LOCAL_NATIVE_TEST_TASKS,
+      '--no-daemon',
+    ],
+    errors,
+    'The Android build job',
+  );
+  for (const task of LOCAL_NATIVE_TEST_TASKS) {
+    if (!hasStandaloneLine(nativeTests, task)) {
+      errors.push(`The Android job must run the native unit-test task ${task}.`);
     }
   }
 
@@ -603,6 +696,20 @@ function validateAndroidJob(workflow, errors) {
     errors.push('The Android job must assemble the debug APK in its own Gradle invocation.');
   }
 
+  const androidStepHeaders = topLevelStepHeaders(android.source);
+  const nativeBuildIndex = androidStepHeaders.indexOf(`- name: ${nativeBuildName}`);
+  const nativeTestIndex = androidStepHeaders.indexOf(`- name: ${nativeTestName}`);
+  const debugBuildIndex = androidStepHeaders.indexOf('- name: Assemble debug APK');
+  if (
+    nativeBuildIndex < 0 ||
+    nativeTestIndex !== nativeBuildIndex + 1 ||
+    debugBuildIndex !== nativeTestIndex + 1
+  ) {
+    errors.push(
+      'The Android job must compile, test, and then package the local native modules in the exact reviewed order.',
+    );
+  }
+
   const releaseBuild = requireExactNamedStep(
     android.source,
     'Bundle release AAB',
@@ -612,6 +719,17 @@ function validateAndroidJob(workflow, errors) {
   );
   if (!hasStandaloneLine(releaseBuild, 'run: ./gradlew :app:bundleRelease --no-daemon')) {
     errors.push('The Android job must bundle the release AAB in its own Gradle invocation.');
+  }
+
+  const nativePathGuard = requireExactNamedStep(
+    android.source,
+    ANDROID_NATIVE_PATH_GUARD_NAME,
+    [`run: ${ANDROID_NATIVE_PATH_GUARD_COMMAND}`],
+    errors,
+    'The Android build job',
+  );
+  if (!hasStandaloneLine(nativePathGuard, `run: ${ANDROID_NATIVE_PATH_GUARD_COMMAND}`)) {
+    errors.push(`The Android job must run ${ANDROID_NATIVE_PATH_GUARD_COMMAND}.`);
   }
 
   const packagedArtifactGuard = requireExactNamedStep(
@@ -640,9 +758,12 @@ function validateAndroidJob(workflow, errors) {
     errors,
     'The Android build job',
   );
-  const androidStepHeaders = topLevelStepHeaders(android.source);
   const artifactGuardIndex = androidStepHeaders.indexOf(
     '- name: Verify debug/release manifests, release AAB, and headless entry',
+  );
+  const releaseBuildIndex = androidStepHeaders.indexOf('- name: Bundle release AAB');
+  const nativePathGuardIndex = androidStepHeaders.indexOf(
+    `- name: ${ANDROID_NATIVE_PATH_GUARD_NAME}`,
   );
   const apkHandoffIndex = androidStepHeaders.indexOf(
     '- name: Retain debug APK for scheduled database checks',
@@ -650,6 +771,7 @@ function validateAndroidJob(workflow, errors) {
   const reviewedFinalSteps = [
     '- name: Assemble debug APK',
     '- name: Bundle release AAB',
+    `- name: ${ANDROID_NATIVE_PATH_GUARD_NAME}`,
     '- name: Verify debug/release manifests, release AAB, and headless entry',
     '- name: Retain debug APK for scheduled database checks',
   ];
@@ -660,6 +782,16 @@ function validateAndroidJob(workflow, errors) {
   ) {
     errors.push(
       'The Android build job must end with the exact reviewed build, verification, and APK handoff step order.',
+    );
+  }
+  if (
+    !nativePathGuard ||
+    releaseBuildIndex < 0 ||
+    nativePathGuardIndex !== releaseBuildIndex + 1 ||
+    artifactGuardIndex !== nativePathGuardIndex + 1
+  ) {
+    errors.push(
+      'The native path guard must run immediately after the release bundle and before packaged Android artifact verification.',
     );
   }
   if (
@@ -924,7 +1056,7 @@ if (invokedDirectly) {
   try {
     const result = runWorkflowSecurityCheck();
     console.log(
-      `Workflow security guard passed: ${result.actionCount} action uses are immutable; database-write approval, UI coverage, audits, dependency review, Android release verification, and scheduled Android DB lane configuration are enforced.`,
+      `Workflow security guard passed: ${result.actionCount} action uses are immutable; database-write approval and scanner tests, UI coverage, audits, dependency review, local native compilation/tests, Android release verification, and scheduled Android DB lane configuration are enforced.`,
     );
   } catch (error) {
     console.error(

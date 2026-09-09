@@ -44,18 +44,26 @@ uses `capMessagePushPayload`.
   rotated FCM token immediately while realtime is active.
 - **Dead targets self-prune.** An FCM 404 / Web Push 410 removes the device row via `onDeadDevice`.
 - **Socket and FCM share normalization, then durable intake deduplicates them.** Canonical occurrence
-  receipts survive process death; `attemptGuid` is the exact identity for RCS send errors. The
-  in-memory `EventRouter.seen` set remains only on the legacy direct `new-message` path.
+  receipts survive process death. On a server that advertises
+  `supports_rcs_send_attempt_ownership`, the exact RCS identity is the complete
+  `{tempGuid, attemptGuid, clientAttemptGeneration}` tuple. A partial or malformed tuple is marked
+  invalid, fails closed instead of falling back to content matching, and gets a distinct durable
+  intake identity so it cannot suppress a later corrected exact event. The in-memory
+  `EventRouter.seen` set remains only on the legacy direct `new-message` path.
 - **Attempt-aware RCS send errors use one identity across transports.** Server commit `e55f1210`
-  generates one immutable `attemptGuid` per physical attempt and reuses the same logical DTO across
-  socket, webhook, and FCM before transport-specific serialization/encryption. Managed-device FCM
+  introduced one immutable `attemptGuid` per physical attempt; the 2026-09-07
+  `PUSH-RETRY-01` host work binds that id to the app-owned retry generation and reuses the same
+  logical DTO across socket, webhook, and FCM before transport-specific serialization/encryption.
+  Managed-device FCM
   requires `messages:write`; unmanaged legacy push rows retain the existing compatibility policy.
   A canonical per-device key encrypts the DTO; without one, FCM carries only the event type and
-  empty-object metadata. The app now enrolls and decrypts the current server's
-  `AEAD_GCM_V2_DEVICE` frame through `PUSH-CRYPTO-01A`, so the attempt payload is eligible for FCM
-  device testing. End-to-end killed-app delivery, broader authenticated identity/replay protection,
-  and matching app/server deployment remain open under `PUSH-CRYPTO-01`; legacy temp-only failures
-  remain socket/webhook-only because they cannot be deduplicated safely across transports.
+  empty-object metadata. Shared-password compatibility can use the bounded `AEAD_GCM_V2_DEVICE`
+  frame; a scoped credential requires `AEAD_GCM_V3_IDENTITY`, which authenticates the exact
+  server/principal/device/message/occurrence/time identity and durably claims replay before effects.
+  The matching app/server source and host contracts are complete through `PUSH-CRYPTO-01D`.
+  End-to-end killed-app delivery against one deployed candidate remains blocked under
+  `PUSH-CRYPTO-01E`; legacy temp-only failures remain socket/webhook-only because they cannot be
+  deduplicated safely across transports.
 
 ---
 
@@ -163,6 +171,10 @@ helper rather than adding a fourth copy.
 
 ### 2.6 Attempt-aware RCS send-error fanout (2026-09-04)
 
+_Historical snapshot: this section records the September 4 boundary. Section 2.8 documents the
+host-complete September 7 active-attempt ownership work that supersedes the final two app-side
+limits below._
+
 Server commit `e55f1210` closes the source-level identity gap for RCS `message-send-error`. BBD
 reserves a UUID for each admitted physical attempt, encodes it with the logical `tempGuid` in the
 sidecar's opaque `tmpID`, and recovers that correlation from live status frames under the paired
@@ -191,7 +203,7 @@ after B can still relabel the shared tempGuid. Automatic A → B proof must use 
 `retryable: true` pre-dispatch error, and the stronger late-first-arrival/manual-retry contract needs
 client implementation.
 
-### 2.7 Current-server V2 client foundation (2026-09-04)
+### 2.7 Random-key V2/V3 client foundation and rotation (2026-09-09)
 
 When `/server/info` reports `supports_fcm_device_encryption: true`, registration requests 32 secure
 random bytes from Expo Crypto, stores a canonical-origin-bound `pending` record in SecureStore
@@ -200,22 +212,184 @@ after the server returns the exact encryption type and a bounded device id. Regi
 so reconnect and token-refresh calls cannot create competing keys; a lost response retries the same
 pending key. An absent or cached-false capability is refreshed so a server upgrade can enroll V2.
 
-Pending and active records accept only canonical standard-base64 V2 frames. The app decrypts
+Pending and active V2 records accept only canonical standard-base64 V2 frames. The app decrypts
 `version(2) | IV(12) | tag(16) | ciphertext` with the stored raw 32-byte key and authenticates the
 exact event type as AES-GCM additional data. On the unlocked content path it rejects malformed
-state/frame/key/UTF-8, wrong origin, plaintext, V1, and unknown schemes after migration. A locked
-delivery intentionally posts only the generic notice before envelope validation. A never-migrated
-installation retains legacy compatibility. After realtime work drains, Disconnect replaces any
-present key record with a retained keyless `revoked` tombstone; a failed or timed-out retirement
-keeps the next connection blocked, and a capable reconnect creates a fresh key.
+state/frame/key/UTF-8, wrong origin, plaintext, V1, and unknown schemes. Password-derived V1 and
+plaintext receive support are removed even when no random-key state exists. Enrolled V2 remains a
+temporary encrypted compatibility path only before the exclusive **2027-02-01T00:00:00Z** cutoff;
+before that cutoff a locked V2 delivery may post one generic notice only after its frame
+authenticates, without opening the database, while an absent state posts no notice. After the cutoff
+V2 fails closed and sync is the fallback.
 
-This is source and host-test evidence only. Current server V2 authenticates no stable
-server/account/device/message identity or issued time beyond the event type, and it supplies no
-cryptographic replay id or durable replay window. Android Expo Crypto/SecureStore behavior,
-process-death access, Firebase delivery, locked/headless behavior, replay, and coordinated
-server-side revocation/staged migration remain open under the parent `PUSH-CRYPTO-01`. Registration
-still uses the shared `HttpClient`; only HTTPS hides the enrolled key from a local network observer,
-so owner-approved cleartext server connections do not support a strong push-confidentiality claim.
+Scoped sessions require identity-bound V3. A versioned active key rotates after 30 days, with a
+bounded timer covering a continuously connected process. The candidate key, stable rotation UUID,
+previous version, and request times are stored before POST, so a lost response retries exactly.
+During a server-acknowledged overlap the candidate/current key is tried first and the immediately
+previous key only until the earlier of the server deadline and the local crash-safe deadline. An
+aged idempotent acknowledgement promotes the current key without reviving an expired predecessor.
+After realtime work drains, Disconnect replaces any present key record with a retained keyless
+`revoked` tombstone; a failed or timed-out retirement keeps the next connection blocked, and a
+capable reconnect creates a fresh key.
+
+V2 authenticates no stable server/account/device/message identity or issued time beyond the event
+type, and it supplies no cryptographic replay id or durable replay window. V3 authenticates the exact
+stable binding, event/message relation, occurrence id, issued time, and expiry before deriving a
+scoped durable replay key. Unlocked delivery reaches the normal encrypted incoming-event queue;
+locked delivery posts a generic notice only after a new durable admission, so a duplicate cannot
+re-alert after restart. Scoped Disconnect invokes the server's exact-device revocation operation and
+retains retry custody on failure. Ordinary same-key registration refresh preserves durable rotation
+metadata without returning a false rotation acknowledgement; an exact lost-response retry returns
+the original paired rotation id/expiry without extending the predecessor overlap.
+
+This is source and host-test evidence only. Android Expo Crypto/SecureStore behavior, process-death
+access, Firebase delivery, locked/headless behavior, and matching server deployment still require
+physical-device proof under `PUSH-CRYPTO-01E`; the primary parent remains open for that boundary.
+Registration sends its key through `HttpClient`; only HTTPS hides it from a local network observer,
+so owner-approved cleartext connections do not support a strong push-confidentiality claim.
+
+### 2.8 Durable RCS active-attempt ownership (PUSH-RETRY-01, 2026-09-07)
+
+The server now advertises `supports_rcs_send_attempt_ownership`. Before creating an optimistic RCS
+message, the app resolves an unknown capability through `/server/info`; it no longer mistakes the
+short startup window before server info arrives for a known legacy server. A completed response
+that omits the flag is still handled as legacy generation zero.
+
+For a capable server, each optimistic message stores a durable app-owned generation plus whether
+its physical owner is still pending. A retry claim uses an atomic compare-and-swap (CAS: update only
+if the row still has the state just read) to advance that generation, so two concurrent drains
+cannot both become the next attempt. The request sends `tempGuid` and `clientAttemptGeneration`;
+the server assigns `attemptGuid`. A normal-send acknowledgement keeps the logical tempGuid in its
+existing `guid` field and adds the attempt fields; an RCS new-chat result returns the named
+`{tempGuid, attemptGuid, clientAttemptGeneration}` tuple. The background RCS delivery-error adapter
+also forwards the generation instead of dropping it.
+
+Acknowledgements, exact `new-message` successes, and `message-send-error` events all reconcile
+against the durable owner. A delayed result from attempt A cannot overwrite settled retry B. If the
+server idempotently replays A while the app is processing a newer local retry token, the app installs
+A's physical `attemptGuid` under that current local generation rather than rolling the durable
+generation backward. If the bounded temp-guid alias has already been pruned, an error may recover
+the bubble only when its active `attemptGuid` identifies exactly one message; zero or multiple
+matches fail closed.
+
+Malformed or one-sided correlation fields never enter the legacy content matcher. They are stored
+with an invalid-correlation marker and use a different durable event identity from a later complete
+tuple, allowing the corrected event to be processed safely. Queue-less automatic reconstruction is
+also deliberately narrow: only an attachment with its retained local file metadata can be rebuilt.
+Text and contact sends remain visibly failed when their queue row is gone because their exact payload
+kind and metadata are not yet durable enough for a faithful resend.
+
+Focused host tests and TypeScript checks pass in both the app and server repositories. This is not a
+release or deployment claim: matching builds, killed/background-app delivery, the paired-phone
+Google correlation behavior, and the exact delayed-A/retry-B device matrix still need device
+evidence. Queue-less text/contact automatic replay remains intentionally unavailable until payload
+kind and all resend metadata are retained durably.
+
+### 2.9 Killed-process notification actions use durable credentials (2026-09-07)
+
+Android may invoke Reply, Mark as read, Love, or FaceTime Answer in a fresh JavaScript process whose
+foreground Zustand session still contains its empty defaults. Each real network action now resolves
+one explicit transport: a warm action pins the connected client's origin and monotonic transport
+revision, while a cold action re-runs the same vault, App Lock, and revocation inspection used by
+background sync and builds one immutable task-local client. Cold results never hydrate or publish
+the foreground store.
+
+Reply retains its existing authored-copy rule: the tray stays until the optimistic message and
+outgoing queue row commit. Love uses the same fixed client, while its database settlement keeps the
+separate account/revocation guard so a later tunnel rotation becomes an ordinary durable retry
+instead of stranding a sending row. FaceTime Answer and link creation use one pinned client and
+recheck it between the two requests. Mark as read commits the local newest-message marker first and
+only then lazily resolves the optional receipt transport. If vault inspection fails, the account is
+locked/revoked, or persisted feature settings did not hydrate, the local badge still clears but no
+receipt is sent. Mark Unread uses the same fail-closed hydration rule for its optional server sync.
+
+Focused host verification passes 2 service suites / 65 tests plus strict TypeScript. This proves
+composition and deterministic guards, not Android SecureStore access, native action delivery, tray
+timing, or process-death behavior; those remain part of the exact-candidate killed-process action
+matrix.
+
+### 2.10 Killed-process wallpaper events retain account and transport identity (2026-09-07)
+
+A background-changed group event is durably applied before its optional synced-wallpaper refresh.
+That refresh may outlive the individual queue attempt, but it must not lose the account that emitted
+the event. The sink therefore forwards only the originating account-generation number. The detached
+entry point captures a fresh lease for that same generation and either pins the warm connected
+client or re-authorizes a fixed vault client through App Lock and the durable revocation marker.
+
+The wallpaper service checks both account authority and HTTP transport currentness around metadata,
+native download, and database publication. This matters for an approved tunnel change: account
+ownership remains valid, while the old origin/header snapshot must stop. Chat-open wallpaper refresh
+uses the same pinned-client rule. A killed process never hydrates foreground Zustand merely to make
+this feature work.
+
+Host checks cover both warm/cold selection and the rotation fence. Android FCM/SecureStore startup,
+native cancellation, and actual wallpaper rendering still require the exact-candidate device run.
+The attachment auto-download caller is covered in the next section; task-local prerequisite
+recovery is covered in section 2.12.
+
+### 2.11 Killed-process attachment auto-download owns one bounded app-cache attempt (2026-09-07)
+
+The post-commit message hook carries the originating account generation into the same warm-pinned
+or cold durable transport resolver as synced wallpapers. It passes that task-local client and lease
+through the complete download, never relies on the empty foreground HTTP singleton in a fresh FCM
+process, and treats a transport/account change as stale before native transfer or DB settlement.
+
+A killed-process runtime also skips foreground attachment-cache startup recovery. Before reserving a
+persistent destination, the detached entry point therefore joins or starts the existing bounded,
+generation-guarded recovery flight. Only a `ready` result under the same current lease opens the
+download; stale or failed recovery remains a best-effort no-op. The development fixture still uses
+its installed synthetic fetcher instead of attempting a real request to its placeholder origin.
+
+For a background FCM delivery, an absolute attachment-effect deadline is captured at
+`receivedAt + 40 seconds`. After FIFO admission, a generation-bound collector accepts the
+post-commit `auto-download:<messageId>` factory synchronously. Repeated revisions share one keyed
+task. Collection close stops admission and starts the factories sequentially only after durable
+dispatch and notification presentation finish. The native callback awaits this tail outside the
+account-teardown slot. Deadline or account invalidation revokes the composed transport/download
+lease, with at most two seconds of cooperative cleanup grace.
+
+Focused host checks cover recovery-before-download, stale/failure refusal, task-client propagation,
+queued ordering, revision deduplication, sequential execution, deadline/account revocation, and the
+native-callback wait. This closes the former detached app-cache source-lifetime gap, but is bounded
+best effort rather than a durable retry: process death after the DB checkpoint may still skip or
+interrupt the copy. The 40-second deadline covers only the attachment-effect tail, not FIFO wait or
+dispatch/presentation. Final persistent-log flushing uses a separate callback-entry
+`receivedAt + 55 seconds` cutoff, leaving five seconds before RNFB's 60-second Android task limit.
+It adopts the older serialized log work and its own queued write, retains ownership across every
+attempt in an older overlapping headless retry session, revokes asynchronous file-mutation authority
+before expiry returns, and suppresses later debounce/retry work. A synchronous Expo file call that
+already began cannot be interrupted, and earlier delivery can reach the finalizer after
+55 seconds, so the complete callback lifetime and exact Android behavior remain unproven.
+
+Headless delivery writes only Gator's app-cache copy. It deliberately skips `expo-media-library`
+because the Photos operation has no cancellation signal. A saved Gallery or Gator Album preference
+therefore is not fulfilled or durably retried for this background delivery; once `localPath` is
+stored, ordinary auto-download will not later repeat that external copy. `DL-01` remains open for a
+durable Gallery receipt or cancellable native worker and for its native hostile-server,
+process-death, cleanup, and DB/file device matrix.
+
+### 2.12 Killed-FCM prerequisite recovery owns its bounded retry (2026-09-07)
+
+A durable message/read/group event can arrive before its local chat or message prerequisite. Those
+expected failures now inherit the dependency-pending marker, so the repository refunds the claim
+attempt and commits the documented five-second retry instead of using the ordinary 30-second error
+backoff. The drain emits a synchronous signal only after that settlement succeeds. This also covers
+wait-only RCS attempt-owner ordering, which needs a retry but no network repair.
+
+During an FCM delivery, the composition root collects the exact task-local recovery jobs and starts
+the due clock from that DB signal, not after the whole drain flight. Chat recovery is capped at eight
+seconds to preserve the 15-second read-status lifetime; account/deletion recovery is capped at 20
+seconds. Recovery and the due clock run concurrently, followed by one 20-second bounded drain retry.
+The runner uses the authorized warm/cold transport, serializes with other sync owners, and supplies
+account/transport/App-Lock guards to every network and DB continuation. Generation retirement and a
+warm App Lock transition abort immediately.
+
+Host tests prove targeted ordering/caps, timeout and invalidation, App-Lock refusal, true dependency
+deferral, wait-only retry, both recovery/due completion orders, and generation cancellation. This
+closes the prerequisite-recovery source lifetime only. Exact Android killed-process execution and
+matching app/server deployment evidence remain open under `REL-001` and `PUSH-RETRY-01`; section
+2.11 closes the app-cache effect-tail source gap while Gallery/Album durability and device proof
+remain open under `DL-01`.
 
 ---
 

@@ -11,3 +11,5 @@ export * as fcmApi from './endpoints/fcm';
 export * as contactsApi from './endpoints/contacts';
 export * as errorReportsApi from './endpoints/errorReports';
 export * as backupsApi from './endpoints/backups';
+export * as repairSnapshotApi from './endpoints/repairSnapshot';
+export * as deviceCredentialsApi from './endpoints/deviceCredentials';

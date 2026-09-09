@@ -1,4 +1,5 @@
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
+import { isRcsChatGuid } from '@utils/chat';
 import { scheduledMessages } from '../schema';
 import {
   runInTransactionContext,
@@ -7,7 +8,18 @@ import {
   type DbTransactionContext,
 } from '../transaction';
 import type { AppDatabase } from '../types';
-import { insertOutgoingTextWithinTransaction, type InsertOutgoingTextArgs } from './outgoing';
+import {
+  explicitMessageTargetPart,
+  MessageTargetUnavailableError,
+  resolveMessageTargetWithinTransaction,
+  type ExplicitMessageTargetPart,
+  type MessageTargetServerAuthorization,
+} from './messageTargets';
+import {
+  insertOutgoingTextWithinTransaction,
+  type InsertOutgoingTextArgs,
+  type OutgoingInsertResult,
+} from './outgoing';
 
 // ---- Scheduled messages ----------------------------------------------------
 
@@ -103,14 +115,31 @@ function mapScheduled(r: {
 export function insertScheduledWithinTransaction(
   context: DbTransactionContext,
   args: InsertScheduledArgs,
+  serverAuthorization?: MessageTargetServerAuthorization,
 ): Promise<number> {
   return runInTransactionContext(context, async (db) => {
+    const targetPart = explicitMessageTargetPart(
+      args.selectedMessageGuid,
+      args.selectedMessagePartIndex,
+    );
+    if (targetPart && isRcsChatGuid(args.chatGuid)) {
+      throw new MessageTargetUnavailableError('RCS threaded replies are not supported');
+    }
+    const resolvedTarget = targetPart
+      ? await resolveMessageTargetWithinTransaction(context, {
+          chatGuid: args.chatGuid,
+          messageGuid: targetPart.messageGuid,
+          partIndex: targetPart.partIndex,
+          serverAuthorization,
+        })
+      : null;
+    if (targetPart && !resolvedTarget) {
+      throw new MessageTargetUnavailableError();
+    }
     const payload: ScheduledPayload = {
       text: args.text,
-      selectedMessageGuid: args.selectedMessageGuid,
-      selectedMessagePartIndex: args.selectedMessageGuid
-        ? args.selectedMessagePartIndex
-        : undefined,
+      selectedMessageGuid: resolvedTarget?.messageGuid,
+      selectedMessagePartIndex: resolvedTarget?.partIndex,
     };
     const rows = await db
       .insert(scheduledMessages)
@@ -396,6 +425,17 @@ export class ScheduledOutgoingClaimLostError extends Error {
   }
 }
 
+/** The claimed occurrence was retired because its exact reply target no longer survives. */
+export class ScheduledOutgoingTargetUnavailableError extends Error {
+  readonly scheduledId: number;
+
+  constructor(scheduledId: number) {
+    super(`scheduled reply target unavailable for row ${scheduledId}`);
+    this.name = 'ScheduledOutgoingTargetUnavailableError';
+    this.scheduledId = scheduledId;
+  }
+}
+
 /**
  * Atomically claim a pending row for sending (pending → sending). The
  * `status = 'pending'` guard makes this the concurrency lock: a second caller
@@ -435,10 +475,11 @@ export async function claimDueScheduled(
   id: number,
   now: number,
   commitGuard?: DbCommitGuard,
+  serverAuthorization?: MessageTargetServerAuthorization,
 ): Promise<ScheduledRow | null> {
   return withDbTransaction(
     db,
-    async () => {
+    async (context) => {
       const rows = await db.all<Parameters<typeof mapScheduled>[0]>(sql`
         UPDATE scheduled_messages
            SET status = 'sending'
@@ -447,7 +488,54 @@ export async function claimDueScheduled(
            AND server_id IS NULL
            AND scheduled_for <= ${now}
         RETURNING ${SCHED_COLS}`);
-      return rows[0] ? mapScheduled(rows[0]) : null;
+      const claimed = rows[0];
+      if (!claimed) return null;
+      let row: ScheduledRow;
+      try {
+        row = mapScheduled(claimed);
+      } catch {
+        await db
+          .update(scheduledMessages)
+          .set({ status: 'error' })
+          .where(and(eq(scheduledMessages.id, id), eq(scheduledMessages.status, 'sending')));
+        return null;
+      }
+      let targetPart: ExplicitMessageTargetPart | null | undefined;
+      try {
+        targetPart = explicitMessageTargetPart(
+          row.selectedMessageGuid,
+          row.selectedMessagePartIndex,
+        );
+      } catch {
+        targetPart = undefined;
+      }
+      const unsupportedRcsReply = targetPart != null && isRcsChatGuid(row.chatGuid);
+      const resolvedTarget = unsupportedRcsReply
+        ? undefined
+        : targetPart === null
+          ? null
+          : targetPart === undefined
+            ? undefined
+            : await resolveMessageTargetWithinTransaction(context, {
+                chatGuid: row.chatGuid,
+                messageGuid: targetPart.messageGuid,
+                partIndex: targetPart.partIndex,
+                serverAuthorization,
+              });
+      if (resolvedTarget === undefined || (targetPart && !resolvedTarget)) {
+        await db
+          .update(scheduledMessages)
+          .set({ status: 'error' })
+          .where(and(eq(scheduledMessages.id, id), eq(scheduledMessages.status, 'sending')));
+        return null;
+      }
+      return resolvedTarget
+        ? {
+            ...row,
+            selectedMessageGuid: resolvedTarget.messageGuid,
+            selectedMessagePartIndex: resolvedTarget.partIndex,
+          }
+        : row;
     },
     commitGuard,
   );
@@ -522,10 +610,48 @@ export async function handoverScheduledTextToOutgoing(
   db: AppDatabase,
   args: ScheduledTextHandoverArgs,
   commitGuard?: DbCommitGuard,
-): Promise<void> {
-  await withDbTransaction(
+  serverAuthorization?: MessageTargetServerAuthorization,
+): Promise<OutgoingInsertResult> {
+  const result = await withDbTransaction(
     db,
     async (context) => {
+      let targetPart: ExplicitMessageTargetPart | null | undefined;
+      try {
+        targetPart = explicitMessageTargetPart(
+          args.outgoing.selectedMessageGuid,
+          args.outgoing.partIndex,
+        );
+      } catch {
+        targetPart = undefined;
+      }
+      const unsupportedRcsReply = targetPart != null && isRcsChatGuid(args.outgoing.chatGuid);
+      const resolvedTarget = unsupportedRcsReply
+        ? undefined
+        : targetPart === null
+          ? null
+          : targetPart === undefined
+            ? undefined
+            : await resolveMessageTargetWithinTransaction(context, {
+                chatGuid: args.outgoing.chatGuid,
+                messageGuid: targetPart.messageGuid,
+                partIndex: targetPart.partIndex,
+                serverAuthorization,
+              });
+      if (resolvedTarget === undefined || (targetPart && !resolvedTarget)) {
+        const retired = await db
+          .update(scheduledMessages)
+          .set({ status: 'error' })
+          .where(
+            and(
+              eq(scheduledMessages.id, args.scheduledId),
+              eq(scheduledMessages.status, 'sending'),
+              isNull(scheduledMessages.serverId),
+            ),
+          )
+          .returning({ id: scheduledMessages.id });
+        if (retired.length === 0) throw new ScheduledOutgoingClaimLostError(args.scheduledId);
+        return null;
+      }
       const claimed =
         args.transition.kind === 'rearm'
           ? await db
@@ -559,10 +685,17 @@ export async function handoverScheduledTextToOutgoing(
         throw new ScheduledOutgoingClaimLostError(args.scheduledId);
       }
 
-      await insertOutgoingTextWithinTransaction(context, args.outgoing);
+      return insertOutgoingTextWithinTransaction(context, {
+        ...args.outgoing,
+        selectedMessageGuid: resolvedTarget?.messageGuid,
+        partIndex: resolvedTarget?.partIndex,
+        threadOriginatorGuid: resolvedTarget?.messageGuid,
+      });
     },
     commitGuard,
   );
+  if (!result) throw new ScheduledOutgoingTargetUnavailableError(args.scheduledId);
+  return result;
 }
 
 /**
@@ -592,6 +725,32 @@ export async function markScheduledFailed(
            AND server_id IS NULL
         RETURNING status`);
       return rows[0]?.status ?? 'stale';
+    },
+    commitGuard,
+  );
+}
+
+/** Release an unposted claim without consuming an attempt (for temporary capability unknowns). */
+export async function deferScheduledClaim(
+  db: AppDatabase,
+  id: number,
+  commitGuard?: DbCommitGuard,
+): Promise<boolean> {
+  return withDbTransaction(
+    db,
+    async () => {
+      const rows = await db
+        .update(scheduledMessages)
+        .set({ status: 'pending' })
+        .where(
+          and(
+            eq(scheduledMessages.id, id),
+            eq(scheduledMessages.status, 'sending'),
+            isNull(scheduledMessages.serverId),
+          ),
+        )
+        .returning({ id: scheduledMessages.id });
+      return rows.length > 0;
     },
     commitGuard,
   );

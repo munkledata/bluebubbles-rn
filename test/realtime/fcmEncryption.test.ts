@@ -1,16 +1,34 @@
 import {
+  activeFcmPushKeyState,
+  activeFcmDeviceEncryptionV3State,
   activeFcmDeviceEncryptionState,
   decodeFcmDeviceEncryptionKey,
   encodeFcmDeviceEncryptionKey,
   FCM_DEVICE_ENCRYPTION_TYPE,
+  FCM_PUSH_KEY_ROTATION_INTERVAL_MS,
+  FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS,
+  FCM_PUSH_ENCRYPTION_TYPE_V3,
+  fcmPushDecryptionKeyCandidates,
+  fcmPushKeyRotationDue,
   inspectFcmDeviceEncryptionState,
+  pendingFcmPushKeyState,
+  pendingFcmDeviceEncryptionV3State,
   pendingFcmDeviceEncryptionState,
   revokedFcmDeviceEncryptionState,
+  rotatingFcmPushKeyState,
   serializeFcmDeviceEncryptionState,
 } from '@core/realtime';
 
 const ORIGIN = 'https://gator.example';
 const KEY = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
+const NEXT_KEY = 'BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc';
+const REQUESTED_AT = 1_700_000_000_000;
+const ROTATION_ID = '44444444-4444-4444-8444-444444444444';
+const V3_BINDING = {
+  serverInstallationId: '11111111-1111-4111-8111-111111111111',
+  principalId: '22222222-2222-4222-8222-222222222222',
+  deviceId: '33333333-3333-4333-8333-333333333333',
+} as const;
 
 describe('FCM device-encryption contract', () => {
   it('encodes and decodes the server canonical 32-byte base64url key', () => {
@@ -37,6 +55,16 @@ describe('FCM device-encryption contract', () => {
       pendingFcmDeviceEncryptionState(KEY, ORIGIN),
       activeFcmDeviceEncryptionState(KEY, 'device-1', ORIGIN),
       revokedFcmDeviceEncryptionState(),
+      pendingFcmDeviceEncryptionV3State(KEY, ORIGIN),
+      activeFcmDeviceEncryptionV3State(KEY, V3_BINDING, ORIGIN),
+      revokedFcmDeviceEncryptionState(FCM_PUSH_ENCRYPTION_TYPE_V3),
+      pendingFcmPushKeyState(KEY, ORIGIN, REQUESTED_AT),
+      rotatingFcmPushKeyState(NEXT_KEY, KEY, 1, V3_BINDING, ORIGIN, ROTATION_ID, REQUESTED_AT),
+      activeFcmPushKeyState(NEXT_KEY, 2, V3_BINDING, ORIGIN, REQUESTED_AT, {
+        key: KEY,
+        keyVersion: 1,
+        expiresAt: REQUESTED_AT + 1_000,
+      }),
     ];
 
     for (const state of states) {
@@ -77,6 +105,17 @@ describe('FCM device-encryption contract', () => {
         key: `${KEY.slice(0, -1)}9`,
         deviceId: 'device-1',
       }),
+      JSON.stringify({
+        version: 1,
+        encryptionType: FCM_PUSH_ENCRYPTION_TYPE_V3,
+        status: 'pending',
+        origin: ORIGIN,
+        key: KEY,
+      }),
+      JSON.stringify({
+        ...activeFcmDeviceEncryptionV3State(KEY, V3_BINDING, ORIGIN),
+        principalId: `A${V3_BINDING.principalId.slice(1)}`,
+      }),
       'x'.repeat(4_097),
     ];
 
@@ -92,6 +131,76 @@ describe('FCM device-encryption contract', () => {
     expect(() => activeFcmDeviceEncryptionState(KEY, '', ORIGIN)).toThrow('invalid FCM device id');
     expect(() => activeFcmDeviceEncryptionState(KEY, 'x'.repeat(257), ORIGIN)).toThrow(
       'invalid FCM device id',
+    );
+  });
+
+  it('requires exact canonical V3 enrollment identities', () => {
+    expect(() =>
+      activeFcmDeviceEncryptionV3State(
+        KEY,
+        { ...V3_BINDING, deviceId: '33333333-3333-3333-8333-333333333333' },
+        ORIGIN,
+      ),
+    ).toThrow('invalid FCM device id');
+  });
+
+  it('tries the current key first and drops the previous key at its exclusive local deadline', () => {
+    const rotating = rotatingFcmPushKeyState(
+      NEXT_KEY,
+      KEY,
+      1,
+      V3_BINDING,
+      ORIGIN,
+      ROTATION_ID,
+      REQUESTED_AT,
+    );
+    const active = activeFcmPushKeyState(NEXT_KEY, 2, V3_BINDING, ORIGIN, REQUESTED_AT, {
+      key: KEY,
+      keyVersion: 1,
+      expiresAt: REQUESTED_AT + 1_000,
+    });
+
+    expect(
+      fcmPushDecryptionKeyCandidates(
+        rotating,
+        REQUESTED_AT + FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS - 1,
+      ),
+    ).toEqual([
+      { key: NEXT_KEY, role: 'current' },
+      { key: KEY, role: 'previous' },
+    ]);
+    expect(
+      fcmPushDecryptionKeyCandidates(rotating, REQUESTED_AT + FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS),
+    ).toEqual([{ key: NEXT_KEY, role: 'current' }]);
+    const agedRetry = rotatingFcmPushKeyState(
+      NEXT_KEY,
+      KEY,
+      1,
+      V3_BINDING,
+      ORIGIN,
+      ROTATION_ID,
+      REQUESTED_AT + FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS,
+      REQUESTED_AT,
+    );
+    expect(
+      fcmPushDecryptionKeyCandidates(agedRetry, REQUESTED_AT + FCM_PUSH_KEY_ROTATION_LOCAL_MAX_MS),
+    ).toEqual([{ key: NEXT_KEY, role: 'current' }]);
+    expect(fcmPushDecryptionKeyCandidates(active, REQUESTED_AT + 999)).toHaveLength(2);
+    expect(fcmPushDecryptionKeyCandidates(active, REQUESTED_AT + 1_000)).toEqual([
+      { key: NEXT_KEY, role: 'current' },
+    ]);
+  });
+
+  it('rotates legacy V3 immediately and versioned keys at the fixed 30-day boundary', () => {
+    const legacy = activeFcmDeviceEncryptionV3State(KEY, V3_BINDING, ORIGIN);
+    const active = activeFcmPushKeyState(KEY, 1, V3_BINDING, ORIGIN, REQUESTED_AT);
+
+    expect(fcmPushKeyRotationDue(legacy, REQUESTED_AT)).toBe(true);
+    expect(
+      fcmPushKeyRotationDue(active, REQUESTED_AT + FCM_PUSH_KEY_ROTATION_INTERVAL_MS - 1),
+    ).toBe(false);
+    expect(fcmPushKeyRotationDue(active, REQUESTED_AT + FCM_PUSH_KEY_ROTATION_INTERVAL_MS)).toBe(
+      true,
     );
   });
 });

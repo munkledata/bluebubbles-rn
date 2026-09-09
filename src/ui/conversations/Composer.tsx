@@ -25,14 +25,32 @@ import type { Recurrence } from '@core/schedule';
 import { AttachmentTray, type PendingAttachment } from './AttachmentTray';
 import { EffectPicker } from './effects';
 import { RecurrenceSheet } from './RecurrenceSheet';
-import { useComposerAuthoringSession } from './useComposerAuthoringSession';
+import {
+  useComposerAuthoringSession,
+  type ComposerAttachmentAdmission,
+  type ComposerTextAttachmentAdmission,
+  type ComposerTextAdmission,
+} from './useComposerAuthoringSession';
 
 interface ComposerProps {
   /** effectId set when sending with an iMessage send-effect (long-press send); subject is the
    *  optional Private-API iMessage subject line; mentions are @mention spans in the text. */
-  onSend: (text: string, effectId?: string, subject?: string, mentions?: MentionRange[]) => void;
+  onSend: (
+    text: string,
+    effectId?: string,
+    subject?: string,
+    mentions?: MentionRange[],
+  ) => ComposerTextAdmission;
   /** Send photo/video/file attachments staged in the inline tray. */
-  onSendAttachments?: (items: PendingAttachment[]) => void;
+  onSendAttachments?: (items: PendingAttachment[]) => ComposerAttachmentAdmission;
+  /** Send one staged attachment and body text under one optimistic/retry identity. */
+  onSendTextAttachment?: (
+    text: string,
+    item: PendingAttachment,
+    effectId?: string,
+    subject?: string,
+    mentions?: MentionRange[],
+  ) => ComposerTextAttachmentAdmission;
   /**
    * Synchronous all-or-none preflight for the logical jobs created by one submit. Returning false
    * leaves the authored text and attachments in place.
@@ -94,6 +112,7 @@ export interface ComposerRemovalState {
 export const Composer = React.memo(function Composer({
   onSend,
   onSendAttachments,
+  onSendTextAttachment,
   canSubmit,
   isSubmitOwnerCurrent,
   onPickFiles,
@@ -214,6 +233,7 @@ export const Composer = React.memo(function Composer({
     trimmed,
     isEditing,
     canSend,
+    submissionPending,
     mentionMatches,
     pickMention,
     setCursor,
@@ -231,6 +251,7 @@ export const Composer = React.memo(function Composer({
     setTrayOpen,
     onSend,
     onSendAttachments,
+    onSendTextAttachment,
     canSubmit,
     isSubmitOwnerCurrent,
     onCancelEdit,
@@ -291,6 +312,7 @@ export const Composer = React.memo(function Composer({
         hasVisibleAttachments: replyTo.hasVisibleAttachments,
         attachmentDescription: replyTo.attachmentDescription,
         balloonBundleId: replyTo.balloonBundleId,
+        isRetracted: replyTo.isRetracted,
       })
     : '';
 
@@ -335,6 +357,7 @@ export const Composer = React.memo(function Composer({
           </View>
           <Pressable
             onPress={cancelEdit}
+            disabled={submissionPending}
             hitSlop={10}
             style={styles.replyClose}
             accessibilityRole="button"
@@ -359,6 +382,7 @@ export const Composer = React.memo(function Composer({
           </View>
           <Pressable
             onPress={onCancelReply}
+            disabled={submissionPending}
             hitSlop={10}
             style={styles.replyClose}
             accessibilityRole="button"
@@ -403,6 +427,7 @@ export const Composer = React.memo(function Composer({
               )}
               <Pressable
                 onPress={() => removePending(p.uri)}
+                disabled={submissionPending}
                 hitSlop={6}
                 style={styles.pendingRemove}
                 accessibilityRole="button"
@@ -417,7 +442,7 @@ export const Composer = React.memo(function Composer({
 
       {subjectEnabled && !isEditing ? (
         <TextInput
-          editable={active}
+          editable={active && !submissionPending}
           value={subject}
           onChangeText={setSubject}
           placeholder="Subject"
@@ -450,6 +475,7 @@ export const Composer = React.memo(function Composer({
         {attachEnabled ? (
           <Pressable
             onPress={toggleTray}
+            disabled={submissionPending}
             hitSlop={8}
             style={styles.attach}
             accessibilityRole="button"
@@ -462,7 +488,7 @@ export const Composer = React.memo(function Composer({
         ) : null}
         <TextInput
           ref={inputRef}
-          editable={active}
+          editable={active && !submissionPending}
           multiline
           value={text}
           onChangeText={onChangeText}
@@ -488,6 +514,7 @@ export const Composer = React.memo(function Composer({
         {trimmed && onSchedule && !isEditing ? (
           <Pressable
             onPress={pickSchedule}
+            disabled={submissionPending}
             hitSlop={8}
             style={styles.schedule}
             accessibilityRole="button"
@@ -501,17 +528,24 @@ export const Composer = React.memo(function Composer({
         {canSend ? (
           <Pressable
             onPress={() => submit()}
-            onLongPress={!isEditing && trimmed ? () => setEffectOpen(true) : undefined}
+            onLongPress={
+              !submissionPending && !isEditing && trimmed ? () => setEffectOpen(true) : undefined
+            }
+            disabled={submissionPending}
             delayLongPress={250}
-            style={[styles.send, { backgroundColor: theme.color.tint }]}
+            style={[
+              styles.send,
+              { backgroundColor: theme.color.tint, opacity: submissionPending ? 0.55 : 1 },
+            ]}
             accessibilityRole="button"
             accessibilityLabel="Send message"
             accessibilityHint="Long-press to send with an effect"
+            accessibilityState={{ disabled: submissionPending, busy: submissionPending }}
           >
             <Icon name="arrow-up" size={20} color={readableTextOn(theme.color.tint)} />
           </Pressable>
         ) : null}
-        {!canSend && !isEditing && onStartVoice ? (
+        {!canSend && !submissionPending && !isEditing && onStartVoice ? (
           <Pressable
             onPress={onStartVoice}
             hitSlop={8}
@@ -525,7 +559,7 @@ export const Composer = React.memo(function Composer({
           </Pressable>
         ) : null}
       </View>
-      {trayOpen ? (
+      {trayOpen && !submissionPending ? (
         <AttachmentTray
           onPick={addPending}
           onPickFiles={handlePickFiles}

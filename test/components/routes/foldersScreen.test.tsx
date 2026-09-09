@@ -21,6 +21,7 @@ jest.mock('expo-router', () => {
   const ReactLib = require('react');
   return {
     useRouter: () => ({ back: mockBack, push: mockPush }),
+    useLocalSearchParams: () => ({}),
     useFocusEffect: (callback: () => void | (() => void)) =>
       ReactLib.useEffect(callback, [callback]),
   };
@@ -30,19 +31,27 @@ jest.mock('@features/conversations/useCustomFolderSummaries', () => ({
     mockUseCustomFolderSummaries(lease, enabled),
 }));
 jest.mock('@/services/customFolderCommands', () => ({
+  createCustomFolder: jest.fn(),
+  deleteCustomFolder: jest.fn(),
+  loadCustomFolders: jest.fn(),
   reorderCustomFolders: (...args: unknown[]) => mockReorderCustomFolders(...args),
+  renameCustomFolder: jest.fn(),
 }));
 jest.mock('@/services/realtime/deliveryCoordinator', () => ({
   captureRealtimeDeliveryLease: () => mockAccountLease,
   subscribeRealtimeGenerationInvalidation: () => mockUnsubscribe,
 }));
 jest.mock('@ui/dialog/dialogStore', () => ({ showDialog: mockShowDialog }));
+jest.mock('@ui/hooks/useUnsavedChangesGuard', () => ({
+  useUnsavedChangesGuard: () => ({ navigateWithoutPrompt: (navigate: () => void) => navigate() }),
+}));
 jest.mock('@ui', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const ReactLib = require('react');
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { Text, View } = require('react-native');
   return {
+    TextField: jest.requireActual('@ui/primitives/TextField').TextField,
     readableTextOn: () => '#ffffff',
     useTheme: () => ({
       color: {
@@ -64,6 +73,8 @@ jest.mock('@ui', () => {
 
 // eslint-disable-next-line import/first
 import ConversationFoldersScreen from '../../../app/(app)/folders';
+// eslint-disable-next-line import/first
+import ConversationFolderEditScreen from '../../../app/(app)/folders/edit';
 
 const INITIAL_ROWS: CustomFolderSummaryRow[] = [
   {
@@ -122,5 +133,16 @@ describe('ConversationFoldersScreen reorder handoff', () => {
     await view.rerender(<ConversationFoldersScreen />);
 
     expect(displayedFolderNames()).toEqual(['Alpha', 'Beta']);
+  });
+});
+
+describe('ConversationFolderEditScreen accessibility', () => {
+  it('gives the folder-name input a direct accessible label', async () => {
+    mockIsCurrent.mockReturnValue(true);
+    await renderWithTheme(<ConversationFolderEditScreen />);
+
+    const input = screen.getByLabelText('Folder name');
+    expect(input.props.accessibilityLabel).toBe('Folder name');
+    expect(input.props.accessibilityLabelledBy).toBeUndefined();
   });
 });

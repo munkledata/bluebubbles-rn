@@ -14,6 +14,7 @@ const mockCleanupActiveMigrationDeathDatabase = jest.fn();
 const mockCleanupWalWriteDeathDatabase = jest.fn();
 const mockCleanupDatabase = jest.fn();
 const mockCleanupRuntimeConcurrencyDatabase = jest.fn();
+const mockCleanupBackupRestoreDatabase = jest.fn();
 const mockPrepareActiveMigrationDeathDatabase = jest.fn();
 const mockPrepareWalWriteDeathDatabase = jest.fn();
 const mockPrepareDatabase = jest.fn();
@@ -22,6 +23,8 @@ const mockResumeWalWriteDeathDatabase = jest.fn();
 const mockResumeDatabase = jest.fn();
 const mockRunRuntimeConcurrencyDatabase = jest.fn();
 const mockRunRuntimeConcurrencyWave = jest.fn();
+const mockRunBackupRestoreDatabase = jest.fn();
+const mockRunBackupRestoreWave = jest.fn();
 
 jest.mock('expo-file-system', () => ({
   Paths: { document: '/private-files' },
@@ -58,7 +61,11 @@ jest.mock('@core/secure', () => ({ logger: mockLogger }));
 jest.mock('@/services/boot/dbRuntimeConcurrencyWave', () => ({
   runDbRuntimeConcurrencyWave: mockRunRuntimeConcurrencyWave,
 }));
+jest.mock('@/services/boot/dbBackupRestoreWave', () => ({
+  runDbBackupRestoreWave: mockRunBackupRestoreWave,
+}));
 jest.mock('@db/database', () => ({
+  cleanupDbBackupRestoreSelfTestDatabase: mockCleanupBackupRestoreDatabase,
   cleanupDbActiveMigrationDeathSelfTestDatabase: mockCleanupActiveMigrationDeathDatabase,
   cleanupDbActiveWalWriteDeathSelfTestDatabase: mockCleanupWalWriteDeathDatabase,
   cleanupDbProcessRelaunchSelfTestDatabase: mockCleanupDatabase,
@@ -70,6 +77,7 @@ jest.mock('@db/database', () => ({
   resumeDbActiveWalWriteDeathSelfTest: mockResumeWalWriteDeathDatabase,
   resumeDbProcessRelaunchSelfTest: mockResumeDatabase,
   runDbRuntimeConcurrencySelfTest: mockRunRuntimeConcurrencyDatabase,
+  runDbBackupRestoreSelfTest: mockRunBackupRestoreDatabase,
 }));
 
 const REQUEST = '.gator-db-relaunch-request-v1';
@@ -77,6 +85,8 @@ const WAL_WRITE_DEATH_REQUEST = '.gator-db-wal-write-death-request-v1';
 const ACTIVE_MIGRATION_DEATH_REQUEST = '.gator-db-active-migration-death-request-v1';
 const RUNTIME_CONCURRENCY_REQUEST = '.gator-db-runtime-concurrency-request-v1';
 const RUNTIME_CONCURRENCY_RUNNING = '.gator-db-runtime-concurrency-running-v1';
+const BACKUP_RESTORE_REQUEST = '.gator-db-backup-restore-request-v1';
+const BACKUP_RESTORE_RUNNING = '.gator-db-backup-restore-running-v1';
 const PREPARING = '.gator-db-relaunch-preparing-v1';
 const READY = '.gator-db-relaunch-ready-v1';
 const RESUMING = '.gator-db-relaunch-resuming-v1';
@@ -90,6 +100,7 @@ const PREFIX = 'GATOR_DB_RELAUNCH_V1 ';
 const WAL_WRITE_DEATH_PREFIX = 'GATOR_DB_WAL_WRITE_DEATH_V1 ';
 const ACTIVE_MIGRATION_DEATH_PREFIX = 'GATOR_DB_ACTIVE_MIGRATION_DEATH_V1 ';
 const RUNTIME_CONCURRENCY_PREFIX = 'GATOR_DB_RUNTIME_CONCURRENCY_V1 ';
+const BACKUP_RESTORE_PREFIX = 'GATOR_DB_BACKUP_RESTORE_V1 ';
 
 const prepareChecks = {
   preCleanup: true,
@@ -175,6 +186,27 @@ const runtimeConcurrencyDatabaseChecks = {
   integrity: true,
   databaseCleanup: true,
 };
+const backupRestoreDatabaseChecks = {
+  preCleanup: true,
+  encryptedOpen: true,
+  migrationLedger: true,
+  plaintextNearLimit: true,
+  bb2Envelope: true,
+  nativeSeal: true,
+  nativeOpen: true,
+  lateFaultObserved: true,
+  kvRolledBack: true,
+  themesRolledBack: true,
+  chatRolledBack: true,
+  foldersRolledBack: true,
+  tempTablesCleaned: true,
+  retrySucceeded: true,
+  successorWrite: true,
+  foreignKeys: true,
+  integrity: true,
+  databaseClosed: true,
+  databaseCleanup: true,
+};
 
 function loadContract(): typeof import('@/services/boot/devDbRelaunchContract') {
   // Each load represents a fresh app process and therefore must get a fresh in-memory latch.
@@ -230,6 +262,17 @@ function parsedRuntimeConcurrencyMarkers(): Record<string, unknown>[] {
   });
 }
 
+function parsedBackupRestoreMarkers(): Record<string, unknown>[] {
+  return mockLogger.info.mock.calls.map(([message]) => {
+    expect(typeof message).toBe('string');
+    expect(message).toMatch(/^GATOR_DB_BACKUP_RESTORE_V1 /);
+    return JSON.parse(String(message).slice(BACKUP_RESTORE_PREFIX.length)) as Record<
+      string,
+      unknown
+    >;
+  });
+}
+
 async function flushMicrotasks(count = 12): Promise<void> {
   for (let index = 0; index < count; index += 1) await Promise.resolve();
 }
@@ -246,6 +289,7 @@ beforeEach(() => {
   mockCleanupWalWriteDeathDatabase.mockReturnValue(true);
   mockCleanupActiveMigrationDeathDatabase.mockReturnValue(true);
   mockCleanupRuntimeConcurrencyDatabase.mockReturnValue(true);
+  mockCleanupBackupRestoreDatabase.mockReturnValue(true);
 });
 
 describe('DEV DB relaunch durable phase orchestration', () => {
@@ -396,8 +440,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         schema: 1,
         suite: 'android-db-runtime-concurrency',
         status: 'pass',
-        migrationCount: 45,
-        migrationHead: '0045_backup_export_indexes',
+        migrationCount: 47,
+        migrationHead: '0047_message_retraction_topology',
         checks: {
           requestValid: true,
           runStatePersisted: true,
@@ -426,8 +470,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         schema: 1,
         suite: 'android-db-runtime-concurrency',
         status: 'fail',
-        migrationCount: 45,
-        migrationHead: '0045_backup_export_indexes',
+        migrationCount: 47,
+        migrationHead: '0047_message_retraction_topology',
         checks: {
           requestValid: true,
           runStatePersisted: true,
@@ -505,6 +549,84 @@ describe('DEV DB relaunch durable phase orchestration', () => {
     });
   });
 
+  it('runs the explicit one-launch BACKUP-02 lane and emits one finite PASS', async () => {
+    createExisting(BACKUP_RESTORE_REQUEST);
+    mockRunBackupRestoreDatabase.mockImplementation(async (runWave) => {
+      expect(runWave).toBe(mockRunBackupRestoreWave);
+      expect(mockFiles.get(BACKUP_RESTORE_RUNNING)).toBe(0);
+      return { status: 'pass', checks: backupRestoreDatabaseChecks };
+    });
+    const contract = loadContract();
+
+    const first = contract.startDevDbRelaunchContractIfRequested();
+    const second = contract.startDevDbRelaunchContractIfRequested();
+    await flushMicrotasks();
+
+    expect(first).toBe(second);
+    expect(mockRunBackupRestoreDatabase).toHaveBeenCalledTimes(1);
+    expect(mockRunRuntimeConcurrencyDatabase).not.toHaveBeenCalled();
+    expect(mockPrepareDatabase).not.toHaveBeenCalled();
+    expect(mockFiles.size).toBe(0);
+    expect(parsedBackupRestoreMarkers()).toEqual([
+      {
+        schema: 1,
+        suite: 'android-backup-restore',
+        status: 'pass',
+        migrationCount: 47,
+        migrationHead: '0047_message_retraction_topology',
+        checks: {
+          requestValid: true,
+          runStatePersisted: true,
+          ...backupRestoreDatabaseChecks,
+          stateCleanup: true,
+        },
+      },
+    ]);
+  });
+
+  it('recovers an interrupted BACKUP-02 run without opening its database workflow', async () => {
+    createExisting(BACKUP_RESTORE_REQUEST, BACKUP_RESTORE_RUNNING);
+    const contract = loadContract();
+
+    contract.startDevDbRelaunchContractIfRequested();
+    await flushMicrotasks();
+
+    expect(mockRunBackupRestoreDatabase).not.toHaveBeenCalled();
+    expect(mockCleanupBackupRestoreDatabase).toHaveBeenCalledTimes(1);
+    expect(mockCleanupRuntimeConcurrencyDatabase).toHaveBeenCalledTimes(1);
+    expect(mockCleanupDatabase).toHaveBeenCalledTimes(1);
+    expect(mockCleanupWalWriteDeathDatabase).toHaveBeenCalledTimes(1);
+    expect(mockCleanupActiveMigrationDeathDatabase).toHaveBeenCalledTimes(1);
+    expect(mockFiles.size).toBe(0);
+    expect(parsedBackupRestoreMarkers()[0]).toMatchObject({
+      status: 'fail',
+      failureCode: 'interrupted-run',
+      checks: { requestValid: true, databaseCleanup: true, stateCleanup: true },
+    });
+  });
+
+  it('rejects a BACKUP-02 request beside another lane and cleans every fixed database', async () => {
+    createExisting(BACKUP_RESTORE_REQUEST, REQUEST);
+    const contract = loadContract();
+
+    contract.startDevDbRelaunchContractIfRequested();
+    await flushMicrotasks();
+
+    expect(mockRunBackupRestoreDatabase).not.toHaveBeenCalled();
+    expect(mockPrepareDatabase).not.toHaveBeenCalled();
+    expect(mockCleanupBackupRestoreDatabase).toHaveBeenCalledTimes(1);
+    expect(mockCleanupRuntimeConcurrencyDatabase).toHaveBeenCalledTimes(1);
+    expect(mockCleanupDatabase).toHaveBeenCalledTimes(1);
+    expect(mockCleanupWalWriteDeathDatabase).toHaveBeenCalledTimes(1);
+    expect(mockCleanupActiveMigrationDeathDatabase).toHaveBeenCalledTimes(1);
+    expect(mockFiles.size).toBe(0);
+    expect(parsedBackupRestoreMarkers()[0]).toMatchObject({
+      status: 'fail',
+      failureCode: 'phase-invalid',
+      checks: { requestValid: false, databaseCleanup: true, stateCleanup: true },
+    });
+  });
+
   it('resumes only from ready state, arms resuming, emits PASS after exact cleanup', async () => {
     createExisting(REQUEST, PREPARING, READY);
     mockResumeDatabase.mockImplementation(async (onReadOnlyVerified: () => void) => {
@@ -512,8 +634,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
       expect(mockFiles.get(RESUMING)).toBe(0);
       return {
         status: 'pass',
-        migrationCount: 45,
-        migrationHead: '0045_backup_export_indexes',
+        migrationCount: 47,
+        migrationHead: '0047_message_retraction_topology',
         checks: resumeChecks,
       };
     });
@@ -539,8 +661,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         suite: 'android-db-relaunch',
         status: 'pass',
         phase: 'resume',
-        migrationCount: 45,
-        migrationHead: '0045_backup_export_indexes',
+        migrationCount: 47,
+        migrationHead: '0047_message_retraction_topology',
         checks: {
           requestValid: true,
           phaseValid: true,
@@ -603,8 +725,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         expect(mockFiles.get(ACTIVE_MIGRATION_DEATH_RESUMING)).toBe(0);
         return {
           status: 'pass',
-          migrationCount: 45,
-          migrationHead: '0045_backup_export_indexes',
+          migrationCount: 47,
+          migrationHead: '0047_message_retraction_topology',
           checks: activeMigrationDeathResumeChecks,
         };
       },
@@ -633,8 +755,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         suite: 'android-db-active-migration-death',
         status: 'pass',
         phase: 'resume',
-        migrationCount: 45,
-        migrationHead: '0045_backup_export_indexes',
+        migrationCount: 47,
+        migrationHead: '0047_message_retraction_topology',
         checks: {
           requestValid: true,
           phaseValid: true,
@@ -774,8 +896,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
       onReadOnlyVerified();
       return {
         status: 'fail',
-        migrationCount: 45,
-        migrationHead: '0045_backup_export_indexes',
+        migrationCount: 47,
+        migrationHead: '0047_message_retraction_topology',
         checks: { ...resumeChecks, databaseCleanup: false },
         failureCode: 'database-cleanup',
       };
@@ -808,8 +930,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
       onReadOnlyVerified();
       return {
         status: 'pass',
-        migrationCount: 45,
-        migrationHead: '0045_backup_export_indexes',
+        migrationCount: 47,
+        migrationHead: '0047_message_retraction_topology',
         checks: resumeChecks,
       };
     });

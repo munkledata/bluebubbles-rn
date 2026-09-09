@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
-import type { HttpClient } from '@core/api/http';
-import { Chat, Message } from '@core/models';
+import type { HttpClient, HttpTransportSnapshot } from '@core/api/http';
+import { Chat, Message, ServerInfo } from '@core/models';
 import { logger } from '@core/secure';
 import {
   claimScheduled,
@@ -13,14 +13,53 @@ import {
 } from '@db/repositories';
 import { DbCommitGuardRejectedError } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
+import { useSessionStore } from '@state/sessionStore';
+import { captureSessionRcsCapabilityLease } from '@/services/send/rcsAttemptCapability';
 import { generateTempGuid, sendTextMessage } from '@/services/send/sendService';
 import { createTestDb } from '../support/testDb';
 
 /** Minimal fake HttpClient: only `post` is used (by sendText). */
 function fakeHttp(impl: (json: unknown) => Promise<unknown>): HttpClient {
-  return {
+  let http!: HttpClient;
+  http = {
     post: (_path: string, _schema: unknown, opts: { json?: unknown }) => impl(opts?.json),
+    pinTransport: () => http,
+    isTransportCurrent: () => true,
+    assertTransportCurrent: () => undefined,
   } as unknown as HttpClient;
+  return http;
+}
+
+function revisionPinnedHttp(options: {
+  get?: () => Promise<unknown>;
+  post?: () => Promise<unknown>;
+}): HttpClient {
+  let root!: HttpClient;
+  root = {
+    pinTransport: () => {
+      const { origin, transportRevision: revision } = useSessionStore.getState();
+      const isTransportCurrent = (): boolean =>
+        useSessionStore.getState().transportRevision === revision;
+      let pinned!: HttpClient;
+      pinned = {
+        get: () => options.get?.() ?? Promise.reject(new Error('unexpected GET')),
+        post: () => options.post?.() ?? Promise.reject(new Error('unexpected POST')),
+        pinTransport: () => pinned,
+        isTransportCurrent,
+        snapshotTransport: () =>
+          ({ origin: origin ?? '', transportRevision: revision }) as HttpTransportSnapshot,
+        assertTransportCurrent: () => {
+          if (!isTransportCurrent()) {
+            throw new ApiError('cancelled', 'test transport changed');
+          }
+        },
+      } as unknown as HttpClient;
+      return pinned;
+    },
+    isTransportCurrent: () => true,
+    assertTransportCurrent: () => undefined,
+  } as unknown as HttpClient;
+  return root;
 }
 
 async function seedChat(db: AppDatabase, guid: string) {
@@ -43,6 +82,166 @@ describe('generateTempGuid', () => {
 });
 
 describe('sendTextMessage', () => {
+  it('discovers RCS attempt ownership on a fixed client with no foreground session', async () => {
+    const { db, raw } = await createTestDb();
+    const chatGuid = 'RCS;-;cold-capability';
+    await seedChat(db, chatGuid);
+    const previousSession = useSessionStore.getState();
+    useSessionStore.setState({
+      status: 'loading',
+      origin: null,
+      password: null,
+      serverInfo: null,
+    });
+    let discoveryFails = true;
+    let postedGeneration: number | undefined;
+    let postedMethod: string | undefined;
+    let http!: HttpClient;
+    http = {
+      get: jest.fn(async (path: string) => {
+        expect(path).toBe('/server/info');
+        expect(countMessages(raw)).toBe(0);
+        if (discoveryFails) throw new Error('server-info unavailable');
+        return { private_api: true, supports_rcs_send_attempt_ownership: true };
+      }),
+      post: jest.fn(async (_path: string, _schema: unknown, options: { json?: unknown }) => {
+        const body = options.json as {
+          tempGuid: string;
+          clientAttemptGeneration?: number;
+          method?: string;
+        };
+        postedGeneration = body.clientAttemptGeneration;
+        postedMethod = body.method;
+        return {
+          guid: body.tempGuid,
+          attemptGuid: 'server-attempt-1',
+          clientAttemptGeneration: body.clientAttemptGeneration,
+          dateCreated: 1_000,
+          dateDelivered: null,
+        };
+      }),
+      pinTransport: () => http,
+      isTransportCurrent: () => true,
+      assertTransportCurrent: () => undefined,
+    } as unknown as HttpClient;
+
+    try {
+      await expect(
+        sendTextMessage(db, http, { chatGuid, text: 'not inserted yet' }),
+      ).rejects.toThrow('server-info unavailable');
+      expect(countMessages(raw)).toBe(0);
+      expect(raw.prepare('SELECT COUNT(*) AS count FROM outgoing_queue').get()).toEqual({
+        count: 0,
+      });
+
+      discoveryFails = false;
+      await sendTextMessage(db, http, { chatGuid, text: 'owned attempt' });
+      expect(postedGeneration).toBe(1);
+      expect(postedMethod).toBe('private-api');
+      expect(http.get).toHaveBeenCalledTimes(2);
+      expect(useSessionStore.getState()).toMatchObject({ origin: null, serverInfo: null });
+    } finally {
+      useSessionStore.setState({
+        status: previousSession.status,
+        origin: previousSession.origin,
+        password: previousSession.password,
+        serverInfo: previousSession.serverInfo,
+      });
+    }
+  });
+
+  it('does not admit an RCS row when the server origin rotates during capability discovery', async () => {
+    const { db, raw } = await createTestDb();
+    const chatGuid = 'RCS;-;rotating-capability';
+    await seedChat(db, chatGuid);
+    const previousSession = useSessionStore.getState();
+    const infoA = ServerInfo.parse({
+      version: '2.0.0',
+      rcs: true,
+      supports_rcs_send_attempt_ownership: true,
+    });
+    const infoB = ServerInfo.parse({
+      version: '2.0.0',
+      rcs: true,
+      supports_rcs_send_attempt_ownership: false,
+    });
+    useSessionStore.getState().connected('https://origin-a.test', 'password', infoA);
+    useSessionStore.setState({ serverInfo: null });
+
+    let releaseInfo!: (info: unknown) => void;
+    let markStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      markStarted = resolve;
+    });
+    const response = new Promise<unknown>((resolve) => {
+      releaseInfo = resolve;
+    });
+    const capabilityGet = jest.fn(async () => {
+      markStarted();
+      return response;
+    });
+    const post = jest.fn(async () => ({ guid: 'must-not-send' }));
+    const client = revisionPinnedHttp({ get: capabilityGet, post });
+
+    try {
+      const capabilityLease = captureSessionRcsCapabilityLease();
+      if (!capabilityLease) throw new Error('expected a connected capability lease');
+      const send = sendTextMessage(
+        db,
+        client,
+        { chatGuid, text: 'stay on A' },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        capabilityLease,
+      );
+      await started;
+      useSessionStore.getState().rotateOrigin('https://origin-b.test', infoB);
+      releaseInfo(infoA);
+
+      await expect(send).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+      expect(capabilityGet).toHaveBeenCalledTimes(1);
+      expect(post).not.toHaveBeenCalled();
+      expect(countMessages(raw)).toBe(0);
+      expect(raw.prepare('SELECT COUNT(*) AS count FROM outgoing_queue').get()).toEqual({
+        count: 0,
+      });
+      expect(useSessionStore.getState().serverInfo).toBe(infoB);
+    } finally {
+      useSessionStore.setState(previousSession);
+    }
+  });
+
+  it('marks a durable row retryable instead of POSTing after a post-admission origin rotation', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const previousSession = useSessionStore.getState();
+    const infoA = ServerInfo.parse({ version: '2.0.0', private_api: true });
+    const infoB = ServerInfo.parse({ version: '2.0.0', private_api: false });
+    useSessionStore.getState().connected('https://origin-a.test', 'password', infoA);
+    const post = jest.fn(async () => ({ guid: 'must-not-send' }));
+    const client = revisionPinnedHttp({ post });
+
+    try {
+      await expect(
+        sendTextMessage(db, client, { chatGuid: 'c1', text: 'durable retry' }, 1_000, () => {
+          useSessionStore.getState().rotateOrigin('https://origin-b.test', infoB);
+        }),
+      ).resolves.toMatchObject({ tempGuid: expect.stringMatching(/^temp-/) });
+
+      expect(post).not.toHaveBeenCalled();
+      expect(raw.prepare('SELECT send_state AS sendState FROM messages').get()).toEqual({
+        sendState: 'error',
+      });
+      expect(raw.prepare('SELECT attempts FROM outgoing_queue').get()).toEqual({ attempts: 1 });
+    } finally {
+      useSessionStore.setState(previousSession);
+      warn.mockRestore();
+    }
+  });
+
   it('optimistically inserts then promotes temp→real on success (one row, queue cleared)', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');

@@ -29,8 +29,8 @@ export interface ParsedFcm {
    */
   encrypted: boolean;
   /**
-   * The encryption scheme id (envelope sibling). `AEAD_GCM_V2_DEVICE` is the current per-device
-   * scheme; `AEAD_GCM_V1` remains pre-migration compatibility. Empty when not encrypted.
+   * The encryption scheme id (envelope sibling). Random-key V2 is accepted only through its
+   * bounded compatibility cutoff; identity-bound V3 is current. Empty when not encrypted.
    */
   encryptionType: string;
 }

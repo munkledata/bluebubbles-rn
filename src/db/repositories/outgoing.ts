@@ -1,12 +1,7 @@
 import { and, eq, ne, sql } from 'drizzle-orm';
 import type { MessageMention } from '@core/api/endpoints/messages';
-import {
-  chats,
-  messageDeletionLedger,
-  messageGuidAliases,
-  messages,
-  outgoingQueue,
-} from '../schema';
+import { isRcsChatGuid } from '@utils/chat';
+import { chats, messageDeletionLedger, messages, outgoingQueue } from '../schema';
 import {
   runInTransactionContext,
   withDbTransaction,
@@ -15,62 +10,107 @@ import {
 } from '../transaction';
 import type { AppDatabase } from '../types';
 import { requireChatIdByGuidWithinTransaction } from './chats';
+import {
+  MAX_SEND_ATTEMPT_OWNER_GENERATION,
+  MessageGuidAliasConflictError,
+  recordMessageGuidAliasWithinTransaction,
+  type SendAttemptOwnerToken,
+} from './outgoingAttemptOwnership';
 import type { RetryableOutgoing } from './outgoingRetry';
 import { OUTGOING_LEASE_MS, OUTGOING_MAX_ATTEMPTS } from './outgoingRetryPolicy';
+import {
+  isMessageTargetAvailableWithinTransaction,
+  queuedMessageTarget,
+  type MessageTargetServerAuthorization,
+} from './messageTargets';
 // The ONE tombstone write (stamp `date_deleted` + recompute the chat's denormalized sort key).
 // Imported from the module that owns it rather than restated here, so the two can't drift;
 // messages.ts imports nothing from this file, so there is no cycle.
 import { markMessageDeletedWithinTransaction } from './messages';
 
-/** Maximum durable temp → real message mappings retained for stale UI actions. */
-export const MESSAGE_GUID_ALIAS_LIMIT = 4096;
+export {
+  MESSAGE_GUID_ALIAS_LIMIT,
+  MAX_SEND_ATTEMPT_OWNER_GENERATION,
+  MessageGuidAliasConflictError,
+  recordMessageGuidAliasWithinTransaction,
+  type SendAttemptOwnerToken,
+} from './outgoingAttemptOwnership';
 
-/** One client temp GUID was observed mapping to two different server identities. */
-export class MessageGuidAliasConflictError extends Error {
-  override readonly name = 'MessageGuidAliasConflictError';
-
-  constructor() {
-    // Fixed copy only: GUIDs are account data and must not leak through diagnostics.
-    super('message GUID alias conflicts with an existing canonical identity');
-  }
+/** Ownership handoff returned by an optimistic insert. Null keeps the legacy send path unchanged. */
+export interface OutgoingInsertResult {
+  readonly attemptOwnerToken: SendAttemptOwnerToken | null;
 }
 
-/**
- * Record one learned temp → real identity while an owning promotion transaction is open.
- *
- * Re-observing the same mapping refreshes its recency. A different canonical identity for an
- * existing alias is ambiguous and fails closed instead of letting a stale destructive action hit
- * the wrong message. The id-ordered prune is deterministic and retains exactly the newest cap.
- */
-async function recordMessageGuidAliasWithinTransaction(
+/** Server identity installed when the exact local request generation acknowledges. */
+export interface OutgoingAttemptSettlement {
+  readonly attemptGuid: string;
+  readonly attemptOwnerToken: SendAttemptOwnerToken;
+}
+
+export type OutgoingAckDisposition = 'sent' | 'sticky-error' | 'stale-attempt-owner' | 'missing';
+
+/** Exact correlation carried by capable RCS message DTOs and live success fanout. */
+export interface ExactOutgoingAttemptSuccess {
+  readonly tempGuid: string;
+  readonly attemptGuid: string;
+  readonly clientAttemptGeneration: number;
+  readonly guid: string;
+  readonly dateCreated: number | null;
+  readonly dateDelivered: number | null;
+}
+
+export type ExactOutgoingAttemptSuccessDisposition =
+  'reconciled' | 'already-reconciled' | 'attempt-owner-pending' | 'stale-attempt' | 'unmatched';
+
+interface AttemptOwnerSnapshot {
+  readonly guid: string;
+  readonly activeSendAttemptGuid: string | null;
+  readonly attemptOwnerPending: number;
+  readonly attemptOwnerGeneration: number;
+  readonly sendState: string | null;
+  readonly error: number | null;
+  readonly errorMessage: string | null;
+}
+
+/** Resolve the durable temp identity first, then its alias, with a canonical fallback for repair. */
+async function findAttemptOwnerSnapshotWithinTransaction(
   context: DbTransactionContext,
-  aliasGuid: string,
-  canonicalGuid: string,
-): Promise<void> {
+  tempGuid: string,
+  fallbackGuid?: string,
+): Promise<AttemptOwnerSnapshot | null> {
   return runInTransactionContext(context, async (db) => {
-    const existing = await db.all<{ canonicalGuid: string }>(sql`
-      SELECT canonical_guid AS canonicalGuid
-        FROM message_guid_aliases
-       WHERE alias_guid = ${aliasGuid}
+    const direct = await db.all<AttemptOwnerSnapshot>(sql`
+      SELECT guid, active_send_attempt_guid AS activeSendAttemptGuid,
+             attempt_owner_pending AS attemptOwnerPending,
+             attempt_owner_generation AS attemptOwnerGeneration,
+             send_state AS sendState, error, error_message AS errorMessage
+        FROM messages
+       WHERE guid = ${tempGuid}
        LIMIT 1
     `);
-    const previous = existing[0]?.canonicalGuid;
-    if (previous != null && previous !== canonicalGuid) {
-      throw new MessageGuidAliasConflictError();
-    }
-    if (previous != null) {
-      await db.delete(messageGuidAliases).where(eq(messageGuidAliases.aliasGuid, aliasGuid));
-    }
-    await db.insert(messageGuidAliases).values({ aliasGuid, canonicalGuid });
-    await db.run(sql`
-      DELETE FROM message_guid_aliases
-       WHERE id IN (
-         SELECT id
-           FROM message_guid_aliases
-          ORDER BY id DESC
-          LIMIT -1 OFFSET ${MESSAGE_GUID_ALIAS_LIMIT}
-       )
+    if (direct[0]) return direct[0];
+    const aliased = await db.all<AttemptOwnerSnapshot>(sql`
+      SELECT m.guid, m.active_send_attempt_guid AS activeSendAttemptGuid,
+             m.attempt_owner_pending AS attemptOwnerPending,
+             m.attempt_owner_generation AS attemptOwnerGeneration,
+             m.send_state AS sendState, m.error, m.error_message AS errorMessage
+        FROM message_guid_aliases a
+        JOIN messages m ON m.guid = a.canonical_guid
+       WHERE a.alias_guid = ${tempGuid}
+       LIMIT 1
     `);
+    if (aliased[0]) return aliased[0];
+    if (!fallbackGuid || fallbackGuid === tempGuid) return null;
+    const fallback = await db.all<AttemptOwnerSnapshot>(sql`
+      SELECT guid, active_send_attempt_guid AS activeSendAttemptGuid,
+             attempt_owner_pending AS attemptOwnerPending,
+             attempt_owner_generation AS attemptOwnerGeneration,
+             send_state AS sendState, error, error_message AS errorMessage
+        FROM messages
+       WHERE guid = ${fallbackGuid}
+       LIMIT 1
+    `);
+    return fallback[0] ?? null;
   });
 }
 
@@ -193,6 +233,8 @@ export interface InsertOutgoingTextArgs {
   effectId?: string;
   subject?: string;
   mentions?: MessageMention[];
+  /** Current server promises exact RCS success/failure attempt correlation for this send. */
+  attemptAware?: boolean;
 }
 
 /**
@@ -204,7 +246,7 @@ export interface InsertOutgoingTextArgs {
 export async function insertOutgoingTextWithinTransaction(
   context: DbTransactionContext,
   args: InsertOutgoingTextArgs,
-): Promise<void> {
+): Promise<OutgoingInsertResult> {
   return runInTransactionContext(context, async (db) => {
     const chatId = await requireChatIdByGuidWithinTransaction(context, args.chatGuid);
     await db.insert(outgoingQueue).values({
@@ -230,6 +272,8 @@ export async function insertOutgoingTextWithinTransaction(
       isFromMe: true,
       dateCreated: args.now,
       sendState: 'sending',
+      attemptOwnerPending: args.attemptAware === true,
+      attemptOwnerGeneration: args.attemptAware === true ? 1 : 0,
       error: 0,
       // Persist locally so an optimistic reply renders its quote + the send-effect
       // plays on the outgoing bubble before the server echo.
@@ -243,6 +287,9 @@ export async function insertOutgoingTextWithinTransaction(
         latestMessageDate: sql`MAX(${args.now}, COALESCE(${chats.latestMessageDate}, ${args.now}))`,
       })
       .where(eq(chats.id, chatId));
+    return {
+      attemptOwnerToken: args.attemptAware === true ? { generation: 1 } : null,
+    };
   });
 }
 
@@ -250,9 +297,9 @@ export async function insertOutgoingTextWithinTransaction(
 export async function insertOutgoingText(
   db: AppDatabase,
   args: InsertOutgoingTextArgs,
-): Promise<void> {
+): Promise<OutgoingInsertResult> {
   // ONE transaction — see the insert-atomicity note directly above.
-  await withDbTransaction(db, (context) => insertOutgoingTextWithinTransaction(context, args));
+  return withDbTransaction(db, (context) => insertOutgoingTextWithinTransaction(context, args));
 }
 
 /**
@@ -283,14 +330,18 @@ export interface InsertOutgoingContactArgs {
   };
   now: number;
   selectedMessageGuid?: string;
+  /** Reply target part, persisted only when a reply target is present. */
+  partIndex?: number;
   threadOriginatorGuid?: string;
+  /** Current server promises exact RCS success/failure attempt correlation for this send. */
+  attemptAware?: boolean;
 }
 
 /** Transaction-only body for one optimistic contact-card insert. */
 export function insertOutgoingContactWithinTransaction(
   context: DbTransactionContext,
   args: InsertOutgoingContactArgs,
-): Promise<void> {
+): Promise<OutgoingInsertResult> {
   return runInTransactionContext(context, async (db) => {
     const chatId = await requireChatIdByGuidWithinTransaction(context, args.chatGuid);
     await db.insert(outgoingQueue).values({
@@ -304,6 +355,7 @@ export function insertOutgoingContactWithinTransaction(
         phones: args.contact.phones?.length ? args.contact.phones : undefined,
         emails: args.contact.emails?.length ? args.contact.emails : undefined,
         selectedMessageGuid: args.selectedMessageGuid,
+        partIndex: args.selectedMessageGuid ? args.partIndex : undefined,
       }),
     });
     await db.insert(messages).values({
@@ -313,8 +365,11 @@ export function insertOutgoingContactWithinTransaction(
       isFromMe: true,
       dateCreated: args.now,
       sendState: 'sending',
+      attemptOwnerPending: args.attemptAware === true,
+      attemptOwnerGeneration: args.attemptAware === true ? 1 : 0,
       error: 0,
       threadOriginatorGuid: args.threadOriginatorGuid ?? null,
+      threadOriginatorPart: args.threadOriginatorGuid ? (args.partIndex ?? null) : null,
     });
     await db
       .update(chats)
@@ -322,6 +377,9 @@ export function insertOutgoingContactWithinTransaction(
         latestMessageDate: sql`MAX(${args.now}, COALESCE(${chats.latestMessageDate}, ${args.now}))`,
       })
       .where(eq(chats.id, chatId));
+    return {
+      attemptOwnerToken: args.attemptAware === true ? { generation: 1 } : null,
+    };
   });
 }
 
@@ -329,9 +387,9 @@ export function insertOutgoingContactWithinTransaction(
 export async function insertOutgoingContact(
   db: AppDatabase,
   args: InsertOutgoingContactArgs,
-): Promise<void> {
+): Promise<OutgoingInsertResult> {
   // ONE transaction — see the insert-atomicity note above insertOutgoingText.
-  await withDbTransaction(db, (context) => insertOutgoingContactWithinTransaction(context, args));
+  return withDbTransaction(db, (context) => insertOutgoingContactWithinTransaction(context, args));
 }
 
 /**
@@ -492,6 +550,8 @@ export interface RetryHandover {
   claim: RetryClaim;
   /** The QUEUE payload to re-POST, under the row's ORIGINAL temp guid. */
   row?: RetryableOutgoing;
+  /** Exact local generation the retry acknowledgement must compare-and-set. */
+  attemptOwnerToken?: SendAttemptOwnerToken;
 }
 
 /**
@@ -522,40 +582,128 @@ export interface RetryHandover {
  * payload is read first, but that read is not a decision — inside the transaction nothing can
  * change under it, and with no payload there is simply nothing to re-POST ('unsendable': an
  * attachment retired because its on-disk file is gone, or a ladder the RCS immediate ack consumed).
- * A refused claim therefore writes nothing at all, so it can never strip the ladder off a send that
- * is in flight. A claimed one re-arms that ladder in the same transaction as the flip — attempts
- * reset, because the button is the ONLY recourse for a row already retired at the attempt cap, and
- * leased, so a drain tick can't re-POST the same payload alongside the caller's own attempt.
+ * A refused claim with a resolved owner writes nothing at all, so it can never strip the ladder off
+ * a send that is in flight. The sole exception is an ownerless ladder, which is retired to prevent a
+ * later tokenless automatic POST. A claimed one re-arms that ladder in the same transaction as the
+ * flip — attempts reset, because the button is the ONLY recourse for a row already retired at the
+ * attempt cap, and leased, so a drain tick can't re-POST the same payload alongside the caller's own
+ * attempt.
  */
 export function claimFailedOutgoingForRetryWithinTransaction(
   context: DbTransactionContext,
-  tempGuid: string,
+  guid: string,
   clock: () => number = Date.now,
+  serverAuthorization?: MessageTargetServerAuthorization,
 ): Promise<RetryHandover> {
   return runInTransactionContext(context, async (db) => {
     const now = clock();
     const queued = await db.all<RetryableOutgoing>(sql`
-        SELECT id, temp_guid AS tempGuid, chat_guid AS chatGuid, kind, payload, attempts,
-               created_at AS createdAt
-        FROM outgoing_queue WHERE temp_guid = ${tempGuid} LIMIT 1`);
+        SELECT q.id, q.temp_guid AS tempGuid, q.chat_guid AS chatGuid, q.kind, q.payload,
+               q.attempts, q.created_at AS createdAt
+          FROM outgoing_queue q
+          LEFT JOIN message_guid_aliases a ON a.alias_guid = q.temp_guid
+         WHERE q.temp_guid = ${guid} OR a.canonical_guid = ${guid}
+         ORDER BY (q.temp_guid = ${guid}) DESC, q.id DESC
+         LIMIT 1`);
     const row = queued[0];
     if (!row) return { claim: 'unsendable' };
-    const taken = await db.all<{ id: number }>(sql`
-        UPDATE messages SET send_state = 'sending', error = 0, error_message = NULL
-         WHERE guid = ${tempGuid} AND send_state = 'error'
-        RETURNING id`);
+
+    const direct = await db.all<{
+      guid: string;
+      sendState: string | null;
+      generation: number;
+    }>(sql`
+      SELECT guid, send_state AS sendState, attempt_owner_generation AS generation
+        FROM messages
+       WHERE guid = ${row.tempGuid}
+       LIMIT 1
+    `);
+    const aliased = direct[0]
+      ? []
+      : await db.all<{ guid: string; sendState: string | null; generation: number }>(sql`
+          SELECT m.guid, m.send_state AS sendState,
+                 m.attempt_owner_generation AS generation
+            FROM message_guid_aliases a
+            JOIN messages m ON m.guid = a.canonical_guid
+           WHERE a.alias_guid = ${row.tempGuid}
+           LIMIT 1
+    `);
+    const current = direct[0] ?? aliased[0];
+    if (!current) {
+      // The durable payload has lost the only direct/alias link that proves its send mode. Retire
+      // this exact ladder rather than leave it for an automatic tokenless POST. Preserve the
+      // historical settled result because this also covers a legitimately promoted legacy row.
+      await db
+        .update(outgoingQueue)
+        .set({ attempts: OUTGOING_MAX_ATTEMPTS })
+        .where(eq(outgoingQueue.id, row.id));
+      return { claim: 'settled' };
+    }
+    const queuedTarget = queuedMessageTarget(row.kind, row.payload);
+    const unsupportedRcsReply =
+      queuedTarget.kind === 'target' && row.kind !== 'reaction' && isRcsChatGuid(row.chatGuid);
+    const targetAvailable =
+      !unsupportedRcsReply &&
+      (queuedTarget.kind === 'none' ||
+        (queuedTarget.kind === 'target' &&
+          (await isMessageTargetAvailableWithinTransaction(context, {
+            chatGuid: row.chatGuid,
+            messageGuid: queuedTarget.messageGuid,
+            partIndex: queuedTarget.partIndex,
+            allowRcsWholeMessage: row.kind === 'reaction' && isRcsChatGuid(row.chatGuid),
+            serverAuthorization,
+          }))));
+    if (!targetAvailable) {
+      await db
+        .update(outgoingQueue)
+        .set({ attempts: OUTGOING_MAX_ATTEMPTS })
+        .where(eq(outgoingQueue.id, row.id));
+      await db
+        .update(messages)
+        .set({ sendState: 'error', error: 1, errorMessage: null })
+        .where(eq(messages.guid, current.guid));
+      return { claim: 'unsendable' };
+    }
+    if (current.generation >= MAX_SEND_ATTEMPT_OWNER_GENERATION) {
+      throw new Error('send attempt ownership generation exhausted');
+    }
+
+    // Send mode is durable per optimistic row. A generation-0 row was created against a legacy
+    // server and must stay legacy even if today's connection advertises the capability: a cached
+    // pre-upgrade success cannot round-trip ownership. Conversely, generation>0 can never fall
+    // back to the legacy path when capability discovery is temporarily unavailable.
+    const modern = current.generation > 0;
+    const taken = modern
+      ? await db.all<{ id: number; generation: number }>(sql`
+          UPDATE messages
+             SET send_state = 'sending', error = 0, error_message = NULL,
+                 attempt_owner_pending = 1,
+                 attempt_owner_generation = attempt_owner_generation + 1
+           WHERE guid = ${current.guid} AND send_state = 'error'
+             AND attempt_owner_generation = ${current.generation}
+             AND attempt_owner_generation < ${MAX_SEND_ATTEMPT_OWNER_GENERATION}
+          RETURNING id, attempt_owner_generation AS generation`)
+      : await db.all<{ id: number; generation: number }>(sql`
+          UPDATE messages SET send_state = 'sending', error = 0, error_message = NULL
+           WHERE guid = ${current.guid} AND send_state = 'error'
+             AND attempt_owner_generation = 0
+          RETURNING id, attempt_owner_generation AS generation`);
     if (taken.length === 0) {
       // Read AFTER the failed compare-and-set, and only to word the message to the user — no write
       // depends on it, so a stale answer here is harmless.
       const cur = await db.all<{ sendState: string | null }>(
-        sql`SELECT send_state AS sendState FROM messages WHERE guid = ${tempGuid} LIMIT 1`,
+        sql`SELECT send_state AS sendState FROM messages WHERE guid = ${current.guid} LIMIT 1`,
       );
       return { claim: cur[0]?.sendState === 'sending' ? 'sending' : 'settled' };
     }
     await db.run(sql`
         UPDATE outgoing_queue SET attempts = 0, next_retry_at = ${now + OUTGOING_LEASE_MS}
-         WHERE temp_guid = ${tempGuid}`);
-    return { claim: 'claimed', row: { ...row, attempts: 0 } };
+         WHERE temp_guid = ${row.tempGuid}`);
+    return {
+      claim: 'claimed',
+      row: { ...row, attempts: 0 },
+      ...(modern ? { attemptOwnerToken: { generation: taken[0]!.generation } } : {}),
+    };
   });
 }
 
@@ -565,13 +713,15 @@ export function claimFailedOutgoingForRetryWithinTransaction(
  */
 export async function claimFailedOutgoingForRetry(
   db: AppDatabase,
-  tempGuid: string,
+  guid: string,
   clock: () => number = Date.now,
   commitGuard?: DbCommitGuard,
+  serverAuthorization?: MessageTargetServerAuthorization,
 ): Promise<RetryHandover> {
   return withDbTransaction(
     db,
-    (context) => claimFailedOutgoingForRetryWithinTransaction(context, tempGuid, clock),
+    (context) =>
+      claimFailedOutgoingForRetryWithinTransaction(context, guid, clock, serverAuthorization),
     commitGuard,
   );
 }
@@ -664,6 +814,32 @@ export function reconcileOutgoingSuccessWithinTransaction(
         tempGuid,
         server.guid,
       );
+      // A live/content echo can materialize the canonical row before the HTTP acknowledgement.
+      // Carry the temp row's attempt-owner state onto that canonical row before deleting it; a
+      // later RCS acknowledgement can then resolve the alias and install the exact attempt id.
+      const tempOwnership = await db.all<{
+        activeSendAttemptGuid: string | null;
+        attemptOwnerPending: number;
+        attemptOwnerGeneration: number;
+      }>(sql`
+        SELECT active_send_attempt_guid AS activeSendAttemptGuid,
+               attempt_owner_pending AS attemptOwnerPending,
+               attempt_owner_generation AS attemptOwnerGeneration
+          FROM messages
+         WHERE guid = ${tempGuid}
+         LIMIT 1
+      `);
+      const ownership = tempOwnership[0];
+      if (ownership) {
+        await db
+          .update(messages)
+          .set({
+            activeSendAttemptGuid: ownership.activeSendAttemptGuid,
+            attemptOwnerPending: ownership.attemptOwnerPending !== 0,
+            attemptOwnerGeneration: ownership.attemptOwnerGeneration,
+          })
+          .where(eq(messages.guid, server.guid));
+      }
       if (dateDeleted != null)
         await markMessageDeletedWithinTransaction(context, server.guid, dateDeleted);
       await db.delete(messages).where(eq(messages.guid, tempGuid));
@@ -679,6 +855,8 @@ export function reconcileOutgoingSuccessWithinTransaction(
           sendState: 'sent',
           error: 0,
           errorMessage: null,
+          activeSendAttemptGuid: null,
+          attemptOwnerPending: false,
         })
         .where(eq(messages.guid, tempGuid));
     }
@@ -705,10 +883,11 @@ export async function markOutgoingSentNoGuid(
   db: AppDatabase,
   tempGuid: string,
   commitGuard?: DbCommitGuard,
-): Promise<void> {
-  await withDbTransaction(
+  settlement?: OutgoingAttemptSettlement,
+): Promise<OutgoingAckDisposition> {
+  return withDbTransaction(
     db,
-    (context) => markOutgoingSentNoGuidWithinTransaction(context, tempGuid),
+    (context) => markOutgoingSentNoGuidWithinTransaction(context, tempGuid, settlement),
     commitGuard,
   );
 }
@@ -716,8 +895,48 @@ export async function markOutgoingSentNoGuid(
 export function markOutgoingSentNoGuidWithinTransaction(
   context: DbTransactionContext,
   tempGuid: string,
-): Promise<void> {
+  settlement?: OutgoingAttemptSettlement,
+): Promise<OutgoingAckDisposition> {
   return runInTransactionContext(context, async (db) => {
+    const owner = await findAttemptOwnerSnapshotWithinTransaction(context, tempGuid);
+    if (!owner) {
+      // Preserve the historical orphan cleanup: a successful request must not be blindly re-sent
+      // merely because its optimistic bubble was purged before the acknowledgement committed.
+      await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
+      return 'missing';
+    }
+
+    if (settlement) {
+      const tokenMatchesPending =
+        owner.attemptOwnerPending !== 0 &&
+        owner.attemptOwnerGeneration === settlement.attemptOwnerToken.generation;
+      const alreadyInstalled =
+        owner.attemptOwnerPending === 0 && owner.activeSendAttemptGuid === settlement.attemptGuid;
+      if (!tokenMatchesPending && !alreadyInstalled) return 'stale-attempt-owner';
+      if (tokenMatchesPending) {
+        // The generation check is the durable compare-and-set. In particular, acknowledgement A
+        // cannot install itself after retry B increments the row, even if A waited for the DB lock.
+        const installed = await db.all<{ id: number }>(sql`
+          UPDATE messages
+             SET active_send_attempt_guid = ${settlement.attemptGuid},
+                 attempt_owner_pending = 0
+           WHERE guid = ${owner.guid}
+             AND attempt_owner_pending = 1
+             AND attempt_owner_generation = ${settlement.attemptOwnerToken.generation}
+          RETURNING id
+        `);
+        if (installed.length === 0) return 'stale-attempt-owner';
+      }
+    } else if (
+      owner.attemptOwnerGeneration !== 0 ||
+      owner.attemptOwnerPending !== 0 ||
+      owner.activeSendAttemptGuid != null
+    ) {
+      // A legacy/no-token acknowledgement may settle only a row born in legacy mode. Silently
+      // downgrading a modern row would allow a delayed failure from an older retry to own it.
+      return 'stale-attempt-owner';
+    }
+
     // Never downgrade a row the server already told us FAILED. With the RCS bridge's immediate
     // "sending" ack, a genuine send failure (`message-send-error`) can land just BEFORE this
     // success ack; promoting to 'sent' would clobber it and hide the failure. 'error' is sticky —
@@ -728,30 +947,265 @@ export function markOutgoingSentNoGuidWithinTransaction(
     // and the message showed as sent with no error badge and no retry row — silently never
     // delivered. Same shape as `retireOutgoing` / `claimOutgoingForSend`.
     const promoted = await db.all<{ id: number }>(sql`
-      UPDATE messages SET send_state = 'sent', error = 0, error_message = NULL
-       WHERE guid = ${tempGuid} AND (send_state IS NULL OR send_state <> 'error')
+      UPDATE messages
+         SET send_state = 'sent', error = 0, error_message = NULL
+       WHERE guid = ${owner.guid} AND (send_state IS NULL OR send_state <> 'error')
       RETURNING id`);
     if (promoted.length > 0) {
       await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
-      return;
+      return 'sent';
     }
-    // Nothing matched: either the row is stickily 'error' (leave its ladder alone) or there is no
-    // message at all — and an ack for a message that no longer exists must still clear the queue
-    // row, or that orphan re-sends blind on every later drain.
-    const cur = await db.all<{ id: number }>(
-      sql`SELECT id FROM messages WHERE guid = ${tempGuid} LIMIT 1`,
-    );
-    if (cur.length === 0)
-      await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
+    // Ownership installation is independent from the sticky visible failure. A server error that
+    // won the race remains visible and keeps its retry ladder, but subsequent exact events can now
+    // be classified against the installed attempt.
+    return 'sticky-error';
   });
+}
+
+/**
+ * Reconcile the exact capable-RCS success triple while the caller owns the event transaction.
+ * The client generation fences the unresolved request window; after ownership is settled, the
+ * server attempt GUID is authoritative so an idempotency replay may safely echo an older client
+ * generation. Exact payloads never fall through to heuristic content matching.
+ */
+function reconcileExactOutgoingAttemptSuccessCoreWithinTransaction(
+  context: DbTransactionContext,
+  success: ExactOutgoingAttemptSuccess,
+  preservePendingError: boolean,
+): Promise<ExactOutgoingAttemptSuccessDisposition> {
+  return runInTransactionContext(context, async (db) => {
+    if (
+      !success.tempGuid ||
+      !success.attemptGuid ||
+      !success.guid ||
+      !Number.isInteger(success.clientAttemptGeneration) ||
+      success.clientAttemptGeneration < 1 ||
+      success.clientAttemptGeneration > MAX_SEND_ATTEMPT_OWNER_GENERATION
+    ) {
+      return 'unmatched';
+    }
+
+    const owner = await findAttemptOwnerSnapshotWithinTransaction(
+      context,
+      success.tempGuid,
+      success.guid,
+    );
+    if (!owner) return 'unmatched';
+
+    const wasPending = owner.attemptOwnerPending !== 0;
+    if (wasPending) {
+      if (owner.attemptOwnerGeneration !== success.clientAttemptGeneration) {
+        // Keep the durable event pending. A later HTTP acknowledgement or matching exact event
+        // will settle the newer local generation, after which this attempt becomes match/stale.
+        return 'attempt-owner-pending';
+      }
+      const installed = await db.all<{ id: number }>(sql`
+        UPDATE messages
+           SET active_send_attempt_guid = ${success.attemptGuid}, attempt_owner_pending = 0
+         WHERE guid = ${owner.guid}
+           AND attempt_owner_pending = 1
+           AND attempt_owner_generation = ${success.clientAttemptGeneration}
+        RETURNING id
+      `);
+      if (installed.length === 0) return 'attempt-owner-pending';
+    } else if (owner.activeSendAttemptGuid !== success.attemptGuid) {
+      return 'stale-attempt';
+    }
+
+    const stickyError = owner.sendState === 'error' && (!wasPending || preservePendingError);
+    const alreadyCanonical = owner.guid === success.guid;
+    if (alreadyCanonical) {
+      // When exact success itself installs a pending owner, it is affirmative evidence that the
+      // current attempt succeeded and may clear a preceding local/HTTP error. A duplicate success
+      // for an already-settled attempt does not erase a server failure that arrived afterward.
+      if (wasPending && !stickyError) {
+        await db
+          .update(messages)
+          .set({ sendState: 'sent', error: 0, errorMessage: null })
+          .where(eq(messages.guid, owner.guid));
+        await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, success.tempGuid));
+        return 'reconciled';
+      }
+      return wasPending ? 'reconciled' : 'already-reconciled';
+    }
+
+    // A canonical fallback without an alias is possible only after bounded alias pruning or a
+    // repaired database. Re-establish the exact mapping; a conflicting existing mapping throws and
+    // fails closed instead of attaching the event to the wrong bubble.
+    if (owner.guid !== success.tempGuid) {
+      await recordMessageGuidAliasWithinTransaction(context, success.tempGuid, success.guid);
+      if (owner.guid !== success.guid) throw new MessageGuidAliasConflictError();
+      if (wasPending && !stickyError) {
+        await db
+          .update(messages)
+          .set({ sendState: 'sent', error: 0, errorMessage: null })
+          .where(eq(messages.guid, owner.guid));
+        await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, success.tempGuid));
+        return 'reconciled';
+      }
+      return wasPending ? 'reconciled' : 'already-reconciled';
+    }
+
+    const duplicate = await db.all<{ id: number }>(
+      sql`SELECT id FROM messages WHERE guid = ${success.guid} LIMIT 1`,
+    );
+    if (duplicate[0]) {
+      const tempAttachment = await db.all<{ localPath: string | null }>(sql`
+        SELECT a.local_path AS localPath
+          FROM attachments a
+          JOIN messages m ON m.id = a.message_id
+         WHERE m.guid = ${success.tempGuid} AND a.local_path IS NOT NULL
+         LIMIT 1
+      `);
+      const localPath = tempAttachment[0]?.localPath;
+      if (localPath) {
+        await db.run(sql`
+          UPDATE attachments
+             SET local_path = ${localPath}
+           WHERE message_id = ${duplicate[0].id} AND local_path IS NULL
+        `);
+      }
+      const dateDeleted = await handoverOutgoingIdentityWithinTransaction(
+        context,
+        success.tempGuid,
+        success.guid,
+      );
+      await db
+        .update(messages)
+        .set({
+          activeSendAttemptGuid: success.attemptGuid,
+          attemptOwnerPending: false,
+          attemptOwnerGeneration: owner.attemptOwnerGeneration,
+          ...(stickyError
+            ? {
+                sendState: 'error' as const,
+                error: owner.error,
+                errorMessage: owner.errorMessage,
+              }
+            : { sendState: 'sent' as const, error: 0, errorMessage: null }),
+        })
+        .where(eq(messages.guid, success.guid));
+      if (dateDeleted != null) {
+        await markMessageDeletedWithinTransaction(context, success.guid, dateDeleted);
+      }
+      await db.delete(messages).where(eq(messages.guid, success.tempGuid));
+    } else {
+      await handoverOutgoingIdentityWithinTransaction(context, success.tempGuid, success.guid);
+      await db
+        .update(messages)
+        .set({
+          guid: success.guid,
+          dateCreated: success.dateCreated ?? undefined,
+          dateDelivered: success.dateDelivered ?? null,
+          isFromMe: true,
+          activeSendAttemptGuid: success.attemptGuid,
+          attemptOwnerPending: false,
+          ...(stickyError ? {} : { sendState: 'sent' as const, error: 0, errorMessage: null }),
+        })
+        .where(eq(messages.guid, success.tempGuid));
+    }
+    if (!stickyError) {
+      await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, success.tempGuid));
+    }
+    return 'reconciled';
+  });
+}
+
+export function reconcileExactOutgoingAttemptSuccessWithinTransaction(
+  context: DbTransactionContext,
+  success: ExactOutgoingAttemptSuccess,
+): Promise<ExactOutgoingAttemptSuccessDisposition> {
+  return reconcileExactOutgoingAttemptSuccessCoreWithinTransaction(context, success, false);
+}
+
+export interface OutgoingAttemptAck {
+  readonly guid?: string | null;
+  readonly attemptGuid: string;
+  /** The local generation captured before this request began. */
+  readonly attemptOwnerToken: SendAttemptOwnerToken;
+  readonly dateCreated: number | null;
+  readonly dateDelivered: number | null;
+}
+
+/**
+ * Settle one capable-RCS HTTP acknowledgement under the request's local ownership token.
+ *
+ * The server also echoes the generation that originally created a replayed physical attempt, but
+ * that value may be older after a process restart. The local token is therefore the compare-and-set
+ * authority here. A server error that committed first remains sticky, while the acknowledgement
+ * can still install the attempt identity and promote a distinct real message GUID atomically.
+ */
+export function reconcileOutgoingAttemptAckWithinTransaction(
+  context: DbTransactionContext,
+  tempGuid: string,
+  ack: OutgoingAttemptAck,
+): Promise<OutgoingAckDisposition> {
+  return runInTransactionContext(context, async (db) => {
+    const distinctGuid = ack.guid && ack.guid !== tempGuid ? ack.guid : undefined;
+    const ownerBefore = await findAttemptOwnerSnapshotWithinTransaction(
+      context,
+      tempGuid,
+      distinctGuid,
+    );
+    if (!ownerBefore) {
+      // Preserve the historical orphan cleanup. A successful request must not remain eligible for
+      // blind re-send solely because its optimistic bubble was independently purged.
+      await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
+      return 'missing';
+    }
+
+    const result = await reconcileExactOutgoingAttemptSuccessCoreWithinTransaction(
+      context,
+      {
+        tempGuid,
+        attemptGuid: ack.attemptGuid,
+        clientAttemptGeneration: ack.attemptOwnerToken.generation,
+        guid: distinctGuid ?? ownerBefore.guid,
+        dateCreated: ack.dateCreated,
+        dateDelivered: ack.dateDelivered,
+      },
+      true,
+    );
+    if (result === 'attempt-owner-pending' || result === 'stale-attempt') {
+      return 'stale-attempt-owner';
+    }
+    if (result === 'unmatched') return 'missing';
+
+    const ownerAfter = await findAttemptOwnerSnapshotWithinTransaction(
+      context,
+      tempGuid,
+      distinctGuid ?? ownerBefore.guid,
+    );
+    if (!ownerAfter) return 'missing';
+    return ownerAfter.sendState === 'error' ? 'sticky-error' : 'sent';
+  });
+}
+
+/** Standalone owner for exact capable-RCS success reconciliation. */
+export function reconcileExactOutgoingAttemptSuccess(
+  db: AppDatabase,
+  success: ExactOutgoingAttemptSuccess,
+  commitGuard?: DbCommitGuard,
+): Promise<ExactOutgoingAttemptSuccessDisposition> {
+  return withDbTransaction(
+    db,
+    (context) => reconcileExactOutgoingAttemptSuccessWithinTransaction(context, success),
+    commitGuard,
+  );
 }
 
 /** The minimal echo fields reconcileEchoByContent needs to correlate to an optimistic row. */
 export interface EchoMatchFields {
   guid: string;
+  tempGuid?: string | null;
+  attemptGuid?: string | null;
+  clientAttemptGeneration?: number | null;
+  /** True when the wire contained a partial or malformed modern correlation tuple. */
+  sendAttemptCorrelationInvalid?: true;
   isFromMe?: boolean | null;
   text?: string | null;
   dateCreated?: number | null;
+  dateDelivered?: number | null;
   associatedMessageGuid?: string | null;
   associatedMessagePart?: number | null;
   associatedMessageType?: string | null;
@@ -785,14 +1239,31 @@ export async function reconcileEchoByContent(
   context: DbTransactionContext,
   m: EchoMatchFields,
   chatId: number,
-): Promise<void> {
+): Promise<ExactOutgoingAttemptSuccessDisposition | null> {
   return runInTransactionContext(context, async (db) => {
-    if (!m.isFromMe || m.guid.startsWith('temp-')) return;
+    if (!m.isFromMe || m.guid.startsWith('temp-')) return null;
+    if (m.sendAttemptCorrelationInvalid === true) return 'unmatched';
+    const hasExactAttemptField =
+      m.tempGuid != null || m.attemptGuid != null || m.clientAttemptGeneration != null;
+    if (hasExactAttemptField) {
+      if (!m.tempGuid || !m.attemptGuid || m.clientAttemptGeneration == null) {
+        // Partial modern correlation is a protocol violation, not permission to content-match.
+        return 'unmatched';
+      }
+      return reconcileExactOutgoingAttemptSuccessWithinTransaction(context, {
+        tempGuid: m.tempGuid,
+        attemptGuid: m.attemptGuid,
+        clientAttemptGeneration: m.clientAttemptGeneration,
+        guid: m.guid,
+        dateCreated: m.dateCreated ?? null,
+        dateDelivered: m.dateDelivered ?? null,
+      });
+    }
     // Already reconciled (the HTTP ack promoted the temp row first) → leave it to the upsert.
     const already = await db.all<{ id: number }>(
       sql`SELECT id FROM messages WHERE guid = ${m.guid} LIMIT 1`,
     );
-    if (already[0]) return;
+    if (already[0]) return null;
     // Match on the fields the BARE socket echo reliably carries — serializeMessage emits NO
     // has_attachments/attachments on the live event, so we must NOT gate on them. A reaction
     // matches its target+type+known part, a reply matches its target+known part+text, and a plain
@@ -847,12 +1318,13 @@ export async function reconcileEchoByContent(
     const rows = await db.all<{ guid: string }>(sql`
       SELECT guid FROM messages
       WHERE chat_id = ${chatId} AND is_from_me = 1 AND guid LIKE 'temp-%'
-        AND send_state IN ('sending', 'sent', 'error') AND ${match} ${window}
+        AND send_state IN ('sending', 'sent', 'error')
+        AND attempt_owner_generation = 0 AND ${match} ${window}
       ORDER BY (date_deleted IS NULL) DESC, (send_state = 'sending') DESC, date_created ASC, id ASC
       LIMIT ${requiresUniqueUnknownPartMatch ? 2 : 1}`);
-    if (requiresUniqueUnknownPartMatch && rows.length !== 1) return;
+    if (requiresUniqueUnknownPartMatch && rows.length !== 1) return null;
     const temp = rows[0];
-    if (!temp) return;
+    if (!temp) return null;
     await handoverOutgoingIdentityWithinTransaction(context, temp.guid, m.guid);
     // Drop the queue row BEFORE promoting, so a concurrent retry tick in the gap can't claim and
     // re-POST a send that's already being reconciled.
@@ -861,6 +1333,7 @@ export async function reconcileEchoByContent(
       .update(messages)
       .set({ guid: m.guid, sendState: 'sent', error: 0, errorMessage: null })
       .where(eq(messages.guid, temp.guid));
+    return null;
   });
 }
 
@@ -891,16 +1364,32 @@ export async function reconcileOutgoingAttachmentByContent(
   m: EchoMatchFields,
   chatId: number,
   commitGuard?: DbCommitGuard,
-): Promise<void> {
-  if (!m.isFromMe || m.guid.startsWith('temp-')) return;
-  await withDbTransaction(
+): Promise<ExactOutgoingAttemptSuccessDisposition | null> {
+  if (!m.isFromMe || m.guid.startsWith('temp-')) return null;
+  if (m.sendAttemptCorrelationInvalid === true) return 'unmatched';
+  return withDbTransaction(
     db,
     async (context) => {
+      const hasExactAttemptField =
+        m.tempGuid != null || m.attemptGuid != null || m.clientAttemptGeneration != null;
+      if (hasExactAttemptField) {
+        if (!m.tempGuid || !m.attemptGuid || m.clientAttemptGeneration == null) {
+          return 'unmatched';
+        }
+        return reconcileExactOutgoingAttemptSuccessWithinTransaction(context, {
+          tempGuid: m.tempGuid,
+          attemptGuid: m.attemptGuid,
+          clientAttemptGeneration: m.clientAttemptGeneration,
+          guid: m.guid,
+          dateCreated: m.dateCreated ?? null,
+          dateDelivered: m.dateDelivered ?? null,
+        });
+      }
       // Already materialized (a prior sync/echo created it) → leave it to the upsert.
       const already = await db.all<{ id: number }>(
         sql`SELECT id FROM messages WHERE guid = ${m.guid} LIMIT 1`,
       );
-      if (already[0]) return;
+      if (already[0]) return null;
       // Time-bound to a send near the echo's own timestamp (same window as reconcileEchoByContent) so a
       // history re-sync of an OLD identical picture can't claim a fresh optimistic row.
       const echoDate = m.dateCreated ?? null;
@@ -918,6 +1407,9 @@ export async function reconcileOutgoingAttachmentByContent(
         SELECT mm.guid FROM messages mm
         WHERE mm.chat_id = ${chatId} AND mm.is_from_me = 1 AND mm.guid LIKE 'temp-%'
           AND mm.send_state IN ('sending', 'sent', 'error')
+          -- Content matching is legacy-only. A modern row (generation > 0) must carry the exact
+          -- server tuple; otherwise an old identical sync row could steal the optimistic bubble.
+          AND mm.attempt_owner_generation = 0
           AND mm.associated_message_type IS NULL AND mm.text IS ${m.text ?? null}
           AND EXISTS (
             SELECT 1 FROM attachments a
@@ -927,7 +1419,7 @@ export async function reconcileOutgoingAttachmentByContent(
         ORDER BY (mm.date_deleted IS NULL) DESC, (mm.send_state = 'sending') DESC,
                  mm.date_created ASC, mm.id ASC LIMIT 1`);
       const temp = rows[0];
-      if (!temp) return;
+      if (!temp) return null;
       // Queue deletion and identity promotion are one commit. Otherwise a crash/rollback between
       // them can either re-send an acknowledged attachment or strand the optimistic temp row.
       await handoverOutgoingIdentityWithinTransaction(context, temp.guid, m.guid);
@@ -936,6 +1428,7 @@ export async function reconcileOutgoingAttachmentByContent(
         .update(messages)
         .set({ guid: m.guid, sendState: 'sent', error: 0, errorMessage: null })
         .where(eq(messages.guid, temp.guid));
+      return null;
     },
     commitGuard,
   );
@@ -955,7 +1448,15 @@ export function retireOutgoingWithinTransaction(
     await db
       .update(messages)
       .set({ sendState: 'error', error: errorCode, errorMessage: null })
-      .where(and(eq(messages.guid, tempGuid), ne(messages.sendState, 'sent')));
+      .where(
+        and(
+          sql`(${messages.guid} = ${tempGuid} OR EXISTS (
+            SELECT 1 FROM message_guid_aliases a
+             WHERE a.alias_guid = ${tempGuid} AND a.canonical_guid = ${messages.guid}
+          ))`,
+          ne(messages.sendState, 'sent'),
+        ),
+      );
   });
 }
 

@@ -13,7 +13,7 @@ const SERVICES_DIRECTORY = 'src/services';
 const UI_DB_OWNER_DIRECTORIES = ['app', 'src/ui'];
 const PRODUCTION_DIRECTORIES = ['app', 'src'];
 const PRODUCTION_ENTRY_FILES = ['index.js'];
-const EMBEDDED_WEBVIEW_MODULE = 'react-native-webview';
+const EMBEDDED_WEBVIEW_MODULES = ['react-native-webview', '@expo/dom-webview', 'expo/dom/internal'];
 const FORBIDDEN_SOURCE_DIRECTORIES = ['db', 'features', 'native', 'services', 'state', 'ui'];
 const FORBIDDEN_ALIASES = ['@db', '@features', '@native', '@services', '@state', '@ui'];
 const SOURCE_EXTENSIONS = ['.tsx', '.jsx', '.mts', '.cts', '.mjs', '.cjs', '.ts', '.js'];
@@ -62,11 +62,15 @@ function literalText(node) {
   return ts.isStringLiteralLike(node) ? node.text : undefined;
 }
 
-export function importSpecifiers(source, fileName = 'source.ts') {
+function parseSource(source, fileName) {
   const scriptKind = extname(fileName).toLowerCase().includes('x')
     ? ts.ScriptKind.TSX
     : ts.ScriptKind.TS;
-  const file = ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, scriptKind);
+  return ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, scriptKind);
+}
+
+export function importSpecifiers(source, fileName = 'source.ts') {
+  const file = parseSource(source, fileName);
   const specifiers = [];
 
   function visit(node) {
@@ -95,6 +99,24 @@ export function importSpecifiers(source, fileName = 'source.ts') {
 
   visit(file);
   return specifiers;
+}
+
+export function hasUseDomDirective(source, fileName = 'source.ts') {
+  const file = parseSource(source, fileName);
+  for (const statement of file.statements) {
+    if (!ts.isExpressionStatement(statement) || !ts.isStringLiteral(statement.expression)) break;
+    if (statement.expression.text === 'use dom') return true;
+  }
+  return false;
+}
+
+function isEmbeddedWebViewModule(specifier) {
+  return EMBEDDED_WEBVIEW_MODULES.some(
+    (module) =>
+      specifier === module ||
+      specifier.startsWith(`${module}/`) ||
+      (module === 'expo/dom/internal' && specifier.startsWith(`${module}.`)),
+  );
 }
 
 function isForbiddenPackage(specifier) {
@@ -193,15 +215,17 @@ export function validateEmbeddedWebViewImports({ root, files }) {
 
   for (const file of files) {
     const source = readFileSync(file, 'utf8');
+    if (hasUseDomDirective(source, file)) {
+      errors.push(
+        `${relative(root, file)} declares disabled Expo DOM WebView directive "use dom".`,
+      );
+    }
     for (const specifier of importSpecifiers(source, file)) {
       if (specifier === '<non-literal>') {
         errors.push(
           `${relative(root, file)} uses a non-literal require/import, so the disabled embedded WebView boundary cannot be verified.`,
         );
-      } else if (
-        specifier === EMBEDDED_WEBVIEW_MODULE ||
-        specifier.startsWith(`${EMBEDDED_WEBVIEW_MODULE}/`)
-      ) {
+      } else if (isEmbeddedWebViewModule(specifier)) {
         errors.push(
           `${relative(root, file)} imports disabled embedded WebView boundary "${specifier}".`,
         );

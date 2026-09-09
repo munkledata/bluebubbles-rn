@@ -8,6 +8,13 @@ outside the current owner-approved private scope: binary distribution through Go
 Testing only to owner-approved private testers. This scope does not waive any third-party obligation
 that already applies to private testing.
 
+The deterministic [source inventory](./legal/generated/THIRD_PARTY_NOTICES.generated.md) records
+the current production-lock dependency superset, recursively discovered package legal files,
+tracked app and store artwork, local native modules, and build plugins. It is technical audit evidence, not an
+exact Android App Bundle notice set or legal approval. The generated report deliberately keeps
+missing metadata, unresolved asset provenance, and compound license choices visible instead of
+guessing them.
+
 ## Expo project-template notice
 
 The following MIT License text was inherited from the Expo project template and previously occupied

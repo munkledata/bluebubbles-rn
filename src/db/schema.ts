@@ -199,6 +199,14 @@ export const messages = sqliteTable(
     dateEdited: integer('date_edited'),
     /** Set when the message is unsent/retracted; renders a tombstone. */
     dateRetracted: integer('date_retracted'),
+    /** Shared aggregate result: partial content may render; full/unknown retractions fail closed. */
+    retractionState: text('retraction_state', {
+      enum: ['intact', 'partial', 'fully-retracted', 'unknown'],
+    }),
+    /** Bounded exact Apple part topology, stored as JSON for action/reply projection. */
+    messagePartTopology: text('message_part_topology'),
+    /** Local unsend part awaiting exact server retraction evidence; blocks stale-part downgrades. */
+    pendingRetractionPartIndex: integer('pending_retraction_part_index'),
     /**
      * Set (Unix ms) when the message enters macOS "Recently Deleted" — the server's `message-deleted`
      * event. A TOMBSTONE, not a hard delete: the message stays in the Mac's chat.db (~30 days) and
@@ -237,6 +245,21 @@ export const messages = sqliteTable(
     errorMessage: text('error_message'),
     /** Local send lifecycle for optimistic outgoing messages. */
     sendState: text('send_state').default('sent'),
+    /**
+     * Server-owned identity of the physical RCS attempt currently allowed to change this bubble.
+     * Null for legacy/unowned sends and while an initial attempt has not returned its identity.
+     */
+    activeSendAttemptGuid: text('active_send_attempt_guid'),
+    /**
+     * A send request is in flight but its server-owned attempt identity is not installed yet.
+     * The previous active identity is deliberately retained while this is true, so a delayed
+     * failure cannot be mistaken for ownership of the new attempt.
+     */
+    attemptOwnerPending: integer('attempt_owner_pending', { mode: 'boolean' })
+      .notNull()
+      .default(false),
+    /** Monotonic local request generation used to reject a delayed acknowledgement. */
+    attemptOwnerGeneration: integer('attempt_owner_generation').notNull().default(0),
     /** Apple delivery tiers: delivered without notifying ("Delivered Quietly")
         vs explicitly notified the recipient. Both arrive in the server payload. */
     wasDeliveredQuietly: integer('was_delivered_quietly', { mode: 'boolean' }).default(false),
@@ -274,6 +297,37 @@ export const messages = sqliteTable(
     balloonBundleIdBounded: check(
       'messages_balloon_bundle_id_bounded',
       sql`${t.balloonBundleId} IS NULL OR (length(${t.balloonBundleId}) BETWEEN 1 AND 255 AND length(CAST(${t.balloonBundleId} AS BLOB)) <= 1024)`,
+    ),
+    activeSendAttemptGuidBounded: check(
+      'messages_active_send_attempt_guid_bounded',
+      sql`${t.activeSendAttemptGuid} IS NULL OR length(${t.activeSendAttemptGuid}) BETWEEN 1 AND 128`,
+    ),
+    attemptOwnerPendingBoolean: check(
+      'messages_attempt_owner_pending_boolean',
+      sql`typeof(${t.attemptOwnerPending}) = 'integer' AND ${t.attemptOwnerPending} IN (0, 1)`,
+    ),
+    attemptOwnerGenerationValid: check(
+      'messages_attempt_owner_generation_valid',
+      sql`typeof(${t.attemptOwnerGeneration}) = 'integer'
+          AND ${t.attemptOwnerGeneration} BETWEEN 0 AND 2147483647`,
+    ),
+    retractionStateValid: check(
+      'messages_retraction_state_valid',
+      sql`${t.retractionState} IS NULL OR ${t.retractionState} IN ('intact', 'partial', 'fully-retracted', 'unknown')`,
+    ),
+    messagePartTopologyBounded: check(
+      'messages_part_topology_bounded',
+      sql`${t.messagePartTopology} IS NULL OR (
+            length(CAST(${t.messagePartTopology} AS BLOB)) BETWEEN 2 AND 1048576
+            AND instr(${t.messagePartTopology}, char(0)) = 0
+          )`,
+    ),
+    pendingRetractionPartIndexValid: check(
+      'messages_pending_retraction_part_index_valid',
+      sql`${t.pendingRetractionPartIndex} IS NULL OR (
+            typeof(${t.pendingRetractionPartIndex}) = 'integer'
+            AND ${t.pendingRetractionPartIndex} BETWEEN 0 AND 10000
+          )`,
     ),
   }),
 );
@@ -338,6 +392,10 @@ export const attachments = sqliteTable(
     isSticker: integer('is_sticker', { mode: 'boolean' }).default(false),
     /** iMessage's hidden rich-link/plugin-payload attachments — skipped when rendering. */
     hideAttachment: integer('hide_attachment', { mode: 'boolean' }).default(false),
+    /** Exact original Apple part owner when a complete topology proves it. */
+    messagePartIndex: integer('message_part_index'),
+    /** True when the owning part was retracted or aggregate visibility is unknown/full. */
+    isRetracted: integer('is_retracted', { mode: 'boolean' }).notNull().default(false),
     /** Genmoji (macOS 15.1+ AI-generated emoji image): the image's content identifier. Presence
      *  marks a Genmoji so the UI renders it inline emoji-sized, not full-width. NULL otherwise. */
     emojiImageContentIdentifier: text('emoji_image_content_identifier'),
@@ -354,6 +412,17 @@ export const attachments = sqliteTable(
     localPathIdx: index('attachments_local_path_idx')
       .on(t.localPath)
       .where(sql`${t.localPath} IS NOT NULL`),
+    messagePartIndexValid: check(
+      'attachments_message_part_index_valid',
+      sql`${t.messagePartIndex} IS NULL OR (
+            typeof(${t.messagePartIndex}) = 'integer'
+            AND ${t.messagePartIndex} BETWEEN 0 AND 10000
+          )`,
+    ),
+    isRetractedBoolean: check(
+      'attachments_is_retracted_boolean',
+      sql`typeof(${t.isRetracted}) = 'integer' AND ${t.isRetracted} IN (0, 1)`,
+    ),
   }),
 );
 

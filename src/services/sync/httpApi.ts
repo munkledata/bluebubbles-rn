@@ -1,4 +1,4 @@
-import { chatsApi, type HttpClient, messagesApi, serverApi } from '@core/api';
+import { chatsApi, type HttpClient, messagesApi, repairSnapshotApi, serverApi } from '@core/api';
 import type { Chat, Message } from '@core/models';
 import type { SyncApi } from './types';
 
@@ -9,6 +9,9 @@ export function httpSyncApi(http: HttpClient): SyncApi {
       const info = await serverApi.serverInfo(http, signal);
       return info.server_version ?? ''; // unknown → '' (sync treats as old → timestamp cursor)
     },
+    beginRepairSnapshot: (signal) => repairSnapshotApi.begin(http, signal),
+    finishRepairSnapshot: (token, signal) => repairSnapshotApi.finish(http, token, signal),
+    cancelRepairSnapshot: (token, signal) => repairSnapshotApi.cancel(http, token, signal),
     fetchChat: (chatGuid, signal): Promise<Chat> => chatsApi.getChat(http, chatGuid, signal),
     fetchChats: (offset, limit, signal): Promise<Chat[]> =>
       chatsApi.queryChats(http, { offset, limit }, signal),

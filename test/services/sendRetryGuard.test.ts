@@ -13,7 +13,7 @@
  * are real, and the HTTP client is a fake whose POSTs are recorded.
  */
 import type Database from 'better-sqlite3';
-import { Chat } from '@core/models';
+import { Chat, Message } from '@core/models';
 import { logger } from '@core/secure';
 import {
   getChatIdByGuid,
@@ -21,12 +21,21 @@ import {
   insertOutgoingText,
   upsertChats,
   upsertHandles,
+  upsertMessages,
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
-jest.mock('@/services/clients', () => ({ http: { post: jest.fn() } })); // real one builds the vault
+jest.mock('@/services/clients', () => {
+  const http = {
+    post: jest.fn(),
+    pinTransport: () => http,
+    assertTransportCurrent: () => undefined,
+    isTransportCurrent: () => true,
+  };
+  return { http };
+}); // real one builds the vault
 jest.mock('@/services/contacts/contactsService', () => ({ pickContact: jest.fn() }));
 jest.mock('@/services/send/attachmentUpload', () => ({
   expoAttachmentUploader: jest.fn(async () => ({ guid: 'up-1', viaPrivateApi: false })),
@@ -59,6 +68,33 @@ async function seedChat(db: AppDatabase): Promise<number> {
     handles,
   );
   return (await getChatIdByGuid(db, 'c1'))!;
+}
+
+async function seedExactTextTarget(
+  db: AppDatabase,
+  chatId: number,
+  guid: string,
+  partIndex: number,
+): Promise<void> {
+  const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
+  await upsertMessages(
+    db,
+    [
+      Message.parse({
+        guid,
+        text: 'target',
+        dateCreated: 500,
+        messagePartTopology: {
+          complete: true,
+          originalPartIndexes: [partIndex],
+          currentParts: [{ index: partIndex, kind: 'text' }],
+          attachmentOwnership: [],
+        },
+      }),
+    ],
+    () => chatId,
+    handles,
+  );
 }
 
 /** Seed a failed optimistic TEXT send (message 'error' + a queue row with a spent attempt). */
@@ -238,6 +274,7 @@ describe('retry() — re-sends the QUEUED send, not the bubble', () => {
     const { db, raw } = await createTestDb();
     (getDatabase as jest.Mock).mockReturnValue(db);
     const chatId = await seedChat(db);
+    await seedExactTextTarget(db, chatId, 'orig-1', 0);
     await insertOutgoingText(db, {
       tempGuid: 'temp-rich',
       chatId,
@@ -245,6 +282,7 @@ describe('retry() — re-sends the QUEUED send, not the bubble', () => {
       text: 'sure',
       now: 1000,
       selectedMessageGuid: 'orig-1',
+      partIndex: 0,
       effectId: 'com.apple.MobileSMS.expressivesend.impact',
       subject: 'Re: lunch',
     });
@@ -255,6 +293,7 @@ describe('retry() — re-sends the QUEUED send, not the bubble', () => {
     expect(posts[0]?.body).toMatchObject({
       tempGuid: 'temp-rich',
       selectedMessageGuid: 'orig-1',
+      partIndex: 0,
       effectId: 'com.apple.MobileSMS.expressivesend.impact',
       subject: 'Re: lunch',
     });

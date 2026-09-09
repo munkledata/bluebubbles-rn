@@ -104,9 +104,53 @@ describe('FindMyScreen external map handoff', () => {
   it('opens the exact validated point through the safe URL boundary', async () => {
     await renderWithTheme(<FindMyScreen />);
 
-    await fireEvent.press(screen.getByText('Open ↗'));
+    await fireEvent.press(screen.getByRole('button', { name: 'Open Private Phone in Maps' }));
     await waitFor(() => expect(safeOpenUrl).toHaveBeenCalledWith(EXPECTED_GEO));
     expect(useToastStore.getState().current).toBeNull();
+  });
+
+  it('exposes named refresh, tabs, and unique external-map controls', async () => {
+    useFindMyStore.setState({
+      devices: [DEVICE, SECOND_DEVICE],
+      friends: [
+        {
+          id: 'private-friend-1',
+          name: 'Casey',
+          latitude: 47.6062,
+          longitude: -122.3321,
+          address: 'Location available',
+          lastUpdated: null,
+        },
+      ],
+    });
+    await renderWithTheme(<FindMyScreen />);
+
+    const refresh = screen.getByRole('button', { name: 'Refresh Find My' });
+    expect(refresh.props.accessibilityState).toEqual({ disabled: false, busy: false });
+    expect(screen.getByRole('tab', { name: 'Devices' }).props.accessibilityState).toEqual({
+      selected: true,
+    });
+    expect(screen.getByRole('tab', { name: 'Items' }).props.accessibilityState).toEqual({
+      selected: false,
+    });
+    expect(screen.getByRole('button', { name: 'Open Private Phone in Maps' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Open Tablet in Maps' })).toBeTruthy();
+
+    await fireEvent.press(screen.getByRole('tab', { name: 'People' }));
+    expect(screen.getByRole('tab', { name: 'People' }).props.accessibilityState).toEqual({
+      selected: true,
+    });
+    expect(screen.getByRole('tab', { name: 'Devices' }).props.accessibilityState).toEqual({
+      selected: false,
+    });
+    expect(screen.getByRole('button', { name: 'Open Casey in Maps' })).toBeTruthy();
+
+    await act(async () => {
+      useFindMyStore.setState({ refreshing: true });
+    });
+    expect(
+      screen.getByRole('button', { name: 'Refresh Find My' }).props.accessibilityState,
+    ).toEqual({ disabled: true, busy: true });
   });
 
   it('shows one generic toast when Android refuses the current handoff', async () => {
@@ -183,7 +227,7 @@ describe('FindMyScreen external map handoff', () => {
     });
     await renderWithTheme(<FindMyScreen />);
 
-    expect(screen.queryByText('Open ↗')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Open Private Phone in Maps' })).toBeNull();
     expect(safeOpenUrl).not.toHaveBeenCalled();
     expect(useToastStore.getState().current).toBeNull();
   });

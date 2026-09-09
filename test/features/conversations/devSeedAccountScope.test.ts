@@ -152,8 +152,15 @@ describe('DEV fake sends — account ownership', () => {
 
   it('drops a delayed text acknowledgement after its account lease is retired', async () => {
     const accountA = captureRealtimeDeliveryLease();
-    await devSendFake('chat-a', 'hello', undefined, accountA);
+    const onQueued = jest.fn(async () => undefined);
+    await devSendFake('chat-a', 'hello', undefined, accountA, onQueued);
     expect(mockInsertOutgoing).toHaveBeenCalledTimes(1);
+    expect(onQueued).toHaveBeenCalledTimes(1);
+
+    mockGetChatId.mockResolvedValueOnce(null);
+    const missingChatQueued = jest.fn();
+    await devSendFake('missing-chat', 'keep me', undefined, accountA, missingChatQueued);
+    expect(missingChatQueued).not.toHaveBeenCalled();
 
     await pauseRealtimeDeliveries();
     resumeRealtimeDeliveries();

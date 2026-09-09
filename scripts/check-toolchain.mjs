@@ -176,6 +176,34 @@ export function validateReleaseRunnerSource(source) {
       errors.push(`Android release runner must use exactly one ${marker} invocation`);
     }
   }
+  for (const [marker, requirement] of [
+    [
+      "EAS_LOCAL_BUILD_SKIP_CLEANUP: '1'",
+      'retain the run-owned EAS workspace for native-path proof',
+    ],
+    ["environment.EAS_LOCAL_BUILD_SKIP_NATIVE_BUILD = '0';", 'pin the native-build bypass off'],
+    [
+      'nativePathProof = verifyReleaseNativePathProof(nativeWorkspace, pendingPath);',
+      'verify the exact retained EAS native build',
+    ],
+    ['artifact: buildArtifact,', 'bind the successful build receipt to the pending AAB'],
+    [
+      'buildReceiptBinding = readBoundReleaseBuildReceipt(state, artifact);',
+      'revalidate the build receipt before artifact validation',
+    ],
+    [
+      'receiptSha256: buildReceiptBinding.sha256,',
+      'carry the build receipt digest into validation',
+    ],
+    [
+      "proofError.releaseFailureCode = 'native_path_proof_failed';",
+      'terminalize a failed native-path proof explicitly',
+    ],
+  ]) {
+    if (source.split(marker).length !== 2) {
+      errors.push(`Android release runner must ${requirement}`);
+    }
+  }
   if (
     /exec eas (?:build|submit)\b|eas-cli(?:-local-build-plugin)?@|--auto-submit\b|--latest\b/.test(
       source,

@@ -56,6 +56,8 @@ export interface EventOccurrenceMetadata {
   readonly transportOccurrenceId?: string;
   /** Native callback receipt time captured before transport-specific asynchronous gates. */
   readonly receivedAt?: number;
+  /** Authenticated transport deadline which may shorten, but never extend, local queue expiry. */
+  readonly authenticatedExpiresAt?: number;
 }
 
 /** Optional account-lifetime guard supplied by native realtime transports. */

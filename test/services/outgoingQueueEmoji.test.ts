@@ -20,9 +20,14 @@ import { runOutgoingQueue } from '@/services/send/outgoingQueueService';
 import { createTestDb } from '../support/testDb';
 
 function fakeHttp(impl: (json?: unknown) => Promise<unknown>): HttpClient {
-  return {
+  let http!: HttpClient;
+  http = {
     post: (_p: string, _s: unknown, opts?: { json?: unknown }) => impl(opts?.json),
+    pinTransport: () => http,
+    isTransportCurrent: () => true,
+    assertTransportCurrent: () => undefined,
   } as unknown as HttpClient;
+  return http;
 }
 
 /** Reaction-only tests: the attachment IO must never be touched. */
@@ -43,7 +48,23 @@ async function seed(db: AppDatabase): Promise<number> {
   const chatId = map.get('c1')!;
   await upsertMessages(
     db,
-    [Message.parse({ guid: 'mt', text: 'hi', dateCreated: 100, handle: { address: 'a@x.com' } })],
+    [
+      Message.parse({
+        guid: 'mt',
+        text: 'hi',
+        dateCreated: 100,
+        handle: { address: 'a@x.com' },
+        messagePartTopology: {
+          complete: true,
+          originalPartIndexes: [0, 2],
+          currentParts: [
+            { index: 0, kind: 'text' },
+            { index: 2, kind: 'text' },
+          ],
+          attachmentOwnership: [],
+        },
+      }),
+    ],
     () => chatId,
     hm,
   );
@@ -133,6 +154,7 @@ describe('runOutgoingQueue — emoji tapback resend', () => {
       tempGuid: 'temp-unemo',
       reaction: '-emoji',
       emoji: '🫡',
+      partIndex: 0,
     });
 
     let body: Record<string, unknown> | undefined;
@@ -151,7 +173,12 @@ describe('runOutgoingQueue — emoji tapback resend', () => {
   it('a CLASSIC tapback retry carries NO reactionEmoji key (server rejects it)', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seed(db);
-    await seedFailedReaction(db, raw, { chatId, tempGuid: 'temp-love', reaction: 'love' });
+    await seedFailedReaction(db, raw, {
+      chatId,
+      tempGuid: 'temp-love',
+      reaction: 'love',
+      partIndex: 0,
+    });
 
     let body: Record<string, unknown> | undefined;
     await runOutgoingQueue(

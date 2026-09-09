@@ -67,10 +67,18 @@ export default function Home(): React.JSX.Element {
         }
         if (useDevFixtures) {
           await fireDueScheduledWithDevelopmentSender(
-            (g, t, s, _onQueued, selectedMessagePartIndex) =>
+            (g, t, s, onQueued, selectedMessagePartIndex) =>
               s
-                ? devSendFakeReply(g, t, s, selectedMessagePartIndex, undefined, accountLease)
-                : devSendFake(g, t, undefined, accountLease),
+                ? devSendFakeReply(
+                    g,
+                    t,
+                    s,
+                    selectedMessagePartIndex,
+                    undefined,
+                    accountLease,
+                    onQueued,
+                  )
+                : devSendFake(g, t, undefined, accountLease, onQueued),
             accountLease,
           );
         } else {

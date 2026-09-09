@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { isAggregateRetractionTombstone } from '@core/messages/retraction';
 import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
@@ -9,6 +10,7 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 import { getDatabase } from '@db/database';
 import { listThreadMessages, type MessageRow } from '@db/repositories';
+import { useReactiveQuery } from '@db/useReactiveQuery';
 import { buildMessageSnippet, formatTime } from '@utils';
 import { useTheme } from '../theme';
 
@@ -67,7 +69,6 @@ export function ThreadSheet({
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const [accountLease] = useState(() => captureRealtimeDeliveryLease());
-  const [loadedThread, setLoadedThread] = useState<LoadedThread | null>(null);
   const openLifetimeRef = useRef(0);
   // The ref revokes synchronously; committed state gives a reopened sheet fresh callbacks.
   const [renderOpenLifetime, setRenderOpenLifetime] = useState(0);
@@ -85,14 +86,12 @@ export function ThreadSheet({
     const nextLifetime = openLifetimeRef.current + 1;
     openLifetimeRef.current = nextLifetime;
     setRenderOpenLifetime(nextLifetime);
-    setLoadedThread(null);
     return nextLifetime;
   }, []);
 
   const requestCloseCurrentThread = useCallback((): void => {
     const current = originatorGuidRef.current;
     if (!current) {
-      setLoadedThread(null);
       return;
     }
     const currentLifetime = openLifetimeRef.current;
@@ -151,41 +150,31 @@ export function ThreadSheet({
     [accountLease],
   );
 
-  useEffect(() => {
-    const sourceOriginatorGuid = originatorGuid;
-    const loadOpenLifetime = renderOpenLifetime;
-    if (
-      !sourceOriginatorGuid ||
-      contentUnavailable ||
-      !threadGrantIsCurrent(loadOpenLifetime, sourceOriginatorGuid)
-    ) {
-      return;
-    }
-    let alive = true;
-    void (async () => {
-      try {
-        const rows = await listThreadForAccount(accountLease, sourceOriginatorGuid);
-        if (
-          !alive ||
-          rows == null ||
-          !threadGrantIsCurrent(loadOpenLifetime, sourceOriginatorGuid)
-        ) {
-          return;
-        }
-        setLoadedThread({
-          originatorGuid: sourceOriginatorGuid,
-          openLifetime: loadOpenLifetime,
-          rows,
-        });
-      } catch {
-        // The sheet has no load-error UI. Keep the existing empty result, but only after the
-        // account/source/lifetime checks above have prevented stale publication.
+  const reactiveThread = useReactiveQuery<LoadedThread | null>(
+    async () => {
+      const sourceOriginatorGuid = originatorGuid;
+      const loadOpenLifetime = renderOpenLifetime;
+      if (
+        !sourceOriginatorGuid ||
+        contentUnavailable ||
+        !threadGrantIsCurrent(loadOpenLifetime, sourceOriginatorGuid)
+      ) {
+        return null;
       }
-    })();
-    return () => {
-      alive = false;
-    };
-  }, [accountLease, originatorGuid, contentUnavailable, renderOpenLifetime, threadGrantIsCurrent]);
+      const rows = await listThreadForAccount(accountLease, sourceOriginatorGuid);
+      if (rows == null || !threadGrantIsCurrent(loadOpenLifetime, sourceOriginatorGuid)) {
+        return null;
+      }
+      return {
+        originatorGuid: sourceOriginatorGuid,
+        openLifetime: loadOpenLifetime,
+        rows,
+      };
+    },
+    ['messages', 'handles'],
+    [originatorGuid, renderOpenLifetime, contentUnavailable],
+    { enabled: !!originatorGuid && !contentUnavailable },
+  );
 
   const closeRequest = closeRequestedForRef.current;
   const closeRequestedForCurrent =
@@ -199,9 +188,9 @@ export function ThreadSheet({
   // Hide a prior thread's rows immediately when the sheet closes or changes originator. The
   // matching async load makes them visible again without a synchronous reset effect.
   const rows =
-    loadedThread?.originatorGuid === originatorGuid &&
-    loadedThread.openLifetime === renderOpenLifetime
-      ? loadedThread.rows
+    reactiveThread.data?.originatorGuid === originatorGuid &&
+    reactiveThread.data.openLifetime === renderOpenLifetime
+      ? reactiveThread.data.rows
       : [];
   const rowOpenLifetime = renderOpenLifetime;
   const rowOriginatorGuid = originatorGuid;
@@ -264,6 +253,7 @@ export function ThreadSheet({
                       hasVisibleAttachments: m.hasVisibleAttachments,
                       attachmentDescription: m.attachmentDescription,
                       balloonBundleId: m.balloonBundleId,
+                      isRetracted: isAggregateRetractionTombstone(m),
                     }) || 'Message'}
                   </Text>
                 </Pressable>

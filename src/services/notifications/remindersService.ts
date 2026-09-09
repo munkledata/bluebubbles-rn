@@ -24,8 +24,6 @@ export interface ReminderScheduler {
     notificationId: string;
     chatGuid: string;
     messageGuid: string;
-    title: string;
-    body: string;
     scheduledFor: number;
     messageDate?: number;
   }): Promise<void>;
@@ -235,8 +233,6 @@ export async function scheduleReminder(
           notificationId,
           chatGuid: args.chatGuid,
           messageGuid: args.messageGuid,
-          title: args.chatTitle,
-          body: args.messagePreview ?? 'Reminder',
           scheduledFor: args.scheduledFor,
           messageDate,
         });
@@ -253,8 +249,8 @@ export async function scheduleReminder(
         // between. Match the notification id we read before crossing the native bridge. If another
         // operation changed or deleted that row while scheduling, this older operation must retire its
         // candidate instead of overwriting the newer reminder or creating a duplicate row.
-        // (The moved row keeps its original preview text; the notification body the user actually sees
-        // was just re-baked from the fresh preview above.)
+        // The durable row stores no frozen preview text, and native reminder presentation is
+        // deliberately generic; the live message projection remains the content authority.
         if (existing) {
           const moved = await withDbTransaction(
             db,
@@ -364,8 +360,6 @@ export async function rescheduleReminder(
           notificationId,
           chatGuid: reminder.chatGuid,
           messageGuid: reminder.messageGuid,
-          title: reminder.senderName ?? 'Reminder',
-          body: reminder.messagePreview ?? 'Reminder',
           scheduledFor,
           messageDate,
         });

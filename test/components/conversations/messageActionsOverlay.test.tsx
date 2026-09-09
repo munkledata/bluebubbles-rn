@@ -129,6 +129,7 @@ function makeSelected(overrides: Partial<SelectedMessage> = {}): SelectedMessage
     isTemp: false,
     sendState: 'sent',
     attachments: [],
+    targetPartIndex: 0,
     ...overrides,
   };
 }
@@ -177,6 +178,16 @@ describe('MessageActionsOverlay — reaction picker', () => {
     await renderOverlay(makeSelected({ mine: ['like'] }));
     expect(screen.getByLabelText('Like').props.accessibilityState).toEqual({ selected: true });
     expect(screen.getByLabelText('Heart').props.accessibilityState).toEqual({ selected: false });
+  });
+
+  it('shows whole-message RCS reactions without offering a threaded Reply', async () => {
+    const h = await renderOverlay(makeSelected({ canReact: true, targetPartIndex: undefined }));
+
+    expect(screen.queryByText('Reply')).toBeNull();
+    await pressAndFlush(screen.getByLabelText('Heart'), () => {
+      expect(h.onReact).toHaveBeenCalledWith('love');
+      expect(h.onClose).toHaveBeenCalledTimes(1);
+    });
   });
 
   const TEMP_LAYOUTS: Array<[string, SelectedMessage['anchorRect']]> = [

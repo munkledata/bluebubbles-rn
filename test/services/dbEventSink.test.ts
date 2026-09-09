@@ -67,7 +67,7 @@ describe('DbEventSink (live path)', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
 
-    expect(onMessageStored).toHaveBeenCalledWith(expect.any(Number));
+    expect(onMessageStored).toHaveBeenCalledWith(expect.any(Number), 'fcm', undefined);
     await expect(handled).resolves.toBeUndefined();
 
     release();
@@ -197,6 +197,80 @@ describe('DbEventSink (live path)', () => {
     expect(m.error).toBe(22);
     expect(m.errorMessage).toBe('Helper rejected [redacted] on [redacted URL]');
     expect(m.sendState).toBe('error');
+  });
+
+  it('fails closed on partial modern send-error identity but accepts legacy tempGuid-only events', async () => {
+    const { db, raw } = await createTestDb();
+    const markDbAppliedWithinTransaction = jest.fn(async () => undefined);
+    const context: EventDeliveryContext = {
+      generation: 1,
+      isCurrent: () => true,
+      durableEvent: { dbAppliedAt: null, markDbAppliedWithinTransaction },
+    };
+    const router = new EventRouter(new DbEventSink(db));
+    await router.handle(
+      'new-message',
+      JSON.stringify(
+        Message.parse({
+          guid: 'temp-legacy-send-error',
+          text: 'keep this bubble unchanged',
+          dateCreated: 1_700_000_000_001,
+          handle: { address: 'legacy-send-error@example.com' },
+          chats: [
+            {
+              guid: 'cLegacySendError',
+              participants: [{ address: 'legacy-send-error@example.com' }],
+            },
+          ],
+        }),
+      ),
+      'socket',
+    );
+    expect(
+      raw
+        .prepare('SELECT attempt_owner_generation AS generation FROM messages WHERE guid = ?')
+        .get('temp-legacy-send-error'),
+    ).toEqual({ generation: 0 });
+
+    for (const partialIdentity of [
+      { attemptGuid: 'attempt-without-generation' },
+      { clientAttemptGeneration: 1 },
+    ]) {
+      await expect(
+        router.handle(
+          'message-send-error',
+          {
+            tempGuid: 'temp-legacy-send-error',
+            error: 22,
+            ...partialIdentity,
+          },
+          'fcm',
+          context,
+        ),
+      ).rejects.toThrow('attempt-aware send error omitted exact correlation');
+    }
+
+    expect(markDbAppliedWithinTransaction).not.toHaveBeenCalled();
+    expect(
+      raw
+        .prepare('SELECT send_state AS sendState, error FROM messages WHERE guid = ?')
+        .get('temp-legacy-send-error'),
+    ).toEqual({ sendState: 'sent', error: 0 });
+
+    await expect(
+      router.handle(
+        'message-send-error',
+        { tempGuid: 'temp-legacy-send-error', error: 22 },
+        'fcm',
+        context,
+      ),
+    ).resolves.toBeDefined();
+    expect(markDbAppliedWithinTransaction).toHaveBeenCalledTimes(1);
+    expect(
+      raw
+        .prepare('SELECT send_state AS sendState, error FROM messages WHERE guid = ?')
+        .get('temp-legacy-send-error'),
+    ).toEqual({ sendState: 'error', error: 22 });
   });
 
   it('a message-send-error with retryable:true re-arms the outgoing queue for a post-ack failure', async () => {
@@ -453,6 +527,40 @@ describe('DbEventSink (live path)', () => {
     }
   });
 
+  it('retires retracted attachment cache entries after commit and contains cleanup failure', async () => {
+    const { db, raw } = await createTestDb();
+    const observedStates: Array<string | null> = [];
+    const retirement = jest.fn(async () => {
+      const row = raw
+        .prepare('SELECT retraction_state AS state FROM messages WHERE guid = ?')
+        .get('retracted-live') as { state: string | null };
+      observedStates.push(row.state);
+      throw new Error('CACHE_RETIREMENT_CANARY');
+    });
+    const router = new EventRouter(new DbEventSink(db, undefined, retirement));
+    await router.handle(
+      'new-message',
+      {
+        guid: 'retracted-live',
+        text: 'private body',
+        dateCreated: 100,
+        handle: { address: 'lean@x.com' },
+        chats: [{ guid: 'cRetract', participants: [{ address: 'lean@x.com' }] }],
+      },
+      'socket',
+    );
+
+    await expect(
+      router.handle(
+        'updated-message',
+        { guid: 'retracted-live', text: 'private body', dateCreated: 100, dateRetracted: 200 },
+        'socket',
+      ),
+    ).resolves.toBeDefined();
+    expect(retirement).toHaveBeenCalledTimes(1);
+    expect(observedStates).toEqual(['unknown']);
+  });
+
   it('keeps a durable message retryable when its chat is unavailable', async () => {
     const { db, raw } = await createTestDb();
     const requestRecovery = jest.fn(async () => undefined);
@@ -489,7 +597,7 @@ describe('DbEventSink (live path)', () => {
     ).toBe(0);
   });
 
-  it('keeps a durable read retryable and requests account recovery when its chat is absent', async () => {
+  it('keeps a durable read retryable and requests targeted recovery when its chat is absent', async () => {
     const { db } = await createTestDb();
     const requestRecovery = jest.fn(async () => undefined);
     const markDbAppliedWithinTransaction = jest.fn(async () => undefined);
@@ -511,14 +619,14 @@ describe('DbEventSink (live path)', () => {
         reason: 'chat-unavailable',
       }),
     );
-    expect(requestRecovery).toHaveBeenCalledWith(null, context);
+    expect(requestRecovery).toHaveBeenCalledWith('cReadNotHydrated', context);
     expect(markDbAppliedWithinTransaction).not.toHaveBeenCalled();
 
     // The compatibility direct path has no durable receipt to retain; preserve its historical no-op.
     await expect(sink.onEvent(event, 'socket')).resolves.toBeUndefined();
   });
 
-  it('requests account recovery until a durable read has a received message to mark', async () => {
+  it('requests targeted recovery until a durable read has a received message to mark', async () => {
     const { db } = await createTestDb();
     const handles = await upsertHandles(db, [{ address: 'empty@x.com' }]);
     await upsertChats(
@@ -551,7 +659,7 @@ describe('DbEventSink (live path)', () => {
         reason: 'message-unavailable',
       }),
     );
-    expect(requestRecovery).toHaveBeenCalledWith(null, context);
+    expect(requestRecovery).toHaveBeenCalledWith('cReadEmpty', context);
     expect(markDbAppliedWithinTransaction).not.toHaveBeenCalled();
   });
 
@@ -580,6 +688,33 @@ describe('DbEventSink (live path)', () => {
     );
     expect(requestRecovery).toHaveBeenCalledWith(null, context);
     expect(markDbAppliedWithinTransaction).not.toHaveBeenCalled();
+  });
+
+  it('targets the raw chat guid when a durable group payload is otherwise malformed', async () => {
+    const { db } = await createTestDb();
+    const requestRecovery = jest.fn(async () => undefined);
+    const context: EventDeliveryContext = {
+      generation: 1,
+      isCurrent: () => true,
+      durableEvent: {
+        dbAppliedAt: null,
+        markDbAppliedWithinTransaction: jest.fn(async () => undefined),
+      },
+    };
+    const sink = new DbEventSink(db, undefined, undefined, requestRecovery);
+
+    await expect(
+      sink.onEvent(
+        {
+          type: 'participant-added',
+          payload: { chats: [{ guid: 'cMalformedGroup', participants: 'not-an-array' }] },
+        },
+        'fcm',
+        context,
+      ),
+    ).rejects.toBeInstanceOf(RealtimeGroupMutationUnavailableError);
+
+    expect(requestRecovery).toHaveBeenCalledWith('cMalformedGroup', context);
   });
 });
 

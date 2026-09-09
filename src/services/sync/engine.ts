@@ -167,6 +167,8 @@ export interface FullSyncOptions {
    * store here so this module stays store-free and node-testable; `runSync` supplies it.
    */
   shouldAbort?: () => boolean;
+  /** Exact guarded DB owner for a repair-wide no-interleaving proof. */
+  commitGuard?: DbCommitGuard;
   /** Cancels the active HttpClient request/retry wait; `shouldAbort` still guards every commit. */
   signal?: AbortSignal;
   /** Repair mode: any chat page failure makes the run restartable instead of marking it complete. */
@@ -179,7 +181,7 @@ export interface FullSyncOptions {
   commitMarker?: boolean;
   /** Highest cursor observed in SERVER responses during this run (never derived from local rows). */
   onServerMarker?: (marker: SyncMarker) => void;
-  /** Repair-only identity view used for the two-crawl destructive-reconciliation fence. */
+  /** Repair-only identity view consumed after the server validates its stable snapshot lease. */
   onServerView?: (view: FullSyncServerView) => void;
 }
 
@@ -200,12 +202,13 @@ export async function syncAllChats(
     chatGuidByMessage: ReadonlyMap<string, string>,
   ) => void,
   onServerChats?: (chats: readonly Chat[]) => void,
+  transactionGuard?: DbCommitGuard,
 ): Promise<StoredChat[]> {
   const boundedPageSize =
     Number.isFinite(chatPageSize) && chatPageSize > 0 ? Math.min(Math.floor(chatPageSize), 200) : 0;
   if (boundedPageSize === 0 || shouldAbort?.()) return [];
   const shouldContinue = (): boolean => !(shouldAbort?.() ?? false);
-  const commitGuard = shouldAbort ? shouldContinue : undefined;
+  const commitGuard = transactionGuard ?? (shouldAbort ? shouldContinue : undefined);
   const stored: StoredChat[] = [];
   let offset = 0;
   for (;;) {
@@ -330,7 +333,7 @@ export async function fullSync(
           ? Math.min(Math.floor(opts.maxMessagesPerChat), CHAT_MESSAGE_MAX)
           : 0;
   const shouldContinue = (): boolean => !(opts.shouldAbort?.() ?? false);
-  const commitGuard = opts.shouldAbort ? shouldContinue : undefined;
+  const commitGuard = opts.commitGuard ?? (opts.shouldAbort ? shouldContinue : undefined);
   let messages = 0;
   let serverMarker: SyncMarker = { lastSyncedRowId: null, lastSyncedTimestamp: null };
   const serverChats = opts.onServerView ? new Map<string, number | null>() : null;
@@ -423,6 +426,7 @@ export async function fullSync(
     opts.signal,
     recordServerLastMessages,
     recordServerChats,
+    commitGuard,
   );
   const chats = stored.length;
   if (shouldContinue()) opts.onProgress?.({ chats, messages });

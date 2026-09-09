@@ -7,16 +7,18 @@
 jest.mock('ky', () => ({ __esModule: true, default: jest.fn() }));
 
 import ky from 'ky';
+import * as repairSnapshotApi from '@core/api/endpoints/repairSnapshot';
+import { UnimplementedEndpointError } from '@core/api/errors';
 import { HttpClient } from '@core/api/http';
 import { logger } from '@core/secure';
 import { z } from 'zod/v4';
 
 const mockKy = ky as unknown as jest.Mock;
 
-function jsonResponse(data: unknown, status = 200): Response {
+function jsonResponse(data: unknown, status = 200, headers: Record<string, string> = {}): Response {
   return new Response(JSON.stringify({ status: 200, data }), {
     status,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...headers },
   });
 }
 
@@ -32,6 +34,7 @@ describe('verbs + accessors', () => {
 
     await client.put('/thing', okSchema, { json: { a: 1 } });
     expect(mockKy.mock.calls[0][1].method).toBe('PUT');
+    expect(mockKy.mock.calls[0][1].redirect).toBe('error');
 
     await client.delete('/thing', okSchema);
     expect(mockKy.mock.calls[1][1].method).toBe('DELETE');
@@ -104,6 +107,136 @@ describe('verbs + accessors', () => {
       'https://old.example/api/v1/contact/c1/avatar?size=thumb&guid=space+password',
     );
     expect(onLegacyAuth).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a pinned A transport after A -> B -> A without issuing a request', async () => {
+    let origin = 'https://a.example';
+    let transportRevision = 1;
+    const client = new HttpClient({
+      getOrigin: () => origin,
+      getPassword: () => 'password',
+      getTransportRevision: () => transportRevision,
+    });
+    const pinned = client.pinTransport();
+
+    origin = 'https://b.example';
+    transportRevision += 1;
+    origin = 'https://a.example';
+    transportRevision += 1;
+
+    await expect(pinned.get('/server-info', okSchema, { retry: false })).rejects.toMatchObject({
+      kind: 'cancelled',
+    });
+    expect(mockKy).not.toHaveBeenCalled();
+  });
+
+  it('pins repair pages to one transport and owns the reserved header case-insensitively', async () => {
+    let origin = 'https://repair.example';
+    const token = '00000000-0000-4000-8000-000000000001';
+    const client = new HttpClient({
+      getOrigin: () => origin,
+      getPassword: () => 'repair-password',
+      getCustomHeaders: () => ({ 'X-Gator-Repair-Snapshot': 'user-value' }),
+    });
+    const repair = client.pinTransport().bindRepairSnapshot(token);
+    mockKy.mockResolvedValue(jsonResponse({ ok: true }, 200, { 'x-gator-repair-snapshot': token }));
+
+    await repair.get('/chat/page', okSchema, { retry: false });
+    const headers = mockKy.mock.calls[0][1].headers as Record<string, string>;
+    const repairHeaders = Object.entries(headers).filter(
+      ([name]) => name.toLowerCase() === 'x-gator-repair-snapshot',
+    );
+    expect(repairHeaders).toEqual([['x-gator-repair-snapshot', token]]);
+    expect(mockKy.mock.calls[0][0]).toBe('https://repair.example/api/v1/chat/page');
+
+    mockKy.mockResolvedValueOnce(jsonResponse({ ok: true }));
+    await expect(repair.get('/chat/page', okSchema, { retry: false })).rejects.toMatchObject({
+      kind: 'parse_error',
+    });
+    mockKy.mockResolvedValueOnce(
+      jsonResponse({ ok: true }, 200, {
+        'x-gator-repair-snapshot': '00000000-0000-4000-8000-000000000099',
+      }),
+    );
+    await expect(repair.get('/chat/page', okSchema, { retry: false })).rejects.toMatchObject({
+      kind: 'parse_error',
+    });
+
+    origin = 'https://rotated.example';
+    await expect(repair.get('/chat/page', okSchema, { retry: false })).rejects.toMatchObject({
+      kind: 'cancelled',
+    });
+    expect(mockKy).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('repair snapshot endpoint', () => {
+  const token = '00000000-0000-4000-8000-000000000021';
+
+  it('uses the exact begin, finish, and cancel contract', async () => {
+    mockKy
+      .mockResolvedValueOnce(
+        jsonResponse({ version: 1, action: 'begin', token, expiresAt: 1_900_000_000_000 }),
+      )
+      .mockResolvedValueOnce(jsonResponse({ version: 1, action: 'finish', stable: true }))
+      .mockResolvedValueOnce(jsonResponse({ version: 1, action: 'cancel', cancelled: true }));
+    const client = new HttpClient({
+      getOrigin: () => 'https://repair.example',
+      getPassword: () => 'p',
+    });
+
+    await expect(repairSnapshotApi.begin(client)).resolves.toEqual({
+      token,
+      expiresAt: 1_900_000_000_000,
+    });
+    await expect(repairSnapshotApi.finish(client, token)).resolves.toBeUndefined();
+    await expect(repairSnapshotApi.cancel(client, token)).resolves.toBeUndefined();
+
+    expect(mockKy.mock.calls.map(([url]) => url)).toEqual([
+      'https://repair.example/api/v1/sync/repair-snapshot',
+      'https://repair.example/api/v1/sync/repair-snapshot',
+      'https://repair.example/api/v1/sync/repair-snapshot',
+    ]);
+    expect(mockKy.mock.calls.map(([, options]) => options.json)).toEqual([
+      { action: 'begin' },
+      { action: 'finish', token },
+      { action: 'cancel', token },
+    ]);
+  });
+
+  it('maps only begin 404 to unsupported and preserves finish conflicts', async () => {
+    const client = new HttpClient({
+      getOrigin: () => 'https://repair.example',
+      getPassword: () => 'p',
+    });
+    mockKy.mockResolvedValueOnce(jsonResponse({}, 404));
+    await expect(repairSnapshotApi.begin(client)).rejects.toBeInstanceOf(
+      UnimplementedEndpointError,
+    );
+
+    mockKy.mockResolvedValueOnce(jsonResponse({}, 409));
+    await expect(repairSnapshotApi.finish(client, token)).rejects.toMatchObject({
+      kind: 'bad_request',
+      status: 409,
+    });
+  });
+
+  it('rejects extra fields in the versioned success shape', async () => {
+    mockKy.mockResolvedValueOnce(
+      jsonResponse({
+        version: 1,
+        action: 'begin',
+        token,
+        expiresAt: 1_900_000_000_000,
+        unexpected: true,
+      }),
+    );
+    const client = new HttpClient({
+      getOrigin: () => 'https://repair.example',
+      getPassword: () => 'p',
+    });
+
+    await expect(repairSnapshotApi.begin(client)).rejects.toMatchObject({ kind: 'parse_error' });
   });
 });
 
@@ -304,6 +437,7 @@ describe('multipart upload (raw fetch path)', () => {
     expect(init.method).toBe('POST');
     expect(init.body).toBe(form);
     expect(init.headers['Authorization']).toBe('Bearer sekret');
+    expect(init.redirect).toBe('error');
     // Never routed through ky.
     expect(mockKy).not.toHaveBeenCalled();
   });

@@ -25,6 +25,21 @@ const waveChecks = {
   sentinelCommit: true,
 } as const;
 
+const backupRestoreWaveChecks = {
+  plaintextNearLimit: true,
+  bb2Envelope: true,
+  nativeSeal: true,
+  nativeOpen: true,
+  lateFaultObserved: true,
+  kvRolledBack: true,
+  themesRolledBack: true,
+  chatRolledBack: true,
+  foldersRolledBack: true,
+  tempTablesCleaned: true,
+  retrySucceeded: true,
+  successorWrite: true,
+} as const;
+
 function cleanupHandle(deleteFails = false) {
   return {
     close: jest.fn(),
@@ -184,5 +199,105 @@ describe('runDbRuntimeConcurrencySelfTest', () => {
       checks: { databaseCleanup: false },
     });
     expect(JSON.stringify(result)).not.toContain('private cleanup path');
+  });
+});
+
+describe('runDbBackupRestoreSelfTest', () => {
+  beforeEach(() => {
+    jest.resetModules();
+    mockOpen.mockReset();
+    mockDrizzle.mockReset();
+    mockRunMigrations.mockReset();
+    mockRunMigrations.mockResolvedValue(migrationNames);
+  });
+
+  function installBackupHarness(closeFails = false) {
+    const preCleanup = cleanupHandle();
+    const active = nativeHandle(async (statement) => {
+      if (statement === 'SELECT name FROM _migrations ORDER BY name') {
+        return { rows: migrationNames.map((name) => ({ name })) };
+      }
+      return { rows: [] };
+    });
+    const reopened = nativeHandle(async (statement) => {
+      if (statement === 'PRAGMA foreign_keys') return { rows: [{ foreign_keys: 1 }] };
+      if (statement === 'PRAGMA integrity_check') {
+        return { rows: [{ integrity_check: 'ok' }] };
+      }
+      return { rows: [] };
+    });
+    if (closeFails) {
+      reopened.close.mockImplementation(() => {
+        throw new Error('private close diagnostic');
+      });
+    }
+    const finalCleanup = cleanupHandle();
+    const handles = [preCleanup, active, reopened, finalCleanup];
+    let next = 0;
+    mockOpen.mockImplementation(() => {
+      const handle = handles[next];
+      if (!handle) throw new Error(`unexpected database open ${next + 1}`);
+      next += 1;
+      return handle;
+    });
+    return { active, finalCleanup, preCleanup, reopened };
+  }
+
+  it('runs the wave only on one fixed encrypted disposable file, then closes and deletes it', async () => {
+    const harness = installBackupHarness();
+    const appDatabase = { kind: 'adapted-backup-restore-database' };
+    mockDrizzle.mockReturnValue(appDatabase);
+    const { runDbBackupRestoreSelfTest } = await import('@db/database');
+    const runWave = jest.fn(async (db) => {
+      expect(db).toBe(appDatabase);
+      return backupRestoreWaveChecks;
+    });
+
+    await expect(runDbBackupRestoreSelfTest(runWave)).resolves.toEqual({
+      status: 'pass',
+      checks: {
+        preCleanup: true,
+        encryptedOpen: true,
+        migrationLedger: true,
+        ...backupRestoreWaveChecks,
+        foreignKeys: true,
+        integrity: true,
+        databaseClosed: true,
+        databaseCleanup: true,
+      },
+    });
+    expect(mockOpen.mock.calls.map(([options]) => options)).toEqual([
+      { name: 'driver-backup-restore-selftest.db' },
+      {
+        name: 'driver-backup-restore-selftest.db',
+        encryptionKey: 'backup-02-public-throwaway-key-v1',
+      },
+      {
+        name: 'driver-backup-restore-selftest.db',
+        encryptionKey: 'backup-02-public-throwaway-key-v1',
+        readOnly: true,
+      },
+      { name: 'driver-backup-restore-selftest.db' },
+    ]);
+    expect(runWave).toHaveBeenCalledTimes(1);
+    expect(harness.active.close).toHaveBeenCalledTimes(1);
+    expect(harness.reopened.close).toHaveBeenCalledTimes(1);
+    expect(harness.preCleanup.delete).toHaveBeenCalledTimes(1);
+    expect(harness.finalCleanup.delete).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a close failure finite and prevents an all-true failure marker', async () => {
+    installBackupHarness(true);
+    mockDrizzle.mockReturnValue({});
+    const { runDbBackupRestoreSelfTest } = await import('@db/database');
+
+    const result = await runDbBackupRestoreSelfTest(async () => backupRestoreWaveChecks);
+
+    expect(result).toMatchObject({
+      status: 'fail',
+      failureCode: 'database-closed',
+      checks: { integrity: true, databaseClosed: false, databaseCleanup: true },
+    });
+    expect(JSON.stringify(result)).not.toContain('private close diagnostic');
   });
 });

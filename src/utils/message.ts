@@ -49,6 +49,8 @@ export interface MessageSnippetInput {
   hasVisibleAttachments?: boolean | number | null;
   attachmentDescription?: string | null;
   balloonBundleId?: string | null;
+  /** Exact part/aggregate is retracted or cannot be proven visible. */
+  isRetracted?: boolean;
 }
 
 function isPresentFlag(value: boolean | number | null | undefined): boolean {
@@ -62,6 +64,7 @@ function isPresentFlag(value: boolean | number | null | undefined): boolean {
  * final attachment branch preserves the legacy fallback for older projections.
  */
 export function buildMessageSnippet(input: MessageSnippetInput): string {
+  if (input.isRetracted) return 'Message unsent';
   const body = stripAttachmentPlaceholder(input.text) || stripAttachmentPlaceholder(input.subject);
   if (body) return body;
 
@@ -70,7 +73,9 @@ export function buildMessageSnippet(input: MessageSnippetInput): string {
 
   const attachmentDescription = input.attachmentDescription?.trim();
   if (attachmentDescription) return attachmentDescription;
-  if (isPresentFlag(input.hasVisibleAttachments)) return '📎 Attachment';
+  if (input.hasVisibleAttachments != null) {
+    return isPresentFlag(input.hasVisibleAttachments) ? '📎 Attachment' : '';
+  }
 
   return isPresentFlag(input.hasAttachments) ? '📎 Attachment' : '';
 }

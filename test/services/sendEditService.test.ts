@@ -17,7 +17,10 @@ import {
   resumeRealtimeDeliveries,
   runTrackedRealtimeWork,
 } from '@/services/realtime/deliveryCoordinator';
-import { sendEdit, sendUnsend } from '@/services/send/sendEditService';
+import {
+  sendEdit as sendEditImpl,
+  sendUnsend as sendUnsendImpl,
+} from '@/services/send/sendEditService';
 import { createTestDb } from '../support/testDb';
 
 const okHttp = { post: async () => ({ guid: 'm1' }) } as unknown as HttpClient;
@@ -27,6 +30,13 @@ const failHttp = {
     throw new ApiError('no_connection', 'offline', 0);
   },
 } as unknown as HttpClient;
+
+// Most legacy cases in this suite exercise mutation/revert behavior rather than target selection.
+// Keep their target explicit at the service boundary; individual wire-shape cases override it.
+const sendEdit = (...[db, http, args, now, commitGuard]: Parameters<typeof sendEditImpl>) =>
+  sendEditImpl(db, http, { ...args, partIndex: args.partIndex ?? 0 }, now, commitGuard);
+const sendUnsend = (...[db, http, args, now, commitGuard]: Parameters<typeof sendUnsendImpl>) =>
+  sendUnsendImpl(db, http, { ...args, partIndex: args.partIndex ?? 0 }, now, commitGuard);
 
 /** Capture the JSON body so we can assert the server-required wire shape (F-4/F-5). */
 function capturingHttp(impl: () => Promise<unknown>): { http: HttpClient; body(): unknown } {
@@ -99,7 +109,24 @@ async function seed(db: AppDatabase): Promise<{
   );
   await upsertMessages(
     db,
-    [Message.parse({ guid: 'm1', text: 'original', isFromMe: true, dateCreated: 100 })],
+    [
+      Message.parse({
+        guid: 'm1',
+        text: 'original',
+        isFromMe: true,
+        dateCreated: 100,
+        messagePartTopology: {
+          complete: true,
+          originalPartIndexes: [0, 2, 3],
+          currentParts: [
+            { index: 0, kind: 'text' },
+            { index: 2, kind: 'text' },
+            { index: 3, kind: 'text' },
+          ],
+          attachmentOwnership: [],
+        },
+      }),
+    ],
     () => map.get('c1')!,
     hm,
   );
@@ -356,7 +383,11 @@ describe('sendEdit / sendUnsend', () => {
   it('unsend: resolves committed row identity inside its owner and never posts a missing row', async () => {
     const { db, raw } = await createTestDb();
     const { handleMap } = await seed(db);
-    raw.prepare("UPDATE messages SET date_retracted = 4321 WHERE guid = 'm1'").run();
+    raw
+      .prepare(
+        "UPDATE messages SET date_retracted = 4321, retraction_state = 'partial' WHERE guid = 'm1'",
+      )
+      .run();
     const secondChat = await upsertChats(
       db,
       [Chat.parse({ guid: 'c2', participants: [{ address: 'a@x.com' }] })],
@@ -423,7 +454,11 @@ describe('sendEdit / sendUnsend', () => {
   it('unsend: rolls back a retired optimistic apply before HTTP and lets a fresh lease revert', async () => {
     const { db, raw } = await createTestDb();
     await seed(db);
-    raw.prepare("UPDATE messages SET date_retracted = 4321 WHERE guid = 'm1'").run();
+    raw
+      .prepare(
+        "UPDATE messages SET date_retracted = 4321, retraction_state = 'partial' WHERE guid = 'm1'",
+      )
+      .run();
     let drain: Promise<void> | undefined;
     let triggerRan = false;
     raw.function('pause_unsend_during_apply', () => {
@@ -506,7 +541,11 @@ describe('sendEdit / sendUnsend', () => {
   it('unsend: attempts a failed local revert once and permits an exact public retry', async () => {
     const { db, raw } = await createTestDb();
     await seed(db);
-    raw.prepare("UPDATE messages SET date_retracted = 4321 WHERE guid = 'm1'").run();
+    raw
+      .prepare(
+        "UPDATE messages SET date_retracted = 4321, retraction_state = 'partial' WHERE guid = 'm1'",
+      )
+      .run();
     let revertAttempts = 0;
     raw.function('record_unsend_revert', () => {
       revertAttempts += 1;
@@ -915,20 +954,19 @@ describe('sendEdit / sendUnsend', () => {
       });
 
       gates[0]?.release();
-      await waitFor(() => starts.length === 2, 'queued edit HTTP');
-      expect(starts).toEqual(['unsend', 'edit']);
-      expect(third.settled()).toBe(false);
-      gates[1]?.release();
+      await waitFor(() => second.settled(), 'queued edit target refusal');
+      expect(starts).toEqual(['unsend']);
 
-      await waitFor(() => starts.length === 3, 'final unsend HTTP');
-      expect(starts).toEqual(['unsend', 'edit', 'unsend']);
+      await waitFor(() => third.settled(), 'duplicate unsend refusal');
+      // The accepted first unsend retains its exact part fence until a server echo arrives. A
+      // queued edit or second frozen/stale unsend must not bypass or replace that fence.
+      expect(starts).toEqual(['unsend']);
       expect(
         one(
           raw,
           "SELECT text, date_edited AS edited, date_retracted AS retracted FROM messages WHERE guid='m1'",
         ),
-      ).toEqual({ text: 'original', edited: null, retracted: 7_003 });
-      gates[2]?.release();
+      ).toEqual({ text: 'original', edited: null, retracted: 7_001 });
       await Promise.allSettled(outcomes);
 
       expect(await first.outcome).toEqual({ kind: 'fulfilled', value: { ok: true } });
@@ -978,7 +1016,11 @@ describe('sendEdit / sendUnsend', () => {
       const { db, raw } = await createTestDb();
       try {
         await seed(db);
-        raw.prepare("UPDATE messages SET date_retracted = 4321 WHERE guid = 'm1'").run();
+        raw
+          .prepare(
+            "UPDATE messages SET date_retracted = 4321, retraction_state = 'partial' WHERE guid = 'm1'",
+          )
+          .run();
         const http = { post: async () => ack } as unknown as HttpClient;
         expect((await sendUnsend(db, http, { messageGuid: 'm1' }, 7_000)).ok).toBe(false);
         expect(

@@ -1,11 +1,20 @@
 import {
+  MAX_MESSAGE_NOTIFICATION_AVATAR_URI_BYTES,
   MAX_MESSAGE_NOTIFICATION_HISTORY,
+  MAX_MESSAGE_NOTIFICATION_LABEL_BYTES,
+  MAX_MESSAGE_NOTIFICATION_LABEL_CODE_POINTS,
+  MAX_MESSAGE_NOTIFICATION_TEXT_BYTES,
+  MAX_MESSAGE_NOTIFICATION_TEXT_CODE_POINTS,
   decodeMessageHistoryIds,
   encodeMessageHistoryIds,
   mergeMessageNotificationHistory,
+  normalizeMessageNotificationHistory,
+  normalizeMessageNotificationHistoryEntry,
   removeMessageFromNotificationHistory,
   type MessageNotificationHistoryEntry,
 } from '@/services/notifications/messageHistory';
+
+const encoder = new TextEncoder();
 
 function entry(messageId: number, text = `line ${messageId}`): MessageNotificationHistoryEntry {
   return { messageId, text, timestamp: messageId, senderName: 'Contact' };
@@ -27,4 +36,40 @@ it('keeps a bounded unique history with an exact opaque-id codec and targeted re
   expect(
     removeMessageFromNotificationHistory(history, 4).map(({ messageId }) => messageId),
   ).toEqual([2, 3, 5, 6, 7]);
+});
+
+it('normalizes every native-facing string within code-point and UTF-8 bounds', () => {
+  const oversizedAvatar = `file:///${'a'.repeat(MAX_MESSAGE_NOTIFICATION_AVATAR_URI_BYTES)}`;
+  const normalized = normalizeMessageNotificationHistoryEntry({
+    messageId: 9,
+    text: '😀'.repeat(MAX_MESSAGE_NOTIFICATION_TEXT_CODE_POINTS + 1),
+    timestamp: 9,
+    senderName: `  ${'e\u0301'.repeat(MAX_MESSAGE_NOTIFICATION_LABEL_CODE_POINTS + 1)}  `,
+    avatarUri: oversizedAvatar,
+  });
+
+  expect(normalized).not.toBeNull();
+  expect([...normalized!.text]).toHaveLength(MAX_MESSAGE_NOTIFICATION_TEXT_CODE_POINTS);
+  expect(encoder.encode(normalized!.text)).toHaveLength(MAX_MESSAGE_NOTIFICATION_TEXT_BYTES);
+  expect([...normalized!.senderName]).toHaveLength(
+    Math.floor(MAX_MESSAGE_NOTIFICATION_LABEL_CODE_POINTS / 2) - 1,
+  );
+  expect(normalized!.senderName).toBe(normalized!.senderName.normalize('NFC').trim());
+  expect(encoder.encode(normalized!.senderName).byteLength).toBeLessThanOrEqual(
+    MAX_MESSAGE_NOTIFICATION_LABEL_BYTES,
+  );
+  expect(normalized).not.toHaveProperty('avatarUri');
+
+  const exactAvatar = `x`.repeat(MAX_MESSAGE_NOTIFICATION_AVATAR_URI_BYTES);
+  const exact = normalizeMessageNotificationHistoryEntry({
+    ...entry(10),
+    avatarUri: exactAvatar,
+  });
+  expect(exact?.avatarUri).toBe(exactAvatar);
+  const byteOversizedAvatar = normalizeMessageNotificationHistoryEntry({
+    ...entry(11),
+    avatarUri: '😀'.repeat(MAX_MESSAGE_NOTIFICATION_AVATAR_URI_BYTES / 4 + 1),
+  });
+  expect(byteOversizedAvatar).not.toHaveProperty('avatarUri');
+  expect(normalizeMessageNotificationHistory([normalized!, normalized!])).toEqual([normalized]);
 });

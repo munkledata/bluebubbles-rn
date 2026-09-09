@@ -1,16 +1,22 @@
 #!/usr/bin/env node
 
+import { Buffer } from 'node:buffer';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import {
   accessSync,
+  chmodSync,
+  closeSync,
   constants as fsConstants,
   copyFileSync,
   existsSync,
+  fstatSync,
   linkSync,
   lstatSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   readdirSync,
   realpathSync,
   renameSync,
@@ -25,7 +31,15 @@ import { createInterface } from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 
+import {
+  isValidReleaseBuildReceipt,
+  isValidReleaseNativePathProof,
+} from './android-release-receipt.mjs';
 import { inspectPackagedAndroidBundle } from './check-android-build.mjs';
+import {
+  nativeCompilerPathMappingFlags,
+  runAndroidNativePathCheck,
+} from './check-android-native-paths.mjs';
 import {
   REQUIRED_EAS_CLI_VERSION,
   REQUIRED_EAS_SUBMIT_CONFIG,
@@ -45,6 +59,12 @@ const RUN_ID_PATTERN = /^[a-z0-9][a-z0-9._-]{0,99}$/;
 const FULL_COMMIT_PATTERN = /^[0-9a-f]{40}$/;
 const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const ZERO_OBJECT_ID = '0'.repeat(40);
+const STAGED_GOOGLE_SERVICES_PATH = '.gator-release/google-services.json';
+const RELEASE_NATIVE_TEMP_PARENT = '/private/tmp';
+const RELEASE_NATIVE_TEMP_PREFIX = 'gator-android-release';
+const PRIVATE_DIRECTORY_MODE = 0o700;
+const PRIVATE_FILE_MODE = 0o600;
+export { isValidReleaseBuildReceipt, isValidReleaseNativePathProof };
 
 function nowIso() {
   return new Date().toISOString();
@@ -496,6 +516,32 @@ function resolveCredentialPath(variableName, fallback) {
   return path;
 }
 
+export function stageGoogleServicesFile(worktree, sourcePath) {
+  const worktreeState = lstatSync(worktree);
+  if (!worktreeState.isDirectory() || worktreeState.isSymbolicLink()) {
+    throw new Error('release worktree must be a real directory before staging Firebase config');
+  }
+
+  const stagingDirectory = resolve(worktree, dirname(STAGED_GOOGLE_SERVICES_PATH));
+  const stagedPath = resolve(worktree, STAGED_GOOGLE_SERVICES_PATH);
+  assertDescendant(worktree, stagedPath, 'staged Firebase config');
+  if (existsSync(stagingDirectory)) {
+    throw new Error('release worktree already contains the reserved Firebase staging directory');
+  }
+
+  mkdirSync(stagingDirectory, { mode: 0o700 });
+  try {
+    copyFileSync(sourcePath, stagedPath, fsConstants.COPYFILE_EXCL);
+    chmodSync(stagedPath, 0o600);
+  } catch (error) {
+    if (existsSync(stagedPath)) unlinkSync(stagedPath);
+    rmdirSync(stagingDirectory);
+    throw error;
+  }
+
+  return `./${STAGED_GOOGLE_SERVICES_PATH}`;
+}
+
 function requireConfiguredSubmitCredential() {
   const configuredPath = REQUIRED_EAS_SUBMIT_CONFIG.production.android.serviceAccountKeyPath;
   const path = resolve(ROOT, configuredPath);
@@ -524,22 +570,90 @@ function managedWorktreePath(runId) {
   return runFile(runId, 'worktree');
 }
 
-function managedEasWorkingPath(runId) {
-  const container = runFile(runId, 'eas-container');
-  const path = resolve(container, 'work');
-  assertDescendant(container, path, 'temporary EAS directory');
-  return path;
+function requireOwnerUid(ownerUid = process.getuid?.()) {
+  if (!Number.isSafeInteger(ownerUid) || ownerUid < 0) {
+    throw new Error('Android release workspace requires a numeric POSIX owner uid');
+  }
+  return ownerUid;
 }
 
-function managedEasContainerPath(runId) {
-  return runFile(runId, 'eas-container');
+export function androidReleaseWorkspacePaths(
+  runId,
+  { temporaryParent = RELEASE_NATIVE_TEMP_PARENT, ownerUid = process.getuid?.() } = {},
+) {
+  validateRunId(runId);
+  const uid = requireOwnerUid(ownerUid);
+  if (!isAbsolute(temporaryParent)) {
+    throw new Error('Android release temporary parent must be absolute');
+  }
+  const parent = resolve(temporaryParent);
+  const root = resolve(parent, `${RELEASE_NATIVE_TEMP_PREFIX}-${uid}`);
+  const container = resolve(root, runId);
+  const marker = resolve(container, '.owner.json');
+  const work = resolve(container, 'work');
+  const gradleHome = resolve(container, 'gradle-home');
+  const source = resolve(work, 'build');
+  assertDescendant(parent, root, 'Android release temporary root');
+  assertDescendant(root, container, 'Android release temporary container');
+  for (const [path, label] of [
+    [marker, 'Android release ownership marker'],
+    [work, 'Android release EAS work directory'],
+    [gradleHome, 'Android release Gradle home'],
+    [source, 'Android release native source directory'],
+  ]) {
+    assertDescendant(container, path, label);
+  }
+  return { ownerUid: uid, parent, root, container, marker, work, gradleHome, source };
 }
 
-function easOwnershipMarkerPath(runId) {
-  const container = managedEasContainerPath(runId);
-  const path = resolve(container, '.owner.json');
-  assertDescendant(container, path, 'EAS ownership marker');
-  return path;
+function assertTemporaryParent(path, { productionPath }) {
+  if (!existsSync(path)) throw new Error(`Android release temporary parent is missing: ${path}`);
+  const state = lstatSync(path);
+  if (!state.isDirectory() || state.isSymbolicLink()) {
+    throw new Error('Android release temporary parent must be a real directory');
+  }
+  const canonical = realpathSync(path);
+  if (canonical !== path) {
+    throw new Error('Android release temporary parent must not contain path indirection');
+  }
+  if (productionPath) {
+    if (state.uid !== 0 || (state.mode & 0o1777) !== 0o1777) {
+      throw new Error('/private/tmp must remain a root-owned sticky temporary directory');
+    }
+  }
+  return canonical;
+}
+
+function assertOwnedPrivateDirectory(path, label, ownerUid, parent) {
+  const state = lstatSync(path);
+  if (!state.isDirectory() || state.isSymbolicLink()) {
+    throw new Error(`${label} must be a real directory`);
+  }
+  if (state.uid !== ownerUid) throw new Error(`${label} has the wrong owner`);
+  if ((state.mode & 0o777) !== PRIVATE_DIRECTORY_MODE) {
+    throw new Error(`${label} must have mode 0700`);
+  }
+  const canonical = realpathSync(path);
+  if (canonical !== path) throw new Error(`${label} must not contain path indirection`);
+  assertDescendant(realpathSync(parent), canonical, `real ${label}`);
+  const confirmed = lstatSync(path);
+  if (!sameFileIdentity(state, confirmed)) throw new Error(`${label} changed during inspection`);
+  return state;
+}
+
+function ensureAndroidReleaseTemporaryRoot(state, workspaceOptions) {
+  const paths = androidReleaseWorkspacePaths(state.runId, workspaceOptions);
+  assertTemporaryParent(paths.parent, {
+    productionPath: paths.parent === RELEASE_NATIVE_TEMP_PARENT,
+  });
+  if (!existsSync(paths.root)) mkdirSync(paths.root, { mode: PRIVATE_DIRECTORY_MODE });
+  assertOwnedPrivateDirectory(
+    paths.root,
+    'Android release temporary root',
+    paths.ownerUid,
+    paths.parent,
+  );
+  return paths;
 }
 
 function removeManagedWorktree(runId) {
@@ -557,54 +671,219 @@ function removeManagedWorktree(runId) {
   git(['worktree', 'prune']);
 }
 
-function expectedEasOwnership(state) {
+function expectedEasOwnership(state, ownerUid) {
   if (typeof state.workspace?.token !== 'string') {
     throw new Error('release state has no workspace ownership token');
   }
-  return { schemaVersion: 1, runId: state.runId, token: state.workspace.token };
+  return { schemaVersion: 2, runId: state.runId, token: state.workspace.token, ownerUid };
 }
 
-function removeManagedEasDirectory(state) {
-  const runDirectoryPath = assertManagedRunDirectory(state.runId);
-  const container = managedEasContainerPath(state.runId);
-  if (!existsSync(container)) return;
-  const containerState = lstatSync(container);
-  if (!containerState.isDirectory() || containerState.isSymbolicLink()) {
-    throw new Error(`refusing to remove an unowned EAS container: ${container}`);
-  }
-  assertDescendant(realpathSync(runDirectoryPath), realpathSync(container), 'real EAS container');
-  const markerPath = easOwnershipMarkerPath(state.runId);
-  if (!existsSync(markerPath)) throw new Error('EAS workspace ownership marker is missing');
-  const markerState = lstatSync(markerPath);
-  if (!markerState.isFile() || markerState.isSymbolicLink()) {
+function readOwnedEasMarker(path, ownerUid) {
+  const pathState = lstatSync(path);
+  if (!pathState.isFile() || pathState.isSymbolicLink()) {
     throw new Error('EAS workspace ownership marker is invalid');
   }
-  if (!isDeepStrictEqual(readJson(markerPath), expectedEasOwnership(state))) {
+  let descriptor;
+  try {
+    descriptor = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+  } catch {
+    throw new Error('EAS workspace ownership marker cannot be opened without following links');
+  }
+  try {
+    const before = fstatSync(descriptor);
+    if (!before.isFile() || !sameFileIdentity(pathState, before)) {
+      throw new Error('EAS workspace ownership marker changed during inspection');
+    }
+    if (before.uid !== ownerUid || (before.mode & 0o777) !== PRIVATE_FILE_MODE) {
+      throw new Error('EAS workspace ownership marker has unsafe ownership or mode');
+    }
+    if (before.size <= 0 || before.size > 4096) {
+      throw new Error('EAS workspace ownership marker has an invalid size');
+    }
+    const bytes = Buffer.alloc(before.size);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const count = readSync(descriptor, bytes, offset, bytes.length - offset, offset);
+      if (count === 0) {
+        throw new Error('EAS workspace ownership marker changed during inspection');
+      }
+      offset += count;
+    }
+    const after = fstatSync(descriptor);
+    const confirmedPathState = lstatSync(path);
+    if (
+      !sameFileIdentity(before, after) ||
+      !sameFileIdentity(after, confirmedPathState) ||
+      before.size !== after.size ||
+      before.mtimeMs !== after.mtimeMs
+    ) {
+      throw new Error('EAS workspace ownership marker changed during inspection');
+    }
+    try {
+      return JSON.parse(bytes.toString('utf8'));
+    } catch {
+      throw new Error('EAS workspace ownership marker is malformed');
+    }
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
+export function removeManagedEasDirectory(state, workspaceOptions) {
+  const paths = androidReleaseWorkspacePaths(state.runId, workspaceOptions);
+  assertTemporaryParent(paths.parent, {
+    productionPath: paths.parent === RELEASE_NATIVE_TEMP_PARENT,
+  });
+  if (!existsSync(paths.root)) return;
+  assertOwnedPrivateDirectory(
+    paths.root,
+    'Android release temporary root',
+    paths.ownerUid,
+    paths.parent,
+  );
+  if (!existsSync(paths.container)) return;
+  assertOwnedPrivateDirectory(
+    paths.container,
+    'Android release temporary container',
+    paths.ownerUid,
+    paths.root,
+  );
+  if (!existsSync(paths.marker)) throw new Error('EAS workspace ownership marker is missing');
+  if (
+    !isDeepStrictEqual(
+      readOwnedEasMarker(paths.marker, paths.ownerUid),
+      expectedEasOwnership(state, paths.ownerUid),
+    )
+  ) {
     throw new Error('EAS workspace ownership marker does not match this release run');
   }
-  const work = managedEasWorkingPath(state.runId);
-  if (existsSync(work)) {
-    const workState = lstatSync(work);
-    if (!workState.isDirectory() || workState.isSymbolicLink()) {
-      throw new Error(`refusing to remove an unowned EAS workspace: ${work}`);
-    }
-    assertDescendant(realpathSync(container), realpathSync(work), 'real EAS workspace');
-    rmSync(work, { recursive: true, force: true });
+
+  for (const [path, label] of [
+    [paths.work, 'Android release EAS work directory'],
+    [paths.gradleHome, 'Android release Gradle home'],
+  ]) {
+    if (!existsSync(path)) continue;
+    assertOwnedPrivateDirectory(path, label, paths.ownerUid, paths.container);
+    rmSync(path, { recursive: true, force: true });
   }
-  const remaining = readdirSync(container).filter((entry) => entry !== '.owner.json');
+  const remaining = readdirSync(paths.container).filter((entry) => entry !== '.owner.json');
   if (remaining.length > 0) {
     throw new Error(`EAS container has unexpected retained entries: ${remaining.join(', ')}`);
   }
-  unlinkSync(markerPath);
-  rmdirSync(container);
+  unlinkSync(paths.marker);
+  rmdirSync(paths.container);
 }
 
-function prepareManagedEasDirectory(state) {
-  removeManagedEasDirectory(state);
-  const container = managedEasContainerPath(state.runId);
-  mkdirSync(container, { mode: 0o700 });
-  writeImmutableJson(easOwnershipMarkerPath(state.runId), expectedEasOwnership(state));
-  return managedEasWorkingPath(state.runId);
+export function prepareManagedEasDirectory(state, workspaceOptions) {
+  removeManagedEasDirectory(state, workspaceOptions);
+  const paths = ensureAndroidReleaseTemporaryRoot(state, workspaceOptions);
+  mkdirSync(paths.container, { mode: PRIVATE_DIRECTORY_MODE });
+  assertOwnedPrivateDirectory(
+    paths.container,
+    'Android release temporary container',
+    paths.ownerUid,
+    paths.root,
+  );
+  writeImmutableJson(paths.marker, expectedEasOwnership(state, paths.ownerUid));
+  mkdirSync(paths.work, { mode: PRIVATE_DIRECTORY_MODE });
+  mkdirSync(paths.gradleHome, { mode: PRIVATE_DIRECTORY_MODE });
+  assertOwnedPrivateDirectory(
+    paths.work,
+    'Android release EAS work directory',
+    paths.ownerUid,
+    paths.container,
+  );
+  assertOwnedPrivateDirectory(
+    paths.gradleHome,
+    'Android release Gradle home',
+    paths.ownerUid,
+    paths.container,
+  );
+  return paths;
+}
+
+export function createAndroidReleaseBuildEnvironment(baseEnvironment, workspace) {
+  const flags = nativeCompilerPathMappingFlags({
+    sourceRoot: workspace.source,
+    gradleHome: workspace.gradleHome,
+  }).join(' ');
+  const environment = {
+    ...baseEnvironment,
+    GRADLE_USER_HOME: workspace.gradleHome,
+    CFLAGS: flags,
+    CXXFLAGS: flags,
+    // The pinned EAS local-build plugin otherwise removes `work/build` before this process can
+    // inspect its compiler databases. The runner owns and removes this private workspace itself.
+    EAS_LOCAL_BUILD_SKIP_CLEANUP: '1',
+  };
+  // The pinned local-build plugin skips only for the exact string "1". Pinning "0" also wins over
+  // a same-named value supplied by the selected EAS environment.
+  environment.EAS_LOCAL_BUILD_SKIP_NATIVE_BUILD = '0';
+  return environment;
+}
+
+/**
+ * Inspect the exact EAS native build before its run-owned workspace is removed. Keep private host
+ * paths out of the durable receipt; only bounded counts and stable mapping destinations survive.
+ */
+export function verifyReleaseNativePathProof(workspace, releaseBundlePath) {
+  const result = runAndroidNativePathCheck({
+    root: workspace.source,
+    sourceRoot: workspace.source,
+    gradleHome: workspace.gradleHome,
+    releaseBundlePath,
+  });
+  return Object.freeze({
+    schemaVersion: 1,
+    compileDatabases: result.compileDatabases,
+    compileCommands: result.compileCommands,
+    databaseBytes: result.databaseBytes,
+    sourceDestination: '/gator/source',
+    gradleDestination: '/gator/gradle',
+  });
+}
+
+function releaseArtifactReceiptBinding(path) {
+  const before = lstatSync(path);
+  if (!before.isFile() || before.isSymbolicLink() || before.size <= 0) {
+    throw new Error('release artifact must be a non-empty regular file without path indirection');
+  }
+  const digest = sha256File(path);
+  const after = lstatSync(path);
+  if (
+    !sameFileIdentity(before, after) ||
+    before.size !== after.size ||
+    before.mtimeMs !== after.mtimeMs
+  ) {
+    throw new Error('release artifact changed while its build receipt was created');
+  }
+  return Object.freeze({
+    filename: 'artifact.pending.aab',
+    bytes: after.size,
+    sha256: digest,
+  });
+}
+
+function readBoundReleaseBuildReceipt(state, artifact) {
+  const path = runFile(state.runId, 'build.json');
+  const pathState = lstatSync(path);
+  if (!pathState.isFile() || pathState.isSymbolicLink()) {
+    throw new Error('build receipt must be a regular file without path indirection');
+  }
+  const source = readFileSync(path, 'utf8');
+  let receipt;
+  try {
+    receipt = JSON.parse(source);
+  } catch {
+    throw new Error('build receipt is malformed');
+  }
+  if (source !== `${JSON.stringify(receipt, null, 2)}\n`) {
+    throw new Error('build receipt is not canonical JSON or contains duplicate keys');
+  }
+  if (!isValidReleaseBuildReceipt(receipt, { runId: state.runId, artifact })) {
+    throw new Error('build receipt does not match its native proof or release artifact');
+  }
+  return { receipt, sha256: sha256Bytes(source) };
 }
 
 async function withWorktree(state, { applyPreparedPatch }, action) {
@@ -833,7 +1112,7 @@ async function build(options) {
     }
     const googleServices = resolveCredentialPath('GOOGLE_SERVICES_JSON', 'google-services.json');
     const localBuildPlugin = resolveLocalBuildPlugin();
-    const easWorkingDirectory = prepareManagedEasDirectory(state);
+    const nativeWorkspace = prepareManagedEasDirectory(state);
     const startedAt = nowIso();
     state = {
       ...state,
@@ -848,17 +1127,19 @@ async function build(options) {
     writeState(state);
 
     let outcome;
+    let nativePathProof = null;
+    let buildArtifact = null;
     try {
       outcome = await withWorktree(state, { applyPreparedPatch: true }, async (worktree) => {
-        const environment = { ...process.env };
-        delete environment.EAS_LOCAL_BUILD_SKIP_CLEANUP;
+        const stagedGoogleServices = stageGoogleServicesFile(worktree, googleServices);
+        const environment = createAndroidReleaseBuildEnvironment(process.env, nativeWorkspace);
         Object.assign(environment, {
-          GOOGLE_SERVICES_JSON: googleServices,
+          GOOGLE_SERVICES_JSON: stagedGoogleServices,
           EAS_LOCAL_BUILD_PLUGIN_PATH: localBuildPlugin,
-          EAS_LOCAL_BUILD_WORKINGDIR: easWorkingDirectory,
+          EAS_LOCAL_BUILD_WORKINGDIR: nativeWorkspace.work,
           GATOR_RELEASE_OUTPUT: pendingPath,
         });
-        return await runInherited('npx', reviewedEasNpxArgs('build'), {
+        const buildOutcome = await runInherited('npx', reviewedEasNpxArgs('build'), {
           cwd: worktree,
           env: environment,
           onSpawn: (processGroupId) => {
@@ -869,6 +1150,25 @@ async function build(options) {
             writeState(state);
           },
         });
+        if (
+          buildOutcome.status === 0 &&
+          buildOutcome.signal == null &&
+          buildOutcome.signalForwardingFailed !== true &&
+          buildOutcome.descendantsRunning !== true
+        ) {
+          try {
+            nativePathProof = verifyReleaseNativePathProof(nativeWorkspace, pendingPath);
+            buildArtifact = releaseArtifactReceiptBinding(pendingPath);
+          } catch (error) {
+            const proofError =
+              error instanceof Error
+                ? error
+                : new Error(`native path proof failed: ${String(error)}`);
+            proofError.releaseFailureCode = 'native_path_proof_failed';
+            throw proofError;
+          }
+        }
+        return buildOutcome;
       });
     } catch (error) {
       outcome = {
@@ -878,12 +1178,27 @@ async function build(options) {
         processGroupId: error?.processGroupId ?? state.build.processGroupId ?? null,
         descendantsRunning: error?.retainWorkspace === true,
         retainWorkspace: error?.retainWorkspace === true,
+        failureCode: error?.releaseFailureCode,
       };
     } finally {
       if (!outcome?.retainWorkspace) removeManagedEasDirectory(state);
     }
 
     const finishedAt = nowIso();
+    const buildReceipt = {
+      schemaVersion: 2,
+      runId,
+      mode: 'local',
+      profile: 'production',
+      environment: 'production',
+      output: 'artifact.pending.aab',
+      startedAt,
+      finishedAt,
+      remoteVersionMayHaveAdvanced: true,
+      exitCode: 0,
+      artifact: buildArtifact,
+      nativePathProof,
+    };
     const succeeded =
       outcome?.status === 0 &&
       outcome?.signal == null &&
@@ -891,7 +1206,10 @@ async function build(options) {
       outcome?.descendantsRunning !== true &&
       existsSync(pendingPath) &&
       statSync(pendingPath).isFile() &&
-      statSync(pendingPath).size > 0;
+      statSync(pendingPath).size > 0 &&
+      isValidReleaseNativePathProof(nativePathProof) &&
+      buildArtifact !== null &&
+      isValidReleaseBuildReceipt(buildReceipt, { runId, artifact: buildArtifact });
     if (!succeeded) {
       const retainedArtifact = outcome?.descendantsRunning
         ? existsSync(pendingPath)
@@ -900,11 +1218,13 @@ async function build(options) {
         : moveFailedArtifact(runId);
       const failure = {
         phase: 'build',
-        code: outcome?.descendantsRunning
-          ? 'build_process_group_still_running'
-          : outcome?.startError
-            ? 'build_start_failed'
-            : 'build_failed_or_missing_artifact',
+        code:
+          outcome?.failureCode ??
+          (outcome?.descendantsRunning
+            ? 'build_process_group_still_running'
+            : outcome?.startError
+              ? 'build_start_failed'
+              : 'build_failed_or_missing_artifact'),
         exitCode: outcome?.status ?? null,
         signal: outcome?.signal ?? null,
         processGroupId: outcome?.processGroupId ?? null,
@@ -930,18 +1250,6 @@ async function build(options) {
       );
     }
 
-    const buildReceipt = {
-      schemaVersion: 1,
-      runId,
-      mode: 'local',
-      profile: 'production',
-      environment: 'production',
-      output: 'artifact.pending.aab',
-      startedAt,
-      finishedAt,
-      remoteVersionMayHaveAdvanced: true,
-      exitCode: 0,
-    };
     writeImmutableJson(runFile(runId, 'build.json'), buildReceipt);
     writeState({
       ...state,
@@ -1007,8 +1315,10 @@ async function validate(options) {
     requirePhase(state, 'built');
     const artifactPath = runFile(runId, 'artifact.pending.aab');
     let artifact;
+    let buildReceiptBinding;
     try {
       artifact = inspectReleaseArtifact(artifactPath, state);
+      buildReceiptBinding = readBoundReleaseBuildReceipt(state, artifact);
     } catch (error) {
       const retainedArtifact = moveFailedArtifact(runId);
       const failure = {
@@ -1039,7 +1349,7 @@ async function validate(options) {
       throw new Error('existing validation receipt has an invalid completion time');
     }
     const receipt = {
-      schemaVersion: 1,
+      schemaVersion: 2,
       runId,
       applicationId: artifact.applicationId,
       targetVersion: state.target.version,
@@ -1053,6 +1363,9 @@ async function validate(options) {
         profile: 'production',
         environment: 'production',
         easCli: REQUIRED_EAS_CLI_VERSION,
+        receipt: 'build.json',
+        receiptSha256: buildReceiptBinding.sha256,
+        nativePathProof: buildReceiptBinding.receipt.nativePathProof,
       },
       artifact: {
         filename: 'artifact.pending.aab',
@@ -1066,7 +1379,14 @@ async function validate(options) {
       validation: {
         status: 'passed',
         validator: 'scripts/check-android-build.mjs',
-        checks: ['zip-integrity', 'packaged-artifact', 'identity', 'signature', 'hash'],
+        checks: [
+          'zip-integrity',
+          'packaged-artifact',
+          'identity',
+          'signature',
+          'hash',
+          'native-path-proof',
+        ],
         completedAt,
       },
     };
@@ -1454,22 +1774,16 @@ function reconcileBuilding(state) {
     throw new Error('build has conflicting success and failure receipts');
   }
   if (hasSuccess) {
-    const receipt = readJson(successPath);
     const pendingPath = runFile(state.runId, 'artifact.pending.aab');
-    if (
-      receipt?.schemaVersion !== 1 ||
-      receipt.runId !== state.runId ||
-      receipt.mode !== 'local' ||
-      receipt.profile !== 'production' ||
-      receipt.environment !== 'production' ||
-      receipt.output !== 'artifact.pending.aab' ||
-      receipt.exitCode !== 0 ||
-      typeof receipt.finishedAt !== 'string' ||
-      !existsSync(pendingPath) ||
-      !lstatSync(pendingPath).isFile() ||
-      lstatSync(pendingPath).isSymbolicLink() ||
-      lstatSync(pendingPath).size <= 0
-    ) {
+    let artifact = null;
+    let receipt = null;
+    try {
+      artifact = releaseArtifactReceiptBinding(pendingPath);
+      receipt = readBoundReleaseBuildReceipt(state, artifact).receipt;
+    } catch {
+      // The shared receipt validator below reports one stable reconciliation error.
+    }
+    if (artifact === null || receipt === null) {
       throw new Error('successful build receipt or pending artifact is invalid');
     }
     writeState({

@@ -50,4 +50,12 @@ export {
   applyNewServerUrl,
 } from './realtimeControl';
 export { connect, forget, disconnectFailureMessage } from './bootstrap';
+export {
+  beginScopedCredentialUpgrade,
+  discardScopedCredentialUpgradeCandidate,
+  inspectScopedCredentialUpgradeStatus,
+  resumeScopedCredentialUpgrade,
+  type ResumeScopedCredentialUpgradeOptions,
+  type ScopedCredentialUpgradeStatus,
+} from './credentialUpgrade';
 export { initErrorReporting, flushErrorReports, runErrorReportQueue } from './errors';

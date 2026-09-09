@@ -1,6 +1,7 @@
 import React, { useCallback, useMemo, useRef } from 'react';
 import { Pressable, StyleSheet, Text, View, type AccessibilityActionEvent } from 'react-native';
 import { bubbleEffectOf } from '@core/effects';
+import { isAggregateRetractionTombstone } from '@core/messages/retraction';
 import { parsePayloadData } from '@core/models';
 import {
   parseAttributedRuns,
@@ -167,7 +168,7 @@ export const MessageBubble = React.memo(function MessageBubble({
       ),
     [runs],
   );
-  const isRetracted = !!msg.dateRetracted;
+  const isRetracted = isAggregateRetractionTombstone(msg);
   const isEdited = !isRetracted && !!msg.dateEdited;
   // Apple "Send Later": a small "Scheduled" badge under the bubble ONLY while the row is pending
   // (not yet sent). The server keeps emitting isScheduled:true even AFTER the message sends (it's
@@ -525,6 +526,12 @@ export const MessageBubble = React.memo(function MessageBubble({
           <Pressable
             onPress={onRetry}
             hitSlop={8}
+            accessible
+            accessibilityRole={onRetry ? 'button' : undefined}
+            accessibilityLabel={
+              onRetry ? 'Message not delivered. Show options' : 'Message not delivered'
+            }
+            accessibilityHint={onRetry ? 'Opens failed message options' : undefined}
             style={[styles.errorBadge, { borderColor: theme.color.destructive }]}
           >
             <Text style={[styles.errorMark, { color: theme.color.destructive }]}>!</Text>
