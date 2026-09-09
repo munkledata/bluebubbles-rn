@@ -5,6 +5,36 @@ repeated account-operation wrappers, and test machinery embedded in production m
 stack and the need for reliable offline messaging remain justified. A rewrite would add risk without
 addressing these specific causes.
 
+## Plain-English summary saved from the review
+
+**Yes, parts are overengineered. Keep the app's foundation and simplify specific areas.**
+
+- The custom audit machinery creates unnecessary maintenance: a comment-only edit invalidated nine
+  classifications, and renaming a local variable failed a scheduling check without changing behavior.
+- About 96% of the 3,769-line database module is self-test machinery. Keep the useful tests, but move
+  their implementation out of the production database module.
+- Theme and folder operations repeat the same account-safety wrapper. Consolidate proven duplication
+  without inventing a broader framework.
+- Disconnect can leave the app unable to connect to another server when the old server cannot confirm
+  credential revocation, even after local cleanup succeeds. Add an explicit local recovery option.
+- The roughly 16,000-line work plan makes current priorities hard to find. Separate active work from
+  history.
+
+Encryption, the shared database writer queue, durable incoming events, and account isolation solve real
+problems. A controlled experiment lost a completed write when it bypassed the queue; using the queue
+preserved it. **A rewrite is not the recommendation.**
+
+At the review snapshot, the full app test run passed **484 suites / 5,630 tests**, with one suite and
+one test skipped; focused refresh tests passed **5 suites / 186 tests**, and architecture tests passed
+**52/52**. The fast database scanner had **83 passes / 5 failures / 12 skips**, and the later typecheck
+failed at `bootstrap.ts:1497` because `Promise<unknown>` was passed where `Promise<void>` was required.
+Other sessions were changing source during these checks, so these results are dated observations.
+This review itself had not yet run phone tests. The subsequent phone checks are recorded separately
+in [the device follow-up](./PHONE_REVIEW_FOLLOWUP_2026-09-09.md).
+
+The useful test for complexity is: **what failure does this prevent, and how much harder does it make
+an ordinary change?**
+
 This review challenged the [earlier review](./INDEPENDENT_REPO_REVIEW_2026-09-08.md), inspected current
 source, ran the app tests and guards, and performed controlled mutations in memory or temporary
 copies. Application code and existing project records were not edited for this review. The working
