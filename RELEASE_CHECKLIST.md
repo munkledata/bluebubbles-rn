@@ -9,20 +9,35 @@ history and is not executable evidence for a replacement candidate. Do not copy 
 build into this file. Section 0 is the next private Internal Testing gate; Sections 1–7 remain the
 broader Closed/Open/Production release gate.
 
-Current release-candidate status — **OPEN; no uploadable candidate exists.** Source changes made after
-the 2026-09-04 freeze supersede the former v59 artifact below. It must not be uploaded, submitted, or
-installed as the replacement, and cannot be credited toward any replacement source, artifact, Play,
-or device gate.
+Current release-candidate status — **INTERNAL TESTING; broader release remains NO-GO.** The exact
+replacement was built, validated, submitted only to Google Play Internal Testing, naturally updated
+over the prior Play build, and exercised for the bounded URL-blocker and ordinary-kill checks. The
+remaining staged-server, device-matrix, tester-administration, policy, and rollout gates below stay
+open; this Internal result is not public-release approval.
 
-A replacement must be built as a new local production AAB and then frozen from its release receipts.
-Do not claim that replacement exists until all of these fields are recorded from the same run:
+Exact replacement frozen from one release run:
 
-- Version/build number: `[OPEN]`
-- Exact source and release commits: `[OPEN]`
-- Release run and local AAB: `[OPEN]`
-- AAB size/SHA-256: `[OPEN]`
-- Upload certificate SHA-256: `[OPEN — reverify from the replacement]`
-- Tester/device/Android versions and test date: `[OPEN]`
+- Version/build number: `0.1.45 (versionCode 62)`
+- Exact source and release commits: `8179d0a3a99c4e2e28a01fd83212fee919bad41c` /
+  `644a566fb54da7d2c195e369d11677acfce097ea`
+- Release branch/run: `release/android-0.1.45` /
+  `android-0.1.45-8179d0a-20260910075110`
+- Local AAB: `gator-release-0.1.45-v62-644a566.aab` — ignored; never commit it
+- AAB size/SHA-256: `56,141,406` bytes /
+  `110efe12a0d5cc620b2a523787bb95139f3f2ddf86550449d16de7d8fcd2bd51`
+- Upload certificate SHA-256:
+  `6E:18:F9:93:61:DC:D6:58:F1:A7:5B:9F:47:E8:66:AC:8D:A6:AF:EF:B9:E7:F4:7C:BF:41:F5:E0:F6:CE:2F:43`
+- Submission: Google Play Internal Testing at `2026-09-10T08:07:26.541Z`; EAS submission
+  `736e29d7-d0d1-48f7-8f68-6095ce240d10`
+- Tester/device/Android/test date: owner-enrolled Samsung `SM-S938U1`, Android 16 / API 36,
+  2026-09-10
+- Exact device receipt:
+  [`docs/PLAY_INTERNAL_DEVICE_PROOF_2026-09-09.md`](./docs/PLAY_INTERNAL_DEVICE_PROOF_2026-09-09.md#replacement-candidate-closure--2026-09-10)
+
+Version code 61 remains retired because its device run exposed the unsupported-scheme bug. The v62
+Play update immediately rejected the same synthetic `ftp://example.com` input, and an ordinary
+background `adb shell am kill` followed by a cold relaunch passed. No Closed, Open, Production, or
+wider-track promotion was performed.
 
 Superseded v59 candidate — historical static artifact proof only; no result transfers to a
 replacement:
@@ -82,9 +97,9 @@ Open, or Production promotion, or earlier if Play flags the internal app.
       build phase cannot submit; the separate submit phase previews by default and requires `--execute`,
       an interactive candidate-specific phrase, and reviewed operator approval.
 - [ ] Play Console confirms no Closed, Open, or Production release is active before submission.
-- [ ] The replacement version/build, source and release commits, AAB SHA-256, upload certificate,
+- [x] The replacement version/build, source and release commits, AAB SHA-256, upload certificate,
       and build provenance are recorded above. The superseded v59 record does not satisfy this gate.
-- [ ] Tester devices, Android versions, and test date are recorded above.
+- [x] Tester devices, Android versions, and test date are recorded above.
 - [ ] The intended tester list, opt-in link, feedback destination, and named response owner work.
 - [ ] Testers use a stable non-production server/setup path and no production-user data or credentials.
 - [ ] The exact AAB installs/updates and completes the staged connect, sync, send, receive, notification,
