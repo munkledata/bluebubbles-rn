@@ -152,3 +152,82 @@ does not prove the required prior-build update path.
 - Gator `0.1.44` / code `61` remains installed from Google Play for bounded follow-up only.
 - Temporary phone and Mac screenshots/XML/APK proof copies used during inspection were removed;
   none contained QR, server, account, or message data.
+
+## Replacement candidate closure — 2026-09-10
+
+The sections above remain the historical receipt for version code 61 and the URL defect it exposed.
+This section records the corrected replacement delivered through Google Play Internal Testing.
+
+### Exact replacement and release gates
+
+| Field                             | Observed value                                                                                    |
+| --------------------------------- | ------------------------------------------------------------------------------------------------- |
+| App/package                       | Gator / `com.bluegreengatorapps.messages`                                                         |
+| Version                           | `0.1.45` / version code `62`                                                                      |
+| Candidate source                  | `8179d0a3a99c4e2e28a01fd83212fee919bad41c`                                                        |
+| Release commit/branch             | `644a566fb54da7d2c195e369d11677acfce097ea` / `release/android-0.1.45`                             |
+| Release run                       | `android-0.1.45-8179d0a-20260910075110`                                                           |
+| Artifact                          | `gator-release-0.1.45-v62-644a566.aab` / 56,141,406 bytes                                         |
+| Artifact SHA-256                  | `110efe12a0d5cc620b2a523787bb95139f3f2ddf86550449d16de7d8fcd2bd51`                                |
+| Upload certificate SHA-256        | `6E:18:F9:93:61:DC:D6:58:F1:A7:5B:9F:47:E8:66:AC:8D:A6:AF:EF:B9:E7:F4:7C:BF:41:F5:E0:F6:CE:2F:43` |
+| Submission                        | Google Play Internal Testing; release receipt status `submitted` at `2026-09-10T08:07:26.541Z`    |
+| EAS submission                    | `736e29d7-d0d1-48f7-8f68-6095ce240d10`                                                            |
+| Play delivery certificate SHA-256 | `fd45704222c77c48bee372e8b93525ff396c527c8c786841179f9e63da074d60`                                |
+
+The frozen candidate passed the reconciled DB inventory with 1,948 approved mutations, zero
+unresolved findings, zero nested coordinators, and zero reconciliation drift. The required full
+adversarial scanner passed 104/104 tests. The focused product evidence remained 2 suites / 66 tests,
+and the pinned focused DB evidence passed 9 suites / 189 tests. TypeScript, architecture (52/52),
+migration (5/5 at head `0048`), formatting, and inventory guards passed. The production build then
+passed Expo Doctor 20/20 and Gradle 1,299/1,299 tasks before the release runner validated the AAB's
+identity, signature, hash, legal inventory, and native paths.
+
+An initial run, `android-0.1.45-8179d0a-20260910071440`, stopped before Gradle because its disposable
+checkout could not resolve `expo-router` without installed dependencies. A pinned EAS query proved
+the remote counter remained at 61. That failed receipt was retained, dependencies were installed in
+the isolated outer checkout, and the successful fresh run consumed version code 62 exactly once.
+
+### Natural Google Play update proof
+
+- Before update, Android reported `0.1.44` / code `61`, installer
+  `com.android.vending`, first-install time `2026-09-09 22:22:02`, and last-update time
+  `2026-09-09 22:22:02`.
+- The Play listing visibly offered **Update** to the enrolled tester. The existing app was neither
+  uninstalled nor cleared, and no APK was sideloaded.
+- After update, Android reported `0.1.45` / code `62`, the same Google Play installer and first-install
+  time, and the newer last-update time `2026-09-10 02:11:04`.
+- The delivered base APK passed v2 and v3 signature verification and carried the expected Play App
+  Signing delivery certificate above.
+
+This closes the previously missing natural Play update branch for this exact Galaxy/API-36 device.
+It does not substitute for the other Android versions, manufacturers, enrollment roles, or staged
+server journeys listed earlier.
+
+### Corrected URL boundary and lifecycle proof
+
+On the Play-installed v62 build, the bounded manual setup sequence used only the synthetic values
+`ftp://example.com` and `proofonly`. Tapping Connect immediately rendered:
+
+> Please enter a valid server URL.
+
+The screen did not enter a Connecting state or show the old “Could not reach your server” result.
+This is exact-device UI proof that the v61 blocker is corrected; it is not packet-capture evidence
+and makes no claim about broader network behavior.
+
+The app was then backgrounded with Home and stopped with ordinary `adb shell am kill`, not
+force-stop. `pidof` confirmed the process was gone. Relaunch was COLD in 428 ms, created a new
+process, and returned cleanly to Get Started without retaining the synthetic values or error.
+
+### Remediation disposition and end state
+
+- The exact build, validation, promotion, Internal submission, accepted outcome receipt, natural
+  Play update, and corrected blocker proof support marking primary `RELEASE-01` **DONE**.
+- Version code 61 remains retired and must not be promoted. Version code 62 was submitted only to
+  Internal Testing; no production or wider-track rollout occurred.
+- Broad connected messaging, files/media, FCM, notification actions, account switching, and teardown
+  remain blocked on a privacy-safe staged server and synthetic account. This bounded run does not
+  close those records.
+- The phone ends on Gator Get Started with `0.1.45` / code `62` installed from Google Play. The
+  temporary pulled APK and screenshots contained only public release metadata or the synthetic setup
+  values and were removed after this receipt was recorded. USB stay-awake was restored to its normal
+  setting.
