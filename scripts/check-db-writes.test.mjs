@@ -1442,6 +1442,127 @@ test('a newly introduced startup caller gets the safe context but still fails ex
   }
 });
 
+test('permits only the exact pinned release diagnostic CommonJS loader', () => {
+  const boundaryPath = 'src/services/errors/reactNativeExceptionPrivacy.ts';
+  const diagnosticPath = 'src/core/secure/errorDiagnostic.ts';
+  const boundarySource = readFileSync(resolve(PROJECT_ROOT, boundaryPath), 'utf8');
+  const diagnosticSource = readFileSync(resolve(PROJECT_ROOT, diagnosticPath), 'utf8');
+  const createRoot = () =>
+    fixture(
+      startupSingleFlightFixture({
+        extraFiles: {
+          [boundaryPath]: boundarySource,
+          [diagnosticPath]: diagnosticSource,
+        },
+      }),
+    );
+  const root = createRoot();
+  try {
+    const baseline = scanDbWrites({ root });
+    assert.equal(
+      startupContext(
+        baseline,
+        'src/services/consumer.ts',
+        'openDirectly',
+        'src/services/databaseControl.ts#ensureDatabase',
+      ),
+      'startup-single-flight-delegation',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+
+  const cases = [
+    {
+      label: 'redirected diagnostic loader',
+      mutate(fixtureRoot) {
+        replaceFixtureSource(
+          fixtureRoot,
+          boundaryPath,
+          "require('@core/secure/errorDiagnostic')",
+          "require('../databaseControl')",
+        );
+      },
+    },
+    {
+      label: 'shadowed require',
+      mutate(fixtureRoot) {
+        writeFileSync(
+          resolve(fixtureRoot, boundaryPath),
+          `const require = (_path: string): never => { throw new Error('shadowed'); };\n${boundarySource}`,
+        );
+      },
+    },
+    {
+      label: 'duplicate diagnostic require',
+      mutate(fixtureRoot) {
+        replaceFixtureSource(
+          fixtureRoot,
+          boundaryPath,
+          "return require('@core/secure/errorDiagnostic') as ErrorDiagnosticApi;",
+          "require('@core/secure/errorDiagnostic');\n    return require('@core/secure/errorDiagnostic') as ErrorDiagnosticApi;",
+        );
+      },
+    },
+    {
+      label: 'changed diagnostic loader body',
+      mutate(fixtureRoot) {
+        replaceFixtureSource(
+          fixtureRoot,
+          boundaryPath,
+          "throw new Error('react-native-diagnostic-projector-unavailable');",
+          "throw new Error('changed-diagnostic-projector');",
+        );
+      },
+    },
+    {
+      label: 'same diagnostic require outside loader',
+      mutate(fixtureRoot) {
+        writeFileSync(
+          resolve(fixtureRoot, boundaryPath),
+          `${boundarySource}\nexport const escapedProjector = require('@core/secure/errorDiagnostic');\n`,
+        );
+      },
+    },
+    {
+      label: 'second project-local require',
+      mutate(fixtureRoot) {
+        writeFileSync(
+          resolve(fixtureRoot, 'src/services/secondDiagnosticLoader.ts'),
+          "export const projector = require('@core/secure/errorDiagnostic');\n",
+        );
+      },
+    },
+    {
+      label: 'project-local import equals',
+      mutate(fixtureRoot) {
+        writeFileSync(
+          resolve(fixtureRoot, 'src/services/importEqualsDiagnosticLoader.ts'),
+          "import projector = require('@core/secure/errorDiagnostic');\nexport { projector };\n",
+        );
+      },
+    },
+    {
+      label: 'changed diagnostic target',
+      mutate(fixtureRoot) {
+        writeFileSync(
+          resolve(fixtureRoot, diagnosticPath),
+          `${diagnosticSource}\nexport const changed = true;\n`,
+        );
+      },
+    },
+  ];
+  for (const { label, mutate } of cases) {
+    const fixtureRoot = createRoot();
+    try {
+      mutate(fixtureRoot);
+      assertStartupCertificateRevoked(scanDbWrites({ root: fixtureRoot }), label);
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  }
+});
+
 test('certifies exactly the reviewed direct incoming-ingress edge nodes', () => {
   const findings = scanProjectDbWrites();
   const ingress = findings.filter(
@@ -1994,18 +2115,20 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
   assert.deepEqual(
     featureSettingTransactions.map((finding) => finding.id).sort(),
     [
-      'src/state/featureSettingsStore.ts#<callback:70127041d1>.setAutoDownloadDestination.<callback:28c2902011>:mutator-call:3b2bc55cacf9',
-      'src/state/featureSettingsStore.ts#<callback:70127041d1>.setAutoDownloadDestination:mutator-call:cbb90d573e57',
-      'src/state/featureSettingsStore.ts#<callback:70127041d1>.setAutoDownloadDestination:mutator-call:d856a5a4f4ca',
-      'src/state/featureSettingsStore.ts#<callback:70127041d1>.setFlag.<callback:80c80d5352>:mutator-call:da7ac3883c44',
-      'src/state/featureSettingsStore.ts#<callback:70127041d1>.setFlag:mutator-call:1ab717b8683f',
-      'src/state/featureSettingsStore.ts#<callback:70127041d1>.setFlag:mutator-call:877fcb8cece4',
-      'src/state/featureSettingsStore.ts#<callback:70127041d1>.setInboxFilters.<callback:fc105905b5>:mutator-call:60e2166d21c0',
-      'src/state/featureSettingsStore.ts#<callback:70127041d1>.setInboxFilters:mutator-call:50c20fed96ae',
-      'src/state/featureSettingsStore.ts#<callback:70127041d1>.setInboxFilters:mutator-call:a92af4d3d757',
-      'src/state/featureSettingsStore.ts#<callback:70127041d1>.setMaxConcurrentDownloads.<callback:62a8e00576>:mutator-call:e56d7ff1e730',
-      'src/state/featureSettingsStore.ts#<callback:70127041d1>.setMaxConcurrentDownloads:mutator-call:2093dc6917c3',
-      'src/state/featureSettingsStore.ts#<callback:70127041d1>.setMaxConcurrentDownloads:mutator-call:436e2423890e',
+      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setAutoDownloadDestination.<callback:0a291c45bf>:mutator-call:370e47c1ad0e',
+      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setAutoDownloadDestination.<callback:0a291c45bf>:mutator-call:7d3f17b348b0',
+      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setAutoDownloadDestination:mutator-call:53bfbf30831c',
+      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setAutoDownloadDestination:mutator-call:70a8e1b16756',
+      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setFlag.<callback:2f7b5f0583>:mutator-call:1613337ce250',
+      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setFlag.<callback:2f7b5f0583>:mutator-call:9fab5720b4a9',
+      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setFlag:mutator-call:83e3afbccc27',
+      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setFlag:mutator-call:b5ce5db1e87f',
+      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setInboxFilters.<callback:fc105905b5>:mutator-call:be6f374ea1f4',
+      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setInboxFilters:mutator-call:60c1275762da',
+      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setInboxFilters:mutator-call:e9c6421566a2',
+      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setMaxConcurrentDownloads.<callback:62a8e00576>:mutator-call:ba53fef4d2ee',
+      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setMaxConcurrentDownloads:mutator-call:38ead881d915',
+      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setMaxConcurrentDownloads:mutator-call:e6459b4ae146',
     ].sort(),
   );
   assert.deepEqual(
@@ -2470,7 +2593,7 @@ test('certifies the exact residual repository delegations after explicit-owner c
   );
 
   assert.equal(devFixtures.length, 17);
-  assert.equal(intentionalBoundaries.length, 35);
+  assert.equal(intentionalBoundaries.length, 40);
   assert.equal(scheduledStateMachine.length, 12);
   assert.deepEqual(
     findings.map((finding) => finding.id).sort(),
@@ -2506,6 +2629,11 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/services/chatActions.ts#movePinnedChat.<callback:f539212418>:mutator-call:d3f83b7bb36a',
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:93672ec10293',
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:e98149765f27',
+      'src/services/download/attachmentMediaExportQueue.ts#drainInsideNativeOwner:mutator-call:1f330c870a01',
+      'src/services/download/attachmentMediaExportQueue.ts#drainInsideNativeOwner:mutator-call:af7f6f6a32a5',
+      'src/services/download/attachmentMediaExportQueue.ts#drainInsideNativeOwner:mutator-call:c9b7c4b08447',
+      'src/services/download/attachmentMediaExportQueue.ts#settleFailedExport:mutator-call:f9d37772cbae',
+      'src/services/download/autoDownloadAttachments.ts#autoDownloadMessageAttachments:mutator-call:a014f805b5d6',
       'src/services/paste/pasteInput.ts#loadPastedAttachmentProtectionPaths:mutator-call:2756cd6e5177',
       'src/services/realtime/incomingEventDispatcher.ts#DurableRealtimeDispatcher.persist:mutator-call:6fde253c2f8b',
       'src/services/realtime/incomingEventDispatcher.ts#DurableRealtimeDispatcher.persist:mutator-call:8c46c894d3aa',
@@ -2985,11 +3113,13 @@ test('certifies exactly the reviewed attachment-cache transaction-context bounda
   assert.deepEqual(
     [...leaves, ...snapshotOwners, ...delegated].map((finding) => finding.id).sort(),
     [
+      'src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch:sql-delete:045962bd8b71',
       'src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch:sql-insert:99e2263a1304',
       'src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch:sql-update:9609800f7a37',
       'src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForDeletedMessage.<callback:acf3a0c5f3>:mutator-call:e802ea4e2e1e',
       'src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement:sql-update:0fd63f0dd34a',
       'src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement:sql-update:300d170b9271',
+      'src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement:sql-delete:ff6e109326d8',
       'src/db/repositories/attachmentCache.ts#commitAttachmentCacheReservation:sql-update:8061a1433826',
       'src/db/repositories/attachmentCache.ts#confirmAttachmentCacheEntryDeleted:sql-delete:f009e63ebbd9',
       'src/db/repositories/attachmentCache.ts#createAttachmentCacheReservation:sql-insert:23906c8fe812',
@@ -2997,6 +3127,7 @@ test('certifies exactly the reviewed attachment-cache transaction-context bounda
       'src/db/repositories/attachmentCache.ts#recordAttachmentCacheAccess:sql-update:3ca8ab1b4190',
       'src/db/repositories/attachmentCache.ts#recordAttachmentCacheEntry:sql-insert:1d5b6db8c26c',
       'src/db/repositories/attachmentCache.ts#repairMissingActiveAttachmentCacheEntry:sql-delete:b9564831e666',
+      'src/db/repositories/attachmentCache.ts#repairMissingActiveAttachmentCacheEntry:sql-delete:c78a3766ee18',
       'src/db/repositories/attachmentCache.ts#repairMissingActiveAttachmentCacheEntry:sql-update:27b8750a28ca',
       'src/db/repositories/attachmentCache.ts#scheduleAttachmentCacheRetirementRetry:sql-update:94a4794dc91e',
       'src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.conformCurrentQuota.<callback:0dcf6c14a5>:mutator-call:7a455dfc3371',
@@ -3021,7 +3152,7 @@ test('certifies exactly the reviewed attachment-cache transaction-context bounda
       'src/services/send/outgoingPasteOwnership.ts#createOutgoingPasteOwnershipPreparer.<callback:ca2b04b199>:mutator-call:4adc4cfd204e',
     ].sort(),
   );
-  assert.equal(leaves.length, 13);
+  assert.equal(leaves.length, 16);
   assert.equal(snapshotOwners.length, 1);
   assert.equal(delegated.length, 20);
   assert.deepEqual(
@@ -3204,8 +3335,8 @@ test('certifies exactly the reviewed outer-lifecycle delegation boundary', () =>
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
     [
-      'app/(app)/_layout.tsx#ConnectedAppLayout.<callback:2f0bceb3e7>.<callback:cff4117220>:mutator-call:172d1d5cd379',
-      'app/(app)/_layout.tsx#ConnectedAppLayout.<callback:2f0bceb3e7>.<callback:cff4117220>:mutator-call:9c6ba7fb690a',
+      'app/(app)/_layout.tsx#ConnectedAppLayout.<callback:3e37ca06e7>.<callback:da2b6409fb>:mutator-call:809651c0aeae',
+      'app/(app)/_layout.tsx#ConnectedAppLayout.<callback:3e37ca06e7>.<callback:da2b6409fb>:mutator-call:b0d360769201',
       'app/(setup)/manual.tsx#Manual.submit:mutator-call:5e0818285fda',
       'app/(setup)/manual.tsx#Manual:mutator-reference:cb409be66510',
       'app/(setup)/manual.tsx#Manual:mutator-reference:cb409be66510:2',
@@ -3240,12 +3371,14 @@ test('certifies exactly the reviewed outer-lifecycle delegation boundary', () =>
       'src/services/realtimeControl.ts#approveNewServerUrl.reconnect:mutator-call:8f17c75f698b',
       'src/services/realtimeControl.ts#dispatchWithContext:mutator-call:723b4235f7f7',
       'src/services/realtimeControl.ts#finishRealtimeRecoveryCollector:mutator-call:3b450803c536',
+      'src/services/realtimeControl.ts#realtimeSink.<callback:bedc1e072f>.<callback:df541decac>:mutator-call:58f925006793',
+      'src/services/realtimeControl.ts#realtimeSink.<callback:bedc1e072f>:mutator-call:acbe59df19d9',
       'src/services/realtimeControl.ts#resumeDesiredRealtime.<callback:edf3121ba2>:mutator-call:ab508913e108',
       'src/services/realtimeControl.ts#resumeDesiredRealtime:mutator-call:2c6798b642a8',
       'src/services/realtimeControl.ts#startRealtime.<callback:edf3121ba2>:mutator-call:3cd6e7e8d376',
     ].sort(),
   );
-  assert.equal(delegated.length, 39);
+  assert.equal(delegated.length, 41);
 
   for (const suffix of [
     '8c40f7e0add0',
@@ -6021,6 +6154,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
   const leafSymbols = new Set([
     'applyLocalEditWithinTransaction',
     'applyLocalUnsendWithinTransaction',
+    'cancelPendingAttachmentMediaExportsWithinTransaction',
     'claimErrorReportsWithinTransaction',
     'createReminderWithinTransaction',
     'deleteErrorReportsWithinTransaction',
@@ -6030,6 +6164,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'deleteScheduledHistoryWithinTransaction',
     'deleteScheduledWithinTransaction',
     'discardOutgoingMessageWithinTransaction',
+    'ensureReceiptSlotWithinTransaction',
     'kvSetWithinTransaction',
     'markAllChatsReadLocalWithinTransaction',
     'markMessageSendErrorWithinTransaction',
@@ -6041,6 +6176,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'insertOutgoingReactionWithinTransaction',
     'insertScheduledWithinTransaction',
     'listRetryableErrorReportsWithinTransaction',
+    'maintainAttachmentMediaExportsWithinTransaction',
     'markErrorReportsFailedWithinTransaction',
     'retireOutgoingWithinTransaction',
     'revertLocalEditWithinTransaction',
@@ -6352,6 +6488,13 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/reminders.ts#deleteReminderByNotificationIdWithinTransaction:drizzle-delete:c5786892fa3b',
       'src/db/repositories/reminders.ts#deleteReminderWithinTransaction:drizzle-delete:4d16415ac0cf',
       'src/db/repositories/reminders.ts#updateReminderTimeWithinTransaction:drizzle-update:69b01aa5bda9',
+      'src/db/repositories/attachmentMediaExports.ts#cancelPendingAttachmentMediaExportsWithinTransaction:sql-delete:eda83f91e310',
+      'src/db/repositories/attachmentMediaExports.ts#ensureReceiptSlotWithinTransaction:sql-delete:0de9c8eb607e',
+      'src/db/repositories/attachmentMediaExports.ts#maintainAttachmentMediaExportsWithinTransaction:sql-delete:2fff9a9d83b1',
+      'src/db/repositories/attachmentMediaExports.ts#maintainAttachmentMediaExportsWithinTransaction:sql-delete:6695af9f3cd7',
+      'src/db/repositories/attachmentMediaExports.ts#maintainAttachmentMediaExportsWithinTransaction:sql-update:64e6cf3df554',
+      'src/db/repositories/attachmentMediaExports.ts#maintainAttachmentMediaExportsWithinTransaction:sql-update:79f7006a9658',
+      'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-delete:1baa5d376435',
       'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:06ff79484d3e',
       'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:42d5bf1453d2',
       'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:a9908ef95877',
@@ -6432,7 +6575,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 102);
+  assert.equal(selected.length, 109);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [

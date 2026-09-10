@@ -1512,6 +1512,67 @@ function hasRuntimeModuleLoad(file, moduleName) {
   return found;
 }
 
+const CERTIFIED_ERROR_DIAGNOSTIC_COMMONJS_LOAD = Object.freeze({
+  importerHash: '15dc651b261a77688f77f165b9e8100bad92031aa1198243e8beaf8832791bc0',
+  importerPath: 'src/services/errors/reactNativeExceptionPrivacy.ts',
+  loaderName: 'loadErrorDiagnosticApi',
+  loaderHash: '3400aa7c47d860d8e3bdba99a2cd6d52a20e58ff11c2ca7e478672ab453105d7',
+  specifier: '@core/secure/errorDiagnostic',
+  targetHash: '074a4c2b7847aca48492ec8807fb3e327baf1074d3ac88e50936fd477e7ce5c3',
+  targetPath: 'src/core/secure/errorDiagnostic.ts',
+});
+
+/**
+ * The release exception boundary must install its console filter before loading the pure
+ * diagnostic projector. Keep that one synchronous Metro load visible and exact without letting a
+ * project-local CommonJS alias bypass the startup ownership graph. Both the complete loader and
+ * its complete non-DB target are pinned; any second loader, target change, or module change falls
+ * back to the ordinary fail-closed rule below.
+ */
+function isCertifiedErrorDiagnosticCommonJsLoad(filesByPath, importerPath, file, node) {
+  const certificate = CERTIFIED_ERROR_DIAGNOSTIC_COMMONJS_LOAD;
+  if (importerPath !== certificate.importerPath || node.text !== certificate.specifier) {
+    return false;
+  }
+  const call = node.parent;
+  if (
+    !ts.isCallExpression(call) ||
+    call.arguments.length !== 1 ||
+    call.arguments[0] !== node ||
+    !identifierNamed(call.expression, 'require')
+  ) {
+    return false;
+  }
+  const targets = projectModulePathCandidates(importerPath, node.text).filter((path) =>
+    filesByPath.has(path),
+  );
+  const targetFile = filesByPath.get(certificate.targetPath);
+  const loaders = file.statements.filter(
+    (statement) =>
+      ts.isFunctionDeclaration(statement) && statement.name?.text === certificate.loaderName,
+  );
+  const loader = loaders.length === 1 ? loaders[0] : undefined;
+  if (
+    targets.length !== 1 ||
+    targets[0] !== certificate.targetPath ||
+    !targetFile ||
+    !loader?.body ||
+    !callableIsInside(call, loader)
+  ) {
+    return false;
+  }
+  const loaderHash = createHash('sha256').update(normalizedSnippet(loader, file)).digest('hex');
+  const importerHash = createHash('sha256').update(normalizedSnippet(file, file)).digest('hex');
+  const targetHash = createHash('sha256')
+    .update(normalizedSnippet(targetFile, targetFile))
+    .digest('hex');
+  return (
+    importerHash === certificate.importerHash &&
+    loaderHash === certificate.loaderHash &&
+    targetHash === certificate.targetHash
+  );
+}
+
 function hasProjectLocalCommonJsLoad(filesByPath) {
   let found = false;
   for (const [importerPath, file] of filesByPath) {
@@ -1528,6 +1589,12 @@ function hasProjectLocalCommonJsLoad(filesByPath) {
           (isRequireCall || isImportEquals) &&
           projectModulePathCandidates(importerPath, node.text).some((path) => filesByPath.has(path))
         ) {
+          if (
+            isRequireCall &&
+            isCertifiedErrorDiagnosticCommonJsLoad(filesByPath, importerPath, file, node)
+          ) {
+            return;
+          }
           found = true;
         }
       }
@@ -13854,7 +13921,7 @@ function foregroundBootLifecycleDelegationNodes({
  * as unresolved for review.
  */
 function errorReportLifecycleDelegationNodes({ root, edges }) {
-  const appStateOwner = 'ConnectedAppLayout.<callback:2f0bceb3e7>.<callback:cff4117220>';
+  const appStateOwner = 'ConnectedAppLayout.<callback:3e37ca06e7>.<callback:da2b6409fb>';
   const appStateTarget = 'src/services/errors/index.ts#flushErrorReports';
   const appStateKey = `app/(app)/_layout.tsx|${appStateOwner}|${appStateTarget}`;
   const expectations = new Map([
