@@ -64,6 +64,24 @@ const RELEASE_NATIVE_TEMP_PARENT = '/private/tmp';
 const RELEASE_NATIVE_TEMP_PREFIX = 'gator-android-release';
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
+const ANDROID_NATIVE_PATH_INIT_SCRIPT = [
+  "def gatorNativePathMapFlags = System.getenv('GATOR_NATIVE_PATH_MAP_FLAGS')",
+  'if (gatorNativePathMapFlags == null || gatorNativePathMapFlags.trim().isEmpty()) {',
+  "    throw new GradleException('GATOR_NATIVE_PATH_MAP_FLAGS must be set')",
+  '}',
+  '',
+  'gradle.beforeProject { project ->',
+  "    ['com.android.application', 'com.android.library'].each { pluginId ->",
+  '        project.pluginManager.withPlugin(pluginId) {',
+  '            project.android.defaultConfig.externalNativeBuild.cmake {',
+  '                arguments "-DCMAKE_C_FLAGS=${gatorNativePathMapFlags}",',
+  '                    "-DCMAKE_CXX_FLAGS=${gatorNativePathMapFlags}"',
+  '            }',
+  '        }',
+  '    }',
+  '}',
+  '',
+].join('\n');
 export { isValidReleaseBuildReceipt, isValidReleaseNativePathProof };
 
 function nowIso() {
@@ -592,6 +610,8 @@ export function androidReleaseWorkspacePaths(
   const marker = resolve(container, '.owner.json');
   const work = resolve(container, 'work');
   const gradleHome = resolve(container, 'gradle-home');
+  const gradleInitDirectory = resolve(gradleHome, 'init.d');
+  const nativePathInitScript = resolve(gradleInitDirectory, 'gator-native-path-map.gradle');
   const source = resolve(work, 'build');
   assertDescendant(parent, root, 'Android release temporary root');
   assertDescendant(root, container, 'Android release temporary container');
@@ -599,11 +619,24 @@ export function androidReleaseWorkspacePaths(
     [marker, 'Android release ownership marker'],
     [work, 'Android release EAS work directory'],
     [gradleHome, 'Android release Gradle home'],
+    [gradleInitDirectory, 'Android release Gradle init directory'],
+    [nativePathInitScript, 'Android release native-path init script'],
     [source, 'Android release native source directory'],
   ]) {
     assertDescendant(container, path, label);
   }
-  return { ownerUid: uid, parent, root, container, marker, work, gradleHome, source };
+  return {
+    ownerUid: uid,
+    parent,
+    root,
+    container,
+    marker,
+    work,
+    gradleHome,
+    gradleInitDirectory,
+    nativePathInitScript,
+    source,
+  };
 }
 
 function assertTemporaryParent(path, { productionPath }) {
@@ -799,6 +832,14 @@ export function prepareManagedEasDirectory(state, workspaceOptions) {
     paths.ownerUid,
     paths.container,
   );
+  mkdirSync(paths.gradleInitDirectory, { mode: PRIVATE_DIRECTORY_MODE });
+  assertOwnedPrivateDirectory(
+    paths.gradleInitDirectory,
+    'Android release Gradle init directory',
+    paths.ownerUid,
+    paths.gradleHome,
+  );
+  writeImmutableFile(paths.nativePathInitScript, ANDROID_NATIVE_PATH_INIT_SCRIPT);
   return paths;
 }
 
@@ -812,6 +853,7 @@ export function createAndroidReleaseBuildEnvironment(baseEnvironment, workspace)
     GRADLE_USER_HOME: workspace.gradleHome,
     CFLAGS: flags,
     CXXFLAGS: flags,
+    GATOR_NATIVE_PATH_MAP_FLAGS: flags,
     // The pinned EAS local-build plugin otherwise removes `work/build` before this process can
     // inspect its compiler databases. The runner owns and removes this private workspace itself.
     EAS_LOCAL_BUILD_SKIP_CLEANUP: '1',

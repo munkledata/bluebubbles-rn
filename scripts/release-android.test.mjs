@@ -132,10 +132,26 @@ test('uses one deterministic private run path with separate EAS and Gradle direc
   );
   assert.equal(paths.work, join(paths.container, 'work'));
   assert.equal(paths.gradleHome, join(paths.container, 'gradle-home'));
+  assert.equal(paths.gradleInitDirectory, join(paths.gradleHome, 'init.d'));
+  assert.equal(
+    paths.nativePathInitScript,
+    join(paths.gradleInitDirectory, 'gator-native-path-map.gradle'),
+  );
   assert.equal(paths.source, join(paths.work, 'build'));
-  for (const directory of [paths.root, paths.container, paths.work, paths.gradleHome]) {
+  for (const directory of [
+    paths.root,
+    paths.container,
+    paths.work,
+    paths.gradleHome,
+    paths.gradleInitDirectory,
+  ]) {
     assert.equal(statSync(directory).mode & 0o777, 0o700);
   }
+  assert.equal(statSync(paths.nativePathInitScript).mode & 0o777, 0o600);
+  const nativePathInitScript = readFileSync(paths.nativePathInitScript, 'utf8');
+  assert.match(nativePathInitScript, /GATOR_NATIVE_PATH_MAP_FLAGS must be set/);
+  assert.match(nativePathInitScript, /-DCMAKE_C_FLAGS=\$\{gatorNativePathMapFlags\}/);
+  assert.match(nativePathInitScript, /-DCMAKE_CXX_FLAGS=\$\{gatorNativePathMapFlags\}/);
   assert.equal(statSync(paths.marker).mode & 0o777, 0o600);
   assert.deepEqual(JSON.parse(readFileSync(paths.marker, 'utf8')), {
     schemaVersion: 2,
@@ -165,6 +181,7 @@ test('uses one deterministic private run path with separate EAS and Gradle direc
   assert.equal(environment.GRADLE_USER_HOME, paths.gradleHome);
   assert.equal(environment.CFLAGS, expectedFlags);
   assert.equal(environment.CXXFLAGS, expectedFlags);
+  assert.equal(environment.GATOR_NATIVE_PATH_MAP_FLAGS, expectedFlags);
   assert.equal(environment.EAS_LOCAL_BUILD_SKIP_CLEANUP, '1');
   assert.equal(environment.EAS_LOCAL_BUILD_SKIP_NATIVE_BUILD, '0');
 
