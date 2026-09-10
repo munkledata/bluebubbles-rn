@@ -15,6 +15,12 @@ describe('sanitizeServerAddress', () => {
     expect(sanitizeServerAddress('http://192.168.1.10:1234')).toBe('http://192.168.1.10:1234');
   });
 
+  it('preserves a host and numeric port when the user omits the scheme', () => {
+    expect(sanitizeServerAddress('localhost:1234')).toBe('https://localhost:1234');
+    expect(sanitizeServerAddress('192.168.1.10:1234')).toBe('https://192.168.1.10:1234');
+    expect(sanitizeServerAddress('[2001:db8::1]:8443')).toBe('https://[2001:db8::1]:8443');
+  });
+
   it('strips paths, queries and trailing slashes down to the origin', () => {
     expect(sanitizeServerAddress('https://x.com/api/v1/?guid=abc')).toBe('https://x.com');
     expect(sanitizeServerAddress('https://x.com///')).toBe('https://x.com');
@@ -24,6 +30,33 @@ describe('sanitizeServerAddress', () => {
     expect(sanitizeServerAddress('')).toBeNull();
     expect(sanitizeServerAddress(null)).toBeNull();
     expect(sanitizeServerAddress('   ')).toBeNull();
+  });
+
+  it.each([
+    'ftp://example.com',
+    'ftp:/example.com',
+    'file:///tmp/example',
+    'ws://example.com',
+    'https:/example.com',
+    'https:///example.com',
+    'https://',
+    'http://',
+    '/example.com',
+    '//example.com',
+    '/ftp://example.com',
+    '?example.com',
+    '#example.com',
+    'mailto:test@example.com',
+    'https://user:secret@example.com',
+    'https://example.com\\@different.example',
+    'https://example.com\n.different.example',
+  ])('rejects an unsupported or ambiguous setup address %p', (input) => {
+    expect(sanitizeServerAddress(input)).toBeNull();
+  });
+
+  it('rejects oversized setup input before URL parsing', () => {
+    const input = `https://${'a'.repeat(MAX_SERVER_ORIGIN_INPUT_LENGTH)}.example`;
+    expect(sanitizeServerAddress(input)).toBeNull();
   });
 
   it('flags cleartext origins', () => {

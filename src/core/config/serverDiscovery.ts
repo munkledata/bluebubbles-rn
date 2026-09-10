@@ -19,12 +19,36 @@ export function sanitizeServerAddress(input: string | null | undefined): string 
   if (!input) return null;
   let addr = input.trim();
   if (addr.length === 0) return null;
-  addr = addr.replace(/\/+$/, '');
-  if (!/^https?:\/\//i.test(addr)) {
+  if (
+    addr.length > MAX_SERVER_ORIGIN_INPUT_LENGTH ||
+    /[\\\s\u0000-\u001f\u007f]/.test(addr) ||
+    addr.includes('@')
+  ) {
+    return null;
+  }
+  const hasHttpScheme = /^https?:\/\//i.test(addr);
+  if (hasHttpScheme) {
+    // Require a raw authority so WHATWG URL repair cannot turn `https:///host` into another URL.
+    if (!/^https?:\/\/[^/?#]+/i.test(addr)) return null;
+  } else {
+    const delimiterIndex = addr.search(/[/?#]/);
+    const authority = delimiterIndex === -1 ? addr : addr.slice(0, delimiterIndex);
+    const isBracketedIpv6 = /^\[[^\]]+\](?::\d+)?$/.test(authority);
+    const isHostWithOptionalPort = /^[^:]+(?::\d+)?$/.test(authority);
+    // Positive schemeless grammar prevents URL repair from turning `/scheme:/host` into a new host.
+    if (!authority || (!isBracketedIpv6 && !isHostWithOptionalPort)) return null;
     addr = `https://${addr}`;
   }
   try {
     const url = new URL(addr);
+    if (
+      (url.protocol !== 'https:' && url.protocol !== 'http:') ||
+      url.username ||
+      url.password ||
+      !url.hostname
+    ) {
+      return null;
+    }
     // Drop any path/query/hash — we only want the origin.
     return `${url.protocol}//${url.host}`;
   } catch {
