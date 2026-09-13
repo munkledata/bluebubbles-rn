@@ -30,6 +30,12 @@ jest.mock('@ui/attachments', () => {
   };
 });
 
+// Keep the unrelated URL-preview service graph (and its ESM-only `ky` dependency) out of this
+// sticker-wiring suite, matching the direct MessageBubble component tests.
+jest.mock('@features/conversations/useUrlPreview', () => ({
+  useUrlPreview: jest.fn(() => null),
+}));
+
 // eslint-disable-next-line import/first
 import { MessageBubble } from '@ui/conversations/MessageBubble';
 

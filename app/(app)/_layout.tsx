@@ -162,7 +162,7 @@ function ConnectedAppLayout(): React.JSX.Element {
       }
     });
     return () => sub.remove();
-  }, [AppState, leaseLogger]);
+  }, [AppState, accountLease, leaseLogger]);
 
   // Cold foreground mount and post-unlock remount do not necessarily emit a new AppState event.
   useEffect(() => {

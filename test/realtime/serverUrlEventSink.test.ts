@@ -6,6 +6,7 @@ jest.mock('@core/secure', () => ({
   ACCOUNT_REVOCATION_CLEAR_FAILURE_MESSAGE: 'Could not activate the saved server session.',
   SERVER_SESSION_STATE: { writing: 'writing', active: 'active', forgotten: 'forgotten' },
   inspectCredentialUpgradeJournal: jest.fn(() => ({ kind: 'absent' })),
+  isScopedDeviceCredential: jest.fn(() => false),
   logger: {
     debug: jest.fn(),
     info: jest.fn(),
