@@ -11,6 +11,7 @@
   "supports_rcs_send_attempt_ownership": true,
   "supports_rcs_text_with_attachment": true,
   "supports_imessage_text_with_attachment": false,
+  "supports_url_preview_proxy": true,
   "supports_message_part_topology": true,
   "supports_message_deleted": true,
   "supports_message_search": true

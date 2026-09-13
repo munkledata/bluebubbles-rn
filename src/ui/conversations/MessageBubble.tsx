@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useRef } from 'react';
 import { Pressable, StyleSheet, Text, View, type AccessibilityActionEvent } from 'react-native';
+import { isUrlPreviewRequestUrl } from '@core/api/endpoints/urlPreviews';
 import { bubbleEffectOf } from '@core/effects';
 import { isAggregateRetractionTombstone } from '@core/messages/retraction';
 import { parsePayloadData } from '@core/models';
@@ -18,7 +19,6 @@ import type {
   StickerRow,
   UrlPreviewRow,
 } from '@db/repositories';
-import { isSafePreviewUrl } from '@/services/urlPreview';
 import {
   performMessageEntityAction,
   type MessageEntityActionRequest,
@@ -182,28 +182,33 @@ export const MessageBubble = React.memo(function MessageBubble({
     () => (hasText && !isRetracted ? firstUrl(bodyText) : null),
     [hasText, isRetracted, bodyText],
   );
-  // Apple's rich-link metadata (server-decoded payload_data): the title/summary/image the
-  // SENDER's device already fetched. When it carries something renderable, synthesize the card
-  // row directly — no network fetch, no url_previews cache — which is what makes bot-hostile
-  // sites (X, Instagram, …) preview reliably. Image/icon URLs receive only a literal-host screen
-  // for inert metadata; that does not authorize a request, and NET-00 deliberately never mounts
-  // remote preview artwork.
+  // Apple's rich-link metadata (server-decoded payload_data): the title/summary the sender's
+  // device already fetched. Remote image/icon URLs are deliberately discarded; automatic artwork
+  // comes back only as server-proxied image bytes through useUrlPreview.
   const payloadPreview = useMemo<UrlPreviewRow | null>(() => {
     if (isRetracted || !msg.payloadData) return null;
     const item = parsePayloadData(msg.payloadData)?.urlData?.[0];
     if (!item) return null;
-    const img =
-      item.imageUrl && isSafePreviewUrl(item.imageUrl)
-        ? item.imageUrl
-        : item.iconUrl && isSafePreviewUrl(item.iconUrl)
-          ? item.iconUrl
+    if (!item.title && !item.summary && !item.siteName && !item.imageUrl && !item.iconUrl) {
+      return null;
+    }
+    // LPLinkMetadata can carry both the sender-authored original URL and a resolved URL. The card
+    // must preserve the original destination; use the resolved field only when no valid original
+    // HTTP(S) URL survived decoding.
+    const targetUrl =
+      item.originalUrl != null
+        ? isUrlPreviewRequestUrl(item.originalUrl)
+          ? item.originalUrl
+          : null
+        : isUrlPreviewRequestUrl(item.url)
+          ? item.url
           : null;
-    if (!item.title && !img) return null; // fall back to the local cache lookup / raw link
+    if (!targetUrl) return null;
     return {
-      url: item.url ?? item.originalUrl ?? '',
+      url: targetUrl,
       title: item.title ?? null,
       description: item.summary ?? null,
-      imageUrl: img,
+      imageUrl: null,
       siteName: item.siteName ?? null,
       fetchedAt: null,
       error: 0,
@@ -213,18 +218,40 @@ export const MessageBubble = React.memo(function MessageBubble({
   // raw link text. When the WHOLE message is just a URL and its card loaded, hide the text so we
   // don't show a blue link AND a card (matching iMessage). If the preview failed, keep the link
   // so it's still tappable. Hook is called unconditionally (null url → null) to keep hook order —
-  // and a renderable payload-backed message passes null so it never touches the cache table. On
-  // other messages the hook is cache-read-only: a miss cannot start HTML or image traffic.
-  const fetched = useUrlPreview(payloadPreview ? null : previewUrl);
+  // Payload-backed messages also use their canonical payload URL so sender metadata can be safely
+  // enriched with bounded text/image bytes. The hook asks only the configured Gator server; the
+  // phone never contacts the link or image host directly.
+  const previewLookupUrl = previewUrl
+    ? isUrlPreviewRequestUrl(previewUrl)
+      ? previewUrl
+      : null
+    : (payloadPreview?.url ?? null);
+  const fetched = useUrlPreview(previewLookupUrl);
   // useReactiveQuery deliberately keeps the previous dependency's data until the next read
   // resolves. A recycled FlashList row may therefore briefly carry URL A's cached preview while
   // rendering URL B. Adopt cache data only when its exact key matches the current message URL.
-  const fetchedForCurrentUrl = fetched?.url === previewUrl ? fetched : null;
-  const preview = payloadPreview ?? fetchedForCurrentUrl;
+  const fetchedForCurrentUrl = fetched?.url === previewLookupUrl ? fetched : null;
+  const preview = useMemo<UrlPreviewRow | null>(() => {
+    if (!payloadPreview) return fetchedForCurrentUrl;
+    if (!fetchedForCurrentUrl || fetchedForCurrentUrl.error === 1) return payloadPreview;
+    return {
+      url: previewLookupUrl ?? payloadPreview.url,
+      title: fetchedForCurrentUrl.title ?? payloadPreview.title,
+      description: fetchedForCurrentUrl.description ?? payloadPreview.description,
+      imageUrl: fetchedForCurrentUrl.imageUrl,
+      siteName: fetchedForCurrentUrl.siteName ?? payloadPreview.siteName,
+      fetchedAt: fetchedForCurrentUrl.fetchedAt,
+      error: 0,
+    };
+  }, [fetchedForCurrentUrl, payloadPreview, previewLookupUrl]);
   // The card's tap target/domain line. Prefer the text URL; a URL balloon whose text somehow
   // lacks a regex-matchable URL (bare-domain text) still gets its card via the payload URL.
-  const cardUrl = previewUrl ?? (payloadPreview?.url ? payloadPreview.url : null);
-  const previewLoaded = !!preview && preview.error !== 1 && (!!preview.title || !!preview.imageUrl);
+  const cardUrl = previewLookupUrl;
+  const previewLoaded =
+    !!preview &&
+    preview.error !== 1 &&
+    (!!preview.title || !!preview.description || !!preview.siteName || !!preview.imageUrl);
+  const hasIndependentAction = hasActionableEntities || (!!cardUrl && previewLoaded);
   const urlOnly = useMemo(
     () =>
       previewUrl != null &&
@@ -235,7 +262,8 @@ export const MessageBubble = React.memo(function MessageBubble({
     [previewUrl, bodyText],
   );
   // Keep the text bubble if it carries a reaction — the reaction cluster anchors to it.
-  const showText = hasText && !(urlOnly && previewLoaded && (msg.reactions?.length ?? 0) === 0);
+  const showText =
+    hasText && !(urlOnly && cardUrl && previewLoaded && (msg.reactions?.length ?? 0) === 0);
   // Subject line (Private API): a bold line above the body.
   const subjectText = msg.subject?.trim() ?? '';
   const hasSubject = subjectText.length > 0;
@@ -338,20 +366,18 @@ export const MessageBubble = React.memo(function MessageBubble({
       onLongPress={onLongPress ? handleLongPress : undefined}
       delayLongPress={onLongPress ? 350 : undefined}
       // An accessible Pressable groups all descendants on Android. Keep the existing grouping for
-      // ordinary bubbles, but let TalkBack focus actionable inline entities independently.
-      accessible={hasActionableEntities ? false : undefined}
-      accessibilityActions={onLongPress && !hasActionableEntities ? MESSAGE_ACTIONS : undefined}
+      // ordinary bubbles, but let TalkBack focus inline entities and preview cards independently.
+      accessible={hasIndependentAction ? false : undefined}
+      accessibilityActions={onLongPress && !hasIndependentAction ? MESSAGE_ACTIONS : undefined}
       accessibilityHint={
-        onLongPress && !hasActionableEntities
-          ? 'Double tap and hold for message actions'
-          : undefined
+        onLongPress && !hasIndependentAction ? 'Double tap and hold for message actions' : undefined
       }
       onAccessibilityAction={
-        onLongPress && !hasActionableEntities ? handleAccessibilityAction : undefined
+        onLongPress && !hasIndependentAction ? handleAccessibilityAction : undefined
       }
       style={{ opacity: isSending ? 0.6 : 1 }}
     >
-      {onLongPress && hasActionableEntities ? (
+      {onLongPress && hasIndependentAction ? (
         <View
           pointerEvents="none"
           collapsable={false}

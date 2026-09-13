@@ -68,8 +68,12 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
 
         <SettingsSection label="LINKS, MAPS & CALLS" style={styles.gap}>
           <Text style={textStyle}>
-            Merely viewing a message or Find My screen does not download third-party link previews
-            or map tiles. Embedded map and FaceTime WebViews are disabled. When you explicitly open
+            When your server supports it, viewing a message with a web link automatically asks your
+            connected Gator server for bounded preview text and an optional image. This phone does
+            not contact the page or image host directly, but your server does; those hosts can learn
+            the requested URL and your server&apos;s IP address. Preview data is kept in
+            Gator&apos;s bounded, encrypted database cache. Merely viewing Find My does not download
+            map tiles, and embedded map and FaceTime WebViews are disabled. When you explicitly open
             a web link, location, or validated FaceTime link, Android hands it to an external
             browser or maps app. That external provider may receive the URL or precise coordinates
             and, for a Find My location, its displayed label.

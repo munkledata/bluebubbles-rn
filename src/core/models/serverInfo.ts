@@ -85,6 +85,8 @@ export const ServerInfo = z
      * that would just drop them.
      */
     supports_error_log_upload: z.boolean().nullish(),
+    /** Whether the server can retrieve bounded link text/images through its SSRF-safe proxy. */
+    supports_url_preview_proxy: z.boolean().nullish(),
   })
   .transform((s) => ({ ...s, server_version: s.server_version ?? s.version ?? undefined }));
 export type ServerInfo = z.infer<typeof ServerInfo>;

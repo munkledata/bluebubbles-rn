@@ -1,3 +1,8 @@
+import {
+  isUrlPreviewImageDataUrl,
+  MAX_URL_PREVIEW_IMAGE_DATA_URL_CHARS,
+} from '@core/api/endpoints/urlPreviews';
+
 /**
  * Literal URL classification retained for inert, server-supplied preview metadata. This module
  * deliberately performs no network request. A future preview transport must independently resolve
@@ -68,4 +73,15 @@ export function isSafePreviewUrl(raw: string): boolean {
   if (u.protocol !== 'http:' && u.protocol !== 'https:') return false; // only http(s)
   if (u.port && u.port !== '80' && u.port !== '443') return false; // standard web ports only
   return !isPrivateHost(u.hostname);
+}
+
+/**
+ * Only server-fetched image bytes may cross the preview rendering boundary. Legacy cache rows and
+ * Apple payload metadata can contain remote URLs; accepting either here would make mounting an
+ * image trigger a direct third-party request from the phone.
+ */
+export function isProxiedPreviewImageDataUrl(raw: string | null | undefined): raw is string {
+  return (
+    !!raw && raw.length <= MAX_URL_PREVIEW_IMAGE_DATA_URL_CHARS && isUrlPreviewImageDataUrl(raw)
+  );
 }

@@ -33,9 +33,12 @@ describe('StoragePrivacyScreen', () => {
     expect(screen.getByText(/push-payload encryption.*not always enabled/)).toBeTruthy();
     expect(screen.getByText(/new or unset installation.*starts off/)).toBeTruthy();
     expect(screen.getByText(/not the original error message or stack trace/)).toBeTruthy();
+    expect(screen.getByText(/automatically asks your connected Gator server/)).toBeTruthy();
+    expect(screen.getByText(/phone does not contact the page or image host directly/)).toBeTruthy();
     expect(
-      screen.getByText(/does not download third-party link previews or map tiles/),
+      screen.getByText(/hosts can learn the requested URL and your server's IP address/),
     ).toBeTruthy();
+    expect(screen.getByText(/Merely viewing Find My does not download map tiles/)).toBeTruthy();
     expect(
       screen.getByText(/external provider may receive the URL or precise coordinates/),
     ).toBeTruthy();
@@ -60,15 +63,20 @@ describe('StoragePrivacyScreen', () => {
     expect(screen.getByText(/automatically exported to Photos or the Gator album/)).toBeTruthy();
     expect(screen.getByText(/shared media storage/)).toBeTruthy();
     expect(
-      screen.getByText(/closed or in the background.*downloaded only to Gator’s private cache/),
+      screen.getByText(
+        /closed or in the background finishes downloading.*only in Gator’s private cache/,
+      ),
     ).toBeTruthy();
-    expect(screen.getByText(/does not create or later retry.*Photos or Gator album/)).toBeTruthy();
+    expect(
+      screen.getByText(/keeps a bounded encrypted record.*retries it on a later foreground/),
+    ).toBeTruthy();
+    expect(screen.getByText(/Turning off auto-download.*cancels queued copies/)).toBeTruthy();
     expect(screen.getByText(/app logs before another account can connect/)).toBeTruthy();
     expect(
       screen.getByText(/limits its ordinary downloaded-attachment cache to 2 GiB/),
     ).toBeTruthy();
     expect(screen.getByText(/preserving at least 512 MiB/)).toBeTruthy();
-    expect(screen.getByText(/needed for an outgoing send are protected/)).toBeTruthy();
+    expect(screen.getByText(/needed for an outgoing send.*are protected/)).toBeTruthy();
     expect(
       screen.getByText(/Android 7 devices keep persistent attachment downloads disabled/),
     ).toBeTruthy();

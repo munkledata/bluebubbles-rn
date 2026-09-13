@@ -1,6 +1,9 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
+import { Image } from 'expo-image';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { isUrlPreviewRequestUrl } from '@core/api/endpoints/urlPreviews';
 import type { UrlPreviewRow } from '@db/repositories';
+import { isProxiedPreviewImageDataUrl } from '@/services/urlPreview';
 import { safeOpenUrl } from '@utils';
 import { useTheme } from '../theme';
 import { showExternalOpenFailure } from '../toast/external-open-feedback';
@@ -82,23 +85,34 @@ export function UrlPreviewCard({
       }
     })();
   };
-  // NET-00: mounting a remote <Image> is itself an automatic in-app network request. Preserve
-  // cached/server-supplied metadata, but never render preview artwork until NET-01 provides a
-  // bounded fetch pipeline. An image-only server payload degrades to the external link's domain.
-  if (!preview || preview.error === 1 || (!preview.title && !preview.imageUrl)) return null;
+  const imageUri = isProxiedPreviewImageDataUrl(preview?.imageUrl) ? preview.imageUrl : null;
+  // A preview card represents an automatically retrievable web page. Opaque schemes such as
+  // mailto:/tel: have no truthful hostname and remain ordinary inline actions instead.
+  const destination = isUrlPreviewRequestUrl(url) ? new URL(url) : null;
+  if (
+    !destination ||
+    !preview ||
+    preview.error === 1 ||
+    (!preview.title && !preview.description && !preview.siteName && !preview.imageUrl)
+  )
+    return null;
 
-  let domain = url;
-  try {
-    domain = new URL(url).hostname.replace(/^www\./, '');
-  } catch {
-    /* keep raw */
-  }
+  const domain = destination.hostname.replace(/^www\./, '');
+  const descriptiveLabel = preview.title ?? preview.siteName;
 
   const card = (
     <Pressable
       testID="url-preview-card"
       onPress={sourceTransitionPending ? undefined : openUrl}
       disabled={sourceTransitionPending}
+      accessible
+      accessibilityRole="link"
+      accessibilityLabel={
+        descriptiveLabel
+          ? `Link preview: ${descriptiveLabel}. Destination: ${domain}`
+          : `Link preview to ${domain}`
+      }
+      accessibilityHint="Opens in your browser"
       style={[
         styles.card,
         overlay ? styles.anchoredCard : null,
@@ -109,6 +123,19 @@ export function UrlPreviewCard({
         },
       ]}
     >
+      {imageUri ? (
+        <Image
+          testID="url-preview-image"
+          source={imageUri}
+          recyclingKey={url}
+          contentFit="cover"
+          cachePolicy="memory"
+          accessible
+          accessibilityRole="image"
+          accessibilityLabel={`${preview.title ?? domain} preview image`}
+          style={styles.image}
+        />
+      ) : null}
       <View style={styles.body}>
         <Text numberOfLines={2} style={[styles.title, { color: theme.color.label }]}>
           {preview.title ?? domain}
@@ -118,8 +145,16 @@ export function UrlPreviewCard({
             {preview.description}
           </Text>
         ) : null}
-        <Text style={[styles.domain, { color: theme.color.tertiaryLabel }]}>
-          {preview.siteName ?? domain}
+        {preview.siteName ? (
+          <Text numberOfLines={1} style={[styles.siteName, { color: theme.color.tertiaryLabel }]}>
+            {preview.siteName}
+          </Text>
+        ) : null}
+        <Text
+          testID="url-preview-destination"
+          style={[styles.domain, { color: theme.color.tertiaryLabel }]}
+        >
+          {domain}
         </Text>
       </View>
     </Pressable>
@@ -145,7 +180,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   card: {
-    // Keep the existing iMessage-like constant card width while preview artwork is contained.
+    // Keep the existing iMessage-like constant card width while artwork loads from bounded bytes.
     width: '78%',
     borderRadius: 14,
     overflow: 'hidden',
@@ -154,8 +189,10 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   anchoredCard: { width: '100%', marginHorizontal: 0, marginTop: 0 },
+  image: { width: '100%', height: 150 },
   body: { padding: 10, gap: 2 },
   title: { fontSize: 14, fontWeight: '600' },
   desc: { fontSize: 13, lineHeight: 17 },
-  domain: { fontSize: 11, marginTop: 2 },
+  siteName: { fontSize: 11, marginTop: 2 },
+  domain: { fontSize: 11 },
 });

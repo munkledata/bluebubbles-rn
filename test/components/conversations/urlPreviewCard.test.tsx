@@ -18,6 +18,13 @@ import { act, fireEvent, renderWithTheme, screen, waitFor } from '../support/ren
 import type { UrlPreviewRow } from '@db/repositories';
 
 jest.mock('@utils', () => ({ ...jest.requireActual('@utils'), safeOpenUrl: jest.fn() }));
+jest.mock('expo-image', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const React = require('react');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { View } = require('react-native');
+  return { Image: (props: object) => React.createElement(View, props) };
+});
 
 // eslint-disable-next-line import/first
 import { UrlPreviewCard } from '@ui/conversations/UrlPreviewCard';
@@ -66,6 +73,12 @@ describe('UrlPreviewCard', () => {
 
     expect(screen.getByText('A Title')).toBeTruthy();
     expect(screen.getByText('Example Site')).toBeTruthy();
+    expect(screen.getByText('example.com')).toBeTruthy();
+    const link = screen.getByRole('link', {
+      name: 'Link preview: A Title. Destination: example.com',
+    });
+    expect(link.props.accessible).toBe(true);
+    expect(link.props.accessibilityHint).toBe('Opens in your browser');
   });
 
   it('renders the description when present', async () => {
@@ -118,6 +131,52 @@ describe('UrlPreviewCard', () => {
     expect(screen.getByText('<i>evil.com</i>')).toBeTruthy();
   });
 
+  it('always exposes the real destination when page metadata impersonates another site', async () => {
+    await renderWithTheme(
+      <UrlPreviewCard
+        url="https://attacker.example/login"
+        preview={row({ title: 'Trusted Bank', siteName: 'bank.example' })}
+        isFromMe={false}
+      />,
+    );
+
+    expect(screen.getByText('bank.example')).toBeTruthy();
+    expect(screen.getByText('attacker.example')).toBeTruthy();
+    expect(
+      screen.getByRole('link', {
+        name: 'Link preview: Trusted Bank. Destination: attacker.example',
+      }),
+    ).toBeTruthy();
+  });
+
+  it('shows the complete right-hand suffix of a maximum-length deceptive hostname', async () => {
+    const deceptiveHost = `bank.example.${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.${'d'.repeat(35)}.evil.example`;
+    expect(deceptiveHost).toHaveLength(253);
+    await renderWithTheme(
+      <UrlPreviewCard
+        url={`https://${deceptiveHost}/login`}
+        preview={row({ title: 'Trusted Bank' })}
+        isFromMe={false}
+      />,
+    );
+
+    const destination = screen.getByTestId('url-preview-destination');
+    expect(destination.props.children).toBe(deceptiveHost);
+    expect(destination.props.numberOfLines).toBeUndefined();
+  });
+
+  it.each(['mailto:person@example.com', 'tel:+15555550100', 'javascript:alert(1)'])(
+    'renders no preview card for hostname-less or non-web destination %s',
+    async (url) => {
+      const { toJSON } = await renderWithTheme(
+        <UrlPreviewCard url={url} preview={row()} isFromMe={false} />,
+      );
+
+      expect(toJSON()).toBeNull();
+      expect(safeOpenUrl).not.toHaveBeenCalled();
+    },
+  );
+
   it('falls back to the bare hostname (www-stripped) when title is absent', async () => {
     // No title, but imageUrl present so the card still renders.
     await renderWithTheme(
@@ -156,7 +215,12 @@ describe('UrlPreviewCard', () => {
     const { toJSON } = await renderWithTheme(
       <UrlPreviewCard
         url="https://www.example.com/article"
-        preview={row({ title: null, imageUrl: null })}
+        preview={row({
+          title: null,
+          description: null,
+          siteName: null,
+          imageUrl: null,
+        })}
         isFromMe={false}
       />,
     );
@@ -174,6 +238,23 @@ describe('UrlPreviewCard', () => {
     );
     expect(screen.queryByTestId('url-preview-image')).toBeNull();
     expect(screen.getByText('A Title')).toBeTruthy();
+  });
+
+  it('renders only server-proxied image bytes with an accessible label', async () => {
+    const imageDataUrl = 'data:image/png;base64,iVBORw0KGgo=';
+    await renderWithTheme(
+      <UrlPreviewCard
+        url="https://www.example.com/article"
+        preview={row({ imageUrl: imageDataUrl })}
+        isFromMe={false}
+      />,
+    );
+
+    const image = screen.getByTestId('url-preview-image');
+    expect(image.props.source).toBe(imageDataUrl);
+    expect(image.props.recyclingKey).toBe('https://www.example.com/article');
+    expect(image.props.accessible).toBe(true);
+    expect(image.props.accessibilityLabel).toBe('A Title preview image');
   });
 
   it('does not expose an image loading/error path for remote artwork', async () => {

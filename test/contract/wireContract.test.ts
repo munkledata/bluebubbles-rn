@@ -41,6 +41,7 @@ describe('wire contract: app zod models accept the Gator server shapes', () => {
       expect(res.data.supports_rcs_send_attempt_ownership).toBe(true);
       expect(res.data.supports_rcs_text_with_attachment).toBe(true);
       expect(res.data.supports_imessage_text_with_attachment).toBe(false);
+      expect(res.data.supports_url_preview_proxy).toBe(true);
       // Schema gap 6: the deletion-detection capability is additive and parsed as a plain boolean.
       expect(res.data.supports_message_deleted).toBe(true);
       expect(res.data.supports_message_search).toBe(true);

@@ -1,10 +1,10 @@
 /**
- * MessageBubble × NET-00 URL-preview containment:
- *   - a message whose row carries server-decoded payloadData renders the link card DIRECTLY
- *     from text metadata, but never mounts its remote image;
- *   - a message without payloadData reads the local url_previews cache only;
- *   - opening a raw link or cached card uses the external URL opener and never invokes the old
- *     in-app HTML/image fetch pipeline.
+ * MessageBubble × NET-01 URL-preview presentation boundary:
+ *   - a message whose row carries server-decoded payloadData renders its text immediately while
+ *     the preview hook may augment it from the local/server-proxy cache path;
+ *   - legacy remote image URLs never mount, while opening a raw link/card stays user-initiated;
+ *   - this isolated presentation suite cannot invoke the authenticated loader or old direct fetch;
+ *     the automatic capable-server path is covered by the hook/loader suites.
  */
 import React from 'react';
 import { act, fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
@@ -73,6 +73,9 @@ jest.mock('@db/useReactiveQuery', () => {
 });
 
 jest.mock('@db/repositories', () => ({ getUrlPreview: jest.fn() }));
+jest.mock('@/services/urlPreviewLoader', () => ({
+  readUrlPreviewAndLoad: jest.fn(async () => null),
+}));
 
 jest.mock('@utils', () => ({
   ...jest.requireActual('@utils'),
@@ -192,7 +195,7 @@ function cachedPreview(
     description,
     imageUrl: null,
     siteName,
-    fetchedAt: 123,
+    fetchedAt: Date.now(),
     error: 0,
   };
 }
@@ -299,17 +302,110 @@ describe('MessageBubble payloadData preview', () => {
     },
   );
 
-  it('renders server text metadata without a cache lookup or remote image request', async () => {
+  it('renders sender metadata without directly fetching a third-party host', async () => {
     await renderWithTheme(<MessageBubble msg={makeMsg({ payloadData: PAYLOAD })} showTail />);
     expect(await screen.findByText('Server Title')).toBeTruthy();
     expect(screen.getByText('Server summary.')).toBeTruthy();
     expect(screen.getByText('Example News')).toBeTruthy();
     expect(screen.queryByTestId('url-preview-image')).toBeNull();
-    expect(mockGetUrlPreview).not.toHaveBeenCalled();
+    expect(mockGetUrlPreview).toHaveBeenCalledWith(undefined, 'https://example.com/article');
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('a cache miss renders the raw link without starting the in-app fetch pipeline', async () => {
+  it('keeps a payload-only preview independently discoverable and actionable as a link', async () => {
+    await renderWithTheme(
+      <MessageBubble msg={makeMsg({ text: null, payloadData: PAYLOAD })} showTail />,
+    );
+
+    const previewLink = await screen.findByRole('link', {
+      name: 'Link preview: Server Title. Destination: example.com',
+    });
+    fireEvent.press(previewLink);
+
+    await waitFor(() =>
+      expect(mockSafeOpenUrl).toHaveBeenCalledWith('https://example.com/article'),
+    );
+  });
+
+  it('keeps the original payload URL as the immutable card destination after a redirect', async () => {
+    const payload = JSON.stringify({
+      urlData: [
+        {
+          originalUrl: 'https://sender.example/article',
+          url: 'https://resolved-attacker.example/login',
+          title: 'Redirected page title',
+        },
+      ],
+    });
+    await renderWithTheme(
+      <MessageBubble msg={makeMsg({ text: null, payloadData: payload })} showTail />,
+    );
+
+    const previewLink = await screen.findByRole('link', {
+      name: 'Link preview: Redirected page title. Destination: sender.example',
+    });
+    fireEvent.press(previewLink);
+
+    await waitFor(() =>
+      expect(mockSafeOpenUrl).toHaveBeenCalledWith('https://sender.example/article'),
+    );
+    expect(mockGetUrlPreview).toHaveBeenCalledWith(undefined, 'https://sender.example/article');
+    expect(mockSafeOpenUrl).not.toHaveBeenCalledWith('https://resolved-attacker.example/login');
+  });
+
+  it.each(['mailto:person@example.com', 'tel:+15555550100'])(
+    'does not create a hostname-less preview card for %s payload metadata',
+    async (url) => {
+      const payload = JSON.stringify({ urlData: [{ originalUrl: url, title: 'Opaque target' }] });
+      await renderWithTheme(
+        <MessageBubble msg={makeMsg({ text: null, payloadData: payload })} showTail />,
+      );
+
+      expect(screen.queryByRole('link')).toBeNull();
+      expect(mockGetUrlPreview).not.toHaveBeenCalled();
+      expect(mockSafeOpenUrl).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps an ineligible text URL visible instead of replacing it with payload metadata', async () => {
+    const textUrl = 'https://example.com:8443/private';
+    const payload = JSON.stringify({
+      urlData: [
+        {
+          originalUrl: 'https://different.example/article',
+          title: 'Different payload destination',
+        },
+      ],
+    });
+    await renderWithTheme(
+      <MessageBubble msg={makeMsg({ text: textUrl, payloadData: payload })} showTail />,
+    );
+
+    expect(await screen.findByText(textUrl)).toBeTruthy();
+    expect(screen.queryByTestId('url-preview-card')).toBeNull();
+    expect(mockGetUrlPreview).not.toHaveBeenCalled();
+  });
+
+  it('never replaces a present-but-ineligible original payload URL with its resolved URL', async () => {
+    const payload = JSON.stringify({
+      urlData: [
+        {
+          originalUrl: 'https://sender.example:8443/article',
+          url: 'https://resolved-attacker.example/login',
+          title: 'Redirected page title',
+        },
+      ],
+    });
+    await renderWithTheme(
+      <MessageBubble msg={makeMsg({ text: null, payloadData: payload })} showTail />,
+    );
+
+    expect(screen.queryByTestId('url-preview-card')).toBeNull();
+    expect(mockGetUrlPreview).not.toHaveBeenCalled();
+    expect(mockSafeOpenUrl).not.toHaveBeenCalled();
+  });
+
+  it('a cache miss on the isolated legacy-server path keeps the raw link actionable', async () => {
     await renderWithTheme(<MessageBubble msg={makeMsg()} showTail />);
     await waitFor(() => expect(mockGetUrlPreview).toHaveBeenCalledTimes(1));
     expect(mockGetUrlPreview).toHaveBeenCalledWith(undefined, 'https://example.com/article');
@@ -331,7 +427,7 @@ describe('MessageBubble payloadData preview', () => {
       description: 'Cached description.',
       imageUrl: 'https://cdn.example.com/cached.jpg',
       siteName: 'Cached Site',
-      fetchedAt: 123,
+      fetchedAt: Date.now(),
       error: 0,
     };
     mockGetUrlPreview.mockResolvedValue(cached);
@@ -349,20 +445,21 @@ describe('MessageBubble payloadData preview', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('degrades an image-only cached row to a text-only domain card', async () => {
+  it('rejects an image-only legacy row whose only artwork source is remote', async () => {
     mockGetUrlPreview.mockResolvedValue({
       url: 'https://example.com/article',
       title: null,
       description: null,
       imageUrl: 'https://cdn.example.com/cached.jpg',
       siteName: null,
-      fetchedAt: 123,
+      fetchedAt: Date.now(),
       error: 0,
     });
 
     await renderWithTheme(<MessageBubble msg={makeMsg()} showTail />);
 
-    expect(await screen.findAllByText('example.com')).toHaveLength(2);
+    expect(await screen.findByText('https://example.com/article')).toBeTruthy();
+    expect(screen.queryByTestId('url-preview-card')).toBeNull();
     expect(screen.queryByTestId('url-preview-image')).toBeNull();
     expect(mockFetch).not.toHaveBeenCalled();
   });
@@ -381,11 +478,11 @@ describe('MessageBubble payloadData preview', () => {
     await renderWithTheme(<MessageBubble msg={makeMsg({ payloadData: payload })} showTail />);
     expect(await screen.findByText('Server Title')).toBeTruthy();
     expect(screen.queryByTestId('url-preview-image')).toBeNull();
-    expect(mockGetUrlPreview).not.toHaveBeenCalled();
+    expect(mockGetUrlPreview).toHaveBeenCalledWith(undefined, 'https://example.com/article');
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('an image-only payload never mounts the remote image', async () => {
+  it('an image-only legacy payload falls back to its raw link without mounting the remote image', async () => {
     await renderWithTheme(
       <MessageBubble
         msg={makeMsg({
@@ -401,9 +498,9 @@ describe('MessageBubble payloadData preview', () => {
         showTail
       />,
     );
-    expect(await screen.findAllByText('example.com')).toHaveLength(2);
+    expect(await screen.findByText('https://example.com/article')).toBeTruthy();
     expect(screen.queryByTestId('url-preview-image')).toBeNull();
-    expect(mockGetUrlPreview).not.toHaveBeenCalled();
+    expect(mockGetUrlPreview).toHaveBeenCalledWith(undefined, 'https://example.com/article');
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
