@@ -730,8 +730,9 @@ or Do Not Disturb access prompt is an unexpected failure.
   (`LOCAL-DEV SUPPORTING ONLY`; no checkbox credit):** this run did not execute or relax the
   prepared matrix above. A nondebuggable locally assembled `0.1.42` / code-1 APK (SHA-256
   `08702f18c76cabd05b159d2b472c5068f26c908788e9122a522bf90542b36cc9`) on the API-36 Samsung used
-  USB reverse to a loopback server built from `76097f75`. Its embedded source map exactly matched
-  the five preview endpoint, loader, hook, bubble, and card files at app commit `4b89431`. Two
+  USB reverse to a loopback server built from `76097f75`. The source map generated alongside its
+  embedded JavaScript bundle exactly matched the five preview endpoint, loader, hook, bubble, and
+  card files at app commit `4b89431`. Two
   existing outbound messages containing public Apple URLs were opened; no message was sent or edited,
   and no message text was retained in proof artifacts. They automatically rendered two accessible
   cards and two native image nodes; a card-only crop visibly contained decoded artwork, title,
