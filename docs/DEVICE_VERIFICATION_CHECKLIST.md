@@ -726,15 +726,19 @@ or Do Not Disturb access prompt is an unexpected failure.
       targets receive zero requests, the phone never contacts any target directly, no partial card
       is cached, and cancellation/account or server rotation frees queued/active work.
 
-  **Supporting observation — 2026-09-13 (`LOCAL-DEV SUPPORTING ONLY`; no checkbox credit):** a
-  nondebuggable locally assembled `0.1.42` / code-1 APK (SHA-256
+  **Separately authorized out-of-matrix engineering observation — 2026-09-13
+  (`LOCAL-DEV SUPPORTING ONLY`; no checkbox credit):** this run did not execute or relax the
+  prepared matrix above. A nondebuggable locally assembled `0.1.42` / code-1 APK (SHA-256
   `08702f18c76cabd05b159d2b472c5068f26c908788e9122a522bf90542b36cc9`) on the API-36 Samsung used
   USB reverse to a loopback server built from `76097f75`. Its embedded source map exactly matched
-  the current preview endpoint, loader, hook, bubble, and card sources. Two already-sent Apple links
-  automatically rendered two accessible cards and two native image nodes; a card-only crop visibly
-  contained decoded artwork, title, summary, and the message URL's hostname. The crop, full capture,
-  and UI hierarchies were deleted. Two Wikipedia article links that exceeded the HTML limit returned
-  fixed `413 url_preview_too_large` failures; the one opened on Android stayed visible as a raw link.
+  the five preview endpoint, loader, hook, bubble, and card files at app commit `4b89431`. Two
+  existing outbound messages containing public Apple URLs were opened; no message was sent or edited,
+  and no message text was retained in proof artifacts. They automatically rendered two accessible
+  cards and two native image nodes; a card-only crop visibly contained decoded artwork, title,
+  summary, and the message
+  URL's hostname. The crop, full capture, and UI hierarchies were deleted. Two Wikipedia article
+  links that exceeded the HTML limit returned fixed `413 url_preview_too_large` failures; the one
+  opened on Android stayed visible as a raw link.
 
   During a fresh-cache repeat, an 80-sample app-UID socket baseline and a 150-sample preview window
   contained the same one pre-existing external HTTPS destination and the USB-forwarded Gator
@@ -743,10 +747,11 @@ or Do Not Disturb access prompt is an unexpected failure.
   controlled fixtures. A network-off repeat was ineligible because Android's network-status signal
   correctly put the app in Offline mode before preview admission. The temporary daemon's database
   and logs were isolated, but its stock standalone entry was later found to share Gator's Keychain
-  namespace and Auto Start reconciler. After shutdown, the data-key item's modification date still
-  predated the run, the LaunchAgent's absence matched the documented saved-off state, real-home
-  upload staging was absent, and the installed production Gator listener remained healthy. Therefore
-  the two candidate/staged-host boxes above remain open.
+  namespace and Auto Start reconciler. After shutdown, no data-key modification was observed—the
+  item's recorded modification date predated the run—but that does not establish whether it was read.
+  The LaunchAgent's absence matched the documented saved-off state, real-home upload staging was
+  absent, and the installed production Gator listener remained healthy. Therefore the two
+  candidate/staged-host boxes above remain open.
 
 - [ ] **`STATIC/HOST` + `EXACT PLAY CANDIDATE`:** Retain scheme-allowlist proof and stage inert
       `intent:`, `javascript:`, `file:`, and `content:` text. It must not become an in-app actionable
