@@ -14,20 +14,37 @@ network contact, persistence, credential use, navigation, or native permission g
 
 `NET-00` removes the client HTML fetch/parser. Server-supplied `payloadData` and exact-key
 legacy-cache text may render because neither path contacts the link host; neither is an
-implementation of this task. If in-app preview retrieval is intentionally restored, implement it
-as four separate slices rather than one large change:
+implementation of this task. The selected product behavior automatically loads preview text and an
+optional preview image exclusively through an authenticated, hardened Gator-server proxy. The app
+uses its existing `HttpClient` boundary to contact only its configured Gator server. It never opens
+a socket or HTTP connection to the submitted link, redirect, or image host, and it never mounts a
+remote preview-image URL.
 
-1. `NET-01A` decides the transport or proxy boundary and records its threat model.
-2. `NET-01B` canonicalizes URLs and enforces DNS, resolved-address, and redirect policy.
-3. `NET-01C` streams bounded HTML and images with time, decompressed-byte, and content-type limits.
-4. `NET-01D` exercises the complete policy on Android against adversarial servers.
+Implement the selected design as four separate slices rather than one large change:
+
+1. `NET-01A` freezes the authenticated app/server API, threat model, response schema, and ownership
+   boundaries. There is no direct-client or native-fetch fallback.
+2. `NET-01B` builds the server-side outbound policy: canonicalize the initial URL, reject unsafe
+   schemes and credentials, validate every DNS answer, connect to the exact public address that was
+   validated, and repeat those checks before every redirect and preview-image request.
+3. `NET-01C` streams HTML and image bodies with explicit redirect, content-type, compressed- and
+   decompressed-byte, per-hop time, total-time, and image-dimension limits. Bound server-side
+   per-source/global concurrency and duplicate work. The selected privacy policy retains no server
+   result cache: its positive entries, negative entries, retained bytes, and retained age are all
+   bounded at zero. In-flight coalescing retains only a shared promise until settlement;
+   cancellation or failure removes temporary state.
+4. `NET-01D` adds automatic app loading with bounded per-account/global concurrency, duplicate-request
+   coalescing, and bounded positive/negative caches by entry count, total bytes, and age. Image bytes
+   arrive through the authenticated proxy, settle into app-private bounded storage, and render only
+   from a controlled data URI. Exercise the complete policy on Android against adversarial servers.
 
 The same public-address rules apply to the initial URL, every DNS answer, every redirect, and every
-preview image. The transport must connect to the exact address that passed validation so a later DNS
-resolution cannot substitute a private or reserved address. Inspect redirects before requesting
-them, cap decompressed data before whole-body allocation, leave no partial state after cancellation,
-and never attach Gator credentials. React Native fetch behavior that automatically follows redirects
-is not an adequate trust boundary.
+preview image. The server transport must connect to the exact address that passed validation so a
+later DNS resolution cannot substitute a private or reserved address. Redirects are inspected before
+the next request, decompressed data is capped before whole-body allocation, and neither Gator
+credentials nor private response data may be forwarded to a link host. Automatic rendering must not
+turn a conversation containing many URLs into unbounded work. React Native fetch behavior that
+automatically follows redirects is not a trust boundary and is not used for preview retrieval.
 
 <a id="web-01"></a>
 

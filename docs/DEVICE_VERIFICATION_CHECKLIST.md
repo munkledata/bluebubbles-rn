@@ -713,10 +713,18 @@ or Do Not Disturb access prompt is an unexpected failure.
 ### 3. External browser, Maps, and disabled embedded-WebView paths
 
 - [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Mount a message containing an approved controlled
-      HTTPS URL and expose that same URL in Chat Settings → Shared Media → Links. The target observer
-      sees no HTML/image request merely from opening either surface, and no remote preview artwork
-      mounts. Exercise both explicit actions; only a tap may hand the URL to the system browser and
-      produce the bounded target request. Do not add a personal-device interception proxy.
+      HTTPS URL whose page names one controlled JPEG/PNG image. The card loads automatically and
+      always shows/speaks the hostname derived from the message URL, even when page metadata claims
+      another brand. Device traffic goes only to the configured Gator server; the controlled target
+      sees the staged server's request/IP and never a direct phone request. The image renders only
+      from returned bounded bytes, never a remote URL. Reopening/coincident duplicate cards reuses
+      bounded app cache/in-flight work. A tap may still hand the original URL to the system browser.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Exercise the preview fixture's public-to-private
+      page redirect, mixed public/private DNS answer, rebinding, nested image redirect, redirect
+      loop, slow/stalled response, forged content type, compressed expansion, and chunked-over-limit
+      branches. The server returns only fixed typed failures or safe text degradation; protected
+      targets receive zero requests, the phone never contacts any target directly, no partial card
+      is cached, and cancellation/account or server rotation frees queued/active work.
 - [ ] **`STATIC/HOST` + `EXACT PLAY CANDIDATE`:** Retain scheme-allowlist proof and stage inert
       `intent:`, `javascript:`, `file:`, and `content:` text. It must not become an in-app actionable
       link or open another app. Do not attempt to make Android execute a rejected value.
@@ -732,9 +740,12 @@ or Do Not Disturb access prompt is an unexpected failure.
       foreground fallback overlay's explicit **Open** action is naturally refused, Gator shows
       `Couldn’t open this outside Gator.`
 - [ ] **`STATIC/HOST`:** Retain proof that no production source mounts `react-native-webview`, Find
-      My uses a disabled placeholder, FaceTime validates its Apple link before external handoff, and
-      URL-preview lookup is cache-read-only. The dependency may remain installed; do not claim it is
-      absent or that visual inspection proves zero network traffic/hostile-navigation safety.
+      My uses a disabled placeholder, and FaceTime validates its Apple link before external handoff.
+      URL-preview retrieval must remain capability-gated through the authenticated `HttpClient`
+      endpoint, and preview artwork must accept only bounded JPEG/PNG data URIs. No production path
+      may directly fetch a message URL or mount a remote preview-image URL. The WebView dependency
+      may remain installed; do not claim it is absent or that host/visual inspection proves native
+      packet, image-decoder, or hostile-network behavior.
 
 Do not uninstall browsers, Maps, Contacts, or viewers to force no-handler behavior. If a message
 preview, Chat Settings Shared Media link, Find My **Open**, shared-location card, or foreground

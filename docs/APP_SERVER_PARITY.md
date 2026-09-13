@@ -230,6 +230,22 @@ videoUrl}]}`. `serializeMessage` emits it presence-driven, double-gated (URL bal
   not mount remote artwork; the old feature-complete claim no longer applies, and `NET-01` remains
   open.
 
+## 🚧 In progress (2026-09-13) — automatic rich-link retrieval (`NET-01`)
+
+Automatic previews are being restored through the authenticated Gator server rather than by making
+arbitrary web requests from the phone. A capable server advertises
+`supports_url_preview_proxy: true` from `GET /api/v1/server/info` and serves
+`POST /api/v1/url-preview` to authenticated clients with `messages:read`. The request is a single
+validated HTTP(S) URL. The response contains bounded title, description, site name, final URL, and
+an optional validated JPEG/PNG data URI; it never gives the app a remote image URL to mount.
+
+The app automatically asks that endpoint for links in messages, displays the hostname from the
+message as the immutable destination label, and keeps a bounded positive/negative cache in the
+encrypted database. Older servers remain compatible: without the capability, the app uses only an
+already-safe, unexpired cached or sender-supplied text preview. App commit `4b89431` and server
+commit `76097f75` complete the host implementation, and independent safety reviews are green.
+`NET-01` remains open only for the Android adversarial/device proof recorded in the work plan.
+
 <a id="missed-deletion-catch-up-sync-r1"></a>
 
 ## ⚠️ Partial (updated 2026-09-02) — missed-deletion catch-up sync (R1)
