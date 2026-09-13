@@ -2,8 +2,9 @@
 
 > **Document role:** This file owns stable implementation design and sequencing for Workstream M.
 > It never owns candidate identity, task status, dates, owners, blockers, or completion evidence.
-> Those remain only in [`WORK_PLAN_2026-08-03.md`](../WORK_PLAN_2026-08-03.md), the authoritative
-> tracker, and the exact-candidate checklist/runbook it names.
+> `DEVICE-01` status remains in [`WORK_PLAN_2026-08-03.md`](../WORK_PLAN_2026-08-03.md); `STORE-01`,
+> `RELEASE-02`, and `RELEASE-GATE-01` status lives in [`RELEASE_PLAN.md`](../RELEASE_PLAN.md).
+> Exact-candidate operations remain in the checklist and runbook those plans name.
 
 <a id="store-01"></a>
 

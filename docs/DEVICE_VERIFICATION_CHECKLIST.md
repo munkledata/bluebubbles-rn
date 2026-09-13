@@ -1,17 +1,18 @@
 # Device Verification Checklist — historical version-code-56 preparation
 
-> **STATUS (2026-08-27): RETIRED V56 PREPARATION — NOT A CURRENT OR REPLACEMENT EXECUTION MATRIX.**
+> **STATUS (2026-09-13): RETIRED V56 PREPARATION — NOT THE CURRENT V62 EXECUTION MATRIX.**
 > This file preserves the prepared `0.1.40` / version-code-`56` ledger and its synthetic-safe matrix history. It
 > contains no current or candidate-eligible Play-device result. Do not execute its historical rows, fill its result
 > fields, or transfer any checkmark or evidence to version code `57` or a future replacement. Explicitly labelled
 > local-development supporting results may be recorded separately without populating the 131 candidate result fields.
 >
-> The later frozen `0.1.41` / version-code-`57` AAB is also nonconforming because it predates `9046e27`. The local
-> version-code-`58` and `59` builds are now superseded historical artifacts; no current uploadable candidate exists.
-> The replacement boundary is recorded in [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md) §0 and
-> [`STORE_01G_INTERNAL_TESTING_RUNBOOK.md`](./STORE_01G_INTERNAL_TESTING_RUNBOOK.md). `DEVICE-01` in
-> [`WORK_PLAN_2026-08-03.md`](./WORK_PLAN_2026-08-03.md) remains blocked until this historical matrix is replaced
-> row-by-row for that exact AAB, source/release commit, device, and Android version.
+> The later version-code-57, 58, and 59 AABs are also superseded historical artifacts. A current v62
+> candidate now exists and has bounded Play-delivery, update, URL-rejection, and ordinary-kill proof;
+> those results do not make this v56 ledger executable. The current boundary is recorded in
+> [`RELEASE_PLAN.md`](./RELEASE_PLAN.md), [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md) §0, and
+> [`PLAY_INTERNAL_DEVICE_PROOF_2026-09-09.md`](./PLAY_INTERNAL_DEVICE_PROOF_2026-09-09.md#replacement-candidate-closure--2026-09-10).
+> `DEVICE-01` in [`WORK_PLAN_2026-08-03.md`](./WORK_PLAN_2026-08-03.md) remains blocked until the
+> remaining matrix is refreshed and run for that exact AAB, source/release commit, device, and Android version.
 
 This was prepared as the evidence record for the retired Google Play Internal Testing candidate. Host tests can
 support a result, but notifications, Firebase Cloud Messaging (FCM), encrypted storage, native
@@ -1091,13 +1092,13 @@ the ignored `android/app/build/reports/backup-restore/` directory.
       does not satisfy the exact release-candidate checkbox below or provide FEAT-03 staged-server
       proof.
 
-      Exact artifacts: `db-relaunch/android-db-relaunch-2026-09-09T04-09-53-377Z.json`,
-                  `db-wal-write-death/android-db-wal-write-death-2026-09-09T04-10-15-041Z.json`,
-                  `db-active-migration-death/android-db-active-migration-death-2026-09-09T04-10-34-772Z.json`,
-                  `db-runtime-concurrency/android-db-runtime-concurrency-2026-09-09T04-10-52-441Z.json`,
-                  `backup-restore/android-backup-restore-2026-09-09T04-11-12-760Z.json`, and
-                  `db-contract/android-db-contract-2026-09-09T04-11-27-811Z.json` under
-                  `android/app/build/reports/`.
+Exact artifacts for this local refresh under `android/app/build/reports/`:
+`db-relaunch/android-db-relaunch-2026-09-09T04-09-53-377Z.json`,
+`db-wal-write-death/android-db-wal-write-death-2026-09-09T04-10-15-041Z.json`,
+`db-active-migration-death/android-db-active-migration-death-2026-09-09T04-10-34-772Z.json`,
+`db-runtime-concurrency/android-db-runtime-concurrency-2026-09-09T04-10-52-441Z.json`,
+`backup-restore/android-backup-restore-2026-09-09T04-11-12-760Z.json`, and
+`db-contract/android-db-contract-2026-09-09T04-11-27-811Z.json`.
 
 - [x] **HISTORICAL / NOT VERSION-CODE-56 CREDIT —** Local API-35 arm64 emulator: **PASS**, schema 3,
       38 migrations at head `0038`, all 28 checks

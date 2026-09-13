@@ -2,8 +2,9 @@
 
 > **RETIRED — NOT CURRENT STATUS.** This checklist and its 2026-06-30 update are retained as historical
 > rationale only. Do not use its checkboxes, build link, branch claim, priorities, or “still open” wording to
-> choose work. Current task/status/blocker/acceptance authority is
-> [`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md); exact-candidate operations are in
+> choose work. Current remediation status is in
+> [`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md); release-task status is in
+> [`docs/RELEASE_PLAN.md`](./docs/RELEASE_PLAN.md); exact-candidate operations are in
 > [`RELEASE_CHECKLIST.md`](./RELEASE_CHECKLIST.md); device-only proof is in
 > [`docs/DEVICE_VERIFICATION_CHECKLIST.md`](./docs/DEVICE_VERIFICATION_CHECKLIST.md).
 
@@ -19,8 +20,10 @@ _Historical checklist preserved below. [ROADMAP.md](./ROADMAP.md) and
 [COMPARISON.md](./COMPARISON.md) are also dated inputs, not current plans._
 
 ## 1. On-device / real-server verification (needs a device + a real Gator server)
+
 Most of P0/P1/P2 + the parity phases are unit-tested and pass the gate, but the **dev-session bypass**
-(`isDevServer()`) means many flows can only be *fully* exercised against a real server.
+(`isDevServer()`) means many flows can only be _fully_ exercised against a real server.
+
 - [ ] **Adaptive-from-image theming** — install EAS dev build **`a4bb0781`** (links `react-native-image-colors`),
       run Metro, then chat-settings → "Generate theme from background". Build:
       https://expo.dev/accounts/bluegreengatorapps/projects/bluegreengatorappsmessages/builds/a4bb0781-741b-489d-bb64-0bb22de7890f
@@ -31,6 +34,7 @@ Most of P0/P1/P2 + the parity phases are unit-tested and pass the gate, but the 
 - [ ] Native batches (audio/voice/file from P1) on-device.
 
 ## 2. Not yet built — ROADMAP Phase 4 (Settings & polish)
+
 - [x] ✅ Settings search — done (2026-06-30); implemented as a keyword-bag section filter in
       `app/(app)/settings.tsx` (not the `SearchableSettingItem` registry design, but the feature ships)
 - [ ] Scheduled **recurrence UI** — one-shot plumbing exists (`ScheduleArgs` / `ScheduledRow`); recurrence is NOT modeled yet (no recurrence field on the REST surface), so model it first
@@ -42,6 +46,7 @@ Most of P0/P1/P2 + the parity phases are unit-tested and pass the gate, but the 
 - [ ] QR pairing display in server management
 
 ## 3. Known code follow-ups
+
 - [ ] **Socket `refreshUrl` resolver** — the reconnect escalation has a `refreshUrl` hook but it's
       not wired to a real `ServerUrlResolver` (none is instantiated in `src/`; no `fetchFromFirebase`
       impl yet). Escalation currently just reconnects to the same origin with backoff.
@@ -51,29 +56,33 @@ Most of P0/P1/P2 + the parity phases are unit-tested and pass the gate, but the 
       wired into the send-failure path (`sendOutcome.ts`).
 
 ## 4. Blocked on credentials / server-side setup (can't be done from the app side)
+
 - [ ] 🔴 **Server-side Firebase** (service account + Realtime DB) so the server can SEND pushes — the
       FCM **client** is built, but killed-app push won't work until this is configured. **Biggest
       functional gap.**
 - [ ] **Sentry** — needs a DSN.
 - [x] ✅ **Find My embedded map** — DONE via an interactive Leaflet/OpenStreetMap WebView
       (`src/ui/findmy/FindMyMap.tsx`, wired into `app/(app)/findmy.tsx`); needs NO Google Maps key or
-      `react-native-maps`. (Real-server Find My *data* is still a device-smoke item in §1.)
+      `react-native-maps`. (Real-server Find My _data_ is still a device-smoke item in §1.)
 - [ ] Exported native **Tasker / automation receiver** (the hardened JS intent-gate is done; the
       native receiver isn't built).
 
 ## 5. In-flight / process
+
 - [x] ✅ **API-model sync with the server** — substantially done as of 2026-07-17: Phase A, the
       endpoint-shape reconciliation, contract fixtures/tests, and all 7 server schema-gap features
       are wired app-side. Residuals (device verification, Phase B/C fixtures, chat mutations, rich
       fields) are tracked in [API_SYNC_PLAN.md](./API_SYNC_PLAN.md) "Still open".
 - ~~Decide whether to push `master` / open a PR (currently local only).~~ **Stale** — `master` is
-      pushed and in sync with `origin` (see the 2026-06-30 status header).
+  pushed and in sync with `origin` (see the 2026-06-30 status header).
 
 ## 6. Post-audit open items (2026-06-21 security/functional audit)
+
 _Most findings from [SECURITY_FUNCTIONAL_AUDIT_2026-06-21.md](./SECURITY_FUNCTIONAL_AUDIT_2026-06-21.md)
 are FIXED and merged. These are the deliberate deferrals + the things static review can't close._
 
 **Deferred — need a decision, not just code:**
+
 - [ ] 🟠 **F10 — Android key custody.** `requireAuthentication` is intentionally OFF on the SQLCipher DB
       key / server password (`src/native/secureVault.ts`) because enabling it forces user-auth on every
       Keystore op and would **break headless-FCM-while-locked decrypt** (the F1 path). Decide: keep the
@@ -89,6 +98,7 @@ are FIXED and merged. These are the deliberate deferrals + the things static rev
       (`feth* 10.144.47.51`) instead of the real Wi-Fi LAN; now skips virtual interfaces.
 
 **Needs live-host validation (fixed in code, unverifiable from static review):**
+
 - [ ] 🔴 **F3 send-text** — fix renames the body key `message`→`text`; this previously **failed open**
       (blank message sent, no error). Send a real message against a live Gator+macOS host and confirm the
       recipient gets the actual text, not an empty bubble.
@@ -98,6 +108,7 @@ are FIXED and merged. These are the deliberate deferrals + the things static rev
       validate against the running Gator helper dylib (not in either repo).
 
 **Recommended — recurrence prevention:**
+
 - [ ] Extend the contract-test gate to (a) feed the **actual outgoing request JSON** through the server's
       zod input schemas and (b) route the **bare live-wire `serializeMessage` shape** (no embedded `chats[]`)
       through `EventRouter→DbEventSink`. Partially seeded by the new tests; make it a standing gate so

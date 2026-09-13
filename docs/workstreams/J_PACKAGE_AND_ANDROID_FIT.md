@@ -2,7 +2,8 @@
 
 > **Document role:** This file owns stable implementation design and sequencing for Workstream J.
 > It never owns task status, dates, owners, blockers, or completion evidence. Those remain only in
-> [`WORK_PLAN_2026-08-03.md`](../WORK_PLAN_2026-08-03.md), the authoritative tracker.
+> [`WORK_PLAN_2026-08-03.md`](../WORK_PLAN_2026-08-03.md) for remediation tasks and
+> [`RELEASE_PLAN.md`](../RELEASE_PLAN.md) for `RELEASE-01`.
 
 <a id="share-01"></a>
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'node:child_process';
+import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
@@ -11,14 +12,26 @@ const AGENTS_PATH = 'AGENTS.md';
 const README_PATH = 'README.md';
 const RELEASE_CHECKLIST_PATH = 'RELEASE_CHECKLIST.md';
 const DOCS_INDEX_PATH = 'docs/README.md';
+const RELEASE_PLAN_PATH = 'docs/RELEASE_PLAN.md';
 const WORK_PLAN_PATH = 'docs/WORK_PLAN_2026-08-03.md';
 
 export const AGENTS_MAX_LINES = 250;
 export const AGENTS_MAX_BYTES = 16 * 1024;
-export const EXPECTED_PRIMARY_TASK_COUNT = 114;
-export const EXPECTED_IMPLEMENTATION_MAPPING_COUNT = 112;
+export const EXPECTED_PRIMARY_TASK_COUNT = 110;
+export const EXPECTED_RELEASE_TASK_COUNT = 4;
+export const EXPECTED_COMBINED_TASK_COUNT = 114;
+export const EXPECTED_IMPLEMENTATION_MAPPING_COUNT = 108;
+export const EXPECTED_RELEASE_IMPLEMENTATION_MAPPING_COUNT = 4;
 export const EXPECTED_IMPLEMENTATION_MAPPING_SHA256 =
-  '4645c8981f57cbf89700703c57f7ac72cd847e8ff29195bf2633c5bae01be7e9';
+  '2fd53623e873f898eb62629234e8bf8a523638a8ed5801fcd00c871023fec05b';
+export const EXPECTED_RELEASE_MAPPING_SHA256 =
+  'c994bda34e659f551aa10906b15c0e980381ca996bf94ed9af3f0d4baa850a71';
+export const EXPECTED_RELEASE_TASK_IDS = Object.freeze([
+  'RELEASE-01',
+  'STORE-01',
+  'RELEASE-02',
+  'RELEASE-GATE-01',
+]);
 
 export const EXPECTED_WORKSTREAM_PATHS = Object.freeze([
   'docs/workstreams/A_BASELINE_AND_CONTAINMENT.md',
@@ -40,6 +53,7 @@ const EXPECTED_INDEX_TARGETS = Object.freeze([
   README_PATH,
   AGENTS_PATH,
   RELEASE_CHECKLIST_PATH,
+  RELEASE_PLAN_PATH,
   WORK_PLAN_PATH,
   'docs/DEVICE_VERIFICATION_CHECKLIST.md',
   'docs/STORE_01G_INTERNAL_TESTING_RUNBOOK.md',
@@ -66,6 +80,7 @@ const EXPECTED_ROOT_README_TARGETS = Object.freeze([
   AGENTS_PATH,
   RELEASE_CHECKLIST_PATH,
   DOCS_INDEX_PATH,
+  RELEASE_PLAN_PATH,
   WORK_PLAN_PATH,
 ]);
 
@@ -387,9 +402,180 @@ export function validatePlanContract({ root, planSource }) {
 
   return {
     errors,
+    implementationMappings: completeMappings,
     mappingCount: completeMappings.length,
     mappingSha256,
     primaryTaskCount: headings.length,
+    taskIds: headingIds,
+  };
+}
+
+export function validateReleasePlanContract({ root, planSource }) {
+  const errors = [];
+  const headings = taskHeadings(planSource);
+  const headingIds = headings.map((heading) => heading.id);
+  const uniqueHeadingIds = new Set(headingIds);
+
+  if (headings.length !== EXPECTED_RELEASE_TASK_COUNT) {
+    errors.push(
+      `release plan has ${headings.length} primary task headings; expected ${EXPECTED_RELEASE_TASK_COUNT}`,
+    );
+  }
+  if (uniqueHeadingIds.size !== headings.length) {
+    errors.push('release plan primary task headings must have unique ids');
+  }
+  if (
+    headingIds.length !== EXPECTED_RELEASE_TASK_IDS.length ||
+    headingIds.some((id, index) => id !== EXPECTED_RELEASE_TASK_IDS[index])
+  ) {
+    errors.push(
+      `release plan task ids are ${headingIds.join(', ') || 'none'}; expected ${EXPECTED_RELEASE_TASK_IDS.join(', ')}`,
+    );
+  }
+
+  const registerStart = planSource.indexOf('## Status register');
+  const registerEnd = planSource.indexOf('## Current candidate', registerStart);
+  if (registerStart < 0 || registerEnd < 0) {
+    errors.push('release plan status register boundaries are missing');
+  }
+
+  const statusById = new Map();
+  if (registerStart >= 0 && registerEnd >= 0) {
+    const registerSource = planSource.slice(registerStart, registerEnd);
+    for (const status of ['DONE', 'IN_PROGRESS', 'BLOCKED', 'TODO']) {
+      const group = parseStatusGroup(registerSource, status);
+      if (!group) {
+        errors.push(`release plan status register is missing ${status}`);
+        continue;
+      }
+      if (group.declaredCount !== group.ids.length) {
+        errors.push(
+          `release plan ${status} declares ${group.declaredCount} tasks but lists ${group.ids.length}`,
+        );
+      }
+      for (const id of group.ids) {
+        if (statusById.has(id)) errors.push(`release plan status register repeats ${id}`);
+        statusById.set(id, status);
+      }
+    }
+
+    const waived = /^- \*\*WAIVED\/DROPPED — (\d+)\.\*\*/m.exec(registerSource);
+    if (!waived) errors.push('release plan status register is missing WAIVED/DROPPED');
+    else if (Number(waived[1]) !== 0) {
+      errors.push(
+        'nonzero release WAIVED/DROPPED tasks require an explicit checker representation',
+      );
+    }
+  }
+
+  for (const heading of headings) {
+    const status = statusById.get(heading.id);
+    if (!status) errors.push(`release task ${heading.id} is missing from the status register`);
+    if ((status === 'DONE') !== heading.checked) {
+      errors.push(
+        `release task ${heading.id} checkbox does not agree with register status ${String(status)}`,
+      );
+    }
+  }
+  for (const id of statusById.keys()) {
+    if (!uniqueHeadingIds.has(id)) {
+      errors.push(`release status register id ${id} has no primary task heading`);
+    }
+  }
+  if (statusById.size !== EXPECTED_RELEASE_TASK_COUNT) {
+    errors.push(
+      `release plan status register has ${statusById.size} unique ids; expected ${EXPECTED_RELEASE_TASK_COUNT}`,
+    );
+  }
+
+  const { mappings, missing } = implementationMappings(planSource, headings);
+  const duplicateMappings = mappings.filter((mapping) => mapping.duplicateCount);
+  for (const mapping of duplicateMappings) {
+    errors.push(
+      `release task ${mapping.id} has ${mapping.duplicateCount} implementation-spec links; expected one`,
+    );
+  }
+  const completeMappings = mappings.filter((mapping) => typeof mapping.target === 'string');
+  if (missing.length > 0) {
+    errors.push(`release tasks without implementation specs are ${missing.join(', ')}`);
+  }
+  if (completeMappings.length !== EXPECTED_RELEASE_IMPLEMENTATION_MAPPING_COUNT) {
+    errors.push(
+      `release plan has ${completeMappings.length} implementation-spec mappings; expected ${EXPECTED_RELEASE_IMPLEMENTATION_MAPPING_COUNT}`,
+    );
+  }
+
+  const mappingPayload = completeMappings
+    .map((mapping) => `${mapping.id}\t${mapping.target}`)
+    .join('\n');
+  const mappingSha256 = createHash('sha256').update(`${mappingPayload}\n`).digest('hex');
+  if (mappingSha256 !== EXPECTED_RELEASE_MAPPING_SHA256) {
+    errors.push(
+      `release implementation-spec mapping checksum is ${mappingSha256}; expected ${EXPECTED_RELEASE_MAPPING_SHA256}`,
+    );
+  }
+
+  const mappedWorkstreams = new Set();
+  for (const mapping of completeMappings) {
+    const [relativePath, encodedFragment] = mapping.target.split('#', 2);
+    const absoluteTarget = resolve(root, dirname(RELEASE_PLAN_PATH), relativePath);
+    const targetPath = normalizedProjectPath(root, absoluteTarget);
+    mappedWorkstreams.add(targetPath);
+    const pathError = exactPathError(root, targetPath);
+    if (pathError) {
+      errors.push(
+        `implementation spec for release task ${mapping.id} targets ${targetPath}, which ${pathError}`,
+      );
+      continue;
+    }
+    if (!encodedFragment) {
+      errors.push(`implementation spec for release task ${mapping.id} has no anchor`);
+      continue;
+    }
+    let fragment;
+    try {
+      fragment = decodeURIComponent(encodedFragment);
+    } catch {
+      errors.push(
+        `implementation spec for release task ${mapping.id} has an invalid encoded anchor`,
+      );
+      continue;
+    }
+    const targetSource = readFileSync(absoluteTarget, 'utf8');
+    if (!targetSource.includes(`<a id="${fragment}"></a>`)) {
+      errors.push(
+        `implementation spec for release task ${mapping.id} has no explicit #${fragment} anchor`,
+      );
+    }
+  }
+
+  const expectedReleaseWorkstreams = new Set([
+    'docs/workstreams/J_PACKAGE_AND_ANDROID_FIT.md',
+    'docs/workstreams/M_CANDIDATE_AND_RELEASE.md',
+  ]);
+  for (const workstreamPath of expectedReleaseWorkstreams) {
+    if (!mappedWorkstreams.has(workstreamPath)) {
+      errors.push(`release plan does not map a task to ${workstreamPath}`);
+    }
+    const source = readFileSync(resolve(root, workstreamPath), 'utf8');
+    const backlinkTargets = directLocalTargets(root, workstreamPath, source);
+    if (!backlinkTargets.has(RELEASE_PLAN_PATH)) {
+      errors.push(`${workstreamPath} does not link back to ${RELEASE_PLAN_PATH}`);
+    }
+  }
+  for (const workstreamPath of mappedWorkstreams) {
+    if (!expectedReleaseWorkstreams.has(workstreamPath)) {
+      errors.push(`release plan maps an implementation spec to unreviewed path ${workstreamPath}`);
+    }
+  }
+
+  return {
+    errors,
+    implementationMappings: completeMappings,
+    mappingCount: completeMappings.length,
+    mappingSha256,
+    primaryTaskCount: headings.length,
+    taskIds: headingIds,
   };
 }
 
@@ -414,9 +600,26 @@ function lineCount(source) {
   return normalized.split('\n').length - (normalized.endsWith('\n') ? 1 : 0);
 }
 
+export function validatePlanSeparation({ remediationTaskIds, releaseTaskIds }) {
+  const errors = [];
+  const remediationIds = new Set(remediationTaskIds);
+  const overlappingIds = releaseTaskIds.filter((id) => remediationIds.has(id));
+  if (overlappingIds.length > 0) {
+    errors.push(`task ids appear in both plans: ${overlappingIds.join(', ')}`);
+  }
+  const combinedIds = new Set([...remediationTaskIds, ...releaseTaskIds]);
+  if (combinedIds.size !== EXPECTED_COMBINED_TASK_COUNT) {
+    errors.push(
+      `combined plans have ${combinedIds.size} unique task ids; expected ${EXPECTED_COMBINED_TASK_COUNT}`,
+    );
+  }
+  return errors;
+}
+
 export function runDocumentationCheck({ root = ROOT } = {}) {
   const errors = [];
   const markdownFiles = listTrackedMarkdownFiles(root);
+  if (!markdownFiles.includes(RELEASE_PLAN_PATH)) markdownFiles.push(RELEASE_PLAN_PATH);
   const linkResult = validateMarkdownLinks({ root, markdownFiles });
   errors.push(...linkResult.errors);
 
@@ -438,6 +641,26 @@ export function runDocumentationCheck({ root = ROOT } = {}) {
   const planResult = validatePlanContract({ root, planSource });
   errors.push(...planResult.errors);
 
+  const releasePlanSource = readFileSync(resolve(root, RELEASE_PLAN_PATH), 'utf8');
+  const releasePlanResult = validateReleasePlanContract({ root, planSource: releasePlanSource });
+  errors.push(...releasePlanResult.errors);
+
+  errors.push(
+    ...validatePlanSeparation({
+      remediationTaskIds: planResult.taskIds,
+      releaseTaskIds: releasePlanResult.taskIds,
+    }),
+  );
+
+  const remediationTargets = directLocalTargets(root, WORK_PLAN_PATH, planSource);
+  const releaseTargets = directLocalTargets(root, RELEASE_PLAN_PATH, releasePlanSource);
+  if (!remediationTargets.has(RELEASE_PLAN_PATH)) {
+    errors.push(`${WORK_PLAN_PATH} does not link directly to ${RELEASE_PLAN_PATH}`);
+  }
+  if (!releaseTargets.has(WORK_PLAN_PATH)) {
+    errors.push(`${RELEASE_PLAN_PATH} does not link directly to ${WORK_PLAN_PATH}`);
+  }
+
   if (errors.length > 0) throw new Error(errors.map((error) => `- ${error}`).join('\n'));
   return {
     agentsBytes,
@@ -447,6 +670,9 @@ export function runDocumentationCheck({ root = ROOT } = {}) {
     localLinkCount: linkResult.linkCount,
     markdownFileCount: markdownFiles.length,
     primaryTaskCount: planResult.primaryTaskCount,
+    releaseMappingCount: releasePlanResult.mappingCount,
+    releaseMappingSha256: releasePlanResult.mappingSha256,
+    releaseTaskCount: releasePlanResult.primaryTaskCount,
     workstreamCount: EXPECTED_WORKSTREAM_PATHS.length,
   };
 }
@@ -457,7 +683,7 @@ if (invokedDirectly) {
   try {
     const result = runDocumentationCheck();
     console.log(
-      `Documentation guard passed: ${result.markdownFileCount} tracked Markdown files / ${result.localLinkCount} local links; ${result.primaryTaskCount} primary tasks / ${result.implementationMappingCount} implementation mappings across ${result.workstreamCount} workstreams; AGENTS.md ${result.agentsLines} lines / ${result.agentsBytes} bytes; mapping ${result.implementationMappingSha256}.`,
+      `Documentation guard passed: ${result.markdownFileCount} tracked Markdown files / ${result.localLinkCount} local links; ${result.primaryTaskCount} remediation tasks / ${result.releaseTaskCount} release tasks; ${result.implementationMappingCount} remediation mappings / ${result.releaseMappingCount} release mappings across ${result.workstreamCount} workstreams; AGENTS.md ${result.agentsLines} lines / ${result.agentsBytes} bytes; mappings ${result.implementationMappingSha256} / ${result.releaseMappingSha256}.`,
     );
   } catch (error) {
     console.error(

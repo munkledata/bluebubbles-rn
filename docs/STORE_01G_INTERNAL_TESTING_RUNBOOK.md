@@ -1,23 +1,34 @@
 # STORE-01G — Internal Testing readiness runbook
 
-> **Status (2026-09-08): DRAFT / NO CURRENT CANDIDATE / OWNER INPUT REQUIRED.** This runbook prepares
-> a future private Google Play Internal Testing round. The former v59 local build, validation, and
-> promotion are preserved below as historical evidence only. They do not prove or authorize a
-> replacement build, upload, submission, tester invitation, server deployment, Play acceptance,
-> install, or device behavior.
+> **Status (2026-09-13): ACTIVE / V62 INTERNAL CANDIDATE / STAGED ENVIRONMENT AND OWNER INPUT
+> REQUIRED.** Version `0.1.45` / code `62` was built locally, submitted only to Google Play Internal
+> Testing, naturally updated through Play on one Samsung API-36 device, and given the bounded checks
+> recorded below. This does not prove the remaining tester, staged-server, policy, cleanup, or broad
+> device journeys.
 
 This is the secret-free operational companion to `STORE-01`. Keep individual tester identities,
 private endpoints, credentials, QR payloads, and the Play opt-in link outside Git. Record only the
 non-secret labels, owners, counts, dates, and evidence references needed to reproduce the round.
 
-## 1. Candidate boundary — replacement required
+## 1. Current candidate boundary
 
-No current uploadable candidate exists. A replacement local production AAB must be built, validated,
-and locally promoted before this runbook can name a candidate. Its exact version/code, source and
-release commits, release run, filename, size, SHA-256, and upload-certificate SHA-256 must be frozen
-from the same run's receipts. The replacement must then pass its candidate-specific certificate,
-install/update, Play-delivery, and physical-device checks. All replacement fields and checks are
-currently open; do not infer them from the v59 record.
+The current candidate is frozen from one release run. Do not substitute an older artifact or an
+ambiguous “latest” build:
+
+| Field                 | Current value                                                         |
+| --------------------- | --------------------------------------------------------------------- |
+| App version/code      | `0.1.45` / `62`                                                       |
+| Source commit         | `8179d0a3a99c4e2e28a01fd83212fee919bad41c`                            |
+| Release commit/branch | `644a566fb54da7d2c195e369d11677acfce097ea` / `release/android-0.1.45` |
+| Release run           | `android-0.1.45-8179d0a-20260910075110`                               |
+| Local AAB             | `gator-release-0.1.45-v62-644a566.aab` — ignored; never commit it     |
+| Size                  | `56,141,406` bytes                                                    |
+| SHA-256               | `110efe12a0d5cc620b2a523787bb95139f3f2ddf86550449d16de7d8fcd2bd51`    |
+| Submission            | Internal Testing; EAS id `736e29d7-d0d1-48f7-8f68-6095ce240d10`       |
+
+The exact source, build, validation, promotion, submission, and device evidence is summarized in
+[`RELEASE_PLAN.md`](./RELEASE_PLAN.md) and frozen in
+[`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md). The superseded records below remain history only.
 
 ### Superseded v59 — historical static proof only
 
@@ -71,54 +82,52 @@ The former candidate remains preserved as `0.1.40` / version code `56`, source c
 historical; no Play, tester, install/update, device, notification, or cleanup result transfers to a
 replacement candidate.
 
-Historically, the approved source freeze and one EAS-backed local `0.1.43` build completed through
-validation and local promotion. The build retrieved the managed upload credential and advanced the
-remote Android counter from `58` to `59`. This history does not create a current candidate. Any
-future submission must use the separately built and frozen replacement, record its new identity in
-section 1, and verify its digest immediately beforehand; never select an ambiguous “latest” build.
+The current v62 run supersedes the earlier histories above. Its local build retrieved the managed
+upload credential, consumed version code `62` once, and submitted the validated artifact only to the
+Internal track. Never select an ambiguous “latest” build for a future action.
 
 ### Current execution mode
 
-A replacement source freeze, local production build, validation, and promotion are required and
-have not been completed. Follow the authoritative `STORE-01` execution mode in
-`WORK_PLAN_2026-08-03.md`. No Play upload or submission, server action, device action, or remote
-release-branch publication is approved. Use this runbook as the current handoff; future sessions
-should read only the Work Plan register and `STORE-01` section, `RELEASE_CHECKLIST.md` section 0, and
-this file unless a specific contradiction requires history.
+The v62 source freeze, local production build, validation, promotion, Internal submission, Play
+update, unsupported-scheme rejection, and ordinary-kill relaunch are complete. Follow the
+authoritative [`STORE-01`](./RELEASE_PLAN.md#store-01) status and `RELEASE_CHECKLIST.md` section 0.
+No staged-server setup or wider-track promotion is implied or approved. Future sessions should read
+the release plan, checklist, and this runbook before consulting the historical records below.
 
 ## 2. Current proven state
 
 - `eas.json` has one Android submission target: Google Play track `internal`.
-- The former `0.1.43` / version-code-59 artifact identified in section 1 is superseded historical
-  evidence. It is not eligible for Play or device work and supplies no replacement-candidate credit.
-- Immutable server-owned RCS attempt identity is source/host-green at server commit `e55f1210`, but
-  that commit is not recorded as deployed for a replacement candidate. The exact text/media echo,
-  physical-phone namespace, and restart/re-pair procedure remain open in
-  [the replacement-candidate matrix below](#61-push-retry-01-immutable-rcs-attempt-identity). Its FCM
-  rows were not executable with v59: that app enrolls no `AEAD_GCM_V2_DEVICE` key and cannot decrypt
-  that server scheme, so `PUSH-CRYPTO-01` must produce a replacement candidate first.
+- Version `0.1.45` / code `62` is the current retained candidate. It was submitted only to Internal
+  Testing and updated through Play on one Samsung `SM-S938U1`, Android 16 / API 36.
+- The v62 source contains the reviewed V2/V3 app work and is installed through Play, so the app
+  candidate build/install prerequisite for the RCS/FCM matrix is satisfied. Server-owned RCS attempt
+  identity is source/host-green at server commit `e55f1210`, but no isolated staged environment has
+  paired and freshly enrolled this exact Play candidate against that server. The text/media echo,
+  scoped V3 FCM, physical-phone namespace, replay, and restart/re-pair rows remain open in
+  [the candidate matrix below](#61-push-retry-01-immutable-rcs-attempt-identity). The superseded v59
+  incompatibility is history only and no result transfers from it.
 - The release build phase is local-only and cannot submit. A separate submit phase previews by default and requires
-  `--execute` plus an interactive candidate-specific phrase; no upload or submission was run for v59. The existing
+  `--execute` plus an interactive candidate-specific phrase; that separately authorized path submitted v62 to
+  Internal Testing on 2026-09-10. The existing
   GitHub Actions native lane compiles disposable fixture/debug-signed APK/AAB verification artifacts. Manual run
   [`33476443641`](https://github.com/munkledata/bluebubbles-rn/actions/runs/33476443641) also completed the four
   disposable database lanes on an API-36 x86_64 emulator; the workflow's first configured schedule occurrence was
   unobserved, so genuine schedule proof remains open. These supporting artifacts are not release candidates and do not
   use EAS Build or submit to Play.
-- The historical v59 local production build incremented the EAS remote Android counter from `58` to
-  `59`, fetched the existing managed keystore, completed the Gradle bundle, and stopped after local
-  validation and promotion. It did not create a hosted build or submission and is not the required
-  replacement.
+- The current local production run advanced the EAS remote Android counter from `61` to `62`, fetched
+  the managed keystore, completed the Gradle bundle, validation, and promotion, then used the
+  separately authorized submit phase. No hosted build was created.
 - The most recent pre-build read-only EAS history contained 22 hosted Android builds; the newest
   hosted artifact was version code `54`, with hosted counts for `55` and `56` both zero.
-- Read-only EAS history contains 45 Android submission records: 42 finished and 3 canceled. Every
-  record requested `internal` with release status `COMPLETED`; the newest is dated 2026-07-30.
+- The current submission receipt records successful Internal Testing submission id
+  `736e29d7-d0d1-48f7-8f68-6095ce240d10` on 2026-09-10. This proves the requested destination and
+  successful submission outcome, not every live Play Console field.
 - EAS records requested submission configuration, not current Google Play state. Pinned EAS CLI
   `21.5.0` states that Google Play app status is not available through EAS and exposes no tester list,
   opt-in link, or live track inventory.
-- In the 2026-08-25 browser preflight, the only available signed-in Google account opened Play
-  Console's developer-account creation page rather than an existing developer account. No app, track,
-  tester, link, signing, prompt, or release state was accessible. Version code `59` is not proven
-  uploaded or accepted.
+- The v62 app was naturally delivered by Play and its installed APK matched the expected Play App
+  Signing identity. Live tester-list, opt-in-link, declaration-prompt, and wider-track inventory
+  remain open because the submission receipt and installed package do not expose those fields.
 
 Google's current [Internal Testing guidance](https://support.google.com/googleplay/android-developer/answer/9845334?hl=en)
 allows up to 100 testers, requires eligible Google accounts in a selected email list, asks for a
@@ -147,7 +156,8 @@ private feedback destination avoids accidental disclosure through this public re
 | Staged-server maintenance owner role | `Project owner`                                               | RECORDED |
 | Test window and credential expiry    | `7 days from first Play install; expire within 24h after`     | RECORDED |
 | Approved device/Android matrix       | `Pixel 10 Pro XL / Android 17; Galaxy S25 Ultra / Android 16` | EXPECTED |
-| Prior-build update baseline          | `0.1.40 / code 53 / release commit 0564a80`                   | APPROVED |
+| Owner-approved full update baseline  | `0.1.40 / code 53 / release commit 0564a80`                   | APPROVED |
+| Observed bounded Play baseline       | `0.1.44 / code 61`                                            | OBSERVED |
 
 The device-matrix versions are current official expectations as of 2026-08-23: Google's
 [August 2026 Pixel update](https://support.google.com/pixelphone/thread/456979478/google-pixel-update-august-2026?hl=en-gb)
@@ -156,15 +166,17 @@ places the Pixel 10 Pro XL on Android 17, while Samsung's current
 lists Android 16 through its latest published entry. Carrier and rollout timing vary. Record each
 device's observed Android version and build during execution before awarding candidate evidence.
 
-The project owner deferred physical-phone inspection on 2026-08-23. All Play-install and
-device-dependent evidence remains open; no replacement-candidate device result is claimed.
+The earlier 2026-08-23 deferral is superseded only for the bounded v62 Play-update, URL-rejection,
+and ordinary-kill checks. All staged-server-dependent and broader device evidence remains open.
 
 The owner approved the update baseline on 2026-08-23. It is the most recent locally documented Play
 release with a defensible source label: commit `0564a80b572f16faf63c4d7b13c798a72451c845`
 records version `0.1.40` / code `53` as submitted to Internal Testing and verified through the
 Android Publisher API. Code `54` is documented only as a hosted EAS artifact, without a source label
-or Play-delivery proof. Execution evidence remains open until a selected device or live Play
-evidence confirms that the Play-delivered code-53 build is actually available or installed.
+or Play-delivery proof. Execution evidence for that approved branch remains open until a selected
+device or live Play record confirms that the Play-delivered code-53 build is actually available or
+installed. The separate natural code-61-to-62 update proves Play delivery and update mechanics on
+one device, but it does not replace the owner-approved code-53 full-update branch.
 
 Private custody may be Play Console, an approved password manager, or another owner-approved secure
 channel. It must not be a repository file, commit, issue, build log, screenshot, or tester handout.
@@ -235,7 +247,7 @@ Approved version/date: `v1 / 2026-08-23`
 
 Draft v2 for frozen v57 and draft v3 for superseded v58 were never approved and are retired. The
 v59 draft below was also never approved and is now retired. Preserve it as historical copy only; a
-new notice naming the exact replacement must be drafted and approved after that artifact exists:
+new notice naming v62 must still be drafted and approved before tester expansion:
 
 > Gator 0.1.43 (59) is an unfinished Android-only build for a small private test. It is
 > not a public release or evidence of Google Play policy compliance. Use only the supplied synthetic test account
@@ -255,7 +267,7 @@ new notice naming the exact replacement must be drafted and approved after that 
 
 Notice owner: `Project owner`
 
-Historical approval: `NOT APPROVED — retired; no replacement notice exists`
+Historical approval: `NOT APPROVED — retired; v62 notice remains open`
 
 ## 6. Staged tester journey
 
@@ -289,9 +301,10 @@ v56, v57, v58, or v59 device records.
 5. **Lifecycle and notifications**
    - Exercise foreground, background, ordinary process kill, notification receipt/tap, app restart,
      and reconnect. Do not use Android force-stop as killed-process delivery evidence.
-   - After the `PUSH-CRYPTO-01` prerequisite is implemented in a replacement candidate, complete the
-     linked attempt-A/attempt-B killed-app `message-send-error` matrix with encrypted FCM and
-     cross-transport exact deduplication. This branch must not be attempted or credited to v59.
+   - V62 satisfies the app candidate prerequisite. After an isolated compatible staged server and a
+     fresh scoped V3 enrollment are available, complete the linked attempt-A/attempt-B killed-app
+     `message-send-error` matrix with encrypted FCM and cross-transport exact deduplication. No
+     result may be credited to v59.
 6. **Privacy and containment**
    - Confirm locked notices remain generic, no inbound Android share target appears, and captured logs,
      screenshots, Recents, and notifications contain no private value.
@@ -311,17 +324,19 @@ The superseded v59 app could not complete this matrix. The current source remove
 V1 and plaintext receive, retains random-key V2 only before the exclusive
 **2027-02-01T00:00:00Z** cutoff, and requires identity-bound, rotating V3 for scoped sessions. Run
 the socket/phone rows only with an isolated staged server whose recorded commit is `e55f1210` or a
-reviewed descendant. Run the FCM rows only after a replacement exact app candidate closes the
-prerequisite below. Keep raw phone ids, message ids, temp/attempt ids, payloads, tokens, and database
-paths out of the evidence; record only commit/build identities, counts, equality or difference
-results, timestamps, and PASS/FAIL.
+reviewed descendant. V62 closes the exact app candidate prerequisite below; its FCM rows still need
+a fresh scoped V3 enrollment against that isolated staged server. Keep raw phone ids, message ids,
+temp/attempt ids, payloads, tokens, and database paths out of the evidence; record only commit/build
+identities, counts, equality or difference results, timestamps, and PASS/FAIL.
 
-- [ ] **HARD PREREQUISITE FOR FCM ROWS:** build and install an exact replacement candidate containing
-      the random-key V2/V3 lifecycle, scoped identity binding, crash-safe 30-day key rotation with
-      bounded old/new overlap, exact server acknowledgements, downgrade/cutoff enforcement, and the
-      cross-language vector/host-negative-test results. Source completion alone does not satisfy
-      this row. Until the exact installed candidate is recorded, mark it BLOCKED and stop before the
-      killed-app FCM steps.
+- [x] **APP CANDIDATE PREREQUISITE FOR FCM ROWS:** v62 was built, submitted, installed through Play,
+      and contains the random-key V2/V3 lifecycle, scoped identity binding, crash-safe 30-day key
+      rotation with bounded old/new overlap, exact server acknowledgements, downgrade/cutoff
+      enforcement, and the reviewed cross-language/host results.
+- [ ] **STAGED FCM PREREQUISITE:** pair v62 with an isolated compatible `e55f1210`-or-newer server
+      over approved HTTPS and record a fresh scoped V3 enrollment. Until this passes, stop before the
+      killed-app FCM steps; retained-key evidence from the locally signed release APK is not a fresh
+      v62 enrollment result.
 
 - [ ] Pair one physical Android phone for RCS. Record only that the sidecar's destination-
       registration phone namespace is non-empty and compares equal before and after a sidecar/BBD
@@ -332,14 +347,14 @@ results, timestamps, and PASS/FAIL.
       request at the documented maximum `tmpID` length. For each, prove Google/libgm returned the
       opaque correlation and owner-only `rcs.db` retained a non-empty correlation/phone pair for the
       resulting real message. Record only before/after matching-row counts and PASS/FAIL.
-- [ ] After the hard prerequisite passes, begin a staged RCS attachment send while the app is alive.
+- [ ] After the staged FCM prerequisite passes, begin a staged RCS attachment send while the app is alive.
       Use a deterministic staged loopback fault seam: let readiness, admission, and media
       preparation pass; hold the sidecar fetch pending until the immediate ack returns; then
       background the app and run `adb shell am kill <package>`. Release the held fetch as classified
       `ECONNREFUSED`, proving the sidecar never accepted attempt A. A text/new-chat failure,
       bridge-down preflight, or lifecycle stop that wins before the ack does not exercise this
       event. Confirm A is emitted with `retryable: true`, FCM starts the killed process, the keyed
-      payload decrypts as `AEAD_GCM_V2_DEVICE`, socket/FCM copies converge to one durable occurrence,
+      payload decrypts as `AEAD_GCM_V3_IDENTITY`, socket/FCM copies converge to one durable occurrence,
       the exact bubble reaches error once, and the automatic ladder re-enqueues the attachment. Do
       not use force-stop.
 - [ ] Restore the bridge and let that automatic ladder send attempt B under the same logical
@@ -367,29 +382,30 @@ host test into device evidence.
 
 ## 7. Evidence ledger
 
-| Checkpoint                      | Owner/evidence alias | Date       | Result                                                              | Private evidence reference |
-| ------------------------------- | -------------------- | ---------- | ------------------------------------------------------------------- | -------------------------- |
-| Superseded v59 source freeze    | Codex                | 2026-09-04 | HISTORICAL PASS — no replacement credit                             | Promotion receipt source   |
-| Superseded v59 build/validation | Codex                | 2026-09-04 | HISTORICAL PASS — no replacement credit                             | Release run receipt        |
-| Superseded v59 promotion        | Codex                | 2026-09-04 | HISTORICAL PASS — no replacement credit                             | Promotion receipt          |
-| Replacement source/artifact     |                      |            | OPEN — no replacement exists                                        |                            |
-| Hosted build                    | Codex                | 2026-09-04 | NOT RUN                                                             |                            |
-| Play upload/submission          | Codex                | 2026-09-04 | NOT RUN — not authorized                                            |                            |
-| Live track inventory            | Project owner        | 2026-08-25 | BLOCKED — account opens Play signup                                 |                            |
-| Play App Signing certificate    |                      |            | OPEN                                                                |                            |
-| Tester list/count               |                      |            | OPEN                                                                |                            |
-| Replacement tester notice       | Project owner        |            | OPEN — not approved                                                 |                            |
-| Feedback path round-trip        | Project owner        | 2026-08-23 | PASS — owner-confirmed                                              | Owner-held email record    |
-| Staged server dry-run           | Project owner        | 2026-08-23 | BLOCKED — isolated setup unavailable                                |                            |
-| Synthetic fixture manifest      |                      |            | OPEN                                                                |                            |
-| Non-admin opt-in/install        |                      |            | OPEN                                                                |                            |
-| Clean install journey           |                      |            | OPEN                                                                |                            |
-| Prior-build baseline            | Project owner        | 2026-08-23 | APPROVED — execution unverified                                     |                            |
-| Prior-build update journey      |                      |            | OPEN                                                                |                            |
-| Notification/lifecycle journey  |                      |            | OPEN                                                                |                            |
-| RCS immutable-attempt matrix    | Codex                | 2026-09-04 | BLOCKED — v59 lacks V2 client; server `e55f1210+` also not deployed |                            |
-| Disconnect/cleanup              |                      |            | OPEN                                                                |                            |
-| Credential/tester revocation    |                      |            | OPEN                                                                |                            |
+| Checkpoint                       | Owner/evidence alias | Date       | Result                                                              | Private evidence reference |
+| -------------------------------- | -------------------- | ---------- | ------------------------------------------------------------------- | -------------------------- |
+| Superseded v59 source freeze     | Codex                | 2026-09-04 | HISTORICAL PASS — no replacement credit                             | Promotion receipt source   |
+| Superseded v59 build/validation  | Codex                | 2026-09-04 | HISTORICAL PASS — no replacement credit                             | Release run receipt        |
+| Superseded v59 promotion         | Codex                | 2026-09-04 | HISTORICAL PASS — no replacement credit                             | Promotion receipt          |
+| Replacement source/artifact      | Codex                | 2026-09-10 | PASS — v62 identity and retained receipt match                      | Release receipt            |
+| Hosted build                     | Codex                | 2026-09-04 | NOT RUN                                                             |                            |
+| Play upload/submission           | Codex                | 2026-09-10 | PASS — submitted only to Internal Testing                           | Submission receipt         |
+| Live track inventory             | Project owner        | 2026-09-10 | PARTIAL — Internal delivery passed; full Console inventory open     |                            |
+| Play App Signing certificate     | Codex                | 2026-09-10 | PASS — installed APK certificate recorded in device proof           | Device proof               |
+| Tester list/count                |                      |            | OPEN                                                                |                            |
+| Replacement tester notice        | Project owner        |            | OPEN — not approved                                                 |                            |
+| Feedback path round-trip         | Project owner        | 2026-08-23 | PASS — owner-confirmed                                              | Owner-held email record    |
+| Staged server dry-run            | Project owner        | 2026-08-23 | BLOCKED — isolated setup unavailable                                |                            |
+| Synthetic fixture manifest       |                      |            | OPEN                                                                |                            |
+| Non-admin opt-in/install         |                      |            | OPEN                                                                |                            |
+| Clean install journey            |                      |            | OPEN                                                                |                            |
+| Owner-approved update baseline   | Project owner        | 2026-08-23 | APPROVED — code 53 execution unverified                             |                            |
+| Approved-baseline update journey |                      |            | OPEN — code 53 to v62 not run                                       |                            |
+| Bounded Play update              | Codex                | 2026-09-10 | PASS — natural code 61 to 62; does not close approved branch        | Device proof               |
+| Notification/lifecycle journey   | Codex                | 2026-09-10 | PARTIAL — ordinary-kill cold relaunch only                          | Device proof               |
+| RCS immutable-attempt matrix     | Codex                | 2026-09-13 | IN PROGRESS — v62 app gate passed; staged V3 enrollment/matrix open |                            |
+| Disconnect/cleanup               |                      |            | OPEN                                                                |                            |
+| Credential/tester revocation     |                      |            | OPEN                                                                |                            |
 
 ## 8. Stop conditions and approval boundary
 
@@ -411,9 +427,8 @@ feedback/link state passes a read-only preflight, and the access plan has an ind
 `STORE-01` must remain open until the separately approved submission, Play acceptance, opt-in/install,
 exact-candidate device journeys, prompted declarations, cleanup, and tester-access evidence pass.
 
-Uploading or submitting an AAB is a separate external-state milestone requiring explicit owner
-approval, and no such approval is currently recorded. The superseded
-`gator-release-0.1.43-v59-e108ad7.aab` and every earlier artifact are prohibited. Submission may use
-only the future replacement recorded from its own build receipts in section 1 after its exact
-SHA-256 and upload certificate are rechecked; it must not trigger a hosted EAS build or another
-promotion.
+The owner-authorized v62 Internal submission completed on 2026-09-10. Any resubmission, tester-list
+mutation, staged-server action, or wider-track promotion is a separate external-state milestone and
+needs its own authority. The superseded `gator-release-0.1.43-v59-e108ad7.aab` and every earlier
+artifact remain prohibited; any future submission must use an explicitly selected, receipt-bound
+artifact rather than an ambiguous latest build.

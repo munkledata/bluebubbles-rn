@@ -1,8 +1,8 @@
 # Release checklist
 
-This is the short, operational checklist for one Android release candidate. The authoritative
-engineering backlog and release dispositions live in
-[`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md). Current Internal Testing preparation
+This is the short, operational checklist for one Android release candidate. Remediation status lives
+in [`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md), while release-task status and
+dispositions live in [`docs/RELEASE_PLAN.md`](./docs/RELEASE_PLAN.md). Current Internal Testing preparation
 lives in [`docs/STORE_01G_INTERNAL_TESTING_RUNBOOK.md`](./docs/STORE_01G_INTERNAL_TESTING_RUNBOOK.md);
 [`docs/DEVICE_VERIFICATION_CHECKLIST.md`](./docs/DEVICE_VERIFICATION_CHECKLIST.md) is retired v56
 history and is not executable evidence for a replacement candidate. Do not copy status from an older
@@ -111,13 +111,15 @@ Open, or Production promotion, or earlier if Play flags the internal app.
 
 ## 1. Release blockers and decisions
 
-- [ ] Every `BLOCKER` in §3.1 of the master work plan is `DONE` for this exact commit.
+- [ ] Every `BLOCKER` in §3.1 of the
+      [remediation plan](./docs/WORK_PLAN_2026-08-03.md#31-release-disposition-register) is `DONE` for
+      this exact commit.
 - [ ] Every open `CONDITIONAL` item has its affected feature disabled, with evidence that the path
       is unreachable in this candidate.
 - [ ] The owner has resolved `DEC-02` (license/ownership) and the selected license and third-party
       notices are present.
 - [ ] The first-release/update strategy, halt thresholds, access, and incident owners required by
-      `RELEASE-02` have been rehearsed and recorded.
+      [`RELEASE-02`](./docs/RELEASE_PLAN.md#release-02) have been rehearsed and recorded.
 - [ ] No checklist item is accepted solely because a Jest test passed; native and device items have
       candidate-specific evidence.
 
@@ -167,7 +169,7 @@ GOOGLE_SERVICES_JSON=./test/fixtures/google-services.ci.json \
 - [ ] A non-secret smoke variable proves that each named EAS environment selects the intended values.
 - [ ] No `.env`, Firebase config, signing key, service-account file, password, token, or local build
       artifact is present in the replacement uploaded source bundle.
-- [ ] The managed Android upload-signing credential produces the replacement candidate, its
+- [x] The managed Android upload-signing credential produced the v62 candidate, its
       certificate is recorded above, and the credential is not stored in Git. The superseded v59
       signing result is historical only.
 - [ ] Play submission credentials and live Console access are available to the release owner.
@@ -176,9 +178,10 @@ GOOGLE_SERVICES_JSON=./test/fixtures/google-services.ci.json \
 
 ## 4. Clean native candidate
 
-Do not rebuild, submit, or silently reuse the superseded v59 candidate recorded above. Build the
-replacement as a new local production AAB, running each phase separately and reviewing its receipt
-before continuing:
+V62 already completed the isolated build, validation, promotion, and separately authorized Internal
+submission recorded above. Do not rerun those phases for v62 or silently reuse any superseded
+artifact. For a future candidate only, run each phase separately and review its receipt before
+continuing:
 
 ```sh
 npm run release:android:preflight -- --version <x.y.z> --source <full-sha>
@@ -248,9 +251,10 @@ npm run check:android-build
 - [ ] `WRITE_CONTACTS`, `READ_MEDIA_AUDIO`, `SCHEDULE_EXACT_ALARM`, `USE_EXACT_ALARM`,
       `USE_FULL_SCREEN_INTENT`, and `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` are absent from the AAB.
 - [ ] Every remaining dangerous permission maps to a visible feature and a runtime request.
-- [ ] The replacement AAB hash at the top of this file is computed after validation and local
+- [x] The v62 AAB hash at the top of this file was computed after validation and local
       promotion.
-- [ ] The byte-identical hashed AAB is the artifact uploaded to Play after separate approval.
+- [x] The byte-identical hashed v62 AAB is the artifact submitted to Play Internal Testing after
+      separate approval.
 
 ## 5. Network and security smoke tests
 
@@ -290,16 +294,17 @@ npm run check:android-build
 
 ## 6. Android/device matrix
 
-Before device work begins, `DEVICE-01` must create a candidate-specific matrix for the exact
-replacement AAB recorded at the top of this file. The superseded
-`gator-release-0.1.43-v59-e108ad7.aab` must not be used.
-At minimum:
+Candidate-specific device work has begun for v62: Play delivery, natural code-61-to-62 update,
+unsupported-scheme rejection, and ordinary-kill cold relaunch passed on the recorded Samsung/API-36
+device. `DEVICE-01` still owns the unproved matrix below for this exact AAB; the superseded
+`gator-release-0.1.43-v59-e108ad7.aab` must not be used. Remaining work includes:
 
 - [ ] Fresh install and upgrade from the latest shipped build both boot and preserve intended data.
 - [ ] Connect, full sync, send, receive, edit/unsend, react, attach, retry, search, and local delete work.
-- [ ] After `PUSH-CRYPTO-01` is complete in a replacement candidate, kill with
-      `adb shell am kill <package>` (never `am force-stop` for delivery testing); a compatible
-      per-device-encrypted FCM push writes to the encrypted DB and posts the expected notification.
+- [ ] After v62 has a fresh scoped V3 enrollment against the isolated compatible staged server in
+      the Internal Testing runbook, kill with `adb shell am kill <package>` (never `am force-stop`
+      for delivery testing); a compatible per-device-encrypted FCM push writes to the encrypted DB
+      and posts the expected notification.
 - [ ] Notification privacy transitions, actions, reminders, channels, killed/background/foreground
       taps, and FaceTime alerts pass with no stale private system state.
 - [ ] App Lock, generic locked notifications, Android Recents, biometric resume, account switch, and

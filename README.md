@@ -3,11 +3,11 @@
 Gator is an Android-only, iOS-styled messaging client built with React Native, Expo SDK 57,
 TypeScript, and a compatible self-hosted Mac server.
 
-> **Release status:** active hardening; not yet release-ready. The authoritative backlog, item
-> status, acceptance criteria, and release blockers are in
-> [`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md). The short candidate gate is
-> [`RELEASE_CHECKLIST.md`](./RELEASE_CHECKLIST.md). Historical phase/audit documents are research,
-> not current status.
+> **Release status:** active hardening; not yet release-ready. Remediation status and acceptance
+> criteria are in [`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md); the four
+> release-operation tasks are in [`docs/RELEASE_PLAN.md`](./docs/RELEASE_PLAN.md). The short
+> candidate gate is [`RELEASE_CHECKLIST.md`](./RELEASE_CHECKLIST.md). Historical phase/audit
+> documents are research, not current status.
 
 ## What is in the app
 
@@ -166,6 +166,7 @@ Gator is not affiliated with, endorsed by, or sponsored by Apple.
 ## Documentation map
 
 - [`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md) — authoritative remediation plan
+- [`docs/RELEASE_PLAN.md`](./docs/RELEASE_PLAN.md) — authoritative release-operation plan
 - [`RELEASE_CHECKLIST.md`](./RELEASE_CHECKLIST.md) — exact-candidate release gate
 - [`docs/README.md`](./docs/README.md) — subsystem contracts, runbooks, focused research, and historical-evidence map
 

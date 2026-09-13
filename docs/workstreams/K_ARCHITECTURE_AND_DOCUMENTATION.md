@@ -2,7 +2,8 @@
 
 > **Document role:** This file owns stable implementation design and sequencing for Workstream K.
 > It never owns task status, dates, owners, blockers, or completion evidence. Those remain only in
-> [`WORK_PLAN_2026-08-03.md`](../WORK_PLAN_2026-08-03.md), the authoritative tracker.
+> [`WORK_PLAN_2026-08-03.md`](../WORK_PLAN_2026-08-03.md) for remediation and
+> [`RELEASE_PLAN.md`](../RELEASE_PLAN.md) for the four release-operation tasks.
 
 <a id="rel-011"></a>
 
@@ -38,16 +39,16 @@ cannot hide an unresolved transaction or introduce a dependency cycle.
 
 Documentation has four distinct roles:
 
-- The master work plan is the only authority for status, owners, dependencies, blockers, acceptance,
-  and completion evidence.
+- The remediation plan owns remediation status, and the release plan owns the four separated
+  release-operation tasks. Each task has exactly one status authority.
 - Root `README.md` and `AGENTS.md` provide the current overview and stable editing rules without
   copying task status.
 - Subsystem documents own durable technical contracts, runbooks, and rationale.
 - Dated plans, audits, comparisons, and incident narratives remain available as clearly marked
   historical evidence.
 
-Move stable implementation design out of the master plan one workstream at a time. Each extracted
-spec must link back to the master tracker and must not copy mutable status or evidence. Archive useful
+Move stable implementation design out of the task plans one workstream at a time. Each extracted
+spec must link back to its owning plan and must not copy mutable status or evidence. Archive useful
 history instead of silently deleting it, and keep release/device identity claims explicit about the
 candidate to which they apply.
 

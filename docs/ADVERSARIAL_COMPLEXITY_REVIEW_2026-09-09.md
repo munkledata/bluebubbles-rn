@@ -39,8 +39,8 @@ This review challenged the [earlier review](./INDEPENDENT_REPO_REVIEW_2026-09-08
 source, ran the app tests and guards, and performed controlled mutations in memory or temporary
 copies. Application code and existing project records were not edited for this review. The working
 tree is based on `e18d548` and contains substantial ongoing changes; files also changed while checks
-ran. Results describe the tested snapshots, not a frozen release candidate. The master work plan
-remains the task tracker.
+ran. Results describe the tested snapshots, not a frozen release candidate. Current remediation and
+release status now live in the separate work and release plans.
 
 ## 1. High priority: remote revocation can prevent leaving an unavailable server
 

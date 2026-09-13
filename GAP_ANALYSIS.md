@@ -8,8 +8,10 @@
 
 ## Where to look now
 
-- **[`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md)** — authoritative task status,
-  priorities, dependencies, blockers, and acceptance criteria.
+- **[`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md)** — authoritative remediation
+  status, priorities, dependencies, blockers, and acceptance criteria.
+- **[`docs/RELEASE_PLAN.md`](./docs/RELEASE_PLAN.md)** — authoritative status for the four
+  release-operation tasks.
 - **[`docs/APP_SERVER_PARITY.md`](./docs/APP_SERVER_PARITY.md)** — current protocol evidence and
   explicit parity dispositions; the work plan remains its implementation-status authority.
 - **[`RELEASE_CHECKLIST.md`](./RELEASE_CHECKLIST.md)** — exact-candidate release operations and

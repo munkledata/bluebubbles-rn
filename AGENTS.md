@@ -1,8 +1,9 @@
 # Gator RN — concise agent instructions
 
 Gator RN is an Android-only React Native/Expo rebuild of the Flutter iMessage client. Start with
-`README.md`. The authoritative open-work tracker is `docs/WORK_PLAN_2026-08-03.md`; older plans and
-`docs/DB_WRITE_SAFETY_AUDIT_2026-07-25.md` are historical context, not current status.
+`README.md`. Remediation status lives in `docs/WORK_PLAN_2026-08-03.md`; `docs/RELEASE_PLAN.md` owns
+the four release-operation tasks. Older plans and `docs/DB_WRITE_SAFETY_AUDIT_2026-07-25.md` are
+historical context, not current status.
 
 This file is deliberately short because it is loaded into every agent turn. Keep only stable,
 actionable rules here. Put incident histories, detailed reasoning, and subsystem-specific procedures
@@ -34,21 +35,24 @@ in the relevant document under `docs/`, then link to it here if future agents mu
 
 ## Read the relevant reference before editing
 
-| Area                                 | Current references                                                                                      |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------- |
-| Frozen DB-02A handoff                | `docs/DB_02A_CURRENT.md`                                                                                |
-| Session late-result ownership        | `docs/REL_004_LATE_RESULT_INVENTORY.md`                                                                 |
-| Session teardown barrier             | `docs/REL_005A_TEARDOWN_INVENTORY.md`                                                                   |
-| Authoritative plan and audit history | `docs/WORK_PLAN_2026-08-03.md`, `AUDIT_REPORT.md`                                                       |
-| Phase/release dependencies           | `docs/PHASE-DEPENDENCIES.md`, `RELEASE_CHECKLIST.md`                                                    |
-| App/server event and API parity      | `docs/APP_SERVER_PARITY.md`                                                                             |
-| Device proof runbook and history     | `docs/STORE_01G_INTERNAL_TESTING_RUNBOOK.md`, `docs/DEVICE_VERIFICATION_CHECKLIST.md`, `docs/SPIKES.md` |
-| Push/headless delivery               | `docs/PUSH_DELIVERY.md`                                                                                 |
-| Upload behavior                      | `docs/UPLOAD_PROGRESS.md`                                                                               |
-| Attachment cache                     | `docs/CACHE_ARCHITECTURE.md`                                                                            |
-| Share intake                         | `docs/SHARE_INTENT_RELIABILITY.md`                                                                      |
-| Session/account isolation            | `docs/SESSION_SCOPED_STATE_INVENTORY.md`                                                                |
-| Historical UI-test rollouts          | `docs/COMPONENT_TESTING_PLAN.md`, `docs/UI_COVERAGE_70_PLAN.md`                                         |
+| Area                              | Current references                                                                                      |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Frozen DB-02A handoff             | `docs/DB_02A_CURRENT.md`                                                                                |
+| Session late-result ownership     | `docs/REL_004_LATE_RESULT_INVENTORY.md`                                                                 |
+| Session teardown barrier          | `docs/REL_005A_TEARDOWN_INVENTORY.md`                                                                   |
+| Authoritative remediation status  | `docs/WORK_PLAN_2026-08-03.md`                                                                          |
+| Authoritative release-task status | `docs/RELEASE_PLAN.md`                                                                                  |
+| Audit history                     | `AUDIT_REPORT.md`                                                                                       |
+| Exact-candidate release gate      | `RELEASE_CHECKLIST.md`                                                                                  |
+| Phase/release dependencies        | `docs/PHASE-DEPENDENCIES.md`, `RELEASE_CHECKLIST.md`                                                    |
+| App/server event and API parity   | `docs/APP_SERVER_PARITY.md`                                                                             |
+| Device proof runbook and history  | `docs/STORE_01G_INTERNAL_TESTING_RUNBOOK.md`, `docs/DEVICE_VERIFICATION_CHECKLIST.md`, `docs/SPIKES.md` |
+| Push/headless delivery            | `docs/PUSH_DELIVERY.md`                                                                                 |
+| Upload behavior                   | `docs/UPLOAD_PROGRESS.md`                                                                               |
+| Attachment cache                  | `docs/CACHE_ARCHITECTURE.md`                                                                            |
+| Share intake                      | `docs/SHARE_INTENT_RELIABILITY.md`                                                                      |
+| Session/account isolation         | `docs/SESSION_SCOPED_STATE_INVENTORY.md`                                                                |
+| Historical UI-test rollouts       | `docs/COMPONENT_TESTING_PLAN.md`, `docs/UI_COVERAGE_70_PLAN.md`                                         |
 
 ## Architecture contracts
 
