@@ -271,6 +271,37 @@ describe('UrlPreviewLoader', () => {
     );
     expect(maximumActive).toBe(URL_PREVIEW_MAX_ACTIVE);
     expect(h.fetchPreview).toHaveBeenCalledTimes(admitted);
+
+    await expect(h.loader.load(`https://example.com/${admitted}`)).resolves.toBe('stored');
+    expect(h.fetchPreview).toHaveBeenCalledTimes(admitted + 1);
+  });
+
+  it('removes queued account work on invalidation and admits the replacement account', async () => {
+    const h = createHarness();
+    const release = deferred<void>();
+    h.fetchPreview.mockImplementation(async (url) => {
+      await release.promise;
+      return preview(url);
+    });
+
+    const active = [
+      h.loader.load('https://example.com/active-a'),
+      h.loader.load('https://example.com/active-b'),
+    ];
+    const queuedUrl = 'https://example.com/queued';
+    const queued = h.loader.load(queuedUrl);
+    await nextTurn();
+    expect(h.fetchPreview).toHaveBeenCalledTimes(URL_PREVIEW_MAX_ACTIVE);
+
+    h.retireAccount();
+    await expect(queued).resolves.toBe('stale');
+    expect(h.fetchPreview).not.toHaveBeenCalledWith(queuedUrl, expect.any(AbortSignal));
+
+    h.resumeAccount();
+    release.resolve();
+    await expect(Promise.all(active)).resolves.toEqual(['stale', 'stale']);
+    await expect(h.loader.load(queuedUrl)).resolves.toBe('stored');
+    expect(h.fetchPreview).toHaveBeenCalledWith(queuedUrl, expect.any(AbortSignal));
   });
 
   it('does not adopt account B while account A cache read is still pending', async () => {

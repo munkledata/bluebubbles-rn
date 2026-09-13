@@ -82,6 +82,22 @@ describe('useUrlPreview', () => {
     expect(mockGetUrlPreview).not.toHaveBeenCalled();
   });
 
+  it('re-reads through a replacement transport for the same mounted account', async () => {
+    const { result } = await renderHook(() => useUrlPreview(URL));
+    await waitFor(() => expect(result.current?.title).toBe('Cached title'));
+
+    await act(async () => {
+      useSessionStore.setState({ transportRevision: 21 });
+    });
+
+    await waitFor(() =>
+      expect(mockReadUrlPreviewAndLoad).toHaveBeenCalledWith(URL, {
+        accountEpoch: 10,
+        transportRevision: 21,
+      }),
+    );
+  });
+
   it('immediately hides account A metadata and never adopts B in a stale mounted hook', async () => {
     const { result, rerender } = await renderHook(() => useUrlPreview(URL));
     await waitFor(() => expect(result.current?.title).toBe('Cached title'));
