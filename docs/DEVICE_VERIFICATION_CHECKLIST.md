@@ -725,6 +725,29 @@ or Do Not Disturb access prompt is an unexpected failure.
       branches. The server returns only fixed typed failures or safe text degradation; protected
       targets receive zero requests, the phone never contacts any target directly, no partial card
       is cached, and cancellation/account or server rotation frees queued/active work.
+
+  **Supporting observation — 2026-09-13 (`LOCAL-DEV SUPPORTING ONLY`; no checkbox credit):** a
+  nondebuggable locally assembled `0.1.42` / code-1 APK (SHA-256
+  `08702f18c76cabd05b159d2b472c5068f26c908788e9122a522bf90542b36cc9`) on the API-36 Samsung used
+  USB reverse to a loopback server built from `76097f75`. Its embedded source map exactly matched
+  the current preview endpoint, loader, hook, bubble, and card sources. Two already-sent Apple links
+  automatically rendered two accessible cards and two native image nodes; a card-only crop visibly
+  contained decoded artwork, title, summary, and the message URL's hostname. The crop, full capture,
+  and UI hierarchies were deleted. Two Wikipedia article links that exceeded the HTML limit returned
+  fixed `413 url_preview_too_large` failures; the one opened on Android stayed visible as a raw link.
+
+  During a fresh-cache repeat, an 80-sample app-UID socket baseline and a 150-sample preview window
+  contained the same one pre-existing external HTTPS destination and the USB-forwarded Gator
+  endpoint; no new direct web destination appeared while both cards/images loaded. This is bounded
+  connection sampling, not authoritative packet capture, and the public pages were not owned
+  controlled fixtures. A network-off repeat was ineligible because Android's network-status signal
+  correctly put the app in Offline mode before preview admission. The temporary daemon's database
+  and logs were isolated, but its stock standalone entry was later found to share Gator's Keychain
+  namespace and Auto Start reconciler. After shutdown, the data-key item's modification date still
+  predated the run, the LaunchAgent's absence matched the documented saved-off state, real-home
+  upload staging was absent, and the installed production Gator listener remained healthy. Therefore
+  the two candidate/staged-host boxes above remain open.
+
 - [ ] **`STATIC/HOST` + `EXACT PLAY CANDIDATE`:** Retain scheme-allowlist proof and stage inert
       `intent:`, `javascript:`, `file:`, and `content:` text. It must not become an in-app actionable
       link or open another app. Do not attempt to make Android execute a rejected value.
