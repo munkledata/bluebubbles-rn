@@ -1,5 +1,6 @@
 import { strictServerOrigin } from '@core/config';
 import type { ServerInfo } from '@core/models';
+import { isScopedDeviceCredential } from '@core/secure';
 import { timingSafeEqual, utf8Encode } from '@utils/bytes';
 import type { ConnectResult } from '../connection';
 import type { RealtimeDeliveryLease } from './deliveryCoordinator';
@@ -114,7 +115,14 @@ export async function approveServerRotation(
     deps.coordinator.cancel(requestId);
     return staleResult();
   }
-  if (!enteredPassword || !passwordsMatch(enteredPassword, session.password)) {
+  const currentPassword = session.password;
+  const scopedSession = isScopedDeviceCredential(currentPassword);
+  if (
+    !enteredPassword ||
+    (scopedSession
+      ? isScopedDeviceCredential(enteredPassword)
+      : !passwordsMatch(enteredPassword, currentPassword))
+  ) {
     return {
       ok: false,
       kind: 'password-mismatch',
@@ -122,7 +130,6 @@ export async function approveServerRotation(
       terminal: false,
     };
   }
-  const currentPassword = session.password;
 
   const lease = deps.captureLease();
   if (lease.generation !== request.deliveryGeneration || !lease.isCurrent()) {
@@ -139,9 +146,34 @@ export async function approveServerRotation(
   };
   if (!beforeCommitCurrent()) return staleResult();
 
+  if (scopedSession) {
+    // Prove fresh knowledge of the shared password only to the already-trusted origin. The
+    // proposed origin receives the narrower device credential below, never the shared password.
+    const passwordProof = await deps.validateCandidate(
+      request.currentOrigin,
+      enteredPassword,
+      beforeCommitCurrent,
+    );
+    if (!beforeCommitCurrent() || (!passwordProof.ok && passwordProof.kind === 'cancelled')) {
+      deps.coordinator.cancel(requestId);
+      return staleResult();
+    }
+    if (!passwordProof.ok) {
+      return {
+        ok: false,
+        kind: passwordProof.kind === 'unauthorized' ? 'password-mismatch' : 'validation-failed',
+        message:
+          passwordProof.kind === 'unauthorized'
+            ? 'The password does not match your current server password.'
+            : passwordProof.message,
+        terminal: false,
+      };
+    }
+  }
+
   const validation = await deps.validateCandidate(
     request.candidateOrigin,
-    enteredPassword,
+    scopedSession ? currentPassword : enteredPassword,
     beforeCommitCurrent,
   );
   if (!beforeCommitCurrent() || (!validation.ok && validation.kind === 'cancelled')) {
@@ -167,7 +199,7 @@ export async function approveServerRotation(
 
     const persistence = await deps.persistCandidate(
       request.candidateOrigin,
-      enteredPassword,
+      currentPassword,
       validation.serverInfo,
       lease,
       durableCommitCurrent,

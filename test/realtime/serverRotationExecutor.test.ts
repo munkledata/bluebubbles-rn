@@ -8,8 +8,12 @@ import {
 } from '@/services/realtime/serverRotationExecutor';
 
 const SERVER_INFO = { server_version: '1.0.0' } as ServerInfo;
+const NEXT_SERVER_INFO = { server_version: '1.1.0' } as ServerInfo;
+const SCOPED_DEVICE_CREDENTIAL = `bbd_device_v1_${'A'.repeat(43)}`;
 
-function setup(options: { currentOrigin?: string; candidateOrigin?: string } = {}): {
+function setup(
+  options: { currentOrigin?: string; candidateOrigin?: string; currentPassword?: string } = {},
+): {
   deps: ServerRotationExecutorDeps;
   requestId: number;
   session: { origin: string | null; password: string | null; epoch: number };
@@ -40,7 +44,7 @@ function setup(options: { currentOrigin?: string; candidateOrigin?: string } = {
   const lease: RealtimeDeliveryLease = { generation: 4, isCurrent: () => leaseCurrent };
   const session = {
     origin: currentOrigin as string | null,
-    password: 'correct-password' as string | null,
+    password: (options.currentPassword ?? 'correct-password') as string | null,
     epoch: 9,
   };
   coordinator.offer(candidateOrigin, currentOrigin, session.epoch, lease, () => foreground);
@@ -110,6 +114,78 @@ describe('approveServerRotation', () => {
       expect.objectContaining({ ok: false, kind: 'cleartext-consent-required', terminal: false }),
     );
     expect(h.validateCandidate).not.toHaveBeenCalled();
+    expect(h.persistCandidate).not.toHaveBeenCalled();
+  });
+
+  it('proves a scoped rotation at the trusted origin and preserves the device credential', async () => {
+    const h = setup({ currentPassword: SCOPED_DEVICE_CREDENTIAL });
+    h.validateCandidate
+      .mockResolvedValueOnce({ ok: true, serverInfo: SERVER_INFO })
+      .mockResolvedValueOnce({ ok: true, serverInfo: NEXT_SERVER_INFO });
+    h.persistCandidate.mockImplementation(async (_origin, _password, info) => ({
+      ok: true,
+      serverInfo: info,
+    }));
+
+    await expect(
+      approveServerRotation(h.requestId, 'fresh-shared-password', false, h.deps),
+    ).resolves.toEqual({ ok: true });
+
+    expect(h.validateCandidate).toHaveBeenNthCalledWith(
+      1,
+      'https://current.example',
+      'fresh-shared-password',
+      expect.any(Function),
+    );
+    expect(h.validateCandidate).toHaveBeenNthCalledWith(
+      2,
+      'https://next.example',
+      SCOPED_DEVICE_CREDENTIAL,
+      expect.any(Function),
+    );
+    expect(h.persistCandidate).toHaveBeenCalledWith(
+      'https://next.example',
+      SCOPED_DEVICE_CREDENTIAL,
+      NEXT_SERVER_INFO,
+      expect.any(Object),
+      expect.any(Function),
+    );
+    expect(h.reconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not expose a scoped credential when the shared-password proof fails', async () => {
+    const h = setup({ currentPassword: SCOPED_DEVICE_CREDENTIAL });
+    h.validateCandidate.mockResolvedValue({
+      ok: false,
+      kind: 'unauthorized',
+      message: 'Unauthorized.',
+    });
+
+    await expect(
+      approveServerRotation(h.requestId, 'wrong-shared-password', false, h.deps),
+    ).resolves.toEqual(
+      expect.objectContaining({ ok: false, kind: 'password-mismatch', terminal: false }),
+    );
+    expect(h.validateCandidate).toHaveBeenCalledTimes(1);
+    expect(h.validateCandidate).toHaveBeenCalledWith(
+      'https://current.example',
+      'wrong-shared-password',
+      expect.any(Function),
+    );
+    expect(h.persistCandidate).not.toHaveBeenCalled();
+  });
+
+  it('stops a scoped rotation before contacting the candidate when authority changes', async () => {
+    const h = setup({ currentPassword: SCOPED_DEVICE_CREDENTIAL });
+    h.validateCandidate.mockImplementation(async () => {
+      h.setLeaseCurrent(false);
+      return { ok: true, serverInfo: SERVER_INFO };
+    });
+
+    await expect(
+      approveServerRotation(h.requestId, 'fresh-shared-password', false, h.deps),
+    ).resolves.toEqual(expect.objectContaining({ ok: false, kind: 'stale' }));
+    expect(h.validateCandidate).toHaveBeenCalledTimes(1);
     expect(h.persistCandidate).not.toHaveBeenCalled();
   });
 
