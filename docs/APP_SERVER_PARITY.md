@@ -221,16 +221,15 @@ videoUrl}]}`. `serializeMessage` emits it presence-driven, double-gated (URL bal
 - **App** (`bluebubbles-rn`): `payload_data` remains a COALESCE-preserved JSON TEXT column with a
   tolerant zod `PayloadData` boundary. `MessageBubble` renders server text metadata directly without
   contacting the link host. When `payloadData` is absent, the app may read an exact-key legacy
-  `url_previews` row; a miss leaves the raw externally opened link. Under `NET-00`, neither source
-  mounts remote artwork. App commit `40b907d` removed the dormant client OG fetch/parser on
-  2026-09-04; any future retrieval path must satisfy `NET-01`.
+  `url_previews` row. App commit `40b907d` removed the dormant client OG fetch/parser; completed
+  `NET-01` adds a separate capability-gated request to the authenticated Gator server, with no
+  direct-client fallback or remote-image URL mount.
 - **Historical postscript (0.1.28, 2026-07-21; superseded by `NET-00` containment):** A fixed
   `width:'78%'` resolved the then-mounted preview image's zero-width layout cycle and was verified on
-  device. The fixed width remains the stable text-card layout, but current cards intentionally do
-  not mount remote artwork; the old feature-complete claim no longer applies, and `NET-01` remains
-  open.
+  device. The fixed width remains the stable card layout; current automatic artwork arrives only as
+  a validated data image through the completed `NET-01` server proxy.
 
-## 🚧 In progress (2026-09-13) — automatic rich-link retrieval (`NET-01`)
+## ✅ Complete (2026-09-13) — automatic rich-link retrieval (`NET-01`)
 
 Automatic previews are being restored through the authenticated Gator server rather than by making
 arbitrary web requests from the phone. A capable server advertises
@@ -244,7 +243,10 @@ message as the immutable destination label, and keeps a bounded positive/negativ
 encrypted database. Older servers remain compatible: without the capability, the app uses only an
 already-safe, unexpired cached or sender-supplied text preview. App commit `4b89431` and server
 commit `76097f75` complete the host implementation, and independent safety reviews are green.
-`NET-01` remains open only for the Android adversarial/device proof recorded in the work plan.
+Google Play `0.1.46` / version code `63` then passed the controlled 20-case Android matrix, native
+JPEG/PNG rendering, exact-original tap, app-UID destination observation, and cleanup. The exact
+artifact/server identities, outcomes, and measurement limits are recorded in
+[`NET_01_PLAY_DEVICE_PROOF_2026-09-13.md`](./NET_01_PLAY_DEVICE_PROOF_2026-09-13.md).
 
 <a id="missed-deletion-catch-up-sync-r1"></a>
 

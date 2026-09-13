@@ -1,16 +1,16 @@
 # Device Verification Checklist — historical version-code-56 preparation
 
-> **STATUS (2026-09-13): RETIRED V56 PREPARATION — NOT THE CURRENT V62 EXECUTION MATRIX.**
+> **STATUS (2026-09-13): RETIRED V56 PREPARATION — NOT A CURRENT EXECUTION MATRIX.**
 > This file preserves the prepared `0.1.40` / version-code-`56` ledger and its synthetic-safe matrix history. It
 > contains no current or candidate-eligible Play-device result. Do not execute its historical rows, fill its result
 > fields, or transfer any checkmark or evidence to version code `57` or a future replacement. Explicitly labelled
 > local-development supporting results may be recorded separately without populating the 131 candidate result fields.
 >
-> The later version-code-57, 58, and 59 AABs are also superseded historical artifacts. A current v62
-> candidate now exists and has bounded Play-delivery, update, URL-rejection, and ordinary-kill proof;
-> those results do not make this v56 ledger executable. The current boundary is recorded in
-> [`RELEASE_PLAN.md`](./RELEASE_PLAN.md), [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md) §0, and
-> [`PLAY_INTERNAL_DEVICE_PROOF_2026-09-09.md`](./PLAY_INTERNAL_DEVICE_PROOF_2026-09-09.md#replacement-candidate-closure--2026-09-10).
+> The later version-code-57 through 62 artifacts are also superseded history. The current candidate
+> boundary is recorded in [`RELEASE_PLAN.md`](./RELEASE_PLAN.md) and
+> [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md) §0; bounded v63 automatic-preview evidence lives in
+> [`NET_01_PLAY_DEVICE_PROOF_2026-09-13.md`](./NET_01_PLAY_DEVICE_PROOF_2026-09-13.md). Those results
+> do not make this v56 ledger executable.
 > `DEVICE-01` in [`WORK_PLAN_2026-08-03.md`](./WORK_PLAN_2026-08-03.md) remains blocked until the
 > remaining matrix is refreshed and run for that exact AAB, source/release commit, device, and Android version.
 

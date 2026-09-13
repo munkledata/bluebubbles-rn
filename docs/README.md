@@ -10,7 +10,7 @@ Start with the root [`README.md`](../README.md) for the product and architecture
 - [`RELEASE_PLAN.md`](./RELEASE_PLAN.md) is the release-task status authority. It owns `RELEASE-01`,
   `STORE-01`, `RELEASE-02`, and `RELEASE-GATE-01`.
 - [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md) is the short operational gate for the current
-  `0.1.45` / code `62` Internal Testing candidate. It does not replace either task plan.
+  `0.1.46` / code `63` Internal Testing candidate. It does not replace either task plan.
 - [`DEVICE_VERIFICATION_CHECKLIST.md`](./DEVICE_VERIFICATION_CHECKLIST.md) preserves the retired v56 preparation
   ledger. It is not executable for a replacement candidate; `DEVICE-01` owns the candidate-specific rewrite.
 - [`STORE_01G_INTERNAL_TESTING_RUNBOOK.md`](./STORE_01G_INTERNAL_TESTING_RUNBOOK.md) is the private Internal Testing

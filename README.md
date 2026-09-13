@@ -144,9 +144,11 @@ the EAS profiles intentionally have no update-channel fields.
   surfaces are disabled; user-opened links, explicit Find My system-map actions, and other
   provider-backed features can contact their respective services. Do not claim that no third party
   is involved.
-- **Previews:** no client Open Graph fetch/parser exists. Server-supplied or exact-key legacy-cache
-  text metadata may render, but no preview path mounts remote artwork; only an explicit tap hands an
-  allowed URL to the external browser.
+- **Previews:** no client Open Graph fetch/parser or arbitrary-host fallback exists. When the paired
+  server advertises the preview capability, the app automatically requests bounded text and an
+  optional validated JPEG/PNG data image through its authenticated `HttpClient`; it never mounts a
+  remote image URL. Results use bounded app-private positive/negative caches, and an explicit tap
+  hands the immutable original URL to the external browser.
 - **Server rotation:** an event cannot silently persist or contact a different/downgraded server
   origin. A future cross-origin rotation flow requires explicit foreground approval.
 - **Logging:** application logging goes through the redacting logger; raw `console.*` calls in app

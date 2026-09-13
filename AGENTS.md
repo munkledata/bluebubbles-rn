@@ -153,10 +153,11 @@ but its affected-row count is not portable. Use`RETURNING` or a builder when own
 - Public ACTION_SEND/Direct Share intake is intentionally disabled. Do not reactivate historical
   `expo-share-intent` or custom native intake paths without a new approved design. See
   `docs/SHARE_INTENT_RELIABILITY.md`.
-- Validate server/user-controlled URLs and file paths before native access. Current server/cache
-  preview metadata is inert and must remain network-free. Any future preview fetcher must satisfy
-  `NET-01`, including scheme, DNS/address binding, redirect, decompressed-byte, timeout, and
-  content-type limits.
+- Validate server/user-controlled URLs and file paths before native access. Automatic previews use
+  only the authenticated, bounded Gator-server proxy completed under `NET-01`; the app must never
+  fetch a link/redirect/image host directly or mount a remote preview-image URL. Preserve the
+  server's scheme, every-answer DNS/address pinning, redirect, compressed/decompressed-byte,
+  dimension, timeout, content-type, concurrency, cancellation, and zero-result-cache limits.
 
 ## UI contracts worth keeping always visible
 

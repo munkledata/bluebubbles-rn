@@ -10,34 +10,52 @@ build into this file. Section 0 is the next private Internal Testing gate; Secti
 broader Closed/Open/Production release gate.
 
 Current release-candidate status — **INTERNAL TESTING; broader release remains NO-GO.** The exact
-replacement was built, validated, submitted only to Google Play Internal Testing, naturally updated
-over the prior Play build, and exercised for the bounded URL-blocker and ordinary-kill checks. The
+replacement was built, validated, submitted only to Google Play Internal Testing, installed from
+Play, and exercised for the completed bounded automatic-preview matrix. The
 remaining staged-server, device-matrix, tester-administration, policy, and rollout gates below stay
 open; this Internal result is not public-release approval.
 
 Exact replacement frozen from one release run:
 
+- Version/build number: `0.1.46 (versionCode 63)`
+- Exact source and release commits: `dc32380c6cb17d85e7ab08c4d5b9118660f763c8` /
+  `a1ba9af51c46aac08f9c00e2c7c84762bb78cb2b`
+- Release branch/run: `release/android-0.1.46` /
+  `android-0.1.46-dc32380-20260913175233`
+- Local AAB: `gator-release-0.1.46-v63-a1ba9af.aab` — ignored; never commit it
+- AAB size/SHA-256: `56,150,828` bytes /
+  `4a9c83a521b6eb20404d502b535a2001e201ae71f1a9f3a88d703aed79221a06`
+- Upload certificate SHA-256:
+  `6E:18:F9:93:61:DC:D6:58:F1:A7:5B:9F:47:E8:66:AC:8D:A6:AF:EF:B9:E7:F4:7C:BF:41:F5:E0:F6:CE:2F:43`
+- Submission: Google Play Internal Testing at `2026-09-13T18:05:22.232Z`; EAS submission
+  `63ddf33f-b3f1-496d-afcf-b7ee4c53a751`
+- Tester/device/Android/test date: owner-enrolled Samsung `SM-S938U1`, Android 16 / API 36,
+  2026-09-13
+- Exact device receipt:
+  [`docs/NET_01_PLAY_DEVICE_PROOF_2026-09-13.md`](./docs/NET_01_PLAY_DEVICE_PROOF_2026-09-13.md)
+
+The installed local-signature build could not update to the Play-signed v63 artifact, so it was
+removed and v63 was installed from Google Play with prior permission. This is clean-install
+evidence, not natural-update evidence. No Closed, Open, Production, or wider-track promotion was
+performed.
+
+Superseded v62 candidate — historical Play and bounded-device evidence only; no result transfers to
+v63 unless repeated:
+
 - Version/build number: `0.1.45 (versionCode 62)`
-- Exact source and release commits: `8179d0a3a99c4e2e28a01fd83212fee919bad41c` /
+- Source/release commits: `8179d0a3a99c4e2e28a01fd83212fee919bad41c` /
   `644a566fb54da7d2c195e369d11677acfce097ea`
 - Release branch/run: `release/android-0.1.45` /
   `android-0.1.45-8179d0a-20260910075110`
-- Local AAB: `gator-release-0.1.45-v62-644a566.aab` — ignored; never commit it
-- AAB size/SHA-256: `56,141,406` bytes /
+- AAB: `gator-release-0.1.45-v62-644a566.aab` — 56,141,406 bytes; SHA-256
   `110efe12a0d5cc620b2a523787bb95139f3f2ddf86550449d16de7d8fcd2bd51`
-- Upload certificate SHA-256:
-  `6E:18:F9:93:61:DC:D6:58:F1:A7:5B:9F:47:E8:66:AC:8D:A6:AF:EF:B9:E7:F4:7C:BF:41:F5:E0:F6:CE:2F:43`
-- Submission: Google Play Internal Testing at `2026-09-10T08:07:26.541Z`; EAS submission
-  `736e29d7-d0d1-48f7-8f68-6095ce240d10`
-- Tester/device/Android/test date: owner-enrolled Samsung `SM-S938U1`, Android 16 / API 36,
-  2026-09-10
-- Exact device receipt:
+- Submission: Internal Testing, `736e29d7-d0d1-48f7-8f68-6095ce240d10`, 2026-09-10
+- Device receipt:
   [`docs/PLAY_INTERNAL_DEVICE_PROOF_2026-09-09.md`](./docs/PLAY_INTERNAL_DEVICE_PROOF_2026-09-09.md#replacement-candidate-closure--2026-09-10)
 
-Version code 61 remains retired because its device run exposed the unsupported-scheme bug. The v62
-Play update immediately rejected the same synthetic `ftp://example.com` input, and an ordinary
-background `adb shell am kill` followed by a cold relaunch passed. No Closed, Open, Production, or
-wider-track promotion was performed.
+Version code 61 remains retired because its device run exposed the unsupported-scheme bug. V62
+rejected that same synthetic setup URL and passed an ordinary-kill cold relaunch, but those results
+remain historical for v63.
 
 Superseded v59 candidate — historical static artifact proof only; no result transfers to a
 replacement:
@@ -169,7 +187,7 @@ GOOGLE_SERVICES_JSON=./test/fixtures/google-services.ci.json \
 - [ ] A non-secret smoke variable proves that each named EAS environment selects the intended values.
 - [ ] No `.env`, Firebase config, signing key, service-account file, password, token, or local build
       artifact is present in the replacement uploaded source bundle.
-- [x] The managed Android upload-signing credential produced the v62 candidate, its
+- [x] The managed Android upload-signing credential produced the v63 candidate, its
       certificate is recorded above, and the credential is not stored in Git. The superseded v59
       signing result is historical only.
 - [ ] Play submission credentials and live Console access are available to the release owner.
@@ -178,8 +196,8 @@ GOOGLE_SERVICES_JSON=./test/fixtures/google-services.ci.json \
 
 ## 4. Clean native candidate
 
-V62 already completed the isolated build, validation, promotion, and separately authorized Internal
-submission recorded above. Do not rerun those phases for v62 or silently reuse any superseded
+V63 already completed the isolated build, validation, promotion, and separately authorized Internal
+submission recorded above. Do not rerun those phases for v63 or silently reuse any superseded
 artifact. For a future candidate only, run each phase separately and review its receipt before
 continuing:
 
@@ -251,9 +269,9 @@ npm run check:android-build
 - [ ] `WRITE_CONTACTS`, `READ_MEDIA_AUDIO`, `SCHEDULE_EXACT_ALARM`, `USE_EXACT_ALARM`,
       `USE_FULL_SCREEN_INTENT`, and `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` are absent from the AAB.
 - [ ] Every remaining dangerous permission maps to a visible feature and a runtime request.
-- [x] The v62 AAB hash at the top of this file was computed after validation and local
+- [x] The v63 AAB hash at the top of this file was computed after validation and local
       promotion.
-- [x] The byte-identical hashed v62 AAB is the artifact submitted to Play Internal Testing after
+- [x] The byte-identical hashed v63 AAB is the artifact submitted to Play Internal Testing after
       separate approval.
 
 ## 5. Network and security smoke tests
@@ -276,9 +294,11 @@ npm run check:android-build
       `7a3aa2058ad1bea4252379b2ea3df285e1fd94ef`, which contains the host flow from `8564b34` plus
       post-v57 removal commit `9046e27`; this historical fact supplies no replacement credit, and
       exact Android network and SecureStore behavior remains unproven.
-- [ ] URL previews make no automatic third-party request. Exercise server `payloadData`, an upgraded
-      exact-key legacy-cache row, and an uncached URL; none may fetch HTML or artwork, and only an
-      explicit tap may hand the URL to the external browser. Record proxy/network-capture evidence.
+- [x] On exact Play v63, automatic preview text and optional JPEG/PNG data images use only the
+      authenticated bounded Gator-server proxy. The controlled 20-case matrix, app-UID destination
+      observation, server request ledger, duplicate coalescing, original-URL tap, limitations, and
+      cleanup are recorded in
+      [`docs/NET_01_PLAY_DEVICE_PROOF_2026-09-13.md`](./docs/NET_01_PLAY_DEVICE_PROOF_2026-09-13.md).
 - [ ] Find My and any other WebView surface passes its hostile-input, navigation, and real-device
       network checks, or is disabled in the candidate.
 - [ ] The replacement clean isolated build, guarded autolinking, and exact-AAB inspection confirm
@@ -294,14 +314,14 @@ npm run check:android-build
 
 ## 6. Android/device matrix
 
-Candidate-specific device work has begun for v62: Play delivery, natural code-61-to-62 update,
-unsupported-scheme rejection, and ordinary-kill cold relaunch passed on the recorded Samsung/API-36
-device. `DEVICE-01` still owns the unproved matrix below for this exact AAB; the superseded
+Candidate-specific device work has begun for v63: Play delivery and the complete `NET-01` matrix
+passed on the recorded Samsung/API-36 device. `DEVICE-01` still owns the unproved matrix below for
+this exact AAB; the superseded
 `gator-release-0.1.43-v59-e108ad7.aab` must not be used. Remaining work includes:
 
 - [ ] Fresh install and upgrade from the latest shipped build both boot and preserve intended data.
 - [ ] Connect, full sync, send, receive, edit/unsend, react, attach, retry, search, and local delete work.
-- [ ] After v62 has a fresh scoped V3 enrollment against the isolated compatible staged server in
+- [ ] After v63 has a fresh scoped V3 enrollment against the isolated compatible staged server in
       the Internal Testing runbook, kill with `adb shell am kill <package>` (never `am force-stop`
       for delivery testing); a compatible per-device-encrypted FCM push writes to the encrypted DB
       and posts the expected notification.

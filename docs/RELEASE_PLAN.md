@@ -18,8 +18,10 @@ Use the related documents for their narrower purposes:
   candidate.
 - [`STORE_01G_INTERNAL_TESTING_RUNBOOK.md`](./STORE_01G_INTERNAL_TESTING_RUNBOOK.md) is the private
   Internal Testing procedure.
-- [`PLAY_INTERNAL_DEVICE_PROOF_2026-09-09.md`](./PLAY_INTERNAL_DEVICE_PROOF_2026-09-09.md) records
-  bounded evidence from the current Play-delivered candidate.
+- [`NET_01_PLAY_DEVICE_PROOF_2026-09-13.md`](./NET_01_PLAY_DEVICE_PROOF_2026-09-13.md) records the
+  current v63 candidate's bounded preview evidence.
+- [`PLAY_INTERNAL_DEVICE_PROOF_2026-09-09.md`](./PLAY_INTERNAL_DEVICE_PROOF_2026-09-09.md) retains
+  bounded historical evidence from the superseded v62 candidate.
 
 ## Status register
 
@@ -36,22 +38,21 @@ staged-server journey and broader release gates are not complete.
 
 ## Current candidate
 
-| Field             | Frozen value                                                               |
-| ----------------- | -------------------------------------------------------------------------- |
-| Version           | `0.1.45` / Android version code `62`                                       |
-| Source commit     | `8179d0a3a99c4e2e28a01fd83212fee919bad41c`                                 |
-| Release commit    | `644a566fb54da7d2c195e369d11677acfce097ea`                                 |
-| Release run       | `android-0.1.45-8179d0a-20260910075110`                                    |
-| AAB               | `gator-release-0.1.45-v62-644a566.aab` — 56,141,406 bytes; never commit it |
-| AAB SHA-256       | `110efe12a0d5cc620b2a523787bb95139f3f2ddf86550449d16de7d8fcd2bd51`         |
-| Play destination  | Google Play Internal Testing only                                          |
-| Submission        | `736e29d7-d0d1-48f7-8f68-6095ce240d10`, submitted 2026-09-10               |
-| Device checkpoint | Play update to `0.1.45` / `62` on Samsung `SM-S938U1`, Android 16 / API 36 |
+| Field             | Frozen value                                                                 |
+| ----------------- | ---------------------------------------------------------------------------- |
+| Version           | `0.1.46` / Android version code `63`                                         |
+| Source commit     | `dc32380c6cb17d85e7ab08c4d5b9118660f763c8`                                   |
+| Release commit    | `a1ba9af51c46aac08f9c00e2c7c84762bb78cb2b`                                   |
+| Release run       | `android-0.1.46-dc32380-20260913175233`                                      |
+| AAB               | `gator-release-0.1.46-v63-a1ba9af.aab` — 56,150,828 bytes; never commit it   |
+| AAB SHA-256       | `4a9c83a521b6eb20404d502b535a2001e201ae71f1a9f3a88d703aed79221a06`           |
+| Play destination  | Google Play Internal Testing only                                            |
+| Submission        | `63ddf33f-b3f1-496d-afcf-b7ee4c53a751`, submitted 2026-09-13                 |
+| Device checkpoint | Play install and `NET-01` matrix on Samsung `SM-S938U1`, Android 16 / API 36 |
 
-The device checkpoint proves the Play-delivered identity, immediate rejection of the synthetic
-unsupported `ftp://example.com` setup URL, and an ordinary killed-process cold relaunch. It does not
-prove staged connect, sync, send, receive, notification, permission, accessibility, cleanup, or
-public-release behavior.
+The device checkpoint proves Play-delivered identity and the bounded `NET-01` automatic-preview
+matrix recorded in the linked proof. It does not prove the general staged connect, send, receive,
+notification, permission, accessibility, process-restart, disconnect, or public-release journeys.
 
 ## Release disposition
 
@@ -95,8 +96,8 @@ public-release behavior.
   hash, and Play signing, install or update through Play, staged-server journeys, feedback path,
   cleanup, and every Play prompt shown for this artifact.
 - **Current status (2026-09-13):** **IN_PROGRESS — candidate creation, validation, Internal
-  submission, Play update, bounded URL rejection, and ordinary-kill relaunch are proven.** Remaining
-  work is live tester/track administration, a stable non-production server and fixtures, the full
+  submission, Play install, and bounded `NET-01` acceptance are proven.** Remaining work is live
+  tester/track administration, a stable non-production server and general fixtures, the full
   selected connect/sync/send/receive/notification/restart/disconnect journey, cleanup, candidate
   limitations, and artifact-specific Play declarations or prompts. No wider-track promotion is
   authorized.
