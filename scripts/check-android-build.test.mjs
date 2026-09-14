@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import {
   FORBIDDEN_COMMUNITY_WEBVIEW_DEX_MARKERS,
@@ -20,6 +22,10 @@ import {
   validateHeadlessEntry,
   validatePackagedAndroidBundle,
 } from './check-android-build.mjs';
+
+const require = createRequire(import.meta.url);
+const { applyWebSocketRedirectPolicy } = require('../plugins/withNoWebSocketRedirects');
+const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 const androidNamespace = 'http://schemas.android.com/apk/res/android';
 const intendedPermissions = [
@@ -264,6 +270,64 @@ test('accepts the expected manifest and headless entry order', () => {
 
 test('accepts the pinned Expo file-system redirect containment chain', () => {
   assert.deepEqual(validateExpoFileSystemRedirectContainment(redirectContainmentInput()), []);
+});
+
+test('injects and retains the fail-closed Android WebSocket redirect policy', () => {
+  const source = `package com.example
+
+import android.app.Application
+import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
+
+class MainApplication : Application() {
+  override fun onCreate() {
+    super.onCreate()
+    loadReactNative(this)
+  }
+}
+`;
+  const transformed = applyWebSocketRedirectPolicy(source, 'kt');
+
+  for (const marker of [
+    'import com.facebook.react.modules.websocket.WebSocketModule',
+    'WebSocketModule.setCustomClientBuilder { builder ->',
+    'builder.followRedirects(false)',
+    'builder.followSslRedirects(false)',
+  ]) {
+    assert.equal(transformed.split(marker).length - 1, 1, marker);
+  }
+  assert.ok(
+    transformed.indexOf('WebSocketModule.setCustomClientBuilder') <
+      transformed.indexOf('loadReactNative(this)'),
+  );
+  assert.equal(applyWebSocketRedirectPolicy(transformed, 'kt'), transformed);
+  assert.throws(
+    () =>
+      applyWebSocketRedirectPolicy(
+        transformed.replace('      builder.followSslRedirects(false)\n', ''),
+        'kt',
+      ),
+    /partial, duplicate, or late policy/,
+  );
+  assert.throws(
+    () =>
+      applyWebSocketRedirectPolicy(
+        transformed.replace(
+          '    loadReactNative(this)',
+          '    WebSocketModule.setCustomClientBuilder(null)\n    loadReactNative(this)',
+        ),
+        'kt',
+      ),
+    /partial, duplicate, or late policy/,
+  );
+  assert.throws(() => applyWebSocketRedirectPolicy(source, 'java'), /only Kotlin/);
+
+  const appConfig = readFileSync(join(ROOT, 'app.config.ts'), 'utf8');
+  const registration = "'./plugins/withNoWebSocketRedirects'";
+  assert.equal(appConfig.split(registration).length - 1, 1);
+  const pluginListStart = appConfig.indexOf('  plugins: [');
+  const registrationIndex = appConfig.indexOf(registration, pluginListStart);
+  assert.ok(pluginListStart >= 0 && registrationIndex > pluginListStart);
+  assert.doesNotMatch(appConfig.slice(pluginListStart, registrationIndex), /^    (?:'|\[)/m);
 });
 
 test('rejects drift anywhere in the Expo file-system redirect containment chain', () => {

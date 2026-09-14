@@ -90,6 +90,10 @@ const config: ExpoConfig = {
     },
   },
   plugins: [
+    // Keep this first: Expo runs edits to MainApplication in reverse registration order, so this
+    // inspector runs after other declared plugins. Socket.IO carries account credentials; a 3xx
+    // WebSocket handshake must fail at the configured origin instead of being followed by OkHttp.
+    './plugins/withNoWebSocketRedirects',
     'expo-router',
     'expo-secure-store',
     'expo-image',
