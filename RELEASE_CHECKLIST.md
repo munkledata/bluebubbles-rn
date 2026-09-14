@@ -283,9 +283,12 @@ npm run check:android-build
 - [ ] Connect to a valid public-CA HTTPS server; verify server info/full sync, one live socket event,
       one upload, and one download.
 - [ ] An untrusted/self-signed certificate is rejected unless Android itself trusts its issuer.
-- [ ] Product copy is explicit that the app uses Android's normal TLS validation and does **not**
+- [x] Product copy is explicit that the app uses Android's normal TLS validation and does **not**
       claim certificate pinning. An inert legacy `certPins` SecureStore value on an upgraded install
-      is harmless because no code reads it.
+      is harmless because no code reads it. Removal commit `66869d3` is in exact Play v63 source
+      `dc32380c`; exact-tree scans found no pinning API/dependency or certificate-validation bypass,
+      and the ordinary public-CA connection is recorded in
+      [`docs/RT_01A_PLAY_DEVICE_PROOF_2026-09-13.md`](./docs/RT_01A_PLAY_DEVICE_PROOF_2026-09-13.md).
 - [x] On the exact candidate, traffic capture proves a forged/rejected `new-server` event cannot
       persist, contact, or send credentials to another origin or downgrade HTTPS. An approved
       rotation displays both origins and requires foreground confirmation, a freshly entered

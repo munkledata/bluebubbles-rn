@@ -157,6 +157,11 @@ that dependency and did not expose the server to the internet. Redirect rejectio
 upload/download TLS behavior remain separate release-checklist rows, not `RT-01A` closure
 conditions; this evidence must not be reused as proof for those rows.
 
+The successful ordinary public-CA server-info, synchronization, and WebSocket connection also
+supplies `TLS-01A`'s normal-HTTPS device gate. That narrowly shared fact does not supply `TLS-00`'s
+cleartext transport matrix or the separate redirect, upload/download, or untrusted-certificate
+release rows.
+
 ## Cleanup
 
 - The fixture printed `RT01_CLOSED`; its temporary root, process, and all listeners were absent.
