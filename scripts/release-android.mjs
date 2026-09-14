@@ -35,7 +35,10 @@ import {
   isValidReleaseBuildReceipt,
   isValidReleaseNativePathProof,
 } from './android-release-receipt.mjs';
-import { inspectPackagedAndroidBundle } from './check-android-build.mjs';
+import {
+  GOOGLE_MAPS_API_KEY_PATTERN,
+  inspectPackagedAndroidBundle,
+} from './check-android-build.mjs';
 import {
   nativeCompilerPathMappingFlags,
   runAndroidNativePathCheck,
@@ -60,6 +63,7 @@ const FULL_COMMIT_PATTERN = /^[0-9a-f]{40}$/;
 const VERSION_PATTERN = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
 const ZERO_OBJECT_ID = '0'.repeat(40);
 const STAGED_GOOGLE_SERVICES_PATH = '.gator-release/google-services.json';
+const CI_GOOGLE_MAPS_API_KEY = `AIza${'A'.repeat(35)}`;
 const RELEASE_NATIVE_TEMP_PARENT = '/private/tmp';
 const RELEASE_NATIVE_TEMP_PREFIX = 'gator-android-release';
 const PRIVATE_DIRECTORY_MODE = 0o700;
@@ -525,13 +529,30 @@ function assertOnlyReleaseVersionsChanged(before, after, targetVersion) {
   }
 }
 
-function resolveCredentialPath(variableName, fallback) {
-  const configured = process.env[variableName];
+function resolveGoogleServicesPath(fallback) {
+  const configured = process.env.GOOGLE_SERVICES_JSON;
   const path = configured ? resolve(configured) : resolve(ROOT, fallback);
   if (!existsSync(path) || !statSync(path).isFile()) {
-    throw new Error(`${variableName} file is missing`);
+    throw new Error('GOOGLE_SERVICES_JSON file is missing');
   }
   return path;
+}
+
+export function requireEnvironmentCredential(environment, variableName) {
+  const configured = environment?.[variableName];
+  if (typeof configured !== 'string' || configured.trim().length === 0) {
+    throw new Error(`${variableName} is missing`);
+  }
+  const value = configured.trim();
+  if (variableName === 'GOOGLE_MAPS_ANDROID_API_KEY') {
+    if (!GOOGLE_MAPS_API_KEY_PATTERN.test(value)) {
+      throw new Error('GOOGLE_MAPS_ANDROID_API_KEY must be a valid Google API key');
+    }
+    if (value === CI_GOOGLE_MAPS_API_KEY) {
+      throw new Error('GOOGLE_MAPS_ANDROID_API_KEY must not use the compile-only CI value');
+    }
+  }
+  return value;
 }
 
 export function stageGoogleServicesFile(worktree, sourcePath) {
@@ -985,7 +1006,11 @@ async function preflight(options) {
     if (findLocalBranchObjectId(releaseBranch) !== null) {
       throw new Error(`release branch already exists: ${releaseBranch}`);
     }
-    resolveCredentialPath('GOOGLE_SERVICES_JSON', 'google-services.json');
+    resolveGoogleServicesPath('google-services.json');
+    const googleMapsAndroidApiKey = requireEnvironmentCredential(
+      process.env,
+      'GOOGLE_MAPS_ANDROID_API_KEY',
+    );
     const toolchain = runToolchainCheck({ root: ROOT });
     const runId = createRunId(version, sourceCommit);
     const directory = runDirectory(runId);
@@ -1004,6 +1029,7 @@ async function preflight(options) {
         environment: 'production',
         track: 'internal',
         applicationId: APPLICATION_ID,
+        googleMapsApiKeySha256: sha256Bytes(googleMapsAndroidApiKey),
         releaseBranch,
       },
       toolchain: {
@@ -1152,7 +1178,14 @@ async function build(options) {
     if (existsSync(pendingPath) || existsSync(runFile(runId, 'artifact.invalid.aab'))) {
       throw new Error('release run already has a pending or invalid artifact');
     }
-    const googleServices = resolveCredentialPath('GOOGLE_SERVICES_JSON', 'google-services.json');
+    const googleServices = resolveGoogleServicesPath('google-services.json');
+    const googleMapsAndroidApiKey = requireEnvironmentCredential(
+      process.env,
+      'GOOGLE_MAPS_ANDROID_API_KEY',
+    );
+    if (sha256Bytes(googleMapsAndroidApiKey) !== state.target.googleMapsApiKeySha256) {
+      throw new Error('GOOGLE_MAPS_ANDROID_API_KEY no longer matches the preflighted credential');
+    }
     const localBuildPlugin = resolveLocalBuildPlugin();
     const nativeWorkspace = prepareManagedEasDirectory(state);
     const startedAt = nowIso();
@@ -1176,6 +1209,8 @@ async function build(options) {
         const stagedGoogleServices = stageGoogleServicesFile(worktree, googleServices);
         const environment = createAndroidReleaseBuildEnvironment(process.env, nativeWorkspace);
         Object.assign(environment, {
+          EAS_BUILD_PROFILE: 'production',
+          GOOGLE_MAPS_ANDROID_API_KEY: googleMapsAndroidApiKey,
           GOOGLE_SERVICES_JSON: stagedGoogleServices,
           EAS_LOCAL_BUILD_PLUGIN_PATH: localBuildPlugin,
           EAS_LOCAL_BUILD_WORKINGDIR: nativeWorkspace.work,
@@ -1341,6 +1376,9 @@ function inspectReleaseArtifact(artifactPath, state) {
   if (identity.versionName !== state.target.version) {
     throw new Error(`AAB versionName is ${identity.versionName}, expected ${state.target.version}`);
   }
+  if (identity.googleMapsApiKeySha256 !== state.target.googleMapsApiKeySha256) {
+    throw new Error('AAB Google Maps API key does not match the preflighted credential');
+  }
   return {
     ...identity,
     bytes,
@@ -1416,6 +1454,7 @@ async function validate(options) {
         versionCode: artifact.versionCode,
         bytes: artifact.bytes,
         sha256: artifact.sha256,
+        googleMapsApiKeySha256: artifact.googleMapsApiKeySha256,
         uploadCertificateSha256: artifact.uploadCertificateSha256,
       },
       validation: {
@@ -1427,6 +1466,7 @@ async function validate(options) {
           'identity',
           'signature',
           'hash',
+          'google-maps-key-binding',
           'native-path-proof',
         ],
         completedAt,
@@ -1458,6 +1498,7 @@ function verifyRecordedArtifact(state, artifactPath) {
     artifact.sha256 !== state.artifact?.sha256 ||
     artifact.bytes !== state.artifact?.bytes ||
     artifact.versionCode !== state.artifact?.versionCode ||
+    artifact.googleMapsApiKeySha256 !== state.artifact?.googleMapsApiKeySha256 ||
     artifact.uploadCertificateSha256 !== state.artifact?.uploadCertificateSha256
   ) {
     throw new Error('release artifact no longer matches its validation receipt');

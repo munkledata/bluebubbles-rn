@@ -168,6 +168,8 @@ jobs:
 
       - name: Clean Expo prebuild
         env:
+          # Compile-only sentinel. Release builds require the restricted production key.
+          GOOGLE_MAPS_ANDROID_API_KEY: AIzaAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
           GOOGLE_SERVICES_JSON: ./test/fixtures/google-services.ci.json
         run: ./node_modules/.bin/expo prebuild --platform android --clean --no-install
 

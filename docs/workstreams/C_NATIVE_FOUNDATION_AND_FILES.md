@@ -70,10 +70,11 @@ configuration can be compared without disclosing credentials.
 
 ## `PKG-01` — explicit native compatibility boundaries
 
-Exact-pin shipped native boundaries such as op-sqlite, notify-kit, Firebase, and FlashList, and pin
-Drizzle where its adapter contract requires it. The lockfile supports reproducibility but is not the
-only compatibility statement; record the upgrade steps and native smoke surface for each critical
-boundary.
+Exact-pin shipped native boundaries such as op-sqlite, notify-kit, Firebase, FlashList, and
+`react-native-maps`, and pin Drizzle where its adapter contract requires it. The lockfile supports
+reproducibility but is not the only compatibility statement; record the upgrade steps and native
+smoke surface for each critical boundary. The Maps boundary also requires a clean native rebuild,
+provider-key injection, merged/AAB metadata proof, and physical rendering/fallback checks.
 
 Keep `expo-share-intent` and direct `react-native-webview` absent while their product surfaces remain
 disabled. Reintroducing the community WebView requires reopening the applicable `WEB-01..03` or
@@ -102,8 +103,10 @@ concern rather than being inferred from a successful native compile.
 ## `PERM-01` — least-privilege Android permissions
 
 Maintain a permission-to-call-site-to-user-flow inventory. Block `WRITE_CONTACTS`,
-`READ_MEDIA_AUDIO`, and other permissions with no approved flow through
-`android.blockedPermissions`; configure media access for photo/video-only granular permissions.
+`READ_MEDIA_AUDIO`, all coarse/fine/background/foreground-service location permissions, and other
+permissions with no approved flow through `android.blockedPermissions`; configure media access for
+photo/video-only granular permissions. Find My renders server-provided coordinates and must never
+silently become a phone-location feature merely because a map package is installed.
 
 Automatic background behavior may check an existing grant but must not surprise the user with a
 prompt. Explicit user actions own permission requests, cancellation handling, denial guidance, and a

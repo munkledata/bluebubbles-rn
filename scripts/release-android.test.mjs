@@ -23,11 +23,51 @@ import {
   isValidReleaseBuildReceipt,
   isValidReleaseNativePathProof,
   prepareManagedEasDirectory,
+  requireEnvironmentCredential,
   removeManagedEasDirectory,
   stageGoogleServicesFile,
   verifyReleaseNativePathProof,
 } from './release-android.mjs';
 import { nativeCompilerPathMappingFlags } from './check-android-native-paths.mjs';
+
+test('requires a nonblank local Maps credential without exposing its value', () => {
+  const validKey = `AIza${'B'.repeat(34)}C`;
+  assert.equal(
+    requireEnvironmentCredential(
+      { GOOGLE_MAPS_ANDROID_API_KEY: `  ${validKey}  ` },
+      'GOOGLE_MAPS_ANDROID_API_KEY',
+    ),
+    validKey,
+  );
+  assert.throws(
+    () => requireEnvironmentCredential({}, 'GOOGLE_MAPS_ANDROID_API_KEY'),
+    /GOOGLE_MAPS_ANDROID_API_KEY is missing/,
+  );
+  assert.throws(
+    () =>
+      requireEnvironmentCredential(
+        { GOOGLE_MAPS_ANDROID_API_KEY: 'restricted-map-key' },
+        'GOOGLE_MAPS_ANDROID_API_KEY',
+      ),
+    /must be a valid Google API key/,
+  );
+  assert.throws(
+    () =>
+      requireEnvironmentCredential(
+        { GOOGLE_MAPS_ANDROID_API_KEY: '   ' },
+        'GOOGLE_MAPS_ANDROID_API_KEY',
+      ),
+    /GOOGLE_MAPS_ANDROID_API_KEY is missing/,
+  );
+  assert.throws(
+    () =>
+      requireEnvironmentCredential(
+        { GOOGLE_MAPS_ANDROID_API_KEY: `AIza${'A'.repeat(35)}` },
+        'GOOGLE_MAPS_ANDROID_API_KEY',
+      ),
+    /must not use the compile-only CI value/,
+  );
+});
 
 function git(cwd, args, { input } = {}) {
   return execFileSync('git', args, {

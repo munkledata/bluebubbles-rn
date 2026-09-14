@@ -57,11 +57,13 @@ accessibility actions and hints. Give failed-message recovery a privacy-safe sta
 advertise a button only when the options action exists, so TalkBack users do not depend on adjacent
 text, punctuation, or an undiscoverable gesture.
 
-On the privacy-contained Find My screen, keep the row-level map-focus action out of the Android
-accessibility tree while its nested external Maps action remains reachable. Expose Refresh as a named
-button with busy/disabled state, expose the category selector as named tabs with one selected state,
-and name every external Maps action with the visible device/person so repeated “Open” controls remain
-distinguishable. Do not add a focusable grouping container around the individual tabs.
+On Find My, keep the row-level visual map-focus action out of the Android accessibility tree while its
+nested external Maps action remains reachable. Give the native map a bounded summary label and each
+marker its bounded device/person label. On a physical device, prove that TalkBack can reach the map,
+markers, Google Maps attribution, Refresh, category tabs, and named external Maps actions without the
+map trapping focus or making the list/fallback unreachable. Expose Refresh with busy/disabled state,
+expose the category selector as named tabs with one selected state, and do not add a focusable grouping
+container around the individual tabs.
 
 Shared settings steppers expose their decrement and increment targets as named buttons and report
 each side's disabled state explicitly. Their accessibility state follows the same boundary that

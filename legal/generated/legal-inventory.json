@@ -5,18 +5,18 @@
     "exactAab": false
   },
   "inputs": {
-    "packageLockSha256": "0da9739b33e7baba7e7ae8bada18c63252e03c12f8f148373b14326d38340d91",
+    "packageLockSha256": "72643cee8ae381e7aeb6371b8b1531792708c678292e07feb322232ffbfaa90b",
     "projectNoticeSha256": "d9f6c2d9d6d7e0511ceadec93411c11f762ebeafb7cf11f7a3d0fef091a0e912",
     "thirdPartyNoticesSha256": "78cc50de9647e81d034807909ed2b0be5fce4ce8aebb5a5e1a54a7379a9af79d",
-    "assetProvenanceSha256": "9c41d5bf60da00ac1727a981163a9ce0a0d443010f6f477a80b418d0c537eeb7"
+    "assetProvenanceSha256": "e528bc414472d10323fc4758a528ccb722210e7a52341bb39acd76842b88a889"
   },
   "summary": {
-    "productionPackageRecords": 1006,
-    "uniquePackageVersions": 914,
+    "productionPackageRecords": 1008,
+    "uniquePackageVersions": 916,
     "assetFiles": 14,
     "pendingAssetProvenance": 14,
-    "localComponents": 8,
-    "packageLockSha256": "0da9739b33e7baba7e7ae8bada18c63252e03c12f8f148373b14326d38340d91",
+    "localComponents": 9,
+    "packageLockSha256": "72643cee8ae381e7aeb6371b8b1531792708c678292e07feb322232ffbfaa90b",
     "unresolvedPackageRecords": 130,
     "exactAabCoverage": false
   },
@@ -4798,6 +4798,23 @@
       "spdx": "MIT",
       "resolved": "https://registry.npmjs.org/@types/emscripten/-/emscripten-1.41.5.tgz",
       "integrity": "sha512-cMQm7pxu6BxtHyqJ7mQZ2kXWV5SLmugybFdHCBbJ5eHzOo6VhBckEgAT3//rP5FwPHNPeEiq4SmQ5ucBwsOo4Q==",
+      "optional": false,
+      "legalDocuments": [
+        {
+          "path": "LICENSE",
+          "bytes": 1141,
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383"
+        }
+      ],
+      "issues": []
+    },
+    {
+      "installPath": "node_modules/@types/geojson",
+      "name": "@types/geojson",
+      "version": "7946.0.16",
+      "spdx": "MIT",
+      "resolved": "https://registry.npmjs.org/@types/geojson/-/geojson-7946.0.16.tgz",
+      "integrity": "sha512-6C8nqWur3j98U6+lXDfTUWIfgvZU+EumvpHKcYjujKH7woYyLj2sUmff0tRhrqM7BohUw7Pz3ZB1jj2gW9Fvmg==",
       "optional": false,
       "legalDocuments": [
         {
@@ -13810,6 +13827,23 @@
       "issues": []
     },
     {
+      "installPath": "node_modules/react-native-maps",
+      "name": "react-native-maps",
+      "version": "1.27.2",
+      "spdx": "MIT",
+      "resolved": "https://registry.npmjs.org/react-native-maps/-/react-native-maps-1.27.2.tgz",
+      "integrity": "sha512-VKr+xZ2RZGHHJlY6KhlafvGSmK0dq/tUu5uhfJ7K9rwN5pUdubdugzMKGDU/16lXmQSg7xbClKhRctj3Pm5F5g==",
+      "optional": false,
+      "legalDocuments": [
+        {
+          "path": "LICENSE",
+          "bytes": 1073,
+          "sha256": "4099a1a5146930614f6c88cab3d38676d460e0e349f3743693ade20e4407587e"
+        }
+      ],
+      "issues": []
+    },
+    {
       "installPath": "node_modules/react-native-notify-kit",
       "name": "react-native-notify-kit",
       "version": "10.4.8",
@@ -17531,6 +17565,14 @@
       ]
     },
     {
+      "sha256": "4099a1a5146930614f6c88cab3d38676d460e0e349f3743693ade20e4407587e",
+      "bytes": 1073,
+      "text": "The MIT License (MIT)\n\nCopyright (c) 2015 Airbnb\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
+      "sources": [
+        "node_modules/react-native-maps/LICENSE"
+      ]
+    },
+    {
       "sha256": "41f2eef190265a6ea435951170947e35461707f91631821b3a67421bea5b2a7c",
       "bytes": 1106,
       "text": "The MIT License (MIT)\n\nCopyright (c) 2020-present 650 Industries, Inc. (aka Expo)\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE.\n",
@@ -19302,6 +19344,7 @@
         "node_modules/@types/babel__traverse/LICENSE",
         "node_modules/@types/better-sqlite3/LICENSE",
         "node_modules/@types/emscripten/LICENSE",
+        "node_modules/@types/geojson/LICENSE",
         "node_modules/@types/graceful-fs/LICENSE",
         "node_modules/@types/istanbul-lib-coverage/LICENSE",
         "node_modules/@types/istanbul-lib-report/LICENSE",
@@ -20219,8 +20262,8 @@
     {
       "path": "modules/gator-screen-security",
       "provenanceStatus": "unresolved",
-      "files": 4,
-      "sha256": "aee8b89142ecbd75b2e198057d4e1afdf508d2b464409219589ea6e1cbb818ed",
+      "files": 5,
+      "sha256": "51a82a403bc4d6acc9421c0507a45adbde744e61fc72d5d9da903ff6b6ae62c2",
       "issue": null
     },
     {
@@ -20235,6 +20278,13 @@
       "provenanceStatus": "unresolved",
       "files": 1,
       "sha256": "7365aa0dc24051a64451abacbe4cbbd7d0dc00f80cad10bee60d84ef6aaa24c5",
+      "issue": null
+    },
+    {
+      "path": "plugins/withNoWebSocketRedirects.js",
+      "provenanceStatus": "unresolved",
+      "files": 1,
+      "sha256": "f88271c524b03fa67d07d636fc1eda298c3f3de470c50af2a3df7dc9cf9932b6",
       "issue": null
     },
     {

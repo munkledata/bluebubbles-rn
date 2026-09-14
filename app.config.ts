@@ -6,11 +6,23 @@ const DEVELOPMENT_ANDROID_ARCHITECTURES = 'arm64-v8a,x86_64';
 const androidArchitectures =
   process.env.GATOR_ANDROID_ARCHITECTURES ?? DEVELOPMENT_ANDROID_ARCHITECTURES;
 const rnFetchEscapeHatch = process.env.EXPO_PUBLIC_USE_RN_FETCH?.trim().toLowerCase();
+const googleMapsAndroidApiKey = process.env.GOOGLE_MAPS_ANDROID_API_KEY?.trim();
+const googleMapsAndroidApiKeyPattern = /^AIza[0-9A-Za-z_-]{35}$/;
 
 if (rnFetchEscapeHatch === '1' || rnFetchEscapeHatch === 'true') {
   throw new Error(
     'EXPO_PUBLIC_USE_RN_FETCH must remain disabled so authenticated redirects fail before a follow-up request',
   );
+}
+
+if (process.env.EAS_BUILD_PROFILE && !googleMapsAndroidApiKey) {
+  throw new Error(
+    'GOOGLE_MAPS_ANDROID_API_KEY is required for every EAS build so Find My never ships with an unauthenticated map',
+  );
+}
+
+if (googleMapsAndroidApiKey && !googleMapsAndroidApiKeyPattern.test(googleMapsAndroidApiKey)) {
+  throw new Error('GOOGLE_MAPS_ANDROID_API_KEY must have a valid Google API key shape');
 }
 
 /**
@@ -70,6 +82,12 @@ const config: ExpoConfig = {
     blockedPermissions: [
       'android.permission.WRITE_CONTACTS',
       'android.permission.READ_MEDIA_AUDIO',
+      // Find My renders server-provided coordinates. It never reads this phone's location, so a
+      // map dependency must not silently expand the Android permission surface.
+      'android.permission.ACCESS_COARSE_LOCATION',
+      'android.permission.ACCESS_FINE_LOCATION',
+      'android.permission.ACCESS_BACKGROUND_LOCATION',
+      'android.permission.FOREGROUND_SERVICE_LOCATION',
       // Incoming FaceTime remains an actionable high-importance heads-up notification. Never let
       // a notification dependency restore automatic full-screen launch.
       'android.permission.USE_FULL_SCREEN_INTENT',
@@ -97,6 +115,13 @@ const config: ExpoConfig = {
     'expo-router',
     'expo-secure-store',
     'expo-image',
+    // Native Google Maps replaces the retired Leaflet/WebView path. The key is restricted in
+    // Google Cloud to this package + reviewed signing certificates + Maps SDK for Android only;
+    // it is supplied by local/EAS environment and is never committed.
+    [
+      'react-native-maps',
+      googleMapsAndroidApiKey ? { androidGoogleMapsApiKey: googleMapsAndroidApiKey } : {},
+    ],
     // Cold-start splash: black background (matches the default oled-dark theme + the welcome
     // screen) with the gator icon, so launching a closed app no longer flashes white. Same
     // color in OS light + dark. The config plugin is the SDK 57 way (legacy `splash` keys are

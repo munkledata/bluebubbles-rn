@@ -1,11 +1,26 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  AppState,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+  type AppStateStatus,
+} from 'react-native';
 import type { FindMyDevice, FindMyFriend } from '@core/findmy';
 import { useFindMyStore } from '@state/findmyStore';
+import { useLockStore } from '@state/lockStore';
 import { hasCoordinates, resolveDisplayPoint, safeOpenUrl, type DisplayPoint } from '@utils';
 import { Screen, ScreenHeader, useTheme } from '@ui';
-import { FindMyMap, type MapMarker } from '@ui/findmy/FindMyMap';
+import {
+  FindMyMap,
+  MAX_FINDMY_MAP_MARKERS,
+  type MapFocusRequest,
+  type MapMarker,
+} from '@ui/findmy/FindMyMap';
 import { showExternalOpenFailure } from '@ui/toast/external-open-feedback';
 import { useFindMyPolling } from '@/features/findmy/use-find-my-polling';
 import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
@@ -22,8 +37,12 @@ export default function FindMyScreen(): React.JSX.Element {
   const error = useFindMyStore((s) => s.error);
   const load = useFindMyStore((s) => s.load);
   const refresh = useFindMyStore((s) => s.refresh);
+  const locked = useLockStore((s) => s.locked);
   const [tab, setTab] = useState<'devices' | 'items' | 'people'>('devices');
-  const [focusId, setFocusId] = useState<string | null>(null);
+  const [mapFocusRequest, setMapFocusRequest] = useState<MapFocusRequest | null>(null);
+  const [routeFocused, setRouteFocused] = useState(false);
+  const [appState, setAppState] = useState<AppStateStatus>(AppState.currentState);
+  const focusRevisionRef = useRef(0);
   const [accountLease] = useState(() => captureRealtimeDeliveryLease());
   const mountedRef = useRef(true);
   const routeFocusedRef = useRef(false);
@@ -40,12 +59,20 @@ export default function FindMyScreen(): React.JSX.Element {
   useFocusEffect(
     useCallback(() => {
       routeFocusedRef.current = true;
+      setRouteFocused(true);
       return () => {
         routeFocusedRef.current = false;
+        setRouteFocused(false);
+        setMapFocusRequest(null);
         activeMapOpenRef.current = null;
       };
     }, []),
   );
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', setAppState);
+    return () => subscription.remove();
+  }, []);
 
   /**
    * Hand one validated point to Android Maps and keep any delayed failure feedback owned by this
@@ -84,19 +111,22 @@ export default function FindMyScreen(): React.JSX.Element {
     void load();
   }, [load]);
 
+  const refreshFindMy = useCallback(async (): Promise<void> => {
+    setMapFocusRequest(null);
+    await refresh();
+  }, [refresh]);
+
   // The backend is a read-only cache (no location push events). Poll only while this route is
   // focused AND the app is active; returning to it gets an immediate refresh.
-  useFindMyPolling(refresh);
-
-  // Marker id namespaces the source so a device + friend can't collide; the list rows reuse it.
-  const midDevice = (d: FindMyDevice, k: 'd' | 'i'): string => `${k}:${d.id}`;
-  const midFriend = (f: FindMyFriend): string => `p:${f.id}`;
+  useFindMyPolling(refreshFindMy);
 
   // Every located entity becomes a map marker only after the coordinate pair passes the shared
-  // finite-value validator. A partial location must never fall through to an accidental (0, 0).
+  // geographic validator. Short source/index ids stay unique without sending server-owned ids
+  // across the native bridge. A partial location must never fall through to accidental (0, 0).
   const markers = useMemo<MapMarker[]>(() => {
     const out: MapMarker[] = [];
     const push = (id: string, lat: number | null, lng: number | null, name: string) => {
+      if (out.length >= MAX_FINDMY_MAP_MARKERS) return;
       const pt = resolveDisplayPoint(lat, lng);
       if (!pt.visible) return;
       out.push({
@@ -106,11 +136,21 @@ export default function FindMyScreen(): React.JSX.Element {
         label: name,
       });
     };
-    devices.forEach((d) => push(midDevice(d, 'd'), d.latitude, d.longitude, d.name));
-    items.forEach((d) => push(midDevice(d, 'i'), d.latitude, d.longitude, d.name));
-    friends.forEach((f) => push(midFriend(f), f.latitude, f.longitude, f.name));
+    devices.forEach((device, index) =>
+      push(`d:${index}`, device.latitude, device.longitude, device.name),
+    );
+    items.forEach((item, index) => push(`i:${index}`, item.latitude, item.longitude, item.name));
+    friends.forEach((friend, index) =>
+      push(`p:${index}`, friend.latitude, friend.longitude, friend.name),
+    );
     return out;
   }, [devices, items, friends]);
+
+  const mappedMarkerIds = useMemo(() => new Set(markers.map(({ id }) => id)), [markers]);
+  const focusMapMarker = useCallback((id: string): void => {
+    focusRevisionRef.current += 1;
+    setMapFocusRequest({ id, revision: focusRevisionRef.current });
+  }, []);
 
   const rows = tab === 'devices' ? devices : tab === 'items' ? items : friends;
 
@@ -121,7 +161,7 @@ export default function FindMyScreen(): React.JSX.Element {
         onBack={() => router.back()}
         right={
           <Pressable
-            onPress={() => void refresh()}
+            onPress={() => void refreshFindMy()}
             hitSlop={8}
             disabled={refreshing}
             accessibilityRole="button"
@@ -135,7 +175,9 @@ export default function FindMyScreen(): React.JSX.Element {
         }
       />
 
-      {markers.length > 0 ? <FindMyMap markers={markers} focusId={focusId} /> : null}
+      {markers.length > 0 && routeFocused && appState === 'active' && !locked ? (
+        <FindMyMap markers={markers} focusRequest={mapFocusRequest} />
+      ) : null}
 
       <View style={[styles.tabs, { borderBottomColor: theme.color.separator }]}>
         {(['devices', 'items', 'people'] as const).map((t) => (
@@ -164,7 +206,7 @@ export default function FindMyScreen(): React.JSX.Element {
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
-            onRefresh={() => void refresh()}
+            onRefresh={() => void refreshFindMy()}
             tintColor={theme.color.tint}
           />
         }
@@ -184,28 +226,38 @@ export default function FindMyScreen(): React.JSX.Element {
           </Text>
         ) : null}
         {tab === 'devices'
-          ? devices.map((d) => (
+          ? devices.map((d, index) => (
               <DeviceRow
-                key={d.id}
+                key={`${d.id}:${index}`}
                 device={d}
-                onFocus={() => setFocusId(midDevice(d, 'd'))}
+                onFocus={
+                  mappedMarkerIds.has(`d:${index}`) ? () => focusMapMarker(`d:${index}`) : undefined
+                }
                 onOpenLocation={openInMaps}
               />
             ))
           : tab === 'items'
-            ? items.map((d) => (
+            ? items.map((d, index) => (
                 <DeviceRow
-                  key={d.id}
+                  key={`${d.id}:${index}`}
                   device={d}
-                  onFocus={() => setFocusId(midDevice(d, 'i'))}
+                  onFocus={
+                    mappedMarkerIds.has(`i:${index}`)
+                      ? () => focusMapMarker(`i:${index}`)
+                      : undefined
+                  }
                   onOpenLocation={openInMaps}
                 />
               ))
-            : friends.map((f) => (
+            : friends.map((f, index) => (
                 <FriendRow
-                  key={f.id}
+                  key={`${f.id}:${index}`}
                   friend={f}
-                  onFocus={() => setFocusId(midFriend(f))}
+                  onFocus={
+                    mappedMarkerIds.has(`p:${index}`)
+                      ? () => focusMapMarker(`p:${index}`)
+                      : undefined
+                  }
                   onOpenLocation={openInMaps}
                 />
               ))}
@@ -220,7 +272,7 @@ function DeviceRow({
   onOpenLocation,
 }: {
   device: FindMyDevice;
-  onFocus: () => void;
+  onFocus?: () => void;
   onOpenLocation: (point: DisplayPoint, label: string) => void;
 }): React.JSX.Element {
   const theme = useTheme();
@@ -236,8 +288,8 @@ function DeviceRow({
   return (
     // One validated point drives focus and native-map admission so those paths cannot drift apart.
     <Pressable
-      onPress={point.visible ? onFocus : undefined}
-      disabled={!point.visible}
+      onPress={point.visible && onFocus ? onFocus : undefined}
+      disabled={!point.visible || !onFocus}
       accessible={false}
       importantForAccessibility="no"
       style={[styles.row, { borderBottomColor: theme.color.separator }]}
@@ -269,7 +321,7 @@ function FriendRow({
   onOpenLocation,
 }: {
   friend: FindMyFriend;
-  onFocus: () => void;
+  onFocus?: () => void;
   onOpenLocation: (point: DisplayPoint, label: string) => void;
 }): React.JSX.Element {
   const theme = useTheme();
@@ -279,8 +331,8 @@ function FriendRow({
   const detail = friend.address ?? (located ? 'Location available' : 'No location');
   return (
     <Pressable
-      onPress={point.visible ? onFocus : undefined}
-      disabled={!point.visible}
+      onPress={point.visible && onFocus ? onFocus : undefined}
+      disabled={!point.visible || !onFocus}
       accessible={false}
       importantForAccessibility="no"
       style={[styles.row, { borderBottomColor: theme.color.separator }]}

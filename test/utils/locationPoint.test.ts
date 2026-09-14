@@ -4,7 +4,7 @@ import { HIDDEN_POINT, hasCoordinates, resolveDisplayPoint } from '@utils';
 const LAT = 43.847291;
 const LNG = -79.418533;
 
-describe('finite coordinate utilities', () => {
+describe('geographic coordinate utilities', () => {
   it('returns the exact finite point', () => {
     expect(resolveDisplayPoint(LAT, LNG)).toEqual({
       visible: true,
@@ -19,6 +19,10 @@ describe('finite coordinate utilities', () => {
     ['both undefined', undefined, undefined],
     ['NaN latitude', Number.NaN, LNG],
     ['infinite longitude', LAT, Number.POSITIVE_INFINITY],
+    ['latitude above 90', 90.0001, LNG],
+    ['latitude below -90', -90.0001, LNG],
+    ['longitude above 180', LAT, 180.0001],
+    ['longitude below -180', LAT, -180.0001],
   ])('withholds a %s without exposing numeric fields', (_label, latitude, longitude) => {
     const point = resolveDisplayPoint(latitude, longitude);
     expect(point).toBe(HIDDEN_POINT);
@@ -35,5 +39,9 @@ describe('finite coordinate utilities', () => {
     expect(hasCoordinates(undefined, undefined)).toBe(false);
     expect(hasCoordinates(Number.NaN, LNG)).toBe(false);
     expect(hasCoordinates(LAT, Number.POSITIVE_INFINITY)).toBe(false);
+    expect(hasCoordinates(90, 180)).toBe(true);
+    expect(hasCoordinates(-90, -180)).toBe(true);
+    expect(hasCoordinates(91, LNG)).toBe(false);
+    expect(hasCoordinates(LAT, -181)).toBe(false);
   });
 });

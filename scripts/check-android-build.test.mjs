@@ -13,6 +13,7 @@ import {
   FORBIDDEN_COMMUNITY_WEBVIEW_DEX_MARKERS,
   FORBIDDEN_LEGACY_SHORTCUT_PUBLISHER_DEX_MARKERS,
   FORBIDDEN_PERMISSIONS,
+  GOOGLE_MAPS_API_KEY_METADATA_NAME,
   inspectPackagedAndroidBundle,
   REQUIRED_PINNED_SHORTCUT_CLEANUP_DEX_MARKERS,
   REQUIRED_PERMISSIONS,
@@ -38,6 +39,7 @@ const intendedPermissions = [
   'android.permission.MODIFY_AUDIO_SETTINGS',
   'android.permission.CAMERA',
 ];
+const mapsApiKeyFixture = `AIza${'A'.repeat(35)}`;
 
 function xmlNode(name, attributes = {}, children = []) {
   return { name, attributes, children };
@@ -78,6 +80,10 @@ const manifestNode = xmlNode(
       ]),
     ]),
     xmlNode('application', { 'android:allowBackup': 'false' }, [
+      xmlNode('meta-data', {
+        'android:name': GOOGLE_MAPS_API_KEY_METADATA_NAME,
+        'android:value': mapsApiKeyFixture,
+      }),
       xmlNode('activity', { 'android:name': '.MainActivity', 'android:exported': 'true' }, [
         intentFilter('android.intent.action.MAIN', 'android.intent.category.LAUNCHER'),
       ]),
@@ -545,6 +551,46 @@ test('rejects backup enablement or an unsafe native component declaration', () =
   assert.ok(headlessErrors.some((error) => error.includes('android:exported="false"')));
 });
 
+test('requires exactly one valid Google Maps key in merged and packaged manifests', () => {
+  const metadata = renderXml(
+    xmlNode('meta-data', {
+      'android:name': GOOGLE_MAPS_API_KEY_METADATA_NAME,
+      'android:value': mapsApiKeyFixture,
+    }),
+  );
+  const missing = manifest.replace(metadata, '');
+  assert.ok(
+    validate({ manifest: missing }).some((error) =>
+      error.includes('exactly one Google Maps API key'),
+    ),
+  );
+
+  const duplicate = manifest.replace('</application>', `${metadata}</application>`);
+  assert.ok(
+    validate({ manifest: duplicate }).some((error) =>
+      error.includes('exactly one Google Maps API key'),
+    ),
+  );
+
+  const placeholder = manifest.replace(mapsApiKeyFixture, 'YOUR_API_KEY_PLACEHOLDER');
+  assert.ok(
+    validate({ manifest: placeholder }).some((error) => error.includes('valid Google API key')),
+  );
+
+  const packagedNode = structuredClone(manifestNode);
+  const application = packagedNode.children.find((child) => child.name === 'application');
+  const mapsMetadata = application?.children.find(
+    (child) => child.attributes['android:name'] === GOOGLE_MAPS_API_KEY_METADATA_NAME,
+  );
+  assert.ok(mapsMetadata);
+  mapsMetadata.attributes['android:value'] = 'fixture-key';
+  assert.ok(
+    validatePackagedAndroidBundle({ manifestProto: encodeXmlDocument(packagedNode) }).some(
+      (error) => error.includes('valid Google API key'),
+    ),
+  );
+});
+
 test('does not accept component names in comments or on the wrong XML element', () => {
   const component =
     '<service android:name="app.notifee.core.ReceiverService" android:exported="false" />';
@@ -826,6 +872,10 @@ test('artifact runner inspects both variants and the final release AAB contents'
 
     writeTestAab(root, releaseBundlePath);
     assert.doesNotThrow(() => runAndroidBuildCheck(options));
+    assert.equal(
+      inspectPackagedAndroidBundle(join(root, releaseBundlePath)).googleMapsApiKeySha256,
+      createHash('sha256').update(mapsApiKeyFixture).digest('hex'),
+    );
 
     const privateUsername = 'private-person';
     const privateRemainder = 'private-checkout';

@@ -336,10 +336,12 @@ npm run check:android-build
       cleanup are recorded in
       [`docs/NET_01_PLAY_DEVICE_PROOF_2026-09-13.md`](./docs/NET_01_PLAY_DEVICE_PROOF_2026-09-13.md).
       That historical device result has not been repeated on exact Play v64.
-- [ ] Find My and any other WebView surface passes its hostile-input, navigation, and real-device
-      network checks, or is disabled in the candidate.
-- [ ] The replacement clean isolated build, guarded autolinking, and exact-AAB inspection confirm
-      that the app-owned `react-native-webview` package/native registration is absent. The
+- [ ] The exact map-enabled candidate keeps Find My marker data bounded/inert, contains exactly one
+      Maps API-key metadata value matching the release preflight digest, omits phone-location
+      permissions, leaves Google Maps attribution unobscured, and passes online/outage,
+      focus/background/App-Lock, TalkBack, fallback, and controlled network checks.
+- [ ] The replacement clean isolated build, guarded autolinking, and exact-AAB inspection continue
+      to confirm that the app-owned `react-native-webview` package/native registration is absent. The
       superseded v59 packaged DEX omitted
       `Lcom/reactnativecommunity/webview/RNCWebViewPackage;`, but that historical inspection does not
       satisfy this gate. Expo’s transitive `@expo/dom-webview`/`DomWebViewModule` remains
@@ -434,8 +436,9 @@ These four DEV results stop at the then-current migration head `0038`; they do n
 
 - [ ] Store screenshots and copy match this exact build and disclose the Android-only, dark-only,
       third-party-server-client product accurately.
-- [ ] Privacy policy/data-safety answers match observed network, notification, contact, file, crash,
-      backup, and telemetry behavior.
+- [ ] Privacy policy/data-safety answers match observed network, Google Maps/FCM provider,
+      notification, contact, file, crash, backup, and telemetry behavior; approved end-user terms
+      contain the required Google Maps terms and privacy destinations.
 - [ ] Contacts, foreground service, and notification declarations have current Play-policy
       justification; `USE_FULL_SCREEN_INTENT` and inbound share-target declarations are absent, and
       incoming-call copy promises only heads-up capability.

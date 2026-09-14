@@ -72,11 +72,16 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
             connected Gator server for bounded preview text and an optional image. This phone does
             not contact the page or image host directly, but your server does; those hosts can learn
             the requested URL and your server&apos;s IP address. Preview data is kept in
-            Gator&apos;s bounded, encrypted database cache. Merely viewing Find My does not download
-            map tiles, and embedded map and FaceTime WebViews are disabled. When you explicitly open
-            a web link, location, or validated FaceTime link, Android hands it to an external
+            Gator&apos;s bounded, encrypted database cache. While an unlocked Find My screen with
+            locations is visible, its native Google map asks Google to center on the server-provided
+            precise coordinates and load the displayed map region. Google Maps may receive those
+            coordinates, the phone&apos;s IP address, device and request details, a Maps-specific
+            identifier, Maps SDK crash diagnostics, and interactions such as panning or zooming.
+            Gator does not request this phone&apos;s own location for that map. When you explicitly
+            open a web link, location, or validated FaceTime link, Android hands it to an external
             browser or maps app. That external provider may receive the URL or precise coordinates
-            and, for a Find My location, its displayed label.
+            and, for a Find My location, its displayed label. Embedded FaceTime WebViews remain
+            disabled.
           </Text>
         </SettingsSection>
 

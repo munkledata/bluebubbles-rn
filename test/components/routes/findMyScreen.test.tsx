@@ -1,8 +1,12 @@
 /** Find My external-map handoff feedback and route/account ownership. */
 import React from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 import { act, fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
 
 const mockBack = jest.fn();
+const mockFindMyMapProps = jest.fn();
+const appStateHandlers = new Set<(state: AppStateStatus) => void>();
+const originalCurrentStateDescriptor = Object.getOwnPropertyDescriptor(AppState, 'currentState');
 
 jest.mock('expo-router', () => {
   const ReactLib = jest.requireActual('react') as typeof import('react');
@@ -25,7 +29,11 @@ jest.mock('@ui/findmy/FindMyMap', () => {
   const ReactLib = jest.requireActual('react') as typeof import('react');
   const { View } = jest.requireActual('react-native') as typeof import('react-native');
   return {
-    FindMyMap: () => ReactLib.createElement(View, { testID: 'find-my-map' }),
+    FindMyMap: (props: unknown) => {
+      mockFindMyMapProps(props);
+      return ReactLib.createElement(View, { testID: 'find-my-map' });
+    },
+    MAX_FINDMY_MAP_MARKERS: 256,
   };
 });
 
@@ -38,6 +46,8 @@ jest.mock('@utils', () => ({ ...jest.requireActual('@utils'), safeOpenUrl: jest.
 import FindMyScreen from '../../../app/(app)/findmy';
 // eslint-disable-next-line import/first
 import { useFindMyStore } from '@state/findmyStore';
+// eslint-disable-next-line import/first
+import { useLockStore } from '@state/lockStore';
 // eslint-disable-next-line import/first
 import { safeOpenUrl } from '@utils';
 // eslint-disable-next-line import/first
@@ -79,7 +89,22 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve };
 }
 
+async function emitAppState(state: AppStateStatus): Promise<void> {
+  Object.defineProperty(AppState, 'currentState', { configurable: true, value: state });
+  await act(async () => {
+    for (const handler of appStateHandlers) handler(state);
+  });
+}
+
+beforeAll(() => {
+  jest.spyOn(AppState, 'addEventListener').mockImplementation(((_type, handler) => {
+    appStateHandlers.add(handler);
+    return { remove: () => appStateHandlers.delete(handler) };
+  }) as typeof AppState.addEventListener);
+});
+
 beforeEach(() => {
+  Object.defineProperty(AppState, 'currentState', { configurable: true, value: 'active' });
   resumeRealtimeDeliveries();
   jest.clearAllMocks();
   (safeOpenUrl as jest.Mock).mockReset().mockResolvedValue(true);
@@ -94,13 +119,54 @@ beforeEach(() => {
     load: jest.fn(async () => undefined),
     refresh: jest.fn(async () => undefined),
   });
+  useLockStore.setState({ enabled: false, hydrated: true, locked: false });
 });
 
 afterEach(() => {
   resumeRealtimeDeliveries();
 });
 
+afterAll(() => {
+  jest.restoreAllMocks();
+  if (originalCurrentStateDescriptor) {
+    Object.defineProperty(AppState, 'currentState', originalCurrentStateDescriptor);
+  }
+});
+
 describe('FindMyScreen external map handoff', () => {
+  it('mounts the map only while the route is active and unlocked', async () => {
+    await renderWithTheme(<FindMyScreen />);
+    await waitFor(() => expect(screen.getByTestId('find-my-map')).toBeTruthy());
+
+    await emitAppState('background');
+    expect(screen.queryByTestId('find-my-map')).toBeNull();
+
+    await emitAppState('active');
+    await waitFor(() => expect(screen.getByTestId('find-my-map')).toBeTruthy());
+
+    await act(async () => useLockStore.setState({ locked: true }));
+    expect(screen.queryByTestId('find-my-map')).toBeNull();
+  });
+
+  it('issues a new map-focus revision when the same located row is tapped twice', async () => {
+    await renderWithTheme(<FindMyScreen />);
+    const rowLabel = await screen.findByText(DEVICE.name);
+
+    await fireEvent.press(rowLabel);
+    await waitFor(() =>
+      expect(mockFindMyMapProps).toHaveBeenLastCalledWith(
+        expect.objectContaining({ focusRequest: { id: 'd:0', revision: 1 } }),
+      ),
+    );
+
+    await fireEvent.press(rowLabel);
+    await waitFor(() =>
+      expect(mockFindMyMapProps).toHaveBeenLastCalledWith(
+        expect.objectContaining({ focusRequest: { id: 'd:0', revision: 2 } }),
+      ),
+    );
+  });
+
   it('opens the exact validated point through the safe URL boundary', async () => {
     await renderWithTheme(<FindMyScreen />);
 

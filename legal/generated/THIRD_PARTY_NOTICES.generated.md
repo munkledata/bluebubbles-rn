@@ -2,12 +2,12 @@
 
 > Generated from the current lockfile and tracked source assets. This is not legal approval and does not prove exact AAB coverage.
 
-- Package-lock SHA-256: `0da9739b33e7baba7e7ae8bada18c63252e03c12f8f148373b14326d38340d91`
-- Production package records: 1006
-- Unique package versions: 914
+- Package-lock SHA-256: `72643cee8ae381e7aeb6371b8b1531792708c678292e07feb322232ffbfaa90b`
+- Production package records: 1008
+- Unique package versions: 916
 - Tracked assets: 14
 - Pending asset provenance: 14
-- Local components: 8
+- Local components: 9
 - Package records needing review: 130
 - Exact AAB coverage: **absent**
 
@@ -37,9 +37,10 @@
 | `modules/gator-bounded-document` | 5 | `392ff12e0b2cf6b9d074ca0f0dedd97213284aa5df97d4317fffeb68bf409730` | unresolved |
 | `modules/gator-bounded-download` | 9 | `bea65d65224507f1d7948a7e5ca205a86ca28593a3e548a211a2dabfd5b70b53` | unresolved |
 | `modules/gator-paste-input` | 5 | `f041b15cade9b49c67aa83c0d6659a71361eb4f602ea30b16af9cacea9aafb7d` | unresolved |
-| `modules/gator-screen-security` | 4 | `aee8b89142ecbd75b2e198057d4e1afdf508d2b464409219589ea6e1cbb818ed` | unresolved |
+| `modules/gator-screen-security` | 5 | `51a82a403bc4d6acc9421c0507a45adbde744e61fc72d5d9da903ff6b6ae62c2` | unresolved |
 | `modules/gator-share-shortcuts` | 4 | `041069da5266bf8520e405e70462f67c2b19b57234f3da271f3112442951e2f6` | unresolved |
 | `plugins/withArm64Only.js` | 1 | `7365aa0dc24051a64451abacbe4cbbd7d0dc00f80cad10bee60d84ef6aaa24c5` | unresolved |
+| `plugins/withNoWebSocketRedirects.js` | 1 | `f88271c524b03fa67d07d636fc1eda298c3f3de470c50af2a3df7dc9cf9932b6` | unresolved |
 | `plugins/withNotificationIcon.js` | 1 | `9472e0045487535f50c80b43dfbd485f461e65febd97df53e55a8d0b7be14c2d` | unresolved |
 | `plugins/withShareTargets.js` | 1 | `281c4eb265a7ec1edc6e72f2f44374489581c56efde86fb75806207fbcb5db47` | unresolved |
 
@@ -341,6 +342,7 @@
 | `@types/babel__traverse` | `7.28.0` | MIT | no | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` | none |
 | `@types/better-sqlite3` | `7.6.13` | MIT | no | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` | none |
 | `@types/emscripten` | `1.41.5` | MIT | no | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` | none |
+| `@types/geojson` | `7946.0.16` | MIT | no | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` | none |
 | `@types/graceful-fs` | `4.1.9` | MIT | no | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` | none |
 | `@types/istanbul-lib-coverage` | `2.0.6` | MIT | no | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` | none |
 | `@types/istanbul-lib-report` | `3.0.3` | MIT | no | `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` | none |
@@ -880,6 +882,7 @@
 | `libsodium-sumo` | `0.8.4` | ISC | no | `ce7b8ba14db085aadb72359226ccf7273225db31dad653242a7726a10dabbbd4` | none |
 | `libsodium-wrappers` | `0.8.4` | ISC | no | `ce7b8ba14db085aadb72359226ccf7273225db31dad653242a7726a10dabbbd4` | none |
 | `libsodium-wrappers-sumo` | `0.8.4` | ISC | no | `ce7b8ba14db085aadb72359226ccf7273225db31dad653242a7726a10dabbbd4` | none |
+| `react-native-maps` | `1.27.2` | MIT | no | `4099a1a5146930614f6c88cab3d38676d460e0e349f3743693ade20e4407587e` | none |
 | `react-native-notify-kit` | `10.4.8` | Apache-2.0 | no | `6da058a052e0700887d012271ef92a7fb34fbaddff78fdb321c8a5ae2d01e69e` | none |
 | `commander` | `12.1.0` | MIT | yes | `04512a63dce4d2d506ad612dc0bd7681ccf6e3655f7b6eaef7dfac8323d1ec0b` | none |
 | `react-native-reanimated` | `4.6.0` | MIT | no | `f1ae22eddd3a96c3b7b8a494ef03749ae6a1e19574bacc9c195d83c916de09e2` | none |
@@ -1138,6 +1141,7 @@
 | `3f4b86b90801dc5ebeef0e70533241805502f7496bfe5dba2d131eaed837b0a3` | 1079 | 1 |
 | `3fb0857ef0133928cf72c88dfc464e931486e88778961eedec25585e2321507f` | 1070 | 1 |
 | `3fe8d55a98dbf260eace67c00cf9bc53edb46234e840098a0b93df3096b97fb6` | 1078 | 4 |
+| `4099a1a5146930614f6c88cab3d38676d460e0e349f3743693ade20e4407587e` | 1073 | 1 |
 | `41f2eef190265a6ea435951170947e35461707f91631821b3a67421bea5b2a7c` | 1106 | 1 |
 | `41f321b33afaa5cdaeb7c1aecd6fd5c21467ff910fb677aa47c941d05b5032c0` | 1079 | 1 |
 | `43571857d624621d9c1f5933339bdb3a31832919bed8143494acf1ae2fa46dc5` | 1103 | 4 |
@@ -1329,7 +1333,7 @@
 | `c1e6e266563517467b1bf874817d23e426f3149252bd7d42758cd697514b8417` | 1070 | 1 |
 | `c1fb8861eca211bf5aea574358aba7039396c0c1824c2a1477cc126d398efd89` | 1065 | 1 |
 | `c28a483580454d61210a1c7cc0899d75b68fa875cc7940ebafde3c49ca762439` | 1070 | 1 |
-| `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` | 1141 | 19 |
+| `c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383` | 1141 | 20 |
 | `c2ecf83f830f226f662c99d003162002c78edd8b59f1105621bdcc2c44043a7d` | 1143 | 1 |
 | `c358ea82eed53098b2ee0913e1de8243c69d45862e11c48614db47fd5889d947` | 11356 | 1 |
 | `c46324e45a005413535a6fb7a97e9eacd3cc6bf30335b7d5c10b8ee3af9e60c2` | 714 | 1 |

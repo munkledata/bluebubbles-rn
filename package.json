@@ -100,6 +100,7 @@
     "react-native": "0.86.3",
     "react-native-image-colors": "2.6.0",
     "react-native-libsodium": "1.7.0",
+    "react-native-maps": "1.27.2",
     "react-native-notify-kit": "10.4.8",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",

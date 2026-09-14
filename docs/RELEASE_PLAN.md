@@ -58,6 +58,12 @@ and raw-path absence. It does not transfer the superseded v63 `NET-01`/`RT-01A` 
 prove the general staged connect, send, receive,
 notification, permission, accessibility, process-restart, disconnect, or public-release journeys.
 
+This v64 candidate predates the restored native Find My map and remains historical for that feature.
+The next candidate must provide the package/certificate/API-restricted Maps key to the local release
+runner, bind its digest to the exact AAB, omit phone-location permissions and every app-owned WebView,
+and complete `WEB-01..03` attribution, lifecycle, accessibility, outage, traffic, privacy/Data Safety,
+and approved Google end-user-terms evidence before those remediation items can close.
+
 ## Release disposition
 
 | Task              | Disposition                         | Required state                                                                                               |

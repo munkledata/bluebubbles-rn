@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { Buffer } from 'node:buffer';
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -66,6 +67,10 @@ export const FORBIDDEN_COMMUNITY_WEBVIEW_DEX_MARKERS = [
 ];
 
 export const FORBIDDEN_PERMISSIONS = [
+  'android.permission.ACCESS_COARSE_LOCATION',
+  'android.permission.ACCESS_FINE_LOCATION',
+  'android.permission.ACCESS_BACKGROUND_LOCATION',
+  'android.permission.FOREGROUND_SERVICE_LOCATION',
   'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
   'android.permission.SCHEDULE_EXACT_ALARM',
   'android.permission.USE_EXACT_ALARM',
@@ -75,6 +80,9 @@ export const FORBIDDEN_PERMISSIONS = [
   'android.permission.ACCESS_NOTIFICATION_POLICY',
   'android.permission.USE_FULL_SCREEN_INTENT',
 ];
+
+export const GOOGLE_MAPS_API_KEY_METADATA_NAME = 'com.google.android.geo.API_KEY';
+export const GOOGLE_MAPS_API_KEY_PATTERN = /^AIza[0-9A-Za-z_-]{35}$/;
 
 function countOccurrences(source, needle) {
   if (typeof source !== 'string' || needle.length === 0) return 0;
@@ -550,7 +558,8 @@ export function inspectPackagedAndroidBundle(
   });
   if (errors.length > 0) throw new Error(errors.map((error) => `- ${error}`).join('\n'));
 
-  const manifest = decodeProtoXml(manifestProto).find(
+  const manifestElements = decodeProtoXml(manifestProto);
+  const manifest = manifestElements.find(
     (element) => element.name === 'manifest' && element.parent == null,
   );
   if (!manifest) throw new Error('packaged manifest identity is missing its root element');
@@ -569,7 +578,32 @@ export function inspectPackagedAndroidBundle(
     throw new Error('packaged manifest identity versionCode exceeds the safe integer range');
   }
 
-  return { applicationId, versionName, versionCode };
+  const googleMapsApiKey = googleMapsApiKeyFromElements(manifestElements).value;
+  if (!googleMapsApiKey) {
+    throw new Error('packaged manifest identity is missing its validated Google Maps API key');
+  }
+
+  return {
+    applicationId,
+    versionName,
+    versionCode,
+    googleMapsApiKeySha256: createHash('sha256').update(googleMapsApiKey).digest('hex'),
+  };
+}
+
+function googleMapsApiKeyFromElements(elements) {
+  const application = elements.find(
+    (element) => element.name === 'application' && element.parent?.name === 'manifest',
+  );
+  const entries = (application?.children ?? []).filter(
+    (child) =>
+      child.name === 'meta-data' &&
+      child.attributes.get('android:name') === GOOGLE_MAPS_API_KEY_METADATA_NAME,
+  );
+  return {
+    count: entries.length,
+    value: entries[0]?.attributes.get('android:value'),
+  };
 }
 
 function validateManifestElements(elements, { debug = false } = {}) {
@@ -597,6 +631,13 @@ function validateManifestElements(elements, { debug = false } = {}) {
   );
   if (application?.attributes.get('android:allowBackup') !== 'false') {
     errors.push('application must set android:allowBackup="false"');
+  }
+
+  const mapsApiKey = googleMapsApiKeyFromElements(elements);
+  if (mapsApiKey.count !== 1) {
+    errors.push('application must declare exactly one Google Maps API key metadata entry');
+  } else if (!mapsApiKey.value || !GOOGLE_MAPS_API_KEY_PATTERN.test(mapsApiKey.value)) {
+    errors.push('Google Maps API key metadata must contain a valid Google API key');
   }
 
   for (const component of REQUIRED_COMPONENTS) {

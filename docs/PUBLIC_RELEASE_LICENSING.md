@@ -41,9 +41,9 @@ dependency or asset review has been performed.
    modification, trademark, and notice obligations for the intended distribution.
 5. Generate and manually review the notice bundle from the exact lockfile, native build, and shipped
    assets. Reconcile it with [`THIRD_PARTY_NOTICES.md`](../THIRD_PARTY_NOTICES.md).
-6. If embedded maps or related assets return, review and restore the applicable Leaflet and
-   OpenStreetMap licenses/attribution before enabling or distributing them. They are not currently
-   packaged as a supported embedded-map feature.
+6. For the restored native Find My map, review the exact `react-native-maps` MIT notice plus Google
+   Maps Platform terms, attribution, API-key, privacy, billing, and Play Data Safety obligations.
+   Never obscure the native Google Maps attribution or substitute unreviewed public tile services.
 7. Point the repository README, in-app About/support UI, and store metadata to the same approved
    project terms and notice bundle.
 8. Obtain explicit owner and qualified legal approval for the intended distribution before publishing
@@ -108,8 +108,13 @@ dependency or asset review has been performed.
 - Settings links a local Legal & Third-Party Notices screen generated from the repository's root
   project notice and confirmed third-party notice, so it does not need a network connection or
   advertise Expo's inherited license as Gator's project license.
-- The embedded Find My map is disabled and Leaflet is not currently packaged; map-related obligations
-  must be reassessed if that feature returns.
+- The native Find My map uses Expo-pinned `react-native-maps` with Google Maps on Android. Leaflet,
+  OpenStreetMap tiles, and a direct WebView package remain absent. The Google logo/provider
+  attribution must stay unobscured, the key must remain package/certificate/API restricted, and the
+  exact candidate's dependency notices plus Play Data Safety answers still require release review.
+  The local Legal screen notifies users that Gator contains Google Maps and links the current
+  [Google Maps End User Additional Terms](https://maps.google.com/help/terms_maps/) and
+  [Google Privacy Policy](https://policies.google.com/privacy); owner/legal approval remains open.
 
 Stop the release review if ownership is unresolved, an artifact lacks provenance, a required notice or
 source obligation cannot be met, the proposed distribution exceeds the approved terms, or owner/legal

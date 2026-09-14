@@ -38,7 +38,11 @@ describe('StoragePrivacyScreen', () => {
     expect(
       screen.getByText(/hosts can learn the requested URL and your server's IP address/),
     ).toBeTruthy();
-    expect(screen.getByText(/Merely viewing Find My does not download map tiles/)).toBeTruthy();
+    expect(
+      screen.getByText(/asks Google to center on the server-provided precise coordinates/),
+    ).toBeTruthy();
+    expect(screen.getByText(/Maps SDK crash diagnostics/)).toBeTruthy();
+    expect(screen.getByText(/does not request this phone's own location/)).toBeTruthy();
     expect(
       screen.getByText(/external provider may receive the URL or precise coordinates/),
     ).toBeTruthy();

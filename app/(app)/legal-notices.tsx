@@ -5,7 +5,11 @@ import {
   PROJECT_NOTICE_TEXT,
   THIRD_PARTY_NOTICES_TEXT,
 } from '@/generated/legalNotices';
-import { Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
+import { NavRow, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
+import { safeOpenUrl } from '@utils';
+
+const GOOGLE_MAPS_ADDITIONAL_TERMS_URL = 'https://maps.google.com/help/terms_maps/';
+const GOOGLE_PRIVACY_POLICY_URL = 'https://policies.google.com/privacy';
 
 /** Local copy of the project terms and reviewed notices; no network access is needed. */
 export default function LegalNoticesScreen(): React.JSX.Element {
@@ -21,6 +25,28 @@ export default function LegalNoticesScreen(): React.JSX.Element {
           <Text selectable style={textStyle}>
             {PROJECT_NOTICE_TEXT}
           </Text>
+        </SettingsSection>
+
+        <SettingsSection label="GOOGLE MAPS TERMS" style={styles.gap}>
+          <Text selectable style={textStyle}>
+            Gator includes Google Maps features and content. Use of those features and content is
+            subject to the current Google Maps End User Additional Terms of Service and Google
+            Privacy Policy.
+          </Text>
+          <NavRow
+            label="Google Maps End User Additional Terms…"
+            accessibilityLabel="Open Google Maps End User Additional Terms"
+            onPress={() => {
+              void safeOpenUrl(GOOGLE_MAPS_ADDITIONAL_TERMS_URL);
+            }}
+          />
+          <NavRow
+            label="Google Privacy Policy…"
+            accessibilityLabel="Open Google Privacy Policy"
+            onPress={() => {
+              void safeOpenUrl(GOOGLE_PRIVACY_POLICY_URL);
+            }}
+          />
         </SettingsSection>
 
         <SettingsSection label="CONFIRMED THIRD-PARTY NOTICE" style={styles.gap}>

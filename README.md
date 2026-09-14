@@ -76,6 +76,12 @@ For an Android build, provide a Firebase config whose package is
 `com.bluegreengatorapps.messages`. Local builds can place an ignored `google-services.json` at the
 repo root; EAS should use a `GOOGLE_SERVICES_JSON` file variable in each named environment.
 
+Native Find My maps also require `GOOGLE_MAPS_ANDROID_API_KEY`. Use a dedicated key restricted to
+the Gator Android package, every intended signing certificate, and Maps SDK for Android only. The
+project-scoped EAS Secret supports hosted builds, but EAS does not download Secret values for
+`eas build --local`; the supported local release runner therefore requires the caller to export the
+key in its environment and binds only its SHA-256 fingerprint into the release receipt.
+
 ```sh
 # Native development build
 npx expo run:android
@@ -140,9 +146,12 @@ the EAS profiles intentionally have no update-channel fields.
   writing the temporary share file, then deletes that temporary file after sharing.
 - **Transport TLS:** HTTPS uses Android’s normal certificate and hostname validation. There is no
   application-level certificate pinning or bad-certificate bypass.
-- **Push/providers:** Firebase Cloud Messaging may carry push data. Embedded Find My and FaceTime web
-  surfaces are disabled; user-opened links, explicit Find My system-map actions, and other
-  provider-backed features can contact their respective services. Do not claim that no third party
+- **Push/providers:** Firebase Cloud Messaging may carry push data. The visible, unlocked Find My
+  screen uses the native Google Maps Android SDK for server-provided coordinates; it does not request
+  the phone's own location. Google can receive those precise coordinates, the phone IP, displayed
+  map region, device/request metadata, a Maps-specific identifier, Maps SDK crash diagnostics, and
+  map interactions. Embedded FaceTime web surfaces remain disabled; user-opened links and explicit
+  Find My system-map actions can contact their respective services. Do not claim that no third party
   is involved.
 - **Previews:** no client Open Graph fetch/parser or arbitrary-host fallback exists. When the paired
   server advertises the preview capability, the app automatically requests bounded text and an

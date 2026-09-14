@@ -30,6 +30,7 @@ const EXPECTED_NATIVE_BOUNDARY_PINS = Object.freeze({
   '@react-native-firebase/messaging': '25.1.0',
   '@shopify/flash-list': '2.0.2',
   'drizzle-orm': '0.45.2',
+  'react-native-maps': '1.27.2',
   'react-native-notify-kit': '10.4.8',
 });
 const EXPECTED_FORBIDDEN_NATIVE_BOUNDARY_PACKAGES = Object.freeze([
@@ -154,7 +155,10 @@ function resolvedConfigFor(lane) {
       package: 'com.bluegreengatorapps.messages',
       googleServicesFile: lane.googleServicesFile,
     },
-    plugins: [['./plugins/withArm64Only', { architectures: lane.architectures }]],
+    plugins: [
+      ['./plugins/withArm64Only', { architectures: lane.architectures }],
+      ['react-native-maps', { androidGoogleMapsApiKey: lane.googleMapsApiKey }],
+    ],
   };
 }
 
@@ -275,6 +279,7 @@ test('passes only runtime necessities and reviewed probe values to Expo config',
     EXPO_NO_CLIENT_ENV_VARS: '1',
     EXPO_NO_DOTENV: '1',
     EXPO_NO_TELEMETRY: '1',
+    GOOGLE_MAPS_ANDROID_API_KEY: lanes[0].googleMapsApiKey,
     HOME: '/private/home',
     PATH: '/reviewed/bin',
     TMPDIR: '/private/tmp',
@@ -283,6 +288,7 @@ test('passes only runtime necessities and reviewed probe values to Expo config',
   const productionEnvironment = environmentProbeProcessEnv(lanes[3], ambient);
   assert.equal(productionEnvironment.CI, '1');
   assert.equal(productionEnvironment.GATOR_ANDROID_ARCHITECTURES, 'arm64-v8a');
+  assert.equal(productionEnvironment.GOOGLE_MAPS_ANDROID_API_KEY, lanes[3].googleMapsApiKey);
   assert.equal(productionEnvironment.GOOGLE_SERVICES_JSON, lanes[3].googleServicesFile);
   assert.equal(productionEnvironment.NODE_ENV, undefined);
   assert.equal(productionEnvironment.SECRET_CANARY, undefined);
@@ -301,6 +307,23 @@ test('rejects resolved Expo identity, Firebase-source, and architecture drift', 
     ['missing architecture plugin', (config) => (config.plugins = [])],
     ['duplicate architecture plugin', (config) => config.plugins.push(config.plugins[0])],
     ['architecture value', (config) => (config.plugins[0][1].architectures = 'x86_64')],
+    [
+      'missing Google Maps plugin',
+      (config) =>
+        (config.plugins = config.plugins.filter((plugin) => plugin[0] !== 'react-native-maps')),
+    ],
+    [
+      'duplicate Google Maps plugin',
+      (config) =>
+        config.plugins.push(config.plugins.find((plugin) => plugin[0] === 'react-native-maps')),
+    ],
+    [
+      'Google Maps key value',
+      (config) => {
+        const plugin = config.plugins.find((item) => item[0] === 'react-native-maps');
+        plugin[1].androidGoogleMapsApiKey = 'unexpected-key';
+      },
+    ],
   ]) {
     const config = resolvedConfigFor(lane);
     mutate(config);

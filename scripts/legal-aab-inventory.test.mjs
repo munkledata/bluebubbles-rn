@@ -12,6 +12,7 @@ import {
   parseZipArchive,
   REVIEWED_ANDROID_ABSOLUTE_PATH_EXCEPTIONS,
   scanZipArchiveForSensitiveMetadata,
+  validateGoogleMapsKeyDigestBinding,
   validateReleaseBuildReceiptProvenance,
 } from './legal-aab-inventory.mjs';
 
@@ -335,6 +336,100 @@ test('legal provenance binds the exact AAB, build receipt hash, and bounded nati
     { ...input, build: { ...build, schemaVersion: 1 } },
   ]) {
     assert.throws(() => validateReleaseBuildReceiptProvenance(mutation), /AAB legal inventory/);
+  }
+});
+
+test('Google Maps key evidence requires the exact validation check and matching SHA-256 digests', () => {
+  const googleMapsApiKeySha256 = 'a'.repeat(64);
+  const releaseState = {
+    target: { googleMapsApiKeySha256 },
+    artifact: { googleMapsApiKeySha256 },
+  };
+  const validation = {
+    artifact: { googleMapsApiKeySha256 },
+    validation: {
+      checks: [
+        'zip-integrity',
+        'packaged-artifact',
+        'identity',
+        'signature',
+        'hash',
+        'google-maps-key-binding',
+        'native-path-proof',
+      ],
+    },
+  };
+
+  assert.equal(
+    validateGoogleMapsKeyDigestBinding({ releaseState, validation }),
+    googleMapsApiKeySha256,
+  );
+
+  const withoutMapCheck = validation.validation.checks.filter(
+    (check) => check !== 'google-maps-key-binding',
+  );
+  for (const mutation of [
+    { releaseState, validation: { ...validation, validation: { checks: withoutMapCheck } } },
+    {
+      releaseState,
+      validation: {
+        ...validation,
+        validation: {
+          checks: [...validation.validation.checks, 'google-maps-key-binding'],
+        },
+      },
+    },
+    {
+      releaseState: {
+        ...releaseState,
+        target: {},
+      },
+      validation,
+    },
+    {
+      releaseState: {
+        ...releaseState,
+        artifact: {},
+      },
+      validation,
+    },
+    {
+      releaseState,
+      validation: {
+        ...validation,
+        artifact: {},
+      },
+    },
+    {
+      releaseState: {
+        ...releaseState,
+        target: { googleMapsApiKeySha256: googleMapsApiKeySha256.toUpperCase() },
+      },
+      validation,
+    },
+    {
+      releaseState: {
+        ...releaseState,
+        target: { googleMapsApiKeySha256: 'a'.repeat(63) },
+      },
+      validation,
+    },
+    {
+      releaseState: {
+        ...releaseState,
+        artifact: { googleMapsApiKeySha256: 'b'.repeat(64) },
+      },
+      validation,
+    },
+    {
+      releaseState,
+      validation: {
+        ...validation,
+        artifact: { googleMapsApiKeySha256: 'c'.repeat(64) },
+      },
+    },
+  ]) {
+    assert.throws(() => validateGoogleMapsKeyDigestBinding(mutation), /AAB legal inventory/);
   }
 });
 

@@ -47,8 +47,11 @@ attachments and ordinary files, backups, local deletion, exported copies, App Lo
 of configurable Redacted Mode.
 
 The map must distinguish SQLCipher-protected database rows from ordinary app-private files and must
-describe conditional behavior such as consent-controlled diagnostics, FCM transit, disabled automatic
-previews, and external browser/maps handoff. Link the same disclosure from Settings and store
+describe conditional behavior such as consent-controlled diagnostics, FCM transit, automatic
+server-proxied previews, native Google Maps rendering, and external browser/maps handoff. State that
+the visible, unlocked Find My screen sends its server-provided precise coordinates, requested map
+region, device/request metadata, pseudonymous SDK identifier, and SDK crash/interaction data to
+Google without requesting the phone's own location. Link the same disclosure from Settings and store
 metadata. Play Data Safety answers must be derived from measured network and storage behavior rather
 than from intended architecture alone.
 
@@ -94,8 +97,9 @@ Record an explicit distribution decision instead of presenting template ownershi
 ownership: either an approved public project license or a private project with no public license
 grant. Preserve confirmed inherited notices regardless of that choice. Before broader distribution,
 inventory the exact release's dependencies and assets, satisfy their applicable terms, and obtain
-owner/legal approval; conditional components such as Leaflet or OpenStreetMap require review only if
-they are actually restored or distributed.
+owner/legal approval. The restored `react-native-maps`/Google Maps path requires its exact dependency
+notice plus Google Maps Platform attribution, key-restriction, privacy, billing, and Data Safety
+review; the retired Leaflet/OpenStreetMap path remains out of scope unless it is restored again.
 
 Repository, About, and store links must describe the same approved scope and consume the same notices
 source. A private project must not advertise an inherited third-party license as the project's own.

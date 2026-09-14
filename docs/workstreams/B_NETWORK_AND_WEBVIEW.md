@@ -50,34 +50,42 @@ automatically follows redirects is not a trust boundary and is not used for prev
 
 ## `WEB-01` — inert Find My data in generated documents
 
-When serializing data into generated HTML, escape `<` so a value cannot close its script element.
-Construct marker and popup labels with DOM `textContent`, never by interpolating an HTML string.
-Treat names, punctuation, emoji, and Unicode separators as untrusted document data.
+The selected implementation uses native Google Maps markers and creates no generated HTML or script
+document. Treat names, punctuation, emoji, and Unicode separators as untrusted native-bridge data:
+bound marker count and label length, pass labels only as native text properties, and never introduce
+HTML interpolation. The production WebView import guard remains in place.
 
 <a id="web-02"></a>
 
 ## `WEB-02` — bundled map code and constrained navigation
 
-After `WEB-01`, bundle a reviewed Leaflet JavaScript and CSS asset and record its version, hash, and
-license. Apply a restrictive content security policy; narrow the origin allowlist; deny file and
-content access, mixed content, popups, new windows, remote executable subframes, and arbitrary
-top-level navigation. Enumerate any tile-image hosts and expose no unnecessary native bridge.
+The selected implementation is `react-native-maps` backed by the native Google Maps Android SDK. It
+contains no generated document, WebView, remote executable JavaScript, top-level navigation, popup,
+file/content origin, or app-authenticated network bridge. Disable Google's map toolbar, place
+selection, phone-location layer, traffic, and other unused surfaces. Only bounded coordinates and
+text labels cross the native marker bridge. Keep the existing production guard that rejects
+community WebView and Expo DOM WebView imports.
 
-Exact coordinates must never be available to remotely downloaded executable JavaScript. The map
-must still load its bundled code when the network is unavailable.
+Configure a dedicated Google Maps API key through build environment only. Restrict it to the Gator
+Android package, reviewed debug/upload/Play signing certificates, and Maps SDK for Android. Every
+EAS build fails before native generation if the controlled key is absent. A native rebuild is
+required; this feature must never ship as an OTA-only JavaScript update to an older binary.
 
 <a id="web-03"></a>
 
 ## `WEB-03` — attribution and tile privacy
 
-After `WEB-02`, show visible OpenStreetMap contributor attribution and explain that a tile provider
-can observe the device IP and requested map region. Where the selected stack permits it, send stable
-app-identifying headers and honor response caching; otherwise establish a bounded cache policy. Do
-not bulk-download or prefetch public tiles, and define behavior for provider throttling or outage.
-When a privacy boundary withholds Find My content, instantiate neither the map nor a tile request.
+Keep the Google Maps logo and provider attribution rendered by the native SDK visible and
+unobscured. The app performs no tile prefetch, bulk download, scraping, provider-content caching, or
+place-data persistence. The location list and explicit system-Maps action remain usable if native
+map rendering is unavailable.
 
-If public-tile policy cannot be satisfied reliably, select a managed provider instead of weakening
-the privacy or attribution contract.
+Explain in-app and in release/privacy materials that Google Maps can receive the server-provided
+precise coordinates, phone IP, requested map region, device/request metadata, a Maps-specific
+pseudonymous identifier, crash information, and map interactions such as panning and zooming. Gator
+does not request the phone's own location.
+Instantiate no map while the route is unfocused, Android is backgrounded, App Lock withholds the
+protected tree, no valid marker exists, or the account has been torn down.
 
 <a id="face-01"></a>
 
@@ -166,8 +174,9 @@ arbitrary self-signed leaf.
 
 1. Keep `NET-00` containment—including the absence of a client HTML fetch/parser and remote-artwork
    mount—in force while `NET-01A..D` are designed and implemented.
-2. For an embedded map, apply `WEB-01`, then `WEB-02`, then `WEB-03`; do not re-enable the path with
-   only part of that chain. `FACE-01` reuses the completed navigation boundary.
+2. For an embedded map, apply `WEB-01`, then `WEB-02`, then `WEB-03`; keep the selected native path
+   free of every generated-document/WebView surface and complete provider privacy/device evidence.
+   `FACE-01` reuses only WebView-specific navigation primitives if that conditional path returns.
 3. Complete `RT-01A` client containment before relying on lifecycle application or considering the
    cross-repository `RT-01B` protocol.
 4. Decide `TLS-00` before selecting the `TLS-01A` removal branch or the `TLS-01B` fail-closed branch;

@@ -21,6 +21,7 @@ export const REQUIRED_NATIVE_BOUNDARY_PINS = Object.freeze({
   '@react-native-firebase/messaging': '25.1.0',
   '@shopify/flash-list': '2.0.2',
   'drizzle-orm': '0.45.2',
+  'react-native-maps': '1.27.2',
   'react-native-notify-kit': '10.4.8',
 });
 export const FORBIDDEN_NATIVE_BOUNDARY_PACKAGES = Object.freeze([
@@ -73,6 +74,7 @@ const ENVIRONMENT_SMOKE_FLAG = '--environment-smoke';
 const ENVIRONMENT_SMOKE_STEP_NAME = 'Smoke controlled environment config resolution';
 const ENVIRONMENT_SMOKE_COMMAND = `node scripts/check-toolchain.mjs ${ENVIRONMENT_SMOKE_FLAG}`;
 const ENVIRONMENT_PROBE_FILE = '__gator_environment_probe_file__';
+const ENVIRONMENT_PROBE_MAPS_KEY = `AIza${'E'.repeat(35)}`;
 const LOCAL_GOOGLE_SERVICES_FILE = './google-services.json';
 const REQUIRED_EXPO_IDENTITY = Object.freeze({
   name: 'Gator',
@@ -417,6 +419,7 @@ export function environmentProbeLanes(eas) {
       architectures: REQUIRED_ANDROID_ARCHITECTURES.development,
       firebaseConfig: 'local-fallback',
       googleServicesFile: LOCAL_GOOGLE_SERVICES_FILE,
+      googleMapsApiKey: ENVIRONMENT_PROBE_MAPS_KEY,
     },
     ...['development', 'preview', 'production'].map((profile) => ({
       lane: profile === 'development' ? 'ci' : profile,
@@ -424,6 +427,7 @@ export function environmentProbeLanes(eas) {
       architectures: eas?.build?.[profile]?.env?.GATOR_ANDROID_ARCHITECTURES,
       firebaseConfig: 'sentinel-file-path',
       googleServicesFile: ENVIRONMENT_PROBE_FILE,
+      googleMapsApiKey: ENVIRONMENT_PROBE_MAPS_KEY,
     })),
   ];
 }
@@ -443,6 +447,15 @@ export function validateResolvedEnvironmentConfig(config, lane) {
   }
   if (config?.android?.googleServicesFile !== lane.googleServicesFile) {
     errors.push(`${lane.lane} Firebase config did not resolve from ${lane.firebaseConfig}`);
+  }
+
+  const mapsPlugins = Array.isArray(config?.plugins)
+    ? config.plugins.filter((plugin) => Array.isArray(plugin) && plugin[0] === 'react-native-maps')
+    : [];
+  if (mapsPlugins.length !== 1) {
+    errors.push(`${lane.lane} must resolve exactly one native Google Maps plugin`);
+  } else if (mapsPlugins[0]?.[1]?.androidGoogleMapsApiKey !== lane.googleMapsApiKey) {
+    errors.push(`${lane.lane} native Google Maps key did not resolve from controlled environment`);
   }
 
   const architecturePlugins = Array.isArray(config?.plugins)
@@ -516,6 +529,7 @@ export function environmentProbeProcessEnv(lane, ambientEnvironment = process.en
     EXPO_NO_CLIENT_ENV_VARS: '1',
     EXPO_NO_DOTENV: '1',
     EXPO_NO_TELEMETRY: '1',
+    GOOGLE_MAPS_ANDROID_API_KEY: lane.googleMapsApiKey,
   };
   for (const name of [
     'ComSpec',

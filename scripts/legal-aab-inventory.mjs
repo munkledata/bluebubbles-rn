@@ -1050,6 +1050,43 @@ export function validateReleaseBuildReceiptProvenance({
   return { buildReceiptSha256, nativePathProof: build.nativePathProof };
 }
 
+export function validateGoogleMapsKeyDigestBinding({ releaseState, validation }) {
+  const requiredChecks = [
+    'google-maps-key-binding',
+    'hash',
+    'identity',
+    'native-path-proof',
+    'packaged-artifact',
+    'signature',
+    'zip-integrity',
+  ];
+  const validationChecks = validation?.validation?.checks;
+  if (
+    !Array.isArray(validationChecks) ||
+    new Set(validationChecks).size !== validationChecks.length ||
+    !isDeepStrictEqual([...validationChecks].sort(compareText), requiredChecks)
+  ) {
+    fail('validation receipt does not contain the exact required check set');
+  }
+
+  const digests = [
+    ['release-state target', releaseState?.target?.googleMapsApiKeySha256],
+    ['release-state artifact', releaseState?.artifact?.googleMapsApiKeySha256],
+    ['validation artifact', validation?.artifact?.googleMapsApiKeySha256],
+  ];
+  for (const [label, digest] of digests) {
+    if (typeof digest !== 'string' || !/^[a-f0-9]{64}$/.test(digest)) {
+      fail(`${label} Google Maps API key SHA-256 is malformed`);
+    }
+  }
+  const [targetDigest, stateArtifactDigest, validationArtifactDigest] = digests.map(
+    ([, digest]) => digest,
+  );
+  assertEqual(stateArtifactDigest, targetDigest, 'release-state Google Maps API key SHA-256');
+  assertEqual(validationArtifactDigest, targetDigest, 'validation Google Maps API key SHA-256');
+  return targetDigest;
+}
+
 function jsonWithoutReleaseVersion(source, lockfile = false) {
   const value = JSON.parse(source);
   delete value.version;
@@ -1134,22 +1171,10 @@ function collectLocalReleaseReceiptBinding(root, runId, aabPath, aabBytes, aabSh
   assertEqual(validation.artifact?.filename, 'artifact.pending.aab', 'validated artifact filename');
   assertEqual(validation.validation?.status, 'passed', 'validation status');
   assertEqual(validation.validation?.validator, 'scripts/check-android-build.mjs', 'validator');
-  const validationChecks = validation.validation?.checks;
-  const requiredChecks = [
-    'hash',
-    'identity',
-    'native-path-proof',
-    'packaged-artifact',
-    'signature',
-    'zip-integrity',
-  ];
-  if (
-    !Array.isArray(validationChecks) ||
-    new Set(validationChecks).size !== validationChecks.length ||
-    JSON.stringify([...validationChecks].sort(compareText)) !== JSON.stringify(requiredChecks)
-  ) {
-    fail('validation receipt does not contain the exact required check set');
-  }
+  const googleMapsApiKeySha256 = validateGoogleMapsKeyDigestBinding({
+    releaseState,
+    validation,
+  });
   assertEqual(validation.versionName, validation.targetVersion, 'validated version name');
   assertEqual(validation.artifact?.versionName, validation.targetVersion, 'artifact version name');
   assertEqual(validation.artifact?.versionCode, validation.versionCode, 'artifact version code');
@@ -1277,6 +1302,7 @@ function collectLocalReleaseReceiptBinding(root, runId, aabPath, aabBytes, aabSh
     targetVersion: promotion.targetVersion,
     versionCode: promotion.versionCode,
     uploadCertificateSha256: promotion.uploadCertificateSha256,
+    googleMapsApiKeySha256,
     releasePackageLockSha256: sha256(releaseLock),
     currentCheckout: {
       head: currentHead,
