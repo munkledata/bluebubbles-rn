@@ -277,9 +277,11 @@ npm run check:android-build
 ## 5. Network and security smoke tests
 
 - [ ] On the exact candidate, 301/302/303/307/308 responses are rejected before a second request for
-      ordinary JSON API traffic, raw multipart traffic, and legacy upload traffic. Test same-origin,
-      cross-origin, and HTTPS-to-HTTP destinations and prove no request body or credential reaches
-      the redirect target.
+      ordinary JSON API traffic and active legacy upload traffic. Test same-origin, cross-origin,
+      and HTTPS-to-HTTP destinations and prove no request body or credential reaches the redirect
+      target. Bind the candidate to source containing `ce0b8c0` or a reviewed descendant and confirm
+      that the removed raw `HttpClient` FormData transport and its attachment-send wrapper remain
+      absent; do not recreate a dormant runtime path solely to test it.
 - [ ] Connect to a valid public-CA HTTPS server; verify server info/full sync, one live socket event,
       one upload, and one download.
 - [ ] An untrusted/self-signed certificate is rejected unless Android itself trusts its issuer.
