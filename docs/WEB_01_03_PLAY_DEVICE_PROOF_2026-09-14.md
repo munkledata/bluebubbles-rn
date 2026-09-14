@@ -106,6 +106,47 @@ with a real PIN through ADB.
 - owner/legal approval of the candidate screenshot and wired terms/privacy wording; and
 - reconciliation and approval of the matching Google Play Data Safety answers.
 
+### Owner approval packet
+
+Google Play currently exempts apps that are active exclusively on Internal Testing from publishing
+the Data Safety form. The remediation gate still requires an approved draft so a later promotion
+cannot invent answers under release pressure. Based on Google's current
+[Maps SDK data disclosure](https://developers.google.com/maps/documentation/android-sdk/play-data-disclosure)
+and [Play Data Safety definitions](https://support.google.com/googleplay/android-developer/answer/10787469),
+the conservative Maps-only draft is:
+
+| Play data type      | Collected | Required | Purpose           | Shared draft |
+| ------------------- | --------- | -------- | ----------------- | ------------ |
+| Precise location    | Yes       | Optional | App functionality | Yes          |
+| App interactions    | Yes       | Optional | Analytics         | Yes          |
+| Crash logs          | Yes       | Optional | Analytics         | Yes          |
+| Diagnostics         | Yes       | Optional | Analytics         | Yes          |
+| Device or other IDs | Yes       | Optional | Analytics         | Yes          |
+
+“Precise location” here means the server-provided Find My coordinate, not this Android phone's
+location. Optional is supportable because Maps mounts only when the user opens optional Find My with
+a valid location. Do not claim ephemeral processing or that every app flow is encrypted in transit;
+Gator permits a separately warned HTTP server connection. Google's documented IP collection has no
+standalone Play category. Owner/legal must decide whether its use also requires **Approximate
+location**. A service-provider or user-initiated sharing exception may apply, but **Shared: Yes** is
+the safe draft until owner/legal approves an exception.
+
+Before closing `WEB-03`, the owner must view the actual candidate screenshot—not only its hash—and
+approve that image, the exact in-app disclosure/legal wording, both Google destinations, and this
+draft matrix. The store pack still names an older candidate and must be updated only after that
+decision.
+
+The human phone pass is deliberately small:
+
+1. Preserve the current accessibility-service state, enable TalkBack, and audibly traverse Refresh,
+   the one-location map summary, marker, Google attribution, all three tabs, list row, and external
+   Maps action. Confirm focus leaves the map and returns from external Maps without trapping, then
+   restore the original accessibility state.
+2. Connect the disposable fixture, enable App Lock, and authenticate personally. Open Find My,
+   background Gator beyond its 30-second grace period, and resume. Confirm the protected map tree is
+   absent before authentication, then use the owner's biometric/PIN and verify exactly one fresh map
+   and marker. Restore the original App Lock setting. Never send the real PIN through ADB.
+
 The local EAS build's Expo Doctor check was nonblocking but reported **19/20** checks because 27
 Expo SDK 57 dependencies have newer recommended patch versions. That is broader dependency/release
 follow-up, not a failure of this frozen map acceptance. Also harden future verbose release logs so
