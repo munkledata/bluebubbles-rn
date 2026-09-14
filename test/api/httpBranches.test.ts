@@ -1,8 +1,7 @@
 /**
  * Branch top-ups for HttpClient not covered by http.test.ts: the put/delete verbs, the
  * `usesHeaderAuth()` accessor, query-param serialization (skipping undefined), the
- * timeout/no-connection error mapping, the invalid-JSON parse error, and the multipart
- * upload path (success + failure) which uses raw `fetch` rather than `ky`.
+ * timeout/no-connection error mapping, and the invalid-JSON parse error.
  */
 jest.mock('ky', () => ({ __esModule: true, default: jest.fn() }));
 
@@ -10,7 +9,6 @@ import ky from 'ky';
 import * as repairSnapshotApi from '@core/api/endpoints/repairSnapshot';
 import { UnimplementedEndpointError } from '@core/api/errors';
 import { HttpClient } from '@core/api/http';
-import { logger } from '@core/secure';
 import { z } from 'zod/v4';
 
 const mockKy = ky as unknown as jest.Mock;
@@ -437,45 +435,5 @@ describe('retry wiring', () => {
       kind: 'unauthorized',
     });
     expect(mockKy).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('multipart upload (raw fetch path)', () => {
-  it('uploads via the injected fetch, carrying auth headers and the form body', async () => {
-    const fetchImpl = jest.fn().mockResolvedValue(jsonResponse({ ok: true }));
-    const client = new HttpClient({
-      getOrigin: () => 'https://x',
-      getPassword: () => 'sekret',
-      fetch: fetchImpl,
-    });
-    const form = new FormData();
-    const res = await client.post('/attachment', okSchema, { form });
-    expect(res).toEqual({ ok: true });
-
-    const [url, init] = fetchImpl.mock.calls[0];
-    expect(url).toBe('https://x/api/v1/attachment');
-    expect(init.method).toBe('POST');
-    expect(init.body).toBe(form);
-    expect(init.headers['Authorization']).toBe('Bearer sekret');
-    expect(init.redirect).toBe('error');
-    // Never routed through ky.
-    expect(mockKy).not.toHaveBeenCalled();
-  });
-
-  it('maps a failed upload to a "no_connection" ApiError', async () => {
-    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
-    const fetchImpl = jest.fn().mockRejectedValue(new Error('Network request failed'));
-    const client = new HttpClient({
-      getOrigin: () => 'https://x',
-      getPassword: () => 'p',
-      fetch: fetchImpl,
-    });
-    await expect(
-      client.post('/attachment', okSchema, { form: new FormData() }),
-    ).rejects.toMatchObject({ kind: 'no_connection' });
-    expect(warn).toHaveBeenCalledWith(
-      '[http] multipart upload failed url=https://x/api/v1/attachment err=Error: Network request failed',
-    );
-    warn.mockRestore();
   });
 });

@@ -7,7 +7,6 @@ import {
   TUNNEL_SKIP_HEADERS,
 } from '@core/config/constants';
 import { apiResponse } from '@core/models/common';
-import { logger } from '@core/secure';
 import { ApiError } from './errors';
 import { withRetry, type RetryPolicy } from './retry';
 import { MAX_SERVER_ERROR_BODY_BYTES, parseServerErrorDetailBody } from './serverErrorDetail';
@@ -77,8 +76,6 @@ export interface HttpClientConfig {
 export interface RequestOptions {
   query?: Record<string, string | number | boolean | undefined>;
   json?: unknown;
-  /** Multipart form body for attachment uploads. */
-  form?: FormData;
   signal?: AbortSignal;
   /**
    * Read only the bounded JSON `error.message` field on a non-success response. This is opt-in for
@@ -90,7 +87,7 @@ export interface RequestOptions {
    * Retry transient failures (dropped connection / timeout / 5xx) with backoff. Defaults ON for
    * GET (idempotent reads), OFF for writes — a retried POST could double-send (the outgoing-queue
    * owns send retries). Pass an explicit policy to opt a write in, or `false` to force a single
-   * shot (e.g. a reachability ping that must fail fast). Never applied to multipart `form` uploads.
+   * shot (e.g. a reachability ping that must fail fast).
    */
   retry?: RetryPolicy | false;
 }
@@ -643,15 +640,6 @@ export class HttpClient {
     this.assertTransportCurrent();
     const initialRequest = this.snapshotRequest(path, opts.query);
 
-    // Multipart uploads take a SEPARATE path: RN's raw `fetch` streams a FormData file part from
-    // disk, whereas `ky` mishandles React Native's FormData (its body/timeout machinery breaks the
-    // native stream, surfacing as an opaque "connection refused"). Raw fetch also drops the 30s
-    // timeout, which would otherwise kill a large video mid-upload. Never retried (double-send).
-    if (opts.form) {
-      const { url, headers, search } = initialRequest;
-      return this.uploadMultipart(method, path, url, headers, search, schema, opts);
-    }
-
     // One full attempt: send, map transport/status/parse failures to a typed ApiError, return data.
     // A logical request owns one transport identity. A retry re-reads the live configuration only
     // to prove it is still that identity: if Disconnect/reconnect changed origin, credentials,
@@ -720,64 +708,6 @@ export class HttpClient {
           waitForRetry(ms, opts.signal),
         )
       : run();
-  }
-
-  /**
-   * Streamed multipart upload via RN's raw `fetch` (not `ky`). We deliberately do NOT set a
-   * Content-Type header — RN's networking fills in `multipart/form-data; boundary=…` and streams
-   * the file part from disk, so a large video is never buffered. No timeout (uploads can run for
-   * minutes) and no retry (a retried upload would double-send).
-   */
-  private async uploadMultipart<S extends z.ZodType>(
-    method: string,
-    path: string,
-    url: string,
-    headers: Readonly<Record<string, string>>,
-    search: URLSearchParams,
-    schema: S,
-    opts: RequestOptions,
-  ): Promise<z.infer<S>> {
-    const qs = search.toString();
-    const fullUrl = qs ? `${url}?${qs}` : url;
-    const fetchImpl = this.cfg.fetch ?? fetch;
-    const requestController = new AbortController();
-    const abortFromCaller = (): void => requestController.abort(opts.signal?.reason);
-    if (opts.signal?.aborted) abortFromCaller();
-    else opts.signal?.addEventListener('abort', abortFromCaller, { once: true });
-    try {
-      let response: Response;
-      try {
-        response = await fetchImpl(fullUrl, {
-          method,
-          headers: { ...headers },
-          body: opts.form,
-          redirect: 'error',
-          signal: requestController.signal,
-        });
-      } catch (err) {
-        if (opts.signal?.aborted) throw callerCancellationError(opts.signal);
-        // Development-only diagnosis. RN's network Error has no enumerable fields, so include its
-        // cause/URL locally; release builds drop this free-form line before inspecting it.
-        const detail = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-        logger.warn(`[http] multipart upload failed url=${fullUrl} err=${detail}`);
-        throw new ApiError('no_connection', 'Upload request failed', undefined, err);
-      }
-      try {
-        return await this.parseResponse(
-          response,
-          method,
-          path,
-          schema,
-          (reason) => requestController.abort(reason),
-          opts.captureErrorDetail === true,
-        );
-      } catch (error) {
-        if (opts.signal?.aborted) throw callerCancellationError(opts.signal);
-        throw error;
-      }
-    } finally {
-      opts.signal?.removeEventListener('abort', abortFromCaller);
-    }
   }
 
   /** Shared response handling: status check → byte-capped JSON parse → envelope/schema validation. */
