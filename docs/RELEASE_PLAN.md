@@ -16,10 +16,12 @@ Use the related documents for their narrower purposes:
   `DEVICE-01` and every task-specific Android acceptance result.
 - [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md) is the operational checklist for one exact
   candidate.
-- [`STORE_01G_INTERNAL_TESTING_RUNBOOK.md`](./STORE_01G_INTERNAL_TESTING_RUNBOOK.md) is the private
-  Internal Testing procedure.
-- [`NET_01_PLAY_DEVICE_PROOF_2026-09-13.md`](./NET_01_PLAY_DEVICE_PROOF_2026-09-13.md) records the
-  current v63 candidate's bounded preview evidence.
+- [`STORE_01G_INTERNAL_TESTING_RUNBOOK.md`](./STORE_01G_INTERNAL_TESTING_RUNBOOK.md) is the
+  superseded v63 execution snapshot and must be refreshed before a v64 staged round.
+- [`TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md`](./TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md) records
+  the current v64 candidate's bounded transport evidence.
+- [`NET_01_PLAY_DEVICE_PROOF_2026-09-13.md`](./NET_01_PLAY_DEVICE_PROOF_2026-09-13.md) retains the
+  superseded v63 candidate's bounded preview evidence.
 - [`PLAY_INTERNAL_DEVICE_PROOF_2026-09-09.md`](./PLAY_INTERNAL_DEVICE_PROOF_2026-09-09.md) retains
   bounded historical evidence from the superseded v62 candidate.
 
@@ -38,20 +40,22 @@ staged-server journey and broader release gates are not complete.
 
 ## Current candidate
 
-| Field             | Frozen value                                                                 |
-| ----------------- | ---------------------------------------------------------------------------- |
-| Version           | `0.1.46` / Android version code `63`                                         |
-| Source commit     | `dc32380c6cb17d85e7ab08c4d5b9118660f763c8`                                   |
-| Release commit    | `a1ba9af51c46aac08f9c00e2c7c84762bb78cb2b`                                   |
-| Release run       | `android-0.1.46-dc32380-20260913175233`                                      |
-| AAB               | `gator-release-0.1.46-v63-a1ba9af.aab` — 56,150,828 bytes; never commit it   |
-| AAB SHA-256       | `4a9c83a521b6eb20404d502b535a2001e201ae71f1a9f3a88d703aed79221a06`           |
-| Play destination  | Google Play Internal Testing only                                            |
-| Submission        | `63ddf33f-b3f1-496d-afcf-b7ee4c53a751`, submitted 2026-09-13                 |
-| Device checkpoint | Play install and `NET-01` matrix on Samsung `SM-S938U1`, Android 16 / API 36 |
+| Field             | Frozen value                                                               |
+| ----------------- | -------------------------------------------------------------------------- |
+| Version           | `0.1.47` / Android version code `64`                                       |
+| Source commit     | `fa6e907beb776fc690cc392f7268d772705bf717`                                 |
+| Release commit    | `e22aacdca959c2e04f0a83a205bd7c012644acf6`                                 |
+| Release run       | `android-0.1.47-fa6e907-20260914045445`                                    |
+| AAB               | `gator-release-0.1.47-v64-e22aacd.aab` — 56,150,684 bytes; never commit it |
+| AAB SHA-256       | `b53b272a757ccb1346928787b927a2cb63dfa2edf57fe44820367a2552784178`         |
+| Play destination  | Google Play Internal Testing only                                          |
+| Submission        | Receipt status `submitted` at `2026-09-14T05:14:29.810Z`                   |
+| Device checkpoint | Play install and exact-candidate `TLS-00` boundary on Android 16 / API 36  |
 
-The device checkpoint proves Play-delivered identity and the bounded `NET-01` automatic-preview
-matrix recorded in the linked proof. It does not prove the general staged connect, send, receive,
+The device checkpoint proves Play-delivered identity and the bounded exact-candidate `TLS-00` slice
+recorded in the linked proof: JSON/upload redirect matrices, public-CA smoke, certificate rejection,
+and raw-path absence. It does not transfer the superseded v63 `NET-01`/`RT-01A` results or
+prove the general staged connect, send, receive,
 notification, permission, accessibility, process-restart, disconnect, or public-release journeys.
 
 ## Release disposition
@@ -95,8 +99,8 @@ notification, permission, accessibility, process-restart, disconnect, or public-
 - **Verify:** Confirm repository track/config, the live track and tester list, exact AAB identity,
   hash, and Play signing, install or update through Play, staged-server journeys, feedback path,
   cleanup, and every Play prompt shown for this artifact.
-- **Current status (2026-09-13):** **IN_PROGRESS — candidate creation, validation, Internal
-  submission, Play install, and bounded `NET-01` acceptance are proven.** Remaining work is live
+- **Current status (2026-09-14):** **IN_PROGRESS — candidate creation, validation, Internal
+  submission, Play install, and bounded `TLS-00` acceptance are proven.** Remaining work is live
   tester/track administration, a stable non-production server and general fixtures, the full
   selected connect/sync/send/receive/notification/restart/disconnect journey, cleanup, candidate
   limitations, and artifact-specific Play declarations or prompts. No wider-track promotion is

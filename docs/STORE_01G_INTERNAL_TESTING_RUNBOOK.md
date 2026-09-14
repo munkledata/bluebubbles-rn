@@ -1,21 +1,21 @@
 # STORE-01G — Internal Testing readiness runbook
 
-> **Status (2026-09-13): ACTIVE / V63 INTERNAL CANDIDATE / STAGED ENVIRONMENT AND OWNER INPUT
-> REQUIRED.** Version `0.1.46` / code `63` was built locally, submitted only to Google Play Internal
-> Testing, installed through Play on one Samsung API-36 device, and given the bounded automatic-preview
-> checks recorded below. This does not prove the remaining tester, general staged-server, policy,
-> cleanup, or broad device journeys.
+> **Status (2026-09-14): SUPERSEDED V63 EXECUTION SNAPSHOT — REFRESH BEFORE USING FOR V64.** The
+> candidate-specific values and completed rows below describe the former `0.1.46` / code `63` round.
+> Current candidate identity and status live in [`RELEASE_PLAN.md`](./RELEASE_PLAN.md) and
+> [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md). Do not execute a v64 staged round from this file
+> until its candidate fields, notices, prerequisites, and evidence rows are deliberately refreshed.
 
 This is the secret-free operational companion to `STORE-01`. Keep individual tester identities,
 private endpoints, credentials, QR payloads, and the Play opt-in link outside Git. Record only the
 non-secret labels, owners, counts, dates, and evidence references needed to reproduce the round.
 
-## 1. Current candidate boundary
+## 1. Superseded v63 candidate boundary
 
-The current candidate is frozen from one release run. Do not substitute an older artifact or an
-ambiguous “latest” build:
+This snapshot's candidate was frozen from one release run. The table is historical and must not be
+substituted for current v64 identity or an ambiguous “latest” build:
 
-| Field                 | Current value                                                         |
+| Field                 | Snapshot value                                                        |
 | --------------------- | --------------------------------------------------------------------- |
 | App version/code      | `0.1.46` / `63`                                                       |
 | Source commit         | `dc32380c6cb17d85e7ab08c4d5b9118660f763c8`                            |
@@ -96,11 +96,11 @@ The former candidate remains preserved as `0.1.40` / version code `56`, source c
 historical; no Play, tester, install/update, device, notification, or cleanup result transfers to a
 replacement candidate.
 
-The current v63 run supersedes the earlier histories above. Its local build retrieved the managed
+The v63 run superseded the earlier histories above when this snapshot was current. Its local build retrieved the managed
 upload credential, consumed version code `63` once, and submitted the validated artifact only to the
 Internal track. Never select an ambiguous “latest” build for a future action.
 
-### Current execution mode
+### V63 snapshot execution state
 
 The v63 source freeze, local production build, validation, promotion, Internal submission, Play
 clean install, and bounded automatic-preview matrix are complete. V62's natural-update,
@@ -109,10 +109,10 @@ authoritative [`STORE-01`](./RELEASE_PLAN.md#store-01) status and `RELEASE_CHECK
 No general staged-server setup or wider-track promotion is implied or approved. Future sessions should read
 the release plan, checklist, and this runbook before consulting the historical records below.
 
-## 2. Current proven state
+## 2. V63 snapshot proven state
 
 - `eas.json` has one Android submission target: Google Play track `internal`.
-- Version `0.1.46` / code `63` is the current retained candidate. It was submitted only to Internal
+- Version `0.1.46` / code `63` was this snapshot's retained candidate. It was submitted only to Internal
   Testing and clean-installed through Play on one Samsung `SM-S938U1`, Android 16 / API 36.
 - The v63 source contains the reviewed V2/V3 app work and is installed through Play, so the app
   candidate build/install prerequisite for the RCS/FCM matrix is satisfied. Server-owned RCS attempt
@@ -129,12 +129,12 @@ the release plan, checklist, and this runbook before consulting the historical r
   disposable database lanes on an API-36 x86_64 emulator; the workflow's first configured schedule occurrence was
   unobserved, so genuine schedule proof remains open. These supporting artifacts are not release candidates and do not
   use EAS Build or submit to Play.
-- The current local production run advanced the EAS remote Android counter from `62` to `63`, fetched
+- This snapshot's local production run advanced the EAS remote Android counter from `62` to `63`, fetched
   the managed keystore, completed the Gradle bundle, validation, and promotion, then used the
   separately authorized submit phase. No hosted build was created.
 - The most recent pre-build read-only EAS history contained 22 hosted Android builds; the newest
   hosted artifact was version code `54`, with hosted counts for `55` and `56` both zero.
-- The current submission receipt records successful Internal Testing submission id
+- The snapshot's submission receipt records successful Internal Testing submission id
   `63ddf33f-b3f1-496d-afcf-b7ee4c53a751` on 2026-09-13. This proves the requested destination and
   successful submission outcome, not every live Play Console field.
 - EAS records requested submission configuration, not current Google Play state. Pinned EAS CLI

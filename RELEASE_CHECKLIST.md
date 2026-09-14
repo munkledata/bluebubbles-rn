@@ -2,8 +2,10 @@
 
 This is the short, operational checklist for one Android release candidate. Remediation status lives
 in [`docs/WORK_PLAN_2026-08-03.md`](./docs/WORK_PLAN_2026-08-03.md), while release-task status and
-dispositions live in [`docs/RELEASE_PLAN.md`](./docs/RELEASE_PLAN.md). Current Internal Testing preparation
-lives in [`docs/STORE_01G_INTERNAL_TESTING_RUNBOOK.md`](./docs/STORE_01G_INTERNAL_TESTING_RUNBOOK.md);
+dispositions live in [`docs/RELEASE_PLAN.md`](./docs/RELEASE_PLAN.md). The superseded v63 Internal
+Testing snapshot lives in
+[`docs/STORE_01G_INTERNAL_TESTING_RUNBOOK.md`](./docs/STORE_01G_INTERNAL_TESTING_RUNBOOK.md) and must
+be refreshed before a v64 staged round;
 [`docs/DEVICE_VERIFICATION_CHECKLIST.md`](./docs/DEVICE_VERIFICATION_CHECKLIST.md) is retired v56
 history and is not executable evidence for a replacement candidate. Do not copy status from an older
 build into this file. Section 0 is the next private Internal Testing gate; Sections 1–7 remain the
@@ -11,36 +13,54 @@ broader Closed/Open/Production release gate.
 
 Current release-candidate status — **INTERNAL TESTING; broader release remains NO-GO.** The exact
 replacement was built, validated, submitted only to Google Play Internal Testing, installed from
-Play, and exercised for the completed bounded automatic-preview matrix. The
+Play, and exercised for the completed exact-candidate `TLS-00` boundary. The
 remaining staged-server, device-matrix, tester-administration, policy, and rollout gates below stay
 open; this Internal result is not public-release approval.
 
 Exact replacement frozen from one release run:
 
+- Version/build number: `0.1.47 (versionCode 64)`
+- Exact source and release commits: `fa6e907beb776fc690cc392f7268d772705bf717` /
+  `e22aacdca959c2e04f0a83a205bd7c012644acf6`
+- Release branch/run: `release/android-0.1.47` /
+  `android-0.1.47-fa6e907-20260914045445`
+- Local AAB: `gator-release-0.1.47-v64-e22aacd.aab` — ignored; never commit it
+- AAB size/SHA-256: `56,150,684` bytes /
+  `b53b272a757ccb1346928787b927a2cb63dfa2edf57fe44820367a2552784178`
+- Upload certificate SHA-256:
+  `6E:18:F9:93:61:DC:D6:58:F1:A7:5B:9F:47:E8:66:AC:8D:A6:AF:EF:B9:E7:F4:7C:BF:41:F5:E0:F6:CE:2F:43`
+- Submission: Google Play Internal Testing at `2026-09-14T05:14:29.810Z`; release receipt status
+  `submitted`; Play delivered version code `64` to the enrolled phone
+- Tester/device/Android/test date: owner-enrolled Samsung, Android 16 / API 36, 2026-09-14
+- Exact device receipt:
+  [`docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md`](./docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md)
+
+Android reports the installed v64 package came from `com.android.vending` and carries the recorded
+Play app-signing certificate. This proves Play delivery but does not assert a natural-update journey.
+No Closed, Open, Production, or wider-track promotion was performed.
+
+Superseded v63 candidate — historical Play, `NET-01`, and `RT-01A` device evidence only; no result
+transfers to v64 unless repeated:
+
 - Version/build number: `0.1.46 (versionCode 63)`
-- Exact source and release commits: `dc32380c6cb17d85e7ab08c4d5b9118660f763c8` /
+- Source/release commits: `dc32380c6cb17d85e7ab08c4d5b9118660f763c8` /
   `a1ba9af51c46aac08f9c00e2c7c84762bb78cb2b`
 - Release branch/run: `release/android-0.1.46` /
   `android-0.1.46-dc32380-20260913175233`
-- Local AAB: `gator-release-0.1.46-v63-a1ba9af.aab` — ignored; never commit it
-- AAB size/SHA-256: `56,150,828` bytes /
+- AAB: `gator-release-0.1.46-v63-a1ba9af.aab`; 56,150,828 bytes; SHA-256
   `4a9c83a521b6eb20404d502b535a2001e201ae71f1a9f3a88d703aed79221a06`
-- Upload certificate SHA-256:
-  `6E:18:F9:93:61:DC:D6:58:F1:A7:5B:9F:47:E8:66:AC:8D:A6:AF:EF:B9:E7:F4:7C:BF:41:F5:E0:F6:CE:2F:43`
-- Submission: Google Play Internal Testing at `2026-09-13T18:05:22.232Z`; EAS submission
-  `63ddf33f-b3f1-496d-afcf-b7ee4c53a751`
-- Tester/device/Android/test date: owner-enrolled Samsung `SM-S938U1`, Android 16 / API 36,
+- Submission: Internal Testing, EAS submission `63ddf33f-b3f1-496d-afcf-b7ee4c53a751`,
   2026-09-13
-- Exact device receipt:
-  [`docs/NET_01_PLAY_DEVICE_PROOF_2026-09-13.md`](./docs/NET_01_PLAY_DEVICE_PROOF_2026-09-13.md)
+- Device receipts:
+  [`docs/NET_01_PLAY_DEVICE_PROOF_2026-09-13.md`](./docs/NET_01_PLAY_DEVICE_PROOF_2026-09-13.md) and
+  [`docs/RT_01A_PLAY_DEVICE_PROOF_2026-09-13.md`](./docs/RT_01A_PLAY_DEVICE_PROOF_2026-09-13.md)
 
 The installed local-signature build could not update to the Play-signed v63 artifact, so it was
-removed and v63 was installed from Google Play with prior permission. This is clean-install
-evidence, not natural-update evidence. No Closed, Open, Production, or wider-track promotion was
-performed.
+removed and v63 was installed from Google Play with prior permission. That historical result is
+clean-install evidence, not natural-update evidence for v64.
 
 Superseded v62 candidate — historical Play and bounded-device evidence only; no result transfers to
-v63 unless repeated:
+v64 unless repeated:
 
 - Version/build number: `0.1.45 (versionCode 62)`
 - Source/release commits: `8179d0a3a99c4e2e28a01fd83212fee919bad41c` /
@@ -55,7 +75,7 @@ v63 unless repeated:
 
 Version code 61 remains retired because its device run exposed the unsupported-scheme bug. V62
 rejected that same synthetic setup URL and passed an ordinary-kill cold relaunch, but those results
-remain historical for v63.
+remain historical for v64.
 
 Superseded v59 candidate — historical static artifact proof only; no result transfers to a
 replacement:
@@ -187,7 +207,7 @@ GOOGLE_SERVICES_JSON=./test/fixtures/google-services.ci.json \
 - [ ] A non-secret smoke variable proves that each named EAS environment selects the intended values.
 - [ ] No `.env`, Firebase config, signing key, service-account file, password, token, or local build
       artifact is present in the replacement uploaded source bundle.
-- [x] The managed Android upload-signing credential produced the v63 candidate, its
+- [x] The managed Android upload-signing credential produced the v64 candidate, its
       certificate is recorded above, and the credential is not stored in Git. The superseded v59
       signing result is historical only.
 - [ ] Play submission credentials and live Console access are available to the release owner.
@@ -196,8 +216,8 @@ GOOGLE_SERVICES_JSON=./test/fixtures/google-services.ci.json \
 
 ## 4. Clean native candidate
 
-V63 already completed the isolated build, validation, promotion, and separately authorized Internal
-submission recorded above. Do not rerun those phases for v63 or silently reuse any superseded
+V64 already completed the isolated build, validation, promotion, and separately authorized Internal
+submission recorded above. Do not rerun those phases for v64 or silently reuse any superseded
 artifact. For a future candidate only, run each phase separately and review its receipt before
 continuing:
 
@@ -269,42 +289,53 @@ npm run check:android-build
 - [ ] `WRITE_CONTACTS`, `READ_MEDIA_AUDIO`, `SCHEDULE_EXACT_ALARM`, `USE_EXACT_ALARM`,
       `USE_FULL_SCREEN_INTENT`, and `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` are absent from the AAB.
 - [ ] Every remaining dangerous permission maps to a visible feature and a runtime request.
-- [x] The v63 AAB hash at the top of this file was computed after validation and local
+- [x] The v64 AAB hash at the top of this file was computed after validation and local
       promotion.
-- [x] The byte-identical hashed v63 AAB is the artifact submitted to Play Internal Testing after
+- [x] The byte-identical hashed v64 AAB is the artifact submitted to Play Internal Testing after
       separate approval.
 
 ## 5. Network and security smoke tests
 
-- [ ] On the exact candidate, 301/302/303/307/308 responses are rejected before a second request for
+- [x] On the exact candidate, 301/302/303/307/308 responses are rejected before a second request for
       ordinary JSON API traffic and active legacy upload traffic. Test same-origin, cross-origin,
       and HTTPS-to-HTTP destinations and prove no request body or credential reaches the redirect
       target. Bind the candidate to source containing `ce0b8c0` or a reviewed descendant and confirm
       that the removed raw `HttpClient` FormData transport and its attachment-send wrapper remain
-      absent; do not recreate a dormant runtime path solely to test it.
-- [ ] Connect to a valid public-CA HTTPS server; verify server info/full sync, one live socket event,
-      one upload, and one download.
-- [ ] An untrusted/self-signed certificate is rejected unless Android itself trusts its issuer.
+      absent; do not recreate a dormant runtime path solely to test it. Exact Play v64 passed both
+      15-case matrices with zero target contact at the frozen checkpoints; the source scan and
+      separate reachability controls are recorded in
+      [`docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md`](./docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md).
+- [x] Connect to a valid public-CA HTTPS server; verify server info/full sync, one live socket event,
+      one upload, and one download. Exact Play v64 completed those paths through the isolated fixture
+      recorded in
+      [`docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md`](./docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md).
+- [x] An untrusted/self-signed certificate is rejected unless Android itself trusts its issuer.
+      Exact Play v64 completed no TLS session or HTTP request and sent no Authorization header or body;
+      the trusted Mac control reached HTTP 200. See
+      [`docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md`](./docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md).
 - [x] Product copy is explicit that the app uses Android's normal TLS validation and does **not**
       claim certificate pinning. An inert legacy `certPins` SecureStore value on an upgraded install
-      is harmless because no code reads it. Removal commit `66869d3` is in exact Play v63 source
-      `dc32380c`; exact-tree scans found no pinning API/dependency or certificate-validation bypass,
+      is harmless because no code reads it. Removal commit `66869d3` is in exact Play v64 source
+      `fa6e907`; exact-tree scans found no pinning API/dependency or certificate-validation bypass,
       and the ordinary public-CA connection is recorded in
-      [`docs/RT_01A_PLAY_DEVICE_PROOF_2026-09-13.md`](./docs/RT_01A_PLAY_DEVICE_PROOF_2026-09-13.md).
-- [x] On the exact candidate, traffic capture proves a forged/rejected `new-server` event cannot
+      [`docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md`](./docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md).
+- [ ] On the exact candidate, traffic capture proves a forged/rejected `new-server` event cannot
       persist, contact, or send credentials to another origin or downgrade HTTPS. An approved
       rotation displays both origins and requires foreground confirmation, a freshly entered
       password, and separate cleartext consent when applicable; interruption cannot mix old/new
-      credentials. Exact Play v63 passed cleartext reject/approve, approved-origin persistence,
+      credentials. Superseded Play v63 passed cleartext reject/approve, approved-origin persistence,
       held late-result rejection, native interrupted-SecureStore fail-safe recovery, and
       Android-trusted HTTPS-to-HTTP downgrade rejection with zero trap TCP contact before and after
       `am kill`. Exact identities, counters, limits, and cleanup are recorded in
       [`docs/RT_01A_PLAY_DEVICE_PROOF_2026-09-13.md`](./docs/RT_01A_PLAY_DEVICE_PROOF_2026-09-13.md).
-- [x] On exact Play v63, automatic preview text and optional JPEG/PNG data images use only the
+      Exact Play v64 displayed and cancelled one isolated-fixture proposal during its TLS smoke, but
+      the full candidate-specific rotation matrix has not been repeated.
+- [ ] On superseded Play v63, automatic preview text and optional JPEG/PNG data images used only the
       authenticated bounded Gator-server proxy. The controlled 20-case matrix, app-UID destination
       observation, server request ledger, duplicate coalescing, original-URL tap, limitations, and
       cleanup are recorded in
       [`docs/NET_01_PLAY_DEVICE_PROOF_2026-09-13.md`](./docs/NET_01_PLAY_DEVICE_PROOF_2026-09-13.md).
+      That historical device result has not been repeated on exact Play v64.
 - [ ] Find My and any other WebView surface passes its hostile-input, navigation, and real-device
       network checks, or is disabled in the candidate.
 - [ ] The replacement clean isolated build, guarded autolinking, and exact-AAB inspection confirm
@@ -320,14 +351,14 @@ npm run check:android-build
 
 ## 6. Android/device matrix
 
-Candidate-specific device work has begun for v63: Play delivery and the complete `NET-01` matrix
-passed on the recorded Samsung/API-36 device. `DEVICE-01` still owns the unproved matrix below for
-this exact AAB; the superseded
-`gator-release-0.1.43-v59-e108ad7.aab` must not be used. Remaining work includes:
+Candidate-specific device work has begun for v64: Play delivery and the exact-candidate `TLS-00`
+boundary passed on the recorded Samsung/API-36 device. `DEVICE-01` still owns the unproved matrix below for
+this exact AAB; the superseded v63 `NET-01`/`RT-01A` device results and
+`gator-release-0.1.43-v59-e108ad7.aab` must not be used as v64 evidence. Remaining work includes:
 
 - [ ] Fresh install and upgrade from the latest shipped build both boot and preserve intended data.
 - [ ] Connect, full sync, send, receive, edit/unsend, react, attach, retry, search, and local delete work.
-- [ ] After v63 has a fresh scoped V3 enrollment against the isolated compatible staged server in
+- [ ] After v64 has a fresh scoped V3 enrollment against the isolated compatible staged server in
       the Internal Testing runbook, kill with `adb shell am kill <package>` (never `am force-stop`
       for delivery testing); a compatible per-device-encrypted FCM push writes to the encrypted DB
       and posts the expected notification.
