@@ -40,6 +40,26 @@ describe('verbs + accessors', () => {
     expect(mockKy.mock.calls[1][1].method).toBe('DELETE');
   });
 
+  it('restates redirect:error on the final fetch call after React Native Request loses it', async () => {
+    const transportFetch = jest.fn(async () => jsonResponse({ ok: true }));
+    mockKy.mockResolvedValue(jsonResponse({ ok: true }));
+    const client = new HttpClient({
+      getOrigin: () => 'https://approved.example',
+      getPassword: () => 'password',
+      fetch: transportFetch,
+    });
+
+    await client.post('/thing', okSchema, { json: { value: 1 } });
+
+    const finalFetch = mockKy.mock.calls[0][1].fetch as typeof fetch;
+    const requestWithoutRedirect = {
+      url: 'https://approved.example/api/v1/thing',
+    } as Request;
+    await finalFetch(requestWithoutRedirect, { redirect: 'follow' });
+
+    expect(transportFetch).toHaveBeenCalledWith(requestWithoutRedirect, { redirect: 'error' });
+  });
+
   it('usesHeaderAuth() reflects the injected config (default true, false when disabled)', () => {
     expect(new HttpClient({ getOrigin: () => 'x', getPassword: () => 'p' }).usesHeaderAuth()).toBe(
       true,

@@ -26,6 +26,18 @@ const MAX_CONSECUTIVE_EMPTY_CHUNKS = 16;
 const REPAIR_SNAPSHOT_HEADER = 'x-gator-repair-snapshot';
 const UUID_V4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+/**
+ * Restate the redirect policy on the final fetch call instead of trusting its Request object.
+ *
+ * React Native's whatwg-fetch Request polyfill drops `redirect` while Ky constructs/clones the
+ * request. Ky then omits standard RequestInit fields from the fetch call because browsers retain
+ * them on Request. Expo fetch consequently sees no policy and defaults to following the redirect.
+ * Supplying it here makes Expo's native no-follow path authoritative on every ordinary API call.
+ */
+function fetchRejectingRedirects(fetchImpl: typeof fetch): typeof fetch {
+  return (input, init) => fetchImpl(input, { ...init, redirect: 'error' });
+}
+
 interface RequiredResponseHeader {
   readonly name: string;
   readonly value: string;
@@ -672,7 +684,8 @@ export class HttpClient {
             timeout: this.timeoutMs,
             retry: 0,
             throwHttpErrors: false,
-            fetch: this.cfg.fetch,
+            // RN's Request polyfill does not retain `redirect`; force it again at fetch dispatch.
+            fetch: fetchRejectingRedirects(this.cfg.fetch ?? fetch),
           });
         } catch (err) {
           if (opts.signal?.aborted) throw callerCancellationError(opts.signal);
