@@ -1,9 +1,9 @@
 # RT-01A Google Play device proof — 2026-09-13
 
 This record is limited to `RT-01A`, client containment for `new-server` rotation. It proves the
-cleartext approval/rejection path and native interrupted-credential recovery on the exact installed
-candidate. It does **not** prove HTTPS-to-HTTP downgrade rejection; that remaining result keeps
-`RT-01A` open in [`WORK_PLAN_2026-08-03.md`](./WORK_PLAN_2026-08-03.md).
+cleartext approval/rejection path, native interrupted-credential recovery, and Android-trusted
+HTTPS-to-HTTP downgrade rejection on the exact installed candidate. `RT-01A` is complete in
+[`WORK_PLAN_2026-08-03.md`](./WORK_PLAN_2026-08-03.md).
 
 ## Exact boundaries
 
@@ -120,29 +120,52 @@ SecureStore keys were not directly inspectable in this nondebuggable Play build.
 stronger than a timing-adjacent A-or-B outcome because the source-defined partial-state branch is
 the path that reaches clean setup with zero authenticated traffic.
 
-## Remaining RT-01A proof
+## Android-trusted HTTPS downgrade rejection
 
-The irreducible open case is an HTTPS current origin receiving a proposed HTTP downgrade. It needs
-an Android-trusted HTTPS front end to A, followed by an emitted C proposal, with all of these results:
+A second clean-data run put the same isolated current counting proxy behind an in-memory TLS
+terminator on the Mac. The app used `https://rt01a.backloop.dev`; that test hostname resolved to
+`127.0.0.1` on the phone, and USB reverse forwarding carried device port 443 only to the temporary
+Mac listener. The listener used the project's current public Let's Encrypt `*.backloop.dev`
+certificate (issuer `YR1`, valid 2026-07-31 through 2026-10-29, SHA-256 fingerprint
+`E0:89:A6:27:B7:BE:A6:B6:44:3F:58:34:E2:E4:C2:CA:75:64:E7:86:4B:65:34:C1:6C:7A:89:F3:C6:1B:59:60`).
+A Mac control reported certificate verification result zero, and the unmodified Play app completed
+authenticated server-info, synchronization, and WebSocket traffic without any custom trust install.
+The transient proxy received the certificate and its deliberately shared development key in
+memory; this run created or retained no additional certificate or key file. Only synthetic fixture
+data and the disposable credential crossed that listener.
 
-1. no approval prompt;
-2. zero TCP connections to C;
-3. continued authenticated traffic only to HTTPS A; and
-4. a killed-process relaunch that still selects HTTPS A and leaves C at zero.
+With the app visibly on Messages, the fixture emitted C's hardcoded
+`http://127.0.0.1:1238` address over A's authenticated socket. The app displayed no approval modal
+and stayed on Messages. C's TCP counter remained exactly zero, B remained entirely untouched, and A
+advanced by one authenticated ping:
 
-The Mac and phone Tailscale clients were available, but Tailscale reported **Serve is not enabled on
-your tailnet** and required an account-admin policy change. The run stopped at that boundary rather
-than silently changing the tailnet. A different public-CA HTTPS fixture would also satisfy this
-case. Redirect rejection remains a separate release-checklist row and is not an `RT-01A` closure
-condition.
+| Point                                   | A                 | B               | C   |
+| --------------------------------------- | ----------------- | --------------- | --- |
+| Before HTTP downgrade proposal          | `4 / 8 / 1 / 8`   | `0 / 0 / 0 / 0` | `0` |
+| After proposal with no approval display | `5 / 9 / 1 / 9`   | unchanged       | `0` |
+| Cold relaunch after confirmed `am kill` | `7 / 14 / 2 / 15` | unchanged       | `0` |
+
+Before relaunch, the app was backgrounded and `am kill` removed its process. Cold launch returned
+directly to Messages and A then received fresh authenticated `/api/v1/server/info`, socket upgrade,
+device, ping, chat-query, and message-query traffic. C remained at zero, proving that the rejected
+HTTP address neither persisted nor replaced the HTTPS origin. One final periodic A ping before
+cleanup produced the closing tuple A `8 / 15 / 2 / 16`, B `0 / 0 / 0 / 0`, C zero.
+
+The initial Tailscale attempt remains useful boundary history: Serve required a separate
+tailnet-admin policy change, so no account policy was changed. The loopback public-CA fixture avoided
+that dependency and did not expose the server to the internet. Redirect rejection and explicit
+upload/download TLS behavior remain separate release-checklist rows, not `RT-01A` closure
+conditions; this evidence must not be reused as proof for those rows.
 
 ## Cleanup
 
-- The fixture printed `RT01_CLOSED`; its temporary root, process, and four listeners were absent.
-- All three USB reverse rules were removed.
+- The fixture printed `RT01_CLOSED`; its temporary root, process, and all listeners were absent.
+- Every USB reverse rule from both runs was removed.
+- The TLS proxy printed `RT01_TLS_CLOSED`; its final counters were 11 TLS connections, 15 HTTP
+  requests, and two WebSocket upgrades, and this run retained no additional certificate/key file.
 - Tailscale's phone UI was restored to **Not connected** and Mac Serve retained zero entries.
 - No screenshot, UI hierarchy, logcat capture, private URL, or credential was retained.
-- Gator `0.1.46` / version code `63` remains installed at the clean Get Started screen produced by
-  the fail-safe recovery.
+- Gator `0.1.46` / version code `63` remains installed at a clean Get Started screen after the
+  synthetic HTTPS session's app data was cleared.
 - The phone's Tailscale connection was temporary; no accessibility setting or stay-awake value was
   changed.

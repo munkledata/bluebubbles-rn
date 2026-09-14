@@ -286,14 +286,15 @@ npm run check:android-build
 - [ ] Product copy is explicit that the app uses Android's normal TLS validation and does **not**
       claim certificate pinning. An inert legacy `certPins` SecureStore value on an upgraded install
       is harmless because no code reads it.
-- [ ] On the exact candidate, traffic capture proves a forged/rejected `new-server` event cannot
+- [x] On the exact candidate, traffic capture proves a forged/rejected `new-server` event cannot
       persist, contact, or send credentials to another origin or downgrade HTTPS. An approved
       rotation displays both origins and requires foreground confirmation, a freshly entered
       password, and separate cleartext consent when applicable; interruption cannot mix old/new
-      credentials. The superseded v59 candidate's exact source was
-      `7a3aa2058ad1bea4252379b2ea3df285e1fd94ef`, which contains the host flow from `8564b34` plus
-      post-v57 removal commit `9046e27`; this historical fact supplies no replacement credit, and
-      exact Android network and SecureStore behavior remains unproven.
+      credentials. Exact Play v63 passed cleartext reject/approve, approved-origin persistence,
+      held late-result rejection, native interrupted-SecureStore fail-safe recovery, and
+      Android-trusted HTTPS-to-HTTP downgrade rejection with zero trap TCP contact before and after
+      `am kill`. Exact identities, counters, limits, and cleanup are recorded in
+      [`docs/RT_01A_PLAY_DEVICE_PROOF_2026-09-13.md`](./docs/RT_01A_PLAY_DEVICE_PROOF_2026-09-13.md).
 - [x] On exact Play v63, automatic preview text and optional JPEG/PNG data images use only the
       authenticated bounded Gator-server proxy. The controlled 20-case matrix, app-UID destination
       observation, server request ledger, duplicate coalescing, original-URL tap, limitations, and
