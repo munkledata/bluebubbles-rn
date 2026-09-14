@@ -17,13 +17,15 @@ not a Play-delivered or production-signed candidate.
   `fac61745dc0903786fb9ede62a962b399f7348f0bb6f899b8332667591033b9c`.
 - Fixture: isolated `TestBackendHost` from clean server commit `7ba80144e78605f6b71ce7c507fcbc2dad59d04a`,
   with only synthetic backup data and a disposable credential.
-- Transient JSON redirect fixture SHA-256:
+- Transient downgrade fixture SHA-256:
   `f6702e89fa295afb3527dbe707b368ac5286817179f38a99f5865e3878ef1d51`.
+- Expanded same-origin/cross-origin-HTTPS fixture SHA-256:
+  `570d7fdca69ad1e2ed6200573d7c2858bc5fb8caa53b0e68dbe36b2de8579f21`.
 
 A checksum-verified temporary Cloudflare tunnel supplied a public-CA HTTPS origin. The fixture
 counted the approved first hop and a separate, phone-reachable cleartext trap. It retained only
 aggregate connection/request/body-byte counts and Authorization/content-type presence booleans; it
-did not print or retain the random hostname, disposable credential, request body, phone identifier,
+did not print or retain the random hostnames, disposable credential, request body, phone identifier,
 or private message data.
 
 ## Failed-before result and root cause
@@ -96,6 +98,41 @@ A final direct phone-originated `toybox nc` control changed only `trap_connectio
 requests, bytes, and Authorization-bearing requests remained zero. This proves the target was
 reachable from the phone and that the five preceding zeros came from app-side redirect rejection.
 
+## Same-origin and cross-origin HTTPS completion
+
+The release checklist also requires same-origin and cross-origin HTTPS destinations. The fixture was
+expanded and restarted with fresh counters, and a second temporary public-CA tunnel pointed only at
+the isolated trap. A normal cold-launch control again completed two authenticated chat queries and
+two authenticated WebSocket handshakes while both target counters stayed zero.
+
+The app then repeated `301`, `302`, `303`, `307`, and `308` for a relative same-origin target. Every
+approved first hop was an authenticated 83-byte JSON POST, while the same-origin target stayed
+exactly:
+
+```text
+requests=0, body_bytes=0, authorization_requests=0
+```
+
+A direct bounded control through the same public-CA origin returned HTTP 204 and changed only that
+target to `1 / 0 / 0`, proving the relative target route was live.
+
+The app next repeated all five statuses with a separately hosted public-CA HTTPS target. Every
+approved first hop retained the same authenticated 83-byte JSON shape. The cross-origin target
+remained exactly:
+
+```text
+connections=0, requests=0, body_bytes=0, authorization_requests=0
+```
+
+A direct bounded request through the second tunnel returned HTTP 204 and changed the target to
+`1 / 1 / 0 / 0`, proving that tunnel and trap were live. Across the ten added app cases, the earlier
+same-origin control baseline remained exactly one and the cross-origin target remained zero until
+its explicit control. All ten launches were true cold launches after a confirmed absent app PID.
+
+Together with the first five HTTPS-to-HTTP cases, the repaired local release therefore rejects all
+15 combinations of five redirect statuses and three required destination classes before a second
+request.
+
 ## Supporting verification and remaining boundary
 
 - Focused HttpClient suites: 2 suites, 32 tests passed.
@@ -109,3 +146,7 @@ This closes the local-release ordinary JSON redirect row only. `TLS-00` remains 
 the active native attachment-upload path, owned bounded downloads, successful public-CA upload and
 download, explicit untrusted/self-signed rejection, the dormant raw-multipart disposition, and final
 exact-candidate evidence.
+
+The expanded fixture and second trap tunnel were stopped, and their USB reverse rule was removed.
+The first synthetic-account tunnel remains temporarily active for the next isolated `TLS-00`
+transport test; the app therefore has not yet received final test-account cleanup.
