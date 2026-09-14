@@ -27,6 +27,8 @@ export class ApiError extends Error {
    * Installed as non-enumerable so generic Error serialization cannot copy it into diagnostics.
    */
   public readonly serverDetail?: string;
+  /** Bounded machine-readable code from the reviewed server error envelope. */
+  public readonly serverErrorType?: string;
 
   constructor(
     public readonly kind: ApiErrorKind,
@@ -34,6 +36,7 @@ export class ApiError extends Error {
     public readonly status?: number,
     public override readonly cause?: unknown,
     serverDetail?: string,
+    serverErrorType?: string,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -43,9 +46,20 @@ export class ApiError extends Error {
       writable: false,
       configurable: false,
     });
+    Object.defineProperty(this, 'serverErrorType', {
+      value: serverErrorType,
+      enumerable: false,
+      writable: false,
+      configurable: false,
+    });
   }
 
-  static fromStatus(status: number, message?: string, serverDetail?: string): ApiError {
+  static fromStatus(
+    status: number,
+    message?: string,
+    serverDetail?: string,
+    serverErrorType?: string,
+  ): ApiError {
     if (status === 401 || status === 403)
       return new ApiError(
         'unauthorized',
@@ -53,6 +67,7 @@ export class ApiError extends Error {
         status,
         undefined,
         serverDetail,
+        serverErrorType,
       );
     if (status >= 500)
       return new ApiError(
@@ -61,15 +76,24 @@ export class ApiError extends Error {
         status,
         undefined,
         serverDetail,
+        serverErrorType,
       );
     if (status >= 400)
-      return new ApiError('bad_request', message ?? 'Bad request', status, undefined, serverDetail);
+      return new ApiError(
+        'bad_request',
+        message ?? 'Bad request',
+        status,
+        undefined,
+        serverDetail,
+        serverErrorType,
+      );
     return new ApiError(
       'server_error',
       message ?? `Unexpected status ${status}`,
       status,
       undefined,
       serverDetail,
+      serverErrorType,
     );
   }
 }

@@ -5,6 +5,7 @@ import type { SyncApi } from './types';
 /** SyncApi backed by the typed HttpClient (header auth). App-only (imports ky). */
 export function httpSyncApi(http: HttpClient): SyncApi {
   return {
+    serverInfo: (signal) => serverApi.serverInfo(http, signal),
     async serverVersion(signal?: AbortSignal): Promise<string> {
       const info = await serverApi.serverInfo(http, signal);
       return info.server_version ?? ''; // unknown → '' (sync treats as old → timestamp cursor)

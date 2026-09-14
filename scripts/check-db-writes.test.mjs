@@ -2665,8 +2665,8 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/services/sync/engine.ts#syncAllChats:mutator-call:d025e1f31f26',
       'src/services/sync/engine.ts#syncChatMessageRange:mutator-call:34deba18cbca',
       'src/services/sync/engine.ts#syncSingleChat:mutator-call:3c8efb8e47a5',
-      'src/services/syncControl.ts#runSync:mutator-call:e5fb2e948fee',
-      'src/services/syncControl.ts#runSync:mutator-call:f1a10c34bde9',
+      'src/services/syncControl.ts#runSync:mutator-call:535bd795208b',
+      'src/services/syncControl.ts#runSync:mutator-call:d8dbede56cd8',
     ].sort(),
   );
 });
@@ -3007,7 +3007,7 @@ test('certifies exactly the reviewed sync delegation edges', () => {
       finding.symbol.startsWith('runSyncedBackgroundRequest.') &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
   );
-  const finalRepairMarkerTransaction = findings.filter(
+  const finalSnapshotMarkerTransactions = findings.filter(
     (finding) =>
       finding.path === 'src/services/syncControl.ts' &&
       finding.symbol === 'runSync' &&
@@ -3031,14 +3031,16 @@ test('certifies exactly the reviewed sync delegation edges', () => {
       'src/services/syncControl.ts#ensureChatSynced.<callback:910670867e>:mutator-call:c1b6e98cef19',
       'src/services/syncControl.ts#runSync:mutator-call:15ffb54cca3e',
       'src/services/syncControl.ts#runSync:mutator-call:15ffb54cca3e:2',
+      'src/services/syncControl.ts#runSync:mutator-call:3d1b923ea415',
       'src/services/syncControl.ts#runSync:mutator-call:471d6b8fb139',
+      'src/services/syncControl.ts#runSync:mutator-call:535bd795208b',
+      'src/services/syncControl.ts#runSync:mutator-call:5e67ff4f7781',
       'src/services/syncControl.ts#runSync:mutator-call:60ab7d89146f',
       'src/services/syncControl.ts#runSync:mutator-call:62e252e57364',
-      'src/services/syncControl.ts#runSync:mutator-call:6635d9ca8da5',
+      'src/services/syncControl.ts#runSync:mutator-call:969f8e9b7657',
       'src/services/syncControl.ts#runSync:mutator-call:cad4b657fd83',
-      'src/services/syncControl.ts#runSync:mutator-call:e5fb2e948fee',
-      'src/services/syncControl.ts#runSync:mutator-call:ecdced85c5c2',
-      'src/services/syncControl.ts#runSync:mutator-call:f1a10c34bde9',
+      'src/services/syncControl.ts#runSync:mutator-call:d8dbede56cd8',
+      'src/services/syncControl.ts#runSync:mutator-call:e4e7d86ff911',
       'src/services/syncControl.ts#runSync:mutator-call:f2bc335e17da',
       'src/services/syncControl.ts#runSync:mutator-call:f2bc335e17da:2',
       'src/services/syncControl.ts#startFullRepair.<callback:a019ed9cf6>:mutator-call:7349d6139eeb',
@@ -3048,10 +3050,12 @@ test('certifies exactly the reviewed sync delegation edges', () => {
     ].sort(),
   );
   assert.deepEqual(
-    finalRepairMarkerTransaction.map((finding) => finding.id).sort(),
+    finalSnapshotMarkerTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/syncControl.ts#runSync:mutator-call:60df5f182f2b',
-      'src/services/syncControl.ts#runSync:mutator-call:75893d5cf0b4',
+      'src/services/syncControl.ts#runSync:mutator-call:1211c3e0c6bc',
+      'src/services/syncControl.ts#runSync:mutator-call:489e43b1e357',
+      'src/services/syncControl.ts#runSync:mutator-call:4a42bc61cca8',
+      'src/services/syncControl.ts#runSync:mutator-call:fc259ece4940',
     ].sort(),
   );
   assert.deepEqual(

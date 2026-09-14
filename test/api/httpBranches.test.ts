@@ -239,6 +239,31 @@ describe('repair snapshot endpoint', () => {
     });
   });
 
+  it('maps the typed RCS snapshot refusal without matching server prose', async () => {
+    mockKy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          status: 409,
+          message: 'Conflict',
+          error: {
+            type: 'repair_snapshot_rcs_active',
+            retryable: false,
+            message: 'server wording may evolve independently',
+          },
+        }),
+        { status: 409, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+    const client = new HttpClient({
+      getOrigin: () => 'https://repair.example',
+      getPassword: () => 'p',
+    });
+
+    await expect(repairSnapshotApi.begin(client)).rejects.toBeInstanceOf(
+      repairSnapshotApi.RepairSnapshotRcsActiveError,
+    );
+  });
+
   it('rejects extra fields in the versioned success shape', async () => {
     mockKy.mockResolvedValueOnce(
       jsonResponse({

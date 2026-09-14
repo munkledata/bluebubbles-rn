@@ -17,10 +17,16 @@ import type { SyncApi } from './types';
 
 /** Account-scoped deletion continuation state. Account cleanup deletes this key. */
 export const DELETIONS_SYNCED_AT_KEY = 'sync.deletionsSyncedAt';
+/** Account-scoped proof that one stable, zero-origin deletion snapshot reached its terminal page. */
+export const DELETION_SNAPSHOT_INITIALIZED_KEY = 'sync.deletionSnapshotInitialized';
+/** Versioned so a future snapshot contract can deliberately require one new initialization pass. */
+export const DELETION_SNAPSHOT_INITIALIZED_VALUE = JSON.stringify({ v: 1 });
 /** Server page cap for GET /message/deleted. */
 export const DELETION_SYNC_PAGE_SIZE = DELETED_MESSAGE_PAGE_LIMIT;
 /** Bounded catch-up: at most this many committed pages per sync. */
 export const DELETION_SYNC_MAX_PAGES = 5;
+/** Hard fail-closed ceiling for a stable-snapshot deletion crawl (500,000 observations). */
+export const DELETION_SYNC_EXHAUSTIVE_MAX_PAGES = 1_000;
 
 const DELETION_SYNC_STATE_VERSION = 1;
 const MAX_DELETION_CURSOR_LENGTH = 512;
@@ -46,6 +52,25 @@ export class DeletionSyncProtocolError extends Error {
   constructor(readonly code: DeletionSyncProtocolErrorCode) {
     super(`Deletion sync protocol violation: ${code}`);
     this.name = 'DeletionSyncProtocolError';
+  }
+}
+
+export type DeletionSyncIncompleteReason =
+  | 'aborted'
+  | 'bounds'
+  | 'legacy-cursor-stalled'
+  | 'legacy-protocol'
+  | 'non-ledger-protocol'
+  | 'page-cap';
+
+/**
+ * An exhaustive crawl stopped without proving that it consumed the terminal deletion page.
+ * Messages deliberately contain no server cursor or message identity.
+ */
+export class DeletionSyncIncompleteError extends Error {
+  constructor(readonly reason: DeletionSyncIncompleteReason) {
+    super(`Deletion sync did not reach its terminal page: ${reason}`);
+    this.name = 'DeletionSyncIncompleteError';
   }
 }
 
@@ -138,8 +163,10 @@ export interface DeletionSyncOptions {
   supported: boolean;
   /** Injectable clock used only when a deletion has no server timestamp. */
   now?: () => number;
-  /** Page cap per sync (default {@link DELETION_SYNC_MAX_PAGES}). */
+  /** Page cap per sync (bounded default 5; exhaustive default 1,000). */
   maxPages?: number;
+  /** Replay from zero and require a durable v2 terminal page before resolving. */
+  exhaustive?: boolean;
   /** Full-page threshold (default {@link DELETION_SYNC_PAGE_SIZE}; tests may lower it). */
   pageSize?: number;
   /** Stop before the next request/write when this account no longer owns the run. */
@@ -148,6 +175,38 @@ export interface DeletionSyncOptions {
   commitGuard?: DbCommitGuard;
   /** Cancel the active deletion request/retry wait. */
   signal?: AbortSignal;
+}
+
+export interface DeletionSnapshotInitializationReadOptions {
+  /** Stop/deny the read when this account no longer owns the run. */
+  shouldAbort?: () => boolean;
+  /** Optional stronger owner, such as an already-captured DB write fence. */
+  commitGuard?: DbCommitGuard;
+}
+
+function normalizePositiveBound(
+  value: number | undefined,
+  fallback: number,
+  ceiling: number,
+): number {
+  if (value == null) return fallback;
+  return Number.isFinite(value) && value > 0 ? Math.min(Math.floor(value), ceiling) : 0;
+}
+
+/** Read the one-time stable-deletion initialization proof under the global DB owner + account guard. */
+export async function isDeletionSnapshotInitialized(
+  db: AppDatabase,
+  opts: DeletionSnapshotInitializationReadOptions = {},
+): Promise<boolean> {
+  const shouldContinue = (): boolean => !(opts.shouldAbort?.() ?? false);
+  const commitGuard = opts.commitGuard ?? (opts.shouldAbort ? shouldContinue : undefined);
+  const value = await withDbTransaction(
+    db,
+    (transactionContext) =>
+      kvGetWithinTransaction(transactionContext, DELETION_SNAPSHOT_INITIALIZED_KEY),
+    commitGuard,
+  );
+  return value === DELETION_SNAPSHOT_INITIALIZED_VALUE;
 }
 
 async function fetchDeletionPage(
@@ -196,41 +255,62 @@ export async function syncDeletedMessages(
   api: SyncApi,
   opts: DeletionSyncOptions,
 ): Promise<number> {
-  if (!opts.supported) return 0;
+  const exhaustive = opts.exhaustive === true;
+  // A bound repair snapshot reads the retained v2 ledger even when the server cannot currently
+  // discover new live deletions. Exhaustive mode therefore owns its own capability contract.
+  if (!opts.supported && !exhaustive) return 0;
+  const config = {
+    maxPages: normalizePositiveBound(
+      opts.maxPages,
+      exhaustive ? DELETION_SYNC_EXHAUSTIVE_MAX_PAGES : DELETION_SYNC_MAX_PAGES,
+      exhaustive ? DELETION_SYNC_EXHAUSTIVE_MAX_PAGES : DELETION_SYNC_MAX_PAGES,
+    ),
+    requireLedgerProtocol: exhaustive,
+    startFromZero: exhaustive,
+  };
   const now = opts.now ?? Date.now;
-  const maxPages =
-    opts.maxPages == null
-      ? DELETION_SYNC_MAX_PAGES
-      : Number.isFinite(opts.maxPages) && opts.maxPages > 0
-        ? Math.min(Math.floor(opts.maxPages), DELETION_SYNC_MAX_PAGES)
-        : 0;
-  const pageSize =
-    opts.pageSize == null
-      ? DELETION_SYNC_PAGE_SIZE
-      : Number.isFinite(opts.pageSize) && opts.pageSize > 0
-        ? Math.min(Math.floor(opts.pageSize), DELETION_SYNC_PAGE_SIZE)
-        : 0;
+  const pageSize = normalizePositiveBound(
+    opts.pageSize,
+    DELETION_SYNC_PAGE_SIZE,
+    DELETION_SYNC_PAGE_SIZE,
+  );
   const shouldContinue = (): boolean => !(opts.shouldAbort?.() ?? false);
   const commitGuard = opts.commitGuard ?? (opts.shouldAbort ? shouldContinue : undefined);
-  if (!shouldContinue() || maxPages === 0 || pageSize === 0) return 0;
+  if (!shouldContinue()) {
+    if (exhaustive) throw new DeletionSyncIncompleteError('aborted');
+    return 0;
+  }
+  if (config.maxPages === 0 || pageSize === 0) {
+    if (exhaustive) throw new DeletionSyncIncompleteError('bounds');
+    return 0;
+  }
 
-  // The read takes the same global owner as writes. It cannot observe a neighbouring transaction's
-  // uncommitted state, and the commit guard rejects a queued old-account read after revocation.
-  const rawState = await withDbTransaction(
-    db,
-    (transactionContext) => kvGetWithinTransaction(transactionContext, DELETIONS_SYNCED_AT_KEY),
-    commitGuard,
-  );
-  let state = parseState(rawState);
+  // A stable-snapshot crawl always replays from zero. Ordinary catch-up resumes its durable cursor;
+  // that read takes the same global owner as writes so it cannot observe a neighbour's uncommitted
+  // state, and its guard rejects a queued old-account read after revocation.
+  let state: DeletionSyncState | null = null;
+  if (!config.startFromZero) {
+    const rawState = await withDbTransaction(
+      db,
+      (transactionContext) => kvGetWithinTransaction(transactionContext, DELETIONS_SYNCED_AT_KEY),
+      commitGuard,
+    );
+    state = parseState(rawState);
+  }
   const seenCursors = new Set<string>();
   if (state?.mode === 'cursor') seenCursors.add(state.cursor);
 
   let applied = 0;
   let committedPages = 0;
+  let completed = false;
+  let incompleteReason: DeletionSyncIncompleteReason | undefined;
   let restartedCursorFromZero = false;
   let restartedRejectedV2CursorFromZero = false;
-  while (committedPages < maxPages) {
-    if (!shouldContinue()) break;
+  while (committedPages < config.maxPages) {
+    if (!shouldContinue()) {
+      incompleteReason = 'aborted';
+      break;
+    }
     const requestedAfterMs = state?.afterMs ?? 0;
     const requestedCursor = state?.mode === 'cursor' ? state.cursor : null;
     let response: DeletedMessagePage;
@@ -245,7 +325,10 @@ export async function syncDeletedMessages(
         !restartedRejectedV2CursorFromZero &&
         isOldServerV2CursorRejection(error, requestedCursor)
       ) {
-        if (!shouldContinue()) break;
+        if (!shouldContinue()) {
+          incompleteReason = 'aborted';
+          break;
+        }
         restartedRejectedV2CursorFromZero = true;
         state = null;
         seenCursors.clear();
@@ -256,7 +339,21 @@ export async function syncDeletedMessages(
 
     // HttpClient keeps an immutable request snapshot through retries. Reject an old-account result
     // before it can enter a transaction after Disconnect changed ownership.
-    if (!shouldContinue()) break;
+    if (!shouldContinue()) {
+      incompleteReason = 'aborted';
+      break;
+    }
+
+    // A stable initialization is authorized only by the durable observation ledger. Reject an old
+    // timestamp/v1 response before applying any tombstone or continuation state: those protocols
+    // cannot prove that a late, older source row did not fall behind an already-issued cursor.
+    if (
+      config.requireLedgerProtocol &&
+      (response.protocol !== 'continuation' || !response.cursor.startsWith('v2.'))
+    ) {
+      incompleteReason = response.protocol === 'legacy' ? 'legacy-protocol' : 'non-ledger-protocol';
+      break;
+    }
 
     // A timestamp-only run cannot be converted safely at a non-zero watermark: rows tied at that
     // timestamp may sit on the other side of the new composite cursor. Discard the one probe and
@@ -328,7 +425,22 @@ export async function syncDeletedMessages(
     committedPages++;
     state = nextState;
     if (response.protocol === 'continuation') seenCursors.add(response.cursor);
-    if (!shouldFetchAnotherPage) break;
+    if (!shouldFetchAnotherPage) {
+      // Only continuation servers explicitly identify the terminal page. Ordinary catch-up keeps
+      // its legacy short-page behavior, but a stable-snapshot crawl fails closed without an exact
+      // `hasMore:false` proof.
+      if (response.protocol === 'continuation') completed = true;
+      else if (config.requireLedgerProtocol) incompleteReason = 'legacy-protocol';
+      else if (rows.length < pageSize) completed = true;
+      else incompleteReason = 'legacy-cursor-stalled';
+      break;
+    }
+  }
+  if (!completed && incompleteReason == null) {
+    incompleteReason = shouldContinue() ? 'page-cap' : 'aborted';
+  }
+  if (exhaustive && !completed) {
+    throw new DeletionSyncIncompleteError(incompleteReason ?? 'page-cap');
   }
   return applied;
 }

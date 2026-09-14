@@ -26,6 +26,14 @@ describe('wire contract: app zod models accept the Gator server shapes', () => {
     if (res.success) expect(res.data.server_version).toBe('1.2.3');
   });
 
+  it('ServerInfo preserves the additive stable-repair-snapshot capability', () => {
+    expect(ServerInfo.parse({ version: '2.0.15', supports_repair_snapshot: true })).toMatchObject({
+      server_version: '2.0.15',
+      supports_repair_snapshot: true,
+    });
+    expect(ServerInfo.parse({ version: '1.9.0' }).supports_repair_snapshot).toBeUndefined();
+  });
+
   it('ServerInfo accepts the enriched server/info (version + feature/proxy flags)', () => {
     const res = ServerInfo.safeParse(fixture('serverInfo.enriched.gator.json'));
     expect(res.success).toBe(true);

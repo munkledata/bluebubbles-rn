@@ -19,8 +19,12 @@ import * as kvRepository from '@db/repositories/kv';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import {
+  DELETION_SNAPSHOT_INITIALIZED_KEY,
+  DELETION_SNAPSHOT_INITIALIZED_VALUE,
   DELETIONS_SYNCED_AT_KEY,
+  DeletionSyncIncompleteError,
   DeletionSyncProtocolError,
+  isDeletionSnapshotInitialized,
   syncDeletedMessages,
 } from '@/services/sync/engine';
 import type { SyncApi } from '@/services/sync/types';
@@ -104,6 +108,16 @@ async function expectProtocolError(
 }
 
 describe('syncDeletedMessages — R1 deletion catch-up', () => {
+  it('recognizes only the current versioned stable-snapshot proof', async () => {
+    const { db } = await createTestDb();
+
+    await expect(isDeletionSnapshotInitialized(db)).resolves.toBe(false);
+    await kvSet(db, DELETION_SNAPSHOT_INITIALIZED_KEY, '{"v":0}');
+    await expect(isDeletionSnapshotInitialized(db)).resolves.toBe(false);
+    await kvSet(db, DELETION_SNAPSHOT_INITIALIZED_KEY, DELETION_SNAPSHOT_INITIALIZED_VALUE);
+    await expect(isDeletionSnapshotInitialized(db)).resolves.toBe(true);
+  });
+
   it('enforces the 500-row server contract at the API schema boundary', () => {
     const row = (index: number): DeletedMessage => ({
       guid: `deleted-${index}`,
@@ -181,6 +195,117 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
     expect(clock).not.toHaveBeenCalled();
     expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(legacyState(111));
     expect(tombstones(raw).get('m1')).toBe(111);
+  });
+
+  it('keeps ordinary catch-up bounded to five pages and returns its partial applied count', async () => {
+    const { db } = await createTestDb();
+    let page = 0;
+    const fetch = jest.fn<Promise<DeletedMessagePage>, [number, string | null, AbortSignal?]>(
+      async () => {
+        page += 1;
+        return {
+          protocol: 'continuation',
+          deleted: [{ guid: `ordinary-${page}`, chatGuid: null, dateDeleted: page }],
+          cursor: `v2.ordinary-${page}`,
+          hasMore: true,
+        };
+      },
+    );
+
+    await expect(syncDeletedMessages(db, cursorApi(fetch), { supported: true })).resolves.toBe(5);
+    expect(fetch).toHaveBeenCalledTimes(5);
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(cursorState(5, 'v2.ordinary-5'));
+  });
+
+  it('exhaustive catch-up ignores durable state and resolves only after an explicit terminal page', async () => {
+    const { db } = await createTestDb();
+    await kvSet(db, DELETIONS_SYNCED_AT_KEY, cursorState(9_000, 'v2.persisted'));
+    const fetch = jest.fn<Promise<DeletedMessagePage>, [number, string | null, AbortSignal?]>(
+      async (_after, cursor) =>
+        cursor == null
+          ? {
+              protocol: 'continuation',
+              deleted: [{ guid: 'snapshot-row', chatGuid: null, dateDeleted: 100 }],
+              cursor: 'v2.snapshot-page',
+              hasMore: true,
+            }
+          : {
+              protocol: 'continuation',
+              deleted: [],
+              cursor: 'v2.snapshot-terminal',
+              hasMore: false,
+            },
+    );
+
+    await expect(
+      syncDeletedMessages(db, cursorApi(fetch), { supported: false, exhaustive: true }),
+    ).resolves.toBe(1);
+    expect(fetch.mock.calls).toEqual([
+      [0, null, undefined],
+      [100, 'v2.snapshot-page', undefined],
+    ]);
+    expect(await kvGet(db, DELETIONS_SYNCED_AT_KEY)).toBe(cursorState(100, 'v2.snapshot-terminal'));
+  });
+
+  it('exhaustive catch-up rejects non-ledger protocols before writes and enforces its safety cap', async () => {
+    const { db: legacyDb } = await createTestDb();
+    const legacy = syncDeletedMessages(
+      legacyDb,
+      api(async () => []),
+      { supported: true, exhaustive: true },
+    );
+    await expect(legacy).rejects.toMatchObject<Partial<DeletionSyncIncompleteError>>({
+      reason: 'legacy-protocol',
+    });
+    expect(await kvGet(legacyDb, DELETIONS_SYNCED_AT_KEY)).toBeNull();
+
+    const { db: v1Db, raw: v1Raw } = await createTestDb();
+    await expect(
+      syncDeletedMessages(
+        v1Db,
+        cursorApi(async () => ({
+          protocol: 'continuation',
+          deleted: [{ guid: 'must-not-apply-v1', chatGuid: null, dateDeleted: 1 }],
+          cursor: 'v1.legacy-cursor',
+          hasMore: false,
+        })),
+        { supported: true, exhaustive: true },
+      ),
+    ).rejects.toMatchObject<Partial<DeletionSyncIncompleteError>>({
+      reason: 'non-ledger-protocol',
+    });
+    expect(await kvGet(v1Db, DELETIONS_SYNCED_AT_KEY)).toBeNull();
+    expect(
+      v1Raw
+        .prepare('SELECT date_deleted FROM message_deletion_ledger WHERE guid = ?')
+        .pluck()
+        .get('must-not-apply-v1'),
+    ).toBeUndefined();
+
+    const { db: cappedDb } = await createTestDb();
+    let page = 0;
+    const neverTerminal = jest.fn<
+      Promise<DeletedMessagePage>,
+      [number, string | null, AbortSignal?]
+    >(async () => {
+      page += 1;
+      return {
+        protocol: 'continuation',
+        deleted: [{ guid: `capped-${page}`, chatGuid: null, dateDeleted: page }],
+        cursor: `v2.capped-${page}`,
+        hasMore: true,
+      };
+    });
+
+    await expect(
+      syncDeletedMessages(cappedDb, cursorApi(neverTerminal), {
+        supported: true,
+        exhaustive: true,
+        maxPages: 2,
+      }),
+    ).rejects.toMatchObject<Partial<DeletionSyncIncompleteError>>({ reason: 'page-cap' });
+    expect(neverTerminal).toHaveBeenCalledTimes(2);
+    expect(await kvGet(cappedDb, DELETIONS_SYNCED_AT_KEY)).toBe(cursorState(2, 'v2.capped-2'));
   });
 
   it('replaces an old clock-derived timestamp with cursor pages from zero and persists the terminal cursor', async () => {

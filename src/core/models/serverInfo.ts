@@ -44,6 +44,8 @@ export const ServerInfo = z
      * old server just never sends one); the accessor/hook exist for future affordances.
      */
     supports_message_deleted: z.boolean().nullish(),
+    /** Whether the server can hold one stable view across multi-request sync/repair crawls. */
+    supports_repair_snapshot: z.boolean().nullish(),
     /**
      * Whether the server exposes bounded text search over its live Messages database. Additive;
      * absent/false on older servers, so global search remains local-only until support is explicit.

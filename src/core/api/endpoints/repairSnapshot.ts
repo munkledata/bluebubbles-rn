@@ -24,9 +24,24 @@ export interface RepairSnapshotLease {
   readonly expiresAt: number;
 }
 
+/** Snapshot support exists, but the server cannot freeze its independently-owned RCS cache. */
+export class RepairSnapshotRcsActiveError extends Error {
+  constructor(cause?: unknown) {
+    super('Stable deletion initialization is deferred while RCS is enabled.', { cause });
+    this.name = 'RepairSnapshotRcsActiveError';
+  }
+}
+
 function surfaceSafeServerDetail(error: unknown, missingMeansUnsupported = false): never {
   if (missingMeansUnsupported && error instanceof ApiError && error.status === 404) {
     throw new UnimplementedEndpointError(ENDPOINT);
+  }
+  if (
+    error instanceof ApiError &&
+    error.status === 409 &&
+    error.serverErrorType === 'repair_snapshot_rcs_active'
+  ) {
+    throw new RepairSnapshotRcsActiveError(error);
   }
   if (error instanceof ApiError && error.serverDetail) {
     throw new Error(error.serverDetail, { cause: error });

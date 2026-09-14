@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { inArray, sql } from 'drizzle-orm';
 import { kv } from '../schema';
 import { withDbTransaction, withDbWriteLock } from '../transaction';
 import type { AppDatabase } from '../types';
@@ -13,6 +13,11 @@ import { setSyncMarkerWithinTransaction } from './sync';
  * `test/db/clearLocalCache.test.ts` asserts the two strings still agree.
  */
 export const DELETIONS_WATERMARK_KV_KEY = 'sync.deletionsSyncedAt';
+/**
+ * Account-scoped stable deletion-snapshot proof. Duplicated from the sync service for the same
+ * dependency-direction reason as {@link DELETIONS_WATERMARK_KV_KEY}.
+ */
+export const DELETION_SNAPSHOT_INITIALIZED_KV_KEY = 'sync.deletionSnapshotInitialized';
 
 /**
  * Prefix of the per-chat composer-draft kv keys (`draft.<chat guid>`), shared by the chat-service
@@ -371,8 +376,14 @@ export async function clearLocalCache(db: AppDatabase): Promise<void> {
   }
 
   // The cursor and its old-server timestamp fallback are relative to one account. Removing the
-  // whole versioned state makes the next account establish its own continuation from zero.
-  await withDbWriteLock(async () => db.delete(kv).where(eq(kv.key, DELETIONS_WATERMARK_KV_KEY)));
+  // whole versioned state makes the next account establish its own continuation from zero. The
+  // stable-snapshot proof is account-relative too; retaining it would skip that initialization for
+  // the next server.
+  await withDbWriteLock(async () =>
+    db
+      .delete(kv)
+      .where(inArray(kv.key, [DELETIONS_WATERMARK_KV_KEY, DELETION_SNAPSHOT_INITIALIZED_KV_KEY])),
+  );
   // Composer drafts are the one CHAT-SCOPED thing in kv: unsent, user-authored text about a chat
   // whose row was deleted five statements ago, keyed by a guid that is identical across servers.
   // Left behind, the next account opening its own thread with the same number finds the previous
@@ -482,6 +493,7 @@ export async function localCacheDirty(db: AppDatabase): Promise<boolean> {
                           OR last_synced_timestamp IS NOT NULL)
           OR EXISTS (SELECT 1 FROM kv
                        WHERE key = ${DELETIONS_WATERMARK_KV_KEY}
+                          OR key = ${DELETION_SNAPSHOT_INITIALIZED_KV_KEY}
                           OR key LIKE ${`${DRAFT_KV_PREFIX}%`}
                           OR key LIKE ${`${FULL_REPAIR_RETIRED_CHAT_KV_PREFIX}%`}
                           OR key LIKE ${`${NOTIFICATION_ROUTE_KV_PREFIX}%`})
