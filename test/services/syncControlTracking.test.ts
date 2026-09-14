@@ -17,16 +17,21 @@ const syncAllChats = jest.fn();
 const syncChatMessages = jest.fn();
 const getSyncMarker = jest.fn();
 const setSyncMarkerWithinTransaction = jest.fn();
+const kvSetWithinTransaction = jest.fn();
 const captureFullRepairPruneExposure = jest.fn();
 const reconcileFullRepairPruneExposure = jest.fn();
 const sameFullSyncServerView = jest.fn();
 const syncContacts = jest.fn();
 const serverVersion = jest.fn();
+const fetchServerInfo = jest.fn();
 const beginRepairSnapshot = jest.fn();
 const finishRepairSnapshot = jest.fn();
 const cancelRepairSnapshot = jest.fn();
 const bindRepairSnapshot = jest.fn();
 const syncDeletedMessages = jest.fn<Promise<number>, [unknown, unknown, unknown]>(async () => 0);
+const isDeletionSnapshotInitialized = jest.fn<Promise<boolean>, [unknown, unknown]>(
+  async () => false,
+);
 const pinnedHttp = { bindRepairSnapshot };
 const pinTransport = jest.fn(() => pinnedHttp);
 const mockSyncDb = {
@@ -81,15 +86,19 @@ jest.mock('@/services/realtime/deliveryCoordinator', () => ({
   subscribeRealtimeGenerationInvalidation: mockSubscribeRealtimeGenerationInvalidation,
 }));
 jest.mock('@/services/sync', () => ({
+  DELETION_SNAPSHOT_INITIALIZED_KEY: 'sync.deletionSnapshotInitialized',
+  DELETION_SNAPSHOT_INITIALIZED_VALUE: '{"v":1}',
   fullSync,
   httpSyncApi: (transport: unknown) => ({
     transport,
+    serverInfo: fetchServerInfo,
     serverVersion,
     beginRepairSnapshot,
     finishRepairSnapshot,
     cancelRepairSnapshot,
   }),
   incrementalSync,
+  isDeletionSnapshotInitialized,
   sameFullSyncServerView,
   syncAllChats,
   syncChatMessages,
@@ -100,12 +109,13 @@ jest.mock('@db/database', () => ({ getDatabase: () => ({}) }));
 jest.mock('@db/repositories', () => ({
   captureFullRepairPruneExposure,
   getSyncMarker,
+  kvSetWithinTransaction,
   reconcileFullRepairPruneExposure,
   setSyncMarkerWithinTransaction,
 }));
 
 import type { ServerInfo } from '@core/models';
-import { UnimplementedEndpointError } from '@core/api/errors';
+import { RepairSnapshotRcsActiveError } from '@core/api/endpoints/repairSnapshot';
 import { useSessionStore } from '@state/sessionStore';
 import { useSyncStore } from '@state/syncStore';
 import {
@@ -121,10 +131,15 @@ import {
 const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
 const SERVER_INFO: ServerInfo = { server_version: '1.9.0' };
+const SNAPSHOT_SERVER_INFO: ServerInfo = {
+  server_version: '2.0.15',
+  supports_message_deleted: true,
+  supports_repair_snapshot: true,
+};
 
 /** Drive the session through the SAME transitions the app does — that is what mints an epoch. */
-const connectSession = (origin: string): void =>
-  useSessionStore.getState().connected(origin, 'hunter2', SERVER_INFO);
+const connectSession = (origin: string, serverInfo: ServerInfo = SERVER_INFO): void =>
+  useSessionStore.getState().connected(origin, 'hunter2', serverInfo);
 const disconnectSession = (): void => useSessionStore.getState().reset();
 
 /** A promise plus the trigger that resolves it — a run we can hold open for as long as we like. */
@@ -161,6 +176,7 @@ beforeEach(() => {
   syncChatMessages.mockResolvedValue(0);
   syncContacts.mockResolvedValue({ contacts: 0, matched: 0 });
   serverVersion.mockResolvedValue('1.9.0');
+  fetchServerInfo.mockResolvedValue(SERVER_INFO);
   beginRepairSnapshot.mockResolvedValue({
     token: '00000000-0000-4000-8000-000000000001',
     expiresAt: 1_900_000_000_000,
@@ -168,6 +184,7 @@ beforeEach(() => {
   finishRepairSnapshot.mockResolvedValue(undefined);
   cancelRepairSnapshot.mockResolvedValue(undefined);
   bindRepairSnapshot.mockReturnValue({});
+  isDeletionSnapshotInitialized.mockResolvedValue(false);
   mockReconcileMessageNotifications.mockResolvedValue(undefined);
   useSyncStore.getState().reset();
   // The slot is keyed by the session INSTANCE it belongs to, so start each test from a fresh one
@@ -307,6 +324,208 @@ describe('runTrackedSync — the background task participates in the coalescing 
   });
 });
 
+describe('first sync — stable snapshot completion', () => {
+  it('waits for capabilities when boot has not published server info yet', async () => {
+    getSyncMarker.mockResolvedValue({ lastSyncedRowId: null, lastSyncedTimestamp: null });
+    let resolveServerInfo!: (info: ServerInfo) => void;
+    fetchServerInfo.mockImplementationOnce(
+      () =>
+        new Promise<ServerInfo>((resolve) => {
+          resolveServerInfo = resolve;
+        }),
+    );
+    fullSync.mockImplementation(async (_db, _api, options) => {
+      options.onServerMarker?.({ lastSyncedRowId: 42, lastSyncedTimestamp: 4_200 });
+      return { chats: 3, messages: 7 };
+    });
+
+    connectSession('https://boot-race.example', SNAPSHOT_SERVER_INFO);
+    useSessionStore.setState({ serverInfo: null });
+    const running = startSync();
+    await settle();
+
+    expect(fetchServerInfo).toHaveBeenCalledTimes(1);
+    expect(fullSync).not.toHaveBeenCalled();
+
+    resolveServerInfo(SNAPSHOT_SERVER_INFO);
+    await running;
+    expect(beginRepairSnapshot).toHaveBeenCalledTimes(1);
+    expect(syncDeletedMessages).toHaveBeenCalledTimes(1);
+    expect(syncDeletedMessages.mock.calls[0]?.[2]).toMatchObject({ exhaustive: true });
+    expect(setSyncMarkerWithinTransaction).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the additive bounded path when the server omits the snapshot capability', async () => {
+    getSyncMarker.mockResolvedValue({ lastSyncedRowId: null, lastSyncedTimestamp: null });
+
+    connectSession('https://legacy.example');
+    await startSync();
+
+    expect(pinTransport).not.toHaveBeenCalled();
+    expect(beginRepairSnapshot).not.toHaveBeenCalled();
+    expect(fullSync).toHaveBeenCalledTimes(1);
+    expect(fullSync.mock.calls[0]?.[2]).toMatchObject({
+      commitMarker: true,
+      failOnChatError: false,
+    });
+    expect(syncDeletedMessages).toHaveBeenCalledTimes(1);
+    expect(syncDeletedMessages.mock.calls[0]?.[2]).not.toHaveProperty('exhaustive');
+    expect(isDeletionSnapshotInitialized).not.toHaveBeenCalled();
+    expect(kvSetWithinTransaction).not.toHaveBeenCalled();
+    expect(useSyncStore.getState().status).toBe('done');
+  });
+
+  it('runs one stable initialization when an upgraded account has a marker but no proof flag', async () => {
+    getSyncMarker.mockResolvedValue({ lastSyncedRowId: 10, lastSyncedTimestamp: 1_000 });
+    isDeletionSnapshotInitialized.mockResolvedValueOnce(false);
+    fullSync.mockImplementation(async (_db, _api, options) => {
+      options.onServerMarker?.({ lastSyncedRowId: 42, lastSyncedTimestamp: 4_200 });
+      return { chats: 3, messages: 7 };
+    });
+
+    connectSession('https://upgraded.example', SNAPSHOT_SERVER_INFO);
+    await startSync();
+
+    expect(isDeletionSnapshotInitialized).toHaveBeenCalledTimes(1);
+    expect(incrementalSync).not.toHaveBeenCalled();
+    expect(beginRepairSnapshot).toHaveBeenCalledTimes(1);
+    expect(fullSync.mock.calls[0]?.[2]).toMatchObject({ commitMarker: false });
+    expect(syncDeletedMessages).toHaveBeenCalledTimes(1);
+    expect(syncDeletedMessages.mock.calls[0]?.[2]).toMatchObject({ exhaustive: true });
+    expect(finishRepairSnapshot).toHaveBeenCalledTimes(1);
+    expect(setSyncMarkerWithinTransaction).toHaveBeenCalledTimes(1);
+    expect(kvSetWithinTransaction).toHaveBeenCalledWith(
+      expect.any(Object),
+      'sync.deletionSnapshotInitialized',
+      '{"v":1}',
+    );
+    expect(useSyncStore.getState()).toMatchObject({ status: 'done', chats: 3, messages: 7 });
+  });
+
+  it('finishes exhaustive deletions and the server lease before installing the marker', async () => {
+    getSyncMarker.mockResolvedValue({ lastSyncedRowId: null, lastSyncedTimestamp: null });
+    fullSync.mockImplementation(async (_db, _api, options) => {
+      options.onServerMarker?.({ lastSyncedRowId: 42, lastSyncedTimestamp: 4_200 });
+      return { chats: 3, messages: 7 };
+    });
+
+    connectSession('https://snapshot.example', SNAPSHOT_SERVER_INFO);
+    await startSync();
+
+    expect(pinTransport).toHaveBeenCalledTimes(1);
+    expect(beginRepairSnapshot).toHaveBeenCalledTimes(1);
+    expect(bindRepairSnapshot).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000001');
+    expect(fullSync).toHaveBeenCalledTimes(1);
+    expect(fullSync.mock.calls[0]?.[2]).toMatchObject({
+      commitMarker: false,
+      failOnChatError: true,
+    });
+    expect(syncDeletedMessages).toHaveBeenCalledTimes(1);
+    expect(syncDeletedMessages.mock.calls[0]?.[1]).toBe(fullSync.mock.calls[0]?.[1]);
+    expect(syncDeletedMessages.mock.calls[0]?.[2]).toMatchObject({ exhaustive: true });
+    expect(finishRepairSnapshot).toHaveBeenCalledWith(
+      '00000000-0000-4000-8000-000000000001',
+      undefined,
+    );
+    expect(setSyncMarkerWithinTransaction).toHaveBeenCalledTimes(1);
+    expect(setSyncMarkerWithinTransaction.mock.calls[0]?.[1]).toEqual({
+      lastSyncedRowId: 42,
+      lastSyncedTimestamp: 4_200,
+    });
+    expect(kvSetWithinTransaction).toHaveBeenCalledWith(
+      expect.any(Object),
+      'sync.deletionSnapshotInitialized',
+      '{"v":1}',
+    );
+    expect(beginRepairSnapshot.mock.invocationCallOrder[0]).toBeLessThan(
+      fullSync.mock.invocationCallOrder[0]!,
+    );
+    expect(fullSync.mock.invocationCallOrder[0]).toBeLessThan(
+      syncDeletedMessages.mock.invocationCallOrder[0]!,
+    );
+    expect(syncDeletedMessages.mock.invocationCallOrder[0]).toBeLessThan(
+      finishRepairSnapshot.mock.invocationCallOrder[0]!,
+    );
+    expect(finishRepairSnapshot.mock.invocationCallOrder[0]).toBeLessThan(
+      setSyncMarkerWithinTransaction.mock.invocationCallOrder[0]!,
+    );
+    expect(cancelRepairSnapshot).not.toHaveBeenCalled();
+    expect(useSyncStore.getState()).toMatchObject({
+      status: 'done',
+      chats: 3,
+      messages: 7,
+      error: null,
+    });
+  });
+
+  it('reads the retained v2 ledger even when live deletion discovery is unavailable', async () => {
+    getSyncMarker.mockResolvedValue({ lastSyncedRowId: null, lastSyncedTimestamp: null });
+    fullSync.mockImplementation(async (_db, _api, options) => {
+      options.onServerMarker?.({ lastSyncedRowId: 42, lastSyncedTimestamp: 4_200 });
+      return { chats: 3, messages: 7 };
+    });
+
+    connectSession('https://snapshot.example', {
+      ...SNAPSHOT_SERVER_INFO,
+      supports_message_deleted: false,
+    });
+    await startSync();
+
+    expect(syncDeletedMessages).toHaveBeenCalledTimes(1);
+    expect(syncDeletedMessages.mock.calls[0]?.[2]).toMatchObject({
+      exhaustive: true,
+      supported: true,
+    });
+    expect(kvSetWithinTransaction).toHaveBeenCalledWith(
+      expect.any(Object),
+      'sync.deletionSnapshotInitialized',
+      '{"v":1}',
+    );
+  });
+
+  it('keeps additive sync usable while RCS prevents a stable server snapshot', async () => {
+    getSyncMarker.mockResolvedValue({ lastSyncedRowId: null, lastSyncedTimestamp: null });
+    beginRepairSnapshot.mockRejectedValueOnce(new RepairSnapshotRcsActiveError());
+
+    connectSession('https://rcs.example', { ...SNAPSHOT_SERVER_INFO, rcs: true });
+    await startSync();
+
+    expect(fullSync).toHaveBeenCalledTimes(1);
+    expect(fullSync.mock.calls[0]?.[2]).toMatchObject({
+      commitMarker: true,
+      failOnChatError: false,
+    });
+    expect(syncDeletedMessages).toHaveBeenCalledTimes(1);
+    expect(syncDeletedMessages.mock.calls[0]?.[2]).not.toHaveProperty('exhaustive');
+    expect(finishRepairSnapshot).not.toHaveBeenCalled();
+    expect(kvSetWithinTransaction).not.toHaveBeenCalled();
+    expect(useSyncStore.getState().status).toBe('done');
+  });
+
+  it('cancels a lease whose finish fails and leaves the first-sync marker empty', async () => {
+    getSyncMarker.mockResolvedValue({ lastSyncedRowId: null, lastSyncedTimestamp: null });
+    fullSync.mockImplementation(async (_db, _api, options) => {
+      options.onServerMarker?.({ lastSyncedRowId: 42, lastSyncedTimestamp: 4_200 });
+      return { chats: 3, messages: 7 };
+    });
+    finishRepairSnapshot.mockRejectedValueOnce(new Error('snapshot finish failed'));
+
+    connectSession('https://snapshot.example', SNAPSHOT_SERVER_INFO);
+    await startSync();
+
+    expect(syncDeletedMessages).toHaveBeenCalledTimes(1);
+    expect(syncDeletedMessages.mock.calls[0]?.[2]).toMatchObject({ exhaustive: true });
+    expect(finishRepairSnapshot).toHaveBeenCalledTimes(1);
+    expect(setSyncMarkerWithinTransaction).not.toHaveBeenCalled();
+    expect(kvSetWithinTransaction).not.toHaveBeenCalled();
+    expect(cancelRepairSnapshot).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000001');
+    expect(useSyncStore.getState()).toMatchObject({
+      status: 'error',
+      error: 'snapshot finish failed',
+    });
+  });
+});
+
 describe('full repair — cancellation ownership', () => {
   it('binds one crawl, verifies it, then reconciles and installs the rebuilt marker', async () => {
     fullSync.mockImplementation(async (_db, _api, options) => {
@@ -319,16 +538,23 @@ describe('full repair — cancellation ownership', () => {
       return { chats: 1, messages: 0 };
     });
 
-    connectSession('https://repair.example');
+    connectSession('https://repair.example', SNAPSHOT_SERVER_INFO);
     await startFullRepair();
 
     expect(beginRepairSnapshot).toHaveBeenCalledTimes(1);
     expect(fullSync).toHaveBeenCalledTimes(1);
     expect(bindRepairSnapshot).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000001');
     expect(finishRepairSnapshot).toHaveBeenCalledTimes(1);
+    expect(syncDeletedMessages).toHaveBeenCalledTimes(1);
     expect(syncDeletedMessages.mock.calls[0]?.[1]).toBe(fullSync.mock.calls[0]?.[1]);
+    expect(syncDeletedMessages.mock.calls[0]?.[2]).toMatchObject({ exhaustive: true });
     expect(reconcileFullRepairPruneExposure).toHaveBeenCalledTimes(1);
     expect(setSyncMarkerWithinTransaction).toHaveBeenCalledTimes(1);
+    expect(kvSetWithinTransaction).toHaveBeenCalledWith(
+      expect.any(Object),
+      'sync.deletionSnapshotInitialized',
+      '{"v":1}',
+    );
     expect(mockReconcileMessageNotifications).toHaveBeenCalledWith(mockSyncDb, mockAccountLease);
     expect(beginRepairSnapshot.mock.invocationCallOrder[0]).toBeLessThan(
       fullSync.mock.invocationCallOrder[0]!,
@@ -349,9 +575,6 @@ describe('full repair — cancellation ownership', () => {
   });
 
   it('keeps old-server refresh additive and reports its limited completion truthfully', async () => {
-    beginRepairSnapshot.mockRejectedValueOnce(
-      new UnimplementedEndpointError('/sync/repair-snapshot'),
-    );
     fullSync.mockImplementation(async (_db, _api, options) => {
       options.onServerMarker?.({ lastSyncedRowId: 42, lastSyncedTimestamp: 4_200 });
       options.onServerView?.({
@@ -365,12 +588,14 @@ describe('full repair — cancellation ownership', () => {
     connectSession('https://old-repair.example');
     await startFullRepair();
 
+    expect(beginRepairSnapshot).not.toHaveBeenCalled();
     expect(fullSync).toHaveBeenCalledTimes(1);
     expect(captureFullRepairPruneExposure).not.toHaveBeenCalled();
     expect(bindRepairSnapshot).not.toHaveBeenCalled();
     expect(finishRepairSnapshot).not.toHaveBeenCalled();
     expect(reconcileFullRepairPruneExposure).not.toHaveBeenCalled();
     expect(setSyncMarkerWithinTransaction).not.toHaveBeenCalled();
+    expect(kvSetWithinTransaction).not.toHaveBeenCalled();
     expect(cancelRepairSnapshot).not.toHaveBeenCalled();
     expect(useSyncStore.getState()).toMatchObject({
       repairStatus: 'done',
@@ -399,7 +624,7 @@ describe('full repair — cancellation ownership', () => {
       },
     );
 
-    connectSession('https://repair.example');
+    connectSession('https://repair.example', SNAPSHOT_SERVER_INFO);
     const running = startFullRepair();
     await settle();
 
@@ -438,7 +663,7 @@ describe('full repair — cancellation ownership', () => {
     });
     finishRepairSnapshot.mockRejectedValueOnce(new Error('snapshot finish failed'));
 
-    connectSession('https://repair.example');
+    connectSession('https://repair.example', SNAPSHOT_SERVER_INFO);
     await startFullRepair();
 
     expect(cancelRepairSnapshot).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000001');
@@ -535,11 +760,11 @@ describe('startSync vs. the tracked slot', () => {
     expect(syncContacts).not.toHaveBeenCalled();
   });
 
-  it('abandons a server-version response that returns after Disconnect', async () => {
+  it('abandons a server-capability response that returns after Disconnect', async () => {
     const request = gate();
-    serverVersion.mockImplementation(async () => {
+    fetchServerInfo.mockImplementation(async () => {
       await request.promise;
-      return '1.9.0';
+      return SERVER_INFO;
     });
 
     connectSession('https://old.example');
@@ -547,7 +772,7 @@ describe('startSync vs. the tracked slot', () => {
     useSessionStore.setState({ serverInfo: null });
     const oldRun = startSync();
     await settle();
-    expect(serverVersion).toHaveBeenCalledTimes(1);
+    expect(fetchServerInfo).toHaveBeenCalledTimes(1);
 
     disconnectSession();
     request.open();

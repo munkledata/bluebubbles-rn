@@ -9,6 +9,7 @@
  */
 import { Attachment, Chat, Message } from '@core/models';
 import {
+  DELETION_SNAPSHOT_INITIALIZED_KV_KEY,
   DELETIONS_WATERMARK_KV_KEY,
   DRAFT_KV_PREFIX,
   NOTIFICATION_ROUTE_KV_PREFIX,
@@ -37,7 +38,11 @@ import {
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { withDbTransaction } from '@db/transaction';
-import { DELETIONS_SYNCED_AT_KEY } from '@/services/sync/engine';
+import {
+  DELETION_SNAPSHOT_INITIALIZED_KEY,
+  DELETION_SNAPSHOT_INITIALIZED_VALUE,
+  DELETIONS_SYNCED_AT_KEY,
+} from '@/services/sync/engine';
 import { createTestDb } from '../support/testDb';
 
 const SETTING_KEY = 'sync.messagesPerChat';
@@ -134,6 +139,7 @@ async function seed(db: AppDatabase): Promise<void> {
 
   await setSyncMarker(db, { lastSyncedRowId: 4321, lastSyncedTimestamp: 1000 });
   await kvSet(db, DELETIONS_WATERMARK_KV_KEY, '1234');
+  await kvSet(db, DELETION_SNAPSHOT_INITIALIZED_KV_KEY, DELETION_SNAPSHOT_INITIALIZED_VALUE);
   // A per-chat composer draft — kv, but chat-scoped and keyed by a guid that repeats across
   // servers, so it must go with the chat row.
   await kvSet(db, `${DRAFT_KV_PREFIX}c1`, 'tell him I am leaving');
@@ -290,6 +296,7 @@ describe('clearLocalCache', () => {
     await clearLocalCache(db);
 
     expect(await kvGet(db, DELETIONS_WATERMARK_KV_KEY)).toBeNull();
+    expect(await kvGet(db, DELETION_SNAPSHOT_INITIALIZED_KV_KEY)).toBeNull();
     // Chat-scoped and guid-keyed: surviving would pre-fill the NEXT account's composer with the
     // previous user's unsent text (1:1 guids are `service;-;address`, identical across servers).
     expect(await kvGet(db, `${DRAFT_KV_PREFIX}c1`)).toBeNull();
@@ -754,6 +761,11 @@ describe('clearLocalCache', () => {
         `INSERT INTO kv (key, value) VALUES ('${DELETIONS_WATERMARK_KV_KEY}', '1234')`,
       ],
       [
+        'stable deletion-snapshot proof',
+        `INSERT INTO kv (key, value)
+         VALUES ('${DELETION_SNAPSHOT_INITIALIZED_KV_KEY}', '${DELETION_SNAPSHOT_INITIALIZED_VALUE}')`,
+      ],
+      [
         'notification route',
         `INSERT INTO kv (key, value)
          VALUES ('${NOTIFICATION_ROUTE_KV_PREFIX}00000000-0000-4000-8000-000000000000',
@@ -771,5 +783,6 @@ describe('clearLocalCache', () => {
   it('targets the same continuation-state key the deletion sync writes', () => {
     // db/ cannot import services/, so the key is duplicated — this is the guard that they agree.
     expect(DELETIONS_WATERMARK_KV_KEY).toBe(DELETIONS_SYNCED_AT_KEY);
+    expect(DELETION_SNAPSHOT_INITIALIZED_KV_KEY).toBe(DELETION_SNAPSHOT_INITIALIZED_KEY);
   });
 });

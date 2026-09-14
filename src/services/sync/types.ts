@@ -1,5 +1,5 @@
 import type { DeletedMessage, DeletedMessagePage } from '@core/api/endpoints/messages';
-import type { Chat, Message } from '@core/models';
+import type { Chat, Message, ServerInfo } from '@core/models';
 import type { SyncCursor } from '@core/sync';
 
 /**
@@ -8,6 +8,8 @@ import type { SyncCursor } from '@core/sync';
  * imports ky and runs in Node.
  */
 export interface SyncApi {
+  /** Full capability snapshot; production supplies it so boot sync cannot race capability refresh. */
+  serverInfo?(signal?: AbortSignal): Promise<ServerInfo>;
   /** Server version, used to pick the incremental cursor mode. */
   serverVersion(signal?: AbortSignal): Promise<string>;
   /** Begin/finish a server-side stability proof around destructive full repair. */

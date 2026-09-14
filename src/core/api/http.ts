@@ -9,7 +9,7 @@ import {
 import { apiResponse } from '@core/models/common';
 import { ApiError } from './errors';
 import { withRetry, type RetryPolicy } from './retry';
-import { MAX_SERVER_ERROR_BODY_BYTES, parseServerErrorDetailBody } from './serverErrorDetail';
+import { MAX_SERVER_ERROR_BODY_BYTES, parseServerErrorBody } from './serverErrorDetail';
 
 /** Hard default for every JSON/envelope response before it is decoded or passed to Zod. */
 export const DEFAULT_MAX_JSON_RESPONSE_BYTES = 16 * 1024 * 1024; // 16 MiB
@@ -78,9 +78,9 @@ export interface RequestOptions {
   json?: unknown;
   signal?: AbortSignal;
   /**
-   * Read only the bounded JSON `error.message` field on a non-success response. This is opt-in for
-   * send endpoints whose failed optimistic row can surface the detail; ordinary APIs remain
-   * status-only and cancel their error body without reading it.
+   * Read only the bounded JSON `error.message` and machine-readable `error.type` fields on a
+   * non-success response. This is opt-in for endpoints with reviewed error behavior; ordinary APIs
+   * remain status-only and cancel their error body without reading it.
    */
   captureErrorDetail?: true;
   /**
@@ -733,6 +733,7 @@ export class HttpClient {
     }
     if (!response.ok) {
       let serverDetail: string | undefined;
+      let serverErrorType: string | undefined;
       const mediaType = response.headers
         .get('content-type')
         ?.split(';', 1)[0]
@@ -747,7 +748,9 @@ export class HttpClient {
             Math.min(this.timeoutMs, MAX_SERVER_ERROR_BODY_TIMEOUT_MS),
             cancelRequest,
           );
-          serverDetail = parseServerErrorDetailBody(errorBody);
+          const serverError = parseServerErrorBody(errorBody);
+          serverDetail = serverError?.detail;
+          serverErrorType = serverError?.type;
         } catch {
           // Status classification remains authoritative for malformed, oversized, or stalled
           // untrusted error bodies. The bounded reader has already canceled failed reads.
@@ -755,7 +758,12 @@ export class HttpClient {
       } else {
         cancelResponseBody(response, 'HTTP error response is not consumed', cancelRequest);
       }
-      throw ApiError.fromStatus(response.status, `${method} ${path} failed`, serverDetail);
+      throw ApiError.fromStatus(
+        response.status,
+        `${method} ${path} failed`,
+        serverDetail,
+        serverErrorType,
+      );
     }
 
     // 204/205 and HEAD intentionally have no envelope. Validate `undefined` against the endpoint's

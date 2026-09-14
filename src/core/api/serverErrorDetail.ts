@@ -24,6 +24,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
+const SERVER_ERROR_TYPE = /^[a-z0-9_]{1,64}$/;
+
+export interface ParsedServerErrorBody {
+  /** Safe, bounded user-facing prose from the reviewed error envelope. */
+  readonly detail?: string;
+  /** Bounded machine-readable server code; never infer behavior from prose. */
+  readonly type?: string;
+}
+
 function boundedDetail(value: string): string {
   let output = '';
   let bytes = 0;
@@ -79,8 +88,8 @@ export function projectServerErrorDetail(value: unknown): string | undefined {
   return bounded || undefined;
 }
 
-/** Parse only the reviewed v1 error envelope field: `{ error: { message: string } }`. */
-export function parseServerErrorDetailBody(bodyText: string): string | undefined {
+/** Parse only bounded fields from the reviewed v1 `{ error: { message, type } }` envelope. */
+export function parseServerErrorBody(bodyText: string): ParsedServerErrorBody | undefined {
   if (bodyText.length > MAX_SERVER_ERROR_BODY_BYTES) return undefined;
   if (encoder.encode(bodyText).byteLength > MAX_SERVER_ERROR_BODY_BYTES) return undefined;
   let body: unknown;
@@ -90,5 +99,16 @@ export function parseServerErrorDetailBody(bodyText: string): string | undefined
     return undefined;
   }
   if (!isRecord(body) || !isRecord(body.error)) return undefined;
-  return projectServerErrorDetail(body.error.message);
+  const detail = projectServerErrorDetail(body.error.message);
+  const type =
+    typeof body.error.type === 'string' && SERVER_ERROR_TYPE.test(body.error.type)
+      ? body.error.type
+      : undefined;
+  if (detail === undefined && type === undefined) return undefined;
+  return Object.freeze({ ...(detail === undefined ? {} : { detail }), ...(type ? { type } : {}) });
+}
+
+/** Compatibility helper for existing UI-detail consumers. */
+export function parseServerErrorDetailBody(bodyText: string): string | undefined {
+  return parseServerErrorBody(bodyText)?.detail;
 }
