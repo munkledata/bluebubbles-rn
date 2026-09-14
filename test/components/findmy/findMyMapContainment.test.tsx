@@ -124,6 +124,19 @@ describe('FindMyMap native containment', () => {
     ).toHaveLength(160);
   });
 
+  it('passes punctuation and Unicode separators only as inert native marker text', async () => {
+    const label = 'A&B <North> "HQ" / level-2\u2028Desk\u2029Wing';
+
+    await renderWithTheme(<FindMyMap markers={[{ ...MARKER, label }]} />);
+
+    expect(screen.getByTestId('findmy-test-marker-gator-findmy-0').props).toEqual(
+      expect.objectContaining({
+        title: label,
+        accessibilityLabel: label,
+      }),
+    );
+  });
+
   it('repeats focus for a second tap on the same row and opens its callout', async () => {
     const view = await renderWithTheme(
       <FindMyMap markers={[MARKER]} focusRequest={{ id: MARKER.id, revision: 1 }} />,
