@@ -112,6 +112,10 @@ const config: ExpoConfig = {
     // inspector runs after other declared plugins. Socket.IO carries account credentials; a 3xx
     // WebSocket handshake must fail at the configured origin instead of being followed by OkHttp.
     './plugins/withNoWebSocketRedirects',
+    // Freeze HTTPS trust at Android's built-in system CAs. User-installed CAs stay excluded, while
+    // the OS-level cleartext allowance remains available only for TLS-00's separately consented
+    // HTTP path. The plugin owns the generated manifest reference and res/xml policy.
+    './plugins/withSystemCaNetworkSecurity',
     'expo-router',
     'expo-secure-store',
     'expo-image',

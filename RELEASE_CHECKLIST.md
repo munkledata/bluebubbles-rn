@@ -285,7 +285,9 @@ npm run check:android-build
 - [ ] The replacement generated entry registers FCM, notification, and background tasks before
       `expo-router/entry`.
 - [ ] The replacement AAB manifest, not only `app.config.ts`, passes the
-      permission/share-target/headless guard.
+      permission/share-target/headless guard. Its compiled manifest must reference exactly one
+      unqualified `xml/network_security_config` resource, and the resource table must resolve that
+      runtime value to the guarded system-CA-only compiled XML.
 - [ ] `WRITE_CONTACTS`, `READ_MEDIA_AUDIO`, `SCHEDULE_EXACT_ALARM`, `USE_EXACT_ALARM`,
       `USE_FULL_SCREEN_INTENT`, and `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` are absent from the AAB.
 - [ ] Every remaining dangerous permission maps to a visible feature and a runtime request.
@@ -309,16 +311,25 @@ npm run check:android-build
       one upload, and one download. Exact Play v64 completed those paths through the isolated fixture
       recorded in
       [`docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md`](./docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md).
-- [x] An untrusted/self-signed certificate is rejected unless Android itself trusts its issuer.
-      Exact Play v64 completed no TLS session or HTTP request and sent no Authorization header or body;
-      the trusted Mac control reached HTTP 200. See
+- [x] A bare untrusted/self-signed certificate is rejected. Exact Play v64 completed no TLS session
+      or HTTP request and sent no Authorization header or body; the trusted Mac control reached HTTP 200. See
       [`docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md`](./docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md).
-- [x] Product copy is explicit that the app uses Android's normal TLS validation and does **not**
-      claim certificate pinning. An inert legacy `certPins` SecureStore value on an upgraded install
-      is harmless because no code reads it. Removal commit `66869d3` is in exact Play v64 source
-      `fa6e907`; exact-tree scans found no pinning API/dependency or certificate-validation bypass,
-      and the ordinary public-CA connection is recorded in
-      [`docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md`](./docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md).
+- [x] The `TLS-02` source/build boundary and disposable API-35 emulator prove the selected policy:
+      the AAB's manifest resource id resolves through `resources.pb` to one unqualified compiled XML
+      that trusts only `src="system"`; an authority installed in Android's user store was rejected
+      with three certificate-unknown TLS alerts and zero HTTP requests, while a public system-CA
+      endpoint reached the authenticated server-info request. This local debug-signed release is
+      remediation evidence, not exact Play-candidate evidence. See
+      [`docs/TLS_02_SYSTEM_CA_DEVICE_PROOF_2026-09-15.md`](./docs/TLS_02_SYSTEM_CA_DEVICE_PROOF_2026-09-15.md).
+- [x] Product copy states that HTTPS trusts Android's built-in system authorities, excludes
+      authorities added in Android Settings, and does **not** claim certificate pinning. An inert
+      legacy `certPins` SecureStore value on an upgraded install is harmless because no code reads
+      it. Removal commit `66869d3` is in exact Play v64 source `fa6e907`; exact-tree scans found no
+      pinning API/dependency or certificate-validation bypass.
+- [ ] On the replacement exact Play candidate, repeat the selected `TLS-02` boundary: a public
+      system-CA endpoint succeeds and an authority visibly installed in Android's user store is
+      rejected before TLS completes or credentials/body reach HTTP. This is a release repeat, not
+      open remediation implementation.
 - [ ] On the exact candidate, traffic capture proves a forged/rejected `new-server` event cannot
       persist, contact, or send credentials to another origin or downgrade HTTPS. An approved
       rotation displays both origins and requires foreground confirmation, a freshly entered

@@ -18,6 +18,8 @@ describe('StoragePrivacyScreen', () => {
     await renderWithTheme(<StoragePrivacyScreen />);
 
     expect(screen.getByText(/self-hosted server you connect/)).toBeTruthy();
+    expect(screen.getByText(/built-in system certificate authorities/)).toBeTruthy();
+    expect(screen.getByText(/authorities added in Android Settings are not accepted/)).toBeTruthy();
     expect(screen.getByText(/HTTP does not protect this traffic/)).toBeTruthy();
     expect(
       screen.getByText(/does not delete conversations or files stored by your server/),

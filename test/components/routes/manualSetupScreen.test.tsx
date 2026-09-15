@@ -54,6 +54,15 @@ beforeEach(() => {
 });
 
 describe('ManualSetupScreen', () => {
+  it('states the system-CA-only HTTPS policy', async () => {
+    await renderWithTheme(<ManualSetupScreen />);
+
+    expect(screen.getByText(/certificate from Android’s built-in system authorities/)).toBeTruthy();
+    expect(
+      screen.getByText(/authorities added in Android Settings are not supported/),
+    ).toBeTruthy();
+  });
+
   it('uses padding only while the keyboard is visible without an offset counterweight', async () => {
     const view = await renderWithTheme(<ManualSetupScreen />);
 

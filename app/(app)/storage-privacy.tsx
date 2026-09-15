@@ -17,8 +17,10 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
             To provide messaging, Gator exchanges messages, participants, attachments, delivery and
             read updates, reactions, call and Find My requests, and account or server status with
             the self-hosted server you connect. Your server credentials authenticate those requests.
-            HTTPS is recommended. Gator also allows an HTTP connection after you approve a clear
-            warning, but HTTP does not protect this traffic from network observers.
+            HTTPS is recommended. Gator trusts only Android&apos;s built-in system certificate
+            authorities; certificate authorities added in Android Settings are not accepted. Gator
+            also allows an HTTP connection after you approve a clear warning, but HTTP does not
+            protect this traffic from network observers.
           </Text>
           <Text style={textStyle}>
             Your server and Mac control their own copies and retention. Disconnecting removes the

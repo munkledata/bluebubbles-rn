@@ -144,8 +144,9 @@ the EAS profiles intentionally have no update-channel fields.
   cleanup and backup behavior.
 - **Backups:** the current UI encrypts settings/customization backups with a user passphrase before
   writing the temporary share file, then deletes that temporary file after sharing.
-- **Transport TLS:** HTTPS uses Android’s normal certificate and hostname validation. There is no
-  application-level certificate pinning or bad-certificate bypass.
+- **Transport TLS:** HTTPS uses Android’s hostname validation and built-in system certificate
+  authorities. Certificate authorities added by the user in Android Settings are not trusted.
+  There is no application-level certificate pinning or bad-certificate bypass.
 - **Push/providers:** Firebase Cloud Messaging may carry push data. The visible, unlocked Find My
   screen uses the native Google Maps Android SDK for server-provided coordinates; it does not request
   the phone's own location. Google can receive those precise coordinates, the phone IP, displayed

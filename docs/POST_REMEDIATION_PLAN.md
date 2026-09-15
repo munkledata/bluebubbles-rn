@@ -3,7 +3,7 @@
 > **Status:** DEFERRED — start only after the active remediation plan is complete unless the product
 > owner explicitly moves an item back.
 >
-> **Authority:** This document owns product work deliberately moved outside
+> **Authority:** This document owns product work deliberately moved outside or explicitly deferred
 > [`WORK_PLAN_2026-08-03.md`](./WORK_PLAN_2026-08-03.md). Its items are not included in the 107-task
 > remediation count or the four-task release count and do not become release requirements merely by
 > being recorded here.
@@ -13,7 +13,7 @@ finished remediation work.
 
 ## Deferred items
 
-- **DEFERRED — 3:** `POST-FACE-01`, `POST-RT-01B`, `POST-TLS-01B`.
+- **DEFERRED — 4:** `POST-FACE-01`, `POST-RT-01B`, `POST-TLS-01B`, `POST-TLS-02`.
 
 <a id="post-face-01"></a>
 
@@ -79,3 +79,26 @@ finished remediation work.
   on a physical Android device.
 - **Non-goal:** Recording future pinning does not weaken Android HTTPS validation or imply that the
   current app is pinned. It also does not replace `TLS-00` downgrade and cleartext containment.
+
+<a id="post-tls-02"></a>
+
+### [ ] `POST-TLS-02` — Reconsider user-installed certificate authorities
+
+- **Related completed remediation ID:** `TLS-02`; the owner selected system CAs only on 2026-09-15.
+  This is a possible future feature, not moved or unfinished remediation work.
+- **Current behavior to keep:** HTTPS trusts Android's built-in system certificate authorities.
+  Authorities added in Android Settings, arbitrary self-signed leaves, custom trust managers, and
+  certificate-validation bypasses are unsupported. Separately consented HTTP remains governed by
+  completed `TLS-00`.
+- **Start condition:** Active remediation is complete and the product owner explicitly chooses
+  private-CA compatibility after accepting the device-wide interception trade-off.
+- **Acceptance if selected:** Add only the reviewed Android user trust store as an explicit trust
+  anchor and describe the interception consequence in product copy. Apply the same behavior to
+  setup, REST, sockets, uploads, downloads, retries, and server rotation without accepting a bare
+  self-signed leaf or weakening `TLS-00`.
+- **Verification if selected:** On a disposable Android target, prove a system CA and an installed
+  user CA across every authenticated transport, prove a bare self-signed leaf still fails before
+  HTTP, and exercise CA removal plus the platform's available revocation/blocklist behavior. Repeat
+  the selected boundary on the exact release candidate.
+- **Non-goal:** Recording this option does not authorize user-CA support now or imply that Android
+  provides universal online revocation checking for every accepted certificate.

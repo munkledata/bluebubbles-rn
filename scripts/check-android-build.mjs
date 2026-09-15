@@ -24,7 +24,9 @@ const DEFAULT_RELEASE_MANIFESTS = [
   'android/app/build/intermediates/merged_manifests/release/processReleaseMainManifest/AndroidManifest.xml',
 ];
 const DEFAULT_RELEASE_BUNDLE = 'android/app/build/outputs/bundle/release/app-release.aab';
+const DEFAULT_NETWORK_SECURITY_CONFIG = 'android/app/src/main/res/xml/network_security_config.xml';
 const PACKAGED_MANIFEST_ENTRY = 'base/manifest/AndroidManifest.xml';
+const PACKAGED_RESOURCES_ENTRY = 'base/resources.pb';
 const PACKAGED_SHORTCUTS_ENTRY = 'base/res/xml/shortcuts.xml';
 const PACKAGED_DEX_PATTERN = /^base\/dex\/[^/]+\.dex$/;
 const MAX_PACKAGED_DEX_BYTES = 256 * 1024 * 1024;
@@ -83,6 +85,7 @@ export const FORBIDDEN_PERMISSIONS = [
 
 export const GOOGLE_MAPS_API_KEY_METADATA_NAME = 'com.google.android.geo.API_KEY';
 export const GOOGLE_MAPS_API_KEY_PATTERN = /^AIza[0-9A-Za-z_-]{35}$/;
+export const NETWORK_SECURITY_CONFIG_REFERENCE = '@xml/network_security_config';
 
 function countOccurrences(source, needle) {
   if (typeof source !== 'string' || needle.length === 0) return 0;
@@ -291,6 +294,55 @@ function parseElements(manifest) {
   return elements;
 }
 
+function validateSystemCaNetworkSecurityConfigElements(elements) {
+  const root = elements.filter(
+    (element) => element.name === 'network-security-config' && !element.parent,
+  );
+  const base = elements.filter(
+    (element) => element.name === 'base-config' && element.parent === root[0],
+  );
+  const anchors = elements.filter(
+    (element) => element.name === 'trust-anchors' && element.parent === base[0],
+  );
+  const certificates = elements.filter(
+    (element) => element.name === 'certificates' && element.parent === anchors[0],
+  );
+  const errors = [];
+
+  if (root.length !== 1 || base.length !== 1 || anchors.length !== 1 || certificates.length !== 1) {
+    errors.push('network security config must contain one base system-CA trust chain');
+    return errors;
+  }
+  if (elements.length !== 4) {
+    errors.push(
+      'network security config must not contain domain, debug, pin, or extra trust rules',
+    );
+  }
+  if (
+    base[0].attributes.size !== 1 ||
+    base[0].attributes.get('cleartextTrafficPermitted') !== 'true'
+  ) {
+    errors.push(
+      'network security base config must preserve cleartext for the separately consented HTTP path',
+    );
+  }
+  if (certificates[0].attributes.size !== 1 || certificates[0].attributes.get('src') !== 'system') {
+    errors.push('network security config must trust only Android system CAs');
+  }
+  if (certificates[0].compiledAttributeKinds?.has('src')) {
+    errors.push('network security config certificate src must be a literal, uncompiled value');
+  }
+  if (root[0].attributes.size !== 0 || anchors[0].attributes.size !== 0) {
+    errors.push('network security config must not add unreviewed root or trust-anchor attributes');
+  }
+
+  return errors;
+}
+
+export function validateSystemCaNetworkSecurityConfig(source) {
+  return validateSystemCaNetworkSecurityConfigElements(parseElements(source));
+}
+
 function permissionElementsOf(elements) {
   return elements.filter(
     (element) =>
@@ -401,32 +453,120 @@ function messageFields(fields, number) {
 }
 
 function stringField(fields, number) {
-  return messageFields(fields, number)[0]?.toString('utf8');
+  const matches = messageFields(fields, number);
+  if (matches.length > 1) throw new Error(`protobuf field ${number} is unexpectedly repeated`);
+  return matches[0]?.toString('utf8');
+}
+
+function scalarField(fields, number) {
+  const matches = fields.filter((field) => field.number === number && field.wireType === 0);
+  if (matches.length > 1) throw new Error(`protobuf field ${number} is unexpectedly repeated`);
+  return matches[0]?.value;
+}
+
+function wrappedIdField(fields, number, label) {
+  const messages = messageFields(fields, number);
+  if (messages.length !== 1) throw new Error(`${label} must contain exactly one id wrapper`);
+  const id = scalarField(decodeProtoFields(messages[0]), 1);
+  if (!Number.isSafeInteger(id)) throw new Error(`${label} is missing a valid id`);
+  return id;
+}
+
+function qualifiedProtoXmlName(namespace, localName, label) {
+  if (localName.includes(':')) {
+    throw new Error(`protobuf XML ${label} local name must not contain a namespace prefix`);
+  }
+  if (!namespace) return localName;
+  if (namespace === ANDROID_NAMESPACE) return `android:${localName}`;
+  return `{${namespace}}${localName}`;
 }
 
 function decodeProtoXmlAttribute(input) {
   const fields = decodeProtoFields(input);
   const namespace = stringField(fields, 1) ?? '';
-  const name = stringField(fields, 2);
-  if (!name) throw new Error('protobuf XML attribute is missing its name');
+  const localName = stringField(fields, 2);
+  if (!localName) throw new Error('protobuf XML attribute is missing its name');
+  const name = qualifiedProtoXmlName(namespace, localName, 'attribute');
+  const compiledItems = messageFields(fields, 6);
+  if (compiledItems.length > 1) {
+    throw new Error(`protobuf XML attribute ${name} repeats its compiled item`);
+  }
+  let compiledResourceId;
+  let compiledReferenceName;
+  let compiledItemKind;
+  let compiledReferenceIsPlain = false;
+  if (compiledItems.length === 1) {
+    const itemFields = decodeProtoFields(compiledItems[0]);
+    const itemValues = itemFields.filter((field) => field.number >= 1 && field.number <= 7);
+    if (itemValues.length !== 1 || itemValues[0].wireType !== 2) {
+      throw new Error(`protobuf XML attribute ${name} compiled item must have exactly one value`);
+    }
+    compiledItemKind = itemValues[0].number;
+    if (compiledItemKind === 1) {
+      const referenceFields = decodeProtoFields(itemValues[0].value);
+      compiledResourceId = scalarField(referenceFields, 2);
+      compiledReferenceName = stringField(referenceFields, 3);
+      compiledReferenceIsPlain =
+        (scalarField(referenceFields, 1) ?? 0) === 0 &&
+        (scalarField(referenceFields, 4) ?? 0) === 0 &&
+        messageFields(referenceFields, 5).length === 0 &&
+        (scalarField(referenceFields, 7) ?? 0) === 0 &&
+        !itemFields.some((field) => field.number >= 8);
+    }
+  }
   return {
-    name: namespace === ANDROID_NAMESPACE ? `android:${name}` : name,
+    name,
     value: stringField(fields, 3) ?? '',
+    compiledResourceId,
+    compiledReferenceName,
+    compiledItemKind,
+    compiledReferenceIsPlain,
   };
 }
 
 function decodeProtoXmlNode(input, parent, elements) {
   const fields = decodeProtoFields(input);
-  const encodedElement = messageFields(fields, 1)[0];
-  if (!encodedElement) return undefined;
+  const encodedElements = messageFields(fields, 1);
+  const encodedTexts = messageFields(fields, 2);
+  if (encodedElements.length + encodedTexts.length !== 1) {
+    throw new Error('protobuf XML node must contain exactly one element or text value');
+  }
+  if (encodedTexts.length === 1) return undefined;
+  const encodedElement = encodedElements[0];
 
   const elementFields = decodeProtoFields(encodedElement);
-  const name = stringField(elementFields, 3);
-  if (!name) throw new Error('protobuf XML element is missing its name');
-  const element = { name, attributes: new Map(), parent, children: [] };
+  const namespace = stringField(elementFields, 2) ?? '';
+  const localName = stringField(elementFields, 3);
+  if (!localName) throw new Error('protobuf XML element is missing its name');
+  const name = qualifiedProtoXmlName(namespace, localName, 'element');
+  const element = {
+    name,
+    attributes: new Map(),
+    compiledAttributeKinds: new Map(),
+    compiledReferenceNames: new Map(),
+    plainCompiledReferences: new Set(),
+    compiledResourceIds: new Map(),
+    parent,
+    children: [],
+  };
   for (const encodedAttribute of messageFields(elementFields, 4)) {
     const attribute = decodeProtoXmlAttribute(encodedAttribute);
+    if (element.attributes.has(attribute.name)) {
+      throw new Error(`protobuf XML element ${name} repeats attribute ${attribute.name}`);
+    }
     element.attributes.set(attribute.name, attribute.value);
+    if (attribute.compiledItemKind !== undefined) {
+      element.compiledAttributeKinds.set(attribute.name, attribute.compiledItemKind);
+    }
+    if (attribute.compiledReferenceIsPlain) {
+      element.plainCompiledReferences.add(attribute.name);
+    }
+    if (attribute.compiledReferenceName !== undefined) {
+      element.compiledReferenceNames.set(attribute.name, attribute.compiledReferenceName);
+    }
+    if (attribute.compiledResourceId !== undefined) {
+      element.compiledResourceIds.set(attribute.name, attribute.compiledResourceId);
+    }
   }
   if (parent) parent.children.push(element);
   elements.push(element);
@@ -443,7 +583,147 @@ export function decodeProtoXml(input) {
   return elements;
 }
 
-export function validatePackagedAndroidBundle({ manifestProto, shortcutsProto, dexBytes }) {
+/**
+ * Resolve the manifest's compiled Network Security Config reference through the AAB resource table.
+ * This prevents a safe-looking, unused XML file from hiding a qualified variant or values alias
+ * that Android would select at runtime.
+ */
+export function resolvePackagedNetworkSecurityConfig(manifestProto, resourcesProto) {
+  const manifestElements = decodeProtoXml(manifestProto);
+  const manifest = manifestElements.find(
+    (element) => element.name === 'manifest' && element.parent == null,
+  );
+  const application = manifestElements.find(
+    (element) => element.name === 'application' && element.parent?.name === 'manifest',
+  );
+  const packageName = manifest?.attributes.get('package');
+  const reference = application?.attributes.get('android:networkSecurityConfig');
+  const compiledResourceId = application?.compiledResourceIds.get('android:networkSecurityConfig');
+  if (!packageName) throw new Error('packaged manifest is missing its application package');
+  if (reference !== NETWORK_SECURITY_CONFIG_REFERENCE) {
+    throw new Error(
+      `packaged manifest must reference ${NETWORK_SECURITY_CONFIG_REFERENCE} exactly`,
+    );
+  }
+  if (
+    application?.compiledAttributeKinds.get('android:networkSecurityConfig') !== 1 ||
+    !application?.plainCompiledReferences.has('android:networkSecurityConfig')
+  ) {
+    throw new Error(
+      'packaged manifest network security config must compile to one plain resource reference',
+    );
+  }
+  const compiledReferenceName = application.compiledReferenceNames.get(
+    'android:networkSecurityConfig',
+  );
+  if (compiledReferenceName && compiledReferenceName !== 'xml/network_security_config') {
+    throw new Error(
+      'packaged manifest network security config compiled reference has the wrong name',
+    );
+  }
+  if (!Number.isSafeInteger(compiledResourceId) || compiledResourceId <= 0) {
+    throw new Error(
+      'packaged manifest network security config is missing its compiled resource id',
+    );
+  }
+
+  const tableFields = decodeProtoFields(resourcesProto);
+  const matches = [];
+  for (const packageMessage of messageFields(tableFields, 2)) {
+    const packageFields = decodeProtoFields(packageMessage);
+    const candidatePackageName = stringField(packageFields, 2);
+    if (candidatePackageName !== packageName) continue;
+    const packageId = wrappedIdField(packageFields, 1, `resource package ${packageName}`);
+
+    for (const typeMessage of messageFields(packageFields, 3)) {
+      const typeFields = decodeProtoFields(typeMessage);
+      if (stringField(typeFields, 2) !== 'xml') continue;
+      const typeId = wrappedIdField(typeFields, 1, 'xml resource type');
+
+      for (const entryMessage of messageFields(typeFields, 3)) {
+        const entryFields = decodeProtoFields(entryMessage);
+        if (stringField(entryFields, 2) !== 'network_security_config') continue;
+        const entryId = wrappedIdField(entryFields, 1, 'network_security_config resource');
+        matches.push({
+          resourceId: packageId * 0x1000000 + typeId * 0x10000 + entryId,
+          activeValues: messageFields(entryFields, 6),
+          disabledValues: messageFields(entryFields, 8),
+        });
+      }
+    }
+  }
+
+  if (matches.length !== 1) {
+    throw new Error(
+      `AAB resource table must contain exactly one ${packageName}:xml/network_security_config entry`,
+    );
+  }
+  const match = matches[0];
+  if (match.resourceId !== compiledResourceId) {
+    throw new Error(
+      'packaged manifest network security config id does not match the named resource-table entry',
+    );
+  }
+  if (match.disabledValues.length !== 0) {
+    throw new Error('network_security_config must not have flag-disabled resource variants');
+  }
+  if (match.activeValues.length !== 1) {
+    throw new Error('network_security_config must have exactly one active resource value');
+  }
+
+  const configValueFields = decodeProtoFields(match.activeValues[0]);
+  const configurations = messageFields(configValueFields, 1);
+  if (
+    configurations.length > 1 ||
+    (configurations.length === 1 && decodeProtoFields(configurations[0]).length !== 0)
+  ) {
+    throw new Error('network_security_config must not have a qualified resource variant');
+  }
+  const values = messageFields(configValueFields, 2);
+  if (values.length !== 1) throw new Error('network_security_config resource value is missing');
+  const valueFields = decodeProtoFields(values[0]);
+  const items = messageFields(valueFields, 4);
+  if (items.length !== 1 || messageFields(valueFields, 5).length !== 0) {
+    throw new Error('network_security_config resource value must be one file item');
+  }
+
+  const itemFields = decodeProtoFields(items[0]);
+  if (messageFields(itemFields, 1).length !== 0) {
+    throw new Error('network_security_config resource aliases are forbidden');
+  }
+  if (
+    itemFields.some(
+      (field) =>
+        (field.number >= 1 && field.number <= 7 && field.number !== 5) || field.number >= 8,
+    )
+  ) {
+    throw new Error('network_security_config must be an unflagged protobuf XML file reference');
+  }
+  const files = messageFields(itemFields, 5);
+  if (files.length !== 1) {
+    throw new Error('network_security_config must resolve to exactly one protobuf XML file');
+  }
+  const fileFields = decodeProtoFields(files[0]);
+  const path = stringField(fileFields, 1);
+  const fileType = scalarField(fileFields, 2);
+  if (
+    !path ||
+    !/^res\/(?:[^/]+\/)?[^/]+\.xml$/.test(path) ||
+    path.includes('..') ||
+    fileType !== 3
+  ) {
+    throw new Error('network_security_config must resolve to a safe PROTO_XML resource path');
+  }
+
+  return { path, resourceId: compiledResourceId };
+}
+
+export function validatePackagedAndroidBundle({
+  manifestProto,
+  networkSecurityConfigProto,
+  shortcutsProto,
+  dexBytes,
+}) {
   const errors = [];
 
   try {
@@ -455,6 +735,24 @@ export function validatePackagedAndroidBundle({ manifestProto, shortcutsProto, d
     errors.push(
       `packaged manifest protobuf is invalid: ${error instanceof Error ? error.message : String(error)}`,
     );
+  }
+
+  if (!networkSecurityConfigProto) {
+    errors.push('packaged network security config protobuf is missing');
+  } else {
+    try {
+      errors.push(
+        ...validateSystemCaNetworkSecurityConfigElements(
+          decodeProtoXml(networkSecurityConfigProto),
+        ).map((error) => `packaged network security config: ${error}`),
+      );
+    } catch (error) {
+      errors.push(
+        `packaged network security config protobuf is invalid: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
   }
 
   // shortcuts.xml is optional while IPC-01 is fail-closed. If another library happens to package
@@ -534,6 +832,33 @@ export function inspectPackagedAndroidBundle(
   );
   if (!manifestEntry) throw new Error(`could not read ${PACKAGED_MANIFEST_ENTRY} from AAB`);
   const manifestProto = extractZipEntry(snapshot.bytes, manifestEntry, 16 * 1024 * 1024);
+  const resourcesEntries = snapshot.archive.entries.filter(
+    (entry) => entry.path === PACKAGED_RESOURCES_ENTRY && !entry.directory,
+  );
+  if (resourcesEntries.length !== 1) {
+    throw new Error(
+      `expected exactly one ${PACKAGED_RESOURCES_ENTRY} in AAB; found ${resourcesEntries.length}`,
+    );
+  }
+  const resourcesProto = extractZipEntry(snapshot.bytes, resourcesEntries[0], 16 * 1024 * 1024);
+  const resolvedNetworkSecurityConfig = resolvePackagedNetworkSecurityConfig(
+    manifestProto,
+    resourcesProto,
+  );
+  const packagedNetworkSecurityConfigPath = `base/${resolvedNetworkSecurityConfig.path}`;
+  const networkSecurityConfigEntries = snapshot.archive.entries.filter(
+    (entry) => entry.path === packagedNetworkSecurityConfigPath && !entry.directory,
+  );
+  if (networkSecurityConfigEntries.length !== 1) {
+    throw new Error(
+      `expected exactly one resolved ${packagedNetworkSecurityConfigPath} in AAB; found ${networkSecurityConfigEntries.length}`,
+    );
+  }
+  const networkSecurityConfigProto = extractZipEntry(
+    snapshot.bytes,
+    networkSecurityConfigEntries[0],
+    1024 * 1024,
+  );
   const shortcutsEntry = snapshot.archive.entries.find(
     (entry) => entry.path === PACKAGED_SHORTCUTS_ENTRY && !entry.directory,
   );
@@ -546,6 +871,7 @@ export function inspectPackagedAndroidBundle(
   }
   const errors = validatePackagedAndroidBundle({
     manifestProto,
+    networkSecurityConfigProto,
     shortcutsProto: shortcutsEntry
       ? extractZipEntry(snapshot.bytes, shortcutsEntry, 16 * 1024 * 1024)
       : undefined,
@@ -631,6 +957,14 @@ function validateManifestElements(elements, { debug = false } = {}) {
   );
   if (application?.attributes.get('android:allowBackup') !== 'false') {
     errors.push('application must set android:allowBackup="false"');
+  }
+  if (
+    application?.attributes.get('android:networkSecurityConfig') !==
+    NETWORK_SECURITY_CONFIG_REFERENCE
+  ) {
+    errors.push(
+      `application must set android:networkSecurityConfig="${NETWORK_SECURITY_CONFIG_REFERENCE}"`,
+    );
   }
 
   const mapsApiKey = googleMapsApiKeyFromElements(elements);
@@ -778,6 +1112,17 @@ export function runAndroidBuildCheck({
     appConfigSource: readFileSync(resolve(root, 'app.config.ts'), 'utf8'),
   }).map((error) => `network redirect containment: ${error}`);
 
+  const networkSecurityConfigPath = resolve(root, DEFAULT_NETWORK_SECURITY_CONFIG);
+  if (!existsSync(networkSecurityConfigPath)) {
+    errors.push(`network security config is missing: ${networkSecurityConfigPath}`);
+  } else {
+    errors.push(
+      ...validateSystemCaNetworkSecurityConfig(readFileSync(networkSecurityConfigPath, 'utf8')).map(
+        (error) => `network security config: ${error}`,
+      ),
+    );
+  }
+
   for (const [label, path] of manifests) {
     if (!existsSync(path)) {
       errors.push(`${label} merged manifest is missing: ${path}`);
@@ -813,6 +1158,7 @@ export function runAndroidBuildCheck({
     debugManifestPath: manifests[0][1],
     releaseManifestPath: manifests[1][1],
     releaseBundlePath: bundlePath,
+    networkSecurityConfigPath,
   };
 }
 

@@ -15,6 +15,7 @@ import {
   FORBIDDEN_PERMISSIONS,
   GOOGLE_MAPS_API_KEY_METADATA_NAME,
   inspectPackagedAndroidBundle,
+  NETWORK_SECURITY_CONFIG_REFERENCE,
   REQUIRED_PINNED_SHORTCUT_CLEANUP_DEX_MARKERS,
   REQUIRED_PERMISSIONS,
   runAndroidBuildCheck,
@@ -22,10 +23,16 @@ import {
   validateExpoFileSystemRedirectContainment,
   validateHeadlessEntry,
   validatePackagedAndroidBundle,
+  validateSystemCaNetworkSecurityConfig,
 } from './check-android-build.mjs';
 
 const require = createRequire(import.meta.url);
 const { applyWebSocketRedirectPolicy } = require('../plugins/withNoWebSocketRedirects');
+const {
+  NETWORK_SECURITY_CONFIG_XML,
+  applySystemCaManifestPolicy,
+  writeSystemCaNetworkSecurityConfig,
+} = require('../plugins/withSystemCaNetworkSecurity');
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 const androidNamespace = 'http://schemas.android.com/apk/res/android';
@@ -40,9 +47,10 @@ const intendedPermissions = [
   'android.permission.CAMERA',
 ];
 const mapsApiKeyFixture = `AIza${'A'.repeat(35)}`;
+const networkSecurityConfigResourceId = 0x7f160009;
 
-function xmlNode(name, attributes = {}, children = []) {
-  return { name, attributes, children };
+function xmlNode(name, attributes = {}, children = [], options = {}) {
+  return { name, attributes, children, ...options };
 }
 
 function renderXml(node) {
@@ -79,40 +87,53 @@ const manifestNode = xmlNode(
         xmlNode('data', { 'android:mimeType': '*/*' }),
       ]),
     ]),
-    xmlNode('application', { 'android:allowBackup': 'false' }, [
-      xmlNode('meta-data', {
-        'android:name': GOOGLE_MAPS_API_KEY_METADATA_NAME,
-        'android:value': mapsApiKeyFixture,
-      }),
-      xmlNode('activity', { 'android:name': '.MainActivity', 'android:exported': 'true' }, [
-        intentFilter('android.intent.action.MAIN', 'android.intent.category.LAUNCHER'),
-      ]),
-      xmlNode('service', {
-        'android:name': 'app.notifee.core.ReceiverService',
-        'android:exported': 'false',
-      }),
-      xmlNode('service', {
-        'android:name':
-          'io.invertase.firebase.messaging.ReactNativeFirebaseMessagingHeadlessService',
-        'android:exported': 'false',
-      }),
-      xmlNode('service', {
-        'android:name': 'io.invertase.firebase.messaging.ReactNativeFirebaseMessagingService',
-        'android:exported': 'false',
-      }),
-      xmlNode('receiver', {
-        'android:name': 'expo.modules.taskManager.TaskBroadcastReceiver',
-        'android:exported': 'false',
-      }),
-      xmlNode('service', {
-        'android:name': 'expo.modules.taskManager.TaskJobService',
-        'android:enabled': 'true',
-        'android:exported': 'false',
-        'android:permission': 'android.permission.BIND_JOB_SERVICE',
-      }),
-    ]),
+    xmlNode(
+      'application',
+      {
+        'android:allowBackup': 'false',
+        'android:networkSecurityConfig': NETWORK_SECURITY_CONFIG_REFERENCE,
+      },
+      [
+        xmlNode('meta-data', {
+          'android:name': GOOGLE_MAPS_API_KEY_METADATA_NAME,
+          'android:value': mapsApiKeyFixture,
+        }),
+        xmlNode('activity', { 'android:name': '.MainActivity', 'android:exported': 'true' }, [
+          intentFilter('android.intent.action.MAIN', 'android.intent.category.LAUNCHER'),
+        ]),
+        xmlNode('service', {
+          'android:name': 'app.notifee.core.ReceiverService',
+          'android:exported': 'false',
+        }),
+        xmlNode('service', {
+          'android:name':
+            'io.invertase.firebase.messaging.ReactNativeFirebaseMessagingHeadlessService',
+          'android:exported': 'false',
+        }),
+        xmlNode('service', {
+          'android:name': 'io.invertase.firebase.messaging.ReactNativeFirebaseMessagingService',
+          'android:exported': 'false',
+        }),
+        xmlNode('receiver', {
+          'android:name': 'expo.modules.taskManager.TaskBroadcastReceiver',
+          'android:exported': 'false',
+        }),
+        xmlNode('service', {
+          'android:name': 'expo.modules.taskManager.TaskJobService',
+          'android:enabled': 'true',
+          'android:exported': 'false',
+          'android:permission': 'android.permission.BIND_JOB_SERVICE',
+        }),
+      ],
+    ),
   ],
 );
+
+const systemCaNetworkSecurityConfigNode = xmlNode('network-security-config', {}, [
+  xmlNode('base-config', { cleartextTrafficPermitted: 'true' }, [
+    xmlNode('trust-anchors', {}, [xmlNode('certificates', { src: 'system' })]),
+  ]),
+]);
 
 function forbiddenShareTargetNode() {
   return xmlNode('shortcuts', {}, [
@@ -139,28 +160,100 @@ function encodeMessageField(number, value) {
   return Buffer.concat([encodeVarint((number << 3) | 2), encodeVarint(payload.length), payload]);
 }
 
+function encodeScalarField(number, value) {
+  return Buffer.concat([encodeVarint(number << 3), encodeVarint(value)]);
+}
+
 function encodeStringField(number, value) {
   return encodeMessageField(number, Buffer.from(value, 'utf8'));
 }
 
-function encodeXmlAttribute(name, value) {
-  const androidName = name.startsWith('android:') ? name.slice('android:'.length) : undefined;
+function encodeXmlAttribute(name, value, namespaceOverride, compiledItemOverride) {
+  const androidName =
+    namespaceOverride === undefined && name.startsWith('android:')
+      ? name.slice('android:'.length)
+      : undefined;
+  const namespace = namespaceOverride ?? (androidName ? androidNamespace : '');
+  const compiledItem =
+    compiledItemOverride ??
+    (name === 'android:networkSecurityConfig'
+      ? encodeMessageField(
+          1,
+          Buffer.concat([
+            encodeScalarField(2, networkSecurityConfigResourceId),
+            encodeStringField(3, 'xml/network_security_config'),
+            encodeScalarField(6, 1),
+          ]),
+        )
+      : undefined);
   return Buffer.concat([
-    ...(androidName ? [encodeStringField(1, androidNamespace)] : []),
+    ...(namespace ? [encodeStringField(1, namespace)] : []),
     encodeStringField(2, androidName ?? name),
     encodeStringField(3, value),
+    ...(compiledItem ? [encodeMessageField(6, compiledItem)] : []),
   ]);
 }
 
 function encodeXmlDocument(node) {
+  const attributeEntries =
+    node.attributeEntries ??
+    Object.entries(node.attributes).map(([name, value]) => [name, value, undefined]);
   const element = Buffer.concat([
+    ...(node.namespace ? [encodeStringField(2, node.namespace)] : []),
     encodeStringField(3, node.name),
-    ...Object.entries(node.attributes)
+    ...attributeEntries
       .filter(([name]) => name !== 'xmlns:android')
-      .map(([name, value]) => encodeMessageField(4, encodeXmlAttribute(name, value))),
+      .map(([name, value, namespace, compiledItem]) =>
+        encodeMessageField(4, encodeXmlAttribute(name, value, namespace, compiledItem)),
+      ),
     ...node.children.map((child) => encodeMessageField(5, encodeXmlDocument(child))),
   ]);
   return encodeMessageField(1, element);
+}
+
+function encodeNetworkSecurityResourceTable({
+  path = 'res/xml/network_security_config.xml',
+  repeatedPath,
+  aliasResourceId,
+  activeValues = 1,
+  qualified = false,
+  includeDisabledValue = false,
+} = {}) {
+  const item = aliasResourceId
+    ? encodeMessageField(1, encodeScalarField(2, aliasResourceId))
+    : encodeMessageField(
+        5,
+        Buffer.concat([
+          encodeStringField(1, path),
+          ...(repeatedPath ? [encodeStringField(1, repeatedPath)] : []),
+          encodeScalarField(2, 3),
+        ]),
+      );
+  const value = encodeMessageField(4, item);
+  const configValue = (qualifiedValue = false) =>
+    Buffer.concat([
+      ...(qualifiedValue ? [encodeMessageField(1, encodeScalarField(1, 1))] : []),
+      encodeMessageField(2, value),
+    ]);
+  const entry = Buffer.concat([
+    encodeMessageField(1, encodeScalarField(1, 9)),
+    encodeStringField(2, 'network_security_config'),
+    ...Array.from({ length: activeValues }, (_, index) =>
+      encodeMessageField(6, configValue(qualified || index > 0)),
+    ),
+    ...(includeDisabledValue ? [encodeMessageField(8, configValue())] : []),
+  ]);
+  const type = Buffer.concat([
+    encodeMessageField(1, encodeScalarField(1, 22)),
+    encodeStringField(2, 'xml'),
+    encodeMessageField(3, entry),
+  ]);
+  const resourcePackage = Buffer.concat([
+    encodeMessageField(1, encodeScalarField(1, 0x7f)),
+    encodeStringField(2, 'com.bluegreengatorapps.messages'),
+    encodeMessageField(3, type),
+  ]);
+  return encodeMessageField(2, resourcePackage);
 }
 
 const manifest = renderXml(manifestNode);
@@ -246,6 +339,11 @@ function writeRedirectContainmentFixture(root) {
     ),
     input.legacyModuleSource,
   );
+  mkdirSync(join(root, 'android/app/src/main/res/xml'), { recursive: true });
+  writeFileSync(
+    join(root, 'android/app/src/main/res/xml/network_security_config.xml'),
+    NETWORK_SECURITY_CONFIG_XML,
+  );
 }
 
 function cleanupDexFixture({ omitRequiredMarker, extraMarkers = [] } = {}) {
@@ -272,6 +370,55 @@ function validate(overrides = {}) {
 test('accepts the expected manifest and headless entry order', () => {
   assert.deepEqual(REQUIRED_PERMISSIONS, intendedPermissions);
   assert.deepEqual(validate(), []);
+});
+
+test('generates and enforces the system-CA-only Android network policy', () => {
+  const androidManifest = {
+    manifest: {
+      application: [{ $: { 'android:name': '.MainApplication', 'android:allowBackup': 'false' } }],
+    },
+  };
+  assert.equal(
+    applySystemCaManifestPolicy(androidManifest).manifest.application[0].$[
+      'android:networkSecurityConfig'
+    ],
+    NETWORK_SECURITY_CONFIG_REFERENCE,
+  );
+  assert.equal(applySystemCaManifestPolicy(androidManifest), androidManifest);
+  assert.throws(
+    () =>
+      applySystemCaManifestPolicy({
+        manifest: {
+          application: [
+            {
+              $: {
+                'android:name': '.MainApplication',
+                'android:networkSecurityConfig': '@xml/competing_policy',
+              },
+            },
+          ],
+        },
+      }),
+    /competing network security config/,
+  );
+
+  const root = mkdtempSync(join(tmpdir(), 'gator-system-ca-policy-'));
+  try {
+    const destination = writeSystemCaNetworkSecurityConfig(root);
+    assert.equal(destination, join(root, 'app/src/main/res/xml/network_security_config.xml'));
+    assert.equal(readFileSync(destination, 'utf8'), NETWORK_SECURITY_CONFIG_XML);
+    assert.deepEqual(validateSystemCaNetworkSecurityConfig(NETWORK_SECURITY_CONFIG_XML), []);
+    assert.ok(
+      validateSystemCaNetworkSecurityConfig(
+        NETWORK_SECURITY_CONFIG_XML.replace('src="system"', 'src="user"'),
+      ).some((error) => error.includes('only Android system CAs')),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+
+  const appConfig = readFileSync(join(ROOT, 'app.config.ts'), 'utf8');
+  assert.equal(appConfig.split("'./plugins/withSystemCaNetworkSecurity'").length - 1, 1);
 });
 
 test('accepts the pinned Expo file-system redirect containment chain', () => {
@@ -695,9 +842,89 @@ test('rejects a bypassed or late expo-router bundle entry', () => {
 
 test('validates the packaged protobuf manifest and rejects a Direct Share resource', () => {
   const manifestProto = encodeXmlDocument(manifestNode);
+  const networkSecurityConfigProto = encodeXmlDocument(systemCaNetworkSecurityConfigNode);
   assert.deepEqual(
-    validatePackagedAndroidBundle({ manifestProto, dexBytes: cleanupDexFixture() }),
+    validatePackagedAndroidBundle({
+      manifestProto,
+      networkSecurityConfigProto,
+      dexBytes: cleanupDexFixture(),
+    }),
     [],
+  );
+
+  const userCaPolicy = structuredClone(systemCaNetworkSecurityConfigNode);
+  userCaPolicy.children[0].children[0].children[0].attributes.src = 'user';
+  assert.ok(
+    validatePackagedAndroidBundle({
+      manifestProto,
+      networkSecurityConfigProto: encodeXmlDocument(userCaPolicy),
+    }).some((error) => error.includes('only Android system CAs')),
+  );
+  const namespaceCollisionPolicy = structuredClone(systemCaNetworkSecurityConfigNode);
+  namespaceCollisionPolicy.children[0].children[0].children[0].attributes = {};
+  namespaceCollisionPolicy.children[0].children[0].children[0].attributeEntries = [
+    ['src', 'user', ''],
+    ['src', 'system', 'urn:gator:attacker'],
+  ];
+  assert.ok(
+    validatePackagedAndroidBundle({
+      manifestProto,
+      networkSecurityConfigProto: encodeXmlDocument(namespaceCollisionPolicy),
+    }).some((error) => error.includes('only Android system CAs')),
+  );
+  const compiledCaPolicy = structuredClone(systemCaNetworkSecurityConfigNode);
+  compiledCaPolicy.children[0].children[0].children[0].attributes = {};
+  compiledCaPolicy.children[0].children[0].children[0].attributeEntries = [
+    [
+      'src',
+      'system',
+      '',
+      encodeMessageField(1, encodeScalarField(2, networkSecurityConfigResourceId + 1)),
+    ],
+  ];
+  assert.ok(
+    validatePackagedAndroidBundle({
+      manifestProto,
+      networkSecurityConfigProto: encodeXmlDocument(compiledCaPolicy),
+    }).some((error) => error.includes('must be a literal, uncompiled value')),
+  );
+
+  const userCaProto = encodeXmlDocument(userCaPolicy);
+  assert.ok(
+    validatePackagedAndroidBundle({
+      manifestProto,
+      networkSecurityConfigProto: Buffer.concat([networkSecurityConfigProto, userCaProto]),
+    }).some((error) => error.includes('exactly one element or text value')),
+  );
+
+  const competingManifest = structuredClone(manifestNode);
+  const competingApplication = competingManifest.children.find(
+    (node) => node.name === 'application',
+  );
+  competingApplication.attributeEntries = Object.entries(competingApplication.attributes).map(
+    ([name, value]) =>
+      name === 'android:networkSecurityConfig'
+        ? [
+            name,
+            value,
+            undefined,
+            Buffer.concat([
+              encodeMessageField(1, encodeScalarField(2, networkSecurityConfigResourceId)),
+              encodeMessageField(2, Buffer.alloc(0)),
+            ]),
+          ]
+        : [name, value, undefined],
+  );
+  assert.ok(
+    validatePackagedAndroidBundle({
+      manifestProto: encodeXmlDocument(competingManifest),
+      networkSecurityConfigProto,
+    }).some((error) => error.includes('compiled item must have exactly one value')),
+  );
+  assert.ok(
+    validatePackagedAndroidBundle({ manifestProto }).some((error) =>
+      error.includes('network security config protobuf is missing'),
+    ),
   );
 
   for (const marker of REQUIRED_PINNED_SHORTCUT_CLEANUP_DEX_MARKERS) {
@@ -766,6 +993,7 @@ test('rejects direct community WebView code without rejecting the supported Expo
   assert.deepEqual(
     validatePackagedAndroidBundle({
       manifestProto,
+      networkSecurityConfigProto: encodeXmlDocument(systemCaNetworkSecurityConfigNode),
       dexBytes: cleanupDexFixture({
         extraMarkers: ['Lexpo/modules/webview/DomWebViewModule;'],
       }),
@@ -786,6 +1014,15 @@ function writeTestAab(
     absoluteUserPath,
     sensitiveArchiveEntry,
     sensitiveArchiveContents,
+    omitNetworkSecurityConfig = false,
+    useUserCaNetworkSecurityConfig = false,
+    omitResourcesTable = false,
+    networkSecurityConfigResourcePath = 'res/xml/network_security_config.xml',
+    repeatedNetworkSecurityConfigResourcePath,
+    networkSecurityConfigAliasResourceId,
+    activeNetworkSecurityConfigValues = 1,
+    qualifiedNetworkSecurityConfig = false,
+    includeDisabledNetworkSecurityConfig = false,
   } = {},
 ) {
   const staging = join(root, 'bundle-staging');
@@ -799,6 +1036,28 @@ function writeTestAab(
     join(staging, 'base', 'manifest', 'AndroidManifest.xml'),
     encodeXmlDocument(manifestNode),
   );
+  if (!omitResourcesTable) {
+    writeFileSync(
+      join(staging, 'base', 'resources.pb'),
+      encodeNetworkSecurityResourceTable({
+        path: networkSecurityConfigResourcePath,
+        repeatedPath: repeatedNetworkSecurityConfigResourcePath,
+        aliasResourceId: networkSecurityConfigAliasResourceId,
+        activeValues: activeNetworkSecurityConfigValues,
+        qualified: qualifiedNetworkSecurityConfig,
+        includeDisabledValue: includeDisabledNetworkSecurityConfig,
+      }),
+    );
+  }
+  if (!omitNetworkSecurityConfig) {
+    const networkPolicy = structuredClone(systemCaNetworkSecurityConfigNode);
+    if (useUserCaNetworkSecurityConfig) {
+      networkPolicy.children[0].children[0].children[0].attributes.src = 'user';
+    }
+    const networkSecurityConfigPath = join(staging, 'base', networkSecurityConfigResourcePath);
+    mkdirSync(dirname(networkSecurityConfigPath), { recursive: true });
+    writeFileSync(networkSecurityConfigPath, encodeXmlDocument(networkPolicy));
+  }
   writeFileSync(
     join(staging, 'base', 'dex', 'classes.dex'),
     cleanupDexFixture({
@@ -876,6 +1135,45 @@ test('artifact runner inspects both variants and the final release AAB contents'
       inspectPackagedAndroidBundle(join(root, releaseBundlePath)).googleMapsApiKeySha256,
       createHash('sha256').update(mapsApiKeyFixture).digest('hex'),
     );
+
+    writeTestAab(root, releaseBundlePath, { omitNetworkSecurityConfig: true });
+    assert.throws(
+      () => runAndroidBuildCheck(options),
+      /expected exactly one resolved base\/res\/xml\/network_security_config\.xml/,
+    );
+
+    writeTestAab(root, releaseBundlePath, { useUserCaNetworkSecurityConfig: true });
+    assert.throws(() => runAndroidBuildCheck(options), /only Android system CAs/);
+
+    writeTestAab(root, releaseBundlePath, { omitResourcesTable: true });
+    assert.throws(() => runAndroidBuildCheck(options), /expected exactly one base\/resources\.pb/);
+
+    writeTestAab(root, releaseBundlePath, {
+      networkSecurityConfigAliasResourceId: 0x7f16000a,
+    });
+    assert.throws(() => runAndroidBuildCheck(options), /resource aliases are forbidden/);
+
+    writeTestAab(root, releaseBundlePath, { activeNetworkSecurityConfigValues: 2 });
+    assert.throws(() => runAndroidBuildCheck(options), /exactly one active resource value/);
+
+    writeTestAab(root, releaseBundlePath, { qualifiedNetworkSecurityConfig: true });
+    assert.throws(
+      () => runAndroidBuildCheck(options),
+      /must not have a qualified resource variant/,
+    );
+
+    writeTestAab(root, releaseBundlePath, { includeDisabledNetworkSecurityConfig: true });
+    assert.throws(() => runAndroidBuildCheck(options), /flag-disabled resource variants/);
+
+    writeTestAab(root, releaseBundlePath, {
+      networkSecurityConfigResourcePath: 'res/8G.xml',
+    });
+    assert.doesNotThrow(() => runAndroidBuildCheck(options));
+
+    writeTestAab(root, releaseBundlePath, {
+      repeatedNetworkSecurityConfigResourcePath: 'res/xml/attacker_selected.xml',
+    });
+    assert.throws(() => runAndroidBuildCheck(options), /protobuf field 1 is unexpectedly repeated/);
 
     const privateUsername = 'private-person';
     const privateRemainder = 'private-checkout';

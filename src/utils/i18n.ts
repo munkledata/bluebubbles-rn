@@ -31,7 +31,8 @@ const ENGLISH_MESSAGES = {
   'manual.insecure.warning.prefix': 'This server uses unencrypted ',
   'manual.insecure.warning.protocol': 'http://',
   'manual.insecure.warning.suffix': '. Only enable for a server you trust.',
-  'manual.subtitle': 'Enter your {serverName} URL and password or paired-client credential.',
+  'manual.subtitle':
+    'Enter your {serverName} URL and password or paired-client credential. HTTPS requires a certificate from Android’s built-in system authorities; authorities added in Android Settings are not supported.',
   'manual.title': 'Server details',
   'permissions.action.checkAgain': 'Check Again',
   'permissions.action.continue': 'Continue to Messages',

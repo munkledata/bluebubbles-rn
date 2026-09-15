@@ -176,13 +176,24 @@ transport enforcement.
 
 <a id="tls-02"></a>
 
-## `TLS-02` — deliberate user-installed CA trust
+## `TLS-02` — system-CA-only Android trust
 
-Decide separately whether production supports certificates chaining to Android's user trust store.
-If supported, generate a reviewed `src="user"` trust anchor, explain the device-wide interception
-trade-off, and apply the policy to every authenticated transport. If unsupported, document the
-server constraint and remove contrary claims. Neither branch permits blanket acceptance of an
-arbitrary self-signed leaf.
+The product owner selected Android's built-in system certificate authorities as the complete HTTPS
+trust-anchor set. Generated Android configuration must contain one unqualified base policy with
+only `src="system"`; it must not add `src="user"`, debug overrides, domain overrides, raw certificate
+files, pins, or a custom certificate-validation bypass. Certificate authorities added through
+Android Settings are therefore unsupported.
+
+Keep `cleartextTrafficPermitted="true"` in this static policy only because completed `TLS-00`
+separately requires explicit in-app consent before a user-entered HTTP origin can be used. The
+static allowance is not permission for another code path to bypass that runtime gate. Product copy
+must state both boundaries plainly.
+
+The generated manifest reference, generated XML, and the AAB resource table plus runtime-selected
+compiled XML are build-guarded. Device proof must show an installed user CA is rejected before HTTP
+while a normal system-CA endpoint reaches the API. Android retains ownership of its system trust
+store, certificate/hostname validation, blocklist, and platform revocation mechanisms; the app does
+not claim universal live revocation checking.
 
 ## Sequencing contract
 
@@ -194,6 +205,7 @@ arbitrary self-signed leaf.
    post-remediation path.
 3. Keep completed `RT-01A` client containment in force. `POST-RT-01B` may add signed rotation only if
    the app and server owners later select the cross-repository protocol, key lifecycle, and rollout.
-4. Keep completed `TLS-00` and the selected `TLS-01A` ordinary-HTTPS branch in force.
+4. Keep completed `TLS-00`, `TLS-01A`, and the selected `TLS-02` system-CA-only policy in force.
    `POST-TLS-01B` may add complete pinning on top only after stable origins and pin operations have
-   owners; make the independent `TLS-02` user-CA policy explicit for the same transport set.
+   owners. `POST-TLS-02` may reconsider user-installed CA support only as a new, explicitly selected
+   product feature.
