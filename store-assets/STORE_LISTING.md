@@ -19,16 +19,17 @@ standard policy/security review and are Data Safety-exempt while exclusively int
 UGC-policy exemption is claimed. Confirm in Play Console that no other track is active before relying
 on this boundary.
 
-The conforming current local candidate is `0.1.43` / version code `59`, source
-`7a3aa2058ad1bea4252379b2ea3df285e1fd94ef`, release commit
-`e108ad7756cf2ae67a6873cbd1e1526df0613e18` on local branch `release/android-0.1.43`, release run
-`android-0.1.43-7a3aa20-20260904145333`, and AAB `gator-release-0.1.43-v59-e108ad7.aab`
-(`55,818,682` bytes), SHA-256
-`e2a60f7b06837b47484f71d79fccb0c585ead745a2e1a1a48952d54cd5bdc0af`. Its local build,
-validation, and promotion passed, but it has not been uploaded, submitted, installed, or exercised
-on a device. Candidate-dependent rows below refer to that exact artifact. The superseded conforming
-v58 AAB and preserved nonconforming v57 AAB remain historical evidence and must not be uploaded or
-submitted.
+Candidate evidence is intentionally split rather than silently transferred. The broader release
+plan freezes Play v64 for its exact `TLS-00` slice. `WEB-03` closes against the complete Play v65 map
+matrix plus behavior-equivalent Play v66 App Lock and owner-review evidence. The latest of those map
+candidates is `0.1.49` / version code `66`, source
+`360d873301e54541b0dbedf97caa4c26b10451ef`, release commit
+`6b592755f35665ac5fff951e861006686301cb23`, and AAB `gator-release-0.1.49-v66-6b59275.aab`
+(`56,801,803` bytes), SHA-256
+`9dfb0d3c9ea9f1e54ed32f2e6f008d57132f9e4d74cc76e5c3cb803447141570`. The formerly named v59
+artifact is historical. None of v59/v64/v65/v66 is represented here as a single comprehensive
+release candidate; a future release must freeze and verify one replacement across every applicable
+gate.
 
 Recheck these requirements before upload/testing and again for any later replacement:
 
@@ -47,10 +48,10 @@ Recheck these requirements before upload/testing and again for any later replace
 | Full description          | Draft below — 2,284/4,000 characters; recount after any edit                                                                                                                                |
 | App icon                  | Technical checks pass: `play-icon-512.png` is a 512×512, 8-bit RGBA PNG; candidate visual approval remains                                                                                  |
 | Feature graphic           | Technical checks pass: `play-feature-1024x500.png` is a 1024×500, 8-bit RGB PNG with no alpha; candidate visual approval remains                                                            |
-| Phone screenshots         | **Blocked:** capture from the exact candidate with staged data; none are stored here yet                                                                                                    |
+| Phone screenshots         | One privacy-safe v66 `WEB-03` map proof screen was viewed and owner-approved; the required exact-candidate listing set is not stored here yet                                               |
 | Privacy-policy URL        | **Blocked:** no owner-approved policy URL is recorded in this repository                                                                                                                    |
 | License/notices           | **Private Internal Testing posture selected:** Expo's inherited notice is preserved; third-party terms still apply; broader distribution awaits an exact inventory and owner/legal approval |
-| Data safety               | **Blocked:** reconcile the candidate, third-party SDKs, active non-internal Play artifacts, and approved privacy policy                                                                     |
+| Data safety               | `WEB-03` Maps-only subset owner-approved below; full candidate/SDK/non-internal-artifact reconciliation and an approved privacy policy remain blocked                                       |
 | App access                | **Blocked:** provide a stable non-production Mac server, reviewer credentials or setup QR, and step-by-step instructions                                                                    |
 | UGC safeguards            | **Deferred for Internal Testing; blocked before promotion:** required safety work is not implemented                                                                                        |
 | Developer contact/support | **Blocked:** enter owner-approved support contact details in Play Console and the app                                                                                                       |
@@ -152,6 +153,25 @@ closed, open, or production tracks.
 | Category                   | **Draft recommendation: Communication**                                                                                                                                                                                                                                                                                                                         | Owner confirms the category; choosing Social may add separate child-safety declarations                                                                                            |
 | Device/distribution claims | **Pending**                                                                                                                                                                                                                                                                                                                                                     | Use Play device-catalog data and exact-candidate checks; do not infer support from the arm64 emulator proof                                                                        |
 | Developer contact/support  | **Blocked**                                                                                                                                                                                                                                                                                                                                                     | Enter verified owner-approved support email/site and make the same destinations available in-app                                                                                   |
+
+### Owner-approved `WEB-03` Maps-only Data Safety subset
+
+For the current private Internal Testing scope, the owner approved the conservative entries below
+on 2026-09-14 after viewing the Play v66 map, privacy, and legal screens. Approximate location is
+included because Google documents receipt of the phone IP. Every transfer stays marked shared
+unless a later full release review documents a valid service-provider or user-initiated exception.
+
+| Play data type       | Collected | Required | Purpose           | Shared |
+| -------------------- | --------- | -------- | ----------------- | ------ |
+| Precise location     | Yes       | Optional | App functionality | Yes    |
+| Approximate location | Yes       | Optional | App functionality | Yes    |
+| App interactions     | Yes       | Optional | Analytics         | Yes    |
+| Crash logs           | Yes       | Optional | Analytics         | Yes    |
+| Diagnostics          | Yes       | Optional | Analytics         | Yes    |
+| Device or other IDs  | Yes       | Optional | Analytics         | Yes    |
+
+This is not the complete app-wide Data Safety answer and does not authorize a broader Play track.
+Full reconciliation remains in the release plan.
 
 Source facts that informed these notes:
 

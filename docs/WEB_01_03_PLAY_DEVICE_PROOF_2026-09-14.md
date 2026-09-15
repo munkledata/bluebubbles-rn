@@ -3,8 +3,10 @@
 > **Evidence class:** frozen-source, production-signed Google Play Internal candidates plus
 > isolated synthetic server fixtures on 2026-09-14.
 >
-> **Disposition:** this closes `WEB-01` and `WEB-02`. `WEB-03` remains **IN_PROGRESS** for the
-> human-only TalkBack, Play Data Safety, and owner/legal gates listed below.
+> **Disposition:** this closes `WEB-01`, `WEB-02`, and `WEB-03`. Per the owner's 2026-09-14
+> decision, accessibility validation is not a `WEB-03` completion requirement. The owner approved
+> the exact screens, Google destinations, and conservative Maps-only Data Safety draft below for
+> the current private Internal Testing scope.
 
 ## Play v65 candidate identity
 
@@ -125,7 +127,7 @@ working Internet route, while the fixture remained available over USB loopback.
   restored. The v66 Play app remains installed and disconnected. Privacy-safe evidence was moved
   recoverably to Trash under `web02-v66.9tNskK`; no production account or credential was retained.
 
-## Remaining gates
+## Final disposition
 
 `WEB-01` is complete: its source/host containment and exact Play marker/focus acceptance both pass.
 
@@ -134,12 +136,13 @@ v66 Play candidate completed the real owner-authenticated App Lock cycle. The pr
 absent before authentication and remounted exactly once after unlock without a WebView or process
 restart.
 
-`WEB-03` remains **IN_PROGRESS** for:
+`WEB-03` is complete. Exact Play v65/v66 evidence covers visible native attribution, native/list
+fallback, controlled lifecycle and outage behavior, truthful disclosure, and safe legal destinations.
 
-- a human listening/focus traversal with TalkBack covering the map summary, marker, tabs, list,
-  external fallback, and Google attribution without a focus trap;
-- owner/legal approval of the candidate screenshot and wired terms/privacy wording; and
-- reconciliation and approval of the matching Google Play Data Safety answers.
+The owner removed accessibility validation from `WEB-03` on 2026-09-14. That decision changes only
+this task's acceptance boundary; no accessibility code or runtime behavior changed. A short TalkBack setup attempt was
+stopped at the owner's request. Cleanup restored touch exploration to off and preserved Bitwarden as the phone's sole
+enabled accessibility service.
 
 ### Owner approval packet
 
@@ -148,35 +151,45 @@ the Data Safety form. The remediation gate still requires an approved draft so a
 cannot invent answers under release pressure. Based on Google's current
 [Maps SDK data disclosure](https://developers.google.com/maps/documentation/android-sdk/play-data-disclosure)
 and [Play Data Safety definitions](https://support.google.com/googleplay/android-developer/answer/10787469),
-the conservative Maps-only draft is:
+the owner-approved conservative Maps-only draft is:
 
-| Play data type      | Collected | Required | Purpose           | Shared draft |
-| ------------------- | --------- | -------- | ----------------- | ------------ |
-| Precise location    | Yes       | Optional | App functionality | Yes          |
-| App interactions    | Yes       | Optional | Analytics         | Yes          |
-| Crash logs          | Yes       | Optional | Analytics         | Yes          |
-| Diagnostics         | Yes       | Optional | Analytics         | Yes          |
-| Device or other IDs | Yes       | Optional | Analytics         | Yes          |
+| Play data type       | Collected | Required | Purpose           | Shared draft |
+| -------------------- | --------- | -------- | ----------------- | ------------ |
+| Precise location     | Yes       | Optional | App functionality | Yes          |
+| Approximate location | Yes       | Optional | App functionality | Yes          |
+| App interactions     | Yes       | Optional | Analytics         | Yes          |
+| Crash logs           | Yes       | Optional | Analytics         | Yes          |
+| Diagnostics          | Yes       | Optional | Analytics         | Yes          |
+| Device or other IDs  | Yes       | Optional | Analytics         | Yes          |
 
 “Precise location” here means the server-provided Find My coordinate, not this Android phone's
-location. Optional is supportable because Maps mounts only when the user opens optional Find My with
+location. Approximate location is included conservatively because Google documents receipt of the
+phone IP. Optional is supportable because Maps mounts only when the user opens optional Find My with
 a valid location. Do not claim ephemeral processing or that every app flow is encrypted in transit;
-Gator permits a separately warned HTTP server connection. Google's documented IP collection has no
-standalone Play category. Owner/legal must decide whether its use also requires **Approximate
-location**. A service-provider or user-initiated sharing exception may apply, but **Shared: Yes** is
-the safe draft until owner/legal approves an exception.
+Gator permits a separately warned HTTP server connection. A service-provider or user-initiated
+sharing exception may apply, but the owner chose **Shared: Yes** unless a later full release review
+approves and documents an exception.
 
-Before closing `WEB-03`, the owner must view the actual candidate screenshot—not only its hash—and
-approve that image, the exact in-app disclosure/legal wording, both Google destinations, and this
-draft matrix. The store pack still names an older candidate and must be updated only after that
-decision.
+The owner viewed and approved the actual Play v66 map screenshot (SHA-256
+`f9b7263bf713cbdfc7abd10aa129729234616ebfdd817c26ebcc97fde3e87f34`), the v66 Privacy & Data Use
+screen (SHA-256 `6336115cee14e4e2e73016c441a20abed48753aea1aa32903b8511c9a2890806`), and the v66 Legal & Notices
+screen (SHA-256 `3e8e6bf796baf54da000b2235424d3d2ca558c86e581ae7258a960e81a38c7ab`). The map hierarchy exposed
+one native map, one marker, one external action, and zero WebViews. The legal actions target exactly
+`https://maps.google.com/help/terms_maps/` and `https://policies.google.com/privacy`; the first v66
+action also opened its exact destination in the installed browser. Focused host tests cover both
+safe-HTTPS destinations.
 
-The remaining human phone pass is deliberately small:
+The closeout rerun passed **6 suites / 25 tests / 0 failures / 0 snapshots**: five map/config/screen/
+privacy/legal suites passed 24 tests, and the focused lifecycle polling suite passed its one test.
+This approval is bounded to `WEB-03` and private Internal Testing. It is not a complete app-wide Data
+Safety declaration, broader-distribution legal approval, or transfer of another candidate's proof.
 
-1. Preserve the current accessibility-service state, enable TalkBack, and audibly traverse Refresh,
-   the one-location map summary, marker, Google attribution, all three tabs, list row, and external
-   Maps action. Confirm focus leaves the map and returns from external Maps without trapping, then
-   restore the original accessibility state.
+Final approval cleanup disconnected the synthetic account through Gator and exposed only onboarding's
+**Get Started** action. The fixture stopped with `WEB02_CLOSED` after a final bounded summary of 124 requests, 121
+authenticated requests, and 33 authorized Find My responses. USB reverse `tcp:1236` was removed while the unrelated
+pre-existing `tcp:8081` reverse was preserved; normal phone sleep reported `stay_on_while_plugged_in=0`. TalkBack and
+touch exploration were off, Bitwarden remained the sole enabled accessibility service, and the disposable fixture
+directory moved recoverably to Trash as `web03-v66.9tNskK`.
 
 The local EAS build's Expo Doctor check was nonblocking but reported **19/20** checks because 27
 Expo SDK 57 dependencies have newer recommended patch versions. That is broader dependency/release
