@@ -24,6 +24,16 @@ export const pruneNativeSyncedBackgroundCache = jest.fn(async (_keepUri: string 
   remainingBytes: 0,
 }));
 
+export const prepareNativeSyncedBackgroundCacheForDownload = jest.fn(
+  async (_keepUri: string | null) => ({
+    withinQuota: true,
+    deletedFiles: 0,
+    deletedBytes: 0,
+    remainingFiles: 0,
+    remainingBytes: 0,
+  }),
+);
+
 export const deleteNativeSyncedBackgroundCacheFile = jest.fn(
   async (_uri: string): Promise<boolean> => true,
 );

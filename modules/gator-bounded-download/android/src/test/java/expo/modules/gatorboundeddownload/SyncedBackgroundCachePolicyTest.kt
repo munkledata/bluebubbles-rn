@@ -1,6 +1,7 @@
 package expo.modules.gatorboundeddownload
 
 import java.io.File
+import java.io.RandomAccessFile
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -12,12 +13,44 @@ import org.junit.rules.TemporaryFolder
 class SyncedBackgroundCachePolicyTest {
   @get:Rule
   val temporary = TemporaryFolder()
+  private val nioFileSystem = NioAttachmentCacheFileSystem()
 
   @Test
   fun `production quota and concurrent-final grace stay pinned`() {
     assertEquals(100L * 1024 * 1024, SYNCED_BACKGROUND_CACHE_MAX_BYTES)
     assertEquals(256, SYNCED_BACKGROUND_CACHE_MAX_FILES)
+    assertEquals(10L * 1024 * 1024, SYNCED_BACKGROUND_DOWNLOAD_MAX_BYTES)
+    assertEquals(90L * 1024 * 1024, SYNCED_BACKGROUND_CACHE_ADMISSION_MAX_BYTES)
+    assertEquals(255, SYNCED_BACKGROUND_CACHE_ADMISSION_MAX_FILES)
+    assertEquals(8_192, SYNCED_BACKGROUND_CACHE_SCAN_MAX_FILES)
+    assertEquals(32_768, SYNCED_BACKGROUND_CACHE_SCAN_MAX_NODES)
     assertEquals(0L, SYNCED_BACKGROUND_CACHE_RECENT_GRACE_MS)
+  }
+
+  @Test
+  fun `pre-admission protects a legacy current file and reserves one maximum download`() {
+    val root = temporary.newFolder(SYNCED_BACKGROUND_CACHE_DIRECTORY).canonicalFile
+    val currentLegacy = sparseFile(File(root, "current-legacy.jpg"), 10L * 1024 * 1024, 9_000L)
+    val newest = sparseMedia(root, 2, "newest", 80L * 1024 * 1024, 8_000L)
+    val oldest = sparseMedia(root, 1, "oldest", 1L * 1024 * 1024, 1_000L)
+
+    val result = prepareSyncedBackgroundCacheForDownload(
+      root = root,
+      fileSystem = nioFileSystem,
+      keepFile = currentLegacy,
+      nowMs = 10_000L,
+    )
+
+    assertTrue(result.withinQuota)
+    assertEquals(SYNCED_BACKGROUND_CACHE_ADMISSION_MAX_BYTES, result.remainingBytes)
+    assertTrue(currentLegacy.exists())
+    assertTrue(newest.exists())
+    assertFalse(oldest.exists())
+    assertTrue(
+      result.remainingBytes + SYNCED_BACKGROUND_DOWNLOAD_MAX_BYTES <=
+        SYNCED_BACKGROUND_CACHE_MAX_BYTES,
+    )
+    assertTrue(result.remainingFiles + 1L <= SYNCED_BACKGROUND_CACHE_MAX_FILES.toLong())
   }
 
   @Test
@@ -30,6 +63,7 @@ class SyncedBackgroundCachePolicyTest {
 
     val result = pruneSyncedBackgroundCache(
       root = root,
+      fileSystem = nioFileSystem,
       keepFile = committed,
       nowMs = 10_000L,
       maxBytes = 10L,
@@ -56,6 +90,7 @@ class SyncedBackgroundCachePolicyTest {
 
     val first = pruneSyncedBackgroundCache(
       root = root,
+      fileSystem = nioFileSystem,
       keepFile = committed,
       nowMs = 10_000L,
       maxBytes = 10L,
@@ -69,6 +104,7 @@ class SyncedBackgroundCachePolicyTest {
 
     val later = pruneSyncedBackgroundCache(
       root = root,
+      fileSystem = nioFileSystem,
       keepFile = committed,
       nowMs = 20_000L,
       maxBytes = 10L,
@@ -89,6 +125,7 @@ class SyncedBackgroundCachePolicyTest {
 
     val result = pruneSyncedBackgroundCache(
       root = root,
+      fileSystem = nioFileSystem,
       keepFile = null,
       nowMs = 10_000L,
       maxBytes = 4L,
@@ -115,6 +152,7 @@ class SyncedBackgroundCachePolicyTest {
 
     val result = pruneSyncedBackgroundCache(
       root = aliasRoot,
+      fileSystem = nioFileSystem,
       keepFile = validatedKeep,
       nowMs = 10_000L,
       maxBytes = 4L,
@@ -148,6 +186,7 @@ class SyncedBackgroundCachePolicyTest {
       runCatching {
         pruneSyncedBackgroundCache(
           root = linkedRoot,
+          fileSystem = nioFileSystem,
           nowMs = 10_000L,
           maxBytes = 1L,
           maxFiles = 1,
@@ -159,35 +198,48 @@ class SyncedBackgroundCachePolicyTest {
   }
 
   @Test
-  fun `deletes only exact canonical two-level media entries`() {
+  fun `unknown entry fails before any deletion`() {
     val root = temporary.newFolder(SYNCED_BACKGROUND_CACHE_DIRECTORY).canonicalFile
     val owned = media(root, 1, "owned", 4, 100L)
-    val generation = File(root, "generation-1")
-    val partial = File(generation, "request.part").apply { writeBytes(byteArrayOf(1)) }
-    val wrongExtension = File(generation, "media-photo.png").apply { writeBytes(byteArrayOf(1)) }
     val unknownRootFile = File(root, "not-wallpaper.bin").apply { writeBytes(byteArrayOf(1)) }
-    val unknownGeneration = File(root, "generation-active").apply { mkdirs() }
-    val unknownMedia = File(unknownGeneration, "media-unknown.jpg").apply {
-      writeBytes(byteArrayOf(1))
+
+    val result = runCatching {
+      pruneSyncedBackgroundCache(
+        root = root,
+        fileSystem = nioFileSystem,
+        nowMs = 10_000L,
+        maxBytes = 1L,
+        maxFiles = 1,
+        recentGraceMs = 0L,
+      )
     }
+
+    assertTrue(result.isFailure)
+    assertTrue(owned.exists())
+    assertTrue(unknownRootFile.exists())
+  }
+
+  @Test
+  fun `a symlinked media entry fails closed without touching its target or owned files`() {
+    val root = temporary.newFolder(SYNCED_BACKGROUND_CACHE_DIRECTORY).canonicalFile
+    val owned = media(root, 1, "owned", 4, 100L)
     val outside = temporary.newFile("outside-secret.db").apply { writeBytes(byteArrayOf(9)) }
-    val symlink = File(generation, "media-link.jpg")
+    val symlink = File(owned.parentFile, "media-link.jpg")
     Files.createSymbolicLink(symlink.toPath(), outside.toPath())
 
-    val result = pruneSyncedBackgroundCache(
-      root = root,
-      nowMs = 10_000L,
-      maxBytes = 1L,
-      maxFiles = 1,
-      recentGraceMs = 1_000L,
-    )
+    val result = runCatching {
+      pruneSyncedBackgroundCache(
+        root = root,
+        fileSystem = nioFileSystem,
+        nowMs = 10_000L,
+        maxBytes = 1L,
+        maxFiles = 1,
+        recentGraceMs = 0L,
+      )
+    }
 
-    assertTrue(result.withinQuota)
-    assertFalse(owned.exists())
-    assertTrue(partial.exists())
-    assertTrue(wrongExtension.exists())
-    assertTrue(unknownRootFile.exists())
-    assertTrue(unknownMedia.exists())
+    assertTrue(result.isFailure)
+    assertTrue(owned.exists())
     assertTrue(outside.exists())
     assertTrue(symlink.exists())
   }
@@ -200,10 +252,9 @@ class SyncedBackgroundCachePolicyTest {
       writeBytes(ByteArray(4) { 1 })
       assertTrue(setLastModified(1_000L))
     }
-    val unrelated = File(root, "readme.txt").apply { writeBytes(byteArrayOf(9)) }
-
     val result = pruneSyncedBackgroundCache(
       root = root,
+      fileSystem = nioFileSystem,
       nowMs = 10_000L,
       maxBytes = 4L,
       maxFiles = 1,
@@ -213,9 +264,160 @@ class SyncedBackgroundCachePolicyTest {
     assertTrue(result.withinQuota)
     assertTrue(current.exists())
     assertFalse(legacy.exists())
-    assertTrue(unrelated.exists())
     assertEquals(1L, result.remainingFiles)
     assertEquals(4L, result.remainingBytes)
+  }
+
+  @Test
+  fun `an unreadable generation fails before any deletion`() {
+    val root = temporary.newFolder("unreadable-generation").canonicalFile
+    val first = media(root, 1, "first", 4, 100L)
+    val second = media(root, 2, "second", 4, 200L)
+    val unreadable = object : ForwardingAttachmentCacheFileSystem(nioFileSystem) {
+      override fun openDirectory(directory: File): AttachmentCacheDirectoryCursor {
+        if (directory.absoluteFile.path != root.absoluteFile.path) {
+          throw IllegalStateException("synthetic unreadable directory")
+        }
+        return super.openDirectory(directory)
+      }
+    }
+
+    val result = runCatching {
+      pruneSyncedBackgroundCache(
+        root = root,
+        fileSystem = unreadable,
+        maxBytes = 1L,
+        maxFiles = 1,
+      )
+    }
+
+    assertTrue(result.isFailure)
+    assertTrue(first.exists())
+    assertTrue(second.exists())
+  }
+
+  @Test
+  fun `an enumerated file disappearance is corruption rather than an ignored miss`() {
+    val root = temporary.newFolder("disappearing-entry").canonicalFile
+    val owned = media(root, 1, "owned", 4, 100L)
+    val disappearing = object : ForwardingAttachmentCacheFileSystem(nioFileSystem) {
+      private var disappearOnNextInspect = false
+
+      override fun inspect(file: File): AttachmentCacheNode? {
+        if (disappearOnNextInspect && file.absoluteFile.path == owned.absoluteFile.path) {
+          disappearOnNextInspect = false
+          return null
+        }
+        return super.inspect(file)
+      }
+
+      override fun openDirectory(directory: File): AttachmentCacheDirectoryCursor {
+        val cursor = super.openDirectory(directory)
+        return object : AttachmentCacheDirectoryCursor {
+          override fun nextOrNull(): File? = cursor.nextOrNull().also { child ->
+            if (child?.absoluteFile?.path == owned.absoluteFile.path) {
+              disappearOnNextInspect = true
+            }
+          }
+
+          override fun close() = cursor.close()
+        }
+      }
+    }
+
+    val result = runCatching {
+      pruneSyncedBackgroundCache(
+        root = root,
+        fileSystem = disappearing,
+        maxBytes = 1L,
+        maxFiles = 1,
+      )
+    }
+
+    assertTrue(result.isFailure)
+    assertTrue(owned.exists())
+  }
+
+  @Test
+  fun `file and node scan ceilings fail before mutation`() {
+    val fileCapRoot = temporary.newFolder("file-cap").canonicalFile
+    val fileCapFirst = media(fileCapRoot, 1, "first", 4, 100L)
+    val fileCapSecond = media(fileCapRoot, 1, "second", 4, 200L)
+    val fileCapResult = runCatching {
+      pruneSyncedBackgroundCache(
+        root = fileCapRoot,
+        fileSystem = nioFileSystem,
+        maxBytes = 1L,
+        maxFiles = 1,
+        scanLimits = SyncedBackgroundCacheScanLimits(maxFiles = 1, maxNodes = 4),
+      )
+    }
+    assertTrue(fileCapResult.isFailure)
+    assertTrue(fileCapFirst.exists())
+    assertTrue(fileCapSecond.exists())
+
+    val nodeCapRoot = temporary.newFolder("node-cap").canonicalFile
+    val nodeCapFirst = media(nodeCapRoot, 1, "first", 4, 100L)
+    val nodeCapSecond = media(nodeCapRoot, 1, "second", 4, 200L)
+    val nodeCapResult = runCatching {
+      pruneSyncedBackgroundCache(
+        root = nodeCapRoot,
+        fileSystem = nioFileSystem,
+        maxBytes = 1L,
+        maxFiles = 1,
+        scanLimits = SyncedBackgroundCacheScanLimits(maxFiles = 2, maxNodes = 2),
+      )
+    }
+    assertTrue(nodeCapResult.isFailure)
+    assertTrue(nodeCapFirst.exists())
+    assertTrue(nodeCapSecond.exists())
+  }
+
+  @Test
+  fun `a failed delete is reflected by the final strict scan`() {
+    val root = temporary.newFolder("failed-delete").canonicalFile
+    val oldest = media(root, 1, "oldest", 4, 100L)
+    val newest = media(root, 1, "newest", 4, 200L)
+
+    val result = pruneSyncedBackgroundCache(
+      root = root,
+      fileSystem = nioFileSystem,
+      maxBytes = 4L,
+      maxFiles = 1,
+      deleteFile = { false },
+    )
+
+    assertFalse(result.withinQuota)
+    assertEquals(0L, result.deletedFiles)
+    assertEquals(2L, result.remainingFiles)
+    assertEquals(8L, result.remainingBytes)
+    assertTrue(oldest.exists())
+    assertTrue(newest.exists())
+  }
+
+  @Test
+  fun `noncanonical current names fail closed`() {
+    val generationRoot = temporary.newFolder("noncanonical-generation").canonicalFile
+    val leadingZeroDirectory = File(generationRoot, "generation-01").apply { mkdirs() }
+    val leadingZeroFile = File(leadingZeroDirectory, "media-valid.jpg").apply {
+      writeBytes(byteArrayOf(1))
+    }
+    assertTrue(
+      runCatching {
+        pruneSyncedBackgroundCache(generationRoot, nioFileSystem)
+      }.isFailure,
+    )
+    assertTrue(leadingZeroFile.exists())
+
+    val mediaRoot = temporary.newFolder("noncanonical-media").canonicalFile
+    val mediaDirectory = File(mediaRoot, "generation-1").apply { mkdirs() }
+    val encodedAlias = File(mediaDirectory, "media-%41.jpg").apply { writeBytes(byteArrayOf(1)) }
+    assertTrue(
+      runCatching {
+        pruneSyncedBackgroundCache(mediaRoot, nioFileSystem)
+      }.isFailure,
+    )
+    assertTrue(encodedAlias.exists())
   }
 
   @Test
@@ -228,6 +430,7 @@ class SyncedBackgroundCachePolicyTest {
     try {
       pruneSyncedBackgroundCache(
         root = root,
+        fileSystem = nioFileSystem,
         keepFile = outside,
         nowMs = 10_000L,
         maxBytes = 1L,
@@ -285,4 +488,29 @@ class SyncedBackgroundCachePolicyTest {
       assertTrue(setLastModified(modifiedAtMs))
     }
   }
+
+  private fun sparseMedia(
+    root: File,
+    generation: Int,
+    id: String,
+    bytes: Long,
+    modifiedAtMs: Long,
+  ): File {
+    val directory = File(root, "generation-$generation").apply { mkdirs() }
+    return sparseFile(File(directory, "media-$id.jpg"), bytes, modifiedAtMs)
+  }
+
+  private fun sparseFile(file: File, bytes: Long, modifiedAtMs: Long): File = file.apply {
+    RandomAccessFile(this, "rw").use { handle -> handle.setLength(bytes) }
+    assertTrue(setLastModified(modifiedAtMs))
+  }
+}
+
+private open class ForwardingAttachmentCacheFileSystem(
+  private val delegate: AttachmentCacheFileSystem,
+) : AttachmentCacheFileSystem {
+  override fun inspect(file: File): AttachmentCacheNode? = delegate.inspect(file)
+
+  override fun openDirectory(directory: File): AttachmentCacheDirectoryCursor =
+    delegate.openDirectory(directory)
 }

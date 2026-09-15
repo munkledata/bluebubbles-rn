@@ -7,6 +7,7 @@ const native = {
   releasePrepared: jest.fn(),
   download: jest.fn(),
   pruneSyncedBackgroundCache: jest.fn(),
+  prepareSyncedBackgroundCacheForDownload: jest.fn(),
   deleteSyncedBackgroundCacheFile: jest.fn(),
   statAttachmentCacheFile: jest.fn(),
   deleteAttachmentCacheFile: jest.fn(),
@@ -40,6 +41,7 @@ import {
   deleteNativeSyncedBackgroundCacheFile,
   getNativeAttachmentCacheAvailableBytes,
   NativeBoundedDownloadError,
+  prepareNativeSyncedBackgroundCacheForDownload,
   pruneNativeSyncedBackgroundCache,
   scanNativeAttachmentCacheFiles,
   statNativeAttachmentCacheFile,
@@ -53,6 +55,14 @@ beforeEach(() => {
   native.releasePrepared.mockReset();
   native.download.mockReset().mockResolvedValue({ ok: true, bytes: 25 });
   native.pruneSyncedBackgroundCache.mockReset().mockResolvedValue({
+    ok: true,
+    withinQuota: true,
+    deletedFiles: 2,
+    deletedBytes: 20,
+    remainingFiles: 3,
+    remainingBytes: 30,
+  });
+  native.prepareSyncedBackgroundCacheForDownload.mockReset().mockResolvedValue({
     ok: true,
     withinQuota: true,
     deletedFiles: 2,
@@ -262,6 +272,34 @@ it('requests the fixed native synced-background prune with only the protected UR
   expect(native.pruneSyncedBackgroundCache).toHaveBeenCalledWith(keepUri);
 });
 
+it('validates fixed synced-background admission headroom reported by native', async () => {
+  const keepUri = 'file:///private/synced-backgrounds/current-legacy.jpg';
+
+  await expect(prepareNativeSyncedBackgroundCacheForDownload(keepUri)).resolves.toEqual({
+    withinQuota: true,
+    deletedFiles: 2,
+    deletedBytes: 20,
+    remainingFiles: 3,
+    remainingBytes: 30,
+  });
+  expect(native.prepareSyncedBackgroundCacheForDownload).toHaveBeenCalledWith(keepUri);
+
+  for (const inconsistent of [
+    { withinQuota: true, remainingFiles: 256, remainingBytes: 30 },
+    { withinQuota: false, remainingFiles: 3, remainingBytes: 30 },
+  ]) {
+    native.prepareSyncedBackgroundCacheForDownload.mockResolvedValueOnce({
+      ok: true,
+      deletedFiles: 0,
+      deletedBytes: 0,
+      ...inconsistent,
+    });
+    await expect(prepareNativeSyncedBackgroundCacheForDownload(null)).rejects.toEqual(
+      expect.objectContaining<Partial<NativeBoundedDownloadError>>({ reason: 'unavailable' }),
+    );
+  }
+});
+
 it('delegates old-wallpaper deletion to the fixed native ownership boundary', async () => {
   const uri = 'file:///private/synced-backgrounds/generation-7/media-old.jpg';
 
@@ -302,6 +340,23 @@ it('accepts a temporary recent-file overage but rejects malformed prune statisti
   await expect(pruneNativeSyncedBackgroundCache(null)).rejects.toEqual(
     expect.objectContaining<Partial<NativeBoundedDownloadError>>({ reason: 'unavailable' }),
   );
+
+  for (const malformed of [
+    null,
+    {
+      ok: 'yes',
+      withinQuota: true,
+      deletedFiles: 0,
+      deletedBytes: 0,
+      remainingFiles: 0,
+      remainingBytes: 0,
+    },
+  ]) {
+    native.pruneSyncedBackgroundCache.mockResolvedValueOnce(malformed);
+    await expect(pruneNativeSyncedBackgroundCache(null)).rejects.toEqual(
+      expect.objectContaining<Partial<NativeBoundedDownloadError>>({ reason: 'unavailable' }),
+    );
+  }
 });
 
 it('stats only the exact attachment-cache URI and validates missing-file accounting', async () => {

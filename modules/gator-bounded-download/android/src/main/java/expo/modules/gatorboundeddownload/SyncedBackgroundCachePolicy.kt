@@ -6,14 +6,20 @@ import java.util.PriorityQueue
 internal const val SYNCED_BACKGROUND_CACHE_DIRECTORY = "synced-backgrounds"
 internal const val SYNCED_BACKGROUND_CACHE_MAX_BYTES = 100L * 1024 * 1024
 internal const val SYNCED_BACKGROUND_CACHE_MAX_FILES = 256
+internal const val SYNCED_BACKGROUND_DOWNLOAD_MAX_BYTES = 10L * 1024 * 1024
+internal const val SYNCED_BACKGROUND_CACHE_ADMISSION_MAX_BYTES =
+  SYNCED_BACKGROUND_CACHE_MAX_BYTES - SYNCED_BACKGROUND_DOWNLOAD_MAX_BYTES
+internal const val SYNCED_BACKGROUND_CACHE_ADMISSION_MAX_FILES =
+  SYNCED_BACKGROUND_CACHE_MAX_FILES - 1
+internal const val SYNCED_BACKGROUND_CACHE_SCAN_MAX_FILES = 8_192
+internal const val SYNCED_BACKGROUND_CACHE_SCAN_MAX_NODES = 32_768
 // Synced-background work is serialized in JavaScript. With no peer promotion in flight, native
 // pruning can enforce the budget immediately instead of retaining a rolling minute of new files.
 internal const val SYNCED_BACKGROUND_CACHE_RECENT_GRACE_MS = 0L
 
 private const val MAX_MEDIA_FILE_NAME_CHARS = 190
 private const val MAX_LEGACY_MEDIA_FILE_NAME_CHARS = 255
-private val GENERATION_DIRECTORY = Regex("^generation-\\d+$")
-private val MEDIA_FILE = Regex("^media-[^/]+\\.jpg$")
+private const val JS_MAX_SAFE_INTEGER = 9_007_199_254_740_991L
 // The pre-quota implementation wrote `<sanitized-guid>-<sanitized-channel>.jpg` directly in root.
 private val LEGACY_MEDIA_FILE = Regex("^[A-Za-z0-9._-]+\\.jpg$")
 
@@ -25,11 +31,27 @@ internal data class SyncedBackgroundPruneResult(
   val withinQuota: Boolean,
 )
 
+internal data class SyncedBackgroundCacheScanLimits(
+  val maxFiles: Int = SYNCED_BACKGROUND_CACHE_SCAN_MAX_FILES,
+  val maxNodes: Int = SYNCED_BACKGROUND_CACHE_SCAN_MAX_NODES,
+) {
+  init {
+    require(maxFiles > 0)
+    require(maxNodes >= maxFiles)
+  }
+}
+
 private data class CacheEntry(
   val file: File,
   val path: String,
   val bytes: Long,
   val modifiedAtMs: Long,
+)
+
+private data class StrictScanSummary(
+  val files: Long,
+  val bytes: Long,
+  val keepSeen: Boolean,
 )
 
 private val oldestFirst = Comparator<CacheEntry> { left, right ->
@@ -38,62 +60,65 @@ private val oldestFirst = Comparator<CacheEntry> { left, right ->
 }
 
 /**
- * Enforce one global cache budget without ever walking outside the owned root. Current files use
- * the exact generation/media two-level shape; canonical flat JPEGs are the one migration-only
- * exception because released builds wrote them directly in this same dedicated directory.
+ * Enforce one global cache budget without ever walking outside the owned root.
+ *
+ * Every pass streams directory entries through `DirectoryStream`, reads attributes without
+ * following links, and rejects unknown names/types or incomplete metadata. The first pass must
+ * finish before deletion starts. A final independent pass is the sole authority for the returned
+ * remaining counts and quota decision, so a failed delete or raced file cannot produce a false
+ * success.
  *
  * Only a bounded set of survivor metadata is retained. This intentionally favors recent files
  * over perfect byte-bin packing: it may evict an extra small old image, but memory stays bounded
  * by [maxFiles] even when an old app version left a very large cache behind.
- *
- * The optional recent grace exists for policy tests/alternate callers, but production uses the
- * pinned zero default because its promotion → DB commit → prune path is serialized. Partials live
- * in the separate cache/bounded-download-parts namespace and never match this shape.
  */
 internal fun pruneSyncedBackgroundCache(
   root: File,
+  fileSystem: AttachmentCacheFileSystem,
   keepFile: File? = null,
   nowMs: Long = System.currentTimeMillis(),
   maxBytes: Long = SYNCED_BACKGROUND_CACHE_MAX_BYTES,
   maxFiles: Int = SYNCED_BACKGROUND_CACHE_MAX_FILES,
   recentGraceMs: Long = SYNCED_BACKGROUND_CACHE_RECENT_GRACE_MS,
+  scanLimits: SyncedBackgroundCacheScanLimits = SyncedBackgroundCacheScanLimits(),
+  deleteFile: (File) -> Boolean = File::delete,
 ): SyncedBackgroundPruneResult {
   require(maxBytes > 0L)
   require(maxFiles > 0)
   require(recentGraceMs >= 0L)
 
-  val canonicalRoot = canonicalPlainRoot(root)
-  if (!canonicalRoot.exists()) {
-    return SyncedBackgroundPruneResult(0L, 0L, 0L, 0L, true)
-  }
-  require(canonicalRoot.isDirectory) { "Synced-background cache root is not a directory" }
-
   val keep = keepFile?.let { candidate ->
-    val canonicalCandidate = canonicalOwnedDescendant(
-      root,
-      canonicalRoot,
-      candidate,
-      "Synced-background keep file",
-    )
-    requireOwnedEntry(canonicalRoot, canonicalCandidate)
+    requireOwnedSyncedBackgroundRetirementPath(root, candidate)
   }
   val keepPath = keep?.path
-  val keepBytes = keep?.length()?.coerceAtLeast(0L) ?: 0L
+  val keepExpectedPresent = keep?.let { candidate ->
+    val node = inspectStrict(fileSystem, candidate, "synced-background keep file")
+    if (node == null) {
+      false
+    } else {
+      requireRegularFileNode(node, "Synced-background keep file")
+      true
+    }
+  } ?: false
   val recentCutoffMs = subtractSaturated(nowMs, recentGraceMs)
 
-  var reservedFiles = if (keep == null) 0L else 1L
-  var reservedBytes = keepBytes
+  var reservedFiles = 0L
+  var reservedBytes = 0L
   val selectedOld = PriorityQueue(oldestFirst)
   var selectedOldBytes = 0L
 
-  forEachOwnedEntry(canonicalRoot) { entry ->
-    if (entry.path == keepPath) return@forEachOwnedEntry
-    if (recentGraceMs > 0L && entry.modifiedAtMs >= recentCutoffMs) {
-      reservedFiles = addSaturated(reservedFiles, 1L)
-      reservedBytes = addSaturated(reservedBytes, entry.bytes)
+  val first = scanSyncedBackgroundCache(
+    root = root,
+    fileSystem = fileSystem,
+    keepPath = keepPath,
+    limits = scanLimits,
+  ) { entry ->
+    if (entry.path == keepPath || (recentGraceMs > 0L && entry.modifiedAtMs >= recentCutoffMs)) {
+      reservedFiles = checkedAdd(reservedFiles, 1L, "reserved file count")
+      reservedBytes = checkedAdd(reservedBytes, entry.bytes, "reserved byte count")
     } else {
       selectedOld.add(entry)
-      selectedOldBytes = addSaturated(selectedOldBytes, entry.bytes)
+      selectedOldBytes = checkedAdd(selectedOldBytes, entry.bytes, "survivor byte count")
     }
     selectedOldBytes = trimOldSurvivors(
       selectedOld,
@@ -104,41 +129,80 @@ internal fun pruneSyncedBackgroundCache(
       reservedBytes,
     )
   }
+  requireKeepConsistency(first, keepPath, keepExpectedPresent, "initial")
 
   val retainedOldPaths = HashSet<String>(selectedOld.size)
   selectedOld.forEach { entry -> retainedOldPaths.add(entry.path) }
 
   var deletedFiles = 0L
   var deletedBytes = 0L
-  forEachOwnedEntry(canonicalRoot) { entry ->
+  val deletion = scanSyncedBackgroundCache(
+    root = root,
+    fileSystem = fileSystem,
+    keepPath = keepPath,
+    limits = scanLimits,
+  ) { entry ->
     val protected = entry.path == keepPath ||
       (recentGraceMs > 0L && entry.modifiedAtMs >= recentCutoffMs) ||
       retainedOldPaths.contains(entry.path)
-    if (!protected && entry.file.delete()) {
-      deletedFiles = addSaturated(deletedFiles, 1L)
-      deletedBytes = addSaturated(deletedBytes, entry.bytes)
+    if (!protected) {
+      requireUnchangedRegularFile(fileSystem, entry)
+      val deleted = try {
+        deleteFile(entry.file)
+      } catch (problem: Exception) {
+        throw IllegalStateException("Synced-background cache file deletion failed", problem)
+      }
+      val afterDelete = inspectStrict(fileSystem, entry.file, "deleted synced-background file")
+      if (deleted) {
+        check(afterDelete == null) { "Synced-background cache file reappeared during deletion" }
+        deletedFiles = checkedAdd(deletedFiles, 1L, "deleted file count")
+        deletedBytes = checkedAdd(deletedBytes, entry.bytes, "deleted byte count")
+      } else {
+        check(afterDelete != null) { "Synced-background cache file disappeared during deletion" }
+        requireRegularFileNode(afterDelete, "Undeleted synced-background cache file")
+      }
     }
   }
+  requireKeepConsistency(deletion, keepPath, keepExpectedPresent, "deletion")
 
-  // Re-stat after deletion so failed deletes and alternate-caller concurrent promotions are
-  // reflected honestly. Production serialization makes its ordinary result a hard cap.
-  var remainingFiles = 0L
-  var remainingBytes = 0L
-  forEachOwnedEntry(canonicalRoot) { entry ->
-    remainingFiles = addSaturated(remainingFiles, 1L)
-    remainingBytes = addSaturated(remainingBytes, entry.bytes)
-  }
+  val final = scanSyncedBackgroundCache(
+    root = root,
+    fileSystem = fileSystem,
+    keepPath = keepPath,
+    limits = scanLimits,
+  ) { _ -> }
+  requireKeepConsistency(final, keepPath, keepExpectedPresent, "final")
 
   return SyncedBackgroundPruneResult(
     deletedFiles = deletedFiles,
     deletedBytes = deletedBytes,
-    remainingFiles = remainingFiles,
-    remainingBytes = remainingBytes,
-    withinQuota = remainingFiles <= maxFiles.toLong() && remainingBytes <= maxBytes,
+    remainingFiles = final.files,
+    remainingBytes = final.bytes,
+    withinQuota = final.files <= maxFiles.toLong() && final.bytes <= maxBytes,
   )
 }
 
-/** Return the raw absolute entry after proving its canonical path has the exact owned shape. */
+/** Prove fixed room for one maximum-size wallpaper before any new bytes are admitted. */
+internal fun prepareSyncedBackgroundCacheForDownload(
+  root: File,
+  fileSystem: AttachmentCacheFileSystem,
+  keepFile: File? = null,
+  nowMs: Long = System.currentTimeMillis(),
+  scanLimits: SyncedBackgroundCacheScanLimits = SyncedBackgroundCacheScanLimits(),
+  deleteFile: (File) -> Boolean = File::delete,
+): SyncedBackgroundPruneResult = pruneSyncedBackgroundCache(
+  root = root,
+  fileSystem = fileSystem,
+  keepFile = keepFile,
+  nowMs = nowMs,
+  maxBytes = SYNCED_BACKGROUND_CACHE_ADMISSION_MAX_BYTES,
+  maxFiles = SYNCED_BACKGROUND_CACHE_ADMISSION_MAX_FILES,
+  recentGraceMs = 0L,
+  scanLimits = scanLimits,
+  deleteFile = deleteFile,
+)
+
+/** Validate one exact current-layout entry; strict callers separately inspect its native type. */
 internal fun requireOwnedSyncedBackgroundEntry(root: File, candidate: File): File {
   val canonicalRoot = canonicalPlainRoot(root)
   val canonicalCandidate = canonicalOwnedDescendant(
@@ -147,16 +211,15 @@ internal fun requireOwnedSyncedBackgroundEntry(root: File, candidate: File): Fil
     candidate,
     "Synced-background file",
   )
-  requireOwnedEntry(canonicalRoot, canonicalCandidate)
+  requireCurrentSyncedBackgroundPath(canonicalRoot, canonicalCandidate)
   return candidate.absoluteFile
 }
 
 /**
  * Validate one current or legacy retirement path without requiring it to still exist.
  *
- * This is the ownership boundary for deleting a DB-referenced old wallpaper. It accepts only an
- * exact namespace path; the bridge separately requires a canonical file URI, checks that a
- * present target is a regular file, and performs a non-recursive file delete.
+ * This is the ownership boundary for deleting or protecting a DB-referenced old wallpaper. It
+ * accepts only an exact namespace path; bridge code separately requires a canonical file URI.
  */
 internal fun requireOwnedSyncedBackgroundRetirementPath(root: File, candidate: File): File {
   val canonicalRoot = canonicalPlainRoot(root)
@@ -170,16 +233,218 @@ internal fun requireOwnedSyncedBackgroundRetirementPath(root: File, candidate: F
     ?: throw IllegalArgumentException("Synced-background retirement path has no parent")
 
   val legacy =
-    parent.path == canonicalRoot.path &&
-      canonicalCandidate.name.length <= MAX_LEGACY_MEDIA_FILE_NAME_CHARS &&
-      LEGACY_MEDIA_FILE.matches(canonicalCandidate.name)
-  val current =
-    parent.parentFile?.path == canonicalRoot.path &&
-      GENERATION_DIRECTORY.matches(parent.name) &&
-      canonicalCandidate.name.length <= MAX_MEDIA_FILE_NAME_CHARS &&
-      MEDIA_FILE.matches(canonicalCandidate.name)
+    parent.path == canonicalRoot.path && isLegacySyncedBackgroundFileName(canonicalCandidate.name)
+  val current = isCurrentSyncedBackgroundPath(canonicalRoot, canonicalCandidate)
   require(current || legacy) { "Synced-background retirement path is outside the owned namespace" }
   return canonicalCandidate
+}
+
+private fun scanSyncedBackgroundCache(
+  root: File,
+  fileSystem: AttachmentCacheFileSystem,
+  keepPath: String?,
+  limits: SyncedBackgroundCacheScanLimits,
+  action: (CacheEntry) -> Unit,
+): StrictScanSummary {
+  val rootNode = inspectStrict(fileSystem, root, "synced-background cache root")
+    ?: return StrictScanSummary(0L, 0L, false)
+  requireDirectoryNode(rootNode, "Synced-background cache root")
+  val canonicalRoot = canonicalPlainRoot(root)
+
+  var totalNodes = 0
+  var totalFiles = 0L
+  var totalBytes = 0L
+  var keepSeen = false
+
+  fun recordNode() {
+    check(totalNodes < limits.maxNodes) { "Synced-background cache contains too many entries" }
+    totalNodes += 1
+  }
+
+  fun recordFile(entry: CacheEntry) {
+    check(totalFiles < limits.maxFiles.toLong()) {
+      "Synced-background cache contains too many files"
+    }
+    totalFiles = checkedAdd(totalFiles, 1L, "scanned file count")
+    totalBytes = checkedAdd(totalBytes, entry.bytes, "scanned byte count")
+    if (entry.path == keepPath) keepSeen = true
+    action(entry)
+  }
+
+  forEachDirectoryChild(fileSystem, root, "synced-background cache root") { child ->
+    recordNode()
+    requireDirectChild(root, child, "Synced-background cache root entry")
+    val node = inspectStrict(fileSystem, child, "synced-background cache root entry")
+      ?: throw IllegalStateException("Synced-background cache root entry disappeared during scan")
+    when (node.kind) {
+      AttachmentCacheNodeKind.REGULAR_FILE -> {
+        require(isLegacySyncedBackgroundFileName(child.name)) {
+          "Invalid legacy synced-background filename"
+        }
+        val owned = canonicalOwnedDescendant(
+          root,
+          canonicalRoot,
+          child,
+          "Legacy synced-background file",
+        )
+        require(owned.parentFile?.path == canonicalRoot.path) {
+          "Legacy synced-background file is outside the owned root"
+        }
+        requireRegularFileNode(node, "Legacy synced-background file")
+        recordFile(CacheEntry(owned, owned.path, node.bytes, node.modifiedAtMs))
+      }
+      AttachmentCacheNodeKind.DIRECTORY -> {
+        require(isCurrentSyncedBackgroundGeneration(child.name)) {
+          "Invalid synced-background generation directory"
+        }
+        val canonicalGeneration = canonicalOwnedDescendant(
+          root,
+          canonicalRoot,
+          child,
+          "Synced-background generation directory",
+        )
+        require(canonicalGeneration.parentFile?.path == canonicalRoot.path) {
+          "Synced-background generation is outside the owned root"
+        }
+        requireDirectoryNode(node, "Synced-background generation directory")
+        forEachDirectoryChild(fileSystem, child, "synced-background generation directory") { file ->
+          recordNode()
+          requireDirectChild(child, file, "Synced-background generation entry")
+          require(isCurrentSyncedBackgroundFileName(file.name)) {
+            "Invalid synced-background media filename"
+          }
+          val fileNode = inspectStrict(fileSystem, file, "synced-background media file")
+            ?: throw IllegalStateException("Synced-background media file disappeared during scan")
+          requireRegularFileNode(fileNode, "Synced-background media file")
+          val owned = canonicalOwnedDescendant(
+            root,
+            canonicalRoot,
+            file,
+            "Synced-background media file",
+          )
+          require(owned.parentFile?.path == canonicalGeneration.path) {
+            "Synced-background media file is outside the owned generation"
+          }
+          recordFile(CacheEntry(owned, owned.path, fileNode.bytes, fileNode.modifiedAtMs))
+        }
+        requireStableDirectory(
+          fileSystem,
+          root,
+          canonicalRoot,
+          child,
+          canonicalGeneration,
+          "Synced-background generation directory",
+        )
+      }
+      AttachmentCacheNodeKind.SYMLINK ->
+        throw IllegalStateException("Synced-background cache root entry is a symlink")
+      AttachmentCacheNodeKind.OTHER ->
+        throw IllegalStateException("Synced-background cache root entry type is invalid")
+    }
+  }
+
+  val finalRootNode = inspectStrict(fileSystem, root, "synced-background cache root")
+    ?: throw IllegalStateException("Synced-background cache root disappeared during scan")
+  requireDirectoryNode(finalRootNode, "Synced-background cache root")
+  check(canonicalPlainRoot(root).path == canonicalRoot.path) {
+    "Synced-background cache root changed during scan"
+  }
+  return StrictScanSummary(totalFiles, totalBytes, keepSeen)
+}
+
+private inline fun forEachDirectoryChild(
+  fileSystem: AttachmentCacheFileSystem,
+  directory: File,
+  label: String,
+  action: (File) -> Unit,
+) {
+  val cursor = try {
+    fileSystem.openDirectory(directory)
+  } catch (problem: Exception) {
+    throw IllegalStateException("$label could not be opened", problem)
+  }
+  try {
+    while (true) {
+      val child = try {
+        cursor.nextOrNull()
+      } catch (problem: Exception) {
+        throw IllegalStateException("$label could not be read", problem)
+      } ?: break
+      action(child)
+    }
+  } finally {
+    cursor.close()
+  }
+}
+
+private fun inspectStrict(
+  fileSystem: AttachmentCacheFileSystem,
+  file: File,
+  label: String,
+): AttachmentCacheNode? = try {
+  fileSystem.inspect(file)
+} catch (problem: Exception) {
+  throw IllegalStateException("$label metadata could not be read", problem)
+}
+
+private fun requireRegularFileNode(node: AttachmentCacheNode, label: String) {
+  require(node.kind == AttachmentCacheNodeKind.REGULAR_FILE) { "$label is not a plain file" }
+  require(node.bytes in 0L..JS_MAX_SAFE_INTEGER) { "$label size is invalid" }
+  require(node.modifiedAtMs in 0L..JS_MAX_SAFE_INTEGER) { "$label timestamp is invalid" }
+}
+
+private fun requireDirectoryNode(node: AttachmentCacheNode, label: String) {
+  require(node.kind == AttachmentCacheNodeKind.DIRECTORY) { "$label is not a plain directory" }
+  require(node.bytes in 0L..JS_MAX_SAFE_INTEGER) { "$label size is invalid" }
+  require(node.modifiedAtMs in 0L..JS_MAX_SAFE_INTEGER) { "$label timestamp is invalid" }
+}
+
+private fun requireUnchangedRegularFile(
+  fileSystem: AttachmentCacheFileSystem,
+  entry: CacheEntry,
+) {
+  val node = inspectStrict(fileSystem, entry.file, "synced-background deletion candidate")
+    ?: throw IllegalStateException("Synced-background deletion candidate disappeared")
+  requireRegularFileNode(node, "Synced-background deletion candidate")
+  check(node.bytes == entry.bytes && node.modifiedAtMs == entry.modifiedAtMs) {
+    "Synced-background deletion candidate changed during scan"
+  }
+}
+
+private fun requireStableDirectory(
+  fileSystem: AttachmentCacheFileSystem,
+  root: File,
+  canonicalRoot: File,
+  directory: File,
+  canonicalDirectory: File,
+  label: String,
+) {
+  val node = inspectStrict(fileSystem, directory, label)
+    ?: throw IllegalStateException("$label disappeared during scan")
+  requireDirectoryNode(node, label)
+  val resolved = canonicalOwnedDescendant(root, canonicalRoot, directory, label)
+  check(resolved.path == canonicalDirectory.path) { "$label changed during scan" }
+}
+
+private fun requireDirectChild(parent: File, child: File, label: String) {
+  val absolute = child.absoluteFile
+  require(absolute.path.length <= MAX_ATTACHMENT_CACHE_PATH_CHARS) { "$label path is too long" }
+  require(absolute.parentFile?.path == parent.absoluteFile.path) {
+    "$label is outside its fixed parent"
+  }
+}
+
+private fun requireKeepConsistency(
+  summary: StrictScanSummary,
+  keepPath: String?,
+  expectedPresent: Boolean,
+  pass: String,
+) {
+  if (keepPath != null) {
+    check(summary.keepSeen == expectedPresent) {
+      "Synced-background keep file changed during $pass scan"
+    }
+  }
 }
 
 private fun trimOldSurvivors(
@@ -200,87 +465,39 @@ private fun trimOldSurvivors(
   return selectedBytes
 }
 
-private inline fun forEachOwnedEntry(root: File, action: (CacheEntry) -> Unit) {
-  val rootEntries = root.listFiles()
-    ?: throw IllegalStateException("Synced-background cache root could not be listed")
-  rootEntries.forEach { generation ->
-    if (
-      generation.name.length <= MAX_LEGACY_MEDIA_FILE_NAME_CHARS &&
-      LEGACY_MEDIA_FILE.matches(generation.name)
-    ) {
-      val legacy = canonicalPlain(generation) ?: return@forEach
-      if (legacy.isFile && legacy.parentFile?.path == root.path) {
-        action(
-          CacheEntry(
-            file = legacy,
-            path = legacy.path,
-            bytes = legacy.length().coerceAtLeast(0L),
-            modifiedAtMs = legacy.lastModified(),
-          ),
-        )
-      }
-      return@forEach
-    }
-    if (!GENERATION_DIRECTORY.matches(generation.name)) return@forEach
-    val canonicalGeneration = canonicalPlain(generation) ?: return@forEach
-    if (!canonicalGeneration.isDirectory || canonicalGeneration.parentFile?.path != root.path) {
-      return@forEach
-    }
-    val children = canonicalGeneration.listFiles() ?: return@forEach
-    children.forEach childLoop@{ child ->
-      if (child.name.length > MAX_MEDIA_FILE_NAME_CHARS || !MEDIA_FILE.matches(child.name)) {
-        return@childLoop
-      }
-      val canonicalChild = canonicalPlain(child) ?: return@childLoop
-      if (!canonicalChild.isFile || canonicalChild.parentFile?.path != canonicalGeneration.path) {
-        return@childLoop
-      }
-      action(
-        CacheEntry(
-          file = canonicalChild,
-          path = canonicalChild.path,
-          bytes = canonicalChild.length().coerceAtLeast(0L),
-          modifiedAtMs = canonicalChild.lastModified(),
-        ),
-      )
-    }
+private fun isCurrentSyncedBackgroundPath(root: File, candidate: File): Boolean {
+  val generation = candidate.parentFile ?: return false
+  return generation.parentFile?.path == root.path &&
+    isCurrentSyncedBackgroundGeneration(generation.name) &&
+    isCurrentSyncedBackgroundFileName(candidate.name)
+}
+
+private fun requireCurrentSyncedBackgroundPath(root: File, candidate: File) {
+  require(isCurrentSyncedBackgroundPath(root, candidate)) {
+    "Invalid synced-background current-layout path"
   }
 }
 
-private fun requireOwnedEntry(root: File, candidate: File): File {
-  val generation = candidate.parentFile
-    ?: throw IllegalArgumentException("Synced-background file has no generation directory")
-  require(GENERATION_DIRECTORY.matches(generation.name)) {
-    "Invalid synced-background generation directory"
-  }
-  require(candidate.name.length <= MAX_MEDIA_FILE_NAME_CHARS && MEDIA_FILE.matches(candidate.name)) {
-    "Invalid synced-background media filename"
-  }
+private fun isCurrentSyncedBackgroundGeneration(value: String): Boolean =
+  value != "generation-unscoped" && isAttachmentCacheGenerationSegment(value)
 
-  val canonicalGeneration = canonicalPlain(generation)
-    ?: throw IllegalArgumentException("Synced-background generation is not canonical")
-  require(canonicalGeneration.isDirectory && canonicalGeneration.parentFile?.path == root.path) {
-    "Synced-background generation is outside the owned root"
+private fun isCurrentSyncedBackgroundFileName(value: String): Boolean =
+  value.length <= MAX_MEDIA_FILE_NAME_CHARS &&
+    value.endsWith(".jpg") &&
+    isEncodedMediaSegment(value.dropLast(4))
+
+private fun isLegacySyncedBackgroundFileName(value: String): Boolean =
+  value.length <= MAX_LEGACY_MEDIA_FILE_NAME_CHARS && LEGACY_MEDIA_FILE.matches(value)
+
+private fun canonicalPlainRoot(root: File): File =
+  canonicalOwnedRoot(root, "Synced-background cache root")
+
+private fun checkedAdd(left: Long, right: Long, label: String): Long {
+  require(left >= 0L && right >= 0L && left <= JS_MAX_SAFE_INTEGER - right) {
+    "Synced-background $label overflowed"
   }
-  val canonicalCandidate = canonicalPlain(candidate)
-    ?: throw IllegalArgumentException("Synced-background file is not canonical")
-  require(canonicalCandidate.isFile && canonicalCandidate.parentFile?.path == canonicalGeneration.path) {
-    "Synced-background file is outside the owned generation"
-  }
-  return canonicalCandidate
+  return left + right
 }
-
-private fun canonicalPlainRoot(root: File): File {
-  return canonicalOwnedRoot(root, "Synced-background cache root")
-}
-
-/** Reject symlinks and path aliases rather than following them during cache deletion. */
-private fun canonicalPlain(file: File): File? = runCatching {
-  file.canonicalFile.takeIf { canonical -> canonical.path == file.absoluteFile.path }
-}.getOrNull()
-
-private fun addSaturated(left: Long, right: Long): Long =
-  if (right > 0L && left > Long.MAX_VALUE - right) Long.MAX_VALUE else left + right
 
 private fun subtractSaturated(left: Long, right: Long): Long =
   if (right > 0L && left < Long.MIN_VALUE + right) Long.MIN_VALUE else left - right

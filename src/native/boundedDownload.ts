@@ -88,6 +88,9 @@ interface GatorBoundedDownloadNative {
     maxImagePixels: number,
   ): Promise<NativeDownloadResult>;
   pruneSyncedBackgroundCache(keepUri: string | null): Promise<NativeSyncedBackgroundPruneResult>;
+  prepareSyncedBackgroundCacheForDownload(
+    keepUri: string | null,
+  ): Promise<NativeSyncedBackgroundPruneResult>;
   deleteSyncedBackgroundCacheFile(uri: string): Promise<boolean>;
   statAttachmentCacheFile(uri: string): Promise<NativeAttachmentCacheStatResult>;
   deleteAttachmentCacheFile(uri: string): Promise<NativeAttachmentCacheDeleteResult>;
@@ -131,6 +134,34 @@ export interface SyncedBackgroundPruneResult {
   readonly deletedBytes: number;
   readonly remainingFiles: number;
   readonly remainingBytes: number;
+}
+
+const SYNCED_BACKGROUND_ADMISSION_MAX_BYTES = 90 * 1024 * 1024;
+const SYNCED_BACKGROUND_ADMISSION_MAX_FILES = 255;
+
+function parseSyncedBackgroundPruneResult(
+  result: NativeSyncedBackgroundPruneResult | null | undefined,
+): SyncedBackgroundPruneResult {
+  if (result?.ok !== true || typeof result.withinQuota !== 'boolean') {
+    throw new NativeBoundedDownloadError('unavailable');
+  }
+  const stats = [
+    result.deletedFiles,
+    result.deletedBytes,
+    result.remainingFiles,
+    result.remainingBytes,
+  ];
+  if (stats.some((value) => !Number.isSafeInteger(value) || (value ?? -1) < 0)) {
+    throw new NativeBoundedDownloadError('unavailable');
+  }
+
+  return {
+    withinQuota: result.withinQuota,
+    deletedFiles: result.deletedFiles!,
+    deletedBytes: result.deletedBytes!,
+    remainingFiles: result.remainingFiles!,
+    remainingBytes: result.remainingBytes!,
+  };
 }
 
 export interface AttachmentCacheFileStat {
@@ -252,29 +283,30 @@ export async function pruneNativeSyncedBackgroundCache(
 ): Promise<SyncedBackgroundPruneResult> {
   const native = getNative();
   if (!native) throw new NativeBoundedDownloadError('unavailable');
+  return parseSyncedBackgroundPruneResult(await native.pruneSyncedBackgroundCache(keepUri));
+}
 
-  const result = await native.pruneSyncedBackgroundCache(keepUri);
-  const stats = [
-    result.deletedFiles,
-    result.deletedBytes,
-    result.remainingFiles,
-    result.remainingBytes,
-  ];
-  if (
-    !result.ok ||
-    typeof result.withinQuota !== 'boolean' ||
-    stats.some((value) => !Number.isSafeInteger(value) || (value ?? -1) < 0)
-  ) {
+/**
+ * Prove fixed native headroom for one maximum-size synced wallpaper before downloading it.
+ *
+ * Android owns the root and the 90 MiB / 255-file admission thresholds. JavaScript supplies only
+ * the currently referenced wallpaper URI so cleanup cannot evict it before replacement commits.
+ */
+export async function prepareNativeSyncedBackgroundCacheForDownload(
+  keepUri: string | null,
+): Promise<SyncedBackgroundPruneResult> {
+  const native = getNative();
+  if (!native) throw new NativeBoundedDownloadError('unavailable');
+  const parsed = parseSyncedBackgroundPruneResult(
+    await native.prepareSyncedBackgroundCacheForDownload(keepUri),
+  );
+  const statsAreWithinAdmissionLimit =
+    parsed.remainingBytes <= SYNCED_BACKGROUND_ADMISSION_MAX_BYTES &&
+    parsed.remainingFiles <= SYNCED_BACKGROUND_ADMISSION_MAX_FILES;
+  if (parsed.withinQuota !== statsAreWithinAdmissionLimit) {
     throw new NativeBoundedDownloadError('unavailable');
   }
-
-  return {
-    withinQuota: result.withinQuota,
-    deletedFiles: result.deletedFiles!,
-    deletedBytes: result.deletedBytes!,
-    remainingFiles: result.remainingFiles!,
-    remainingBytes: result.remainingBytes!,
-  };
+  return parsed;
 }
 
 /** Delete one exact current/legacy wallpaper through Android's fixed, canonical namespace gate. */

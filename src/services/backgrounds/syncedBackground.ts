@@ -14,6 +14,7 @@ import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import {
   deleteNativeSyncedBackgroundCacheFile,
+  prepareNativeSyncedBackgroundCacheForDownload,
   pruneNativeSyncedBackgroundCache,
 } from '@native/boundedDownload';
 import type { HttpClient } from '@core/api';
@@ -306,6 +307,15 @@ async function runSyncedBackgroundRequest(
 
     let effectiveUri = state?.uri ?? null;
     if (!alreadyCurrent) {
+      // Establish fixed native headroom before the transfer. The current DB-referenced wallpaper
+      // stays protected, and a failed/partial cleanup refuses new bytes instead of relying on a
+      // best-effort post-commit prune to restore the hard global ceiling.
+      const admission = await prepareNativeSyncedBackgroundCacheForDownload(state?.uri ?? null);
+      if (!ownsRequest()) return;
+      if (!admission.withinQuota) {
+        logger.warn('[background] synced-background cache admission unavailable');
+        return;
+      }
       dir.create({ intermediates: true, idempotent: true });
       if (dest.exists && !isReusableBackground(dest)) deleteOwnedFile(dest);
       if (!dest.exists) {

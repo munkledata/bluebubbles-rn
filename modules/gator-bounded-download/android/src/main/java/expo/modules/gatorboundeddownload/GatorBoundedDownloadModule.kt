@@ -120,12 +120,29 @@ class GatorBoundedDownloadModule : Module() {
     AsyncFunction("pruneSyncedBackgroundCache") { keepUri: String? ->
       val context = appContext.reactContext
         ?: throw IllegalStateException("Android context is unavailable")
+      requireBoundedDirectoryStreamSupport()
       // The root is fixed natively: JavaScript cannot redirect this deletion primitive to another
-      // app-private directory. A non-null keep URI must resolve to one exact owned media entry.
+      // app-private directory. Construct API-26 NIO only after the explicit version gate.
       val root = File(context.filesDir, SYNCED_BACKGROUND_CACHE_DIRECTORY)
-      val keep = keepUri?.let { raw -> ownedSyncedBackgroundCacheEntry(root, raw) }
+      val fileSystem = newBoundedDirectoryStreamFileSystem()
       val result = synchronized(syncedBackgroundPruneLock) {
-        pruneSyncedBackgroundCache(root, keep)
+        val keep = keepUri?.let { raw -> ownedSyncedBackgroundRetirementFile(root, raw) }
+        pruneSyncedBackgroundCache(root, fileSystem, keep)
+      }
+      pruneOutcome(result)
+    }.runOnQueue(appContext.backgroundCoroutineScope)
+
+    AsyncFunction("prepareSyncedBackgroundCacheForDownload") { keepUri: String? ->
+      val context = appContext.reactContext
+        ?: throw IllegalStateException("Android context is unavailable")
+      requireBoundedDirectoryStreamSupport()
+      // This separate fixed policy leaves room for one maximum-size incoming wallpaper. The
+      // optional current URI may use either the generation layout or the released legacy layout.
+      val root = File(context.filesDir, SYNCED_BACKGROUND_CACHE_DIRECTORY)
+      val fileSystem = newBoundedDirectoryStreamFileSystem()
+      val result = synchronized(syncedBackgroundPruneLock) {
+        val keep = keepUri?.let { raw -> ownedSyncedBackgroundRetirementFile(root, raw) }
+        prepareSyncedBackgroundCacheForDownload(root, fileSystem, keep)
       }
       pruneOutcome(result)
     }.runOnQueue(appContext.backgroundCoroutineScope)
@@ -473,14 +490,6 @@ class GatorBoundedDownloadModule : Module() {
     return destination
   }
 
-  /** Accept only one canonical generation-N/media-*.jpg entry under the fixed cache root. */
-  private fun ownedSyncedBackgroundCacheEntry(root: File, rawUri: String): File {
-    val uri = Uri.parse(rawUri)
-    require(uri.scheme == "file") { "Invalid synced-background cache URI" }
-    val rawPath = uri.path ?: throw IllegalArgumentException("Missing synced-background path")
-    return requireOwnedSyncedBackgroundEntry(root, File(rawPath))
-  }
-
   /**
    * Resolve a DB-provided old-wallpaper URI without allowing URL normalization to change its
    * meaning. Exact round-tripping rejects encoded separators, fragments, queries, authorities,
@@ -496,11 +505,13 @@ class GatorBoundedDownloadModule : Module() {
     ) { "Invalid synced-background retirement URI" }
     val rawPath = uri.path ?: throw IllegalArgumentException("Missing synced-background path")
     val rawTarget = File(rawPath).absoluteFile
-    val target = requireOwnedSyncedBackgroundRetirementPath(root, rawTarget)
+    requireOwnedSyncedBackgroundRetirementPath(root, rawTarget)
     require(Uri.fromFile(rawTarget).toString() == rawUri) {
       "Synced-background retirement URI is not canonical"
     }
-    return target
+    // Preserve the native filesDir spelling. Its trusted ancestor can be an OS alias, and the
+    // strict policy resolves that spelling under the same root while performing its NOFOLLOW scan.
+    return rawTarget
   }
 
   /** Resolve only an exact canonical file URI beneath the native-fixed attachment cache root. */
@@ -563,23 +574,27 @@ class GatorBoundedDownloadModule : Module() {
 
   /**
    * Android's streaming `DirectoryStream` API begins at API 26. Falling back to `File.listFiles`
-   * on API 24/25 would allocate an attacker-amplifiable array before the native page cap applies,
-   * so those versions fail closed instead.
+   * on API 24/25 would allocate an attacker-amplifiable array before a native scan cap applies, so
+   * bounded persistent-cache scans fail closed instead.
    */
   private fun requireBoundedDirectoryStreamSupport() {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
       throw UnsupportedOperationException(
-        "Bounded attachment cache scanning requires Android 8.0 or newer",
+        "Bounded persistent-cache scanning requires Android 8.0 or newer",
       )
     }
   }
+
+  @Suppress("NewApi")
+  private fun newBoundedDirectoryStreamFileSystem(): AttachmentCacheFileSystem =
+    NioAttachmentCacheFileSystem()
 
   @Suppress("NewApi")
   private fun getAttachmentCacheScanManager(): AttachmentCacheScanManager {
     attachmentCacheScanManager?.let { return it }
     return AttachmentCacheScanManager(
       root = File(appContext.persistentFilesDirectory, ATTACHMENT_CACHE_DIRECTORY),
-      fileSystem = NioAttachmentCacheFileSystem(),
+      fileSystem = newBoundedDirectoryStreamFileSystem(),
       nowMs = SystemClock::elapsedRealtime,
     ).also { manager -> attachmentCacheScanManager = manager }
   }

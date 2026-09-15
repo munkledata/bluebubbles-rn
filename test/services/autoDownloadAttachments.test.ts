@@ -215,6 +215,73 @@ describe('autoDownloadMessageAttachments', () => {
     expect(outcome).toEqual({ savedImages: 0, destination: null });
   });
 
+  it.each([
+    [
+      'the bounded receipt queue rejects it',
+      () => mockEnqueueExport.mockResolvedValueOnce({ status: 'capacity-rejected' }),
+    ],
+    [
+      'the receipt write fails',
+      () => mockEnqueueExport.mockRejectedValueOnce(new Error('receipt unavailable')),
+    ],
+    [
+      'the attachment is no longer eligible',
+      () => mockEnqueueExport.mockResolvedValueOnce({ status: 'ineligible' }),
+    ],
+    [
+      'the prior receipt is terminal',
+      () =>
+        mockEnqueueExport.mockResolvedValueOnce({
+          status: 'duplicate',
+          id: 1,
+          state: 'terminal',
+          destination: 'album',
+        }),
+    ],
+    [
+      'the prior receipt belongs to another destination',
+      () =>
+        mockEnqueueExport.mockResolvedValueOnce({
+          status: 'duplicate',
+          id: 1,
+          state: 'pending',
+          destination: 'gallery',
+        }),
+    ],
+  ])('does not start an external-destination download when %s', async (_reason, failReceipt) => {
+    useFeatureSettingsStore.setState({ autoDownloadDestination: 'album' });
+    mockList.mockResolvedValue(new Map([[1, [imageRow()]]]));
+    failReceipt();
+
+    await expect(autoDownloadMessageAttachments(db, 1)).resolves.toEqual({
+      savedImages: 0,
+      destination: null,
+    });
+
+    expect(mockEnqueueExport).toHaveBeenCalledTimes(1);
+    expect(mockDownload).not.toHaveBeenCalled();
+    expect(mockFulfillExport).not.toHaveBeenCalled();
+  });
+
+  it('re-caches after a completed same-destination export without exporting it twice', async () => {
+    useFeatureSettingsStore.setState({ autoDownloadDestination: 'album' });
+    mockList.mockResolvedValue(new Map([[1, [imageRow()]]]));
+    mockEnqueueExport.mockResolvedValueOnce({
+      status: 'duplicate',
+      id: 1,
+      state: 'completed',
+      destination: 'album',
+    });
+
+    await expect(autoDownloadMessageAttachments(db, 1)).resolves.toEqual({
+      savedImages: 0,
+      destination: null,
+    });
+
+    expect(mockDownload).toHaveBeenCalledTimes(1);
+    expect(mockFulfillExport).not.toHaveBeenCalled();
+  });
+
   it('recovers a fresh killed-process cache before starting its task-local download', async () => {
     const taskHttp = { task: 'http' };
     const taskLease = { generation: 73, isCurrent: () => true };

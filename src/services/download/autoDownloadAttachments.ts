@@ -131,10 +131,12 @@ export async function autoDownloadMessageAttachments(
       if (!lease.isCurrent()) return NO_SAVED_IMAGES;
       if (actualDownloadedBytes >= MAX_AUTO_DOWNLOAD_BYTES_PER_MESSAGE) break;
       let exportPending = false;
+      let downloadAllowed = true;
       // Persist the destination-bound intent BEFORE native download work. A killed/background
       // delivery can then finish with only attachments.local_path committed; the next unlocked
       // foreground activation will still discover and fulfill the outside Photos copy.
       if (galleryDestination !== null && !att.isSticker) {
+        downloadAllowed = false;
         try {
           const receipt = await enqueueAttachmentMediaExport(
             db,
@@ -146,11 +148,21 @@ export async function autoDownloadMessageAttachments(
             (receipt.status === 'duplicate' &&
               receipt.state === 'pending' &&
               receipt.destination === galleryDestination);
+          downloadAllowed =
+            exportPending ||
+            (receipt.status === 'duplicate' &&
+              receipt.state === 'completed' &&
+              receipt.destination === galleryDestination);
         } catch (error) {
           if (lease.isCurrent()) {
             logger.debug('[autoDownload] media export receipt unavailable', error);
           }
         }
+        // The external destination is part of the user's selected behavior. If its durable
+        // receipt cannot be secured, do not create an app-cache-only result that has no later
+        // Gallery/Album retry path. Queue capacity is intentionally bounded; the user can still
+        // download the attachment manually.
+        if (!downloadAllowed) continue;
       }
       if (!lease.isCurrent()) return NO_SAVED_IMAGES;
       const remainingBytes = MAX_AUTO_DOWNLOAD_BYTES_PER_MESSAGE - actualDownloadedBytes;

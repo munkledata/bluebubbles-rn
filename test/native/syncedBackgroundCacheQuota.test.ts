@@ -33,13 +33,34 @@ describe('synced-background global disk quota contract', () => {
     expect(bridge).not.toMatch(/rootUri|maxBytesValue|maxFilesValue/);
   });
 
-  it('recognizes canonical current and legacy media JPEGs and never recursively deletes', () => {
-    expect(policySource).toContain('Regex("^generation-\\\\d+$")');
-    expect(policySource).toContain('Regex("^media-[^/]+\\\\.jpg$")');
+  it('strictly streams canonical current and legacy media JPEGs without recursive deletion', () => {
+    expect(policySource).toContain('isAttachmentCacheGenerationSegment(value)');
+    expect(policySource).toContain('isEncodedMediaSegment(value.dropLast(4))');
     expect(policySource).toContain('Regex("^[A-Za-z0-9._-]+\\\\.jpg$")');
-    expect(policySource).toMatch(/canonical\.path == file\.absoluteFile\.path/);
-    expect(policySource).toMatch(/canonicalChild\.parentFile\?\.path != canonicalGeneration\.path/);
+    expect(policySource).toContain('fileSystem.openDirectory(directory)');
+    expect(policySource).toContain('fileSystem.inspect(file)');
+    expect(policySource).toContain('requireKeepConsistency(final');
+    expect(policySource).not.toMatch(/listFiles\(/);
     expect(policySource).not.toMatch(/deleteRecursively|walkTopDown|walkBottomUp/);
+  });
+
+  it('guards API-26 directory streaming before constructing it for prune and admission', () => {
+    const pruneBridge = moduleSource.slice(
+      moduleSource.indexOf('AsyncFunction("pruneSyncedBackgroundCache")'),
+      moduleSource.indexOf('AsyncFunction("prepareSyncedBackgroundCacheForDownload")'),
+    );
+    const admissionBridge = moduleSource.slice(
+      moduleSource.indexOf('AsyncFunction("prepareSyncedBackgroundCacheForDownload")'),
+      moduleSource.indexOf('AsyncFunction("deleteSyncedBackgroundCacheFile")'),
+    );
+    for (const bridge of [pruneBridge, admissionBridge]) {
+      expect(bridge).toMatch(
+        /requireBoundedDirectoryStreamSupport\(\)[\s\S]*newBoundedDirectoryStreamFileSystem\(\)/,
+      );
+      expect(bridge.indexOf('requireBoundedDirectoryStreamSupport()')).toBeLessThan(
+        bridge.indexOf('newBoundedDirectoryStreamFileSystem()'),
+      );
+    }
   });
 
   it('keeps survivor metadata bounded and serializes service work for an immediate hard cap', () => {

@@ -14,8 +14,18 @@ const mockPruneNativeCache = jest.fn(async () => {
     remainingBytes: 0,
   };
 });
+const mockPrepareNativeCache = jest.fn(async () => {
+  mockNativeStates.push({ effect: 'prepare', inTransaction: mockIsInTransaction() });
+  return {
+    withinQuota: true,
+    deletedFiles: 0,
+    deletedBytes: 0,
+    remainingFiles: 0,
+    remainingBytes: 0,
+  };
+});
 const mockFileBytes = new Map<string, number>();
-const mockNativeStates: Array<{ effect: string; inTransaction: boolean }> = [];
+const mockNativeStates: { effect: string; inTransaction: boolean }[] = [];
 let mockIsInTransaction = (): boolean => false;
 
 const mockDownloadBoundedNativeFile = jest.fn(
@@ -43,6 +53,7 @@ jest.mock('@core/api', () => ({
 
 jest.mock('@native/boundedDownload', () => ({
   deleteNativeSyncedBackgroundCacheFile: mockDeleteNativeFile,
+  prepareNativeSyncedBackgroundCacheForDownload: mockPrepareNativeCache,
   pruneNativeSyncedBackgroundCache: mockPruneNativeCache,
 }));
 
@@ -68,7 +79,7 @@ jest.mock('expo-file-system', () => ({
   Directory: class {
     readonly uri: string;
 
-    constructor(...parts: Array<string | { uri: string }>) {
+    constructor(...parts: (string | { uri: string })[]) {
       const [first, ...rest] = parts.map((part) => (typeof part === 'string' ? part : part.uri));
       this.uri = `${first?.replace(/\/$/, '') ?? ''}/${rest.join('/')}`;
     }
@@ -231,6 +242,30 @@ describe('synced-background guarded settlements', () => {
     } finally {
       raw.exec('DROP TRIGGER IF EXISTS retire_synced_background_promotion');
     }
+  });
+
+  it('refuses a new wallpaper when native cleanup cannot prove admission headroom', async () => {
+    const previous = '/documents/synced-backgrounds/generation-70/media-old.jpg';
+    mockFileBytes.set(previous, 10);
+    await seedChat(db, 'CH-1', previous);
+    mockPrepareNativeCache.mockResolvedValueOnce({
+      withinQuota: false,
+      deletedFiles: 0,
+      deletedBytes: 0,
+      remainingFiles: 256,
+      remainingBytes: 100 * 1024 * 1024,
+    });
+
+    await ensureSyncedBackground(http, db, 'g1', lease(71).context);
+
+    expect(mockPrepareNativeCache).toHaveBeenCalledWith(previous);
+    expect(mockDownloadBoundedNativeFile).not.toHaveBeenCalled();
+    expect(await getSyncedBackgroundState(db, 'g1')).toEqual({
+      channel: 'CH-1',
+      uri: previous,
+    });
+    expect(mockFileBytes.has(previous)).toBe(true);
+    expect(mockNativeStates.every((state) => !state.inTransaction)).toBe(true);
   });
 
   it('retains the old pointer and file when guarded removal rolls back, then clears both on retry', async () => {
