@@ -14,8 +14,8 @@ interface FaceTimeOpenOperation {
 }
 
 /**
- * Safe FaceTime handoff for an active call. The embedded WebView is deliberately disabled while
- * FACE-01 is open: it granted camera/microphone access while allowing broad navigation. The link
+ * Safe FaceTime handoff for an active call. The embedded WebView remains deliberately disabled;
+ * POST-FACE-01 defers reconsidering that unreliable experience until after remediation. The link
  * has already passed the FaceTime allowlist before entering the store, and the system browser owns
  * its navigation and media permission prompts.
  */

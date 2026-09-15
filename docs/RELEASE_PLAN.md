@@ -3,7 +3,7 @@
 > **Status:** ACTIVE — created 2026-09-13.
 >
 > **Authority:** This document is the only task-status authority for `RELEASE-01`, `STORE-01`,
-> `RELEASE-02`, and `RELEASE-GATE-01`. The remediation tracker remains authoritative for its 110
+> `RELEASE-02`, and `RELEASE-GATE-01`. The remediation tracker remains authoritative for its 109
 > engineering, security, privacy, feature, and device-proof tasks.
 
 This plan separates release operations from remediation work. It tracks how a reviewed build is

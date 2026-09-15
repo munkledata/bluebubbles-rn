@@ -7,7 +7,7 @@
  *     (always present);
  *   - pressing End calls the store's `close`, clearing the call so the overlay disappears;
  *   - the release-safe external-browser action opens the call's validated link via safeOpenUrl;
- *   - no embedded WebView path is mounted while FACE-01 is open.
+ *   - no embedded WebView path is mounted; POST-FACE-01 defers reconsidering that experience.
  *
  * In-file mock: `react-native-safe-area-context` — the overlay calls useSafeAreaInsets; zero insets.
  */

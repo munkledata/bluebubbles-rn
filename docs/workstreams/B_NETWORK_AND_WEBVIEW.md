@@ -1,8 +1,9 @@
 # Workstream B — network and WebView trust boundaries
 
 > **Document role:** This file owns stable implementation design and sequencing for Workstream B.
-> It never owns task status, dates, owners, blockers, or completion evidence. Those remain only in
-> [`WORK_PLAN_2026-08-03.md`](../WORK_PLAN_2026-08-03.md), the authoritative tracker.
+> It never owns task status, dates, owners, blockers, or completion evidence. Active remediation
+> status remains in [`WORK_PLAN_2026-08-03.md`](../WORK_PLAN_2026-08-03.md); explicitly deferred
+> future product status remains in [`POST_REMEDIATION_PLAN.md`](../POST_REMEDIATION_PLAN.md).
 
 Workstream B treats URLs, DNS answers, redirects, embedded documents, server-rotation instructions,
 and certificate policy as separate attacker-controlled boundaries. Validation must happen before
@@ -89,13 +90,17 @@ protected tree, no valid marker exists, or the account has been torn down.
 
 <a id="face-01"></a>
 
-## `FACE-01` — FaceTime WebView policy
+## `FACE-01` / `POST-FACE-01` — deferred FaceTime WebView policy
 
-Reuse the `WEB-02` navigation primitives for any embedded FaceTime path. Enumerate exact required
-Apple HTTPS origins without a broad wildcard, and block or externally open every other destination.
-Compare the requesting origin before each camera or microphone grant, and deny popups and new
-windows. A prior Android permission grant must never become media access for an attacker-controlled
-origin.
+`FACE-01` left the active remediation inventory on 2026-09-14 because the embedded experience never
+worked reliably. [`POST-FACE-01`](../POST_REMEDIATION_PLAN.md#post-face-01) is the future status
+authority; the validated system-browser handoff remains the current product behavior.
+
+If the owner later selects a new embedded design, reuse the `WEB-02` navigation primitives. Enumerate
+exact required Apple HTTPS origins without a broad wildcard, and block or externally open every
+other destination. Compare the requesting origin before each camera or microphone grant, and deny
+popups and new windows. A prior Android permission grant must never become media access for an
+attacker-controlled origin.
 
 <a id="rt-01a"></a>
 
@@ -176,7 +181,8 @@ arbitrary self-signed leaf.
    mount—in force while `NET-01A..D` are designed and implemented.
 2. For an embedded map, apply `WEB-01`, then `WEB-02`, then `WEB-03`; keep the selected native path
    free of every generated-document/WebView surface and complete provider privacy/device evidence.
-   `FACE-01` reuses only WebView-specific navigation primitives if that conditional path returns.
+   `POST-FACE-01` reuses only WebView-specific navigation primitives if the owner later selects that
+   post-remediation path.
 3. Complete `RT-01A` client containment before relying on lifecycle application or considering the
    cross-repository `RT-01B` protocol.
 4. Decide `TLS-00` before selecting the `TLS-01A` removal branch or the `TLS-01B` fail-closed branch;

@@ -77,8 +77,8 @@ smoke surface for each critical boundary. The Maps boundary also requires a clea
 provider-key injection, merged/AAB metadata proof, and physical rendering/fallback checks.
 
 Keep `expo-share-intent` and direct `react-native-webview` absent while their product surfaces remain
-disabled. Reintroducing the community WebView requires reopening the applicable `WEB-01..03` or
-`FACE-01` path, selecting an exact pin, and supplying native/device proof. Expo's separate transitive
+disabled. Reintroducing the community WebView requires reopening the applicable `WEB-01..03` path or
+starting `POST-FACE-01`, selecting an exact pin, and supplying native/device proof. Expo's separate transitive
 `@expo/dom-webview` module is framework-owned and does not authorize a reachable embedded surface.
 Routine installation must not silently select a new native bridge implementation.
 
