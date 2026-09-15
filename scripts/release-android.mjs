@@ -1206,6 +1206,10 @@ async function build(options) {
     let buildArtifact = null;
     try {
       outcome = await withWorktree(state, { applyPreparedPatch: true }, async (worktree) => {
+        // EAS resolves app.config.ts and local config plugins before its local builder installs
+        // project dependencies. Install the exact lockfile first so config resolution uses the
+        // same patched dependency tree as CI.
+        runCapture('npm', ['ci'], { cwd: worktree });
         const stagedGoogleServices = stageGoogleServicesFile(worktree, googleServices);
         const environment = createAndroidReleaseBuildEnvironment(process.env, nativeWorkspace);
         Object.assign(environment, {

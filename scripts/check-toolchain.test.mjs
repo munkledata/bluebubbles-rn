@@ -773,6 +773,11 @@ test('pins retained native-build evidence and rejects ambient EAS bypass control
 
   for (const [expected, replacement, errorMarker] of [
     [
+      "runCapture('npm', ['ci'], { cwd: worktree });",
+      "runCapture('npm', ['--version'], { cwd: worktree });",
+      'install the exact patched project dependencies',
+    ],
+    [
       "EAS_LOCAL_BUILD_SKIP_CLEANUP: '1'",
       "EAS_LOCAL_BUILD_SKIP_CLEANUP: '0'",
       'retain the run-owned EAS workspace',

@@ -180,6 +180,10 @@ export function validateReleaseRunnerSource(source) {
   }
   for (const [marker, requirement] of [
     [
+      "runCapture('npm', ['ci'], { cwd: worktree });",
+      'install the exact patched project dependencies before EAS resolves config plugins',
+    ],
+    [
       "EAS_LOCAL_BUILD_SKIP_CLEANUP: '1'",
       'retain the run-owned EAS workspace for native-path proof',
     ],
