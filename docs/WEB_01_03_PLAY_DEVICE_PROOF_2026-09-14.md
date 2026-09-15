@@ -1,13 +1,12 @@
-# WEB-01..03 native Find My map — Play v65 device proof
+# WEB-01..03 native Find My map — Play v65/v66 device proof
 
-> **Evidence class:** frozen-source, production-signed Google Play Internal candidate plus an
-> isolated synthetic server fixture on 2026-09-14.
+> **Evidence class:** frozen-source, production-signed Google Play Internal candidates plus
+> isolated synthetic server fixtures on 2026-09-14.
 >
-> **Disposition:** this closes `WEB-01`. It advances `WEB-02` and `WEB-03`, but those items remain
-> **IN_PROGRESS** for the human-only App Lock, TalkBack, Play Data Safety, and owner/legal gates
-> listed below.
+> **Disposition:** this closes `WEB-01` and `WEB-02`. `WEB-03` remains **IN_PROGRESS** for the
+> human-only TalkBack, Play Data Safety, and owner/legal gates listed below.
 
-## Candidate identity
+## Play v65 candidate identity
 
 - App source: `edc1888fc7c618ba50564c6c31189dcf4483f0fb`; release commit:
   `560be51865cbaef48cc24f7cbbc40156f7904f50`; run:
@@ -29,7 +28,7 @@ The first local build attempt is retained as a terminal failure and receives no 
 failed before compilation because the clean worktree had no `node_modules`. The successful run used
 the pinned Node 24/npm/EAS toolchain after a clean `npm ci`.
 
-## Isolated fixture
+## Play v65 isolated fixture
 
 - The approved fixture SHA-256 was
   `8fdaf9446b32cc3b5e4b320aef5a8bdd66dfaabe1b9996e98f605a4dd5500fd2`.
@@ -38,7 +37,7 @@ the pinned Node 24/npm/EAS toolchain after a clean `npm ci`.
 - The server runtime/helper paths were unchanged from the independently reviewed fixture baseline.
   No production account, contact, message, coordinate, server address, or credential was used.
 
-## Exact-candidate results
+## Play v65 exact-candidate results
 
 | Check                 | Result                                                                                                                                                                                                                                                                                                                                                                                                         |
 | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -63,7 +62,7 @@ Privacy-safe screenshot hashes retained during review were:
 - proven-outage focus/list/fallback and attribution:
   `ff1bdf1376617194d4376c12b87e27c437f3f14aab470f82dd9e04e418a63e87`.
 
-## Supporting traffic observation
+## Play v65 supporting traffic observation
 
 Android's live BPF counter was sampled for Gator's unique Play-installed Linux UID. It includes all
 Gator traffic and cannot identify Maps traffic separately; some SDK work may also occur in Google
@@ -79,7 +78,7 @@ Play services. It is therefore supporting lifecycle evidence, not a provider-des
 The outage delta is deliberately not described as Internet or Maps traffic: the phone had no
 working Internet route, while the fixture remained available over USB loopback.
 
-## Host and cleanup evidence
+## Play v65 host and cleanup evidence
 
 - The six focused map/config/location/privacy/legal suites passed **6/6 suites and 35/35 tests**.
 - Strict TypeScript and the DB-write report had already passed after the candidate source froze;
@@ -87,17 +86,53 @@ working Internet route, while the fixture remained available over USB loopback.
 - The fixture ended with a final bounded summary and `WEB02_CLOSED`. Its listener and USB reverse
   were removed, its helper-owned temporary backend was deleted, and its staging directory plus the
   installed-APK evidence directory were moved to Trash for recoverable cleanup.
-- Wi-Fi, mobile data, airplane mode, and normal phone sleep behavior were restored. Gator remains
-  the Play-delivered v65 app, disconnected on onboarding. TalkBack and App Lock were not changed.
+- At the end of the v65 run, Wi-Fi, mobile data, airplane mode, and normal phone sleep behavior
+  were restored. Gator remained the Play-delivered v65 app, disconnected on onboarding. TalkBack
+  and App Lock were not changed.
+
+## Play v66 App Lock completion
+
+- Reviewed app source `360d873301e54541b0dbedf97caa4c26b10451ef` was packaged by release commit
+  `6b592755f35665ac5fff951e861006686301cb23`, whose only source-tree differences were the version
+  values in `package.json` and `package-lock.json`. The Google Play Internal artifact
+  `gator-release-0.1.49-v66-6b59275.aab` reported version `0.1.49` / code `66`, measured 56,801,803
+  bytes, and had SHA-256
+  `9dfb0d3c9ea9f1e54ed32f2e6f008d57132f9e4d74cc76e5c3cb803447141570`.
+- The installed package came from `com.android.vending`, was nondebuggable, and retained the
+  expected Play delivery certificate SHA-256
+  `fd45704222c77c48bee372e8b93525ff396c527c8c786841179f9e63da074d60`. Its delivered 75,384,958-byte
+  base APK had SHA-256 `c0d617dd5634cc6817efbba4c351f5201bd697103a1f8842732f61b494835675`;
+  `apksigner` verified its v2 and v3 signatures.
+- With App Lock enabled and process `19110` already unlocked, Settings -> Find My rendered exactly
+  one native map summary, one `Synthetic Phone` marker, one matching list row, and one external
+  Maps action, with zero WebViews. Gator was then sent Home from 18:54:32 to 18:55:10 MDT: 38 seconds,
+  beyond its 30-second grace period, while the same process remained alive.
+- Resume presented Android's owner-controlled biometric window explicitly titled `Gator` /
+  `Unlock Gator`. Before authentication, its hierarchy exposed zero map, marker, row, action, or
+  WebView nodes. Android then recorded a successful fingerprint authentication for Gator at
+  18:55:38; no PIN or biometric was sent through ADB.
+- After authentication, the protected navigation tree remounted at Messages as designed. One normal
+  Settings -> Find My navigation recreated exactly one native map summary, one marker, one matching
+  row, and one external action with zero WebViews, zero lock nodes, and zero empty-state nodes. PID
+  `19110` was unchanged throughout. The post-unlock screenshot SHA-256 was
+  `32ff20150fafdcb3c5b24bb0885eacade0f9580bcc561500333324f6aed42760`.
+- The lifecycle log contained only the expected test-owned Home, Gator launch, and later Back/launch
+  commands; it contained no process kill or competing shell lifecycle command. The independently
+  rerun lock/Find My source gate passed **9/9 suites and 81/81 tests**.
+- Cleanup restored App Lock to off, disconnected the disposable fixture through Gator, and confirmed
+  onboarding with no synthetic conversation. The fixture emitted its final bounded summary and
+  `WEB02_CLOSED`; its listener and `tcp:1236` USB reverse were removed, and normal phone sleep was
+  restored. The v66 Play app remains installed and disconnected. Privacy-safe evidence was moved
+  recoverably to Trash under `web02-v66.9tNskK`; no production account or credential was retained.
 
 ## Remaining gates
 
 `WEB-01` is complete: its source/host containment and exact Play marker/focus acceptance both pass.
 
-`WEB-02` remains **IN_PROGRESS** only for a real App Lock cycle on this candidate: enable App Lock,
-authenticate through Android's owner-controlled biometric/PIN UI, verify the protected map tree is
-absent while locked, and verify one clean remount after unlock. This must not be bypassed or driven
-with a real PIN through ADB.
+`WEB-02` is complete: the source/AAB/native-map containment passed on v65, and the behavior-equivalent
+v66 Play candidate completed the real owner-authenticated App Lock cycle. The protected map tree was
+absent before authentication and remounted exactly once after unlock without a WebView or process
+restart.
 
 `WEB-03` remains **IN_PROGRESS** for:
 
@@ -136,16 +171,12 @@ approve that image, the exact in-app disclosure/legal wording, both Google desti
 draft matrix. The store pack still names an older candidate and must be updated only after that
 decision.
 
-The human phone pass is deliberately small:
+The remaining human phone pass is deliberately small:
 
 1. Preserve the current accessibility-service state, enable TalkBack, and audibly traverse Refresh,
    the one-location map summary, marker, Google attribution, all three tabs, list row, and external
    Maps action. Confirm focus leaves the map and returns from external Maps without trapping, then
    restore the original accessibility state.
-2. Connect the disposable fixture, enable App Lock, and authenticate personally. Open Find My,
-   background Gator beyond its 30-second grace period, and resume. Confirm the protected map tree is
-   absent before authentication, then use the owner's biometric/PIN and verify exactly one fresh map
-   and marker. Restore the original App Lock setting. Never send the real PIN through ADB.
 
 The local EAS build's Expo Doctor check was nonblocking but reported **19/20** checks because 27
 Expo SDK 57 dependencies have newer recommended patch versions. That is broader dependency/release
