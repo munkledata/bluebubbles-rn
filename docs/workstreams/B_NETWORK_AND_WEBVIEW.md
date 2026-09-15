@@ -122,12 +122,16 @@ must await that owner rather than duplicating policy.
 
 <a id="rt-01b"></a>
 
-## `RT-01B` — signed server-rotation protocol
+## `RT-01B` / `POST-RT-01B` — deferred signed server-rotation protocol
 
-After client-side containment, a cross-repository protocol may version and sign rotation
-instructions. Bind the old and new origins, expiry, and account identity; define replay rejection and
-key rotation; and migrate client and server without an unsigned downgrade path. Cross-language
-vectors must define the wire contract before rollout.
+`RT-01B` left the active remediation inventory on 2026-09-14. Its future status is owned by
+[`POST-RT-01B`](../POST_REMEDIATION_PLAN.md#post-rt-01b); completed `RT-01A` remains the current safe
+containment and confirmation path.
+
+If selected later, a cross-repository protocol may version and sign rotation instructions. Bind the
+old and new origins, expiry, and account identity; define replay rejection and key rotation; and
+migrate client and server without an unsigned downgrade path. Cross-language vectors must define
+the wire contract before rollout.
 
 This cryptographic protocol strengthens authenticated rotation but does not replace `RT-01A`'s local
 validation, consent, or session fencing.
@@ -155,15 +159,20 @@ copy may imply that inactive certificate pins provide protection.
 
 <a id="tls-01b"></a>
 
-## `TLS-01B` — optional fail-closed pinning
+## `TLS-01B` / `POST-TLS-01B` — deferred fail-closed pinning
 
-If stable origins and operational ownership justify pinning, implement it only after `TLS-00`.
+`TLS-01B` left the active remediation inventory on 2026-09-14. Its future status is owned by
+[`POST-TLS-01B`](../POST_REMEDIATION_PLAN.md#post-tls-01b); completed `TLS-01A` ordinary Android HTTPS
+remains the current product boundary.
+
+If stable origins and operational ownership later justify pinning, implement it only after `TLS-00`.
 Initialization failure, missing or malformed state, and pin mismatch must all fail closed across
 every authenticated transport. Use exact-host primary and backup pins, support safe certificate
 rotation, expose truthful status, and prevent server rotation from escaping the policy.
 
-`TLS-01A` and `TLS-01B` are alternative product branches; do not retain the appearance of pinning
-without its fail-closed transport enforcement.
+Future `POST-TLS-01B` may add a complete pinning layer on top of `TLS-01A`'s ordinary Android
+certificate and hostname validation; do not retain the appearance of pinning without its fail-closed
+transport enforcement.
 
 <a id="tls-02"></a>
 
@@ -183,7 +192,8 @@ arbitrary self-signed leaf.
    free of every generated-document/WebView surface and complete provider privacy/device evidence.
    `POST-FACE-01` reuses only WebView-specific navigation primitives if the owner later selects that
    post-remediation path.
-3. Complete `RT-01A` client containment before relying on lifecycle application or considering the
-   cross-repository `RT-01B` protocol.
-4. Decide `TLS-00` before selecting the `TLS-01A` removal branch or the `TLS-01B` fail-closed branch;
-   make the independent `TLS-02` user-CA policy explicit for the same transport set.
+3. Keep completed `RT-01A` client containment in force. `POST-RT-01B` may add signed rotation only if
+   the app and server owners later select the cross-repository protocol, key lifecycle, and rollout.
+4. Keep completed `TLS-00` and the selected `TLS-01A` ordinary-HTTPS branch in force.
+   `POST-TLS-01B` may add complete pinning on top only after stable origins and pin operations have
+   owners; make the independent `TLS-02` user-CA policy explicit for the same transport set.
