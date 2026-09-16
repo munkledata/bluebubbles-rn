@@ -34,6 +34,11 @@ const ANDROID_NATIVE_PATH_ENV_LINES = [
   '-fdebug-prefix-map=${{ github.workspace }}=/gator/source',
   '-ffile-prefix-map=/var/tmp/gator-gradle=/gator/gradle',
   '-fdebug-prefix-map=/var/tmp/gator-gradle=/gator/gradle',
+  'ASMFLAGS: >-',
+  '-ffile-prefix-map=${{ github.workspace }}=/gator/source',
+  '-fdebug-prefix-map=${{ github.workspace }}=/gator/source',
+  '-ffile-prefix-map=/var/tmp/gator-gradle=/gator/gradle',
+  '-fdebug-prefix-map=/var/tmp/gator-gradle=/gator/gradle',
 ];
 const LOCAL_NATIVE_COMPILE_TASKS = [
   ':gator-paste-input:compileDebugKotlin',

@@ -137,6 +137,11 @@ jobs:
         -fdebug-prefix-map=${{ github.workspace }}=/gator/source
         -ffile-prefix-map=/var/tmp/gator-gradle=/gator/gradle
         -fdebug-prefix-map=/var/tmp/gator-gradle=/gator/gradle
+      ASMFLAGS: >-
+        -ffile-prefix-map=${{ github.workspace }}=/gator/source
+        -fdebug-prefix-map=${{ github.workspace }}=/gator/source
+        -ffile-prefix-map=/var/tmp/gator-gradle=/gator/gradle
+        -fdebug-prefix-map=/var/tmp/gator-gradle=/gator/gradle
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 

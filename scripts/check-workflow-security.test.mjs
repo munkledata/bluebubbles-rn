@@ -675,7 +675,7 @@ test('pins the Android Gradle home and native compiler path maps', () => {
     '-ffile-prefix-map=/var/tmp/gator-gradle=/gator/gradle',
     '-fdebug-prefix-map=/var/tmp/gator-gradle=/gator/gradle',
   ]) {
-    for (const occurrence of [0, 1]) {
+    for (const occurrence of [0, 1, 2]) {
       const mutated = replaceOccurrence(
         workflow,
         flag,
@@ -690,7 +690,7 @@ test('pins the Android Gradle home and native compiler path maps', () => {
     }
   }
 
-  for (const variable of ['CFLAGS', 'CXXFLAGS']) {
+  for (const variable of ['CFLAGS', 'CXXFLAGS', 'ASMFLAGS']) {
     const mutated = workflow.replace(`      ${variable}: >-`, `      ${variable}: ''`);
     assert.notEqual(mutated, workflow, `${variable} mutation must change the fixture`);
     assert.ok(
