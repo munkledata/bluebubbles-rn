@@ -17,8 +17,10 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import {
+  MANAGED_DIRECTORY_REMOVAL_OPTIONS,
   androidReleaseWorkspacePaths,
   createAndroidReleaseBuildEnvironment,
+  finalizeVerifiedReleaseBuild,
   findLocalBranchObjectId,
   isValidReleaseBuildReceipt,
   isValidReleaseNativePathProof,
@@ -230,6 +232,72 @@ test('uses one deterministic private run path with separate EAS and Gradle direc
   assert.equal(existsSync(paths.root), true);
 });
 
+test('stops only the run-owned Gradle home before removing its native workspace', (t) => {
+  const fixture = nativeWorkspaceFixture(t, '-gradle-stop');
+  const paths = prepareManagedEasDirectory(fixture.state, fixture.options);
+  const androidDirectory = join(paths.source, 'android');
+  const gradleWrapper = join(androidDirectory, 'gradlew');
+  const stopMarker = join(fixture.options.temporaryParent, 'gradle-stop-marker');
+  mkdirSync(androidDirectory, { recursive: true });
+  writeFileSync(
+    gradleWrapper,
+    `#!/bin/sh\n` +
+      `test "$1" = "--stop" || exit 20\n` +
+      `test -n "$GATOR_NATIVE_PATH_MAP_FLAGS" || exit 21\n` +
+      `test -d "$GRADLE_USER_HOME" || exit 22\n` +
+      `printf '%s\\n' "$GRADLE_USER_HOME" > '${stopMarker}'\n`,
+  );
+  chmodSync(gradleWrapper, 0o700);
+
+  removeManagedEasDirectory(fixture.state, fixture.options);
+
+  assert.equal(readFileSync(stopMarker, 'utf8'), `${paths.gradleHome}\n`);
+  assert.equal(existsSync(paths.container), false);
+});
+
+test('retains the complete native workspace when its scoped Gradle stop fails', (t) => {
+  const fixture = nativeWorkspaceFixture(t, '-gradle-stop-failure');
+  const paths = prepareManagedEasDirectory(fixture.state, fixture.options);
+  const androidDirectory = join(paths.source, 'android');
+  const gradleWrapper = join(androidDirectory, 'gradlew');
+  mkdirSync(androidDirectory, { recursive: true });
+  writeFileSync(gradleWrapper, '#!/bin/sh\nexit 23\n');
+  chmodSync(gradleWrapper, 0o700);
+
+  assert.throws(
+    () => removeManagedEasDirectory(fixture.state, fixture.options),
+    /run-owned Gradle daemons could not be stopped.*workspace retained/,
+  );
+  assert.equal(existsSync(paths.work), true);
+  assert.equal(existsSync(paths.gradleHome), true);
+});
+
+test('does not recreate a Gradle home while finishing partial workspace cleanup', (t) => {
+  const fixture = nativeWorkspaceFixture(t, '-partial-cleanup');
+  const paths = prepareManagedEasDirectory(fixture.state, fixture.options);
+  const androidDirectory = join(paths.source, 'android');
+  const gradleWrapper = join(androidDirectory, 'gradlew');
+  const unexpectedStopMarker = join(fixture.options.temporaryParent, 'unexpected-gradle-stop');
+  mkdirSync(androidDirectory, { recursive: true });
+  writeFileSync(gradleWrapper, `#!/bin/sh\ntouch '${unexpectedStopMarker}'\nexit 24\n`);
+  chmodSync(gradleWrapper, 0o700);
+  rmSync(paths.gradleHome, { recursive: true, force: true });
+
+  removeManagedEasDirectory(fixture.state, fixture.options);
+
+  assert.equal(existsSync(unexpectedStopMarker), false);
+  assert.equal(existsSync(paths.container), false);
+});
+
+test('uses bounded retries for run-owned recursive directory removal', () => {
+  assert.deepEqual(MANAGED_DIRECTORY_REMOVAL_OPTIONS, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 100,
+  });
+});
+
 test('records sanitized proof from the exact retained EAS native workspace', (t) => {
   const fixture = nativeWorkspaceFixture(t, '-proof');
   const paths = prepareManagedEasDirectory(fixture.state, fixture.options);
@@ -348,6 +416,76 @@ test('build receipt strictly binds one pending AAB to its native-path proof', ()
       artifact: { ...artifact, sha256: 'b'.repeat(64) },
     }),
     false,
+  );
+});
+
+test('records a verified build before surfacing workspace cleanup failure', (t) => {
+  const temporaryDirectory = mkdtempSync(join(tmpdir(), 'gator-release-finalize-failure-'));
+  t.after(() => rmSync(temporaryDirectory, { recursive: true, force: true }));
+  const pendingArtifact = join(temporaryDirectory, 'artifact.pending.aab');
+  writeFileSync(pendingArtifact, 'verified-candidate');
+  const state = {
+    runId: 'android-test-finalize-failure',
+    phase: 'building',
+    build: { status: 'building' },
+    history: [],
+  };
+  const events = [];
+  const states = [];
+
+  assert.throws(
+    () =>
+      finalizeVerifiedReleaseBuild({
+        state,
+        finishedAt: '2026-09-16T05:30:00.000Z',
+        persistReceipt: () => events.push('receipt'),
+        persistState: (nextState) => {
+          states.push(structuredClone(nextState));
+          events.push(`state:${nextState.phase}:${nextState.build.status}`);
+        },
+        cleanupWorkspaces: () => {
+          events.push('cleanup');
+          throw new Error('fixture ENOTEMPTY');
+        },
+      }),
+    /verified build receipt is durable.*fixture ENOTEMPTY/,
+  );
+
+  assert.deepEqual(events, ['receipt', 'state:building:cleanup_required', 'cleanup']);
+  assert.equal(states.length, 1);
+  assert.equal(states[0].build.finishedAt, '2026-09-16T05:30:00.000Z');
+  assert.equal(states[0].build.exitCode, 0);
+  assert.equal(readFileSync(pendingArtifact, 'utf8'), 'verified-candidate');
+});
+
+test('releases a verified build for validation only after workspace cleanup succeeds', () => {
+  const state = {
+    runId: 'android-test-finalize-success',
+    phase: 'building',
+    build: { status: 'building' },
+    history: [],
+  };
+  const events = [];
+
+  const builtState = finalizeVerifiedReleaseBuild({
+    state,
+    finishedAt: '2026-09-16T05:31:00.000Z',
+    persistReceipt: () => events.push('receipt'),
+    persistState: (nextState) => events.push(`state:${nextState.phase}:${nextState.build.status}`),
+    cleanupWorkspaces: () => events.push('cleanup'),
+  });
+
+  assert.deepEqual(events, [
+    'receipt',
+    'state:building:cleanup_required',
+    'cleanup',
+    'state:built:built',
+  ]);
+  assert.equal(builtState.phase, 'built');
+  assert.equal(builtState.build.status, 'built');
+  assert.deepEqual(
+    builtState.history.map(({ phase, status }) => ({ phase, status })),
+    [{ phase: 'build', status: 'passed' }],
   );
 });
 

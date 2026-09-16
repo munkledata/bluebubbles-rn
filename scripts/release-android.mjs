@@ -68,6 +68,12 @@ const RELEASE_NATIVE_TEMP_PARENT = '/private/tmp';
 const RELEASE_NATIVE_TEMP_PREFIX = 'gator-android-release';
 const PRIVATE_DIRECTORY_MODE = 0o700;
 const PRIVATE_FILE_MODE = 0o600;
+export const MANAGED_DIRECTORY_REMOVAL_OPTIONS = Object.freeze({
+  recursive: true,
+  force: true,
+  maxRetries: 10,
+  retryDelay: 100,
+});
 const ANDROID_NATIVE_PATH_INIT_SCRIPT = [
   "def gatorNativePathMapFlags = System.getenv('GATOR_NATIVE_PATH_MAP_FLAGS')",
   'if (gatorNativePathMapFlags == null || gatorNativePathMapFlags.trim().isEmpty()) {',
@@ -812,13 +818,50 @@ export function removeManagedEasDirectory(state, workspaceOptions) {
     throw new Error('EAS workspace ownership marker does not match this release run');
   }
 
-  for (const [path, label] of [
-    [paths.work, 'Android release EAS work directory'],
+  const expectedEntries = new Set(['.owner.json', 'work', 'gradle-home']);
+  const unexpectedEntries = readdirSync(paths.container).filter(
+    (entry) => !expectedEntries.has(entry),
+  );
+  if (unexpectedEntries.length > 0) {
+    throw new Error(
+      `EAS container has unexpected retained entries: ${unexpectedEntries.join(', ')}`,
+    );
+  }
+
+  const ownedDirectories = [
     [paths.gradleHome, 'Android release Gradle home'],
-  ]) {
-    if (!existsSync(path)) continue;
-    assertOwnedPrivateDirectory(path, label, paths.ownerUid, paths.container);
-    rmSync(path, { recursive: true, force: true });
+    [paths.work, 'Android release EAS work directory'],
+  ].filter(([directory]) => existsSync(directory));
+  for (const [directory, label] of ownedDirectories) {
+    assertOwnedPrivateDirectory(directory, label, paths.ownerUid, paths.container);
+  }
+
+  const gradleWrapper = resolve(paths.source, 'android', 'gradlew');
+  if (existsSync(paths.gradleHome) && existsSync(gradleWrapper)) {
+    const wrapperState = lstatSync(gradleWrapper);
+    if (!wrapperState.isFile() || wrapperState.isSymbolicLink()) {
+      throw new Error('run-owned Gradle wrapper must be a regular file without path indirection');
+    }
+    assertDescendant(
+      realpathSync(paths.work),
+      realpathSync(gradleWrapper),
+      'run-owned Gradle wrapper',
+    );
+    accessSync(gradleWrapper, fsConstants.X_OK);
+    const stopResult = runCapture(gradleWrapper, ['--stop'], {
+      cwd: dirname(gradleWrapper),
+      env: createAndroidReleaseBuildEnvironment(process.env, paths),
+      allowFailure: true,
+    });
+    if (stopResult.status !== 0 || stopResult.signal != null) {
+      throw new Error(
+        `run-owned Gradle daemons could not be stopped (exit ${String(stopResult.status)}, signal ${String(stopResult.signal)}); workspace retained`,
+      );
+    }
+  }
+
+  for (const [directory] of ownedDirectories) {
+    rmSync(directory, MANAGED_DIRECTORY_REMOVAL_OPTIONS);
   }
   const remaining = readdirSync(paths.container).filter((entry) => entry !== '.owner.json');
   if (remaining.length > 0) {
@@ -826,6 +869,30 @@ export function removeManagedEasDirectory(state, workspaceOptions) {
   }
   unlinkSync(paths.marker);
   rmdirSync(paths.container);
+}
+
+function removeManagedBuildWorkspaces(state) {
+  const failures = [];
+  for (const [label, remove] of [
+    ['EAS workspace', () => removeManagedEasDirectory(state)],
+    ['Git worktree', () => removeManagedWorktree(state.runId)],
+  ]) {
+    try {
+      remove();
+    } catch (error) {
+      failures.push(
+        new Error(`${label}: ${error instanceof Error ? error.message : String(error)}`, {
+          cause: error,
+        }),
+      );
+    }
+  }
+  if (failures.length > 0) {
+    throw new AggregateError(
+      failures,
+      `temporary release workspace cleanup failed: ${failures.map((error) => error.message).join('; ')}`,
+    );
+  }
 }
 
 export function prepareManagedEasDirectory(state, workspaceOptions) {
@@ -949,7 +1016,7 @@ function readBoundReleaseBuildReceipt(state, artifact) {
   return { receipt, sha256: sha256Bytes(source) };
 }
 
-async function withWorktree(state, { applyPreparedPatch }, action) {
+async function withWorktree(state, { applyPreparedPatch, deferCleanup = false }, action) {
   const worktree = managedWorktreePath(state.runId);
   if (existsSync(worktree)) {
     throw new Error(`temporary release worktree already exists; run cleanup for ${state.runId}`);
@@ -976,8 +1043,48 @@ async function withWorktree(state, { applyPreparedPatch }, action) {
     retainWorkspace = error?.retainWorkspace === true;
     throw error;
   } finally {
-    if (!retainWorkspace) removeManagedWorktree(state.runId);
+    if (!retainWorkspace && !deferCleanup) removeManagedWorktree(state.runId);
   }
+}
+
+export function finalizeVerifiedReleaseBuild({
+  state,
+  finishedAt,
+  persistReceipt,
+  persistState,
+  cleanupWorkspaces,
+  successHistoryPhase = 'build',
+}) {
+  persistReceipt();
+  const cleanupRequiredState = {
+    ...state,
+    build: {
+      ...state.build,
+      status: 'cleanup_required',
+      finishedAt,
+      exitCode: 0,
+    },
+  };
+  persistState(cleanupRequiredState);
+  try {
+    cleanupWorkspaces();
+  } catch (error) {
+    throw new Error(
+      `verified build receipt is durable, but temporary workspace cleanup failed; run npm run release:android:reconcile -- --run ${state.runId} before validation: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+  const builtState = {
+    ...cleanupRequiredState,
+    phase: 'built',
+    build: { ...cleanupRequiredState.build, status: 'built' },
+    history: [
+      ...cleanupRequiredState.history,
+      historyEntry(successHistoryPhase, successHistoryPhase === 'build' ? 'passed' : 'built'),
+    ],
+  };
+  persistState(builtState);
+  return builtState;
 }
 
 function createRunId(version, commit) {
@@ -1205,52 +1312,56 @@ async function build(options) {
     let nativePathProof = null;
     let buildArtifact = null;
     try {
-      outcome = await withWorktree(state, { applyPreparedPatch: true }, async (worktree) => {
-        // EAS resolves app.config.ts and local config plugins before its local builder installs
-        // project dependencies. Install the exact lockfile first so config resolution uses the
-        // same patched dependency tree as CI.
-        runCapture('npm', ['ci'], { cwd: worktree });
-        const stagedGoogleServices = stageGoogleServicesFile(worktree, googleServices);
-        const environment = createAndroidReleaseBuildEnvironment(process.env, nativeWorkspace);
-        Object.assign(environment, {
-          EAS_BUILD_PROFILE: 'production',
-          GOOGLE_MAPS_ANDROID_API_KEY: googleMapsAndroidApiKey,
-          GOOGLE_SERVICES_JSON: stagedGoogleServices,
-          EAS_LOCAL_BUILD_PLUGIN_PATH: localBuildPlugin,
-          EAS_LOCAL_BUILD_WORKINGDIR: nativeWorkspace.work,
-          GATOR_RELEASE_OUTPUT: pendingPath,
-        });
-        const buildOutcome = await runInherited('npx', reviewedEasNpxArgs('build'), {
-          cwd: worktree,
-          env: environment,
-          onSpawn: (processGroupId) => {
-            state = {
-              ...state,
-              build: { ...state.build, processGroupId },
-            };
-            writeState(state);
-          },
-        });
-        if (
-          buildOutcome.status === 0 &&
-          buildOutcome.signal == null &&
-          buildOutcome.signalForwardingFailed !== true &&
-          buildOutcome.descendantsRunning !== true
-        ) {
-          try {
-            nativePathProof = verifyReleaseNativePathProof(nativeWorkspace, pendingPath);
-            buildArtifact = releaseArtifactReceiptBinding(pendingPath);
-          } catch (error) {
-            const proofError =
-              error instanceof Error
-                ? error
-                : new Error(`native path proof failed: ${String(error)}`);
-            proofError.releaseFailureCode = 'native_path_proof_failed';
-            throw proofError;
+      outcome = await withWorktree(
+        state,
+        { applyPreparedPatch: true, deferCleanup: true },
+        async (worktree) => {
+          // EAS resolves app.config.ts and local config plugins before its local builder installs
+          // project dependencies. Install the exact lockfile first so config resolution uses the
+          // same patched dependency tree as CI.
+          runCapture('npm', ['ci'], { cwd: worktree });
+          const stagedGoogleServices = stageGoogleServicesFile(worktree, googleServices);
+          const environment = createAndroidReleaseBuildEnvironment(process.env, nativeWorkspace);
+          Object.assign(environment, {
+            EAS_BUILD_PROFILE: 'production',
+            GOOGLE_MAPS_ANDROID_API_KEY: googleMapsAndroidApiKey,
+            GOOGLE_SERVICES_JSON: stagedGoogleServices,
+            EAS_LOCAL_BUILD_PLUGIN_PATH: localBuildPlugin,
+            EAS_LOCAL_BUILD_WORKINGDIR: nativeWorkspace.work,
+            GATOR_RELEASE_OUTPUT: pendingPath,
+          });
+          const buildOutcome = await runInherited('npx', reviewedEasNpxArgs('build'), {
+            cwd: worktree,
+            env: environment,
+            onSpawn: (processGroupId) => {
+              state = {
+                ...state,
+                build: { ...state.build, processGroupId },
+              };
+              writeState(state);
+            },
+          });
+          if (
+            buildOutcome.status === 0 &&
+            buildOutcome.signal == null &&
+            buildOutcome.signalForwardingFailed !== true &&
+            buildOutcome.descendantsRunning !== true
+          ) {
+            try {
+              nativePathProof = verifyReleaseNativePathProof(nativeWorkspace, pendingPath);
+              buildArtifact = releaseArtifactReceiptBinding(pendingPath);
+            } catch (error) {
+              const proofError =
+                error instanceof Error
+                  ? error
+                  : new Error(`native path proof failed: ${String(error)}`);
+              proofError.releaseFailureCode = 'native_path_proof_failed';
+              throw proofError;
+            }
           }
-        }
-        return buildOutcome;
-      });
+          return buildOutcome;
+        },
+      );
     } catch (error) {
       outcome = {
         status: null,
@@ -1261,8 +1372,6 @@ async function build(options) {
         retainWorkspace: error?.retainWorkspace === true,
         failureCode: error?.releaseFailureCode,
       };
-    } finally {
-      if (!outcome?.retainWorkspace) removeManagedEasDirectory(state);
     }
 
     const finishedAt = nowIso();
@@ -1326,17 +1435,27 @@ async function build(options) {
         ...failure,
       });
       writeState(state);
+      if (!outcome?.retainWorkspace) {
+        try {
+          removeManagedBuildWorkspaces(state);
+        } catch (error) {
+          throw new Error(
+            `release build failed and its terminal receipt is durable, but temporary workspace cleanup also failed; run release:android:cleanup -- --run ${runId}: ${error instanceof Error ? error.message : String(error)}`,
+            { cause: error },
+          );
+        }
+      }
       throw new Error(
         `release build failed; run ${runId} is terminal because its remote versionCode may have advanced`,
       );
     }
 
-    writeImmutableJson(runFile(runId, 'build.json'), buildReceipt);
-    writeState({
-      ...state,
-      phase: 'built',
-      build: { ...state.build, status: 'built', finishedAt, exitCode: 0 },
-      history: [...state.history, historyEntry('build', 'passed')],
+    state = finalizeVerifiedReleaseBuild({
+      state,
+      finishedAt,
+      persistReceipt: () => writeImmutableJson(runFile(runId, 'build.json'), buildReceipt),
+      persistState: writeState,
+      cleanupWorkspaces: () => removeManagedBuildWorkspaces(state),
     });
     process.stdout.write(`Built ${runId}; validate artifact.pending.aab before promotion.\n`);
   });
@@ -1873,16 +1992,13 @@ function reconcileBuilding(state) {
     if (artifact === null || receipt === null) {
       throw new Error('successful build receipt or pending artifact is invalid');
     }
-    writeState({
-      ...state,
-      phase: 'built',
-      build: {
-        ...state.build,
-        status: 'built',
-        finishedAt: receipt.finishedAt,
-        exitCode: 0,
-      },
-      history: [...state.history, historyEntry('reconcile', 'built')],
+    finalizeVerifiedReleaseBuild({
+      state,
+      finishedAt: receipt.finishedAt,
+      persistReceipt: () => {},
+      persistState: writeState,
+      cleanupWorkspaces: () => removeManagedBuildWorkspaces(state),
+      successHistoryPhase: 'reconcile',
     });
     process.stdout.write(`Reconciled ${state.runId} to built without invoking EAS.\n`);
     return;
@@ -2086,8 +2202,7 @@ async function cleanup(options) {
       }
       const releaseState = readState(effectiveRunId);
       assertReleaseProcessGroupsStopped(releaseState);
-      removeManagedWorktree(effectiveRunId);
-      removeManagedEasDirectory(releaseState);
+      removeManagedBuildWorkspaces(releaseState);
       process.stdout.write(
         `Removed only temporary workspaces for ${effectiveRunId}; receipts and artifacts remain.\n`,
       );
