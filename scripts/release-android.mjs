@@ -85,7 +85,8 @@ const ANDROID_NATIVE_PATH_INIT_SCRIPT = [
   '        project.pluginManager.withPlugin(pluginId) {',
   '            project.android.defaultConfig.externalNativeBuild.cmake {',
   '                arguments "-DCMAKE_C_FLAGS=${gatorNativePathMapFlags}",',
-  '                    "-DCMAKE_CXX_FLAGS=${gatorNativePathMapFlags}"',
+  '                    "-DCMAKE_CXX_FLAGS=${gatorNativePathMapFlags}",',
+  '                    "-DCMAKE_ASM_FLAGS=${gatorNativePathMapFlags}"',
   '            }',
   '        }',
   '    }',
@@ -935,12 +936,14 @@ export function createAndroidReleaseBuildEnvironment(baseEnvironment, workspace)
   const flags = nativeCompilerPathMappingFlags({
     sourceRoot: workspace.source,
     gradleHome: workspace.gradleHome,
+    includePrivateTmpAlias: true,
   }).join(' ');
   const environment = {
     ...baseEnvironment,
     GRADLE_USER_HOME: workspace.gradleHome,
     CFLAGS: flags,
     CXXFLAGS: flags,
+    ASMFLAGS: flags,
     GATOR_NATIVE_PATH_MAP_FLAGS: flags,
     // The pinned EAS local-build plugin otherwise removes `work/build` before this process can
     // inspect its compiler databases. The runner owns and removes this private workspace itself.
@@ -971,6 +974,28 @@ export function verifyReleaseNativePathProof(workspace, releaseBundlePath) {
     sourceDestination: '/gator/source',
     gradleDestination: '/gator/gradle',
   });
+}
+
+export function classifyReleaseEvidenceFailure(error, code, workspace) {
+  const failureError =
+    error instanceof Error ? error : new Error(`release evidence failed: ${String(error)}`);
+  const replacements = [
+    [workspace.source, '[native source]'],
+    [workspace.gradleHome, '[Gradle home]'],
+    [workspace.work, '[EAS workspace]'],
+    [ROOT, '[release checkout]'],
+  ].sort((left, right) => right[0].length - left[0].length);
+  let detail = failureError.message.replace(/[\x00-\x1f\x7f]+/g, ' ');
+  for (const [hostPath, label] of replacements) {
+    detail = detail.replaceAll(hostPath, label);
+    if (hostPath.startsWith('/private/tmp/')) {
+      detail = detail.replaceAll(hostPath.slice('/private'.length), label);
+    }
+  }
+  failureError.releaseFailureCode = code;
+  failureError.releaseFailureDetail = detail.slice(0, 2000);
+  failureError.retainWorkspace = true;
+  return failureError;
 }
 
 function releaseArtifactReceiptBinding(path) {
@@ -1349,26 +1374,41 @@ async function build(options) {
           ) {
             try {
               nativePathProof = verifyReleaseNativePathProof(nativeWorkspace, pendingPath);
-              buildArtifact = releaseArtifactReceiptBinding(pendingPath);
             } catch (error) {
-              const proofError =
-                error instanceof Error
-                  ? error
-                  : new Error(`native path proof failed: ${String(error)}`);
+              const proofError = classifyReleaseEvidenceFailure(
+                error,
+                'native_path_proof_failed',
+                nativeWorkspace,
+              );
+              // Keep this assignment explicit: the toolchain guard verifies that a failed native
+              // proof cannot silently fall through to a generic build failure.
               proofError.releaseFailureCode = 'native_path_proof_failed';
               throw proofError;
+            }
+            try {
+              buildArtifact = releaseArtifactReceiptBinding(pendingPath);
+            } catch (error) {
+              throw classifyReleaseEvidenceFailure(
+                error,
+                'artifact_receipt_binding_failed',
+                nativeWorkspace,
+              );
             }
           }
           return buildOutcome;
         },
       );
     } catch (error) {
+      const processGroupId = error?.processGroupId ?? state.build.processGroupId ?? null;
       outcome = {
         status: null,
         signal: null,
         startError: String(error),
-        processGroupId: error?.processGroupId ?? state.build.processGroupId ?? null,
-        descendantsRunning: error?.retainWorkspace === true,
+        failureDetail: error?.releaseFailureDetail,
+        processGroupId,
+        descendantsRunning:
+          error?.descendantsRunning === true ||
+          (error?.retainWorkspace === true && processGroupIsRunning(processGroupId)),
         retainWorkspace: error?.retainWorkspace === true,
         failureCode: error?.releaseFailureCode,
       };
@@ -1421,6 +1461,7 @@ async function build(options) {
         remoteVersionMayHaveAdvanced: true,
         retainedArtifact,
         at: finishedAt,
+        ...(typeof outcome?.failureDetail === 'string' ? { detail: outcome.failureDetail } : {}),
       };
       state = {
         ...state,
@@ -1446,7 +1487,7 @@ async function build(options) {
         }
       }
       throw new Error(
-        `release build failed; run ${runId} is terminal because its remote versionCode may have advanced`,
+        `release build failed; run ${runId} is terminal because its remote versionCode may have advanced${failure.detail ? `: ${failure.detail}` : ''}`,
       );
     }
 

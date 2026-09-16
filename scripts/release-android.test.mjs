@@ -13,13 +13,14 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
 
 import {
   MANAGED_DIRECTORY_REMOVAL_OPTIONS,
   androidReleaseWorkspacePaths,
   createAndroidReleaseBuildEnvironment,
+  classifyReleaseEvidenceFailure,
   finalizeVerifiedReleaseBuild,
   findLocalBranchObjectId,
   isValidReleaseBuildReceipt,
@@ -194,6 +195,7 @@ test('uses one deterministic private run path with separate EAS and Gradle direc
   assert.match(nativePathInitScript, /GATOR_NATIVE_PATH_MAP_FLAGS must be set/);
   assert.match(nativePathInitScript, /-DCMAKE_C_FLAGS=\$\{gatorNativePathMapFlags\}/);
   assert.match(nativePathInitScript, /-DCMAKE_CXX_FLAGS=\$\{gatorNativePathMapFlags\}/);
+  assert.match(nativePathInitScript, /-DCMAKE_ASM_FLAGS=\$\{gatorNativePathMapFlags\}/);
   assert.equal(statSync(paths.marker).mode & 0o777, 0o600);
   assert.deepEqual(JSON.parse(readFileSync(paths.marker, 'utf8')), {
     schemaVersion: 2,
@@ -207,6 +209,7 @@ test('uses one deterministic private run path with separate EAS and Gradle direc
       PATH: '/reviewed/bin',
       CFLAGS: 'ambient-c-flags',
       CXXFLAGS: 'ambient-cxx-flags',
+      ASMFLAGS: 'ambient-asm-flags',
       GRADLE_USER_HOME: '/unreviewed/gradle',
       EAS_LOCAL_BUILD_SKIP_CLEANUP: 'ambient-cleanup-policy',
       EAS_LOCAL_BUILD_SKIP_NATIVE_BUILD: '1',
@@ -223,6 +226,7 @@ test('uses one deterministic private run path with separate EAS and Gradle direc
   assert.equal(environment.GRADLE_USER_HOME, paths.gradleHome);
   assert.equal(environment.CFLAGS, expectedFlags);
   assert.equal(environment.CXXFLAGS, expectedFlags);
+  assert.equal(environment.ASMFLAGS, expectedFlags);
   assert.equal(environment.GATOR_NATIVE_PATH_MAP_FLAGS, expectedFlags);
   assert.equal(environment.EAS_LOCAL_BUILD_SKIP_CLEANUP, '1');
   assert.equal(environment.EAS_LOCAL_BUILD_SKIP_NATIVE_BUILD, '0');
@@ -307,14 +311,20 @@ test('records sanitized proof from the exact retained EAS native workspace', (t)
     paths.source,
     'android/app/.cxx/RelWithDebInfo/fingerprint/arm64-v8a',
   );
+  const hermesCompileDirectory = join(
+    paths.source,
+    'node_modules/react-native/ReactAndroid/hermes-engine/.cxx/MinSizeRel/fingerprint/arm64-v8a',
+  );
   const bundle = join(paths.source, 'android/app/build/outputs/bundle/release/app-release.aab');
   mkdirSync(join(paths.source, 'android/app/src'), { recursive: true });
   mkdirSync(compileDirectory, { recursive: true });
+  mkdirSync(hermesCompileDirectory, { recursive: true });
   mkdirSync(join(paths.source, 'android/app/build/outputs/bundle/release'), { recursive: true });
   writeFileSync(source, 'int main() { return 0; }\n');
   const flags = nativeCompilerPathMappingFlags({
     sourceRoot: paths.source,
     gradleHome: paths.gradleHome,
+    includePrivateTmpAlias: true,
   });
   writeFileSync(
     join(compileDirectory, 'compile_commands.json'),
@@ -326,16 +336,116 @@ test('records sanitized proof from the exact retained EAS native workspace', (t)
       },
     ]),
   );
+  const assemblySource = join(paths.source, 'node_modules/react-native/boost.S');
+  mkdirSync(join(paths.source, 'node_modules/react-native'), { recursive: true });
+  writeFileSync(assemblySource, '.text\n');
+  const disabledHermesSource = join(
+    hermesCompileDirectory,
+    'lib/InternalJavaScript/internal_unit.c',
+  );
+  const disabledHermesOutput =
+    'lib/InternalJavaScript/CMakeFiles/hermesInternalUnit_obj.dir/internal_unit.c.o';
+  const selectedHermesOutput =
+    'lib/InternalJavaScript/CMakeFiles/hermesInternalBytecode_obj.dir/InternalBytecode.cpp.o';
+  const selectedHermesObject = join(hermesCompileDirectory, selectedHermesOutput);
+  const finalHermesLibrary = join(
+    paths.source,
+    'node_modules/react-native/ReactAndroid/hermes-engine/build/intermediates/cxx/MinSizeRel/fingerprint/obj/arm64-v8a/libhermesvm.so',
+  );
+  mkdirSync(dirname(disabledHermesSource), { recursive: true });
+  mkdirSync(dirname(selectedHermesObject), { recursive: true });
+  mkdirSync(dirname(finalHermesLibrary), { recursive: true });
+  writeFileSync(
+    join(hermesCompileDirectory, 'CMakeCache.txt'),
+    ['# fixture', 'HERMESVM_INTERNAL_JAVASCRIPT_NATIVE:BOOL=OFF', ''].join('\n'),
+  );
+  writeFileSync(selectedHermesObject, 'selected-bytecode-object');
+  writeFileSync(finalHermesLibrary, 'selected-hermes-library');
+  writeFileSync(
+    join(hermesCompileDirectory, '.ninja_log'),
+    [
+      '# ninja log v5',
+      `1\t2\t3\t${selectedHermesOutput}\tselected-hash`,
+      `2\t3\t4\t${finalHermesLibrary}\tlibrary-hash`,
+      '',
+    ].join('\n'),
+  );
+  writeFileSync(
+    join(hermesCompileDirectory, 'compile_commands.json'),
+    JSON.stringify([
+      {
+        directory: hermesCompileDirectory,
+        arguments: ['clang', ...flags, '-c', assemblySource],
+        file: assemblySource,
+      },
+      {
+        directory: hermesCompileDirectory,
+        arguments: ['clang', ...flags, '-o', disabledHermesOutput, '-c', disabledHermesSource],
+        file: disabledHermesSource,
+        output: disabledHermesOutput,
+      },
+    ]),
+  );
   writeFileSync(bundle, 'fixture-aab');
 
   assert.deepEqual(verifyReleaseNativePathProof(paths, bundle), {
     schemaVersion: 1,
-    compileDatabases: 1,
-    compileCommands: 1,
-    databaseBytes: statSync(join(compileDirectory, 'compile_commands.json')).size,
+    compileDatabases: 2,
+    compileCommands: 3,
+    databaseBytes:
+      statSync(join(compileDirectory, 'compile_commands.json')).size +
+      statSync(join(hermesCompileDirectory, 'compile_commands.json')).size,
     sourceDestination: '/gator/source',
     gradleDestination: '/gator/gradle',
   });
+
+  rmSync(selectedHermesObject);
+  assert.throws(
+    () => verifyReleaseNativePathProof(paths, bundle),
+    /selected Hermes bytecode object/,
+  );
+});
+
+test('retains native evidence and redacts host paths when release proof fails', () => {
+  const paths = {
+    source: '/private/tmp/gator-android-release-501/run/work/build',
+    gradleHome: '/private/tmp/gator-android-release-501/run/gradle-home',
+    work: '/private/tmp/gator-android-release-501/run/work',
+  };
+  const failure = classifyReleaseEvidenceFailure(
+    new Error(
+      `missing map for ${paths.source}\nand alias ${paths.source.replace('/private/tmp/', '/tmp/')}\tfrom ${process.cwd()}/dist/release/artifact.pending.aab`,
+    ),
+    'native_path_proof_failed',
+    paths,
+  );
+
+  assert.equal(failure.releaseFailureCode, 'native_path_proof_failed');
+  assert.equal(failure.retainWorkspace, true);
+  assert.match(failure.releaseFailureDetail, /\[native source\]/);
+  assert.match(failure.releaseFailureDetail, /\[release checkout\]/);
+  assert.doesNotMatch(failure.releaseFailureDetail, /gator-android-release-/);
+  assert.doesNotMatch(failure.releaseFailureDetail, /[\x00-\x1f\x7f]/);
+});
+
+test('maps both macOS temporary-directory spellings for release-native compilers', () => {
+  assert.deepEqual(
+    nativeCompilerPathMappingFlags({
+      sourceRoot: '/private/tmp/gator/source',
+      gradleHome: '/private/tmp/gator/gradle',
+      includePrivateTmpAlias: true,
+    }),
+    [
+      '-ffile-prefix-map=/private/tmp/gator/source=/gator/source',
+      '-fdebug-prefix-map=/private/tmp/gator/source=/gator/source',
+      '-ffile-prefix-map=/tmp/gator/source=/gator/source',
+      '-fdebug-prefix-map=/tmp/gator/source=/gator/source',
+      '-ffile-prefix-map=/private/tmp/gator/gradle=/gator/gradle',
+      '-fdebug-prefix-map=/private/tmp/gator/gradle=/gator/gradle',
+      '-ffile-prefix-map=/tmp/gator/gradle=/gator/gradle',
+      '-fdebug-prefix-map=/tmp/gator/gradle=/gator/gradle',
+    ],
+  );
 });
 
 test('reconciliation accepts only the exact bounded native-path proof receipt shape', () => {

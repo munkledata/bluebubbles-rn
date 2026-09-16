@@ -18,7 +18,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const DEFAULT_RELEASE_BUNDLE = 'android/app/build/outputs/bundle/release/app-release.aab';
-const RELEASE_CONFIGURATION_NAMES = new Set(['Release', 'RelWithDebInfo']);
+const RELEASE_CONFIGURATION_NAMES = new Set(['Release', 'RelWithDebInfo', 'MinSizeRel']);
 const SKIPPED_DIRECTORY_NAMES = new Set(['.git', '.gradle', 'build', 'coverage', 'dist']);
 const MAX_DISCOVERED_ENTRIES = 250_000;
 const MAX_DISCOVERED_DIRECTORIES = 75_000;
@@ -27,10 +27,18 @@ const MAX_COMPILE_DATABASES = 256;
 const MAX_COMPILE_DATABASE_BYTES = 16 * 1024 * 1024;
 const MAX_TOTAL_COMPILE_DATABASE_BYTES = 128 * 1024 * 1024;
 const MAX_COMPILE_COMMANDS = 250_000;
+const MAX_HERMES_CMAKE_CACHE_BYTES = 1024 * 1024;
+const MAX_HERMES_NINJA_LOG_BYTES = 16 * 1024 * 1024;
 const MAX_PROOF_AGE_MS = 6 * 60 * 60 * 1000;
 const MAX_FUTURE_SKEW_MS = 5_000;
 const SOURCE_MAP_DESTINATION = '/gator/source';
 const GRADLE_MAP_DESTINATION = '/gator/gradle';
+const ANDROID_ABIS = new Set(['arm64-v8a', 'armeabi-v7a', 'x86', 'x86_64']);
+const HERMES_DISABLED_NATIVE_SOURCE = 'lib/InternalJavaScript/internal_unit.c';
+const HERMES_DISABLED_NATIVE_OUTPUT =
+  'lib/InternalJavaScript/CMakeFiles/hermesInternalUnit_obj.dir/internal_unit.c.o';
+const HERMES_SELECTED_BYTECODE_OUTPUT =
+  'lib/InternalJavaScript/CMakeFiles/hermesInternalBytecode_obj.dir/InternalBytecode.cpp.o';
 
 function fail(message) {
   throw new Error(`Android native-path proof failed: ${message}`);
@@ -48,21 +56,36 @@ function normalizedAbsoluteMappingPath(path, label) {
 }
 
 /**
- * Return the exact flags used by clean Android C and C++ configurations.
+ * Return the exact flags used by clean Android C, C++, and assembly configurations.
  *
  * `-ffile-prefix-map` covers source-level values such as `__FILE__`, while
  * `-fdebug-prefix-map` covers compiler debug metadata. Both roots are explicit so a Gradle prefab
  * header path cannot escape the source-root mapping.
  */
-export function nativeCompilerPathMappingFlags({ sourceRoot, gradleHome }) {
+function privateTmpPathSpellings(path, includePrivateTmpAlias) {
+  if (!includePrivateTmpAlias) return [path];
+  if (path === '/private/tmp') return [path, '/tmp'];
+  if (path.startsWith('/private/tmp/')) return [path, path.slice('/private'.length)];
+  return [path];
+}
+
+export function nativeCompilerPathMappingFlags({
+  sourceRoot,
+  gradleHome,
+  includePrivateTmpAlias = false,
+}) {
   const source = normalizedAbsoluteMappingPath(sourceRoot, 'native source root');
   const gradle = normalizedAbsoluteMappingPath(gradleHome, 'Gradle user home');
   if (source === gradle) throw new Error('native source root and Gradle user home must differ');
   return [
-    `-ffile-prefix-map=${source}=${SOURCE_MAP_DESTINATION}`,
-    `-fdebug-prefix-map=${source}=${SOURCE_MAP_DESTINATION}`,
-    `-ffile-prefix-map=${gradle}=${GRADLE_MAP_DESTINATION}`,
-    `-fdebug-prefix-map=${gradle}=${GRADLE_MAP_DESTINATION}`,
+    ...privateTmpPathSpellings(source, includePrivateTmpAlias).flatMap((path) => [
+      `-ffile-prefix-map=${path}=${SOURCE_MAP_DESTINATION}`,
+      `-fdebug-prefix-map=${path}=${SOURCE_MAP_DESTINATION}`,
+    ]),
+    ...privateTmpPathSpellings(gradle, includePrivateTmpAlias).flatMap((path) => [
+      `-ffile-prefix-map=${path}=${GRADLE_MAP_DESTINATION}`,
+      `-fdebug-prefix-map=${path}=${GRADLE_MAP_DESTINATION}`,
+    ]),
   ];
 }
 
@@ -134,6 +157,21 @@ function regularFileStat(path, label) {
     fail(`${label} must be a non-empty regular file without following symbolic links`);
   }
   return state;
+}
+
+function unindirectedRegularFileStat(path, label) {
+  const state = regularFileStat(path, label);
+  if (realpathSync(path) !== path) fail(`${label} must not use path indirection`);
+  return state;
+}
+
+function requireFreshEvidence(state, label, bundleMtimeMs, maximumProofAgeMs) {
+  if (state.mtimeMs > bundleMtimeMs + MAX_FUTURE_SKEW_MS) {
+    fail(`${label} is newer than the release AAB`);
+  }
+  if (bundleMtimeMs - state.mtimeMs > maximumProofAgeMs) {
+    fail(`${label} is stale relative to the release AAB`);
+  }
 }
 
 function releaseCompileDatabasePath(path, cxxRoot) {
@@ -219,7 +257,130 @@ function commandTokens(record, label) {
   return record.command.trim().split(/\s+/);
 }
 
-function validateCompileCommand(record, { label, expectedFlags, sourceRoot }) {
+/**
+ * Hermes configures both internal-JavaScript implementations, so its compile database includes
+ * one command for the disabled native-C alternative. When the bytecode implementation is selected,
+ * CMake never generates that command's source or object. Admit only that exact pinned layout and
+ * require durable evidence that Ninja built the selected bytecode object and final ABI library.
+ */
+function validateDisabledHermesNativeSource({
+  record,
+  sourcePath,
+  directory,
+  databasePath,
+  sourceRoot,
+  bundleMtimeMs,
+  maximumProofAgeMs,
+}) {
+  const databaseSegments = relative(sourceRoot, databasePath).split(sep);
+  if (
+    databaseSegments.length !== 9 ||
+    databaseSegments[0] !== 'node_modules' ||
+    databaseSegments[1] !== 'react-native' ||
+    databaseSegments[2] !== 'ReactAndroid' ||
+    databaseSegments[3] !== 'hermes-engine' ||
+    databaseSegments[4] !== '.cxx' ||
+    databaseSegments[5] !== 'MinSizeRel' ||
+    !/^[a-z0-9]+$/i.test(databaseSegments[6] ?? '') ||
+    !ANDROID_ABIS.has(databaseSegments[7]) ||
+    databaseSegments[8] !== 'compile_commands.json' ||
+    directory !== dirname(databasePath) ||
+    record.output !== HERMES_DISABLED_NATIVE_OUTPUT
+  ) {
+    return false;
+  }
+
+  const sourceParent = dirname(sourcePath);
+  if (!existsSync(sourceParent)) return false;
+  const canonicalSourcePath = resolve(realpathSync(sourceParent), 'internal_unit.c');
+  if (canonicalSourcePath !== resolve(directory, HERMES_DISABLED_NATIVE_SOURCE)) return false;
+
+  const fingerprint = databaseSegments[6];
+  const abi = databaseSegments[7];
+  const disabledObject = resolve(directory, HERMES_DISABLED_NATIVE_OUTPUT);
+  if (existsSync(disabledObject)) {
+    fail('disabled Hermes native-JavaScript object exists without its declared source');
+  }
+
+  const cache = readRegularFileOnce(
+    resolve(directory, 'CMakeCache.txt'),
+    MAX_HERMES_CMAKE_CACHE_BYTES,
+    'Hermes CMake cache',
+  );
+  requireFreshEvidence(cache.stat, 'Hermes CMake cache', bundleMtimeMs, maximumProofAgeMs);
+  const cacheSetting = 'HERMESVM_INTERNAL_JAVASCRIPT_NATIVE:BOOL=OFF';
+  const matchingCacheLines = cache.bytes
+    .toString('utf8')
+    .split(/\r?\n/)
+    .filter((line) => line === cacheSetting);
+  if (matchingCacheLines.length !== 1) {
+    fail('Hermes CMake cache does not select the bytecode internal-JavaScript implementation');
+  }
+
+  const selectedBytecodeObject = resolve(directory, HERMES_SELECTED_BYTECODE_OUTPUT);
+  const selectedObjectState = unindirectedRegularFileStat(
+    selectedBytecodeObject,
+    'selected Hermes bytecode object',
+  );
+  requireFreshEvidence(
+    selectedObjectState,
+    'selected Hermes bytecode object',
+    bundleMtimeMs,
+    maximumProofAgeMs,
+  );
+
+  const hermesRoot = resolve(sourceRoot, 'node_modules/react-native/ReactAndroid/hermes-engine');
+  const finalLibrary = resolve(
+    hermesRoot,
+    'build/intermediates/cxx/MinSizeRel',
+    fingerprint,
+    'obj',
+    abi,
+    'libhermesvm.so',
+  );
+  const finalLibraryState = unindirectedRegularFileStat(
+    finalLibrary,
+    'selected Hermes ABI library',
+  );
+  requireFreshEvidence(
+    finalLibraryState,
+    'selected Hermes ABI library',
+    bundleMtimeMs,
+    maximumProofAgeMs,
+  );
+
+  const ninjaLog = readRegularFileOnce(
+    resolve(directory, '.ninja_log'),
+    MAX_HERMES_NINJA_LOG_BYTES,
+    'Hermes Ninja log',
+  );
+  requireFreshEvidence(ninjaLog.stat, 'Hermes Ninja log', bundleMtimeMs, maximumProofAgeMs);
+  const ninjaLines = ninjaLog.bytes.toString('utf8').split(/\r?\n/);
+  if (!/^# ninja log v\d+$/.test(ninjaLines.shift() ?? '')) {
+    fail('Hermes Ninja log has an invalid header');
+  }
+  const ninjaOutputs = ninjaLines.filter(Boolean).map((line) => {
+    const columns = line.split('\t');
+    if (columns.length !== 5 || !columns[3]) fail('Hermes Ninja log has an invalid record');
+    return columns[3];
+  });
+  if (ninjaOutputs.includes(HERMES_DISABLED_NATIVE_OUTPUT)) {
+    fail('Hermes Ninja log says the disabled native-JavaScript object was built');
+  }
+  if (!ninjaOutputs.includes(HERMES_SELECTED_BYTECODE_OUTPUT)) {
+    fail('Hermes Ninja log does not prove the selected bytecode object was built');
+  }
+  const finalLibrarySpellings = privateTmpPathSpellings(finalLibrary, true);
+  if (!ninjaOutputs.some((output) => finalLibrarySpellings.includes(output))) {
+    fail('Hermes Ninja log does not prove the selected ABI library was built');
+  }
+  return true;
+}
+
+function validateCompileCommand(
+  record,
+  { label, expectedFlags, sourceRoot, databasePath, bundleMtimeMs, maximumProofAgeMs },
+) {
   if (!record || typeof record !== 'object' || Array.isArray(record)) {
     fail(`${label} is not an object`);
   }
@@ -236,13 +397,6 @@ function validateCompileCommand(record, { label, expectedFlags, sourceRoot }) {
   const sourcePath = isAbsolute(record.file)
     ? resolve(record.file)
     : resolve(record.directory, record.file);
-  if (!existsSync(sourcePath) || !statSync(sourcePath).isFile()) {
-    fail(`${label} names a missing source file`);
-  }
-  const realSourcePath = realpathSync(sourcePath);
-  if (!isDescendantOrSame(sourceRoot, realSourcePath)) {
-    fail(`${label} source file belongs to a different source tree`);
-  }
 
   const tokens = commandTokens(record, label);
   for (const flag of expectedFlags) {
@@ -261,6 +415,28 @@ function validateCompileCommand(record, { label, expectedFlags, sourceRoot }) {
     pathMaps.some((pathMap) => !expectedFlags.includes(pathMap))
   ) {
     fail(`${label} has an unexpected compiler path map`);
+  }
+
+  if (!existsSync(sourcePath)) {
+    if (
+      validateDisabledHermesNativeSource({
+        record,
+        sourcePath,
+        directory,
+        databasePath,
+        sourceRoot,
+        bundleMtimeMs,
+        maximumProofAgeMs,
+      })
+    ) {
+      return;
+    }
+    fail(`${label} names a missing source file`);
+  }
+  if (!statSync(sourcePath).isFile()) fail(`${label} source is not a regular file`);
+  const realSourcePath = realpathSync(sourcePath);
+  if (!isDescendantOrSame(sourceRoot, realSourcePath)) {
+    fail(`${label} source file belongs to a different source tree`);
   }
 }
 
@@ -295,6 +471,7 @@ export function runAndroidNativePathCheck({
   const expectedFlags = nativeCompilerPathMappingFlags({
     sourceRoot: canonicalSourceRoot,
     gradleHome: canonicalGradleHome,
+    includePrivateTmpAlias: true,
   });
 
   const bundle = regularFileStat(resolve(releaseBundlePath), 'release AAB');
@@ -346,6 +523,9 @@ export function runAndroidNativePathCheck({
         label: `${databaseLabel}[${index}]`,
         expectedFlags,
         sourceRoot: canonicalSourceRoot,
+        databasePath,
+        bundleMtimeMs: bundle.mtimeMs,
+        maximumProofAgeMs,
       }),
     );
   }
