@@ -1,0 +1,546 @@
+diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java
+index 82bc0db..5c61a89 100644
+--- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java
++++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java
+@@ -15,6 +15,7 @@ import android.os.PersistableBundle;
+ import android.util.Log;
+
+ import java.util.ArrayList;
++import java.util.Collections;
+ import java.util.List;
+ import java.util.Map;
+
+@@ -73,7 +74,10 @@ public class TaskManagerUtils implements TaskManagerUtilsInterface {
+   @Override
+   public void executeTask(TaskInterface task, Bundle data, @Nullable TaskExecutionCallback callback) {
+     if (task == null) {
+-      Log.e(TAG, "Trying to execute a null task!");
++      Log.e(TAG, "Trying to execute a null task; completing callback with failure.");
++      if (callback != null) {
++        callback.onFinished(Collections.emptyMap());
++      }
+     } else {
+       task.execute(data, null, callback);
+     }
+diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java
+index de829ca..330e839 100644
+--- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java
++++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java
+@@ -16,6 +16,7 @@ import org.json.JSONObject;
+ import java.lang.ref.WeakReference;
+ import java.lang.reflect.Constructor;
+ import java.util.ArrayList;
++import java.util.Collections;
+ import java.util.HashMap;
+ import java.util.List;
+ import java.util.Map;
+@@ -58,6 +59,7 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+   private static final String TAG = "TaskService";
+   private static final String SHARED_PREFERENCES_NAME = "TaskManagerModule";
+   private static final int MAX_TASK_EXECUTION_TIME_MS = 15000; // 15 seconds
++  private static final Object sTaskExecutionLock = new Object();
+
+   private WeakReference<Context> mContextRef;
+   private TaskManagerUtilsInterface mTaskManagerUtils;
+@@ -76,9 +78,12 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+   // Map of callbacks for task execution events. Schema: { "<eventId>": TaskExecutionCallback }
+   private static final Map<String, TaskExecutionCallback> sTaskCallbacks = new HashMap<>();
+
+-  // Tracks headless JS task IDs per appScopeKey, used to keep JS timers alive
+-  // during background task execution. See maybeStartHeadlessTask().
+-  private static final Map<String, Integer> sHeadlessTaskIds = new HashMap<>();
++  // Tracks headless JS task IDs by their event-generation token, used to keep JS timers alive
++  // during background task execution without letting one retry finish another. See maybeStartHeadlessTask().
++  private static final Map<Object, Integer> sHeadlessTaskIds = new HashMap<>();
++
++  // Identifies the only event generation allowed to start a headless JS timer keeper.
++  private static final Map<String, Object> sHeadlessStartTokens = new HashMap<>();
+
+   public TaskService(Context context) {
+     super();
+@@ -208,29 +213,38 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+   @Override
+   public void notifyTaskFinished(String taskName, final String appScopeKey, Map<String, Object> response) {
+     String eventId = (String) response.get("eventId");
+-    List<String> appEvents = sEvents.get(appScopeKey);
+-
+     Log.i(TAG, "Finished task '" + taskName + "' with eventId '" + eventId + "'.");
+
+-    if (appEvents != null) {
+-      appEvents.remove(eventId);
+-
+-      if (appEvents.isEmpty()) {
+-        sEvents.remove(appScopeKey);
+-        maybeFinishHeadlessTask(appScopeKey);
++    Object finishedHeadlessStartToken = null;
++    TaskExecutionCallback taskCallback;
++    synchronized (sTaskExecutionLock) {
++      List<String> appEvents = sEvents.get(appScopeKey);
++      if (appEvents != null) {
++        appEvents.remove(eventId);
+
+-        // Invalidate app record but after 2 seconds delay so we can still take batched events.
+-        Handler handler = new Handler();
+-        handler.postDelayed(() -> {
+-          if (!sEvents.containsKey(appScopeKey)) {
+-            invalidateAppRecord(appScopeKey);
+-          }
+-        }, 2000);
++        if (appEvents.isEmpty()) {
++          sEvents.remove(appScopeKey);
++          finishedHeadlessStartToken = sHeadlessStartTokens.remove(appScopeKey);
++        }
+       }
++      taskCallback = sTaskCallbacks.remove(eventId);
+     }
+
+-    // Invoke task callback
+-    TaskExecutionCallback taskCallback = sTaskCallbacks.remove(eventId);
++    if (finishedHeadlessStartToken != null) {
++      maybeFinishHeadlessTask(appScopeKey, finishedHeadlessStartToken);
++
++      // Invalidate app record but after 2 seconds delay so we can still take batched events.
++      Handler handler = new Handler();
++      handler.postDelayed(() -> {
++        boolean hasEvents;
++        synchronized (sTaskExecutionLock) {
++          hasEvents = sEvents.containsKey(appScopeKey);
++        }
++        if (!hasEvents) {
++          invalidateAppRecord(appScopeKey);
++        }
++      }, 2000);
++    }
+
+     if (taskCallback != null) {
+       taskCallback.onFinished(response);
+@@ -241,7 +255,9 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+   public void setTaskManager(TaskManagerInterface taskManager, String appScopeKey, String appUrl) {
+     // It may be called with null when the host activity is destroyed.
+     if (taskManager == null) {
+-      sTaskManagers.remove(appScopeKey);
++      synchronized (sTaskExecutionLock) {
++        sTaskManagers.remove(appScopeKey);
++      }
+       return;
+     }
+
+@@ -251,21 +267,30 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+     boolean isHeadless = isStartedByHeadlessLoader(appScopeKey);
+     Map<String, WeakReference<TaskManagerInterface>> taskManagers = isHeadless ? sHeadlessTaskManagers : sTaskManagers;
+
+-    // Set task manager in appropriate map.
+-    taskManagers.put(appScopeKey, new WeakReference<>(taskManager));
+-
+-    // Execute events waiting for the task manager.
+-    List<Bundle> eventsQueue = mTasksAndEventsRepository.getEvents(appScopeKey);
++    final List<Bundle> eventsQueue;
++    synchronized (sTaskExecutionLock) {
++      // Publishing the manager and detaching its queue under one lock assigns every event to
++      // exactly one owner: either this JavaScript manager or native failure settlement.
++      taskManagers.put(appScopeKey, new WeakReference<>(taskManager));
++      eventsQueue = mTasksAndEventsRepository.getEvents(appScopeKey);
++      mTasksAndEventsRepository.removeEvents(appScopeKey);
++    }
+
++    // Execute events only after releasing the handoff lock so JavaScript cannot call back into it.
+     if (eventsQueue != null) {
+       for (Bundle body : eventsQueue) {
+-        taskManager.executeTaskWithBody(body);
++        try {
++          taskManager.executeTaskWithBody(body);
++        } catch (Exception e) {
++          String eventId = getTaskEventId(body);
++          Log.e(TAG, "Task manager threw before queued JavaScript dispatch; completing task with failure.", e);
++          if (eventId != null) {
++            finishClaimedTaskExecutionWithFailure(appScopeKey, eventId);
++          }
++        }
+       }
+     }
+
+-    // Remove events queue for that app.
+-    mTasksAndEventsRepository.removeEvents(appScopeKey);
+-
+     if (!isHeadless) {
+       // Maybe update app url in user defaults. It might change only in non-headless mode.
+       maybeUpdateAppUrlForAppScopeKey(appUrl, appScopeKey);
+@@ -377,66 +402,147 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+
+   public void executeTask(TaskInterface task, Bundle data, Error error, TaskExecutionCallback callback) {
+     String appScopeKey = task.getAppScopeKey();
+-    TaskManagerInterface taskManager = getTaskManager(appScopeKey);
+     Bundle body = createExecutionEventBody(task, data, error);
+     Bundle executionInfo = body.getBundle("executionInfo");
+
+     if (executionInfo == null) {
+-      // it should never happen, just to suppress warnings :)
++      Log.e(TAG, "Task execution body is missing execution info; completing callback with failure.");
++      if (callback != null) {
++        callback.onFinished(Collections.emptyMap());
++      }
+       return;
+     }
+
+     String eventId = executionInfo.getString("eventId");
+-
+-    if (callback != null) {
+-      sTaskCallbacks.put(eventId, callback);
++    if (eventId == null) {
++      Log.e(TAG, "Task execution body is missing an event ID; completing callback with failure.");
++      if (callback != null) {
++        callback.onFinished(Collections.emptyMap());
++      }
++      return;
+     }
+
+-    boolean isFirstEvent = sEvents.get(appScopeKey) == null;
+-    final List<String> appEvents;
+-    if (isFirstEvent) {
+-      appEvents = new ArrayList<>();
+-      appEvents.add(eventId);
+-      sEvents.put(appScopeKey, appEvents);
+-    } else {
+-      appEvents = sEvents.get(appScopeKey);
+-      appEvents.add(eventId);
+-    }
++    final TaskManagerInterface taskManager;
++    final boolean isFirstEvent;
++    final Object headlessStartToken;
++    synchronized (sTaskExecutionLock) {
++      taskManager = getTaskManager(appScopeKey);
+
+-    // Register with HeadlessJsTaskContext to keep JS timers alive while
+-    // the app is backgrounded. Without this, JavaTimerManager pauses all
+-    // timers when the Activity is paused (isPaused=true && isRunningTasks=false),
+-    // causing all async JS operations (promises, setTimeout) to hang.
+-    if (isFirstEvent) {
+-      maybeStartHeadlessTask(appScopeKey);
++      if (callback != null) {
++        sTaskCallbacks.put(eventId, callback);
++      }
++
++      isFirstEvent = sEvents.get(appScopeKey) == null;
++      final List<String> appEvents;
++      if (isFirstEvent) {
++        appEvents = new ArrayList<>();
++        appEvents.add(eventId);
++        sEvents.put(appScopeKey, appEvents);
++        headlessStartToken = new Object();
++        sHeadlessStartTokens.put(appScopeKey, headlessStartToken);
++      } else {
++        appEvents = sEvents.get(appScopeKey);
++        appEvents.add(eventId);
++        headlessStartToken = null;
++      }
++
++      if (taskManager == null) {
++        if (!mTasksAndEventsRepository.hasEvents(appScopeKey)) {
++          mTasksAndEventsRepository.putEvents(appScopeKey, new ArrayList<>());
++        }
++        mTasksAndEventsRepository.putEventForAppScopeKey(appScopeKey, body);
++      }
+     }
+
+     if (taskManager != null) {
+-      taskManager.executeTaskWithBody(body);
++      if (headlessStartToken != null) {
++        maybeStartHeadlessTask(appScopeKey, headlessStartToken);
++      }
++      try {
++        taskManager.executeTaskWithBody(body);
++      } catch (Exception e) {
++        Log.e(TAG, "Task manager threw before JavaScript dispatch; completing task with failure.", e);
++        finishClaimedTaskExecutionWithFailure(appScopeKey, eventId);
++      }
++      return;
++    }
++
++    HeadlessAppLoader appLoader = getAppLoader();
++    Context context = mContextRef.get();
++    if (appLoader == null || context == null) {
++      Log.e(TAG, "Headless app loader is unavailable; completing pending tasks with failure.");
++      finishPendingTaskExecutionWithFailure(appScopeKey, eventId, body);
+       return;
+     }
+
+-    // The app is not fully loaded as its task manager is not there yet.
+-    // We need to add event's body to the queue from which events will be executed once the task manager is ready.
+-    if (!mTasksAndEventsRepository.hasEvents(appScopeKey)) {
+-      mTasksAndEventsRepository.putEvents(appScopeKey, new ArrayList<>());
++    // Register with HeadlessJsTaskContext to keep JS timers alive while
++    // the app is backgrounded. Resolve the loader first so an unavailable native bootstrap does
++    // not leave a dormant ReactContext listener behind on every WorkManager retry.
++    if (headlessStartToken != null) {
++      maybeStartHeadlessTask(appScopeKey, headlessStartToken);
+     }
+-    mTasksAndEventsRepository.putEventForAppScopeKey(appScopeKey, body);
+
+-    getAppLoader().loadApp(mContextRef.get(),
+-      new HeadlessAppLoader.Params(appScopeKey, task.getAppUrl()),
+-      () -> {
+-      },
+-      success -> {
+-        if (!success) {
+-          sEvents.remove(appScopeKey);
+-          mTasksAndEventsRepository.removeEvents(appScopeKey);
++    try {
++      appLoader.loadApp(context,
++        new HeadlessAppLoader.Params(appScopeKey, task.getAppUrl()),
++        () -> {
++          Log.e(TAG, "Headless app is already running without a task manager; completing pending task with failure.");
++          finishPendingTaskExecutionWithFailure(appScopeKey, eventId, body);
++        },
++        success -> {
++          if (!success) {
++            Log.e(TAG, "Headless app load failed; completing pending tasks with failure.");
++            finishPendingTaskExecutionWithFailure(appScopeKey, eventId, body);
++          }
++        }
++      );
++    } catch (Exception e) {
++      Log.e(TAG, "Headless app loader threw before JavaScript dispatch; completing pending tasks with failure.", e);
++      finishPendingTaskExecutionWithFailure(appScopeKey, eventId, body);
++    }
++  }
+
+-          // Host unreachable? Unregister all tasks for that app.
+-          unregisterAllTasksForAppScopeKey(appScopeKey);
++  /**
++   * Settles exactly one event only while it remains in the pre-JavaScript queue. A late loader
++   * failure cannot complete work that setTaskManager already handed to JavaScript, and a failed
++   * bootstrap does not unregister durable tasks that can retry.
++   */
++  private void finishPendingTaskExecutionWithFailure(String appScopeKey, String eventId, Bundle body) {
++    finishTaskExecutionWithFailure(appScopeKey, eventId, body);
++  }
++
++  /** Settles an event whose queue ownership was already detached for JavaScript dispatch. */
++  private void finishClaimedTaskExecutionWithFailure(String appScopeKey, String eventId) {
++    finishTaskExecutionWithFailure(appScopeKey, eventId, null);
++  }
++
++  private void finishTaskExecutionWithFailure(String appScopeKey, String eventId, @Nullable Bundle pendingBody) {
++    Object finishedHeadlessStartToken = null;
++    TaskExecutionCallback taskCallback;
++    synchronized (sTaskExecutionLock) {
++      if (pendingBody != null && !mTasksAndEventsRepository.removeEventForAppScopeKey(appScopeKey, pendingBody)) {
++        return;
++      }
++
++      List<String> appEvents = sEvents.get(appScopeKey);
++      if (appEvents != null) {
++        appEvents.remove(eventId);
++        if (appEvents.isEmpty()) {
++          sEvents.remove(appScopeKey);
++          finishedHeadlessStartToken = sHeadlessStartTokens.remove(appScopeKey);
+         }
+       }
+-    );
++      taskCallback = sTaskCallbacks.remove(eventId);
++    }
++
++    if (finishedHeadlessStartToken != null) {
++      maybeFinishHeadlessTask(appScopeKey, finishedHeadlessStartToken);
++    }
++    if (taskCallback != null) {
++      Map<String, Object> response = new HashMap<>();
++      response.put("eventId", eventId);
++      taskCallback.onFinished(response);
++    }
+   }
+
+   //endregion
+@@ -450,6 +556,12 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+     }
+   }
+
++  @Nullable
++  private String getTaskEventId(Bundle body) {
++    Bundle executionInfo = body.getBundle("executionInfo");
++    return executionInfo == null ? null : executionInfo.getString("eventId");
++  }
++
+   private void internalRegisterTask(String taskName, String appScopeKey, String appUrl, Class<TaskConsumerInterface> consumerClass, Map<String, Object> options) throws TaskRegisteringFailedException {
+     Constructor<?> consumerConstructor;
+     TaskConsumerInterface consumer;
+@@ -599,20 +711,24 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+    */
+   @Nullable
+   private TaskManagerInterface getTaskManager(String appScopeKey) {
+-    WeakReference<TaskManagerInterface> weakRef = sTaskManagers.get(appScopeKey);
+-    TaskManagerInterface taskManager = weakRef == null ? null : weakRef.get();
++    synchronized (sTaskExecutionLock) {
++      WeakReference<TaskManagerInterface> weakRef = sTaskManagers.get(appScopeKey);
++      TaskManagerInterface taskManager = weakRef == null ? null : weakRef.get();
+
+-    if (taskManager == null) {
+-      weakRef = sHeadlessTaskManagers.get(appScopeKey);
++      if (taskManager == null) {
++        weakRef = sHeadlessTaskManagers.get(appScopeKey);
++      }
++      return weakRef == null ? null : weakRef.get();
+     }
+-    return weakRef == null ? null : weakRef.get();
+   }
+
+   private void invalidateAppRecord(String appScopeKey) {
+     HeadlessAppLoader appLoader = getAppLoader();
+     if (appLoader != null) {
+       if (getAppLoader().invalidateApp(appScopeKey)) {
+-        sHeadlessTaskManagers.remove(appScopeKey);
++        synchronized (sTaskExecutionLock) {
++          sHeadlessTaskManagers.remove(appScopeKey);
++        }
+       }
+     }
+   }
+@@ -630,24 +746,24 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+    *
+    * @see <a href="https://github.com/facebook/react-native/blob/63800af9438ea9ddaec84b6f17793a4f1bffe342/packages/react-native/ReactAndroid/src/main/java/com/facebook/react/modules/core/JavaTimerManager.kt#L291">JavaTimerManager timer guard</a>
+    */
+-  private void maybeStartHeadlessTask(String appScopeKey) {
++  private void maybeStartHeadlessTask(String appScopeKey, Object headlessStartToken) {
+     try {
+       Context context = mContextRef.get();
+       if (context == null) return;
+
+       ReactContext reactContext = getReactContext(context);
+       if (reactContext != null) {
+-        invokeStartHeadlessTask(reactContext, appScopeKey);
++        invokeStartHeadlessTask(reactContext, appScopeKey, headlessStartToken);
+       } else {
+         // App was killed — context not ready yet. Listen for creation and start then.
+-        waitForReactContextAndStartTask(context, appScopeKey);
++        waitForReactContextAndStartTask(context, appScopeKey, headlessStartToken);
+       }
+     } catch (Exception e) {
+       Log.w(TAG, "Failed to start headless task: " + e.getMessage());
+     }
+   }
+
+-  private void invokeStartHeadlessTask(ReactContext reactContext, String appScopeKey) {
++  private void invokeStartHeadlessTask(ReactContext reactContext, String appScopeKey, Object headlessStartToken) {
+     HeadlessJsTaskContext headlessContext = HeadlessJsTaskContext.getInstance(reactContext);
+     HeadlessJsTaskConfig taskConfig = new HeadlessJsTaskConfig(
+       "expo-task-manager",
+@@ -658,8 +774,21 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+
+     UiThreadUtil.runOnUiThread(() -> {
+       try {
++        synchronized (sTaskExecutionLock) {
++          if (sHeadlessStartTokens.get(appScopeKey) != headlessStartToken || !sEvents.containsKey(appScopeKey)) {
++            return;
++          }
++        }
+         int taskId = headlessContext.startTask(taskConfig);
+-        sHeadlessTaskIds.put(appScopeKey, taskId);
++        boolean stillOwnsHeadlessStart;
++        synchronized (sTaskExecutionLock) {
++          stillOwnsHeadlessStart = sHeadlessStartTokens.get(appScopeKey) == headlessStartToken && sEvents.containsKey(appScopeKey);
++        }
++        if (!stillOwnsHeadlessStart) {
++          headlessContext.finishTask(taskId);
++          return;
++        }
++        sHeadlessTaskIds.put(headlessStartToken, taskId);
+         Log.i(TAG, "Started headless task " + taskId + " to keep JS timers alive for '" + appScopeKey + "'");
+       } catch (Exception e) {
+         Log.w(TAG, "Failed to start headless task: " + e.getMessage());
+@@ -667,7 +796,7 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+     });
+   }
+
+-  private void waitForReactContextAndStartTask(Context context, String appScopeKey) {
++  private void waitForReactContextAndStartTask(Context context, String appScopeKey, Object headlessStartToken) {
+     ReactApplication app = (ReactApplication) context.getApplicationContext();
+     ReactHost reactHost = app.getReactHost();
+     if (reactHost == null) return;
+@@ -675,8 +804,14 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+     reactHost.addReactInstanceEventListener(new ReactInstanceEventListener() {
+       @Override
+       public void onReactContextInitialized(@NonNull ReactContext reactContext) {
+-        invokeStartHeadlessTask(reactContext, appScopeKey);
+         reactHost.removeReactInstanceEventListener(this);
++        boolean hasPendingEvents;
++        synchronized (sTaskExecutionLock) {
++          hasPendingEvents = sHeadlessStartTokens.get(appScopeKey) == headlessStartToken && sEvents.containsKey(appScopeKey);
++        }
++        if (hasPendingEvents) {
++          invokeStartHeadlessTask(reactContext, appScopeKey, headlessStartToken);
++        }
+       }
+     });
+   }
+@@ -685,11 +820,11 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+    * Finishes the headless JS task for the given appScopeKey, allowing JavaTimerManager
+    * to pause timers again when all background tasks are complete.
+    */
+-  private void maybeFinishHeadlessTask(String appScopeKey) {
++  private void maybeFinishHeadlessTask(String appScopeKey, Object headlessStartToken) {
+     // Run on UI thread to match startTask and ensure sHeadlessTaskIds
+     // is only accessed from the UI thread.
+     UiThreadUtil.runOnUiThread(() -> {
+-      Integer taskId = sHeadlessTaskIds.remove(appScopeKey);
++      Integer taskId = sHeadlessTaskIds.remove(headlessStartToken);
+       if (taskId == null) return;
+
+       try {
+diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/BareTasksAndEventsRepository.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/BareTasksAndEventsRepository.java
+index 5d20b8a..581042d 100644
+--- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/BareTasksAndEventsRepository.java
++++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/BareTasksAndEventsRepository.java
+@@ -48,6 +48,18 @@ public class BareTasksAndEventsRepository implements TasksAndEventsRepository {
+     sEvents.get(appScopeKey).add(body);
+   }
+
++  @Override
++  public boolean removeEventForAppScopeKey(String appScopeKey, Bundle body) {
++    List<Bundle> events = sEvents.get(appScopeKey);
++    if (events == null || !events.remove(body)) {
++      return false;
++    }
++    if (events.isEmpty()) {
++      sEvents.remove(appScopeKey);
++    }
++    return true;
++  }
++
+   @Override
+   public boolean hasEvents(String appScopeKey) {
+     return sEvents.containsKey(appScopeKey);
+diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/ManagedTasksAndEventsRepository.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/ManagedTasksAndEventsRepository.java
+index df04404..b7f8a4f 100644
+--- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/ManagedTasksAndEventsRepository.java
++++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/ManagedTasksAndEventsRepository.java
+@@ -39,6 +39,18 @@ public class ManagedTasksAndEventsRepository implements TasksAndEventsRepository
+     sEvents.get(appScopeKey).add(body);
+   }
+
++  @Override
++  public boolean removeEventForAppScopeKey(String appScopeKey, Bundle body) {
++    List<Bundle> events = sEvents.get(appScopeKey);
++    if (events == null || !events.remove(body)) {
++      return false;
++    }
++    if (events.isEmpty()) {
++      sEvents.remove(appScopeKey);
++    }
++    return true;
++  }
++
+   @Override
+   public boolean hasEvents(String appScopeKey) {
+     return sEvents.containsKey(appScopeKey);
+diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/TasksAndEventsRepository.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/TasksAndEventsRepository.java
+index 185a391..db4f67d 100644
+--- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/TasksAndEventsRepository.java
++++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/TasksAndEventsRepository.java
+@@ -53,6 +53,7 @@ public interface TasksAndEventsRepository {
+
+   void putEvents(String appScopeKey, List<Bundle> events);
+   void putEventForAppScopeKey(String appScopeKey, Bundle body);
++  boolean removeEventForAppScopeKey(String appScopeKey, Bundle body);
+   boolean hasEvents(String appScopeKey);
+   void removeEvents(String appScopeKey);
+   List<Bundle> getEvents(String appScopeKey);

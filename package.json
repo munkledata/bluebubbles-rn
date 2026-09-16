@@ -90,7 +90,7 @@
     "expo-splash-screen": "~57.0.8",
     "expo-status-bar": "~57.0.1",
     "expo-system-ui": "~57.0.3",
-    "expo-task-manager": "~57.0.16",
+    "expo-task-manager": "57.0.16",
     "expo-video": "~57.0.3",
     "expo-web-browser": "~57.0.2",
     "jail-monkey": "3.0.0",
@@ -158,7 +158,9 @@
       "android": {
         "buildFromSource": [
           "expo-background-task",
-          "expo-file-system"
+          "expo-file-system",
+          "expo-task-manager",
+          "unimodules-app-loader"
         ]
       }
     },

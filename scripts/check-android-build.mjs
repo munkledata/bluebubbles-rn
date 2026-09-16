@@ -33,6 +33,8 @@ const MAX_PACKAGED_DEX_BYTES = 256 * 1024 * 1024;
 const ANDROID_NAMESPACE = 'http://schemas.android.com/apk/res/android';
 const FORBIDDEN_INBOUND_SHARE_DEX_MARKERS = ['ExpoShareIntent', 'expo/modules/shareintent'];
 const EXPO_BACKGROUND_TASK_VERSION = '57.0.16';
+const EXPO_TASK_MANAGER_VERSION = '57.0.16';
+const UNIMODULES_APP_LOADER_VERSION = '57.0.1';
 const EXPO_FILE_SYSTEM_VERSION = '57.0.6';
 const PATCH_PACKAGE_VERSION = '8.0.1';
 const EXPO_BACKGROUND_TASK_PATCH_PATH = `patches/expo-background-task+${EXPO_BACKGROUND_TASK_VERSION}.patch`;
@@ -40,6 +42,17 @@ const EXPO_BACKGROUND_TASK_SCHEDULER_PATH =
   'node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskScheduler.kt';
 const EXPO_BACKGROUND_TASK_WORK_PATH =
   'node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskWork.kt';
+const EXPO_TASK_MANAGER_PATCH_PATH = `patches/expo-task-manager+${EXPO_TASK_MANAGER_VERSION}.patch`;
+const EXPO_TASK_MANAGER_UTILS_PATH =
+  'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java';
+const EXPO_TASK_SERVICE_PATH =
+  'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java';
+const EXPO_TASKS_REPOSITORY_PATH =
+  'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/TasksAndEventsRepository.java';
+const EXPO_BARE_TASKS_REPOSITORY_PATH =
+  'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/BareTasksAndEventsRepository.java';
+const EXPO_MANAGED_TASKS_REPOSITORY_PATH =
+  'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/ManagedTasksAndEventsRepository.java';
 const EXPO_FILE_SYSTEM_PATCH_PATH = `patches/expo-file-system+${EXPO_FILE_SYSTEM_VERSION}.patch`;
 const EXPO_FILE_SYSTEM_LEGACY_ANDROID_PATH =
   'node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemLegacyModule.kt';
@@ -64,6 +77,16 @@ export const REQUIRED_PINNED_SHORTCUT_CLEANUP_DEX_MARKERS = [
 export const REQUIRED_BACKGROUND_TASK_RETRY_DEX_MARKERS = [
   'Task finished; success=',
   'doWork: Worker failed; requesting retry',
+];
+
+// These messages exist only in the patched task-manager sources. They prove the packaged runtime
+// settles pre-JavaScript failures instead of leaving BackgroundTaskWork suspended forever.
+export const REQUIRED_TASK_MANAGER_SETTLEMENT_DEX_MARKERS = [
+  'Trying to execute a null task; completing callback with failure.',
+  'Task manager threw before queued JavaScript dispatch; completing task with failure.',
+  'Headless app is already running without a task manager; completing pending task with failure.',
+  'Headless app load failed; completing pending tasks with failure.',
+  'Headless app loader threw before JavaScript dispatch; completing pending tasks with failure.',
 ];
 
 export const FORBIDDEN_LEGACY_SHORTCUT_PUBLISHER_DEX_MARKERS = [
@@ -214,6 +237,206 @@ export function validateExpoBackgroundTaskRetryBridge({
       'expo-background-task worker must fail malformed input, propagate cancellation, and retry operational failures',
     );
   }
+  return errors;
+}
+
+/**
+ * Keep Expo TaskManager's pre-JavaScript failure settlement source-built and fail closed on drift.
+ * A missing task or failed headless loader must resolve only its still-queued native callback so
+ * WorkManager can retry; it must never unregister durable tasks or race work already handed to JS.
+ */
+export function validateExpoTaskManagerPreJsSettlement({
+  packageJson,
+  packageLock,
+  patchSource,
+  utilsSource,
+  serviceSource,
+  repositorySource,
+  bareRepositorySource,
+  managedRepositorySource,
+}) {
+  const errors = [];
+  if (packageJson?.dependencies?.['expo-task-manager'] !== EXPO_TASK_MANAGER_VERSION) {
+    errors.push(`expo-task-manager must be pinned exactly to ${EXPO_TASK_MANAGER_VERSION}`);
+  }
+  if (
+    packageLock?.packages?.['']?.dependencies?.['expo-task-manager'] !== EXPO_TASK_MANAGER_VERSION
+  ) {
+    errors.push(
+      `package-lock root must pin expo-task-manager exactly to ${EXPO_TASK_MANAGER_VERSION}`,
+    );
+  }
+  if (
+    packageLock?.packages?.['node_modules/expo-task-manager']?.version !== EXPO_TASK_MANAGER_VERSION
+  ) {
+    errors.push(`package-lock must resolve expo-task-manager ${EXPO_TASK_MANAGER_VERSION}`);
+  }
+  if (
+    packageLock?.packages?.['node_modules/unimodules-app-loader']?.version !==
+    UNIMODULES_APP_LOADER_VERSION
+  ) {
+    errors.push(`package-lock must resolve unimodules-app-loader ${UNIMODULES_APP_LOADER_VERSION}`);
+  }
+
+  const sourceBuild = packageJson?.expo?.autolinking?.android?.buildFromSource;
+  if (
+    !Array.isArray(sourceBuild) ||
+    sourceBuild.filter((name) => name === 'expo-task-manager').length !== 1
+  ) {
+    errors.push('Expo Android autolinking must build expo-task-manager from source exactly once');
+  }
+  if (
+    !Array.isArray(sourceBuild) ||
+    sourceBuild.filter((name) => name === 'unimodules-app-loader').length !== 1
+  ) {
+    errors.push(
+      'Expo Android autolinking must build unimodules-app-loader from source exactly once',
+    );
+  }
+
+  const expectedPatchPaths = [
+    EXPO_TASK_MANAGER_UTILS_PATH,
+    EXPO_TASK_SERVICE_PATH,
+    EXPO_TASKS_REPOSITORY_PATH,
+    EXPO_BARE_TASKS_REPOSITORY_PATH,
+    EXPO_MANAGED_TASKS_REPOSITORY_PATH,
+  ].sort();
+  const patchHeaders =
+    typeof patchSource === 'string'
+      ? [...patchSource.matchAll(/^diff --git a\/(.+) b\/(.+)$/gm)]
+      : [];
+  const patchedPaths = patchHeaders.map((match) => match[1]).sort();
+  if (
+    patchHeaders.some((match) => match[1] !== match[2]) ||
+    JSON.stringify(patchedPaths) !== JSON.stringify(expectedPatchPaths)
+  ) {
+    errors.push(`${EXPO_TASK_MANAGER_PATCH_PATH} must patch only the five reviewed source files`);
+  }
+
+  const patchMarkers = [
+    '+        callback.onFinished(Collections.emptyMap());',
+    '+  private static final Object sTaskExecutionLock = new Object();',
+    '+      // Publishing the manager and detaching its queue under one lock assigns every event to',
+    '+            finishClaimedTaskExecutionWithFailure(appScopeKey, eventId);',
+    '+      finishPendingTaskExecutionWithFailure(appScopeKey, eventId, body);',
+    '+      if (pendingBody != null && !mTasksAndEventsRepository.removeEventForAppScopeKey(appScopeKey, pendingBody)) {',
+    '+          finishedHeadlessStartToken = sHeadlessStartTokens.remove(appScopeKey);',
+    '+        sHeadlessTaskIds.put(headlessStartToken, taskId);',
+    '+      Integer taskId = sHeadlessTaskIds.remove(headlessStartToken);',
+    '+  boolean removeEventForAppScopeKey(String appScopeKey, Bundle body);',
+    '-          unregisterAllTasksForAppScopeKey(appScopeKey);',
+  ];
+  if (patchMarkers.some((marker) => !patchSource?.includes(marker))) {
+    errors.push(
+      `${EXPO_TASK_MANAGER_PATCH_PATH} must carry the reviewed pre-JavaScript settlement repair`,
+    );
+  }
+
+  const utilsMarkers = [
+    'Trying to execute a null task; completing callback with failure.',
+    'if (callback != null) {\n        callback.onFinished(Collections.emptyMap());\n      }',
+  ];
+  if (utilsMarkers.some((marker) => !utilsSource?.includes(marker))) {
+    errors.push('expo-task-manager utils must settle null-task callbacks as failures');
+  }
+
+  const serviceMarkers = [
+    'private static final Object sTaskExecutionLock = new Object();',
+    'private static final Map<Object, Integer> sHeadlessTaskIds = new HashMap<>();',
+    'private static final Map<String, Object> sHeadlessStartTokens = new HashMap<>();',
+    'Task execution body is missing execution info; completing callback with failure.',
+    'Task execution body is missing an event ID; completing callback with failure.',
+    'Task manager threw before queued JavaScript dispatch; completing task with failure.',
+    'Task manager threw before JavaScript dispatch; completing task with failure.',
+    'Headless app loader is unavailable; completing pending tasks with failure.',
+    'Headless app is already running without a task manager; completing pending task with failure.',
+    'Headless app load failed; completing pending tasks with failure.',
+    'Headless app loader threw before JavaScript dispatch; completing pending tasks with failure.',
+    'private void finishPendingTaskExecutionWithFailure(String appScopeKey, String eventId, Bundle body)',
+    'private void finishClaimedTaskExecutionWithFailure(String appScopeKey, String eventId)',
+    'pendingBody != null && !mTasksAndEventsRepository.removeEventForAppScopeKey(appScopeKey, pendingBody)',
+    'finishedHeadlessStartToken = sHeadlessStartTokens.remove(appScopeKey);',
+    'sHeadlessStartTokens.get(appScopeKey) != headlessStartToken',
+    'sHeadlessTaskIds.put(headlessStartToken, taskId);',
+    'sHeadlessTaskIds.remove(headlessStartToken);',
+    'response.put("eventId", eventId);',
+  ];
+  const managerHandoffRegion = serviceSource?.match(
+    /final List<Bundle> eventsQueue;[\s\S]*?Execute events only after releasing the handoff lock/,
+  )?.[0];
+  const enqueueDecisionRegion = serviceSource?.match(
+    /final TaskManagerInterface taskManager;[\s\S]*?if \(headlessStartToken != null\)/,
+  )?.[0];
+  const failureSettlementRegion = serviceSource?.match(
+    /private void finishTaskExecutionWithFailure[\s\S]*?\/\/endregion/,
+  )?.[0];
+  const executeTaskRegion = serviceSource?.match(
+    /public void executeTask\(TaskInterface task[\s\S]*?\/\/endregion/,
+  )?.[0];
+  const queuedBootstrapOffset = executeTaskRegion?.indexOf(
+    'HeadlessAppLoader appLoader = getAppLoader();',
+  );
+  const preJsSettlementRegion =
+    queuedBootstrapOffset != null && queuedBootstrapOffset >= 0
+      ? executeTaskRegion?.slice(queuedBootstrapOffset)
+      : undefined;
+  const queuedLoaderGuardIndex = preJsSettlementRegion?.indexOf(
+    'if (appLoader == null || context == null)',
+  );
+  const queuedKeeperIndex = preJsSettlementRegion?.indexOf(
+    'maybeStartHeadlessTask(appScopeKey, headlessStartToken);',
+  );
+  const queuedLoadIndex = preJsSettlementRegion?.indexOf('appLoader.loadApp');
+  const headlessTokenRegion = serviceSource?.match(
+    /private void invokeStartHeadlessTask[\s\S]*?private void maybeFinishHeadlessTask[\s\S]*?\n  }/,
+  )?.[0];
+  if (
+    serviceMarkers.some((marker) => !serviceSource?.includes(marker)) ||
+    !managerHandoffRegion?.includes('synchronized (sTaskExecutionLock)') ||
+    !managerHandoffRegion.includes('taskManagers.put(appScopeKey') ||
+    !managerHandoffRegion.includes('mTasksAndEventsRepository.removeEvents(appScopeKey);') ||
+    !enqueueDecisionRegion?.includes('synchronized (sTaskExecutionLock)') ||
+    !enqueueDecisionRegion.includes('taskManager = getTaskManager(appScopeKey);') ||
+    !enqueueDecisionRegion.includes('mTasksAndEventsRepository.putEventForAppScopeKey') ||
+    !failureSettlementRegion?.includes('synchronized (sTaskExecutionLock)') ||
+    !/taskCallback = sTaskCallbacks\.remove\(eventId\);\n\s*}\n\n\s*if \(finishedHeadlessStartToken != null\)[\s\S]*?taskCallback\.onFinished\(response\);/.test(
+      failureSettlementRegion,
+    ) ||
+    !headlessTokenRegion?.includes(
+      'stillOwnsHeadlessStart = sHeadlessStartTokens.get(appScopeKey) == headlessStartToken',
+    ) ||
+    !headlessTokenRegion.includes('sHeadlessTaskIds.remove(headlessStartToken)') ||
+    queuedLoaderGuardIndex == null ||
+    queuedLoaderGuardIndex < 0 ||
+    queuedKeeperIndex == null ||
+    queuedKeeperIndex <= queuedLoaderGuardIndex ||
+    queuedLoadIndex == null ||
+    queuedLoadIndex <= queuedKeeperIndex ||
+    !preJsSettlementRegion ||
+    preJsSettlementRegion.includes('unregisterAllTasksForAppScopeKey') ||
+    preJsSettlementRegion.includes('response.put("result"')
+  ) {
+    errors.push(
+      'expo-task-manager service must preserve locked one-owner handoff and generation-bound failure settlement',
+    );
+  }
+
+  if (
+    !repositorySource?.includes(
+      'boolean removeEventForAppScopeKey(String appScopeKey, Bundle body);',
+    ) ||
+    !bareRepositorySource?.includes(
+      'public boolean removeEventForAppScopeKey(String appScopeKey, Bundle body)',
+    ) ||
+    !managedRepositorySource?.includes(
+      'public boolean removeEventForAppScopeKey(String appScopeKey, Bundle body)',
+    ) ||
+    !bareRepositorySource?.includes('if (events == null || !events.remove(body))') ||
+    !managedRepositorySource?.includes('if (events == null || !events.remove(body))')
+  ) {
+    errors.push('expo-task-manager repositories must remove the exact still-queued event');
+  }
+
   return errors;
 }
 
@@ -903,6 +1126,11 @@ export function validatePackagedAndroidBundle({
         errors.push(`packaged DEX is missing required background-task retry marker: ${marker}`);
       }
     }
+    for (const marker of REQUIRED_TASK_MANAGER_SETTLEMENT_DEX_MARKERS) {
+      if (!dexBytes.includes(Buffer.from(marker, 'utf8'))) {
+        errors.push(`packaged DEX is missing required task-manager settlement marker: ${marker}`);
+      }
+    }
     for (const marker of REQUIRED_PINNED_SHORTCUT_CLEANUP_DEX_MARKERS) {
       if (!dexBytes.includes(Buffer.from(marker, 'utf8'))) {
         errors.push(`packaged DEX is missing required pinned-shortcut cleanup marker: ${marker}`);
@@ -1249,6 +1477,21 @@ export function runAndroidBuildCheck({
       schedulerSource: readFileSync(resolve(root, EXPO_BACKGROUND_TASK_SCHEDULER_PATH), 'utf8'),
       workerSource: readFileSync(resolve(root, EXPO_BACKGROUND_TASK_WORK_PATH), 'utf8'),
     }).map((error) => `background task retry bridge: ${error}`),
+  );
+  errors.push(
+    ...validateExpoTaskManagerPreJsSettlement({
+      packageJson,
+      packageLock,
+      patchSource: readFileSync(resolve(root, EXPO_TASK_MANAGER_PATCH_PATH), 'utf8'),
+      utilsSource: readFileSync(resolve(root, EXPO_TASK_MANAGER_UTILS_PATH), 'utf8'),
+      serviceSource: readFileSync(resolve(root, EXPO_TASK_SERVICE_PATH), 'utf8'),
+      repositorySource: readFileSync(resolve(root, EXPO_TASKS_REPOSITORY_PATH), 'utf8'),
+      bareRepositorySource: readFileSync(resolve(root, EXPO_BARE_TASKS_REPOSITORY_PATH), 'utf8'),
+      managedRepositorySource: readFileSync(
+        resolve(root, EXPO_MANAGED_TASKS_REPOSITORY_PATH),
+        'utf8',
+      ),
+    }).map((error) => `task-manager pre-JavaScript settlement: ${error}`),
   );
 
   const networkSecurityConfigPath = resolve(root, DEFAULT_NETWORK_SECURITY_CONFIG);
