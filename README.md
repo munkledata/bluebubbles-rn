@@ -138,10 +138,14 @@ the EAS profiles intentionally have no update-channel fields.
   copies, and image or other Android/Expo-managed caches are ordinary plaintext files in Android
   app-private storage.
   Files explicitly saved—or images automatically exported—to Photos/the Gator album are plaintext
-  copies in Android shared media storage and are not removed by disconnect or uninstall. An image
-  delivered while Gator is closed or in the background may remain only in the app-private cache;
-  that automatic shared-media copy is not retried. Settings → Storage & File Privacy explains
-  cleanup and backup behavior.
+  copies in Android shared media storage and are not removed by disconnect or uninstall. When
+  Gallery or Gator Album is selected, background delivery of an eligible incoming non-sticker image
+  skips the immediate Photos call, but before its private-cache download Gator stores a bounded,
+  destination-bound receipt in the encrypted database. If that download commits, a later active,
+  unlocked, connected foreground session can retry the Photos/Gator Album copy after permission has
+  already been granted. A process stop between Android saving the copy and receipt completion can
+  cause duplicates; three total attempts can produce at most two duplicate copies after the first
+  save. Settings → Storage & File Privacy explains cleanup and backup behavior.
 - **Backups:** the current UI encrypts settings/customization backups with a user passphrase before
   writing the temporary share file, then deletes that temporary file after sharing.
 - **Transport TLS:** HTTPS uses Android’s hostname validation and built-in system certificate

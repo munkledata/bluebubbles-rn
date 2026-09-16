@@ -1,9 +1,9 @@
 # STORE-01G — Internal Testing readiness runbook
 
-> **Status (2026-09-14): SUPERSEDED V63 EXECUTION SNAPSHOT — REFRESH BEFORE USING FOR V64.** The
+> **Status (2026-09-15): SUPERSEDED V63 EXECUTION SNAPSHOT — REFRESH BEFORE ANY CURRENT ROUND.** The
 > candidate-specific values and completed rows below describe the former `0.1.46` / code `63` round.
 > Current candidate identity and status live in [`RELEASE_PLAN.md`](./RELEASE_PLAN.md) and
-> [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md). Do not execute a v64 staged round from this file
+> [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md). Do not execute a current staged round from this file
 > until its candidate fields, notices, prerequisites, and evidence rows are deliberately refreshed.
 
 This is the secret-free operational companion to `STORE-01`. Keep individual tester identities,
@@ -13,7 +13,7 @@ non-secret labels, owners, counts, dates, and evidence references needed to repr
 ## 1. Superseded v63 candidate boundary
 
 This snapshot's candidate was frozen from one release run. The table is historical and must not be
-substituted for current v64 identity or an ambiguous “latest” build:
+substituted for current candidate identity or an ambiguous “latest” build:
 
 | Field                 | Snapshot value                                                        |
 | --------------------- | --------------------------------------------------------------------- |

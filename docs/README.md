@@ -12,7 +12,7 @@ Start with the root [`README.md`](../README.md) for the product and architecture
 - [`POST_REMEDIATION_PLAN.md`](./POST_REMEDIATION_PLAN.md) preserves explicitly deferred product work. Its items are
   outside both active task counts and start only after remediation unless the owner moves one back.
 - [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md) is the short operational gate for the current
-  `0.1.46` / code `63` Internal Testing candidate. It does not replace either task plan.
+  `0.1.50` / code `67` Internal Testing candidate. It does not replace either task plan.
 - [`DEVICE_VERIFICATION_CHECKLIST.md`](./DEVICE_VERIFICATION_CHECKLIST.md) preserves the retired v56 preparation
   ledger. It is not executable for a replacement candidate; `DEVICE-01` owns the candidate-specific rewrite.
 - [`STORE_01G_INTERNAL_TESTING_RUNBOOK.md`](./STORE_01G_INTERNAL_TESTING_RUNBOOK.md) is the private Internal Testing

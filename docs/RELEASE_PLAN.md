@@ -17,9 +17,11 @@ Use the related documents for their narrower purposes:
 - [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md) is the operational checklist for one exact
   candidate.
 - [`STORE_01G_INTERNAL_TESTING_RUNBOOK.md`](./STORE_01G_INTERNAL_TESTING_RUNBOOK.md) is the
-  superseded v63 execution snapshot and must be refreshed before a v64 staged round.
+  superseded v63 execution snapshot and must be refreshed before any current staged-server round.
+- [`DL_01_PLAY_V67_DEVICE_PROOF_2026-09-15.md`](./DL_01_PLAY_V67_DEVICE_PROOF_2026-09-15.md)
+  records the current v67 candidate identity and narrow Play-update/lifecycle checkpoint.
 - [`TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md`](./TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md) records
-  the current v64 candidate's bounded transport evidence.
+  the superseded v64 candidate's bounded transport evidence.
 - [`NET_01_PLAY_DEVICE_PROOF_2026-09-13.md`](./NET_01_PLAY_DEVICE_PROOF_2026-09-13.md) retains the
   superseded v63 candidate's bounded preview evidence.
 - [`PLAY_INTERNAL_DEVICE_PROOF_2026-09-09.md`](./PLAY_INTERNAL_DEVICE_PROOF_2026-09-09.md) retains
@@ -35,34 +37,33 @@ This is the counting authority for the four release tasks below.
 - **TODO — 2:** `RELEASE-02`, `RELEASE-GATE-01`.
 - **WAIVED/DROPPED — 0.**
 
-Three of four release tasks remain open. The private Internal Testing candidate exists, but the
-staged-server journey and broader release gates are not complete.
+Three of four release tasks remain open. The current private Internal Testing release is live, but
+the staged-server journey and broader release gates are not complete.
 
 ## Current candidate
 
-| Field             | Frozen value                                                               |
-| ----------------- | -------------------------------------------------------------------------- |
-| Version           | `0.1.47` / Android version code `64`                                       |
-| Source commit     | `fa6e907beb776fc690cc392f7268d772705bf717`                                 |
-| Release commit    | `e22aacdca959c2e04f0a83a205bd7c012644acf6`                                 |
-| Release run       | `android-0.1.47-fa6e907-20260914045445`                                    |
-| AAB               | `gator-release-0.1.47-v64-e22aacd.aab` — 56,150,684 bytes; never commit it |
-| AAB SHA-256       | `b53b272a757ccb1346928787b927a2cb63dfa2edf57fe44820367a2552784178`         |
-| Play destination  | Google Play Internal Testing only                                          |
-| Submission        | Receipt status `submitted` at `2026-09-14T05:14:29.810Z`                   |
-| Device checkpoint | Play install and exact-candidate `TLS-00` boundary on Android 16 / API 36  |
+| Field             | Frozen value                                                                                                                               |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Version           | `0.1.50` / Android version code `67`                                                                                                       |
+| Source commit     | `2c7f426e3549127972fdd5c601bf98f651a75870` containing `DL-01` implementation `9139cf72bb56d613f1b848de63fe882b2029e91a`                    |
+| Release commit    | `12a45924a2e8b5dc998e0b56e0df6c58f8186960`                                                                                                 |
+| Release run       | `android-0.1.50-9139cf7-20260915234900`; archived session record only                                                                      |
+| Submitted AAB     | `gator-release-0.1.50-v67-12a4592.aab` — 56,806,011 bytes; local bytes and receipt directory were removed by the later host update         |
+| AAB SHA-256       | `1bec41156c38e556eb9dbe079bc0cf83ee1577d07d0912144fb0524739304702`                                                                         |
+| Play destination  | Google Play Internal Testing only                                                                                                          |
+| Submission        | EAS submission `67253f5c-6f5c-47a9-b669-c0ea25c4f5de` completed; live Internal release `0.1.50` / code `67` reports status `completed`     |
+| Device checkpoint | Play v66→v67 update, visible session continuity, and ordinary-kill/App Lock biometric resume on owner-enrolled Samsung Android 16 / API 36 |
 
-The device checkpoint proves Play-delivered identity and the bounded exact-candidate `TLS-00` slice
-recorded in the linked proof: JSON/upload redirect matrices, public-CA smoke, certificate rejection,
-and raw-path absence. It does not transfer the superseded v63 `NET-01`/`RT-01A` results or
-prove the general staged connect, send, receive,
-notification, permission, accessibility, process-restart, disconnect, or public-release journeys.
+The linked v67 checkpoint proves Play delivery, a natural update with visible app-state continuity,
+packaging of the current `DL-01` source markers, and one ordinary process-death/App Lock resume. It
+does not prove a fresh install, hostile attachment transport, destination-receipt ordering, cache or
+wallpaper quotas, private DB/filesystem outcomes, staged connect/sync/send/receive/notification,
+permission/accessibility/account cleanup, or broader release readiness. `DL-01`, `DEVICE-01`, and
+`STORE-01` therefore remain open.
 
-This v64 candidate predates the restored native Find My map and remains historical for that feature.
-The next candidate must provide the package/certificate/API-restricted Maps key to the local release
-runner, bind its digest to the exact AAB, omit phone-location permissions and every app-owned WebView,
-and complete `WEB-01..03` attribution, lifecycle, accessibility, outage, traffic, privacy/Data Safety,
-and approved Google end-user-terms evidence before those remediation items can close.
+The superseded v64 candidate retains its bounded `TLS-00` evidence only. That device result and the
+superseded v63 `NET-01`/`RT-01A` results do not transfer to v67. V67 contains the restored native Find
+My implementation, but this checkpoint did not repeat its full candidate-specific device matrix.
 
 ## Release disposition
 
@@ -105,25 +106,25 @@ and approved Google end-user-terms evidence before those remediation items can c
 - **Verify:** Confirm repository track/config, the live track and tester list, exact AAB identity,
   hash, and Play signing, install or update through Play, staged-server journeys, feedback path,
   cleanup, and every Play prompt shown for this artifact.
-- **Current status (2026-09-14):** **IN_PROGRESS — candidate creation, validation, Internal
-  submission, Play install, and bounded `TLS-00` acceptance are proven.** Remaining work is live
-  tester/track administration, a stable non-production server and general fixtures, the full
-  selected connect/sync/send/receive/notification/restart/disconnect journey, cleanup, candidate
-  limitations, and artifact-specific Play declarations or prompts. No wider-track promotion is
-  authorized.
+- **Current status (2026-09-15):** **IN_PROGRESS — v67 candidate creation and validation, EAS
+  submission, live Internal `completed` state, Play v66→v67 update, and one bounded ordinary-kill/App
+  Lock resume are proven.** Remaining work is tester/track administration, a stable non-production
+  server and general fixtures, the full selected connect/sync/send/receive/notification/restart/
+  disconnect journey, cleanup, candidate limitations, hostile `DL-01` proof, and artifact-specific
+  Play declarations or prompts. No wider-track promotion is authorized.
 
 Current child disposition:
 
-| Child                                   | Status      | Remaining boundary                                                                    |
-| --------------------------------------- | ----------- | ------------------------------------------------------------------------------------- |
-| `STORE-01A-UGC-SAFETY`                  | Deferred    | Required before Closed, Open, or Production promotion, or earlier if Play requires it |
-| `STORE-01B-SDK57-DEPS`                  | Done        | None for the current SDK 57 dependency slice                                          |
-| `STORE-01C-FIREBASE-EAS`                | Done        | Runtime Firebase behavior remains task-specific device evidence                       |
-| `STORE-01D-RELEASE-NOISE`               | Done        | None for deterministic host-test noise                                                |
-| `STORE-01E-SOURCE-FREEZE`               | Done        | Current source identity is recorded above                                             |
-| `STORE-01F-LOCAL-AAB`                   | Done        | Current retained AAB identity is recorded above                                       |
-| `STORE-01G-TESTER-READINESS`            | In progress | Tester, staged-server, disclosure, journey, and cleanup evidence                      |
-| `STORE-01H-INTERNAL-TRACK-CONFIG-GUARD` | Done        | Live Play state is still verified separately                                          |
+| Child                                   | Status      | Remaining boundary                                                                          |
+| --------------------------------------- | ----------- | ------------------------------------------------------------------------------------------- |
+| `STORE-01A-UGC-SAFETY`                  | Deferred    | Required before Closed, Open, or Production promotion, or earlier if Play requires it       |
+| `STORE-01B-SDK57-DEPS`                  | Done        | None for the current SDK 57 dependency slice                                                |
+| `STORE-01C-FIREBASE-EAS`                | Done        | Runtime Firebase behavior remains task-specific device evidence                             |
+| `STORE-01D-RELEASE-NOISE`               | Done        | None for deterministic host-test noise                                                      |
+| `STORE-01E-SOURCE-FREEZE`               | Done        | Current source identity is recorded above                                                   |
+| `STORE-01F-LOCAL-AAB`                   | Done        | Identity is recorded; the local artifact/receipt workspace was removed and cannot be reused |
+| `STORE-01G-TESTER-READINESS`            | In progress | Tester, staged-server, disclosure, journey, and cleanup evidence                            |
+| `STORE-01H-INTERNAL-TRACK-CONFIG-GUARD` | Done        | Live v67 Internal status is verified; tester readiness remains separate                     |
 
 The deferred UGC-safety branch is the code-bearing exception inside this release plan: before any
 wider promotion, children A1–A4 require app/server terms, blocking, reporting, and enforcement code;

@@ -361,12 +361,18 @@ before expiry returns, and suppresses later debounce/retry work. A synchronous E
 already began cannot be interrupted, and earlier delivery can reach the finalizer after
 55 seconds, so the complete callback lifetime and exact Android behavior remain unproven.
 
-Headless delivery writes only Gator's app-cache copy. It deliberately skips `expo-media-library`
-because the Photos operation has no cancellation signal. A saved Gallery or Gator Album preference
-therefore is not fulfilled or durably retried for this background delivery; once `localPath` is
-stored, ordinary auto-download will not later repeat that external copy. `DL-01` remains open for a
-durable Gallery receipt or cancellable native worker and for its native hostile-server,
-process-death, cleanup, and DB/file device matrix.
+Headless delivery deliberately skips the immediate `expo-media-library` call because the Photos
+operation has no cancellation signal. For an eligible incoming non-sticker image with a saved
+Gallery or Gator Album preference, it now commits a bounded destination-bound receipt before
+allowing the private-cache download. Once `localPath` commits, an active, unlocked, connected
+foreground session with already-granted Photos permission can claim and fulfill that receipt. A
+setting change or disabled auto-download cancels pending work; permission checks never open a
+passive prompt. A process stop after MediaStore saves the copy but before receipt completion can
+cause a later duplicate attempt, so claims, age, capacity, and attempts are bounded. The app-cache
+effect itself remains best effort: death before its DB/file commit can still leave the receipt
+without an eligible source until maintenance expires it. `DL-01` remains open for exact-candidate
+receipt/restart proof and the native hostile-server, process-death, cleanup, quota, and DB/file
+device matrix.
 
 ### 2.12 Killed-FCM prerequisite recovery owns its bounded retry (2026-09-07)
 
@@ -388,8 +394,8 @@ Host tests prove targeted ordering/caps, timeout and invalidation, App-Lock refu
 deferral, wait-only retry, both recovery/due completion orders, and generation cancellation. This
 closes the prerequisite-recovery source lifetime only. Exact Android killed-process execution and
 matching app/server deployment evidence remain open under `REL-001` and `PUSH-RETRY-01`; section
-2.11 closes the app-cache effect-tail source gap while Gallery/Album durability and device proof
-remain open under `DL-01`.
+2.11 closes the app-cache effect-tail and Gallery/Album receipt source gaps; matching-candidate
+killed-process execution and device proof remain open under `DL-01`.
 
 ---
 

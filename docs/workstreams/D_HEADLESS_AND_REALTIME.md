@@ -78,10 +78,12 @@ sessions captured across every retry attempt, revokes their asynchronous mutatio
 returning at expiry, suppresses detached debounce/retry work, and leaves later independent Clear or
 callback owners alone. A synchronous Expo file call that already started
 cannot be interrupted, and earlier unbounded delivery can reach this finalizer after its cutoff, so
-this is not yet a whole-callback proof. Headless FCM also suppresses the external Photos copy because
-`expo-media-library` has no abort signal. A Gallery or Gator Album preference therefore needs a
-future durable receipt or cancellable native worker; storing `localPath` does not schedule that
-omitted copy later.
+this is not yet a whole-callback proof. Headless FCM also suppresses the immediate external Photos
+call because `expo-media-library` has no abort signal. For an eligible incoming non-sticker image
+with a Gallery or Gator Album preference it instead stores one bounded destination-bound receipt
+before the private-cache download; committed `localPath` then makes that receipt eligible for a
+later active, unlocked, connected foreground drain with existing Photos permission. Policy changes
+cancel pending receipts, and claim leases, age, capacity, and attempts bound crash/retry behavior.
 
 Durable incoming-event prerequisite recovery now has its own bounded task-local runner rather than
 calling foreground `startSync`/`ensureChatSynced`. Missing chat/read/group prerequisites use an
@@ -91,8 +93,8 @@ deferral commits; the FCM callback owns that already-running clock, the repair, 
 retry. Account invalidation or App Lock aborts the repair and prevents a stale write.
 
 Do not infer that these specialized callers complete the parent. Exact killed-process Android
-execution remains unproven, and earlier full-callback timing plus durable Gallery/Album fulfillment
-remain open in the authoritative plan.
+execution, receipt draining on the matching candidate, and earlier full-callback timing remain open
+in the authoritative plan.
 
 <a id="rel-006"></a>
 

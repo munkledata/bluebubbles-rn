@@ -1,7 +1,7 @@
 # Gator RN — Data Caching Architecture
 
-_Reference notes, generated 2026-06-24 from a code-verified subsystem audit; realtime/push boundary
-updated 2026-09-07._
+_Reference notes, generated 2026-06-24 from a code-verified subsystem audit; download/cache boundary
+updated 2026-09-15._
 
 ## TL;DR
 
@@ -138,8 +138,15 @@ content_rowid='id')`, created in migration 0001, kept current by AFTER INSERT/DE
   adjustable up to `MAX_CONCURRENT_DOWNLOADS_LIMIT = 6`), with per-guid dedup of concurrent calls.
 - Unlocked background FCM may make one bounded best-effort app-cache attempt after the message DB
   commit. It deliberately does not invoke `expo-media-library`, whose Photos write has no abort
-  signal. A Gallery/Gator Album preference is therefore neither fulfilled nor durably retried on
-  that headless path; a future durable receipt or cancellable native worker must own that copy.
+  signal. For an eligible incoming non-sticker image with a Gallery/Gator Album preference, it
+  instead commits a destination-bound encrypted receipt before native download work; if no receipt
+  slot can be proved, it admits no private-cache download. Once `local_path` commits, an active,
+  unlocked, connected foreground session with already-granted Photos permission can drain the
+  receipt. The queue is bounded to 512 pending / 2,000 total receipts. Pending receipts expire after
+  seven days; terminal receipts may remain for up to 30 days. Claims are limited to three total
+  attempts, and each drain invocation processes at most eight exports. A process stop after
+  MediaStore saves but before receipt completion consumes an attempt; repeated stops can produce at
+  most two duplicate copies after the first save.
 - Before native work can create a destination, the coordinator durably reserves the transfer's
   maximum bytes. The global ordinary-attachment cache is limited to **2 GiB / 4,096 files** and
   preserves at least **512 MiB free**. Deterministic least-recently-used eviction protects files
@@ -150,6 +157,12 @@ content_rowid='id')`, created in migration 0001, kept current by AFTER INSERT/DE
   transfers use 2-minute automatic or 15-minute manual deadlines; server contact thumbnails use
   5 MiB / 30 seconds; synced chat wallpapers use 10 MiB / 60 seconds. Each route downloads to a
   Gator-owned `*.part`, verifies a positive final stat, promotes it, and prunes abandoned partials.
+- Before a new synced wallpaper can start, native cleanup must strictly prove no more than 90 MiB / 255
+  files while protecting the DB-referenced current wallpaper. The bounded transfer can then add at
+  most 10 MiB / one file, and the post-commit prune retains the final 100 MiB / 256-file ceiling. Each
+  pass streams at most 8,192 files / 32,768 nodes with no-follow metadata, exact current/legacy path
+  grammar, and a final independent recount. Malformed, unreadable, symlinked, raced, or overflowing
+  state refuses admission rather than silently skipping an entry.
 - On success, `updateAttachmentLocalPath` writes `local_path` → adapter flush → `useMessages`
   re-queries → the image swaps from placeholder to media (driven by the **DB write**, never the
   store). The reservation remains identity-owned across this reactive handoff so a mounted reader
@@ -159,8 +172,9 @@ content_rowid='id')`, created in migration 0001, kept current by AFTER INSERT/DE
   retires zero-byte/orphan/crash-owned files, and proactively conforms the quota before persistent
   downloads open. The scanner supports both the legacy `attachments/{safe-guid}/{safe-name}`
   layout and the canonical generation layout, with hard limits of 8,192 files and 32,768 nodes.
-  Malformed/symlinked/partial inventories fail closed. On Android 7 (API 24/25), persistent
-  downloads remain disabled because the bounded streaming directory API begins at Android 8.
+  Malformed/symlinked/partial inventories fail closed. On Android 7 (API 24/25), ordinary persistent
+  attachment downloads and new synced-wallpaper downloads remain disabled because the bounded
+  streaming directory API begins at Android 8.
 - `downloadStore` (zustand) is **presentation-only** byte progress (`0..1 | null`, status) —
   it never carries the path. expo-image runs its own native memory/disk bitmap cache (never
   cleared).
@@ -263,8 +277,9 @@ value TEXT)`.
 
 - **Only ordinary attachment files use the app-managed global LRU.** The 2 GiB/4,096-file ledger
   does not govern SQLCipher history or third-party Expo Image and other Android/Expo-managed caches.
-  Synced backgrounds have their own native 100 MiB/256-file quota; Android/Expo-managed caches
-  remain outside this ledger and may follow OS/library cleanup policy.
+  Synced backgrounds have their own strict 90 MiB/255-file pre-admission reserve and native 100
+  MiB/256-file final quota; Android/Expo-managed caches remain outside this ledger and may follow
+  OS/library cleanup policy.
 - **Disconnect is a verified account wipe.** `forget()` closes the authorization window, clears
   credentials and account-scoped DB contents, cancels known reminders/notifications/shortcuts, and
   removes persistent attachment/avatar/background/wallpaper directories. It clears the in-memory

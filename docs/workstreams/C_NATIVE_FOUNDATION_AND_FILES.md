@@ -174,9 +174,13 @@ canonical account-generation directory layouts, reject symlinked or corrupt layo
 downloads remain closed when recovery cannot establish a trustworthy cache view, while the offline
 inbox may remain usable. The bounded native inventory requires Android API 26 or newer.
 
-Synced wallpapers use their own smaller policy: 10 MiB and 16 million pixels per file, plus a
-100 MiB/256-file native quota. Keeping this separate avoids making wallpaper cleanup depend on the
-ordinary attachment ledger.
+Synced wallpapers use their own smaller policy: 10 MiB and 16 million pixels per file. Before a new
+transfer, a native strict streaming scan must protect the current DB-referenced wallpaper and prove
+no more than 90 MiB/255 files, reserving one maximum transfer beneath the final 100 MiB/256-file
+quota. Every initial, deletion, and final pass accepts only exact current/legacy paths, reads metadata
+without following links, and is bounded to 8,192 files/32,768 nodes. Unknown, unreadable, symlinked,
+raced, overflowing, or API<26 state fails closed. Keeping this separate avoids making wallpaper
+cleanup depend on the ordinary attachment ledger.
 
 <a id="ipc-01"></a>
 

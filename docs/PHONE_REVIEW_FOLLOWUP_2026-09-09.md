@@ -7,14 +7,14 @@ is saved at the beginning of the adversarial review.
 host tests, and controlled experiments. This follow-up records fresh physical-device testing and its
 limits; it does not mark the retired release-candidate checklist complete.
 
-## Tested environment
+## Tested environment — initial development-build phase
 
 - Connected physical Galaxy S25 Ultra, Android 16 / API 36, arm64.
 - Installed Gator: development build `0.1.42`, version code `1`, debuggable.
 - Installed base APK SHA-256:
   `97049e01d2f65af1cb5577c9fcef4d9071b231f608a908626231eaaffa5275c6`.
 - This differs from the older local `android/app/build/outputs/apk/debug/app-debug.apk`
-  (`0.1.41`). No APK was installed or replaced during this follow-up.
+  (`0.1.41`). No APK was installed or replaced during this initial phase.
 - Metro on port 8081 serves this repository. JavaScript is development code from the moving working
   tree; the installed native APK is not a frozen, signed release candidate. Version numbers alone do
   not establish that every native patch in current source is installed.
@@ -104,35 +104,78 @@ label instead of the composer; the selector was corrected to prefer the native t
 Those were test setup/driver issues, not app findings. No application source was changed to obtain
 the results above.
 
+## Nondebuggable release Firebase follow-up
+
+A local `assembleRelease` APK from app commit
+`1f4c77c648a7b80ad3c5e7dd21a99a0899d6db67` (`0.1.42`, version code `1`, SHA-256
+`572f7c05232812a70020cabdab1dafd4a25b3274efda3163bb7a71db2f4a6de2`) was installed in place with
+`adb install -r`. Android reported install success, the app was nondebuggable, and pairing plus
+notification permission survived. The APK uses the local development signing certificate, so it is
+a release-variant validation build rather than a production-signed or Play candidate.
+
+| App state        | Server result                               | Physical observation                                                                                    |
+| ---------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Foreground       | `{configured:true,total:1,sent:1,failed:0}` | The existing app process remained foreground.                                                           |
+| Alive background | `{configured:true,total:1,sent:1,failed:0}` | The existing process remained alive while Android Home was foreground.                                  |
+| Killed           | `{configured:true,total:1,sent:1,failed:0}` | After `am kill`, the old process was absent; Firebase started a new process and posted the test notice. |
+
+The killed case used no force-stop. Android showed the fixed app-authored title/body `Gator` /
+`Test notification received.` The exact live registration's vaulted envelope authenticated and
+parsed as `AEAD_GCM_V3_IDENTITY`; the same production lookup/parser succeeded after a normal server
+restart. Together these results prove use of the retained SecureStore key after an in-place update
+and process death, plus server-side V3 key persistence across restart. They do not prove fresh
+release-build key generation/enrollment because `install -r` retained prior app state. Enrollment
+used a USB-reversed HTTP connection, so this run does not establish network confidentiality for the
+enrollment key.
+
+The running `/Applications/Gator.app` exactly matched the retained local
+`packages/server/releases/mac-arm64/Gator.app`: each bundle contained 469 files, 405 directories, and
+14 symlinks with canonical logical SHA-256
+`ebe9808586e8fded512467977f591c8e9ada41f9bfeac8315ba25a263e560c3c`. The running `app.asar` SHA-256
+was `43384972b2b774988bb092f765545d09bb0f756c2b0f689f415cd6f6163ebaac`, and the external server
+daemon SHA-256 was `5a71d5ee47ef250854c7e2144afcf2e57e73f2877c24983681553916c24b6fdb`. The sealed
+bundle records version `2.0.15`, commit `e55f12106b9844b4c56d55c8ed233b77fa6ea4c1`, Node `24.19.0`,
+Electron `42.10.1`, and `sourceDirty:true`. This identifies the exact server bytes used in the phone
+run, but not the uncommitted source patch that produced them.
+
 ## Boundaries of this evidence
 
-The device checks do not cover a matching staged messaging server, live iMessage/RCS delivery, real
-Firebase delivery while killed or locked, signed upgrades, actual power loss, or every file provider,
-redirect, timeout, and cancellation case. Development sample messages do not prove transport delivery.
-App Lock is a presentation policy; these disposable encryption checks do not establish key custody
-while the phone or app is locked.
+The later checks cover real Firebase foreground, alive-background, and killed delivery for this local
+install and bind the running server to an exact retained binary snapshot. They do not bind that dirty
+binary to an exact frozen source snapshot or cover live
+iMessage/RCS delivery, Firebase admission while locked, a production-signed upgrade, actual power
+loss, or every file provider, redirect, timeout, and cancellation case. Development sample messages
+do not prove transport delivery. App Lock is a presentation policy; these checks do not establish key
+custody while the phone or app is locked.
 
 Remaining work includes biometric App Lock/Recents behavior, real account replacement and unavailable-
-server credential retirement, live messages and attachments, push/headless recovery, native upload
-redirects, hostile or stalling document providers, download cancellation/process death, large data
-sets, and supported-device coverage. Those need a fixed matching app/server build and a disposable
-test account; some also need human biometric interaction or purpose-built hostile-provider fixtures.
-The installed development build and local fixture session cannot stand in for that evidence.
+server credential retirement, live messages and attachments, fresh release-build push-key enrollment,
+exact replay after app restart, locked admission/unlock drain, physical cross-account/device rejection,
+rotation/overlap/revocation, same-candidate downgrade rejection, native upload redirects, hostile or
+stalling document providers, download cancellation/process death, large data sets, and supported-device
+coverage. Those need a fixed matching app/server build and a disposable test account; some also need
+human biometric interaction or purpose-built hostile-provider fixtures. This local release variant
+cannot stand in for a production-signed candidate.
 
 Recommended next step: run the remaining user journeys against one frozen candidate and a synthetic
 test account, so failures can be reproduced without involving personal conversations.
 
 ## Cleanup and retained evidence
 
-The original font scale and Secure Screen setting were restored. The three disposable picker files
-and their folder were removed. The phone was returned to Android Home, and the development app was
-background-killed with `am kill`. The temporary Metro server, its port-8082 ADB mapping, and the
-temporary checkout/dependency copy were removed; the pre-existing port mappings remain.
+During the initial development-fixture phase, the original font scale and Secure Screen setting were
+restored. The three disposable picker files and their folder were removed. The phone was returned to
+Android Home, and the development app was background-killed with `am kill`. The temporary Metro
+server, its port-8082 ADB mapping, and the temporary checkout/dependency copy were removed; the
+pre-existing port mappings remain.
 
 The built-in sample conversations, one local simulated message, and the optional-permissions onboarding
-choice remain in the development app. No account disconnect, data wipe, app replacement, successful
-production-database restore, real message send, or release operation was performed.
+choice remained in the development app during that phase. No account disconnect, data wipe, successful
+production-database restore, real message send, or release operation was performed. The later local
+nondebuggable release variant was installed and paired, the phone was returned to Gator Settings, and
+the normal packaged Gator server was restored at the end of that matrix. A subsequent read-only package
+check found version `0.1.42` debuggable and Android's package state `stopped=true`, so concurrent later
+work changed the device state and this report does not claim the release variant remains installed now.
 
 Only summary results and privacy-safe harness artifacts are referenced here. Screenshots remain in
 temporary local storage; phone serials, personal messages, credentials, and server addresses are not
-included in this report. The master work plan remains authoritative for project task status.
+included in this report. Current remediation and release status live in their separate owning plans.
