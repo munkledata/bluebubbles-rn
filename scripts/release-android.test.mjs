@@ -10,6 +10,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -348,6 +349,8 @@ test('records sanitized proof from the exact retained EAS native workspace', (t)
   const selectedHermesOutput =
     'lib/InternalJavaScript/CMakeFiles/hermesInternalBytecode_obj.dir/InternalBytecode.cpp.o';
   const selectedHermesObject = join(hermesCompileDirectory, selectedHermesOutput);
+  const hermesCache = join(hermesCompileDirectory, 'CMakeCache.txt');
+  const hermesNinjaLog = join(hermesCompileDirectory, '.ninja_log');
   const finalHermesLibrary = join(
     paths.source,
     'node_modules/react-native/ReactAndroid/hermes-engine/build/intermediates/cxx/MinSizeRel/fingerprint/obj/arm64-v8a/libhermesvm.so',
@@ -355,21 +358,23 @@ test('records sanitized proof from the exact retained EAS native workspace', (t)
   mkdirSync(dirname(disabledHermesSource), { recursive: true });
   mkdirSync(dirname(selectedHermesObject), { recursive: true });
   mkdirSync(dirname(finalHermesLibrary), { recursive: true });
-  writeFileSync(
-    join(hermesCompileDirectory, 'CMakeCache.txt'),
-    ['# fixture', 'HERMESVM_INTERNAL_JAVASCRIPT_NATIVE:BOOL=OFF', ''].join('\n'),
-  );
+  const writeValidHermesCache = () =>
+    writeFileSync(
+      hermesCache,
+      ['# fixture', 'HERMESVM_INTERNAL_JAVASCRIPT_NATIVE:BOOL=OFF', ''].join('\n'),
+    );
+  const validHermesNinjaLines = [
+    '# ninja log v5',
+    `1\t2\t3\t${selectedHermesOutput}\t0123456789abcdef`,
+    `2\t3\t4\t${finalHermesLibrary}\tfedcba9876543210`,
+    '',
+  ];
+  const writeValidHermesNinjaLog = () =>
+    writeFileSync(hermesNinjaLog, validHermesNinjaLines.join('\n'));
+  writeValidHermesCache();
   writeFileSync(selectedHermesObject, 'selected-bytecode-object');
   writeFileSync(finalHermesLibrary, 'selected-hermes-library');
-  writeFileSync(
-    join(hermesCompileDirectory, '.ninja_log'),
-    [
-      '# ninja log v5',
-      `1\t2\t3\t${selectedHermesOutput}\tselected-hash`,
-      `2\t3\t4\t${finalHermesLibrary}\tlibrary-hash`,
-      '',
-    ].join('\n'),
-  );
+  writeValidHermesNinjaLog();
   writeFileSync(
     join(hermesCompileDirectory, 'compile_commands.json'),
     JSON.stringify([
@@ -398,6 +403,81 @@ test('records sanitized proof from the exact retained EAS native workspace', (t)
     sourceDestination: '/gator/source',
     gradleDestination: '/gator/gradle',
   });
+
+  writeFileSync(
+    hermesCache,
+    [
+      'HERMESVM_INTERNAL_JAVASCRIPT_NATIVE:BOOL=OFF',
+      'HERMESVM_INTERNAL_JAVASCRIPT_NATIVE:BOOL=ON',
+      '',
+    ].join('\n'),
+  );
+  assert.throws(
+    () => verifyReleaseNativePathProof(paths, bundle),
+    /does not select the bytecode internal-JavaScript implementation/,
+  );
+  writeValidHermesCache();
+
+  writeFileSync(hermesNinjaLog, ['# ninja log v4', ...validHermesNinjaLines.slice(1)].join('\n'));
+  assert.throws(() => verifyReleaseNativePathProof(paths, bundle), /invalid header/);
+  writeFileSync(
+    hermesNinjaLog,
+    [
+      '# ninja log v5',
+      `not-a-number\t2\t3\t${selectedHermesOutput}\tnot-a-hash`,
+      `2\t3\t4\t${finalHermesLibrary}\tfedcba9876543210`,
+      '',
+    ].join('\n'),
+  );
+  assert.throws(() => verifyReleaseNativePathProof(paths, bundle), /invalid record/);
+
+  const disabledNinjaOutputSpellings = new Set([
+    'lib/InternalJavaScript/internal_unit.c',
+    disabledHermesSource,
+    disabledHermesOutput,
+    join(hermesCompileDirectory, disabledHermesOutput),
+  ]);
+  if (hermesCompileDirectory.startsWith('/private/tmp/')) {
+    disabledNinjaOutputSpellings.add(disabledHermesSource.slice('/private'.length));
+    disabledNinjaOutputSpellings.add(
+      join(hermesCompileDirectory, disabledHermesOutput).slice('/private'.length),
+    );
+  }
+  for (const disabledOutput of disabledNinjaOutputSpellings) {
+    writeFileSync(
+      hermesNinjaLog,
+      [
+        ...validHermesNinjaLines.slice(0, -1),
+        `3\t4\t5\t${disabledOutput}\tabcdef0123456789`,
+        '',
+      ].join('\n'),
+    );
+    assert.throws(
+      () => verifyReleaseNativePathProof(paths, bundle),
+      /disabled native-JavaScript source or object/,
+    );
+  }
+  writeValidHermesNinjaLog();
+
+  const cacheTarget = join(hermesCompileDirectory, 'CMakeCache.fixture-target.txt');
+  writeFileSync(cacheTarget, 'HERMESVM_INTERNAL_JAVASCRIPT_NATIVE:BOOL=OFF\n');
+  rmSync(hermesCache);
+  symlinkSync(cacheTarget, hermesCache);
+  assert.throws(
+    () => verifyReleaseNativePathProof(paths, bundle),
+    /symbolic link is not allowed in native build metadata/,
+  );
+  rmSync(hermesCache);
+  writeValidHermesCache();
+
+  const bundleMtime = statSync(bundle).mtime;
+  const staleMtime = new Date(bundleMtime.getTime() - 7 * 60 * 60 * 1000);
+  utimesSync(selectedHermesObject, staleMtime, staleMtime);
+  assert.throws(() => verifyReleaseNativePathProof(paths, bundle), /stale relative/);
+  const futureMtime = new Date(bundleMtime.getTime() + 6_000);
+  utimesSync(selectedHermesObject, futureMtime, futureMtime);
+  assert.throws(() => verifyReleaseNativePathProof(paths, bundle), /newer than the release AAB/);
+  utimesSync(selectedHermesObject, bundleMtime, bundleMtime);
 
   rmSync(selectedHermesObject);
   assert.throws(

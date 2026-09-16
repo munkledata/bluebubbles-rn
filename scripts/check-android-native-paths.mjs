@@ -308,12 +308,13 @@ function validateDisabledHermesNativeSource({
     'Hermes CMake cache',
   );
   requireFreshEvidence(cache.stat, 'Hermes CMake cache', bundleMtimeMs, maximumProofAgeMs);
-  const cacheSetting = 'HERMESVM_INTERNAL_JAVASCRIPT_NATIVE:BOOL=OFF';
+  const cacheSettingPrefix = 'HERMESVM_INTERNAL_JAVASCRIPT_NATIVE:';
+  const cacheSetting = `${cacheSettingPrefix}BOOL=OFF`;
   const matchingCacheLines = cache.bytes
     .toString('utf8')
     .split(/\r?\n/)
-    .filter((line) => line === cacheSetting);
-  if (matchingCacheLines.length !== 1) {
+    .filter((line) => line.startsWith(cacheSettingPrefix));
+  if (matchingCacheLines.length !== 1 || matchingCacheLines[0] !== cacheSetting) {
     fail('Hermes CMake cache does not select the bytecode internal-JavaScript implementation');
   }
 
@@ -356,16 +357,33 @@ function validateDisabledHermesNativeSource({
   );
   requireFreshEvidence(ninjaLog.stat, 'Hermes Ninja log', bundleMtimeMs, maximumProofAgeMs);
   const ninjaLines = ninjaLog.bytes.toString('utf8').split(/\r?\n/);
-  if (!/^# ninja log v\d+$/.test(ninjaLines.shift() ?? '')) {
+  if (ninjaLines.shift() !== '# ninja log v5') {
     fail('Hermes Ninja log has an invalid header');
   }
   const ninjaOutputs = ninjaLines.filter(Boolean).map((line) => {
     const columns = line.split('\t');
-    if (columns.length !== 5 || !columns[3]) fail('Hermes Ninja log has an invalid record');
+    if (
+      columns.length !== 5 ||
+      columns.slice(0, 3).some((field) => !/^\d{1,20}$/.test(field)) ||
+      !columns[3] ||
+      columns[3].length > 32 * 1024 ||
+      /[^\x21-\x7e]/.test(columns[3]) ||
+      !/^[0-9a-f]{1,16}$/i.test(columns[4] ?? '')
+    ) {
+      fail('Hermes Ninja log has an invalid record');
+    }
     return columns[3];
   });
-  if (ninjaOutputs.includes(HERMES_DISABLED_NATIVE_OUTPUT)) {
-    fail('Hermes Ninja log says the disabled native-JavaScript object was built');
+  const disabledNinjaOutputs = new Set([
+    HERMES_DISABLED_NATIVE_SOURCE,
+    HERMES_DISABLED_NATIVE_OUTPUT,
+    `./${HERMES_DISABLED_NATIVE_SOURCE}`,
+    `./${HERMES_DISABLED_NATIVE_OUTPUT}`,
+    ...privateTmpPathSpellings(resolve(directory, HERMES_DISABLED_NATIVE_SOURCE), true),
+    ...privateTmpPathSpellings(resolve(directory, HERMES_DISABLED_NATIVE_OUTPUT), true),
+  ]);
+  if (ninjaOutputs.some((output) => disabledNinjaOutputs.has(output))) {
+    fail('Hermes Ninja log says a disabled native-JavaScript source or object was built');
   }
   if (!ninjaOutputs.includes(HERMES_SELECTED_BYTECODE_OUTPUT)) {
     fail('Hermes Ninja log does not prove the selected bytecode object was built');
