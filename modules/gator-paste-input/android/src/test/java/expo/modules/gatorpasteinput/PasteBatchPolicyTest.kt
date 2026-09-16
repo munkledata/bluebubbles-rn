@@ -209,6 +209,90 @@ class PasteBatchPolicyTest {
   }
 
   @Test
+  fun `cache inspection permits only the trusted ancestor alias and preserves raw path identity`() {
+    val realBase = temporary.newFolder("real-paste-base").canonicalFile
+    val aliasBase = File(temporary.root.canonicalFile, "android-paste-base-alias")
+    Files.createSymbolicLink(aliasBase.toPath(), realBase.toPath())
+    val realRoot = File(realBase, "pasted-in").apply { mkdirs() }
+    val protected = batch(realRoot, "1000-1", 6)
+    val expired = batch(realRoot, "1001-1", 4)
+    val aliasRoot = File(aliasBase, "pasted-in")
+    val aliasProtected = File(aliasRoot, "1000-1/payload.bin")
+
+    val stats = inspectPasteCacheRoot(
+      aliasRoot,
+      nowMs = 10_000L,
+      protectedPaths = setOf(aliasProtected.absolutePath),
+      maxAgeMs = 1_000L,
+    )
+
+    assertEquals(PasteCacheStats(committedBatches = 1, committedBytes = 6L), stats)
+    assertTrue(protected.exists())
+    assertFalse(expired.exists())
+    assertEquals(
+      aliasProtected.absolutePath,
+      ownedPasteReferencePath(aliasRoot, aliasProtected),
+    )
+    assertNull(ownedPasteReferencePath(aliasRoot, File(protected, "payload.bin")))
+
+    val linkedRoot = File(temporary.root.canonicalFile, "linked-pasted-in")
+    Files.createSymbolicLink(linkedRoot.toPath(), realRoot.toPath())
+    expectFailure(PasteBatchFailure.CACHE_QUOTA) {
+      inspectPasteCacheRoot(linkedRoot, nowMs = 10_000L, protectedPaths = emptySet())
+    }
+  }
+
+  @Test
+  fun `atomic batch cleanup and deletion work through the trusted ancestor alias`() {
+    val realBase = temporary.newFolder("real-atomic-base").canonicalFile
+    val aliasBase = File(temporary.root.canonicalFile, "android-atomic-base-alias")
+    Files.createSymbolicLink(aliasBase.toPath(), realBase.toPath())
+    val realRoot = File(realBase, "pasted-in").apply { mkdirs() }
+    val aliasRoot = File(aliasBase, "pasted-in")
+
+    expectFailure(PasteBatchFailure.UNAVAILABLE) {
+      createAtomicPasteBatch<String>(aliasRoot, "1000-1", 2) { pending ->
+        File(pending, "partial.bin").writeBytes(byteArrayOf(1))
+        throw PasteBatchException(PasteBatchFailure.UNAVAILABLE)
+      }
+    }
+    assertFalse(File(realRoot, "1000-1.pending").exists())
+    assertFalse(File(realRoot, "1000-1").exists())
+
+    val committed = createAtomicPasteBatch(aliasRoot, "1001-1", 1) { pending ->
+      File(pending, "complete.bin").writeBytes(byteArrayOf(1, 2))
+      listOf("complete.bin")
+    }
+    assertEquals(File(aliasRoot, "1001-1"), committed.directory)
+    deleteOwnedPasteBatchDirectory(committed.directory, allowEmpty = false)
+    assertFalse(File(realRoot, "1001-1").exists())
+  }
+
+  @Test
+  fun `atomic batch creation and deletion reject a symlinked paste root`() {
+    val outsideRoot = temporary.newFolder("outside-paste-root").canonicalFile
+    val outsideBatch = batch(outsideRoot, "1000-1", 3)
+    val linkedRoot = File(temporary.root.canonicalFile, "linked-paste-root")
+    Files.createSymbolicLink(linkedRoot.toPath(), outsideRoot.toPath())
+
+    var builderInvoked = false
+    expectFailure(PasteBatchFailure.CACHE_QUOTA) {
+      createAtomicPasteBatch<String>(linkedRoot, "1001-1", 1) {
+        builderInvoked = true
+        emptyList()
+      }
+    }
+    assertFalse(builderInvoked)
+    assertFalse(File(outsideRoot, "1001-1").exists())
+
+    expectFailure(PasteBatchFailure.CACHE_QUOTA) {
+      deleteOwnedPasteBatchDirectory(File(linkedRoot, "1000-1"), allowEmpty = false)
+    }
+    assertTrue(outsideBatch.exists())
+    assertTrue(File(outsideBatch, "payload.bin").exists())
+  }
+
+  @Test
   fun `cache inspection removes empty legacy and current batches left by failed copies`() {
     val root = temporary.newFolder("empty-upgrade-batches").canonicalFile
     val emptyLegacy = File(root, "9500").apply { mkdirs() }
@@ -321,6 +405,7 @@ class PasteBatchPolicyTest {
     val legacy = File(batch(root, "1001", 1), "payload.bin").canonicalFile
     val pending = File(batch(root, "1002-1.pending", 1), "payload.bin").canonicalFile
     val outside = temporary.newFile("outside-reference.bin").canonicalFile
+    val traversal = File(root, "1000-1/../1001/payload.bin")
     val alias = File(current.parentFile, "alias.bin")
     Files.createSymbolicLink(alias.toPath(), outside.toPath())
 
@@ -328,6 +413,7 @@ class PasteBatchPolicyTest {
     assertEquals(legacy.path, ownedPasteReferencePath(root, legacy))
     assertNull(ownedPasteReferencePath(root, pending))
     assertNull(ownedPasteReferencePath(root, outside))
+    assertNull(ownedPasteReferencePath(root, traversal))
     assertNull(ownedPasteReferencePath(root, alias))
   }
 

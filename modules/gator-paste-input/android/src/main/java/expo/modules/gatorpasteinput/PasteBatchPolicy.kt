@@ -148,9 +148,10 @@ internal fun inspectPasteCacheRoot(
   require(maxRootEntries > 0)
   require(protectedPaths.size <= MAX_PROTECTED_PASTE_PATHS)
   if (!root.exists() && !root.mkdirs()) throw PasteBatchException(PasteBatchFailure.UNAVAILABLE)
-  val canonicalRoot = canonicalPlainPasteFile(root)
+  val canonicalRoot = canonicalOwnedPasteRoot(root)
     ?: throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
   if (!canonicalRoot.isDirectory) throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
+  val canonicalProtectedPaths = canonicalProtectedPastePaths(root, canonicalRoot, protectedPaths)
 
   val cutoff = if (nowMs < Long.MIN_VALUE + maxAgeMs) Long.MIN_VALUE else nowMs - maxAgeMs
   val firstPass = canonicalRoot.listFiles()
@@ -159,11 +160,11 @@ internal fun inspectPasteCacheRoot(
   // directories than today's ceiling, perform only a bounded number of exact pending/expired
   // deletions, then reject this paste and let the next attach/paste continue the migration.
   if (firstPass.size > maxRootEntries) {
-    cleanupPasteRootOverage(canonicalRoot, firstPass, cutoff, protectedPaths, maxRootEntries)
+    cleanupPasteRootOverage(canonicalRoot, firstPass, cutoff, canonicalProtectedPaths, maxRootEntries)
     throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
   }
   firstPass.forEach { raw ->
-    val entry = canonicalPlainPasteFile(raw)
+    val entry = canonicalOwnedPasteDescendant(canonicalRoot, canonicalRoot, raw)
       ?: throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
     if (entry.parentFile?.path != canonicalRoot.path || !entry.isDirectory) {
       throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
@@ -180,7 +181,10 @@ internal fun inspectPasteCacheRoot(
         val files = ownedPasteBatchFiles(entry, allowEmpty = true)
         // Older releases could leave an exact timestamp-only directory empty after every copy
         // failed. It is abandoned, not a permanent cache-poisoning unknown entry.
-        if (files.isEmpty() || (stamp < cutoff && files.none { it.path in protectedPaths })) {
+        if (
+          files.isEmpty() ||
+          (stamp < cutoff && files.none { it.path in canonicalProtectedPaths })
+        ) {
           deleteOwnedPasteBatchDirectory(entry, allowEmpty = true)
         }
       }
@@ -195,7 +199,7 @@ internal fun inspectPasteCacheRoot(
   var batches = 0
   var bytes = 0L
   retained.forEach { raw ->
-    val batch = canonicalPlainPasteFile(raw)
+    val batch = canonicalOwnedPasteDescendant(canonicalRoot, canonicalRoot, raw)
       ?: throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
     if (
       batch.parentFile?.path != canonicalRoot.path ||
@@ -234,16 +238,64 @@ internal fun availablePasteBatchBytes(
   return available
 }
 
-/** Reject path aliases/symlinks instead of following them during quota scans or cleanup. */
-private fun canonicalPlainPasteFile(file: File): File? = runCatching {
-  file.canonicalFile.takeIf { canonical -> canonical.path == file.absoluteFile.path }
+/**
+ * Canonicalize only ancestors of the native-fixed cache root.
+ *
+ * Android may expose one app sandbox through two OS-owned path spellings. Trusting the native
+ * parent's canonical spelling permits that platform alias while rebuilding the final `pasted-in`
+ * component still rejects a symlink or alias at the owned root itself.
+ */
+private fun canonicalOwnedPasteRoot(root: File): File? = runCatching {
+  val absoluteRoot = root.absoluteFile
+  val absoluteParent = absoluteRoot.parentFile
+    ?: throw IllegalArgumentException("Paste cache root has no parent")
+  val canonicalParent = absoluteParent.canonicalFile
+  val expectedCanonicalRoot = File(canonicalParent, absoluteRoot.name).absoluteFile
+  root.canonicalFile.takeIf { canonical -> canonical.path == expectedCanonicalRoot.path }
+    ?: throw IllegalArgumentException("Paste cache root is a symlink or alias")
 }.getOrNull()
+
+/** Reject traversal and symlinks below a validated native-owned root. */
+private fun canonicalOwnedPasteDescendant(
+  root: File,
+  canonicalRoot: File,
+  candidate: File,
+): File? = runCatching {
+  val absoluteRoot = root.absoluteFile
+  val absoluteCandidate = candidate.absoluteFile
+  val prefix = absoluteRoot.path + File.separator
+  require(absoluteCandidate.path.startsWith(prefix)) { "Paste cache path is outside the root" }
+  val relativePath = absoluteCandidate.path.substring(prefix.length)
+  require(relativePath.isNotEmpty()) { "Paste cache path is the root" }
+  val expectedCanonical = File(canonicalRoot, relativePath).absoluteFile
+  candidate.canonicalFile.takeIf { canonical -> canonical.path == expectedCanonical.path }
+    ?: throw IllegalArgumentException("Paste cache path is not canonical below the root")
+}.getOrNull()
+
+/** Map raw DB-owned paths to the canonical spelling used by the bounded native scan. */
+private fun canonicalProtectedPastePaths(
+  root: File,
+  canonicalRoot: File,
+  protectedPaths: Set<String>,
+): Set<String> = protectedPaths.mapTo(LinkedHashSet(protectedPaths.size)) { rawPath ->
+  val target = canonicalOwnedPasteDescendant(root, canonicalRoot, File(rawPath))
+    ?: throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
+  val batch = target.parentFile
+    ?: throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
+  if (
+    batch.parentFile?.path != canonicalRoot.path ||
+    !(COMMITTED_BATCH_DIRECTORY.matches(batch.name) || LEGACY_BATCH_DIRECTORY.matches(batch.name))
+  ) {
+    throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
+  }
+  target.path
+}
 
 /** Canonicalize one possibly-missing DB reference under an exact committed paste batch. */
 internal fun ownedPasteReferencePath(root: File, candidate: File): String? {
   if (candidate.absolutePath.length > MAX_PROTECTED_PASTE_URI_CHARS) return null
-  val canonicalRoot = canonicalPlainPasteFile(root) ?: return null
-  val target = canonicalPlainPasteFile(candidate) ?: return null
+  val canonicalRoot = canonicalOwnedPasteRoot(root) ?: return null
+  val target = canonicalOwnedPasteDescendant(root, canonicalRoot, candidate) ?: return null
   val batch = target.parentFile ?: return null
   if (
     batch.parentFile?.path != canonicalRoot.path ||
@@ -251,18 +303,33 @@ internal fun ownedPasteReferencePath(root: File, candidate: File): String? {
   ) {
     return null
   }
-  return target.path
+  return candidate.absoluteFile.path
 }
 
 private fun ownedPasteBatchFiles(directory: File, allowEmpty: Boolean): List<File> {
-  val rawFiles = directory.listFiles() ?: throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
+  val rawDirectory = directory.absoluteFile
+  val rawRoot = rawDirectory.parentFile
+    ?: throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
+  val canonicalRoot = canonicalOwnedPasteRoot(rawRoot)
+    ?: throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
+  if (!canonicalRoot.isDirectory) throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
+  val canonicalDirectory = canonicalOwnedPasteDescendant(rawRoot, canonicalRoot, rawDirectory)
+    ?: throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
+  if (
+    canonicalDirectory.parentFile?.path != canonicalRoot.path ||
+    !canonicalDirectory.isDirectory
+  ) {
+    throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
+  }
+  val rawFiles = rawDirectory.listFiles()
+    ?: throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
   if (rawFiles.size > MAX_PASTED_FILES || (!allowEmpty && rawFiles.isEmpty())) {
     throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
   }
   return rawFiles.map { raw ->
-    val file = canonicalPlainPasteFile(raw)
+    val file = canonicalOwnedPasteDescendant(rawRoot, canonicalRoot, raw)
       ?: throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
-    if (!file.isFile || file.parentFile?.path != directory.path) {
+    if (!file.isFile || file.parentFile?.path != canonicalDirectory.path) {
       throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
     }
     file
@@ -296,7 +363,7 @@ private fun cleanupPasteRootOverage(
     }
     if (!pending && (stamp == null || stamp >= cutoff)) return@forEach
 
-    val entry = canonicalPlainPasteFile(raw)
+    val entry = canonicalOwnedPasteDescendant(root, root, raw)
       ?: throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
     if (entry.parentFile?.path != root.path || !entry.isDirectory) {
       throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
@@ -321,7 +388,7 @@ private fun cleanupPasteRootOverage(
     } ?: return@forEach
     if (stamp < cutoff) return@forEach
 
-    val entry = canonicalPlainPasteFile(raw)
+    val entry = canonicalOwnedPasteDescendant(root, root, raw)
       ?: throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
     if (entry.parentFile?.path != root.path || !entry.isDirectory) {
       throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
@@ -355,6 +422,9 @@ internal fun <T> createAtomicPasteBatch(
     throw PasteBatchException(PasteBatchFailure.UNAVAILABLE)
   }
   if (!root.exists() && !root.mkdirs()) throw PasteBatchException(PasteBatchFailure.UNAVAILABLE)
+  val canonicalRoot = canonicalOwnedPasteRoot(root)
+    ?: throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
+  if (!canonicalRoot.isDirectory) throw PasteBatchException(PasteBatchFailure.CACHE_QUOTA)
   val pending = File(root, "$batchId.pending")
   val committed = File(root, batchId)
   if (pending.exists() || committed.exists()) {

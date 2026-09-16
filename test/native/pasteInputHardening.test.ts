@@ -70,7 +70,13 @@ describe('owned rich-paste native boundary', () => {
     expect(process).toMatch(/maxBatchBytes = cacheAllowance/);
     expect(process.indexOf('inspectPasteCacheRoot')).toBeLessThan(process.indexOf('queryMetadata'));
     expect(policySource).toMatch(/PasteBatchFailure\.CACHE_QUOTA/);
-    expect(policySource).toMatch(/canonical\.path == file\.absoluteFile\.path/);
+    expect(policySource).toContain('val canonicalParent = absoluteParent.canonicalFile');
+    expect(policySource).toContain(
+      'val expectedCanonicalRoot = File(canonicalParent, absoluteRoot.name).absoluteFile',
+    );
+    expect(policySource).toContain('canonical.path == expectedCanonicalRoot.path');
+    expect(policySource).toContain('canonicalOwnedPasteDescendant');
+    expect(policySource).toContain('canonical.path == expectedCanonical.path');
     expect(policySource).toContain('Regex("^\\\\d+$")');
     expect(policySource.indexOf('firstPass.size > maxRootEntries')).toBeLessThan(
       policySource.indexOf('firstPass.forEach'),
@@ -98,7 +104,15 @@ describe('owned rich-paste native boundary', () => {
 
   it('age-deletes only batches absent from a validated durable-reference snapshot', () => {
     expect(policySource).toMatch(/PASTE_CACHE_MAX_AGE_MS = 24L \* 60 \* 60 \* 1000\b/);
-    expect(policySource).toMatch(/stamp < cutoff && files\.none \{ it\.path in protectedPaths \}/);
+    expect(policySource).toContain(
+      'val canonicalProtectedPaths = canonicalProtectedPastePaths(root, canonicalRoot, protectedPaths)',
+    );
+    expect(policySource).toMatch(
+      /stamp < cutoff && files\.none \{ it\.path in canonicalProtectedPaths \}/,
+    );
+    expect(policySource.indexOf('val canonicalProtectedPaths')).toBeLessThan(
+      policySource.indexOf('files.none { it.path in canonicalProtectedPaths }'),
+    );
     expect(moduleSource).toContain(
       'AsyncFunction("attach") { tag: Int, protectedUris: List<String> ->',
     );
