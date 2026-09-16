@@ -32,8 +32,14 @@ const PACKAGED_DEX_PATTERN = /^base\/dex\/[^/]+\.dex$/;
 const MAX_PACKAGED_DEX_BYTES = 256 * 1024 * 1024;
 const ANDROID_NAMESPACE = 'http://schemas.android.com/apk/res/android';
 const FORBIDDEN_INBOUND_SHARE_DEX_MARKERS = ['ExpoShareIntent', 'expo/modules/shareintent'];
+const EXPO_BACKGROUND_TASK_VERSION = '57.0.16';
 const EXPO_FILE_SYSTEM_VERSION = '57.0.6';
 const PATCH_PACKAGE_VERSION = '8.0.1';
+const EXPO_BACKGROUND_TASK_PATCH_PATH = `patches/expo-background-task+${EXPO_BACKGROUND_TASK_VERSION}.patch`;
+const EXPO_BACKGROUND_TASK_SCHEDULER_PATH =
+  'node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskScheduler.kt';
+const EXPO_BACKGROUND_TASK_WORK_PATH =
+  'node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskWork.kt';
 const EXPO_FILE_SYSTEM_PATCH_PATH = `patches/expo-file-system+${EXPO_FILE_SYSTEM_VERSION}.patch`;
 const EXPO_FILE_SYSTEM_LEGACY_ANDROID_PATH =
   'node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemLegacyModule.kt';
@@ -51,6 +57,13 @@ export const REQUIRED_PINNED_SHORTCUT_CLEANUP_DEX_MARKERS = [
   'gator-retired-shortcut',
   'This shortcut is no longer available',
   'Direct Share cleanup could not replace ',
+];
+
+// These strings exist only in the patched Kotlin source. Requiring them in DEX rejects a stale AAB
+// that still linked Expo's prebuilt worker even when the current checkout is configured correctly.
+export const REQUIRED_BACKGROUND_TASK_RETRY_DEX_MARKERS = [
+  'Task finished; success=',
+  'doWork: Worker failed; requesting retry',
 ];
 
 export const FORBIDDEN_LEGACY_SHORTCUT_PUBLISHER_DEX_MARKERS = [
@@ -90,6 +103,118 @@ export const NETWORK_SECURITY_CONFIG_REFERENCE = '@xml/network_security_config';
 function countOccurrences(source, needle) {
   if (typeof source !== 'string' || needle.length === 0) return 0;
   return source.split(needle).length - 1;
+}
+
+/**
+ * Keep Expo's Android WorkManager result bridge source-built and fail closed on patch drift.
+ * SDK 57 otherwise links the package's prebuilt AAR, whose worker reports every JS result as
+ * success and prevents Android from retrying transient failures.
+ */
+export function validateExpoBackgroundTaskRetryBridge({
+  packageJson,
+  packageLock,
+  patchSource,
+  schedulerSource,
+  workerSource,
+}) {
+  const errors = [];
+  if (packageJson?.dependencies?.['expo-background-task'] !== EXPO_BACKGROUND_TASK_VERSION) {
+    errors.push(`expo-background-task must be pinned exactly to ${EXPO_BACKGROUND_TASK_VERSION}`);
+  }
+  if (
+    packageLock?.packages?.['']?.dependencies?.['expo-background-task'] !==
+    EXPO_BACKGROUND_TASK_VERSION
+  ) {
+    errors.push(
+      `package-lock root must pin expo-background-task exactly to ${EXPO_BACKGROUND_TASK_VERSION}`,
+    );
+  }
+  if (
+    packageLock?.packages?.['node_modules/expo-background-task']?.version !==
+    EXPO_BACKGROUND_TASK_VERSION
+  ) {
+    errors.push(`package-lock must resolve expo-background-task ${EXPO_BACKGROUND_TASK_VERSION}`);
+  }
+
+  const sourceBuild = packageJson?.expo?.autolinking?.android?.buildFromSource;
+  if (
+    !Array.isArray(sourceBuild) ||
+    sourceBuild.filter((name) => name === 'expo-background-task').length !== 1
+  ) {
+    errors.push(
+      'Expo Android autolinking must build expo-background-task from source exactly once',
+    );
+  }
+
+  const patchMarkers = [
+    `a/${EXPO_BACKGROUND_TASK_SCHEDULER_PATH}`,
+    `a/${EXPO_BACKGROUND_TASK_WORK_PATH}`,
+    '+    if (cancelExisting && hasUnfinishedWorker(context)) {',
+    'if (consumers.isEmpty()) {\n-      return\n+      return true',
+    '+        return scheduled',
+    '+          val succeeded = result is Number && result.toDouble() == 1.0',
+    '+        taskCompletion.complete(false)',
+    '+    if (!succeeded) {\n+      return false\n     }',
+    '+      workInfos.any { !it.state.isFinished }',
+    '+      return if (succeeded) Result.success() else Result.retry()',
+    '+      return Result.retry()',
+  ];
+  if (patchMarkers.some((marker) => !patchSource?.includes(marker))) {
+    errors.push(
+      `${EXPO_BACKGROUND_TASK_PATCH_PATH} must carry the reviewed retry and unfinished-chain repair`,
+    );
+  }
+
+  const schedulerMarkers = [
+    'suspend fun runTasks(context: Context, appScopeKey: String): Boolean',
+    'if (cancelExisting && hasUnfinishedWorker(context)) {',
+    '.filterIsInstance<BackgroundTaskConsumer>()',
+    'if (consumers.isEmpty()) {\n      return true\n    }',
+    'Log.d(TAG, "runTasks: Deferred foreground worker; scheduled=$scheduled")\n        return scheduled',
+    'val succeeded = result is Number && result.toDouble() == 1.0',
+    'Log.e(TAG, "Task failed: ${e.message}")\n        taskCompletion.complete(false)',
+    'val succeeded = tasks.awaitAll().all { it }',
+    'if (!succeeded) {\n      return false\n    }\n    return Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||',
+    'scheduleWorker(context, appScopeKey, false)',
+    'private suspend fun hasUnfinishedWorker(context: Context): Boolean',
+    'workInfos.any { !it.state.isFinished }',
+  ];
+  if (schedulerMarkers.some((marker) => !schedulerSource?.includes(marker))) {
+    errors.push('expo-background-task scheduler source must preserve the reviewed retry flow');
+  }
+  const cancellationHandlers =
+    schedulerSource?.match(/catch \(e: CancellationException\) \{[\s\S]*?\n\s*\}/g) ?? [];
+  if (
+    cancellationHandlers.length !== 6 ||
+    cancellationHandlers.some((handler) => !handler.includes('throw e')) ||
+    schedulerSource?.includes('workInfos.firstOrNull()') ||
+    schedulerSource?.includes('.toInt() == 1')
+  ) {
+    errors.push(
+      'expo-background-task scheduler must propagate cancellation and inspect the full worker chain',
+    );
+  }
+
+  const workerMarkers = [
+    'if (appScopeKey == null) {',
+    'return Result.failure(outputData)',
+    'return if (succeeded) Result.success() else Result.retry()',
+    'catch (e: CancellationException)',
+    'doWork: Worker failed; requesting retry',
+  ];
+  const workerCancellationHandler = workerSource?.match(
+    /catch \(e: CancellationException\) \{[\s\S]*?\n\s*\}/,
+  )?.[0];
+  if (
+    workerMarkers.some((marker) => !workerSource?.includes(marker)) ||
+    !workerCancellationHandler?.includes('throw e') ||
+    countOccurrences(workerSource, 'return Result.retry()') !== 1
+  ) {
+    errors.push(
+      'expo-background-task worker must fail malformed input, propagate cancellation, and retry operational failures',
+    );
+  }
+  return errors;
 }
 
 /**
@@ -773,6 +898,11 @@ export function validatePackagedAndroidBundle({
   }
 
   if (dexBytes) {
+    for (const marker of REQUIRED_BACKGROUND_TASK_RETRY_DEX_MARKERS) {
+      if (!dexBytes.includes(Buffer.from(marker, 'utf8'))) {
+        errors.push(`packaged DEX is missing required background-task retry marker: ${marker}`);
+      }
+    }
     for (const marker of REQUIRED_PINNED_SHORTCUT_CLEANUP_DEX_MARKERS) {
       if (!dexBytes.includes(Buffer.from(marker, 'utf8'))) {
         errors.push(`packaged DEX is missing required pinned-shortcut cleanup marker: ${marker}`);
@@ -1111,6 +1241,15 @@ export function runAndroidBuildCheck({
     legacyModuleSource: readFileSync(resolve(root, EXPO_FILE_SYSTEM_LEGACY_ANDROID_PATH), 'utf8'),
     appConfigSource: readFileSync(resolve(root, 'app.config.ts'), 'utf8'),
   }).map((error) => `network redirect containment: ${error}`);
+  errors.push(
+    ...validateExpoBackgroundTaskRetryBridge({
+      packageJson,
+      packageLock,
+      patchSource: readFileSync(resolve(root, EXPO_BACKGROUND_TASK_PATCH_PATH), 'utf8'),
+      schedulerSource: readFileSync(resolve(root, EXPO_BACKGROUND_TASK_SCHEDULER_PATH), 'utf8'),
+      workerSource: readFileSync(resolve(root, EXPO_BACKGROUND_TASK_WORK_PATH), 'utf8'),
+    }).map((error) => `background task retry bridge: ${error}`),
+  );
 
   const networkSecurityConfigPath = resolve(root, DEFAULT_NETWORK_SECURITY_CONFIG);
   if (!existsSync(networkSecurityConfigPath)) {

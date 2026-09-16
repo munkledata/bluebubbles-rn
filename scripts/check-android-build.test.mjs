@@ -16,10 +16,12 @@ import {
   GOOGLE_MAPS_API_KEY_METADATA_NAME,
   inspectPackagedAndroidBundle,
   NETWORK_SECURITY_CONFIG_REFERENCE,
+  REQUIRED_BACKGROUND_TASK_RETRY_DEX_MARKERS,
   REQUIRED_PINNED_SHORTCUT_CLEANUP_DEX_MARKERS,
   REQUIRED_PERMISSIONS,
   runAndroidBuildCheck,
   validateAndroidBuild,
+  validateExpoBackgroundTaskRetryBridge,
   validateExpoFileSystemRedirectContainment,
   validateHeadlessEntry,
   validatePackagedAndroidBundle,
@@ -270,16 +272,27 @@ import 'expo-router/entry';
 const redirectContainmentPackageJson = {
   main: 'index.js',
   scripts: { postinstall: 'patch-package' },
-  dependencies: { 'expo-file-system': '57.0.6' },
+  dependencies: {
+    'expo-background-task': '57.0.16',
+    'expo-file-system': '57.0.6',
+  },
   devDependencies: { 'patch-package': '8.0.1' },
-  expo: { autolinking: { android: { buildFromSource: ['expo-file-system'] } } },
+  expo: {
+    autolinking: {
+      android: { buildFromSource: ['expo-background-task', 'expo-file-system'] },
+    },
+  },
 };
 const redirectContainmentPackageLock = {
   packages: {
     '': {
-      dependencies: { 'expo-file-system': '57.0.6' },
+      dependencies: {
+        'expo-background-task': '57.0.16',
+        'expo-file-system': '57.0.6',
+      },
       devDependencies: { 'patch-package': '8.0.1' },
     },
+    'node_modules/expo-background-task': { version: '57.0.16' },
     'node_modules/expo-file-system': { version: '57.0.6' },
     'node_modules/patch-package': { version: '8.0.1' },
   },
@@ -306,6 +319,77 @@ const redirectContainmentAppConfigSource = `
 const rnFetchEscapeHatch = process.env.EXPO_PUBLIC_USE_RN_FETCH?.trim().toLowerCase();
 if (rnFetchEscapeHatch === '1' || rnFetchEscapeHatch === 'true') throw new Error();
 `;
+const backgroundTaskRetryPatchSource = `
+diff --git a/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskScheduler.kt b/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskScheduler.kt
++    if (cancelExisting && hasUnfinishedWorker(context)) {
+ if (consumers.isEmpty()) {
+-      return
++      return true
++        return scheduled
++          val succeeded = result is Number && result.toDouble() == 1.0
++        taskCompletion.complete(false)
++    if (!succeeded) {
++      return false
+     }
++      workInfos.any { !it.state.isFinished }
+diff --git a/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskWork.kt b/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskWork.kt
++      return if (succeeded) Result.success() else Result.retry()
++      return Result.retry()
+`;
+const backgroundTaskRetrySchedulerSource = `
+suspend fun runTasks(context: Context, appScopeKey: String): Boolean {
+  if (cancelExisting && hasUnfinishedWorker(context)) {
+  val consumers = taskService.getTaskConsumers(appScopeKey)
+    .filterIsInstance<BackgroundTaskConsumer>()
+    if (consumers.isEmpty()) {
+      return true
+    }
+        Log.d(TAG, "runTasks: Deferred foreground worker; scheduled=$scheduled")
+        return scheduled
+  val succeeded = result is Number && result.toDouble() == 1.0
+        Log.e(TAG, "Task failed: \${e.message}")
+        taskCompletion.complete(false)
+  val succeeded = tasks.awaitAll().all { it }
+    if (!succeeded) {
+      return false
+    }
+    return Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+    scheduleWorker(context, appScopeKey, false)
+}
+private suspend fun hasUnfinishedWorker(context: Context): Boolean {
+  workInfos.any { !it.state.isFinished }
+}
+catch (e: CancellationException) {
+  throw e
+}
+catch (e: CancellationException) {
+  throw e
+}
+catch (e: CancellationException) {
+  throw e
+}
+catch (e: CancellationException) {
+  throw e
+}
+catch (e: CancellationException) {
+  throw e
+}
+catch (e: CancellationException) {
+  cancel(true)
+  throw e
+}
+`;
+const backgroundTaskRetryWorkerSource = `
+if (appScopeKey == null) {
+  return Result.failure(outputData)
+}
+return if (succeeded) Result.success() else Result.retry()
+catch (e: CancellationException) {
+  throw e
+}
+doWork: Worker failed; requesting retry
+return Result.retry()
+`;
 
 function redirectContainmentInput(overrides = {}) {
   return {
@@ -314,6 +398,17 @@ function redirectContainmentInput(overrides = {}) {
     patchSource: redirectContainmentPatchSource,
     legacyModuleSource: redirectContainmentLegacyModuleSource,
     appConfigSource: redirectContainmentAppConfigSource,
+    ...overrides,
+  };
+}
+
+function backgroundTaskRetryInput(overrides = {}) {
+  return {
+    packageJson: structuredClone(redirectContainmentPackageJson),
+    packageLock: structuredClone(redirectContainmentPackageLock),
+    patchSource: backgroundTaskRetryPatchSource,
+    schedulerSource: backgroundTaskRetrySchedulerSource,
+    workerSource: backgroundTaskRetryWorkerSource,
     ...overrides,
   };
 }
@@ -328,16 +423,41 @@ function writeRedirectContainmentFixture(root) {
     ),
     { recursive: true },
   );
+  mkdirSync(
+    join(
+      root,
+      'node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask',
+    ),
+    { recursive: true },
+  );
   writeFileSync(join(root, 'package.json'), JSON.stringify(input.packageJson));
   writeFileSync(join(root, 'package-lock.json'), JSON.stringify(input.packageLock));
   writeFileSync(join(root, 'app.config.ts'), input.appConfigSource);
   writeFileSync(join(root, 'patches/expo-file-system+57.0.6.patch'), input.patchSource);
+  writeFileSync(
+    join(root, 'patches/expo-background-task+57.0.16.patch'),
+    backgroundTaskRetryPatchSource,
+  );
   writeFileSync(
     join(
       root,
       'node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemLegacyModule.kt',
     ),
     input.legacyModuleSource,
+  );
+  writeFileSync(
+    join(
+      root,
+      'node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskScheduler.kt',
+    ),
+    backgroundTaskRetrySchedulerSource,
+  );
+  writeFileSync(
+    join(
+      root,
+      'node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskWork.kt',
+    ),
+    backgroundTaskRetryWorkerSource,
   );
   mkdirSync(join(root, 'android/app/src/main/res/xml'), { recursive: true });
   writeFileSync(
@@ -350,6 +470,9 @@ function cleanupDexFixture({ omitRequiredMarker, extraMarkers = [] } = {}) {
   return Buffer.from(
     [
       ...REQUIRED_PINNED_SHORTCUT_CLEANUP_DEX_MARKERS.filter(
+        (marker) => marker !== omitRequiredMarker,
+      ),
+      ...REQUIRED_BACKGROUND_TASK_RETRY_DEX_MARKERS.filter(
         (marker) => marker !== omitRequiredMarker,
       ),
       ...extraMarkers,
@@ -423,6 +546,155 @@ test('generates and enforces the system-CA-only Android network policy', () => {
 
 test('accepts the pinned Expo file-system redirect containment chain', () => {
   assert.deepEqual(validateExpoFileSystemRedirectContainment(redirectContainmentInput()), []);
+});
+
+test('guards the source-built Expo background-task retry bridge against drift', () => {
+  assert.deepEqual(validateExpoBackgroundTaskRetryBridge(backgroundTaskRetryInput()), []);
+  assert.deepEqual(
+    validateExpoBackgroundTaskRetryBridge({
+      packageJson: JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')),
+      packageLock: JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8')),
+      patchSource: readFileSync(join(ROOT, 'patches/expo-background-task+57.0.16.patch'), 'utf8'),
+      schedulerSource: readFileSync(
+        join(
+          ROOT,
+          'node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskScheduler.kt',
+        ),
+        'utf8',
+      ),
+      workerSource: readFileSync(
+        join(
+          ROOT,
+          'node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskWork.kt',
+        ),
+        'utf8',
+      ),
+    }),
+    [],
+  );
+
+  const mutations = [
+    {
+      label: 'dependency pin',
+      mutate(input) {
+        input.packageJson.dependencies['expo-background-task'] = '~57.0.16';
+      },
+      error: 'must be pinned exactly',
+    },
+    {
+      label: 'lockfile resolution',
+      mutate(input) {
+        input.packageLock.packages['node_modules/expo-background-task'].version = '57.0.17';
+      },
+      error: 'package-lock must resolve',
+    },
+    {
+      label: 'source build',
+      mutate(input) {
+        input.packageJson.expo.autolinking.android.buildFromSource = ['expo-file-system'];
+      },
+      error: 'must build expo-background-task from source exactly once',
+    },
+    {
+      label: 'durable patch',
+      mutate(input) {
+        input.patchSource = input.patchSource.replace(
+          '+      workInfos.any { !it.state.isFinished }\n',
+          '',
+        );
+      },
+      error: 'must carry the reviewed retry',
+    },
+    {
+      label: 'exact success result',
+      mutate(input) {
+        input.schedulerSource = input.schedulerSource.replace(
+          'result.toDouble() == 1.0',
+          'result.toInt() == 1',
+        );
+      },
+      error: 'must preserve the reviewed retry flow',
+    },
+    {
+      label: 'failed result propagation',
+      mutate(input) {
+        input.schedulerSource = input.schedulerSource.replace(
+          '    if (!succeeded) {\n      return false\n    }\n',
+          '',
+        );
+      },
+      error: 'must preserve the reviewed retry flow',
+    },
+    {
+      label: 'foreground successor result',
+      mutate(input) {
+        input.schedulerSource = input.schedulerSource.replace(
+          '        return scheduled\n',
+          '        return true\n',
+        );
+      },
+      error: 'must preserve the reviewed retry flow',
+    },
+    {
+      label: 'synchronous exception result',
+      mutate(input) {
+        input.schedulerSource = input.schedulerSource.replace(
+          'taskCompletion.complete(false)',
+          'taskCompletion.complete(true)',
+        );
+      },
+      error: 'must preserve the reviewed retry flow',
+    },
+    {
+      label: 'empty consumer completion',
+      mutate(input) {
+        input.schedulerSource = input.schedulerSource.replace(
+          '    if (consumers.isEmpty()) {\n      return true\n    }',
+          '    if (consumers.isEmpty()) {\n      return false\n    }',
+        );
+      },
+      error: 'must preserve the reviewed retry flow',
+    },
+    {
+      label: 'cancellation propagation',
+      mutate(input) {
+        input.schedulerSource = input.schedulerSource.replace(
+          'catch (e: CancellationException)',
+          'catch (e: IllegalStateException)',
+        );
+      },
+      error: 'must propagate cancellation',
+    },
+    {
+      label: 'operational retry',
+      mutate(input) {
+        input.workerSource = input.workerSource.replace(
+          'doWork: Worker failed; requesting retry',
+          'doWork: Worker failed',
+        );
+      },
+      error: 'must fail malformed input',
+    },
+    {
+      label: 'worker cancellation propagation',
+      mutate(input) {
+        input.workerSource = input.workerSource.replace(
+          '  throw e\n',
+          '  return Result.failure()\n',
+        );
+      },
+      error: 'must fail malformed input',
+    },
+  ];
+
+  for (const { label, mutate, error } of mutations) {
+    const input = backgroundTaskRetryInput();
+    mutate(input);
+    assert.ok(
+      validateExpoBackgroundTaskRetryBridge(input).some((message) => message.includes(error)),
+      `${label} must fail closed`,
+    );
+  }
 });
 
 test('injects and retains the fail-closed Android WebSocket redirect policy', () => {
@@ -940,6 +1212,19 @@ test('validates the packaged protobuf manifest and rejects a Direct Share resour
     );
   }
 
+  for (const marker of REQUIRED_BACKGROUND_TASK_RETRY_DEX_MARKERS) {
+    const missingRetryBridge = validatePackagedAndroidBundle({
+      manifestProto,
+      dexBytes: cleanupDexFixture({ omitRequiredMarker: marker }),
+    });
+    assert.ok(
+      missingRetryBridge.includes(
+        `packaged DEX is missing required background-task retry marker: ${marker}`,
+      ),
+      marker,
+    );
+  }
+
   for (const marker of FORBIDDEN_LEGACY_SHORTCUT_PUBLISHER_DEX_MARKERS) {
     const legacyPublisher = validatePackagedAndroidBundle({
       manifestProto,
@@ -1131,6 +1416,24 @@ test('artifact runner inspects both variants and the final release AAB contents'
 
     writeTestAab(root, releaseBundlePath);
     assert.doesNotThrow(() => runAndroidBuildCheck(options));
+
+    const backgroundSchedulerPath = join(
+      root,
+      'node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskScheduler.kt',
+    );
+    writeFileSync(
+      backgroundSchedulerPath,
+      backgroundTaskRetrySchedulerSource.replace(
+        '    if (!succeeded) {\n      return false\n    }\n',
+        '',
+      ),
+    );
+    assert.throws(
+      () => runAndroidBuildCheck(options),
+      /background task retry bridge:.*reviewed retry flow/s,
+    );
+    writeFileSync(backgroundSchedulerPath, backgroundTaskRetrySchedulerSource);
+
     assert.equal(
       inspectPackagedAndroidBundle(join(root, releaseBundlePath)).googleMapsApiKeySha256,
       createHash('sha256').update(mapsApiKeyFixture).digest('hex'),

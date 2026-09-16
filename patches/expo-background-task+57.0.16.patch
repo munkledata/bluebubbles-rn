@@ -1,0 +1,230 @@
+diff --git a/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskScheduler.kt b/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskScheduler.kt
+index 74c5719..562a96d 100644
+--- a/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskScheduler.kt
++++ b/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskScheduler.kt
+@@ -11,7 +11,6 @@ import androidx.work.NetworkType
+ import androidx.work.OneTimeWorkRequestBuilder
+ import androidx.work.Operation
+ import androidx.work.PeriodicWorkRequestBuilder
+-import androidx.work.WorkInfo
+ import androidx.work.WorkManager
+ import com.google.common.util.concurrent.ListenableFuture
+ import expo.modules.interfaces.taskManager.TaskServiceProviderHelper
+@@ -79,16 +78,11 @@ object BackgroundTaskScheduler {
+       return false
+     }
+
+-    val existingWorkInfo = getWorkerInfo(context)
+-
+     // During startup/headless restore, task consumers register again while the
+     // unique worker is already scheduled or executing. Replacing it here resets
+     // the pending run or cancels the active run, which can create a
+     // cancel/reschedule loop.
+-    if (
+-      cancelExisting &&
+-      (existingWorkInfo?.state == WorkInfo.State.ENQUEUED || existingWorkInfo?.state == WorkInfo.State.RUNNING)
+-    ) {
++    if (cancelExisting && hasUnfinishedWorker(context)) {
+       Log.d(TAG, "Worker is already scheduled, skipping cancel-and-replace scheduling.")
+       return true
+     }
+@@ -141,6 +135,8 @@ object BackgroundTaskScheduler {
+         ).await()
+
+         true
++      } catch (e: CancellationException) {
++        throw e
+       } catch (e: Exception) {
+         Log.e(TAG, "Worker failed to start with error " + e.message)
+         false
+@@ -163,6 +159,8 @@ object BackgroundTaskScheduler {
+         ).await()
+
+         true
++      } catch (e: CancellationException) {
++        throw e
+       } catch (e: Exception) {
+         Log.e(TAG, "Worker failed to start with error " + e.message)
+         false
+@@ -174,7 +172,7 @@ object BackgroundTaskScheduler {
+    * Cancels the worker task
+    */
+   private suspend fun stopWorker(context: Context): Boolean {
+-    if (!isWorkerRunning(context)) {
++    if (!hasUnfinishedWorker(context)) {
+       return false
+     }
+
+@@ -184,25 +182,18 @@ object BackgroundTaskScheduler {
+     val workManager = WorkManager.getInstance(context)
+     return try {
+       workManager.cancelUniqueWork(WORKER_IDENTIFIER).await()
++    } catch (e: CancellationException) {
++      throw e
+     } catch (e: Exception) {
+       Log.d(TAG, "Stopping worker failed with error " + e.message)
+       false
+     }
+   }
+
+-  /**
+-   * Returns true if the worker task is pending
+-   */
+-  private suspend fun isWorkerRunning(context: Context): Boolean {
+-    val workInfo = getWorkerInfo(context)
+-    return workInfo?.state == WorkInfo.State.RUNNING ||
+-      workInfo?.state == WorkInfo.State.ENQUEUED
+-  }
+-
+   /**
+    * Runs tasks with the given appScopeKey
+    */
+-  suspend fun runTasks(context: Context, appScopeKey: String) {
++  suspend fun runTasks(context: Context, appScopeKey: String): Boolean {
+     // Get task service
+     val taskService = TaskServiceProviderHelper.getTaskServiceImpl(context)
+       ?: throw MissingTaskServiceException()
+@@ -211,10 +202,11 @@ object BackgroundTaskScheduler {
+
+     // Get all task consumers
+     val consumers = taskService.getTaskConsumers(appScopeKey)
+-    Log.d(TAG, "runTasks: number of consumers ${consumers.size}")
++      .filterIsInstance<BackgroundTaskConsumer>()
++    Log.d(TAG, "runTasks: number of background task consumers ${consumers.size}")
+
+     if (consumers.isEmpty()) {
+-      return
++      return true
+     }
+
+     // Make sure we're in the background before running a task
+@@ -223,49 +215,64 @@ object BackgroundTaskScheduler {
+       // we don't want to run anything to avoid performance issues.
+       Log.d(TAG, "runTasks: App is in the foreground")
+       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+-        scheduleWorker(context, appScopeKey, false, 60L.coerceAtMost(intervalMinutes))
+-        Log.d(TAG, "runTasks: Scheduled new worker in $intervalMinutes minutes")
++        val scheduled = scheduleWorker(
++          context,
++          appScopeKey,
++          false,
++          60L.coerceAtMost(intervalMinutes)
++        )
++        Log.d(TAG, "runTasks: Deferred foreground worker; scheduled=$scheduled")
++        return scheduled
+       }
+-      return
++      return true
+     }
+
+-    val tasks = consumers.filterIsInstance<BackgroundTaskConsumer>()
+-      .map { bgTaskConsumer ->
+-        Log.d(TAG, "runTasks: executing tasks for consumer of type ${bgTaskConsumer.taskType()}")
+-        val taskCompletion = CompletableDeferred<Unit>()
+-        try {
+-          bgTaskConsumer.executeTask {
+-            Log.d(TAG, "Task successfully finished")
+-            taskCompletion.complete(Unit)
+-          }
+-        } catch (e: Exception) {
+-          Log.e(TAG, "Task failed: ${e.message}")
++    val tasks = consumers.map { bgTaskConsumer ->
++      Log.d(TAG, "runTasks: executing tasks for consumer of type ${bgTaskConsumer.taskType()}")
++      val taskCompletion = CompletableDeferred<Boolean>()
++      try {
++        bgTaskConsumer.executeTask { response ->
++          val result = response["result"]
++          val succeeded = result is Number && result.toDouble() == 1.0
++          Log.d(TAG, "Task finished; success=$succeeded")
++          taskCompletion.complete(succeeded)
+         }
+-        taskCompletion
++      } catch (e: CancellationException) {
++        throw e
++      } catch (e: Exception) {
++        Log.e(TAG, "Task failed: ${e.message}")
++        taskCompletion.complete(false)
+       }
++      taskCompletion
++    }
+     // Await all tasks to complete
+-    tasks.awaitAll()
++    val succeeded = tasks.awaitAll().all { it }
+
+-    // Schedule next task
+-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+-      scheduleWorker(context, appScopeKey, false)
++    // A failed task asks WorkManager to retry this exact work with backoff. Appending the ordinary
++    // interval successor too would create two independent future runs for one failed attempt.
++    if (!succeeded) {
++      return false
+     }
++    return Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
++      scheduleWorker(context, appScopeKey, false)
+   }
+
+   /**
+-   * Returns the worker info object from the WorkManager if the worker has been
+-   * registered, otherwise returns null
++   * Returns true when any unfinished item remains in the unique worker chain.
++   * WorkManager retains historical predecessors and does not guarantee query order.
+    */
+-  private suspend fun getWorkerInfo(context: Context): WorkInfo? {
++  private suspend fun hasUnfinishedWorker(context: Context): Boolean {
+     // Get work manager
+     val workManager = WorkManager.getInstance(context)
+
+     return try {
+       val workInfos = workManager.getWorkInfosForUniqueWork(WORKER_IDENTIFIER).await()
+-      return workInfos.firstOrNull()
++      workInfos.any { !it.state.isFinished }
++    } catch (e: CancellationException) {
++      throw e
+     } catch (e: Exception) {
+       Log.d(TAG, "Calling getWorkInfosForUniqueWork failed with error " + e.message)
+-      null
++      false
+     }
+   }
+
+diff --git a/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskWork.kt b/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskWork.kt
+index 33fea94..5e88d08 100644
+--- a/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskWork.kt
++++ b/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskWork.kt
+@@ -19,24 +19,26 @@ class BackgroundTaskWork(context: Context, params: WorkerParameters) : Coroutine
+     Log.i(TAG, "doWork: Running worker")
+
+     // Get the app scope key
+-    val appScopeKey = inputData.getString("appScopeKey") ?: throw MissingAppScopeKey()
++    val appScopeKey = inputData.getString("appScopeKey")
++    if (appScopeKey == null) {
++      val error = MissingAppScopeKey()
++      val outputData = Data.Builder()
++        .putString("error", error.message)
++        .build()
++      return Result.failure(outputData)
++    }
+
+     try {
+       // Run tasks async using the task service. This call will return when the task has finished
+       // ie. When JS task executor has notified the task manager that it is done.
+-      BackgroundTaskScheduler.runTasks(applicationContext, appScopeKey)
++      val succeeded = BackgroundTaskScheduler.runTasks(applicationContext, appScopeKey)
++      return if (succeeded) Result.success() else Result.retry()
+     } catch (e: CancellationException) {
+       Log.i(TAG, "doWork: Worker was cancelled")
+       throw e
+     } catch (e: Exception) {
+-      // Wrap exception in Data:
+-      val outputData = Data.Builder()
+-        .putString("error", e.message)
+-        .putString("stackTrace", e.stackTraceToString())
+-        .build()
+-
+-      return Result.failure(outputData)
++      Log.e(TAG, "doWork: Worker failed; requesting retry", e)
++      return Result.retry()
+     }
+-    return Result.success()
+   }
+ }
