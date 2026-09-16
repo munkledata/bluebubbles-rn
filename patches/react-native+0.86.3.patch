@@ -1,0 +1,40 @@
+diff --git a/node_modules/react-native/ReactAndroid/src/main/java/com/facebook/react/views/textinput/ReactEditText.kt b/node_modules/react-native/ReactAndroid/src/main/java/com/facebook/react/views/textinput/ReactEditText.kt
+index b8c3b7e..1edb503 100644
+--- a/node_modules/react-native/ReactAndroid/src/main/java/com/facebook/react/views/textinput/ReactEditText.kt
++++ b/node_modules/react-native/ReactAndroid/src/main/java/com/facebook/react/views/textinput/ReactEditText.kt
+@@ -38,6 +38,8 @@ import android.view.ViewGroup
+ import android.view.accessibility.AccessibilityNodeInfo
+ import android.view.inputmethod.EditorInfo
+ import android.view.inputmethod.InputConnection
++import android.view.inputmethod.InputConnectionWrapper
++import android.view.inputmethod.InputContentInfo
+ import android.view.inputmethod.InputMethodManager
+ import androidx.appcompat.widget.AppCompatEditText
+ import androidx.core.util.Predicate
+@@ -342,6 +344,26 @@ public open class ReactEditText public constructor(context: Context) : AppCompat
+   override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
+     val reactContext = UIManagerHelper.getReactContext(this)
+     var inputConnection = super.onCreateInputConnection(outAttrs)
++    if (
++        inputConnection != null &&
++            Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
++            ViewCompat.getOnReceiveContentMimeTypes(this) != null
++    ) {
++      val platformConnection = inputConnection
++      inputConnection =
++          object : InputConnectionWrapper(platformConnection, false) {
++            override fun commitContent(
++                inputContentInfo: InputContentInfo,
++                flags: Int,
++                opts: Bundle?,
++            ): Boolean {
++              val anchoredOpts = Bundle(opts ?: Bundle.EMPTY)
++              anchoredOpts.putParcelable(
++                  "androidx.core.view.extra.INPUT_CONTENT_INFO", inputContentInfo)
++              return super.commitContent(inputContentInfo, flags, anchoredOpts)
++            }
++          }
++    }
+     if (inputConnection != null && onKeyPress) {
+       inputConnection =
+           ReactEditTextInputConnectionWrapper(

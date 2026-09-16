@@ -68,10 +68,10 @@ private const val MAX_RAW_NAME_LENGTH = 512
 private const val MAX_MIME_LENGTH = 120
 private const val MAX_QUEUED_BATCHES = 1
 
-// AndroidX stores the API 25-30 permission token here after requestPermission(). API 31+ instead
-// ties the grant to a hidden InputContentInfo field on the framework ContentInfo object, so the
-// lease below must also keep the original ContentInfoCompat (and its platform object) strongly
-// reachable until the worker finishes.
+// AndroidX stores the API 25-30 permission token here after requestPermission(). The version-pinned
+// ReactEditText patch supplies the same exact token on API 31+, before delegating to the platform's
+// normal requestPermission()/receive-content path. The lease also retains the original payload so
+// neither platform path can revoke the grant before the bounded worker finishes.
 private const val EXTRA_INPUT_CONTENT_INFO = "androidx.core.view.extra.INPUT_CONTENT_INFO"
 
 private data class PendingPasteBatch(
@@ -114,10 +114,20 @@ private class PermissionLease(
 @RequiresApi(25)
 private object InputPermissionApi25 {
   @Suppress("DEPRECATION")
-  fun capture(payload: ContentInfoCompat): PermissionLease {
+  fun capture(payload: ContentInfoCompat): PermissionLease? {
     val info = payload.extras?.getParcelable(EXTRA_INPUT_CONTENT_INFO) as? InputContentInfo
     return if (info == null) {
-      PermissionLease(payload, null)
+      // API 31+ IME content must carry the exact token injected by the patched ReactEditText. If
+      // the version-pinned patch is ever absent, reject instead of consuming content whose grant
+      // could only be released later by nondeterministic platform finalization.
+      if (
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+        payload.source == ContentInfoCompat.SOURCE_INPUT_METHOD
+      ) {
+        null
+      } else {
+        PermissionLease(payload, null)
+      }
     } else {
       PermissionLease(payload) { info.releasePermission() }
     }
@@ -187,14 +197,13 @@ private fun namedThreadFactory(name: String): ThreadFactory = ThreadFactory { ru
  * `pasteAsPlainText`, so the system's long-press Paste coerces an image to text and drops a raw
  * `content://…` string into the input.
  *
- * THE FIX IS ONE CALL ON THE VIEW RN ALREADY CREATED — no fork, no subclass, no custom
- * ViewManager. `ReactEditText` extends androidx's `AppCompatEditText`, which ALREADY contains the
- * whole receive-content implementation (the `setContentMimeTypes` + `InputConnectionCompat`
- * wiring on API ≤30, and `AppCompatReceiveContentHelper`, which intercepts both `paste` AND
- * `pasteAsPlainText` — so RN's rewrite still routes here). It is simply dormant until a listener
- * is registered. On API 31+ the framework `TextView` does the same natively. Registering
- * `ViewCompat.setOnReceiveContentListener` therefore lights up long-press Paste, keyboard
- * image/GIF/sticker commits, and drag-and-drop at once, for any MIME type.
+ * THE FIX REUSES THE VIEW RN ALREADY CREATED — no subclass or custom ViewManager. `ReactEditText`
+ * extends androidx's `AppCompatEditText`, whose receive-content implementation handles
+ * `pasteAsPlainText` and API 25-30 keyboard commits once this module registers a listener. On API
+ * 31+, Android's framework handles the commit, while the version-pinned ReactEditText source patch
+ * forwards the exact public permission token into this module so the bounded worker can release
+ * it deterministically. Together these paths enable long-press Paste, keyboard image/GIF/sticker
+ * commits, and drag-and-drop for the accepted MIME types.
  *
  * See the JS half in `src/services/paste/pasteInput.ts` + `pastePayload.ts`.
  */
@@ -245,6 +254,10 @@ class GatorPasteInputModule : Module() {
       if (view != null) {
         runCatching {
           ViewCompat.setOnReceiveContentListener(view, null, null)
+          // Replace any still-focused connection that advertised rich content. Otherwise an IME
+          // can race one final commit after the listener that owns its permission token is gone.
+          val imm = view.context.getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+          imm?.restartInput(view)
         }.onFailure { android.util.Log.w("GatorPasteInput", "detach failed") }
       }
     }.runOnQueue(Queues.MAIN)
@@ -284,10 +297,10 @@ class GatorPasteInputModule : Module() {
    * default handling; the URI items are consumed here and must not be returned, or the default
    * listener would `coerceToText` them into a `content://…` string in the input.
    *
-   * No provider call happens here. AndroidX already requested the temporary keyboard grant and
-   * placed its `InputContentInfo` token in the payload extras; retaining that token keeps the grant
-   * alive while one bounded worker performs metadata queries and streaming. We release it in the
-   * worker's `finally` block. Count is rejected before that worker can touch a provider.
+   * No provider call happens here. AndroidX (API 25-30) or the version-pinned ReactEditText wrapper
+   * (API 31+) placed the exact `InputContentInfo` token in the payload extras. Retaining that token
+   * keeps the grant alive while one bounded worker performs metadata queries and streaming; the
+   * worker releases it in `finally`. Count is rejected before that worker can touch a provider.
    */
   private fun onReceive(context: Context, payload: ContentInfoCompat, tag: Int): ContentInfoCompat? {
     val split = payload.partition { item -> item.uri != null }
@@ -297,9 +310,11 @@ class GatorPasteInputModule : Module() {
 
     val clip = withUris.clip
     val count = clip.itemCount
-    // Anchor the ORIGINAL payload, not the partition copy. On API 31+ its hidden framework
-    // InputContentInfo owns the temporary IME grant while the queued worker is still copying.
-    val permission = capturePermissionLease(payload)
+    // Anchor the ORIGINAL payload, not the partition copy, and require the explicit API 31+ token.
+    val permission = capturePermissionLease(payload) ?: run {
+      emitRejected(tag, maxOf(count, 1))
+      return payload
+    }
     if (count !in 1..MAX_PASTED_FILES) {
       permission.release()
       emitRejected(tag, maxOf(count, 1))
@@ -554,7 +569,7 @@ class GatorPasteInputModule : Module() {
       }
   }
 
-  private fun capturePermissionLease(payload: ContentInfoCompat): PermissionLease {
+  private fun capturePermissionLease(payload: ContentInfoCompat): PermissionLease? {
     return if (Build.VERSION.SDK_INT >= 25) {
       InputPermissionApi25.capture(payload)
     } else {
