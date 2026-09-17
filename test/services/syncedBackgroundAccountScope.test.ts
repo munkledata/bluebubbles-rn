@@ -149,6 +149,7 @@ import type { AppDatabase } from '@db/types';
 import {
   deleteNativeSyncedBackgroundCacheFile,
   pruneNativeSyncedBackgroundCache,
+  validateNativeSyncedBackgroundCacheFile,
 } from '@native/boundedDownload';
 import {
   ensureSyncedBackground,
@@ -164,6 +165,7 @@ import {
 
 const mockPruneSyncedBackgroundCache = jest.mocked(pruneNativeSyncedBackgroundCache);
 const mockDeleteSyncedBackgroundCacheFile = jest.mocked(deleteNativeSyncedBackgroundCacheFile);
+const mockValidateSyncedBackgroundCacheFile = jest.mocked(validateNativeSyncedBackgroundCacheFile);
 
 beforeEach(() => {
   jest.spyOn(logger, 'warn').mockImplementation(() => {});
@@ -824,6 +826,155 @@ describe('account-scoped synced backgrounds', () => {
     expect(mockDeletedUris).not.toContain(unexpected);
     expect(mockDeleteSyncedBackgroundCacheFile).toHaveBeenCalledWith(unexpected);
     expect(mockFileBytes.has(unexpected)).toBe(true);
+  });
+
+  it('retires an invalid DB-current wallpaper through native policy and redownloads it', async () => {
+    const current = backgroundUri(20);
+    mockFileBytes.set(current, 10);
+    getSyncedBackgroundState.mockResolvedValueOnce({ channel: 'channel-1', uri: current });
+    mockValidateSyncedBackgroundCacheFile.mockResolvedValueOnce(false);
+
+    const run = ensureSyncedBackground(
+      {
+        snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
+        isTransportCurrent: () => true,
+      } as never,
+      {} as AppDatabase,
+      'chat-1',
+      { generation: 20, isCurrent: () => true },
+    );
+
+    const pending = await takePendingDownload();
+    expect(mockValidateSyncedBackgroundCacheFile).toHaveBeenCalledWith(current);
+    expect(mockValidateSyncedBackgroundCacheFile).toHaveBeenCalledTimes(1);
+    expect(mockDeleteSyncedBackgroundCacheFile).toHaveBeenCalledWith(current);
+    expect(pending.finalUri).toBe(current);
+
+    pending.resolve();
+    await run;
+
+    expect(setSyncedBackgroundUriIfCurrent).toHaveBeenCalledWith(
+      expect.anything(),
+      'chat-1',
+      'channel-1',
+      current,
+      current,
+    );
+  });
+
+  it('does not replace an invalid wallpaper when native retirement cannot confirm cleanup', async () => {
+    const current = backgroundUri(20);
+    mockFileBytes.set(current, 10);
+    getSyncedBackgroundState.mockResolvedValueOnce({ channel: 'channel-1', uri: current });
+    mockValidateSyncedBackgroundCacheFile.mockResolvedValueOnce(false);
+    mockDeleteSyncedBackgroundCacheFile.mockRejectedValueOnce(new Error('delete failed'));
+
+    await ensureSyncedBackground(
+      {
+        snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
+        isTransportCurrent: () => true,
+      } as never,
+      {} as AppDatabase,
+      'chat-1',
+      { generation: 20, isCurrent: () => true },
+    );
+
+    expect(mockDeleteSyncedBackgroundCacheFile).toHaveBeenCalledWith(current);
+    expect(mockPendingDownloads).toHaveLength(0);
+    expect(setSyncedBackgroundUriIfCurrent).not.toHaveBeenCalled();
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[background] invalid synced background could not be retired',
+    );
+  });
+
+  it('validates and reuses an orphan destination left by an earlier run', async () => {
+    const orphan = backgroundUri(20);
+    mockFileBytes.set(orphan, 10);
+    getSyncedBackgroundState.mockResolvedValueOnce({ channel: 'channel-1', uri: null });
+
+    await ensureSyncedBackground(
+      {
+        snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
+        isTransportCurrent: () => true,
+      } as never,
+      {} as AppDatabase,
+      'chat-1',
+      { generation: 20, isCurrent: () => true },
+    );
+
+    expect(mockValidateSyncedBackgroundCacheFile).toHaveBeenCalledWith(orphan);
+    expect(mockPendingDownloads).toHaveLength(0);
+    expect(mockDeleteSyncedBackgroundCacheFile).not.toHaveBeenCalledWith(orphan);
+    expect(setSyncedBackgroundUriIfCurrent).toHaveBeenCalledWith(
+      expect.anything(),
+      'chat-1',
+      'channel-1',
+      null,
+      orphan,
+    );
+  });
+
+  it('retires an invalid orphan destination before redownloading it', async () => {
+    const orphan = backgroundUri(20);
+    mockFileBytes.set(orphan, 10);
+    getSyncedBackgroundState.mockResolvedValueOnce({ channel: 'channel-1', uri: null });
+    mockValidateSyncedBackgroundCacheFile.mockResolvedValueOnce(false);
+
+    const run = ensureSyncedBackground(
+      {
+        snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
+        isTransportCurrent: () => true,
+      } as never,
+      {} as AppDatabase,
+      'chat-1',
+      { generation: 20, isCurrent: () => true },
+    );
+
+    const pending = await takePendingDownload();
+    expect(mockValidateSyncedBackgroundCacheFile).toHaveBeenCalledWith(orphan);
+    expect(mockDeleteSyncedBackgroundCacheFile).toHaveBeenCalledWith(orphan);
+    expect(pending.finalUri).toBe(orphan);
+
+    pending.resolve();
+    await run;
+  });
+
+  it('stops after cached-file validation when its account lease is revoked', async () => {
+    const currentUri = backgroundUri(20);
+    mockFileBytes.set(currentUri, 10);
+    getSyncedBackgroundState.mockResolvedValueOnce({ channel: 'channel-1', uri: currentUri });
+    let resolveValidation!: (valid: boolean) => void;
+    mockValidateSyncedBackgroundCacheFile.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveValidation = resolve;
+        }),
+    );
+    let current = true;
+    const run = ensureSyncedBackground(
+      {
+        snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
+        isTransportCurrent: () => true,
+      } as never,
+      {} as AppDatabase,
+      'chat-1',
+      { generation: 20, isCurrent: () => current },
+    );
+    for (
+      let attempt = 0;
+      attempt < 50 && mockValidateSyncedBackgroundCacheFile.mock.calls.length === 0;
+      attempt += 1
+    ) {
+      await Promise.resolve();
+    }
+
+    current = false;
+    resolveValidation(false);
+    await run;
+
+    expect(mockDeleteSyncedBackgroundCacheFile).not.toHaveBeenCalledWith(currentUri);
+    expect(mockPendingDownloads).toHaveLength(0);
+    expect(setSyncedBackgroundUriIfCurrent).not.toHaveBeenCalled();
   });
 
   it('does not reuse a matching-channel file from an older generation', async () => {

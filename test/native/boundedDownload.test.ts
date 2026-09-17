@@ -8,6 +8,7 @@ const native = {
   download: jest.fn(),
   pruneSyncedBackgroundCache: jest.fn(),
   prepareSyncedBackgroundCacheForDownload: jest.fn(),
+  validateSyncedBackgroundCacheFile: jest.fn(),
   deleteSyncedBackgroundCacheFile: jest.fn(),
   statAttachmentCacheFile: jest.fn(),
   deleteAttachmentCacheFile: jest.fn(),
@@ -45,6 +46,7 @@ import {
   pruneNativeSyncedBackgroundCache,
   scanNativeAttachmentCacheFiles,
   statNativeAttachmentCacheFile,
+  validateNativeSyncedBackgroundCacheFile,
 } from '../../src/native/boundedDownload';
 
 beforeEach(() => {
@@ -70,6 +72,7 @@ beforeEach(() => {
     remainingFiles: 3,
     remainingBytes: 30,
   });
+  native.validateSyncedBackgroundCacheFile.mockReset().mockResolvedValue(true);
   native.deleteSyncedBackgroundCacheFile.mockReset().mockResolvedValue(true);
   native.statAttachmentCacheFile.mockReset().mockResolvedValue({
     ok: true,
@@ -308,6 +311,22 @@ it('delegates old-wallpaper deletion to the fixed native ownership boundary', as
   expect(native.deleteSyncedBackgroundCacheFile).toHaveBeenCalledWith(uri);
   native.deleteSyncedBackgroundCacheFile.mockResolvedValueOnce('yes');
   await expect(deleteNativeSyncedBackgroundCacheFile(uri)).rejects.toEqual(
+    expect.objectContaining<Partial<NativeBoundedDownloadError>>({ reason: 'unavailable' }),
+  );
+});
+
+it('validates one wallpaper through the fixed native ownership boundary', async () => {
+  const uri = 'file:///private/synced-backgrounds/generation-7/media-current.jpg';
+
+  await expect(validateNativeSyncedBackgroundCacheFile(uri)).resolves.toBe(true);
+  expect(native.validateSyncedBackgroundCacheFile).toHaveBeenCalledWith(uri);
+  expect(native.validateSyncedBackgroundCacheFile.mock.calls[0]).toHaveLength(1);
+
+  native.validateSyncedBackgroundCacheFile.mockResolvedValueOnce(false);
+  await expect(validateNativeSyncedBackgroundCacheFile(uri)).resolves.toBe(false);
+
+  native.validateSyncedBackgroundCacheFile.mockResolvedValueOnce('yes');
+  await expect(validateNativeSyncedBackgroundCacheFile(uri)).rejects.toEqual(
     expect.objectContaining<Partial<NativeBoundedDownloadError>>({ reason: 'unavailable' }),
   );
 });

@@ -430,6 +430,11 @@ includes:
 - [ ] Keyboard/navigation-bar behavior passes gesture and three-button navigation.
 - [ ] Dark appearance, contrast, large text, TalkBack labels/focus order, reduced motion, and supported
       display sizes pass. The store listing makes no light/system-theme promise.
+- [ ] The exact candidate enforces the selected Android support boundary: release configuration and
+      the generated manifest/AAB report `minSdkVersion` 36, Play targeting and store copy exclude
+      Android versions below Android 16 / API 36, and the candidate passes the applicable smoke
+      matrix on both Android 16 / API 36 and the current latest Android 17 / API 37. API 24/25 device
+      execution is not required because those versions are outside the selected product boundary.
 - [ ] Permission denial, restricted battery settings handoff, offline/reconnect, low-storage, and
       process-death paths fail visibly and recover. V67 recovered visibly from one ordinary process
       kill with zero scoped fatal/ANR/native-crash markers; the other cases and any active-download
@@ -460,8 +465,8 @@ includes:
       admits one maximum 10 MiB transfer, and finishes at or below 100 MiB/256 files. Corrupt,
       unreadable, symlinked, raced, numerically overflowing, failed-delete, or scan-count-over-limit
       state (more than 8,192 files or 32,768 nodes) refuses admission; ordinary quota excess is
-      pruned when safe. Record the Android 7/API24–25 disposition. The sideloaded exact-v66-split
-      API-35 valid/invalid image run predates this native admission boundary and is
+      pruned when safe. The sideloaded exact-v66-split API-35 valid/invalid image run predates this
+      native admission boundary and is
       [supporting evidence only](./docs/DL_01_SUPPORTING_V66_DOWNLOAD_PROOF_2026-09-15.md).
 - [ ] The exact candidate's backup picker/provider path accepts a near-limit document, rejects an
       oversized stream even when the provider lies about size, times out a stalled provider, cancels

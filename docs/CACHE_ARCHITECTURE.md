@@ -172,9 +172,11 @@ content_rowid='id')`, created in migration 0001, kept current by AFTER INSERT/DE
   retires zero-byte/orphan/crash-owned files, and proactively conforms the quota before persistent
   downloads open. The scanner supports both the legacy `attachments/{safe-guid}/{safe-name}`
   layout and the canonical generation layout, with hard limits of 8,192 files and 32,768 nodes.
-  Malformed/symlinked/partial inventories fail closed. On Android 7 (API 24/25), ordinary persistent
-  attachment downloads and new synced-wallpaper downloads remain disabled because the bounded
-  streaming directory API begins at Android 8.
+  Malformed/symlinked/partial inventories fail closed. The selected product boundary begins at
+  Android 16 / API 36, and Android 17 / API 37 is the current latest supported release. The native
+  API-below-26 failure branch remains defense in depth, not an advertised degraded support mode.
+  Release configuration, generated manifest/AAB metadata, Play targeting, and store copy must all
+  enforce the API 36 floor before the boundary is considered proven.
 - `downloadStore` (zustand) is **presentation-only** byte progress (`0..1 | null`, status) —
   it never carries the path. expo-image runs its own native memory/disk bitmap cache (never
   cleared).

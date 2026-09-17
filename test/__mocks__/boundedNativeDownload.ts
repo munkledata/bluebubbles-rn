@@ -34,6 +34,10 @@ export const prepareNativeSyncedBackgroundCacheForDownload = jest.fn(
   }),
 );
 
+export const validateNativeSyncedBackgroundCacheFile = jest.fn(
+  async (_uri: string): Promise<boolean> => true,
+);
+
 export const deleteNativeSyncedBackgroundCacheFile = jest.fn(
   async (_uri: string): Promise<boolean> => true,
 );

@@ -348,7 +348,7 @@ capability and the release/product owner has approved the `PLAY-02` eligibility 
       promise a Chrome custom tab. Notification **Decline** clears only the local ring; unlike the
       foreground overlay, it does not send server leave. Record this distinction for `PLAY-02`.
 - [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Confirm the server's ended status clears the
-      active ring. Keep Android 14/15/16 allowed/denied full-screen coverage and browser
+      active ring. Keep Android 16/17 allowed/denied full-screen coverage and browser
       camera/microphone hostile-navigation evidence open under `PLAY-02`/`DEVICE-01B3`.
 
 ### 9. Cleanup and privacy-safe evidence
@@ -401,12 +401,12 @@ approved fixture.
       expiry, stop owner, and cleanup owner.
       Missing delayed-transfer, observer, or sticker support is `BLOCKED/OPEN`, never silently `N/A`.
 
-| Branch or condition              | Current rule                                                                                                                                                                       | Result |
-| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| Clean Play install               | Exercise current-data persistence/search and current file flows. Record legacy DB/cache/shortcut upgrade as `N/A — clean-install branch selected`; that does not close update work | [ ]    |
-| Approved prior-build Play update | Name the exact Play-delivered baseline and its version code first. Populate only synthetic state, update through Play without uninstall/clear-data, and test visible continuity    | [ ]    |
-| No approved prior Play baseline  | Leave migration, legacy-layout, and old-shortcut continuity `BLOCKED/OPEN`. Do not substitute a sideloaded build, DEV fixture, or source inspection                                | [ ]    |
-| Android API 24/25                | Remains conditional and open until an arm64 Play-delivered device runs it. A newer test phone does not close the advertised minimum-SDK behavior                                   | [ ]    |
+| Branch or condition               | Current rule                                                                                                                                                                          | Result |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| Clean Play install                | Exercise current-data persistence/search and current file flows. Record legacy DB/cache/shortcut upgrade as `N/A — clean-install branch selected`; that does not close update work    | [ ]    |
+| Approved prior-build Play update  | Name the exact Play-delivered baseline and its version code first. Populate only synthetic state, update through Play without uninstall/clear-data, and test visible continuity       | [ ]    |
+| No approved prior Play baseline   | Leave migration, legacy-layout, and old-shortcut continuity `BLOCKED/OPEN`. Do not substitute a sideloaded build, DEV fixture, or source inspection                                   | [ ]    |
+| Selected Android support boundary | Android 16 / API 36 is the minimum and Android 17 / API 37 is the current latest. The exact candidate must enforce API 36 in artifact/Play metadata and run on both boundary versions | [ ]    |
 
 ### 2. Database persistence, search, and visible key-rotation continuity
 
@@ -478,8 +478,9 @@ legacy-shortcut cleanup path ran. A clean-install result must not be relabeled a
       ledger ownership, symlink/malformed/zero-byte rejection, two-generation recovery, 2 GiB /
       4,096-file / 512 MiB-free quota enforcement, protected-reader/outgoing paths, and legacy
       layout adoption as controlled evidence. Do not manufacture these on an ordinary tester
-      phone. API 24/25 persistent downloads remain an open product/device result; newer Android
-      behavior cannot close it.
+      phone. API 24/25 is outside the owner-selected product boundary; retain the native fail-closed
+      path as defense in depth, and prove the exact candidate on Android 16 / API 36 and Android 17 /
+      API 37 instead.
 
 ### 4. Multipart uploads, concurrency, and cancellation
 
@@ -622,7 +623,7 @@ Play-candidate results remain open.
 | `.part`/ledger/native-delete correctness, exact caps, quota/low-space pressure               | `STATIC/HOST` and separately approved disposable native evidence; never infer from a retry or manufacture on an ordinary tester phone |
 | Multipart byte progress, active byte-stop, queued zero-start, maximum two uploads            | `EXACT PLAY CANDIDATE` plus privacy-safe `STAGED-SERVER` aggregate evidence                                                           |
 | FileProvider/viewer/share/save bridge and natural missing-file recovery                      | Exact candidate observation when the branch is naturally reachable; host mocks alone do not prove it                                  |
-| API 24/25 persistent-download behavior                                                       | Arm64 Play-delivered API-24/25 device or an explicit product/minimum-SDK decision; a newer phone is not evidence                      |
+| Selected minimum/latest Android support                                                      | Exact candidate declares API 36 minimum in artifact/Play metadata and passes on Android 16 / API 36 plus Android 17 / API 37          |
 | Full account A → Disconnect → account B isolation                                            | `DEVICE-01B3`, coordinated with this slice's external-copy and server cleanup; Welcome-screen appearance alone is insufficient        |
 
 All rows above remain open. This offline reconciliation did not execute a Play install, database
@@ -663,12 +664,12 @@ or a setting that cannot be restored safely.
       and cleanup owners. Record aliases and capability flags only—never endpoints, credentials,
       QR data, contact details, coordinates, or message text.
 
-| Device/session condition                                              | Current rule                                                                                                                                                 | Result |
-| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------ |
-| Android 14/API 34+ selected-photo access                              | Exercise full, selected/limited, and denied media access only when the OS offers each branch; selected access must expose only approved synthetic items      | [ ]    |
-| Android 13/API 33 without the API-34 selected-photo branch            | Exercise its actual photo/video and notification behavior; a missing selected-photo choice is session-N/A, while B1 still owns notification candidate credit | [ ]    |
-| Android 12/API 32 or lower                                            | Legacy media/storage permission behavior remains `BLOCKED/OPEN` until such a supported device runs it; a newer phone cannot close `PERM-01`                  | [ ]    |
-| Missing optional Find My, FaceTime, or send-contact staged capability | Leave that positive result `BLOCKED/OPEN`, except send-contact may be session-N/A when the exact server truthfully advertises it unsupported                 | [ ]    |
+| Device/session condition                                              | Current rule                                                                                                                                 | Result |
+| --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
+| Android 16/API 36 minimum boundary                                    | Exercise full, selected/limited, and denied media access when offered; selected access must expose only approved synthetic items             | [ ]    |
+| Android 17/API 37 current-latest boundary                             | Repeat permission and Android-owned-settings behavior on the current latest release; do not infer it from the API-36 result                  | [ ]    |
+| Android below 16/API 36                                               | Runtime permission testing is not applicable because the exact candidate and Play metadata must refuse installation                          | [ ]    |
+| Missing optional Find My, FaceTime, or send-contact staged capability | Leave that positive result `BLOCKED/OPEN`, except send-contact may be session-N/A when the exact server truthfully advertises it unsupported | [ ]    |
 
 ### 2. Runtime permissions and Android-owned settings
 
@@ -1322,10 +1323,10 @@ These checks require a fresh build containing the current `gator-bounded-downloa
 tests prove the state machine and bounds; only a real Android filesystem can prove the bridge,
 process-death, low-storage, and upgrade behavior.
 
-- [ ] On Android 8+ with an existing pre-ledger install, download several attachments using the old
-      two-level `attachments/<guid>/<name>` layout, upgrade in place, and launch. Every exact DB
-      reference still renders; an unreferenced legacy file is removed without deleting its sibling
-      or parent directory.
+- [ ] On a supported Android 16/17 device with an approved pre-ledger Play baseline, download
+      several attachments using the old two-level `attachments/<guid>/<name>` layout, upgrade in
+      place, and launch. Every exact DB reference still renders; an unreferenced legacy file is
+      removed without deleting its sibling or parent directory.
 - [ ] With canonical files from two account generations for the same attachment GUID/name, launch
       recovery. The exact path stored in the DB survives; the unreferenced duplicate retires. Repeat
       with identical mtimes and confirm the outcome is deterministic.
@@ -1350,9 +1351,8 @@ process-death, low-storage, and upgrade behavior.
       downloads open.
 - [ ] Open Settings → Storage & File Privacy and confirm the 2 GiB/4,096-file, 512 MiB free-space,
       protected-file, and Android-version limitations are visible and understandable.
-- [ ] On Android 7/API 24 or 25, confirm the inbox/sync remains usable but persistent attachment
-      downloads fail closed. Before release, explicitly choose and document either this limitation
-      or raising `minSdkVersion` from 24 to 26.
+- [ ] Confirm the exact candidate cannot be installed below Android 16/API 36, and that Settings →
+      Storage & File Privacy accurately names Android 16 as the minimum supported version.
 
 ## (k) Reaction / action menu placement
 

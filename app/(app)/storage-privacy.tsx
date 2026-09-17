@@ -132,8 +132,8 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
             preserving at least 512 MiB of free app storage. It removes the least recently used old
             files first. Files currently on screen, used by an in-progress operation, needed for an
             outgoing send, or awaiting an automatic Photos copy are protected; a new download is
-            refused when space cannot be freed safely. Android 7 devices keep persistent attachment
-            downloads disabled because the bounded startup inventory requires Android 8 or newer.
+            refused when space cannot be freed safely. This release requires Android 16 or newer;
+            older Android versions cannot install it.
           </Text>
           <Text style={textStyle}>
             Deleting a chat removes Gator-owned downloaded files after its database purge when

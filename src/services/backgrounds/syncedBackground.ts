@@ -16,6 +16,7 @@ import {
   deleteNativeSyncedBackgroundCacheFile,
   prepareNativeSyncedBackgroundCacheForDownload,
   pruneNativeSyncedBackgroundCache,
+  validateNativeSyncedBackgroundCacheFile,
 } from '@native/boundedDownload';
 import type { HttpClient } from '@core/api';
 import { computeBackgroundIsLight } from './luminance';
@@ -296,11 +297,17 @@ async function runSyncedBackgroundRequest(
     const expectedFileName = `${encodedMediaPathSegment(JSON.stringify([guid, channel]))}.jpg`;
     const dir = new Directory(Paths.document, 'synced-backgrounds', generationNamespace);
     const dest = new File(dir, expectedFileName);
+    let destinationValidation: boolean | null = null;
     let alreadyCurrent = state?.uri === dest.uri;
     if (alreadyCurrent && state?.uri) {
-      const cached = new File(state.uri);
-      if (!isReusableBackground(cached)) {
-        deleteOwnedFile(cached);
+      destinationValidation = await validateNativeSyncedBackgroundCacheFile(state.uri);
+      if (!ownsRequest()) return;
+      if (!destinationValidation) {
+        if (!(await deletePreviousSyncedBackground(state.uri))) {
+          logger.warn('[background] invalid synced background could not be retired');
+          return;
+        }
+        if (!ownsRequest()) return;
         alreadyCurrent = false;
       }
     }
@@ -317,8 +324,20 @@ async function runSyncedBackgroundRequest(
         return;
       }
       dir.create({ intermediates: true, idempotent: true });
-      if (dest.exists && !isReusableBackground(dest)) deleteOwnedFile(dest);
-      if (!dest.exists) {
+      // A prior interrupted/stale run may have left the exact destination without committing it.
+      // Admit it only through the same native image-integrity boundary as a DB-current wallpaper.
+      if (destinationValidation == null && dest.exists) {
+        destinationValidation = await validateNativeSyncedBackgroundCacheFile(dest.uri);
+        if (!ownsRequest()) return;
+        if (!destinationValidation) {
+          if (!(await deletePreviousSyncedBackground(dest.uri))) {
+            logger.warn('[background] invalid synced-background destination could not be retired');
+            return;
+          }
+          if (!ownsRequest()) return;
+        }
+      }
+      if (destinationValidation !== true) {
         if (!ownsRequest()) return;
         await downloadBoundedNativeFile({
           url: chatsApi.chatBackgroundUrl(transport, guid),
@@ -409,28 +428,19 @@ async function runSyncedBackgroundRequest(
   }
 }
 
-/** Expo reports zero for missing/unreadable files, so only a bounded positive stat is reusable. */
-function isReusableBackground(file: File): boolean {
-  try {
-    return (
-      Number.isSafeInteger(file.size) && file.size > 0 && file.size <= SYNCED_BACKGROUND_MAX_BYTES
-    );
-  } catch {
-    return false;
-  }
-}
-
 /**
  * Delete through Android's fixed-root, canonical, regular-file-only boundary. In particular, do
  * not construct an Expo `File` from a DB URI here: its URL normalization plus recursive directory
  * delete would make encoded traversal or fragments dangerous before JavaScript could re-check it.
  */
-async function deletePreviousSyncedBackground(uri: string | null): Promise<void> {
-  if (!uri) return;
+async function deletePreviousSyncedBackground(uri: string | null): Promise<boolean> {
+  if (!uri) return true;
   try {
     await deleteNativeSyncedBackgroundCacheFile(uri);
+    return true;
   } catch {
     // The account-wide media sweep remains the best-effort fallback.
+    return false;
   }
 }
 

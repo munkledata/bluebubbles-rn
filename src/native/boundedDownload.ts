@@ -91,6 +91,7 @@ interface GatorBoundedDownloadNative {
   prepareSyncedBackgroundCacheForDownload(
     keepUri: string | null,
   ): Promise<NativeSyncedBackgroundPruneResult>;
+  validateSyncedBackgroundCacheFile(uri: string): Promise<boolean>;
   deleteSyncedBackgroundCacheFile(uri: string): Promise<boolean>;
   statAttachmentCacheFile(uri: string): Promise<NativeAttachmentCacheStatResult>;
   deleteAttachmentCacheFile(uri: string): Promise<NativeAttachmentCacheDeleteResult>;
@@ -307,6 +308,15 @@ export async function prepareNativeSyncedBackgroundCacheForDownload(
     throw new NativeBoundedDownloadError('unavailable');
   }
   return parsed;
+}
+
+/** Validate one exact current/legacy wallpaper through Android's fixed cache-root gate. */
+export async function validateNativeSyncedBackgroundCacheFile(uri: string): Promise<boolean> {
+  const native = getNative();
+  if (!native) throw new NativeBoundedDownloadError('unavailable');
+  const valid = await native.validateSyncedBackgroundCacheFile(uri);
+  if (typeof valid !== 'boolean') throw new NativeBoundedDownloadError('unavailable');
+  return valid;
 }
 
 /** Delete one exact current/legacy wallpaper through Android's fixed, canonical namespace gate. */

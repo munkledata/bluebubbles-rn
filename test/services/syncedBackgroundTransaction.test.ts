@@ -24,6 +24,10 @@ const mockPrepareNativeCache = jest.fn(async () => {
     remainingBytes: 0,
   };
 });
+const mockValidateNativeFile = jest.fn(async () => {
+  mockNativeStates.push({ effect: 'validate', inTransaction: mockIsInTransaction() });
+  return true;
+});
 const mockFileBytes = new Map<string, number>();
 const mockNativeStates: { effect: string; inTransaction: boolean }[] = [];
 let mockIsInTransaction = (): boolean => false;
@@ -55,6 +59,7 @@ jest.mock('@native/boundedDownload', () => ({
   deleteNativeSyncedBackgroundCacheFile: mockDeleteNativeFile,
   prepareNativeSyncedBackgroundCacheForDownload: mockPrepareNativeCache,
   pruneNativeSyncedBackgroundCache: mockPruneNativeCache,
+  validateNativeSyncedBackgroundCacheFile: mockValidateNativeFile,
 }));
 
 jest.mock('@/services/download/boundedNativeDownload', () => ({

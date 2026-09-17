@@ -243,7 +243,9 @@ const config: ExpoConfig = {
           // "Allow insecure connection" toggle (services/index.ts + the manual-setup screen).
           // HTTPS / a tunnel remains the recommended path, especially for remote access.
           usesCleartextTraffic: true,
-          minSdkVersion: 24,
+          // Product policy: support the current Android major and the immediately previous one.
+          // Android 17 is current as of 2026-09-17, so Android 16 / API 36 is the floor.
+          minSdkVersion: 36,
           // react-native-notify-kit needs no extraMavenRepos: since 9.2.0 the native
           // core compiles from source (autolinked), so the old notifee local-AAR maven
           // repo workaround is gone.

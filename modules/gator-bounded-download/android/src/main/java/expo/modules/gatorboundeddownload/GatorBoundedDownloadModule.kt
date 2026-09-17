@@ -2,7 +2,7 @@ package expo.modules.gatorboundeddownload
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
+import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -34,6 +34,7 @@ private const val MAX_ACTIVE_REQUESTS = 8
 private const val MAX_IMAGE_PIXELS = 100L * 1024 * 1024
 private const val MAX_IMAGE_EDGE = 16_384
 private const val MAX_IMAGE_VALIDATION_DECODE_PIXELS = 1L * 1024 * 1024
+private const val SYNCED_BACKGROUND_IMAGE_MAX_PIXELS = 16L * 1024 * 1024
 private const val PROGRESS_INTERVAL_MS = 100L
 
 private const val REASON_CANCELLED = "cancelled"
@@ -165,6 +166,41 @@ class GatorBoundedDownloadModule : Module() {
       pruneOutcome(result)
     }.runOnQueue(appContext.backgroundCoroutineScope)
 
+    AsyncFunction("validateSyncedBackgroundCacheFile") { rawUri: String ->
+      val context = appContext.reactContext
+        ?: throw IllegalStateException("Android context is unavailable")
+      val root = File(context.filesDir, SYNCED_BACKGROUND_CACHE_DIRECTORY)
+      val target = ownedSyncedBackgroundRetirementFile(root, rawUri)
+      synchronized(syncedBackgroundPruneLock) {
+        val before = ownedFileLstat(target)
+        when {
+          before == null -> false
+          !OsConstants.S_ISREG(before.st_mode) -> {
+            throw IllegalArgumentException("Synced-background validation target is not a regular file")
+          }
+          before.st_size <= 0L || before.st_size > SYNCED_BACKGROUND_DOWNLOAD_MAX_BYTES -> false
+          else -> {
+            val valid = try {
+              validateImageFile(target, SYNCED_BACKGROUND_IMAGE_MAX_PIXELS)
+              true
+            } catch (problem: DownloadFailure) {
+              if (problem.reason != REASON_SIZE) throw problem
+              false
+            }
+            val after = ownedFileLstat(target)
+              ?: throw IllegalStateException("Synced-background validation target disappeared")
+            check(
+              OsConstants.S_ISREG(after.st_mode) &&
+                after.st_dev == before.st_dev &&
+                after.st_ino == before.st_ino &&
+                after.st_size == before.st_size,
+            ) { "Synced-background validation target changed" }
+            valid
+          }
+        }
+      }
+    }.runOnQueue(appContext.backgroundCoroutineScope)
+
     AsyncFunction("deleteSyncedBackgroundCacheFile") { rawUri: String ->
       val context = appContext.reactContext
         ?: throw IllegalStateException("Android context is unavailable")
@@ -184,7 +220,7 @@ class GatorBoundedDownloadModule : Module() {
       val root = File(appContext.persistentFilesDirectory, ATTACHMENT_CACHE_DIRECTORY)
       synchronized(attachmentCacheIoLock) {
         val target = ownedAttachmentCacheFile(root, rawUri)
-        val stat = attachmentCacheLstat(target)
+        val stat = ownedFileLstat(target)
         when {
           stat == null -> attachmentCacheStatOutcome(false, 0L)
           !OsConstants.S_ISREG(stat.st_mode) -> {
@@ -200,7 +236,7 @@ class GatorBoundedDownloadModule : Module() {
       val root = File(appContext.persistentFilesDirectory, ATTACHMENT_CACHE_DIRECTORY)
       synchronized(attachmentCacheIoLock) {
         val target = ownedAttachmentCacheFile(root, rawUri)
-        val before = attachmentCacheLstat(target)
+        val before = ownedFileLstat(target)
         val outcome = if (before == null) {
           attachmentCacheDeleteOutcome("missing", 0L)
         } else {
@@ -215,7 +251,7 @@ class GatorBoundedDownloadModule : Module() {
           } catch (error: ErrnoException) {
             if (error.errno != OsConstants.ENOENT) throw error
           }
-          if (attachmentCacheLstat(target) != null) {
+          if (ownedFileLstat(target) != null) {
             throw IllegalStateException("Attachment cache file still exists after delete")
           }
           attachmentCacheDeleteOutcome("deleted", before.st_size)
@@ -241,7 +277,7 @@ class GatorBoundedDownloadModule : Module() {
       synchronized(attachmentCacheIoLock) {
         val source = ownedPastedAttachmentFile(pasteRoot, sourceUri)
         var destination = ownedCurrentAttachmentCacheFile(attachmentRoot, destinationUri)
-        val sourceStat = attachmentCacheLstat(source)
+        val sourceStat = ownedFileLstat(source)
           ?: throw IllegalArgumentException("Pasted attachment is missing")
         require(OsConstants.S_ISREG(sourceStat.st_mode)) {
           "Pasted attachment is not a regular file"
@@ -249,7 +285,7 @@ class GatorBoundedDownloadModule : Module() {
         require(sourceStat.st_size == expectedBytes) {
           "Pasted attachment size changed"
         }
-        require(attachmentCacheLstat(destination) == null) {
+        require(ownedFileLstat(destination) == null) {
           "Outgoing attachment destination already exists"
         }
 
@@ -262,13 +298,13 @@ class GatorBoundedDownloadModule : Module() {
           }
           // Re-resolve after mkdirs so a raced/symlinked parent cannot redirect the rename.
           destination = ownedCurrentAttachmentCacheFile(attachmentRoot, destinationUri)
-          require(attachmentCacheLstat(destination) == null) {
+          require(ownedFileLstat(destination) == null) {
             "Outgoing attachment destination already exists"
           }
           Os.rename(source.path, destination.path)
           moved = true
 
-          val destinationStat = attachmentCacheLstat(destination)
+          val destinationStat = ownedFileLstat(destination)
             ?: throw IllegalStateException("Adopted attachment is missing")
           require(
             OsConstants.S_ISREG(destinationStat.st_mode) && destinationStat.st_size == expectedBytes,
@@ -484,30 +520,37 @@ class GatorBoundedDownloadModule : Module() {
     return boundedPositiveLong(value, maximum)
   }
 
-  /** Bound dimensions first, then require a sampled decode as a corruption smoke test. */
+  /** Reject partial/invalid primary image data while bounding the sampled decode allocation. */
   private fun validateImageFile(file: File, maxPixels: Long) {
-    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-    BitmapFactory.decodeFile(file.path, bounds)
-    val width = bounds.outWidth
-    val height = bounds.outHeight
-    if (width <= 0 || height <= 0 || width > MAX_IMAGE_EDGE || height > MAX_IMAGE_EDGE) {
-      throw DownloadFailure(REASON_SIZE)
-    }
-    if (width.toLong() * height.toLong() > maxPixels) throw DownloadFailure(REASON_SIZE)
+    var decoded: Bitmap? = null
+    try {
+      decoded = ImageDecoder.decodeBitmap(ImageDecoder.createSource(file)) { decoder, info, _ ->
+        val width = info.size.width
+        val height = info.size.height
+        if (width <= 0 || height <= 0 || width > MAX_IMAGE_EDGE || height > MAX_IMAGE_EDGE) {
+          throw DownloadFailure(REASON_SIZE)
+        }
+        if (width.toLong() * height.toLong() > maxPixels) throw DownloadFailure(REASON_SIZE)
 
-    val decoded = BitmapFactory.decodeFile(
-      file.path,
-      BitmapFactory.Options().apply {
-        inSampleSize = imageValidationSampleSize(
-          width,
-          height,
-          MAX_IMAGE_VALIDATION_DECODE_PIXELS,
+        decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+        decoder.memorySizePolicy = ImageDecoder.MEMORY_POLICY_LOW_RAM
+        decoder.setTargetSampleSize(
+          imageValidationSampleSize(
+            width,
+            height,
+            MAX_IMAGE_VALIDATION_DECODE_PIXELS,
+          ),
         )
-        inPreferredConfig = Bitmap.Config.RGB_565
-        inScaled = false
-      },
-    ) ?: throw DownloadFailure(REASON_SIZE)
-    decoded.recycle()
+        // Android otherwise throws on partial input; keep that fail-closed behavior explicit.
+        decoder.setOnPartialImageListener { false }
+      }
+    } catch (problem: DownloadFailure) {
+      throw problem
+    } catch (_: Exception) {
+      throw DownloadFailure(REASON_SIZE)
+    } finally {
+      decoded?.recycle()
+    }
   }
 
   private fun validateHeaders(headers: Map<String, String>) {
@@ -607,7 +650,7 @@ class GatorBoundedDownloadModule : Module() {
   }
 
   /** lstat keeps a last-moment symlink swap from being followed; ENOENT is an idempotent miss. */
-  private fun attachmentCacheLstat(target: File): StructStat? = try {
+  private fun ownedFileLstat(target: File): StructStat? = try {
     Os.lstat(target.path)
   } catch (error: ErrnoException) {
     if (error.errno == OsConstants.ENOENT) null else throw error

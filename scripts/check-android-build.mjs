@@ -31,6 +31,7 @@ const PACKAGED_SHORTCUTS_ENTRY = 'base/res/xml/shortcuts.xml';
 const PACKAGED_DEX_PATTERN = /^base\/dex\/[^/]+\.dex$/;
 const MAX_PACKAGED_DEX_BYTES = 256 * 1024 * 1024;
 const ANDROID_NAMESPACE = 'http://schemas.android.com/apk/res/android';
+const REQUIRED_MIN_SDK_VERSION = '36';
 const FORBIDDEN_INBOUND_SHARE_DEX_MARKERS = ['ExpoShareIntent', 'expo/modules/shareintent'];
 const EXPO_BACKGROUND_TASK_VERSION = '57.0.16';
 const EXPO_TASK_MANAGER_VERSION = '57.0.16';
@@ -1292,6 +1293,15 @@ function googleMapsApiKeyFromElements(elements) {
 
 function validateManifestElements(elements, { debug = false } = {}) {
   const errors = [];
+  const manifest = elements.find(
+    (element) => element.name === 'manifest' && element.parent == null,
+  );
+  const usesSdk = (manifest?.children ?? []).filter((element) => element.name === 'uses-sdk');
+  if (usesSdk.length !== 1) {
+    errors.push('manifest must declare exactly one <uses-sdk> element');
+  } else if (usesSdk[0].attributes.get('android:minSdkVersion') !== REQUIRED_MIN_SDK_VERSION) {
+    errors.push(`manifest android:minSdkVersion must be exactly ${REQUIRED_MIN_SDK_VERSION}`);
+  }
   const permissionElements = permissionElementsOf(elements);
   const permissions = permissionsOf(permissionElements);
 

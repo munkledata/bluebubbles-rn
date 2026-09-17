@@ -83,9 +83,7 @@ describe('StoragePrivacyScreen', () => {
     ).toBeTruthy();
     expect(screen.getByText(/preserving at least 512 MiB/)).toBeTruthy();
     expect(screen.getByText(/needed for an outgoing send.*are protected/)).toBeTruthy();
-    expect(
-      screen.getByText(/Android 7 devices keep persistent attachment downloads disabled/),
-    ).toBeTruthy();
+    expect(screen.getByText(/This release requires Android 16 or newer/)).toBeTruthy();
     expect(screen.getByText(/blocks the next connection/)).toBeTruthy();
     expect(screen.getByText(/opaque crash-site code without a filename/)).toBeTruthy();
     expect(

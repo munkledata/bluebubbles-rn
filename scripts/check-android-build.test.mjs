@@ -82,6 +82,10 @@ const manifestNode = xmlNode(
     'android:versionCode': '57',
   },
   [
+    xmlNode('uses-sdk', {
+      'android:minSdkVersion': '36',
+      'android:targetSdkVersion': '36',
+    }),
     ...intendedPermissions.map((name) => xmlNode('uses-permission', { 'android:name': name })),
     // Package visibility for sharing OUT of Gator is harmless. It is not nested below an
     // application component, so it cannot make MainActivity an inbound Android share target.
@@ -702,6 +706,60 @@ function validate(overrides = {}) {
 test('accepts the expected manifest and headless entry order', () => {
   assert.deepEqual(REQUIRED_PERMISSIONS, intendedPermissions);
   assert.deepEqual(validate(), []);
+});
+
+test('requires exactly one Android 16 minimum in merged and packaged manifests', () => {
+  const usesSdk = renderXml(
+    xmlNode('uses-sdk', {
+      'android:minSdkVersion': '36',
+      'android:targetSdkVersion': '36',
+    }),
+  );
+  assert.ok(
+    validate({ manifest: manifest.replace(usesSdk, '') }).some((error) =>
+      error.includes('exactly one <uses-sdk>'),
+    ),
+  );
+  assert.ok(
+    validate({
+      manifest: manifest.replace('android:minSdkVersion="36"', 'android:minSdkVersion="35"'),
+    }).some((error) => error.includes('android:minSdkVersion must be exactly 36')),
+  );
+  assert.ok(
+    validate({ manifest: manifest.replace('</manifest>', `${usesSdk}</manifest>`) }).some((error) =>
+      error.includes('exactly one <uses-sdk>'),
+    ),
+  );
+
+  const packagedMissing = structuredClone(manifestNode);
+  packagedMissing.children = packagedMissing.children.filter((child) => child.name !== 'uses-sdk');
+  assert.ok(
+    validatePackagedAndroidBundle({ manifestProto: encodeXmlDocument(packagedMissing) }).some(
+      (error) => error.includes('exactly one <uses-sdk>'),
+    ),
+  );
+
+  const packagedWrong = structuredClone(manifestNode);
+  const packagedUsesSdk = packagedWrong.children.find((child) => child.name === 'uses-sdk');
+  assert.ok(packagedUsesSdk);
+  packagedUsesSdk.attributes['android:minSdkVersion'] = '35';
+  assert.ok(
+    validatePackagedAndroidBundle({ manifestProto: encodeXmlDocument(packagedWrong) }).some(
+      (error) => error.includes('android:minSdkVersion must be exactly 36'),
+    ),
+  );
+
+  const packagedDuplicate = structuredClone(manifestNode);
+  const duplicateUsesSdk = structuredClone(
+    packagedDuplicate.children.find((child) => child.name === 'uses-sdk'),
+  );
+  assert.ok(duplicateUsesSdk);
+  packagedDuplicate.children.push(duplicateUsesSdk);
+  assert.ok(
+    validatePackagedAndroidBundle({ manifestProto: encodeXmlDocument(packagedDuplicate) }).some(
+      (error) => error.includes('exactly one <uses-sdk>'),
+    ),
+  );
 });
 
 test('generates and enforces the system-CA-only Android network policy', () => {
