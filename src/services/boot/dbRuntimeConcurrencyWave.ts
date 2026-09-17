@@ -28,7 +28,7 @@ interface UploadIdentity {
 }
 
 const PREFIX = 'gator-db-runtime-wave';
-const UPLOAD_CHAT_GUID = `${PREFIX}-sync-chat-0`;
+const UPLOAD_CHAT_GUID = `RCS;-;${PREFIX}-sync-chat-0`;
 const UPLOAD_PATH = `file:///${PREFIX}-attachment.jpg`;
 const UPLOAD_REAL_GUID = `${PREFIX}-attachment-message`;
 const ROLLBACK_KEY = `${PREFIX}-rollback`;
@@ -39,6 +39,7 @@ const ROLLBACK_SIGNAL = Symbol('db-runtime-wave-rollback');
 
 let dummyHttp!: HttpClient;
 dummyHttp = {
+  get: async () => ({ private_api: false, rcs: true }),
   pinTransport: () => dummyHttp,
   isTransportCurrent: () => true,
   assertTransportCurrent: () => undefined,
@@ -86,7 +87,7 @@ function observe<T>(promise: Promise<T>): ObservedPromise<T> {
 
 function syncChat(index: number): Chat {
   return Chat.parse({
-    guid: `${PREFIX}-sync-chat-${index}`,
+    guid: index === 0 ? UPLOAD_CHAT_GUID : `${PREFIX}-sync-chat-${index}`,
     // Empty by design: contact linking is a separate post-commit read/write path and is not part
     // of this disposable database lifetime proof.
     participants: [],
@@ -163,7 +164,8 @@ function submitOrderedCoordinatorWave(db: AppDatabase, rawRekey: () => Promise<v
       syncFirstChunkBeforeRekey =
         (await count(
           db,
-          sql`SELECT COUNT(*) AS count FROM chats WHERE guid LIKE ${`${PREFIX}-sync-chat-%`}`,
+          sql`SELECT COUNT(*) AS count FROM chats
+               WHERE guid = ${UPLOAD_CHAT_GUID} OR guid LIKE ${`${PREFIX}-sync-chat-%`}`,
         )) === 5;
       liveMessagesBlockedAtRekey =
         (await count(
@@ -234,7 +236,7 @@ export async function runDbRuntimeConcurrencyWave(
           uploadIdentity = { tempGuid, attachmentGuid };
           uploadEntered.resolve();
           await releaseUpload.promise;
-          return { guid: UPLOAD_REAL_GUID, viaPrivateApi: true };
+          return { guid: UPLOAD_REAL_GUID };
         },
         20_000,
         undefined,
@@ -292,7 +294,8 @@ export async function runDbRuntimeConcurrencyWave(
       storedChats.length === 10 &&
       (await count(
         db,
-        sql`SELECT COUNT(*) AS count FROM chats WHERE guid LIKE ${`${PREFIX}-sync-chat-%`}`,
+        sql`SELECT COUNT(*) AS count FROM chats
+             WHERE guid = ${UPLOAD_CHAT_GUID} OR guid LIKE ${`${PREFIX}-sync-chat-%`}`,
       )) === 10;
     const liveMessages =
       orderedState.liveMessagesBlockedAtRekey &&

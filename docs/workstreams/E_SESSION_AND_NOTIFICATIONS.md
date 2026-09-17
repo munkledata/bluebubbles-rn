@@ -9,9 +9,12 @@
 ## `REL-003` — one session-scoped reset boundary
 
 Centralize reset behavior for every process-memory value derived from the connected account. This
-includes TanStack Query data, Find My and RCS state, typing state, FaceTime state, realtime router and
+includes TanStack Query data, Find My and RCS state, typing state, legacy FaceTime cleanup state, realtime router and
 deduplication state, and active upload/download state. Keep genuinely device-global preferences out
 of this reset boundary.
+
+`FP-006` exposes no FaceTime feature in the current client. The retained reset adapter is cleanup for
+stale pre-retirement/in-flight values only and must not be treated as a capability or UI owner.
 
 Implement the boundary in this order:
 

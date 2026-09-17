@@ -39,13 +39,9 @@ export interface SelectedMessage {
   mine: ReactionBaseType[];
   /** Arbitrary-emoji tapback glyphs the current user has already applied. */
   myEmojis?: string[];
-  /** Exact stored target part for each own reaction, keyed by reactionKindKey. */
-  myReactionParts?: Readonly<Record<string, number>>;
-  /** RCS can react to a whole confirmed message even though it has no Apple part topology. */
+  /** A confirmed RCS message can receive a whole-message reaction. */
   canReact?: boolean;
-  /** Best available Apple part represented by this aggregate bubble. */
-  targetPartIndex?: number;
-  dateCreated: number | null; // for the "recent" edit/unsend gate
+  dateCreated: number | null;
   /** Delivery/read/edit timestamps + per-message service — surfaced by the "Details" sheet.
    *  Optional so existing SelectedMessage literals (tests) stay valid. */
   dateDelivered?: number | null;
@@ -55,20 +51,16 @@ export interface SelectedMessage {
   isRetracted: boolean;
   /** Internal proof that retires this frozen menu snapshot after a live retraction change. */
   sourceRetractionFingerprint?: string;
-  /** The message carries an edit marker (dateEdited) → offers "View Edit History". Distinct from
-   *  the own-recent Edit/Unsend gate: you can view the history of ANY edited message. */
-  isEdited: boolean;
-  /** Parsed edit history / unsent parts for this message (or null). Threaded through from the
-   *  reactive row so the history sheet needs no extra fetch. Present only when isEdited. */
+  /** Read-only local edit history remains available after outgoing edit support is retired. */
+  isEdited?: boolean;
   messageSummaryInfo?: MessageSummaryInfo | null;
-  isTemp: boolean; // not yet on the server → can't edit/unsend
+  isTemp: boolean;
   /** Local send lifecycle of an optimistic message ('sending' | 'error' | 'sent'). */
   sendState: string;
   /** This message's attachments (for Save-to-device). */
   attachments: { guid: string; localPath: string | null; mimeType: string | null }[];
-  /** Part of a reply thread (is a reply, or has replies) → offers "View Thread". */
+  /** Read-only reply-thread membership derived from received/persisted rows. */
   inThread?: boolean;
-  /** The thread originator's guid when this message is a reply (else it IS the originator). */
   threadOriginatorGuid?: string | null;
   /** The pressed bubble's on-screen rectangle (window coords). Present → the menu floats around
    *  the bubble (iMessage-style); absent → a centered fallback sheet (tests / measure failure). */
@@ -80,34 +72,27 @@ interface MessageActionsOverlayProps {
   onClose: () => void;
   /** reaction is a base type ('love'), a removal ('-love'), or 'emoji'/'-emoji' with a glyph. */
   onReact: (reaction: string, emoji?: string) => void;
-  onReply: () => void;
   onRemindLater: () => void;
-  onEdit: () => void;
-  onUnsend: () => void;
   /** Cancel a still-queued/sending (or errored) optimistic message before it confirms. */
   onCancelSend: () => void;
   /** Copy the message text to the clipboard. */
   onCopy: () => void;
   /** Forward the message text and/or downloaded attachments (opens the new-message composer). */
-  onForward: () => void;
+  onForward?: () => void;
   /** Save the message's attachment(s) to the device gallery. */
   onSave: () => void;
   /** Share the message's attachment file or text via the OS share sheet. */
   onShare: () => void;
   /** Delete this message from the local device (any delivered/received message). */
   onDelete: () => void;
-  /** Open the reply-thread sheet (shown only when the message is in a thread). */
+  /** Open read-only received/persisted reply and edit-history views. */
   onViewThread?: () => void;
-  /** Open the edit-history sheet (shown only when the message was edited). */
   onViewEditHistory?: () => void;
   /** Open the message-details sheet (sent/delivered/read times, sender, service). */
   onDetails?: () => void;
   /** Enter multi-select mode seeded with this message. */
   onSelect?: () => void;
 }
-
-// iMessage allows edit/unsend on your own messages for ~15 minutes.
-const EDIT_WINDOW_MS = 15 * 60_000;
 
 // Floating-layout geometry (iMessage-style anchored menu).
 const GAP = 8;
@@ -146,7 +131,7 @@ function useReduceMotionPreference(): boolean | null {
   return reduceMotion;
 }
 
-/** One row in the action menu (Reply / Copy / … ), built once and rendered in either layout. */
+/** One row in the local action menu, built once and rendered in either layout. */
 interface ActionDef {
   key: string;
   label: string;
@@ -155,20 +140,15 @@ interface ActionDef {
 }
 
 /**
- * Long-press menu: a tapback picker + Reply/Copy/… actions, with Edit/Unsend on your own recent
- * messages. iMessage-style — the tapback bar floats above the pressed bubble and the action menu
- * below it, positioned to the bubble's measured rectangle. Falls back to a centered sheet when the
- * bubble rectangle is missing. Built with a plain Modal + Pressable + Animated (no
- * gesture-handler/reanimated).
+ * Long-press menu: an RCS reaction picker plus local copy/share/details/select/reminder/delete
+ * actions. The bar and action menu float around the measured bubble, with a centered fallback when
+ * measurement is unavailable.
  */
 export function MessageActionsOverlay({
   selected,
   onClose,
   onReact,
-  onReply,
   onRemindLater,
-  onEdit,
-  onUnsend,
   onCancelSend,
   onCopy,
   onForward,
@@ -242,23 +222,7 @@ export function MessageActionsOverlay({
   const selectedBodyText = selected?.bodyText ?? selected?.text ?? '';
   const hasText = selectedBodyText.trim().length > 0;
   const hasAttachments = (selected?.attachments?.length ?? 0) > 0;
-  const canReactToServerMessage =
-    !!selected &&
-    !selected.isTemp &&
-    (selected.canReact === true || selected.targetPartIndex != null);
-  const canReplyToServerMessage =
-    !!selected && !selected.isTemp && selected.targetPartIndex != null;
-
-  const canEditUnsend =
-    !!selected &&
-    selected.isFromMe &&
-    !selected.isRetracted &&
-    !selected.isTemp &&
-    selected.targetPartIndex != null &&
-    selected.dateCreated != null &&
-    // The action menu is explicitly time-sensitive; this snapshot gates a 15-minute server rule.
-    // eslint-disable-next-line react-hooks/purity
-    Date.now() - selected.dateCreated <= EDIT_WINDOW_MS;
+  const canReactToServerMessage = !!selected && !selected.isTemp && selected.canReact === true;
 
   // A still-optimistic own message (queued/sending or errored, not yet confirmed)
   // can be cancelled — drop it before it lands rather than only retry an error.
@@ -349,25 +313,23 @@ export function MessageActionsOverlay({
       />
     ) : null;
 
-  // Assemble the action list once. Server-target actions require a confirmed message; the
-  // remaining action gates and order stay unchanged.
+  // Assemble local actions once; the only server-targeted surface is the separately gated RCS
+  // reaction picker above.
   const actions: ActionDef[] = [];
-  if (canReplyToServerMessage) actions.push({ key: 'reply', label: 'Reply', onPress: onReply });
   if (hasText) actions.push({ key: 'copy', label: 'Copy', onPress: onCopy });
-  if (hasText || hasAttachments)
+  if (onForward && (hasText || hasAttachments))
     actions.push({ key: 'forward', label: 'Forward', onPress: onForward });
   if (hasAttachments) actions.push({ key: 'save', label: 'Save to Photos', onPress: onSave });
   if (hasText || hasAttachments) actions.push({ key: 'share', label: 'Share…', onPress: onShare });
-  if (onViewThread && selected?.inThread)
+  if (onViewThread && selected?.inThread) {
     actions.push({ key: 'thread', label: 'View Thread', onPress: onViewThread });
-  if (onViewEditHistory && selected?.isEdited)
+  }
+  if (onViewEditHistory && selected?.isEdited) {
     actions.push({ key: 'edithistory', label: 'View Edit History', onPress: onViewEditHistory });
+  }
   if (onDetails) actions.push({ key: 'details', label: 'Details', onPress: onDetails });
   if (onSelect) actions.push({ key: 'select', label: 'Select', onPress: onSelect });
   actions.push({ key: 'remind', label: 'Remind Me Later', onPress: onRemindLater });
-  if (canEditUnsend && hasText) actions.push({ key: 'edit', label: 'Edit', onPress: onEdit });
-  if (canEditUnsend)
-    actions.push({ key: 'unsend', label: 'Unsend', onPress: onUnsend, destructive: true });
   if (canCancel)
     actions.push({
       key: 'cancel',

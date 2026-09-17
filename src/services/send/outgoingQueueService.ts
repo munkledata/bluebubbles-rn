@@ -11,6 +11,7 @@ import {
 import { logger } from '@core/secure';
 import {
   claimOutgoingForSendWithinTransaction,
+  deferOutgoingSendClaimWithinTransaction,
   getAttachmentByGuid,
   listRetryableOutgoing,
   MessageTargetCapabilityUnknownError,
@@ -71,6 +72,27 @@ interface ContactPayload {
   partIndex?: number;
 }
 
+type QueueRowShape = Pick<RetryableOutgoing, 'chatGuid' | 'kind' | 'payload'>;
+
+/** Current-client policy: only ordinary iMessage text survives the retired helper boundary. */
+function requiresRetiredPrivateApi(row: QueueRowShape): boolean {
+  if (isRcsChatGuid(row.chatGuid)) return false;
+  if (row.kind === 'reaction' || row.kind === 'contact' || row.kind === 'attachment') return true;
+  if (row.kind !== 'text') return false;
+  try {
+    const payload = JSON.parse(row.payload) as TextPayload;
+    return (
+      payload.selectedMessageGuid !== undefined ||
+      payload.effectId !== undefined ||
+      payload.subject !== undefined ||
+      payload.mentions !== undefined
+    );
+  } catch {
+    // Malformed payloads follow the existing invalid-row retirement path.
+    return false;
+  }
+}
+
 /**
  * The native I/O an attachment re-upload needs, INJECTED so this module stays free of RN
  * imports (it runs in Node tests against better-sqlite3). Production wires the expo
@@ -82,7 +104,14 @@ export interface OutgoingQueueIO {
 }
 
 /** What one re-POST attempt did. 'unsendable' = retired for good (nothing can ever fix it). */
-export type ResendOutcome = 'sent' | 'failed' | 'unsendable' | 'paused';
+export type ResendOutcome = 'sent' | 'failed' | 'unsendable' | 'paused' | 'deferred';
+
+class RcsCapabilityUnavailableError extends Error {
+  constructor() {
+    super('RCS capability changed before the request started.');
+    this.name = 'RcsCapabilityUnavailableError';
+  }
+}
 
 const accountIsCurrent = (lease?: RealtimeDeliveryLease): boolean => !lease || lease.isCurrent();
 const MAX_TIMER_MS = 2_147_483_647;
@@ -197,8 +226,19 @@ export async function resendOutgoingRow(
   attachmentTimeoutMs?: number,
   attemptOwnerToken?: SendAttemptOwnerToken,
   serverAuthorization?: MessageTargetServerAuthorization,
+  rcsAvailable?: () => boolean,
 ): Promise<ResendOutcome> {
   if (!accountIsCurrent(accountLease)) return 'paused';
+  const rcsChat = isRcsChatGuid(row.chatGuid);
+  const rcsIsCurrent = (): boolean => !rcsChat || (rcsAvailable?.() ?? true);
+  if (!rcsIsCurrent()) return 'deferred';
+  let networkStarted = false;
+  const assertNetworkStart = (): void => {
+    if (!accountIsCurrent(accountLease)) throw new DbCommitGuardRejectedError();
+    if (!rcsIsCurrent()) throw new RcsCapabilityUnavailableError();
+    networkStarted = true;
+  };
+  const retiredPrivateApiRow = requiresRetiredPrivateApi(row);
   const queuedTarget = queuedMessageTarget(row.kind, row.payload);
   const target =
     queuedTarget.kind === 'target'
@@ -221,7 +261,16 @@ export async function resendOutgoingRow(
     ))
       ? 'unsendable'
       : 'paused';
+  const retirePrivateApiRow = async (): Promise<ResendOutcome> =>
+    (await runAccountCommit(accountLease, (guard) =>
+      retireUnsendableOutgoing(db, row.chatGuid, row.tempGuid, guard),
+    ))
+      ? 'unsendable'
+      : 'paused';
+  if (retiredPrivateApiRow) return retirePrivateApiRow();
   if (queuedTarget.kind === 'invalid') return retireTarget();
+
+  const textPayload = row.kind === 'text' ? (JSON.parse(row.payload) as TextPayload) : undefined;
   // Old builds could persist a locally-threaded RCS text/media/contact send even though the
   // Google Messages bridge discards that target. Never let a recovered row become an ordinary
   // unthreaded send. Whole-message RCS reactions remain the only intentional exception.
@@ -258,15 +307,17 @@ export async function resendOutgoingRow(
     // 'error' for the user's "Try Again" to claim out from under this attempt.
     let server;
     if (row.kind === 'text') {
-      const p = JSON.parse(row.payload) as TextPayload;
+      const p = textPayload!;
       if (!accountIsCurrent(accountLease)) return 'paused';
       const resolvedTarget = await authorizeTarget();
       retryHttp.assertTransportCurrent();
+      assertNetworkStart();
       server = await sendText(retryHttp, {
         chatGuid: row.chatGuid,
         tempGuid: row.tempGuid,
         clientAttemptGeneration: attemptOwnerToken?.generation,
         message: p.message,
+        method: rcsChat ? undefined : 'apple-script',
         selectedMessageGuid: resolvedTarget?.messageGuid,
         partIndex: resolvedTarget?.partIndex,
         effectId: p.effectId,
@@ -280,6 +331,7 @@ export async function resendOutgoingRow(
       const resolvedTarget = await authorizeTarget();
       if (!resolvedTarget) return retireTarget();
       retryHttp.assertTransportCurrent();
+      assertNetworkStart();
       server = await sendReaction(retryHttp, {
         chatGuid: row.chatGuid,
         selectedMessageGuid: resolvedTarget.messageGuid,
@@ -292,6 +344,7 @@ export async function resendOutgoingRow(
       if (!accountIsCurrent(accountLease)) return 'paused';
       const resolvedTarget = await authorizeTarget();
       retryHttp.assertTransportCurrent();
+      assertNetworkStart();
       server = await sendContact(retryHttp, {
         chatGuid: row.chatGuid,
         tempGuid: row.tempGuid,
@@ -337,7 +390,6 @@ export async function resendOutgoingRow(
           : 'paused';
       }
       if (!accountIsCurrent(accountLease)) return 'paused';
-      const resolvedTarget = await authorizeTarget();
       // Keep this check and the uploader call in one synchronous turn. The uploader receives the
       // same pinned client captured before our DB/stat awaits and snapshots its native transport.
       retryHttp.assertTransportCurrent();
@@ -348,16 +400,8 @@ export async function resendOutgoingRow(
             chatGuid: row.chatGuid,
             tempGuid: row.tempGuid,
             clientAttemptGeneration: attemptOwnerToken?.generation,
-            authorizeNetworkStart: target
-              ? async () => {
-                  const resolved = await authorizeTarget();
-                  if (!resolved) throw new MessageTargetUnavailableError();
-                  return resolved;
-                }
-              : undefined,
+            assertNetworkStart,
             text: p.text,
-            selectedMessageGuid: resolvedTarget?.messageGuid,
-            partIndex: resolvedTarget?.partIndex,
             attachmentGuid: att.guid,
             name: att.transferName ?? 'attachment',
             uri,
@@ -387,6 +431,12 @@ export async function resendOutgoingRow(
       : 'paused';
   } catch (e) {
     if (!accountIsCurrent(accountLease)) return 'paused';
+    if (
+      e instanceof RcsCapabilityUnavailableError ||
+      (rcsChat && !networkStarted && !rcsIsCurrent())
+    ) {
+      return 'deferred';
+    }
     if (e instanceof DbCommitGuardRejectedError) return 'paused';
     if (e instanceof MessageTargetCapabilityUnknownError) return 'paused';
     if (e instanceof MessageTargetUnavailableError) return retireTarget();
@@ -419,9 +469,12 @@ async function runOutgoingQueueBody(
   maxRows?: number,
   attachmentTimeoutMs?: number,
   serverAuthorization?: MessageTargetServerAuthorization,
+  rcsAvailable?: () => boolean,
 ): Promise<{ eligible: number; sent: number }> {
   if (!accountIsCurrent(accountLease)) return { eligible: 0, sent: 0 };
-  const rows = await listRetryableOutgoing(db, now, maxRows);
+  // Filter disabled RCS work in SQLite before applying the headless work cap. Fetching every
+  // eligible row merely to skip RCS in JavaScript would make one background pass unbounded.
+  const rows = await listRetryableOutgoing(db, now, maxRows, rcsAvailable?.() === false);
   if (!accountIsCurrent(accountLease)) return { eligible: rows.length, sent: 0 };
   // `now` anchors the drain (and is injectable, so tests keep a deterministic clock), but every
   // claim and every outcome reads the time AGAIN through here. A single loop-start value both
@@ -431,8 +484,15 @@ async function runOutgoingQueueBody(
   const startedAt = Date.now();
   const clock = (): number => now + (Date.now() - startedAt);
   let sent = 0;
+  let attemptedRows = 0;
   for (const row of rows) {
     if (!accountIsCurrent(accountLease)) break;
+    const rcsRow = isRcsChatGuid(row.chatGuid);
+    const rcsIsCurrent = (): boolean => !rcsRow || (rcsAvailable?.() ?? true);
+    // Capability-disabled RCS rows remain untouched and must not starve later AppleScript work.
+    if (!rcsIsCurrent()) continue;
+    if (maxRows !== undefined && attemptedRows >= maxRows) break;
+    attemptedRows += 1;
     // THE LEASE AND THE VISIBLE STATE FLIP ARE ONE STEP. This service owns their short guarded
     // transaction: the lease lives in
     // outgoing_queue.next_retry_at; 'sending' on the message row is what every OTHER actor reads
@@ -449,13 +509,27 @@ async function runOutgoingQueueBody(
       claimed: false,
     };
     let claimCommitted: boolean;
+    // A legacy part-zero target normally waits for current ServerInfo before it can be claimed.
+    // These rows are being retired by permanent local product policy, not sent, so supply a
+    // fail-closed local authorization solely to keep claim + visible state atomic. This never
+    // authorizes a target or an HTTP request.
+    const privateApiRetirementAuthorization: MessageTargetServerAuthorization | undefined =
+      requiresRetiredPrivateApi(row)
+        ? { allowsLegacyPartZero: false, isCurrent: () => accountIsCurrent(accountLease) }
+        : serverAuthorization;
     try {
       claimCommitted = await runAccountCommit(accountLease, async (guard) => {
+        const claimGuard = (): boolean => (guard?.() ?? true) && rcsIsCurrent();
         claim = await withDbTransaction(
           db,
           (context) =>
-            claimOutgoingForSendWithinTransaction(context, row.id, clock, serverAuthorization),
-          messageTargetCommitGuard(guard, serverAuthorization),
+            claimOutgoingForSendWithinTransaction(
+              context,
+              row.id,
+              clock,
+              privateApiRetirementAuthorization,
+            ),
+          messageTargetCommitGuard(claimGuard, privateApiRetirementAuthorization),
         );
       });
     } catch (error) {
@@ -463,6 +537,7 @@ async function runOutgoingQueueBody(
         error instanceof MessageTargetCapabilityUnknownError ||
         error instanceof DbCommitGuardRejectedError
       ) {
+        if (rcsRow && !rcsIsCurrent()) continue;
         break;
       }
       throw error;
@@ -478,9 +553,22 @@ async function runOutgoingQueueBody(
       accountLease,
       attachmentTimeoutMs,
       claim.attemptOwnerToken,
-      serverAuthorization,
+      privateApiRetirementAuthorization,
+      rcsAvailable,
     );
     if (outcome === 'sent') sent += 1;
+    if (outcome === 'deferred') {
+      if (!claim.deferToken) throw new Error('claimed outgoing row is missing its defer token');
+      const released = await runAccountCommit(accountLease, (guard) =>
+        withDbTransaction(
+          db,
+          (context) => deferOutgoingSendClaimWithinTransaction(context, claim.deferToken!),
+          guard,
+        ),
+      );
+      if (!released) break;
+      continue;
+    }
     if (outcome === 'paused') break;
   }
   return { eligible: rows.length, sent };
@@ -501,6 +589,7 @@ export async function runOutgoingQueue(
   maxRows?: number,
   attachmentTimeoutMs?: number,
   serverAuthorization?: MessageTargetServerAuthorization,
+  rcsAvailable?: () => boolean,
 ): Promise<{ eligible: number; sent: number }> {
   if (!accountLease) {
     return runOutgoingQueueBody(
@@ -512,6 +601,7 @@ export async function runOutgoingQueue(
       maxRows,
       attachmentTimeoutMs,
       serverAuthorization,
+      rcsAvailable,
     );
   }
 
@@ -526,6 +616,7 @@ export async function runOutgoingQueue(
       maxRows,
       attachmentTimeoutMs,
       serverAuthorization,
+      rcsAvailable,
     );
   });
   return status === 'delivered' && completed.value ? completed.value : { eligible: 0, sent: 0 };

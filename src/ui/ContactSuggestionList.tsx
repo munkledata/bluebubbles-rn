@@ -3,7 +3,7 @@ import type { ContactPick } from '@db/repositories';
 import { useTheme } from './theme';
 
 /**
- * Tappable contact-suggestion rows under a recipient input (new-chat, FaceTime dialer).
+ * Tappable contact-suggestion rows under a recipient input such as new chat.
  * Renders nothing when there are no suggestions.
  */
 export function ContactSuggestionList({

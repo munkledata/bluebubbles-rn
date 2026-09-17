@@ -123,21 +123,23 @@ accurately describes that handoff.
 
 <a id="play-02"></a>
 
-## `PLAY-02` — truthful incoming-call notification behavior
+## `PLAY-02` — truthful incoming-call notification retirement
 
-First decide whether incoming calling is genuinely a core product function eligible for Play's
-full-screen-intent declaration. If eligible, check runtime capability, explain the setting, and route
-the user to it when needed. If calling is auxiliary, remove automatic reliance on the permission
-where feasible.
+`FP-006` decides the product question for the current release: FaceTime is not a client feature.
+Block `USE_FULL_SCREEN_INTENT` and remove the FaceTime channel, incoming-call presentation, body
+route, Answer/Decline actions, and helper/link work. Stale events and old server capability fields
+must remain inert.
 
-In either case, retain an actionable heads-up notification fallback so denied or unavailable
-full-screen access does not make an incoming call unusable.
+Closure needs focused negative source/event coverage plus merged-manifest and packaged-artifact
+inspection. It does not need an Android-version matrix for a positive call flow. Any future calling
+feature belongs to `POST-FACE-01` and starts from a newly approved contract rather than restoring the
+retired fallback.
 
-The owner selected the removal branch on 2026-08-27. Durable Expo config must explicitly block
-`USE_FULL_SCREEN_INTENT`, and neither generic locked nor detailed incoming-call notification may set
-`fullScreenAction`. Retain high importance, call category, body tap, Answer, and Decline behavior.
-Describe the notification as heads-up-capable because Android or the user can suppress heads-up
-presentation through channel policy.
+The owner's 2026-08-27 intermediate decision removed `fullScreenAction` while retaining a
+heads-up-capable call notification. That retained notification contract is historical and is
+superseded by `FP-006`. Durable Expo config still blocks `USE_FULL_SCREEN_INTENT`; the current client
+also removes high importance/call category, body tap, Answer, and Decline behavior instead of
+offering a fallback.
 
 <a id="dl-01"></a>
 

@@ -32,13 +32,6 @@ import {
 } from '@/services';
 import { openChatNotificationSettings } from '@/services/notifications/notifeeService';
 import {
-  clearGroupPhoto,
-  leaveGroupChat,
-  renameGroupChat,
-  setGroupPhoto,
-  updateGroupParticipant,
-} from '@/services/chat/groupManagement';
-import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
   subscribeRealtimeGenerationInvalidation,
@@ -275,39 +268,8 @@ function ChatSettingsScreen({
 
   const isGroup = data ? isGroupRow(data) : false;
 
-  // SERVER-GATED (private API): leave on the server, then drop the chat locally.
-  const leaveGroup = (): void => {
-    const dialogGrant = renderGrant;
-    if (!grantIsCurrent(dialogGrant)) return;
-    showDialog('Leave Group', 'Leave this conversation on the server and remove it here?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Leave',
-        style: 'destructive',
-        onPress: () => {
-          if (!grantIsCurrent(dialogGrant)) return;
-          void (async () => {
-            try {
-              if ((await leaveGroupChat(guid, accountLease)) && grantIsCurrent(dialogGrant)) {
-                router.back();
-              }
-            } catch {
-              if (grantIsCurrent(dialogGrant)) {
-                showDialog(
-                  'Leave Group',
-                  'Couldn’t leave — the server needs the private API enabled.',
-                );
-              }
-            }
-          })();
-        },
-      },
-    ]);
-  };
-
-  // ── Group management (SERVER-GATED, Private API) ────────────────────────────
-  // Members are reactive on the DB: add/remove/rename handlers persist the server
-  // chat (writes chat_handles + handles), so this auto-updates — no manual refresh.
+  // Group membership remains visible from the local database, but helper-only group mutations are
+  // retired. This section is deliberately read-only regardless of what an old server advertises.
   const { data: membersData } = useReactiveQuery<{ address: string; name: string }[]>(
     () => getChatParticipants(getDatabase(), guid),
     ['chat_handles', 'handles', 'chats'],
@@ -474,75 +436,7 @@ function ChatSettingsScreen({
     );
   };
 
-  const [renaming, setRenaming] = useState(false);
-  const [groupName, setGroupName] = useState('');
-  const [adding, setAdding] = useState(false);
-  const [addAddress, setAddAddress] = useState('');
-  const [busy, setBusy] = useState(false);
   const [repairing, setRepairing] = useState(false);
-
-  const showGroupError = (grant: ChatSettingsGrant): void => {
-    if (grantIsCurrent(grant)) {
-      showDialog('Group', 'Couldn’t update — the server needs the Private API enabled.');
-    }
-  };
-
-  const doRename = (): void => {
-    const operationGrant = renderGrant;
-    if (!grantIsCurrent(operationGrant) || !groupName.trim() || busy) return;
-    setBusy(true);
-    void renameGroupChat(guid, groupName.trim(), accountLease)
-      .then((completed) => {
-        if (!completed || !grantIsCurrent(operationGrant)) return;
-        setRenaming(false);
-        setGroupName('');
-      })
-      .catch(() => {
-        showGroupError(operationGrant);
-      })
-      .finally(() => {
-        if (grantIsCurrent(operationGrant)) setBusy(false);
-      });
-  };
-  const doAdd = (): void => {
-    const operationGrant = renderGrant;
-    if (!grantIsCurrent(operationGrant) || !addAddress.trim() || busy) return;
-    setBusy(true);
-    void updateGroupParticipant(guid, 'add', addAddress.trim(), accountLease)
-      .then((completed) => {
-        if (!completed || !grantIsCurrent(operationGrant)) return;
-        setAdding(false);
-        setAddAddress('');
-      })
-      .catch(() => {
-        showGroupError(operationGrant);
-      })
-      .finally(() => {
-        if (grantIsCurrent(operationGrant)) setBusy(false);
-      });
-  };
-  const doRemove = (address: string): void => {
-    const dialogGrant = renderGrant;
-    if (!grantIsCurrent(dialogGrant)) return;
-    showDialog('Remove', 'Remove this person from the group?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: () => {
-          if (!grantIsCurrent(dialogGrant)) return;
-          setBusy(true);
-          void updateGroupParticipant(guid, 'remove', address, accountLease)
-            .catch(() => {
-              showGroupError(dialogGrant);
-            })
-            .finally(() => {
-              if (grantIsCurrent(dialogGrant)) setBusy(false);
-            });
-        },
-      },
-    ]);
-  };
 
   const saveName = (text: string): void => {
     const operationGrant = renderGrant;
@@ -573,74 +467,6 @@ function ChatSettingsScreen({
     queueScreenCommand(operationGrant, () =>
       setChatMuted(operationGrant.chatGuid, on, operationGrant.accountLease),
     );
-  };
-  // Pick a new group photo and upload it to the server (Private API sends it to everyone).
-  const onChangeGroupPhoto = (): void => {
-    void (async () => {
-      const pickerGrant = renderGrant;
-      if (!grantIsCurrent(pickerGrant)) return;
-      const pickerToken = pickerOwner.acquire();
-      if (!pickerToken) return;
-      const pickerIsCurrent = (): boolean =>
-        pickerOwner.isCurrent(pickerToken) && grantIsCurrent(pickerGrant);
-      try {
-        if (!(await requestPhotoLibraryAccess(pickerIsCurrent)) || !pickerIsCurrent()) return;
-        const res = await ImagePicker.launchImageLibraryAsync({
-          mediaTypes: ['images'],
-          quality: 0.9,
-        }).catch(() => {
-          if (pickerIsCurrent()) showDialog('Photos', 'Couldn’t open the photo picker.');
-          return null;
-        });
-        if (!res || res.canceled || !res.assets[0] || !pickerIsCurrent()) return;
-        const a = res.assets[0];
-        try {
-          const completed = await setGroupPhoto(
-            guid,
-            {
-              uri: a.uri,
-              name: a.fileName ?? 'group-icon.jpg',
-              mimeType: a.mimeType ?? 'image/jpeg',
-            },
-            accountLease,
-          );
-          if (completed && pickerIsCurrent()) {
-            showDialog('Group Photo', 'Photo updated — it may take a moment to sync to everyone.');
-          }
-        } catch {
-          if (pickerIsCurrent()) {
-            showDialog('Group Photo', 'Couldn’t update the group photo.');
-          }
-        }
-      } finally {
-        pickerOwner.release(pickerToken);
-      }
-    })();
-  };
-  const onRemoveGroupPhoto = (): void => {
-    const dialogGrant = renderGrant;
-    if (!grantIsCurrent(dialogGrant)) return;
-    showDialog('Remove Photo', 'Remove this group’s photo?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: () => {
-          if (!grantIsCurrent(dialogGrant)) return;
-          void clearGroupPhoto(guid, accountLease)
-            .then((completed) => {
-              if (completed && grantIsCurrent(dialogGrant)) {
-                showDialog('Group Photo', 'Photo removed.');
-              }
-            })
-            .catch(() => {
-              if (grantIsCurrent(dialogGrant)) {
-                showDialog('Group Photo', 'Couldn’t remove the group photo.');
-              }
-            });
-        },
-      },
-    ]);
   };
   const resetAll = (): void => {
     const operationGrant = renderGrant;
@@ -747,23 +573,6 @@ function ChatSettingsScreen({
       );
     });
   };
-  const openAddPerson = (): void => {
-    if (!grantIsCurrent(renderGrant)) return;
-    setAdding(true);
-  };
-  const changeAddAddress = (text: string): void => {
-    if (!grantIsCurrent(renderGrant)) return;
-    setAddAddress(text);
-  };
-  const openRename = (): void => {
-    if (!grantIsCurrent(renderGrant)) return;
-    setRenaming(true);
-  };
-  const changeGroupName = (text: string): void => {
-    if (!grantIsCurrent(renderGrant)) return;
-    setGroupName(text);
-  };
-
   return (
     <>
       <ScrollView contentContainerStyle={styles.content}>
@@ -880,100 +689,18 @@ function ChatSettingsScreen({
         </SettingsSection>
 
         {isGroup ? (
-          <>
-            <SettingsSection label="GROUP PHOTO" style={styles.gap}>
-              <NavRow label="Change Photo…" onPress={onChangeGroupPhoto} disabled={busy} />
-              <NavRow
-                label="Remove Photo"
-                color="destructive"
-                chevron={false}
-                onPress={onRemoveGroupPhoto}
-                disabled={busy}
-              />
-            </SettingsSection>
-
-            <SettingsSection label={`GROUP · ${members.length} PEOPLE`} style={styles.gap}>
-              {members.map((m, i) => (
-                <View key={`${m.address}-${i}`} style={styles.row}>
-                  <Text
-                    numberOfLines={1}
-                    style={[styles.rowLabel, { color: theme.color.label, flex: 1 }]}
-                  >
-                    {m.name}
-                  </Text>
-                  <Pressable
-                    onPress={() => doRemove(m.address)}
-                    disabled={busy}
-                    hitSlop={8}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Remove ${m.name}`}
-                  >
-                    <Text style={[styles.remove, { color: theme.color.destructive }]}>✕</Text>
-                  </Pressable>
-                </View>
-              ))}
-
-              {adding ? (
-                <View style={styles.row}>
-                  <TextInput
-                    value={addAddress}
-                    onChangeText={changeAddAddress}
-                    placeholder="Phone or email"
-                    placeholderTextColor={theme.color.tertiaryLabel}
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    autoFocus
-                    style={[styles.rowLabel, { flex: 1, color: theme.color.label }]}
-                  />
-                  <Pressable onPress={doAdd} disabled={busy || !addAddress.trim()} hitSlop={8}>
-                    <Text
-                      style={{
-                        color: addAddress.trim() ? theme.color.tint : theme.color.tertiaryLabel,
-                        fontSize: 16,
-                      }}
-                    >
-                      Add
-                    </Text>
-                  </Pressable>
-                </View>
-              ) : (
-                <NavRow label="Add Person…" chevron={false} onPress={openAddPerson} />
-              )}
-
-              {renaming ? (
-                <View style={styles.row}>
-                  <TextInput
-                    value={groupName}
-                    onChangeText={changeGroupName}
-                    placeholder="New group name"
-                    placeholderTextColor={theme.color.tertiaryLabel}
-                    autoFocus
-                    style={[styles.rowLabel, { flex: 1, color: theme.color.label }]}
-                  />
-                  <Pressable onPress={doRename} disabled={busy || !groupName.trim()} hitSlop={8}>
-                    <Text
-                      style={{
-                        color: groupName.trim() ? theme.color.tint : theme.color.tertiaryLabel,
-                        fontSize: 16,
-                      }}
-                    >
-                      Save
-                    </Text>
-                  </Pressable>
-                </View>
-              ) : (
-                <NavRow label="Rename Group…" chevron={false} onPress={openRename} />
-              )}
-
-              <NavRow
-                label="Leave Group"
-                color="destructive"
-                chevron={false}
-                onPress={leaveGroup}
-                accessibilityLabel="Leave group"
-              />
-            </SettingsSection>
-          </>
+          <SettingsSection label={`GROUP · ${members.length} PEOPLE`} style={styles.gap}>
+            {members.map((member, index) => (
+              <View key={`${member.address}-${index}`} style={styles.row}>
+                <Text
+                  numberOfLines={1}
+                  style={[styles.rowLabel, { color: theme.color.label, flex: 1 }]}
+                >
+                  {member.name}
+                </Text>
+              </View>
+            ))}
+          </SettingsSection>
         ) : null}
 
         <Pressable onPress={resetAll} style={styles.reset}>
@@ -1033,7 +760,6 @@ const styles = StyleSheet.create({
   },
   rowLabel: { fontSize: 16 },
   rowValue: { fontSize: 15 },
-  remove: { fontSize: 18, paddingHorizontal: 4 },
   reset: { alignItems: 'center', paddingVertical: 24 },
   resetText: { fontSize: 16 },
 });

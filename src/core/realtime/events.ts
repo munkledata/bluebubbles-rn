@@ -199,13 +199,7 @@ export type NotificationIntent =
   | { kind: 'message-withdraw'; chatGuid: string; messageGuid: string }
   /** Whole-chat cancellation remains reserved for read/dismiss semantics. */
   | { kind: 'cancel'; chatGuid: string }
-  | {
-      kind: 'facetime-call';
-      uuid: string;
-      callerName: string;
-      isAudio: boolean;
-      avatarUri?: string;
-    }
+  /** Cleanup-only compatibility for a call notification posted by an older app build. */
   | { kind: 'facetime-cancel'; uuid: string }
   /** One or more of the user's own iMessage aliases were deregistered server-side (F-6). */
   | { kind: 'alias-removed'; aliases: string[] }

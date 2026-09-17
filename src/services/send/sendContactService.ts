@@ -1,26 +1,15 @@
 import type { HttpClient } from '@core/api/http';
 import { sendContact, type ContactEmail, type ContactPhone } from '@core/api/endpoints/messages';
-import {
-  explicitMessageTargetPart,
-  insertOutgoingContactWithinTransaction,
-  MessageTargetUnavailableError,
-  resolveMessageTarget,
-  resolveMessageTargetWithinTransaction,
-} from '@db/repositories';
+import { insertOutgoingContactWithinTransaction } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { isRcsChatGuid } from '@utils';
 import {
-  messageTargetCommitGuard,
-  messageTargetServerAuthorization,
   resolveRcsAttemptOwnership,
+  sendCapabilityCommitGuard,
   type RcsCapabilitySource,
 } from './rcsAttemptCapability';
-import {
-  handleSendFailure,
-  reconcileSendOutcome,
-  retireUnavailableMessageTarget,
-} from './sendOutcome';
+import { handleSendFailure, reconcileSendOutcome } from './sendOutcome';
 import { generateTempGuid } from './sendService';
 import { pinSendTransport } from './sendTransport';
 
@@ -83,17 +72,11 @@ export async function sendContactMessage(
   /** Fires only after the optimistic message and durable retry row commit. */
   onQueued?: (tempGuid: string) => void | Promise<void>,
 ): Promise<{ tempGuid: string }> {
-  const targetPart = explicitMessageTargetPart(args.selectedMessageGuid, args.partIndex);
-  const target = targetPart
-    ? {
-        chatGuid: args.chatGuid,
-        messageGuid: targetPart.messageGuid,
-        partIndex: targetPart.partIndex,
-      }
-    : null;
-  // The server's RCS media transport cannot preserve reply identity. Refuse instead of silently
-  // delivering an ordinary contact card that appears locally to be a reply.
-  if (target && isRcsChatGuid(args.chatGuid)) {
+  const rcsChat = isRcsChatGuid(args.chatGuid);
+  if (!rcsChat) {
+    throw new Error('iMessage contact cards were retired with the Private API helper.');
+  }
+  if (args.selectedMessageGuid !== undefined || args.partIndex !== undefined) {
     throw new Error('This server cannot send an RCS contact-card reply.');
   }
   if (!hasContactContent(args.contact)) {
@@ -106,61 +89,38 @@ export async function sendContactMessage(
     args.chatGuid,
     transport.admissionGuard,
     capabilitySource,
-    { requireServerInfo: target != null },
+    { requireServerInfo: true },
   );
-  const authorizedTarget = target
-    ? {
-        ...target,
-        serverAuthorization: messageTargetServerAuthorization(
-          capability.serverInfo,
-          transport.admissionGuard,
-        ),
-      }
-    : null;
-  const targetCommitGuard = messageTargetCommitGuard(
-    commitGuard,
-    authorizedTarget?.serverAuthorization,
-  );
+  const capabilityGuard = sendCapabilityCommitGuard(transport.admissionGuard, capabilitySource);
+  if (capability.serverInfo?.rcs !== true) {
+    throw new Error('This server cannot send a contact card for this chat service.');
+  }
   // Derive the presentation label before claiming the process-wide writer. Native contact picking
   // already completed in the front door and stays entirely outside this DB-only owner.
   const displayName = contactDisplayName(args.contact);
   const { attemptOwnerToken } = await withDbTransaction(
     db,
-    async (context) => {
-      const resolvedTarget = authorizedTarget
-        ? await resolveMessageTargetWithinTransaction(context, authorizedTarget)
-        : null;
-      if (authorizedTarget && !resolvedTarget) throw new MessageTargetUnavailableError();
-      return insertOutgoingContactWithinTransaction(context, {
+    (context) =>
+      insertOutgoingContactWithinTransaction(context, {
         tempGuid,
         chatGuid: args.chatGuid,
         // Placeholder bubble text; the server echo replaces it with the rendered contact card.
         text: displayName,
         contact: args.contact,
         now,
-        selectedMessageGuid: resolvedTarget?.messageGuid,
-        partIndex: resolvedTarget?.partIndex,
-        threadOriginatorGuid: resolvedTarget?.messageGuid,
         attemptAware: capability.attemptAware,
-      });
-    },
-    transport.admissionGuard,
+      }),
+    capabilityGuard,
   );
   await onQueued?.(tempGuid);
 
   // The owner can commit immediately before Disconnect retires this account. Do not let the old
   // continuation use a successor account's credential boundary.
-  if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
+  if (!capabilityGuard()) throw new DbCommitGuardRejectedError();
 
   try {
-    const finalTarget = authorizedTarget
-      ? await resolveMessageTarget(db, authorizedTarget, targetCommitGuard)
-      : null;
-    if (authorizedTarget && !finalTarget) {
-      await retireUnavailableMessageTarget(db, tempGuid, targetCommitGuard);
-      return { tempGuid };
-    }
     transport.assertNetworkCurrent();
+    if (!capabilityGuard()) throw new DbCommitGuardRejectedError();
     const server = await sendContact(transport.http, {
       chatGuid: args.chatGuid,
       tempGuid,
@@ -170,8 +130,6 @@ export async function sendContactMessage(
       organization: args.contact.organization,
       phones: args.contact.phones,
       emails: args.contact.emails,
-      selectedMessageGuid: finalTarget?.messageGuid,
-      partIndex: finalTarget?.partIndex,
     });
     await reconcileSendOutcome(db, tempGuid, server, now, commitGuard, {
       attemptOwnerToken: attemptOwnerToken ?? undefined,
@@ -181,10 +139,6 @@ export async function sendContactMessage(
     // followed by a second stale-account DB attempt.
     if (e instanceof DbCommitGuardRejectedError) throw e;
     if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
-    if (e instanceof MessageTargetUnavailableError) {
-      await retireUnavailableMessageTarget(db, tempGuid, targetCommitGuard);
-      return { tempGuid };
-    }
     await handleSendFailure(
       db,
       tempGuid,

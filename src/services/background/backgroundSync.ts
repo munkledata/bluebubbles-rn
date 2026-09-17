@@ -161,6 +161,7 @@ export async function executeBackgroundSyncTask(): Promise<BackgroundTask.Backgr
           BACKGROUND_OUTGOING_MAX_ROWS,
           BACKGROUND_ATTACHMENT_UPLOAD_TIMEOUT_MS,
           messageTargetServerAuthorization(info, () => scope.isCurrent()),
+          () => scope.isCurrent() && info.rcs === true,
         );
       },
       flushDiagnostics: (db, client, info, scope) =>

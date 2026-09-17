@@ -74,7 +74,7 @@ function seedReactionTarget(raw: Database.Database, chatGuid: string): void {
   raw
     .prepare(
       `INSERT INTO messages(guid, chat_id, text, date_created, message_part_topology)
-       VALUES ('target-message', ?, 'target', 1, ?)`,
+       VALUES ('rcs-target-message', ?, 'target', 1, ?)`,
     )
     .run(
       chat.id,
@@ -164,6 +164,7 @@ function startSend(
 ): Promise<{ tempGuid: string }> {
   let http!: HttpClient;
   http = {
+    get: async () => ({ rcs: true, supports_send_contact: true }),
     post: async (_path: string, _schema: unknown, options?: { json?: unknown }) => {
       const body = (options?.json ?? {}) as { chatGuid?: string };
       await onNetwork(outgoingAtNetworkStart(raw, body.chatGuid ?? 'missing'));
@@ -189,7 +190,7 @@ function startSend(
     return sendReactionMessage(
       db,
       http,
-      { chatGuid, targetGuid: 'target-message', reaction: 'love', partIndex: 0 },
+      { chatGuid, targetGuid: 'rcs-target-message', reaction: 'love', partIndex: 0 },
       1_000,
     );
   }
@@ -206,7 +207,7 @@ describe('outgoing chat identity is resolved by the optimistic insert owner', ()
     '%s waits out a rolled-back chat deletion before lookup and network',
     async (kind) => {
       const { db, raw } = await createTestDb();
-      const targetGuid = 'target-chat';
+      const targetGuid = kind === 'text' ? 'target-chat' : 'RCS;-;target-chat';
       seedChat(raw, targetGuid);
       seedChat(raw, 'decoy-chat');
       if (kind === 'reaction') seedReactionTarget(raw, targetGuid);
@@ -298,9 +299,15 @@ describe('outgoing chat identity is resolved by the optimistic insert owner', ()
       const network: NetworkSnapshot[] = [];
       try {
         const result = await observe(
-          startSend(kind, db, raw, 'missing-chat', (snapshot) => {
-            network.push(snapshot);
-          }),
+          startSend(
+            kind,
+            db,
+            raw,
+            kind === 'text' ? 'missing-chat' : 'RCS;-;missing-chat',
+            (snapshot) => {
+              network.push(snapshot);
+            },
+          ),
         ).outcome;
         expect(result.kind).toBe('rejected');
         if (result.kind === 'rejected') {

@@ -59,8 +59,6 @@ interface MessageListProps {
   /** Same, for the floating composer at the bottom. */
   bottomInset?: number;
   onLongPressMessage?: (msg: EnrichedMessage, rect: BubbleRect) => void;
-  /** Swipe a bubble right past the threshold → set it as the reply target. */
-  onSwipeReply?: (msg: EnrichedMessage) => void;
   /** Pull-to-refresh action (re-sync this thread). Omit to disable the gesture. */
   onRefresh?: () => Promise<unknown>;
   /** Scrolled to the OLDEST loaded message → grow the window (load older history). Omit or return
@@ -100,7 +98,6 @@ export function MessageList({
   topInset = 0,
   bottomInset = 0,
   onLongPressMessage,
-  onSwipeReply,
   onRefresh,
   onLoadOlder,
   focusGuid,
@@ -448,7 +445,6 @@ export function MessageList({
             isLastOutgoing={item.id === lastOutgoingId}
             onRetry={handleRetry}
             onLongPress={onLongPressMessage}
-            onSwipeReply={onSwipeReply}
             selecting={selectedGuids != null}
             isSelected={selectedGuids?.has(item.guid) ?? false}
             onToggleSelect={onToggleSelect}

@@ -309,9 +309,11 @@ v56, v57, v58, or v59 device records.
    - Exercise QR pairing, then repeat with manual URL/password entry on the selected clean branch.
    - Confirm only synthetic conversations, identities, attachments, and contacts appear.
 4. **Core messaging**
-   - Send and receive staged text plus one small staged attachment.
-   - Exercise sync, reply/reaction, retry, search, and the selected edit/unsend path only when the
-     staged server reports support.
+   - Send and receive staged existing-chat iMessage plain text plus supported RCS text and one small
+     RCS attachment.
+   - Exercise sync, RCS whole-message reaction, retry, and search. Confirm helper-backed iMessage
+     reply, reaction, edit, unsend, contact-card, attachment, and targeted-schedule controls remain
+     absent even if stale server data advertises them.
    - Complete the linked `PUSH-RETRY-01` physical-phone text/media correlation and restart/re-pair
      checks; record only bounded non-secret evidence.
 5. **Lifecycle and notifications**

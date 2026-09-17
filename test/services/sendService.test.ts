@@ -14,7 +14,10 @@ import {
 import { DbCommitGuardRejectedError } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { useSessionStore } from '@state/sessionStore';
-import { captureSessionRcsCapabilityLease } from '@/services/send/rcsAttemptCapability';
+import {
+  captureSessionRcsCapabilityLease,
+  fixedRcsCapabilitySource,
+} from '@/services/send/rcsAttemptCapability';
 import { generateTempGuid, sendTextMessage } from '@/services/send/sendService';
 import { createTestDb } from '../support/testDb';
 
@@ -102,7 +105,7 @@ describe('sendTextMessage', () => {
         expect(path).toBe('/server/info');
         expect(countMessages(raw)).toBe(0);
         if (discoveryFails) throw new Error('server-info unavailable');
-        return { private_api: true, supports_rcs_send_attempt_ownership: true };
+        return { private_api: true, rcs: true, supports_rcs_send_attempt_ownership: true };
       }),
       post: jest.fn(async (_path: string, _schema: unknown, options: { json?: unknown }) => {
         const body = options.json as {
@@ -137,7 +140,7 @@ describe('sendTextMessage', () => {
       discoveryFails = false;
       await sendTextMessage(db, http, { chatGuid, text: 'owned attempt' });
       expect(postedGeneration).toBe(1);
-      expect(postedMethod).toBe('private-api');
+      expect(postedMethod).toBe('apple-script');
       expect(http.get).toHaveBeenCalledTimes(2);
       expect(useSessionStore.getState()).toMatchObject({ origin: null, serverInfo: null });
     } finally {
@@ -148,6 +151,32 @@ describe('sendTextMessage', () => {
         serverInfo: previousSession.serverInfo,
       });
     }
+  });
+
+  it('rejects RCS text before DB admission when the live RCS capability is off', async () => {
+    const { db, raw } = await createTestDb();
+    const chatGuid = 'RCS;-;disabled-capability';
+    await seedChat(db, chatGuid);
+    const post = jest.fn(async () => ({ guid: 'must-not-send' }));
+
+    await expect(
+      sendTextMessage(
+        db,
+        fakeHttp(post),
+        { chatGuid, text: 'do not queue' },
+        1_000,
+        undefined,
+        undefined,
+        undefined,
+        fixedRcsCapabilitySource(ServerInfo.parse({ version: '2.0.0', rcs: false })),
+      ),
+    ).rejects.toThrow('cannot send RCS messages without RCS support');
+
+    expect(post).not.toHaveBeenCalled();
+    expect(countMessages(raw)).toBe(0);
+    expect(raw.prepare('SELECT COUNT(*) AS count FROM outgoing_queue').get()).toEqual({
+      count: 0,
+    });
   });
 
   it('does not admit an RCS row when the server origin rotates during capability discovery', async () => {
@@ -242,6 +271,51 @@ describe('sendTextMessage', () => {
     }
   });
 
+  it('leaves queued RCS text owned for retry when the same transport retires RCS', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const { db, raw } = await createTestDb();
+    const chatGuid = 'RCS;-;same-transport-retirement';
+    await seedChat(db, chatGuid);
+    const previousSession = useSessionStore.getState();
+    const info = ServerInfo.parse({ version: '2.0.0', rcs: true });
+    useSessionStore.getState().connected('https://origin-a.test', 'password', info);
+    const post = jest.fn(async () => ({ guid: 'must-not-send' }));
+    const client = revisionPinnedHttp({ post });
+
+    try {
+      const capabilityLease = captureSessionRcsCapabilityLease();
+      if (!capabilityLease) throw new Error('expected a connected capability lease');
+      await expect(
+        sendTextMessage(
+          db,
+          client,
+          { chatGuid, text: 'stay local' },
+          1_000,
+          () => {
+            const state = useSessionStore.getState();
+            state.setServerInfoForTransport(
+              state.origin!,
+              state.transportRevision,
+              ServerInfo.parse({ version: '2.0.0', rcs: false }),
+            );
+          },
+          undefined,
+          undefined,
+          capabilityLease,
+        ),
+      ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+
+      expect(post).not.toHaveBeenCalled();
+      expect(raw.prepare('SELECT send_state AS sendState FROM messages').get()).toEqual({
+        sendState: 'sending',
+      });
+      expect(raw.prepare('SELECT attempts FROM outgoing_queue').get()).toEqual({ attempts: 0 });
+    } finally {
+      useSessionStore.setState(previousSession);
+      warn.mockRestore();
+    }
+  });
+
   it('optimistically inserts then promotes temp→real on success (one row, queue cleared)', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
@@ -263,27 +337,27 @@ describe('sendTextMessage', () => {
     expect((raw.prepare('SELECT COUNT(*) c FROM outgoing_queue').get() as { c: number }).c).toBe(0);
   });
 
-  it('persists a send-effect on the optimistic message + the queue payload', async () => {
+  it('does not let an old server advertisement restore retired iMessage effects', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
-    let queuedPayload = '';
-    await sendTextMessage(
-      db,
-      fakeHttp(async () => {
-        // Capture the optimistic state BEFORE reconciliation.
-        const m = raw.prepare('SELECT expressive_send_style_id e FROM messages').get() as {
-          e: string | null;
-        };
-        expect(m.e).toBe('com.apple.messages.effect.CKConfettiEffect');
-        queuedPayload =
-          (raw.prepare('SELECT payload p FROM outgoing_queue').get() as { p: string } | undefined)
-            ?.p ?? '';
-        return { guid: 'real-1', dateCreated: 1000, dateDelivered: null };
-      }),
-      { chatGuid: 'c1', text: 'party', effectId: 'com.apple.messages.effect.CKConfettiEffect' },
-    );
-    // The effect id is also sent to the server (in the queue payload).
-    expect(queuedPayload).toContain('CKConfettiEffect');
+    const request = jest.fn(async () => ({ guid: 'must-not-send' }));
+
+    await expect(
+      sendTextMessage(
+        db,
+        fakeHttp(request),
+        { chatGuid: 'c1', text: 'party', effectId: 'com.apple.messages.effect.CKConfettiEffect' },
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        fixedRcsCapabilitySource(ServerInfo.parse({ version: '2.0.0', private_api: true })),
+      ),
+    ).rejects.toThrow('Private API message features were retired in this release.');
+
+    expect(request).not.toHaveBeenCalled();
+    expect(countMessages(raw)).toBe(0);
+    expect((raw.prepare('SELECT COUNT(*) c FROM outgoing_queue').get() as { c: number }).c).toBe(0);
   });
 
   it('does not duplicate when the socket echo lands FIRST (deletes temp)', async () => {

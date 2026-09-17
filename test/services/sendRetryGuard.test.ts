@@ -1,12 +1,10 @@
 /**
  * "Try Again" on a failed bubble — the send barrel's `retry()`.
  *
- * THE CONTRACT IT HAS TO KEEP: re-POST the QUEUE PAYLOAD under the row's ORIGINAL temp guid. The
- * old shape deleted the errored row and re-sent whatever the sheet could see, which broke three
- * ways at once — a failed CONTACT CARD went out as a plain message reading the contact's display
- * name; the fresh temp guid is a second idempotency key at the server, so an ack-lost send is
- * delivered twice; and the user's only copy of the message was destroyed before any replacement
- * existed, so a throw in the re-send lost it outright with no error shown (the caller is `void`).
+ * THE CONTRACT IT HAS TO KEEP: supported plain text is re-POSTed from the QUEUE PAYLOAD under the
+ * row's ORIGINAL temp guid. Rows requiring the retired Private API (including iMessage contact,
+ * reply, effect, subject, and mention sends) are permanently retired without a network request.
+ * Nothing is deleted: the failed bubble and capped retry row remain available for review/removal.
  *
  * The barrel wires native modules at import time, so the native leaves are mocked here
  * (composition-root clients / expo uploader / contacts picker); the DB and every repository call
@@ -237,12 +235,7 @@ describe('retry() — re-sends the QUEUED send, not the bubble', () => {
     expect(raw.prepare('SELECT COUNT(*) c FROM messages').get()).toEqual({ c: 1 });
   });
 
-  /**
-   * THE contact-card regression. `insertOutgoingContact` stores a `kind:'contact'` queue row plus a
-   * placeholder bubble whose TEXT is the contact's display name — so rebuilding the send from the
-   * bubble delivered "Craig Federighi" to the recipient as a plain message.
-   */
-  it('re-POSTs a failed CONTACT CARD as a contact, not as the placeholder text', async () => {
+  it('retires a legacy iMessage contact-card retry without POST', async () => {
     const { db, raw } = await createTestDb();
     (getDatabase as jest.Mock).mockReturnValue(db);
     const chatId = await seedChat(db);
@@ -256,21 +249,22 @@ describe('retry() — re-sends the QUEUED send, not the bubble', () => {
     });
     raw.prepare("UPDATE messages SET send_state='error', error=502 WHERE guid='temp-card'").run();
 
-    await retry('temp-card');
+    await expect(retry('temp-card')).resolves.toBe('unsendable');
 
-    expect(posts).toHaveLength(1);
-    expect(posts[0]?.path).toContain('contact');
-    expect(posts[0]?.body).toMatchObject({
-      tempGuid: 'temp-card',
-      firstName: 'Craig',
-      lastName: 'Federighi',
+    expect(posts).toHaveLength(0);
+    expect(
+      raw.prepare("SELECT send_state state FROM messages WHERE guid='temp-card'").get(),
+    ).toEqual({
+      state: 'error',
     });
-    // The one assertion that fails against the old code: it POSTed the display name as a message.
-    expect(posts[0]?.path).not.toContain('text');
-    expect(posts[0]?.body.text).toBeUndefined();
+    expect(
+      raw.prepare("SELECT attempts FROM outgoing_queue WHERE temp_guid='temp-card'").get(),
+    ).toEqual({
+      attempts: 5,
+    });
   });
 
-  it('keeps the reply target / effect / subject the payload carries and the bubble does not', async () => {
+  it('retires a legacy iMessage reply/effect/subject retry without POST', async () => {
     const { db, raw } = await createTestDb();
     (getDatabase as jest.Mock).mockReturnValue(db);
     const chatId = await seedChat(db);
@@ -288,14 +282,18 @@ describe('retry() — re-sends the QUEUED send, not the bubble', () => {
     });
     raw.prepare("UPDATE messages SET send_state='error', error=502 WHERE guid='temp-rich'").run();
 
-    await retry('temp-rich');
+    await expect(retry('temp-rich')).resolves.toBe('unsendable');
 
-    expect(posts[0]?.body).toMatchObject({
-      tempGuid: 'temp-rich',
-      selectedMessageGuid: 'orig-1',
-      partIndex: 0,
-      effectId: 'com.apple.MobileSMS.expressivesend.impact',
-      subject: 'Re: lunch',
+    expect(posts).toHaveLength(0);
+    expect(
+      raw.prepare("SELECT send_state state FROM messages WHERE guid='temp-rich'").get(),
+    ).toEqual({
+      state: 'error',
+    });
+    expect(
+      raw.prepare("SELECT attempts FROM outgoing_queue WHERE temp_guid='temp-rich'").get(),
+    ).toEqual({
+      attempts: 5,
     });
   });
 });

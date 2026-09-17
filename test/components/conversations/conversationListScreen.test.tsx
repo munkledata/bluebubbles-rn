@@ -239,6 +239,8 @@ import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
+// eslint-disable-next-line import/first
+import { useSessionStore } from '@state/sessionStore';
 
 const useChatsMock = useChats as jest.Mock;
 const mockMarkAllChatsRead = markAllChatsRead as jest.Mock;
@@ -246,6 +248,9 @@ const mockMovePinnedChat = movePinnedChat as jest.Mock;
 
 beforeEach(() => {
   resumeRealtimeDeliveries();
+  useSessionStore.setState({
+    serverInfo: { version: 'test', private_api: true, rcs: true } as any,
+  });
   // The confirm dialog lives in the store (AppDialog is mounted at the app root, not here).
   useDialogStore.setState({ current: null, queue: [] });
   // Reset in beforeEach, never afterEach: an afterEach mutation lands on a still-mounted tree.
@@ -382,10 +387,26 @@ describe('ConversationListScreen — navigation & actions', () => {
     // and an un-awaited one leaks an act() into the next test's render (harness rule 1).
     fireEvent.press(screen.getByLabelText('New message'));
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/new-chat'));
-    fireEvent.press(screen.getByLabelText('FaceTime'));
-    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/facetime'));
     fireEvent.press(screen.getByLabelText('Settings'));
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/settings'));
+  });
+
+  it('keeps RCS new-message available while stale Private API data cannot restore FaceTime', async () => {
+    setChats({ data: [makeRow({ guid: 'l1' })] });
+    await renderWithTheme(<ConversationListScreen />);
+
+    expect(screen.queryByLabelText('FaceTime')).toBeNull();
+    expect(screen.getByLabelText('New message')).toBeTruthy();
+  });
+
+  it('fails closed for new-chat creation when RCS capability is missing', async () => {
+    useSessionStore.setState({ serverInfo: null });
+    setChats({ data: [makeRow({ guid: 'l1' })] });
+    await renderWithTheme(<ConversationListScreen />);
+
+    expect(screen.queryByLabelText('FaceTime')).toBeNull();
+    expect(screen.queryByLabelText('New message')).toBeNull();
+    expect(screen.getByLabelText('Settings')).toBeTruthy();
   });
 
   it('Mark all read confirms first, and only the confirm button calls the service command', async () => {

@@ -70,7 +70,7 @@ interface AttachmentTrayProps {
   /** Open the document picker for non-media files (PDFs, etc.). */
   onPickFiles: () => void;
   /** Pick a device contact and send it as a card. Omitted when the server can't build vCards, so
-   *  the "Contact" button appears only when `serverInfo.supports_send_contact` is true. */
+   *  the "Contact" button appears only when its RCS chat supports interactive attachments. */
   onPickContact?: () => void;
 }
 

@@ -145,7 +145,7 @@ revoked service account, a spent quota, an HTTP 403) produced **no visible serve
 ### 2.4 One channel failure killed message notifications permanently
 
 `ensureChannel()` in `notifeeService.ts` memoized the `createChannel` promise but never cleared it
-on rejection — unlike the FaceTime and Reminder channels, which always had that guard. One transient
+on rejection — unlike the then-existing FaceTime and Reminder channels, which always had that guard. One transient
 failure poisoned the cache for the whole JS context: every later `postNotification` awaited the same
 rejected promise and threw, so message notifications stopped until the app restarted.
 
@@ -285,28 +285,37 @@ Google correlation behavior, and the exact delayed-A/retry-B device matrix still
 evidence. Queue-less text/contact automatic replay remains intentionally unavailable until payload
 kind and all resend metadata are retained durably.
 
-### 2.9 Killed-process notification actions use durable credentials (2026-09-07)
+The FaceTime comparison above is historical root-cause evidence; `FP-006` subsequently removed the
+FaceTime channel and actions from the current client.
 
-Android may invoke Reply, Mark as read, Love, or FaceTime Answer in a fresh JavaScript process whose
-foreground Zustand session still contains its empty defaults. Each real network action now resolves
-one explicit transport: a warm action pins the connected client's origin and monotonic transport
-revision, while a cold action re-runs the same vault, App Lock, and revocation inspection used by
-background sync and builds one immutable task-local client. Cold results never hydrate or publish
-the foreground store.
+### 2.9 Current killed-process notification actions use durable credentials (updated 2026-09-16)
+
+Android may invoke a plain Reply or Mark as read in a fresh JavaScript process whose foreground
+Zustand session still contains its empty defaults. A supported whole-message RCS Love action may
+also use the independent RCS transport. Every remaining network action resolves one explicit
+transport: a warm action pins the connected client's origin and monotonic transport revision, while
+a cold action re-runs the same vault, App Lock, and revocation inspection used by background sync
+and builds one immutable task-local client. Cold results never hydrate or publish the foreground
+store.
 
 Reply retains its existing authored-copy rule: the tray stays until the optimistic message and
-outgoing queue row commit. Love uses the same fixed client, while its database settlement keeps the
-separate account/revocation guard so a later tunnel rotation becomes an ordinary durable retry
-instead of stranding a sending row. FaceTime Answer and link creation use one pinned client and
-recheck it between the two requests. Mark as read commits the local newest-message marker first and
-only then lazily resolves the optional receipt transport. If vault inspection fails, the account is
-locked/revoked, or persisted feature settings did not hydrate, the local badge still clears but no
-receipt is sent. Mark Unread uses the same fail-closed hydration rule for its optional server sync.
+outgoing queue row commit. An existing iMessage chat sends that plain text with AppleScript; an RCS
+chat uses its separately advertised transport. A supported RCS Love action uses the same fixed
+client, while its database settlement keeps the separate account/revocation guard so a later tunnel
+rotation becomes an ordinary durable retry instead of stranding a sending row. iMessage Love,
+FaceTime Answer/link creation, and every other helper-dependent action are absent. Mark as read and
+Mark Unread commit only the local marker and never resolve a receipt transport. Stale feature
+settings cannot restore remote read-state effects.
 
-Focused host verification passes 2 service suites / 65 tests plus strict TypeScript. This proves
-composition and deterministic guards, not Android SecureStore access, native action delivery, tray
-timing, or process-death behavior; those remain part of the exact-candidate killed-process action
-matrix.
+The notification may expose Love from a cold process when both route identities are canonical
+(`RCS;-;…` chat and `rcs-…` message); it does not depend on the empty foreground Zustand cache.
+Pressing Love still performs the task-local server-info lookup above before any send is admitted.
+
+The earlier 2-service-suite / 65-test result proves the 2026-09-07 credential-composition work only;
+it does not prove the later retirement. Current `FP-006` verification must instead show that stale
+iMessage helper and FaceTime actions fail before network work while the retained plain-send, local
+read-state, and RCS boundaries still behave as documented. Host checks do not prove Android
+SecureStore access, native action delivery, tray timing, or process-death behavior.
 
 ### 2.10 Killed-process wallpaper events retain account and transport identity (2026-09-07)
 
@@ -519,8 +528,8 @@ Before a notify-kit upgrade, verify all of the following against the pinned Expo
 - permission state/request behavior and app/per-chat channel creation, deletion, and settings handoff;
 - foreground action/body events, background/headless actions, killed-start `getInitialNotification`, and pending-tap
   navigation after App Lock;
-- displayed/trigger/all/targeted cancellation truth, trigger scheduling, messaging-style rendering, actionable
-  high-importance FaceTime heads-up behavior, and continued absence of `USE_FULL_SCREEN_INTENT`.
+- displayed/trigger/all/targeted cancellation truth, trigger scheduling, messaging-style rendering,
+  absence of FaceTime call channels/actions, and continued absence of `USE_FULL_SCREEN_INTENT`.
 
 Replace the package behind the adapter when it becomes incompatible with the pinned Expo/RN toolchain, loses a safe
 maintained release path, develops an unresolved security/licensing problem, or cannot meet the lifecycle/cancellation

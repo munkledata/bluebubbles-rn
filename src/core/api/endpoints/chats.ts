@@ -32,10 +32,8 @@ export async function queryChats(
 }
 
 export interface CreateChatParams {
-  addresses: string[]; // recipient handles (phone/email)
+  address: string; // exactly one RCS recipient handle (phone/email)
   message: string; // initial message (the server requires one to create the thread)
-  service?: string; // 'iMessage' | 'SMS' | 'RCS' (server routes RCS to the sidecar); defaults iMessage
-  method?: string; // 'private-api' | 'apple-script'
 }
 
 // A single chat read/mutation may be wrapped in a named key ({ chat }) — like the list's
@@ -46,21 +44,23 @@ function unwrapChat(res: z.infer<typeof SingleChat>): Chat {
 }
 
 /**
- * POST /api/v1/chat/new — create a chat with the given addresses + an initial message.
- * Implemented on the Gator server (Private API `new-chat` op). The server responds with
- * `{ guid }`; the rest of the chat hydrates from the chat sync. The tolerant
- * `{ chat }`-or-bare schema accepts either shape.
+ * POST /api/v1/chat/new — create a one-recipient RCS chat with an initial message. iMessage/SMS
+ * creation and their helper `method` selector are intentionally absent from this client contract.
+ * The tolerant `{ chat }`-or-bare schema accepts either server response shape.
  */
 export async function createChat(http: HttpClient, params: CreateChatParams): Promise<Chat> {
   const res = await http.post('/chat/new', SingleChat, {
     json: {
-      addresses: params.addresses,
+      addresses: [params.address],
       message: params.message,
-      service: params.service ?? 'iMessage',
-      method: params.method ?? 'private-api',
+      service: 'RCS',
     },
   });
-  return unwrapChat(res);
+  const chat = unwrapChat(res);
+  if (!chat.guid.startsWith('RCS;-;')) {
+    throw new Error('The server returned a non-RCS conversation for an RCS create request.');
+  }
+  return chat;
 }
 
 /**
@@ -77,57 +77,12 @@ export async function getChat(http: HttpClient, guid: string, signal?: AbortSign
   return unwrapChat(res);
 }
 
-/** POST /api/v1/chat/{guid}/read — mark a chat as read. */
+/** POST /api/v1/chat/{guid}/read — propagate a read marker through the supported RCS bridge. */
 export function markChatRead(http: HttpClient, guid: string): Promise<unknown> {
+  if (!guid.startsWith('RCS;-;')) {
+    throw new Error('Remote read markers are available only for RCS conversations.');
+  }
   return http.post(`/chat/${encodeURIComponent(guid)}/read`, z.unknown());
-}
-
-/**
- * POST /api/v1/chat/{guid}/unread — mark a chat as unread on the Mac (Private API,
- * iMessage-only; the RCS sidecar has no unread endpoint, so callers skip `RCS;-;` guids).
- */
-export function markChatUnread(http: HttpClient, guid: string): Promise<unknown> {
-  return http.post(`/chat/${encodeURIComponent(guid)}/unread`, z.unknown());
-}
-
-// ── Group management ─────────────────────────────────────────────────────────
-// Implemented on the Gator server via the injected Private-API helper: add/remove
-// participant, rename (PUT), and leave. Each mutation except leave returns the updated
-// { chat } (read back from chat.db with participants). chat.db lags the action slightly, so
-// the returned chat is best-effort; the app re-syncs to the authoritative state afterward.
-
-/** POST /api/v1/chat/{guid}/participant/{add|remove} — add/remove a member by address. */
-export async function updateParticipant(
-  http: HttpClient,
-  guid: string,
-  action: 'add' | 'remove',
-  address: string,
-): Promise<Chat> {
-  const res = await http.post(
-    `/chat/${encodeURIComponent(guid)}/participant/${action}`,
-    SingleChat,
-    {
-      json: { address },
-    },
-  );
-  return unwrapChat(res);
-}
-
-/** PUT /api/v1/chat/{guid} — rename a group chat. */
-export async function renameChat(
-  http: HttpClient,
-  guid: string,
-  displayName: string,
-): Promise<Chat> {
-  const res = await http.put(`/chat/${encodeURIComponent(guid)}`, SingleChat, {
-    json: { displayName },
-  });
-  return unwrapChat(res);
-}
-
-/** POST /api/v1/chat/{guid}/leave — leave a group chat. */
-export function leaveChat(http: HttpClient, guid: string): Promise<unknown> {
-  return http.post(`/chat/${encodeURIComponent(guid)}/leave`, z.unknown());
 }
 
 /**

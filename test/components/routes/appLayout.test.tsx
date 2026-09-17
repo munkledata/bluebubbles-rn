@@ -67,10 +67,6 @@ jest.mock('@/services/notifications/pendingNav', () => ({
 jest.mock('@/services/notifications/notifeeService', () => ({
   reconcileMessageNotificationGroupAfterRemoval: jest.fn(() => Promise.resolve()),
 }));
-jest.mock('@ui/facetime', () => ({
-  FaceTimeCallOverlay: () => null,
-  IncomingFaceTimeOverlay: () => null,
-}));
 jest.mock('@ui/connection', () => ({
   ConnectionBanner: (props: { onRetry: () => unknown }) => mockConnectionBanner(props),
 }));
@@ -166,6 +162,7 @@ beforeEach(() => {
     origin: 'https://server.example',
     password: 'secret',
     error: null,
+    serverInfo: { version: 'test', private_api: true } as any,
   });
 });
 

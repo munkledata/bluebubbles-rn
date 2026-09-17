@@ -385,7 +385,12 @@ describe('new-server production admission', () => {
         status: 'connected',
         origin: 'https://next.example',
         password: 'current-password',
-        serverInfo: info,
+        serverInfo: {
+          ...info,
+          private_api: false,
+          supports_imessage_text_with_attachment: false,
+          supports_icloud_account: false,
+        },
       }),
     );
     expect(serverRotationCoordinator.getSnapshot()).toBeNull();

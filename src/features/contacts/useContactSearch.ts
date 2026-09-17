@@ -6,7 +6,7 @@ import { useReactiveQuery } from '@db/useReactiveQuery';
 const EMPTY: ContactPick[] = [];
 
 /**
- * Contact-address suggestions for a recipient input (new-chat, FaceTime dialer).
+ * Contact-address suggestions for the new-chat recipient input.
  *
  * REACTIVE on the `contacts` table, not a one-shot read. The contacts sync fires at the tail of
  * every sync, so the compose screen is regularly opened while it is mid-write — most sharply on a

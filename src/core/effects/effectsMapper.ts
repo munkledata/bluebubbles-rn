@@ -38,25 +38,3 @@ export function screenEffectOf(id: string | null | undefined): ScreenEffect | nu
   const d = mapExpressiveSendStyleId(id);
   return d.kind === 'screen' ? d.name : null;
 }
-
-/** A sendable effect (id + display label) for the composer's effect picker. */
-export interface EffectOption {
-  id: string;
-  label: string;
-  kind: 'bubble' | 'screen';
-}
-
-export const EFFECT_OPTIONS: EffectOption[] = [
-  { id: 'com.apple.MobileSMS.expressivesend.impact', label: 'Slam', kind: 'bubble' },
-  { id: 'com.apple.MobileSMS.expressivesend.loud', label: 'Loud', kind: 'bubble' },
-  { id: 'com.apple.MobileSMS.expressivesend.gentle', label: 'Gentle', kind: 'bubble' },
-  { id: 'com.apple.MobileSMS.expressivesend.invisibleink', label: 'Invisible Ink', kind: 'bubble' },
-  { id: 'com.apple.messages.effect.CKConfettiEffect', label: 'Confetti', kind: 'screen' },
-  { id: 'com.apple.messages.effect.CKHappyBirthdayEffect', label: 'Balloons', kind: 'screen' },
-  { id: 'com.apple.messages.effect.CKFireworksEffect', label: 'Fireworks', kind: 'screen' },
-  { id: 'com.apple.messages.effect.CKHeartEffect', label: 'Love', kind: 'screen' },
-  { id: 'com.apple.messages.effect.CKLasersEffect', label: 'Lasers', kind: 'screen' },
-  { id: 'com.apple.messages.effect.CKSparklesEffect', label: 'Celebration', kind: 'screen' },
-  { id: 'com.apple.messages.effect.CKEchoEffect', label: 'Echo', kind: 'screen' },
-  { id: 'com.apple.messages.effect.CKSpotlightEffect', label: 'Spotlight', kind: 'screen' },
-];

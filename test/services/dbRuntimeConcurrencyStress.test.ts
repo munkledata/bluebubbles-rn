@@ -25,6 +25,7 @@ jest.mock('expo-crypto', () => ({
 
 let dummyHttp!: HttpClient;
 dummyHttp = {
+  get: async () => ({ private_api: false, rcs: true }),
   pinTransport: () => dummyHttp,
   isTransportCurrent: () => true,
   assertTransportCurrent: () => undefined,
@@ -37,7 +38,7 @@ const IMAGE = {
   width: 800,
   height: 600,
 };
-const UPLOAD_CHAT_GUID = 'db02c-sync-upload-chat';
+const UPLOAD_CHAT_GUID = 'RCS;-;db02c-sync-upload-chat';
 const DEADLINE_MS = 2_000;
 
 interface Gate {
@@ -194,11 +195,14 @@ describe('DB-02C mixed runtime concurrency', () => {
             uploadTransactionStates.push(raw.inTransaction);
             uploadEntered.release();
             await uploadGate.promise;
-            return { guid: 'db02c-real-attachment-message', viaPrivateApi: true };
+            return { guid: 'db02c-real-attachment-message' };
           },
           20_000,
         ),
       );
+      // RCS capability discovery is an async preflight. Let its continuation enqueue the upload's
+      // construction owner behind the held rollback before placing the rekey owner after it.
+      await nextTurn();
       rotationRun = retain(
         rotateDbKey(vault, {
           execute: async (statement) => {
@@ -227,7 +231,13 @@ describe('DB-02C mixed runtime concurrency', () => {
       expect(protectionRelease).not.toHaveBeenCalled();
       expect(raw.inTransaction).toBe(true);
       expect(count(raw, `SELECT COUNT(*) count FROM kv WHERE key='db02c-doomed'`)).toBe(1);
-      expect(count(raw, `SELECT COUNT(*) count FROM chats WHERE guid LIKE 'db02c-%'`)).toBe(0);
+      expect(
+        count(
+          raw,
+          `SELECT COUNT(*) count FROM chats
+            WHERE guid LIKE 'db02c-%' OR guid LIKE 'RCS;-;db02c-%'`,
+        ),
+      ).toBe(0);
       expect(count(raw, `SELECT COUNT(*) count FROM messages WHERE guid LIKE 'db02c-%'`)).toBe(0);
 
       neighbour.release();
@@ -258,7 +268,13 @@ describe('DB-02C mixed runtime concurrency', () => {
       expect(rekeyTransactionStates).toEqual([false]);
       expect(protectionRelease).toHaveBeenCalledTimes(1);
       expect(raw.inTransaction).toBe(false);
-      expect(count(raw, `SELECT COUNT(*) count FROM chats WHERE guid LIKE 'db02c-sync-%'`)).toBe(5);
+      expect(
+        count(
+          raw,
+          `SELECT COUNT(*) count FROM chats
+            WHERE guid LIKE 'db02c-sync-%' OR guid LIKE 'RCS;-;db02c-sync-%'`,
+        ),
+      ).toBe(5);
       expect(
         count(raw, `SELECT COUNT(*) count FROM messages WHERE guid LIKE 'db02c-live-message-%'`),
       ).toBe(8);
@@ -276,9 +292,13 @@ describe('DB-02C mixed runtime concurrency', () => {
       expect(sendRun.settled()).toBe(false);
       expect(uploadGate.released()).toBe(false);
       expect(raw.inTransaction).toBe(false);
-      expect(count(raw, `SELECT COUNT(*) count FROM chats WHERE guid LIKE 'db02c-sync-%'`)).toBe(
-        10,
-      );
+      expect(
+        count(
+          raw,
+          `SELECT COUNT(*) count FROM chats
+            WHERE guid LIKE 'db02c-sync-%' OR guid LIKE 'RCS;-;db02c-sync-%'`,
+        ),
+      ).toBe(10);
       expect(
         count(raw, `SELECT COUNT(*) count FROM messages WHERE guid LIKE 'db02c-live-message-%'`),
       ).toBe(9);

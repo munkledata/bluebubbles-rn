@@ -27,7 +27,7 @@ import { renderHook, act, waitFor } from '../support/renderWithTheme';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
 
 const mockIsDevServer = jest.fn(() => false);
-let mockTopologySupported: boolean | null = false;
+let mockRcsEnabled = false;
 
 jest.mock('expo-router', () => ({ useRouter: () => ({ push: jest.fn() }) }));
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn() }));
@@ -45,7 +45,7 @@ jest.mock('@features/conversations/devSeed', () => ({
 }));
 jest.mock('@utils/isDev', () => ({ isDevServer: () => mockIsDevServer() }));
 jest.mock('@state/sessionStore', () => ({
-  useMessagePartTopologySupported: () => mockTopologySupported,
+  useRcsEnabled: () => mockRcsEnabled,
 }));
 jest.mock('@ui/conversations/pickReminderTime', () => ({ pickReminderTime: jest.fn() }));
 jest.mock('@/services/send', () => ({
@@ -113,7 +113,6 @@ const msg = (guid: string, sendState: string | null): EnrichedMessage =>
 const rect = { x: 0, y: 0, width: 10, height: 10 };
 
 async function mount(messages: EnrichedMessage[], guid = 'iMessage;-;+15550001111') {
-  const setReplyTo = jest.fn();
   const hook = await renderHook(() => {
     const [liveMessages, setLiveMessages] = useState(messages);
     return {
@@ -121,136 +120,72 @@ async function mount(messages: EnrichedMessage[], guid = 'iMessage;-;+1555000111
         guid,
         messages: liveMessages,
         chatTitle: 'Alice',
-        setReplyTo,
-        setEditing: jest.fn(),
       }),
       setLiveMessages,
     };
   });
-  return { ...hook, setReplyTo };
+  return hook;
 }
 
 beforeEach(() => {
   jest.clearAllMocks();
   mockIsDevServer.mockReturnValue(false);
-  mockTopologySupported = false;
+  mockRcsEnabled = false;
   mockPickReminderTime.mockResolvedValue(2_000);
   mockScheduleMessageReminder.mockResolvedValue(1);
   dialogs.length = 0;
 });
 
-describe('useMessageActions — DEV reaction account scope', () => {
-  it('keeps confirmed reaction and reply actions on their exact message identity', async () => {
+describe('useMessageActions — retired helper actions and RCS reactions', () => {
+  it('never exposes or sends an iMessage reaction, even when RCS exists elsewhere', async () => {
+    mockRcsEnabled = true;
     mockIsDevServer.mockReturnValue(true);
     const target = msg('message-a', null);
-    const { result, setReplyTo } = await mount([target]);
-    await act(async () => {
-      result.current.onLongPressMessage(target, rect);
-    });
+    const { result } = await mount([target]);
 
-    await act(async () => {
-      result.current.onReact('love');
-    });
+    await act(async () => result.current.onLongPressMessage(target, rect));
+    expect(result.current.selected?.canReact).toBe(false);
+    await act(async () => result.current.onReact('love'));
 
-    expect(devSendFakeReaction).toHaveBeenCalledWith(
-      'iMessage;-;+15550001111',
-      'message-a',
-      'love',
-      undefined,
-      0,
-      expect.objectContaining({ isCurrent: expect.any(Function) }),
-    );
+    expect(react).not.toHaveBeenCalled();
+    expect(devSendFakeReaction).not.toHaveBeenCalled();
+    expect(result.current).not.toHaveProperty('onReplyToSelected');
+    expect(result.current).not.toHaveProperty('onSwipeReply');
+    expect(result.current).not.toHaveProperty('onEditSelected');
+    expect(result.current).not.toHaveProperty('onUnsendSelected');
+  });
 
-    mockIsDevServer.mockReturnValue(false);
-    await act(async () => {
-      result.current.onReact('like');
-      result.current.onReplyToSelected();
-      result.current.onSwipeReply(target);
-    });
+  it('allows whole-message reactions only for a confirmed RCS message with live capability', async () => {
+    mockRcsEnabled = true;
+    const target = msg('rcs-message-a', null);
+    const { result } = await mount([target], 'RCS;-;thread-1');
+    await act(async () => result.current.onLongPressMessage(target, rect));
 
+    expect(result.current.selected?.canReact).toBe(true);
+    await act(async () => result.current.onReact('love'));
     expect(react).toHaveBeenCalledWith(
-      {
-        chatGuid: 'iMessage;-;+15550001111',
-        targetGuid: 'message-a',
-        reaction: 'like',
-        emoji: undefined,
+      expect.objectContaining({
+        chatGuid: 'RCS;-;thread-1',
+        targetGuid: 'rcs-message-a',
+        reaction: 'love',
         partIndex: 0,
-        selectedMessageText: 'hi',
-      },
+      }),
       expect.objectContaining({ isCurrent: expect.any(Function) }),
       expect.any(Function),
     );
-    const expectedReply = {
-      guid: 'message-a',
-      text: 'hi',
-      subject: undefined,
-      balloonBundleId: undefined,
-      isFromMe: 1,
-      senderName: null,
-      hasAttachments: 0,
-      hasVisibleAttachments: 0,
-      attachmentDescription: undefined,
-      targetPartIndex: 0,
-    };
-    expect(setReplyTo).toHaveBeenNthCalledWith(1, expectedReply);
-    expect(setReplyTo).toHaveBeenNthCalledWith(2, expectedReply);
   });
 
-  it.each([
-    {
-      caseName: 'legacy part-zero targeting',
-      topologySupported: false,
-      topology: null,
-    },
-    {
-      caseName: 'exact message-part topology',
-      topologySupported: true,
-      topology: JSON.stringify({
-        complete: true,
-        originalPartIndexes: [4],
-        currentParts: [{ index: 4, kind: 'text' }],
-        attachmentOwnership: [],
-      }),
-    },
-  ])(
-    'allows a whole-message RCS reaction but no reply with $caseName',
-    async ({ topologySupported, topology }) => {
-      mockTopologySupported = topologySupported;
-      const target = {
-        ...msg('rcs-message-a', null),
-        messagePartTopology: topology,
-      } as EnrichedMessage;
-      const { result, setReplyTo } = await mount([target], 'RCS;-;thread-1');
-      await act(async () => {
-        result.current.onLongPressMessage(target, rect);
-      });
+  it('blocks an RCS reaction when the live RCS capability is false', async () => {
+    const target = msg('rcs-message-a', null);
+    const { result } = await mount([target], 'RCS;-;thread-1');
+    await act(async () => result.current.onLongPressMessage(target, rect));
 
-      expect(result.current.selected?.canReact).toBe(true);
-      expect(result.current.selected?.targetPartIndex).toBeUndefined();
+    expect(result.current.selected?.canReact).toBe(false);
+    await act(async () => result.current.onReact('love'));
+    expect(react).not.toHaveBeenCalled();
+  });
 
-      await act(async () => {
-        result.current.onReact('love');
-        result.current.onReplyToSelected();
-        result.current.onSwipeReply(target);
-      });
-
-      expect(react).toHaveBeenCalledWith(
-        {
-          chatGuid: 'RCS;-;thread-1',
-          targetGuid: 'rcs-message-a',
-          reaction: 'love',
-          emoji: undefined,
-          partIndex: 0,
-          selectedMessageText: 'hi',
-        },
-        expect.objectContaining({ isCurrent: expect.any(Function) }),
-        expect.any(Function),
-      );
-      expect(setReplyTo).not.toHaveBeenCalled();
-    },
-  );
-
-  it('keeps a lean interactive payload out of attachment actions and reply previews', async () => {
+  it('keeps a lean interactive payload out of local attachment actions', async () => {
     const target = {
       ...msg('message-balloon', null),
       text: null,
@@ -265,11 +200,10 @@ describe('useMessageActions — DEV reaction account scope', () => {
         },
       ],
     } as unknown as EnrichedMessage;
-    const { result, setReplyTo } = await mount([target]);
+    const { result } = await mount([target]);
 
     await act(async () => {
       result.current.onLongPressMessage(target, rect);
-      result.current.onSwipeReply(target);
     });
 
     expect(result.current.selected).toMatchObject({
@@ -277,13 +211,6 @@ describe('useMessageActions — DEV reaction account scope', () => {
       hasVisibleAttachments: 0,
       attachments: [],
     });
-    expect(setReplyTo).toHaveBeenCalledWith(
-      expect.objectContaining({
-        balloonBundleId: 'com.apple.Handwriting.HandwritingProvider',
-        hasVisibleAttachments: 0,
-      }),
-    );
-
     await act(async () => {
       result.current.onRemindLater();
     });
@@ -298,17 +225,16 @@ describe('useMessageActions — DEV reaction account scope', () => {
     );
   });
 
-  it('rejects temp identities from live and DEV reactions, long-press reply, and swipe reply', async () => {
+  it('rejects temp identities from live and DEV reactions', async () => {
+    mockRcsEnabled = true;
     const target = msg('temp-message-a', 'sending');
-    const { result, setReplyTo } = await mount([target]);
+    const { result } = await mount([target], 'RCS;-;thread-1');
     await act(async () => {
       result.current.onLongPressMessage(target, rect);
     });
 
     await act(async () => {
       result.current.onReact('love');
-      result.current.onReplyToSelected();
-      result.current.onSwipeReply(target);
     });
     mockIsDevServer.mockReturnValue(true);
     await act(async () => {
@@ -317,7 +243,6 @@ describe('useMessageActions — DEV reaction account scope', () => {
 
     expect(react).not.toHaveBeenCalled();
     expect(devSendFakeReaction).not.toHaveBeenCalled();
-    expect(setReplyTo).not.toHaveBeenCalled();
   });
 
   it('retires a frozen action snapshot when a live retraction arrives', async () => {
@@ -337,11 +262,6 @@ describe('useMessageActions — DEV reaction account scope', () => {
 
     await act(async () => {
       result.current.onReact('love');
-      result.current.onSwipeReply({
-        ...target,
-        dateRetracted: 2_000,
-        retractionState: 'unknown',
-      } as EnrichedMessage);
     });
     expect(react).not.toHaveBeenCalled();
   });

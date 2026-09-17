@@ -1,15 +1,9 @@
-import { Linking } from 'react-native';
-import { faceTimeApi } from '@core/api';
 import type { HttpClient } from '@core/api/http';
-import { isFaceTimeLink } from '@core/facetime';
-import { resolveExactMessageTargetPartIndex } from '@core/messages/partIndex';
-import { parseMessagePartTopology } from '@core/models';
-import { bodyTextFromRuns, parseAttributedRuns } from '@core/richtext';
 import { logger, readAccountRevocationState } from '@core/secure';
-import { deleteReminderByNotificationId, getMessageActionPartLayoutByGuid } from '@db/repositories';
-import { withDbWriteLock } from '@db/transaction';
+import { deleteReminderByNotificationId } from '@db/repositories';
 import { isDevServer } from '@utils/isDev';
 import { isRcsChatGuid } from '@utils/chat';
+import { sessionAccessors } from '@state/sessionStore';
 import { accountRevocationMarker, fixedCredentialClient, http, vault } from '../clients';
 import { inspectBackgroundSession } from '../background/backgroundSyncOrchestrator';
 import { markRead, type ReadReceiptTransport } from '../chatActions';
@@ -187,12 +181,17 @@ async function handleNotificationActionForAccount(
   // FaceTime call actions carry a faceTimeUuid (no chatGuid) — handle first.
   const faceTimeUuid = route?.faceTimeUuid;
   if (faceTimeUuid) {
-    await handleFaceTimeAction(actionId, faceTimeUuid, accountLease);
+    await dismissRetiredFaceTimeAction(faceTimeUuid, accountLease);
     return;
   }
 
   const chatGuid = route?.chatGuid;
   if (!chatGuid) return;
+
+  // Old Android notifications can outlive an app upgrade. Their Love button is inert unless its
+  // resolved encrypted route is a canonical RCS chat; task-local capability discovery below must
+  // separately prove that the RCS bridge is live before any reaction is sent.
+  if (actionId === ACTION_LOVE && !isRcsChatGuid(chatGuid)) return;
 
   // Only inline action buttons act. A body/main press (open-chat, reminder) is EventType.PRESS,
   // not ACTION_PRESS — handled by handleNotificationPress (side-effects) + openFromNotification
@@ -336,50 +335,13 @@ async function handleNotificationPressForAccount(
   await deleteReminderByNotificationId(db, notificationId, () => accountLease.isCurrent());
 }
 
-/**
- * Answer → ask the server to answer the call, then open the returned FaceTime
- * link; Decline → just clear the notification. Both clear the ringing
- * notification (id = ft-<uuid>). In dev, skip the server call and open a stub.
- */
-async function handleFaceTimeAction(
-  actionId: string | undefined,
+/** Clear a stale retired-call notification without invoking any FaceTime helper action. */
+async function dismissRetiredFaceTimeAction(
   uuid: string,
   accountLease: RealtimeDeliveryLease,
 ): Promise<void> {
-  const dismiss = async (): Promise<void> => {
-    assertCurrentAccount(accountLease);
-    await cancelFaceTimeNotification(uuid, accountLease);
-  };
-  if (actionId === ACTION_DECLINE_FACETIME) {
-    await dismiss();
-    return;
-  }
-  if (actionId === ACTION_ANSWER_FACETIME) {
-    try {
-      let link: string | null;
-      if (isDevServer()) {
-        link = `https://facetime.apple.com/join#v=1&p=dev&k=${uuid}`;
-      } else {
-        // Gator's answer op only acks the answer ({ answered: true }); the openable join
-        // link is minted by a SEPARATE op. Answer the call, then request a link to open.
-        const transport = await resolveNotificationActionTransport(accountLease);
-        assertCurrentTransport(transport);
-        await faceTimeApi.answerFaceTime(transport.http, uuid);
-        assertCurrentTransport(transport);
-        link = await faceTimeApi.createFaceTimeLink(transport.http);
-      }
-      assertCurrentAccount(accountLease);
-      // The link comes from the server — only open a real FaceTime link, never an
-      // arbitrary scheme/Intent (a compromised server could otherwise deep-link).
-      if (!isFaceTimeLink(link)) throw new Error('rejected non-FaceTime link');
-      await Linking.openURL(link);
-      assertCurrentAccount(accountLease);
-    } catch {
-      // best-effort; the call may already have ended / the link was rejected
-    } finally {
-      if (accountLease.isCurrent()) await dismiss();
-    }
-  }
+  assertCurrentAccount(accountLease);
+  await cancelFaceTimeNotification(uuid, accountLease);
 }
 
 /**
@@ -431,40 +393,19 @@ async function loveMessage(
   messageGuid: string,
   accountLease: RealtimeDeliveryLease,
 ): Promise<void> {
+  if (!isRcsChatGuid(chatGuid) || !messageGuid.startsWith('rcs-')) return;
   const turn = await logicalSendQueue.acquire(accountLease);
   try {
-    // A notification carries aggregate identity only. Resolve the same conservative text/caption
-    // target as the mounted bubble from the current encrypted row before either dev or real send.
     assertCurrentAccount(accountLease);
     const db = await ensureDatabase();
     assertCurrentAccount(accountLease);
-    // One shared SQLite connection means even a read can otherwise see a neighbouring owner's
-    // uncommitted rows. Take the global coordinator slot, but do not open a transaction: this is
-    // one bounded DB-only snapshot and all parsing/network work stays after the slot is released.
-    const layout = await withDbWriteLock(async () => {
-      assertCurrentAccount(accountLease);
-      return getMessageActionPartLayoutByGuid(db, messageGuid);
-    });
-    assertCurrentAccount(accountLease);
-    // Missing/deleted/full/unknown targets are not a legacy part-zero message. The DB query returns
-    // null for all of them, so abort instead of reacting to an unrelated part or stale notification.
-    if (!layout) return;
-    const bodyText = bodyTextFromRuns(parseAttributedRuns(layout.attributedBody, layout.text));
 
     // DEV: simulate the reaction round-trip locally without a server.
     if (isDevServer()) {
-      const partIndex = resolveExactMessageTargetPartIndex({
-        attachmentCount: layout.visibleAttachmentCount,
-        hasText: bodyText.trim().length > 0,
-        partCount: layout.partCount,
-        topology: parseMessagePartTopology(layout.messagePartTopology),
-        topologySupported: false,
-        visibleAttachmentGuids: layout.visibleAttachmentGuids,
-      });
-      if (partIndex == null) return;
+      if (!sessionAccessors.rcsEnabled()) return;
       const { devSendFakeReaction } = await import('@features/conversations/devSeed');
       assertCurrentAccount(accountLease);
-      await devSendFakeReaction(chatGuid, messageGuid, 'love', undefined, partIndex, accountLease);
+      await devSendFakeReaction(chatGuid, messageGuid, 'love', undefined, 0, accountLease);
       assertCurrentAccount(accountLease);
       return;
     }
@@ -478,18 +419,9 @@ async function loveMessage(
       { requireServerInfo: true },
     );
     assertCurrentTransport(transport);
-    const partIndex =
-      isRcsChatGuid(chatGuid) && messageGuid.startsWith('rcs-')
-        ? 0
-        : resolveExactMessageTargetPartIndex({
-            attachmentCount: layout.visibleAttachmentCount,
-            hasText: bodyText.trim().length > 0,
-            partCount: layout.partCount,
-            topology: parseMessagePartTopology(layout.messagePartTopology),
-            topologySupported: capability.serverInfo?.supports_message_part_topology === true,
-            visibleAttachmentGuids: layout.visibleAttachmentGuids,
-          });
-    if (partIndex == null) return;
+    // A killed-process RCS action has no trustworthy foreground store. Require the task-local
+    // server-info fetch above to affirm the RCS bridge before a stale notification can react.
+    if (capability.serverInfo?.rcs !== true) return;
     await sendReactionMessage(
       db,
       transport.http,
@@ -497,11 +429,11 @@ async function loveMessage(
         chatGuid,
         targetGuid: messageGuid,
         reaction: 'love',
-        partIndex,
+        partIndex: 0,
       },
       Date.now(),
       transport.accountIsCurrent,
-      messageTargetServerAuthorization(capability.serverInfo, transport.isCurrent),
+      messageTargetServerAuthorization(capability.serverInfo, () => transport.isCurrent()),
     );
     assertCurrentAccount(accountLease);
   } finally {

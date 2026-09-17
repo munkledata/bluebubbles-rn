@@ -1,4 +1,5 @@
 import { ServerInfo } from '@core/models';
+import { captureSessionRcsCapabilityLease } from '@/services/send/rcsAttemptCapability';
 import { sessionAccessors, useSessionStore } from '@state/sessionStore';
 
 /**
@@ -66,8 +67,8 @@ describe('sessionAccessors.messagePartTopologySupported', () => {
 });
 
 /**
- * The `supports_icloud_account` capability (iMessage-account F#8). The Settings "iMessage Account"
- * row gates on this accessor; false in every shape except a server that explicitly advertises it.
+ * The helper-backed iMessage account surface is permanently retired for this release. An old or
+ * forged server advertisement cannot restore it.
  */
 describe('sessionAccessors.icloudAccountSupported', () => {
   beforeEach(() => useSessionStore.setState({ serverInfo: null }));
@@ -88,11 +89,11 @@ describe('sessionAccessors.icloudAccountSupported', () => {
     expect(sessionAccessors.icloudAccountSupported()).toBe(false);
   });
 
-  it('is true only when the server advertises the capability', () => {
+  it('stays false when an old server advertises the retired capability', () => {
     useSessionStore.setState({
       serverInfo: ServerInfo.parse({ version: '1.9.0', supports_icloud_account: true }),
     });
-    expect(sessionAccessors.icloudAccountSupported()).toBe(true);
+    expect(sessionAccessors.icloudAccountSupported()).toBe(false);
   });
 });
 
@@ -127,5 +128,99 @@ describe('session transport-scoped server info', () => {
 
     useSessionStore.getState().hydrated({ origin: 'https://a.example', password: 'password' });
     expect(useSessionStore.getState().serverInfo).toBeNull();
+  });
+});
+
+describe('session send-capability leases', () => {
+  it('keeps a lease current when refreshed server info has identical send capabilities', () => {
+    const previousSession = useSessionStore.getState();
+    const originalInfo = ServerInfo.parse({
+      version: '2.0.0',
+      rcs: true,
+      supports_message_deleted: false,
+    });
+    const refreshedInfo = ServerInfo.parse({
+      version: '2.0.1',
+      rcs: true,
+      supports_message_deleted: true,
+    });
+
+    try {
+      useSessionStore.getState().connected('https://same-transport.test', 'password', originalInfo);
+      const lease = captureSessionRcsCapabilityLease();
+      if (!lease) throw new Error('expected a connected capability lease');
+      const capabilityRevision = useSessionStore.getState().sendCapabilityRevision;
+
+      expect(
+        useSessionStore
+          .getState()
+          .setServerInfoForTransport(lease.origin, lease.revision, refreshedInfo),
+      ).toBe(true);
+      expect(useSessionStore.getState().sendCapabilityRevision).toBe(capabilityRevision);
+      expect(useSessionStore.getState().serverInfo).toBe(refreshedInfo);
+      expect(lease.isCurrent()).toBe(true);
+    } finally {
+      useSessionStore.setState(previousSession);
+    }
+  });
+
+  it('does not revive an old lease when RCS changes true to false and back on one transport', () => {
+    const previousSession = useSessionStore.getState();
+    const rcsEnabled = ServerInfo.parse({ version: '2.0.0', rcs: true });
+    const rcsDisabled = ServerInfo.parse({ version: '2.0.0', rcs: false });
+
+    try {
+      useSessionStore.getState().connected('https://same-transport.test', 'password', rcsEnabled);
+      const lease = captureSessionRcsCapabilityLease();
+      if (!lease) throw new Error('expected a connected capability lease');
+      const transportRevision = useSessionStore.getState().transportRevision;
+
+      expect(
+        useSessionStore
+          .getState()
+          .setServerInfoForTransport(lease.origin, lease.revision, rcsDisabled),
+      ).toBe(true);
+      expect(useSessionStore.getState().transportRevision).toBe(transportRevision);
+      expect(lease.isCurrent()).toBe(false);
+
+      expect(
+        useSessionStore
+          .getState()
+          .setServerInfoForTransport(lease.origin, lease.revision, rcsEnabled),
+      ).toBe(true);
+      expect(useSessionStore.getState().transportRevision).toBe(transportRevision);
+      expect(lease.isCurrent()).toBe(false);
+
+      const currentLease = captureSessionRcsCapabilityLease();
+      expect(currentLease?.isCurrent()).toBe(true);
+    } finally {
+      useSessionStore.setState(previousSession);
+    }
+  });
+
+  it('updates a null-info lease when it publishes discovered server info', () => {
+    const previousSession = useSessionStore.getState();
+    const discoveredInfo = ServerInfo.parse({
+      version: '2.0.0',
+      rcs: true,
+      supports_rcs_send_attempt_ownership: true,
+    });
+
+    try {
+      useSessionStore
+        .getState()
+        .hydrated({ origin: 'https://capability-discovery.test', password: 'password' });
+      const lease = captureSessionRcsCapabilityLease();
+      if (!lease) throw new Error('expected a connected capability lease');
+
+      expect(lease.serverInfo).toBeNull();
+      expect(lease.isCurrent()).toBe(true);
+      expect(lease.publish(discoveredInfo)).toBe(true);
+      expect(lease.serverInfo).toBe(discoveredInfo);
+      expect(useSessionStore.getState().serverInfo).toBe(discoveredInfo);
+      expect(lease.isCurrent()).toBe(true);
+    } finally {
+      useSessionStore.setState(previousSession);
+    }
   });
 });

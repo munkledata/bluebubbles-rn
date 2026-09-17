@@ -32,8 +32,6 @@ import { showToast } from '@ui/toast';
 import { InfoRow, NavRow, NoteRow, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
 
 const yesNo = (v: boolean | null | undefined): string => (v == null ? '—' : v ? 'Yes' : 'No');
-const okBad = (v: boolean | null | undefined): string =>
-  v == null ? '—' : v ? 'Connected' : 'Not connected';
 
 /**
  * Isolate a health read to both the account and the exact approved server URL that started it.
@@ -59,15 +57,6 @@ async function readForTransport<T>(
   }
 }
 
-function privateApiState(
-  available: unknown,
-  enabled: boolean | null | undefined,
-  connected: boolean | null | undefined,
-): string {
-  if (available === false) return 'Unavailable';
-  return enabled === false ? 'Disabled' : okBad(connected);
-}
-
 function formatUptime(ms: number | null | undefined): string {
   if (ms == null || !Number.isFinite(ms)) return '—';
   const s = Math.floor(ms / 1000);
@@ -80,7 +69,7 @@ function formatUptime(ms: number | null | undefined): string {
 }
 
 /** Server Health / diagnostics — surfaces the server's read-only status channels so the user can
- *  see helper connectivity, Find My key state, push config, connection/TLS, uptime, and alerts. */
+ *  see retired-feature status, Find My key state, push config, connection/TLS, uptime, and alerts. */
 export default function ServerHealthScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
@@ -122,15 +111,6 @@ export default function ServerHealthScreen(): React.JSX.Element {
   const queryClient = useQueryClient();
   const healthQueries = useQueries({
     queries: [
-      {
-        queryKey: [...healthQueryPrefix, 'private-api'],
-        queryFn: ({ signal }) =>
-          readForTransport(
-            accountLease,
-            transportRevision,
-            async () => (await serverApi.privateApiStatus(http, signal)) ?? null,
-          ),
-      },
       {
         queryKey: [...healthQueryPrefix, 'env'],
         queryFn: ({ signal }) =>
@@ -192,9 +172,8 @@ export default function ServerHealthScreen(): React.JSX.Element {
       },
     ],
   });
-  const [paQ, envQ, keysQ, fcmQ, ipQ, tlsQ, adminQ, alertsQ] = healthQueries;
+  const [envQ, keysQ, fcmQ, ipQ, tlsQ, adminQ, alertsQ] = healthQueries;
   const visibleServerInfo = accountCurrent ? serverInfo : null;
-  const pa = accountCurrent ? paQ.data : null;
   const env = accountCurrent ? envQ.data : null;
   const keys = accountCurrent ? keysQ.data : null;
   const fcm = accountCurrent && !scopedCredentialSession ? fcmQ.data : null;
@@ -208,7 +187,7 @@ export default function ServerHealthScreen(): React.JSX.Element {
       ? 'Unavailable'
       : '—';
   const attemptedHealthQueries = scopedCredentialSession
-    ? healthQueries.filter((_query, index) => index !== 3 && index !== 7)
+    ? healthQueries.filter((_query, index) => index !== 2 && index !== 6)
     : healthQueries;
   const refreshing = accountCurrent && attemptedHealthQueries.some((q) => q.isFetching);
   // True when EVERY read failed → the server isn't answering the health channels at all (offline
@@ -296,15 +275,9 @@ export default function ServerHealthScreen(): React.JSX.Element {
               </Text>
             </View>
           ) : null}
-          <SettingsSection label="PRIVATE API">
-            <InfoRow
-              label="Messages helper"
-              value={privateApiState(pa?.available, pa?.enabled, pa?.connected)}
-            />
-            <InfoRow
-              label="FaceTime helper"
-              value={privateApiState(pa?.ft_available, pa?.ft_enabled, pa?.ft_connected)}
-            />
+          <SettingsSection label="RETIRED FEATURES">
+            <InfoRow label="Messages Private API" value="Retired in this release" />
+            <InfoRow label="FaceTime Private API" value="Retired in this release" />
           </SettingsSection>
 
           <SettingsSection label="FIND MY KEYS" style={styles.gap}>

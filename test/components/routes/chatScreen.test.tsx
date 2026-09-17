@@ -14,10 +14,10 @@
  *     get trivial stubs. Mocking the barrel keeps the real (native-pulling) UI tree out.
  *   - the data hooks (`useMessages`, `useChatHeader`, `useNewScreenEffect`) + `useChatBackgroundUri`
  *     → controllable jest.fns.
- *   - `@/services` + `@/services/send` → jest.fn spies (the send/react/reply/edit/schedule wiring).
+ *   - `@/services` + `@/services/send` → jest.fn spies (send, RCS reaction, and schedule wiring).
  *   - `@utils/isDev` (`isDevServer`) → false by default so the screen takes the REAL service path
- *     (`react`/`reply`/`send`/`editText`/`fireDueScheduled`), not the `devSeed` fixtures — this is
- *     the path shipped to users and gives the cleaner assertions (see the ticker + react tests).
+ *     (`react`/`send`/`fireDueScheduled`), not the `devSeed` fixtures — this is the path shipped to
+ *     users and gives the cleaner assertions (see the ticker + RCS reaction tests).
  *   - `expo-router` (fixed guid + a push spy), `expo-clipboard`/`expo-image`/`expo-media-library`,
  *     `react-native-safe-area-context` (zero insets), and the small `@ui/*` sibling modules
  *     (ChatThemeProvider, dialogStore, pickDateTime, LoadErrorBoundary) → native/inset stubs.
@@ -31,6 +31,7 @@ import type { ChatSearchResultRow } from '@db/repositories';
 import { logger } from '@core/secure';
 
 const GUID = 'iMessage;-;+15551234567';
+const RCS_GUID = 'RCS;-;thread-1';
 const PRIVATE_WALLPAPER_URI = 'file:///private/chat-wallpaper-r-canary-9f31d7.jpg';
 const SECOND_WALLPAPER_URI = 'file:///private/chat-wallpaper-second-74c02a.jpg';
 const mockPush = jest.fn();
@@ -186,16 +187,9 @@ jest.mock('@features/conversations/useNewScreenEffect', () => ({ useNewScreenEff
 jest.mock('@features/conversations/useChatSearch', () => ({
   useChatSearch: (...args: unknown[]) => mockUseChatSearch(...args),
 }));
-jest.mock('@features/conversations/devSeed', () => ({
-  devEditFake: jest.fn(),
-  devInjectEffect: jest.fn(),
-  devSendFake: jest.fn(),
-  devSendFakeReaction: jest.fn(),
-  devSendFakeReply: jest.fn(),
-  devUnsendFake: jest.fn(),
-}));
+jest.mock('@features/conversations/devSeed', () => ({ devSendFake: jest.fn() }));
 
-// Force the REAL (non-dev) service path so the send/react/reply/edit spies below are what fires.
+// Force the REAL (non-dev) service path so the send/react spies below are what fire.
 jest.mock('@utils/isDev', () => ({
   isDevServer: () => mockIsDevServer(),
   DEV_SERVER_ORIGIN: 'https://dev.local',
@@ -215,7 +209,6 @@ jest.mock('@db/repositories', () => ({
 }));
 
 jest.mock('@/services', () => ({
-  dispatchRealtimeEvent: jest.fn(async () => undefined),
   ensureChatSynced: jest.fn(),
   ensureSyncedBackgroundForChat: jest.fn(),
   markRead: jest.fn(),
@@ -234,7 +227,6 @@ jest.mock('@/services/media', () => ({
   saveAttachmentsToPhotos: jest.fn(),
 }));
 jest.mock('@/services/send', () => ({
-  editText: jest.fn(),
   fireDueScheduled: jest.fn(),
   fireDueScheduledWithDevelopmentSender: jest.fn(),
   hasLogicalSendCapacity: jest.fn(() => true),
@@ -244,17 +236,6 @@ jest.mock('@/services/send', () => ({
   pickAndSendContact: jest.fn(),
   react: jest.fn(),
   recoverOutgoing: jest.fn().mockResolvedValue({ eligible: 0, sent: 0 }),
-  reply: jest.fn(
-    (
-      _args: unknown,
-      _lease: unknown,
-      _reportIssue: unknown,
-      onQueued?: (tempGuid: string) => void,
-    ) => {
-      onQueued?.('temp-reply');
-      return Promise.resolve({ tempGuid: 'temp-reply' });
-    },
-  ),
   schedule: jest.fn().mockResolvedValue(undefined),
   send: jest.fn(
     (
@@ -280,7 +261,6 @@ jest.mock('@/services/send', () => ({
       return Promise.resolve({ tempGuid: 'temp-combined' });
     },
   ),
-  unsend: jest.fn(),
 }));
 
 // eslint-disable-next-line import/first
@@ -294,24 +274,16 @@ import { useNewScreenEffect } from '@features/conversations/useNewScreenEffect';
 // eslint-disable-next-line import/first
 import { useChatBackgroundUri } from '@ui/theme/ChatThemeProvider';
 // eslint-disable-next-line import/first
-import {
-  dispatchRealtimeEvent,
-  ensureChatSynced,
-  markRead,
-  saveChatDraft,
-  sendTyping,
-} from '@/services';
+import { ensureChatSynced, markRead, saveChatDraft, sendTyping } from '@/services';
 // eslint-disable-next-line import/first
 import { getContactsPermissionState } from '@/services/contacts/contactsService';
 // eslint-disable-next-line import/first
 import {
-  editText,
   fireDueScheduled,
   fireDueScheduledWithDevelopmentSender,
   hasLogicalSendCapacity,
   pickAndSendContact,
   react,
-  reply,
   schedule,
   send,
   sendImage,
@@ -323,7 +295,7 @@ import { showToast } from '@ui';
 // eslint-disable-next-line import/first
 import { presentSendIssue } from '@ui/conversations/sendNotices';
 // eslint-disable-next-line import/first
-import { devSendFake, devSendFakeReply } from '@features/conversations/devSeed';
+import { devSendFake } from '@features/conversations/devSeed';
 // eslint-disable-next-line import/first
 import { saveAttachmentsToPhotos, shareAttachment } from '@/services/media';
 // eslint-disable-next-line import/first
@@ -390,6 +362,28 @@ function reactionRow(over: Record<string, unknown>): any {
   };
 }
 
+function configureRcsChat(serverInfo: Record<string, unknown> = {}): void {
+  mockGuid = RCS_GUID;
+  useSessionStore.setState({
+    serverInfo: {
+      version: 'test',
+      private_api: false,
+      rcs: true,
+      ...serverInfo,
+    } as any,
+  });
+  useChatHeaderMock.mockReturnValue({
+    data: {
+      id: 2,
+      guid: RCS_GUID,
+      style: 45,
+      participantCount: 1,
+      handleServices: 'RCS',
+    },
+    error: null,
+  });
+}
+
 beforeEach(() => {
   resumeRealtimeDeliveries();
   jest.clearAllMocks();
@@ -407,7 +401,11 @@ beforeEach(() => {
   mockVoiceRecorderProps = undefined;
   mockMessagePreview = null;
   useSessionStore.setState({
-    serverInfo: { version: 'legacy-test', supports_message_part_topology: false } as any,
+    serverInfo: {
+      version: 'legacy-test',
+      private_api: true,
+      supports_message_part_topology: false,
+    } as any,
   });
   useTypingStore.setState({ typing: {} });
   useMessagesMock.mockReturnValue({
@@ -631,7 +629,7 @@ describe('ChatScreen — mount side effects', () => {
 });
 
 describe('ChatScreen — long-press → SelectedMessage mapping', () => {
-  it('maps classic own-reactions into `mine` and emoji tapbacks into `myEmojis` (excluding emoji from mine)', async () => {
+  it('does not project iMessage reaction metadata into the retired picker', async () => {
     await renderWithTheme(<ChatScreen />);
     const msg = makeMsg({
       guid: 'm7',
@@ -647,8 +645,9 @@ describe('ChatScreen — long-press → SelectedMessage mapping', () => {
 
     const sel = mockCaptured.overlay!.selected;
     expect(sel.guid).toBe('m7');
-    expect(sel.mine).toEqual(['love']);
-    expect(sel.myEmojis).toEqual(['🎉']);
+    expect(sel.mine).toEqual([]);
+    expect(sel.myEmojis).toEqual([]);
+    expect(sel.canReact).toBe(false);
     expect(sel.isFromMe).toBe(false);
     expect(sel.isTemp).toBe(false);
   });
@@ -659,43 +658,18 @@ describe('ChatScreen — long-press → SelectedMessage mapping', () => {
     expect(mockCaptured.overlay!.selected.isTemp).toBe(true);
     expect(mockCaptured.overlay!.selected.isFromMe).toBe(true);
   });
-
-  it('flags an edited message and parses its messageSummaryInfo JSON onto the selection', async () => {
-    await renderWithTheme(<ChatScreen />);
-    const info = {
-      editedParts: {
-        '0': [
-          { date: 1, text: 'a' },
-          { date: 2, text: 'b' },
-        ],
-      },
-    };
-    await longPressMessage(
-      makeMsg({ guid: 'm9', dateEdited: 2, messageSummaryInfo: JSON.stringify(info) }),
-    );
-    const sel = mockCaptured.overlay!.selected;
-    expect(sel.isEdited).toBe(true);
-    // The raw JSON column is parsed into the structured history (original → current).
-    expect(sel.messageSummaryInfo.editedParts['0']).toHaveLength(2);
-  });
-
-  it('leaves isEdited false and messageSummaryInfo null for an un-edited message', async () => {
-    await renderWithTheme(<ChatScreen />);
-    await longPressMessage(makeMsg({ guid: 'm1' }));
-    expect(mockCaptured.overlay!.selected.isEdited).toBe(false);
-    expect(mockCaptured.overlay!.selected.messageSummaryInfo).toBeNull();
-  });
 });
 
-describe('ChatScreen — onReact routing (real react() path)', () => {
-  it('routes a classic tapback to react() with no emoji', async () => {
+describe('ChatScreen — RCS reaction routing', () => {
+  it('routes a classic reaction to react() with no emoji', async () => {
+    configureRcsChat();
     await renderWithTheme(<ChatScreen />);
-    await longPressMessage(makeMsg({ guid: 'm1', text: 'hey' }));
+    await longPressMessage(makeMsg({ guid: 'rcs-m1', text: 'hey' }));
     await run(() => mockCaptured.overlay!.onReact('love'));
     expect(react).toHaveBeenCalledWith(
       expect.objectContaining({
-        chatGuid: GUID,
-        targetGuid: 'm1',
+        chatGuid: RCS_GUID,
+        targetGuid: 'rcs-m1',
         reaction: 'love',
         emoji: undefined,
         selectedMessageText: 'hey',
@@ -705,12 +679,13 @@ describe('ChatScreen — onReact routing (real react() path)', () => {
     );
   });
 
-  it('routes an arbitrary-emoji tapback to react() carrying the glyph', async () => {
+  it('routes an arbitrary emoji reaction carrying the glyph', async () => {
+    configureRcsChat();
     await renderWithTheme(<ChatScreen />);
-    await longPressMessage(makeMsg({ guid: 'm1' }));
+    await longPressMessage(makeMsg({ guid: 'rcs-m1' }));
     await run(() => mockCaptured.overlay!.onReact('emoji', '🎉'));
     expect(react).toHaveBeenCalledWith(
-      expect.objectContaining({ reaction: 'emoji', emoji: '🎉', targetGuid: 'm1' }),
+      expect.objectContaining({ reaction: 'emoji', emoji: '🎉', targetGuid: 'rcs-m1' }),
       expect.objectContaining({ isCurrent: expect.any(Function) }),
       presentSendIssue,
     );
@@ -718,13 +693,8 @@ describe('ChatScreen — onReact routing (real react() path)', () => {
 });
 
 describe('ChatScreen — send routing', () => {
-  it('offers and routes one iMessage attachment-plus-text send only when the server advertises it', async () => {
-    useSessionStore.setState({
-      serverInfo: {
-        private_api: true,
-        supports_imessage_text_with_attachment: true,
-      } as any,
-    });
+  it('offers and routes one RCS attachment-plus-text send only when the server advertises it', async () => {
+    configureRcsChat({ supports_rcs_text_with_attachment: true });
     await renderWithTheme(<ChatScreen />);
     expect(mockCaptured.composer!.onSendTextAttachment).toEqual(expect.any(Function));
 
@@ -737,12 +707,10 @@ describe('ChatScreen — send routing', () => {
     await expect(mockCaptured.composer!.onSendTextAttachment('caption', item)).resolves.toBe(true);
     expect(sendTextAttachment).toHaveBeenCalledWith(
       {
-        chatGuid: GUID,
+        chatGuid: RCS_GUID,
         image: item,
         text: 'caption',
-        service: 'iMessage',
-        selectedMessageGuid: undefined,
-        partIndex: undefined,
+        service: 'RCS',
       },
       expect.objectContaining({ isCurrent: expect.any(Function) }),
       presentSendIssue,
@@ -767,32 +735,104 @@ describe('ChatScreen — send routing', () => {
     await renderWithTheme(<ChatScreen />);
     await run(() => mockCaptured.composer!.onSend('hello'));
     expect(send).toHaveBeenCalledWith(
-      { chatGuid: GUID, text: 'hello', effectId: undefined },
+      { chatGuid: GUID, text: 'hello' },
       expect.objectContaining({ isCurrent: expect.any(Function) }),
       presentSendIssue,
       expect.any(Function),
     );
-    expect(reply).not.toHaveBeenCalled();
   });
 
-  it('carries the effect id through send()', async () => {
+  it('keeps plain iMessage text and local actions while hiding helper-only affordances', async () => {
+    useSessionStore.setState({ serverInfo: null });
+    await renderWithTheme(<ChatScreen />);
+
+    expect(mockCaptured.composer).toEqual(
+      expect.objectContaining({
+        onSend: expect.any(Function),
+        onSendAttachments: undefined,
+        onSendTextAttachment: undefined,
+        onPickFiles: undefined,
+        onPickContact: undefined,
+        onStartVoice: undefined,
+        onTyping: undefined,
+      }),
+    );
+    expect(mockCaptured.composer).not.toHaveProperty('replyTo');
+    expect(mockCaptured.composer).not.toHaveProperty('editingText');
+    expect(mockCaptured.composer).not.toHaveProperty('subjectEnabled');
+    expect(mockCaptured.composer).not.toHaveProperty('effectsEnabled');
+    expect(mockCaptured.composer).not.toHaveProperty('mentionParticipants');
+    expect(mockCaptured.list?.onSwipeReply).toBeUndefined();
+    expect(screen.queryByText('💥')).toBeNull();
+
+    await run(() => mockCaptured.composer!.onSend('plain still works'));
+    expect(send).toHaveBeenCalledWith(
+      { chatGuid: GUID, text: 'plain still works' },
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+      presentSendIssue,
+      expect.any(Function),
+    );
+
+    await longPressMessage(makeMsg({ guid: 'local-action-message', text: 'keep me local' }));
+    expect(mockCaptured.overlay).toEqual(
+      expect.objectContaining({
+        selected: expect.objectContaining({ canReact: false }),
+        onCopy: expect.any(Function),
+        onDelete: expect.any(Function),
+        onForward: undefined,
+      }),
+    );
+  });
+
+  it('preserves supported RCS reaction, attachment, contact, typing, and voice controls', async () => {
+    configureRcsChat({ supports_send_contact: false });
+    await renderWithTheme(<ChatScreen />);
+
+    expect(mockCaptured.composer).toEqual(
+      expect.objectContaining({
+        onSendAttachments: expect.any(Function),
+        onPickFiles: expect.any(Function),
+        onPickContact: expect.any(Function),
+        onStartVoice: expect.any(Function),
+        onTyping: expect.any(Function),
+      }),
+    );
+    expect(mockCaptured.composer).not.toHaveProperty('effectsEnabled');
+    expect(mockCaptured.overlay?.onForward).toEqual(expect.any(Function));
+
+    await longPressMessage(makeMsg({ guid: 'rcs-m1' }));
+    expect(mockCaptured.overlay?.selected).toEqual(expect.objectContaining({ canReact: true }));
+
+    await act(async () => {
+      useSessionStore.setState({
+        serverInfo: { version: 'test', private_api: true, rcs: false } as any,
+      });
+    });
+    expect(mockCaptured.composer).toEqual(
+      expect.objectContaining({
+        onSendAttachments: undefined,
+        onPickFiles: undefined,
+        onPickContact: undefined,
+        onStartVoice: undefined,
+        onTyping: undefined,
+      }),
+    );
+  });
+
+  it('ignores injected effect arguments and sends ordinary text', async () => {
     await renderWithTheme(<ChatScreen />);
     await run(() =>
       mockCaptured.composer!.onSend('party', 'com.apple.MobileSMS.expressivesend.impact'),
     );
     expect(send).toHaveBeenCalledWith(
-      {
-        chatGuid: GUID,
-        text: 'party',
-        effectId: 'com.apple.MobileSMS.expressivesend.impact',
-      },
+      { chatGuid: GUID, text: 'party' },
       expect.objectContaining({ isCurrent: expect.any(Function) }),
       presentSendIssue,
       expect.any(Function),
     );
   });
 
-  it('threads the mounted account lease through DEV text and reply sends', async () => {
+  it('threads the mounted account lease through DEV plain-text sends', async () => {
     mockIsDevServer.mockReturnValue(true);
     await renderWithTheme(<ChatScreen />);
     const plainAdmission = mockCaptured.composer!.onSend('plain-dev') as Promise<boolean>;
@@ -806,26 +846,12 @@ describe('ChatScreen — send routing', () => {
       expect.any(Function),
     );
 
-    await longPressMessage(
-      makeMsg({ guid: 'reply-target', text: 'question', senderName: 'Alice' }),
-    );
-    await run(() => mockCaptured.overlay!.onReply());
-    const replyAdmission = mockCaptured.composer!.onSend('reply-dev') as Promise<boolean>;
-    await expect(replyAdmission).resolves.toBe(false);
-    expect(devSendFakeReply).toHaveBeenCalledWith(
-      GUID,
-      'reply-dev',
-      'reply-target',
-      0,
-      undefined,
-      accountLease,
-      expect.any(Function),
-    );
+    expect(mockCaptured.overlay).not.toHaveProperty('onReply');
     expect(accountLease).toEqual(expect.objectContaining({ isCurrent: expect.any(Function) }));
   });
 
   it('shows recovery guidance when Send Contact permission is denied', async () => {
-    useSessionStore.setState({ serverInfo: { supports_send_contact: true } as any });
+    configureRcsChat();
     const denied = Object.assign(new Error('contacts-permission-denied'), {
       name: 'ContactsPermissionDeniedError',
       canAskAgain: false,
@@ -845,7 +871,7 @@ describe('ChatScreen — send routing', () => {
   });
 
   it('explains optional Contacts access before opening the native contact picker', async () => {
-    useSessionStore.setState({ serverInfo: { supports_send_contact: true } as any });
+    configureRcsChat();
     mockGetContactsPermissionState.mockResolvedValueOnce({
       status: 'undetermined',
       canAskAgain: true,
@@ -869,7 +895,7 @@ describe('ChatScreen — send routing', () => {
   });
 
   it('keeps a canceled Send Contact picker silent', async () => {
-    useSessionStore.setState({ serverInfo: { supports_send_contact: true } as any });
+    configureRcsChat();
     (pickAndSendContact as jest.Mock).mockResolvedValueOnce(null);
     await renderWithTheme(<ChatScreen />);
 
@@ -879,46 +905,8 @@ describe('ChatScreen — send routing', () => {
     expect(showDialog).not.toHaveBeenCalled();
   });
 
-  it('carries the selected exact message part through the contact picker', async () => {
-    useSessionStore.setState({
-      serverInfo: {
-        supports_send_contact: true,
-        supports_message_part_topology: true,
-      } as any,
-    });
-    const target = makeMsg({
-      guid: 'contact-reply-target',
-      messagePartTopology: JSON.stringify({
-        complete: true,
-        originalPartIndexes: [2],
-        currentParts: [{ index: 2, kind: 'text' }],
-        attachmentOwnership: [],
-      }),
-    });
-    (pickAndSendContact as jest.Mock).mockImplementationOnce((...args: unknown[]) => {
-      const onQueued = args[4] as ((tempGuid: string) => void) | undefined;
-      onQueued?.('temp-contact-reply');
-      return Promise.resolve({ tempGuid: 'temp-contact-reply' });
-    });
-    await renderWithTheme(<ChatScreen />);
-    await longPressMessage(target);
-    await run(() => mockCaptured.overlay!.onReply());
-
-    await run(() => mockCaptured.composer!.onPickContact());
-
-    await waitFor(() =>
-      expect(pickAndSendContact).toHaveBeenCalledWith(
-        GUID,
-        expect.objectContaining({ isCurrent: expect.any(Function) }),
-        presentSendIssue,
-        { replyToGuid: 'contact-reply-target', replyToPartIndex: 2 },
-        expect.any(Function),
-      ),
-    );
-    await waitFor(() => expect(mockCaptured.composer!.replyTo).toBeNull());
-  });
-
   it('wires microphone denial and native-request errors to recovery dialogs', async () => {
+    configureRcsChat();
     await renderWithTheme(<ChatScreen />);
     await run(() => mockCaptured.composer!.onStartVoice());
     await waitFor(() => expect(mockVoiceRecorderProps).toBeDefined());
@@ -937,6 +925,7 @@ describe('ChatScreen — send routing', () => {
   });
 
   it('accepts a voice recording only after its durable queue callback', async () => {
+    configureRcsChat();
     let markQueued!: (tempGuid: string) => void;
     let finishOperation!: (value: { tempGuid: string }) => void;
     (sendImage as jest.Mock).mockImplementationOnce(
@@ -965,7 +954,7 @@ describe('ChatScreen — send routing', () => {
     expect(settled).toBe(false);
     expect(sendImage).toHaveBeenCalledWith(
       {
-        chatGuid: GUID,
+        chatGuid: RCS_GUID,
         image: {
           uri: 'file:///cache/voice.m4a',
           name: 'voice.m4a',
@@ -984,122 +973,18 @@ describe('ChatScreen — send routing', () => {
   });
 });
 
-describe('ChatScreen — reply flow', () => {
-  it('selecting Reply sets the composer replyTo, and sending routes to reply()', async () => {
-    await renderWithTheme(<ChatScreen />);
-    await longPressMessage(makeMsg({ guid: 'm1', text: 'hey', senderName: 'Alice' }));
-    await run(() => mockCaptured.overlay!.onReply());
-
-    expect(mockCaptured.composer!.replyTo).toEqual(
-      expect.objectContaining({ guid: 'm1', text: 'hey', senderName: 'Alice', isFromMe: 0 }),
-    );
-
-    await run(() => mockCaptured.composer!.onSend('sure'));
-    expect(reply).toHaveBeenCalledWith(
-      {
-        chatGuid: GUID,
-        text: 'sure',
-        replyToGuid: 'm1',
-        replyToPartIndex: 0,
-        effectId: undefined,
-      },
-      expect.objectContaining({ isCurrent: expect.any(Function) }),
-      presentSendIssue,
-      expect.any(Function),
-    );
-    expect(send).not.toHaveBeenCalled();
-    // The mocked queue handoff fires synchronously, so the durable reply owns the draft now.
-    expect(mockCaptured.composer!.replyTo).toBeNull();
-  });
-
-  it('retains the reply target and reports a failure before queue admission', async () => {
-    const loggerWarn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
-    const failure = new Error('server-info unavailable');
-    try {
-      (reply as jest.Mock).mockRejectedValueOnce(failure);
-      await renderWithTheme(<ChatScreen />);
-      await longPressMessage(makeMsg({ guid: 'm1', text: 'hey', senderName: 'Alice' }));
-      await run(() => mockCaptured.overlay!.onReply());
-
-      const admitted = await mockCaptured.composer!.onSend('keep my reply');
-
-      expect(admitted).toBe(false);
-      expect(mockCaptured.composer!.replyTo).toEqual(expect.objectContaining({ guid: 'm1' }));
-      expect(showToast).toHaveBeenCalledWith(
-        'Couldn’t queue that reply. Your draft is still here—try again when connected',
-      );
-      expect(loggerWarn).toHaveBeenCalledWith('[chat] reply queue admission failed', failure);
-    } finally {
-      loggerWarn.mockRestore();
-    }
-  });
-});
-
-describe('ChatScreen — edit flow', () => {
-  it('selecting Edit prefills the composer, and confirming routes to editText()', async () => {
-    await renderWithTheme(<ChatScreen />);
-    await longPressMessage(makeMsg({ guid: 'm1', text: 'original', isFromMe: 1 }));
-    await run(() => mockCaptured.overlay!.onEdit());
-    expect(mockCaptured.composer!.editingText).toBe('original');
-
-    await run(() => mockCaptured.composer!.onSend('edited body'));
-    expect(editText).toHaveBeenCalledWith(
-      {
-        messageGuid: 'm1',
-        newText: 'edited body',
-        chatGuid: GUID,
-        partIndex: 0,
-      },
-      expect.objectContaining({ isCurrent: expect.any(Function) }),
-    );
-    expect(send).not.toHaveBeenCalled();
-  });
-});
-
 describe('ChatScreen — typing indicator', () => {
   it('renders the TypingBubble when the typing store flags this chat', async () => {
-    useTypingStore.setState({ typing: { [GUID]: true } });
+    configureRcsChat();
+    useTypingStore.setState({ typing: { [RCS_GUID]: true } });
     await renderWithTheme(<ChatScreen />);
     expect(await screen.findByText('typing…')).toBeTruthy();
   });
 
   it('does not render the TypingBubble when idle', async () => {
+    configureRcsChat();
     await renderWithTheme(<ChatScreen />);
     expect(screen.queryByText('typing…')).toBeNull();
-  });
-
-  it('binds the DEV typing injection to the mounted account lease', async () => {
-    mockIsDevServer.mockReturnValue(true);
-    await renderWithTheme(<ChatScreen />);
-
-    await fireEvent.press(screen.getByText('⌨️'));
-
-    expect(dispatchRealtimeEvent).toHaveBeenCalledWith(
-      'typing-indicator',
-      { chatGuid: GUID, display: true },
-      'dev',
-      expect.objectContaining({ isCurrent: expect.any(Function) }),
-    );
-  });
-
-  it('does not dispatch DEV typing outside the local fixture session', async () => {
-    await renderWithTheme(<ChatScreen />);
-
-    await fireEvent.press(screen.getByText('⌨️'));
-
-    expect(dispatchRealtimeEvent).not.toHaveBeenCalled();
-  });
-
-  it('drops a retained account-A DEV typing button after account B is admitted', async () => {
-    mockIsDevServer.mockReturnValue(true);
-    await renderWithTheme(<ChatScreen />);
-    await pauseRealtimeDeliveries();
-    resumeRealtimeDeliveries();
-    (dispatchRealtimeEvent as jest.Mock).mockClear();
-
-    await fireEvent.press(screen.getByText('⌨️'));
-
-    expect(dispatchRealtimeEvent).not.toHaveBeenCalled();
   });
 });
 
@@ -1199,7 +1084,7 @@ describe('ChatScreen — current-chat search orchestration', () => {
       expect(mockCaptured.list?.focusMessageId).toBeUndefined();
       expect(mockCaptured.list?.focusGuid).toBeUndefined();
       expect(mockCaptured.list?.onLongPressMessage).toEqual(expect.any(Function));
-      expect(mockCaptured.list?.onSwipeReply).toEqual(expect.any(Function));
+      expect(mockCaptured.list?.onSwipeReply).toBeUndefined();
       expect(mockSetParams).toHaveBeenLastCalledWith({ focus: '', focusDate: '' });
 
       await run(() => mockCaptured.header!.onSearchPress());
@@ -1615,11 +1500,10 @@ describe('ChatScreen — keyboard avoidance contract', () => {
 });
 
 describe('ChatScreen — stable list callbacks (row memoization contract)', () => {
-  it('keeps onLongPressMessage/onSwipeReply/onToggleSelect identities across re-renders', async () => {
+  it('keeps onLongPressMessage/onToggleSelect identities across re-renders', async () => {
     await renderWithTheme(<ChatScreen />);
     const first = {
       longPress: mockCaptured.list!.onLongPressMessage,
-      swipe: mockCaptured.list!.onSwipeReply,
       toggle: mockCaptured.list!.onToggleSelect,
     };
     // Force an unrelated screen re-render (typing state) — a fresh closure here would
@@ -1628,13 +1512,13 @@ describe('ChatScreen — stable list callbacks (row memoization contract)', () =
       useTypingStore.setState({ typing: { [GUID]: true } });
     });
     expect(mockCaptured.list!.onLongPressMessage).toBe(first.longPress);
-    expect(mockCaptured.list!.onSwipeReply).toBe(first.swipe);
     expect(mockCaptured.list!.onToggleSelect).toBe(first.toggle);
   });
 });
 
 describe('ChatScreen — stable composer callbacks (Composer memo contract)', () => {
   it('surfaces a current-account attachment admission failure', async () => {
+    configureRcsChat();
     const loggerWarn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const failure = new Error('paste ownership unavailable');
     try {
@@ -1665,14 +1549,13 @@ describe('ChatScreen — stable composer callbacks (Composer memo contract)', ()
   });
 
   it('keeps every composer callback identity across an unrelated screen re-render', async () => {
+    configureRcsChat();
     await renderWithTheme(<ChatScreen />);
     const first = {
       send: mockCaptured.composer!.onSend,
       schedule: mockCaptured.composer!.onSchedule,
       attachments: mockCaptured.composer!.onSendAttachments,
       pickFiles: mockCaptured.composer!.onPickFiles,
-      cancelReply: mockCaptured.composer!.onCancelReply,
-      cancelEdit: mockCaptured.composer!.onCancelEdit,
       typing: mockCaptured.composer!.onTyping,
       voice: mockCaptured.composer!.onStartVoice,
     };
@@ -1680,14 +1563,12 @@ describe('ChatScreen — stable composer callbacks (Composer memo contract)', ()
     // Unrelated screen state change (typing flag) — fresh closures here would defeat
     // the memoized Composer's shallow prop compare on every reactive tick.
     await act(async () => {
-      useTypingStore.setState({ typing: { [GUID]: true } });
+      useTypingStore.setState({ typing: { [RCS_GUID]: true } });
     });
     expect(mockCaptured.composer!.onSend).toBe(first.send);
     expect(mockCaptured.composer!.onSchedule).toBe(first.schedule);
     expect(mockCaptured.composer!.onSendAttachments).toBe(first.attachments);
     expect(mockCaptured.composer!.onPickFiles).toBe(first.pickFiles);
-    expect(mockCaptured.composer!.onCancelReply).toBe(first.cancelReply);
-    expect(mockCaptured.composer!.onCancelEdit).toBe(first.cancelEdit);
     expect(mockCaptured.composer!.onTyping).toBe(first.typing);
     expect(mockCaptured.composer!.onStartVoice).toBe(first.voice);
   });
@@ -1747,6 +1628,7 @@ describe('ChatScreen — stable composer callbacks (Composer memo contract)', ()
   });
 
   it('drops draft-flush and typing callbacks after their screen account retires', async () => {
+    configureRcsChat();
     await renderWithTheme(<ChatScreen />);
     const flushDraft = mockCaptured.composer!.onDraftChange as (text: string) => void;
     const emitTyping = mockCaptured.composer!.onTyping as (active: boolean) => void;
@@ -1962,8 +1844,10 @@ describe('ChatScreen — scheduled-message ticker', () => {
       ) => {
         expect(accountLease.isCurrent()).toBe(true);
         await sender('plain-chat', 'plain', undefined, async () => undefined);
-        await sender('reply-chat', 'reply', 'reply-target', async () => undefined, 2);
-        return 2;
+        await expect(
+          sender('reply-chat', 'reply', 'reply-target', async () => undefined, 2),
+        ).rejects.toThrow('Scheduled replies were retired in this release.');
+        return 1;
       },
     );
 
@@ -1973,15 +1857,6 @@ describe('ChatScreen — scheduled-message ticker', () => {
     expect(devSendFake).toHaveBeenCalledWith(
       'plain-chat',
       'plain',
-      undefined,
-      accountLease,
-      expect.any(Function),
-    );
-    expect(devSendFakeReply).toHaveBeenCalledWith(
-      'reply-chat',
-      'reply',
-      'reply-target',
-      2,
       undefined,
       accountLease,
       expect.any(Function),

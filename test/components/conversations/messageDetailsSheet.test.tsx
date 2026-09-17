@@ -41,7 +41,6 @@ function sel(partial: Partial<SelectedMessage>): SelectedMessage {
     mine: [],
     dateCreated: 1_700_000_000_000,
     isRetracted: false,
-    isEdited: false,
     isTemp: false,
     sendState: 'sent',
     attachments: [],

@@ -278,6 +278,8 @@ async function retryableRow(db: AppDatabase, now: number): Promise<RetryableOutg
   return row;
 }
 
+const RCS_ATTACHMENT_CHAT_GUID = 'RCS;-;queue-attachment-thread';
+
 /** Insert an outgoing text whose created_at is forced old, so it's a stranded (eligible) row. */
 async function strandedText(
   db: AppDatabase,
@@ -300,12 +302,13 @@ async function seedFailedAttachment(
   tempGuid: string,
   combined?: { text: string; selectedMessageGuid?: string; partIndex?: number },
 ): Promise<void> {
-  const chatId = await getChatIdByGuid(db, 'c1');
+  await seedChat(db, RCS_ATTACHMENT_CHAT_GUID);
+  const chatId = await getChatIdByGuid(db, RCS_ATTACHMENT_CHAT_GUID);
   await insertOutgoingAttachment(db, {
     tempGuid,
     attachmentGuid: `${tempGuid}-att`,
     chatId: chatId!,
-    chatGuid: 'c1',
+    chatGuid: RCS_ATTACHMENT_CHAT_GUID,
     localPath: 'file:///pic.jpg',
     mimeType: 'image/jpeg',
     transferName: 'pic.jpg',
@@ -331,6 +334,251 @@ describe('outgoingBackoffMs', () => {
 });
 
 describe('runOutgoingQueue', () => {
+  it('skips disabled RCS work before claim and still sends a later AppleScript row', async () => {
+    const { db, raw } = await createTestDb();
+    const rcsGuid = 'RCS;-;disabled-recovery-thread';
+    await seedChat(db, rcsGuid);
+    await seedChat(db, 'c1');
+    await strandedText(db, raw, rcsGuid, 'temp-disabled-rcs', 100);
+    await strandedText(db, raw, 'c1', 'temp-later-apple', 200);
+    raw
+      .prepare(
+        `UPDATE messages
+            SET send_state = 'error', error = 502
+          WHERE guid IN ('temp-disabled-rcs', 'temp-later-apple')`,
+      )
+      .run();
+    raw
+      .prepare(
+        `UPDATE outgoing_queue
+            SET attempts = 1, next_retry_at = 0
+          WHERE temp_guid IN ('temp-disabled-rcs', 'temp-later-apple')`,
+      )
+      .run();
+
+    const posts: Record<string, unknown>[] = [];
+    await expect(
+      runOutgoingQueue(
+        db,
+        fakeHttp(async (body) => {
+          posts.push(body as Record<string, unknown>);
+          return { guid: 'real-later-apple', dateCreated: 2_000, dateDelivered: null };
+        }),
+        noAttachmentIo,
+        2_000_000,
+        undefined,
+        1,
+        undefined,
+        undefined,
+        () => false,
+      ),
+    ).resolves.toEqual({ eligible: 1, sent: 1 });
+
+    expect(posts).toEqual([
+      expect.objectContaining({
+        chatGuid: 'c1',
+        tempGuid: 'temp-later-apple',
+        method: 'apple-script',
+      }),
+    ]);
+    expect(
+      raw
+        .prepare(
+          `SELECT attempts, next_retry_at AS nextRetryAt
+             FROM outgoing_queue
+            WHERE temp_guid = 'temp-disabled-rcs'`,
+        )
+        .get(),
+    ).toEqual({ attempts: 1, nextRetryAt: 0 });
+    expect(stateOf(raw, 'temp-disabled-rcs')).toBe('error');
+  });
+
+  it('immediately defers an RCS claim when capability disappears before network start', async () => {
+    const { db, raw } = await createTestDb();
+    const rcsGuid = 'RCS;-;mid-claim-capability-thread';
+    await seedChat(db, rcsGuid);
+    await seedChat(db, 'c1');
+    await strandedText(db, raw, rcsGuid, 'temp-mid-claim-rcs', 100);
+    await strandedText(db, raw, 'c1', 'temp-after-defer-apple', 200);
+    raw
+      .prepare(
+        `UPDATE messages
+            SET send_state = 'error', error = 502, error_message = 'prior failure'
+          WHERE guid = 'temp-mid-claim-rcs'`,
+      )
+      .run();
+    raw
+      .prepare(
+        `UPDATE messages
+            SET send_state = 'error', error = 503
+          WHERE guid = 'temp-after-defer-apple'`,
+      )
+      .run();
+    raw
+      .prepare(
+        `UPDATE outgoing_queue
+            SET attempts = CASE temp_guid WHEN 'temp-mid-claim-rcs' THEN 2 ELSE 1 END,
+                next_retry_at = 0
+          WHERE temp_guid IN ('temp-mid-claim-rcs', 'temp-after-defer-apple')`,
+      )
+      .run();
+
+    let rcsAvailable = true;
+    let flipCapability = true;
+    const posts: Record<string, unknown>[] = [];
+    let http!: HttpClient;
+    http = {
+      post: async (_path: string, _schema: unknown, opts: { json?: unknown }) => {
+        posts.push(opts.json as Record<string, unknown>);
+        return { guid: 'real-after-defer-apple', dateCreated: 2_000, dateDelivered: null };
+      },
+      pinTransport: () => http,
+      assertTransportCurrent: () => {
+        if (!flipCapability) return;
+        flipCapability = false;
+        rcsAvailable = false;
+      },
+      isTransportCurrent: () => true,
+    } as unknown as HttpClient;
+
+    await expect(
+      runOutgoingQueue(
+        db,
+        http,
+        noAttachmentIo,
+        2_000_000,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        () => rcsAvailable,
+      ),
+    ).resolves.toEqual({ eligible: 2, sent: 1 });
+
+    expect(posts).toEqual([
+      expect.objectContaining({
+        chatGuid: 'c1',
+        tempGuid: 'temp-after-defer-apple',
+        method: 'apple-script',
+      }),
+    ]);
+    expect(
+      raw
+        .prepare(
+          `SELECT attempts, next_retry_at AS nextRetryAt
+             FROM outgoing_queue
+            WHERE temp_guid = 'temp-mid-claim-rcs'`,
+        )
+        .get(),
+    ).toEqual({ attempts: 2, nextRetryAt: 0 });
+    expect(
+      raw
+        .prepare(
+          `SELECT send_state AS sendState, error, error_message AS errorMessage
+             FROM messages
+            WHERE guid = 'temp-mid-claim-rcs'`,
+        )
+        .get(),
+    ).toEqual({ sendState: 'error', error: 502, errorMessage: 'prior failure' });
+  });
+
+  it('uses AppleScript only for plain recovered iMessage text and retires helper-only rows', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    await seedExactTextTarget(db, 'reply-target', 2);
+    const chatId = (await getChatIdByGuid(db, 'c1'))!;
+
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-plain',
+      chatGuid: 'c1',
+      text: 'plain text survives',
+      now: 1_000,
+    });
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-rich',
+      chatGuid: 'c1',
+      text: 'must not send',
+      selectedMessageGuid: 'reply-target',
+      partIndex: 2,
+      effectId: 'com.apple.MobileSMS.expressivesend.impact',
+      subject: 'retired subject',
+      mentions: [{ start: 0, length: 4, address: 'a@b.com' }],
+      now: 1_000,
+    });
+    await insertOutgoingReaction(db, {
+      tempGuid: 'temp-retired-reaction',
+      chatId,
+      chatGuid: 'c1',
+      targetGuid: 'reply-target',
+      reaction: 'love',
+      partIndex: 2,
+      now: 1_000,
+    });
+    await insertOutgoingContact(db, {
+      tempGuid: 'temp-retired-contact',
+      chatGuid: 'c1',
+      text: 'Ada Lovelace',
+      contact: { firstName: 'Ada', lastName: 'Lovelace' },
+      now: 1_000,
+    });
+    await insertOutgoingAttachment(db, {
+      tempGuid: 'temp-retired-attachment',
+      attachmentGuid: 'temp-retired-attachment-att',
+      chatGuid: 'c1',
+      localPath: 'file:///must-not-open.jpg',
+      mimeType: 'image/jpeg',
+      transferName: 'must-not-open.jpg',
+      totalBytes: 10,
+      now: 1_000,
+    });
+    const retired = [
+      'temp-rich',
+      'temp-retired-reaction',
+      'temp-retired-contact',
+      'temp-retired-attachment',
+    ];
+    raw
+      .prepare(
+        `UPDATE messages SET send_state = 'error', error = 500
+          WHERE guid IN (${retired.map(() => '?').join(', ')})`,
+      )
+      .run(...retired);
+    raw.prepare('UPDATE outgoing_queue SET created_at = 0, next_retry_at = 0').run();
+
+    const posts: Record<string, unknown>[] = [];
+    let fileChecks = 0;
+    let uploads = 0;
+    await expect(
+      runOutgoingQueue(
+        db,
+        fakeHttp(async (body) => {
+          posts.push(body as Record<string, unknown>);
+          return { guid: 'real-plain', dateCreated: 2_000, dateDelivered: null };
+        }),
+        {
+          fileExists: async () => {
+            fileChecks += 1;
+            return true;
+          },
+          upload: async () => {
+            uploads += 1;
+            return { guid: 'must-not-send' };
+          },
+        },
+        2_000_000,
+      ),
+    ).resolves.toEqual({ eligible: 5, sent: 1 });
+
+    expect(posts).toEqual([
+      expect.objectContaining({ text: 'plain text survives', method: 'apple-script' }),
+    ]);
+    expect({ fileChecks, uploads }).toEqual({ fileChecks: 0, uploads: 0 });
+    for (const tempGuid of retired) {
+      expect(attemptsOf(raw, tempGuid)).toBe(OUTGOING_MAX_ATTEMPTS);
+      expect(stateOf(raw, tempGuid)).toBe('error');
+    }
+  });
+
   it('retries a whole-message RCS reaction without inventing Apple part topology', async () => {
     const { db, raw } = await createTestDb();
     await seedWholeMessageRcsTarget(db, 'rcs-target-1');
@@ -536,7 +784,7 @@ describe('runOutgoingQueue', () => {
     expect(stateOf(raw, 'temp-rcs-direct-reply')).toBe('error');
   });
 
-  it('defers a legacy target while ServerInfo is unknown without claiming or retiring it', async () => {
+  it('retires a legacy iMessage reply without waiting for ServerInfo', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
     await seedLegacyTextTarget(db, 'legacy-target');
@@ -571,30 +819,11 @@ describe('runOutgoingQueue', () => {
     ).resolves.toEqual({ eligible: 1, sent: 0 });
 
     expect(posts).toBe(0);
-    expect(attemptsOf(raw, 'temp-legacy-unknown')).toBe(1);
-    expect(stateOf(raw, 'temp-legacy-unknown')).toBe('error');
-
-    await expect(
-      runOutgoingQueue(
-        db,
-        fakeHttp(async () => {
-          posts += 1;
-          return { guid: 'must-not-send' };
-        }),
-        noAttachmentIo,
-        2_000,
-        undefined,
-        undefined,
-        undefined,
-        { allowsLegacyPartZero: true, isCurrent: () => false },
-      ),
-    ).resolves.toEqual({ eligible: 1, sent: 0 });
-    expect(posts).toBe(0);
-    expect(attemptsOf(raw, 'temp-legacy-unknown')).toBe(1);
+    expect(attemptsOf(raw, 'temp-legacy-unknown')).toBe(OUTGOING_MAX_ATTEMPTS);
     expect(stateOf(raw, 'temp-legacy-unknown')).toBe('error');
   });
 
-  it('resolves a promoted target alias to the canonical GUID immediately before retry POST', async () => {
+  it('retires an iMessage reply even when its promoted target alias is still valid', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
     await seedExactTextTarget(db, 'temp-target-alias', 2);
@@ -634,10 +863,12 @@ describe('runOutgoingQueue', () => {
       2_000,
     );
 
-    expect(posted).toMatchObject({ selectedMessageGuid: 'real-target-alias', partIndex: 2 });
+    expect(posted).toBeUndefined();
+    expect(attemptsOf(raw, 'temp-reply-alias')).toBe(OUTGOING_MAX_ATTEMPTS);
+    expect(stateOf(raw, 'temp-reply-alias')).toBe('error');
   });
 
-  it('retries a contact reply with its canonical target GUID and exact part', async () => {
+  it('retires an iMessage contact reply without posting its canonical target', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
     await seedExactTextTarget(db, 'temp-contact-target', 2);
@@ -679,12 +910,9 @@ describe('runOutgoingQueue', () => {
       2_000,
     );
 
-    expect(posted).toMatchObject({
-      firstName: 'Ada',
-      lastName: 'Lovelace',
-      selectedMessageGuid: 'real-contact-target',
-      partIndex: 2,
-    });
+    expect(posted).toBeUndefined();
+    expect(attemptsOf(raw, 'temp-contact-reply')).toBe(OUTGOING_MAX_ATTEMPTS);
+    expect(stateOf(raw, 'temp-contact-reply')).toBe('error');
   });
 
   it('retires a targeted retry without POST when sync has removed its exact part', async () => {
@@ -766,7 +994,7 @@ describe('runOutgoingQueue', () => {
     expect(stateOf(raw, 'real-1')).toBe('sent'); // temp promoted to the real guid
   });
 
-  it('re-sends the subject line and mention spans persisted in the queue payload', async () => {
+  it('retires persisted iMessage subject and mention payloads without HTTP', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
     const now = 10_000_000;
@@ -789,9 +1017,13 @@ describe('runOutgoingQueue', () => {
       wire = json as Record<string, unknown>;
       return { guid: 'real-subj', dateCreated: now, dateDelivered: null };
     });
-    expect((await runOutgoingQueue(db, http, noAttachmentIo, now)).sent).toBe(1);
-    expect(wire?.subject).toBe('Important');
-    expect(wire?.mentions).toEqual([{ start: 0, length: 4, address: 'a@b.com' }]);
+    expect(await runOutgoingQueue(db, http, noAttachmentIo, now)).toEqual({
+      eligible: 1,
+      sent: 0,
+    });
+    expect(wire).toBeUndefined();
+    expect(attemptsOf(raw, 'temp-subj')).toBe(OUTGOING_MAX_ATTEMPTS);
+    expect(stateOf(raw, 'temp-subj')).toBe('error');
   });
 
   it('does not touch a FRESH in-flight row (within the grace window)', async () => {
@@ -920,11 +1152,8 @@ describe('runOutgoingQueue — attachment resend', () => {
   it('re-uploads a failed picture and its text under the same retry identity', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
-    await seedExactTextTarget(db, 'reply-target', 2);
     await seedFailedAttachment(db, raw, 'temp-pic', {
       text: 'caption',
-      selectedMessageGuid: 'reply-target',
-      partIndex: 2,
     });
 
     let transportPinned = false;
@@ -956,14 +1185,12 @@ describe('runOutgoingQueue — attachment resend', () => {
     // The re-upload streams the ORIGINAL on-disk file under the ORIGINAL tempGuid (so the
     // server's idempotency cache can absorb an ack-lost duplicate).
     expect(up.captured).toMatchObject({
-      chatGuid: 'c1',
+      chatGuid: RCS_ATTACHMENT_CHAT_GUID,
       tempGuid: 'temp-pic',
       name: 'pic.jpg',
       uri: 'file:///pic.jpg',
       mimeType: 'image/jpeg',
       text: 'caption',
-      selectedMessageGuid: 'reply-target',
-      partIndex: 2,
     });
     expect(up.captured?.timeoutMs).toBeUndefined(); // foreground/ordinary drains stay unbounded
     // The same durable payload succeeds, promotes to the real iMessage guid, and clears its queue.
@@ -1037,7 +1264,7 @@ describe('runOutgoingQueue — attachment resend', () => {
       expect(errorOf(raw, 'temp-stat-timeout')).toBe(10003);
       expect(attemptsOf(raw, 'temp-stat-timeout')).toBe(2);
       expect(warn).toHaveBeenCalledWith(
-        '[queue] failed for chat c1 (code 10003): Attachment retry timed out',
+        `[queue] failed for chat ${RCS_ATTACHMENT_CHAT_GUID} (code 10003): Attachment retry timed out`,
       );
     } finally {
       finishFileCheck(true);
@@ -1065,7 +1292,7 @@ describe('runOutgoingQueue — attachment resend', () => {
     expect(queueCount(raw)).toBe(1);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(
-      '[queue] failed for chat c1 (code 10002, HTTP 502): bridge down',
+      `[queue] failed for chat ${RCS_ATTACHMENT_CHAT_GUID} (code 10002, HTTP 502): bridge down`,
     );
     warn.mockRestore();
   });
@@ -1094,7 +1321,12 @@ describe('runOutgoingQueue — attachment resend', () => {
     expect(queueCount(raw)).toBe(1); // row kept (cancellable / visible to diagnostics)
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith('[queue] attachment retry has no local file — retiring');
-    expect(mockNotifyFailedSend).toHaveBeenCalledWith(db, 'c1', 'temp-gone', undefined);
+    expect(mockNotifyFailedSend).toHaveBeenCalledWith(
+      db,
+      RCS_ATTACHMENT_CHAT_GUID,
+      'temp-gone',
+      undefined,
+    );
     warn.mockRestore();
   });
 
@@ -1582,13 +1814,13 @@ describe('applyServerSendError', () => {
     // background relay then failed and the server pushed message-send-error {retryable:true}
     // (send-phase — nothing reached Google). The ladder must re-arm automatically.
     const { db, raw } = await createTestDb();
-    await seedChat(db, 'c1');
-    const chatId = await getChatIdByGuid(db, 'c1');
+    await seedChat(db, RCS_ATTACHMENT_CHAT_GUID);
+    const chatId = await getChatIdByGuid(db, RCS_ATTACHMENT_CHAT_GUID);
     await insertOutgoingAttachment(db, {
       tempGuid: 'temp-async-pic',
       attachmentGuid: 'temp-async-pic-att',
       chatId: chatId!,
-      chatGuid: 'c1',
+      chatGuid: RCS_ATTACHMENT_CHAT_GUID,
       localPath: 'file:///async.jpg',
       mimeType: 'image/jpeg',
       transferName: 'async.jpg',

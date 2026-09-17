@@ -1,9 +1,9 @@
 import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
-import { Chat, Message } from '@core/models';
+import { Chat, ServerInfo } from '@core/models';
 import { logger } from '@core/secure';
-import { upsertChats, upsertHandles, upsertMessages } from '@db/repositories';
+import { upsertChats, upsertHandles } from '@db/repositories';
 import { DbCommitGuardRejectedError } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import {
@@ -13,6 +13,7 @@ import {
   type ContactCard,
 } from '@/services/send/sendContactService';
 import { runOutgoingQueue, type OutgoingQueueIO } from '@/services/send/outgoingQueueService';
+import { fixedRcsCapabilitySource } from '@/services/send/rcsAttemptCapability';
 import {
   captureRealtimeDeliveryLease,
   pauseRealtimeDeliveries,
@@ -36,7 +37,13 @@ function fakeHttp(impl: (path: string, json: unknown) => Promise<unknown>): {
   let http!: HttpClient;
   http = {
     get: () =>
-      Promise.resolve({ version: 'test', private_api: true, supports_message_part_topology: true }),
+      Promise.resolve({
+        version: 'test',
+        private_api: true,
+        rcs: true,
+        supports_message_part_topology: true,
+        supports_send_contact: true,
+      }),
     post: (path: string, _schema: unknown, opts: { json?: unknown }) => {
       last = { path, json: opts?.json };
       return impl(path, opts?.json);
@@ -53,38 +60,6 @@ async function seedChat(db: AppDatabase, guid: string) {
   await upsertChats(
     db,
     [Chat.parse({ guid, participants: [{ address: 'craig@apple.com' }] })],
-    handles,
-  );
-}
-
-async function seedExactTarget(
-  db: AppDatabase,
-  chatGuid: string,
-  messageGuid: string,
-  partIndex: number,
-): Promise<void> {
-  const handles = await upsertHandles(db, [{ address: 'craig@apple.com' }]);
-  const chats = await upsertChats(
-    db,
-    [Chat.parse({ guid: chatGuid, participants: [{ address: 'craig@apple.com' }] })],
-    handles,
-  );
-  await upsertMessages(
-    db,
-    [
-      Message.parse({
-        guid: messageGuid,
-        text: 'Reply target',
-        dateCreated: 1_500,
-        messagePartTopology: {
-          complete: true,
-          originalPartIndexes: [partIndex],
-          currentParts: [{ index: partIndex, kind: 'text' }],
-          attachmentOwnership: [],
-        },
-      }),
-    ],
-    () => chats.get(chatGuid)!,
     handles,
   );
 }
@@ -117,9 +92,55 @@ describe('hasContactContent', () => {
 });
 
 describe('sendContactMessage', () => {
+  it('fails before DB admission when iMessage contact capability is false', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'iMessage;-;retired');
+    const post = jest.fn(async () => ({ guid: 'must-not-send' }));
+
+    await expect(
+      sendContactMessage(
+        db,
+        fakeHttp(post).http,
+        { chatGuid: 'iMessage;-;retired', contact: { firstName: 'Craig' } },
+        1_000,
+        undefined,
+        fixedRcsCapabilitySource(ServerInfo.parse({ version: '2.0.0', private_api: false })),
+      ),
+    ).rejects.toThrow('iMessage contact cards were retired');
+
+    expect(post).not.toHaveBeenCalled();
+    expect(countMessages(raw)).toBe(0);
+    expect(one(raw, 'SELECT COUNT(*) c FROM outgoing_queue').c).toBe(0);
+  });
+
+  it('preserves RCS contact cards independently of the retired helper capability', async () => {
+    const { db } = await createTestDb();
+    const chatGuid = 'RCS;-;+15551234567';
+    await seedChat(db, chatGuid);
+    const post = jest.fn(async () => ({ guid: 'rcs-contact', viaPrivateApi: false }));
+
+    await sendContactMessage(
+      db,
+      fakeHttp(post).http,
+      { chatGuid, contact: { firstName: 'Craig' } },
+      1_000,
+      undefined,
+      fixedRcsCapabilitySource(
+        ServerInfo.parse({
+          version: '2.0.0',
+          private_api: false,
+          rcs: true,
+          supports_send_contact: false,
+        }),
+      ),
+    );
+
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
   it('optimistically inserts then promotes temp→real on the send ack (one row, is-from-me)', async () => {
     const { db, raw } = await createTestDb();
-    await seedChat(db, 'c1');
+    await seedChat(db, 'RCS;-;c1');
     const onQueued = jest.fn();
     let queuedBeforePost = false;
     const { http } = fakeHttp(async () => {
@@ -130,7 +151,7 @@ describe('sendContactMessage', () => {
       db,
       http,
       {
-        chatGuid: 'c1',
+        chatGuid: 'RCS;-;c1',
         contact: {
           firstName: 'Craig',
           lastName: 'Federighi',
@@ -162,8 +183,8 @@ describe('sendContactMessage', () => {
 
   it('rolls back a retired contact insert before HTTP and lets a fresh lease send', async () => {
     const { db, raw } = await createTestDb();
-    await seedChat(db, 'c1');
-    raw.prepare("UPDATE chats SET latest_message_date = 321 WHERE guid = 'c1'").run();
+    await seedChat(db, 'RCS;-;c1');
+    raw.prepare("UPDATE chats SET latest_message_date = 321 WHERE guid = 'RCS;-;c1'").run();
     let drain: Promise<void> | undefined;
     let triggerRan = false;
     raw.function('pause_contact_during_chat_update', () => {
@@ -173,7 +194,7 @@ describe('sendContactMessage', () => {
     });
     raw.exec(`CREATE TRIGGER pause_contact_during_chat_update
       AFTER UPDATE OF latest_message_date ON chats
-      WHEN NEW.guid = 'c1' AND NEW.latest_message_date = 1000
+      WHEN NEW.guid = 'RCS;-;c1' AND NEW.latest_message_date = 1000
       BEGIN SELECT pause_contact_during_chat_update(); END`);
 
     let posts = 0;
@@ -187,7 +208,7 @@ describe('sendContactMessage', () => {
             posts += 1;
             return { guid: 'must-not-send' };
           }).http,
-          { chatGuid: 'c1', contact: { firstName: 'Retired', lastName: 'Contact' } },
+          { chatGuid: 'RCS;-;c1', contact: { firstName: 'Retired', lastName: 'Contact' } },
           1_000,
           () => lease.isCurrent(),
         ),
@@ -202,10 +223,9 @@ describe('sendContactMessage', () => {
       expect(raw.inTransaction).toBe(false);
       expect(one(raw, 'SELECT COUNT(*) c FROM outgoing_queue').c).toBe(0);
       expect(countMessages(raw)).toBe(0);
-      expect(one(raw, "SELECT latest_message_date d FROM chats WHERE guid='c1'").d).toBe(321);
+      expect(one(raw, "SELECT latest_message_date d FROM chats WHERE guid='RCS;-;c1'").d).toBe(321);
 
       raw.exec('DROP TRIGGER pause_contact_during_chat_update');
-      await seedExactTarget(db, 'c1', 'reply-target', 2);
       resumeRealtimeDeliveries();
       const freshLease = captureRealtimeDeliveryLease();
       const freshContact = {
@@ -243,10 +263,8 @@ describe('sendContactMessage', () => {
               return { guid: 'real-contact-after-retirement', viaPrivateApi: true };
             }).http,
             {
-              chatGuid: 'c1',
+              chatGuid: 'RCS;-;c1',
               contact: freshContact,
-              selectedMessageGuid: 'reply-target',
-              partIndex: 2,
             },
             2_000,
             () => lease.isCurrent(),
@@ -263,8 +281,8 @@ describe('sendContactMessage', () => {
         text: 'Grace Hopper',
         sendState: 'sending',
         created: 2_000,
-        replyGuid: 'reply-target',
-        replyPart: 2,
+        replyGuid: null,
+        replyPart: null,
         chatDate: 2_000,
       });
       expect(JSON.parse(String(optimisticState?.payload))).toEqual({
@@ -272,19 +290,15 @@ describe('sendContactMessage', () => {
         lastName: 'Hopper',
         phones: [{ label: 'work', number: '+15551234000' }],
         emails: [{ label: 'home', address: 'grace@example.test' }],
-        selectedMessageGuid: 'reply-target',
-        partIndex: 2,
       });
       expect(String(optimisticState?.payload)).not.toContain('private-device-contact-id');
       expect(String(optimisticState?.payload)).not.toContain('private-contact-photo');
       expect(String(optimisticState?.payload)).not.toContain('private selected message body');
       expect(requestBody).toMatchObject({
-        chatGuid: 'c1',
+        chatGuid: 'RCS;-;c1',
         tempGuid: result?.tempGuid,
         firstName: 'Grace',
         lastName: 'Hopper',
-        selectedMessageGuid: 'reply-target',
-        partIndex: 2,
       });
       expect(JSON.stringify(requestBody)).not.toContain('private-device-contact-id');
       expect(JSON.stringify(requestBody)).not.toContain('private-contact-photo');
@@ -303,10 +317,10 @@ describe('sendContactMessage', () => {
 
   it('POSTs structured fields to /message/contact, omitting empty phone/email arrays', async () => {
     const { db } = await createTestDb();
-    await seedChat(db, 'c1');
+    await seedChat(db, 'RCS;-;c1');
     const cap = fakeHttp(async () => ({ guid: 'g' }));
     await sendContactMessage(db, cap.http, {
-      chatGuid: 'c1',
+      chatGuid: 'RCS;-;c1',
       contact: {
         firstName: 'Tim',
         organization: 'Apple',
@@ -317,7 +331,7 @@ describe('sendContactMessage', () => {
     const sent = cap.last();
     expect(sent?.path).toBe('/message/contact');
     const body = sent?.json as Record<string, unknown>;
-    expect(body.chatGuid).toBe('c1');
+    expect(body.chatGuid).toBe('RCS;-;c1');
     expect(body.firstName).toBe('Tim');
     expect(body.organization).toBe('Apple');
     expect(typeof body.tempGuid).toBe('string');
@@ -329,11 +343,11 @@ describe('sendContactMessage', () => {
   it('marks the bubble errored when the send fails (retryable)', async () => {
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const { db, raw } = await createTestDb();
-    await seedChat(db, 'c1');
+    await seedChat(db, 'RCS;-;c1');
     const { http } = fakeHttp(async () => {
       throw new ApiError('unauthorized', 'nope', 401);
     });
-    await sendContactMessage(db, http, { chatGuid: 'c1', contact: { firstName: 'Nope' } });
+    await sendContactMessage(db, http, { chatGuid: 'RCS;-;c1', contact: { firstName: 'Nope' } });
     expect(countMessages(raw)).toBe(1);
     const row = raw.prepare('SELECT send_state s, error e FROM messages').get() as {
       s: string;
@@ -343,25 +357,25 @@ describe('sendContactMessage', () => {
     expect(row.e).toBe(401);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(
-      '[send-contact] failed for chat c1 (code 401, HTTP 401): nope',
+      '[send-contact] failed for chat RCS;-;c1 (code 401, HTTP 401): nope',
     );
     warn.mockRestore();
   });
 
   it('throws (sends nothing) for a content-less contact', async () => {
     const { db } = await createTestDb();
-    await seedChat(db, 'c1');
+    await seedChat(db, 'RCS;-;c1');
     const { http } = fakeHttp(async () => ({ guid: 'x' }));
-    await expect(sendContactMessage(db, http, { chatGuid: 'c1', contact: {} })).rejects.toThrow(
-      /name, organization, phone, or email/,
-    );
+    await expect(
+      sendContactMessage(db, http, { chatGuid: 'RCS;-;c1', contact: {} }),
+    ).rejects.toThrow(/name, organization, phone, or email/);
   });
 
   it('throws for an unknown chat', async () => {
     const { db } = await createTestDb();
     const { http } = fakeHttp(async () => ({ guid: 'x' }));
     await expect(
-      sendContactMessage(db, http, { chatGuid: 'nope', contact: { firstName: 'A' } }),
+      sendContactMessage(db, http, { chatGuid: 'RCS;-;nope', contact: { firstName: 'A' } }),
     ).rejects.toThrow(/unknown chat/);
   });
 });
@@ -376,6 +390,7 @@ describe('sendContactMessage', () => {
  * drained the queue.
  */
 describe('sendContactMessage — the retry re-sends a CARD, never a text message', () => {
+  const rcsChatGuid = 'RCS;-;contact-retry-thread';
   const contact = {
     firstName: 'Craig',
     lastName: 'Federighi',
@@ -386,13 +401,13 @@ describe('sendContactMessage — the retry re-sends a CARD, never a text message
   /** Fail the first send, then drain the queue past the 30s backoff and record every POST. */
   async function failThenDrain() {
     const { db, raw } = await createTestDb();
-    await seedChat(db, 'c1');
+    await seedChat(db, rcsChatGuid);
     const t = 1_000_000;
 
     const { http: failing } = fakeHttp(async () => {
       throw new ApiError('unauthorized', 'nope', 401);
     });
-    await sendContactMessage(db, failing, { chatGuid: 'c1', contact }, t);
+    await sendContactMessage(db, failing, { chatGuid: rcsChatGuid, contact }, t);
 
     const posts: { path: string; json: Record<string, unknown> }[] = [];
     let retryHttp!: HttpClient;
@@ -416,12 +431,12 @@ describe('sendContactMessage — the retry re-sends a CARD, never a text message
   it('queues the send under kind "contact" carrying the structured fields (not the name as text)', async () => {
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const { db, raw } = await createTestDb();
-    await seedChat(db, 'c1');
+    await seedChat(db, 'RCS;-;c1');
     const { http } = fakeHttp(async () => {
       throw new ApiError('unauthorized', 'nope', 401);
     });
     // Assert BEFORE any drain — a successful retry deletes the queue row.
-    await sendContactMessage(db, http, { chatGuid: 'c1', contact }, 1_000_000);
+    await sendContactMessage(db, http, { chatGuid: 'RCS;-;c1', contact }, 1_000_000);
 
     const row = raw.prepare('SELECT kind, payload FROM outgoing_queue').get() as {
       kind: string;
@@ -435,7 +450,7 @@ describe('sendContactMessage — the retry re-sends a CARD, never a text message
     expect(payload.message).toBeUndefined();
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(
-      '[send-contact] failed for chat c1 (code 401, HTTP 401): nope',
+      '[send-contact] failed for chat RCS;-;c1 (code 401, HTTP 401): nope',
     );
     warn.mockRestore();
   });
@@ -457,7 +472,7 @@ describe('sendContactMessage — the retry re-sends a CARD, never a text message
     expect(posts[0]!.json.emails).toEqual([{ address: 'craig@apple.com' }]);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(
-      '[send-contact] failed for chat c1 (code 401, HTTP 401): nope',
+      `[send-contact] failed for chat ${rcsChatGuid} (code 401, HTTP 401): nope`,
     );
     warn.mockRestore();
   });
@@ -472,7 +487,7 @@ describe('sendContactMessage — the retry re-sends a CARD, never a text message
     expect(msg.guid).toBeTruthy();
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(
-      '[send-contact] failed for chat c1 (code 401, HTTP 401): nope',
+      `[send-contact] failed for chat ${rcsChatGuid} (code 401, HTTP 401): nope`,
     );
     warn.mockRestore();
   });

@@ -241,9 +241,9 @@ export default function ServerManagementScreen(): React.JSX.Element {
   // A typed-route 404 followed by an unavailable legacy fallback is surfaced as unsupported.
   const statsUnsupported = statsError && isUnimplementedEndpoint(statsQuery.error);
 
-  // Refresh the cached server info (version / macOS / private-API). On a hydrated boot the
+  // Refresh the cached server info (version / macOS / current capabilities). On a hydrated boot the
   // `connected` action never ran, so the session store still has serverInfo=null → "Unknown";
-  // fetching it here populates the STATUS section (and the app-wide `privateApiEnabled` gate).
+  // fetching it here populates the STATUS section and the independent RCS capability gate.
   const infoQuery = useQuery({
     queryKey: ['server', 'info', accountLease.generation, transportRevision],
     queryFn: ({ signal }) =>
@@ -486,10 +486,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
           />
           <InfoRow label="Server version" value={visibleServerInfo?.server_version ?? 'Unknown'} />
           <InfoRow label="macOS" value={visibleServerInfo?.os_version ?? 'Unknown'} />
-          <InfoRow
-            label="Private API"
-            value={visibleServerInfo?.private_api ? 'Enabled' : 'Disabled'}
-          />
+          <InfoRow label="Private API" value="Retired in this release" />
           <InfoRow label="Proxy" value={visibleServerInfo?.proxy_service ?? 'Direct'} />
           <Pressable
             onPress={onShareUrl}

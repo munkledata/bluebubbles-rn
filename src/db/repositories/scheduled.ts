@@ -1,5 +1,5 @@
+/* eslint-disable @typescript-eslint/no-unused-vars -- claimDueScheduled retains the reviewed transaction-owner callback shape. */
 import { and, eq, inArray, isNull, sql } from 'drizzle-orm';
-import { isRcsChatGuid } from '@utils/chat';
 import { scheduledMessages } from '../schema';
 import {
   runInTransactionContext,
@@ -9,10 +9,7 @@ import {
 } from '../transaction';
 import type { AppDatabase } from '../types';
 import {
-  explicitMessageTargetPart,
   MessageTargetUnavailableError,
-  resolveMessageTargetWithinTransaction,
-  type ExplicitMessageTargetPart,
   type MessageTargetServerAuthorization,
 } from './messageTargets';
 import {
@@ -115,31 +112,14 @@ function mapScheduled(r: {
 export function insertScheduledWithinTransaction(
   context: DbTransactionContext,
   args: InsertScheduledArgs,
-  serverAuthorization?: MessageTargetServerAuthorization,
+  _serverAuthorization?: MessageTargetServerAuthorization,
 ): Promise<number> {
   return runInTransactionContext(context, async (db) => {
-    const targetPart = explicitMessageTargetPart(
-      args.selectedMessageGuid,
-      args.selectedMessagePartIndex,
-    );
-    if (targetPart && isRcsChatGuid(args.chatGuid)) {
-      throw new MessageTargetUnavailableError('RCS threaded replies are not supported');
-    }
-    const resolvedTarget = targetPart
-      ? await resolveMessageTargetWithinTransaction(context, {
-          chatGuid: args.chatGuid,
-          messageGuid: targetPart.messageGuid,
-          partIndex: targetPart.partIndex,
-          serverAuthorization,
-        })
-      : null;
-    if (targetPart && !resolvedTarget) {
-      throw new MessageTargetUnavailableError();
+    if (args.selectedMessageGuid !== undefined || args.selectedMessagePartIndex !== undefined) {
+      throw new MessageTargetUnavailableError('Scheduled replies were retired in this release');
     }
     const payload: ScheduledPayload = {
       text: args.text,
-      selectedMessageGuid: resolvedTarget?.messageGuid,
-      selectedMessagePartIndex: resolvedTarget?.partIndex,
     };
     const rows = await db
       .insert(scheduledMessages)
@@ -475,7 +455,7 @@ export async function claimDueScheduled(
   id: number,
   now: number,
   commitGuard?: DbCommitGuard,
-  serverAuthorization?: MessageTargetServerAuthorization,
+  _serverAuthorization?: MessageTargetServerAuthorization,
 ): Promise<ScheduledRow | null> {
   return withDbTransaction(
     db,
@@ -500,46 +480,28 @@ export async function claimDueScheduled(
           .where(and(eq(scheduledMessages.id, id), eq(scheduledMessages.status, 'sending')));
         return null;
       }
-      let targetPart: ExplicitMessageTargetPart | null | undefined;
+      let payload: ScheduledPayload;
       try {
-        targetPart = explicitMessageTargetPart(
-          row.selectedMessageGuid,
-          row.selectedMessagePartIndex,
-        );
+        payload = JSON.parse(claimed.payload) as ScheduledPayload;
       } catch {
-        targetPart = undefined;
+        payload = { text: row.text, selectedMessageGuid: '__invalid__' };
       }
-      const unsupportedRcsReply = targetPart != null && isRcsChatGuid(row.chatGuid);
-      const resolvedTarget = unsupportedRcsReply
-        ? undefined
-        : targetPart === null
-          ? null
-          : targetPart === undefined
-            ? undefined
-            : await resolveMessageTargetWithinTransaction(context, {
-                chatGuid: row.chatGuid,
-                messageGuid: targetPart.messageGuid,
-                partIndex: targetPart.partIndex,
-                serverAuthorization,
-              });
-      if (resolvedTarget === undefined || (targetPart && !resolvedTarget)) {
+      if (
+        payload.selectedMessageGuid !== undefined ||
+        payload.selectedMessagePartIndex !== undefined
+      ) {
         await db
           .update(scheduledMessages)
           .set({ status: 'error' })
           .where(and(eq(scheduledMessages.id, id), eq(scheduledMessages.status, 'sending')));
         return null;
       }
-      return resolvedTarget
-        ? {
-            ...row,
-            selectedMessageGuid: resolvedTarget.messageGuid,
-            selectedMessagePartIndex: resolvedTarget.partIndex,
-          }
-        : row;
+      return row;
     },
     commitGuard,
   );
 }
+/* eslint-enable @typescript-eslint/no-unused-vars */
 
 /**
  * Finish a claimed local row. Returns false when the row is no longer `sending` or became
@@ -610,34 +572,14 @@ export async function handoverScheduledTextToOutgoing(
   db: AppDatabase,
   args: ScheduledTextHandoverArgs,
   commitGuard?: DbCommitGuard,
-  serverAuthorization?: MessageTargetServerAuthorization,
+  _serverAuthorization?: MessageTargetServerAuthorization,
 ): Promise<OutgoingInsertResult> {
   const result = await withDbTransaction(
     db,
     async (context) => {
-      let targetPart: ExplicitMessageTargetPart | null | undefined;
-      try {
-        targetPart = explicitMessageTargetPart(
-          args.outgoing.selectedMessageGuid,
-          args.outgoing.partIndex,
-        );
-      } catch {
-        targetPart = undefined;
-      }
-      const unsupportedRcsReply = targetPart != null && isRcsChatGuid(args.outgoing.chatGuid);
-      const resolvedTarget = unsupportedRcsReply
-        ? undefined
-        : targetPart === null
-          ? null
-          : targetPart === undefined
-            ? undefined
-            : await resolveMessageTargetWithinTransaction(context, {
-                chatGuid: args.outgoing.chatGuid,
-                messageGuid: targetPart.messageGuid,
-                partIndex: targetPart.partIndex,
-                serverAuthorization,
-              });
-      if (resolvedTarget === undefined || (targetPart && !resolvedTarget)) {
+      const targeted =
+        args.outgoing.selectedMessageGuid !== undefined || args.outgoing.partIndex !== undefined;
+      if (targeted) {
         const retired = await db
           .update(scheduledMessages)
           .set({ status: 'error' })
@@ -687,9 +629,9 @@ export async function handoverScheduledTextToOutgoing(
 
       return insertOutgoingTextWithinTransaction(context, {
         ...args.outgoing,
-        selectedMessageGuid: resolvedTarget?.messageGuid,
-        partIndex: resolvedTarget?.partIndex,
-        threadOriginatorGuid: resolvedTarget?.messageGuid,
+        selectedMessageGuid: undefined,
+        partIndex: undefined,
+        threadOriginatorGuid: undefined,
       });
     },
     commitGuard,

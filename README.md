@@ -13,8 +13,8 @@ TypeScript, and a compatible self-hosted Mac server.
 
 The codebase includes conversation sync, sending and retry, reactions/replies, group management,
 search, contacts, attachments and voice messages, scheduled messages/reminders, privacy-aware
-Android notifications, FaceTime entry points, Find My views, dark themes, backups, and an optional
-App Lock screen. Receiving text/files from Android's share sheet is deliberately disabled
+Android notifications, Find My views, dark themes, backups, and an optional App Lock screen.
+Receiving text/files from Android's share sheet is deliberately disabled
 until Gator owns a native intake that can cap bytes and time while streaming.
 
 Many capabilities depend on a compatible server version or private server APIs. Native behavior
@@ -155,8 +155,8 @@ the EAS profiles intentionally have no update-channel fields.
   screen uses the native Google Maps Android SDK for server-provided coordinates; it does not request
   the phone's own location. Google can receive those precise coordinates, the phone IP, displayed
   map region, device/request metadata, a Maps-specific identifier, Maps SDK crash diagnostics, and
-  map interactions. Embedded FaceTime web surfaces remain disabled; user-opened links and explicit
-  Find My system-map actions can contact their respective services. Do not claim that no third party
+  map interactions. FaceTime entry points and embedded FaceTime web surfaces are retired; explicit
+  Find My system-map actions can contact external mapping services. Do not claim that no third party
   is involved.
 - **Previews:** no client Open Graph fetch/parser or arbitrary-host fallback exists. When the paired
   server advertises the preview capability, the app automatically requests bounded text and an

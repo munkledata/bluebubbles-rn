@@ -10,11 +10,9 @@ import {
   recoverOutgoing,
 } from '@/services/send';
 import {
-  devInjectIncomingFaceTime,
   devQueueIncomingMessageWithoutDrain,
   devResumeQueuedIncomingMessages,
   devSendFake,
-  devSendFakeReply,
   injectMessage,
 } from '@features/conversations/devSeed';
 import { hydrateAllStores } from '@state/hydrateStores';
@@ -67,18 +65,12 @@ export default function Home(): React.JSX.Element {
         }
         if (useDevFixtures) {
           await fireDueScheduledWithDevelopmentSender(
-            (g, t, s, onQueued, selectedMessagePartIndex) =>
-              s
-                ? devSendFakeReply(
-                    g,
-                    t,
-                    s,
-                    selectedMessagePartIndex,
-                    undefined,
-                    accountLease,
-                    onQueued,
-                  )
-                : devSendFake(g, t, undefined, accountLease, onQueued),
+            (guid, text, selectedMessageGuid, onQueued) => {
+              if (selectedMessageGuid) {
+                return Promise.reject(new Error('Scheduled replies were retired in this release.'));
+              }
+              return devSendFake(guid, text, undefined, accountLease, onQueued);
+            },
             accountLease,
           );
         } else {
@@ -147,12 +139,6 @@ export default function Home(): React.JSX.Element {
                 <Text style={styles.devText}>⏸ Queue</Text>
               </Pressable>
             ) : null}
-            <Pressable
-              style={[styles.devBtn, styles.devFlex]}
-              onPress={() => runDevAccountAction('FaceTime injection', devInjectIncomingFaceTime)}
-            >
-              <Text style={styles.devText}>📞 FaceTime</Text>
-            </Pressable>
             <Pressable
               style={[styles.devBtn, styles.devFlex]}
               onPress={() => {

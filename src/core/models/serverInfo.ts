@@ -10,7 +10,8 @@ export const MAX_SEND_ATTACHMENT_TEXT_BYTES = 65_536;
  * private_api, proxy_service); the Gator fork's `coreOperations` emits only `{ version }`.
  * We accept either and coalesce into `server_version` so a Gator server parses (previously
  * the required `server_version` made `.parse` throw → connect failed). Fields the Gator
- * fork doesn't send stay nullish and degrade gracefully (e.g. private_api → apple-script).
+ * fork doesn't send stay nullish and degrade gracefully. Private API fields are accepted for
+ * wire compatibility but normalized to the current release's permanent-retirement policy.
  */
 export const ServerInfo = z
   .object({
@@ -90,5 +91,48 @@ export const ServerInfo = z
     /** Whether the server can retrieve bounded link text/images through its SSRF-safe proxy. */
     supports_url_preview_proxy: z.boolean().nullish(),
   })
-  .transform((s) => ({ ...s, server_version: s.server_version ?? s.version ?? undefined }));
-export type ServerInfo = z.infer<typeof ServerInfo>;
+  .transform((s) => ({
+    ...s,
+    server_version: s.server_version ?? s.version ?? undefined,
+    private_api: false as boolean,
+    supports_imessage_text_with_attachment: false as boolean,
+    supports_icloud_account: false as boolean,
+  }));
+// Callers may still construct the tolerant wire shape (old servers omit most capability fields).
+// `ServerInfo.parse(...)` returns the normalized output, while this public type deliberately keeps
+// those incoming fields optional so task-local fixtures and partial capability snapshots stay valid.
+export type ServerInfo = z.input<typeof ServerInfo>;
+
+/**
+ * Apply the current release's permanent Private API retirement to any already-typed capability
+ * object. This covers task-local/test-injected capability sources that did not cross the wire
+ * schema, so an old or forged server response cannot restore helper authority.
+ */
+export function retirePrivateApiCapabilities(info: ServerInfo): ServerInfo {
+  if (
+    info.private_api === false &&
+    info.supports_imessage_text_with_attachment === false &&
+    info.supports_icloud_account === false
+  ) {
+    return info;
+  }
+  return {
+    ...info,
+    private_api: false,
+    supports_imessage_text_with_attachment: false,
+    supports_icloud_account: false,
+  };
+}
+
+/** Stable identity for only the server flags that can change outgoing-send safety or encoding. */
+export function serverSendCapabilityKey(info: ServerInfo | null | undefined): string {
+  if (!info) return 'unknown';
+  return [
+    info.rcs === true,
+    info.supports_rcs_send_attempt_ownership === true,
+    info.supports_message_part_topology === true,
+    info.supports_rcs_text_with_attachment === true,
+  ]
+    .map(Number)
+    .join('');
+}

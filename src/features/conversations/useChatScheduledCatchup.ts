@@ -7,7 +7,7 @@ import {
 } from '@/services/send';
 import type { RealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import { isDevServer } from '@utils/isDev';
-import { devSendFake, devSendFakeReply } from './devSeed';
+import { devSendFake } from './devSeed';
 
 /** Run scheduled-send catch-up and outgoing recovery while a chat remains mounted. */
 export function useChatScheduledCatchup(accountLease: RealtimeDeliveryLease): void {
@@ -25,18 +25,12 @@ export function useChatScheduledCatchup(accountLease: RealtimeDeliveryLease): vo
       try {
         if (isDev()) {
           await fireDueScheduledWithDevelopmentSender(
-            (guid, text, selectedMessageGuid, onQueued, selectedMessagePartIndex) =>
-              selectedMessageGuid
-                ? devSendFakeReply(
-                    guid,
-                    text,
-                    selectedMessageGuid,
-                    selectedMessagePartIndex,
-                    undefined,
-                    accountLease,
-                    onQueued,
-                  )
-                : devSendFake(guid, text, undefined, accountLease, onQueued),
+            (guid, text, selectedMessageGuid, onQueued) => {
+              if (selectedMessageGuid) {
+                return Promise.reject(new Error('Scheduled replies were retired in this release.'));
+              }
+              return devSendFake(guid, text, undefined, accountLease, onQueued);
+            },
             accountLease,
           );
         } else {

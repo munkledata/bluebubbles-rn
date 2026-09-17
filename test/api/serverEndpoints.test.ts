@@ -28,11 +28,13 @@ function notFound(): Response {
   return new Response(null, { status: 404 });
 }
 
-// Compatibility wrappers remain for older servers, but the current product does not advertise
-// these remote actions because it has no password-authenticated restart or log routes.
-describe('legacy server-management restart/log wrappers', () => {
-  it('does not advertise remote server management', () => {
+// Legacy server-log reads remain for older servers, but restart management stays local to the Mac.
+describe('server-management support boundaries', () => {
+  it('does not advertise or export remote restart management', () => {
     expect(serverApi.SERVER_MANAGEMENT_SUPPORTED).toBe(false);
+    expect(serverApi).not.toHaveProperty('restartImessage');
+    expect(serverApi).not.toHaveProperty('softRestart');
+    expect(serverApi).not.toHaveProperty('hardRestart');
   });
 
   it('checkUpdate stays unimplemented (no HTTP call)', async () => {
@@ -42,39 +44,6 @@ describe('legacy server-management restart/log wrappers', () => {
     );
     expect(isUnimplementedEndpoint(err)).toBe(true);
     expect(mockKy).not.toHaveBeenCalled();
-  });
-
-  // The channel STRING is the whole contract here: every restart wrapper POSTs the same URL with
-  // the same schema, so a copy-paste slip that makes "Hard Restart" send `soft-restart` is
-  // invisible to a call-count assertion. Pin the exact channel each wrapper sends.
-  it.each([
-    ['restartImessage', 'restart-imessage', (h: HttpClient) => serverApi.restartImessage(h)],
-    ['softRestart', 'soft-restart', (h: HttpClient) => serverApi.softRestart(h)],
-    ['hardRestart', 'hard-restart', (h: HttpClient) => serverApi.hardRestart(h)],
-  ])('%s POSTs /admin/command with channel "%s"', async (_name, channel, call) => {
-    mockKy.mockResolvedValueOnce(envelope({ success: true }));
-    await expect(call(client())).resolves.toBeDefined();
-    expect(mockKy).toHaveBeenCalledTimes(1);
-
-    const [url, init] = mockKy.mock.calls[0] as [string, { method: string; json: unknown }];
-    expect(url).toBe('https://x.test/api/v1/admin/command');
-    expect(init.method).toBe('POST');
-    expect(init.json).toEqual({ channel });
-    // Guard against the three wrappers collapsing onto one channel.
-    expect((init.json as { channel: string }).channel).toBe(channel);
-  });
-
-  it('the three restart wrappers send three DISTINCT channels', async () => {
-    // Fresh Response per call — a Response body can only be read once.
-    mockKy.mockImplementation(async () => envelope({ success: true }));
-    await serverApi.restartImessage(client());
-    await serverApi.softRestart(client());
-    await serverApi.hardRestart(client());
-    const channels = mockKy.mock.calls.map(
-      (c) => (c[1] as { json: { channel: string } }).json.channel,
-    );
-    expect(channels).toEqual(['restart-imessage', 'soft-restart', 'hard-restart']);
-    expect(new Set(channels).size).toBe(3);
   });
 
   it('serverLogs sends the get-logs channel with the requested line count', async () => {
@@ -184,16 +153,6 @@ describe('serverStatTotals prefers the typed statistics route', () => {
   });
 });
 
-const typedPrivateApiStatus = {
-  available: true,
-  connected: true,
-  enabled: true,
-  unavailable_reason: null,
-  ft_available: true,
-  ft_connected: false,
-  ft_enabled: false,
-  ft_unavailable_reason: null,
-};
 const typedEnvironment = {
   version: '1.10.0',
   platform: 'darwin',
@@ -251,17 +210,6 @@ interface TypedHealthRouteCase {
 }
 
 const typedHealthRouteCases: TypedHealthRouteCase[] = [
-  {
-    name: 'Private API status',
-    method: 'GET',
-    path: '/private-api/status',
-    channel: 'get-private-api-status',
-    typedPayload: typedPrivateApiStatus,
-    legacyPayload: { connected: true, enabled: true },
-    expectedTyped: typedPrivateApiStatus,
-    expectedLegacy: { connected: true, enabled: true },
-    call: (http, signal) => serverApi.privateApiStatus(http, signal),
-  },
   {
     name: 'server environment',
     method: 'GET',
@@ -385,7 +333,7 @@ describe('server health prefers typed routes with narrow legacy fallback', () =>
 
   it('does not fall back to a legacy health channel for non-404 errors', async () => {
     mockKy.mockResolvedValueOnce(new Response(null, { status: 401 }));
-    const err = await serverApi.privateApiStatus(client()).then(
+    const err = await serverApi.serverEnv(client()).then(
       () => null,
       (e: unknown) => e,
     );
@@ -411,23 +359,6 @@ describe('server health prefers typed routes with narrow legacy fallback', () =>
 
 describe('typed health response validation', () => {
   it.each([
-    {
-      name: 'Private API rejects a connected Messages helper that is unavailable',
-      payload: {
-        ...typedPrivateApiStatus,
-        available: false,
-        unavailable_reason: 'trusted_helper_unavailable',
-      },
-      call: (http: HttpClient) => serverApi.privateApiStatus(http),
-    },
-    {
-      name: 'Private API rejects an available FaceTime helper with an unavailable reason',
-      payload: {
-        ...typedPrivateApiStatus,
-        ft_unavailable_reason: 'trusted_helper_unavailable',
-      },
-      call: (http: HttpClient) => serverApi.privateApiStatus(http),
-    },
     {
       name: 'FCM rejects a partial service-account identity',
       payload: { ...typedFcmStatus, clientEmail: null },

@@ -1,7 +1,5 @@
 import { getDatabase } from '@db/database';
 import {
-  applyLocalEdit,
-  applyLocalUnsend,
   getChatIdByGuid,
   insertOutgoingAttachment,
   insertOutgoingReaction,
@@ -10,16 +8,12 @@ import {
   reconcileOutgoingSuccess,
 } from '@db/repositories';
 import {
-  devEditFake,
   devInjectEffect,
-  devInjectIncomingFaceTime,
   devQueueIncomingMessageWithoutDrain,
   devResumeQueuedIncomingMessages,
   devSendFake,
   devSendFakeImage,
   devSendFakeReaction,
-  devSendFakeReply,
-  devUnsendFake,
   injectMessage,
 } from '@features/conversations/devSeed';
 import {
@@ -37,8 +31,6 @@ const mockDb = { __db: true };
 
 jest.mock('@db/database', () => ({ getDatabase: jest.fn(() => mockDb) }));
 jest.mock('@db/repositories', () => ({
-  applyLocalEdit: jest.fn(async () => undefined),
-  applyLocalUnsend: jest.fn(async () => undefined),
   getChatIdByGuid: jest.fn(async () => 7),
   insertOutgoingAttachment: jest.fn(async () => undefined),
   insertOutgoingReaction: jest.fn(async () => undefined),
@@ -63,8 +55,6 @@ jest.mock('@/services/send/sendService', () => ({
 jest.mock('@utils/isDev', () => ({ isDevServer: jest.fn(() => true) }));
 
 const mockGetDatabase = getDatabase as jest.Mock;
-const mockApplyLocalEdit = applyLocalEdit as jest.Mock;
-const mockApplyLocalUnsend = applyLocalUnsend as jest.Mock;
 const mockGetChatId = getChatIdByGuid as jest.Mock;
 const mockInsertAttachment = insertOutgoingAttachment as jest.Mock;
 const mockInsertReaction = insertOutgoingReaction as jest.Mock;
@@ -88,8 +78,6 @@ beforeEach(() => {
   resumeRealtimeDeliveries();
   jest.clearAllMocks();
   mockGetDatabase.mockReturnValue(mockDb);
-  mockApplyLocalEdit.mockResolvedValue(undefined);
-  mockApplyLocalUnsend.mockResolvedValue(undefined);
   mockGetChatId.mockResolvedValue(7);
   mockInsertAttachment.mockResolvedValue(undefined);
   mockInsertReaction.mockResolvedValue(undefined);
@@ -117,39 +105,6 @@ afterEach(() => {
 });
 
 describe('DEV fake sends — account ownership', () => {
-  it('does not start immediate edit/unsend writes through a retired screen lease', async () => {
-    const accountA = captureRealtimeDeliveryLease();
-    await pauseRealtimeDeliveries();
-    resumeRealtimeDeliveries();
-
-    await devEditFake('message-a', 'A-only edit', undefined, accountA);
-    await devUnsendFake('message-a', undefined, accountA);
-
-    expect(mockApplyLocalEdit).not.toHaveBeenCalled();
-    expect(mockApplyLocalUnsend).not.toHaveBeenCalled();
-  });
-
-  it('keeps teardown waiting for an admitted immediate edit write', async () => {
-    const editA = deferred();
-    mockApplyLocalEdit.mockReturnValueOnce(editA.promise);
-    const accountA = captureRealtimeDeliveryLease();
-    const write = devEditFake('message-a', 'edited in A', undefined, accountA);
-    await Promise.resolve();
-    expect(mockApplyLocalEdit).toHaveBeenCalledTimes(1);
-
-    let teardownFinished = false;
-    const teardown = pauseRealtimeDeliveries().then(() => {
-      teardownFinished = true;
-    });
-    await Promise.resolve();
-    expect(teardownFinished).toBe(false);
-
-    editA.resolve();
-    await write;
-    await teardown;
-    expect(teardownFinished).toBe(true);
-  });
-
   it('drops a delayed text acknowledgement after its account lease is retired', async () => {
     const accountA = captureRealtimeDeliveryLease();
     const onQueued = jest.fn(async () => undefined);
@@ -167,27 +122,6 @@ describe('DEV fake sends — account ownership', () => {
     await jest.advanceTimersByTimeAsync(700);
 
     expect(mockReconcile).not.toHaveBeenCalled();
-  });
-
-  it('keeps teardown waiting for an admitted delayed reply acknowledgement', async () => {
-    const reconcileA = deferred();
-    mockReconcile.mockReturnValueOnce(reconcileA.promise);
-    const accountA = captureRealtimeDeliveryLease();
-    await devSendFakeReply('chat-a', 'reply', 'message-a', undefined, undefined, accountA);
-
-    await jest.advanceTimersByTimeAsync(700);
-    expect(mockReconcile).toHaveBeenCalledTimes(1);
-
-    let teardownFinished = false;
-    const teardown = pauseRealtimeDeliveries().then(() => {
-      teardownFinished = true;
-    });
-    await Promise.resolve();
-    expect(teardownFinished).toBe(false);
-
-    reconcileA.resolve();
-    await teardown;
-    expect(teardownFinished).toBe(true);
   });
 
   it('drops a delayed image acknowledgement after its account lease is retired', async () => {
@@ -234,10 +168,9 @@ describe('DEV fake sends — account ownership', () => {
     const accountA = captureRealtimeDeliveryLease();
 
     await injectMessage(accountA);
-    await devInjectIncomingFaceTime(accountA);
     await devInjectEffect('chat-a', accountA);
 
-    expect(mockDevPushInject).toHaveBeenCalledTimes(3);
+    expect(mockDevPushInject).toHaveBeenCalledTimes(2);
     for (const call of mockDevPushInject.mock.calls) {
       const payload = call[1] as { guid?: string; uuid?: string };
       const eventId = payload.guid ?? payload.uuid;

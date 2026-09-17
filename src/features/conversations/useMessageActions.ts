@@ -4,22 +4,9 @@ import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Share } from 'react-native';
 import { isAggregateRetractionTombstone } from '@core/messages/retraction';
-import {
-  editedPartFromSummary,
-  resolveExactMessageTargetPartIndex,
-} from '@core/messages/partIndex';
-import {
-  parseMessagePartTopology,
-  parseMessageSummaryInfo,
-  type MessageSummaryInfo,
-} from '@core/models';
-import {
-  parseReactionType,
-  reactionKindKey,
-  type ReactionBaseType,
-} from '@core/reactions/reactionType';
+import { parseMessageSummaryInfo, type MessageSummaryInfo } from '@core/models';
+import { parseReactionType, type ReactionBaseType } from '@core/reactions/reactionType';
 import { bodyTextFromRuns, parseAttributedRuns } from '@core/richtext';
-import { type MessagePreview } from '@db/repositories';
 import { saveAttachmentsToPhotos, shareAttachment } from '@/services/media';
 import { attachmentCacheCoordinator } from '@/services/download/attachmentCacheCoordinator';
 import { scheduleMessageReminder } from '@/services/notifications/remindersService';
@@ -27,20 +14,20 @@ import {
   captureRealtimeDeliveryLease,
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
-import { discardMessage, react, unsend } from '@/services/send';
-import { useMessagePartTopologySupported } from '@state/sessionStore';
+import { discardMessage, react } from '@/services/send';
+import { useRcsEnabled } from '@state/sessionStore';
 import type { SelectedMessage } from '@ui';
 import { pickReminderTime } from '@ui/conversations/pickReminderTime';
 import { presentDiscardMessageResult, presentSendIssue } from '@ui/conversations/sendNotices';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { isDevServer } from '@utils/isDev';
 import { buildMessageSnippet, isLocalFileUri, isRcsChatGuid, type BubbleRect } from '@utils';
-import { devSendFakeReaction, devUnsendFake } from './devSeed';
+import { devSendFakeReaction } from './devSeed';
 import { stageForwardAttachmentHandoff } from './forwardAttachmentHandoff';
 import { buildForwardParams } from './forwardParams';
 import type { EnrichedMessage } from './useMessages';
 
-function actionContentOf(msg: EnrichedMessage, topologyCapable: boolean | null) {
+function actionContentOf(msg: EnrichedMessage) {
   const bodyText = bodyTextFromRuns(parseAttributedRuns(msg.attributedBody, msg.text));
   // Private Messages-extension payloads are not visible user attachments and therefore cannot own
   // a part in this aggregate action target. Keep the same conservative filter as MessageBubble.
@@ -48,20 +35,10 @@ function actionContentOf(msg: EnrichedMessage, topologyCapable: boolean | null) 
     ? []
     : (msg.attachments ?? []).filter((attachment) => !attachment.hideAttachment);
   const visibleAttachmentCount = visibleAttachments.length;
-  const topology = parseMessagePartTopology(msg.messagePartTopology);
-  const targetPartIndex = resolveExactMessageTargetPartIndex({
-    attachmentCount: visibleAttachmentCount,
-    hasText: bodyText.trim().length > 0,
-    partCount: msg.partCount,
-    topology,
-    topologySupported: topologyCapable,
-    visibleAttachmentGuids: visibleAttachments.map((attachment) => attachment.guid),
-  });
   return {
     bodyText,
     visibleAttachments,
     visibleAttachmentCount,
-    targetPartIndex,
   };
 }
 
@@ -82,32 +59,20 @@ export interface MessageActionsArgs {
   chatTitle: string;
   /** Account generation captured when the owning chat screen mounted. */
   accountLease?: RealtimeDeliveryLease;
-  /** Must be the useState setters themselves (stable) — onSwipeReply's identity rides on it. */
-  setReplyTo: (preview: MessagePreview | null) => void;
-  setEditing: (editing: { guid: string; text: string; partIndex: number } | null) => void;
 }
 
 /**
- * The chat screen's message-action handlers: the long-press menu (tapback/reply/edit/unsend/
- * copy/share/save/forward/delete/remind-later), the reply swipe, and multi-select with its
- * bulk actions. Owns the `selected` / `selectedGuids` / `threadFor` state; the screen is
- * thin wiring from these to MessageList / MessageActionsOverlay / ThreadSheet.
+ * The chat screen's message-action handlers: RCS reactions, local copy/share/save/forward/delete/
+ * remind-later/details, and multi-select with its bulk actions.
  *
- * CONTRACT: `onLongPressMessage`, `onSwipeReply`, and `onToggleSelect` are STABLE
+ * CONTRACT: `onLongPressMessage` and `onToggleSelect` are STABLE
  * (useCallback over refs/setters only) — they feed the memoized MessageList → MessageRow
  * chain, and a fresh closure per render would silently kill the row memoization.
  */
-export function useMessageActions({
-  guid,
-  messages,
-  chatTitle,
-  accountLease,
-  setReplyTo,
-  setEditing,
-}: MessageActionsArgs) {
+export function useMessageActions({ guid, messages, chatTitle, accountLease }: MessageActionsArgs) {
   const router = useRouter();
   const isDev = isDevServer;
-  const topologyCapable = useMessagePartTopologySupported();
+  const rcsEnabled = useRcsEnabled();
   const [screenLease] = useState(() => accountLease ?? captureRealtimeDeliveryLease());
 
   // Latest messages for the stable long-press callback (thread membership check).
@@ -129,27 +94,24 @@ export function useMessageActions({
     return current;
   };
 
-  // Long-press a bubble → open the tapback/reply/edit menu. Stable so the
+  // Long-press a bubble → open the local-action menu (plus RCS reactions). Stable so the
   // memoized message rows aren't re-rendered by a fresh closure each render.
   const onLongPressMessage = useCallback(
     (msg: EnrichedMessage, rect: BubbleRect): void => {
       if (isAggregateRetractionTombstone(msg)) return;
-      const { bodyText, visibleAttachments, visibleAttachmentCount, targetPartIndex } =
-        actionContentOf(msg, topologyCapable);
-      const mine = msg.reactions
-        .filter((r) => r.isFromMe && r.baseType !== 'emoji')
-        .map((r) => r.baseType)
-        .filter((t): t is ReactionBaseType => !!parseReactionType(t));
-      const myEmojis = msg.reactions
-        .filter((r) => r.isFromMe && r.baseType === 'emoji' && !!r.emoji)
-        .map((r) => r.emoji as string);
-      const myReactionParts: Record<string, number> = {};
-      for (const reaction of msg.reactions) {
-        if (!reaction.isFromMe || reaction.targetPart == null) continue;
-        myReactionParts[reactionKindKey(reaction.baseType, reaction.emoji)] = reaction.targetPart;
-      }
-      const messageSummaryInfo = parseMessageSummaryInfo(msg.messageSummaryInfo);
-      const targetsRcsMessage = isRcsChatGuid(guid);
+      const { bodyText, visibleAttachments, visibleAttachmentCount } = actionContentOf(msg);
+      const canReact = rcsEnabled && isRcsChatGuid(guid) && msg.guid.startsWith('rcs-');
+      const mine = canReact
+        ? msg.reactions
+            .filter((r) => r.isFromMe && r.baseType !== 'emoji')
+            .map((r) => r.baseType)
+            .filter((t): t is ReactionBaseType => !!parseReactionType(t))
+        : [];
+      const myEmojis = canReact
+        ? msg.reactions
+            .filter((r) => r.isFromMe && r.baseType === 'emoji' && !!r.emoji)
+            .map((r) => r.emoji as string)
+        : [];
       setSelected({
         guid: msg.guid,
         text: msg.text,
@@ -165,11 +127,7 @@ export function useMessageActions({
         senderName: msg.senderName,
         mine,
         myEmojis,
-        myReactionParts,
-        canReact: targetPartIndex != null || (targetsRcsMessage && msg.guid.startsWith('rcs-')),
-        // Google Messages accepts whole-message reactions but does not preserve Apple's threaded
-        // reply target. Keep Reply (and the other part-targeted actions) out of the overlay.
-        targetPartIndex: targetsRcsMessage ? undefined : targetPartIndex,
+        canReact,
         dateCreated: msg.dateCreated,
         // For the "Details" sheet: delivery/read/edit timestamps + this message's own service.
         dateDelivered: msg.dateDelivered,
@@ -178,12 +136,10 @@ export function useMessageActions({
         senderService: msg.senderService,
         isRetracted: isAggregateRetractionTombstone(msg),
         sourceRetractionFingerprint: retractionFingerprintOf(msg),
-        // Any edited message offers "View Edit History" (independent of the own-recent Edit gate).
+        // These are read-only views of received/persisted message state. They remain useful even
+        // though helper-backed reply, edit, and unsend commands are retired.
         isEdited: !!msg.dateEdited,
-        // Parse the persisted JSON blob (raw string on the row) into the history shape, tolerantly —
-        // a garbage/legacy value degrades to null (empty sheet), never throws. Threaded onto the
-        // selection so the sheet needs no extra DB fetch (the row is already loaded).
-        messageSummaryInfo,
+        messageSummaryInfo: parseMessageSummaryInfo(msg.messageSummaryInfo),
         isTemp: msg.guid.startsWith('temp-'),
         sendState: msg.sendState,
         // Keep private Messages-extension payload blobs out of Share/Save/Forward as well as the
@@ -194,30 +150,25 @@ export function useMessageActions({
           localPath: a.localPath,
           mimeType: a.mimeType,
         })),
-        // Thread membership: this message is a reply, or something in the loaded window replies to it.
         inThread:
           !!msg.threadOriginatorGuid ||
-          messagesRef.current.some((m) => m.threadOriginatorGuid === msg.guid),
+          messagesRef.current.some((candidate) => candidate.threadOriginatorGuid === msg.guid),
         threadOriginatorGuid: msg.threadOriginatorGuid,
         // The pressed bubble's on-screen rectangle → the overlay floats the tapback bar + menu
         // around it (iMessage-style). Absent → the overlay falls back to a centered sheet.
         anchorRect: rect,
       });
     },
-    [guid, topologyCapable],
+    [guid, rcsEnabled],
   );
 
-  // "View Thread": the reply chain sheet, keyed by the thread ORIGINATOR's guid.
+  // Read-only received-message affordances do not depend on the retired helper send path.
   const [threadFor, setThreadFor] = useState<string | null>(null);
   const onViewThreadSelected = (): void => {
     if (!currentSelectedMessage() || !selected) return;
     setThreadFor(selected.threadOriginatorGuid ?? selected.guid);
   };
 
-  // "View Edit History": the edit-history sheet. Wrapped so the wrapper's presence is the open
-  // signal (null = closed) even when there's no synced summary info (an optimistic local edit) —
-  // the sheet then shows an empty state. The value is already on the selection (parsed from the
-  // reactive row), so no fetch is needed.
   const [editHistory, setEditHistory] = useState<{ info: MessageSummaryInfo | null } | null>(null);
   const onViewEditHistorySelected = (): void => {
     const current = currentSelectedMessage();
@@ -330,71 +281,6 @@ export function useMessageActions({
     );
   };
 
-  // Swipe a bubble right past the threshold → reply to it (stable for the memoized rows).
-  const onSwipeReply = useCallback(
-    (msg: EnrichedMessage): void => {
-      if (
-        isRcsChatGuid(guid) ||
-        msg.guid.startsWith('temp-') ||
-        isAggregateRetractionTombstone(msg)
-      )
-        return;
-      const { bodyText, visibleAttachmentCount, targetPartIndex } = actionContentOf(
-        msg,
-        topologyCapable,
-      );
-      if (targetPartIndex == null) return;
-      setReplyTo({
-        guid: msg.guid,
-        text: bodyText,
-        subject: msg.subject,
-        balloonBundleId: msg.balloonBundleId,
-        isFromMe: msg.isFromMe,
-        senderName: msg.senderName,
-        hasAttachments: msg.hasAttachments,
-        hasVisibleAttachments: visibleAttachmentCount > 0 ? 1 : 0,
-        attachmentDescription: msg.attachmentDescription,
-        targetPartIndex,
-      });
-    },
-    [guid, setReplyTo, topologyCapable],
-  );
-
-  const onEditSelected = (): void => {
-    const current = currentSelectedMessage();
-    if (!current) return;
-    const { bodyText, targetPartIndex } = actionContentOf(current, topologyCapable);
-    if (targetPartIndex == null) return;
-    setReplyTo(null);
-    setEditing({
-      guid: current.guid,
-      text: bodyText || current.text || '',
-      partIndex:
-        editedPartFromSummary(parseMessageSummaryInfo(current.messageSummaryInfo)) ??
-        targetPartIndex,
-    });
-  };
-
-  const onUnsendSelected = (): void => {
-    const initial = currentSelectedMessage();
-    if (!initial || actionContentOf(initial, topologyCapable).targetPartIndex == null) return;
-    showDialog('Unsend message?', 'This removes it for you and retracts it.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Unsend',
-        style: 'destructive',
-        onPress: () => {
-          const current = currentSelectedMessage();
-          if (!current) return;
-          const partIndex = actionContentOf(current, topologyCapable).targetPartIndex;
-          if (partIndex == null) return;
-          if (isDev()) void devUnsendFake(current.guid, partIndex, screenLease);
-          else void unsend({ messageGuid: current.guid, chatGuid: guid, partIndex }, screenLease);
-        },
-      },
-    ]);
-  };
-
   const onCancelSelected = (): void => {
     if (!selected) return;
     const g = selected.guid;
@@ -429,28 +315,17 @@ export function useMessageActions({
 
   const onReact = (reaction: string, emoji?: string): void => {
     const current = currentSelectedMessage();
-    if (!current || current.guid.startsWith('temp-')) return;
-    const { bodyText, targetPartIndex } = actionContentOf(current, topologyCapable);
-    const targetsWholeRcsMessage = isRcsChatGuid(guid) && current.guid.startsWith('rcs-');
-    const parsed = parseReactionType(reaction);
-    // A removal targets the exact part stored on the surviving own reaction. Old rows whose
-    // prefix was normalized before 0042 have UNKNOWN identity and must retain the legacy part-zero
-    // fallback; borrowing the bubble's nonzero caption guess could remove a different reaction.
-    const existingReactionPart = parsed
-      ? current.reactions.find(
-          (entry) =>
-            entry.isFromMe &&
-            entry.targetPart != null &&
-            reactionKindKey(entry.baseType, entry.emoji) ===
-              reactionKindKey(parsed.baseType, emoji),
-        )?.targetPart
-      : undefined;
-    const partIndex = targetsWholeRcsMessage
-      ? 0
-      : parsed?.isRemoval
-        ? (existingReactionPart ?? targetPartIndex)
-        : targetPartIndex;
-    if (partIndex == null) return;
+    if (
+      !rcsEnabled ||
+      !isRcsChatGuid(guid) ||
+      !current ||
+      !current.guid.startsWith('rcs-') ||
+      !parseReactionType(reaction)
+    ) {
+      return;
+    }
+    const { bodyText } = actionContentOf(current);
+    const partIndex = 0;
     const args = {
       chatGuid: guid,
       targetGuid: current.guid,
@@ -464,32 +339,10 @@ export function useMessageActions({
     else void react(args, screenLease, presentSendIssue);
   };
 
-  const onReplyToSelected = (): void => {
-    const current = currentSelectedMessage();
-    if (isRcsChatGuid(guid) || !current || current.guid.startsWith('temp-')) return;
-    const { bodyText, visibleAttachmentCount, targetPartIndex } = actionContentOf(
-      current,
-      topologyCapable,
-    );
-    if (targetPartIndex == null) return;
-    setReplyTo({
-      guid: current.guid,
-      text: bodyText || current.text,
-      subject: current.subject,
-      balloonBundleId: current.balloonBundleId,
-      isFromMe: current.isFromMe,
-      senderName: current.senderName,
-      hasAttachments: current.hasAttachments ?? 0,
-      hasVisibleAttachments: visibleAttachmentCount > 0 ? 1 : 0,
-      attachmentDescription: current.attachmentDescription,
-      targetPartIndex,
-    });
-  };
-
   const onCopySelected = (): void => {
     const current = currentSelectedMessage();
     if (!current) return;
-    const text = actionContentOf(current, topologyCapable).bodyText || current.text;
+    const text = actionContentOf(current).bodyText || current.text;
     if (text) void Clipboard.setStringAsync(text);
   };
 
@@ -500,7 +353,7 @@ export function useMessageActions({
     void (async () => {
       const current = currentSelectedMessage();
       if (!current || !screenLease.isCurrent()) return;
-      const content = actionContentOf(current, topologyCapable);
+      const content = actionContentOf(current);
       const att = content.visibleAttachments.find((a) => isLocalFileUri(a.localPath));
       if (att?.localPath) {
         const res = await shareAttachment(att.localPath, att.mimeType, screenLease.isCurrent);
@@ -556,7 +409,7 @@ export function useMessageActions({
   const onForwardSelected = (): void => {
     const current = currentSelectedMessage();
     if (!current) return;
-    const content = actionContentOf(current, topologyCapable);
+    const content = actionContentOf(current);
     const plan = buildForwardParams(
       {
         text: content.bodyText || current.text,
@@ -582,7 +435,7 @@ export function useMessageActions({
   // file; if none is downloaded yet, tells the user to open it first (which triggers the download).
   const onSaveSelected = (): void => {
     const current = currentSelectedMessage();
-    const atts = current ? actionContentOf(current, topologyCapable).visibleAttachments : [];
+    const atts = current ? actionContentOf(current).visibleAttachments : [];
     if (atts.length === 0 || !screenLease.isCurrent()) return;
     void (async () => {
       const res = await saveAttachmentsToPhotos(
@@ -613,7 +466,7 @@ export function useMessageActions({
         if (when == null || !screenLease.isCurrent()) return;
         const msg = currentSelectedMessage();
         if (!msg) return;
-        const content = actionContentOf(msg, topologyCapable);
+        const content = actionContentOf(msg);
         await scheduleMessageReminder(
           {
             chatGuid: guid,
@@ -658,17 +511,13 @@ export function useMessageActions({
     setDetails,
     onDetailsSelected,
     onLongPressMessage,
-    onSwipeReply,
     onToggleSelect,
     onEnterSelect,
     onBulkCopy,
     onBulkDelete,
     onViewThreadSelected,
-    onEditSelected,
-    onUnsendSelected,
     onCancelSelected,
     onReact,
-    onReplyToSelected,
     onCopySelected,
     onShareSelected,
     onDeleteSelected,

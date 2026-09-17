@@ -24,26 +24,10 @@ async function createFixture(options: { serverId?: string } = {}): Promise<Fixtu
     .prepare('INSERT INTO chats (guid, latest_message_date) VALUES (?, ?)')
     .run('c1', 100);
   const chatId = Number(inserted.lastInsertRowid);
-  raw
-    .prepare(
-      `INSERT INTO messages(guid, chat_id, text, date_created, message_part_topology)
-       VALUES ('reply-guid', ?, 'target', 1, ?)`,
-    )
-    .run(
-      chatId,
-      JSON.stringify({
-        complete: true,
-        originalPartIndexes: [0],
-        currentParts: [{ index: 0, kind: 'text' }],
-        attachmentOwnership: [],
-      }),
-    );
   const scheduledId = await insertScheduled(db, {
     chatGuid: 'c1',
     text: 'scheduled text',
     scheduledFor: 1_000,
-    selectedMessageGuid: 'reply-guid',
-    selectedMessagePartIndex: 0,
     serverId: options.serverId,
   });
   return { db, raw, chatId, scheduledId };
@@ -56,15 +40,12 @@ function outgoing(chatId: number, overrides: Partial<InsertOutgoingTextArgs> = {
     chatGuid: 'c1',
     text: 'scheduled text',
     now: 2_000,
-    selectedMessageGuid: 'reply-guid',
-    partIndex: 0,
-    threadOriginatorGuid: 'reply-guid',
     ...overrides,
   } satisfies InsertOutgoingTextArgs;
 }
 
 describe('scheduled → outgoing repository handoff', () => {
-  it('retires a directly handed-off targeted RCS schedule without creating outgoing work', async () => {
+  it('retires a stale directly handed-off target without creating outgoing work', async () => {
     const { db, raw, chatId, scheduledId } = await createFixture();
     expect(await claimScheduled(db, scheduledId)).toBe(true);
     raw
@@ -74,7 +55,12 @@ describe('scheduled → outgoing repository handoff', () => {
     await expect(
       handoverScheduledTextToOutgoing(db, {
         scheduledId,
-        outgoing: outgoing(chatId, { chatGuid: 'RCS;-;thread-1' }),
+        outgoing: outgoing(chatId, {
+          chatGuid: 'RCS;-;thread-1',
+          selectedMessageGuid: 'stale-reply-guid',
+          partIndex: 0,
+          threadOriginatorGuid: 'stale-reply-guid',
+        }),
         transition: { kind: 'sent' },
       }),
     ).rejects.toBeInstanceOf(ScheduledOutgoingTargetUnavailableError);
@@ -110,11 +96,7 @@ describe('scheduled → outgoing repository handoff', () => {
       tempGuid: 'temp-handoff',
       chatGuid: 'c1',
       kind: 'text',
-      payload: JSON.stringify({
-        message: 'scheduled text',
-        selectedMessageGuid: 'reply-guid',
-        partIndex: 0,
-      }),
+      payload: JSON.stringify({ message: 'scheduled text' }),
     });
     expect(
       raw
@@ -131,7 +113,7 @@ describe('scheduled → outgoing repository handoff', () => {
       text: 'scheduled text',
       dateCreated: 2_000,
       sendState: 'sending',
-      threadOriginatorGuid: 'reply-guid',
+      threadOriginatorGuid: null,
     });
     expect(
       raw.prepare('SELECT latest_message_date AS latest FROM chats WHERE id = ?').get(chatId),

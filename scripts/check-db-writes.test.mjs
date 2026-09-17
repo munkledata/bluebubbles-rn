@@ -1569,7 +1569,7 @@ test('certifies exactly the reviewed direct incoming-ingress edge nodes', () => 
     (finding) => finding.detectedContext === 'incoming-ingress-delegation',
   );
 
-  assert.equal(ingress.length, 29);
+  assert.equal(ingress.length, 27);
   assert.deepEqual(
     Object.fromEntries(
       [...new Set(ingress.map((finding) => finding.path))]
@@ -1577,15 +1577,14 @@ test('certifies exactly the reviewed direct incoming-ingress edge nodes', () => 
         .map((path) => [path, ingress.filter((finding) => finding.path === path).length]),
     ),
     {
-      'app/(app)/chat/[guid].tsx': 1,
-      'src/features/conversations/devSeed.ts': 5,
+      'src/features/conversations/devSeed.ts': 4,
       'src/services/notifications/fcmMessaging.ts': 9,
       'src/services/notifications/registerFcmBackgroundHandler.ts': 1,
       'src/services/realtimeControl.ts': 13,
     },
   );
   // The reviewed extension is closed over two durable locked-V3 admission handoffs and the two
-  // exact foreground-intent resume wrappers. Their stable IDs make the 25 -> 29 increase explicit.
+  // exact foreground-intent resume wrappers. Their stable IDs make the reviewed extension explicit.
   assert.deepEqual(
     ingress
       .map((finding) => finding.id)
@@ -1789,7 +1788,7 @@ fullOnlyTest('rejects the reviewed foreground, headless, and key-overlap weakeni
     assert.equal(
       baseline.filter((finding) => finding.detectedContext === 'incoming-ingress-delegation')
         .length,
-      29,
+      27,
       'focused hostile fixture must exercise the live positive certificate',
     );
     for (const mutation of cases) {
@@ -1936,23 +1935,19 @@ test('certifies exactly the reviewed notification presentation and reminder-effe
       'src/services/notifications/notifeeService.ts#cancelAllNotifications.<callback:d88b914181>:mutator-call:5e1eda48b4c7',
       'src/services/notifications/notifeeService.ts#cancelFaceTimeNotification.<callback:4ef3145a64>:mutator-call:dd3a6cf045a8',
       'src/services/notifications/notifeeService.ts#cancelFaceTimeNotificationNow:mutator-call:22faf30a92fa',
-      'src/services/notifications/notifeeService.ts#postFaceTimeNotification:mutator-call:61526340fc91',
       'src/services/notifications/notifeeService.ts#postNotification.<callback:8bc766ee78>:mutator-call:51a350ad5620',
       'src/services/notifications/notifeeService.ts#postNotificationNow:mutator-call:3715d5ebf0b8',
-      'src/services/notifications/notifeeService.ts#postNotificationNow:mutator-call:a1fe19482506',
       'src/services/notifications/notifeeService.ts#postSendFailureNotification.<callback:733692bd31>:mutator-call:69ad00d25654',
       'src/services/notifications/notifeeService.ts#prepareNotificationPresentationState.<callback:2d26413326>.<callback:aaa5db8dfb>:mutator-call:49cfa621c037',
       'src/services/notifications/notifeeService.ts#prepareNotificationPresentationStateNow:mutator-call:636ff0e2c483',
+      'src/services/notifications/notifeeService.ts#prepareNotificationPresentationStateNow:mutator-call:72595637777d',
       'src/services/notifications/notifeeService.ts#prepareNotificationPresentationStateNow:mutator-call:d69db4ac60cd',
       'src/services/notifications/notifeeService.ts#sanitizeCurrentDisplayedReminders:mutator-call:eaf56e29329b',
-      'src/services/notifications/notifeeService.ts#sanitizeDisplayedNotifications:mutator-call:1a0c7f4aa6a7',
       'src/services/notifications/notifeeService.ts#sanitizeDisplayedNotifications:mutator-call:fc0ca0b8b11a',
       'src/services/notifications/notifeeService.ts#sanitizeLegacyNotificationPayloadsIfPresent:mutator-call:9e429c36e49b',
       'src/services/notifications/notifeeService.ts#sanitizeLegacyNotificationPayloadsIfPresent:mutator-call:e85e19312cb9',
       'src/services/notifications/notifeeService.ts#sanitizeLegacyNotificationPayloadsIfPresent:mutator-call:e85e19312cb9:2',
       'src/services/notifications/notifeeService.ts#sanitizeTriggerNotifications:mutator-call:fd918617393f',
-      'src/services/notifications/notifeeService.ts#sanitizedFaceTimeNotification:mutator-call:89a00ac79465',
-      'src/services/notifications/notifeeService.ts#sanitizedNotification:mutator-call:0c7b1862fc9e',
     ].sort(),
   );
   assert.deepEqual(
@@ -2115,20 +2110,20 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
   assert.deepEqual(
     featureSettingTransactions.map((finding) => finding.id).sort(),
     [
-      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setAutoDownloadDestination.<callback:0a291c45bf>:mutator-call:370e47c1ad0e',
-      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setAutoDownloadDestination.<callback:0a291c45bf>:mutator-call:7d3f17b348b0',
-      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setAutoDownloadDestination:mutator-call:53bfbf30831c',
-      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setAutoDownloadDestination:mutator-call:70a8e1b16756',
-      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setFlag.<callback:2f7b5f0583>:mutator-call:1613337ce250',
-      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setFlag.<callback:2f7b5f0583>:mutator-call:9fab5720b4a9',
-      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setFlag:mutator-call:83e3afbccc27',
-      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setFlag:mutator-call:b5ce5db1e87f',
-      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setInboxFilters.<callback:fc105905b5>:mutator-call:be6f374ea1f4',
-      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setInboxFilters:mutator-call:60c1275762da',
-      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setInboxFilters:mutator-call:e9c6421566a2',
-      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setMaxConcurrentDownloads.<callback:62a8e00576>:mutator-call:ba53fef4d2ee',
-      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setMaxConcurrentDownloads:mutator-call:38ead881d915',
-      'src/state/featureSettingsStore.ts#<callback:aa3a0f2928>.setMaxConcurrentDownloads:mutator-call:e6459b4ae146',
+      'src/state/featureSettingsStore.ts#<callback:a7fb95a4a8>.setAutoDownloadDestination.<callback:0a291c45bf>:mutator-call:bea795bad123',
+      'src/state/featureSettingsStore.ts#<callback:a7fb95a4a8>.setAutoDownloadDestination.<callback:0a291c45bf>:mutator-call:f4f4625b7d36',
+      'src/state/featureSettingsStore.ts#<callback:a7fb95a4a8>.setAutoDownloadDestination:mutator-call:8a7c2ddf6d61',
+      'src/state/featureSettingsStore.ts#<callback:a7fb95a4a8>.setAutoDownloadDestination:mutator-call:c5c9cd8341e5',
+      'src/state/featureSettingsStore.ts#<callback:a7fb95a4a8>.setFlag.<callback:2f7b5f0583>:mutator-call:1d53e56f5f13',
+      'src/state/featureSettingsStore.ts#<callback:a7fb95a4a8>.setFlag.<callback:2f7b5f0583>:mutator-call:f5753feb3717',
+      'src/state/featureSettingsStore.ts#<callback:a7fb95a4a8>.setFlag:mutator-call:1b06f095a3a4',
+      'src/state/featureSettingsStore.ts#<callback:a7fb95a4a8>.setFlag:mutator-call:8fd19b9c75cc',
+      'src/state/featureSettingsStore.ts#<callback:a7fb95a4a8>.setInboxFilters.<callback:fc105905b5>:mutator-call:1494e474e34c',
+      'src/state/featureSettingsStore.ts#<callback:a7fb95a4a8>.setInboxFilters:mutator-call:5f707f492285',
+      'src/state/featureSettingsStore.ts#<callback:a7fb95a4a8>.setInboxFilters:mutator-call:9d2754893220',
+      'src/state/featureSettingsStore.ts#<callback:a7fb95a4a8>.setMaxConcurrentDownloads.<callback:62a8e00576>:mutator-call:1a2b9c7d9647',
+      'src/state/featureSettingsStore.ts#<callback:a7fb95a4a8>.setMaxConcurrentDownloads:mutator-call:4cf05853d474',
+      'src/state/featureSettingsStore.ts#<callback:a7fb95a4a8>.setMaxConcurrentDownloads:mutator-call:ef298dcccff8',
     ].sort(),
   );
   assert.deepEqual(
@@ -2225,7 +2220,7 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
             'src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:',
           ))),
   );
-  const outgoingQueueClaimTransaction = findings.filter(
+  const outgoingQueueClaimAndDeferralTransactions = findings.filter(
     (finding) =>
       finding.path === 'src/services/send/outgoingQueueService.ts' &&
       finding.symbol.startsWith('runOutgoingQueueBody.') &&
@@ -2233,6 +2228,8 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
         finding.target ===
           'src/db/repositories/outgoingRetry.ts#claimOutgoingForSendWithinTransaction' ||
+        finding.target ===
+          'src/db/repositories/outgoingRetry.ts#deferOutgoingSendClaimWithinTransaction' ||
         (finding.detectedContext === 'withDbTransaction' &&
           finding.target.startsWith(
             'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:',
@@ -2310,40 +2307,30 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/notifications/actions.ts#handleNotificationAction.<callback:383ea8d776>:mutator-call:f5e067703ee5',
       'src/services/notifications/actions.ts#handleNotificationActionForAccount:mutator-call:6c2fa704827f',
       'src/services/notifications/actions.ts#handleNotificationActionForAccount:mutator-call:d1008c7afb46',
-      'src/services/notifications/actions.ts#loveMessage:mutator-call:3891092a2706',
+      'src/services/notifications/actions.ts#loveMessage:mutator-call:24b12380d8b6',
       'src/services/notifications/actions.ts#replyTo:mutator-call:16685310e2e9',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:217b993890>:mutator-call:e29e08b5718a',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:49d47bc9dc>:mutator-call:ad52ad6af0e9',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:49d47bc9dc>:mutator-call:ad52ad6af0e9:2',
-      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:6fa16d3d19>.<callback:7b52abff34>:mutator-call:699373b78c98',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:e7bd01875e>:mutator-call:45e09bb6f5a8',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.authorizeTarget:mutator-call:9a263ef84bb1',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retirePrivateApiRow.<callback:49d47bc9dc>:mutator-call:9ca1c09561f1',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retireTarget.<callback:603c120868>:mutator-call:8116c446048a',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow:mutator-call:676a94da498c',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow:mutator-call:676a94da498c:2',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow:mutator-call:676a94da498c:3',
-      'src/services/send/outgoingQueueService.ts#resendOutgoingRow:mutator-call:676a94da498c:4',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueue.<callback:29840cb4df>:mutator-call:38f56b01ae85',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueue:mutator-call:0a114e0f6425',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody:mutator-call:492bba910ec0',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage.authorizeTarget:mutator-call:8a0a6b874f37',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueue.<callback:6f1c0971ba>:mutator-call:8a9c96b197b7',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueue:mutator-call:96266b944567',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody:mutator-call:0f9846ef4fff',
       'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:7b145a63f68d',
       'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:d63151141c20',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:ded649d365f0',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:e3781fe57bc4',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-reference:44978000bc73',
       'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:6e5f31342b9a',
-      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:76a6eb6cb3d5',
-      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:76a6eb6cb3d5:2',
       'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:94ed03d73c45',
-      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:f095dc2ef480',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:0383d1f78e53',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:4722f6c1c506',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:519577ae83e1',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:e8547c9b8ebc',
-      'src/services/send/sendService.ts#sendTextMessage:mutator-call:190d8d6370e4',
-      'src/services/send/sendService.ts#sendTextMessage:mutator-call:31d10cdc7448',
-      'src/services/send/sendService.ts#sendTextMessage:mutator-call:3bef99e14355',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:8e8d9434e3c4',
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:d67f792bc542',
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:e3462acdb37d',
     ].sort(),
@@ -2351,26 +2338,29 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
   assert.deepEqual(
     outgoingAttachmentInsertTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:6c96a954ed>:mutator-call:037aaedb148a',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:6c96a954ed>:mutator-call:136a59f3358e',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:398f7cb81e9c',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:54e02d7d2f49',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:dc74bca8e3>:mutator-call:05785a97cf5a',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:dc74bca8e3>:mutator-call:26ecbe1eceea',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:3001ad1c2263',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:e904f326be38',
     ].sort(),
   );
   assert.deepEqual(
     outgoingContactInsertTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendContactService.ts#sendContactMessage.<callback:68fa4f1fa0>:mutator-call:9da6d7acd614',
-      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:207634ff49af',
-      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:72360c3ad6df',
+      'src/services/send/sendContactService.ts#sendContactMessage.<callback:33999fe2ba>:mutator-call:0c0a900a2a27',
+      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:62fcea64c1d4',
+      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:7065ae2ebeb0',
     ].sort(),
   );
   assert.deepEqual(
-    outgoingQueueClaimTransaction.map((finding) => finding.id).sort(),
+    outgoingQueueClaimAndDeferralTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:8568475ef9>.<callback:31e029392f>:mutator-call:31d4d25a13ab',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:8568475ef9>:mutator-call:6f65564873d7',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:8568475ef9>:mutator-call:8adfafbe99d4',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:7074dbe4a3>.<callback:2da3f076f1>:mutator-call:4663866c59ef',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:7074dbe4a3>:mutator-call:bb5ed5290238',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:7074dbe4a3>:mutator-call:c04731bd2274',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:7678a0d5ed>.<callback:58de47bad3>:mutator-call:3998f044069d',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:7678a0d5ed>:mutator-call:a49bb208b031',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:7678a0d5ed>:mutator-call:ced5adb9083e',
     ].sort(),
   );
   assert.deepEqual(
@@ -2392,9 +2382,9 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
   assert.deepEqual(
     outgoingTextInsertTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendService.ts#sendTextMessage.<callback:7974d32845>:mutator-call:6ec500bcfbe9',
-      'src/services/send/sendService.ts#sendTextMessage:mutator-call:0d1b2054e6a1',
-      'src/services/send/sendService.ts#sendTextMessage:mutator-call:69fe1c02d86d',
+      'src/services/send/sendService.ts#sendTextMessage.<callback:3940f52b1d>:mutator-call:b8808f288fd5',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:dbae6e23dc66',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:df6b0bc3345b',
     ].sort(),
   );
   assert.deepEqual(
@@ -2512,62 +2502,22 @@ test('certifies exactly the reviewed deferred-send service delegation edges', ()
       'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:129221ae16e0',
       'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:2d6c1d03bc6e',
       'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:3dac61ecbedb',
-      'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:5eb8b21bfb27',
-      'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:8080ee272e67',
-      'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:8080ee272e67:2',
+      'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:4403cba029a2',
       'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:d03c79eca4a4',
+      'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:fe7c5860f178',
       'src/services/send/scheduleService.ts#runDueScheduled:mutator-reference:28e61216ad29',
-      'src/services/send/scheduleService.ts#scheduleTextMessage:mutator-call:56f2f66dc208',
-      'src/services/send/scheduleService.ts#scheduleTextMessage:mutator-call:56f2f66dc208:2',
-      'src/services/send/sendEditService.ts#sendEdit.<callback:cee4f3aecd>:mutator-call:96fbefa9a803',
-      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:18190c10a3a7',
-      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:18190c10a3a7:2',
-      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:18190c10a3a7:3',
-      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:e76fdd58c0ef',
-      'src/services/send/sendEditService.ts#sendUnsend.<callback:e9d709b4f5>:mutator-call:b72f3c0fdd17',
-      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:d616627ba85d',
-      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:e72a95e45dea',
-      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:e72a95e45dea:2',
-      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:e72a95e45dea:3',
     ].sort(),
   );
-  assert.deepEqual(
-    editApplyTransaction.map((finding) => finding.id).sort(),
-    [
-      'src/services/send/sendEditService.ts#sendEditOnce.<callback:e84e4358bd>:mutator-call:5f8def4fe9ee',
-      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:c06cf93330ce',
-      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:c53a326b6dd5',
-    ].sort(),
-  );
-  assert.deepEqual(
-    editRevertTransaction.map((finding) => finding.id).sort(),
-    [
-      'src/services/send/sendEditService.ts#revertOptimisticEdit.<callback:bcbc86276a>:mutator-call:3a035e3ce559',
-      'src/services/send/sendEditService.ts#revertOptimisticEdit:mutator-call:536da85cdca4',
-      'src/services/send/sendEditService.ts#revertOptimisticEdit:mutator-call:bea2b441da12',
-    ].sort(),
-  );
-  assert.deepEqual(
-    unsendApplyTransaction.map((finding) => finding.id).sort(),
-    [
-      'src/services/send/sendEditService.ts#sendUnsendOnce.<callback:f40315bf84>:mutator-call:a79ca93d4d72',
-      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:580043de2d5c',
-      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:ca09c10da247',
-    ].sort(),
-  );
-  assert.deepEqual(
-    unsendRevertTransaction.map((finding) => finding.id).sort(),
-    [
-      'src/services/send/sendEditService.ts#revertOptimisticUnsend.<callback:dbbeb4ecfb>:mutator-call:d47f88b21b88',
-      'src/services/send/sendEditService.ts#revertOptimisticUnsend:mutator-call:98db85aad231',
-      'src/services/send/sendEditService.ts#revertOptimisticUnsend:mutator-call:ca930e9a0ed6',
-    ].sort(),
-  );
+  assert.deepEqual(editApplyTransaction.map((finding) => finding.id).sort(), []);
+  assert.deepEqual(editRevertTransaction.map((finding) => finding.id).sort(), []);
+  assert.deepEqual(unsendApplyTransaction.map((finding) => finding.id).sort(), []);
+  assert.deepEqual(unsendRevertTransaction.map((finding) => finding.id).sort(), []);
   assert.deepEqual(
     scheduledInsertTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/scheduleService.ts#scheduleTextMessage.insert.<callback:2230f77330>:mutator-call:65fa9a45d877',
-      'src/services/send/scheduleService.ts#scheduleTextMessage.insert:mutator-call:f6392efa123b',
+      'src/services/send/scheduleService.ts#scheduleTextMessage.<callback:bcbf452138>:mutator-call:ef3b92e88431',
+      'src/services/send/scheduleService.ts#scheduleTextMessage:mutator-call:31eb04a40935',
+      'src/services/send/scheduleService.ts#scheduleTextMessage:mutator-call:c6c6102cb4ec',
     ].sort(),
   );
 });
@@ -2592,9 +2542,9 @@ test('certifies the exact residual repository delegations after explicit-owner c
     (finding) => !devFixtures.includes(finding) && !scheduledStateMachine.includes(finding),
   );
 
-  assert.equal(devFixtures.length, 17);
-  assert.equal(intentionalBoundaries.length, 40);
-  assert.equal(scheduledStateMachine.length, 12);
+  assert.equal(devFixtures.length, 14);
+  assert.equal(intentionalBoundaries.length, 36);
+  assert.equal(scheduledStateMachine.length, 11);
   assert.deepEqual(
     findings.map((finding) => finding.id).sort(),
     [
@@ -2605,12 +2555,9 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/db/repositories/maintenance.ts#clearLocalCache:mutator-call:e64441bf4d7f',
       'src/db/repositories/messageTargets.ts#isPendingUnsendTargetAvailable:mutator-call:280d92fbf22d',
       'src/db/repositories/scheduled.ts#reconcileServerScheduled:mutator-call:6df044728f30',
-      'src/features/conversations/devSeed.ts#devEditFake.<callback:5de2143777>:mutator-call:22334d03d1f3',
       'src/features/conversations/devSeed.ts#devSendFake.<callback:afb6e663ad>:mutator-call:02860e861312',
       'src/features/conversations/devSeed.ts#devSendFakeImage.<callback:daefab75bd>:mutator-call:149c3a85dd8b',
       'src/features/conversations/devSeed.ts#devSendFakeReaction.<callback:6d65226469>:mutator-call:46a3d5cbab9e',
-      'src/features/conversations/devSeed.ts#devSendFakeReply.<callback:b7005c9592>:mutator-call:7ce6f05a395b',
-      'src/features/conversations/devSeed.ts#devUnsendFake.<callback:63759d66d5>:mutator-call:e9407914db8f',
       'src/features/conversations/devSeed.ts#queueDevSendReconcile.<callback:a529712610>.reconcile:mutator-call:e5846ec828a7',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:263f9a2cf920',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:2d1329c7ad6c',
@@ -2646,21 +2593,16 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/services/realtime/incomingEventDrain.ts#durableContext.markDbAppliedWithinTransaction:mutator-call:737d7a3d436b',
       'src/services/send/index.ts#syncScheduledFromServer.<callback:c129c31bd8>:mutator-call:1a675a1023a2',
       'src/services/send/index.ts#syncScheduledFromServer.<callback:c129c31bd8>:mutator-call:73312ae182ae',
+      'src/services/send/index.ts#retry.<callback:5dfb1a7072>:mutator-call:71b2c14e4854',
       'src/services/send/scheduleService.ts#recoverInterruptedScheduledRows:mutator-call:8fc2072469ba',
       'src/services/send/scheduleService.ts#runDueScheduled.writeTerminal:mutator-call:934d3ba3156d',
       'src/services/send/scheduleService.ts#runDueScheduled.writeTerminal:mutator-call:ae2537472d84',
       'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:3dac61ecbedb',
-      'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:8080ee272e67',
-      'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:8080ee272e67:2',
       'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:d03c79eca4a4',
+      'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:fe7c5860f178',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.authorizeTarget:mutator-call:9a263ef84bb1',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage.authorizeTarget:mutator-call:8a0a6b874f37',
-      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:f095dc2ef480',
-      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:e76fdd58c0ef',
-      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:d616627ba85d',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:0383d1f78e53',
-      'src/services/send/sendService.ts#sendTextMessage:mutator-call:190d8d6370e4',
-      'src/services/send/sendService.ts#sendTextMessage:mutator-call:3bef99e14355',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:8e8d9434e3c4',
       'src/db/repositories/outgoing.ts#reconcileExactOutgoingAttemptSuccessWithinTransaction:mutator-call:e0ea8d72f9a8',
       'src/services/sync/engine.ts#syncAllChats:mutator-call:d025e1f31f26',
       'src/services/sync/engine.ts#syncChatMessageRange:mutator-call:34deba18cbca',
@@ -2717,15 +2659,15 @@ test('certifies exactly the reviewed coordinated-delegation path additions', () 
         'transaction-coordinator',
       ],
       [
-        'src/features/conversations/useChatScheduledCatchup.ts#useChatScheduledCatchup.<callback:0489268c8c>.<callback:9669f9a50a>:mutator-call:4f04ac7c873d',
+        'src/features/conversations/useChatScheduledCatchup.ts#useChatScheduledCatchup.<callback:13e6d4e5b3>.<callback:9669f9a50a>:mutator-call:436aaee422cf',
         'coordinated-delegation',
       ],
       [
-        'src/features/conversations/useChatScheduledCatchup.ts#useChatScheduledCatchup.<callback:0489268c8c>.tick:mutator-call:81661530f32e',
+        'src/features/conversations/useChatScheduledCatchup.ts#useChatScheduledCatchup.<callback:13e6d4e5b3>.tick:mutator-call:2aa917f8b1f6',
         'coordinated-delegation',
       ],
       [
-        'src/features/conversations/useChatScheduledCatchup.ts#useChatScheduledCatchup.<callback:0489268c8c>:mutator-call:b43fff54eb99',
+        'src/features/conversations/useChatScheduledCatchup.ts#useChatScheduledCatchup.<callback:13e6d4e5b3>:mutator-call:65c5452f9609',
         'coordinated-delegation',
       ],
       [
@@ -2833,12 +2775,13 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
       'src/services/send/index.ts#fireDueScheduled.<callback:5c87ee99e7>:mutator-call:60a4834011d2',
       'src/services/send/index.ts#fireDueScheduledWithDevelopmentSender.<callback:0d6a663823>:mutator-call:a9efdbe22d70',
       'src/services/send/index.ts#pickAndSendContact.<callback:9bcfe7b86a>:mutator-call:a2100e00af93',
-      'src/services/send/index.ts#react.<callback:8681fdf18d>:mutator-call:8e63998325e5',
-      'src/services/send/index.ts#recoverOutgoing:mutator-call:addf824cadbb',
-      'src/services/send/index.ts#reply.<callback:61780df257>:mutator-call:d79714059aab',
-      'src/services/send/index.ts#retry.<callback:1a00c72a23>:mutator-call:5d13fb57c4c7',
+      'src/services/send/index.ts#react.<callback:2fba6f67ec>:mutator-call:e25ee15503af',
+      'src/services/send/index.ts#recoverOutgoing:mutator-call:03fa495ae369',
+      'src/services/send/index.ts#reply.<callback:693037f6f4>:mutator-call:9042a08c81dd',
+      'src/services/send/index.ts#retry.<callback:5dfb1a7072>:mutator-call:5d0ceeab3069',
+      'src/services/send/index.ts#retry.<callback:5dfb1a7072>:mutator-call:71b2c14e4854',
       'src/services/send/index.ts#schedule.<callback:f60bffc979>:mutator-call:29e6d7bb7f61',
-      'src/services/send/index.ts#send.<callback:f1b1c50eab>:mutator-call:4ab68665c262',
+      'src/services/send/index.ts#send.<callback:939d3d95aa>:mutator-call:9d6fc3b4c735',
       'src/services/send/index.ts#sendContactCard.<callback:4de55a3dfc>:mutator-call:6b3aa4db6f03',
       'src/services/send/index.ts#sendImage.<callback:cb0dce58ca>:mutator-call:3f3c0bb5866e',
       'src/services/send/index.ts#sendImages.<callback:b21823580a>.<callback:fe2d832948>:mutator-call:14eea9ad558f',
@@ -2859,9 +2802,9 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
   assert.deepEqual(
     retryClaimTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#retry.<callback:1a00c72a23>.<callback:26e204e71c>:mutator-call:066b0679e70e',
-      'src/services/send/index.ts#retry.<callback:1a00c72a23>:mutator-call:84ec968a40da',
-      'src/services/send/index.ts#retry.<callback:1a00c72a23>:mutator-call:b6a7770a4683',
+      'src/services/send/index.ts#retry.<callback:5dfb1a7072>.<callback:26e204e71c>:mutator-call:19e925bb96fd',
+      'src/services/send/index.ts#retry.<callback:5dfb1a7072>:mutator-call:5337bdc97950',
+      'src/services/send/index.ts#retry.<callback:5dfb1a7072>:mutator-call:99e71b4c3048',
     ].sort(),
   );
   assert.deepEqual(
@@ -2889,7 +2832,7 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
       'src/services/send/index.ts#editScheduled.<callback:f519119574>.persistPatch:mutator-call:9a5e1dfb2592',
     ].sort(),
   );
-  assert.equal(sendFrontDoorFindings.length, 37);
+  assert.equal(sendFrontDoorFindings.length, 38);
 });
 
 test('certifies exactly the reviewed conversation-action delegation edges', () => {
@@ -2926,12 +2869,9 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
     [
-      'src/features/conversations/devSeed.ts#devEditFake.<callback:5de2143777>:mutator-call:22334d03d1f3',
       'src/features/conversations/devSeed.ts#devSendFake.<callback:afb6e663ad>:mutator-call:02860e861312',
       'src/features/conversations/devSeed.ts#devSendFakeImage.<callback:daefab75bd>:mutator-call:149c3a85dd8b',
       'src/features/conversations/devSeed.ts#devSendFakeReaction.<callback:6d65226469>:mutator-call:46a3d5cbab9e',
-      'src/features/conversations/devSeed.ts#devSendFakeReply.<callback:b7005c9592>:mutator-call:7ce6f05a395b',
-      'src/features/conversations/devSeed.ts#devUnsendFake.<callback:63759d66d5>:mutator-call:e9407914db8f',
       'src/features/conversations/devSeed.ts#queueDevSendReconcile.<callback:a529712610>.reconcile:mutator-call:e5846ec828a7',
       'src/features/conversations/devSeed.ts#queueDevSendReconcile.<callback:a529712610>:mutator-reference:7993eb4dd862',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:263f9a2cf920',
@@ -2959,17 +2899,17 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
   assert.deepEqual(
     markReadTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/chatActions.ts#markRead.<callback:68c7d29d71>.<callback:f2c8eca326>:mutator-call:2a7928c76405',
-      'src/services/chatActions.ts#markRead.<callback:68c7d29d71>:mutator-call:1e8d5154d0de',
-      'src/services/chatActions.ts#markRead.<callback:68c7d29d71>:mutator-call:8ad9952c932f',
+      'src/services/chatActions.ts#markRead.<callback:8454ed5eb1>.<callback:f2c8eca326>:mutator-call:75a7cd28ce05',
+      'src/services/chatActions.ts#markRead.<callback:8454ed5eb1>:mutator-call:496a45663e99',
+      'src/services/chatActions.ts#markRead.<callback:8454ed5eb1>:mutator-call:8a51b0a532fb',
     ].sort(),
   );
   assert.deepEqual(
     markUnreadTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/chatActions.ts#markUnread.<callback:df8a151083>.<callback:add0a7f05b>:mutator-call:4b56371166c7',
-      'src/services/chatActions.ts#markUnread.<callback:df8a151083>:mutator-call:cb00e86ea5fd',
-      'src/services/chatActions.ts#markUnread.<callback:df8a151083>:mutator-call:ff399be009ca',
+      'src/services/chatActions.ts#markUnread.<callback:35dead9faf>.<callback:add0a7f05b>:mutator-call:d617aa51eac6',
+      'src/services/chatActions.ts#markUnread.<callback:35dead9faf>:mutator-call:2482c55a1134',
+      'src/services/chatActions.ts#markUnread.<callback:35dead9faf>:mutator-call:947e8e024b90',
     ].sort(),
   );
   assert.deepEqual(
@@ -3019,7 +2959,7 @@ test('certifies exactly the reviewed sync delegation edges', () => {
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
     [
-      'src/services/background/backgroundSync.ts#executeBackgroundSyncTask.drainOutgoing:mutator-call:2eed2d18717e',
+      'src/services/background/backgroundSync.ts#executeBackgroundSyncTask.drainOutgoing:mutator-call:475f73c47dc6',
       'src/services/background/backgroundSync.ts#executeBackgroundSyncTask.synchronize:mutator-call:23a950f7cc3a',
       'src/services/background/backgroundSync.ts#recoverAndDrainBackgroundSchedules.<callback:bb391a2ee5>:mutator-call:a0022079e125',
       'src/services/sync/engine.ts#fullSync:mutator-call:c1a685cf20b7',
@@ -4054,7 +3994,7 @@ test('certifies exactly the DB-02C runtime-concurrency writes and exclusive hand
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:04b4fca63da2',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:04b4fca63da2:2',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:150264484d1d',
-      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:189f55fb6c2e',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:46ae37afbaa9',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:2c5121e200af',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:3509064feb66',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:45be8e671e33',
@@ -4067,13 +4007,13 @@ test('certifies exactly the DB-02C runtime-concurrency writes and exclusive hand
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:bcdace9d293d',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:da8a7a29ea3f',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:da8a7a29ea3f:2',
-      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:779a08232837',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:d1d57ee78997',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:sql-insert:c225ba9768f7',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave.<callback:250c3794fc>:mutator-call:55ffe792a557',
-      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave.<callback:7b24129e54>:mutator-call:8cb85d5f3bee',
-      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave.<callback:7b24129e54>:mutator-call:98f7f8fb4e90',
-      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:31b64135cad8',
-      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:438c945711e6',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave.<callback:1d0bfbce31>:mutator-call:100591a9a500',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave.<callback:1d0bfbce31>:mutator-call:bc8e8f7ce7a5',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:2b56f206c62d',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:d47cc381aaf6',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:53f5e929f07d',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:6395b5094423',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#submitOrderedCoordinatorWave:mutator-call:a8582564276c',
@@ -4499,6 +4439,12 @@ fullOnlyTest(
           '    const inserted = await withDbTransaction(\n      db,\n      async (context) => {',
         after:
           '    const inserted = void withDbTransaction(\n      db,\n      async (context) => {',
+      },
+      {
+        label: 'image-send callee weakens capability-fenced DB admission',
+        path: 'src/services/send/sendAttachmentService.ts',
+        before: '      capabilityGuard,\n    );',
+        after: '      transport.admissionGuard,\n    );',
       },
       {
         label: 'sync contact bypass helper detaches its reachable DB work',
@@ -6149,7 +6095,6 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'app/(app)/new-chat.tsx',
     'src/db/repositories/chats.ts',
     'src/db/repositories/outgoing.ts',
-    'src/features/facetime/useFaceTime.ts',
     'src/services/backup/backup.ts',
     'src/services/backup/backupService.ts',
     'src/services/chat/groupManagement.ts',
@@ -6167,6 +6112,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'deleteMessageLocalWithinTransaction',
     'deleteScheduledHistoryWithinTransaction',
     'deleteScheduledWithinTransaction',
+    'deferOutgoingSendClaimWithinTransaction',
     'discardOutgoingMessageWithinTransaction',
     'ensureReceiptSlotWithinTransaction',
     'kvSetWithinTransaction',
@@ -6469,7 +6415,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     selected.map((finding) => finding.id).sort(),
     [
       'app/(app)/new-chat.tsx#NewChatScreen.<callback:6cde4fbfd5>:mutator-call:b4a563a44345',
-      'app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:4838a450d3a7',
+      'app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:d6589868b8c7',
       'src/db/repositories/chats.ts#deleteChatLocal:mutator-call:4b0c893b8080',
       'src/db/repositories/chats.ts#markAllChatsReadLocalWithinTransaction:sql-update:52eca3e393a6',
       'src/db/repositories/chats.ts#reconcileReadMarkersFromTimestamps:sql-update:9a087251324f',
@@ -6531,7 +6477,10 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoingRetry.ts#claimOutgoingForSendWithinTransaction:drizzle-update:7f620d3bb4f5',
       'src/db/repositories/outgoingRetry.ts#claimOutgoingForSendWithinTransaction:drizzle-update:7f620d3bb4f5:2',
       'src/db/repositories/outgoingRetry.ts#claimOutgoingForSendWithinTransaction:sql-update:67eaad07e164',
-      'src/db/repositories/outgoingRetry.ts#claimOutgoingForSendWithinTransaction:sql-update:dec41de4d57c',
+      'src/db/repositories/outgoingRetry.ts#claimOutgoingForSendWithinTransaction:sql-update:0cd3bdcc38d0',
+      'src/db/repositories/outgoingRetry.ts#deferOutgoingSendClaimWithinTransaction:sql-update:15e05dd06ec0',
+      'src/db/repositories/outgoingRetry.ts#deferOutgoingSendClaimWithinTransaction:sql-update:5e49fca77b02',
+      'src/db/repositories/outgoingRetry.ts#deferOutgoingSendClaimWithinTransaction:sql-update:b34b6cdc2b14',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:drizzle-update:7bbea9e0b4c6',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:drizzle-update:bf7b74884a04',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:drizzle-update:bf7b74884a04:2',
@@ -6569,13 +6518,10 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction:sql-update:fb0297907ce8',
       'src/db/repositories/chats.ts#setChatUnreadLocalWithinTransaction:drizzle-update:bc72f0e85266',
       'src/db/repositories/sync.ts#setSyncMarkerWithinTransaction:drizzle-update:7582ca63d697',
-      'src/features/facetime/useFaceTime.ts#useFaceTime.<callback:fff597c8bc>:mutator-call:ea4e12c6ab95',
       'src/services/backup/backup.ts#buildBackup:mutator-call:50677029090e',
       'src/services/backup/backup.ts#buildBackupWithCustomFolders:mutator-call:6eca578bbb50',
       'src/services/backup/backupService.ts#buildCurrentBackup.<callback:2bd1ecedc4>:mutator-call:3ea042f4e17e',
       'src/services/backup/backupService.ts#restoreCurrentBackup.<callback:93bf63133c>:mutator-call:27d17cbc08f6',
-      'src/services/chat/groupManagement.ts#renameGroupChat.<callback:c13ecdb63a>:mutator-call:2e89e3325c50',
-      'src/services/chat/groupManagement.ts#updateGroupParticipant.<callback:50428f1bde>:mutator-call:4e81064f65bb',
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
@@ -7291,12 +7237,6 @@ function incomingIngressMutationCases() {
         'export async function injectMessage(accountLease: RealtimeDeliveryLease): Promise<void> {',
     },
     {
-      label: 'chat DEV callback loses its release gate',
-      path: 'app/(app)/chat/[guid].tsx',
-      before: 'if (!isDevServer() || !accountLease.isCurrent()) return;',
-      after: 'if (!accountLease.isCurrent()) return;',
-    },
-    {
       label: 'rotation proposal bypasses the canonical snapshot',
       path: 'src/services/realtimeControl.ts',
       before: 'const normalized = snapshotIncomingEvent(captured.eventName, captured.rawData);',
@@ -7366,7 +7306,7 @@ fullOnlyTest(
       assert.equal(
         baseline.filter((finding) => finding.detectedContext === 'incoming-ingress-delegation')
           .length,
-        29,
+        27,
         'incoming-ingress fixture must exercise the live positive certificate',
       );
       for (const mutation of cases) {

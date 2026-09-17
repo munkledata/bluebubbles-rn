@@ -3,9 +3,10 @@
  *   - the TITLE resolves via the same resolveTitle semantics as the tile (custom name → real
  *     display name → participant names), with the exact address and avatar photo where available;
  *   - the SERVICE badge derives from the chat guid prefix via resolveChatService (RCS/SMS/iMessage);
- *   - the affordances fire the right navigation/call side-effects: back → router.back(); the
- *     centered avatar/title → router.push('/chat-settings/<encoded guid>'); the video button →
- *     useFaceTime().startCall({ chatGuid, video: true }); the calendar button → router.push('/scheduled');
+ *   - the remaining affordances fire the right navigation side-effects: back → router.back();
+ *     the centered avatar/title → router.push('/chat-settings/<encoded guid>'); the calendar
+ *     button → router.push('/scheduled');
+ *   - retired FaceTime controls stay absent even when stale server data advertises Private API;
  *   - when the header row hasn't loaded (data null) no avatar renders and the details a11y label
  *     falls back to "Chat details".
  *
@@ -14,7 +15,6 @@
  *
  * In-file mocks:
  *   - `expo-router` → useRouter with jest.fn push/back (mockPush/mockBack).
- *   - `@features/facetime/useFaceTime` → returns { startCall } (the real hook pulls services/web-browser).
  *   - `react-native-safe-area-context` → zero insets.
  *   - `@expo/vector-icons` → a synchronous Text marker (the real Ionicons does an async font-load
  *     setState that trips overlapping-act; the header renders two icons).
@@ -23,17 +23,13 @@ import React from 'react';
 import { act, fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
 import { ConversationHeader } from '@ui/conversations/ConversationHeader';
 import type { ChatHeaderRow } from '@db/repositories';
+import { useSessionStore } from '@state/sessionStore';
 
 const mockPush = jest.fn();
 const mockBack = jest.fn();
-const mockStartCall = jest.fn(() => Promise.resolve());
 let mockHeaderData: ChatHeaderRow | null = null;
 
 jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush, back: mockBack }) }));
-
-jest.mock('@features/facetime/useFaceTime', () => ({
-  useFaceTime: () => ({ startCall: mockStartCall, startCallTo: jest.fn() }),
-}));
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -99,9 +95,9 @@ function makeHeader(overrides: Partial<ChatHeaderRow> = {}): ChatHeaderRow {
 }
 
 beforeEach(() => {
+  useSessionStore.setState({ serverInfo: { version: 'test', private_api: true } as any });
   mockPush.mockClear();
   mockBack.mockClear();
-  mockStartCall.mockClear();
   mockHeaderData = null;
 });
 
@@ -331,16 +327,6 @@ describe('ConversationHeader — affordances', () => {
     );
   });
 
-  it('video button starts a FaceTime call for this chat', async () => {
-    const guid = 'iMessage;-;+15551230000';
-    mockHeaderData = makeHeader({ guid });
-    await renderWithTheme(<ConversationHeader chatGuid={guid} data={mockHeaderData} />);
-    await fireEvent.press(screen.getByLabelText('Start FaceTime call'));
-    await waitFor(() =>
-      expect(mockStartCall).toHaveBeenCalledWith({ chatGuid: guid, video: true }),
-    );
-  });
-
   it('calendar button routes to the scheduled-messages screen', async () => {
     mockHeaderData = makeHeader();
     await renderWithTheme(
@@ -348,6 +334,16 @@ describe('ConversationHeader — affordances', () => {
     );
     await fireEvent.press(screen.getByLabelText('View scheduled messages'));
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/scheduled'));
+  });
+
+  it('never renders retired FaceTime controls when stale server data advertises Private API', async () => {
+    mockHeaderData = makeHeader();
+    await renderWithTheme(
+      <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
+    );
+
+    expect(screen.queryByLabelText('Start FaceTime call')).toBeNull();
+    expect(screen.getByLabelText('View scheduled messages')).toBeTruthy();
   });
 });
 

@@ -40,12 +40,14 @@ native transfer, and HTTP response. This is not a promise that the whole wake or
 native operation terminates at that instant; claim and outcome commits remain outside the transfer
 deadline.
 
-The same durable bootstrap boundary owns network effects from a killed-process notification action.
-Reply, reaction, FaceTime Answer, and an enabled read receipt use one fixed client created only after
-vault, App Lock, and revocation inspection; they never fall back to default foreground-store
-credentials. Mark Read commits its local marker before lazily resolving that client, and read/unread
-server effects fail closed unless feature settings actually hydrated. A missing native client or
-settings read therefore suppresses only the optional network effect, never the device-local state.
+The same durable bootstrap boundary owns the remaining network effects from a killed-process
+notification action. A plain notification reply in an existing iMessage chat uses AppleScript,
+while the equivalent plain RCS send and supported whole-message RCS reaction use the independent
+RCS transport. Both network paths receive one fixed client, created only after vault, App Lock, and
+revocation inspection, and never fall back to foreground-store
+credentials. `FP-006` removes iMessage reaction and FaceTime actions entirely. Mark Read and Mark
+Unread now change only the device-local marker and never resolve a helper client or send a remote
+receipt. Stale persisted feature settings cannot restore any retired effect.
 
 A realtime chat-background event uses the same rule. Its detached callback carries the originating
 account generation, captures a fresh lease when it actually starts, and either pins the exact warm
@@ -232,22 +234,30 @@ remain idempotent, and account revocation must prevent an old cursor commit. Unt
 continuation contract is available, a full page that cannot advance the timestamp watermark stops
 fail-closed instead of silently skipping tied rows.
 
-As of 2026-09-02, the server and app implement the frozen composite v1 continuation plus the additive
+As of 2026-09-15, the server and app implement the frozen composite v1 continuation plus the additive
 v2 durable observation ledger, `hasMore`, zero-origin initialization, legacy fallback, and atomic
 page/state commit. Host tests prove late older-timestamp/lower-row observations, restart and epoch
 recovery (including startup rotation before background refill can reuse restored sequences),
 request-local rejection of forged-ahead cursors, background persistence before fanout, v1-to-v2
 transition, v2-to-old-server downgrade recovery, pagination, rollback, and old-server fallback. The
 response contract is host-green: the server owns canonical v1 and v2 continued-response fixtures,
-and app contract tests consume byte-identical copies pinned to matching SHA-256 digests. Exact-device
-killed-process verification remains open under the
-[`DELETE-SYNC-01` device runbook](../DELETE_SYNC_DEVICE_RUNBOOK.md). Each daemon start deliberately
-rotates the process epoch and therefore causes a conservative retained-history replay on the next
-sync. The append-only ledger retains GUID/timestamp metadata, but no message body or attachment
-content, in owner-only `config.db` without a TTL; safe pruning would require durable per-client
-acknowledgements. For older timestamp-only servers, an
+and app contract tests consume byte-identical copies pinned to matching SHA-256 digests. A stable
+repair-snapshot lease now fences the complete first-sync history boundary before absence-based
+settlement. Both physical-device branches pass under the
+[`DELETE-SYNC-01` device runbook](../DELETE_SYNC_DEVICE_RUNBOOK.md): stopped-process/reconnect and
+App-Lock/unlock, each followed by a second restart with no resurrection or duplicate notification.
+Each daemon start deliberately rotates the process epoch and therefore causes a conservative
+retained-history replay on the next sync. The append-only ledger retains GUID/timestamp metadata,
+but no message body or attachment content, in owner-only `config.db` without a TTL; the owner deferred
+safe pruning until durable per-client acknowledgement/full-resync semantics exist. For older
+timestamp-only servers, an
 over-500 soft-boundary tie remains intentionally fail-closed; v1 is tie-safe for a stable result set,
 while v2 also closes late-behind-cursor discovery for observed rows.
+
+The owner also deferred three non-blocking product/protocol designs: the general mutable-message
+reader's rare global timestamp-max loss window, false-positive-safe whole-chat/hard-delete detection,
+and true recovered-message resurrection. Current deletion handling remains fail-closed: retained
+tombstones win until a future protocol carries an explicit restore signal.
 
 <a id="sched-01"></a>
 

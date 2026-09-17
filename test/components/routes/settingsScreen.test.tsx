@@ -180,7 +180,6 @@ beforeEach(() => {
   // Reset the kv-backed stores to their defaults BEFORE each test (harness rule: reset in
   // beforeEach, never afterEach — an afterEach setState fires on a still-mounted tree).
   useFeatureSettingsStore.setState({
-    privateApiEnabled: true,
     sendTypingIndicators: true,
     sendReadReceipts: true,
     autoDownloadAttachments: true,
@@ -222,26 +221,31 @@ afterEach(() => {
 });
 
 describe('SettingsScreen — toggles wire to the real stores + persist', () => {
-  it('flips a feature flag (Read Receipts off) via setFlag + persists it', async () => {
+  it('keeps service-supported messaging preferences without exposing retired controls', async () => {
     await renderWithTheme(<SettingsScreen />);
-    const sw = screen.getByLabelText('Let others see when you have read their messages');
+    expect(screen.queryByText('Enable Private API Features')).toBeNull();
+    expect(screen.queryByText('Send Subject Lines')).toBeNull();
+    expect(screen.getByText('Send Typing Indicators')).toBeTruthy();
+    expect(screen.getByText('Send Read Receipts')).toBeTruthy();
+    expect(screen.getByText(/connected messaging service supports them/)).toBeTruthy();
+
     await act(async () => {
-      fireEvent(sw, 'valueChange', false);
+      fireEvent(
+        screen.getByLabelText(
+          'Let others see when you have read their messages on supported services',
+        ),
+        'valueChange',
+        false,
+      );
     });
     expect(useFeatureSettingsStore.getState().sendReadReceipts).toBe(false);
     await waitFor(() =>
       expect(
         mockKvSetWithinTransaction.mock.calls.some(
-          (c) => c[1] === 'privateApi.sendReadReceipts' && c[2] === '0',
+          (call) => call[1] === 'privateApi.sendReadReceipts' && call[2] === '0',
         ),
       ).toBe(true),
     );
-  });
-
-  it('leaves the Send-Typing switch disabled while Private API is off', async () => {
-    useFeatureSettingsStore.setState({ privateApiEnabled: false });
-    await renderWithTheme(<SettingsScreen />);
-    expect(screen.getByLabelText('Let others see when you are typing').props.disabled).toBe(true);
   });
 
   it('steps the Parallel Downloads cap up through the store', async () => {
@@ -753,7 +757,7 @@ describe('SettingsScreen — destructive/confirm dialogs', () => {
 });
 
 describe('SettingsScreen — account-owned server display', () => {
-  it('renders exact installed and connected-server details and opens the exact account route', async () => {
+  it('renders exact installed and connected-server details without restoring the retired account route', async () => {
     useSessionStore.setState(PRIVATE_SERVER_SESSION);
 
     await renderWithTheme(<SettingsScreen />);
@@ -773,13 +777,27 @@ describe('SettingsScreen — account-owned server display', () => {
       screen.getByRole('text', { name: PRIVATE_SERVER_SESSION.serverInfo.os_version }),
     ).toBeTruthy();
     expect(screen.getByText('Private API')).toBeTruthy();
-    expect(screen.getByRole('text', { name: 'Enabled' })).toBeTruthy();
+    expect(screen.getByRole('text', { name: 'Retired in this release' })).toBeTruthy();
     expect(screen.queryByText('fallback-version')).toBeNull();
     expect(screen.queryByText('999')).toBeNull();
-    await act(async () => {
-      fireEvent.press(screen.getByText('iMessage Account…'));
+    expect(screen.queryByText('iMessage Account…')).toBeNull();
+  });
+
+  it('does not let a stale account capability override Private API retirement', async () => {
+    useSessionStore.setState({
+      ...PRIVATE_SERVER_SESSION,
+      serverInfo: {
+        ...PRIVATE_SERVER_SESSION.serverInfo,
+        private_api: false,
+        supports_icloud_account: true,
+      },
     });
-    expect(mockPush).toHaveBeenCalledWith('/account');
+
+    await renderWithTheme(<SettingsScreen />);
+
+    expect(screen.getByText(PRIVATE_SERVER_SESSION.origin)).toBeTruthy();
+    expect(screen.queryByText('iMessage Account…')).toBeNull();
+    expect(screen.getByRole('text', { name: 'Retired in this release' })).toBeTruthy();
   });
 
   it('fails closed for an initially stale account and reveals exact details on a fresh mount', async () => {
@@ -797,7 +815,7 @@ describe('SettingsScreen — account-owned server display', () => {
     expect(screen.getByText(PRIVATE_SERVER_SESSION.origin)).toBeTruthy();
     expect(screen.getByText(PRIVATE_SERVER_SESSION.serverInfo.server_version)).toBeTruthy();
     expect(screen.getByText(PRIVATE_SERVER_SESSION.serverInfo.os_version)).toBeTruthy();
-    expect(screen.getByText('iMessage Account…')).toBeTruthy();
+    expect(screen.queryByText('iMessage Account…')).toBeNull();
   });
 
   it('automatically hides account-A identity after handoff and lets a fresh account render', async () => {
@@ -806,7 +824,7 @@ describe('SettingsScreen — account-owned server display', () => {
     expect(screen.getByText(PRIVATE_SERVER_SESSION.origin)).toBeTruthy();
     expect(screen.getByText(PRIVATE_SERVER_SESSION.serverInfo.server_version)).toBeTruthy();
     expect(screen.getByText(PRIVATE_SERVER_SESSION.serverInfo.os_version)).toBeTruthy();
-    expect(screen.getByText('iMessage Account…')).toBeTruthy();
+    expect(screen.queryByText('iMessage Account…')).toBeNull();
 
     await act(async () => {
       await pauseRealtimeDeliveries();
@@ -821,7 +839,7 @@ describe('SettingsScreen — account-owned server display', () => {
     expect(screen.getByText(PRIVATE_SERVER_SESSION.origin)).toBeTruthy();
     expect(screen.getByText(PRIVATE_SERVER_SESSION.serverInfo.server_version)).toBeTruthy();
     expect(screen.getByText(PRIVATE_SERVER_SESSION.serverInfo.os_version)).toBeTruthy();
-    expect(screen.getByText('iMessage Account…')).toBeTruthy();
+    expect(screen.queryByText('iMessage Account…')).toBeNull();
   });
 });
 

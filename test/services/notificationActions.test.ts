@@ -2,7 +2,7 @@
  * Unit tests for the notification-action handler (`src/services/notifications/actions.ts`).
  *
  * This is the code that runs when a user taps an inline notification button (Reply,
- * Mark as read, ♥ Love) or a FaceTime Answer/Decline — possibly HEADLESS (killed app,
+ * Mark as read, RCS-only ♥ Love) or cleans up a retired FaceTime action — possibly HEADLESS (killed app,
  * no React tree, DB never opened by boot). The invariants pinned here:
  *   - each action performs the right DB write / service call and clears the chat notif;
  *   - unknown / missing actions are ignored (no side effects);
@@ -15,11 +15,9 @@
  */
 import type { EventDetail } from 'react-native-notify-kit';
 import notifee from 'react-native-notify-kit';
-import { Linking } from 'react-native';
-import { faceTimeApi } from '@core/api';
 import { logger } from '@core/secure';
 import { getDatabase } from '@db/database';
-import { deleteReminderByNotificationId, getMessageActionPartLayoutByGuid } from '@db/repositories';
+import { deleteReminderByNotificationId } from '@db/repositories';
 import { isDevServer } from '@utils/isDev';
 import { ensureDatabase } from '@/services/databaseControl';
 import { accountRevocationMarker, fixedCredentialClient, vault } from '@/services/clients';
@@ -50,6 +48,7 @@ import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
+import { useSessionStore } from '@state/sessionStore';
 
 // notifee: the shared stub isn't a jest.fn, so mock it here to spy on cancelNotification.
 jest.mock('react-native-notify-kit', () => ({
@@ -100,7 +99,7 @@ jest.mock('@/services/send/rcsAttemptCapability', () => ({
   })),
   resolveRcsAttemptOwnership: jest.fn(async () => ({
     attemptAware: false,
-    serverInfo: { private_api: true, supports_message_part_topology: false },
+    serverInfo: { private_api: false, rcs: true, supports_message_part_topology: false },
   })),
   messageTargetServerAuthorization: jest.fn(
     (info: { supports_message_part_topology?: boolean } | null, isCurrent: () => boolean) =>
@@ -144,23 +143,8 @@ jest.mock('@/services/send/sendReactionService', () => ({
 }));
 jest.mock('@db/repositories', () => ({
   deleteReminderByNotificationId: jest.fn(async () => undefined),
-  getMessageActionPartLayoutByGuid: jest.fn(async () => ({
-    text: 'message',
-    attributedBody: null,
-    partCount: 1,
-    visibleAttachmentCount: 0,
-    messagePartTopology: null,
-    visibleAttachmentGuids: [],
-  })),
 }));
 jest.mock('@utils/isDev', () => ({ isDevServer: jest.fn(() => false) }));
-jest.mock('@core/api', () => ({
-  faceTimeApi: {
-    answerFaceTime: jest.fn(async () => true),
-    createFaceTimeLink: jest.fn(async () => 'https://facetime.apple.com/join#v=1&p=x&k=y'),
-  },
-}));
-jest.mock('react-native', () => ({ Linking: { openURL: jest.fn(async () => undefined) } }));
 jest.mock('@features/conversations/devSeed', () => ({
   devSendFake: jest.fn(async () => undefined),
   devSendFakeReaction: jest.fn(async () => undefined),
@@ -178,11 +162,7 @@ const mockMarkRead = markRead as jest.Mock;
 const mockSendText = sendTextMessage as jest.Mock;
 const mockSendReaction = sendReactionMessage as jest.Mock;
 const mockDeleteReminder = deleteReminderByNotificationId as jest.Mock;
-const mockGetMessageActionPartLayout = getMessageActionPartLayoutByGuid as jest.Mock;
 const mockIsDevServer = isDevServer as jest.Mock;
-const mockLinkingOpen = Linking.openURL as jest.Mock;
-const mockAnswerFaceTime = faceTimeApi.answerFaceTime as jest.Mock;
-const mockCreateFaceTimeLink = faceTimeApi.createFaceTimeLink as jest.Mock;
 const mockDevSendFake = devSendFake as jest.Mock;
 const mockDevSendFakeReaction = devSendFakeReaction as jest.Mock;
 
@@ -263,6 +243,12 @@ async function waitForCalls(mock: jest.Mock, count: number): Promise<void> {
   expect(mock).toHaveBeenCalledTimes(count);
 }
 
+beforeEach(() => {
+  useSessionStore.setState({
+    serverInfo: { version: 'test', private_api: true, rcs: true } as any,
+  });
+});
+
 afterEach(() => {
   // Race tests close admission synchronously. Always reopen it, even if an assertion fails, so the
   // next independent example cannot inherit a deliberately paused coordinator.
@@ -294,6 +280,27 @@ describe('handleNotificationAction — reply', () => {
     expect(commitGuard?.()).toBe(false);
     resumeRealtimeDeliveries();
     expect(mockNotifeeCancel).toHaveBeenCalledWith('gator-message-7');
+  });
+
+  it('keeps ordinary existing-chat Reply available without Private API', async () => {
+    useSessionStore.setState({
+      serverInfo: { version: 'test', private_api: false, rcs: false } as any,
+    });
+
+    await handleNotificationAction(
+      safeChatDetail(ACTION_REPLY, { chatGuid: 'c1' }, { input: 'plain text' }),
+    );
+
+    expect(mockSendText).toHaveBeenCalledWith(
+      mockDb,
+      expect.anything(),
+      { chatGuid: 'c1', text: 'plain text' },
+      expect.any(Number),
+      expect.any(Function),
+      undefined,
+      expect.any(Function),
+      expect.anything(),
+    );
   });
 
   it('binds a killed-process reply to one authorized task-local transport', async () => {
@@ -388,8 +395,8 @@ describe('handleNotificationAction — reply', () => {
     await waitForCalls(mockSendText, 1);
     const loveAction = handleNotificationAction(
       safeChatDetail(ACTION_LOVE, {
-        chatGuid: 'ordered-chat',
-        messageGuid: 'ordered-message',
+        chatGuid: 'RCS;-;ordered-chat',
+        messageGuid: 'rcs-ordered-message',
       }),
     );
     await Promise.resolve();
@@ -450,24 +457,31 @@ describe('handleNotificationAction — mark-read', () => {
 });
 
 describe('handleNotificationAction — love (tapback)', () => {
-  it('sends a love reaction for the notification message, then clears the notif', async () => {
-    mockGetMessageActionPartLayout.mockResolvedValueOnce({
-      text: 'caption',
-      attributedBody: null,
-      partCount: 3,
-      visibleAttachmentCount: 2,
-    });
+  it('ignores an iMessage Love action even under injected private_api:true', async () => {
     await handleNotificationAction(
-      safeChatDetail(ACTION_LOVE, { chatGuid: 'c2', messageGuid: 'm2' }),
+      safeChatDetail(ACTION_LOVE, { chatGuid: 'iMessage;-;+15551230000', messageGuid: 'm2' }),
+    );
+
+    expect(mockSendReaction).not.toHaveBeenCalled();
+    expect(mockResolveRcsAttemptOwnership).not.toHaveBeenCalled();
+    expect(mockNotifeeCancel).not.toHaveBeenCalled();
+  });
+
+  it('sends a love reaction for a live canonical RCS chat, then clears the notif', async () => {
+    await handleNotificationAction(
+      safeChatDetail(ACTION_LOVE, {
+        chatGuid: 'RCS;-;thread-2',
+        messageGuid: 'rcs-message-2',
+      }),
     );
     expect(mockSendReaction).toHaveBeenCalledWith(
       mockDb,
       expect.anything(),
       {
-        chatGuid: 'c2',
-        targetGuid: 'm2',
+        chatGuid: 'RCS;-;thread-2',
+        targetGuid: 'rcs-message-2',
         reaction: 'love',
-        partIndex: 2,
+        partIndex: 0,
       },
       expect.any(Number),
       expect.any(Function),
@@ -487,10 +501,22 @@ describe('handleNotificationAction — love (tapback)', () => {
     expect(mockNotifeeCancel).toHaveBeenCalledWith('gator-message-7');
   });
 
+  it('ignores a noncanonical message id even inside an RCS chat', async () => {
+    await handleNotificationAction(
+      safeChatDetail(ACTION_LOVE, { chatGuid: 'RCS;-;thread-2', messageGuid: 'legacy-message' }),
+    );
+
+    expect(mockSendReaction).not.toHaveBeenCalled();
+    expect(mockResolveRcsAttemptOwnership).not.toHaveBeenCalled();
+  });
+
   it('targets a modern RCS notification as whole-message part zero', async () => {
+    useSessionStore.setState({
+      serverInfo: { version: 'test', private_api: false, rcs: true } as any,
+    });
     mockResolveRcsAttemptOwnership.mockResolvedValueOnce({
       attemptAware: true,
-      serverInfo: { private_api: true, supports_message_part_topology: true },
+      serverInfo: { private_api: false, rcs: true, supports_message_part_topology: true },
     });
 
     await handleNotificationAction(
@@ -515,19 +541,43 @@ describe('handleNotificationAction — love (tapback)', () => {
     );
   });
 
+  it('fails closed when task-local discovery does not confirm RCS', async () => {
+    useSessionStore.setState({ serverInfo: null });
+    mockResolveRcsAttemptOwnership.mockResolvedValueOnce({
+      attemptAware: true,
+      serverInfo: { private_api: false, rcs: false, supports_message_part_topology: true },
+    });
+
+    await handleNotificationAction(
+      safeChatDetail(ACTION_LOVE, {
+        chatGuid: 'RCS;-;thread-1',
+        messageGuid: 'rcs-message-1',
+      }),
+    );
+
+    expect(mockSendReaction).not.toHaveBeenCalled();
+  });
+
   it('binds killed-process Love to the authorized task-local client', async () => {
     const taskHttp = { __taskHttp: 'love', isTransportCurrent: () => true };
     mockCaptureCapability.mockReturnValueOnce(undefined);
     mockFixedClient.mockReturnValueOnce(taskHttp);
 
     await handleNotificationAction(
-      safeChatDetail(ACTION_LOVE, { chatGuid: 'c2', messageGuid: 'm2' }),
+      safeChatDetail(ACTION_LOVE, {
+        chatGuid: 'RCS;-;headless',
+        messageGuid: 'rcs-headless-message',
+      }),
     );
 
     expect(mockSendReaction).toHaveBeenCalledWith(
       mockDb,
       taskHttp,
-      expect.objectContaining({ chatGuid: 'c2', targetGuid: 'm2', reaction: 'love' }),
+      expect.objectContaining({
+        chatGuid: 'RCS;-;headless',
+        targetGuid: 'rcs-headless-message',
+        reaction: 'love',
+      }),
       expect.any(Number),
       expect.any(Function),
       expect.objectContaining({ allowsLegacyPartZero: true, isCurrent: expect.any(Function) }),
@@ -535,7 +585,7 @@ describe('handleNotificationAction — love (tapback)', () => {
   });
 
   it('does nothing to react when the intent carried no messageGuid, but still clears', async () => {
-    await handleNotificationAction(safeChatDetail(ACTION_LOVE, { chatGuid: 'c2' }));
+    await handleNotificationAction(safeChatDetail(ACTION_LOVE, { chatGuid: 'RCS;-;thread-2' }));
     expect(mockSendReaction).not.toHaveBeenCalled();
     expect(mockNotifeeCancel).toHaveBeenCalledWith('gator-message-7');
   });
@@ -543,11 +593,14 @@ describe('handleNotificationAction — love (tapback)', () => {
   it('DEV: routes the reaction through devSendFakeReaction', async () => {
     mockIsDevServer.mockReturnValueOnce(true);
     await handleNotificationAction(
-      safeChatDetail(ACTION_LOVE, { chatGuid: 'c2', messageGuid: 'm2' }),
+      safeChatDetail(ACTION_LOVE, {
+        chatGuid: 'RCS;-;dev',
+        messageGuid: 'rcs-dev-message',
+      }),
     );
     expect(mockDevSendFakeReaction).toHaveBeenCalledWith(
-      'c2',
-      'm2',
+      'RCS;-;dev',
+      'rcs-dev-message',
       'love',
       undefined,
       0,
@@ -558,7 +611,10 @@ describe('handleNotificationAction — love (tapback)', () => {
 
   it('love uses ensureDatabase(), never getDatabase()', async () => {
     await handleNotificationAction(
-      safeChatDetail(ACTION_LOVE, { chatGuid: 'c2', messageGuid: 'm2' }),
+      safeChatDetail(ACTION_LOVE, {
+        chatGuid: 'RCS;-;thread-2',
+        messageGuid: 'rcs-message-2',
+      }),
     );
     expect(mockEnsureDatabase).toHaveBeenCalledTimes(2);
     expect(mockGetDatabase).not.toHaveBeenCalled();
@@ -714,74 +770,32 @@ describe('handleNotificationAction — a failing action still clears the tray', 
   it('swallows a throwing love reaction and cancels the notification anyway', async () => {
     mockSendReaction.mockRejectedValueOnce(new Error('boom'));
     await expect(
-      handleNotificationAction(safeChatDetail(ACTION_LOVE, { chatGuid: 'c9', messageGuid: 'm9' })),
+      handleNotificationAction(
+        safeChatDetail(ACTION_LOVE, {
+          chatGuid: 'RCS;-;thread-9',
+          messageGuid: 'rcs-message-9',
+        }),
+      ),
     ).resolves.toBeUndefined();
     expect(mockNotifeeCancel).toHaveBeenCalledWith('gator-message-7');
   });
 });
 
-describe('handleNotificationAction — FaceTime answer/decline', () => {
-  it('decline just clears the ringing notification (ft-<uuid>), no server call', async () => {
-    await handleNotificationAction(safeFaceTimeDetail(ACTION_DECLINE_FACETIME, 'u1'));
-    expect(mockNotifeeCancel).toHaveBeenCalledWith('ft-u1');
-    expect(mockAnswerFaceTime).not.toHaveBeenCalled();
-    expect(mockLinkingOpen).not.toHaveBeenCalled();
+describe('handleNotificationAction — retired FaceTime cleanup', () => {
+  it.each([
+    ['Answer', ACTION_ANSWER_FACETIME, 'answer-stale'],
+    ['Decline', ACTION_DECLINE_FACETIME, 'decline-stale'],
+  ])('%s is cleanup-only even under injected private_api:true', async (_label, actionId, uuid) => {
+    await handleNotificationAction(safeFaceTimeDetail(actionId, uuid));
+
+    expect(mockInspectSession).not.toHaveBeenCalled();
+    expect(mockFixedClient).not.toHaveBeenCalled();
+    expect(mockNotifeeCancel).toHaveBeenCalledWith(`ft-${uuid}`);
   });
 
-  it('answer asks the server to answer, mints a link, opens it, and clears the notif', async () => {
-    mockCreateFaceTimeLink.mockResolvedValueOnce('https://facetime.apple.com/join#k=abc');
-    await handleNotificationAction(safeFaceTimeDetail(ACTION_ANSWER_FACETIME, 'u2'));
-    expect(mockAnswerFaceTime).toHaveBeenCalledWith(expect.anything(), 'u2');
-    expect(mockCreateFaceTimeLink).toHaveBeenCalled();
-    expect(mockLinkingOpen).toHaveBeenCalledWith('https://facetime.apple.com/join#k=abc');
-    expect(mockNotifeeCancel).toHaveBeenCalledWith('ft-u2');
-  });
-
-  it('uses one authorized task-local client for a killed-process answer and link', async () => {
-    const taskHttp = { __taskHttp: 'facetime', isTransportCurrent: () => true };
-    mockCaptureCapability.mockReturnValueOnce(undefined);
-    mockFixedClient.mockReturnValueOnce(taskHttp);
-    mockCreateFaceTimeLink.mockResolvedValueOnce('https://facetime.apple.com/join#k=headless');
-
-    await handleNotificationAction(safeFaceTimeDetail(ACTION_ANSWER_FACETIME, 'u-headless'));
-
-    expect(mockAnswerFaceTime).toHaveBeenCalledWith(taskHttp, 'u-headless');
-    expect(mockCreateFaceTimeLink).toHaveBeenCalledWith(taskHttp);
-    expect(mockLinkingOpen).toHaveBeenCalledWith('https://facetime.apple.com/join#k=headless');
-  });
-
-  it('answer REJECTS a non-FaceTime link from a compromised server (never openURL), still clears', async () => {
-    // A malicious/compromised server returns an arbitrary scheme — must NOT be opened.
-    mockCreateFaceTimeLink.mockResolvedValueOnce('intent://evil#Intent;end');
-    await handleNotificationAction(safeFaceTimeDetail(ACTION_ANSWER_FACETIME, 'u3'));
-    expect(mockLinkingOpen).not.toHaveBeenCalled();
-    expect(mockNotifeeCancel).toHaveBeenCalledWith('ft-u3'); // finally-dismiss still runs
-  });
-
-  it('answer swallows a server error and still clears the ringing notif', async () => {
-    mockAnswerFaceTime.mockRejectedValueOnce(new Error('server down'));
-    await expect(
-      handleNotificationAction(safeFaceTimeDetail(ACTION_ANSWER_FACETIME, 'u4')),
-    ).resolves.toBeUndefined();
-    expect(mockLinkingOpen).not.toHaveBeenCalled();
-    expect(mockNotifeeCancel).toHaveBeenCalledWith('ft-u4');
-  });
-
-  it('DEV: answer skips the server and opens a stub FaceTime link', async () => {
-    mockIsDevServer.mockReturnValueOnce(true);
-    await handleNotificationAction(safeFaceTimeDetail(ACTION_ANSWER_FACETIME, 'uDev'));
-    expect(mockAnswerFaceTime).not.toHaveBeenCalled();
-    expect(mockLinkingOpen).toHaveBeenCalledTimes(1);
-    expect(mockLinkingOpen.mock.calls[0]![0]).toContain('facetime.apple.com');
-    expect(mockLinkingOpen.mock.calls[0]![0]).toContain('uDev');
-    expect(mockNotifeeCancel).toHaveBeenCalledWith('ft-uDev');
-  });
-
-  it('an unknown FaceTime action id is a no-op (no dismiss, no server call)', async () => {
+  it('an unknown FaceTime action id is a no-op', async () => {
     await handleNotificationAction(chatDetail('facetime-unknown', { faceTimeUuid: 'u5' }));
-    expect(mockAnswerFaceTime).not.toHaveBeenCalled();
     expect(mockNotifeeCancel).not.toHaveBeenCalled();
-    // FaceTime branch returns early — a chat action never runs even if chatGuid were present.
     expect(mockMarkRead).not.toHaveBeenCalled();
   });
 });
@@ -812,7 +826,6 @@ describe('notification actions — account-switch containment', () => {
     expect(mockSendText).not.toHaveBeenCalled();
     expect(mockMarkRead).not.toHaveBeenCalled();
     expect(mockSendReaction).not.toHaveBeenCalled();
-    expect(mockAnswerFaceTime).not.toHaveBeenCalled();
     expect(mockDeleteReminder).not.toHaveBeenCalled();
     expect(mockNotifeeCancel).not.toHaveBeenCalled();
   });
@@ -896,8 +909,8 @@ describe('notification actions — account-switch containment', () => {
     mockEnsureDatabase.mockResolvedValueOnce(mockDb).mockReturnValueOnce(database.promise);
     const action = handleNotificationAction(
       safeChatDetail(ACTION_LOVE, {
-        chatGuid: 'account-a-chat',
-        messageGuid: 'account-a-message',
+        chatGuid: 'RCS;-;account-a-chat',
+        messageGuid: 'rcs-account-a-message',
       }),
     );
     await waitForCalls(mockEnsureDatabase, 2);
@@ -927,23 +940,6 @@ describe('notification actions — account-switch containment', () => {
 
     marking.resolve(undefined);
     await Promise.all([action, drain]);
-    expect(mockNotifeeCancel).not.toHaveBeenCalled();
-  });
-
-  it("does not mint/open a FaceTime link or dismiss B's call after A is retired", async () => {
-    const answering = deferred<unknown>();
-    mockAnswerFaceTime.mockReturnValueOnce(answering.promise);
-    const action = handleNotificationAction(
-      safeFaceTimeDetail(ACTION_ANSWER_FACETIME, 'account-a-call'),
-    );
-    await waitForCalls(mockAnswerFaceTime, 1);
-
-    const drain = pauseRealtimeDeliveries();
-    answering.resolve(true);
-    await Promise.all([action, drain]);
-
-    expect(mockCreateFaceTimeLink).not.toHaveBeenCalled();
-    expect(mockLinkingOpen).not.toHaveBeenCalled();
     expect(mockNotifeeCancel).not.toHaveBeenCalled();
   });
 

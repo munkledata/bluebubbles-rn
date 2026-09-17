@@ -2,7 +2,7 @@
  * Unit tests for the Notifee presentation layer (`src/services/notifications/notifeeService.ts`).
  *
  * These functions build the exact Notifee payloads posted to the OS. The invariants pinned:
- *   - Ordinary unlocked message/call notices keep their detail; native reminder alarms are always
+ *   - Ordinary unlocked message notices keep their detail; native reminder alarms are always
  *     generic because Android persists them outside SQLCipher.
  *   - The MESSAGING-style `person.icon` is spread CONDITIONALLY — never `icon: undefined`
  *     (AGENTS.md: passing undefined throws at displayNotification on device). No avatar means
@@ -11,30 +11,27 @@
  *   - Channel promises don't memoize a rejection (a failed createChannel can be retried).
  *
  * notifee is a native module — mocked here with jest.fn spies so we can inspect the payloads
- * (the shared runtime stub in test/__mocks__/notifee.ts isn't spyable and lacks AndroidCategory
- * / AlarmType). This is a pure `node`-project test.
+ * (the shared runtime stub in test/__mocks__/notifee.ts isn't spyable and lacks AlarmType). This
+ * is a pure `node`-project test.
  */
 import notifee from 'react-native-notify-kit';
 import type { EventDeliveryContext, NotificationIntent } from '@core/realtime';
 import { logger } from '@core/secure';
 import { useLockStore } from '@state/lockStore';
+import { useSessionStore } from '@state/sessionStore';
 import { claimActiveChat, resetActiveChat } from '@/services/notifications/activeChat';
 import {
-  getOrCreateFaceTimeRoute,
   listFutureReminderTriggerRoutes,
   listMessageNotificationTruth,
 } from '@/services/notifications/notificationRouting';
 import {
-  captureRealtimeDeliveryLease,
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
 import {
-  ACTION_DECLINE_FACETIME,
   ACTION_LOVE,
   ACTION_MARK_READ,
   ACTION_REPLY,
-  CHANNEL_FACETIME,
   CHANNEL_NEW_MESSAGE,
   CHANNEL_REMINDERS,
   PRESS_OPEN,
@@ -66,12 +63,12 @@ import {
 const notificationTextEncoder = new TextEncoder();
 
 const ALARM_IDLE = 3;
+const LEGACY_FACETIME_CHANNEL_ID = 'com.bluegreengatorapps.messages.facetime';
 jest.mock('react-native-notify-kit', () => ({
   __esModule: true,
   AndroidImportance: { NONE: 0, MIN: 1, LOW: 2, DEFAULT: 3, HIGH: 4 },
   AndroidGroupAlertBehavior: { ALL: 0, SUMMARY: 1, CHILDREN: 2 },
   AndroidStyle: { BIGPICTURE: 0, BIGTEXT: 1, INBOX: 2, MESSAGING: 3 },
-  AndroidCategory: { CALL: 'call' },
   AlarmType: { SET_AND_ALLOW_WHILE_IDLE: 3 },
   AuthorizationStatus: { NOT_DETERMINED: -1, DENIED: 0, AUTHORIZED: 1, PROVISIONAL: 2 },
   TriggerType: { TIMESTAMP: 0, INTERVAL: 1 },
@@ -171,8 +168,6 @@ jest.mock('@/services/notifications/notificationRouting', () => {
       ...(date == null ? {} : { messageDate: String(date) }),
     }),
     nativeStatusData: (kind: string) => marker(kind),
-    nativeFaceTimeData: (token: string) => ({ ...marker('facetime'), routeToken: token }),
-    getOrCreateFaceTimeRoute: jest.fn(async () => '7f000000-0000-4000-8000-000000000001'),
     findFaceTimeRoute: jest.fn(async () => '7f000000-0000-4000-8000-000000000001'),
     deleteFaceTimeRoute: jest.fn(async () => undefined),
     clearNotificationRoutes: jest.fn(async () => undefined),
@@ -224,7 +219,6 @@ const mockGetChannel = notifee.getChannel as jest.Mock;
 const mockGetChannels = notifee.getChannels as jest.Mock;
 const mockDeleteChannel = notifee.deleteChannel as jest.Mock;
 const mockOpenSettings = notifee.openNotificationSettings as jest.Mock;
-const mockGetOrCreateFaceTimeRoute = getOrCreateFaceTimeRoute as jest.Mock;
 const mockListFutureReminderTriggerRoutes = listFutureReminderTriggerRoutes as jest.Mock;
 const mockListMessageNotificationTruth = listMessageNotificationTruth as jest.Mock;
 const {
@@ -379,6 +373,9 @@ function messageTruth(
 
 beforeEach(() => {
   resumeRealtimeDeliveries();
+  useSessionStore.setState({
+    serverInfo: { version: 'test', private_api: true, rcs: true } as any,
+  });
   resetActiveChat();
   mockGetNotificationSettings.mockResolvedValue({ authorizationStatus: 1 });
   useLockStore.setState({
@@ -446,7 +443,6 @@ describe('postNotification permission boundary', () => {
   const presentationIntents: NotificationIntent[] = [
     messageIntent(),
     { kind: 'send-failure', chatGuid: 'chat-1', messageGuid: 'msg-1' },
-    { kind: 'facetime-call', uuid: 'u-permission', callerName: 'Alice', isAudio: false },
     { kind: 'alias-removed', aliases: ['me@example.test'] },
     { kind: 'rcs-bridge-down', title: 'ignored', body: 'ignored' },
     { kind: 'test-notification', title: 'ignored', body: 'ignored' },
@@ -1096,15 +1092,6 @@ describe('postNotification — detailed message', () => {
       }),
     ],
     [
-      'FaceTime',
-      {
-        kind: 'facetime-call',
-        uuid: 'LOCKED_FACETIME_UUID_CANARY',
-        callerName: 'LOCKED_FACETIME_CALLER_CANARY',
-        isAudio: false,
-      } as NotificationIntent,
-    ],
-    [
       'failed send',
       {
         kind: 'send-failure',
@@ -1136,7 +1123,6 @@ describe('postNotification — detailed message', () => {
     expect(n.body).toBe('You have new messages');
     expect(JSON.stringify(n)).not.toMatch(/LOCKED_|chat-1|msg-1/);
     expect(mockLocalRouteForGuids).not.toHaveBeenCalled();
-    expect(mockGetOrCreateFaceTimeRoute).not.toHaveBeenCalled();
   });
 
   it('rechecks App Lock after a deferred message channel lookup', async () => {
@@ -1171,39 +1157,6 @@ describe('postNotification — detailed message', () => {
       }),
     );
     expect(JSON.stringify(notification)).not.toMatch(/LATE_LOCK_MESSAGE_/);
-  });
-
-  it('rechecks App Lock after a deferred FaceTime route handoff', async () => {
-    let releaseRoute!: () => void;
-    mockGetOrCreateFaceTimeRoute.mockImplementationOnce(
-      () =>
-        new Promise<string>((resolve) => {
-          releaseRoute = () => resolve('7f000000-0000-4000-8000-0000000000cc');
-        }),
-    );
-    const pending = postNotification({
-      kind: 'facetime-call',
-      uuid: 'LATE_LOCK_FACETIME_UUID_CANARY',
-      callerName: 'LATE_LOCK_FACETIME_CALLER_CANARY',
-      isAudio: false,
-    });
-    for (let i = 0; i < 20 && mockGetOrCreateFaceTimeRoute.mock.calls.length === 0; i += 1) {
-      await Promise.resolve();
-    }
-
-    useLockStore.setState({ enabled: true, locked: true });
-    releaseRoute();
-    await pending;
-
-    const notification = lastNotif();
-    expect(notification).toEqual(
-      expect.objectContaining({
-        id: 'bb-locked-messages',
-        title: 'Gator',
-        body: 'You have new messages',
-      }),
-    );
-    expect(JSON.stringify(notification)).not.toMatch(/LATE_LOCK_FACETIME_/);
   });
 
   it('posts one notification per chat with a local-key id and the real title/body/sender', async () => {
@@ -1531,15 +1484,50 @@ describe('postNotification — detailed message', () => {
     expect(sender).not.toHaveProperty('icon'); // the AGENTS.md conditional-spread rule
   });
 
-  it('exposes the three inline actions: Reply (free-form), Mark as read, ♥ Love', async () => {
+  it('keeps iMessage actions to Reply and Mark Read even under injected private_api:true', async () => {
     await postNotification(messageIntent());
     const actions = lastNotif().android?.actions as any[];
-    expect(actions.map((a) => a.pressAction.id)).toEqual([
+    expect(actions.map((a) => a.pressAction.id)).toEqual([ACTION_REPLY, ACTION_MARK_READ]);
+    expect(actions[0].input.allowFreeFormInput).toBe(true);
+  });
+
+  it('exposes Love only for a canonical RCS chat with live RCS capability', async () => {
+    await postNotification(
+      messageIntent({ chatGuid: 'RCS;-;thread-1', messageGuid: 'rcs-message-1' }),
+    );
+
+    const actions = lastNotif().android?.actions as any[];
+    expect(actions.map((action) => action.pressAction.id)).toEqual([
       ACTION_REPLY,
       ACTION_MARK_READ,
       ACTION_LOVE,
     ]);
-    expect(actions[0].input.allowFreeFormInput).toBe(true);
+  });
+
+  it('hides Love when an RCS chat notification has a noncanonical message target', async () => {
+    await postNotification(
+      messageIntent({ chatGuid: 'RCS;-;thread-1', messageGuid: 'legacy-message' }),
+    );
+
+    const actions = lastNotif().android?.actions as any[];
+    expect(actions.map((action) => action.pressAction.id)).toEqual([
+      ACTION_REPLY,
+      ACTION_MARK_READ,
+    ]);
+  });
+
+  it('shows Love for a canonical RCS notification in a cold process without session cache', async () => {
+    useSessionStore.setState({ serverInfo: null });
+    await postNotification(
+      messageIntent({ chatGuid: 'RCS;-;thread-1', messageGuid: 'rcs-message-1' }),
+    );
+
+    const actions = lastNotif().android?.actions as any[];
+    expect(actions.map((action) => action.pressAction.id)).toEqual([
+      ACTION_REPLY,
+      ACTION_MARK_READ,
+      ACTION_LOVE,
+    ]);
   });
 
   it('marks the MESSAGING style as a group for a group chat', async () => {
@@ -1747,97 +1735,6 @@ describe('postNotification — cancel / facetime-cancel', () => {
     );
     expect(mockCancel).toHaveBeenCalledWith('ft-u1'); // legacy cleanup only
     expect(mockDisplay).not.toHaveBeenCalled();
-  });
-});
-
-describe('postNotification — facetime-call', () => {
-  const call: NotificationIntent = {
-    kind: 'facetime-call',
-    uuid: 'u2',
-    callerName: 'Bob Jones',
-    isAudio: false,
-  };
-
-  it('rings with the caller name, CALL category, ongoing + Answer/Decline', async () => {
-    await postNotification(call);
-    const n = lastNotif();
-    expect(n.id).toBe('gator-facetime-7f000000-0000-4000-8000-000000000001');
-    expect(n.title).toBe('Incoming FaceTime');
-    expect(n.body).toBe('Bob Jones');
-    expect(n.data).toEqual({
-      gatorOwner: 'gator',
-      gatorSchema: '2',
-      gatorKind: 'facetime',
-      routeToken: '7f000000-0000-4000-8000-000000000001',
-    });
-    expect(JSON.stringify({ id: n.id, data: n.data })).not.toContain('u2');
-    expect(n.android?.channelId).toBe(CHANNEL_FACETIME);
-    expect(n.android?.category).toBe('call');
-    expect(n.android?.ongoing).toBe(true);
-    expect(n.android?.autoCancel).toBe(false);
-    expect(n.android?.fullScreenAction).toBeUndefined();
-    const actions = n.android?.actions as any[];
-    expect(actions.map((a) => a.pressAction.id)).toEqual([
-      ACTION_DECLINE_FACETIME,
-      'answer-facetime',
-    ]);
-  });
-
-  it('passes the original account guard to FaceTime route creation and allows a fresh account call', async () => {
-    let capturedGuard: (() => boolean) | undefined;
-    let releaseRoute!: () => void;
-    mockGetOrCreateFaceTimeRoute.mockImplementationOnce(
-      async (_uuid: string, commitGuard?: () => boolean) => {
-        capturedGuard = commitGuard;
-        await new Promise<void>((resolve) => {
-          releaseRoute = resolve;
-        });
-        if (commitGuard?.() === false) throw new Error('stale FaceTime route commit rejected');
-        return '7f000000-0000-4000-8000-0000000000aa';
-      },
-    );
-    const accountA = captureRealtimeDeliveryLease();
-    const staleResult = postNotification(
-      { ...call, uuid: 'ACCOUNT_A_CALL_UUID', callerName: 'ACCOUNT_A_CALLER' },
-      accountA,
-    ).then(
-      () => null,
-      (error: unknown) => error,
-    );
-    for (let i = 0; i < 20 && capturedGuard == null; i += 1) await Promise.resolve();
-
-    expect(capturedGuard).toEqual(expect.any(Function));
-    expect(capturedGuard?.()).toBe(true);
-    const pause = pauseRealtimeDeliveries();
-    expect(capturedGuard?.()).toBe(false);
-    releaseRoute();
-
-    await expect(staleResult).resolves.toEqual(new Error('stale FaceTime route commit rejected'));
-    await pause;
-    expect(mockDisplay).not.toHaveBeenCalled();
-
-    resumeRealtimeDeliveries();
-    mockGetOrCreateFaceTimeRoute.mockResolvedValueOnce('7f000000-0000-4000-8000-0000000000bb');
-    await postNotification(
-      { ...call, uuid: 'ACCOUNT_B_CALL_UUID', callerName: 'ACCOUNT_B_CALLER' },
-      captureRealtimeDeliveryLease(),
-    );
-
-    expect(lastNotif()).toEqual(
-      expect.objectContaining({
-        id: 'gator-facetime-7f000000-0000-4000-8000-0000000000bb',
-        body: 'ACCOUNT_B_CALLER',
-      }),
-    );
-    expect(mockGetOrCreateFaceTimeRoute).toHaveBeenLastCalledWith(
-      'ACCOUNT_B_CALL_UUID',
-      expect.any(Function),
-    );
-  });
-
-  it('titles an audio call "Incoming FaceTime Audio"', async () => {
-    await postNotification({ ...call, isAudio: true });
-    expect(lastNotif().title).toBe('Incoming FaceTime Audio');
   });
 });
 
@@ -2096,7 +1993,8 @@ describe('prepareNotificationPresentationState — startup maintenance', () => {
         expect(mockDisplay).not.toHaveBeenCalled();
         expect(mockCancelDisplayedAll).not.toHaveBeenCalled();
         expect(mockCancelTriggersAll).toHaveBeenCalledTimes(1);
-        expect(mockDeleteChannel).not.toHaveBeenCalled();
+        expect(mockDeleteChannel).toHaveBeenCalledWith(LEGACY_FACETIME_CHANNEL_ID);
+        expect(mockClearNotificationRoutes).toHaveBeenCalledWith(expect.any(Function));
         expect(mockCreateChannel).not.toHaveBeenCalled();
       } finally {
         state.restore();
@@ -2140,6 +2038,8 @@ describe('prepareNotificationPresentationState — startup maintenance', () => {
       expect(mockGetTriggers).not.toHaveBeenCalled();
       expect(mockGetChannels).not.toHaveBeenCalled();
       expect(mockListFutureReminderTriggerRoutes).not.toHaveBeenCalled();
+      expect(mockClearNotificationRoutes).not.toHaveBeenCalled();
+      expect(mockDeleteChannel).not.toHaveBeenCalled();
 
       mockGetDisplayed.mockResolvedValueOnce([]);
       mockGetTriggers.mockResolvedValueOnce([]);
@@ -2159,6 +2059,8 @@ describe('prepareNotificationPresentationState — startup maintenance', () => {
       expect(mockGetDisplayed).toHaveBeenCalledTimes(4);
       expect(mockGetTriggers).toHaveBeenCalledTimes(2);
       expect(mockGetChannels).toHaveBeenCalledTimes(1);
+      expect(mockClearNotificationRoutes).toHaveBeenCalledWith(expect.any(Function));
+      expect(mockDeleteChannel).toHaveBeenCalledWith(LEGACY_FACETIME_CHANNEL_ID);
       expect(mockCreateTrigger).toHaveBeenCalledWith(
         expect.objectContaining({ id: 'gator-reminder-message-111-7100' }),
         expect.objectContaining({ timestamp: 7100 }),
@@ -2398,58 +2300,82 @@ describe('prepareNotificationPresentationState — startup maintenance', () => {
       ]);
     });
 
-    it('guards a legacy FaceTime route migration with the admitted account lease', async () => {
-      const legacyFaceTime = {
-        id: 'legacy-account-a-facetime',
+    it('removes a schema-2 FaceTime notice, route rows, and persistent channel on upgrade', async () => {
+      const retiredFaceTime = {
+        id: 'gator-facetime-7f000000-0000-4000-8000-000000000001',
         notification: {
-          id: 'legacy-account-a-facetime',
+          id: 'gator-facetime-7f000000-0000-4000-8000-000000000001',
           title: 'Incoming FaceTime',
           body: 'ACCOUNT_A_CALLER_NAME',
           data: {
-            faceTimeUuid: 'ACCOUNT_A_PRIVATE_CALL_UUID',
-            caller: 'ACCOUNT_A_CALLER_NAME',
+            gatorOwner: 'gator',
+            gatorSchema: '2',
+            gatorKind: 'facetime',
+            routeToken: '7f000000-0000-4000-8000-000000000001',
+          },
+          android: {
+            channelId: LEGACY_FACETIME_CHANNEL_ID,
+            ongoing: true,
+            actions: [
+              { title: 'Decline', pressAction: { id: 'decline-facetime' } },
+              { title: 'Answer', pressAction: { id: 'answer-facetime' } },
+            ],
           },
         },
       };
-      let releaseRoute!: () => void;
-      let capturedGuard: (() => boolean) | undefined;
-      let routeCommitted = false;
       mockGetDisplayed
-        .mockResolvedValueOnce([legacyFaceTime])
-        .mockResolvedValueOnce([legacyFaceTime]);
+        .mockResolvedValueOnce([retiredFaceTime])
+        .mockResolvedValueOnce([retiredFaceTime]);
       mockGetTriggers.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
       mockListFutureReminderTriggerRoutes.mockResolvedValueOnce([]);
-      mockGetOrCreateFaceTimeRoute.mockImplementationOnce(
-        async (uuid: string, commitGuard?: () => boolean) => {
-          expect(uuid).toBe('ACCOUNT_A_PRIVATE_CALL_UUID');
-          capturedGuard = commitGuard;
-          await new Promise<void>((resolve) => {
-            releaseRoute = resolve;
-          });
-          if (commitGuard?.() === false) throw new Error('stale FaceTime route commit rejected');
-          routeCommitted = true;
-          return '7f000000-0000-4000-8000-0000000000aa';
-        },
-      );
 
-      const maintenance = prepareNotificationPresentationState();
-      for (let i = 0; i < 20 && capturedGuard == null; i += 1) await Promise.resolve();
+      await prepareNotificationPresentationState();
 
-      expect(capturedGuard).toEqual(expect.any(Function));
-      expect(capturedGuard?.()).toBe(true);
-      const pause = pauseRealtimeDeliveries();
-      expect(capturedGuard?.()).toBe(false);
-
-      releaseRoute();
-      await expect(Promise.all([maintenance, pause])).resolves.toEqual([undefined, undefined]);
-
-      expect(routeCommitted).toBe(false);
-      expect(mockGetOrCreateFaceTimeRoute).toHaveBeenCalledWith(
-        'ACCOUNT_A_PRIVATE_CALL_UUID',
-        capturedGuard,
-      );
       expect(mockDisplay).not.toHaveBeenCalled();
-      expect(mockCancelDisplayedAll).not.toHaveBeenCalled();
+      expect(mockCancelDisplayedAll).toHaveBeenCalledTimes(1);
+      expect(mockClearNotificationRoutes).toHaveBeenCalledWith(expect.any(Function));
+      expect(mockDeleteChannel).toHaveBeenCalledWith(LEGACY_FACETIME_CHANNEL_ID);
+      expect(mockDeleteFaceTimeRoute).not.toHaveBeenCalled();
+    });
+
+    it('reports a failed legacy FaceTime channel deletion after completing other maintenance', async () => {
+      mockDeleteChannel.mockRejectedValueOnce(new Error('legacy FaceTime channel delete failed'));
+
+      await expect(prepareNotificationPresentationState()).rejects.toThrow(
+        'notification presentation maintenance completed with failures',
+      );
+
+      expect(mockDeleteChannel).toHaveBeenCalledWith(LEGACY_FACETIME_CHANNEL_ID);
+      expect(mockClearNotificationRoutes).toHaveBeenCalledWith(expect.any(Function));
+      expect(mockGetChannels).toHaveBeenCalledTimes(1);
+    });
+
+    it('retains FaceTime routes when Android cannot contain the stale displayed notice', async () => {
+      const retainedFaceTime = {
+        id: 'gator-facetime-7f000000-0000-4000-8000-000000000002',
+        notification: {
+          id: 'gator-facetime-7f000000-0000-4000-8000-000000000002',
+          data: {
+            gatorOwner: 'gator',
+            gatorSchema: '2',
+            gatorKind: 'facetime',
+            routeToken: '7f000000-0000-4000-8000-000000000002',
+          },
+        },
+      };
+      mockGetDisplayed
+        .mockResolvedValueOnce([retainedFaceTime])
+        .mockResolvedValueOnce([retainedFaceTime]);
+      mockGetTriggers.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+      mockCancelDisplayedAll.mockRejectedValueOnce(new Error('displayed cancellation failed'));
+
+      await expect(prepareNotificationPresentationState()).rejects.toThrow(
+        'notification presentation maintenance completed with failures',
+      );
+
+      expect(mockClearNotificationRoutes).not.toHaveBeenCalled();
+      expect(mockDeleteChannel).toHaveBeenCalledWith(LEGACY_FACETIME_CHANNEL_ID);
+      expect(mockDeleteFaceTimeRoute).not.toHaveBeenCalled();
     });
 
     it('finishes missing-reminder repair before aggregating an independent channel failure', async () => {
@@ -2577,7 +2503,6 @@ describe('prepareNotificationPresentationState — startup maintenance', () => {
     expect(message.android.actions.map((action: any) => action.pressAction.id)).toEqual([
       ACTION_REPLY,
       ACTION_MARK_READ,
-      ACTION_LOVE,
     ]);
     // These cover every place Android can visibly/accessibly announce the old identity/content,
     // plus arbitrary extra data. Only the opaque action/deep-link ids above survive.
@@ -2595,24 +2520,10 @@ describe('prepareNotificationPresentationState — startup maintenance', () => {
       expect(serializedMessage).not.toContain(privateString);
     }
 
-    const faceTime = reposted.find((notification) => notification.id.startsWith('gator-facetime-'));
-    expect(faceTime).toEqual(
-      expect.objectContaining({
-        title: 'Incoming FaceTime',
-        body: 'Incoming call',
-        data: {
-          gatorOwner: 'gator',
-          gatorSchema: '2',
-          gatorKind: 'facetime',
-          routeToken: '7f000000-0000-4000-8000-000000000001',
-        },
-      }),
+    expect(reposted.some((notification) => notification.id.startsWith('gator-facetime-'))).toBe(
+      false,
     );
-    expect(faceTime.android.actions.map((action: any) => action.title)).toEqual([
-      'Decline',
-      'Answer',
-    ]);
-    expect(JSON.stringify(faceTime)).not.toMatch(
+    expect(JSON.stringify(reposted)).not.toMatch(
       /Bob Jones|CALLER_SUBTITLE_SECRET|CALLER_AVATAR_SECRET/,
     );
 
@@ -3055,30 +2966,11 @@ describe('channel promises do not memoize a rejection', () => {
     });
   });
 
-  it('facetime channel: a failed createChannel is retried on the next call', async () => {
-    await jest.isolateModulesAsync(async () => {
-      const svc = loadFreshService();
-      const call = {
-        kind: 'facetime-call' as const,
-        uuid: 'ft-retry',
-        callerName: 'Bob',
-        isAudio: false,
-      };
-      mockCreateChannel.mockRejectedValueOnce(new Error('ft channel boom'));
-      await expect(svc.postNotification(call)).rejects.toThrow('ft channel boom');
-      // Cache wasn't poisoned — the next post creates the channel and rings.
-      await svc.postNotification(call);
-      expect(mockDisplay.mock.calls.at(-1)![0].id).toBe(
-        'gator-facetime-7f000000-0000-4000-8000-000000000001',
-      );
-    });
-  });
-
   // REGRESSION: the main "New Messages" channel was the ONLY one missing this guard — it
   // memoized the rejected createChannel promise forever, so a single transient failure meant
   // every later message notification awaited that rejection and threw. Message notifications
   // then stopped for the rest of the JS context with nothing but an unhandled rejection to
-  // show for it. The reminder/facetime cases above always had the reset; this one did not.
+  // show for it. The reminder case above always had the reset; this one did not.
   it('new-messages channel: a failed createChannel is retried on the next call', async () => {
     await jest.isolateModulesAsync(async () => {
       const svc = loadFreshService();
@@ -3173,15 +3065,22 @@ describe('cancel helpers', () => {
       name: 'Conversation',
       importance: 3,
     });
-    expect(mockClearNotificationRoutes).toHaveBeenCalledTimes(1);
+    expect(mockClearNotificationRoutes).toHaveBeenCalledTimes(2);
     expect(mockCreateTrigger.mock.invocationCallOrder[0]).toBeLessThan(
       mockCancelAll.mock.invocationCallOrder[0]!,
     );
+    const legacyChannelCall = mockDeleteChannel.mock.calls.findIndex(
+      ([channelId]) => channelId === legacyChannel,
+    );
+    expect(legacyChannelCall).toBeGreaterThanOrEqual(0);
     expect(mockCancelAll.mock.invocationCallOrder[0]).toBeLessThan(
-      mockDeleteChannel.mock.invocationCallOrder[0]!,
+      mockDeleteChannel.mock.invocationCallOrder[legacyChannelCall]!,
+    );
+    expect(mockClearNotificationRoutes.mock.invocationCallOrder[0]).toBeLessThan(
+      mockCreateTrigger.mock.invocationCallOrder[0]!,
     );
     expect(mockCancelAll.mock.invocationCallOrder[0]).toBeLessThan(
-      mockClearNotificationRoutes.mock.invocationCallOrder[0]!,
+      mockClearNotificationRoutes.mock.invocationCallOrder[1]!,
     );
   });
 

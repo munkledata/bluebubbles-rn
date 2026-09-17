@@ -12,11 +12,13 @@ import {
   listServerScheduledPruneExposure,
   MessageTargetCapabilityUnknownError,
   MessageTargetUnavailableError,
+  reconcileOutgoingError,
   reconcileServerScheduled,
   updateScheduledWithinTransaction,
   type UpdateScheduledPatch,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
+import { isRcsChatGuid } from '@utils/chat';
 import { http } from '../clients';
 import { sendTextMessage, type SendTextArgs } from './sendService';
 import { sendReactionMessage, type SendReactionArgs } from './sendReactionService';
@@ -81,6 +83,20 @@ export type ManualRetryResult =
   | 'stale';
 
 export type DiscardMessageResult = 'discarded' | 'message-changed' | 'stale';
+
+/** Internal, expected refusal when a retained callback outlives its required server capability. */
+class SendCapabilityUnavailableError extends Error {
+  constructor() {
+    super('This messaging feature is unavailable.');
+    this.name = 'SendCapabilityUnavailableError';
+  }
+}
+
+function assertPrivateApiAvailable(
+  _capability: ReturnType<typeof captureSessionRcsCapabilityLease>,
+): void {
+  throw new SendCapabilityUnavailableError();
+}
 
 /** Development sender injected into the scheduled runner instead of the real HTTP send path. */
 export type ScheduledDevelopmentSender = (
@@ -185,7 +201,8 @@ async function runUiAccountOperation<T>(
     if (
       error instanceof MessageTargetUnavailableError ||
       error instanceof MessageTargetCapabilityUnknownError ||
-      error instanceof DbCommitGuardRejectedError
+      error instanceof DbCommitGuardRejectedError ||
+      error instanceof SendCapabilityUnavailableError
     ) {
       return null;
     }
@@ -406,8 +423,15 @@ export function send(
   const snapshot = snapshotSendTextArgs(args);
   return runUiAccountOperation(
     accountLease,
-    () =>
-      sendTextMessage(
+    () => {
+      const capability = captureSessionRcsCapabilityLease();
+      const needsPrivateApi =
+        snapshot.selectedMessageGuid != null ||
+        !!snapshot.effectId ||
+        !!snapshot.subject ||
+        !!snapshot.mentions?.length;
+      if (needsPrivateApi) assertPrivateApiAvailable(capability);
+      return sendTextMessage(
         getDatabase(),
         http,
         snapshot,
@@ -421,8 +445,9 @@ export function send(
         },
         undefined,
         () => accountLease.isCurrent(),
-        captureSessionRcsCapabilityLease(),
-      ),
+        capability,
+      );
+    },
     'logical-send',
     reportIssue,
   );
@@ -544,6 +569,11 @@ export function react(
     accountLease,
     () => {
       const capability = captureSessionRcsCapabilityLease();
+      if (isRcsChatGuid(snapshot.chatGuid)) {
+        if (capability?.serverInfo?.rcs !== true) throw new SendCapabilityUnavailableError();
+      } else {
+        assertPrivateApiAvailable(capability);
+      }
       const serverAuthorization = messageTargetServerAuthorization(
         capability?.serverInfo,
         () => accountLease.isCurrent() && capability?.isCurrent() === true,
@@ -581,8 +611,10 @@ export function reply(
   const snapshot = { ...args };
   return runUiAccountOperation(
     accountLease,
-    () =>
-      sendTextMessage(
+    () => {
+      const capability = captureSessionRcsCapabilityLease();
+      assertPrivateApiAvailable(capability);
+      return sendTextMessage(
         getDatabase(),
         http,
         {
@@ -602,8 +634,9 @@ export function reply(
         },
         undefined,
         () => accountLease.isCurrent(),
-        captureSessionRcsCapabilityLease(),
-      ),
+        capability,
+      );
+    },
     'logical-send',
     reportIssue,
   );
@@ -623,6 +656,7 @@ export function editText(
 } | null> {
   return runUiAccountOperation(accountLease, () => {
     const capability = captureSessionRcsCapabilityLease();
+    assertPrivateApiAvailable(capability);
     const serverAuthorization = messageTargetServerAuthorization(
       capability?.serverInfo,
       () => accountLease.isCurrent() && capability?.isCurrent() === true,
@@ -645,6 +679,7 @@ export function unsend(
 ): Promise<{ ok: boolean } | null> {
   return runUiAccountOperation(accountLease, () => {
     const capability = captureSessionRcsCapabilityLease();
+    assertPrivateApiAvailable(capability);
     const serverAuthorization = messageTargetServerAuthorization(
       capability?.serverInfo,
       () => accountLease.isCurrent() && capability?.isCurrent() === true,
@@ -934,6 +969,10 @@ export async function recoverOutgoing(
     capability?.serverInfo,
     () => accountLease.isCurrent() && capability?.isCurrent() === true,
   );
+  const rcsAvailable = (): boolean =>
+    accountLease.isCurrent() &&
+    capability?.isCurrent() === true &&
+    capability.serverInfo?.rcs === true;
   return runOutgoingQueue(
     getDatabase(),
     http,
@@ -943,6 +982,7 @@ export async function recoverOutgoing(
     undefined,
     undefined,
     serverAuthorization,
+    rcsAvailable,
   );
 }
 
@@ -983,6 +1023,10 @@ export async function retry(
           capability?.serverInfo,
           () => accountLease.isCurrent() && capability?.isCurrent() === true,
         );
+        const rcsAvailable = (): boolean =>
+          accountLease.isCurrent() &&
+          capability?.isCurrent() === true &&
+          capability.serverInfo?.rcs === true;
         const { claim, row, attemptOwnerToken } = await withDbTransaction(
           db,
           (context) =>
@@ -1013,6 +1057,7 @@ export async function retry(
           undefined,
           attemptOwnerToken,
           serverAuthorization,
+          rcsAvailable,
         );
         if (!accountLease.isCurrent()) return 'stale';
         // Retired for good: the attachment's on-disk file is gone, so no re-send can ever work. The
@@ -1027,6 +1072,17 @@ export async function retry(
             return 'unsendable';
           case 'paused':
             return 'stale';
+          case 'deferred':
+            await reconcileOutgoingError(
+              db,
+              row.tempGuid,
+              1,
+              Date.now(),
+              () => accountLease.isCurrent(),
+              'RCS is unavailable.',
+              attemptOwnerToken,
+            );
+            return 'failed';
         }
       },
     );

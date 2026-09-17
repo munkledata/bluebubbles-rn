@@ -34,22 +34,22 @@ async function seed(db: AppDatabase) {
   const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
   const map = await upsertChats(
     db,
-    [Chat.parse({ guid: 'c1', participants: [{ address: 'a@x.com' }] })],
+    [Chat.parse({ guid: 'RCS;-;c1', participants: [{ address: 'a@x.com' }] })],
     hm,
   );
-  const chatId = map.get('c1')!;
+  const chatId = map.get('RCS;-;c1')!;
   await upsertMessages(
     db,
     [
       Message.parse({
-        guid: 'mt',
+        guid: 'rcs-mt',
         text: 'hi',
         dateCreated: 100,
         handle: { address: 'a@x.com' },
         messagePartTopology: {
           complete: true,
-          originalPartIndexes: [2],
-          currentParts: [{ index: 2, kind: 'text' }],
+          originalPartIndexes: [0],
+          currentParts: [{ index: 0, kind: 'text' }],
           attachmentOwnership: [],
         },
       }),
@@ -75,6 +75,24 @@ async function seedWholeMessageRcsTarget(db: AppDatabase) {
 }
 
 describe('sendReactionMessage', () => {
+  it('rejects an iMessage reaction before DB or HTTP even with a stale caller', async () => {
+    const { db, raw } = await createTestDb();
+    const post = jest.fn(async () => ({ guid: 'must-not-send' }));
+
+    await expect(
+      sendReactionMessage(db, fakeHttp(post), {
+        chatGuid: 'iMessage;-;retired',
+        targetGuid: 'apple-target',
+        reaction: 'love',
+        partIndex: 0,
+      }),
+    ).rejects.toThrow('iMessage reactions were retired');
+
+    expect(post).not.toHaveBeenCalled();
+    expect(one(raw, 'SELECT COUNT(*) AS count FROM messages')).toEqual({ count: 0 });
+    expect(one(raw, 'SELECT COUNT(*) AS count FROM outgoing_queue')).toEqual({ count: 0 });
+  });
+
   it('optimistically inserts a reaction + reconciles, posting the right body', async () => {
     const { db, raw } = await createTestDb();
     await seed(db);
@@ -86,26 +104,26 @@ describe('sendReactionMessage', () => {
         return { guid: 'real-react', dateCreated: 1000 };
       }),
       {
-        chatGuid: 'c1',
-        targetGuid: 'mt',
+        chatGuid: 'RCS;-;c1',
+        targetGuid: 'rcs-mt',
         reaction: 'love',
-        partIndex: 2,
+        partIndex: 0,
         selectedMessageText: 'hi',
       },
     );
 
     // Server contract: { chatGuid, messageGuid, reactionType } (F-2).
-    expect(body).toMatchObject({ messageGuid: 'mt', reactionType: 'love', partIndex: 2 });
+    expect(body).toMatchObject({ messageGuid: 'rcs-mt', reactionType: 'love', partIndex: 0 });
     const row = one(
       raw,
-      "SELECT guid, send_state s, associated_message_type t, associated_message_part p FROM messages WHERE associated_message_guid='mt'",
+      "SELECT guid, send_state s, associated_message_type t, associated_message_part p FROM messages WHERE associated_message_guid='rcs-mt'",
     );
     expect(row.guid).toBe('real-react'); // promoted
     expect(row.s).toBe('sent');
     expect(row.t).toBe('love');
-    expect(row.p).toBe(2);
+    expect(row.p).toBe(0);
     expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
-    expect((await listReactionsByMessageGuids(db, ['mt'])).get('mt')).toHaveLength(1);
+    expect((await listReactionsByMessageGuids(db, ['rcs-mt'])).get('rcs-mt')).toHaveLength(1);
   });
 
   it('targets a confirmed RCS message as whole-message part zero without Apple topology', async () => {
@@ -158,7 +176,10 @@ describe('sendReactionMessage', () => {
   it('rolls back a mid-insert account change before HTTP and lets a fresh lease send', async () => {
     const { db, raw } = await createTestDb();
     await seed(db);
-    const initialChatDate = one(raw, "SELECT latest_message_date d FROM chats WHERE guid='c1'").d;
+    const initialChatDate = one(
+      raw,
+      "SELECT latest_message_date d FROM chats WHERE guid='RCS;-;c1'",
+    ).d;
     let drain: Promise<void> | undefined;
     let triggerRan = false;
     raw.function('pause_reaction_during_message_insert', () => {
@@ -169,7 +190,7 @@ describe('sendReactionMessage', () => {
     raw.exec(`
       CREATE TRIGGER pause_reaction_during_message_insert
       AFTER INSERT ON messages
-      WHEN NEW.associated_message_guid = 'mt' AND NEW.associated_message_type = 'emoji'
+      WHEN NEW.associated_message_guid = 'rcs-mt' AND NEW.associated_message_type = 'emoji'
       BEGIN
         SELECT pause_reaction_during_message_insert();
       END
@@ -186,11 +207,11 @@ describe('sendReactionMessage', () => {
             return { guid: 'must-not-send' };
           }),
           {
-            chatGuid: 'c1',
-            targetGuid: 'mt',
+            chatGuid: 'RCS;-;c1',
+            targetGuid: 'rcs-mt',
             reaction: 'emoji',
             emoji: '🫡',
-            partIndex: 2,
+            partIndex: 0,
             selectedMessageText: 'private quoted body',
           },
           1_000,
@@ -206,11 +227,11 @@ describe('sendReactionMessage', () => {
       expect(posts).toBe(0);
       expect(raw.inTransaction).toBe(false);
       expect(one(raw, 'SELECT COUNT(*) c FROM outgoing_queue').c).toBe(0);
-      expect(one(raw, "SELECT COUNT(*) c FROM messages WHERE associated_message_guid='mt'").c).toBe(
-        0,
-      );
-      expect(one(raw, "SELECT COUNT(*) c FROM messages WHERE guid='mt'").c).toBe(1);
-      expect(one(raw, "SELECT latest_message_date d FROM chats WHERE guid='c1'").d).toBe(
+      expect(
+        one(raw, "SELECT COUNT(*) c FROM messages WHERE associated_message_guid='rcs-mt'").c,
+      ).toBe(0);
+      expect(one(raw, "SELECT COUNT(*) c FROM messages WHERE guid='rcs-mt'").c).toBe(1);
+      expect(one(raw, "SELECT latest_message_date d FROM chats WHERE guid='RCS;-;c1'").d).toBe(
         initialChatDate,
       );
 
@@ -234,17 +255,17 @@ describe('sendReactionMessage', () => {
                   `SELECT m.guid AS messageGuid, q.temp_guid AS queueGuid, q.kind, q.payload
                      FROM messages m
                      JOIN outgoing_queue q ON q.temp_guid = m.guid
-                    WHERE m.associated_message_guid = 'mt'`,
+                    WHERE m.associated_message_guid = 'rcs-mt'`,
                 )
                 .get() as typeof localState;
               return { guid: 'real-reaction-after-retirement', dateCreated: 2_000 };
             }),
             {
-              chatGuid: 'c1',
-              targetGuid: 'mt',
+              chatGuid: 'RCS;-;c1',
+              targetGuid: 'rcs-mt',
               reaction: 'emoji',
               emoji: '🫡',
-              partIndex: 2,
+              partIndex: 0,
               selectedMessageText: 'private quoted body',
             },
             2_000,
@@ -260,24 +281,24 @@ describe('sendReactionMessage', () => {
         kind: 'reaction',
       });
       expect(JSON.parse(localState?.payload ?? '{}')).toEqual({
-        selectedMessageGuid: 'mt',
+        selectedMessageGuid: 'rcs-mt',
         reaction: 'emoji',
         emoji: '🫡',
-        partIndex: 2,
+        partIndex: 0,
       });
       expect(localState?.payload).not.toContain('private quoted body');
       expect(requestBody).toMatchObject({
-        messageGuid: 'mt',
+        messageGuid: 'rcs-mt',
         reactionType: 'emoji',
         reactionEmoji: '🫡',
       });
       expect(requestBody).not.toHaveProperty('tempGuid');
       expect(one(raw, 'SELECT COUNT(*) c FROM outgoing_queue').c).toBe(0);
-      expect(one(raw, "SELECT COUNT(*) c FROM messages WHERE guid='mt'").c).toBe(1);
+      expect(one(raw, "SELECT COUNT(*) c FROM messages WHERE guid='rcs-mt'").c).toBe(1);
       expect(
         one(raw, "SELECT COUNT(*) c FROM messages WHERE guid='real-reaction-after-retirement'").c,
       ).toBe(1);
-      expect(one(raw, "SELECT latest_message_date d FROM chats WHERE guid='c1'").d).toBe(
+      expect(one(raw, "SELECT latest_message_date d FROM chats WHERE guid='RCS;-;c1'").d).toBe(
         initialChatDate,
       );
     } finally {
@@ -303,7 +324,7 @@ describe('sendReactionMessage', () => {
             drain = pauseRealtimeDeliveries();
             return { guid: 'late-reaction', dateCreated: 1_000 };
           }),
-          { chatGuid: 'c1', targetGuid: 'mt', reaction: 'love', partIndex: 2 },
+          { chatGuid: 'RCS;-;c1', targetGuid: 'rcs-mt', reaction: 'love', partIndex: 0 },
           1_000,
           () => activeLease.isCurrent(),
         ),
@@ -315,7 +336,7 @@ describe('sendReactionMessage', () => {
 
       expect(warn).not.toHaveBeenCalled();
       expect(
-        one(raw, "SELECT send_state s FROM messages WHERE associated_message_guid='mt'"),
+        one(raw, "SELECT send_state s FROM messages WHERE associated_message_guid='rcs-mt'"),
       ).toEqual({ s: 'sending' });
       expect(one(raw, 'SELECT COUNT(*) c FROM outgoing_queue').c).toBe(1);
     } finally {
@@ -332,16 +353,16 @@ describe('sendReactionMessage', () => {
     await sendReactionMessage(
       db,
       ok,
-      { chatGuid: 'c1', targetGuid: 'mt', reaction: 'love', partIndex: 2 },
+      { chatGuid: 'RCS;-;c1', targetGuid: 'rcs-mt', reaction: 'love', partIndex: 0 },
       1000,
     );
     await sendReactionMessage(
       db,
       ok,
-      { chatGuid: 'c1', targetGuid: 'mt', reaction: '-love', partIndex: 2 },
+      { chatGuid: 'RCS;-;c1', targetGuid: 'rcs-mt', reaction: '-love', partIndex: 0 },
       2000,
     );
-    expect((await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? []).toHaveLength(0);
+    expect((await listReactionsByMessageGuids(db, ['rcs-mt'])).get('rcs-mt') ?? []).toHaveLength(0);
   });
 
   it('marks the reaction errored on failure', async () => {
@@ -353,7 +374,7 @@ describe('sendReactionMessage', () => {
       fakeHttp(async () => {
         throw new ApiError('server_error', 'boom', 500);
       }),
-      { chatGuid: 'c1', targetGuid: 'mt', reaction: 'like', partIndex: 2 },
+      { chatGuid: 'RCS;-;c1', targetGuid: 'rcs-mt', reaction: 'like', partIndex: 0 },
     );
     expect(
       (
@@ -365,7 +386,7 @@ describe('sendReactionMessage', () => {
     ).toBe('error');
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(
-      '[send-reaction] failed for chat c1 (code 500, HTTP 500): boom',
+      '[send-reaction] failed for chat RCS;-;c1 (code 500, HTTP 500): boom',
     );
     warn.mockRestore();
   });
@@ -374,15 +395,19 @@ describe('sendReactionMessage', () => {
     const { db, raw } = await createTestDb();
     await seed(db);
     const before = (
-      one(raw, "SELECT latest_message_date d FROM chats WHERE guid='c1'") as { d: number | null }
+      one(raw, "SELECT latest_message_date d FROM chats WHERE guid='RCS;-;c1'") as {
+        d: number | null;
+      }
     ).d;
     await sendReactionMessage(
       db,
       fakeHttp(async () => ({ guid: 'r', dateCreated: 9999 })),
-      { chatGuid: 'c1', targetGuid: 'mt', reaction: 'love', partIndex: 2 },
+      { chatGuid: 'RCS;-;c1', targetGuid: 'rcs-mt', reaction: 'love', partIndex: 0 },
     );
     const after = (
-      one(raw, "SELECT latest_message_date d FROM chats WHERE guid='c1'") as { d: number | null }
+      one(raw, "SELECT latest_message_date d FROM chats WHERE guid='RCS;-;c1'") as {
+        d: number | null;
+      }
     ).d;
     expect(after).toBe(before);
   });

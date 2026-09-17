@@ -28,15 +28,15 @@ async function seed(db: AppDatabase) {
   const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
   const map = await upsertChats(
     db,
-    [Chat.parse({ guid: 'c1', participants: [{ address: 'a@x.com' }] })],
+    [Chat.parse({ guid: 'RCS;-;c1', participants: [{ address: 'a@x.com' }] })],
     hm,
   );
-  const chatId = map.get('c1')!;
+  const chatId = map.get('RCS;-;c1')!;
   await upsertMessages(
     db,
     [
       Message.parse({
-        guid: 'mt',
+        guid: 'rcs-mt',
         text: 'hi',
         dateCreated: 100,
         handle: { address: 'a@x.com' },
@@ -68,8 +68,8 @@ describe('sendReactionMessage — emoji tapbacks', () => {
         return { guid: 'real-react', dateCreated: 1000 };
       }),
       {
-        chatGuid: 'c1',
-        targetGuid: 'mt',
+        chatGuid: 'RCS;-;c1',
+        targetGuid: 'rcs-mt',
         reaction: 'emoji',
         emoji: '🔥',
         partIndex: 0,
@@ -77,14 +77,18 @@ describe('sendReactionMessage — emoji tapbacks', () => {
       },
     );
 
-    expect(body).toMatchObject({ messageGuid: 'mt', reactionType: 'emoji', reactionEmoji: '🔥' });
+    expect(body).toMatchObject({
+      messageGuid: 'rcs-mt',
+      reactionType: 'emoji',
+      reactionEmoji: '🔥',
+    });
     const row = one(
       raw,
       "SELECT associated_message_emoji AS e FROM messages WHERE guid = 'real-react'",
     );
     expect(row.e).toBe('🔥');
     // And the reactions repo renders it as an own emoji badge.
-    const rows = (await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? [];
+    const rows = (await listReactionsByMessageGuids(db, ['rcs-mt'])).get('rcs-mt') ?? [];
     expect(rows[0]).toMatchObject({ baseType: 'emoji', emoji: '🔥', isFromMe: 1 });
   });
 
@@ -98,7 +102,7 @@ describe('sendReactionMessage — emoji tapbacks', () => {
         body = json as Record<string, unknown>;
         return { guid: 'real-unreact', dateCreated: 1000 };
       }),
-      { chatGuid: 'c1', targetGuid: 'mt', reaction: '-emoji', emoji: '🔥', partIndex: 0 },
+      { chatGuid: 'RCS;-;c1', targetGuid: 'rcs-mt', reaction: '-emoji', emoji: '🔥', partIndex: 0 },
     );
     expect(body).toMatchObject({ reactionType: '-emoji', reactionEmoji: '🔥' });
   });
@@ -113,7 +117,7 @@ describe('sendReactionMessage — emoji tapbacks', () => {
         body = json as Record<string, unknown>;
         return { guid: 'real-love', dateCreated: 1000 };
       }),
-      { chatGuid: 'c1', targetGuid: 'mt', reaction: 'love', partIndex: 0 },
+      { chatGuid: 'RCS;-;c1', targetGuid: 'rcs-mt', reaction: 'love', partIndex: 0 },
     );
     expect(body).toMatchObject({ reactionType: 'love' });
     expect(Object.keys(body!)).not.toContain('reactionEmoji');
@@ -129,13 +133,13 @@ describe('sendReactionMessage — emoji tapbacks', () => {
       fakeHttp(async () => {
         throw new Error('network down');
       }),
-      { chatGuid: 'c1', targetGuid: 'mt', reaction: 'emoji', emoji: '🫡', partIndex: 0 },
+      { chatGuid: 'RCS;-;c1', targetGuid: 'rcs-mt', reaction: 'emoji', emoji: '🫡', partIndex: 0 },
     );
     const q = one(raw, "SELECT payload FROM outgoing_queue WHERE kind = 'reaction'");
     expect(JSON.parse(q.payload as string)).toMatchObject({ reaction: 'emoji', emoji: '🫡' });
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(
-      '[send-reaction] failed for chat c1 (code 10004): network down',
+      '[send-reaction] failed for chat RCS;-;c1 (code 10004): network down',
     );
     warn.mockRestore();
   });

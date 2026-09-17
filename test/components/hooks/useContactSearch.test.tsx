@@ -1,6 +1,6 @@
 /**
  * useContactSearch (src/features/contacts/useContactSearch.ts) — contact-address suggestions
- * shared by new-chat and the FaceTime dialer. Locks in the doc-comment contract:
+ * used by new-chat. Locks in the doc-comment contract:
  *   - result delivery: whatever `searchContactAddresses` resolves is exposed;
  *   - a rejected search is swallowed → empty suggestions (never throws);
  *   - active-flag cancellation: a stale query's late result never clobbers the newer one;

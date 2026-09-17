@@ -200,9 +200,6 @@ jest.mock('@db/repositories', () => ({
   getIncomingEventQueueHealth: mockQueueHealth,
   INCOMING_EVENT_DEPENDENCY_RETRY_MS: 5_000,
 }));
-jest.mock('@state/faceTimeStore', () => ({
-  useFaceTimeStore: { getState: () => ({ ring: jest.fn(), dismissIncoming: jest.fn() }) },
-}));
 jest.mock('@state/featureSettingsStore', () => ({
   useFeatureSettingsStore: {
     getState: () => mockFeatureState,
@@ -485,13 +482,6 @@ const MESSAGE_INTENT: MockNotificationIntent = {
   sender: 'notify-private-sender-a4c6',
 };
 
-const FACETIME_INTENT: MockNotificationIntent = {
-  kind: 'facetime-call',
-  uuid: 'notify-private-facetime-b5d7',
-  caller: 'notify-private-caller-c6e8',
-  isVideo: true,
-};
-
 async function startAndCaptureNotifier(): Promise<MockNotifyIntent> {
   await startFreshRealtime();
   if (!mockNotifyIntent) throw new Error('NotifyingEventSink did not capture its notifier');
@@ -616,26 +606,14 @@ describe('realtime detached side-effect ownership', () => {
 });
 
 describe('realtime notification callback ownership', () => {
-  it.each([
-    ['message', MESSAGE_INTENT, false],
-    ['FaceTime', FACETIME_INTENT, true],
-  ] as const)('forwards an ordinary %s intent exactly', async (_label, intent, bypassFeatures) => {
-    if (bypassFeatures) {
-      mockFeatureState.hydrated = false;
-      mockFeatureState.messageNotifications = false;
-      mockFeatureState.filterUnknownSenders = true;
-    }
+  it('forwards an ordinary message intent exactly', async () => {
     const notify = await startAndCaptureNotifier();
     const { context } = deliveryContext();
 
-    await expect(Promise.resolve(notify(intent, context))).resolves.toBeUndefined();
+    await expect(Promise.resolve(notify(MESSAGE_INTENT, context))).resolves.toBeUndefined();
 
     expect(mockPostNotification).toHaveBeenCalledTimes(1);
-    expect(mockPostNotification).toHaveBeenCalledWith(intent, context);
-    if (bypassFeatures) {
-      expect(mockFeatureHydrate).not.toHaveBeenCalled();
-      expect(mockChatHasKnownSender).not.toHaveBeenCalled();
-    }
+    expect(mockPostNotification).toHaveBeenCalledWith(MESSAGE_INTENT, context);
   });
 
   it('rejects a durable message while feature settings remain unavailable, then retries exactly', async () => {

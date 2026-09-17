@@ -182,13 +182,7 @@ describe('Composer paste', () => {
 
     fireEvent.press(screen.getByLabelText('Send message'));
     await waitFor(() =>
-      expect(onSendTextAttachment).toHaveBeenCalledWith(
-        'look at this',
-        PASTED_IMAGE,
-        undefined,
-        undefined,
-        undefined,
-      ),
+      expect(onSendTextAttachment).toHaveBeenCalledWith('look at this', PASTED_IMAGE),
     );
     expect(onSendAttachments).not.toHaveBeenCalled();
     expect(onSend).not.toHaveBeenCalled();

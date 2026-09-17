@@ -96,7 +96,6 @@ const COORDINATED_DELEGATION_PATHS = new Set([
   'src/db/repositories/outgoing.ts',
   'src/features/conversations/devFixtureSession.ts',
   'src/features/conversations/useChatScheduledCatchup.ts',
-  'src/features/facetime/useFaceTime.ts',
   'src/services/backup/backup.ts',
   'src/services/backup/backupService.ts',
   'src/services/boot/foregroundBoot.ts',
@@ -1639,7 +1638,7 @@ function dbProcessRelaunchCertificateCandidate({
   if (
     createHash('sha256')
       .update(normalizedSnippet(runtimeWaveFile, runtimeWaveFile))
-      .digest('hex') !== 'a1b7cb90f44e2a6106bfc69f4ad28c9637d0566e9467bd0e36b7719b4aeb0c74'
+      .digest('hex') !== 'a14265769bad54427f56dbf645573de0cf13e5b25fafedfaae25e38a737bc6a0'
   ) {
     return undefined;
   }
@@ -1885,17 +1884,17 @@ function dbProcessRelaunchCertificateCandidate({
   const expectedRuntimeWaveFingerprints = new Map([
     ['deferred', '749b46b1f7f78556be7dfdc72d405a2f92493d45bf2e87e990c99a25e24b45eb'],
     ['observe', '2a1287160d12928bb5a95a0ce78bff88adf80562d831e4aedd6dd9c261f1f965'],
-    ['syncChat', '71ea327d809efd891f9196214ebb20b4149304a9c8b5e715143030ff114c30db'],
+    ['syncChat', '3ead31c399bf10e3dda22ec59e42f593a280c7a84e969c1262f83b5371e1d737'],
     ['liveMessage', '4cccfc43e183566a82228df3a9689f8b217d78cfed297c6f523a6485fa05b4a6'],
     ['syncApi', 'bc4e46fa51e2e97b812b7cd1b9473812c2edc49cde9ae414c33b3b54fe080284'],
     ['count', '04da8112837e41f975bb09ef7205ea81050dd24c1c167eba8914b3ba69a54ef1'],
     [
       'submitOrderedCoordinatorWave',
-      '5bbe0ae791b6df42ec968ebfe7506e1bb2ca459500efc0e3bbd0f148ec8c6b72',
+      'f64872e86e4f858884ae75ec6a19e9f9480e087fd79871ab77c57b81b9a329cf',
     ],
     [
       'runDbRuntimeConcurrencyWave',
-      '191426b03e8950e87f8e0e4a9b7a650e9b66a2879f5ab7a822fcb700d3214a55',
+      '492d0d4abd275e7fb9148b693fd21eff83b38623d6b0daaeda2ea711f92cbc2d',
     ],
   ]);
   for (const [name, expected] of expectedRuntimeWaveFingerprints) {
@@ -2495,7 +2494,7 @@ function dbProcessRelaunchCertificateCandidate({
   const runtimeProductionCalleeFingerprints = new Map([
     [syncAllChats, '31721c299f75745c0c3ea4a8a0110c3a2a656c39784fd2c6d633b25da2b0098e'],
     [linkHandlesAfterCommit, '02704855bb63dd6db55395393c6f25fa309d91fdb3aac54422c71ca86fd206b6'],
-    [sendImageMessage, 'e1ce38ad9d74a11e9157526d1fee7fd430e6bb9a2b27aabf3a3a29ab4e3adf07'],
+    [sendImageMessage, '9d33f303476ba829f1a16d33247d7728f66c184e097350e71b6cfb3eeeec85f0'],
     [reconcileSendOutcome, '8829dd1fff1160b2a77b29713228232f30d1ef6ecb6d86ecadd72f8a48bb4952'],
     [handleSendFailure, 'db45f7ee8cd8a4109c7003a87b31c4165edc15256853ab1a5aa2f7c7b3c5b0c7'],
     [
@@ -2512,7 +2511,7 @@ function dbProcessRelaunchCertificateCandidate({
     ],
     [
       resolveRcsAttemptOwnership,
-      'fce77a26a501efc43bea7886017281a0e99f222f03c30e300117e051033b9951',
+      'b5a6143737abfcd925e8d3e191baf4eff28365737f07055432e1a7c29a7ca53d',
     ],
     [pinSendTransport, 'd5b3d2ce63b16eecf6c7490f69f8368de8d6847833898258a89efa0af97d2aa6'],
   ]);
@@ -7741,7 +7740,6 @@ function incomingIngressCertifiedNodes({
   const fcmRegistrationPath = 'src/services/notifications/registerFcmBackgroundHandler.ts';
   const foregroundBootPath = 'src/services/boot/foregroundBoot.ts';
   const devPath = 'src/features/conversations/devSeed.ts';
-  const chatPath = 'app/(app)/chat/[guid].tsx';
   const digestPath = 'src/services/realtime/expoDigestBackend.ts';
   const headlessEffectsPath = 'src/services/background/realtimeHeadlessEffects.ts';
   const fcmEncryptionPath = 'src/core/realtime/fcmEncryption.ts';
@@ -7757,7 +7755,6 @@ function incomingIngressCertifiedNodes({
   const fcmRegistrationFile = filesByPath.get(fcmRegistrationPath);
   const foregroundBootFile = filesByPath.get(foregroundBootPath);
   const devFile = filesByPath.get(devPath);
-  const chatFile = filesByPath.get(chatPath);
   const digestFile = filesByPath.get(digestPath);
   const headlessEffectsFile = filesByPath.get(headlessEffectsPath);
   const fcmEncryptionFile = filesByPath.get(fcmEncryptionPath);
@@ -7773,7 +7770,6 @@ function incomingIngressCertifiedNodes({
     !fcmRegistrationFile ||
     !foregroundBootFile ||
     !devFile ||
-    !chatFile ||
     !digestFile ||
     !headlessEffectsFile ||
     !fcmEncryptionFile ||
@@ -7942,9 +7938,7 @@ function incomingIngressCertifiedNodes({
   const devQueue = fn(devPath, 'devQueueIncomingMessageWithoutDrain');
   const devResumeQueued = fn(devPath, 'devResumeQueuedIncomingMessages');
   const injectMessage = fn(devPath, 'injectMessage');
-  const injectFaceTime = fn(devPath, 'devInjectIncomingFaceTime');
   const injectEffect = fn(devPath, 'devInjectEffect');
-  const chatScreen = fn(chatPath, 'ChatScreenInner');
   const required = [
     dispatchRealtimeEvent,
     persistAuthenticatedLockedFcmV3Event,
@@ -8045,9 +8039,7 @@ function incomingIngressCertifiedNodes({
     devQueue,
     devResumeQueued,
     injectMessage,
-    injectFaceTime,
     injectEffect,
-    chatScreen,
   ];
   if (
     required.some((callable) => !callable?.body) ||
@@ -9561,7 +9553,7 @@ function incomingIngressCertifiedNodes({
   const sinkSpineSpecs = [
     ['./realtime/serverUrlEventSink', 'ServerUrlEventSink', 2],
     ['./realtime/rcsAlertEventSink', 'RcsAlertEventSink', 2],
-    ['./realtime/faceTimeEventSink', 'FaceTimeEventSink', 3],
+    ['./realtime/faceTimeEventSink', 'FaceTimeEventSink', 1],
     ['./realtime/typingEventSink', 'TypingEventSink', 2],
     ['./realtime/groupEventSideEffectSink', 'GroupEventSideEffectSink', 2],
     ['./realtime/notifyingEventSink', 'NotifyingEventSink', 4],
@@ -10916,7 +10908,6 @@ function incomingIngressCertifiedNodes({
     [devQueue, devPersist],
     [devResumeQueued, devResume],
     [injectMessage, devPushInject],
-    [injectFaceTime, devPushInject],
     [injectEffect, devPushInject],
   ];
   const devOuterNodes = [];
@@ -10975,112 +10966,6 @@ function incomingIngressCertifiedNodes({
     devOuterNodes.push(matches[0].node);
   }
   approved.push(...devOuterNodes);
-
-  // The chat DEV button checks the screen lease before its contained public-dispatch promise.
-  const chatDispatchCall = sole(nestedCallEdges(edges, chatScreen, dispatchRealtimeEvent));
-  const chatCallback = chatDispatchCall?.caller;
-  const useStateBinding = namedImportBinding(chatFile, 'react', 'useState');
-  const chatIsDevBinding = namedImportBinding(chatFile, '@utils/isDev', 'isDevServer');
-  const chatIsDevCalls = chatIsDevBinding
-    ? directCallsToBinding(chatFile, chatIsDevBinding, checker)
-    : [];
-  const chatLeaseState = (() => {
-    const matches = [];
-    for (const statement of chatScreen.body.statements) {
-      if (!ts.isVariableStatement(statement)) continue;
-      for (const declaration of statement.declarationList.declarations) {
-        if (!ts.isArrayBindingPattern(declaration.name) || declaration.name.elements.length !== 1) {
-          continue;
-        }
-        const element = declaration.name.elements[0];
-        if (
-          !element ||
-          !ts.isBindingElement(element) ||
-          !ts.isIdentifier(element.name) ||
-          element.name.text !== 'accountLease' ||
-          !declaration.initializer
-        ) {
-          continue;
-        }
-        const stateCall = callExpression(declaration.initializer);
-        const initializer = stateCall?.arguments[0]
-          ? unwrapExpression(stateCall.arguments[0])
-          : undefined;
-        const captureCall =
-          initializer && ts.isArrowFunction(initializer) && !ts.isBlock(initializer.body)
-            ? callableCall(initializer.body, captureRealtimeDeliveryLease, checker)
-            : undefined;
-        if (
-          stateCall &&
-          useStateBinding &&
-          sameSymbol(unwrapExpression(stateCall.expression), useStateBinding, checker) &&
-          stateCall.arguments.length === 1 &&
-          initializer &&
-          ts.isArrowFunction(initializer) &&
-          hasPlainIdentifierParameters(initializer, []) &&
-          captureCall &&
-          captureCall.arguments.length === 0
-        ) {
-          matches.push({ binding: element.name, captureCall });
-        }
-      }
-    }
-    return matches.length === 1 ? matches[0] : undefined;
-  })();
-  const chatGuard =
-    chatCallback && ts.isBlock(chatCallback.body) ? chatCallback.body.statements[0] : undefined;
-  const chatLeaseGuardCalls = [];
-  if (chatGuard && ts.isIfStatement(chatGuard)) {
-    const visitChatGuard = (node) => {
-      if (ts.isCallExpression(node)) {
-        const access = callAccess(node.expression);
-        if (
-          access?.method === 'isCurrent' &&
-          chatLeaseState &&
-          sameSymbol(access.receiver, chatLeaseState.binding, checker)
-        ) {
-          chatLeaseGuardCalls.push(node);
-        }
-      }
-      ts.forEachChild(node, visitChatGuard);
-    };
-    visitChatGuard(chatGuard.expression);
-  }
-  const chatCallbackIsDevCalls = chatCallback
-    ? chatIsDevCalls.filter((call) => nodeIsInside(call, chatCallback))
-    : [];
-  if (
-    !chatDispatchCall ||
-    !chatCallback ||
-    !ts.isArrowFunction(chatCallback) ||
-    !hasPlainIdentifierParameters(chatCallback, []) ||
-    !ts.isBlock(chatCallback.body) ||
-    chatCallback.body.statements.length !== 2 ||
-    !chatLeaseState ||
-    !chatIsDevBinding ||
-    chatCallbackIsDevCalls.length !== 1 ||
-    chatCallbackIsDevCalls[0].arguments.length !== 0 ||
-    !chatGuard ||
-    !ts.isIfStatement(chatGuard) ||
-    chatLeaseGuardCalls.length !== 1 ||
-    chatLeaseGuardCalls[0].arguments.length !== 0 ||
-    !ts.isReturnStatement(chatGuard.thenStatement) ||
-    normalizedSnippet(chatCallback.body.statements[0], chatFile) !==
-      'if (!isDevServer() || !accountLease.isCurrent()) return;' ||
-    chatDispatchCall.node.arguments.length !== 4 ||
-    !sameSymbol(
-      unwrapExpression(chatDispatchCall.node.arguments[3]),
-      chatLeaseState.binding,
-      checker,
-    ) ||
-    !snippetIs(
-      chatDispatchCall.node,
-      "dispatchRealtimeEvent( 'typing-indicator', { chatGuid: guid, display: true }, 'dev', accountLease, )",
-    )
-  ) {
-    return empty();
-  }
-  approved.push(chatDispatchCall.node);
 
   // Socket construction passes the exact public dispatcher. Native callbacks use the account
   // lease captured at connect, reserve occurrence synchronously, and return the handler promise
@@ -12996,7 +12881,7 @@ function incomingIngressCertifiedNodes({
     ],
     [
       dispatchRealtimeEvent,
-      [...fcmDispatchCalls.map((edge) => edge.node), devDispatchCall.node, chatDispatchCall.node],
+      [...fcmDispatchCalls.map((edge) => edge.node), devDispatchCall.node],
     ],
     [devPushInject, devOuterNodes.slice(2)],
     [devPersist, [devOuterNodes[0]]],
@@ -13065,7 +12950,7 @@ function incomingIngressCertifiedNodes({
     return empty();
   }
   const certified = new Set(approved);
-  if (approved.length !== 29 || certified.size !== 29) return empty();
+  if (approved.length !== 27 || certified.size !== 27) return empty();
 
   const protectedOwners = new Set([
     dispatchRealtimeEvent,
@@ -13112,7 +12997,6 @@ function incomingIngressCertifiedNodes({
     foregroundCallback,
     runDevAccountWrite,
     ...devCallbacks,
-    chatCallback,
     startRecoveryTask,
     resumeRecoveryTask,
   ]);

@@ -316,10 +316,8 @@ const BACKUP_KV_KEYS: ReadonlySet<string> = new Set([
   // syncSettingsStore
   'sync.messagesPerChat',
   // featureSettingsStore — the boolean FLAGS…
-  'privateApi.enabled',
   'privateApi.sendTypingIndicators',
   'privateApi.sendReadReceipts',
-  'privateApi.sendSubjectLines',
   'attachments.autoDownload',
   'attachments.autoDownloadWifiOnly',
   'conversation.sendWithReturn',

@@ -21,7 +21,6 @@ import {
   INCOMING_EVENT_DEPENDENCY_RETRY_MS,
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
-import { useFaceTimeStore } from '@state/faceTimeStore';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useLockStore } from '@state/lockStore';
 import { useRcsHealthStore } from '@state/rcsHealthStore';
@@ -594,8 +593,6 @@ function realtimeSink(db: AppDatabase, accountGeneration: number): EventSink {
           ),
           (chatGuid, display) => useTypingStore.getState().setTyping(chatGuid, display),
         ),
-        (c) => useFaceTimeStore.getState().ring(c),
-        (uuid) => useFaceTimeStore.getState().dismissIncoming(uuid),
       ),
       (alertType) => useRcsHealthStore.getState().setAlert(alertType),
     ),

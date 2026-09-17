@@ -201,7 +201,7 @@ describe('the Expo background task adapter', () => {
     mockRunBackgroundSync.mockImplementationOnce(async (deps) => {
       await deps.synchronize(db, client, '1.9.0', scope);
       await deps.recoverAndDrainSchedules(db, client, scope, serverInfo);
-      await deps.drainOutgoing(db, client, scope);
+      await deps.drainOutgoing(db, client, scope, serverInfo);
       return { result: 'success', reason: 'completed' };
     });
 
@@ -235,7 +235,12 @@ describe('the Expo background task adapter', () => {
     )?.[6] as (() => unknown) | undefined;
     expect(capabilitySourceFactory?.()).toEqual({
       kind: 'fixed',
-      serverInfo,
+      serverInfo: {
+        ...serverInfo,
+        private_api: false,
+        supports_imessage_text_with_attachment: false,
+        supports_icloud_account: false,
+      },
     });
     expect(mockRunOutgoingQueue).toHaveBeenCalledWith(
       db,
@@ -245,8 +250,15 @@ describe('the Expo background task adapter', () => {
       scope,
       BACKGROUND_OUTGOING_MAX_ROWS,
       BACKGROUND_ATTACHMENT_UPLOAD_TIMEOUT_MS,
-      undefined,
+      expect.objectContaining({
+        allowsLegacyPartZero: true,
+        isCurrent: expect.any(Function),
+      }),
+      expect.any(Function),
     );
+    const rcsAvailable = (mockRunOutgoingQueue.mock.calls[0] as unknown[] | undefined)?.[8] as
+      (() => boolean) | undefined;
+    expect(rcsAvailable?.()).toBe(false);
   });
 
   it('keeps task registration idempotent', async () => {

@@ -8,22 +8,18 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
-  Text,
   TextInput,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { MessagePreview } from '@db/repositories';
 import { attachPasteListener } from '@/services/paste';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { showToast } from '../toast/toastStore';
-import { buildMessageSnippet, type MentionRange } from '@utils';
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 import { Icon } from '../primitives';
 import { readableTextOn, useTheme, withAlpha } from '../theme';
 import type { Recurrence } from '@core/schedule';
 import { AttachmentTray, type PendingAttachment } from './AttachmentTray';
-import { EffectPicker } from './effects';
 import { RecurrenceSheet } from './RecurrenceSheet';
 import {
   useComposerAuthoringSession,
@@ -33,24 +29,12 @@ import {
 } from './useComposerAuthoringSession';
 
 interface ComposerProps {
-  /** effectId set when sending with an iMessage send-effect (long-press send); subject is the
-   *  optional Private-API iMessage subject line; mentions are @mention spans in the text. */
-  onSend: (
-    text: string,
-    effectId?: string,
-    subject?: string,
-    mentions?: MentionRange[],
-  ) => ComposerTextAdmission;
+  /** Send an ordinary text message. */
+  onSend: (text: string) => ComposerTextAdmission;
   /** Send photo/video/file attachments staged in the inline tray. */
   onSendAttachments?: (items: PendingAttachment[]) => ComposerAttachmentAdmission;
   /** Send one staged attachment and body text under one optimistic/retry identity. */
-  onSendTextAttachment?: (
-    text: string,
-    item: PendingAttachment,
-    effectId?: string,
-    subject?: string,
-    mentions?: MentionRange[],
-  ) => ComposerTextAttachmentAdmission;
+  onSendTextAttachment?: (text: string, item: PendingAttachment) => ComposerTextAttachmentAdmission;
   /**
    * Synchronous all-or-none preflight for the logical jobs created by one submit. Returning false
    * leaves the authored text and attachments in place.
@@ -61,13 +45,8 @@ interface ComposerProps {
   /** Open the document picker (the tray's "Files" button); returns picked items to stage. */
   onPickFiles?: () => Promise<PendingAttachment[]>;
   /** Pick a device contact and send it as a card (tray's "Contact" button). Provided only when the
-   *  server can build vCards (`supports_send_contact`), so the button is capability-gated. */
+   *  current RCS chat can send interactive attachments, so the button is capability-gated. */
   onPickContact?: () => void;
-  replyTo?: MessagePreview | null;
-  onCancelReply?: () => void;
-  /** When set, the composer edits this text instead of sending a new message. */
-  editingText?: string | null;
-  onCancelEdit?: () => void;
   /** When set, a 📅 button offers to schedule the typed text for a future time
    *  (recurrence: null/undefined = send once, else repeat daily/weekly/monthly). */
   onSchedule?: (text: string, scheduledFor: number, recurrence?: Recurrence | null) => void;
@@ -79,10 +58,6 @@ interface ComposerProps {
   translucent?: boolean;
   /** Input placeholder; defaults to "iMessage". SMS screens pass "Text Message". */
   placeholder?: string;
-  /** Show a Private-API subject-line field above the input (iMessage + setting on). */
-  subjectEnabled?: boolean;
-  /** Group participants for @mention autocomplete (empty/undefined → no mention picker). */
-  mentionParticipants?: { address: string; name: string }[];
   /** Restore a persisted per-chat draft into an EMPTY composer (loads async after mount). */
   initialText?: string;
   /** Persist the draft (debounced while typing; '' immediately on send). */
@@ -97,14 +72,12 @@ interface ComposerProps {
 }
 
 export interface ComposerRemovalState {
-  /** The current edit differs from the original message and would be lost on removal. */
-  hasUnsavedEdit: boolean;
-  /** Attachments, subject, or mention metadata are not part of the persisted body-text draft. */
+  /** Attachments are not part of the persisted body-text draft. */
   hasUnsavedDraftMetadata: boolean;
 }
 
 /**
- * iOS message composer: optional reply/edit bar + attach button + input + send button.
+ * Message composer: optional RCS attachment button + plain-text input + send button.
  * Memoized: it re-renders on every keystroke from its own state, but the chat screen re-renders
  * on every reactive tick — the memo (with the screen's useCallback-stable props) keeps those
  * ticks from re-rendering the composer too.
@@ -117,17 +90,11 @@ export const Composer = React.memo(function Composer({
   isSubmitOwnerCurrent,
   onPickFiles,
   onPickContact,
-  replyTo,
-  onCancelReply,
-  editingText,
-  onCancelEdit,
   onSchedule,
   onTyping,
   onStartVoice,
   translucent = false,
   placeholder = 'iMessage',
-  subjectEnabled = false,
-  mentionParticipants = [],
   initialText,
   onDraftChange,
   initialAttachments,
@@ -143,19 +110,30 @@ export const Composer = React.memo(function Composer({
   // Over a wallpaper the composer bar disappears; the input pill + each control float as bubbles.
   const chip = withAlpha(theme.color.background, 0.62);
   const bubble = translucent ? [styles.ctrlBubble, { backgroundColor: chip }] : null;
-  // Over a wallpaper the composer bar is transparent, so the reply/edit preview would sit straight
-  // on the image — back it with the same frosted chip the controls use.
-  const replyBarBg = translucent ? [styles.replyBarBubble, { backgroundColor: chip }] : null;
-  const [effectOpen, setEffectOpen] = useState(false);
   const [trayOpen, setTrayOpen] = useState(false);
   // Set once the date+time pickers resolve; the RecurrenceSheet (step 3) commits or cancels it.
   const [pendingSchedule, setPendingSchedule] = useState<{ text: string; when: number } | null>(
     null,
   );
   const [pending, setPending] = useState<PendingAttachment[]>([]);
+  const attachmentsEnabled = !!onSendAttachments;
+  const attachmentsEnabledRef = useRef(attachmentsEnabled);
+  attachmentsEnabledRef.current = attachmentsEnabled;
 
-  const addPending = (item: PendingAttachment): void =>
+  // A server capability can disappear while this screen stays mounted. Keep already-staged files
+  // visible/removable (they are user-authored state), but close the picker tray. The authoring hook
+  // treats them as non-sendable until support returns, so they do not create a dead Send button.
+  useEffect(() => {
+    if (attachmentsEnabled) return;
+    setTrayOpen(false);
+  }, [attachmentsEnabled]);
+
+  const addPending = (item: PendingAttachment): void => {
+    // A native picker can resolve after capability loss and after its tray has unmounted. Read the
+    // live ref rather than the callback's render-time prop before admitting that late result.
+    if (!attachmentsEnabledRef.current) return;
     setPending((cur) => (cur.some((p) => p.uri === item.uri) ? cur : [...cur, item]));
+  };
 
   /**
    * Pasted pictures/files (long-press Paste, a keyboard image/GIF/sticker commit, or a drop).
@@ -172,7 +150,7 @@ export const Composer = React.memo(function Composer({
   }, []);
 
   useEffect(() => {
-    if (!active || inputTag == null) return;
+    if (!active || !attachmentsEnabled || inputTag == null) return;
     return attachPasteListener(inputTag, ({ files, dropped }) => {
       // Only `setPending` (stable) is used here, so the listener never needs re-attaching when
       // the composer re-renders — which would otherwise churn the native registration on every
@@ -186,7 +164,7 @@ export const Composer = React.memo(function Composer({
       // Silence would read as "paste is broken" — say so when nothing could be staged.
       if (files.length === 0 && dropped > 0) showToast("Couldn't read that pasted file");
     });
-  }, [active, inputTag]);
+  }, [active, attachmentsEnabled, inputTag]);
   const removePending = (uri: string): void =>
     setPending((cur) => cur.filter((p) => p.uri !== uri));
   const toggleTray = (): void =>
@@ -225,41 +203,24 @@ export const Composer = React.memo(function Composer({
     if (p) void p.then((items) => items.forEach(addPending));
   };
 
-  const {
-    text,
-    setText,
-    subject,
-    setSubject,
-    trimmed,
-    isEditing,
-    canSend,
-    submissionPending,
-    mentionMatches,
-    pickMention,
-    setCursor,
-    onChangeText,
-    submit,
-    cancelEdit,
-  } = useComposerAuthoringSession({
-    active,
-    editingText,
-    initialText,
-    initialAttachments,
-    mentionParticipants,
-    pending,
-    setPending,
-    setTrayOpen,
-    onSend,
-    onSendAttachments,
-    onSendTextAttachment,
-    canSubmit,
-    isSubmitOwnerCurrent,
-    onCancelEdit,
-    onDraftChange,
-    onTyping,
-    onRemovalStateChange,
-  });
-  const attachEnabled = !!onSendAttachments && !isEditing;
+  const { text, setText, trimmed, canSend, submissionPending, onChangeText, submit } =
+    useComposerAuthoringSession({
+      active,
+      initialText,
+      initialAttachments,
+      pending,
+      setPending,
+      setTrayOpen,
+      onSend,
+      onSendAttachments,
+      onSendTextAttachment,
+      canSubmit,
+      isSubmitOwnerCurrent,
+      onDraftChange,
+      onTyping,
+      onRemovalStateChange,
+    });
+  const attachEnabled = attachmentsEnabled;
 
   // Two-step native pickers (date → time); cancelling either aborts scheduling.
   const pickSchedule = (): void => {
@@ -299,23 +260,6 @@ export const Composer = React.memo(function Composer({
     });
   };
 
-  const replyWho = replyTo
-    ? replyTo.isFromMe === 1
-      ? 'You'
-      : (replyTo.senderName ?? 'Unknown')
-    : '';
-  const replySnippet = replyTo
-    ? buildMessageSnippet({
-        text: replyTo.text,
-        subject: replyTo.subject,
-        hasAttachments: replyTo.hasAttachments,
-        hasVisibleAttachments: replyTo.hasVisibleAttachments,
-        attachmentDescription: replyTo.attachmentDescription,
-        balloonBundleId: replyTo.balloonBundleId,
-        isRetracted: replyTo.isRetracted,
-      })
-    : '';
-
   return (
     <View
       // The bottom-inset rule below is device-only in effect but node-testable through this handle
@@ -348,51 +292,6 @@ export const Composer = React.memo(function Composer({
         },
       ]}
     >
-      {isEditing ? (
-        <View style={[styles.replyBar, { borderLeftColor: theme.color.tint }, replyBarBg]}>
-          <View style={styles.replyText}>
-            <Text style={[styles.replyWho, { color: theme.color.secondaryLabel }]}>
-              Editing message
-            </Text>
-          </View>
-          <Pressable
-            onPress={cancelEdit}
-            disabled={submissionPending}
-            hitSlop={10}
-            style={styles.replyClose}
-            accessibilityRole="button"
-            accessibilityLabel="Cancel edit"
-          >
-            <Icon name="close" size={18} color={theme.color.secondaryLabel} />
-          </Pressable>
-        </View>
-      ) : null}
-      {replyTo && !isEditing ? (
-        <View style={[styles.replyBar, { borderLeftColor: theme.color.tint }, replyBarBg]}>
-          <View style={styles.replyText}>
-            <Text style={[styles.replyWho, { color: theme.color.secondaryLabel }]}>
-              Replying to {replyWho}
-            </Text>
-            <Text
-              numberOfLines={1}
-              style={[styles.replySnippet, { color: theme.color.tertiaryLabel }]}
-            >
-              {replySnippet}
-            </Text>
-          </View>
-          <Pressable
-            onPress={onCancelReply}
-            disabled={submissionPending}
-            hitSlop={10}
-            style={styles.replyClose}
-            accessibilityRole="button"
-            accessibilityLabel="Cancel reply"
-          >
-            <Icon name="close" size={18} color={theme.color.secondaryLabel} />
-          </Pressable>
-        </View>
-      ) : null}
-
       {pending.length > 0 ? (
         <ScrollView
           horizontal
@@ -440,37 +339,6 @@ export const Composer = React.memo(function Composer({
         </ScrollView>
       ) : null}
 
-      {subjectEnabled && !isEditing ? (
-        <TextInput
-          editable={active && !submissionPending}
-          value={subject}
-          onChangeText={setSubject}
-          placeholder="Subject"
-          placeholderTextColor={theme.color.tertiaryLabel}
-          style={[
-            styles.subjectInput,
-            { color: theme.color.label, borderBottomColor: theme.color.separator },
-          ]}
-          accessibilityLabel="Subject line"
-        />
-      ) : null}
-      {mentionMatches.length > 0 ? (
-        <View style={[styles.mentionList, { backgroundColor: theme.color.secondaryBackground }]}>
-          {mentionMatches.map((p) => (
-            <Pressable
-              key={p.address}
-              onPress={() => pickMention(p)}
-              style={[styles.mentionRow, { borderBottomColor: theme.color.separator }]}
-              accessibilityRole="button"
-              accessibilityLabel={`Mention ${p.name}`}
-            >
-              <Text style={[styles.mentionName, { color: theme.color.label }]} numberOfLines={1}>
-                {p.name}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
-      ) : null}
       <View style={styles.row}>
         {attachEnabled ? (
           <Pressable
@@ -494,8 +362,6 @@ export const Composer = React.memo(function Composer({
           onChangeText={onChangeText}
           // Registers the native paste listener once the view exists (see captureInputTag).
           onLayout={captureInputTag}
-          // Track the caret so @mention autocomplete knows where the in-progress query is.
-          onSelectionChange={(e) => setCursor(e.nativeEvent.selection.start)}
           onFocus={() => setTrayOpen(false)}
           // "Send with Return": Enter submits instead of inserting a newline.
           submitBehavior={sendWithReturn ? 'submit' : 'newline'}
@@ -511,7 +377,7 @@ export const Composer = React.memo(function Composer({
             },
           ]}
         />
-        {trimmed && onSchedule && !isEditing ? (
+        {trimmed && onSchedule ? (
           <Pressable
             onPress={pickSchedule}
             disabled={submissionPending}
@@ -528,24 +394,19 @@ export const Composer = React.memo(function Composer({
         {canSend ? (
           <Pressable
             onPress={() => submit()}
-            onLongPress={
-              !submissionPending && !isEditing && trimmed ? () => setEffectOpen(true) : undefined
-            }
             disabled={submissionPending}
-            delayLongPress={250}
             style={[
               styles.send,
               { backgroundColor: theme.color.tint, opacity: submissionPending ? 0.55 : 1 },
             ]}
             accessibilityRole="button"
             accessibilityLabel="Send message"
-            accessibilityHint="Long-press to send with an effect"
             accessibilityState={{ disabled: submissionPending, busy: submissionPending }}
           >
             <Icon name="arrow-up" size={20} color={readableTextOn(theme.color.tint)} />
           </Pressable>
         ) : null}
-        {!canSend && !submissionPending && !isEditing && onStartVoice ? (
+        {!canSend && !submissionPending && onStartVoice ? (
           <Pressable
             onPress={onStartVoice}
             hitSlop={8}
@@ -573,11 +434,6 @@ export const Composer = React.memo(function Composer({
           }
         />
       ) : null}
-      <EffectPicker
-        visible={effectOpen}
-        onClose={() => setEffectOpen(false)}
-        onPick={(effectId) => submit(effectId)}
-      />
       <RecurrenceSheet
         visible={pendingSchedule != null}
         onClose={() => setPendingSchedule(null)} /* cancel keeps the typed text */
@@ -596,37 +452,7 @@ export const Composer = React.memo(function Composer({
 const styles = StyleSheet.create({
   wrap: { paddingTop: 8, borderTopWidth: StyleSheet.hairlineWidth },
   row: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 10, gap: 8 },
-  replyBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: 14,
-    marginBottom: 8,
-    paddingLeft: 8,
-    borderLeftWidth: 2,
-  },
-  // Frosted pill behind the reply/edit bar when the composer floats over a wallpaper.
-  replyBarBubble: { borderRadius: 10, overflow: 'hidden', paddingVertical: 4 },
-  replyText: { flex: 1 },
-  replyWho: { fontSize: 12, fontWeight: '600' },
-  replySnippet: { fontSize: 13, marginTop: 1 },
-  replyClose: { padding: 4 },
   schedule: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
-  subjectInput: {
-    marginHorizontal: 14,
-    marginBottom: 6,
-    paddingVertical: 6,
-    fontSize: 16,
-    fontWeight: '600',
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  // @mention autocomplete list above the input.
-  mentionList: { marginHorizontal: 10, marginBottom: 6, borderRadius: 12, overflow: 'hidden' },
-  mentionRow: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  mentionName: { fontSize: 16 },
   input: {
     flex: 1,
     minHeight: 38,

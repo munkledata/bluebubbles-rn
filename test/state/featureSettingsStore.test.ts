@@ -34,7 +34,6 @@ const mockGetDatabase = getDatabase as jest.Mock;
 const mockApplyDownloads = setMaxConcurrentDownloads as jest.Mock;
 
 const DEFAULTS = {
-  privateApiEnabled: true,
   sendTypingIndicators: true,
   sendReadReceipts: true,
   autoDownloadAttachments: true,
@@ -184,6 +183,19 @@ describe('featureSettingsStore', () => {
       sendReadReceipts: false, // the persisted override
       hydrated: true,
     });
+  });
+
+  it('clears retired Private API master and subject preferences during upgrade hydration', async () => {
+    const db = await openTestDb();
+    await kvSet(db, 'privateApi.enabled', '1');
+    await kvSet(db, 'privateApi.sendSubjectLines', '1');
+
+    await useFeatureSettingsStore.getState().hydrate();
+
+    expect(useFeatureSettingsStore.getState()).not.toHaveProperty('privateApiEnabled');
+    expect(useFeatureSettingsStore.getState()).not.toHaveProperty('sendSubjectLines');
+    expect(await kvGet(db, 'privateApi.enabled')).toBe('0');
+    expect(await kvGet(db, 'privateApi.sendSubjectLines')).toBe('0');
   });
 
   it('hydrate merges persisted overrides without disturbing untouched flags', async () => {

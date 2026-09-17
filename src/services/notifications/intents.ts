@@ -131,32 +131,13 @@ export async function buildMessageIntents(
       // full/unknown/read/deleted/muted rows are removed and never resurrected from this envelope.
       return [{ kind: 'message-withdraw', chatGuid, messageGuid: m.guid }];
     }
-    case 'incoming-facetime': {
-      // Legacy incoming event (carries `caller`).
-      const { uuid, caller, address } = event.payload;
-      if (!uuid) return [];
-      return [
-        {
-          kind: 'facetime-call',
-          uuid,
-          callerName: caller ?? address ?? 'Unknown caller',
-          isAudio: event.payload.is_audio ?? false,
-        },
-      ];
-    }
+    case 'incoming-facetime':
+      return [];
     case 'ft-call-status-changed': {
-      const { uuid, status_id: status, address, handle } = event.payload;
+      const { uuid, status_id: status } = event.payload;
       if (!uuid) return [];
-      if (status === 6) return [{ kind: 'facetime-cancel', uuid }]; // call ended → dismiss
-      if (status === 4)
-        return [
-          {
-            kind: 'facetime-call',
-            uuid,
-            callerName: address ?? handle?.address ?? 'Unknown caller',
-            isAudio: event.payload.is_audio ?? false,
-          },
-        ];
+      // Cleanup-only compatibility for a ringing notification left by an older build.
+      if (status === 6) return [{ kind: 'facetime-cancel', uuid }];
       return [];
     }
     case 'imessage-aliases-removed': {

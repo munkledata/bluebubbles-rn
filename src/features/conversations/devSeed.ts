@@ -1,8 +1,6 @@
 import { Attachment, Chat, Message } from '@core/models';
 import { getDatabase } from '@db/database';
 import {
-  applyLocalEdit,
-  applyLocalUnsend,
   getChatIdByGuid,
   insertOutgoingAttachment,
   insertOutgoingReaction,
@@ -548,67 +546,6 @@ export async function devSendFakeReaction(
   });
 }
 
-/** DEV: locally edit a message's text (no server) so the bubble shows it + "Edited". */
-export async function devEditFake(
-  messageGuid: string,
-  newText: string,
-  _partIndex: number | undefined,
-  accountLease: RealtimeDeliveryLease,
-): Promise<void> {
-  await runDevAccountWrite(accountLease, async () => {
-    if (!accountLease.isCurrent()) return;
-    await applyLocalEdit(getDatabase(), messageGuid, newText, Date.now());
-  });
-}
-
-/** DEV: locally retract a message (no server) so the bubble becomes the tombstone. */
-export async function devUnsendFake(
-  messageGuid: string,
-  partIndex: number | undefined,
-  accountLease: RealtimeDeliveryLease,
-): Promise<void> {
-  await runDevAccountWrite(accountLease, async () => {
-    if (!accountLease.isCurrent()) return;
-    await applyLocalUnsend(getDatabase(), messageGuid, Date.now(), partIndex ?? 0);
-  });
-}
-
-/** DEV: optimistic threaded reply (renders its quote), reconciled locally. */
-export async function devSendFakeReply(
-  chatGuid: string,
-  text: string,
-  replyToGuid: string,
-  partIndex: number | undefined,
-  effectId: string | undefined,
-  accountLease: RealtimeDeliveryLease,
-  onQueued?: () => Promise<void> | void,
-): Promise<void> {
-  await runDevAccountWrite(accountLease, async () => {
-    const db = getDatabase();
-    const chatId = await getChatIdByGuid(db, chatGuid);
-    if (chatId == null || !accountLease.isCurrent()) return;
-    const tempGuid = generateTempGuid();
-    const now = Date.now();
-    await insertOutgoingText(db, {
-      tempGuid,
-      chatId,
-      chatGuid,
-      text,
-      now,
-      selectedMessageGuid: replyToGuid,
-      partIndex,
-      threadOriginatorGuid: replyToGuid,
-      effectId,
-    });
-    queueDevSendReconcile(db, tempGuid, now, {
-      delayMs: 700,
-      delivered: true,
-      accountLease,
-    });
-    if (accountLease.isCurrent()) await onQueued?.();
-  });
-}
-
 let injectCounter = 0;
 let queuedInjectCounter = 0;
 const DEV_PROCESS_DEATH_CHAT_GUID = 'c-mom';
@@ -717,31 +654,6 @@ export async function injectMessage(accountLease: RealtimeDeliveryLease): Promis
       },
       accountLease,
       { transportOccurrenceId: `dev:${messageGuid}` },
-    );
-  });
-}
-
-let ftCounter = 0;
-
-/** DEV: simulate an incoming FaceTime (ft-call-status-changed, status_id 4). */
-export async function devInjectIncomingFaceTime(
-  accountLease: RealtimeDeliveryLease,
-): Promise<void> {
-  if (!isDevServer()) return;
-  await runDevAccountWrite(accountLease, async () => {
-    ftCounter += 1;
-    const callUuid = `dev-ft-${ftCounter}`;
-    await devPush.inject(
-      'ft-call-status-changed',
-      {
-        uuid: callUuid,
-        status_id: 4,
-        address: 'Mom (dev)',
-        is_audio: false,
-        handle: { address: '+15558675309' },
-      },
-      accountLease,
-      { transportOccurrenceId: `dev:${callUuid}` },
     );
   });
 }

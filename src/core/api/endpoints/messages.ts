@@ -23,10 +23,10 @@ export const ServerMessageSearchList = z
 
 /**
  * The Gator write ops (send/react/attachment) return a `SendResult`, NOT a Message:
- * `{ guid?: string, viaPrivateApi: boolean, attemptGuid?: string }`. `guid` is the REAL message
- * GUID on the Private-API path (the ack) and is ABSENT on the AppleScript fallback (plain text
- * only). Newer RCS servers add `attemptGuid`: the server-owned identity for this admitted send,
- * used to reject a delayed failure from an older retry. It remains optional for old servers.
+ * `{ guid?: string, viaPrivateApi?: boolean, attemptGuid?: string }`. `viaPrivateApi` is accepted
+ * only as inert legacy response data and never grants client capability. AppleScript plain text may
+ * omit `guid`; RCS sends can return one. Newer RCS servers add `attemptGuid`: the server-owned
+ * identity for this admitted send, used to reject a delayed failure from an older retry.
  */
 export const SendAck = z
   .object({
@@ -47,6 +47,12 @@ function requireMessagePartIndex(partIndex: number): number {
     throw new RangeError('A message action needs an exact part index from 0 through 10000');
   }
   return partIndex;
+}
+
+function requireRcsChatGuid(chatGuid: string): void {
+  if (!chatGuid.startsWith('RCS;-;')) {
+    throw new Error('This message action is available only for RCS conversations.');
+  }
 }
 
 /** GET /api/v1/chat/{guid}/message — messages for a chat, newest first. */
@@ -93,45 +99,38 @@ export interface SendTextParams {
   effectId?: string;
   /** @mention spans — the server assembles the Private-API multipart `parts` from these. */
   mentions?: MessageMention[];
-  /** 'private-api' (effects/replies) or 'apple-script' (stock server). */
+  /** Only `apple-script` is supported; retained as a field for the server wire contract. */
   method?: string;
 }
 
 /**
- * POST /api/v1/message/text — send a text message (private API for effects/replies).
- * Returns the send ack: `{ guid? }` — the real GUID on the Private-API path, ABSENT on
- * the AppleScript fallback (in which case the socket `new-message` echo reconciles by
- * tempGuid). NOT a Message — see {@link SendAck}.
+ * POST /api/v1/message/text — send plain text through the supported AppleScript path.
+ * The socket `new-message` echo reconciles the optimistic row by tempGuid. Rich helper fields are
+ * rejected here so a stale caller cannot restore retired Private API behavior.
  *
  * Server contract: it reads the body under `text` (NOT `message`, which it ignores → a
  * blank send). We keep `message` on the params and map it to `text` on the wire here.
  */
 export function sendText(http: HttpClient, params: SendTextParams): Promise<SendAck> {
   if (
-    params.selectedMessageGuid === '' ||
-    (params.selectedMessageGuid !== undefined && params.partIndex === undefined) ||
-    (params.selectedMessageGuid === undefined && params.partIndex !== undefined)
+    params.method === 'private-api' ||
+    (params.method !== undefined && params.method !== 'apple-script') ||
+    params.selectedMessageGuid !== undefined ||
+    params.partIndex !== undefined ||
+    params.effectId !== undefined ||
+    params.subject !== undefined ||
+    !!params.mentions?.length
   ) {
-    throw new RangeError('A reply requires both selectedMessageGuid and partIndex');
+    throw new Error('Private API message features were retired in this release.');
   }
-  const partIndex =
-    params.partIndex === undefined ? undefined : requireMessagePartIndex(params.partIndex);
   return http.post('/message/text', SendAck, {
     captureErrorDetail: true,
     json: {
       chatGuid: params.chatGuid,
       tempGuid: params.tempGuid,
       clientAttemptGeneration: params.clientAttemptGeneration,
-      method: params.method ?? 'private-api',
+      method: 'apple-script',
       text: params.message,
-      subject: params.subject,
-      selectedMessageGuid: params.selectedMessageGuid,
-      // Plain sends have no target part. Keep the key absent unless this is a reply so the
-      // ordinary send-message wire shape remains unchanged.
-      ...(params.selectedMessageGuid && partIndex !== undefined ? { partIndex } : {}),
-      effectId: params.effectId,
-      // Only sent when non-empty so the server keeps the plain send-message path otherwise.
-      mentions: params.mentions?.length ? params.mentions : undefined,
     },
   });
 }
@@ -170,21 +169,22 @@ export interface SendContactParams {
  * POST /api/v1/message/contact — send a contact card. The client sends STRUCTURED fields; the
  * server assembles a vCard 3.0 and ships it through the same attachment pipeline as
  * send-attachment (so the ack is the same `{ guid? }` SendAck, and the live `new-message` echo
- * carries the real `.vcf` attachment). Gate on `serverInfo.supports_send_contact` before calling.
+ * carries the real `.vcf` attachment). Canonical RCS capability gates this retained path; the
+ * historical helper-era `supports_send_contact` flag is no longer advertised.
  *
  * Empty phone/email arrays are omitted so the server's "a contact needs at least a name, org,
  * phone, or email" refinement isn't tripped by an all-empty body.
  */
 export function sendContact(http: HttpClient, params: SendContactParams): Promise<SendAck> {
+  requireRcsChatGuid(params.chatGuid);
   if (
-    params.selectedMessageGuid === '' ||
-    (params.selectedMessageGuid !== undefined && params.partIndex === undefined) ||
-    (params.selectedMessageGuid === undefined && params.partIndex !== undefined)
+    params.subject !== undefined ||
+    params.effectId !== undefined ||
+    params.selectedMessageGuid !== undefined ||
+    params.partIndex !== undefined
   ) {
-    throw new RangeError('A contact reply requires both selectedMessageGuid and partIndex');
+    throw new Error('Private API contact-card features were retired in this release.');
   }
-  const partIndex =
-    params.partIndex === undefined ? undefined : requireMessagePartIndex(params.partIndex);
   return http.post('/message/contact', SendAck, {
     captureErrorDetail: true,
     json: {
@@ -196,10 +196,6 @@ export function sendContact(http: HttpClient, params: SendContactParams): Promis
       organization: params.organization,
       phones: params.phones?.length ? params.phones : undefined,
       emails: params.emails?.length ? params.emails : undefined,
-      subject: params.subject,
-      effectId: params.effectId,
-      selectedMessageGuid: params.selectedMessageGuid,
-      ...(params.selectedMessageGuid && partIndex !== undefined ? { partIndex } : {}),
     },
   });
 }
@@ -365,14 +361,15 @@ export interface SendReactionParams {
 
 /**
  * POST /api/v1/message/react — send (or remove, with a `-` prefix) a tapback. Returns
- * the send ack `{ guid? }` (reactions require the Private API, so the guid is present on
- * success), NOT a Message — see {@link SendAck}.
+ * the send ack `{ guid? }`, NOT a Message — see {@link SendAck}. The current client reaches this
+ * endpoint only for an independently authorized RCS reaction.
  *
  * Server contract: it requires `{ chatGuid, messageGuid, reactionType }` — NOT the
  * `selectedMessage*`/`reaction` keys the older client sent (which the server dropped → no
  * tapback). We map our params onto the server's names here.
  */
 export function sendReaction(http: HttpClient, params: SendReactionParams): Promise<SendAck> {
+  requireRcsChatGuid(params.chatGuid);
   return http.post('/message/react', SendAck, {
     captureErrorDetail: true,
     json: {
@@ -407,14 +404,9 @@ export interface EditMessageParams {
  * our params onto the server's names here.
  */
 export function editMessage(http: HttpClient, p: EditMessageParams): Promise<SendAck> {
-  return http.post(`/message/${encodeURIComponent(p.messageGuid)}/edit`, SendAck, {
-    json: {
-      chatGuid: p.chatGuid,
-      editedText: p.editedMessage,
-      backwardsCompatText: p.backwardsCompatibilityMessage,
-      partIndex: requireMessagePartIndex(p.partIndex),
-    },
-  });
+  void http;
+  void p;
+  throw new Error('Editing iMessages was retired with the Private API helper.');
 }
 
 export interface UnsendMessageParams {
@@ -432,7 +424,7 @@ export interface UnsendMessageParams {
  * failed validation server-side. We thread it through from the caller.
  */
 export function unsendMessage(http: HttpClient, p: UnsendMessageParams): Promise<UnsendAck> {
-  return http.post(`/message/${encodeURIComponent(p.messageGuid)}/unsend`, UnsendAck, {
-    json: { chatGuid: p.chatGuid, partIndex: requireMessagePartIndex(p.partIndex) },
-  });
+  void http;
+  void p;
+  throw new Error('Unsend was retired with the Private API helper.');
 }

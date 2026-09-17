@@ -1,6 +1,10 @@
 import { serverInfo as fetchServerInfo } from '@core/api/endpoints/server';
 import type { HttpClient, HttpTransportSnapshot } from '@core/api/http';
-import type { ServerInfo } from '@core/models/serverInfo';
+import {
+  retirePrivateApiCapabilities,
+  serverSendCapabilityKey,
+  type ServerInfo,
+} from '@core/models/serverInfo';
 import type { MessageTargetServerAuthorization } from '@db/repositories';
 import { DbCommitGuardRejectedError, type DbCommitGuard } from '@db/transaction';
 import { captureSessionTransportLease, useSessionStore } from '@state/sessionStore';
@@ -28,10 +32,28 @@ export interface FixedRcsCapabilitySource {
 /** Session cache provenance or already-proven task-local capability data. */
 export type RcsCapabilitySource = RcsCapabilityLease | FixedRcsCapabilitySource;
 
+/**
+ * RCS capability could not be proven for this physical send. This is temporary work starvation,
+ * not a failed delivery attempt: scheduled and queued owners may safely leave their durable work
+ * pending until the bridge/server-info boundary is available again.
+ */
+export class RcsCapabilityUnavailableError extends Error {
+  constructor(
+    message = 'RCS capability is unavailable.',
+    readonly originalError?: unknown,
+  ) {
+    super(message);
+    this.name = 'RcsCapabilityUnavailableError';
+  }
+}
+
 export function fixedRcsCapabilitySource(
   serverInfo: ServerInfo | null = null,
 ): FixedRcsCapabilitySource {
-  return Object.freeze({ kind: 'fixed', serverInfo });
+  return Object.freeze({
+    kind: 'fixed',
+    serverInfo: serverInfo ? retirePrivateApiCapabilities(serverInfo) : null,
+  });
 }
 
 export interface RcsAttemptOwnershipResolution {
@@ -42,6 +64,14 @@ export interface RcsAttemptOwnershipResolution {
 export interface SendCapabilityResolutionOptions {
   /** Fetch an exact server-info result even for a non-RCS send. */
   readonly requireServerInfo?: boolean;
+}
+
+/** Keep a capability-derived decision valid through a DB commit or network-start boundary. */
+export function sendCapabilityCommitGuard(
+  accountGuard: DbCommitGuard | undefined,
+  source?: RcsCapabilitySource,
+): DbCommitGuard {
+  return () => (accountGuard?.() ?? true) && (source?.kind !== 'session' || source.isCurrent());
 }
 
 /** Only a completed response from a known older server authorizes the part-zero compatibility. */
@@ -82,14 +112,33 @@ export function captureSessionRcsCapabilityLease(): RcsCapabilityLease | undefin
   if (state.status !== 'connected' || !state.origin || !state.password) return undefined;
   const transport = captureSessionTransportLease();
   const origin = state.origin;
+  let ownedServerInfo = state.serverInfo;
+  let ownedCapabilityRevision = state.sendCapabilityRevision;
   return Object.freeze({
     kind: 'session',
     origin,
     revision: transport.revision,
-    serverInfo: state.serverInfo,
-    isCurrent: transport.isCurrent,
-    publish: (info: ServerInfo): boolean =>
-      useSessionStore.getState().setServerInfoForTransport(origin, transport.revision, info),
+    get serverInfo(): ServerInfo | null {
+      return ownedServerInfo;
+    },
+    isCurrent: (): boolean =>
+      transport.isCurrent() &&
+      useSessionStore.getState().sendCapabilityRevision === ownedCapabilityRevision,
+    publish: (info: ServerInfo): boolean => {
+      const previousInfo = ownedServerInfo;
+      const previousRevision = ownedCapabilityRevision;
+      const expectedRevision =
+        previousRevision +
+        (serverSendCapabilityKey(previousInfo) === serverSendCapabilityKey(info) ? 0 : 1);
+      ownedServerInfo = info;
+      ownedCapabilityRevision = expectedRevision;
+      if (useSessionStore.getState().setServerInfoForTransport(origin, transport.revision, info)) {
+        return true;
+      }
+      ownedServerInfo = previousInfo;
+      ownedCapabilityRevision = previousRevision;
+      return false;
+    },
   });
 }
 
@@ -131,7 +180,9 @@ export async function resolveRcsAttemptOwnership(
   options?: SendCapabilityResolutionOptions,
 ): Promise<RcsAttemptOwnershipResolution> {
   assertCurrentCapabilitySource(http, commitGuard, capabilitySource);
-  let info = capabilitySource?.serverInfo ?? null;
+  let info = capabilitySource?.serverInfo
+    ? retirePrivateApiCapabilities(capabilitySource.serverInfo)
+    : null;
   const isRcs = isRcsChatGuid(chatGuid);
   if (!isRcs && options?.requireServerInfo !== true) {
     return { attemptAware: false, serverInfo: info };
@@ -139,15 +190,25 @@ export async function resolveRcsAttemptOwnership(
 
   if (!info) {
     try {
-      info = await fetchServerInfo(http);
+      info = retirePrivateApiCapabilities(await fetchServerInfo(http));
     } catch (error) {
       // Prefer the ownership error when Disconnect happened during discovery. That prevents the
       // retired account's network failure from being presented as a current-account send failure.
       assertCurrentCapabilitySource(http, commitGuard, capabilitySource);
+      if (isRcs) {
+        throw new RcsCapabilityUnavailableError(
+          error instanceof Error ? error.message : 'RCS capability discovery failed.',
+          error,
+        );
+      }
       throw error;
     }
     assertCurrentCapabilitySource(http, commitGuard, capabilitySource);
-    if (!info) throw new Error('RCS send-attempt capability discovery returned no server info.');
+    if (!info) {
+      throw new RcsCapabilityUnavailableError(
+        'RCS send-attempt capability discovery returned no server info.',
+      );
+    }
     if (capabilitySource?.kind === 'session' && !capabilitySource.publish(info)) {
       throw new DbCommitGuardRejectedError();
     }

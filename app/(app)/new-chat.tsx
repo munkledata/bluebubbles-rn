@@ -6,13 +6,12 @@ import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } fr
 import { showDialog } from '@ui/dialog/dialogStore';
 import { getDatabase } from '@db/database';
 import { findChatByParticipantAddresses } from '@db/repositories';
-import { createNewChat, http } from '@/services';
+import { createNewChat } from '@/services';
 import {
   captureRealtimeDeliveryLease,
   subscribeRealtimeGenerationInvalidation,
 } from '@/services/realtime/deliveryCoordinator';
 import { sendImages } from '@/services/send';
-import { checkIMessageAvailability } from '@core/api/endpoints/handles';
 import { logger } from '@core/secure';
 import { consumeForwardAttachmentHandoff } from '@features/conversations/forwardAttachmentHandoff';
 import { useContactSearch } from '@features/contacts/useContactSearch';
@@ -71,8 +70,9 @@ export default function NewChatScreen(): React.JSX.Element {
     };
   });
   const [message, setMessage] = useState(initialContent.message);
-  const [service, setService] = useState<'iMessage' | 'SMS' | 'RCS'>('iMessage');
-  // RCS is server-gated: the chip only renders when the connected server's RCS bridge is on.
+  // Starting iMessage/SMS conversations depended on the retired helper. RCS is the only supported
+  // new-conversation transport, and this hook fails closed while authoritative server info is
+  // absent or says the RCS bridge is unavailable.
   const rcsEnabled = useRcsEnabled();
   const [existingMatch, setExistingMatch] = useState<{
     recipientKey: string;
@@ -86,13 +86,6 @@ export default function NewChatScreen(): React.JSX.Element {
   const abandonedRef = useRef(false);
   const forwardProtectionReleaseRef = useRef<(() => void) | null>(null);
   const forwardProtectionReleaseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Per-recipient iMessage availability (advisory): true → blue chip, false → green (SMS),
-  // undefined → probe pending/failed (neutral).
-  const [availability, setAvailability] = useState<Record<string, boolean>>({});
-  // Each address is probed at most once for this mounted account. Results stay address-keyed so
-  // removing and re-adding a recipient can reuse a confirmed transport without another request.
-  const probedRef = useRef(new Set<string>());
-
   useEffect(() => {
     abandonedRef.current = false;
     return () => {
@@ -207,45 +200,6 @@ export default function NewChatScreen(): React.JSX.Element {
     },
   });
 
-  // Any confirmed-false recipient auto-switches the compose to SMS so the send routes correctly
-  // without guessing. The original account owns both request admission and result publication;
-  // address-keyed results deliberately survive a remove/re-add inside that same mounted form.
-  useEffect(() => {
-    if (accountUnavailable || !accountLease.isCurrent()) return;
-    for (const r of recipients) {
-      if (probedRef.current.has(r.address)) continue;
-      probedRef.current.add(r.address);
-      void checkIMessageAvailability(http, r.address)
-        .then((available) => {
-          if (accountLease.isCurrent()) {
-            setAvailability((cur) => ({ ...cur, [r.address]: available }));
-          }
-        })
-        .catch(() => {
-          // Advisory only (helper down / older server) — leave the chip neutral.
-        });
-    }
-  }, [accountLease, accountUnavailable, recipients]);
-  // Auto-pick the service from availability UNTIL the user manually taps the toggle. Deriving both
-  // directions (SMS when any recipient is confirmed SMS-only, else iMessage) means removing the
-  // SMS-only recipient reverts to iMessage instead of getting stuck on SMS; the `touched` guard
-  // stops a later probe from clobbering the user's explicit choice. RCS is NEVER auto-picked —
-  // it's a manual choice only, and (being manual) is itself protected by the same guard.
-  const serviceTouchedRef = useRef(false);
-  useEffect(() => {
-    if (serviceTouchedRef.current) return;
-    const anySmsOnly = recipients.some((r) => availability[r.address] === false);
-    setService(anySmsOnly ? 'SMS' : 'iMessage');
-  }, [recipients, availability]);
-  // If the capability disappears mid-compose (reconnect to a non-RCS server) while RCS is
-  // selected, fall back so we never send service='RCS' to a server that can't route it.
-  useEffect(() => {
-    // This is a real external-capability transition, not derived render state: resetting the
-    // selection prevents RCS from silently becoming active again if a later server supports it.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (!rcsEnabled && service === 'RCS') setService('iMessage');
-  }, [rcsEnabled, service]);
-
   const chosen = new Set(recipients.map((r) => r.address.toLowerCase()));
 
   // Already-chosen recipients are filtered out of the shared hook's suggestions.
@@ -348,32 +302,28 @@ export default function NewChatScreen(): React.JSX.Element {
   // Recipients as they'd be at send time, including a still-uncommitted typed address.
   const effectiveRecipients = pendingRecipient ? [...recipients, pendingRecipient] : recipients;
 
-  // RCS chats are 1:1 (the server's RCS branch routes to the FIRST address only) — block a
-  // multi-recipient create instead of silently dropping the extra people.
-  const rcsTooMany = service === 'RCS' && effectiveRecipients.length > 1;
+  // RCS chats are 1:1. Block a multi-recipient create instead of silently dropping people.
+  const rcsTooMany = effectiveRecipients.length > 1;
 
-  // A staged shared file can be sent even with no typed message.
+  // The server creates an RCS thread by sending its required initial text. Attachments are a
+  // follow-up after that acknowledgement, so they cannot make an empty initial message valid.
   const canStart =
     !accountUnavailable &&
     !busy &&
-    !rcsTooMany &&
-    effectiveRecipients.length > 0 &&
-    (message.trim().length > 0 || staged.length > 0);
+    rcsEnabled &&
+    effectiveRecipients.length === 1 &&
+    message.trim().length > 0;
 
   const onStart = async (): Promise<void> => {
-    if (!canStart || !accountLease.isCurrent()) return;
+    const recipient = effectiveRecipients[0];
+    if (!canStart || !recipient || !accountLease.isCurrent()) return;
     // Bind navigation, follow-up attachment sends, and error UI to the account that owned the tap.
     // createNewChat receives this exact lease before its first await; retaining it here also
     // prevents an old completion from routing or showing a dialog after reconnect.
     setBusy(true);
     try {
       // createNewChat is server-deduped, so it returns the existing chat if there is one.
-      const guid = await createNewChat(
-        effectiveRecipients.map((r) => r.address),
-        message.trim(),
-        service,
-        accountLease,
-      );
+      const guid = await createNewChat([recipient.address], message.trim(), accountLease);
       if (!accountLease.isCurrent() || abandonedRef.current) return;
       // Send any shared files into the new (or matched) chat.
       if (staged.length > 0) {
@@ -447,21 +397,14 @@ export default function NewChatScreen(): React.JSX.Element {
             <Text style={[styles.toLabel, { color: theme.color.secondaryLabel }]}>To:</Text>
             <View style={styles.chipsWrap}>
               {recipients.map((r) => {
-                const avail = availability[r.address];
-                // Blue = confirmed iMessage, green = SMS-only, gray = unknown (probe pending/failed).
-                const chipColor =
-                  avail === true
-                    ? theme.color.tint
-                    : avail === false
-                      ? '#34C759'
-                      : theme.color.tertiaryLabel;
+                const chipColor = theme.color.tertiaryLabel;
                 return (
                   <Pressable
                     key={r.address}
                     onPress={() => removeRecipient(r.address)}
                     style={[styles.chip, { backgroundColor: chipColor }]}
                     accessibilityRole="button"
-                    accessibilityLabel={`Remove ${r.name}${avail === false ? ' (SMS only)' : ''}`}
+                    accessibilityLabel={`Remove ${r.name}`}
                   >
                     <Text style={[styles.chipText, { color: readableTextOn(chipColor) }]}>
                       {r.name} ✕
@@ -503,42 +446,16 @@ export default function NewChatScreen(): React.JSX.Element {
             </Pressable>
           ) : null}
 
-          {/* Transport picker. `radio` + `selected` so the active transport is ANNOUNCED — colour
-            alone leaves a screen-reader user unable to tell which one is armed. */}
-          <View style={styles.serviceRow} accessibilityRole="radiogroup">
-            {(rcsEnabled
-              ? (['iMessage', 'SMS', 'RCS'] as const)
-              : (['iMessage', 'SMS'] as const)
-            ).map((s) => (
-              <Pressable
-                key={s}
-                onPress={() => {
-                  if (!screenInteractionIsCurrent()) return;
-                  serviceTouchedRef.current = true;
-                  setService(s);
-                }}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: service === s }}
-                accessibilityLabel={`Send as ${s}`}
-                style={[
-                  styles.serviceChip,
-                  {
-                    backgroundColor:
-                      service === s ? theme.color.tint : theme.color.secondaryBackground,
-                  },
-                ]}
-              >
-                <Text
-                  style={{
-                    color: service === s ? readableTextOn(theme.color.tint) : theme.color.label,
-                    fontSize: 14,
-                  }}
-                >
-                  {s}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
+          {rcsEnabled ? (
+            <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
+              New conversations use RCS and support one recipient.
+            </Text>
+          ) : (
+            <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
+              Starting a new conversation requires an available RCS bridge. Open an existing
+              conversation to send a message.
+            </Text>
+          )}
 
           {rcsTooMany ? (
             <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
@@ -599,7 +516,7 @@ export default function NewChatScreen(): React.JSX.Element {
               if (!screenInteractionIsCurrent()) return;
               setMessage(text);
             }}
-            placeholder={staged.length > 0 ? 'Add a message (optional)' : 'Message'}
+            placeholder="Message"
             placeholderTextColor={theme.color.tertiaryLabel}
             multiline
             style={[
@@ -641,8 +558,6 @@ const styles = StyleSheet.create({
   toInput: { flexGrow: 1, minWidth: 120, fontSize: 16, paddingVertical: 4 },
   existing: { borderRadius: 10, padding: 12 },
   existingText: { fontSize: 14, fontWeight: '500' },
-  serviceRow: { flexDirection: 'row', gap: 8 },
-  serviceChip: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 14 },
   rcsNote: { fontSize: 13 },
   message: { minHeight: 90, borderRadius: 12, padding: 14, fontSize: 16, textAlignVertical: 'top' },
   stagedRow: { gap: 10, paddingVertical: 2 },

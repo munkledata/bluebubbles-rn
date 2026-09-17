@@ -38,31 +38,25 @@ const noIo = {
   fileExists: async () => true,
 };
 
+const RCS_CHAT_GUID = 'RCS;-;emoji-thread';
+const RCS_TARGET_GUID = 'rcs-message-target';
+
 async function seed(db: AppDatabase): Promise<number> {
-  const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
+  const hm = await upsertHandles(db, [{ address: '+15550001111' }]);
   const map = await upsertChats(
     db,
-    [Chat.parse({ guid: 'c1', participants: [{ address: 'a@x.com' }] })],
+    [Chat.parse({ guid: RCS_CHAT_GUID, participants: [{ address: '+15550001111' }] })],
     hm,
   );
-  const chatId = map.get('c1')!;
+  const chatId = map.get(RCS_CHAT_GUID)!;
   await upsertMessages(
     db,
     [
       Message.parse({
-        guid: 'mt',
+        guid: RCS_TARGET_GUID,
         text: 'hi',
         dateCreated: 100,
-        handle: { address: 'a@x.com' },
-        messagePartTopology: {
-          complete: true,
-          originalPartIndexes: [0, 2],
-          currentParts: [
-            { index: 0, kind: 'text' },
-            { index: 2, kind: 'text' },
-          ],
-          attachmentOwnership: [],
-        },
+        handle: { address: '+15550001111' },
       }),
     ],
     () => chatId,
@@ -84,8 +78,8 @@ async function seedFailedReaction(
   await insertOutgoingReaction(db, {
     tempGuid: args.tempGuid,
     chatId: args.chatId,
-    chatGuid: 'c1',
-    targetGuid: 'mt',
+    chatGuid: RCS_CHAT_GUID,
+    targetGuid: RCS_TARGET_GUID,
     reaction: args.reaction,
     emoji: args.emoji,
     partIndex: args.partIndex,
@@ -112,7 +106,7 @@ describe('runOutgoingQueue — emoji tapback resend', () => {
       tempGuid: 'temp-emo',
       reaction: 'emoji',
       emoji: '🔥',
-      partIndex: 2,
+      partIndex: 0,
     });
 
     let body: Record<string, unknown> | undefined;
@@ -129,10 +123,10 @@ describe('runOutgoingQueue — emoji tapback resend', () => {
     expect(res).toEqual({ eligible: 1, sent: 1 });
     // The retry re-POST carries the emoji reactionType AND the glyph (not a classic tapback).
     expect(body).toMatchObject({
-      messageGuid: 'mt',
+      messageGuid: RCS_TARGET_GUID,
       reactionType: 'emoji',
       reactionEmoji: '🔥',
-      partIndex: 2,
+      partIndex: 0,
     });
     // Reconciled to the real guid, glyph preserved, queue row cleared.
     expect(queueCount(raw)).toBe(0);
@@ -143,7 +137,7 @@ describe('runOutgoingQueue — emoji tapback resend', () => {
       .get() as { s: string; e: string; p: number };
     expect(row.s).toBe('sent');
     expect(row.e).toBe('🔥');
-    expect(row.p).toBe(2);
+    expect(row.p).toBe(0);
   });
 
   it("re-POSTs an emoji REMOVAL with reactionType '-emoji' + the glyph", async () => {

@@ -45,7 +45,6 @@ jest.mock('ky', () => ({ __esModule: true, default: jest.fn() }));
 // Keep the real module shape (schemas/constants); replace only the health-channel calls.
 jest.mock('@core/api/endpoints/server', () => ({
   ...jest.requireActual('@core/api/endpoints/server'),
-  privateApiStatus: jest.fn(),
   serverEnv: jest.fn(),
   findMyKeysStatus: jest.fn(),
   fcmStatus: jest.fn(),
@@ -78,7 +77,6 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 
 const mocks = {
-  privateApiStatus: serverApi.privateApiStatus as jest.Mock,
   serverEnv: serverApi.serverEnv as jest.Mock,
   findMyKeysStatus: serverApi.findMyKeysStatus as jest.Mock,
   fcmStatus: serverApi.fcmStatus as jest.Mock,
@@ -91,7 +89,6 @@ const mocks = {
 };
 
 const healthReadMocks = [
-  mocks.privateApiStatus,
   mocks.serverEnv,
   mocks.findMyKeysStatus,
   mocks.fcmStatus,
@@ -115,7 +112,6 @@ const PRIVATE_RECONNECT_ERROR = 'health-private-reconnect-error-4f61';
 const PRIVATE_OLD_QUERY_ERROR = 'health-private-old-query-error-96ac';
 const ACCOUNT_CHANGED_COPY = 'Server account changed. Go back and reopen Server Health.';
 const HEALTH_QUERY_SUFFIXES = [
-  'private-api',
   'env',
   'findmy-keys',
   'fcm',
@@ -206,7 +202,7 @@ async function waitForHealthQueries(
           (generation == null || query.queryKey[2] === generation) &&
           (transportRevision == null || query.queryKey[3] === transportRevision),
       );
-    expect(queries).toHaveLength(8);
+    expect(queries).toHaveLength(7);
     expect(queries.every((query) => query.state.status === 'success')).toBe(true);
   });
   await act(async () => {
@@ -238,12 +234,6 @@ function expectNoPrivateHealthCanaries(): void {
 }
 
 function resolveAllChannels(): void {
-  mocks.privateApiStatus.mockResolvedValue({
-    connected: true,
-    enabled: true,
-    ft_connected: false,
-    ft_enabled: true,
-  });
   mocks.serverEnv.mockResolvedValue({ version: '1.9.9', node: 'v20.1.0' });
   mocks.findMyKeysStatus.mockResolvedValue({ LocalStorage: { present: true, valid: true } });
   mocks.fcmStatus.mockResolvedValue({ configured: true, projectId: 'proj-x' });
@@ -327,7 +317,6 @@ describe('ServerHealthScreen — query-backed cards', () => {
     expect(mocks.serverAlerts).not.toHaveBeenCalled();
     expect(mocks.clearServerAlerts).not.toHaveBeenCalled();
     for (const endpoint of [
-      mocks.privateApiStatus,
       mocks.serverEnv,
       mocks.findMyKeysStatus,
       mocks.publicIp,
@@ -361,8 +350,8 @@ describe('ServerHealthScreen — query-backed cards', () => {
   it('fills each card as its channel resolves', async () => {
     await renderScreen();
     expect(await screen.findByText('proj-x')).toBeTruthy();
-    expect(screen.getByText('Connected')).toBeTruthy(); // Messages helper
-    expect(screen.getByText('Not connected')).toBeTruthy(); // FaceTime helper
+    expect(screen.getByText('RETIRED FEATURES')).toBeTruthy();
+    expect(screen.getAllByText('Retired in this release')).toHaveLength(2);
     expect(screen.getByText('1.9.9')).toBeTruthy();
     expect(screen.getByText('Direct')).toBeTruthy();
     expect(screen.getByText('203.0.113.9')).toBeTruthy();
@@ -374,21 +363,10 @@ describe('ServerHealthScreen — query-backed cards', () => {
     }
   });
 
-  it('shows typed trusted-helper load failures as Unavailable instead of Disabled', async () => {
-    mocks.privateApiStatus.mockResolvedValue({
-      available: false,
-      connected: false,
-      enabled: true,
-      unavailable_reason: 'trusted_helper_unavailable',
-      ft_available: false,
-      ft_connected: false,
-      ft_enabled: false,
-      ft_unavailable_reason: 'trusted_helper_unavailable',
-    });
-
+  it('presents retired helper features without requesting helper status', async () => {
     await renderScreen();
 
-    expect(await screen.findAllByText('Unavailable')).toHaveLength(2);
+    expect(await screen.findAllByText('Retired in this release')).toHaveLength(2);
     expect(screen.queryByText('Disabled')).toBeNull();
   });
 
@@ -447,7 +425,7 @@ describe('ServerHealthScreen — query-backed cards', () => {
   });
 
   it.each(['success', 'rejection'] as const)(
-    'isolates all eight generation-and-transport-keyed reads and drops a delayed old-account %s',
+    'isolates all seven generation-and-transport-keyed reads and drops a delayed old-account %s',
     async (outcome) => {
       const oldFcm = deferred<{ configured: boolean; projectId: string }>();
       mocks.fcmStatus.mockReset().mockReturnValueOnce(oldFcm.promise);
@@ -455,7 +433,7 @@ describe('ServerHealthScreen — query-backed cards', () => {
       const renderedA = await renderScreen(client);
       await waitFor(() => expect(mocks.fcmStatus).toHaveBeenCalledTimes(1));
       await waitFor(() =>
-        expect(client.getQueryCache().findAll({ queryKey: ['server', 'health'] })).toHaveLength(8),
+        expect(client.getQueryCache().findAll({ queryKey: ['server', 'health'] })).toHaveLength(7),
       );
       const firstHealthKey = client
         .getQueryCache()
@@ -516,7 +494,6 @@ describe('ServerHealthScreen — query-backed cards', () => {
   it('shows the unreachable banner when every permitted scoped health channel fails', async () => {
     useSessionStore.setState({ password: `bbd_device_v1_${'A'.repeat(43)}` });
     for (const endpoint of [
-      mocks.privateApiStatus,
       mocks.serverEnv,
       mocks.findMyKeysStatus,
       mocks.publicIp,
@@ -551,7 +528,7 @@ describe('ServerHealthScreen — query-backed cards', () => {
     const { client } = await renderScreen();
     await waitFor(() => {
       const queries = client.getQueryCache().findAll({ queryKey: ['server', 'health'] });
-      expect(queries).toHaveLength(8);
+      expect(queries).toHaveLength(7);
       expect(queries.find((query) => query.queryKey[4] === 'alerts')?.state.status).toBe('error');
       expect(
         queries

@@ -5,14 +5,10 @@
  *     send fires onSend with the TRIMMED text (effectId undefined) and clears the input;
  *   - the "Send with Return" feature flag (useFeatureSettingsStore — the REAL store via setState)
  *     wires submitBehavior + onSubmitEditing so Enter submits;
- *   - the reply banner renders "Replying to <who>" + snippet and its close fires onCancelReply;
- *   - edit mode: prefills the input from editingText, shows the "Editing message" bar, hides the
- *     attach/schedule/reply affordances, confirm (send) fires onSend with the edited text, cancel
- *     fires onCancelEdit and clears;
  *   - staged-attachment chips render (one "Remove attachment" control each) and removing drops one;
- *   - the send-effect long-press opens the EffectPicker and picking sends with that effect id;
+ *   - retired reply, edit, and send-effect controls stay absent;
  *   - the schedule button drives the two-step native date/time picker → onSchedule(text, when);
- *   - the voice/mic affordance shows only when empty + not editing + onStartVoice is provided;
+ *   - the voice/mic affordance shows only when empty and onStartVoice is provided;
  *   - the debounced typing emitter: true on first keystroke, deduped, false on clear / debounce /
  *     unmount.
  *
@@ -30,7 +26,6 @@
 import React from 'react';
 import { renderWithTheme, screen, fireEvent, act, waitFor } from '../support/renderWithTheme';
 import type { PendingAttachment } from '@ui/conversations/AttachmentTray';
-import type { MessagePreview } from '@db/repositories';
 
 // Zero insets so useSafeAreaInsets() resolves without a SafeAreaProvider.
 jest.mock('react-native-safe-area-context', () => ({
@@ -174,7 +169,7 @@ describe('Composer — typing enables send + trimmed send + clear', () => {
     await renderWithTheme(<Composer onSend={onSend} />);
     await fireEvent.changeText(input(), '  hey there  ');
     await fireEvent.press(await screen.findByLabelText('Send message'));
-    expect(onSend).toHaveBeenCalledWith('hey there', undefined, undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith('hey there');
     await waitFor(() => expect(input().props.value).toBe(''));
     // The send button disappears once the field is empty again (canSend false).
     await waitFor(() => expect(screen.queryByLabelText('Send message')).toBeNull());
@@ -210,23 +205,6 @@ describe('Composer — typing enables send + trimmed send + clear', () => {
     expect(screen.queryByPlaceholderText('Subject')).toBeNull();
   });
 
-  it('carries the subject line when subjectEnabled and a subject is typed', async () => {
-    const onSend = jest.fn();
-    await renderWithTheme(<Composer onSend={onSend} subjectEnabled />);
-    // Flush each controlled-value re-render before the next act-wrapped event (React 19 overlapping
-    // act() — see the send-with-return tests).
-    await fireEvent.changeText(screen.getByPlaceholderText('Subject'), 'Re: lunch');
-    await screen.findByDisplayValue('Re: lunch');
-    await fireEvent.changeText(input(), 'you around?');
-    await screen.findByDisplayValue('you around?');
-    await fireEvent.press(await screen.findByLabelText('Send message'));
-    await waitFor(() =>
-      expect(onSend).toHaveBeenCalledWith('you around?', undefined, 'Re: lunch', undefined),
-    );
-    // The subject field clears after send.
-    await waitFor(() => expect(screen.getByPlaceholderText('Subject').props.value).toBe(''));
-  });
-
   it('restores a persisted draft into an empty composer', async () => {
     await renderWithTheme(<Composer onSend={jest.fn()} initialText="half-typed thought" />);
     expect(await screen.findByDisplayValue('half-typed thought')).toBeTruthy();
@@ -244,10 +222,7 @@ describe('Composer — typing enables send + trimmed send + clear', () => {
     const firstAdmission = deferred<boolean>();
     const onSend = jest.fn(() => firstAdmission.promise);
     const onDraftChange = jest.fn();
-    await renderWithTheme(
-      <Composer onSend={onSend} onDraftChange={onDraftChange} subjectEnabled />,
-    );
-    await fireEvent.changeText(screen.getByPlaceholderText('Subject'), 'keep subject');
+    await renderWithTheme(<Composer onSend={onSend} onDraftChange={onDraftChange} />);
     await fireEvent.changeText(input(), 'keep this offline draft');
     const sendButton = await screen.findByLabelText('Send message');
 
@@ -256,7 +231,6 @@ describe('Composer — typing enables send + trimmed send + clear', () => {
 
     expect(onSend).toHaveBeenCalledTimes(1);
     expect(input().props.value).toBe('keep this offline draft');
-    expect(screen.getByPlaceholderText('Subject').props.value).toBe('keep subject');
     expect(screen.getByLabelText('Send message').props.accessibilityState).toEqual({
       disabled: true,
       busy: true,
@@ -270,13 +244,11 @@ describe('Composer — typing enables send + trimmed send + clear', () => {
       }),
     );
     expect(input().props.value).toBe('keep this offline draft');
-    expect(screen.getByPlaceholderText('Subject').props.value).toBe('keep subject');
     expect(onDraftChange).not.toHaveBeenCalledWith('');
 
     onSend.mockReturnValueOnce(Promise.resolve(true));
     await fireEvent.press(screen.getByLabelText('Send message'));
     await waitFor(() => expect(input().props.value).toBe(''));
-    expect(screen.getByPlaceholderText('Subject').props.value).toBe('');
     expect(onDraftChange).toHaveBeenCalledWith('');
   });
 
@@ -293,25 +265,15 @@ describe('Composer — typing enables send + trimmed send + clear', () => {
     expect(onDraftChange).toHaveBeenCalledWith('brb');
   });
 
-  it('inserts an @mention from the picker and sends the resolved span', async () => {
+  it('has no subject or mention authoring controls and sends ordinary text', async () => {
     const onSend = jest.fn();
-    await renderWithTheme(
-      <Composer onSend={onSend} mentionParticipants={[{ address: 'a@x.com', name: 'Alice' }]} />,
-    );
+    await renderWithTheme(<Composer onSend={onSend} />);
+    expect(screen.queryByPlaceholderText('Subject')).toBeNull();
     await fireEvent.changeText(input(), '@Al');
-    await screen.findByDisplayValue('@Al');
-    // The picker keys off the caret — feed a selectionChange so the @query is detected.
-    await fireEvent(input(), 'selectionChange', {
-      nativeEvent: { selection: { start: 3, end: 3 } },
-    });
-    await fireEvent.press(await screen.findByLabelText('Mention Alice'));
-    await screen.findByDisplayValue('@Alice ');
+    expect(screen.queryByLabelText('Mention Alice')).toBeNull();
     await fireEvent.press(await screen.findByLabelText('Send message'));
-    await waitFor(() =>
-      expect(onSend).toHaveBeenCalledWith('@Alice', undefined, undefined, [
-        { start: 0, length: 6, address: 'a@x.com' },
-      ]),
-    );
+
+    await waitFor(() => expect(onSend).toHaveBeenCalledWith('@Al'));
   });
 });
 
@@ -334,194 +296,22 @@ describe('Composer — send-with-return feature flag (real store)', () => {
     await fireEvent.changeText(input(), 'via return');
     await screen.findByDisplayValue('via return'); // flush before submitEditing (see note above)
     await fireEvent(input(), 'submitEditing');
-    expect(onSend).toHaveBeenCalledWith('via return', undefined, undefined, undefined);
+    expect(onSend).toHaveBeenCalledWith('via return');
   });
 });
 
-describe('Composer — reply banner', () => {
-  function reply(over: Partial<MessagePreview> = {}): MessagePreview {
-    return {
-      guid: 'orig',
-      text: 'the original',
-      senderName: 'Carol',
-      isFromMe: 0,
-      hasAttachments: 0,
-      ...over,
-    };
-  }
-
-  it('renders "Replying to <name>" with the snippet and fires onCancelReply on dismiss', async () => {
-    const onCancelReply = jest.fn();
-    await renderWithTheme(
-      <Composer onSend={jest.fn()} replyTo={reply()} onCancelReply={onCancelReply} />,
-    );
-    expect(screen.getByText('Replying to Carol')).toBeTruthy();
-    expect(screen.getByText('the original')).toBeTruthy();
-    await fireEvent.press(screen.getByLabelText('Cancel reply'));
-    expect(onCancelReply).toHaveBeenCalledTimes(1);
-  });
-
-  it('shows "Replying to You" for an own message', async () => {
-    await renderWithTheme(
-      <Composer onSend={jest.fn()} replyTo={reply({ isFromMe: 1 })} onCancelReply={jest.fn()} />,
-    );
-    expect(screen.getByText('Replying to You')).toBeTruthy();
-  });
-
-  it('uses the attachment placeholder snippet when the replied message has no text', async () => {
-    await renderWithTheme(
-      <Composer
-        onSend={jest.fn()}
-        replyTo={reply({ text: '', hasAttachments: 1 })}
-        onCancelReply={jest.fn()}
-      />,
-    );
-    expect(screen.getByText('📎 Attachment')).toBeTruthy();
-  });
-
-  it('falls back to "Unknown" when a received reply has no sender name', async () => {
-    await renderWithTheme(
-      <Composer
-        onSend={jest.fn()}
-        replyTo={reply({ senderName: null })}
-        onCancelReply={jest.fn()}
-      />,
-    );
-    expect(screen.getByText('Replying to Unknown')).toBeTruthy();
-  });
-});
-
-describe('Composer — edit mode', () => {
-  it('prefills the input, shows the Editing bar, and hides attach/reply', async () => {
-    await renderWithTheme(
-      <Composer
-        onSend={jest.fn()}
-        editingText="edit me"
-        onCancelEdit={jest.fn()}
-        onSendAttachments={jest.fn()}
-        replyTo={{ guid: 'o', text: 't', senderName: 'X', isFromMe: 0, hasAttachments: 0 }}
-        onCancelReply={jest.fn()}
-      />,
-    );
-    expect(await screen.findByDisplayValue('edit me')).toBeTruthy();
-    expect(screen.getByText('Editing message')).toBeTruthy();
-    // Attach button and the reply banner are suppressed while editing.
-    expect(screen.queryByLabelText('Attach photo or file')).toBeNull();
-    expect(screen.queryByText(/Replying to/)).toBeNull();
-  });
-
-  it('confirm (send) fires onSend with the edited text and clears', async () => {
-    const onSend = jest.fn();
-    await renderWithTheme(
-      <Composer onSend={onSend} editingText="original" onCancelEdit={jest.fn()} />,
-    );
-    await screen.findByDisplayValue('original');
-    await fireEvent.changeText(input(), 'edited body');
-    await fireEvent.press(await screen.findByLabelText('Send message'));
-    expect(onSend).toHaveBeenCalledWith('edited body', undefined, undefined, undefined);
-    await waitFor(() => expect(input().props.value).toBe(''));
-  });
-
-  it('cancel fires onCancelEdit and clears the input', async () => {
-    const onCancelEdit = jest.fn();
-    await renderWithTheme(
-      <Composer onSend={jest.fn()} editingText="original" onCancelEdit={onCancelEdit} />,
-    );
-    await screen.findByDisplayValue('original');
-    await fireEvent.press(screen.getByLabelText('Cancel edit'));
-    expect(onCancelEdit).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(input().props.value).toBe(''));
-  });
-
-  it('does not open the effect picker on long-press while editing', async () => {
-    await renderWithTheme(
-      <Composer onSend={jest.fn()} editingText="original" onCancelEdit={jest.fn()} />,
-    );
+describe('Composer — retired helper controls', () => {
+  it('does not expose reply, edit, or send-effect controls', async () => {
+    await renderWithTheme(<Composer onSend={jest.fn()} />);
+    await fireEvent.changeText(input(), 'ordinary text');
     const send = await screen.findByLabelText('Send message');
+
+    expect(screen.queryByText(/Replying to/)).toBeNull();
+    expect(screen.queryByText('Editing message')).toBeNull();
+    expect(send.props.accessibilityHint).toBeUndefined();
+
     await fireEvent(send, 'longPress');
     expect(screen.queryByText('Send with effect')).toBeNull();
-  });
-
-  // Regression: starting an edit must not eat an in-progress draft. Before the fix, editing
-  // overwrote the input with the edited message and then cleared it to '' on cancel/send,
-  // losing the draft (and later persisting '' over kv).
-  it('restores the in-progress draft when an edit is cancelled', async () => {
-    const { rerender } = await renderWithTheme(
-      <Composer onSend={jest.fn()} onCancelEdit={jest.fn()} initialText="draft I was writing" />,
-    );
-    await screen.findByDisplayValue('draft I was writing');
-    // The parent starts an edit → the input prefills with the message being edited.
-    await rerender(
-      <Composer onSend={jest.fn()} onCancelEdit={jest.fn()} editingText="original message" />,
-    );
-    await screen.findByDisplayValue('original message');
-    await fireEvent.press(screen.getByLabelText('Cancel edit'));
-    // The displaced draft comes back — not a blank box.
-    await waitFor(() => expect(input().props.value).toBe('draft I was writing'));
-  });
-
-  it('restores the draft after an edit is sent, and never persists it as empty', async () => {
-    const onSend = jest.fn();
-    const onDraftChange = jest.fn();
-    const { rerender } = await renderWithTheme(
-      <Composer
-        onSend={onSend}
-        onCancelEdit={jest.fn()}
-        onDraftChange={onDraftChange}
-        initialText="draft text"
-      />,
-    );
-    await screen.findByDisplayValue('draft text');
-    await rerender(
-      <Composer
-        onSend={onSend}
-        onCancelEdit={jest.fn()}
-        onDraftChange={onDraftChange}
-        editingText="edit this"
-      />,
-    );
-    await screen.findByDisplayValue('edit this');
-    await fireEvent.changeText(input(), 'edited body');
-    await fireEvent.press(await screen.findByLabelText('Send message'));
-    expect(onSend).toHaveBeenCalledWith('edited body', undefined, undefined, undefined);
-    // The draft is restored, and the edit never clobbers kv with '' (that would wipe the draft).
-    await waitFor(() => expect(input().props.value).toBe('draft text'));
-    expect(onDraftChange).not.toHaveBeenCalledWith('');
-  });
-
-  it('preserves attachments staged before an edit without sending them with the edit', async () => {
-    const onSend = jest.fn();
-    const onSendAttachments = jest.fn();
-    const canSubmit = jest.fn(() => false);
-    const { rerender } = await renderWithTheme(
-      <Composer onSend={onSend} onSendAttachments={onSendAttachments} canSubmit={canSubmit} />,
-    );
-    await fireEvent.press(screen.getByLabelText('Attach photo or file'));
-    await fireEvent.press(await screen.findByLabelText('tray-pick-a'));
-    await waitFor(() => expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(1));
-
-    await rerender(
-      <Composer
-        onSend={onSend}
-        onSendAttachments={onSendAttachments}
-        canSubmit={canSubmit}
-        editingText="original"
-        onCancelEdit={jest.fn()}
-      />,
-    );
-    await screen.findByDisplayValue('original');
-    await fireEvent.changeText(input(), 'edited body');
-    await fireEvent.press(await screen.findByLabelText('Send message'));
-
-    expect(onSend).toHaveBeenCalledWith('edited body', undefined, undefined, undefined);
-    expect(onSendAttachments).not.toHaveBeenCalled();
-    expect(canSubmit).not.toHaveBeenCalled();
-    expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(1);
-
-    await rerender(
-      <Composer onSend={onSend} onSendAttachments={onSendAttachments} canSubmit={canSubmit} />,
-    );
-    expect(screen.getAllByLabelText('Remove attachment')).toHaveLength(1);
   });
 });
 
@@ -670,32 +460,42 @@ describe('Composer — staged attachments', () => {
     await renderWithTheme(<Composer onSend={jest.fn()} />);
     expect(screen.queryByLabelText('Attach photo or file')).toBeNull();
   });
-});
 
-describe('Composer — send-effect long-press', () => {
-  it('long-pressing send opens the effect picker; picking sends with that effect id', async () => {
+  it('retains staged files but sends plain text without them when attachment support retires', async () => {
     const onSend = jest.fn();
-    await renderWithTheme(<Composer onSend={onSend} />);
-    await fireEvent.changeText(input(), 'party');
-    await fireEvent(await screen.findByLabelText('Send message'), 'longPress');
-    expect(await screen.findByText('Send with effect')).toBeTruthy();
-    await fireEvent.press(screen.getByText('Slam'));
-    expect(onSend).toHaveBeenCalledWith(
-      'party',
-      'com.apple.MobileSMS.expressivesend.impact',
-      undefined,
-      undefined,
-    );
-    await waitFor(() => expect(input().props.value).toBe(''));
+    const view = await renderWithTheme(<Composer onSend={onSend} onSendAttachments={jest.fn()} />);
+    await fireEvent.press(screen.getByLabelText('Attach photo or file'));
+    await fireEvent.press(await screen.findByLabelText('tray-pick-a'));
+    await waitFor(() => expect(screen.getByLabelText('Remove attachment')).toBeTruthy());
+
+    await view.rerender(<Composer onSend={onSend} />);
+
+    expect(screen.getByLabelText('Remove attachment')).toBeTruthy();
+    expect(screen.queryByLabelText('Attach photo or file')).toBeNull();
+    expect(screen.queryByLabelText('Send message')).toBeNull();
+
+    await fireEvent.changeText(input(), 'plain text survives');
+    await fireEvent.press(await screen.findByLabelText('Send message'));
+    expect(onSend).toHaveBeenCalledWith('plain text survives');
+    expect(screen.getByLabelText('Remove attachment')).toBeTruthy();
   });
 
-  it('"Send without effect" sends with no effect id', async () => {
-    const onSend = jest.fn();
-    await renderWithTheme(<Composer onSend={onSend} />);
-    await fireEvent.changeText(input(), 'plain');
-    await fireEvent(await screen.findByLabelText('Send message'), 'longPress');
-    await fireEvent.press(await screen.findByText('Send without effect'));
-    expect(onSend).toHaveBeenCalledWith('plain', undefined, undefined, undefined);
+  it('does not stage a document picker result that resolves after attachment support retires', async () => {
+    const picked = deferred<PendingAttachment[]>();
+    const view = await renderWithTheme(
+      <Composer
+        onSend={jest.fn()}
+        onSendAttachments={jest.fn()}
+        onPickFiles={() => picked.promise}
+      />,
+    );
+    await fireEvent.press(screen.getByLabelText('Attach photo or file'));
+    await fireEvent.press(await screen.findByLabelText('tray-files'));
+
+    await view.rerender(<Composer onSend={jest.fn()} />);
+    await act(async () => picked.resolve([FILE_A]));
+
+    expect(screen.queryByLabelText('Remove attachment')).toBeNull();
   });
 });
 
@@ -823,19 +623,6 @@ describe('Composer — schedule (two-step native picker + recurrence sheet)', ()
     // fact that the sheet never opens in this flow.
     expect(await screen.findByText('Send once')).toBeTruthy();
   });
-
-  it('does not show the schedule button while editing', async () => {
-    await renderWithTheme(
-      <Composer
-        onSend={jest.fn()}
-        onSchedule={jest.fn()}
-        editingText="x"
-        onCancelEdit={jest.fn()}
-      />,
-    );
-    await screen.findByDisplayValue('x');
-    expect(screen.queryByLabelText('Schedule message')).toBeNull();
-  });
 });
 
 describe('Composer — voice/mic affordance', () => {
@@ -851,19 +638,6 @@ describe('Composer — voice/mic affordance', () => {
     await renderWithTheme(<Composer onSend={jest.fn()} onStartVoice={jest.fn()} />);
     await fireEvent.changeText(input(), 'hi');
     await screen.findByLabelText('Send message');
-    expect(screen.queryByLabelText('Record voice message')).toBeNull();
-  });
-
-  it('hides the mic while editing', async () => {
-    await renderWithTheme(
-      <Composer
-        onSend={jest.fn()}
-        onStartVoice={jest.fn()}
-        editingText="x"
-        onCancelEdit={jest.fn()}
-      />,
-    );
-    await screen.findByDisplayValue('x');
     expect(screen.queryByLabelText('Record voice message')).toBeNull();
   });
 });

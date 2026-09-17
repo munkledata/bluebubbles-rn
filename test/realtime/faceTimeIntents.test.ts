@@ -6,17 +6,15 @@ import { buildMessageIntents } from '@/services/notifications/intents';
 const db = {} as AppDatabase;
 
 describe('buildMessageIntents — FaceTime', () => {
-  it('maps a legacy incoming-facetime to a facetime-call intent', async () => {
+  it('drops a legacy incoming-facetime event', async () => {
     const ev: NormalizedEvent = {
       type: 'incoming-facetime',
       payload: { uuid: 'u1', caller: 'Alice', is_audio: false },
     };
-    expect(await buildMessageIntents(db, ev)).toEqual([
-      { kind: 'facetime-call', uuid: 'u1', callerName: 'Alice', isAudio: false },
-    ]);
+    expect(await buildMessageIntents(db, ev)).toEqual([]);
   });
 
-  it('maps ft-call-status-changed status 4 (incoming) to a facetime-call', async () => {
+  it('drops an incoming ft-call-status-changed event', async () => {
     const ev: NormalizedEvent = {
       type: 'ft-call-status-changed',
       payload: {
@@ -27,9 +25,7 @@ describe('buildMessageIntents — FaceTime', () => {
         handle: { address: '+1' },
       },
     };
-    expect(await buildMessageIntents(db, ev)).toEqual([
-      { kind: 'facetime-call', uuid: 'u2', callerName: 'Mom', isAudio: true },
-    ]);
+    expect(await buildMessageIntents(db, ev)).toEqual([]);
   });
 
   it('maps ft-call-status-changed status 6 (ended) to a facetime-cancel', async () => {
@@ -40,17 +36,7 @@ describe('buildMessageIntents — FaceTime', () => {
     expect(await buildMessageIntents(db, ev)).toEqual([{ kind: 'facetime-cancel', uuid: 'u3' }]);
   });
 
-  it('falls back to the handle address when there is no display address', async () => {
-    const ev: NormalizedEvent = {
-      type: 'ft-call-status-changed',
-      payload: { uuid: 'u4', status_id: 4, handle: { address: '+15551234567' } },
-    };
-    expect(await buildMessageIntents(db, ev)).toEqual([
-      { kind: 'facetime-call', uuid: 'u4', callerName: '+15551234567', isAudio: false },
-    ]);
-  });
-
-  it('ignores a FaceTime event with no uuid, and other statuses', async () => {
+  it('ignores a FaceTime event with no uuid and non-cleanup statuses', async () => {
     expect(await buildMessageIntents(db, { type: 'incoming-facetime', payload: {} })).toEqual([]);
     expect(
       await buildMessageIntents(db, {

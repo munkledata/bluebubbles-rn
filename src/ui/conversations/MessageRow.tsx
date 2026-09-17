@@ -42,8 +42,6 @@ interface MessageRowProps {
   onJumpToReply?: (originatorGuid: string) => void;
   /** Tap the reaction badges → show who reacted (the list owns the detail sheet). */
   onShowReactions?: (msg: EnrichedMessage) => void;
-  /** Swipe the bubble right past the threshold → set this message as the reply target. */
-  onSwipeReply?: (msg: EnrichedMessage) => void;
   /** Briefly flashed when this row is the jump target. */
   isHighlighted?: boolean;
   /** Multi-select mode: rows show a check circle and taps toggle membership. */
@@ -72,7 +70,6 @@ export const MessageRow = React.memo(function MessageRow({
   onLongPress,
   onJumpToReply,
   onShowReactions,
-  onSwipeReply,
   isHighlighted,
   selecting,
   isSelected,
@@ -118,7 +115,6 @@ export const MessageRow = React.memo(function MessageRow({
   const handleJumpToReply = useCallback(() => {
     if (originator) onJumpToReply?.(originator);
   }, [onJumpToReply, originator]);
-  const handleSwipeReply = useCallback(() => onSwipeReply?.(msg), [onSwipeReply, msg]);
   const handleShowReactions = useCallback(() => onShowReactions?.(msg), [onShowReactions, msg]);
 
   // Group / chat-event system message → a centered event line instead of a bubble.
@@ -194,12 +190,8 @@ export const MessageRow = React.memo(function MessageRow({
           {timeLabel}
         </Text>
       ) : null}
-      {/* Horizontal swipe on the bubble content: drag left peeks this message's sent time; drag
-          right past the threshold sets it as the reply target. The separator + status stay put. */}
-      <MessageSwipeWrapper
-        timestamp={formatTime(msg.dateCreated ?? 0)}
-        onReply={onSwipeReply && !msg.guid.startsWith('temp-') ? handleSwipeReply : undefined}
-      >
+      {/* Horizontal swipe on the bubble content peeks this message's sent time. */}
+      <MessageSwipeWrapper timestamp={formatTime(msg.dateCreated ?? 0)}>
         {showAvatar ? (
           <>
             <View style={styles.avatarRow}>

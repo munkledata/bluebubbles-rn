@@ -1,5 +1,9 @@
 import { create } from 'zustand';
-import type { ServerInfo } from '@core/models';
+import {
+  retirePrivateApiCapabilities,
+  serverSendCapabilityKey,
+  type ServerInfo,
+} from '@core/models';
 
 export type ConnectionStatus =
   | 'loading' // hydrating credentials from the vault at boot
@@ -41,6 +45,8 @@ interface SessionState {
    * would otherwise look identical from the URL and password alone.
    */
   transportRevision: number;
+  /** Monotonic identity for send-related ServerInfo capabilities on the current transport. */
+  sendCapabilityRevision: number;
 
   /** Result of boot hydration (credentials found or not). */
   hydrated: (creds: { origin: string; password: string } | null) => void;
@@ -81,6 +87,7 @@ export const useSessionStore = create<SessionState>((set) => ({
   error: null,
   epoch: 0,
   transportRevision: 0,
+  sendCapabilityRevision: 0,
 
   hydrated: (creds) =>
     set((s) =>
@@ -93,6 +100,7 @@ export const useSessionStore = create<SessionState>((set) => ({
             error: null,
             epoch: s.epoch + 1,
             transportRevision: s.transportRevision + 1,
+            sendCapabilityRevision: s.sendCapabilityRevision + 1,
           }
         : {
             status: 'unauthenticated',
@@ -102,6 +110,7 @@ export const useSessionStore = create<SessionState>((set) => ({
             error: null,
             epoch: s.epoch + 1,
             transportRevision: s.transportRevision + 1,
+            sendCapabilityRevision: s.sendCapabilityRevision + 1,
           },
     ),
   beginConnecting: () => set({ status: 'connecting', error: null }),
@@ -110,10 +119,11 @@ export const useSessionStore = create<SessionState>((set) => ({
       status: 'connected',
       origin,
       password,
-      serverInfo: info,
+      serverInfo: retirePrivateApiCapabilities(info),
       error: null,
       epoch: s.epoch + 1,
       transportRevision: s.transportRevision + 1,
+      sendCapabilityRevision: s.sendCapabilityRevision + 1,
     })),
   setServerInfoForTransport: (expectedOrigin, expectedTransportRevision, info) => {
     let published = false;
@@ -121,8 +131,14 @@ export const useSessionStore = create<SessionState>((set) => ({
       if (s.origin !== expectedOrigin || s.transportRevision !== expectedTransportRevision) {
         return s;
       }
+      const retiredInfo = retirePrivateApiCapabilities(info);
       published = true;
-      return { serverInfo: info };
+      return {
+        serverInfo: retiredInfo,
+        sendCapabilityRevision:
+          s.sendCapabilityRevision +
+          (serverSendCapabilityKey(s.serverInfo) === serverSendCapabilityKey(retiredInfo) ? 0 : 1),
+      };
     });
     return published;
   },
@@ -152,11 +168,17 @@ export const useSessionStore = create<SessionState>((set) => ({
     return replaced;
   },
   rotateOrigin: (origin, info) =>
-    set((s) => ({
-      origin,
-      serverInfo: info,
-      transportRevision: s.transportRevision + 1,
-    })),
+    set((s) => {
+      const retiredInfo = retirePrivateApiCapabilities(info);
+      return {
+        origin,
+        serverInfo: retiredInfo,
+        transportRevision: s.transportRevision + 1,
+        sendCapabilityRevision:
+          s.sendCapabilityRevision +
+          (serverSendCapabilityKey(s.serverInfo) === serverSendCapabilityKey(retiredInfo) ? 0 : 1),
+      };
+    }),
   failed: (message) => set({ status: 'error', error: message }),
   reset: () =>
     set((s) => ({
@@ -167,6 +189,7 @@ export const useSessionStore = create<SessionState>((set) => ({
       error: null,
       epoch: s.epoch + 1,
       transportRevision: s.transportRevision + 1,
+      sendCapabilityRevision: s.sendCapabilityRevision + 1,
     })),
 }));
 
@@ -197,8 +220,6 @@ export const sessionAccessors = {
   /** The current HTTP transport id; also changes on approved same-account origin rotation. */
   getTransportRevision: (): number => useSessionStore.getState().transportRevision,
   getPassword: (): string | undefined => useSessionStore.getState().password ?? undefined,
-  /** Whether the connected server has the Gator Private API enabled. */
-  privateApiEnabled: (): boolean => !!useSessionStore.getState().serverInfo?.private_api,
   /** Whether the connected server's Gator RCS bridge is enabled (absent/false → off). */
   rcsEnabled: (): boolean => !!useSessionStore.getState().serverInfo?.rcs,
   /** Whether this server supplies exact RCS success/error attempt correlation. */
@@ -217,12 +238,8 @@ export const sessionAccessors = {
   /** Whether this server supplies exact multipart topology for safe action targeting. */
   messagePartTopologySupported: (): boolean =>
     useSessionStore.getState().serverInfo?.supports_message_part_topology === true,
-  /** Whether the connected server can build + send a contact card (`send-contact`). */
-  sendContactSupported: (): boolean =>
-    !!useSessionStore.getState().serverInfo?.supports_send_contact,
-  /** Whether the connected server exposes the iMessage-account endpoints (`icloud/account`). */
-  icloudAccountSupported: (): boolean =>
-    !!useSessionStore.getState().serverInfo?.supports_icloud_account,
+  /** Helper-backed iMessage-account endpoints are retired for this release. */
+  icloudAccountSupported: (): boolean => false,
   /** Whether the connected server accepts client error-report uploads. */
   errorLogUploadSupported: (): boolean =>
     !!useSessionStore.getState().serverInfo?.supports_error_log_upload,
@@ -239,21 +256,11 @@ export const useMessageDeletedSupported = (): boolean =>
 export const useMessageSearchSupported = (): boolean =>
   useSessionStore((s) => !!s.serverInfo?.supports_message_search);
 
-/** React hook: can the server send a contact card? (Gate the composer's "Contact" affordance.) */
-export const useSendContactSupported = (): boolean =>
-  useSessionStore((s) => !!s.serverInfo?.supports_send_contact);
-
 /** Can this exact chat service send one attachment and its text as a single message? */
 export const useSendAttachmentTextSupported = (service: string | null | undefined): boolean =>
   useSessionStore((s) => {
     if (service === 'RCS') {
       return s.serverInfo?.rcs === true && s.serverInfo.supports_rcs_text_with_attachment === true;
-    }
-    if (service === 'iMessage') {
-      return (
-        s.serverInfo?.private_api === true &&
-        s.serverInfo.supports_imessage_text_with_attachment === true
-      );
     }
     return false;
   });
@@ -264,9 +271,8 @@ export const useMessagePartTopologySupported = (): boolean | null =>
     s.serverInfo == null ? null : s.serverInfo.supports_message_part_topology === true,
   );
 
-/** React hook: does the server expose the iMessage-account endpoints? (Gate the Settings row.) */
-export const useIcloudAccountSupported = (): boolean =>
-  useSessionStore((s) => !!s.serverInfo?.supports_icloud_account);
+/** Helper-backed iMessage-account endpoints are retired for this release. */
+export const useIcloudAccountSupported = (): boolean => false;
 
 /** React hook: does the server accept error-report uploads? (Gate the Settings toggle's effect.) */
 export const useErrorLogUploadSupported = (): boolean =>

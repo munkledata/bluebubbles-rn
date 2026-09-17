@@ -62,17 +62,18 @@ Deliver this as three independent slices:
    and associated-message part identity through live ingestion, sync, persistence, and retry. Migration
    `0047_message_retraction_topology` stores that durable evidence. Parse exactly one outer `p:<n>/`
    or `bp:<n>/` prefix and preserve a normalized received reply/reaction part. Complete topology is
-   authoritative; malformed or incomplete topology fails closed, and only a proven older server may
-   use the narrow legacy part-zero compatibility rule. Replies, reactions, edits, unsend, supported
-   iMessage contact-card replies, local scheduling, optimistic rows, and retry payloads carry the resolved target. A
-   shared classifier uses complete topology to preserve only proven surviving text and attachments across
-   bubbles, inbox/search, notifications, and attachment-cache ownership. RCS reactions may use part
-   zero only for a proven whole `rcs-*` message; that exception must not enable RCS reply threading,
-   edits, or unsend.
+   authoritative; malformed or incomplete topology fails closed. The topology still supports
+   truthful received-message rendering and retraction-survivor classification, but `FP-006` retires
+   every helper-dependent outgoing iMessage target: reply, reaction, edit, unsend, contact-card
+   reply, targeted schedule, attachment, and combined send. A shared classifier uses complete
+   topology to preserve only proven surviving text and attachments across bubbles, inbox/search,
+   notifications, and attachment-cache ownership. RCS reactions may use part zero only for a proven
+   whole `rcs-*` message; that exception must not enable RCS reply threading, edits, or unsend.
 3. `FEAT-03C` sends one attachment plus its text only behind the matching chat-service capability,
-   with one logical optimistic/retry identity and truthful disablement on older servers. RCS and
-   iMessage capabilities remain independent: support for one service must never be inferred for the
-   other, and authored text/attachment/reply state stays in the composer until durable queue admission.
+   with one logical optimistic/retry identity and truthful disablement on older servers. This is an
+   RCS-only path. It must never infer a retired iMessage capability, and authored text/attachment
+   state stays in the composer until durable queue admission. Existing-chat iMessage plain text is
+   a separate AppleScript-only path with no target or rich metadata.
 
 <a id="feat-04"></a>
 

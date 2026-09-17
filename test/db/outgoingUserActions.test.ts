@@ -18,13 +18,17 @@ import {
   cancelOutgoing,
   claimFailedOutgoingForRetry,
   claimOutgoingForSend,
+  claimOutgoingForSendWithinTransaction,
   countOutgoingQueueHealth,
+  deferOutgoingSendClaimWithinTransaction,
   discardOutgoingMessage,
   insertOutgoingContact,
   insertOutgoingText,
   listMessagesWithSenders,
+  OUTGOING_MAX_ATTEMPTS,
   reconcileEchoByContent,
   reconcileOutgoingError,
+  retireOutgoing,
   upsertChats,
   upsertHandles,
 } from '@db/repositories';
@@ -246,6 +250,118 @@ describe('claimOutgoingForSend — lease + visible ownership', () => {
         .prepare('SELECT next_retry_at AS nextRetryAt FROM outgoing_queue WHERE id = ?')
         .get(before.id),
     ).toEqual({ nextRetryAt: before.nextRetryAt });
+  });
+
+  it('defers a modern claim by restoring its failed bubble without reviving the old generation', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db, 'c1');
+    const tempGuid = 'temp-modern-capability-defer';
+    const inserted = await insertOutgoingText(db, {
+      tempGuid,
+      chatId,
+      chatGuid: 'c1',
+      text: 'hi',
+      now: 100,
+      attemptAware: true,
+    });
+    await reconcileOutgoingError(
+      db,
+      tempGuid,
+      502,
+      1_000,
+      undefined,
+      'prior failure',
+      inserted.attemptOwnerToken!,
+    );
+    const before = readRetryQueueState(raw, tempGuid);
+
+    const claim = await withDbTransaction(db, (context) =>
+      claimOutgoingForSendWithinTransaction(context, before.id, () => before.nextRetryAt),
+    );
+    expect(claim).toEqual(
+      expect.objectContaining({
+        claimed: true,
+        attemptOwnerToken: { generation: 2 },
+        deferToken: expect.objectContaining({ previousAttempts: 1, ownerGeneration: 2 }),
+      }),
+    );
+
+    await expect(
+      withDbTransaction(db, (context) =>
+        deferOutgoingSendClaimWithinTransaction(context, claim.deferToken!),
+      ),
+    ).resolves.toBe(true);
+    expect(readRetryQueueState(raw, tempGuid)).toEqual({
+      id: before.id,
+      attempts: 1,
+      nextRetryAt: 0,
+    });
+    expect(
+      raw
+        .prepare(
+          `SELECT send_state AS sendState, error, error_message AS errorMessage,
+                  attempt_owner_pending AS pending, attempt_owner_generation AS generation
+             FROM messages WHERE guid = ?`,
+        )
+        .get(tempGuid),
+    ).toEqual({
+      sendState: 'error',
+      error: 502,
+      errorMessage: 'prior failure',
+      pending: 0,
+      generation: 2,
+    });
+  });
+
+  it('does not let capability deferral overwrite a competing permanent retirement', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db, 'c1');
+    const tempGuid = 'temp-retired-during-capability-defer';
+    const inserted = await insertOutgoingText(db, {
+      tempGuid,
+      chatId,
+      chatGuid: 'c1',
+      text: 'hi',
+      now: 100,
+      attemptAware: true,
+    });
+    await reconcileOutgoingError(
+      db,
+      tempGuid,
+      502,
+      1_000,
+      undefined,
+      'prior failure',
+      inserted.attemptOwnerToken!,
+    );
+    const before = readRetryQueueState(raw, tempGuid);
+    const claim = await withDbTransaction(db, (context) =>
+      claimOutgoingForSendWithinTransaction(context, before.id, () => before.nextRetryAt),
+    );
+    expect(claim.claimed).toBe(true);
+    expect(claim.deferToken).toBeDefined();
+
+    await retireOutgoing(db, tempGuid, 77);
+    await expect(
+      withDbTransaction(db, (context) =>
+        deferOutgoingSendClaimWithinTransaction(context, claim.deferToken!),
+      ),
+    ).resolves.toBe(false);
+
+    expect(readRetryQueueState(raw, tempGuid)).toEqual({
+      id: before.id,
+      attempts: OUTGOING_MAX_ATTEMPTS,
+      nextRetryAt: claim.deferToken!.leaseUntil,
+    });
+    expect(
+      raw
+        .prepare(
+          `SELECT send_state AS sendState, error, error_message AS errorMessage,
+                  attempt_owner_pending AS pending, attempt_owner_generation AS generation
+             FROM messages WHERE guid = ?`,
+        )
+        .get(tempGuid),
+    ).toEqual({ sendState: 'error', error: 77, errorMessage: null, pending: 1, generation: 2 });
   });
 });
 

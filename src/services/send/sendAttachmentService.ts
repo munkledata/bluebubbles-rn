@@ -3,11 +3,7 @@ import type { HttpClient } from '@core/api/http';
 import { MAX_SEND_ATTACHMENT_TEXT_BYTES } from '@core/models/serverInfo';
 import {
   commitAttachmentCacheReservation,
-  explicitMessageTargetPart,
   insertOutgoingAttachmentWithinTransaction,
-  MessageTargetUnavailableError,
-  resolveMessageTarget,
-  resolveMessageTargetWithinTransaction,
   type SendAttemptOwnerToken,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
@@ -19,17 +15,11 @@ import {
   type AttachmentCacheReservation,
 } from '../download/attachmentCacheCoordinator';
 import {
-  messageTargetCommitGuard,
-  messageTargetServerAuthorization,
   resolveRcsAttemptOwnership,
+  sendCapabilityCommitGuard,
   type RcsCapabilitySource,
 } from './rcsAttemptCapability';
-import {
-  handleSendFailure,
-  reconcileSendOutcome,
-  retireUnavailableMessageTarget,
-  type SendOutcomeOptions,
-} from './sendOutcome';
+import { handleSendFailure, reconcileSendOutcome, type SendOutcomeOptions } from './sendOutcome';
 import { generateTempGuid } from './sendService';
 import { pinSendTransport } from './sendTransport';
 
@@ -70,12 +60,10 @@ export type AttachmentUploader = (args: {
   tempGuid: string;
   /** Local request generation echoed by attempt-aware RCS success/error events. */
   clientAttemptGeneration?: number;
-  /** Final durable target check, run after native preflight/FIFO wait and immediately before POST. */
-  authorizeNetworkStart?: () => Promise<{ messageGuid: string; partIndex: number }>;
+  /** Await-free final capability fence immediately before native code opens the request. */
+  assertNetworkStart?: () => void;
   /** Body text consumed by the same server transport as this one attachment. */
   text?: string;
-  selectedMessageGuid?: string;
-  partIndex?: number;
   /**
    * The ATTACHMENT row's guid — the key byte progress is published under. It is not the message
    * temp guid because the attachment components render under `att.guid`, so this is what lets the
@@ -130,18 +118,15 @@ export async function sendImageMessage(
   /** Explicit provenance for foreground cache data or already-proven task-local server info. */
   capabilitySource?: RcsCapabilitySource,
 ): Promise<{ tempGuid: string }> {
-  const targetPart = explicitMessageTargetPart(args.selectedMessageGuid, args.partIndex);
-  const target = targetPart
-    ? {
-        chatGuid: args.chatGuid,
-        messageGuid: targetPart.messageGuid,
-        partIndex: targetPart.partIndex,
-      }
-    : null;
-  // RCS attachment transport cannot preserve an Apple reply target. Key this from the canonical
-  // chat identity rather than the caller-supplied service label so stale callers fail closed.
-  if (target && isRcsChatGuid(args.chatGuid)) {
+  const rcsChat = isRcsChatGuid(args.chatGuid);
+  if (!rcsChat) {
+    throw new Error('iMessage attachments were retired with the Private API helper.');
+  }
+  if (args.selectedMessageGuid !== undefined || args.partIndex !== undefined) {
     throw new Error('This server cannot send an RCS media reply.');
+  }
+  if (args.text !== undefined && args.service !== 'RCS') {
+    throw new Error('Attachment text must use the RCS transport.');
   }
   // Pin before pasted-file ownership preparation: that native/cache await belongs to the same
   // exact transport decision as capability discovery, durable admission, and upload.
@@ -157,21 +142,15 @@ export async function sendImageMessage(
     args.chatGuid,
     transport.admissionGuard,
     capabilitySource,
-    { requireServerInfo: args.text !== undefined || target != null },
+    { requireServerInfo: true },
   );
-  const authorizedTarget = target
-    ? {
-        ...target,
-        serverAuthorization: messageTargetServerAuthorization(
-          capability.serverInfo,
-          transport.admissionGuard,
-        ),
-      }
-    : null;
-  const targetCommitGuard = messageTargetCommitGuard(
-    commitGuard,
-    authorizedTarget?.serverAuthorization,
-  );
+  const capabilityGuard = sendCapabilityCommitGuard(transport.admissionGuard, capabilitySource);
+  // Reject false/missing service capability before cache ownership or durable queue admission.
+  // The retired helper was the only iMessage attachment transport; RCS remains independent but
+  // still requires its own live bridge rather than inheriting authority from `private_api`.
+  if (capability.serverInfo?.rcs !== true) {
+    throw new Error('This server cannot send RCS attachments without RCS support.');
+  }
   if (args.text !== undefined) {
     if (
       args.text.length === 0 ||
@@ -179,14 +158,7 @@ export async function sendImageMessage(
     ) {
       throw new Error('Attachment text is empty or exceeds the 65,536-byte limit.');
     }
-    const supported =
-      args.service === 'RCS'
-        ? capability.serverInfo?.rcs === true &&
-          capability.serverInfo.supports_rcs_text_with_attachment === true
-        : args.service === 'iMessage'
-          ? capability.serverInfo?.private_api === true &&
-            capability.serverInfo.supports_imessage_text_with_attachment === true
-          : false;
+    const supported = capability.serverInfo.supports_rcs_text_with_attachment === true;
     if (!supported) {
       throw new Error('This server cannot send text with an attachment for this chat service.');
     }
@@ -233,10 +205,6 @@ export async function sendImageMessage(
     const inserted = await withDbTransaction(
       db,
       async (context) => {
-        const resolvedTarget = authorizedTarget
-          ? await resolveMessageTargetWithinTransaction(context, authorizedTarget)
-          : null;
-        if (authorizedTarget && !resolvedTarget) throw new MessageTargetUnavailableError();
         if (cacheReservation) {
           const promoted = await commitAttachmentCacheReservation(context, {
             path: image.uri,
@@ -260,12 +228,10 @@ export async function sendImageMessage(
           height: image.height,
           now,
           text: args.text,
-          selectedMessageGuid: resolvedTarget?.messageGuid,
-          partIndex: resolvedTarget?.partIndex,
           attemptAware: capability.attemptAware,
         });
       },
-      transport.admissionGuard,
+      capabilityGuard,
     );
     attemptOwnerToken = inserted.attemptOwnerToken;
   } catch (error) {
@@ -288,16 +254,9 @@ export async function sendImageMessage(
 
   // Disconnect can retire this operation immediately after COMMIT. Do not let that old
   // continuation register a brand-new native upload after the synchronous cancel sweep.
-  if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
+  if (!capabilityGuard()) throw new DbCommitGuardRejectedError();
 
   try {
-    const authorizeTarget = async (): Promise<{ messageGuid: string; partIndex: number }> => {
-      if (!authorizedTarget) throw new MessageTargetUnavailableError();
-      const resolved = await resolveMessageTarget(db, authorizedTarget, targetCommitGuard);
-      if (!resolved) throw new MessageTargetUnavailableError();
-      return { messageGuid: resolved.messageGuid, partIndex: resolved.partIndex };
-    };
-    const finalTarget = authorizedTarget ? await authorizeTarget() : null;
     transport.assertNetworkCurrent();
     // Stream the file to the server (native upload — never buffered in JS memory).
     const server = await upload({
@@ -305,10 +264,10 @@ export async function sendImageMessage(
       chatGuid: args.chatGuid,
       tempGuid,
       clientAttemptGeneration: attemptOwnerToken?.generation,
-      authorizeNetworkStart: target ? authorizeTarget : undefined,
+      assertNetworkStart: () => {
+        if (!capabilityGuard()) throw new DbCommitGuardRejectedError();
+      },
       text: args.text,
-      selectedMessageGuid: finalTarget?.messageGuid,
-      partIndex: finalTarget?.partIndex,
       attachmentGuid,
       name: image.name,
       uri: image.uri,
@@ -329,10 +288,6 @@ export async function sendImageMessage(
     // account's recovery path instead of logging or starting a second stale-account owner.
     if (e instanceof DbCommitGuardRejectedError) throw e;
     if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
-    if (e instanceof MessageTargetUnavailableError) {
-      await retireUnavailableMessageTarget(db, tempGuid, targetCommitGuard);
-      return { tempGuid };
-    }
     await handleSendFailure(
       db,
       tempGuid,

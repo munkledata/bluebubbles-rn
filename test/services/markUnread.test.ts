@@ -5,8 +5,8 @@
  *   - the LOCAL flip (read marker cleared) always happens, and happens FIRST;
  *   - a rejecting server call neither throws nor reverts the local flip (best-effort sync);
  *   - `RCS;-;` chats never hit the server (the RCS sidecar has no unread endpoint);
- *   - the master Private API toggle gates the server call, and is HYDRATED first — headlessly the
- *     store sits at its module defaults (everything on), so an un-hydrated read would ignore it;
+ *   - the connected server's Private API capability gates remote calls; a missing/false capability
+ *     fails closed while the local marker still changes;
  *   - the DB is opened with the lazy `ensureDatabase()`, never the eager `getDatabase()` (this path
  *     is shared with the notification actions, which run with no React tree at all).
  *
@@ -31,7 +31,8 @@ import { createTestDb } from '../support/testDb';
 
 // Hoisted jest.mock factories may only reference `mock`-prefixed vars.
 let mockDb: AppDatabase;
-let mockPrivateApiEnabled = true;
+let mockServerPrivateApiEnabled = true;
+let mockServerRcsEnabled = false;
 let mockSendReadReceipts = true;
 let mockSettingsHydrated = true;
 const mockHydrate = jest.fn(async () => {
@@ -52,11 +53,17 @@ jest.mock('@/services/realtimeControl', () => ({ getSocket: jest.fn(() => null) 
 jest.mock('@state/featureSettingsStore', () => ({
   useFeatureSettingsStore: {
     getState: () => ({
-      privateApiEnabled: mockPrivateApiEnabled,
+      sendTypingIndicators: true,
       sendReadReceipts: mockSendReadReceipts,
       hydrated: mockSettingsHydrated,
       hydrate: mockHydrate,
     }),
+  },
+}));
+jest.mock('@state/sessionStore', () => ({
+  sessionAccessors: {
+    privateApiEnabled: () => mockServerPrivateApiEnabled,
+    rcsEnabled: () => mockServerRcsEnabled,
   },
 }));
 jest.mock('@core/api', () => ({
@@ -68,7 +75,8 @@ jest.mock('@core/api', () => ({
 
 import { getDatabase } from '@db/database';
 import { ensureDatabase } from '@/services/databaseControl';
-import { markRead, markUnread } from '@/services/chatActions';
+import { markRead, markUnread, sendTyping } from '@/services/chatActions';
+import { getSocket } from '@/services/realtimeControl';
 import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
@@ -112,10 +120,14 @@ beforeEach(() => {
   resumeRealtimeDeliveries();
   mockMarkChatUnread.mockReset().mockResolvedValue({});
   mockMarkChatRead.mockReset().mockResolvedValue({});
-  mockPrivateApiEnabled = true;
+  mockServerPrivateApiEnabled = true;
+  mockServerRcsEnabled = false;
   mockSendReadReceipts = true;
   mockSettingsHydrated = true;
-  mockHydrate.mockClear();
+  mockHydrate.mockReset().mockImplementation(async () => {
+    mockSettingsHydrated = true;
+  });
+  (getSocket as jest.Mock).mockReset().mockReturnValue(null);
   (ensureDatabase as jest.Mock).mockClear();
   (getDatabase as jest.Mock).mockClear();
 });
@@ -124,8 +136,33 @@ afterEach(() => {
   resumeRealtimeDeliveries();
 });
 
+describe('sendTyping', () => {
+  it('preserves supported RCS start-typing while skipping unsupported RCS stop-typing', () => {
+    const emit = jest.fn();
+    (getSocket as jest.Mock).mockReturnValue({ emit });
+    mockServerPrivateApiEnabled = false;
+    mockServerRcsEnabled = true;
+
+    sendTyping('RCS;-;+15551234567', true);
+    sendTyping('RCS;-;+15551234567', false);
+
+    expect(emit).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledWith('start-typing', { guid: 'RCS;-;+15551234567' });
+  });
+
+  it('does not let stale helper capability restore iMessage typing', () => {
+    const emit = jest.fn();
+    (getSocket as jest.Mock).mockReturnValue({ emit });
+    mockServerPrivateApiEnabled = true;
+
+    sendTyping('iMessage;-;+15551234567', true);
+
+    expect(emit).not.toHaveBeenCalled();
+  });
+});
+
 describe('markUnread', () => {
-  it('clears the local read marker AND fires the server call for an iMessage chat', async () => {
+  it('clears the local read marker without a remote iMessage call', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
     const guid = 'iMessage;-;+15551234567';
@@ -134,10 +171,10 @@ describe('markUnread', () => {
     await markUnread(guid);
 
     expect(readMarker(raw, guid)).toBeNull();
-    expect(mockMarkChatUnread).toHaveBeenCalledWith({ __http: true }, guid);
+    expect(mockMarkChatUnread).not.toHaveBeenCalled();
   });
 
-  it('a REJECTING server call neither throws nor reverts the local flip', async () => {
+  it('never reaches a configured remote iMessage failure', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
     const guid = 'iMessage;-;+15551234567';
@@ -146,7 +183,7 @@ describe('markUnread', () => {
 
     await expect(markUnread(guid)).resolves.toBeUndefined();
 
-    expect(mockMarkChatUnread).toHaveBeenCalledTimes(1);
+    expect(mockMarkChatUnread).not.toHaveBeenCalled();
     expect(readMarker(raw, guid)).toBeNull(); // local flip kept
   });
 
@@ -192,7 +229,7 @@ describe('markUnread', () => {
       await expect(action).resolves.toBeUndefined();
 
       expect(readState(raw, guid)).toEqual({ marker: null, markedUnreadAt: 4_000 });
-      expect(mockMarkChatUnread).toHaveBeenCalledWith({ __http: true }, guid);
+      expect(mockMarkChatUnread).not.toHaveBeenCalled();
     } finally {
       now.mockRestore();
       releaseNeighbour.resolve();
@@ -258,21 +295,18 @@ describe('markUnread', () => {
     expect(getDatabase).not.toHaveBeenCalled();
   });
 
-  it('hydrates the feature settings before reading the Private API toggle (headless defaults)', async () => {
+  it('fails closed on missing server capability without trusting device-local defaults', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
     const guid = 'iMessage;-;+15551234567';
     await seedChat(db, guid);
-    // Headless: no UI boot effect ran, so the store is un-hydrated and at its (all-on) defaults.
+    // Headless: neither UI hydration nor a server-info response has run yet.
     mockSettingsHydrated = false;
-    mockHydrate.mockImplementationOnce(async () => {
-      mockSettingsHydrated = true;
-      mockPrivateApiEnabled = false; // what the user actually chose
-    });
+    mockServerPrivateApiEnabled = false;
 
     await markUnread(guid);
 
-    expect(mockHydrate).toHaveBeenCalledTimes(1);
+    expect(mockHydrate).not.toHaveBeenCalled();
     expect(mockMarkChatUnread).not.toHaveBeenCalled();
     expect(readMarker(raw, guid)).toBeNull(); // the local flip still lands
   });
@@ -292,12 +326,12 @@ describe('markUnread', () => {
     expect(mockMarkChatUnread).not.toHaveBeenCalled();
   });
 
-  it('the Private API master toggle OFF skips the server call (local flip still lands)', async () => {
+  it('server Private API false skips the server call (local flip still lands)', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
     const guid = 'iMessage;-;+15551234567';
     await seedChat(db, guid);
-    mockPrivateApiEnabled = false;
+    mockServerPrivateApiEnabled = false;
 
     await markUnread(guid);
 
@@ -307,10 +341,38 @@ describe('markUnread', () => {
 });
 
 describe('markRead', () => {
+  it('preserves killed-process RCS reads before session ServerInfo has hydrated', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    const guid = 'RCS;-;+15551234567';
+    const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
+    await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
+    const chatId = (await getChatIdByGuid(db, guid))!;
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'rcs-m1', text: 'hi', isFromMe: false, dateCreated: 1000 })],
+      () => chatId,
+      hm,
+    );
+    mockServerPrivateApiEnabled = false;
+    mockServerRcsEnabled = false;
+    const killedProcessHttp = { __http: 'vault' } as never;
+    const resolveReceiptTransport = jest.fn(async () => ({
+      http: killedProcessHttp,
+      isCurrent: () => true,
+    }));
+
+    await markRead(guid, undefined, { resolveReceiptTransport });
+
+    expect(readMarker(raw, guid)).toBe('rcs-m1');
+    expect(resolveReceiptTransport).toHaveBeenCalledTimes(1);
+    expect(mockMarkChatRead).toHaveBeenCalledWith(killedProcessHttp, guid);
+  });
+
   it('advances the marker via the LAZY ensureDatabase() — the killed-app tray button path', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
-    const guid = 'iMessage;-;+15551234567';
+    const guid = 'RCS;-;+15551234567';
     const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
     await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
     const chatId = (await getChatIdByGuid(db, guid))!;
@@ -332,7 +394,7 @@ describe('markRead', () => {
   it('hydrates the settings first, so a user who turned read receipts off sends none', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
-    const guid = 'iMessage;-;+15551234567';
+    const guid = 'RCS;-;+15551234567';
     const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
     await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
     const chatId = (await getChatIdByGuid(db, guid))!;
@@ -395,7 +457,7 @@ describe('markRead', () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
     mockSettingsHydrated = false;
-    const guid = 'iMessage;-;+15550000000';
+    const guid = 'RCS;-;+15550000000';
     const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
     await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
 
@@ -409,7 +471,7 @@ describe('markRead', () => {
   it('keeps the local marker when killed-process receipt authorization is unavailable', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
-    const guid = 'iMessage;-;+15551234567';
+    const guid = 'RCS;-;+15551234567';
     const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
     await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
     const chatId = (await getChatIdByGuid(db, guid))!;
@@ -437,7 +499,7 @@ describe('markRead', () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
     mockSettingsHydrated = false;
-    const guid = 'iMessage;-;+15551234567';
+    const guid = 'RCS;-;+15551234567';
     const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
     const chatIds = await upsertChats(
       db,
@@ -561,7 +623,7 @@ describe('markRead', () => {
   it('keeps teardown waiting for a read receipt and disowns its late A-account completion', async () => {
     const accountA = await createTestDb();
     const accountB = await createTestDb();
-    const guid = 'iMessage;-;+15551234567';
+    const guid = 'RCS;-;+15551234567';
     mockDb = accountA.db;
 
     for (const { db, messageGuid } of [

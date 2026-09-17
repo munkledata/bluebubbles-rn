@@ -408,13 +408,16 @@ includes:
 - [ ] Fresh install and upgrade from the latest shipped build both boot and preserve intended data.
       Only the Play v66→v67 update, boot, and visible session continuity passed; the fresh-install half
       and private data/cache invariants remain open.
-- [ ] Connect, full sync, send, receive, edit/unsend, react, attach, retry, search, and local delete work.
+- [ ] Connect and full sync work; existing-chat iMessage plain text/local read-unread-delete and
+      supported RCS text/contact/media/whole-message reaction, retry, search, and receive flows pass.
+      Retired helper-backed edit/unsend/reply/attachment actions remain absent.
 - [ ] After v67 has a fresh scoped V3 enrollment against the isolated compatible staged server in
       the Internal Testing runbook, kill with `adb shell am kill <package>` (never `am force-stop`
       for delivery testing); a compatible per-device-encrypted FCM push writes to the encrypted DB
       and posts the expected notification.
-- [ ] Notification privacy transitions, actions, reminders, channels, killed/background/foreground
-      taps, and FaceTime alerts pass with no stale private system state.
+- [ ] Notification privacy transitions, supported actions, reminders, channels, and
+      killed/background/foreground taps pass. An upgrade removes any stale FaceTime notification,
+      route, or channel state and never recreates call presentation.
 - [ ] App Lock, generic locked notifications, Android Recents, biometric resume, account switch, and
       forget/wipe pass. Only an ordinary-kill relaunch, a failed first biometric attempt, and a
       successful owner-authenticated retry back to Messages passed on v67.
@@ -522,7 +525,7 @@ These four DEV results stop at the then-current migration head `0038`; they do n
       contain the required Google Maps terms and privacy destinations.
 - [ ] Contacts, foreground service, and notification declarations have current Play-policy
       justification; `USE_FULL_SCREEN_INTENT` and inbound share-target declarations are absent, and
-      incoming-call copy promises only heads-up capability.
+      store copy advertises no incoming-call feature.
 - [ ] Play pre-launch/device-catalog results have been reviewed; unsupported device classes are
       excluded or clearly documented.
 - [ ] Internal testing receives the hashed candidate first; rollout follows the rehearsed staged plan.

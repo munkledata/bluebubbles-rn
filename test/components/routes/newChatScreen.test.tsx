@@ -89,7 +89,6 @@ jest.mock('@/services/send', () => ({ sendImages: jest.fn() }));
 jest.mock('@ui/hooks/useUnsavedChangesGuard', () => ({
   useUnsavedChangesGuard: () => ({ navigateWithoutPrompt: (navigate: () => void) => navigate() }),
 }));
-jest.mock('@core/api/endpoints/handles', () => ({ checkIMessageAvailability: jest.fn() }));
 jest.mock('@db/repositories', () => ({
   ...jest.requireActual('@db/repositories'),
   searchContactAddresses: jest.fn(),
@@ -106,8 +105,6 @@ import { sendImages } from '@/services/send';
 import { presentSendIssue } from '@ui/conversations/sendNotices';
 // eslint-disable-next-line import/first
 import { searchContactAddresses, findChatByParticipantAddresses } from '@db/repositories';
-// eslint-disable-next-line import/first
-import { checkIMessageAvailability } from '@core/api/endpoints/handles';
 // eslint-disable-next-line import/first
 import { useDialogStore } from '@ui/dialog/dialogStore';
 // eslint-disable-next-line import/first
@@ -126,7 +123,6 @@ const mockCreateNewChat = createNewChat as jest.Mock;
 const mockSendImages = sendImages as jest.Mock;
 const mockSearchContacts = searchContactAddresses as jest.Mock;
 const mockFindChat = findChatByParticipantAddresses as jest.Mock;
-const mockCheckAvailability = checkIMessageAvailability as jest.Mock;
 const clearShareIntentStore = useShareIntentStore.getState().clear;
 
 const PRIVATE_NAME = 'new-chat-private-contact-7f31';
@@ -142,9 +138,14 @@ const FORWARD_URI = 'file:///data/doc/attachments/new-chat-private-forward-e901.
 const FORWARD_FILENAME = 'new-chat-private-forward-e901.jpg';
 const FORWARD_NONCE = '44444444-4444-4444-8444-444444444444';
 const PRIVATE_EXISTING_GUID = 'iMessage;-;new-chat-private-existing-2b4e';
-const PRIVATE_CREATED_GUID = 'iMessage;-;new-chat-private-created-d913';
-const SECOND_CREATED_GUID = 'iMessage;-;new-chat-current-created-471a';
+const PRIVATE_CREATED_GUID = 'RCS;-;new-chat-private-created-d913';
+const SECOND_CREATED_GUID = 'RCS;-;new-chat-current-created-471a';
 const ACCOUNT_CHANGED_COPY = 'Account changed. Go back and start a new message again.';
+const rcsServerInfo = ServerInfo.parse({
+  version: '1.9.0',
+  private_api: true,
+  rcs: true,
+});
 let keyboardDismissSpy: jest.SpiedFunction<typeof Keyboard.dismiss>;
 
 interface Deferred<T> {
@@ -259,14 +260,11 @@ beforeEach(() => {
   mockSendImages.mockReset().mockResolvedValue([]);
   mockSearchContacts.mockReset().mockResolvedValue([] as ContactPick[]);
   mockFindChat.mockReset().mockResolvedValue(null);
-  mockCreateNewChat.mockReset().mockResolvedValue('iMessage;-;+15551234567');
-  // Default: no probe resolves (helper down) → chips stay neutral, service stays iMessage.
-  mockCheckAvailability.mockReset().mockRejectedValue(new Error('no helper'));
+  mockCreateNewChat.mockReset().mockResolvedValue('RCS;-;+15551234567');
   useDialogStore.setState({ current: null, queue: [] });
   useShareIntentStore.setState({ text: null, files: [], clear: clearShareIntentStore });
   keyboardDismissSpy = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => undefined);
-  // Default: no server capabilities → the RCS chip is hidden.
-  useSessionStore.setState({ serverInfo: null });
+  useSessionStore.setState({ serverInfo: rcsServerInfo });
 });
 
 afterEach(() => {
@@ -288,13 +286,14 @@ async function addRecipient(address: string): Promise<void> {
   });
 }
 
-describe('NewChatScreen — iMessage availability + auto-SMS', () => {
-  it('auto-switches to SMS when a recipient is confirmed iMessage-unavailable', async () => {
-    mockCheckAvailability.mockResolvedValue(false);
+describe('NewChatScreen — RCS-only creation boundary', () => {
+  it('creates one RCS conversation when the authoritative capability is available', async () => {
     await renderWithTheme(<NewChatScreen />);
+    expect(screen.getByText(/New conversations use RCS/)).toBeTruthy();
+    expect(screen.queryByText('iMessage')).toBeNull();
+    expect(screen.queryByText('SMS')).toBeNull();
+    expect(screen.queryByRole('radio')).toBeNull();
     await addRecipient('+15551230000');
-    // The chip flips to its SMS-only label once the probe resolves.
-    await screen.findByLabelText('Remove +15551230000 (SMS only)');
     await act(async () => {
       fireEvent.changeText(screen.getByPlaceholderText('Message'), 'hi');
     });
@@ -302,106 +301,14 @@ describe('NewChatScreen — iMessage availability + auto-SMS', () => {
       fireEvent.press(screen.getByText('Start'));
     });
     await waitFor(() =>
-      expect(mockCreateNewChat).toHaveBeenCalledWith(
-        ['+15551230000'],
-        'hi',
-        'SMS',
-        expect.anything(),
-      ),
+      expect(mockCreateNewChat).toHaveBeenCalledWith(['+15551230000'], 'hi', expect.anything()),
     );
   });
 
-  it('keeps the manual iMessage choice even after a later probe resolves SMS-only', async () => {
-    mockCheckAvailability.mockResolvedValue(false);
-    await renderWithTheme(<NewChatScreen />);
-    await addRecipient('+15551230000');
-    await screen.findByLabelText('Remove +15551230000 (SMS only)');
-    // User overrides back to iMessage.
-    await act(async () => {
-      fireEvent.press(screen.getByText('iMessage'));
-    });
-    // A second recipient's probe resolves later → the auto-effect re-runs but must NOT clobber.
-    await addRecipient('+15559990000');
-    await screen.findByLabelText('Remove +15559990000 (SMS only)');
-    await act(async () => {
-      fireEvent.changeText(screen.getByPlaceholderText('Message'), 'hi');
-    });
-    await act(async () => {
-      fireEvent.press(screen.getByText('Start'));
-    });
-    await waitFor(() =>
-      expect(mockCreateNewChat).toHaveBeenCalledWith(
-        ['+15551230000', '+15559990000'],
-        'hi',
-        'iMessage',
-        expect.anything(),
-      ),
-    );
-  });
-
-  it('probes each address once and applies an in-flight result across recipient changes', async () => {
-    // Never-auto-resolving probes: capture the resolvers so we control WHEN each lands.
-    const resolvers: Array<(available: boolean) => void> = [];
-    mockCheckAvailability.mockImplementation(
-      () =>
-        new Promise<boolean>((resolve) => {
-          resolvers.push(resolve);
-        }),
-    );
+  it('blocks a multi-recipient create and unblocks after returning to one recipient', async () => {
     await renderWithTheme(<NewChatScreen />);
     await addRecipient('+15551230000');
     await addRecipient('+15559990000');
-    // One probe per address — the recipients change must NOT re-issue the first (still
-    // in-flight) probe.
-    expect(mockCheckAvailability).toHaveBeenCalledTimes(2);
-    // The first probe resolves AFTER the recipient list changed — its result still lands.
-    await act(async () => {
-      resolvers[0]!(false);
-    });
-    await screen.findByLabelText('Remove +15551230000 (SMS only)');
-  });
-});
-
-describe('NewChatScreen — RCS service option (server-gated)', () => {
-  const rcsServerInfo = ServerInfo.parse({ version: '1.9.0', rcs: true });
-
-  it('hides the RCS chip when the server lacks the capability', async () => {
-    await renderWithTheme(<NewChatScreen />);
-    expect(screen.getByText('SMS')).toBeTruthy(); // the service row rendered…
-    expect(screen.queryByText('RCS')).toBeNull(); // …without an RCS chip
-  });
-
-  it('shows the RCS chip when the server advertises RCS and sends with service=RCS', async () => {
-    useSessionStore.setState({ serverInfo: rcsServerInfo });
-    await renderWithTheme(<NewChatScreen />);
-    await addRecipient('+15551230000');
-    await act(async () => {
-      fireEvent.press(screen.getByText('RCS'));
-    });
-    await act(async () => {
-      fireEvent.changeText(screen.getByPlaceholderText('Message'), 'hi');
-    });
-    await act(async () => {
-      fireEvent.press(screen.getByText('Start'));
-    });
-    await waitFor(() =>
-      expect(mockCreateNewChat).toHaveBeenCalledWith(
-        ['+15551230000'],
-        'hi',
-        'RCS',
-        expect.anything(),
-      ),
-    );
-  });
-
-  it('blocks Start for a multi-recipient RCS chat (1:1 only) and unblocks on removal', async () => {
-    useSessionStore.setState({ serverInfo: rcsServerInfo });
-    await renderWithTheme(<NewChatScreen />);
-    await addRecipient('+15551230000');
-    await addRecipient('+15559990000');
-    await act(async () => {
-      fireEvent.press(screen.getByText('RCS'));
-    });
     // The inline 1:1 note appears and Start is inert.
     await screen.findByText(/one-to-one/);
     await act(async () => {
@@ -420,13 +327,30 @@ describe('NewChatScreen — RCS service option (server-gated)', () => {
       fireEvent.press(screen.getByText('Start'));
     });
     await waitFor(() =>
-      expect(mockCreateNewChat).toHaveBeenCalledWith(
-        ['+15551230000'],
-        'hi',
-        'RCS',
-        expect.anything(),
-      ),
+      expect(mockCreateNewChat).toHaveBeenCalledWith(['+15551230000'], 'hi', expect.anything()),
     );
+  });
+
+  it('does not restore helper creation from an injected private_api:true flag', async () => {
+    useSessionStore.setState({
+      serverInfo: {
+        ...ServerInfo.parse({ version: '1.9.0', rcs: false }),
+        private_api: true,
+      },
+    });
+    await renderWithTheme(<NewChatScreen />);
+
+    expect(screen.queryByRole('radio')).toBeNull();
+    expect(screen.queryByText('iMessage')).toBeNull();
+    expect(screen.queryByText('SMS')).toBeNull();
+    expect(screen.getByText(/requires an available RCS bridge/)).toBeTruthy();
+    await addRecipient('+15551230000');
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Message'), 'hi');
+      fireEvent.press(screen.getByText('Start'));
+    });
+
+    expect(mockCreateNewChat).not.toHaveBeenCalled();
   });
 });
 
@@ -451,20 +375,33 @@ describe('NewChatScreen — forward prefill', () => {
     mockSearchParams = { forwardAttachmentHandoff: nonce };
     await renderWithTheme(<NewChatScreen />);
 
-    // The attachment tray renders the staged file (its remove affordance is the stable handle),
-    // and the message placeholder flips to optional.
+    // The attachment tray renders the staged file (its remove affordance is the stable handle).
     expect(screen.getByLabelText('Remove attachment')).toBeTruthy();
-    expect(screen.getByPlaceholderText('Add a message (optional)')).toBeTruthy();
+    expect(screen.getByPlaceholderText('Message')).toBeTruthy();
 
-    // Attachment-only forward: Start is enabled with no typed message.
+    // The create endpoint requires initial text, so a staged file alone cannot start a thread.
     await addRecipient('+15551234567');
+    await act(async () => {
+      fireEvent.press(screen.getByText('Start'));
+    });
+    expect(mockCreateNewChat).not.toHaveBeenCalled();
+    expect(mockSendImages).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Message'), 'Forwarded attachment');
+    });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Start' }).props.accessibilityState).toEqual({
+        disabled: false,
+      }),
+    );
     await act(async () => {
       fireEvent.press(screen.getByText('Start'));
     });
     await waitFor(() =>
       expect(mockSendImages).toHaveBeenCalledWith(
         {
-          chatGuid: 'iMessage;-;+15551234567',
+          chatGuid: 'RCS;-;+15551234567',
           images: [{ uri, name: 'IMG_0001.jpeg', mimeType: 'image/jpeg', size: 1234 }],
         },
         expect.objectContaining({ isCurrent: expect.any(Function) }),
@@ -528,7 +465,7 @@ describe('NewChatScreen — shared-in prefill', () => {
 
     await renderWithTheme(<NewChatScreen />);
 
-    expect(screen.getByPlaceholderText('Add a message (optional)').props.value).toBe('Shared note');
+    expect(screen.getByPlaceholderText('Message').props.value).toBe('Shared note');
     expect(screen.getByLabelText('Remove attachment')).toBeTruthy();
     expect(useShareIntentStore.getState().text).toBeNull();
     expect(useShareIntentStore.getState().files).toEqual([]);
@@ -557,14 +494,11 @@ describe('NewChatScreen — recipient entry + create', () => {
       expect(mockCreateNewChat).toHaveBeenCalledWith(
         ['+15551234567'],
         'Hello there',
-        'iMessage',
         expect.anything(),
       ),
     );
     await waitFor(() =>
-      expect(mockReplace).toHaveBeenCalledWith(
-        `/chat/${encodeURIComponent('iMessage;-;+15551234567')}`,
-      ),
+      expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent('RCS;-;+15551234567')}`),
     );
   });
 
@@ -607,12 +541,8 @@ describe('NewChatScreen — recipient entry + create', () => {
     expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent(PRIVATE_EXISTING_GUID)}`);
     mockReplace.mockClear();
 
-    await fireEvent.press(screen.getByRole('radio', { name: 'Send as SMS' }));
     await act(async () => {
-      fireEvent.changeText(
-        screen.getByPlaceholderText('Add a message (optional)'),
-        PRIVATE_MESSAGE,
-      );
+      fireEvent.changeText(screen.getByPlaceholderText('Message'), PRIVATE_MESSAGE);
     });
     await fireEvent.press(screen.getByText('Start'));
 
@@ -620,11 +550,10 @@ describe('NewChatScreen — recipient entry + create', () => {
       expect(mockCreateNewChat).toHaveBeenCalledWith(
         [PRIVATE_ADDRESS],
         PRIVATE_MESSAGE,
-        'SMS',
         expect.anything(),
       ),
     );
-    const accountLease = mockCreateNewChat.mock.calls[0]?.[3];
+    const accountLease = mockCreateNewChat.mock.calls[0]?.[2];
     await waitFor(() =>
       expect(mockSendImages).toHaveBeenCalledWith(
         { chatGuid: PRIVATE_CREATED_GUID, images: [sharedPrivateImage()] },
@@ -657,7 +586,6 @@ describe('NewChatScreen — account ownership and handoff lifetime', () => {
     expect(release).not.toHaveBeenCalled();
     expect(mockSearchContacts).toHaveBeenCalledTimes(1);
     expect(mockSearchContacts).toHaveBeenCalledWith(undefined, '', 30);
-    expect(mockCheckAvailability).not.toHaveBeenCalled();
     expect(mockFindChat).not.toHaveBeenCalled();
     expect(mockCreateNewChat).not.toHaveBeenCalled();
     expect(mockSendImages).not.toHaveBeenCalled();
@@ -703,11 +631,11 @@ describe('NewChatScreen — account ownership and handoff lifetime', () => {
     const oldToInput = screen.getByPlaceholderText('Add another…');
     const oldToChange = oldToInput.props.onChangeText as (text: string) => void;
     const oldToSubmit = oldToInput.props.onSubmitEditing as () => void;
-    const oldMessageChange = screen.getByPlaceholderText('Add a message (optional)').props
-      .onChangeText as (text: string) => void;
+    const oldMessageChange = screen.getByPlaceholderText('Message').props.onChangeText as (
+      text: string,
+    ) => void;
     const oldChip = retainConfiguredPress(screen.getByLabelText(`Remove ${PRIVATE_NAME}`));
     const oldAttachment = retainConfiguredPress(screen.getByLabelText('Remove attachment'));
-    const oldSms = retainConfiguredPress(screen.getByRole('radio', { name: 'Send as SMS' }));
     const oldSuggestion = retainConfiguredPress(await screen.findByText(SECOND_NAME));
     const oldExisting = retainConfiguredPress(screen.getByText(/Open it/));
     const oldStart = retainConfiguredPress(screen.getByRole('button', { name: 'Start' }));
@@ -725,7 +653,6 @@ describe('NewChatScreen — account ownership and handoff lifetime', () => {
       oldMessageChange('retired-A-message-must-not-land');
       oldChip();
       oldAttachment();
-      oldSms();
       oldSuggestion();
       oldExisting();
       oldStart();
@@ -746,67 +673,17 @@ describe('NewChatScreen — account ownership and handoff lifetime', () => {
     await fireEvent.press(freshExisting);
     expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent(PRIVATE_EXISTING_GUID)}`);
     mockReplace.mockClear();
-    await fireEvent.press(screen.getByRole('radio', { name: 'Send as SMS' }));
     await fireEvent.press(screen.getByRole('button', { name: 'Start' }));
     await waitFor(() =>
       expect(mockCreateNewChat).toHaveBeenCalledWith(
         [SECOND_ADDRESS],
         SECOND_MESSAGE,
-        'SMS',
         expect.anything(),
       ),
     );
     expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent(SECOND_CREATED_GUID)}`);
     expect(currentView.toJSON()).not.toBeNull();
   });
-
-  it.each(['success', 'rejection'] as const)(
-    'keeps a fresh account availability result when retired A settles with %s',
-    async (outcome) => {
-      const oldProbe = deferred<boolean>();
-      const freshProbe = deferred<boolean>();
-      mockCheckAvailability
-        .mockReturnValueOnce(oldProbe.promise)
-        .mockReturnValueOnce(freshProbe.promise);
-      mockSearchParams = { forwardText: PRIVATE_MESSAGE };
-      mockCreateNewChat.mockResolvedValue(SECOND_CREATED_GUID);
-      const oldView = await renderWithTheme(<NewChatScreen />);
-      await addRecipient(PRIVATE_ADDRESS);
-      await waitFor(() => expect(mockCheckAvailability).toHaveBeenCalledTimes(1));
-
-      await act(async () => {
-        await pauseRealtimeDeliveries();
-      });
-      expectAccountChangedComposer(oldView.toJSON());
-      resumeRealtimeDeliveries();
-      const currentView = await renderWithTheme(<NewChatScreen />);
-      await addRecipient(PRIVATE_ADDRESS);
-      await waitFor(() => expect(mockCheckAvailability).toHaveBeenCalledTimes(2));
-      await act(async () => {
-        freshProbe.resolve(false);
-        await freshProbe.promise;
-      });
-      expect(screen.getByLabelText(`Remove ${PRIVATE_ADDRESS} (SMS only)`)).toBeTruthy();
-
-      await act(async () => {
-        if (outcome === 'success') oldProbe.resolve(true);
-        else oldProbe.reject(new Error('retired-availability-error-c8c1'));
-        await oldProbe.promise.catch(() => undefined);
-      });
-      expect(screen.getByLabelText(`Remove ${PRIVATE_ADDRESS} (SMS only)`)).toBeTruthy();
-      await fireEvent.press(screen.getByRole('button', { name: 'Start' }));
-      await waitFor(() =>
-        expect(mockCreateNewChat).toHaveBeenCalledWith(
-          [PRIVATE_ADDRESS],
-          PRIVATE_MESSAGE,
-          'SMS',
-          expect.anything(),
-        ),
-      );
-      expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent(SECOND_CREATED_GUID)}`);
-      expect(currentView.toJSON()).not.toBeNull();
-    },
-  );
 
   it.each(['success', 'rejection'] as const)(
     'keeps fresh B existing-chat routing when retired A lookup settles with %s',
@@ -863,7 +740,7 @@ describe('NewChatScreen — account ownership and handoff lifetime', () => {
       await addRecipient(PRIVATE_ADDRESS);
       await fireEvent.press(screen.getByRole('button', { name: 'Start' }));
       await waitFor(() => expect(mockSendImages).toHaveBeenCalledTimes(1));
-      const oldLease = mockCreateNewChat.mock.calls[0]?.[3];
+      const oldLease = mockCreateNewChat.mock.calls[0]?.[2];
 
       await act(async () => {
         await pauseRealtimeDeliveries();
@@ -894,7 +771,7 @@ describe('NewChatScreen — account ownership and handoff lifetime', () => {
       await addRecipient(SECOND_ADDRESS);
       await fireEvent.press(screen.getByRole('button', { name: 'Start' }));
       await waitFor(() => expect(mockSendImages).toHaveBeenCalledTimes(2));
-      const currentLease = mockCreateNewChat.mock.calls[1]?.[3];
+      const currentLease = mockCreateNewChat.mock.calls[1]?.[2];
       expect(currentLease).not.toBe(oldLease);
       expect(mockSendImages).toHaveBeenLastCalledWith(
         { chatGuid: SECOND_CREATED_GUID, images: [sharedPrivateImage()] },
@@ -1106,7 +983,7 @@ describe('NewChatScreen — create failure', () => {
         fireEvent.press(screen.getByText('Start'));
       });
       await waitFor(() => expect(mockCreateNewChat).toHaveBeenCalledTimes(1));
-      const accountLease = mockCreateNewChat.mock.calls[0]?.[3] as { isCurrent: () => boolean };
+      const accountLease = mockCreateNewChat.mock.calls[0]?.[2] as { isCurrent: () => boolean };
       expect(accountLease.isCurrent()).toBe(true);
 
       await act(async () => {
@@ -1158,7 +1035,6 @@ describe('NewChatScreen — Start works on a typed address that was never commit
       expect(mockCreateNewChat).toHaveBeenCalledWith(
         ['+15551234567'],
         'Hello there',
-        'iMessage',
         expect.anything(),
       ),
     );
@@ -1179,7 +1055,6 @@ describe('NewChatScreen — Start works on a typed address that was never commit
       expect(mockCreateNewChat).toHaveBeenCalledWith(
         ['someone@example.com'],
         'Hi',
-        'iMessage',
         expect.anything(),
       ),
     );

@@ -295,7 +295,7 @@ describe('ServerManagementScreen — status queries', () => {
     await renderScreen();
     expect(await screen.findByText('9.9.9')).toBeTruthy();
     expect(screen.getByText('26.0')).toBeTruthy();
-    expect(screen.getByText('Enabled')).toBeTruthy();
+    expect(screen.getByText('Retired in this release')).toBeTruthy();
     await waitFor(() =>
       expect(useSessionStore.getState().serverInfo?.server_version).toBe('9.9.9'),
     );

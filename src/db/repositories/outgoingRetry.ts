@@ -578,6 +578,7 @@ export async function listRetryableOutgoing(
   db: AppDatabase,
   now: number,
   limit?: number,
+  excludeRcs = false,
 ): Promise<RetryableOutgoing[]> {
   // SQLite's -1 means "all rows" for existing foreground callers. Any explicit invalid cap is a
   // safe empty run rather than an accidental unbounded headless drain.
@@ -589,6 +590,7 @@ export async function listRetryableOutgoing(
     WHERE attempts < ${OUTGOING_MAX_ATTEMPTS}
       AND next_retry_at <= ${now}
       AND (attempts >= 1 OR created_at <= ${now - OUTGOING_GRACE_MS})
+      AND (${excludeRcs ? 1 : 0} = 0 OR chat_guid NOT LIKE 'RCS;-;%')
     ORDER BY created_at ASC
     LIMIT ${rowLimit}`);
 }
@@ -607,6 +609,20 @@ export interface OutgoingSendClaim {
   readonly claimed: boolean;
   /** Present only for a row that was born in attempt-aware mode. */
   readonly attemptOwnerToken?: SendAttemptOwnerToken;
+  /** Exact claim identity used only to undo a send that lost capability before network start. */
+  readonly deferToken?: OutgoingSendClaimDeferToken;
+}
+
+export interface OutgoingSendClaimDeferToken {
+  readonly queueId: number;
+  readonly tempGuid: string;
+  readonly leaseUntil: number;
+  readonly previousAttempts: number;
+  readonly ownerGuid: string;
+  readonly ownerGeneration: number;
+  readonly previousSendState: string | null;
+  readonly previousError: number | null;
+  readonly previousErrorMessage: string | null;
 }
 
 export function claimOutgoingForSendWithinTransaction(
@@ -619,28 +635,44 @@ export function claimOutgoingForSendWithinTransaction(
     // Read AFTER acquiring the process-wide lock. A timestamp captured before a long queue wait
     // can make the two-minute lease expire as soon as it commits, allowing a second sender in.
     const now = clock();
+    const leaseUntil = now + OUTGOING_LEASE_MS;
     const rows = await db.all<{
       tempGuid: string;
       chatGuid: string;
       kind: string;
       payload: string;
+      attempts: number;
     }>(sql`
-        UPDATE outgoing_queue SET next_retry_at = ${now + OUTGOING_LEASE_MS}
+        UPDATE outgoing_queue SET next_retry_at = ${leaseUntil}
         WHERE id = ${id} AND next_retry_at <= ${now}
-        RETURNING temp_guid AS tempGuid, chat_guid AS chatGuid, kind, payload`);
+        RETURNING temp_guid AS tempGuid, chat_guid AS chatGuid, kind, payload, attempts`);
     const claimed = rows[0];
     if (!claimed) return { claimed: false };
 
-    const direct = await db.all<{ guid: string; generation: number }>(sql`
-      SELECT guid, attempt_owner_generation AS generation
+    const direct = await db.all<{
+      guid: string;
+      generation: number;
+      sendState: string | null;
+      error: number | null;
+      errorMessage: string | null;
+    }>(sql`
+      SELECT guid, attempt_owner_generation AS generation, send_state AS sendState,
+             error, error_message AS errorMessage
         FROM messages
        WHERE guid = ${claimed.tempGuid}
        LIMIT 1
     `);
     const aliased = direct[0]
       ? []
-      : await db.all<{ guid: string; generation: number }>(sql`
-          SELECT m.guid, m.attempt_owner_generation AS generation
+      : await db.all<{
+          guid: string;
+          generation: number;
+          sendState: string | null;
+          error: number | null;
+          errorMessage: string | null;
+        }>(sql`
+          SELECT m.guid, m.attempt_owner_generation AS generation,
+                 m.send_state AS sendState, m.error, m.error_message AS errorMessage
             FROM message_guid_aliases a
             JOIN messages m ON m.guid = a.canonical_guid
            WHERE a.alias_guid = ${claimed.tempGuid}
@@ -695,7 +727,20 @@ export function claimOutgoingForSendWithinTransaction(
         .update(messages)
         .set({ sendState: 'sending', error: 0, errorMessage: null })
         .where(eq(messages.guid, owner.guid));
-      return { claimed: true };
+      return {
+        claimed: true,
+        deferToken: {
+          queueId: id,
+          tempGuid: claimed.tempGuid,
+          leaseUntil,
+          previousAttempts: claimed.attempts,
+          ownerGuid: owner.guid,
+          ownerGeneration: 0,
+          previousSendState: owner.sendState,
+          previousError: owner.error,
+          previousErrorMessage: owner.errorMessage,
+        },
+      };
     }
     if (owner.generation >= MAX_SEND_ATTEMPT_OWNER_GENERATION) {
       throw new Error('send attempt ownership generation exhausted');
@@ -719,7 +764,74 @@ export function claimOutgoingForSendWithinTransaction(
     return {
       claimed: true,
       attemptOwnerToken: { generation: advanced[0].generation },
+      deferToken: {
+        queueId: id,
+        tempGuid: claimed.tempGuid,
+        leaseUntil,
+        previousAttempts: claimed.attempts,
+        ownerGuid: owner.guid,
+        ownerGeneration: advanced[0].generation,
+        previousSendState: owner.sendState,
+        previousError: owner.error,
+        previousErrorMessage: owner.errorMessage,
+      },
     };
+  });
+}
+
+/**
+ * Undo an automatic claim only when its capability vanished before any request started.
+ * Generation is deliberately never decremented: that keeps delayed older acknowledgements stale.
+ */
+export function deferOutgoingSendClaimWithinTransaction(
+  context: DbTransactionContext,
+  token: OutgoingSendClaimDeferToken,
+): Promise<boolean> {
+  return runInTransactionContext(context, async (db) => {
+    const released = await db.all<{ id: number }>(sql`
+      UPDATE outgoing_queue
+         SET next_retry_at = 0
+       WHERE id = ${token.queueId}
+         AND temp_guid = ${token.tempGuid}
+         AND next_retry_at = ${token.leaseUntil}
+         AND attempts = ${token.previousAttempts}
+      RETURNING id
+    `);
+    if (!released[0]) return false;
+
+    const restored =
+      token.ownerGeneration > 0
+        ? await db.all<{ id: number }>(sql`
+            UPDATE messages
+               SET send_state = ${token.previousSendState},
+                   error = ${token.previousError},
+                   error_message = ${token.previousErrorMessage},
+                   attempt_owner_pending = 0
+             WHERE guid = ${token.ownerGuid}
+               AND send_state = 'sending'
+               AND error = 0
+               AND error_message IS NULL
+               AND attempt_owner_generation = ${token.ownerGeneration}
+               AND attempt_owner_pending = 1
+            RETURNING id
+          `)
+        : await db.all<{ id: number }>(sql`
+            UPDATE messages
+               SET send_state = ${token.previousSendState},
+                   error = ${token.previousError},
+                   error_message = ${token.previousErrorMessage}
+             WHERE guid = ${token.ownerGuid}
+               AND send_state = 'sending'
+               AND error = 0
+               AND error_message IS NULL
+               AND attempt_owner_generation = 0
+               AND attempt_owner_pending = 0
+            RETURNING id
+          `);
+    if (!restored[0]) {
+      throw new Error('outgoing send claim changed before capability deferral');
+    }
+    return true;
   });
 }
 

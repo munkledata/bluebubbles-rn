@@ -1,6 +1,6 @@
 /**
  * ContactSuggestionList (src/ui/ContactSuggestionList.tsx) — the shared tappable suggestion
- * rows under a recipient input (new-chat, FaceTime dialer). Locks in:
+ * rows under a recipient input such as new chat. Locks in:
  *   - each pick renders its name with the address as a secondary line;
  *   - a nameless pick shows its address as the title (no secondary line);
  *   - tapping a row reports the full pick via `onPick`;

@@ -18,9 +18,9 @@ export function serverInfo(http: HttpClient, signal?: AbortSignal): Promise<Serv
 
 // ---- Server management (F-9) ----
 // Current Gator servers expose typed password-authenticated routes for statistics and health.
-// Older Gator builds used `POST /api/v1/admin/command`; those reads retain a narrow compatibility
-// fallback below, used only when the typed route itself returns 404. Restart/log operations still
-// use the dispatcher because they do not yet have equivalent password-authenticated typed routes.
+// The supported server has no `POST /api/v1/admin/command`. Remaining dispatcher-based reads are
+// isolated legacy compatibility paths pending separate FP-010/FP-011 cleanup, not current-server
+// functionality. Remote restart is intentionally unsupported and has no client wrapper.
 
 /**
  * Invoke a Gator admin-command channel over the password-authed dispatcher. The server wraps
@@ -59,24 +59,8 @@ async function typedRouteOrLegacy<T>(
   }
 }
 
-/** Current Gator has no password-authenticated remote restart or log-reading routes. */
+/** Remote restart stays local to the Mac; this client must not expose it. */
 export const SERVER_MANAGEMENT_SUPPORTED = false;
-
-/** Generic server ack — the restart channels return `{ success, ... }`. */
-const ServerAck = z.unknown();
-export type ServerAck = z.infer<typeof ServerAck>;
-
-/** Relaunch the macOS Messages/FaceTime helper apps ("Restart iMessage") via the dispatcher. */
-export const restartImessage = (http: HttpClient): Promise<ServerAck> =>
-  adminCommand(http, 'restart-imessage', ServerAck);
-
-/** Soft restart — reload the Private API helper and bounce the tunnel, no process exit. */
-export const softRestart = (http: HttpClient): Promise<ServerAck> =>
-  adminCommand(http, 'soft-restart', ServerAck);
-
-/** Hard restart — exit the daemon so launchd (KeepAlive) respawns it (briefly drops the link). */
-export const hardRestart = (http: HttpClient): Promise<ServerAck> =>
-  adminCommand(http, 'hard-restart', ServerAck);
 
 const UpdateCheck = z
   .object({
@@ -185,69 +169,6 @@ export function serverLogs(http: HttpClient, count = 500): Promise<string> {
 // Each read prefers the current typed password-authenticated route. The old dispatcher channel is
 // reached only after a typed-route 404, which preserves compatibility without masking auth,
 // transport, or response-validation failures.
-
-/** Messages + FaceTime Private-API helper connectivity. */
-const PrivateApiStatus = z
-  .object({
-    connected: z.boolean().nullish(),
-    enabled: z.boolean().nullish(),
-    ft_connected: z.boolean().nullish(),
-    ft_enabled: z.boolean().nullish(),
-  })
-  .loose()
-  .nullish();
-const TypedPrivateApiStatus = z
-  .object({
-    available: z.boolean(),
-    connected: z.boolean(),
-    enabled: z.boolean(),
-    unavailable_reason: z.literal('trusted_helper_unavailable').nullable(),
-    ft_available: z.boolean(),
-    ft_connected: z.boolean(),
-    ft_enabled: z.boolean(),
-    ft_unavailable_reason: z.literal('trusted_helper_unavailable').nullable(),
-  })
-  .strict()
-  .superRefine((status, context) => {
-    for (const target of [
-      {
-        available: status.available,
-        connected: status.connected,
-        reason: status.unavailable_reason,
-        path: 'unavailable_reason',
-      },
-      {
-        available: status.ft_available,
-        connected: status.ft_connected,
-        reason: status.ft_unavailable_reason,
-        path: 'ft_unavailable_reason',
-      },
-    ] as const) {
-      if (target.connected && !target.available) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: [target.path],
-          message: 'a connected helper must be available',
-        });
-      }
-      if ((target.reason === null) !== target.available) {
-        context.addIssue({
-          code: z.ZodIssueCode.custom,
-          path: [target.path],
-          message: 'availability and unavailable reason must agree',
-        });
-      }
-    }
-  });
-export type PrivateApiStatus = z.infer<typeof PrivateApiStatus>;
-export const privateApiStatus = (
-  http: HttpClient,
-  signal?: AbortSignal,
-): Promise<PrivateApiStatus> =>
-  typedRouteOrLegacy<PrivateApiStatus>(
-    () => http.get('/private-api/status', TypedPrivateApiStatus, { signal }),
-    () => adminCommand(http, 'get-private-api-status', PrivateApiStatus, undefined, signal),
-  );
 
 /** Server environment: version, platform, node, and Find My / macOS capability flags. */
 const ServerEnv = z

@@ -4,37 +4,29 @@ import {
   handoverScheduledTextToOutgoing,
   insertOutgoingTextWithinTransaction,
   explicitMessageTargetPart,
-  MessageTargetUnavailableError,
-  resolveMessageTarget,
-  resolveMessageTargetWithinTransaction,
   type ScheduledTextHandoverTransition,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { isRcsChatGuid } from '@utils/chat';
 import {
-  messageTargetCommitGuard,
-  messageTargetServerAuthorization,
+  RcsCapabilityUnavailableError,
   resolveRcsAttemptOwnership,
+  sendCapabilityCommitGuard,
   type RcsCapabilitySource,
 } from './rcsAttemptCapability';
-import {
-  handleSendFailure,
-  reconcileSendOutcome,
-  retireUnavailableMessageTarget,
-} from './sendOutcome';
+import { handleSendFailure, reconcileSendOutcome } from './sendOutcome';
 import { pinSendTransport } from './sendTransport';
 
 /**
- * Pick the send method (mirrors Flutter http_service): effects/replies/edits REQUIRE the
- * Private API; a plain text send falls back to AppleScript on a stock server (Private API
- * off) instead of failing outright.
+ * Pick the only supported iMessage text method in this release. Private API sends are retired
+ * unconditionally, including when an old server or stale callback still advertises the helper.
  */
-export function chooseSendMethod(
-  needsPrivateApi: boolean,
-  privateApiEnabled: boolean,
-): 'private-api' | 'apple-script' {
-  return needsPrivateApi || privateApiEnabled ? 'private-api' : 'apple-script';
+export function chooseSendMethod(needsPrivateApi: boolean): 'apple-script' {
+  if (needsPrivateApi) {
+    throw new Error('Private API message features were retired in this release.');
+  }
+  return 'apple-script';
 }
 
 /** "temp-{8 lowercase alnum}" — a client-generated id for optimistic sends. */
@@ -108,44 +100,36 @@ export async function sendTextMessage(
   if (target && isRcsChatGuid(args.chatGuid)) {
     throw new Error('This server cannot send an RCS threaded reply.');
   }
+  const needsPrivateApi =
+    target != null ||
+    args.effectId !== undefined ||
+    args.subject !== undefined ||
+    !!args.mentions?.length;
+  if (needsPrivateApi) {
+    throw new Error('Private API message features were retired in this release.');
+  }
   const tempGuid = generateTempGuid();
   const effectiveCommitGuard = scheduledHandover?.commitGuard ?? ordinaryCommitGuard;
   const transport = pinSendTransport(http, effectiveCommitGuard);
+  const rcsChat = isRcsChatGuid(args.chatGuid);
   const capability = await resolveRcsAttemptOwnership(
     transport.http,
     args.chatGuid,
     transport.admissionGuard,
     capabilitySource,
-    { requireServerInfo: target != null },
+    { requireServerInfo: rcsChat },
   );
-  const authorizedTarget = target
-    ? {
-        ...target,
-        serverAuthorization: messageTargetServerAuthorization(
-          capability.serverInfo,
-          transport.admissionGuard,
-        ),
-      }
-    : null;
-  const targetCommitGuard = messageTargetCommitGuard(
-    effectiveCommitGuard,
-    authorizedTarget?.serverAuthorization,
-  );
+  const capabilityGuard = sendCapabilityCommitGuard(transport.admissionGuard, capabilitySource);
+  if (rcsChat && capability.serverInfo?.rcs !== true) {
+    throw new RcsCapabilityUnavailableError(
+      'This server cannot send RCS messages without RCS support.',
+    );
+  }
   const outgoing = {
     tempGuid,
     chatGuid: args.chatGuid,
     text: args.text,
     now,
-    selectedMessageGuid: target?.messageGuid,
-    partIndex: target?.partIndex,
-    // A reply targets the selected message; persist it locally so the optimistic
-    // bubble shows its quote before the server echo.
-    threadOriginatorGuid: target?.messageGuid,
-    effectId: args.effectId,
-    // Persist the subject so the optimistic bubble shows it before the server echo.
-    subject: args.subject,
-    // Into the queue payload only, so a crash-recovery resend keeps the spans.
-    mentions: args.mentions,
     attemptAware: capability.attemptAware,
   };
   const { attemptOwnerToken } = scheduledHandover
@@ -156,24 +140,12 @@ export async function sendTextMessage(
           transition: scheduledHandover.transition,
           outgoing,
         },
-        transport.admissionGuard,
-        authorizedTarget?.serverAuthorization,
+        capabilityGuard,
       )
     : await withDbTransaction(
         db,
-        async (context) => {
-          const resolvedTarget = authorizedTarget
-            ? await resolveMessageTargetWithinTransaction(context, authorizedTarget)
-            : null;
-          if (authorizedTarget && !resolvedTarget) throw new MessageTargetUnavailableError();
-          return insertOutgoingTextWithinTransaction(context, {
-            ...outgoing,
-            selectedMessageGuid: resolvedTarget?.messageGuid,
-            partIndex: resolvedTarget?.partIndex,
-            threadOriginatorGuid: resolvedTarget?.messageGuid,
-          });
-        },
-        transport.admissionGuard,
+        (context) => insertOutgoingTextWithinTransaction(context, outgoing),
+        capabilityGuard,
       );
   await onQueued?.(tempGuid);
 
@@ -186,29 +158,19 @@ export async function sendTextMessage(
   }
 
   try {
-    const finalTarget = authorizedTarget
-      ? await resolveMessageTarget(db, authorizedTarget, targetCommitGuard)
-      : null;
-    if (authorizedTarget && !finalTarget) {
-      await retireUnavailableMessageTarget(db, tempGuid, targetCommitGuard);
-      return { tempGuid };
-    }
     transport.assertNetworkCurrent();
-    // Subject lines + mentions, like replies/effects, are Private-API-only features.
-    const method = chooseSendMethod(
-      target != null || !!args.effectId || !!args.subject || !!args.mentions?.length,
-      capability.serverInfo?.private_api === true,
-    );
+    if (effectiveCommitGuard && !effectiveCommitGuard()) {
+      throw new DbCommitGuardRejectedError();
+    }
+    if (capabilitySource?.kind === 'session' && !capabilitySource.isCurrent()) {
+      throw new DbCommitGuardRejectedError();
+    }
+    const method = chooseSendMethod(needsPrivateApi);
     const server = await sendText(transport.http, {
       chatGuid: args.chatGuid,
       tempGuid,
       clientAttemptGeneration: attemptOwnerToken?.generation,
       message: args.text,
-      selectedMessageGuid: finalTarget?.messageGuid,
-      partIndex: finalTarget?.partIndex,
-      effectId: args.effectId,
-      subject: args.subject,
-      mentions: args.mentions,
       method,
     });
     await reconcileSendOutcome(db, tempGuid, server, now, effectiveCommitGuard, {

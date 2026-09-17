@@ -3,7 +3,6 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ChatHeaderRow } from '@db/repositories';
-import { useFaceTime } from '@features/facetime/useFaceTime';
 import {
   addressMatchesTitle,
   avatarSeed,
@@ -43,7 +42,6 @@ export function ConversationHeader({
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const { startCall } = useFaceTime();
   const title = data ? resolveTitle(data) : '';
   const group = data ? isGroupRow(data) : false;
   // Over a wallpaper the bar disappears and each control floats in its own frosted bubble.
@@ -179,17 +177,6 @@ export function ConversationHeader({
       </Pressable>
       <View style={styles.rightGroup}>
         <Pressable
-          onPress={() => void startCall({ chatGuid, video: true })}
-          hitSlop={12}
-          style={styles.side}
-          accessibilityRole="button"
-          accessibilityLabel="Start FaceTime call"
-        >
-          <View style={bubble}>
-            <Icon name="videocam-outline" size={24} color={theme.color.tint} />
-          </View>
-        </Pressable>
-        <Pressable
           onPress={() => router.push('/scheduled')}
           hitSlop={12}
           style={styles.side}
@@ -213,8 +200,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  // Equal-width side groups (88 = two 44 slots) keep the centered title balanced around the
-  // back/search pair and the FaceTime/scheduled pair.
+  // Equal-width side groups (88 = two 44 slots) keep the centered title balanced when the
+  // optional search control makes the left side wider than the scheduled-message action.
   leftGroup: {
     width: 88,
     flexDirection: 'row',

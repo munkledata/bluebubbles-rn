@@ -1,6 +1,5 @@
 import {
   AlarmType,
-  AndroidCategory,
   AndroidGroupAlertBehavior,
   AndroidImportance,
   AndroidStyle,
@@ -18,7 +17,7 @@ import { parseMessagePartTopology } from '@core/models';
 import { logger } from '@core/secure';
 import type { AppDatabase } from '@db/types';
 import { useLockStore } from '@state/lockStore';
-import { buildMessageSnippet } from '@utils';
+import { buildMessageSnippet, isRcsChatGuid } from '@utils';
 import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
@@ -47,7 +46,6 @@ import {
   deleteFaceTimeRoute,
   faceTimeNotificationId,
   findFaceTimeRoute,
-  getOrCreateFaceTimeRoute,
   isSafeReminderNotificationId,
   listMessageNotificationTruth,
   listFutureReminderTriggerRoutes,
@@ -55,7 +53,6 @@ import {
   localRouteForGuids,
   localRouteForMessageGuid,
   migrateReminderNotificationId,
-  nativeFaceTimeData,
   nativeRouteData,
   nativeStatusData,
   replacementReminderNotificationId,
@@ -67,7 +64,6 @@ import {
 
 export const CHANNEL_NEW_MESSAGE = 'com.bluegreengatorapps.messages.new_messages';
 export const CHANNEL_REMINDERS = 'com.bluegreengatorapps.messages.reminders';
-export const CHANNEL_FACETIME = 'com.bluegreengatorapps.messages.facetime';
 export const PRESS_OPEN = 'open-chat';
 export const PRESS_INBOX = 'open-inbox';
 export const PRESS_REMINDER = 'open-reminder';
@@ -100,6 +96,9 @@ const STATUS_LOCKED_ID = 'bb-locked-messages';
 const STATUS_RCS_ID = 'bb-rcs-bridge-down';
 const STATUS_TEST_ID = 'bb-test-notification';
 const STATUS_ALIAS_ID = 'bb-aliases-removed';
+// Android notification channels survive app updates. This id is cleanup-only and must never be
+// exported or passed to createChannel again.
+const LEGACY_FACETIME_CHANNEL_ID = 'com.bluegreengatorapps.messages.facetime';
 const MESSAGE_GROUP_ID = 'gator-message-group';
 const MESSAGE_GROUP_SUMMARY_ID = 'gator-message-summary';
 const SEND_FAILURE_TITLE = 'Message not sent';
@@ -115,7 +114,13 @@ function notificationId(notification: Notification, displayedId?: string): strin
   return typeof id === 'string' && id.length > 0 ? id : undefined;
 }
 
-function messageActions(includeLove: boolean): NonNullable<Notification['android']>['actions'] {
+function messageActions(
+  includeLove: boolean,
+  chatGuid?: string,
+  messageGuid?: string,
+): NonNullable<Notification['android']>['actions'] {
+  const reactionAvailable =
+    !!chatGuid && isRcsChatGuid(chatGuid) && !!messageGuid && messageGuid.startsWith('rcs-');
   return [
     {
       title: 'Reply',
@@ -123,7 +128,9 @@ function messageActions(includeLove: boolean): NonNullable<Notification['android
       input: { allowFreeFormInput: true, placeholder: 'Message' },
     },
     { title: 'Mark as read', pressAction: { id: ACTION_MARK_READ } },
-    ...(includeLove ? [{ title: '♥ Love', pressAction: { id: ACTION_LOVE } }] : []),
+    ...(includeLove && reactionAvailable
+      ? [{ title: '♥ Love', pressAction: { id: ACTION_LOVE } }]
+      : []),
   ];
 }
 
@@ -256,7 +263,7 @@ function findDisplayedMessageHistory(
 
 function messageNotificationFromHistory(
   history: DisplayedMessageHistory,
-  options: { onlyAlertOnce?: boolean } = {},
+  options: { onlyAlertOnce?: boolean; chatGuid?: string; messageGuid?: string } = {},
 ): Notification {
   const entries = normalizeMessageNotificationHistory(history.entries);
   const latest = entries.at(-1);
@@ -286,7 +293,7 @@ function messageNotificationFromHistory(
         group: history.isGroup,
         messages: messagingStyleLines(entries),
       },
-      actions: messageActions(true),
+      actions: messageActions(true, options.chatGuid, options.messageGuid),
     },
   };
 }
@@ -800,7 +807,14 @@ async function reconcileDisplayedMessageHistoriesNow(
       await notifee.displayNotification(
         messageNotificationFromHistory(
           { ...current, entries: reconciled.entries },
-          { onlyAlertOnce: true },
+          {
+            onlyAlertOnce: true,
+            // Reconciliation intentionally has no current server message GUID. Omitting it keeps
+            // a rebuilt/stale history's Love action hidden instead of guessing from its chat.
+            chatGuid: reconciled.entries
+              .map((entry) => truthByMessageId.get(entry.messageId)?.chatGuid)
+              .find((guid): guid is string => typeof guid === 'string' && guid.length > 0),
+          },
         ),
       );
       mutated = true;
@@ -880,7 +894,11 @@ async function sanitizedMessageNotification(source: Notification): Promise<Notif
           },
         ],
       },
-      { onlyAlertOnce: true },
+      {
+        onlyAlertOnce: true,
+        chatGuid: resolved.chatGuid,
+        messageGuid: resolved.messageGuid,
+      },
     );
   }
 
@@ -916,7 +934,7 @@ async function sanitizedMessageNotification(source: Notification): Promise<Notif
           },
         ],
       },
-      actions: messageActions(false),
+      actions: messageActions(false, resolved.chatGuid),
     },
   };
 }
@@ -946,42 +964,6 @@ async function sanitizedSendFailureNotification(
   const target = await localFailedMessageRoute(resolved.messageGuid);
   if (!target || target.chatGuid !== resolved.chatGuid) return null;
   return fixedSendFailureNotification(target.route);
-}
-
-async function sanitizedFaceTimeNotification(
-  source: Notification,
-  context?: EventDeliveryContext,
-): Promise<Notification | null> {
-  if (!deliveryIsCurrent(context)) return null;
-  const uuid = (await resolveNotificationData(source.data))?.faceTimeUuid;
-  if (!deliveryIsCurrent(context)) return null;
-  if (!uuid) return null;
-  const token = await getOrCreateFaceTimeRoute(
-    uuid,
-    context ? () => context.isCurrent() : undefined,
-  );
-  if (!deliveryIsCurrent(context)) return null;
-
-  return {
-    id: faceTimeNotificationId(token),
-    title: source.title === 'Incoming FaceTime Audio' ? source.title : 'Incoming FaceTime',
-    body: 'Incoming call',
-    data: nativeFaceTimeData(token),
-    android: {
-      channelId: CHANNEL_FACETIME,
-      smallIcon: 'ic_stat_gator',
-      onlyAlertOnce: true,
-      importance: AndroidImportance.HIGH,
-      category: AndroidCategory.CALL,
-      ongoing: true,
-      autoCancel: false,
-      pressAction: { id: 'default', launchActivity: 'default' },
-      actions: [
-        { title: 'Decline', pressAction: { id: ACTION_DECLINE_FACETIME } },
-        { title: 'Answer', pressAction: { id: ACTION_ANSWER_FACETIME, launchActivity: 'default' } },
-      ],
-    },
-  };
 }
 
 interface ReminderReplacement {
@@ -1109,7 +1091,6 @@ function preservedStatusNotification(id: string): Notification | null {
 async function sanitizedNotification(
   source: Notification,
   displayedId?: string,
-  context?: EventDeliveryContext,
 ): Promise<Notification | null> {
   const id = notificationId(source, displayedId);
   if (!id) return null;
@@ -1118,11 +1099,9 @@ async function sanitizedNotification(
   const kind = markerKind(source);
   const reminder = await sanitizedReminderNotification(source, displayedId);
   if (reminder) return reminder.notification;
-  const faceTime =
-    kind === 'facetime' || dataString(source.data, 'faceTimeUuid')
-      ? await sanitizedFaceTimeNotification(source, context)
-      : null;
-  if (faceTime) return faceTime;
+  // A legacy/current FaceTime notice is cleanup-only during the whitelist rebuild. Returning null
+  // ensures the store-wide containment sweep removes it and never reconstructs call presentation.
+  if (kind === 'facetime' || dataString(source.data, 'faceTimeUuid')) return null;
   if (kind === 'send-failure') return sanitizedSendFailureNotification(source);
   return sanitizedMessageNotification(source);
 }
@@ -1183,7 +1162,7 @@ async function sanitizeDisplayedNotifications(context?: EventDeliveryContext): P
         failures.push(new Error('a displayed reminder could not be reconciled to its durable row'));
         continue;
       }
-      const replacement = await sanitizedNotification(item.notification, item.id, context);
+      const replacement = await sanitizedNotification(item.notification, item.id);
       if (replacement) plans.push(replacement);
     } catch (error) {
       failures.push(error);
@@ -1451,12 +1430,13 @@ async function sanitizeTriggerNotifications(context?: EventDeliveryContext): Pro
   }
 }
 
-function carriesLegacyRawRoute(source: Notification): boolean {
-  // Schema-2 payloads contain only local integer keys/random tokens. Older payloads had no owner
-  // marker and placed server GUIDs, phone/email-bearing chat ids, message GUIDs or call UUIDs in
-  // Android-persisted data. Positively identify only that legacy shape; ordinary current payloads
-  // must not be rebuilt merely because startup maintenance runs.
-  if (markerKind(source) != null) return false;
+function requiresNotificationStateRebuild(source: Notification): boolean {
+  // FaceTime was retired after schema 2 shipped, so both its opaque schema-2 notices and older raw
+  // UUID payloads must force the one-time whitelist rebuild. Other schema-2 notifications contain
+  // only local keys/tokens and must not be rebuilt merely because startup maintenance runs.
+  const kind = markerKind(source);
+  if (kind === 'facetime') return true;
+  if (kind != null) return false;
   return ['chatGuid', 'messageGuid', 'faceTimeUuid'].some(
     (key) => dataString(source.data, key) != null,
   );
@@ -1504,8 +1484,8 @@ async function sanitizeLegacyNotificationPayloadsIfPresent(
   const triggers = triggersResult.value;
 
   const hasLegacy =
-    displayed.some((item) => carriesLegacyRawRoute(item.notification)) ||
-    triggers.some((item) => carriesLegacyRawRoute(item.notification));
+    displayed.some((item) => requiresNotificationStateRebuild(item.notification)) ||
+    triggers.some((item) => requiresNotificationStateRebuild(item.notification));
   if (!hasLegacy) {
     // Current schema-2 alarms can still have been created by an older build with private title/body.
     // Rebuild every future alarm from encrypted durable rows on every connected startup.
@@ -1590,8 +1570,29 @@ async function prepareNotificationPresentationStateNow(
   context?: EventDeliveryContext,
 ): Promise<void> {
   const failures: unknown[] = [];
+  let nativeStateSanitized = false;
   try {
     await sanitizeLegacyNotificationPayloadsIfPresent(context);
+    nativeStateSanitized = true;
+  } catch (error) {
+    failures.push(error);
+  }
+  if (!deliveryIsCurrent(context)) return;
+  if (nativeStateSanitized) {
+    try {
+      // Positive route creation is gone. Purge every encrypted route left by an older install only
+      // after Android state is clean; a failed native sweep retains routes so stale actions can
+      // still resolve their notification id for a later dismissal/retry.
+      await clearNotificationRoutes(context ? () => context.isCurrent() : undefined);
+    } catch (error) {
+      failures.push(error);
+    }
+  }
+  if (!deliveryIsCurrent(context)) return;
+  try {
+    // Deleting a missing channel is an Android no-op. Running this on every admitted startup also
+    // repairs an earlier partial upgrade without ever recreating the retired channel.
+    await notifee.deleteChannel(LEGACY_FACETIME_CHANNEL_ID);
   } catch (error) {
     failures.push(error);
   }
@@ -1826,7 +1827,6 @@ function isPresentationIntent(intent: NotificationIntent): boolean {
   return (
     intent.kind === 'message' ||
     intent.kind === 'send-failure' ||
-    intent.kind === 'facetime-call' ||
     intent.kind === 'alias-removed' ||
     intent.kind === 'rcs-bridge-down' ||
     intent.kind === 'test-notification'
@@ -1890,7 +1890,6 @@ async function postNotificationNow(
   if (
     (intent.kind === 'message' ||
       intent.kind === 'send-failure' ||
-      intent.kind === 'facetime-call' ||
       intent.kind === 'alias-removed') &&
     privateNotificationMustBeHidden()
   ) {
@@ -1913,10 +1912,6 @@ async function postNotificationNow(
   }
   if (intent.kind === 'facetime-cancel') {
     await cancelFaceTimeNotificationNow(intent.uuid, context);
-    return;
-  }
-  if (intent.kind === 'facetime-call') {
-    await postFaceTimeNotification(intent, context);
     return;
   }
   if (intent.kind === 'send-failure-cancel') {
@@ -2041,7 +2036,13 @@ async function postNotificationNow(
       isGroup: intent.isGroup,
       entries: history,
     },
-    { onlyAlertOnce: replacesExistingLine },
+    {
+      onlyAlertOnce: replacesExistingLine,
+      chatGuid: intent.chatGuid,
+      // A delayed event can merge behind a newer line. Only expose a reaction action when the
+      // route we just resolved is still the notification's latest visible message.
+      messageGuid: latest.messageId === route.messageId ? intent.messageGuid : undefined,
+    },
   );
   await notifee.displayNotification(notification);
   if (!deliveryIsCurrent(context)) return;
@@ -2303,62 +2304,6 @@ export function postLockedNotification(context?: EventDeliveryContext): Promise<
   return enqueueNotificationOperation(() =>
     postStatusNotification(STATUS_LOCKED_ID, 'locked', 'Gator', 'You have new messages', context),
   );
-}
-
-let faceTimeChannelReady: Promise<string> | null = null;
-function ensureFaceTimeChannel(): Promise<string> {
-  faceTimeChannelReady ??= notifee
-    .createChannel({ id: CHANNEL_FACETIME, name: 'FaceTime', importance: AndroidImportance.HIGH })
-    .catch((e) => {
-      faceTimeChannelReady = null;
-      throw e;
-    });
-  return faceTimeChannelReady;
-}
-
-/**
- * Post an "Incoming FaceTime" heads-up notification with Answer + Decline actions.
- * Its native id carries a random route token; the call UUID remains in the encrypted database.
- * Ongoing + high-importance so it rings until answered/declined.
- */
-async function postFaceTimeNotification(
-  intent: {
-    uuid: string;
-    callerName: string;
-    isAudio: boolean;
-    avatarUri?: string;
-  },
-  context?: EventDeliveryContext,
-): Promise<void> {
-  if (!deliveryIsCurrent(context)) return;
-  await ensureFaceTimeChannel();
-  if (!deliveryIsCurrent(context)) return;
-  if (await containPrivateNotificationIfLocked(context)) return;
-  const token = await getOrCreateFaceTimeRoute(
-    intent.uuid,
-    context ? () => context.isCurrent() : undefined,
-  );
-  if (!deliveryIsCurrent(context)) return;
-  if (await containPrivateNotificationIfLocked(context)) return;
-  await notifee.displayNotification({
-    id: faceTimeNotificationId(token),
-    title: intent.isAudio ? 'Incoming FaceTime Audio' : 'Incoming FaceTime',
-    body: intent.callerName,
-    data: nativeFaceTimeData(token),
-    android: {
-      channelId: CHANNEL_FACETIME,
-      smallIcon: 'ic_stat_gator',
-      importance: AndroidImportance.HIGH,
-      category: AndroidCategory.CALL,
-      ongoing: true,
-      autoCancel: false,
-      pressAction: { id: 'default', launchActivity: 'default' },
-      actions: [
-        { title: 'Decline', pressAction: { id: ACTION_DECLINE_FACETIME } },
-        { title: 'Answer', pressAction: { id: ACTION_ANSWER_FACETIME, launchActivity: 'default' } },
-      ],
-    },
-  });
 }
 
 let reminderChannelReady: Promise<string> | null = null;

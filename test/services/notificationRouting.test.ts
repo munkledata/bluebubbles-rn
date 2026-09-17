@@ -1,7 +1,6 @@
 import { Chat, Message } from '@core/models';
 import { sql } from 'drizzle-orm';
 import notifee from 'react-native-notify-kit';
-import * as Crypto from 'expo-crypto';
 import {
   createReminder,
   getReminderByMessageGuid,
@@ -15,16 +14,12 @@ import {
   chatNotificationId,
   clearNotificationRoutes,
   deleteFaceTimeRoute,
-  faceTimeNotificationId,
-  findFaceTimeRoute,
-  getOrCreateFaceTimeRoute,
   isSafeReminderNotificationId,
   listFutureReminderTriggerRoutes,
   localFailedMessageRoute,
   localRouteForGuids,
   localRouteForMessageGuid,
   migrateReminderNotificationId,
-  nativeFaceTimeData,
   nativeRouteData,
   nativeStatusData,
   newReminderNotificationId,
@@ -51,7 +46,6 @@ jest.mock('react-native-notify-kit', () => ({
 }));
 
 const mockCancelAllNotifications = notifee.cancelAllNotifications as jest.Mock;
-const mockRandomUuid = Crypto.randomUUID as jest.Mock;
 type RawDb = Awaited<ReturnType<typeof createTestDb>>['raw'];
 let mockRaw: RawDb;
 
@@ -59,6 +53,15 @@ const nextEventLoopTurn = (): Promise<void> =>
   new Promise((resolve) => {
     setImmediate(resolve);
   });
+
+function retiredFaceTimeData(token: string): Record<string, string> {
+  return {
+    gatorOwner: 'gator',
+    gatorSchema: '2',
+    gatorKind: 'facetime',
+    routeToken: token,
+  };
+}
 
 interface DriverGate {
   didStart: boolean;
@@ -250,89 +253,13 @@ describe('notificationRouting — native privacy boundary', () => {
     );
   });
 
-  it('stores a server-controlled FaceTime UUID behind a random encrypted-DB token', async () => {
-    const uuid = 'attacker-controlled-phone@example.com';
-    const token = await getOrCreateFaceTimeRoute(uuid);
-    const data = nativeFaceTimeData(token);
-    const id = faceTimeNotificationId(token);
-    expect(JSON.stringify({ id, data })).not.toContain(uuid);
-    await expect(resolveNotificationData(data)).resolves.toEqual({ faceTimeUuid: uuid });
-    await expect(getOrCreateFaceTimeRoute(uuid)).resolves.toBe(token);
-  });
-
-  it('does not return a FaceTime route that a neighbouring transaction rolls back', async () => {
-    const uuid = 'phantom-call-uuid';
-    const phantomToken = '7f000000-0000-4000-8000-000000000001';
-    const durableToken = '7f000000-0000-4000-8000-000000000002';
-    mockRandomUuid.mockReturnValueOnce(durableToken);
-
-    let neighbourStarted!: () => void;
-    let releaseNeighbour!: () => void;
-    const started = new Promise<void>((resolve) => {
-      neighbourStarted = resolve;
-    });
-    const held = new Promise<void>((resolve) => {
-      releaseNeighbour = resolve;
-    });
-    const neighbour = withDbTransaction(mockDb, async () => {
-      await mockDb.run(sql`
-        INSERT INTO kv (key, value)
-        VALUES (${`notification.route.v2.facetime.${phantomToken}`}, ${uuid})
-      `);
-      neighbourStarted();
-      await held;
-      throw new Error('neighbour rollback');
-    });
-    await started;
-
-    let routeSettled = false;
-    const route = getOrCreateFaceTimeRoute(uuid).then((value) => {
-      routeSettled = true;
-      return value;
-    });
-    await Promise.resolve();
-    expect(routeSettled).toBe(false);
-
-    releaseNeighbour();
-    await expect(neighbour).rejects.toThrow('neighbour rollback');
-    await expect(route).resolves.toBe(durableToken);
-    await expect(resolveNotificationData(nativeFaceTimeData(phantomToken))).resolves.toBeNull();
-    await expect(resolveNotificationData(nativeFaceTimeData(durableToken))).resolves.toEqual({
-      faceTimeUuid: uuid,
-    });
-  });
-
-  it('rejects a queued FaceTime route when its account commit guard is revoked', async () => {
-    const uuid = 'revoked-call-uuid';
-    let releaseNeighbour!: () => void;
-    let neighbourStarted!: () => void;
-    const started = new Promise<void>((resolve) => {
-      neighbourStarted = resolve;
-    });
-    const held = new Promise<void>((resolve) => {
-      releaseNeighbour = resolve;
-    });
-    const neighbour = withDbTransaction(mockDb, async () => {
-      neighbourStarted();
-      await held;
-    });
-    await started;
-
-    let current = true;
-    const route = getOrCreateFaceTimeRoute(uuid, () => current);
-    await Promise.resolve();
-    current = false;
-    releaseNeighbour();
-    await neighbour;
-
-    await expect(route).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
-    await expect(findFaceTimeRoute(uuid)).resolves.toBeNull();
-  });
-
   it('clears the encrypted FaceTime route table during account teardown', async () => {
     const uuid = 'old-account-call-uuid';
-    const token = await getOrCreateFaceTimeRoute(uuid);
-    const data = nativeFaceTimeData(token);
+    const token = '7f000000-0000-4000-8000-000000000001';
+    mockRaw
+      .prepare('INSERT INTO kv (key, value) VALUES (?, ?)')
+      .run(`notification.route.v2.facetime.${token}`, uuid);
+    const data = retiredFaceTimeData(token);
     await expect(resolveNotificationData(data)).resolves.toEqual({ faceTimeUuid: uuid });
 
     await clearNotificationRoutes();
@@ -635,11 +562,11 @@ describe('notificationRouting — native privacy boundary', () => {
   });
 
   it('composes native cancellation with clearing every encrypted notification route', async () => {
-    mockRandomUuid
-      .mockReturnValueOnce('7f000000-0000-4000-8000-000000000001')
-      .mockReturnValueOnce('7f000000-0000-4000-8000-000000000002');
-    const firstToken = await getOrCreateFaceTimeRoute('first-private-call-uuid');
-    const secondToken = await getOrCreateFaceTimeRoute('second-private-call-uuid');
+    const firstToken = '7f000000-0000-4000-8000-000000000001';
+    const secondToken = '7f000000-0000-4000-8000-000000000002';
+    const insert = mockRaw.prepare('INSERT INTO kv (key, value) VALUES (?, ?)');
+    insert.run(`notification.route.v2.facetime.${firstToken}`, 'first-private-call-uuid');
+    insert.run(`notification.route.v2.facetime.${secondToken}`, 'second-private-call-uuid');
     const routeCount = async (): Promise<number> => {
       const rows = await mockDb.all<{ count: number }>(sql`
         SELECT COUNT(*) AS count
@@ -654,8 +581,8 @@ describe('notificationRouting — native privacy boundary', () => {
 
     expect(mockCancelAllNotifications).toHaveBeenCalledTimes(1);
     expect(await routeCount()).toBe(0);
-    await expect(resolveNotificationData(nativeFaceTimeData(firstToken))).resolves.toBeNull();
-    await expect(resolveNotificationData(nativeFaceTimeData(secondToken))).resolves.toBeNull();
+    await expect(resolveNotificationData(retiredFaceTimeData(firstToken))).resolves.toBeNull();
+    await expect(resolveNotificationData(retiredFaceTimeData(secondToken))).resolves.toBeNull();
   });
 
   it('mints and migrates reminder ids without embedding the message GUID', async () => {

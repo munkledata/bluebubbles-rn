@@ -62,7 +62,7 @@ plan; mutable status for the four release-operation tasks remains in the release
 - [`COMPONENT_TESTING_PLAN.md`](./COMPONENT_TESTING_PLAN.md) and
   [`UI_COVERAGE_70_PLAN.md`](./UI_COVERAGE_70_PLAN.md) — completed historical UI-test rollout plans. Current
   coverage-hardening status belongs to `TEST-01` in the work plan.
-- [`IMESSAGE_ACCOUNT_PLAN.md`](./IMESSAGE_ACCOUNT_PLAN.md) — iMessage account contract/design record.
+- [`IMESSAGE_ACCOUNT_PLAN.md`](./IMESSAGE_ACCOUNT_PLAN.md) — historical iMessage account contract/design record, superseded by `FP-006` retirement.
 - [`FINDMY_DECRYPTION_PLAN.md`](./FINDMY_DECRYPTION_PLAN.md) and
   [`FINDMY_KEY_EXTRACTION.md`](./FINDMY_KEY_EXTRACTION.md) — Find My crypto/key research.
 

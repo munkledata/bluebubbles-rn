@@ -68,7 +68,7 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
           </Text>
         </SettingsSection>
 
-        <SettingsSection label="LINKS, MAPS & CALLS" style={styles.gap}>
+        <SettingsSection label="LINKS & MAPS" style={styles.gap}>
           <Text style={textStyle}>
             When your server supports it, viewing a message with a web link automatically asks your
             connected Gator server for bounded preview text and an optional image. This phone does
@@ -80,10 +80,9 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
             coordinates, the phone&apos;s IP address, device and request details, a Maps-specific
             identifier, Maps SDK crash diagnostics, and interactions such as panning or zooming.
             Gator does not request this phone&apos;s own location for that map. When you explicitly
-            open a web link, location, or validated FaceTime link, Android hands it to an external
-            browser or maps app. That external provider may receive the URL or precise coordinates
-            and, for a Find My location, its displayed label. Embedded FaceTime WebViews remain
-            disabled.
+            open a web link or location, Android hands it to an external browser or maps app. That
+            external provider may receive the URL or precise coordinates and, for a Find My
+            location, its displayed label. FaceTime calling from Gator is retired in this release.
           </Text>
         </SettingsSection>
 

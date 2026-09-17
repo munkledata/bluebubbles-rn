@@ -37,6 +37,7 @@ import {
   type DbTransactionContext,
 } from '@db/transaction';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
+import { sessionAccessors } from '@state/sessionStore';
 import { http } from './clients';
 import { ensureDatabase } from './databaseControl';
 import { createAttachmentCacheAccountScope } from './download/attachmentCacheAccountScope';
@@ -56,6 +57,20 @@ const STALE_CHAT_ACTION = Symbol('stale-chat-action');
 
 function assertCreateChatLease(lease: RealtimeDeliveryLease): void {
   if (!lease.isCurrent()) throw STALE_CREATE_CHAT;
+}
+
+function assertCreateChatCapability(): void {
+  if (!sessionAccessors.rcsEnabled()) {
+    throw new Error('Starting a new RCS conversation is unavailable on this server.');
+  }
+}
+
+function assertSingleRcsRecipient(
+  addresses: readonly string[],
+): asserts addresses is readonly [string] {
+  if (addresses.length !== 1 || addresses[0]?.trim().length === 0) {
+    throw new Error('Starting a new RCS conversation requires exactly one recipient.');
+  }
 }
 
 function assertChatActionLease(lease: RealtimeDeliveryLease): void {
@@ -288,29 +303,34 @@ export function saveChatDraft(
 }
 
 /**
- * Create a new chat with the given recipient addresses + an initial message, upsert the
- * returned chat locally so it appears immediately, and return its guid (route into it).
- * `service` accepts 'RCS' (server routes it to the sidecar and mints an `RCS;-;` guid);
- * defaults to iMessage for existing callers.
+ * Create a one-recipient RCS chat with an initial message, upsert the returned chat locally so it
+ * appears immediately, and return its guid (route into it). iMessage/SMS creation was permanently
+ * retired with the helper and is deliberately absent from this command boundary.
  */
 export async function createNewChat(
-  addresses: string[],
+  addresses: readonly [string],
   message: string,
-  service: 'iMessage' | 'SMS' | 'RCS' = 'iMessage',
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<string> {
   try {
-    // Capture happened in the default argument, before the first await. Re-check after opening the
-    // DB so an A-account call parked on Keystore/database work cannot wake up after reconnect and
-    // send its request with B's live credentials.
+    // Capture happened in the default argument. A retained callback must fail as old-account work
+    // before it reads any capability owned by a successor session.
     assertCreateChatLease(accountLease);
+    // Fail before opening the DB or starting HTTP. The single-recipient shape is checked at runtime
+    // too, so stale JavaScript or an untyped caller cannot silently drop extra recipients.
+    assertSingleRcsRecipient(addresses);
+    assertCreateChatCapability();
+    // Re-check after opening the DB so an A-account call parked on Keystore/database work cannot
+    // wake up after reconnect and send its request with B's live credentials.
     const db = await ensureDatabase();
     assertCreateChatLease(accountLease);
+    assertSingleRcsRecipient(addresses);
+    assertCreateChatCapability();
 
     // HttpClient snapshots the origin + credential at request entry. A Disconnect cannot recall a
     // request the old server already accepted, but its response is disowned below and can never be
     // reconciled into the next account's database.
-    const chat = await chatsApi.createChat(http, { addresses, message, service });
+    const chat = await chatsApi.createChat(http, { address: addresses[0], message });
     assertCreateChatLease(accountLease);
 
     // Keep every local consequence atomic. Disconnect either waits for this short commit and then
@@ -359,17 +379,17 @@ export async function createNewChat(
 }
 
 /**
- * Emit a typing indicator to the server. The server listens on `start-typing` / `stop-typing`
- * with a `{ guid }` payload — NOT `started-typing`/`stopped-typing` with `{ chatGuid }` (which
- * it ignored, so the indicator never reached the other party). No-op when not connected.
- * SERVER-GATED: the server only relays this with the **private API** enabled, so it can't be
- * verified without a server.
+ * Emit the one supported remote typing signal: RCS `start-typing` with a `{ guid }` payload.
+ * iMessage typing and RCS stop-typing are unavailable in this release. No-op when disconnected,
+ * when RCS is not live, or when the user disabled typing indicators.
  */
 export function sendTyping(chatGuid: string, isTyping: boolean): void {
-  // Respect the master Private API switch + the "Send Typing Indicators" toggle.
+  // The bridge supports RCS start-typing only. Helper-backed iMessage typing and RCS stop-typing
+  // are both retired, even if stale session state advertises Private API support.
+  if (!chatGuid.startsWith('RCS;-;') || !isTyping || !sessionAccessors.rcsEnabled()) return;
   const fs = useFeatureSettingsStore.getState();
-  if (!fs.privateApiEnabled || !fs.sendTypingIndicators) return;
-  getSocket()?.emit(isTyping ? 'start-typing' : 'stop-typing', { guid: chatGuid });
+  if (!fs.sendTypingIndicators) return;
+  getSocket()?.emit('start-typing', { guid: chatGuid });
 }
 
 type FeatureSettings = ReturnType<typeof useFeatureSettingsStore.getState>;
@@ -461,11 +481,15 @@ export function markRead(
     );
     assertChatActionLease(activeLease);
     if (!target.chatExists) return;
+    // The RCS route remains a supported best-effort path even on a killed-process notification
+    // wake. Helper-backed iMessage read receipts are permanently retired; their local marker above
+    // still clears this device's badge.
+    if (!chatGuid.startsWith('RCS;-;')) return;
     const fs = await hydratedFeatureSettings();
     assertChatActionLease(activeLease);
     // Hydration deliberately leaves `hydrated=false` on a DB/read failure. The module defaults are
     // enabled for normal first use, but they are not proof of the user's persisted privacy choice.
-    if (!fs.hydrated || !fs.privateApiEnabled || !fs.sendReadReceipts) return;
+    if (!fs.hydrated || !fs.sendReadReceipts) return;
 
     let receiptTransport: ReadReceiptTransport | null;
     try {
@@ -489,11 +513,8 @@ export function markRead(
 }
 
 /**
- * Mark a chat UNREAD: always clear the local read marker first (the inbox badge returns
- * immediately), then best-effort sync it to the Mac via POST /chat/:guid/unread. A server
- * failure never reverts or blocks the local flip — it's logged and dropped. The endpoint is
- * Private-API + iMessage-only, so the call is skipped for `RCS;-;` chats (the RCS sidecar has
- * no unread endpoint) and when the master Private API toggle is off.
+ * Mark a chat UNREAD locally. The helper-backed remote unread endpoint is retired, while the local
+ * marker remains useful and must never depend on a server capability or network request.
  */
 export function markUnread(
   chatGuid: string,
@@ -514,20 +535,6 @@ export function markUnread(
       },
       () => activeLease.isCurrent(),
     );
-    assertChatActionLease(activeLease);
-    if (chatGuid.startsWith('RCS;-;')) return;
-    const fs = await hydratedFeatureSettings();
-    assertChatActionLease(activeLease);
-    if (!fs.hydrated || !fs.privateApiEnabled) return;
-    try {
-      await chatsApi.markChatUnread(http, chatGuid);
-    } catch (e) {
-      if (activeLease.isCurrent()) {
-        logger.debug('[chats] mark-unread server sync failed; local flip kept', {
-          error: String(e),
-        });
-      }
-    }
     assertChatActionLease(activeLease);
   });
 }

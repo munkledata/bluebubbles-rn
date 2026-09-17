@@ -5,7 +5,6 @@ export * as chatsApi from './endpoints/chats';
 export * as messagesApi from './endpoints/messages';
 export * as scheduledApi from './endpoints/scheduled';
 export * as attachmentsApi from './endpoints/attachments';
-export * as faceTimeApi from './endpoints/facetime';
 export * as findMyApi from './endpoints/findmy';
 export * as fcmApi from './endpoints/fcm';
 export * as contactsApi from './endpoints/contacts';

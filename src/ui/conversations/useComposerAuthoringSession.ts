@@ -1,10 +1,4 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import {
-  activeMentionQuery,
-  computeMentionRanges,
-  type MentionPick,
-  type MentionRange,
-} from '@utils';
 import { showToast } from '../toast/toastStore';
 import type { PendingAttachment } from './AttachmentTray';
 
@@ -28,45 +22,26 @@ function isPromiseLike<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
 
 interface ComposerAuthoringSessionOptions {
   active: boolean;
-  editingText?: string | null;
   initialText?: string;
   initialAttachments?: PendingAttachment[];
-  mentionParticipants: { address: string; name: string }[];
   pending: PendingAttachment[];
   setPending: Dispatch<SetStateAction<PendingAttachment[]>>;
   setTrayOpen: Dispatch<SetStateAction<boolean>>;
-  onSend: (
-    text: string,
-    effectId?: string,
-    subject?: string,
-    mentions?: MentionRange[],
-  ) => ComposerTextAdmission;
+  onSend: (text: string) => ComposerTextAdmission;
   onSendAttachments?: (items: PendingAttachment[]) => ComposerAttachmentAdmission;
-  onSendTextAttachment?: (
-    text: string,
-    item: PendingAttachment,
-    effectId?: string,
-    subject?: string,
-    mentions?: MentionRange[],
-  ) => ComposerTextAttachmentAdmission;
+  onSendTextAttachment?: (text: string, item: PendingAttachment) => ComposerTextAttachmentAdmission;
   canSubmit?: (logicalSendCount: number) => boolean;
   isSubmitOwnerCurrent?: () => boolean;
-  onCancelEdit?: () => void;
   onDraftChange?: (text: string) => void;
   onTyping?: (isTyping: boolean) => void;
-  onRemovalStateChange?: (state: {
-    hasUnsavedEdit: boolean;
-    hasUnsavedDraftMetadata: boolean;
-  }) => void;
+  onRemovalStateChange?: (state: { hasUnsavedDraftMetadata: boolean }) => void;
 }
 
-/** Own the authored text, typing, edit, draft, mention, and submit lifecycle for one composer. */
+/** Own the plain-text, attachment, typing, draft, and submit lifecycle for one composer. */
 export function useComposerAuthoringSession({
   active,
-  editingText,
   initialText,
   initialAttachments,
-  mentionParticipants,
   pending,
   setPending,
   setTrayOpen,
@@ -75,50 +50,19 @@ export function useComposerAuthoringSession({
   onSendTextAttachment,
   canSubmit,
   isSubmitOwnerCurrent,
-  onCancelEdit,
   onDraftChange,
   onTyping,
   onRemovalStateChange,
 }: ComposerAuthoringSessionOptions) {
   const [text, setText] = useState('');
-  const [subject, setSubject] = useState('');
-  // Picked @mentions (resolved to text spans at send time) + the current cursor for @-detection.
-  const [mentions, setMentions] = useState<MentionPick[]>([]);
-  const [cursor, setCursor] = useState(0);
   const [submissionPending, setSubmissionPending] = useState(false);
   const submissionPendingRef = useRef(false);
   const mountedRef = useRef(true);
   const trimmed = text.trim();
-  const isEditing = editingText != null;
-  const canSend = trimmed.length > 0 || (!isEditing && pending.length > 0);
-
-  // @mention autocomplete: the query being typed at the cursor and the participants it matches.
-  const mentionQ =
-    mentionParticipants.length > 0 && !isEditing ? activeMentionQuery(text, cursor) : null;
-  const mentionMatches =
-    mentionQ != null
-      ? mentionParticipants
-          .filter((participant) => {
-            const query = mentionQ.query.toLowerCase();
-            return (
-              participant.name.toLowerCase().includes(query) ||
-              participant.address.toLowerCase().includes(query)
-            );
-          })
-          .slice(0, 6)
-      : [];
-
-  // Replace the in-progress "@query" with "@Name " and record the mention for send-time resolution.
-  const pickMention = (participant: { address: string; name: string }): void => {
-    if (!mentionQ) return;
-    const label = `@${participant.name}`;
-    const before = text.slice(0, mentionQ.atIndex);
-    const after = text.slice(cursor);
-    const next = `${before}${label} ${after}`;
-    setText(next);
-    setMentions((current) => [...current, { address: participant.address, label }]);
-    setCursor(before.length + label.length + 1);
-  };
+  // Retain staged files across a temporary capability loss, but do not count them as sendable or
+  // combine them with plain text until an attachment sender is available again.
+  const attachmentsSendable = onSendAttachments != null;
+  const canSend = trimmed.length > 0 || (attachmentsSendable && pending.length > 0);
 
   // Debounced typing emit: start-typing on input, stop-typing after a pause / on send.
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -147,36 +91,13 @@ export function useComposerAuthoringSession({
   // Stop typing on unmount (leaving the chat).
   useEffect(() => () => emitTyping(false), []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Prefill the input when an edit starts, stashing whatever draft it displaces so ending the edit
-  // can put it back (otherwise editing a message silently discards the in-progress draft).
-  const preEditRef = useRef('');
-  const editingActiveRef = useRef(false);
-  useEffect(() => {
-    if (editingText != null) {
-      if (!editingActiveRef.current) preEditRef.current = draftStateRef.current.text;
-      editingActiveRef.current = true;
-      // Editing is an explicit prop-to-local-state transition; mirroring it here is intentional.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setText(editingText);
-      return;
-    }
-    // Route-level Back can cancel edit mode by clearing the parent `editing` prop. Restore the
-    // displaced draft here as well as in the visible Cancel handler so both paths are lossless.
-    if (editingActiveRef.current) {
-      editingActiveRef.current = false;
-      setText(preEditRef.current);
-      draftStateRef.current = { ...draftStateRef.current, text: preEditRef.current };
-    }
-  }, [editingText]);
-
-  // Restore a persisted draft — only into an EMPTY, non-editing composer (the draft loads async;
+  // Restore a persisted draft — only into an EMPTY composer (the draft loads async;
   // never clobber something the user already typed).
   const restoredRef = useRef(false);
   useEffect(() => {
-    if (restoredRef.current || !initialText || isEditing) return;
+    if (restoredRef.current || !initialText) return;
     restoredRef.current = true;
     setText((current) => current || initialText);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialText]);
 
   // Seed shared attachments (Direct Share INTO this chat) into the tray once, on mount, without
@@ -190,23 +111,20 @@ export function useComposerAuthoringSession({
   }, [initialAttachments, setPending, setTrayOpen]);
 
   // Draft persistence: debounced while typing; flushed on unmount so the last keystrokes aren't
-  // lost when backing out of the chat. Editing an existing message never persists as a draft.
+  // lost when backing out of the chat.
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const draftStateRef = useRef({ text: '', isEditing: false, onDraftChange });
+  const draftStateRef = useRef({ text: '', onDraftChange });
   // The unmount cleanup needs the latest committed render, not the values from its first closure.
-  // eslint-disable-next-line react-hooks/immutability
-  draftStateRef.current = { text, isEditing, onDraftChange };
+  draftStateRef.current = { text, onDraftChange };
 
   // Body text already flushes to the per-chat DB draft below. Report only the authored pieces
   // that cannot be reconstructed after this component or route is removed.
-  const hasUnsavedEdit = isEditing && text !== editingText;
-  const hasUnsavedDraftMetadata =
-    subject.trim().length > 0 || pending.length > 0 || mentions.length > 0;
+  const hasUnsavedDraftMetadata = pending.length > 0;
   useEffect(() => {
-    onRemovalStateChange?.({ hasUnsavedEdit, hasUnsavedDraftMetadata });
-  }, [hasUnsavedDraftMetadata, hasUnsavedEdit, onRemovalStateChange]);
+    onRemovalStateChange?.({ hasUnsavedDraftMetadata });
+  }, [hasUnsavedDraftMetadata, onRemovalStateChange]);
   const queueDraft = (value: string): void => {
-    if (!onDraftChange || isEditing) return;
+    if (!onDraftChange) return;
     if (draftTimer.current) clearTimeout(draftTimer.current);
     draftTimer.current = setTimeout(() => onDraftChange(value), 500);
   };
@@ -214,7 +132,7 @@ export function useComposerAuthoringSession({
     () => () => {
       if (draftTimer.current) clearTimeout(draftTimer.current);
       const state = draftStateRef.current;
-      if (state.onDraftChange && !state.isEditing) state.onDraftChange(state.text);
+      state.onDraftChange?.(state.text);
     },
     [],
   );
@@ -226,16 +144,11 @@ export function useComposerAuthoringSession({
     [],
   );
 
-  const submit = (effectId?: string): void => {
+  const submit = (): void => {
     if (submissionPendingRef.current) return;
     const captured = trimmed;
     const capturedAuthoredText = text;
-    const capturedSubject = subject.trim();
-    // Resolve mentions against the trimmed text that's actually sent, so the spans line up.
-    const finalMentions = mentions.length > 0 ? computeMentionRanges(captured, mentions) : [];
-    // Attachments staged before an edit belong to the draft, not to the edited message. Keep them
-    // untouched until edit mode ends instead of sending or discarding them with the edit.
-    const attachments = isEditing ? [] : pending;
+    const attachments = attachmentsSendable ? pending : [];
     if (!captured && attachments.length === 0) return;
     if (isSubmitOwnerCurrent && !isSubmitOwnerCurrent()) return;
     const isTextAttachment = !!captured && attachments.length > 0;
@@ -250,7 +163,7 @@ export function useComposerAuthoringSession({
     const logicalSendCount = isTextAttachment
       ? 1
       : (attachments.length > 0 ? 1 : 0) + (captured ? 1 : 0);
-    if (!isEditing && canSubmit && !canSubmit(logicalSendCount)) {
+    if (canSubmit && !canSubmit(logicalSendCount)) {
       showToast('Too many messages are waiting—try again in a moment');
       return;
     }
@@ -285,13 +198,7 @@ export function useComposerAuthoringSession({
       const attachment = attachments[0];
       if (!attachment || !captured || !onSendTextAttachment) return false;
       try {
-        const admission = onSendTextAttachment(
-          captured,
-          attachment,
-          effectId,
-          capturedSubject || undefined,
-          finalMentions.length > 0 ? finalMentions : undefined,
-        );
+        const admission = onSendTextAttachment(captured, attachment);
         return isPromiseLike(admission)
           ? Promise.resolve(admission).then(normalizeTextAdmission, () => false)
           : normalizeTextAdmission(admission);
@@ -302,12 +209,7 @@ export function useComposerAuthoringSession({
     const admitText = (): boolean | Promise<boolean> => {
       if (!captured) return false;
       try {
-        const admission = onSend(
-          captured,
-          effectId,
-          capturedSubject || undefined,
-          finalMentions.length > 0 ? finalMentions : undefined,
-        );
+        const admission = onSend(captured);
         return isPromiseLike(admission)
           ? Promise.resolve(admission).then(normalizeTextAdmission, () => false)
           : normalizeTextAdmission(admission);
@@ -330,25 +232,18 @@ export function useComposerAuthoringSession({
       }
 
       if (textAdmitted) {
-        // After a normal send the draft is consumed. An edit never consumed the displaced draft,
-        // so restore it exactly as before. Inputs are read-only during this short admission wait,
-        // which makes the captured value the value being cleared here.
-        const postText = isEditing ? preEditRef.current : '';
+        // Inputs are read-only during this short admission wait, which makes the captured value the
+        // value being cleared here.
+        const postText = '';
         if (mountedRef.current) {
           setText(postText);
-          setSubject('');
-          setMentions([]);
         }
         if (typingTimer.current) clearTimeout(typingTimer.current);
         if (draftTimer.current) clearTimeout(draftTimer.current);
-        if (!isEditing) onDraftChange?.('');
+        onDraftChange?.('');
         // Keep an immediate unmount from restoring the admitted text before React rerenders.
         draftStateRef.current = { ...draftStateRef.current, text: postText };
         emitTyping(false);
-      } else if (!captured && everyAttachmentAdmitted && mountedRef.current) {
-        // Attachment-only submit consumed the old metadata just as the synchronous path did.
-        setSubject('');
-        setMentions([]);
       } else if (capturedAuthoredText !== draftStateRef.current.text) {
         // A render may not have committed between the user's final keystroke and this submit.
         // Preserve the exact submitted copy for the unmount flush when admission failed.
@@ -410,29 +305,13 @@ export function useComposerAuthoringSession({
       .catch(() => undefined);
   };
 
-  const cancelEdit = (): void => {
-    // Restore whatever draft the edit displaced (not blank) so cancelling an edit keeps the draft.
-    setText(preEditRef.current);
-    // Keep an immediate unmount from flushing the edited message as the user's saved draft.
-    // eslint-disable-next-line react-hooks/immutability
-    draftStateRef.current = { ...draftStateRef.current, text: preEditRef.current };
-    onCancelEdit?.();
-  };
-
   return {
     text,
     setText,
-    subject,
-    setSubject,
     trimmed,
-    isEditing,
     canSend,
     submissionPending,
-    mentionMatches,
-    pickMention,
-    setCursor,
     onChangeText,
     submit,
-    cancelEdit,
   };
 }

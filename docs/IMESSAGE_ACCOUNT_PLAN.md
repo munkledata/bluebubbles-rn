@@ -1,8 +1,17 @@
-# iMessage Account screen — server + app implementation plan
+# iMessage Account screen — historical implementation plan
 
-_Status: **IMPLEMENTED 2026-07-18** (server `packages/bbd` + app, both unit-tested). Written 2026-07-18._
+_Historical status: **IMPLEMENTED 2026-07-18**, then **RETIRED 2026-09-16 by `FP-006`**. Written
+2026-07-18 and retained only as an implementation record._
+
+> **Do not implement or verify this plan for the current client.** The current release removed the
+> iCloud endpoint wrapper, capability hook/accessor, Settings entrance, account query/mutation, and
+> alias picker. A direct `/account` route shows a static retirement notice. Stale server
+> `supports_icloud_account` or Private API fields cannot reactivate it, and compatibility with older
+> Flutter/BlueBubbles helper behavior is not a product requirement. Everything below this notice is
+> historical design evidence, not current work or a rollout checklist.
 
 > **What shipped** (both sides, server-TS only — no dylib rebuild):
+>
 > - **Server** (`~/github/BB/bluebubbles-server`, branch `fix/push-delivery-hardening`):
 >   `MessageSender.getAccountInfo()`/`setActiveAlias()` (`get-account-info`/`modify-active-alias`),
 >   new `api/operations/icloudOperations.ts` (`buildIcloudOperations`) registered in `backend.ts`,
@@ -15,6 +24,7 @@ _Status: **IMPLEMENTED 2026-07-18** (server `packages/bbd` + app, both unit-test
 >   1854 app tests pass.
 >
 > **Two divergences from the plan below (found during implementation):**
+>
 > 1. `MessageSender` lives at `packages/bbd/src/messaging/MessageSender.ts`, **not** `api/services/`.
 > 2. bbd's `PrivateApiTransport` nests the helper payload **one level (`res.data`)**, not the legacy
 >    server's `res.data.data`. So `getAccountInfo()` reads `res.data` (with an `res.extra` fallback).
@@ -52,8 +62,10 @@ clone `~/github/bluebubbles-server` (`PrivateApiCloud.ts`, `iCloudInterface.ts`,
 ## Part A — Server (`~/github/BB/bluebubbles-server`, `packages/bbd`)
 
 ### A1. Backing methods on `MessageSender` — template: `checkIMessageAvailability` (`MessageSender.ts:393-404`)
+
 Add two methods (before the closing brace ~line 415), each guarding `this.#transport.isConnected()`
 (throw "requires the Private API" like line 395) then dispatching over the framed UDS transport:
+
 - `getAccountInfo()` → `await this.#transport.send({ action: "get-account-info", data: {} })`; the
   payload nests under `res.data` (upstream reads `data.data`); throw on `res.error`; return the raw dict.
 - `setActiveAlias(alias)` → `await this.#transport.send({ action: "modify-active-alias", data: { alias } })`;
@@ -63,6 +75,7 @@ Add two methods (before the closing brace ~line 415), each guarding `this.#trans
 the existing `sender` dep is the least new plumbing.)
 
 ### A2. New operation group — create `packages/bbd/src/api/operations/icloudOperations.ts`
+
 Copy the shape of `handleOperations.ts` (the closest template — a Private-API read via `deps.sender`).
 Two `defineOperation(...)` entries in a `buildIcloudOperations({ sender }): Operation[]` factory:
 
@@ -82,12 +95,14 @@ Routing/auth are fully declarative — `mountFastify`/`mountSocket` iterate the 
 any `Operation` on REST **and** Socket.IO; `executeOperation` enforces `auth: true`. No adapter edits.
 
 ### A3. Register the group — `packages/bbd/src/backend.ts`
+
 Add `import { buildIcloudOperations } from "./api/operations/icloudOperations";` (near the other
 operation imports ~line 56), and insert `.registerAll(buildIcloudOperations({ sender }))` into the
 registry chain right after `.registerAll(buildHandleOperations({ sender }))` (~line 462). `sender`
 already exists (~line 357). Export the builder from `packages/bbd/src/index.ts` for parity.
 
 ### A4. Advertise the capability flag
+
 - `packages/protocol/src/v1/entities.ts`: add `supports_icloud_account: boolean;` to the
   `ServerInfoV1` interface (~after line 225) — **required or bbd tsc fails.**
 - `packages/bbd/src/api/operations/coreOperations.ts`: in the `server/info` handler (~after line 85)
@@ -97,6 +112,7 @@ already exists (~line 357). Export the builder from `packages/bbd/src/index.ts` 
   private-API-off servers.)
 
 ### A5. Server tests
+
 Clone `packages/bbd/test/handleAvailability.test.ts` (the `FakeTransport` pattern) to assert the
 request action strings (`get-account-info` / `modify-active-alias`) and the **snake→camel
 normalization**. Run the bbd package typecheck + tests.
@@ -104,24 +120,31 @@ normalization**. Run the bbd package typecheck + tests.
 ## Part B — App (`/Users/munkle/github/bluebubbles-rn`)
 
 ### B1. Capability flag → model + hook (mirror `supports_send_contact` exactly)
+
 - `src/core/models/serverInfo.ts`: add `supports_icloud_account: z.boolean().nullish(),` inside the
   `z.object({...})` (after `supports_send_contact`, line 36). The line-45 `.transform` spreads `...s`,
   so no other change.
 - `src/state/sessionStore.ts`: add hook `export const useIcloudAccountSupported = () =>
-  useSessionStore((s) => !!s.serverInfo?.supports_icloud_account);` (after line 85), and (for parity)
+useSessionStore((s) => !!s.serverInfo?.supports_icloud_account);` (after line 85), and (for parity)
   the non-React accessor `icloudAccountSupported` in `sessionAccessors` (after line 73).
 
 ### B2. Gate the Settings entrance — `app/(app)/settings.tsx`
+
 `serverInfo` is already in scope (line 75). Wrap the nav row (~line 400):
+
 ```tsx
-{serverInfo?.supports_icloud_account && (
-  <NavRow label="iMessage Account…" onPress={() => router.push('/account')} />
-)}
+{
+  serverInfo?.supports_icloud_account && (
+    <NavRow label="iMessage Account…" onPress={() => router.push('/account')} />
+  );
+}
 ```
+
 So the row only appears when the server advertises support. The surrounding SERVER section stays
 (Server Management / Health remain).
 
 ### B3. Keep the graceful fallback in `account.tsx`
+
 **Keep** the `'unsupported'` (404 → `UnimplementedEndpointError`) state as defense-in-depth: the flag
 hides the _entrance_, but the screen is still reachable via a deep link (`gator://account`) or a
 null/stale `serverInfo` (capability can flip across reconnects). Removing it would regress that safety.
@@ -133,6 +156,7 @@ shows a generic error. If desired, map a "private API not connected" 500 to a cl
 Private API is off).
 
 ### B4. App tests
+
 Add an `icloudAccountSupported` case to `test/state/sessionCapabilities.test.ts` (parse
 `ServerInfo.parse({ version, supports_icloud_account: true/false })`); a hook test mirroring
 `test/components/hooks/useMessageDeletedSupported.test.tsx`; optionally the wire-contract fixture

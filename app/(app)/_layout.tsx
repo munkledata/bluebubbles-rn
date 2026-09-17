@@ -32,7 +32,6 @@ import {
 import { isDevServer } from '@utils/isDev';
 import { useLockStore } from '@state/lockStore';
 import { useSessionStore } from '@state/sessionStore';
-import { FaceTimeCallOverlay, IncomingFaceTimeOverlay } from '@ui/facetime';
 import { ConnectionBanner } from '@ui/connection';
 import { ServerRotationApprovalHost } from '@ui/server-rotation';
 import { useChatNavigator } from '@ui/useChatNavigator';
@@ -242,10 +241,6 @@ function ConnectedAppLayout(): React.JSX.Element {
     <View style={styles.root}>
       <Stack screenOptions={{ headerShown: false }} />
       <ConnectionBanner onRetry={retryRealtimeConnection} />
-      {/* App-wide so an incoming call rings on any screen; the safe external-browser handoff
-          takes over once answered (and is also used by dev call flows). */}
-      <IncomingFaceTimeOverlay />
-      <FaceTimeCallOverlay />
       <ServerRotationApprovalHost />
     </View>
   );

@@ -20,6 +20,8 @@ import {
 import { createTestDb } from '../support/testDb';
 
 let mockDb: AppDatabase;
+let mockServerRcsEnabled = true;
+const mockPrivateApiEnabled = jest.fn(() => true);
 
 jest.mock('@db/repositories', () => {
   const actual = jest.requireActual<typeof import('@db/repositories')>('@db/repositories');
@@ -33,7 +35,13 @@ jest.mock('@/services/databaseControl', () => ({ ensureDatabase: jest.fn(() => m
 jest.mock('@/services/realtimeControl', () => ({ getSocket: jest.fn(() => null) }));
 jest.mock('@state/featureSettingsStore', () => ({
   useFeatureSettingsStore: {
-    getState: () => ({ privateApiEnabled: true, sendReadReceipts: true, hydrated: true }),
+    getState: () => ({ sendReadReceipts: true, hydrated: true }),
+  },
+}));
+jest.mock('@state/sessionStore', () => ({
+  sessionAccessors: {
+    privateApiEnabled: () => mockPrivateApiEnabled(),
+    rcsEnabled: () => mockServerRcsEnabled,
   },
 }));
 jest.mock('@core/api', () => ({
@@ -59,8 +67,8 @@ function deferred<T>(): Deferred<T> {
 
 const serverChat = (): Chat =>
   Chat.parse({
-    guid: 'iMessage;-;old@example.com',
-    participants: [{ address: 'old@example.com', service: 'iMessage' }],
+    guid: 'RCS;-;old@example.com',
+    participants: [{ address: 'old@example.com', service: 'RCS' }],
   });
 
 const count = (raw: Database.Database, table: 'handles' | 'chats'): number =>
@@ -72,6 +80,8 @@ describe('createNewChat account lease', () => {
   beforeEach(async () => {
     resumeRealtimeDeliveries();
     ({ db: mockDb, raw } = await createTestDb());
+    mockServerRcsEnabled = true;
+    mockPrivateApiEnabled.mockClear();
     mockEnsureDatabase.mockReset().mockImplementation(() => Promise.resolve(mockDb));
     mockCreateChat.mockReset().mockResolvedValue(serverChat());
   });
@@ -82,14 +92,55 @@ describe('createNewChat account lease', () => {
     raw.close();
   });
 
-  it('preserves the ordinary create path and commits the returned chat atomically', async () => {
+  it('creates only through the RCS contract and commits the returned chat atomically', async () => {
     await expect(createNewChat(['old@example.com'], 'hello')).resolves.toBe(
-      'iMessage;-;old@example.com',
+      'RCS;-;old@example.com',
     );
 
     expect(mockCreateChat).toHaveBeenCalledTimes(1);
+    expect(mockCreateChat).toHaveBeenCalledWith(
+      { account: 'captured-by-http-client' },
+      { address: 'old@example.com', message: 'hello' },
+    );
+    expect(mockPrivateApiEnabled).not.toHaveBeenCalled();
     expect(count(raw, 'handles')).toBe(1);
     expect(count(raw, 'chats')).toBe(1);
+  });
+
+  it('rejects multiple recipients before DB or HTTP instead of silently dropping one', async () => {
+    const invalidAddresses = ['first@example.com', 'second@example.com'] as unknown as [string];
+    await expect(createNewChat(invalidAddresses, 'hello')).rejects.toThrow(
+      'requires exactly one recipient',
+    );
+
+    expect(mockEnsureDatabase).not.toHaveBeenCalled();
+    expect(mockCreateChat).not.toHaveBeenCalled();
+  });
+
+  it('creates an RCS chat without consulting an injected legacy Private API flag', async () => {
+    mockCreateChat.mockResolvedValueOnce(
+      Chat.parse({
+        guid: 'RCS;-;+15551234567',
+        participants: [{ address: '+15551234567', service: 'RCS' }],
+      }),
+    );
+
+    await expect(createNewChat(['+15551234567'], 'hello')).resolves.toBe('RCS;-;+15551234567');
+    expect(mockCreateChat).toHaveBeenCalledWith(
+      { account: 'captured-by-http-client' },
+      { address: '+15551234567', message: 'hello' },
+    );
+    expect(mockPrivateApiEnabled).not.toHaveBeenCalled();
+  });
+
+  it('rejects RCS creation before DB or HTTP when the RCS bridge is unavailable', async () => {
+    mockServerRcsEnabled = false;
+
+    await expect(createNewChat(['+15551234567'], 'hello')).rejects.toThrow(
+      'RCS conversation is unavailable',
+    );
+    expect(mockEnsureDatabase).not.toHaveBeenCalled();
+    expect(mockCreateChat).not.toHaveBeenCalled();
   });
 
   it('links the created participant to a device contact after the chat commit', async () => {
@@ -133,6 +184,19 @@ describe('createNewChat account lease', () => {
     expect(mockCreateChat).not.toHaveBeenCalled();
     expect(count(raw, 'handles')).toBe(0);
     expect(count(raw, 'chats')).toBe(0);
+  });
+
+  it('rechecks capability after database setup before starting HTTP', async () => {
+    const database = deferred<AppDatabase>();
+    mockEnsureDatabase.mockReturnValueOnce(database.promise);
+    const create = createNewChat(['old@example.com'], 'hello');
+    expect(mockEnsureDatabase).toHaveBeenCalledTimes(1);
+
+    mockServerRcsEnabled = false;
+    database.resolve(mockDb);
+
+    await expect(create).rejects.toThrow('RCS conversation is unavailable');
+    expect(mockCreateChat).not.toHaveBeenCalled();
   });
 
   it('disowns an accepted A-server response instead of reconciling it into B', async () => {

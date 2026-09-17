@@ -45,6 +45,9 @@ export async function sendReactionMessage(
   commitGuard?: DbCommitGuard,
   serverAuthorization?: MessageTargetServerAuthorization,
 ): Promise<{ tempGuid: string }> {
+  if (!isRcsChatGuid(args.chatGuid)) {
+    throw new Error('iMessage reactions were retired with the Private API helper.');
+  }
   const targetPart = explicitMessageTargetPart(args.targetGuid, args.partIndex);
   if (!targetPart) throw new MessageTargetUnavailableError();
   const target = {
@@ -52,7 +55,7 @@ export async function sendReactionMessage(
     messageGuid: targetPart.messageGuid,
     partIndex: targetPart.partIndex,
     serverAuthorization,
-    allowRcsWholeMessage: isRcsChatGuid(args.chatGuid),
+    allowRcsWholeMessage: true,
   };
   const targetCommitGuard = messageTargetCommitGuard(commitGuard, serverAuthorization);
   const tempGuid = generateTempGuid();
@@ -86,6 +89,9 @@ export async function sendReactionMessage(
   }
 
   try {
+    if (serverAuthorization && !serverAuthorization.isCurrent()) {
+      throw new DbCommitGuardRejectedError();
+    }
     const server = await sendReaction(http, {
       chatGuid: args.chatGuid,
       selectedMessageGuid: finalTarget.messageGuid,
@@ -93,7 +99,7 @@ export async function sendReactionMessage(
       emoji: args.emoji,
       partIndex: finalTarget.partIndex,
     });
-    // Reactions require the Private API, so the ack carries the real GUID on success.
+    // RCS reactions return the same send acknowledgement shape as other message writes.
     await reconcileSendOutcome(db, tempGuid, server, now, commitGuard);
   } catch (e) {
     // A revoked success-settlement owner must not be reinterpreted as a transport failure and

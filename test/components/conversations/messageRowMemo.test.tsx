@@ -91,12 +91,7 @@ const PRIVATE_ACTOR = 'private-event-actor-b80c';
 const PRIVATE_OTHER = 'private-event-member-d197';
 const PRIVATE_GROUP_TITLE = 'private-event-title-993a';
 
-function latestSwipeReply(): (() => void) | undefined {
-  const calls = mockMessageSwipeWrapperRender.mock.calls;
-  return calls.length > 0 ? (calls[calls.length - 1]?.[0] as (() => void) | undefined) : undefined;
-}
-
-function IdentityRows({ onSwipeReply }: { onSwipeReply?: (msg: EnrichedMessage) => void }) {
+function IdentityRows() {
   const groupMessage = makeMsg({
     guid: 'group-message',
     senderName: PRIVATE_SENDER,
@@ -120,14 +115,7 @@ function IdentityRows({ onSwipeReply }: { onSwipeReply?: (msg: EnrichedMessage) 
 
   return (
     <View>
-      <MessageRow
-        msg={groupMessage}
-        older={null}
-        newer={null}
-        isGroup
-        isLastOutgoing={false}
-        onSwipeReply={onSwipeReply}
-      />
+      <MessageRow msg={groupMessage} older={null} newer={null} isGroup isLastOutgoing={false} />
       <MessageRow msg={addEvent} older={null} newer={null} isGroup isLastOutgoing={false} />
       <MessageRow msg={renameEvent} older={null} newer={null} isGroup isLastOutgoing={false} />
     </View>
@@ -211,8 +199,7 @@ describe('MessageRow memo contract', () => {
     expect(renderCount()).toBe(2);
   });
 
-  it('does not expose swipe-to-reply for a normal sent row that still has a temp identity', async () => {
-    const onSwipeReply = jest.fn();
+  it('does not expose swipe-to-reply', async () => {
     const temp = makeMsg({
       guid: 'temp-guidless-ack',
       sendState: 'sent',
@@ -221,24 +208,15 @@ describe('MessageRow memo contract', () => {
     });
 
     await renderWithTheme(
-      <MessageRow
-        msg={temp}
-        older={null}
-        newer={null}
-        isGroup={false}
-        isLastOutgoing={false}
-        onSwipeReply={onSwipeReply}
-      />,
+      <MessageRow msg={temp} older={null} newer={null} isGroup={false} isLastOutgoing={false} />,
     );
 
     expect(mockMessageSwipeWrapperRender).toHaveBeenCalledTimes(1);
-    expect(latestSwipeReply()).toBeUndefined();
-    expect(onSwipeReply).not.toHaveBeenCalled();
+    expect(mockMessageSwipeWrapperRender.mock.calls[0]?.[0]).toBeUndefined();
   });
 
-  it('renders exact sender, avatar, group-event identities, and swipe reply target', async () => {
-    const onSwipeReply = jest.fn();
-    const view = await renderWithTheme(<IdentityRows onSwipeReply={onSwipeReply} />);
+  it('renders exact sender, avatar, and group-event identities', async () => {
+    const view = await renderWithTheme(<IdentityRows />);
     const tree = JSON.stringify(view.toJSON());
 
     for (const canary of [
@@ -256,11 +234,5 @@ describe('MessageRow memo contract', () => {
     expect(
       screen.getByText(`${PRIVATE_ACTOR} named the conversation \"${PRIVATE_GROUP_TITLE}\".`),
     ).toBeTruthy();
-    const swipeReply = latestSwipeReply();
-    expect(swipeReply).toEqual(expect.any(Function));
-    swipeReply?.();
-    expect(onSwipeReply).toHaveBeenCalledWith(
-      expect.objectContaining({ guid: 'group-message', senderName: PRIVATE_SENDER }),
-    );
   });
 });

@@ -7,6 +7,7 @@ import { logger } from '@core/secure';
 import { MessageTargetUnavailableError } from '@db/repositories';
 import { DbCommitGuardRejectedError } from '@db/transaction';
 import { uploadStoreSink } from '@state/uploadStore';
+import { isRcsChatGuid } from '@utils/chat';
 import type { AttachmentUploader } from './sendAttachmentService';
 import { runTrackedUpload } from './trackedUpload';
 import { uploadGate, uploadRegistry } from './uploadControl';
@@ -73,9 +74,7 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
   tempGuid,
   clientAttemptGeneration,
   text,
-  selectedMessageGuid,
-  partIndex,
-  authorizeNetworkStart,
+  assertNetworkStart,
   attachmentGuid,
   name,
   uri,
@@ -83,6 +82,12 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
   totalBytes,
   timeoutMs,
 }) => {
+  // The Private API helper was the only iMessage attachment transport. Keep this leaf-level
+  // boundary even though normal callers already admit only RCS so a stale queue row or direct
+  // invocation cannot revive the retired helper wire shape.
+  if (!isRcsChatGuid(chatGuid)) {
+    throw new Error('iMessage attachments were retired with the Private API helper.');
+  }
   if (
     timeoutMs !== undefined &&
     (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_TIMER_MS)
@@ -185,10 +190,9 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
           const transfer = uploadGate.run(async () => {
             // Cancelled during pre-flight or while queued — never open a socket at all.
             if (stopReason !== null) return null;
-            const authorizedTarget = await authorizeNetworkStart?.();
-            if (stopReason !== null) return null;
             // The approved origin can rotate while file stat or the FIFO gate is pending. This is
             // the last await-free boundary before native code opens the socket.
+            assertNetworkStart?.();
             http.assertTransportCurrent();
             const started = FileSystem.createUploadTask(
               url,
@@ -202,17 +206,7 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
                   chatGuid,
                   tempGuid,
                   name,
-                  method: 'private-api',
                   ...(text === undefined ? {} : { text }),
-                  ...((authorizedTarget?.messageGuid ?? selectedMessageGuid) === undefined
-                    ? {}
-                    : {
-                        selectedMessageGuid: authorizedTarget?.messageGuid ?? selectedMessageGuid!,
-                      }),
-                  ...((authorizedTarget?.messageGuid ?? selectedMessageGuid) === undefined ||
-                  (authorizedTarget?.partIndex ?? partIndex) === undefined
-                    ? {}
-                    : { partIndex: String(authorizedTarget?.partIndex ?? partIndex) }),
                   ...(clientAttemptGeneration == null
                     ? {}
                     : { clientAttemptGeneration: String(clientAttemptGeneration) }),

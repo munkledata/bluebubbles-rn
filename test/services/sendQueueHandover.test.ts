@@ -16,7 +16,7 @@
 import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
-import { Chat, Message } from '@core/models';
+import { Chat } from '@core/models';
 import { logger } from '@core/secure';
 import {
   getChatIdByGuid,
@@ -26,7 +26,6 @@ import {
   outgoingBackoffMs,
   upsertChats,
   upsertHandles,
-  upsertMessages,
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { runDueScheduled } from '@/services/send/scheduleService';
@@ -73,37 +72,6 @@ const noAttachmentIo: OutgoingQueueIO = {
 async function seedChat(db: AppDatabase, guid: string): Promise<void> {
   const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
   await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@b.com' }] })], handles);
-}
-
-async function seedExactTextTarget(
-  db: AppDatabase,
-  guid: string,
-  partIndex: number,
-): Promise<void> {
-  const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
-  const chats = await upsertChats(
-    db,
-    [Chat.parse({ guid: 'c1', participants: [{ address: 'a@b.com' }] })],
-    handles,
-  );
-  await upsertMessages(
-    db,
-    [
-      Message.parse({
-        guid,
-        text: 'target',
-        dateCreated: 500,
-        messagePartTopology: {
-          complete: true,
-          originalPartIndexes: [partIndex],
-          currentParts: [{ index: partIndex, kind: 'text' }],
-          attachmentOwnership: [],
-        },
-      }),
-    ],
-    () => chats.get('c1')!,
-    handles,
-  );
 }
 
 /** Run one synchronous edit after the due SELECT returns but before runDueScheduled can claim it. */
@@ -250,20 +218,15 @@ describe('runDueScheduled — production atomic handover', () => {
   it('uses text edited after the due-list snapshot instead of sending the stale payload', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
-    await seedExactTextTarget(db, 'reply-guid', 0);
     const id = await insertScheduled(db, {
       chatGuid: 'c1',
       text: 'stale text',
       scheduledFor: 1,
-      selectedMessageGuid: 'reply-guid',
-      selectedMessagePartIndex: 0,
     });
     const edit = jest.fn(() => {
       raw.prepare('UPDATE scheduled_messages SET payload = ? WHERE id = ?').run(
         JSON.stringify({
           text: 'edited text',
-          selectedMessageGuid: 'reply-guid',
-          selectedMessagePartIndex: 0,
         }),
         id,
       );
@@ -284,14 +247,10 @@ describe('runDueScheduled — production atomic handover', () => {
       expect(edit).toHaveBeenCalledTimes(1);
       expect(postedBody).toMatchObject({
         text: 'edited text',
-        selectedMessageGuid: 'reply-guid',
-        partIndex: 0,
       });
       expect(raw.prepare('SELECT payload FROM outgoing_queue').get()).toEqual({
         payload: JSON.stringify({
           message: 'edited text',
-          selectedMessageGuid: 'reply-guid',
-          partIndex: 0,
         }),
       });
       expect(raw.prepare("SELECT text FROM messages WHERE send_state = 'sending'").get()).toEqual({
@@ -397,72 +356,34 @@ describe('runDueScheduled — production atomic handover', () => {
     });
   });
 
-  it('commits a one-shot schedule, queue row, optimistic reply, and reply metadata before HTTP resolves', async () => {
+  it('retires a legacy targeted schedule without DB handoff or HTTP', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');
-    await seedExactTextTarget(db, 'original-guid', 0);
-    const id = await insertScheduled(db, {
-      chatGuid: 'c1',
-      text: 'reply later',
-      scheduledFor: 1,
-      selectedMessageGuid: 'original-guid',
-      selectedMessagePartIndex: 0,
-    });
-    const response = deferred<unknown>();
-    const postStarted = deferred<void>();
-    let postedBody: unknown;
-    const http = fakeHttp(async (json) => {
-      postedBody = json;
-      postStarted.resolve(undefined);
-      return response.promise;
-    });
-
-    const run = runDueScheduled(db, http, 1_000);
-    await postStarted.promise;
-    try {
-      expect(await getScheduledById(db, id)).toMatchObject({ status: 'sent' });
-      expect(
-        raw
-          .prepare(
-            `SELECT temp_guid AS tempGuid, chat_guid AS chatGuid, kind, payload
-               FROM outgoing_queue`,
-          )
-          .get(),
-      ).toMatchObject({
-        tempGuid: expect.stringMatching(/^temp-/),
-        chatGuid: 'c1',
-        kind: 'text',
-        payload: JSON.stringify({
-          message: 'reply later',
+    const inserted = raw
+      .prepare(
+        `INSERT INTO scheduled_messages(chat_guid, payload, scheduled_for, status)
+         VALUES (?, ?, 1, 'pending')`,
+      )
+      .run(
+        'c1',
+        JSON.stringify({
+          text: 'reply later',
           selectedMessageGuid: 'original-guid',
-          partIndex: 0,
+          selectedMessagePartIndex: 0,
         }),
-      });
-      expect(
-        raw
-          .prepare(
-            `SELECT guid, text, send_state AS sendState,
-                    thread_originator_guid AS threadOriginatorGuid
-               FROM messages
-              WHERE send_state = 'sending'`,
-          )
-          .get(),
-      ).toMatchObject({
-        guid: expect.stringMatching(/^temp-/),
-        text: 'reply later',
-        sendState: 'sending',
-        threadOriginatorGuid: 'original-guid',
-      });
-      expect(postedBody).toMatchObject({
-        text: 'reply later',
-        selectedMessageGuid: 'original-guid',
-        partIndex: 0,
-      });
-    } finally {
-      response.resolve({ guid: 'real-reply', dateCreated: 2_000, dateDelivered: null });
-    }
+      );
+    const id = Number(inserted.lastInsertRowid);
+    let posts = 0;
+    const http = fakeHttp(async () => {
+      posts += 1;
+      return { guid: 'must-not-send' };
+    });
 
-    await expect(run).resolves.toBe(1);
+    await expect(runDueScheduled(db, http, 1_000)).resolves.toBe(0);
+    expect(await getScheduledById(db, id)).toMatchObject({ status: 'error' });
+    expect(posts).toBe(0);
+    expect(raw.prepare('SELECT COUNT(*) AS count FROM outgoing_queue').get()).toEqual({ count: 0 });
+    expect(raw.prepare('SELECT COUNT(*) AS count FROM messages').get()).toEqual({ count: 0 });
   });
 
   it('re-arms a recurring occurrence exactly once before HTTP resolves', async () => {

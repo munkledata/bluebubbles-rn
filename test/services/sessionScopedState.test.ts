@@ -6,7 +6,6 @@ import {
 } from '@/services/notifications/pendingNav';
 import { claimActiveChat, isActiveChat } from '@/services/notifications/activeChat';
 import { useDownloadStore } from '@state/downloadStore';
-import { useFaceTimeStore } from '@state/faceTimeStore';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useFindMyStore } from '@state/findmyStore';
 import { useLockStore } from '@state/lockStore';
@@ -88,16 +87,6 @@ describe('resetSessionScopedState', () => {
       .getState()
       .start('old-upload', { chatGuid: 'old-chat', name: 'private.jpg', total: 100 });
     useDownloadStore.getState().start('old-download');
-    useFaceTimeStore.getState().open({
-      link: 'facetime://old-call',
-      chatGuid: 'old-chat',
-      video: true,
-    });
-    useFaceTimeStore.getState().ring({
-      uuid: 'old-call-uuid',
-      callerName: 'Previous account caller',
-      isAudio: false,
-    });
     useTypingStore.getState().setTyping('old-chat', true);
     useRcsHealthStore.getState().setAlert('PHONE_NOT_RESPONDING');
     const transportGeneration = useTransportHealthStore.getState().beginLifecycle();
@@ -140,7 +129,6 @@ describe('resetSessionScopedState', () => {
     expect(queryClient.getQueryCache().getAll()).toHaveLength(0);
     expect(useUploadStore.getState().byGuid).toEqual({});
     expect(useDownloadStore.getState()).toMatchObject({ progress: {}, status: {} });
-    expect(useFaceTimeStore.getState()).toMatchObject({ call: null, incoming: null });
     expect(useTypingStore.getState().typing).toEqual({});
     expect(useRcsHealthStore.getState()).toMatchObject({
       lastAlertType: null,

@@ -1,5 +1,4 @@
 import { useDownloadStore } from '@state/downloadStore';
-import { useFaceTimeStore } from '@state/faceTimeStore';
 import { useFindMyStore } from '@state/findmyStore';
 import { queryClient } from '@state/queryClient';
 import { useRcsHealthStore } from '@state/rcsHealthStore';
@@ -26,7 +25,6 @@ export type SessionScopedResetSurface =
   | 'typing'
   | 'active-chat'
   | 'pending-notification'
-  | 'facetime'
   | 'rcs-health'
   | 'transport-health'
   | 'sync'
@@ -71,11 +69,6 @@ export function resetSessionScopedState(): SessionScopedResetResult {
     resetPendingNotification();
   } catch {
     failedSurfaces.push('pending-notification');
-  }
-  try {
-    useFaceTimeStore.getState().reset();
-  } catch {
-    failedSurfaces.push('facetime');
   }
   try {
     useRcsHealthStore.getState().reset();

@@ -52,11 +52,9 @@ jest.mock('@/services/send', () => ({
 
 jest.mock('@features/conversations/devSeed', () => ({
   injectMessage: jest.fn().mockResolvedValue(undefined),
-  devInjectIncomingFaceTime: jest.fn().mockResolvedValue(undefined),
   devQueueIncomingMessageWithoutDrain: jest.fn().mockResolvedValue(undefined),
   devResumeQueuedIncomingMessages: jest.fn().mockResolvedValue(undefined),
   devSendFake: jest.fn().mockResolvedValue(undefined),
-  devSendFakeReply: jest.fn().mockResolvedValue(undefined),
 }));
 
 jest.mock('@utils/isDev', () => ({ isDevServer: jest.fn(() => false) }));
@@ -86,11 +84,9 @@ import {
 } from '@/services/send';
 // eslint-disable-next-line import/first
 import {
-  devInjectIncomingFaceTime,
   devQueueIncomingMessageWithoutDrain,
   devResumeQueuedIncomingMessages,
   devSendFake,
-  devSendFakeReply,
   injectMessage,
 } from '@features/conversations/devSeed';
 // eslint-disable-next-line import/first
@@ -106,7 +102,6 @@ const injectMessageMock = injectMessage as jest.Mock;
 const devQueueIncomingMessageMock = devQueueIncomingMessageWithoutDrain as jest.Mock;
 const devResumeQueuedMessagesMock = devResumeQueuedIncomingMessages as jest.Mock;
 const devSendFakeMock = devSendFake as jest.Mock;
-const devSendFakeReplyMock = devSendFakeReply as jest.Mock;
 
 const STORES = [useFeatureSettingsStore, useSyncSettingsStore, useThemeStore];
 
@@ -151,7 +146,7 @@ describe('Home route — render', () => {
     // __DEV__ is true under jest-expo, so the dev overlay renders its affordances.
     expect(screen.getByText('⚡ Inject')).toBeTruthy();
     expect(screen.queryByText('⏸ Queue')).toBeNull();
-    expect(screen.getByText('📞 FaceTime')).toBeTruthy();
+    expect(screen.queryByText('📞 FaceTime')).toBeNull();
     expect(screen.getByText('📍 Find My')).toBeTruthy();
     expect(screen.getByText('Disconnect')).toBeTruthy();
   });
@@ -203,7 +198,7 @@ describe('Home route — boot-completion side-effects', () => {
     expect(fireDueScheduled).not.toHaveBeenCalled();
   });
 
-  it('threads the Home mount lease into DEV scheduled send and reply fixtures', async () => {
+  it('threads the Home mount lease into plain DEV scheduled sends and rejects stale replies', async () => {
     isDevServerMock.mockReturnValue(true);
     fireDueScheduledWithDevelopmentSenderMock.mockImplementationOnce(
       async (
@@ -218,8 +213,10 @@ describe('Home route — boot-completion side-effects', () => {
       ) => {
         expect(accountLease.isCurrent()).toBe(true);
         await sender('plain-chat', 'plain', undefined, async () => undefined);
-        await sender('reply-chat', 'reply', 'reply-target', async () => undefined, 2);
-        return 2;
+        await expect(
+          sender('reply-chat', 'reply', 'reply-target', async () => undefined, 2),
+        ).rejects.toThrow('Scheduled replies were retired');
+        return 1;
       },
     );
 
@@ -234,15 +231,7 @@ describe('Home route — boot-completion side-effects', () => {
       accountLease,
       expect.any(Function),
     );
-    expect(devSendFakeReplyMock).toHaveBeenCalledWith(
-      'reply-chat',
-      'reply',
-      'reply-target',
-      2,
-      undefined,
-      accountLease,
-      expect.any(Function),
-    );
+    expect(devSendFakeMock).toHaveBeenCalledTimes(1);
   });
 
   it('swallows a failed scheduled catch-up — the inbox still renders, no throw', async () => {
@@ -313,7 +302,7 @@ describe('Home route — boot-completion side-effects', () => {
 });
 
 describe('Home route — DEV overlay actions', () => {
-  it('kicks inject, queue-without-drain, and FaceTime helpers from their buttons', async () => {
+  it('kicks the retained inject and queue-without-drain helpers from their buttons', async () => {
     isDevServerMock.mockReturnValue(true);
     await renderWithTheme(<Home />);
     fireEvent.press(screen.getByText('⚡ Inject'));
@@ -325,12 +314,6 @@ describe('Home route — DEV overlay actions', () => {
     fireEvent.press(screen.getByText('⏸ Queue'));
     await waitFor(() =>
       expect(devQueueIncomingMessageWithoutDrain).toHaveBeenCalledWith(
-        expect.objectContaining({ isCurrent: expect.any(Function) }),
-      ),
-    );
-    fireEvent.press(screen.getByText('📞 FaceTime'));
-    await waitFor(() =>
-      expect(devInjectIncomingFaceTime).toHaveBeenCalledWith(
         expect.objectContaining({ isCurrent: expect.any(Function) }),
       ),
     );
@@ -371,13 +354,11 @@ describe('Home route — DEV overlay actions', () => {
     // sequence so the test itself does not leave overlapping act scopes behind for the next case.
     await fireEvent.press(screen.getByText('⚡ Inject'));
     await fireEvent.press(screen.getByText('⏸ Queue'));
-    await fireEvent.press(screen.getByText('📞 FaceTime'));
     await fireEvent.press(screen.getByText('📍 Find My'));
     await fireEvent.press(screen.getByText('Disconnect'));
 
     expect(injectMessage).not.toHaveBeenCalled();
     expect(devQueueIncomingMessageWithoutDrain).not.toHaveBeenCalled();
-    expect(devInjectIncomingFaceTime).not.toHaveBeenCalled();
     expect(mockPush).not.toHaveBeenCalled();
     expect(forget).not.toHaveBeenCalled();
   });

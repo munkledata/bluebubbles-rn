@@ -1,6 +1,6 @@
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
-import { Chat, Message } from '@core/models';
+import { ServerInfo } from '@core/models';
 import { sql } from 'drizzle-orm';
 import {
   claimDueScheduled,
@@ -22,49 +22,16 @@ import {
   resetStuckScheduled,
   SCHED_MAX_ATTEMPTS,
   updateScheduled,
-  upsertChats,
-  upsertHandles,
-  upsertMessages,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import { nextOccurrence } from '@core/schedule';
 import * as scheduledApi from '@core/api/endpoints/scheduled';
 import { ScheduledItem } from '@core/api/endpoints/scheduled';
 import { runDueScheduled, scheduleTextMessage } from '@/services/send/scheduleService';
+import { fixedRcsCapabilitySource } from '@/services/send/rcsAttemptCapability';
 import { createTestDb } from '../support/testDb';
 
 const noHttp = {} as unknown as HttpClient;
-
-async function seedExactTextTarget(
-  db: Awaited<ReturnType<typeof createTestDb>>['db'],
-  guid: string,
-  partIndex: number,
-): Promise<void> {
-  const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
-  const chats = await upsertChats(
-    db,
-    [Chat.parse({ guid: 'c1', participants: [{ address: 'a@b.com' }] })],
-    handles,
-  );
-  await upsertMessages(
-    db,
-    [
-      Message.parse({
-        guid,
-        text: 'target',
-        dateCreated: 500,
-        messagePartTopology: {
-          complete: true,
-          originalPartIndexes: [partIndex],
-          currentParts: [{ index: partIndex, kind: 'text' }],
-          attachmentOwnership: [],
-        },
-      }),
-    ],
-    () => chats.get('c1')!,
-    handles,
-  );
-}
 
 describe('scheduled messages repo', () => {
   it('inserts, lists (parsed text + pending), and deletes', async () => {
@@ -77,19 +44,20 @@ describe('scheduled messages repo', () => {
     expect(await listAllScheduled(db)).toHaveLength(0);
   });
 
-  it('round-trips a reply target and part through the payload', async () => {
-    const { db } = await createTestDb();
-    await seedExactTextTarget(db, 'orig-guid', 2);
-    await insertScheduled(db, {
-      chatGuid: 'c1',
-      text: 'threaded',
-      scheduledFor: 1,
-      selectedMessageGuid: 'orig-guid',
-      selectedMessagePartIndex: 2,
+  it('rejects a new targeted iMessage schedule before storing it', async () => {
+    const { db, raw } = await createTestDb();
+    await expect(
+      insertScheduled(db, {
+        chatGuid: 'c1',
+        text: 'threaded',
+        scheduledFor: 1,
+        selectedMessageGuid: 'orig-guid',
+        selectedMessagePartIndex: 2,
+      }),
+    ).rejects.toBeInstanceOf(MessageTargetUnavailableError);
+    expect(raw.prepare('SELECT COUNT(*) AS count FROM scheduled_messages').get()).toEqual({
+      count: 0,
     });
-    const [row] = await listDueScheduled(db, 1000);
-    expect(row?.selectedMessageGuid).toBe('orig-guid');
-    expect(row?.selectedMessagePartIndex).toBe(2);
   });
 
   it('rejects a new targeted RCS schedule before storing it', async () => {
@@ -523,13 +491,10 @@ describe('scheduled messages repo', () => {
 
     it('claims only a still-due local row and returns its authoritative payload', async () => {
       const { db } = await createTestDb();
-      await seedExactTextTarget(db, 'reply-guid', 2);
       const dueId = await insertScheduled(db, {
         chatGuid: 'c1',
         text: 'before edit',
         scheduledFor: 100,
-        selectedMessageGuid: 'reply-guid',
-        selectedMessagePartIndex: 2,
       });
       const futureId = await insertScheduled(db, {
         chatGuid: 'c1',
@@ -548,7 +513,7 @@ describe('scheduled messages repo', () => {
         id: dueId,
         status: 'sending',
         text: 'after edit',
-        selectedMessageGuid: 'reply-guid',
+        selectedMessageGuid: undefined,
       });
       await expect(claimDueScheduled(db, futureId, 1_000)).resolves.toBeNull();
       await expect(claimDueScheduled(db, serverId, 1_000)).resolves.toBeNull();
@@ -573,22 +538,53 @@ describe('scheduled messages repo', () => {
   });
 
   describe('runDueScheduled', () => {
-    it('fires due rows via the injected sender (with reply guid) then marks them sent', async () => {
+    it.each([null, 'daily' as const])(
+      'defers an RCS %s schedule without spending an attempt while the bridge is unavailable',
+      async (recurrence) => {
+        const { db, raw } = await createTestDb();
+        const id = await insertScheduled(db, {
+          chatGuid: 'RCS;-;temporarily-unavailable',
+          text: 'wait for the bridge',
+          scheduledFor: 1,
+          recurrence,
+        });
+        let http!: HttpClient;
+        http = {
+          pinTransport: () => http,
+          isTransportCurrent: () => true,
+          assertTransportCurrent: () => undefined,
+        } as unknown as HttpClient;
+
+        await expect(
+          runDueScheduled(db, http, 1_000, undefined, undefined, undefined, () =>
+            fixedRcsCapabilitySource(ServerInfo.parse({ version: '2.0.0', rcs: false })),
+          ),
+        ).resolves.toBe(0);
+
+        expect(await getScheduledById(db, id)).toMatchObject({
+          status: 'pending',
+          scheduledFor: 1,
+          recurrence,
+        });
+        expect(raw.prepare('SELECT attempts FROM scheduled_messages WHERE id = ?').get(id)).toEqual(
+          { attempts: 0 },
+        );
+      },
+    );
+
+    it('fires a plain due row via the injected sender then marks it sent', async () => {
       const { db } = await createTestDb();
-      await seedExactTextTarget(db, 'r1', 2);
       await insertScheduled(db, {
         chatGuid: 'c1',
         text: 'fire',
         scheduledFor: 1,
-        selectedMessageGuid: 'r1',
-        selectedMessagePartIndex: 2,
       });
       const calls: Array<[string, string, string | undefined, number | undefined]> = [];
       const fired = await runDueScheduled(db, noHttp, 1000, async (g, t, s, _settle, p) => {
         calls.push([g, t, s, p]);
       });
       expect(fired).toBe(1);
-      expect(calls).toEqual([['c1', 'fire', 'r1', 2]]);
+      expect(calls).toEqual([['c1', 'fire', undefined, undefined]]);
       expect(await listAllScheduled(db)).toHaveLength(0); // now 'sent'
     });
 
@@ -883,6 +879,29 @@ describe('scheduled messages repo', () => {
       }
     });
 
+    it('keeps a one-shot RCS message local so the retained RCS sender fires it', async () => {
+      const { db } = await createTestDb();
+      const spy = jest
+        .spyOn(scheduledApi, 'createScheduled')
+        .mockResolvedValue({ id: 'wrong-apple-script-owner' } as never);
+      try {
+        const { serverId } = await scheduleTextMessage(db, noHttp, {
+          chatGuid: 'RCS;-;scheduled-thread',
+          text: 'send over RCS later',
+          scheduledFor: 1000,
+        });
+
+        expect(spy).not.toHaveBeenCalled();
+        expect(serverId).toBeNull();
+        expect((await listAllScheduled(db))[0]).toMatchObject({
+          chatGuid: 'RCS;-;scheduled-thread',
+          serverId: null,
+        });
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
     it('rearmScheduled only re-arms a CLAIMED row (preserves the claim contract)', async () => {
       const { db } = await createTestDb();
       const id = await insertScheduled(db, { chatGuid: 'c1', text: 'x', scheduledFor: 1 });
@@ -1033,21 +1052,18 @@ describe('scheduled messages repo', () => {
   });
 
   describe('updateScheduled', () => {
-    it('updates the text while preserving the reply target', async () => {
+    it('updates the text of a plain schedule', async () => {
       const { db } = await createTestDb();
-      await seedExactTextTarget(db, 'orig', 2);
       const id = await insertScheduled(db, {
         chatGuid: 'c1',
         text: 'old',
         scheduledFor: 1000,
-        selectedMessageGuid: 'orig',
-        selectedMessagePartIndex: 2,
       });
       await updateScheduled(db, id, { text: 'new' });
       const row = await getScheduledById(db, id);
       expect(row?.text).toBe('new');
-      expect(row?.selectedMessageGuid).toBe('orig'); // JSON merge kept the reply target
-      expect(row?.selectedMessagePartIndex).toBe(2);
+      expect(row?.selectedMessageGuid).toBeUndefined();
+      expect(row?.selectedMessagePartIndex).toBeUndefined();
     });
 
     it('updates the fire time', async () => {

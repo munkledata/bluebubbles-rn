@@ -104,10 +104,8 @@ export default function SettingsScreen(): React.JSX.Element {
   const [secureScreen, setSecureScreen] = useState<SecureScreenState>(getSecureScreenState);
   const maxDownloads = useFeatureSettingsStore((s) => s.maxConcurrentDownloads);
   const setMaxDownloads = useFeatureSettingsStore((s) => s.setMaxConcurrentDownloads);
-  const privateApiEnabled = useFeatureSettingsStore((s) => s.privateApiEnabled);
   const sendTypingIndicators = useFeatureSettingsStore((s) => s.sendTypingIndicators);
   const sendReadReceipts = useFeatureSettingsStore((s) => s.sendReadReceipts);
-  const sendSubjectLines = useFeatureSettingsStore((s) => s.sendSubjectLines);
   const autoDownload = useFeatureSettingsStore((s) => s.autoDownloadAttachments);
   const autoDownloadWifiOnly = useFeatureSettingsStore((s) => s.autoDownloadOnWifiOnly);
   const autoDownloadDestination = useFeatureSettingsStore((s) => s.autoDownloadDestination);
@@ -173,7 +171,7 @@ export default function SettingsScreen(): React.JSX.Element {
     contacts: 'contacts sync names photos address book',
     general:
       'general app lock biometric secure screen screenshot recording capture reminders backup find my location',
-    messaging: 'messaging private api typing indicators read receipts subject lines',
+    messaging: 'messaging typing indicators read receipts rcs privacy',
     conversation: 'conversation message view send with return enter delivery timestamps',
     chatlist:
       'chat list conversations compact dense appearance unknown senders filter spam folders groups organize',
@@ -185,9 +183,9 @@ export default function SettingsScreen(): React.JSX.Element {
     privacy:
       'privacy encryption key rotate security storage files plaintext attachments cache logs wallpaper backups app private error reports crashes diagnostics consent share',
     server:
-      'server connection live updates connecting reconnecting offline retry management restart logs statistics health diagnostics private api find my keys push uptime alerts account alias apple id imessage start chats using',
+      'server connection live updates connecting reconnecting offline retry management restart logs statistics health diagnostics retired features rcs find my keys push uptime alerts',
     about:
-      'about app version build server version macos private api disconnect forget app logs debug diagnostics privacy data storage legal license notices third-party internal testing',
+      'about app version build server version macos disconnect forget app logs debug diagnostics privacy data storage legal license notices third-party internal testing',
   } as const;
   const match = (terms: string): boolean => q.length === 0 || terms.includes(q);
   const anyMatch = Object.values(SECTIONS).some(match);
@@ -569,32 +567,18 @@ export default function SettingsScreen(): React.JSX.Element {
         {match(SECTIONS.messaging) && (
           <SettingsSection label="MESSAGING" style={styles.gap}>
             <SwitchRow
-              label="Enable Private API Features"
-              value={privateApiEnabled}
-              onValueChange={(v) => void setFlag('privateApiEnabled', v)}
-              accessibilityLabel="Enable typing indicators, read receipts, and other Private API features"
-            />
-            <SwitchRow
               label="Send Typing Indicators"
               value={sendTypingIndicators}
-              disabled={!privateApiEnabled}
               onValueChange={(v) => void setFlag('sendTypingIndicators', v)}
-              accessibilityLabel="Let others see when you are typing"
+              accessibilityLabel="Let others see when you are typing on supported services"
             />
             <SwitchRow
               label="Send Read Receipts"
               value={sendReadReceipts}
-              disabled={!privateApiEnabled}
               onValueChange={(v) => void setFlag('sendReadReceipts', v)}
-              accessibilityLabel="Let others see when you have read their messages"
+              accessibilityLabel="Let others see when you have read their messages on supported services"
             />
-            <SwitchRow
-              label="Send Subject Lines"
-              value={sendSubjectLines}
-              disabled={!privateApiEnabled}
-              onValueChange={(v) => void setFlag('sendSubjectLines', v)}
-              accessibilityLabel="Show a subject-line field above the message composer"
-            />
+            <NoteRow text="These preferences apply only when the connected messaging service supports them. They do not enable retired Private API features." />
           </SettingsSection>
         )}
 
@@ -749,11 +733,6 @@ export default function SettingsScreen(): React.JSX.Element {
               label="Live Updates"
               value={accountCurrent ? transportHealthStatusLabel(transportStatus) : '—'}
             />
-            {/* Only when the server advertises the icloud/account endpoints (Private API on). The
-                account screen keeps its own 404 fallback for a deep link / stale serverInfo. */}
-            {visibleServerInfo?.supports_icloud_account && (
-              <NavRow label="iMessage Account…" onPress={() => router.push('/account')} />
-            )}
             <NavRow label="Server Management…" onPress={() => router.push('/server-management')} />
             <NavRow label="Server Health…" onPress={() => router.push('/server-health')} />
           </SettingsSection>
@@ -766,10 +745,7 @@ export default function SettingsScreen(): React.JSX.Element {
             <InfoRow label="Server" value={visibleOrigin ?? '—'} />
             <InfoRow label="Server Version" value={visibleServerInfo?.server_version ?? '—'} />
             <InfoRow label="macOS" value={visibleServerInfo?.os_version ?? '—'} />
-            <InfoRow
-              label="Private API"
-              value={visibleServerInfo?.private_api ? 'Enabled' : 'Disabled'}
-            />
+            <InfoRow label="Private API" value="Retired in this release" />
             <NavRow
               label="Privacy & Data Use…"
               onPress={() => router.push('/storage-privacy')}

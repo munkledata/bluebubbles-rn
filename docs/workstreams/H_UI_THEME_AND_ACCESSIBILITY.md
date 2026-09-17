@@ -103,11 +103,11 @@ targets, keyboard and navigation modes, privacy labels, and every supported orie
 evidence is required wherever host rendering cannot prove native focus, announcements, clipping, or
 gesture behavior.
 
-The incoming FaceTime overlay must keep Answer and Decline reachable when fonts grow. Action controls
-use content-driven dimensions with minimum touch targets and padding rather than fixed text-container
-heights; caller and action text may wrap or shrink within bounded columns without shrinking away the
-action row. Host style checks support this contract, but maximum-font, short-screen, and TalkBack
-behavior still require device evidence.
+The former incoming FaceTime overlay large-text contract is historical evidence only. `FP-006`
+removes the overlay and Answer/Decline controls, so they no longer contribute to the current
+accessibility device matrix. Any future `POST-FACE-01` implementation must define and verify its own
+large-text, touch-target, short-screen, and TalkBack contract rather than inheriting a pass from the
+retired UI.
 
 <a id="test-01"></a>
 

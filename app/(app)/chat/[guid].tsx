@@ -1,11 +1,6 @@
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useNavigation, useRoute, useRouter } from 'expo-router';
 import { usePreventRemove } from 'expo-router/react-navigation';
-import {
-  isAggregateRetractionTombstone,
-  isExactMessagePartTopology,
-} from '@core/messages/retraction';
-import { parseMessagePartTopology } from '@core/models';
 import type { Recurrence } from '@core/schedule';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -18,28 +13,18 @@ import {
 } from 'react-native';
 import { showConfirm, showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import {
-  DRAFT_KV_PREFIX,
-  getChatParticipants,
-  kvGet,
-  type MessagePreview,
-  type MessageWindowAnchor,
-} from '@db/repositories';
-import { useReactiveQuery } from '@db/useReactiveQuery';
-import { dispatchRealtimeEvent, saveChatDraft, sendTyping } from '@/services';
+import { DRAFT_KV_PREFIX, kvGet, type MessageWindowAnchor } from '@db/repositories';
+import { saveChatDraft, sendTyping } from '@/services';
 import { getDatabase } from '@db/database';
 import { getContactsPermissionState } from '@/services/contacts/contactsService';
-import { readMessagePreview } from '@/services/messagePreview';
 import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
 } from '@/services/realtime/deliveryCoordinator';
 import {
-  editText,
   hasLogicalSendCapacity,
   isContactsPermissionDeniedError,
   pickAndSendContact,
-  reply,
   schedule,
   send,
   sendImage,
@@ -48,13 +33,8 @@ import {
   type AttachmentQueueAdmission,
 } from '@/services/send';
 import { logger } from '@core/secure';
-import { useSendAttachmentTextSupported, useSendContactSupported } from '@state/sessionStore';
-import {
-  devEditFake,
-  devInjectEffect,
-  devSendFake,
-  devSendFakeReply,
-} from '@features/conversations/devSeed';
+import { useSendAttachmentTextSupported, useSessionStore } from '@state/sessionStore';
+import { devSendFake } from '@features/conversations/devSeed';
 import { useChatHeader } from '@features/conversations/useChatHeader';
 import { useChatSearch } from '@features/conversations/useChatSearch';
 import { useMessageActions } from '@features/conversations/useMessageActions';
@@ -75,9 +55,9 @@ import {
   MessageDetailsSheet,
   MessageList,
   Screen,
+  ScreenEffectOverlay,
   showToast,
   ThreadSheet,
-  ScreenEffectOverlay,
   TypingBubble,
   UploadStatusBar,
   useTheme,
@@ -94,7 +74,6 @@ import {
 import { LoadErrorBoundary } from '@ui/LoadErrorBoundary';
 import { presentSendIssue } from '@ui/conversations/sendNotices';
 import { useTypingStore } from '@state/typingStore';
-import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useShareIntentStore } from '@state/shareIntentStore';
 import { isGroupRow, resolveChatService, resolveTitle } from '@utils';
 
@@ -246,6 +225,9 @@ function ChatScreenInner({
   // The chat's service for the badge, composer placeholder, and outgoing-bubble colour. Resolved
   // from the participant handle service (not just the guid prefix) so an SMS-only thread reads SMS.
   const chatService = resolveChatService(guid, header.data?.handleServices);
+  const rcsAvailable = useSessionStore((s) => s.serverInfo?.rcs === true);
+  const rcsInteractiveFeaturesAvailable = rcsAvailable && chatService === 'RCS';
+  const attachmentFeaturesAvailable = rcsInteractiveFeaturesAvailable;
   const supportsSendAttachmentText = useSendAttachmentTextSupported(chatService);
   // Search hits, reminders, unread jumps, and thread jumps all use exact message identity. The DB
   // resolves that identity to a stable (date,id) window, so null/equal timestamps cannot strand the
@@ -443,68 +425,12 @@ function ChatScreenInner({
     void moveToSearchResult(searchIndex - 1);
   }, [moveToSearchResult, searchIndex]);
   const isTyping = useTypingStore((s) => !!s.typing[guid]);
-  const sendSubjectLines = useFeatureSettingsStore((s) => s.sendSubjectLines);
-  // Group participants for @mention autocomplete (reactive so contact-sync name updates flow in).
-  const { data: participants } = useReactiveQuery<{ address: string; name: string }[]>(
-    async () => (isGroup ? getChatParticipants(getDatabase(), guid) : []),
-    ['chat_handles', 'handles'],
-    [guid, isGroup],
-  );
-  const [replyTo, setReplyTo] = useState<MessagePreview | null>(null);
-  const [editing, setEditing] = useState<{
-    guid: string;
-    text: string;
-    partIndex: number;
-  } | null>(null);
   const [recording, setRecording] = useState(false);
-  const replyGuid = replyTo?.guid;
-  const replyTargetPartIndex = replyTo?.targetPartIndex;
-
-  // Reply previews are snapshots. Re-read the exact part whenever the live message window changes
-  // so an unsend cannot remain quoted in the composer after the authoritative DB row updates.
   useEffect(() => {
-    if (replyGuid == null || replyTargetPartIndex == null) return;
-    let alive = true;
-    void runTrackedRealtimeWork(accountLease, async () => {
-      const preview = await readMessagePreview(replyGuid, replyTargetPartIndex);
-      if (!alive || !accountLease.isCurrent()) return;
-      setReplyTo((current) => {
-        if (current?.guid !== replyGuid || current.targetPartIndex !== replyTargetPartIndex) {
-          return current;
-        }
-        return preview?.isRetracted
-          ? null
-          : preview
-            ? { ...preview, targetPartIndex: replyTargetPartIndex }
-            : null;
-      });
-    }).catch(() => {
-      if (!alive || !accountLease.isCurrent()) return;
-      setReplyTo((current) =>
-        current?.guid === replyGuid && current.targetPartIndex === replyTargetPartIndex
-          ? null
-          : current,
-      );
-    });
-    return () => {
-      alive = false;
-    };
-  }, [accountLease, messages, replyGuid, replyTargetPartIndex]);
-
-  useEffect(() => {
-    if (!editing) return;
-    const current = messages.find((message) => message.guid === editing.guid);
-    const topology = parseMessagePartTopology(current?.messagePartTopology);
-    const editedPartSurvives =
-      current?.retractionState !== 'partial' ||
-      (isExactMessagePartTopology(topology) &&
-        topology.currentParts.some(
-          (part) => part.index === editing.partIndex && part.kind === 'text',
-        ));
-    if (current && !isAggregateRetractionTombstone(current) && editedPartSurvives) return;
+    if (attachmentFeaturesAvailable) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setEditing(null);
-  }, [editing, messages]);
+    setRecording(false);
+  }, [attachmentFeaturesAvailable]);
 
   // Dormant future bounded-share handoff. IPC-01 currently exposes no inbound Android share target,
   // so production navigation never supplies `?share=1`. If an owned bounded intake is added later,
@@ -536,18 +462,11 @@ function ChatScreenInner({
   // screen doesn't re-render the composer through fresh closures.
   const onSchedule = useCallback(
     (text: string, scheduledFor: number, recurrence?: Recurrence | null): void => {
-      if (replyTo && replyTo.targetPartIndex == null) {
-        showToast('That message part is not available to reply to yet');
-        return;
-      }
-      // Capture the active reply target so a scheduled reply still threads.
       void schedule(
         {
           chatGuid: guid,
           text,
           scheduledFor,
-          selectedMessageGuid: replyTo?.guid,
-          selectedMessagePartIndex: replyTo?.targetPartIndex,
           recurrence,
         },
         accountLease,
@@ -556,83 +475,20 @@ function ChatScreenInner({
         logger.warn('[chat] could not schedule message', error);
         showDialog('Scheduled', 'Couldn’t schedule that message.');
       });
-      setReplyTo(null);
     },
-    [accountLease, guid, replyTo],
+    [accountLease, guid],
   );
 
   const onSend = useCallback(
-    (
-      text: string,
-      effectId?: string,
-      subject?: string,
-      mentions?: { start: number; length: number; address: string }[],
-    ): void | Promise<boolean> => {
+    (text: string): Promise<boolean> => {
       // DEV: when on the local dev session, simulate the server round-trip so the
       // optimistic → sent flow is visible without a real Gator server.
-      if (editing) {
-        const g = editing.guid;
-        const partIndex = editing.partIndex;
-        setEditing(null);
-        if (isDev()) void devEditFake(g, text, partIndex, accountLease);
-        else
-          void editText({ messageGuid: g, newText: text, chatGuid: guid, partIndex }, accountLease);
-        return;
-      }
-      if (replyTo) {
-        const capturedReply = replyTo;
-        const partIndex = replyTo.targetPartIndex;
-        if (partIndex == null) {
-          showToast('That message part is not available to reply to yet');
-          return Promise.resolve(false);
-        }
-        return observeQueueAdmission(
-          (onQueued) => {
-            if (isDev()) {
-              return devSendFakeReply(
-                guid,
-                text,
-                capturedReply.guid,
-                partIndex,
-                effectId,
-                accountLease,
-                onQueued,
-              );
-            }
-            return reply(
-              {
-                chatGuid: guid,
-                text,
-                replyToGuid: capturedReply.guid,
-                replyToPartIndex: partIndex,
-                effectId,
-              },
-              accountLease,
-              presentSendIssue,
-              onQueued,
-            );
-          },
-          () => setReplyTo((current) => (current === capturedReply ? null : current)),
-          (error) => {
-            if (!accountLease.isCurrent()) return;
-            logger.warn('[chat] reply queue admission failed', error);
-            showToast(
-              'Couldn’t queue that reply. Your draft is still here—try again when connected',
-            );
-          },
-        );
-      }
       return observeQueueAdmission(
         (onQueued) => {
           if (isDev()) {
-            return devSendFake(guid, text, effectId, accountLease, onQueued);
+            return devSendFake(guid, text, undefined, accountLease, onQueued);
           }
-          return send(
-            { chatGuid: guid, text, effectId, subject, mentions },
-            accountLease,
-            presentSendIssue,
-            onQueued,
-          );
+          return send({ chatGuid: guid, text }, accountLease, presentSendIssue, onQueued);
         },
         () => undefined,
         (error) => {
@@ -644,12 +500,10 @@ function ChatScreenInner({
         },
       );
     },
-    [accountLease, guid, editing, replyTo, isDev],
+    [accountLease, guid, isDev],
   );
 
-  // The long-press menu / multi-select / swipe-reply handlers (selected, selectedGuids, and
-  // threadFor state live in the hook). onLongPressMessage / onSwipeReply / onToggleSelect are
-  // STABLE — they feed the memoized MessageList → MessageRow chain (see useMessageActions).
+  // Long-press and multi-select handlers. Stable callbacks feed the memoized list/row chain.
   const {
     selected,
     setSelected,
@@ -664,17 +518,13 @@ function ChatScreenInner({
     setDetails,
     onDetailsSelected,
     onLongPressMessage,
-    onSwipeReply,
     onToggleSelect,
     onEnterSelect,
     onBulkCopy,
     onBulkDelete,
     onViewThreadSelected,
-    onEditSelected,
-    onUnsendSelected,
     onCancelSelected,
     onReact,
-    onReplyToSelected,
     onCopySelected,
     onShareSelected,
     onDeleteSelected,
@@ -686,9 +536,14 @@ function ChatScreenInner({
     messages,
     chatTitle: header.data ? resolveTitle(header.data) : 'Gator',
     accountLease,
-    setReplyTo,
-    setEditing,
   });
+  const actionSelected = useMemo(() => {
+    if (!selected) return null;
+    return {
+      ...selected,
+      canReact: selected.canReact === true && rcsInteractiveFeaturesAvailable,
+    };
+  }, [rcsInteractiveFeaturesAvailable, selected]);
 
   const toggleSearch = useCallback((): void => {
     if (searchOpenRef.current) {
@@ -736,16 +591,11 @@ function ChatScreenInner({
   );
 
   const [composerRemovalState, setComposerRemovalState] = useState<ComposerRemovalState>({
-    hasUnsavedEdit: false,
     hasUnsavedDraftMetadata: false,
   });
   const backConfirmationPendingRef = useRef(false);
   const shouldHandleBack =
-    searchOpen ||
-    selectedGuids != null ||
-    replyTo != null ||
-    editing != null ||
-    composerRemovalState.hasUnsavedDraftMetadata;
+    searchOpen || selectedGuids != null || composerRemovalState.hasUnsavedDraftMetadata;
 
   // Android/Header Back peels the active chat layer before removing the route. Ordinary body text
   // is not included: Composer already flushes it to the per-chat DB draft on route removal.
@@ -758,38 +608,11 @@ function ChatScreenInner({
       setSelectedGuids(null);
       return;
     }
-    if (editing != null) {
-      if (!composerRemovalState.hasUnsavedEdit) {
-        setEditing(null);
-        return;
-      }
-      if (backConfirmationPendingRef.current) return;
-      backConfirmationPendingRef.current = true;
-      showConfirm({
-        title: 'Discard message edit?',
-        message: 'The changes to this message will be lost.',
-        confirmText: 'Discard',
-        destructive: true,
-        onCancel: () => {
-          backConfirmationPendingRef.current = false;
-        },
-        onConfirm: () => {
-          backConfirmationPendingRef.current = false;
-          setEditing(null);
-        },
-      });
-      return;
-    }
-    if (replyTo != null) {
-      setReplyTo(null);
-      return;
-    }
     if (!composerRemovalState.hasUnsavedDraftMetadata || backConfirmationPendingRef.current) return;
     backConfirmationPendingRef.current = true;
     showConfirm({
-      title: 'Discard message attachments and options?',
-      message:
-        'Attachments, the subject, and mention details are not part of the saved text draft.',
+      title: 'Discard message attachments?',
+      message: 'Attachments are not part of the saved text draft.',
       confirmText: 'Discard',
       destructive: true,
       onCancel: () => {
@@ -806,13 +629,15 @@ function ChatScreenInner({
   // previews (the tray handles photos/videos itself; this covers PDFs/other files). No popup
   // beyond the OS document picker itself.
   const pickFiles = useCallback(
-    (): Promise<PendingAttachment[]> => pickDocumentFilesForLease(accountLease),
-    [accountLease],
+    (): Promise<PendingAttachment[]> =>
+      attachmentFeaturesAvailable ? pickDocumentFilesForLease(accountLease) : Promise.resolve([]),
+    [accountLease, attachmentFeaturesAvailable],
   );
 
   // The rest of the Composer's callback props, useCallback-stable for the same memo reason.
   const onSendAttachments = useCallback(
     (items: PendingAttachment[]): Promise<readonly string[]> => {
+      if (!attachmentFeaturesAvailable) return Promise.resolve([]);
       const expectedUris = new Set(items.map((item) => item.uri));
       const decidedUris = new Set<string>();
       const queuedUris = new Set<string>();
@@ -876,30 +701,12 @@ function ChatScreenInner({
         );
       });
     },
-    [accountLease, guid],
+    [accountLease, attachmentFeaturesAvailable, guid],
   );
   const onSendTextAttachment = useCallback(
-    (
-      text: string,
-      item: PendingAttachment,
-      effectId?: string,
-      subject?: string,
-      mentions?: { start: number; length: number; address: string }[],
-    ): Promise<boolean> | false => {
-      if (chatService !== 'iMessage' && chatService !== 'RCS') return false;
-      if (effectId || subject || (mentions?.length ?? 0) > 0) {
-        showToast('Text with an attachment doesn’t support effects, subjects, or mentions yet');
-        return false;
-      }
-      if (chatService === 'RCS' && replyTo) {
-        showToast('This server can’t send an RCS media reply with text yet');
-        return false;
-      }
-      const capturedReply = replyTo;
-      if (capturedReply && capturedReply.targetPartIndex == null) {
-        showToast('That message part is not available to reply to yet');
-        return false;
-      }
+    (text: string, item: PendingAttachment): Promise<boolean> | false => {
+      if (!attachmentFeaturesAvailable) return false;
+      if (chatService !== 'RCS') return false;
       return observeQueueAdmission(
         (onQueued) =>
           sendTextAttachment(
@@ -908,18 +715,12 @@ function ChatScreenInner({
               image: item,
               text,
               service: chatService,
-              selectedMessageGuid: capturedReply?.guid,
-              partIndex: capturedReply?.targetPartIndex,
             },
             accountLease,
             presentSendIssue,
             onQueued,
           ),
-        () => {
-          if (capturedReply) {
-            setReplyTo((current) => (current === capturedReply ? null : current));
-          }
-        },
+        () => undefined,
         (error) => {
           if (!accountLease.isCurrent()) return;
           logger.warn('[chat] text-attachment queue admission failed', error);
@@ -929,81 +730,60 @@ function ChatScreenInner({
         },
       );
     },
-    [accountLease, chatService, guid, replyTo],
+    [accountLease, attachmentFeaturesAvailable, chatService, guid],
   );
-  const onCancelReply = useCallback((): void => setReplyTo(null), []);
-  const onCancelEdit = useCallback((): void => setEditing(null), []);
   const onTyping = useCallback(
     (active: boolean): void => {
       // Composer debounce/unmount callbacks can run after Disconnect. The socket emit itself is
       // synchronous, so a lease check is the complete atomic boundary here.
-      if (accountLease.isCurrent()) void sendTyping(guid, active);
+      if (accountLease.isCurrent() && rcsInteractiveFeaturesAvailable) {
+        void sendTyping(guid, active);
+      }
     },
-    [accountLease, guid],
+    [accountLease, guid, rcsInteractiveFeaturesAvailable],
   );
-  const onStartVoice = useCallback((): void => setRecording(true), []);
+  const onStartVoice = useCallback((): void => {
+    if (attachmentFeaturesAvailable) setRecording(true);
+  }, [attachmentFeaturesAvailable]);
   const onSendVoice = useCallback(
     (uri: string): Promise<boolean> =>
-      observeQueueAdmission(
-        (onQueued) =>
-          sendImage(
-            {
-              chatGuid: guid,
-              image: {
-                uri,
-                name: uri.split('/').pop() ?? 'voice.m4a',
-                mimeType: 'audio/mp4',
-                size: 0,
-              },
+      !attachmentFeaturesAvailable
+        ? Promise.resolve(false)
+        : observeQueueAdmission(
+            (onQueued) =>
+              sendImage(
+                {
+                  chatGuid: guid,
+                  image: {
+                    uri,
+                    name: uri.split('/').pop() ?? 'voice.m4a',
+                    mimeType: 'audio/mp4',
+                    size: 0,
+                  },
+                },
+                accountLease,
+                presentSendIssue,
+                onQueued,
+              ),
+            () => undefined,
+            (error) => {
+              if (!accountLease.isCurrent()) return;
+              logger.warn('[chat] voice message queue admission failed', error);
+              showToast('Couldn’t queue that recording. It’s still here—try again when connected');
             },
-            accountLease,
-            presentSendIssue,
-            onQueued,
           ),
-        () => undefined,
-        (error) => {
-          if (!accountLease.isCurrent()) return;
-          logger.warn('[chat] voice message queue admission failed', error);
-          showToast('Couldn’t queue that recording. It’s still here—try again when connected');
-        },
-      ),
-    [accountLease, guid],
+    [accountLease, attachmentFeaturesAvailable, guid],
   );
 
-  // Contact card: only offered when the server can build vCards (supports_send_contact). Explain
-  // the optional Contacts grant before Android's prompt, then open the native picker and send the
-  // chosen contact (optimistic bubble + reconcile inside the service).
-  const supportsSendContact = useSendContactSupported();
+  // Contact cards use the retained RCS attachment path. The old helper-era capability flag is no
+  // longer advertised, so canonical live RCS capability is the complete UI gate.
+  const contactCardAvailable = rcsInteractiveFeaturesAvailable;
   const runContactPicker = useCallback((): void => {
-    const capturedReply = replyTo;
-    let capturedTarget: { replyToGuid: string; replyToPartIndex: number } | undefined;
-    if (capturedReply) {
-      if (chatService === 'RCS') {
-        showToast("This server can't send an RCS contact-card reply yet");
-        return;
-      }
-      if (capturedReply.targetPartIndex == null) {
-        showToast('That message part is not available to reply to yet');
-        return;
-      }
-      capturedTarget = {
-        replyToGuid: capturedReply.guid,
-        replyToPartIndex: capturedReply.targetPartIndex,
-      };
-    }
+    if (!attachmentFeaturesAvailable) return;
     const attempt = (): void => {
       void observeQueueAdmission(
-        (onQueued) =>
-          pickAndSendContact(guid, accountLease, presentSendIssue, capturedTarget, onQueued),
-        () => {
-          if (!capturedReply) return;
-          setReplyTo((current) =>
-            current?.guid === capturedReply.guid &&
-            current.targetPartIndex === capturedReply.targetPartIndex
-              ? null
-              : current,
-          );
-        },
+        (onQueued) => pickAndSendContact(guid, accountLease, presentSendIssue, undefined, onQueued),
+        () => undefined,
         (e) => {
           if (!accountLease.isCurrent()) return;
           if (isContactsPermissionDeniedError(e)) {
@@ -1019,7 +799,7 @@ function ChatScreenInner({
       );
     };
     attempt();
-  }, [accountLease, chatService, guid, replyTo]);
+  }, [accountLease, attachmentFeaturesAvailable, guid]);
   const onPickContact = useCallback((): void => {
     void getContactsPermissionState()
       .then((permission) => {
@@ -1154,7 +934,6 @@ function ChatScreenInner({
       topInset={hasWallpaper ? topBar + BAR_GAP : 0}
       bottomInset={hasWallpaper ? bottomBar + BAR_GAP : 0}
       onLongPressMessage={searchOpen ? undefined : onLongPressMessage}
-      onSwipeReply={searchOpen ? undefined : onSwipeReply}
       onRefresh={() => backfillChatUnlessDeleted(guid, accountLease)}
       onLoadOlder={onLoadOlder}
       focusGuid={effFocusGuid}
@@ -1166,8 +945,7 @@ function ChatScreenInner({
     />
   );
   // Multi-select visually replaces the composer with a selection action bar. Keep Composer
-  // MOUNTED (display:none below): unmount/remount preserved body text but destroyed attachments,
-  // subject/mention metadata, and in-progress edits.
+  // MOUNTED (display:none below) so unmount/remount cannot destroy staged attachments.
   const selectionBar = selectedGuids ? (
     // Add the bottom safe-area inset (like the Composer this bar replaces) so Copy/Delete/Done
     // clear the Android system nav bar under edge-to-edge instead of hiding behind it.
@@ -1205,7 +983,7 @@ function ChatScreenInner({
       accessibilityElementsHidden={composerHidden}
       importantForAccessibility={composerHidden ? 'no-hide-descendants' : 'auto'}
     >
-      {isTyping ? <TypingBubble /> : null}
+      {isTyping && rcsInteractiveFeaturesAvailable ? <TypingBubble /> : null}
       {/* Renders nothing unless this chat has an upload in flight. It lives INSIDE the measured
           bottom bar, so appearing/disappearing re-lands the message list through the wrapper's
           existing onLayout → pin convergence rather than stranding it behind the composer. */}
@@ -1219,27 +997,27 @@ function ChatScreenInner({
               : 'iMessage'
         }
         onSend={onSend}
-        onSendAttachments={onSendAttachments}
-        onSendTextAttachment={supportsSendAttachmentText ? onSendTextAttachment : undefined}
+        onSendAttachments={attachmentFeaturesAvailable ? onSendAttachments : undefined}
+        onSendTextAttachment={
+          attachmentFeaturesAvailable && supportsSendAttachmentText
+            ? onSendTextAttachment
+            : undefined
+        }
         canSubmit={hasLogicalSendCapacity}
         isSubmitOwnerCurrent={accountLease.isCurrent}
-        onPickFiles={pickFiles}
-        onPickContact={supportsSendContact ? onPickContact : undefined}
-        replyTo={replyTo}
-        onCancelReply={onCancelReply}
-        editingText={editing?.text ?? null}
-        onCancelEdit={onCancelEdit}
+        onPickFiles={attachmentFeaturesAvailable ? pickFiles : undefined}
+        onPickContact={contactCardAvailable ? onPickContact : undefined}
         onSchedule={onSchedule}
-        onTyping={onTyping}
-        onStartVoice={isDev() ? undefined : onStartVoice}
+        onTyping={rcsInteractiveFeaturesAvailable ? onTyping : undefined}
+        onStartVoice={isDev() || !attachmentFeaturesAvailable ? undefined : onStartVoice}
         translucent={hasWallpaper}
-        subjectEnabled={sendSubjectLines && chatService === 'iMessage'}
-        mentionParticipants={
-          isGroup && chatService === 'iMessage' ? (participants ?? NO_PARTICIPANTS) : undefined
-        }
         initialText={draft ?? sharedText ?? undefined}
         onDraftChange={onDraftChange}
-        initialAttachments={sharedAttachments.length > 0 ? sharedAttachments : undefined}
+        initialAttachments={
+          attachmentFeaturesAvailable && sharedAttachments.length > 0
+            ? sharedAttachments
+            : undefined
+        }
         active={!composerHidden && screenFocused}
         onRemovalStateChange={setComposerRemovalState}
       />
@@ -1328,16 +1106,13 @@ function ChatScreenInner({
         </LoadErrorBoundary>
       ) : null}
       <MessageActionsOverlay
-        selected={selected}
+        selected={actionSelected}
         onClose={() => setSelected(null)}
         onReact={onReact}
-        onReply={onReplyToSelected}
         onRemindLater={onRemindLater}
-        onEdit={onEditSelected}
-        onUnsend={onUnsendSelected}
         onCancelSend={onCancelSelected}
         onCopy={onCopySelected}
-        onForward={onForwardSelected}
+        onForward={rcsAvailable ? onForwardSelected : undefined}
         onSave={onSaveSelected}
         onShare={onShareSelected}
         onDelete={onDeleteSelected}
@@ -1349,7 +1124,7 @@ function ChatScreenInner({
       <ThreadSheet
         originatorGuid={threadFor}
         onClose={() => setThreadFor(null)}
-        onJump={(m) => setJump({ guid: m.guid })}
+        onJump={(message) => setJump({ guid: message.guid })}
       />
       <EditHistorySheet data={editHistory} onClose={() => setEditHistory(null)} />
       <MessageDetailsSheet
@@ -1360,31 +1135,6 @@ function ChatScreenInner({
       {screenEffect.effect ? (
         <ScreenEffectOverlay effect={screenEffect.effect} onDone={screenEffect.clear} />
       ) : null}
-      {__DEV__ ? (
-        <Pressable style={styles.devFx} onPress={() => void devInjectEffect(guid, accountLease)}>
-          <Text style={styles.devFxText}>💥</Text>
-        </Pressable>
-      ) : null}
-      {__DEV__ ? (
-        <Pressable
-          style={styles.devTyping}
-          onPress={() => {
-            if (!isDevServer() || !accountLease.isCurrent()) return;
-            void dispatchRealtimeEvent(
-              'typing-indicator',
-              { chatGuid: guid, display: true },
-              'dev',
-              accountLease,
-            ).catch((error: unknown) => {
-              if (accountLease.isCurrent()) {
-                logger.debug('[chat] DEV typing injection failed', error);
-              }
-            });
-          }}
-        >
-          <Text style={styles.devFxText}>⌨️</Text>
-        </Pressable>
-      ) : null}
     </Screen>
   );
 }
@@ -1392,10 +1142,6 @@ function ChatScreenInner({
 // Extra breathing room between the newest resting message and the transparent bars floating over
 // the wallpaper (added to the measured bar height for the list's content inset).
 const BAR_GAP = 28;
-
-// Stable empty fallback for mentionParticipants — a fresh [] each render would defeat the
-// memoized Composer's shallow prop compare.
-const NO_PARTICIPANTS: { address: string; name: string }[] = [];
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
@@ -1435,29 +1181,4 @@ const styles = StyleSheet.create({
     borderRadius: 16,
   },
   unreadChipText: { fontSize: 13, fontWeight: '600' },
-  // DEV-only: inject a send-effect message into this chat to demo effects.
-  devFx: {
-    position: 'absolute',
-    left: 12,
-    bottom: 92,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#00000088',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  // DEV-only: inject a typing-indicator event to demo the typing bubble.
-  devTyping: {
-    position: 'absolute',
-    left: 12,
-    bottom: 144,
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#00000088',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  devFxText: { fontSize: 22 },
 });

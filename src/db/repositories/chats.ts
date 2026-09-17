@@ -1086,8 +1086,8 @@ export async function setLastReadMessageGuid(
 /**
  * Mark a chat UNREAD locally: clear the read marker so `unreadCount` (messages newer than the
  * marker) counts all received messages again and the inbox badge/bold-title returns. This is the
- * LOCAL half only — the service `markUnread` (chatActions.ts) calls it, then best-effort syncs the
- * Mac via POST /chat/:guid/unread. Opening the chat re-marks it read.
+ * complete current behavior — the retired helper-backed remote unread route is never called.
+ * Opening the chat re-marks it read locally.
  *
  * `marked_unread_at` records WHEN, which is what makes the flag survive. A NULL read marker alone
  * is indistinguishable from "never read", so the watermark reconcile read it as `current = 0`, its

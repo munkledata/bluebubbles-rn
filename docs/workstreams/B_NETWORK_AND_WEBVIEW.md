@@ -90,11 +90,12 @@ protected tree, no valid marker exists, or the account has been torn down.
 
 <a id="face-01"></a>
 
-## `FACE-01` / `POST-FACE-01` — deferred FaceTime WebView policy
+## `FACE-01` / `POST-FACE-01` — retired FaceTime client; deferred new design
 
 `FACE-01` left the active remediation inventory on 2026-09-14 because the embedded experience never
 worked reliably. [`POST-FACE-01`](../POST_REMEDIATION_PLAN.md#post-face-01) is the future status
-authority; the validated system-browser handoff remains the current product behavior.
+authority. `FP-006` subsequently retired the complete FaceTime client surface, including the former
+validated system-browser handoff. Stale server/helper state cannot restore it.
 
 If the owner later selects a new embedded design, reuse the `WEB-02` navigation primitives. Enumerate
 exact required Apple HTTPS origins without a broad wildcard, and block or externally open every

@@ -175,7 +175,7 @@ export function useChatReadLifecycle({
       // afterwards, so the undefined→guid step is just the window arriving — everything in it was
       // already covered by the open-time markRead above. Without this baseline every single chat
       // open fired a second markRead: another `chats` write whose reactive flush re-runs the
-      // inbox query, plus a second POST /chat/:guid/read when read receipts are on.
+      // inbox query, plus a second supported RCS read POST when read receipts are on.
       markedThroughGuid.current = newestReceivedGuid ?? null;
       return;
     }

@@ -100,7 +100,17 @@ describe('RCS active send-attempt ownership', () => {
       const retryB = await withDbTransaction(db, (context) =>
         claimOutgoingForSendWithinTransaction(context, queued.id, () => queued.nextRetryAt),
       );
-      expect(retryB).toEqual({ claimed: true, attemptOwnerToken: { generation: 2 } });
+      expect(retryB).toEqual({
+        claimed: true,
+        attemptOwnerToken: { generation: 2 },
+        deferToken: expect.objectContaining({
+          queueId: queued.id,
+          tempGuid,
+          previousAttempts: 1,
+          ownerGuid: tempGuid,
+          ownerGeneration: 2,
+        }),
+      });
 
       // A's late HTTP response holds generation 1 and therefore cannot install itself.
       await reconcileSendOutcome(
@@ -312,7 +322,16 @@ describe('RCS active send-attempt ownership', () => {
       const retry = await withDbTransaction(db, (context) =>
         claimOutgoingForSendWithinTransaction(context, queued.id, () => queued.nextRetryAt),
       );
-      expect(retry).toEqual({ claimed: true });
+      expect(retry).toEqual({
+        claimed: true,
+        deferToken: expect.objectContaining({
+          queueId: queued.id,
+          tempGuid: legacyGuid,
+          previousAttempts: 1,
+          ownerGuid: legacyGuid,
+          ownerGeneration: 0,
+        }),
+      });
       expect(ownerState(raw, legacyGuid)).toMatchObject({
         sendState: 'sending',
         pending: 0,
@@ -568,7 +587,17 @@ describe('RCS active send-attempt ownership', () => {
         withDbTransaction(db, (context) =>
           claimOutgoingForSendWithinTransaction(context, rebuilt.id, () => rebuilt.nextRetryAt),
         ),
-      ).resolves.toEqual({ claimed: true, attemptOwnerToken: { generation: 3 } });
+      ).resolves.toEqual({
+        claimed: true,
+        attemptOwnerToken: { generation: 3 },
+        deferToken: expect.objectContaining({
+          queueId: rebuilt.id,
+          tempGuid,
+          previousAttempts: 1,
+          ownerGuid: 'rcs-retained-a',
+          ownerGeneration: 3,
+        }),
+      });
     } finally {
       raw.close();
     }

@@ -116,22 +116,24 @@ function handlers() {
 }
 
 /** A received text message with no prior reactions (the plain baseline). */
-function makeSelected(overrides: Partial<SelectedMessage> = {}): SelectedMessage {
+function makeSelected(
+  overrides: Partial<SelectedMessage> & Record<string, unknown> = {},
+): SelectedMessage {
   return {
     guid: 'm1',
     text: 'hey there',
     isFromMe: false,
     senderName: 'Alice',
     mine: [],
+    canReact: true,
     dateCreated: Date.now(),
     isRetracted: false,
     isEdited: false,
     isTemp: false,
     sendState: 'sent',
     attachments: [],
-    targetPartIndex: 0,
     ...overrides,
-  };
+  } as SelectedMessage;
 }
 
 async function renderOverlay(
@@ -261,18 +263,30 @@ describe('MessageActionsOverlay — reaction picker', () => {
     );
     expect(screen.getByLabelText('Heart')).toBeTruthy();
     expect(screen.getByLabelText('React with any emoji')).toBeTruthy();
-    expect(screen.getByText('Reply')).toBeTruthy();
+    expect(screen.queryByText('Reply')).toBeNull();
     expect(screen.queryByLabelText('Emoji reaction input')).toBeNull();
   });
 });
 
-describe('MessageActionsOverlay — confirmed Reply + local actions', () => {
-  it('Reply fires onReply + onClose', async () => {
-    const h = await renderOverlay(makeSelected());
-    await pressAndFlush(screen.getByText('Reply'), () => {
-      expect(h.onReply).toHaveBeenCalledTimes(1);
-      expect(h.onClose).toHaveBeenCalledTimes(1);
-    });
+describe('MessageActionsOverlay — retired helper actions + read-only history', () => {
+  it('keeps outgoing helper actions retired while preserving local thread/history views', async () => {
+    const h = await renderOverlay(
+      makeSelected({
+        targetPartIndex: 0,
+        isEdited: true,
+        inThread: true,
+        isFromMe: true,
+      }),
+    );
+    expect(screen.queryByText('Reply')).toBeNull();
+    expect(screen.queryByText('Edit')).toBeNull();
+    expect(screen.queryByText('Unsend')).toBeNull();
+    await pressAndFlush(screen.getByText('View Thread'), () =>
+      expect(h.onViewThread).toHaveBeenCalledTimes(1),
+    );
+    await pressAndFlush(screen.getByText('View Edit History'), () =>
+      expect(h.onViewEditHistory).toHaveBeenCalledTimes(1),
+    );
   });
 
   it('Remind Me Later fires onRemindLater + onClose', async () => {
@@ -348,40 +362,7 @@ describe('MessageActionsOverlay — Save to Photos (attachment-gated)', () => {
   });
 });
 
-describe('MessageActionsOverlay — View Thread + Select', () => {
-  it('shows View Thread only for a message in a thread, and fires onViewThread', async () => {
-    const h = await renderOverlay(makeSelected({ inThread: true }));
-    await pressAndFlush(screen.getByText('View Thread'), () => {
-      expect(h.onViewThread).toHaveBeenCalledTimes(1);
-      expect(h.onClose).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  it('hides View Thread for a message with no thread', async () => {
-    await renderOverlay(makeSelected({ inThread: false }));
-    expect(screen.queryByText('View Thread')).toBeNull();
-  });
-
-  it('shows View Edit History only for an edited message, and fires onViewEditHistory + onClose', async () => {
-    const h = await renderOverlay(makeSelected({ isEdited: true }));
-    await pressAndFlush(screen.getByText('View Edit History'), () => {
-      expect(h.onViewEditHistory).toHaveBeenCalledTimes(1);
-      expect(h.onClose).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  it('hides View Edit History for a message that was never edited', async () => {
-    await renderOverlay(makeSelected({ isEdited: false }));
-    expect(screen.queryByText('View Edit History')).toBeNull();
-  });
-
-  it('shows View Edit History for ANY edited message, including one from someone else', async () => {
-    // Distinct from Edit/Unsend (own-recent only) — you can view the history of a message the
-    // other person edited.
-    await renderOverlay(makeSelected({ isFromMe: false, isEdited: true }));
-    expect(screen.getByText('View Edit History')).toBeTruthy();
-  });
-
+describe('MessageActionsOverlay — Select', () => {
   it('Select fires onSelect + onClose (multi-select entry)', async () => {
     const h = await renderOverlay(makeSelected());
     await pressAndFlush(screen.getByText('Select'), () => {
@@ -413,68 +394,6 @@ describe('MessageActionsOverlay — Share', () => {
   it('hides Share when the message has neither text nor attachments', async () => {
     await renderOverlay(makeSelected({ text: null, attachments: [] }));
     expect(screen.queryByText('Share…')).toBeNull();
-  });
-});
-
-describe('MessageActionsOverlay — Edit / Unsend (own recent message)', () => {
-  const ownRecent = (o: Partial<SelectedMessage> = {}) =>
-    makeSelected({
-      isFromMe: true,
-      isTemp: false,
-      isRetracted: false,
-      dateCreated: Date.now(),
-      ...o,
-    });
-
-  it('shows Edit + Unsend for an own recent iMessage with text and fires the callbacks', async () => {
-    const h = await renderOverlay(ownRecent({ text: 'edit me' }));
-    await pressAndFlush(screen.getByText('Edit'), () => expect(h.onEdit).toHaveBeenCalledTimes(1));
-    await pressAndFlush(screen.getByText('Unsend'), () =>
-      expect(h.onUnsend).toHaveBeenCalledTimes(1),
-    );
-    expect(h.onClose).toHaveBeenCalledTimes(2);
-  });
-
-  it('hides Edit (no text) but still shows Unsend for an own recent attachment-only message', async () => {
-    await renderOverlay(
-      ownRecent({
-        text: null,
-        attachments: [{ guid: 'a1', localPath: '/x.jpg', mimeType: 'image/jpeg' }],
-      }),
-    );
-    expect(screen.queryByText('Edit')).toBeNull();
-    expect(screen.getByText('Unsend')).toBeTruthy();
-  });
-
-  it('hides Edit + Unsend for a message from someone else', async () => {
-    await renderOverlay(makeSelected({ isFromMe: false, text: 'hi' }));
-    expect(screen.queryByText('Edit')).toBeNull();
-    expect(screen.queryByText('Unsend')).toBeNull();
-  });
-
-  it('hides Edit + Unsend once the 15-minute edit window has passed', async () => {
-    const stale = Date.now() - 16 * 60_000;
-    await renderOverlay(ownRecent({ text: 'too late', dateCreated: stale }));
-    expect(screen.queryByText('Edit')).toBeNull();
-    expect(screen.queryByText('Unsend')).toBeNull();
-  });
-
-  it('hides Edit + Unsend for a still-temp (not-yet-on-server) message', async () => {
-    await renderOverlay(ownRecent({ text: 'pending', isTemp: true }));
-    expect(screen.queryByText('Edit')).toBeNull();
-    expect(screen.queryByText('Unsend')).toBeNull();
-  });
-
-  it('hides Edit + Unsend for an already-retracted message', async () => {
-    await renderOverlay(ownRecent({ text: 'gone', isRetracted: true }));
-    expect(screen.queryByText('Edit')).toBeNull();
-    expect(screen.queryByText('Unsend')).toBeNull();
-  });
-
-  it('hides Edit + Unsend when dateCreated is null', async () => {
-    await renderOverlay(ownRecent({ text: 'x', dateCreated: null }));
-    expect(screen.queryByText('Edit')).toBeNull();
-    expect(screen.queryByText('Unsend')).toBeNull();
   });
 });
 
@@ -533,7 +452,7 @@ describe('MessageActionsOverlay — Reduce Motion opening lifecycle', () => {
       const { view, h } = await renderClosed();
       await view.rerender(overlay(makeSelected({ anchorRect: ANCHOR }), h));
 
-      expect(screen.getByText('Reply')).toBeTruthy();
+      expect(screen.getByText('Copy')).toBeTruthy();
       expect(springs.handles).toHaveLength(0);
       expect(setValue.mock.calls.at(-1)).toEqual([1]);
 
@@ -560,7 +479,7 @@ describe('MessageActionsOverlay — Reduce Motion opening lifecycle', () => {
 
       await act(async () => reduceMotionListeners[0]!(false));
       expect(springs.handles).toHaveLength(0);
-      expect(screen.getByText('Reply')).toBeTruthy();
+      expect(screen.getByText('Copy')).toBeTruthy();
 
       await act(async () => view.unmount());
     } finally {
@@ -623,7 +542,7 @@ describe('MessageActionsOverlay — Reduce Motion opening lifecycle', () => {
         await query.promise.catch(() => undefined);
       });
       expect(springs.handles).toHaveLength(0);
-      expect(screen.getByText('Reply')).toBeTruthy();
+      expect(screen.getByText('Copy')).toBeTruthy();
 
       await act(async () => view.unmount());
     } finally {

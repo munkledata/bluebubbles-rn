@@ -32,6 +32,10 @@ jest.mock('@/services/send/sendEditService', () => ({
   sendEdit: jest.fn(),
   sendUnsend: jest.fn(),
 }));
+jest.mock('@/services/send/rcsAttemptCapability', () => ({
+  ...jest.requireActual('@/services/send/rcsAttemptCapability'),
+  captureSessionRcsCapabilityLease: jest.fn(),
+}));
 jest.mock('@/services/send/sendContactService', () => ({
   contactDisplayName: jest.fn(() => 'Contact'),
   hasContactContent: jest.fn((contact: { firstName?: string }) =>
@@ -73,6 +77,8 @@ import { sendImageMessage } from '@/services/send/sendAttachmentService';
 import { sendReactionMessage } from '@/services/send/sendReactionService';
 // eslint-disable-next-line import/first
 import { sendEdit, sendUnsend } from '@/services/send/sendEditService';
+// eslint-disable-next-line import/first
+import { captureSessionRcsCapabilityLease } from '@/services/send/rcsAttemptCapability';
 // eslint-disable-next-line import/first
 import { uploadRegistry } from '@/services/send/uploadControl';
 // eslint-disable-next-line import/first
@@ -123,6 +129,7 @@ const mockSendImage = sendImageMessage as jest.Mock;
 const mockSendReaction = sendReactionMessage as jest.Mock;
 const mockSendEdit = sendEdit as jest.Mock;
 const mockSendUnsend = sendUnsend as jest.Mock;
+const mockCaptureCapability = captureSessionRcsCapabilityLease as jest.Mock;
 const mockDiscardOutgoingWithinTransaction = discardOutgoingMessageWithinTransaction as jest.Mock;
 const mockDeleteMessageLocalWithinTransaction = deleteMessageLocalWithinTransaction as jest.Mock;
 
@@ -135,6 +142,19 @@ beforeEach(() => {
   mockSendReaction.mockResolvedValue({ tempGuid: 'temp-reaction' });
   mockSendEdit.mockResolvedValue({ ok: true });
   mockSendUnsend.mockResolvedValue({ ok: true });
+  mockCaptureCapability.mockReturnValue({
+    kind: 'session',
+    origin: 'https://capability.test',
+    revision: 1,
+    serverInfo: {
+      private_api: true,
+      rcs: true,
+      supports_message_part_topology: true,
+      supports_send_contact: true,
+    },
+    isCurrent: () => true,
+    publish: () => true,
+  });
 });
 
 afterEach(async () => {
@@ -143,6 +163,48 @@ afterEach(async () => {
 });
 
 describe('UI send account lease', () => {
+  it('fails closed for helper-only mutations while preserving an enabled RCS reaction', async () => {
+    mockCaptureCapability.mockReturnValue({
+      kind: 'session',
+      origin: 'https://capability.test',
+      revision: 1,
+      serverInfo: { private_api: false, rcs: true, supports_message_part_topology: true },
+      isCurrent: () => true,
+      publish: () => true,
+    });
+
+    await expect(
+      react({ chatGuid: 'iMessage;-;+15551234567', targetGuid: 'm1', reaction: 'love' }),
+    ).resolves.toBeNull();
+    await expect(
+      editText({ chatGuid: 'iMessage;-;+15551234567', messageGuid: 'm1', newText: 'edited' }),
+    ).resolves.toBeNull();
+    await expect(
+      unsend({ chatGuid: 'iMessage;-;+15551234567', messageGuid: 'm1' }),
+    ).resolves.toBeNull();
+    await expect(
+      send({ chatGuid: 'iMessage;-;+15551234567', text: 'party', effectId: 'confetti' }),
+    ).resolves.toBeNull();
+    await expect(
+      reply({ chatGuid: 'iMessage;-;+15551234567', text: 'reply', replyToGuid: 'm1' }),
+    ).resolves.toBeNull();
+
+    expect(mockSendReaction).not.toHaveBeenCalled();
+    expect(mockSendEdit).not.toHaveBeenCalled();
+    expect(mockSendUnsend).not.toHaveBeenCalled();
+    expect(mockSendText).not.toHaveBeenCalled();
+
+    await expect(
+      send({ chatGuid: 'iMessage;-;+15551234567', text: 'plain text' }),
+    ).resolves.toEqual({ tempGuid: 'temp-text' });
+    expect(mockSendText).toHaveBeenCalledTimes(1);
+
+    await expect(
+      react({ chatGuid: 'RCS;-;+15551234567', targetGuid: 'rcs-m1', reaction: 'love' }),
+    ).resolves.toEqual({ tempGuid: 'temp-reaction' });
+    expect(mockSendReaction).toHaveBeenCalledTimes(1);
+  });
+
   it('runs current cache work and rejects a retired lease before invoking work', async () => {
     const lease = captureRealtimeDeliveryLease();
     const scope = createAttachmentCacheAccountScope(lease);
@@ -323,22 +385,11 @@ describe('UI send account lease', () => {
     expect(drained).toBe(true);
   });
 
-  it('passes text and reply persistence guards tied to their captured leases', async () => {
+  it('passes a text persistence guard tied to its captured lease', async () => {
     const sendQueued = jest.fn();
-    const replyQueued = jest.fn();
     const sendLease = captureRealtimeDeliveryLease();
     await expect(
       send({ chatGuid: 'chat-a', text: 'plain text' }, sendLease, undefined, sendQueued),
-    ).resolves.toEqual({ tempGuid: 'temp-text' });
-
-    const replyLease = captureRealtimeDeliveryLease();
-    await expect(
-      reply(
-        { chatGuid: 'chat-b', text: 'thread reply', replyToGuid: 'message-b' },
-        replyLease,
-        undefined,
-        replyQueued,
-      ),
     ).resolves.toEqual({ tempGuid: 'temp-text' });
 
     expect(mockSendText).toHaveBeenNthCalledWith(
@@ -350,45 +401,19 @@ describe('UI send account lease', () => {
       expect.any(Function),
       undefined,
       expect.any(Function),
-      undefined,
-    );
-    expect(mockSendText).toHaveBeenNthCalledWith(
-      2,
       expect.anything(),
-      expect.anything(),
-      {
-        chatGuid: 'chat-b',
-        text: 'thread reply',
-        selectedMessageGuid: 'message-b',
-        partIndex: undefined,
-        effectId: undefined,
-      },
-      expect.any(Number),
-      expect.any(Function),
-      undefined,
-      expect.any(Function),
-      undefined,
     );
     const sendGuard = mockSendText.mock.calls[0]?.[6] as (() => boolean) | undefined;
-    const replyGuard = mockSendText.mock.calls[1]?.[6] as (() => boolean) | undefined;
     const sendAdmission = mockSendText.mock.calls[0]?.[4] as
       ((tempGuid: string) => void) | undefined;
-    const replyAdmission = mockSendText.mock.calls[1]?.[4] as
-      ((tempGuid: string) => void) | undefined;
     expect(sendGuard?.()).toBe(true);
-    expect(replyGuard?.()).toBe(true);
     sendAdmission?.('temp-send');
-    replyAdmission?.('temp-reply');
     expect(sendQueued).toHaveBeenCalledWith('temp-send');
-    expect(replyQueued).toHaveBeenCalledWith('temp-reply');
 
     await pauseRealtimeDeliveries();
     expect(sendGuard?.()).toBe(false);
-    expect(replyGuard?.()).toBe(false);
     sendAdmission?.('late-send');
-    replyAdmission?.('late-reply');
     expect(sendQueued).toHaveBeenCalledTimes(1);
-    expect(replyQueued).toHaveBeenCalledTimes(1);
     resumeRealtimeDeliveries();
   });
 
@@ -399,10 +424,8 @@ describe('UI send account lease', () => {
     await expect(
       sendContactCard(
         {
-          chatGuid: 'chat-a',
+          chatGuid: 'RCS;-;chat-a',
           contact: { firstName: 'Alice' },
-          replyToGuid: 'direct-target',
-          replyToPartIndex: 0,
         },
         directLease,
         undefined,
@@ -413,16 +436,7 @@ describe('UI send account lease', () => {
     mockPickContact.mockResolvedValueOnce({ firstName: 'Bob' });
     const pickerLease = captureRealtimeDeliveryLease();
     await expect(
-      pickAndSendContact(
-        'chat-b',
-        pickerLease,
-        undefined,
-        {
-          replyToGuid: 'picker-target',
-          replyToPartIndex: 2,
-        },
-        pickerQueued,
-      ),
+      pickAndSendContact('RCS;-;chat-b', pickerLease, undefined, undefined, pickerQueued),
     ).resolves.toEqual({ tempGuid: 'temp-contact' });
 
     expect(mockSendContact).toHaveBeenNthCalledWith(
@@ -430,14 +444,14 @@ describe('UI send account lease', () => {
       expect.anything(),
       expect.anything(),
       {
-        chatGuid: 'chat-a',
+        chatGuid: 'RCS;-;chat-a',
         contact: { firstName: 'Alice' },
-        selectedMessageGuid: 'direct-target',
-        partIndex: 0,
+        selectedMessageGuid: undefined,
+        partIndex: undefined,
       },
       expect.any(Number),
       expect.any(Function),
-      undefined,
+      expect.anything(),
       expect.any(Function),
     );
     expect(mockSendContact).toHaveBeenNthCalledWith(
@@ -445,14 +459,14 @@ describe('UI send account lease', () => {
       expect.anything(),
       expect.anything(),
       {
-        chatGuid: 'chat-b',
+        chatGuid: 'RCS;-;chat-b',
         contact: { firstName: 'Bob' },
-        selectedMessageGuid: 'picker-target',
-        partIndex: 2,
+        selectedMessageGuid: undefined,
+        partIndex: undefined,
       },
       expect.any(Number),
       expect.any(Function),
-      undefined,
+      expect.anything(),
       expect.any(Function),
     );
     const directGuard = mockSendContact.mock.calls[0]?.[4] as (() => boolean) | undefined;
@@ -485,7 +499,7 @@ describe('UI send account lease', () => {
     await expect(
       sendImage(
         {
-          chatGuid: 'chat-a',
+          chatGuid: 'RCS;-;chat-a',
           image: { uri: 'file:///a.jpg', name: 'a.jpg', mimeType: 'image/jpeg', size: 10 },
         },
         singleLease,
@@ -498,7 +512,7 @@ describe('UI send account lease', () => {
     await expect(
       sendImages(
         {
-          chatGuid: 'chat-b',
+          chatGuid: 'RCS;-;chat-b',
           images: [
             { uri: 'file:///b.jpg', name: 'b.jpg', mimeType: 'image/jpeg', size: 20 },
             { uri: 'file:///c.jpg', name: 'c.jpg', mimeType: 'image/jpeg', size: 30 },
@@ -515,13 +529,14 @@ describe('UI send account lease', () => {
       expect(call).toEqual([
         expect.anything(),
         expect.anything(),
-        expect.objectContaining({ chatGuid: expect.stringMatching(/^chat-[ab]$/) }),
+        expect.objectContaining({ chatGuid: expect.stringMatching(/^RCS;-;chat-[ab]$/) }),
         expect.anything(),
         expect.any(Number),
         expect.any(Function),
         undefined,
         expect.any(Function),
         expect.any(Function),
+        expect.anything(),
       ]);
     }
     const singleGuard = mockSendImage.mock.calls[0]?.[5] as (() => boolean) | undefined;
@@ -559,63 +574,21 @@ describe('UI send account lease', () => {
   it('passes React persistence a commit guard tied to the captured screen lease', async () => {
     const screenLease = captureRealtimeDeliveryLease();
     await expect(
-      react({ chatGuid: 'chat-a', targetGuid: 'message-a', reaction: 'love' }, screenLease),
+      react(
+        { chatGuid: 'RCS;-;chat-a', targetGuid: 'rcs-message-a', reaction: 'love' },
+        screenLease,
+      ),
     ).resolves.toEqual({ tempGuid: 'temp-reaction' });
 
     expect(mockSendReaction).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
-      { chatGuid: 'chat-a', targetGuid: 'message-a', reaction: 'love' },
+      { chatGuid: 'RCS;-;chat-a', targetGuid: 'rcs-message-a', reaction: 'love' },
       expect.any(Number),
       expect.any(Function),
-      undefined,
+      expect.anything(),
     );
     const commitGuard = mockSendReaction.mock.calls[0]?.[4] as (() => boolean) | undefined;
-    expect(commitGuard?.()).toBe(true);
-    await pauseRealtimeDeliveries();
-    expect(commitGuard?.()).toBe(false);
-    resumeRealtimeDeliveries();
-  });
-
-  it('passes edit persistence a commit guard tied to the captured screen lease', async () => {
-    const screenLease = captureRealtimeDeliveryLease();
-    await expect(
-      editText(
-        { messageGuid: 'message-a', newText: 'updated text', chatGuid: 'chat-a' },
-        screenLease,
-      ),
-    ).resolves.toEqual({ ok: true });
-
-    expect(mockSendEdit).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      { messageGuid: 'message-a', newText: 'updated text', chatGuid: 'chat-a' },
-      expect.any(Number),
-      expect.any(Function),
-      undefined,
-    );
-    const commitGuard = mockSendEdit.mock.calls[0]?.[4] as (() => boolean) | undefined;
-    expect(commitGuard?.()).toBe(true);
-    await pauseRealtimeDeliveries();
-    expect(commitGuard?.()).toBe(false);
-    resumeRealtimeDeliveries();
-  });
-
-  it('passes unsend persistence a commit guard tied to the captured screen lease', async () => {
-    const screenLease = captureRealtimeDeliveryLease();
-    await expect(
-      unsend({ messageGuid: 'message-a', chatGuid: 'chat-a' }, screenLease),
-    ).resolves.toEqual({ ok: true });
-
-    expect(mockSendUnsend).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      { messageGuid: 'message-a', chatGuid: 'chat-a' },
-      expect.any(Number),
-      expect.any(Function),
-      undefined,
-    );
-    const commitGuard = mockSendUnsend.mock.calls[0]?.[4] as (() => boolean) | undefined;
     expect(commitGuard?.()).toBe(true);
     await pauseRealtimeDeliveries();
     expect(commitGuard?.()).toBe(false);
@@ -629,16 +602,10 @@ describe('UI send account lease', () => {
     const firstImageResult = deferred<{ tempGuid: string }>();
     const secondImageResult = deferred<{ tempGuid: string }>();
     const reactionResult = deferred<{ tempGuid: string }>();
-    const replyResult = deferred<{ tempGuid: string }>();
-    mockSendText
-      .mockImplementationOnce(() => {
-        starts.push('text');
-        return textResult.promise;
-      })
-      .mockImplementationOnce(() => {
-        starts.push('reply');
-        return replyResult.promise;
-      });
+    mockSendText.mockImplementationOnce(() => {
+      starts.push('text');
+      return textResult.promise;
+    });
     mockSendContact.mockImplementationOnce(() => {
       starts.push('contact');
       return contactResult.promise;
@@ -659,25 +626,20 @@ describe('UI send account lease', () => {
 
     const text = send({ chatGuid: 'chat-a', text: 'first' });
     const contact = sendContactCard({
-      chatGuid: 'chat-a',
+      chatGuid: 'RCS;-;contact-chat',
       contact: { firstName: 'Alice' },
     });
     const images = sendImages({
-      chatGuid: 'chat-a',
+      chatGuid: 'RCS;-;image-chat',
       images: [
         { uri: 'file:///one.jpg', name: 'one.jpg', mimeType: 'image/jpeg', size: 1 },
         { uri: 'file:///two.jpg', name: 'two.jpg', mimeType: 'image/jpeg', size: 2 },
       ],
     });
     const reaction = react({
-      chatGuid: 'chat-a',
-      targetGuid: 'target-a',
+      chatGuid: 'RCS;-;reaction-chat',
+      targetGuid: 'rcs-target-a',
       reaction: 'love',
-    });
-    const threadedReply = reply({
-      chatGuid: 'chat-a',
-      text: 'last',
-      replyToGuid: 'target-a',
     });
 
     await waitUntil(() => starts.length === 1);
@@ -699,20 +661,16 @@ describe('UI send account lease', () => {
     expect(starts[4]).toBe('reaction');
 
     reactionResult.resolve({ tempGuid: 'temp-reaction' });
-    await waitUntil(() => starts.length === 6);
-    expect(starts[5]).toBe('reply');
-    replyResult.resolve({ tempGuid: 'temp-reply' });
 
-    await expect(Promise.all([text, contact, images, reaction, threadedReply])).resolves.toEqual([
+    await expect(Promise.all([text, contact, images, reaction])).resolves.toEqual([
       { tempGuid: 'temp-text' },
       { tempGuid: 'temp-contact' },
       [{ tempGuid: 'temp-image-1' }, { tempGuid: 'temp-image-2' }],
       { tempGuid: 'temp-reaction' },
-      { tempGuid: 'temp-reply' },
     ]);
   });
 
-  it('does not put edit and unsend mutations behind the logical-send queue', async () => {
+  it('rejects retired edit and unsend immediately instead of retaining them in the send queue', async () => {
     const sendResult = deferred<{ tempGuid: string }>();
     mockSendText.mockReturnValueOnce(sendResult.promise);
 
@@ -721,10 +679,10 @@ describe('UI send account lease', () => {
     const edit = editText({ messageGuid: 'message-a', newText: 'edited', chatGuid: 'chat-a' });
     const retract = unsend({ messageGuid: 'message-b', chatGuid: 'chat-a' });
 
-    await expect(edit).resolves.toEqual({ ok: true });
-    await expect(retract).resolves.toEqual({ ok: true });
-    expect(mockSendEdit).toHaveBeenCalledTimes(1);
-    expect(mockSendUnsend).toHaveBeenCalledTimes(1);
+    await expect(edit).resolves.toBeNull();
+    await expect(retract).resolves.toBeNull();
+    expect(mockSendEdit).not.toHaveBeenCalled();
+    expect(mockSendUnsend).not.toHaveBeenCalled();
 
     sendResult.resolve({ tempGuid: 'temp-slow' });
     await expect(pendingSend).resolves.toEqual({ tempGuid: 'temp-slow' });
@@ -739,10 +697,9 @@ describe('UI send account lease', () => {
     const textArgs = {
       chatGuid: 'text-chat',
       text: 'original text',
-      mentions: [{ start: 0, length: 8, address: 'alice@example.com' }],
     };
     const singleImageArgs = {
-      chatGuid: 'single-image-chat',
+      chatGuid: 'RCS;-;single-image-chat',
       image: {
         uri: 'file:///single.jpg',
         name: 'single.jpg',
@@ -751,30 +708,22 @@ describe('UI send account lease', () => {
       },
     };
     const imageBatchArgs = {
-      chatGuid: 'batch-chat',
+      chatGuid: 'RCS;-;batch-chat',
       images: [{ uri: 'file:///batch.jpg', name: 'batch.jpg', mimeType: 'image/jpeg', size: 20 }],
     };
     const contactArgs = {
-      chatGuid: 'contact-chat',
+      chatGuid: 'RCS;-;contact-chat',
       contact: {
         firstName: 'Alice',
         phones: [{ number: '+15550000001', label: 'cell' }],
         emails: [{ address: 'alice@example.com', label: 'home' }],
       },
-      replyToGuid: 'contact-reply',
-      replyToPartIndex: 4,
     };
     const reactionArgs = {
-      chatGuid: 'reaction-chat',
-      targetGuid: 'reaction-target',
+      chatGuid: 'RCS;-;reaction-chat',
+      targetGuid: 'rcs-reaction-target',
       reaction: 'love',
       selectedMessageText: 'original target',
-    };
-    const replyArgs = {
-      chatGuid: 'reply-chat',
-      text: 'original reply',
-      replyToGuid: 'reply-target',
-      effectId: 'original-effect',
     };
 
     const queued = [
@@ -783,12 +732,10 @@ describe('UI send account lease', () => {
       sendImages(imageBatchArgs),
       sendContactCard(contactArgs),
       react(reactionArgs),
-      reply(replyArgs),
     ];
 
     textArgs.chatGuid = 'mutated-text-chat';
     textArgs.text = 'mutated text';
-    textArgs.mentions[0]!.address = 'mutated@example.com';
     singleImageArgs.chatGuid = 'mutated-single-chat';
     singleImageArgs.image.uri = 'file:///mutated-single.jpg';
     imageBatchArgs.chatGuid = 'mutated-batch-chat';
@@ -803,27 +750,20 @@ describe('UI send account lease', () => {
     contactArgs.contact.firstName = 'Mallory';
     contactArgs.contact.phones[0]!.number = '+15559999999';
     contactArgs.contact.emails[0]!.address = 'mallory@example.com';
-    contactArgs.replyToGuid = 'mutated-contact-reply';
-    contactArgs.replyToPartIndex = 9;
     reactionArgs.chatGuid = 'mutated-reaction-chat';
     reactionArgs.targetGuid = 'mutated-reaction-target';
     reactionArgs.reaction = 'dislike';
     reactionArgs.selectedMessageText = 'mutated target';
-    replyArgs.chatGuid = 'mutated-reply-chat';
-    replyArgs.text = 'mutated reply';
-    replyArgs.replyToGuid = 'mutated-reply-target';
-    replyArgs.effectId = 'mutated-effect';
-
     blockerResult.resolve({ tempGuid: 'temp-blocker' });
-    await expect(Promise.all([blocker, ...queued])).resolves.toHaveLength(7);
+    await expect(Promise.all([blocker, ...queued])).resolves.toHaveLength(6);
 
     expect(mockSendText.mock.calls[1]?.[2]).toEqual({
       chatGuid: 'text-chat',
       text: 'original text',
-      mentions: [{ start: 0, length: 8, address: 'alice@example.com' }],
+      mentions: undefined,
     });
     expect(mockSendImage.mock.calls[0]?.[2]).toEqual({
-      chatGuid: 'single-image-chat',
+      chatGuid: 'RCS;-;single-image-chat',
       image: {
         uri: 'file:///single.jpg',
         name: 'single.jpg',
@@ -832,7 +772,7 @@ describe('UI send account lease', () => {
       },
     });
     expect(mockSendImage.mock.calls[1]?.[2]).toEqual({
-      chatGuid: 'batch-chat',
+      chatGuid: 'RCS;-;batch-chat',
       image: {
         uri: 'file:///batch.jpg',
         name: 'batch.jpg',
@@ -841,26 +781,20 @@ describe('UI send account lease', () => {
       },
     });
     expect(mockSendContact.mock.calls[0]?.[2]).toEqual({
-      chatGuid: 'contact-chat',
+      chatGuid: 'RCS;-;contact-chat',
       contact: {
         firstName: 'Alice',
         phones: [{ number: '+15550000001', label: 'cell' }],
         emails: [{ address: 'alice@example.com', label: 'home' }],
       },
-      selectedMessageGuid: 'contact-reply',
-      partIndex: 4,
+      selectedMessageGuid: undefined,
+      partIndex: undefined,
     });
     expect(mockSendReaction.mock.calls[0]?.[2]).toEqual({
-      chatGuid: 'reaction-chat',
-      targetGuid: 'reaction-target',
+      chatGuid: 'RCS;-;reaction-chat',
+      targetGuid: 'rcs-reaction-target',
       reaction: 'love',
       selectedMessageText: 'original target',
-    });
-    expect(mockSendText.mock.calls[2]?.[2]).toEqual({
-      chatGuid: 'reply-chat',
-      text: 'original reply',
-      selectedMessageGuid: 'reply-target',
-      effectId: 'original-effect',
     });
   });
 
@@ -915,7 +849,7 @@ describe('UI send account lease', () => {
       .mockReturnValueOnce(slowImage.promise);
 
     const pending = sendImages({
-      chatGuid: 'chat-a',
+      chatGuid: 'RCS;-;chat-a',
       images: [
         { uri: 'file:///one.jpg', name: 'one.jpg', mimeType: 'image/jpeg', size: 1 },
         { uri: 'file:///two.jpg', name: 'two.jpg', mimeType: 'image/jpeg', size: 2 },
@@ -942,7 +876,7 @@ describe('UI send account lease', () => {
     mockPickContact.mockReturnValueOnce(picked.promise);
     const screenLease = captureRealtimeDeliveryLease();
 
-    const pending = pickAndSendContact('chat-a', screenLease);
+    const pending = pickAndSendContact('RCS;-;chat-a', screenLease);
     await waitUntil(() => mockPickContact.mock.calls.length === 1);
 
     // No account mutation has begun, so Disconnect need not wait for a user-controlled OS sheet.

@@ -34,6 +34,8 @@ import { HttpClient } from '@core/api/http';
 // eslint-disable-next-line import/first
 import { logger } from '@core/secure';
 // eslint-disable-next-line import/first
+import { DbCommitGuardRejectedError } from '@db/transaction';
+// eslint-disable-next-line import/first
 import { expoAttachmentUploader } from '@/services/send/attachmentUpload';
 // eslint-disable-next-line import/first
 import { uploadGate, uploadRegistry } from '@/services/send/uploadControl';
@@ -67,21 +69,20 @@ afterEach(async () => {
 function upload(
   http: HttpClient,
   options: {
+    chatGuid?: string;
     timeoutMs?: number;
     clientAttemptGeneration?: number;
     text?: string;
-    selectedMessageGuid?: string;
-    partIndex?: number;
+    assertNetworkStart?: () => void;
   } = {},
 ): ReturnType<typeof expoAttachmentUploader> {
   return expoAttachmentUploader({
     http,
-    chatGuid: 'chat-1',
+    chatGuid: options.chatGuid ?? 'RCS;-;chat-1',
     tempGuid: 'temp-1',
     clientAttemptGeneration: options.clientAttemptGeneration,
     text: options.text,
-    selectedMessageGuid: options.selectedMessageGuid,
-    partIndex: options.partIndex,
+    assertNetworkStart: options.assertNetworkStart,
     attachmentGuid: 'att-1',
     name: 'photo.jpg',
     uri: 'file:///photo.jpg',
@@ -96,6 +97,20 @@ async function flushMicrotasks(count = 8): Promise<void> {
 }
 
 describe('native attachment upload account scope', () => {
+  it('rejects a direct iMessage upload before native file or network work', async () => {
+    const http = new HttpClient({
+      getOrigin: () => 'https://old.example',
+      getPassword: () => 'old-password',
+    });
+
+    await expect(upload(http, { chatGuid: 'iMessage;-;chat-1' })).rejects.toThrow(
+      'iMessage attachments were retired',
+    );
+    expect(mockGetInfoAsync).not.toHaveBeenCalled();
+    expect(mockCreateUploadTask).not.toHaveBeenCalled();
+    expect(uploadRegistry.size).toBe(0);
+  });
+
   it.each([301, 302, 303, 307, 308])(
     'rejects redirect status %i instead of accepting a native follow-up result',
     async (status) => {
@@ -179,8 +194,6 @@ describe('native attachment upload account scope', () => {
     const run = upload(http, {
       clientAttemptGeneration: 7,
       text: 'caption',
-      selectedMessageGuid: 'reply-target',
-      partIndex: 2,
     });
     expect(mockGetInfoAsync).toHaveBeenCalledWith('file:///photo.jpg');
     expect(uploadRegistry.size).toBe(1);
@@ -197,8 +210,9 @@ describe('native attachment upload account scope', () => {
     expect(options.headers.Authorization).not.toContain('new-password');
     expect(options.parameters.clientAttemptGeneration).toBe('7');
     expect(options.parameters.text).toBe('caption');
-    expect(options.parameters.selectedMessageGuid).toBe('reply-target');
-    expect(options.parameters.partIndex).toBe('2');
+    expect(options.parameters).not.toHaveProperty('method');
+    expect(options.parameters).not.toHaveProperty('selectedMessageGuid');
+    expect(options.parameters).not.toHaveProperty('partIndex');
     expect(uploadRegistry.size).toBe(0);
   });
 
@@ -219,6 +233,26 @@ describe('native attachment upload account scope', () => {
     finishFileCheck({ exists: true });
 
     await expect(run).rejects.toMatchObject({ kind: 'cancelled' });
+    expect(mockCreateUploadTask).not.toHaveBeenCalled();
+    expect(uploadRegistry.size).toBe(0);
+  });
+
+  it('rechecks send capability after file preflight and before starting the native task', async () => {
+    let capabilityCurrent = true;
+    const assertNetworkStart = jest.fn(() => {
+      if (!capabilityCurrent) throw new DbCommitGuardRejectedError();
+    });
+    const http = new HttpClient({
+      getOrigin: () => 'https://old.example',
+      getPassword: () => 'old-password',
+    });
+
+    const run = upload(http, { assertNetworkStart });
+    capabilityCurrent = false;
+    finishFileCheck({ exists: true });
+
+    await expect(run).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+    expect(assertNetworkStart).toHaveBeenCalledTimes(1);
     expect(mockCreateUploadTask).not.toHaveBeenCalled();
     expect(uploadRegistry.size).toBe(0);
   });

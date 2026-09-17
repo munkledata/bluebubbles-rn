@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import type { AppDatabase } from '@db/types';
-import { kvSetWithinTransaction, NOTIFICATION_ROUTE_KV_PREFIX } from '@db/repositories';
+import { NOTIFICATION_ROUTE_KV_PREFIX } from '@db/repositories';
 import { messageHasVisibleContentSql } from '@db/repositories/chatVisibility';
 import { withDbTransaction, type DbCommitGuard } from '@db/transaction';
 
@@ -62,6 +62,8 @@ interface DurableReminderTriggerRow {
 export interface MessageNotificationTruth {
   messageId: number;
   chatId: number;
+  /** Used only in memory to preserve RCS actions while helper-backed iMessage actions stay hidden. */
+  chatGuid?: string;
   notificationEligible: number;
   retractionState: string | null;
   dateRetracted: number | null;
@@ -190,6 +192,7 @@ export async function listMessageNotificationTruth(
     const rows = await database.all<MessageNotificationTruth>(sql`
       SELECT m.id AS messageId,
              m.chat_id AS chatId,
+             c.guid AS chatGuid,
              CASE WHEN
                m.is_from_me = 0
                AND m.associated_message_type IS NULL
@@ -411,42 +414,7 @@ export function nativeStatusData(
   };
 }
 
-/**
- * A FaceTime UUID is server-controlled, so even a prefixed UUID is not a safe native id. Store the
- * UUID behind a random token in the encrypted database; only the token crosses into Android state.
- */
-export async function getOrCreateFaceTimeRoute(
-  uuid: string,
-  commitGuard?: DbCommitGuard,
-): Promise<string> {
-  const db = await notificationDatabase();
-  // Generate outside the DB mutex: expo-crypto is a native boundary and transaction callbacks
-  // must stay short and DB-only. An existing route simply leaves this candidate unused.
-  const Crypto = await import('expo-crypto');
-  const candidateToken = Crypto.randomUUID();
-  return withDbTransaction(
-    db,
-    async (context) => {
-      // Lookup and insert share one queue slot. A plain pre-transaction read could see another
-      // transaction's temporary row, return its token, then leave no route after that neighbour
-      // rolled back.
-      const existing: Array<{ token: string }> = await db.all<{ token: string }>(sql`
-        SELECT substr(key, ${FACE_TIME_ROUTE_PREFIX.length + 1}) AS token
-        FROM kv
-        WHERE key LIKE ${`${FACE_TIME_ROUTE_PREFIX}%`} AND value = ${uuid}
-      `);
-      const existingToken = existing
-        .map((row) => stringValue(row.token))
-        .find((token): token is string => token != null && RANDOM_UUID.test(token));
-      if (existingToken) return existingToken;
-
-      await kvSetWithinTransaction(context, `${FACE_TIME_ROUTE_PREFIX}${candidateToken}`, uuid);
-      return candidateToken;
-    },
-    commitGuard,
-  );
-}
-
+/** Locate an old encrypted route so an upgrade can cancel its already-posted notification. */
 export async function findFaceTimeRoute(uuid: string): Promise<string | null> {
   const db = await notificationDatabase();
   const rows: Array<{ token: string }> = await db.all<{ token: string }>(sql`
@@ -468,15 +436,6 @@ async function resolveFaceTimeToken(token: string): Promise<string | null> {
     SELECT value FROM kv WHERE key = ${`${FACE_TIME_ROUTE_PREFIX}${token}`} LIMIT 1
   `);
   return stringValue(rows[0]?.value) ?? null;
-}
-
-export function nativeFaceTimeData(token: string): Record<string, string> {
-  return {
-    gatorOwner: NOTIFICATION_DATA_OWNER,
-    gatorSchema: NOTIFICATION_DATA_SCHEMA,
-    gatorKind: 'facetime',
-    routeToken: token,
-  };
 }
 
 /**
@@ -612,24 +571,28 @@ export async function deleteFaceTimeRoute(
   );
 }
 
-/** Account teardown: remove UUID route material after native notifications are cancelled. */
-export async function clearNotificationRoutes(): Promise<void> {
+/** Remove retired FaceTime UUID route material in bounded transactions. */
+export async function clearNotificationRoutes(commitGuard?: DbCommitGuard): Promise<void> {
   const db = await notificationDatabase();
   while (true) {
-    const deletedCount = await withDbTransaction(db, async () => {
-      const deleted = await db.all<{ rowid: number }>(sql`
-        DELETE FROM kv
-        WHERE rowid IN (
-          SELECT rowid
-          FROM kv
-          WHERE key LIKE ${`${FACE_TIME_ROUTE_PREFIX}%`}
-          ORDER BY rowid
-          LIMIT 500
-        )
-        RETURNING rowid
-      `);
-      return deleted.length;
-    });
+    const deletedCount = await withDbTransaction(
+      db,
+      async () => {
+        const deleted = await db.all<{ rowid: number }>(sql`
+          DELETE FROM kv
+          WHERE rowid IN (
+            SELECT rowid
+            FROM kv
+            WHERE key LIKE ${`${FACE_TIME_ROUTE_PREFIX}%`}
+            ORDER BY rowid
+            LIMIT 500
+          )
+          RETURNING rowid
+        `);
+        return deleted.length;
+      },
+      commitGuard,
+    );
     if (deletedCount < 500) return;
   }
 }

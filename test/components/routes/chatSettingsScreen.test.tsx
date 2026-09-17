@@ -9,11 +9,6 @@ const mockShowDialog = jest.fn();
 const mockShowToast = jest.fn();
 const mockLaunchImageLibrary = jest.fn();
 const mockRequestPhotoLibraryAccess = jest.fn();
-const mockSetGroupPhoto = jest.fn();
-const mockClearGroupPhoto = jest.fn();
-const mockLeaveGroupChat = jest.fn();
-const mockRenameGroupChat = jest.fn();
-const mockUpdateGroupParticipant = jest.fn();
 const mockOpenNotificationSettings = jest.fn();
 const mockSetChatAppearanceWithinTransaction = jest.fn();
 const mockSetChatCustomizationWithinTransaction = jest.fn();
@@ -70,8 +65,6 @@ const PRIVATE_MEMBER = 'details-private-member-c615';
 const PRIVATE_ADDRESS = 'private-member-address@example.invalid';
 const PRIVATE_MEDIA_URI = 'file:///details-private-photo-3e0f.jpg';
 const PRIVATE_BLURHASH = 'details-private-blurhash-771c';
-const PRIVATE_ADD_DRAFT = 'details-private-add-draft-a1a3';
-const PRIVATE_RENAME_DRAFT = 'details-private-rename-draft-f2e4';
 const PRIVATE_THEME_TOKEN = 'details-private-theme-token-889d';
 const CHAT_GUID = 'iMessage;-;chat-settings-private-guid';
 const MEDIA_GUID = 'details-private-message-guid';
@@ -184,8 +177,6 @@ function privateCanaries(): string[] {
     PRIVATE_ADDRESS,
     PRIVATE_MEDIA_URI,
     PRIVATE_BLURHASH,
-    PRIVATE_ADD_DRAFT,
-    PRIVATE_RENAME_DRAFT,
     PRIVATE_THEME_TOKEN,
   ];
 }
@@ -396,14 +387,6 @@ jest.mock('@/services/notifications/notifeeService', () => ({
   openChatNotificationSettings: (...args: unknown[]) => mockOpenNotificationSettings(...args),
 }));
 
-jest.mock('@/services/chat/groupManagement', () => ({
-  clearGroupPhoto: (...args: unknown[]) => mockClearGroupPhoto(...args),
-  leaveGroupChat: (...args: unknown[]) => mockLeaveGroupChat(...args),
-  renameGroupChat: (...args: unknown[]) => mockRenameGroupChat(...args),
-  setGroupPhoto: (...args: unknown[]) => mockSetGroupPhoto(...args),
-  updateGroupParticipant: (...args: unknown[]) => mockUpdateGroupParticipant(...args),
-}));
-
 jest.mock('@/services/realtime/deliveryCoordinator', () => {
   const actual = jest.requireActual(
     '@/services/realtime/deliveryCoordinator',
@@ -562,12 +545,15 @@ import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
+// eslint-disable-next-line import/first
+import { useSessionStore } from '@state/sessionStore';
 
 let keyboardDismissSpy: jest.SpiedFunction<typeof Keyboard.dismiss>;
 const mockGetDatabase = getDatabase as jest.Mock;
 
 beforeEach(() => {
   resumeRealtimeDeliveries();
+  useSessionStore.setState({ serverInfo: { version: 'test', private_api: true } as any });
   jest.clearAllMocks();
   reduceMotionListener = undefined;
   removeReduceMotionListener = jest.fn();
@@ -590,11 +576,6 @@ beforeEach(() => {
   keyboardDismissSpy = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => undefined);
   mockRequestPhotoLibraryAccess.mockResolvedValue(true);
   mockLaunchImageLibrary.mockResolvedValue({ canceled: true, assets: [] });
-  mockSetGroupPhoto.mockResolvedValue(true);
-  mockClearGroupPhoto.mockResolvedValue(true);
-  mockLeaveGroupChat.mockResolvedValue(true);
-  mockRenameGroupChat.mockResolvedValue(true);
-  mockUpdateGroupParticipant.mockResolvedValue(true);
   mockOpenNotificationSettings.mockResolvedValue(undefined);
   mockSetChatAppearanceWithinTransaction.mockReset().mockResolvedValue(undefined);
   mockSetChatCustomizationWithinTransaction.mockReset().mockResolvedValue(undefined);
@@ -768,6 +749,19 @@ describe('ChatSettingsScreen reduced motion', () => {
 });
 
 describe('ChatSettingsScreen source and account ownership', () => {
+  it('keeps group details read-only even when an old server advertises Private API', async () => {
+    await renderWithTheme(<ChatSettingsScreen />);
+
+    expect(screen.getByText(PRIVATE_MEMBER)).toBeTruthy();
+    expect(screen.getByText('Chat Theme…')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: `Remove ${PRIVATE_MEMBER}` })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add Person…' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Rename Group…' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Leave group' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Change Photo…' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Remove Photo' })).toBeNull();
+  });
+
   it.each([
     [CHAT_GUID, 73],
     [CHAT_GUID_B, 74],
@@ -859,10 +853,6 @@ describe('ChatSettingsScreen source and account ownership', () => {
     );
     await emitReduceMotion(true);
     expect(studioModal().props.animationType).toBe('slide');
-    await fireEvent.press(screen.getByRole('button', { name: 'Add Person…' }));
-    await fireEvent.press(screen.getByRole('button', { name: 'Rename Group…' }));
-    await fireEvent.changeText(screen.getByPlaceholderText('Phone or email'), PRIVATE_ADD_DRAFT);
-    await fireEvent.changeText(screen.getByPlaceholderText('New group name'), PRIVATE_RENAME_DRAFT);
 
     mockPendingReactiveGuid = CHAT_GUID_B;
     mockGuid = CHAT_GUID_B;
@@ -982,8 +972,6 @@ describe('ChatSettingsScreen source and account ownership', () => {
   });
 
   it.each([
-    ['Change Photo…', 'success'],
-    ['Change Photo…', 'rejection'],
     ['Set Background…', 'success'],
     ['Set Background…', 'rejection'],
     ['Generate theme from background', 'success'],
@@ -1015,44 +1003,28 @@ describe('ChatSettingsScreen source and account ownership', () => {
         await oldPick.promise.catch(() => undefined);
         await Promise.resolve();
       });
-      expect(mockSetGroupPhoto).not.toHaveBeenCalled();
       expect(mockSetChatAppearanceWithinTransaction).not.toHaveBeenCalled();
       expect(mockShowDialog).not.toHaveBeenCalled();
       expect(JSON.stringify(mockShowDialog.mock.calls)).not.toContain(rawError);
 
       await fireEvent.press(screen.getByText(control));
-      if (control === 'Change Photo…') {
-        await waitFor(() =>
-          expect(mockSetGroupPhoto).toHaveBeenCalledWith(
-            CHAT_GUID_B,
-            {
-              uri: 'file:///picked-current-b.jpg',
-              name: 'picked.jpg',
-              mimeType: 'image/jpeg',
-            },
-            mockAccountLease,
-          ),
-        );
-      } else {
-        await waitFor(() =>
-          expect(mockSetChatAppearanceWithinTransaction).toHaveBeenCalledWith(
-            expect.any(Object),
-            CHAT_GUID_B,
-            {
-              backgroundUri: 'file:///documents/copied-background.jpg',
-              backgroundIsLight: false,
-            },
-          ),
-        );
-        await waitFor(() => expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE', 'COMMIT']));
-      }
+      await waitFor(() =>
+        expect(mockSetChatAppearanceWithinTransaction).toHaveBeenCalledWith(
+          expect.any(Object),
+          CHAT_GUID_B,
+          {
+            backgroundUri: 'file:///documents/copied-background.jpg',
+            backgroundIsLight: false,
+          },
+        ),
+      );
+      await waitFor(() => expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE', 'COMMIT']));
       expect(mockLaunchImageLibrary).toHaveBeenCalledTimes(2);
     },
   );
 
   it.each([
-    ['Change Photo…', 'cancel'],
-    ['Change Photo…', 'rejection'],
+    ['Set Background…', 'cancel'],
     ['Set Background…', 'rejection'],
     ['Generate theme from background', 'rejection'],
   ] as const)(
@@ -1080,34 +1052,19 @@ describe('ChatSettingsScreen source and account ownership', () => {
         );
         expect(JSON.stringify(mockShowDialog.mock.calls)).not.toContain(rawError);
       }
-      expect(mockSetGroupPhoto).not.toHaveBeenCalled();
       expect(mockSetChatAppearanceWithinTransaction).not.toHaveBeenCalled();
 
       await fireEvent.press(screen.getByText(control));
-      if (control === 'Change Photo…') {
-        await waitFor(() =>
-          expect(mockSetGroupPhoto).toHaveBeenCalledWith(
-            CHAT_GUID,
-            {
-              uri: 'file:///picked-retry-a.jpg',
-              name: 'picked.jpg',
-              mimeType: 'image/jpeg',
-            },
-            mockAccountLease,
-          ),
-        );
-      } else {
-        await waitFor(() =>
-          expect(mockSetChatAppearanceWithinTransaction).toHaveBeenCalledWith(
-            expect.any(Object),
-            CHAT_GUID,
-            {
-              backgroundUri: 'file:///documents/copied-background.jpg',
-              backgroundIsLight: false,
-            },
-          ),
-        );
-      }
+      await waitFor(() =>
+        expect(mockSetChatAppearanceWithinTransaction).toHaveBeenCalledWith(
+          expect.any(Object),
+          CHAT_GUID,
+          {
+            backgroundUri: 'file:///documents/copied-background.jpg',
+            backgroundIsLight: false,
+          },
+        ),
+      );
       expect(mockLaunchImageLibrary).toHaveBeenCalledTimes(2);
     },
   );
@@ -1355,339 +1312,6 @@ describe('ChatSettingsScreen source and account ownership', () => {
       resumeRealtimeDeliveries();
     }
   });
-
-  it('revokes an old A removal confirmation and binds a fresh exact B confirmation', async () => {
-    const view = await renderWithTheme(<ChatSettingsScreen />);
-    await fireEvent.press(screen.getByRole('button', { name: `Remove ${PRIVATE_MEMBER}` }));
-    expect(mockShowDialog.mock.calls.at(-1)?.slice(0, 2)).toEqual([
-      'Remove',
-      'Remove this person from the group?',
-    ]);
-    const oldRemove = dialogAction('Remove');
-    expect(oldRemove).toBeDefined();
-
-    mockGuid = CHAT_GUID_B;
-    await view.rerender(<ChatSettingsScreen />);
-    await act(async () => {
-      oldRemove?.();
-      await Promise.resolve();
-    });
-    expect(mockUpdateGroupParticipant).not.toHaveBeenCalled();
-
-    await fireEvent.press(screen.getByRole('button', { name: `Remove ${PRIVATE_MEMBER_B}` }));
-    await act(async () => {
-      dialogAction('Remove')?.();
-      await Promise.resolve();
-    });
-    expect(mockUpdateGroupParticipant).toHaveBeenCalledTimes(1);
-    expect(mockUpdateGroupParticipant).toHaveBeenCalledWith(
-      CHAT_GUID_B,
-      'remove',
-      PRIVATE_ADDRESS_B,
-      mockAccountLease,
-    );
-  });
-
-  it('revokes retained A Rename, Add, and Remove Photo callbacks across A to B to A', async () => {
-    const view = await renderWithTheme(<ChatSettingsScreen />);
-    await fireEvent.press(screen.getByRole('button', { name: 'Rename Group…' }));
-    await fireEvent.changeText(screen.getByPlaceholderText('New group name'), 'old-a-rename');
-    const oldRename = retainConfiguredPress(screen.getByText('Save').parent!);
-    await fireEvent.press(screen.getByRole('button', { name: 'Add Person…' }));
-    await fireEvent.changeText(screen.getByPlaceholderText('Phone or email'), 'old-a-add');
-    const oldAdd = retainConfiguredPress(screen.getByText('Add').parent!);
-    await fireEvent.press(screen.getByRole('button', { name: 'Remove Photo' }));
-    const oldRemovePhoto = dialogAction('Remove');
-    expect(oldRemovePhoto).toBeDefined();
-
-    mockGuid = CHAT_GUID_B;
-    await view.rerender(<ChatSettingsScreen />);
-    mockGuid = CHAT_GUID;
-    await view.rerender(<ChatSettingsScreen />);
-    await act(async () => {
-      oldRename();
-      oldAdd();
-      oldRemovePhoto?.();
-      await Promise.resolve();
-    });
-    expect(mockRenameGroupChat).not.toHaveBeenCalled();
-    expect(mockUpdateGroupParticipant).not.toHaveBeenCalled();
-    expect(mockClearGroupPhoto).not.toHaveBeenCalled();
-
-    await fireEvent.press(screen.getByRole('button', { name: 'Rename Group…' }));
-    await fireEvent.changeText(screen.getByPlaceholderText('New group name'), 'fresh-a-rename');
-    await fireEvent.press(screen.getByText('Save'));
-    await waitFor(() =>
-      expect(mockRenameGroupChat).toHaveBeenCalledWith(
-        CHAT_GUID,
-        'fresh-a-rename',
-        mockAccountLease,
-      ),
-    );
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Rename Group…' })).toBeTruthy());
-
-    await fireEvent.press(screen.getByRole('button', { name: 'Add Person…' }));
-    await fireEvent.changeText(screen.getByPlaceholderText('Phone or email'), 'fresh-a-add');
-    await fireEvent.press(screen.getByText('Add'));
-    await waitFor(() =>
-      expect(mockUpdateGroupParticipant).toHaveBeenCalledWith(
-        CHAT_GUID,
-        'add',
-        'fresh-a-add',
-        mockAccountLease,
-      ),
-    );
-
-    await fireEvent.press(screen.getByRole('button', { name: 'Remove Photo' }));
-    await act(async () => {
-      dialogAction('Remove')?.();
-      await Promise.resolve();
-    });
-    await waitFor(() =>
-      expect(mockClearGroupPhoto).toHaveBeenCalledWith(CHAT_GUID, mockAccountLease),
-    );
-  });
-
-  it('suppresses a delayed A Rename rejection and reports then retries an exact current B error', async () => {
-    const pending = deferred<boolean>();
-    const staleRawError = 'raw-stale-rename-error-582f';
-    const currentRawError = 'raw-current-rename-error-65b9';
-    mockRenameGroupChat
-      .mockReturnValueOnce(pending.promise)
-      .mockRejectedValueOnce(new Error(currentRawError))
-      .mockResolvedValueOnce(true);
-    const view = await renderWithTheme(<ChatSettingsScreen />);
-
-    await fireEvent.press(screen.getByRole('button', { name: 'Rename Group…' }));
-    await fireEvent.changeText(screen.getByPlaceholderText('New group name'), 'stale-a-rename');
-    await fireEvent.press(screen.getByText('Save'));
-    await waitFor(() =>
-      expect(mockRenameGroupChat).toHaveBeenCalledWith(
-        CHAT_GUID,
-        'stale-a-rename',
-        mockAccountLease,
-      ),
-    );
-
-    mockGuid = CHAT_GUID_B;
-    await view.rerender(<ChatSettingsScreen />);
-    await act(async () => {
-      pending.reject(new Error(staleRawError));
-      await pending.promise.catch(() => undefined);
-      await Promise.resolve();
-    });
-    expect(mockShowDialog).not.toHaveBeenCalled();
-    expect(JSON.stringify(mockShowDialog.mock.calls)).not.toContain(staleRawError);
-
-    await fireEvent.press(screen.getByRole('button', { name: 'Rename Group…' }));
-    await fireEvent.changeText(screen.getByPlaceholderText('New group name'), 'fresh-b-rename');
-    await fireEvent.press(screen.getByText('Save'));
-    await waitFor(() =>
-      expect(mockShowDialog).toHaveBeenCalledWith(
-        'Group',
-        'Couldn’t update — the server needs the Private API enabled.',
-      ),
-    );
-    expect(JSON.stringify(mockShowDialog.mock.calls)).not.toContain(currentRawError);
-
-    await act(async () => {
-      await Promise.resolve();
-    });
-    await fireEvent.press(screen.getByText('Save'));
-    await waitFor(() => expect(mockRenameGroupChat).toHaveBeenCalledTimes(3));
-    expect(mockRenameGroupChat).toHaveBeenLastCalledWith(
-      CHAT_GUID_B,
-      'fresh-b-rename',
-      mockAccountLease,
-    );
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Rename Group…' })).toBeTruthy());
-  });
-
-  it.each(['success', 'rejection'] as const)(
-    'suppresses delayed A setGroupPhoto %s and publishes only a fresh current B outcome',
-    async (outcome) => {
-      const pending = deferred<boolean>();
-      const staleRawError = 'raw-stale-set-group-photo-error-28ad';
-      const currentRawError = 'raw-current-set-group-photo-error-739c';
-      mockLaunchImageLibrary.mockResolvedValue(pickedAsset('file:///picked-group-photo.jpg'));
-      mockSetGroupPhoto.mockReturnValueOnce(pending.promise);
-      if (outcome === 'success') {
-        mockSetGroupPhoto.mockResolvedValueOnce(true);
-      } else {
-        mockSetGroupPhoto
-          .mockRejectedValueOnce(new Error(currentRawError))
-          .mockResolvedValueOnce(true);
-      }
-      const view = await renderWithTheme(<ChatSettingsScreen />);
-
-      await fireEvent.press(screen.getByRole('button', { name: 'Change Photo…' }));
-      await waitFor(() =>
-        expect(mockSetGroupPhoto).toHaveBeenCalledWith(
-          CHAT_GUID,
-          {
-            uri: 'file:///picked-group-photo.jpg',
-            name: 'picked.jpg',
-            mimeType: 'image/jpeg',
-          },
-          mockAccountLease,
-        ),
-      );
-
-      mockGuid = CHAT_GUID_B;
-      await view.rerender(<ChatSettingsScreen />);
-      await fireEvent.press(screen.getByRole('button', { name: 'Change Photo…' }));
-      expect(mockLaunchImageLibrary).toHaveBeenCalledTimes(1);
-      await act(async () => {
-        if (outcome === 'success') pending.resolve(true);
-        else pending.reject(new Error(staleRawError));
-        await pending.promise.catch(() => undefined);
-        await Promise.resolve();
-      });
-      expect(mockShowDialog).not.toHaveBeenCalled();
-      expect(JSON.stringify(mockShowDialog.mock.calls)).not.toContain(staleRawError);
-
-      await fireEvent.press(screen.getByRole('button', { name: 'Change Photo…' }));
-      if (outcome === 'success') {
-        await waitFor(() =>
-          expect(mockShowDialog).toHaveBeenCalledWith(
-            'Group Photo',
-            'Photo updated — it may take a moment to sync to everyone.',
-          ),
-        );
-      } else {
-        await waitFor(() =>
-          expect(mockShowDialog).toHaveBeenCalledWith(
-            'Group Photo',
-            'Couldn’t update the group photo.',
-          ),
-        );
-        expect(JSON.stringify(mockShowDialog.mock.calls)).not.toContain(currentRawError);
-        await fireEvent.press(screen.getByRole('button', { name: 'Change Photo…' }));
-        await waitFor(() =>
-          expect(mockShowDialog).toHaveBeenCalledWith(
-            'Group Photo',
-            'Photo updated — it may take a moment to sync to everyone.',
-          ),
-        );
-      }
-      expect(mockSetGroupPhoto).toHaveBeenLastCalledWith(
-        CHAT_GUID_B,
-        {
-          uri: 'file:///picked-group-photo.jpg',
-          name: 'picked.jpg',
-          mimeType: 'image/jpeg',
-        },
-        mockAccountLease,
-      );
-    },
-  );
-
-  it.each(['success', 'rejection'] as const)(
-    'suppresses delayed A clearGroupPhoto %s and publishes only a fresh current B outcome',
-    async (outcome) => {
-      const pending = deferred<boolean>();
-      const staleRawError = 'raw-stale-clear-group-photo-error-392e';
-      const currentRawError = 'raw-current-clear-group-photo-error-84c0';
-      mockClearGroupPhoto.mockReturnValueOnce(pending.promise);
-      if (outcome === 'success') {
-        mockClearGroupPhoto.mockResolvedValueOnce(true);
-      } else {
-        mockClearGroupPhoto
-          .mockRejectedValueOnce(new Error(currentRawError))
-          .mockResolvedValueOnce(true);
-      }
-      const view = await renderWithTheme(<ChatSettingsScreen />);
-
-      await fireEvent.press(screen.getByRole('button', { name: 'Remove Photo' }));
-      await act(async () => {
-        dialogAction('Remove')?.();
-        await Promise.resolve();
-      });
-      await waitFor(() =>
-        expect(mockClearGroupPhoto).toHaveBeenCalledWith(CHAT_GUID, mockAccountLease),
-      );
-
-      mockGuid = CHAT_GUID_B;
-      await view.rerender(<ChatSettingsScreen />);
-      await act(async () => {
-        if (outcome === 'success') pending.resolve(true);
-        else pending.reject(new Error(staleRawError));
-        await pending.promise.catch(() => undefined);
-        await Promise.resolve();
-      });
-      expect(mockShowDialog).toHaveBeenCalledTimes(1);
-      expect(JSON.stringify(mockShowDialog.mock.calls)).not.toContain(staleRawError);
-
-      await fireEvent.press(screen.getByRole('button', { name: 'Remove Photo' }));
-      await act(async () => {
-        dialogAction('Remove')?.();
-        await Promise.resolve();
-      });
-      if (outcome === 'success') {
-        await waitFor(() =>
-          expect(mockShowDialog).toHaveBeenCalledWith('Group Photo', 'Photo removed.'),
-        );
-      } else {
-        await waitFor(() =>
-          expect(mockShowDialog).toHaveBeenCalledWith(
-            'Group Photo',
-            'Couldn’t remove the group photo.',
-          ),
-        );
-        expect(JSON.stringify(mockShowDialog.mock.calls)).not.toContain(currentRawError);
-        await fireEvent.press(screen.getByRole('button', { name: 'Remove Photo' }));
-        await act(async () => {
-          dialogAction('Remove')?.();
-          await Promise.resolve();
-        });
-        await waitFor(() =>
-          expect(mockShowDialog).toHaveBeenCalledWith('Group Photo', 'Photo removed.'),
-        );
-      }
-      expect(mockClearGroupPhoto).toHaveBeenLastCalledWith(CHAT_GUID_B, mockAccountLease);
-    },
-  );
-
-  it.each(['success', 'rejection'] as const)(
-    'suppresses an admitted A Leave %s after B and preserves a fresh exact B Leave',
-    async (outcome) => {
-      const pending = deferred<boolean>();
-      const rawError = 'raw-stale-leave-error-c218';
-      mockLeaveGroupChat.mockReturnValueOnce(pending.promise).mockResolvedValueOnce(true);
-      const view = await renderWithTheme(<ChatSettingsScreen />);
-
-      await fireEvent.press(screen.getByRole('button', { name: 'Leave group' }));
-      const oldLeave = dialogAction('Leave');
-      expect(oldLeave).toBeDefined();
-      await act(async () => {
-        oldLeave?.();
-        await Promise.resolve();
-      });
-      await waitFor(() =>
-        expect(mockLeaveGroupChat).toHaveBeenCalledWith(CHAT_GUID, mockAccountLease),
-      );
-
-      mockGuid = CHAT_GUID_B;
-      await view.rerender(<ChatSettingsScreen />);
-      await act(async () => {
-        if (outcome === 'success') pending.resolve(true);
-        else pending.reject(new Error(rawError));
-        await pending.promise.catch(() => undefined);
-        await Promise.resolve();
-      });
-      expect(mockBack).not.toHaveBeenCalled();
-      expect(mockShowDialog).toHaveBeenCalledTimes(1);
-      expect(JSON.stringify(mockShowDialog.mock.calls)).not.toContain(rawError);
-
-      await fireEvent.press(screen.getByRole('button', { name: 'Leave group' }));
-      await act(async () => {
-        dialogAction('Leave')?.();
-        await Promise.resolve();
-      });
-      await waitFor(() => expect(mockBack).toHaveBeenCalledTimes(1));
-      expect(mockLeaveGroupChat).toHaveBeenLastCalledWith(CHAT_GUID_B, mockAccountLease);
-    },
-  );
 
   it.each(['success', 'rejection'] as const)(
     'suppresses an admitted A notification %s after B, then reports and retries a current B error',
@@ -2187,7 +1811,7 @@ describe('ChatSettingsScreen source and account ownership', () => {
     expect(JSON.stringify(view.toJSON())).not.toContain(rawError);
   });
 
-  it('keeps exact current group, notification, customization, and Leave actions', async () => {
+  it('keeps exact current notification and local customization actions without group mutations', async () => {
     await renderWithTheme(<ChatSettingsScreen />);
 
     await fireEvent.changeText(
@@ -2215,32 +1839,11 @@ describe('ChatSettingsScreen source and account ownership', () => {
     };
     expect(notificationContext.generation).toBe(73);
     expect(notificationContext.isCurrent()).toBe(true);
-
-    await fireEvent.press(screen.getByRole('button', { name: `Remove ${PRIVATE_MEMBER}` }));
-    expect(mockShowDialog.mock.calls.at(-1)?.slice(0, 2)).toEqual([
-      'Remove',
-      'Remove this person from the group?',
-    ]);
-    await act(async () => {
-      dialogAction('Remove')?.();
-      await Promise.resolve();
-    });
-    expect(mockUpdateGroupParticipant).toHaveBeenCalledWith(
-      CHAT_GUID,
-      'remove',
-      PRIVATE_ADDRESS,
-      mockAccountLease,
-    );
-
-    await fireEvent.press(screen.getByRole('button', { name: 'Leave group' }));
-    await act(async () => {
-      dialogAction('Leave')?.();
-      await Promise.resolve();
-    });
-    await waitFor(() =>
-      expect(mockLeaveGroupChat).toHaveBeenCalledWith(CHAT_GUID, mockAccountLease),
-    );
-    expect(mockBack).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(PRIVATE_MEMBER)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: `Remove ${PRIVATE_MEMBER}` })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Add Person…' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Rename Group…' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Leave group' })).toBeNull();
   });
 });
 

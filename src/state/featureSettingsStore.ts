@@ -24,7 +24,7 @@ import { canCommitHydration, reportHydrationError, type HydrationOptions } from 
 
 /**
  * User-configurable behavior toggles that gate features which were previously hardcoded:
- * Private API client behaviors (typing indicators, read receipts) and attachment auto-download.
+ * messaging preferences (typing indicators, read receipts) and attachment auto-download.
  * Persisted in `kv`; ordinary feature flags default to the app's prior behavior. Error reporting
  * is the deliberate exception: it is a versioned, explicit consent choice and fails closed until
  * hydration proves the user opted in. Hydrate at app launch + home mount alongside
@@ -39,7 +39,6 @@ import { canCommitHydration, reportHydrationError, type HydrationOptions } from 
  * Non-React consumers (services `sendTyping`/`markRead`) read via `getState()`.
  */
 export type FeatureFlag =
-  | 'privateApiEnabled'
   | 'sendTypingIndicators'
   | 'sendReadReceipts'
   | 'autoDownloadAttachments'
@@ -48,11 +47,9 @@ export type FeatureFlag =
   | 'showDeliveryTimestamps'
   | 'compactChatList'
   | 'messageNotifications'
-  | 'sendSubjectLines'
   | 'filterUnknownSenders';
 
 const FLAGS: Record<FeatureFlag, { key: string; def: boolean }> = {
-  privateApiEnabled: { key: 'privateApi.enabled', def: true },
   sendTypingIndicators: { key: 'privateApi.sendTypingIndicators', def: true },
   sendReadReceipts: { key: 'privateApi.sendReadReceipts', def: true },
   autoDownloadAttachments: { key: 'attachments.autoDownload', def: true },
@@ -61,9 +58,11 @@ const FLAGS: Record<FeatureFlag, { key: string; def: boolean }> = {
   showDeliveryTimestamps: { key: 'conversation.showDeliveryTimestamps', def: true },
   compactChatList: { key: 'chatList.compact', def: false },
   messageNotifications: { key: 'notifications.messages', def: true },
-  sendSubjectLines: { key: 'privateApi.sendSubjectLines', def: false },
   filterUnknownSenders: { key: 'chatList.filterUnknownSenders', def: false },
 };
+
+const RETIRED_PRIVATE_API_MASTER_KEY = 'privateApi.enabled';
+const RETIRED_PRIVATE_API_SUBJECT_KEY = 'privateApi.sendSubjectLines';
 
 /** Versioned, device-local record of informed error-reporting consent. */
 export const ERROR_REPORTING_CONSENT_KEY = 'diagnostics.errorReportingConsent.v1';
@@ -195,7 +194,6 @@ const VALUE_SETTINGS = {
 type ValueSettingKey = keyof typeof VALUE_SETTINGS;
 
 interface FeatureSettingsState {
-  privateApiEnabled: boolean;
   sendTypingIndicators: boolean;
   sendReadReceipts: boolean;
   autoDownloadAttachments: boolean;
@@ -204,7 +202,6 @@ interface FeatureSettingsState {
   showDeliveryTimestamps: boolean;
   compactChatList: boolean;
   messageNotifications: boolean;
-  sendSubjectLines: boolean;
   filterUnknownSenders: boolean;
   errorReportingEnabled: boolean;
   permissionOnboardingCompleted: boolean;
@@ -231,7 +228,6 @@ interface FeatureSettingsState {
 }
 
 export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) => ({
-  privateApiEnabled: FLAGS.privateApiEnabled.def,
   sendTypingIndicators: FLAGS.sendTypingIndicators.def,
   sendReadReceipts: FLAGS.sendReadReceipts.def,
   autoDownloadAttachments: FLAGS.autoDownloadAttachments.def,
@@ -240,7 +236,6 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
   showDeliveryTimestamps: FLAGS.showDeliveryTimestamps.def,
   compactChatList: FLAGS.compactChatList.def,
   messageNotifications: FLAGS.messageNotifications.def,
-  sendSubjectLines: FLAGS.sendSubjectLines.def,
   filterUnknownSenders: FLAGS.filterUnknownSenders.def,
   errorReportingEnabled: false,
   permissionOnboardingCompleted: false,
@@ -259,6 +254,8 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
         consentRaw,
         permissionOnboardingRaw,
         inboxFiltersRaw,
+        retiredPrivateApiMasterRaw,
+        retiredPrivateApiSubjectRaw,
       ] = await Promise.all([
         Promise.all(
           (Object.keys(FLAGS) as FeatureFlag[]).map(async (f) => {
@@ -277,8 +274,34 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
         kvGet(db, ERROR_REPORTING_CONSENT_KEY),
         kvGet(db, PERMISSION_ONBOARDING_COMPLETED_KEY),
         kvGet(db, INBOX_FILTERS_KEY),
+        kvGet(db, RETIRED_PRIVATE_API_MASTER_KEY),
+        kvGet(db, RETIRED_PRIVATE_API_SUBJECT_KEY),
       ]);
       if (!canCommitHydration(options)) return;
+
+      // Upgrade cleanup: old installs may carry enabled helper preferences. Persist their disabled
+      // state before publishing settings so neither a later downgrade nor a stale backup can treat
+      // those bytes as current user intent. This is idempotent and runs only when a nonzero value
+      // actually exists; failure remains best-effort because retirement is enforced in code too.
+      if (retiredPrivateApiMasterRaw === '1' || retiredPrivateApiSubjectRaw === '1') {
+        await withDbTransaction(
+          db,
+          async (transactionContext) => {
+            if (retiredPrivateApiMasterRaw === '1') {
+              await kvSetWithinTransaction(transactionContext, RETIRED_PRIVATE_API_MASTER_KEY, '0');
+            }
+            if (retiredPrivateApiSubjectRaw === '1') {
+              await kvSetWithinTransaction(
+                transactionContext,
+                RETIRED_PRIVATE_API_SUBJECT_KEY,
+                '0',
+              );
+            }
+          },
+          () => canCommitHydration(options),
+        ).catch(() => undefined);
+        if (!canCommitHydration(options)) return;
+      }
 
       // Only the versioned, plain-language choice can authorize capture or upload. Missing,
       // corrupt, and pre-consent legacy values all fail closed and are sealed as denied below.

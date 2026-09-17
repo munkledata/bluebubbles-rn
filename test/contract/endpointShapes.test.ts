@@ -9,7 +9,6 @@ import {
   SERVER_MESSAGE_SEARCH_LIMIT,
   ServerMessageSearchList,
   SendAck,
-  UnsendAck,
   deletedMessages,
   queryMessages,
   searchMessagesOnServer,
@@ -17,15 +16,15 @@ import {
   unsendMessage,
 } from '@core/api/endpoints/messages';
 import { ChatList, createChat, getChat, queryChats } from '@core/api/endpoints/chats';
-import { answerFaceTime, createFaceTimeLink, leaveFaceTime } from '@core/api/endpoints/facetime';
 import { registerDevice } from '@core/api/endpoints/fcm';
 import { SYNC_WITH_QUERY } from '@core/config/constants';
+import { Chat } from '@core/models';
 
 /**
  * Endpoint-shape contract gate. The entity-level wire contract (wireContract.test.ts)
  * only proved the app models the server's ENTITIES; it missed the wrapper layer — Gator
  * wraps responses in named keys ({ chats }, { messages }) and returns status/ack objects
- * ({ guid, viaPrivateApi }, { unsent }, { answered }, { id }) rather than bare entities.
+ * ({ guid, viaPrivateApi }, { unsent }, { id }) rather than bare entities.
  * These goldens mirror the actual `bbd/src/api/operations/*` + MessageSender returns
  * (post {status,message,data} unwrap), so a wrapper/ack divergence the app doesn't model
  * fails CI here instead of shipping (as it did before this audit).
@@ -259,17 +258,6 @@ describe('endpoint shapes: list wrappers', () => {
 });
 
 describe('endpoint shapes: send / action acks (NOT bare Messages)', () => {
-  it('sendText parses the Private-API ack { guid, viaPrivateApi } and surfaces the guid', async () => {
-    const fx = fixture('sendAck.privateApi.gator.json');
-    expect(SendAck.safeParse(fx).success).toBe(true);
-    const ack = await sendText(httpReturning(fx), {
-      chatGuid: 'c1',
-      tempGuid: 't1',
-      message: 'hi',
-    });
-    expect(ack.guid).toBe('p:0/REAL-GUID-1122-3344');
-  });
-
   it('sendText parses the AppleScript ack { viaPrivateApi:false } with NO guid (the old bug: this threw)', async () => {
     const fx = fixture('sendAck.appleScript.gator.json');
     const parsed = SendAck.safeParse(fx);
@@ -318,15 +306,16 @@ describe('endpoint shapes: send / action acks (NOT bare Messages)', () => {
     );
   });
 
-  it('unsendMessage parses the { unsent: true } status object (not a Message)', async () => {
-    const fx = fixture('unsendAck.gator.json');
-    expect(UnsendAck.safeParse(fx).success).toBe(true);
-    const ack = await unsendMessage(httpReturning(fx), {
-      chatGuid: 'c1',
-      messageGuid: 'm1',
-      partIndex: 0,
-    });
-    expect(ack.unsent).toBe(true);
+  it('rejects retired Unsend before HTTP', () => {
+    const post = jest.fn();
+    expect(() =>
+      unsendMessage({ post } as unknown as HttpClient, {
+        chatGuid: 'c1',
+        messageGuid: 'm1',
+        partIndex: 0,
+      }),
+    ).toThrow('Unsend was retired');
+    expect(post).not.toHaveBeenCalled();
   });
 });
 
@@ -337,24 +326,16 @@ describe('endpoint shapes: single-chat read/create wrapper-or-bare', () => {
   });
 
   it('createChat accepts a { chat } wrapper too', async () => {
-    const wrapped = { chat: fixture('chat.gator.json') };
-    const chat = await createChat(httpReturning(wrapped), { addresses: ['+1555'], message: 'hi' });
-    expect(chat.guid).toBe('iMessage;-;+15551234567');
-  });
-});
-
-describe('endpoint shapes: facetime status objects', () => {
-  it('answerFaceTime reads { answered: true } (NOT a { data: { link } } envelope)', async () => {
-    expect(await answerFaceTime(httpReturning({ answered: true }), 'u1')).toBe(true);
-  });
-  it('leaveFaceTime reads { left: true }', async () => {
-    expect(await leaveFaceTime(httpReturning({ left: true }), 'u1')).toBe(true);
-  });
-  it('createFaceTimeLink reads { link } and tolerates a null link', async () => {
-    expect(
-      await createFaceTimeLink(httpReturning({ link: 'https://facetime.apple.com/join#x' })),
-    ).toBe('https://facetime.apple.com/join#x');
-    expect(await createFaceTimeLink(httpReturning({ link: null }))).toBeNull();
+    const base = Chat.parse(fixture('chat.gator.json'));
+    const wrapped = {
+      chat: {
+        ...base,
+        guid: 'RCS;-;+15551234567',
+        participants: [{ address: '+15551234567', service: 'RCS' }],
+      },
+    };
+    const chat = await createChat(httpReturning(wrapped), { address: '+1555', message: 'hi' });
+    expect(chat.guid).toBe('RCS;-;+15551234567');
   });
 });
 

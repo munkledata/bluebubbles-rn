@@ -20,6 +20,7 @@ import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordi
 import { useChats } from '@features/conversations/useChats';
 import type { InboxRow, PinnedOrderMoveDirection } from '@db/repositories';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
+import { useSessionStore } from '@state/sessionStore';
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 import { Icon, Screen, usePullToRefresh } from '../primitives';
 import { readableTextOn, useTheme } from '../theme';
@@ -54,6 +55,7 @@ export function ConversationListScreen(): React.JSX.Element {
   const filterUnknown = useFeatureSettingsStore((s) => s.filterUnknownSenders);
   const inboxFilters = useFeatureSettingsStore((s) => s.inboxFilters);
   const setInboxFilters = useFeatureSettingsStore((s) => s.setInboxFilters);
+  const rcsAvailable = useSessionStore((s) => s.serverInfo?.rcs === true);
   const effectiveInboxFilters = useMemo<InboxFilters>(
     () => (filterUnknown ? { ...inboxFilters, sender: 'known' } : inboxFilters),
     [filterUnknown, inboxFilters],
@@ -316,32 +318,21 @@ export function ConversationListScreen(): React.JSX.Element {
               style={styles.headerIcon}
             />
           </Pressable>
-          <Pressable
-            onPress={() => router.push('/facetime')}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel="FaceTime"
-          >
-            <Icon
-              name="videocam-outline"
-              size={25}
-              color={theme.color.tint}
-              style={styles.headerIcon}
-            />
-          </Pressable>
-          <Pressable
-            onPress={() => router.push('/new-chat')}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel="New message"
-          >
-            <Icon
-              name="create-outline"
-              size={24}
-              color={theme.color.tint}
-              style={styles.headerIcon}
-            />
-          </Pressable>
+          {rcsAvailable ? (
+            <Pressable
+              onPress={() => router.push('/new-chat')}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="New message"
+            >
+              <Icon
+                name="create-outline"
+                size={24}
+                color={theme.color.tint}
+                style={styles.headerIcon}
+              />
+            </Pressable>
+          ) : null}
           <Pressable
             onPress={() => router.push('/settings')}
             hitSlop={8}

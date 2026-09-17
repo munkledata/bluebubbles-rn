@@ -17,25 +17,27 @@ finished remediation work.
 
 <a id="post-face-01"></a>
 
-### [ ] `POST-FACE-01` — Reconsider an embedded FaceTime experience
+### [ ] `POST-FACE-01` — Consider a new FaceTime feature
 
 - **Former remediation ID:** `FACE-01`; moved here by the product owner on 2026-09-14 because the
   embedded experience never worked reliably.
-- **Current behavior to keep:** Gator creates and validates FaceTime links, presents incoming calls,
-  supports Answer/Decline, and hands a validated Apple FaceTime link to a system-owned handler or
-  browser. Gator does not mount a FaceTime WebView or own media-permission prompts for that external
-  surface.
+- **Current behavior to keep:** Callable FaceTime functionality is absent from the current client.
+  Gator exposes no dialer, incoming-call overlay, Answer/Decline notification action, link creation,
+  or browser handoff, and stale server/helper capability cannot restore one. The inert `/facetime`
+  route only explains retirement to old bookmarks. Retain that fail-closed boundary unless this item
+  is explicitly selected as a new cross-repository feature.
 - **Historical design reference:** [`FACE-01`](./workstreams/B_NETWORK_AND_WEBVIEW.md#face-01).
 - **Start condition:** Active remediation is complete and the product owner explicitly chooses to
-  design a new embedded experience. Do not restore the deleted implementation by default.
+  design a new FaceTime experience. Start from a new versioned contract and threat model; do not
+  restore the deleted helper/WebView implementation by default or promise compatibility with it.
 - **Acceptance if selected:** Calling works reliably while only exact required Apple HTTPS origins
   can receive camera or microphone access. Foreign navigation, redirects, links, popups, new
   windows, and media requests fail closed or leave Gator through an explicit safe handoff.
 - **Verification if selected:** Add focused navigation and permission tests, then use a physical
   Android device with camera/microphone already granted to exercise normal calls and hostile origins.
   Host mocks alone cannot prove native WebView or media-permission behavior.
-- **Non-goal:** Moving the item here does not claim that the old embedded path passed, authorize a
-  WebView dependency, or weaken the current external-browser containment.
+- **Non-goal:** Moving the item here does not claim that any old FaceTime path passed, authorize a
+  WebView or Private API dependency, or make the retired browser handoff part of the current product.
 
 <a id="post-rt-01b"></a>
 
