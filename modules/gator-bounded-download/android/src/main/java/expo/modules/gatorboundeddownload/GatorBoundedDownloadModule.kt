@@ -1,6 +1,7 @@
 package expo.modules.gatorboundeddownload
 
 import android.content.Context
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
@@ -32,6 +33,7 @@ private const val MAX_TIMEOUT_MS = 15L * 60 * 1000
 private const val MAX_ACTIVE_REQUESTS = 8
 private const val MAX_IMAGE_PIXELS = 100L * 1024 * 1024
 private const val MAX_IMAGE_EDGE = 16_384
+private const val MAX_IMAGE_VALIDATION_DECODE_PIXELS = 1L * 1024 * 1024
 private const val PROGRESS_INTERVAL_MS = 100L
 
 private const val REASON_CANCELLED = "cancelled"
@@ -47,6 +49,22 @@ private class RequestState {
 }
 
 private class DownloadFailure(val reason: String) : Exception()
+
+internal fun isCompleteDownloadResponse(statusCode: Int): Boolean = statusCode == 200
+
+internal fun matchesDeclaredDownloadLength(declaredBytes: Long, actualBytes: Long): Boolean =
+  declaredBytes == -1L || declaredBytes == actualBytes
+
+internal fun imageValidationSampleSize(width: Int, height: Int, maxDecodedPixels: Long): Int {
+  require(width > 0 && height > 0 && maxDecodedPixels > 0L)
+  var sampleSize = 1
+  while (true) {
+    val sampledWidth = (width.toLong() + sampleSize - 1L) / sampleSize
+    val sampledHeight = (height.toLong() + sampleSize - 1L) / sampleSize
+    if (sampledWidth * sampledHeight <= maxDecodedPixels) return sampleSize
+    sampleSize *= 2
+  }
+}
 
 /**
  * Android hard boundary for every server-sourced file download.
@@ -364,7 +382,9 @@ class GatorBoundedDownloadModule : Module() {
       response.use { current ->
         if (state.cancelled) throw DownloadFailure(REASON_CANCELLED)
         if (current.code == 404 || current.code == 410) throw DownloadFailure(REASON_MISSING)
-        if (!current.isSuccessful) throw DownloadFailure(REASON_NETWORK)
+        // A ranged or otherwise partial 2xx response must never become an authoritative complete
+        // attachment. Every current route is a whole-file GET and therefore requires HTTP 200.
+        if (!isCompleteDownloadResponse(current.code)) throw DownloadFailure(REASON_NETWORK)
         val body = current.body ?: throw DownloadFailure(REASON_MISSING)
         val declaredBytes = body.contentLength()
         if (declaredBytes > maxBytes) throw DownloadFailure(REASON_SIZE)
@@ -406,10 +426,17 @@ class GatorBoundedDownloadModule : Module() {
           }
         }
         if (state.cancelled) throw DownloadFailure(REASON_CANCELLED)
-        if (total <= 0L || total > maxBytes || !target.exists() || target.length() != total) {
+        if (
+          total <= 0L ||
+          total > maxBytes ||
+          !matchesDeclaredDownloadLength(declaredBytes, total) ||
+          !target.exists() ||
+          target.length() != total
+        ) {
           throw DownloadFailure(REASON_SIZE)
         }
-        if (maxImagePixels > 0L) validateImageBounds(target, maxImagePixels)
+        if (maxImagePixels > 0L) validateImageFile(target, maxImagePixels)
+        if (state.cancelled) throw DownloadFailure(REASON_CANCELLED)
         emitProgress(requestId, total, declaredBytes)
         keepFile = true
         return outcomeSuccess(total)
@@ -457,8 +484,8 @@ class GatorBoundedDownloadModule : Module() {
     return boundedPositiveLong(value, maximum)
   }
 
-  /** Decode image metadata only; never allocate the remote bitmap before enforcing its bounds. */
-  private fun validateImageBounds(file: File, maxPixels: Long) {
+  /** Bound dimensions first, then require a sampled decode as a corruption smoke test. */
+  private fun validateImageFile(file: File, maxPixels: Long) {
     val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
     BitmapFactory.decodeFile(file.path, bounds)
     val width = bounds.outWidth
@@ -467,6 +494,20 @@ class GatorBoundedDownloadModule : Module() {
       throw DownloadFailure(REASON_SIZE)
     }
     if (width.toLong() * height.toLong() > maxPixels) throw DownloadFailure(REASON_SIZE)
+
+    val decoded = BitmapFactory.decodeFile(
+      file.path,
+      BitmapFactory.Options().apply {
+        inSampleSize = imageValidationSampleSize(
+          width,
+          height,
+          MAX_IMAGE_VALIDATION_DECODE_PIXELS,
+        )
+        inPreferredConfig = Bitmap.Config.RGB_565
+        inScaled = false
+      },
+    ) ?: throw DownloadFailure(REASON_SIZE)
+    decoded.recycle()
   }
 
   private fun validateHeaders(headers: Map<String, String>) {
