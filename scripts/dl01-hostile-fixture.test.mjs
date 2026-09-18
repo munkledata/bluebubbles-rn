@@ -4,14 +4,25 @@ import net from 'node:net';
 import test from 'node:test';
 
 import {
+  createExactLengthValidPng,
   createFcmV3Frame,
+  DL01_DEFAULT_ATTACHMENT_MAX_BYTES,
+  DL01_DEFAULT_WALLPAPER_MAX_BYTES,
+  DL01_MAX_ATTACHMENT_COUNT,
   DL01_MODES,
   DL01_OVERSIZED_DIMENSION_PNG,
   DL01_VALID_PNG,
   encodeFcmPushIdentityV3,
   startDl01FixtureServer,
 } from './dl01-hostile-fixture.mjs';
-import { parseDeviceBaseUrl, parseDl01DeviceFixtureArgs } from './run-dl01-device-fixture.mjs';
+import {
+  parseDeviceBaseUrl,
+  parseDl01CandidateArgs,
+  parseDl01DeviceFixtureArgs,
+  parseDownloadIntegrityUiSnapshot,
+  parseDownloadIntegrityUiXml,
+  parseInstalledPackageDump,
+} from './run-dl01-device-fixture.mjs';
 
 const AUTH_TOKEN = `bbd_device_v1_${'A'.repeat(43)}`;
 const PUSH_KEY = Buffer.from(Array.from({ length: 32 }, (_, index) => index)).toString('base64url');
@@ -111,6 +122,16 @@ async function control(fixture, path, body) {
   return { response, json };
 }
 
+async function waitForStatus(fixture, predicate) {
+  const deadline = Date.now() + 1_000;
+  while (Date.now() < deadline) {
+    const status = await control(fixture, '/_dl01/v1/status');
+    if (predicate(status.json)) return status.json;
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error('fixture status condition timed out');
+}
+
 function decryptV3Frame(frame, key) {
   const bytes = Buffer.from(frame, 'base64');
   assert.equal(bytes[0], 3);
@@ -136,6 +157,20 @@ function decryptV3Frame(frame, key) {
   };
 }
 
+test('exact-cap fixture images remain complete PNGs at the production byte limits', () => {
+  for (const byteLimit of [DL01_DEFAULT_ATTACHMENT_MAX_BYTES, DL01_DEFAULT_WALLPAPER_MAX_BYTES]) {
+    const image = createExactLengthValidPng(byteLimit);
+    assert.equal(image.length, byteLimit);
+    assert.deepEqual(image.subarray(0, 8), DL01_VALID_PNG.subarray(0, 8));
+    assert.equal(image.subarray(-8, -4).toString('ascii'), 'IEND');
+    assert.equal(
+      image.subarray(DL01_VALID_PNG.length - 8, DL01_VALID_PNG.length - 4).toString('ascii'),
+      'raNd',
+    );
+  }
+  assert.throws(() => createExactLengthValidPng(DL01_VALID_PNG.length + 1), /needs at least/);
+});
+
 test('DL-01 fixture exposes only authenticated synthetic sync and bounded hostile modes', async (t) => {
   const fcmCalls = [];
   const fixture = await startDl01FixtureServer({
@@ -145,8 +180,8 @@ test('DL-01 fixture exposes only authenticated synthetic sync and bounded hostil
     connectionCapMs: 90,
     attachmentDeadlineDelayMs: 40,
     wallpaperDeadlineDelayMs: 30,
-    attachmentMaxBytes: 64,
-    wallpaperMaxBytes: 96,
+    attachmentMaxBytes: 128,
+    wallpaperMaxBytes: 160,
     endlessChunkIntervalMs: 1,
     getAccessToken: async () => ACCESS_TOKEN,
     fetchImpl: async (url, init) => {
@@ -202,10 +237,25 @@ test('DL-01 fixture exposes only authenticated synthetic sync and bounded hostil
       const chats = await control(fixture, '/api/v1/chat/query', { offset: 0, limit: 1 });
       const attachment = chats.json.data.chats[0].lastMessage.attachments[0];
       const startedAt = Date.now();
-      const raw = await rawRequest(
+      const pendingRaw = rawRequest(
         fixture.port,
         `/api/v1/attachment/${encodeURIComponent(attachment.guid)}/download`,
       );
+      if (mode === 'held-valid-image') {
+        await waitForStatus(fixture, (status) => status.transfers.held === 1);
+        const unauthorizedRelease = await fetch(`${fixture.origin}/_dl01/v1/release-held`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        assert.equal(unauthorizedRelease.status, 401);
+        assert.equal((await control(fixture, '/_dl01/v1/status')).json.transfers.held, 1);
+        const released = await control(fixture, '/_dl01/v1/release-held', {});
+        assert.deepEqual(released.json, { ok: true, released: 1 });
+        const releasedAgain = await control(fixture, '/_dl01/v1/release-held', {});
+        assert.deepEqual(releasedAgain.json, { ok: true, released: 0 });
+      }
+      const raw = await pendingRaw;
       const elapsed = Date.now() - startedAt;
       const response = splitResponse(raw);
       assert.equal(response.status, 200, mode);
@@ -230,8 +280,13 @@ test('DL-01 fixture exposes only authenticated synthetic sync and bounded hostil
       } else if (mode === 'delayed-deadline') {
         assert.deepEqual(decodeChunks(response.body).bytes, DL01_VALID_PNG);
         assert.ok(elapsed >= 25);
+      } else if (mode === 'held-valid-image') {
+        assert.deepEqual(decodeChunks(response.body).bytes, DL01_VALID_PNG);
       } else if (mode === 'max-plus-one') {
-        assert.equal(decodeChunks(response.body).bytes.length, 65);
+        assert.equal(decodeChunks(response.body).bytes.length, 129);
+      } else if (mode === 'valid-max-image') {
+        assert.equal(response.body.length, 128);
+        assert.deepEqual(response.body, createExactLengthValidPng(128));
       } else if (mode === 'invalid-image') {
         assert.equal(response.body.subarray(0, 8).equals(DL01_VALID_PNG.subarray(0, 8)), false);
       } else if (mode === 'oversized-dimensions') {
@@ -242,6 +297,17 @@ test('DL-01 fixture exposes only authenticated synthetic sync and bounded hostil
         assert.deepEqual(response.body, DL01_VALID_PNG);
       }
     }
+
+    const status = await control(fixture, '/_dl01/v1/status');
+    assert.equal(status.json.transfers.started, DL01_MODES.length);
+    assert.ok(status.json.transfers.bytesAttempted >= 128);
+    assert.equal(
+      status.json.transfers.responsesFinished + status.json.transfers.closedEarly,
+      DL01_MODES.length,
+    );
+    assert.ok(status.json.transfers.closedEarly >= 2);
+    assert.equal(status.json.transfers.held, 0);
+    assert.equal(JSON.stringify(status.json).includes('dl01-message-'), false);
   });
 
   await t.test('serves the selected mode through the wallpaper route too', async () => {
@@ -257,7 +323,19 @@ test('DL-01 fixture exposes only authenticated synthetic sync and bounded hostil
       fixture.port,
       `/api/v1/chat/${encodeURIComponent(chat.guid)}/background`,
     );
-    assert.equal(decodeChunks(splitResponse(raw).body).bytes.length, 97);
+    assert.equal(decodeChunks(splitResponse(raw).body).bytes.length, 161);
+
+    await control(fixture, '/_dl01/v1/scenario', {
+      mode: 'valid-max-image',
+      target: 'wallpaper',
+    });
+    const exactChats = await control(fixture, '/api/v1/chat/query', { offset: 0, limit: 1 });
+    const exactChat = exactChats.json.data.chats[0];
+    const exactRaw = await rawRequest(
+      fixture.port,
+      `/api/v1/chat/${encodeURIComponent(exactChat.guid)}/background`,
+    );
+    assert.deepEqual(splitResponse(exactRaw).body, createExactLengthValidPng(160));
   });
 
   await t.test(
@@ -304,8 +382,73 @@ test('DL-01 fixture exposes only authenticated synthetic sync and bounded hostil
   );
 
   await t.test(
-    'self-revoke acknowledges cleanup, clears registration, and rejects reuse',
+    'seeds a bounded multi-attachment FCM scenario without exposing payloads',
     async () => {
+      const selected = await control(fixture, '/_dl01/v1/scenario', {
+        mode: 'valid-image',
+        target: 'attachment',
+        attachmentCount: DL01_MAX_ATTACHMENT_COUNT,
+      });
+      assert.equal(selected.response.status, 200);
+      assert.equal(selected.json.scenario.attachmentCount, DL01_MAX_ATTACHMENT_COUNT);
+
+      const chats = await control(fixture, '/api/v1/chat/query', { offset: 0, limit: 1 });
+      const attachments = chats.json.data.chats[0].lastMessage.attachments;
+      assert.equal(attachments.length, DL01_MAX_ATTACHMENT_COUNT);
+      assert.equal(
+        new Set(attachments.map((attachment) => attachment.guid)).size,
+        attachments.length,
+      );
+
+      const secondaryRaw = await rawRequest(
+        fixture.port,
+        `/api/v1/attachment/${encodeURIComponent(attachments.at(-1).guid)}/download`,
+      );
+      assert.deepEqual(splitResponse(secondaryRaw).body, DL01_VALID_PNG);
+
+      const sent = await control(fixture, '/_dl01/v1/fcm/send-current', {});
+      assert.deepEqual(sent.json, { ok: true, sent: true });
+      assert.equal(fcmCalls.length, 2);
+      const outbound = JSON.parse(fcmCalls.at(-1).init.body);
+      const plaintext = JSON.parse(decryptV3Frame(outbound.message.data.data, PUSH_KEY).plaintext);
+      assert.equal(plaintext.attachments.length, DL01_MAX_ATTACHMENT_COUNT);
+
+      const status = await control(fixture, '/_dl01/v1/status');
+      assert.equal(status.json.scenario.attachmentCount, DL01_MAX_ATTACHMENT_COUNT);
+      const publicText = JSON.stringify(status.json);
+      assert.equal(publicText.includes(plaintext.guid), false);
+      assert.equal(publicText.includes(AUTH_TOKEN), false);
+
+      const tooMany = await control(fixture, '/_dl01/v1/scenario', {
+        mode: 'valid-image',
+        target: 'attachment',
+        attachmentCount: DL01_MAX_ATTACHMENT_COUNT + 1,
+      });
+      assert.equal(tooMany.response.status, 400);
+      const wallpaperBatch = await control(fixture, '/_dl01/v1/scenario', {
+        mode: 'valid-image',
+        target: 'wallpaper',
+        attachmentCount: 2,
+      });
+      assert.equal(wallpaperBatch.response.status, 400);
+    },
+  );
+
+  await t.test(
+    'self-revoke rejects app reuse while preserving authenticated proof controls',
+    async () => {
+      await control(fixture, '/_dl01/v1/scenario', {
+        mode: 'held-valid-image',
+        target: 'attachment',
+      });
+      const chats = await control(fixture, '/api/v1/chat/query', { offset: 0, limit: 1 });
+      const attachment = chats.json.data.chats[0].lastMessage.attachments[0];
+      const pendingDownload = rawRequest(
+        fixture.port,
+        `/api/v1/attachment/${encodeURIComponent(attachment.guid)}/download`,
+      );
+      await waitForStatus(fixture, (status) => status.transfers.held === 1);
+
       const revoked = await control(fixture, '/api/v1/device-credentials/revoke-self', {});
       assert.equal(revoked.response.status, 200);
       assert.deepEqual(revoked.json, {
@@ -317,10 +460,21 @@ test('DL-01 fixture exposes only authenticated synthetic sync and bounded hostil
           deviceRemoved: true,
         },
       });
-      const afterRevokeStatus = fixture.status();
-      assert.equal(afterRevokeStatus.fcm.registrationReady, false);
-      assert.equal(JSON.stringify(afterRevokeStatus).includes(FCM_TOKEN), false);
-      assert.equal(JSON.stringify(afterRevokeStatus).includes(PUSH_KEY), false);
+      const afterRevokeStatus = await control(fixture, '/_dl01/v1/status');
+      assert.equal(afterRevokeStatus.response.status, 200);
+      assert.equal(afterRevokeStatus.json.fcm.registrationReady, false);
+      assert.equal(afterRevokeStatus.json.transfers.held, 1);
+      assert.equal(JSON.stringify(afterRevokeStatus.json).includes(FCM_TOKEN), false);
+      assert.equal(JSON.stringify(afterRevokeStatus.json).includes(PUSH_KEY), false);
+
+      const released = await control(fixture, '/_dl01/v1/release-held', {});
+      assert.deepEqual(released.json, { ok: true, released: 1 });
+      assert.deepEqual(
+        decodeChunks(splitResponse(await pendingDownload).body).bytes,
+        DL01_VALID_PNG,
+      );
+      const settled = await waitForStatus(fixture, (status) => status.transfers.held === 0);
+      assert.equal(settled.fcm.registrationReady, false);
 
       const rejectedAfterRevoke = await fetch(`${fixture.origin}/api/v1/server/info`, {
         headers: { Authorization: `Bearer ${AUTH_TOKEN}` },
@@ -385,4 +539,164 @@ test('ADB runner requires one exact serial, package, and loopback base URL', () 
   ]) {
     assert.throws(() => parseDeviceBaseUrl(unsafe), /exact http/);
   }
+});
+
+test('candidate parser normalizes exact provenance inputs and rejects unsafe ambiguity', () => {
+  const sha = 'A'.repeat(64);
+  const commit = 'B'.repeat(40);
+  const argv = [
+    '--serial',
+    'emulator-5556',
+    '--package',
+    'com.example.gator',
+    '--expected-version',
+    '0.1.54',
+    '--expected-code',
+    '74',
+    '--expected-min-sdk',
+    '36',
+    '--expected-target-sdk',
+    '36',
+    '--expected-api',
+    '37',
+    '--expected-installer',
+    'none',
+    '--expected-play-cert-sha256',
+    sha,
+    '--expected-aab-sha256',
+    sha,
+    '--expected-source-commit',
+    commit,
+    '--require-qemu',
+    'yes',
+    '--aab',
+    '/private/tmp/candidate.aab',
+    '--validation-receipt',
+    '/private/tmp/validation.json',
+    '--promotion-receipt',
+    '/private/tmp/promotion.json',
+    '--state-receipt',
+    '/private/tmp/state.json',
+    '--apksigner',
+    '/private/tmp/apksigner',
+  ];
+  const parsed = parseDl01CandidateArgs(argv, { diagnostics: true });
+  assert.deepEqual(
+    {
+      serial: parsed.serial,
+      packageName: parsed.packageName,
+      expectedVersion: parsed.expectedVersion,
+      expectedCode: parsed.expectedCode,
+      expectedMinSdk: parsed.expectedMinSdk,
+      expectedTargetSdk: parsed.expectedTargetSdk,
+      expectedApi: parsed.expectedApi,
+      expectedInstaller: parsed.expectedInstaller,
+      expectedPlayCertificateSha256: parsed.expectedPlayCertificateSha256,
+      expectedAabSha256: parsed.expectedAabSha256,
+      expectedSourceCommit: parsed.expectedSourceCommit,
+      requireQemu: parsed.requireQemu,
+      scrolls: parsed.scrolls,
+    },
+    {
+      serial: 'emulator-5556',
+      packageName: 'com.example.gator',
+      expectedVersion: '0.1.54',
+      expectedCode: 74,
+      expectedMinSdk: 36,
+      expectedTargetSdk: 36,
+      expectedApi: 37,
+      expectedInstaller: null,
+      expectedPlayCertificateSha256: sha.toLowerCase(),
+      expectedAabSha256: sha.toLowerCase(),
+      expectedSourceCommit: commit.toLowerCase(),
+      requireQemu: true,
+      scrolls: 8,
+    },
+  );
+  assert.throws(() => parseDl01CandidateArgs([...argv, '--serial', 'other-device']), /repeated/);
+  assert.throws(
+    () =>
+      parseDl01CandidateArgs(
+        argv.map((value, index) => (argv[index - 1] === '--require-qemu' ? 'maybe' : value)),
+      ),
+    /must be yes or no/,
+  );
+});
+
+test('installed package parser extracts only the exact Android identity', () => {
+  const output = `
+    Package [com.example.gator] (abc123):
+      versionCode=74 minSdk=36 targetSdk=36
+      versionName=0.1.54
+      installerPackageName=com.android.vending
+  `;
+  assert.deepEqual(parseInstalledPackageDump(output, 'com.example.gator'), {
+    versionCode: 74,
+    minSdk: 36,
+    targetSdk: 36,
+    versionName: '0.1.54',
+    installerPackageName: 'com.android.vending',
+  });
+  assert.throws(() => parseInstalledPackageDump(output, 'com.example.other'), /not installed/);
+  assert.throws(
+    () =>
+      parseInstalledPackageDump(
+        'Package [com.example.gator]\n versionCode=not-a-number minSdk=36 targetSdk=36',
+        'com.example.gator',
+      ),
+    /could not be read/,
+  );
+});
+
+test('diagnostic XML parser returns only allowlisted aggregate rows', () => {
+  const rows = parseDownloadIntegrityUiXml(`<?xml version="1.0"?>
+    <hierarchy>
+      <node text="Download Integrity" bounds="[0,0][1080,100]" />
+      <node text="EXACT CANDIDATE" bounds="[16,110][500,140]" />
+      <node text="App version" bounds="[16,150][400,200]" />
+      <node text="0.1.54" bounds="[600,150][1000,200]" />
+      <node text="ATTACHMENT CACHE" bounds="[16,210][500,240]" />
+      <node text="Within 4,096 files" bounds="[16,250][400,300]" />
+      <node text="Yes" bounds="[600,250][1000,300]" />
+      <node text="GALLERY / ALBUM RECEIPTS" bounds="[16,310][500,340]" />
+      <node text="Latest terminal" bounds="[16,350][400,400]" />
+      <node text="No" bounds="[600,350][1000,400]" />
+      <node text="SYNCED WALLPAPERS" bounds="[16,410][500,440]" />
+      <node text="Native files" bounds="[16,450][400,500]" />
+      <node text="3" bounds="[600,450][1000,500]" />
+      <node text="private-message-body" bounds="[16,510][600,560]" />
+    </hierarchy>`);
+  assert.deepEqual(rows, {
+    'EXACT CANDIDATE / App version': '0.1.54',
+    'ATTACHMENT CACHE / Within 4,096 files': 'Yes',
+    'GALLERY / ALBUM RECEIPTS / Latest terminal': 'No',
+    'SYNCED WALLPAPERS / Native files': '3',
+  });
+  assert.equal(JSON.stringify(rows).includes('private-message-body'), false);
+  const continued = parseDownloadIntegrityUiSnapshot(
+    '<node text="Download Integrity" bounds="[0,0][1080,100]"/><node text="Native files" bounds="[16,150][400,200]"/><node text="4" bounds="[600,150][1000,200]"/>',
+    'ATTACHMENT CACHE',
+  );
+  assert.deepEqual(continued, {
+    rows: { 'ATTACHMENT CACHE / Native files': '4' },
+    section: 'ATTACHMENT CACHE',
+  });
+  assert.throws(
+    () => parseDownloadIntegrityUiXml('<node text="App version"/><node text="0.1.54"/>'),
+    /not visible/,
+  );
+  assert.throws(
+    () =>
+      parseDownloadIntegrityUiXml(
+        '<node text="Download Integrity" bounds="[0,0][1080,100]"/><node text="EXACT CANDIDATE" bounds="[16,110][500,140]"/><node text="App build" bounds="[16,150][400,200]"/><node text="74" bounds="[600,150][1000,200]"/><node text="App build" bounds="[16,210][400,260]"/><node text="75" bounds="[600,210][1000,260]"/>',
+      ),
+    /ambiguous/,
+  );
+  assert.throws(
+    () =>
+      parseDownloadIntegrityUiXml(
+        '<node text="Download Integrity" bounds="[0,0][1080,100]"/><node text="GALLERY / ALBUM RECEIPTS" bounds="[16,110][500,140]"/><node text="Latest terminal" bounds="[16,150][400,200]"/><node text="private-message-body" bounds="[600,150][1000,200]"/>',
+      ),
+    /has no value/,
+  );
 });

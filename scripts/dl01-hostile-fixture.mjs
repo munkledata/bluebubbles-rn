@@ -15,12 +15,15 @@ export const DL01_MODES = Object.freeze([
   'chunked-endless',
   'stall',
   'delayed-deadline',
+  'held-valid-image',
   'max-plus-one',
+  'valid-max-image',
   'invalid-image',
   'oversized-dimensions',
   'valid-image',
 ]);
 export const DL01_TARGETS = Object.freeze(['attachment', 'wallpaper']);
+export const DL01_MAX_ATTACHMENT_COUNT = 16;
 
 const MODE_SET = new Set(DL01_MODES);
 const TARGET_SET = new Set(DL01_TARGETS);
@@ -34,8 +37,8 @@ const DEFAULT_REQUEST_READ_TIMEOUT_MS = 10_000;
 const DEFAULT_CONNECTION_CAP_MS = 135_000;
 const DEFAULT_ATTACHMENT_DEADLINE_DELAY_MS = 125_000;
 const DEFAULT_WALLPAPER_DEADLINE_DELAY_MS = 65_000;
-const DEFAULT_ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
-const DEFAULT_WALLPAPER_MAX_BYTES = 10 * 1024 * 1024;
+export const DL01_DEFAULT_ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024;
+export const DL01_DEFAULT_WALLPAPER_MAX_BYTES = 10 * 1024 * 1024;
 const FCM_ENCRYPTION_TYPE = 'AEAD_GCM_V3_IDENTITY';
 const FCM_FRAME_MAX_BYTES = 4_096;
 const FCM_EVENT_TYPE = 'new-message';
@@ -101,6 +104,35 @@ function pngWithDimensions(width, height) {
 // 64-Mi-pixel cap (and therefore also the wallpaper 16-Mi-pixel cap).
 export const DL01_OVERSIZED_DIMENSION_PNG = pngWithDimensions(8_193, 8_193);
 const INVALID_IMAGE = Buffer.from('gator-dl01-not-an-image', 'ascii');
+
+/**
+ * Return a structurally valid 1x1 PNG of exactly `totalBytes` bytes. The padding lives in a
+ * private ancillary chunk before IEND, so it contributes to the transported file without
+ * changing the decoded image or relying on trailing bytes after the PNG terminator.
+ */
+export function createExactLengthValidPng(totalBytes) {
+  requireInteger(totalBytes, 'exact PNG byte length', DL01_VALID_PNG.length, 512 * 1024 * 1024);
+  if (totalBytes === DL01_VALID_PNG.length) return Buffer.from(DL01_VALID_PNG);
+
+  const addedBytes = totalBytes - DL01_VALID_PNG.length;
+  if (addedBytes < 12) {
+    throw new Error(
+      `An exact PNG larger than the fixture image needs at least ${DL01_VALID_PNG.length + 12} bytes.`,
+    );
+  }
+  const dataBytes = addedBytes - 12;
+  const ancillaryChunk = Buffer.alloc(addedBytes);
+  ancillaryChunk.writeUInt32BE(dataBytes, 0);
+  ancillaryChunk.write('raNd', 4, 4, 'ascii');
+  ancillaryChunk.writeUInt32BE(crc32(ancillaryChunk.subarray(4, 8 + dataBytes)), 8 + dataBytes);
+
+  const iendOffset = DL01_VALID_PNG.length - 12;
+  return Buffer.concat([
+    DL01_VALID_PNG.subarray(0, iendOffset),
+    ancillaryChunk,
+    DL01_VALID_PNG.subarray(iendOffset),
+  ]);
+}
 
 function requireInteger(value, label, minimum, maximum) {
   if (!Number.isSafeInteger(value) || value < minimum || value > maximum) {
@@ -304,7 +336,7 @@ function fixtureHandle() {
   };
 }
 
-function createCase(generation, mode, target, now) {
+function createCase(generation, mode, target, now, attachmentCount = 1) {
   const chatGuid = `dl01-chat-${generation}`;
   const messageGuid = `dl01-message-${generation}`;
   const attachmentGuid = `dl01-attachment-${generation}`;
@@ -339,6 +371,19 @@ function createCase(generation, mode, target, now) {
     blurhash: null,
     metadata: null,
   };
+  // Keep the original single-attachment payload byte-for-byte compatible. Extra entries use only
+  // fields needed for an eligible PNG download, keeping a 16-attachment message inside the
+  // authenticated FCM V3 frame bound.
+  const attachments = Array.from({ length: attachmentCount }, (_, index) => {
+    if (index === 0) return attachment;
+    return {
+      guid: `${attachmentGuid}-${index + 1}`,
+      mimeType: 'image/png',
+      totalBytes: DL01_VALID_PNG.length,
+      height: 1,
+      width: 1,
+    };
+  });
   const message = {
     originalROWID: generation,
     guid: messageGuid,
@@ -350,7 +395,7 @@ function createCase(generation, mode, target, now) {
     isSent: true,
     dateCreated: now + generation,
     hasAttachments: target === 'attachment',
-    attachments: target === 'attachment' ? [attachment] : [],
+    attachments: target === 'attachment' ? attachments : [],
     chats: [chatSummary],
     chatGuid,
   };
@@ -362,6 +407,8 @@ function createCase(generation, mode, target, now) {
     chatGuid,
     messageGuid,
     attachmentGuid,
+    attachmentGuids: attachments.map((candidate) => candidate.guid),
+    attachmentCount: target === 'attachment' ? attachmentCount : 0,
     chat,
     message,
     downloadRequests: 0,
@@ -372,6 +419,50 @@ function socketLifetime(socket, milliseconds) {
   const timer = setTimeout(() => socket.destroy(), milliseconds);
   timer.unref?.();
   socket.once('close', () => clearTimeout(timer));
+}
+
+function beginTransfer(socket, state) {
+  const transfer = {
+    completed: false,
+    held: false,
+    releaseHeld: null,
+    attempt(byteCount) {
+      state.transferBytesAttempted += byteCount;
+    },
+    hold(releaseHeld) {
+      if (this.held || this.completed || socket.destroyed) return false;
+      this.held = true;
+      this.releaseHeld = releaseHeld;
+      state.heldTransfers.add(this);
+      return true;
+    },
+    release() {
+      if (!this.held) return false;
+      this.held = false;
+      state.heldTransfers.delete(this);
+      const releaseHeld = this.releaseHeld;
+      this.releaseHeld = null;
+      releaseHeld?.();
+      return true;
+    },
+  };
+  state.transferStarted += 1;
+  state.activeDownloadConnections += 1;
+  socket.once('finish', () => {
+    if (transfer.completed) return;
+    transfer.completed = true;
+    state.transferResponsesFinished += 1;
+  });
+  socket.once('close', () => {
+    state.activeDownloadConnections = Math.max(0, state.activeDownloadConnections - 1);
+    if (transfer.held) {
+      transfer.held = false;
+      transfer.releaseHeld = null;
+      state.heldTransfers.delete(transfer);
+    }
+    if (!transfer.completed) state.transferClosedEarly += 1;
+  });
+  return transfer;
 }
 
 function chunkFrame(bytes) {
@@ -386,14 +477,17 @@ function endChunked(socket) {
   if (!socket.destroyed) socket.end('0\r\n\r\n');
 }
 
-function sendFiniteChunks(socket, buffers) {
+function sendFiniteChunks(socket, buffers, transfer) {
   for (const bytes of buffers) {
-    if (bytes.length > 0) socket.write(chunkFrame(bytes));
+    if (bytes.length > 0) {
+      transfer.attempt(bytes.length);
+      socket.write(chunkFrame(bytes));
+    }
   }
   endChunked(socket);
 }
 
-function pumpGeneratedChunks(socket, totalBytes, options = {}) {
+function pumpGeneratedChunks(socket, totalBytes, transfer, options = {}) {
   const chunkBytes = options.chunkBytes ?? 64 * 1024;
   const intervalMs = options.intervalMs ?? 0;
   let written = 0;
@@ -413,6 +507,7 @@ function pumpGeneratedChunks(socket, totalBytes, options = {}) {
     const count = Math.min(chunkBytes, totalBytes - written);
     const frame = chunkFrame(Buffer.alloc(count, 0x41));
     written += count;
+    transfer.attempt(count);
     const continueWriting = () => {
       if (intervalMs > 0) timer = setTimeout(schedule, intervalMs);
       else setImmediate(schedule);
@@ -423,7 +518,7 @@ function pumpGeneratedChunks(socket, totalBytes, options = {}) {
   schedule();
 }
 
-function serveDownload(socket, scenario, options) {
+function serveDownload(socket, scenario, options, transfer) {
   const contentHeaders = { 'Content-Type': 'image/png' };
   const valid = DL01_VALID_PNG;
   switch (scenario.mode) {
@@ -432,6 +527,7 @@ function serveDownload(socket, scenario, options) {
       // the false fixed length and cannot observe the extra TCP bytes, so decoded-image validation
       // is what must reject the deliberately truncated representation.
       const declared = Math.max(1, Math.floor(valid.length / 2));
+      transfer.attempt(valid.length);
       socket.end(
         Buffer.concat([
           responseHead(200, { ...contentHeaders, 'Content-Length': declared }),
@@ -441,6 +537,7 @@ function serveDownload(socket, scenario, options) {
       return;
     }
     case 'false-larger-length':
+      transfer.attempt(valid.length);
       socket.end(
         Buffer.concat([
           responseHead(200, { ...contentHeaders, 'Content-Length': valid.length + 17 }),
@@ -449,16 +546,17 @@ function serveDownload(socket, scenario, options) {
       );
       return;
     case 'missing-length-eof':
+      transfer.attempt(valid.length);
       socket.end(Buffer.concat([responseHead(200, contentHeaders), valid]));
       return;
     case 'chunked-finite': {
       socket.write(responseHead(200, { ...contentHeaders, 'Transfer-Encoding': 'chunked' }));
       const first = Math.max(1, Math.floor(valid.length / 3));
-      sendFiniteChunks(socket, [
-        valid.subarray(0, first),
-        valid.subarray(first, first * 2),
-        valid.subarray(first * 2),
-      ]);
+      sendFiniteChunks(
+        socket,
+        [valid.subarray(0, first), valid.subarray(first, first * 2), valid.subarray(first * 2)],
+        transfer,
+      );
       return;
     }
     case 'chunked-endless': {
@@ -471,6 +569,7 @@ function serveDownload(socket, scenario, options) {
         const next = () => {
           timer = setTimeout(write, options.endlessChunkIntervalMs);
         };
+        transfer.attempt(chunk.length);
         if (socket.write(chunkFrame(chunk))) next();
         else socket.once('drain', next);
       };
@@ -488,6 +587,7 @@ function serveDownload(socket, scenario, options) {
       return;
     case 'delayed-deadline': {
       socket.write(responseHead(200, { ...contentHeaders, 'Transfer-Encoding': 'chunked' }));
+      transfer.attempt(8);
       socket.write(chunkFrame(valid.subarray(0, 8)));
       socketLifetime(socket, options.connectionCapMs);
       const delay =
@@ -495,7 +595,7 @@ function serveDownload(socket, scenario, options) {
           ? options.wallpaperDeadlineDelayMs
           : options.attachmentDeadlineDelayMs;
       const timer = setTimeout(() => {
-        if (!socket.destroyed) sendFiniteChunks(socket, [valid.subarray(8)]);
+        if (!socket.destroyed) sendFiniteChunks(socket, [valid.subarray(8)], transfer);
       }, delay);
       timer.unref?.();
       socket.once('close', () => clearTimeout(timer));
@@ -506,10 +606,30 @@ function serveDownload(socket, scenario, options) {
         scenario.target === 'wallpaper' ? options.wallpaperMaxBytes : options.attachmentMaxBytes;
       socket.write(responseHead(200, { ...contentHeaders, 'Transfer-Encoding': 'chunked' }));
       socketLifetime(socket, options.connectionCapMs);
-      pumpGeneratedChunks(socket, maximum + 1);
+      pumpGeneratedChunks(socket, maximum + 1, transfer);
+      return;
+    }
+    case 'held-valid-image': {
+      socket.write(responseHead(200, { ...contentHeaders, 'Transfer-Encoding': 'chunked' }));
+      socketLifetime(socket, options.connectionCapMs);
+      transfer.hold(() => sendFiniteChunks(socket, [valid], transfer));
+      return;
+    }
+    case 'valid-max-image': {
+      const maximum =
+        scenario.target === 'wallpaper' ? options.wallpaperMaxBytes : options.attachmentMaxBytes;
+      const exact = createExactLengthValidPng(maximum);
+      transfer.attempt(exact.length);
+      socket.end(
+        Buffer.concat([
+          responseHead(200, { ...contentHeaders, 'Content-Length': exact.length }),
+          exact,
+        ]),
+      );
       return;
     }
     case 'invalid-image':
+      transfer.attempt(INVALID_IMAGE.length);
       socket.end(
         Buffer.concat([
           responseHead(200, { ...contentHeaders, 'Content-Length': INVALID_IMAGE.length }),
@@ -518,6 +638,7 @@ function serveDownload(socket, scenario, options) {
       );
       return;
     case 'oversized-dimensions':
+      transfer.attempt(DL01_OVERSIZED_DIMENSION_PNG.length);
       socket.end(
         Buffer.concat([
           responseHead(200, {
@@ -529,6 +650,7 @@ function serveDownload(socket, scenario, options) {
       );
       return;
     case 'valid-image':
+      transfer.attempt(valid.length);
       socket.end(
         Buffer.concat([
           responseHead(200, { ...contentHeaders, 'Content-Length': valid.length }),
@@ -755,6 +877,7 @@ function publicStatus(state, firebaseProjectId) {
       generation: current.generation,
       mode: current.mode,
       target: current.target,
+      attachmentCount: current.attachmentCount,
       downloadRequests: current.downloadRequests,
     },
     totals: {
@@ -764,6 +887,13 @@ function publicStatus(state, firebaseProjectId) {
       downloadRequests: state.downloadRequests,
       activeDownloadConnections: state.activeDownloadConnections,
       fcmSends: state.fcmSends,
+    },
+    transfers: {
+      started: state.transferStarted,
+      bytesAttempted: state.transferBytesAttempted,
+      responsesFinished: state.transferResponsesFinished,
+      closedEarly: state.transferClosedEarly,
+      held: state.heldTransfers.size,
     },
     fcm: {
       enabled: firebaseProjectId !== null,
@@ -917,13 +1047,13 @@ export async function startDl01FixtureServer(configuration) {
       20 * 60 * 1_000,
     ),
     attachmentMaxBytes: requireInteger(
-      configuration?.attachmentMaxBytes ?? DEFAULT_ATTACHMENT_MAX_BYTES,
+      configuration?.attachmentMaxBytes ?? DL01_DEFAULT_ATTACHMENT_MAX_BYTES,
       'attachment byte cap',
       1,
       512 * 1024 * 1024,
     ),
     wallpaperMaxBytes: requireInteger(
-      configuration?.wallpaperMaxBytes ?? DEFAULT_WALLPAPER_MAX_BYTES,
+      configuration?.wallpaperMaxBytes ?? DL01_DEFAULT_WALLPAPER_MAX_BYTES,
       'wallpaper byte cap',
       1,
       512 * 1024 * 1024,
@@ -963,18 +1093,24 @@ export async function startDl01FixtureServer(configuration) {
     downloadRequests: 0,
     activeDownloadConnections: 0,
     fcmSends: 0,
+    transferStarted: 0,
+    transferBytesAttempted: 0,
+    transferResponsesFinished: 0,
+    transferClosedEarly: 0,
+    heldTransfers: new Set(),
   };
   const sockets = new Set();
 
   const route = async (socket, request) => {
-    if (!state.credentialActive || !isAuthorized(request, authToken)) {
+    const { pathname } = request.url;
+    const controlRequest = pathname.startsWith(CONTROL_PREFIX);
+    if (!isAuthorized(request, authToken) || (!state.credentialActive && !controlRequest)) {
       state.unauthorizedRequests += 1;
       sendJson(socket, 401, envelope(null, 401), { 'WWW-Authenticate': 'Bearer' });
       return;
     }
-    const { pathname } = request.url;
 
-    if (pathname.startsWith(CONTROL_PREFIX)) state.controlRequests += 1;
+    if (controlRequest) state.controlRequests += 1;
     else if (pathname.startsWith(API_PREFIX)) state.apiRequests += 1;
 
     if (pathname === `${CONTROL_PREFIX}/status`) {
@@ -988,8 +1124,23 @@ export async function startDl01FixtureServer(configuration) {
       if (!MODE_SET.has(body.mode) || !TARGET_SET.has(body.target)) {
         throw new FixtureHttpError(400);
       }
+      const attachmentCount = body.attachmentCount === undefined ? 1 : body.attachmentCount;
+      if (
+        !Number.isSafeInteger(attachmentCount) ||
+        attachmentCount < 1 ||
+        attachmentCount > DL01_MAX_ATTACHMENT_COUNT ||
+        (body.target !== 'attachment' && body.attachmentCount !== undefined)
+      ) {
+        throw new FixtureHttpError(400);
+      }
       state.generation += 1;
-      state.current = createCase(state.generation, body.mode, body.target, options.now());
+      state.current = createCase(
+        state.generation,
+        body.mode,
+        body.target,
+        options.now(),
+        attachmentCount,
+      );
       appendHistory(state, state.current);
       sendJson(socket, 200, {
         ok: true,
@@ -997,8 +1148,20 @@ export async function startDl01FixtureServer(configuration) {
           generation: state.current.generation,
           mode: state.current.mode,
           target: state.current.target,
+          attachmentCount: state.current.attachmentCount,
         },
       });
+      return;
+    }
+    if (pathname === `${CONTROL_PREFIX}/release-held`) {
+      requireMethod(request, 'POST');
+      const body = parseJsonBody(request);
+      if (Object.keys(body).length !== 0) throw new FixtureHttpError(400);
+      let released = 0;
+      for (const transfer of [...state.heldTransfers]) {
+        if (transfer.release()) released += 1;
+      }
+      sendJson(socket, 200, { ok: true, released });
       return;
     }
     if (pathname === `${CONTROL_PREFIX}/fcm/send-current`) {
@@ -1090,7 +1253,8 @@ export async function startDl01FixtureServer(configuration) {
       requireMethod(request, 'GET');
       const guid = decodePathSegment(attachmentMatch[1]);
       const scenario = [...state.history.values()].find(
-        (candidate) => candidate.target === 'attachment' && candidate.attachmentGuid === guid,
+        (candidate) =>
+          candidate.target === 'attachment' && candidate.attachmentGuids.includes(guid),
       );
       if (!scenario) {
         sendApiError(socket, 404);
@@ -1098,11 +1262,8 @@ export async function startDl01FixtureServer(configuration) {
       }
       scenario.downloadRequests += 1;
       state.downloadRequests += 1;
-      state.activeDownloadConnections += 1;
-      socket.once('close', () => {
-        state.activeDownloadConnections = Math.max(0, state.activeDownloadConnections - 1);
-      });
-      serveDownload(socket, scenario, options);
+      const transfer = beginTransfer(socket, state);
+      serveDownload(socket, scenario, options, transfer);
       return;
     }
 
@@ -1116,11 +1277,8 @@ export async function startDl01FixtureServer(configuration) {
       }
       scenario.downloadRequests += 1;
       state.downloadRequests += 1;
-      state.activeDownloadConnections += 1;
-      socket.once('close', () => {
-        state.activeDownloadConnections = Math.max(0, state.activeDownloadConnections - 1);
-      });
-      serveDownload(socket, scenario, options);
+      const transfer = beginTransfer(socket, state);
+      serveDownload(socket, scenario, options, transfer);
       return;
     }
 
