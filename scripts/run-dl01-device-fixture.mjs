@@ -2,7 +2,7 @@
 
 import { execFile } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { chmod, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { chmod, mkdtemp, open, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -17,6 +17,8 @@ const COMMIT = /^[0-9a-f]{40}$/;
 const SHA256 = /^[0-9a-f]{64}$/;
 const RUN_ID = /^android-[0-9A-Za-z][0-9A-Za-z._-]{0,127}$/;
 const APK_NAME = /^[A-Za-z0-9._-]+\.apk$/;
+const AAB_NAME = /^[A-Za-z0-9._-]+\.aab$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const INSTALLER = /^(?:none|[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+)$/;
 const MAX_RECEIPT_BYTES = 1024 * 1024;
 const MAX_COMMAND_OUTPUT_BYTES = 2 * 1024 * 1024;
@@ -269,6 +271,7 @@ export function parseDl01CandidateArgs(argv, options = {}) {
     '--validation-receipt',
     '--promotion-receipt',
     '--state-receipt',
+    '--submission-recovery-receipt',
     '--apksigner',
     ...(options.diagnostics ? ['--scrolls'] : []),
   ]);
@@ -320,6 +323,9 @@ export function parseDl01CandidateArgs(argv, options = {}) {
     validationReceiptPath: requiredPath(values.get('--validation-receipt'), '--validation-receipt'),
     promotionReceiptPath: requiredPath(values.get('--promotion-receipt'), '--promotion-receipt'),
     stateReceiptPath: requiredPath(values.get('--state-receipt'), '--state-receipt'),
+    submissionRecoveryReceiptPath: values.has('--submission-recovery-receipt')
+      ? requiredPath(values.get('--submission-recovery-receipt'), '--submission-recovery-receipt')
+      : null,
     apksignerPath: requiredPath(values.get('--apksigner'), '--apksigner'),
   };
   if (options.diagnostics) {
@@ -425,44 +431,217 @@ async function sha256File(path, label) {
   }
 }
 
-async function readBoundedJson(path, label) {
-  let details;
+async function readBoundedJsonSnapshot(path, label, options = {}) {
+  let handle;
   try {
-    details = await stat(path);
+    handle = await open(path, 'r');
   } catch {
     throw new Error(`${label} is missing or invalid.`);
   }
-  if (!details.isFile() || details.size <= 0 || details.size > MAX_RECEIPT_BYTES) {
-    throw new Error(`${label} is missing or invalid.`);
-  }
-  let parsed;
   try {
-    parsed = JSON.parse(await readFile(path, 'utf8'));
-  } catch {
-    throw new Error(`${label} is not valid JSON.`);
+    const details = await handle.stat();
+    if (!details.isFile() || details.size <= 0 || details.size > MAX_RECEIPT_BYTES) {
+      throw new Error(`${label} is missing or invalid.`);
+    }
+    const bytes = await handle.readFile();
+    if (bytes.length !== details.size || bytes.length > MAX_RECEIPT_BYTES) {
+      throw new Error(`${label} changed while it was being read.`);
+    }
+    const text = bytes.toString('utf8');
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      throw new Error(`${label} is not valid JSON.`);
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error(`${label} is not a JSON object.`);
+    }
+    if (options.canonical === true && text !== `${JSON.stringify(parsed, null, 2)}\n`) {
+      throw new Error(`${label} is not canonical JSON.`);
+    }
+    return {
+      parsed,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+    };
+  } finally {
+    await handle.close();
   }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error(`${label} is not a JSON object.`);
-  }
-  return parsed;
 }
 
-async function verifyCandidateReceipts(args) {
-  const [validation, promotion, state, aabSha256] = await Promise.all([
+async function readBoundedJson(path, label, options) {
+  return (await readBoundedJsonSnapshot(path, label, options)).parsed;
+}
+
+function hasExactKeys(value, expected) {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.keys(value).sort().join('\0') === [...expected].sort().join('\0')
+  );
+}
+
+function canonicalTimestamp(value) {
+  if (typeof value !== 'string') return null;
+  const milliseconds = Date.parse(value);
+  return Number.isFinite(milliseconds) && new Date(milliseconds).toISOString() === value
+    ? milliseconds
+    : null;
+}
+
+function verifyDirectSubmissionRecovery({
+  recovery,
+  state,
+  stateSha256,
+  validation,
+  promotion,
+  args,
+  runId,
+  releaseCommit,
+}) {
+  const topKeys = [
+    'schemaVersion',
+    'kind',
+    'runId',
+    'preservedStateSha256',
+    'sourceCommit',
+    'releaseCommit',
+    'applicationId',
+    'versionName',
+    'versionCode',
+    'artifact',
+    'directSubmission',
+    'playReadback',
+  ];
+  const artifactKeys = ['filename', 'bytes', 'sha256'];
+  const easKeys = [
+    'cliVersion',
+    'artifactSelection',
+    'submissionId',
+    'platform',
+    'status',
+    'error',
+    'track',
+    'releaseStatus',
+    'createdAt',
+    'completedAt',
+  ];
+  const playKeys = ['applicationId', 'track', 'releaseName', 'versionCode', 'status', 'observedAt'];
+  const stateCompletedAt = canonicalTimestamp(state.submission?.completedAt);
+  const easCreatedAt = canonicalTimestamp(recovery.directSubmission?.createdAt);
+  const easCompletedAt = canonicalTimestamp(recovery.directSubmission?.completedAt);
+  const playObservedAt = canonicalTimestamp(recovery.playReadback?.observedAt);
+  const submissionId = recovery.directSubmission?.submissionId;
+  const valid =
+    hasExactKeys(recovery, topKeys) &&
+    hasExactKeys(recovery.artifact, artifactKeys) &&
+    hasExactKeys(recovery.directSubmission, easKeys) &&
+    hasExactKeys(recovery.playReadback, playKeys) &&
+    recovery.schemaVersion === 1 &&
+    recovery.kind === 'direct-play-submission-recovery' &&
+    recovery.runId === runId &&
+    recovery.preservedStateSha256 === stateSha256 &&
+    recovery.sourceCommit === args.expectedSourceCommit &&
+    recovery.releaseCommit === releaseCommit &&
+    recovery.applicationId === args.packageName &&
+    recovery.versionName === args.expectedVersion &&
+    recovery.versionCode === args.expectedCode &&
+    AAB_NAME.test(recovery.artifact?.filename ?? '') &&
+    recovery.artifact?.filename === promotion.artifactFilename &&
+    recovery.artifact?.filename === state.artifact?.filename &&
+    recovery.artifact?.bytes === state.artifact?.bytes &&
+    recovery.artifact?.bytes === validation.artifact?.bytes &&
+    Number.isSafeInteger(recovery.artifact?.bytes) &&
+    recovery.artifact.bytes > 0 &&
+    recovery.artifact?.sha256 === args.expectedAabSha256 &&
+    typeof submissionId === 'string' &&
+    UUID.test(submissionId) &&
+    recovery.directSubmission?.cliVersion === '21.5.0' &&
+    recovery.directSubmission?.artifactSelection === 'explicit-path' &&
+    recovery.directSubmission?.platform === 'ANDROID' &&
+    recovery.directSubmission?.status === 'FINISHED' &&
+    recovery.directSubmission?.error === null &&
+    recovery.directSubmission?.track === 'internal' &&
+    recovery.directSubmission?.releaseStatus === 'COMPLETED' &&
+    recovery.playReadback?.applicationId === args.packageName &&
+    recovery.playReadback?.track === 'internal' &&
+    recovery.playReadback?.releaseName === args.expectedVersion &&
+    recovery.playReadback?.versionCode === args.expectedCode &&
+    recovery.playReadback?.status === 'completed' &&
+    stateCompletedAt !== null &&
+    easCreatedAt !== null &&
+    easCompletedAt !== null &&
+    playObservedAt !== null &&
+    stateCompletedAt < easCreatedAt &&
+    easCreatedAt <= easCompletedAt &&
+    easCompletedAt <= playObservedAt &&
+    state.toolchain?.easCli === recovery.directSubmission?.cliVersion &&
+    validation.artifact?.sha256 === recovery.artifact?.sha256;
+  if (!valid) {
+    throw new Error('The direct submission recovery receipt is missing or invalid.');
+  }
+  return submissionId;
+}
+
+export async function verifyCandidateReceipts(args) {
+  const [validation, promotion, stateSnapshot, aabSha256, recovery] = await Promise.all([
     readBoundedJson(args.validationReceiptPath, 'validation receipt'),
     readBoundedJson(args.promotionReceiptPath, 'promotion receipt'),
-    readBoundedJson(args.stateReceiptPath, 'release state receipt'),
+    readBoundedJsonSnapshot(args.stateReceiptPath, 'release state receipt'),
     sha256File(args.aabPath, 'candidate AAB'),
+    args.submissionRecoveryReceiptPath === null || args.submissionRecoveryReceiptPath === undefined
+      ? Promise.resolve(null)
+      : readBoundedJson(args.submissionRecoveryReceiptPath, 'submission recovery receipt', {
+          canonical: true,
+        }),
   ]);
+  const state = stateSnapshot.parsed;
+  const stateSha256 = stateSnapshot.sha256;
   const runId = validation.runId;
   const releaseCommit = promotion.commit;
   const uploadCertificateSha256 = normalizeCertificateSha256(
     validation.artifact?.uploadCertificateSha256 ?? '',
   );
-  const allowedPhase = new Set(['promoted', 'submitted']);
-  const phaseMatchesSubmission =
-    (state.phase === 'promoted' && state.submission?.status === 'not_started') ||
-    (state.phase === 'submitted' && state.submission?.status === 'submitted');
+  const promotedNotSubmitted =
+    state.phase === 'promoted' &&
+    hasExactKeys(state.submission, ['status']) &&
+    state.submission.status === 'not_started';
+  const cleanRunnerSubmission =
+    state.phase === 'submitted' &&
+    hasExactKeys(state.submission, [
+      'schemaVersion',
+      'runId',
+      'status',
+      'track',
+      'artifactFilename',
+      'sha256',
+      'completedAt',
+    ]) &&
+    state.submission.schemaVersion === 1 &&
+    state.submission.runId === runId &&
+    state.submission.status === 'submitted' &&
+    state.submission.track === 'internal' &&
+    state.submission.artifactFilename === promotion.artifactFilename &&
+    state.submission.sha256 === args.expectedAabSha256 &&
+    canonicalTimestamp(state.submission.completedAt) !== null;
+  const unknownRunnerSubmission =
+    state.phase === 'submission_unknown' &&
+    hasExactKeys(state.submission, [
+      'schemaVersion',
+      'runId',
+      'status',
+      'track',
+      'exitCode',
+      'signal',
+      'processGroupId',
+      'completedAt',
+    ]) &&
+    state.submission.schemaVersion === 1 &&
+    state.submission.runId === runId &&
+    state.submission?.status === 'unknown' &&
+    state.submission?.track === 'internal' &&
+    canonicalTimestamp(state.submission.completedAt) !== null;
   const valid =
     typeof runId === 'string' &&
     RUN_ID.test(runId) &&
@@ -480,14 +659,45 @@ async function verifyCandidateReceipts(args) {
     promotion.targetVersion === args.expectedVersion &&
     promotion.versionCode === args.expectedCode &&
     promotion.sha256 === args.expectedAabSha256 &&
+    state.schemaVersion === 1 &&
     state.runId === runId &&
     state.source?.commit === args.expectedSourceCommit &&
+    state.target?.version === args.expectedVersion &&
+    state.target?.platform === 'android' &&
     state.promotion?.status === 'promoted' &&
     state.promotion?.commit === releaseCommit &&
-    allowedPhase.has(state.phase) &&
-    phaseMatchesSubmission &&
+    state.promotion?.artifactFilename === promotion.artifactFilename &&
+    state.target?.track === 'internal' &&
+    state.target?.applicationId === args.packageName &&
+    state.artifact?.filename === promotion.artifactFilename &&
+    state.artifact?.applicationId === args.packageName &&
+    state.artifact?.versionName === args.expectedVersion &&
+    state.artifact?.versionCode === args.expectedCode &&
+    Number.isSafeInteger(state.artifact?.bytes) &&
+    state.artifact.bytes > 0 &&
+    state.artifact?.sha256 === args.expectedAabSha256 &&
+    (promotedNotSubmitted || cleanRunnerSubmission || unknownRunnerSubmission) &&
     aabSha256 === args.expectedAabSha256;
   if (!valid) throw new Error('The frozen candidate receipts do not match the expected candidate.');
+  if ((promotedNotSubmitted || cleanRunnerSubmission) && recovery !== null) {
+    throw new Error('A clean runner submission must not have a recovery receipt.');
+  }
+  if (unknownRunnerSubmission && recovery === null) {
+    throw new Error('The unknown runner submission requires a recovery receipt.');
+  }
+  const recoverySubmissionId =
+    recovery === null
+      ? null
+      : verifyDirectSubmissionRecovery({
+          recovery,
+          state,
+          stateSha256,
+          validation,
+          promotion,
+          args,
+          runId,
+          releaseCommit,
+        });
   return {
     runId,
     sourceCommit: args.expectedSourceCommit,
@@ -495,6 +705,9 @@ async function verifyCandidateReceipts(args) {
     aabSha256,
     uploadCertificateSha256,
     phase: state.phase,
+    submissionEvidence:
+      recovery !== null ? 'direct_recovery' : cleanRunnerSubmission ? 'runner' : 'not_started',
+    ...(recoverySubmissionId === null ? {} : { recoverySubmissionId }),
   };
 }
 
@@ -893,7 +1106,9 @@ function usage() {
   node scripts/run-dl01-device-fixture.mjs capture-diagnostics <candidate options> [--scrolls 0..12]
 
 Candidate options require independent expected version/code/SDK/API/source/AAB/signer values plus
-the AAB, validation.json, promotion.json, state.json, and apksigner paths. Output is sanitized JSON.
+the AAB, validation.json, promotion.json, state.json, and apksigner paths. A fail-closed direct-submit
+recovery receipt is optional for an honestly preserved submission_unknown runner state. Output is
+sanitized JSON.
 Legacy invocation without the serve word remains supported.
 `;
 }

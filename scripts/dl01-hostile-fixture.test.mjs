@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
-import { createDecipheriv } from 'node:crypto';
+import { createDecipheriv, createHash } from 'node:crypto';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import net from 'node:net';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import test from 'node:test';
 
 import {
@@ -22,6 +25,7 @@ import {
   parseDownloadIntegrityUiSnapshot,
   parseDownloadIntegrityUiXml,
   parseInstalledPackageDump,
+  verifyCandidateReceipts,
 } from './run-dl01-device-fixture.mjs';
 
 const AUTH_TOKEN = `bbd_device_v1_${'A'.repeat(43)}`;
@@ -577,6 +581,8 @@ test('candidate parser normalizes exact provenance inputs and rejects unsafe amb
     '/private/tmp/promotion.json',
     '--state-receipt',
     '/private/tmp/state.json',
+    '--submission-recovery-receipt',
+    '/private/tmp/submission-recovery.json',
     '--apksigner',
     '/private/tmp/apksigner',
   ];
@@ -595,6 +601,7 @@ test('candidate parser normalizes exact provenance inputs and rejects unsafe amb
       expectedAabSha256: parsed.expectedAabSha256,
       expectedSourceCommit: parsed.expectedSourceCommit,
       requireQemu: parsed.requireQemu,
+      submissionRecoveryReceiptPath: parsed.submissionRecoveryReceiptPath,
       scrolls: parsed.scrolls,
     },
     {
@@ -610,6 +617,7 @@ test('candidate parser normalizes exact provenance inputs and rejects unsafe amb
       expectedAabSha256: sha.toLowerCase(),
       expectedSourceCommit: commit.toLowerCase(),
       requireQemu: true,
+      submissionRecoveryReceiptPath: '/private/tmp/submission-recovery.json',
       scrolls: 8,
     },
   );
@@ -621,6 +629,236 @@ test('candidate parser normalizes exact provenance inputs and rejects unsafe amb
       ),
     /must be yes or no/,
   );
+});
+
+test('candidate receipts accept only a strictly bound direct submission recovery', async (t) => {
+  const directory = await mkdtemp(join(tmpdir(), 'gator-dl01-recovery-test-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const paths = Object.fromEntries(
+    ['aab', 'validation', 'promotion', 'state', 'recovery'].map((name) => [
+      name,
+      join(directory, `${name}.${name === 'aab' ? 'aab' : 'json'}`),
+    ]),
+  );
+  const aabBytes = Buffer.from('frozen-candidate-aab');
+  const aabSha256 = createHash('sha256').update(aabBytes).digest('hex');
+  const runId = 'android-0.1.55-abcdef0-20260918055448';
+  const sourceCommit = 'a'.repeat(40);
+  const releaseCommit = 'b'.repeat(40);
+  const artifactFilename = `gator-release-0.1.55-v75-${releaseCommit.slice(0, 7)}.aab`;
+  const submissionId = '8953c1c0-79f1-463a-a3cf-1ff1b49f46b5';
+  const validation = {
+    runId,
+    applicationId: 'com.example.gator',
+    versionName: '0.1.55',
+    versionCode: 75,
+    sourceCommit,
+    artifact: {
+      bytes: aabBytes.length,
+      sha256: aabSha256,
+      uploadCertificateSha256: 'c'.repeat(64),
+    },
+    validation: { status: 'passed' },
+  };
+  const promotion = {
+    runId,
+    sourceCommit,
+    targetVersion: '0.1.55',
+    versionCode: 75,
+    sha256: aabSha256,
+    commit: releaseCommit,
+    artifactFilename,
+  };
+  const state = {
+    schemaVersion: 1,
+    runId,
+    phase: 'submission_unknown',
+    source: { commit: sourceCommit },
+    target: {
+      version: '0.1.55',
+      platform: 'android',
+      track: 'internal',
+      applicationId: 'com.example.gator',
+    },
+    artifact: {
+      filename: artifactFilename,
+      applicationId: 'com.example.gator',
+      versionName: '0.1.55',
+      versionCode: 75,
+      bytes: aabBytes.length,
+      sha256: aabSha256,
+    },
+    toolchain: { easCli: '21.5.0' },
+    promotion: { status: 'promoted', commit: releaseCommit, artifactFilename },
+    submission: {
+      schemaVersion: 1,
+      runId,
+      status: 'unknown',
+      track: 'internal',
+      exitCode: 1,
+      signal: null,
+      processGroupId: 1234,
+      completedAt: '2026-09-18T06:24:20.912Z',
+    },
+  };
+  await Promise.all([
+    writeFile(paths.aab, aabBytes),
+    writeFile(paths.validation, `${JSON.stringify(validation)}\n`),
+    writeFile(paths.promotion, `${JSON.stringify(promotion)}\n`),
+    writeFile(paths.state, `${JSON.stringify(state)}\n`),
+  ]);
+  const stateSha256 = createHash('sha256')
+    .update(`${JSON.stringify(state)}\n`)
+    .digest('hex');
+  const recovery = {
+    schemaVersion: 1,
+    kind: 'direct-play-submission-recovery',
+    runId,
+    preservedStateSha256: stateSha256,
+    sourceCommit,
+    releaseCommit,
+    applicationId: 'com.example.gator',
+    versionName: '0.1.55',
+    versionCode: 75,
+    artifact: { filename: artifactFilename, bytes: aabBytes.length, sha256: aabSha256 },
+    directSubmission: {
+      cliVersion: '21.5.0',
+      artifactSelection: 'explicit-path',
+      submissionId,
+      platform: 'ANDROID',
+      status: 'FINISHED',
+      error: null,
+      track: 'internal',
+      releaseStatus: 'COMPLETED',
+      createdAt: '2026-09-18T06:28:02.540Z',
+      completedAt: '2026-09-18T06:29:35.118Z',
+    },
+    playReadback: {
+      applicationId: 'com.example.gator',
+      track: 'internal',
+      releaseName: '0.1.55',
+      versionCode: 75,
+      status: 'completed',
+      observedAt: '2026-09-18T06:38:49.590Z',
+    },
+  };
+  const canonicalJson = (value) => `${JSON.stringify(value, null, 2)}\n`;
+  await writeFile(paths.recovery, canonicalJson(recovery));
+  const args = {
+    packageName: 'com.example.gator',
+    expectedVersion: '0.1.55',
+    expectedCode: 75,
+    expectedAabSha256: aabSha256,
+    expectedSourceCommit: sourceCommit,
+    aabPath: paths.aab,
+    validationReceiptPath: paths.validation,
+    promotionReceiptPath: paths.promotion,
+    stateReceiptPath: paths.state,
+    submissionRecoveryReceiptPath: paths.recovery,
+  };
+
+  const verified = await verifyCandidateReceipts(args);
+  assert.equal(verified.phase, 'submission_unknown');
+  assert.equal(verified.submissionEvidence, 'direct_recovery');
+  assert.equal(verified.recoverySubmissionId, submissionId);
+  await assert.rejects(
+    verifyCandidateReceipts({ ...args, submissionRecoveryReceiptPath: null }),
+    /requires a recovery receipt/,
+  );
+  const rejectedRecoveries = [
+    ['state hash', { ...recovery, preservedStateSha256: 'd'.repeat(64) }],
+    ['extra key', { ...recovery, unexpected: true }],
+    [
+      'EAS identifier',
+      {
+        ...recovery,
+        directSubmission: { ...recovery.directSubmission, submissionId: 'not-a-uuid' },
+      },
+    ],
+    [
+      'EAS status',
+      { ...recovery, directSubmission: { ...recovery.directSubmission, status: 'ERRORED' } },
+    ],
+    [
+      'EAS error',
+      { ...recovery, directSubmission: { ...recovery.directSubmission, error: 'failed' } },
+    ],
+    [
+      'EAS platform',
+      { ...recovery, directSubmission: { ...recovery.directSubmission, platform: 'IOS' } },
+    ],
+    [
+      'reversed time',
+      {
+        ...recovery,
+        directSubmission: {
+          ...recovery.directSubmission,
+          createdAt: '2026-09-18T06:30:00.000Z',
+        },
+      },
+    ],
+    ['candidate version', { ...recovery, versionName: '0.1.56' }],
+    ['artifact hash', { ...recovery, artifact: { ...recovery.artifact, sha256: 'e'.repeat(64) } }],
+    [
+      'Play version code',
+      { ...recovery, playReadback: { ...recovery.playReadback, versionCode: 74 } },
+    ],
+    ['Play status', { ...recovery, playReadback: { ...recovery.playReadback, status: 'draft' } }],
+  ];
+  for (const [label, candidate] of rejectedRecoveries) {
+    await writeFile(paths.recovery, canonicalJson(candidate));
+    await assert.rejects(
+      verifyCandidateReceipts(args),
+      /recovery receipt is missing or invalid/,
+      label,
+    );
+  }
+  await writeFile(
+    paths.recovery,
+    `${canonicalJson(recovery).trimEnd().slice(0, -1)},\n  "schemaVersion": 1\n}\n`,
+  );
+  await assert.rejects(verifyCandidateReceipts(args), /not canonical JSON/);
+  await writeFile(paths.recovery, canonicalJson(recovery));
+  const promotedState = {
+    ...state,
+    phase: 'promoted',
+    submission: { status: 'not_started' },
+  };
+  await writeFile(paths.state, `${JSON.stringify(promotedState)}\n`);
+  assert.equal(
+    (
+      await verifyCandidateReceipts({
+        ...args,
+        submissionRecoveryReceiptPath: null,
+      })
+    ).submissionEvidence,
+    'not_started',
+  );
+  await assert.rejects(verifyCandidateReceipts(args), /must not have a recovery receipt/);
+  const submittedState = {
+    ...state,
+    phase: 'submitted',
+    submission: {
+      schemaVersion: 1,
+      runId,
+      status: 'submitted',
+      track: 'internal',
+      artifactFilename,
+      sha256: aabSha256,
+      completedAt: '2026-09-18T06:29:35.118Z',
+    },
+  };
+  await writeFile(paths.state, `${JSON.stringify(submittedState)}\n`);
+  assert.equal(
+    (
+      await verifyCandidateReceipts({
+        ...args,
+        submissionRecoveryReceiptPath: null,
+      })
+    ).submissionEvidence,
+    'runner',
+  );
+  await assert.rejects(verifyCandidateReceipts(args), /must not have a recovery receipt/);
 });
 
 test('installed package parser extracts only the exact Android identity', () => {
