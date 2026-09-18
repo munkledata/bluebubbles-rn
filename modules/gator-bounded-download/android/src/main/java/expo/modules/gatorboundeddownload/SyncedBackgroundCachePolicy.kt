@@ -31,6 +31,14 @@ internal data class SyncedBackgroundPruneResult(
   val withinQuota: Boolean,
 )
 
+/** Count-only strict scan used by the release-safe Download Integrity report. */
+internal data class SyncedBackgroundCacheInspection(
+  val files: Long,
+  val bytes: Long,
+  val withinAdmissionLimit: Boolean,
+  val withinFinalLimit: Boolean,
+)
+
 internal data class SyncedBackgroundCacheScanLimits(
   val maxFiles: Int = SYNCED_BACKGROUND_CACHE_SCAN_MAX_FILES,
   val maxNodes: Int = SYNCED_BACKGROUND_CACHE_SCAN_MAX_NODES,
@@ -202,6 +210,38 @@ internal fun prepareSyncedBackgroundCacheForDownload(
   deleteFile = deleteFile,
 )
 
+/**
+ * Inspect the native-fixed wallpaper root without deleting, rewriting, or returning any path.
+ *
+ * This deliberately uses the same no-follow, bounded scanner as admission and pruning. Visible
+ * corrupt, unreadable, symlinked, or over-limit state rejects the report instead of being
+ * summarized as healthy. Admission/pruning, not this count-only observation, owns race rejection.
+ */
+internal fun inspectSyncedBackgroundCache(
+  root: File,
+  fileSystem: AttachmentCacheFileSystem,
+  scanLimits: SyncedBackgroundCacheScanLimits = SyncedBackgroundCacheScanLimits(),
+  shouldContinue: () -> Boolean = { true },
+): SyncedBackgroundCacheInspection {
+  val summary = scanSyncedBackgroundCache(
+    root = root,
+    fileSystem = fileSystem,
+    keepPath = null,
+    limits = scanLimits,
+    shouldContinue = shouldContinue,
+  ) { _ -> }
+  return SyncedBackgroundCacheInspection(
+    files = summary.files,
+    bytes = summary.bytes,
+    withinAdmissionLimit =
+      summary.files <= SYNCED_BACKGROUND_CACHE_ADMISSION_MAX_FILES.toLong() &&
+        summary.bytes <= SYNCED_BACKGROUND_CACHE_ADMISSION_MAX_BYTES,
+    withinFinalLimit =
+      summary.files <= SYNCED_BACKGROUND_CACHE_MAX_FILES.toLong() &&
+        summary.bytes <= SYNCED_BACKGROUND_CACHE_MAX_BYTES,
+  )
+}
+
 /** Validate one exact current-layout entry; strict callers separately inspect its native type. */
 internal fun requireOwnedSyncedBackgroundEntry(root: File, candidate: File): File {
   val canonicalRoot = canonicalPlainRoot(root)
@@ -244,8 +284,10 @@ private fun scanSyncedBackgroundCache(
   fileSystem: AttachmentCacheFileSystem,
   keepPath: String?,
   limits: SyncedBackgroundCacheScanLimits,
+  shouldContinue: () -> Boolean = { true },
   action: (CacheEntry) -> Unit,
 ): StrictScanSummary {
+  check(shouldContinue()) { "Synced-background cache scan was cancelled" }
   val rootNode = inspectStrict(fileSystem, root, "synced-background cache root")
     ?: return StrictScanSummary(0L, 0L, false)
   requireDirectoryNode(rootNode, "Synced-background cache root")
@@ -257,6 +299,7 @@ private fun scanSyncedBackgroundCache(
   var keepSeen = false
 
   fun recordNode() {
+    check(shouldContinue()) { "Synced-background cache scan was cancelled" }
     check(totalNodes < limits.maxNodes) { "Synced-background cache contains too many entries" }
     totalNodes += 1
   }
@@ -349,6 +392,7 @@ private fun scanSyncedBackgroundCache(
   check(canonicalPlainRoot(root).path == canonicalRoot.path) {
     "Synced-background cache root changed during scan"
   }
+  check(shouldContinue()) { "Synced-background cache scan was cancelled" }
   return StrictScanSummary(totalFiles, totalBytes, keepSeen)
 }
 

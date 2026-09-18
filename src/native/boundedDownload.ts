@@ -24,6 +24,20 @@ interface NativeSyncedBackgroundPruneResult {
   remainingBytes?: number;
 }
 
+interface NativeSyncedBackgroundInspectionResult {
+  ok?: boolean;
+  files?: number;
+  bytes?: number;
+  withinAdmissionLimit?: boolean;
+  withinFinalLimit?: boolean;
+}
+
+interface NativeBoundedDownloadPartialsInspectionResult {
+  ok?: boolean;
+  files?: number;
+  bytes?: number;
+}
+
 interface NativeAttachmentCacheStatResult {
   ok?: boolean;
   exists?: boolean;
@@ -91,6 +105,8 @@ interface GatorBoundedDownloadNative {
   prepareSyncedBackgroundCacheForDownload(
     keepUri: string | null,
   ): Promise<NativeSyncedBackgroundPruneResult>;
+  inspectSyncedBackgroundCache(): Promise<NativeSyncedBackgroundInspectionResult>;
+  inspectBoundedDownloadPartials(): Promise<NativeBoundedDownloadPartialsInspectionResult>;
   validateSyncedBackgroundCacheFile(uri: string): Promise<boolean>;
   deleteSyncedBackgroundCacheFile(uri: string): Promise<boolean>;
   statAttachmentCacheFile(uri: string): Promise<NativeAttachmentCacheStatResult>;
@@ -137,8 +153,22 @@ export interface SyncedBackgroundPruneResult {
   readonly remainingBytes: number;
 }
 
+export interface SyncedBackgroundCacheInspection {
+  readonly files: number;
+  readonly bytes: number;
+  readonly withinAdmissionLimit: boolean;
+  readonly withinFinalLimit: boolean;
+}
+
+export interface BoundedDownloadPartialsInspection {
+  readonly files: number;
+  readonly bytes: number;
+}
+
 const SYNCED_BACKGROUND_ADMISSION_MAX_BYTES = 90 * 1024 * 1024;
 const SYNCED_BACKGROUND_ADMISSION_MAX_FILES = 255;
+const SYNCED_BACKGROUND_FINAL_MAX_BYTES = 100 * 1024 * 1024;
+const SYNCED_BACKGROUND_FINAL_MAX_FILES = 256;
 
 function parseSyncedBackgroundPruneResult(
   result: NativeSyncedBackgroundPruneResult | null | undefined,
@@ -310,6 +340,55 @@ export async function prepareNativeSyncedBackgroundCacheForDownload(
   return parsed;
 }
 
+/** Read count-only health from Android's fixed synced-wallpaper cache root. */
+export async function inspectNativeSyncedBackgroundCache(): Promise<SyncedBackgroundCacheInspection> {
+  const native = getNative();
+  if (!native) throw new NativeBoundedDownloadError('unavailable');
+  const result = await native.inspectSyncedBackgroundCache();
+  if (
+    result?.ok !== true ||
+    !isNonNegativeSafeInteger(result.files) ||
+    !isNonNegativeSafeInteger(result.bytes) ||
+    typeof result.withinAdmissionLimit !== 'boolean' ||
+    typeof result.withinFinalLimit !== 'boolean'
+  ) {
+    throw new NativeBoundedDownloadError('unavailable');
+  }
+  const withinAdmissionLimit =
+    result.files <= SYNCED_BACKGROUND_ADMISSION_MAX_FILES &&
+    result.bytes <= SYNCED_BACKGROUND_ADMISSION_MAX_BYTES;
+  const withinFinalLimit =
+    result.files <= SYNCED_BACKGROUND_FINAL_MAX_FILES &&
+    result.bytes <= SYNCED_BACKGROUND_FINAL_MAX_BYTES;
+  if (
+    result.withinAdmissionLimit !== withinAdmissionLimit ||
+    result.withinFinalLimit !== withinFinalLimit
+  ) {
+    throw new NativeBoundedDownloadError('unavailable');
+  }
+  return {
+    files: result.files,
+    bytes: result.bytes,
+    withinAdmissionLimit,
+    withinFinalLimit,
+  };
+}
+
+/** Read only counts from the fixed app-cache namespace used for in-flight native downloads. */
+export async function inspectNativeBoundedDownloadPartials(): Promise<BoundedDownloadPartialsInspection> {
+  const native = getNative();
+  if (!native) throw new NativeBoundedDownloadError('unavailable');
+  const result = await native.inspectBoundedDownloadPartials();
+  if (
+    result?.ok !== true ||
+    !isNonNegativeSafeInteger(result.files) ||
+    !isNonNegativeSafeInteger(result.bytes)
+  ) {
+    throw new NativeBoundedDownloadError('unavailable');
+  }
+  return Object.freeze({ files: result.files, bytes: result.bytes });
+}
+
 /** Validate one exact current/legacy wallpaper through Android's fixed cache-root gate. */
 export async function validateNativeSyncedBackgroundCacheFile(uri: string): Promise<boolean> {
   const native = getNative();
@@ -423,9 +502,20 @@ export async function getNativeAttachmentCacheAvailableBytes(): Promise<number> 
  * bridge page, applies its own total/page ceilings, rejects duplicate URIs, and returns no partial
  * manifest when any later page fails. The opaque native session is always closed best-effort.
  */
-export async function scanNativeAttachmentCacheFiles(): Promise<AttachmentCacheScanFile[]> {
+export async function scanNativeAttachmentCacheFiles(
+  shouldContinue: () => boolean = () => true,
+): Promise<AttachmentCacheScanFile[]> {
   const native = getNative();
   if (!native) throw new NativeBoundedDownloadError('unavailable');
+
+  const current = (): boolean => {
+    try {
+      return shouldContinue();
+    } catch {
+      return false;
+    }
+  };
+  if (!current()) throw new NativeBoundedDownloadError('cancelled');
 
   const begin = await native.beginAttachmentCacheScan();
   if (
@@ -442,7 +532,9 @@ export async function scanNativeAttachmentCacheFiles(): Promise<AttachmentCacheS
   const seen = new Set<string>();
   try {
     for (let pageNumber = 0; pageNumber < ATTACHMENT_CACHE_SCAN_MAX_PAGES; pageNumber += 1) {
+      if (!current()) throw new NativeBoundedDownloadError('cancelled');
       const page = await native.nextAttachmentCacheScanPage(scanId);
+      if (!current()) throw new NativeBoundedDownloadError('cancelled');
       if (
         page?.ok !== true ||
         typeof page.done !== 'boolean' ||

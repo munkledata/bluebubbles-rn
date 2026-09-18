@@ -12,6 +12,7 @@ export * from './chats';
 export * from './attachments';
 export * from './attachmentCache';
 export * from './attachmentMediaExports';
+export * from './downloadIntegrityDiagnostics';
 export * from './messages';
 export * from './messageTargets';
 export * from './reactions';

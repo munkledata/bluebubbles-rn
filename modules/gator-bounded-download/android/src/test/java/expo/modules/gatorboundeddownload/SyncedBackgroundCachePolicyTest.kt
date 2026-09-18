@@ -5,6 +5,7 @@ import java.io.RandomAccessFile
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -25,6 +26,20 @@ class SyncedBackgroundCachePolicyTest {
     assertEquals(8_192, SYNCED_BACKGROUND_CACHE_SCAN_MAX_FILES)
     assertEquals(32_768, SYNCED_BACKGROUND_CACHE_SCAN_MAX_NODES)
     assertEquals(0L, SYNCED_BACKGROUND_CACHE_RECENT_GRACE_MS)
+  }
+
+  @Test
+  fun `count-only inspection rejects when its caller deadline expires`() {
+    val root = temporary.newFolder(SYNCED_BACKGROUND_CACHE_DIRECTORY).canonicalFile
+    sparseFile(File(root, "current-deadline.jpg"), 1L, 1_000L)
+    var checks = 0
+
+    assertThrows(IllegalStateException::class.java) {
+      inspectSyncedBackgroundCache(root, nioFileSystem) {
+        checks += 1
+        checks < 2
+      }
+    }
   }
 
   @Test

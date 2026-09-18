@@ -181,7 +181,7 @@ export default function SettingsScreen(): React.JSX.Element {
       'downloads parallel concurrent attachments images media bandwidth auto-download wifi gallery album photos save destination location',
     sync: 'sync messages per chat initial history',
     privacy:
-      'privacy encryption key rotate security storage files plaintext attachments cache logs wallpaper backups app private error reports crashes diagnostics consent share',
+      'privacy encryption key rotate security storage files plaintext attachments cache logs wallpaper backups app private error reports crashes diagnostics consent share download integrity',
     server:
       'server connection live updates connecting reconnecting offline retry management restart logs statistics health diagnostics retired features rcs find my keys push uptime alerts',
     about:
@@ -722,6 +722,11 @@ export default function SettingsScreen(): React.JSX.Element {
             <NavRow
               label="Storage & File Privacy…"
               onPress={() => router.push('/storage-privacy')}
+            />
+            <NavRow
+              label="Download Integrity…"
+              onPress={() => router.push('/download-integrity')}
+              accessibilityLabel="View download integrity"
             />
             <NavRow label="Rotate encryption key…" chevron={false} onPress={onRotateKey} />
           </SettingsSection>

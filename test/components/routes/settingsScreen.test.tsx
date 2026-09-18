@@ -573,6 +573,7 @@ describe('SettingsScreen — navigation rows', () => {
       ['Backup', '/backup'],
       ['Find My', '/findmy'],
       ['Storage & File Privacy…', '/storage-privacy'],
+      ['Download Integrity…', '/download-integrity'],
       ['Privacy & Data Use…', '/storage-privacy'],
       ['Legal & Third-Party Notices…', '/legal-notices'],
       ['Server Management…', '/server-management'],

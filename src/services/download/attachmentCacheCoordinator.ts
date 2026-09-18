@@ -40,6 +40,16 @@ export interface AttachmentCacheNativeBoundary {
   deleteFile(path: string): Promise<AttachmentCacheDeleteResult>;
 }
 
+/** Count-only process state for the privacy-safe Download Integrity report. */
+export interface AttachmentCacheCoordinatorDiagnostics {
+  readonly reservations: number;
+  readonly reservedBytes: number;
+  readonly retirementOwners: number;
+  readonly pendingRetirements: number;
+  readonly protectedPaths: number;
+  readonly protectionOwners: number;
+}
+
 /**
  * Account scope used while creating or revalidating durable cache ownership.
  *
@@ -154,6 +164,27 @@ export class AttachmentCacheCoordinator {
     private readonly io: AttachmentCacheNativeBoundary = nativeBoundary,
     private readonly now: () => number = Date.now,
   ) {}
+
+  /**
+   * Take one synchronous, identifier-free snapshot of this process's cache ownership state.
+   *
+   * JavaScript cannot interleave another callback while these maps are counted. The result exposes
+   * no path or token, and deliberately does not wait on the coordinator gate or mutate ownership.
+   */
+  diagnosticSnapshot(): AttachmentCacheCoordinatorDiagnostics {
+    let protectionOwners = 0;
+    for (const owners of this.protections.values()) {
+      protectionOwners = Math.min(Number.MAX_SAFE_INTEGER, protectionOwners + owners.size);
+    }
+    return Object.freeze({
+      reservations: this.reservations.size,
+      reservedBytes: this.reservationBytes(),
+      retirementOwners: this.retirementOwners.size,
+      pendingRetirements: this.pendingRetirements.size,
+      protectedPaths: this.protections.size,
+      protectionOwners,
+    });
+  }
 
   /**
    * Reserve one exact final path before directory creation or native streaming begins.

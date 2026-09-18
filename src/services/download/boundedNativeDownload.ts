@@ -35,6 +35,19 @@ export interface BoundedNativeDownloadResult {
   readonly bytes: number;
 }
 
+/** Identifier-free live ownership used only by the read-only Download Integrity report. */
+export interface BoundedDownloadRuntimeDiagnostics {
+  readonly activeTransfers: number;
+  readonly activeDestinations: number;
+}
+
+export function getBoundedDownloadRuntimeDiagnostics(): BoundedDownloadRuntimeDiagnostics {
+  return Object.freeze({
+    activeTransfers: activeBoundedTransfers.size,
+    activeDestinations: activeDestinations.size,
+  });
+}
+
 /**
  * Stream a native download into a request-unique app-cache file, enforce actual bytes + an
  * absolute deadline, verify the on-disk size, then atomically promote it to the caller's final

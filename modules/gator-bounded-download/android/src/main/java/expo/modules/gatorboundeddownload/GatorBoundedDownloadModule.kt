@@ -36,6 +36,7 @@ private const val MAX_IMAGE_EDGE = 16_384
 private const val MAX_IMAGE_VALIDATION_DECODE_PIXELS = 1L * 1024 * 1024
 private const val SYNCED_BACKGROUND_IMAGE_MAX_PIXELS = 16L * 1024 * 1024
 private const val PROGRESS_INTERVAL_MS = 100L
+private const val DOWNLOAD_INTEGRITY_WALLPAPER_SCAN_MAX_MS = 2_000L
 
 private const val REASON_CANCELLED = "cancelled"
 private const val REASON_MISSING = "missing"
@@ -164,6 +165,30 @@ class GatorBoundedDownloadModule : Module() {
         prepareSyncedBackgroundCacheForDownload(root, fileSystem, keep)
       }
       pruneOutcome(result)
+    }.runOnQueue(appContext.backgroundCoroutineScope)
+
+    AsyncFunction("inspectSyncedBackgroundCache") {
+      val context = appContext.reactContext
+        ?: throw IllegalStateException("Android context is unavailable")
+      requireBoundedDirectoryStreamSupport()
+      val root = File(context.filesDir, SYNCED_BACKGROUND_CACHE_DIRECTORY)
+      val result = synchronized(syncedBackgroundPruneLock) {
+        val startedAt = SystemClock.elapsedRealtime()
+        inspectSyncedBackgroundCache(root, newBoundedDirectoryStreamFileSystem()) {
+          SystemClock.elapsedRealtime() - startedAt < DOWNLOAD_INTEGRITY_WALLPAPER_SCAN_MAX_MS
+        }
+      }
+      syncedBackgroundInspectionOutcome(result)
+    }.runOnQueue(appContext.backgroundCoroutineScope)
+
+    AsyncFunction("inspectBoundedDownloadPartials") {
+      val context = appContext.reactContext
+        ?: throw IllegalStateException("Android context is unavailable")
+      requireBoundedDirectoryStreamSupport()
+      val root = File(context.cacheDir, BOUNDED_DOWNLOAD_PARTIAL_DIRECTORY)
+      partialInspectionOutcome(
+        inspectBoundedDownloadPartials(root, newBoundedDirectoryStreamFileSystem()),
+      )
     }.runOnQueue(appContext.backgroundCoroutineScope)
 
     AsyncFunction("validateSyncedBackgroundCacheFile") { rawUri: String ->
@@ -700,6 +725,24 @@ class GatorBoundedDownloadModule : Module() {
     "deletedBytes" to result.deletedBytes.toDouble(),
     "remainingFiles" to result.remainingFiles.toDouble(),
     "remainingBytes" to result.remainingBytes.toDouble(),
+  )
+
+  private fun syncedBackgroundInspectionOutcome(
+    result: SyncedBackgroundCacheInspection,
+  ): Map<String, Any> = mapOf(
+    "ok" to true,
+    "files" to result.files.toDouble(),
+    "bytes" to result.bytes.toDouble(),
+    "withinAdmissionLimit" to result.withinAdmissionLimit,
+    "withinFinalLimit" to result.withinFinalLimit,
+  )
+
+  private fun partialInspectionOutcome(
+    result: BoundedDownloadPartialsInspection,
+  ): Map<String, Any> = mapOf(
+    "ok" to true,
+    "files" to result.files.toDouble(),
+    "bytes" to result.bytes.toDouble(),
   )
 
   private fun attachmentCacheStatOutcome(exists: Boolean, bytes: Long): Map<String, Any> = mapOf(

@@ -8,6 +8,8 @@ const native = {
   download: jest.fn(),
   pruneSyncedBackgroundCache: jest.fn(),
   prepareSyncedBackgroundCacheForDownload: jest.fn(),
+  inspectSyncedBackgroundCache: jest.fn(),
+  inspectBoundedDownloadPartials: jest.fn(),
   validateSyncedBackgroundCacheFile: jest.fn(),
   deleteSyncedBackgroundCacheFile: jest.fn(),
   statAttachmentCacheFile: jest.fn(),
@@ -41,6 +43,8 @@ import {
   downloadNativeBoundedFile,
   deleteNativeSyncedBackgroundCacheFile,
   getNativeAttachmentCacheAvailableBytes,
+  inspectNativeBoundedDownloadPartials,
+  inspectNativeSyncedBackgroundCache,
   NativeBoundedDownloadError,
   prepareNativeSyncedBackgroundCacheForDownload,
   pruneNativeSyncedBackgroundCache,
@@ -71,6 +75,18 @@ beforeEach(() => {
     deletedBytes: 20,
     remainingFiles: 3,
     remainingBytes: 30,
+  });
+  native.inspectSyncedBackgroundCache.mockReset().mockResolvedValue({
+    ok: true,
+    files: 3,
+    bytes: 30,
+    withinAdmissionLimit: true,
+    withinFinalLimit: true,
+  });
+  native.inspectBoundedDownloadPartials.mockReset().mockResolvedValue({
+    ok: true,
+    files: 1,
+    bytes: 12,
   });
   native.validateSyncedBackgroundCacheFile.mockReset().mockResolvedValue(true);
   native.deleteSyncedBackgroundCacheFile.mockReset().mockResolvedValue(true);
@@ -301,6 +317,52 @@ it('validates fixed synced-background admission headroom reported by native', as
       expect.objectContaining<Partial<NativeBoundedDownloadError>>({ reason: 'unavailable' }),
     );
   }
+});
+
+it('strictly validates count-only native cache inspections', async () => {
+  await expect(inspectNativeSyncedBackgroundCache()).resolves.toEqual({
+    files: 3,
+    bytes: 30,
+    withinAdmissionLimit: true,
+    withinFinalLimit: true,
+  });
+  await expect(inspectNativeBoundedDownloadPartials()).resolves.toEqual({
+    files: 1,
+    bytes: 12,
+  });
+
+  native.inspectSyncedBackgroundCache.mockResolvedValueOnce({
+    ok: true,
+    files: 256,
+    bytes: 30,
+    withinAdmissionLimit: true,
+    withinFinalLimit: true,
+  });
+  await expect(inspectNativeSyncedBackgroundCache()).rejects.toEqual(
+    expect.objectContaining<Partial<NativeBoundedDownloadError>>({ reason: 'unavailable' }),
+  );
+
+  native.inspectBoundedDownloadPartials.mockResolvedValueOnce({
+    ok: true,
+    files: -1,
+    bytes: 0,
+  });
+  await expect(inspectNativeBoundedDownloadPartials()).rejects.toEqual(
+    expect.objectContaining<Partial<NativeBoundedDownloadError>>({ reason: 'unavailable' }),
+  );
+});
+
+it('closes a paged attachment scan when account ownership is revoked', async () => {
+  let current = true;
+  native.nextAttachmentCacheScanPage.mockImplementationOnce(async () => {
+    current = false;
+    return { ok: true, done: false, overflow: false, files: [] };
+  });
+
+  await expect(scanNativeAttachmentCacheFiles(() => current)).rejects.toEqual(
+    expect.objectContaining<Partial<NativeBoundedDownloadError>>({ reason: 'cancelled' }),
+  );
+  expect(native.closeAttachmentCacheScan).toHaveBeenCalledWith('opaque-scan-id');
 });
 
 it('delegates old-wallpaper deletion to the fixed native ownership boundary', async () => {
