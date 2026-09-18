@@ -47,10 +47,12 @@ jest.mock('react-native-safe-area-context', () => ({
 jest.mock('expo-constants', () => ({
   __esModule: true,
   default: {
-    nativeAppVersion: '0.1.40',
-    nativeBuildVersion: '53',
     expoConfig: { version: 'fallback-version', android: { versionCode: 999 } },
   },
+}));
+jest.mock('expo-application', () => ({
+  nativeApplicationVersion: '0.1.40',
+  nativeBuildVersion: '53',
 }));
 jest.mock('@native/biometrics', () => ({ isBiometricAvailable: jest.fn() }));
 jest.mock('@native/screenSecurity', () => ({

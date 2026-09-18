@@ -1,4 +1,4 @@
-import Constants from 'expo-constants';
+import * as Application from 'expo-application';
 import { Platform } from 'react-native';
 import { getDatabase } from '@db/database';
 import {
@@ -137,10 +137,8 @@ const productionDependencies: DownloadIntegrityDependencies = {
   readRuntime: getBoundedDownloadRuntimeDiagnostics,
   readCoordinator: () => attachmentCacheCoordinator.diagnosticSnapshot(),
   readCandidate: () => ({
-    appVersion: safeIdentity(Constants.nativeAppVersion ?? Constants.expoConfig?.version),
-    appBuild: safeIdentity(
-      Constants.nativeBuildVersion ?? Constants.expoConfig?.android?.versionCode,
-    ),
+    appVersion: safeIdentity(Application.nativeApplicationVersion),
+    appBuild: safeIdentity(Application.nativeBuildVersion),
     androidApi: safeIdentity(Platform.OS === 'android' ? Platform.Version : Platform.OS),
   }),
 };

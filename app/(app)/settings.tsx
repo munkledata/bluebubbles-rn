@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import Constants from 'expo-constants';
+import * as Application from 'expo-application';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AppState, Platform, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
 import { logger } from '@core/secure';
@@ -71,9 +71,8 @@ const AUTO_DOWNLOAD_DEST_OPTIONS: { value: AutoDownloadDestination; label: strin
   { value: 'album', label: 'Gator album' },
 ];
 
-const APP_VERSION = Constants.nativeAppVersion ?? Constants.expoConfig?.version ?? '—';
-const APP_BUILD =
-  Constants.nativeBuildVersion ?? Constants.expoConfig?.android?.versionCode?.toString() ?? '—';
+const APP_VERSION = Application.nativeApplicationVersion ?? '—';
+const APP_BUILD = Application.nativeBuildVersion ?? '—';
 
 const notificationPermissionLabel = (
   permission: NotificationPermissionState | 'loading' | 'unavailable',

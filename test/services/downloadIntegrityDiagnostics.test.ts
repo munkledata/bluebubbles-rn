@@ -1,10 +1,6 @@
-jest.mock('expo-constants', () => ({
-  __esModule: true,
-  default: {
-    nativeAppVersion: 'test',
-    nativeBuildVersion: '1',
-    expoConfig: null,
-  },
+jest.mock('expo-application', () => ({
+  nativeApplicationVersion: 'test',
+  nativeBuildVersion: '1',
 }));
 jest.mock('react-native', () => ({ Platform: { OS: 'android', Version: 37 } }));
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
