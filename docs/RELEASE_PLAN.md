@@ -19,8 +19,8 @@ Use the related documents for their narrower purposes:
 - [`STORE_01G_INTERNAL_TESTING_RUNBOOK.md`](./STORE_01G_INTERNAL_TESTING_RUNBOOK.md) is the
   superseded v63 execution snapshot and must be refreshed before any current staged-server round.
 - [`DL_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md`](./DL_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md)
-  records the current v75 identity, Play-installed API-36 `DL-01` matrix, and supporting API-37
-  compatibility evidence.
+  records the superseded v75 Play-installed API-36 `DL-01` matrix and supporting API-37
+  compatibility evidence; it is not v77 device proof.
 - [`DL_01_PLAY_V67_DEVICE_PROOF_2026-09-15.md`](./DL_01_PLAY_V67_DEVICE_PROOF_2026-09-15.md)
   records the superseded v67 Play-update/lifecycle checkpoint.
 - [`TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md`](./TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md) records
@@ -45,30 +45,31 @@ the staged-server journey and broader release gates are not complete.
 
 ## Current candidate
 
-| Field             | Frozen value                                                                                                                                                                  |
-| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Version           | `0.1.55` / Android version code `75`                                                                                                                                          |
-| Source commit     | `546750a0844adc48733436f26d81ebea63f0319c`                                                                                                                                    |
-| Release commit    | `9c73c1ffb0d4d63ecc562ab988ae73f28c8750dc`                                                                                                                                    |
-| Release run       | `android-0.1.55-546750a-20260918055448`; the run identity is recorded, but its local runner receipts are no longer present                                                    |
-| Submitted AAB     | `gator-release-0.1.55-v75-9c73c1f.aab` — 57,878,322 bytes; its recorded submitted hash remains below, but the local AAB bytes are no longer present                           |
-| AAB SHA-256       | `86e7ee236f2caa644e97b645fc9d0ec1fa562fc105ffa5bb26549d44f42b3197`                                                                                                            |
-| Play destination  | Google Play Internal Testing only                                                                                                                                             |
-| Submission        | Submission id `8953c1c0-79f1-463a-a3cf-1ff1b49f46b5` finished; live Internal release `0.1.55` / code `75` reports `completed`; preserved runner phase is `submission_unknown` |
-| Device checkpoint | Natural Play build-73→75 update and five-group `DL-01` pass on Samsung Android 16 / API 36; Play-signed sideloaded Android 17 / API 37 compatibility pass                     |
+| Field             | Frozen value                                                                                                                                                  |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Version           | `0.1.56` / Android version code `77`                                                                                                                          |
+| Source commit     | `da05b66cfcbd9b3c35ebd6d0ec3ba0ed781bf7d0`                                                                                                                    |
+| Release commit    | `694d65bce9effde40a50c100e264cc50d0ef594b` on `release/android-0.1.56`                                                                                        |
+| Release run       | `android-0.1.56-da05b66-20260919025209`; local phase receipts are retained under `dist/release/`                                                              |
+| Submitted AAB     | `gator-release-0.1.56-v77-694d65b.aab` — 57,879,683 bytes                                                                                                     |
+| AAB SHA-256       | `ba85e8356be306bd8d820ef0f09ed4cb5a9781afb2e601d76b792a9bf843f6d2`                                                                                            |
+| Play destination  | Google Play Internal Testing only                                                                                                                             |
+| Submission        | EAS id `e7ca0440-81f3-40a0-ae6e-b05f2c52e59b` finished; Android Publisher readback at `2026-09-19T03:18:57Z` found only Internal `0.1.56` / `77`, `completed` |
+| Device checkpoint | No v77 phone install or behavior proof: ADB reported no connected device after the Mac restart                                                                |
 
-The linked v75 proof binds the Play-installed Samsung splits to the exact AAB, source, release,
-certificates, submission recovery, and Play readback. The five scoped `DL-01` groups passed on that
-API-36 installation. The same Play-signed candidate passed the API-37 matrix from a sideloaded
-installation, and controlled proof covers private fault states unsafe to manufacture on a tester
-phone. Under the owner's approved split, `DL-01` is done; `DEVICE-01` and `STORE-01` remain open for
-Play-installed API-37 provenance, fresh/prepared install paths, the general staged journey, and their
-other release/device gates.
+The validated v77 AAB binds the exact package, version, source/release tree, upload certificate,
+Maps-key digest, artifact hash, and native-path proof. The first 0.1.56 build from `f95d4f3`
+failed in Gradle and consumed code `76` without an artifact or Play submission; the detailed EAS
+log was not retained. A no-increment diagnostic reproduced D8's 2 GiB Java-heap exhaustion.
+The bounded 4 GiB fix is in source `da05b66`; its diagnostic and exact signed release build passed.
+No Android device result from v75 is relabeled as v77 evidence.
 
-The superseded v67 candidate retains its natural-update/App Lock history, v64 retains bounded
-`TLS-00`, and v63 retains `NET-01`/`RT-01A`. Those results do not transfer to v75 unless an owning
-task explicitly combines them. V75 contains the restored native Find My implementation, but this
-checkpoint did not repeat its full candidate-specific device matrix.
+The superseded v75 Play-installed Samsung passed all five scoped `DL-01` groups, with supporting
+Play-signed sideloaded API-37 compatibility and controlled private-state proof. Under the owner's
+approved split, `DL-01` remains done; `DEVICE-01` and `STORE-01` remain open for v77 Play installs,
+API-37 provenance, fresh/prepared install paths, the general staged journey, and other gates. The
+earlier v67 natural-update/App Lock, v64 `TLS-00`, and v63 `NET-01`/`RT-01A` results likewise remain
+historical unless an owning task explicitly combines them.
 
 ## Release disposition
 
@@ -111,9 +112,10 @@ checkpoint did not repeat its full candidate-specific device matrix.
 - **Verify:** Confirm repository track/config, the live track and tester list, exact AAB identity,
   hash, and Play signing, install or update through Play, staged-server journeys, feedback path,
   cleanup, and every Play prompt shown for this artifact.
-- **Current status (2026-09-18):** **IN_PROGRESS — v75 candidate creation and validation, direct
-  submission recovery, live Internal `completed` state, natural Play build-73→75 update, and the
-  scoped Samsung `DL-01` matrix are proven.** The Play-signed API-37 result remains supporting-only.
+- **Current status (2026-09-18):** **IN_PROGRESS — v77 creation, validation, direct submission, and
+  live Internal `completed` state are proven; v77 has no phone proof.** The superseded v75 natural
+  Play build-73→75 update and scoped Samsung `DL-01` matrix remain task history, while its
+  Play-signed API-37 result remains supporting-only.
   Remaining work is tester/track administration, genuine API-37 Play delivery, a stable
   non-production server and general fixtures, the full selected
   connect/sync/send/receive/notification/restart/disconnect journey, general cleanup and candidate
@@ -128,10 +130,10 @@ Current child disposition:
 | `STORE-01B-SDK57-DEPS`                  | Done        | Historical slice remains done; a replacement candidate must resolve or disposition the current 19/20 Doctor result and 27 recommended patches |
 | `STORE-01C-FIREBASE-EAS`                | Done        | Runtime Firebase behavior remains task-specific device evidence                                                                               |
 | `STORE-01D-RELEASE-NOISE`               | Done        | None for deterministic host-test noise                                                                                                        |
-| `STORE-01E-SOURCE-FREEZE`               | Done        | Exact v75 source and release identities are recorded above                                                                                    |
-| `STORE-01F-LOCAL-AAB`                   | Done        | Exact v75 build/validation identity is recorded; the local AAB is no longer retained                                                          |
+| `STORE-01E-SOURCE-FREEZE`               | Done        | Exact v77 source and release identities are recorded above                                                                                    |
+| `STORE-01F-LOCAL-AAB`                   | Done        | Exact v77 build/validation identity and retained local AAB are recorded above                                                                 |
 | `STORE-01G-TESTER-READINESS`            | In progress | Tester, staged-server, disclosure, journey, and cleanup evidence                                                                              |
-| `STORE-01H-INTERNAL-TRACK-CONFIG-GUARD` | Done        | Live v75 Internal status is verified; tester readiness remains separate                                                                       |
+| `STORE-01H-INTERNAL-TRACK-CONFIG-GUARD` | Done        | Live v77 Internal status is verified; tester readiness remains separate                                                                       |
 
 The deferred UGC-safety branch is the code-bearing exception inside this release plan: before any
 wider promotion, children A1–A4 require app/server terms, blocking, reporting, and enforcement code;

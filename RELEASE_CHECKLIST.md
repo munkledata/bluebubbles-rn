@@ -11,52 +11,56 @@ history and is not executable evidence for a replacement candidate. Do not copy 
 build into this file. Section 0 is the next private Internal Testing gate; Sections 1–7 remain the
 broader Closed/Open/Production release gate.
 
-Current release-candidate status — **INTERNAL TESTING; broader release remains NO-GO.** Exact v75
-was built, validated, and submitted only to Google Play Internal Testing. Play-delivered v75 passed
-the five-group `DL-01` matrix on the physical Android 16/API 36 Samsung. The same scoped matrix also
-passed on Android 17/API 37 using the correct Google-generated, Play-signed APK, but that installation
-was sideloaded and remains supporting compatibility evidence. Under the owner-approved evidence
-split, `DL-01` is done and per-OS Play-install provenance belongs to `DEVICE-01`/release. The live
-Internal release reports `completed`; that means Play serves version code 75, not that `STORE-01`,
-`DEVICE-01`, or the staged journey is complete. Remaining staged-server, device-matrix,
-tester-administration, policy, and rollout gates below stay open; this Internal result is not
-public-release approval.
+Current release-candidate status — **INTERNAL TESTING; broader release remains NO-GO.** Exact v77
+was built, validated, and submitted only to Google Play Internal Testing. The live Internal release
+reports `completed`, but no v77 phone install or behavior proof exists after the Mac restart. The
+superseded Play-delivered v75 passed the five-group `DL-01` matrix on a physical Android 16/API 36
+Samsung; its Play-signed, sideloaded Android 17/API 37 compatibility result remains supporting-only.
+Under the owner-approved split, `DL-01` stays done, while v77 Play/device provenance belongs to
+`DEVICE-01`/release. Historical v75 checkmarks below do not transfer exact-device credit to v77.
+The staged-server, device-matrix, tester-administration, policy, and rollout gates remain open;
+Internal availability is not public-release approval.
 
 Exact replacement frozen from one release run:
 
-- Version/build number: `0.1.55 (versionCode 75)`
-- Exact source and release commits: `546750a0844adc48733436f26d81ebea63f0319c` /
-  `9c73c1ffb0d4d63ecc562ab988ae73f28c8750dc`
-- Release branch/run: `release/android-0.1.55` /
-  `android-0.1.55-546750a-20260918055448`
-- Submitted AAB: `gator-release-0.1.55-v75-9c73c1f.aab`
-- AAB size/SHA-256: `57,878,322` bytes /
-  `86e7ee236f2caa644e97b645fc9d0ec1fa562fc105ffa5bb26549d44f42b3197`
+- Version/build number: `0.1.56 (versionCode 77)`
+- Exact source and release commits: `da05b66cfcbd9b3c35ebd6d0ec3ba0ed781bf7d0` /
+  `694d65bce9effde40a50c100e264cc50d0ef594b`
+- Release branch/run: `release/android-0.1.56` /
+  `android-0.1.56-da05b66-20260919025209`
+- Submitted AAB: `gator-release-0.1.56-v77-694d65b.aab`
+- AAB size/SHA-256: `57,879,683` bytes /
+  `ba85e8356be306bd8d820ef0f09ed4cb5a9781afb2e601d76b792a9bf843f6d2`
 - Upload certificate SHA-256:
   `6E:18:F9:93:61:DC:D6:58:F1:A7:5B:9F:47:E8:66:AC:8D:A6:AF:EF:B9:E7:F4:7C:BF:41:F5:E0:F6:CE:2F:43`
-- Submission: id `8953c1c0-79f1-463a-a3cf-1ff1b49f46b5`, finished; Android Publisher readback
-  found Internal release `0.1.55`, version code `75`, status `completed`
-- Tester/device/Android/test date: Samsung API 36 plus isolated arm64 emulator API 37, 2026-09-18
-- Exact device receipt:
-  [`docs/DL_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md`](./docs/DL_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md)
+- Submission: EAS id `e7ca0440-81f3-40a0-ae6e-b05f2c52e59b`, finished; Android Publisher readback
+  at `2026-09-19T03:18:57Z` found only Internal release `0.1.56`, code `77`, status `completed`
+- Tester/device/Android/test date: no v77 phone observed; ADB listed no connected device
+- Exact v77 device receipt: none yet
 
-Google Play naturally updated the Samsung from build 73 to v75 without uninstall or app-data
-clearing; the existing session remained, the app resumed, and all five scoped `DL-01` groups passed
-on API 36. A verified Google-generated universal APK with the same Play certificate exercised the
-same matrix on API 37, but `installerPackageName=null` makes that run supporting-only. `DL-01` is
-done; fresh install, prepared private-cache upgrade, full staged use, Play-installed API 37, and the
-remaining composite device rows remain `DEVICE-01`/release work. No Closed, Open, Production, or
-wider-track promotion occurred.
+The first 0.1.56 build consumed code 76 and failed in Gradle without an artifact or submission. A
+separate diagnostic reproduced D8 Java-heap exhaustion at 2 GiB; the committed bounded 4 GiB fix
+passed the diagnostic and this exact signed v77 build. The current AAB passed identity, signature,
+hash, Maps-key, and native-path validation. No Closed, Open, Production, or wider-track promotion
+occurred. The prior Play v75 Samsung update and five-group `DL-01` pass remain in the
+[`v75 device proof`](./docs/DL_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md), not as v77 runtime proof.
+
+Superseded v75 candidate — historical scoped `DL-01`, `IPC-01`, `SHARE-01`, and `PKG-01` evidence:
+`0.1.55` / code `75`, source `546750a`, release `9c73c1f`, submitted AAB SHA-256
+`86e7ee236f2caa644e97b645fc9d0ec1fa562fc105ffa5bb26549d44f42b3197`. Play naturally
+updated the Samsung from code 73 to 75 without data clearing. Its Play-signed API-37 sideloaded
+matrix remains supporting-only. Those owner-approved task completions remain done, but fresh v77
+install, prepared private-cache upgrade, staged use, and broader device rows remain open.
 
 Superseded v67 candidate — historical natural-update/App Lock evidence only; no result transfers to
-v75 unless the owning row explicitly combines it:
+v77 unless the owning row explicitly combines it:
 
 - Version/build `0.1.50` / `67`, source `2c7f426`, release `12a4592`.
 - Play naturally updated v66 to v67 on API 36 and one ordinary-kill/App Lock resume passed.
 - The recorded limitations remain in
   [`docs/DL_01_PLAY_V67_DEVICE_PROOF_2026-09-15.md`](./docs/DL_01_PLAY_V67_DEVICE_PROOF_2026-09-15.md).
 
-Superseded v64 candidate — historical `TLS-00` device evidence only; no result transfers to v75
+Superseded v64 candidate — historical `TLS-00` device evidence only; no result transfers to v77
 unless repeated:
 
 - Version/build number: `0.1.47 (versionCode 64)`
@@ -73,10 +77,10 @@ unless repeated:
 
 V64 passed its bounded redirect, public-CA, and self-signed-certificate matrix. It predates the
 current `DL-01` receipt and strict-wallpaper source, and its exact-candidate results remain historical
-for v75.
+for v77.
 
 Superseded v63 candidate — historical Play, `NET-01`, and `RT-01A` device evidence only; no result
-transfers to v75 unless repeated:
+transfers to v77 unless repeated:
 
 - Version/build number: `0.1.46 (versionCode 63)`
 - Source/release commits: `dc32380c6cb17d85e7ab08c4d5b9118660f763c8` /
@@ -93,10 +97,10 @@ transfers to v75 unless repeated:
 
 The installed local-signature build could not update to the Play-signed v63 artifact, so it was
 removed and v63 was installed from Google Play with prior permission. That historical result is
-clean-install evidence, not fresh-install evidence for v75.
+clean-install evidence, not fresh-install evidence for v77.
 
 Superseded v62 candidate — historical Play and bounded-device evidence only; no result transfers to
-v75 unless repeated:
+v77 unless repeated:
 
 - Version/build number: `0.1.45 (versionCode 62)`
 - Source/release commits: `8179d0a3a99c4e2e28a01fd83212fee919bad41c` /
@@ -111,7 +115,7 @@ v75 unless repeated:
 
 Version code 61 remains retired because its device run exposed the unsupported-scheme bug. V62
 rejected that same synthetic setup URL and passed an ordinary-kill cold relaunch, but those results
-remain historical for v75.
+remain historical for v77.
 
 Superseded v59 candidate — historical static artifact proof only; no result transfers to a
 replacement:
@@ -173,13 +177,14 @@ Open, or Production promotion, or earlier if Play flags the internal app.
 - [ ] Play Console confirms no Closed, Open, or Production release is active before submission.
 - [x] The replacement version/build, source and release commits, AAB SHA-256, upload certificate,
       and build provenance are recorded above. The superseded v59 record does not satisfy this gate.
-- [x] Tester devices, Android versions, and test date are recorded above.
+- [ ] A v77 tester device, Android version, and test date are recorded; the v75 device record above
+      is historical and ADB currently lists no connected phone.
 - [ ] The intended tester list, opt-in link, feedback destination, and named response owner work.
 - [ ] Testers use a stable non-production server/setup path and no production-user data or credentials.
 - [ ] The exact AAB installs/updates and completes the staged connect, sync, send, receive, notification,
       restart, and disconnect journeys selected for this test round.
-      The Play build-73→75 update, boot, visible session continuity, and scoped `DL-01` journey are
-      partial evidence only; no fresh install or full general staged journey was run.
+      The historical Play build-73→75 update, boot, visible session continuity, and scoped `DL-01`
+      journey are task evidence only; no v77 install or full general staged journey was run.
 - [ ] Every declaration or permission review that Play actually prompts for this internal artifact is
       completed truthfully; no missing prompt is treated as exempt by assumption.
 - [ ] Known limitations and unfinished safety/release work are disclosed to testers, and no result from
@@ -233,7 +238,7 @@ GOOGLE_SERVICES_JSON=./test/fixtures/google-services.ci.json \
 - [ ] Expo dependency validation and the local pinned Doctor pass 20/20 on the replacement source.
       Clean native autolinking, compilation, tests, and AAB inspection prove all five owned modules
       are present; an older EAS-worker module-directory advisory supplies no replacement credit.
-      The exact v75 rerun currently reports 19/20 plus a failing `expo install --check` because 27
+      The historical exact v75 rerun reported 19/20 plus a failing `expo install --check` because 27
       non-`PKG-01` SDK 57 packages now have newer recommended patches; the frozen lockfile was
       unchanged. This remains a release follow-up, as recorded in the
       [bounded package proof](./docs/PKG_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md).
@@ -251,7 +256,7 @@ GOOGLE_SERVICES_JSON=./test/fixtures/google-services.ci.json \
       without fetching secret values or starting a build.
 - [ ] No `.env`, Firebase config, signing key, service-account file, password, token, or local build
       artifact is present in the replacement uploaded source bundle.
-- [x] The managed Android upload-signing credential produced the v75 candidate, its
+- [x] The managed Android upload-signing credential produced the v77 candidate, its
       certificate is recorded above, and the credential is not stored in Git. The superseded v59
       signing result is historical only.
 - [ ] Play submission credentials and live Console access are available to the release owner.
@@ -260,9 +265,10 @@ GOOGLE_SERVICES_JSON=./test/fixtures/google-services.ci.json \
 
 ## 4. Clean native candidate
 
-V75 already completed the isolated build, validation, promotion, and separately authorized Internal
-submission recorded above. Its sanitized identity and submission result are retained in the v75
-proof; do not reconstruct a receipt, rerun a consumed phase, or silently reuse a superseded artifact.
+V77 completed the isolated build, validation, promotion, and separately authorized Internal
+submission recorded above. Its exact local runner receipts are retained under `dist/release/`;
+do not rerun a consumed phase or silently reuse a superseded artifact. The failed code-76 run is
+terminal and never produced an uploadable AAB.
 For a future candidate only, run each phase separately and review its receipt before continuing:
 
 ```sh
@@ -335,9 +341,9 @@ npm run check:android-build
 - [ ] `WRITE_CONTACTS`, `READ_MEDIA_AUDIO`, `SCHEDULE_EXACT_ALARM`, `USE_EXACT_ALARM`,
       `USE_FULL_SCREEN_INTENT`, and `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` are absent from the AAB.
 - [ ] Every remaining dangerous permission maps to a visible feature and a runtime request.
-- [x] The v75 AAB hash at the top of this file was computed after validation and local
+- [x] The v77 AAB hash at the top of this file was computed after validation and local
       promotion.
-- [x] The byte-identical hashed v75 AAB is the artifact submitted to Play Internal Testing after
+- [x] The byte-identical hashed v77 AAB is the artifact submitted to Play Internal Testing after
       separate approval.
 
 ## 5. Network and security smoke tests
@@ -351,16 +357,16 @@ npm run check:android-build
       passed both 15-case matrices with zero target contact at the frozen checkpoints; the source scan and
       separate reachability controls are recorded in
       [`docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md`](./docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md).
-      That result has not been repeated on v75.
+      That result has not been repeated on v77.
 - [ ] Connect to a valid public-CA HTTPS server; verify server info/full sync, one live socket event,
       one upload, and one download. Superseded exact Play v64 completed those paths through the isolated fixture
       recorded in
       [`docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md`](./docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md),
-      but v75 has not repeated it.
+      but v77 has not repeated it.
 - [ ] A bare untrusted/self-signed certificate is rejected. Superseded exact Play v64 completed no TLS session
       or HTTP request and sent no Authorization header or body; the trusted Mac control reached HTTP 200. See
       [`docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md`](./docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md).
-      V75 has not repeated this boundary.
+      V77 has not repeated this boundary.
 - [x] The `TLS-02` source/build boundary and disposable API-35 emulator prove the selected policy:
       the AAB's manifest resource id resolves through `resources.pb` to one unqualified compiled XML
       that trusts only `src="system"`; an authority installed in Android's user store was rejected
@@ -371,9 +377,9 @@ npm run check:android-build
 - [x] Product copy states that HTTPS trusts Android's built-in system authorities, excludes
       authorities added in Android Settings, and does **not** claim certificate pinning. An inert
       legacy `certPins` SecureStore value on an upgraded install is harmless because no code reads
-      it. Removal commit `66869d3` is an ancestor of v75 source `546750a`; exact-tree scans found no
-      pinning API/dependency or certificate-validation bypass. This is source/static evidence, not a
-      v75 device repeat of the next row.
+      it. Removal commit `66869d3` is an ancestor of v77 source `da05b66`; prior exact-tree scans
+      found no pinning API/dependency or certificate-validation bypass. This is source/static
+      evidence, not a v77 device repeat of the next row.
 - [ ] On the replacement exact Play candidate, repeat the selected `TLS-02` boundary: a public
       system-CA endpoint succeeds and an authority visibly installed in Android's user store is
       rejected before TLS completes or credentials/body reach HTTP. This is a release repeat, not
@@ -394,7 +400,7 @@ npm run check:android-build
       observation, server request ledger, duplicate coalescing, original-URL tap, limitations, and
       cleanup are recorded in
       [`docs/NET_01_PLAY_DEVICE_PROOF_2026-09-13.md`](./docs/NET_01_PLAY_DEVICE_PROOF_2026-09-13.md).
-      That historical device result has not been repeated on exact Play v75.
+      That historical device result has not been repeated on exact Play v77.
 - [ ] The exact map-enabled candidate keeps Find My marker data bounded/inert, contains exactly one
       Maps API-key metadata value matching the release preflight digest, omits phone-location
       permissions, leaves Google Maps attribution unobscured, and passes online/outage,
@@ -403,10 +409,11 @@ npm run check:android-build
       release matrix remains open. See the
       [bounded package proof](./docs/PKG_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md).
 - [x] The replacement clean isolated build, guarded autolinking, and exact-AAB inspection confirm
-      that the app-owned `react-native-webview` package/native registration is absent. Exact v75 DEX
-      omits `Lcom/reactnativecommunity/webview/RNCWebViewPackage;`, and the Play-v75 map hierarchy
-      contained zero WebViews. Expo’s transitive `@expo/dom-webview`/`DomWebViewModule` remains
-      framework-owned and is not evidence of a reachable product surface. See the
+      that the app-owned `react-native-webview` package/native registration is absent. Exact v77 DEX
+      omits `Lcom/reactnativecommunity/webview/RNCWebViewPackage;`; the Play-v75 map hierarchy
+      historically contained zero WebViews, but v77 has no phone hierarchy proof. Expo’s transitive
+      `@expo/dom-webview`/`DomWebViewModule` remains framework-owned and is not evidence of a
+      reachable product surface. See the
       [bounded package proof](./docs/PKG_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md).
 - [ ] Logs never expose message text, server URLs, credentials, or raw internal identifiers;
       notifications, channels, and alarms honor App Lock's generic-notification boundary, while
@@ -415,9 +422,9 @@ npm run check:android-build
 
 ## 6. Android/device matrix
 
-Exact v75 completed all five scoped `DL-01` groups on the Play-installed API-36 Samsung. Supporting
-API-37 behavior and controlled host/native evidence cover the additional current-candidate and
-private fault branches described below. The owner explicitly transferred per-OS Play-install
+Historical exact v75 completed all five scoped `DL-01` groups on the Play-installed API-36 Samsung.
+Supporting API-37 behavior and controlled host/native evidence cover its private fault branches,
+not v77 device behavior. The owner explicitly transferred per-OS Play-install
 provenance—including a future genuine Play-installed API-37 repeat—to `DEVICE-01`/release, so the
 five `DL-01` rows are closed without relabeling the sideloaded API-37 run. `DEVICE-01` still owns
 every unchecked general row; superseded task-specific results transfer only where their owning task
@@ -429,7 +436,7 @@ explicitly says so. Remaining work includes:
 - [ ] Connect and full sync work; existing-chat iMessage plain text/local read-unread-delete and
       supported RCS text/contact/media/whole-message reaction, retry, search, and receive flows pass.
       Retired helper-backed edit/unsend/reply/attachment actions remain absent.
-- [ ] After v75 has a fresh scoped V3 enrollment against the isolated compatible staged server in
+- [ ] After v77 has a fresh scoped V3 enrollment against the isolated compatible staged server in
       the Internal Testing runbook, kill with `adb shell am kill <package>` (never `am force-stop`
       for delivery testing); a compatible per-device-encrypted FCM push writes to the encrypted DB
       and posts the expected notification. The v75 download run proves Google acceptance plus
@@ -442,7 +449,7 @@ explicitly says so. Remaining work includes:
 - [ ] App Lock, generic locked notifications, Android Recents, biometric resume, account switch, and
       forget/wipe pass. Only an ordinary-kill relaunch, a failed first biometric attempt, and a
       successful owner-authenticated retry back to Messages passed on historical v67.
-- [x] IPC-01 containment passes: exact-v75 packaged validation and autolinking contain no inbound
+- [x] `IPC-01` task containment passed on exact-v75 packaged validation and autolinking: no inbound
       `SEND`/`SEND_MULTIPLE` filter, Direct Share target, or `expo-share-intent`. Two natural Play
       code-53→75 migrations prove legacy pinned-row retirement, and text, one-image, multiple-image,
       and PDF resolver checks found neither Gator nor conversation chips. See the
@@ -458,7 +465,8 @@ explicitly says so. Remaining work includes:
       Android versions below Android 16 / API 36, and the candidate passes the applicable smoke
       matrix on both Android 16 / API 36 and the current latest Android 17 / API 37. API 24/25 device
       execution is not required because those versions are outside the selected product boundary.
-      V75 passed the artifact and Play API-36 subset; its API-37 runtime matrix is supporting-only.
+      V77 passed artifact validation only. Historical v75 passed Play API-36; its API-37 runtime
+      matrix is supporting-only.
       Play-installed API-37, store-copy, and broader `DEVICE-01` evidence keep this composite row open.
 - [ ] Permission denial, restricted battery settings handoff, offline/reconnect, low-storage, and
       process-death paths fail visibly and recover. Supporting v75 API-37 evidence passed the scoped
