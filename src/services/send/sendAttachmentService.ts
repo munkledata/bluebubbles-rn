@@ -75,6 +75,8 @@ export type AttachmentUploader = (args: {
   mimeType: string;
   /** Size if the caller knows it, else 0/undefined — the uploader learns the real one natively. */
   totalBytes?: number;
+  /** Optional owner lifetime; abort requests native cancellation before any later settlement. */
+  signal?: AbortSignal;
   /**
    * Optional absolute limit for this invocation, covering its own native preflight, gate wait,
    * transfer, and response. Foreground sends deliberately omit it; bounded headless retries pass

@@ -3,7 +3,6 @@ jest.mock('ky', () => ({ __esModule: true, default: jest.fn() }));
 
 /* eslint-disable import/first -- the ESM mock must be installed before these CJS test imports. */
 import ky from 'ky';
-import { z } from 'zod/v4';
 import { HttpClient } from '@core/api/http';
 import { ApiError, UnimplementedEndpointError, isUnimplementedEndpoint } from '@core/api/errors';
 import * as serverApi from '@core/api/endpoints/server';
@@ -28,13 +27,15 @@ function notFound(): Response {
   return new Response(null, { status: 404 });
 }
 
-// Legacy server-log reads remain for older servers, but restart management stays local to the Mac.
 describe('server-management support boundaries', () => {
-  it('does not advertise or export remote restart management', () => {
+  it('exports neither remote management nor the retired generic dispatcher', () => {
     expect(serverApi.SERVER_MANAGEMENT_SUPPORTED).toBe(false);
     expect(serverApi).not.toHaveProperty('restartImessage');
     expect(serverApi).not.toHaveProperty('softRestart');
     expect(serverApi).not.toHaveProperty('hardRestart');
+    expect(serverApi).not.toHaveProperty('adminCommand');
+    expect(serverApi).not.toHaveProperty('serverLogs');
+    expect(serverApi).not.toHaveProperty('zrokStatus');
   });
 
   it('checkUpdate stays unimplemented (no HTTP call)', async () => {
@@ -45,23 +46,9 @@ describe('server-management support boundaries', () => {
     expect(isUnimplementedEndpoint(err)).toBe(true);
     expect(mockKy).not.toHaveBeenCalled();
   });
-
-  it('serverLogs sends the get-logs channel with the requested line count', async () => {
-    mockKy.mockResolvedValueOnce(envelope({ logs: 'x' }));
-    await serverApi.serverLogs(client(), 250);
-    expect((mockKy.mock.calls[0] as [string, { json: unknown }])[1].json).toEqual({
-      channel: 'get-logs',
-      data: { count: 250 },
-    });
-  });
-
-  it('serverLogs returns the joined log text from the get-logs channel', async () => {
-    mockKy.mockResolvedValueOnce(envelope({ logs: 'line one\nline two' }));
-    await expect(serverApi.serverLogs(client(), 100)).resolves.toBe('line one\nline two');
-  });
 });
 
-describe('serverStatTotals prefers the typed statistics route', () => {
+describe('serverStatTotals uses the typed statistics route', () => {
   it('maps only Messages, Photos, and Videos from an all-time snapshot', async () => {
     mockKy.mockResolvedValueOnce(
       envelope({
@@ -85,26 +72,20 @@ describe('serverStatTotals prefers the typed statistics route', () => {
     expect(init.json).toEqual({ range: 'all-time' });
   });
 
-  it('falls back after a typed-route 404 and requests only the three legacy totals', async () => {
-    mockKy
-      .mockResolvedValueOnce(notFound())
-      .mockResolvedValueOnce(envelope(1234))
-      .mockResolvedValueOnce(envelope([{ media_count: 42 }]))
-      .mockResolvedValueOnce(envelope([{ media_count: 7 }]));
+  it('maps a typed-route 404 without trying the retired dispatcher', async () => {
+    mockKy.mockResolvedValueOnce(notFound());
 
-    const res = await serverApi.serverStatTotals(client());
-    expect(res).toEqual({ messages: 1234, images: 42, videos: 7 });
-    expect(mockKy).toHaveBeenCalledTimes(4);
+    const error = await serverApi.serverStatTotals(client()).then(
+      () => null,
+      (reason: unknown) => reason,
+    );
+
+    expect(error).toBeInstanceOf(UnimplementedEndpointError);
+    expect(mockKy).toHaveBeenCalledTimes(1);
     expect((mockKy.mock.calls[0] as [string])[0]).toBe('https://x.test/api/v1/statistics/snapshot');
-    expect(
-      mockKy.mock.calls.slice(1).map((call) => {
-        const [, init] = call as [string, { json: { channel: string } }];
-        return init.json.channel;
-      }),
-    ).toEqual(['get-message-count', 'get-chat-image-count', 'get-chat-video-count']);
   });
 
-  it('does not use the legacy dispatcher for a typed-route auth error', async () => {
+  it('preserves a typed-route auth error without another request', async () => {
     mockKy.mockResolvedValueOnce(new Response(null, { status: 401 }));
     const err = await serverApi.serverStatTotals(client()).then(
       () => null,
@@ -116,40 +97,22 @@ describe('serverStatTotals prefers the typed statistics route', () => {
     expect(mockKy).toHaveBeenCalledTimes(1);
   });
 
-  it('does not try the legacy admin dispatcher when a scoped caller opts out', async () => {
-    mockKy.mockResolvedValueOnce(notFound());
-
-    const error = await serverApi
-      .serverStatTotals(client(), undefined, {
-        allowLegacyFallback: false,
-      })
-      .then(
-        () => null,
-        (reason: unknown) => reason,
-      );
-
-    expect(error).toBeInstanceOf(UnimplementedEndpointError);
-    expect(mockKy).toHaveBeenCalledTimes(1);
-  });
-
-  it('forwards cancellation to both the typed attempt and the legacy fallback requests', async () => {
+  it('forwards cancellation to the typed request without issuing a fallback', async () => {
     const controller = new AbortController();
     const post = jest.fn(
-      async (path: string, _schema: unknown, options: { json: { channel?: string } }) => {
-        if (path === '/statistics/snapshot') {
-          throw new ApiError('bad_request', 'missing typed route', 404);
-        }
-        return options.json.channel === 'get-message-count' ? 0 : [];
+      async (_path: string, _schema: unknown, _options: { signal?: AbortSignal }) => {
+        throw new ApiError('bad_request', 'missing typed route', 404);
       },
     );
     const http = { post } as unknown as HttpClient;
 
-    await serverApi.serverStatTotals(http, controller.signal);
+    const error = await serverApi
+      .serverStatTotals(http, controller.signal)
+      .catch((reason) => reason);
 
-    expect(post).toHaveBeenCalledTimes(4);
-    for (const call of post.mock.calls) {
-      expect(call[2]).toMatchObject({ signal: controller.signal });
-    }
+    expect(error).toBeInstanceOf(UnimplementedEndpointError);
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post.mock.calls[0]?.[2]).toMatchObject({ signal: controller.signal });
   });
 });
 
@@ -201,11 +164,8 @@ interface TypedHealthRouteCase {
   name: string;
   method: 'GET' | 'DELETE';
   path: string;
-  channel: string;
   typedPayload: unknown;
-  legacyPayload: unknown;
   expectedTyped: unknown;
-  expectedLegacy: unknown;
   call: (http: HttpClient, signal: AbortSignal) => Promise<unknown>;
 }
 
@@ -214,87 +174,66 @@ const typedHealthRouteCases: TypedHealthRouteCase[] = [
     name: 'server environment',
     method: 'GET',
     path: '/server/environment',
-    channel: 'get-env',
     typedPayload: typedEnvironment,
-    legacyPayload: { version: 'legacy' },
     expectedTyped: typedEnvironment,
-    expectedLegacy: { version: 'legacy' },
     call: (http, signal) => serverApi.serverEnv(http, signal),
   },
   {
     name: 'FCM status',
     method: 'GET',
     path: '/notifications/fcm/status',
-    channel: 'get-fcm-status',
     typedPayload: typedFcmStatus,
-    legacyPayload: { configured: false },
     expectedTyped: typedFcmStatus,
-    expectedLegacy: { configured: false },
     call: (http, signal) => serverApi.fcmStatus(http, signal),
   },
   {
     name: 'TLS status',
     method: 'GET',
     path: '/tls/status',
-    channel: 'get-tls-status',
     typedPayload: typedTlsStatus,
-    legacyPayload: { enabled: true, mode: 'custom' },
     expectedTyped: {
       ...typedTlsStatus,
       enabled: true,
       mode: 'self-signed',
       domain: 'gator.example',
     },
-    expectedLegacy: { enabled: true, mode: 'custom' },
     call: (http, signal) => serverApi.tlsStatus(http, signal),
   },
   {
     name: 'Find My key status',
     method: 'GET',
     path: '/admin/findmy/keys/status',
-    channel: 'get-findmy-keys-status',
     typedPayload: typedFindMyKeys,
-    legacyPayload: { LocalStorage: { present: true, valid: true } },
     expectedTyped: typedFindMyKeys,
-    expectedLegacy: { LocalStorage: { present: true, valid: true } },
     call: (http, signal) => serverApi.findMyKeysStatus(http, signal),
   },
   {
     name: 'public IP',
     method: 'GET',
     path: '/admin/network/public-ip',
-    channel: 'get-public-ip',
     typedPayload: { ip: '8.8.8.8' },
-    legacyPayload: { ip: '1.1.1.1' },
     expectedTyped: '8.8.8.8',
-    expectedLegacy: '1.1.1.1',
     call: (http, signal) => serverApi.publicIp(http, signal),
   },
   {
     name: 'alert list',
     method: 'GET',
     path: '/alerts',
-    channel: 'get-alerts',
     typedPayload: { alerts: [typedAlert] },
-    legacyPayload: [typedAlert],
     expectedTyped: [typedAlert],
-    expectedLegacy: [typedAlert],
     call: (http, signal) => serverApi.serverAlerts(http, signal),
   },
   {
     name: 'alert clear',
     method: 'DELETE',
     path: '/alerts',
-    channel: 'clear-alerts',
     typedPayload: { removed: 1 },
-    legacyPayload: { success: true },
     expectedTyped: { removed: 1 },
-    expectedLegacy: { success: true },
     call: (http) => serverApi.clearServerAlerts(http),
   },
 ];
 
-describe('server health prefers typed routes with narrow legacy fallback', () => {
+describe('server health uses only typed routes', () => {
   it.each(typedHealthRouteCases)('$name uses $method $path first', async (testCase) => {
     mockKy.mockResolvedValueOnce(envelope(testCase.typedPayload));
 
@@ -309,29 +248,21 @@ describe('server health prefers typed routes with narrow legacy fallback', () =>
   });
 
   it.each(typedHealthRouteCases)(
-    '$name falls back to $channel only after a typed-route 404',
+    '$name maps a 404 without a fallback request',
     async (testCase) => {
-      mockKy
-        .mockResolvedValueOnce(notFound())
-        .mockResolvedValueOnce(envelope(testCase.legacyPayload));
+      mockKy.mockResolvedValueOnce(notFound());
 
-      await expect(testCase.call(client(), new AbortController().signal)).resolves.toEqual(
-        testCase.expectedLegacy,
-      );
-      expect(mockKy).toHaveBeenCalledTimes(2);
+      const error = await testCase
+        .call(client(), new AbortController().signal)
+        .catch((reason: unknown) => reason);
+
+      expect(error).toBeInstanceOf(UnimplementedEndpointError);
+      expect(mockKy).toHaveBeenCalledTimes(1);
       expect((mockKy.mock.calls[0] as [string])[0]).toBe(`https://x.test/api/v1${testCase.path}`);
-
-      const [legacyUrl, legacyInit] = mockKy.mock.calls[1] as [
-        string,
-        { method: string; json: { channel: string } },
-      ];
-      expect(legacyUrl).toBe('https://x.test/api/v1/admin/command');
-      expect(legacyInit.method).toBe('POST');
-      expect(legacyInit.json.channel).toBe(testCase.channel);
     },
   );
 
-  it('does not fall back to a legacy health channel for non-404 errors', async () => {
+  it('preserves non-404 typed-route errors without another request', async () => {
     mockKy.mockResolvedValueOnce(new Response(null, { status: 401 }));
     const err = await serverApi.serverEnv(client()).then(
       () => null,
@@ -354,6 +285,16 @@ describe('server health prefers typed routes with narrow legacy fallback', () =>
     const [url, init] = mockKy.mock.calls[0] as [string, { method: string }];
     expect(url).toBe('https://x.test/api/v1/admin/status');
     expect(init.method).toBe('GET');
+  });
+
+  it('maps an admin-status 404 without a fallback request', async () => {
+    mockKy.mockResolvedValueOnce(notFound());
+
+    const error = await serverApi.adminStatus(client()).catch((reason: unknown) => reason);
+
+    expect(error).toBeInstanceOf(UnimplementedEndpointError);
+    expect(mockKy).toHaveBeenCalledTimes(1);
+    expect((mockKy.mock.calls[0] as [string])[0]).toBe('https://x.test/api/v1/admin/status');
   });
 });
 
@@ -450,7 +391,7 @@ describe('typed health response validation', () => {
       payload: { version: '2.0.15', uptimeMs: 5_000, unexpected: true },
       call: (http: HttpClient) => serverApi.adminStatus(http),
     },
-  ])('$name without falling back to the legacy dispatcher', async ({ payload, call }) => {
+  ])('$name without issuing another request', async ({ payload, call }) => {
     mockKy.mockResolvedValueOnce(envelope(payload));
 
     const err = await call(client()).then(
@@ -530,64 +471,6 @@ describe('RCS server-owned reauthentication response validation', () => {
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).kind).toBe('parse_error');
     expect(mockKy).toHaveBeenCalledTimes(1);
-  });
-});
-
-// A 404 on the dispatcher route means the server has no admin dispatcher at all (stock
-// BlueBubbles / pre-dispatcher Gator) or a reverse proxy blocks /api/v1/admin/* (the prod Caddy
-// hardening did exactly this). That must surface as UnimplementedEndpointError — "unsupported on
-// this server" — never as a misleading "check your connection".
-describe('admin dispatcher 404 → UnimplementedEndpointError', () => {
-  it('adminCommand remaps a route-level 404', async () => {
-    mockKy.mockResolvedValue(notFound());
-    const err = await serverApi.adminCommand(client(), 'get-env', z.unknown()).then(
-      () => null,
-      (e: unknown) => e,
-    );
-    expect(isUnimplementedEndpoint(err)).toBe(true);
-  });
-
-  it('adminStatus remaps a route-level 404', async () => {
-    mockKy.mockResolvedValue(notFound());
-    const err = await serverApi.adminStatus(client()).then(
-      () => null,
-      (e: unknown) => e,
-    );
-    expect(isUnimplementedEndpoint(err)).toBe(true);
-  });
-
-  it('adminCommand propagates a non-404 unchanged (401 stays unauthorized)', async () => {
-    mockKy.mockResolvedValue(new Response(null, { status: 401 }));
-    const err = await serverApi.adminCommand(client(), 'get-env', z.unknown()).then(
-      () => null,
-      (e: unknown) => e,
-    );
-    expect(isUnimplementedEndpoint(err)).toBe(false);
-    expect(err).toBeInstanceOf(ApiError);
-    expect((err as ApiError).kind).toBe('unauthorized');
-  });
-
-  it('serverStatTotals: ALL channels 404 → UnimplementedEndpointError', async () => {
-    mockKy.mockResolvedValue(notFound());
-    const err = await serverApi.serverStatTotals(client()).then(
-      () => null,
-      (e: unknown) => e,
-    );
-    expect(isUnimplementedEndpoint(err)).toBe(true);
-  });
-
-  it('serverStatTotals: mixed 404 + network failures → the generic error, not Unimplemented', async () => {
-    mockKy
-      .mockResolvedValueOnce(notFound())
-      .mockResolvedValueOnce(notFound())
-      .mockRejectedValue(new Error('net down'));
-    const err = await serverApi.serverStatTotals(client()).then(
-      () => null,
-      (e: unknown) => e,
-    );
-    expect(isUnimplementedEndpoint(err)).toBe(false);
-    expect(err).toBeInstanceOf(Error);
-    expect((err as Error).message).toBe('Server statistics unavailable');
   });
 });
 

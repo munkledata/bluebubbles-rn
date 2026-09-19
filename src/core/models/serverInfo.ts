@@ -63,6 +63,8 @@ export const ServerInfo = z
     supports_rcs_text_with_attachment: z.boolean().nullish(),
     /** Whether the currently connected iMessage helper consumes text with the attachment. */
     supports_imessage_text_with_attachment: z.boolean().nullish(),
+    /** Whether the server exposes the read-only iMessage reachability lookup. */
+    supports_imessage_availability: z.boolean().nullish(),
     /** Whether message payloads can carry bounded, exact Apple multipart topology. */
     supports_message_part_topology: z.boolean().nullish(),
     /**

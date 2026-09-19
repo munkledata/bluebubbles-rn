@@ -1231,6 +1231,31 @@ describe('runOutgoingQueue — attachment resend', () => {
     }
   });
 
+  it('passes the exact queue abort signal through to the attachment uploader', async () => {
+    const { db, raw } = await createTestDb();
+    await seedFailedAttachment(db, raw, 'temp-abort-signal');
+    const controller = new AbortController();
+    const up = fakeIo({
+      upload: async (args) => ({ guid: args.tempGuid, viaPrivateApi: false }),
+    });
+
+    await expect(
+      runOutgoingQueue(
+        db,
+        noRequestHttp,
+        up.io,
+        2_000_000,
+        undefined,
+        1,
+        undefined,
+        undefined,
+        undefined,
+        controller.signal,
+      ),
+    ).resolves.toEqual({ eligible: 1, sent: 1 });
+    expect(up.captured?.signal).toBe(controller.signal);
+  });
+
   it('times out the queue-level native file check and bumps one retry backoff', async () => {
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const { db, raw } = await createTestDb();

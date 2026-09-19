@@ -1569,7 +1569,7 @@ test('certifies exactly the reviewed direct incoming-ingress edge nodes', () => 
     (finding) => finding.detectedContext === 'incoming-ingress-delegation',
   );
 
-  assert.equal(ingress.length, 27);
+  assert.equal(ingress.length, 28);
   assert.deepEqual(
     Object.fromEntries(
       [...new Set(ingress.map((finding) => finding.path))]
@@ -1578,7 +1578,7 @@ test('certifies exactly the reviewed direct incoming-ingress edge nodes', () => 
     ),
     {
       'src/features/conversations/devSeed.ts': 4,
-      'src/services/notifications/fcmMessaging.ts': 9,
+      'src/services/notifications/fcmMessaging.ts': 10,
       'src/services/notifications/registerFcmBackgroundHandler.ts': 1,
       'src/services/realtimeControl.ts': 13,
     },
@@ -1788,7 +1788,7 @@ fullOnlyTest('rejects the reviewed foreground, headless, and key-overlap weakeni
     assert.equal(
       baseline.filter((finding) => finding.detectedContext === 'incoming-ingress-delegation')
         .length,
-      27,
+      28,
       'focused hostile fixture must exercise the live positive certificate',
     );
     for (const mutation of cases) {
@@ -2319,9 +2319,9 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow:mutator-call:676a94da498c',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow:mutator-call:676a94da498c:2',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow:mutator-call:676a94da498c:3',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueue.<callback:6f1c0971ba>:mutator-call:8a9c96b197b7',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueue:mutator-call:96266b944567',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody:mutator-call:0f9846ef4fff',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueue.<callback:6cecc33135>:mutator-call:c14a009ea17d',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueue:mutator-call:660e0f2d1659',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody:mutator-call:2fb5831b19de',
       'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:7b145a63f68d',
       'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:d63151141c20',
       'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:6e5f31342b9a',
@@ -2959,8 +2959,8 @@ test('certifies exactly the reviewed sync delegation edges', () => {
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
     [
-      'src/services/background/backgroundSync.ts#executeBackgroundSyncTask.drainOutgoing:mutator-call:475f73c47dc6',
-      'src/services/background/backgroundSync.ts#executeBackgroundSyncTask.synchronize:mutator-call:23a950f7cc3a',
+      'src/services/background/backgroundSync.ts#executeBackgroundSyncTask.drainOutgoing:mutator-call:392f6b98c2d4',
+      'src/services/background/backgroundSync.ts#executeBackgroundSyncTask.synchronize:mutator-call:c2262a9f7184',
       'src/services/background/backgroundSync.ts#recoverAndDrainBackgroundSchedules.<callback:bb391a2ee5>:mutator-call:a0022079e125',
       'src/services/sync/engine.ts#fullSync:mutator-call:c1a685cf20b7',
       'src/services/sync/engine.ts#fullSync:mutator-call:e0e0072c3545',
@@ -3314,9 +3314,9 @@ test('certifies exactly the reviewed outer-lifecycle delegation boundary', () =>
       'src/services/lock.ts#completeUnlock:mutator-call:97831ab6c576',
       'src/services/realtimeControl.ts#approveNewServerUrl.reconnect:mutator-call:8f17c75f698b',
       'src/services/realtimeControl.ts#dispatchWithContext:mutator-call:723b4235f7f7',
-      'src/services/realtimeControl.ts#finishRealtimeRecoveryCollector:mutator-call:3b450803c536',
-      'src/services/realtimeControl.ts#realtimeSink.<callback:bedc1e072f>.<callback:df541decac>:mutator-call:58f925006793',
-      'src/services/realtimeControl.ts#realtimeSink.<callback:bedc1e072f>:mutator-call:acbe59df19d9',
+      'src/services/realtimeControl.ts#finishRealtimeRecoveryCollector:mutator-call:4b930e6e8a7e',
+      'src/services/realtimeControl.ts#realtimeSink.<callback:c9e203ee58>.<callback:df541decac>:mutator-call:3c328ee86acb',
+      'src/services/realtimeControl.ts#realtimeSink.<callback:c9e203ee58>:mutator-call:d71d8edcccb5',
       'src/services/realtimeControl.ts#resumeDesiredRealtime.<callback:edf3121ba2>:mutator-call:ab508913e108',
       'src/services/realtimeControl.ts#resumeDesiredRealtime:mutator-call:2c6798b642a8',
       'src/services/realtimeControl.ts#startRealtime.<callback:edf3121ba2>:mutator-call:3cd6e7e8d376',
@@ -6734,8 +6734,125 @@ function incomingIngressMutationCases() {
       label: 'recovered-event retry drops its runtime and account fence',
       path: 'src/services/realtimeControl.ts',
       before:
-        'isCurrent: () => ownsAttempt && accountLease.isCurrent() && realtimeRuntimeInstance === runtime,',
+        'isCurrent: () =>\n      ownsAttempt &&\n      callbackOwner.isCurrent() &&\n      accountLease.isCurrent() &&\n      realtimeRuntimeInstance === runtime,',
       after: 'isCurrent: () => true,',
+    },
+    {
+      label: 'recovery task drops its originating callback owner',
+      path: 'src/services/realtimeControl.ts',
+      before:
+        'isAllowed: () => context.isCurrent() && accountLease.isCurrent() && !realtimeIntakeLocked(),',
+      after: 'isAllowed: () => accountLease.isCurrent() && !realtimeIntakeLocked(),',
+    },
+    {
+      label: 'recovery task ignores callback abort',
+      path: 'src/services/realtimeControl.ts',
+      before: "context.signal?.addEventListener('abort', abortFromCallback, { once: true });",
+      after: 'void context.signal;',
+    },
+    {
+      label: 'recovery task resolves to an imported-helper decoy',
+      path: 'src/services/realtimeControl.ts',
+      transform: (source) =>
+        source.replace(
+          "  recoverRealtimePrerequisite,\n  type RealtimePrerequisiteRecoveryOutcome,\n} from './background/realtimePrerequisiteRecovery';",
+          "  recoverRealtimePrerequisite as canonicalRecoverRealtimePrerequisite,\n  type RealtimePrerequisiteRecoveryOutcome,\n} from './background/realtimePrerequisiteRecovery';\nvoid canonicalRecoverRealtimePrerequisite;\nconst recoverRealtimePrerequisite = async (\n  _db: AppDatabase,\n  _recovery: IncomingEventConflictRecovery,\n  _generation: number,\n  _options?: unknown,\n): Promise<RealtimePrerequisiteRecoveryOutcome> => 'recovered';",
+        ),
+    },
+    {
+      label: 'recovery helper drops callback-owner invalidation subscription',
+      path: 'src/services/background/realtimePrerequisiteRecovery.ts',
+      before:
+        '  const releasePolicyInvalidation =\n    options.subscribeInvalidation?.(invalidate) ?? (() => undefined);',
+      after: '  const releasePolicyInvalidation = () => undefined;',
+    },
+    {
+      label: 'headless effect adoption resolves to an imported-helper decoy',
+      path: 'src/services/realtimeControl.ts',
+      transform: (source) =>
+        source.replace(
+          "import { adoptRealtimeHeadlessEffect } from './background/realtimeHeadlessEffects';",
+          "import { adoptRealtimeHeadlessEffect as canonicalAdoptRealtimeHeadlessEffect } from './background/realtimeHeadlessEffects';\nvoid canonicalAdoptRealtimeHeadlessEffect;\nfunction adoptRealtimeHeadlessEffect(\n  _generation: number,\n  _key: string,\n  _effect: unknown,\n): { status: 'absent' } {\n  return { status: 'absent' };\n}",
+        ),
+    },
+    {
+      label: 'auto-download drops its callback-expiry fence',
+      path: 'src/services/download/autoDownloadAttachments.ts',
+      before: '  const effectCurrent = options.isEffectCurrent;',
+      after: '  const effectCurrent = undefined;',
+    },
+    {
+      label: 'realtime auto-download resolves to an imported-helper decoy',
+      path: 'src/services/realtimeControl.ts',
+      transform: (source) =>
+        source.replace(
+          "import { autoDownloadMessageAttachmentsForRealtimeEvent } from './download/autoDownloadAttachments';",
+          "import { autoDownloadMessageAttachmentsForRealtimeEvent as canonicalAutoDownloadMessageAttachmentsForRealtimeEvent } from './download/autoDownloadAttachments';\nvoid canonicalAutoDownloadMessageAttachmentsForRealtimeEvent;\nasync function autoDownloadMessageAttachmentsForRealtimeEvent(\n  ..._args: unknown[]\n): Promise<{ savedImages: number; destination: null }> {\n  return { savedImages: 0, destination: null };\n}",
+        ),
+    },
+    {
+      label: 'dependency retry wait returns immediately',
+      path: 'src/services/realtimeControl.ts',
+      before:
+        '    timeoutHandle = setTimeout(() => finish(true), INCOMING_EVENT_DEPENDENCY_RETRY_MS);',
+      after: '    finish(true);',
+    },
+    {
+      label: 'dependency retry interval changes from the reviewed five seconds',
+      path: 'src/db/repositories/incomingEvents.ts',
+      before: 'export const INCOMING_EVENT_DEPENDENCY_RETRY_MS = 5_000;',
+      after: 'export const INCOMING_EVENT_DEPENDENCY_RETRY_MS = 20_000;',
+    },
+    {
+      label: 'recovered-event retry drops callback signal propagation',
+      path: 'src/services/realtimeControl.ts',
+      before: 'signal: callbackOwner.signal,',
+      after: 'signal: undefined,',
+    },
+    {
+      label: 'recovery collector ignores callback expiry before retry',
+      path: 'src/services/realtimeControl.ts',
+      before:
+        'if (!recoveredDependency || !retryIsCurrent || !collector.owner.isCurrent()) return;',
+      after: 'if (!recoveredDependency || !retryIsCurrent) return;',
+    },
+    {
+      label: 'recovery collector drops its originating callback owner',
+      path: 'src/services/realtimeControl.ts',
+      before:
+        'await resumeRecoveredRealtimeEvents(runtime, collector.generation, collector.owner);',
+      after:
+        'await resumeRecoveredRealtimeEvents(runtime, collector.generation, { generation: collector.generation, isCurrent: () => true });',
+    },
+    {
+      label: 'late FCM auto-download captures a fresh lease after callback expiry',
+      path: 'src/services/realtimeControl.ts',
+      before:
+        '                    if (!context.isCurrent()) return;\n                  }\n                  const lease = captureRealtimeDeliveryLease();',
+      after:
+        '                    void context;\n                  }\n                  const lease = captureRealtimeDeliveryLease();',
+    },
+    {
+      label: 'dispatcher recovery context drops callback signal',
+      path: 'src/services/realtime/incomingEventDispatcher.ts',
+      before: '      signal: context?.signal,',
+      after: '      signal: undefined,',
+    },
+    {
+      label: 'drain permanent-recovery context drops callback signal',
+      path: 'src/services/realtime/incomingEventDrain.ts',
+      before:
+        '    const recoveryContext: EventDeliveryContext = {\n      generation: context?.generation ?? 0,\n      signal: context?.signal,',
+      after:
+        '    const recoveryContext: EventDeliveryContext = {\n      generation: context?.generation ?? 0,\n      signal: undefined,',
+    },
+    {
+      label: 'drain durable context drops callback signal',
+      path: 'src/services/realtime/incomingEventDrain.ts',
+      before:
+        '    context: {\n      generation: context?.generation ?? 0,\n      signal: context?.signal,',
+      after:
+        '    context: {\n      generation: context?.generation ?? 0,\n      signal: undefined,',
     },
     {
       label: 'locked intake persistence bypass',
@@ -7134,9 +7251,122 @@ function incomingIngressMutationCases() {
     {
       label: 'FCM capture yields before reserving FIFO position',
       path: 'src/services/notifications/fcmMessaging.ts',
-      before: 'const delivery = captureFcmDelivery(msg, backgroundReceivedAt);',
+      before: 'const delivery = captureFcmDelivery(msg, backgroundLifetime?.receivedAt);',
       after:
-        'const delivery = await Promise.resolve(captureFcmDelivery(msg, backgroundReceivedAt));',
+        'const delivery = await Promise.resolve(captureFcmDelivery(msg, backgroundLifetime?.receivedAt));',
+    },
+    {
+      label: 'FCM callback delivery window exceeds the native safety bound',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: 'export const FCM_HEADLESS_DELIVERY_WINDOW_MS = 50_000;',
+      after: 'export const FCM_HEADLESS_DELIVERY_WINDOW_MS = 70_000;',
+    },
+    {
+      label: 'FCM callback lifetime uses a no-op AbortController',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: 'function createFcmHeadlessCallbackLifetime(',
+      after:
+        'class AbortController { readonly signal = new globalThis.AbortController().signal; abort(): void {} }\nfunction createFcmHeadlessCallbackLifetime(',
+    },
+    {
+      label: 'FCM callback lifetime uses a timer that never fires',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: 'function createFcmHeadlessCallbackLifetime(',
+      after:
+        'const setTimeout = (_task: () => void, delay: number): ReturnType<typeof globalThis.setTimeout> => globalThis.setTimeout(() => undefined, delay);\nfunction createFcmHeadlessCallbackLifetime(',
+    },
+    {
+      label: 'FCM callback expiry does not abort native work',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: "controller.abort(new Error('FCM callback delivery deadline expired'));",
+      after: 'void controller;',
+    },
+    {
+      label: 'FCM callback current check ignores a delayed deadline timer',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: 'isCurrent: () => {\n      expireIfDue();\n      return current;\n    },',
+      after: 'isCurrent: () => current,',
+    },
+    {
+      label: 'FCM composed lease drops callback abort propagation',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: 'signal: backgroundLifetime.signal,',
+      after: 'signal: accountLease.signal,',
+    },
+    {
+      label: 'FCM composed lease ignores callback expiry',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: 'isCurrent: () => accountLease.isCurrent() && backgroundLifetime.isCurrent(),',
+      after: 'isCurrent: () => accountLease.isCurrent(),',
+    },
+    {
+      label: 'FCM locked context drops callback abort propagation',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: '      signal: lease.signal,',
+      after: '      signal: undefined,',
+    },
+    {
+      label: 'FCM public callback ignores its delivery deadline',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: '? [deliveryTask, generationInvalidated, backgroundLifetime.expired]',
+      after: '? [deliveryTask, generationInvalidated]',
+    },
+    {
+      label: 'FCM foreground wait ignores account-generation invalidation',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: ': [deliveryTask, generationInvalidated],',
+      after: ': [deliveryTask],',
+    },
+    {
+      label: 'FCM drops the true underlying delivery continuation',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: 'underlyingDelivery = deliveryTask;',
+      after: 'void deliveryTask;',
+    },
+    {
+      label: 'FCM paused admission replaces the true predecessor with the tracked wrapper',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: 'fcmAdmissionTail = (underlyingDelivery ?? previous).then(',
+      after: 'fcmAdmissionTail = (underlyingDelivery ?? tracked).then(',
+    },
+    {
+      label: 'FCM FIFO always follows the bounded tracked wrapper',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: 'fcmAdmissionTail = (underlyingDelivery ?? previous).then(',
+      after: 'fcmAdmissionTail = tracked.then(',
+    },
+    {
+      label: 'FCM publishes the real continuation only after its bounded wait',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before:
+        '      underlyingDelivery = deliveryTask;\n      await waitForFcmDeliveryOwner(deliveryTask, lease, backgroundLifetime);',
+      after:
+        '      await waitForFcmDeliveryOwner(deliveryTask, lease, backgroundLifetime);\n      underlyingDelivery = deliveryTask;',
+    },
+    {
+      label: 'FCM background delivery omits its callback lifetime',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: "await handleIncomingFcm(msg, 'background', lifetime);",
+      after: "await handleIncomingFcm(msg, 'background', undefined);",
+    },
+    {
+      label: 'FCM background finalizer leaves callback authority current',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: '    lifetime.finish();',
+      after: '    void lifetime;',
+    },
+    {
+      label: 'FCM log flush invents a fresh finalization deadline',
+      path: 'src/services/notifications/fcmMessaging.ts',
+      before: 'flushPersistentLogsForHeadlessCompletion(lifetime.finalizationDeadlineAt)',
+      after:
+        'flushPersistentLogsForHeadlessCompletion(Date.now() + FCM_HEADLESS_FINALIZATION_WINDOW_MS)',
+    },
+    {
+      label: 'headless log flush drops the callback finalization deadline',
+      path: 'src/services/logging/fileLogSink.ts',
+      before: 'return await fileLogSink.flushForHeadlessCompletion(deadlineAt);',
+      after: 'return await fileLogSink.flushForHeadlessCompletion();',
     },
     {
       label: 'FCM headless effect deadline is detached from callback receipt',
@@ -7149,30 +7379,30 @@ function incomingIngressMutationCases() {
       path: 'src/services/notifications/fcmMessaging.ts',
       transform: (source) =>
         source.replace(
-          '        headlessEffectCompletion = collection.close();\n      }\n    });',
-          '        headlessEffectCompletion = collection.close();\n      }\n    }, await Promise.resolve());',
+          '      await waitForFcmDeliveryOwner(deliveryTask, lease, backgroundLifetime);',
+          '      await waitForFcmDeliveryOwner(deliveryTask, lease, await Promise.resolve(backgroundLifetime));',
         ),
     },
     {
       label: 'FCM failure poisons the admission tail',
       path: 'src/services/notifications/fcmMessaging.ts',
       before:
-        '    fcmAdmissionTail = tracked.then(\n      () => undefined,\n      () => undefined,\n    );',
-      after: '    fcmAdmissionTail = tracked.then(() => undefined);',
+        '    fcmAdmissionTail = (underlyingDelivery ?? previous).then(\n      () => undefined,\n      () => undefined,\n    );',
+      after: '    fcmAdmissionTail = (underlyingDelivery ?? previous).then(() => undefined);',
     },
     {
       label: 'FCM queued callback skips its post-wait lease check',
       path: 'src/services/notifications/fcmMessaging.ts',
       before:
-        '      await previous;\n      if (!lease.isCurrent()) return;\n      if (headlessEffectDeadlineAt == null) {',
+        '        await previous;\n        if (!lease.isCurrent()) return;\n        if (headlessEffectDeadlineAt == null) {',
       after:
-        '      await previous;\n      void lease;\n      if (headlessEffectDeadlineAt == null) {',
+        '        await previous;\n        void lease;\n        if (headlessEffectDeadlineAt == null) {',
     },
     {
       label: 'detached headless handler',
       path: 'src/services/notifications/fcmMessaging.ts',
-      before: "await handleIncomingFcm(msg, 'background', receivedAt);",
-      after: "void handleIncomingFcm(msg, 'background', receivedAt);",
+      before: "await handleIncomingFcm(msg, 'background', lifetime);",
+      after: "void handleIncomingFcm(msg, 'background', lifetime);",
     },
     {
       label: 'conditional background registration',
@@ -7306,7 +7536,7 @@ fullOnlyTest(
       assert.equal(
         baseline.filter((finding) => finding.detectedContext === 'incoming-ingress-delegation')
           .length,
-        27,
+        28,
         'incoming-ingress fixture must exercise the live positive certificate',
       );
       for (const mutation of cases) {

@@ -7742,6 +7742,10 @@ function incomingIngressCertifiedNodes({
   const devPath = 'src/features/conversations/devSeed.ts';
   const digestPath = 'src/services/realtime/expoDigestBackend.ts';
   const headlessEffectsPath = 'src/services/background/realtimeHeadlessEffects.ts';
+  const prerequisiteRecoveryPath = 'src/services/background/realtimePrerequisiteRecovery.ts';
+  const autoDownloadPath = 'src/services/download/autoDownloadAttachments.ts';
+  const incomingEventsPath = 'src/db/repositories/incomingEvents.ts';
+  const fileLogPath = 'src/services/logging/fileLogSink.ts';
   const fcmEncryptionPath = 'src/core/realtime/fcmEncryption.ts';
   const fcmEncryptionStatePath = 'src/services/notifications/fcmEncryptionState.ts';
 
@@ -7757,6 +7761,10 @@ function incomingIngressCertifiedNodes({
   const devFile = filesByPath.get(devPath);
   const digestFile = filesByPath.get(digestPath);
   const headlessEffectsFile = filesByPath.get(headlessEffectsPath);
+  const prerequisiteRecoveryFile = filesByPath.get(prerequisiteRecoveryPath);
+  const autoDownloadFile = filesByPath.get(autoDownloadPath);
+  const incomingEventsFile = filesByPath.get(incomingEventsPath);
+  const fileLogFile = filesByPath.get(fileLogPath);
   const fcmEncryptionFile = filesByPath.get(fcmEncryptionPath);
   const fcmEncryptionStateFile = filesByPath.get(fcmEncryptionStatePath);
   if (
@@ -7772,6 +7780,10 @@ function incomingIngressCertifiedNodes({
     !devFile ||
     !digestFile ||
     !headlessEffectsFile ||
+    !prerequisiteRecoveryFile ||
+    !autoDownloadFile ||
+    !incomingEventsFile ||
+    !fileLogFile ||
     !fcmEncryptionFile ||
     !fcmEncryptionStateFile
   ) {
@@ -7790,6 +7802,13 @@ function incomingIngressCertifiedNodes({
   const resetRealtimeRuntime = fn(controlPath, 'resetRealtimeRuntime');
   const getRealtimeRuntime = fn(controlPath, 'getRealtimeRuntime');
   const getFallbackOccurrenceNamespace = fn(controlPath, 'getFallbackOccurrenceNamespace');
+  const requestRealtimeRecovery = fn(controlPath, 'requestRealtimeRecovery');
+  const recoverRealtimePrerequisite = fn(prerequisiteRecoveryPath, 'recoverRealtimePrerequisite');
+  const adoptRealtimeHeadlessEffect = fn(headlessEffectsPath, 'adoptRealtimeHeadlessEffect');
+  const autoDownloadMessageAttachmentsForRealtimeEvent = fn(
+    autoDownloadPath,
+    'autoDownloadMessageAttachmentsForRealtimeEvent',
+  );
   const beginRealtimeRecoveryCollector = fn(controlPath, 'beginRealtimeRecoveryCollector');
   const finishRealtimeRecoveryCollector = fn(controlPath, 'finishRealtimeRecoveryCollector');
   const resumeRecoveredRealtimeEvents = fn(controlPath, 'resumeRecoveredRealtimeEvents');
@@ -7820,6 +7839,7 @@ function incomingIngressCertifiedNodes({
     coordinatorPath,
     'subscribeRealtimeGenerationInvalidation',
   );
+  const waitForFcmDeliveryOwner = fn(fcmPath, 'waitForFcmDeliveryOwner');
   const expoDigestSha256 = topLevelObjectMethod(
     filesByPath,
     digestPath,
@@ -7870,6 +7890,11 @@ function incomingIngressCertifiedNodes({
   const queuePersistence = method(dispatcherPath, 'DurableRealtimeDispatcher', 'queuePersistence');
   const persistAdmission = method(dispatcherPath, 'DurableRealtimeDispatcher', 'persist');
   const finishAdmission = method(dispatcherPath, 'DurableRealtimeDispatcher', 'finishAdmission');
+  const durableRequestRecovery = method(
+    dispatcherPath,
+    'DurableRealtimeDispatcher',
+    'requestRecovery',
+  );
   const enqueueIncomingEvent = fn('src/db/repositories/incomingEvents.ts', 'enqueueIncomingEvent');
   const enqueueAndClaimIncomingEventIfQueueEmpty = fn(
     'src/db/repositories/incomingEvents.ts',
@@ -7877,6 +7902,12 @@ function incomingIngressCertifiedNodes({
   );
   const drainDispose = method(drainPath, 'IncomingEventDrain', 'dispose');
   const drainCancelWakeTimer = method(drainPath, 'IncomingEventDrain', 'cancelWakeTimer');
+  const drainReportPermanentFailure = method(
+    drainPath,
+    'IncomingEventDrain',
+    'reportPermanentFailure',
+  );
+  const durableContextFactory = fn(drainPath, 'durableContext');
   const socketConstructor = topLevelClassConstructor(filesByPath, socketPath, 'SocketService');
   const makeProcessSocketOccurrenceNonce = fn(socketPath, 'makeProcessSocketOccurrenceNonce');
   const makeSocketOccurrenceNamespace = fn(socketPath, 'makeSocketOccurrenceNamespace');
@@ -7913,6 +7944,7 @@ function incomingIngressCertifiedNodes({
   const v3ServerEventId = fn(fcmPath, 'v3ServerEventId');
   const authenticateFcmV3Delivery = fn(fcmPath, 'authenticateFcmV3Delivery');
   const deliverRespectingLock = fn(fcmPath, 'deliverRespectingLock');
+  const createFcmHeadlessCallbackLifetime = fn(fcmPath, 'createFcmHeadlessCallbackLifetime');
   const handleIncomingFcm = fn(fcmPath, 'handleIncomingFcm');
   const handleBackgroundFcm = fn(fcmPath, 'handleBackgroundFcm');
   const startFcm = fn(fcmPath, 'startFcm');
@@ -7930,10 +7962,7 @@ function incomingIngressCertifiedNodes({
     'src/services/notifications/notifeeService.ts',
     'postLockedNotification',
   );
-  const flushHeadlessLogs = fn(
-    'src/services/logging/fileLogSink.ts',
-    'flushPersistentLogsForHeadlessCompletion',
-  );
+  const flushHeadlessLogs = fn(fileLogPath, 'flushPersistentLogsForHeadlessCompletion');
   const runDevAccountWrite = fn(devPath, 'runDevAccountWrite');
   const devQueue = fn(devPath, 'devQueueIncomingMessageWithoutDrain');
   const devResumeQueued = fn(devPath, 'devResumeQueuedIncomingMessages');
@@ -7946,6 +7975,10 @@ function incomingIngressCertifiedNodes({
     applyNewServerUrl,
     resetRealtimeRuntime,
     getRealtimeRuntime,
+    requestRealtimeRecovery,
+    recoverRealtimePrerequisite,
+    adoptRealtimeHeadlessEffect,
+    autoDownloadMessageAttachmentsForRealtimeEvent,
     finishRealtimeRecoveryCollector,
     resumeRecoveredRealtimeEvents,
     getFallbackOccurrenceNamespace,
@@ -7973,6 +8006,7 @@ function incomingIngressCertifiedNodes({
     pauseRealtimeDeliveries,
     resumeRealtimeDeliveries,
     subscribeRealtimeGenerationInvalidation,
+    waitForFcmDeliveryOwner,
     expoDigestSha256,
     beginHeadlessEffectCollection,
     effectivelyLocked,
@@ -7998,10 +8032,13 @@ function incomingIngressCertifiedNodes({
     queuePersistence,
     persistAdmission,
     finishAdmission,
+    durableRequestRecovery,
     enqueueIncomingEvent,
     enqueueAndClaimIncomingEventIfQueueEmpty,
     drainDispose,
     drainCancelWakeTimer,
+    drainReportPermanentFailure,
+    durableContextFactory,
     socketConstructor,
     makeProcessSocketOccurrenceNonce,
     makeSocketOccurrenceNamespace,
@@ -8026,6 +8063,7 @@ function incomingIngressCertifiedNodes({
     v3ServerEventId,
     authenticateFcmV3Delivery,
     deliverRespectingLock,
+    createFcmHeadlessCallbackLifetime,
     handleIncomingFcm,
     handleBackgroundFcm,
     startFcm,
@@ -8077,9 +8115,32 @@ function incomingIngressCertifiedNodes({
     hasExactIdentifierParameters(resetRealtimeRuntime, [{ name: 'expected', optional: true }]) &&
     hasExactIdentifierParameters(getRealtimeRuntime, [{ name: 'db' }, { name: 'context' }]) &&
     hasExactIdentifierParameters(getFallbackOccurrenceNamespace, []) &&
+    hasExactIdentifierParameters(requestRealtimeRecovery, [
+      { name: 'db' },
+      { name: 'recovery' },
+      { name: 'context', optional: true },
+      { name: 'dependencyRetry', defaulted: true },
+    ]) &&
+    hasExactIdentifierParameters(recoverRealtimePrerequisite, [
+      { name: 'db' },
+      { name: 'recovery' },
+      { name: 'expectedAccountGeneration' },
+      { name: 'options', defaulted: true },
+    ]) &&
+    hasExactIdentifierParameters(adoptRealtimeHeadlessEffect, [
+      { name: 'generation' },
+      { name: 'key' },
+      { name: 'effect' },
+    ]) &&
+    hasExactIdentifierParameters(autoDownloadMessageAttachmentsForRealtimeEvent, [
+      { name: 'db' },
+      { name: 'messageId' },
+      { name: 'expectedAccountGeneration' },
+      { name: 'options', defaulted: true },
+    ]) &&
     hasExactIdentifierParameters(beginRealtimeRecoveryCollector, [
       { name: 'db' },
-      { name: 'generation' },
+      { name: 'owner' },
     ]) &&
     hasExactIdentifierParameters(finishRealtimeRecoveryCollector, [
       { name: 'collector' },
@@ -8088,6 +8149,7 @@ function incomingIngressCertifiedNodes({
     hasExactIdentifierParameters(resumeRecoveredRealtimeEvents, [
       { name: 'runtime' },
       { name: 'generation' },
+      { name: 'callbackOwner' },
     ]) &&
     hasExactIdentifierParameters(realtimeSink, [{ name: 'db' }, { name: 'accountGeneration' }]) &&
     hasExactIdentifierParameters(sharedRouter, [{ name: 'db' }, { name: 'accountGeneration' }]) &&
@@ -8175,10 +8237,11 @@ function incomingIngressCertifiedNodes({
       { name: 'source' },
       { name: 'lease' },
     ]) &&
+    hasExactIdentifierParameters(createFcmHeadlessCallbackLifetime, [{ name: 'receivedAt' }]) &&
     hasExactIdentifierParameters(handleIncomingFcm, [
       { name: 'msg' },
       { name: 'source' },
-      { name: 'backgroundReceivedAt', optional: true },
+      { name: 'backgroundLifetime', optional: true },
     ]) &&
     hasExactIdentifierParameters(handleBackgroundFcm, [{ name: 'msg' }]) &&
     hasExactIdentifierParameters(startFcm, []) &&
@@ -8221,6 +8284,12 @@ function incomingIngressCertifiedNodes({
       { name: 'receivedAt', defaulted: true },
     ]) &&
     hasExactIdentifierParameters(durableDispose, []) &&
+    hasExactIdentifierParameters(durableRequestRecovery, [
+      { name: 'recovery' },
+      { name: 'reason' },
+      { name: 'isCurrent' },
+      { name: 'context', optional: true },
+    ]) &&
     hasExactIdentifierParameters(durableLockedFcmV3Persist, [
       { name: 'eventName' },
       { name: 'rawData' },
@@ -8249,6 +8318,17 @@ function incomingIngressCertifiedNodes({
     ]) &&
     hasExactIdentifierParameters(drainDispose, []) &&
     hasExactIdentifierParameters(drainCancelWakeTimer, []) &&
+    hasExactIdentifierParameters(drainReportPermanentFailure, [
+      { name: 'eventName' },
+      { name: 'isCurrent' },
+      { name: 'context', optional: true },
+    ]) &&
+    hasExactIdentifierParameters(durableContextFactory, [
+      { name: 'context' },
+      { name: 'claim' },
+      { name: 'now' },
+      { name: 'guard' },
+    ]) &&
     hasExactIdentifierParameters(socketConnect, [
       { name: 'origin' },
       { name: 'password' },
@@ -8282,7 +8362,9 @@ function incomingIngressCertifiedNodes({
       { name: 'owner' },
       { name: 'options' },
     ]);
-  if (!parametersAreExact) return empty();
+  if (!parametersAreExact) {
+    return empty();
+  }
 
   const realtimeForegroundDesiredState = topLevelVariable(controlFile, 'realtimeForegroundDesired');
   const realtimeForegroundIntentEpochState = topLevelVariable(
@@ -8295,6 +8377,15 @@ function incomingIngressCertifiedNodes({
   const realtimeForegroundIntentEpochWrites = realtimeForegroundIntentEpochState
     ? assignmentWritesTo(controlFile, realtimeForegroundIntentEpochState.declaration.name, checker)
     : [];
+  const incomingEventDependencyRetryState = topLevelVariable(
+    incomingEventsFile,
+    'INCOMING_EVENT_DEPENDENCY_RETRY_MS',
+  );
+  const incomingEventDependencyRetryBinding = namedImportBinding(
+    controlFile,
+    '@db/repositories',
+    'INCOMING_EVENT_DEPENDENCY_RETRY_MS',
+  );
   const headlessEffectWindowState = topLevelVariable(
     headlessEffectsFile,
     'REALTIME_HEADLESS_EFFECT_WINDOW_MS',
@@ -8302,6 +8393,14 @@ function incomingIngressCertifiedNodes({
   const headlessEffectCancelGraceState = topLevelVariable(
     headlessEffectsFile,
     'REALTIME_HEADLESS_EFFECT_CANCEL_GRACE_MS',
+  );
+  const fcmHeadlessDeliveryWindowState = topLevelVariable(
+    fcmFile,
+    'FCM_HEADLESS_DELIVERY_WINDOW_MS',
+  );
+  const fcmHeadlessFinalizationWindowState = topLevelVariable(
+    fcmFile,
+    'FCM_HEADLESS_FINALIZATION_WINDOW_MS',
   );
   const fcmRotationLocalMaxState = topLevelVariable(
     fcmEncryptionFile,
@@ -8339,6 +8438,19 @@ function incomingIngressCertifiedNodes({
       nodeIsInside(write, claimRealtimeForegroundIntent),
     ) ||
     !realtimeForegroundIntentEpochWrites.some((write) => nodeIsInside(write, pauseRealtime)) ||
+    !incomingEventDependencyRetryState ||
+    !(incomingEventDependencyRetryState.declarationList.flags & ts.NodeFlags.Const) ||
+    !incomingEventDependencyRetryState.declaration.initializer ||
+    normalizedSnippet(
+      incomingEventDependencyRetryState.declaration.initializer,
+      incomingEventsFile,
+    ) !== '5_000' ||
+    !incomingEventDependencyRetryBinding ||
+    !sameSymbol(
+      incomingEventDependencyRetryBinding,
+      incomingEventDependencyRetryState.declaration.name,
+      checker,
+    ) ||
     !headlessEffectWindowState ||
     !(headlessEffectWindowState.declarationList.flags & ts.NodeFlags.Const) ||
     !headlessEffectWindowState.declaration.initializer ||
@@ -8351,6 +8463,16 @@ function incomingIngressCertifiedNodes({
       headlessEffectCancelGraceState.declaration.initializer,
       headlessEffectsFile,
     ) !== '2_000' ||
+    !fcmHeadlessDeliveryWindowState ||
+    !(fcmHeadlessDeliveryWindowState.declarationList.flags & ts.NodeFlags.Const) ||
+    !fcmHeadlessDeliveryWindowState.declaration.initializer ||
+    !ts.isNumericLiteral(fcmHeadlessDeliveryWindowState.declaration.initializer) ||
+    fcmHeadlessDeliveryWindowState.declaration.initializer.text !== '50000' ||
+    !fcmHeadlessFinalizationWindowState ||
+    !(fcmHeadlessFinalizationWindowState.declarationList.flags & ts.NodeFlags.Const) ||
+    !fcmHeadlessFinalizationWindowState.declaration.initializer ||
+    !ts.isNumericLiteral(fcmHeadlessFinalizationWindowState.declaration.initializer) ||
+    fcmHeadlessFinalizationWindowState.declaration.initializer.text !== '55000' ||
     !fcmRotationLocalMaxState ||
     !(fcmRotationLocalMaxState.declarationList.flags & ts.NodeFlags.Const) ||
     !fcmRotationLocalMaxState.declaration.initializer ||
@@ -8362,6 +8484,11 @@ function incomingIngressCertifiedNodes({
     return empty();
   }
   if (
+    createHash('sha256').update(normalizedSnippet(controlFile, controlFile)).digest('hex') !==
+      'c8afcfef8364a3136be5bfefb493e849ddc85ce0b93d62e083a61e6dfb62de90' ||
+    createHash('sha256')
+      .update(normalizedSnippet(autoDownloadFile, autoDownloadFile))
+      .digest('hex') !== 'dfc68841889263b004ffd03f2f819fa8eb783ac3fac9689327dbdd78c6863fc9' ||
     createHash('sha256')
       .update(normalizedSnippet(claimRealtimeForegroundIntent, controlFile))
       .digest('hex') !== 'd51eec3879f0a2cdd48c51cb63e6787d848420b80430e3d25e716c841a107fdb' ||
@@ -8377,6 +8504,26 @@ function incomingIngressCertifiedNodes({
       .update(normalizedSnippet(beginHeadlessEffectCollection, headlessEffectsFile))
       .digest('hex') !== '98cc5f5d5f2ba3b3de00d13bd7054b12d2198aa36d945506f0eeb035adaf9325' ||
     createHash('sha256')
+      .update(normalizedSnippet(requestRealtimeRecovery, controlFile))
+      .digest('hex') !== '64ef0ee4c27ead97edc14f2ca49d638de4c08666c7867036c77e1f15f1287468' ||
+    createHash('sha256')
+      .update(normalizedSnippet(prerequisiteRecoveryFile, prerequisiteRecoveryFile))
+      .digest('hex') !== '90da1f4ead2e877f16f6d4790f2893f1ad567a52142251e94bbc41e1a67df296' ||
+    createHash('sha256').update(normalizedSnippet(fileLogFile, fileLogFile)).digest('hex') !==
+      '58120b0f2dd9cd52685c83894333ee06db8e32b69569fb76ddcafd8cc13fbdbe' ||
+    createHash('sha256')
+      .update(normalizedSnippet(beginRealtimeRecoveryCollector, controlFile))
+      .digest('hex') !== '08d0f5b0739532b8e1a3706a8cbdcc00b44ef87beeab7d4738a48686f600070c' ||
+    createHash('sha256')
+      .update(normalizedSnippet(durableRequestRecovery, dispatcherFile))
+      .digest('hex') !== 'd953bea5ef97facc07f14205747adc5a9d52fd5016e8b9524042f4034407ed6f' ||
+    createHash('sha256')
+      .update(normalizedSnippet(drainReportPermanentFailure, drainFile))
+      .digest('hex') !== 'f41605c83058f532f3fe6a900b916c3ee687b57a32ae32cbabeedfa3f9d9c6d6' ||
+    createHash('sha256')
+      .update(normalizedSnippet(durableContextFactory, drainFile))
+      .digest('hex') !== 'b9cec8794f9004f3259b152d84e777c3c56ca2308b5c7c1db20deb2094ffb93b' ||
+    createHash('sha256')
       .update(normalizedSnippet(fcmEncryptionFile, fcmEncryptionFile))
       .digest('hex') !== '6b748275ba1a3906c4fe92115c997bfccb1f4c472794d4aa14ac67b5c147a3d3' ||
     createHash('sha256')
@@ -8390,10 +8537,10 @@ function incomingIngressCertifiedNodes({
       .digest('hex') !== '4a830c972edc247193d801a73e262b6728cd3d4a00cf3408d669ba2115143af4' ||
     createHash('sha256')
       .update(normalizedSnippet(finishRealtimeRecoveryCollector, controlFile))
-      .digest('hex') !== '4fb08c91c8e09bfe5c4ca02f18e5f4c459e65ffb6316b0ae980e2710033341a7' ||
+      .digest('hex') !== '53ac24ffb7ecb898014ba13035f32ac58230cd66ee0fa0f8750740387fa40ffe' ||
     createHash('sha256')
       .update(normalizedSnippet(resumeRecoveredRealtimeEvents, controlFile))
-      .digest('hex') !== '80ef3d24d957a89c4af222f37519677447cc6919012917da049cb53ce438d3e7' ||
+      .digest('hex') !== '583b5ecd1a2fea9bd06d27e1fbd8a338261e27537feffe51ffeed7c54e71f56e' ||
     createHash('sha256')
       .update(
         normalizedSnippet(
@@ -8416,11 +8563,21 @@ function incomingIngressCertifiedNodes({
       .update(normalizedSnippet(authenticateFcmV3Delivery, fcmFile))
       .digest('hex') !== '50312d5c35899dddd6151792863b57ad01ef9fed858785cba036b225e8838ba9' ||
     createHash('sha256').update(normalizedSnippet(fcmFile, fcmFile)).digest('hex') !==
-      'e32e4407c40181b3e5dd3ffbddc58de719355a2c76a432ad4dd48de912e61c2a' ||
+      '9f16aec13e93d5a3eac5ef68bebcdfad352b65a7771d172acea2ee22602514fa' ||
+    createHash('sha256')
+      .update(normalizedSnippet(createFcmHeadlessCallbackLifetime, fcmFile))
+      .digest('hex') !== '1b4681d00f4778d7a2d57d83bc39f66059553d54e92f12481862814bfb47eeb5' ||
+    createHash('sha256').update(normalizedSnippet(handleIncomingFcm, fcmFile)).digest('hex') !==
+      '5f249c69577a4ed8c69fcd911513b1359329ed2156df52890f49b1ac90d0263f' ||
+    createHash('sha256')
+      .update(normalizedSnippet(waitForFcmDeliveryOwner, fcmFile))
+      .digest('hex') !== '12e229fd050eeefb37894163b10f27c4d7e527bd187eb7f4865db32363355975' ||
+    createHash('sha256').update(normalizedSnippet(handleBackgroundFcm, fcmFile)).digest('hex') !==
+      '304e5e2fd8077dbad603490bebe251fc79c763bbb867444dc7dcf5dbb0e5c1a9' ||
     createHash('sha256').update(normalizedSnippet(deliver, fcmFile)).digest('hex') !==
       'fc417aa35635148e71bb0c61ffea3289352ac7a7456f61af31d9c884204d6e32' ||
     createHash('sha256').update(normalizedSnippet(deliverRespectingLock, fcmFile)).digest('hex') !==
-      '52daf032202727acad14261e9d4b4313d8e7f49fb63a23c95a9843a633bc3035' ||
+      '1c6d931477a6289b7fb0b8296c74d4ddaf32ad214af2920fc04aa89018540960' ||
     createHash('sha256')
       .update(
         normalizedSnippet(
@@ -8486,6 +8643,20 @@ function incomingIngressCertifiedNodes({
         return (
           source.isDeclarationFile &&
           /\/typescript\/lib\/lib\.[^/]+\.d\.ts$/.test(normalizePath(source.fileName))
+        );
+      }),
+    );
+  const isPlatformGlobalSymbol = (symbol) =>
+    Boolean(
+      symbol?.declarations?.length &&
+      symbol.declarations.every((declaration) => {
+        const source = declaration.getSourceFile();
+        const path = normalizePath(source.fileName);
+        return (
+          source.isDeclarationFile &&
+          (/\/typescript\/lib\/lib\.[^/]+\.d\.ts$/.test(path) ||
+            /\/react-native\/src\/types\/globals\.d\.ts$/.test(path) ||
+            /\/@types\/node\/web-globals\/(?:abortcontroller|timers)\.d\.ts$/.test(path))
         );
       }),
     );
@@ -9437,6 +9608,9 @@ function incomingIngressCertifiedNodes({
   const finishRecoveryCall = sole(
     exactCallEdges(edges, dispatchWithContext, finishRealtimeRecoveryCollector),
   );
+  const recoverPrerequisiteCall = sole(
+    exactCallEdges(edges, requestRealtimeRecovery, recoverRealtimePrerequisite),
+  );
   if (
     dispatchWithContext.body.statements.length !== 7 ||
     statementText(dispatchWithContext, 0) !==
@@ -9447,7 +9621,7 @@ function incomingIngressCertifiedNodes({
     statementText(dispatchWithContext, 3) !== 'const runtime = getRealtimeRuntime(db, context);' ||
     statementText(dispatchWithContext, 4) !== 'if (!runtime) return;' ||
     statementText(dispatchWithContext, 5) !==
-      "const recoveryCollector = source === 'fcm' ? beginRealtimeRecoveryCollector(db, context.generation) : null;" ||
+      "const recoveryCollector = source === 'fcm' ? beginRealtimeRecoveryCollector(db, context) : null;" ||
     statementText(dispatchWithContext, 6) !==
       'try { await runtime.dispatcher.handle(eventName, rawData, source, context, occurrence, receivedAt); } finally { if (recoveryCollector) { await finishRealtimeRecoveryCollector(recoveryCollector, runtime); } }' ||
     !databaseCall ||
@@ -9461,7 +9635,7 @@ function incomingIngressCertifiedNodes({
     beginRecoveryCall.node.arguments.length !== 2 ||
     !nodeIsInside(beginRecoveryCall.node, dispatchWithContext.body.statements[5]) ||
     !snippetIs(beginRecoveryCall.node.arguments[0], 'db') ||
-    !snippetIs(beginRecoveryCall.node.arguments[1], 'context.generation') ||
+    !snippetIs(beginRecoveryCall.node.arguments[1], 'context') ||
     !finishRecoveryCall ||
     finishRecoveryCall.node.arguments.length !== 2 ||
     !nodeIsInside(finishRecoveryCall.node, dispatchWithContext.body.statements[6]) ||
@@ -9475,6 +9649,15 @@ function incomingIngressCertifiedNodes({
       unwrapExpression(finishRecoveryCall.node.arguments[1]),
       dispatchRuntimeDeclaration.name,
       checker,
+    ) ||
+    !recoverPrerequisiteCall ||
+    recoverPrerequisiteCall.node.arguments.length !== 4 ||
+    !snippetIs(recoverPrerequisiteCall.node.arguments[0], 'db') ||
+    !snippetIs(recoverPrerequisiteCall.node.arguments[1], 'recovery') ||
+    !snippetIs(recoverPrerequisiteCall.node.arguments[2], 'generation') ||
+    !snippetIs(
+      recoverPrerequisiteCall.node.arguments[3],
+      "{ isAllowed: () => context.isCurrent() && accountLease.isCurrent() && !realtimeIntakeLocked(), subscribeInvalidation: (invalidate) => { const unsubscribeLock = useLockStore.subscribe((state) => { if (effectivelyLocked(state, false)) invalidate(); }); const abortFromCallback = (): void => invalidate(); context.signal?.addEventListener('abort', abortFromCallback, { once: true }); if (context.signal?.aborted) abortFromCallback(); return () => { context.signal?.removeEventListener('abort', abortFromCallback); unsubscribeLock(); }; }, }",
     ) ||
     !durableHandleCall ||
     !nodeIsInside(databaseCall.node, dispatchWithContext.body.statements[1]) ||
@@ -9579,6 +9762,19 @@ function incomingIngressCertifiedNodes({
   }
   const notifyingSinkConstruction = sinkSpine[5];
   const dbEventSinkConstruction = sinkSpine[6];
+  const realtimeAutoDownloadCallback = dbEventSinkConstruction?.arguments?.[1]
+    ? unwrapExpression(dbEventSinkConstruction.arguments[1])
+    : undefined;
+  const adoptHeadlessEffectCall = realtimeAutoDownloadCallback
+    ? sole(exactCallEdges(edges, realtimeAutoDownloadCallback, adoptRealtimeHeadlessEffect))
+    : undefined;
+  const realtimeAutoDownloadCalls = realtimeAutoDownloadCallback
+    ? nestedCallEdges(
+        edges,
+        realtimeAutoDownloadCallback,
+        autoDownloadMessageAttachmentsForRealtimeEvent,
+      )
+    : [];
   const sharedRouterInitStatement = sharedRouter.body.statements[0];
   const sharedRouterInit = ts.isExpressionStatement(sharedRouterInitStatement)
     ? unwrapExpression(sharedRouterInitStatement.expression)
@@ -9775,6 +9971,13 @@ function incomingIngressCertifiedNodes({
     sinkSpine.length !== sinkSpineSpecs.length ||
     !dbEventSinkConstruction ||
     !notifyingSinkConstruction ||
+    !realtimeAutoDownloadCallback ||
+    !ts.isArrowFunction(realtimeAutoDownloadCallback) ||
+    !adoptHeadlessEffectCall ||
+    realtimeAutoDownloadCalls.length !== 2 ||
+    createHash('sha256')
+      .update(normalizedSnippet(realtimeAutoDownloadCallback, controlFile))
+      .digest('hex') !== 'c9e203ee589bb39a3e3de2be383e3ff723ff527928cd3986b4441b9a70a8f887' ||
     !sameSymbol(
       unwrapExpression(dbEventSinkConstruction.arguments[0]),
       realtimeSinkDbParameter.name,
@@ -11053,7 +11256,7 @@ function incomingIngressCertifiedNodes({
   const socketTask = socketTrackedCall
     ? oneInlineCallback(socketTrackedCall.node, 1, 'lease')
     : undefined;
-  const socketConnectLeaseStatement = socketConnect.body.statements[6];
+  const socketConnectLeaseStatement = socketConnect.body.statements[5];
   const socketConnectLeaseExpression = ts.isExpressionStatement(socketConnectLeaseStatement)
     ? unwrapExpression(socketConnectLeaseStatement.expression)
     : undefined;
@@ -11297,29 +11500,24 @@ function incomingIngressCertifiedNodes({
     socketLifecycleField.modifiers?.length !== 1 ||
     socketLifecycleField.modifiers[0].kind !== ts.SyntaxKind.PrivateKeyword ||
     socketLifecycleWrites.length !== 3 ||
-    socketConnect.body.statements.length !== 9 ||
-    statementText(socketConnect, 0) !==
-      "if (opts.legacyQueryAuth && isScopedDeviceCredential(password)) { throw new RangeError( 'Scoped device credentials require Socket.IO auth.token and cannot use legacy query authentication.', ); }" ||
+    socketConnect.body.statements.length !== 8 ||
     !scopedDeviceCredentialBinding ||
-    scopedDeviceCredentialCalls.length !== 2 ||
-    !scopedDeviceCredentialCalls.some((call) =>
-      nodeIsInside(call, socketConnect.body.statements[0]),
-    ) ||
-    statementText(socketConnect, 1) !== 'this.lifecycleGeneration += 1;' ||
-    statementText(socketConnect, 2) !== 'this.retireCurrentConnection();' ||
-    statementText(socketConnect, 3) !== 'this.stopped = false;' ||
-    statementText(socketConnect, 4) !== 'this.origin = origin;' ||
-    statementText(socketConnect, 5) !== 'this.password = password;' ||
-    statementText(socketConnect, 6) !== 'this.accountLease = captureRealtimeDeliveryLease();' ||
+    scopedDeviceCredentialCalls.length !== 1 ||
+    statementText(socketConnect, 0) !== 'this.lifecycleGeneration += 1;' ||
+    statementText(socketConnect, 1) !== 'this.retireCurrentConnection();' ||
+    statementText(socketConnect, 2) !== 'this.stopped = false;' ||
+    statementText(socketConnect, 3) !== 'this.origin = origin;' ||
+    statementText(socketConnect, 4) !== 'this.password = password;' ||
+    statementText(socketConnect, 5) !== 'this.accountLease = captureRealtimeDeliveryLease();' ||
     !socketConnectLeaseCall ||
     socketConnectLeaseCall.arguments.length !== 0 ||
     !socketAccountLeaseWrites.some((write) =>
-      nodeIsInside(write, socketConnect.body.statements[6]),
+      nodeIsInside(write, socketConnect.body.statements[5]),
     ) ||
-    !socketLifecycleWrites.some((write) => nodeIsInside(write, socketConnect.body.statements[1])) ||
-    statementText(socketConnect, 7) !==
+    !socketLifecycleWrites.some((write) => nodeIsInside(write, socketConnect.body.statements[0])) ||
+    statementText(socketConnect, 6) !==
       'this.opts = { ...opts, headers: opts.headers ? { ...opts.headers } : undefined };' ||
-    statementText(socketConnect, 8) !== 'this.openSocket();' ||
+    statementText(socketConnect, 7) !== 'this.openSocket();' ||
     !socketSequenceState ||
     !(socketSequenceState.declarationList.flags & ts.NodeFlags.Let) ||
     !socketSequenceState.declaration.initializer ||
@@ -11867,13 +12065,46 @@ function incomingIngressCertifiedNodes({
     : [];
   const fcmCaptureCall = sole(exactCallEdges(edges, handleIncomingFcm, captureFcm));
   const fcmTrackedCall = sole(exactCallEdges(edges, handleIncomingFcm, runTrackedDelivery));
-  const fcmTask = fcmTrackedCall ? oneInlineCallback(fcmTrackedCall.node, 0, 'lease') : undefined;
-  const fcmLockCalls = fcmTask ? exactCallEdges(edges, fcmTask, deliverRespectingLock) : [];
-  const fcmHeadlessCollectionCall = fcmTask
-    ? sole(exactCallEdges(edges, fcmTask, beginHeadlessEffectCollection))
+  const fcmTask = fcmTrackedCall
+    ? oneInlineCallback(fcmTrackedCall.node, 0, 'accountLease')
+    : undefined;
+  const fcmLeaseDeclaration =
+    fcmTask?.body && ts.isBlock(fcmTask.body)
+      ? singleConstDeclaration(fcmTask.body.statements[0], 'lease')
+      : undefined;
+  const fcmDeliveryTaskDeclaration =
+    fcmTask?.body && ts.isBlock(fcmTask.body)
+      ? singleConstDeclaration(fcmTask.body.statements[1], 'deliveryTask')
+      : undefined;
+  const fcmDeliveryInvocation = fcmDeliveryTaskDeclaration?.initializer
+    ? callExpression(fcmDeliveryTaskDeclaration.initializer)
+    : undefined;
+  const fcmDeliveryTaskExpression = fcmDeliveryInvocation
+    ? unwrapExpression(fcmDeliveryInvocation.expression)
+    : undefined;
+  const fcmDeliveryTask =
+    fcmDeliveryTaskExpression && ts.isArrowFunction(fcmDeliveryTaskExpression)
+      ? fcmDeliveryTaskExpression
+      : undefined;
+  const fcmDeliveryInvocationEdge = fcmDeliveryTask
+    ? sole(exactCallEdges(edges, fcmTask, fcmDeliveryTask))
+    : undefined;
+  const fcmOwnerWaitCall = fcmTask
+    ? sole(exactCallEdges(edges, fcmTask, waitForFcmDeliveryOwner))
+    : undefined;
+  const fcmInvalidationSubscription = sole(
+    exactCallEdges(edges, waitForFcmDeliveryOwner, subscribeRealtimeGenerationInvalidation),
+  );
+  const fcmLockCalls = fcmDeliveryTask
+    ? exactCallEdges(edges, fcmDeliveryTask, deliverRespectingLock)
+    : [];
+  const fcmHeadlessCollectionCall = fcmDeliveryTask
+    ? sole(exactCallEdges(edges, fcmDeliveryTask, beginHeadlessEffectCollection))
     : undefined;
   const fcmHeadlessEffectTry =
-    fcmTask?.body && ts.isBlock(fcmTask.body) ? fcmTask.body.statements[4] : undefined;
+    fcmDeliveryTask?.body && ts.isBlock(fcmDeliveryTask.body)
+      ? fcmDeliveryTask.body.statements[5]
+      : undefined;
   const fcmTry = handleIncomingFcm.body.statements[0];
   const fcmDeliveryDeclaration = ts.isTryStatement(fcmTry)
     ? singleConstDeclaration(fcmTry.tryBlock.statements[0], 'delivery')
@@ -11888,13 +12119,20 @@ function incomingIngressCertifiedNodes({
     fcmHeadlessCompletionStatement && ts.isVariableStatement(fcmHeadlessCompletionStatement)
       ? fcmHeadlessCompletionStatement.declarationList.declarations[0]
       : undefined;
+  const fcmUnderlyingDeliveryStatement = ts.isTryStatement(fcmTry)
+    ? fcmTry.tryBlock.statements[3]
+    : undefined;
+  const fcmUnderlyingDeliveryDeclaration =
+    fcmUnderlyingDeliveryStatement && ts.isVariableStatement(fcmUnderlyingDeliveryStatement)
+      ? fcmUnderlyingDeliveryStatement.declarationList.declarations[0]
+      : undefined;
   const fcmPreviousDeclaration = ts.isTryStatement(fcmTry)
-    ? singleConstDeclaration(fcmTry.tryBlock.statements[3], 'previous')
+    ? singleConstDeclaration(fcmTry.tryBlock.statements[4], 'previous')
     : undefined;
   const fcmTrackedDeclaration = ts.isTryStatement(fcmTry)
-    ? singleConstDeclaration(fcmTry.tryBlock.statements[4], 'tracked')
+    ? singleConstDeclaration(fcmTry.tryBlock.statements[5], 'tracked')
     : undefined;
-  const fcmTailStatement = ts.isTryStatement(fcmTry) ? fcmTry.tryBlock.statements[5] : undefined;
+  const fcmTailStatement = ts.isTryStatement(fcmTry) ? fcmTry.tryBlock.statements[6] : undefined;
   const fcmTailAssignment =
     fcmTailStatement && ts.isExpressionStatement(fcmTailStatement)
       ? unwrapExpression(fcmTailStatement.expression)
@@ -11904,12 +12142,15 @@ function incomingIngressCertifiedNodes({
       ? callExpression(fcmTailAssignment.right)
       : undefined;
   const fcmTailThenAccess = fcmTailThenCall ? callAccess(fcmTailThenCall.expression) : undefined;
-  const fcmResultStatement = ts.isTryStatement(fcmTry) ? fcmTry.tryBlock.statements[6] : undefined;
+  const fcmTailThenReceiver = fcmTailThenAccess
+    ? unwrapExpression(fcmTailThenAccess.receiver)
+    : undefined;
+  const fcmResultStatement = ts.isTryStatement(fcmTry) ? fcmTry.tryBlock.statements[7] : undefined;
   const fcmResultDeclaration =
     fcmResultStatement && ts.isVariableStatement(fcmResultStatement)
       ? fcmResultStatement.declarationList.declarations[0]
       : undefined;
-  const fcmResultTry = ts.isTryStatement(fcmTry) ? fcmTry.tryBlock.statements[7] : undefined;
+  const fcmResultTry = ts.isTryStatement(fcmTry) ? fcmTry.tryBlock.statements[8] : undefined;
   const fcmResultAssignmentStatement =
     fcmResultTry && ts.isTryStatement(fcmResultTry)
       ? fcmResultTry.tryBlock.statements[0]
@@ -11922,7 +12163,62 @@ function incomingIngressCertifiedNodes({
     fcmResultAssignment && ts.isBinaryExpression(fcmResultAssignment)
       ? unwrapExpression(fcmResultAssignment.right)
       : undefined;
+  const fcmLifetimeControllerDeclaration = singleConstDeclaration(
+    createFcmHeadlessCallbackLifetime.body.statements[0],
+    'controller',
+  );
+  const fcmLifetimeControllerConstruction = fcmLifetimeControllerDeclaration?.initializer
+    ? unwrapExpression(fcmLifetimeControllerDeclaration.initializer)
+    : undefined;
+  const fcmLifetimeControllerSymbol =
+    fcmLifetimeControllerConstruction && ts.isNewExpression(fcmLifetimeControllerConstruction)
+      ? unaliasSymbol(
+          checker.getSymbolAtLocation(
+            unwrapExpression(fcmLifetimeControllerConstruction.expression),
+          ),
+          checker,
+        )
+      : undefined;
+  const fcmLifetimeTimerDeclaration = singleConstDeclaration(
+    createFcmHeadlessCallbackLifetime.body.statements[8],
+    'deadlineTimer',
+  );
+  const fcmLifetimeTimerCall = fcmLifetimeTimerDeclaration?.initializer
+    ? callExpression(fcmLifetimeTimerDeclaration.initializer)
+    : undefined;
+  const fcmLifetimeTimerSymbol = fcmLifetimeTimerCall
+    ? unaliasSymbol(
+        checker.getSymbolAtLocation(unwrapExpression(fcmLifetimeTimerCall.expression)),
+        checker,
+      )
+    : undefined;
+  const fcmLifetimeReturn = createFcmHeadlessCallbackLifetime.body.statements[11];
+  const fcmLifetimeReturnObject =
+    fcmLifetimeReturn && ts.isReturnStatement(fcmLifetimeReturn) && fcmLifetimeReturn.expression
+      ? unwrapExpression(fcmLifetimeReturn.expression)
+      : undefined;
+  const fcmLifetimeSignalProperty =
+    fcmLifetimeReturnObject && ts.isObjectLiteralExpression(fcmLifetimeReturnObject)
+      ? fcmLifetimeReturnObject.properties[3]
+      : undefined;
   if (
+    createFcmHeadlessCallbackLifetime.body.statements.length !== 12 ||
+    !fcmLifetimeControllerDeclaration ||
+    !fcmLifetimeControllerConstruction ||
+    !ts.isNewExpression(fcmLifetimeControllerConstruction) ||
+    fcmLifetimeControllerConstruction.arguments?.length !== 0 ||
+    !isPlatformGlobalSymbol(fcmLifetimeControllerSymbol) ||
+    !fcmLifetimeTimerDeclaration ||
+    !fcmLifetimeTimerCall ||
+    fcmLifetimeTimerCall.arguments.length !== 2 ||
+    !isPlatformGlobalSymbol(fcmLifetimeTimerSymbol) ||
+    !snippetIs(
+      fcmLifetimeTimerCall,
+      'setTimeout(expire, Math.max(0, deliveryDeadlineAt - Date.now()))',
+    ) ||
+    !fcmLifetimeSignalProperty ||
+    !ts.isPropertyAssignment(fcmLifetimeSignalProperty) ||
+    normalizedSnippet(fcmLifetimeSignalProperty, fcmFile) !== 'signal: controller.signal' ||
     !fcmAdmissionTailState ||
     !(fcmAdmissionTailState.declarationList.flags & ts.NodeFlags.Let) ||
     !fcmAdmissionTailState.declaration.initializer ||
@@ -11940,7 +12236,7 @@ function incomingIngressCertifiedNodes({
     !ts.isTryStatement(fcmTry) ||
     !fcmTry.catchClause ||
     fcmTry.finallyBlock ||
-    fcmTry.tryBlock.statements.length !== 9 ||
+    fcmTry.tryBlock.statements.length !== 11 ||
     fcmTry.catchClause.block.statements.length !== 1 ||
     normalizedSnippet(fcmTry.catchClause.block.statements[0], fcmFile) !==
       "logger.warn( '[fcm] push delivery failed; sync may recover server state, but a one-time event may be lost', { source, errorName: error instanceof Error ? error.name : 'UnknownError', }, );" ||
@@ -11954,24 +12250,29 @@ function incomingIngressCertifiedNodes({
       handleIncomingFcm.parameters[0].name,
       checker,
     ) ||
-    !sameSymbol(
-      unwrapExpression(fcmCaptureCall.node.arguments[1]),
-      handleIncomingFcm.parameters[2].name,
-      checker,
-    ) ||
+    !snippetIs(fcmCaptureCall.node.arguments[1], 'backgroundLifetime?.receivedAt') ||
     !fcmHeadlessDeadlineDeclaration?.initializer ||
     statementText({ body: fcmTry.tryBlock }, 1) !==
       "const headlessEffectDeadlineAt = source === 'background' ? (delivery.occurrence.receivedAt ?? Date.now()) + REALTIME_HEADLESS_EFFECT_WINDOW_MS : null;" ||
     !fcmHeadlessCompletionStatement ||
     !ts.isVariableStatement(fcmHeadlessCompletionStatement) ||
-    !(fcmHeadlessCompletionStatement.declarationList.flags & ts.NodeFlags.Let) ||
+    !(fcmHeadlessCompletionStatement.declarationList.flags & ts.NodeFlags.Const) ||
     fcmHeadlessCompletionStatement.declarationList.declarations.length !== 1 ||
     !fcmHeadlessCompletionDeclaration ||
     !ts.isIdentifier(fcmHeadlessCompletionDeclaration.name) ||
-    fcmHeadlessCompletionDeclaration.name.text !== 'headlessEffectCompletion' ||
-    fcmHeadlessCompletionDeclaration.initializer?.kind !== ts.SyntaxKind.NullKeyword ||
+    fcmHeadlessCompletionDeclaration.name.text !== 'headlessEffect' ||
     normalizedSnippet(fcmHeadlessCompletionStatement, fcmFile) !==
-      'let headlessEffectCompletion: Promise<RealtimeHeadlessEffectOutcome> | null = null;' ||
+      'const headlessEffect: { collection: RealtimeHeadlessEffectCollection | null; completion: Promise<RealtimeHeadlessEffectOutcome> | null; } = { collection: null, completion: null };' ||
+    !fcmUnderlyingDeliveryStatement ||
+    !ts.isVariableStatement(fcmUnderlyingDeliveryStatement) ||
+    !(fcmUnderlyingDeliveryStatement.declarationList.flags & ts.NodeFlags.Let) ||
+    fcmUnderlyingDeliveryStatement.declarationList.declarations.length !== 1 ||
+    !fcmUnderlyingDeliveryDeclaration ||
+    !ts.isIdentifier(fcmUnderlyingDeliveryDeclaration.name) ||
+    fcmUnderlyingDeliveryDeclaration.name.text !== 'underlyingDelivery' ||
+    fcmUnderlyingDeliveryDeclaration.initializer?.kind !== ts.SyntaxKind.NullKeyword ||
+    normalizedSnippet(fcmUnderlyingDeliveryStatement, fcmFile) !==
+      'let underlyingDelivery: Promise<void> | null = null;' ||
     !fcmPreviousDeclaration ||
     !fcmPreviousDeclaration.initializer ||
     !sameSymbol(
@@ -11983,22 +12284,38 @@ function incomingIngressCertifiedNodes({
     fcmTrackedCall.node.arguments.length !== 1 ||
     !fcmTrackedDeclaration ||
     unwrapExpression(fcmTrackedDeclaration.initializer) !== fcmTrackedCall.node ||
-    !nodeIsInside(fcmTrackedCall.node, fcmTry.tryBlock.statements[4]) ||
+    !nodeIsInside(fcmTrackedCall.node, fcmTry.tryBlock.statements[5]) ||
     !fcmTask ||
     !fcmTask.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword) ||
     !ts.isBlock(fcmTask.body) ||
-    fcmTask.body.statements.length !== 5 ||
-    normalizedSnippet(fcmTask.body.statements[0], fcmFile) !== 'await previous;' ||
+    fcmTask.body.statements.length !== 4 ||
+    !fcmLeaseDeclaration ||
+    normalizedSnippet(fcmTask.body.statements[0], fcmFile) !==
+      'const lease: RealtimeDeliveryLease = backgroundLifetime ? { generation: accountLease.generation, signal: backgroundLifetime.signal, isCurrent: () => accountLease.isCurrent() && backgroundLifetime.isCurrent(), } : accountLease;' ||
+    !fcmDeliveryTaskDeclaration ||
+    !fcmDeliveryInvocation ||
+    fcmDeliveryInvocation.arguments.length !== 0 ||
+    !fcmDeliveryTask ||
+    !fcmDeliveryTask.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword) ||
+    !hasPlainIdentifierParameters(fcmDeliveryTask, []) ||
+    !ts.isBlock(fcmDeliveryTask.body) ||
+    fcmDeliveryTask.body.statements.length !== 6 ||
+    !fcmDeliveryInvocationEdge ||
+    fcmDeliveryInvocationEdge.node !== fcmDeliveryInvocation ||
+    normalizedSnippet(fcmDeliveryTask.body.statements[0], fcmFile) !== 'await previous;' ||
     !sameSymbol(
-      unwrapExpression(fcmTask.body.statements[0].expression.expression),
+      unwrapExpression(fcmDeliveryTask.body.statements[0].expression.expression),
       fcmPreviousDeclaration.name,
       checker,
     ) ||
-    normalizedSnippet(fcmTask.body.statements[1], fcmFile) !== 'if (!lease.isCurrent()) return;' ||
-    normalizedSnippet(fcmTask.body.statements[2], fcmFile) !==
+    normalizedSnippet(fcmDeliveryTask.body.statements[1], fcmFile) !==
+      'if (!lease.isCurrent()) return;' ||
+    normalizedSnippet(fcmDeliveryTask.body.statements[2], fcmFile) !==
       'if (headlessEffectDeadlineAt == null) { await deliverRespectingLock(delivery, source, lease); return; }' ||
-    normalizedSnippet(fcmTask.body.statements[3], fcmFile) !==
+    normalizedSnippet(fcmDeliveryTask.body.statements[3], fcmFile) !==
       'const collection = beginRealtimeHeadlessEffectCollection(lease, { deadlineAt: headlessEffectDeadlineAt, });' ||
+    normalizedSnippet(fcmDeliveryTask.body.statements[4], fcmFile) !==
+      'headlessEffect.collection = collection;' ||
     !fcmHeadlessEffectTry ||
     !ts.isTryStatement(fcmHeadlessEffectTry) ||
     fcmHeadlessEffectTry.catchClause ||
@@ -12008,26 +12325,38 @@ function incomingIngressCertifiedNodes({
     normalizedSnippet(fcmHeadlessEffectTry.tryBlock.statements[0], fcmFile) !==
       'await deliverRespectingLock(delivery, source, lease);' ||
     normalizedSnippet(fcmHeadlessEffectTry.finallyBlock.statements[0], fcmFile) !==
-      'headlessEffectCompletion = collection.close();' ||
+      'headlessEffect.completion ??= collection.close();' ||
     !exactly(fcmLockCalls, 2) ||
     !fcmLockCalls.every(
       (edge) =>
-        coordinatorCallbackAdoptsInvocation(edge.node, fcmTask) &&
+        coordinatorCallbackAdoptsInvocation(edge.node, fcmDeliveryTask) &&
         snippetIs(edge.node, 'deliverRespectingLock(delivery, source, lease)'),
     ) ||
-    !fcmLockCalls.some((edge) => nodeIsInside(edge.node, fcmTask.body.statements[2])) ||
-    !fcmLockCalls.some((edge) => nodeIsInside(edge.node, fcmTask.body.statements[4])) ||
+    !fcmLockCalls.some((edge) => nodeIsInside(edge.node, fcmDeliveryTask.body.statements[2])) ||
+    !fcmLockCalls.some((edge) => nodeIsInside(edge.node, fcmDeliveryTask.body.statements[5])) ||
     !fcmHeadlessCollectionCall ||
-    !nodeIsInside(fcmHeadlessCollectionCall.node, fcmTask.body.statements[3]) ||
+    !nodeIsInside(fcmHeadlessCollectionCall.node, fcmDeliveryTask.body.statements[3]) ||
     fcmHeadlessCollectionCall.node.arguments.length !== 2 ||
     !sameSymbol(
       unwrapExpression(fcmHeadlessCollectionCall.node.arguments[0]),
-      fcmTask.parameters[0].name,
+      fcmLeaseDeclaration.name,
       checker,
     ) ||
     !snippetIs(
       fcmHeadlessCollectionCall.node.arguments[1],
       '{ deadlineAt: headlessEffectDeadlineAt, }',
+    ) ||
+    normalizedSnippet(fcmTask.body.statements[2], fcmFile) !==
+      'underlyingDelivery = deliveryTask;' ||
+    !fcmOwnerWaitCall ||
+    fcmOwnerWaitCall.node.arguments.length !== 3 ||
+    !nodeIsInside(fcmOwnerWaitCall.node, fcmTask.body.statements[3]) ||
+    normalizedSnippet(fcmTask.body.statements[3], fcmFile) !==
+      'await waitForFcmDeliveryOwner(deliveryTask, lease, backgroundLifetime);' ||
+    !fcmInvalidationSubscription ||
+    !snippetIs(
+      fcmInvalidationSubscription.node,
+      'subscribeRealtimeGenerationInvalidation( lease.generation, resolveGenerationInvalidated, )',
     ) ||
     !fcmTailAssignment ||
     !ts.isBinaryExpression(fcmTailAssignment) ||
@@ -12041,9 +12370,17 @@ function incomingIngressCertifiedNodes({
     !fcmTailThenCall ||
     !fcmTailThenAccess ||
     fcmTailThenAccess.method !== 'then' ||
+    !fcmTailThenReceiver ||
+    !ts.isBinaryExpression(fcmTailThenReceiver) ||
+    fcmTailThenReceiver.operatorToken.kind !== ts.SyntaxKind.QuestionQuestionToken ||
     !sameSymbol(
-      unwrapExpression(fcmTailThenAccess.receiver),
-      fcmTrackedDeclaration.name,
+      unwrapExpression(fcmTailThenReceiver.left),
+      fcmUnderlyingDeliveryDeclaration.name,
+      checker,
+    ) ||
+    !sameSymbol(
+      unwrapExpression(fcmTailThenReceiver.right),
+      fcmPreviousDeclaration.name,
       checker,
     ) ||
     fcmTailThenCall.arguments.length !== 2 ||
@@ -12073,15 +12410,17 @@ function incomingIngressCertifiedNodes({
     !ts.isAwaitExpression(fcmResultAwait) ||
     !sameSymbol(unwrapExpression(fcmResultAwait.expression), fcmTrackedDeclaration.name, checker) ||
     normalizedSnippet(fcmResultTry.finallyBlock.statements[0], fcmFile) !==
-      'const effectOutcome = await headlessEffectCompletion;' ||
+      'const effectOutcome = await (headlessEffect.completion ?? headlessEffect.collection?.close());' ||
     normalizedSnippet(fcmResultTry.finallyBlock.statements[1], fcmFile) !==
       "if (effectOutcome === 'deadline') { logger.warn('[fcm] headless side effects reached their bounded effect deadline'); }" ||
-    normalizedSnippet(fcmTry.tryBlock.statements[8], fcmFile) !==
+    normalizedSnippet(fcmTry.tryBlock.statements[9], fcmFile) !==
+      "if (backgroundLifetime?.didExpire()) { logger.warn('[fcm] delivery reached its bounded callback deadline'); }" ||
+    normalizedSnippet(fcmTry.tryBlock.statements[10], fcmFile) !==
       "if (result === 'paused') { logger.debug('[fcm] delivery paused during account transition', { source }); }"
   ) {
     return empty();
   }
-  approved.push(...fcmLockCalls.map((edge) => edge.node));
+  approved.push(fcmDeliveryInvocationEdge.node, ...fcmLockCalls.map((edge) => edge.node));
 
   // Headless delivery awaits the common handler and log flush in finally. Foreground delivery is
   // a contained void call into the same catch-owning handler. Registration remains module-top.
@@ -12091,15 +12430,14 @@ function incomingIngressCertifiedNodes({
     handleBackgroundFcm.body.statements[0],
     'receivedAt',
   );
-  const backgroundFinalizationDeadlineDeclaration = singleConstDeclaration(
+  const backgroundLifetimeDeclaration = singleConstDeclaration(
     handleBackgroundFcm.body.statements[1],
-    'finalizationDeadlineAt',
+    'lifetime',
+  );
+  const backgroundLifetimeCall = sole(
+    exactCallEdges(edges, handleBackgroundFcm, createFcmHeadlessCallbackLifetime),
   );
   const backgroundTry = handleBackgroundFcm.body.statements[2];
-  const headlessFinalizationWindow = topLevelVariable(
-    fcmFile,
-    'FCM_HEADLESS_FINALIZATION_WINDOW_MS',
-  );
   const foregroundIncoming = sole(nestedCallEdges(edges, startFcm, handleIncomingFcm));
   const foregroundCallback = foregroundIncoming?.caller;
   const foregroundRegistration = foregroundCallback?.parent;
@@ -12524,41 +12862,41 @@ function incomingIngressCertifiedNodes({
     handleBackgroundFcm.body.statements.length !== 3 ||
     !backgroundReceivedAtDeclaration?.initializer ||
     statementText(handleBackgroundFcm, 0) !== 'const receivedAt = Date.now();' ||
-    !backgroundFinalizationDeadlineDeclaration?.initializer ||
+    !backgroundLifetimeDeclaration?.initializer ||
     statementText(handleBackgroundFcm, 1) !==
-      'const finalizationDeadlineAt = receivedAt + FCM_HEADLESS_FINALIZATION_WINDOW_MS;' ||
-    !headlessFinalizationWindow ||
-    !(headlessFinalizationWindow.declarationList.flags & ts.NodeFlags.Const) ||
-    !headlessFinalizationWindow.declaration.initializer ||
-    !ts.isNumericLiteral(headlessFinalizationWindow.declaration.initializer) ||
-    headlessFinalizationWindow.declaration.initializer.text !== '55000' ||
+      'const lifetime = createFcmHeadlessCallbackLifetime(receivedAt);' ||
+    !backgroundLifetimeCall ||
+    backgroundLifetimeCall.node !== backgroundLifetimeDeclaration.initializer ||
+    backgroundLifetimeCall.node.arguments.length !== 1 ||
+    !sameSymbol(
+      unwrapExpression(backgroundLifetimeCall.node.arguments[0]),
+      backgroundReceivedAtDeclaration.name,
+      checker,
+    ) ||
     !ts.isTryStatement(backgroundTry) ||
     backgroundTry.catchClause ||
     !backgroundTry.finallyBlock ||
     backgroundTry.tryBlock.statements.length !== 1 ||
-    backgroundTry.finallyBlock.statements.length !== 1 ||
+    backgroundTry.finallyBlock.statements.length !== 2 ||
     !backgroundIncoming ||
     !coordinatorCallbackAdoptsInvocation(backgroundIncoming.node, handleBackgroundFcm) ||
-    !snippetIs(backgroundIncoming.node, "handleIncomingFcm(msg, 'background', receivedAt)") ||
+    !snippetIs(backgroundIncoming.node, "handleIncomingFcm(msg, 'background', lifetime)") ||
     backgroundIncoming.node.arguments.length !== 3 ||
     !sameSymbol(
       unwrapExpression(backgroundIncoming.node.arguments[2]),
-      backgroundReceivedAtDeclaration.name,
+      backgroundLifetimeDeclaration.name,
       checker,
     ) ||
     !ts.isAwaitExpression(unwrapExpression(backgroundIncoming.node.parent)) ||
+    normalizedSnippet(backgroundTry.finallyBlock.statements[0], fcmFile) !== 'lifetime.finish();' ||
     !backgroundFlush ||
     !coordinatorCallbackAdoptsInvocation(backgroundFlush.node, handleBackgroundFcm) ||
     !snippetIs(
       backgroundFlush.node,
-      'flushPersistentLogsForHeadlessCompletion(finalizationDeadlineAt)',
+      'flushPersistentLogsForHeadlessCompletion(lifetime.finalizationDeadlineAt)',
     ) ||
     backgroundFlush.node.arguments.length !== 1 ||
-    !sameSymbol(
-      unwrapExpression(backgroundFlush.node.arguments[0]),
-      backgroundFinalizationDeadlineDeclaration.name,
-      checker,
-    ) ||
+    !snippetIs(backgroundFlush.node.arguments[0], 'lifetime.finalizationDeadlineAt') ||
     !ts.isAwaitExpression(unwrapExpression(backgroundFlush.node.parent)) ||
     !foregroundIncoming ||
     !snippetIs(foregroundIncoming.node, "handleIncomingFcm(msg, 'foreground')") ||
@@ -12793,8 +13131,12 @@ function incomingIngressCertifiedNodes({
     !snippetIs(recoveredResumeCall.node, 'runtime.dispatcher.resume(retryContext)') ||
     !snippetIs(
       finishRecoveredCall.node,
-      'resumeRecoveredRealtimeEvents(runtime, collector.generation)',
+      'resumeRecoveredRealtimeEvents(runtime, collector.generation, collector.owner)',
     ) ||
+    finishRecoveredCall.node.arguments.length !== 3 ||
+    !snippetIs(finishRecoveredCall.node.arguments[0], 'runtime') ||
+    !snippetIs(finishRecoveredCall.node.arguments[1], 'collector.generation') ||
+    !snippetIs(finishRecoveredCall.node.arguments[2], 'collector.owner') ||
     !ts.isAwaitExpression(unwrapExpression(finishRecoveredCall.node.parent)) ||
     !startRecoveryTracker ||
     !resumeRecoveryTracker ||
@@ -12831,10 +13173,7 @@ function incomingIngressCertifiedNodes({
     startSocketConnectCall.arguments.length !== 3 ||
     !snippetIs(startSocketConnectCall.arguments[0], 'transport.origin') ||
     !snippetIs(startSocketConnectCall.arguments[1], 'transport.password') ||
-    !snippetIs(
-      startSocketConnectCall.arguments[2],
-      "{ headers: { ...transport.headers }, legacyQueryAuth: transport.authMode === 'legacy-query', }",
-    ) ||
+    !snippetIs(startSocketConnectCall.arguments[2], '{ headers: { ...transport.headers }, }') ||
     startRuntimeCall.arguments.length !== 2 ||
     !snippetIs(startRuntimeCall.arguments[0], 'db') ||
     !snippetIs(startRuntimeCall.arguments[1], 'accountLease') ||
@@ -12879,16 +13218,21 @@ function incomingIngressCertifiedNodes({
       durableResume,
       [resumeProofCall.node, startResumeCall.node, resumeResumeCall.node, recoveredResumeCall.node],
     ],
-    [
-      dispatchRealtimeEvent,
-      [...fcmDispatchCalls.map((edge) => edge.node), devDispatchCall.node],
-    ],
+    [dispatchRealtimeEvent, [...fcmDispatchCalls.map((edge) => edge.node), devDispatchCall.node]],
     [devPushInject, devOuterNodes.slice(2)],
     [devPersist, [devOuterNodes[0]]],
     [devResume, [devOuterNodes[1]]],
     [deliver, deliverCalls.map((edge) => edge.node)],
     [deliverRespectingLock, fcmLockCalls.map((edge) => edge.node)],
+    [fcmDeliveryTask, [fcmDeliveryInvocationEdge.node]],
+    [createFcmHeadlessCallbackLifetime, [backgroundLifetimeCall.node]],
     [beginHeadlessEffectCollection, [fcmHeadlessCollectionCall.node]],
+    [recoverRealtimePrerequisite, [recoverPrerequisiteCall.node]],
+    [adoptRealtimeHeadlessEffect, [adoptHeadlessEffectCall.node]],
+    [
+      autoDownloadMessageAttachmentsForRealtimeEvent,
+      realtimeAutoDownloadCalls.map((edge) => edge.node),
+    ],
     [beginRealtimeRecoveryCollector, [beginRecoveryCall.node]],
     [finishRealtimeRecoveryCollector, [finishRecoveryCall.node]],
     [resumeRecoveredRealtimeEvents, [finishRecoveredCall.node]],
@@ -12950,7 +13294,7 @@ function incomingIngressCertifiedNodes({
     return empty();
   }
   const certified = new Set(approved);
-  if (approved.length !== 27 || certified.size !== 27) return empty();
+  if (approved.length !== 28 || certified.size !== 28) return empty();
 
   const protectedOwners = new Set([
     dispatchRealtimeEvent,
@@ -12959,6 +13303,10 @@ function incomingIngressCertifiedNodes({
     trackedDeliveryCallback,
     resetRealtimeRuntime,
     getRealtimeRuntime,
+    requestRealtimeRecovery,
+    beginRealtimeRecoveryCollector,
+    finishRealtimeRecoveryCollector,
+    resumeRecoveredRealtimeEvents,
     realtimeIntakeLocked,
     canPersistRealtimeEvent,
     createDevProofContext,
@@ -12990,8 +13338,10 @@ function incomingIngressCertifiedNodes({
     captureFcm,
     deliver,
     deliverRespectingLock,
+    createFcmHeadlessCallbackLifetime,
     handleIncomingFcm,
     fcmTask,
+    fcmDeliveryTask,
     handleBackgroundFcm,
     startFcm,
     foregroundCallback,

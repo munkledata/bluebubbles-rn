@@ -1,10 +1,8 @@
 /* eslint-disable import/first -- Jest mocks must be registered before importing their consumers. */
 /**
- * SocketService auth-mode wiring. The secure default puts the password in the
- * handshake `auth` payload (never the URL); legacy mode falls back to a `?guid=`
- * query for a stock/old server that only reads the legacy param. These
- * tests assert the exact `io()` options for each mode so a regression can't silently
- * leak the password into the URL (or break stock-server connectivity).
+ * SocketService auth wiring. Credentials belong in the handshake `auth` payload, never
+ * the URL query. These tests pin the shared-password and scoped-device forms so a regression
+ * cannot silently leak either credential into a URL.
  */
 const mockEmit = jest.fn();
 const mockIo = jest.fn((..._args: unknown[]) => ({
@@ -24,7 +22,7 @@ function lastIoOptions(): Record<string, unknown> {
   return calls[calls.length - 1]![1] as Record<string, unknown>;
 }
 
-describe('SocketService auth mode', () => {
+describe('SocketService auth', () => {
   beforeEach(() => {
     mockIo.mockClear();
     mockEmit.mockClear();
@@ -52,44 +50,10 @@ describe('SocketService auth mode', () => {
     expect(opts.extraHeaders).toEqual({ Authorization: `Bearer ${token}` });
   });
 
-  it('rejects a scoped device credential instead of leaking it through legacy query auth', () => {
-    const token = `bbd_device_v1_${'z'.repeat(43)}`;
-    const service = new SocketService(handleRawEvent);
-
-    expect(() => service.connect('https://srv', token, { legacyQueryAuth: true })).toThrow(
-      'Scoped device credentials require Socket.IO auth.token',
-    );
-    expect(mockIo).not.toHaveBeenCalled();
-  });
-
-  it('rejects an invalid scoped reconnect before retiring the existing socket', () => {
-    const service = new SocketService(handleRawEvent);
-    service.connect('https://current.example', 'current-shared-password');
-    const currentSocket = mockIo.mock.results[0]!.value as { disconnect: jest.Mock };
-    const token = `bbd_device_v1_${'q'.repeat(43)}`;
-
-    expect(() =>
-      service.connect('https://replacement.example', token, { legacyQueryAuth: true }),
-    ).toThrow('Scoped device credentials require Socket.IO auth.token');
-
-    expect(currentSocket.disconnect).not.toHaveBeenCalled();
-    expect(mockIo).toHaveBeenCalledTimes(1);
-    expect(mockIo).toHaveBeenLastCalledWith(
-      'https://current.example',
-      expect.objectContaining({ auth: { password: 'current-shared-password' } }),
-    );
-  });
-
-  it('legacy mode: sends a ?guid= query and no auth payload', () => {
-    new SocketService(handleRawEvent).connect('https://srv', 'pw', { legacyQueryAuth: true });
-    const opts = lastIoOptions();
-    expect(opts.query).toEqual({ guid: 'pw' });
-    expect(opts.auth).toBeUndefined();
-  });
-
   it('never places the password in the connection origin (URL)', () => {
-    new SocketService(handleRawEvent).connect('https://srv', 'pw', { legacyQueryAuth: false });
+    new SocketService(handleRawEvent).connect('https://srv', 'pw');
     expect(mockIo.mock.calls[0]![0]).toBe('https://srv');
+    expect(lastIoOptions().query).toBeUndefined();
   });
 
   it('releases its retained credential snapshot on terminal disconnect', () => {

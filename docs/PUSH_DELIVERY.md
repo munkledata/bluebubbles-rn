@@ -139,8 +139,9 @@ revoked service account, a spent quota, an HTTP 403) produced **no visible serve
   would warn on every message until the prune lands.
 - `pushMessageSink` logs the failure _shape_: `2/2 device deliveries failed` means the pipeline is
   down; `1/2` means one phone is gone.
-- `send-test-notification` returns the actual error strings (`errors: string[]`), so
-  "FCM send returned HTTP 403: …" reaches the user instead of a bare `failed: 1`.
+- The typed test-notification operation returns truthful `total`, `sent`, `failed`, and `configured`
+  counts. Provider error details stay in the Mac's local server logs rather than crossing the admin
+  API boundary.
 
 ### 2.4 One channel failure killed message notifications permanently
 
@@ -362,13 +363,16 @@ queued ordering, revision deduplication, sequential execution, deadline/account 
 native-callback wait. This closes the former detached app-cache source-lifetime gap, but is bounded
 best effort rather than a durable retry: process death after the DB checkpoint may still skip or
 interrupt the copy. The 40-second deadline covers only the attachment-effect tail, not FIFO wait or
-dispatch/presentation. Final persistent-log flushing uses a separate callback-entry
+dispatch/presentation by itself. An enclosing 50-second FCM callback lifetime covers FIFO wait,
+dispatch/presentation, prerequisite recovery, and the effect tail. Expiry revokes its composed
+lease and abort signal before the public callback continues, while the real underlying delivery
+remains the FIFO fence so a fresh callback cannot overlap it. Final persistent-log flushing uses a separate callback-entry
 `receivedAt + 55 seconds` cutoff, leaving five seconds before RNFB's 60-second Android task limit.
 It adopts the older serialized log work and its own queued write, retains ownership across every
 attempt in an older overlapping headless retry session, revokes asynchronous file-mutation authority
-before expiry returns, and suppresses later debounce/retry work. A synchronous Expo file call that
-already began cannot be interrupted, and earlier delivery can reach the finalizer after
-55 seconds, so the complete callback lifetime and exact Android behavior remain unproven.
+before expiry returns, and suppresses later debounce/retry work. A synchronous Expo/native call that
+already began cannot be interrupted, so native cancellation and complete callback timing remain
+exact-Android proof requirements rather than host claims.
 
 Headless delivery deliberately skips the immediate `expo-media-library` call because the Photos
 operation has no cancellation signal. For an eligible incoming non-sticker image with a saved
@@ -379,9 +383,10 @@ setting change or disabled auto-download cancels pending work; permission checks
 passive prompt. A process stop after MediaStore saves the copy but before receipt completion can
 cause a later duplicate attempt, so claims, age, capacity, and attempts are bounded. The app-cache
 effect itself remains best effort: death before its DB/file commit can still leave the receipt
-without an eligible source until maintenance expires it. `DL-01` remains open for exact-candidate
-receipt/restart proof and the native hostile-server, process-death, cleanup, quota, and DB/file
-device matrix.
+without an eligible source until maintenance expires it. The exact-candidate receipt/restart proof
+and native hostile-server, process-death, cleanup, quota, and DB/file device matrix completed under
+`DL-01` on Play v75. The remaining killed-process callback and incoming-retry device boundaries stay
+open under `REL-001` and `PUSH-RETRY-01`.
 
 ### 2.12 Killed-FCM prerequisite recovery owns its bounded retry (2026-09-07)
 
@@ -403,8 +408,9 @@ Host tests prove targeted ordering/caps, timeout and invalidation, App-Lock refu
 deferral, wait-only retry, both recovery/due completion orders, and generation cancellation. This
 closes the prerequisite-recovery source lifetime only. Exact Android killed-process execution and
 matching app/server deployment evidence remain open under `REL-001` and `PUSH-RETRY-01`; section
-2.11 closes the app-cache effect-tail and Gallery/Album receipt source gaps; matching-candidate
-killed-process execution and device proof remain open under `DL-01`.
+2.11 closes the app-cache effect-tail and Gallery/Album receipt source gaps. `DL-01` is complete
+under Play v75; the remaining matching-candidate killed-process execution and device proof are
+owned by `REL-001` and `PUSH-RETRY-01`.
 
 ---
 
@@ -412,19 +418,19 @@ killed-process execution and device proof remain open under `DL-01`.
 
 Work the chain from the middle out; each step tells you which side you're on.
 
-1. **Is the server sending?** Fire the test push and read the counts _and_ errors:
+1. **Is the server sending?** On the Mac, open the local Gator dashboard, go to **Devices**, and
+   choose **Send Test Notification**. The dashboard calls the typed local-only
+   `POST /api/v1/devices/test-notification` operation and shows the sent/failed counts.
+   `sent: N, failed: 0` means links 1–6 are healthy. If a delivery fails, inspect the Mac's local
+   server logs for the provider error that identifies the failed link.
 
-   ```bash
-   curl -s -X POST http://127.0.0.1:1235/api/v1/admin/command \
-     -H 'content-type: application/json' -H "x-bbd-local-auth: $TOKEN" \
-     -d '{"channel":"send-test-notification","data":{}}'
-   ```
+   Do not call the retired `/api/v1/admin/command` dispatcher or scrape a local-admin credential
+   from process arguments. Current builds intentionally keep the local dashboard capability out of
+   command-line arguments and environment variables.
 
-   `sent: N, failed: 0` means links 1–6 are healthy. Any `errors[]` entry now names the real cause.
-   (The local-auth token is on the Gator renderer process's command line: `--bbd-local-auth=…`.)
-
-2. **Are the right devices registered?** `{"channel":"get-devices"}` — check `lastActiveAt` and that
-   the token count matches the number of real installs.
+2. **Are the right devices registered?** Review the list on the same **Devices** page. It uses the
+   typed `GET /api/v1/devices` operation. Check `lastActiveAt` and confirm that the registered token
+   count matches the number of real installs.
 
 3. **Did it reach the phone?** This is the step that found the bug:
 

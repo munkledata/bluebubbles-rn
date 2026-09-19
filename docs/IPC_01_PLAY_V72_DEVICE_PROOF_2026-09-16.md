@@ -5,9 +5,11 @@
 >
 > **Disposition:** The `IPC-01` composer-paste hostile-provider, bounded-copy, deadline,
 > process-kill/relaunch, and native-publication boundaries passed on v72. Current public-share
-> absence also passed. Parent `IPC-01` remains **IN_PROGRESS** only because this post-cleanup install
-> cannot prove a no-data-wipe upgrade from a real legacy shortcut-publishing build; that shared
-> `IPC-01`/`SHARE-01` migration row remains open.
+> absence also passed. At this checkpoint, parent `IPC-01` remained **IN_PROGRESS** only because
+> this post-cleanup install could not prove a no-data-wipe upgrade from a real legacy shortcut-
+> publishing build. The later
+> [exact Play-v75 migration proof](./IPC_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md) closes that shared
+> `IPC-01`/`SHARE-01` gap; this document remains the authoritative hostile-provider/lifecycle half.
 
 ## Exact candidate and fixture
 
@@ -133,12 +135,14 @@ batch-count ceilings, expired legacy batches, and DB-protected legacy `pasted-in
 fake protected database row into the Play-signed encrypted production database would weaken rather
 than strengthen this exact-candidate test.
 
-This phone's current install began after the legacy Direct Share publisher had already been removed.
-An empty v72 shortcut inventory therefore cannot prove the separate no-data-wipe legacy migration.
-That proof needs an approved same-Play-signature baseline that first contains a synthetic legacy
-shortcut and is then naturally updated to the cleanup build; neither an uninstall nor a differently
-signed local fixture preserves the state being tested. This is the sole remaining `IPC-01` boundary
-after this run and is also owned by `SHARE-01`/`REL-005B`.
+This phone's v72 install began after the legacy Direct Share publisher had already been removed. Its
+empty shortcut inventory therefore did not prove the separate no-data-wipe legacy migration. That
+gap required an approved same-Play-signature baseline containing a synthetic legacy shortcut and a
+natural update to the cleanup build; neither an uninstall nor a differently signed local fixture
+could preserve the state being tested. The later
+[`IPC-01`/`SHARE-01` v75 proof](./IPC_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md) completed that exact
+boundary. `REL-005B` receives the shortcut-system-state subproof but remains open for the full
+distinct-account wipe.
 
 No message body, account credential, private endpoint, raw provider URI outside the synthetic
 fixture namespace, device serial, or service-account material is retained in this record.

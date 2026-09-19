@@ -301,6 +301,29 @@ describe('ServerManagementScreen — status queries', () => {
     );
   });
 
+  it.each([
+    [true, 'Read-only lookup available'],
+    [false, 'Not available'],
+    [undefined, 'Unknown'],
+  ] as const)(
+    'reports iMessage availability capability %s without enabling broad Private API access',
+    async (supported, expected) => {
+      mockInfo.mockResolvedValue({
+        server_version: '9.9.9',
+        os_version: '26.0',
+        private_api: true,
+        proxy_service: 'zrok',
+        supports_imessage_availability: supported,
+      });
+
+      await renderScreen();
+      expect(await screen.findByText('9.9.9')).toBeTruthy();
+      expect(screen.getByText('iMessage availability')).toBeTruthy();
+      expect(screen.getByText(expected)).toBeTruthy();
+      expect(screen.getByText('Retired in this release')).toBeTruthy();
+    },
+  );
+
   it.each(['success', 'rejection'] as const)(
     'isolates all three query keys and drops delayed old-account %s publication',
     async (outcome) => {
@@ -462,9 +485,9 @@ describe('ServerManagementScreen — ordinary sensitive presentation and account
     expect(screen.queryByRole('button', { name: 'Pair This Device' })).toBeNull();
     expect(screen.getByText('Device credential')).toBeTruthy();
     expect(screen.getByText('Active')).toBeTruthy();
-    expect(mockStats).toHaveBeenCalledTimes(1);
-    expect(mockStats.mock.calls[0]?.[2]).toEqual({ allowLegacyFallback: false });
-    expect(screen.getByText(PRIVATE_TOTALS.messages.toLocaleString())).toBeTruthy();
+    expect(screen.getByText('Mac dashboard only')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Refresh Statistics' })).toBeNull();
+    expect(mockStats).not.toHaveBeenCalled();
     expect(screen.queryByTestId('pairing-qr-modal')).toBeNull();
     expect(JSON.stringify(view.toJSON())).not.toContain(PRIVATE_SCOPED_CREDENTIAL);
     expect(mockQrCode).not.toHaveBeenCalled();
@@ -729,10 +752,8 @@ describe('ServerManagementScreen — statistics query', () => {
     expect(mockStats).toHaveBeenCalledTimes(2);
   });
 
-  it('shows the "unsupported" copy (not connection-blaming) when the dispatcher 404s', async () => {
-    // serverStatTotals re-throws Unimplemented when EVERY channel was a dispatcher 404 —
-    // an old server or a reverse proxy blocking /api/v1/admin/*.
-    mockStats.mockRejectedValueOnce(new UnimplementedEndpointError('/admin/command'));
+  it('shows the "unsupported" copy (not connection-blaming) when the typed route is absent', async () => {
+    mockStats.mockRejectedValueOnce(new UnimplementedEndpointError('/statistics/snapshot'));
     await renderScreen();
     expect(await screen.findByText(/doesn.t expose statistics/)).toBeTruthy();
     expect(screen.queryByText(/Check your connection/)).toBeNull();

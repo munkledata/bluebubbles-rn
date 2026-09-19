@@ -14,7 +14,7 @@ export const API_BASE_PATH = '/api/v1';
  */
 export const MIN_SERVER_VERSION = '1.9.0';
 
-/** Header used to carry the server password instead of the legacy `?guid=`. */
+/** Header used to carry the server password. */
 export const AUTH_HEADER = 'Authorization';
 
 /** Scheme prefix for the bearer-style auth header value. */

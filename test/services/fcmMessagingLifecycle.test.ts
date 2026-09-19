@@ -82,6 +82,23 @@ const mockReadFcmSessionState = jest.fn(
 );
 let leaseCurrent = true;
 const activeLease = { generation: 1, isCurrent: () => leaseCurrent };
+const mockGenerationInvalidationListeners = new Set<() => void>();
+const mockSubscribeRealtimeGenerationInvalidation = jest.fn(
+  (generation: number, listener: () => void): (() => void) => {
+    if (!leaseCurrent || generation !== activeLease.generation) {
+      listener();
+      return () => undefined;
+    }
+    mockGenerationInvalidationListeners.add(listener);
+    return () => mockGenerationInvalidationListeners.delete(listener);
+  },
+);
+function invalidateActiveGeneration(): void {
+  leaseCurrent = false;
+  const listeners = [...mockGenerationInvalidationListeners];
+  mockGenerationInvalidationListeners.clear();
+  for (const listener of listeners) listener();
+}
 const mockRunTrackedRealtimeDelivery = jest.fn(
   async (task: (lease: typeof activeLease) => Promise<void>): Promise<'delivered' | 'paused'> => {
     await task(activeLease);
@@ -141,6 +158,7 @@ jest.mock('@/services/notifications/notifeeService', () => ({
 }));
 jest.mock('@/services/realtime/deliveryCoordinator', () => ({
   runTrackedRealtimeDelivery: mockRunTrackedRealtimeDelivery,
+  subscribeRealtimeGenerationInvalidation: mockSubscribeRealtimeGenerationInvalidation,
 }));
 
 import { logger } from '@core/secure';
@@ -153,7 +171,11 @@ import {
   revokedFcmDeviceEncryptionState,
   serializeFcmDeviceEncryptionState,
 } from '@core/realtime';
-import { FCM_V2_COMPATIBILITY_CUTOFF_MS, startFcm } from '@/services/notifications/fcmMessaging';
+import {
+  FCM_HEADLESS_DELIVERY_WINDOW_MS,
+  FCM_V2_COMPATIBILITY_CUTOFF_MS,
+  startFcm,
+} from '@/services/notifications/fcmMessaging';
 import '@/services/notifications/registerFcmBackgroundHandler';
 
 const message = { messageId: 'provider-message-1', data: { type: 'new-message' } };
@@ -226,6 +248,8 @@ beforeEach(() => {
   jest.spyOn(Date, 'now').mockReturnValue(FCM_V2_COMPATIBILITY_CUTOFF_MS - 1);
   diagnosticEvent = jest.spyOn(logger, 'event').mockImplementation(() => undefined);
   leaseCurrent = true;
+  mockGenerationInvalidationListeners.clear();
+  mockSubscribeRealtimeGenerationInvalidation.mockClear();
   mockGetMessaging.mockReturnValue({ app: 'messaging' });
   mockDispatchRealtimeEvent.mockResolvedValue(undefined);
   mockPersistAuthenticatedLockedFcmV3Event.mockResolvedValue('enqueued');
@@ -279,7 +303,11 @@ describe('FCM native callback ownership', () => {
 
     expect(mockRunTrackedRealtimeDelivery).toHaveBeenCalledTimes(1);
     expect(mockBeginHeadlessEffects).toHaveBeenCalledWith(
-      activeLease,
+      expect.objectContaining({
+        generation: activeLease.generation,
+        signal: expect.any(AbortSignal),
+        isCurrent: expect.any(Function),
+      }),
       expect.objectContaining({ deadlineAt: expect.any(Number) }),
     );
     expect(mockCloseHeadlessEffects).toHaveBeenCalledTimes(1);
@@ -287,7 +315,11 @@ describe('FCM native callback ownership', () => {
       'new-message',
       '{"guid":"m1"}',
       'fcm',
-      activeLease,
+      expect.objectContaining({
+        generation: activeLease.generation,
+        signal: expect.any(AbortSignal),
+        isCurrent: expect.any(Function),
+      }),
       expect.objectContaining({
         transportOccurrenceId: 'provider-message-1',
         receivedAt: expect.any(Number),
@@ -331,9 +363,14 @@ describe('FCM native callback ownership', () => {
 
     await expect(mockBackgroundHandler!(message)).resolves.toBeUndefined();
 
-    expect(mockBeginHeadlessEffects).toHaveBeenCalledWith(activeLease, {
-      deadlineAt: callbackStartedAt + 40_000,
-    });
+    expect(mockBeginHeadlessEffects).toHaveBeenCalledWith(
+      expect.objectContaining({
+        generation: activeLease.generation,
+        signal: expect.any(AbortSignal),
+        isCurrent: expect.any(Function),
+      }),
+      { deadlineAt: callbackStartedAt + 40_000 },
+    );
     expect(warn).toHaveBeenCalledWith(
       '[fcm] headless side effects reached their bounded effect deadline',
     );
@@ -357,7 +394,11 @@ describe('FCM native callback ownership', () => {
       'new-message',
       '{"guid":"m1"}',
       'fcm',
-      activeLease,
+      expect.objectContaining({
+        generation: activeLease.generation,
+        signal: expect.any(AbortSignal),
+        isCurrent: expect.any(Function),
+      }),
       expect.objectContaining({
         transportOccurrenceId: 'captured-before-await',
         receivedAt: expect.any(Number),
@@ -443,7 +484,8 @@ describe('FCM native callback ownership', () => {
   });
 
   it('keeps native receipt order when an earlier FCM gate settles later', async () => {
-    jest.spyOn(Date, 'now').mockReturnValueOnce(1_000).mockReturnValueOnce(2_000);
+    let now = 1_000;
+    jest.spyOn(Date, 'now').mockImplementation(() => now);
     const firstSessionGate = deferred<'active'>();
     mockReadFcmSessionState
       .mockReturnValueOnce(firstSessionGate.promise)
@@ -453,6 +495,7 @@ describe('FCM native callback ownership', () => {
       messageId: 'native-first',
       data: { type: 'new-message' },
     });
+    now = 2_000;
     const second = mockBackgroundHandler!({
       messageId: 'native-second',
       data: { type: 'new-message' },
@@ -475,6 +518,136 @@ describe('FCM native callback ownership', () => {
       { transportOccurrenceId: 'native-first', receivedAt: 1_000 },
       { transportOccurrenceId: 'native-second', receivedAt: 2_000 },
     ]);
+  });
+
+  it('bounds callbacks waiting in FIFO and never overlaps a late predecessor', async () => {
+    jest.useFakeTimers();
+    const firstSessionGate = deferred<'active'>();
+    mockReadFcmSessionState.mockReturnValueOnce(firstSessionGate.promise);
+    let first: Promise<void> | undefined;
+    let second: Promise<void> | undefined;
+    let third: Promise<void> | undefined;
+    try {
+      first = Promise.resolve(
+        mockBackgroundHandler!({
+          messageId: 'deadline-first',
+          data: { type: 'new-message' },
+        }),
+      );
+      second = Promise.resolve(
+        mockBackgroundHandler!({
+          messageId: 'deadline-second',
+          data: { type: 'new-message' },
+        }),
+      );
+      await settle();
+
+      expect(mockRunTrackedRealtimeDelivery).toHaveBeenCalledTimes(2);
+      expect(mockReadFcmSessionState).toHaveBeenCalledTimes(1);
+      expect(mockDispatchRealtimeEvent).not.toHaveBeenCalled();
+
+      jest.advanceTimersByTime(FCM_HEADLESS_DELIVERY_WINDOW_MS);
+      await settle();
+      await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
+      expect(mockDispatchRealtimeEvent).not.toHaveBeenCalled();
+
+      third = Promise.resolve(
+        mockBackgroundHandler!({
+          messageId: 'fresh-after-deadline',
+          data: { type: 'new-message' },
+        }),
+      );
+      await settle();
+      expect(mockRunTrackedRealtimeDelivery).toHaveBeenCalledTimes(3);
+      expect(mockReadFcmSessionState).toHaveBeenCalledTimes(1);
+
+      firstSessionGate.resolve('active');
+      await expect(third).resolves.toBeUndefined();
+      expect(mockReadFcmSessionState).toHaveBeenCalledTimes(2);
+      expect(mockDispatchRealtimeEvent).toHaveBeenCalledTimes(1);
+      expect(mockDispatchRealtimeEvent.mock.calls[0]?.[4]).toMatchObject({
+        transportOccurrenceId: 'fresh-after-deadline',
+      });
+    } finally {
+      firstSessionGate.resolve('active');
+      jest.runOnlyPendingTimers();
+      await settle();
+      await Promise.allSettled(
+        [first, second, third].filter((value): value is Promise<void> => !!value),
+      );
+      jest.useRealTimers();
+    }
+  });
+
+  it('releases a foreground teardown wait without overtaking an expired predecessor', async () => {
+    jest.useFakeTimers();
+    const firstSessionGate = deferred<'active'>();
+    mockReadFcmSessionState.mockReturnValueOnce(firstSessionGate.promise);
+    await startFcm();
+    let first: Promise<void> | undefined;
+    let fresh: Promise<void> | undefined;
+    try {
+      first = Promise.resolve(
+        mockBackgroundHandler!({
+          messageId: 'expired-predecessor',
+          data: { type: 'new-message' },
+        }),
+      );
+      await settle();
+      expect(mockReadFcmSessionState).toHaveBeenCalledTimes(1);
+
+      jest.advanceTimersByTime(FCM_HEADLESS_DELIVERY_WINDOW_MS);
+      await settle();
+      await expect(first).resolves.toBeUndefined();
+
+      expect(
+        mockForegroundHandler!({
+          messageId: 'foreground-behind-expired',
+          data: { type: 'new-message' },
+        }),
+      ).toBeUndefined();
+      await settle();
+      expect(mockRunTrackedRealtimeDelivery).toHaveBeenCalledTimes(2);
+      expect(mockReadFcmSessionState).toHaveBeenCalledTimes(1);
+
+      const foregroundTracked = mockRunTrackedRealtimeDelivery.mock.results[1]?.value as
+        Promise<'delivered' | 'paused'> | undefined;
+      expect(foregroundTracked).toBeDefined();
+      let teardownWaitSettled = false;
+      const teardownWait = foregroundTracked?.finally(() => {
+        teardownWaitSettled = true;
+      });
+      await settle();
+      expect(teardownWaitSettled).toBe(false);
+
+      invalidateActiveGeneration();
+      await expect(teardownWait).resolves.toBe('delivered');
+      expect(mockDispatchRealtimeEvent).not.toHaveBeenCalled();
+
+      firstSessionGate.resolve('active');
+      await settle();
+      expect(mockDispatchRealtimeEvent).not.toHaveBeenCalled();
+
+      leaseCurrent = true;
+      fresh = Promise.resolve(
+        mockBackgroundHandler!({
+          messageId: 'fresh-after-teardown',
+          data: { type: 'new-message' },
+        }),
+      );
+      await expect(fresh).resolves.toBeUndefined();
+      expect(mockDispatchRealtimeEvent).toHaveBeenCalledTimes(1);
+      expect(mockDispatchRealtimeEvent.mock.calls[0]?.[4]).toMatchObject({
+        transportOccurrenceId: 'fresh-after-teardown',
+      });
+    } finally {
+      firstSessionGate.resolve('active');
+      leaseCurrent = true;
+      await settle();
+      await Promise.allSettled([first, fresh].filter((value): value is Promise<void> => !!value));
+      jest.clearAllTimers();
+      jest.useRealTimers();
+    }
   });
 
   it('uses distinct bounded process-local occurrence ids when Firebase omits messageId', async () => {
@@ -582,7 +755,11 @@ describe('FCM native callback ownership', () => {
         'message-send-error',
         '{"guid":"v2-message"}',
         'fcm',
-        activeLease,
+        expect.objectContaining({
+          generation: activeLease.generation,
+          signal: expect.any(AbortSignal),
+          isCurrent: expect.any(Function),
+        }),
         expect.anything(),
       );
       expect(mockDispatchRealtimeEvent.mock.calls[0]?.[1]).not.toContain(
@@ -645,7 +822,11 @@ describe('FCM native callback ownership', () => {
       'new-message',
       '{"guid":"v3-message"}',
       'fcm',
-      activeLease,
+      expect.objectContaining({
+        generation: activeLease.generation,
+        signal: expect.any(AbortSignal),
+        isCurrent: expect.any(Function),
+      }),
       {
         transportOccurrenceId: 'provider-message-1',
         receivedAt: V3_NOW,

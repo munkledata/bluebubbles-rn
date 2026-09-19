@@ -8,6 +8,8 @@ import {
   scheduledRecoverySourceErrors,
   scheduledHandoffSourceErrors,
   scheduledRunnerUsageErrors,
+  scheduledEnsureRecoveryBodyHash,
+  scheduledReserveRunBodyHash,
   scheduledRunDueBodyHash,
   scheduledSendTextBodyHash,
 } from './check-scheduled-recovery.mjs';
@@ -22,6 +24,10 @@ const runnerPaths = [
   'app/(app)/chat/[guid].tsx',
   'src/features/conversations/useChatScheduledCatchup.ts',
   'src/services/background/backgroundSync.ts',
+  'src/services/background/backgroundSyncOrchestrator.ts',
+  'src/services/send/outgoingQueueService.ts',
+  'src/services/send/attachmentUpload.ts',
+  'src/core/api/http.ts',
   'src/services/send/index.ts',
   schedulePath,
 ];
@@ -79,7 +85,7 @@ test('accepts the current one-claim scheduled recovery and text handoff design',
 });
 
 test('requires one early unconditional recovery barrier', () => {
-  const barrier = '  await ensureScheduledRecovery(db, accountScope, maxRows);\n';
+  const barrier = '    await ensureScheduledRecovery(db, accountScope, maxRows);\n';
   assertErrors(
     scheduledRecoverySourceErrors(replaceOnce(validSource, barrier, '')),
     /exactly once/,
@@ -89,15 +95,15 @@ test('requires one early unconditional recovery barrier', () => {
       replaceOnce(
         validSource,
         barrier.trimEnd(),
-        '  if (accountScope) await ensureScheduledRecovery(db, accountScope, maxRows);',
+        '    if (accountScope) await ensureScheduledRecovery(db, accountScope, maxRows);',
       ),
     ),
-    /unconditional top-level/,
+    /unconditional awaited statement inside the serialized owner/,
   );
   const delayed = replaceOnce(
     replaceOnce(validSource, barrier, ''),
-    '  const due = await listDueScheduled(db, now, maxRows, true);',
-    '  const due = await listDueScheduled(db, now, maxRows, true);\n' + barrier.trimEnd(),
+    '    const due = await listDueScheduled(db, now, maxRows, true);',
+    '    const due = await listDueScheduled(db, now, maxRows, true);\n' + barrier.trimEnd(),
   );
   assertErrors(scheduledRecoverySourceErrors(delayed), /before due-list or claim/);
 });
@@ -156,22 +162,22 @@ test('requires the exact one-claim inputs', () => {
 });
 
 test('captures one immutable capability source immediately before the claim', () => {
-  const capture = '    const capabilitySource = captureCapabilitySource?.();';
+  const capture = '      const capabilitySource = captureCapabilitySource?.();';
   assertErrors(
     scheduledRecoverySourceErrors(
-      replaceOnce(validSource, capture, '    const capabilitySource = undefined;'),
+      replaceOnce(validSource, capture, '      const capabilitySource = undefined;'),
     ),
     /capture one immutable capabilitySource/,
   );
   assertErrors(
     scheduledRecoverySourceErrors(
-      replaceOnce(validSource, capture, capture + '\n    captureCapabilitySource?.();'),
+      replaceOnce(validSource, capture, capture + '\n      captureCapabilitySource?.();'),
     ),
     /capture one immutable capabilitySource/,
   );
   assertErrors(
     scheduledRecoverySourceErrors(
-      replaceOnce(validSource, capture, capture + '\n    void candidate.id;'),
+      replaceOnce(validSource, capture, capture + '\n      void candidate.id;'),
     ),
     /immediately before its claim/,
   );
@@ -185,8 +191,9 @@ test('captures one immutable capability source immediately before the claim', ()
     scheduledRecoverySourceErrors(
       replaceOnce(
         validSource,
-        capture + '\n    try {\n      m = await claimDueScheduled',
-        capture + '\n    try {\n      await Promise.resolve();\n      m = await claimDueScheduled',
+        capture + '\n      try {\n        m = await claimDueScheduled',
+        capture +
+          '\n      try {\n        await Promise.resolve();\n        m = await claimDueScheduled',
       ),
     ),
     /immediately before its claim/,
@@ -198,8 +205,8 @@ test('does not allow another capability capture outside the attempt loop', () =>
     scheduledRecoverySourceErrors(
       replaceOnce(
         validSource,
-        '  let fired = 0;',
-        '  captureCapabilitySource?.();\n  let fired = 0;',
+        '    let fired = 0;',
+        '    captureCapabilitySource?.();\n    let fired = 0;',
       ),
     ),
     /capture one immutable capabilitySource/,
@@ -207,11 +214,11 @@ test('does not allow another capability capture outside the attempt loop', () =>
 });
 
 test('passes the same captured capability source to the scheduled send', () => {
-  const sourceArgument = '          capabilitySource,\n        );';
+  const sourceArgument = '            capabilitySource,\n          );';
   for (const replacement of [
-    '          undefined,\n        );',
-    '          captureCapabilitySource?.(),\n        );',
-    '          otherCapabilitySource,\n        );',
+    '            undefined,\n          );',
+    '            captureCapabilitySource?.(),\n          );',
+    '            otherCapabilitySource,\n          );',
   ]) {
     assertErrors(
       scheduledRecoverySourceErrors(replaceOnce(validSource, sourceArgument, replacement)),
@@ -222,12 +229,12 @@ test('passes the same captured capability source to the scheduled send', () => {
 
 test('sends only the claimed chat and text', () => {
   const payload =
-    '          {\n            chatGuid: m.chatGuid,\n            text: m.text,\n          },';
+    '            {\n              chatGuid: m.chatGuid,\n              text: m.text,\n            },';
   for (const replacement of [
-    '          {\n            chatGuid: candidate.chatGuid,\n            text: candidate.text,\n          },',
-    '          {\n            chatGuid: m.chatGuid,\n            text: m.chatGuid,\n          },',
-    '          {\n            chatGuid: m.chatGuid,\n            text: m.text,\n            selectedMessageGuid: m.selectedMessageGuid,\n          },',
-    '          payload,',
+    '            {\n              chatGuid: candidate.chatGuid,\n              text: candidate.text,\n            },',
+    '            {\n              chatGuid: m.chatGuid,\n              text: m.chatGuid,\n            },',
+    '            {\n              chatGuid: m.chatGuid,\n              text: m.text,\n              selectedMessageGuid: m.selectedMessageGuid,\n            },',
+    '            payload,',
   ]) {
     assertErrors(
       scheduledRecoverySourceErrors(replaceOnce(validSource, payload, replacement)),
@@ -270,8 +277,8 @@ test('rejects mutation or shadowing of the claimed row and handoff bindings', ()
     scheduledRecoverySourceErrors(
       replaceOnce(
         validSource,
-        '    if (!m) continue;',
-        '    if (!m) continue;\n    m = candidate;',
+        '      if (!m) continue;',
+        '      if (!m) continue;\n      m = candidate;',
       ),
     ),
     /claimed row may not be/,
@@ -280,8 +287,8 @@ test('rejects mutation or shadowing of the claimed row and handoff bindings', ()
     scheduledRecoverySourceErrors(
       replaceOnce(
         validSource,
-        '      } else {\n        await sendTextMessage(',
-        "      } else {\n        const transition = { kind: 'sent' };\n        await sendTextMessage(",
+        '        } else {\n          await sendTextMessage(',
+        "        } else {\n          const transition = { kind: 'sent' };\n          await sendTextMessage(",
       ),
     ),
     /transition must have exactly one/,
@@ -509,16 +516,42 @@ test('keeps the exact canonical network payload and guarded settlement', () => {
 
 test('reviewed function fingerprints fail closed on otherwise unchecked edits', () => {
   const runDueHash = scheduledRunDueBodyHash(validSource);
-  assert.deepEqual(
-    scheduledRecoverySourceErrors(validSource, { expectedBodyHash: runDueHash }),
-    [],
+  const reserveRunHash = scheduledReserveRunBodyHash(validSource);
+  const ensureRecoveryHash = scheduledEnsureRecoveryBodyHash(validSource);
+  const expectedRecoveryHashes = {
+    expectedBodyHash: runDueHash,
+    expectedReserveBodyHash: reserveRunHash,
+    expectedEnsureBodyHash: ensureRecoveryHash,
+  };
+  assert.deepEqual(scheduledRecoverySourceErrors(validSource, expectedRecoveryHashes), []);
+  assertErrors(
+    scheduledRecoverySourceErrors(
+      replaceOnce(validSource, '    return fired;', '    void fired;\n    return fired;'),
+      expectedRecoveryHashes,
+    ),
+    /reviewed AST body fingerprint/,
   );
   assertErrors(
     scheduledRecoverySourceErrors(
-      replaceOnce(validSource, '  return fired;', '  void fired;\n  return fired;'),
-      { expectedBodyHash: runDueHash },
+      replaceOnce(
+        validSource,
+        '  const waitForTurn = tails.get(key) ?? Promise.resolve();',
+        '  const waitForTurn = Promise.resolve();',
+      ),
+      expectedRecoveryHashes,
     ),
-    /reviewed AST body fingerprint/,
+    /reserveScheduledRun no longer matches its reviewed AST body fingerprint/,
+  );
+  assertErrors(
+    scheduledRecoverySourceErrors(
+      replaceOnce(
+        validSource,
+        '  if (existing) return existing.promise;',
+        '  if (existing && accountScope?.isCurrent()) return existing.promise;',
+      ),
+      expectedRecoveryHashes,
+    ),
+    /ensureScheduledRecovery no longer matches its reviewed AST body fingerprint/,
   );
 
   const sendHash = scheduledSendTextBodyHash(validSendServiceSource);
@@ -539,8 +572,184 @@ test('reviewed function fingerprints fail closed on otherwise unchecked edits', 
   );
 });
 
+test('rejects bypass or early release of the scheduled-run FIFO', () => {
+  const expectedRecoveryHashes = {
+    expectedBodyHash: scheduledRunDueBodyHash(validSource),
+    expectedReserveBodyHash: scheduledReserveRunBodyHash(validSource),
+    expectedEnsureBodyHash: scheduledEnsureRecoveryBodyHash(validSource),
+  };
+  assertErrors(
+    scheduledRecoverySourceErrors(
+      replaceOnce(
+        validSource,
+        '    await reservation.waitForTurn;',
+        '    void reservation.waitForTurn;',
+      ),
+      expectedRecoveryHashes,
+    ),
+    /reviewed AST body fingerprint|reserved FIFO turn/,
+  );
+
+  const guardedRelease =
+    '    try {\n' +
+    '      if (accountScope && !accountScope.isCurrent()) {\n' +
+    '        recoveryStatesForDatabase(db as object).delete(recoveryKey);\n' +
+    '      }\n' +
+    '    } finally {\n' +
+    '      reservation.finish();\n' +
+    '    }';
+  const earlyRelease =
+    '    reservation.finish();\n' +
+    '    if (accountScope && !accountScope.isCurrent()) {\n' +
+    '      recoveryStatesForDatabase(db as object).delete(recoveryKey);\n' +
+    '    }';
+  assertErrors(
+    scheduledRecoverySourceErrors(
+      replaceOnce(validSource, guardedRelease, earlyRelease),
+      expectedRecoveryHashes,
+    ),
+    /reviewed AST body fingerprint/,
+  );
+});
+
 test('accepts all reviewed production scheduler owners', () => {
   assert.deepEqual(scheduledRunnerUsageErrors(validRunnerSources), []);
+});
+
+test('requires the background callback to wire its reviewed schedule owner directly', () => {
+  const wrapped = mutateRunnerSource('src/services/background/backgroundSync.ts', (source) =>
+    replaceOnce(
+      source,
+      '      recoverAndDrainSchedules: recoverAndDrainBackgroundSchedules,',
+      '      recoverAndDrainSchedules: (...args) => recoverAndDrainBackgroundSchedules(...args),',
+    ),
+  );
+  assertErrors(scheduledRunnerUsageErrors(wrapped), /background schedule owner directly/);
+
+  const conditional = mutateRunnerSource('src/services/background/backgroundSync.ts', (source) =>
+    replaceOnce(
+      source,
+      '    const run = runBackgroundSync({',
+      '    const run = true ? runBackgroundSync({',
+    ).replace('    });\n\n    owner = {', '    }) : Promise.reject(new Error());\n\n    owner = {'),
+  );
+  assertErrors(scheduledRunnerUsageErrors(conditional), /background schedule owner directly/);
+
+  const earlyExit = mutateRunnerSource('src/services/background/backgroundSync.ts', (source) =>
+    replaceOnce(
+      source,
+      '    const run = runBackgroundSync({',
+      '    return BackgroundTask.BackgroundTaskResult.Success;\n    const run = runBackgroundSync({',
+    ),
+  );
+  assertErrors(scheduledRunnerUsageErrors(earlyExit), /reviewed scheduled-owner fingerprint/);
+
+  const unownedRun = mutateRunnerSource('src/services/background/backgroundSync.ts', (source) =>
+    replaceOnce(
+      source,
+      '    });\n\n    owner = { callbackFinished: false, continuationFinished: false };',
+      '    });\n\n    return BackgroundTask.BackgroundTaskResult.Success;\n    owner = { callbackFinished: false, continuationFinished: false };',
+    ),
+  );
+  assertErrors(scheduledRunnerUsageErrors(unownedRun), /reviewed scheduled-owner fingerprint/);
+
+  const detachedOwner = mutateRunnerSource('src/services/background/backgroundSync.ts', (source) =>
+    replaceOnce(source, '    void run\n      .then(', '    void Promise.resolve()\n      .then('),
+  );
+  assertErrors(scheduledRunnerUsageErrors(detachedOwner), /reviewed scheduled-owner fingerprint/);
+
+  const detachedRace = mutateRunnerSource('src/services/background/backgroundSync.ts', (source) =>
+    replaceOnce(
+      source,
+      "      run.then((outcome) => ({ kind: 'outcome' as const, outcome })),",
+      "      Promise.resolve().then((outcome) => ({ kind: 'outcome' as const, outcome })),",
+    ),
+  );
+  assertErrors(scheduledRunnerUsageErrors(detachedRace), /reviewed scheduled-owner fingerprint/);
+});
+
+test('pins the complete background callback lifetime and work graph', () => {
+  const widenedDeadline = mutateRunnerSource(
+    'src/services/background/backgroundSync.ts',
+    (source) =>
+      replaceOnce(
+        source,
+        'BACKGROUND_CALLBACK_WORK_WINDOW_MS = 50_000',
+        'BACKGROUND_CALLBACK_WORK_WINDOW_MS = 300_000',
+      ),
+  );
+  assertErrors(
+    scheduledRunnerUsageErrors(widenedDeadline),
+    /reviewed REL-001 callback dependency fingerprint/,
+  );
+
+  const disabledAbort = mutateRunnerSource('src/services/background/backgroundSync.ts', (source) =>
+    replaceOnce(
+      source,
+      "controller.abort(new Error('Background callback work deadline expired'));",
+      'void controller;',
+    ),
+  );
+  assertErrors(
+    scheduledRunnerUsageErrors(disabledAbort),
+    /reviewed REL-001 callback dependency fingerprint/,
+  );
+});
+
+test('pins the complete background callback dependency chain', () => {
+  const detachedOutgoingDrain = mutateRunnerSource(
+    'src/services/background/backgroundSyncOrchestrator.ts',
+    (source) =>
+      replaceOnce(
+        source,
+        '    await deps.drainOutgoing(context.db, context.client, budgetScope, context.serverInfo);',
+        '    void deps.drainOutgoing(context.db, context.client, budgetScope, context.serverInfo);',
+      ),
+  );
+  assertErrors(
+    scheduledRunnerUsageErrors(detachedOutgoingDrain),
+    /reviewed REL-001 callback dependency fingerprint/,
+  );
+
+  const droppedHttpLifetimeSignal = mutateRunnerSource('src/core/api/http.ts', (source) =>
+    replaceOnce(
+      source,
+      '    const linkedSignal = linkAbortSignals(opts.signal, this.cfg.lifetimeSignal);',
+      '    const linkedSignal = linkAbortSignals(opts.signal, undefined);',
+    ),
+  );
+  assertErrors(
+    scheduledRunnerUsageErrors(droppedHttpLifetimeSignal),
+    /reviewed REL-001 callback dependency fingerprint/,
+  );
+
+  const droppedOutgoingSignal = mutateRunnerSource(
+    'src/services/send/outgoingQueueService.ts',
+    (source) =>
+      replaceOnce(
+        source,
+        '            signal: attachmentSignal,',
+        '            signal: undefined,',
+      ),
+  );
+  assertErrors(
+    scheduledRunnerUsageErrors(droppedOutgoingSignal),
+    /reviewed REL-001 callback dependency fingerprint/,
+  );
+
+  const disabledUploadAbort = mutateRunnerSource(
+    'src/services/send/attachmentUpload.ts',
+    (source) =>
+      replaceOnce(
+        source,
+        "  const abortFromOwner = (): void => stopAttempt('cancelled');",
+        '  const abortFromOwner = (): void => undefined;',
+      ),
+  );
+  assertErrors(
+    scheduledRunnerUsageErrors(disabledUploadAbort),
+    /reviewed REL-001 callback dependency fingerprint/,
+  );
 });
 
 test('requires explicit foreground and background ownership sources', () => {

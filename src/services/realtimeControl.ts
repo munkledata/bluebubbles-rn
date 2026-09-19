@@ -207,6 +207,7 @@ interface RealtimeRecoveryJob {
 interface RealtimeRecoveryCollector {
   readonly db: AppDatabase;
   readonly generation: number;
+  readonly owner: EventDeliveryContext;
   readonly jobs: Set<RealtimeRecoveryJob>;
   readonly dependencyJobs: Set<RealtimeRecoveryJob>;
   readonly dependencyDue: Promise<boolean>[];
@@ -266,11 +267,19 @@ function requestRealtimeRecovery(
     }
     let created!: RealtimeRecoveryJob;
     const task = recoverRealtimePrerequisite(db, recovery, generation, {
-      isAllowed: () => accountLease.isCurrent() && !realtimeIntakeLocked(),
-      subscribeInvalidation: (invalidate) =>
-        useLockStore.subscribe((state) => {
+      isAllowed: () => context.isCurrent() && accountLease.isCurrent() && !realtimeIntakeLocked(),
+      subscribeInvalidation: (invalidate) => {
+        const unsubscribeLock = useLockStore.subscribe((state) => {
           if (effectivelyLocked(state, false)) invalidate();
-        }),
+        });
+        const abortFromCallback = (): void => invalidate();
+        context.signal?.addEventListener('abort', abortFromCallback, { once: true });
+        if (context.signal?.aborted) abortFromCallback();
+        return () => {
+          context.signal?.removeEventListener('abort', abortFromCallback);
+          unsubscribeLock();
+        };
+      },
     })
       .catch((error: unknown): RealtimePrerequisiteRecoveryOutcome => {
         logger.warn('[incomingEvents] recovery task failed', {
@@ -310,11 +319,12 @@ function requestRealtimeRecovery(
 
 function beginRealtimeRecoveryCollector(
   db: AppDatabase,
-  generation: number,
+  owner: EventDeliveryContext,
 ): RealtimeRecoveryCollector {
   const collector: RealtimeRecoveryCollector = {
     db,
-    generation,
+    generation: owner.generation,
+    owner,
     jobs: new Set(),
     dependencyJobs: new Set(),
     dependencyDue: [],
@@ -361,9 +371,11 @@ async function waitForRealtimeDependencyRetry(generation: number): Promise<boole
 async function resumeRecoveredRealtimeEvents(
   runtime: RealtimeRuntime,
   generation: number,
+  callbackOwner: EventDeliveryContext,
 ): Promise<void> {
   const accountLease = captureRealtimeDeliveryLease();
   if (
+    !callbackOwner.isCurrent() ||
     accountLease.generation !== generation ||
     !accountLease.isCurrent() ||
     realtimeRuntimeInstance !== runtime
@@ -384,9 +396,17 @@ async function resumeRecoveredRealtimeEvents(
     };
   });
   const releaseInvalidation = subscribeRealtimeGenerationInvalidation(generation, cancelAttempt);
+  const abortFromCallback = (): void => cancelAttempt();
+  callbackOwner.signal?.addEventListener('abort', abortFromCallback, { once: true });
+  if (callbackOwner.signal?.aborted) abortFromCallback();
   const retryContext: EventDeliveryContext = {
     generation,
-    isCurrent: () => ownsAttempt && accountLease.isCurrent() && realtimeRuntimeInstance === runtime,
+    signal: callbackOwner.signal,
+    isCurrent: () =>
+      ownsAttempt &&
+      callbackOwner.isCurrent() &&
+      accountLease.isCurrent() &&
+      realtimeRuntimeInstance === runtime,
   };
   const resume = runtime.dispatcher.resume(retryContext).catch((error: unknown) => {
     if (retryContext.isCurrent()) {
@@ -408,6 +428,7 @@ async function resumeRecoveredRealtimeEvents(
   } finally {
     ownsAttempt = false;
     if (timeoutHandle != null) clearTimeout(timeoutHandle);
+    callbackOwner.signal?.removeEventListener('abort', abortFromCallback);
     releaseInvalidation();
   }
   if (timedOut && !cancelled && accountLease.isCurrent()) {
@@ -438,8 +459,8 @@ async function finishRealtimeRecoveryCollector(
     const recoveredDependency =
       collector.waitOnlyDependencyDeferred ||
       [...collector.dependencyJobs].some((job) => outcomes.get(job) === 'recovered');
-    if (!recoveredDependency || !retryIsCurrent) return;
-    await resumeRecoveredRealtimeEvents(runtime, collector.generation);
+    if (!recoveredDependency || !retryIsCurrent || !collector.owner.isCurrent()) return;
+    await resumeRecoveredRealtimeEvents(runtime, collector.generation, collector.owner);
   } finally {
     for (const job of jobs) {
       job.references -= 1;
@@ -509,6 +530,10 @@ function realtimeSink(db: AppDatabase, accountGeneration: number): EventSink {
                     // A matching callback exists but has expired/revoked. Never escape its bound by
                     // capturing a fresh detached lease; a later foreground/manual path can fetch.
                     if (adoption.status === 'rejected') return;
+                    // The collection can already have closed and disappeared before this late DB
+                    // continuation reaches adoption. Recheck its originating callback authority
+                    // before the ordinary detached fallback captures a fresh account lease.
+                    if (!context.isCurrent()) return;
                   }
                   const lease = captureRealtimeDeliveryLease();
                   if (!lease.isCurrent() || lease.generation !== accountGeneration) return;
@@ -766,8 +791,7 @@ async function dispatchWithContext(
   if (!context.isCurrent() || realtimeIntakeLocked()) return;
   const runtime = getRealtimeRuntime(db, context);
   if (!runtime) return;
-  const recoveryCollector =
-    source === 'fcm' ? beginRealtimeRecoveryCollector(db, context.generation) : null;
+  const recoveryCollector = source === 'fcm' ? beginRealtimeRecoveryCollector(db, context) : null;
   try {
     await runtime.dispatcher.handle(eventName, rawData, source, context, occurrence, receivedAt);
   } finally {
@@ -1041,8 +1065,8 @@ export async function startRealtime(options: StartRealtimeOptions = {}): Promise
     return;
   }
   // Capture AFTER the async DB open: a Disconnect while it was opening must be observed here.
-  // From this point through `connect` there is no await, so origin/password/mode/headers are one
-  // coherent identity rather than four live reads from a possibly changing session.
+  // From this point through `connect` there is no await, so origin/password/headers are one
+  // coherent identity rather than separate live reads from a possibly changing session.
   const transport = http.snapshotTransport();
   if (!transport.origin || !transport.password) return;
   const accountLease = captureRealtimeDeliveryLease();
@@ -1052,11 +1076,10 @@ export async function startRealtime(options: StartRealtimeOptions = {}): Promise
   socket?.disconnect();
   // Socket and FCM now enter the same durable dispatcher; SQLite receipts own dedup/replay.
   socket = new SocketService(dispatchRealtimeEvent);
-  // Keep the socket in the SAME auth mode as REST: header/auth-payload by default,
-  // `?guid=` query against a stock server that only reads the legacy param.
+  // Keep the socket on the same captured account identity as REST. The password is carried in the
+  // Socket.IO auth payload; the matching Bearer header remains available to the handshake request.
   socket.connect(transport.origin, transport.password, {
     headers: { ...transport.headers },
-    legacyQueryAuth: transport.authMode === 'legacy-query',
   });
   // The durable-ingress constructor/connect sequence above is security-certified. Transport
   // presentation observes the opened socket afterward and owns its own generation fence.

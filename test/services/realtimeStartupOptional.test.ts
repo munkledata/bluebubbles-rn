@@ -22,6 +22,7 @@ type MockDeliveryContext = {
   generation: number;
   isCurrent: () => boolean;
   durableEvent?: object;
+  signal?: AbortSignal;
 };
 type MockAttachmentCacheRetirement = (context?: MockDeliveryContext) => Promise<void> | void;
 type MockMessageStored = (
@@ -143,7 +144,7 @@ const mockMaybeResumeSync = jest.fn();
 const mockResumeScopedCredentialUpgrade = jest.fn(async () => ({ kind: 'idle' as const }));
 const mockRecoverRealtimePrerequisite = jest.fn<
   Promise<'recovered' | 'unavailable' | 'stale' | 'timed-out'>,
-  [unknown, { kind: string; chatGuid?: string }, number]
+  [unknown, { kind: string; chatGuid?: string }, number, unknown]
 >(async () => 'recovered');
 const mockAttachmentCacheScope = { testId: 'realtime-attachment-cache-scope' };
 const mockCreateAttachmentCacheAccountScope = jest.fn<
@@ -167,7 +168,7 @@ let mockSession = {
 let mockRecoveryRequest:
   | ((
       chatGuid: string | null,
-      context?: { generation: number; isCurrent(): boolean },
+      context?: { generation: number; signal?: AbortSignal; isCurrent(): boolean },
     ) => Promise<void> | void)
   | undefined;
 jest.mock('@core/api', () => ({ serverApi: { ping: jest.fn(async () => undefined) } }));
@@ -240,7 +241,6 @@ jest.mock('@/services/clients', () => ({
       origin: 'https://server.example',
       password: 'secret',
       headers: {},
-      authMode: 'header',
     }),
   },
 }));
@@ -579,6 +579,23 @@ describe('realtime detached side-effect ownership', () => {
     expect(mockAutoDownloadForRealtimeEvent).not.toHaveBeenCalled();
   });
 
+  it('does not use the detached fallback after an expired callback collection is gone', async () => {
+    const onMessageStored = await startAndCaptureMessageStored();
+    const delivered = deliveryContext();
+    const context = { ...delivered.context, generation: 0 };
+    mockAdoptRealtimeHeadlessEffect.mockReturnValueOnce({ status: 'absent' });
+    delivered.retire();
+
+    await onMessageStored(419, 'fcm', context);
+
+    expect(mockAdoptRealtimeHeadlessEffect).toHaveBeenCalledWith(
+      context.generation,
+      'auto-download:419',
+      expect.any(Function),
+    );
+    expect(mockAutoDownloadForRealtimeEvent).not.toHaveBeenCalled();
+  });
+
   it('starts wallpaper refresh with a fresh account lease, not the retiring attempt context', async () => {
     const started = deferred<void>();
     const finish = deferred<void>();
@@ -796,7 +813,13 @@ describe('startRealtime optional setup containment', () => {
     await startRealtime();
     await settle();
     if (!mockRecoveryRequest) throw new Error('DB sink did not register its recovery callback');
-    const context = { generation: 0, isCurrent: () => true };
+    const callback = new AbortController();
+    let callbackCurrent = true;
+    const context = {
+      generation: 0,
+      signal: callback.signal,
+      isCurrent: () => callbackCurrent,
+    };
 
     await mockRecoveryRequest(null, context);
     await settle();
@@ -811,6 +834,21 @@ describe('startRealtime optional setup containment', () => {
       }),
     );
     expect(mockMaybeResumeSync).not.toHaveBeenCalled();
+
+    const recoveryOptions = mockRecoverRealtimePrerequisite.mock.calls[0]?.[3] as
+      | {
+          isAllowed(): boolean;
+          subscribeInvalidation(invalidate: () => void): () => void;
+        }
+      | undefined;
+    expect(recoveryOptions?.isAllowed()).toBe(true);
+    callbackCurrent = false;
+    expect(recoveryOptions?.isAllowed()).toBe(false);
+    const invalidate = jest.fn();
+    const release = recoveryOptions?.subscribeInvalidation(invalidate);
+    callback.abort();
+    expect(invalidate).toHaveBeenCalledTimes(1);
+    release?.();
 
     await resumeRealtime();
     expect(mockMaybeResumeSync).toHaveBeenCalledTimes(1);
@@ -1054,6 +1092,9 @@ describe('startRealtime optional setup containment', () => {
     const { startRealtime } = await import('@/services/realtimeControl');
     await startRealtime();
     await settle();
+    expect(mockSocketConnect).toHaveBeenCalledWith('https://server.example', 'secret', {
+      headers: {},
+    });
     if (!mockSocketLifecycleHandler)
       throw new Error('socket lifecycle observer was not registered');
     if (!mockReachabilityCallbacks) throw new Error('reachability observer was not registered');

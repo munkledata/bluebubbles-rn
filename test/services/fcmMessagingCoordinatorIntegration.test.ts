@@ -99,7 +99,7 @@ describe('FCM delivery coordinator integration', () => {
     resumeRealtimeDeliveries();
   });
 
-  it('drains an admitted native callback and refuses callbacks arriving after pause', async () => {
+  it('releases tracked callback ownership on pause and refuses later callbacks', async () => {
     if (!backgroundHandler) throw new Error('background FCM handler was not registered');
     const sessionGate = deferred<'active'>();
     mockReadFcmSessionState.mockReturnValueOnce(sessionGate.promise);
@@ -115,7 +115,11 @@ describe('FCM delivery coordinator integration', () => {
       pauseSettled = true;
     });
     await settle();
-    expect(pauseSettled).toBe(false);
+    // Teardown retires the tracked wait immediately. The callback's real session-gate continuation
+    // remains the private FIFO fence, so a later account can never overtake it.
+    expect(pauseSettled).toBe(true);
+    await expect(pause).resolves.toBeUndefined();
+    await expect(admitted).resolves.toBeUndefined();
 
     await expect(
       backgroundHandler({
@@ -126,8 +130,7 @@ describe('FCM delivery coordinator integration', () => {
     expect(mockReadFcmSessionState).toHaveBeenCalledTimes(1);
 
     sessionGate.resolve('active');
-    await expect(admitted).resolves.toBeUndefined();
-    await expect(pause).resolves.toBeUndefined();
+    await settle();
     expect(mockDispatchRealtimeEvent).not.toHaveBeenCalled();
     expect(mockFlushHeadlessLogs).toHaveBeenCalledTimes(2);
   });

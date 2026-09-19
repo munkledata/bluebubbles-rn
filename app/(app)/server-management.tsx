@@ -109,6 +109,12 @@ function repairStatusCopy(status: SyncRepairStatus, phase: string | null): strin
   return 'Failed — safe to restart';
 }
 
+function iMessageAvailabilityCopy(supported: boolean | null | undefined): string {
+  if (supported === true) return 'Read-only lookup available';
+  if (supported === false) return 'Not available';
+  return 'Unknown';
+}
+
 /** Server status, local-cache maintenance, pairing, sync, and read-only statistics. */
 export default function ServerManagementScreen(): React.JSX.Element {
   const theme = useTheme();
@@ -225,20 +231,19 @@ export default function ServerManagementScreen(): React.JSX.Element {
         ? false
         : null;
 
-  // Statistics use the typed password-authenticated snapshot route, with an older-server fallback.
-  // A total failure is shown inline rather than as a modal interruption.
+  // Statistics use the typed password-authenticated snapshot route. A total failure is shown
+  // inline rather than as a modal interruption.
   const statsQuery = useQuery({
     queryKey: ['server', 'stats', accountLease.generation, transportRevision],
+    enabled: legacyCredentialSession,
     queryFn: ({ signal }) =>
       readForTransport(accountLease, transportRevision, () =>
-        serverApi.serverStatTotals(http, signal, {
-          allowLegacyFallback: !scopedCredentialSession,
-        }),
+        serverApi.serverStatTotals(http, signal),
       ),
   });
-  const totals = accountLease.isCurrent() ? (statsQuery.data ?? null) : null;
-  const statsError = accountLease.isCurrent() && statsQuery.isError;
-  // A typed-route 404 followed by an unavailable legacy fallback is surfaced as unsupported.
+  const totals = legacyCredentialSession ? (statsQuery.data ?? null) : null;
+  const statsError = legacyCredentialSession && statsQuery.isError;
+  // A missing typed route is surfaced as unsupported rather than as a connection failure.
   const statsUnsupported = statsError && isUnimplementedEndpoint(statsQuery.error);
 
   // Refresh the cached server info (version / macOS / current capabilities). On a hydrated boot the
@@ -267,7 +272,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
   }, [accountLease, latestServerInfo, setServerInfoForTransport]);
 
   const onLoadStats = (): void => {
-    if (busy || !accountLease.isCurrent()) return;
+    if (busy || !legacyCredentialSession) return;
     setBusy('Load Stats');
     // `refetch` never rejects — success/failure land in `statsQuery.data` / `.isError`.
     void statsQuery.refetch().finally(() => {
@@ -487,6 +492,10 @@ export default function ServerManagementScreen(): React.JSX.Element {
           <InfoRow label="Server version" value={visibleServerInfo?.server_version ?? 'Unknown'} />
           <InfoRow label="macOS" value={visibleServerInfo?.os_version ?? 'Unknown'} />
           <InfoRow label="Private API" value="Retired in this release" />
+          <InfoRow
+            label="iMessage availability"
+            value={iMessageAvailabilityCopy(visibleServerInfo?.supports_imessage_availability)}
+          />
           <InfoRow label="Proxy" value={visibleServerInfo?.proxy_service ?? 'Direct'} />
           <Pressable
             onPress={onShareUrl}
@@ -617,24 +626,30 @@ export default function ServerManagementScreen(): React.JSX.Element {
         </SettingsSection>
 
         <SettingsSection label="STATISTICS" style={styles.gap}>
-          <InfoRow label="Messages" value={statVal(totals?.messages)} />
-          <InfoRow label="Photos" value={statVal(totals?.images)} />
-          <InfoRow label="Videos" value={statVal(totals?.videos)} />
-          {statsError ? (
-            <View style={styles.row}>
-              <Text style={[styles.errorText, { color: theme.color.destructive }]}>
-                {statsUnsupported
-                  ? 'This server doesn’t expose statistics. It may be an older version, or a proxy may be blocking its statistics endpoint.'
-                  : 'Couldn’t load statistics. Check your connection, then tap Refresh.'}
-              </Text>
-            </View>
-          ) : null}
-          <ActionRow
-            label="Refresh Statistics"
-            disabled={!!busy}
-            busy={busy === 'Load Stats'}
-            onPress={onLoadStats}
-          />
+          {scopedCredentialSession ? (
+            <InfoRow label="Statistics" value="Mac dashboard only" />
+          ) : (
+            <>
+              <InfoRow label="Messages" value={statVal(totals?.messages)} />
+              <InfoRow label="Photos" value={statVal(totals?.images)} />
+              <InfoRow label="Videos" value={statVal(totals?.videos)} />
+              {statsError ? (
+                <View style={styles.row}>
+                  <Text style={[styles.errorText, { color: theme.color.destructive }]}>
+                    {statsUnsupported
+                      ? 'This server doesn’t expose statistics. It may be an older version, or a proxy may be blocking its statistics endpoint.'
+                      : 'Couldn’t load statistics. Check your connection, then tap Refresh.'}
+                  </Text>
+                </View>
+              ) : null}
+              <ActionRow
+                label="Refresh Statistics"
+                disabled={!!busy}
+                busy={busy === 'Load Stats'}
+                onPress={onLoadStats}
+              />
+            </>
+          )}
         </SettingsSection>
       </ScrollView>
 

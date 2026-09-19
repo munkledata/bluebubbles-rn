@@ -41,6 +41,7 @@ import { accountRevocationMarker, http, vault } from '../clients';
 import {
   beginRealtimeHeadlessEffectCollection,
   REALTIME_HEADLESS_EFFECT_WINDOW_MS,
+  type RealtimeHeadlessEffectCollection,
   type RealtimeHeadlessEffectOutcome,
 } from '../background/realtimeHeadlessEffects';
 import { flushPersistentLogsForHeadlessCompletion } from '../logging/fileLogSink';
@@ -57,6 +58,7 @@ import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeDelivery,
   runTrackedRealtimeWork,
+  subscribeRealtimeGenerationInvalidation,
   type RealtimeDeliveryLease,
 } from '../realtime/deliveryCoordinator';
 import { readFcmSessionState } from './fcmSessionGate';
@@ -79,17 +81,102 @@ import { postLockedNotification } from './notifeeService';
 const fcmProcessOccurrenceNonce = `${Date.now().toString(36)}-${Math.random()
   .toString(36)
   .slice(2, 14)}`;
-/** Finish logging by 55 seconds so RNFB's 60-second Android task retains an OS-return margin. */
-const FCM_HEADLESS_FINALIZATION_WINDOW_MS = 55_000;
+/** Stop delivery before final logging so RNFB's 60-second Android task retains an OS margin. */
+export const FCM_HEADLESS_DELIVERY_WINDOW_MS = 50_000;
+export const FCM_HEADLESS_FINALIZATION_WINDOW_MS = 55_000;
 /** Maximum accepted positive difference between the server's issue clock and callback receipt. */
 const FCM_V3_FUTURE_CLOCK_SKEW_MS = 5 * 60_000;
-/** Same exclusive removal date as the documented temporary legacy query-auth compatibility. */
+/** Exclusive retirement date for the legacy FCM v2 envelope. */
 export const FCM_V2_COMPATIBILITY_CUTOFF_MS = 1_801_440_000_000; // 2027-02-01T00:00:00Z
 let fcmLocalOccurrenceSequence = 0;
 let fcmAdmissionTail: Promise<void> = Promise.resolve();
 const FCM_ROTATION_TIMER_MAX_DELAY_MS = 24 * 60 * 60 * 1_000;
 let fcmRotationCheckTimer: ReturnType<typeof setTimeout> | null = null;
 let fcmRotationCheckDeadlineAt: number | null = null;
+
+interface FcmHeadlessCallbackLifetime {
+  readonly receivedAt: number;
+  readonly deliveryDeadlineAt: number;
+  readonly finalizationDeadlineAt: number;
+  readonly signal: AbortSignal;
+  readonly expired: Promise<void>;
+  isCurrent(): boolean;
+  didExpire(): boolean;
+  finish(): void;
+}
+
+/** Revoke late delivery authority before resolving the deadline observed by the tracked slot. */
+function createFcmHeadlessCallbackLifetime(receivedAt: number): FcmHeadlessCallbackLifetime {
+  const controller = new AbortController();
+  const deliveryDeadlineAt = receivedAt + FCM_HEADLESS_DELIVERY_WINDOW_MS;
+  const finalizationDeadlineAt = receivedAt + FCM_HEADLESS_FINALIZATION_WINDOW_MS;
+  let current = true;
+  let expired = false;
+  let resolveExpired!: () => void;
+  const expiredPromise = new Promise<void>((resolve) => {
+    resolveExpired = resolve;
+  });
+  const expire = (): void => {
+    if (!current) return;
+    expired = true;
+    current = false;
+    controller.abort(new Error('FCM callback delivery deadline expired'));
+    resolveExpired();
+  };
+  const deadlineTimer = setTimeout(expire, Math.max(0, deliveryDeadlineAt - Date.now()));
+  if (typeof deadlineTimer === 'object' && 'unref' in deadlineTimer) deadlineTimer.unref();
+  const expireIfDue = (): void => {
+    if (current && Date.now() >= deliveryDeadlineAt) expire();
+  };
+
+  return {
+    receivedAt,
+    deliveryDeadlineAt,
+    finalizationDeadlineAt,
+    signal: controller.signal,
+    expired: expiredPromise,
+    isCurrent: () => {
+      expireIfDue();
+      return current;
+    },
+    didExpire: () => {
+      expireIfDue();
+      return expired;
+    },
+    finish: () => {
+      clearTimeout(deadlineTimer);
+      current = false;
+    },
+  };
+}
+
+/**
+ * Bound only the tracked teardown slot. The caller keeps the real delivery promise as its FIFO
+ * tail, so releasing a stale account/callback can never let a newer delivery overtake it.
+ */
+async function waitForFcmDeliveryOwner(
+  deliveryTask: Promise<void>,
+  lease: RealtimeDeliveryLease,
+  backgroundLifetime?: FcmHeadlessCallbackLifetime,
+): Promise<void> {
+  let resolveGenerationInvalidated!: () => void;
+  const generationInvalidated = new Promise<void>((resolve) => {
+    resolveGenerationInvalidated = resolve;
+  });
+  const unsubscribeInvalidation = subscribeRealtimeGenerationInvalidation(
+    lease.generation,
+    resolveGenerationInvalidated,
+  );
+  try {
+    await Promise.race(
+      backgroundLifetime
+        ? [deliveryTask, generationInvalidated, backgroundLifetime.expired]
+        : [deliveryTask, generationInvalidated],
+    );
+  } finally {
+    unsubscribeInvalidation();
+  }
+}
 
 function scheduleFcmRotationCheck(deadlineAt: number): void {
   if (!Number.isSafeInteger(deadlineAt) || deadlineAt < 0) return;
@@ -448,6 +535,7 @@ async function deliverRespectingLock(
     // the later generic notice before either crosses the unlock boundary.
     const lockedContext: RealtimeDeliveryLease = {
       generation: lease.generation,
+      signal: lease.signal,
       isCurrent: () =>
         lease.isCurrent() &&
         (!lockStateAvailable ||
@@ -469,39 +557,58 @@ async function deliverRespectingLock(
 async function handleIncomingFcm(
   msg: RemoteMessage,
   source: 'background' | 'foreground',
-  backgroundReceivedAt?: number,
+  backgroundLifetime?: FcmHeadlessCallbackLifetime,
 ): Promise<void> {
   try {
     // Capture provider identity + envelope synchronously, before the session/lock/decrypt awaits.
-    const delivery = captureFcmDelivery(msg, backgroundReceivedAt);
+    const delivery = captureFcmDelivery(msg, backgroundLifetime?.receivedAt);
     const headlessEffectDeadlineAt =
       source === 'background'
         ? (delivery.occurrence.receivedAt ?? Date.now()) + REALTIME_HEADLESS_EFFECT_WINDOW_MS
         : null;
-    let headlessEffectCompletion: Promise<RealtimeHeadlessEffectOutcome> | null = null;
+    const headlessEffect: {
+      collection: RealtimeHeadlessEffectCollection | null;
+      completion: Promise<RealtimeHeadlessEffectOutcome> | null;
+    } = { collection: null, completion: null };
+    let underlyingDelivery: Promise<void> | null = null;
     // Reserve FIFO position synchronously, while also registering this callback with teardown
     // before it waits for an earlier FCM delivery. Otherwise a faster later callback can persist
     // and drain before an earlier callback has cleared its session/lock/decrypt gates.
     const previous = fcmAdmissionTail;
-    const tracked = runTrackedRealtimeDelivery(async (lease) => {
-      await previous;
-      if (!lease.isCurrent()) return;
-      if (headlessEffectDeadlineAt == null) {
-        await deliverRespectingLock(delivery, source, lease);
-        return;
-      }
-      const collection = beginRealtimeHeadlessEffectCollection(lease, {
-        deadlineAt: headlessEffectDeadlineAt,
-      });
-      try {
-        await deliverRespectingLock(delivery, source, lease);
-      } finally {
-        // Start waiting now, but do not keep the long transfer inside the account teardown slot.
-        // The native background callback below still awaits it; Disconnect merely revokes it.
-        headlessEffectCompletion = collection.close();
-      }
+    const tracked = runTrackedRealtimeDelivery(async (accountLease) => {
+      const lease: RealtimeDeliveryLease = backgroundLifetime
+        ? {
+            generation: accountLease.generation,
+            signal: backgroundLifetime.signal,
+            isCurrent: () => accountLease.isCurrent() && backgroundLifetime.isCurrent(),
+          }
+        : accountLease;
+      const deliveryTask = (async (): Promise<void> => {
+        await previous;
+        if (!lease.isCurrent()) return;
+        if (headlessEffectDeadlineAt == null) {
+          await deliverRespectingLock(delivery, source, lease);
+          return;
+        }
+        const collection = beginRealtimeHeadlessEffectCollection(lease, {
+          deadlineAt: headlessEffectDeadlineAt,
+        });
+        headlessEffect.collection = collection;
+        try {
+          await deliverRespectingLock(delivery, source, lease);
+        } finally {
+          // Start waiting now, but do not keep the long transfer inside account teardown. The
+          // native callback below still owns it; Disconnect or the callback deadline revokes it.
+          headlessEffect.completion ??= collection.close();
+        }
+      })();
+      underlyingDelivery = deliveryTask;
+      await waitForFcmDeliveryOwner(deliveryTask, lease, backgroundLifetime);
     });
-    fcmAdmissionTail = tracked.then(
+    // Preserve provider FIFO against the real continuation, not the 50-second public bound. A
+    // successor may itself expire while waiting, but it must never overlap an older delivery that
+    // ignored cancellation.
+    fcmAdmissionTail = (underlyingDelivery ?? previous).then(
       () => undefined,
       () => undefined,
     );
@@ -509,10 +616,13 @@ async function handleIncomingFcm(
     try {
       result = await tracked;
     } finally {
-      const effectOutcome = await headlessEffectCompletion;
+      const effectOutcome = await (headlessEffect.completion ?? headlessEffect.collection?.close());
       if (effectOutcome === 'deadline') {
         logger.warn('[fcm] headless side effects reached their bounded effect deadline');
       }
+    }
+    if (backgroundLifetime?.didExpire()) {
+      logger.warn('[fcm] delivery reached its bounded callback deadline');
     }
     if (result === 'paused') {
       logger.debug('[fcm] delivery paused during account transition', { source });
@@ -532,12 +642,13 @@ export async function handleBackgroundFcm(msg: RemoteMessage): Promise<void> {
   // One callback-entry timestamp governs the effect collector and the final persistence barrier.
   // Capturing it here also preserves the provider envelope's before-first-await ownership.
   const receivedAt = Date.now();
-  const finalizationDeadlineAt = receivedAt + FCM_HEADLESS_FINALIZATION_WINDOW_MS;
+  const lifetime = createFcmHeadlessCallbackLifetime(receivedAt);
   try {
-    await handleIncomingFcm(msg, 'background', receivedAt);
+    await handleIncomingFcm(msg, 'background', lifetime);
   } finally {
+    lifetime.finish();
     // Android may tear down this headless runtime as soon as the native callback settles.
-    await flushPersistentLogsForHeadlessCompletion(finalizationDeadlineAt);
+    await flushPersistentLogsForHeadlessCompletion(lifetime.finalizationDeadlineAt);
   }
 }
 

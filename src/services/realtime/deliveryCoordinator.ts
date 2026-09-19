@@ -3,6 +3,8 @@ export type RealtimeDeliveryResult = 'delivered' | 'paused';
 /** Account generation captured by work admitted before a Disconnect. */
 export interface RealtimeDeliveryLease {
   readonly generation: number;
+  /** Optional owner-local cancellation in addition to account-generation invalidation. */
+  readonly signal?: AbortSignal;
   isCurrent(): boolean;
 }
 

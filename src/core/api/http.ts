@@ -45,7 +45,7 @@ interface RequiredResponseHeader {
 export interface HttpClientConfig {
   /** Current server origin, e.g. "https://abc.ngrok.io". May change on failover. */
   getOrigin: () => string;
-  /** Server password (the legacy "guid"). Header by default; URL only in explicit legacy mode. */
+  /** Server password. Sent only as an Authorization Bearer credential, never in the URL. */
   getPassword: () => string | undefined;
   /**
    * Optional monotonic identity for transports whose origin/password can rotate back to an older
@@ -54,23 +54,21 @@ export interface HttpClientConfig {
   getTransportRevision?: () => number;
   /** Optional user-defined headers (ported from settings.customHeaders). */
   getCustomHeaders?: () => Record<string, string>;
-  /**
-   * When false, fall back to legacy `?guid=` query auth for old servers. Default
-   * true. SECURITY: the rebuild gates setup on MIN_SERVER_VERSION so header auth
-   * is the norm; legacy mode is permitted only over HTTPS and is logged.
-   */
-  useHeaderAuth?: () => boolean;
   /** Separate ceilings for receiving headers and then consuming the complete JSON body. */
   timeoutMs?: number;
   /** Injectable fetch for tests; defaults to the platform fetch. */
   fetch?: typeof fetch;
   /**
+   * Optional lifetime shared by every request from this client and its pinned children.
+   * Background-task composition uses this to stop the complete request graph at one deadline;
+   * ordinary foreground clients leave it unset and retain per-request cancellation only.
+   */
+  lifetimeSignal?: AbortSignal;
+  /**
    * Optional tighter client-wide response cap (primarily for focused tests). It may never raise
    * the production default; a genuinely larger endpoint needs its own reviewed transport design.
    */
   responseByteLimit?: number;
-  /** Called when legacy query auth is used, so callers can warn/redact. */
-  onLegacyAuth?: () => void;
 }
 
 export interface RequestOptions {
@@ -92,8 +90,6 @@ export interface RequestOptions {
   retry?: RetryPolicy | false;
 }
 
-export type HttpAuthMode = 'header' | 'legacy-query';
-
 /** Minimal URL-building surface accepted by binary endpoint helpers. */
 export interface HttpUrlBuilder {
   buildUrl(path: string): string;
@@ -106,12 +102,11 @@ export interface HttpUrlBuilder {
  * must capture this object once, before their first await, and reuse it for the operation's whole
  * lifetime. That prevents an old URL from ever being paired with a newly connected account's
  * credential. `password` is exposed only because Socket.IO requires the raw value in its auth
- * payload (or its explicit legacy query mode); file-transfer callers must use `headers`/`buildUrl`.
+ * payload; file-transfer callers must use `headers`/`buildUrl`.
  */
 export interface HttpTransportSnapshot extends HttpUrlBuilder {
   readonly origin: string;
   readonly headers: Readonly<Record<string, string>>;
-  readonly authMode: HttpAuthMode;
   readonly password: string | undefined;
   readonly transportRevision: number | undefined;
 }
@@ -159,7 +154,6 @@ function sameRequestSnapshot(left: RequestSnapshot, right: RequestSnapshot): boo
 function sameTransportIdentity(left: HttpTransportSnapshot, right: HttpTransportSnapshot): boolean {
   return (
     left.origin === right.origin &&
-    left.authMode === right.authMode &&
     left.password === right.password &&
     left.transportRevision === right.transportRevision &&
     sameStringRecord(left.headers, right.headers)
@@ -172,6 +166,41 @@ function responseParseError(message: string, response: Response, cause?: unknown
 
 function callerCancellationError(signal: AbortSignal): ApiError {
   return new ApiError('cancelled', 'Network request was cancelled', undefined, signal.reason);
+}
+
+interface LinkedAbortSignal {
+  readonly signal?: AbortSignal;
+  release(): void;
+}
+
+/** Combine per-request and client-lifetime cancellation without relying on AbortSignal.any. */
+function linkAbortSignals(
+  requestSignal?: AbortSignal,
+  lifetimeSignal?: AbortSignal,
+): LinkedAbortSignal {
+  const signals = [...new Set([requestSignal, lifetimeSignal].filter(Boolean))] as AbortSignal[];
+  if (signals.length === 0) return { signal: undefined, release: () => undefined };
+  if (signals.length === 1) return { signal: signals[0], release: () => undefined };
+
+  const controller = new AbortController();
+  const listeners: Array<{ signal: AbortSignal; listener: () => void }> = [];
+  for (const signal of signals) {
+    const listener = (): void => {
+      if (!controller.signal.aborted) controller.abort(signal.reason);
+    };
+    signal.addEventListener('abort', listener, { once: true });
+    listeners.push({ signal, listener });
+    // Close the check/listener race for injected AbortSignal implementations.
+    if (signal.aborted) listener();
+  }
+  return {
+    signal: controller.signal,
+    release: () => {
+      for (const entry of listeners) {
+        entry.signal.removeEventListener('abort', entry.listener);
+      }
+    },
+  };
 }
 
 /** Abort-aware retry delay so Disconnect cannot leave an old logical request parked in backoff. */
@@ -462,51 +491,26 @@ export class HttpClient {
   }
 
   buildHeaders(): Record<string, string> {
-    return this.buildHeadersFor(this.cfg.getPassword(), this.useHeaderAuth());
+    return this.buildHeadersFor(this.cfg.getPassword());
   }
 
-  private buildHeadersFor(
-    password: string | undefined,
-    useHeaderAuth: boolean,
-  ): Record<string, string> {
+  private buildHeadersFor(password: string | undefined): Record<string, string> {
     const headers: Record<string, string> = {
       ...TUNNEL_SKIP_HEADERS,
       ...(this.cfg.getCustomHeaders?.() ?? {}),
     };
-    if (useHeaderAuth && password) {
+    if (password) {
       headers[AUTH_HEADER] = `${AUTH_SCHEME} ${password}`;
     }
     return headers;
   }
 
-  private buildSearch(
-    query: RequestOptions['query'],
-    password: string | undefined,
-    useHeaderAuth: boolean,
-  ): URLSearchParams {
+  private buildSearch(query: RequestOptions['query']): URLSearchParams {
     const search = new URLSearchParams();
     for (const [k, v] of Object.entries(query ?? {})) {
       if (v !== undefined) search.set(k, String(v));
     }
-    if (!useHeaderAuth) {
-      if (password) {
-        this.cfg.onLegacyAuth?.();
-        search.set('guid', password); // legacy fallback only
-      }
-    }
     return search;
-  }
-
-  private useHeaderAuth(): boolean {
-    return this.cfg.useHeaderAuth ? this.cfg.useHeaderAuth() : true;
-  }
-
-  /**
-   * Whether auth travels in a header (secure default) vs. the legacy `?guid=` query.
-   * Kept for simple inspection/tests; native transports must read the mode from one snapshot.
-   */
-  usesHeaderAuth(): boolean {
-    return this.useHeaderAuth();
   }
 
   /**
@@ -543,9 +547,8 @@ export class HttpClient {
   /**
    * Capture a coherent origin/auth/header view for a native transport.
    *
-   * `buildUrl` is bound to the captured origin. In explicit legacy mode it also appends the
-   * captured `guid` query credential, because native file APIs cannot use HttpClient's normal
-   * query injection. Header-auth mode always keeps the password out of the URL.
+   * `buildUrl` is bound to the captured origin. Credentials remain in the captured headers so
+   * native file APIs cannot accidentally place them in a URL.
    */
   snapshotTransport(): HttpTransportSnapshot {
     // All accessors are synchronous. Keeping this block await-free makes the values one JS-turn
@@ -553,20 +556,11 @@ export class HttpClient {
     const origin = this.cfg.getOrigin();
     const password = this.cfg.getPassword();
     const transportRevision = this.cfg.getTransportRevision?.();
-    const useHeaderAuth = this.useHeaderAuth();
-    const onLegacyAuth = this.cfg.onLegacyAuth;
-    const headers = Object.freeze(this.buildHeadersFor(password, useHeaderAuth));
-    const buildUrl = (path: string): string => {
-      const url = this.buildUrlForOrigin(origin, path);
-      if (useHeaderAuth || !password) return url;
-      onLegacyAuth?.();
-      const separator = url.includes('?') ? '&' : '?';
-      return `${url}${separator}${new URLSearchParams({ guid: password }).toString()}`;
-    };
+    const headers = Object.freeze(this.buildHeadersFor(password));
+    const buildUrl = (path: string): string => this.buildUrlForOrigin(origin, path);
     return Object.freeze({
       origin,
       headers,
-      authMode: useHeaderAuth ? 'header' : 'legacy-query',
       password,
       transportRevision,
       buildUrl,
@@ -600,11 +594,10 @@ export class HttpClient {
           ? {}
           : { getTransportRevision: () => transportRevision }),
         getCustomHeaders: () => fixedHeaders,
-        useHeaderAuth: () => transport.authMode === 'header',
         timeoutMs: this.timeoutMs,
         fetch: this.cfg.fetch,
+        lifetimeSignal: this.cfg.lifetimeSignal,
         responseByteLimit: this.responseByteLimit,
-        onLegacyAuth: this.cfg.onLegacyAuth,
       },
       transportStillCurrent,
       requiredResponseHeader,
@@ -616,17 +609,14 @@ export class HttpClient {
    *
    * A retry may run after Disconnect + reconnect. Reading the live password again while retaining
    * the first attempt's URL would send the new account's credential to the old server. Keep the
-   * origin, password, auth mode, query, and custom headers together for the request's whole life.
+   * origin, password, query, and custom headers together for the request's whole life.
    */
   private snapshotRequest(path: string, query: RequestOptions['query']): RequestSnapshot {
     const transport = this.snapshotTransport();
-    const useHeaderAuth = transport.authMode === 'header';
     return {
-      // The normal ky path injects legacy auth through searchParams below. Use the clean URL here
-      // so `guid` is present exactly once; snapshot.buildUrl handles native callers instead.
       url: this.buildUrlForOrigin(transport.origin, path),
       headers: transport.headers,
-      search: this.buildSearch(query, transport.password, useHeaderAuth),
+      search: this.buildSearch(query),
       transportRevision: transport.transportRevision,
     };
   }
@@ -637,77 +627,85 @@ export class HttpClient {
     schema: S,
     opts: RequestOptions,
   ): Promise<z.infer<S>> {
-    this.assertTransportCurrent();
-    const initialRequest = this.snapshotRequest(path, opts.query);
-
-    // One full attempt: send, map transport/status/parse failures to a typed ApiError, return data.
-    // A logical request owns one transport identity. A retry re-reads the live configuration only
-    // to prove it is still that identity: if Disconnect/reconnect changed origin, credentials,
-    // auth mode, query auth, or custom headers, retire the old request without sending either the
-    // old credential after revocation or the new credential with old-account work.
-    let firstAttempt = true;
-    const run = async (): Promise<z.infer<S>> => {
-      if (opts.signal?.aborted) throw callerCancellationError(opts.signal);
+    const linkedSignal = linkAbortSignals(opts.signal, this.cfg.lifetimeSignal);
+    const signal = linkedSignal.signal;
+    try {
+      if (signal?.aborted) throw callerCancellationError(signal);
       this.assertTransportCurrent();
-      const request = firstAttempt ? initialRequest : this.snapshotRequest(path, opts.query);
-      firstAttempt = false;
-      if (!sameRequestSnapshot(initialRequest, request)) {
-        throw new ApiError('cancelled', 'Request configuration changed before retry');
-      }
-      const { url, headers, search } = request;
-      const requestController = new AbortController();
-      const abortFromCaller = (): void => requestController.abort(opts.signal?.reason);
-      if (opts.signal?.aborted) abortFromCaller();
-      else opts.signal?.addEventListener('abort', abortFromCaller, { once: true });
-      try {
-        let response: Response;
-        try {
-          response = await ky(url, {
-            method,
-            headers: { ...headers },
-            searchParams: new URLSearchParams(search),
-            json: opts.json,
-            redirect: 'error',
-            signal: requestController.signal,
-            timeout: this.timeoutMs,
-            retry: 0,
-            throwHttpErrors: false,
-            // RN's Request polyfill does not retain `redirect`; force it again at fetch dispatch.
-            fetch: fetchRejectingRedirects(this.cfg.fetch ?? fetch),
-          });
-        } catch (err) {
-          if (opts.signal?.aborted) throw callerCancellationError(opts.signal);
-          if (err instanceof DOMException && err.name === 'TimeoutError') {
-            throw new ApiError('timeout', 'Request timed out', undefined, err);
-          }
-          throw new ApiError('no_connection', 'Network request failed', undefined, err);
-        }
-        try {
-          return await this.parseResponse(
-            response,
-            method,
-            path,
-            schema,
-            (reason) => requestController.abort(reason),
-            opts.captureErrorDetail === true,
-          );
-        } catch (error) {
-          if (opts.signal?.aborted) throw callerCancellationError(opts.signal);
-          throw error;
-        }
-      } finally {
-        opts.signal?.removeEventListener('abort', abortFromCaller);
-      }
-    };
+      const initialRequest = this.snapshotRequest(path, opts.query);
 
-    // Retry idempotent GETs by default; writes only when explicitly opted in; never when
-    // `retry: false`.
-    const wantsRetry = opts.retry !== false && (method === 'GET' || opts.retry !== undefined);
-    return wantsRetry
-      ? withRetry(run, typeof opts.retry === 'object' ? opts.retry : undefined, (ms) =>
-          waitForRetry(ms, opts.signal),
-        )
-      : run();
+      // One full attempt: send, map transport/status/parse failures to a typed ApiError, return
+      // data. A logical request owns one transport identity. A retry re-reads the live
+      // configuration only to prove it is still that identity: if Disconnect/reconnect changed
+      // origin, credentials, query parameters, or custom headers, retire the old request without
+      // sending either the old credential after revocation or the new credential with old-account
+      // work.
+      let firstAttempt = true;
+      const run = async (): Promise<z.infer<S>> => {
+        if (signal?.aborted) throw callerCancellationError(signal);
+        this.assertTransportCurrent();
+        const request = firstAttempt ? initialRequest : this.snapshotRequest(path, opts.query);
+        firstAttempt = false;
+        if (!sameRequestSnapshot(initialRequest, request)) {
+          throw new ApiError('cancelled', 'Request configuration changed before retry');
+        }
+        const { url, headers, search } = request;
+        const requestController = new AbortController();
+        const abortFromCaller = (): void => requestController.abort(signal?.reason);
+        if (signal?.aborted) abortFromCaller();
+        else signal?.addEventListener('abort', abortFromCaller, { once: true });
+        try {
+          let response: Response;
+          try {
+            response = await ky(url, {
+              method,
+              headers: { ...headers },
+              searchParams: new URLSearchParams(search),
+              json: opts.json,
+              redirect: 'error',
+              signal: requestController.signal,
+              timeout: this.timeoutMs,
+              retry: 0,
+              throwHttpErrors: false,
+              // RN's Request polyfill does not retain `redirect`; force it again at fetch dispatch.
+              fetch: fetchRejectingRedirects(this.cfg.fetch ?? fetch),
+            });
+          } catch (err) {
+            if (signal?.aborted) throw callerCancellationError(signal);
+            if (err instanceof DOMException && err.name === 'TimeoutError') {
+              throw new ApiError('timeout', 'Request timed out', undefined, err);
+            }
+            throw new ApiError('no_connection', 'Network request failed', undefined, err);
+          }
+          try {
+            return await this.parseResponse(
+              response,
+              method,
+              path,
+              schema,
+              (reason) => requestController.abort(reason),
+              opts.captureErrorDetail === true,
+            );
+          } catch (error) {
+            if (signal?.aborted) throw callerCancellationError(signal);
+            throw error;
+          }
+        } finally {
+          signal?.removeEventListener('abort', abortFromCaller);
+        }
+      };
+
+      // Retry idempotent GETs by default; writes only when explicitly opted in; never when
+      // `retry: false`.
+      const wantsRetry = opts.retry !== false && (method === 'GET' || opts.retry !== undefined);
+      return await (wantsRetry
+        ? withRetry(run, typeof opts.retry === 'object' ? opts.retry : undefined, (ms) =>
+            waitForRetry(ms, signal),
+          )
+        : run());
+    } finally {
+      linkedSignal.release();
+    }
   }
 
   /** Shared response handling: status check → byte-capped JSON parse → envelope/schema validation. */

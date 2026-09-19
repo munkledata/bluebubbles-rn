@@ -93,6 +93,8 @@ import '@/services/background/registerBackgroundSyncHeadlessTask';
 // eslint-disable-next-line import/first -- native/task dependencies above must be mocked first
 import {
   BACKGROUND_ATTACHMENT_UPLOAD_TIMEOUT_MS,
+  BACKGROUND_CALLBACK_FINALIZATION_WINDOW_MS,
+  BACKGROUND_CALLBACK_WORK_WINDOW_MS,
   BACKGROUND_OUTGOING_MAX_ROWS,
   BACKGROUND_SCHEDULE_MAX_ROWS,
   BACKGROUND_SYNC_MAX_PAGES,
@@ -100,6 +102,18 @@ import {
   BG_SYNC_TASK,
   registerBackgroundSync,
 } from '@/services/background/backgroundSync';
+
+function deferred<T>(): { promise: Promise<T>; resolve(value: T): void } {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
+async function settleMicrotasks(): Promise<void> {
+  for (let index = 0; index < 12; index += 1) await Promise.resolve();
+}
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -143,9 +157,55 @@ describe('the Expo background task adapter', () => {
     const config = mockHttpClient.mock.calls[0]![0] as {
       getOrigin: () => string;
       getPassword: () => string;
+      lifetimeSignal: AbortSignal;
     };
     expect(config.getOrigin()).toBe('https://vault.example');
     expect(config.getPassword()).toBe('vault-secret');
+    expect(config.lifetimeSignal).toEqual(expect.any(AbortSignal));
+    expect(config.lifetimeSignal.aborted).toBe(false);
+  });
+
+  it('revokes work at 50 seconds, returns Failed, and fences a replacement until late work settles', async () => {
+    jest.useFakeTimers({ now: 20_000 });
+    const lateRun = deferred<{ result: 'success'; reason: 'completed' }>();
+    let capturedScope: { isCurrent(): boolean } | undefined;
+    let lifetimeSignal: AbortSignal | undefined;
+    mockRunBackgroundSync.mockImplementationOnce(async (deps) => {
+      capturedScope = deps.captureAccountScope();
+      deps.createClient({ origin: 'https://vault.example', password: 'vault-secret' });
+      lifetimeSignal = (mockHttpClient.mock.calls.at(-1)?.[0] as { lifetimeSignal: AbortSignal })
+        .lifetimeSignal;
+      return lateRun.promise;
+    });
+
+    try {
+      const first = Promise.resolve(task?.());
+      await settleMicrotasks();
+      expect(capturedScope?.isCurrent()).toBe(true);
+      expect(lifetimeSignal?.aborted).toBe(false);
+
+      jest.advanceTimersByTime(BACKGROUND_CALLBACK_WORK_WINDOW_MS);
+      await settleMicrotasks();
+
+      await expect(first).resolves.toBe('failed');
+      expect(capturedScope?.isCurrent()).toBe(false);
+      expect(lifetimeSignal?.aborted).toBe(true);
+      expect(mockFlushPersistentLogs).toHaveBeenNthCalledWith(
+        1,
+        20_000 + BACKGROUND_CALLBACK_FINALIZATION_WINDOW_MS,
+      );
+
+      await expect(task?.()).resolves.toBe('failed');
+      expect(mockRunBackgroundSync).toHaveBeenCalledTimes(1);
+
+      lateRun.resolve({ result: 'success', reason: 'completed' });
+      await settleMicrotasks();
+      await expect(task?.()).resolves.toBe('success');
+      expect(mockRunBackgroundSync).toHaveBeenCalledTimes(2);
+    } finally {
+      lateRun.resolve({ result: 'success', reason: 'completed' });
+      jest.useRealTimers();
+    }
   });
 
   it('does not let the retired legacy toggle authorize a background diagnostic upload', async () => {
@@ -218,6 +278,7 @@ describe('the Expo background task adapter', () => {
         serverVersion: '1.9.0',
         maxPages: BACKGROUND_SYNC_MAX_PAGES,
         shouldAbort: expect.any(Function),
+        signal: expect.any(AbortSignal),
       }),
     );
     expect(mockReconcileMessageNotifications).toHaveBeenCalledWith(db, scope);
@@ -249,13 +310,19 @@ describe('the Expo background task adapter', () => {
       expect.any(Number),
       scope,
       BACKGROUND_OUTGOING_MAX_ROWS,
-      BACKGROUND_ATTACHMENT_UPLOAD_TIMEOUT_MS,
+      expect.any(Number),
       expect.objectContaining({
         allowsLegacyPartZero: true,
         isCurrent: expect.any(Function),
       }),
       expect.any(Function),
+      expect.any(AbortSignal),
     );
+    const attachmentTimeout = (mockRunOutgoingQueue.mock.calls[0] as unknown[] | undefined)?.[6] as
+      number | undefined;
+    expect(attachmentTimeout).toBeGreaterThan(0);
+    expect(attachmentTimeout).toBeLessThanOrEqual(BACKGROUND_CALLBACK_WORK_WINDOW_MS);
+    expect(attachmentTimeout).toBeLessThan(BACKGROUND_ATTACHMENT_UPLOAD_TIMEOUT_MS);
     const rcsAvailable = (mockRunOutgoingQueue.mock.calls[0] as unknown[] | undefined)?.[8] as
       (() => boolean) | undefined;
     expect(rcsAvailable?.()).toBe(false);

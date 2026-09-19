@@ -1,13 +1,16 @@
 # Sharing INTO Gator — why a shared PDF vanished, and the fix
 
-> **Current release status (2026-09-03): disabled for IPC-01 containment.** The investigation below
+> **Current release status (2026-09-18): public inbound sharing remains disabled; `IPC-01` and
+> `SHARE-01` containment are complete.** The investigation below
 > is retained as design evidence, but its earlier JS workaround is not safe enough to ship.
 > `expo-share-intent@8.0.1` can perform unbounded provider reads/copies inside `getFileInfo()` before
 > any raw event reaches JavaScript. Gator therefore installs no such native package, declares no
 > `SEND`/`SEND_MULTIPLE` or Direct Share target, and mounts no provider/capture. The app-root cleanup
 > bridge removes old dynamic/cached conversation shortcuts and disables and sanitizes any retained
-> pinned rows that Android will not let the publisher delete. Exact in-place device-upgrade proof
-> remains open.
+> pinned rows that Android will not let the publisher delete. Two natural Play code-53→75 upgrades
+> now prove the cleanup, including a distinct synthetic bitmap avatar; exact-v75 resolver checks
+> found no Gator target for text, one image, multiple images, or PDF. See the
+> [sanitized proof](./IPC_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md).
 > Re-enabling inbound sharing requires an owned native intake with pre-copy count rejection, actual
 > per-file and aggregate byte caps, streaming cancellation/deadline enforcement, atomic completion,
 > and process-restart cleanup.
@@ -242,23 +245,19 @@ not make Gator a receiver. The guard also rejects `android.app.shortcuts` metada
 seven cleanup and pinned-row sanitization markers and forbids all four old first-party shortcut
 publisher markers.
 
-The remaining device proof must start from the exact approved shortcut-publishing Play build. Use
-that baseline's ordinary app/server flow with one distinct, non-private synthetic chat and avatar;
-never invoke its unsafe inbound-share path or use `cmd shortcut` to manufacture or clear state.
-Verify that the baseline publishes the shortcut with its distinct synthetic label/avatar and legacy
-Direct Share category, then pin it only through the launcher UI when the launcher permits. Update to
-the exact candidate through Play **without uninstalling or clearing app data**. Before the first
-candidate launch, run
-`adb shell dumpsys shortcut com.bluegreengatorapps.messages` and verify that the same shortcut ID
-and old pinned metadata survived the update; otherwise the pinned-survivor branch remains open.
-After launching the candidate, inspect that package-scoped dump and the launcher again: old
-dynamic/cached conversation rows must be gone. Android may retain the launcher-owned pinned row, but
-the same ID must now be disabled and generic, with no old conversation/account label, contact photo,
-launch deep link, or Direct Share category. Launch again and repeat the inspection to prove cleanup
-is safe to rerun. Retain only sanitized fields or a private evidence reference—not the raw dump—and
-after review remove only the synthetic home-screen pin through the launcher UI. If the approved
-baseline cannot publish the shortcut, the launcher cannot pin it, or the row does not survive the
-update, leave the affected branch `BLOCKED/OPEN`; a clean install, sideload, DEV build, or
-command-created shortcut is not a substitute. Separately open another app's share sheet with bounded
-synthetic text, one file, multiple files, and a PDF: Gator and conversation chips must not appear.
-Ordinary outbound backup/media sharing must continue to work through `expo-sharing`.
+The required device proof completed on 2026-09-18. Two complementary natural Google Play upgrades
+started from approved legacy build `0.1.40` / code `53` and ended on exact candidate `0.1.55` / code
+`75`, without command-created shortcut state. Pass A captured the same launcher-pinned legacy row
+before the first v75 foreground launch and after cleanup. Pass B began with a distinct synthetic
+bitmap avatar; Play itself started `MainActivity` during replacement, so this pass truthfully claims
+only the attributed post-cleanup observation. Together they prove that removable rows disappear and
+the retained pinned ID loses its legacy label, bitmap, deep link, and Direct Share category before
+being disabled. A repeat launch left the cleanup timestamp unchanged.
+
+Separate text, single-image, multiple-image, and PDF resolver checks found zero Gator activities or
+conversation targets. Sharing a bounded synthetic attachment outward from Gator still opened
+Android's chooser through `expo-sharing`; backup export was not separately exercised. The synthetic
+pin and public files were removed, the tested app data was erased, and a fresh Play-v75 install now
+has Contacts denied and an empty shortcut inventory. Full observations, privacy precautions, exact
+candidate identity, and evidence limits are in
+[`IPC_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md`](./IPC_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md).

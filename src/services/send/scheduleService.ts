@@ -72,6 +72,50 @@ const scheduledRecoveryStates = new WeakMap<
   Map<ScheduledRecoveryKey, ScheduledRecoveryState>
 >();
 
+/**
+ * One FIFO per database + account generation. Recovery may reset every `sending` row, so the next
+ * runner must not invalidate and repeat recovery until the exact runner that lost authority has
+ * fully unwound its network/DB continuation.
+ */
+const scheduledRunTails = new WeakMap<object, Map<ScheduledRecoveryKey, Promise<void>>>();
+
+interface ScheduledRunReservation {
+  readonly waitForTurn: Promise<void>;
+  finish(): void;
+}
+
+/** Reserve the next non-overlapping run synchronously, before this caller's first await. */
+function reserveScheduledRun(database: object, key: ScheduledRecoveryKey): ScheduledRunReservation {
+  const tails = scheduledRunTails.get(database) ?? new Map<ScheduledRecoveryKey, Promise<void>>();
+  if (!scheduledRunTails.has(database)) scheduledRunTails.set(database, tails);
+
+  const waitForTurn = tails.get(key) ?? Promise.resolve();
+  let resolveCurrent!: () => void;
+  const currentSettled = new Promise<void>((resolve) => {
+    resolveCurrent = resolve;
+  });
+  const tail = waitForTurn.then(
+    () => currentSettled,
+    () => currentSettled,
+  );
+  tails.set(key, tail);
+
+  let finished = false;
+  return {
+    waitForTurn,
+    finish: () => {
+      if (finished) return;
+      finished = true;
+      resolveCurrent();
+      void tail.then(() => {
+        if (tails.get(key) !== tail) return;
+        tails.delete(key);
+        if (tails.size === 0) scheduledRunTails.delete(database);
+      });
+    },
+  };
+}
+
 /** Keep WeakMap bookkeeping out of DB-tainted data flow; these are JS objects, not SQL handles. */
 function recoveryStatesForDatabase(
   database: object,
@@ -132,7 +176,9 @@ async function recoverInterruptedScheduledRows(
  * Publication is synchronous: the promise is stored before its first reset begins, so concurrent
  * Home/chat/background callers share one recovery. A successful promise stays cached for this
  * DB+generation and therefore can never reset a live claim made later in the same runtime. Failed
- * or revoked attempts are removed, allowing a later tick to retry while still failing closed now.
+ * attempts are removed, allowing a later tick to retry while still failing closed now. Callback
+ * expiry is handled by the serialized `runDueScheduled` owner only after that whole run settles;
+ * `ensureScheduledRecovery` must never invalidate a cache while a live claim may still exist.
  */
 export function ensureScheduledRecovery(
   db: AppDatabase,
@@ -257,172 +303,198 @@ export async function runDueScheduled(
   /** Capture foreground cache provenance or fixed task-local info for each physical handoff. */
   captureCapabilitySource?: () => RcsCapabilitySource | undefined,
 ): Promise<number> {
-  assertScheduledScope(accountScope);
-  await ensureScheduledRecovery(db, accountScope, maxRows);
-  assertScheduledScope(accountScope);
-  const commitGuard = accountScope ? () => accountScope.isCurrent() : undefined;
-  // Server-backed rows are informational only: the server fires them. Filter them BEFORE LIMIT,
-  // or an old block of server rows can starve every local fallback/recurrence on every wake.
-  const due = await listDueScheduled(db, now, maxRows, true);
-  // A due-list read can be parked behind native SQLite while Disconnect wipes and reconnects. Do
-  // not claim — and especially do not SEND — any row returned to an operation that no longer owns
-  // the account generation.
-  assertScheduledScope(accountScope);
-  let fired = 0;
-  for (const candidate of due) {
+  const recoveryKey = scheduledRecoveryKey(accountScope);
+  const reservation = reserveScheduledRun(db as object, recoveryKey);
+  try {
+    await reservation.waitForTurn;
     assertScheduledScope(accountScope);
-    // The list is only a bounded candidate snapshot. Re-check due/local/pending atomically and use
-    // the row returned by that claim, so an intervening edit cannot send stale text or a future/
-    // server-owned occurrence.
-    let m: ScheduledRow | null;
-    const capabilitySource = captureCapabilitySource?.();
-    try {
-      m = await claimDueScheduled(db, candidate.id, now, commitGuard);
-    } catch (error) {
-      // A scope revoked inside the claim transaction reports the scheduler's public session error,
-      // while an unrelated database failure keeps its original diagnostic.
-      assertScheduledScope(accountScope);
-      throw error;
-    }
-    if (!m) continue;
+    await ensureScheduledRecovery(db, accountScope, maxRows);
     assertScheduledScope(accountScope);
-    const recurrence = asRecurrence(m.recurrence);
-    const transition: ScheduledTextHandoverTransition = recurrence
-      ? {
-          kind: 'rearm',
-          // Catch-up semantics: skip stale slots, so a device that was off for a week sends one
-          // occurrence now and re-arms for the next future slot.
-          nextScheduledFor: nextOccurrence(m.scheduledFor, recurrence, now),
-        }
-      : { kind: 'sent' };
-    // `settled` = the outgoing queue owns delivery from here on (flipped BEFORE the terminal write,
-    // because that is the instant ownership changes hands). `terminalWritten` = the row actually
-    // reached its terminal state on disk. They are separate because the write can fail on its own,
-    // and the two mean very different things to the catch below.
-    let settled = false;
-    let terminalWritten = false;
-    /**
-     * Stamp the row terminal. Returns whether THIS attempt matched a row: `rearmScheduled` is a
-     * compare-and-set on `status='sending'`, so it legitimately reports false when a previous
-     * attempt already re-armed it. `terminalWritten` therefore accumulates — it means "at least one
-     * attempt landed", which is the only thing the diagnostic below can honestly claim.
-     *
-     * Each repository transition owns its own short transaction, so it queues behind a neighbouring
-     * writer instead of silently joining that writer's rollback. Safe against the no-nesting rule:
-     * `settle` is invoked from `sendTextMessage` only after `insertOutgoingText`'s transaction has
-     * committed, and again after `sender()` resolves.
-     */
-    const writeTerminal = async (): Promise<boolean> => {
+    const commitGuard = accountScope ? () => accountScope.isCurrent() : undefined;
+    // Server-backed rows are informational only: the server fires them. Filter them BEFORE LIMIT,
+    // or an old block of server rows can starve every local fallback/recurrence on every wake.
+    const due = await listDueScheduled(db, now, maxRows, true);
+    // A due-list read can be parked behind native SQLite while Disconnect wipes and reconnects. Do
+    // not claim — and especially do not SEND — any row returned to an operation that no longer owns
+    // the account generation.
+    assertScheduledScope(accountScope);
+    let fired = 0;
+    for (const candidate of due) {
       assertScheduledScope(accountScope);
-      let matched: boolean;
-      if (transition.kind === 'rearm') {
-        matched = await rearmScheduled(db, m.id, transition.nextScheduledFor, commitGuard);
-      } else {
-        matched = await markScheduledSent(db, m.id, null, commitGuard);
+      // The list is only a bounded candidate snapshot. Re-check due/local/pending atomically and use
+      // the row returned by that claim, so an intervening edit cannot send stale text or a future/
+      // server-owned occurrence.
+      let m: ScheduledRow | null;
+      const capabilitySource = captureCapabilitySource?.();
+      try {
+        m = await claimDueScheduled(db, candidate.id, now, commitGuard);
+      } catch (error) {
+        // A scope revoked inside the claim transaction reports the scheduler's public session error,
+        // while an unrelated database failure keeps its original diagnostic.
+        assertScheduledScope(accountScope);
+        throw error;
       }
+      if (!m) continue;
       assertScheduledScope(accountScope);
-      terminalWritten = terminalWritten || matched;
-      return matched;
-    };
-    const settle = async (): Promise<void> => {
-      if (settled) return;
-      settled = true;
-      // Counted at the HANDOVER, not after the write: the message is durably queued at this point,
-      // so it fired even if stamping the row fails and has to be re-attempted below.
-      fired += 1;
-      await writeTerminal();
-    };
-    const recordAtomicHandover = (): void => {
-      if (settled) return;
-      settled = true;
-      terminalWritten = true;
-      fired += 1;
-    };
-    try {
-      assertScheduledScope(accountScope);
-      if (sender) {
-        await sender(m.chatGuid, m.text, m.selectedMessageGuid, settle, m.selectedMessagePartIndex);
-      } else {
-        await sendTextMessage(
-          db,
-          http,
-          {
-            chatGuid: m.chatGuid,
-            text: m.text,
-          },
-          Date.now(),
-          recordAtomicHandover,
-          { scheduledId: m.id, transition, commitGuard },
-          undefined,
-          capabilitySource,
-        );
-      }
-      assertScheduledScope(accountScope);
-      await settle(); // no-op when the sender already handed over
-    } catch (e) {
-      // Once Disconnect revokes the generation, no failure/re-arm write belongs to this runner.
-      // Teardown drains this tracked operation and wipes A's claimed row before B can connect.
-      assertScheduledScope(accountScope);
-      // A throw BEFORE the handover is an ordinary send failure: release/retire the row.
-      if (!settled) {
-        if (e instanceof DbCommitGuardRejectedError || e instanceof RcsCapabilityUnavailableError) {
-          await deferScheduledClaim(db, m.id, commitGuard);
-          continue;
-        }
-        // A compare-and-set miss means this runner no longer owns the scheduled row. Do not
-        // overwrite its newer state with a failure transition.
-        if (e instanceof ScheduledOutgoingClaimLostError) {
-          logger.debug('[sched] outgoing handoff skipped after scheduled claim changed');
-          continue;
-        }
-        if (e instanceof ScheduledOutgoingTargetUnavailableError) {
-          logger.debug('[sched] scheduled reply retired after its target became unavailable');
-          continue;
-        }
-
-        let status: 'pending' | 'error' | 'stale' | null = null;
-        let failureWriteError: unknown;
-        for (let attempt = 0; attempt < 2; attempt += 1) {
-          try {
-            status = await markScheduledFailed(db, m.id, commitGuard);
-            break;
-          } catch (transitionError) {
-            assertScheduledScope(accountScope);
-            failureWriteError = transitionError;
+      const recurrence = asRecurrence(m.recurrence);
+      const transition: ScheduledTextHandoverTransition = recurrence
+        ? {
+            kind: 'rearm',
+            // Catch-up semantics: skip stale slots, so a device that was off for a week sends one
+            // occurrence now and re-arms for the next future slot.
+            nextScheduledFor: nextOccurrence(m.scheduledFor, recurrence, now),
           }
-        }
-        if (status === null) {
-          logger.warn(`[sched] failure transition failed twice (${m.id}); row left 'sending'`, {
-            errorName: failureWriteError instanceof Error ? failureWriteError.name : 'UnknownError',
-          });
+        : { kind: 'sent' };
+      // `settled` = the outgoing queue owns delivery from here on (flipped BEFORE the terminal write,
+      // because that is the instant ownership changes hands). `terminalWritten` = the row actually
+      // reached its terminal state on disk. They are separate because the write can fail on its own,
+      // and the two mean very different things to the catch below.
+      let settled = false;
+      let terminalWritten = false;
+      /**
+       * Stamp the row terminal. Returns whether THIS attempt matched a row: `rearmScheduled` is a
+       * compare-and-set on `status='sending'`, so it legitimately reports false when a previous
+       * attempt already re-armed it. `terminalWritten` therefore accumulates — it means "at least one
+       * attempt landed", which is the only thing the diagnostic below can honestly claim.
+       *
+       * Each repository transition owns its own short transaction, so it queues behind a neighbouring
+       * writer instead of silently joining that writer's rollback. Safe against the no-nesting rule:
+       * `settle` is invoked from `sendTextMessage` only after `insertOutgoingText`'s transaction has
+       * committed, and again after `sender()` resolves.
+       */
+      const writeTerminal = async (): Promise<boolean> => {
+        assertScheduledScope(accountScope);
+        let matched: boolean;
+        if (transition.kind === 'rearm') {
+          matched = await rearmScheduled(db, m.id, transition.nextScheduledFor, commitGuard);
         } else {
-          assertScheduledScope(accountScope);
-          logger.debug(`[sched] send failed (${m.id}) → ${status}`, e);
+          matched = await markScheduledSent(db, m.id, null, commitGuard);
         }
-        continue;
-      }
-      // A throw AFTER the handover is a delivery problem the queue now owns — re-arming the
-      // scheduled row on top of it (markScheduledFailed releases it to 'pending') would send the
-      // message a second time.
-      logger.debug(`[sched] send threw after handover (${m.id}); queue owns delivery`, e);
-    }
-    // Retry only when the first terminal transaction failed or its compare-and-set did not match.
-    // A successfully committed helper is durable because it owns the write-lock slot and cannot be
-    // erased by a neighbouring rollback.
-    if (settled && !terminalWritten) {
+        assertScheduledScope(accountScope);
+        terminalWritten = terminalWritten || matched;
+        return matched;
+      };
+      const settle = async (): Promise<void> => {
+        if (settled) return;
+        settled = true;
+        // Counted at the HANDOVER, not after the write: the message is durably queued at this point,
+        // so it fired even if stamping the row fails and has to be re-attempted below.
+        fired += 1;
+        await writeTerminal();
+      };
+      const recordAtomicHandover = (): void => {
+        if (settled) return;
+        settled = true;
+        terminalWritten = true;
+        fired += 1;
+      };
       try {
         assertScheduledScope(accountScope);
-        await writeTerminal();
-      } catch (e2) {
+        if (sender) {
+          await sender(
+            m.chatGuid,
+            m.text,
+            m.selectedMessageGuid,
+            settle,
+            m.selectedMessagePartIndex,
+          );
+        } else {
+          await sendTextMessage(
+            db,
+            http,
+            {
+              chatGuid: m.chatGuid,
+              text: m.text,
+            },
+            Date.now(),
+            recordAtomicHandover,
+            { scheduledId: m.id, transition, commitGuard },
+            undefined,
+            capabilitySource,
+          );
+        }
         assertScheduledScope(accountScope);
-        logger.warn(`[sched] terminal write failed twice (${m.id}); row left 'sending'`, e2);
+        await settle(); // no-op when the sender already handed over
+      } catch (e) {
+        // Once Disconnect revokes the generation, no failure/re-arm write belongs to this runner.
+        // Teardown drains this tracked operation and wipes A's claimed row before B can connect.
+        assertScheduledScope(accountScope);
+        // A throw BEFORE the handover is an ordinary send failure: release/retire the row.
+        if (!settled) {
+          if (
+            e instanceof DbCommitGuardRejectedError ||
+            e instanceof RcsCapabilityUnavailableError
+          ) {
+            await deferScheduledClaim(db, m.id, commitGuard);
+            continue;
+          }
+          // A compare-and-set miss means this runner no longer owns the scheduled row. Do not
+          // overwrite its newer state with a failure transition.
+          if (e instanceof ScheduledOutgoingClaimLostError) {
+            logger.debug('[sched] outgoing handoff skipped after scheduled claim changed');
+            continue;
+          }
+          if (e instanceof ScheduledOutgoingTargetUnavailableError) {
+            logger.debug('[sched] scheduled reply retired after its target became unavailable');
+            continue;
+          }
+
+          let status: 'pending' | 'error' | 'stale' | null = null;
+          let failureWriteError: unknown;
+          for (let attempt = 0; attempt < 2; attempt += 1) {
+            try {
+              status = await markScheduledFailed(db, m.id, commitGuard);
+              break;
+            } catch (transitionError) {
+              assertScheduledScope(accountScope);
+              failureWriteError = transitionError;
+            }
+          }
+          if (status === null) {
+            logger.warn(`[sched] failure transition failed twice (${m.id}); row left 'sending'`, {
+              errorName:
+                failureWriteError instanceof Error ? failureWriteError.name : 'UnknownError',
+            });
+          } else {
+            assertScheduledScope(accountScope);
+            logger.debug(`[sched] send failed (${m.id}) → ${status}`, e);
+          }
+          continue;
+        }
+        // A throw AFTER the handover is a delivery problem the queue now owns — re-arming the
+        // scheduled row on top of it (markScheduledFailed releases it to 'pending') would send the
+        // message a second time.
+        logger.debug(`[sched] send threw after handover (${m.id}); queue owns delivery`, e);
       }
-      // Neither attempt matched: a recurring row whose `status='sending'` guard missed (someone
-      // else moved it) is left 'pending' at a PAST scheduledFor and re-fires on every tick.
-      if (!terminalWritten) {
-        logger.warn(`[sched] scheduled row ${m.id} was never stamped terminal`);
+      // Retry only when the first terminal transaction failed or its compare-and-set did not match.
+      // A successfully committed helper is durable because it owns the write-lock slot and cannot be
+      // erased by a neighbouring rollback.
+      if (settled && !terminalWritten) {
+        try {
+          assertScheduledScope(accountScope);
+          await writeTerminal();
+        } catch (e2) {
+          assertScheduledScope(accountScope);
+          logger.warn(`[sched] terminal write failed twice (${m.id}); row left 'sending'`, e2);
+        }
+        // Neither attempt matched: a recurring row whose `status='sending'` guard missed (someone
+        // else moved it) is left 'pending' at a PAST scheduledFor and re-fires on every tick.
+        if (!terminalWritten) {
+          logger.warn(`[sched] scheduled row ${m.id} was never stamped terminal`);
+        }
       }
     }
+    return fired;
+  } finally {
+    // A callback-local deadline can expire without advancing the account generation. Delete the
+    // shared recovery result only after this exact runner has fully settled, then release the FIFO;
+    // the next runner can safely reset any claim this expired continuation left `sending`.
+    try {
+      if (accountScope && !accountScope.isCurrent()) {
+        recoveryStatesForDatabase(db as object).delete(recoveryKey);
+      }
+    } finally {
+      reservation.finish();
+    }
   }
-  return fired;
 }

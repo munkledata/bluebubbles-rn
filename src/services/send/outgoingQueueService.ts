@@ -227,6 +227,7 @@ export async function resendOutgoingRow(
   attemptOwnerToken?: SendAttemptOwnerToken,
   serverAuthorization?: MessageTargetServerAuthorization,
   rcsAvailable?: () => boolean,
+  attachmentSignal?: AbortSignal,
 ): Promise<ResendOutcome> {
   if (!accountIsCurrent(accountLease)) return 'paused';
   const rcsChat = isRcsChatGuid(row.chatGuid);
@@ -407,6 +408,7 @@ export async function resendOutgoingRow(
             uri,
             mimeType: att.mimeType ?? 'application/octet-stream',
             totalBytes: att.totalBytes ?? 0,
+            signal: attachmentSignal,
             timeoutMs: remainingMs,
           }),
         deadlineAt,
@@ -470,6 +472,7 @@ async function runOutgoingQueueBody(
   attachmentTimeoutMs?: number,
   serverAuthorization?: MessageTargetServerAuthorization,
   rcsAvailable?: () => boolean,
+  attachmentSignal?: AbortSignal,
 ): Promise<{ eligible: number; sent: number }> {
   if (!accountIsCurrent(accountLease)) return { eligible: 0, sent: 0 };
   // Filter disabled RCS work in SQLite before applying the headless work cap. Fetching every
@@ -555,6 +558,7 @@ async function runOutgoingQueueBody(
       claim.attemptOwnerToken,
       privateApiRetirementAuthorization,
       rcsAvailable,
+      attachmentSignal,
     );
     if (outcome === 'sent') sent += 1;
     if (outcome === 'deferred') {
@@ -590,6 +594,7 @@ export async function runOutgoingQueue(
   attachmentTimeoutMs?: number,
   serverAuthorization?: MessageTargetServerAuthorization,
   rcsAvailable?: () => boolean,
+  attachmentSignal?: AbortSignal,
 ): Promise<{ eligible: number; sent: number }> {
   if (!accountLease) {
     return runOutgoingQueueBody(
@@ -602,6 +607,7 @@ export async function runOutgoingQueue(
       attachmentTimeoutMs,
       serverAuthorization,
       rcsAvailable,
+      attachmentSignal,
     );
   }
 
@@ -617,6 +623,7 @@ export async function runOutgoingQueue(
       attachmentTimeoutMs,
       serverAuthorization,
       rcsAvailable,
+      attachmentSignal,
     );
   });
   return status === 'delivered' && completed.value ? completed.value : { eligible: 0, sent: 0 };

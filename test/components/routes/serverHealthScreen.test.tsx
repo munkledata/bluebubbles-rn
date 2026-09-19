@@ -510,11 +510,10 @@ describe('ServerHealthScreen — query-backed cards', () => {
     expect(mocks.serverAlerts).not.toHaveBeenCalled();
   });
 
-  it('shows the "unsupported" banner when every channel is a dispatcher 404 (Unimplemented)', async () => {
-    // An old server without the admin dispatcher, or a reverse proxy blocking /api/v1/admin/* —
-    // the copy must point at server/proxy config, not connectivity.
+  it('shows the "unsupported" banner when every typed health route is absent', async () => {
+    // The copy must point at server/proxy compatibility, not connectivity.
     for (const m of Object.values(mocks))
-      m.mockRejectedValue(new UnimplementedEndpointError('/admin/command'));
+      m.mockRejectedValue(new UnimplementedEndpointError('/server/environment'));
     await renderScreen();
     expect(await screen.findByText(/doesn.t expose health reporting/)).toBeTruthy();
     expect(screen.queryByText(/isn.t responding to health checks/)).toBeNull();

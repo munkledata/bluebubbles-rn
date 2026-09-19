@@ -49,8 +49,9 @@ export const RcsBridgeDownPayload = z
 
 /**
  * The server's `test-notification` push — the dashboard's "Send Test Notification" button
- * (`send-test-notification` admin channel), which fans a `{ title, body }` out to every
- * registered device through the exact same dispatch + encryption path a real message uses.
+ * (typed local-only `POST /api/v1/devices/test-notification`), which fans a `{ title, body }` out
+ * to every registered device through the exact same dispatch + encryption path a real message
+ * uses.
  *
  * WHY IT MATTERS: this is the ONE end-to-end probe of the push chain, and until it was handled
  * here the app had no case for the event — the router hit `default: return null` and dropped it.

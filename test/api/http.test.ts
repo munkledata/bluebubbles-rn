@@ -32,23 +32,6 @@ describe('HttpClient', () => {
     expect(options.headers['ngrok-skip-browser-warning']).toBe('true');
   });
 
-  it('falls back to legacy ?guid= only when header auth is disabled', async () => {
-    mockKy.mockResolvedValue(jsonResponse({ ok: true }));
-    const onLegacyAuth = jest.fn();
-    const client = new HttpClient({
-      getOrigin: () => 'https://abc.ngrok.io',
-      getPassword: () => 'sekret',
-      useHeaderAuth: () => false,
-      onLegacyAuth,
-    });
-    await client.get('/server/info', z.object({ ok: z.boolean() }));
-
-    const [, options] = mockKy.mock.calls[0];
-    expect(options.headers['Authorization']).toBeUndefined();
-    expect(options.searchParams.get('guid')).toBe('sekret');
-    expect(onLegacyAuth).toHaveBeenCalledTimes(1);
-  });
-
   it('unwraps the data envelope and validates with the schema', async () => {
     mockKy.mockResolvedValue(jsonResponse({ server_version: '1.9.5' }));
     const client = new HttpClient({ getOrigin: () => 'https://x', getPassword: () => 'p' });
@@ -84,5 +67,37 @@ describe('HttpClient', () => {
     mockKy.mockResolvedValue(new Response('x', { status: 500 }));
     const client = new HttpClient({ getOrigin: () => 'https://x', getPassword: () => 'p' });
     await expect(client.get('/p', z.unknown())).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('propagates one client lifetime abort through pinned requests', async () => {
+    const lifetime = new AbortController();
+    mockKy.mockImplementationOnce(
+      async (_url: string, options: { signal: AbortSignal }): Promise<Response> =>
+        new Promise((_resolve, reject) => {
+          options.signal.addEventListener(
+            'abort',
+            () => reject(new DOMException('aborted', 'AbortError')),
+            { once: true },
+          );
+        }),
+    );
+    const client = new HttpClient({
+      getOrigin: () => 'https://x',
+      getPassword: () => 'p',
+      lifetimeSignal: lifetime.signal,
+    })
+      .pinTransport()
+      .bindRepairSnapshot('00000000-0000-4000-8000-000000000001');
+
+    const request = client.get('/server/info', z.unknown());
+    await Promise.resolve();
+    lifetime.abort(new Error('background callback expired'));
+
+    await expect(request).rejects.toMatchObject({ kind: 'cancelled' });
+    expect((mockKy.mock.calls[0]?.[1] as { signal: AbortSignal }).signal.aborted).toBe(true);
+    await expect(client.get('/server/info', z.unknown())).rejects.toMatchObject({
+      kind: 'cancelled',
+    });
+    expect(mockKy).toHaveBeenCalledTimes(1);
   });
 });

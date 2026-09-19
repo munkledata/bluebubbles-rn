@@ -48,14 +48,22 @@ describe('scheduled crash-recovery barrier', () => {
     expect((await getScheduledById(db, firstId))?.status).toBe('sending');
 
     // Recovery already succeeded for generation 7. A second ticker must reuse that completed
-    // barrier, see the live `sending` claim, and leave it alone.
+    // barrier, queue behind the live owner, and leave its `sending` claim alone.
     const sameGenerationScope = { generation: 7, isCurrent: () => true };
-    await expect(runDueScheduled(db, noHttp, 1_000, sender, sameGenerationScope)).resolves.toBe(0);
+    let secondSettled = false;
+    const secondRun = runDueScheduled(db, noHttp, 1_000, sender, sameGenerationScope).finally(
+      () => {
+        secondSettled = true;
+      },
+    );
+    await new Promise<void>((resolve) => setImmediate(resolve));
     expect(sends).toBe(1);
+    expect(secondSettled).toBe(false);
     expect((await getScheduledById(db, firstId))?.status).toBe('sending');
 
     releaseSender.resolve(undefined);
     await expect(firstRun).resolves.toBe(1);
+    await expect(secondRun).resolves.toBe(0);
 
     // A row claimed later in this same runtime is not a crash remnant either.
     const liveId = await insertScheduled(db, {
@@ -85,6 +93,68 @@ describe('scheduled crash-recovery barrier', () => {
     expect(second).toBe(first);
     await expect(first).resolves.toBe(0);
   });
+
+  it.each([
+    ['a long-lived foreground owner established the cache', true],
+    ['the expiring callback established the cache', false],
+  ] as const)(
+    'waits for an expired runner to settle, then recovers when %s',
+    async (_description, primeWithForeground) => {
+      const { db } = await createTestDb();
+      const foregroundScope = { generation: 31, isCurrent: () => true };
+      if (primeWithForeground) {
+        await expect(ensureScheduledRecovery(db, foregroundScope)).resolves.toBe(0);
+      }
+
+      const interruptedId = await insertScheduled(db, {
+        chatGuid: 'c1',
+        text: 'recover after callback timeout',
+        scheduledFor: 1,
+      });
+      let callbackCurrent = true;
+      const callbackScope = { generation: 31, isCurrent: () => callbackCurrent };
+      const callbackSenderEntered = deferred<void>();
+      const releaseCallbackSender = deferred<void>();
+      const expiredRun = runDueScheduled(
+        db,
+        noHttp,
+        1_000,
+        async () => {
+          callbackSenderEntered.resolve(undefined);
+          await releaseCallbackSender.promise;
+        },
+        callbackScope,
+      );
+      await callbackSenderEntered.promise;
+      expect((await getScheduledById(db, interruptedId))?.status).toBe('sending');
+
+      callbackCurrent = false;
+      let replacementSends = 0;
+      let replacementSettled = false;
+      const replacement = runDueScheduled(
+        db,
+        noHttp,
+        1_000,
+        async () => {
+          replacementSends += 1;
+        },
+        foregroundScope,
+      ).finally(() => {
+        replacementSettled = true;
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(replacementSends).toBe(0);
+      expect(replacementSettled).toBe(false);
+      expect((await getScheduledById(db, interruptedId))?.status).toBe('sending');
+
+      releaseCallbackSender.resolve(undefined);
+      await expect(expiredRun).rejects.toThrow('account session changed');
+      await expect(replacement).resolves.toBe(1);
+      expect(replacementSends).toBe(1);
+      expect((await getScheduledById(db, interruptedId))?.status).toBe('sent');
+    },
+  );
 
   it('fails closed after a full fourth bounded batch, then finishes recovery before sending', async () => {
     const { db, raw } = await createTestDb();

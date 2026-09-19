@@ -219,6 +219,29 @@ test('DL-01 fixture exposes only authenticated synthetic sync and bounded hostil
     assert.equal(messages.json.data.messages[0].guid, chat.lastMessage.guid);
     assert.equal(JSON.stringify(messages.json).includes(AUTH_TOKEN), false);
 
+    const contacts = await control(fixture, '/api/v1/contact/query', {
+      addresses: ['dl01-fixture@example.invalid'],
+    });
+    assert.deepEqual(contacts.json.data.contacts, [
+      {
+        id: 'dl01-fixture-contact',
+        displayName: 'DL-01 Fixture',
+        firstName: 'DL-01',
+        lastName: 'Fixture',
+        phoneNumbers: [],
+        emails: ['dl01-fixture@example.invalid'],
+        hasAvatar: true,
+        avatarEtag: 'synthetic-v1',
+      },
+    ]);
+    const avatar = await fetch(
+      `${fixture.origin}/api/v1/contact/dl01-fixture-contact/avatar?size=thumb`,
+      { headers: { Authorization: `Bearer ${AUTH_TOKEN}` } },
+    );
+    assert.equal(avatar.status, 200);
+    assert.equal(avatar.headers.get('content-type'), 'image/png');
+    assert.deepEqual(Buffer.from(await avatar.arrayBuffer()), DL01_VALID_PNG);
+
     const invalidScenario = await control(fixture, '/_dl01/v1/scenario', {
       mode: 'not-a-fixture-mode',
       target: 'attachment',

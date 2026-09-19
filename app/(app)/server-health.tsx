@@ -193,8 +193,8 @@ export default function ServerHealthScreen(): React.JSX.Element {
   // True when EVERY read failed → the server isn't answering the health channels at all (offline
   // or too old). Shown as a banner so an empty screen reads as a server issue, not an app bug.
   const allFailed = accountCurrent && attemptedHealthQueries.every((q) => q.isError);
-  // Every typed route and its older-server fallback was absent. That is version/proxy
-  // compatibility, not proof that the server is offline.
+  // Every typed route was absent. That is version/proxy compatibility, not proof that the server
+  // is offline.
   const allUnsupported =
     allFailed && attemptedHealthQueries.every((q) => isUnimplementedEndpoint(q.error));
 

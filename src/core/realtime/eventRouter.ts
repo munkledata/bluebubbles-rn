@@ -64,6 +64,8 @@ export interface EventOccurrenceMetadata {
 export interface EventDeliveryContext {
   readonly generation: number;
   readonly durableEvent?: DurableEventCheckpoint;
+  /** Optional shorter native-callback lifetime layered over the account generation. */
+  readonly signal?: AbortSignal;
   isCurrent(): boolean;
 }
 

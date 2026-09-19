@@ -336,6 +336,22 @@ function fixtureHandle() {
   };
 }
 
+const FIXTURE_CONTACT_ID = 'dl01-fixture-contact';
+const FIXTURE_CONTACT_ADDRESS = 'dl01-fixture@example.invalid';
+
+function fixtureContact() {
+  return {
+    id: FIXTURE_CONTACT_ID,
+    displayName: 'DL-01 Fixture',
+    firstName: 'DL-01',
+    lastName: 'Fixture',
+    phoneNumbers: [],
+    emails: [FIXTURE_CONTACT_ADDRESS],
+    hasAvatar: true,
+    avatarEtag: 'synthetic-v1',
+  };
+}
+
 function createCase(generation, mode, target, now, attachmentCount = 1) {
   const chatGuid = `dl01-chat-${generation}`;
   const messageGuid = `dl01-message-${generation}`;
@@ -1245,6 +1261,40 @@ export async function startDl01FixtureServer(configuration) {
         state.current.message.originalROWID > afterRowId &&
         (body.afterRowId !== undefined || state.current.message.dateCreated > afterTimestamp);
       sendJson(socket, 200, envelope({ messages: include ? [state.current.message] : [] }));
+      return;
+    }
+
+    if (pathname === `${API_PREFIX}/contact/query`) {
+      requireMethod(request, 'POST');
+      const body = parseJsonBody(request);
+      if (
+        !Array.isArray(body.addresses) ||
+        body.addresses.some((address) => typeof address !== 'string')
+      ) {
+        throw new FixtureHttpError(400);
+      }
+      const contacts = body.addresses.includes(FIXTURE_CONTACT_ADDRESS) ? [fixtureContact()] : [];
+      sendJson(socket, 200, envelope({ contacts }));
+      return;
+    }
+
+    const contactAvatarMatch = /^\/api\/v1\/contact\/([^/]+)\/avatar$/.exec(pathname);
+    if (contactAvatarMatch) {
+      requireMethod(request, 'GET');
+      const id = decodePathSegment(contactAvatarMatch[1]);
+      if (id !== FIXTURE_CONTACT_ID) {
+        sendApiError(socket, 404);
+        return;
+      }
+      socket.end(
+        Buffer.concat([
+          responseHead(200, {
+            'Content-Type': 'image/png',
+            'Content-Length': DL01_VALID_PNG.length,
+          }),
+          DL01_VALID_PNG,
+        ]),
+      );
       return;
     }
 

@@ -19,7 +19,11 @@ const PUBLIC_TEXT_INSERT_TARGET = 'src/db/repositories/outgoing.ts#insertOutgoin
 const TRANSACTION_TEXT_INSERT_TARGET =
   'src/db/repositories/outgoing.ts#insertOutgoingTextWithinTransaction';
 const REVIEWED_RUN_DUE_BODY_HASH =
-  '2a445fd30f62928eb9fcb2fb1bec74164e245054b05da4e99384a1a3e725408a';
+  '6fcf727f957ebee14c1d31f6110b79f97999cfef6f50689f58768ed800a6b627';
+const REVIEWED_RESERVE_SCHEDULED_RUN_BODY_HASH =
+  'd8b2eff4e441b6340e91120123f6a7c76365e0c6dc519561b81305276c42ada2';
+const REVIEWED_ENSURE_SCHEDULED_RECOVERY_BODY_HASH =
+  '4b623fa83b24c1602c60e02c1a226e3b2cfd7e5b06bde9e947dc5b35a7a851fb';
 const REVIEWED_SEND_TEXT_BODY_HASH =
   'cac6456de2aa30f90e47ed0dae521ef06d0bcd77c6b6f6bd5c98403a85e0a9b6';
 const HOME_PATH = 'app/(app)/home.tsx';
@@ -27,6 +31,20 @@ const CHAT_ROUTE_PATH = 'app/(app)/chat/[guid].tsx';
 const CHAT_CATCHUP_PATH = 'src/features/conversations/useChatScheduledCatchup.ts';
 const SEND_COMPOSITION_PATH = 'src/services/send/index.ts';
 const BACKGROUND_SYNC_PATH = 'src/services/background/backgroundSync.ts';
+const BACKGROUND_SYNC_ORCHESTRATOR_PATH = 'src/services/background/backgroundSyncOrchestrator.ts';
+const OUTGOING_QUEUE_SERVICE_PATH = 'src/services/send/outgoingQueueService.ts';
+const ATTACHMENT_UPLOAD_PATH = 'src/services/send/attachmentUpload.ts';
+const HTTP_CLIENT_PATH = 'src/core/api/http.ts';
+const REVIEWED_CALLBACK_DEPENDENCY_FILE_HASHES = new Map([
+  [BACKGROUND_SYNC_PATH, 'a9f27cdeb38edc321d99d7991702297a76f81e6083f46c3343092d53449f3b38'],
+  [
+    BACKGROUND_SYNC_ORCHESTRATOR_PATH,
+    '364aa2052974bef32055640230d9c9f4cbf6757de072104245ac66de5a06ca83',
+  ],
+  [OUTGOING_QUEUE_SERVICE_PATH, '65931b408afd0af64bc529d22d59ae719e8115dcbae79e227d666e9efed147ce'],
+  [ATTACHMENT_UPLOAD_PATH, 'a35f9382d70e4446fb0a1ce4497ad64ddd9576e442d2a4b041022beeee94d80b'],
+  [HTTP_CLIENT_PATH, '9de33f6afa815241607d4a93162b0cbb962cdfd2dacf3b7dfbef47044fcc4480'],
+]);
 const REVIEWED_SCHEDULED_SYNTAX_HASHES = new Map([
   [
     `${SEND_COMPOSITION_PATH}#fireDueScheduled`,
@@ -47,6 +65,10 @@ const REVIEWED_SCHEDULED_SYNTAX_HASHES = new Map([
   [
     `${BACKGROUND_SYNC_PATH}#asRealtimeLease`,
     '21c06aea640ecdb4ae509a6eb4f8768b4fbffb47226a992521e0b225beb68564',
+  ],
+  [
+    `${BACKGROUND_SYNC_PATH}#executeBackgroundSyncTask`,
+    'ffa8bfb34823d9f8df4784384ffe259dd4c015414dfc3e100b68b2daba6d67ee',
   ],
   [
     `${CHAT_CATCHUP_PATH}#useChatScheduledCatchup`,
@@ -156,10 +178,21 @@ function exportedFunction(sourceFile, name) {
   return { matches, declaration: exported ? declaration : undefined };
 }
 
+function topLevelFunction(sourceFile, name) {
+  const matches = sourceFile.statements.filter(
+    (statement) => ts.isFunctionDeclaration(statement) && statement.name?.text === name,
+  );
+  return { matches, declaration: matches.length === 1 ? matches[0] : undefined };
+}
+
 function functionBodyHash(declaration, sourceFile) {
   const printer = ts.createPrinter({ removeComments: true, newLine: ts.NewLineKind.LineFeed });
   const normalized = printer.printNode(ts.EmitHint.Unspecified, declaration.body, sourceFile);
   return createHash('sha256').update(normalized).digest('hex');
+}
+
+function normalizedNodeText(node, sourceFile) {
+  return node.getText(sourceFile).replace(/\s+/g, ' ').trim();
 }
 
 function syntaxHash(node, sourceFile) {
@@ -1627,7 +1660,10 @@ export function scheduledSendTextBodyHash(source) {
 }
 
 /** Validate the ordering inside the one production scheduler entry point. */
-export function scheduledRecoverySourceErrors(source, { expectedBodyHash } = {}) {
+export function scheduledRecoverySourceErrors(
+  source,
+  { expectedBodyHash, expectedReserveBodyHash, expectedEnsureBodyHash } = {},
+) {
   const errors = [];
   const sourceFile = ts.createSourceFile(
     SCHEDULE_SERVICE_PATH,
@@ -1644,6 +1680,37 @@ export function scheduledRecoverySourceErrors(source, { expectedBodyHash } = {})
   if (expectedBodyHash && functionBodyHash(declaration, sourceFile) !== expectedBodyHash) {
     errors.push('runDueScheduled no longer matches its reviewed AST body fingerprint');
   }
+  const reserve = topLevelFunction(sourceFile, 'reserveScheduledRun');
+  if (reserve.matches.length !== 1 || !reserve.declaration?.body) {
+    errors.push('reserveScheduledRun must be one top-level function declaration');
+  } else if (
+    expectedReserveBodyHash &&
+    functionBodyHash(reserve.declaration, sourceFile) !== expectedReserveBodyHash
+  ) {
+    errors.push('reserveScheduledRun no longer matches its reviewed AST body fingerprint');
+  }
+  const ensure = exportedFunction(sourceFile, 'ensureScheduledRecovery');
+  if (ensure.matches.length !== 1 || !ensure.declaration?.body) {
+    errors.push('ensureScheduledRecovery must be one exported top-level function declaration');
+  } else if (
+    expectedEnsureBodyHash &&
+    functionBodyHash(ensure.declaration, sourceFile) !== expectedEnsureBodyHash
+  ) {
+    errors.push('ensureScheduledRecovery no longer matches its reviewed AST body fingerprint');
+  }
+
+  const serializedTry = declaration.body.statements[2];
+  const serializedWork =
+    serializedTry && ts.isTryStatement(serializedTry) ? serializedTry.tryBlock : undefined;
+  if (
+    declaration.body.statements.length !== 3 ||
+    !serializedTry ||
+    !ts.isTryStatement(serializedTry) ||
+    serializedTry.catchClause ||
+    !serializedTry.finallyBlock
+  ) {
+    errors.push('runDueScheduled must keep one outer serialized try/finally owner');
+  }
 
   const recoveryCalls = callsNamed(declaration.body, new Set(['ensureScheduledRecovery']));
   if (recoveryCalls.length !== 1) {
@@ -1653,8 +1720,10 @@ export function scheduledRecoverySourceErrors(source, { expectedBodyHash } = {})
   }
   const recovery = recoveryCalls[0];
   if (recovery) {
-    if (!isExactTopLevelRecoveryAwait(recovery, declaration.body)) {
-      errors.push('ensureScheduledRecovery must be an unconditional top-level awaited statement');
+    if (!serializedWork || !isExactTopLevelRecoveryAwait(recovery, serializedWork)) {
+      errors.push(
+        'ensureScheduledRecovery must be an unconditional awaited statement inside the serialized owner',
+      );
     }
     if (
       recovery.arguments.length !== 3 ||
@@ -1666,16 +1735,18 @@ export function scheduledRecoverySourceErrors(source, { expectedBodyHash } = {})
     }
 
     const recoveryStatement = recovery.parent.parent;
-    const earlierStatements = declaration.body.statements.filter(
+    const earlierStatements = (serializedWork?.statements ?? []).filter(
       (statement) => statement.getStart(sourceFile) < recoveryStatement.getStart(sourceFile),
     );
-    const onlyInitialScopeAssertion =
-      earlierStatements.length === 1 &&
-      ts.isExpressionStatement(earlierStatements[0]) &&
-      ts.isCallExpression(earlierStatements[0].expression) &&
-      directCallName(earlierStatements[0].expression) === 'assertScheduledScope';
-    if (!onlyInitialScopeAssertion) {
-      errors.push('only the initial account-scope assertion may run before scheduled recovery');
+    const exactSerializedPrefix =
+      earlierStatements.length === 2 &&
+      normalizedNodeText(earlierStatements[0], sourceFile) === 'await reservation.waitForTurn;' &&
+      normalizedNodeText(earlierStatements[1], sourceFile) ===
+        'assertScheduledScope(accountScope);';
+    if (!exactSerializedPrefix) {
+      errors.push(
+        'scheduled recovery must wait for the reserved FIFO turn before its initial account-scope assertion',
+      );
     }
   }
 
@@ -1711,6 +1782,36 @@ export function scheduledRunDueBodyHash(source) {
   const { matches, declaration } = exportedFunction(sourceFile, 'runDueScheduled');
   if (matches.length !== 1 || !declaration?.body) {
     throw new Error('runDueScheduled must be one exported top-level function declaration');
+  }
+  return functionBodyHash(declaration, sourceFile);
+}
+
+export function scheduledReserveRunBodyHash(source) {
+  const sourceFile = ts.createSourceFile(
+    SCHEDULE_SERVICE_PATH,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const { matches, declaration } = topLevelFunction(sourceFile, 'reserveScheduledRun');
+  if (matches.length !== 1 || !declaration?.body) {
+    throw new Error('reserveScheduledRun must be one top-level function declaration');
+  }
+  return functionBodyHash(declaration, sourceFile);
+}
+
+export function scheduledEnsureRecoveryBodyHash(source) {
+  const sourceFile = ts.createSourceFile(
+    SCHEDULE_SERVICE_PATH,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS,
+  );
+  const { matches, declaration } = exportedFunction(sourceFile, 'ensureScheduledRecovery');
+  if (matches.length !== 1 || !declaration?.body) {
+    throw new Error('ensureScheduledRecovery must be one exported top-level function declaration');
   }
   return functionBodyHash(declaration, sourceFile);
 }
@@ -2061,27 +2162,25 @@ function exactBackgroundScheduleWiring(sourceFile) {
     return false;
   }
   const call = calls[0];
-  const awaited = call.parent;
-  const outcomeDeclaration = awaited?.parent;
-  const declarationList = outcomeDeclaration?.parent;
-  const outcomeStatement = declarationList?.parent;
-  const tryBlock = outcomeStatement?.parent;
+  const runDeclaration = call.parent;
+  const declarationList = runDeclaration?.parent;
+  const runStatement = declarationList?.parent;
+  const tryBlock = runStatement?.parent;
   const tryStatement = tryBlock?.parent;
   if (
-    !ts.isAwaitExpression(awaited) ||
-    !ts.isVariableDeclaration(outcomeDeclaration) ||
-    !ts.isIdentifier(outcomeDeclaration.name) ||
-    outcomeDeclaration.name.text !== 'outcome' ||
-    outcomeDeclaration.initializer !== awaited ||
+    !ts.isVariableDeclaration(runDeclaration) ||
+    !ts.isIdentifier(runDeclaration.name) ||
+    runDeclaration.name.text !== 'run' ||
+    runDeclaration.initializer !== call ||
     !ts.isVariableDeclarationList(declarationList) ||
     !(declarationList.flags & ts.NodeFlags.Const) ||
     declarationList.declarations.length !== 1 ||
-    !ts.isVariableStatement(outcomeStatement) ||
+    !ts.isVariableStatement(runStatement) ||
     !ts.isBlock(tryBlock) ||
-    tryBlock.statements[0] !== outcomeStatement ||
+    !tryBlock.statements.includes(runStatement) ||
     !ts.isTryStatement(tryStatement) ||
     tryStatement.tryBlock !== tryBlock ||
-    task.body.statements[0] !== tryStatement
+    tryStatement.parent !== task.body
   ) {
     return false;
   }
@@ -2212,6 +2311,7 @@ function reviewedScheduledOwnerErrors(sourceFiles) {
     'fireDueScheduledWithDevelopmentSender',
     'useChatScheduledCatchup',
     'ChatScreen',
+    'executeBackgroundSyncTask',
   ]);
   for (const [key, expectedHash] of REVIEWED_SCHEDULED_SYNTAX_HASHES) {
     if (key.endsWith('#Home.scheduledEffect')) continue;
@@ -2266,6 +2366,17 @@ function reviewedScheduledOwnerErrors(sourceFiles) {
     errors.push(
       `${CHAT_ROUTE_PATH}#ChatScreenInner must directly invoke the reviewed catch-up hook with its mounted account lease`,
     );
+  }
+
+  for (const [path, expectedHash] of REVIEWED_CALLBACK_DEPENDENCY_FILE_HASHES) {
+    const sourceFile = sourceFiles.get(path);
+    const actualHash = sourceFile ? syntaxHash(sourceFile, sourceFile) : '<missing>';
+    if (actualHash !== expectedHash) {
+      errors.push(
+        `${path} no longer matches its reviewed REL-001 callback dependency fingerprint ` +
+          `(expected ${expectedHash}; actual ${actualHash})`,
+      );
+    }
   }
 
   const backgroundSource = sourceFiles.get(BACKGROUND_SYNC_PATH);
@@ -2438,6 +2549,8 @@ export function runScheduledRecoveryCheck({ root = process.cwd() } = {}) {
   const errors = [
     ...scheduledRecoverySourceErrors(readFileSync(scheduleService, 'utf8'), {
       expectedBodyHash: REVIEWED_RUN_DUE_BODY_HASH,
+      expectedReserveBodyHash: REVIEWED_RESERVE_SCHEDULED_RUN_BODY_HASH,
+      expectedEnsureBodyHash: REVIEWED_ENSURE_SCHEDULED_RECOVERY_BODY_HASH,
     }),
     ...scheduledHandoffSourceErrors(readFileSync(sendService, 'utf8'), {
       expectedBodyHash: REVIEWED_SEND_TEXT_BODY_HASH,

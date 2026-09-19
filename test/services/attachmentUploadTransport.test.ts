@@ -73,7 +73,9 @@ function upload(
     timeoutMs?: number;
     clientAttemptGeneration?: number;
     text?: string;
+    totalBytes?: number;
     assertNetworkStart?: () => void;
+    signal?: AbortSignal;
   } = {},
 ): ReturnType<typeof expoAttachmentUploader> {
   return expoAttachmentUploader({
@@ -87,7 +89,8 @@ function upload(
     name: 'photo.jpg',
     uri: 'file:///photo.jpg',
     mimeType: 'image/jpeg',
-    totalBytes: 42,
+    totalBytes: options.totalBytes ?? 42,
+    signal: options.signal,
     timeoutMs: options.timeoutMs,
   });
 }
@@ -97,19 +100,45 @@ async function flushMicrotasks(count = 8): Promise<void> {
 }
 
 describe('native attachment upload account scope', () => {
-  it('rejects a direct iMessage upload before native file or network work', async () => {
-    const http = new HttpClient({
-      getOrigin: () => 'https://old.example',
-      getPassword: () => 'old-password',
-    });
+  it.each([1024 * 1024 - 1, 1024 * 1024, 1024 * 1024 + 1])(
+    'rejects a direct iMessage %i-byte upload before native file or network work',
+    async (totalBytes) => {
+      const http = new HttpClient({
+        getOrigin: () => 'https://old.example',
+        getPassword: () => 'old-password',
+      });
 
-    await expect(upload(http, { chatGuid: 'iMessage;-;chat-1' })).rejects.toThrow(
-      'iMessage attachments were retired',
-    );
-    expect(mockGetInfoAsync).not.toHaveBeenCalled();
-    expect(mockCreateUploadTask).not.toHaveBeenCalled();
-    expect(uploadRegistry.size).toBe(0);
-  });
+      await expect(upload(http, { chatGuid: 'iMessage;-;chat-1', totalBytes })).rejects.toThrow(
+        'iMessage attachments were retired',
+      );
+      expect(mockGetInfoAsync).not.toHaveBeenCalled();
+      expect(mockCreateUploadTask).not.toHaveBeenCalled();
+      expect(uploadRegistry.size).toBe(0);
+    },
+  );
+
+  it.each([1024 * 1024 - 1, 1024 * 1024, 1024 * 1024 + 1])(
+    'uses the multipart route for a supported RCS %i-byte upload',
+    async (totalBytes) => {
+      const http = new HttpClient({
+        getOrigin: () => 'https://old.example',
+        getPassword: () => 'old-password',
+      });
+
+      const run = upload(http, { totalBytes });
+      finishFileCheck({ exists: true });
+      await expect(run).resolves.toMatchObject({ guid: 'server-message' });
+
+      expect(mockCreateUploadTask).toHaveBeenCalledTimes(1);
+      const [url, , options] = mockCreateUploadTask.mock.calls[0]!;
+      expect(url).toBe('https://old.example/api/v1/message/attachment/upload');
+      expect(options).toMatchObject({
+        httpMethod: 'POST',
+        uploadType: 1,
+        fieldName: 'attachment',
+      });
+    },
+  );
 
   it.each([301, 302, 303, 307, 308])(
     'rejects redirect status %i instead of accepting a native follow-up result',
@@ -344,6 +373,40 @@ describe('native attachment upload account scope', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('cancels one active native task when its callback owner expires', async () => {
+    let finishNativeUpload!: (value: MockUploadSuccess) => void;
+    mockUploadAsync.mockImplementationOnce(
+      () =>
+        new Promise<MockUploadSuccess>((resolve) => {
+          finishNativeUpload = resolve;
+        }),
+    );
+    const owner = new AbortController();
+    const http = new HttpClient({
+      getOrigin: () => 'https://old.example',
+      getPassword: () => 'old-password',
+    });
+    const run = upload(http, { signal: owner.signal });
+    finishFileCheck({ exists: true });
+    await flushMicrotasks();
+    expect(mockCreateUploadTask).toHaveBeenCalledTimes(1);
+
+    owner.abort(new Error('background callback expired'));
+    await expect(run).rejects.toMatchObject({ kind: 'cancelled' });
+    expect(mockCancelAsync).toHaveBeenCalledTimes(1);
+    expect(mockUploadSettle).toHaveBeenCalledTimes(1);
+    expect(uploadRegistry.size).toBe(1);
+
+    finishNativeUpload({
+      status: 200,
+      body: JSON.stringify({ status: 200, data: { guid: 'late-server-message' } }),
+    });
+    await flushMicrotasks();
+    await expect(uploadRegistry.awaitIdle()).resolves.toBeUndefined();
+    expect(mockRemoveSubscription).toHaveBeenCalledTimes(1);
+    expect(uploadRegistry.size).toBe(0);
   });
 
   it('times out and removes an uploader queued behind both production gate slots', async () => {

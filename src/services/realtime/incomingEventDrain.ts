@@ -365,6 +365,7 @@ export class IncomingEventDrain {
     if (!isCurrent()) return;
     const recoveryContext: EventDeliveryContext = {
       generation: context?.generation ?? 0,
+      signal: context?.signal,
       isCurrent,
     };
     try {
@@ -405,6 +406,7 @@ function durableContext(
   return {
     context: {
       generation: context?.generation ?? 0,
+      signal: context?.signal,
       isCurrent: attemptGuard,
       durableEvent: {
         dbAppliedAt: claim.dbAppliedAt,

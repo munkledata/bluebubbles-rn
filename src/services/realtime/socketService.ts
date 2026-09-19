@@ -15,16 +15,6 @@ import {
 export interface SocketAuthOptions {
   /** Auth header(s) for the handshake (mirrors the REST client's headers). */
   headers?: Readonly<Record<string, string>>;
-  /**
-   * When true, send the shared password as a `?guid=` handshake query (what a stock/old
-   * server reads — `socket.handshake.query.guid`) instead of the secure
-   * `auth` payload. Drive this from one `HttpClient.snapshotTransport()` so REST and socket
-   * stay in the same mode and account identity. Legacy mode puts the password in the
-   * (WSS-encrypted) URL,
-   * so use it only against servers that don't support `handshake.auth`. Scoped device
-   * credentials are never valid in this mode.
-   */
-  legacyQueryAuth?: boolean;
 }
 
 /** Explicit raw-event handoff accepted by the socket transport. */
@@ -150,9 +140,8 @@ export function shouldLogSocketError(
 /**
  * Socket.IO connection for live updates while the app is open. By default auth travels in the
  * handshake `auth` payload—`auth.password` for a shared password or `auth.token` for a scoped
- * device credential (not the URL query—the security fix). Legacy shared-password mode falls back
- * to a `?guid=` query for servers that only read it. Every
- * server event is funneled through the required injected raw-event handler.
+ * device credential, never a URL query. Every server event is funneled through the required
+ * injected raw-event handler.
  *
  * On Android, FCM is the primary delivery path (Phase 6); this covers the
  * foreground/open window.
@@ -198,11 +187,6 @@ export class SocketService {
   }
 
   connect(origin: string, password: string, opts: SocketAuthOptions = {}): void {
-    if (opts.legacyQueryAuth && isScopedDeviceCredential(password)) {
-      throw new RangeError(
-        'Scoped device credentials require Socket.IO auth.token and cannot use legacy query authentication.',
-      );
-    }
     this.lifecycleGeneration += 1;
     this.retireCurrentConnection();
     this.stopped = false;
@@ -228,12 +212,10 @@ export class SocketService {
     this.socket = io(this.origin, {
       transports: ['websocket'],
       // Shared passwords use auth.password; the server reserves auth.token for scoped device
-      // bearers. Only a legacy shared password may fall back to a URL query.
-      ...(this.opts.legacyQueryAuth
-        ? { query: { guid: this.password } }
-        : scopedDeviceCredential
-          ? { auth: { token: this.password } }
-          : { auth: { password: this.password } }),
+      // bearers. Neither credential is ever placed in the URL query.
+      ...(scopedDeviceCredential
+        ? { auth: { token: this.password } }
+        : { auth: { password: this.password } }),
       extraHeaders: { ...(this.opts.headers ?? {}) },
       reconnection: true,
       // Cap socket.io's built-in retries (its default is Infinity) so it surrenders to

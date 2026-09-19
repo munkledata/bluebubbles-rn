@@ -11,42 +11,52 @@ history and is not executable evidence for a replacement candidate. Do not copy 
 build into this file. Section 0 is the next private Internal Testing gate; Sections 1–7 remain the
 broader Closed/Open/Production release gate.
 
-Current release-candidate status — **INTERNAL TESTING; broader release remains NO-GO.** The exact
-replacement was built, validated, submitted only to Google Play Internal Testing, installed from
-Play through a natural v66→v67 update, and exercised for one narrow ordinary-kill/App Lock resume.
-The live Internal release reports `completed`; that means Play serves version code 67, not that
-`STORE-01`, `DEVICE-01`, `DL-01`, or the staged journey is complete. The remaining staged-server,
-device-matrix, tester-administration, policy, and rollout gates below stay open; this Internal result
-is not public-release approval.
+Current release-candidate status — **INTERNAL TESTING; broader release remains NO-GO.** Exact v75
+was built, validated, and submitted only to Google Play Internal Testing. Play-delivered v75 passed
+the five-group `DL-01` matrix on the physical Android 16/API 36 Samsung. The same scoped matrix also
+passed on Android 17/API 37 using the correct Google-generated, Play-signed APK, but that installation
+was sideloaded and remains supporting compatibility evidence. Under the owner-approved evidence
+split, `DL-01` is done and per-OS Play-install provenance belongs to `DEVICE-01`/release. The live
+Internal release reports `completed`; that means Play serves version code 75, not that `STORE-01`,
+`DEVICE-01`, or the staged journey is complete. Remaining staged-server, device-matrix,
+tester-administration, policy, and rollout gates below stay open; this Internal result is not
+public-release approval.
 
 Exact replacement frozen from one release run:
 
-- Version/build number: `0.1.50 (versionCode 67)`
-- Exact source and release commits: `2c7f426e3549127972fdd5c601bf98f651a75870` /
-  `12a45924a2e8b5dc998e0b56e0df6c58f8186960`; source contains `DL-01` implementation
-  `9139cf72bb56d613f1b848de63fe882b2029e91a`
-- Release branch/run: `release/android-0.1.50` /
-  `android-0.1.50-9139cf7-20260915234900`
-- Submitted AAB: `gator-release-0.1.50-v67-12a4592.aab`; the later host update removed the local
-  AAB bytes and receipt directory, so neither may be described as retained or reused
-- AAB size/SHA-256: `56,806,011` bytes /
-  `1bec41156c38e556eb9dbe079bc0cf83ee1577d07d0912144fb0524739304702`
+- Version/build number: `0.1.55 (versionCode 75)`
+- Exact source and release commits: `546750a0844adc48733436f26d81ebea63f0319c` /
+  `9c73c1ffb0d4d63ecc562ab988ae73f28c8750dc`
+- Release branch/run: `release/android-0.1.55` /
+  `android-0.1.55-546750a-20260918055448`
+- Submitted AAB: `gator-release-0.1.55-v75-9c73c1f.aab`
+- AAB size/SHA-256: `57,878,322` bytes /
+  `86e7ee236f2caa644e97b645fc9d0ec1fa562fc105ffa5bb26549d44f42b3197`
 - Upload certificate SHA-256:
   `6E:18:F9:93:61:DC:D6:58:F1:A7:5B:9F:47:E8:66:AC:8D:A6:AF:EF:B9:E7:F4:7C:BF:41:F5:E0:F6:CE:2F:43`
-- Submission: EAS id `67253f5c-6f5c-47a9-b669-c0ea25c4f5de`, completed; Android Publisher
-  readback found Internal release `0.1.50`, version code `67`, status `completed`
-- Tester/device/Android/test date: owner-enrolled Samsung, Android 16 / API 36, 2026-09-15
+- Submission: id `8953c1c0-79f1-463a-a3cf-1ff1b49f46b5`, finished; Android Publisher readback
+  found Internal release `0.1.55`, version code `75`, status `completed`
+- Tester/device/Android/test date: Samsung API 36 plus isolated arm64 emulator API 37, 2026-09-18
 - Exact device receipt:
-  [`docs/DL_01_PLAY_V67_DEVICE_PROOF_2026-09-15.md`](./docs/DL_01_PLAY_V67_DEVICE_PROOF_2026-09-15.md)
+  [`docs/DL_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md`](./docs/DL_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md)
 
-Android reports the installed v67 package came from `com.android.vending` and carries the recorded
-Play app-signing certificate. Play updated v66 to v67 without uninstall or app-data clearing; the
-existing session remained and an ordinary `am kill`/biometric retry returned to Messages. This is
-partial update and App Lock evidence only: fresh install, full staged use, hostile downloads, private
-DB/filesystem outcomes, and the remaining composite device rows are unproved. No Closed, Open,
-Production, or wider-track promotion was performed.
+Google Play naturally updated the Samsung from build 73 to v75 without uninstall or app-data
+clearing; the existing session remained, the app resumed, and all five scoped `DL-01` groups passed
+on API 36. A verified Google-generated universal APK with the same Play certificate exercised the
+same matrix on API 37, but `installerPackageName=null` makes that run supporting-only. `DL-01` is
+done; fresh install, prepared private-cache upgrade, full staged use, Play-installed API 37, and the
+remaining composite device rows remain `DEVICE-01`/release work. No Closed, Open, Production, or
+wider-track promotion occurred.
 
-Superseded v64 candidate — historical `TLS-00` device evidence only; no result transfers to v67
+Superseded v67 candidate — historical natural-update/App Lock evidence only; no result transfers to
+v75 unless the owning row explicitly combines it:
+
+- Version/build `0.1.50` / `67`, source `2c7f426`, release `12a4592`.
+- Play naturally updated v66 to v67 on API 36 and one ordinary-kill/App Lock resume passed.
+- The recorded limitations remain in
+  [`docs/DL_01_PLAY_V67_DEVICE_PROOF_2026-09-15.md`](./docs/DL_01_PLAY_V67_DEVICE_PROOF_2026-09-15.md).
+
+Superseded v64 candidate — historical `TLS-00` device evidence only; no result transfers to v75
 unless repeated:
 
 - Version/build number: `0.1.47 (versionCode 64)`
@@ -63,10 +73,10 @@ unless repeated:
 
 V64 passed its bounded redirect, public-CA, and self-signed-certificate matrix. It predates the
 current `DL-01` receipt and strict-wallpaper source, and its exact-candidate results remain historical
-for v67.
+for v75.
 
 Superseded v63 candidate — historical Play, `NET-01`, and `RT-01A` device evidence only; no result
-transfers to v67 unless repeated:
+transfers to v75 unless repeated:
 
 - Version/build number: `0.1.46 (versionCode 63)`
 - Source/release commits: `dc32380c6cb17d85e7ab08c4d5b9118660f763c8` /
@@ -83,10 +93,10 @@ transfers to v67 unless repeated:
 
 The installed local-signature build could not update to the Play-signed v63 artifact, so it was
 removed and v63 was installed from Google Play with prior permission. That historical result is
-clean-install evidence, not fresh-install evidence for v67.
+clean-install evidence, not fresh-install evidence for v75.
 
 Superseded v62 candidate — historical Play and bounded-device evidence only; no result transfers to
-v67 unless repeated:
+v75 unless repeated:
 
 - Version/build number: `0.1.45 (versionCode 62)`
 - Source/release commits: `8179d0a3a99c4e2e28a01fd83212fee919bad41c` /
@@ -101,7 +111,7 @@ v67 unless repeated:
 
 Version code 61 remains retired because its device run exposed the unsupported-scheme bug. V62
 rejected that same synthetic setup URL and passed an ordinary-kill cold relaunch, but those results
-remain historical for v67.
+remain historical for v75.
 
 Superseded v59 candidate — historical static artifact proof only; no result transfers to a
 replacement:
@@ -168,8 +178,8 @@ Open, or Production promotion, or earlier if Play flags the internal app.
 - [ ] Testers use a stable non-production server/setup path and no production-user data or credentials.
 - [ ] The exact AAB installs/updates and completes the staged connect, sync, send, receive, notification,
       restart, and disconnect journeys selected for this test round.
-      Play v66→v67 update, boot, visible session continuity, and one ordinary-kill/App Lock resume are
-      partial evidence only; no fresh install or full staged journey was run.
+      The Play build-73→75 update, boot, visible session continuity, and scoped `DL-01` journey are
+      partial evidence only; no fresh install or full general staged journey was run.
 - [ ] Every declaration or permission review that Play actually prompts for this internal artifact is
       completed truthfully; no missing prompt is treated as exempt by assumption.
 - [ ] Known limitations and unfinished safety/release work are disclosed to testers, and no result from
@@ -223,6 +233,10 @@ GOOGLE_SERVICES_JSON=./test/fixtures/google-services.ci.json \
 - [ ] Expo dependency validation and the local pinned Doctor pass 20/20 on the replacement source.
       Clean native autolinking, compilation, tests, and AAB inspection prove all five owned modules
       are present; an older EAS-worker module-directory advisory supplies no replacement credit.
+      The exact v75 rerun currently reports 19/20 plus a failing `expo install --check` because 27
+      non-`PKG-01` SDK 57 packages now have newer recommended patches; the frozen lockfile was
+      unchanged. This remains a release follow-up, as recorded in the
+      [bounded package proof](./docs/PKG_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md).
 - [ ] Full and production dependency audits have no unreviewed high/critical advisory on the frozen
       lockfile; every remaining lower-severity advisory has a recorded disposition.
 - [ ] The replacement production Android Expo export completes with `__DEV__` false.
@@ -232,10 +246,12 @@ GOOGLE_SERVICES_JSON=./test/fixtures/google-services.ci.json \
 
 - [x] `GOOGLE_SERVICES_JSON` is configured as an EAS **file** variable in the `development`,
       `preview`, and `production` environments and matches the Android application id.
-- [ ] A non-secret smoke variable proves that each named EAS environment selects the intended values.
+- [x] Project-scoped plaintext `GATOR_ENVIRONMENT_PROBE` is retained with distinct matching values in
+      `development`, `preview`, and `production`; authenticated pinned EAS CLI 21.5.0 `env:exec` checks passed
+      without fetching secret values or starting a build.
 - [ ] No `.env`, Firebase config, signing key, service-account file, password, token, or local build
       artifact is present in the replacement uploaded source bundle.
-- [x] The managed Android upload-signing credential produced the v67 candidate, its
+- [x] The managed Android upload-signing credential produced the v75 candidate, its
       certificate is recorded above, and the credential is not stored in Git. The superseded v59
       signing result is historical only.
 - [ ] Play submission credentials and live Console access are available to the release owner.
@@ -244,10 +260,10 @@ GOOGLE_SERVICES_JSON=./test/fixtures/google-services.ci.json \
 
 ## 4. Clean native candidate
 
-V67 already completed the isolated build, validation, promotion, and separately authorized Internal
-submission recorded above. The later host update removed its local artifact and receipt directory;
-do not reconstruct a receipt, rerun a consumed phase, or silently reuse any superseded artifact. For
-a future candidate only, run each phase separately and review its receipt before continuing:
+V75 already completed the isolated build, validation, promotion, and separately authorized Internal
+submission recorded above. Its sanitized identity and submission result are retained in the v75
+proof; do not reconstruct a receipt, rerun a consumed phase, or silently reuse a superseded artifact.
+For a future candidate only, run each phase separately and review its receipt before continuing:
 
 ```sh
 npm run release:android:preflight -- --version <x.y.z> --source <full-sha>
@@ -319,9 +335,9 @@ npm run check:android-build
 - [ ] `WRITE_CONTACTS`, `READ_MEDIA_AUDIO`, `SCHEDULE_EXACT_ALARM`, `USE_EXACT_ALARM`,
       `USE_FULL_SCREEN_INTENT`, and `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` are absent from the AAB.
 - [ ] Every remaining dangerous permission maps to a visible feature and a runtime request.
-- [x] The v67 AAB hash at the top of this file was computed after validation and local
+- [x] The v75 AAB hash at the top of this file was computed after validation and local
       promotion.
-- [x] The byte-identical hashed v67 AAB is the artifact submitted to Play Internal Testing after
+- [x] The byte-identical hashed v75 AAB is the artifact submitted to Play Internal Testing after
       separate approval.
 
 ## 5. Network and security smoke tests
@@ -335,16 +351,16 @@ npm run check:android-build
       passed both 15-case matrices with zero target contact at the frozen checkpoints; the source scan and
       separate reachability controls are recorded in
       [`docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md`](./docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md).
-      That result has not been repeated on v67.
+      That result has not been repeated on v75.
 - [ ] Connect to a valid public-CA HTTPS server; verify server info/full sync, one live socket event,
       one upload, and one download. Superseded exact Play v64 completed those paths through the isolated fixture
       recorded in
       [`docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md`](./docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md),
-      but v67 has not repeated it.
+      but v75 has not repeated it.
 - [ ] A bare untrusted/self-signed certificate is rejected. Superseded exact Play v64 completed no TLS session
       or HTTP request and sent no Authorization header or body; the trusted Mac control reached HTTP 200. See
       [`docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md`](./docs/TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md).
-      V67 has not repeated this boundary.
+      V75 has not repeated this boundary.
 - [x] The `TLS-02` source/build boundary and disposable API-35 emulator prove the selected policy:
       the AAB's manifest resource id resolves through `resources.pb` to one unqualified compiled XML
       that trusts only `src="system"`; an authority installed in Android's user store was rejected
@@ -355,9 +371,9 @@ npm run check:android-build
 - [x] Product copy states that HTTPS trusts Android's built-in system authorities, excludes
       authorities added in Android Settings, and does **not** claim certificate pinning. An inert
       legacy `certPins` SecureStore value on an upgraded install is harmless because no code reads
-      it. Removal commit `66869d3` is an ancestor of v67 source `2c7f426`; exact-tree scans found no
+      it. Removal commit `66869d3` is an ancestor of v75 source `546750a`; exact-tree scans found no
       pinning API/dependency or certificate-validation bypass. This is source/static evidence, not a
-      v67 device repeat of the next row.
+      v75 device repeat of the next row.
 - [ ] On the replacement exact Play candidate, repeat the selected `TLS-02` boundary: a public
       system-CA endpoint succeeds and an authority visibly installed in Android's user store is
       rejected before TLS completes or credentials/body reach HTTP. This is a release repeat, not
@@ -378,17 +394,20 @@ npm run check:android-build
       observation, server request ledger, duplicate coalescing, original-URL tap, limitations, and
       cleanup are recorded in
       [`docs/NET_01_PLAY_DEVICE_PROOF_2026-09-13.md`](./docs/NET_01_PLAY_DEVICE_PROOF_2026-09-13.md).
-      That historical device result has not been repeated on exact Play v67.
+      That historical device result has not been repeated on exact Play v75.
 - [ ] The exact map-enabled candidate keeps Find My marker data bounded/inert, contains exactly one
       Maps API-key metadata value matching the release preflight digest, omits phone-location
       permissions, leaves Google Maps attribution unobscured, and passes online/outage,
-      focus/background/App-Lock, TalkBack, fallback, and controlled network checks.
-- [ ] The replacement clean isolated build, guarded autolinking, and exact-AAB inspection continue
-      to confirm that the app-owned `react-native-webview` package/native registration is absent. The
-      superseded v59 packaged DEX omitted
-      `Lcom/reactnativecommunity/webview/RNCWebViewPackage;`, but that historical inspection does not
-      satisfy this gate. Expo’s transitive `@expo/dom-webview`/`DomWebViewModule` remains
-      framework-owned and is not evidence of a reachable product surface.
+      focus/background/App-Lock, TalkBack, fallback, and controlled network checks. Exact Play v75
+      passed the narrower native render/attribution/focus/fallback subset for `PKG-01`; the broader
+      release matrix remains open. See the
+      [bounded package proof](./docs/PKG_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md).
+- [x] The replacement clean isolated build, guarded autolinking, and exact-AAB inspection confirm
+      that the app-owned `react-native-webview` package/native registration is absent. Exact v75 DEX
+      omits `Lcom/reactnativecommunity/webview/RNCWebViewPackage;`, and the Play-v75 map hierarchy
+      contained zero WebViews. Expo’s transitive `@expo/dom-webview`/`DomWebViewModule` remains
+      framework-owned and is not evidence of a reachable product surface. See the
+      [bounded package proof](./docs/PKG_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md).
 - [ ] Logs never expose message text, server URLs, credentials, or raw internal identifiers;
       notifications, channels, and alarms honor App Lock's generic-notification boundary, while
       Recents and screenshots honor its protected-screen boundary without leaking identity or message
@@ -396,37 +415,41 @@ npm run check:android-build
 
 ## 6. Android/device matrix
 
-Candidate-specific device work has begun for v67: Play delivery, the natural v66→v67 update, visible
-session continuity, packaged current-`DL-01` markers, and one ordinary-kill/App Lock biometric resume
-were observed on the recorded Samsung/API-36 device. `DEVICE-01` still owns the unproved matrix below
-for this exact AAB; superseded v64 `TLS-00`, v63 `NET-01`/`RT-01A`, and earlier results must not be
-used as v67 evidence. V67 satisfies the prerequisite of containing the current `DL-01` receipt and
-strict-wallpaper source, but it did not execute any of the five behavioral rows tagged `DL-01` below.
-The superseded v64 and supporting sideloaded v66 runs do not transfer to those rows. Remaining work
-includes:
+Exact v75 completed all five scoped `DL-01` groups on the Play-installed API-36 Samsung. Supporting
+API-37 behavior and controlled host/native evidence cover the additional current-candidate and
+private fault branches described below. The owner explicitly transferred per-OS Play-install
+provenance—including a future genuine Play-installed API-37 repeat—to `DEVICE-01`/release, so the
+five `DL-01` rows are closed without relabeling the sideloaded API-37 run. `DEVICE-01` still owns
+every unchecked general row; superseded task-specific results transfer only where their owning task
+explicitly says so. Remaining work includes:
 
 - [ ] Fresh install and upgrade from the latest shipped build both boot and preserve intended data.
-      Only the Play v66→v67 update, boot, and visible session continuity passed; the fresh-install half
-      and private data/cache invariants remain open.
+      The natural Play build-73→75 update, boot, and visible session continuity passed; the
+      fresh-install half and prepared private data/cache invariants remain open.
 - [ ] Connect and full sync work; existing-chat iMessage plain text/local read-unread-delete and
       supported RCS text/contact/media/whole-message reaction, retry, search, and receive flows pass.
       Retired helper-backed edit/unsend/reply/attachment actions remain absent.
-- [ ] After v67 has a fresh scoped V3 enrollment against the isolated compatible staged server in
+- [ ] After v75 has a fresh scoped V3 enrollment against the isolated compatible staged server in
       the Internal Testing runbook, kill with `adb shell am kill <package>` (never `am force-stop`
       for delivery testing); a compatible per-device-encrypted FCM push writes to the encrypted DB
-      and posts the expected notification.
+      and posts the expected notification. The v75 download run proves Google acceptance plus
+      killed-process receive/decrypt/process behavior for `PKG-01`; it did not separately inspect the
+      encrypted row or expected notification, so this broader release row remains open. See the
+      [bounded package proof](./docs/PKG_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md).
 - [ ] Notification privacy transitions, supported actions, reminders, channels, and
       killed/background/foreground taps pass. An upgrade removes any stale FaceTime notification,
       route, or channel state and never recreates call presentation.
 - [ ] App Lock, generic locked notifications, Android Recents, biometric resume, account switch, and
       forget/wipe pass. Only an ordinary-kill relaunch, a failed first biometric attempt, and a
-      successful owner-authenticated retry back to Messages passed on v67.
-- [ ] IPC-01 containment passes: the exact candidate's merged manifest, AAB, and autolinking contain
-      no inbound `SEND`/`SEND_MULTIPLE` filter, Direct Share target, or `expo-share-intent`; after
-      startup clears shortcuts cached by an older build, neither Gator nor conversation chips appear
-      in Android share sheets for text or files.
-- [ ] Ordinary outbound sharing, such as exporting a backup or sharing downloaded media, still opens
-      Android's share sheet through `expo-sharing`.
+      successful owner-authenticated retry back to Messages passed on historical v67.
+- [x] IPC-01 containment passes: exact-v75 packaged validation and autolinking contain no inbound
+      `SEND`/`SEND_MULTIPLE` filter, Direct Share target, or `expo-share-intent`. Two natural Play
+      code-53→75 migrations prove legacy pinned-row retirement, and text, one-image, multiple-image,
+      and PDF resolver checks found neither Gator nor conversation chips. See the
+      [sanitized proof](./docs/IPC_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md).
+- [x] Ordinary outbound attachment/media sharing still opens Android's chooser through
+      `expo-sharing`; the exercised synthetic attachment path passed on Play v75. Backup export was
+      not separately exercised and receives no additional task-specific credit from this row.
 - [ ] Keyboard/navigation-bar behavior passes gesture and three-button navigation.
 - [ ] Dark appearance, contrast, large text, TalkBack labels/focus order, reduced motion, and supported
       display sizes pass. The store listing makes no light/system-theme promise.
@@ -435,39 +458,37 @@ includes:
       Android versions below Android 16 / API 36, and the candidate passes the applicable smoke
       matrix on both Android 16 / API 36 and the current latest Android 17 / API 37. API 24/25 device
       execution is not required because those versions are outside the selected product boundary.
+      V75 passed the artifact and Play API-36 subset; its API-37 runtime matrix is supporting-only.
+      Play-installed API-37, store-copy, and broader `DEVICE-01` evidence keep this composite row open.
 - [ ] Permission denial, restricted battery settings handoff, offline/reconnect, low-storage, and
-      process-death paths fail visibly and recover. V67 recovered visibly from one ordinary process
-      kill with zero scoped fatal/ANR/native-crash markers; the other cases and any active-download
-      process death remain open.
-- [ ] `DL-01` Gallery/Gator Album receipt proof uses that fresh replacement candidate and an eligible
-      incoming non-sticker image: a background/killed delivery performs no immediate Photos write,
-      and DB/filesystem/native observation proves the encrypted destination receipt commits before
-      any native partial or final download bytes are created. The private-cache file and
-      authoritative `localPath` then commit before an active/unlocked/connected foreground drain
-      with existing permission exports it. Repeated drains normally do not duplicate; denied
-      permission opens no passive prompt; destination/off changes cancel pending work; and
-      controlled stops after each MediaStore success but before receipt completion prove the
-      three-total-attempt ceiling: at most two duplicate copies after the first saved copy.
-- [ ] `DL-01` ordinary attachment transport proof uses false smaller/larger lengths, missing length,
-      chunked and endless bodies, a stalled response, actual-byte overflow, deadline expiry, native
-      cancellation, and process kill/restart. Every refusal leaves no abandoned partial, promoted
-      file, or false `localPath`; startup cleanup removes interrupted partials; a valid bounded
-      control still commits exactly once.
-- [ ] `DL-01` ordinary cache proof fills toward **2 GiB / 4,096 files** and the **512 MiB free-space
-      floor**. Failed/raced deletion remains charged and refuses unsafe admission; recent, mounted,
-      in-flight, and outgoing/retry inputs survive eviction. Zero-byte completion recovery, legacy
-      two-level adoption/promotion, canonical account-generation layout, two-account isolation, and
-      account cleanup each converge without cross-account deletion or ledger/DB disagreement.
-- [ ] `DL-01` image validation rejects an oversized/invalid image and image-bomb dimensions without
-      committing a wallpaper or attachment path, while a valid bounded image succeeds. Low-storage,
-      cancellation, and process-death cases preserve both the file quota and authoritative DB state.
-- [ ] `DL-01` synced-wallpaper proof starts near 90 MiB/255 files, protects the current wallpaper,
-      admits one maximum 10 MiB transfer, and finishes at or below 100 MiB/256 files. Corrupt,
-      unreadable, symlinked, raced, numerically overflowing, failed-delete, or scan-count-over-limit
-      state (more than 8,192 files or 32,768 nodes) refuses admission; ordinary quota excess is
-      pruned when safe. The sideloaded exact-v66-split API-35 valid/invalid image run predates this
-      native admission boundary and is
-      [supporting evidence only](./docs/DL_01_SUPPORTING_V66_DOWNLOAD_PROOF_2026-09-15.md).
+      process-death paths fail visibly and recover. Supporting v75 API-37 evidence passed the scoped
+      `DL-01` low-storage and active-download process-death cases; other permission/battery/offline
+      release cases remain open.
+- [x] `DL-01` Gallery/Gator Album proof on Play-installed Samsung v75 passed killed/background
+      no-save, foreground export, repeated-drain deduplication, and destination/off cancellation.
+      Supporting API-37 evidence passed post-MediaStore stops at attempts one, two, and three with no
+      fourth copy; controlled proof retains receipt-before-byte ordering and the check-only,
+      no-passive-prompt state machine. Modern MediaStore needs no retired broad-storage permission.
+      See the
+      [sanitized v75 checkpoint](./docs/DL_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md).
+- [x] `DL-01` ordinary attachment transport on Play-installed Samsung v75 plus supporting API-37 v75
+      passed false smaller/larger lengths, missing-length EOF, finite chunked and endless bodies,
+      stall/deadline expiry, actual-byte overflow, cancellation, ordinary process kill/restart,
+      cleanup, and exact-once valid controls.
+- [x] `DL-01` ordinary cache proof combines the Play-installed Samsung maximum transfer, lifecycle
+      recovery, and safe aggregate snapshots with supporting API-37 low-space refusal and full
+      reconciliation. Controlled host/native proof retains the literal **2 GiB / 4,096-file / 512
+      MiB-free** limits, failed/raced deletion, protected paths, zero-byte repair,
+      legacy/two-generation adoption, and corrupt private state that must not be fabricated on a
+      tester candidate.
+- [x] `DL-01` image validation on Play-installed Samsung v75 and supporting API-37 v75 rejected
+      invalid bytes and 8,193 × 8,193 dimension bombs and accepted valid maximum images. The combined
+      evidence preserved quota/DB truth across low storage, cancellation, and process death.
+- [x] `DL-01` synced-wallpaper proof on Play-installed Samsung v75 and supporting API-37 v75 passed
+      foreground-only admission of one valid 10 MiB file plus invalid/dimension-bomb rejection.
+      Controlled host/native proof retains the 90 MiB/255 preflight, 100 MiB/256 final limit,
+      protected wallpaper, safe pruning, corrupt/symlink/race, failed-delete, overflow, and
+      8,192-file/32,768-node scan-limit branches.
 - [ ] The exact candidate's backup picker/provider path accepts a near-limit document, rejects an
       oversized stream even when the provider lies about size, times out a stalled provider, cancels
       without continuing work, deletes every partial copy, and leaves the UI responsive.

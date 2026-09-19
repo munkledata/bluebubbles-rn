@@ -43,8 +43,7 @@ export async function queryContactsByAddress(
 /**
  * The authed URL for a contact's avatar bytes — `GET /api/v1/contact/{id}/avatar`. Fetch it
  * from one `http.snapshotTransport()` and pass that same snapshot's headers to the native task.
- * Header auth keeps the password off the URL; explicit legacy mode is added centrally by the
- * snapshot rather than by the feature.
+ * The snapshot keeps the URL clean and carries the captured Bearer credential only in its headers.
  */
 export function contactAvatarUrl(
   http: HttpUrlBuilder,

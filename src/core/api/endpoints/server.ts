@@ -1,6 +1,6 @@
 import { z } from 'zod/v4';
 import { ServerInfo } from '@core/models';
-import { ApiError, UnimplementedEndpointError, isUnimplementedEndpoint } from '../errors';
+import { ApiError, UnimplementedEndpointError } from '../errors';
 import type { HttpClient } from '../http';
 
 /** GET /api/v1/ping — health check. The server returns `data: { pong: true }`. */
@@ -18,43 +18,16 @@ export function serverInfo(http: HttpClient, signal?: AbortSignal): Promise<Serv
 
 // ---- Server management (F-9) ----
 // Current Gator servers expose typed password-authenticated routes for statistics and health.
-// The supported server has no `POST /api/v1/admin/command`. Remaining dispatcher-based reads are
-// isolated legacy compatibility paths pending separate FP-010/FP-011 cleanup, not current-server
-// functionality. Remote restart is intentionally unsupported and has no client wrapper.
+// Remote restart is intentionally unsupported and has no client wrapper.
 
-/**
- * Invoke a Gator admin-command channel over the password-authed dispatcher. The server wraps
- * the channel result in the standard envelope; `http.post` unwraps + validates it with `schema`.
- */
-export async function adminCommand<T>(
-  http: HttpClient,
-  channel: string,
-  schema: z.ZodType<T>,
-  data?: unknown,
-  signal?: AbortSignal,
-): Promise<T> {
+/** Preserve the existing unsupported-version presentation without retrying a retired route. */
+async function typedRoute<T>(path: string, request: () => Promise<T>): Promise<T> {
   try {
-    return await http.post('/admin/command', schema, { json: { channel, data }, signal });
+    return await request();
   } catch (e) {
-    // A 404 means the dispatcher route itself is unreachable — a server without it (stock
-    // BlueBubbles / pre-dispatcher Gator) or a reverse proxy blocking /admin/*. Surface that as
-    // "unsupported" so callers don't blame the connection. Non-404 errors propagate unchanged.
     if (e instanceof ApiError && e.status === 404) {
-      throw new UnimplementedEndpointError('/admin/command');
+      throw new UnimplementedEndpointError(path);
     }
-    throw e;
-  }
-}
-
-/** Prefer a typed route; use its retired dispatcher equivalent only when that route is absent. */
-async function typedRouteOrLegacy<T>(
-  typedRequest: () => Promise<T>,
-  legacyRequest: () => Promise<T>,
-): Promise<T> {
-  try {
-    return await typedRequest();
-  } catch (e) {
-    if (e instanceof ApiError && e.status === 404) return legacyRequest();
     throw e;
   }
 }
@@ -93,82 +66,27 @@ const StatisticsSnapshot = z
   })
   .strict();
 
-// Retired dispatcher fallback: message count is a number; media counts are [{ media_count }].
-const MediaCount = z.array(z.object({ media_count: z.number() }).loose()).nullish();
-const CountNum = z.union([z.number(), z.array(z.unknown())]).nullish();
-const asCount = (v: number | unknown[] | null | undefined): number =>
-  typeof v === 'number' ? v : 0;
-
-async function legacyServerStatTotals(http: HttpClient, signal?: AbortSignal): Promise<StatTotals> {
-  let anyOk = false;
-  let sawOtherError = false;
-  const settle = async <T>(p: Promise<T>): Promise<T | null> => {
-    try {
-      const v = await p;
-      anyOk = true;
-      return v;
-    } catch (e) {
-      if (signal?.aborted) throw e;
-      if (!isUnimplementedEndpoint(e)) sawOtherError = true;
-      return null;
-    }
-  };
-  const [messages, images, videos] = await Promise.all([
-    settle(adminCommand(http, 'get-message-count', CountNum, undefined, signal)),
-    settle(adminCommand(http, 'get-chat-image-count', MediaCount, undefined, signal)),
-    settle(adminCommand(http, 'get-chat-video-count', MediaCount, undefined, signal)),
-  ]);
-  if (!anyOk && !sawOtherError) throw new UnimplementedEndpointError('/admin/command');
-  if (!anyOk) throw new Error('Server statistics unavailable');
-  return {
-    messages: asCount(messages),
-    images: images?.[0]?.media_count ?? 0,
-    videos: videos?.[0]?.media_count ?? 0,
-  };
-}
-
-export interface ServerStatTotalsOptions {
-  /** Scoped clients must not turn a missing typed route into an admin-command attempt. */
-  readonly allowLegacyFallback?: boolean;
-}
-
-/** All-time message/photo/video totals, with an opt-out dispatcher fallback for scoped clients. */
+/** All-time message/photo/video totals from the supported typed statistics route. */
 export async function serverStatTotals(
   http: HttpClient,
   signal?: AbortSignal,
-  options: ServerStatTotalsOptions = {},
 ): Promise<StatTotals> {
-  try {
-    const snapshot = await http.post('/statistics/snapshot', StatisticsSnapshot, {
+  const snapshot = await typedRoute('/statistics/snapshot', () =>
+    http.post('/statistics/snapshot', StatisticsSnapshot, {
       json: { range: 'all-time' },
       signal,
-    });
-    return {
-      messages: snapshot.messageCount,
-      images: snapshot.imageCount,
-      videos: snapshot.videoCount,
-    };
-  } catch (error) {
-    if (!(error instanceof ApiError && error.status === 404)) throw error;
-    if (options.allowLegacyFallback === false) {
-      throw new UnimplementedEndpointError('/statistics/snapshot');
-    }
-    return legacyServerStatTotals(http, signal);
-  }
-}
-
-/** The `get-logs` channel returns `{ logs: string }` (a newline-joined, timestamped tail). */
-const ServerLogs = z.object({ logs: z.string().nullish() }).loose().nullish();
-
-/** Recent server log lines via the admin-command dispatcher (password-authed). */
-export function serverLogs(http: HttpClient, count = 500): Promise<string> {
-  return adminCommand(http, 'get-logs', ServerLogs, { count }).then((r) => r?.logs ?? '');
+    }),
+  );
+  return {
+    messages: snapshot.messageCount,
+    images: snapshot.imageCount,
+    videos: snapshot.videoCount,
+  };
 }
 
 // ---- Server health / diagnostics ----
-// Each read prefers the current typed password-authenticated route. The old dispatcher channel is
-// reached only after a typed-route 404, which preserves compatibility without masking auth,
-// transport, or response-validation failures.
+// Each read uses its current typed password-authenticated route. A route-level 404 becomes an
+// explicit unsupported-version result without retrying any retired compatibility transport.
 
 /** Server environment: version, platform, node, and Find My / macOS capability flags. */
 const ServerEnv = z
@@ -192,9 +110,8 @@ const TypedServerEnv = z
   .strict();
 export type ServerEnv = z.infer<typeof ServerEnv>;
 export const serverEnv = (http: HttpClient, signal?: AbortSignal): Promise<ServerEnv> =>
-  typedRouteOrLegacy<ServerEnv>(
-    () => http.get('/server/environment', TypedServerEnv, { signal }),
-    () => adminCommand(http, 'get-env', ServerEnv, undefined, signal),
+  typedRoute('/server/environment', () =>
+    http.get('/server/environment', TypedServerEnv, { signal }),
   );
 
 /** Find My decryption-key import status (per key: present + valid). */
@@ -223,9 +140,8 @@ export const findMyKeysStatus = (
   http: HttpClient,
   signal?: AbortSignal,
 ): Promise<FindMyKeysStatus> =>
-  typedRouteOrLegacy<FindMyKeysStatus>(
-    () => http.get('/admin/findmy/keys/status', TypedFindMyKeysStatus, { signal }),
-    () => adminCommand(http, 'get-findmy-keys-status', FindMyKeysStatus, undefined, signal),
+  typedRoute('/admin/findmy/keys/status', () =>
+    http.get('/admin/findmy/keys/status', TypedFindMyKeysStatus, { signal }),
   );
 
 /** FCM (push) configuration status. */
@@ -264,23 +180,9 @@ const TypedFcmStatus = z
   });
 export type FcmStatus = z.infer<typeof FcmStatus>;
 export const fcmStatus = (http: HttpClient, signal?: AbortSignal): Promise<FcmStatus> =>
-  typedRouteOrLegacy<FcmStatus>(
-    () => http.get('/notifications/fcm/status', TypedFcmStatus, { signal }),
-    () => adminCommand(http, 'get-fcm-status', FcmStatus, undefined, signal),
+  typedRoute('/notifications/fcm/status', () =>
+    http.get('/notifications/fcm/status', TypedFcmStatus, { signal }),
   );
-
-/** zrok tunnel status (running + public URL). */
-const ZrokStatus = z
-  .object({
-    running: z.boolean().nullish(),
-    url: z.string().nullish(),
-    available: z.boolean().nullish(),
-  })
-  .loose()
-  .nullish();
-export type ZrokStatus = z.infer<typeof ZrokStatus>;
-export const zrokStatus = (http: HttpClient, signal?: AbortSignal): Promise<ZrokStatus> =>
-  adminCommand(http, 'get-zrok-status', ZrokStatus, undefined, signal);
 
 /** The bridge accepted the server-owned Firefox cookies immediately. */
 const RcsReauthAppliedResult = z
@@ -326,7 +228,6 @@ export const rcsReauthNow = (http: HttpClient): Promise<RcsReauthResult> =>
   http.post('/rcs/reauth-now', RcsReauthResult, { json: {} });
 
 /** The server's detected public IP (or null). */
-const PublicIp = z.object({ ip: z.string().nullish() }).loose().nullish();
 const BLOCKED_IPV4_RANGES: ReadonlyArray<readonly [number, number]> = [
   [0x00000000, 8],
   [0x0a000000, 8],
@@ -375,10 +276,9 @@ const TypedPublicIp = z
   })
   .strict();
 export const publicIp = (http: HttpClient, signal?: AbortSignal): Promise<string | null> =>
-  typedRouteOrLegacy(
-    () => http.get('/admin/network/public-ip', TypedPublicIp, { signal }),
-    () => adminCommand(http, 'get-public-ip', PublicIp, undefined, signal),
-  ).then((r) => r?.ip ?? null);
+  typedRoute('/admin/network/public-ip', () =>
+    http.get('/admin/network/public-ip', TypedPublicIp, { signal }),
+  ).then((r) => r.ip);
 
 /** Active TLS/certificate information. */
 const TlsStatus = z.record(z.string(), z.unknown()).nullish();
@@ -492,21 +392,19 @@ const TypedTlsStatus = z
   });
 export type TlsStatus = z.infer<typeof TlsStatus>;
 export const tlsStatus = (http: HttpClient, signal?: AbortSignal): Promise<TlsStatus> =>
-  typedRouteOrLegacy<TlsStatus>(
-    () =>
-      http.get('/tls/status', TypedTlsStatus, { signal }).then((status) => ({
-        ...status,
-        // Compatibility aliases for the existing health presentation while retaining every
-        // canonical typed field for future callers.
-        enabled: status.configuredEnabled,
-        mode: status.serving
-          ? (status.effectiveCertificateSource ?? status.configuredMode)
-          : status.configuredEnabled
-            ? 'not-serving'
-            : 'off',
-        domain: status.certificate?.domain ?? null,
-      })),
-    () => adminCommand(http, 'get-tls-status', TlsStatus, undefined, signal),
+  typedRoute('/tls/status', () =>
+    http.get('/tls/status', TypedTlsStatus, { signal }).then((status) => ({
+      ...status,
+      // Presentation aliases for the existing health screen while retaining every canonical
+      // typed field for future callers.
+      enabled: status.configuredEnabled,
+      mode: status.serving
+        ? (status.effectiveCertificateSource ?? status.configuredMode)
+        : status.configuredEnabled
+          ? 'not-serving'
+          : 'off',
+      domain: status.certificate?.domain ?? null,
+    })),
   );
 
 /** In-memory server alert log. */
@@ -520,7 +418,6 @@ const ServerAlert = z
   })
   .loose();
 export type ServerAlert = z.infer<typeof ServerAlert>;
-const ServerAlerts = z.array(ServerAlert).nullish();
 const TypedServerAlert = z
   .object({
     id: z.string().min(1).max(256),
@@ -535,15 +432,11 @@ const ClearServerAlertsResult = z
   .object({ removed: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER) })
   .strict();
 export const serverAlerts = (http: HttpClient, signal?: AbortSignal): Promise<ServerAlert[]> =>
-  typedRouteOrLegacy<ServerAlert[]>(
-    () => http.get('/alerts', TypedServerAlerts, { signal }).then((r) => r.alerts),
-    () => adminCommand(http, 'get-alerts', ServerAlerts, undefined, signal).then((a) => a ?? []),
+  typedRoute('/alerts', () =>
+    http.get('/alerts', TypedServerAlerts, { signal }).then((r) => r.alerts),
   );
 export const clearServerAlerts = (http: HttpClient): Promise<unknown> =>
-  typedRouteOrLegacy<unknown>(
-    () => http.delete('/alerts', ClearServerAlertsResult),
-    () => adminCommand(http, 'clear-alerts', z.unknown()),
-  );
+  typedRoute('/alerts', () => http.delete('/alerts', ClearServerAlertsResult));
 
 /** GET /admin/status — server version + uptime (ms). */
 const AdminStatus = z
@@ -553,14 +446,5 @@ const AdminStatus = z
   })
   .strict();
 export type AdminStatus = z.infer<typeof AdminStatus>;
-export async function adminStatus(http: HttpClient, signal?: AbortSignal): Promise<AdminStatus> {
-  try {
-    return await http.get('/admin/status', AdminStatus, { signal });
-  } catch (e) {
-    // Same remap as adminCommand: a 404 = route absent or proxy-blocked, i.e. "unsupported".
-    if (e instanceof ApiError && e.status === 404) {
-      throw new UnimplementedEndpointError('/admin/status');
-    }
-    throw e;
-  }
-}
+export const adminStatus = (http: HttpClient, signal?: AbortSignal): Promise<AdminStatus> =>
+  typedRoute('/admin/status', () => http.get('/admin/status', AdminStatus, { signal }));

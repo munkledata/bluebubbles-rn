@@ -413,14 +413,20 @@ describe('runDueScheduled — production atomic handover', () => {
     expect(raw.prepare('SELECT COUNT(*) AS count FROM outgoing_queue').get()).toEqual({ count: 1 });
     expect(raw.prepare('SELECT COUNT(*) AS count FROM messages').get()).toEqual({ count: 1 });
 
-    // The next occurrence is in the future. An overlapping production ticker must neither POST
-    // nor apply the recurrence calculation a second time while the first POST is still pending.
-    await expect(runDueScheduled(db, http, 2_000)).resolves.toBe(0);
+    // The next occurrence is in the future. An overlapping production ticker queues behind the
+    // first runner, so it can neither POST nor run recovery against that runner's live ownership.
+    let secondSettled = false;
+    const secondRun = runDueScheduled(db, http, 2_000).finally(() => {
+      secondSettled = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(secondSettled).toBe(false);
     expect(posts).toBe(1);
     expect((await getScheduledById(db, id))?.scheduledFor).toBe(atHandover.scheduledFor);
 
     response.resolve({ guid: 'real-recurring', dateCreated: 2_000, dateDelivered: null });
     await expect(firstRun).resolves.toBe(1);
+    await expect(secondRun).resolves.toBe(0);
     expect((await getScheduledById(db, id))?.scheduledFor).toBe(atHandover.scheduledFor);
   });
 

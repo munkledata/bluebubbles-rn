@@ -18,8 +18,11 @@ Use the related documents for their narrower purposes:
   candidate.
 - [`STORE_01G_INTERNAL_TESTING_RUNBOOK.md`](./STORE_01G_INTERNAL_TESTING_RUNBOOK.md) is the
   superseded v63 execution snapshot and must be refreshed before any current staged-server round.
+- [`DL_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md`](./DL_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md)
+  records the current v75 identity, Play-installed API-36 `DL-01` matrix, and supporting API-37
+  compatibility evidence.
 - [`DL_01_PLAY_V67_DEVICE_PROOF_2026-09-15.md`](./DL_01_PLAY_V67_DEVICE_PROOF_2026-09-15.md)
-  records the current v67 candidate identity and narrow Play-update/lifecycle checkpoint.
+  records the superseded v67 Play-update/lifecycle checkpoint.
 - [`TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md`](./TLS_00_PLAY_CANDIDATE_PROOF_2026-09-14.md) records
   the superseded v64 candidate's bounded transport evidence.
 - [`NET_01_PLAY_DEVICE_PROOF_2026-09-13.md`](./NET_01_PLAY_DEVICE_PROOF_2026-09-13.md) retains the
@@ -42,28 +45,30 @@ the staged-server journey and broader release gates are not complete.
 
 ## Current candidate
 
-| Field             | Frozen value                                                                                                                               |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| Version           | `0.1.50` / Android version code `67`                                                                                                       |
-| Source commit     | `2c7f426e3549127972fdd5c601bf98f651a75870` containing `DL-01` implementation `9139cf72bb56d613f1b848de63fe882b2029e91a`                    |
-| Release commit    | `12a45924a2e8b5dc998e0b56e0df6c58f8186960`                                                                                                 |
-| Release run       | `android-0.1.50-9139cf7-20260915234900`; archived session record only                                                                      |
-| Submitted AAB     | `gator-release-0.1.50-v67-12a4592.aab` — 56,806,011 bytes; local bytes and receipt directory were removed by the later host update         |
-| AAB SHA-256       | `1bec41156c38e556eb9dbe079bc0cf83ee1577d07d0912144fb0524739304702`                                                                         |
-| Play destination  | Google Play Internal Testing only                                                                                                          |
-| Submission        | EAS submission `67253f5c-6f5c-47a9-b669-c0ea25c4f5de` completed; live Internal release `0.1.50` / code `67` reports status `completed`     |
-| Device checkpoint | Play v66→v67 update, visible session continuity, and ordinary-kill/App Lock biometric resume on owner-enrolled Samsung Android 16 / API 36 |
+| Field             | Frozen value                                                                                                                                                                  |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Version           | `0.1.55` / Android version code `75`                                                                                                                                          |
+| Source commit     | `546750a0844adc48733436f26d81ebea63f0319c`                                                                                                                                    |
+| Release commit    | `9c73c1ffb0d4d63ecc562ab988ae73f28c8750dc`                                                                                                                                    |
+| Release run       | `android-0.1.55-546750a-20260918055448`; the run identity is recorded, but its local runner receipts are no longer present                                                    |
+| Submitted AAB     | `gator-release-0.1.55-v75-9c73c1f.aab` — 57,878,322 bytes; its recorded submitted hash remains below, but the local AAB bytes are no longer present                           |
+| AAB SHA-256       | `86e7ee236f2caa644e97b645fc9d0ec1fa562fc105ffa5bb26549d44f42b3197`                                                                                                            |
+| Play destination  | Google Play Internal Testing only                                                                                                                                             |
+| Submission        | Submission id `8953c1c0-79f1-463a-a3cf-1ff1b49f46b5` finished; live Internal release `0.1.55` / code `75` reports `completed`; preserved runner phase is `submission_unknown` |
+| Device checkpoint | Natural Play build-73→75 update and five-group `DL-01` pass on Samsung Android 16 / API 36; Play-signed sideloaded Android 17 / API 37 compatibility pass                     |
 
-The linked v67 checkpoint proves Play delivery, a natural update with visible app-state continuity,
-packaging of the current `DL-01` source markers, and one ordinary process-death/App Lock resume. It
-does not prove a fresh install, hostile attachment transport, destination-receipt ordering, cache or
-wallpaper quotas, private DB/filesystem outcomes, staged connect/sync/send/receive/notification,
-permission/accessibility/account cleanup, or broader release readiness. `DL-01`, `DEVICE-01`, and
-`STORE-01` therefore remain open.
+The linked v75 proof binds the Play-installed Samsung splits to the exact AAB, source, release,
+certificates, submission recovery, and Play readback. The five scoped `DL-01` groups passed on that
+API-36 installation. The same Play-signed candidate passed the API-37 matrix from a sideloaded
+installation, and controlled proof covers private fault states unsafe to manufacture on a tester
+phone. Under the owner's approved split, `DL-01` is done; `DEVICE-01` and `STORE-01` remain open for
+Play-installed API-37 provenance, fresh/prepared install paths, the general staged journey, and their
+other release/device gates.
 
-The superseded v64 candidate retains its bounded `TLS-00` evidence only. That device result and the
-superseded v63 `NET-01`/`RT-01A` results do not transfer to v67. V67 contains the restored native Find
-My implementation, but this checkpoint did not repeat its full candidate-specific device matrix.
+The superseded v67 candidate retains its natural-update/App Lock history, v64 retains bounded
+`TLS-00`, and v63 retains `NET-01`/`RT-01A`. Those results do not transfer to v75 unless an owning
+task explicitly combines them. V75 contains the restored native Find My implementation, but this
+checkpoint did not repeat its full candidate-specific device matrix.
 
 ## Release disposition
 
@@ -106,25 +111,27 @@ My implementation, but this checkpoint did not repeat its full candidate-specifi
 - **Verify:** Confirm repository track/config, the live track and tester list, exact AAB identity,
   hash, and Play signing, install or update through Play, staged-server journeys, feedback path,
   cleanup, and every Play prompt shown for this artifact.
-- **Current status (2026-09-15):** **IN_PROGRESS — v67 candidate creation and validation, EAS
-  submission, live Internal `completed` state, Play v66→v67 update, and one bounded ordinary-kill/App
-  Lock resume are proven.** Remaining work is tester/track administration, a stable non-production
-  server and general fixtures, the full selected connect/sync/send/receive/notification/restart/
-  disconnect journey, cleanup, candidate limitations, hostile `DL-01` proof, and artifact-specific
-  Play declarations or prompts. No wider-track promotion is authorized.
+- **Current status (2026-09-18):** **IN_PROGRESS — v75 candidate creation and validation, direct
+  submission recovery, live Internal `completed` state, natural Play build-73→75 update, and the
+  scoped Samsung `DL-01` matrix are proven.** The Play-signed API-37 result remains supporting-only.
+  Remaining work is tester/track administration, genuine API-37 Play delivery, a stable
+  non-production server and general fixtures, the full selected
+  connect/sync/send/receive/notification/restart/disconnect journey, general cleanup and candidate
+  limitations, and artifact-specific Play declarations or prompts. No wider-track promotion is
+  authorized.
 
 Current child disposition:
 
-| Child                                   | Status      | Remaining boundary                                                                          |
-| --------------------------------------- | ----------- | ------------------------------------------------------------------------------------------- |
-| `STORE-01A-UGC-SAFETY`                  | Deferred    | Required before Closed, Open, or Production promotion, or earlier if Play requires it       |
-| `STORE-01B-SDK57-DEPS`                  | Done        | None for the current SDK 57 dependency slice                                                |
-| `STORE-01C-FIREBASE-EAS`                | Done        | Runtime Firebase behavior remains task-specific device evidence                             |
-| `STORE-01D-RELEASE-NOISE`               | Done        | None for deterministic host-test noise                                                      |
-| `STORE-01E-SOURCE-FREEZE`               | Done        | Current source identity is recorded above                                                   |
-| `STORE-01F-LOCAL-AAB`                   | Done        | Identity is recorded; the local artifact/receipt workspace was removed and cannot be reused |
-| `STORE-01G-TESTER-READINESS`            | In progress | Tester, staged-server, disclosure, journey, and cleanup evidence                            |
-| `STORE-01H-INTERNAL-TRACK-CONFIG-GUARD` | Done        | Live v67 Internal status is verified; tester readiness remains separate                     |
+| Child                                   | Status      | Remaining boundary                                                                                                                            |
+| --------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `STORE-01A-UGC-SAFETY`                  | Deferred    | Required before Closed, Open, or Production promotion, or earlier if Play requires it                                                         |
+| `STORE-01B-SDK57-DEPS`                  | Done        | Historical slice remains done; a replacement candidate must resolve or disposition the current 19/20 Doctor result and 27 recommended patches |
+| `STORE-01C-FIREBASE-EAS`                | Done        | Runtime Firebase behavior remains task-specific device evidence                                                                               |
+| `STORE-01D-RELEASE-NOISE`               | Done        | None for deterministic host-test noise                                                                                                        |
+| `STORE-01E-SOURCE-FREEZE`               | Done        | Exact v75 source and release identities are recorded above                                                                                    |
+| `STORE-01F-LOCAL-AAB`                   | Done        | Exact v75 build/validation identity is recorded; the local AAB is no longer retained                                                          |
+| `STORE-01G-TESTER-READINESS`            | In progress | Tester, staged-server, disclosure, journey, and cleanup evidence                                                                              |
+| `STORE-01H-INTERNAL-TRACK-CONFIG-GUARD` | Done        | Live v75 Internal status is verified; tester readiness remains separate                                                                       |
 
 The deferred UGC-safety branch is the code-bearing exception inside this release plan: before any
 wider promotion, children A1–A4 require app/server terms, blocking, reporting, and enforcement code;

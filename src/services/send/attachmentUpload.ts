@@ -80,6 +80,7 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
   uri,
   mimeType,
   totalBytes,
+  signal,
   timeoutMs,
 }) => {
   // The Private API helper was the only iMessage attachment transport. Keep this leaf-level
@@ -95,6 +96,9 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
     throw new RangeError(
       `timeoutMs must be a positive safe integer no greater than ${MAX_TIMER_MS}`,
     );
+  }
+  if (signal?.aborted) {
+    throw new ApiError('cancelled', 'Attachment upload was cancelled', undefined, signal.reason);
   }
 
   // Send entry points pass a pinned client. Reject a transport already superseded before even the
@@ -161,6 +165,10 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
     releaseCancelHandle();
     resolveSettled();
   };
+  const abortFromOwner = (): void => stopAttempt('cancelled');
+  signal?.addEventListener('abort', abortFromOwner, { once: true });
+  // Close the check/listener race before the first native file await.
+  if (signal?.aborted) abortFromOwner();
   if (timeoutMs !== undefined) {
     // Starts before the first native stat and covers the uploader's own preflight, FIFO gate wait,
     // transfer, and response. The queue passes only the remainder of its wider attempt deadline.
@@ -249,6 +257,7 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
       throw new ApiError('no_connection', 'Upload request failed', undefined, err);
     }
   } finally {
+    signal?.removeEventListener('abort', abortFromOwner);
     if (timeout !== undefined) clearTimeout(timeout);
     // A timed-out active native task still owns a real socket and a gate slot until Expo settles
     // it. Keep the exact cancellation handle registered for that lifetime so a later account sweep

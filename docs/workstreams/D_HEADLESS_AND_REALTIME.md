@@ -34,11 +34,13 @@ deterministic: missing credentials are an intentional no-op, completed work succ
 bootstrap or work failure requests retry. Register the headless entry from `index.js`; a route module
 is not a killed-process entry point.
 
-Bound each wake to four sync pages, ten scheduled rows, and ten outgoing rows. An attachment retry
-uses one 60-second JavaScript deadline spanning lookup, file stat, upload preflight, FIFO admission,
-native transfer, and HTTP response. This is not a promise that the whole wake or an uncooperative
-native operation terminates at that instant; claim and outcome commits remain outside the transfer
-deadline.
+Bound each WorkManager wake to one 50-second monotonic work owner, four sync pages, two scheduled
+rows, and ten outgoing rows. Reserve a separate absolute 55-second cutoff for final persistent-log
+flushing. The owner's abort signal reaches task-local HTTP and retry waits, sync, diagnostics, and
+native attachment uploads. An attachment retry keeps its standalone 60-second ceiling but uses only
+the smaller remaining callback budget. Expiry returns retryable `Failed` and keeps replacements
+fenced until the real prior continuation settles. An uncooperative synchronous/native operation can
+still outlive its JavaScript cancellation result, so exact Android evidence remains required.
 
 The same durable bootstrap boundary owns the remaining network effects from a killed-process
 notification action. A plain notification reply in an existing iMessage chat uses AppleScript,
@@ -49,7 +51,8 @@ credentials. `FP-006` removes iMessage reaction and FaceTime actions entirely. M
 Unread now change only the device-local marker and never resolve a helper client or send a remote
 receipt. Stale persisted feature settings cannot restore any retired effect.
 
-A realtime chat-background event uses the same rule. Its detached callback carries the originating
+A realtime chat-background event is the explicit exception to callback ownership. Its detached,
+account-owned callback carries the originating
 account generation, captures a fresh lease when it actually starts, and either pins the exact warm
 transport or constructs a guarded client from the authorized durable tuple. This lets the wallpaper
 transfer outlive its short queue attempt without adopting a replacement account. The mounted-chat
@@ -72,15 +75,17 @@ account-teardown tracking slot. Account invalidation or deadline expiry makes th
 stale, with at most two more seconds allowed for cooperative cleanup.
 
 This is one bounded callback-owned app-cache attempt, not a durable retry. Process death after the
-database checkpoint can still lose it. The 40-second window covers only the attachment-effect tail,
-not FIFO waiting or dispatch/presentation. Final persistent-log flushing now has a separate absolute
+database checkpoint can still lose it. The effect-specific 40-second window covers only the
+attachment tail, while an enclosing 50-second FCM lifetime now covers FIFO waiting,
+dispatch/presentation, prerequisite recovery, and the effect tail. On expiry it revokes the derived
+lease and abort signal before the public callback continues; the real underlying delivery remains
+the FIFO fence so later callbacks cannot overlap it. Final persistent-log flushing has a separate absolute
 `receivedAt + 55 seconds` cutoff, leaving five seconds before RNFB's 60-second Android task limit.
 That barrier adopts pre-existing log operations plus its own queued write, keeps older headless
 sessions captured across every retry attempt, revokes their asynchronous mutation authority before
 returning at expiry, suppresses detached debounce/retry work, and leaves later independent Clear or
-callback owners alone. A synchronous Expo file call that already started
-cannot be interrupted, and earlier unbounded delivery can reach this finalizer after its cutoff, so
-this is not yet a whole-callback proof. Headless FCM also suppresses the immediate external Photos
+callback owners alone. A synchronous Expo/native call that already started cannot be interrupted,
+so native cancellation and complete callback timing still require exact Android evidence. Headless FCM also suppresses the immediate external Photos
 call because `expo-media-library` has no abort signal. For an eligible incoming non-sticker image
 with a Gallery or Gator Album preference it instead stores one bounded destination-bound receipt
 before the private-cache download; committed `localPath` then makes that receipt eligible for a
@@ -94,15 +99,15 @@ otherwise. The incoming-event drain signals only after the row's exact five-seco
 deferral commits; the FCM callback owns that already-running clock, the repair, and one bounded
 retry. Account invalidation or App Lock aborts the repair and prevents a stale write.
 
-Do not infer that these specialized callers complete the parent. Exact killed-process Android
-execution, receipt draining on the matching candidate, and earlier full-callback timing remain open
-in the authoritative plan.
+Do not infer that the host proof completes the parent. Exact killed-process Android execution,
+50/55-second timing, offline retry, and cancellation/no-stuck behavior remain open in the
+authoritative plan.
 
 <a id="rel-006"></a>
 
 ## `REL-006` — coherent HTTP identity across retries
 
-Treat origin, query parameters, optional legacy query credential, and headers as one logical-request
+Treat origin, query parameters, Bearer credentials, and headers as one logical-request
 identity. Before retrying, re-read the complete live configuration and proceed only when it is still
 identical. If any part changed, retire the old request without sending revoked credentials or mixing
 new credentials with old-account work.

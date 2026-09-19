@@ -417,6 +417,7 @@ export class DurableRealtimeDispatcher {
     if (recovery.kind === 'none' || !isCurrent()) return;
     const recoveryContext: EventDeliveryContext = {
       generation: context?.generation ?? 0,
+      signal: context?.signal,
       isCurrent,
     };
     try {

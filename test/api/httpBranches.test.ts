@@ -1,6 +1,6 @@
 /**
- * Branch top-ups for HttpClient not covered by http.test.ts: the put/delete verbs, the
- * `usesHeaderAuth()` accessor, query-param serialization (skipping undefined), the
+ * Branch top-ups for HttpClient not covered by http.test.ts: the put/delete verbs,
+ * query-param serialization (skipping undefined), the
  * timeout/no-connection error mapping, and the invalid-JSON parse error.
  */
 jest.mock('ky', () => ({ __esModule: true, default: jest.fn() }));
@@ -24,7 +24,7 @@ const okSchema = z.object({ ok: z.boolean() });
 
 beforeEach(() => mockKy.mockReset());
 
-describe('verbs + accessors', () => {
+describe('verbs + request snapshots', () => {
   it('put and delete route through the request path with the right method', async () => {
     // Fresh Response per call — a Response body can only be read once.
     mockKy.mockImplementation(async () => jsonResponse({ ok: true }));
@@ -58,19 +58,6 @@ describe('verbs + accessors', () => {
     expect(transportFetch).toHaveBeenCalledWith(requestWithoutRedirect, { redirect: 'error' });
   });
 
-  it('usesHeaderAuth() reflects the injected config (default true, false when disabled)', () => {
-    expect(new HttpClient({ getOrigin: () => 'x', getPassword: () => 'p' }).usesHeaderAuth()).toBe(
-      true,
-    );
-    expect(
-      new HttpClient({
-        getOrigin: () => 'x',
-        getPassword: () => 'p',
-        useHeaderAuth: () => false,
-      }).usesHeaderAuth(),
-    ).toBe(false);
-  });
-
   it('serializes defined query params and drops undefined ones', async () => {
     mockKy.mockResolvedValue(jsonResponse({ ok: true }));
     const client = new HttpClient({ getOrigin: () => 'https://x', getPassword: () => 'p' });
@@ -84,25 +71,21 @@ describe('verbs + accessors', () => {
   it('captures one immutable native transport identity across live config changes', () => {
     let origin = 'https://old.example';
     let password = 'old-password';
-    let headerAuth = true;
     let customHeaders = { 'X-Account': 'old' };
     const client = new HttpClient({
       getOrigin: () => origin,
       getPassword: () => password,
-      useHeaderAuth: () => headerAuth,
       getCustomHeaders: () => customHeaders,
     });
 
     const transport = client.snapshotTransport();
     origin = 'https://new.example';
     password = 'new-password';
-    headerAuth = false;
     customHeaders = { 'X-Account': 'new' };
 
     expect(Object.isFrozen(transport)).toBe(true);
     expect(Object.isFrozen(transport.headers)).toBe(true);
     expect(transport.origin).toBe('https://old.example');
-    expect(transport.authMode).toBe('header');
     expect(transport.password).toBe('old-password');
     expect(transport.headers).toMatchObject({
       Authorization: 'Bearer old-password',
@@ -111,20 +94,16 @@ describe('verbs + accessors', () => {
     expect(transport.buildUrl('/binary')).toBe('https://old.example/api/v1/binary');
   });
 
-  it('centralizes explicit legacy auth in native transport URLs', () => {
-    const onLegacyAuth = jest.fn();
+  it('keeps native transport credentials in headers and out of URLs', () => {
     const transport = new HttpClient({
       getOrigin: () => 'https://old.example',
       getPassword: () => 'space password',
-      useHeaderAuth: () => false,
-      onLegacyAuth,
     }).snapshotTransport();
 
-    expect(transport.headers.Authorization).toBeUndefined();
+    expect(transport.headers.Authorization).toBe('Bearer space password');
     expect(transport.buildUrl('/contact/c1/avatar?size=thumb')).toBe(
-      'https://old.example/api/v1/contact/c1/avatar?size=thumb&guid=space+password',
+      'https://old.example/api/v1/contact/c1/avatar?size=thumb',
     );
-    expect(onLegacyAuth).toHaveBeenCalledTimes(1);
   });
 
   it('rejects a pinned A transport after A -> B -> A without issuing a request', async () => {
@@ -371,19 +350,16 @@ describe('retry wiring', () => {
   it('retires an old logical request after account rotation, then uses one coherent new transport', async () => {
     let origin = 'https://old.example';
     let password = 'old-password';
-    let headerAuth = true;
     let customHeader = 'old-header';
     const client = new HttpClient({
       getOrigin: () => origin,
       getPassword: () => password,
-      useHeaderAuth: () => headerAuth,
       getCustomHeaders: () => ({ 'x-account': customHeader }),
     });
     mockKy.mockImplementationOnce(async () => {
       // Deterministically model Disconnect + reconnect while the first attempt is failing.
       origin = 'https://new.example';
       password = 'new-password';
-      headerAuth = false;
       customHeader = 'new-header';
       throw new Error('socket hang up');
     });
@@ -404,16 +380,16 @@ describe('retry wiring', () => {
     });
     expect(mockKy.mock.calls[0]?.[1].searchParams.has('guid')).toBe(false);
 
-    // A newly initiated request owns the complete new legacy-query configuration; no old header,
-    // origin, or password crosses the account boundary.
+    // A newly initiated request owns the complete new configuration; no old header, origin, or
+    // password crosses the account boundary.
     await expect(client.get('/account-bound', okSchema, { retry: false })).resolves.toEqual({
       ok: true,
     });
     expect(mockKy).toHaveBeenCalledTimes(2);
     expect(mockKy.mock.calls[1]?.[0]).toBe('https://new.example/api/v1/account-bound');
-    expect(mockKy.mock.calls[1]?.[1].headers.Authorization).toBeUndefined();
+    expect(mockKy.mock.calls[1]?.[1].headers.Authorization).toBe('Bearer new-password');
     expect(mockKy.mock.calls[1]?.[1].headers['x-account']).toBe('new-header');
-    expect(mockKy.mock.calls[1]?.[1].searchParams.get('guid')).toBe('new-password');
+    expect(mockKy.mock.calls[1]?.[1].searchParams.has('guid')).toBe(false);
   });
 
   it('does NOT retry a POST — a retried write could double-send', async () => {
