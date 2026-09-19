@@ -55,14 +55,25 @@ the staged-server journey and broader release gates are not complete.
 | AAB SHA-256       | `ba85e8356be306bd8d820ef0f09ed4cb5a9781afb2e601d76b792a9bf843f6d2`                                                                                            |
 | Play destination  | Google Play Internal Testing only                                                                                                                             |
 | Submission        | EAS id `e7ca0440-81f3-40a0-ae6e-b05f2c52e59b` finished; Android Publisher readback at `2026-09-19T03:18:57Z` found only Internal `0.1.56` / `77`, `completed` |
-| Device checkpoint | No v77 phone install or behavior proof: ADB reported no connected device after the Mac restart                                                                |
+| Device checkpoint | Play-installed Samsung/Android 16/API 36 v77: synthetic killed-FCM/attachment slice passed; full journey and installed-signature check remain open            |
 
 The validated v77 AAB binds the exact package, version, source/release tree, upload certificate,
 Maps-key digest, artifact hash, and native-path proof. The first 0.1.56 build from `f95d4f3`
 failed in Gradle and consumed code `76` without an artifact or Play submission; the detailed EAS
 log was not retained. A no-increment diagnostic reproduced D8's 2 GiB Java-heap exhaustion.
 The bounded 4 GiB fix is in source `da05b66`; its diagnostic and exact signed release build passed.
-No Android device result from v75 is relabeled as v77 evidence.
+No Android device result from v75 is relabeled as v77 evidence. On 2026-09-18 Play updated the
+Samsung from v75 to v77, then delivered a clean v77 reinstall after Disconnect
+reported incomplete cleanup of the old disposable fixture session. The replacement fixture counted
+11 unauthorized requests, consistent with the old and new synthetic credentials differing. The clean
+install paired to synthetic loopback data; ordinary `am kill` removed the process, one encrypted FCM
+woke a new process, and one attachment download finished before foregrounding. In-app diagnostics
+later showed one attachment row with one local path and zero active transfers. An initialized
+background WorkManager run executed and contacted the fixture; two forced runs after `am kill`
+started processes but did not execute native `doWork` or change the fixture API count, so
+killed-process WorkManager work remains unproven. The installed split-signature verifier stopped
+at a Java `SIGBUS` in local `apksigner`; the other session owns that Java issue, and this run did
+not troubleshoot it.
 
 The superseded v75 Play-installed Samsung passed all five scoped `DL-01` groups, with supporting
 Play-signed sideloaded API-37 compatibility and controlled private-state proof. Under the owner's
@@ -113,7 +124,8 @@ historical unless an owning task explicitly combines them.
   hash, and Play signing, install or update through Play, staged-server journeys, feedback path,
   cleanup, and every Play prompt shown for this artifact.
 - **Current status (2026-09-18):** **IN_PROGRESS — v77 creation, validation, direct submission, and
-  live Internal `completed` state are proven; v77 has no phone proof.** The superseded v75 natural
+  live Internal `completed` state and a narrow Play-installed v77/API-36 killed-FCM slice are
+  proven; the full v77 phone journey is open.** The superseded v75 natural
   Play build-73→75 update and scoped Samsung `DL-01` matrix remain task history, while its
   Play-signed API-37 result remains supporting-only.
   Remaining work is tester/track administration, genuine API-37 Play delivery, a stable

@@ -13,8 +13,9 @@ broader Closed/Open/Production release gate.
 
 Current release-candidate status — **INTERNAL TESTING; broader release remains NO-GO.** Exact v77
 was built, validated, and submitted only to Google Play Internal Testing. The live Internal release
-reports `completed`, but no v77 phone install or behavior proof exists after the Mac restart. The
-superseded Play-delivered v75 passed the five-group `DL-01` matrix on a physical Android 16/API 36
+reports `completed`. A Play-installed Android 16/API 36 Samsung now has a narrow v77 killed-FCM and
+attachment-download result, but not the full candidate journey or installed-split signature result.
+The superseded Play-delivered v75 passed the five-group `DL-01` matrix on a physical Android 16/API 36
 Samsung; its Play-signed, sideloaded Android 17/API 37 compatibility result remains supporting-only.
 Under the owner-approved split, `DL-01` stays done, while v77 Play/device provenance belongs to
 `DEVICE-01`/release. Historical v75 checkmarks below do not transfer exact-device credit to v77.
@@ -35,8 +36,14 @@ Exact replacement frozen from one release run:
   `6E:18:F9:93:61:DC:D6:58:F1:A7:5B:9F:47:E8:66:AC:8D:A6:AF:EF:B9:E7:F4:7C:BF:41:F5:E0:F6:CE:2F:43`
 - Submission: EAS id `e7ca0440-81f3-40a0-ae6e-b05f2c52e59b`, finished; Android Publisher readback
   at `2026-09-19T03:18:57Z` found only Internal release `0.1.56`, code `77`, status `completed`
-- Tester/device/Android/test date: no v77 phone observed; ADB listed no connected device
-- Exact v77 device receipt: none yet
+- Tester/device/Android/test date: Samsung SM-S938U1, Android 16/API 36, 2026-09-18 local
+- Exact v77 device slice: Play update and clean Play reinstall of code 77; disposable loopback
+  connection, ordinary `am kill`, encrypted FCM process restart, one completed background attachment
+  request, then one DB attachment row/local path and zero active transfers. A warm-background
+  WorkManager run executed and contacted the fixture, but two forced runs after `am kill` started
+  processes without executing native `doWork` or proving durable work. Installed-split signature
+  inspection remains open because local `apksigner` crashed with Java `SIGBUS`; `REL-001`/`DEVICE-01`
+  remain open.
 
 The first 0.1.56 build consumed code 76 and failed in Gradle without an artifact or submission. A
 separate diagnostic reproduced D8 Java-heap exhaustion at 2 GiB; the committed bounded 4 GiB fix
@@ -177,14 +184,15 @@ Open, or Production promotion, or earlier if Play flags the internal app.
 - [ ] Play Console confirms no Closed, Open, or Production release is active before submission.
 - [x] The replacement version/build, source and release commits, AAB SHA-256, upload certificate,
       and build provenance are recorded above. The superseded v59 record does not satisfy this gate.
-- [ ] A v77 tester device, Android version, and test date are recorded; the v75 device record above
-      is historical and ADB currently lists no connected phone.
+- [x] A v77 tester device, Android version, and test date are recorded above; the v75 device record
+      remains historical.
 - [ ] The intended tester list, opt-in link, feedback destination, and named response owner work.
 - [ ] Testers use a stable non-production server/setup path and no production-user data or credentials.
 - [ ] The exact AAB installs/updates and completes the staged connect, sync, send, receive, notification,
       restart, and disconnect journeys selected for this test round.
       The historical Play build-73→75 update, boot, visible session continuity, and scoped `DL-01`
-      journey are task evidence only; no v77 install or full general staged journey was run.
+      journey are task evidence only. The v77 Play install and narrow killed-FCM slice above do not
+      complete the general staged journey.
 - [ ] Every declaration or permission review that Play actually prompts for this internal artifact is
       completed truthfully; no missing prompt is treated as exempt by assumption.
 - [ ] Known limitations and unfinished safety/release work are disclosed to testers, and no result from
