@@ -241,7 +241,7 @@ export function parseDeviceBaseUrl(value) {
 export function parseDl01DeviceFixtureArgs(argv) {
   const values = parsePairs(
     argv,
-    new Set(['--serial', '--package', '--base-url', '--firebase-project-id']),
+    new Set(['--serial', '--package', '--base-url', '--firebase-project-id', '--rcs-permissions']),
   );
   const serial = requiredString(values.get('--serial'), '--serial', SERIAL);
   const packageName = requiredString(values.get('--package'), '--package', PACKAGE);
@@ -250,7 +250,11 @@ export function parseDl01DeviceFixtureArgs(argv) {
   if (firebaseProjectId !== null && !PROJECT_ID.test(firebaseProjectId)) {
     throw new Error('--firebase-project-id is invalid.');
   }
-  return { serial, packageName, base, firebaseProjectId };
+  const rcsPermissions = values.get('--rcs-permissions');
+  if (rcsPermissions !== undefined && rcsPermissions !== 'yes') {
+    throw new Error('--rcs-permissions must be yes when provided.');
+  }
+  return { serial, packageName, base, firebaseProjectId, rcsPermissions: rcsPermissions === 'yes' };
 }
 
 export function parseDl01CandidateArgs(argv, options = {}) {
@@ -1056,6 +1060,7 @@ async function serveFixture(argv) {
     host: '127.0.0.1',
     port: args.base.port,
     firebaseProjectId: args.firebaseProjectId,
+    rcsPermissions: args.rcsPermissions,
   });
   let reverseAdded = false;
   let stopping = false;
@@ -1101,7 +1106,7 @@ async function serveFixture(argv) {
 
 function usage() {
   return `Usage:
-  node scripts/run-dl01-device-fixture.mjs serve --serial SERIAL --package PACKAGE --base-url http://127.0.0.1:PORT [--firebase-project-id ID]
+  node scripts/run-dl01-device-fixture.mjs serve --serial SERIAL --package PACKAGE --base-url http://127.0.0.1:PORT [--firebase-project-id ID] [--rcs-permissions yes]
   node scripts/run-dl01-device-fixture.mjs verify-candidate <candidate options>
   node scripts/run-dl01-device-fixture.mjs capture-diagnostics <candidate options> [--scrolls 0..12]
 

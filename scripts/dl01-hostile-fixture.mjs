@@ -324,11 +324,11 @@ function boundedNumber(value, fallback, minimum = 0) {
   return Number.isSafeInteger(value) && value >= minimum ? value : fallback;
 }
 
-function fixtureHandle() {
+function fixtureHandle(rcsPermissions) {
   return {
     originalROWID: 1,
     address: 'dl01-fixture@example.invalid',
-    service: 'iMessage',
+    service: rcsPermissions ? 'RCS' : 'iMessage',
     country: null,
     uncanonicalizedId: null,
     color: '#336699',
@@ -352,11 +352,11 @@ function fixtureContact() {
   };
 }
 
-function createCase(generation, mode, target, now, attachmentCount = 1) {
-  const chatGuid = `dl01-chat-${generation}`;
+function createCase(generation, mode, target, now, attachmentCount = 1, rcsPermissions = false) {
+  const chatGuid = rcsPermissions ? `RCS;-;dl01-chat-${generation}` : `dl01-chat-${generation}`;
   const messageGuid = `dl01-message-${generation}`;
   const attachmentGuid = `dl01-attachment-${generation}`;
-  const handle = fixtureHandle();
+  const handle = fixtureHandle(rcsPermissions);
   const chatSummary = {
     guid: chatGuid,
     originalROWID: generation,
@@ -1081,6 +1081,7 @@ export async function startDl01FixtureServer(configuration) {
       60_000,
     ),
     firebaseProjectId,
+    rcsPermissions: configuration?.rcsPermissions === true,
     now: configuration?.now ?? Date.now,
     randomUuid: configuration?.randomUuid ?? randomUUID,
     randomBytes: configuration?.randomBytes ?? randomBytes,
@@ -1090,7 +1091,14 @@ export async function startDl01FixtureServer(configuration) {
   if (typeof options.fetchImpl !== 'function')
     throw new Error('A fetch implementation is required.');
 
-  const first = createCase(1, 'valid-image', 'attachment', options.now());
+  const first = createCase(
+    1,
+    'valid-image',
+    'attachment',
+    options.now(),
+    1,
+    options.rcsPermissions,
+  );
   const state = {
     generation: 1,
     current: first,
@@ -1156,6 +1164,7 @@ export async function startDl01FixtureServer(configuration) {
         body.target,
         options.now(),
         attachmentCount,
+        options.rcsPermissions,
       );
       appendHistory(state, state.current);
       sendJson(socket, 200, {
@@ -1210,7 +1219,7 @@ export async function startDl01FixtureServer(configuration) {
           supports_message_part_topology: false,
           supports_error_log_upload: false,
           supports_url_preview_proxy: false,
-          rcs: false,
+          rcs: options.rcsPermissions,
         }),
       );
       return;
@@ -1404,7 +1413,7 @@ export async function startDl01FixtureServer(configuration) {
 }
 
 export function parseDl01FixtureArgs(argv) {
-  const parsed = { port: DL01_DEFAULT_PORT, firebaseProjectId: null };
+  const parsed = { port: DL01_DEFAULT_PORT, firebaseProjectId: null, rcsPermissions: false };
   for (let index = 0; index < argv.length; index += 1) {
     const key = argv[index];
     const value = argv[index + 1];
@@ -1413,6 +1422,9 @@ export function parseDl01FixtureArgs(argv) {
       index += 1;
     } else if (key === '--firebase-project-id' && value !== undefined) {
       parsed.firebaseProjectId = requireProjectId(value);
+      index += 1;
+    } else if (key === '--rcs-permissions' && value === 'yes') {
+      parsed.rcsPermissions = true;
       index += 1;
     } else {
       throw new Error(`Unknown or incomplete argument: ${String(key)}`);
@@ -1428,6 +1440,7 @@ async function main() {
     authToken: token,
     port: args.port,
     firebaseProjectId: args.firebaseProjectId,
+    rcsPermissions: args.rcsPermissions,
   });
   process.stdout.write(`DL-01 fixture listening on ${fixture.origin}\n`);
   process.stdout.write(`Modes: ${fixture.modes.join(', ')}\n`);

@@ -204,11 +204,13 @@ test('DL-01 fixture exposes only authenticated synthetic sync and bounded hostil
     assert.equal(info.json.data.supports_header_auth, true);
     assert.equal(info.json.data.supports_fcm_push_encryption_v3, true);
     assert.equal(info.json.data.supports_repair_snapshot, false);
+    assert.equal(info.json.data.rcs, false);
 
     const chats = await control(fixture, '/api/v1/chat/query', { offset: 0, limit: 200 });
     assert.equal(chats.json.data.chats.length, 1);
     const chat = chats.json.data.chats[0];
     assert.equal(chat.displayName, 'DL-01 Fixture');
+    assert.equal(chat.guid.startsWith('RCS;-;'), false);
     assert.equal(chat.lastMessage.attachments.length, 1);
     assert.match(chat.lastMessage.attachments[0].guid, /^dl01-attachment-/);
 
@@ -511,6 +513,21 @@ test('DL-01 fixture exposes only authenticated synthetic sync and bounded hostil
   );
 });
 
+test('opt-in permission fixture exposes a synthetic RCS chat without changing the default', async (t) => {
+  const fixture = await startDl01FixtureServer({
+    authToken: AUTH_TOKEN,
+    port: 0,
+    rcsPermissions: true,
+  });
+  t.after(() => fixture.close());
+
+  const info = await control(fixture, '/api/v1/server/info');
+  const chats = await control(fixture, '/api/v1/chat/query', { offset: 0, limit: 1 });
+  assert.equal(info.json.data.rcs, true);
+  assert.match(chats.json.data.chats[0].guid, /^RCS;-;dl01-chat-/);
+  assert.equal(chats.json.data.chats[0].participants[0].service, 'RCS');
+});
+
 test('V3 identity encoder matches the checked-in cross-runtime contract vector', () => {
   const identity = {
     version: 3,
@@ -551,7 +568,21 @@ test('ADB runner requires one exact serial, package, and loopback base URL', () 
       packageName: 'com.example.gator',
       base: { origin: 'http://127.0.0.1:43117', port: 43_117 },
       firebaseProjectId: null,
+      rcsPermissions: false,
     },
+  );
+  assert.equal(
+    parseDl01DeviceFixtureArgs([
+      '--serial',
+      'device-1234',
+      '--package',
+      'com.example.gator',
+      '--base-url',
+      'http://127.0.0.1:43117',
+      '--rcs-permissions',
+      'yes',
+    ]).rcsPermissions,
+    true,
   );
   assert.throws(() => parseDl01DeviceFixtureArgs([]), /--serial/);
   assert.throws(
