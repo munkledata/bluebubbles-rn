@@ -1,10 +1,11 @@
 const { withGradleProperties } = require('@expo/config-plugins');
 
-// Building the patched React Native source loads substantially more Gradle/Kotlin classes than
-// the default prebuilt-AAR path. Expo's generated 512 MiB Metaspace limit is too small for the
-// release build, so keep the existing heap/flags and raise only the exhausted bounded pool.
-const FALLBACK_GRADLE_JVM_ARGS = '-Xmx2048m -XX:MaxMetaspaceSize=1024m';
+// Building the patched React Native source needs more than Expo's default heap for release D8
+// merging and more than its default Metaspace for Gradle/Kotlin classes. Pin both bounded pools
+// while preserving unrelated JVM flags whenever the ignored Android project is regenerated.
+const HEAP_ARG = '-Xmx4096m';
 const METASPACE_ARG = '-XX:MaxMetaspaceSize=1024m';
+const FALLBACK_GRADLE_JVM_ARGS = `${HEAP_ARG} ${METASPACE_ARG}`;
 
 function applyGradleJvmMemory(properties) {
   const matches = properties.filter(
@@ -32,8 +33,11 @@ function applyGradleJvmMemory(properties) {
   const preserved = existing.value
     .trim()
     .split(/\s+/)
-    .filter((argument) => argument && !argument.startsWith('-XX:MaxMetaspaceSize='));
-  existing.value = [...preserved, METASPACE_ARG].join(' ');
+    .filter(
+      (argument) =>
+        argument && !argument.startsWith('-Xmx') && !argument.startsWith('-XX:MaxMetaspaceSize='),
+    );
+  existing.value = [HEAP_ARG, ...preserved, METASPACE_ARG].join(' ');
 }
 
 module.exports = function withGradleJvmMemory(config) {

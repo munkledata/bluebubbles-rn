@@ -15,7 +15,7 @@ describe('Android Gradle JVM memory config', () => {
     expect(config.plugins).toContain('./plugins/withGradleJvmMemory');
   });
 
-  it('raises only Metaspace while preserving the existing heap and unrelated flags', () => {
+  it('raises the release heap and Metaspace while preserving unrelated flags', () => {
     const properties: GradleProperty[] = [
       {
         type: 'property',
@@ -30,7 +30,7 @@ describe('Android Gradle JVM memory config', () => {
       {
         type: 'property',
         key: 'org.gradle.jvmargs',
-        value: '-Xmx2048m -Dfile.encoding=UTF-8 -XX:MaxMetaspaceSize=1024m',
+        value: '-Xmx4096m -Dfile.encoding=UTF-8 -XX:MaxMetaspaceSize=1024m',
       },
     ]);
   });
@@ -44,7 +44,7 @@ describe('Android Gradle JVM memory config', () => {
       {
         type: 'property',
         key: 'org.gradle.jvmargs',
-        value: '-Xmx2048m -XX:MaxMetaspaceSize=1024m',
+        value: '-Xmx4096m -XX:MaxMetaspaceSize=1024m',
       },
     ]);
   });

@@ -157,9 +157,9 @@ const config: ExpoConfig = {
     // values are available while this dynamic config is evaluated; a plain local prebuild has no
     // selected profile and deliberately defaults to the development list above.
     ['./plugins/withArm64Only', { architectures: androidArchitectures }],
-    // React Native is compiled from the patched source below. That loads more Gradle/Kotlin
-    // classes than the prebuilt-AAR path, so preserve a bounded release-safe Metaspace allowance
-    // whenever Expo regenerates the ignored native project.
+    // React Native is compiled from the patched source below. Keep bounded Gradle heap and
+    // Metaspace allowances for its release D8 merge and Gradle/Kotlin classes whenever Expo
+    // regenerates the ignored native project.
     './plugins/withGradleJvmMemory',
     // FCM push: the firebase plugin wires google-services.json + the messaging SDK
     // into the native build (the receive pipeline is already in JS).
