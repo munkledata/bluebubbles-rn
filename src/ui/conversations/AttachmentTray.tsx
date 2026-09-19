@@ -93,7 +93,9 @@ export function AttachmentTray({
   const [assets, setAssets] = useState<MediaLibrary.Asset[]>([]);
   const [mediaPermission, setMediaPermission] = useState<MediaPermissionState>('checking');
   const [permissionDialogVisible, setPermissionDialogVisible] = useState(false);
-  const [cameraPermissionDenied, setCameraPermissionDenied] = useState(false);
+  const [cameraPermissionIssue, setCameraPermissionIssue] = useState<
+    'denied' | 'unavailable' | null
+  >(null);
   const isCurrent = useCallback(
     () => mountedRef.current && accountLease.isCurrent(),
     [accountLease],
@@ -219,14 +221,22 @@ export function AttachmentTray({
   // camera button). CAMERA is already declared by the expo-camera plugin, so no rebuild is needed.
   const capture = async (): Promise<void> => {
     if (!isCurrent()) return;
+    let permission: Awaited<ReturnType<typeof ImagePicker.requestCameraPermissionsAsync>>;
     try {
-      const p = await ImagePicker.requestCameraPermissionsAsync();
+      permission = await ImagePicker.requestCameraPermissionsAsync();
+    } catch (error) {
       if (!isCurrent()) return;
-      if (!p.granted) {
-        setCameraPermissionDenied(true);
-        return;
-      }
-      if (cameraPermissionDenied) setCameraPermissionDenied(false);
+      logger.warn('[attachment-tray] camera permission request failed', error);
+      setCameraPermissionIssue('unavailable');
+      return;
+    }
+    if (!isCurrent()) return;
+    if (!permission.granted) {
+      setCameraPermissionIssue('denied');
+      return;
+    }
+    if (cameraPermissionIssue) setCameraPermissionIssue(null);
+    try {
       const res = await ImagePicker.launchCameraAsync({ quality: 0.8 });
       if (!isCurrent()) return;
       const a = res.assets?.[0];
@@ -241,6 +251,7 @@ export function AttachmentTray({
         height: a.height,
       });
     } catch (e) {
+      if (!isCurrent()) return;
       logger.warn('[attachment-tray] camera capture failed', e);
     }
   };
@@ -350,10 +361,12 @@ export function AttachmentTray({
           </Pressable>
         ) : null}
 
-        {cameraPermissionDenied ? (
+        {cameraPermissionIssue ? (
           <View style={styles.msg}>
             <Text style={[styles.msgText, { color: theme.color.secondaryLabel }]}>
-              Camera access was denied. Enable it in system settings to take a photo.
+              {cameraPermissionIssue === 'denied'
+                ? 'Camera access was denied. Enable it in system settings to take a photo.'
+                : "Gator couldn't request camera access. Try Camera again or check Gator's permission in system settings."}
             </Text>
           </View>
         ) : null}

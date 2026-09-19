@@ -10,8 +10,8 @@
  *     the filename extension (mimeFromName), with a raw-uri fallback when getAssetInfoAsync throws;
  *   - undetermined access shows an in-app rationale before the Android prompt;
  *   - denied access and media-load errors keep Camera/Files usable and offer recovery;
- *   - Camera: a successful capture stages via onPick; denied camera permission or a cancelled
- *     capture stages nothing; a video capture with missing fields derives capture.mp4 / video/mp4.
+ *   - Camera: a successful capture stages via onPick; denied or failed camera permission and a
+ *     cancelled capture stage nothing; a video capture with missing fields derives capture.mp4 / video/mp4.
  *
  * In-file mocks: expo-media-library/legacy + expo-image-picker (native modules) are stubbed so the
  * permission/asset/camera flows can be driven deterministically; expo-image (thumbnail renderer)
@@ -38,7 +38,10 @@ jest.mock('@/services/realtime/deliveryCoordinator', () => ({
 }));
 
 jest.mock('expo-image', () => {
+  // Jest requires these imports inside the hoisted mock factory.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const React = require('react');
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
   const { View } = require('react-native');
   return { Image: (props: Record<string, unknown>) => React.createElement(View, props) };
 });
@@ -472,6 +475,31 @@ describe('AttachmentTray — camera capture', () => {
     expect(
       await screen.findByText(
         'Camera access was denied. Enable it in system settings to take a photo.',
+      ),
+    ).toBeTruthy();
+  });
+
+  it('stages nothing and explains recovery when the camera permission request fails', async () => {
+    grantWith([]);
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => {});
+    requestCamera.mockRejectedValue(new Error('Native camera permission request failed'));
+    const onPick = jest.fn();
+    await renderWithTheme(<AttachmentTray onPick={onPick} onPickFiles={jest.fn()} />);
+    await waitForMediaCheckToSettle();
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('Take a photo'));
+      await Promise.resolve();
+    });
+    expect(requestCamera).toHaveBeenCalled();
+    expect(launchCamera).not.toHaveBeenCalled();
+    expect(onPick).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      '[attachment-tray] camera permission request failed',
+      expect.any(Error),
+    );
+    expect(
+      await screen.findByText(
+        "Gator couldn't request camera access. Try Camera again or check Gator's permission in system settings.",
       ),
     ).toBeTruthy();
   });
