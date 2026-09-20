@@ -12,6 +12,10 @@ interface FailedMessageSheetProps {
   onDelete: () => void;
   /** True when the failed message carries an attachment (tweaks the copy). */
   isAttachment?: boolean;
+  /** False for a one-shot attachment, whether rejected or delivery-uncertain. */
+  retryAllowed?: boolean;
+  /** Only the new one-shot path carries a dedicated uncertain-delivery error. */
+  deliveryUnconfirmed?: boolean;
   /** Bounded/redacted server detail read from the encrypted failed-message row. */
   errorDetail?: string | null;
 }
@@ -27,6 +31,8 @@ export function FailedMessageSheet({
   onRetry,
   onDelete,
   isAttachment,
+  retryAllowed = true,
+  deliveryUnconfirmed = false,
   errorDetail,
 }: FailedMessageSheetProps): React.JSX.Element {
   const theme = useTheme();
@@ -44,28 +50,40 @@ export function FailedMessageSheet({
           onPress={() => {}}
         >
           <View style={styles.header}>
-            <Text style={[styles.title, { color: theme.color.label }]}>Message Not Delivered</Text>
-            <Text style={[styles.subtitle, { color: theme.color.secondaryLabel }]}>
-              {isAttachment
-                ? 'Your attachment couldn’t be sent.'
-                : 'Your message couldn’t be sent.'}
+            <Text style={[styles.title, { color: theme.color.label }]}>
+              {deliveryUnconfirmed
+                ? 'Attachment Status Unconfirmed'
+                : retryAllowed
+                  ? 'Message Not Delivered'
+                  : 'Attachment Needs Review'}
             </Text>
-            {errorDetail ? (
+            <Text style={[styles.subtitle, { color: theme.color.secondaryLabel }]}>
+              {deliveryUnconfirmed
+                ? 'Delivery may have occurred. Check Messages before sending a new copy.'
+                : !retryAllowed
+                  ? 'This attachment cannot be retried. Review this copy before sending another.'
+                  : isAttachment
+                    ? 'Your attachment couldn’t be sent.'
+                    : 'Your message couldn’t be sent.'}
+            </Text>
+            {retryAllowed && errorDetail ? (
               <Text style={[styles.detail, { color: theme.color.secondaryLabel }]}>
                 {errorDetail}
               </Text>
             ) : null}
           </View>
-          <Pressable
-            style={[styles.action, { borderTopColor: theme.color.separator }]}
-            onPress={() => {
-              onRetry();
-              onClose();
-            }}
-            accessibilityRole="button"
-          >
-            <Text style={[styles.actionText, { color: theme.color.tint }]}>Try Again</Text>
-          </Pressable>
+          {retryAllowed ? (
+            <Pressable
+              style={[styles.action, { borderTopColor: theme.color.separator }]}
+              onPress={() => {
+                onRetry();
+                onClose();
+              }}
+              accessibilityRole="button"
+            >
+              <Text style={[styles.actionText, { color: theme.color.tint }]}>Try Again</Text>
+            </Pressable>
+          ) : null}
           <Pressable
             style={[styles.action, { borderTopColor: theme.color.separator }]}
             onPress={() => {
@@ -74,7 +92,9 @@ export function FailedMessageSheet({
             }}
             accessibilityRole="button"
           >
-            <Text style={[styles.actionText, { color: theme.color.destructive }]}>Delete</Text>
+            <Text style={[styles.actionText, { color: theme.color.destructive }]}>
+              {retryAllowed ? 'Delete' : 'Remove from Gator'}
+            </Text>
           </Pressable>
           <Pressable
             style={[

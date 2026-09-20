@@ -3,9 +3,9 @@ import { Handle } from './handle';
 import { Message } from './message';
 
 /**
- * Chat display style: 43 = DM, 45 = group (the standard iMessage values). Kept as a plain
+ * Chat display style: 43 = group, 45 = DM (the standard iMessage values). Kept as a plain
  * `number` (not a strict union) so a non-standard style from a newer/odd server doesn't fail
- * the whole chat/message page parse — the only consumer (`isGroup`) compares against 45.
+ * the whole chat/message page parse — the only consumer (`isGroup`) compares against 43.
  */
 export const ChatStyle = z.number();
 

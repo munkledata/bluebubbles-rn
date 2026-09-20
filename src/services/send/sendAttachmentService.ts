@@ -1,15 +1,21 @@
 import type { SendAck } from '@core/api/endpoints/messages';
+import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
-import { MAX_SEND_ATTACHMENT_TEXT_BYTES } from '@core/models/serverInfo';
+import {
+  MAX_IMESSAGE_ATTACHMENT_UPLOAD_BYTES,
+  MAX_SEND_ATTACHMENT_TEXT_BYTES,
+  isSupportedImessageAttachmentType,
+} from '@core/models/serverInfo';
 import {
   commitAttachmentCacheReservation,
+  getChatHeader,
   insertOutgoingAttachmentWithinTransaction,
   type SendAttemptOwnerToken,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { utf8Encode } from '@utils/bytes';
-import { isRcsChatGuid } from '@utils/chat';
+import { isProvenOneToOneIMessageChat, isRcsChatGuid } from '@utils/chat';
 import {
   attachmentCacheCoordinator,
   type AttachmentCacheReservation,
@@ -41,7 +47,7 @@ export interface SendImageMessageArgs {
   image: PickedImage;
   /** Present only for one attachment + text represented by this one optimistic message. */
   text?: string;
-  /** Required with `text`; prevents an SMS/iMessage-prefix ambiguity from granting capability. */
+  /** Required for iMessage files and for RCS combined sends; never inferred from a GUID alone. */
   service?: AttachmentTextService;
   /** Optional reply target for helper-backed iMessage. RCS media replies currently fail closed. */
   selectedMessageGuid?: string;
@@ -64,6 +70,8 @@ export type AttachmentUploader = (args: {
   assertNetworkStart?: () => void;
   /** Body text consumed by the same server transport as this one attachment. */
   text?: string;
+  /** Explicit transport mode; omitted for the existing RCS upload path. */
+  service?: AttachmentTextService;
   /**
    * The ATTACHMENT row's guid — the key byte progress is published under. It is not the message
    * temp guid because the attachment components render under `att.guid`, so this is what lets the
@@ -100,9 +108,19 @@ export type AttachmentOwnershipPreparer = (input: {
 
 const ATTACHMENT_CACHE_PROMOTION_CONFLICT = Symbol('attachment-cache-promotion-conflict');
 
+export function isSupportedImessageAttachmentFile(image: PickedImage): boolean {
+  if (typeof image.mimeType !== 'string' || typeof image.name !== 'string') return false;
+  return (
+    Number.isSafeInteger(image.size) &&
+    image.size > 0 &&
+    image.size <= MAX_IMESSAGE_ATTACHMENT_UPLOAD_BYTES &&
+    isSupportedImessageAttachmentType(image.mimeType, image.name)
+  );
+}
+
 /**
- * Optimistic image send: inserts a local attachment row (renders immediately from disk), streams
- * the file to the server, then reconciles message + attachment guids. Mirrors `sendTextMessage`;
+ * Optimistic file send: inserts one local attachment row (renders immediately from disk), streams
+ * the file with optional caption to the server, then reconciles message + attachment guids. Mirrors `sendTextMessage`;
  * pure orchestration (the upload is injected) so it is Node-testable. The file is streamed from
  * disk by the native layer, so a large video is never read into JS memory.
  */
@@ -121,14 +139,35 @@ export async function sendImageMessage(
   capabilitySource?: RcsCapabilitySource,
 ): Promise<{ tempGuid: string }> {
   const rcsChat = isRcsChatGuid(args.chatGuid);
-  if (!rcsChat) {
-    throw new Error('iMessage attachments were retired with the Private API helper.');
+  const imessageAttachment = !rcsChat && args.service === 'iMessage';
+  if (!rcsChat && !imessageAttachment) {
+    throw new Error('iMessage attachments require the narrow attachment-only capability.');
   }
   if (args.selectedMessageGuid !== undefined || args.partIndex !== undefined) {
-    throw new Error('This server cannot send an RCS media reply.');
+    throw new Error(
+      imessageAttachment
+        ? 'This server cannot send an iMessage attachment reply.'
+        : 'This server cannot send an RCS media reply.',
+    );
   }
-  if (args.text !== undefined && args.service !== 'RCS') {
-    throw new Error('Attachment text must use the RCS transport.');
+  if (imessageAttachment) {
+    if (!isSupportedImessageAttachmentFile(args.image)) {
+      throw new Error('Choose one JPEG, PNG, or PDF file no larger than 10 MiB.');
+    }
+    if (
+      args.text !== undefined &&
+      (args.text.trim().length === 0 ||
+        utf8Encode(args.text).byteLength > MAX_SEND_ATTACHMENT_TEXT_BYTES)
+    ) {
+      throw new Error('Attachment caption is blank or exceeds the 65,536-byte limit.');
+    }
+  } else {
+    if (args.service === 'iMessage') {
+      throw new Error('An RCS attachment cannot use the iMessage transport.');
+    }
+    if (args.text !== undefined && args.service !== 'RCS') {
+      throw new Error('Attachment text must use the RCS transport.');
+    }
   }
   // Pin before pasted-file ownership preparation: that native/cache await belongs to the same
   // exact transport decision as capability discovery, durable admission, and upload.
@@ -150,10 +189,31 @@ export async function sendImageMessage(
   // Reject false/missing service capability before cache ownership or durable queue admission.
   // The retired helper was the only iMessage attachment transport; RCS remains independent but
   // still requires its own live bridge rather than inheriting authority from `private_api`.
-  if (capability.serverInfo?.rcs !== true) {
+  if (imessageAttachment) {
+    if (capability.serverInfo?.supports_imessage_attachment_upload !== true) {
+      throw new Error('This server cannot send iMessage attachments.');
+    }
+    if (
+      image.mimeType === 'application/pdf' &&
+      capability.serverInfo.supports_imessage_pdf_attachment_upload !== true
+    ) {
+      throw new Error('This server cannot send PDF iMessage attachments.');
+    }
+    if (
+      args.text !== undefined &&
+      capability.serverInfo.supports_imessage_attachment_caption_upload !== true
+    ) {
+      throw new Error('This server cannot send text with an iMessage attachment.');
+    }
+    const header = await getChatHeader(db, args.chatGuid);
+    if (!capabilityGuard()) throw new DbCommitGuardRejectedError();
+    if (!isProvenOneToOneIMessageChat(header)) {
+      throw new Error('A proven existing one-to-one iMessage chat is required.');
+    }
+  } else if (capability.serverInfo?.rcs !== true) {
     throw new Error('This server cannot send RCS attachments without RCS support.');
   }
-  if (args.text !== undefined) {
+  if (!imessageAttachment && args.text !== undefined) {
     if (
       args.text.length === 0 ||
       utf8Encode(args.text).byteLength > MAX_SEND_ATTACHMENT_TEXT_BYTES
@@ -181,6 +241,18 @@ export async function sendImageMessage(
     ) {
       await cacheReservation?.release().catch(() => undefined);
       throw new Error('Prepared attachment ownership is inconsistent.');
+    }
+    if (imessageAttachment && !isSupportedImessageAttachmentFile(image)) {
+      await cacheReservation.release().catch(() => undefined);
+      throw new Error('Choose one JPEG, PNG, or PDF file no larger than 10 MiB.');
+    }
+    if (
+      imessageAttachment &&
+      image.mimeType === 'application/pdf' &&
+      capability.serverInfo?.supports_imessage_pdf_attachment_upload !== true
+    ) {
+      await cacheReservation.release().catch(() => undefined);
+      throw new Error('This server cannot send PDF iMessage attachments.');
     }
   }
 
@@ -231,6 +303,7 @@ export async function sendImageMessage(
           now,
           text: args.text,
           attemptAware: capability.attemptAware,
+          ...(imessageAttachment ? { imessageAttachmentV1: true } : {}),
         });
       },
       capabilityGuard,
@@ -270,12 +343,22 @@ export async function sendImageMessage(
         if (!capabilityGuard()) throw new DbCommitGuardRejectedError();
       },
       text: args.text,
+      ...(imessageAttachment ? { service: 'iMessage' as const } : {}),
       attachmentGuid,
       name: image.name,
       uri: image.uri,
       mimeType: image.mimeType,
       totalBytes: image.size,
     });
+    if (
+      imessageAttachment &&
+      (typeof server.guid !== 'string' ||
+        server.guid.trim().length === 0 ||
+        server.guid.length > 256 ||
+        server.viaPrivateApi !== true)
+    ) {
+      throw new ApiError('parse_error', 'iMessage attachment acknowledgement was incomplete');
+    }
     if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
     // The server ack carries only the message GUID (no attachment guid) — the optimistic
     // attachment row keeps its local guid + local_path until the live socket `new-message`
@@ -301,6 +384,9 @@ export async function sendImageMessage(
       {
         ...outcomeOptions,
         attemptOwnerToken: attemptOwnerToken ?? undefined,
+        ...(imessageAttachment
+          ? { terminalUncertain: true, failureNoticeMode: 'suppressed' as const }
+          : {}),
       },
     );
   }

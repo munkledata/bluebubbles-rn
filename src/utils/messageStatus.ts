@@ -17,6 +17,8 @@ export const ClientErrorCode = {
   userCanceled: 10008,
   /** The attachment's file on THIS device is gone or unreadable — not a network failure. */
   attachmentUnreadable: 10009,
+  /** A one-shot iMessage attachment may have reached Messages despite a missing acknowledgement. */
+  attachmentDeliveryUnconfirmed: 10010,
 } as const;
 
 /** Friendly title per client error code (mirrors ClientMessageErrorExtension.friendlyTitles). */
@@ -30,6 +32,7 @@ const CLIENT_ERROR_TITLES: Record<number, string> = {
   [ClientErrorCode.unsendFailed]: 'Unsend Failed',
   [ClientErrorCode.userCanceled]: 'Manually Canceled',
   [ClientErrorCode.attachmentUnreadable]: 'Attachment Unavailable',
+  [ClientErrorCode.attachmentDeliveryUnconfirmed]: 'Delivery Unconfirmed',
 };
 
 /**
@@ -76,6 +79,7 @@ export function errorTitleForCode(code: number | null | undefined): string {
 export function statusFor(msg: MessageRow): string | null {
   if (!msg.isFromMe) return null;
   if (msg.sendState === 'sending') return 'Sending…';
+  if (msg.error === ClientErrorCode.attachmentDeliveryUnconfirmed) return 'Delivery Unconfirmed';
   if (msg.sendState === 'error' || msg.error) return 'Not Delivered';
   if (msg.dateRead) return `Read ${formatTime(msg.dateRead)}`;
   if (msg.dateDelivered) return deliveredQuietly(msg) ? 'Delivered Quietly' : 'Delivered';

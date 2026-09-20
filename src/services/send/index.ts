@@ -226,6 +226,7 @@ export const outgoingQueueIO: OutgoingQueueIO = {
 
 export { generateTempGuid, sendTextMessage, type SendTextArgs } from './sendService';
 export {
+  isSupportedImessageAttachmentFile,
   sendImageMessage,
   type AttachmentTextService,
   type PickedImage,
@@ -344,6 +345,7 @@ export function sendImages(
   args: {
     chatGuid: string;
     images: PickedImage[];
+    service?: AttachmentTextService;
   },
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
   reportIssue?: SendIssueReporter,
@@ -352,7 +354,11 @@ export function sendImages(
   const snapshot = {
     chatGuid: args.chatGuid,
     images: args.images.map(snapshotPickedImage),
+    service: args.service,
   };
+  if (snapshot.service === 'iMessage' && snapshot.images.length !== 1) {
+    return Promise.reject(new Error('Send one iMessage attachment at a time.'));
+  }
   const pasteOwnership = createOutgoingPasteOwnershipPreparer(
     createAttachmentCacheAccountScope(accountLease),
     () => isAttachmentCacheRecoveryReady(accountLease),
@@ -368,7 +374,7 @@ export function sendImages(
             return await sendImageMessage(
               db,
               http,
-              { chatGuid: snapshot.chatGuid, image },
+              { chatGuid: snapshot.chatGuid, image, service: snapshot.service },
               expoAttachmentUploader,
               Date.now(),
               () => accountLease.isCurrent(),

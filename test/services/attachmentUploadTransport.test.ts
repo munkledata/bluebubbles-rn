@@ -29,6 +29,10 @@ jest.mock('@ui/toast/toastStore', () => ({ showToast: jest.fn() }));
 // Mocks must be registered before these modules evaluate their native imports.
 // eslint-disable-next-line import/first
 import { ApiError } from '@core/api/errors';
+import {
+  MAX_IMESSAGE_ATTACHMENT_UPLOAD_BYTES,
+  MAX_SEND_ATTACHMENT_TEXT_BYTES,
+} from '@core/models/serverInfo';
 // eslint-disable-next-line import/first
 import { HttpClient } from '@core/api/http';
 // eslint-disable-next-line import/first
@@ -40,7 +44,7 @@ import { expoAttachmentUploader } from '@/services/send/attachmentUpload';
 // eslint-disable-next-line import/first
 import { uploadGate, uploadRegistry } from '@/services/send/uploadControl';
 
-let finishFileCheck!: (value: { exists: boolean }) => void;
+let finishFileCheck!: (value: { exists: boolean; size?: number }) => void;
 
 beforeEach(async () => {
   uploadRegistry.cancelAll();
@@ -72,8 +76,12 @@ function upload(
     chatGuid?: string;
     timeoutMs?: number;
     clientAttemptGeneration?: number;
+    service?: 'iMessage' | 'RCS';
     text?: string;
     totalBytes?: number;
+    name?: string;
+    uri?: string;
+    mimeType?: string;
     assertNetworkStart?: () => void;
     signal?: AbortSignal;
   } = {},
@@ -83,12 +91,13 @@ function upload(
     chatGuid: options.chatGuid ?? 'RCS;-;chat-1',
     tempGuid: 'temp-1',
     clientAttemptGeneration: options.clientAttemptGeneration,
+    service: options.service,
     text: options.text,
     assertNetworkStart: options.assertNetworkStart,
     attachmentGuid: 'att-1',
-    name: 'photo.jpg',
-    uri: 'file:///photo.jpg',
-    mimeType: 'image/jpeg',
+    name: options.name ?? 'photo.jpg',
+    uri: options.uri ?? 'file:///photo.jpg',
+    mimeType: options.mimeType ?? 'image/jpeg',
     totalBytes: options.totalBytes ?? 42,
     signal: options.signal,
     timeoutMs: options.timeoutMs,
@@ -100,6 +109,144 @@ async function flushMicrotasks(count = 8): Promise<void> {
 }
 
 describe('native attachment upload account scope', () => {
+  it('uses the multipart filename for an iMessage Files-picker cache copy', async () => {
+    mockUploadAsync.mockResolvedValueOnce({
+      status: 200,
+      body: JSON.stringify({
+        status: 200,
+        data: { guid: 'image-message-guid', viaPrivateApi: true },
+      }),
+    });
+    const http = new HttpClient({
+      getOrigin: () => 'https://old.example',
+      getPassword: () => 'old-password',
+    });
+    const assertNetworkStart = jest.fn();
+    const run = upload(http, {
+      chatGuid: 'any;-;+15551234567',
+      service: 'iMessage',
+      assertNetworkStart,
+      totalBytes: 42,
+      name: 'original-photo.jpg',
+      uri: 'file:///cache/DocumentPicker/uuid-copy.jpg',
+    });
+    finishFileCheck({ exists: true, size: 42 });
+    await expect(run).resolves.toMatchObject({ guid: 'image-message-guid' });
+    expect(assertNetworkStart).toHaveBeenCalledTimes(1);
+    const [, nativeUri, options] = mockCreateUploadTask.mock.calls[0]!;
+    expect(nativeUri).toBe('file:///cache/DocumentPicker/uuid-copy.jpg');
+    expect(options.parameters).toMatchObject({
+      chatGuid: 'any;-;+15551234567',
+      tempGuid: 'temp-1',
+    });
+    expect(options.parameters).not.toHaveProperty('name');
+    expect(options.parameters).not.toHaveProperty('text');
+    expect(options.parameters).not.toHaveProperty('clientAttemptGeneration');
+    expect(options.parameters).not.toHaveProperty('service');
+  });
+
+  it('streams a PDF with its exact MIME and omits the conflicting original-name field', async () => {
+    mockUploadAsync.mockResolvedValueOnce({
+      status: 200,
+      body: JSON.stringify({
+        status: 200,
+        data: { guid: 'pdf-message-guid', viaPrivateApi: true },
+      }),
+    });
+    const http = new HttpClient({
+      getOrigin: () => 'https://old.example',
+      getPassword: () => 'old-password',
+    });
+    const run = upload(http, {
+      chatGuid: 'any;-;+15551234567',
+      service: 'iMessage',
+      assertNetworkStart: () => undefined,
+      name: 'original-report.pdf',
+      uri: 'file:///cache/DocumentPicker/uuid-copy.pdf',
+      mimeType: 'application/pdf',
+      totalBytes: 2048,
+    });
+    finishFileCheck({ exists: true, size: 2048 });
+    await expect(run).resolves.toMatchObject({ guid: 'pdf-message-guid' });
+    const [, , options] = mockCreateUploadTask.mock.calls[0]!;
+    expect(options.mimeType).toBe('application/pdf');
+    expect(options.parameters).not.toHaveProperty('name');
+  });
+
+  it.each([
+    ['JPEG', 'image/jpeg', 'original-photo.jpg', 'uuid-copy.jpg'],
+    ['PDF', 'application/pdf', 'original-report.pdf', 'uuid-copy.pdf'],
+  ])(
+    'streams one %s with exact caption text in the same multipart request',
+    async (_kind, mimeType, name, cacheName) => {
+      mockUploadAsync.mockResolvedValueOnce({
+        status: 200,
+        body: JSON.stringify({
+          status: 200,
+          data: { guid: 'captioned-message-guid', viaPrivateApi: true },
+        }),
+      });
+      const http = new HttpClient({
+        getOrigin: () => 'https://old.example',
+        getPassword: () => 'old-password',
+      });
+      const caption = '  Look at this 📄  ';
+      const run = upload(http, {
+        chatGuid: 'any;-;+15551234567',
+        service: 'iMessage',
+        assertNetworkStart: () => undefined,
+        name,
+        uri: `file:///cache/DocumentPicker/${cacheName}`,
+        mimeType,
+        totalBytes: 2048,
+        text: caption,
+      });
+      finishFileCheck({ exists: true, size: 2048 });
+      await expect(run).resolves.toMatchObject({ guid: 'captioned-message-guid' });
+      expect(mockCreateUploadTask).toHaveBeenCalledTimes(1);
+      const [, , options] = mockCreateUploadTask.mock.calls[0]!;
+      expect(options.parameters.text).toBe(caption);
+      expect(options.parameters).not.toHaveProperty('name');
+      expect(options.parameters).not.toHaveProperty('clientAttemptGeneration');
+    },
+  );
+
+  it.each(['  ', '📄'.repeat(MAX_SEND_ATTACHMENT_TEXT_BYTES / 4 + 1)])(
+    'rejects a blank or oversized direct iMessage caption before native file work',
+    async (text) => {
+      const http = new HttpClient({
+        getOrigin: () => 'https://old.example',
+        getPassword: () => 'old-password',
+      });
+      await expect(
+        upload(http, {
+          chatGuid: 'any;-;+15551234567',
+          service: 'iMessage',
+          assertNetworkStart: () => undefined,
+          text,
+        }),
+      ).rejects.toThrow('iMessage attachment caption is blank or exceeds the 65,536-byte limit.');
+      expect(mockGetInfoAsync).not.toHaveBeenCalled();
+      expect(mockCreateUploadTask).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects an oversized actual iMessage file before starting native upload', async () => {
+    const http = new HttpClient({
+      getOrigin: () => 'https://old.example',
+      getPassword: () => 'old-password',
+    });
+    const run = upload(http, {
+      chatGuid: 'any;-;+15551234567',
+      service: 'iMessage',
+      assertNetworkStart: () => undefined,
+      totalBytes: 0,
+    });
+    finishFileCheck({ exists: true, size: MAX_IMESSAGE_ATTACHMENT_UPLOAD_BYTES + 1 });
+    await expect(run).rejects.toMatchObject({ kind: 'local_file' });
+    expect(mockCreateUploadTask).not.toHaveBeenCalled();
+  });
+
   it.each([1024 * 1024 - 1, 1024 * 1024, 1024 * 1024 + 1])(
     'rejects a direct iMessage %i-byte upload before native file or network work',
     async (totalBytes) => {
@@ -109,7 +256,7 @@ describe('native attachment upload account scope', () => {
       });
 
       await expect(upload(http, { chatGuid: 'iMessage;-;chat-1', totalBytes })).rejects.toThrow(
-        'iMessage attachments were retired',
+        'iMessage attachments require the narrow attachment-only capability',
       );
       expect(mockGetInfoAsync).not.toHaveBeenCalled();
       expect(mockCreateUploadTask).not.toHaveBeenCalled();
@@ -183,7 +330,10 @@ describe('native attachment upload account scope', () => {
       status: 422,
     });
     expect((caught as ApiError).serverDetail).toBe('Recipient [redacted] could not be reached.');
-    expect(logger.warn).toHaveBeenCalledWith('[upload] server rejected status=422');
+    expect((caught as ApiError).serverErrorType).toBe('send_failed');
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[upload] server rejected status=422 type=send_failed',
+    );
     expect(JSON.stringify((logger.warn as jest.Mock).mock.calls)).not.toContain(privateDetail);
   });
 

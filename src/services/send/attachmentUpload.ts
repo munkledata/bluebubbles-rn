@@ -1,13 +1,19 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { SendAck } from '@core/api/endpoints/messages';
 import { ApiError } from '@core/api/errors';
-import { parseServerErrorDetailBody } from '@core/api/serverErrorDetail';
+import { parseServerErrorBody } from '@core/api/serverErrorDetail';
 import { apiResponse } from '@core/models/common';
+import {
+  MAX_IMESSAGE_ATTACHMENT_UPLOAD_BYTES,
+  MAX_SEND_ATTACHMENT_TEXT_BYTES,
+  isSupportedImessageAttachmentType,
+} from '@core/models/serverInfo';
 import { logger } from '@core/secure';
 import { MessageTargetUnavailableError } from '@db/repositories';
 import { DbCommitGuardRejectedError } from '@db/transaction';
 import { uploadStoreSink } from '@state/uploadStore';
 import { isRcsChatGuid } from '@utils/chat';
+import { utf8Encode } from '@utils/bytes';
 import type { AttachmentUploader } from './sendAttachmentService';
 import { runTrackedUpload } from './trackedUpload';
 import { uploadGate, uploadRegistry } from './uploadControl';
@@ -20,8 +26,8 @@ import { isLocalFileFailure } from './uploadErrors';
  * NOT use `fetch`/FormData here: Expo's `fetch` can't stream a file-URI FormData part (it needs an
  * in-memory Blob), which threw "Unsupported FormDataPart implementation".
  *
- * The form fields (chatGuid/tempGuid/name/method) ride as multipart `parameters` alongside the
- * file part (fieldName `attachment`); the server reads them the same as the JSON path did.
+ * The form fields (chatGuid/tempGuid, optional caption text, plus RCS-only name/attempt generation)
+ * ride as multipart `parameters` alongside the file part (fieldName `attachment`).
  *
  * WHY `createUploadTask` AND NOT `uploadAsync`: they build the identical request (both go through
  * the native `createUploadRequest`), but `uploadAsync` passes a no-op body decorator while the
@@ -74,6 +80,7 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
   tempGuid,
   clientAttemptGeneration,
   text,
+  service,
   assertNetworkStart,
   attachmentGuid,
   name,
@@ -83,11 +90,29 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
   signal,
   timeoutMs,
 }) => {
-  // The Private API helper was the only iMessage attachment transport. Keep this leaf-level
-  // boundary even though normal callers already admit only RCS so a stale queue row or direct
-  // invocation cannot revive the retired helper wire shape.
-  if (!isRcsChatGuid(chatGuid)) {
-    throw new Error('iMessage attachments were retired with the Private API helper.');
+  // An explicit, capability-fenced one-to-one file path is the sole iMessage exception. The
+  // existing RCS uploader remains unchanged, and a stale queue row cannot infer this mode.
+  const imessageAttachment = service === 'iMessage';
+  if (imessageAttachment) {
+    if (
+      text !== undefined &&
+      (text.trim().length === 0 || utf8Encode(text).byteLength > MAX_SEND_ATTACHMENT_TEXT_BYTES)
+    ) {
+      throw new Error('iMessage attachment caption is blank or exceeds the 65,536-byte limit.');
+    }
+    if (
+      !/^(?:any|iMessage);-;.+$/.test(chatGuid) ||
+      clientAttemptGeneration !== undefined ||
+      assertNetworkStart === undefined ||
+      !Number.isSafeInteger(totalBytes) ||
+      totalBytes! < 0 ||
+      totalBytes! > MAX_IMESSAGE_ATTACHMENT_UPLOAD_BYTES ||
+      !isSupportedImessageAttachmentType(mimeType, name)
+    ) {
+      throw new Error('Only one bounded JPEG/PNG/PDF iMessage attachment is available.');
+    }
+  } else if (!isRcsChatGuid(chatGuid)) {
+    throw new Error('iMessage attachments require the narrow attachment-only capability.');
   }
   if (
     timeoutMs !== undefined &&
@@ -178,11 +203,19 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
   try {
     // Pre-flight: a missing local file is NOT a network problem, and saying so up front keeps the
     // failed bubble from reading "Connection Refused" for a file the user can plainly see is gone.
-    const fileExists = await withinAttempt(expoFileExists(uri));
+    const fileInfo = await withinAttempt(FileSystem.getInfoAsync(uri).catch(() => null));
     if (stopReason !== null) throw stoppedError();
-    if (!fileExists) {
+    if (!fileInfo?.exists) {
       logger.warn('[upload] attachment file is missing before upload');
       throw new ApiError('local_file', 'Attachment file is no longer available');
+    }
+    if (
+      imessageAttachment &&
+      (!Number.isSafeInteger(fileInfo.size) ||
+        fileInfo.size <= 0 ||
+        fileInfo.size > MAX_IMESSAGE_ATTACHMENT_UPLOAD_BYTES)
+    ) {
+      throw new ApiError('local_file', 'Choose a JPEG, PNG, or PDF file no larger than 10 MiB');
     }
 
     try {
@@ -213,7 +246,11 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
                 parameters: {
                   chatGuid,
                   tempGuid,
-                  name,
+                  // Expo names the multipart file part from the on-disk URI. Android's Files
+                  // picker often caches it under a UUID, so a separate original `name` would
+                  // disagree and the narrow iMessage server route would reject it before send.
+                  // With no override, the server uses the actual file-part filename.
+                  ...(imessageAttachment ? {} : { name }),
                   ...(text === undefined ? {} : { text }),
                   ...(clientAttemptGeneration == null
                     ? {}
@@ -281,13 +318,17 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
   }
 
   if (result.status < 200 || result.status >= 300) {
-    // Status only: server prose is untrusted and must never enter diagnostics. The projector keeps
-    // the reviewed nested error message solely on the typed failure for encrypted-row/UI handling.
-    logger.warn(`[upload] server rejected status=${result.status}`);
+    // Only the validated machine type may enter diagnostics; private server prose stays on the
+    // typed failure for the encrypted-row/UI path and is never logged.
+    const serverError = parseServerErrorBody(result.body ?? '');
+    logger.warn(
+      `[upload] server rejected status=${result.status}${serverError?.type ? ` type=${serverError.type}` : ''}`,
+    );
     throw ApiError.fromStatus(
       result.status,
       'attachment upload failed',
-      parseServerErrorDetailBody(result.body ?? ''),
+      serverError?.detail,
+      serverError?.type,
     );
   }
 
@@ -305,6 +346,15 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
       result.status,
       parsed.error,
     );
+  }
+  if (
+    imessageAttachment &&
+    (typeof parsed.data.data.guid !== 'string' ||
+      parsed.data.data.guid.trim().length === 0 ||
+      parsed.data.data.guid.length > 256 ||
+      parsed.data.data.viaPrivateApi !== true)
+  ) {
+    throw new ApiError('parse_error', 'iMessage attachment acknowledgement was incomplete');
   }
   return parsed.data.data;
 };

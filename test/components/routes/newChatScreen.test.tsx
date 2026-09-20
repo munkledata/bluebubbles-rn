@@ -21,6 +21,7 @@ import React from 'react';
 import { Keyboard } from 'react-native';
 import { renderWithTheme, screen, fireEvent, waitFor, act } from '../support/renderWithTheme';
 import { logger } from '@core/secure';
+import { ApiError } from '@core/api/errors';
 import type { ContactPick } from '@db/repositories';
 import {
   pauseRealtimeDeliveries,
@@ -52,6 +53,7 @@ jest.mock('expo-router', () => ({
   useRouter: () => ({ push: mockPush, back: mockBack, replace: mockReplace }),
   useLocalSearchParams: () => mockSearchParams,
 }));
+jest.mock('expo-crypto', () => ({ randomUUID: jest.fn() }));
 jest.mock('expo-file-system', () => ({
   Paths: {
     cache: { uri: 'file:///data/cache/' },
@@ -98,6 +100,8 @@ jest.mock('@db/repositories', () => ({
 // eslint-disable-next-line import/first
 import NewChatScreen from '../../../app/(app)/new-chat';
 // eslint-disable-next-line import/first
+import * as Crypto from 'expo-crypto';
+// eslint-disable-next-line import/first
 import { createNewChat } from '@/services';
 // eslint-disable-next-line import/first
 import { sendImages } from '@/services/send';
@@ -120,6 +124,7 @@ import {
 } from '@features/conversations/forwardAttachmentHandoff';
 
 const mockCreateNewChat = createNewChat as jest.Mock;
+const mockRandomUUID = Crypto.randomUUID as jest.Mock;
 const mockSendImages = sendImages as jest.Mock;
 const mockSearchContacts = searchContactAddresses as jest.Mock;
 const mockFindChat = findChatByParticipantAddresses as jest.Mock;
@@ -261,6 +266,7 @@ beforeEach(() => {
   mockSearchContacts.mockReset().mockResolvedValue([] as ContactPick[]);
   mockFindChat.mockReset().mockResolvedValue(null);
   mockCreateNewChat.mockReset().mockResolvedValue('RCS;-;+15551234567');
+  mockRandomUUID.mockReset().mockReturnValue('00000000-0000-4000-8000-000000000001');
   useDialogStore.setState({ current: null, queue: [] });
   useShareIntentStore.setState({ text: null, files: [], clear: clearShareIntentStore });
   keyboardDismissSpy = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => undefined);
@@ -286,7 +292,7 @@ async function addRecipient(address: string): Promise<void> {
   });
 }
 
-describe('NewChatScreen — RCS-only creation boundary', () => {
+describe('NewChatScreen — service-scoped creation boundary', () => {
   it('creates one RCS conversation when the authoritative capability is available', async () => {
     await renderWithTheme(<NewChatScreen />);
     expect(screen.getByText(/New conversations use RCS/)).toBeTruthy();
@@ -350,6 +356,152 @@ describe('NewChatScreen — RCS-only creation boundary', () => {
       fireEvent.press(screen.getByText('Start'));
     });
 
+    expect(mockCreateNewChat).not.toHaveBeenCalled();
+  });
+
+  it('lets the user explicitly choose an advertised iMessage path without changing the RCS default', async () => {
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({
+        version: 'test',
+        rcs: true,
+        supports_imessage_new_chat: true,
+        private_api: false,
+      }),
+    });
+    mockCreateNewChat.mockResolvedValue('iMessage;-;+15551230000');
+    await renderWithTheme(<NewChatScreen />);
+    expect(screen.getByRole('radio', { name: 'RCS' }).props.accessibilityState.selected).toBe(true);
+    await addRecipient('+15551230000');
+    await act(async () => {
+      fireEvent.press(screen.getByRole('radio', { name: 'iMessage' }));
+    });
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Message'), 'hello');
+    });
+    await waitFor(() =>
+      expect(mockFindChat).toHaveBeenLastCalledWith(undefined, ['+15551230000'], 'iMessage'),
+    );
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Start' }));
+    });
+    await waitFor(() => expect(mockCreateNewChat).toHaveBeenCalledTimes(1));
+    expect(mockCreateNewChat).toHaveBeenCalledWith(
+      ['+15551230000'],
+      'hello',
+      expect.anything(),
+      'iMessage',
+      'temp-00000000-0000-4000-8000-000000000001',
+    );
+    expect(mockReplace).toHaveBeenCalledWith('/chat/iMessage%3B-%3B%2B15551230000');
+  });
+
+  it('keeps an iMessage draft and the exact request id for retry after an uncertain failure', async () => {
+    jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({ version: 'test', supports_imessage_new_chat: true }),
+    });
+    mockCreateNewChat
+      .mockRejectedValueOnce(new Error('uncertain response'))
+      .mockResolvedValueOnce('iMessage;-;+15551230000');
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient('+15551230000');
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Message'), 'keep this draft');
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Start' }));
+    });
+    await waitFor(() => expect(useDialogStore.getState().current?.title).toBe('New message'));
+    expect(useDialogStore.getState().current?.message).toContain(
+      'could not confirm whether the iMessage was sent',
+    );
+    expect(screen.getByDisplayValue('keep this draft')).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Start' }).props.accessibilityState.disabled).toBe(
+        false,
+      ),
+    );
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Start' }));
+    });
+    await waitFor(() => expect(mockCreateNewChat).toHaveBeenCalledTimes(2));
+    expect(mockCreateNewChat.mock.calls[0]?.[4]).toBe(mockCreateNewChat.mock.calls[1]?.[4]);
+    expect(mockRandomUUID).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports a known unavailable helper without suggesting the message may have been sent', async () => {
+    jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({ version: 'test', supports_imessage_new_chat: true }),
+    });
+    mockCreateNewChat.mockRejectedValueOnce(
+      ApiError.fromStatus(503, 'unavailable', undefined, 'imessage_new_chat_unavailable'),
+    );
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient('+15551230000');
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Message'), 'keep this draft');
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Start' }));
+    });
+    await waitFor(() => expect(useDialogStore.getState().current?.title).toBe('New message'));
+    expect(useDialogStore.getState().current?.message).toContain('Couldn’t start');
+    expect(useDialogStore.getState().current?.message).not.toContain(
+      'whether the iMessage was sent',
+    );
+    expect(screen.getByDisplayValue('keep this draft')).toBeTruthy();
+  });
+
+  it.each([
+    ['untyped HTTP 400', ApiError.fromStatus(400, 'bad request')],
+    [
+      'reused idempotency key',
+      ApiError.fromStatus(409, 'key already used', undefined, 'idempotency_key_reused'),
+    ],
+  ])('keeps the uncertain-send warning for %s', async (_name, failure) => {
+    jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({ version: 'test', supports_imessage_new_chat: true }),
+    });
+    mockCreateNewChat.mockRejectedValueOnce(failure);
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient('+15551230000');
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Message'), 'keep this draft');
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Start' }));
+    });
+    await waitFor(() => expect(useDialogStore.getState().current?.title).toBe('New message'));
+    expect(useDialogStore.getState().current?.message).toContain(
+      'could not confirm whether the iMessage was sent',
+    );
+  });
+
+  it('requires an international number and prevents text-only iMessage creation with staged files', async () => {
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({
+        version: 'test',
+        rcs: true,
+        supports_imessage_new_chat: true,
+      }),
+    });
+    useShareIntentStore.setState({
+      text: 'hello',
+      files: [sharedPrivateImage()],
+      clear: clearShareIntentStore,
+    });
+    await renderWithTheme(<NewChatScreen />);
+    await act(async () => {
+      fireEvent.press(screen.getByRole('radio', { name: 'iMessage' }));
+    });
+    await addRecipient('5551234567');
+    expect(screen.getByText(/number with country code/)).toBeTruthy();
+    expect(screen.getByText(/iMessage attachments are not available yet/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Start' }).props.accessibilityState.disabled).toBe(
+      true,
+    );
     expect(mockCreateNewChat).not.toHaveBeenCalled();
   });
 });

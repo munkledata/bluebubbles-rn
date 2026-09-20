@@ -8,6 +8,7 @@ import {
   reconcileOutgoingErrorWithinTransaction,
   reconcileOutgoingSuccessWithinTransaction,
   retireOutgoingWithinTransaction,
+  retireUncertainOutgoingWithinTransaction,
   type OutgoingAckDisposition,
   type SendAttemptOwnerToken,
 } from '@db/repositories';
@@ -20,6 +21,46 @@ export interface SendOutcomeOptions {
   readonly failureNoticeMode?: 'enabled' | 'suppressed';
   /** Exact local request generation captured before an attempt-aware RCS request began. */
   readonly attemptOwnerToken?: SendAttemptOwnerToken;
+  /** One-shot helper mutation: a failed HTTP/parse outcome may still have delivered. */
+  readonly terminalUncertain?: boolean;
+}
+
+export const UNCERTAIN_IMESSAGE_ATTACHMENT_COPY =
+  'Delivery may have occurred. Check Messages before sending a new copy.';
+
+const REJECTED_IMESSAGE_ATTACHMENT_COPY =
+  'The server rejected this upload before dispatch. This attempt was not sent.';
+
+const PRE_DISPATCH_ATTACHMENT_ERROR_TYPES: Readonly<Record<number, ReadonlySet<string>>> = {
+  400: new Set([
+    'attachment_text_too_large',
+    'chat_guid_required_before_file',
+    'duplicate_chat_guid',
+    'duplicate_attachment_field',
+    'idempotency_key_invalid',
+    'imessage_attachment_caption_unavailable',
+    'imessage_attachment_fields_unsupported',
+    'imessage_attachment_type_unsupported',
+    'imessage_retry_key_required',
+    'invalid_attachment_text',
+    'invalid_filename',
+    'invalid_imessage_chat_guid',
+    'malformed_multipart',
+    'multipart_field_too_large',
+  ]),
+  404: new Set(['imessage_chat_not_found']),
+  413: new Set(['imessage_attachment_too_large', 'multipart_limit', 'staging_request_too_large']),
+};
+
+/** Only Gator upload-route machine types prove that a 4xx predates helper dispatch. */
+function isPreDispatchAttachmentRejection(err: unknown): boolean {
+  return (
+    err instanceof ApiError &&
+    err.kind === 'bad_request' &&
+    err.status !== undefined &&
+    err.serverErrorType !== undefined &&
+    PRE_DISPATCH_ATTACHMENT_ERROR_TYPES[err.status]?.has(err.serverErrorType) === true
+  );
 }
 
 /**
@@ -151,24 +192,41 @@ export async function handleSendFailure(
           : kind === 'parse_error'
             ? ClientErrorCode.clientError
             : sendErrorCode(status);
-  logger.warn(
-    `[${logTag}] failed for chat ${chatGuid} (code ${code}${status != null ? `, HTTP ${status}` : ''}): ${
-      err instanceof Error ? err.message : String(err)
-    }`,
-  );
+  const preDispatchRejection =
+    options?.terminalUncertain === true && isPreDispatchAttachmentRejection(err);
+  if (options?.terminalUncertain) {
+    logger.warn(
+      `[${logTag}] one-shot attachment ${preDispatchRejection ? 'rejected before dispatch' : 'outcome unconfirmed'} (code ${code}${status != null ? `, HTTP ${status}` : ''})`,
+    );
+  } else {
+    logger.warn(
+      `[${logTag}] failed for chat ${chatGuid} (code ${code}${status != null ? `, HTTP ${status}` : ''}): ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
   const failedAt = now === undefined ? Date.now() : now;
   const serverDetail = err instanceof ApiError ? err.serverDetail : undefined;
   const reconciled = await withDbTransaction(
     db,
     (context) =>
-      reconcileOutgoingErrorWithinTransaction(
-        context,
-        tempGuid,
-        code,
-        failedAt,
-        serverDetail,
-        options?.attemptOwnerToken,
-      ),
+      options?.terminalUncertain
+        ? retireUncertainOutgoingWithinTransaction(
+            context,
+            tempGuid,
+            preDispatchRejection ? code : ClientErrorCode.attachmentDeliveryUnconfirmed,
+            preDispatchRejection
+              ? REJECTED_IMESSAGE_ATTACHMENT_COPY
+              : UNCERTAIN_IMESSAGE_ATTACHMENT_COPY,
+          )
+        : reconcileOutgoingErrorWithinTransaction(
+            context,
+            tempGuid,
+            code,
+            failedAt,
+            serverDetail,
+            options?.attemptOwnerToken,
+          ),
     commitGuard,
   );
   if (reconciled && options?.failureNoticeMode !== 'suppressed') {

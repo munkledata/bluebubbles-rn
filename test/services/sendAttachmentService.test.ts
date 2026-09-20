@@ -5,6 +5,8 @@ import type { HttpClient } from '@core/api/http';
 import { Chat, Message, ServerInfo } from '@core/models';
 import { logger } from '@core/secure';
 import {
+  claimFailedOutgoingForRetry,
+  OUTGOING_MAX_ATTEMPTS,
   reconcileEchoByContent,
   reconcileOutgoingAttachmentByContent,
   upsertChats,
@@ -29,6 +31,7 @@ import {
   runTrackedRealtimeWork,
 } from '@/services/realtime/deliveryCoordinator';
 import { fixedRcsCapabilitySource } from '@/services/send/rcsAttemptCapability';
+import { ClientErrorCode } from '@utils';
 import { createTestDb as createBaseTestDb } from '../support/testDb';
 
 let dummyHttp!: HttpClient;
@@ -83,6 +86,17 @@ const IMG = {
 async function seedChat(db: AppDatabase, guid: string) {
   const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
   await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], handles);
+}
+
+async function seedProvenImessageChat(
+  db: AppDatabase,
+  guid = 'any;-;+15551234567',
+  service: 'iMessage' | 'SMS' = 'iMessage',
+  style = 45,
+) {
+  const participant = { address: '+15551234567', service };
+  const handles = await upsertHandles(db, [participant]);
+  await upsertChats(db, [Chat.parse({ guid, style, participants: [participant] })], handles);
 }
 
 async function seedReplyTarget(db: AppDatabase) {
@@ -148,6 +162,420 @@ async function echoMessageWithAttachment(
 }
 
 describe('sendImageMessage', () => {
+  const imessageCapability = (pdf = false, captions = false) =>
+    fixedRcsCapabilitySource(
+      ServerInfo.parse({
+        version: '2.0.15-bbd',
+        private_api: true,
+        supports_imessage_attachment_upload: true,
+        supports_imessage_pdf_attachment_upload: pdf,
+        supports_imessage_attachment_caption_upload: captions,
+      }),
+    );
+
+  it.each([
+    ['JPEG', IMG, false],
+    [
+      'PDF',
+      {
+        uri: 'file:///cache/report.pdf',
+        name: 'report.pdf',
+        mimeType: 'application/pdf',
+        size: 2048,
+      },
+      true,
+    ],
+  ] as const)(
+    'sends one %s and its exact caption under one message identity',
+    async (_kind, image, pdf) => {
+      const { db, raw } = await createTestDb();
+      const chatGuid = 'any;-;+15551234567';
+      const caption = '  Look at this 📄  ';
+      await seedProvenImessageChat(db, chatGuid);
+      const up = fakeUploader(async (args) => {
+        expect(args.text).toBe(caption);
+        expect(args.service).toBe('iMessage');
+        expect(one(raw, 'SELECT text FROM messages').text).toBe(caption);
+        expect(
+          JSON.parse(String(one(raw, 'SELECT payload FROM outgoing_queue').payload)),
+        ).toMatchObject({
+          text: caption,
+          imessageAttachmentV1: true,
+        });
+        expect((one(raw, 'SELECT COUNT(*) c FROM messages') as { c: number }).c).toBe(1);
+        expect((one(raw, 'SELECT COUNT(*) c FROM attachments') as { c: number }).c).toBe(1);
+        return { guid: 'captioned-message-guid', viaPrivateApi: true };
+      });
+
+      await sendImageMessage(
+        db,
+        dummyHttp,
+        { chatGuid, image, text: caption, service: 'iMessage' },
+        up.upload,
+        1_000,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        imessageCapability(pdf, true),
+      );
+
+      expect(one(raw, 'SELECT guid FROM messages').guid).toBe('captioned-message-guid');
+      expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
+    },
+  );
+
+  it('rejects a caption before queue admission when only the retired broad flag is advertised', async () => {
+    const { db, raw } = await createTestDb();
+    const chatGuid = 'any;-;+15551234567';
+    await seedProvenImessageChat(db, chatGuid);
+    const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+
+    await expect(
+      sendImageMessage(
+        db,
+        dummyHttp,
+        { chatGuid, image: IMG, text: 'keep this draft', service: 'iMessage' },
+        up.upload,
+        1_000,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        fixedRcsCapabilitySource(
+          ServerInfo.parse({
+            version: '2.0.15-bbd',
+            supports_imessage_attachment_upload: true,
+            supports_imessage_text_with_attachment: true,
+          }),
+        ),
+      ),
+    ).rejects.toThrow('cannot send text with an iMessage attachment');
+    expect(up.captured).toBeUndefined();
+    expect((one(raw, 'SELECT COUNT(*) c FROM messages') as { c: number }).c).toBe(0);
+    expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
+  });
+
+  it.each(['  ', '📄'.repeat(16_385)])(
+    'rejects blank or oversized iMessage caption before queue admission',
+    async (caption) => {
+      const { db, raw } = await createTestDb();
+      const chatGuid = 'any;-;+15551234567';
+      await seedProvenImessageChat(db, chatGuid);
+      const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+
+      await expect(
+        sendImageMessage(
+          db,
+          dummyHttp,
+          { chatGuid, image: IMG, text: caption, service: 'iMessage' },
+          up.upload,
+          1_000,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          imessageCapability(false, true),
+        ),
+      ).rejects.toThrow('Attachment caption is blank or exceeds the 65,536-byte limit.');
+      expect(up.captured).toBeUndefined();
+      expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
+    },
+  );
+
+  it('sends one bounded PDF only when the server advertises the PDF helper', async () => {
+    const { db, raw } = await createTestDb();
+    const chatGuid = 'any;-;+15551234567';
+    await seedProvenImessageChat(db, chatGuid);
+    const pdf = {
+      uri: 'file:///cache/report.pdf',
+      name: 'report.pdf',
+      mimeType: 'application/pdf',
+      size: 2048,
+    };
+    const up = fakeUploader(async () => ({ guid: 'delivered-pdf-guid', viaPrivateApi: true }));
+
+    await sendImageMessage(
+      db,
+      dummyHttp,
+      { chatGuid, image: pdf, service: 'iMessage' },
+      up.upload,
+      1_000,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      imessageCapability(true),
+    );
+
+    expect(up.captured).toMatchObject({
+      service: 'iMessage',
+      name: 'report.pdf',
+      mimeType: 'application/pdf',
+      totalBytes: 2048,
+    });
+    expect(up.captured?.text).toBeUndefined();
+    expect(one(raw, 'SELECT guid FROM messages').guid).toBe('delivered-pdf-guid');
+    expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
+  });
+
+  it('rejects PDF before queue admission when only image uploads are advertised', async () => {
+    const { db, raw } = await createTestDb();
+    const chatGuid = 'any;-;+15551234567';
+    await seedProvenImessageChat(db, chatGuid);
+    const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+
+    await expect(
+      sendImageMessage(
+        db,
+        dummyHttp,
+        {
+          chatGuid,
+          image: {
+            uri: 'file:///cache/report.pdf',
+            name: 'report.pdf',
+            mimeType: 'application/pdf',
+            size: 2048,
+          },
+          service: 'iMessage',
+        },
+        up.upload,
+        1_000,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        imessageCapability(),
+      ),
+    ).rejects.toThrow('This server cannot send PDF iMessage attachments.');
+    expect(up.captured).toBeUndefined();
+    expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
+  });
+
+  it('sends one marked image to a proven any;-; iMessage DM without broad helper authority', async () => {
+    const { db, raw } = await createTestDb();
+    const chatGuid = 'any;-;+15551234567';
+    await seedProvenImessageChat(db, chatGuid);
+    const up = fakeUploader(async (args) => {
+      expect(args.service).toBe('iMessage');
+      expect(args.text).toBeUndefined();
+      expect(args.clientAttemptGeneration).toBeUndefined();
+      expect(
+        JSON.parse(String(one(raw, 'SELECT payload FROM outgoing_queue').payload)),
+      ).toMatchObject({
+        imessageAttachmentV1: true,
+      });
+      return { guid: 'delivered-image-guid', viaPrivateApi: true };
+    });
+
+    await sendImageMessage(
+      db,
+      dummyHttp,
+      { chatGuid, image: IMG, service: 'iMessage' },
+      up.upload,
+      1_000,
+      undefined,
+      { failureNoticeMode: 'suppressed' },
+      undefined,
+      undefined,
+      imessageCapability(),
+    );
+
+    expect(up.captured?.chatGuid).toBe(chatGuid);
+    expect(one(raw, 'SELECT guid FROM messages').guid).toBe('delivered-image-guid');
+    expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
+  });
+
+  it.each([
+    ['SMS participant', 'SMS', 45],
+    ['group style', 'iMessage', 43],
+  ] as const)('refuses an %s before queue/upload work', async (_label, service, style) => {
+    const { db, raw } = await createTestDb();
+    const chatGuid = 'any;-;+15551234567';
+    await seedProvenImessageChat(db, chatGuid, service, style);
+    const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+
+    await expect(
+      sendImageMessage(
+        db,
+        dummyHttp,
+        { chatGuid, image: IMG, service: 'iMessage' },
+        up.upload,
+        1_000,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        imessageCapability(),
+      ),
+    ).rejects.toThrow('proven existing one-to-one iMessage chat');
+    expect(up.captured).toBeUndefined();
+    expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
+  });
+
+  it('makes an uncertain image send terminal without deleting its local file or queue row', async () => {
+    const { db, raw } = await createTestDb();
+    const chatGuid = 'any;-;+15551234567';
+    await seedProvenImessageChat(db, chatGuid);
+    const up = fakeUploader(async () => {
+      throw new ApiError('no_connection', 'ack was lost');
+    });
+
+    const result = await sendImageMessage(
+      db,
+      dummyHttp,
+      { chatGuid, image: IMG, service: 'iMessage' },
+      up.upload,
+      1_000,
+      undefined,
+      { failureNoticeMode: 'suppressed' },
+      undefined,
+      undefined,
+      imessageCapability(),
+    );
+    const queue = one(raw, 'SELECT attempts, payload FROM outgoing_queue') as {
+      attempts: number;
+      payload: string;
+    };
+    expect(queue.attempts).toBe(OUTGOING_MAX_ATTEMPTS);
+    expect(JSON.parse(queue.payload)).toMatchObject({ imessageAttachmentV1: true });
+    expect(
+      one(raw, 'SELECT send_state AS state, error AS code, error_message AS detail FROM messages'),
+    ).toMatchObject({
+      state: 'error',
+      code: ClientErrorCode.attachmentDeliveryUnconfirmed,
+      detail: 'Delivery may have occurred. Check Messages before sending a new copy.',
+    });
+    expect(one(raw, 'SELECT local_path AS path FROM attachments').path).toBe(IMG.uri);
+    await expect(claimFailedOutgoingForRetry(db, result.tempGuid)).resolves.toMatchObject({
+      claim: 'unsendable',
+    });
+    expect(up.captured).toBeDefined();
+  });
+
+  it.each([
+    [400, 'imessage_attachment_type_unsupported', false],
+    [413, 'imessage_attachment_too_large', false],
+    [400, 'imessage_attachment_caption_unavailable', true],
+    [400, 'invalid_attachment_text', true],
+    [400, 'attachment_text_too_large', true],
+  ] as const)(
+    'labels a definite HTTP %i image rejection (%s) as not sent without replaying it',
+    async (status, serverErrorType, withCaption) => {
+      const { db, raw } = await createTestDb();
+      const chatGuid = 'any;-;+15551234567';
+      await seedProvenImessageChat(db, chatGuid);
+      const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+      const up = fakeUploader(async () => {
+        throw ApiError.fromStatus(
+          status,
+          'attachment upload failed',
+          'private recipient data must not be logged',
+          serverErrorType,
+        );
+      });
+
+      const result = await sendImageMessage(
+        db,
+        dummyHttp,
+        {
+          chatGuid,
+          image: IMG,
+          ...(withCaption ? { text: 'valid caption' } : {}),
+          service: 'iMessage',
+        },
+        up.upload,
+        1_000,
+        undefined,
+        { failureNoticeMode: 'suppressed' },
+        undefined,
+        undefined,
+        imessageCapability(false, withCaption),
+      );
+
+      expect(
+        one(
+          raw,
+          'SELECT send_state AS state, error AS code, error_message AS detail FROM messages',
+        ),
+      ).toMatchObject({
+        state: 'error',
+        code: status,
+        detail: 'The server rejected this upload before dispatch. This attempt was not sent.',
+      });
+      expect(one(raw, 'SELECT attempts FROM outgoing_queue').attempts).toBe(OUTGOING_MAX_ATTEMPTS);
+      await expect(claimFailedOutgoingForRetry(db, result.tempGuid)).resolves.toMatchObject({
+        claim: 'unsendable',
+      });
+      expect(warn).toHaveBeenCalledWith(
+        `[send-attachment] one-shot attachment rejected before dispatch (code ${status}, HTTP ${status})`,
+      );
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('private recipient data');
+    },
+  );
+
+  it.each([
+    [400, undefined],
+    [409, 'idempotency_key_reused'],
+  ] as const)(
+    'keeps an unproven HTTP %i image failure delivery-unconfirmed',
+    async (status, serverErrorType) => {
+      const { db, raw } = await createTestDb();
+      const chatGuid = 'any;-;+15551234567';
+      await seedProvenImessageChat(db, chatGuid);
+      const up = fakeUploader(async () => {
+        throw ApiError.fromStatus(status, 'attachment upload failed', undefined, serverErrorType);
+      });
+
+      const result = await sendImageMessage(
+        db,
+        dummyHttp,
+        { chatGuid, image: IMG, service: 'iMessage' },
+        up.upload,
+        1_000,
+        undefined,
+        { failureNoticeMode: 'suppressed' },
+        undefined,
+        undefined,
+        imessageCapability(),
+      );
+
+      expect(one(raw, 'SELECT error AS code, error_message AS detail FROM messages')).toMatchObject(
+        {
+          code: ClientErrorCode.attachmentDeliveryUnconfirmed,
+          detail: 'Delivery may have occurred. Check Messages before sending a new copy.',
+        },
+      );
+      expect(one(raw, 'SELECT attempts FROM outgoing_queue').attempts).toBe(OUTGOING_MAX_ATTEMPTS);
+      await expect(claimFailedOutgoingForRetry(db, result.tempGuid)).resolves.toMatchObject({
+        claim: 'unsendable',
+      });
+    },
+  );
+
+  it('rejects an image with unknown zero bytes before creating an optimistic row', async () => {
+    const { db, raw } = await createTestDb();
+    const chatGuid = 'any;-;+15551234567';
+    await seedProvenImessageChat(db, chatGuid);
+    const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+    await expect(
+      sendImageMessage(
+        db,
+        dummyHttp,
+        { chatGuid, image: { ...IMG, size: 0 }, service: 'iMessage' },
+        up.upload,
+        1_000,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        imessageCapability(),
+      ),
+    ).rejects.toThrow('Choose one JPEG, PNG, or PDF file no larger than 10 MiB.');
+    expect(up.captured).toBeUndefined();
+    expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
+  });
+
   it('rejects an iMessage attachment before DB, cache, or upload when capability is false', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'iMessage;-;retired');
@@ -167,7 +595,7 @@ describe('sendImageMessage', () => {
         undefined,
         fixedRcsCapabilitySource(ServerInfo.parse({ version: '2.0.0', private_api: false })),
       ),
-    ).rejects.toThrow('iMessage attachments were retired');
+    ).rejects.toThrow('iMessage attachments require the narrow attachment-only capability');
 
     expect(protect).not.toHaveBeenCalled();
     expect(up.captured).toBeUndefined();
@@ -262,7 +690,7 @@ describe('sendImageMessage', () => {
           }),
         ),
       ),
-    ).rejects.toThrow('iMessage attachments were retired');
+    ).rejects.toThrow('This server cannot send iMessage attachments.');
 
     expect(protect).not.toHaveBeenCalled();
     expect(up.captured).toBeUndefined();

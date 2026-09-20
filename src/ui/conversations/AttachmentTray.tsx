@@ -1,5 +1,6 @@
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 // SDK 57's root expo-media-library is the class-based API (async getters, MediaType.VIDEO); the
 // /legacy entry keeps the imperative getAssetsAsync + plain-property Assets we use here.
 import * as MediaLibrary from 'expo-media-library/legacy';
@@ -22,6 +23,7 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 import { Icon } from '../primitives';
 import { useTheme } from '../theme';
+import { showToast } from '../toast/toastStore';
 
 /** A photo/video/file the composer has staged but not yet sent (shape sendImages accepts). */
 export interface PendingAttachment {
@@ -72,6 +74,8 @@ interface AttachmentTrayProps {
   /** Pick a device contact and send it as a card. Omitted when the server can't build vCards, so
    *  the "Contact" button appears only when its RCS chat supports interactive attachments. */
   onPickContact?: () => void;
+  /** The first iMessage upload slice accepts a single bounded still image with known bytes. */
+  imessageImageOnly?: boolean;
 }
 
 /**
@@ -84,6 +88,7 @@ export function AttachmentTray({
   onPick,
   onPickFiles,
   onPickContact,
+  imessageImageOnly = false,
 }: AttachmentTrayProps): React.JSX.Element {
   const theme = useTheme();
   const [accountLease] = useState<RealtimeDeliveryLease>(() => captureRealtimeDeliveryLease());
@@ -106,7 +111,9 @@ export function AttachmentTray({
     try {
       const result = await MediaLibrary.getAssetsAsync({
         first: 40,
-        mediaType: [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
+        mediaType: imessageImageOnly
+          ? [MediaLibrary.MediaType.photo]
+          : [MediaLibrary.MediaType.photo, MediaLibrary.MediaType.video],
         sortBy: [[MediaLibrary.SortBy.creationTime, false]],
       });
       if (!isCurrent()) return;
@@ -119,7 +126,19 @@ export function AttachmentTray({
       setMediaPermission('unavailable');
       setPermissionDialogVisible(true);
     }
-  }, [isCurrent]);
+  }, [imessageImageOnly, isCurrent]);
+
+  const readableImageSize = async (uri: string): Promise<number | null> => {
+    try {
+      const info = await FileSystem.getInfoAsync(uri);
+      if (!isCurrent()) return null;
+      if (info.exists && Number.isSafeInteger(info.size) && info.size > 0) return info.size;
+    } catch {
+      // An inaccessible media-library URI is not eligible for a new one-shot send.
+    }
+    if (isCurrent()) showToast('Couldn’t read this photo for sending');
+    return null;
+  };
 
   const inspectMediaPermission = useCallback(async (): Promise<void> => {
     if (!isCurrent()) return;
@@ -242,11 +261,17 @@ export function AttachmentTray({
       const a = res.assets?.[0];
       if (res.canceled || !a) return;
       const isVideo = a.type === 'video';
+      if (imessageImageOnly && isVideo) return;
+      const size =
+        imessageImageOnly && !(a.fileSize && a.fileSize > 0)
+          ? await readableImageSize(a.uri)
+          : (a.fileSize ?? 0);
+      if (size === null || !isCurrent()) return;
       onPick({
         uri: a.uri,
         name: a.fileName ?? `capture.${isVideo ? 'mp4' : 'jpg'}`,
         mimeType: a.mimeType ?? mimeFromName(a.fileName ?? (isVideo ? '.mp4' : '.jpg'), isVideo),
-        size: a.fileSize ?? 0,
+        size,
         width: a.width,
         height: a.height,
       });
@@ -259,6 +284,7 @@ export function AttachmentTray({
   const pick = async (asset: MediaLibrary.Asset): Promise<void> => {
     if (!isCurrent()) return;
     const isVideo = asset.mediaType === MediaLibrary.MediaType.video;
+    if (imessageImageOnly && isVideo) return;
     // getAssetInfoAsync resolves a readable file:// localUri (the raw asset uri can be a
     // non-readable content/ph reference). It can THROW under Android scoped storage / limited
     // photo access — if it does, fall back to the asset's own uri so the pick STILL stages
@@ -273,11 +299,13 @@ export function AttachmentTray({
       logger.warn('[attachment-tray] getAssetInfoAsync failed; staging raw asset uri', e);
     }
     if (!isCurrent()) return;
+    const size = imessageImageOnly ? await readableImageSize(uri) : 0;
+    if (size === null || !isCurrent()) return;
     onPick({
       uri,
       name: asset.filename,
       mimeType: mimeFromName(asset.filename, isVideo),
-      size: 0,
+      size,
       width: asset.width,
       height: asset.height,
     });

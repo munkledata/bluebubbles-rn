@@ -5,6 +5,7 @@ import {
   dedupeParticipants,
   isGroupRow,
   isHexColor,
+  isProvenOneToOneIMessageChat,
   isRcsChatGuid,
   participantAvatars,
   participantColors,
@@ -116,6 +117,31 @@ describe('resolveChatService', () => {
     expect(resolveChatService('iMessage;-;g', '')).toBe('iMessage');
     expect(resolveChatService('iMessage;-;g', null)).toBe('iMessage');
     expect(resolveChatService('iMessage;-;g', ' , ')).toBe('iMessage');
+  });
+});
+
+describe('isProvenOneToOneIMessageChat', () => {
+  it('admits an existing style-45 any GUID even with multiple iMessage aliases', () => {
+    expect(
+      isProvenOneToOneIMessageChat({
+        guid: 'any;-;+15551234567',
+        style: 45,
+        participantCount: 2,
+        handleServices: 'iMessage,iMessage',
+      }),
+    ).toBe(true);
+  });
+
+  it('rejects SMS, unknown service, and group rows', () => {
+    const chat = {
+      guid: 'any;-;+15551234567',
+      style: 45,
+      participantCount: 1,
+      handleServices: 'iMessage',
+    };
+    expect(isProvenOneToOneIMessageChat({ ...chat, handleServices: 'SMS' })).toBe(false);
+    expect(isProvenOneToOneIMessageChat({ ...chat, handleServices: null })).toBe(false);
+    expect(isProvenOneToOneIMessageChat({ ...chat, style: 43 })).toBe(false);
   });
 });
 

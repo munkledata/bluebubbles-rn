@@ -699,31 +699,74 @@ function normalizeAddr(a: string): string {
   return a.includes('@') ? a.trim().toLowerCase() : a.replace(/\D/g, '').slice(-10);
 }
 
+/** New iMessage creation admits E.164 numbers, where the country code is part of identity. */
+function normalizeAddrForMatch(a: string, service?: 'RCS' | 'iMessage'): string {
+  if (service !== 'iMessage') return normalizeAddr(a);
+  return a.includes('@') ? a.trim().toLowerCase() : a.trim();
+}
+
 /**
- * Find an existing chat whose participant set EXACTLY equals `addresses` (order-independent,
- * phone-suffix/email-normalized) — so the new-chat screen can offer "continue existing
- * conversation" instead of spawning a duplicate thread. Returns the chat guid or null.
+ * Find an existing chat whose participant set equals `addresses` (order-independent). Legacy/RCS
+ * matching uses phone suffixes; selected iMessage requires exact E.164 numbers so another country
+ * code cannot open the wrong conversation. Returns the chat guid or null.
  */
 export async function findChatByParticipantAddresses(
   db: AppDatabase,
   addresses: string[],
+  service?: 'RCS' | 'iMessage',
 ): Promise<string | null> {
-  const want = new Set(addresses.map(normalizeAddr).filter(Boolean));
+  const want = new Set(
+    addresses.map((address) => normalizeAddrForMatch(address, service)).filter(Boolean),
+  );
   if (want.size === 0) return null;
-  const rows = await db.all<{ guid: string; address: string }>(sql`
-    SELECT c.guid AS guid, h.address AS address
+  const rows = await db.all<{
+    guid: string;
+    style: number | null;
+    address: string;
+    handleService: string | null;
+  }>(sql`
+    SELECT c.guid AS guid, c.style AS style, h.address AS address, h.service AS handleService
       FROM chats c
       JOIN chat_handles ch ON ch.chat_id = c.id
       JOIN handles h ON h.id = ch.handle_id
      WHERE ${chatVisible('c')}
   `);
-  const byChat = new Map<string, Set<string>>();
+  const byChat = new Map<
+    string,
+    { style: number | null; addresses: Set<string>; allIMessageHandles: boolean }
+  >();
   for (const r of rows) {
-    const set = byChat.get(r.guid) ?? new Set<string>();
-    set.add(normalizeAddr(r.address));
-    byChat.set(r.guid, set);
+    const match = byChat.get(r.guid) ?? {
+      style: r.style,
+      addresses: new Set<string>(),
+      allIMessageHandles: true,
+    };
+    match.addresses.add(normalizeAddrForMatch(r.address, service));
+    match.allIMessageHandles &&= r.handleService === 'iMessage';
+    byChat.set(r.guid, match);
   }
-  for (const [guid, set] of byChat) {
+  const singleWantedAddress = want.size === 1 ? want.values().next().value : undefined;
+  for (const [guid, match] of byChat) {
+    const { addresses: set } = match;
+    const exactNativeIMessage =
+      service === 'iMessage' &&
+      singleWantedAddress !== undefined &&
+      match.allIMessageHandles &&
+      guid.startsWith('any;-;') &&
+      normalizeAddrForMatch(guid.slice('any;-;'.length), service) === singleWantedAddress;
+    if (service === 'iMessage') {
+      // A service-prefixed GUID alone is not DM proof: sparse group and SMS rows can carry one
+      // matching handle. Wait for authoritative style/handle data after a create.
+      if (
+        match.style !== 45 ||
+        !match.allIMessageHandles ||
+        (!guid.startsWith('iMessage;-;') && !exactNativeIMessage)
+      ) {
+        continue;
+      }
+    } else if (service && !guid.startsWith(`${service};`)) {
+      continue;
+    }
     if (set.size === want.size && [...want].every((a) => set.has(a))) return guid;
   }
   return null;

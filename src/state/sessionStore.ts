@@ -222,6 +222,12 @@ export const sessionAccessors = {
   getPassword: (): string | undefined => useSessionStore.getState().password ?? undefined,
   /** Whether the connected server's Gator RCS bridge is enabled (absent/false → off). */
   rcsEnabled: (): boolean => !!useSessionStore.getState().serverInfo?.rcs,
+  /** Narrow helper capability; independent of the retired broad Private API flag. */
+  imessageNewChatEnabled: (): boolean =>
+    useSessionStore.getState().serverInfo?.supports_imessage_new_chat === true,
+  /** One-file existing-chat helper capability, independent of the broad retired API. */
+  imessageAttachmentUploadEnabled: (): boolean =>
+    useSessionStore.getState().serverInfo?.supports_imessage_attachment_upload === true,
   /** Whether this server supplies exact RCS success/error attempt correlation. */
   rcsSendAttemptOwnershipSupported: (): boolean =>
     useSessionStore.getState().serverInfo?.supports_rcs_send_attempt_ownership === true,
@@ -261,6 +267,12 @@ export const useSendAttachmentTextSupported = (service: string | null | undefine
   useSessionStore((s) => {
     if (service === 'RCS') {
       return s.serverInfo?.rcs === true && s.serverInfo.supports_rcs_text_with_attachment === true;
+    }
+    if (service === 'iMessage') {
+      return (
+        s.serverInfo?.supports_imessage_attachment_upload === true &&
+        s.serverInfo.supports_imessage_attachment_caption_upload === true
+      );
     }
     return false;
   });

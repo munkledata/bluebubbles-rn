@@ -26,6 +26,15 @@ function client(): HttpClient {
 }
 
 describe('read-only iMessage availability contract', () => {
+  it('preserves the narrow new-chat capability while broad Private API stays retired', () => {
+    const info = ServerInfo.parse({
+      version: 'test',
+      private_api: true,
+      supports_imessage_new_chat: true,
+    });
+    expect(info.private_api).toBe(false);
+    expect(info.supports_imessage_new_chat).toBe(true);
+  });
   beforeEach(() => {
     mockKy.mockReset();
   });

@@ -91,6 +91,27 @@ export function resolveChatService(
   return 'iMessage';
 }
 
+/** A loaded, one-to-one iMessage chat with an explicit iMessage participant service. */
+export function isProvenOneToOneIMessageChat(
+  chat:
+    | {
+        guid: string;
+        style: number | null;
+        participantCount: number;
+        handleServices: string | null;
+      }
+    | null
+    | undefined,
+): boolean {
+  if (!chat || !/^(?:any|iMessage);-;.+$/.test(chat.guid)) return false;
+  if (chat.style !== 45 || chat.participantCount < 1) return false;
+  const services = (chat.handleServices ?? '')
+    .split(',')
+    .map((service) => service.trim())
+    .filter(Boolean);
+  return services.length > 0 && services.every((service) => service === 'iMessage');
+}
+
 /** A valid 6-digit hex color (e.g. "#1982FC"), used for per-chat accent colors. */
 export function isHexColor(s: string | null | undefined): s is string {
   return !!s && /^#[0-9a-f]{6}$/i.test(s);

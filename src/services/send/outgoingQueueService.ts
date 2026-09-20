@@ -19,18 +19,23 @@ import {
   queuedMessageTarget,
   resolveMessageTarget,
   retireOutgoingWithinTransaction,
+  retireUncertainOutgoingWithinTransaction,
   type MessageTargetServerAuthorization,
   type RetryableOutgoing,
   type SendAttemptOwnerToken,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
-import { isRcsChatGuid } from '@utils/chat';
+import { ClientErrorCode, isRcsChatGuid } from '@utils';
 import {
   runTrackedRealtimeWork,
   type RealtimeDeliveryLease,
 } from '../realtime/deliveryCoordinator';
-import { handleSendFailure, reconcileSendOutcome } from './sendOutcome';
+import {
+  handleSendFailure,
+  reconcileSendOutcome,
+  UNCERTAIN_IMESSAGE_ATTACHMENT_COPY,
+} from './sendOutcome';
 import { notifyFailedSend } from './sendFailureNotice';
 import type { AttachmentUploader } from './sendAttachmentService';
 import { messageTargetCommitGuard } from './rcsAttemptCapability';
@@ -56,6 +61,7 @@ interface AttachmentPayload {
   text?: string;
   selectedMessageGuid?: string;
   partIndex?: number;
+  imessageAttachmentV1?: true;
 }
 /**
  * A contact card's STRUCTURED fields (the server rebuilds the vCard). Queued under its own
@@ -74,7 +80,7 @@ interface ContactPayload {
 
 type QueueRowShape = Pick<RetryableOutgoing, 'chatGuid' | 'kind' | 'payload'>;
 
-/** Current-client policy: only ordinary iMessage text survives the retired helper boundary. */
+/** Retire helper-dependent queued work, including new one-shot iMessage file sends. */
 function requiresRetiredPrivateApi(row: QueueRowShape): boolean {
   if (isRcsChatGuid(row.chatGuid)) return false;
   if (row.kind === 'reaction' || row.kind === 'contact' || row.kind === 'attachment') return true;
@@ -89,6 +95,17 @@ function requiresRetiredPrivateApi(row: QueueRowShape): boolean {
     );
   } catch {
     // Malformed payloads follow the existing invalid-row retirement path.
+    return false;
+  }
+}
+
+/** Only a new, explicitly marked one-shot attachment gets the uncertain-delivery outcome. */
+function isMarkedImessageAttachment(row: QueueRowShape): boolean {
+  if (row.kind !== 'attachment' || isRcsChatGuid(row.chatGuid)) return false;
+  try {
+    const payload = JSON.parse(row.payload) as AttachmentPayload;
+    return payload?.imessageAttachmentV1 === true;
+  } catch {
     return false;
   }
 }
@@ -262,12 +279,32 @@ export async function resendOutgoingRow(
     ))
       ? 'unsendable'
       : 'paused';
-  const retirePrivateApiRow = async (): Promise<ResendOutcome> =>
-    (await runAccountCommit(accountLease, (guard) =>
+  const retirePrivateApiRow = async (): Promise<ResendOutcome> => {
+    if (isMarkedImessageAttachment(row)) {
+      // A process death may have hidden a successful helper dispatch. Never replay this key or
+      // present the generic "not sent" notification; keep its local file for user review.
+      return (await runAccountCommit(accountLease, (guard) =>
+        withDbTransaction(
+          db,
+          (context) =>
+            retireUncertainOutgoingWithinTransaction(
+              context,
+              row.tempGuid,
+              ClientErrorCode.attachmentDeliveryUnconfirmed,
+              UNCERTAIN_IMESSAGE_ATTACHMENT_COPY,
+            ),
+          guard,
+        ),
+      ))
+        ? 'unsendable'
+        : 'paused';
+    }
+    return (await runAccountCommit(accountLease, (guard) =>
       retireUnsendableOutgoing(db, row.chatGuid, row.tempGuid, guard),
     ))
       ? 'unsendable'
       : 'paused';
+  };
   if (retiredPrivateApiRow) return retirePrivateApiRow();
   if (queuedTarget.kind === 'invalid') return retireTarget();
 

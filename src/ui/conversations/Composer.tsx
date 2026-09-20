@@ -44,6 +44,8 @@ interface ComposerProps {
   isSubmitOwnerCurrent?: () => boolean;
   /** Open the document picker (the tray's "Files" button); returns picked items to stage. */
   onPickFiles?: () => Promise<PendingAttachment[]>;
+  /** This chat's narrow iMessage path needs a real photo byte count before staging. */
+  imessageImageOnly?: boolean;
   /** Pick a device contact and send it as a card (tray's "Contact" button). Provided only when the
    *  current RCS chat can send interactive attachments, so the button is capability-gated. */
   onPickContact?: () => void;
@@ -89,6 +91,7 @@ export const Composer = React.memo(function Composer({
   canSubmit,
   isSubmitOwnerCurrent,
   onPickFiles,
+  imessageImageOnly,
   onPickContact,
   onSchedule,
   onTyping,
@@ -424,6 +427,7 @@ export const Composer = React.memo(function Composer({
         <AttachmentTray
           onPick={addPending}
           onPickFiles={handlePickFiles}
+          imessageImageOnly={imessageImageOnly}
           onPickContact={
             onPickContact
               ? () => {

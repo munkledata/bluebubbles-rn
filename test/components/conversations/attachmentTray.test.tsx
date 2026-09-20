@@ -60,12 +60,18 @@ jest.mock('expo-image-picker', () => ({
   launchCameraAsync: jest.fn(),
 }));
 
+jest.mock('expo-file-system/legacy', () => ({
+  getInfoAsync: jest.fn(),
+}));
+
 // eslint-disable-next-line import/first
 import { AttachmentTray } from '@ui/conversations/AttachmentTray';
 // eslint-disable-next-line import/first
 import * as MediaLibrary from 'expo-media-library/legacy';
 // eslint-disable-next-line import/first
 import * as ImagePicker from 'expo-image-picker';
+// eslint-disable-next-line import/first
+import * as FileSystem from 'expo-file-system/legacy';
 
 const getPerm = MediaLibrary.getPermissionsAsync as unknown as jest.Mock;
 const requestPerm = MediaLibrary.requestPermissionsAsync as unknown as jest.Mock;
@@ -73,6 +79,7 @@ const getAssets = MediaLibrary.getAssetsAsync as unknown as jest.Mock;
 const getAssetInfo = MediaLibrary.getAssetInfoAsync as unknown as jest.Mock;
 const requestCamera = ImagePicker.requestCameraPermissionsAsync as unknown as jest.Mock;
 const launchCamera = ImagePicker.launchCameraAsync as unknown as jest.Mock;
+const getFileInfo = FileSystem.getInfoAsync as unknown as jest.Mock;
 
 afterEach(() => {
   mockLeaseCurrent = true;
@@ -208,6 +215,24 @@ describe('AttachmentTray — media library', () => {
         width: 100,
         height: 80,
       }),
+    );
+  });
+
+  it('stats a media-library photo before staging it for the narrow iMessage path', async () => {
+    grantWith([PHOTO]);
+    getAssetInfo.mockResolvedValue({ localUri: 'file://real/IMG_1.jpg' });
+    getFileInfo.mockResolvedValue({ exists: true, size: 321 });
+    const onPick = jest.fn();
+    await renderWithTheme(
+      <AttachmentTray onPick={onPick} onPickFiles={jest.fn()} imessageImageOnly />,
+    );
+    fireEvent.press(await screen.findByLabelText('Attach photo'));
+    await waitFor(() =>
+      expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ size: 321 })),
+    );
+    expect(getFileInfo).toHaveBeenCalledWith('file://real/IMG_1.jpg');
+    expect(getAssets).toHaveBeenCalledWith(
+      expect.objectContaining({ mediaType: [MediaLibrary.MediaType.photo] }),
     );
   });
 

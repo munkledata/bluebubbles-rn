@@ -59,8 +59,8 @@ export function useComposerAuthoringSession({
   const submissionPendingRef = useRef(false);
   const mountedRef = useRef(true);
   const trimmed = text.trim();
-  // Retain staged files across a temporary capability loss, but do not count them as sendable or
-  // combine them with plain text until an attachment sender is available again.
+  // Retain staged files across a temporary capability loss, but do not count them as sendable.
+  // A typed caption must not silently fall back to a separate text-only send while a chip remains.
   const attachmentsSendable = onSendAttachments != null;
   const canSend = trimmed.length > 0 || (attachmentsSendable && pending.length > 0);
 
@@ -148,7 +148,11 @@ export function useComposerAuthoringSession({
     if (submissionPendingRef.current) return;
     const captured = trimmed;
     const capturedAuthoredText = text;
-    const attachments = attachmentsSendable ? pending : [];
+    if (pending.length > 0 && !attachmentsSendable) {
+      showToast('Attachment sending is unavailable; remove the file to send text alone');
+      return;
+    }
+    const attachments = pending;
     if (!captured && attachments.length === 0) return;
     if (isSubmitOwnerCurrent && !isSubmitOwnerCurrent()) return;
     const isTextAttachment = !!captured && attachments.length > 0;

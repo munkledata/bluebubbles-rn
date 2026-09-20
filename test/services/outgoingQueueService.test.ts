@@ -4,6 +4,7 @@ import type { SendAck } from '@core/api/endpoints/messages';
 import type { HttpClient } from '@core/api/http';
 import { Chat, Message } from '@core/models';
 import { logger } from '@core/secure';
+import { ClientErrorCode } from '@utils';
 import {
   applyServerSendError,
   claimFailedOutgoingForRetry,
@@ -577,6 +578,49 @@ describe('runOutgoingQueue', () => {
       expect(attemptsOf(raw, tempGuid)).toBe(OUTGOING_MAX_ATTEMPTS);
       expect(stateOf(raw, tempGuid)).toBe('error');
     }
+  });
+
+  it('retires only a marked recovered iMessage image as delivery-unconfirmed without replay', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'any;-;+15551234567');
+    await insertOutgoingAttachment(db, {
+      tempGuid: 'temp-one-shot-image',
+      attachmentGuid: 'temp-one-shot-image-att',
+      chatGuid: 'any;-;+15551234567',
+      localPath: 'file:///keep-this-image.jpg',
+      mimeType: 'image/jpeg',
+      transferName: 'keep-this-image.jpg',
+      totalBytes: 10,
+      now: 1_000,
+      imessageAttachmentV1: true,
+    });
+    raw.prepare('UPDATE outgoing_queue SET created_at = 0, next_retry_at = 0').run();
+    const upload = jest.fn(async () => ({ guid: 'must-not-send' }));
+    const fileExists = jest.fn(async () => true);
+
+    await expect(
+      runOutgoingQueue(db, noRequestHttp, { upload, fileExists }, 2_000_000),
+    ).resolves.toEqual({ eligible: 1, sent: 0 });
+
+    expect(upload).not.toHaveBeenCalled();
+    expect(fileExists).not.toHaveBeenCalled();
+    expect(attemptsOf(raw, 'temp-one-shot-image')).toBe(OUTGOING_MAX_ATTEMPTS);
+    expect(
+      raw
+        .prepare(
+          `SELECT send_state AS state, error, error_message AS detail
+             FROM messages WHERE guid = 'temp-one-shot-image'`,
+        )
+        .get(),
+    ).toEqual({
+      state: 'error',
+      error: ClientErrorCode.attachmentDeliveryUnconfirmed,
+      detail: 'Delivery may have occurred. Check Messages before sending a new copy.',
+    });
+    expect(
+      (raw.prepare('SELECT local_path AS path FROM attachments').get() as { path: string }).path,
+    ).toBe('file:///keep-this-image.jpg');
+    expect(mockNotifyFailedSend).not.toHaveBeenCalled();
   });
 
   it('retries a whole-message RCS reaction without inventing Apple part topology', async () => {

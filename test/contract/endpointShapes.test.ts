@@ -334,7 +334,11 @@ describe('endpoint shapes: single-chat read/create wrapper-or-bare', () => {
         participants: [{ address: '+15551234567', service: 'RCS' }],
       },
     };
-    const chat = await createChat(httpReturning(wrapped), { address: '+1555', message: 'hi' });
+    const chat = await createChat(httpReturning(wrapped), {
+      address: '+1555',
+      message: 'hi',
+      service: 'RCS',
+    });
     expect(chat.guid).toBe('RCS;-;+15551234567');
   });
 });

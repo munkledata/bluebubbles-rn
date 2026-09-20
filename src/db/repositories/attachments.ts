@@ -614,6 +614,8 @@ export interface InsertOutgoingAttachmentArgs {
   partIndex?: number;
   /** Current server promises exact RCS success/failure attempt correlation for this send. */
   attemptAware?: boolean;
+  /** Durable marker for the one-shot helper-backed iMessage attachment slice. */
+  imessageAttachmentV1?: true;
 }
 
 /** Transaction-only body for one optimistic outgoing attachment insert. */
@@ -663,6 +665,7 @@ export function insertOutgoingAttachmentWithinTransaction(
         text: args.text,
         selectedMessageGuid: args.selectedMessageGuid,
         partIndex: args.selectedMessageGuid ? args.partIndex : undefined,
+        ...(args.imessageAttachmentV1 === true ? { imessageAttachmentV1: true } : {}),
       }),
     });
     await db

@@ -32,35 +32,59 @@ export async function queryChats(
 }
 
 export interface CreateChatParams {
-  address: string; // exactly one RCS recipient handle (phone/email)
+  address: string; // exactly one recipient handle (phone/email)
   message: string; // initial message (the server requires one to create the thread)
+  service: 'RCS' | 'iMessage';
+  /** Stable across retries of the same iMessage submission. */
+  tempGuid?: string;
 }
 
 // A single chat read/mutation may be wrapped in a named key ({ chat }) — like the list's
-// { chats } — or returned bare. Accept either so we're robust to the server's shape.
+// { chats } — or returned bare. /chat/new currently acknowledges only { guid }, before the
+// Mac's chat database is guaranteed to show the new row.
 const SingleChat = z.union([z.object({ chat: Chat }), Chat]);
 function unwrapChat(res: z.infer<typeof SingleChat>): Chat {
   return 'chat' in res ? res.chat : res;
 }
 
 /**
- * POST /api/v1/chat/new — create a one-recipient RCS chat with an initial message. iMessage/SMS
- * creation and their helper `method` selector are intentionally absent from this client contract.
- * The tolerant `{ chat }`-or-bare schema accepts either server response shape.
+ * POST /api/v1/chat/new — create a one-recipient chat with an initial message. iMessage creation
+ * requires a stable client identity so retrying an ambiguous response cannot send twice.
+ * A guid-only acknowledgement gets a provisional participant so the route has a local chat
+ * immediately. The normal sync path later replaces it with authoritative Messages metadata.
  */
 export async function createChat(http: HttpClient, params: CreateChatParams): Promise<Chat> {
+  if (params.service !== 'RCS' && params.service !== 'iMessage') {
+    throw new Error('This conversation service cannot be started.');
+  }
+  if (params.service === 'iMessage' && !params.tempGuid?.trim()) {
+    throw new Error('Starting an iMessage conversation requires a stable request identity.');
+  }
   const res = await http.post('/chat/new', SingleChat, {
+    captureErrorDetail: true,
     json: {
       addresses: [params.address],
       message: params.message,
-      service: 'RCS',
+      service: params.service,
+      ...(params.service === 'iMessage' ? { tempGuid: params.tempGuid } : {}),
     },
   });
   const chat = unwrapChat(res);
-  if (!chat.guid.startsWith('RCS;-;')) {
-    throw new Error('The server returned a non-RCS conversation for an RCS create request.');
+  // Messages may return its native service-agnostic ID for a new iMessage thread. That `any` ID
+  // must name the requested address. An iMessage-prefixed ID may instead use a canonical alias;
+  // its service prefix is not independent proof of the recipient, so the paired server/helper
+  // remains responsible for binding this acknowledgement to the submitted address.
+  const isRequestedNativeIMessageGuid =
+    params.service === 'iMessage' && chat.guid === `any;-;${params.address}`;
+  if (!chat.guid.startsWith(`${params.service};-;`) && !isRequestedNativeIMessageGuid) {
+    throw new Error('The server returned a conversation for the wrong service.');
   }
-  return chat;
+  return {
+    ...chat,
+    participants: chat.participants?.length
+      ? chat.participants
+      : [{ address: params.address, service: params.service }],
+  };
 }
 
 /**

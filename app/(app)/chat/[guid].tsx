@@ -24,6 +24,7 @@ import {
 import {
   hasLogicalSendCapacity,
   isContactsPermissionDeniedError,
+  isSupportedImessageAttachmentFile,
   pickAndSendContact,
   schedule,
   send,
@@ -75,10 +76,14 @@ import { LoadErrorBoundary } from '@ui/LoadErrorBoundary';
 import { presentSendIssue } from '@ui/conversations/sendNotices';
 import { useTypingStore } from '@state/typingStore';
 import { useShareIntentStore } from '@state/shareIntentStore';
-import { isGroupRow, resolveChatService, resolveTitle } from '@utils';
+import { isGroupRow, isProvenOneToOneIMessageChat, resolveChatService, resolveTitle } from '@utils';
 
 interface DocumentPickerModule {
-  getDocumentAsync(options: { multiple: boolean; copyToCacheDirectory: boolean }): Promise<{
+  getDocumentAsync(options: {
+    multiple: boolean;
+    copyToCacheDirectory: boolean;
+    type?: string[];
+  }): Promise<{
     canceled: boolean;
     assets: Array<{
       uri: string;
@@ -145,13 +150,20 @@ function observeQueueAdmission(
 export async function pickDocumentFilesForLease(
   accountLease: { isCurrent(): boolean },
   loadPicker: DocumentPickerLoader = () => import('expo-document-picker'),
+  imessageAttachmentOnly = false,
+  imessagePdfAvailable = false,
 ): Promise<PendingAttachment[]> {
   try {
     const DocumentPicker = await loadPicker();
     if (!accountLease.isCurrent()) return [];
     const res = await DocumentPicker.getDocumentAsync({
-      multiple: true,
+      multiple: !imessageAttachmentOnly,
       copyToCacheDirectory: true,
+      ...(imessageAttachmentOnly
+        ? {
+            type: ['image/jpeg', 'image/png', ...(imessagePdfAvailable ? ['application/pdf'] : [])],
+          }
+        : {}),
     });
     if (!accountLease.isCurrent() || res.canceled || !res.assets || res.assets.length === 0) {
       return [];
@@ -227,8 +239,23 @@ function ChatScreenInner({
   const chatService = resolveChatService(guid, header.data?.handleServices);
   const rcsAvailable = useSessionStore((s) => s.serverInfo?.rcs === true);
   const rcsInteractiveFeaturesAvailable = rcsAvailable && chatService === 'RCS';
-  const attachmentFeaturesAvailable = rcsInteractiveFeaturesAvailable;
+  const imessageAttachmentSupported = useSessionStore(
+    (s) => s.serverInfo?.supports_imessage_attachment_upload === true,
+  );
+  const imessagePdfSupported = useSessionStore(
+    (s) => s.serverInfo?.supports_imessage_pdf_attachment_upload === true,
+  );
+  const imessageAttachmentFeaturesAvailable =
+    imessageAttachmentSupported &&
+    chatService === 'iMessage' &&
+    header.data?.guid === guid &&
+    isProvenOneToOneIMessageChat(header.data);
+  const imessagePdfFeaturesAvailable = imessageAttachmentFeaturesAvailable && imessagePdfSupported;
+  const attachmentFeaturesAvailable =
+    rcsInteractiveFeaturesAvailable || imessageAttachmentFeaturesAvailable;
   const supportsSendAttachmentText = useSendAttachmentTextSupported(chatService);
+  const imessageCaptionFeaturesAvailable =
+    imessageAttachmentFeaturesAvailable && supportsSendAttachmentText;
   // Search hits, reminders, unread jumps, and thread jumps all use exact message identity. The DB
   // resolves that identity to a stable (date,id) window, so null/equal timestamps cannot strand the
   // requested bubble outside the loaded context.
@@ -630,14 +657,40 @@ function ChatScreenInner({
   // beyond the OS document picker itself.
   const pickFiles = useCallback(
     (): Promise<PendingAttachment[]> =>
-      attachmentFeaturesAvailable ? pickDocumentFilesForLease(accountLease) : Promise.resolve([]),
-    [accountLease, attachmentFeaturesAvailable],
+      attachmentFeaturesAvailable
+        ? pickDocumentFilesForLease(
+            accountLease,
+            undefined,
+            imessageAttachmentFeaturesAvailable,
+            imessagePdfFeaturesAvailable,
+          )
+        : Promise.resolve([]),
+    [
+      accountLease,
+      attachmentFeaturesAvailable,
+      imessageAttachmentFeaturesAvailable,
+      imessagePdfFeaturesAvailable,
+    ],
   );
 
   // The rest of the Composer's callback props, useCallback-stable for the same memo reason.
   const onSendAttachments = useCallback(
     (items: PendingAttachment[]): Promise<readonly string[]> => {
       if (!attachmentFeaturesAvailable) return Promise.resolve([]);
+      if (imessageAttachmentFeaturesAvailable) {
+        if (
+          items.length !== 1 ||
+          !isSupportedImessageAttachmentFile(items[0]!) ||
+          (items[0]!.mimeType === 'application/pdf' && !imessagePdfFeaturesAvailable)
+        ) {
+          showToast(
+            imessagePdfFeaturesAvailable
+              ? 'Choose one JPEG, PNG, or PDF file no larger than 10 MiB'
+              : 'Choose one JPEG or PNG image no larger than 10 MiB',
+          );
+          return Promise.resolve([]);
+        }
+      }
       const expectedUris = new Set(items.map((item) => item.uri));
       const decidedUris = new Set<string>();
       const queuedUris = new Set<string>();
@@ -668,7 +721,11 @@ function ChatScreenInner({
         try {
           operation = Promise.resolve(
             sendImages(
-              { chatGuid: guid, images: items },
+              {
+                chatGuid: guid,
+                images: items,
+                ...(imessageAttachmentFeaturesAvailable ? { service: 'iMessage' as const } : {}),
+              },
               accountLease,
               presentSendIssue,
               onAdmission,
@@ -701,12 +758,33 @@ function ChatScreenInner({
         );
       });
     },
-    [accountLease, attachmentFeaturesAvailable, guid],
+    [
+      accountLease,
+      attachmentFeaturesAvailable,
+      guid,
+      imessageAttachmentFeaturesAvailable,
+      imessagePdfFeaturesAvailable,
+    ],
   );
   const onSendTextAttachment = useCallback(
     (text: string, item: PendingAttachment): Promise<boolean> | false => {
       if (!attachmentFeaturesAvailable) return false;
-      if (chatService !== 'RCS') return false;
+      if (chatService === 'iMessage') {
+        if (!imessageCaptionFeaturesAvailable) return false;
+        if (
+          !isSupportedImessageAttachmentFile(item) ||
+          (item.mimeType === 'application/pdf' && !imessagePdfFeaturesAvailable)
+        ) {
+          showToast(
+            imessagePdfFeaturesAvailable
+              ? 'Choose one JPEG, PNG, or PDF file no larger than 10 MiB'
+              : 'Choose one JPEG or PNG image no larger than 10 MiB',
+          );
+          return false;
+        }
+      } else if (chatService !== 'RCS') {
+        return false;
+      }
       return observeQueueAdmission(
         (onQueued) =>
           sendTextAttachment(
@@ -730,7 +808,14 @@ function ChatScreenInner({
         },
       );
     },
-    [accountLease, attachmentFeaturesAvailable, chatService, guid],
+    [
+      accountLease,
+      attachmentFeaturesAvailable,
+      chatService,
+      guid,
+      imessageCaptionFeaturesAvailable,
+      imessagePdfFeaturesAvailable,
+    ],
   );
   const onTyping = useCallback(
     (active: boolean): void => {
@@ -743,11 +828,11 @@ function ChatScreenInner({
     [accountLease, guid, rcsInteractiveFeaturesAvailable],
   );
   const onStartVoice = useCallback((): void => {
-    if (attachmentFeaturesAvailable) setRecording(true);
-  }, [attachmentFeaturesAvailable]);
+    if (rcsInteractiveFeaturesAvailable) setRecording(true);
+  }, [rcsInteractiveFeaturesAvailable]);
   const onSendVoice = useCallback(
     (uri: string): Promise<boolean> =>
-      !attachmentFeaturesAvailable
+      !rcsInteractiveFeaturesAvailable
         ? Promise.resolve(false)
         : observeQueueAdmission(
             (onQueued) =>
@@ -772,7 +857,7 @@ function ChatScreenInner({
               showToast('Couldn’t queue that recording. It’s still here—try again when connected');
             },
           ),
-    [accountLease, attachmentFeaturesAvailable, guid],
+    [accountLease, rcsInteractiveFeaturesAvailable, guid],
   );
 
   // Contact cards use the retained RCS attachment path. The old helper-era capability flag is no
@@ -1006,10 +1091,11 @@ function ChatScreenInner({
         canSubmit={hasLogicalSendCapacity}
         isSubmitOwnerCurrent={accountLease.isCurrent}
         onPickFiles={attachmentFeaturesAvailable ? pickFiles : undefined}
+        imessageImageOnly={imessageAttachmentFeaturesAvailable}
         onPickContact={contactCardAvailable ? onPickContact : undefined}
         onSchedule={onSchedule}
         onTyping={rcsInteractiveFeaturesAvailable ? onTyping : undefined}
-        onStartVoice={isDev() || !attachmentFeaturesAvailable ? undefined : onStartVoice}
+        onStartVoice={isDev() || !rcsInteractiveFeaturesAvailable ? undefined : onStartVoice}
         translucent={hasWallpaper}
         initialText={draft ?? sharedText ?? undefined}
         onDraftChange={onDraftChange}

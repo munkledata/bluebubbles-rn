@@ -102,6 +102,7 @@ import { darkTheme, gatorTheme } from '@ui/theme/tokens';
 import { contrastRatio, readableTextOn } from '@ui/theme/adaptiveFromImage';
 // eslint-disable-next-line import/first
 import { useUrlPreview } from '@features/conversations/useUrlPreview';
+import { ClientErrorCode } from '@utils';
 
 const attachmentModuleMocks = jest.requireMock('@ui/attachments') as {
   AttachmentView: jest.Mock;
@@ -888,6 +889,23 @@ describe('MessageBubble Scheduled badge (Apple Send Later)', () => {
 });
 
 describe('MessageBubble send-error state', () => {
+  it('labels an unconfirmed one-shot attachment without falsely saying not delivered', async () => {
+    await renderWithTheme(
+      <MessageBubble
+        msg={makeMsg({
+          isFromMe: 1,
+          error: ClientErrorCode.attachmentDeliveryUnconfirmed,
+          sendState: 'error',
+          hasAttachments: 1,
+        })}
+        showTail
+        onRetry={jest.fn()}
+      />,
+    );
+    expect(screen.getByText('Delivery Unconfirmed')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Delivery unconfirmed. Show options' })).toBeTruthy();
+    expect(screen.queryByLabelText('Message not delivered. Show options')).toBeNull();
+  });
   it('renders the error badge + title and fires onRetry when the badge is pressed', async () => {
     const onRetry = jest.fn();
     await renderWithTheme(

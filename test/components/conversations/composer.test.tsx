@@ -461,7 +461,7 @@ describe('Composer — staged attachments', () => {
     expect(screen.queryByLabelText('Attach photo or file')).toBeNull();
   });
 
-  it('retains staged files but sends plain text without them when attachment support retires', async () => {
+  it('retains text and file without sending either when attachment support retires', async () => {
     const onSend = jest.fn();
     const view = await renderWithTheme(<Composer onSend={onSend} onSendAttachments={jest.fn()} />);
     await fireEvent.press(screen.getByLabelText('Attach photo or file'));
@@ -476,8 +476,13 @@ describe('Composer — staged attachments', () => {
 
     await fireEvent.changeText(input(), 'plain text survives');
     await fireEvent.press(await screen.findByLabelText('Send message'));
-    expect(onSend).toHaveBeenCalledWith('plain text survives');
+    expect(onSend).not.toHaveBeenCalled();
+    expect(input().props.value).toBe('plain text survives');
     expect(screen.getByLabelText('Remove attachment')).toBeTruthy();
+
+    await fireEvent.press(screen.getByLabelText('Remove attachment'));
+    await fireEvent.press(await screen.findByLabelText('Send message'));
+    expect(onSend).toHaveBeenCalledWith('plain text survives');
   });
 
   it('does not stage a document picker result that resolves after attachment support retires', async () => {

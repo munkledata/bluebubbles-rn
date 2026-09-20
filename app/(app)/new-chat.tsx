@@ -1,12 +1,15 @@
+import * as Crypto from 'expo-crypto';
 import { File, Paths } from 'expo-file-system';
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
+import { ApiError } from '@core/api/errors';
 import { getDatabase } from '@db/database';
 import { findChatByParticipantAddresses } from '@db/repositories';
 import { createNewChat } from '@/services';
+import type { NewChatService } from '@/services/chatActions';
 import {
   captureRealtimeDeliveryLease,
   subscribeRealtimeGenerationInvalidation,
@@ -15,7 +18,7 @@ import { sendImages } from '@/services/send';
 import { logger } from '@core/secure';
 import { consumeForwardAttachmentHandoff } from '@features/conversations/forwardAttachmentHandoff';
 import { useContactSearch } from '@features/contacts/useContactSearch';
-import { useRcsEnabled } from '@state/sessionStore';
+import { useRcsEnabled, useSessionStore } from '@state/sessionStore';
 import { useShareIntentStore, type SharedAttachment } from '@state/shareIntentStore';
 import { Icon, readableTextOn, Screen, ScreenHeader, useTheme } from '@ui';
 import { ContactSuggestionList } from '@ui/ContactSuggestionList';
@@ -39,6 +42,30 @@ function looksLikeAddress(raw: string): boolean {
   if (raw.includes('@')) return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(raw);
   const digits = raw.replace(/\D/g, '');
   return digits.length >= 7 && /^[+\d\s()./-]+$/.test(raw);
+}
+
+/** Match the first iMessage mutation's explicit destination contract; never guess a country. */
+function looksLikeIMessageAddress(raw: string): boolean {
+  if (raw.includes('@')) return raw.length <= 254 && looksLikeAddress(raw);
+  return /^\+[1-9][0-9]{1,14}$/.test(raw);
+}
+
+const MAX_INITIAL_IMESSAGE_TEXT_BYTES = 64 * 1024;
+
+/** Only these paired-server status/type pairs are known to reject before helper dispatch. */
+function isKnownPreDispatchNewChatError(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return false;
+  if (error.status === 400) {
+    return (
+      error.serverErrorType === 'validation' || error.serverErrorType === 'idempotency_key_invalid'
+    );
+  }
+  return (
+    error.status === 503 &&
+    (error.serverErrorType === 'imessage_new_chat_unavailable' ||
+      error.serverErrorType === 'idempotency_capacity_exhausted' ||
+      error.serverErrorType === 'idempotency_persistence_unavailable')
+  );
 }
 
 /** Start a new conversation: pick recipient chips + an initial message. */
@@ -70,10 +97,27 @@ export default function NewChatScreen(): React.JSX.Element {
     };
   });
   const [message, setMessage] = useState(initialContent.message);
-  // Starting iMessage/SMS conversations depended on the retired helper. RCS is the only supported
-  // new-conversation transport, and this hook fails closed while authoritative server info is
-  // absent or says the RCS bridge is unavailable.
+  // A narrow live server capability admits new iMessage chats without restoring broad Private API.
+  // Preserve the user's explicit choice if that capability disappears; never silently switch the
+  // destination to another service while the draft is open.
   const rcsEnabled = useRcsEnabled();
+  const imessageEnabled = useSessionStore((s) => s.serverInfo?.supports_imessage_new_chat === true);
+  const [requestedService, setRequestedService] = useState<NewChatService | null>(null);
+  const selectedService: NewChatService | null =
+    requestedService ?? (rcsEnabled ? 'RCS' : imessageEnabled ? 'iMessage' : null);
+  // Once a default becomes available, pin it for this draft. A later capability refresh must not
+  // silently change a prepared RCS message into an iMessage (or the reverse).
+  useEffect(() => {
+    if (!requestedService && selectedService) setRequestedService(selectedService);
+  }, [requestedService, selectedService]);
+  const serviceAvailable =
+    selectedService === 'RCS' ? rcsEnabled : selectedService === 'iMessage' && imessageEnabled;
+  const showServiceChoice =
+    (rcsEnabled || requestedService === 'RCS') &&
+    (imessageEnabled || requestedService === 'iMessage');
+  // The helper create route sends the first text itself. Reuse this identity on an ambiguous
+  // response and retry of the same authored message rather than sending it a second time.
+  const createAttemptsRef = useRef(new Map<string, string>());
   const [existingMatch, setExistingMatch] = useState<{
     recipientKey: string;
     guid: string | null;
@@ -208,13 +252,20 @@ export default function NewChatScreen(): React.JSX.Element {
   // Detect whether a chat with exactly these recipients already exists → offer to continue it.
   // Effect cleanup plus the exact recipient key prevent an older set from publishing its shortcut;
   // the captured account lease prevents a retired route from adopting a result into the next one.
-  const recipientKey = JSON.stringify(recipients.map((r) => r.address));
+  const recipientKey = JSON.stringify([selectedService, recipients.map((r) => r.address)]);
   useEffect(() => {
     let active = true;
-    if (recipients.length === 0 || accountUnavailable || !accountLease.isCurrent()) return;
+    if (
+      recipients.length === 0 ||
+      !selectedService ||
+      accountUnavailable ||
+      !accountLease.isCurrent()
+    )
+      return;
     void findChatByParticipantAddresses(
       getDatabase(),
       recipients.map((r) => r.address),
+      selectedService,
     )
       .then((g) => {
         if (active && accountLease.isCurrent()) {
@@ -229,7 +280,7 @@ export default function NewChatScreen(): React.JSX.Element {
     return () => {
       active = false;
     };
-  }, [accountLease, accountUnavailable, recipients, recipientKey]);
+  }, [accountLease, accountUnavailable, recipients, recipientKey, selectedService]);
   const existingGuid =
     !accountUnavailable && existingMatch?.recipientKey === recipientKey ? existingMatch.guid : null;
 
@@ -301,29 +352,49 @@ export default function NewChatScreen(): React.JSX.Element {
 
   // Recipients as they'd be at send time, including a still-uncommitted typed address.
   const effectiveRecipients = pendingRecipient ? [...recipients, pendingRecipient] : recipients;
+  const imessageAddressValid =
+    effectiveRecipients.length === 1 && looksLikeIMessageAddress(effectiveRecipients[0]!.address);
+  const imessageTextTooLong =
+    selectedService === 'iMessage' &&
+    new TextEncoder().encode(message.trim()).byteLength > MAX_INITIAL_IMESSAGE_TEXT_BYTES;
 
-  // RCS chats are 1:1. Block a multi-recipient create instead of silently dropping people.
-  const rcsTooMany = effectiveRecipients.length > 1;
+  // This slice creates only 1:1 chats. Group creation is a later helper capability.
+  const tooManyRecipients = effectiveRecipients.length > 1;
 
-  // The server creates an RCS thread by sending its required initial text. Attachments are a
-  // follow-up after that acknowledgement, so they cannot make an empty initial message valid.
+  // The server creates the thread by sending its required initial text. iMessage attachments are
+  // not restored yet, so keep staged files visible but refuse to start until they are removed.
   const canStart =
     !accountUnavailable &&
     !busy &&
-    rcsEnabled &&
+    !!selectedService &&
+    serviceAvailable &&
     effectiveRecipients.length === 1 &&
-    message.trim().length > 0;
+    message.trim().length > 0 &&
+    (selectedService !== 'iMessage' ||
+      (staged.length === 0 && imessageAddressValid && !imessageTextTooLong));
 
   const onStart = async (): Promise<void> => {
     const recipient = effectiveRecipients[0];
-    if (!canStart || !recipient || !accountLease.isCurrent()) return;
+    if (!canStart || !recipient || !selectedService || !accountLease.isCurrent()) return;
     // Bind navigation, follow-up attachment sends, and error UI to the account that owned the tap.
     // createNewChat receives this exact lease before its first await; retaining it here also
     // prevents an old completion from routing or showing a dialog after reconnect.
     setBusy(true);
     try {
-      // createNewChat is server-deduped, so it returns the existing chat if there is one.
-      const guid = await createNewChat([recipient.address], message.trim(), accountLease);
+      const body = message.trim();
+      const attemptKey = JSON.stringify([selectedService, recipient.address.trim(), body]);
+      let tempGuid: string | undefined;
+      if (selectedService === 'iMessage') {
+        tempGuid = createAttemptsRef.current.get(attemptKey);
+        if (!tempGuid) {
+          tempGuid = `temp-${Crypto.randomUUID()}`;
+          createAttemptsRef.current.set(attemptKey, tempGuid);
+        }
+      }
+      const guid =
+        selectedService === 'RCS'
+          ? await createNewChat([recipient.address], body, accountLease)
+          : await createNewChat([recipient.address], body, accountLease, 'iMessage', tempGuid);
       if (!accountLease.isCurrent() || abandonedRef.current) return;
       // Send any shared files into the new (or matched) chat.
       if (staged.length > 0) {
@@ -346,9 +417,14 @@ export default function NewChatScreen(): React.JSX.Element {
       // dead end (found on-device — the dialog appeared with NO log line anywhere, so a real
       // failure like an RCS bridge outage left zero telemetry).
       logger.error('[new-chat] createNewChat failed', 'sfcbzc1wod', e);
+      const knownNotDispatched = isKnownPreDispatchNewChatError(e);
       showDialog(
         'New message',
-        'Couldn’t start the conversation. Check the address and your server connection.',
+        selectedService === 'iMessage'
+          ? knownNotDispatched
+            ? 'Couldn’t start the iMessage conversation. The address or Messages helper may be unavailable. Your draft is still here.'
+            : 'We could not confirm whether the iMessage was sent. Check Messages or the conversation before trying again. Your draft is still here.'
+          : 'Couldn’t start the conversation. Check the address and your server connection.',
       );
     } finally {
       if (accountLease.isCurrent() && !abandonedRef.current) setBusy(false);
@@ -446,20 +522,79 @@ export default function NewChatScreen(): React.JSX.Element {
             </Pressable>
           ) : null}
 
-          {rcsEnabled ? (
-            <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
-              New conversations use RCS and support one recipient.
-            </Text>
-          ) : (
-            <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
-              Starting a new conversation requires an available RCS bridge. Open an existing
-              conversation to send a message.
-            </Text>
-          )}
+          {showServiceChoice ? (
+            <View
+              style={styles.serviceChoiceRow}
+              accessibilityRole="radiogroup"
+              accessibilityLabel="Message service"
+            >
+              {(['RCS', 'iMessage'] as const).map((service) => {
+                const available = service === 'RCS' ? rcsEnabled : imessageEnabled;
+                const selected = selectedService === service;
+                return (
+                  <Pressable
+                    key={service}
+                    accessibilityRole="radio"
+                    accessibilityLabel={service}
+                    accessibilityState={{ selected, disabled: !available }}
+                    disabled={!available}
+                    onPress={() => {
+                      if (screenInteractionIsCurrent()) setRequestedService(service);
+                    }}
+                    style={[
+                      styles.serviceChoice,
+                      {
+                        borderColor: selected ? theme.color.tint : theme.color.separator,
+                        backgroundColor: selected
+                          ? theme.color.secondaryBackground
+                          : theme.color.background,
+                        opacity: available ? 1 : 0.5,
+                      },
+                    ]}
+                  >
+                    <Text style={{ color: selected ? theme.color.tint : theme.color.label }}>
+                      {service}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
 
-          {rcsTooMany ? (
+          <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
+            {selectedService === 'iMessage'
+              ? imessageEnabled
+                ? 'New iMessage conversations support one recipient and text only.'
+                : 'Starting a new iMessage conversation requires the Messages helper.'
+              : rcsEnabled
+                ? 'New conversations use RCS and support one recipient.'
+                : 'Starting a new conversation requires an available RCS bridge. Open an existing conversation to send a message.'}
+          </Text>
+
+          {tooManyRecipients ? (
             <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
-              RCS conversations are one-to-one — remove extra recipients to start.
+              New conversations are one-to-one — remove extra recipients to start.
+            </Text>
+          ) : null}
+
+          {selectedService === 'iMessage' && staged.length > 0 ? (
+            <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
+              iMessage attachments are not available yet. Remove them or choose RCS to start.
+            </Text>
+          ) : null}
+
+          {selectedService === 'iMessage' &&
+          effectiveRecipients.length === 1 &&
+          !imessageAddressValid ? (
+            <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
+              For iMessage, enter a full email address or a number with country code, such as
+              +15551234567.
+            </Text>
+          ) : null}
+
+          {imessageTextTooLong ? (
+            <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
+              The first iMessage must be 64 KB or smaller. Shorten it to start.
             </Text>
           ) : null}
 
@@ -559,6 +694,14 @@ const styles = StyleSheet.create({
   existing: { borderRadius: 10, padding: 12 },
   existingText: { fontSize: 14, fontWeight: '500' },
   rcsNote: { fontSize: 13 },
+  serviceChoiceRow: { flexDirection: 'row', gap: 8 },
+  serviceChoice: {
+    flex: 1,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    paddingVertical: 9,
+  },
   message: { minHeight: 90, borderRadius: 12, padding: 14, fontSize: 16, textAlignVertical: 'top' },
   stagedRow: { gap: 10, paddingVertical: 2 },
   stagedItem: { width: 64, height: 64 },

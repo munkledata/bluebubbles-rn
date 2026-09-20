@@ -16,6 +16,7 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
 import {
+  ClientErrorCode,
   chatServiceFromGuid,
   initialPinState,
   isGroupEvent,
@@ -499,7 +500,15 @@ export function MessageList({
       ) : null}
       <FailedMessageSheet
         visible={stillFailed}
-        isAttachment={failedImage !== undefined}
+        isAttachment={failed?.hasAttachments === 1 || failedImage !== undefined}
+        deliveryUnconfirmed={failed?.error === ClientErrorCode.attachmentDeliveryUnconfirmed}
+        retryAllowed={
+          failed?.error !== ClientErrorCode.attachmentDeliveryUnconfirmed &&
+          !(
+            chatService === 'iMessage' &&
+            (failed?.hasAttachments === 1 || failedImage !== undefined)
+          )
+        }
         errorDetail={failed?.errorMessage}
         onClose={() => setFailedGuid(null)}
         onRetry={() => {

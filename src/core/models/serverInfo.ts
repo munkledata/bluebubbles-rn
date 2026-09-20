@@ -2,6 +2,16 @@ import { z } from 'zod/v4';
 
 /** Hard client ceiling even if a malformed server advertises a larger caption allowance. */
 export const MAX_SEND_ATTACHMENT_TEXT_BYTES = 65_536;
+/** The narrow helper-backed attachment slice admits one JPEG, PNG, or PDF up to 10 MiB. */
+export const MAX_IMESSAGE_ATTACHMENT_UPLOAD_BYTES = 10 * 1024 * 1024;
+
+export function isSupportedImessageAttachmentType(mimeType: string, name: string): boolean {
+  return (
+    (mimeType === 'image/jpeg' && /\.jpe?g$/i.test(name)) ||
+    (mimeType === 'image/png' && /\.png$/i.test(name)) ||
+    (mimeType === 'application/pdf' && /\.pdf$/i.test(name))
+  );
+}
 
 /**
  * Subset of GET /api/v1/server/info used for version gating and discovery.
@@ -61,10 +71,18 @@ export const ServerInfo = z
     supports_send_contact: z.boolean().nullish(),
     /** Whether the RCS media route consumes body text in the same logical send. */
     supports_rcs_text_with_attachment: z.boolean().nullish(),
-    /** Whether the currently connected iMessage helper consumes text with the attachment. */
+    /** Retired broad helper flag. Narrow one-file captions use their own capability below. */
     supports_imessage_text_with_attachment: z.boolean().nullish(),
     /** Whether the server exposes the read-only iMessage reachability lookup. */
     supports_imessage_availability: z.boolean().nullish(),
+    /** Whether the authenticated Messages helper can create one-to-one iMessage chats. */
+    supports_imessage_new_chat: z.boolean().nullish(),
+    /** One file upload to a proven existing one-to-one iMessage chat. */
+    supports_imessage_attachment_upload: z.boolean().nullish(),
+    /** PDF is an additive exception; older image-only helpers must not expose it. */
+    supports_imessage_pdf_attachment_upload: z.boolean().nullish(),
+    /** A separate narrow gate for nonblank text sent with that same one-file iMessage upload. */
+    supports_imessage_attachment_caption_upload: z.boolean().nullish(),
     /** Whether message payloads can carry bounded, exact Apple multipart topology. */
     supports_message_part_topology: z.boolean().nullish(),
     /**
@@ -134,6 +152,9 @@ export function serverSendCapabilityKey(info: ServerInfo | null | undefined): st
     info.supports_rcs_send_attempt_ownership === true,
     info.supports_message_part_topology === true,
     info.supports_rcs_text_with_attachment === true,
+    info.supports_imessage_attachment_upload === true,
+    info.supports_imessage_pdf_attachment_upload === true,
+    info.supports_imessage_attachment_caption_upload === true,
   ]
     .map(Number)
     .join('');

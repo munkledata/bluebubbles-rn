@@ -48,6 +48,34 @@ describe('FailedMessageSheet — header copy', () => {
 });
 
 describe('FailedMessageSheet — actions', () => {
+  it('explains an uncertain one-shot image without offering Retry', async () => {
+    const h = handlers();
+    await renderWithTheme(
+      <FailedMessageSheet visible isAttachment retryAllowed={false} deliveryUnconfirmed {...h} />,
+    );
+    expect(screen.getByText('Attachment Status Unconfirmed')).toBeTruthy();
+    expect(
+      screen.getByText('Delivery may have occurred. Check Messages before sending a new copy.'),
+    ).toBeTruthy();
+    expect(screen.queryByText('Try Again')).toBeNull();
+    fireEvent.press(screen.getByText('Remove from Gator'));
+    expect(h.onDelete).toHaveBeenCalledTimes(1);
+    expect(h.onRetry).not.toHaveBeenCalled();
+  });
+
+  it('keeps retired attachment copy distinct from a confirmed uncertain outcome', async () => {
+    const h = handlers();
+    await renderWithTheme(<FailedMessageSheet visible isAttachment retryAllowed={false} {...h} />);
+    expect(screen.getByText('Attachment Needs Review')).toBeTruthy();
+    expect(
+      screen.getByText(
+        'This attachment cannot be retried. Review this copy before sending another.',
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText('Attachment Status Unconfirmed')).toBeNull();
+    expect(screen.queryByText('Try Again')).toBeNull();
+  });
+
   it('Try Again fires onRetry then onClose', async () => {
     const h = handlers();
     await renderWithTheme(<FailedMessageSheet visible {...h} />);

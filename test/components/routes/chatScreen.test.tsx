@@ -230,6 +230,14 @@ jest.mock('@/services/send', () => ({
   fireDueScheduled: jest.fn(),
   fireDueScheduledWithDevelopmentSender: jest.fn(),
   hasLogicalSendCapacity: jest.fn(() => true),
+  isSupportedImessageAttachmentFile: jest.fn(
+    (image: { mimeType: string; name: string; size: number }) =>
+      image.size > 0 &&
+      image.size <= 10 * 1024 * 1024 &&
+      ((image.mimeType === 'image/jpeg' && /\.jpg$/i.test(image.name)) ||
+        (image.mimeType === 'image/png' && /\.png$/i.test(image.name)) ||
+        (image.mimeType === 'application/pdf' && /\.pdf$/i.test(image.name))),
+  ),
   isContactsPermissionDeniedError: jest.fn(
     (error: unknown) => error instanceof Error && error.name === 'ContactsPermissionDeniedError',
   ),
@@ -693,6 +701,209 @@ describe('ChatScreen — RCS reaction routing', () => {
 });
 
 describe('ChatScreen — send routing', () => {
+  it('offers only a single JPEG/PNG upload in a proven existing iMessage DM', async () => {
+    mockGuid = 'any;-;+15551234567';
+    useSessionStore.setState({
+      serverInfo: {
+        version: 'test',
+        private_api: false,
+        supports_imessage_attachment_upload: true,
+      } as any,
+    });
+    useChatHeaderMock.mockReturnValue({
+      data: {
+        id: 2,
+        guid: mockGuid,
+        style: 45,
+        participantCount: 1,
+        handleServices: 'iMessage',
+      },
+      error: null,
+    });
+    await renderWithTheme(<ChatScreen />);
+    expect(mockCaptured.composer).toEqual(
+      expect.objectContaining({
+        onSendAttachments: expect.any(Function),
+        onSendTextAttachment: undefined,
+        onPickContact: undefined,
+        onStartVoice: undefined,
+        onTyping: undefined,
+      }),
+    );
+    const image = { uri: 'file:///photo.jpg', name: 'photo.jpg', mimeType: 'image/jpeg', size: 42 };
+    await act(async () => {
+      await mockCaptured.composer!.onSendAttachments([image]);
+    });
+    expect(sendImages).toHaveBeenCalledWith(
+      { chatGuid: mockGuid, images: [image], service: 'iMessage' },
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+      presentSendIssue,
+      expect.any(Function),
+    );
+    await act(async () => {
+      await mockCaptured.composer!.onSendAttachments([image, { ...image, uri: 'file:///two.jpg' }]);
+    });
+    expect(sendImages).toHaveBeenCalledTimes(1);
+    expect(showToast).toHaveBeenCalledWith('Choose one JPEG or PNG image no larger than 10 MiB');
+  });
+
+  it('offers PDF only when the separate PDF helper capability is advertised', async () => {
+    mockGuid = 'any;-;+15551234567';
+    useSessionStore.setState({
+      serverInfo: {
+        version: 'test',
+        supports_imessage_attachment_upload: true,
+        supports_imessage_pdf_attachment_upload: true,
+      } as any,
+    });
+    useChatHeaderMock.mockReturnValue({
+      data: {
+        id: 2,
+        guid: mockGuid,
+        style: 45,
+        participantCount: 1,
+        handleServices: 'iMessage',
+      },
+      error: null,
+    });
+    await renderWithTheme(<ChatScreen />);
+    const pdf = {
+      uri: 'file:///report.pdf',
+      name: 'report.pdf',
+      mimeType: 'application/pdf',
+      size: 2048,
+    };
+    await act(async () => {
+      await mockCaptured.composer!.onSendAttachments([pdf]);
+    });
+    expect(sendImages).toHaveBeenCalledWith(
+      { chatGuid: mockGuid, images: [pdf], service: 'iMessage' },
+      expect.anything(),
+      presentSendIssue,
+      expect.any(Function),
+    );
+    expect(sendImages).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes one JPEG or PDF with text through one iMessage send only with caption capability', async () => {
+    mockGuid = 'any;-;+15551234567';
+    useSessionStore.setState({
+      serverInfo: {
+        version: 'test',
+        supports_imessage_attachment_upload: true,
+        supports_imessage_pdf_attachment_upload: true,
+        supports_imessage_attachment_caption_upload: true,
+        supports_imessage_text_with_attachment: false,
+      } as any,
+    });
+    useChatHeaderMock.mockReturnValue({
+      data: {
+        id: 2,
+        guid: mockGuid,
+        style: 45,
+        participantCount: 1,
+        handleServices: 'iMessage',
+      },
+      error: null,
+    });
+    await renderWithTheme(<ChatScreen />);
+    expect(mockCaptured.composer!.onSendTextAttachment).toEqual(expect.any(Function));
+    const pdf = {
+      uri: 'file:///report.pdf',
+      name: 'report.pdf',
+      mimeType: 'application/pdf',
+      size: 2048,
+    };
+    await expect(mockCaptured.composer!.onSendTextAttachment('  caption  ', pdf)).resolves.toBe(
+      true,
+    );
+    expect(sendTextAttachment).toHaveBeenCalledWith(
+      { chatGuid: mockGuid, image: pdf, text: '  caption  ', service: 'iMessage' },
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+      presentSendIssue,
+      expect.any(Function),
+    );
+    expect(send).not.toHaveBeenCalled();
+    expect(sendImages).not.toHaveBeenCalled();
+  });
+
+  it('does not expose caption send for image-only support or an unproven chat', async () => {
+    mockGuid = 'any;-;+15551234567';
+    useSessionStore.setState({
+      serverInfo: {
+        version: 'test',
+        supports_imessage_attachment_upload: true,
+        supports_imessage_text_with_attachment: true,
+      } as any,
+    });
+    useChatHeaderMock.mockReturnValue({
+      data: {
+        id: 2,
+        guid: mockGuid,
+        style: 45,
+        participantCount: 1,
+        handleServices: 'iMessage',
+      },
+      error: null,
+    });
+    const view = await renderWithTheme(<ChatScreen />);
+    expect(mockCaptured.composer!.onSendTextAttachment).toBeUndefined();
+
+    await act(async () => {
+      useSessionStore.setState({
+        serverInfo: {
+          version: 'test',
+          supports_imessage_attachment_upload: true,
+          supports_imessage_attachment_caption_upload: true,
+        } as any,
+      });
+    });
+    useChatHeaderMock.mockReturnValue({
+      data: {
+        id: 3,
+        guid: mockGuid,
+        style: 43,
+        participantCount: 2,
+        handleServices: 'iMessage',
+      },
+      error: null,
+    });
+    await act(async () => view.rerender(<ChatScreen />));
+    expect(mockCaptured.composer!.onSendTextAttachment).toBeUndefined();
+  });
+
+  it('does not expose the image tray for an SMS handle or a stale previous-chat header', async () => {
+    mockGuid = 'any;-;+15551234567';
+    useSessionStore.setState({
+      serverInfo: { version: 'test', supports_imessage_attachment_upload: true } as any,
+    });
+    useChatHeaderMock.mockReturnValue({
+      data: {
+        id: 2,
+        guid: 'any;-;+15557654321',
+        style: 45,
+        participantCount: 1,
+        handleServices: 'iMessage',
+      },
+      error: null,
+    });
+    const view = await renderWithTheme(<ChatScreen />);
+    expect(mockCaptured.composer!.onSendAttachments).toBeUndefined();
+
+    useChatHeaderMock.mockReturnValue({
+      data: {
+        id: 3,
+        guid: mockGuid,
+        style: 45,
+        participantCount: 1,
+        handleServices: 'SMS',
+      },
+      error: null,
+    });
+    await act(async () => view.rerender(<ChatScreen />));
+    expect(mockCaptured.composer!.onSendAttachments).toBeUndefined();
+  });
+
   it('offers and routes one RCS attachment-plus-text send only when the server advertises it', async () => {
     configureRcsChat({ supports_rcs_text_with_attachment: true });
     await renderWithTheme(<ChatScreen />);
@@ -1604,6 +1815,35 @@ describe('ChatScreen — stable composer callbacks (Composer memo contract)', ()
     });
 
     await expect(picked).resolves.toEqual([]);
+  });
+
+  it('asks Android for one JPEG/PNG only in the narrow iMessage picker', async () => {
+    const getDocumentAsync = jest.fn(async () => ({ canceled: true, assets: null }));
+    await pickDocumentFilesForLease(
+      captureRealtimeDeliveryLease(),
+      async () => ({ getDocumentAsync }),
+      true,
+    );
+    expect(getDocumentAsync).toHaveBeenCalledWith({
+      multiple: false,
+      copyToCacheDirectory: true,
+      type: ['image/jpeg', 'image/png'],
+    });
+  });
+
+  it('adds PDF to the single-file iMessage picker only with the PDF capability', async () => {
+    const getDocumentAsync = jest.fn(async () => ({ canceled: true, assets: null }));
+    await pickDocumentFilesForLease(
+      captureRealtimeDeliveryLease(),
+      async () => ({ getDocumentAsync }),
+      true,
+      true,
+    );
+    expect(getDocumentAsync).toHaveBeenCalledWith({
+      multiple: false,
+      copyToCacheDirectory: true,
+      type: ['image/jpeg', 'image/png', 'application/pdf'],
+    });
   });
 
   it('routes an admitted draft write through the exact screen account lease', async () => {

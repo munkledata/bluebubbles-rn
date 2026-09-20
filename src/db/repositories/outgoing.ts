@@ -607,6 +607,11 @@ export function claimFailedOutgoingForRetryWithinTransaction(
          LIMIT 1`);
     const row = queued[0];
     if (!row) return { claim: 'unsendable' };
+    // Neither historical nor newly marked iMessage attachment rows may be manually replayed:
+    // a lost HTTP acknowledgement can mean the helper already dispatched the file.
+    if (row.kind === 'attachment' && !isRcsChatGuid(row.chatGuid)) {
+      return { claim: 'unsendable' };
+    }
 
     const direct = await db.all<{
       guid: string;
@@ -1457,6 +1462,37 @@ export function retireOutgoingWithinTransaction(
           ne(messages.sendState, 'sent'),
         ),
       );
+  });
+}
+
+/** Keep a one-shot attachment and its local file, but make an uncertain result non-replayable. */
+export function retireUncertainOutgoingWithinTransaction(
+  context: DbTransactionContext,
+  tempGuid: string,
+  errorCode: number,
+  detail: string,
+): Promise<boolean> {
+  return runInTransactionContext(context, async (db) => {
+    const owned = await db
+      .update(outgoingQueue)
+      .set({ attempts: OUTGOING_MAX_ATTEMPTS })
+      .where(eq(outgoingQueue.tempGuid, tempGuid))
+      .returning({ id: outgoingQueue.id });
+    if (owned.length === 0) return false;
+    const marked = await db
+      .update(messages)
+      .set({ sendState: 'error', error: errorCode, errorMessage: detail })
+      .where(
+        and(
+          sql`(${messages.guid} = ${tempGuid} OR EXISTS (
+            SELECT 1 FROM message_guid_aliases a
+             WHERE a.alias_guid = ${tempGuid} AND a.canonical_guid = ${messages.guid}
+          ))`,
+          ne(messages.sendState, 'sent'),
+        ),
+      )
+      .returning({ id: messages.id });
+    return marked.length > 0;
   });
 }
 

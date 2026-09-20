@@ -43,6 +43,9 @@ describe('statusFor', () => {
     expect(statusFor(m({ sendState: 'sending' }))).toBe('Sending…');
     expect(statusFor(m({ sendState: 'error' }))).toBe('Not Delivered');
     expect(statusFor(m({ error: 401 }))).toBe('Not Delivered');
+    expect(statusFor(m({ error: ClientErrorCode.attachmentDeliveryUnconfirmed }))).toBe(
+      'Delivery Unconfirmed',
+    );
     expect(statusFor(m({ dateDelivered: 1000 }))).toBe('Delivered');
     expect(statusFor(m({ dateRead: 1700000000000 }))).toMatch(/^Read /);
     expect(statusFor(m({}))).toBe('Sent');
@@ -85,6 +88,9 @@ describe('errorTitleForCode (2.4)', () => {
     expect(errorTitleForCode(10007)).toBe('Unsend Failed');
     expect(errorTitleForCode(10008)).toBe('Manually Canceled');
     expect(errorTitleForCode(10009)).toBe('Attachment Unavailable');
+    expect(errorTitleForCode(ClientErrorCode.attachmentDeliveryUnconfirmed)).toBe(
+      'Delivery Unconfirmed',
+    );
   });
 
   it('falls back to "iMessage Error (Code N)" for positive server codes', () => {

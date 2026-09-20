@@ -67,6 +67,97 @@ describe('persistServerChat + findChatByParticipantAddresses', () => {
     expect(await findChatByParticipantAddresses(db, [])).toBeNull();
     expect(await findChatByParticipantAddresses(db, ['+19998887777'])).toBeNull();
   });
+
+  it('matches the selected service when RCS and iMessage share a recipient', async () => {
+    const { db } = await createTestDb();
+    for (const service of ['RCS', 'iMessage'] as const) {
+      await persistServerChat(
+        db,
+        Chat.parse({
+          guid: `${service};-;+15551112222`,
+          style: 45,
+          participants: [{ address: '+15551112222', service }],
+        }),
+      );
+    }
+    expect(await findChatByParticipantAddresses(db, ['+15551112222'], 'RCS')).toBe(
+      'RCS;-;+15551112222',
+    );
+    expect(await findChatByParticipantAddresses(db, ['+15551112222'], 'iMessage')).toBe(
+      'iMessage;-;+15551112222',
+    );
+  });
+
+  it('never treats a different iMessage country code as the same recipient', async () => {
+    const { db } = await createTestDb();
+    await persistServerChat(
+      db,
+      Chat.parse({
+        guid: 'iMessage;-;+445551112222',
+        style: 45,
+        participants: [{ address: '+445551112222', service: 'iMessage' }],
+      }),
+    );
+    expect(await findChatByParticipantAddresses(db, ['+15551112222'], 'iMessage')).toBeNull();
+    await persistServerChat(
+      db,
+      Chat.parse({
+        guid: 'iMessage;-;+15551112222',
+        style: 45,
+        participants: [{ address: '+15551112222', service: 'iMessage' }],
+      }),
+    );
+    expect(await findChatByParticipantAddresses(db, ['+15551112222'], 'iMessage')).toBe(
+      'iMessage;-;+15551112222',
+    );
+  });
+
+  it('finds an exact native any-service iMessage chat without adopting an SMS chat', async () => {
+    const { db } = await createTestDb();
+    await persistServerChat(
+      db,
+      Chat.parse({
+        guid: 'any;-;+15551112222',
+        style: 45,
+        participants: [{ address: '+15551112222', service: 'SMS' }],
+      }),
+    );
+    expect(await findChatByParticipantAddresses(db, ['+15551112222'], 'iMessage')).toBeNull();
+    await persistServerChat(
+      db,
+      Chat.parse({
+        guid: 'any;-;+15553334444',
+        style: 45,
+        participants: [{ address: '+15553334444', service: 'iMessage' }],
+      }),
+    );
+    expect(await findChatByParticipantAddresses(db, ['+15553334444'], 'iMessage')).toBe(
+      'any;-;+15553334444',
+    );
+    expect(await findChatByParticipantAddresses(db, ['+15553334444'], 'RCS')).toBeNull();
+  });
+
+  it('does not offer a group or SMS row as an existing iMessage conversation', async () => {
+    const { db } = await createTestDb();
+    await persistServerChat(
+      db,
+      Chat.parse({
+        guid: 'iMessage;-;+15551112222',
+        style: 43,
+        participants: [{ address: '+15551112222', service: 'iMessage' }],
+      }),
+    );
+    await persistServerChat(
+      db,
+      Chat.parse({
+        guid: 'iMessage;-;+15553334444',
+        style: 45,
+        participants: [{ address: '+15553334444', service: 'SMS' }],
+      }),
+    );
+    expect(await findChatByParticipantAddresses(db, ['+15551112222'], 'iMessage')).toBeNull();
+    expect(await findChatByParticipantAddresses(db, ['+15553334444'], 'iMessage')).toBeNull();
+  });
 });
 
 describe('local read / unread markers', () => {

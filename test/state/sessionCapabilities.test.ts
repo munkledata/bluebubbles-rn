@@ -132,6 +132,86 @@ describe('session transport-scoped server info', () => {
 });
 
 describe('session send-capability leases', () => {
+  it('invalidates an in-flight send when the narrow iMessage upload flag turns off', () => {
+    const previousSession = useSessionStore.getState();
+    const enabled = ServerInfo.parse({
+      version: '2.0.15-bbd',
+      private_api: true,
+      supports_imessage_attachment_upload: true,
+    });
+    const disabled = ServerInfo.parse({ version: '2.0.15-bbd' });
+    try {
+      useSessionStore.getState().connected('https://same-transport.test', 'password', enabled);
+      expect(sessionAccessors.imessageAttachmentUploadEnabled()).toBe(true);
+      expect(useSessionStore.getState().serverInfo?.private_api).toBe(false);
+      const lease = captureSessionRcsCapabilityLease();
+      if (!lease) throw new Error('expected connected capability lease');
+      expect(
+        useSessionStore
+          .getState()
+          .setServerInfoForTransport(lease.origin, lease.revision, disabled),
+      ).toBe(true);
+      expect(lease.isCurrent()).toBe(false);
+      expect(sessionAccessors.imessageAttachmentUploadEnabled()).toBe(false);
+    } finally {
+      useSessionStore.setState(previousSession);
+    }
+  });
+
+  it('invalidates an in-flight PDF send when PDF support turns off but image support remains', () => {
+    const previousSession = useSessionStore.getState();
+    const enabled = ServerInfo.parse({
+      version: '2.0.15-bbd',
+      supports_imessage_attachment_upload: true,
+      supports_imessage_pdf_attachment_upload: true,
+    });
+    const imageOnly = ServerInfo.parse({
+      version: '2.0.15-bbd',
+      supports_imessage_attachment_upload: true,
+    });
+    try {
+      useSessionStore.getState().connected('https://same-transport.test', 'password', enabled);
+      const lease = captureSessionRcsCapabilityLease();
+      if (!lease) throw new Error('expected connected capability lease');
+      expect(
+        useSessionStore
+          .getState()
+          .setServerInfoForTransport(lease.origin, lease.revision, imageOnly),
+      ).toBe(true);
+      expect(lease.isCurrent()).toBe(false);
+    } finally {
+      useSessionStore.setState(previousSession);
+    }
+  });
+
+  it('invalidates an in-flight caption send when narrow caption support turns off', () => {
+    const previousSession = useSessionStore.getState();
+    const enabled = ServerInfo.parse({
+      version: '2.0.15-bbd',
+      supports_imessage_attachment_upload: true,
+      supports_imessage_attachment_caption_upload: true,
+      supports_imessage_text_with_attachment: true,
+    });
+    const attachmentOnly = ServerInfo.parse({
+      version: '2.0.15-bbd',
+      supports_imessage_attachment_upload: true,
+    });
+    try {
+      expect(enabled.supports_imessage_text_with_attachment).toBe(false);
+      useSessionStore.getState().connected('https://same-transport.test', 'password', enabled);
+      const lease = captureSessionRcsCapabilityLease();
+      if (!lease) throw new Error('expected connected capability lease');
+      expect(
+        useSessionStore
+          .getState()
+          .setServerInfoForTransport(lease.origin, lease.revision, attachmentOnly),
+      ).toBe(true);
+      expect(lease.isCurrent()).toBe(false);
+    } finally {
+      useSessionStore.setState(previousSession);
+    }
+  });
+
   it('keeps a lease current when refreshed server info has identical send capabilities', () => {
     const previousSession = useSessionStore.getState();
     const originalInfo = ServerInfo.parse({

@@ -21,6 +21,7 @@ import { createTestDb } from '../support/testDb';
 
 let mockDb: AppDatabase;
 let mockServerRcsEnabled = true;
+let mockImessageNewChatEnabled = false;
 const mockPrivateApiEnabled = jest.fn(() => true);
 
 jest.mock('@db/repositories', () => {
@@ -42,6 +43,7 @@ jest.mock('@state/sessionStore', () => ({
   sessionAccessors: {
     privateApiEnabled: () => mockPrivateApiEnabled(),
     rcsEnabled: () => mockServerRcsEnabled,
+    imessageNewChatEnabled: () => mockImessageNewChatEnabled,
   },
 }));
 jest.mock('@core/api', () => ({
@@ -81,6 +83,7 @@ describe('createNewChat account lease', () => {
     resumeRealtimeDeliveries();
     ({ db: mockDb, raw } = await createTestDb());
     mockServerRcsEnabled = true;
+    mockImessageNewChatEnabled = false;
     mockPrivateApiEnabled.mockClear();
     mockEnsureDatabase.mockReset().mockImplementation(() => Promise.resolve(mockDb));
     mockCreateChat.mockReset().mockResolvedValue(serverChat());
@@ -100,7 +103,7 @@ describe('createNewChat account lease', () => {
     expect(mockCreateChat).toHaveBeenCalledTimes(1);
     expect(mockCreateChat).toHaveBeenCalledWith(
       { account: 'captured-by-http-client' },
-      { address: 'old@example.com', message: 'hello' },
+      { address: 'old@example.com', message: 'hello', service: 'RCS', tempGuid: undefined },
     );
     expect(mockPrivateApiEnabled).not.toHaveBeenCalled();
     expect(count(raw, 'handles')).toBe(1);
@@ -128,7 +131,7 @@ describe('createNewChat account lease', () => {
     await expect(createNewChat(['+15551234567'], 'hello')).resolves.toBe('RCS;-;+15551234567');
     expect(mockCreateChat).toHaveBeenCalledWith(
       { account: 'captured-by-http-client' },
-      { address: '+15551234567', message: 'hello' },
+      { address: '+15551234567', message: 'hello', service: 'RCS', tempGuid: undefined },
     );
     expect(mockPrivateApiEnabled).not.toHaveBeenCalled();
   });
@@ -139,6 +142,40 @@ describe('createNewChat account lease', () => {
     await expect(createNewChat(['+15551234567'], 'hello')).rejects.toThrow(
       'RCS conversation is unavailable',
     );
+    expect(mockEnsureDatabase).not.toHaveBeenCalled();
+    expect(mockCreateChat).not.toHaveBeenCalled();
+  });
+
+  it('creates iMessage only under its narrow live capability and preserves the retry id', async () => {
+    mockServerRcsEnabled = false;
+    mockImessageNewChatEnabled = true;
+    mockCreateChat.mockResolvedValueOnce(
+      Chat.parse({
+        guid: 'iMessage;-;+15551234567',
+        participants: [{ address: '+15551234567', service: 'iMessage' }],
+      }),
+    );
+
+    await expect(
+      createNewChat(['+15551234567'], 'hello', undefined, 'iMessage', 'temp-stable-1'),
+    ).resolves.toBe('iMessage;-;+15551234567');
+    expect(mockCreateChat).toHaveBeenCalledWith(
+      { account: 'captured-by-http-client' },
+      {
+        address: '+15551234567',
+        message: 'hello',
+        service: 'iMessage',
+        tempGuid: 'temp-stable-1',
+      },
+    );
+    expect(count(raw, 'handles')).toBe(1);
+    expect(count(raw, 'chats')).toBe(1);
+  });
+
+  it('rejects iMessage creation before DB or HTTP when its narrow capability is absent', async () => {
+    await expect(
+      createNewChat(['+15551234567'], 'hello', undefined, 'iMessage', 'temp-stable-1'),
+    ).rejects.toThrow('iMessage conversation is unavailable');
     expect(mockEnsureDatabase).not.toHaveBeenCalled();
     expect(mockCreateChat).not.toHaveBeenCalled();
   });

@@ -59,17 +59,24 @@ function assertCreateChatLease(lease: RealtimeDeliveryLease): void {
   if (!lease.isCurrent()) throw STALE_CREATE_CHAT;
 }
 
-function assertCreateChatCapability(): void {
-  if (!sessionAccessors.rcsEnabled()) {
-    throw new Error('Starting a new RCS conversation is unavailable on this server.');
+export type NewChatService = 'RCS' | 'iMessage';
+
+function assertCreateChatCapability(service: NewChatService): void {
+  if (service !== 'RCS' && service !== 'iMessage') {
+    throw new Error('This conversation service cannot be started.');
+  }
+  if (
+    service === 'RCS' ? !sessionAccessors.rcsEnabled() : !sessionAccessors.imessageNewChatEnabled()
+  ) {
+    throw new Error(`Starting a new ${service} conversation is unavailable on this server.`);
   }
 }
 
-function assertSingleRcsRecipient(
+function assertSingleRecipient(
   addresses: readonly string[],
 ): asserts addresses is readonly [string] {
   if (addresses.length !== 1 || addresses[0]?.trim().length === 0) {
-    throw new Error('Starting a new RCS conversation requires exactly one recipient.');
+    throw new Error('Starting a new conversation requires exactly one recipient.');
   }
 }
 
@@ -303,14 +310,16 @@ export function saveChatDraft(
 }
 
 /**
- * Create a one-recipient RCS chat with an initial message, upsert the returned chat locally so it
- * appears immediately, and return its guid (route into it). iMessage/SMS creation was permanently
- * retired with the helper and is deliberately absent from this command boundary.
+ * Create a one-recipient chat with an initial message, upsert the returned chat locally so it
+ * appears immediately, and return its guid (route into it). iMessage requires a narrowly admitted
+ * helper capability and a stable request identity; SMS creation remains unavailable.
  */
 export async function createNewChat(
   addresses: readonly [string],
   message: string,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+  service: NewChatService = 'RCS',
+  tempGuid?: string,
 ): Promise<string> {
   try {
     // Capture happened in the default argument. A retained callback must fail as old-account work
@@ -318,19 +327,27 @@ export async function createNewChat(
     assertCreateChatLease(accountLease);
     // Fail before opening the DB or starting HTTP. The single-recipient shape is checked at runtime
     // too, so stale JavaScript or an untyped caller cannot silently drop extra recipients.
-    assertSingleRcsRecipient(addresses);
-    assertCreateChatCapability();
+    assertSingleRecipient(addresses);
+    assertCreateChatCapability(service);
+    if (service === 'iMessage' && !tempGuid?.trim()) {
+      throw new Error('Starting an iMessage conversation requires a stable request identity.');
+    }
     // Re-check after opening the DB so an A-account call parked on Keystore/database work cannot
     // wake up after reconnect and send its request with B's live credentials.
     const db = await ensureDatabase();
     assertCreateChatLease(accountLease);
-    assertSingleRcsRecipient(addresses);
-    assertCreateChatCapability();
+    assertSingleRecipient(addresses);
+    assertCreateChatCapability(service);
 
     // HttpClient snapshots the origin + credential at request entry. A Disconnect cannot recall a
     // request the old server already accepted, but its response is disowned below and can never be
     // reconciled into the next account's database.
-    const chat = await chatsApi.createChat(http, { address: addresses[0], message });
+    const chat = await chatsApi.createChat(http, {
+      address: addresses[0],
+      message,
+      service,
+      tempGuid,
+    });
     assertCreateChatLease(accountLease);
 
     // Keep every local consequence atomic. Disconnect either waits for this short commit and then
