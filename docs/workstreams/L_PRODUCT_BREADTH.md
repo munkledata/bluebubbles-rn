@@ -64,16 +64,23 @@ Deliver this as three independent slices:
    or `bp:<n>/` prefix and preserve a normalized received reply/reaction part. Complete topology is
    authoritative; malformed or incomplete topology fails closed. The topology still supports
    truthful received-message rendering and retraction-survivor classification, but `FP-006` retires
-   every helper-dependent outgoing iMessage target: reply, reaction, edit, unsend, contact-card
-   reply, targeted schedule, attachment, and combined send. A shared classifier uses complete
+   helper-dependent outgoing iMessage targets: reply, reaction, edit, unsend, contact-card
+   reply, and targeted schedule. A separate narrow attachment/caption upload does not restore
+   those targeted actions. A shared classifier uses complete
    topology to preserve only proven surviving text and attachments across bubbles, inbox/search,
    notifications, and attachment-cache ownership. RCS reactions may use part zero only for a proven
    whole `rcs-*` message; that exception must not enable RCS reply threading, edits, or unsend.
-3. `FEAT-03C` sends one attachment plus its text only behind the matching chat-service capability,
-   with one logical optimistic/retry identity and truthful disablement on older servers. This is an
-   RCS-only path. It must never infer a retired iMessage capability, and authored text/attachment
-   state stays in the composer until durable queue admission. Existing-chat iMessage plain text is
-   a separate AppleScript-only path with no target or rich metadata.
+3. `FEAT-03C` sends one RCS attachment plus its text only behind the matching RCS capability,
+   with one logical optimistic/retry identity and truthful disablement on older servers. Authored
+   text/attachment state stays in the composer until durable queue admission. Existing-chat
+   iMessage plain text remains an AppleScript path without a target. Separately,
+   `supports_imessage_attachment_upload` permits one JPEG or PNG (up to 10 MiB) in one existing
+   one-to-one iMessage; PDF additionally requires `supports_imessage_pdf_attachment_upload`, and an
+   optional caption (nonblank when supplied, up to 65,536 UTF-8 bytes) requires
+   `supports_imessage_attachment_caption_upload`. Keep `supports_imessage_text_with_attachment`
+   false; the narrow upload must not infer replies, other media, or groups. New iMessage chat has
+   its own text-only `supports_imessage_new_chat` capability, never inherited from upload flags.
+   Completion evidence and release status remain in the authoritative work plan.
 
 <a id="feat-04"></a>
 
@@ -90,8 +97,8 @@ observable empty intermediate state.
 Implement these as three independent slices:
 
 1. `FEAT-05A` is blocked until a negotiated server transport can actually send the location
-   attachment. The current server intentionally rejects iMessage attachment upload after retirement
-   of the Private API helper, and its supported AppleScript fallback sends text only. Until that
+   attachment. The narrow current iMessage upload accepts only JPEG, PNG, and PDF, not a location
+   attachment; AppleScript plain-text send does not fill that gap. Until that
    capability exists, expose no Location action and add no location permission or dependency. Once
    available, current-location sending must use an explicit foreground permission and one bounded,
    user-initiated location attachment, with truthful denial/cancellation/error states and no

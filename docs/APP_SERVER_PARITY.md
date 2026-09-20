@@ -2,13 +2,20 @@
 
 _Initial baseline generated 2026-07-01 from a bidirectional API/feature reconciliation between the RN app (`~/github/bluebubbles-rn`) and the Gator server (`~/github/BB/bluebubbles-server`, then-current `master`). Later dated annotations record subsequent verification and closure; counts and `CONFIRMED` labels without a newer date describe that original baseline, not a fresh whole-repository scan._
 
-> **Current-client override (2026-09-16; `FP-006`):** The current Gator release permanently
-> retires every Private API/helper and FaceTime client path. Advertised or stale helper flags are
-> normalized to unavailable and cannot restore UI, notification actions, or network calls. New chat
-> is RCS-only; RCS send/contact/media and whole-message reactions remain independent of this
-> retirement. An existing iMessage chat can send plain text through AppleScript. Its read, unread,
-> and delete actions are device-local. There is no backward-compatibility promise for the retired
-> Flutter client or older BlueBubbles server/helper contracts. Dated sections below remain historical
+> **Current-client boundary (updated 2026-09-20; `FP-006`):** The current Gator client retires
+> helper-dependent targeted iMessage actions and FaceTime paths. Advertised or stale broad helper
+> flags are normalized to unavailable and cannot restore UI, notification actions, or network calls.
+> New chat remains one-to-one: RCS requires its own capability. Text-only iMessage creation
+> separately requires `supports_imessage_new_chat`; SMS, groups, and staged files on a new iMessage
+> remain unavailable.
+> RCS send/contact/media and whole-message reactions remain independent of this retirement.
+> An existing iMessage chat can send plain text through AppleScript. In an existing one-to-one
+> iMessage chat, `supports_imessage_attachment_upload` permits one JPEG or PNG; PDF also needs
+> `supports_imessage_pdf_attachment_upload`, and optional caption text needs
+> `supports_imessage_attachment_caption_upload`. That attachment path does not restore the broad
+> iMessage combined-send flag or any targeted/reply action. Read, unread, and delete actions are
+> device-local. There is no backward-compatibility promise for the retired Flutter client or older
+> BlueBubbles server/helper contracts. Dated sections below remain historical
 > evidence unless they explicitly say they describe the current client.
 
 > **Status authority (2026-08-08):** This document records protocol evidence and parity decisions; it is not the
@@ -43,7 +50,7 @@ a complete repair. This is host/source alignment only; the authoritative work pl
 `RECOVERY-01` open for a matching packaged deployment and real Mac/Android cancellation,
 session-switch, RCS-refusal, and final database comparison evidence.
 
-## 🟡 Source-aligned (updated 2026-09-08) — multipart topology and combined sends (`FEAT-03`)
+## 🟡 Source-aligned with local dev-client proof (updated 2026-09-20) — multipart topology and combined sends (`FEAT-03`)
 
 The app and Gator server now share a bounded normalized per-part topology and exact received-message
 reply/reaction part identity. Migration `0047_message_retraction_topology` persists the topology and
@@ -55,19 +62,28 @@ as an empty message.
 
 Incoming topology remains useful for truthful rendering and retraction-survivor classification, but
 the current client does not expose or transmit helper-dependent iMessage reply, reaction, edit,
-unsend, contact-card reply, targeted schedule, attachment, or combined-send actions. Plain text in an
-existing iMessage chat uses AppleScript without a message target. Google Messages reactions may
+unsend, contact-card reply, or targeted schedule actions. Plain text in an existing iMessage chat
+uses AppleScript without a message target. A separate `supports_imessage_attachment_upload`
+capability permits one JPEG or PNG (up to 10 MiB) in an existing one-to-one iMessage chat. PDF
+also requires `supports_imessage_pdf_attachment_upload`; optional nonblank caption text (up to
+65,536 UTF-8 bytes) requires `supports_imessage_attachment_caption_upload`. The broad
+`supports_imessage_text_with_attachment` flag remains false; this upload does not enable
+reply targeting, groups, or other attachment types. New iMessage chat is a separate, text-only
+`supports_imessage_new_chat` capability, not implied by the attachment flags. Google Messages
+reactions may
 target a proven `rcs-*` message as the whole message at part zero; that exception does not enable RCS
 reply threading. RCS text plus one attachment travels under `supports_rcs_text_with_attachment` as
 one logical optimistic/retry identity and older servers fail closed. RCS capability is independent
 of every retired iMessage helper flag.
 
 Focused host suites exercise the app and server contracts, including capability fallback, received
-topology/survivor presentation, retired-iMessage negative boundaries, and whole-message RCS reactions. This is source evidence only: a matching staged server
-and packaged Android candidate still need to prove the supported RCS cross-repository path. Server follow-up
-`FP-006` permanently retires the helper-dependent iMessage combined-send positive for this release, so it is no
-longer a `FEAT-03` completion requirement. `FEAT-03` remains **IN_PROGRESS** for the RCS device proof, and no
-such proof is claimed here.
+topology/survivor presentation, retired-iMessage negative boundaries, and whole-message RCS reactions.
+On 2026-09-20, a local Samsung dev client sent exactly one 1,667-byte PDF with its caption as the
+same iMessage: the Mac Messages database recorded the exact caption and one PDF on ROWID 76267;
+delivery completed without a duplicate. This is local dev-client proof of the narrow iMessage path,
+not Play-release or packaged-candidate proof. The matching staged server and packaged Android
+candidate still need to prove the supported RCS cross-repository path. `FEAT-03` remains
+**IN_PROGRESS** for that RCS device proof.
 
 ## 🟡 Source-aligned (2026-09-04) — capability-gated global message search (`FEAT-05C`)
 
@@ -386,7 +402,8 @@ one-to-one RCS conversations.
 | Server → App | `rcs-alert` realtime event (bridge health: `alertType` + message)                                                                                                                    | ✅ Subscribed (`SERVER_EVENTS`) + zod-normalized in `EventRouter`; `RcsAlertEventSink` maps it to a Server Health RCS row (`rcsHealth.ts`).                                                                                                                                                                                                              |
 | Server → App | `rcs-bridge-down` high-priority push (`{title, body, reason}`)                                                                                                                       | ✅ Subscribed + normalized; posts a content-less status notification (`intents.ts` → `notifeeService`), honoring the hide-preview toggle.                                                                                                                                                                                                                |
 | App UI       | RCS bubble colour + badge                                                                                                                                                            | ✅ New `rcsBackground` teal token (distinct from iMessage blue + SMS green) across all presets; `MessageBubble` mirrors the SMS-green branch for `senderService === 'RCS'`; a subtle "RCS" `ServiceBadge` pill shows in `ConversationHeader` + `ConversationTile` (keyed off the `RCS;-;` guid).                                                         |
-| App → Server | Create a new RCS conversation                                                                                                                                                        | ✅ `new-chat` offers RCS only when `ServerInfoV1.rcs` is enabled, requires the server's non-empty initial text before enabling Start, passes `service: 'RCS'` to the existing create endpoint, and rejects multiple recipients because the server's RCS branch is one-to-one. Staged attachments send only after that text creates or resolves the chat. |
+| App → Server | Create a new RCS conversation                                                                                                                                                        | ✅ `new-chat` offers RCS only when `ServerInfoV1.rcs` is enabled, requires the server's non-empty initial text before enabling Start, passes `service: 'RCS'` to the create endpoint, and rejects multiple recipients because the server's RCS branch is one-to-one. Staged attachments send only after that text creates or resolves the chat. |
+| App → Server | Create a new iMessage conversation                                                                                                                                                    | 🟡 Separately gated by `supports_imessage_new_chat`: one E.164 number or email, non-empty text, and a stable retry ID. SMS/group creation and staged files remain unavailable. Host/source proof exists; a current packaged Android candidate has not proved it. |
 
 **Intentional non-alignments (RCS):**
 
