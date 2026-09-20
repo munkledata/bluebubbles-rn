@@ -2247,6 +2247,12 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
             'src/services/send/outgoingQueueService.ts#retireUnsendableOutgoing.<callback:',
           ))),
   );
+  const outgoingQueueUncertainRetirementTransaction = findings.filter(
+    (finding) =>
+      finding.path === 'src/services/send/outgoingQueueService.ts' &&
+      finding.symbol.startsWith('resendOutgoingRow.retirePrivateApiRow.') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
+  );
   const outgoingAttachmentInsertTransaction = findings.filter(
     (finding) =>
       finding.path === 'src/services/send/sendAttachmentService.ts' &&
@@ -2323,7 +2329,7 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/send/outgoingQueueService.ts#runOutgoingQueue:mutator-call:660e0f2d1659',
       'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody:mutator-call:2fb5831b19de',
       'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:7b145a63f68d',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:d63151141c20',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:605604c1644f',
       'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:6e5f31342b9a',
       'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:94ed03d73c45',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:0383d1f78e53',
@@ -2338,10 +2344,10 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
   assert.deepEqual(
     outgoingAttachmentInsertTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:dc74bca8e3>:mutator-call:05785a97cf5a',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:dc74bca8e3>:mutator-call:26ecbe1eceea',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:3001ad1c2263',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:e904f326be38',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:d66e2c3d8a>:mutator-call:32653cf03649',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:d66e2c3d8a>:mutator-call:db4fcc11b38a',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:521bd5efa519',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:802db95e2d31',
     ].sort(),
   );
   assert.deepEqual(
@@ -2369,6 +2375,14 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/send/outgoingQueueService.ts#retireUnsendableOutgoing.<callback:4fb0fd5796>:mutator-call:082adb25d74d',
       'src/services/send/outgoingQueueService.ts#retireUnsendableOutgoing:mutator-call:10b9cb63a5a1',
       'src/services/send/outgoingQueueService.ts#retireUnsendableOutgoing:mutator-call:ebe5f8857989',
+    ].sort(),
+  );
+  assert.deepEqual(
+    outgoingQueueUncertainRetirementTransaction.map((finding) => finding.id).sort(),
+    [
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retirePrivateApiRow.<callback:e855d42cac>.<callback:358463adf2>:mutator-call:794310ffaa7e',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retirePrivateApiRow.<callback:e855d42cac>:mutator-call:318f0016836c',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retirePrivateApiRow.<callback:e855d42cac>:mutator-call:b5512f3c869d',
     ].sort(),
   );
   assert.deepEqual(
@@ -2404,9 +2418,10 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
   assert.deepEqual(
     failureTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendOutcome.ts#handleSendFailure.<callback:43c72cee33>:mutator-call:157c2fd07289',
-      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:0aee8bce4b6f',
-      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:56c815c4b441',
+      'src/services/send/sendOutcome.ts#handleSendFailure.<callback:5356b32ae5>:mutator-call:a65aaefa929e',
+      'src/services/send/sendOutcome.ts#handleSendFailure.<callback:5356b32ae5>:mutator-call:d5a9d52ea303',
+      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:625c905681aa',
+      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:8ab9db6efe5d',
     ].sort(),
   );
   assert.deepEqual(
@@ -2543,7 +2558,7 @@ test('certifies the exact residual repository delegations after explicit-owner c
   );
 
   assert.equal(devFixtures.length, 14);
-  assert.equal(intentionalBoundaries.length, 36);
+  assert.equal(intentionalBoundaries.length, 37);
   assert.equal(scheduledStateMachine.length, 11);
   assert.deepEqual(
     findings.map((finding) => finding.id).sort(),
@@ -2604,6 +2619,7 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:0383d1f78e53',
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:8e8d9434e3c4',
       'src/db/repositories/outgoing.ts#reconcileExactOutgoingAttemptSuccessWithinTransaction:mutator-call:e0ea8d72f9a8',
+      'src/services/search/inboxSearchIndexRebuild.ts#runInboxSearchIndexRebuildPass.<callback:c1fe751ccd>:mutator-call:225fd9b8cc41',
       'src/services/sync/engine.ts#syncAllChats:mutator-call:d025e1f31f26',
       'src/services/sync/engine.ts#syncChatMessageRange:mutator-call:34deba18cbca',
       'src/services/sync/engine.ts#syncSingleChat:mutator-call:3c8efb8e47a5',
@@ -2636,6 +2652,10 @@ test('certifies exactly the reviewed coordinated-delegation path additions', () 
       ],
       [
         'app/(app)/server-management.tsx#ServerManagementScreen.onDiscardCredential:mutator-call:cff6cdb98796',
+        'coordinated-delegation',
+      ],
+      [
+        'app/(app)/server-management.tsx#ServerManagementScreen.onSubmitCredential:mutator-call:1e716ab98ac5',
         'coordinated-delegation',
       ],
       [
@@ -2695,6 +2715,10 @@ test('certifies exactly the reviewed coordinated-delegation path additions', () 
         'coordinated-delegation',
       ],
       [
+        'src/services/credentialUpgrade.ts#beginScopedCredentialReplacement:mutator-call:ec167bc062b1',
+        'coordinated-delegation',
+      ],
+      [
         'src/services/credentialUpgrade.ts#discardScopedCredentialUpgradeCandidate:mutator-call:ab2e71099acf',
         'coordinated-delegation',
       ],
@@ -2703,14 +2727,30 @@ test('certifies exactly the reviewed coordinated-delegation path additions', () 
         'coordinated-delegation',
       ],
       [
-        'src/services/credentialUpgrade.ts#runCredentialUpgrade.<callback:c120dd0889>:mutator-call:5869dbf25d5d',
+        'src/services/credentialUpgrade.ts#runCredentialUpgrade.<callback:0137fa13cb>:mutator-call:54b86789cdbd',
         'coordinated-delegation',
       ],
       [
-        'src/services/credentialUpgrade.ts#runCredentialUpgrade:mutator-call:0f7c20945957',
+        'src/services/credentialUpgrade.ts#runCredentialUpgrade:mutator-call:b60b6329bbde',
         'coordinated-delegation',
       ],
     ].sort(),
+  );
+});
+
+test('certifies only the reviewed PERF-02 inbox index worker delegation', () => {
+  const findings = scanProjectDbWrites().filter(
+    (finding) => finding.path === 'src/services/search/inboxSearchIndexRebuild.ts',
+  );
+  assert.deepEqual(
+    findings.map(({ id, target, detectedContext }) => [id, target, detectedContext]),
+    [
+      [
+        'src/services/search/inboxSearchIndexRebuild.ts#runInboxSearchIndexRebuildPass.<callback:c1fe751ccd>:mutator-call:225fd9b8cc41',
+        'src/db/repositories/inboxSearchIndex.ts#rebuildInboxSearchIndexBatch',
+        'coordinated-delegation',
+      ],
+    ],
   );
 });
 
@@ -2784,7 +2824,7 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
       'src/services/send/index.ts#send.<callback:939d3d95aa>:mutator-call:9d6fc3b4c735',
       'src/services/send/index.ts#sendContactCard.<callback:4de55a3dfc>:mutator-call:6b3aa4db6f03',
       'src/services/send/index.ts#sendImage.<callback:cb0dce58ca>:mutator-call:3f3c0bb5866e',
-      'src/services/send/index.ts#sendImages.<callback:b21823580a>.<callback:fe2d832948>:mutator-call:14eea9ad558f',
+      'src/services/send/index.ts#sendImages.<callback:edb2f7e555>.<callback:970ea1cb4e>:mutator-call:b79ae2665830',
       'src/services/send/index.ts#sendTextAttachment.<callback:d665192176>:mutator-call:db5414457e2a',
       'src/services/send/index.ts#syncScheduledFromServer.<callback:c129c31bd8>:mutator-call:1a675a1023a2',
       'src/services/send/index.ts#syncScheduledFromServer.<callback:c129c31bd8>:mutator-call:73312ae182ae',
@@ -5571,7 +5611,7 @@ fullOnlyTest('driver adapter proof fails closed on forwarding, escape, and scope
         replaceFixtureSource(
           root,
           'src/db/database.ts',
-          "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0048_attachment_media_exports' as const;",
+          "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0049_inbox_search_postings' as const;",
           "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0039_message_error_message' as const;",
         );
       },
@@ -6415,7 +6455,8 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     selected.map((finding) => finding.id).sort(),
     [
       'app/(app)/new-chat.tsx#NewChatScreen.<callback:6cde4fbfd5>:mutator-call:b4a563a44345',
-      'app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:d6589868b8c7',
+      'app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:4206cc986735',
+      'app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:cefa95463ae3',
       'src/db/repositories/chats.ts#deleteChatLocal:mutator-call:4b0c893b8080',
       'src/db/repositories/chats.ts#markAllChatsReadLocalWithinTransaction:sql-update:52eca3e393a6',
       'src/db/repositories/chats.ts#reconcileReadMarkersFromTimestamps:sql-update:9a087251324f',
@@ -6525,7 +6566,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 109);
+  assert.equal(selected.length, 110);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [

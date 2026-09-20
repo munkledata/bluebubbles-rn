@@ -115,6 +115,7 @@ const COORDINATED_DELEGATION_PATHS = new Set([
   'src/services/realtime/incomingEventDispatcher.ts',
   'src/services/realtime/incomingEventDrain.ts',
   'src/services/realtimeControl.ts',
+  'src/services/search/inboxSearchIndexRebuild.ts',
   'src/services/notifications/actions.ts',
   'src/services/paste/pasteInput.ts',
   'src/services/send/outgoingQueueService.ts',
@@ -2248,11 +2249,8 @@ function dbProcessRelaunchCertificateCandidate({
       'DB_ACTIVE_MIGRATION_DEATH_RESUMING_FILE',
       [ts.NodeFlags.Const, "'.gator-db-active-migration-death-resuming-v1'"],
     ],
-    ['DB_RELAUNCH_MIGRATION_COUNT', [ts.NodeFlags.Const, '48 as const']],
-    [
-      'DB_RELAUNCH_MIGRATION_HEAD',
-      [ts.NodeFlags.Const, "'0048_attachment_media_exports' as const"],
-    ],
+    ['DB_RELAUNCH_MIGRATION_COUNT', [ts.NodeFlags.Const, '49 as const']],
+    ['DB_RELAUNCH_MIGRATION_HEAD', [ts.NodeFlags.Const, "'0049_inbox_search_postings' as const"]],
     ['WAIT_FOR_HOST_PROCESS_KILL', [ts.NodeFlags.Const, 'new Promise<never>(() => undefined)']],
     ['activeDbRelaunchContract', [ts.NodeFlags.Let, undefined]],
     ['ordinaryBootClaimedProcess', [ts.NodeFlags.Let, 'false']],
@@ -2283,22 +2281,22 @@ function dbProcessRelaunchCertificateCandidate({
     ['DB_RUNTIME_CONCURRENCY_SELF_TEST_NAME', "'driver-runtime-concurrency-selftest.db'"],
     ['DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_A', "'db-02c-public-throwaway-key-a-v1'"],
     ['DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_B', "'db-02c-public-throwaway-key-b-v1'"],
-    ['DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_COUNT', '48 as const'],
-    ['DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_HEAD', "'0048_attachment_media_exports' as const"],
+    ['DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_COUNT', '49 as const'],
+    ['DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_HEAD', "'0049_inbox_search_postings' as const"],
     ['DB_RUNTIME_CONCURRENCY_SENTINEL_KEY', "'gator-db-runtime-wave-sentinel'"],
     ['DB_RUNTIME_CONCURRENCY_SENTINEL_VALUE', "'committed'"],
     ['DB_BACKUP_RESTORE_SELF_TEST_NAME', "'driver-backup-restore-selftest.db'"],
     ['DB_BACKUP_RESTORE_SELF_TEST_KEY', "'backup-02-public-throwaway-key-v1'"],
-    ['DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_COUNT', '48 as const'],
-    ['DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_HEAD', "'0048_attachment_media_exports' as const"],
+    ['DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_COUNT', '49 as const'],
+    ['DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_HEAD', "'0049_inbox_search_postings' as const"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_NAME', "'driver-relaunch-selftest.db'"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_KEY', "'db-03b1-public-throwaway-key-v1'"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_SENTINEL', "'driver-relaunch-continuity-v1'"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_PARTIAL_MIGRATION_COUNT', '29'],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_PARTIAL_MIGRATION_HEAD', "'0029_chats_deleted_at'"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_RETRY_MIGRATION_START', "'0030_attachment_cache_entries'"],
-    ['DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_COUNT', '48 as const'],
-    ['DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_HEAD', "'0048_attachment_media_exports' as const"],
+    ['DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_COUNT', '49 as const'],
+    ['DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_HEAD', "'0049_inbox_search_postings' as const"],
     ['DB_ACTIVE_WAL_WRITE_DEATH_SELF_TEST_NAME', "'driver-wal-write-death-selftest.db'"],
     ['DB_ACTIVE_WAL_WRITE_DEATH_SELF_TEST_KEY', "'db-03b2b1-public-throwaway-key-v1'"],
     ['DB_ACTIVE_WAL_WRITE_DEATH_BASELINE', "'db-03b2b1-baseline-v1'"],
@@ -2310,8 +2308,8 @@ function dbProcessRelaunchCertificateCandidate({
     ['DB_ACTIVE_MIGRATION_DEATH_PREFIX_COUNT', '37'],
     ['DB_ACTIVE_MIGRATION_DEATH_PREFIX_HEAD', "'0037_purge_legacy_redacted_mode_setting' as const"],
     ['DB_ACTIVE_MIGRATION_DEATH_TARGET', "'0038_scrub_reaction_selected_message_text' as const"],
-    ['DB_ACTIVE_MIGRATION_DEATH_HEAD', "'0048_attachment_media_exports' as const"],
-    ['DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT', '48 as const'],
+    ['DB_ACTIVE_MIGRATION_DEATH_HEAD', "'0049_inbox_search_postings' as const"],
+    ['DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT', '49 as const'],
     ['DB_ACTIVE_MIGRATION_DEATH_TARGET_COUNT', '128'],
     ['DB_ACTIVE_MIGRATION_DEATH_SELECTED_TEXT_LENGTH', '8_192'],
     [
@@ -2494,9 +2492,9 @@ function dbProcessRelaunchCertificateCandidate({
   const runtimeProductionCalleeFingerprints = new Map([
     [syncAllChats, '31721c299f75745c0c3ea4a8a0110c3a2a656c39784fd2c6d633b25da2b0098e'],
     [linkHandlesAfterCommit, '02704855bb63dd6db55395393c6f25fa309d91fdb3aac54422c71ca86fd206b6'],
-    [sendImageMessage, '9d33f303476ba829f1a16d33247d7728f66c184e097350e71b6cfb3eeeec85f0'],
+    [sendImageMessage, '5aef70058e1688edc87d40b7c1b9fb9eee7018b6b03f9e9ff7d7092ab9dd5228'],
     [reconcileSendOutcome, '8829dd1fff1160b2a77b29713228232f30d1ef6ecb6d86ecadd72f8a48bb4952'],
-    [handleSendFailure, 'db45f7ee8cd8a4109c7003a87b31c4165edc15256853ab1a5aa2f7c7b3c5b0c7'],
+    [handleSendFailure, '25497104c29d4672fbe9f9cfbc0ed058da0bd00f34b83aa068b09728a2fe25a0'],
     [
       withCurrentDeliveryTransaction,
       '08e52d3be405df405ae6ff1f66b29922b89884b05bb0378629c0b6b040ef3330',
@@ -3661,7 +3659,7 @@ function dbProcessRelaunchCertificateCandidate({
       optionedFailureEdges,
       sendImageMessage,
       7,
-      '{ ...outcomeOptions, attemptOwnerToken: attemptOwnerToken ?? undefined, }',
+      "{ ...outcomeOptions, attemptOwnerToken: attemptOwnerToken ?? undefined, ...(imessageAttachment ? { terminalUncertain: true, failureNoticeMode: 'suppressed' as const } : {}), }",
     ) ||
     !hasExactNestedOptionedEdge(
       optionedFailureEdges,
@@ -4640,10 +4638,10 @@ function driverSelfTestCertificateCandidate({
     nameState.declaration.initializer.text !== 'driver-selftest.db' ||
     !(migrationCountState.declarationList.flags & ts.NodeFlags.Const) ||
     normalizedSnippet(migrationCountState.declaration.initializer, databaseFile) !==
-      '48 as const' ||
+      '49 as const' ||
     !(migrationHeadState.declarationList.flags & ts.NodeFlags.Const) ||
     normalizedSnippet(migrationHeadState.declaration.initializer, databaseFile) !==
-      "'0048_attachment_media_exports' as const" ||
+      "'0049_inbox_search_postings' as const" ||
     !(partialMigrationCountState.declarationList.flags & ts.NodeFlags.Const) ||
     normalizedSnippet(partialMigrationCountState.declaration.initializer, databaseFile) !== '29' ||
     !(internalFailureState.declarationList.flags & ts.NodeFlags.Const) ||
