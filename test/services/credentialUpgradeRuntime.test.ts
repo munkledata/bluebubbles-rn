@@ -2,6 +2,7 @@ import {
   acknowledgeCredentialUpgradePushAdoption,
   beginCredentialUpgradePushAdoption,
   createCredentialUpgradeCandidate,
+  createCredentialReplacementCandidate,
   InMemoryVault,
   inspectCredentialUpgradeJournal,
   serializeCredentialUpgradeJournal,
@@ -11,8 +12,10 @@ import {
   type SecretKey,
 } from '@core/secure';
 import { FCM_DEVICE_ENCRYPTION_TYPE, FCM_PUSH_ENCRYPTION_TYPE_V3 } from '@core/realtime';
+import { ApiError } from '@core/api/errors';
 import {
   beginCredentialUpgradeRuntime,
+  beginCredentialReplacementRuntime,
   discardCredentialUpgradeCandidateRuntime,
   resumeCredentialUpgradeRuntime,
   type CredentialUpgradeRuntimeDependencies,
@@ -20,6 +23,7 @@ import {
 
 const ORIGIN = 'https://gator.example';
 const PREVIOUS = 'legacy shared password';
+const PREVIOUS_SCOPED = `bbd_device_v1_${'B'.repeat(43)}`;
 const CANDIDATE = `bbd_device_v1_${'A'.repeat(43)}`;
 const KEY = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
 const REGISTRATION: CredentialUpgradeFcmRegistration = {
@@ -59,11 +63,11 @@ class RecordingVault extends InMemoryVault {
   }
 }
 
-async function activeVault(): Promise<RecordingVault> {
+async function activeVault(credential = PREVIOUS): Promise<RecordingVault> {
   const vault = new RecordingVault();
   await vault.set('serverSessionState', SERVER_SESSION_STATE.active);
   await vault.set('serverAddress', ORIGIN);
-  await vault.set('serverPassword', PREVIOUS);
+  await vault.set('serverPassword', credential);
   vault.events.length = 0;
   return vault;
 }
@@ -249,5 +253,148 @@ describe('scoped credential upgrade runtime', () => {
     });
     expect(await vault.get('serverCredentialUpgrade')).toBeNull();
     expect(vault.events).toEqual(['exclusive', 'server:revoke-candidate', 'journal:delete']);
+  });
+
+  it('removes a scoped candidate only when the server also rejects its exact bearer', async () => {
+    const unauthorized = ApiError.fromStatus(401, 'invalid credential');
+    const vault = await activeVault(PREVIOUS_SCOPED);
+    await expect(
+      beginCredentialReplacementRuntime(
+        CANDIDATE,
+        dependencies(vault, {
+          fetchCandidateServerInfo: async () => {
+            throw unauthorized;
+          },
+        }),
+      ),
+    ).resolves.toEqual({ kind: 'retry', stage: 'candidate-validation' });
+    expect(await vault.get('serverCredentialUpgrade')).not.toBeNull();
+
+    await expect(
+      discardCredentialUpgradeCandidateRuntime(
+        dependencies(vault, {
+          revokeCandidate: async () => {
+            throw unauthorized;
+          },
+          fetchCandidateServerInfo: async () => {
+            throw unauthorized;
+          },
+        }),
+      ),
+    ).resolves.toEqual({ kind: 'discarded' });
+    expect(await vault.get('serverCredentialUpgrade')).toBeNull();
+    expect(await vault.get('serverPassword')).toBe(PREVIOUS_SCOPED);
+
+    const validVault = await activeVault(PREVIOUS_SCOPED);
+    await validVault.set(
+      'serverCredentialUpgrade',
+      serializeCredentialUpgradeJournal(
+        createCredentialReplacementCandidate(ORIGIN, PREVIOUS_SCOPED, CANDIDATE),
+      ),
+    );
+    await expect(
+      discardCredentialUpgradeCandidateRuntime(
+        dependencies(validVault, {
+          revokeCandidate: async () => {
+            throw unauthorized;
+          },
+        }),
+      ),
+    ).resolves.toEqual({ kind: 'retry', stage: 'candidate-revocation' });
+    expect(await validVault.get('serverCredentialUpgrade')).not.toBeNull();
+  });
+
+  it('replaces a scoped credential in place after exact V3 adoption without revoking the old bearer', async () => {
+    const vault = await activeVault(PREVIOUS_SCOPED);
+
+    await expect(
+      beginCredentialReplacementRuntime(CANDIDATE, dependencies(vault)),
+    ).resolves.toEqual({
+      kind: 'adopted',
+    });
+
+    expect(await vault.get('serverPassword')).toBe(CANDIDATE);
+    expect(await vault.get('serverCredentialUpgrade')).toBeNull();
+    expect(vault.events).toEqual([
+      'exclusive',
+      'journal:candidate',
+      'candidate-info',
+      'prepare-v3',
+      'journal:adopting',
+      'fcm:pending',
+      'server:adopt',
+      'fcm:active',
+      'journal:adopted',
+      'fcm:verify',
+      'main-credential',
+      'journal:delete',
+      'live:publish',
+    ]);
+    expect(vault.events).not.toContain('server:revoke-candidate');
+  });
+
+  it('keeps a V2 scoped replacement recoverable when push adoption conflicts', async () => {
+    const vault = await activeVault(PREVIOUS_SCOPED);
+    await expect(
+      beginCredentialReplacementRuntime(
+        CANDIDATE,
+        dependencies(vault, {
+          registerV3: async () => {
+            vault.events.push('server:adoption-conflict');
+            throw ApiError.fromStatus(
+              409,
+              'device target already owned',
+              undefined,
+              'device_target_owned',
+            );
+          },
+        }),
+      ),
+    ).resolves.toEqual({ kind: 'blocked', reason: 'push-target-owned' });
+
+    expect(await vault.get('serverPassword')).toBe(PREVIOUS_SCOPED);
+    expect(
+      inspectCredentialUpgradeJournal(await vault.get('serverCredentialUpgrade')),
+    ).toMatchObject({
+      kind: 'valid',
+      journal: {
+        version: 2,
+        phase: 'adopting',
+        previousCredential: PREVIOUS_SCOPED,
+        candidateCredential: CANDIDATE,
+        registration: REGISTRATION,
+      },
+    });
+    expect(vault.events).not.toContain('server:revoke-candidate');
+
+    vault.events.length = 0;
+    await expect(resumeCredentialUpgradeRuntime(dependencies(vault))).resolves.toEqual({
+      kind: 'adopted',
+    });
+    expect(vault.events).not.toContain('prepare-v3');
+    expect(vault.events).not.toContain('server:revoke-candidate');
+    expect(await vault.get('serverPassword')).toBe(CANDIDATE);
+  });
+
+  it('keeps legacy upgrade and scoped replacement entry points separate', async () => {
+    const scopedVault = await activeVault(PREVIOUS_SCOPED);
+    await expect(
+      beginCredentialUpgradeRuntime(CANDIDATE, dependencies(scopedVault)),
+    ).resolves.toEqual({
+      kind: 'quarantined',
+      reason: 'legacy-session-required',
+    });
+    expect(scopedVault.events).toEqual([]);
+
+    const legacyVault = await activeVault();
+    await expect(
+      beginCredentialReplacementRuntime(CANDIDATE, dependencies(legacyVault)),
+    ).resolves.toEqual({ kind: 'quarantined', reason: 'scoped-session-required' });
+    expect(legacyVault.events).toEqual([]);
+
+    await expect(
+      beginCredentialReplacementRuntime(PREVIOUS_SCOPED, dependencies(scopedVault)),
+    ).resolves.toEqual({ kind: 'quarantined', reason: 'invalid-candidate' });
+    expect(scopedVault.events).toEqual([]);
   });
 });

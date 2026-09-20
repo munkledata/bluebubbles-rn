@@ -10,6 +10,7 @@ describe('fcmApi.registerDevice', () => {
     const http = { post } as unknown as HttpClient;
     const res = await registerDevice(http, 'My Phone', 'fcm-token-123');
     expect(post).toHaveBeenCalledWith('/devices', expect.anything(), {
+      captureErrorDetail: true,
       json: { name: 'My Phone', provider: 'fcm', token: 'fcm-token-123' },
     });
     expect(res).toEqual({
@@ -46,6 +47,7 @@ describe('fcmApi.registerDevice', () => {
       pushEncryptionIdentity: null,
     });
     expect(post).toHaveBeenCalledWith('/devices', expect.anything(), {
+      captureErrorDetail: true,
       json: {
         name: 'My Phone',
         provider: 'fcm',
@@ -81,6 +83,7 @@ describe('fcmApi.registerDevice', () => {
       pushEncryptionIdentity: identity,
     });
     expect(post).toHaveBeenCalledWith('/devices', expect.anything(), {
+      captureErrorDetail: true,
       json: {
         name: 'My Phone',
         provider: 'fcm',
@@ -125,6 +128,7 @@ describe('fcmApi.registerDevice', () => {
       pushEncryptionPreviousKeyExpiresAt: previousKeyExpiresAt,
     });
     expect(post).toHaveBeenCalledWith('/devices', expect.anything(), {
+      captureErrorDetail: true,
       json: {
         name: 'My Phone',
         provider: 'fcm',

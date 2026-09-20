@@ -51,6 +51,7 @@ export {
 } from './realtimeControl';
 export { connect, forget, disconnectFailureMessage } from './bootstrap';
 export {
+  beginScopedCredentialReplacement,
   beginScopedCredentialUpgrade,
   discardScopedCredentialUpgradeCandidate,
   inspectScopedCredentialUpgradeStatus,

@@ -23,6 +23,7 @@ const mockPush = jest.fn();
 const mockBack = jest.fn();
 // `mock*` prefix so the jest.mock factory below may close over it (hoisting rule).
 const mockQrCode = jest.fn();
+const mockBeginScopedCredentialReplacement = jest.fn();
 const mockBeginScopedCredentialUpgrade = jest.fn();
 const mockDiscardScopedCredentialUpgradeCandidate = jest.fn();
 const mockInspectScopedCredentialUpgradeStatus = jest.fn();
@@ -62,6 +63,8 @@ jest.mock('@ui/primitives/QrCode', () => {
   };
 });
 jest.mock('@/services', () => ({
+  beginScopedCredentialReplacement: (...args: unknown[]) =>
+    mockBeginScopedCredentialReplacement(...args),
   beginScopedCredentialUpgrade: (...args: unknown[]) => mockBeginScopedCredentialUpgrade(...args),
   discardScopedCredentialUpgradeCandidate: (...args: unknown[]) =>
     mockDiscardScopedCredentialUpgradeCandidate(...args),
@@ -254,6 +257,7 @@ beforeEach(() => {
   useSyncStore.setState({ status: 'idle', chats: 0, messages: 0, error: null });
   useDialogStore.setState({ current: null, queue: [] });
   mockBeginScopedCredentialUpgrade.mockResolvedValue({ kind: 'adopted' });
+  mockBeginScopedCredentialReplacement.mockResolvedValue({ kind: 'adopted' });
   mockDiscardScopedCredentialUpgradeCandidate.mockResolvedValue({ kind: 'discarded' });
   mockInspectScopedCredentialUpgradeStatus.mockResolvedValue({ kind: 'none' });
   mockPing.mockResolvedValue({ pong: true });
@@ -483,14 +487,142 @@ describe('ServerManagementScreen — ordinary sensitive presentation and account
     expect(await screen.findByText(PRIVATE_INFO.server_version)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Show Pairing QR' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Pair This Device' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Replace Device Credential' })).toBeTruthy();
     expect(screen.getByText('Device credential')).toBeTruthy();
-    expect(screen.getByText('Active')).toBeTruthy();
+    expect(screen.getByText('Saved on phone')).toBeTruthy();
     expect(screen.getByText('Mac dashboard only')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Refresh Statistics' })).toBeNull();
     expect(mockStats).not.toHaveBeenCalled();
     expect(screen.queryByTestId('pairing-qr-modal')).toBeNull();
     expect(JSON.stringify(view.toJSON())).not.toContain(PRIVATE_SCOPED_CREDENTIAL);
     expect(mockQrCode).not.toHaveBeenCalled();
+  });
+
+  it('replaces a scoped credential without a QR or automatic old-credential revocation', async () => {
+    useSessionStore.setState({
+      origin: PRIVATE_ORIGIN,
+      password: PRIVATE_SCOPED_CREDENTIAL,
+      serverInfo: null,
+    });
+    mockInfo.mockResolvedValue({ ...PRIVATE_INFO, supports_scoped_device_credentials: true });
+    await renderScreen();
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Replace Device Credential' }));
+    expect(screen.getByText(/Devices → Paired Client Credentials/)).toBeTruthy();
+    expect(screen.queryByTestId('pairing-qr-modal')).toBeNull();
+    const newCredential = `bbd_device_v1_${'n'.repeat(43)}`;
+    await fireEvent.changeText(screen.getByLabelText('Paired-client credential'), newCredential);
+    await fireEvent.press(screen.getByRole('button', { name: 'Use New Credential' }));
+
+    await waitFor(() =>
+      expect(mockBeginScopedCredentialReplacement).toHaveBeenCalledWith(newCredential),
+    );
+    expect(mockBeginScopedCredentialUpgrade).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('device-credential-modal')).toBeNull();
+    expect(useDialogStore.getState().current).toMatchObject({
+      title: 'Credential replaced',
+      message: expect.stringContaining('old credential was not revoked automatically'),
+    });
+  });
+
+  it('keeps an unconfirmed replacement entry available to retry', async () => {
+    useSessionStore.setState({
+      origin: PRIVATE_ORIGIN,
+      password: PRIVATE_SCOPED_CREDENTIAL,
+      serverInfo: null,
+    });
+    mockInfo.mockResolvedValue({ ...PRIVATE_INFO, supports_scoped_device_credentials: true });
+    mockBeginScopedCredentialReplacement.mockResolvedValue({ kind: 'retry', stage: 'storage' });
+    await renderScreen();
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Replace Device Credential' }));
+    const newCredential = `bbd_device_v1_${'n'.repeat(43)}`;
+    await fireEvent.changeText(screen.getByLabelText('Paired-client credential'), newCredential);
+    await fireEvent.press(screen.getByRole('button', { name: 'Use New Credential' }));
+
+    expect(
+      await screen.findByText(/could not confirm that the replacement was saved/),
+    ).toBeTruthy();
+    expect(screen.getByLabelText('Paired-client credential').props.value).toBe(newCredential);
+    expect(screen.getByLabelText('Paired-client credential').props.editable).toBe(true);
+    expect(screen.getByRole('button', { name: 'Use New Credential' })).toBeTruthy();
+  });
+
+  it('lets a scoped session remove a candidate the server could not verify', async () => {
+    useSessionStore.setState({
+      origin: PRIVATE_ORIGIN,
+      password: PRIVATE_SCOPED_CREDENTIAL,
+      serverInfo: null,
+    });
+    mockInfo.mockResolvedValue({ ...PRIVATE_INFO, supports_scoped_device_credentials: true });
+    mockBeginScopedCredentialReplacement.mockResolvedValue({
+      kind: 'retry',
+      stage: 'candidate-validation',
+    });
+    mockInspectScopedCredentialUpgradeStatus
+      .mockResolvedValueOnce({ kind: 'none' })
+      .mockResolvedValue({ kind: 'candidate' });
+    await renderScreen();
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Replace Device Credential' }));
+    await fireEvent.changeText(
+      screen.getByLabelText('Paired-client credential'),
+      `bbd_device_v1_${'n'.repeat(43)}`,
+    );
+    await fireEvent.press(screen.getByRole('button', { name: 'Use New Credential' }));
+
+    expect(await screen.findByText(/server could not verify it/)).toBeTruthy();
+    expect(screen.getByLabelText('Paired-client credential').props.value).toBe('');
+    await fireEvent.press(screen.getByRole('button', { name: 'Revoke and Remove Replacement' }));
+    expect(mockDiscardScopedCredentialUpgradeCandidate).toHaveBeenCalledTimes(1);
+    expect(useDialogStore.getState().current).toMatchObject({
+      title: 'Credential removed',
+      message: expect.stringContaining('previous paired-client credential'),
+    });
+  });
+
+  it('shows a push-owner conflict with a saved retry and no revocation action', async () => {
+    useSessionStore.setState({
+      origin: PRIVATE_ORIGIN,
+      password: PRIVATE_SCOPED_CREDENTIAL,
+      serverInfo: null,
+    });
+    mockInfo.mockResolvedValue({ ...PRIVATE_INFO, supports_scoped_device_credentials: true });
+    mockBeginScopedCredentialReplacement.mockResolvedValue({
+      kind: 'blocked',
+      reason: 'push-target-owned',
+    });
+    mockInspectScopedCredentialUpgradeStatus
+      .mockResolvedValueOnce({ kind: 'none' })
+      .mockResolvedValue({ kind: 'in-progress' });
+    await renderScreen();
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Replace Device Credential' }));
+    await fireEvent.changeText(
+      screen.getByLabelText('Paired-client credential'),
+      `bbd_device_v1_${'n'.repeat(43)}`,
+    );
+    await fireEvent.press(screen.getByRole('button', { name: 'Use New Credential' }));
+    expect(await screen.findByText(/push target assigned to another credential/)).toBeTruthy();
+    expect(await screen.findByText(/remove only the old notification registration/)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Revoke and Remove Credential' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Revoke and Remove Replacement' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Use New Credential' })).toBeNull();
+  });
+
+  it('restores a scoped candidate discard action after process restart', async () => {
+    useSessionStore.setState({
+      origin: PRIVATE_ORIGIN,
+      password: PRIVATE_SCOPED_CREDENTIAL,
+      serverInfo: null,
+    });
+    mockInfo.mockResolvedValue({ ...PRIVATE_INFO, supports_scoped_device_credentials: true });
+    mockInspectScopedCredentialUpgradeStatus.mockResolvedValue({ kind: 'candidate' });
+    await renderScreen();
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Finish Credential Replacement' }));
+    expect(screen.getByRole('button', { name: 'Revoke and Remove Replacement' })).toBeTruthy();
+    expect(screen.getByLabelText('Paired-client credential').props.editable).toBe(false);
   });
 
   it('validates and securely submits the device credential created on the Mac', async () => {

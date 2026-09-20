@@ -16,6 +16,7 @@ import { utf8Encode } from '@utils/bytes';
  * a live record would make an interrupted old write ambiguous.
  */
 const CREDENTIAL_UPGRADE_JOURNAL_VERSION = 1 as const;
+const CREDENTIAL_REPLACEMENT_JOURNAL_VERSION = 2 as const;
 
 /** Bound the complete SecureStore value before parsing or retaining any attacker-controlled text. */
 export const MAX_CREDENTIAL_UPGRADE_JOURNAL_UTF8_BYTES = 32 * 1024;
@@ -53,8 +54,8 @@ export interface CredentialUpgradeFcmV3AdoptionAck {
 export type CredentialUpgradeFcmAdoptionAck =
   CredentialUpgradeFcmV2AdoptionAck | CredentialUpgradeFcmV3AdoptionAck;
 
-interface CredentialUpgradeJournalBase {
-  readonly version: typeof CREDENTIAL_UPGRADE_JOURNAL_VERSION;
+interface CredentialUpgradeJournalBase<Version extends 1 | 2> {
+  readonly version: Version;
   /** Exact canonical origin whose active session owns both credentials. */
   readonly origin: string;
   /** Retained only until promotion so a stale/interleaved journal cannot replace another session. */
@@ -63,11 +64,15 @@ interface CredentialUpgradeJournalBase {
   readonly candidateCredential: string;
 }
 
-export interface CredentialUpgradeCandidateJournal extends CredentialUpgradeJournalBase {
+export interface CredentialUpgradeCandidateJournal extends CredentialUpgradeJournalBase<
+  typeof CREDENTIAL_UPGRADE_JOURNAL_VERSION
+> {
   readonly phase: 'candidate';
 }
 
-export interface CredentialUpgradeAdoptingJournal extends CredentialUpgradeJournalBase {
+export interface CredentialUpgradeAdoptingJournal extends CredentialUpgradeJournalBase<
+  typeof CREDENTIAL_UPGRADE_JOURNAL_VERSION
+> {
   readonly phase: 'adopting';
   /**
    * Exact body persisted before the first mutating request. Recovery must replay this body even if
@@ -76,7 +81,9 @@ export interface CredentialUpgradeAdoptingJournal extends CredentialUpgradeJourn
   readonly registration: CredentialUpgradeFcmRegistration;
 }
 
-export interface CredentialUpgradeAdoptedJournal extends CredentialUpgradeJournalBase {
+export interface CredentialUpgradeAdoptedJournal extends CredentialUpgradeJournalBase<
+  typeof CREDENTIAL_UPGRADE_JOURNAL_VERSION
+> {
   readonly phase: 'adopted';
   readonly registration: CredentialUpgradeFcmRegistration;
   /** Exact server acknowledgement already paired with the matching active local encryption state. */
@@ -89,11 +96,47 @@ export interface RevokedCredentialUpgradeJournal {
   readonly phase: 'revoked';
 }
 
+/** Version 2 replaces one scoped bearer without changing the deployed version 1 wire shape. */
+export interface CredentialReplacementCandidateJournal extends CredentialUpgradeJournalBase<
+  typeof CREDENTIAL_REPLACEMENT_JOURNAL_VERSION
+> {
+  readonly phase: 'candidate';
+}
+
+export interface CredentialReplacementAdoptingJournal extends CredentialUpgradeJournalBase<
+  typeof CREDENTIAL_REPLACEMENT_JOURNAL_VERSION
+> {
+  readonly phase: 'adopting';
+  readonly registration: CredentialUpgradeFcmRegistration;
+}
+
+export interface CredentialReplacementAdoptedJournal extends CredentialUpgradeJournalBase<
+  typeof CREDENTIAL_REPLACEMENT_JOURNAL_VERSION
+> {
+  readonly phase: 'adopted';
+  readonly registration: CredentialUpgradeFcmRegistration;
+  readonly ack: CredentialUpgradeFcmV3AdoptionAck;
+}
+
 export type CredentialUpgradeJournal =
   | CredentialUpgradeCandidateJournal
   | CredentialUpgradeAdoptingJournal
   | CredentialUpgradeAdoptedJournal
+  | CredentialReplacementCandidateJournal
+  | CredentialReplacementAdoptingJournal
+  | CredentialReplacementAdoptedJournal
   | RevokedCredentialUpgradeJournal;
+
+type Version1CredentialUpgradeJournal =
+  | CredentialUpgradeCandidateJournal
+  | CredentialUpgradeAdoptingJournal
+  | CredentialUpgradeAdoptedJournal
+  | RevokedCredentialUpgradeJournal;
+
+type CredentialReplacementJournal =
+  | CredentialReplacementCandidateJournal
+  | CredentialReplacementAdoptingJournal
+  | CredentialReplacementAdoptedJournal;
 
 export type CredentialUpgradeJournalInspection =
   | { readonly kind: 'absent' }
@@ -124,18 +167,18 @@ export type CredentialUpgradeResolution =
   | {
       readonly kind: 'resume-candidate';
       readonly session: StoredServerCredential;
-      readonly journal: CredentialUpgradeCandidateJournal;
+      readonly journal: CredentialUpgradeCandidateJournal | CredentialReplacementCandidateJournal;
     }
   | {
       readonly kind: 'retry-adoption';
       readonly session: StoredServerCredential;
-      readonly journal: CredentialUpgradeAdoptingJournal;
+      readonly journal: CredentialUpgradeAdoptingJournal | CredentialReplacementAdoptingJournal;
     }
   | {
       readonly kind: 'finish-promotion';
       /** Candidate is authoritative once encrypted push adoption has an exact acknowledgement. */
       readonly session: StoredServerCredential;
-      readonly journal: CredentialUpgradeAdoptedJournal;
+      readonly journal: CredentialUpgradeAdoptedJournal | CredentialReplacementAdoptedJournal;
       /** False means the main credential was promoted and only journal cleanup remains. */
       readonly writeMainCredential: boolean;
     }
@@ -290,7 +333,7 @@ function normalizeAdoptionAck(
   });
 }
 
-function normalizeJournal(value: unknown): CredentialUpgradeJournal {
+function normalizeVersion1Journal(value: unknown): Version1CredentialUpgradeJournal {
   if (
     !isPlainRecord(value) ||
     value.version !== CREDENTIAL_UPGRADE_JOURNAL_VERSION ||
@@ -366,6 +409,90 @@ function normalizeJournal(value: unknown): CredentialUpgradeJournal {
   return Object.freeze({ ...base, phase: 'adopted', registration, ack });
 }
 
+function normalizeCredentialReplacementJournal(value: unknown): CredentialReplacementJournal {
+  if (
+    !isPlainRecord(value) ||
+    value.version !== CREDENTIAL_REPLACEMENT_JOURNAL_VERSION ||
+    typeof value.phase !== 'string'
+  ) {
+    throw invalidJournal();
+  }
+
+  requireCanonicalOrigin(value.origin);
+  requireCandidateCredential(value.previousCredential);
+  requireCandidateCredential(value.candidateCredential);
+  if (value.previousCredential === value.candidateCredential) throw invalidJournal();
+
+  const base = {
+    version: CREDENTIAL_REPLACEMENT_JOURNAL_VERSION,
+    origin: value.origin,
+    previousCredential: value.previousCredential,
+    candidateCredential: value.candidateCredential,
+  } as const;
+
+  if (value.phase === 'candidate') {
+    if (
+      !hasExactKeys(value, [
+        'version',
+        'phase',
+        'origin',
+        'previousCredential',
+        'candidateCredential',
+      ])
+    ) {
+      throw invalidJournal();
+    }
+    return Object.freeze({ ...base, phase: 'candidate' });
+  }
+
+  if (value.phase !== 'adopting' && value.phase !== 'adopted') throw invalidJournal();
+  const registration = normalizeRegistration(value.registration);
+  if (registration.pushEncryption.type !== FCM_PUSH_ENCRYPTION_TYPE_V3) throw invalidJournal();
+  if (value.phase === 'adopting') {
+    if (
+      !hasExactKeys(value, [
+        'version',
+        'phase',
+        'origin',
+        'previousCredential',
+        'candidateCredential',
+        'registration',
+      ])
+    ) {
+      throw invalidJournal();
+    }
+    return Object.freeze({ ...base, phase: 'adopting', registration });
+  }
+
+  if (
+    !hasExactKeys(value, [
+      'version',
+      'phase',
+      'origin',
+      'previousCredential',
+      'candidateCredential',
+      'registration',
+      'ack',
+    ])
+  ) {
+    throw invalidJournal();
+  }
+  const ack = normalizeAdoptionAck(value.ack, registration, value.origin);
+  if (ack.pushEncryptionType !== FCM_PUSH_ENCRYPTION_TYPE_V3) throw invalidJournal();
+  return Object.freeze({ ...base, phase: 'adopted', registration, ack });
+}
+
+function normalizeJournal(value: unknown): CredentialUpgradeJournal {
+  if (!isPlainRecord(value)) throw invalidJournal();
+  if (value.version === CREDENTIAL_UPGRADE_JOURNAL_VERSION) {
+    return normalizeVersion1Journal(value);
+  }
+  if (value.version === CREDENTIAL_REPLACEMENT_JOURNAL_VERSION) {
+    return normalizeCredentialReplacementJournal(value);
+  }
+  throw invalidJournal();
+}
+
 function requirePhase<P extends CredentialUpgradeJournal['phase']>(
   journal: CredentialUpgradeJournal,
   phase: P,
@@ -390,25 +517,78 @@ export function createCredentialUpgradeCandidate(
       candidateCredential,
     },
     'candidate',
-  );
+  ) as CredentialUpgradeCandidateJournal;
+}
+
+/** Take durable custody of a new scoped bearer while retaining the prior scoped session. */
+export function createCredentialReplacementCandidate(
+  origin: string,
+  previousCredential: string,
+  candidateCredential: string,
+): CredentialReplacementCandidateJournal {
+  return requirePhase(
+    {
+      version: CREDENTIAL_REPLACEMENT_JOURNAL_VERSION,
+      phase: 'candidate',
+      origin,
+      previousCredential,
+      candidateCredential,
+    },
+    'candidate',
+  ) as CredentialReplacementCandidateJournal;
 }
 
 /** Persist this transition before the first POST so every later retry owns one exact target. */
 export function beginCredentialUpgradePushAdoption(
   candidate: CredentialUpgradeCandidateJournal,
   registration: CredentialUpgradeFcmRegistration,
-): CredentialUpgradeAdoptingJournal {
+): CredentialUpgradeAdoptingJournal;
+export function beginCredentialUpgradePushAdoption(
+  candidate: CredentialReplacementCandidateJournal,
+  registration: CredentialUpgradeFcmRegistration,
+): CredentialReplacementAdoptingJournal;
+export function beginCredentialUpgradePushAdoption(
+  candidate: CredentialUpgradeCandidateJournal | CredentialReplacementCandidateJournal,
+  registration: CredentialUpgradeFcmRegistration,
+): CredentialUpgradeAdoptingJournal | CredentialReplacementAdoptingJournal;
+export function beginCredentialUpgradePushAdoption(
+  candidate: CredentialUpgradeCandidateJournal | CredentialReplacementCandidateJournal,
+  registration: CredentialUpgradeFcmRegistration,
+): CredentialUpgradeAdoptingJournal | CredentialReplacementAdoptingJournal {
   const current = requirePhase(candidate, 'candidate');
-  return requirePhase({ ...current, phase: 'adopting', registration }, 'adopting');
+  return requirePhase({ ...current, phase: 'adopting', registration }, 'adopting') as
+    CredentialUpgradeAdoptingJournal | CredentialReplacementAdoptingJournal;
 }
 
 /** Record an exact acknowledgement only after the matching local encryption state is active. */
 export function acknowledgeCredentialUpgradePushAdoption(
   adopting: CredentialUpgradeAdoptingJournal,
   ack: CredentialUpgradeFcmAdoptionAck,
-): CredentialUpgradeAdoptedJournal {
+): CredentialUpgradeAdoptedJournal;
+export function acknowledgeCredentialUpgradePushAdoption(
+  adopting: CredentialReplacementAdoptingJournal,
+  ack: CredentialUpgradeFcmV3AdoptionAck,
+): CredentialReplacementAdoptedJournal;
+export function acknowledgeCredentialUpgradePushAdoption(
+  adopting: CredentialUpgradeAdoptingJournal | CredentialReplacementAdoptingJournal,
+  ack: CredentialUpgradeFcmAdoptionAck,
+): CredentialUpgradeAdoptedJournal | CredentialReplacementAdoptedJournal;
+export function acknowledgeCredentialUpgradePushAdoption(
+  adopting: CredentialUpgradeAdoptingJournal | CredentialReplacementAdoptingJournal,
+  ack: CredentialUpgradeFcmAdoptionAck,
+): CredentialUpgradeAdoptedJournal | CredentialReplacementAdoptedJournal {
   const current = requirePhase(adopting, 'adopting');
-  return requirePhase({ ...current, phase: 'adopted', ack }, 'adopted');
+  if (current.version === CREDENTIAL_REPLACEMENT_JOURNAL_VERSION) {
+    if (ack.pushEncryptionType !== FCM_PUSH_ENCRYPTION_TYPE_V3) throw invalidJournal();
+    return requirePhase(
+      { ...current, phase: 'adopted', ack },
+      'adopted',
+    ) as CredentialReplacementAdoptedJournal;
+  }
+  return requirePhase(
+    { ...current, phase: 'adopted', ack },
+    'adopted',
+  ) as CredentialUpgradeAdoptedJournal;
 }
 
 export function revokedCredentialUpgradeJournal(): RevokedCredentialUpgradeJournal {

@@ -90,6 +90,9 @@ export async function registerDevice(
     }
   }
   const res = await http.post('/devices', RegisterAck, {
+    // The scoped replacement flow needs the server's bounded machine-readable 409 type to
+    // distinguish an existing push owner from a temporary network failure.
+    captureErrorDetail: true,
     json: {
       name,
       provider: 'fcm',

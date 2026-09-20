@@ -18,6 +18,7 @@ import { isUnimplementedEndpoint } from '@core/api/errors';
 import { isScopedDeviceCredential } from '@core/secure';
 import { buildSetupQr } from '@features/setup/qr';
 import {
+  beginScopedCredentialReplacement,
   beginScopedCredentialUpgrade,
   cancelFullRepair,
   discardScopedCredentialUpgradeCandidate,
@@ -171,12 +172,13 @@ export default function ServerManagementScreen(): React.JSX.Element {
     accountCurrent && !!password && !isScopedDeviceCredential(password);
   const scopedCredentialSession =
     accountCurrent && !!password && isScopedDeviceCredential(password);
+  const canManageCredential = legacyCredentialSession || scopedCredentialSession;
 
   // The journal, rather than component memory, owns retry visibility. This makes a candidate
   // created before process death immediately visible and discardable without pasting it again.
   useEffect(() => {
     let current = true;
-    if (!legacyCredentialSession) {
+    if (!canManageCredential) {
       return () => {
         current = false;
       };
@@ -195,7 +197,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
     return () => {
       current = false;
     };
-  }, [accountLease, legacyCredentialSession, transportRevision]);
+  }, [accountLease, canManageCredential, transportRevision]);
 
   // A legacy pairing payload embeds the shared password. A scoped credential belongs to this
   // device alone, so never offer it as a reusable QR or hand it to the QR subtree at all.
@@ -329,32 +331,55 @@ export default function ServerManagementScreen(): React.JSX.Element {
 
   const onSubmitCredential = async (): Promise<void> => {
     if (credentialWorking || !accountLease.isCurrent()) return;
+    const replacing = scopedCredentialSession;
     const candidate = credentialText.trim();
     if (!isScopedDeviceCredential(candidate)) {
       setCredentialIssue('That doesn’t look like a complete paired-client credential.');
       return;
     }
 
-    // Never retain the bearer in component state once secure adoption has started.
-    setCredentialText('');
+    // Keep an unconfirmed replacement in the form so the owner can retry without losing the
+    // Mac's one-time bearer. Once durable custody is confirmed, remove it from component state.
+    if (!replacing) setCredentialText('');
     setCredentialIssue(null);
     setCredentialSaved(false);
     setCredentialDiscardable(false);
     setCredentialWorking(true);
     try {
-      const outcome = await beginScopedCredentialUpgrade(candidate);
+      const outcome = replacing
+        ? await beginScopedCredentialReplacement(candidate)
+        : await beginScopedCredentialUpgrade(candidate);
       if (!accountLease.isCurrent()) return;
       if (outcome.kind === 'adopted' || outcome.kind === 'adopted-cleanup-pending') {
+        setCredentialText('');
         setCredentialModal(null);
         showDialog(
-          'Device paired',
-          outcome.kind === 'adopted'
-            ? 'This phone now uses its own paired-client credential.'
-            : 'This phone is paired. Secure cleanup will finish automatically after the next reconnect.',
+          replacing ? 'Credential replaced' : 'Device paired',
+          replacing
+            ? 'This phone now uses the new credential. The old credential was not revoked automatically; check the Mac dashboard before revoking it.'
+            : outcome.kind === 'adopted'
+              ? 'This phone now uses its own paired-client credential.'
+              : 'This phone is paired. Secure cleanup will finish automatically after the next reconnect.',
         );
         return;
       }
       if (outcome.kind === 'retry') {
+        if (replacing) {
+          const status = await inspectScopedCredentialUpgradeStatus();
+          if (!accountLease.isCurrent()) return;
+          const confirmedSaved = status.kind === 'candidate' || status.kind === 'in-progress';
+          setCredentialSaved(confirmedSaved);
+          setCredentialDiscardable(status.kind === 'candidate');
+          if (confirmedSaved) setCredentialText('');
+          setCredentialIssue(
+            status.kind === 'candidate' && outcome.stage === 'candidate-validation'
+              ? 'The replacement is saved securely, but the server could not verify it. Gator will retry; if the value is wrong, revoke and remove it below before entering another. The old credential still works.'
+              : confirmedSaved
+                ? 'The replacement is saved securely. Gator will retry it when it reconnects; the old credential was not revoked automatically.'
+                : 'Gator could not confirm that the replacement was saved. Your entry is still here so you can retry.',
+          );
+          return;
+        }
         if (outcome.stage === 'candidate-validation' || outcome.stage === 'adoption') {
           setCredentialSaved(true);
           setCredentialDiscardable(outcome.stage === 'candidate-validation');
@@ -377,7 +402,31 @@ export default function ServerManagementScreen(): React.JSX.Element {
         );
         return;
       }
+      if (replacing && outcome.kind === 'blocked' && outcome.reason === 'push-target-owned') {
+        const status = await inspectScopedCredentialUpgradeStatus();
+        if (!accountLease.isCurrent()) return;
+        const confirmedSaved = status.kind === 'candidate' || status.kind === 'in-progress';
+        setCredentialSaved(confirmedSaved);
+        setCredentialDiscardable(false);
+        if (confirmedSaved) setCredentialText('');
+        setCredentialIssue(
+          'The Mac still has this phone’s push target assigned to another credential. In the Mac dashboard, remove only the old notification registration for this phone, not the old paired-client credential. Then Gator can retry; your phone data remains here.',
+        );
+        return;
+      }
       if (outcome.kind === 'unsupported') {
+        if (replacing) {
+          const status = await inspectScopedCredentialUpgradeStatus();
+          if (!accountLease.isCurrent()) return;
+          const confirmedSaved = status.kind === 'candidate' || status.kind === 'in-progress';
+          setCredentialSaved(confirmedSaved);
+          setCredentialDiscardable(status.kind === 'candidate');
+          if (confirmedSaved) setCredentialText('');
+          setCredentialIssue(
+            'The server cannot finish this replacement yet. Check the Mac dashboard; the old credential was not revoked automatically.',
+          );
+          return;
+        }
         setCredentialSaved(true);
         setCredentialDiscardable(true);
         setCredentialIssue(
@@ -392,8 +441,13 @@ export default function ServerManagementScreen(): React.JSX.Element {
         if (!accountLease.isCurrent()) return;
         setCredentialSaved(status.kind === 'candidate' || status.kind === 'in-progress');
         setCredentialDiscardable(status.kind === 'candidate');
+        if (replacing && (status.kind === 'candidate' || status.kind === 'in-progress')) {
+          setCredentialText('');
+        }
         setCredentialIssue(
-          'Another credential is already saved for this phone. Gator will finish it automatically, or you can try to revoke and remove it below.',
+          replacing
+            ? 'A replacement is already saved for this phone. Gator will retry it automatically; the old credential was not revoked automatically.'
+            : 'Another credential is already saved for this phone. Gator will finish it automatically, or you can try to revoke and remove it below.',
         );
         return;
       }
@@ -407,13 +461,25 @@ export default function ServerManagementScreen(): React.JSX.Element {
       }
       if (outcome.kind === 'quarantined') {
         setCredentialIssue(
-          'Pairing stopped because the saved secure state did not match this server session. Reconnect the server before trying again.',
+          replacing
+            ? 'Replacement stopped because the saved secure state did not match this server session. The old credential was not revoked automatically; check the Mac dashboard.'
+            : 'Pairing stopped because the saved secure state did not match this server session. Reconnect the server before trying again.',
         );
         return;
       }
       setCredentialIssue(
-        'Pairing stopped because the account changed. Reopen this screen to try again.',
+        replacing
+          ? 'Replacement stopped because the account changed. Reopen this screen to try again.'
+          : 'Pairing stopped because the account changed. Reopen this screen to try again.',
       );
+    } catch {
+      if (accountLease.isCurrent()) {
+        setCredentialIssue(
+          replacing
+            ? 'Gator could not confirm that the replacement was saved. Your entry is still here so you can retry.'
+            : 'Gator could not finish pairing. Check the Mac dashboard before trying again.',
+        );
+      }
     } finally {
       if (accountLease.isCurrent()) setCredentialWorking(false);
     }
@@ -432,7 +498,9 @@ export default function ServerManagementScreen(): React.JSX.Element {
         setCredentialModal(null);
         showDialog(
           'Credential removed',
-          'The credential is no longer authorized on the server and was removed from this phone. This phone still uses the shared server password.',
+          scopedCredentialSession
+            ? 'The replacement has no server authority and was removed from this phone. This phone still uses its previous paired-client credential.'
+            : 'The credential is no longer authorized on the server and was removed from this phone. This phone still uses the shared server password.',
         );
         return;
       }
@@ -557,7 +625,32 @@ export default function ServerManagementScreen(): React.JSX.Element {
               }}
             />
           ) : scopedCredentialSession ? (
-            <InfoRow label="Device credential" value="Active" />
+            <>
+              <InfoRow
+                label="Device credential"
+                value={credentialSaved ? 'Replacement pending' : 'Saved on phone'}
+              />
+              <ActionRow
+                label={
+                  credentialSaved ? 'Finish Credential Replacement' : 'Replace Device Credential'
+                }
+                disabled={credentialWorking}
+                busy={credentialWorking}
+                onPress={() => {
+                  if (accountLease.isCurrent()) {
+                    setCredentialIssue(
+                      credentialSaved
+                        ? credentialDiscardable
+                          ? 'A replacement is saved securely. Gator will retry it automatically, or you can revoke and remove it below before entering another.'
+                          : 'A replacement is saved securely. Gator will retry it automatically; the old credential was not revoked automatically.'
+                        : null,
+                    );
+                    const animationType = modalAnimationFor(reduceMotion.current);
+                    setCredentialModal((current) => current ?? animationType);
+                  }
+                }}
+              />
+            </>
           ) : null}
           {pairingPayload ? (
             <ActionRow
@@ -681,9 +774,9 @@ export default function ServerManagementScreen(): React.JSX.Element {
         </Modal>
       ) : null}
 
-      {/* Unmounting clears the secret TextInput and its native backing view. The credential itself
-          is never rendered after submit; only the secure journal retains a retryable candidate. */}
-      {legacyCredentialSession && credentialModal ? (
+      {/* Unmounting clears the secret TextInput and its native backing view. Keep an unconfirmed
+          replacement only while this form stays open; clear it once secure custody is confirmed. */}
+      {canManageCredential && credentialModal ? (
         <Modal
           visible
           animationType={credentialModal}
@@ -692,7 +785,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
         >
           <Screen>
             <ScreenHeader
-              title="Pair This Device"
+              title={scopedCredentialSession ? 'Replace Device Credential' : 'Pair This Device'}
               right={
                 <Pressable
                   onPress={closeCredentialModal}
@@ -717,8 +810,9 @@ export default function ServerManagementScreen(): React.JSX.Element {
               keyboardShouldPersistTaps="handled"
             >
               <Text style={[styles.credentialDescription, { color: theme.color.secondaryLabel }]}>
-                On your Mac, open the local Gator dashboard and create a device credential. The Mac
-                shows it only once; paste it here so this phone can stop using the shared password.
+                {scopedCredentialSession
+                  ? 'On your Mac, open Gator → Devices → Paired Client Credentials and create a new credential for this phone. Paste its one-time value here. This keeps your phone data; the old credential is not revoked automatically.'
+                  : 'On your Mac, open the local Gator dashboard and create a device credential. The Mac shows it only once; paste it here so this phone can stop using the shared password.'}
               </Text>
               <SettingsSection>
                 <TextInput
@@ -746,7 +840,11 @@ export default function ServerManagementScreen(): React.JSX.Element {
               ) : null}
               {credentialSaved && credentialDiscardable ? (
                 <ActionRow
-                  label="Revoke and Remove Credential"
+                  label={
+                    scopedCredentialSession
+                      ? 'Revoke and Remove Replacement'
+                      : 'Revoke and Remove Credential'
+                  }
                   disabled={credentialWorking}
                   busy={credentialWorking}
                   destructive
@@ -754,7 +852,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
                 />
               ) : !credentialSaved ? (
                 <ActionRow
-                  label="Use Credential"
+                  label={scopedCredentialSession ? 'Use New Credential' : 'Use Credential'}
                   disabled={credentialWorking || !credentialText.trim()}
                   busy={credentialWorking}
                   onPress={() => void onSubmitCredential()}

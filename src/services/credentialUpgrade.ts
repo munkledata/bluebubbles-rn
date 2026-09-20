@@ -18,6 +18,7 @@ import {
 import { useSessionStore } from '@state/sessionStore';
 import { fixedCredentialClient, vault } from './clients';
 import {
+  beginCredentialReplacementRuntime,
   beginCredentialUpgradeRuntime,
   discardCredentialUpgradeCandidateRuntime,
   resumeCredentialUpgradeRuntime,
@@ -304,7 +305,7 @@ function createRuntimeDependencies(
 }
 
 function runCredentialUpgrade(
-  mode: 'begin' | 'resume' | 'discard',
+  mode: 'begin' | 'replace' | 'resume' | 'discard',
   candidateCredential: string | undefined,
   options: ResumeScopedCredentialUpgradeOptions,
 ): Promise<CredentialUpgradeRuntimeOutcome> {
@@ -334,9 +335,11 @@ function runCredentialUpgrade(
           outcome =
             mode === 'begin'
               ? await beginCredentialUpgradeRuntime(candidateCredential ?? '', deps)
-              : mode === 'resume'
-                ? await resumeCredentialUpgradeRuntime(deps)
-                : await discardCredentialUpgradeCandidateRuntime(deps);
+              : mode === 'replace'
+                ? await beginCredentialReplacementRuntime(candidateCredential ?? '', deps)
+                : mode === 'resume'
+                  ? await resumeCredentialUpgradeRuntime(deps)
+                  : await discardCredentialUpgradeCandidateRuntime(deps);
         }),
       );
       if (tracked === 'paused') outcome = { kind: 'cancelled' };
@@ -374,6 +377,13 @@ export function beginScopedCredentialUpgrade(
   candidateCredential: string,
 ): Promise<CredentialUpgradeRuntimeOutcome> {
   return runCredentialUpgrade('begin', candidateCredential, { restartRealtime: true });
+}
+
+/** Replace this app's scoped bearer without clearing local data or revoking the previous bearer. */
+export function beginScopedCredentialReplacement(
+  candidateCredential: string,
+): Promise<CredentialUpgradeRuntimeOutcome> {
+  return runCredentialUpgrade('replace', candidateCredential, { restartRealtime: true });
 }
 
 /** Resume candidate/adoption/promotion state left by a retry, reconnect, or process death. */

@@ -1,9 +1,11 @@
 import type { ServerInfo } from '@core/models';
+import { ApiError } from '@core/api/errors';
 import { FCM_PUSH_ENCRYPTION_TYPE_V3 } from '@core/realtime';
 import {
   acknowledgeCredentialUpgradePushAdoption,
   beginCredentialUpgradePushAdoption,
   createCredentialUpgradeCandidate,
+  createCredentialReplacementCandidate,
   isScopedDeviceCredential,
   resolveCredentialUpgrade,
   serializeCredentialUpgradeJournal,
@@ -65,6 +67,7 @@ export type CredentialUpgradeRuntimeOutcome =
   | { readonly kind: 'busy' }
   | { readonly kind: 'discarded' }
   | { readonly kind: 'conflict' }
+  | { readonly kind: 'blocked'; readonly reason: 'push-target-owned' }
   | {
       readonly kind: 'retry';
       readonly stage: 'candidate-validation' | 'candidate-revocation' | 'adoption' | 'storage';
@@ -79,6 +82,7 @@ export type CredentialUpgradeRuntimeOutcome =
         | CredentialUpgradeQuarantineReason
         | 'invalid-candidate'
         | 'legacy-session-required'
+        | 'scoped-session-required'
         | 'v3-registration-required'
         | 'invalid-v3-ack'
         | 'active-v3-mismatch';
@@ -231,8 +235,11 @@ async function advanceCredentialUpgrade(
 
   if (resolution.kind === 'resume-candidate') {
     const { journal } = resolution;
-    if (isScopedDeviceCredential(journal.previousCredential)) {
+    if (journal.version === 1 && isScopedDeviceCredential(journal.previousCredential)) {
       return { kind: 'quarantined', reason: 'legacy-session-required' };
+    }
+    if (journal.version === 2 && !isScopedDeviceCredential(journal.previousCredential)) {
+      return { kind: 'quarantined', reason: 'scoped-session-required' };
     }
 
     let serverInfo: ServerInfo;
@@ -301,8 +308,19 @@ async function advanceCredentialUpgrade(
         journal.candidateCredential,
         journal.registration,
       );
-    } catch {
-      return deps.isCurrent() ? { kind: 'retry', stage: 'adoption' } : { kind: 'cancelled' };
+    } catch (error) {
+      if (!deps.isCurrent()) return { kind: 'cancelled' };
+      if (
+        journal.version === 2 &&
+        error instanceof ApiError &&
+        error.status === 409 &&
+        error.serverErrorType === 'device_target_owned'
+      ) {
+        // The exact V2 intent remains durable. Do not revoke the old bearer or accept a different
+        // candidate; an owner must resolve the conflicting push row before this request can retry.
+        return { kind: 'blocked', reason: 'push-target-owned' };
+      }
+      return { kind: 'retry', stage: 'adoption' };
     }
     if (!deps.isCurrent()) return { kind: 'cancelled' };
 
@@ -341,10 +359,10 @@ async function advanceCredentialUpgrade(
   return terminalResolutionOutcome(resolution) ?? { kind: 'cancelled' };
 }
 
-/** Persist one user-supplied scoped bearer, then advance it through exact V3 push adoption. */
-export async function beginCredentialUpgradeRuntime(
+async function beginCredentialTransitionRuntime(
   candidateCredential: string,
   deps: CredentialUpgradeRuntimeDependencies,
+  mode: 'legacy-upgrade' | 'scoped-replacement',
 ): Promise<CredentialUpgradeRuntimeOutcome> {
   if (!isScopedDeviceCredential(candidateCredential)) {
     return { kind: 'quarantined', reason: 'invalid-candidate' };
@@ -353,19 +371,39 @@ export async function beginCredentialUpgradeRuntime(
   if (!snapshot) return { kind: 'cancelled' };
   const terminal = terminalResolutionOutcome(snapshot.resolution);
   if (terminal?.kind !== 'idle') return terminal ?? { kind: 'conflict' };
-  if (!snapshot.storedSession || isScopedDeviceCredential(snapshot.storedSession.credential)) {
-    return { kind: 'quarantined', reason: 'legacy-session-required' };
+  if (!snapshot.storedSession) {
+    return {
+      kind: 'quarantined',
+      reason: mode === 'legacy-upgrade' ? 'legacy-session-required' : 'scoped-session-required',
+    };
+  }
+  const previousIsScoped = isScopedDeviceCredential(snapshot.storedSession.credential);
+  if (mode === 'legacy-upgrade' ? previousIsScoped : !previousIsScoped) {
+    return {
+      kind: 'quarantined',
+      reason: mode === 'legacy-upgrade' ? 'legacy-session-required' : 'scoped-session-required',
+    };
+  }
+  if (snapshot.storedSession.credential === candidateCredential) {
+    return { kind: 'quarantined', reason: 'invalid-candidate' };
   }
   if (!deps.beginExclusiveTransition()) return { kind: 'busy' };
   if (!deps.isCurrent()) return { kind: 'cancelled' };
 
   let candidate;
   try {
-    candidate = createCredentialUpgradeCandidate(
-      snapshot.storedSession.origin,
-      snapshot.storedSession.credential,
-      candidateCredential,
-    );
+    candidate =
+      mode === 'legacy-upgrade'
+        ? createCredentialUpgradeCandidate(
+            snapshot.storedSession.origin,
+            snapshot.storedSession.credential,
+            candidateCredential,
+          )
+        : createCredentialReplacementCandidate(
+            snapshot.storedSession.origin,
+            snapshot.storedSession.credential,
+            candidateCredential,
+          );
     await deps.vault.set('serverCredentialUpgrade', serializeCredentialUpgradeJournal(candidate));
   } catch {
     return { kind: 'retry', stage: 'storage' };
@@ -376,6 +414,22 @@ export async function beginCredentialUpgradeRuntime(
     session: snapshot.storedSession,
     journal: candidate,
   });
+}
+
+/** Upgrade a legacy shared-password session without changing its account or local data. */
+export function beginCredentialUpgradeRuntime(
+  candidateCredential: string,
+  deps: CredentialUpgradeRuntimeDependencies,
+): Promise<CredentialUpgradeRuntimeOutcome> {
+  return beginCredentialTransitionRuntime(candidateCredential, deps, 'legacy-upgrade');
+}
+
+/** Replace only this phone's scoped bearer; the old bearer is never revoked here. */
+export function beginCredentialReplacementRuntime(
+  candidateCredential: string,
+  deps: CredentialUpgradeRuntimeDependencies,
+): Promise<CredentialUpgradeRuntimeOutcome> {
+  return beginCredentialTransitionRuntime(candidateCredential, deps, 'scoped-replacement');
 }
 
 /** Resume every durable crash boundary without accepting or inventing another bearer. */
@@ -410,10 +464,30 @@ export async function discardCredentialUpgradeCandidateRuntime(
       snapshot.resolution.journal.origin,
       snapshot.resolution.journal.candidateCredential,
     );
-  } catch {
-    return deps.isCurrent()
-      ? { kind: 'retry', stage: 'candidate-revocation' }
-      : { kind: 'cancelled' };
+  } catch (error) {
+    if (!(error instanceof ApiError && error.status === 401)) {
+      return deps.isCurrent()
+        ? { kind: 'retry', stage: 'candidate-revocation' }
+        : { kind: 'cancelled' };
+    }
+    // A revoked or mistyped bearer cannot call revoke-self. Only an independent 401 from the
+    // candidate-authenticated info endpoint proves it has no remaining authority; any reachable
+    // valid bearer or uncertain result keeps its only local custody for another revocation attempt.
+    try {
+      await deps.fetchCandidateServerInfo(
+        snapshot.resolution.journal.origin,
+        snapshot.resolution.journal.candidateCredential,
+      );
+      return deps.isCurrent()
+        ? { kind: 'retry', stage: 'candidate-revocation' }
+        : { kind: 'cancelled' };
+    } catch (validationError) {
+      if (!(validationError instanceof ApiError && validationError.status === 401)) {
+        return deps.isCurrent()
+          ? { kind: 'retry', stage: 'candidate-revocation' }
+          : { kind: 'cancelled' };
+      }
+    }
   }
   if (!deps.isCurrent()) return { kind: 'cancelled' };
   if (!(await rereadExactJournal(deps, snapshot.resolution.journal))) {

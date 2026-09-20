@@ -1,6 +1,7 @@
 import {
   acknowledgeCredentialUpgradePushAdoption,
   beginCredentialUpgradePushAdoption,
+  createCredentialReplacementCandidate,
   createCredentialUpgradeCandidate,
   inspectCredentialUpgradeJournal,
   MAX_CREDENTIAL_UPGRADE_JOURNAL_UTF8_BYTES,
@@ -15,6 +16,7 @@ import { FCM_DEVICE_ENCRYPTION_TYPE, FCM_PUSH_ENCRYPTION_TYPE_V3 } from '@core/r
 
 const ORIGIN = 'https://gator.example';
 const PREVIOUS_CREDENTIAL = 'legacy shared password';
+const PREVIOUS_SCOPED_CREDENTIAL = `bbd_device_v1_${'B'.repeat(43)}`;
 const CANDIDATE_CREDENTIAL = `bbd_device_v1_${'A'.repeat(43)}`;
 const KEY = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
 const V3_BINDING = {
@@ -93,6 +95,109 @@ describe('credential-upgrade durable journal', () => {
     expect(() => acknowledgeCredentialUpgradePushAdoption(candidate as never, V2_ACK)).toThrow(
       'invalid credential-upgrade journal',
     );
+  });
+
+  it('round-trips V2 scoped replacement without changing V1 canonical bytes', () => {
+    const replacement = createCredentialReplacementCandidate(
+      ORIGIN,
+      PREVIOUS_SCOPED_CREDENTIAL,
+      CANDIDATE_CREDENTIAL,
+    );
+    const adopting = beginCredentialUpgradePushAdoption(replacement, V3_REGISTRATION);
+    const adopted = acknowledgeCredentialUpgradePushAdoption(adopting, V3_ACK);
+
+    expect(serializeCredentialUpgradeJournal(replacement)).toBe(
+      JSON.stringify({
+        version: 2,
+        origin: ORIGIN,
+        previousCredential: PREVIOUS_SCOPED_CREDENTIAL,
+        candidateCredential: CANDIDATE_CREDENTIAL,
+        phase: 'candidate',
+      }),
+    );
+    for (const journal of [replacement, adopting, adopted]) {
+      expect(inspectCredentialUpgradeJournal(serializeCredentialUpgradeJournal(journal))).toEqual({
+        kind: 'valid',
+        journal,
+      });
+    }
+    expect(serializeCredentialUpgradeJournal(states().candidate)).toBe(
+      JSON.stringify({
+        version: 1,
+        origin: ORIGIN,
+        previousCredential: PREVIOUS_CREDENTIAL,
+        candidateCredential: CANDIDATE_CREDENTIAL,
+        phase: 'candidate',
+      }),
+    );
+  });
+
+  it('requires two different scoped bearers and V3 push adoption for V2 replacement', () => {
+    expect(() =>
+      createCredentialReplacementCandidate(ORIGIN, PREVIOUS_CREDENTIAL, CANDIDATE_CREDENTIAL),
+    ).toThrow('invalid credential-upgrade journal');
+    expect(() =>
+      createCredentialReplacementCandidate(ORIGIN, CANDIDATE_CREDENTIAL, CANDIDATE_CREDENTIAL),
+    ).toThrow('invalid credential-upgrade journal');
+    const replacement = createCredentialReplacementCandidate(
+      ORIGIN,
+      PREVIOUS_SCOPED_CREDENTIAL,
+      CANDIDATE_CREDENTIAL,
+    );
+    expect(() => beginCredentialUpgradePushAdoption(replacement, REGISTRATION)).toThrow(
+      'invalid credential-upgrade journal',
+    );
+    expect(() =>
+      acknowledgeCredentialUpgradePushAdoption(
+        beginCredentialUpgradePushAdoption(replacement, V3_REGISTRATION),
+        V2_ACK as never,
+      ),
+    ).toThrow('invalid credential-upgrade journal');
+  });
+
+  it('recovers each V2 boundary without promoting before acknowledged V3 adoption', () => {
+    const candidate = createCredentialReplacementCandidate(
+      ORIGIN,
+      PREVIOUS_SCOPED_CREDENTIAL,
+      CANDIDATE_CREDENTIAL,
+    );
+    const adopting = beginCredentialUpgradePushAdoption(candidate, V3_REGISTRATION);
+    const adopted = acknowledgeCredentialUpgradePushAdoption(adopting, V3_ACK);
+    const oldSession = { origin: ORIGIN, credential: PREVIOUS_SCOPED_CREDENTIAL };
+    const newSession = { origin: ORIGIN, credential: CANDIDATE_CREDENTIAL };
+
+    expect(
+      resolveCredentialUpgrade(serializeCredentialUpgradeJournal(candidate), oldSession),
+    ).toMatchObject({
+      kind: 'resume-candidate',
+      session: oldSession,
+    });
+    expect(
+      resolveCredentialUpgrade(serializeCredentialUpgradeJournal(adopting), oldSession),
+    ).toMatchObject({
+      kind: 'retry-adoption',
+      session: oldSession,
+    });
+    expect(
+      resolveCredentialUpgrade(serializeCredentialUpgradeJournal(adopting), newSession),
+    ).toEqual({
+      kind: 'quarantined',
+      reason: 'promotion-before-adoption',
+    });
+    expect(
+      resolveCredentialUpgrade(serializeCredentialUpgradeJournal(adopted), oldSession),
+    ).toMatchObject({
+      kind: 'finish-promotion',
+      session: newSession,
+      writeMainCredential: true,
+    });
+    expect(
+      resolveCredentialUpgrade(serializeCredentialUpgradeJournal(adopted), newSession),
+    ).toMatchObject({
+      kind: 'finish-promotion',
+      session: newSession,
+      writeMainCredential: false,
+    });
   });
 
   it('requires the acknowledgement scheme and V3 identity to match the persisted request', () => {
@@ -273,13 +378,13 @@ describe('credential-upgrade durable journal', () => {
       serializeCredentialUpgradeJournal({
         ...adopting,
         unexpected: true,
-      } as CredentialUpgradeJournal),
+      } as unknown as CredentialUpgradeJournal),
     ).toThrow('invalid credential-upgrade journal');
     expect(() =>
       serializeCredentialUpgradeJournal({
         ...adopting,
         registration: { ...adopting.registration, unexpected: true },
-      } as CredentialUpgradeJournal),
+      } as unknown as CredentialUpgradeJournal),
     ).toThrow('invalid credential-upgrade journal');
   });
 

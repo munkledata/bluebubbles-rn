@@ -1,4 +1,5 @@
 const mockBeginCredentialUpgradeRuntime = jest.fn();
+const mockBeginCredentialReplacementRuntime = jest.fn();
 const mockResumeCredentialUpgradeRuntime = jest.fn();
 const mockDiscardCredentialUpgradeCandidateRuntime = jest.fn();
 const mockRunTrackedRealtimeWork = jest.fn();
@@ -41,6 +42,7 @@ jest.mock('@/services/clients', () => ({
 }));
 jest.mock('@/services/credentialUpgradeRuntime', () => ({
   beginCredentialUpgradeRuntime: mockBeginCredentialUpgradeRuntime,
+  beginCredentialReplacementRuntime: mockBeginCredentialReplacementRuntime,
   resumeCredentialUpgradeRuntime: mockResumeCredentialUpgradeRuntime,
   discardCredentialUpgradeCandidateRuntime: mockDiscardCredentialUpgradeCandidateRuntime,
 }));
@@ -69,6 +71,7 @@ import { ApiError } from '@core/api/errors';
 import { FCM_PUSH_ENCRYPTION_TYPE_V3 } from '@core/realtime';
 // eslint-disable-next-line import/first
 import {
+  beginScopedCredentialReplacement,
   beginScopedCredentialUpgrade,
   discardScopedCredentialUpgradeCandidate,
   resumeScopedCredentialUpgrade,
@@ -103,6 +106,7 @@ beforeEach(() => {
     await task();
   });
   mockBeginCredentialUpgradeRuntime.mockResolvedValue({ kind: 'adopted' });
+  mockBeginCredentialReplacementRuntime.mockResolvedValue({ kind: 'adopted' });
   mockResumeCredentialUpgradeRuntime.mockResolvedValue({ kind: 'idle' });
   mockDiscardCredentialUpgradeCandidateRuntime.mockResolvedValue({ kind: 'discarded' });
   mockResumeRealtimeAfterCredentialUpgrade.mockResolvedValue(undefined);
@@ -181,14 +185,33 @@ it('joins an in-flight resume while begin and discard remain busy', async () => 
 
   expect(joined).toBe(first);
   await expect(beginScopedCredentialUpgrade('device-candidate')).resolves.toEqual({ kind: 'busy' });
+  await expect(beginScopedCredentialReplacement('replacement-candidate')).resolves.toEqual({
+    kind: 'busy',
+  });
   await expect(discardScopedCredentialUpgradeCandidate()).resolves.toEqual({ kind: 'busy' });
   expect(mockResumeCredentialUpgradeRuntime).toHaveBeenCalledTimes(1);
   expect(mockBeginCredentialUpgradeRuntime).not.toHaveBeenCalled();
+  expect(mockBeginCredentialReplacementRuntime).not.toHaveBeenCalled();
   expect(mockDiscardCredentialUpgradeCandidateRuntime).not.toHaveBeenCalled();
 
   recovery.resolve({ kind: 'idle' });
   await expect(Promise.all([first, joined])).resolves.toEqual([{ kind: 'idle' }, { kind: 'idle' }]);
   await settle();
+});
+
+it('routes a scoped replacement through the same serialized transition without revoking the old token', async () => {
+  const candidate = `bbd_device_v1_${'R'.repeat(43)}`;
+  mockBeginCredentialReplacementRuntime.mockImplementationOnce(
+    async (_candidate: string, dependencies: { beginExclusiveTransition(): boolean }) => {
+      expect(dependencies.beginExclusiveTransition()).toBe(true);
+      return { kind: 'adopted' };
+    },
+  );
+
+  await expect(beginScopedCredentialReplacement(candidate)).resolves.toEqual({ kind: 'adopted' });
+  expect(mockBeginCredentialReplacementRuntime).toHaveBeenCalledWith(candidate, expect.any(Object));
+  expect(mockRevokeSelf).not.toHaveBeenCalled();
+  expect(mockResumeRealtimeAfterCredentialUpgrade).toHaveBeenCalledTimes(1);
 });
 
 it('preserves begin and discard transitions plus their one post-settlement restart', async () => {
