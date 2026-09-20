@@ -13,11 +13,10 @@
  *     collapsed for consecutive same-sender runs, and never in a 1:1;
  *   - row callback BINDING: the row's onLongPress fires the list's onLongPressMessage with the msg
  *     and the bubble's measured rect (which anchors the floating reaction/action menu);
- *   - the failed-message flow: tapping retry opens FailedMessageSheet, whose Try Again / Delete
- *     call `retry` / `discardMessage` from `@/services/send` with the right args — including the
- *     PHOTO branch, where the list rebuilds a PickedImage from the first attachment that still has
- *     a localPath (without it, retry deletes the row and re-sends text only: the picture is lost);
- *     and the sheet tracking the LIVE row rather than a snapshot, so it closes itself the moment
+ *   - the failed-message flow: tapping retry opens FailedMessageSheet, whose available actions
+ *     call `retry` / `discardMessage` from `@/services/send` with the right args. RCS attachment
+ *     retries reuse the durable queue payload; one-shot iMessage attachments never offer Retry.
+ *     The sheet tracks the LIVE row rather than a snapshot, so it closes itself the moment
  *     the 20 s retry drain takes the message over or the message turns out to be delivered;
  *   - empty state: "No messages yet" when there are no messages.
  *
@@ -103,6 +102,7 @@ jest.mock('@ui/conversations/FailedMessageSheet', () => {
     FailedMessageSheet: (props: {
       visible: boolean;
       isAttachment?: boolean;
+      retryAllowed?: boolean;
       errorDetail?: string | null;
       onRetry: () => void;
       onDelete: () => void;
@@ -119,11 +119,13 @@ jest.mock('@ui/conversations/FailedMessageSheet', () => {
               String(!!props.isAttachment),
             ),
             ReactLib.createElement(Text, { testID: 'sheet-detail' }, props.errorDetail ?? ''),
-            ReactLib.createElement(
-              Pressable,
-              { testID: 'sheet-retry', onPress: props.onRetry },
-              ReactLib.createElement(Text, null, 'try'),
-            ),
+            props.retryAllowed === false
+              ? null
+              : ReactLib.createElement(
+                  Pressable,
+                  { testID: 'sheet-retry', onPress: props.onRetry },
+                  ReactLib.createElement(Text, null, 'try'),
+                ),
             ReactLib.createElement(
               Pressable,
               { testID: 'sheet-delete', onPress: props.onDelete },
@@ -376,9 +378,9 @@ describe('MessageList — failed-message flow', () => {
     );
   });
 
-  it('a failed PHOTO retries as an attachment, rebuilt from the downloaded row', async () => {
-    // The row the list must find: the FIRST attachment has no on-disk file, so `find(localPath)`
-    // (not `[0]`) is what makes the picture re-uploadable.
+  it('a failed RCS photo retries from its durable queue row', async () => {
+    // The first downloaded attachment is missing locally, but the queue row retains the original
+    // outbound payload. The visible row still identifies the send as an attachment.
     const messages = [
       make({
         id: 1,
@@ -404,7 +406,7 @@ describe('MessageList — failed-message flow', () => {
       }),
     ];
     await renderWithTheme(
-      <MessageList chatGuid="iMessage;-;+15550001111" isGroup={false} messages={messages} />,
+      <MessageList chatGuid="RCS;-;+15550001111" isGroup={false} messages={messages} />,
     );
     fireEvent.press(screen.getByTestId('retry-x'));
     expect(await screen.findByTestId('sheet')).toBeTruthy();
@@ -412,16 +414,14 @@ describe('MessageList — failed-message flow', () => {
     expect(screen.getByTestId('sheet-attachment').props.children).toBe('true');
 
     fireEvent.press(screen.getByTestId('sheet-retry'));
-    // Still just the guid: the queue row already knows this is an attachment send and holds the
-    // on-disk path, so the re-upload streams the same file under the same temp guid. The downloaded
-    // attachment is only used HERE to word the sheet ("re-upload the picture").
+    // Still just the guid: the queue row, not the downloaded row, owns the retry payload.
     expect(retry).toHaveBeenCalledWith(
       'x',
       expect.objectContaining({ isCurrent: expect.any(Function) }),
     );
   });
 
-  it('an attachment whose local file is gone is NOT re-sent as a fabricated image', async () => {
+  it('a one-shot iMessage attachment with no local file never offers Retry', async () => {
     const messages = [
       make({
         id: 1,
@@ -438,15 +438,9 @@ describe('MessageList — failed-message flow', () => {
     );
     fireEvent.press(screen.getByTestId('retry-x'));
     expect(await screen.findByTestId('sheet')).toBeTruthy();
-    expect(screen.getByTestId('sheet-attachment').props.children).toBe('false');
-
-    fireEvent.press(screen.getByTestId('sheet-retry'));
-    // No downloaded file to describe, so the sheet reads as a plain message — but the retry itself
-    // is unchanged: the service re-POSTs whatever the queue row says was sent.
-    expect(retry).toHaveBeenCalledWith(
-      'x',
-      expect.objectContaining({ isCurrent: expect.any(Function) }),
-    );
+    expect(screen.getByTestId('sheet-attachment').props.children).toBe('true');
+    expect(screen.queryByTestId('sheet-retry')).toBeNull();
+    expect(screen.getByTestId('sheet-delete')).toBeTruthy();
   });
 
   it('Delete discards the failed message via @/services/send', async () => {
