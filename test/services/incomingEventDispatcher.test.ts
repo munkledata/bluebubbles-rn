@@ -12,6 +12,7 @@ import { DurableRealtimeDispatcher } from '@/services/realtime/incomingEventDisp
 import { IncomingEventDrain } from '@/services/realtime/incomingEventDrain';
 import { DbEventSink } from '@/services/realtime/dbEventSink';
 import {
+  clearLocalCache,
   getChatIdByGuid,
   INCOMING_EVENT_LEASE_MS,
   insertOutgoingText,
@@ -388,6 +389,104 @@ describe('durable realtime dispatcher', () => {
       (raw.prepare(`SELECT COUNT(*) AS count FROM incoming_event_queue`).get() as { count: number })
         .count,
     ).toBe(1);
+  });
+
+  it('keeps the same GUID account-scoped across sources, a failed delivery, and redelivery', async () => {
+    const { db, raw } = await createTestDb();
+    const guid = 'same-guid-across-accounts';
+    let generation = 1;
+    const aLease: EventDeliveryContext = {
+      generation: 1,
+      isCurrent: () => generation === 1,
+    };
+    const bLease: EventDeliveryContext = {
+      generation: 2,
+      isCurrent: () => generation === 2,
+    };
+    const accountA = wire(db, raw);
+    const aPayload = rawMessage(guid, 'account A only');
+
+    await accountA.dispatcher.handle('new-message', aPayload, 'socket', aLease, {
+      transportOccurrenceId: 'socket:account-a',
+    });
+    await accountA.dispatcher.handle('new-message', JSON.stringify(aPayload), 'fcm', aLease, {
+      transportOccurrenceId: 'fcm:account-a',
+    });
+    expect(accountA.effects).toEqual([
+      expect.objectContaining({
+        type: 'new-message',
+        message: expect.objectContaining({ text: 'account A only' }),
+      }),
+    ]);
+    expect(raw.prepare(`SELECT source, state FROM incoming_event_queue`).get()).toEqual({
+      source: 'socket',
+      state: 'completed',
+    });
+
+    generation = 2;
+    accountA.dispatcher.dispose();
+    await clearLocalCache(db);
+    expect(
+      (raw.prepare(`SELECT COUNT(*) AS count FROM incoming_event_queue`).get() as { count: number })
+        .count,
+    ).toBe(0);
+    await expect(
+      accountA.dispatcher.handle('new-message', aPayload, 'socket', aLease, {
+        transportOccurrenceId: 'socket:retired-account-a',
+      }),
+    ).resolves.toBeNull();
+
+    let now = NOW;
+    let failOnce = true;
+    const successfulB: NormalizedEvent[] = [];
+    const accountB = wire(db, raw, {
+      now: () => now,
+      onEffect(event) {
+        if (failOnce) {
+          failOnce = false;
+          throw new Error('intentional account B delivery failure');
+        }
+        successfulB.push(event);
+      },
+    });
+    const bPayload = rawMessage(guid, 'account B only');
+    await accountB.dispatcher.handle('new-message', bPayload, 'dev', bLease, {
+      transportOccurrenceId: 'dev:account-b',
+    });
+    await accountB.dispatcher.handle('new-message', JSON.stringify(bPayload), 'fcm', bLease, {
+      transportOccurrenceId: 'fcm:account-b',
+    });
+    expect(accountB.effects).toHaveLength(1);
+    expect(successfulB).toHaveLength(0);
+    const failedRow = raw
+      .prepare(
+        `SELECT source, state, attempts, next_attempt_at AS nextAttemptAt FROM incoming_event_queue`,
+      )
+      .get() as { source: string; state: string; attempts: number; nextAttemptAt: number };
+    expect(failedRow).toMatchObject({ source: 'dev', state: 'pending', attempts: 1 });
+    expect(failedRow.nextAttemptAt).toBeGreaterThan(NOW);
+
+    now = failedRow.nextAttemptAt;
+    await accountB.dispatcher.resume(bLease);
+    expect(successfulB).toEqual([
+      expect.objectContaining({
+        type: 'new-message',
+        message: expect.objectContaining({ text: 'account B only' }),
+      }),
+    ]);
+    expect(accountB.effects).toHaveLength(2);
+    expect(accountA.effects).toHaveLength(1);
+    expect(accountA.recoveries).not.toHaveBeenCalled();
+    expect(accountB.recoveries).not.toHaveBeenCalled();
+    expect(
+      raw.prepare(`SELECT source, state, payload, attempts FROM incoming_event_queue`).get(),
+    ).toEqual({
+      source: 'dev',
+      state: 'completed',
+      payload: null,
+      attempts: 2,
+    });
+    accountB.dispatcher.dispose();
   });
 
   it('does not request account recovery for the server rich/lean updated-message pair', async () => {
