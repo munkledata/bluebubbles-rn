@@ -171,6 +171,55 @@ export const chatHandles = sqliteTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.chatId, t.handleId] }),
+    handleChatIdx: index('chat_handles_handle_chat_idx').on(t.handleId, t.chatId),
+  }),
+);
+
+/** Persistent revision survives a clean rebuild so stale workers cannot reuse an old version. */
+export const inboxSearchState = sqliteTable(
+  'inbox_search_state',
+  {
+    chatId: integer('chat_id')
+      .primaryKey()
+      .references(() => chats.id, { onDelete: 'cascade' }),
+    revision: integer('revision').notNull().default(1),
+    isDirty: integer('is_dirty', { mode: 'boolean' }).notNull().default(true),
+    rebuildable: integer('rebuildable', { mode: 'boolean' }).notNull().default(true),
+  },
+  (t) => ({
+    rebuildIdx: index('inbox_search_state_rebuild_idx').on(t.isDirty, t.rebuildable, t.chatId),
+    dirtyIdx: index('inbox_search_state_dirty_idx').on(t.isDirty, t.chatId),
+    revisionValid: check(
+      'inbox_search_state_revision_valid',
+      sql`typeof(${t.revision}) = 'integer' AND ${t.revision} >= 1`,
+    ),
+    dirtyBoolean: check(
+      'inbox_search_state_dirty_boolean',
+      sql`typeof(${t.isDirty}) = 'integer' AND ${t.isDirty} IN (0, 1)`,
+    ),
+    rebuildableBoolean: check(
+      'inbox_search_state_rebuildable_boolean',
+      sql`typeof(${t.rebuildable}) = 'integer' AND ${t.rebuildable} IN (0, 1)`,
+    ),
+  }),
+);
+
+/** Candidate postings only; the live chat/participant fields still decide every exact match. */
+export const inboxSearchPostings = sqliteTable(
+  'inbox_search_postings',
+  {
+    chatId: integer('chat_id')
+      .notNull()
+      .references(() => chats.id, { onDelete: 'cascade' }),
+    gram: integer('gram').notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.chatId, t.gram] }),
+    gramIdx: index('inbox_search_postings_gram_idx').on(t.gram, t.chatId),
+    gramValid: check(
+      'inbox_search_postings_gram_valid',
+      sql`typeof(${t.gram}) = 'integer' AND ${t.gram} BETWEEN 0 AND 4294967295`,
+    ),
   }),
 );
 

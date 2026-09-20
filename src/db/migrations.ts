@@ -985,4 +985,85 @@ export const MIGRATIONS: Migration[] = [
          ON attachment_media_exports (state, terminal_at, id)`,
     ],
   },
+  {
+    // PERF-02: maintain exact JavaScript-search candidate postings without making a name change
+    // depend on an app process surviving. Triggers invalidate the affected chat in the same SQL
+    // transaction as the source write; a later bounded rebuilder replaces its postings.
+    name: '0049_inbox_search_postings',
+    statements: [
+      `CREATE TABLE inbox_search_state (
+        chat_id INTEGER PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
+        revision INTEGER NOT NULL DEFAULT 1
+          CONSTRAINT inbox_search_state_revision_valid
+            CHECK (typeof(revision) = 'integer' AND revision >= 1),
+        is_dirty INTEGER NOT NULL DEFAULT 1
+          CONSTRAINT inbox_search_state_dirty_boolean
+            CHECK (typeof(is_dirty) = 'integer' AND is_dirty IN (0, 1)),
+        rebuildable INTEGER NOT NULL DEFAULT 1
+          CONSTRAINT inbox_search_state_rebuildable_boolean
+            CHECK (typeof(rebuildable) = 'integer' AND rebuildable IN (0, 1))
+      )`,
+      `CREATE INDEX inbox_search_state_rebuild_idx
+         ON inbox_search_state (is_dirty, rebuildable, chat_id)`,
+      `CREATE INDEX inbox_search_state_dirty_idx
+         ON inbox_search_state (is_dirty, chat_id)`,
+      `CREATE TABLE inbox_search_postings (
+        chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+        gram INTEGER NOT NULL
+          CONSTRAINT inbox_search_postings_gram_valid
+            CHECK (typeof(gram) = 'integer' AND gram BETWEEN 0 AND 4294967295),
+        PRIMARY KEY (chat_id, gram)
+      )`,
+      `CREATE INDEX inbox_search_postings_gram_idx
+         ON inbox_search_postings (gram, chat_id)`,
+      `CREATE INDEX chat_handles_handle_chat_idx ON chat_handles (handle_id, chat_id)`,
+      `CREATE TRIGGER inbox_search_chats_insert AFTER INSERT ON chats BEGIN
+         INSERT INTO inbox_search_state (chat_id) VALUES (NEW.id);
+       END`,
+      `CREATE TRIGGER inbox_search_chats_title_update
+       AFTER UPDATE OF chat_identifier, display_name, custom_name, style ON chats
+       WHEN OLD.chat_identifier IS NOT NEW.chat_identifier
+         OR OLD.display_name IS NOT NEW.display_name
+         OR OLD.custom_name IS NOT NEW.custom_name
+         OR OLD.style IS NOT NEW.style
+       BEGIN
+         INSERT INTO inbox_search_state (chat_id) VALUES (NEW.id)
+         ON CONFLICT(chat_id) DO UPDATE SET
+           revision = revision + 1, is_dirty = 1, rebuildable = 1;
+       END`,
+      `CREATE TRIGGER inbox_search_chat_handles_insert AFTER INSERT ON chat_handles BEGIN
+         INSERT INTO inbox_search_state (chat_id) VALUES (NEW.chat_id)
+         ON CONFLICT(chat_id) DO UPDATE SET
+           revision = revision + 1, is_dirty = 1, rebuildable = 1;
+       END`,
+      `CREATE TRIGGER inbox_search_chat_handles_delete AFTER DELETE ON chat_handles BEGIN
+         INSERT INTO inbox_search_state (chat_id)
+           SELECT OLD.chat_id WHERE EXISTS(SELECT 1 FROM chats WHERE id = OLD.chat_id)
+         ON CONFLICT(chat_id) DO UPDATE SET
+           revision = revision + 1, is_dirty = 1, rebuildable = 1;
+       END`,
+      `CREATE TRIGGER inbox_search_chat_handles_update
+       AFTER UPDATE OF chat_id, handle_id ON chat_handles
+       WHEN OLD.chat_id IS NOT NEW.chat_id OR OLD.handle_id IS NOT NEW.handle_id
+       BEGIN
+         INSERT INTO inbox_search_state (chat_id)
+           SELECT OLD.chat_id WHERE EXISTS(SELECT 1 FROM chats WHERE id = OLD.chat_id)
+         ON CONFLICT(chat_id) DO UPDATE SET
+           revision = revision + 1, is_dirty = 1, rebuildable = 1;
+         INSERT INTO inbox_search_state (chat_id) VALUES (NEW.chat_id)
+         ON CONFLICT(chat_id) DO UPDATE SET
+           revision = revision + 1, is_dirty = 1, rebuildable = 1;
+       END`,
+      `CREATE TRIGGER inbox_search_handles_name_update
+       AFTER UPDATE OF address, display_name ON handles
+       WHEN OLD.address IS NOT NEW.address OR OLD.display_name IS NOT NEW.display_name
+       BEGIN
+         INSERT INTO inbox_search_state (chat_id)
+           SELECT chat_id FROM chat_handles WHERE handle_id = NEW.id
+         ON CONFLICT(chat_id) DO UPDATE SET
+           revision = revision + 1, is_dirty = 1, rebuildable = 1;
+       END`,
+      `INSERT INTO inbox_search_state (chat_id) SELECT id FROM chats`,
+    ],
+  },
 ];

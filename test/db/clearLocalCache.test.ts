@@ -37,6 +37,7 @@ import {
   upsertMessages,
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
+import { rebuildInboxSearchIndexBatch } from '@db/repositories/inboxSearchIndex';
 import { withDbTransaction } from '@db/transaction';
 import {
   DELETION_SNAPSHOT_INITIALIZED_KEY,
@@ -229,6 +230,8 @@ describe('clearLocalCache', () => {
          VALUES ('temp-old-account', 'real-old-account')`,
       )
       .run();
+    expect(await rebuildInboxSearchIndexBatch(db)).toMatchObject({ settled: 1 });
+    expect(count(raw, 'inbox_search_postings')).toBeGreaterThan(0);
     expect(count(raw, 'messages')).toBeGreaterThan(0);
 
     await clearLocalCache(db);
@@ -242,6 +245,8 @@ describe('clearLocalCache', () => {
       'attachments',
       'messages',
       'chat_handles',
+      'inbox_search_postings',
+      'inbox_search_state',
       'custom_folder_members',
       'custom_folders',
       'chats',

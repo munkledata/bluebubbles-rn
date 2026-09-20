@@ -15,6 +15,7 @@
 import { renderHook, act } from '../support/renderWithTheme';
 import { useChatMatches } from '@features/search/useChatMatches';
 import { searchChatGuidsByMessage, searchChatsForInboxPage } from '@db/repositories';
+import { runInboxSearchIndexRebuildOnce } from '@/services/search/inboxSearchIndexRebuild';
 import {
   captureRealtimeDeliveryLease,
   pauseRealtimeDeliveries,
@@ -27,12 +28,18 @@ jest.mock('@db/repositories', () => ({
   searchChatGuidsByMessage: jest.fn(),
   searchChatsForInboxPage: jest.fn(),
 }));
+jest.mock('@/services/search/inboxSearchIndexRebuild', () => ({
+  runInboxSearchIndexRebuildOnce: jest.fn(async () => undefined),
+}));
 
 const mockGuidSearch = searchChatGuidsByMessage as jest.MockedFunction<
   typeof searchChatGuidsByMessage
 >;
 const mockChatSearch = searchChatsForInboxPage as jest.MockedFunction<
   typeof searchChatsForInboxPage
+>;
+const mockIndexRebuild = runInboxSearchIndexRebuildOnce as jest.MockedFunction<
+  typeof runInboxSearchIndexRebuildOnce
 >;
 
 const ROWS = [
@@ -53,6 +60,7 @@ beforeEach(() => {
   resumeRealtimeDeliveries();
   jest.useFakeTimers();
   mockGuidSearch.mockResolvedValue([]);
+  mockIndexRebuild.mockClear();
   mockChatSearch.mockImplementation(async (_db, opts) => {
     const folded = opts.query.normalize('NFC').toLowerCase();
     const messageGuids = new Set(opts.messageMatchGuids ?? []);
@@ -82,6 +90,7 @@ describe('useChatMatches', () => {
     expect(result.current.isLoading).toBe(false);
     expect(mockGuidSearch).not.toHaveBeenCalled();
     expect(mockChatSearch).not.toHaveBeenCalled();
+    expect(mockIndexRebuild).not.toHaveBeenCalled();
   });
 
   it('matches by resolved title', async () => {
@@ -90,6 +99,7 @@ describe('useChatMatches', () => {
     });
     await advance(200);
     expect(result.current.data?.map((r) => r.id)).toEqual([1]);
+    expect(mockIndexRebuild).toHaveBeenCalledTimes(1);
   });
 
   it('matches by participant name (chat with no display name)', async () => {

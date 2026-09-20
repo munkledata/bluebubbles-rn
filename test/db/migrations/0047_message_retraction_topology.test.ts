@@ -52,6 +52,7 @@ describe('migration 0047_message_retraction_topology', () => {
       await expect(runMigrations(runner)).resolves.toEqual([
         MIGRATION_NAME,
         '0048_attachment_media_exports',
+        '0049_inbox_search_postings',
       ]);
       expect(
         raw

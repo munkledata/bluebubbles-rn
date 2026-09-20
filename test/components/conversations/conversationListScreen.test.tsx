@@ -399,7 +399,17 @@ describe('ConversationListScreen — navigation & actions', () => {
     expect(screen.getByLabelText('New message')).toBeTruthy();
   });
 
-  it('fails closed for new-chat creation when RCS capability is missing', async () => {
+  it('shows new-message when iMessage new-chat is available without RCS', async () => {
+    useSessionStore.setState({
+      serverInfo: { version: 'test', rcs: false, supports_imessage_new_chat: true } as any,
+    });
+    setChats({ data: [makeRow({ guid: 'l1' })] });
+    await renderWithTheme(<ConversationListScreen />);
+
+    expect(screen.getByLabelText('New message')).toBeTruthy();
+  });
+
+  it('fails closed for new-chat creation when both transport capabilities are missing', async () => {
     useSessionStore.setState({ serverInfo: null });
     setChats({ data: [makeRow({ guid: 'l1' })] });
     await renderWithTheme(<ConversationListScreen />);

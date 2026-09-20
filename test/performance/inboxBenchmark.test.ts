@@ -1,7 +1,12 @@
 import { drizzle } from 'drizzle-orm/better-sqlite3';
 import { readFileSync } from 'node:fs';
 import { MIGRATIONS } from '@db/migrations';
-import { listChatsForInbox, listChatsForInboxPage } from '@db/repositories';
+import {
+  listChatsForInbox,
+  listChatsForInboxPage,
+  searchChatsForInboxPage,
+} from '@db/repositories';
+import { rebuildInboxSearchIndexBatch } from '@db/repositories/inboxSearchIndex';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
@@ -44,6 +49,12 @@ function collectGarbage(): void {
     throw new Error('The inbox benchmark requires --expose-gc; run npm run benchmark:inbox.');
   }
   global.gc();
+}
+
+function databaseBytes(raw: TestDatabase['raw']): number {
+  const pages = raw.prepare('PRAGMA page_count').get() as { page_count: number };
+  const size = raw.prepare('PRAGMA page_size').get() as { page_size: number };
+  return pages.page_count * size.page_size;
 }
 
 function seedFixture({ raw }: TestDatabase, chatCount: number): void {
@@ -124,13 +135,37 @@ async function captureCompiledQuery(
   return captured;
 }
 
+async function captureSearchWork(raw: TestDatabase['raw']): Promise<{
+  statementCount: number;
+  candidateReadCount: number;
+  candidatePlan: string[];
+}> {
+  const statements: CompiledQuery[] = [];
+  const captureDb = drizzle(raw, {
+    logger: {
+      logQuery(sql, params) {
+        statements.push({ sql, params: [...params] });
+      },
+    },
+  }) as unknown as AppDatabase;
+  await searchChatsForInboxPage(captureDb, { query: 'absent-search-needle', limit: 50 });
+  const candidateReads = statements.filter(({ sql }) => /\bFROM chats c\b/.test(sql));
+  const candidateIdQuery = statements.find(({ sql }) => /\bFROM inbox_search_postings\b/.test(sql));
+  if (!candidateIdQuery) throw new Error('Inbox search candidate-id query was not captured.');
+  return {
+    statementCount: statements.length,
+    candidateReadCount: candidateReads.length,
+    candidatePlan: explainQuery(raw, candidateIdQuery),
+  };
+}
+
 function explainQuery(raw: TestDatabase['raw'], query: CompiledQuery): string[] {
-  if (!query.params.every((value) => typeof value === 'number')) {
-    throw new Error('The benchmark expected only numeric inbox query parameters.');
+  if (!query.params.every((value) => typeof value === 'number' || typeof value === 'string')) {
+    throw new Error('The benchmark expected only numeric/text inbox query parameters.');
   }
   const rows = raw
     .prepare(`EXPLAIN QUERY PLAN ${query.sql}`)
-    .all(...(query.params as number[])) as Array<{ detail: string }>;
+    .all(...(query.params as Array<number | string>)) as { detail: string }[];
   if (rows.length === 0) throw new Error('SQLite returned an empty inbox query plan.');
   return rows.map(({ detail }) => detail.replace(/\s+/g, ' ').trim());
 }
@@ -222,6 +257,15 @@ async function runScale(chatCount: (typeof CHAT_COUNTS)[number]): Promise<void> 
       fullRssBefore,
     );
 
+    collectGarbage();
+    const searchRssBefore = process.memoryUsage().rss;
+    const noMatchSearch = await measure(
+      () => searchChatsForInboxPage(fixture.db, { query: 'absent-search-needle', limit: 50 }),
+      (result) => expect(result).toEqual({ rows: [], hasMore: false }),
+      searchRssBefore,
+    );
+    const searchWork = await captureSearchWork(fixture.raw);
+
     const pageQuery = await captureCompiledQuery(fixture.raw, (db) =>
       listChatsForInboxPage(db, { limit: 50 }),
     );
@@ -229,12 +273,42 @@ async function runScale(chatCount: (typeof CHAT_COUNTS)[number]): Promise<void> 
     const pagePlan = explainQuery(fixture.raw, pageQuery);
     const fullPlan = explainQuery(fixture.raw, fullQuery);
 
+    // Backfill the actual production postings in bounded batches. The dirty-baseline query above
+    // remains exact while this runs; the second measurement is a caught-up index, not a probe.
+    const bytesBeforeIndex = databaseBytes(fixture.raw);
+    const buildStarted = process.hrtime.bigint();
+    let afterChatId = 0;
+    let indexedChats = 0;
+    while (true) {
+      const batch = await rebuildInboxSearchIndexBatch(fixture.db, afterChatId);
+      if (batch.visited === 0) {
+        if (afterChatId === 0) break;
+        afterChatId = 0;
+        continue;
+      }
+      afterChatId = batch.lastChatId;
+      indexedChats += batch.settled;
+    }
+    expect(indexedChats).toBe(chatCount);
+    const indexBuildMs = round(Number(process.hrtime.bigint() - buildStarted) / 1_000_000);
+    const indexStorageDeltaMiB = round(
+      (databaseBytes(fixture.raw) - bytesBeforeIndex) / (1024 * 1024),
+    );
+    collectGarbage();
+    const indexedSearchRssBefore = process.memoryUsage().rss;
+    const indexedNoMatchSearch = await measure(
+      () => searchChatsForInboxPage(fixture.db, { query: 'absent-search-needle', limit: 50 }),
+      (result) => expect(result).toEqual({ rows: [], hasMore: false }),
+      indexedSearchRssBefore,
+    );
+    const indexedSearchWork = await captureSearchWork(fixture.raw);
+
     const sqliteVersion = (
       fixture.raw.prepare('SELECT sqlite_version() AS version').get() as { version: string }
     ).version;
     const report = {
-      artifact: 'PERF-01-host-inbox',
-      schemaVersion: 1,
+      artifact: 'PERF-01-PERF-02-host-inbox',
+      schemaVersion: 3,
       environment: {
         node: process.version,
         sqlite: sqliteVersion,
@@ -259,6 +333,17 @@ async function runScale(chatCount: (typeof CHAT_COUNTS)[number]): Promise<void> 
         plan: pagePlan,
       },
       full: { rows: activeChats, ...full, plan: fullPlan },
+      noMatchSearch: { rows: 0, hasMore: false, ...noMatchSearch, ...searchWork },
+      indexedNoMatchSearch: {
+        index: 'inbox_search_postings (gram, chat_id)',
+        indexedChats,
+        indexBuildMs,
+        indexStorageDeltaMiB,
+        rows: 0,
+        hasMore: false,
+        ...indexedNoMatchSearch,
+        ...indexedSearchWork,
+      },
     };
     process.stdout.write(`${JSON.stringify(report)}\n`);
   } finally {

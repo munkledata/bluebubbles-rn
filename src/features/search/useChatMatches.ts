@@ -3,6 +3,7 @@ import { getDatabase } from '@db/database';
 import { searchChatGuidsByMessage, searchChatsForInboxPage, type InboxRow } from '@db/repositories';
 import { useReactiveQuery, type ReactiveState } from '@db/useReactiveQuery';
 import { createRowIdentityCache } from '@features/conversations/rowIdentity';
+import { runInboxSearchIndexRebuildOnce } from '@/services/search/inboxSearchIndexRebuild';
 import {
   captureRealtimeDeliveryLease,
   subscribeRealtimeGenerationInvalidation,
@@ -98,6 +99,9 @@ export function useChatMatches(
         }
       }
       if (!accountLease.isCurrent()) return { key: searchKey, rows: [] };
+      // A later contact/chat rename can dirty postings after boot. Search remains exact through
+      // the dirty-row union while this best-effort, account-scoped rebuild catches up.
+      void runInboxSearchIndexRebuildOnce(accountLease);
       const page = await searchChatsForInboxPage(db, {
         query: term,
         messageMatchGuids,

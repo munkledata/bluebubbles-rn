@@ -13,6 +13,7 @@ import {
   type InboxSenderFilter,
 } from './chatVisibility';
 import { MAX_CUSTOM_FOLDER_MEMBERS, type CustomFolderRow } from './customFolders';
+import { firstInboxSearchBigram, foldInboxSearchText } from './inboxSearchText';
 import { searchCustomFolderChatGuidsByMessage } from './messageQueries';
 
 export type { InboxArchiveFilter, InboxSenderFilter } from './chatVisibility';
@@ -347,14 +348,13 @@ function boundedMessageMatchSet(guids: readonly string[] | undefined): Set<strin
 }
 
 /**
- * Search active inbox identities without retaining/decorating the entire inbox. Candidate reads
- * use the immutable AUTOINCREMENT chat id as their cursor, so pin/date changes cannot make paging
- * skip or duplicate an id. A starting high-water mark prevents sustained inserts from extending
- * one refresh forever; the reactive subscriber schedules a new refresh for later inserts.
- *
- * This deliberately remains a full lightweight scan for a query with few matches. Each native
- * bridge result is capped at 128 candidates, only the best `limit + 1` matches are retained, and
- * only the first `limit` identities receive the expensive preview/unread decoration.
+ * Search active inbox identities without retaining/decorating the entire inbox. A persisted bigram
+ * posting narrows indexed identities; dirty/unindexable identities and bounded message hits are
+ * unioned in, so indexing never decides exact text matches. One SQL statement snapshots all three
+ * candidate sources per page; an indexer cannot move an id from dirty to indexed between reads.
+ * The immutable AUTOINCREMENT chat id is the cursor, and a starting high-water mark prevents
+ * sustained inserts from extending one refresh forever. Common bigrams or a dirty migration
+ * backlog can still cover many ids; each native result and the decorated set remain capped.
  */
 export async function searchChatsForInboxPage(
   db: AppDatabase,
@@ -368,8 +368,10 @@ export async function searchChatsForInboxPage(
     ? Math.min(MAX_INBOX_SEARCH_RESULTS, Math.max(1, Math.floor(requested)))
     : MAX_INBOX_SEARCH_RESULTS;
   const retainedLimit = limit + 1;
-  const foldedQuery = query.toLowerCase();
+  const foldedQuery = foldInboxSearchText(query);
+  const firstGram = firstInboxSearchBigram(foldedQuery);
   const messageMatchGuids = boundedMessageMatchSet(opts.messageMatchGuids);
+  const messageMatchJson = JSON.stringify([...messageMatchGuids]);
   const horizonRows = await db.all<{ maxId: number | null }>(sql`
     SELECT MAX(id) AS maxId FROM chats
   `);
@@ -382,6 +384,32 @@ export async function searchChatsForInboxPage(
   let cursor = 0;
   const retained: InboxSearchCandidate[] = [];
   while (cursor < highWater) {
+    const candidateIds = await db.all<{ id: number }>(sql`
+      WITH posting_ids AS (
+        SELECT chat_id AS id FROM inbox_search_postings
+         WHERE gram = ${firstGram} AND chat_id > ${cursor} AND chat_id <= ${highWater}
+         ORDER BY chat_id ASC LIMIT ${INBOX_SEARCH_CANDIDATE_PAGE_SIZE}
+      ), dirty_ids AS (
+        SELECT chat_id AS id FROM inbox_search_state
+         WHERE is_dirty = 1 AND chat_id > ${cursor} AND chat_id <= ${highWater}
+         ORDER BY chat_id ASC LIMIT ${INBOX_SEARCH_CANDIDATE_PAGE_SIZE}
+      ), message_ids AS (
+        SELECT id FROM chats
+         WHERE id > ${cursor} AND id <= ${highWater}
+           AND guid IN (SELECT CAST(value AS TEXT) FROM json_each(${messageMatchJson}))
+         ORDER BY id ASC LIMIT ${INBOX_SEARCH_CANDIDATE_PAGE_SIZE}
+      ), combined AS (
+        SELECT id FROM posting_ids UNION SELECT id FROM dirty_ids UNION SELECT id FROM message_ids
+      )
+      SELECT id FROM combined ORDER BY id ASC LIMIT ${INBOX_SEARCH_CANDIDATE_PAGE_SIZE}
+    `);
+    if (candidateIds.length === 0) break;
+    for (const row of candidateIds) {
+      if (!Number.isSafeInteger(row.id) || row.id <= cursor || row.id > highWater) {
+        throw new Error('Inbox search candidate cursor is invalid.');
+      }
+    }
+    const candidateIdsJson = JSON.stringify(candidateIds.map((row: { id: number }) => row.id));
     const candidates = await db.all<InboxSearchCandidate>(sql`
       SELECT c.id, c.guid, c.chat_identifier AS chatIdentifier,
              c.display_name AS displayName, c.custom_name AS customName, c.style,
@@ -393,35 +421,29 @@ export async function searchChatsForInboxPage(
                 FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
                WHERE ch.chat_id = c.id) AS participantNames
         FROM chats c
-       WHERE c.id > ${cursor} AND c.id <= ${highWater}
+       WHERE c.id IN (SELECT CAST(value AS INTEGER) FROM json_each(${candidateIdsJson}))
          AND c.is_archived = 0
          AND c.is_pinned IN (0, 1)
          AND ${chatVisible('c')}
        ORDER BY c.id ASC
-       LIMIT ${INBOX_SEARCH_CANDIDATE_PAGE_SIZE}
     `);
-    if (candidates.length === 0) break;
 
     for (const candidate of candidates) {
-      if (!Number.isSafeInteger(candidate.id) || candidate.id <= cursor) {
-        throw new Error('Inbox search candidate cursor is invalid.');
-      }
-      const nameMatches = `${resolveTitle(candidate)} ${candidate.participantNames ?? ''}`
-        .normalize('NFC')
-        .toLowerCase()
-        .includes(foldedQuery);
+      const nameMatches = foldInboxSearchText(
+        `${resolveTitle(candidate)} ${candidate.participantNames ?? ''}`,
+      ).includes(foldedQuery);
       if (!nameMatches && !messageMatchGuids.has(candidate.guid)) continue;
       retained.push(candidate);
       retained.sort(compareInboxSearchCandidates);
       if (retained.length > retainedLimit) retained.pop();
     }
 
-    const nextCursor = candidates[candidates.length - 1]!.id;
+    const nextCursor = candidateIds[candidateIds.length - 1]!.id;
     if (!Number.isSafeInteger(nextCursor) || nextCursor <= cursor || nextCursor > highWater) {
       throw new Error('Inbox search candidate cursor did not advance.');
     }
     cursor = nextCursor;
-    if (candidates.length < INBOX_SEARCH_CANDIDATE_PAGE_SIZE) break;
+    if (candidateIds.length < INBOX_SEARCH_CANDIDATE_PAGE_SIZE) break;
   }
 
   const selectedGuids = retained.slice(0, limit).map((candidate) => candidate.guid);

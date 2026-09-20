@@ -37,6 +37,7 @@ describe('migration 0044_custom_folder_unread_badge', () => {
         '0046_message_send_attempt_owner',
         '0047_message_retraction_topology',
         '0048_attachment_media_exports',
+        '0049_inbox_search_postings',
       ]);
       expect(
         raw

@@ -27,6 +27,7 @@ import { fileLogSink } from './logging/fileLogSink';
 import { retireFcmDeviceEncryptionState } from './notifications/fcmEncryptionState';
 import { connectToServer } from './connection';
 import { ensureDatabase, runSearchTextBackfillOnce } from './databaseControl';
+import { runInboxSearchIndexRebuildOnce } from './search/inboxSearchIndexRebuild';
 import {
   invalidateAttachmentCacheRecoveryReadiness,
   recoverAttachmentCache,
@@ -635,6 +636,7 @@ export async function activateForegroundBootSession(
   useSessionStore.getState().hydrated({ origin, password });
 
   void runSearchTextBackfillOnce(deliveryLease);
+  void runInboxSearchIndexRebuildOnce(deliveryLease);
   const serverInfoLease = captureRealtimeDeliveryLease();
   const serverInfoTransport = captureSessionTransportLease();
   void serverApi
@@ -753,6 +755,7 @@ export async function hydrateSession(): Promise<void> {
     // Make older edited/SMS messages searchable only after BOTH durable session gates authorize
     // this account. A revoked restart must run its residual wipe without this stale writer racing.
     void runSearchTextBackfillOnce(cacheLease);
+    void runInboxSearchIndexRebuildOnce(cacheLease);
     // `hydrated` restores creds but NOT serverInfo (only first-setup `connect` sets it), so
     // Settings' Version/macOS/Private-API rows stayed blank on every relaunch. Re-fetch it in
     // the background so those screens populate — best-effort, never blocks boot.
@@ -1111,6 +1114,7 @@ export async function connect(
       if (cacheRecovery === 'stale' || !cacheLease.isCurrent() || !isAttemptCurrent()) return;
       store.connected(origin, password, result.serverInfo);
       connectionCommitted = true;
+      void runInboxSearchIndexRebuildOnce(cacheLease);
       void startSync().catch((error) => {
         if (!cacheLease.isCurrent()) return;
         logger.warn('[connect] initial sync failed to start', error);

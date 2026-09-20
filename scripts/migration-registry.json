@@ -190,6 +190,16 @@
       "upgradeTest": "test/db/migrations/0048_attachment_media_exports.test.ts",
       "schemaEvidence": "src/db/schema.ts",
       "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 49,
+      "name": "0049_inbox_search_postings",
+      "task": "PERF-02",
+      "branchPr": "master",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0049_inbox_search_postings.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
     }
   ]
 }

@@ -55,7 +55,9 @@ export function ConversationListScreen(): React.JSX.Element {
   const filterUnknown = useFeatureSettingsStore((s) => s.filterUnknownSenders);
   const inboxFilters = useFeatureSettingsStore((s) => s.inboxFilters);
   const setInboxFilters = useFeatureSettingsStore((s) => s.setInboxFilters);
-  const rcsAvailable = useSessionStore((s) => s.serverInfo?.rcs === true);
+  const newChatAvailable = useSessionStore(
+    (s) => s.serverInfo?.rcs === true || s.serverInfo?.supports_imessage_new_chat === true,
+  );
   const effectiveInboxFilters = useMemo<InboxFilters>(
     () => (filterUnknown ? { ...inboxFilters, sender: 'known' } : inboxFilters),
     [filterUnknown, inboxFilters],
@@ -318,7 +320,7 @@ export function ConversationListScreen(): React.JSX.Element {
               style={styles.headerIcon}
             />
           </Pressable>
-          {rcsAvailable ? (
+          {newChatAvailable ? (
             <Pressable
               onPress={() => router.push('/new-chat')}
               hitSlop={8}

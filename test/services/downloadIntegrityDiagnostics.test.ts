@@ -59,8 +59,8 @@ const wallpaperPath = 'file:///private/synced-backgrounds/generation-7/media-cur
 function snapshot(activeFiles = 1): DownloadIntegrityDbSnapshot {
   return {
     counts: {
-      migrationCount: 48,
-      migrationHead: '0048_attachment_media_exports',
+      migrationCount: 49,
+      migrationHead: '0049_inbox_search_postings',
       attachments: { rows: 2, localPathRows: 1, distinctLocalPaths: 1 },
       cache: {
         activeFiles,

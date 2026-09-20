@@ -48,7 +48,10 @@ describe('migration 0048_attachment_media_exports', () => {
         .run('attachment-before-0048', message.id, 'image/jpeg', 1234, 'file:///old/image.jpg');
 
       stopBefore0048.value = false;
-      await expect(runMigrations(runner)).resolves.toEqual([MIGRATION_NAME]);
+      await expect(runMigrations(runner)).resolves.toEqual([
+        MIGRATION_NAME,
+        '0049_inbox_search_postings',
+      ]);
       expect(raw.prepare('SELECT COUNT(*) AS rows FROM attachment_media_exports').get()).toEqual({
         rows: 0,
       });

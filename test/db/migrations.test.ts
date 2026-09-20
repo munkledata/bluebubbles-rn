@@ -24,6 +24,8 @@ describe('migrations', () => {
       'error_reports',
       'handles',
       'incoming_event_queue',
+      'inbox_search_postings',
+      'inbox_search_state',
       'message_deletion_ledger',
       'message_guid_aliases',
       'messages',

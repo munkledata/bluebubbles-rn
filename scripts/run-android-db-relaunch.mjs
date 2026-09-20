@@ -19,8 +19,8 @@ import {
 export const RELAUNCH_MARKER_PREFIX = 'GATOR_DB_RELAUNCH_V1 ';
 export const RELAUNCH_SUITE = 'android-db-relaunch';
 export const RELAUNCH_SCHEMA = 1;
-export const RELAUNCH_MIGRATION_COUNT = 48;
-export const RELAUNCH_MIGRATION_HEAD = '0048_attachment_media_exports';
+export const RELAUNCH_MIGRATION_COUNT = 49;
+export const RELAUNCH_MIGRATION_HEAD = '0049_inbox_search_postings';
 export const PREPARE_CHECKS = Object.freeze([
   'requestValid',
   'preCleanup',
@@ -2636,12 +2636,15 @@ function privateTestStateClean(serial, files) {
   return clean;
 }
 
-function resetTestState(serial) {
+async function resetTestState(serial) {
   stopApp(serial);
   runAdb(serial, CLEANUP_RELAUNCH_STATE_ADB_ARGS, {
     code: 'test-cleanup-failed',
     label: 'DB relaunch private-state cleanup',
   });
+  // Require an observed no-process gap before the next request or launch, while still
+  // attempting exact file cleanup if process polling fails.
+  await waitForNoProcess(() => currentProcessIdentity(serial));
   if (!privateTestStateClean(serial, RELAUNCH_PRIVATE_TEST_FILES)) {
     throw new HarnessError(
       'test-cleanup-unconfirmed',
