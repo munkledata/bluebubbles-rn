@@ -117,6 +117,10 @@ const config: ExpoConfig = {
     // HTTP path. The plugin owns the generated manifest reference and res/xml policy.
     './plugins/withSystemCaNetworkSecurity',
     'expo-router',
+    // Android 16's three-button contrast scrim can follow the phone's light mode at a cold
+    // start, even though Gator itself is dark-only. Keep the bar transparent and its buttons
+    // light before React mounts; native changes require a fresh build.
+    ['expo-navigation-bar', { enforceContrast: false, style: 'light' }],
     'expo-secure-store',
     'expo-image',
     // Native Google Maps replaces the retired Leaflet/WebView path. The key is restricted in
