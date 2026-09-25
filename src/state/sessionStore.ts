@@ -225,6 +225,9 @@ export const sessionAccessors = {
   /** Narrow helper capability; independent of the retired broad Private API flag. */
   imessageNewChatEnabled: (): boolean =>
     useSessionStore.getState().serverInfo?.supports_imessage_new_chat === true,
+  /** Existing one-to-one iMessage read state only; absent/false always fails closed. */
+  imessageReadStateEnabled: (): boolean =>
+    useSessionStore.getState().serverInfo?.supports_imessage_read_state === true,
   /** One-file existing-chat helper capability, independent of the broad retired API. */
   imessageAttachmentUploadEnabled: (): boolean =>
     useSessionStore.getState().serverInfo?.supports_imessage_attachment_upload === true,

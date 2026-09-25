@@ -1,6 +1,7 @@
 import { z } from 'zod/v4';
 import { Chat } from '@core/models';
 import { SYNC_WITH_QUERY } from '@core/config/constants';
+import { utf8Decode, utf8Encode } from '@utils/bytes';
 import type { HttpClient, HttpUrlBuilder } from '../http';
 
 export interface ChatQuery {
@@ -101,12 +102,38 @@ export async function getChat(http: HttpClient, guid: string, signal?: AbortSign
   return unwrapChat(res);
 }
 
-/** POST /api/v1/chat/{guid}/read — propagate a read marker through the supported RCS bridge. */
-export function markChatRead(http: HttpClient, guid: string): Promise<unknown> {
-  if (!guid.startsWith('RCS;-;')) {
-    throw new Error('Remote read markers are available only for RCS conversations.');
+const MAX_IMESSAGE_READ_STATE_GUID_BYTES = 1_024;
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/;
+
+/** Match the server/helper's bounded wire-safe one-to-one iMessage identifier rule. */
+export function isIMessageReadStateGuid(guid: string): boolean {
+  const parts = guid.split(';-;');
+  if (
+    parts.length !== 2 ||
+    (parts[0] !== 'iMessage' && parts[0] !== 'any') ||
+    (parts[1]?.length ?? 0) === 0 ||
+    CONTROL_CHARACTER.test(guid)
+  ) {
+    return false;
   }
-  return http.post(`/chat/${encodeURIComponent(guid)}/read`, z.unknown());
+  const bytes = utf8Encode(guid);
+  return bytes.byteLength <= MAX_IMESSAGE_READ_STATE_GUID_BYTES && utf8Decode(bytes) === guid;
+}
+
+/** POST /api/v1/chat/{guid}/read — propagate one supported RCS/iMessage read marker. */
+export function markChatRead(http: HttpClient, guid: string): Promise<unknown> {
+  if (!guid.startsWith('RCS;-;') && !isIMessageReadStateGuid(guid)) {
+    throw new Error('Remote read markers require an RCS or one-to-one iMessage conversation.');
+  }
+  return http.post(`/chat/${encodeURIComponent(guid)}/read`, z.unknown(), { retry: false });
+}
+
+/** POST /api/v1/chat/{guid}/unread — mark one existing one-to-one iMessage chat unread. */
+export function markChatUnread(http: HttpClient, guid: string): Promise<unknown> {
+  if (!isIMessageReadStateGuid(guid)) {
+    throw new Error('Remote unread markers require a one-to-one iMessage conversation.');
+  }
+  return http.post(`/chat/${encodeURIComponent(guid)}/unread`, z.unknown(), { retry: false });
 }
 
 /**

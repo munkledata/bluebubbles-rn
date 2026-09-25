@@ -75,6 +75,8 @@ export const ServerInfo = z
     supports_imessage_text_with_attachment: z.boolean().nullish(),
     /** Whether the server exposes the read-only iMessage reachability lookup. */
     supports_imessage_availability: z.boolean().nullish(),
+    /** Mark read/unread on a proven existing one-to-one iMessage chat. */
+    supports_imessage_read_state: z.boolean().nullish(),
     /** Whether the authenticated Messages helper can create one-to-one iMessage chats. */
     supports_imessage_new_chat: z.boolean().nullish(),
     /** One file upload to a proven existing one-to-one iMessage chat. */

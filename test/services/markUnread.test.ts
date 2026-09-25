@@ -4,9 +4,10 @@
  * Invariants pinned here:
  *   - the LOCAL flip (read marker cleared) always happens, and happens FIRST;
  *   - a rejecting server call neither throws nor reverts the local flip (best-effort sync);
- *   - `RCS;-;` chats never hit the server (the RCS sidecar has no unread endpoint);
- *   - the connected server's Private API capability gates remote calls; a missing/false capability
- *     fails closed while the local marker still changes;
+ *   - RCS read behavior is preserved, while RCS unread never hits the unsupported endpoint;
+ *   - iMessage calls require the explicit narrow read-state capability; missing/false fails closed;
+ *   - iMessage read also requires a successfully hydrated, enabled read-receipt preference;
+ *   - iMessage remote read/unread requests preserve the user's per-chat action order;
  *   - the DB is opened with the lazy `ensureDatabase()`, never the eager `getDatabase()` (this path
  *     is shared with the notification actions, which run with no React tree at all).
  *
@@ -18,6 +19,7 @@ import { sql } from 'drizzle-orm';
 import { Chat, Message } from '@core/models';
 import {
   getChatIdByGuid,
+  setChatUnreadLocal,
   setLastReadMessageGuid,
   upsertChats,
   upsertChatsWithinTransaction,
@@ -33,6 +35,7 @@ import { createTestDb } from '../support/testDb';
 let mockDb: AppDatabase;
 let mockServerPrivateApiEnabled = true;
 let mockServerRcsEnabled = false;
+let mockImessageReadStateEnabled = false;
 let mockSendReadReceipts = true;
 let mockSettingsHydrated = true;
 const mockHydrate = jest.fn(async () => {
@@ -64,6 +67,7 @@ jest.mock('@state/sessionStore', () => ({
   sessionAccessors: {
     privateApiEnabled: () => mockServerPrivateApiEnabled,
     rcsEnabled: () => mockServerRcsEnabled,
+    imessageReadStateEnabled: () => mockImessageReadStateEnabled,
   },
 }));
 jest.mock('@core/api', () => ({
@@ -122,6 +126,7 @@ beforeEach(() => {
   mockMarkChatRead.mockReset().mockResolvedValue({});
   mockServerPrivateApiEnabled = true;
   mockServerRcsEnabled = false;
+  mockImessageReadStateEnabled = false;
   mockSendReadReceipts = true;
   mockSettingsHydrated = true;
   mockHydrate.mockReset().mockImplementation(async () => {
@@ -162,29 +167,87 @@ describe('sendTyping', () => {
 });
 
 describe('markUnread', () => {
-  it('clears the local read marker without a remote iMessage call', async () => {
+  it('clears the local marker before syncing a capable iMessage server', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
     const guid = 'iMessage;-;+15551234567';
     await seedChat(db, guid);
+    mockImessageReadStateEnabled = true;
+    let markerAtRemote: string | null | undefined;
+    mockMarkChatUnread.mockImplementationOnce(async () => {
+      markerAtRemote = readMarker(raw, guid);
+      return {};
+    });
 
     await markUnread(guid);
 
     expect(readMarker(raw, guid)).toBeNull();
-    expect(mockMarkChatUnread).not.toHaveBeenCalled();
+    expect(markerAtRemote).toBeNull();
+    expect(mockMarkChatUnread).toHaveBeenCalledWith({ __http: true }, guid);
   });
 
-  it('never reaches a configured remote iMessage failure', async () => {
+  it('keeps the local unread marker when the capable server call fails', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
     const guid = 'iMessage;-;+15551234567';
     await seedChat(db, guid);
+    mockImessageReadStateEnabled = true;
     mockMarkChatUnread.mockRejectedValue(new Error('offline'));
 
     await expect(markUnread(guid)).resolves.toBeUndefined();
 
-    expect(mockMarkChatUnread).not.toHaveBeenCalled();
+    expect(mockMarkChatUnread).toHaveBeenCalledWith({ __http: true }, guid);
     expect(readMarker(raw, guid)).toBeNull(); // local flip kept
+  });
+
+  it('updates locally at once but preserves remote order when a later action becomes ready first', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    const guid = 'iMessage;-;+15551234567';
+    await seedChat(db, guid);
+    await setChatUnreadLocal(db, guid, 1_000);
+    mockImessageReadStateEnabled = true;
+    mockSettingsHydrated = false;
+    const releaseHydration = deferred<void>();
+    const releaseRead = deferred<void>();
+    const remoteOrder: string[] = [];
+    mockHydrate.mockImplementationOnce(async () => {
+      await releaseHydration.promise;
+      mockSettingsHydrated = true;
+    });
+    mockMarkChatRead.mockImplementationOnce(async () => {
+      remoteOrder.push('read:start');
+      await releaseRead.promise;
+      remoteOrder.push('read:end');
+      return {};
+    });
+    mockMarkChatUnread.mockImplementationOnce(async () => {
+      remoteOrder.push('unread');
+      return {};
+    });
+
+    const read = markRead(guid);
+    await waitForCall(mockHydrate);
+    expect(readState(raw, guid).markedUnreadAt).toBeNull();
+
+    const unread = markUnread(guid);
+    for (let turn = 0; turn < 20 && readState(raw, guid).markedUnreadAt === null; turn += 1) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    expect(readState(raw, guid).markedUnreadAt).not.toBeNull();
+    expect(mockMarkChatUnread).not.toHaveBeenCalled();
+    expect(mockMarkChatRead).not.toHaveBeenCalled();
+
+    releaseHydration.resolve();
+    await waitForCall(mockMarkChatRead);
+    expect(remoteOrder).toEqual(['read:start']);
+    expect(mockMarkChatUnread).not.toHaveBeenCalled();
+
+    releaseRead.resolve();
+    await Promise.all([unread, read]);
+
+    expect(remoteOrder).toEqual(['read:start', 'read:end', 'unread']);
+    expect(readState(raw, guid).markedUnreadAt).not.toBeNull();
   });
 
   it('keeps the tap timestamp while waiting behind a rolling-back transaction', async () => {
@@ -295,48 +358,61 @@ describe('markUnread', () => {
     expect(getDatabase).not.toHaveBeenCalled();
   });
 
-  it('fails closed on missing server capability without trusting device-local defaults', async () => {
+  it('fails closed on a missing narrow server capability', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
     const guid = 'iMessage;-;+15551234567';
     await seedChat(db, guid);
-    // Headless: neither UI hydration nor a server-info response has run yet.
-    mockSettingsHydrated = false;
-    mockServerPrivateApiEnabled = false;
+    mockImessageReadStateEnabled = false;
 
     await markUnread(guid);
 
-    expect(mockHydrate).not.toHaveBeenCalled();
     expect(mockMarkChatUnread).not.toHaveBeenCalled();
     expect(readMarker(raw, guid)).toBeNull(); // the local flip still lands
   });
 
-  it('keeps the local unread flip but sends nothing when hydration cannot complete', async () => {
+  it('keeps an oversized iMessage identifier local even when the capability is on', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    const guid = `iMessage;-;${'a'.repeat(1_025)}`;
+    await seedChat(db, guid);
+    mockImessageReadStateEnabled = true;
+
+    await markUnread(guid);
+
+    expect(readMarker(raw, guid)).toBeNull();
+    expect(mockMarkChatUnread).not.toHaveBeenCalled();
+  });
+
+  it('does not consult the read-receipt preference when syncing unread state', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
     const guid = 'iMessage;-;+15551234567';
     await seedChat(db, guid);
     mockSettingsHydrated = false;
-    mockHydrate.mockImplementationOnce(async () => undefined);
+    mockSendReadReceipts = false;
+    mockImessageReadStateEnabled = true;
 
     await markUnread(guid);
 
     expect(mockSettingsHydrated).toBe(false);
+    expect(mockHydrate).not.toHaveBeenCalled();
     expect(readMarker(raw, guid)).toBeNull();
-    expect(mockMarkChatUnread).not.toHaveBeenCalled();
+    expect(mockMarkChatUnread).toHaveBeenCalledWith({ __http: true }, guid);
   });
 
-  it('server Private API false skips the server call (local flip still lands)', async () => {
+  it('uses the narrow capability independently of retired Private API', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
     const guid = 'iMessage;-;+15551234567';
     await seedChat(db, guid);
     mockServerPrivateApiEnabled = false;
+    mockImessageReadStateEnabled = true;
 
     await markUnread(guid);
 
     expect(readMarker(raw, guid)).toBeNull();
-    expect(mockMarkChatUnread).not.toHaveBeenCalled();
+    expect(mockMarkChatUnread).toHaveBeenCalledWith({ __http: true }, guid);
   });
 });
 
@@ -367,6 +443,76 @@ describe('markRead', () => {
     expect(readMarker(raw, guid)).toBe('rcs-m1');
     expect(resolveReceiptTransport).toHaveBeenCalledTimes(1);
     expect(mockMarkChatRead).toHaveBeenCalledWith(killedProcessHttp, guid);
+  });
+
+  it('clears the local badge before syncing a capable iMessage read', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    const guid = 'iMessage;-;+15551234567';
+    const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
+    await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
+    const chatId = (await getChatIdByGuid(db, guid))!;
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'imessage-m1', text: 'hi', isFromMe: false, dateCreated: 1000 })],
+      () => chatId,
+      hm,
+    );
+    mockImessageReadStateEnabled = true;
+    let markerAtRemote: string | null | undefined;
+    mockMarkChatRead.mockImplementationOnce(async () => {
+      markerAtRemote = readMarker(raw, guid);
+      return {};
+    });
+
+    await markRead(guid);
+
+    expect(readMarker(raw, guid)).toBe('imessage-m1');
+    expect(markerAtRemote).toBe('imessage-m1');
+    expect(mockMarkChatRead).toHaveBeenCalledWith({ __http: true }, guid);
+  });
+
+  it('keeps an iMessage read local when the narrow capability is absent', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    const guid = 'iMessage;-;+15551234567';
+    const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
+    await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
+    const chatId = (await getChatIdByGuid(db, guid))!;
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'imessage-no-cap', text: 'hi', isFromMe: false, dateCreated: 1000 })],
+      () => chatId,
+      hm,
+    );
+
+    await markRead(guid);
+
+    expect(readMarker(raw, guid)).toBe('imessage-no-cap');
+    expect(mockHydrate).not.toHaveBeenCalled();
+    expect(mockMarkChatRead).not.toHaveBeenCalled();
+  });
+
+  it('keeps an iMessage read local when persisted receipts are off', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    const guid = 'iMessage;-;+15551234567';
+    const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
+    await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
+    const chatId = (await getChatIdByGuid(db, guid))!;
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'imessage-local', text: 'hi', isFromMe: false, dateCreated: 1000 })],
+      () => chatId,
+      hm,
+    );
+    mockImessageReadStateEnabled = true;
+    mockSendReadReceipts = false;
+
+    await markRead(guid);
+
+    expect(readMarker(raw, guid)).toBe('imessage-local');
+    expect(mockMarkChatRead).not.toHaveBeenCalled();
   });
 
   it('advances the marker via the LAZY ensureDatabase() — the killed-app tray button path', async () => {
@@ -430,6 +576,7 @@ describe('markRead', () => {
       () => chatId,
       hm,
     );
+    mockImessageReadStateEnabled = true;
     mockSettingsHydrated = false;
     mockHydrate.mockImplementationOnce(async () => undefined);
     const resolveReceiptTransport = jest.fn(async () => null);
@@ -439,6 +586,36 @@ describe('markRead', () => {
     expect(mockSettingsHydrated).toBe(false);
     expect(readMarker(raw, guid)).toBe('m-fail-closed');
     expect(resolveReceiptTransport).not.toHaveBeenCalled();
+    expect(mockMarkChatRead).not.toHaveBeenCalled();
+  });
+
+  it('keeps an iMessage read local when persisted settings cannot be read', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    const guid = 'iMessage;-;+15551234567';
+    const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
+    await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
+    const chatId = (await getChatIdByGuid(db, guid))!;
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'imessage-unreadable',
+          text: 'hi',
+          isFromMe: false,
+          dateCreated: 1000,
+        }),
+      ],
+      () => chatId,
+      hm,
+    );
+    mockImessageReadStateEnabled = true;
+    mockSettingsHydrated = false;
+    mockHydrate.mockRejectedValueOnce(new Error('settings unavailable'));
+
+    await expect(markRead(guid)).resolves.toBeUndefined();
+
+    expect(readMarker(raw, guid)).toBe('imessage-unreadable');
     expect(mockMarkChatRead).not.toHaveBeenCalled();
   });
 
@@ -460,10 +637,13 @@ describe('markRead', () => {
     const guid = 'RCS;-;+15550000000';
     const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
     await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
+    await setChatUnreadLocal(db, guid, 1_000);
+
+    expect(readState(raw, guid)).toEqual({ marker: null, markedUnreadAt: 1_000 });
 
     await markRead(guid);
 
-    expect(readMarker(raw, guid)).toBeNull();
+    expect(readState(raw, guid)).toEqual({ marker: null, markedUnreadAt: null });
     expect(mockHydrate).toHaveBeenCalledTimes(1);
     expect(mockMarkChatRead).toHaveBeenCalledWith({ __http: true }, guid);
   });

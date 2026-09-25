@@ -1,5 +1,5 @@
 import * as chatsApi from '@core/api/endpoints/chats';
-import { createChat, markChatRead } from '@core/api/endpoints/chats';
+import { createChat, markChatRead, markChatUnread } from '@core/api/endpoints/chats';
 import type { HttpClient } from '@core/api/http';
 
 describe('chatsApi helper retirement', () => {
@@ -120,19 +120,45 @@ describe('chatsApi.createChat', () => {
 });
 
 describe('chatsApi.markChatRead', () => {
-  it('rejects an iMessage read marker before HTTP', () => {
+  it('rejects unsupported and malformed read-state targets before HTTP', () => {
     const post = jest.fn();
     const http = { post } as unknown as HttpClient;
 
-    expect(() => markChatRead(http, 'iMessage;-;+1555')).toThrow('only for RCS');
+    expect(() => markChatRead(http, 'SMS;-;+1555')).toThrow('RCS or one-to-one iMessage');
+    expect(() => markChatRead(http, 'iMessage;-;')).toThrow('RCS or one-to-one iMessage');
+    expect(() => markChatRead(http, `iMessage;-;${'a'.repeat(1_025)}`)).toThrow(
+      'RCS or one-to-one iMessage',
+    );
+    expect(() => markChatRead(http, 'iMessage;-;+1555\n')).toThrow('RCS or one-to-one iMessage');
+    expect(() => markChatUnread(http, 'RCS;-;+1555')).toThrow('one-to-one iMessage');
     expect(post).not.toHaveBeenCalled();
   });
 
-  it('preserves the supported RCS read marker', async () => {
+  it('preserves the supported RCS read marker without enabling retries', async () => {
     const post = jest.fn(() => Promise.resolve({}));
     const http = { post } as unknown as HttpClient;
 
     await markChatRead(http, 'RCS;-;+1555');
-    expect(post).toHaveBeenCalledWith('/chat/RCS%3B-%3B%2B1555/read', expect.anything());
+    expect(post).toHaveBeenCalledWith('/chat/RCS%3B-%3B%2B1555/read', expect.anything(), {
+      retry: false,
+    });
+  });
+
+  it('posts iMessage read and unread state once with no automatic retry', async () => {
+    const post = jest.fn(() => Promise.resolve({}));
+    const http = { post } as unknown as HttpClient;
+
+    await markChatRead(http, 'iMessage;-;+1555');
+    await markChatUnread(http, 'any;-;+1666');
+
+    expect(post).toHaveBeenNthCalledWith(
+      1,
+      '/chat/iMessage%3B-%3B%2B1555/read',
+      expect.anything(),
+      { retry: false },
+    );
+    expect(post).toHaveBeenNthCalledWith(2, '/chat/any%3B-%3B%2B1666/unread', expect.anything(), {
+      retry: false,
+    });
   });
 });

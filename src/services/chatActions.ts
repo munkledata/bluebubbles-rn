@@ -1,4 +1,5 @@
 import { chatsApi, scheduledApi } from '@core/api';
+import { isIMessageReadStateGuid } from '@core/api/endpoints/chats';
 import type { HttpClient } from '@core/api/http';
 import { logger } from '@core/secure';
 import {
@@ -105,6 +106,60 @@ async function runChatAction(
     if (error === STALE_CHAT_ACTION || !lease.isCurrent()) return;
     throw error;
   }
+}
+
+type ReadStateSyncTask = () => Promise<void>;
+
+interface ReadStateSyncReservation {
+  run(task: ReadStateSyncTask): Promise<void>;
+  releaseWithoutSync(): void;
+}
+
+/**
+ * Reserve the caller's place in one chat's remote read-state sequence before any local await.
+ * Local database changes still happen immediately; only the best-effort Mac requests wait for the
+ * preceding intent. Releasing every unused reservation prevents an early return from blocking the
+ * next read/unread action.
+ */
+const readStateSyncTails = new Map<string, Promise<void>>();
+
+function reserveReadStateSync(
+  accountGeneration: number,
+  chatGuid: string,
+): ReadStateSyncReservation {
+  const laneKey = `${accountGeneration}\u0000${chatGuid}`;
+  let supplyTask: (task: ReadStateSyncTask | null) => void = () => undefined;
+  const admittedTask = new Promise<ReadStateSyncTask | null>((resolve) => {
+    supplyTask = resolve;
+  });
+  const previous = readStateSyncTails.get(laneKey) ?? Promise.resolve();
+  let supplied = false;
+  const completion = previous.then(async () => {
+    const task = await admittedTask;
+    if (task) await task();
+  });
+  let settledTail: Promise<void>;
+  settledTail = completion
+    .catch(() => undefined)
+    .finally(() => {
+      if (readStateSyncTails.get(laneKey) === settledTail) readStateSyncTails.delete(laneKey);
+    });
+  readStateSyncTails.set(laneKey, settledTail);
+
+  return {
+    run(task) {
+      if (!supplied) {
+        supplied = true;
+        supplyTask(task);
+      }
+      return completion;
+    },
+    releaseWithoutSync() {
+      if (supplied) return;
+      supplied = true;
+      supplyTask(null);
+    },
+  };
 }
 
 /** Set or clear the device-local mute preference for one conversation. */
@@ -470,7 +525,10 @@ export function markRead(
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
   options: MarkReadOptions = {},
 ): Promise<void> {
-  return runChatAction(accountLease, async (activeLease) => {
+  const readStateSync = isIMessageReadStateGuid(chatGuid)
+    ? reserveReadStateSync(accountLease.generation, chatGuid)
+    : null;
+  const action = runChatAction(accountLease, async (activeLease) => {
     // ensureDatabase, never getDatabase: the tray's "Mark as read" button runs HEADLESS on a
     // killed-app wake, where no React tree ever mounted, boot() never ran and the eager accessor
     // throws "Database not initialized". That rejection escaped the whole action handler, so the
@@ -484,29 +542,39 @@ export function markRead(
         assertChatActionLease(activeLease);
         const resolved = await resolveMarkReadTargetWithinTransaction(context, chatGuid);
         assertChatActionLease(activeLease);
-        if (resolved.newestReceivedGuid) {
-          await setLastReadMessageGuidWithinTransaction(
-            context,
-            chatGuid,
-            resolved.newestReceivedGuid,
-          );
-          assertChatActionLease(activeLease);
-        }
+        // Even an outgoing-only chat can carry a deliberate mark-as-unread stamp. Writing null is
+        // still necessary there: it clears that stamp so this device's badge changes before any
+        // optional server request.
+        await setLastReadMessageGuidWithinTransaction(
+          context,
+          chatGuid,
+          resolved.newestReceivedGuid,
+        );
+        assertChatActionLease(activeLease);
         return resolved;
       },
       () => activeLease.isCurrent(),
     );
     assertChatActionLease(activeLease);
     if (!target.chatExists) return;
-    // The RCS route remains a supported best-effort path even on a killed-process notification
-    // wake. Helper-backed iMessage read receipts are permanently retired; their local marker above
-    // still clears this device's badge.
-    if (!chatGuid.startsWith('RCS;-;')) return;
-    const fs = await hydratedFeatureSettings();
+    // RCS remains a supported best-effort path even before ServerInfo is available on a killed-app
+    // wake. iMessage must fail closed unless the server explicitly advertises its narrow bridge.
+    const isRcs = chatGuid.startsWith('RCS;-;');
+    const isIMessage = isIMessageReadStateGuid(chatGuid);
+    if (!isRcs && (!isIMessage || !sessionAccessors.imessageReadStateEnabled())) return;
+
+    let fs: FeatureSettings;
+    try {
+      fs = await hydratedFeatureSettings();
+    } catch {
+      // An unreadable persisted preference is not permission to disclose read state.
+      return;
+    }
     assertChatActionLease(activeLease);
     // Hydration deliberately leaves `hydrated=false` on a DB/read failure. The module defaults are
     // enabled for normal first use, but they are not proof of the user's persisted privacy choice.
     if (!fs.hydrated || !fs.sendReadReceipts) return;
+    if (isIMessage && !sessionAccessors.imessageReadStateEnabled()) return;
 
     let receiptTransport: ReadReceiptTransport | null;
     try {
@@ -520,24 +588,39 @@ export function markRead(
     }
     assertChatActionLease(activeLease);
     if (!receiptTransport?.isCurrent()) return;
+    if (isIMessage && !sessionAccessors.imessageReadStateEnabled()) return;
     try {
-      await chatsApi.markChatRead(receiptTransport.http, chatGuid);
+      if (isIMessage && readStateSync) {
+        await readStateSync.run(async () => {
+          if (
+            !activeLease.isCurrent() ||
+            !receiptTransport.isCurrent() ||
+            !sessionAccessors.imessageReadStateEnabled()
+          ) {
+            return;
+          }
+          await chatsApi.markChatRead(receiptTransport.http, chatGuid);
+        });
+      } else {
+        await chatsApi.markChatRead(receiptTransport.http, chatGuid);
+      }
     } catch {
       // Offline / not connected — the local marker still clears the badge.
     }
     assertChatActionLease(activeLease);
   });
+  return action.finally(() => readStateSync?.releaseWithoutSync());
 }
 
-/**
- * Mark a chat UNREAD locally. The helper-backed remote unread endpoint is retired, while the local
- * marker remains useful and must never depend on a server capability or network request.
- */
+/** Mark a chat unread locally, then best-effort sync a separately supported iMessage bridge. */
 export function markUnread(
   chatGuid: string,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
-  return runChatAction(accountLease, async (activeLease) => {
+  const readStateSync = isIMessageReadStateGuid(chatGuid)
+    ? reserveReadStateSync(accountLease.generation, chatGuid)
+    : null;
+  const action = runChatAction(accountLease, async (activeLease) => {
     // ensureDatabase for the same headless reason as markRead — this shares the
     // notification-action and background-event code paths.
     const db = await ensureDatabase();
@@ -553,7 +636,20 @@ export function markUnread(
       () => activeLease.isCurrent(),
     );
     assertChatActionLease(activeLease);
+    if (!isIMessageReadStateGuid(chatGuid) || !sessionAccessors.imessageReadStateEnabled()) {
+      return;
+    }
+    try {
+      await readStateSync?.run(async () => {
+        if (!activeLease.isCurrent() || !sessionAccessors.imessageReadStateEnabled()) return;
+        await chatsApi.markChatUnread(http, chatGuid);
+      });
+    } catch {
+      // The local marker remains authoritative for this device when Mac sync is unavailable.
+    }
+    assertChatActionLease(activeLease);
   });
+  return action.finally(() => readStateSync?.releaseWithoutSync());
 }
 
 /**

@@ -49,6 +49,25 @@ describe('sessionAccessors.messageSearchSupported', () => {
   });
 });
 
+describe('sessionAccessors.imessageReadStateEnabled', () => {
+  beforeEach(() => useSessionStore.setState({ serverInfo: null }));
+
+  it('is true only for the explicit narrow read-state capability', () => {
+    expect(sessionAccessors.imessageReadStateEnabled()).toBe(false);
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({ version: '1.9.0', private_api: true }),
+    });
+    expect(sessionAccessors.imessageReadStateEnabled()).toBe(false);
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({
+        version: '1.9.0',
+        supports_imessage_read_state: true,
+      }),
+    });
+    expect(sessionAccessors.imessageReadStateEnabled()).toBe(true);
+  });
+});
+
 describe('sessionAccessors.messagePartTopologySupported', () => {
   beforeEach(() => useSessionStore.setState({ serverInfo: null }));
 
