@@ -36,7 +36,8 @@
 | Authenticated connection/core messaging | **PARTIAL PASS** | An existing scoped credential resumed automatically after Mac health recovery, completed the setup transition, began the historical sync, and opened Messages while optional permissions remained denied. After Home plus ordinary `am kill`, PID `12192` was absent; a 457 ms cold launch created PID `12860`, returned directly to Messages, and produced zero scoped fatal lines. Send/receive and mutation checks remain barred on the non-synthetic account.                                                                                                                                                                                                                  |
 | Notification/push/headless/scheduling   | **PARTIAL PASS** | The app continued into Messages with notification permission denied. Its enable flow reached Android's prompt; denial produced the expected foreground-only guidance and recovery action. A reversible package grant established `POST_NOTIFICATIONS: granted=true` / default app-op `allow`, with unrelated runtime permissions still denied; `Notification Access…` opened Android's app-notification settings. The controlled foreground, alive-background, and ordinary-killed Firebase test-notification branches all passed; exact process and visible-notice evidence is recorded below. WorkManager, message-specific policy/actions, retries, and scheduling remain open. |
 | Account A to Disconnect to B            | **NOT RUN**      | Requires two distinct isolated identities and controlled delayed operations.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| App Lock and private Recents            | **OWNER INPUT**  | Biometric authentication cannot be completed unattended.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| App Lock and private Recents            | **PARTIAL PASS** | Enabling App Lock requested authentication immediately; after the killed push, foregrounding again required owner authentication before returning to Messages. The separate locked-notification/admission/drain branch below failed. Private Recents visual proof was not run.                                                                                                                                                                                                                                                                                                                                                                                                     |
+| Locked killed-Firebase admission/drain  | **FAIL**         | Firebase started a new process, but no generic notice appeared before unlock and no fixed test notice appeared after owner authentication within five minutes of the native receiver broadcast. The candidate source contains a locked-session authorization rejection on this path; details below.                                                                                                                                                                                                                                                                                                                                                                                |
 | Genuine Play-installed API 37           | **EXTERNAL**     | No approved API-37 Play device is currently available.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | Independent second-device backup slots  | **EXTERNAL**     | The Pixel is owner-excluded; Samsung-only partial proof cannot close `BACKUP-SLOTS-01`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 
@@ -72,6 +73,40 @@ the app was not device-idle-whitelisted. Do Not Disturb was temporarily disabled
 restored to `1` afterward. Only the located fixed test notices were dismissed. Temporary device UI
 dumps were deleted, the bounded two-minute keep-awake helper was stopped, and Gator was successfully
 foregrounded again. No scoped Android fatal line was observed in the killed-branch trace.
+
+## Locked killed-Firebase checkpoint
+
+The owner then completed one additional Samsung-only test on the same exact Play-v79 package.
+App Lock and Secure Screen were initially off. Enabling App Lock produced Android's `Unlock Gator`
+prompt. After Home, the first immediate `am kill` left process `29477` alive; a second attempt after
+confirming Home was resumed removed it. `pidof` confirmed no Gator process and Android had no Gator
+notification before the owner invoked the trusted Mac test control once. Force-stop was not used.
+
+At 13:43:38 MDT, Android started process `32036` for the Firebase receiver and logged receipt.
+Home remained resumed. At 13:43:59 and one follow-up, there was no Gator notification record;
+`You have new messages` and `Test notification received.` were both absent. Foregrounding Gator
+produced `Unlock Gator`. After owner authentication, at 13:47:10 the app displayed Messages in the
+same process, but there was still no Gator notification record or fixed test notice. This was within
+five minutes of receipt. No package-scoped Android fatal or missing-headless-task warning was
+observed. This is a **failed locked admission/notice/drain branch**, not a partial pass for it.
+
+**Source diagnosis:** `persistAuthenticatedLockedFcmV3Event` calls
+`resolveAuthorizedRealtimeTransport`. In a fresh process the resolver calls
+`inspectBackgroundSession`, which returns `kind: 'locked'` when persisted App Lock is enabled.
+The resolver accepts only `kind: 'ready'`. Any fresh-process locked V3 delivery that reaches this
+helper receives no transport and returns `not-enqueued`, preventing both the generic notice and
+later drain. The affected files are unchanged
+between candidate source `a0add484` and the audited local master. Independent source review confirms
+this contradiction. It is a definite source defect matching the result; native receiver receipt
+alone does not prove this specific envelope completed V3 authentication or reached that line.
+The finite in-app JS receipt was not captured, and release logcat intentionally omits the detailed
+warning diagnostics, so those missing observations are not treated as evidence of callback failure.
+
+`PUSH-CRYPTO-01E`, `NOTIF-02`, `REL-007`, and `DEVICE-01` remain open for this failed branch. The
+three unlocked delivery passes above remain valid. No code fix or replacement candidate is claimed.
+App Lock and Secure Screen were verified off afterward; Do Not Disturb was restored to `zen_mode=1`.
+Temporary device UI dumps were removed. The test procedure did not intentionally send a contact
+message or create, change, or remove credentials, accounts, or user content.
 
 ## Session notes
 
