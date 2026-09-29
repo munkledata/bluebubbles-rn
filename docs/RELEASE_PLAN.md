@@ -52,6 +52,18 @@ below deliberately remains frozen to v77 because the operational release checkli
 rebound to v78 and v78 has not completed the broader staged journey, artifact ledger, or release
 matrix. No v78 task result transfers into a v77-only release row.
 
+**Latest submitted artifact — not a checklist rebind:** `0.1.58` / version code `79` was built from
+source `a0add484c00fdda06b7ee2c0a5bb5221d256d292` and promoted as release commit
+`4cbb05064ec9f891f00cb0a4f697435206f54fce` by run
+`android-0.1.58-a0add48-20260929062534`. The retained
+`gator-release-0.1.58-v79-4cbb050.aab` is 58,215,008 bytes with SHA-256
+`c60cc661a318399afc5d30ed6d914303df41674cfafadfef9d835bfe3c442e19`. EAS submission
+`3138fc9b-c658-4fbc-b144-6a19f68a9e6e` finished successfully for Internal Testing with release
+status `COMPLETED`. This proves the bounded submission, not Android Publisher live-track state,
+tester availability, Play installation, or device behavior. An immediate Samsung Play install still
+delivered v78, so v78 remains the latest verified-live and Play-installed artifact until v79
+propagates and receives separate readback/device proof.
+
 | Field             | Frozen value                                                                                                                                                  |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Version           | `0.1.56` / Android version code `77`                                                                                                                          |
@@ -138,15 +150,16 @@ historical unless an owning task explicitly combines them.
 - **Verify:** Confirm repository track/config, the live track and tester list, exact AAB identity,
   hash, and Play signing, install or update through Play, staged-server journeys, feedback path,
   cleanup, and every Play prompt shown for this artifact.
-- **Current status (2026-09-25):** **IN_PROGRESS — v77 creation, validation, direct submission, and
-  live Internal `completed` state and a narrow Play-installed v77/API-36 killed-FCM slice are
-  proven; CURRENT LOCATION REQUIRES A REPLACEMENT CANDIDATE AND NEW DISCLOSURE/DEVICE PROOF.** The
+- **Current status (2026-09-29):** **IN_PROGRESS — v79 supplies the validated Current Location
+  replacement artifact and its Internal submission finished successfully, but live-track readback,
+  disclosure, and exact-candidate device proof remain open.** The v77 live Internal `completed`
+  state and narrow Play-installed v77/API-36 killed-FCM slice remain historical proof. The
   superseded v75 natural Play build-73→75 update and scoped Samsung `DL-01` matrix remain task history,
   while its Play-signed API-37 result remains supporting-only.
   Remaining work is tester/track administration, genuine API-37 Play delivery, a stable
   non-production server and general fixtures, the full selected
   connect/sync/send/receive/notification/restart/disconnect journey, general cleanup and candidate
-  limitations, and artifact-specific Play declarations or prompts. The replacement must additionally
+  limitations, and artifact-specific Play declarations or prompts. V79 must additionally
   reconcile foreground coarse/fine location, absence of background/location-service permission,
   Current Location success/no-send/retry behavior, privacy copy, and Data Safety. No wider-track
   promotion is authorized.
