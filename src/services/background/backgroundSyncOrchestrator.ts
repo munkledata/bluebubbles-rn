@@ -20,7 +20,7 @@ export interface BackgroundSession {
 export type BackgroundSessionInspection =
   | { kind: 'ready'; session: BackgroundSession }
   | { kind: 'empty' }
-  | { kind: 'locked' }
+  | { kind: 'locked'; session: BackgroundSession }
   | { kind: 'unsafe' }
   | { kind: 'revoked' }
   | { kind: 'unavailable' };
@@ -149,10 +149,16 @@ export async function inspectBackgroundSession(
   ) {
     return { kind: 'unsafe' };
   }
-  if (appLockEnabled === 'true') return { kind: 'locked' };
+  const session = Object.freeze({
+    origin: upgrade.session.origin,
+    password: upgrade.session.credential,
+  });
+  // Keep the validated tuple separate from permission to run background work. Authenticated
+  // locked V3 intake may use it to enqueue only; ordinary consumers still require kind: 'ready'.
+  if (appLockEnabled === 'true') return { kind: 'locked', session };
   return {
     kind: 'ready',
-    session: { origin: upgrade.session.origin, password: upgrade.session.credential },
+    session,
   };
 }
 

@@ -24,11 +24,31 @@ export interface AuthorizedRealtimeTransport {
 export async function resolveAuthorizedRealtimeTransport(
   expectedAccountGeneration?: number,
 ): Promise<AuthorizedRealtimeTransport | undefined> {
+  return resolveRealtimeTransport(expectedAccountGeneration);
+}
+
+/**
+ * Authorize only the authenticated V3 enqueue-only seam while App Lock remains effective.
+ * The caller's lock/deadline ownership is composed with every transport continuation; this does
+ * not grant ordinary background sync, downloads, actions, or router work permission to run locked.
+ */
+export async function resolveAuthorizedLockedFcmV3Transport(
+  context: RealtimeDeliveryLease,
+): Promise<AuthorizedRealtimeTransport | undefined> {
+  return resolveRealtimeTransport(context.generation, context);
+}
+
+async function resolveRealtimeTransport(
+  expectedAccountGeneration?: number,
+  lockedContext?: RealtimeDeliveryLease,
+): Promise<AuthorizedRealtimeTransport | undefined> {
   // Capture before the first await. Disconnect permanently invalidates this generation even if the
   // user immediately reconnects to the same origin with the same password.
   const accountLease = captureRealtimeDeliveryLease();
+  const ownerIsCurrent = (): boolean =>
+    accountLease.isCurrent() && (lockedContext === undefined || lockedContext.isCurrent());
   if (
-    !accountLease.isCurrent() ||
+    !ownerIsCurrent() ||
     (expectedAccountGeneration !== undefined &&
       accountLease.generation !== expectedAccountGeneration)
   ) {
@@ -53,7 +73,7 @@ export async function resolveAuthorizedRealtimeTransport(
       isCurrent: (): boolean => {
         const current = useSessionStore.getState();
         return (
-          accountLease.isCurrent() &&
+          ownerIsCurrent() &&
           taskHttp.isTransportCurrent() &&
           current.status === 'connected' &&
           current.origin === origin &&
@@ -74,10 +94,16 @@ export async function resolveAuthorizedRealtimeTransport(
   }
 
   const inspection = await inspectBackgroundSession(vault, accountRevocationMarker);
-  if (!accountLease.isCurrent() || inspection.kind !== 'ready') return undefined;
+  if (!ownerIsCurrent()) return undefined;
+  if (
+    inspection.kind !== 'ready' &&
+    (inspection.kind !== 'locked' || lockedContext === undefined)
+  ) {
+    return undefined;
+  }
 
   const durableSessionIsCurrent = (): boolean =>
-    accountLease.isCurrent() &&
+    ownerIsCurrent() &&
     useSessionStore.getState().transportRevision === capturedTransportRevision &&
     readAccountRevocationState(accountRevocationMarker) === 'clear';
   const taskHttp = fixedCredentialClient(

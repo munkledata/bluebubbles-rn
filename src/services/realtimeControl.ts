@@ -46,7 +46,7 @@ import {
   type RealtimePrerequisiteRecoveryOutcome,
 } from './background/realtimePrerequisiteRecovery';
 import { adoptRealtimeHeadlessEffect } from './background/realtimeHeadlessEffects';
-import { resolveAuthorizedRealtimeTransport } from './background/authorizedRealtimeTransport';
+import { resolveAuthorizedLockedFcmV3Transport } from './background/authorizedRealtimeTransport';
 import { ensureDatabase } from './databaseControl';
 import { maybeResumeSync } from './syncControl';
 import { autoDownloadMessageAttachmentsForRealtimeEvent } from './download/autoDownloadAttachments';
@@ -854,7 +854,7 @@ export async function persistAuthenticatedLockedFcmV3Event(
   if (!captured || captured.eventName === 'new-server') return 'not-enqueued';
   const normalized = snapshotIncomingEvent(captured.eventName, captured.rawData);
   if (!normalized) return 'not-enqueued';
-  const transport = await resolveAuthorizedRealtimeTransport(context.generation);
+  const transport = await resolveAuthorizedLockedFcmV3Transport(context);
   if (!transport || !context.isCurrent() || !transport.lease.isCurrent()) return 'not-enqueued';
   const initialProviderAdmission = classifyRcsEventAdmission(undefined, normalized);
   let providerInfo: Awaited<ReturnType<typeof serverApi.serverInfo>> | undefined;

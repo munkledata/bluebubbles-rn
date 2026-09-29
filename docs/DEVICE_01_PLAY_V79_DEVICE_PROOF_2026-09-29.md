@@ -103,10 +103,51 @@ The finite in-app JS receipt was not captured, and release logcat intentionally 
 warning diagnostics, so those missing observations are not treated as evidence of callback failure.
 
 `PUSH-CRYPTO-01E`, `NOTIF-02`, `REL-007`, and `DEVICE-01` remain open for this failed branch. The
-three unlocked delivery passes above remain valid. No code fix or replacement candidate is claimed.
+three unlocked delivery passes above remain valid. No code fix or replacement candidate is claimed
+by this device checkpoint; the later host correction below does not change the installed v79 result.
 App Lock and Secure Screen were verified off afterward; Do Not Disturb was restored to `zen_mode=1`.
 Temporary device UI dumps were removed. The test procedure did not intentionally send a contact
 message or create, change, or remove credentials, accounts, or user content.
+
+## Post-v79 host correction — replacement build deferred
+
+**2026-09-29: HOST FIX AND REQUIRED HOST GATES COMPLETE / NEW BUILD AND DEVICE PROOF DEFERRED.**
+The validated durable session tuple is now available to a dedicated locked-V3 transport resolver.
+Only `persistAuthenticatedLockedFcmV3Event` uses this resolver. Ordinary background work still
+requires `ready` and exits before client creation or DB access when the session is `locked`.
+The narrow path retains account generation, transport revision, durable revocation, transport
+currentness, and the caller's lock/deadline ownership. It does not hydrate foreground credentials,
+unlock the app, drain while locked, or post a notice before durable admission.
+
+The new six-case regression uses the real session inspection, transport resolution, and admission
+composition from cold store defaults, mocking native/database leaves. Its positive case failed
+before the fix (`enqueued` expected; `not-enqueued` received), then passed with the correction.
+Negative cases reject an already-revoked account or generation, transport-revision, revocation,
+and lock-owner changes during DB open. The focused gate passed **5 suites / 119 tests**; TypeScript,
+focused ESLint, and source formatting passed. Independent review found no blocking issue. The DB
+proof's two exact incoming-ingress fingerprints and the scheduled-recovery inspector fingerprint
+were renewed after review, without widening eligibility or changing the write inventory.
+
+Full Jest passed **529 suites / 6,407 tests**, with two intentional skipped suites/tests;
+architecture/recovery passed **51 tests**, migrations **5 tests**, and documentation **5 tests**.
+The 2,187-write guard and zero-drift reconciliation passed; the required full adversarial DB gate
+passed **115/115 tests**, with zero failures, cancellations, or skips. Source/test ESLint has no
+errors; linting the renewed guard scripts retained one unchanged unused-helper warning in
+`check-scheduled-recovery.mjs`. These are not evidence of native delivery or SQLCipher. Final host suites used the
+installed compatible Node `24.21.0`, not the machine-default Node `26.10.0`:
+the existing host SQLite test module requires Node ABI `137`, while Node 26 requires `147`.
+The incompatible run was stopped; no dependency rebuild or system-wide runtime change was made.
+This is not an exact release-toolchain certificate (the build tooling pins Node `24.19.0` / npm
+`11.17.0`).
+
+At the owner's direction, **do not build or upload yet**. After an approved replacement build is
+installed, repeat only the failed Samsung branch first: enable App Lock; Home plus ordinary
+`am kill` and confirm no process or prior fixed test notice; send the trusted built-in Samsung test
+once; verify a generic notice without opening Gator; authenticate within the event lifetime and
+verify the fixed test notice drains once. Restore App Lock/Secure Screen/DND to their prior states.
+Record the replacement candidate identity and actual observations, including failure if any.
+`PUSH-CRYPTO-01E`, `NOTIF-02`, `REL-007`, and `DEVICE-01` remain open. No build, upload, installation,
+AMFI change, or device retest is part of this host correction.
 
 ## Session notes
 

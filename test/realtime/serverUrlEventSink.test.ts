@@ -23,7 +23,7 @@ jest.mock('@/services/clients', () => ({
 }));
 jest.mock('@/services/backgrounds/syncedBackground', () => ({ ensureSyncedBackground: jest.fn() }));
 jest.mock('@/services/background/authorizedRealtimeTransport', () => ({
-  resolveAuthorizedRealtimeTransport: jest.fn(),
+  resolveAuthorizedLockedFcmV3Transport: jest.fn(),
 }));
 jest.mock('@/services/databaseControl', () => ({ ensureDatabase: jest.fn(async () => ({})) }));
 jest.mock('@/services/syncControl', () => ({ maybeResumeSync: jest.fn() }));
@@ -83,9 +83,9 @@ const { candidateClient: mockCandidateClient } = jest.requireMock('@/services/cl
 const { ensureDatabase: mockEnsureDatabase } = jest.requireMock('@/services/databaseControl') as {
   ensureDatabase: jest.Mock;
 };
-const { resolveAuthorizedRealtimeTransport: mockResolveAuthorizedRealtimeTransport } =
+const { resolveAuthorizedLockedFcmV3Transport: mockResolveAuthorizedRealtimeTransport } =
   jest.requireMock('@/services/background/authorizedRealtimeTransport') as {
-    resolveAuthorizedRealtimeTransport: jest.Mock;
+    resolveAuthorizedLockedFcmV3Transport: jest.Mock;
   };
 
 const ev = (e: unknown): NormalizedEvent => e as NormalizedEvent;
