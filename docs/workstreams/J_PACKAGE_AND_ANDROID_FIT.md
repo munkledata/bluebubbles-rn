@@ -15,12 +15,13 @@ historical failure record and retain only one-way cleanup of shortcuts published
 
 <a id="share-02"></a>
 
-## `SHARE-02` — optional owned Android share intake
+## `SHARE-02` — owned Android share intake
 
-If inbound sharing is selected again, use one owned native ACTION_SEND/Direct Share boundary. Reject
-item count before provider reads; enforce per-file, aggregate-byte, and deadline limits while streaming;
-cancel on every bound; restat and atomically promote only a complete batch; remove partials on failure
-or restart; and preserve lock/root/direct-target routing without restoring third-party parser coupling.
+Use one owned native ACTION_SEND/Direct Share boundary. Reject item count before provider reads;
+enforce per-file, aggregate-byte, and deadline limits while streaming; cancel on every bound; restat
+and atomically promote only a complete batch; remove partials on failure or restart; and preserve
+lock/root/direct-target routing without restoring third-party parser coupling. Publish opaque Direct
+Share identifiers from the same bounded current-account chat universe used to resolve them.
 
 <a id="notify-pkg-01"></a>
 

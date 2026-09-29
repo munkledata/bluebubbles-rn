@@ -21,6 +21,7 @@ import { createTestDb } from '../support/testDb';
 
 let mockDb: AppDatabase;
 let mockServerRcsEnabled = true;
+let mockRcsProviderEpoch: string | null;
 let mockImessageNewChatEnabled = false;
 const mockPrivateApiEnabled = jest.fn(() => true);
 
@@ -43,6 +44,8 @@ jest.mock('@state/sessionStore', () => ({
   sessionAccessors: {
     privateApiEnabled: () => mockPrivateApiEnabled(),
     rcsEnabled: () => mockServerRcsEnabled,
+    rcsProviderEpoch: () => mockRcsProviderEpoch,
+    rcsSendAttemptOwnershipSupported: () => true,
     imessageNewChatEnabled: () => mockImessageNewChatEnabled,
   },
 }));
@@ -67,9 +70,16 @@ function deferred<T>(): Deferred<T> {
   return { promise, resolve };
 }
 
+const RCS_EPOCH_A = `gpe1_${'A'.repeat(43)}`;
+const RCS_EPOCH_B = `gpe1_${'B'.repeat(42)}A`;
+const encoded = (value: string): string => Buffer.from(value, 'utf8').toString('base64url');
+const rcsChatGuid = (epoch: string, source = 'old@example.com'): string =>
+  `RCS;-;g1.${epoch}.${encoded(source)}`;
+
 const serverChat = (): Chat =>
   Chat.parse({
-    guid: 'RCS;-;old@example.com',
+    guid: rcsChatGuid(RCS_EPOCH_A),
+    providerEpoch: RCS_EPOCH_A,
     participants: [{ address: 'old@example.com', service: 'RCS' }],
   });
 
@@ -83,6 +93,7 @@ describe('createNewChat account lease', () => {
     resumeRealtimeDeliveries();
     ({ db: mockDb, raw } = await createTestDb());
     mockServerRcsEnabled = true;
+    mockRcsProviderEpoch = RCS_EPOCH_A;
     mockImessageNewChatEnabled = false;
     mockPrivateApiEnabled.mockClear();
     mockEnsureDatabase.mockReset().mockImplementation(() => Promise.resolve(mockDb));
@@ -97,13 +108,19 @@ describe('createNewChat account lease', () => {
 
   it('creates only through the RCS contract and commits the returned chat atomically', async () => {
     await expect(createNewChat(['old@example.com'], 'hello')).resolves.toBe(
-      'RCS;-;old@example.com',
+      rcsChatGuid(RCS_EPOCH_A),
     );
 
     expect(mockCreateChat).toHaveBeenCalledTimes(1);
     expect(mockCreateChat).toHaveBeenCalledWith(
       { account: 'captured-by-http-client' },
-      { address: 'old@example.com', message: 'hello', service: 'RCS', tempGuid: undefined },
+      {
+        address: 'old@example.com',
+        message: 'hello',
+        service: 'RCS',
+        tempGuid: undefined,
+        providerEpoch: RCS_EPOCH_A,
+      },
     );
     expect(mockPrivateApiEnabled).not.toHaveBeenCalled();
     expect(count(raw, 'handles')).toBe(1);
@@ -120,24 +137,88 @@ describe('createNewChat account lease', () => {
     expect(mockCreateChat).not.toHaveBeenCalled();
   });
 
+  it('rejects an expired SHARE new-chat plan before DB or HTTP', async () => {
+    const nativeCreatedAtMs = Date.now() - chatRepositories.SHARE_INTAKE_NEW_CHAT_RETRY_WINDOW_MS;
+    const tempGuid = 'share-1700000000000-1-0123456789abcdef';
+
+    await expect(
+      createNewChat(['old@example.com'], 'hello', undefined, 'RCS', tempGuid, {
+        identity: {
+          batchId: '1700000000000-1-0123456789abcdef',
+          nativeCreatedAtMs,
+          hasText: true,
+          fileCount: 0,
+        },
+        plan: {
+          address: 'old@example.com',
+          body: 'hello',
+          service: 'RCS',
+          providerEpoch: RCS_EPOCH_A,
+          tempGuid,
+          clientAttemptGeneration: 1,
+        },
+      }),
+    ).rejects.toThrow('too old to retry safely');
+
+    expect(mockEnsureDatabase).not.toHaveBeenCalled();
+    expect(mockCreateChat).not.toHaveBeenCalled();
+  });
+
+  it('rejects SHARE-created iMessage chats before DB or HTTP', async () => {
+    mockImessageNewChatEnabled = true;
+    const tempGuid = 'share-1700000000000-1-fedcba9876543210';
+
+    await expect(
+      createNewChat(['+15551234567'], 'hello', undefined, 'iMessage', tempGuid, {
+        identity: {
+          batchId: '1700000000000-1-fedcba9876543210',
+          nativeCreatedAtMs: Date.now(),
+          hasText: true,
+          fileCount: 0,
+        },
+        plan: {
+          address: '+15551234567',
+          body: 'hello',
+          service: 'iMessage',
+          providerEpoch: null,
+          tempGuid,
+          clientAttemptGeneration: 1,
+        },
+      }),
+    ).rejects.toThrow('active Messages account');
+
+    expect(mockEnsureDatabase).not.toHaveBeenCalled();
+    expect(mockCreateChat).not.toHaveBeenCalled();
+  });
+
   it('creates an RCS chat without consulting an injected legacy Private API flag', async () => {
     mockCreateChat.mockResolvedValueOnce(
       Chat.parse({
-        guid: 'RCS;-;+15551234567',
+        guid: rcsChatGuid(RCS_EPOCH_A, '+15551234567'),
+        providerEpoch: RCS_EPOCH_A,
         participants: [{ address: '+15551234567', service: 'RCS' }],
       }),
     );
 
-    await expect(createNewChat(['+15551234567'], 'hello')).resolves.toBe('RCS;-;+15551234567');
+    await expect(createNewChat(['+15551234567'], 'hello')).resolves.toBe(
+      rcsChatGuid(RCS_EPOCH_A, '+15551234567'),
+    );
     expect(mockCreateChat).toHaveBeenCalledWith(
       { account: 'captured-by-http-client' },
-      { address: '+15551234567', message: 'hello', service: 'RCS', tempGuid: undefined },
+      {
+        address: '+15551234567',
+        message: 'hello',
+        service: 'RCS',
+        tempGuid: undefined,
+        providerEpoch: RCS_EPOCH_A,
+      },
     );
     expect(mockPrivateApiEnabled).not.toHaveBeenCalled();
   });
 
   it('rejects RCS creation before DB or HTTP when the RCS bridge is unavailable', async () => {
     mockServerRcsEnabled = false;
+    mockRcsProviderEpoch = null;
 
     await expect(createNewChat(['+15551234567'], 'hello')).rejects.toThrow(
       'RCS conversation is unavailable',
@@ -230,10 +311,45 @@ describe('createNewChat account lease', () => {
     expect(mockEnsureDatabase).toHaveBeenCalledTimes(1);
 
     mockServerRcsEnabled = false;
+    mockRcsProviderEpoch = null;
     database.resolve(mockDb);
 
     await expect(create).rejects.toThrow('RCS conversation is unavailable');
     expect(mockCreateChat).not.toHaveBeenCalled();
+  });
+
+  it('does not start HTTP after the same session rotates to another RCS provider epoch', async () => {
+    const database = deferred<AppDatabase>();
+    mockEnsureDatabase.mockReturnValueOnce(database.promise);
+    const create = createNewChat(['old@example.com'], 'hello');
+    expect(mockEnsureDatabase).toHaveBeenCalledTimes(1);
+
+    mockRcsProviderEpoch = RCS_EPOCH_B;
+    database.resolve(mockDb);
+
+    await expect(create).rejects.toThrow('Google pairing');
+    expect(mockCreateChat).not.toHaveBeenCalled();
+    expect(count(raw, 'handles')).toBe(0);
+    expect(count(raw, 'chats')).toBe(0);
+  });
+
+  it('disowns an RCS response when the same session rotates epochs before local persistence', async () => {
+    const response = deferred<Chat>();
+    mockCreateChat.mockReturnValueOnce(response.promise);
+    const create = createNewChat(['old@example.com'], 'hello');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(mockCreateChat).toHaveBeenCalledWith(
+      { account: 'captured-by-http-client' },
+      expect.objectContaining({ providerEpoch: RCS_EPOCH_A }),
+    );
+
+    mockRcsProviderEpoch = RCS_EPOCH_B;
+    response.resolve(serverChat());
+
+    await expect(create).rejects.toThrow('Google pairing');
+    expect(count(raw, 'handles')).toBe(0);
+    expect(count(raw, 'chats')).toBe(0);
   });
 
   it('disowns an accepted A-server response instead of reconciling it into B', async () => {

@@ -68,12 +68,12 @@ notices have not yet been approved; that review is a gate for broader distributi
 `;
 
 export const LEGAL_INVENTORY_SUMMARY = Object.freeze({
-  productionPackageRecords: 1008,
-  uniquePackageVersions: 916,
+  productionPackageRecords: 1011,
+  uniquePackageVersions: 919,
   assetFiles: 14,
   pendingAssetProvenance: 14,
-  localComponents: 9,
-  packageLockSha256: '72643cee8ae381e7aeb6371b8b1531792708c678292e07feb322232ffbfaa90b',
+  localComponents: 12,
+  packageLockSha256: '261073d4be39b8f26beacc91e7d1cdbff19d943e35085f8a3862cf0cc3485597',
   unresolvedPackageRecords: 130,
   exactAabCoverage: false,
 } as const);

@@ -150,6 +150,8 @@ describe('DEV fake sends — account ownership', () => {
       mockDb,
       'temp-account-scope',
       expect.objectContaining({ dateDelivered: null }),
+      undefined,
+      'chat-a',
     );
 
     let teardownFinished = false;

@@ -38,4 +38,23 @@ describe('Android permission containment', () => {
   it('configures expo-media-library for photo/video reads only', () => {
     expect(pluginOptions('expo-media-library')?.granularPermissions).toEqual(['photo', 'video']);
   });
+
+  it('allows one foreground location fix but blocks background and location-service access', () => {
+    expect(directPermissions).toEqual(
+      expect.arrayContaining([
+        'android.permission.ACCESS_COARSE_LOCATION',
+        'android.permission.ACCESS_FINE_LOCATION',
+      ]),
+    );
+    expect(blockedPermissions).toEqual(
+      expect.arrayContaining([
+        'android.permission.ACCESS_BACKGROUND_LOCATION',
+        'android.permission.FOREGROUND_SERVICE_LOCATION',
+      ]),
+    );
+    expect(pluginOptions('expo-location')).toMatchObject({
+      isAndroidBackgroundLocationEnabled: false,
+      isAndroidForegroundServiceEnabled: false,
+    });
+  });
 });

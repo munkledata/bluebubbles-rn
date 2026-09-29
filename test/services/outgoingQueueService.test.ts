@@ -44,6 +44,15 @@ jest.mock('@/services/send/sendFailureNotice', () => ({
 
 const mockNotifyFailedSend = notifyFailedSend as jest.Mock;
 
+const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
+const rcsChatGuid = (sourceId: string): string =>
+  `RCS;-;g1.${RCS_PROVIDER_EPOCH}.${Buffer.from(sourceId).toString('base64url')}`;
+const rcsMessageGuid = (sourceId: string): string =>
+  `rcs-g1.${RCS_PROVIDER_EPOCH}.${Buffer.from(sourceId).toString('base64url')}`;
+const RCS_CHAT_GUID = rcsChatGuid('thread-1');
+const rcsAvailable = (chatGuid?: string): boolean =>
+  chatGuid === undefined || chatGuid.startsWith(`RCS;-;g1.${RCS_PROVIDER_EPOCH}.`);
+
 beforeEach(() => {
   mockNotifyFailedSend.mockClear();
 });
@@ -160,13 +169,13 @@ async function seedWholeMessageRcsTarget(db: AppDatabase, guid: string): Promise
   const handles = await upsertHandles(db, [{ address: '+15550001111' }]);
   const chats = await upsertChats(
     db,
-    [Chat.parse({ guid: 'RCS;-;thread-1', participants: [{ address: '+15550001111' }] })],
+    [Chat.parse({ guid: RCS_CHAT_GUID, participants: [{ address: '+15550001111' }] })],
     handles,
   );
   await upsertMessages(
     db,
     [Message.parse({ guid, text: 'RCS target', dateCreated: 500 })],
-    () => chats.get('RCS;-;thread-1')!,
+    () => chats.get(RCS_CHAT_GUID)!,
     handles,
   );
 }
@@ -179,7 +188,7 @@ async function seedExactRcsTextTarget(
   const handles = await upsertHandles(db, [{ address: '+15550001111' }]);
   const chats = await upsertChats(
     db,
-    [Chat.parse({ guid: 'RCS;-;thread-1', participants: [{ address: '+15550001111' }] })],
+    [Chat.parse({ guid: RCS_CHAT_GUID, participants: [{ address: '+15550001111' }] })],
     handles,
   );
   await upsertMessages(
@@ -197,7 +206,7 @@ async function seedExactRcsTextTarget(
         },
       }),
     ],
-    () => chats.get('RCS;-;thread-1')!,
+    () => chats.get(RCS_CHAT_GUID)!,
     handles,
   );
 }
@@ -279,7 +288,7 @@ async function retryableRow(db: AppDatabase, now: number): Promise<RetryableOutg
   return row;
 }
 
-const RCS_ATTACHMENT_CHAT_GUID = 'RCS;-;queue-attachment-thread';
+const RCS_ATTACHMENT_CHAT_GUID = rcsChatGuid('queue-attachment-thread');
 
 /** Insert an outgoing text whose created_at is forced old, so it's a stranded (eligible) row. */
 async function strandedText(
@@ -392,6 +401,62 @@ describe('runOutgoingQueue', () => {
         .get(),
     ).toEqual({ attempts: 1, nextRetryAt: 0 });
     expect(stateOf(raw, 'temp-disabled-rcs')).toBe('error');
+  });
+
+  it('does not let an old-provider RCS row consume the bounded candidate cap', async () => {
+    const { db, raw } = await createTestDb();
+    const staleEpoch = `gpe1_${'B'.repeat(43)}`;
+    const staleRcsGuid = `RCS;-;g1.${staleEpoch}.${Buffer.from('old-thread').toString('base64url')}`;
+    const currentRcsGuid = rcsChatGuid('current-thread');
+    await seedChat(db, staleRcsGuid);
+    await seedChat(db, currentRcsGuid);
+    await strandedText(db, raw, staleRcsGuid, 'temp-stale-provider-rcs', 100);
+    await strandedText(db, raw, currentRcsGuid, 'temp-current-provider-rcs', 200);
+    raw
+      .prepare(
+        `UPDATE messages
+            SET send_state = 'error', error = 502
+          WHERE guid IN ('temp-stale-provider-rcs', 'temp-current-provider-rcs')`,
+      )
+      .run();
+    raw
+      .prepare(
+        `UPDATE outgoing_queue
+            SET attempts = 1, next_retry_at = 0
+          WHERE temp_guid IN ('temp-stale-provider-rcs', 'temp-current-provider-rcs')`,
+      )
+      .run();
+
+    const posts: Record<string, unknown>[] = [];
+    await expect(
+      runOutgoingQueue(
+        db,
+        fakeHttp(async (body) => {
+          posts.push(body as Record<string, unknown>);
+          return { guid: 'temp-current-provider-rcs', dateCreated: 2_000, dateDelivered: null };
+        }),
+        noAttachmentIo,
+        2_000_000,
+        undefined,
+        1,
+        undefined,
+        undefined,
+        (chatGuid?: string) =>
+          chatGuid === undefined || chatGuid.startsWith(`RCS;-;g1.${RCS_PROVIDER_EPOCH}.`),
+        undefined,
+        undefined,
+        RCS_PROVIDER_EPOCH,
+      ),
+    ).resolves.toEqual({ eligible: 1, sent: 1 });
+
+    expect(posts).toEqual([
+      expect.objectContaining({
+        chatGuid: currentRcsGuid,
+        tempGuid: 'temp-current-provider-rcs',
+      }),
+    ]);
+    expect(attemptsOf(raw, 'temp-stale-provider-rcs')).toBe(1);
+    expect(stateOf(raw, 'temp-stale-provider-rcs')).toBe('error');
   });
 
   it('immediately defers an RCS claim when capability disappears before network start', async () => {
@@ -580,6 +645,73 @@ describe('runOutgoingQueue', () => {
     }
   });
 
+  it('retires a marker-only recovered iMessage effect as delivery-unconfirmed without replay', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'any;-;+15551234567');
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-effect-recovery',
+      chatGuid: 'any;-;+15551234567',
+      text: 'possibly delivered',
+      oneShotEffect: true,
+      now: 1_000,
+    });
+    raw
+      .prepare(
+        `UPDATE outgoing_queue
+            SET created_at = 0, next_retry_at = 0
+          WHERE temp_guid = 'temp-effect-recovery'`,
+      )
+      .run();
+
+    await expect(runOutgoingQueue(db, noRequestHttp, noAttachmentIo, 2_000_000)).resolves.toEqual({
+      eligible: 1,
+      sent: 0,
+    });
+
+    expect(attemptsOf(raw, 'temp-effect-recovery')).toBe(OUTGOING_MAX_ATTEMPTS);
+    expect(
+      raw
+        .prepare(
+          `SELECT send_state AS state, error, error_message AS detail
+             FROM messages WHERE guid = 'temp-effect-recovery'`,
+        )
+        .get(),
+    ).toEqual({
+      state: 'error',
+      error: ClientErrorCode.effectDeliveryUnconfirmed,
+      detail:
+        'This effect message may have been delivered. Check Messages before sending a new copy.',
+    });
+    await expect(claimFailedOutgoingForRetry(db, 'temp-effect-recovery')).resolves.toMatchObject({
+      claim: 'unsendable',
+    });
+  });
+
+  it('refuses manual replay of a marker-only iMessage effect before mutating its ladder', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'any;-;+15551234567');
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-effect-manual',
+      chatGuid: 'any;-;+15551234567',
+      text: 'must not become plain text',
+      oneShotEffect: true,
+      now: 1_000,
+    });
+    raw
+      .prepare(
+        `UPDATE messages
+            SET send_state = 'error', error = 500
+          WHERE guid = 'temp-effect-manual'`,
+      )
+      .run();
+
+    await expect(claimFailedOutgoingForRetry(db, 'temp-effect-manual')).resolves.toEqual({
+      claim: 'unsendable',
+    });
+    expect(attemptsOf(raw, 'temp-effect-manual')).toBe(0);
+    expect(stateOf(raw, 'temp-effect-manual')).toBe('error');
+  });
+
   it('retires only a marked recovered iMessage image as delivery-unconfirmed without replay', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'any;-;+15551234567');
@@ -625,13 +757,14 @@ describe('runOutgoingQueue', () => {
 
   it('retries a whole-message RCS reaction without inventing Apple part topology', async () => {
     const { db, raw } = await createTestDb();
-    await seedWholeMessageRcsTarget(db, 'rcs-target-1');
-    const chatId = await getChatIdByGuid(db, 'RCS;-;thread-1');
+    const targetGuid = rcsMessageGuid('target-1');
+    await seedWholeMessageRcsTarget(db, targetGuid);
+    const chatId = await getChatIdByGuid(db, RCS_CHAT_GUID);
     await insertOutgoingReaction(db, {
       tempGuid: 'temp-rcs-reaction',
       chatId: chatId!,
-      chatGuid: 'RCS;-;thread-1',
-      targetGuid: 'rcs-target-1',
+      chatGuid: RCS_CHAT_GUID,
+      targetGuid,
       reaction: 'love',
       partIndex: 0,
       now: 1_000,
@@ -659,11 +792,12 @@ describe('runOutgoingQueue', () => {
         undefined,
         undefined,
         { allowsLegacyPartZero: false, isCurrent: () => true },
+        rcsAvailable,
       ),
     ).resolves.toEqual({ eligible: 1, sent: 1 });
 
     expect(body).toMatchObject({
-      messageGuid: 'rcs-target-1',
+      messageGuid: targetGuid,
       reactionType: 'love',
       partIndex: 0,
     });
@@ -672,24 +806,25 @@ describe('runOutgoingQueue', () => {
 
   it('retires recovered targeted RCS text, contact, and attachment rows without transport work', async () => {
     const { db, raw } = await createTestDb();
-    await seedExactRcsTextTarget(db, 'rcs-reply-target', 4);
-    const chatId = await getChatIdByGuid(db, 'RCS;-;thread-1');
+    const targetGuid = rcsMessageGuid('reply-target');
+    await seedExactRcsTextTarget(db, targetGuid, 4);
+    const chatId = await getChatIdByGuid(db, RCS_CHAT_GUID);
     await insertOutgoingText(db, {
       tempGuid: 'temp-rcs-text-reply',
       chatId: chatId!,
-      chatGuid: 'RCS;-;thread-1',
+      chatGuid: RCS_CHAT_GUID,
       text: 'text',
-      selectedMessageGuid: 'rcs-reply-target',
+      selectedMessageGuid: targetGuid,
       partIndex: 4,
       now: 1_000,
     });
     await insertOutgoingContact(db, {
       tempGuid: 'temp-rcs-contact-reply',
       chatId: chatId!,
-      chatGuid: 'RCS;-;thread-1',
+      chatGuid: RCS_CHAT_GUID,
       text: 'Ada',
       contact: { firstName: 'Ada' },
-      selectedMessageGuid: 'rcs-reply-target',
+      selectedMessageGuid: targetGuid,
       partIndex: 4,
       now: 1_000,
     });
@@ -697,12 +832,12 @@ describe('runOutgoingQueue', () => {
       tempGuid: 'temp-rcs-attachment-reply',
       attachmentGuid: 'temp-rcs-attachment-reply-att',
       chatId: chatId!,
-      chatGuid: 'RCS;-;thread-1',
+      chatGuid: RCS_CHAT_GUID,
       localPath: 'file:///must-not-open.jpg',
       mimeType: 'image/jpeg',
       transferName: 'must-not-open.jpg',
       totalBytes: 10,
-      selectedMessageGuid: 'rcs-reply-target',
+      selectedMessageGuid: targetGuid,
       partIndex: 4,
       now: 1_000,
     });
@@ -744,6 +879,11 @@ describe('runOutgoingQueue', () => {
           },
         },
         2_000,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        rcsAvailable,
       ),
     ).resolves.toEqual({ eligible: 3, sent: 0 });
 
@@ -758,16 +898,17 @@ describe('runOutgoingQueue', () => {
     }
   });
 
-  it('retires a legacy targeted RCS row at manual claim without capability proof', async () => {
+  it('keeps a targeted RCS row intact at manual claim without current pairing proof', async () => {
     const { db, raw } = await createTestDb();
-    await seedWholeMessageRcsTarget(db, 'rcs-legacy-reply-target');
-    const chatId = await getChatIdByGuid(db, 'RCS;-;thread-1');
+    const targetGuid = rcsMessageGuid('legacy-reply-target');
+    await seedWholeMessageRcsTarget(db, targetGuid);
+    const chatId = await getChatIdByGuid(db, RCS_CHAT_GUID);
     await insertOutgoingText(db, {
       tempGuid: 'temp-rcs-manual-reply',
       chatId: chatId!,
-      chatGuid: 'RCS;-;thread-1',
+      chatGuid: RCS_CHAT_GUID,
       text: 'must not send',
-      selectedMessageGuid: 'rcs-legacy-reply-target',
+      selectedMessageGuid: targetGuid,
       partIndex: 0,
       now: 1_000,
     });
@@ -780,20 +921,21 @@ describe('runOutgoingQueue', () => {
     await expect(claimFailedOutgoingForRetry(db, 'temp-rcs-manual-reply')).resolves.toEqual({
       claim: 'unsendable',
     });
-    expect(attemptsOf(raw, 'temp-rcs-manual-reply')).toBe(OUTGOING_MAX_ATTEMPTS);
+    expect(attemptsOf(raw, 'temp-rcs-manual-reply')).toBe(0);
     expect(stateOf(raw, 'temp-rcs-manual-reply')).toBe('error');
   });
 
   it('defensively retires a directly handed-off targeted RCS row without POST', async () => {
     const { db, raw } = await createTestDb();
-    await seedWholeMessageRcsTarget(db, 'rcs-direct-reply-target');
-    const chatId = await getChatIdByGuid(db, 'RCS;-;thread-1');
+    const targetGuid = rcsMessageGuid('direct-reply-target');
+    await seedWholeMessageRcsTarget(db, targetGuid);
+    const chatId = await getChatIdByGuid(db, RCS_CHAT_GUID);
     await insertOutgoingText(db, {
       tempGuid: 'temp-rcs-direct-reply',
       chatId: chatId!,
-      chatGuid: 'RCS;-;thread-1',
+      chatGuid: RCS_CHAT_GUID,
       text: 'must not send',
-      selectedMessageGuid: 'rcs-direct-reply-target',
+      selectedMessageGuid: targetGuid,
       partIndex: 0,
       now: 1_000,
     });
@@ -820,6 +962,11 @@ describe('runOutgoingQueue', () => {
         noAttachmentIo,
         row,
         () => 2_000,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        rcsAvailable,
       ),
     ).resolves.toBe('unsendable');
 
@@ -1183,7 +1330,19 @@ describe('runOutgoingQueue — attachment resend', () => {
       },
     });
 
-    await expect(runOutgoingQueue(db, noRequestHttp, io.io, 2_000_000, lease)).resolves.toEqual({
+    await expect(
+      runOutgoingQueue(
+        db,
+        noRequestHttp,
+        io.io,
+        2_000_000,
+        lease,
+        undefined,
+        undefined,
+        undefined,
+        rcsAvailable,
+      ),
+    ).resolves.toEqual({
       eligible: 1,
       sent: 0,
     });
@@ -1224,7 +1383,17 @@ describe('runOutgoingQueue — attachment resend', () => {
         return { guid: 'real-pic', viaPrivateApi: true };
       },
     });
-    const res = await runOutgoingQueue(db, sourceHttp, up.io, 2_000_000);
+    const res = await runOutgoingQueue(
+      db,
+      sourceHttp,
+      up.io,
+      2_000_000,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      rcsAvailable,
+    );
     expect(res).toEqual({ eligible: 1, sent: 1 });
     // The re-upload streams the ORIGINAL on-disk file under the ORIGINAL tempGuid (so the
     // server's idempotency cache can absorb an ack-lost duplicate).
@@ -1267,7 +1436,20 @@ describe('runOutgoingQueue — attachment resend', () => {
       });
 
       await expect(
-        runOutgoingQueue(db, noRequestHttp, up.io, 2_000_000, undefined, 1, 60_000),
+        runOutgoingQueue(
+          db,
+          noRequestHttp,
+          up.io,
+          2_000_000,
+          undefined,
+          1,
+          60_000,
+          undefined,
+          rcsAvailable,
+          undefined,
+          undefined,
+          RCS_PROVIDER_EPOCH,
+        ),
       ).resolves.toEqual({ eligible: 1, sent: 1 });
       expect(up.captured?.timeoutMs).toBe(59_750);
     } finally {
@@ -1293,8 +1475,10 @@ describe('runOutgoingQueue — attachment resend', () => {
         1,
         undefined,
         undefined,
-        undefined,
+        rcsAvailable,
         controller.signal,
+        undefined,
+        RCS_PROVIDER_EPOCH,
       ),
     ).resolves.toEqual({ eligible: 1, sent: 1 });
     expect(up.captured?.signal).toBe(controller.signal);
@@ -1323,7 +1507,20 @@ describe('runOutgoingQueue — attachment resend', () => {
     jest.useFakeTimers();
     jest.setSystemTime(2_000_000);
     try {
-      const run = runOutgoingQueue(db, noRequestHttp, up.io, 2_000_000, undefined, 1, 60_000);
+      const run = runOutgoingQueue(
+        db,
+        noRequestHttp,
+        up.io,
+        2_000_000,
+        undefined,
+        1,
+        60_000,
+        undefined,
+        rcsAvailable,
+        undefined,
+        undefined,
+        RCS_PROVIDER_EPOCH,
+      );
       await entered;
       jest.advanceTimersByTime(60_000);
 
@@ -1354,7 +1551,17 @@ describe('runOutgoingQueue — attachment resend', () => {
         throw new ApiError('server_error', 'bridge down', 502);
       },
     });
-    const res = await runOutgoingQueue(db, noRequestHttp, up.io, 2_000_000);
+    const res = await runOutgoingQueue(
+      db,
+      noRequestHttp,
+      up.io,
+      2_000_000,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      rcsAvailable,
+    );
     expect(res).toEqual({ eligible: 1, sent: 0 });
     expect(stateOf(raw, 'temp-pic2')).toBe('error');
     expect(attemptsOf(raw, 'temp-pic2')).toBe(2);
@@ -1379,7 +1586,17 @@ describe('runOutgoingQueue — attachment resend', () => {
         return false;
       },
     });
-    const res = await runOutgoingQueue(db, noRequestHttp, up.io, 2_000_000);
+    const res = await runOutgoingQueue(
+      db,
+      noRequestHttp,
+      up.io,
+      2_000_000,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      rcsAvailable,
+    );
     expect(res).toEqual({ eligible: 1, sent: 0 });
     expect(fileCheckRanInsideTransaction).toBe(false);
     expect(up.captured).toBeUndefined(); // never attempted an upload
@@ -1702,6 +1919,10 @@ describe('outgoing queue — account revocation while a DB commit waits', () => 
       row,
       () => 2_000_000,
       account.lease,
+      undefined,
+      undefined,
+      undefined,
+      rcsAvailable,
     );
     await account.waitForChecks(4);
     account.revoke();
@@ -1916,7 +2137,17 @@ describe('applyServerSendError', () => {
 
     // The drain then re-uploads from disk and the RCS echo ack reconciles it to 'sent'.
     const up = fakeIo({ upload: async (args) => ({ guid: args.tempGuid, viaPrivateApi: false }) });
-    const res = await runOutgoingQueue(db, noRequestHttp, up.io, 5_000_000 + 31_000);
+    const res = await runOutgoingQueue(
+      db,
+      noRequestHttp,
+      up.io,
+      5_000_000 + 31_000,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      rcsAvailable,
+    );
     expect(res.sent).toBe(1);
     expect(up.captured?.uri).toBe('file:///async.jpg');
     expect(stateOf(raw, 'temp-async-pic')).toBe('sent');

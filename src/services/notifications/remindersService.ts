@@ -9,6 +9,8 @@ import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import type { Reminder } from '@core/models';
 import { logger } from '@core/secure';
+import { parseRcsChatGuid, parseRcsMessageGuid } from '@core/rcs';
+import { sessionAccessors } from '@state/sessionStore';
 import { ensureDatabase } from '../databaseControl';
 import { cancelReminderNotification, scheduleReminderNotification } from './notifeeService';
 import { isSafeReminderNotificationId, newReminderNotificationId } from './notificationRouting';
@@ -45,6 +47,30 @@ export class ReminderSessionChangedError extends Error {
 
 function assertReminderLease(lease: RealtimeDeliveryLease): void {
   if (!lease.isCurrent()) throw new ReminderSessionChangedError();
+}
+
+function captureReminderIdentityGuard(
+  target: Pick<ScheduleReminderArgs, 'chatGuid' | 'messageGuid'>,
+): () => boolean {
+  const rcsChat = target.chatGuid.startsWith('RCS;-;');
+  const rcsMessage = target.messageGuid.startsWith('rcs-');
+  if (!rcsChat && !rcsMessage) return () => true;
+  const expectedEpoch = sessionAccessors.rcsProviderEpoch();
+  if (
+    !rcsChat ||
+    !rcsMessage ||
+    expectedEpoch == null ||
+    parseRcsChatGuid(target.chatGuid)?.providerEpoch !== expectedEpoch ||
+    parseRcsMessageGuid(target.messageGuid)?.providerEpoch !== expectedEpoch
+  ) {
+    throw new Error(
+      'This RCS message is read-only because its Google pairing is no longer current.',
+    );
+  }
+  return () =>
+    sessionAccessors.rcsProviderEpoch() === expectedEpoch &&
+    sessionAccessors.acceptsRcsChat(target.chatGuid) &&
+    sessionAccessors.acceptsRcsMessage(target.messageGuid);
 }
 
 /** Acquire the composition-root database while the originating account remains admitted. */
@@ -161,15 +187,19 @@ export async function scheduleMessageReminder(
   args: ScheduleReminderArgs,
   accountLease: RealtimeDeliveryLease,
 ): Promise<number> {
+  const identityIsCurrent = captureReminderIdentityGuard(args);
+  if (!identityIsCurrent()) throw new ReminderSessionChangedError();
   const db = await acquireReminderDatabase(accountLease);
   return scheduleReminder(db, args, notifeeScheduler, accountLease);
 }
 
 /** UI-facing reminder cancellation without exposing the database or native scheduler. */
 export async function cancelMessageReminder(
-  reminder: Pick<Reminder, 'id' | 'notificationId'>,
+  reminder: Pick<Reminder, 'id' | 'notificationId' | 'chatGuid' | 'messageGuid'>,
   accountLease: RealtimeDeliveryLease,
 ): Promise<void> {
+  const identityIsCurrent = captureReminderIdentityGuard(reminder);
+  if (!identityIsCurrent()) throw new ReminderSessionChangedError();
   const db = await acquireReminderDatabase(accountLease);
   await cancelReminder(db, reminder, notifeeScheduler, accountLease);
 }
@@ -180,6 +210,8 @@ export async function rescheduleMessageReminder(
   scheduledFor: number,
   accountLease: RealtimeDeliveryLease,
 ): Promise<string> {
+  const identityIsCurrent = captureReminderIdentityGuard(reminder);
+  if (!identityIsCurrent()) throw new ReminderSessionChangedError();
   const db = await acquireReminderDatabase(accountLease);
   return rescheduleReminder(db, reminder, scheduledFor, notifeeScheduler, accountLease);
 }
@@ -202,13 +234,18 @@ export async function scheduleReminder(
   scheduler: ReminderScheduler = notifeeScheduler,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<number> {
+  const identityIsCurrent = captureReminderIdentityGuard(args);
+  const assertOperationCurrent = (): void => {
+    assertReminderLease(accountLease);
+    if (!identityIsCurrent()) throw new ReminderSessionChangedError();
+  };
   let candidateNotificationId: string | null = null;
   return runReminderAccountOperation(
     accountLease,
     async () => {
-      assertReminderLease(accountLease);
+      assertOperationCurrent();
       const existing = await getReminderByMessageGuid(db, args.messageGuid);
-      assertReminderLease(accountLease);
+      assertOperationCurrent();
       let notificationId: string;
       if (
         existing?.scheduledFor === args.scheduledFor &&
@@ -217,7 +254,7 @@ export async function scheduleReminder(
         notificationId = existing.notificationId;
       } else {
         notificationId = await newReminderNotificationId(db, args.messageGuid, args.scheduledFor);
-        assertReminderLease(accountLease);
+        assertOperationCurrent();
       }
       candidateNotificationId = notificationId;
       // Re-picking the same minute yields the same id, so `schedule` re-arms the SAME trigger in place.
@@ -227,7 +264,7 @@ export async function scheduleReminder(
       // Look up the reminded message's date so the notification tap can center the chat on it
       // (?focusDate deep-link). null when the message is gone — the tap still opens the chat.
       const messageDate = (await getMessageDateByGuid(db, args.messageGuid)) ?? undefined;
-      assertReminderLease(accountLease);
+      assertOperationCurrent();
       try {
         await scheduler.schedule({
           notificationId,
@@ -236,11 +273,11 @@ export async function scheduleReminder(
           scheduledFor: args.scheduledFor,
           messageDate,
         });
+        assertOperationCurrent();
       } catch (error) {
         if (!rearmedInPlace) await retireUncertainTrigger(scheduler, notificationId, error);
         throw error;
       }
-      assertReminderLease(accountLease);
 
       let id: number | null = null;
       try {
@@ -262,12 +299,12 @@ export async function scheduleReminder(
                 notificationId,
                 existing.notificationId,
               ),
-            () => accountLease.isCurrent(),
+            () => accountLease.isCurrent() && identityIsCurrent(),
           );
           if (!moved) throw new Error('reminder no longer matches');
           id = existing.id;
         }
-        assertReminderLease(accountLease);
+        assertOperationCurrent();
         if (id == null) {
           id = await withDbTransaction(
             db,
@@ -281,9 +318,9 @@ export async function scheduleReminder(
                 notificationId,
                 createdAt: args.now ?? null,
               }),
-            () => accountLease.isCurrent(),
+            () => accountLease.isCurrent() && identityIsCurrent(),
           );
-          assertReminderLease(accountLease);
+          assertOperationCurrent();
         }
       } catch (e) {
         // The durable half failed after the alarm was armed. Un-arm it, or it fires with no row behind
@@ -293,7 +330,7 @@ export async function scheduleReminder(
         throw e;
       }
       if (existing && !rearmedInPlace) await retireTrigger(scheduler, existing.notificationId);
-      assertReminderLease(accountLease);
+      assertOperationCurrent();
       return id;
     },
     scheduler,
@@ -304,23 +341,60 @@ export async function scheduleReminder(
 /** Cancel + delete a reminder (the Notifee trigger and the DB row). */
 export async function cancelReminder(
   db: AppDatabase,
-  reminder: Pick<Reminder, 'id' | 'notificationId'>,
+  reminder: Pick<Reminder, 'id' | 'notificationId' | 'chatGuid' | 'messageGuid'>,
   scheduler: ReminderScheduler = notifeeScheduler,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
+  const identityIsCurrent = captureReminderIdentityGuard(reminder);
+  const assertOperationCurrent = (): void => {
+    assertReminderLease(accountLease);
+    if (!identityIsCurrent()) throw new ReminderSessionChangedError();
+  };
   await runReminderAccountOperation(
     accountLease,
     async () => {
-      assertReminderLease(accountLease);
-      await scheduler.cancel(reminder.notificationId);
-      assertReminderLease(accountLease);
-      const deleted = await withDbTransaction(
-        db,
-        (context) => deleteReminderWithinTransaction(context, reminder.id, reminder.notificationId),
-        () => accountLease.isCurrent(),
-      );
-      assertReminderLease(accountLease);
-      if (!deleted) throw new Error('reminder no longer matches');
+      assertOperationCurrent();
+      const stored = await getReminderByMessageGuid(db, reminder.messageGuid);
+      assertOperationCurrent();
+      if (
+        !stored ||
+        stored.id !== reminder.id ||
+        stored.notificationId !== reminder.notificationId ||
+        stored.chatGuid !== reminder.chatGuid
+      ) {
+        throw new Error('reminder no longer matches');
+      }
+      const messageDate = (await getMessageDateByGuid(db, reminder.messageGuid)) ?? undefined;
+      assertOperationCurrent();
+      let nativeCancelled = false;
+      let rowDeleted = false;
+      try {
+        await scheduler.cancel(reminder.notificationId);
+        nativeCancelled = true;
+        assertOperationCurrent();
+        rowDeleted = await withDbTransaction(
+          db,
+          (context) =>
+            deleteReminderWithinTransaction(context, reminder.id, reminder.notificationId),
+          () => accountLease.isCurrent() && identityIsCurrent(),
+        );
+        assertOperationCurrent();
+        if (!rowDeleted) throw new Error('reminder no longer matches');
+      } catch (error) {
+        // Cancellation crosses the native bridge before the durable row can be removed. If the
+        // provider rotates or the guarded delete rolls back, restore the trigger that the still-
+        // present read-only row owns so the operation converges back to its original state.
+        if (nativeCancelled && !rowDeleted) {
+          await scheduler.schedule({
+            notificationId: reminder.notificationId,
+            chatGuid: reminder.chatGuid,
+            messageGuid: reminder.messageGuid,
+            scheduledFor: stored.scheduledFor,
+            messageDate,
+          });
+        }
+        throw error;
+      }
     },
     scheduler,
     () => null,
@@ -338,20 +412,25 @@ export async function rescheduleReminder(
   scheduler: ReminderScheduler = notifeeScheduler,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<string> {
+  const identityIsCurrent = captureReminderIdentityGuard(reminder);
+  const assertOperationCurrent = (): void => {
+    assertReminderLease(accountLease);
+    if (!identityIsCurrent()) throw new ReminderSessionChangedError();
+  };
   let candidateNotificationId: string | null = null;
   return runReminderAccountOperation(
     accountLease,
     async () => {
-      assertReminderLease(accountLease);
+      assertOperationCurrent();
       const notificationId = await newReminderNotificationId(
         db,
         reminder.messageGuid,
         scheduledFor,
       );
-      assertReminderLease(accountLease);
+      assertOperationCurrent();
       candidateNotificationId = notificationId;
       const messageDate = (await getMessageDateByGuid(db, reminder.messageGuid)) ?? undefined;
-      assertReminderLease(accountLease);
+      assertOperationCurrent();
       const rearmedInPlace = reminder.notificationId === notificationId;
       // Schedule the new trigger FIRST so a failure leaves the old reminder intact
       // (no orphaned DB row pointing at a cancelled trigger).
@@ -363,11 +442,11 @@ export async function rescheduleReminder(
           scheduledFor,
           messageDate,
         });
+        assertOperationCurrent();
       } catch (error) {
         if (!rearmedInPlace) await retireUncertainTrigger(scheduler, notificationId, error);
         throw error;
       }
-      assertReminderLease(accountLease);
 
       let moved: boolean;
       try {
@@ -381,9 +460,9 @@ export async function rescheduleReminder(
               notificationId,
               reminder.notificationId,
             ),
-          () => accountLease.isCurrent(),
+          () => accountLease.isCurrent() && identityIsCurrent(),
         );
-        assertReminderLease(accountLease);
+        assertOperationCurrent();
       } catch (e) {
         if (!rearmedInPlace) await retireUncertainTrigger(scheduler, notificationId, e);
         throw e;
@@ -400,7 +479,7 @@ export async function rescheduleReminder(
         throw missing;
       }
       if (!rearmedInPlace) await retireTrigger(scheduler, reminder.notificationId);
-      assertReminderLease(accountLease);
+      assertOperationCurrent();
       return notificationId;
     },
     scheduler,

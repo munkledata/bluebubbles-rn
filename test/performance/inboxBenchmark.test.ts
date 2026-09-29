@@ -1,5 +1,9 @@
 import { drizzle } from 'drizzle-orm/better-sqlite3';
-import { readFileSync } from 'node:fs';
+import Database from 'better-sqlite3';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { MIGRATIONS } from '@db/migrations';
 import {
   listChatsForInbox,
@@ -15,6 +19,7 @@ const MESSAGES_PER_CHAT = 4;
 const WARM_SAMPLES = 5;
 const ACTIVE_PERCENT = 95;
 const WARM_PAGE_BUDGET_MS = 16;
+const COLD_CHILD_MARKER = 'GATOR_INBOX_COLD_PROCESS:';
 const benchmark = process.env.GATOR_INBOX_BENCHMARK === '1' ? test : test.skip;
 
 interface CompiledQuery {
@@ -31,6 +36,13 @@ interface QueryMeasurement {
     samples: number[];
   };
   rssPeakDeltaMiB: number;
+}
+
+interface FreshConnectionMeasurement {
+  openMs: number;
+  firstPageQueryMs: number;
+  openThroughPageMs: number;
+  rssDeltaMiB: number;
 }
 
 type TestDatabase = Awaited<ReturnType<typeof createTestDb>>;
@@ -55,6 +67,93 @@ function databaseBytes(raw: TestDatabase['raw']): number {
   const pages = raw.prepare('PRAGMA page_count').get() as { page_count: number };
   const size = raw.prepare('PRAGMA page_size').get() as { page_size: number };
   return pages.page_count * size.page_size;
+}
+
+async function measureFilePage(databasePath: string): Promise<FreshConnectionMeasurement> {
+  let fileRaw: Database.Database | undefined;
+  try {
+    collectGarbage();
+    const rssBefore = process.memoryUsage().rss;
+    const openStarted = process.hrtime.bigint();
+    fileRaw = new Database(databasePath, { readonly: true, fileMustExist: true });
+    const fileDb = drizzle(fileRaw) as unknown as AppDatabase;
+    const queryStarted = process.hrtime.bigint();
+    const page = await listChatsForInboxPage(fileDb, { limit: 50 });
+    const queryFinished = process.hrtime.bigint();
+    expect(page.rows).toHaveLength(50);
+    expect(page.hasMore).toBe(true);
+    return {
+      openMs: round(Number(queryStarted - openStarted) / 1_000_000),
+      firstPageQueryMs: round(Number(queryFinished - queryStarted) / 1_000_000),
+      openThroughPageMs: round(Number(queryFinished - openStarted) / 1_000_000),
+      rssDeltaMiB: round(Math.max(0, process.memoryUsage().rss - rssBefore) / (1024 * 1024)),
+    };
+  } finally {
+    fileRaw?.close();
+  }
+}
+
+function measureNewProcessFilePage(databasePath: string): FreshConnectionMeasurement {
+  const child = spawnSync(
+    process.execPath,
+    [
+      '--expose-gc',
+      join(process.cwd(), 'node_modules/jest/bin/jest.js'),
+      '--selectProjects',
+      'node',
+      '--runInBand',
+      '--no-cache',
+      '--runTestsByPath',
+      'test/performance/inboxBenchmark.test.ts',
+    ],
+    {
+      cwd: process.cwd(),
+      encoding: 'utf8',
+      timeout: 60_000,
+      env: {
+        ...process.env,
+        GATOR_INBOX_BENCHMARK: '1',
+        GATOR_INBOX_COLD_CHILD: '1',
+        GATOR_INBOX_COLD_DB_PATH: databasePath,
+      },
+    },
+  );
+  if (child.error || child.status !== 0) {
+    throw new Error(
+      `The fresh-process inbox benchmark failed (${child.error?.message ?? child.status}):\n${child.stderr}`,
+    );
+  }
+  const report = child.stdout
+    .split(/\r?\n/)
+    .find((line) => line.startsWith(COLD_CHILD_MARKER))
+    ?.slice(COLD_CHILD_MARKER.length);
+  if (!report) throw new Error('The fresh-process inbox benchmark returned no measurement.');
+  const parsed = JSON.parse(report) as FreshConnectionMeasurement;
+  if (
+    !Number.isFinite(parsed.openMs) ||
+    !Number.isFinite(parsed.firstPageQueryMs) ||
+    !Number.isFinite(parsed.openThroughPageMs) ||
+    !Number.isFinite(parsed.rssDeltaMiB)
+  ) {
+    throw new Error('The fresh-process inbox benchmark returned an invalid measurement.');
+  }
+  return parsed;
+}
+
+async function measureFileBackedPages(raw: TestDatabase['raw']): Promise<{
+  freshConnection: FreshConnectionMeasurement;
+  newProcess: FreshConnectionMeasurement;
+}> {
+  const directory = mkdtempSync(join(tmpdir(), 'gator-inbox-host-'));
+  try {
+    const databasePath = join(directory, 'inbox.sqlite');
+    await raw.backup(databasePath);
+    const newProcess = measureNewProcessFilePage(databasePath);
+    const freshConnection = await measureFilePage(databasePath);
+    return { freshConnection, newProcess };
+  } finally {
+    rmSync(directory, { recursive: true });
+  }
 }
 
 function seedFixture({ raw }: TestDatabase, chatCount: number): void {
@@ -238,6 +337,9 @@ async function runScale(chatCount: (typeof CHAT_COUNTS)[number]): Promise<void> 
     });
     expect(fixture.raw.pragma('foreign_key_check')).toEqual([]);
 
+    // This is a fresh, file-backed SQLite connection, not a cold OS page cache or process launch.
+    const fileBackedPages = await measureFileBackedPages(fixture.raw);
+
     collectGarbage();
     const pageRssBefore = process.memoryUsage().rss;
     const page = await measure(
@@ -308,7 +410,7 @@ async function runScale(chatCount: (typeof CHAT_COUNTS)[number]): Promise<void> 
     ).version;
     const report = {
       artifact: 'PERF-01-PERF-02-host-inbox',
-      schemaVersion: 3,
+      schemaVersion: 5,
       environment: {
         node: process.version,
         sqlite: sqliteVersion,
@@ -323,6 +425,18 @@ async function runScale(chatCount: (typeof CHAT_COUNTS)[number]): Promise<void> 
         chatHandles: chatCount,
         messages: chatCount * MESSAGES_PER_CHAT,
         messagesPerChat: MESSAGES_PER_CHAT,
+      },
+      freshFileConnectionPage: {
+        rows: 50,
+        hasMore: true,
+        cacheCaveat: 'Fresh SQLite connection; OS page cache and Node process are not cold',
+        ...fileBackedPages.freshConnection,
+      },
+      newProcessFilePage: {
+        rows: 50,
+        hasMore: true,
+        cacheCaveat: 'Fresh Node process and SQLite connection; OS page cache is uncontrolled',
+        ...fileBackedPages.newProcess,
       },
       page: {
         rows: 50,
@@ -356,6 +470,13 @@ benchmark(
   async () => {
     const expectedNode = readFileSync('.nvmrc', 'utf8').trim();
     expect(process.version).toBe(`v${expectedNode}`);
+    if (process.env.GATOR_INBOX_COLD_CHILD === '1') {
+      const databasePath = process.env.GATOR_INBOX_COLD_DB_PATH;
+      if (!databasePath) throw new Error('The fresh-process inbox benchmark has no database path.');
+      const measurement = await measureFilePage(databasePath);
+      process.stdout.write(`${COLD_CHILD_MARKER}${JSON.stringify(measurement)}\n`);
+      return;
+    }
     for (const chatCount of CHAT_COUNTS) await runScale(chatCount);
   },
   300_000,

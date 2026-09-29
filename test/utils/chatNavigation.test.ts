@@ -35,8 +35,15 @@ describe('resolveChatNavigation', () => {
     expect(resolveChatNavigation('/chat/c1', '/chat/c1?focus=m1&focusDate=5')).toBe('replace');
   });
 
-  it('REPLACES for a Direct Share even into the SAME chat (must re-stage the shared files)', () => {
-    expect(resolveChatNavigation('/chat/c1', '/chat/c1?share=1')).toBe('replace');
+  it('REPLACES for an exact Direct Share batch even into the SAME chat', () => {
+    expect(
+      resolveChatNavigation('/chat/c1', '/chat/c1?shareBatch=1700000000000-1-0123456789abcdef'),
+    ).toBe('replace');
+  });
+
+  it('does not treat legacy or empty share query values as an exact batch claim', () => {
+    expect(resolveChatNavigation('/chat/c1', '/chat/c1?share=1')).toBe('none');
+    expect(resolveChatNavigation('/chat/c1', '/chat/c1?shareBatch=')).toBe('none');
   });
 
   it('a plain message tap into the SAME chat is a no-op regardless of focus in the target being absent', () => {

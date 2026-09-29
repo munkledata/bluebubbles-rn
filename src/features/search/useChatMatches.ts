@@ -1,6 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { getDatabase } from '@db/database';
-import { searchChatGuidsByMessage, searchChatsForInboxPage, type InboxRow } from '@db/repositories';
+import {
+  InboxSearchCancelledError,
+  searchChatGuidsByMessage,
+  searchChatsForInboxPage,
+  type InboxRow,
+} from '@db/repositories';
 import { useReactiveQuery, type ReactiveState } from '@db/useReactiveQuery';
 import { createRowIdentityCache } from '@features/conversations/rowIdentity';
 import { runInboxSearchIndexRebuildOnce } from '@/services/search/inboxSearchIndexRebuild';
@@ -90,6 +95,8 @@ export function useChatMatches(
   const state = useReactiveQuery<ChatMatchEnvelope>(
     async () => {
       const db = getDatabase();
+      const isCurrent = (): boolean =>
+        accountLease.isCurrent() && committedSearchKeyRef.current === searchKey;
       let messageMatchGuids: string[] = [];
       if (contentMatches) {
         try {
@@ -98,15 +105,25 @@ export function useChatMatches(
           // Conversation-name search remains useful when the optional local FTS read fails.
         }
       }
-      if (!accountLease.isCurrent()) return { key: searchKey, rows: [] };
+      if (!isCurrent()) return { key: searchKey, rows: [] };
       // A later contact/chat rename can dirty postings after boot. Search remains exact through
       // the dirty-row union while this best-effort, account-scoped rebuild catches up.
       void runInboxSearchIndexRebuildOnce(accountLease);
-      const page = await searchChatsForInboxPage(db, {
-        query: term,
-        messageMatchGuids,
-        limit: 50,
-      });
+      let page: Awaited<ReturnType<typeof searchChatsForInboxPage>>;
+      try {
+        page = await searchChatsForInboxPage(db, {
+          query: term,
+          messageMatchGuids,
+          limit: 50,
+          shouldContinue: isCurrent,
+        });
+      } catch (error) {
+        if (error instanceof InboxSearchCancelledError && !isCurrent()) {
+          return { key: searchKey, rows: [] };
+        }
+        throw error;
+      }
+      if (!isCurrent()) return { key: searchKey, rows: [] };
       return { key: searchKey, rows: reconcile(page.rows) };
     },
     TABLES,

@@ -12,12 +12,15 @@ import {
   getChatHeader,
   handleMapKey,
   listChatsForInbox,
+  listDeletedChats,
   listMessagesWithSenders,
+  setHandleColorWithinTransaction,
   upsertChats,
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
-import { resolveChatService } from '@utils';
+import { withDbTransaction } from '@db/transaction';
+import { participantAvatars, participantColors, participantList, resolveChatService } from '@utils';
 import { createTestDb } from '../support/testDb';
 
 const ADDR = '+15550001111';
@@ -157,34 +160,52 @@ describe('handle (address, service) identity', () => {
     expect(rows[0]!.handleId).not.toBeNull(); // the sender resolved through the composite key
   });
 
-  it('keeps the last valid server color across partial payloads and projects a changed color', async () => {
+  it('keeps a chosen device color across every server payload and projects local changes', async () => {
     const { db, raw } = await createTestDb();
-    const colorOf = (): string | null =>
+    const colorOf = (service: string): string | null =>
       (
         raw
           .prepare('SELECT color FROM handles WHERE address = ? AND service = ?')
-          .get(ADDR, 'iMessage') as { color: string | null }
+          .get(ADDR, service) as { color: string | null }
       ).color;
 
+    // Server payload colors are not part of the wire contract and cannot own this preference.
     await upsertHandles(db, [
       { address: ADDR, service: 'iMessage', color: ' #abcdef ' },
       { address: ADDR, service: 'iMessage', color: null, displayName: 'Latest payload name' },
       { address: ADDR, service: 'iMessage', color: 'not-a-color' },
     ]);
-    expect(colorOf()).toBe('#ABCDEF');
+    expect(colorOf('iMessage')).toBeNull();
 
+    const handles = await upsertHandles(db, [{ address: ADDR, service: 'iMessage' }]);
+    const guid = `iMessage;-;${ADDR}`;
+    const chatMap = await upsertChats(db, [chatWith(guid, 'iMessage')], handles);
+    await expect(
+      withDbTransaction(db, (context) =>
+        setHandleColorWithinTransaction(context, guid, ADDR, 'iMessage', '#abcdef'),
+      ),
+    ).resolves.toBe(true);
+    expect(colorOf('iMessage')).toBe('#ABCDEF');
+
+    // Missing, null, malformed, and even valid-looking inbound values cannot overwrite the
+    // explicitly chosen device value.
     await upsertHandles(db, [{ address: ADDR, service: 'iMessage' }]);
     await upsertHandles(db, [{ address: ADDR, service: 'iMessage', color: null }]);
     await upsertHandles(db, [{ address: ADDR, service: 'iMessage', color: 'not-a-color' }]);
-    expect(colorOf()).toBe('#ABCDEF');
+    await upsertHandles(db, [{ address: ADDR, service: 'iMessage', color: '#112233' }]);
+    expect(colorOf('iMessage')).toBe('#ABCDEF');
 
-    const handles = await upsertHandles(db, [
-      { address: ADDR, service: 'iMessage', color: '#123456' },
-    ]);
-    expect(colorOf()).toBe('#123456');
+    const smsHandles = await upsertHandles(db, [{ address: ADDR, service: 'SMS' }]);
+    const smsGuid = `SMS;-;${ADDR}`;
+    await upsertChats(db, [chatWith(smsGuid, 'SMS')], smsHandles);
+    await expect(
+      withDbTransaction(db, (context) =>
+        setHandleColorWithinTransaction(context, smsGuid, ADDR, 'SMS', '#123456'),
+      ),
+    ).resolves.toBe(true);
+    expect(colorOf('iMessage')).toBe('#ABCDEF');
+    expect(colorOf('SMS')).toBe('#123456');
 
-    const guid = `iMessage;-;${ADDR}`;
-    const chatMap = await upsertChats(db, [chatWith(guid, 'iMessage')], handles);
     await upsertMessages(
       db,
       [
@@ -199,8 +220,116 @@ describe('handle (address, service) identity', () => {
       handles,
     );
 
-    expect((await getChatHeader(db, guid))?.participantColors).toBe('#123456');
-    expect((await listChatsForInbox(db))[0]?.participantColors).toBe('#123456');
-    expect((await listMessagesWithSenders(db, chatMap.get(guid)!))[0]?.senderColor).toBe('#123456');
+    expect(participantColors((await getChatHeader(db, guid))?.participantColors)).toEqual([
+      '#ABCDEF',
+    ]);
+    expect(
+      participantColors(
+        (await listChatsForInbox(db)).find((row) => row.guid === guid)?.participantColors,
+      ),
+    ).toEqual(['#ABCDEF']);
+    expect((await listMessagesWithSenders(db, chatMap.get(guid)!))[0]?.senderColor).toBe('#ABCDEF');
+
+    await expect(
+      withDbTransaction(db, (context) =>
+        setHandleColorWithinTransaction(context, guid, ADDR, 'SMS', '#654321'),
+      ),
+    ).resolves.toBe(false);
+    await expect(
+      withDbTransaction(db, (context) =>
+        setHandleColorWithinTransaction(context, guid, ADDR, 'iMessage', 'red'),
+      ),
+    ).rejects.toThrow('six-digit hex color');
+    await expect(
+      withDbTransaction(db, (context) =>
+        setHandleColorWithinTransaction(context, guid, ADDR, 'iMessage', null),
+      ),
+    ).resolves.toBe(true);
+    expect(colorOf('iMessage')).toBeNull();
+    expect(colorOf('SMS')).toBe('#123456');
+  });
+
+  it('keeps comma-containing names aligned with their own avatar and color in every chat row', async () => {
+    const { db, raw } = await createTestDb();
+    const guid = 'iMessage;-;comma-name-group';
+    const jane = 'jane@example.test';
+    const bob = 'bob@example.test';
+    const handles = await upsertHandles(db, [
+      { address: jane, service: 'iMessage' },
+      { address: bob, service: 'iMessage' },
+    ]);
+    const chatMap = await upsertChats(
+      db,
+      [
+        Chat.parse({
+          guid,
+          style: 43,
+          participants: [
+            { address: jane, service: 'iMessage' },
+            { address: bob, service: 'iMessage' },
+          ],
+        }),
+      ],
+      handles,
+    );
+    raw
+      .prepare(
+        `UPDATE handles
+          SET display_name = CASE address WHEN ? THEN ? ELSE ? END,
+              avatar = CASE address WHEN ? THEN ? ELSE ? END,
+              color = CASE address WHEN ? THEN ? ELSE ? END
+        WHERE address IN (?, ?) AND service = 'iMessage'`,
+      )
+      .run(
+        jane,
+        'Doe, Jane',
+        'Bob',
+        jane,
+        'file:///jane.png',
+        'file:///bob.png',
+        jane,
+        '#112233',
+        '#445566',
+        jane,
+        bob,
+      );
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'comma-name-message',
+          text: 'hello',
+          dateCreated: 1_000,
+          handle: { address: jane, service: 'iMessage' },
+        }),
+      ],
+      () => chatMap.get(guid)!,
+      handles,
+    );
+
+    const assertAligned = (row: {
+      participantNames: string | null;
+      participantAvatars: string | null;
+      participantColors?: string | null;
+    }): void => {
+      expect(participantList(row.participantNames)).toEqual(['Doe, Jane', 'Bob']);
+      expect(participantAvatars(row.participantAvatars)).toEqual([
+        'file:///jane.png',
+        'file:///bob.png',
+      ]);
+      expect(participantColors(row.participantColors)).toEqual(['#112233', '#445566']);
+    };
+
+    const header = await getChatHeader(db, guid);
+    expect(header).not.toBeNull();
+    assertAligned(header!);
+    const inbox = (await listChatsForInbox(db)).find((row) => row.guid === guid);
+    expect(inbox).toBeDefined();
+    assertAligned(inbox!);
+
+    raw.prepare('UPDATE chats SET deleted_at = ? WHERE guid = ?').run(2_000, guid);
+    const deleted = (await listDeletedChats(db)).rows.find((row) => row.guid === guid);
+    expect(deleted).toBeDefined();
+    assertAligned(deleted!);
   });
 });

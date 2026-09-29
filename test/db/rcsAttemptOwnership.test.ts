@@ -4,8 +4,10 @@ import { Chat } from '@core/models';
 import type { EventDeliveryContext } from '@core/realtime';
 import {
   applyServerSendErrorWithinTransaction,
+  cancelOutgoing,
   claimFailedOutgoingForRetry,
   claimOutgoingForSendWithinTransaction,
+  deleteChatLocal,
   getChatIdByGuid,
   insertOutgoingAttachment,
   insertOutgoingText,
@@ -26,7 +28,13 @@ import { runOutgoingQueue } from '@/services/send/outgoingQueueService';
 import { reconcileSendOutcome } from '@/services/send/sendOutcome';
 import { createTestDb } from '../support/testDb';
 
-const CHAT_GUID = 'RCS;-;attempt-owner-conversation';
+const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
+const RCS_PROVIDER_INFO = {
+  rcs: true,
+  supports_rcs_epoch_qualified_ids: true,
+  rcs_provider_epoch: RCS_PROVIDER_EPOCH,
+} as const;
+const CHAT_GUID = `RCS;-;g1.${RCS_PROVIDER_EPOCH}.YQ`;
 
 type OwnerState = {
   guid: string;
@@ -61,13 +69,16 @@ function queueState(raw: Database.Database, tempGuid: string) {
 }
 
 async function seedChat(db: AppDatabase): Promise<number> {
-  const handles = await upsertHandles(db, [{ address: 'attempt-owner@example.test' }]);
+  const handles = await upsertHandles(db, [
+    { address: 'attempt-owner@example.test', service: 'RCS' },
+  ]);
   await upsertChats(
     db,
     [
       Chat.parse({
         guid: CHAT_GUID,
-        participants: [{ address: 'attempt-owner@example.test' }],
+        providerEpoch: RCS_PROVIDER_EPOCH,
+        participants: [{ address: 'attempt-owner@example.test', service: 'RCS' }],
       }),
     ],
     handles,
@@ -76,6 +87,614 @@ async function seedChat(db: AppDatabase): Promise<number> {
 }
 
 describe('RCS active send-attempt ownership', () => {
+  it('recreates the exact chat owner when a capable ack arrives after local purge', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      const tempGuid = 'temp-capable-purge-ack';
+      const realGuid = 'rcs-capable-purge-echo';
+      const inserted = await insertOutgoingText(db, {
+        tempGuid,
+        chatId,
+        chatGuid: CHAT_GUID,
+        text: 'cancelled while capable request is in flight',
+        now: 1_000,
+        attemptAware: true,
+      });
+      await cancelOutgoing(db, tempGuid, 2_000);
+      await deleteChatLocal(db, CHAT_GUID, 2_500);
+      expect(ownerState(raw, tempGuid)).toBeUndefined();
+      expect(queueState(raw, tempGuid)).toBeUndefined();
+
+      await reconcileSendOutcome(
+        db,
+        tempGuid,
+        {
+          guid: tempGuid,
+          attemptGuid: 'attempt-capable-purge',
+          clientAttemptGeneration: inserted.attemptOwnerToken!.generation,
+        },
+        3_000,
+        undefined,
+        {
+          attemptOwnerToken: inserted.attemptOwnerToken!,
+          expectedChatGuid: CHAT_GUID,
+          failureNoticeMode: 'suppressed',
+        },
+      );
+
+      expect(ownerState(raw, tempGuid)).toEqual({
+        guid: tempGuid,
+        sendState: 'sent',
+        error: 0,
+        activeAttemptGuid: 'attempt-capable-purge',
+        pending: 0,
+        generation: inserted.attemptOwnerToken!.generation,
+      });
+      expect(
+        raw
+          .prepare('SELECT date_deleted AS dateDeleted FROM messages WHERE guid = ?')
+          .get(tempGuid),
+      ).toEqual({ dateDeleted: 2_000 });
+
+      await expect(
+        reconcileExactOutgoingAttemptSuccess(db, {
+          tempGuid,
+          attemptGuid: 'attempt-capable-purge',
+          clientAttemptGeneration: inserted.attemptOwnerToken!.generation,
+          guid: realGuid,
+          dateCreated: 3_100,
+          dateDelivered: null,
+        }),
+      ).resolves.toBe('reconciled');
+
+      expect(ownerState(raw, tempGuid)).toBeUndefined();
+      expect(ownerState(raw, realGuid)).toMatchObject({
+        guid: realGuid,
+        sendState: 'sent',
+        activeAttemptGuid: 'attempt-capable-purge',
+      });
+      expect(
+        raw
+          .prepare('SELECT date_deleted AS dateDeleted FROM messages WHERE guid = ?')
+          .get(realGuid),
+      ).toEqual({ dateDeleted: 2_000 });
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('settles a conflicting duplicate exact success without replacing its canonical owner', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      const tempGuid = 'temp-conflicting-exact-success';
+      const firstCanonicalGuid = 'rcs-first-canonical-owner';
+      const inserted = await insertOutgoingText(db, {
+        tempGuid,
+        chatId,
+        chatGuid: CHAT_GUID,
+        text: 'one physical RCS send',
+        now: 1_000,
+        attemptAware: true,
+      });
+      const exactOwner = {
+        tempGuid,
+        attemptGuid: 'attempt-conflicting-exact-success',
+        clientAttemptGeneration: inserted.attemptOwnerToken!.generation,
+        dateCreated: 1_100,
+        dateDelivered: null,
+      };
+
+      await expect(
+        reconcileExactOutgoingAttemptSuccess(db, {
+          ...exactOwner,
+          guid: firstCanonicalGuid,
+        }),
+      ).resolves.toBe('reconciled');
+      raw
+        .prepare(
+          `UPDATE messages
+              SET send_state = 'sending', active_send_attempt_guid = 'retained-attempt-owner',
+                  attempt_owner_pending = 1, attempt_owner_generation = 2
+            WHERE guid = ?`,
+        )
+        .run(firstCanonicalGuid);
+      raw
+        .prepare(
+          `INSERT INTO outgoing_queue (temp_guid, chat_guid, kind, payload, attempts, next_retry_at)
+           VALUES (?, ?, 'text', '{}', 0, 0)`,
+        )
+        .run(tempGuid, CHAT_GUID);
+      await expect(
+        reconcileExactOutgoingAttemptSuccess(db, {
+          ...exactOwner,
+          attemptGuid: 'disputed-attempt-owner',
+          clientAttemptGeneration: 2,
+          guid: 'rcs-conflicting-canonical-owner',
+        }),
+      ).resolves.toBe('owner-conflict');
+
+      expect(ownerState(raw, firstCanonicalGuid)).toEqual({
+        guid: firstCanonicalGuid,
+        sendState: 'sent',
+        error: 0,
+        activeAttemptGuid: 'retained-attempt-owner',
+        pending: 0,
+        generation: 2,
+      });
+      expect(queueState(raw, tempGuid)).toBeUndefined();
+      expect(ownerState(raw, 'rcs-conflicting-canonical-owner')).toBeUndefined();
+      expect(
+        raw
+          .prepare(
+            `SELECT canonical_guid AS canonicalGuid, chat_guid AS chatGuid
+               FROM message_guid_aliases
+              WHERE alias_guid = ?`,
+          )
+          .get(tempGuid),
+      ).toEqual({ canonicalGuid: firstCanonicalGuid, chatGuid: CHAT_GUID });
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('settles only a proven temp source when its alias reserves another canonical identity', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      const tempGuid = 'temp-direct-alias-conflict';
+      const inserted = await insertOutgoingText(db, {
+        tempGuid,
+        chatId,
+        chatGuid: CHAT_GUID,
+        text: 'do not send twice',
+        now: 2_000,
+        attemptAware: true,
+      });
+      raw
+        .prepare(
+          `INSERT INTO message_guid_aliases (alias_guid, canonical_guid, chat_guid)
+           VALUES (?, 'rcs-reserved-canonical', ?)`,
+        )
+        .run(tempGuid, CHAT_GUID);
+
+      await expect(
+        reconcileExactOutgoingAttemptSuccess(db, {
+          tempGuid,
+          attemptGuid: 'attempt-direct-alias-conflict',
+          clientAttemptGeneration: inserted.attemptOwnerToken!.generation,
+          guid: 'rcs-disputed-canonical',
+          dateCreated: 2_100,
+          dateDelivered: null,
+        }),
+      ).resolves.toBe('owner-conflict');
+
+      expect(ownerState(raw, tempGuid)).toEqual({
+        guid: tempGuid,
+        sendState: 'sent',
+        error: 0,
+        activeAttemptGuid: null,
+        pending: 0,
+        generation: inserted.attemptOwnerToken!.generation,
+      });
+      expect(queueState(raw, tempGuid)).toBeUndefined();
+      expect(ownerState(raw, 'rcs-disputed-canonical')).toBeUndefined();
+      expect(
+        raw
+          .prepare(
+            `SELECT canonical_guid AS canonicalGuid, chat_guid AS chatGuid
+               FROM message_guid_aliases
+              WHERE alias_guid = ?`,
+          )
+          .get(tempGuid),
+      ).toEqual({ canonicalGuid: 'rcs-reserved-canonical', chatGuid: CHAT_GUID });
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('never installs exact success or error ownership through a NULL-scoped alias fallback', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      const tempGuid = 'temp-null-alias-fallback';
+      const canonicalGuid = 'rcs-null-alias-canonical';
+      const inserted = await insertOutgoingText(db, {
+        tempGuid,
+        chatId,
+        chatGuid: CHAT_GUID,
+        text: 'quarantined legacy alias',
+        now: 3_000,
+        attemptAware: true,
+      });
+      await expect(
+        reconcileExactOutgoingAttemptSuccess(db, {
+          tempGuid,
+          attemptGuid: 'attempt-before-null-quarantine',
+          clientAttemptGeneration: inserted.attemptOwnerToken!.generation,
+          guid: canonicalGuid,
+          dateCreated: 3_100,
+          dateDelivered: null,
+        }),
+      ).resolves.toBe('reconciled');
+      raw
+        .prepare(`UPDATE message_guid_aliases SET chat_guid = NULL WHERE alias_guid = ?`)
+        .run(tempGuid);
+      raw
+        .prepare(
+          `UPDATE messages
+              SET send_state = 'sending', active_send_attempt_guid = 'retained-before-quarantine',
+                  attempt_owner_pending = 1, attempt_owner_generation = 2
+            WHERE guid = ?`,
+        )
+        .run(canonicalGuid);
+      raw
+        .prepare(
+          `INSERT INTO outgoing_queue (temp_guid, chat_guid, kind, payload, attempts, next_retry_at)
+           VALUES (?, ?, 'text', '{}', 0, 0)`,
+        )
+        .run(tempGuid, CHAT_GUID);
+
+      await expect(
+        reconcileExactOutgoingAttemptSuccess(db, {
+          tempGuid,
+          attemptGuid: 'attempt-must-not-install',
+          clientAttemptGeneration: 2,
+          guid: canonicalGuid,
+          dateCreated: 3_200,
+          dateDelivered: null,
+        }),
+      ).resolves.toBe('owner-conflict');
+      expect(ownerState(raw, canonicalGuid)).toEqual({
+        guid: canonicalGuid,
+        sendState: 'sending',
+        error: 0,
+        activeAttemptGuid: 'retained-before-quarantine',
+        pending: 1,
+        generation: 2,
+      });
+      expect(queueState(raw, tempGuid)).toBeUndefined();
+
+      raw
+        .prepare(
+          `INSERT INTO outgoing_queue (temp_guid, chat_guid, kind, payload, attempts, next_retry_at)
+           VALUES (?, ?, 'text', '{}', 0, 0)`,
+        )
+        .run(tempGuid, CHAT_GUID);
+      const errorResult = await withDbTransaction(db, (context) =>
+        applyServerSendErrorWithinTransaction(
+          context,
+          canonicalGuid,
+          502,
+          3_300,
+          true,
+          'test',
+          null,
+          {
+            tempGuid,
+            attemptGuid: 'error-attempt-must-not-install',
+            clientAttemptGeneration: 2,
+          },
+        ),
+      );
+      expect(errorResult).toEqual({
+        matched: true,
+        disposition: 'owner-conflict',
+        onCommitted: null,
+      });
+      expect(ownerState(raw, canonicalGuid)).toEqual({
+        guid: canonicalGuid,
+        sendState: 'sending',
+        error: 0,
+        activeAttemptGuid: 'retained-before-quarantine',
+        pending: 1,
+        generation: 2,
+      });
+      expect(queueState(raw, tempGuid)).toBeUndefined();
+      expect(
+        raw
+          .prepare(
+            `SELECT canonical_guid AS canonicalGuid, chat_guid AS chatGuid
+               FROM message_guid_aliases
+              WHERE alias_guid = ?`,
+          )
+          .get(tempGuid),
+      ).toEqual({ canonicalGuid, chatGuid: null });
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('keeps a sticky server error retryable when an HTTP ack has a disputed canonical identity', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      const tempGuid = 'temp-sticky-ack-conflict';
+      const inserted = await insertOutgoingText(db, {
+        tempGuid,
+        chatId,
+        chatGuid: CHAT_GUID,
+        text: 'error committed before ack',
+        now: 4_000,
+        attemptAware: true,
+      });
+      raw
+        .prepare(
+          `INSERT INTO message_guid_aliases (alias_guid, canonical_guid, chat_guid)
+           VALUES (?, 'rcs-retained-before-ack', ?)`,
+        )
+        .run(tempGuid, CHAT_GUID);
+      raw
+        .prepare(
+          `UPDATE messages
+              SET send_state = 'error', error = 502, error_message = 'bounded server failure'
+            WHERE guid = ?`,
+        )
+        .run(tempGuid);
+
+      await expect(
+        reconcileSendOutcome(
+          db,
+          tempGuid,
+          {
+            guid: 'rcs-disputed-http-ack',
+            attemptGuid: 'attempt-sticky-ack-conflict',
+            clientAttemptGeneration: inserted.attemptOwnerToken!.generation,
+          },
+          4_100,
+          undefined,
+          {
+            attemptOwnerToken: inserted.attemptOwnerToken!,
+            expectedChatGuid: CHAT_GUID,
+            failureNoticeMode: 'suppressed',
+          },
+        ),
+      ).resolves.toBeUndefined();
+
+      expect(ownerState(raw, tempGuid)).toEqual({
+        guid: tempGuid,
+        sendState: 'error',
+        error: 502,
+        activeAttemptGuid: null,
+        pending: 0,
+        generation: inserted.attemptOwnerToken!.generation,
+      });
+      expect(queueState(raw, tempGuid)).toBeDefined();
+      expect(ownerState(raw, 'rcs-disputed-http-ack')).toBeUndefined();
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('does not retry a confirmed HTTP ack when only a foreign canonical ledger remains', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      const tempGuid = 'temp-purged-ack-ledger-conflict';
+      const canonicalGuid = 'rcs-purged-ack-ledger-conflict';
+      const inserted = await insertOutgoingText(db, {
+        tempGuid,
+        chatId,
+        chatGuid: CHAT_GUID,
+        text: 'confirmed before local purge',
+        now: 5_000,
+        attemptAware: true,
+      });
+      raw.prepare("INSERT INTO chats (guid) VALUES ('RCS;-;foreign-ledger-owner')").run();
+      raw
+        .prepare(
+          `INSERT INTO message_deletion_ledger (guid, date_deleted, chat_guid)
+           VALUES (?, 5_050, 'RCS;-;foreign-ledger-owner')`,
+        )
+        .run(canonicalGuid);
+      raw.prepare('DELETE FROM messages WHERE guid = ?').run(tempGuid);
+
+      await expect(
+        reconcileSendOutcome(
+          db,
+          tempGuid,
+          {
+            guid: canonicalGuid,
+            attemptGuid: 'attempt-purged-ack-ledger-conflict',
+            clientAttemptGeneration: inserted.attemptOwnerToken!.generation,
+          },
+          5_100,
+          undefined,
+          {
+            attemptOwnerToken: inserted.attemptOwnerToken!,
+            expectedChatGuid: CHAT_GUID,
+            failureNoticeMode: 'suppressed',
+          },
+        ),
+      ).resolves.toBeUndefined();
+
+      expect(queueState(raw, tempGuid)).toBeUndefined();
+      expect(ownerState(raw, canonicalGuid)).toBeUndefined();
+      expect(
+        raw
+          .prepare(
+            `SELECT date_deleted AS dateDeleted, chat_guid AS chatGuid
+               FROM message_deletion_ledger
+              WHERE guid = ?`,
+          )
+          .get(canonicalGuid),
+      ).toEqual({ dateDeleted: 5_050, chatGuid: 'RCS;-;foreign-ledger-owner' });
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('keeps the queued source untouched when an HTTP ack claims a different chat', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      const tempGuid = 'temp-purged-ack-chat-conflict';
+      const inserted = await insertOutgoingText(db, {
+        tempGuid,
+        chatId,
+        chatGuid: CHAT_GUID,
+        text: 'retain the legitimate queue owner',
+        now: 6_000,
+        attemptAware: true,
+      });
+      raw.prepare("INSERT INTO chats (guid) VALUES ('RCS;-;wrong-ack-chat')").run();
+      raw.prepare('DELETE FROM messages WHERE guid = ?').run(tempGuid);
+
+      await expect(
+        reconcileSendOutcome(
+          db,
+          tempGuid,
+          {
+            guid: 'rcs-wrong-ack-chat-canonical',
+            attemptGuid: 'attempt-wrong-ack-chat',
+            clientAttemptGeneration: inserted.attemptOwnerToken!.generation,
+          },
+          6_100,
+          undefined,
+          {
+            attemptOwnerToken: inserted.attemptOwnerToken!,
+            expectedChatGuid: 'RCS;-;wrong-ack-chat',
+            failureNoticeMode: 'suppressed',
+          },
+        ),
+      ).resolves.toBeUndefined();
+
+      expect(queueState(raw, tempGuid)).toBeDefined();
+      expect(ownerState(raw, 'rcs-wrong-ack-chat-canonical')).toBeUndefined();
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('does not recreate a purged temp row through a retained alias on a no-GUID HTTP ack', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      const tempGuid = 'temp-purged-no-guid-retained-alias';
+      const inserted = await insertOutgoingText(db, {
+        tempGuid,
+        chatId,
+        chatGuid: CHAT_GUID,
+        text: 'do not resurrect this temp row',
+        now: 7_000,
+        attemptAware: true,
+      });
+      raw
+        .prepare(
+          `INSERT INTO message_guid_aliases (alias_guid, canonical_guid, chat_guid)
+           VALUES (?, 'rcs-retained-no-guid-owner', NULL)`,
+        )
+        .run(tempGuid);
+      raw.prepare('DELETE FROM messages WHERE guid = ?').run(tempGuid);
+
+      await expect(
+        reconcileSendOutcome(
+          db,
+          tempGuid,
+          {
+            guid: tempGuid,
+            attemptGuid: 'attempt-purged-no-guid-retained-alias',
+            clientAttemptGeneration: inserted.attemptOwnerToken!.generation,
+          },
+          7_100,
+          undefined,
+          {
+            attemptOwnerToken: inserted.attemptOwnerToken!,
+            expectedChatGuid: CHAT_GUID,
+            failureNoticeMode: 'suppressed',
+          },
+        ),
+      ).resolves.toBeUndefined();
+
+      expect(queueState(raw, tempGuid)).toBeUndefined();
+      expect(ownerState(raw, tempGuid)).toBeUndefined();
+      expect(
+        raw
+          .prepare(
+            `SELECT canonical_guid AS canonicalGuid, chat_guid AS chatGuid
+               FROM message_guid_aliases
+              WHERE alias_guid = ?`,
+          )
+          .get(tempGuid),
+      ).toEqual({ canonicalGuid: 'rcs-retained-no-guid-owner', chatGuid: null });
+    } finally {
+      raw.close();
+    }
+  });
+
+  it('does not adopt a NULL alias or duplicate its existing canonical row on an HTTP ack', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      const tempGuid = 'temp-purged-distinct-null-alias';
+      const canonicalGuid = 'rcs-existing-null-alias-canonical';
+      const inserted = await insertOutgoingText(db, {
+        tempGuid,
+        chatId,
+        chatGuid: CHAT_GUID,
+        text: 'preserve the existing canonical row',
+        now: 8_000,
+        attemptAware: true,
+      });
+      raw
+        .prepare(
+          `INSERT INTO messages (guid, chat_id, is_from_me, text, send_state)
+           VALUES (?, ?, 1, 'retained canonical content', 'sent')`,
+        )
+        .run(canonicalGuid, chatId);
+      raw
+        .prepare(
+          `INSERT INTO message_guid_aliases (alias_guid, canonical_guid, chat_guid)
+           VALUES (?, ?, NULL)`,
+        )
+        .run(tempGuid, canonicalGuid);
+      raw.prepare('DELETE FROM messages WHERE guid = ?').run(tempGuid);
+
+      await expect(
+        reconcileSendOutcome(
+          db,
+          tempGuid,
+          {
+            guid: canonicalGuid,
+            attemptGuid: 'attempt-purged-distinct-null-alias',
+            clientAttemptGeneration: inserted.attemptOwnerToken!.generation,
+          },
+          8_100,
+          undefined,
+          {
+            attemptOwnerToken: inserted.attemptOwnerToken!,
+            expectedChatGuid: CHAT_GUID,
+            failureNoticeMode: 'suppressed',
+          },
+        ),
+      ).resolves.toBeUndefined();
+
+      expect(queueState(raw, tempGuid)).toBeUndefined();
+      expect(
+        raw
+          .prepare(
+            `SELECT text, active_send_attempt_guid AS activeAttemptGuid,
+                    attempt_owner_pending AS pending
+               FROM messages
+              WHERE guid = ?`,
+          )
+          .get(canonicalGuid),
+      ).toEqual({ text: 'retained canonical content', activeAttemptGuid: null, pending: 0 });
+      expect(
+        raw
+          .prepare(
+            `SELECT canonical_guid AS canonicalGuid, chat_guid AS chatGuid
+               FROM message_guid_aliases
+              WHERE alias_guid = ?`,
+          )
+          .get(tempGuid),
+      ).toEqual({ canonicalGuid, chatGuid: null });
+    } finally {
+      raw.close();
+    }
+  });
+
   it('keeps delayed attempt A outcomes from overwriting retry B', async () => {
     const { db, raw } = await createTestDb();
     try {
@@ -250,11 +869,12 @@ describe('RCS active send-attempt ownership', () => {
           tempGuid,
           attemptGuid: 'attempt-a',
           clientAttemptGeneration: 1,
+          chatGuid: CHAT_GUID,
           error: 502,
           retryable: true,
         },
       };
-      const sink = new DbEventSink(db);
+      const sink = new DbEventSink(db, undefined, undefined, undefined, () => RCS_PROVIDER_INFO);
 
       await expect(sink.onEvent(event, 'fcm', context)).rejects.toBeInstanceOf(
         IncomingEventDependencyPendingError,
@@ -363,10 +983,20 @@ describe('RCS active send-attempt ownership', () => {
       })();
 
       await withDbTransaction(db, (context) =>
-        recordMessageGuidAliasWithinTransaction(context, 'temp-pinned-new-a', 'real-pinned-new-a'),
+        recordMessageGuidAliasWithinTransaction(
+          context,
+          'temp-pinned-new-a',
+          'real-pinned-new-a',
+          CHAT_GUID,
+        ),
       );
       await withDbTransaction(db, (context) =>
-        recordMessageGuidAliasWithinTransaction(context, 'temp-pinned-new-b', 'real-pinned-new-b'),
+        recordMessageGuidAliasWithinTransaction(
+          context,
+          'temp-pinned-new-b',
+          'real-pinned-new-b',
+          CHAT_GUID,
+        ),
       );
 
       const hasAlias = (guid: string): boolean =>
@@ -429,7 +1059,7 @@ describe('RCS active send-attempt ownership', () => {
         post: async (_path: string, _schema: unknown, options: { json?: unknown }) => {
           posted.push(options.json as (typeof posted)[number]);
           return {
-            guid: 'real-after-ownerless',
+            guid: `rcs-g1.${RCS_PROVIDER_EPOCH}.Yg`,
             dateCreated: 100_000,
             dateDelivered: null,
           };
@@ -448,6 +1078,11 @@ describe('RCS active send-attempt ownership', () => {
           fileExists: async () => true,
         },
         100_000,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        (chatGuid) => chatGuid == null || chatGuid === CHAT_GUID,
       );
 
       expect(result).toEqual({ eligible: 2, sent: 1 });
@@ -458,7 +1093,7 @@ describe('RCS active send-attempt ownership', () => {
       });
       expect(queueState(raw, autoTempGuid)?.attempts).toBe(OUTGOING_MAX_ATTEMPTS);
       expect(queueState(raw, legacyGuid)).toBeUndefined();
-      expect(ownerState(raw, 'real-after-ownerless')).toMatchObject({
+      expect(ownerState(raw, `rcs-g1.${RCS_PROVIDER_EPOCH}.Yg`)).toMatchObject({
         sendState: 'sent',
         generation: 0,
       });
@@ -485,9 +1120,17 @@ describe('RCS active send-attempt ownership', () => {
         .prepare('UPDATE messages SET guid = ? WHERE guid = ?')
         .run('rcs-ownerless-manual', manualTempGuid);
 
-      await expect(claimFailedOutgoingForRetry(db, manualTempGuid)).resolves.toEqual({
-        claim: 'settled',
-      });
+      await expect(
+        claimFailedOutgoingForRetry(
+          db,
+          manualTempGuid,
+          Date.now,
+          undefined,
+          undefined,
+          undefined,
+          (chatGuid) => chatGuid === CHAT_GUID,
+        ),
+      ).resolves.toEqual({ claim: 'settled' });
       expect(queueState(raw, manualTempGuid)?.attempts).toBe(OUTGOING_MAX_ATTEMPTS);
     } finally {
       raw.close();

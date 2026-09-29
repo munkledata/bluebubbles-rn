@@ -148,8 +148,9 @@ export async function localRouteForMessageGuid(
      WHERE m.guid = ${messageGuid}
         OR m.guid = (
           SELECT canonical_guid
-            FROM message_guid_aliases
-           WHERE alias_guid = ${messageGuid}
+            FROM message_guid_aliases a
+           WHERE a.alias_guid = ${messageGuid}
+             AND a.chat_guid = c.guid
            LIMIT 1
         )
      ORDER BY CASE WHEN m.guid = ${messageGuid} THEN 0 ELSE 1 END

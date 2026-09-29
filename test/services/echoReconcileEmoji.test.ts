@@ -83,7 +83,7 @@ describe('live echo reconcile — emoji tapback', () => {
     expect(row.e).toBe('🔥'); // glyph survived the promote + upsert COALESCE
 
     // The reactions repo renders exactly ONE own emoji badge with the glyph (no duplicate).
-    const badges = (await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? [];
+    const badges = (await listReactionsByMessageGuids(db, 'cEmo', ['mt'])).get('mt') ?? [];
     expect(badges).toHaveLength(1);
     expect(badges[0]).toMatchObject({ baseType: 'emoji', emoji: '🔥', isFromMe: 1 });
   });
@@ -134,7 +134,7 @@ describe('live echo reconcile — emoji tapback', () => {
     });
     await router.handle('new-message', JSON.stringify(echo), 'socket');
 
-    const badges = (await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? [];
+    const badges = (await listReactionsByMessageGuids(db, 'cEmo', ['mt'])).get('mt') ?? [];
     expect(badges).toHaveLength(1);
     expect(badges[0]).toMatchObject({ baseType: 'emoji', emoji: '🫡', isFromMe: 1 });
   });

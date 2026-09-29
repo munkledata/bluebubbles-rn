@@ -273,8 +273,18 @@ describe('getChatParticipants', () => {
     );
 
     const members = await getChatParticipants(t.db, 'g1');
-    expect(members).toContainEqual({ address: '+15551112222', name: 'Mom' });
-    expect(members).toContainEqual({ address: 'craig@apple.com', name: 'craig@apple.com' });
+    expect(members).toContainEqual({
+      address: '+15551112222',
+      name: 'Mom',
+      service: null,
+      color: null,
+    });
+    expect(members).toContainEqual({
+      address: 'craig@apple.com',
+      name: 'craig@apple.com',
+      service: null,
+      color: null,
+    });
   });
 
   it('returns empty for an unknown chat', async () => {

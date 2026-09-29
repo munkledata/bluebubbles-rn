@@ -32,7 +32,7 @@
  */
 import React from 'react';
 import { renderWithTheme, screen, fireEvent, waitFor } from '../support/renderWithTheme';
-import { formatSeparatorDate } from '@utils';
+import { ClientErrorCode, formatSeparatorDate } from '@utils';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
 import type { AttachmentRow } from '@db/repositories';
 
@@ -102,6 +102,9 @@ jest.mock('@ui/conversations/FailedMessageSheet', () => {
     FailedMessageSheet: (props: {
       visible: boolean;
       isAttachment?: boolean;
+      isLocation?: boolean;
+      isEffect?: boolean;
+      isFormatted?: boolean;
       retryAllowed?: boolean;
       errorDetail?: string | null;
       onRetry: () => void;
@@ -117,6 +120,13 @@ jest.mock('@ui/conversations/FailedMessageSheet', () => {
               Text,
               { testID: 'sheet-attachment' },
               String(!!props.isAttachment),
+            ),
+            ReactLib.createElement(Text, { testID: 'sheet-location' }, String(!!props.isLocation)),
+            ReactLib.createElement(Text, { testID: 'sheet-effect' }, String(!!props.isEffect)),
+            ReactLib.createElement(
+              Text,
+              { testID: 'sheet-formatted' },
+              String(!!props.isFormatted),
             ),
             ReactLib.createElement(Text, { testID: 'sheet-detail' }, props.errorDetail ?? ''),
             props.retryAllowed === false
@@ -441,6 +451,73 @@ describe('MessageList — failed-message flow', () => {
     expect(screen.getByTestId('sheet-attachment').props.children).toBe('true');
     expect(screen.queryByTestId('sheet-retry')).toBeNull();
     expect(screen.getByTestId('sheet-delete')).toBeTruthy();
+  });
+
+  it.each([ClientErrorCode.locationDeliveryUnconfirmed, ClientErrorCode.locationRejected])(
+    'a terminal current-location error %s is identified and never offers Retry',
+    async (error) => {
+      const messages = [
+        make({
+          id: 1,
+          guid: 'location-x',
+          text: 'Current Location',
+          isFromMe: 1,
+          sendState: 'error',
+          error,
+        }),
+      ];
+      await renderWithTheme(
+        <MessageList chatGuid="iMessage;-;+15550001111" isGroup={false} messages={messages} />,
+      );
+      fireEvent.press(screen.getByTestId('retry-location-x'));
+
+      expect(await screen.findByTestId('sheet')).toBeTruthy();
+      expect(screen.getByTestId('sheet-location').props.children).toBe('true');
+      expect(screen.queryByTestId('sheet-retry')).toBeNull();
+    },
+  );
+
+  it('identifies an uncertain effect and never offers Retry', async () => {
+    const messages = [
+      make({
+        id: 1,
+        guid: 'effect-x',
+        text: 'boom',
+        isFromMe: 1,
+        sendState: 'error',
+        error: ClientErrorCode.effectDeliveryUnconfirmed,
+        expressiveSendStyleId: 'com.apple.MobileSMS.expressivesend.impact',
+      }),
+    ];
+    await renderWithTheme(
+      <MessageList chatGuid="iMessage;-;+15550001111" isGroup={false} messages={messages} />,
+    );
+    fireEvent.press(screen.getByTestId('retry-effect-x'));
+
+    expect(await screen.findByTestId('sheet')).toBeTruthy();
+    expect(screen.getByTestId('sheet-effect').props.children).toBe('true');
+    expect(screen.queryByTestId('sheet-retry')).toBeNull();
+  });
+
+  it('identifies an uncertain formatted message and never offers Retry', async () => {
+    const messages = [
+      make({
+        id: 1,
+        guid: 'formatted-x',
+        text: 'styled',
+        isFromMe: 1,
+        sendState: 'error',
+        error: ClientErrorCode.formattedDeliveryUnconfirmed,
+      }),
+    ];
+    await renderWithTheme(
+      <MessageList chatGuid="iMessage;-;+15550001111" isGroup={false} messages={messages} />,
+    );
+    fireEvent.press(screen.getByTestId('retry-formatted-x'));
+
+    expect(await screen.findByTestId('sheet')).toBeTruthy();
+    expect(screen.getByTestId('sheet-formatted').props.children).toBe('true');
+    expect(screen.queryByTestId('sheet-retry')).toBeNull();
   });
 
   it('Delete discards the failed message via @/services/send', async () => {

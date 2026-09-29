@@ -154,6 +154,9 @@ jest.mock('@/services/notifications/notifeeService', () => ({ clearChatNotificat
 jest.mock('@/services/notifications/remindersService', () => ({
   scheduleMessageReminder: jest.fn(),
 }));
+jest.mock('@/services/remoteMessageDeleteUiService', () => ({
+  deleteMessageFromMac: jest.fn(),
+}));
 jest.mock('@/services/media', () => ({
   shareAttachment: jest.fn(),
   saveAttachmentsToPhotos: jest.fn(),

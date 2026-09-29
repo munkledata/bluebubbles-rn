@@ -12,11 +12,20 @@ const mockRequestPhotoLibraryAccess = jest.fn();
 const mockOpenNotificationSettings = jest.fn();
 const mockSetChatAppearanceWithinTransaction = jest.fn();
 const mockSetChatCustomizationWithinTransaction = jest.fn();
+const mockSetHandleColorWithinTransaction = jest.fn();
 const mockSetChatMuteWithinTransaction = jest.fn();
 const mockComputeBackgroundIsLight = jest.fn();
 const mockAdaptiveTokensFromImage = jest.fn();
 const mockSafeOpenUrl = jest.fn();
 const mockStartChatRepair = jest.fn();
+const mockRenameAppleGroup = jest.fn();
+const mockPrepareAppleGroupPhotoSet = jest.fn();
+const mockSubmitAppleGroupPhoto = jest.fn();
+const mockCancelAppleGroupPhoto = jest.fn();
+const mockRemoveAppleGroupPhoto = jest.fn();
+const mockAddAppleGroupParticipant = jest.fn();
+const mockRemoveAppleGroupParticipant = jest.fn();
+const mockLeaveAppleGroup = jest.fn();
 const mockSubscribeGenerationInvalidation = jest.fn();
 const mockUseChatHeader = jest.fn();
 const mockReactiveHookCall = jest.fn();
@@ -54,6 +63,11 @@ let mockAccountLease = makeLease(73);
 let mockGuid = 'iMessage;-;chat-settings-private-guid';
 let mockMuteType: 'mute' | null = null;
 let mockCustomColor: string | null = null;
+let mockHandleColor: string | null = null;
+let mockChatStyle = 43;
+let mockParticipantCount = 2;
+let mockHandleServices: string | null = null;
+let mockDisplayNameOverride: string | null | undefined;
 let mockPendingReactiveGuid: string | null = null;
 const mockInvalidationListeners = new Map<number, Set<() => void>>();
 let reduceMotionListener: ((enabled: boolean) => void) | undefined;
@@ -71,6 +85,7 @@ const MEDIA_GUID = 'details-private-message-guid';
 const PRIVATE_LINK = 'https://details-a.example.invalid/path-a';
 const ACCOUNT_CHANGED_COPY = 'Conversation account changed. Go back and reopen Details.';
 const CHAT_GUID_B = 'iMessage;-;chat-settings-private-guid-b';
+const GROUP_CHAT_GUID = 'iMessage;+;chat-settings-private-group-guid';
 const PRIVATE_CUSTOM_TITLE_B = 'details-private-custom-title-b-31f0';
 const PRIVATE_SERVER_TITLE_B = 'details-private-server-title-b-42a1';
 const PRIVATE_MEMBER_B = 'details-private-member-b-53b2';
@@ -228,6 +243,8 @@ jest.mock('@db/repositories', () => ({
     mockSetChatAppearanceWithinTransaction(...args),
   setChatCustomizationWithinTransaction: (...args: unknown[]) =>
     mockSetChatCustomizationWithinTransaction(...args),
+  setHandleColorWithinTransaction: (...args: unknown[]) =>
+    mockSetHandleColorWithinTransaction(...args),
   setChatMuteWithinTransaction: (...args: unknown[]) => mockSetChatMuteWithinTransaction(...args),
 }));
 
@@ -267,7 +284,16 @@ jest.mock('@db/useReactiveQuery', () => ({
       mockPendingReactiveGuid === requestedGuid ? firstGuid : requestedGuid,
     );
     if (tables.includes('chat_handles')) {
-      return { data: [{ address: source.address, name: source.member }] };
+      return {
+        data: [
+          {
+            address: source.address,
+            name: source.member,
+            service: 'iMessage',
+            color: mockHandleColor,
+          },
+        ],
+      };
     }
     if (tables.includes('messages')) {
       return {
@@ -309,16 +335,17 @@ jest.mock('@features/conversations/useChatHeader', () => ({
         id: 91,
         guid,
         chatIdentifier: 'private-chat-identifier',
-        displayName: source.serverTitle,
+        displayName:
+          mockDisplayNameOverride === undefined ? source.serverTitle : mockDisplayNameOverride,
         customName: source.customTitle,
         customColor: mockCustomColor,
         muteType: mockMuteType,
-        style: 43,
-        participantCount: 2,
+        style: mockChatStyle,
+        participantCount: mockParticipantCount,
         participantNames: `${source.member}, Second Member`,
         participantAvatars: null,
         participantAddresses: `${source.address}|||second@example.invalid`,
-        handleServices: null,
+        handleServices: mockHandleServices,
       },
     };
   },
@@ -363,6 +390,21 @@ jest.mock('@features/conversations/useSharedDocuments', () => ({
 
 jest.mock('@utils', () => ({
   isGroupRow: (row: { style?: number }) => row.style === 43,
+  isProvenIMessageGroupChat: (row: {
+    guid?: string;
+    style?: number;
+    participantCount?: number;
+    handleServices?: string | null;
+  }) => {
+    const services = (row.handleServices ?? '').split(',').filter(Boolean);
+    return (
+      !!row.guid?.startsWith('iMessage;+;') &&
+      row.style === 43 &&
+      (row.participantCount ?? 0) >= 2 &&
+      services.length === row.participantCount &&
+      services.every((service) => service === 'iMessage')
+    );
+  },
   resolveTitle: (row: { customName?: string | null; displayName?: string | null }) =>
     row.customName || row.displayName || 'Conversation',
   isLocalFileUri: (uri: string | null | undefined) => !!uri?.startsWith('file://'),
@@ -374,12 +416,19 @@ jest.mock('@/services', () => {
     '@/services/chatActions',
   ) as typeof import('@/services/chatActions');
   return {
+    addAppleGroupParticipant: (...args: unknown[]) => mockAddAppleGroupParticipant(...args),
     computeBackgroundIsLight: (...args: unknown[]) => mockComputeBackgroundIsLight(...args),
+    leaveAppleGroup: (...args: unknown[]) => mockLeaveAppleGroup(...args),
+    prepareAppleGroupPhotoSet: (...args: unknown[]) => mockPrepareAppleGroupPhotoSet(...args),
+    renameAppleGroup: (...args: unknown[]) => mockRenameAppleGroup(...args),
+    removeAppleGroupPhoto: (...args: unknown[]) => mockRemoveAppleGroupPhoto(...args),
+    removeAppleGroupParticipant: (...args: unknown[]) => mockRemoveAppleGroupParticipant(...args),
     resetChatLocalPreferences: chatActions.resetChatLocalPreferences,
     setChatMuted: chatActions.setChatMuted,
     startChatRepair: (...args: unknown[]) => mockStartChatRepair(...args),
     updateChatAppearance: chatActions.updateChatAppearance,
     updateChatCustomization: chatActions.updateChatCustomization,
+    updateHandleColor: chatActions.updateHandleColor,
   };
 });
 
@@ -566,6 +615,11 @@ beforeEach(() => {
   mockGuid = CHAT_GUID;
   mockMuteType = null;
   mockCustomColor = null;
+  mockHandleColor = null;
+  mockChatStyle = 43;
+  mockParticipantCount = 2;
+  mockHandleServices = null;
+  mockDisplayNameOverride = undefined;
   mockPendingReactiveGuid = null;
   mockAccountLease = makeLease(73);
   mockInvalidationListeners.clear();
@@ -579,6 +633,7 @@ beforeEach(() => {
   mockOpenNotificationSettings.mockResolvedValue(undefined);
   mockSetChatAppearanceWithinTransaction.mockReset().mockResolvedValue(undefined);
   mockSetChatCustomizationWithinTransaction.mockReset().mockResolvedValue(undefined);
+  mockSetHandleColorWithinTransaction.mockReset().mockResolvedValue(true);
   mockSetChatMuteWithinTransaction.mockReset().mockResolvedValue(undefined);
   mockComputeBackgroundIsLight.mockReset().mockResolvedValue(false);
   mockAdaptiveTokensFromImage.mockReset().mockResolvedValue(null);
@@ -587,6 +642,45 @@ beforeEach(() => {
     messages: 0,
     historyExhausted: false,
     restored: false,
+  });
+  mockRenameAppleGroup.mockReset().mockResolvedValue({
+    status: 'accepted',
+    tempGuid: 'temp-rename1',
+    guid: GROUP_CHAT_GUID,
+    displayName: 'Renamed Group',
+  });
+  mockSubmitAppleGroupPhoto.mockReset().mockResolvedValue({
+    status: 'accepted',
+    operation: 'set',
+    tempGuid: 'temp-photo1',
+    guid: GROUP_CHAT_GUID,
+  });
+  mockCancelAppleGroupPhoto.mockReset();
+  mockPrepareAppleGroupPhotoSet.mockReset().mockResolvedValue({
+    submit: (...args: unknown[]) => mockSubmitAppleGroupPhoto(...args),
+    cancel: () => mockCancelAppleGroupPhoto(),
+  });
+  mockRemoveAppleGroupPhoto.mockReset().mockResolvedValue({
+    status: 'accepted',
+    operation: 'remove',
+    tempGuid: 'temp-photo2',
+    guid: GROUP_CHAT_GUID,
+  });
+  mockAddAppleGroupParticipant.mockReset().mockResolvedValue({
+    status: 'accepted',
+    tempGuid: 'temp-participant1',
+    guid: GROUP_CHAT_GUID,
+    address: '+15559876543',
+  });
+  mockRemoveAppleGroupParticipant.mockReset().mockResolvedValue({
+    status: 'accepted',
+    tempGuid: 'temp-participant-remove1',
+    guid: GROUP_CHAT_GUID,
+    address: PRIVATE_ADDRESS,
+  });
+  mockLeaveAppleGroup.mockReset().mockResolvedValue({
+    status: 'outcome-unknown',
+    tempGuid: 'temp-leave1',
   });
 });
 
@@ -745,6 +839,569 @@ describe('ChatSettingsScreen reduced motion', () => {
 
     await view.unmount();
     expect(removeReduceMotionListener).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('ChatSettingsScreen Apple group rename', () => {
+  function configureEligibleGroup(): void {
+    mockGuid = GROUP_CHAT_GUID;
+    mockChatStyle = 43;
+    mockParticipantCount = 2;
+    mockHandleServices = 'iMessage,iMessage';
+    useSessionStore.setState({
+      serverInfo: {
+        version: 'test',
+        private_api: false,
+        supports_imessage_group_rename: true,
+      } as any,
+    });
+  }
+
+  it('keeps the phone-local nickname separate and submits the exact Apple group name once', async () => {
+    configureEligibleGroup();
+    const view = await renderWithTheme(<ChatSettingsScreen />);
+
+    expect(screen.getByText('PHONE-LOCAL NICKNAME')).toBeTruthy();
+    expect(screen.getByLabelText('Phone-Local Nickname').props.value).toBe(PRIVATE_CUSTOM_TITLE);
+    expect(screen.getByText('APPLE GROUP NAME')).toBeTruthy();
+    const input = screen.getByLabelText('Apple Group Name');
+    expect(input.props.value).toBe(PRIVATE_SERVER_TITLE);
+
+    await fireEvent.changeText(input, 'Renamed Group');
+    await fireEvent.press(screen.getByRole('button', { name: 'Rename in Apple Messages' }));
+
+    await waitFor(() =>
+      expect(mockRenameAppleGroup).toHaveBeenCalledWith(
+        { chatGuid: GROUP_CHAT_GUID, displayName: 'Renamed Group' },
+        mockAccountLease,
+      ),
+    );
+    expect(mockRenameAppleGroup).toHaveBeenCalledTimes(1);
+    expect(mockSetChatCustomizationWithinTransaction).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: 'Rename in Apple Messages' }).props.accessibilityState,
+      ).toEqual({ disabled: true }),
+    );
+
+    // Keep the accepted name visible while the reactive row still contains the pre-submit value.
+    await view.rerender(<ChatSettingsScreen />);
+    expect(screen.getByLabelText('Apple Group Name').props.value).toBe('Renamed Group');
+
+    // Once sync echoes the accepted value, release the local overlay. Later remote renames must
+    // flow through the same mounted screen instead of remaining masked by the accepted draft.
+    mockDisplayNameOverride = 'Renamed Group';
+    await view.rerender(<ChatSettingsScreen />);
+    await waitFor(() =>
+      expect(screen.getByLabelText('Apple Group Name').props.value).toBe('Renamed Group'),
+    );
+    mockDisplayNameOverride = 'Renamed by Another Member';
+    await view.rerender(<ChatSettingsScreen />);
+    await waitFor(() =>
+      expect(screen.getByLabelText('Apple Group Name').props.value).toBe(
+        'Renamed by Another Member',
+      ),
+    );
+  });
+
+  it('releases an accepted overlay when the authoritative name changes before its echo', async () => {
+    configureEligibleGroup();
+    mockRenameAppleGroup.mockResolvedValueOnce({
+      status: 'accepted',
+      tempGuid: 'temp-accepted-before-echo',
+      guid: GROUP_CHAT_GUID,
+      displayName: 'My Accepted Name',
+    });
+    const view = await renderWithTheme(<ChatSettingsScreen />);
+
+    await fireEvent.changeText(screen.getByLabelText('Apple Group Name'), 'My Accepted Name');
+    await fireEvent.press(screen.getByRole('button', { name: 'Rename in Apple Messages' }));
+    await waitFor(() => expect(mockRenameAppleGroup).toHaveBeenCalledTimes(1));
+    expect(screen.getByLabelText('Apple Group Name').props.value).toBe('My Accepted Name');
+
+    mockDisplayNameOverride = 'A Newer Remote Name';
+    await view.rerender(<ChatSettingsScreen />);
+    await waitFor(() =>
+      expect(screen.getByLabelText('Apple Group Name').props.value).toBe('A Newer Remote Name'),
+    );
+  });
+
+  it.each([
+    [{ status: 'rejected', tempGuid: 'temp-reject1' }, 'Apple Group Name Not Changed'],
+    [{ status: 'outcome-unknown', tempGuid: 'temp-unknown1' }, 'Rename Not Confirmed'],
+  ])(
+    'keeps the typed name after %j and never submits it again automatically',
+    async (result, title) => {
+      configureEligibleGroup();
+      mockRenameAppleGroup.mockResolvedValue(result);
+      await renderWithTheme(<ChatSettingsScreen />);
+
+      const input = screen.getByLabelText('Apple Group Name');
+      await fireEvent.changeText(input, 'Keep My Typed Name');
+      await fireEvent.press(screen.getByRole('button', { name: 'Rename in Apple Messages' }));
+
+      await waitFor(() => expect(mockShowDialog).toHaveBeenCalledWith(title, expect.any(String)));
+      expect(screen.getByLabelText('Apple Group Name').props.value).toBe('Keep My Typed Name');
+      expect(mockRenameAppleGroup).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('hides the remote control without both the live capability and exact participant proof', async () => {
+    mockGuid = GROUP_CHAT_GUID;
+    mockHandleServices = 'iMessage,iMessage';
+    const withoutCapability = await renderWithTheme(<ChatSettingsScreen />);
+    expect(screen.queryByLabelText('Apple Group Name')).toBeNull();
+    await withoutCapability.unmount();
+
+    useSessionStore.setState({
+      serverInfo: {
+        version: 'test',
+        private_api: false,
+        supports_imessage_group_rename: true,
+      } as any,
+    });
+    mockHandleServices = 'iMessage,SMS';
+    await renderWithTheme(<ChatSettingsScreen />);
+    expect(screen.queryByLabelText('Apple Group Name')).toBeNull();
+    expect(mockRenameAppleGroup).not.toHaveBeenCalled();
+  });
+});
+
+describe('ChatSettingsScreen Apple group photo', () => {
+  function configureEligibleGroupPhoto(): void {
+    mockGuid = GROUP_CHAT_GUID;
+    mockChatStyle = 43;
+    mockParticipantCount = 2;
+    mockHandleServices = 'iMessage,iMessage';
+    useSessionStore.setState({
+      serverInfo: {
+        version: 'test',
+        private_api: false,
+        supports_imessage_group_photo: true,
+      } as any,
+    });
+  }
+
+  it('pins the exact operation before picker UI and submits one JPEG without local mutation', async () => {
+    configureEligibleGroupPhoto();
+    mockLaunchImageLibrary.mockResolvedValueOnce(pickedAsset('file:///picker/group-photo.jpg'));
+    await renderWithTheme(<ChatSettingsScreen />);
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Change Apple Group Photo' }));
+    await waitFor(() => expect(mockSubmitAppleGroupPhoto).toHaveBeenCalledTimes(1));
+
+    expect(mockPrepareAppleGroupPhotoSet).toHaveBeenCalledWith(GROUP_CHAT_GUID, mockAccountLease);
+    expect(mockPrepareAppleGroupPhotoSet.mock.invocationCallOrder[0]).toBeLessThan(
+      mockRequestPhotoLibraryAccess.mock.invocationCallOrder[0]!,
+    );
+    expect(mockPrepareAppleGroupPhotoSet.mock.invocationCallOrder[0]).toBeLessThan(
+      mockLaunchImageLibrary.mock.invocationCallOrder[0]!,
+    );
+    expect(mockSubmitAppleGroupPhoto).toHaveBeenCalledWith({
+      uri: 'file:///picker/group-photo.jpg',
+      name: 'picked.jpg',
+      mimeType: 'image/jpeg',
+      size: undefined,
+    });
+    expect(mockSubmitAppleGroupPhoto).toHaveBeenCalledTimes(1);
+    expect(mockSetChatAppearanceWithinTransaction).not.toHaveBeenCalled();
+    expect(mockSetChatCustomizationWithinTransaction).not.toHaveBeenCalled();
+    expect(mockShowDialog).toHaveBeenCalledWith(
+      'Group Photo Change Accepted',
+      expect.stringContaining('Check the group in Messages on your Mac'),
+    );
+  });
+
+  it('rejects a HEIC MIME or filename clearly and cancels the unused pinned grant', async () => {
+    configureEligibleGroupPhoto();
+    mockLaunchImageLibrary.mockResolvedValueOnce({
+      canceled: false,
+      assets: [
+        {
+          uri: 'file:///picker/group-photo.heic',
+          fileName: 'group-photo.heic',
+          mimeType: 'image/heic',
+        },
+      ],
+    });
+    await renderWithTheme(<ChatSettingsScreen />);
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Change Apple Group Photo' }));
+    await waitFor(() =>
+      expect(mockShowDialog).toHaveBeenCalledWith(
+        'Unsupported Group Photo',
+        expect.stringContaining('HEIC photos are not supported'),
+      ),
+    );
+    expect(mockSubmitAppleGroupPhoto).not.toHaveBeenCalled();
+    expect(mockCancelAppleGroupPhoto).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses explicit uncertainty wording and never retries set or remove automatically', async () => {
+    configureEligibleGroupPhoto();
+    mockLaunchImageLibrary.mockResolvedValueOnce(pickedAsset('file:///picker/group-photo.jpg'));
+    mockSubmitAppleGroupPhoto.mockResolvedValueOnce({
+      status: 'outcome-unknown',
+      operation: 'set',
+      tempGuid: 'temp-photo-unknown',
+    });
+    mockRemoveAppleGroupPhoto.mockResolvedValueOnce({
+      status: 'outcome-unknown',
+      operation: 'remove',
+      tempGuid: 'temp-remove-unknown',
+    });
+    await renderWithTheme(<ChatSettingsScreen />);
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Change Apple Group Photo' }));
+    await waitFor(() =>
+      expect(mockShowDialog).toHaveBeenCalledWith(
+        'Photo Change Not Confirmed',
+        expect.stringContaining('may have reached Messages'),
+      ),
+    );
+    expect(mockSubmitAppleGroupPhoto).toHaveBeenCalledTimes(1);
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Remove Apple Group Photo' }));
+    expect(mockShowDialog).toHaveBeenLastCalledWith(
+      'Remove Apple Group Photo?',
+      expect.any(String),
+      expect.any(Array),
+    );
+    await act(async () => dialogAction('Remove Photo')?.());
+    await waitFor(() =>
+      expect(mockShowDialog).toHaveBeenCalledWith(
+        'Photo Removal Not Confirmed',
+        expect.stringContaining('may have reached Messages'),
+      ),
+    );
+    expect(mockRemoveAppleGroupPhoto).toHaveBeenCalledWith(
+      { chatGuid: GROUP_CHAT_GUID },
+      mockAccountLease,
+    );
+    expect(mockRemoveAppleGroupPhoto).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides both controls without the live capability and exact local group proof', async () => {
+    mockGuid = GROUP_CHAT_GUID;
+    mockHandleServices = 'iMessage,iMessage';
+    const withoutCapability = await renderWithTheme(<ChatSettingsScreen />);
+    expect(screen.queryByRole('button', { name: 'Change Apple Group Photo' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Remove Apple Group Photo' })).toBeNull();
+    await withoutCapability.unmount();
+
+    configureEligibleGroupPhoto();
+    mockHandleServices = 'iMessage,SMS';
+    await renderWithTheme(<ChatSettingsScreen />);
+    expect(screen.queryByRole('button', { name: 'Change Apple Group Photo' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Remove Apple Group Photo' })).toBeNull();
+  });
+});
+
+describe('ChatSettingsScreen Apple group participant add', () => {
+  function configureEligibleGroupParticipantAdd(): void {
+    mockGuid = GROUP_CHAT_GUID;
+    mockChatStyle = 43;
+    mockParticipantCount = 2;
+    mockHandleServices = 'iMessage,iMessage';
+    useSessionStore.setState({
+      serverInfo: {
+        version: 'test',
+        private_api: false,
+        supports_imessage_group_participant_add: true,
+      } as any,
+    });
+  }
+
+  it('submits one exact address, clears only accepted input, and waits for roster sync', async () => {
+    configureEligibleGroupParticipantAdd();
+    await renderWithTheme(<ChatSettingsScreen />);
+
+    const input = screen.getByLabelText('Apple Group Participant Address');
+    await fireEvent.changeText(input, '+15559876543');
+    await fireEvent.press(screen.getByRole('button', { name: 'Add Person to Apple Group' }));
+
+    await waitFor(() =>
+      expect(mockAddAppleGroupParticipant).toHaveBeenCalledWith(
+        { chatGuid: GROUP_CHAT_GUID, address: '+15559876543' },
+        mockAccountLease,
+      ),
+    );
+    expect(mockAddAppleGroupParticipant).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(screen.getByLabelText('Apple Group Participant Address').props.value).toBe(''),
+    );
+    expect(mockSetChatCustomizationWithinTransaction).not.toHaveBeenCalled();
+    expect(mockShowDialog).toHaveBeenCalledWith(
+      'Add Request Accepted',
+      expect.stringContaining('after Messages syncs the roster'),
+    );
+  });
+
+  it.each([
+    [{ status: 'rejected', tempGuid: 'temp-participant-rejected' }, 'Person Not Added'],
+    [{ status: 'outcome-unknown', tempGuid: 'temp-participant-unknown' }, 'Add Not Confirmed'],
+  ])('preserves the address after %j and does not retry automatically', async (result, title) => {
+    configureEligibleGroupParticipantAdd();
+    mockAddAppleGroupParticipant.mockResolvedValueOnce(result);
+    await renderWithTheme(<ChatSettingsScreen />);
+
+    const input = screen.getByLabelText('Apple Group Participant Address');
+    await fireEvent.changeText(input, 'person@example.com');
+    await fireEvent.press(screen.getByRole('button', { name: 'Add Person to Apple Group' }));
+
+    await waitFor(() => expect(mockShowDialog).toHaveBeenCalledWith(title, expect.any(String)));
+    expect(screen.getByLabelText('Apple Group Participant Address').props.value).toBe(
+      'person@example.com',
+    );
+    expect(mockAddAppleGroupParticipant).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides the control without both the live capability and exact local group proof', async () => {
+    mockGuid = GROUP_CHAT_GUID;
+    mockHandleServices = 'iMessage,iMessage';
+    const withoutCapability = await renderWithTheme(<ChatSettingsScreen />);
+    expect(screen.queryByLabelText('Apple Group Participant Address')).toBeNull();
+    await withoutCapability.unmount();
+
+    configureEligibleGroupParticipantAdd();
+    mockHandleServices = 'iMessage,SMS';
+    await renderWithTheme(<ChatSettingsScreen />);
+    expect(screen.queryByLabelText('Apple Group Participant Address')).toBeNull();
+    expect(mockAddAppleGroupParticipant).not.toHaveBeenCalled();
+  });
+});
+
+describe('ChatSettingsScreen Apple group participant removal', () => {
+  function configureEligibleGroupParticipantRemoval(includeAdd = false): void {
+    mockGuid = GROUP_CHAT_GUID;
+    mockChatStyle = 43;
+    mockParticipantCount = 3;
+    mockHandleServices = 'iMessage,iMessage,iMessage';
+    useSessionStore.setState({
+      serverInfo: {
+        version: 'test',
+        private_api: false,
+        supports_imessage_group_participant_remove: true,
+        supports_imessage_group_participant_add: includeAdd,
+      } as any,
+    });
+  }
+
+  it('confirm-gates one exact loaded member and waits for sync after acceptance', async () => {
+    configureEligibleGroupParticipantRemoval();
+    await renderWithTheme(<ChatSettingsScreen />);
+
+    await fireEvent.press(
+      screen.getByRole('button', { name: `Remove ${PRIVATE_MEMBER} from Apple Group` }),
+    );
+    expect(mockShowDialog).toHaveBeenLastCalledWith(
+      'Remove Person from Apple Group?',
+      expect.stringContaining('for everyone in Apple Messages'),
+      expect.any(Array),
+    );
+    expect(mockRemoveAppleGroupParticipant).not.toHaveBeenCalled();
+
+    await act(async () => dialogAction('Remove Person')?.());
+    await waitFor(() =>
+      expect(mockRemoveAppleGroupParticipant).toHaveBeenCalledWith(
+        { chatGuid: GROUP_CHAT_GUID, address: PRIVATE_ADDRESS },
+        mockAccountLease,
+      ),
+    );
+    expect(mockRemoveAppleGroupParticipant).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(PRIVATE_MEMBER)).toBeTruthy();
+    expect(mockSetChatCustomizationWithinTransaction).not.toHaveBeenCalled();
+    expect(mockShowDialog).toHaveBeenCalledWith(
+      'Removal Request Accepted',
+      expect.stringContaining('after Messages sync confirms it'),
+    );
+  });
+
+  it.each([
+    [{ status: 'rejected', tempGuid: 'temp-remove-rejected' }, 'Person Not Removed'],
+    [{ status: 'outcome-unknown', tempGuid: 'temp-remove-unknown' }, 'Removal Not Confirmed'],
+  ])('keeps the roster after %j and never retries automatically', async (result, title) => {
+    configureEligibleGroupParticipantRemoval();
+    mockRemoveAppleGroupParticipant.mockResolvedValueOnce(result);
+    await renderWithTheme(<ChatSettingsScreen />);
+
+    await fireEvent.press(
+      screen.getByRole('button', { name: `Remove ${PRIVATE_MEMBER} from Apple Group` }),
+    );
+    await act(async () => dialogAction('Remove Person')?.());
+    await waitFor(() => expect(mockShowDialog).toHaveBeenCalledWith(title, expect.any(String)));
+
+    expect(screen.getByText(PRIVATE_MEMBER)).toBeTruthy();
+    expect(mockRemoveAppleGroupParticipant).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides removal without the capability, three members, and exact iMessage proof', async () => {
+    mockGuid = GROUP_CHAT_GUID;
+    mockParticipantCount = 3;
+    mockHandleServices = 'iMessage,iMessage,iMessage';
+    const withoutCapability = await renderWithTheme(<ChatSettingsScreen />);
+    expect(screen.queryByRole('button', { name: /from Apple Group$/u })).toBeNull();
+    await withoutCapability.unmount();
+
+    configureEligibleGroupParticipantRemoval();
+    mockParticipantCount = 2;
+    mockHandleServices = 'iMessage,iMessage';
+    const withTwoMembers = await renderWithTheme(<ChatSettingsScreen />);
+    expect(screen.queryByRole('button', { name: /from Apple Group$/u })).toBeNull();
+    await withTwoMembers.unmount();
+
+    configureEligibleGroupParticipantRemoval();
+    mockHandleServices = 'iMessage,iMessage,SMS';
+    await renderWithTheme(<ChatSettingsScreen />);
+    expect(screen.queryByRole('button', { name: /from Apple Group$/u })).toBeNull();
+  });
+
+  it('does not start removal while an add attempt owns the shared membership lane', async () => {
+    configureEligibleGroupParticipantRemoval(true);
+    const pendingAdd = deferred<{
+      status: 'accepted';
+      tempGuid: string;
+      guid: string;
+      address: string;
+    }>();
+    mockAddAppleGroupParticipant.mockReturnValueOnce(pendingAdd.promise);
+    await renderWithTheme(<ChatSettingsScreen />);
+
+    await fireEvent.changeText(
+      screen.getByLabelText('Apple Group Participant Address'),
+      '+15559876543',
+    );
+    await fireEvent.press(screen.getByRole('button', { name: 'Add Person to Apple Group' }));
+    await waitFor(() => expect(mockAddAppleGroupParticipant).toHaveBeenCalledTimes(1));
+
+    const remove = screen.getByRole('button', {
+      name: `Remove ${PRIVATE_MEMBER} from Apple Group`,
+    });
+    expect(remove.props.accessibilityState).toEqual({ disabled: true });
+    await fireEvent.press(remove);
+    expect(mockRemoveAppleGroupParticipant).not.toHaveBeenCalled();
+
+    await act(async () => {
+      pendingAdd.resolve({
+        status: 'accepted',
+        tempGuid: 'temp-add-cross-lane',
+        guid: GROUP_CHAT_GUID,
+        address: '+15559876543',
+      });
+      await pendingAdd.promise;
+    });
+  });
+});
+
+describe('ChatSettingsScreen Apple group leave', () => {
+  function configureEligibleGroupLeave(includeOtherMembershipActions = false): void {
+    mockGuid = GROUP_CHAT_GUID;
+    mockChatStyle = 43;
+    mockParticipantCount = includeOtherMembershipActions ? 3 : 2;
+    mockHandleServices = includeOtherMembershipActions
+      ? 'iMessage,iMessage,iMessage'
+      : 'iMessage,iMessage';
+    useSessionStore.setState({
+      serverInfo: {
+        version: 'test',
+        private_api: false,
+        supports_imessage_group_leave: true,
+        supports_imessage_group_participant_add: includeOtherMembershipActions,
+        supports_imessage_group_participant_remove: includeOtherMembershipActions,
+      } as any,
+    });
+  }
+
+  it.each([
+    [
+      { status: 'accepted', tempGuid: 'temp-leave-accepted', guid: GROUP_CHAT_GUID },
+      'Leave Request Accepted',
+      'authoritative sync',
+    ],
+    [{ status: 'rejected', tempGuid: 'temp-leave-rejected' }, 'Group Not Left', 'roster unchanged'],
+    [
+      { status: 'outcome-unknown', tempGuid: 'temp-leave-unknown' },
+      'Leave Not Confirmed',
+      'may have reached Messages',
+    ],
+  ])(
+    'confirm-gates %j, keeps the local conversation, and waits for Messages',
+    async (result, title, copy) => {
+      configureEligibleGroupLeave();
+      mockLeaveAppleGroup.mockResolvedValueOnce(result);
+      await renderWithTheme(<ChatSettingsScreen />);
+
+      await fireEvent.press(screen.getByRole('button', { name: 'Leave Apple Group' }));
+      expect(mockShowDialog).toHaveBeenLastCalledWith(
+        'Leave Apple Group?',
+        expect.stringContaining('may remove your access'),
+        expect.any(Array),
+      );
+      expect(mockLeaveAppleGroup).not.toHaveBeenCalled();
+
+      await act(async () => dialogAction('Leave Group')?.());
+      await waitFor(() =>
+        expect(mockLeaveAppleGroup).toHaveBeenCalledWith(
+          { chatGuid: GROUP_CHAT_GUID },
+          mockAccountLease,
+        ),
+      );
+      await waitFor(() =>
+        expect(mockShowDialog).toHaveBeenCalledWith(title, expect.stringContaining(copy)),
+      );
+      expect(mockLeaveAppleGroup).toHaveBeenCalledTimes(1);
+      expect(screen.getByText(PRIVATE_MEMBER)).toBeTruthy();
+      expect(mockBack).not.toHaveBeenCalled();
+      expect(mockDatabase.run).not.toHaveBeenCalled();
+    },
+  );
+
+  it('hides leave without both its live capability and exact iMessage group proof', async () => {
+    mockGuid = GROUP_CHAT_GUID;
+    mockHandleServices = 'iMessage,iMessage';
+    const withoutCapability = await renderWithTheme(<ChatSettingsScreen />);
+    expect(screen.queryByRole('button', { name: 'Leave Apple Group' })).toBeNull();
+    await withoutCapability.unmount();
+
+    configureEligibleGroupLeave();
+    mockHandleServices = 'iMessage,SMS';
+    await renderWithTheme(<ChatSettingsScreen />);
+    expect(screen.queryByRole('button', { name: 'Leave Apple Group' })).toBeNull();
+    expect(mockLeaveAppleGroup).not.toHaveBeenCalled();
+  });
+
+  it('owns the shared UI lane against both add and remove while leave is pending', async () => {
+    configureEligibleGroupLeave(true);
+    const pendingLeave = deferred<{
+      status: 'outcome-unknown';
+      tempGuid: string;
+    }>();
+    mockLeaveAppleGroup.mockReturnValueOnce(pendingLeave.promise);
+    await renderWithTheme(<ChatSettingsScreen />);
+
+    await fireEvent.changeText(
+      screen.getByLabelText('Apple Group Participant Address'),
+      '+15559876543',
+    );
+    await fireEvent.press(screen.getByRole('button', { name: 'Leave Apple Group' }));
+    await act(async () => dialogAction('Leave Group')?.());
+    await waitFor(() => expect(mockLeaveAppleGroup).toHaveBeenCalledTimes(1));
+
+    const add = screen.getByRole('button', { name: 'Add Person to Apple Group' });
+    const remove = screen.getByRole('button', {
+      name: `Remove ${PRIVATE_MEMBER} from Apple Group`,
+    });
+    expect(add.props.accessibilityState).toEqual({ disabled: true });
+    expect(remove.props.accessibilityState).toEqual({ disabled: true });
+    await fireEvent.press(add);
+    await fireEvent.press(remove);
+    expect(mockAddAppleGroupParticipant).not.toHaveBeenCalled();
+    expect(mockRemoveAppleGroupParticipant).not.toHaveBeenCalled();
+
+    await act(async () => {
+      pendingLeave.resolve({ status: 'outcome-unknown', tempGuid: 'temp-leave-pending' });
+      await pendingLeave.promise;
+    });
   });
 });
 
@@ -1476,7 +2133,8 @@ describe('ChatSettingsScreen source and account ownership', () => {
       'Orange bubble color',
       'Slate blue bubble color',
     ];
-    expect(screen.getAllByRole('radio')).toHaveLength(expectedNames.length);
+    // Seven chat-bubble choices plus eight choices for the one participant handle.
+    expect(screen.getAllByRole('radio')).toHaveLength(expectedNames.length + 8);
     for (const accessibleName of expectedNames) {
       expect(screen.getByRole('radio', { name: accessibleName })).toBeTruthy();
     }
@@ -1508,6 +2166,53 @@ describe('ChatSettingsScreen source and account ownership', () => {
         expect.any(Object),
         CHAT_GUID,
         { customColor: null },
+      ),
+    );
+    await waitFor(() => expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE', 'COMMIT']));
+    expect(mockDatabaseB.run).not.toHaveBeenCalled();
+  });
+
+  it('chooses and resets an exact device-owned participant color', async () => {
+    const view = await renderWithTheme(<ChatSettingsScreen />);
+
+    const pale = screen.getByRole('radio', { name: `Pale yellow color for ${PRIVATE_MEMBER}` });
+    const navy = screen.getByRole('radio', { name: `Navy color for ${PRIVATE_MEMBER}` });
+    const reset = screen.getByRole('radio', { name: `Default color for ${PRIVATE_MEMBER}` });
+    expect(pale).toBeTruthy();
+    expect(navy).toBeTruthy();
+    expect(reset.props.accessibilityState).toMatchObject({ selected: true });
+
+    await fireEvent.press(pale);
+    await waitFor(() =>
+      expect(mockSetHandleColorWithinTransaction).toHaveBeenCalledWith(
+        expect.any(Object),
+        CHAT_GUID,
+        PRIVATE_ADDRESS,
+        'iMessage',
+        '#FFF3A3',
+      ),
+    );
+    await waitFor(() => expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE', 'COMMIT']));
+
+    mockHandleColor = '#FFF3A3';
+    await view.rerender(<ChatSettingsScreen />);
+    expect(
+      screen.getByRole('radio', { name: `Pale yellow color for ${PRIVATE_MEMBER}` }).props
+        .accessibilityState,
+    ).toMatchObject({ selected: true });
+
+    mockSetHandleColorWithinTransaction.mockClear();
+    mockDatabase.run.mockClear();
+    await fireEvent.press(
+      screen.getByRole('radio', { name: `Default color for ${PRIVATE_MEMBER}` }),
+    );
+    await waitFor(() =>
+      expect(mockSetHandleColorWithinTransaction).toHaveBeenCalledWith(
+        expect.any(Object),
+        CHAT_GUID,
+        PRIVATE_ADDRESS,
+        'iMessage',
+        null,
       ),
     );
     await waitFor(() => expectDbRunSequence(mockDatabase, ['BEGIN IMMEDIATE', 'COMMIT']));

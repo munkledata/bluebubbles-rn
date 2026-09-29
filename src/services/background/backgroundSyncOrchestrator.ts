@@ -63,6 +63,7 @@ export interface BackgroundSyncDependencies<Database, Client, ServerInfo> {
     client: Client,
     serverVersion: string,
     scope: BackgroundAccountScope,
+    serverInfo: ServerInfo,
   ): Promise<void>;
   recoverAndDrainSchedules(
     db: Database,
@@ -271,7 +272,7 @@ export async function runBackgroundSync<Database, Client, ServerInfo>(
         stoppedOutcome(baseScope, deps.revocationMarker, budgetExpired) ?? undefined;
       if (terminalOutcome) return;
 
-      await deps.synchronize(db, client, deps.serverVersion(serverInfo), budgetScope);
+      await deps.synchronize(db, client, deps.serverVersion(serverInfo), budgetScope, serverInfo);
       terminalOutcome =
         stoppedOutcome(baseScope, deps.revocationMarker, budgetExpired) ?? undefined;
       if (terminalOutcome) return;

@@ -1,6 +1,10 @@
 import React, { useCallback } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { isAggregateRetractionTombstone } from '@core/messages/retraction';
+import {
+  isAggregateRetractionTombstone,
+  isExactMessagePartTopology,
+} from '@core/messages/retraction';
+import { parseMessagePartTopology } from '@core/models';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import {
@@ -38,6 +42,7 @@ interface MessageRowProps {
   // happens here, inside the memoized row, not in the list's renderItem).
   onRetry?: (msg: EnrichedMessage) => void;
   onLongPress?: (msg: EnrichedMessage, rect: BubbleRect) => void;
+  onSwipeReply?: (msg: EnrichedMessage) => void;
   /** Jump to a replied-to message by its guid (tap the reply quote). */
   onJumpToReply?: (originatorGuid: string) => void;
   /** Tap the reaction badges → show who reacted (the list owns the detail sheet). */
@@ -68,6 +73,7 @@ export const MessageRow = React.memo(function MessageRow({
   hasBackground,
   onRetry,
   onLongPress,
+  onSwipeReply,
   onJumpToReply,
   onShowReactions,
   isHighlighted,
@@ -116,6 +122,7 @@ export const MessageRow = React.memo(function MessageRow({
     if (originator) onJumpToReply?.(originator);
   }, [onJumpToReply, originator]);
   const handleShowReactions = useCallback(() => onShowReactions?.(msg), [onShowReactions, msg]);
+  const handleSwipeReply = useCallback(() => onSwipeReply?.(msg), [onSwipeReply, msg]);
 
   // Group / chat-event system message → a centered event line instead of a bubble.
   if (isGroupEvent(msg)) {
@@ -146,6 +153,14 @@ export const MessageRow = React.memo(function MessageRow({
   // they stay aligned. Own messages + 1:1 chats need no avatar (it's obvious who's talking).
   const showAvatar = isGroup && msg.isFromMe !== 1;
   const isEdited = !isAggregateRetractionTombstone(msg) && !!msg.dateEdited;
+  const topology = parseMessagePartTopology(msg.messagePartTopology);
+  const canSwipeReply =
+    !!onSwipeReply &&
+    !msg.guid.startsWith('temp-') &&
+    !isAggregateRetractionTombstone(msg) &&
+    (msg.senderService == null || msg.senderService === 'iMessage') &&
+    isExactMessagePartTopology(topology) &&
+    topology.currentParts.some((part) => part.index === 0);
 
   const headerNode = header ? (
     <Text style={[styles.sender, overlay, pill ? [styles.senderPill, pill] : null]}>
@@ -191,7 +206,10 @@ export const MessageRow = React.memo(function MessageRow({
         </Text>
       ) : null}
       {/* Horizontal swipe on the bubble content peeks this message's sent time. */}
-      <MessageSwipeWrapper timestamp={formatTime(msg.dateCreated ?? 0)}>
+      <MessageSwipeWrapper
+        timestamp={formatTime(msg.dateCreated ?? 0)}
+        onReply={canSwipeReply ? handleSwipeReply : undefined}
+      >
         {showAvatar ? (
           <>
             <View style={styles.avatarRow}>

@@ -35,7 +35,13 @@ import { createTestDb } from '../support/testDb';
 let mockDb: AppDatabase;
 let mockServerPrivateApiEnabled = true;
 let mockServerRcsEnabled = false;
+let mockAcceptsRcsChat = true;
+const CURRENT_RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
+const CURRENT_RCS_CHAT_GUID = `RCS;-;g1.${CURRENT_RCS_PROVIDER_EPOCH}.Y29udmVyc2F0aW9u`;
+let mockRcsProviderEpoch: string | null = CURRENT_RCS_PROVIDER_EPOCH;
+let mockImessageTypingEnabled = false;
 let mockImessageReadStateEnabled = false;
+let mockSendTypingIndicators = true;
 let mockSendReadReceipts = true;
 let mockSettingsHydrated = true;
 const mockHydrate = jest.fn(async () => {
@@ -56,7 +62,7 @@ jest.mock('@/services/realtimeControl', () => ({ getSocket: jest.fn(() => null) 
 jest.mock('@state/featureSettingsStore', () => ({
   useFeatureSettingsStore: {
     getState: () => ({
-      sendTypingIndicators: true,
+      sendTypingIndicators: mockSendTypingIndicators,
       sendReadReceipts: mockSendReadReceipts,
       hydrated: mockSettingsHydrated,
       hydrate: mockHydrate,
@@ -67,6 +73,9 @@ jest.mock('@state/sessionStore', () => ({
   sessionAccessors: {
     privateApiEnabled: () => mockServerPrivateApiEnabled,
     rcsEnabled: () => mockServerRcsEnabled,
+    rcsProviderEpoch: () => mockRcsProviderEpoch,
+    acceptsRcsChat: () => mockAcceptsRcsChat,
+    imessageTypingEnabled: () => mockImessageTypingEnabled,
     imessageReadStateEnabled: () => mockImessageReadStateEnabled,
   },
 }));
@@ -126,7 +135,11 @@ beforeEach(() => {
   mockMarkChatRead.mockReset().mockResolvedValue({});
   mockServerPrivateApiEnabled = true;
   mockServerRcsEnabled = false;
+  mockAcceptsRcsChat = true;
+  mockRcsProviderEpoch = CURRENT_RCS_PROVIDER_EPOCH;
+  mockImessageTypingEnabled = false;
   mockImessageReadStateEnabled = false;
+  mockSendTypingIndicators = true;
   mockSendReadReceipts = true;
   mockSettingsHydrated = true;
   mockHydrate.mockReset().mockImplementation(async () => {
@@ -144,7 +157,7 @@ afterEach(() => {
 describe('sendTyping', () => {
   it('preserves supported RCS start-typing while skipping unsupported RCS stop-typing', () => {
     const emit = jest.fn();
-    (getSocket as jest.Mock).mockReturnValue({ emit });
+    (getSocket as jest.Mock).mockReturnValue({ connected: true, emit });
     mockServerPrivateApiEnabled = false;
     mockServerRcsEnabled = true;
 
@@ -155,14 +168,121 @@ describe('sendTyping', () => {
     expect(emit).toHaveBeenCalledWith('start-typing', { guid: 'RCS;-;+15551234567' });
   });
 
+  it('does not emit typing for legacy or stale RCS history', () => {
+    const emit = jest.fn();
+    (getSocket as jest.Mock).mockReturnValue({ connected: true, emit });
+    mockAcceptsRcsChat = false;
+
+    sendTyping('RCS;-;legacy-conversation', true);
+
+    expect(emit).not.toHaveBeenCalled();
+  });
+
   it('does not let stale helper capability restore iMessage typing', () => {
     const emit = jest.fn();
-    (getSocket as jest.Mock).mockReturnValue({ emit });
+    (getSocket as jest.Mock).mockReturnValue({ connected: true, emit });
     mockServerPrivateApiEnabled = true;
 
     sendTyping('iMessage;-;+15551234567', true);
 
     expect(emit).not.toHaveBeenCalled();
+  });
+
+  it('sends one start and confirms stop even if capability and preference turn off', async () => {
+    const emit = jest.fn();
+    const request = jest.fn().mockResolvedValue({
+      kind: 'ack',
+      response: { status: 200, data: { typing: false } },
+    });
+    (getSocket as jest.Mock).mockReturnValue({ connected: true, emit, request });
+    mockImessageTypingEnabled = true;
+
+    sendTyping('iMessage;-;+15551234567', true);
+    mockImessageTypingEnabled = false;
+    mockSendTypingIndicators = false;
+    sendTyping('iMessage;-;+15551234567', false);
+    sendTyping('iMessage;-;+15551234567;-;wrong', true);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(emit).toHaveBeenCalledTimes(1);
+    expect(emit).toHaveBeenCalledWith('start-typing', {
+      guid: 'iMessage;-;+15551234567',
+    });
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(request).toHaveBeenCalledWith('stop-typing', {
+      guid: 'iMessage;-;+15551234567',
+    });
+  });
+
+  it('does not queue a stale start while the socket is disconnected', () => {
+    const emit = jest.fn();
+    const request = jest.fn();
+    (getSocket as jest.Mock).mockReturnValue({ connected: false, emit, request });
+    mockImessageTypingEnabled = true;
+
+    sendTyping('iMessage;-;+15550000001', true);
+    sendTyping('iMessage;-;+15550000001', false);
+
+    expect(emit).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('does not send stop when the typing preference blocked start', () => {
+    const emit = jest.fn();
+    const request = jest.fn();
+    (getSocket as jest.Mock).mockReturnValue({ connected: true, emit, request });
+    mockImessageTypingEnabled = true;
+    mockSendTypingIndicators = false;
+
+    sendTyping('iMessage;-;+15550000003', true);
+    sendTyping('iMessage;-;+15550000003', false);
+
+    expect(emit).not.toHaveBeenCalled();
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('forgets an admitted start when its account generation is retired', async () => {
+    const emit = jest.fn();
+    const request = jest.fn();
+    (getSocket as jest.Mock).mockReturnValue({ connected: true, emit, request });
+    mockImessageTypingEnabled = true;
+
+    sendTyping('iMessage;-;+15550000004', true);
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+    sendTyping('iMessage;-;+15550000004', false);
+
+    expect(emit).toHaveBeenCalledTimes(1);
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  it('retries stop once after no acknowledgement', async () => {
+    jest.useFakeTimers();
+    try {
+      const emit = jest.fn();
+      const request = jest
+        .fn()
+        .mockResolvedValueOnce({ kind: 'no-ack' })
+        .mockResolvedValueOnce({
+          kind: 'ack',
+          response: { status: 200, data: { typing: false } },
+        });
+      (getSocket as jest.Mock).mockReturnValue({ connected: true, emit, request });
+      mockImessageTypingEnabled = true;
+
+      sendTyping('iMessage;-;+15550000002', true);
+      sendTyping('iMessage;-;+15550000002', false);
+      await Promise.resolve();
+      expect(request).toHaveBeenCalledTimes(1);
+
+      await jest.advanceTimersByTimeAsync(1_000);
+      expect(request).toHaveBeenCalledTimes(2);
+      expect(request).toHaveBeenNthCalledWith(2, 'stop-typing', {
+        guid: 'iMessage;-;+15550000002',
+      });
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
 
@@ -337,7 +457,7 @@ describe('markUnread', () => {
   it('RCS chats flip locally but SKIP the server call entirely', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
-    const guid = 'RCS;-;+15551234567';
+    const guid = CURRENT_RCS_CHAT_GUID;
     await seedChat(db, guid);
 
     await markUnread(guid);
@@ -420,7 +540,7 @@ describe('markRead', () => {
   it('preserves killed-process RCS reads before session ServerInfo has hydrated', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
-    const guid = 'RCS;-;+15551234567';
+    const guid = CURRENT_RCS_CHAT_GUID;
     const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
     await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
     const chatId = (await getChatIdByGuid(db, guid))!;
@@ -432,10 +552,13 @@ describe('markRead', () => {
     );
     mockServerPrivateApiEnabled = false;
     mockServerRcsEnabled = false;
+    mockRcsProviderEpoch = null;
     const killedProcessHttp = { __http: 'vault' } as never;
     const resolveReceiptTransport = jest.fn(async () => ({
       http: killedProcessHttp,
       isCurrent: () => true,
+      rcsProviderEpoch: CURRENT_RCS_PROVIDER_EPOCH,
+      acceptsRcsChat: () => true,
     }));
 
     await markRead(guid, undefined, { resolveReceiptTransport });
@@ -443,6 +566,50 @@ describe('markRead', () => {
     expect(readMarker(raw, guid)).toBe('rcs-m1');
     expect(resolveReceiptTransport).toHaveBeenCalledTimes(1);
     expect(mockMarkChatRead).toHaveBeenCalledWith(killedProcessHttp, guid);
+  });
+
+  it('does not reopen an RCS read after task-local provider authority briefly revokes', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    const guid = CURRENT_RCS_CHAT_GUID;
+    const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
+    await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
+    const chatId = (await getChatIdByGuid(db, guid))!;
+    await upsertMessages(
+      db,
+      [Message.parse({ guid: 'rcs-current', text: 'hi', isFromMe: false, dateCreated: 1000 })],
+      () => chatId,
+      hm,
+    );
+    await setLastReadMessageGuid(db, guid, 'previous-marker');
+    let providerCurrent = true;
+    raw.function('rotate_provider_during_mark_read', () => {
+      providerCurrent = false;
+      setImmediate(() => {
+        providerCurrent = true;
+      });
+      return 0;
+    });
+    raw.exec(`
+      CREATE TRIGGER rotate_provider_during_mark_read
+      AFTER UPDATE OF last_read_message_guid ON chats
+      BEGIN
+        SELECT rotate_provider_during_mark_read();
+      END
+    `);
+    const resolveReceiptTransport = jest.fn(async () => ({
+      http: { __http: 'provider-rotation' } as never,
+      isCurrent: () => providerCurrent,
+      rcsProviderEpoch: CURRENT_RCS_PROVIDER_EPOCH,
+      acceptsRcsChat: () => providerCurrent,
+    }));
+
+    await expect(markRead(guid, undefined, { resolveReceiptTransport })).resolves.toBeUndefined();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(providerCurrent).toBe(true);
+    expect(readMarker(raw, guid)).toBe('previous-marker');
+    expect(mockMarkChatRead).not.toHaveBeenCalled();
   });
 
   it('clears the local badge before syncing a capable iMessage read', async () => {
@@ -518,7 +685,7 @@ describe('markRead', () => {
   it('advances the marker via the LAZY ensureDatabase() — the killed-app tray button path', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
-    const guid = 'RCS;-;+15551234567';
+    const guid = CURRENT_RCS_CHAT_GUID;
     const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
     await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
     const chatId = (await getChatIdByGuid(db, guid))!;
@@ -540,7 +707,7 @@ describe('markRead', () => {
   it('hydrates the settings first, so a user who turned read receipts off sends none', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
-    const guid = 'RCS;-;+15551234567';
+    const guid = CURRENT_RCS_CHAT_GUID;
     const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
     await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
     const chatId = (await getChatIdByGuid(db, guid))!;
@@ -634,7 +801,7 @@ describe('markRead', () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
     mockSettingsHydrated = false;
-    const guid = 'RCS;-;+15550000000';
+    const guid = CURRENT_RCS_CHAT_GUID;
     const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
     await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
     await setChatUnreadLocal(db, guid, 1_000);
@@ -648,7 +815,7 @@ describe('markRead', () => {
     expect(mockMarkChatRead).toHaveBeenCalledWith({ __http: true }, guid);
   });
 
-  it('keeps the local marker when killed-process receipt authorization is unavailable', async () => {
+  it('leaves stale RCS history read-only when killed-process authorization is unavailable', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
     const guid = 'RCS;-;+15551234567';
@@ -669,8 +836,8 @@ describe('markRead', () => {
 
     await expect(markRead(guid, undefined, { resolveReceiptTransport })).resolves.toBeUndefined();
 
-    expect(readMarker(raw, guid)).toBe('m-local');
-    expect(markerAtResolution).toBe('m-local');
+    expect(readMarker(raw, guid)).toBeNull();
+    expect(markerAtResolution).toBeNull();
     expect(resolveReceiptTransport).toHaveBeenCalledTimes(1);
     expect(mockMarkChatRead).not.toHaveBeenCalled();
   });
@@ -679,7 +846,7 @@ describe('markRead', () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
     mockSettingsHydrated = false;
-    const guid = 'RCS;-;+15551234567';
+    const guid = CURRENT_RCS_CHAT_GUID;
     const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
     const chatIds = await upsertChats(
       db,
@@ -803,7 +970,7 @@ describe('markRead', () => {
   it('keeps teardown waiting for a read receipt and disowns its late A-account completion', async () => {
     const accountA = await createTestDb();
     const accountB = await createTestDb();
-    const guid = 'RCS;-;+15551234567';
+    const guid = CURRENT_RCS_CHAT_GUID;
     mockDb = accountA.db;
 
     for (const { db, messageGuid } of [

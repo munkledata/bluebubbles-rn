@@ -64,6 +64,30 @@ describe('parseAttributedRuns', () => {
     expect(parseAttributedRuns(body, 'bold?')).toEqual([{ text: 'bold?' }]);
   });
 
+  it('retains the four admitted Apple text-formatting attributes', () => {
+    const body = JSON.stringify([
+      {
+        string: 'Bold styled',
+        runs: [
+          { range: [0, 4], attributes: { __kIMTextBoldAttributeName: 1 } },
+          {
+            range: [5, 6],
+            attributes: {
+              __kIMTextItalicAttributeName: 1,
+              __kIMTextUnderlineAttributeName: 1,
+              __kIMTextStrikethroughAttributeName: 1,
+            },
+          },
+        ],
+      },
+    ]);
+    expect(parseAttributedRuns(body, '')).toEqual([
+      { text: 'Bold', bold: true },
+      { text: ' ' },
+      { text: 'styled', italic: true, underline: true, strikethrough: true },
+    ]);
+  });
+
   it('fills gaps when runs do not tile the whole string (no text dropped)', () => {
     // Realistic: a single mention run inside a longer string, leaving gaps.
     const body = JSON.stringify([

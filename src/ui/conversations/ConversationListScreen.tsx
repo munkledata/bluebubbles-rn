@@ -1,6 +1,6 @@
 import { FlashList, type FlashListRef } from '@shopify/flash-list';
 import { useFocusEffect, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   AppState,
@@ -11,15 +11,23 @@ import {
   Text,
   TextInput,
   View,
+  type ViewToken,
 } from 'react-native';
-import { activeInboxFilterCount, type InboxFilters } from '@core/models';
+import { activeInboxFilterCount, DEFAULT_INBOX_FILTERS, type InboxFilters } from '@core/models';
+import { currentRcsProviderEpoch } from '@core/rcs/providerIdentity';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { markAllChatsRead, movePinnedChat, refreshInbox } from '@/services';
 import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
-import { useChats } from '@features/conversations/useChats';
+import { refreshShareShortcuts } from '@/services/shortcuts/shareShortcuts';
+import {
+  useChats,
+  type InboxQuerySource,
+  type InboxQueryTiming,
+} from '@features/conversations/useChats';
 import type { InboxRow, PinnedOrderMoveDirection } from '@db/repositories';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
+import { useLockStore } from '@state/lockStore';
 import { useSessionStore } from '@state/sessionStore';
 import { useKeyboardVisible } from '../hooks/useKeyboardVisible';
 import { Icon, Screen, usePullToRefresh } from '../primitives';
@@ -39,10 +47,47 @@ import { SearchResultsView } from './SearchResultsView';
  * (TalkBack, programmatic) emit no drag to disarm it. See the convergence loop below. */
 const SCROLL_TO_TOP_WINDOW_MS = 1_000;
 const INBOX_PAGE_SIZE = 50;
+// The benchmark times first visibility itself. FlashList otherwise waits 250 ms before reporting it.
+const BENCHMARK_VIEWABILITY_CONFIG = { minimumViewTime: 0 } as const;
 
 /** Phase 3 inbox: a live (reactive) FlashList of iOS conversation tiles, with a BOTTOM search bar
  * that swaps the list for the unified search results (chats + message hits) the moment you type. */
-export function ConversationListScreen(): React.JSX.Element {
+export interface InboxBenchmarkProbe {
+  source: InboxQuerySource;
+  onQueryTiming: (timing: InboxQueryTiming) => void;
+  onVisibleRows: (rows: readonly { guid: string; index: number | null }[]) => void;
+  /** Reports the identity committed into the rendered row-0 cell, even when index 0 stayed visible. */
+  onTopRowPublished: (guid: string) => void;
+  /** A DEV-only imperative deep-scroll request; production has no such control. */
+  scrollToIndex?: number;
+  scrollRequest?: number;
+  /** Confirms FlashList has finished its native offset-correction pause for this request. */
+  onScrollSettled?: (request: number, succeeded: boolean) => void;
+}
+
+function BenchmarkRowPublication({
+  guid,
+  index,
+  onPublished,
+  children,
+}: {
+  guid: string;
+  index: number;
+  onPublished: (guid: string) => void;
+  children: React.ReactNode;
+}): React.JSX.Element {
+  useLayoutEffect(() => {
+    if (index === 0) onPublished(guid);
+  }, [guid, index, onPublished]);
+  return <>{children}</>;
+}
+
+export function ConversationListScreen({
+  benchmark,
+}: {
+  benchmark?: InboxBenchmarkProbe;
+} = {}): React.JSX.Element {
+  const fixtureMode = benchmark != null;
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -52,11 +97,16 @@ export function ConversationListScreen(): React.JSX.Element {
   const [search, setSearch] = useState('');
   // Push the Unknown Senders split into SQL before pagination; filtering only the loaded page
   // would silently omit known conversations that happen to sort after unknown ones.
-  const filterUnknown = useFeatureSettingsStore((s) => s.filterUnknownSenders);
-  const inboxFilters = useFeatureSettingsStore((s) => s.inboxFilters);
+  const configuredFilterUnknown = useFeatureSettingsStore((s) => s.filterUnknownSenders);
+  const configuredInboxFilters = useFeatureSettingsStore((s) => s.inboxFilters);
+  const appLockEnabled = useLockStore((s) => s.enabled);
+  const filterUnknown = fixtureMode ? false : configuredFilterUnknown;
+  const inboxFilters = fixtureMode ? DEFAULT_INBOX_FILTERS : configuredInboxFilters;
   const setInboxFilters = useFeatureSettingsStore((s) => s.setInboxFilters);
   const newChatAvailable = useSessionStore(
-    (s) => s.serverInfo?.rcs === true || s.serverInfo?.supports_imessage_new_chat === true,
+    (s) =>
+      currentRcsProviderEpoch(s.serverInfo) !== null ||
+      s.serverInfo?.supports_imessage_new_chat === true,
   );
   const effectiveInboxFilters = useMemo<InboxFilters>(
     () => (filterUnknown ? { ...inboxFilters, sender: 'known' } : inboxFilters),
@@ -82,10 +132,31 @@ export function ConversationListScreen(): React.JSX.Element {
     pageSize: INBOX_PAGE_SIZE,
     filters: effectiveInboxFilters,
     countUnknown: filterUnknown,
+    source: benchmark?.source,
+    onQueryTiming: benchmark?.onQueryTiming,
   });
+  const visibleProbeRef = useRef(benchmark?.onVisibleRows);
+  visibleProbeRef.current = benchmark?.onVisibleRows;
+  const topPublishedProbeRef = useRef(benchmark?.onTopRowPublished);
+  topPublishedProbeRef.current = benchmark?.onTopRowPublished;
+  const onTopRowPublished = useCallback((guid: string): void => {
+    topPublishedProbeRef.current?.(guid);
+  }, []);
+  const onViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: ViewToken<InboxRow>[] }): void => {
+      visibleProbeRef.current?.(
+        viewableItems.map((token) => ({ guid: token.item.guid, index: token.index })),
+      );
+    },
+    [],
+  );
   // Memoized so the `data ?? []` fallback isn't a fresh array each render (which would defeat the
   // pinned/listData useMemos below and re-run them + re-render tiles every tick).
   const rows = useMemo(() => data ?? [], [data]);
+  useEffect(() => {
+    if (fixtureMode || data == null || !accountLease.isCurrent()) return;
+    void refreshShareShortcuts(appLockEnabled, accountLease);
+  }, [accountLease, appLockEnabled, data, fixtureMode]);
   // Pull-to-refresh: incremental sync. The list sits below the fixed title → no offset.
   const { refreshControl } = usePullToRefresh(refreshInbox);
 
@@ -109,6 +180,27 @@ export function ConversationListScreen(): React.JSX.Element {
   const onLongPress = useCallback((row: InboxRow): void => {
     setActionTarget(toChatActionTarget(row));
   }, []);
+
+  const renderInboxItem = useCallback(
+    ({ item, index }: { item: InboxRow; index: number }): React.JSX.Element => {
+      const tile = (
+        <ConversationTile
+          row={item}
+          onPress={openChat}
+          onLongPress={fixtureMode ? undefined : onLongPress}
+          readOnly={fixtureMode}
+        />
+      );
+      return fixtureMode ? (
+        <BenchmarkRowPublication guid={item.guid} index={index} onPublished={onTopRowPublished}>
+          {tile}
+        </BenchmarkRowPublication>
+      ) : (
+        tile
+      );
+    },
+    [fixtureMode, onLongPress, onTopRowPublished, openChat],
+  );
 
   const onMarkAllRead = useCallback((): void => {
     showDialog('Mark All Read', 'Mark every conversation as read?', [
@@ -135,6 +227,27 @@ export function ConversationListScreen(): React.JSX.Element {
   const canReorderVisiblePins = activeFilterCount === 0;
   const pinned = useMemo(() => visible.filter((r) => r.isPinned), [visible]);
   const listData = useMemo(() => visible.filter((r) => !r.isPinned), [visible]);
+  useEffect(() => {
+    const index = benchmark?.scrollToIndex;
+    const request = benchmark?.scrollRequest;
+    const onScrollSettled = benchmark?.onScrollSettled;
+    if (index == null || request == null || listData.length <= index) return;
+    const frame = requestAnimationFrame(() => {
+      const scroll = listRef.current?.scrollToIndex({ index, animated: false });
+      if (scroll) {
+        void scroll.then(
+          () => onScrollSettled?.(request, true),
+          () => onScrollSettled?.(request, false),
+        );
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [
+    benchmark?.onScrollSettled,
+    benchmark?.scrollRequest,
+    benchmark?.scrollToIndex,
+    listData.length,
+  ]);
   const onMovePinned = useCallback(
     (guid: string, adjacentGuid: string, direction: PinnedOrderMoveDirection): void => {
       void movePinnedChat(
@@ -306,56 +419,58 @@ export function ConversationListScreen(): React.JSX.Element {
     <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
       <View style={styles.titleRow}>
         <Text style={[styles.largeTitle, { color: theme.color.label }]}>Messages</Text>
-        <View style={styles.headerActions}>
-          <Pressable
-            onPress={onMarkAllRead}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel="Mark all read"
-          >
-            <Icon
-              name="checkmark-done-outline"
-              size={24}
-              color={theme.color.tint}
-              style={styles.headerIcon}
-            />
-          </Pressable>
-          {newChatAvailable ? (
+        {!fixtureMode ? (
+          <View style={styles.headerActions}>
             <Pressable
-              onPress={() => router.push('/new-chat')}
+              onPress={onMarkAllRead}
               hitSlop={8}
               accessibilityRole="button"
-              accessibilityLabel="New message"
+              accessibilityLabel="Mark all read"
             >
               <Icon
-                name="create-outline"
+                name="checkmark-done-outline"
                 size={24}
                 color={theme.color.tint}
                 style={styles.headerIcon}
               />
             </Pressable>
-          ) : null}
-          <Pressable
-            onPress={() => router.push('/settings')}
-            hitSlop={8}
-            accessibilityRole="button"
-            accessibilityLabel="Settings"
-          >
-            <Icon
-              name="settings-outline"
-              size={24}
-              color={theme.color.tint}
-              style={styles.headerIcon}
-            />
-          </Pressable>
-        </View>
+            {newChatAvailable ? (
+              <Pressable
+                onPress={() => router.push('/new-chat')}
+                hitSlop={8}
+                accessibilityRole="button"
+                accessibilityLabel="New message"
+              >
+                <Icon
+                  name="create-outline"
+                  size={24}
+                  color={theme.color.tint}
+                  style={styles.headerIcon}
+                />
+              </Pressable>
+            ) : null}
+            <Pressable
+              onPress={() => router.push('/settings')}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Settings"
+            >
+              <Icon
+                name="settings-outline"
+                size={24}
+                color={theme.color.tint}
+                style={styles.headerIcon}
+              />
+            </Pressable>
+          </View>
+        ) : null}
       </View>
     </View>
   );
 
   // The pinned-chats grid scrolls WITH the list (it's content, like iOS).
   const listHeader =
-    pinned.length > 0 ? (
+    !fixtureMode && pinned.length > 0 ? (
       <View style={styles.pinnedWrap}>
         <PinnedGrid
           rows={pinned}
@@ -491,18 +606,18 @@ export function ConversationListScreen(): React.JSX.Element {
               ref={listRef}
               data={listData}
               keyExtractor={(r: InboxRow) => r.guid}
-              refreshControl={refreshControl}
-              renderItem={({ item }: { item: InboxRow }) => (
-                <ConversationTile row={item} onPress={openChat} onLongPress={onLongPress} />
-              )}
+              refreshControl={fixtureMode ? undefined : refreshControl}
+              renderItem={renderInboxItem}
               ListHeaderComponent={listHeader}
-              ListFooterComponent={listData.length > 0 ? ListFooter : null}
+              ListFooterComponent={!fixtureMode && listData.length > 0 ? ListFooter : null}
               ItemSeparatorComponent={InboxSeparator}
               // The convergence loop (see requestScrollToTop): re-issue the corrective scroll on
               // every content-size change until a drag — or the arm window closing — hands the
               // list back to the user.
               onContentSizeChange={onContentSizeChange}
               onScrollBeginDrag={onScrollBeginDrag}
+              onViewableItemsChanged={fixtureMode ? onViewableItemsChanged : undefined}
+              viewabilityConfig={fixtureMode ? BENCHMARK_VIEWABILITY_CONFIG : undefined}
               onEndReached={hasMore ? loadMore : undefined}
               onEndReachedThreshold={0.5}
               ListEmptyComponent={
@@ -526,10 +641,12 @@ export function ConversationListScreen(): React.JSX.Element {
             />
           )}
         </View>
-        {searchBar}
+        {fixtureMode ? null : searchBar}
       </KeyboardAvoidingView>
-      <ChatActionsSheet target={actionTarget} onClose={() => setActionTarget(null)} />
-      {filtersVisible ? (
+      {fixtureMode ? null : (
+        <ChatActionsSheet target={actionTarget} onClose={() => setActionTarget(null)} />
+      )}
+      {!fixtureMode && filtersVisible ? (
         <InboxFiltersSheet
           filters={inboxFilters}
           senderLocked={filterUnknown}

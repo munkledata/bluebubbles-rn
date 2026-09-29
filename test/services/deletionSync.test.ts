@@ -591,7 +591,7 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
             }
           : {
               protocol: 'continuation',
-              deleted: [{ guid: 'zero-origin-row', chatGuid: null, dateDeleted: 100 }],
+              deleted: [{ guid: 'zero-origin-row', chatGuid: 'c1', dateDeleted: 100 }],
               cursor: 'zero-terminal',
               hasMore: false,
             },
@@ -934,7 +934,7 @@ describe('syncDeletedMessages — R1 deletion catch-up', () => {
       after === 1000
         ? [
             { guid: 'm1', chatGuid: 'c1', dateDeleted: 2000 },
-            { guid: 'ghost-never-synced', chatGuid: null, dateDeleted: 2500 },
+            { guid: 'ghost-never-synced', chatGuid: 'c1', dateDeleted: 2500 },
             { guid: 'm2', chatGuid: 'c1', dateDeleted: 3000 },
           ]
         : [],

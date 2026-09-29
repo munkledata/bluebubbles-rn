@@ -11,6 +11,7 @@ import {
   applyLocalUnsend,
   getChatGuidByMessageGuid,
   getChatIdByGuid,
+  getMessageActionPartLayoutByGuid,
   getMessagePreviewByGuid,
   getMessageTextByGuid,
   listMessagesAround,
@@ -179,14 +180,47 @@ describe('read-null helpers + edit/unsend', () => {
   it('getMessagePreviewByGuid returns null for a miss, a preview for a hit', async () => {
     const { db } = await createTestDb();
     const { chatId, hm } = await seedChat(db);
-    expect(await getMessagePreviewByGuid(db, 'ghost')).toBeNull();
+    expect(await getMessagePreviewByGuid(db, 'c1', 'ghost')).toBeNull();
     await put(db, chatId, hm, {
       guid: 'p1',
       text: 'preview',
       dateCreated: 1,
       handle: { address: 'a@x.com' },
     });
-    expect(await getMessagePreviewByGuid(db, 'p1')).toMatchObject({ guid: 'p1', text: 'preview' });
+    expect(await getMessagePreviewByGuid(db, 'c1', 'p1')).toMatchObject({
+      guid: 'p1',
+      text: 'preview',
+    });
+  });
+
+  it('returns a reply preview only for its exact owning chat', async () => {
+    const { db } = await createTestDb();
+    const { chatId, hm } = await seedChat(db, 'iMessage;-;+15550000001');
+    await seedChat(db, 'RCS;-;google-conversation-1');
+    await put(db, chatId, hm, {
+      guid: 'scoped-reply-target',
+      text: 'private owner-chat preview',
+      dateCreated: 1,
+      messagePartTopology: {
+        complete: true,
+        originalPartIndexes: [0],
+        currentParts: [{ index: 0, kind: 'text' }],
+        attachmentOwnership: [],
+      },
+    });
+
+    await expect(
+      getMessagePreviewByGuid(db, 'iMessage;-;+15550000001', 'scoped-reply-target', 0),
+    ).resolves.toMatchObject({ text: 'private owner-chat preview' });
+    await expect(
+      getMessagePreviewByGuid(db, 'RCS;-;google-conversation-1', 'scoped-reply-target', 0),
+    ).resolves.toBeNull();
+    await expect(
+      getMessageActionPartLayoutByGuid(db, 'iMessage;-;+15550000001', 'scoped-reply-target'),
+    ).resolves.toMatchObject({ text: 'private owner-chat preview' });
+    await expect(
+      getMessageActionPartLayoutByGuid(db, 'RCS;-;google-conversation-1', 'scoped-reply-target'),
+    ).resolves.toBeNull();
   });
 
   it('getChatGuidByMessageGuid resolves the owning chat, null when unknown', async () => {

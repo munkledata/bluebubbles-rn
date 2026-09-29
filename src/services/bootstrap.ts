@@ -1314,6 +1314,14 @@ async function cleanupAccountDatabase(): Promise<DatabaseAccountCleanupResult> {
   let notificationFailure: Error | null = null;
   try {
     const db = await ensureDatabase();
+    let boundShareCleanupFailed = false;
+    try {
+      const { discardAccountBoundShareIntake } = await import('./share/shareIntake');
+      await discardAccountBoundShareIntake(db);
+    } catch (error) {
+      boundShareCleanupFailed = true;
+      logger.warn('[forget] account-bound share cleanup failed', error);
+    }
     try {
       const pending = await listReminders(db);
       if (pending.length > 0) {
@@ -1344,9 +1352,11 @@ async function cleanupAccountDatabase(): Promise<DatabaseAccountCleanupResult> {
       logger.warn('[forget] reminder cancel failed', error);
     }
     return {
-      databaseFailure: (await wipeLocalCache(db))
-        ? null
-        : new Error(DATABASE_CLEANUP_FAILURE_MESSAGE),
+      databaseFailure: boundShareCleanupFailed
+        ? new Error(DATABASE_CLEANUP_FAILURE_MESSAGE)
+        : (await wipeLocalCache(db))
+          ? null
+          : new Error(DATABASE_CLEANUP_FAILURE_MESSAGE),
       notificationFailure,
     };
   } catch (error) {
@@ -1765,15 +1775,13 @@ async function runForget(invalidateForegroundBoot: boolean): Promise<void> {
   }
   const mediaCleared = await deleteCachedMedia();
   const mediaCleanupFailure = mediaCleared ? null : new Error(MEDIA_CLEANUP_FAILURE_MESSAGE);
-  // Confirm legacy Direct Share cleanup before allowing account B. Normal code can no longer
-  // publish rows, but an older installed build may have left account A's long-lived names/photos in
-  // Android's persistent shortcut cache. Lazy import keeps this module's React-free, node-tested
-  // graph off the native bridge at load. A false/throw means removal was not confirmed, so B stays
-  // blocked while every other cleanup step still runs.
+  // Confirm both legacy and current Direct Share cleanup before allowing account B. The native
+  // operation also rotates the opaque-id namespace so a retained account-A target cannot resolve
+  // under B. Lazy import keeps the native bridge off the bootstrap graph until teardown.
   let shortcutCleanupFailure: Error | null = null;
   try {
-    const { clearShareShortcuts } = await import('./shortcuts/shareShortcuts');
-    if (!clearShareShortcuts()) {
+    const { clearAllShareShortcuts } = await import('./shortcuts/shareShortcuts');
+    if (!clearAllShareShortcuts()) {
       shortcutCleanupFailure = new Error(SHORTCUT_CLEANUP_FAILURE_MESSAGE);
       logger.warn('[forget] could not confirm Direct Share shortcut cleanup');
     }

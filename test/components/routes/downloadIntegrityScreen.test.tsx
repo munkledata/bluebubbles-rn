@@ -31,8 +31,8 @@ function report(appBuild = '74'): DownloadIntegrityReport {
       appVersion: '0.1.54',
       appBuild,
       androidApi: '37',
-      migrationCount: 49,
-      migrationHead: '0049_inbox_search_postings',
+      migrationCount: 50,
+      migrationHead: '0050_message_identity_owner_scope',
     },
     databaseAndOwnershipMatched: true,
     downloads: {

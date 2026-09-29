@@ -58,13 +58,11 @@ function prepareHandles(items: Handle[]): Handle[] {
   for (const handle of items) {
     if (!handle?.address) continue;
     const key = handleMapKey(handle);
-    const previous = byIdentity.get(key);
-    // Keep existing last-item semantics for the handle's ordinary fields, but merge its color as
-    // last-known-valid data. Server pages can repeat one identity; a later partial duplicate must
-    // not discard valid color information before the SQL conflict clause gets a chance to run.
+    // Color is a device-owned preference. Never admit a server/debug payload value into the
+    // authoritative row; only the explicit local command below may change it.
     byIdentity.set(key, {
       ...handle,
-      color: normalizeHandleColor(handle.color) ?? normalizeHandleColor(previous?.color),
+      color: null,
     });
   }
   return [...byIdentity.values()];
@@ -97,10 +95,8 @@ export function upsertHandlesWithinTransaction(
           // indexes, so a NULL service would dodge the (address, service) conflict target.
           service: h.service ?? '',
           country: h.country ?? null,
-          // Server-owned, last-known-valid presentation hint. A missing/null/invalid value means
-          // this payload has no usable color information; the conflict clause preserves any value
-          // learned by an earlier complete payload.
-          color: normalizeHandleColor(h.color),
+          // Device-owned. Inbound payload values were stripped by prepareHandles.
+          color: null,
           displayName: h.displayName ?? null,
           serverDisplayName: h.displayName ?? null,
         })),
@@ -108,6 +104,10 @@ export function upsertHandlesWithinTransaction(
       .onConflictDoUpdate({
         target: [handles.address, handles.service],
         set: {
+          // A backup restore can create a color-only placeholder before the first server sync.
+          // Hydrate server identity metadata when it arrives; a partial payload must not erase it.
+          originalRowId: sql`COALESCE(excluded.original_row_id, ${handles.originalRowId})`,
+          country: sql`COALESCE(excluded.country, ${handles.country})`,
           // A contact match (contact_id set) wins: keep the contact's name on a
           // server re-sync. avatar + contact_id are owned by the contacts matcher.
           displayName: sql`CASE WHEN ${handles.contactId} IS NULL
@@ -116,8 +116,6 @@ export function upsertHandlesWithinTransaction(
           // the device contact is later removed.
           serverDisplayName: sql`excluded.display_name`,
           // service is part of the row's IDENTITY now — never overwritten on conflict.
-          color: sql`CASE WHEN excluded.color IS NULL
-                           THEN ${handles.color} ELSE excluded.color END`,
         },
       })
       .returning({ id: handles.id, address: handles.address, service: handles.service });
@@ -125,6 +123,41 @@ export function upsertHandlesWithinTransaction(
     for (const r of rows) map.set(handleMapKey(r), r.id);
 
     return map;
+  });
+}
+
+/**
+ * Set or reset one participant's device-local color while proving that the selected handle still
+ * belongs to the exact conversation that opened the editor. The handle row is shared by every
+ * chat using the same `(address, service)` identity, so all of those surfaces update together.
+ */
+export function setHandleColorWithinTransaction(
+  context: DbTransactionContext,
+  chatGuid: string,
+  address: string,
+  service: string | null,
+  color: string | null,
+): Promise<boolean> {
+  return runInTransactionContext(context, async (db) => {
+    if (!chatGuid) throw new RangeError('Chat guid is required.');
+    if (!address) throw new RangeError('Handle address is required.');
+    const normalized = normalizeHandleColor(color);
+    if (color !== null && normalized === null) {
+      throw new RangeError('Handle color must be a six-digit hex color.');
+    }
+    const updated = await db.all<{ id: number }>(sql`
+      UPDATE handles
+         SET color = ${normalized}
+       WHERE address = ${address} AND service = ${service ?? ''}
+         AND EXISTS (
+           SELECT 1
+             FROM chat_handles ch
+             JOIN chats c ON c.id = ch.chat_id
+            WHERE ch.handle_id = handles.id AND c.guid = ${chatGuid}
+         )
+      RETURNING id
+    `);
+    return updated.length === 1;
   });
 }
 

@@ -10,13 +10,20 @@ import { fullSync, type FullSyncServerView } from '@/services/sync/engine';
 import type { SyncApi } from '@/services/sync/types';
 import { createTestDb } from '../support/testDb';
 
+const RCS_EPOCH = `gpe1_${'A'.repeat(43)}`;
+const encoded = (value: string): string => Buffer.from(value, 'utf8').toString('base64url');
+const RCS_CHAT_GUID = `RCS;-;g1.${RCS_EPOCH}.${encoded('old-conversation')}`;
+const RCS_MESSAGE_GUID = `rcs-g1.${RCS_EPOCH}.${encoded('old-message')}`;
+const RCS_ATTACHMENT_GUID = `rcs-media-g1.${RCS_EPOCH}.${encoded('old-message')}.${encoded('old-media')}`;
+
 describe('full repair reconciliation', () => {
   it('removes only stable phantom rows while preserving local state and concurrent protections', async () => {
     const { db, raw } = await createTestDb();
     const insertChat = raw.prepare(
       `INSERT INTO chats
-         (guid, latest_message_date, is_pinned, custom_name, background_uri, deleted_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+         (guid, latest_message_date, is_pinned, custom_name, background_uri, deleted_at,
+          history_deleted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     );
     const seedChat = (
       guid: string,
@@ -26,6 +33,7 @@ describe('full repair reconciliation', () => {
         customName?: string | null;
         backgroundUri?: string | null;
         deletedAt?: number | null;
+        historyDeletedAt?: number | null;
       } = {},
     ): number => {
       const result = insertChat.run(
@@ -35,6 +43,7 @@ describe('full repair reconciliation', () => {
         options.customName ?? null,
         options.backgroundUri ?? null,
         options.deletedAt ?? null,
+        options.historyDeletedAt ?? null,
       );
       const id = Number(result.lastInsertRowid);
       return id;
@@ -54,11 +63,12 @@ describe('full repair reconciliation', () => {
       backgroundUri: 'file:///custom-wallpaper.jpg',
     });
     seedChat('draft-chat');
+    seedChat('history-boundary-chat', { historyDeletedAt: 5_000 });
     const tombstoneChatId = seedChat('tombstone-chat', { latest: 400 });
     const lateTombstoneChatId = seedChat('late-tombstone-chat', { latest: 500 });
     const lateReminderChatId = seedChat('late-reminder-chat', { latest: 600 });
     const lateAttachmentChatId = seedChat('late-attachment-chat', { latest: 700 });
-    const rcsChatId = seedChat('RCS;-;group;-;keep-local', { latest: 800 });
+    const rcsChatId = seedChat(RCS_CHAT_GUID, { latest: 800 });
 
     insertMessage.run('source-anchor', 10, sourceChatId, 0, 100, null);
     insertMessage.run('server-last', 22, sourceChatId, 0, 200, null);
@@ -73,7 +83,7 @@ describe('full repair reconciliation', () => {
         .lastInsertRowid,
     );
     const rcsMessageId = Number(
-      insertMessage.run('rcs-local-message', null, rcsChatId, 0, 800, null).lastInsertRowid,
+      insertMessage.run(RCS_MESSAGE_GUID, null, rcsChatId, 0, 800, null).lastInsertRowid,
     );
     raw
       .prepare('UPDATE chats SET last_read_message_guid = ? WHERE id = ?')
@@ -86,7 +96,7 @@ describe('full repair reconciliation', () => {
       .run('late-old-attachment', lateAttachmentMessageId);
     raw
       .prepare('INSERT INTO attachments (guid, message_id) VALUES (?, ?)')
-      .run('rcs-local-attachment', rcsMessageId);
+      .run(RCS_ATTACHMENT_GUID, rcsMessageId);
     raw
       .prepare(
         `INSERT INTO reminders
@@ -165,18 +175,19 @@ describe('full repair reconciliation', () => {
       messagesRemoved: 1,
       attachmentsRemoved: 1,
       chatsRemoved: 1,
-      chatShellsRetired: 1,
+      chatShellsRetired: 2,
     });
     expect(raw.prepare('SELECT id FROM chats WHERE guid = ?').get('phantom-chat')).toBeUndefined();
     expect(raw.prepare('SELECT id FROM messages WHERE guid = ?').get('server-last')).toBeDefined();
     expect(raw.prepare('SELECT chat_id FROM messages WHERE guid = ?').get('server-last')).toEqual({
-      chat_id: serverChatId,
+      chat_id: sourceChatId,
     });
     expect(
       raw
         .prepare('SELECT latest_message_date, last_read_message_guid FROM chats WHERE id = ?')
         .get(sourceChatId),
-    ).toEqual({ latest_message_date: 100, last_read_message_guid: 'source-anchor' });
+    ).toEqual({ latest_message_date: 200, last_read_message_guid: 'server-last' });
+    expect(serverChatId).not.toBe(sourceChatId);
 
     expect(
       raw
@@ -195,6 +206,16 @@ describe('full repair reconciliation', () => {
         .prepare('SELECT value FROM kv WHERE key = ?')
         .get(`${FULL_REPAIR_RETIRED_CHAT_KV_PREFIX}custom-chat`),
     ).toEqual({ value: '0' });
+    expect(
+      raw
+        .prepare('SELECT deleted_at, history_deleted_at FROM chats WHERE guid = ?')
+        .get('history-boundary-chat'),
+    ).toEqual({ deleted_at: 0, history_deleted_at: 5_000 });
+    expect(
+      raw
+        .prepare('SELECT value FROM kv WHERE key = ?')
+        .get(`${FULL_REPAIR_RETIRED_CHAT_KV_PREFIX}history-boundary-chat`),
+    ).toEqual({ value: '0' });
     for (const guid of [
       'tombstone-message',
       'late-tombstone-message',
@@ -208,14 +229,12 @@ describe('full repair reconciliation', () => {
         .prepare('SELECT guid FROM attachments WHERE message_id = ? ORDER BY guid')
         .all(lateAttachmentMessageId),
     ).toEqual([{ guid: 'late-new-attachment' }, { guid: 'late-old-attachment' }]);
+    expect(raw.prepare('SELECT id FROM chats WHERE guid = ?').get(RCS_CHAT_GUID)).toBeDefined();
     expect(
-      raw.prepare('SELECT id FROM chats WHERE guid = ?').get('RCS;-;group;-;keep-local'),
+      raw.prepare('SELECT id FROM messages WHERE guid = ?').get(RCS_MESSAGE_GUID),
     ).toBeDefined();
     expect(
-      raw.prepare('SELECT id FROM messages WHERE guid = ?').get('rcs-local-message'),
-    ).toBeDefined();
-    expect(
-      raw.prepare('SELECT id FROM attachments WHERE guid = ?').get('rcs-local-attachment'),
+      raw.prepare('SELECT id FROM attachments WHERE guid = ?').get(RCS_ATTACHMENT_GUID),
     ).toBeDefined();
 
     // When that customized chat later returns, clear only repair's synthetic visibility floor.
@@ -229,5 +248,72 @@ describe('full repair reconciliation', () => {
         .prepare('SELECT value FROM kv WHERE key = ?')
         .get(`${FULL_REPAIR_RETIRED_CHAT_KV_PREFIX}custom-chat`),
     ).toBeUndefined();
+  });
+
+  it('scopes deletion-ledger protection to the exact owning chat', async () => {
+    const { db, raw } = await createTestDb();
+    const insertChat = raw.prepare('INSERT INTO chats (guid) VALUES (?)');
+    const wrongOwnerChatId = Number(insertChat.run('wrong-owner-chat').lastInsertRowid);
+    const exactOwnerChatId = Number(insertChat.run('exact-owner-chat').lastInsertRowid);
+    insertChat.run('foreign-ledger-owner');
+
+    const insertMessage = raw.prepare(
+      `INSERT INTO messages
+         (guid, original_row_id, chat_id, is_from_me, date_created, send_state)
+       VALUES (?, ?, ?, 0, ?, 'sent')`,
+    );
+    const wrongOwnerMessageId = Number(
+      insertMessage.run('wrong-owner-message', 901, wrongOwnerChatId, 9_010).lastInsertRowid,
+    );
+    insertMessage.run('exact-owner-message', 902, exactOwnerChatId, 9_020);
+    const exactOwnerAttachmentMessageId = Number(
+      insertMessage.run('exact-owner-attachment-message', 903, exactOwnerChatId, 9_030)
+        .lastInsertRowid,
+    );
+    raw
+      .prepare('INSERT INTO attachments (guid, message_id) VALUES (?, ?)')
+      .run('wrong-owner-attachment', wrongOwnerMessageId);
+    raw
+      .prepare('INSERT INTO attachments (guid, message_id) VALUES (?, ?)')
+      .run('exact-owner-attachment', exactOwnerAttachmentMessageId);
+    raw
+      .prepare(
+        'INSERT INTO message_deletion_ledger (guid, date_deleted, chat_guid) VALUES (?, ?, ?)',
+      )
+      .run('wrong-owner-message', 9_100, 'foreign-ledger-owner');
+    raw
+      .prepare(
+        'INSERT INTO message_deletion_ledger (guid, date_deleted, chat_guid) VALUES (?, ?, ?)',
+      )
+      .run('exact-owner-message', 9_200, 'exact-owner-chat');
+    raw
+      .prepare(
+        'INSERT INTO message_deletion_ledger (guid, date_deleted, chat_guid) VALUES (?, ?, ?)',
+      )
+      .run('exact-owner-attachment-message', 9_300, 'exact-owner-chat');
+
+    const exposure = await captureFullRepairPruneExposure(db);
+    const result = await reconcileFullRepairPruneExposure(db, exposure, {
+      chatGuids: new Set(),
+      messageGuids: new Set(),
+      attachmentGuidsByMessage: new Map(),
+    });
+
+    expect(result).toMatchObject({ messagesRemoved: 1, attachmentsRemoved: 1 });
+    expect(
+      raw.prepare('SELECT id FROM messages WHERE guid = ?').get('wrong-owner-message'),
+    ).toBeUndefined();
+    expect(
+      raw.prepare('SELECT id FROM attachments WHERE guid = ?').get('wrong-owner-attachment'),
+    ).toBeUndefined();
+    expect(
+      raw.prepare('SELECT id FROM messages WHERE guid = ?').get('exact-owner-message'),
+    ).toBeDefined();
+    expect(
+      raw.prepare('SELECT id FROM messages WHERE guid = ?').get('exact-owner-attachment-message'),
+    ).toBeDefined();
+    expect(
+      raw.prepare('SELECT id FROM attachments WHERE guid = ?').get('exact-owner-attachment'),
+    ).toBeDefined();
   });
 });

@@ -275,9 +275,9 @@ export default function ServerHealthScreen(): React.JSX.Element {
               </Text>
             </View>
           ) : null}
-          <SettingsSection label="RETIRED FEATURES">
-            <InfoRow label="Messages Private API" value="Retired in this release" />
-            <InfoRow label="FaceTime Private API" value="Retired in this release" />
+          <SettingsSection label="LEGACY PRIVATE API">
+            <InfoRow label="Broad Messages transport" value="Retired; narrow features are gated" />
+            <InfoRow label="Broad FaceTime transport" value="Retired; narrow features are gated" />
           </SettingsSection>
 
           <SettingsSection label="FIND MY KEYS" style={styles.gap}>

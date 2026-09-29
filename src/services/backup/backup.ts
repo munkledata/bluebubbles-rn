@@ -1,6 +1,6 @@
 import {
   getBackupBaseExportData,
-  getBackupV3ExportData,
+  getBackupV4ExportData,
   restorePreparedBackupWithinTransaction,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, type DbCommitGuard, withDbTransaction } from '@db/transaction';
@@ -15,12 +15,12 @@ import {
   BACKUP_LIMITS,
   BackupSchema,
   BackupV2Schema,
-  BackupV3Schema,
+  BackupV4Schema,
   isBackupKey,
   listBackupKvKeys,
   type Backup,
   type BackupV2,
-  type BackupV3,
+  type BackupV4,
 } from './backupSchema';
 
 export type BackupInputLimitKind =
@@ -72,6 +72,7 @@ const BACKUP_EXPORT_LIMITS = {
   kvEntries: BACKUP_LIMITS.kvEntries,
   themes: BACKUP_LIMITS.themes,
   chatCustomizations: BACKUP_LIMITS.chatCustomizations,
+  handleColors: BACKUP_LIMITS.handleColors,
   keyCharacters: BACKUP_LIMITS.keyCharacters,
   valueCharacters: BACKUP_LIMITS.valueCharacters,
   themeNameCharacters: BACKUP_LIMITS.themeNameCharacters,
@@ -89,7 +90,7 @@ const BACKUP_EXPORT_LIMITS = {
 
 /**
  * Gather the v2-compatible portion of a backup: settings (kv), custom themes, and per-chat
- * customizations. `buildBackupWithCustomFolders` extends it for encrypted v3 export.
+ * customizations. `buildBackupWithCustomFolders` extends it for complete encrypted export.
  * SECURITY: kv is exported through the `isBackupKey` ALLOW-list, so only named
  * settings leave the device — never a credential (those live in the SecureVault),
  * never a per-chat draft (unsent text, keyed by the counterparty's address), and
@@ -115,10 +116,10 @@ export async function buildBackupWithCustomFolders(
   db: AppDatabase,
   opts: { exportedAt: number; appVersion?: string },
   ownershipGuard?: DbCommitGuard,
-): Promise<BackupV3> {
-  const snapshot = await getBackupV3ExportData(db, BACKUP_EXPORT_LIMITS, ownershipGuard);
-  return BackupV3Schema.parse({
-    version: 3,
+): Promise<BackupV4> {
+  const snapshot = await getBackupV4ExportData(db, BACKUP_EXPORT_LIMITS, ownershipGuard);
+  return BackupV4Schema.parse({
+    version: 4,
     exportedAt: opts.exportedAt,
     appVersion: opts.appVersion,
     ...snapshot,
@@ -135,11 +136,14 @@ export interface RestoreResult {
   customFoldersSkipped: number;
   customFolderMemberships: number;
   customFolderMembershipsSkipped: number;
+  handleColors: number;
+  handleColorsSkipped: number;
 }
 
 /**
  * Apply a validated backup. Kv + themes are upserted; chat customizations and folder members are
- * applied only to uniquely matched local chats. V3 folders merge non-destructively by name.
+ * applied only to uniquely matched local chats. V3+ folders merge non-destructively by name, and
+ * v4 restores device-owned handle colors by exact address/service identity.
  *
  * The kv allow-list runs again on IMPORT: a backup file is untrusted input (hand-edited, or made
  * by another install), and re-gating it here is what stops one from planting a composer draft or
@@ -183,8 +187,10 @@ export async function restoreBackup(
     ...customization,
     pinOrder: customization.isPinned === 1 ? (normalizedPinOrder.get(sourceIndex) ?? null) : null,
   }));
-  const customFolderChatIdentities = backup.version === 3 ? backup.customFolderChatIdentities : [];
-  const customFolders = backup.version === 3 ? backup.customFolders : [];
+  const hasCustomFolders = backup.version === 3 || backup.version === 4;
+  const customFolderChatIdentities = hasCustomFolders ? backup.customFolderChatIdentities : [];
+  const customFolders = hasCustomFolders ? backup.customFolders : [];
+  const handleColors = backup.version === 4 ? backup.handleColors : [];
   const sourceFolderMembershipCount = customFolders.reduce(
     (total, folder) => total + folder.sourceMemberCount,
     0,
@@ -200,6 +206,7 @@ export async function restoreBackup(
       customFolderChatIdentities.map((identity) => ({ identity })),
     ),
     customFoldersJson: JSON.stringify(customFolders),
+    handleColorsJson: JSON.stringify(handleColors),
   };
   assertRestoreOwned(ownershipGuard);
   const applied = await withDbTransaction(
@@ -210,7 +217,8 @@ export async function restoreBackup(
   if (
     applied.chatCustomizations > backup.chatCustomizations.length ||
     applied.customFolders > customFolders.length ||
-    applied.customFolderMemberships > sourceFolderMembershipCount
+    applied.customFolderMemberships > sourceFolderMembershipCount ||
+    applied.handleColors > handleColors.length
   ) {
     throw new Error('Backup restore returned counts outside the validated source bounds.');
   }
@@ -223,6 +231,8 @@ export async function restoreBackup(
     customFoldersSkipped: customFolders.length - applied.customFolders,
     customFolderMemberships: applied.customFolderMemberships,
     customFolderMembershipsSkipped: sourceFolderMembershipCount - applied.customFolderMemberships,
+    handleColors: applied.handleColors,
+    handleColorsSkipped: handleColors.length - applied.handleColors,
   };
 }
 

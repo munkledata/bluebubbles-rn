@@ -30,3 +30,4 @@ export * from './contacts';
 export * from './scheduled';
 export * from './reminders';
 export * from './maintenance';
+export * from './shareIntakeReceipts';

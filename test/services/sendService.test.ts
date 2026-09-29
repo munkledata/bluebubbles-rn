@@ -21,6 +21,18 @@ import {
 import { generateTempGuid, sendTextMessage } from '@/services/send/sendService';
 import { createTestDb } from '../support/testDb';
 
+const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
+const rcsChatGuid = (sourceId: string): string =>
+  `RCS;-;g1.${RCS_PROVIDER_EPOCH}.${Buffer.from(sourceId).toString('base64url')}`;
+const currentRcsInfo = (extra: Record<string, unknown> = {}): ServerInfo =>
+  ServerInfo.parse({
+    version: '2.0.0',
+    rcs: true,
+    supports_rcs_epoch_qualified_ids: true,
+    rcs_provider_epoch: RCS_PROVIDER_EPOCH,
+    ...extra,
+  });
+
 /** Minimal fake HttpClient: only `post` is used (by sendText). */
 function fakeHttp(impl: (json: unknown) => Promise<unknown>): HttpClient {
   let http!: HttpClient;
@@ -87,7 +99,7 @@ describe('generateTempGuid', () => {
 describe('sendTextMessage', () => {
   it('discovers RCS attempt ownership on a fixed client with no foreground session', async () => {
     const { db, raw } = await createTestDb();
-    const chatGuid = 'RCS;-;cold-capability';
+    const chatGuid = rcsChatGuid('cold-capability');
     await seedChat(db, chatGuid);
     const previousSession = useSessionStore.getState();
     useSessionStore.setState({
@@ -105,7 +117,13 @@ describe('sendTextMessage', () => {
         expect(path).toBe('/server/info');
         expect(countMessages(raw)).toBe(0);
         if (discoveryFails) throw new Error('server-info unavailable');
-        return { private_api: true, rcs: true, supports_rcs_send_attempt_ownership: true };
+        return {
+          private_api: true,
+          rcs: true,
+          supports_rcs_send_attempt_ownership: true,
+          supports_rcs_epoch_qualified_ids: true,
+          rcs_provider_epoch: RCS_PROVIDER_EPOCH,
+        };
       }),
       post: jest.fn(async (_path: string, _schema: unknown, options: { json?: unknown }) => {
         const body = options.json as {
@@ -155,7 +173,7 @@ describe('sendTextMessage', () => {
 
   it('rejects RCS text before DB admission when the live RCS capability is off', async () => {
     const { db, raw } = await createTestDb();
-    const chatGuid = 'RCS;-;disabled-capability';
+    const chatGuid = rcsChatGuid('disabled-capability');
     await seedChat(db, chatGuid);
     const post = jest.fn(async () => ({ guid: 'must-not-send' }));
 
@@ -170,7 +188,7 @@ describe('sendTextMessage', () => {
         undefined,
         fixedRcsCapabilitySource(ServerInfo.parse({ version: '2.0.0', rcs: false })),
       ),
-    ).rejects.toThrow('cannot send RCS messages without RCS support');
+    ).rejects.toThrow('unavailable or previous Google pairing');
 
     expect(post).not.toHaveBeenCalled();
     expect(countMessages(raw)).toBe(0);
@@ -181,17 +199,13 @@ describe('sendTextMessage', () => {
 
   it('does not admit an RCS row when the server origin rotates during capability discovery', async () => {
     const { db, raw } = await createTestDb();
-    const chatGuid = 'RCS;-;rotating-capability';
+    const chatGuid = rcsChatGuid('rotating-capability');
     await seedChat(db, chatGuid);
     const previousSession = useSessionStore.getState();
-    const infoA = ServerInfo.parse({
-      version: '2.0.0',
-      rcs: true,
+    const infoA = currentRcsInfo({
       supports_rcs_send_attempt_ownership: true,
     });
-    const infoB = ServerInfo.parse({
-      version: '2.0.0',
-      rcs: true,
+    const infoB = currentRcsInfo({
       supports_rcs_send_attempt_ownership: false,
     });
     useSessionStore.getState().connected('https://origin-a.test', 'password', infoA);
@@ -274,10 +288,10 @@ describe('sendTextMessage', () => {
   it('leaves queued RCS text owned for retry when the same transport retires RCS', async () => {
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const { db, raw } = await createTestDb();
-    const chatGuid = 'RCS;-;same-transport-retirement';
+    const chatGuid = rcsChatGuid('same-transport-retirement');
     await seedChat(db, chatGuid);
     const previousSession = useSessionStore.getState();
-    const info = ServerInfo.parse({ version: '2.0.0', rcs: true });
+    const info = currentRcsInfo();
     useSessionStore.getState().connected('https://origin-a.test', 'password', info);
     const post = jest.fn(async () => ({ guid: 'must-not-send' }));
     const client = revisionPinnedHttp({ post });

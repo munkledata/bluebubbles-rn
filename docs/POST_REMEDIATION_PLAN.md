@@ -1,7 +1,7 @@
 # Post-remediation plan
 
-> **Status:** DEFERRED — start only after the active remediation plan is complete unless the product
-> owner explicitly moves an item back.
+> **Status:** ACTIVE FOR `POST-FACE-01` — the product owner selected its narrow replacement design.
+> The other items remain deferred until explicitly selected.
 >
 > **Authority:** This document owns product work deliberately moved outside or explicitly deferred
 > [`WORK_PLAN_2026-08-03.md`](./WORK_PLAN_2026-08-03.md). Its items are not included in the 107-task
@@ -11,33 +11,33 @@
 This plan keeps postponed product and security work visible without treating a scope transfer as
 finished remediation work.
 
-## Deferred items
+## Post-remediation items
 
-- **DEFERRED — 4:** `POST-FACE-01`, `POST-RT-01B`, `POST-TLS-01B`, `POST-TLS-02`.
+- **SELECTED; LIVE ACCEPTANCE OPEN — 1:** `POST-FACE-01`.
+- **DEFERRED — 3:** `POST-RT-01B`, `POST-TLS-01B`, `POST-TLS-02`.
 
 <a id="post-face-01"></a>
 
-### [ ] `POST-FACE-01` — Consider a new FaceTime feature
+### [ ] `POST-FACE-01` — Finish the selected narrow FaceTime replacement
 
 - **Former remediation ID:** `FACE-01`; moved here by the product owner on 2026-09-14 because the
   embedded experience never worked reliably.
-- **Current behavior to keep:** Callable FaceTime functionality is absent from the current client.
-  Gator exposes no dialer, incoming-call overlay, Answer/Decline notification action, link creation,
-  or browser handoff, and stale server/helper capability cannot restore one. The inert `/facetime`
-  route only explains retirement to old bookmarks. Retain that fail-closed boundary unless this item
-  is explicitly selected as a new cross-repository feature.
+- **Selected design (2026-09-28):** Keep the unreliable embedded WebView/browser call experience
+  retired. Current Gator source instead exposes separately capability-gated plain-link creation and
+  one-to-one audio/video call start through exact, non-retrying requests to the connected Gator
+  server. The broad historical Private API remains false. Source-only answer/leave plumbing stays
+  hidden because the client does not yet have a trustworthy active-call UUID/state source.
 - **Historical design reference:** [`FACE-01`](./workstreams/B_NETWORK_AND_WEBVIEW.md#face-01).
-- **Start condition:** Active remediation is complete and the product owner explicitly chooses to
-  design a new FaceTime experience. Start from a new versioned contract and threat model; do not
-  restore the deleted helper/WebView implementation by default or promise compatibility with it.
-- **Acceptance if selected:** Calling works reliably while only exact required Apple HTTPS origins
-  can receive camera or microphone access. Foreign navigation, redirects, links, popups, new
-  windows, and media requests fail closed or leave Gator through an explicit safe handoff.
-- **Verification if selected:** Add focused navigation and permission tests, then use a physical
-  Android device with camera/microphone already granted to exercise normal calls and hostile origins.
-  Host mocks alone cannot prove native WebView or media-permission behavior.
-- **Non-goal:** Moving the item here does not claim that any old FaceTime path passed, authorize a
-  WebView or Private API dependency, or make the retired browser handoff part of the current product.
+- **Current checkpoint:** Link creation and call start have focused API/service/screen coverage and
+  fail closed unless their exact live server capability is true. Answer/leave have source-only
+  API/service plumbing with no UI, notification action, or event-state consumption. The production
+  server still supplies no admitted FaceTime artifact, so all of these capabilities remain false.
+- **Remaining acceptance:** Run the PII-free Mac selector/event probe, build and admit the exact
+  reviewed helper, then package and exercise link creation and one real audio/video call on the Mac
+  and physical Android client. Only a proven versioned event contract may unlock answer/leave UI.
+- **Non-goal:** This work does not restore the old embedded browser, grant camera/microphone access to
+  web content, promise compatibility with the Flutter client or old server, or treat source coverage
+  as packaged/live proof.
 
 <a id="post-rt-01b"></a>
 

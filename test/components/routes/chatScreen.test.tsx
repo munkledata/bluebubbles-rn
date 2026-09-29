@@ -29,22 +29,30 @@ import { renderWithTheme, screen, act, fireEvent, waitFor } from '../support/ren
 import type { EnrichedMessage } from '@features/conversations/useMessages';
 import type { ChatSearchResultRow } from '@db/repositories';
 import { logger } from '@core/secure';
+import { getDatabase } from '@db/database';
 
 const GUID = 'iMessage;-;+15551234567';
-const RCS_GUID = 'RCS;-;thread-1';
+const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
+const RCS_GUID = `RCS;-;g1.${RCS_PROVIDER_EPOCH}.dGhyZWFkLTE`;
+const RCS_MESSAGE_GUID = `rcs-g1.${RCS_PROVIDER_EPOCH}.bWVzc2FnZS0x`;
 const PRIVATE_WALLPAPER_URI = 'file:///private/chat-wallpaper-r-canary-9f31d7.jpg';
 const SECOND_WALLPAPER_URI = 'file:///private/chat-wallpaper-second-74c02a.jpg';
 const mockPush = jest.fn();
+const mockReplace = jest.fn();
 const mockSetParams = jest.fn();
+const mockRouter = { push: mockPush, replace: mockReplace, setParams: mockSetParams };
 const mockNavigationDispatch = jest.fn();
 const mockUsePreventRemove = jest.fn();
+const mockShowConfirm = jest.fn();
 const mockIsDevServer = jest.fn(() => false);
 const mockUseChatSearch = jest.fn();
 const mockRefreshWindow = jest.fn();
+const ACCOUNT_A_DB = { account: 'A' };
 // Mutable so a test can hand the SAME mounted screen a new guid (reused-instance path).
 let mockGuid = GUID;
 let mockFocus: string | undefined;
 let mockFocusDate: string | undefined;
+let mockShareBatch: string | undefined;
 let mockRouteKey = 'chat-route-1';
 let mockMessagePreview: EnrichedMessage | null = null;
 
@@ -82,10 +90,11 @@ jest.mock('expo-router', () => {
       guid: mockGuid,
       focus: mockFocus,
       focusDate: mockFocusDate,
+      shareBatch: mockShareBatch,
     }),
     useNavigation: () => ({ dispatch: mockNavigationDispatch }),
     useRoute: () => ({ key: mockRouteKey }),
-    useRouter: () => ({ push: mockPush, setParams: mockSetParams }),
+    useRouter: () => mockRouter,
   };
 });
 jest.mock('expo-router/react-navigation', () => ({
@@ -176,7 +185,10 @@ jest.mock('@ui/theme/ChatThemeProvider', () => ({
   ChatThemeProvider: ({ children }: { children: React.ReactNode }) => children,
   useChatBackgroundUri: jest.fn(),
 }));
-jest.mock('@ui/dialog/dialogStore', () => ({ showDialog: jest.fn() }));
+jest.mock('@ui/dialog/dialogStore', () => ({
+  showConfirm: (...args: unknown[]) => mockShowConfirm(...args),
+  showDialog: jest.fn(),
+}));
 jest.mock('@ui/conversations/pickDateTime', () => ({ pickFutureDateTime: jest.fn() }));
 jest.mock('@ui/LoadErrorBoundary', () => ({
   LoadErrorBoundary: ({ children }: { children: React.ReactNode }) => children,
@@ -219,6 +231,22 @@ jest.mock('@/services/notifications/notifeeService', () => ({ clearChatNotificat
 jest.mock('@/services/notifications/remindersService', () => ({
   scheduleMessageReminder: jest.fn(),
 }));
+jest.mock('@/services/remoteMessageDeleteUiService', () => ({
+  deleteMessageFromMac: jest.fn(),
+}));
+jest.mock('@/services/share/shareIntake', () => ({
+  admitShareIntakeTextDraft: jest.fn(async () => ({ draft: 'Shared text' })),
+  consumeShareIntakeBatch: jest.fn(),
+  discardShareIntakeItem: jest.fn(async () => undefined),
+  discardShareIntakeBatch: jest.fn(),
+  drainShareIntake: jest.fn(() => Promise.resolve()),
+  isShareIntakeFileSettled: jest.fn(
+    (receipt: { items?: Record<string, unknown> } | null, index: number) =>
+      receipt?.items?.[`file:${String(index).padStart(2, '0')}`] != null,
+  ),
+  isShareIntakeReceiptComplete: jest.fn(() => false),
+  readShareIntakeReceipt: jest.fn(async () => null),
+}));
 jest.mock('@/services/contacts/contactsService', () => ({
   getContactsPermissionState: jest.fn(),
 }));
@@ -227,6 +255,7 @@ jest.mock('@/services/media', () => ({
   saveAttachmentsToPhotos: jest.fn(),
 }));
 jest.mock('@/services/send', () => ({
+  acquireAndSendCurrentLocation: jest.fn(),
   fireDueScheduled: jest.fn(),
   fireDueScheduledWithDevelopmentSender: jest.fn(),
   hasLogicalSendCapacity: jest.fn(() => true),
@@ -242,7 +271,7 @@ jest.mock('@/services/send', () => ({
     (error: unknown) => error instanceof Error && error.name === 'ContactsPermissionDeniedError',
   ),
   pickAndSendContact: jest.fn(),
-  react: jest.fn(),
+  react: jest.fn().mockResolvedValue(null),
   recoverOutgoing: jest.fn().mockResolvedValue({ eligible: 0, sent: 0 }),
   schedule: jest.fn().mockResolvedValue(undefined),
   send: jest.fn(
@@ -256,7 +285,11 @@ jest.mock('@/services/send', () => ({
       return Promise.resolve({ tempGuid: 'temp-send' });
     },
   ),
+  sendEffect: jest.fn().mockResolvedValue({ status: 'accepted', tempGuid: 'temp-effect' }),
+  sendFormatted: jest.fn().mockResolvedValue({ status: 'accepted', tempGuid: 'temp-formatted' }),
+  sendMention: jest.fn().mockResolvedValue({ status: 'accepted', tempGuid: 'temp-mention' }),
   sendImage: jest.fn(),
+  sendVoice: jest.fn(),
   sendImages: jest.fn().mockResolvedValue(null),
   sendTextAttachment: jest.fn(
     (
@@ -287,6 +320,7 @@ import { ensureChatSynced, markRead, saveChatDraft, sendTyping } from '@/service
 import { getContactsPermissionState } from '@/services/contacts/contactsService';
 // eslint-disable-next-line import/first
 import {
+  acquireAndSendCurrentLocation,
   fireDueScheduled,
   fireDueScheduledWithDevelopmentSender,
   hasLogicalSendCapacity,
@@ -294,7 +328,11 @@ import {
   react,
   schedule,
   send,
+  sendEffect,
+  sendFormatted,
+  sendMention,
   sendImage,
+  sendVoice,
   sendImages,
   sendTextAttachment,
 } from '@/services/send';
@@ -309,9 +347,20 @@ import { saveAttachmentsToPhotos, shareAttachment } from '@/services/media';
 // eslint-disable-next-line import/first
 import { showDialog } from '@ui/dialog/dialogStore';
 // eslint-disable-next-line import/first
+import {
+  admitShareIntakeTextDraft,
+  consumeShareIntakeBatch,
+  discardShareIntakeBatch,
+  drainShareIntake,
+  isShareIntakeReceiptComplete,
+  readShareIntakeReceipt,
+} from '@/services/share/shareIntake';
+// eslint-disable-next-line import/first
 import { useSessionStore } from '@state/sessionStore';
 // eslint-disable-next-line import/first
 import { useTypingStore } from '@state/typingStore';
+// eslint-disable-next-line import/first
+import { useShareIntentStore } from '@state/shareIntentStore';
 // eslint-disable-next-line import/first
 import { isChatHiddenByDeletion } from '@db/repositories';
 // eslint-disable-next-line import/first
@@ -326,6 +375,24 @@ const useChatHeaderMock = useChatHeader as jest.Mock;
 const useNewScreenEffectMock = useNewScreenEffect as jest.Mock;
 const useChatBackgroundUriMock = useChatBackgroundUri as jest.Mock;
 const mockGetContactsPermissionState = getContactsPermissionState as jest.Mock;
+const mockGetDatabase = getDatabase as jest.Mock;
+const mockConsumeShareIntakeBatch = consumeShareIntakeBatch as jest.Mock;
+const mockDiscardShareIntakeBatch = discardShareIntakeBatch as jest.Mock;
+const mockDrainShareIntake = drainShareIntake as jest.Mock;
+const mockAdmitShareIntakeTextDraft = admitShareIntakeTextDraft as jest.Mock;
+const mockGetShareIntakeReceipt = readShareIntakeReceipt as jest.Mock;
+const mockIsShareIntakeReceiptComplete = isShareIntakeReceiptComplete as jest.Mock;
+
+const SHARE_BATCH = '1700000000000-1-0123456789abcdef';
+const OTHER_SHARE_BATCH = '1700000000001-2-fedcba9876543210';
+const SHARED_FILE = {
+  uri: `file:///data/no_backup/shared-in/files/${SHARE_BATCH}/00-photo.jpg`,
+  name: 'photo.jpg',
+  mimeType: 'image/jpeg',
+  size: 42,
+  origin: 'share' as const,
+  shareItemIndex: 0,
+};
 
 /** A received text message; only the fields onLongPressMessage reads need to be right. */
 function makeMsg(overrides: Partial<EnrichedMessage> = {}): EnrichedMessage {
@@ -377,6 +444,8 @@ function configureRcsChat(serverInfo: Record<string, unknown> = {}): void {
       version: 'test',
       private_api: false,
       rcs: true,
+      supports_rcs_epoch_qualified_ids: true,
+      rcs_provider_epoch: RCS_PROVIDER_EPOCH,
       ...serverInfo,
     } as any,
   });
@@ -392,22 +461,54 @@ function configureRcsChat(serverInfo: Record<string, unknown> = {}): void {
   });
 }
 
+function stageExactShare(
+  batchId = SHARE_BATCH,
+  options: { text?: string | null; files?: (typeof SHARED_FILE)[] } = {},
+): void {
+  mockShareBatch = batchId;
+  useShareIntentStore.setState({
+    batchId,
+    createdAtMs: 1_700_000_000_000,
+    text: options.text ?? null,
+    files: options.files ?? [SHARED_FILE],
+    targetToken: null,
+    failureReason: null,
+  });
+}
+
 beforeEach(() => {
   resumeRealtimeDeliveries();
   jest.clearAllMocks();
+  mockGetDatabase.mockReset().mockReturnValue(ACCOUNT_A_DB);
   (saveChatDraft as jest.Mock).mockReset().mockResolvedValue(undefined);
   (fireDueScheduledWithDevelopmentSender as jest.Mock).mockReset().mockResolvedValue(0);
   mockIsDevServer.mockReturnValue(false);
   mockGetContactsPermissionState.mockResolvedValue({ status: 'granted', canAskAgain: true });
   (pickAndSendContact as jest.Mock).mockResolvedValue(null);
+  (acquireAndSendCurrentLocation as jest.Mock).mockResolvedValue({
+    status: 'queued',
+    tempGuid: 'temp-location',
+  });
   mockGuid = GUID;
   mockFocus = undefined;
   mockFocusDate = undefined;
+  mockShareBatch = undefined;
   mockRouteKey = 'chat-route-1';
   mockInsetBottom = 0;
   mockKbVisible = false;
   mockVoiceRecorderProps = undefined;
   mockMessagePreview = null;
+  mockConsumeShareIntakeBatch.mockReset().mockResolvedValue(true);
+  mockDiscardShareIntakeBatch.mockReset().mockResolvedValue(true);
+  mockDrainShareIntake.mockReset().mockResolvedValue(undefined);
+  mockGetShareIntakeReceipt.mockReset().mockResolvedValue(null);
+  mockIsShareIntakeReceiptComplete.mockReset().mockReturnValue(false);
+  mockAdmitShareIntakeTextDraft.mockReset().mockResolvedValue({ draft: 'Shared text' });
+  for (const key of Object.keys(mockCaptured) as (keyof typeof mockCaptured)[]) {
+    delete mockCaptured[key];
+  }
+  useShareIntentStore.getState().clear();
+  useShareIntentStore.setState({ failureReason: null });
   useSessionStore.setState({
     serverInfo: {
       version: 'legacy-test',
@@ -636,6 +737,149 @@ describe('ChatScreen — mount side effects', () => {
   });
 });
 
+describe('ChatScreen — exact native share handoff', () => {
+  it('preserves share provenance and consumes only after composer admission is durable', async () => {
+    configureRcsChat();
+    stageExactShare();
+    mockGetShareIntakeReceipt.mockResolvedValue({
+      destination: { chatGuid: RCS_GUID, routeKind: 'existing_chat' },
+      newChatPlan: null,
+      items: {},
+    });
+    mockIsShareIntakeReceiptComplete.mockReturnValueOnce(false).mockReturnValueOnce(true);
+
+    await renderWithTheme(<ChatScreen />);
+
+    await waitFor(() => expect(mockCaptured.composer?.initialAttachments).toEqual([SHARED_FILE]));
+    expect(mockCaptured.composer?.onAdmissionApplied).toEqual(expect.any(Function));
+    expect(useShareIntentStore.getState()).toMatchObject({
+      batchId: SHARE_BATCH,
+      files: [SHARED_FILE],
+    });
+    expect(mockConsumeShareIntakeBatch).not.toHaveBeenCalled();
+
+    await act(async () => {
+      mockCaptured.composer!.onAdmissionApplied({
+        admittedAttachmentUris: [SHARED_FILE.uri],
+        textAdmitted: false,
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(mockConsumeShareIntakeBatch).toHaveBeenCalledWith(
+        SHARE_BATCH,
+        expect.objectContaining({
+          drainNext: false,
+          lease: expect.objectContaining({ isCurrent: expect.any(Function) }),
+        }),
+      ),
+    );
+    expect(mockConsumeShareIntakeBatch.mock.invocationCallOrder[0]!).toBeLessThan(
+      mockDrainShareIntake.mock.invocationCallOrder[0]!,
+    );
+    expect(mockDiscardShareIntakeBatch).not.toHaveBeenCalled();
+  });
+
+  it('does not mount an editable composer until shared text is durably merged', async () => {
+    configureRcsChat();
+    const receiptRead = deferred<Record<string, unknown> | null>();
+    stageExactShare(SHARE_BATCH, { text: 'Shared text', files: [] });
+    mockGetShareIntakeReceipt.mockReturnValue(receiptRead.promise);
+
+    await renderWithTheme(<ChatScreen />);
+
+    expect(mockCaptured.composer).toBeUndefined();
+    expect(screen.getByText('Preparing shared item…')).toBeTruthy();
+
+    await act(async () => {
+      receiptRead.resolve({
+        destination: { chatGuid: RCS_GUID, routeKind: 'existing_chat' },
+        newChatPlan: null,
+        items: {},
+      });
+      await receiptRead.promise;
+    });
+
+    await waitFor(() => expect(mockAdmitShareIntakeTextDraft).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mockCaptured.composer?.initialText).toBe('Shared text'));
+    expect(screen.queryByText('Preparing shared item…')).toBeNull();
+  });
+
+  it('returns a plan-owned share to new-chat instead of exposing the wrong composer', async () => {
+    configureRcsChat();
+    stageExactShare();
+    mockGetShareIntakeReceipt.mockResolvedValue({
+      destination: null,
+      newChatPlan: { address: '+15551234567' },
+      items: {},
+    });
+
+    await renderWithTheme(<ChatScreen />);
+
+    await waitFor(() =>
+      expect(mockReplace).toHaveBeenCalledWith(
+        `/new-chat?shareBatch=${encodeURIComponent(SHARE_BATCH)}`,
+      ),
+    );
+    expect(mockCaptured.composer).toBeUndefined();
+  });
+
+  it('does not adopt an ambient share when the route names a different batch', async () => {
+    configureRcsChat();
+    useShareIntentStore.setState({
+      batchId: SHARE_BATCH,
+      text: 'Ambient share must not leak',
+      files: [SHARED_FILE],
+      targetToken: null,
+    });
+    mockShareBatch = OTHER_SHARE_BATCH;
+
+    await renderWithTheme(<ChatScreen />);
+
+    expect(mockCaptured.composer?.initialAttachments).toBeUndefined();
+    expect(mockCaptured.composer?.onAdmissionApplied).toBeUndefined();
+    expect(mockConsumeShareIntakeBatch).not.toHaveBeenCalled();
+    expect(useShareIntentStore.getState().batchId).toBe(SHARE_BATCH);
+  });
+
+  it('discards the exact pending batch before allowing route removal', async () => {
+    configureRcsChat();
+    stageExactShare();
+    await renderWithTheme(<ChatScreen />);
+
+    const latestGuardCall =
+      mockUsePreventRemove.mock.calls[mockUsePreventRemove.mock.calls.length - 1];
+    expect(latestGuardCall?.[0]).toBe(true);
+    await run(() => latestGuardCall?.[1]({ data: { action: { type: 'GO_BACK' } } }));
+
+    expect(mockShowConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Discard shared item?', onConfirm: expect.any(Function) }),
+    );
+    const confirmation = mockShowConfirm.mock.calls[0]?.[0] as
+      { onConfirm?: () => void } | undefined;
+    await act(async () => {
+      confirmation?.onConfirm?.();
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(mockDiscardShareIntakeBatch).toHaveBeenCalledWith(
+        SHARE_BATCH,
+        expect.objectContaining({
+          drainNext: false,
+          lease: expect.objectContaining({ isCurrent: expect.any(Function) }),
+        }),
+      ),
+    );
+    expect(mockConsumeShareIntakeBatch).not.toHaveBeenCalled();
+    expect(mockNavigationDispatch).toHaveBeenCalledWith({ type: 'GO_BACK' });
+    expect(mockNavigationDispatch.mock.invocationCallOrder[0]!).toBeLessThan(
+      mockDrainShareIntake.mock.invocationCallOrder[0]!,
+    );
+  });
+});
+
 describe('ChatScreen — long-press → SelectedMessage mapping', () => {
   it('does not project iMessage reaction metadata into the retired picker', async () => {
     await renderWithTheme(<ChatScreen />);
@@ -672,12 +916,12 @@ describe('ChatScreen — RCS reaction routing', () => {
   it('routes a classic reaction to react() with no emoji', async () => {
     configureRcsChat();
     await renderWithTheme(<ChatScreen />);
-    await longPressMessage(makeMsg({ guid: 'rcs-m1', text: 'hey' }));
+    await longPressMessage(makeMsg({ guid: RCS_MESSAGE_GUID, text: 'hey' }));
     await run(() => mockCaptured.overlay!.onReact('love'));
     expect(react).toHaveBeenCalledWith(
       expect.objectContaining({
         chatGuid: RCS_GUID,
-        targetGuid: 'rcs-m1',
+        targetGuid: RCS_MESSAGE_GUID,
         reaction: 'love',
         emoji: undefined,
         selectedMessageText: 'hey',
@@ -690,10 +934,10 @@ describe('ChatScreen — RCS reaction routing', () => {
   it('routes an arbitrary emoji reaction carrying the glyph', async () => {
     configureRcsChat();
     await renderWithTheme(<ChatScreen />);
-    await longPressMessage(makeMsg({ guid: 'rcs-m1' }));
+    await longPressMessage(makeMsg({ guid: RCS_MESSAGE_GUID }));
     await run(() => mockCaptured.overlay!.onReact('emoji', '🎉'));
     expect(react).toHaveBeenCalledWith(
-      expect.objectContaining({ reaction: 'emoji', emoji: '🎉', targetGuid: 'rcs-m1' }),
+      expect.objectContaining({ reaction: 'emoji', emoji: '🎉', targetGuid: RCS_MESSAGE_GUID }),
       expect.objectContaining({ isCurrent: expect.any(Function) }),
       presentSendIssue,
     );
@@ -728,6 +972,8 @@ describe('ChatScreen — send routing', () => {
         onPickContact: undefined,
         onStartVoice: undefined,
         onTyping: undefined,
+        onSendMention: undefined,
+        mentionParticipants: [],
       }),
     );
     const image = { uri: 'file:///photo.jpg', name: 'photo.jpg', mimeType: 'image/jpeg', size: 42 };
@@ -972,7 +1218,6 @@ describe('ChatScreen — send routing', () => {
     expect(mockCaptured.composer).not.toHaveProperty('editingText');
     expect(mockCaptured.composer).not.toHaveProperty('subjectEnabled');
     expect(mockCaptured.composer).not.toHaveProperty('effectsEnabled');
-    expect(mockCaptured.composer).not.toHaveProperty('mentionParticipants');
     expect(mockCaptured.list?.onSwipeReply).toBeUndefined();
     expect(screen.queryByText('💥')).toBeNull();
 
@@ -1011,7 +1256,7 @@ describe('ChatScreen — send routing', () => {
     expect(mockCaptured.composer).not.toHaveProperty('effectsEnabled');
     expect(mockCaptured.overlay?.onForward).toEqual(expect.any(Function));
 
-    await longPressMessage(makeMsg({ guid: 'rcs-m1' }));
+    await longPressMessage(makeMsg({ guid: RCS_MESSAGE_GUID }));
     expect(mockCaptured.overlay?.selected).toEqual(expect.objectContaining({ canReact: true }));
 
     await act(async () => {
@@ -1030,6 +1275,139 @@ describe('ChatScreen — send routing', () => {
     );
   });
 
+  it('offers Send Contact for iMessage only with the live capability and an exact DM', async () => {
+    useSessionStore.setState({
+      serverInfo: { version: 'test', supports_send_contact: true } as any,
+    });
+    useChatHeaderMock.mockReturnValue({
+      data: { id: 1, guid: GUID, style: 45, participantCount: 1, handleServices: 'iMessage' },
+      error: null,
+    });
+    const view = await renderWithTheme(<ChatScreen />);
+    expect(mockCaptured.composer?.onPickContact).toEqual(expect.any(Function));
+
+    useChatHeaderMock.mockReturnValue({
+      data: { id: 1, guid: GUID, style: 43, participantCount: 2, handleServices: 'iMessage' },
+      error: null,
+    });
+    await act(async () => view.rerender(<ChatScreen />));
+    expect(mockCaptured.composer?.onPickContact).toBeUndefined();
+
+    useChatHeaderMock.mockReturnValue({
+      data: { id: 1, guid: GUID, style: 45, participantCount: 1, handleServices: 'iMessage' },
+      error: null,
+    });
+    await act(async () => {
+      useSessionStore.setState({ serverInfo: { version: 'test' } as any });
+    });
+    expect(mockCaptured.composer?.onPickContact).toBeUndefined();
+  });
+
+  it('confirms one current-location send only for a capable exact iMessage DM', async () => {
+    useSessionStore.setState({
+      serverInfo: { version: 'test', supports_imessage_location: true } as any,
+    });
+    useChatHeaderMock.mockReturnValue({
+      data: { id: 1, guid: GUID, style: 45, participantCount: 1, handleServices: 'iMessage' },
+      error: null,
+    });
+    const view = await renderWithTheme(<ChatScreen />);
+    expect(mockCaptured.composer?.onShareLocation).toEqual(expect.any(Function));
+
+    await act(async () => mockCaptured.composer?.onShareLocation());
+    expect(acquireAndSendCurrentLocation).not.toHaveBeenCalled();
+    const confirmation = mockShowConfirm.mock.calls[0]?.[0] as
+      { onConfirm?: () => void } | undefined;
+    expect(confirmation).toEqual(
+      expect.objectContaining({
+        title: 'Send Current Location?',
+        confirmText: 'Send Location',
+        onConfirm: expect.any(Function),
+      }),
+    );
+
+    await act(async () => {
+      confirmation?.onConfirm?.();
+      confirmation?.onConfirm?.();
+      await Promise.resolve();
+    });
+    expect(acquireAndSendCurrentLocation).toHaveBeenCalledTimes(1);
+    expect(acquireAndSendCurrentLocation).toHaveBeenCalledWith(
+      GUID,
+      expect.objectContaining({
+        foregroundLifecycle: expect.objectContaining({
+          isActive: expect.any(Function),
+          subscribeToInactive: expect.any(Function),
+        }),
+        accountLease: expect.objectContaining({ isCurrent: expect.any(Function) }),
+        reportIssue: presentSendIssue,
+      }),
+    );
+
+    useChatHeaderMock.mockReturnValue({
+      data: { id: 1, guid: GUID, style: 43, participantCount: 2, handleServices: 'iMessage' },
+      error: null,
+    });
+    await act(async () => view.rerender(<ChatScreen />));
+    expect(mockCaptured.composer?.onShareLocation).toBeUndefined();
+
+    useChatHeaderMock.mockReturnValue({
+      data: { id: 1, guid: GUID, style: 45, participantCount: 1, handleServices: 'SMS' },
+      error: null,
+    });
+    await act(async () => view.rerender(<ChatScreen />));
+    expect(mockCaptured.composer?.onShareLocation).toBeUndefined();
+
+    await act(async () => {
+      useSessionStore.setState({ serverInfo: { version: 'test' } as any });
+    });
+    expect(mockCaptured.composer?.onShareLocation).toBeUndefined();
+  });
+
+  it('offers iMessage typing only for a proven chat with its separate live capability', async () => {
+    useSessionStore.setState({
+      serverInfo: { version: 'test', supports_imessage_typing: true } as any,
+    });
+    useChatHeaderMock.mockReturnValue({
+      data: { id: 1, guid: GUID, style: 45, participantCount: 1, handleServices: 'iMessage' },
+      error: null,
+    });
+    await renderWithTheme(<ChatScreen />);
+    expect(mockCaptured.composer?.onTyping).toEqual(expect.any(Function));
+
+    await act(async () => {
+      useTypingStore.setState({ typing: { [GUID]: true } });
+    });
+    expect(screen.getByText('typing…')).toBeTruthy();
+
+    await act(async () => mockCaptured.composer?.onTyping(true));
+    expect(sendTyping).toHaveBeenCalledWith(GUID, true);
+
+    await act(async () => {
+      useSessionStore.setState({ serverInfo: { version: 'test' } as any });
+    });
+    expect(mockCaptured.composer?.onTyping).toBeUndefined();
+    expect(screen.queryByText('typing…')).toBeNull();
+  });
+
+  it('offers the voice recorder only with the separate iMessage voice capability', async () => {
+    useSessionStore.setState({
+      serverInfo: { version: 'test', supports_imessage_voice_upload: true } as any,
+    });
+    useChatHeaderMock.mockReturnValue({
+      data: { id: 1, guid: GUID, style: 45, participantCount: 1, handleServices: 'iMessage' },
+      error: null,
+    });
+    await renderWithTheme(<ChatScreen />);
+    expect(mockCaptured.composer?.onStartVoice).toEqual(expect.any(Function));
+    expect(sendVoice).not.toHaveBeenCalled();
+
+    await act(async () => {
+      useSessionStore.setState({ serverInfo: { version: 'test', private_api: true } as any });
+    });
+    expect(mockCaptured.composer?.onStartVoice).toBeUndefined();
+  });
+
   it('ignores injected effect arguments and sends ordinary text', async () => {
     await renderWithTheme(<ChatScreen />);
     await run(() =>
@@ -1041,6 +1419,187 @@ describe('ChatScreen — send routing', () => {
       presentSendIssue,
       expect.any(Function),
     );
+  });
+
+  it('exposes the narrow effect action only for a proven exact one-to-one iMessage chat', async () => {
+    useSessionStore.setState({
+      serverInfo: { version: 'test', supports_imessage_effects: true } as any,
+    });
+    useChatHeaderMock.mockReturnValue({
+      data: {
+        id: 1,
+        guid: GUID,
+        style: 45,
+        participantCount: 1,
+        handleServices: 'iMessage',
+      },
+      error: null,
+    });
+    const view = await renderWithTheme(<ChatScreen />);
+
+    expect(mockCaptured.composer?.onSendEffect).toEqual(expect.any(Function));
+    await expect(
+      mockCaptured.composer!.onSendEffect('party', 'com.apple.MobileSMS.expressivesend.impact'),
+    ).resolves.toBe(true);
+    expect(sendEffect).toHaveBeenCalledWith(
+      {
+        chatGuid: GUID,
+        text: 'party',
+        effectId: 'com.apple.MobileSMS.expressivesend.impact',
+      },
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+      presentSendIssue,
+    );
+
+    useChatHeaderMock.mockReturnValue({
+      data: {
+        id: 1,
+        guid: GUID,
+        style: 43,
+        participantCount: 2,
+        handleServices: 'iMessage,iMessage',
+      },
+      error: null,
+    });
+    await act(async () => view.rerender(<ChatScreen />));
+    expect(mockCaptured.composer?.onSendEffect).toBeUndefined();
+
+    useChatHeaderMock.mockReturnValue({
+      data: { id: 1, guid: GUID, style: 45, participantCount: 1, handleServices: 'iMessage' },
+      error: null,
+    });
+    await act(async () => {
+      useSessionStore.setState({ serverInfo: { version: 'test' } as any });
+    });
+    expect(mockCaptured.composer?.onSendEffect).toBeUndefined();
+  });
+
+  it('exposes formatted text for a proven style-45 multi-alias iMessage chat', async () => {
+    useSessionStore.setState({
+      serverInfo: { version: 'test', supports_imessage_formatted_messages: true } as any,
+    });
+    useChatHeaderMock.mockReturnValue({
+      data: {
+        id: 1,
+        guid: GUID,
+        style: 45,
+        participantCount: 2,
+        handleServices: 'iMessage,iMessage',
+      },
+      error: null,
+    });
+    await renderWithTheme(<ChatScreen />);
+
+    expect(mockCaptured.composer?.onSendFormatted).toEqual(expect.any(Function));
+    await expect(
+      mockCaptured.composer!.onSendFormatted('A B', [
+        { start: 1, length: 1, styles: ['underline'] },
+      ]),
+    ).resolves.toBe(true);
+    expect(sendFormatted).toHaveBeenCalledWith(
+      {
+        chatGuid: GUID,
+        text: 'A B',
+        textFormatting: [{ start: 1, length: 1, styles: ['underline'] }],
+      },
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+      presentSendIssue,
+    );
+  });
+
+  it('exposes exact group participants for the narrow mention action and rejects an ambiguous roster', async () => {
+    mockGuid = 'iMessage;+;mention-group';
+    useSessionStore.setState({
+      serverInfo: { version: 'test', supports_imessage_mentions: true } as any,
+    });
+    useChatHeaderMock.mockReturnValue({
+      data: {
+        id: 7,
+        guid: mockGuid,
+        style: 43,
+        participantCount: 2,
+        handleServices: 'iMessage,iMessage',
+        participantNames: JSON.stringify(['Alice', 'Bob']),
+        participantAddresses: 'alice@example.test|||+15551234567',
+      },
+      error: null,
+    });
+    const view = await renderWithTheme(<ChatScreen />);
+
+    expect(mockCaptured.composer?.mentionParticipants).toEqual([
+      { address: 'alice@example.test', label: 'Alice' },
+      { address: '+15551234567', label: 'Bob' },
+    ]);
+    expect(mockCaptured.composer?.onSendMention).toEqual(expect.any(Function));
+    await expect(
+      mockCaptured.composer!.onSendMention('Hi Alice', [
+        { start: 3, length: 5, address: 'alice@example.test' },
+      ]),
+    ).resolves.toBe(true);
+    expect(sendMention).toHaveBeenCalledWith(
+      {
+        chatGuid: mockGuid,
+        text: 'Hi Alice',
+        mentions: [{ start: 3, length: 5, address: 'alice@example.test' }],
+      },
+      expect.objectContaining({ isCurrent: expect.any(Function) }),
+      presentSendIssue,
+    );
+
+    useChatHeaderMock.mockReturnValue({
+      data: {
+        id: 7,
+        guid: mockGuid,
+        style: 43,
+        participantCount: 2,
+        handleServices: 'iMessage,iMessage',
+        participantNames: JSON.stringify(['Alice', 'Alice duplicate']),
+        participantAddresses: 'alice@example.test|||alice@example.test',
+      },
+      error: null,
+    });
+    await act(async () => view.rerender(<ChatScreen />));
+    expect(mockCaptured.composer?.mentionParticipants).toEqual([]);
+    expect(mockCaptured.composer?.onSendMention).toBeUndefined();
+  });
+
+  it('retains effect text after definite refusal and consumes it after outcome-unknown', async () => {
+    useSessionStore.setState({
+      serverInfo: { version: 'test', supports_imessage_effects: true } as any,
+    });
+    useChatHeaderMock.mockReturnValue({
+      data: { id: 1, guid: GUID, style: 45, participantCount: 1, handleServices: 'iMessage' },
+      error: null,
+    });
+    await renderWithTheme(<ChatScreen />);
+
+    (sendEffect as jest.Mock).mockResolvedValueOnce({
+      status: 'rejected',
+      tempGuid: 'temp-reject',
+    });
+    await expect(
+      mockCaptured.composer!.onSendEffect('keep me', 'com.apple.MobileSMS.expressivesend.loud'),
+    ).resolves.toBe(false);
+    expect(showDialog).toHaveBeenCalledWith(
+      'Effect Not Sent',
+      'Your message is still here so you can try again.',
+    );
+
+    (sendEffect as jest.Mock).mockResolvedValueOnce({
+      status: 'outcome-unknown',
+      tempGuid: 'temp-unknown',
+    });
+    await expect(
+      mockCaptured.composer!.onSendEffect(
+        'maybe sent',
+        'com.apple.messages.effect.CKConfettiEffect',
+      ),
+    ).resolves.toBe(true);
+    expect(showDialog).toHaveBeenCalledWith(
+      'Effect Not Confirmed',
+      'It may have been delivered. Check the conversation before sending another copy.',
+    );
+    expect(sendEffect).toHaveBeenCalledTimes(2);
   });
 
   it('threads the mounted account lease through DEV plain-text sends', async () => {
@@ -1707,6 +2266,52 @@ describe('ChatScreen — keyboard avoidance contract', () => {
     expect(mockCaptured.composer!.__instance).toBe(composerInstance);
     expect(mockCaptured.composer!.active).toBe(true);
     expect(mockNavigationDispatch).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    'makes route Back close the attachment tray before removing the chat (staged=%s)',
+    async (hasUnsavedDraftMetadata) => {
+      await renderWithTheme(<ChatScreen />);
+      const dismissAttachmentTray = jest.fn();
+
+      await run(() =>
+        mockCaptured.composer!.onRemovalStateChange({
+          hasUnsavedDraftMetadata,
+          hasOpenAttachmentTray: true,
+          dismissAttachmentTray,
+        }),
+      );
+
+      const latestGuardCall =
+        mockUsePreventRemove.mock.calls[mockUsePreventRemove.mock.calls.length - 1];
+      expect(latestGuardCall?.[0]).toBe(true);
+      await run(() => latestGuardCall?.[1]({ data: { action: { type: 'GO_BACK' } } }));
+
+      expect(dismissAttachmentTray).toHaveBeenCalledTimes(1);
+      expect(mockShowConfirm).not.toHaveBeenCalled();
+      expect(mockNavigationDispatch).not.toHaveBeenCalled();
+    },
+  );
+
+  it('warns that formatted draft metadata will be discarded on route removal', async () => {
+    await renderWithTheme(<ChatScreen />);
+    await run(() =>
+      mockCaptured.composer!.onRemovalStateChange({
+        hasUnsavedDraftMetadata: true,
+        hasUnsavedFormattingMetadata: true,
+      }),
+    );
+
+    const latestGuardCall =
+      mockUsePreventRemove.mock.calls[mockUsePreventRemove.mock.calls.length - 1];
+    await run(() => latestGuardCall?.[1]({ data: { action: { type: 'GO_BACK' } } }));
+
+    expect(mockShowConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: 'Discard message details?',
+        message: 'Text formatting is not part of the saved plain-text draft.',
+      }),
+    );
   });
 });
 

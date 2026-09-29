@@ -51,9 +51,14 @@ describe conditional behavior such as consent-controlled diagnostics, FCM transi
 server-proxied previews, native Google Maps rendering, and external browser/maps handoff. State that
 the visible, unlocked Find My screen sends its server-provided precise coordinates, requested map
 region, device/request metadata, pseudonymous SDK identifier, and SDK crash/interaction data to
-Google without requesting the phone's own location. Link the same disclosure from Settings and store
-metadata. Play Data Safety answers must be derived from measured network and storage behavior rather
-than from intended architecture alone.
+Google without reading the phone's own location. Treat explicit Current Location sharing as a
+separate flow: after confirmation it may request one approximate or precise foreground fix, persist
+the successful coordinate in the SQLCipher-encrypted outgoing queue, and send it through the
+connected server. Temporary failures may replay that exact snapshot for no more than 15 minutes and
+must not acquire a new fix. State that Gator performs no background location collection and queues or
+sends nothing after denial, cancellation/account retirement, disabled services, acquisition error,
+or timeout. Link the same disclosure from Settings and store metadata. Play Data Safety answers must
+be derived from measured network and storage behavior rather than from intended architecture alone.
 
 Drafting can proceed early, but final text follows the selected network, web, realtime, TLS,
 notification, diagnostics, file, and lock outcomes.

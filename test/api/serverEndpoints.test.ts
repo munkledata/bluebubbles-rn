@@ -27,6 +27,80 @@ function notFound(): Response {
   return new Response(null, { status: 404 });
 }
 
+describe('read-only iMessage account status', () => {
+  const status = {
+    appleId: 'person@example.test',
+    displayName: 'Person',
+    activeAlias: 'alias@example.test',
+    aliases: ['alias@example.test'],
+    vettedAliases: ['alias@example.test'],
+    loginStatusMessage: null,
+  };
+
+  it('reads only the narrow authenticated status route', async () => {
+    mockKy.mockResolvedValueOnce(envelope(status));
+    const signal = new AbortController().signal;
+
+    await expect(serverApi.imessageAccountStatus(client(), signal)).resolves.toEqual(status);
+    expect(mockKy).toHaveBeenCalledTimes(1);
+    const [url, init] = mockKy.mock.calls[0] as [string, { method: string; signal: AbortSignal }];
+    expect(url).toBe('https://x.test/api/v1/imessage/account/status');
+    expect(init.method).toBe('GET');
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it('cancels its HTTP request when the caller aborts', async () => {
+    mockKy.mockImplementationOnce(
+      (_url: string, init: { signal: AbortSignal }) =>
+        new Promise<Response>((_resolve, reject) => {
+          init.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+        }),
+    );
+    const controller = new AbortController();
+    const pending = serverApi.imessageAccountStatus(client(), controller.signal);
+    expect(mockKy).toHaveBeenCalledTimes(1);
+    const requestSignal = (mockKy.mock.calls[0] as [string, { signal: AbortSignal }])[1].signal;
+
+    controller.abort();
+    expect(requestSignal.aborted).toBe(true);
+    await expect(pending).rejects.toMatchObject({ kind: 'cancelled' });
+  });
+
+  it('maps 404 without calling a retired fallback', async () => {
+    mockKy.mockResolvedValueOnce(notFound());
+    await expect(serverApi.imessageAccountStatus(client())).rejects.toBeInstanceOf(
+      UnimplementedEndpointError,
+    );
+    expect(mockKy).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects malformed account data', async () => {
+    mockKy.mockResolvedValueOnce(envelope({ ...status, aliases: [{ Alias: 'bad' }] }));
+    await expect(serverApi.imessageAccountStatus(client())).rejects.toThrow();
+    expect(mockKy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('narrow iMessage send-from alias change', () => {
+  it('POSTs one selected alias only to the separate route', async () => {
+    mockKy.mockResolvedValueOnce(envelope({ activeAlias: 'alias@example.test' }));
+
+    await expect(
+      serverApi.changeImessageActiveAlias(client(), 'alias@example.test'),
+    ).resolves.toEqual({ activeAlias: 'alias@example.test' });
+    expect(mockKy).toHaveBeenCalledTimes(1);
+    const [url, init] = mockKy.mock.calls[0] as [string, { method: string; json: unknown }];
+    expect(url).toBe('https://x.test/api/v1/imessage/account/alias');
+    expect(init.method).toBe('POST');
+    expect(init.json).toEqual({ alias: 'alias@example.test' });
+  });
+
+  it('rejects an invalid alias before sending anything', () => {
+    expect(() => serverApi.changeImessageActiveAlias(client(), 'bad\nalias')).toThrow();
+    expect(mockKy).not.toHaveBeenCalled();
+  });
+});
+
 describe('server-management support boundaries', () => {
   it('exports neither remote management nor the retired generic dispatcher', () => {
     expect(serverApi.SERVER_MANAGEMENT_SUPPORTED).toBe(false);

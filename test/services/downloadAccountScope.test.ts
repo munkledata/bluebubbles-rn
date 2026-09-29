@@ -10,7 +10,7 @@ jest.mock('@/services/download/expoFetcher', () => ({
 }));
 jest.mock('@utils/isDev', () => ({ isDevServer: () => mockIsDevServer }));
 
-import { Attachment, Chat, Message } from '@core/models';
+import { Attachment, Chat, Message, ServerInfo } from '@core/models';
 import {
   createAttachmentCacheReservation,
   getAttachmentByGuid,
@@ -34,6 +34,7 @@ import {
   setAttachmentFetcher,
 } from '@/services/download';
 import { useDownloadStore } from '@state/downloadStore';
+import { useSessionStore } from '@state/sessionStore';
 import { createAttachmentCacheAccountScope } from '@/services/download/attachmentCacheAccountScope';
 import {
   attachmentCacheCoordinator,
@@ -55,6 +56,20 @@ import {
 import { createTestDb } from '../support/testDb';
 
 type Outcome<T> = { kind: 'fulfilled'; value: T } | { kind: 'rejected'; error: unknown };
+
+const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
+const RCS_CHAT_GUID = `RCS;-;g1.${RCS_PROVIDER_EPOCH}.${Buffer.from('scope-chat').toString('base64url')}`;
+const RCS_MESSAGE_GUID = `rcs-g1.${RCS_PROVIDER_EPOCH}.${Buffer.from('scope-message').toString('base64url')}`;
+const RCS_ATTACHMENT_GUID = `rcs-media-g1.${RCS_PROVIDER_EPOCH}.${Buffer.from('scope-message').toString('base64url')}.${Buffer.from('scope-attachment').toString('base64url')}`;
+const RCS_SERVER_INFO = ServerInfo.parse({
+  version: '2.0.0',
+  rcs: true,
+  supports_rcs_epoch_qualified_ids: true,
+  rcs_provider_epoch: RCS_PROVIDER_EPOCH,
+});
+const IMESSAGE_CHAT_GUID = 'iMessage;-;+15550000000';
+const IMESSAGE_MESSAGE_GUID = 'imessage-scope-message';
+const IMESSAGE_ATTACHMENT_GUID = 'imessage-scope-attachment';
 
 function observe<T>(promise: Promise<T>): { outcome: Promise<Outcome<T>>; settled(): boolean } {
   let didSettle = false;
@@ -80,19 +95,27 @@ async function seedRcsAttachment(db: AppDatabase) {
   const handles = await upsertHandles(db, [{ address: 'rcs@x.com' }]);
   const chats = await upsertChats(
     db,
-    [Chat.parse({ guid: 'RCS;-;scope-chat', participants: [{ address: 'rcs@x.com' }] })],
+    [
+      Chat.parse({
+        guid: RCS_CHAT_GUID,
+        providerEpoch: RCS_PROVIDER_EPOCH,
+        participants: [{ address: 'rcs@x.com' }],
+      }),
+    ],
     handles,
   );
   await upsertMessages(
     db,
     [
       Message.parse({
-        guid: 'scope-message',
+        guid: RCS_MESSAGE_GUID,
+        providerEpoch: RCS_PROVIDER_EPOCH,
         dateCreated: 1,
         hasAttachments: true,
         attachments: [
           Attachment.parse({
-            guid: 'scope-attachment',
+            guid: RCS_ATTACHMENT_GUID,
+            providerEpoch: RCS_PROVIDER_EPOCH,
             mimeType: 'image/jpeg',
             transferName: 'photo.jpg',
             totalBytes: 1_000,
@@ -100,11 +123,50 @@ async function seedRcsAttachment(db: AppDatabase) {
         ],
       }),
     ],
-    () => chats.get('RCS;-;scope-chat')!,
+    () => chats.get(RCS_CHAT_GUID)!,
     handles,
   );
-  return (await getAttachmentByGuid(db, 'scope-attachment'))!;
+  return (await getAttachmentByGuid(db, RCS_ATTACHMENT_GUID))!;
 }
+
+async function seedImessageAttachment(db: AppDatabase) {
+  const handles = await upsertHandles(db, [{ address: '+15550000000' }]);
+  const chats = await upsertChats(
+    db,
+    [
+      Chat.parse({
+        guid: IMESSAGE_CHAT_GUID,
+        participants: [{ address: '+15550000000' }],
+      }),
+    ],
+    handles,
+  );
+  await upsertMessages(
+    db,
+    [
+      Message.parse({
+        guid: IMESSAGE_MESSAGE_GUID,
+        dateCreated: 1,
+        hasAttachments: true,
+        attachments: [
+          Attachment.parse({
+            guid: IMESSAGE_ATTACHMENT_GUID,
+            mimeType: 'image/jpeg',
+            transferName: 'photo.jpg',
+            totalBytes: 1_000,
+          }),
+        ],
+      }),
+    ],
+    () => chats.get(IMESSAGE_CHAT_GUID)!,
+    handles,
+  );
+  return (await getAttachmentByGuid(db, IMESSAGE_ATTACHMENT_GUID))!;
+}
+
+beforeEach(() => {
+  useSessionStore.setState({ serverInfo: RCS_SERVER_INFO });
+});
 
 afterEach(async () => {
   mockIsDevServer = true;
@@ -120,7 +182,7 @@ describe('account-scoped attachment retries', () => {
   it('uses an installed fixture fetcher only while the DEV fixture session is active', async () => {
     const { db } = await createTestDb();
     activeDb = db;
-    const attachment = { ...(await seedRcsAttachment(db)), service: 'iMessage' };
+    const attachment = { ...(await seedImessageAttachment(db)), service: 'iMessage' };
     const fixtureDownload = jest.fn().mockResolvedValue({
       localPath: 'file:///attachments/scope-attachment/fixture.jpg',
       bytes: 1_000,
@@ -152,7 +214,7 @@ describe('account-scoped attachment retries', () => {
   it('keeps the DEV fixture fetcher when a realtime caller supplies a task-local client', async () => {
     const { db } = await createTestDb();
     activeDb = db;
-    const attachment = { ...(await seedRcsAttachment(db)), service: 'iMessage' };
+    const attachment = { ...(await seedImessageAttachment(db)), service: 'iMessage' };
     const fixtureDownload = jest.fn().mockResolvedValue({
       localPath: 'file:///attachments/scope-attachment/fixture.jpg',
       bytes: 1_000,
@@ -171,7 +233,7 @@ describe('account-scoped attachment retries', () => {
     const { db } = await createTestDb();
     activeDb = db;
     await recoverAttachmentCache(db, captureRealtimeDeliveryLease());
-    const seeded = await seedRcsAttachment(db);
+    const seeded = await seedImessageAttachment(db);
     const oldPath = 'file:///documents/attachments/scope-attachment/generation-0/old.jpg';
     await updateAttachmentLocalPath(db, seeded.guid, oldPath);
     await withDbTransaction(db, (context) =>
@@ -1728,7 +1790,7 @@ describe('account-scoped attachment retries', () => {
     ).resolves.toBeNull();
     expect(jest.getTimerCount()).toBe(1);
 
-    raw.prepare('UPDATE messages SET date_deleted = ? WHERE guid = ?').run(2, 'scope-message');
+    raw.prepare('UPDATE messages SET date_deleted = ? WHERE guid = ?').run(2, RCS_MESSAGE_GUID);
     await jest.advanceTimersByTimeAsync(2_500);
 
     expect(fetch).toHaveBeenCalledTimes(2);

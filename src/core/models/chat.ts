@@ -1,4 +1,5 @@
 import { z } from 'zod/v4';
+import { isRcsProviderEpoch } from '../rcs/providerIdentity';
 import { Handle } from './handle';
 import { Message } from './message';
 
@@ -13,6 +14,8 @@ export const ChatStyle = z.number();
 export const Chat = z.object({
   originalROWID: z.number().nullish(),
   guid: z.string(),
+  /** Google pairing generation for an epoch-qualified RCS conversation. */
+  providerEpoch: z.string().refine(isRcsProviderEpoch).nullish(),
   chatIdentifier: z.string().nullish(),
   displayName: z.string().nullish(),
   style: ChatStyle.nullish(),

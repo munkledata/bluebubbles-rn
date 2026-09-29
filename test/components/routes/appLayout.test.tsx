@@ -11,6 +11,7 @@ import React from 'react';
 const mockRedirect = jest.fn((_props: { href: string }) => null);
 const mockServerRotationApprovalHost = jest.fn(() => null);
 const mockConnectionBanner = jest.fn((_props: { onRetry: () => unknown }) => null);
+const mockShareIntentNavigator = jest.fn(() => null);
 const mockOpenChat = jest.fn();
 const mockDismissTo = jest.fn();
 const mockLoggerWarn = jest.fn();
@@ -32,7 +33,7 @@ jest.mock('react-native-notify-kit', () => ({
   EventType: { DISMISSED: 0, ACTION_PRESS: 1, PRESS: 2 },
 }));
 jest.mock('expo-router', () => ({
-  Stack: () => null,
+  ExperimentalStack: () => null,
   Redirect: (props: { href: string }) => {
     mockRedirect(props);
     return null;
@@ -72,6 +73,9 @@ jest.mock('@ui/connection', () => ({
 }));
 jest.mock('@ui/server-rotation', () => ({
   ServerRotationApprovalHost: () => mockServerRotationApprovalHost(),
+}));
+jest.mock('@ui/ShareIntentHandler', () => ({
+  ShareIntentNavigator: () => mockShareIntentNavigator(),
 }));
 jest.mock('@ui/useChatNavigator', () => ({ useChatNavigator: () => mockOpenChat }));
 
@@ -173,6 +177,7 @@ afterEach(() => {
 async function mountLayout(): Promise<void> {
   await renderWithTheme(<AppLayout />);
   expect(mockServerRotationApprovalHost).toHaveBeenCalledTimes(1);
+  expect(mockShareIntentNavigator).toHaveBeenCalledTimes(1);
   // One callback owns lock/realtime coordination; the other drains notification taps on resume.
   expect(appStateHandlers).toHaveLength(2);
   expect(mockForegroundHandlers).toHaveLength(1);
@@ -206,6 +211,7 @@ describe('AppLayout — active AppState lock gate', () => {
     await renderWithTheme(<AppLayout />);
 
     expect(mockRedirect).not.toHaveBeenCalled();
+    expect(mockShareIntentNavigator).not.toHaveBeenCalled();
     expect(appStateHandlers).toHaveLength(0);
     expect(mockFlushErrorReports).not.toHaveBeenCalled();
   });
@@ -216,6 +222,7 @@ describe('AppLayout — active AppState lock gate', () => {
     await renderWithTheme(<AppLayout />);
 
     expect(mockRedirect.mock.calls[0]?.[0]).toEqual(expect.objectContaining({ href: '/welcome' }));
+    expect(mockShareIntentNavigator).not.toHaveBeenCalled();
     expect(appStateHandlers).toHaveLength(0);
     expect(mockFlushErrorReports).not.toHaveBeenCalled();
     expect(mockRecoverOutgoing).not.toHaveBeenCalled();

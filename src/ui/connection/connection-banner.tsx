@@ -6,6 +6,11 @@ import { useTransportHealthStore } from '@state/transportHealthStore';
 import { Button } from '../primitives';
 import { useTheme } from '../theme';
 
+/** Non-actionable connection churn must persist this long before it interrupts the user. */
+export const CONNECTION_BANNER_TRANSIENT_DELAY_MS = 1_000;
+
+type TransientTransportHealthStatus = Extract<TransportHealthStatus, 'connecting' | 'reconnecting'>;
+
 interface TransportHealthPresentation {
   readonly label: string;
   readonly showBanner: boolean;
@@ -32,20 +37,28 @@ export function transportHealthStatusLabel(status: TransportHealthStatus): strin
   return PRESENTATION[status].label;
 }
 
+function isTransientStatus(
+  status: TransportHealthStatus,
+): status is TransientTransportHealthStatus {
+  return status === 'connecting' || status === 'reconnecting';
+}
+
 interface ConnectionBannerProps {
   /** Service-owned Retry action; this component never mutates auth or transport state directly. */
   readonly onRetry: () => unknown;
 }
 
-/** Compact protected-route overlay that appears only while live updates are degraded. */
-export function ConnectionBanner({ onRetry }: ConnectionBannerProps): React.JSX.Element | null {
+interface ConnectionBannerSurfaceProps extends ConnectionBannerProps {
+  readonly status: TransportHealthStatus;
+}
+
+function ConnectionBannerSurface({
+  status,
+  onRetry,
+}: ConnectionBannerSurfaceProps): React.JSX.Element {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const status = useTransportHealthStore((state) => state.status);
   const presentation = PRESENTATION[status];
-
-  if (!presentation.showBanner) return null;
-
   const tone = theme.color[presentation.tone];
   return (
     <View pointerEvents="box-none" style={styles.host}>
@@ -84,6 +97,40 @@ export function ConnectionBanner({ onRetry }: ConnectionBannerProps): React.JSX.
       </View>
     </View>
   );
+}
+
+interface DelayedConnectionBannerProps extends ConnectionBannerProps {
+  readonly status: TransientTransportHealthStatus;
+}
+
+/** One transient connection episode; unmounting it cancels both the timer and visible banner. */
+function DelayedConnectionBanner({
+  status,
+  onRetry,
+}: DelayedConnectionBannerProps): React.JSX.Element | null {
+  const [visible, setVisible] = React.useState(false);
+
+  React.useEffect(() => {
+    const timer = setTimeout(() => {
+      setVisible(true);
+    }, CONNECTION_BANNER_TRANSIENT_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, []);
+
+  return visible ? <ConnectionBannerSurface status={status} onRetry={onRetry} /> : null;
+}
+
+/** Compact protected-route overlay that appears only while live updates are degraded. */
+export function ConnectionBanner({ onRetry }: ConnectionBannerProps): React.JSX.Element | null {
+  const status = useTransportHealthStore((state) => state.status);
+
+  if (!PRESENTATION[status].showBanner) return null;
+  if (isTransientStatus(status)) {
+    // The key makes connecting → reconnecting a fresh delay. Recovery unmounts this child, so
+    // returning to the same status later also starts a new episode instead of reusing old state.
+    return <DelayedConnectionBanner key={status} status={status} onRetry={onRetry} />;
+  }
+  return <ConnectionBannerSurface status={status} onRetry={onRetry} />;
 }
 
 const styles = StyleSheet.create({

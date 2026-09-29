@@ -16,6 +16,7 @@ import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.BufferedInputStream
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.InterruptedIOException
 import java.util.concurrent.ConcurrentHashMap
@@ -347,6 +348,70 @@ class GatorBoundedDownloadModule : Module() {
       }
     }.runOnQueue(appContext.backgroundCoroutineScope)
 
+    AsyncFunction("adoptSharedAttachment") {
+        sourceUri: String,
+        destinationUri: String,
+        expectedBytesValue: Double,
+      ->
+      val expectedBytes = boundedPositiveLong(expectedBytesValue, MAX_PASTED_ATTACHMENT_BYTES)
+      val context = appContext.reactContext
+        ?: throw IllegalStateException("Android context is unavailable")
+      val shareRoot = File(
+        File(context.noBackupFilesDir, SHARED_INPUT_CACHE_DIRECTORY),
+        SHARED_INPUT_FILES_DIRECTORY,
+      )
+      val attachmentRoot = File(appContext.persistentFilesDirectory, ATTACHMENT_CACHE_DIRECTORY)
+      synchronized(attachmentCacheIoLock) {
+        val source = ownedSharedAttachmentFile(shareRoot, sourceUri)
+        var destination = ownedCurrentAttachmentCacheFile(attachmentRoot, destinationUri)
+        val sourceStat = ownedFileLstat(source)
+          ?: throw IllegalArgumentException("Shared attachment is missing")
+        require(OsConstants.S_ISREG(sourceStat.st_mode)) {
+          "Shared attachment is not a regular file"
+        }
+        require(sourceStat.st_size == expectedBytes) {
+          "Shared attachment size changed"
+        }
+        require(ownedFileLstat(destination) == null) {
+          "Outgoing attachment destination already exists"
+        }
+
+        var created = false
+        try {
+          val parent = destination.parentFile
+            ?: throw IllegalArgumentException("Outgoing attachment destination has no parent")
+          if (!parent.exists() && !parent.mkdirs()) {
+            throw IllegalStateException("Outgoing attachment destination is unavailable")
+          }
+          destination = ownedCurrentAttachmentCacheFile(attachmentRoot, destinationUri)
+          require(ownedFileLstat(destination) == null) {
+            "Outgoing attachment destination already exists"
+          }
+          copyOwnedSharedAttachment(
+            source,
+            destination,
+            expectedBytes,
+            sourceStat.st_dev,
+            sourceStat.st_ino,
+          )
+          created = true
+
+          val destinationStat = ownedFileLstat(destination)
+            ?: throw IllegalStateException("Adopted attachment is missing")
+          require(
+            OsConstants.S_ISREG(destinationStat.st_mode) && destinationStat.st_size == expectedBytes,
+          ) { "Adopted attachment failed final validation" }
+          adoptedPasteOutcome(destinationUri, expectedBytes)
+        } catch (error: Exception) {
+          if (created || ownedFileLstat(destination) != null) {
+            runCatching { Os.remove(destination.path) }
+          }
+          runCatching { pruneEmptyAttachmentCacheParents(attachmentRoot, destination) }
+          throw error
+        }
+      }
+    }.runOnQueue(appContext.backgroundCoroutineScope)
+
     AsyncFunction("getAttachmentCacheAvailableBytes") {
       val available = StatFs(appContext.persistentFilesDirectory.path).availableBytes
       require(available >= 0L) { "Attachment cache available bytes are invalid" }
@@ -672,6 +737,96 @@ class GatorBoundedDownloadModule : Module() {
       "Pasted attachment URI is not canonical"
     }
     return target
+  }
+
+  /** Resolve one exact completed file beneath this app's fixed ACTION_SEND cache root. */
+  private fun ownedSharedAttachmentFile(root: File, rawUri: String): File {
+    val uri = Uri.parse(rawUri)
+    require(
+      uri.scheme == "file" &&
+        uri.authority.isNullOrEmpty() &&
+        uri.query == null &&
+        uri.fragment == null,
+    ) { "Invalid shared attachment URI" }
+    val rawPath = uri.path ?: throw IllegalArgumentException("Missing shared attachment path")
+    val target = requireOwnedSharedAttachment(root, File(rawPath))
+    require(Uri.fromFile(target).toString() == rawUri) {
+      "Shared attachment URI is not canonical"
+    }
+    return target
+  }
+
+  /** Copy, fsync and restat without consuming the native batch's source file. */
+  private fun copyOwnedSharedAttachment(
+    source: File,
+    destination: File,
+    expectedBytes: Long,
+    expectedDevice: Long,
+    expectedInode: Long,
+  ) {
+    val sourceDescriptor = Os.open(
+      source.path,
+      OsConstants.O_RDONLY or OsConstants.O_CLOEXEC or OsConstants.O_NOFOLLOW,
+      0,
+    )
+    val openedSource = try {
+      Os.fstat(sourceDescriptor)
+    } catch (error: Exception) {
+      runCatching { Os.close(sourceDescriptor) }
+      throw error
+    }
+    if (
+      !OsConstants.S_ISREG(openedSource.st_mode) ||
+      openedSource.st_size != expectedBytes ||
+      openedSource.st_dev != expectedDevice ||
+      openedSource.st_ino != expectedInode
+    ) {
+      runCatching { Os.close(sourceDescriptor) }
+      throw IllegalArgumentException("Shared attachment changed before adoption")
+    }
+    val destinationDescriptor = try {
+      Os.open(
+        destination.path,
+        OsConstants.O_WRONLY or
+          OsConstants.O_CREAT or
+          OsConstants.O_EXCL or
+          OsConstants.O_CLOEXEC or
+          OsConstants.O_NOFOLLOW,
+        0b110_000_000,
+      )
+    } catch (error: Exception) {
+      runCatching { Os.close(sourceDescriptor) }
+      throw error
+    }
+
+    try {
+      FileInputStream(sourceDescriptor).use { input ->
+        FileOutputStream(destinationDescriptor).use { output ->
+          copyExactSharedAttachment(input, output, expectedBytes)
+          output.fd.sync()
+        }
+      }
+    } catch (error: Exception) {
+      // The streams own both descriptors after construction. A failed constructor is covered by
+      // these idempotent best-effort closes.
+      runCatching { Os.close(sourceDescriptor) }
+      runCatching { Os.close(destinationDescriptor) }
+      throw error
+    }
+
+    val sourceAfter = ownedFileLstat(source)
+      ?: throw IllegalArgumentException("Shared attachment disappeared during adoption")
+    val destinationAfter = ownedFileLstat(destination)
+      ?: throw IllegalStateException("Adopted attachment is missing")
+    require(
+      OsConstants.S_ISREG(sourceAfter.st_mode) &&
+        sourceAfter.st_size == expectedBytes &&
+        sourceAfter.st_dev == expectedDevice &&
+        sourceAfter.st_ino == expectedInode,
+    ) { "Shared attachment changed during adoption" }
+    require(
+      OsConstants.S_ISREG(destinationAfter.st_mode) && destinationAfter.st_size == expectedBytes,
+    ) { "Adopted attachment failed final validation" }
   }
 
   /** lstat keeps a last-moment symlink swap from being followed; ENOENT is an idempotent miss. */

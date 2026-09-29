@@ -16,6 +16,7 @@ import {
   getScheduledById,
   insertScheduled,
   listAllScheduled,
+  listScheduledHistory,
   listServerScheduledPruneExposure,
   reconcileServerScheduled,
   updateScheduled,
@@ -90,6 +91,31 @@ beforeEach(() => {
 });
 
 describe('syncScheduledFromServer — prune exposure is snapshotted before the round trip', () => {
+  it('labels a failed narrow file as uncertain, because delivery may have occurred', async () => {
+    const { db } = await createTestDb();
+    (getDatabase as jest.Mock).mockReturnValue(db);
+    mockGetScheduled.mockResolvedValue([
+      {
+        id: 'srv-file',
+        chatGuid: 'iMessage;-;+15551234567',
+        text: 'caption',
+        scheduledFor: 9_000_000,
+        status: 'failed',
+        method: 'narrow-attachment',
+        attachmentName: 'small.png',
+      },
+    ]);
+
+    await expect(syncScheduledFromServer()).resolves.toBe(true);
+    expect(await listScheduledHistory(db)).toEqual([
+      expect.objectContaining({
+        serverId: 'srv-file',
+        status: 'uncertain',
+        attachmentName: 'small.png',
+      }),
+    ]);
+  });
+
   it('keeps a row created WHILE the list fetch was in flight', async () => {
     const { db } = await createTestDb();
     (getDatabase as jest.Mock).mockReturnValue(db);

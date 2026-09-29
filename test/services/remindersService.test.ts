@@ -1,4 +1,4 @@
-import { Chat, Message } from '@core/models';
+import { Chat, Message, ServerInfo } from '@core/models';
 import {
   createReminder,
   deleteReminder,
@@ -14,8 +14,10 @@ import {
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
+import { useSessionStore } from '@state/sessionStore';
 import {
   cancelReminder,
+  ReminderSessionChangedError,
   rescheduleReminder,
   scheduleReminder,
   type ReminderScheduler,
@@ -116,6 +118,20 @@ const base = {
   messagePreview: 'see you at 5',
   senderName: 'Alice',
 };
+
+const RCS_EPOCH_A = `gpe1_${'A'.repeat(43)}`;
+const RCS_EPOCH_B = `gpe1_${'B'.repeat(42)}A`;
+const rcsEncoded = (value: string): string => Buffer.from(value, 'utf8').toString('base64url');
+const rcsChatGuid = (epoch: string): string => `RCS;-;g1.${epoch}.${rcsEncoded('reminder-chat')}`;
+const rcsMessageGuid = (epoch: string): string =>
+  `rcs-g1.${epoch}.${rcsEncoded('reminder-message')}`;
+const rcsInfo = (epoch: string) =>
+  ServerInfo.parse({
+    version: '2.0.0',
+    rcs: true,
+    supports_rcs_epoch_qualified_ids: true,
+    rcs_provider_epoch: epoch,
+  });
 
 beforeEach(() => resumeRealtimeDeliveries());
 
@@ -350,6 +366,53 @@ describe('scheduleReminder', () => {
     expect(await listReminders(db)).toEqual([]);
   });
 
+  it('cancels a qualified RCS trigger when the provider epoch rotates while native scheduling is pending', async () => {
+    const previousSession = useSessionStore.getState();
+    const { db } = await createTestDb();
+    const native = deferred<void>();
+    const cancelled: string[] = [];
+    let scheduleStarted = false;
+    const scheduler: ReminderScheduler = {
+      schedule: async () => {
+        scheduleStarted = true;
+        await native.promise;
+      },
+      cancel: async (notificationId) => {
+        cancelled.push(notificationId);
+      },
+    };
+    try {
+      useSessionStore.getState().connected('https://server.test', 'password', rcsInfo(RCS_EPOCH_A));
+      const pending = scheduleReminder(
+        db,
+        {
+          ...base,
+          chatGuid: rcsChatGuid(RCS_EPOCH_A),
+          messageGuid: rcsMessageGuid(RCS_EPOCH_A),
+          scheduledFor: 5_000,
+        },
+        scheduler,
+      );
+      await waitUntil(() => scheduleStarted);
+      const session = useSessionStore.getState();
+      expect(
+        session.setServerInfoForTransport(
+          session.origin!,
+          session.transportRevision,
+          rcsInfo(RCS_EPOCH_B),
+        ),
+      ).toBe(true);
+      native.resolve(undefined);
+
+      await expect(pending).rejects.toBeInstanceOf(ReminderSessionChangedError);
+      expect(cancelled).toContain(reminderId(5_000));
+      expect(await listReminders(db)).toEqual([]);
+    } finally {
+      native.resolve(undefined);
+      useSessionStore.setState(previousSession);
+    }
+  });
+
   it('rejects a reminder insert that was still waiting for the DB when A was retired', async () => {
     const { db } = await createTestDb();
     const writer = await holdWriter(db);
@@ -450,7 +513,7 @@ describe('cancelReminder', () => {
     const { db } = await createTestDb();
     const { scheduler, cancelled } = fakeScheduler();
     const id = await scheduleReminder(db, { ...base, scheduledFor: 5000 }, scheduler);
-    await cancelReminder(db, { id, notificationId: reminderId(5000) }, scheduler);
+    await cancelReminder(db, { ...base, id, notificationId: reminderId(5000) }, scheduler);
     expect(await listReminders(db)).toHaveLength(0);
     expect(cancelled).toContain(reminderId(5000));
   });
@@ -490,7 +553,7 @@ describe('cancelReminder', () => {
     `);
 
     try {
-      await expect(cancelReminder(db, { id, notificationId }, scheduler)).rejects.toThrow(
+      await expect(cancelReminder(db, { ...base, id, notificationId }, scheduler)).rejects.toThrow(
         'account session changed',
       );
       if (!drain) throw new Error('direct reminder delete did not retire the account lease');
@@ -503,7 +566,7 @@ describe('cancelReminder', () => {
 
       raw.exec('DROP TRIGGER pause_direct_reminder_cancel_during_delete');
       resumeRealtimeDeliveries();
-      await cancelReminder(db, { id, notificationId }, scheduler);
+      await cancelReminder(db, { ...base, id, notificationId }, scheduler);
 
       expect(cancelled).toEqual([notificationId, notificationId]);
       expect(await getReminderByMessageGuid(db, 'm1')).toBeNull();
@@ -527,7 +590,11 @@ describe('cancelReminder', () => {
       },
     };
 
-    const pending = cancelReminder(db, { id, notificationId: reminderId(5000) }, scheduler);
+    const pending = cancelReminder(
+      db,
+      { ...base, id, notificationId: reminderId(5000) },
+      scheduler,
+    );
     await waitUntil(() => cancelStarted);
     const rejected = expect(pending).rejects.toThrow('account session changed');
     const drain = pauseRealtimeDeliveries();
@@ -545,7 +612,11 @@ describe('cancelReminder', () => {
     const id = await scheduleReminder(db, { ...base, scheduledFor: 5000 }, initial.scheduler);
     const writer = await holdWriter(db);
     const { scheduler, cancelled } = fakeScheduler();
-    const pending = cancelReminder(db, { id, notificationId: reminderId(5000) }, scheduler);
+    const pending = cancelReminder(
+      db,
+      { ...base, id, notificationId: reminderId(5000) },
+      scheduler,
+    );
     await waitUntil(() => cancelled.length === 1);
 
     const rejected = expect(pending).rejects.toThrow('account session changed');
@@ -574,6 +645,55 @@ describe('cancelReminder', () => {
       notificationId: reminderId(9000),
     });
     expect(cancelled).not.toContain(reminderId(9000));
+  });
+
+  it('keeps an RCS reminder row when the provider epoch rotates during native cancellation', async () => {
+    const previousSession = useSessionStore.getState();
+    const { db } = await createTestDb();
+    const native = deferred<void>();
+    const restored: string[] = [];
+    let cancelStarted = false;
+    const scheduler: ReminderScheduler = {
+      schedule: async (args) => {
+        restored.push(args.notificationId);
+      },
+      cancel: async () => {
+        cancelStarted = true;
+        await native.promise;
+      },
+    };
+    try {
+      useSessionStore.getState().connected('https://server.test', 'password', rcsInfo(RCS_EPOCH_A));
+      const id = await createReminder(db, {
+        chatGuid: rcsChatGuid(RCS_EPOCH_A),
+        messageGuid: rcsMessageGuid(RCS_EPOCH_A),
+        messagePreview: null,
+        senderName: null,
+        scheduledFor: 5_000,
+        notificationId: reminderId(5_000),
+        createdAt: 1,
+      });
+      const reminder = (await listReminders(db)).find((candidate) => candidate.id === id)!;
+      const pending = cancelReminder(db, reminder, scheduler);
+      await waitUntil(() => cancelStarted);
+
+      const session = useSessionStore.getState();
+      expect(
+        session.setServerInfoForTransport(
+          session.origin!,
+          session.transportRevision,
+          rcsInfo(RCS_EPOCH_B),
+        ),
+      ).toBe(true);
+      native.resolve(undefined);
+
+      await expect(pending).rejects.toBeInstanceOf(ReminderSessionChangedError);
+      expect(await listReminders(db)).toEqual([expect.objectContaining({ id })]);
+      expect(restored).toEqual([reminderId(5_000)]);
+    } finally {
+      native.resolve(undefined);
+      useSessionStore.setState(previousSession);
+    }
   });
 });
 
@@ -666,6 +786,58 @@ describe('rescheduleReminder', () => {
       scheduledFor: 5000,
       notificationId: reminderId(5000),
     });
+  });
+
+  it('cancels a qualified RCS reschedule trigger when the provider epoch rotates during native scheduling', async () => {
+    const previousSession = useSessionStore.getState();
+    const { db } = await createTestDb();
+    const native = deferred<void>();
+    const cancelled: string[] = [];
+    let scheduleStarted = false;
+    const scheduler: ReminderScheduler = {
+      schedule: async () => {
+        scheduleStarted = true;
+        await native.promise;
+      },
+      cancel: async (notificationId) => {
+        cancelled.push(notificationId);
+      },
+    };
+    try {
+      useSessionStore.getState().connected('https://server.test', 'password', rcsInfo(RCS_EPOCH_A));
+      const id = await createReminder(db, {
+        chatGuid: rcsChatGuid(RCS_EPOCH_A),
+        messageGuid: rcsMessageGuid(RCS_EPOCH_A),
+        messagePreview: null,
+        senderName: null,
+        scheduledFor: 5_000,
+        notificationId: reminderId(5_000),
+        createdAt: 1,
+      });
+      const reminder = (await listReminders(db)).find((candidate) => candidate.id === id)!;
+      const pending = rescheduleReminder(db, reminder, 12_000, scheduler);
+      await waitUntil(() => scheduleStarted);
+      const session = useSessionStore.getState();
+      expect(
+        session.setServerInfoForTransport(
+          session.origin!,
+          session.transportRevision,
+          rcsInfo(RCS_EPOCH_B),
+        ),
+      ).toBe(true);
+      native.resolve(undefined);
+
+      await expect(pending).rejects.toBeInstanceOf(ReminderSessionChangedError);
+      expect(cancelled).toContain(reminderId(12_000));
+      expect(await getReminderByMessageGuid(db, rcsMessageGuid(RCS_EPOCH_A))).toMatchObject({
+        id,
+        scheduledFor: 5_000,
+        notificationId: reminderId(5_000),
+      });
+    } finally {
+      native.resolve(undefined);
+      useSessionStore.setState(previousSession);
+    }
   });
 
   it('rejects a reminder move that was still waiting for the DB when A was retired', async () => {

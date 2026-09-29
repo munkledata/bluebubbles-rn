@@ -110,11 +110,13 @@ const COORDINATED_DELEGATION_PATHS = new Set([
   'src/services/errors/index.ts',
   'src/services/featureSettingsCommands.ts',
   'src/services/lock.ts',
+  'src/services/messagePreview.ts',
   'src/services/notifications/notifeeService.ts',
   'src/services/notifications/remindersService.ts',
   'src/services/realtime/incomingEventDispatcher.ts',
   'src/services/realtime/incomingEventDrain.ts',
   'src/services/realtimeControl.ts',
+  'src/services/remoteMessageDeleteUiService.ts',
   'src/services/search/inboxSearchIndexRebuild.ts',
   'src/services/notifications/actions.ts',
   'src/services/paste/pasteInput.ts',
@@ -122,10 +124,15 @@ const COORDINATED_DELEGATION_PATHS = new Set([
   'src/services/send/outgoingPasteOwnership.ts',
   'src/services/send/sendAttachmentService.ts',
   'src/services/send/sendContactService.ts',
+  'src/services/send/sendEffectService.ts',
+  'src/services/send/sendFormattedService.ts',
+  'src/services/send/sendLocationService.ts',
+  'src/services/send/sendMentionService.ts',
   'src/services/send/sendOutcome.ts',
   'src/services/send/sendReactionService.ts',
   'src/services/send/sendService.ts',
   'src/services/send/index.ts',
+  'src/services/share/shareIntake.ts',
   'src/services/chatActions.ts',
   'src/features/conversations/devSeed.ts',
   'src/services/syncControl.ts',
@@ -144,6 +151,7 @@ const COORDINATED_DELEGATION_PATHS = new Set([
   'src/services/send/sendEditService.ts',
   'src/state/featureSettingsStore.ts',
   'src/state/themeStore.ts',
+  'src/ui/ShareIntentHandler.tsx',
   'src/ui/attachments/AudioAttachment.tsx',
   'src/ui/attachments/ContactCard.tsx',
   'src/ui/attachments/FileChip.tsx',
@@ -1522,6 +1530,16 @@ const CERTIFIED_ERROR_DIAGNOSTIC_COMMONJS_LOAD = Object.freeze({
   targetPath: 'src/core/secure/errorDiagnostic.ts',
 });
 
+const CERTIFIED_GROUP_PHOTO_UPLOAD_COMMONJS_LOAD = Object.freeze({
+  importerHash: 'f21afcfce29d4d9eed86e4e3762099a5801ed69c09718a6d279380ce1472d608',
+  importerPath: 'src/services/groupPhotoUiService.ts',
+  loaderName: 'productionGroupPhotoUploader',
+  loaderHash: '23080b86ad63d69429dfc914e804456c8599a877a5499cd2d57e015d6af30c4b',
+  specifier: './groupPhotoUpload',
+  targetHash: '5582952c384fd598293226333de419063cb52ecf24c5b3768f0a8274336121ce',
+  targetPath: 'src/services/groupPhotoUpload.ts',
+});
+
 /**
  * The release exception boundary must install its console filter before loading the pure
  * diagnostic projector. Keep that one synchronous Metro load visible and exact without letting a
@@ -1573,6 +1591,66 @@ function isCertifiedErrorDiagnosticCommonJsLoad(filesByPath, importerPath, file,
   );
 }
 
+/**
+ * Loading the native upload module lazily keeps the evaluation-safe services barrel free of Expo's
+ * native file API. Pin the complete importer, arrow-function loader, and upload target so this one
+ * foreground boundary cannot become a general project-local CommonJS escape hatch.
+ */
+function isCertifiedGroupPhotoUploadCommonJsLoad(filesByPath, importerPath, file, node) {
+  const certificate = CERTIFIED_GROUP_PHOTO_UPLOAD_COMMONJS_LOAD;
+  if (importerPath !== certificate.importerPath || node.text !== certificate.specifier) {
+    return false;
+  }
+  const call = node.parent;
+  if (
+    !ts.isCallExpression(call) ||
+    call.arguments.length !== 1 ||
+    call.arguments[0] !== node ||
+    !identifierNamed(call.expression, 'require')
+  ) {
+    return false;
+  }
+  const targets = projectModulePathCandidates(importerPath, node.text).filter((path) =>
+    filesByPath.has(path),
+  );
+  const targetFile = filesByPath.get(certificate.targetPath);
+  const loaders = file.statements.flatMap((statement) => {
+    if (
+      !ts.isVariableStatement(statement) ||
+      (statement.declarationList.flags & ts.NodeFlags.Const) === 0
+    ) {
+      return [];
+    }
+    return statement.declarationList.declarations.filter(
+      (declaration) =>
+        ts.isIdentifier(declaration.name) &&
+        declaration.name.text === certificate.loaderName &&
+        declaration.initializer &&
+        ts.isArrowFunction(declaration.initializer),
+    );
+  });
+  const loader = loaders.length === 1 ? loaders[0]?.initializer : undefined;
+  if (
+    targets.length !== 1 ||
+    targets[0] !== certificate.targetPath ||
+    !targetFile ||
+    !loader ||
+    !callableIsInside(call, loader)
+  ) {
+    return false;
+  }
+  const loaderHash = createHash('sha256').update(normalizedSnippet(loader, file)).digest('hex');
+  const importerHash = createHash('sha256').update(normalizedSnippet(file, file)).digest('hex');
+  const targetHash = createHash('sha256')
+    .update(normalizedSnippet(targetFile, targetFile))
+    .digest('hex');
+  return (
+    importerHash === certificate.importerHash &&
+    loaderHash === certificate.loaderHash &&
+    targetHash === certificate.targetHash
+  );
+}
+
 function hasProjectLocalCommonJsLoad(filesByPath) {
   let found = false;
   for (const [importerPath, file] of filesByPath) {
@@ -1591,7 +1669,8 @@ function hasProjectLocalCommonJsLoad(filesByPath) {
         ) {
           if (
             isRequireCall &&
-            isCertifiedErrorDiagnosticCommonJsLoad(filesByPath, importerPath, file, node)
+            (isCertifiedErrorDiagnosticCommonJsLoad(filesByPath, importerPath, file, node) ||
+              isCertifiedGroupPhotoUploadCommonJsLoad(filesByPath, importerPath, file, node))
           ) {
             return;
           }
@@ -1639,7 +1718,7 @@ function dbProcessRelaunchCertificateCandidate({
   if (
     createHash('sha256')
       .update(normalizedSnippet(runtimeWaveFile, runtimeWaveFile))
-      .digest('hex') !== 'a14265769bad54427f56dbf645573de0cf13e5b25fafedfaae25e38a737bc6a0'
+      .digest('hex') !== '6968d63599f07c2477d08efef5f45a8731b8fc886e4d9de53b621dc5711cb603'
   ) {
     return undefined;
   }
@@ -1885,7 +1964,7 @@ function dbProcessRelaunchCertificateCandidate({
   const expectedRuntimeWaveFingerprints = new Map([
     ['deferred', '749b46b1f7f78556be7dfdc72d405a2f92493d45bf2e87e990c99a25e24b45eb'],
     ['observe', '2a1287160d12928bb5a95a0ce78bff88adf80562d831e4aedd6dd9c261f1f965'],
-    ['syncChat', '3ead31c399bf10e3dda22ec59e42f593a280c7a84e969c1262f83b5371e1d737'],
+    ['syncChat', '6438f8d7da356f50db890f6e7baa72959966b6c7e345c0fe51bdc2bf5ee01e57'],
     ['liveMessage', '4cccfc43e183566a82228df3a9689f8b217d78cfed297c6f523a6485fa05b4a6'],
     ['syncApi', 'bc4e46fa51e2e97b812b7cd1b9473812c2edc49cde9ae414c33b3b54fe080284'],
     ['count', '04da8112837e41f975bb09ef7205ea81050dd24c1c167eba8914b3ba69a54ef1'],
@@ -1895,7 +1974,7 @@ function dbProcessRelaunchCertificateCandidate({
     ],
     [
       'runDbRuntimeConcurrencyWave',
-      '492d0d4abd275e7fb9148b693fd21eff83b38623d6b0daaeda2ea711f92cbc2d',
+      'a82b6925813f5910e09dbdceb50e53e93948f1a2a6c1e206d869b1119d39d2f8',
     ],
   ]);
   for (const [name, expected] of expectedRuntimeWaveFingerprints) {
@@ -2249,8 +2328,11 @@ function dbProcessRelaunchCertificateCandidate({
       'DB_ACTIVE_MIGRATION_DEATH_RESUMING_FILE',
       [ts.NodeFlags.Const, "'.gator-db-active-migration-death-resuming-v1'"],
     ],
-    ['DB_RELAUNCH_MIGRATION_COUNT', [ts.NodeFlags.Const, '49 as const']],
-    ['DB_RELAUNCH_MIGRATION_HEAD', [ts.NodeFlags.Const, "'0049_inbox_search_postings' as const"]],
+    ['DB_RELAUNCH_MIGRATION_COUNT', [ts.NodeFlags.Const, '52 as const']],
+    [
+      'DB_RELAUNCH_MIGRATION_HEAD',
+      [ts.NodeFlags.Const, "'0052_chat_history_deletion_boundary' as const"],
+    ],
     ['WAIT_FOR_HOST_PROCESS_KILL', [ts.NodeFlags.Const, 'new Promise<never>(() => undefined)']],
     ['activeDbRelaunchContract', [ts.NodeFlags.Let, undefined]],
     ['ordinaryBootClaimedProcess', [ts.NodeFlags.Let, 'false']],
@@ -2281,22 +2363,31 @@ function dbProcessRelaunchCertificateCandidate({
     ['DB_RUNTIME_CONCURRENCY_SELF_TEST_NAME', "'driver-runtime-concurrency-selftest.db'"],
     ['DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_A', "'db-02c-public-throwaway-key-a-v1'"],
     ['DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_B', "'db-02c-public-throwaway-key-b-v1'"],
-    ['DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_COUNT', '49 as const'],
-    ['DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_HEAD', "'0049_inbox_search_postings' as const"],
+    ['DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_COUNT', '52 as const'],
+    [
+      'DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_HEAD',
+      "'0052_chat_history_deletion_boundary' as const",
+    ],
     ['DB_RUNTIME_CONCURRENCY_SENTINEL_KEY', "'gator-db-runtime-wave-sentinel'"],
     ['DB_RUNTIME_CONCURRENCY_SENTINEL_VALUE', "'committed'"],
     ['DB_BACKUP_RESTORE_SELF_TEST_NAME', "'driver-backup-restore-selftest.db'"],
     ['DB_BACKUP_RESTORE_SELF_TEST_KEY', "'backup-02-public-throwaway-key-v1'"],
-    ['DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_COUNT', '49 as const'],
-    ['DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_HEAD', "'0049_inbox_search_postings' as const"],
+    ['DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_COUNT', '52 as const'],
+    [
+      'DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_HEAD',
+      "'0052_chat_history_deletion_boundary' as const",
+    ],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_NAME', "'driver-relaunch-selftest.db'"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_KEY', "'db-03b1-public-throwaway-key-v1'"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_SENTINEL', "'driver-relaunch-continuity-v1'"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_PARTIAL_MIGRATION_COUNT', '29'],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_PARTIAL_MIGRATION_HEAD', "'0029_chats_deleted_at'"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_RETRY_MIGRATION_START', "'0030_attachment_cache_entries'"],
-    ['DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_COUNT', '49 as const'],
-    ['DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_HEAD', "'0049_inbox_search_postings' as const"],
+    ['DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_COUNT', '52 as const'],
+    [
+      'DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_HEAD',
+      "'0052_chat_history_deletion_boundary' as const",
+    ],
     ['DB_ACTIVE_WAL_WRITE_DEATH_SELF_TEST_NAME', "'driver-wal-write-death-selftest.db'"],
     ['DB_ACTIVE_WAL_WRITE_DEATH_SELF_TEST_KEY', "'db-03b2b1-public-throwaway-key-v1'"],
     ['DB_ACTIVE_WAL_WRITE_DEATH_BASELINE', "'db-03b2b1-baseline-v1'"],
@@ -2308,8 +2399,8 @@ function dbProcessRelaunchCertificateCandidate({
     ['DB_ACTIVE_MIGRATION_DEATH_PREFIX_COUNT', '37'],
     ['DB_ACTIVE_MIGRATION_DEATH_PREFIX_HEAD', "'0037_purge_legacy_redacted_mode_setting' as const"],
     ['DB_ACTIVE_MIGRATION_DEATH_TARGET', "'0038_scrub_reaction_selected_message_text' as const"],
-    ['DB_ACTIVE_MIGRATION_DEATH_HEAD', "'0049_inbox_search_postings' as const"],
-    ['DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT', '49 as const'],
+    ['DB_ACTIVE_MIGRATION_DEATH_HEAD', "'0052_chat_history_deletion_boundary' as const"],
+    ['DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT', '52 as const'],
     ['DB_ACTIVE_MIGRATION_DEATH_TARGET_COUNT', '128'],
     ['DB_ACTIVE_MIGRATION_DEATH_SELECTED_TEXT_LENGTH', '8_192'],
     [
@@ -2419,6 +2510,27 @@ function dbProcessRelaunchCertificateCandidate({
     'src/services/send/sendAttachmentService.ts',
     'sendImageMessage',
   );
+  const sendVoice = topLevelFunction(filesByPath, 'src/services/send/index.ts', 'sendVoice');
+  const sendCurrentLocationMessage = topLevelFunction(
+    filesByPath,
+    'src/services/send/sendLocationService.ts',
+    'sendCurrentLocationMessage',
+  );
+  const sendIMessageEffect = topLevelFunction(
+    filesByPath,
+    'src/services/send/sendEffectService.ts',
+    'sendIMessageEffect',
+  );
+  const sendIMessageMention = topLevelFunction(
+    filesByPath,
+    'src/services/send/sendMentionService.ts',
+    'sendIMessageMention',
+  );
+  const sendIMessageFormatted = topLevelFunction(
+    filesByPath,
+    'src/services/send/sendFormattedService.ts',
+    'sendIMessageFormatted',
+  );
   const sendTextMessage = topLevelFunction(
     filesByPath,
     'src/services/send/sendService.ts',
@@ -2428,6 +2540,11 @@ function dbProcessRelaunchCertificateCandidate({
     filesByPath,
     'src/services/send/sendContactService.ts',
     'sendContactMessage',
+  );
+  const sendReactionMessage = topLevelFunction(
+    filesByPath,
+    'src/services/send/sendReactionService.ts',
+    'sendReactionMessage',
   );
   const resendOutgoingRow = topLevelFunction(
     filesByPath,
@@ -2443,6 +2560,11 @@ function dbProcessRelaunchCertificateCandidate({
     filesByPath,
     'src/services/send/sendOutcome.ts',
     'handleSendFailure',
+  );
+  const isTerminalLocationSendError = topLevelFunction(
+    filesByPath,
+    'src/services/send/sendOutcome.ts',
+    'isTerminalLocationSendError',
   );
   const withCurrentDeliveryTransaction = topLevelFunction(
     filesByPath,
@@ -2490,26 +2612,38 @@ function dbProcessRelaunchCertificateCandidate({
   // reviewed entry bodies plus the exact contact-link bypass and send-attempt ownership closure, so
   // internal DB/native work cannot become detached while an outer inventory id stays unchanged.
   const runtimeProductionCalleeFingerprints = new Map([
-    [syncAllChats, '31721c299f75745c0c3ea4a8a0110c3a2a656c39784fd2c6d633b25da2b0098e'],
+    [syncAllChats, '189937044d82dfb92301d506020b56ab350514c7cc2fb7d8d4e3d909511b0461'],
     [linkHandlesAfterCommit, '02704855bb63dd6db55395393c6f25fa309d91fdb3aac54422c71ca86fd206b6'],
-    [sendImageMessage, '5aef70058e1688edc87d40b7c1b9fb9eee7018b6b03f9e9ff7d7092ab9dd5228'],
-    [reconcileSendOutcome, '8829dd1fff1160b2a77b29713228232f30d1ef6ecb6d86ecadd72f8a48bb4952'],
-    [handleSendFailure, '25497104c29d4672fbe9f9cfbc0ed058da0bd00f34b83aa068b09728a2fe25a0'],
+    [sendImageMessage, '8e1d4938fde6492a04f9a455ee44786cfc0f5c56f84a04798e42592783ea01f7'],
+    [sendVoice, '18b6288942751c4a3adf6ebab973e88fdae2d4e2932acaeb0abadc34ca779062'],
+    [
+      sendCurrentLocationMessage,
+      'f160a0844999ab354cb68ff35f1a2de1d06f34c78edb39b197c423313e3b9985',
+    ],
+    [sendIMessageEffect, '1c039d7607e2fa1092c8401a8f0a382c522f434ef9811f673ef6481abfd2ddc0'],
+    [sendIMessageMention, 'bfd922d5ff2918e6911ae7f7939b4ee1fc894cca10d779a88cdce9ca848b0bbd'],
+    [sendIMessageFormatted, '6c53108d0cdd11091b68ae3119de718bd1c94220d6cf3204bafbe0e03bf8a68d'],
+    [reconcileSendOutcome, 'aedfc0bb25afbf331d39a1eb1e425b726dee99a5878b04a4fbb9bdca5f9636b1'],
+    [handleSendFailure, '0e3e0eb474d0bdec7ba6fa8f7a54ca86b0909c10b41dbb25efc64de2f17affb1'],
+    [
+      isTerminalLocationSendError,
+      'c4476403a6dd9484f45fbb35fa032c97e2f48d81d058482f880c3dd1a163a2d5',
+    ],
     [
       withCurrentDeliveryTransaction,
-      '08e52d3be405df405ae6ff1f66b29922b89884b05bb0378629c0b6b040ef3330',
+      '89571d272f5cd53c5d70cc98412afbb3ba505b2b6705982475a1400aa38dbf89',
     ],
-    [dbEventSinkConstructor, 'fc1dde2a75c07d2baa063cb4c9c28ea618ea3c0389fc63e87a97dbf003f302b7'],
-    [dbEventSinkLinkContacts, 'efeff49c6e0d6e74395d05dcf5f3e1f6774decb7fec6e773ea61761d9e01d0e9'],
-    [dbEventSinkOnEvent, '0d8b2585776b21760d2427884ce72f00d57a176bb6b352b73231d87d9ddc64de'],
-    [restoreBackup, 'f42bd7777a2afd3ffbbd067e825061a47b031efb298e4ebbacf314d559797a7c'],
+    [dbEventSinkConstructor, '711559bd22c0abe4cd4616c02abcc11716e9fbeadbbc1b034fae93668b9249eb'],
+    [dbEventSinkLinkContacts, '0815eb9769042c9b5d8be504720e727f05cdde857fd255d692afdb391b3e3e2d'],
+    [dbEventSinkOnEvent, '16da4006d5b5d0411feb51e4657a145a3694801d98d6bbeb1bac61ab5b2800c9'],
+    [restoreBackup, '288e2048756fcdf32695da44b9cb685160fa82baf12399b615b055924bd62437'],
     [
       restorePreparedBackupWithinTransaction,
-      '98c7cfce43d21aba8df8b91843f8021df9e121e8d704523adb8440025dc649d9',
+      '3b5fec9cbdb126021831009ff232e9c5a96a9fdea74c1e35eb089df42ed9f490',
     ],
     [
       resolveRcsAttemptOwnership,
-      'b5a6143737abfcd925e8d3e191baf4eff28365737f07055432e1a7c29a7ca53d',
+      '5f96b040cff345e58ff94c856558695ecf28e42436dbfa427a2a9c886a39a21d',
     ],
     [pinSendTransport, 'd5b3d2ce63b16eecf6c7490f69f8368de8d6847833898258a89efa0af97d2aa6'],
   ]);
@@ -2568,9 +2702,16 @@ function dbProcessRelaunchCertificateCandidate({
     !withDbWriteLock?.body ||
     !syncAllChats?.body ||
     !sendImageMessage?.body ||
+    !sendVoice?.body ||
+    !sendCurrentLocationMessage?.body ||
+    !sendIMessageEffect?.body ||
+    !sendIMessageMention?.body ||
+    !sendIMessageFormatted?.body ||
     !sendTextMessage?.body ||
     !sendContactMessage?.body ||
+    !sendReactionMessage?.body ||
     !resendOutgoingRow?.body ||
+    !isTerminalLocationSendError?.body ||
     !dbEventSinkOnEvent?.body ||
     !restoreBackup?.body ||
     !resolveRcsAttemptOwnership?.body ||
@@ -3549,6 +3690,12 @@ function dbProcessRelaunchCertificateCandidate({
   const productionSendImageEdges = allSendImageEdges.filter(
     (edge) => edge !== runtimeWaveSendEdges[0],
   );
+  const voiceSendImageEdges = productionSendImageEdges.filter((edge) =>
+    callableIsInside(edge.caller, sendVoice),
+  );
+  const regularProductionSendImageEdges = productionSendImageEdges.filter(
+    (edge) => !callableIsInside(edge.caller, sendVoice),
+  );
   const isDirectUnspreadCallEdge = (edge, callee) =>
     edge.callee === callee &&
     callableNodeForExpression(edge.node.expression, checker) === callee &&
@@ -3601,10 +3748,13 @@ function dbProcessRelaunchCertificateCandidate({
     runtimeWaveSyncEdges.length !== 2 ||
     runtimeWaveSendEdges.length !== 1 ||
     runtimeWaveEventEdges.length !== 1 ||
-    allSendImageEdges.length !== 4 ||
+    allSendImageEdges.length !== 5 ||
     allSendImageEdges.some((edge) => edge.node.arguments.some(ts.isSpreadElement)) ||
-    productionSendImageEdges.length !== 3 ||
-    productionSendImageEdges.some(
+    productionSendImageEdges.length !== 4 ||
+    voiceSendImageEdges.length !== 1 ||
+    voiceSendImageEdges[0].node.arguments.length !== 10 ||
+    regularProductionSendImageEdges.length !== 3 ||
+    regularProductionSendImageEdges.some(
       (edge) =>
         edge.node.arguments.length !== 10 ||
         !identifierNamed(edge.node.arguments[6], 'undefined') ||
@@ -3622,38 +3772,68 @@ function dbProcessRelaunchCertificateCandidate({
     !runtimeSendOptions ||
     normalizedSnippet(runtimeSendOptions, runtimeWaveFile) !==
       "{ failureNoticeMode: 'suppressed' }" ||
-    optionedReconcileEdges.length !== 4 ||
+    optionedReconcileEdges.length !== 9 ||
     !hasExactOptionedEdge(
       optionedReconcileEdges,
       sendTextMessage,
       5,
-      '{ attemptOwnerToken: attemptOwnerToken ?? undefined, }',
+      '{ attemptOwnerToken: attemptOwnerToken ?? undefined, expectedChatGuid: args.chatGuid, }',
     ) ||
     !hasExactOptionedEdge(
       optionedReconcileEdges,
       sendContactMessage,
       5,
-      '{ attemptOwnerToken: attemptOwnerToken ?? undefined, }',
+      '{ attemptOwnerToken: attemptOwnerToken ?? undefined, expectedChatGuid: args.chatGuid, }',
+    ) ||
+    !hasExactOptionedEdge(
+      optionedReconcileEdges,
+      sendReactionMessage,
+      5,
+      '{ expectedChatGuid: args.chatGuid, }',
+    ) ||
+    !hasExactOptionedEdge(
+      optionedReconcileEdges,
+      sendCurrentLocationMessage,
+      5,
+      '{ expectedChatGuid: args.chatGuid, }',
+    ) ||
+    !hasExactOptionedEdge(
+      optionedReconcileEdges,
+      sendIMessageEffect,
+      5,
+      '{ expectedChatGuid: args.chatGuid, }',
+    ) ||
+    !hasExactOptionedEdge(
+      optionedReconcileEdges,
+      sendIMessageMention,
+      5,
+      '{ expectedChatGuid: request.chatGuid, }',
+    ) ||
+    !hasExactOptionedEdge(
+      optionedReconcileEdges,
+      sendIMessageFormatted,
+      5,
+      '{ expectedChatGuid: request.chatGuid, }',
     ) ||
     !hasExactOptionedEdge(optionedReconcileEdges, sendImageMessage, 5, 'attemptOptions') ||
     !hasExactNestedOptionedEdge(
       optionedReconcileEdges,
       resendOutgoingRow,
       5,
-      '{ attemptOwnerToken, }',
+      '{ attemptOwnerToken, expectedChatGuid: row.chatGuid, }',
     ) ||
-    optionedFailureEdges.length !== 4 ||
+    optionedFailureEdges.length !== 8 ||
     !hasExactOptionedEdge(
       optionedFailureEdges,
       sendTextMessage,
       7,
-      '{ attemptOwnerToken: attemptOwnerToken ?? undefined }',
+      "{ attemptOwnerToken: attemptOwnerToken ?? undefined, ...(target ? { terminalUncertainKind: 'reply' as const } : {}), }",
     ) ||
     !hasExactOptionedEdge(
       optionedFailureEdges,
       sendContactMessage,
       7,
-      '{ attemptOwnerToken: attemptOwnerToken ?? undefined, }',
+      '{ attemptOwnerToken: attemptOwnerToken ?? undefined, terminalUncertain: !rcsChat, }',
     ) ||
     !hasExactOptionedEdge(
       optionedFailureEdges,
@@ -3661,11 +3841,35 @@ function dbProcessRelaunchCertificateCandidate({
       7,
       "{ ...outcomeOptions, attemptOwnerToken: attemptOwnerToken ?? undefined, ...(imessageAttachment ? { terminalUncertain: true, failureNoticeMode: 'suppressed' as const } : {}), }",
     ) ||
+    !hasExactOptionedEdge(
+      optionedFailureEdges,
+      sendCurrentLocationMessage,
+      7,
+      "isTerminalLocationSendError(error) ? { terminalUncertainKind: 'location' } : undefined",
+    ) ||
+    !hasExactNestedOptionedEdge(
+      optionedFailureEdges,
+      sendIMessageEffect,
+      7,
+      "{ terminalUncertainKind: 'effect', expectedChatGuid: args.chatGuid }",
+    ) ||
+    !hasExactNestedOptionedEdge(
+      optionedFailureEdges,
+      sendIMessageMention,
+      7,
+      "{ terminalUncertainKind: 'mention', expectedChatGuid: request.chatGuid }",
+    ) ||
+    !hasExactNestedOptionedEdge(
+      optionedFailureEdges,
+      sendIMessageFormatted,
+      7,
+      "{ terminalUncertainKind: 'formatted', expectedChatGuid: request.chatGuid }",
+    ) ||
     !hasExactNestedOptionedEdge(
       optionedFailureEdges,
       resendOutgoingRow,
       7,
-      '{ attemptOwnerToken, }',
+      "{ attemptOwnerToken, ...(terminalLocation ? { terminalUncertainKind: 'location' as const } : {}), }",
     ) ||
     edges.filter((edge) => edge.callee === runtimeConcurrencyCount).length !== 15 ||
     edges.filter((edge) => edge.callee === submitOrderedCoordinatorWave).length !== 1 ||
@@ -4550,10 +4754,504 @@ function driverHistorySelfTestCertificateCandidate({
   };
 }
 
+/** Certify the retained, fixed-name PERF-01 files before sharing the PERF-02 seed helper. */
+function perf01ColdBenchmarkCertificateCandidate({
+  filesByPath,
+  checker,
+  edges,
+  referenceEdges,
+  findings,
+}) {
+  const databasePath = 'src/db/database.ts';
+  const screenPath = 'src/ui/conversations/ColdInboxBenchmarkScreen.tsx';
+  const routePath = 'app/(app)/perf-inbox-cold.tsx';
+  const servicePath = 'src/services/index.ts';
+  const databaseFile = filesByPath.get(databasePath);
+  const screenFile = filesByPath.get(screenPath);
+  const routeFile = filesByPath.get(routePath);
+  const serviceFile = filesByPath.get(servicePath);
+  const name = topLevelFunction(filesByPath, databasePath, 'perf01ColdName');
+  const cleanup = topLevelFunction(filesByPath, databasePath, 'deletePerf01ColdFixture');
+  const prepare = topLevelFunction(filesByPath, databasePath, 'preparePerf01ColdFixture');
+  const measure = topLevelFunction(filesByPath, databasePath, 'openPerf01ColdFixture');
+  const screen = topLevelFunction(filesByPath, screenPath, 'ColdInboxBenchmarkScreen');
+  const opRunner = topLevelFunction(filesByPath, databasePath, 'opRunner');
+  const drizzleAdapter = topLevelFunction(filesByPath, databasePath, 'drizzleAdapter');
+  const extractRows = topLevelFunction(filesByPath, databasePath, 'extractRows');
+  const runMigrations = topLevelFunction(filesByPath, 'src/db/migrate.ts', 'runMigrations');
+  const nameState = databaseFile ? topLevelVariable(databaseFile, 'DB_NAME') : undefined;
+  const keyState = databaseFile ? topLevelVariable(databaseFile, 'PERF01_COLD_KEY') : undefined;
+  const rawState = databaseFile ? topLevelVariable(databaseFile, 'rawDb') : undefined;
+  const drizzleState = databaseFile ? topLevelVariable(databaseFile, 'dbInstance') : undefined;
+  if (
+    !databaseFile ||
+    !screenFile ||
+    !routeFile ||
+    !serviceFile ||
+    !name?.body ||
+    !cleanup?.body ||
+    !prepare?.body ||
+    !measure?.body ||
+    !screen?.body ||
+    !opRunner?.body ||
+    !drizzleAdapter?.body ||
+    !extractRows?.body ||
+    !runMigrations?.body ||
+    !nameState?.declaration.initializer ||
+    !keyState?.declaration.initializer ||
+    !rawState ||
+    !drizzleState
+  )
+    return undefined;
+  const sha = (node, file) =>
+    createHash('sha256').update(normalizedSnippet(node, file)).digest('hex');
+  if (
+    sha(name, databaseFile) !==
+      'e7df163369f21716684bc7c49bde4fc447f46ad0d1ad23c4219020074bdfb6d0' ||
+    sha(cleanup, databaseFile) !==
+      'e668fc798c8ad23a59a0bca68a74a2c6a12d013fc97a0c14d3240ff635090809' ||
+    sha(prepare, databaseFile) !==
+      'd197554f078bdf03bcf8b132387155b99be2d750447cf1504259a6184bb1541d' ||
+    sha(measure, databaseFile) !==
+      '6002e7bd8da54ec0b25ef5d1f3db310fdf31f6e6f6044d599fb505abc799b797' ||
+    sha(screenFile, screenFile) !==
+      '9ebdcb0ed61761d699b83742351b2fe7d0247dfb5a726a129de1c4a05befebd5' ||
+    sha(routeFile, routeFile) !==
+      'c32c1208a961f1f4f9b3867f95cc041e5f5c38adad0c89473642e717d7c9a20b' ||
+    normalizedSnippet(nameState.declaration.initializer, databaseFile) !== "'gator.db'" ||
+    normalizedSnippet(keyState.declaration.initializer, databaseFile) !==
+      "'perf01-public-throwaway-key-v1'"
+  )
+    return undefined;
+  const serviceAliases = [
+    ['prepareDevPerf01ColdFixture', 'preparePerf01ColdFixture'],
+    ['openDevPerf01ColdFixture', 'openPerf01ColdFixture'],
+    ['deleteDevPerf01ColdFixture', 'deletePerf01ColdFixture'],
+  ];
+  if (
+    serviceAliases.some(([alias, target]) => {
+      const state = topLevelVariable(serviceFile, alias);
+      const imported = namedImportBinding(serviceFile, '@db/database', target);
+      return (
+        !state?.declaration.initializer ||
+        !imported ||
+        normalizedSnippet(state.declaration.initializer, serviceFile) !== target ||
+        !sameSymbol(unwrapExpression(state.declaration.initializer), imported, checker)
+      );
+    })
+  )
+    return undefined;
+  const openBinding = soleNamedImportBinding(databaseFile, '@op-engineering/op-sqlite', 'open');
+  const drizzleBinding = soleNamedImportBinding(databaseFile, 'drizzle-orm/op-sqlite', 'drizzle');
+  if (!openBinding || !drizzleBinding) return undefined;
+  const owners = [cleanup, prepare, measure];
+  const insideOwner = (node) => owners.some((owner) => nodeIsInside(node, owner));
+  const openCalls = directCallsToBinding(databaseFile, openBinding, checker).filter(insideOwner);
+  const runnerFactoryCalls = directCallsToBinding(databaseFile, opRunner.name, checker).filter(
+    insideOwner,
+  );
+  const adapterCalls = directCallsToBinding(databaseFile, drizzleAdapter.name, checker).filter(
+    insideOwner,
+  );
+  const drizzleCalls = directCallsToBinding(databaseFile, drizzleBinding, checker).filter(
+    insideOwner,
+  );
+  const extractCalls = directCallsToBinding(databaseFile, extractRows.name, checker).filter(
+    insideOwner,
+  );
+  const migrationCalls = edges.filter(
+    (edge) => edge.callee === runMigrations && nodeIsInside(edge.node, prepare),
+  );
+  const expectedFindingIds = new Set([
+    'src/db/database.ts#deletePerf01ColdFixture:native-database-delete:9a4d94084922',
+    'src/db/database.ts#preparePerf01ColdFixture:native-database-delete:8405deee85cd',
+    'src/db/database.ts#preparePerf01ColdFixture:sql-pragma:133307a5048f',
+    'src/db/database.ts#preparePerf01ColdFixture:sql-pragma:95a909b0e621',
+  ]);
+  const protectedFindings = findings.filter(
+    (finding) =>
+      finding.path === databasePath && owners.some((owner) => finding.symbol === owner.name.text),
+  );
+  if (
+    openCalls.length !== 4 ||
+    runnerFactoryCalls.length !== 1 ||
+    adapterCalls.length !== 2 ||
+    drizzleCalls.length !== 2 ||
+    extractCalls.length !== 2 ||
+    extractCalls.some((call) => !nodeIsInside(call, prepare)) ||
+    migrationCalls.length !== 1 ||
+    protectedFindings.length !== expectedFindingIds.size ||
+    protectedFindings.some((finding) => !expectedFindingIds.has(finding.id)) ||
+    [rawState, drizzleState, nameState].some((state) =>
+      runtimeReferencesToBinding(databaseFile, state.declaration.name, checker).some((reference) =>
+        insideOwner(reference),
+      ),
+    ) ||
+    referenceEdges.some((reference) => owners.some((owner) => reference.target === owner))
+  )
+    return undefined;
+  const allowedCaller = (edge) =>
+    edge.file === screenFile || (edge.file === databaseFile && nodeIsInside(edge.node, prepare));
+  if (edges.some((edge) => owners.some((owner) => edge.callee === owner) && !allowedCaller(edge))) {
+    return undefined;
+  }
+  const screenMutationReferences = referenceEdges.filter(
+    (reference) =>
+      reference.file === screenFile && reference.node.getText(screenFile) === 'cleanup',
+  );
+  if (screenMutationReferences.length !== 1) return undefined;
+  return {
+    openCalls,
+    runnerFactoryCalls,
+    adapterCalls,
+    drizzleCalls,
+    extractCalls,
+    migrationCalls: migrationCalls.map((edge) => edge.node),
+    findingIds: expectedFindingIds,
+    callNodes: edges
+      .filter(
+        (edge) =>
+          edge.file === screenFile || (edge.file === databaseFile && insideOwner(edge.node)),
+      )
+      .map((edge) => edge.node)
+      .concat(screenMutationReferences.map((reference) => reference.node)),
+  };
+}
+
+/**
+ * The PERF-02 native fixture is a second, fixed throwaway SQLCipher lifetime. Keep its reviewed
+ * implementation and service-mediated DEV UI entry exact: the runner opens only its own file,
+ * awaits migrations and fixture work, then closes and deletes the file in finally. Symbol checks
+ * prevent another caller, adapter consumer, or production-handle reference from inheriting this
+ * exception.
+ */
+function perf02InboxBenchmarkCertificateCandidate({
+  filesByPath,
+  checker,
+  edges,
+  referenceEdges,
+  findings,
+  perf01Candidate,
+}) {
+  const databasePath = 'src/db/database.ts';
+  const benchmarkPath = 'src/db/performance/deviceInboxBenchmark.ts';
+  const servicePath = 'src/services/index.ts';
+  const homePath = 'app/(app)/home.tsx';
+  const screenPath = 'src/ui/conversations/PerfInboxBenchmarkScreen.tsx';
+  const routePath = 'app/(app)/perf-inbox.tsx';
+  const databaseFile = filesByPath.get(databasePath);
+  const benchmarkFile = filesByPath.get(benchmarkPath);
+  const serviceFile = filesByPath.get(servicePath);
+  const homeFile = filesByPath.get(homePath);
+  const screenFile = filesByPath.get(screenPath);
+  const routeFile = filesByPath.get(routePath);
+  const hookFile = filesByPath.get('src/features/conversations/useChats.ts');
+  const reactiveFile = filesByPath.get('src/db/useReactiveQuery.ts');
+  const listFile = filesByPath.get('src/ui/conversations/ConversationListScreen.tsx');
+  const tileFile = filesByPath.get('src/ui/conversations/ConversationTile.tsx');
+  const cleanup = topLevelFunction(filesByPath, databasePath, 'deletePerf02BenchmarkDatabase');
+  const runner = topLevelFunction(filesByPath, databasePath, 'runPerf02DeviceInboxBenchmark');
+  const fixture = topLevelFunction(filesByPath, benchmarkPath, 'runDeviceInboxBenchmarkFixture');
+  const seed = topLevelFunction(filesByPath, benchmarkPath, 'seedDeviceInboxBenchmarkFixture');
+  const bump = topLevelFunction(filesByPath, benchmarkPath, 'bumpDeviceInboxBenchmarkFixture');
+  const service = topLevelFunction(filesByPath, servicePath, 'runDevPerf02InboxBenchmark');
+  const home = topLevelFunction(filesByPath, homePath, 'Home');
+  const screen = topLevelFunction(filesByPath, screenPath, 'PerfInboxBenchmarkScreen');
+  const opRunner = topLevelFunction(filesByPath, databasePath, 'opRunner');
+  const drizzleAdapter = topLevelFunction(filesByPath, databasePath, 'drizzleAdapter');
+  const extractRows = topLevelFunction(filesByPath, databasePath, 'extractRows');
+  const runMigrations = topLevelFunction(filesByPath, 'src/db/migrate.ts', 'runMigrations');
+  const rawState = databaseFile ? topLevelVariable(databaseFile, 'rawDb') : undefined;
+  const drizzleState = databaseFile ? topLevelVariable(databaseFile, 'dbInstance') : undefined;
+  const productionNameState = databaseFile ? topLevelVariable(databaseFile, 'DB_NAME') : undefined;
+  const nameState = databaseFile
+    ? topLevelVariable(databaseFile, 'PERF02_BENCHMARK_DB_NAME')
+    : undefined;
+  const keyState = databaseFile
+    ? topLevelVariable(databaseFile, 'PERF02_BENCHMARK_KEY')
+    : undefined;
+  const runningState = databaseFile
+    ? topLevelVariable(databaseFile, 'perf02BenchmarkRunning')
+    : undefined;
+  if (
+    !databaseFile ||
+    !benchmarkFile ||
+    !serviceFile ||
+    !homeFile ||
+    !screenFile ||
+    !routeFile ||
+    !hookFile ||
+    !reactiveFile ||
+    !listFile ||
+    !tileFile ||
+    !cleanup?.body ||
+    !runner?.body ||
+    !fixture?.body ||
+    !seed?.body ||
+    !bump?.body ||
+    !service?.body ||
+    !home?.body ||
+    !screen?.body ||
+    !opRunner?.body ||
+    !drizzleAdapter?.body ||
+    !extractRows?.body ||
+    !runMigrations?.body ||
+    !rawState ||
+    !drizzleState ||
+    !productionNameState?.declaration.initializer ||
+    !nameState?.declaration.initializer ||
+    !keyState?.declaration.initializer ||
+    !runningState?.declaration.initializer ||
+    !perf01Candidate
+  ) {
+    return undefined;
+  }
+  const sha = (node, file) =>
+    createHash('sha256').update(normalizedSnippet(node, file)).digest('hex');
+  if (
+    sha(cleanup, databaseFile) !==
+      '82b69f0ad1ae12e39d4571c29509648085d319e01a89bbd7bf7e9aa23cc48c3c' ||
+    sha(runner, databaseFile) !==
+      '3680d44e5847212a22c97e1869c68b4d517b951152440c37578b22d6254e649a' ||
+    sha(benchmarkFile, benchmarkFile) !==
+      'd3490c2697828a9406d9615b7eed5ccc9a8046107539bb365ba2c3106d7f7405' ||
+    sha(service, serviceFile) !==
+      'f2499c347c59626735128bed19f5e5375e43a5b5a211dc26b5b95bddf04f60ae' ||
+    sha(home, homeFile) !== '951339054464f21c63b03ff73de75d689d254cf466fba406ce98ff8876364de4' ||
+    sha(screenFile, screenFile) !==
+      'a88d26af63b1b12092b228a9982abc314e1aee0c25130ec424c4220c72a20e98' ||
+    sha(routeFile, routeFile) !==
+      'ff92c4c0efe0899004d4ac009ada33d152a5961c506fedc0856c3647fb838b00' ||
+    sha(hookFile, hookFile) !==
+      'c88fb682529c0b4115645769236bc75129272d3557c013e9b86a1b9193e96bd8' ||
+    sha(reactiveFile, reactiveFile) !==
+      '052cde3cfd637a3aed40f083910a8fb126f92be445c5ff3650b6fc1be34a406e' ||
+    sha(listFile, listFile) !==
+      'cc19a10523a66fe2b93b95557c674aceadcdcae3c6f9bf074c7215d4a16bce64' ||
+    sha(tileFile, tileFile) !==
+      'bfe8887f3c0a23ca1b01c5ab03f9f0e5057bec215be80f95e7bc122491c943e4' ||
+    !(nameState.declarationList.flags & ts.NodeFlags.Const) ||
+    normalizedSnippet(nameState.declaration.initializer, databaseFile) !==
+      "'perf02-inbox-benchmark.db'" ||
+    !(keyState.declarationList.flags & ts.NodeFlags.Const) ||
+    normalizedSnippet(keyState.declaration.initializer, databaseFile) !==
+      "'perf02-public-throwaway-key-v1'" ||
+    normalizedSnippet(productionNameState.declaration.initializer, databaseFile) ===
+      normalizedSnippet(nameState.declaration.initializer, databaseFile) ||
+    normalizedSnippet(runningState.declaration.initializer, databaseFile) !== 'false'
+  ) {
+    return undefined;
+  }
+
+  const openBinding = soleNamedImportBinding(databaseFile, '@op-engineering/op-sqlite', 'open');
+  const drizzleBinding = soleNamedImportBinding(databaseFile, 'drizzle-orm/op-sqlite', 'drizzle');
+  const fixtureBinding = namedImportBinding(
+    databaseFile,
+    './performance/deviceInboxBenchmark',
+    'runDeviceInboxBenchmarkFixture',
+  );
+  const seedBinding = namedImportBinding(
+    databaseFile,
+    './performance/deviceInboxBenchmark',
+    'seedDeviceInboxBenchmarkFixture',
+  );
+  const bumpBinding = namedImportBinding(
+    databaseFile,
+    './performance/deviceInboxBenchmark',
+    'bumpDeviceInboxBenchmarkFixture',
+  );
+  const serviceRunnerBinding = namedImportBinding(
+    serviceFile,
+    '@db/database',
+    'runPerf02DeviceInboxBenchmark',
+  );
+  const homeRunnerBinding = namedImportBinding(
+    homeFile,
+    '@/services',
+    'runDevPerf02InboxBenchmark',
+  );
+  const screenRunnerBinding = namedImportBinding(
+    screenFile,
+    '@/services',
+    'runDevPerf02InboxBenchmark',
+  );
+  if (
+    !openBinding ||
+    !drizzleBinding ||
+    !fixtureBinding ||
+    !seedBinding ||
+    !bumpBinding ||
+    !serviceRunnerBinding ||
+    !homeRunnerBinding ||
+    !screenRunnerBinding
+  )
+    return undefined;
+  const openCalls = directCallsToBinding(databaseFile, openBinding, checker).filter(
+    (call) => nodeIsInside(call, cleanup) || nodeIsInside(call, runner),
+  );
+  const runnerFactoryCalls = directCallsToBinding(databaseFile, opRunner.name, checker).filter(
+    (call) => nodeIsInside(call, runner),
+  );
+  const adapterCalls = directCallsToBinding(databaseFile, drizzleAdapter.name, checker).filter(
+    (call) => nodeIsInside(call, runner),
+  );
+  const drizzleCalls = directCallsToBinding(databaseFile, drizzleBinding, checker).filter((call) =>
+    nodeIsInside(call, runner),
+  );
+  const extractCalls = directCallsToBinding(databaseFile, extractRows.name, checker).filter(
+    (call) => nodeIsInside(call, runner),
+  );
+  const fixtureCalls = directCallsToBinding(databaseFile, fixtureBinding, checker);
+  const seedCalls = directCallsToBinding(databaseFile, seedBinding, checker);
+  const bumpCalls = directCallsToBinding(databaseFile, bumpBinding, checker);
+  const serviceCalls = directCallsToBinding(serviceFile, serviceRunnerBinding, checker);
+  const homeCalls = directCallsToBinding(homeFile, homeRunnerBinding, checker);
+  const screenCalls = directCallsToBinding(screenFile, screenRunnerBinding, checker);
+  const migrationEdges = edges.filter(
+    (edge) => edge.callee === runMigrations && nodeIsInside(edge.node, runner),
+  );
+  const runnerEdges = edges.filter((edge) => edge.callee === runner);
+  const serviceEdges = edges.filter((edge) => edge.callee === service);
+  const fixtureEdges = edges.filter((edge) => edge.callee === fixture);
+  const seedEdges = edges.filter((edge) => edge.callee === seed);
+  const bumpEdges = edges.filter((edge) => edge.callee === bump);
+  const cleanupEdges = edges.filter((edge) => edge.callee === cleanup);
+  const homeBenchmarkReferences = referenceEdges.filter(
+    (reference) =>
+      reference.file === homeFile &&
+      reference.caller === home &&
+      reference.node.getText(homeFile) === 'onBenchmark',
+  );
+  const nameReferences = runtimeReferencesToBinding(
+    databaseFile,
+    nameState.declaration.name,
+    checker,
+  );
+  const keyReferences = runtimeReferencesToBinding(
+    databaseFile,
+    keyState.declaration.name,
+    checker,
+  );
+  if (
+    openCalls.length !== 2 ||
+    !nodeIsInside(openCalls[0], cleanup) ||
+    !nodeIsInside(openCalls[1], runner) ||
+    runnerFactoryCalls.length !== 1 ||
+    adapterCalls.length !== 1 ||
+    drizzleCalls.length !== 1 ||
+    extractCalls.length !== 1 ||
+    fixtureCalls.length !== 1 ||
+    seedCalls.length !== 2 ||
+    bumpCalls.length !== 1 ||
+    serviceCalls.length !== 1 ||
+    homeCalls.length !== 1 ||
+    screenCalls.length !== 1 ||
+    migrationEdges.length !== 1 ||
+    runnerEdges.length !== 1 ||
+    runnerEdges[0].node !== serviceCalls[0] ||
+    serviceEdges.length !== 2 ||
+    !serviceEdges.some((edge) => edge.node === homeCalls[0]) ||
+    !serviceEdges.some((edge) => edge.node === screenCalls[0]) ||
+    fixtureEdges.length !== 1 ||
+    fixtureEdges[0].node !== fixtureCalls[0] ||
+    seedEdges.length !== 3 ||
+    !seedEdges.some((edge) => edge.node === seedCalls[0]) ||
+    !seedEdges.some(
+      (edge) =>
+        edge.node === seedCalls[1] &&
+        nodeIsInside(
+          edge.node,
+          topLevelFunction(filesByPath, databasePath, 'preparePerf01ColdFixture'),
+        ),
+    ) ||
+    !seedEdges.some((edge) => nodeIsInside(edge.node, fixture)) ||
+    bumpEdges.length !== 1 ||
+    bumpEdges[0].node !== bumpCalls[0] ||
+    cleanupEdges.length !== 2 ||
+    cleanupEdges.some((edge) => !nodeIsInside(edge.node, runner)) ||
+    homeBenchmarkReferences.length !== 1 ||
+    nameReferences.length !== 3 ||
+    nameReferences[0] !== nameState.declaration.name ||
+    nameReferences
+      .slice(1)
+      .some((reference) => !openCalls.some((call) => nodeIsInside(reference, call))) ||
+    keyReferences.length !== 2 ||
+    keyReferences[0] !== keyState.declaration.name ||
+    !nodeIsInside(keyReferences[1], openCalls[1]) ||
+    referenceEdges.some(
+      (reference) =>
+        reference.target === runner ||
+        reference.target === service ||
+        reference.target === fixture ||
+        reference.target === seed ||
+        reference.target === bump ||
+        reference.target === cleanup,
+    ) ||
+    [rawState, drizzleState, productionNameState].some((state) =>
+      runtimeReferencesToBinding(databaseFile, state.declaration.name, checker).some(
+        (reference) => nodeIsInside(reference, runner) || nodeIsInside(reference, cleanup),
+      ),
+    )
+  ) {
+    return undefined;
+  }
+  const expectedFindingIds = new Set([
+    'src/db/database.ts#deletePerf02BenchmarkDatabase:native-database-delete:625cf98f5fe0',
+    'src/db/database.ts#runPerf02DeviceInboxBenchmark:sql-pragma:d0b6d4d17bda',
+    'src/db/performance/deviceInboxBenchmark.ts#seedFixture:sql-insert:6e5c9de934e3',
+    'src/db/performance/deviceInboxBenchmark.ts#seedFixture:sql-insert:5745bda7cb08',
+    'src/db/performance/deviceInboxBenchmark.ts#seedFixture:sql-insert:ae0c929d63d0',
+    'src/db/performance/deviceInboxBenchmark.ts#seedFixture:sql-insert:d5daeec433fb',
+    'src/db/performance/deviceInboxBenchmark.ts#seedDeviceInboxBenchmarkFixture:sql-pragma:93bcca4be38e',
+    'src/db/performance/deviceInboxBenchmark.ts#bumpDeviceInboxBenchmarkFixture:sql-insert:365869a94c0b',
+    'src/db/performance/deviceInboxBenchmark.ts#bumpDeviceInboxBenchmarkFixture:sql-update:a57808001967',
+  ]);
+  const protectedFindings = findings.filter(
+    (finding) =>
+      expectedFindingIds.has(finding.id) ||
+      (finding.path === databasePath &&
+        ['deletePerf02BenchmarkDatabase', 'runPerf02DeviceInboxBenchmark'].includes(
+          finding.symbol,
+        )) ||
+      finding.path === benchmarkPath,
+  );
+  if (
+    protectedFindings.length !== expectedFindingIds.size ||
+    protectedFindings.some((finding) => !expectedFindingIds.has(finding.id))
+  ) {
+    return undefined;
+  }
+  return {
+    openCalls: [...openCalls, ...perf01Candidate.openCalls],
+    runnerFactoryCalls: [...runnerFactoryCalls, ...perf01Candidate.runnerFactoryCalls],
+    adapterCall: adapterCalls[0],
+    drizzleCall: drizzleCalls[0],
+    coldAdapterCalls: perf01Candidate.adapterCalls,
+    coldDrizzleCalls: perf01Candidate.drizzleCalls,
+    extractCalls: [...extractCalls, ...perf01Candidate.extractCalls],
+    migrationCalls: [...migrationEdges.map((edge) => edge.node), ...perf01Candidate.migrationCalls],
+    findingIds: new Set([...expectedFindingIds, ...perf01Candidate.findingIds]),
+    callNodes: [
+      ...edges
+        .filter(
+          (edge) =>
+            edge.file === benchmarkFile ||
+            (edge.file === databaseFile && nodeIsInside(edge.node, runner)) ||
+            edge.node === serviceCalls[0] ||
+            edge.node === homeCalls[0] ||
+            edge.node === screenCalls[0],
+        )
+        .map((edge) => edge.node),
+      ...homeBenchmarkReferences.map((reference) => reference.node),
+      ...perf01Candidate.callNodes,
+    ],
+  };
+}
+
 /**
  * Prove the exact disposable Android driver contract without making the private adapter a public
  * capability. This is a candidate only: the adapter certificate below must also prove the shared
- * Proxy body and all three sole consumers before any finding receives a throwaway context.
+ * Proxy body and every exact consumer before any finding receives a throwaway context.
  */
 function driverSelfTestCertificateCandidate({
   filesByPath,
@@ -4565,6 +5263,7 @@ function driverSelfTestCertificateCandidate({
   findings,
   findingCallables,
   processRelaunchCandidate,
+  perf02Candidate,
 }) {
   const databasePath = 'src/db/database.ts';
   const databaseFile = filesByPath.get(databasePath);
@@ -4621,6 +5320,7 @@ function driverSelfTestCertificateCandidate({
     !subscribe?.body ||
     !selfTest?.body ||
     !processRelaunchCandidate ||
+    !perf02Candidate ||
     !nameState?.declaration.initializer ||
     !rawState ||
     !drizzleState ||
@@ -4638,10 +5338,10 @@ function driverSelfTestCertificateCandidate({
     nameState.declaration.initializer.text !== 'driver-selftest.db' ||
     !(migrationCountState.declarationList.flags & ts.NodeFlags.Const) ||
     normalizedSnippet(migrationCountState.declaration.initializer, databaseFile) !==
-      '49 as const' ||
+      '52 as const' ||
     !(migrationHeadState.declarationList.flags & ts.NodeFlags.Const) ||
     normalizedSnippet(migrationHeadState.declaration.initializer, databaseFile) !==
-      "'0049_inbox_search_postings' as const" ||
+      "'0052_chat_history_deletion_boundary' as const" ||
     !(partialMigrationCountState.declarationList.flags & ts.NodeFlags.Const) ||
     normalizedSnippet(partialMigrationCountState.declaration.initializer, databaseFile) !== '29' ||
     !(internalFailureState.declarationList.flags & ts.NodeFlags.Const) ||
@@ -4950,14 +5650,15 @@ function driverSelfTestCertificateCandidate({
   const historyOpenCallSet = new Set(historyCandidate.openCalls);
   const processOpenCallSet = new Set(processRelaunchCandidate.openCalls);
   if (
-    allOpenCalls.length !== 35 ||
+    allOpenCalls.length !== 41 ||
     productionOpenCalls.length !== 1 ||
     cleanupOpenCalls.length !== 1 ||
     selfTestOpenCalls.length !== 5 ||
     historyOpenCallSet.size !== 5 ||
     historyCandidate.openCalls.some((call) => !allOpenCalls.includes(call)) ||
     processOpenCallSet.size !== 23 ||
-    processRelaunchCandidate.openCalls.some((call) => !allOpenCalls.includes(call))
+    processRelaunchCandidate.openCalls.some((call) => !allOpenCalls.includes(call)) ||
+    perf02Candidate.openCalls.some((call) => !allOpenCalls.includes(call))
   ) {
     return undefined;
   }
@@ -5027,7 +5728,13 @@ function driverSelfTestCertificateCandidate({
 
   const allDrizzleCalls = directCallsToBinding(databaseFile, drizzleBinding, checker);
   const selfTestDrizzleCalls = allDrizzleCalls.filter((call) => nodeIsInside(call, selfTest));
-  if (allDrizzleCalls.length !== 4 || selfTestDrizzleCalls.length !== 1) return undefined;
+  if (
+    allDrizzleCalls.length !== 7 ||
+    selfTestDrizzleCalls.length !== 1 ||
+    !allDrizzleCalls.includes(perf02Candidate.drizzleCall) ||
+    perf02Candidate.coldDrizzleCalls.some((call) => !allDrizzleCalls.includes(call))
+  )
+    return undefined;
   const selfTestDrizzleCall = selfTestDrizzleCalls[0];
   const selfTestAdapterCall = selfTestDrizzleCall.arguments[0]
     ? callableCall(selfTestDrizzleCall.arguments[0], drizzleAdapter, checker)
@@ -6056,6 +6763,7 @@ function startupSingleFlightDelegationTargets({
   findingCallables,
   driverSelfTestCandidate,
   processRelaunchCandidate,
+  perf02Candidate,
 }) {
   const empty = () => new Set();
   const databaseFile = filesByPath.get('src/db/database.ts');
@@ -6298,6 +7006,9 @@ function startupSingleFlightDelegationTargets({
     ...(processRelaunchCandidate?.openCalls ?? []).map((candidate) =>
       unwrapExpression(candidate.expression),
     ),
+    ...(perf02Candidate?.openCalls ?? []).map((candidate) =>
+      unwrapExpression(candidate.expression),
+    ),
   ]);
   const expectedDrizzleReferences = new Set([
     unwrapExpression(drizzleCall.expression),
@@ -6305,6 +7016,10 @@ function startupSingleFlightDelegationTargets({
       ? [unwrapExpression(driverSelfTestCandidate.drizzleCall.expression)]
       : []),
     ...(processRelaunchCandidate?.drizzleCalls ?? []).map((candidate) =>
+      unwrapExpression(candidate.expression),
+    ),
+    ...(perf02Candidate ? [unwrapExpression(perf02Candidate.drizzleCall.expression)] : []),
+    ...(perf02Candidate?.coldDrizzleCalls ?? []).map((candidate) =>
       unwrapExpression(candidate.expression),
     ),
   ]);
@@ -6538,6 +7253,7 @@ function startupSingleFlightDelegationTargets({
     migrationCall,
     ...(driverSelfTestCandidate?.migrationCalls ?? []),
     ...(processRelaunchCandidate?.migrationCalls ?? []),
+    ...(perf02Candidate?.migrationCalls ?? []),
   ]);
   const incomingMigrationCalls = edges.filter((edge) => edge.callee === runMigrations);
   if (
@@ -6617,14 +7333,15 @@ function startupSingleFlightDelegationTargets({
 /**
  * Prove the five raw driver calls that cannot use the normal transaction-owner graph.
  *
- * The migration runner has exactly sixteen awaited call sites: the unpublished production
+ * The migration runner has exactly eighteen awaited call sites: the unpublished production
  * first-open handle, six same-process disposable probes, three relaunch probes, four
- * active-migration-death probes, the fixed DB-02C runtime-concurrency probe, and the fixed
- * BACKUP-02 backup/restore probe. Fourteen adopt
+ * active-migration-death probes, the fixed DB-02C runtime-concurrency probe, the fixed
+ * BACKUP-02 backup/restore probe, the disposable PERF-02 benchmark, and the retained PERF-01
+ * cold fixture. Sixteen adopt
  * opRunner directly; the remaining two use the exact identity-bound prefix and crash wrapper
- * triples before awaited runMigrations. The four Drizzle overrides are coordinated adapter calls:
+ * triples before awaited runMigrations. The seven Drizzle clients use coordinated adapter calls:
  * a private, exact Proxy forwards one operation to the sole op-sqlite handle used by each of the
- * four exact Drizzle clients. Any escape, detached runner call, extra override, dependency drift,
+ * seven exact Drizzle clients. Any escape, detached runner call, extra override, dependency drift,
  * or newly unresolved raw write empties both sets.
  */
 function driverAdapterCertifiedCallables({
@@ -6637,6 +7354,7 @@ function driverAdapterCertifiedCallables({
   startupSingleFlightTargets,
   driverSelfTestCandidate,
   processRelaunchCandidate,
+  perf02Candidate,
 }) {
   const empty = () => ({
     coordinated: new Set(),
@@ -6664,6 +7382,7 @@ function driverAdapterCertifiedCallables({
     !runMigrations?.body ||
     !driverSelfTestCandidate ||
     !processRelaunchCandidate ||
+    !perf02Candidate ||
     !startupSingleFlightTargets.has(initDatabase)
   ) {
     return empty();
@@ -6861,6 +7580,7 @@ function driverAdapterCertifiedCallables({
   const disposableRunnerCalls = new Set([
     ...driverSelfTestCandidate.runnerFactoryCalls,
     ...processRelaunchCandidate.runnerFactoryCalls,
+    ...perf02Candidate.runnerFactoryCalls,
   ]);
   const productionRunnerCall = sole(
     runnerFactoryCalls.filter((call) => !disposableRunnerCalls.has(call)),
@@ -6872,17 +7592,20 @@ function driverAdapterCertifiedCallables({
     unwrapExpression(extractCall.expression),
     ...driverSelfTestCandidate.extractCalls.map((call) => unwrapExpression(call.expression)),
     ...processRelaunchCandidate.extractCalls.map((call) => unwrapExpression(call.expression)),
+    ...perf02Candidate.extractCalls.map((call) => unwrapExpression(call.expression)),
   ]);
   const productionMigrationCall = productionRunnerCall?.parent;
   const expectedRunnerCalls = new Set([
     productionRunnerCall,
     ...driverSelfTestCandidate.runnerFactoryCalls,
     ...processRelaunchCandidate.runnerFactoryCalls,
+    ...perf02Candidate.runnerFactoryCalls,
   ]);
   const expectedMigrationCalls = new Set([
     productionMigrationCall,
     ...driverSelfTestCandidate.migrationCalls,
     ...processRelaunchCandidate.migrationCalls,
+    ...perf02Candidate.migrationCalls,
   ]);
   const nestedRunnerAdoptions = processRelaunchCandidate.nestedRunnerAdoptions;
   const nestedRunnerAdoptionByFactoryCall = new Map(
@@ -6891,8 +7614,8 @@ function driverAdapterCertifiedCallables({
   if (
     !productionRunnerCall ||
     !productionMigrationCall ||
-    expectedRunnerCalls.size !== 16 ||
-    expectedMigrationCalls.size !== 16 ||
+    expectedRunnerCalls.size !== 18 ||
+    expectedMigrationCalls.size !== 18 ||
     nestedRunnerAdoptions.length !== 2 ||
     nestedRunnerAdoptionByFactoryCall.size !== 2 ||
     runnerFactoryCalls.length !== expectedRunnerCalls.size ||
@@ -6916,7 +7639,7 @@ function driverAdapterCertifiedCallables({
         !expectedMigrationCalls.has(migrationCall)
       );
     }) ||
-    runnerFactoryReferences.length !== 17 ||
+    runnerFactoryReferences.length !== 19 ||
     runnerFactoryReferences[0] !== opRunner.name ||
     runnerFactoryReferences.slice(1).some((reference) => {
       const runnerCall = reference.parent;
@@ -7169,7 +7892,11 @@ function driverAdapterCertifiedCallables({
   const processAdapterCallSet = new Set(processRelaunchCandidate.adapterCalls);
   const adapterFactoryCall = sole(
     adapterFactoryCalls.filter(
-      (call) => call !== driverSelfTestCandidate.adapterCall && !processAdapterCallSet.has(call),
+      (call) =>
+        call !== driverSelfTestCandidate.adapterCall &&
+        call !== perf02Candidate.adapterCall &&
+        !perf02Candidate.coldAdapterCalls.includes(call) &&
+        !processAdapterCallSet.has(call),
     ),
   );
   const adapterFactoryReferences = runtimeReferencesToBinding(
@@ -7197,17 +7924,23 @@ function driverAdapterCertifiedCallables({
     retireFailedRollbackReferences[0] !== retireFailedRollbackDeclaration.name ||
     overridesReferences.length !== 3 ||
     overridesReferences[0] !== overridesDeclaration.name ||
-    adapterFactoryCalls.length !== 4 ||
+    adapterFactoryCalls.length !== 7 ||
     !adapterFactoryCalls.includes(driverSelfTestCandidate.adapterCall) ||
+    !adapterFactoryCalls.includes(perf02Candidate.adapterCall) ||
+    perf02Candidate.coldAdapterCalls.some((call) => !adapterFactoryCalls.includes(call)) ||
     processAdapterCallSet.size !== 2 ||
     processRelaunchCandidate.adapterCalls.some((call) => !adapterFactoryCalls.includes(call)) ||
     !adapterFactoryCall ||
     adapterFactoryCall.arguments.length !== 1 ||
-    adapterFactoryReferences.length !== 5 ||
+    adapterFactoryReferences.length !== 8 ||
     adapterFactoryReferences[0] !== drizzleAdapter.name ||
     !adapterFactoryReferences.includes(unwrapExpression(adapterFactoryCall.expression)) ||
     !adapterFactoryReferences.includes(
       unwrapExpression(driverSelfTestCandidate.adapterCall.expression),
+    ) ||
+    !adapterFactoryReferences.includes(unwrapExpression(perf02Candidate.adapterCall.expression)) ||
+    perf02Candidate.coldAdapterCalls.some(
+      (call) => !adapterFactoryReferences.includes(unwrapExpression(call.expression)),
     ) ||
     processRelaunchCandidate.adapterCalls.some(
       (call) => !adapterFactoryReferences.includes(unwrapExpression(call.expression)),
@@ -7251,7 +7984,8 @@ function driverAdapterCertifiedCallables({
       finding.path === databasePath &&
       finding.detectedContext === 'driver-adapter' &&
       !driverSelfTestCandidate.findingIds.has(finding.id) &&
-      !processRelaunchCandidate.rawFindingIds.has(finding.id),
+      !processRelaunchCandidate.rawFindingIds.has(finding.id) &&
+      !perf02Candidate.findingIds.has(finding.id),
   );
   const expectedCallables = new Set([...temporal, ...coordinated]);
   if (
@@ -7272,6 +8006,7 @@ function driverAdapterCertifiedCallables({
         !driverFindings.includes(finding) &&
         !driverSelfTestCandidate.findingIds.has(finding.id) &&
         !processRelaunchCandidate.allFindingIds.has(finding.id) &&
+        !perf02Candidate.findingIds.has(finding.id) &&
         !COORDINATED_CONTEXTS.has(finding.detectedContext) &&
         !TEMPORAL_EXCLUSION_CONTEXTS.has(finding.detectedContext),
     )
@@ -7285,10 +8020,12 @@ function driverAdapterCertifiedCallables({
     throwawayFindingIds: new Set([
       ...driverSelfTestCandidate.findingIds,
       ...processRelaunchCandidate.rawFindingIds,
+      ...perf02Candidate.findingIds,
     ]),
     throwawayCallNodes: new Set([
       ...driverSelfTestCandidate.internalCallNodes,
       ...processRelaunchCandidate.databaseCallNodes,
+      ...perf02Candidate.callNodes,
     ]),
     throwawayDelegationCallNodes: new Set(processRelaunchCandidate.orchestrationCallNodes),
   };
@@ -8294,6 +9031,7 @@ function incomingIngressCertifiedNodes({
       { name: 'context' },
       { name: 'occurrence' },
       { name: 'receivedAt', defaulted: true },
+      { name: 'lockedPersistenceGuard', optional: true },
     ]) &&
     hasExactIdentifierParameters(queuePersistence, [
       { name: 'eventName' },
@@ -8304,6 +9042,7 @@ function incomingIngressCertifiedNodes({
       { name: 'devLeaseToken', optional: true },
       { name: 'receivedAt', defaulted: true },
       { name: 'persistenceMode', defaulted: true },
+      { name: 'lockedPersistenceGuard', optional: true },
     ]) &&
     hasExactIdentifierParameters(persistAdmission, [
       { name: 'event' },
@@ -8313,6 +9052,7 @@ function incomingIngressCertifiedNodes({
       { name: 'occurrence', optional: true },
       { name: 'devLeaseToken', optional: true },
       { name: 'persistenceMode', defaulted: true },
+      { name: 'lockedPersistenceGuard', optional: true },
     ]) &&
     hasExactIdentifierParameters(drainDispose, []) &&
     hasExactIdentifierParameters(drainCancelWakeTimer, []) &&
@@ -8483,7 +9223,7 @@ function incomingIngressCertifiedNodes({
   }
   if (
     createHash('sha256').update(normalizedSnippet(controlFile, controlFile)).digest('hex') !==
-      'c8afcfef8364a3136be5bfefb493e849ddc85ce0b93d62e083a61e6dfb62de90' ||
+      '52f1e0457ceb73fc10cf830ddb8ec14a4b5a7c8883c83aa9251400bcb320a954' ||
     createHash('sha256')
       .update(normalizedSnippet(autoDownloadFile, autoDownloadFile))
       .digest('hex') !== 'dfc68841889263b004ffd03f2f819fa8eb783ac3fac9689327dbdd78c6863fc9' ||
@@ -8506,7 +9246,7 @@ function incomingIngressCertifiedNodes({
       .digest('hex') !== '64ef0ee4c27ead97edc14f2ca49d638de4c08666c7867036c77e1f15f1287468' ||
     createHash('sha256')
       .update(normalizedSnippet(prerequisiteRecoveryFile, prerequisiteRecoveryFile))
-      .digest('hex') !== '90da1f4ead2e877f16f6d4790f2893f1ad567a52142251e94bbc41e1a67df296' ||
+      .digest('hex') !== '4cfcd16e370a6604fefff1e394e2b9b0e63d6d941c2200f46a7e33d95606435c' ||
     createHash('sha256').update(normalizedSnippet(fileLogFile, fileLogFile)).digest('hex') !==
       '58120b0f2dd9cd52685c83894333ee06db8e32b69569fb76ddcafd8cc13fbdbe' ||
     createHash('sha256')
@@ -8607,16 +9347,16 @@ function incomingIngressCertifiedNodes({
       .digest('hex') !== 'a6eac6aebbeec5ee7d7bf8f167f6e264313f558d57f5552be2cd54f362f16f7b' ||
     createHash('sha256')
       .update(normalizedSnippet(persistAuthenticatedLockedFcmV3Event, controlFile))
-      .digest('hex') !== '9dca41afeb5b77bfe0e54bd8c93a83f25d77a949b5f1583d7e27948fa0065994' ||
+      .digest('hex') !== '90ee60796eb93326fe030e46195e74b50bb0699ef582fc4136dc81a88e3f8805' ||
     createHash('sha256')
       .update(normalizedSnippet(durableLockedFcmV3Persist, dispatcherFile))
-      .digest('hex') !== 'd35bc8b57b4c3fb3b2fddb18e2c86333b9fd96a10b7e6e5a11ece9a9d4ec9088' ||
+      .digest('hex') !== '97ec89d2b5d481241fd35874bd7a4dfbb4e263c74cc801a45a110613333d3120' ||
     createHash('sha256')
       .update(normalizedSnippet(queuePersistence, dispatcherFile))
-      .digest('hex') !== '55b31e55c9022171dfe89a1978203118ec505810274dc9fd94c49a987b04b220' ||
+      .digest('hex') !== '11f853a8e1711c263b086b8ff8b79a059a70ed61e6301579fea256d81c659ed6' ||
     createHash('sha256')
       .update(normalizedSnippet(persistAdmission, dispatcherFile))
-      .digest('hex') !== 'f1a40608a41609acf5d7d8bb3340dcd739210101f3077f49d9604940347a5543' ||
+      .digest('hex') !== 'abe5411ddf7e47b3f434b5f9c5ce1dcf872c9b3894b63e51ae3067fc73dfa0ad' ||
     createHash('sha256')
       .update(normalizedSnippet(resumeDesiredRealtime, controlFile))
       .digest('hex') !== 'e48b706c0cf96cb7fd28f6ceb6ac2063af3fe449b5f36d1bc3c6f3f643f563ee' ||
@@ -9732,13 +10472,14 @@ function incomingIngressCertifiedNodes({
     ? assignmentWritesTo(controlFile, realtimeSinkState.declaration.name, checker)
     : [];
   const sinkSpineSpecs = [
+    ['./realtime/rcsProviderEpochEventSink', 'RcsProviderEpochEventSink', 2],
     ['./realtime/serverUrlEventSink', 'ServerUrlEventSink', 2],
     ['./realtime/rcsAlertEventSink', 'RcsAlertEventSink', 2],
     ['./realtime/faceTimeEventSink', 'FaceTimeEventSink', 1],
     ['./realtime/typingEventSink', 'TypingEventSink', 2],
-    ['./realtime/groupEventSideEffectSink', 'GroupEventSideEffectSink', 2],
+    ['./realtime/groupEventSideEffectSink', 'GroupEventSideEffectSink', 3],
     ['./realtime/notifyingEventSink', 'NotifyingEventSink', 4],
-    ['./realtime/dbEventSink', 'DbEventSink', 4],
+    ['./realtime/dbEventSink', 'DbEventSink', 5],
   ];
   const sinkSpine = [];
   let sinkSpineCursor = realtimeSinkConstruction;
@@ -9758,8 +10499,8 @@ function incomingIngressCertifiedNodes({
     sinkSpine.push(sinkSpineCursor);
     sinkSpineCursor = unwrapExpression(sinkSpineCursor.arguments[0]);
   }
-  const notifyingSinkConstruction = sinkSpine[5];
-  const dbEventSinkConstruction = sinkSpine[6];
+  const notifyingSinkConstruction = sinkSpine[6];
+  const dbEventSinkConstruction = sinkSpine[7];
   const realtimeAutoDownloadCallback = dbEventSinkConstruction?.arguments?.[1]
     ? unwrapExpression(dbEventSinkConstruction.arguments[1])
     : undefined;
@@ -9975,7 +10716,7 @@ function incomingIngressCertifiedNodes({
     realtimeAutoDownloadCalls.length !== 2 ||
     createHash('sha256')
       .update(normalizedSnippet(realtimeAutoDownloadCallback, controlFile))
-      .digest('hex') !== 'c9e203ee589bb39a3e3de2be383e3ff723ff527928cd3986b4441b9a70a8f887' ||
+      .digest('hex') !== 'd8c17dcb979e6c9590142b505643e23832d2083b2b1ad7247856f12f97805f2c' ||
     !sameSymbol(
       unwrapExpression(dbEventSinkConstruction.arguments[0]),
       realtimeSinkDbParameter.name,
@@ -10156,13 +10897,15 @@ function incomingIngressCertifiedNodes({
     !sameSymbol(lockStateAccess.receiver, lockStoreBinding, checker) ||
     lockStateCall.arguments.length !== 0 ||
     unwrapExpression(lockCall.arguments[1]).kind !== ts.SyntaxKind.FalseKeyword ||
-    canPersistRealtimeEvent.body.statements.length !== 4 ||
+    canPersistRealtimeEvent.body.statements.length !== 5 ||
     statementText(canPersistRealtimeEvent, 0) !==
       "if (realtimeIntakeLocked()) { logger.debug('[realtime] ignored private event while App Lock is active', { event: event.type, }); return false; }" ||
-    statementText(canPersistRealtimeEvent, 1) !== "if (event.type !== 'new-server') return true;" ||
-    statementText(canPersistRealtimeEvent, 2) !==
+    statementText(canPersistRealtimeEvent, 1) !==
+      "if (classifyRcsEventAdmission(sessionAccessors.getServerInfo(), event) === 'stale') return false;" ||
+    statementText(canPersistRealtimeEvent, 2) !== "if (event.type !== 'new-server') return true;" ||
+    statementText(canPersistRealtimeEvent, 3) !==
       "logger.warn('[realtime] kept new-server event out of durable persistence');" ||
-    statementText(canPersistRealtimeEvent, 3) !== 'return false;' ||
+    statementText(canPersistRealtimeEvent, 4) !== 'return false;' ||
     !runtimeDbParameter ||
     !runtimeContextParameter ||
     !routerDeclaration ||
@@ -10760,7 +11503,7 @@ function incomingIngressCertifiedNodes({
     !coordinatorCallbackAdoptsInvocation(queuePersistCalls[0].node, queuePersistCalls[0].caller) ||
     !snippetIs(
       queuePersistCalls[0].node,
-      'this.persist( event, source, receivedAt, context, capturedOccurrence, devLeaseToken, persistenceMode, )',
+      'this.persist( event, source, receivedAt, context, capturedOccurrence, devLeaseToken, persistenceMode, lockedPersistenceGuard, )',
     ) ||
     !coordinatorCallbackAdoptsInvocation(finishCalls[0].node, finishCalls[0].caller) ||
     !snippetIs(finishCalls[0].node, 'this.finishAdmission(persisted)') ||
@@ -10861,7 +11604,7 @@ function incomingIngressCertifiedNodes({
       'if (admissionRevoked) return false;' ||
     !persistAllowedDeclaration ||
     normalizedSnippet(persistGuardCallback.body.statements[1], dispatcherFile) !==
-      "const allowed = !this.stopped && (!context || context.isCurrent()) && (persistenceMode === 'locked-fcm-v3' ? event.type !== 'new-server' : !this.options.canPersist || this.options.canPersist(event));" ||
+      "const allowed = !this.stopped && (!context || context.isCurrent()) && (persistenceMode === 'locked-fcm-v3' ? event.type !== 'new-server' && (lockedPersistenceGuard ? lockedPersistenceGuard(event) : !this.options.canPersist || this.options.canPersist(event)) : !this.options.canPersist || this.options.canPersist(event));" ||
     normalizedSnippet(persistGuardCallback.body.statements[2], dispatcherFile) !==
       'if (!allowed) admissionRevoked = true;' ||
     normalizedSnippet(persistGuardCallback.body.statements[3], dispatcherFile) !==
@@ -12020,13 +12763,13 @@ function incomingIngressCertifiedNodes({
     !lockedDispatcherCall ||
     !snippetIs(
       lockedDispatcherCall.node,
-      'runtime?.dispatcher.persistLockedFcmV3WithoutDrain( captured.eventName, captured.rawData, context, capturedOccurrence, receivedAt, )',
+      'runtime?.dispatcher.persistLockedFcmV3WithoutDrain( captured.eventName, captured.rawData, context, capturedOccurrence, receivedAt, lockedAdmissionIsCurrent, )',
     ) ||
     !ts.isAwaitExpression(unwrapExpression(lockedDispatcherCall.node.parent)) ||
     !lockedQueueCall ||
     !snippetIs(
       lockedQueueCall.node,
-      "this.queuePersistence( eventName, rawData, 'fcm', context, occurrence, undefined, receivedAt, 'locked-fcm-v3', )",
+      "this.queuePersistence( eventName, rawData, 'fcm', context, occurrence, undefined, receivedAt, 'locked-fcm-v3', lockedPersistenceGuard, )",
     ) ||
     !persistEncodeCall ||
     !snippetIs(
@@ -13440,6 +14183,7 @@ function foregroundBootLifecycleDelegationNodes({
   driverSelfTestCandidate,
   driverAdapterCallables,
   processRelaunchCandidate,
+  perf02Candidate,
 }) {
   const empty = () => ({ coordinated: new Set(), temporal: new Set() });
   const rootPath = 'app/_layout.tsx';
@@ -13484,8 +14228,11 @@ function foregroundBootLifecycleDelegationNodes({
     !replayProcessIssues?.body ||
     !runDbDriverSelfTest?.body ||
     !processRelaunchCandidate?.startContract?.body ||
+    !perf02Candidate ||
     driverAdapterCallables.throwawayFindingIds.size !==
-      driverSelfTestCandidate.findingIds.size + processRelaunchCandidate.rawFindingIds.size ||
+      driverSelfTestCandidate.findingIds.size +
+        processRelaunchCandidate.rawFindingIds.size +
+        perf02Candidate.findingIds.size ||
     !rootLayout?.body ||
     !processWorkStarted?.declaration.initializer ||
     !coordinator
@@ -14244,8 +14991,6 @@ function notificationEffectLifecycleDelegationNodes({ root, edges }) {
 /** Exact account-transition handoffs in mixed UI/realtime composition owners. */
 function accountTransitionDelegationNodes({ root, edges, referenceEdges }) {
   const expectations = new Map([
-    ['app/(app)/home.tsx|Home.onDisconnect|mutator-call|src/services/bootstrap.ts#forget', 1],
-    ['app/(app)/home.tsx|Home|mutator-reference|app/(app)/home.tsx#Home.onDisconnect', 1],
     [
       'app/(app)/settings.tsx|SettingsScreen.onDisconnect.onPress|mutator-call|src/services/bootstrap.ts#forget',
       1,
@@ -14259,11 +15004,19 @@ function accountTransitionDelegationNodes({ root, edges, referenceEdges }) {
       1,
     ],
   ]);
+  const candidateKeys = new Set(
+    [...expectations.keys()].map((key) => {
+      const [path, , , target] = key.split('|');
+      return `${path}|${target}`;
+    }),
+  );
   const matched = new Map([...expectations].map(([key]) => [key, []]));
+  const candidates = new Set();
   const collect = (edge, operation) => {
     const path = normalizePath(relative(root, edge.file.fileName));
     const owner = edge.caller ? callableDisplayName(edge.caller) : '<module>';
     const target = callableDescriptor(edge.callee, root);
+    if (candidateKeys.has(`${path}|${target}`)) candidates.add(edge.node);
     const key = `${path}|${owner}|${operation}|${target}`;
     if (matched.has(key)) matched.get(key).push(edge.node);
   };
@@ -14272,11 +15025,14 @@ function accountTransitionDelegationNodes({ root, edges, referenceEdges }) {
     if (typeof reference.target === 'string') continue;
     collect({ ...reference, callee: reference.target }, 'mutator-reference');
   }
-  for (const [key, count] of expectations) {
-    if (matched.get(key).length !== count) return new Set();
-  }
-  const approved = [...matched.values()].flat();
-  return approved.length === 5 && new Set(approved).size === 5 ? new Set(approved) : new Set();
+  const approved = new Set([...matched.values()].flat());
+  const exact = [...expectations].every(([key, count]) => matched.get(key).length === count);
+  const valid =
+    exact &&
+    approved.size === 3 &&
+    candidates.size === 3 &&
+    [...approved].every((node) => candidates.has(node));
+  return { approved: valid ? approved : new Set(), candidates };
 }
 
 function callableNodeForFinding(finding, file) {
@@ -15127,6 +15883,21 @@ function scanMutatorCallSites({ root, files, findings }) {
     findings: contextualFindings,
     findingCallables,
   });
+  const perf01Candidate = perf01ColdBenchmarkCertificateCandidate({
+    filesByPath,
+    checker,
+    edges,
+    referenceEdges,
+    findings: contextualFindings,
+  });
+  const perf02Candidate = perf02InboxBenchmarkCertificateCandidate({
+    filesByPath,
+    checker,
+    edges,
+    referenceEdges,
+    findings: contextualFindings,
+    perf01Candidate,
+  });
   const driverSelfTestCandidate = driverSelfTestCertificateCandidate({
     filesByPath,
     checker,
@@ -15137,6 +15908,7 @@ function scanMutatorCallSites({ root, files, findings }) {
     findings: contextualFindings,
     findingCallables,
     processRelaunchCandidate,
+    perf02Candidate,
   });
   const startupSingleFlightTargets = startupSingleFlightDelegationTargets({
     filesByPath,
@@ -15150,6 +15922,7 @@ function scanMutatorCallSites({ root, files, findings }) {
     findingCallables,
     driverSelfTestCandidate,
     processRelaunchCandidate,
+    perf02Candidate,
   });
   contextualFindings = contextualFindings.map((finding) => {
     const callable = findingCallables.get(finding.id);
@@ -15169,6 +15942,7 @@ function scanMutatorCallSites({ root, files, findings }) {
     startupSingleFlightTargets,
     driverSelfTestCandidate,
     processRelaunchCandidate,
+    perf02Candidate,
   });
   contextualFindings = contextualFindings.map((finding) => {
     if (driverAdapterCallables.throwawayFindingIds.has(finding.id)) {
@@ -15205,6 +15979,7 @@ function scanMutatorCallSites({ root, files, findings }) {
     driverSelfTestCandidate,
     driverAdapterCallables,
     processRelaunchCandidate,
+    perf02Candidate,
   });
 
   /**
@@ -15295,7 +16070,13 @@ function scanMutatorCallSites({ root, files, findings }) {
     root,
     edges,
   });
-  const accountTransitionNodes = accountTransitionDelegationNodes({ root, edges, referenceEdges });
+  const accountTransitionDelegation = accountTransitionDelegationNodes({
+    root,
+    edges,
+    referenceEdges,
+  });
+  const accountTransitionNodes = accountTransitionDelegation.approved;
+  const accountTransitionCandidates = accountTransitionDelegation.candidates;
 
   const callFindings = [];
   const duplicateIds = new Map();
@@ -15352,23 +16133,27 @@ function scanMutatorCallSites({ root, files, findings }) {
                 ? 'account-transition-delegation'
                 : certifiedBaseContext === 'unresolved' &&
                     typeof targetCallable !== 'string' &&
-                    foregroundBootLifecycleNodes.temporal.has(node)
-                  ? 'throwaway-database-delegation'
+                    accountTransitionCandidates.has(node)
+                  ? certifiedBaseContext
                   : certifiedBaseContext === 'unresolved' &&
                       typeof targetCallable !== 'string' &&
-                      foregroundBootLifecycleNodes.coordinated.has(node) &&
-                      coordinatedDelegationTargets.has(targetCallable) &&
-                      (operation === 'mutator-reference' ||
-                        !caller ||
-                        !unsafeDelegationTargets.has(caller))
-                    ? 'foreground-boot-lifecycle-delegation'
+                      foregroundBootLifecycleNodes.temporal.has(node)
+                    ? 'throwaway-database-delegation'
                     : certifiedBaseContext === 'unresolved' &&
-                        COORDINATED_DELEGATION_PATHS.has(path) &&
-                        !unsafeDelegationTargets.has(caller) &&
                         typeof targetCallable !== 'string' &&
-                        coordinatedDelegationTargets.has(targetCallable)
-                      ? 'coordinated-delegation'
-                      : certifiedBaseContext;
+                        foregroundBootLifecycleNodes.coordinated.has(node) &&
+                        coordinatedDelegationTargets.has(targetCallable) &&
+                        (operation === 'mutator-reference' ||
+                          !caller ||
+                          !unsafeDelegationTargets.has(caller))
+                      ? 'foreground-boot-lifecycle-delegation'
+                      : certifiedBaseContext === 'unresolved' &&
+                          COORDINATED_DELEGATION_PATHS.has(path) &&
+                          !unsafeDelegationTargets.has(caller) &&
+                          typeof targetCallable !== 'string' &&
+                          coordinatedDelegationTargets.has(targetCallable)
+                        ? 'coordinated-delegation'
+                        : certifiedBaseContext;
     const target =
       typeof targetCallable === 'string'
         ? targetCallable

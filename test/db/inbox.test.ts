@@ -17,6 +17,7 @@ import {
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
+import { participantList } from '@utils';
 import { createTestDb } from '../support/testDb';
 
 type Db = Awaited<ReturnType<typeof createTestDb>>;
@@ -466,7 +467,7 @@ describe('listChatsForInbox', () => {
     expect(visible.map((r) => r.guid).sort()).toEqual(['dm', 'grp']); // archived hidden
     const grp = visible.find((r) => r.guid === 'grp')!;
     expect(grp.participantCount).toBe(3);
-    expect(grp.participantNames?.split(', ')).toHaveLength(3);
+    expect(participantList(grp.participantNames)).toHaveLength(3);
 
     const all = await listChatsForInbox(t.db, { includeArchived: true });
     expect(all.map((r) => r.guid)).toContain('arch');

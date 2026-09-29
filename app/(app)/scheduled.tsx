@@ -15,7 +15,7 @@ import {
 import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import { ActionListRow, Screen, ScreenHeader, useTheme } from '@ui';
 import { SCHEDULE_DELIVERY_TIMING_NOTE } from '@ui/conversations/RecurrenceSheet';
-import { formatChatDate, formatTime } from '@utils';
+import { formatChatDate, formatSeparatorDate } from '@utils';
 
 /** One flat-list item: a scheduled row or the COMPLETED section header. */
 type ListItem = { kind: 'header'; key: string; label: string } | { kind: 'row'; row: ScheduledRow };
@@ -29,9 +29,20 @@ export default function ScheduledScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
   const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const [serverListVerified, setServerListVerified] = useState<boolean | null>(null);
   // Reconcile server-scheduled rows on open so the list reflects what the server is tracking.
   useEffect(() => {
-    void syncScheduledFromServer(accountLease);
+    let mounted = true;
+    void syncScheduledFromServer(accountLease)
+      .then((verified) => {
+        if (mounted && accountLease.isCurrent()) setServerListVerified(verified);
+      })
+      .catch(() => {
+        if (mounted && accountLease.isCurrent()) setServerListVerified(false);
+      });
+    return () => {
+      mounted = false;
+    };
   }, [accountLease]);
   const { data } = useReactiveQuery<{ pending: ScheduledRow[]; history: ScheduledRow[] }>(
     async () => ({
@@ -61,7 +72,7 @@ export default function ScheduledScreen(): React.JSX.Element {
     if (row.status === 'error')
       return { label: '✕ Failed to send', color: theme.color.destructive };
     return {
-      label: `${formatChatDate(row.scheduledFor)} · ${formatTime(row.scheduledFor)}`,
+      label: formatSeparatorDate(row.scheduledFor),
       color: theme.color.secondaryLabel,
     };
   };
@@ -75,6 +86,11 @@ export default function ScheduledScreen(): React.JSX.Element {
       <Text style={[styles.timingNote, { color: theme.color.secondaryLabel }]}>
         {SCHEDULE_DELIVERY_TIMING_NOTE}
       </Text>
+      {serverListVerified === false && items.length > 0 ? (
+        <Text style={[styles.timingNote, { color: theme.color.destructive }]}>
+          Couldn’t verify the Mac’s schedules. Check again before retrying an uncertain save.
+        </Text>
+      ) : null}
 
       <FlashList
         data={items}
@@ -92,18 +108,22 @@ export default function ScheduledScreen(): React.JSX.Element {
           const pendingRow = isPendingRow(row);
           // Compact recurrence tag, e.g. "· Repeats daily" (null for one-shot rows).
           const rec = asRecurrence(row.recurrence);
-          const subtitle = `${status.label}${!pendingRow ? ` · ${formatChatDate(row.scheduledFor)}` : ''}${rec && pendingRow ? ` · ${recurrenceLabel(rec)}` : ''}`;
+          const subtitle = `${status.label}${!pendingRow ? ` · ${formatChatDate(row.scheduledFor)}` : ''}${rec && pendingRow ? ` · ${recurrenceLabel(rec)}` : ''}${row.attachmentName && row.text ? ` · 📎 ${row.attachmentName}` : ''}`;
+          const title =
+            row.text || (row.attachmentName ? `📎 ${row.attachmentName}` : 'Scheduled message');
           return (
             <ActionListRow
-              title={row.text}
+              title={title}
               subtitle={subtitle}
               subtitleColor={status.color}
-              disabled={!pendingRow}
+              disabled={!pendingRow || !!row.attachmentName}
               onPress={() => router.push(`/scheduled-edit/${row.id}`)}
               accessibilityLabel={
                 pendingRow
-                  ? `Edit scheduled message: ${row.text}`
-                  : `Scheduled message ${status.label}: ${row.text}`
+                  ? row.attachmentName
+                    ? `Scheduled file: ${title}. Cancel to change it.`
+                    : `Edit scheduled message: ${title}`
+                  : `Scheduled message ${status.label}: ${title}`
               }
               action={
                 pendingRow
@@ -135,7 +155,11 @@ export default function ScheduledScreen(): React.JSX.Element {
         }}
         ListEmptyComponent={
           <Text style={[styles.empty, { color: theme.color.tertiaryLabel }]}>
-            No scheduled messages
+            {serverListVerified === null
+              ? 'Checking schedules…'
+              : serverListVerified
+                ? 'No scheduled messages'
+                : 'Couldn’t verify schedules. Check the Mac connection before trying again.'}
           </Text>
         }
       />

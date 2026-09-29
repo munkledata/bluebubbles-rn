@@ -157,19 +157,27 @@ describe('message retraction persistence', () => {
       'attachment-visible',
     ]);
 
-    await expect(getMessagePreviewByGuid(db, 'partial-message')).resolves.toMatchObject({
+    await expect(
+      getMessagePreviewByGuid(db, 'retraction-chat', 'partial-message'),
+    ).resolves.toMatchObject({
       text: 'surviving words',
       isFromMe: 0,
     });
-    await expect(getMessagePreviewByGuid(db, 'partial-message', 2)).resolves.toMatchObject({
+    await expect(
+      getMessagePreviewByGuid(db, 'retraction-chat', 'partial-message', 2),
+    ).resolves.toMatchObject({
       text: null,
       hasVisibleAttachments: 1,
     });
-    await expect(getMessagePreviewByGuid(db, 'partial-message', 5)).resolves.toMatchObject({
+    await expect(
+      getMessagePreviewByGuid(db, 'retraction-chat', 'partial-message', 5),
+    ).resolves.toMatchObject({
       text: 'surviving words',
       hasVisibleAttachments: 0,
     });
-    await expect(getMessagePreviewByGuid(db, 'partial-message', null)).resolves.toMatchObject({
+    await expect(
+      getMessagePreviewByGuid(db, 'retraction-chat', 'partial-message', null),
+    ).resolves.toMatchObject({
       text: null,
       isRetracted: true,
     });
@@ -212,6 +220,26 @@ describe('message retraction persistence', () => {
       editedParts: { '3': [{ date: 11, text: 'prior wording' }] },
     });
     expect(JSON.parse(row.messagePartTopology)).toMatchObject({
+      complete: true,
+      originalPartIndexes: [3],
+      currentParts: [{ index: 3, kind: 'text' }],
+    });
+
+    await put(db, chatId, handles, {
+      guid: 'ordinary-edited-message',
+      text: 'current wording',
+      dateCreated: 12,
+      messagePartTopology: {
+        complete: false,
+        originalPartIndexes: [3],
+        currentParts: [{ index: 3, kind: 'text' }],
+        attachmentOwnership: [],
+      },
+    });
+    const afterLeanUpdate = raw
+      .prepare('SELECT message_part_topology AS topology FROM messages WHERE guid = ?')
+      .get('ordinary-edited-message') as { topology: string };
+    expect(parseMessagePartTopology(afterLeanUpdate.topology)).toMatchObject({
       complete: true,
       originalPartIndexes: [3],
       currentParts: [{ index: 3, kind: 'text' }],
@@ -279,17 +307,23 @@ describe('message retraction persistence', () => {
       },
     });
 
-    await expect(getMessagePreviewByGuid(db, 'ordinary-multipart', 0)).resolves.toMatchObject({
+    await expect(
+      getMessagePreviewByGuid(db, 'retraction-chat', 'ordinary-multipart', 0),
+    ).resolves.toMatchObject({
       text: 'caption part',
       hasVisibleAttachments: 0,
       attachmentDescription: null,
     });
-    await expect(getMessagePreviewByGuid(db, 'ordinary-multipart', 2)).resolves.toMatchObject({
+    await expect(
+      getMessagePreviewByGuid(db, 'retraction-chat', 'ordinary-multipart', 2),
+    ).resolves.toMatchObject({
       text: null,
       hasVisibleAttachments: 1,
       attachmentDescription: 'first private description',
     });
-    await expect(getMessagePreviewByGuid(db, 'ordinary-multipart', 4)).resolves.toMatchObject({
+    await expect(
+      getMessagePreviewByGuid(db, 'retraction-chat', 'ordinary-multipart', 4),
+    ).resolves.toMatchObject({
       text: null,
       hasVisibleAttachments: 1,
       attachmentDescription: 'second private description',
@@ -467,7 +501,9 @@ describe('message retraction persistence', () => {
       { guid: 'unknown-attachment', isRetracted: 1 },
       { guid: 'later-unowned-attachment', isRetracted: 1 },
     ]);
-    await expect(getMessagePreviewByGuid(db, 'unknown-message')).resolves.toMatchObject({
+    await expect(
+      getMessagePreviewByGuid(db, 'retraction-chat', 'unknown-message'),
+    ).resolves.toMatchObject({
       text: null,
       hasVisibleAttachments: 0,
       isRetracted: true,

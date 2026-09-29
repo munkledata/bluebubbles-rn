@@ -200,6 +200,36 @@
       "upgradeTest": "test/db/migrations/0049_inbox_search_postings.test.ts",
       "schemaEvidence": "src/db/schema.ts",
       "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 50,
+      "name": "0050_message_identity_owner_scope",
+      "task": "FEAT-06",
+      "branchPr": "master",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0050_message_identity_owner_scope.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 51,
+      "name": "0051_handle_color_backup_index",
+      "task": "HANDLE-COLOR-01",
+      "branchPr": "master",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0051_handle_color_backup_index.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 52,
+      "name": "0052_chat_history_deletion_boundary",
+      "task": "RECOVERY-02",
+      "branchPr": "master",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0052_chat_history_deletion_boundary.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
     }
   ]
 }

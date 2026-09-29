@@ -8,6 +8,9 @@ export interface ReactiveState<T> {
   error: Error | null;
 }
 
+/** An injected DEV fixture can subscribe without replacing the production database singleton. */
+export type ReactiveSubscribe = (tables: readonly string[], onChange: () => void) => () => void;
+
 // Coalesce a burst of writes (e.g. a sync batch fires the reactive callback many
 // times) into a single re-query.
 const DEBOUNCE_MS = 24;
@@ -41,9 +44,13 @@ export function useReactiveQuery<T>(
   run: () => Promise<T>,
   tables: string[],
   deps: unknown[] = [],
-  options: { enabled?: boolean } = {},
+  options: {
+    enabled?: boolean;
+    subscribe?: ReactiveSubscribe;
+  } = {},
 ): ReactiveState<T> {
   const enabled = options.enabled !== false;
+  const injectedSubscribe = options.subscribe;
   const [state, setState] = useState<ReactiveState<T>>({
     data: null,
     isLoading: enabled,
@@ -121,12 +128,14 @@ export function useReactiveQuery<T>(
 
     let unsubscribe: (() => void) | undefined;
     try {
-      unsubscribe = getRawDatabase().reactiveExecute({
-        query: 'SELECT 1',
-        arguments: [],
-        fireOn: tablesKey.split(',').map((table) => ({ table })),
-        callback: schedule,
-      });
+      unsubscribe = injectedSubscribe
+        ? injectedSubscribe(tablesKey.split(','), schedule)
+        : getRawDatabase().reactiveExecute({
+            query: 'SELECT 1',
+            arguments: [],
+            fireOn: tablesKey.split(',').map((table) => ({ table })),
+            callback: schedule,
+          });
     } catch (e) {
       logger.debug('[db] reactive subscribe failed', e);
     }
@@ -138,7 +147,7 @@ export function useReactiveQuery<T>(
       unsubscribe?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tablesKey, enabled, ...deps]);
+  }, [tablesKey, enabled, injectedSubscribe, ...deps]);
 
   return state;
 }

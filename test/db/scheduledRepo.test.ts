@@ -32,6 +32,16 @@ import { fixedRcsCapabilitySource } from '@/services/send/rcsAttemptCapability';
 import { createTestDb } from '../support/testDb';
 
 const noHttp = {} as unknown as HttpClient;
+const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
+const RCS_CHAT_GUID = `RCS;-;g1.${RCS_PROVIDER_EPOCH}.${Buffer.from('scheduled-thread').toString('base64url')}`;
+const RCS_CAPABILITY = fixedRcsCapabilitySource(
+  ServerInfo.parse({
+    version: '2.0.0',
+    rcs: true,
+    supports_rcs_epoch_qualified_ids: true,
+    rcs_provider_epoch: RCS_PROVIDER_EPOCH,
+  }),
+);
 
 describe('scheduled messages repo', () => {
   it('inserts, lists (parsed text + pending), and deletes', async () => {
@@ -885,16 +895,22 @@ describe('scheduled messages repo', () => {
         .spyOn(scheduledApi, 'createScheduled')
         .mockResolvedValue({ id: 'wrong-apple-script-owner' } as never);
       try {
-        const { serverId } = await scheduleTextMessage(db, noHttp, {
-          chatGuid: 'RCS;-;scheduled-thread',
-          text: 'send over RCS later',
-          scheduledFor: 1000,
-        });
+        const { serverId } = await scheduleTextMessage(
+          db,
+          noHttp,
+          {
+            chatGuid: RCS_CHAT_GUID,
+            text: 'send over RCS later',
+            scheduledFor: 1000,
+          },
+          undefined,
+          RCS_CAPABILITY,
+        );
 
         expect(spy).not.toHaveBeenCalled();
         expect(serverId).toBeNull();
         expect((await listAllScheduled(db))[0]).toMatchObject({
-          chatGuid: 'RCS;-;scheduled-thread',
+          chatGuid: RCS_CHAT_GUID,
           serverId: null,
         });
       } finally {

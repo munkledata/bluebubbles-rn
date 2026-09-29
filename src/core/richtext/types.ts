@@ -5,4 +5,8 @@ export interface TextRun {
   mention?: boolean;
   /** An inline attachment placeholder (rendered separately, skipped in text). */
   attachment?: boolean;
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  strikethrough?: boolean;
 }

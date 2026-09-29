@@ -67,7 +67,7 @@ describe('listReactionsByMessageGuids', () => {
     await react(db, chatId, hm, { guid: 'r1', type: 'love', from: 'a@x.com', date: 110 });
     await react(db, chatId, hm, { guid: 'r2', type: 'love', date: 120 }); // me
 
-    const byGuid = await listReactionsByMessageGuids(db, ['mt']);
+    const byGuid = await listReactionsByMessageGuids(db, 'c1', ['mt']);
     const list = byGuid.get('mt') ?? [];
     expect(list).toHaveLength(2);
     expect(list.every((r: ReactionRow) => r.baseType === 'love')).toBe(true);
@@ -87,7 +87,7 @@ describe('listReactionsByMessageGuids', () => {
       date: 110,
       target: 'p:0/mt',
     });
-    const list = (await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? [];
+    const list = (await listReactionsByMessageGuids(db, 'c1', ['mt'])).get('mt') ?? [];
     expect(list).toHaveLength(1);
     expect(list[0]?.baseType).toBe('love');
     expect(list[0]?.isFromMe).toBe(0); // from someone else
@@ -103,7 +103,7 @@ describe('listReactionsByMessageGuids', () => {
       date: 110,
       target: 'bp:0/mt',
     });
-    expect((await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? []).toHaveLength(1);
+    expect((await listReactionsByMessageGuids(db, 'c1', ['mt'])).get('mt') ?? []).toHaveLength(1);
   });
 
   it('collapses add→remove (latest wins) to no badge', async () => {
@@ -112,7 +112,7 @@ describe('listReactionsByMessageGuids', () => {
     await react(db, chatId, hm, { guid: 'r1', type: 'love', from: 'a@x.com', date: 110 });
     await react(db, chatId, hm, { guid: 'r2', type: '-love', from: 'a@x.com', date: 120 });
 
-    const byGuid = await listReactionsByMessageGuids(db, ['mt']);
+    const byGuid = await listReactionsByMessageGuids(db, 'c1', ['mt']);
     expect(byGuid.get('mt') ?? []).toHaveLength(0);
   });
 
@@ -147,7 +147,7 @@ describe('listReactionsByMessageGuids', () => {
       target: 'p:2/mt',
     });
 
-    const list = (await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? [];
+    const list = (await listReactionsByMessageGuids(db, 'c1', ['mt'])).get('mt') ?? [];
     expect(list).toHaveLength(1);
     expect(list[0]).toMatchObject({ baseType: 'love', targetPart: 2 });
   });
@@ -158,14 +158,58 @@ describe('listReactionsByMessageGuids', () => {
     await react(db, chatId, hm, { guid: 'r1', type: 'love', from: 'a@x.com', date: 110 });
     await react(db, chatId, hm, { guid: 'r2', type: 'like', from: 'a@x.com', date: 120 });
 
-    const list = (await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? [];
+    const list = (await listReactionsByMessageGuids(db, 'c1', ['mt'])).get('mt') ?? [];
     // love and like are distinct (sender,type) keys, so both survive their own collapse
     expect(list.map((r) => r.baseType).sort()).toEqual(['like', 'love']);
   });
 
+  it('keeps a foreign-chat add and removal from changing the owner chat reaction state', async () => {
+    const { db } = await createTestDb();
+    const { chatId, hm } = await setup(db);
+    const foreignChats = await upsertChats(
+      db,
+      [
+        Chat.parse({
+          guid: 'RCS;-;foreign-reaction-chat',
+          participants: [{ address: 'a@x.com', service: 'RCS' }],
+        }),
+      ],
+      hm,
+    );
+    const foreignChatId = foreignChats.get('RCS;-;foreign-reaction-chat')!;
+
+    await react(db, chatId, hm, {
+      guid: 'local-love',
+      type: 'love',
+      from: 'a@x.com',
+      date: 110,
+      target: 'p:0/mt',
+    });
+    await react(db, foreignChatId, hm, {
+      guid: 'foreign-like',
+      type: 'like',
+      from: 'a@x.com',
+      date: 120,
+      target: 'p:0/mt',
+    });
+    await react(db, foreignChatId, hm, {
+      guid: 'foreign-love-removal',
+      type: '-love',
+      from: 'a@x.com',
+      date: 130,
+      target: 'p:0/mt',
+    });
+
+    const local = (await listReactionsByMessageGuids(db, 'c1', ['mt'])).get('mt') ?? [];
+    expect(local.map((reaction) => reaction.baseType)).toEqual(['love']);
+    await expect(
+      listReactionsByMessageGuids(db, 'RCS;-;foreign-reaction-chat', ['mt']),
+    ).resolves.toEqual(new Map());
+  });
+
   it('returns an empty map for no guids', async () => {
     const { db } = await createTestDb();
-    expect((await listReactionsByMessageGuids(db, [])).size).toBe(0);
+    expect((await listReactionsByMessageGuids(db, 'c1', [])).size).toBe(0);
   });
 
   it('drops a tombstoned (deleted) reaction row from the badge', async () => {
@@ -173,11 +217,11 @@ describe('listReactionsByMessageGuids', () => {
     const { chatId, hm } = await setup(db);
     await react(db, chatId, hm, { guid: 'r1', type: 'love', from: 'a@x.com', date: 110 });
     // The reaction badges the target first…
-    expect((await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? []).toHaveLength(1);
+    expect((await listReactionsByMessageGuids(db, 'c1', ['mt'])).get('mt') ?? []).toHaveLength(1);
     // …then the reaction message lands in "Recently Deleted" (tombstoned via date_deleted) — the
     // badge must vanish, like every other render/count query that filters date_deleted IS NULL.
     await markMessageDeleted(db, 'r1', 5000);
-    expect((await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? []).toHaveLength(0);
+    expect((await listReactionsByMessageGuids(db, 'c1', ['mt'])).get('mt') ?? []).toHaveLength(0);
   });
 
   it('excludes reaction rows from the bubble list', async () => {
@@ -191,7 +235,7 @@ describe('listReactionsByMessageGuids', () => {
   it('getMessagePreviewByGuid resolves hit/miss', async () => {
     const { db } = await createTestDb();
     await setup(db);
-    expect((await getMessagePreviewByGuid(db, 'mt'))?.text).toBe('hi');
-    expect(await getMessagePreviewByGuid(db, 'nope')).toBeNull();
+    expect((await getMessagePreviewByGuid(db, 'c1', 'mt'))?.text).toBe('hi');
+    expect(await getMessagePreviewByGuid(db, 'c1', 'nope')).toBeNull();
   });
 });

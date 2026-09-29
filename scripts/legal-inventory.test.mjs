@@ -205,11 +205,11 @@ test('runtime notice conversion is plain text and release checking preserves ope
   );
 });
 
-test('current repository inventory pins the 14 assets, nine local components, and SQLCipher notice', () => {
+test('current repository inventory pins the 14 assets, 12 local components, and SQLCipher notice', () => {
   const { inventory } = buildInventory(ROOT);
 
   assert.equal(inventory.summary.assetFiles, 14);
-  assert.equal(inventory.summary.localComponents, 9);
+  assert.equal(inventory.summary.localComponents, 12);
   assert.equal(inventory.summary.pendingAssetProvenance, 14);
   assert.equal(inventory.coverage.exactAab, false);
   assert.deepEqual(inventory.inventoryIssues, []);

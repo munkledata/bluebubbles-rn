@@ -295,10 +295,26 @@ export function validatePlanContract({ root, planSource }) {
       }
     }
 
-    const waived = /^- \*\*WAIVED\/DROPPED — (\d+)\.\*\*/m.exec(registerSource);
-    if (!waived) errors.push('work plan status register is missing WAIVED/DROPPED');
-    else if (Number(waived[1]) !== 0) {
-      errors.push('nonzero WAIVED/DROPPED tasks require an explicit checker representation');
+    const dispositionMatch = /^- \*\*WAIVED\/DROPPED — (\d+):\*\*([^\n]*)$/m.exec(registerSource);
+    const waivedOrDropped = dispositionMatch
+      ? {
+          declaredCount: Number(dispositionMatch[1]),
+          ids: [...dispositionMatch[2].matchAll(/`([^`]+)`/g)].map((idMatch) => idMatch[1]),
+        }
+      : null;
+    const emptyWaivedOrDropped = /^- \*\*WAIVED\/DROPPED — 0\.\*\*/m.test(registerSource);
+    if (!waivedOrDropped && !emptyWaivedOrDropped) {
+      errors.push('work plan status register is missing WAIVED/DROPPED');
+    } else if (waivedOrDropped) {
+      if (waivedOrDropped.declaredCount !== waivedOrDropped.ids.length) {
+        errors.push(
+          `WAIVED/DROPPED declares ${waivedOrDropped.declaredCount} tasks but lists ${waivedOrDropped.ids.length}`,
+        );
+      }
+      for (const id of waivedOrDropped.ids) {
+        if (statusById.has(id)) errors.push(`work plan status register repeats ${id}`);
+        statusById.set(id, 'WAIVED/DROPPED');
+      }
     }
   }
 

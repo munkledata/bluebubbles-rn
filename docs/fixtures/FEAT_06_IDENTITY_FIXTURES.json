@@ -1,0 +1,1052 @@
+{
+  "version": 1,
+  "policy": {
+    "conversationKey": "account-data-realm + provider + required-provider-epoch + exact-source-conversation-id",
+    "supportedProviders": ["apple_messages", "google_messages"],
+    "transports": ["imessage", "sms", "mms", "rcs", "unknown"],
+    "contactPresentationOnly": true,
+    "mergeDistinctTranscripts": false,
+    "mergeDifferentNumbers": false,
+    "mergeRcsWithAppleMessages": false
+  },
+  "cases": [
+    {
+      "id": "same-exact-chat-on-two-pages",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;-;+15550000001",
+        "address": "+15550000001",
+        "snapshotToken": "snapshot-exact-chat",
+        "page": 1
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;-;+15550000001",
+        "address": "+15550000001",
+        "snapshotToken": "snapshot-exact-chat",
+        "page": 2
+      },
+      "expected": {
+        "relation": "same-conversation",
+        "shareTranscript": true,
+        "shareConversationState": true,
+        "routeByContactMatch": false,
+        "disposition": "deduplicate-exact-key"
+      }
+    },
+    {
+      "id": "same-contact-two-phone-numbers",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "sms",
+        "chatGuid": "SMS;-;+15550000002",
+        "address": "+15550000002",
+        "contactSourceId": "contact-alice"
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "sms",
+        "chatGuid": "SMS;-;+15550000003",
+        "address": "+15550000003",
+        "contactSourceId": "contact-alice"
+      },
+      "expected": {
+        "relation": "separate-conversations",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "maySharePresentation": true,
+        "routeByContactMatch": false,
+        "disposition": "retain-both"
+      }
+    },
+    {
+      "id": "same-contact-rcs-and-sms-different-numbers",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "providerEpoch": "phone-pairing-7",
+        "chatGuid": "RCS;-;google-conversation-10",
+        "address": "+15550000004",
+        "contactSourceId": "contact-bob"
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "sms",
+        "chatGuid": "SMS;-;+15550000005",
+        "address": "+15550000005",
+        "contactSourceId": "contact-bob"
+      },
+      "expected": {
+        "relation": "separate-conversations",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "maySharePresentation": true,
+        "routeByContactMatch": false,
+        "disposition": "retain-both"
+      }
+    },
+    {
+      "id": "same-contact-google-rcs-and-google-sms-different-numbers",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "providerEpoch": "phone-pairing-7",
+        "chatGuid": "RCS;-;google-conversation-rcs-number",
+        "address": "+15550000036",
+        "contactSourceId": "contact-carol"
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "google_messages",
+        "transport": "sms",
+        "providerEpoch": "phone-pairing-7",
+        "chatGuid": "RCS;-;google-conversation-sms-number",
+        "address": "+15550000037",
+        "contactSourceId": "contact-carol"
+      },
+      "expected": {
+        "relation": "separate-conversations",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "maySharePresentation": true,
+        "routeByContactMatch": false,
+        "disposition": "retain-both-google-conversations"
+      }
+    },
+    {
+      "id": "same-number-rcs-and-imessage",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "providerEpoch": "phone-pairing-7",
+        "chatGuid": "RCS;-;google-conversation-11",
+        "address": "+15550000006"
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;-;+15550000006",
+        "address": "+15550000006"
+      },
+      "expected": {
+        "relation": "separate-conversations",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "maySharePresentation": true,
+        "routeByContactMatch": false,
+        "disposition": "retain-both-service-variants"
+      }
+    },
+    {
+      "id": "google-rcs-to-sms-fallback-same-source-conversation",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "providerEpoch": "phone-pairing-7",
+        "chatGuid": "RCS;-;google-conversation-fallback",
+        "address": "+15550000019"
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "google_messages",
+        "transport": "sms",
+        "providerEpoch": "phone-pairing-7",
+        "chatGuid": "RCS;-;google-conversation-fallback",
+        "address": "+15550000019"
+      },
+      "expected": {
+        "relation": "same-conversation",
+        "shareTranscript": true,
+        "shareConversationState": true,
+        "routeByContactMatch": false,
+        "disposition": "retain-google-provider-owner"
+      }
+    },
+    {
+      "id": "same-number-sms-and-imessage-separate-guids",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "sms",
+        "chatGuid": "SMS;-;+15550000007",
+        "address": "+15550000007"
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;-;+15550000007",
+        "address": "+15550000007"
+      },
+      "expected": {
+        "relation": "separate-conversations",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "maySharePresentation": true,
+        "routeByContactMatch": false,
+        "disposition": "retain-both-service-variants"
+      }
+    },
+    {
+      "id": "international-last-ten-collision",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "providerEpoch": "phone-pairing-7",
+        "chatGuid": "RCS;-;google-conversation-12",
+        "address": "+15551234567"
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "providerEpoch": "phone-pairing-7",
+        "chatGuid": "RCS;-;google-conversation-13",
+        "address": "+445551234567"
+      },
+      "expected": {
+        "relation": "separate-conversations",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "maySharePresentation": false,
+        "routeByContactMatch": false,
+        "disposition": "reject-suffix-only-match"
+      }
+    },
+    {
+      "id": "same-email-different-chat-guids",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;-;Person@Example.test",
+        "address": "Person@Example.test"
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;-;person@example.test#replacement",
+        "address": "person@example.test"
+      },
+      "expected": {
+        "relation": "separate-conversations",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "maySharePresentation": true,
+        "routeByContactMatch": false,
+        "disposition": "retain-exact-guids"
+      }
+    },
+    {
+      "id": "same-participants-two-groups",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;+;group-100",
+        "participants": ["+15550000008", "+15550000009"]
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;+;group-101",
+        "participants": ["+15550000008", "+15550000009"]
+      },
+      "expected": {
+        "relation": "separate-conversations",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "routeByContactMatch": false,
+        "disposition": "retain-exact-guids"
+      }
+    },
+    {
+      "id": "rcs-id-reused-after-repair",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "providerEpoch": "phone-pairing-7",
+        "chatGuid": "RCS;-;google-conversation-14"
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "providerEpoch": "phone-pairing-8",
+        "chatGuid": "RCS;-;google-conversation-14"
+      },
+      "expected": {
+        "relation": "separate-conversations",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "routeByContactMatch": false,
+        "disposition": "reject-stale-epoch"
+      }
+    },
+    {
+      "id": "duplicate-message-guid-cross-service",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "providerEpoch": "phone-pairing-7",
+        "chatGuid": "RCS;-;google-conversation-15",
+        "messageGuid": "rcs-message-collision"
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;-;+15550000010",
+        "messageGuid": "rcs-message-collision"
+      },
+      "expected": {
+        "relation": "identity-conflict",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "routeByContactMatch": false,
+        "disposition": "reject-or-quarantine-no-reparent"
+      }
+    },
+    {
+      "id": "duplicate-attachment-guid-cross-chat",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "providerEpoch": "phone-pairing-7",
+        "chatGuid": "RCS;-;google-conversation-16",
+        "attachmentGuid": "attachment-collision"
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "sms",
+        "chatGuid": "SMS;-;+15550000011",
+        "attachmentGuid": "attachment-collision"
+      },
+      "expected": {
+        "relation": "identity-conflict",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "routeByContactMatch": false,
+        "disposition": "reject-or-quarantine-no-reparent"
+      }
+    },
+    {
+      "id": "cross-chat-reply-reference",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "providerEpoch": "phone-pairing-7",
+        "chatGuid": "RCS;-;google-conversation-17",
+        "messageGuid": "rcs-reply-row",
+        "referencesMessageGuid": "apple-target"
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;-;+15550000012",
+        "messageGuid": "apple-target"
+      },
+      "expected": {
+        "relation": "invalid-reference",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "routeByContactMatch": false,
+        "disposition": "ignore-cross-chat-reference"
+      }
+    },
+    {
+      "id": "ambiguous-shared-contact-endpoint",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "sms",
+        "chatGuid": "SMS;-;+15550000013",
+        "address": "+15550000013",
+        "contactSourceId": "contact-one"
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "sms",
+        "chatGuid": "SMS;-;+15550000013",
+        "address": "+15550000013",
+        "contactSourceId": "contact-two"
+      },
+      "expected": {
+        "relation": "same-conversation-ambiguous-presentation",
+        "shareTranscript": true,
+        "shareConversationState": true,
+        "maySharePresentation": false,
+        "routeByContactMatch": false,
+        "disposition": "leave-contact-unlinked"
+      }
+    },
+    {
+      "id": "backup-unique-same-service-replacement",
+      "left": {
+        "accountRealm": "old-account-dataset",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;-;old-chat-14",
+        "identityVersion": 1,
+        "conversationKind": "direct",
+        "serverChatIdentifier": "stable-apple-thread-14",
+        "address": "+15550000014",
+        "regionEvidence": "US",
+        "participants": ["+15550000014"]
+      },
+      "right": {
+        "accountRealm": "new-account-dataset",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;-;new-chat-14",
+        "identityVersion": 1,
+        "conversationKind": "direct",
+        "serverChatIdentifier": "stable-apple-thread-14",
+        "address": "+15550000014",
+        "regionEvidence": "US",
+        "participants": ["+15550000014"]
+      },
+      "expected": {
+        "relation": "separate-conversations",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "routeByContactMatch": false,
+        "backupDisposition": "copy-customization-only-after-unique-versioned-match",
+        "disposition": "no-message-restore"
+      }
+    },
+    {
+      "id": "backup-ambiguous-candidates",
+      "left": {
+        "accountRealm": "old-account-dataset",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "providerEpoch": "unknown",
+        "chatGuid": "RCS;-;google-conversation-18",
+        "validIdentity": false
+      },
+      "right": {
+        "accountRealm": "new-account-dataset",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "providerEpoch": "phone-pairing-9",
+        "candidateChatGuids": ["RCS;-;candidate-a", "RCS;-;candidate-b"]
+      },
+      "expected": {
+        "relation": "ambiguous",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "routeByContactMatch": false,
+        "inputDisposition": "reject",
+        "backupDisposition": "skip-and-report",
+        "disposition": "no-guess"
+      }
+    },
+    {
+      "id": "bulk-page-same-address-service-variants",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "providerEpoch": "phone-pairing-9",
+        "chatGuid": "RCS;-;google-conversation-19",
+        "address": "+15550000015",
+        "page": 1
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;-;+15550000015",
+        "address": "+15550000015",
+        "page": 2
+      },
+      "expected": {
+        "relation": "separate-conversations",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "maySharePresentation": true,
+        "routeByContactMatch": false,
+        "disposition": "retain-both-across-pages"
+      }
+    },
+    {
+      "id": "late-result-after-account-replacement",
+      "left": {
+        "accountRealm": "account-a-generation-1",
+        "provider": "apple_messages",
+        "transport": "sms",
+        "chatGuid": "SMS;-;+15550000016"
+      },
+      "right": {
+        "accountRealm": "account-a-generation-2",
+        "provider": "apple_messages",
+        "transport": "sms",
+        "chatGuid": "SMS;-;+15550000016"
+      },
+      "expected": {
+        "relation": "stale-lifecycle-result",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "routeByContactMatch": false,
+        "disposition": "discard-old-generation-result"
+      }
+    },
+    {
+      "id": "rcs-display-name-is-not-address",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "providerEpoch": "phone-pairing-9",
+        "chatGuid": "RCS;-;google-conversation-20",
+        "participantPresentation": "Example Contact"
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "sms",
+        "chatGuid": "SMS;-;+15550000017",
+        "address": "+15550000017",
+        "contactSourceId": "contact-example"
+      },
+      "expected": {
+        "relation": "separate-conversations",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "maySharePresentation": false,
+        "routeByContactMatch": false,
+        "disposition": "require-raw-rcs-identity-fields"
+      }
+    },
+    {
+      "id": "identical-content-and-time-cross-chat",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "providerEpoch": "phone-pairing-9",
+        "chatGuid": "RCS;-;google-conversation-21",
+        "messageGuid": "rcs-message-21",
+        "contentFingerprint": "same-text-at-same-time"
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "sms",
+        "chatGuid": "SMS;-;+15550000018",
+        "messageGuid": "sms-message-21",
+        "contentFingerprint": "same-text-at-same-time"
+      },
+      "expected": {
+        "relation": "separate-conversations",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "routeByContactMatch": false,
+        "disposition": "retain-both-messages"
+      }
+    },
+    {
+      "id": "unknown-service-and-short-code",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "unknown",
+        "transport": "unknown",
+        "chatGuid": "opaque-chat-a",
+        "address": "611",
+        "validIdentity": false
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "sms",
+        "chatGuid": "SMS;-;611",
+        "address": "611"
+      },
+      "expected": {
+        "relation": "separate-conversations",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "maySharePresentation": false,
+        "routeByContactMatch": false,
+        "inputDisposition": "reject",
+        "disposition": "exact-only-no-service-inference"
+      }
+    },
+    {
+      "id": "same-number-google-messages-and-apple-sms",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "google_messages",
+        "transport": "sms",
+        "providerEpoch": "phone-pairing-9",
+        "chatGuid": "RCS;-;google-conversation-same-number",
+        "address": "+15550000022"
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "sms",
+        "chatGuid": "SMS;-;+15550000022",
+        "address": "+15550000022"
+      },
+      "expected": {
+        "relation": "separate-conversations",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "maySharePresentation": true,
+        "routeByContactMatch": false,
+        "disposition": "retain-provider-separated-histories"
+      }
+    },
+    {
+      "id": "shared-contact-actions-route-by-conversation",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "providerEpoch": "phone-pairing-9",
+        "chatGuid": "RCS;-;google-conversation-actions",
+        "address": "+15550000023",
+        "contactSourceId": "contact-shared-actions"
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "sms",
+        "chatGuid": "SMS;-;+15550000024",
+        "address": "+15550000024",
+        "contactSourceId": "contact-shared-actions"
+      },
+      "expected": {
+        "relation": "separate-conversations",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "maySharePresentation": true,
+        "routeByContactMatch": false,
+        "actions": {
+          "markRead": "exact-origin-conversation-only",
+          "delete": "exact-origin-conversation-only",
+          "searchNavigation": "exact-origin-conversation-only",
+          "notificationTap": "exact-origin-conversation-only"
+        },
+        "disposition": "route-every-action-by-conversation-key"
+      }
+    },
+    {
+      "id": "cross-chat-reaction-reference",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;-;+15550000025",
+        "messageGuid": "reaction-row",
+        "referencesMessageGuid": "reaction-target"
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;-;+15550000026",
+        "messageGuid": "reaction-target"
+      },
+      "expected": {
+        "relation": "invalid-reference",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "routeByContactMatch": false,
+        "disposition": "ignore-cross-chat-reaction"
+      }
+    },
+    {
+      "id": "cross-chat-sticker-reference",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;-;+15550000027",
+        "messageGuid": "sticker-row",
+        "referencesMessageGuid": "sticker-target"
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;-;+15550000028",
+        "messageGuid": "sticker-target"
+      },
+      "expected": {
+        "relation": "invalid-reference",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "routeByContactMatch": false,
+        "disposition": "ignore-cross-chat-sticker"
+      }
+    },
+    {
+      "id": "cross-chat-thread-reference",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;-;+15550000029",
+        "messageGuid": "thread-row",
+        "referencesMessageGuid": "thread-target"
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;-;+15550000030",
+        "messageGuid": "thread-target"
+      },
+      "expected": {
+        "relation": "invalid-reference",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "routeByContactMatch": false,
+        "disposition": "ignore-cross-chat-thread"
+      }
+    },
+    {
+      "id": "google-conversation-missing-provider-epoch",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "chatGuid": "RCS;-;google-conversation-missing-epoch",
+        "validIdentity": false
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "providerEpoch": "phone-pairing-9",
+        "chatGuid": "RCS;-;google-conversation-missing-epoch"
+      },
+      "expected": {
+        "relation": "invalid-identity",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "routeByContactMatch": false,
+        "inputDisposition": "reject",
+        "disposition": "reject-missing-provider-epoch"
+      }
+    },
+    {
+      "id": "backup-provider-epoch-mismatch",
+      "left": {
+        "accountRealm": "old-account-dataset",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "providerEpoch": "phone-pairing-9",
+        "chatGuid": "RCS;-;google-conversation-backup-epoch"
+      },
+      "right": {
+        "accountRealm": "new-account-dataset",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "providerEpoch": "phone-pairing-10",
+        "chatGuid": "RCS;-;google-conversation-backup-epoch"
+      },
+      "expected": {
+        "relation": "separate-conversations",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "routeByContactMatch": false,
+        "backupDisposition": "skip-and-report",
+        "disposition": "reject-backup-provider-epoch-mismatch"
+      }
+    },
+    {
+      "id": "backup-stale-reassigned-contact",
+      "left": {
+        "accountRealm": "old-account-dataset",
+        "provider": "apple_messages",
+        "transport": "sms",
+        "chatGuid": "SMS;-;old-backup-contact",
+        "serverChatIdentifier": "stable-apple-thread-contact",
+        "contactSourceId": "device-contact-44",
+        "address": "+15550000031"
+      },
+      "right": {
+        "accountRealm": "new-account-dataset",
+        "provider": "apple_messages",
+        "transport": "sms",
+        "chatGuid": "SMS;-;new-backup-contact",
+        "serverChatIdentifier": "stable-apple-thread-contact",
+        "contactSourceId": "device-contact-44-reassigned",
+        "address": "+15550000031"
+      },
+      "expected": {
+        "relation": "separate-conversations",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "maySharePresentation": false,
+        "routeByContactMatch": false,
+        "backupDisposition": "discard-stale-contact-link",
+        "disposition": "contact-metadata-never-restores-identity"
+      }
+    },
+    {
+      "id": "pagination-insert-changes-snapshot",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;-;page-before-insert",
+        "snapshotToken": "snapshot-100",
+        "page": 1
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;-;page-after-insert",
+        "snapshotToken": "snapshot-101",
+        "page": 2
+      },
+      "expected": {
+        "relation": "snapshot-conflict",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "routeByContactMatch": false,
+        "publishPartialResults": false,
+        "disposition": "discard-pages-and-restart"
+      }
+    },
+    {
+      "id": "pagination-equal-timestamp-tiebreak",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;-;equal-time-a",
+        "sortTimestamp": "2026-09-26T12:00:00.000Z",
+        "tieBreakId": "conversation-a",
+        "snapshotToken": "snapshot-102"
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;-;equal-time-b",
+        "sortTimestamp": "2026-09-26T12:00:00.000Z",
+        "tieBreakId": "conversation-b",
+        "snapshotToken": "snapshot-102"
+      },
+      "expected": {
+        "relation": "separate-conversations",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "routeByContactMatch": false,
+        "disposition": "order-by-timestamp-then-exact-id"
+      }
+    },
+    {
+      "id": "pagination-provider-generation-rotation",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "providerEpoch": "phone-pairing-10",
+        "chatGuid": "RCS;-;provider-rotation",
+        "snapshotToken": "google-generation-33",
+        "page": 1
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "providerEpoch": "phone-pairing-11",
+        "chatGuid": "RCS;-;provider-rotation",
+        "snapshotToken": "google-generation-34",
+        "page": 2
+      },
+      "expected": {
+        "relation": "snapshot-conflict",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "routeByContactMatch": false,
+        "publishPartialResults": false,
+        "disposition": "discard-pages-and-restart"
+      }
+    },
+    {
+      "id": "pagination-cancelled-incomplete",
+      "left": {
+        "accountRealm": "account-a-generation-1",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;-;partial-scan",
+        "scanState": "cancelled-incomplete",
+        "snapshotToken": "snapshot-103"
+      },
+      "right": {
+        "accountRealm": "account-a-generation-0",
+        "provider": "apple_messages",
+        "transport": "imessage",
+        "chatGuid": "iMessage;-;last-complete-scan",
+        "scanState": "complete",
+        "snapshotToken": "snapshot-99"
+      },
+      "expected": {
+        "relation": "incomplete-generation",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "routeByContactMatch": false,
+        "publishPartialResults": false,
+        "disposition": "retain-last-complete-generation"
+      }
+    },
+    {
+      "id": "privacy-scope-and-minimal-response",
+      "left": {
+        "request": "endpoint-inventory",
+        "requiredScope": "messages:read",
+        "requestedEndpointCount": 20,
+        "returnsWholeAddressBook": false
+      },
+      "right": {
+        "request": "per-input-contact-resolution",
+        "requiredScope": "personal-data:read",
+        "combinedResponseRequiresBothScopes": true,
+        "returnsOnlyRequestedMatches": true
+      },
+      "expected": {
+        "relation": "authorization-boundary",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "routeByContactMatch": false,
+        "logContactNames": false,
+        "logEndpoints": false,
+        "logParticipantIds": false,
+        "disposition": "bounded-minimum-data-only"
+      }
+    },
+    {
+      "id": "old-server-without-identity-capability",
+      "left": {
+        "serverCapability": "rcs",
+        "supportsIdentityDirectoryV1": false,
+        "legacyHandleQueryAvailable": true
+      },
+      "right": {
+        "clientAction": "automatic-contact-association",
+        "requiresCapability": "supports_identity_directory_v1"
+      },
+      "expected": {
+        "relation": "unsupported-capability",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "routeByContactMatch": false,
+        "disposition": "keep-legacy-service-separated-no-association"
+      }
+    },
+    {
+      "id": "same-display-name-different-people",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "providerEpoch": "phone-pairing-11",
+        "chatGuid": "RCS;-;example-contact-one",
+        "rawParticipantId": "google-participant-example-1",
+        "address": "+15550000032",
+        "displayName": "Example Contact"
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "google_messages",
+        "transport": "rcs",
+        "providerEpoch": "phone-pairing-11",
+        "chatGuid": "RCS;-;example-contact-two",
+        "rawParticipantId": "google-participant-example-2",
+        "address": "+15550000033",
+        "displayName": "Example Contact"
+      },
+      "expected": {
+        "relation": "separate-conversations",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "maySharePresentation": false,
+        "routeByContactMatch": false,
+        "disposition": "reject-name-only-match"
+      }
+    },
+    {
+      "id": "local-number-without-region",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "sms",
+        "chatGuid": "SMS;-;5550000034",
+        "address": "5550000034",
+        "regionEvidence": null
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "sms",
+        "chatGuid": "SMS;-;+15550000034",
+        "address": "+15550000034",
+        "regionEvidence": "US"
+      },
+      "expected": {
+        "relation": "separate-conversations",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "maySharePresentation": false,
+        "routeByContactMatch": false,
+        "disposition": "reject-region-inference"
+      }
+    },
+    {
+      "id": "phone-extension-not-base-number",
+      "left": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "sms",
+        "chatGuid": "SMS;-;+15550000035x44",
+        "address": "+15550000035;ext=44"
+      },
+      "right": {
+        "accountRealm": "account-a",
+        "provider": "apple_messages",
+        "transport": "sms",
+        "chatGuid": "SMS;-;+15550000035",
+        "address": "+15550000035"
+      },
+      "expected": {
+        "relation": "separate-conversations",
+        "shareTranscript": false,
+        "shareConversationState": false,
+        "maySharePresentation": false,
+        "routeByContactMatch": false,
+        "disposition": "reject-extension-stripping"
+      }
+    }
+  ]
+}

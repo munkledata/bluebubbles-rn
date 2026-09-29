@@ -151,6 +151,8 @@ const restoreResult = {
   customFoldersSkipped: 7,
   customFolderMemberships: 8,
   customFolderMembershipsSkipped: 9,
+  handleColors: 10,
+  handleColorsSkipped: 11,
 };
 
 async function renderSection(options: { operationBusy?: boolean } = {}) {
@@ -625,7 +627,7 @@ describe('ServerBackupSlotsSection restore and delete flows', () => {
     await waitFor(() =>
       expect(mockShowDialog).toHaveBeenCalledWith(
         'Restored',
-        'Settings: 2, themes: 3, chats restored: 4, chats skipped: 5, folders matched/restored: 6, folders skipped: 7, folder members matched: 8, folder members skipped: 9.',
+        'Settings: 2, themes: 3, chats restored: 4, chats skipped: 5, folders matched/restored: 6, folders skipped: 7, folder members matched: 8, folder members skipped: 9, handle colors restored: 10, handle colors skipped: 11.',
       ),
     );
     expect(screen.getByLabelText('Server backup passphrase').props.value).toBe('');

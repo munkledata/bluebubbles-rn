@@ -1,24 +1,37 @@
-# Sharing INTO Gator — why a shared PDF vanished, and the fix
+# Sharing INTO Gator — failure history and the owned replacement
 
-> **Current release status (2026-09-18): public inbound sharing remains disabled; `IPC-01` and
-> `SHARE-01` containment are complete.** The investigation below
-> is retained as design evidence, but its earlier JS workaround is not safe enough to ship.
-> `expo-share-intent@8.0.1` can perform unbounded provider reads/copies inside `getFileInfo()` before
-> any raw event reaches JavaScript. Gator therefore installs no such native package, declares no
-> `SEND`/`SEND_MULTIPLE` or Direct Share target, and mounts no provider/capture. The app-root cleanup
-> bridge removes old dynamic/cached conversation shortcuts and disables and sanitizes any retained
-> pinned rows that Android will not let the publisher delete. Two natural Play code-53→75 upgrades
-> now prove the cleanup, including a distinct synthetic bitmap avatar; exact-v75 resolver checks
-> found no Gator target for text, one image, multiple images, or PDF. See the
-> [sanitized proof](./IPC_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md).
-> Re-enabling inbound sharing requires an owned native intake with pre-copy count rejection, actual
-> per-file and aggregate byte caps, streaming cancellation/deadline enforcement, atomic completion,
-> and process-restart cleanup.
+> **Current status (2026-09-28): `SHARE-02` is DONE for its owned acceptance boundary.** Current
+> source re-enables `ACTION_SEND`, `ACTION_SEND_MULTIPLE`, and Direct
+> Share through product-owned native modules with bounded streaming and durable batch ownership.
+> It does not restore `expo-share-intent` or its unsafe pre-handler. The exact SHARE certificate,
+> SHARE-owned current-AAB inspection, real code-1-to-code-2 no-wipe upgrade, all ten conservative
+> route/payload pairs, connected embedded-release lifecycle, fresh-install replay, and
+> owner-authenticated App Lock cycle are green in the
+> [current proof record](./SHARE_02_DEVICE_PROOF_2026-09-28.md). The separately deferred Maps
+> metadata and native-symbol path findings still keep the full Android release guard red; this
+> task-local completion does not claim otherwise. Sections explicitly labelled
+> **Historical** below describe the retired July implementation or the completed `IPC-01` /
+> `SHARE-01` disabled baseline, not current source behavior.
 
 _2026-07-24. Reported symptom: "I tried to share a PDF and Gator showed in the intent menu but
 failed after that" — and, when pressed for detail, **nothing happened at all**: no attachment, no
 error, no toast, no screen change. Shared from the T-Mobile T-Life app. Photos, meanwhile, had
 always worked._
+
+## Current owned architecture (`SHARE-02`)
+
+The replacement handles the Android intent before JavaScript through local
+`gator-share-intake` code. It rejects item count before provider reads; accepts only `content://`
+sources; enforces actual per-file, batch-byte, text, cache, concurrency, and one absolute deadline;
+streams into a pending app-private directory; and publishes only a complete, re-statted, atomic
+manifest. Exact native acknowledge/release/discard operations make a claimed batch replayable after
+process or React-context restart without exposing a partial copy.
+
+The companion `gator-share-shortcuts` module publishes at most ten current-account rows with opaque
+HMAC identifiers. Publication and resolution use the same bounded canonical active-chat universe;
+generation fencing rejects stale account work, and operational key/token failures surface as a
+redacted failure rather than an ordinary no-match. App Lock clears personalized rows and keeps
+capture above the protected tree while routing remains below it.
 
 ## Summary
 
@@ -158,11 +171,11 @@ round-trip, so it stays node-testable). Batches older than 24h are pruned opport
 library types as non-null but frequently emits as `null` — a render crash into the root
 `ErrorBoundary`. Both now use `(f.mimeType ?? '')`, matching `MessageBubble.tsx:205`.
 
-## Historical Direct Share implementation (disabled)
+## Historical Direct Share implementation (retired unsafe version)
 
-An earlier build implemented Direct Share but exposed the same unsafe intake. These findings are
-retained for a future owned implementation; the current app applies no share-target plugin and
-publishes no conversation rows.
+An earlier build implemented Direct Share but exposed the same unsafe intake. These findings were
+retained to design the owned replacement. References in this section to what was “now” fixed describe
+that retired implementation; current behavior is owned by `SHARE-02` and the proof linked above.
 
 1. **`<share-target>` declared only `image/*`, `video/*`, `text/*`.** Android offers Direct Share
    targets only for a mime type the target DECLARES, so a shared PDF matched nothing and the
@@ -219,7 +232,7 @@ The pure suites remain useful evidence, but they do not authorize re-enabling na
 | `test/config/shareIntakeDisabled.test.ts`        | dependency/lock/config/import/layout/publication absence plus root legacy cleanup and retired-shortcut marker enforcement                                                                                                                                                             |
 | `scripts/check-android-build.test.mjs`           | allows harmless outbound `<queries>` ACTION_SEND, rejects inbound surfaces, and requires the cleanup/sanitization DEX markers while forbidding the old publisher markers                                                                                                              |
 
-## Current IPC-01 verification
+## Historical IPC-01 containment verification
 
 ```bash
 npm ls expo-share-intent --all                 # expect: (empty)

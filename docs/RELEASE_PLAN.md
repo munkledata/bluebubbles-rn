@@ -45,6 +45,13 @@ the staged-server journey and broader release gates are not complete.
 
 ## Current candidate
 
+The current candidate table is the frozen release-checklist boundary, not the latest artifact on the
+Internal track. Play `0.1.57` / version code `78` is the latest live Internal Testing artifact and supplies the
+task-scoped `PERM-01`, `UI-01`, and `THEME-01A` evidence recorded in the remediation plan. The table
+below deliberately remains frozen to v77 because the operational release checklist has not been
+rebound to v78 and v78 has not completed the broader staged journey, artifact ledger, or release
+matrix. No v78 task result transfers into a v77-only release row.
+
 | Field             | Frozen value                                                                                                                                                  |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Version           | `0.1.56` / Android version code `77`                                                                                                                          |
@@ -56,6 +63,14 @@ the staged-server journey and broader release gates are not complete.
 | Play destination  | Google Play Internal Testing only                                                                                                                             |
 | Submission        | EAS id `e7ca0440-81f3-40a0-ae6e-b05f2c52e59b` finished; Android Publisher readback at `2026-09-19T03:18:57Z` found only Internal `0.1.56` / `77`, `completed` |
 | Device checkpoint | Play-installed Samsung/Android 16/API 36 v77: synthetic killed-FCM/attachment slice passed; full journey and installed-signature check remain open            |
+
+Play v77 remains the frozen release-checklist candidate, but it is no longer the latest live
+Internal artifact. It predates `FEAT-05A` Current Location, its coarse/fine foreground permissions,
+and the revised privacy/store disclosures. It therefore provides no Current Location permission,
+send, retry, background-containment, or Data Safety evidence. Shipping that feature requires an
+explicit rebind to a new source-frozen candidate and the exact checks in
+[`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md); neither historical no-location-permission results
+nor the narrow v78 task results transfer to the frozen v77 rows.
 
 The validated v77 AAB binds the exact package, version, source/release tree, upload certificate,
 Maps-key digest, artifact hash, and native-path proof. The first 0.1.56 build from `f95d4f3`
@@ -123,16 +138,18 @@ historical unless an owning task explicitly combines them.
 - **Verify:** Confirm repository track/config, the live track and tester list, exact AAB identity,
   hash, and Play signing, install or update through Play, staged-server journeys, feedback path,
   cleanup, and every Play prompt shown for this artifact.
-- **Current status (2026-09-18):** **IN_PROGRESS — v77 creation, validation, direct submission, and
+- **Current status (2026-09-25):** **IN_PROGRESS — v77 creation, validation, direct submission, and
   live Internal `completed` state and a narrow Play-installed v77/API-36 killed-FCM slice are
-  proven; the full v77 phone journey is open.** The superseded v75 natural
-  Play build-73→75 update and scoped Samsung `DL-01` matrix remain task history, while its
-  Play-signed API-37 result remains supporting-only.
+  proven; CURRENT LOCATION REQUIRES A REPLACEMENT CANDIDATE AND NEW DISCLOSURE/DEVICE PROOF.** The
+  superseded v75 natural Play build-73→75 update and scoped Samsung `DL-01` matrix remain task history,
+  while its Play-signed API-37 result remains supporting-only.
   Remaining work is tester/track administration, genuine API-37 Play delivery, a stable
   non-production server and general fixtures, the full selected
   connect/sync/send/receive/notification/restart/disconnect journey, general cleanup and candidate
-  limitations, and artifact-specific Play declarations or prompts. No wider-track promotion is
-  authorized.
+  limitations, and artifact-specific Play declarations or prompts. The replacement must additionally
+  reconcile foreground coarse/fine location, absence of background/location-service permission,
+  Current Location success/no-send/retry behavior, privacy copy, and Data Safety. No wider-track
+  promotion is authorized.
 
 Current child disposition:
 
@@ -144,7 +161,7 @@ Current child disposition:
 | `STORE-01D-RELEASE-NOISE`               | Done        | None for deterministic host-test noise                                                                                                        |
 | `STORE-01E-SOURCE-FREEZE`               | Done        | Exact v77 source and release identities are recorded above                                                                                    |
 | `STORE-01F-LOCAL-AAB`                   | Done        | Exact v77 build/validation identity and retained local AAB are recorded above                                                                 |
-| `STORE-01G-TESTER-READINESS`            | In progress | Tester, staged-server, disclosure, journey, and cleanup evidence                                                                              |
+| `STORE-01G-TESTER-READINESS`            | In progress | Tester, staged-server, Current Location disclosure/device, journey, and cleanup evidence                                                      |
 | `STORE-01H-INTERNAL-TRACK-CONFIG-GUARD` | Done        | Live v77 Internal status is verified; tester readiness remains separate                                                                       |
 
 The deferred UGC-safety branch is the code-bearing exception inside this release plan: before any

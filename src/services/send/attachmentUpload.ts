@@ -5,8 +5,10 @@ import { parseServerErrorBody } from '@core/api/serverErrorDetail';
 import { apiResponse } from '@core/models/common';
 import {
   MAX_IMESSAGE_ATTACHMENT_UPLOAD_BYTES,
+  MAX_IMESSAGE_VOICE_UPLOAD_BYTES,
   MAX_SEND_ATTACHMENT_TEXT_BYTES,
   isSupportedImessageAttachmentType,
+  isSupportedImessageVoiceType,
 } from '@core/models/serverInfo';
 import { logger } from '@core/secure';
 import { MessageTargetUnavailableError } from '@db/repositories';
@@ -81,6 +83,7 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
   clientAttemptGeneration,
   text,
   service,
+  voice,
   assertNetworkStart,
   attachmentGuid,
   name,
@@ -93,6 +96,10 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
   // An explicit, capability-fenced one-to-one file path is the sole iMessage exception. The
   // existing RCS uploader remains unchanged, and a stale queue row cannot infer this mode.
   const imessageAttachment = service === 'iMessage';
+  const imessageVoice = imessageAttachment && voice === true;
+  if (voice === true && !imessageAttachment) {
+    throw new Error('Voice mode requires the narrow iMessage upload path.');
+  }
   if (imessageAttachment) {
     if (
       text !== undefined &&
@@ -107,9 +114,15 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
       !Number.isSafeInteger(totalBytes) ||
       totalBytes! < 0 ||
       totalBytes! > MAX_IMESSAGE_ATTACHMENT_UPLOAD_BYTES ||
-      !isSupportedImessageAttachmentType(mimeType, name)
+      (imessageVoice
+        ? text !== undefined || totalBytes! <= 0 || !isSupportedImessageVoiceType(mimeType, name)
+        : !isSupportedImessageAttachmentType(mimeType, name))
     ) {
-      throw new Error('Only one bounded JPEG/PNG/PDF iMessage attachment is available.');
+      throw new Error(
+        imessageVoice
+          ? 'Only one bounded M4A iMessage voice note is available.'
+          : 'Only one bounded JPEG/PNG/PDF iMessage attachment is available.',
+      );
     }
   } else if (!isRcsChatGuid(chatGuid)) {
     throw new Error('iMessage attachments require the narrow attachment-only capability.');
@@ -213,9 +226,15 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
       imessageAttachment &&
       (!Number.isSafeInteger(fileInfo.size) ||
         fileInfo.size <= 0 ||
-        fileInfo.size > MAX_IMESSAGE_ATTACHMENT_UPLOAD_BYTES)
+        fileInfo.size >
+          (imessageVoice ? MAX_IMESSAGE_VOICE_UPLOAD_BYTES : MAX_IMESSAGE_ATTACHMENT_UPLOAD_BYTES))
     ) {
-      throw new ApiError('local_file', 'Choose a JPEG, PNG, or PDF file no larger than 10 MiB');
+      throw new ApiError(
+        'local_file',
+        imessageVoice
+          ? 'Choose an M4A voice note no larger than 10 MiB'
+          : 'Choose a JPEG, PNG, or PDF file no larger than 10 MiB',
+      );
     }
 
     try {
@@ -251,6 +270,7 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
                   // disagree and the narrow iMessage server route would reject it before send.
                   // With no override, the server uses the actual file-part filename.
                   ...(imessageAttachment ? {} : { name }),
+                  ...(imessageVoice ? { uploadKind: 'imessage_voice' } : {}),
                   ...(text === undefined ? {} : { text }),
                   ...(clientAttemptGeneration == null
                     ? {}

@@ -25,6 +25,8 @@ export interface ScheduledRow {
   serverId: string | null;
   chatGuid: string;
   text: string;
+  /** Display-only metadata; file bytes live only on the scheduling Mac. */
+  attachmentName?: string;
   selectedMessageGuid?: string;
   selectedMessagePartIndex?: number;
   scheduledFor: number;
@@ -35,6 +37,7 @@ export interface ScheduledRow {
 
 interface ScheduledPayload {
   text: string;
+  attachmentName?: string;
   selectedMessageGuid?: string;
   selectedMessagePartIndex?: number;
 }
@@ -42,6 +45,7 @@ interface ScheduledPayload {
 export interface InsertScheduledArgs {
   chatGuid: string;
   text: string;
+  attachmentName?: string;
   scheduledFor: number;
   selectedMessageGuid?: string;
   selectedMessagePartIndex?: number;
@@ -100,6 +104,7 @@ function mapScheduled(r: {
     serverId: r.serverId,
     chatGuid: r.chatGuid,
     text: p.text,
+    attachmentName: p.attachmentName,
     selectedMessageGuid: p.selectedMessageGuid,
     selectedMessagePartIndex: p.selectedMessageGuid ? p.selectedMessagePartIndex : undefined,
     scheduledFor: r.scheduledFor,
@@ -120,6 +125,7 @@ export function insertScheduledWithinTransaction(
     }
     const payload: ScheduledPayload = {
       text: args.text,
+      ...(args.attachmentName ? { attachmentName: args.attachmentName } : {}),
     };
     const rows = await db
       .insert(scheduledMessages)
@@ -193,6 +199,7 @@ export async function reconcileServerScheduled(
     serverId: string;
     chatGuid: string;
     text: string;
+    attachmentName?: string;
     scheduledFor: number;
     status: string;
   }[],
@@ -214,10 +221,12 @@ export async function reconcileServerScheduled(
         );
         const row = existing[0];
         if (row) {
-          // Preserve any local reply target — only text/time/status are server-authoritative.
+          // Preserve any local reply target — text/file name/time/status are server-authoritative.
           let p: ScheduledPayload = { text: it.text };
           try {
             p = { ...(JSON.parse(row.payload) as ScheduledPayload), text: it.text };
+            if (it.attachmentName) p.attachmentName = it.attachmentName;
+            else delete p.attachmentName;
           } catch {
             /* corrupt local payload — fall back to text-only */
           }
@@ -233,7 +242,10 @@ export async function reconcileServerScheduled(
         await db.insert(scheduledMessages).values({
           serverId: it.serverId,
           chatGuid: it.chatGuid,
-          payload: JSON.stringify({ text: it.text } satisfies ScheduledPayload),
+          payload: JSON.stringify({
+            text: it.text,
+            ...(it.attachmentName ? { attachmentName: it.attachmentName } : {}),
+          } satisfies ScheduledPayload),
           scheduledFor: it.scheduledFor,
           status: it.status,
         });

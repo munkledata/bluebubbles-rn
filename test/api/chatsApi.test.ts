@@ -2,6 +2,9 @@ import * as chatsApi from '@core/api/endpoints/chats';
 import { createChat, markChatRead, markChatUnread } from '@core/api/endpoints/chats';
 import type { HttpClient } from '@core/api/http';
 
+const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
+const RCS_CHAT_GUID = `RCS;-;g1.${RCS_PROVIDER_EPOCH}.${Buffer.from('+1555').toString('base64url')}`;
+
 describe('chatsApi helper retirement', () => {
   it('does not export helper-only group mutation endpoints', () => {
     expect(chatsApi).not.toHaveProperty('renameChat');
@@ -12,17 +15,27 @@ describe('chatsApi helper retirement', () => {
 
 describe('chatsApi.createChat', () => {
   it('POSTs one RCS recipient without the retired helper method selector', async () => {
-    const post = jest.fn((..._a: unknown[]) => Promise.resolve({ guid: 'RCS;-;+1555' }));
+    const post = jest.fn((..._a: unknown[]) => Promise.resolve({ guid: RCS_CHAT_GUID }));
     const http = { post } as unknown as HttpClient;
     await expect(
-      createChat(http, { address: '+1555', message: 'hi', service: 'RCS' }),
+      createChat(http, {
+        address: '+1555',
+        message: 'hi',
+        service: 'RCS',
+        providerEpoch: RCS_PROVIDER_EPOCH,
+      }),
     ).resolves.toMatchObject({
-      guid: 'RCS;-;+1555',
+      guid: RCS_CHAT_GUID,
       participants: [{ address: '+1555', service: 'RCS' }],
     });
     expect(post).toHaveBeenCalledWith('/chat/new', expect.anything(), {
       captureErrorDetail: true,
-      json: { addresses: ['+1555'], message: 'hi', service: 'RCS' },
+      json: {
+        addresses: ['+1555'],
+        message: 'hi',
+        service: 'RCS',
+        providerEpoch: RCS_PROVIDER_EPOCH,
+      },
     });
   });
 
@@ -31,7 +44,12 @@ describe('chatsApi.createChat', () => {
     const http = { post } as unknown as HttpClient;
 
     await expect(
-      createChat(http, { address: '+1555', message: 'hi', service: 'RCS' }),
+      createChat(http, {
+        address: '+1555',
+        message: 'hi',
+        service: 'RCS',
+        providerEpoch: RCS_PROVIDER_EPOCH,
+      }),
     ).rejects.toThrow('wrong service');
   });
 
@@ -82,7 +100,7 @@ describe('chatsApi.createChat', () => {
     post.mockResolvedValueOnce({ guid: 'SMS;-;+1555' });
     await expect(createChat(http, params)).rejects.toThrow('wrong service');
 
-    post.mockResolvedValueOnce({ guid: 'RCS;-;+1555' });
+    post.mockResolvedValueOnce({ guid: RCS_CHAT_GUID });
     await expect(createChat(http, params)).rejects.toThrow('wrong service');
   });
 
@@ -90,7 +108,12 @@ describe('chatsApi.createChat', () => {
     const post = jest.fn(async () => ({ guid: 'any;-;+1555' }));
     const http = { post } as unknown as HttpClient;
     await expect(
-      createChat(http, { address: '+1555', message: 'hi', service: 'RCS' }),
+      createChat(http, {
+        address: '+1555',
+        message: 'hi',
+        service: 'RCS',
+        providerEpoch: RCS_PROVIDER_EPOCH,
+      }),
     ).rejects.toThrow('wrong service');
   });
 

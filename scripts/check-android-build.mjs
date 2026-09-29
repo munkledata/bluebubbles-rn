@@ -25,6 +25,8 @@ const DEFAULT_RELEASE_MANIFESTS = [
 ];
 const DEFAULT_RELEASE_BUNDLE = 'android/app/build/outputs/bundle/release/app-release.aab';
 const DEFAULT_NETWORK_SECURITY_CONFIG = 'android/app/src/main/res/xml/network_security_config.xml';
+const DEFAULT_MAIN_ACTIVITY_SOURCE =
+  'android/app/src/main/java/com/bluegreengatorapps/messages/MainActivity.kt';
 const PACKAGED_MANIFEST_ENTRY = 'base/manifest/AndroidManifest.xml';
 const PACKAGED_RESOURCES_ENTRY = 'base/resources.pb';
 const PACKAGED_SHORTCUTS_ENTRY = 'base/res/xml/shortcuts.xml';
@@ -33,10 +35,23 @@ const MAX_PACKAGED_DEX_BYTES = 256 * 1024 * 1024;
 const ANDROID_NAMESPACE = 'http://schemas.android.com/apk/res/android';
 const REQUIRED_MIN_SDK_VERSION = '36';
 const FORBIDDEN_INBOUND_SHARE_DEX_MARKERS = ['ExpoShareIntent', 'expo/modules/shareintent'];
+const REQUIRED_SHARE_ACTIONS = [
+  'android.intent.action.SEND',
+  'android.intent.action.SEND_MULTIPLE',
+];
+const SHARE_TARGET_CATEGORY = 'com.bluegreengatorapps.messages.category.SHARE_TARGET';
+const SHARE_TARGET_ACTIVITY = 'com.bluegreengatorapps.messages.MainActivity';
+const SHARE_ON_CREATE_CAPTURE =
+  'expo.modules.gatorshareintake.GatorShareIntakeActivityBridge.captureOnCreate(this, intent, savedInstanceState)';
+const SHARE_ON_NEW_INTENT_CAPTURE =
+  'expo.modules.gatorshareintake.GatorShareIntakeActivityBridge.captureOnNewIntent(this, intent)';
 const EXPO_BACKGROUND_TASK_VERSION = '57.0.16';
 const EXPO_TASK_MANAGER_VERSION = '57.0.16';
 const UNIMODULES_APP_LOADER_VERSION = '57.0.1';
 const EXPO_FILE_SYSTEM_VERSION = '57.0.6';
+const EXPO_ROUTER_VERSION = '57.0.20';
+const REACT_NATIVE_SCREENS_VERSION = '4.26.2';
+const REACT_NATIVE_SCREENS_RANGE = '~4.26.0';
 const PATCH_PACKAGE_VERSION = '8.0.1';
 const EXPO_BACKGROUND_TASK_PATCH_PATH = `patches/expo-background-task+${EXPO_BACKGROUND_TASK_VERSION}.patch`;
 const EXPO_BACKGROUND_TASK_SCHEDULER_PATH =
@@ -59,6 +74,12 @@ const EXPO_FILE_SYSTEM_LEGACY_ANDROID_PATH =
   'node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemLegacyModule.kt';
 const EXPO_FILE_SYSTEM_REDIRECT_TEST_PATH =
   'node_modules/expo-file-system/android/src/test/java/expo/modules/filesystem/legacy/FileSystemLegacyRedirectPolicyTest.kt';
+const EXPO_ROUTER_PATCH_PATH = `patches/expo-router+${EXPO_ROUTER_VERSION}.patch`;
+const EXPO_ROUTER_EXPERIMENTAL_STACK_PATH =
+  'node_modules/expo-router/build/layouts/experimental-stack/ExperimentalStackView.js';
+const REACT_NATIVE_SCREENS_PATCH_PATH = `patches/react-native-screens+${REACT_NATIVE_SCREENS_VERSION}.patch`;
+const REACT_NATIVE_SCREENS_STACK_CONTAINER_PATH =
+  'node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainer.kt';
 
 // These exact product-owned runtime values bind an AAB to the pinned-shortcut retirement added in
 // 9d97eab. Generic ShortcutManager method names are deliberately excluded because AndroidX itself
@@ -71,6 +92,13 @@ export const REQUIRED_PINNED_SHORTCUT_CLEANUP_DEX_MARKERS = [
   'gator-retired-shortcut',
   'This shortcut is no longer available',
   'Direct Share cleanup could not replace ',
+];
+
+// These product-owned class descriptors prove the AAB contains both the Expo bridge and the
+// synchronous MainActivity capture bridge that runs before ReactActivity sees either intent.
+export const REQUIRED_SHARE_INTAKE_DEX_MARKERS = [
+  'Lexpo/modules/gatorshareintake/GatorShareIntakeModule;',
+  'Lexpo/modules/gatorshareintake/GatorShareIntakeActivityBridge;',
 ];
 
 // These strings exist only in the patched Kotlin source. Requiring them in DEX rejects a stale AAB
@@ -91,8 +119,6 @@ export const REQUIRED_TASK_MANAGER_SETTLEMENT_DEX_MARKERS = [
 ];
 
 export const FORBIDDEN_LEGACY_SHORTCUT_PUBLISHER_DEX_MARKERS = [
-  'com.bluegreengatorapps.messages.category.SHARE_TARGET',
-  'setShareShortcuts',
   'getLaunchShortcutId',
   'share shortcuts were not published (device cap or disabled shortcuts)',
 ];
@@ -106,8 +132,6 @@ export const FORBIDDEN_COMMUNITY_WEBVIEW_DEX_MARKERS = [
 ];
 
 export const FORBIDDEN_PERMISSIONS = [
-  'android.permission.ACCESS_COARSE_LOCATION',
-  'android.permission.ACCESS_FINE_LOCATION',
   'android.permission.ACCESS_BACKGROUND_LOCATION',
   'android.permission.FOREGROUND_SERVICE_LOCATION',
   'android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS',
@@ -442,6 +466,305 @@ export function validateExpoTaskManagerPreJsSettlement({
 }
 
 /**
+ * Keep SDK 57's experimental Router stack safe for Gator's predictive-Back contract.
+ *
+ * Upstream 57.0.20 does not redispatch a native dismissal that usePreventRemove blocked, so
+ * authored-work guards never receive the pending pop action. It also paints every scene white,
+ * which flashes during the preview in this dark-only app. Every route layout must use the same
+ * stack on Android; mixing the standard and experimental navigators disables the native preview
+ * contract.
+ */
+export function validateExpoRouterPredictiveBackBridge({
+  packageJson,
+  packageLock,
+  appConfigSource,
+  patchSource,
+  experimentalStackSource,
+  screensPatchSource,
+  stackContainerSource,
+  rootLayoutSource,
+  setupLayoutSource,
+  appLayoutSource,
+}) {
+  const errors = [];
+  const predictiveBackOptIns =
+    typeof appConfigSource === 'string'
+      ? (appConfigSource.match(/^\s*predictiveBackGestureEnabled:\s*true,?\s*$/gm) ?? [])
+      : [];
+  const predictiveBackKeys =
+    typeof appConfigSource === 'string'
+      ? (appConfigSource.match(/^\s*predictiveBackGestureEnabled\s*:/gm) ?? [])
+      : [];
+  if (predictiveBackOptIns.length !== 1 || predictiveBackKeys.length !== 1) {
+    errors.push('app.config.ts must set android.predictiveBackGestureEnabled to true exactly once');
+  }
+  const expectedRange = `~${EXPO_ROUTER_VERSION}`;
+  if (packageJson?.dependencies?.['expo-router'] !== expectedRange) {
+    errors.push(`expo-router must remain pinned to ${expectedRange} while its local patch applies`);
+  }
+  if (packageLock?.packages?.['']?.dependencies?.['expo-router'] !== expectedRange) {
+    errors.push(`package-lock root must pin expo-router to ${expectedRange}`);
+  }
+  if (packageLock?.packages?.['node_modules/expo-router']?.version !== EXPO_ROUTER_VERSION) {
+    errors.push(`package-lock must resolve expo-router ${EXPO_ROUTER_VERSION}`);
+  }
+  if (packageJson?.dependencies?.['react-native-screens'] !== REACT_NATIVE_SCREENS_RANGE) {
+    errors.push(
+      `react-native-screens must remain pinned to ${REACT_NATIVE_SCREENS_RANGE} while its local patch applies`,
+    );
+  }
+  if (
+    packageLock?.packages?.['']?.dependencies?.['react-native-screens'] !==
+    REACT_NATIVE_SCREENS_RANGE
+  ) {
+    errors.push(`package-lock root must pin react-native-screens to ${REACT_NATIVE_SCREENS_RANGE}`);
+  }
+  if (
+    packageLock?.packages?.['node_modules/react-native-screens']?.version !==
+    REACT_NATIVE_SCREENS_VERSION
+  ) {
+    errors.push(`package-lock must resolve react-native-screens ${REACT_NATIVE_SCREENS_VERSION}`);
+  }
+
+  const patchHeaders =
+    typeof patchSource === 'string'
+      ? [...patchSource.matchAll(/^diff --git a\/(.+) b\/(.+)$/gm)]
+      : [];
+  if (
+    patchHeaders.length !== 1 ||
+    patchHeaders[0]?.[1] !== EXPO_ROUTER_EXPERIMENTAL_STACK_PATH ||
+    patchHeaders[0]?.[2] !== EXPO_ROUTER_EXPERIMENTAL_STACK_PATH
+  ) {
+    errors.push(`${EXPO_ROUTER_PATCH_PATH} must patch only the reviewed experimental stack file`);
+  }
+
+  const patchMarkers = [
+    '+                        navigation.dispatch({',
+    '+                            ...native_1.StackActions.pop(),',
+    '+                            source: route.key,',
+    '+                            target: state.key,',
+    '+    const { colors } = (0, native_1.useTheme)();',
+    '+    return ((0, jsx_runtime_1.jsxs)(experimental_1.Stack.Screen,',
+    'style: [styles.scene, { backgroundColor: colors.background }]',
+    'headerConfigProps.hidden === true ? null :',
+    "-        backgroundColor: 'white',",
+  ];
+  if (patchMarkers.some((marker) => !patchSource?.includes(marker))) {
+    errors.push(`${EXPO_ROUTER_PATCH_PATH} must carry the reviewed pop and theme repairs`);
+  }
+
+  const screensPatchHeaders =
+    typeof screensPatchSource === 'string'
+      ? [...screensPatchSource.matchAll(/^diff --git a\/(.+) b\/(.+)$/gm)]
+      : [];
+  if (
+    screensPatchHeaders.length !== 1 ||
+    screensPatchHeaders[0]?.[1] !== REACT_NATIVE_SCREENS_STACK_CONTAINER_PATH ||
+    screensPatchHeaders[0]?.[2] !== REACT_NATIVE_SCREENS_STACK_CONTAINER_PATH
+  ) {
+    errors.push(
+      `${REACT_NATIVE_SCREENS_PATCH_PATH} must patch only the reviewed gamma stack container`,
+    );
+  }
+  const screensPatchMarkers = [
+    '+        pendingPopOperations.toList().forEach { popOperation ->',
+    '+            if (stackModel.none { it.stackScreen === popOperation.screen }) {',
+    '+                    pendingPushOperations.indexOfLast { it.screen === popOperation.screen }',
+    '+                    pendingPushOperations.removeAt(matchingPushIndex)',
+    '+                    pendingPopOperations.remove(popOperation)',
+    '+        if (!hasPendingOperations) {',
+    '+            val isRootReplacement =',
+    '+                stackModel.size == 1 &&',
+    '+                    pendingPopOperations.size == 1 &&',
+    '+                    pendingPushOperations.size == 1 &&',
+    '+                    stackModel.single().stackScreen === pendingPopOperations.single().screen &&',
+    '+                    pendingPushOperations.single().screen !== pendingPopOperations.single().screen',
+    '+            if (isRootReplacement) {',
+    '+                fragmentOps.add(RemoveOp(fragment))',
+    '+                check(stackModel.size > 1) {',
+    '+                    "[RNScreens] Attempt to pop last screen from the stack"',
+    '+                fragmentOps.add(PopBackStackOp(fragment))',
+  ];
+  const exactRootReplacementBlock = [
+    '            val isRootReplacement =',
+    '                stackModel.size == 1 &&',
+    '                    pendingPopOperations.size == 1 &&',
+    '                    pendingPushOperations.size == 1 &&',
+    '                    stackModel.single().stackScreen === pendingPopOperations.single().screen &&',
+    '                    pendingPushOperations.single().screen !== pendingPopOperations.single().screen',
+    '',
+    '            if (isRootReplacement) {',
+    '                fragmentOps.add(RemoveOp(fragment))',
+    '            } else {',
+    '                check(stackModel.size > 1) {',
+    '                    "[RNScreens] Attempt to pop last screen from the stack"',
+    '                }',
+    '',
+    '                fragmentOps.add(PopBackStackOp(fragment))',
+    '            }',
+  ].join('\n');
+  const exactRootReplacementPatchBlock = exactRootReplacementBlock
+    .split('\n')
+    .map((line) => `+${line}`)
+    .join('\n');
+  if (screensPatchMarkers.some((marker) => !screensPatchSource?.includes(marker))) {
+    errors.push(
+      `${REACT_NATIVE_SCREENS_PATCH_PATH} must carry the reviewed uncommitted-pair and root-replacement repairs`,
+    );
+  }
+  if (
+    screensPatchSource?.split('+            val isRootReplacement =').length !== 2 ||
+    !screensPatchSource.includes(exactRootReplacementPatchBlock)
+  ) {
+    errors.push(
+      `${REACT_NATIVE_SCREENS_PATCH_PATH} must preserve the exact reviewed root-replacement predicate and branches`,
+    );
+  }
+
+  const preventedStart = experimentalStackSource?.indexOf('onNativeDismissPrevented: () => {');
+  const preventedEnd =
+    preventedStart == null || preventedStart < 0
+      ? -1
+      : experimentalStackSource.indexOf('} }, route.key)', preventedStart);
+  const preventedBlock =
+    preventedStart != null && preventedStart >= 0 && preventedEnd > preventedStart
+      ? experimentalStackSource.slice(preventedStart, preventedEnd)
+      : '';
+  if (
+    !preventedBlock.includes("type: 'gestureCancel'") ||
+    !preventedBlock.includes('navigation.dispatch({') ||
+    !preventedBlock.includes('...native_1.StackActions.pop(),') ||
+    !preventedBlock.includes('source: route.key,') ||
+    !preventedBlock.includes('target: state.key,')
+  ) {
+    errors.push('installed experimental stack must redispatch the exact prevented pop action');
+  }
+  if (
+    !experimentalStackSource?.includes('const { colors } = (0, native_1.useTheme)();') ||
+    !experimentalStackSource.includes(
+      'style: [styles.scene, { backgroundColor: colors.background }]',
+    ) ||
+    experimentalStackSource.includes("backgroundColor: 'white'")
+  ) {
+    errors.push('installed experimental stack must use the navigation theme background');
+  }
+  if (
+    !experimentalStackSource?.includes(
+      'headerConfigProps.hidden === true ? null : (0, jsx_runtime_1.jsx)(experimental_1.Stack.HeaderConfig',
+    )
+  ) {
+    errors.push(
+      'installed experimental stack must omit native HeaderConfig when explicitly hidden',
+    );
+  }
+
+  const fragmentOpsClearStart = stackContainerSource?.indexOf('fragmentOps.clear()');
+  const reconciliationStart = stackContainerSource?.indexOf(
+    'pendingPopOperations.toList().forEach { popOperation ->',
+  );
+  const emptyBatchReturnStart = stackContainerSource?.indexOf(
+    'if (!hasPendingOperations) {\n            return\n        }',
+  );
+  const ordinaryPopStart = stackContainerSource?.indexOf('// Handle pop operations first.');
+  const popLoopStart = stackContainerSource?.indexOf('pendingPopOperations.forEach { operation ->');
+  const rootReplacementStart = stackContainerSource?.indexOf('val isRootReplacement =');
+  const rootRemovalStart = stackContainerSource?.indexOf('fragmentOps.add(RemoveOp(fragment))');
+  const finalPopGuardStart = stackContainerSource?.indexOf(
+    'check(stackModel.size > 1)',
+    rootReplacementStart,
+  );
+  const ordinaryPopOperationStart = stackContainerSource?.indexOf(
+    'fragmentOps.add(PopBackStackOp(fragment))',
+    rootReplacementStart,
+  );
+  const pushLoopStart = stackContainerSource?.indexOf(
+    'pendingPushOperations.forEach { operation ->',
+    rootReplacementStart,
+  );
+  const pushBackStackDecisionStart = stackContainerSource?.indexOf(
+    'addToBackStack = stackModel.isNotEmpty()',
+    pushLoopStart,
+  );
+  if (
+    fragmentOpsClearStart == null ||
+    fragmentOpsClearStart < 0 ||
+    reconciliationStart == null ||
+    reconciliationStart < 0 ||
+    fragmentOpsClearStart >= reconciliationStart ||
+    emptyBatchReturnStart == null ||
+    emptyBatchReturnStart <= reconciliationStart ||
+    ordinaryPopStart == null ||
+    ordinaryPopStart <= emptyBatchReturnStart ||
+    popLoopStart == null ||
+    popLoopStart <= ordinaryPopStart ||
+    rootReplacementStart == null ||
+    rootReplacementStart <= popLoopStart ||
+    rootRemovalStart == null ||
+    rootRemovalStart <= rootReplacementStart ||
+    finalPopGuardStart == null ||
+    finalPopGuardStart <= rootRemovalStart ||
+    ordinaryPopOperationStart == null ||
+    ordinaryPopOperationStart <= finalPopGuardStart ||
+    pushLoopStart == null ||
+    pushLoopStart <= ordinaryPopOperationStart ||
+    pushBackStackDecisionStart == null ||
+    pushBackStackDecisionStart <= pushLoopStart ||
+    !stackContainerSource.includes(
+      'if (stackModel.none { it.stackScreen === popOperation.screen })',
+    ) ||
+    !stackContainerSource.includes(
+      'pendingPushOperations.indexOfLast { it.screen === popOperation.screen }',
+    ) ||
+    !stackContainerSource.includes('pendingPushOperations.removeAt(matchingPushIndex)') ||
+    !stackContainerSource.includes('pendingPopOperations.remove(popOperation)') ||
+    stackContainerSource.split('val isRootReplacement =').length !== 2 ||
+    !stackContainerSource.includes(exactRootReplacementBlock) ||
+    !stackContainerSource.includes('stackModel.size == 1 &&') ||
+    !stackContainerSource.includes('pendingPopOperations.size == 1 &&') ||
+    !stackContainerSource.includes('pendingPushOperations.size == 1 &&') ||
+    !stackContainerSource.includes(
+      'stackModel.single().stackScreen === pendingPopOperations.single().screen &&',
+    ) ||
+    !stackContainerSource.includes(
+      'pendingPushOperations.single().screen !== pendingPopOperations.single().screen',
+    ) ||
+    !stackContainerSource.includes('if (isRootReplacement) {') ||
+    !stackContainerSource.includes('check(stackModel.size > 1) {') ||
+    !stackContainerSource.includes('[RNScreens] Attempt to pop last screen from the stack') ||
+    !stackContainerSource.includes('[RNScreens] Attempt to pop non-top screen') ||
+    !stackContainerSource.includes('[RNScreens] Stack should never be empty after updates') ||
+    !stackContainerSource.includes(
+      'checkNotNull(stackModel.find { it.stackScreen === operation.screen })',
+    ) ||
+    !stackContainerSource.includes('[RNScreens] Unable to find a fragment to pop')
+  ) {
+    errors.push(
+      'installed gamma stack must cancel only identity-matched uncommitted pairs, safely replace a sole root, and reject unmatched pops',
+    );
+  }
+
+  for (const [label, source] of [
+    ['root layout', rootLayoutSource],
+    ['setup layout', setupLayoutSource],
+    ['authenticated layout', appLayoutSource],
+  ]) {
+    if (!source?.includes("from 'expo-router'") || !/<ExperimentalStack\b/.test(source)) {
+      errors.push(`${label} must render Expo Router ExperimentalStack`);
+    }
+    if (/<Stack\b/.test(source)) {
+      errors.push(`${label} must not mix the standard Stack with ExperimentalStack`);
+    }
+    if (
+      !/<ExperimentalStack\s+screenOptions=\{\{\s*headerShown:\s*false\s*\}\}\s*\/>/.test(source)
+    ) {
+      errors.push(`${label} must keep its experimental stack explicitly headerless`);
+    }
+  }
+
+  return errors;
+}
+
+/**
  * Keep the SDK 57 upload redirect repair durable across installs and native builds.
  *
  * Expo file-system ships a prebuilt Android AAR, so merely patching its Kotlin source is inert.
@@ -543,6 +866,8 @@ const DEBUG_ONLY_ALLOWED_PERMISSIONS = new Set(['android.permission.SYSTEM_ALERT
 // This is the sensitive/product permission contract. The merged manifest also contains normal
 // platform permissions such as INTERNET and WAKE_LOCK from the runtime and its libraries.
 export const REQUIRED_PERMISSIONS = [
+  'android.permission.ACCESS_COARSE_LOCATION',
+  'android.permission.ACCESS_FINE_LOCATION',
   'android.permission.POST_NOTIFICATIONS',
   'android.permission.READ_CONTACTS',
   'android.permission.READ_MEDIA_IMAGES',
@@ -554,6 +879,14 @@ export const REQUIRED_PERMISSIONS = [
 ];
 
 const REQUIRED_COMPONENTS = [
+  {
+    tag: 'service',
+    name: 'expo.modules.location.services.LocationTaskService',
+    attributes: {
+      'android:exported': 'false',
+      'android:foregroundServiceType': 'location',
+    },
+  },
   {
     tag: 'service',
     name: 'app.notifee.core.ReceiverService',
@@ -583,11 +916,6 @@ const REQUIRED_COMPONENTS = [
       'android:permission': 'android.permission.BIND_JOB_SERVICE',
     },
   },
-];
-
-const FORBIDDEN_INBOUND_SHARE_ACTIONS = [
-  'android.intent.action.SEND',
-  'android.intent.action.SEND_MULTIPLE',
 ];
 
 const REQUIRED_ENTRY_IMPORTS = [
@@ -932,6 +1260,41 @@ export function decodeProtoXml(input) {
   return elements;
 }
 
+function validateOwnedShareTargetElements(elements) {
+  const errors = [];
+  const roots = elements.filter((element) => element.parent == null);
+  if (roots.length !== 1 || roots[0].name !== 'shortcuts') {
+    return ['packaged shortcuts.xml must contain exactly one <shortcuts> root'];
+  }
+  const root = roots[0];
+  const targets = root.children.filter((child) => child.name === 'share-target');
+  if (root.children.length !== 1 || targets.length !== 1) {
+    errors.push('packaged shortcuts.xml must contain exactly one owned <share-target>');
+    return errors;
+  }
+
+  const target = targets[0];
+  if (target.attributes.get('android:targetClass') !== SHARE_TARGET_ACTIVITY) {
+    errors.push(`packaged share-target must target ${SHARE_TARGET_ACTIVITY}`);
+  }
+  const data = target.children.filter((child) => child.name === 'data');
+  const categories = target.children.filter((child) => child.name === 'category');
+  if (
+    target.children.length !== 2 ||
+    data.length !== 1 ||
+    data[0].attributes.get('android:mimeType') !== '*/*'
+  ) {
+    errors.push('packaged share-target must declare exactly one */* data element');
+  }
+  if (
+    categories.length !== 1 ||
+    categories[0].attributes.get('android:name') !== SHARE_TARGET_CATEGORY
+  ) {
+    errors.push(`packaged share-target must declare exactly one ${SHARE_TARGET_CATEGORY} category`);
+  }
+  return errors;
+}
+
 /**
  * Resolve the manifest's compiled Network Security Config reference through the AAB resource table.
  * This prevents a safe-looking, unused XML file from hiding a qualified variant or values alias
@@ -1104,16 +1467,11 @@ export function validatePackagedAndroidBundle({
     }
   }
 
-  // shortcuts.xml is optional while IPC-01 is fail-closed. If another library happens to package
-  // one, inspect its XML rather than treating the filename itself as proof of an inbound target.
-  if (shortcutsProto) {
+  if (!shortcutsProto) {
+    errors.push('packaged owned shortcuts.xml is missing');
+  } else {
     try {
-      const shortcutsElements = decodeProtoXml(shortcutsProto);
-      if (shortcutsElements.some((element) => element.name === 'share-target')) {
-        errors.push(
-          'packaged shortcuts.xml must not contain <share-target> while inbound sharing is disabled',
-        );
-      }
+      errors.push(...validateOwnedShareTargetElements(decodeProtoXml(shortcutsProto)));
     } catch (error) {
       errors.push(
         `packaged shortcuts.xml protobuf is invalid: ${error instanceof Error ? error.message : String(error)}`,
@@ -1135,6 +1493,11 @@ export function validatePackagedAndroidBundle({
     for (const marker of REQUIRED_PINNED_SHORTCUT_CLEANUP_DEX_MARKERS) {
       if (!dexBytes.includes(Buffer.from(marker, 'utf8'))) {
         errors.push(`packaged DEX is missing required pinned-shortcut cleanup marker: ${marker}`);
+      }
+    }
+    for (const marker of REQUIRED_SHARE_INTAKE_DEX_MARKERS) {
+      if (!dexBytes.includes(Buffer.from(marker, 'utf8'))) {
+        errors.push(`packaged DEX is missing required owned-share intake marker: ${marker}`);
       }
     }
     for (const marker of FORBIDDEN_LEGACY_SHORTCUT_PUBLISHER_DEX_MARKERS) {
@@ -1291,6 +1654,79 @@ function googleMapsApiKeyFromElements(elements) {
   };
 }
 
+function validateOwnedShareManifest(application, launcherActivity) {
+  const errors = [];
+  if (!launcherActivity) return errors;
+
+  const shortcutMetadata = launcherActivity.children.filter(
+    (child) =>
+      child.name === 'meta-data' &&
+      child.attributes.get('android:name') === 'android.app.shortcuts',
+  );
+  if (shortcutMetadata.length !== 1) {
+    errors.push('launcher activity must declare android.app.shortcuts meta-data exactly once');
+  } else if (shortcutMetadata[0].attributes.get('android:resource') !== '@xml/shortcuts') {
+    errors.push('launcher android.app.shortcuts meta-data must reference "@xml/shortcuts"');
+  }
+
+  const components = (application?.children ?? []).filter(
+    (child) => child.name === 'activity' || child.name === 'activity-alias',
+  );
+  for (const component of components) {
+    for (const filter of component.children.filter((child) => child.name === 'intent-filter')) {
+      const actions = filter.children
+        .filter((child) => child.name === 'action')
+        .map((child) => child.attributes.get('android:name'));
+      const ownedActions = actions.filter((action) => REQUIRED_SHARE_ACTIONS.includes(action));
+      if (ownedActions.length === 0) continue;
+      if (component !== launcherActivity) {
+        for (const action of ownedActions) {
+          errors.push(
+            `${component.attributes.get('android:name') ?? component.name} must not declare owned inbound ${action}`,
+          );
+        }
+        continue;
+      }
+
+      const categories = filter.children
+        .filter((child) => child.name === 'category')
+        .map((child) => child.attributes.get('android:name'));
+      const mimeTypes = filter.children
+        .filter((child) => child.name === 'data')
+        .map((child) => child.attributes.get('android:mimeType'));
+      const action = ownedActions[0];
+      if (
+        ownedActions.length !== 1 ||
+        actions.length !== 1 ||
+        categories.length !== 1 ||
+        categories[0] !== 'android.intent.category.DEFAULT' ||
+        mimeTypes.length !== 1 ||
+        mimeTypes[0] !== '*/*' ||
+        filter.children.some((child) => !['action', 'category', 'data'].includes(child.name))
+      ) {
+        errors.push(
+          `launcher ${action ?? 'share'} intent-filter must contain only its action, DEFAULT, and */*`,
+        );
+      }
+    }
+  }
+
+  for (const action of REQUIRED_SHARE_ACTIONS) {
+    const matches = launcherActivity.children
+      .filter((child) => child.name === 'intent-filter')
+      .filter((filter) =>
+        filter.children.some(
+          (child) => child.name === 'action' && child.attributes.get('android:name') === action,
+        ),
+      );
+    if (matches.length !== 1) {
+      errors.push(`launcher activity must declare inbound ${action} exactly once`);
+    }
+  }
+
+  return errors;
+}
+
 function validateManifestElements(elements, { debug = false } = {}) {
   const errors = [];
   const manifest = elements.find(
@@ -1334,6 +1770,9 @@ function validateManifestElements(elements, { debug = false } = {}) {
       `application must set android:networkSecurityConfig="${NETWORK_SECURITY_CONFIG_REFERENCE}"`,
     );
   }
+  if (application?.attributes.get('android:enableOnBackInvokedCallback') !== 'true') {
+    errors.push('application must set android:enableOnBackInvokedCallback="true"');
+  }
 
   const mapsApiKey = googleMapsApiKeyFromElements(elements);
   if (mapsApiKey.count !== 1) {
@@ -1362,34 +1801,7 @@ function validateManifestElements(elements, { debug = false } = {}) {
   if (!launcherActivity) {
     errors.push('merged manifest is missing the launcher activity');
   } else {
-    const shortcuts = launcherActivity.children.find(
-      (child) =>
-        child.name === 'meta-data' &&
-        child.attributes.get('android:name') === 'android.app.shortcuts',
-    );
-    if (shortcuts) {
-      errors.push(
-        'launcher activity must not declare android.app.shortcuts meta-data while inbound sharing is disabled',
-      );
-    }
-  }
-
-  // Only component intent-filters make Gator an inbound target. Android package-visibility
-  // declarations under <queries> may legitimately mention ACTION_SEND so expo-sharing can find an
-  // outbound receiver; those are deliberately outside the application/component hierarchy below.
-  for (const component of application?.children ?? []) {
-    if (component.name !== 'activity' && component.name !== 'activity-alias') continue;
-    for (const filter of component.children.filter((child) => child.name === 'intent-filter')) {
-      for (const action of filter.children
-        .filter((child) => child.name === 'action')
-        .map((child) => child.attributes.get('android:name'))) {
-        if (action && FORBIDDEN_INBOUND_SHARE_ACTIONS.includes(action)) {
-          errors.push(
-            `${component.attributes.get('android:name') ?? component.name} must not declare inbound ${action}`,
-          );
-        }
-      }
-    }
+    errors.push(...validateOwnedShareManifest(application, launcherActivity));
   }
 
   return errors;
@@ -1459,6 +1871,58 @@ export function runHeadlessEntryCheck({ root = process.cwd() } = {}) {
   return { imports: entrySideEffectImports(entrySource).length };
 }
 
+function withoutKotlinComments(source) {
+  return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+}
+
+export function validateShareIntakeMainActivity(source) {
+  const errors = [];
+  const contracts = [
+    {
+      name: 'onCreate',
+      signature: /override\s+fun\s+onCreate\s*\(\s*savedInstanceState:\s*Bundle\?\s*\)\s*\{/g,
+      call: SHARE_ON_CREATE_CAPTURE,
+      superCall: 'super.onCreate(',
+    },
+    {
+      name: 'onNewIntent',
+      signature:
+        /override\s+fun\s+onNewIntent\s*\(\s*intent:\s*(?:android\.content\.)?Intent\s*\)\s*\{/g,
+      call: SHARE_ON_NEW_INTENT_CAPTURE,
+      superCall: 'super.onNewIntent(',
+    },
+  ];
+
+  for (const contract of contracts) {
+    const signatures = [...source.matchAll(contract.signature)];
+    if (signatures.length !== 1) {
+      errors.push(
+        `MainActivity must declare ${contract.name} exactly once for owned share capture`,
+      );
+      continue;
+    }
+    if (countOccurrences(source, contract.call) !== 1) {
+      errors.push(`MainActivity ${contract.name} must call the owned share capture exactly once`);
+      continue;
+    }
+    const signature = signatures[0];
+    const methodStart = signature.index ?? -1;
+    const bodyStart = methodStart + signature[0].length;
+    const callIndex = source.indexOf(contract.call, bodyStart);
+    const superIndex = source.indexOf(contract.superCall, bodyStart);
+    if (callIndex < bodyStart || superIndex < bodyStart || callIndex > superIndex) {
+      errors.push(
+        `MainActivity ${contract.name} must capture the owned share before ${contract.superCall.slice(0, -1)}`,
+      );
+      continue;
+    }
+    if (withoutKotlinComments(source.slice(bodyStart, callIndex)).trim().length !== 0) {
+      errors.push(`MainActivity ${contract.name} owned share capture must be its first statement`);
+    }
+  }
+  return errors;
+}
+
 export function runAndroidBuildCheck({
   root = process.cwd(),
   debugManifestPath,
@@ -1503,6 +1967,37 @@ export function runAndroidBuildCheck({
       ),
     }).map((error) => `task-manager pre-JavaScript settlement: ${error}`),
   );
+  errors.push(
+    ...validateExpoRouterPredictiveBackBridge({
+      packageJson,
+      packageLock,
+      appConfigSource: readFileSync(resolve(root, 'app.config.ts'), 'utf8'),
+      patchSource: readFileSync(resolve(root, EXPO_ROUTER_PATCH_PATH), 'utf8'),
+      experimentalStackSource: readFileSync(
+        resolve(root, EXPO_ROUTER_EXPERIMENTAL_STACK_PATH),
+        'utf8',
+      ),
+      screensPatchSource: readFileSync(resolve(root, REACT_NATIVE_SCREENS_PATCH_PATH), 'utf8'),
+      stackContainerSource: readFileSync(
+        resolve(root, REACT_NATIVE_SCREENS_STACK_CONTAINER_PATH),
+        'utf8',
+      ),
+      rootLayoutSource: readFileSync(resolve(root, 'app/_layout.tsx'), 'utf8'),
+      setupLayoutSource: readFileSync(resolve(root, 'app/(setup)/_layout.tsx'), 'utf8'),
+      appLayoutSource: readFileSync(resolve(root, 'app/(app)/_layout.tsx'), 'utf8'),
+    }).map((error) => `predictive Back bridge: ${error}`),
+  );
+
+  const mainActivityPath = resolve(root, DEFAULT_MAIN_ACTIVITY_SOURCE);
+  if (!existsSync(mainActivityPath)) {
+    errors.push(`generated MainActivity source is missing: ${mainActivityPath}`);
+  } else {
+    errors.push(
+      ...validateShareIntakeMainActivity(readFileSync(mainActivityPath, 'utf8')).map(
+        (error) => `owned share MainActivity capture: ${error}`,
+      ),
+    );
+  }
 
   const networkSecurityConfigPath = resolve(root, DEFAULT_NETWORK_SECURITY_CONFIG);
   if (!existsSync(networkSecurityConfigPath)) {

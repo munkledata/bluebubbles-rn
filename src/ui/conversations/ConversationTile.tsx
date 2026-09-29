@@ -25,6 +25,8 @@ import { SwipeableRow, type SwipeAction } from './SwipeableRow';
 interface ConversationTileProps {
   row: InboxRow;
   onPress: (guid: string) => void;
+  /** Synthetic DEV rows must never expose the production chat/swipe mutations. */
+  readOnly?: boolean;
   // Long-press → chat actions (pin/mute/archive/delete). Takes the row so the inbox
   // can pass a STABLE callback (the binding happens here, inside the memoized tile).
   onLongPress?: (row: InboxRow) => void;
@@ -36,6 +38,7 @@ export const ConversationTile = React.memo(function ConversationTile({
   row,
   onPress,
   onLongPress,
+  readOnly = false,
 }: ConversationTileProps): React.JSX.Element {
   const theme = useTheme();
   // Swipe actions and the global delete dialog can fire after this row unmounts. Keep the account
@@ -119,91 +122,93 @@ export const ConversationTile = React.memo(function ConversationTile({
     },
   ];
 
-  return (
-    <SwipeableRow resetKey={row.guid} left={leftActions} right={rightActions}>
-      <Pressable
-        onPress={() => onPress(row.guid)}
-        onLongPress={onLongPress ? () => onLongPress(row) : undefined}
-        delayLongPress={350}
-        style={({ pressed }) => [
-          styles.tile,
-          compact ? styles.tileCompact : null,
-          { backgroundColor: theme.color.background },
-          pressed ? { backgroundColor: theme.color.secondaryBackground } : null,
-        ]}
-        accessibilityRole="button"
-        accessibilityLabel={`${title}. ${unread ? `${row.unreadCount} unread. ` : ''}${preview}`}
-        accessibilityHint="Double tap to open, or long press for actions"
-      >
-        <View style={styles.leading}>
-          {/* Unread is now signalled by the count badge on the right, so the leading gutter is
+  const tile = (
+    <Pressable
+      disabled={readOnly}
+      onPress={readOnly ? undefined : () => onPress(row.guid)}
+      onLongPress={!readOnly && onLongPress ? () => onLongPress(row) : undefined}
+      delayLongPress={350}
+      style={({ pressed }) => [
+        styles.tile,
+        compact ? styles.tileCompact : null,
+        { backgroundColor: theme.color.background },
+        pressed ? { backgroundColor: theme.color.secondaryBackground } : null,
+      ]}
+      accessibilityRole={readOnly ? undefined : 'button'}
+      accessibilityLabel={`${title}. ${unread ? `${row.unreadCount} unread. ` : ''}${preview}`}
+      accessibilityHint={readOnly ? undefined : 'Double tap to open, or long press for actions'}
+    >
+      <View style={styles.leading}>
+        {/* Unread is now signalled by the count badge on the right, so the leading gutter is
               always the spacer (keeps avatars aligned across read/unread rows). */}
-          <View style={styles.dotSpacer} />
-          {group ? (
-            <GroupAvatar
-              names={groupParts.names}
-              uris={groupParts.uris}
-              colors={groupParts.colors}
-            />
-          ) : (
-            <Avatar
-              name={avatarSeed(row)}
-              uri={participantAvatars(row.participantAvatars)[0]}
-              color={primaryParticipantColor(row.participantColors)}
-            />
-          )}
-        </View>
+        <View style={styles.dotSpacer} />
+        {group ? (
+          <GroupAvatar names={groupParts.names} uris={groupParts.uris} colors={groupParts.colors} />
+        ) : (
+          <Avatar
+            name={avatarSeed(row)}
+            uri={participantAvatars(row.participantAvatars)[0]}
+            color={primaryParticipantColor(row.participantColors)}
+          />
+        )}
+      </View>
 
-        <View style={styles.center}>
-          <View style={styles.titleRow}>
-            <Text
-              numberOfLines={1}
-              style={[
-                styles.title,
-                { color: theme.color.label, fontWeight: unread ? '600' : '500' },
-              ]}
-            >
-              {title}
-            </Text>
-            {badge ? (
-              <ServiceBadge
-                label={badge.label}
-                color={badge.color}
-                // Pale gator-green label on the deep-green RCS pill; other services keep white.
-                textColor={service === 'RCS' ? '#EAF7EC' : undefined}
-              />
-            ) : null}
-          </View>
+      <View style={styles.center}>
+        <View style={styles.titleRow}>
           <Text
-            numberOfLines={compact ? 1 : 2}
-            style={[styles.preview, { color: theme.color.secondaryLabel }]}
+            numberOfLines={1}
+            style={[styles.title, { color: theme.color.label, fontWeight: unread ? '600' : '500' }]}
           >
-            {preview}
+            {title}
           </Text>
+          {badge ? (
+            <ServiceBadge
+              label={badge.label}
+              color={badge.color}
+              // Pale gator-green label on the deep-green RCS pill; other services keep white.
+              textColor={service === 'RCS' ? '#EAF7EC' : undefined}
+            />
+          ) : null}
         </View>
+        <Text
+          numberOfLines={compact ? 1 : 2}
+          style={[styles.preview, { color: theme.color.secondaryLabel }]}
+        >
+          {preview}
+        </Text>
+      </View>
 
-        <View style={styles.trailing}>
-          <Text style={[styles.time, { color: theme.color.tertiaryLabel }]}>
-            {formatChatDate(row.lastDate)}
-          </Text>
-          <View style={styles.trailingRow}>
-            {unread ? (
-              <View style={[styles.countBadge, { backgroundColor: theme.color.tint }]}>
-                <Text
-                  style={[styles.countText, { color: readableTextOn(theme.color.tint) }]}
-                  numberOfLines={1}
-                >
-                  {row.unreadCount > 99 ? '99+' : row.unreadCount}
-                </Text>
-              </View>
-            ) : null}
-            {muted ? (
-              <Icon name="notifications-off-outline" size={14} color={theme.color.tertiaryLabel} />
-            ) : null}
-            <Text style={[styles.chevron, { color: theme.color.separator }]}>›</Text>
-          </View>
+      <View style={styles.trailing}>
+        <Text style={[styles.time, { color: theme.color.tertiaryLabel }]}>
+          {formatChatDate(row.lastDate)}
+        </Text>
+        <View style={styles.trailingRow}>
+          {unread ? (
+            <View style={[styles.countBadge, { backgroundColor: theme.color.tint }]}>
+              <Text
+                style={[styles.countText, { color: readableTextOn(theme.color.tint) }]}
+                numberOfLines={1}
+              >
+                {row.unreadCount > 99 ? '99+' : row.unreadCount}
+              </Text>
+            </View>
+          ) : null}
+          {muted ? (
+            <Icon name="notifications-off-outline" size={14} color={theme.color.tertiaryLabel} />
+          ) : null}
+          <Text style={[styles.chevron, { color: theme.color.separator }]}>›</Text>
         </View>
-      </Pressable>
+      </View>
+    </Pressable>
+  );
+  return (
+    <SwipeableRow
+      resetKey={row.guid}
+      left={leftActions}
+      right={rightActions}
+      interactionDisabled={readOnly}
+    >
+      {tile}
     </SwipeableRow>
   );
 });

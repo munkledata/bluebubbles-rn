@@ -322,7 +322,7 @@ describe('chat actions repo', () => {
     // Hidden everywhere a chat is LISTED.
     expect(await listChatsForInbox(db)).toHaveLength(0);
     expect(await listChatsForInbox(db, { includeArchived: true })).toHaveLength(0);
-    expect(await findChatByParticipantAddresses(db, ['a@b.com'])).toBeNull();
+    expect(await findChatByParticipantAddresses(db, ['a@b.com'], 'iMessage')).toBeNull();
     // …but NOT from the identity/preferences lookup, which is not a list: a null header reads as
     // "no such chat" to the notification builder, which silently switches the chat's MUTE off.
     expect((await getChatHeader(db, 'c1'))?.guid).toBe('c1');
@@ -1083,6 +1083,7 @@ describe('chat actions repo', () => {
     const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
     const history = [received('h1', 1000), received('h2', 2000)];
     await upsertMessages(db, history, () => chatId, handles);
+    await markMessageDeleted(db, 'h1', 4000, undefined, 'c1');
     await deleteChatLocal(db, 'c1', 5000);
 
     // Simulate an older/incomplete tombstone that did not retain its original floor, then land the
@@ -1114,7 +1115,21 @@ describe('chat actions repo', () => {
     );
     expect(restored).toBe(true);
     expect(col(raw, 'c1', 'last_read_message_guid')).toBe('h2');
+    expect(col(raw, 'c1', 'history_deleted_at')).toBeNull();
     expect((await listChatsForInbox(db))[0]!.unreadCount).toBe(0);
+    expect(
+      raw.prepare('SELECT guid, date_deleted AS dateDeleted FROM messages ORDER BY guid').all(),
+    ).toEqual([
+      { guid: 'h1', dateDeleted: 4000 },
+      { guid: 'h2', dateDeleted: null },
+    ]);
+    expect(
+      raw
+        .prepare(
+          'SELECT guid, date_deleted AS dateDeleted, chat_guid AS chatGuid FROM message_deletion_ledger ORDER BY guid',
+        )
+        .all(),
+    ).toEqual([{ guid: 'h1', dateDeleted: 4000, chatGuid: 'c1' }]);
 
     // A retained restore callback from the first deletion cannot clear a newer delete.
     await deleteChatLocal(db, 'c1', 7000);
@@ -1408,7 +1423,7 @@ describe('chat actions repo', () => {
     expect(col(raw, 'c1', 'deleted_at')).toBe(5000); // still deleted; only the leftovers went
   });
 
-  it('resumeChatPurges never touches a revived chat, nor anything newer than the stamp', async () => {
+  it('resumeChatPurges finishes deleted history after revival but preserves newer activity', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1'); // tombstoned, but a message landed after the stamp
     await seedChat(db, 'c2'); // revived: the stamp has been retired
@@ -1425,11 +1440,12 @@ describe('chat actions repo', () => {
         'INSERT INTO messages (guid, chat_id, text, is_from_me, date_created) VALUES (?,?,?,0,?)',
       )
       .run('live', c1, 'landed after the delete', 9000);
-    // c2: the same thing through the ingestion path, which also retires the stamp, and THEN its
-    // history re-syncs — the user un-deleted this conversation and it must keep its history.
+    // c2: the same thing through the ingestion path, which retires only the active tombstone. Its
+    // durable history boundary still owns the older re-synced row until an explicit Restore.
     await upsertMessages(db, [received('new-2', 9000)], () => c2, handles);
     await upsertMessages(db, [received('old-2', 1000)], () => c2, handles);
     expect(col(raw, 'c2', 'deleted_at')).toBeNull();
+    expect(col(raw, 'c2', 'history_deleted_at')).toBe(5000);
 
     await resumeChatPurges(db);
 
@@ -1437,7 +1453,104 @@ describe('chat actions repo', () => {
       (raw.prepare('SELECT guid FROM messages ORDER BY guid').all() as Array<{ guid: string }>).map(
         (r) => r.guid,
       ),
-    ).toEqual(['live', 'new-2', 'old-2']);
+    ).toEqual(['live', 'new-2']);
+  });
+
+  it('an explicit restore clears the boundary and stops later purge chunks', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const chatId = (await getChatIdByGuid(db, 'c1'))!;
+    const ins = raw.prepare(
+      'INSERT INTO messages (guid, chat_id, text, is_from_me, date_created) VALUES (?,?,?,0,?)',
+    );
+    raw.transaction(() => {
+      for (let i = 0; i < 600; i++) ins.run(`m${i}`, chatId, 'x', 1000 + i);
+    })();
+
+    let deletes = 0;
+    const realPrepare = raw.prepare.bind(raw);
+    (raw as unknown as { prepare: (s: string) => unknown }).prepare = (s: string) => {
+      if (/DELETE\s+FROM\s+messages\b/i.test(s) && ++deletes === 2) throw new Error('process died');
+      return realPrepare(s);
+    };
+    try {
+      await expect(deleteChatLocal(db, 'c1', 5000)).rejects.toThrow('process died');
+    } finally {
+      (raw as unknown as { prepare: unknown }).prepare = realPrepare;
+    }
+    expect(counts(raw, 'messages')).toBe(100);
+
+    await expect(
+      withDbTransaction(db, (context) =>
+        restoreDeletedChatWithinTransaction(context, {
+          guid: 'c1',
+          expectedDeletedAt: 5000,
+          historyExhausted: false,
+          repairedReadFloor: { guid: 'm599', dateCreated: 1599 },
+        }),
+      ),
+    ).resolves.toBe(true);
+    await resumeChatPurges(db);
+
+    expect(counts(raw, 'messages')).toBe(100);
+    expect(col(raw, 'c1', 'deleted_at')).toBeNull();
+    expect(col(raw, 'c1', 'history_deleted_at')).toBeNull();
+  });
+
+  it('rolls back the chat tombstone when its provider-aware guard is revoked mid-transaction', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'guarded-delete');
+    const chatId = (await getChatIdByGuid(db, 'guarded-delete'))!;
+    raw
+      .prepare(
+        'INSERT INTO messages (guid, chat_id, text, is_from_me, date_created) VALUES (?,?,?,?,?)',
+      )
+      .run('guarded-message', chatId, 'keep', 0, 1_000);
+    let current = true;
+    raw.function('revoke_chat_delete_guard', () => {
+      current = false;
+      return 0;
+    });
+    raw.exec(`
+      CREATE TRIGGER revoke_chat_delete_guard_after_tombstone
+      AFTER UPDATE OF deleted_at ON chats
+      WHEN NEW.guid = 'guarded-delete'
+      BEGIN
+        SELECT revoke_chat_delete_guard();
+      END
+    `);
+
+    await expect(
+      deleteChatLocal(db, 'guarded-delete', 5_000, () => current),
+    ).rejects.toBeInstanceOf(DbCommitGuardRejectedError);
+    expect(col(raw, 'guarded-delete', 'deleted_at')).toBeNull();
+    expect(counts(raw, 'messages')).toBe(1);
+  });
+
+  it('stops a multi-chunk chat purge before the next chunk when its guard is revoked', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'guarded-purge');
+    const chatId = (await getChatIdByGuid(db, 'guarded-purge'))!;
+    const insert = raw.prepare(
+      'INSERT INTO messages (guid, chat_id, text, is_from_me, date_created) VALUES (?,?,?,0,?)',
+    );
+    raw.transaction(() => {
+      for (let i = 0; i < 700; i += 1) insert.run(`guarded-purge-${i}`, chatId, 'x', 1_000 + i);
+    })();
+    let guardChecks = 0;
+    const current = (): boolean => {
+      guardChecks += 1;
+      // Three checks own the tombstone transaction and three own the first 500-row purge chunk.
+      // The simulated provider rotation is observed before the second chunk opens.
+      return guardChecks <= 6;
+    };
+
+    await expect(deleteChatLocal(db, 'guarded-purge', 5_000, current)).rejects.toBeInstanceOf(
+      DbCommitGuardRejectedError,
+    );
+    expect(col(raw, 'guarded-purge', 'deleted_at')).toBe(5_000);
+    expect(counts(raw, 'messages')).toBe(200);
+    expect(guardChecks).toBe(7);
   });
 
   it('lists all chat attachment guids for cancellation, and reports which ones the purge orphaned', async () => {

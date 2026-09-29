@@ -46,6 +46,9 @@ describe('statusFor', () => {
     expect(statusFor(m({ error: ClientErrorCode.attachmentDeliveryUnconfirmed }))).toBe(
       'Delivery Unconfirmed',
     );
+    expect(statusFor(m({ error: ClientErrorCode.mentionDeliveryUnconfirmed }))).toBe(
+      'Mention Status Unconfirmed',
+    );
     expect(statusFor(m({ dateDelivered: 1000 }))).toBe('Delivered');
     expect(statusFor(m({ dateRead: 1700000000000 }))).toMatch(/^Read /);
     expect(statusFor(m({}))).toBe('Sent');
@@ -90,6 +93,9 @@ describe('errorTitleForCode (2.4)', () => {
     expect(errorTitleForCode(10009)).toBe('Attachment Unavailable');
     expect(errorTitleForCode(ClientErrorCode.attachmentDeliveryUnconfirmed)).toBe(
       'Delivery Unconfirmed',
+    );
+    expect(errorTitleForCode(ClientErrorCode.mentionDeliveryUnconfirmed)).toBe(
+      'Mention Status Unconfirmed',
     );
   });
 

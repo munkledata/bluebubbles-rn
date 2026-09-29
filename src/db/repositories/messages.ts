@@ -18,6 +18,7 @@ import {
   chatHandles,
   chats,
   messageDeletionLedger,
+  messageGuidAliases,
   messages,
   outgoingQueue,
 } from '../schema';
@@ -127,18 +128,26 @@ function incomingRetractionProjection(
     message.dateRetracted != null ||
     (retractedParts?.length ?? 0) > 0;
   if (!hasRetractionSignal) {
+    const incomingTopologyIsExact = isExactMessagePartTopology(message.messagePartTopology);
+    const existingTopologyIsExact = isExactMessagePartTopology(
+      parseMessagePartTopology(existing?.messagePartTopology),
+    );
     return {
       state: null,
       classification: null,
       dateRetracted: null,
       // Exact topology is useful before any retraction: replies, reactions and a later unsend all
-      // target the original Apple part index. Keep valid ordinary-message proof and edit history.
+      // target the original Apple part index. A lean live event can carry a valid but incomplete
+      // topology, so do not let it downgrade an already-exact hydrated row. Malformed topology
+      // still writes the sentinel below and revokes trust rather than preserving stale proof.
       topologyText:
         message.messagePartTopologyInvalid === true
           ? INVALID_TOPOLOGY_SENTINEL
-          : !message.messagePartTopology
+          : message.messagePartTopology && existingTopologyIsExact && !incomingTopologyIsExact
             ? null
-            : JSON.stringify(message.messagePartTopology),
+            : !message.messagePartTopology
+              ? null
+              : JSON.stringify(message.messagePartTopology),
       summaryText: message.messageSummaryInfo ? JSON.stringify(message.messageSummaryInfo) : null,
     };
   }
@@ -231,21 +240,32 @@ export function upsertMessagesWithinTransaction(
 ): Promise<Map<string, number>> {
   return runInTransactionContext(context, async (db) => {
     const map = new Map<string, number>();
-    const deduped = dedupeBy(
-      items.filter((m) => !!m?.guid),
-      (m) => m.guid,
-    );
-    const withChat = deduped
+    const resolved = items
+      .filter((m) => !!m?.guid)
       .map((m) => ({ m, chatId: resolveChatId(m) }))
       .filter((x): x is { m: Message; chatId: number } => x.chatId != null);
-    if (withChat.length === 0) return map;
+    if (resolved.length === 0) return map;
 
-    const destinationChatByGuid = new Map(withChat.map(({ m, chatId }) => [m.guid, chatId]));
+    // A source message GUID has one immutable conversation owner. Reject every candidate for a
+    // GUID that claims multiple chats in one batch; last-item deduplication would otherwise choose
+    // an owner arbitrarily. Same-owner repeats remain ordinary last-payload-wins refreshes.
+    const batchOwnerByGuid = new Map<string, number>();
+    const batchConflicts = new Set<string>();
+    for (const { m, chatId } of resolved) {
+      const owner = batchOwnerByGuid.get(m.guid);
+      if (owner != null && owner !== chatId) batchConflicts.add(m.guid);
+      else batchOwnerByGuid.set(m.guid, chatId);
+    }
+    const candidates = dedupeBy(
+      resolved.filter(({ m }) => !batchConflicts.has(m.guid)),
+      ({ m }) => m.guid,
+    );
+    if (candidates.length === 0) return map;
+
     const existingLocations = await db
       .select({
         guid: messages.guid,
         chatId: messages.chatId,
-        dateCreated: messages.dateCreated,
         retractionState: messages.retractionState,
         dateRetracted: messages.dateRetracted,
         messagePartTopology: messages.messagePartTopology,
@@ -256,33 +276,183 @@ export function upsertMessagesWithinTransaction(
       .where(
         inArray(
           messages.guid,
-          withChat.map(({ m }) => m.guid),
+          candidates.map(({ m }) => m.guid),
         ),
       );
-    const movedLocations = existingLocations.filter(
-      (row) => destinationChatByGuid.get(row.guid) !== row.chatId,
-    );
     const existingLocationByGuid = new Map(existingLocations.map((row) => [row.guid, row]));
+    // Preserve the first committed owner. Skipping the whole conflicting candidate also prevents
+    // sender links, attachments, retraction state, tombstones, and inbox dates from leaking into
+    // the claimed destination chat.
+    const rowOwnerCandidates = candidates.filter(({ m, chatId }) => {
+      const existing = existingLocationByGuid.get(m.guid);
+      return existing == null || existing.chatId === chatId;
+    });
+    if (rowOwnerCandidates.length === 0) return map;
+
+    const destinationChats = await db
+      .select({
+        id: chats.id,
+        guid: chats.guid,
+        historyDeletedAt: chats.historyDeletedAt,
+      })
+      .from(chats)
+      .where(inArray(chats.id, [...new Set(rowOwnerCandidates.map(({ chatId }) => chatId))]));
+    const destinationChatById = new Map(destinationChats.map((chat) => [chat.id, chat]));
+    const canonicalGuids = rowOwnerCandidates.map(({ m }) => m.guid);
+    const tempGuids = [
+      ...new Set(
+        rowOwnerCandidates
+          .map(({ m }) => m.tempGuid)
+          .filter((guid): guid is string => typeof guid === 'string' && guid.length > 0),
+      ),
+    ];
+    const identityGuids = [...new Set([...canonicalGuids, ...tempGuids])];
+
+    // Read retained deletion knowledge BEFORE the insert so an out-of-order/backfilled message is
+    // born tombstoned. Insert-then-UPDATE is observably unsafe: reactive queries flush after each
+    // statement and could briefly render or notify on server-deleted content.
+    const deletionRows = await db
+      .select({
+        guid: messageDeletionLedger.guid,
+        dateDeleted: messageDeletionLedger.dateDeleted,
+        chatGuid: messageDeletionLedger.chatGuid,
+      })
+      .from(messageDeletionLedger)
+      .where(inArray(messageDeletionLedger.guid, identityGuids));
+    const deletionByIdentity = new Map(deletionRows.map((row) => [row.guid, row]));
+
+    // A promoted outgoing identity can outlive its message row. Its alias is therefore an
+    // independent ownership reservation, just like a deletion ledger row. Legacy NULL-scoped
+    // rows quarantine a new claimant until a trusted path adopts an exact owner.
+    const canonicalAliases = await db
+      .select({
+        aliasGuid: messageGuidAliases.aliasGuid,
+        canonicalGuid: messageGuidAliases.canonicalGuid,
+        chatGuid: messageGuidAliases.chatGuid,
+      })
+      .from(messageGuidAliases)
+      .where(inArray(messageGuidAliases.canonicalGuid, canonicalGuids));
+    const aliasesByCanonical = new Map<
+      string,
+      Array<{ aliasGuid: string; canonicalGuid: string; chatGuid: string | null }>
+    >();
+    for (const alias of canonicalAliases) {
+      const rows = aliasesByCanonical.get(alias.canonicalGuid) ?? [];
+      rows.push(alias);
+      aliasesByCanonical.set(alias.canonicalGuid, rows);
+    }
+    const tempAliases =
+      tempGuids.length === 0
+        ? []
+        : await db
+            .select({
+              aliasGuid: messageGuidAliases.aliasGuid,
+              canonicalGuid: messageGuidAliases.canonicalGuid,
+              chatGuid: messageGuidAliases.chatGuid,
+            })
+            .from(messageGuidAliases)
+            .where(inArray(messageGuidAliases.aliasGuid, tempGuids));
+    const aliasByTempGuid = new Map(tempAliases.map((row) => [row.aliasGuid, row]));
+
+    const withChat = rowOwnerCandidates.filter(({ m, chatId }) => {
+      const destination = destinationChatById.get(chatId);
+      if (!destination) return false;
+      const existing = existingLocationByGuid.get(m.guid);
+      const canonicalDeletion = deletionByIdentity.get(m.guid);
+      if (
+        canonicalDeletion &&
+        (canonicalDeletion.chatGuid == null
+          ? existing == null
+          : canonicalDeletion.chatGuid !== destination.guid)
+      ) {
+        return false;
+      }
+      if (m.tempGuid) {
+        const tempDeletion = deletionByIdentity.get(m.tempGuid);
+        if (tempDeletion?.chatGuid == null || tempDeletion?.chatGuid !== destination.guid) {
+          if (tempDeletion) return false;
+        }
+        const exactAlias = aliasByTempGuid.get(m.tempGuid);
+        if (
+          exactAlias &&
+          (exactAlias.canonicalGuid !== m.guid ||
+            exactAlias.chatGuid == null ||
+            exactAlias.chatGuid !== destination.guid)
+        ) {
+          return false;
+        }
+      }
+      for (const alias of aliasesByCanonical.get(m.guid) ?? []) {
+        if (alias.chatGuid == null ? existing == null : alias.chatGuid !== destination.guid) {
+          return false;
+        }
+      }
+      return true;
+    });
+    if (withChat.length === 0) return map;
+
+    const deletionByGuid = new Map<string, number>();
+    const scopedReceipts: Array<{ guid: string; dateDeleted: number; chatGuid: string }> = [];
+    for (const { m, chatId } of withChat) {
+      const destination = destinationChatById.get(chatId)!;
+      const retainedDeletionDates = [m.guid, m.tempGuid]
+        .filter((guid): guid is string => typeof guid === 'string' && guid.length > 0)
+        .map((guid) => deletionByIdentity.get(guid))
+        .filter(
+          (row): row is NonNullable<typeof row> =>
+            row != null &&
+            (row.chatGuid === destination.guid ||
+              (row.chatGuid == null && existingLocationByGuid.has(m.guid))),
+        )
+        .map((row) => row.dateDeleted);
+      const retainedDeletionDate =
+        retainedDeletionDates.length > 0 ? Math.max(...retainedDeletionDates) : null;
+      // A conversation deletion owns every message at or before its durable history boundary.
+      // Keep that provenance on the chat, not in message_deletion_ledger: the latter records only
+      // genuine per-message deletes and must survive an explicit chat-history restore.
+      const chatHistoryDate =
+        destination.historyDeletedAt != null &&
+        (m.dateCreated == null || m.dateCreated <= destination.historyDeletedAt)
+          ? destination.historyDeletedAt
+          : null;
+      const dateDeleted =
+        retainedDeletionDate == null
+          ? chatHistoryDate
+          : chatHistoryDate == null
+            ? retainedDeletionDate
+            : Math.max(retainedDeletionDate, chatHistoryDate);
+      if (retainedDeletionDate != null) {
+        // Canonicalize a genuine temp/alias deletion onto the incoming identity. A later explicit
+        // chat restore can then recompute visibility from this exact scoped receipt.
+        scopedReceipts.push({
+          guid: m.guid,
+          dateDeleted: retainedDeletionDate,
+          chatGuid: destination.guid,
+        });
+      }
+      if (dateDeleted != null) {
+        deletionByGuid.set(m.guid, dateDeleted);
+      }
+    }
+    if (scopedReceipts.length > 0) {
+      await db
+        .insert(messageDeletionLedger)
+        .values(scopedReceipts)
+        .onConflictDoUpdate({
+          target: messageDeletionLedger.guid,
+          setWhere: sql`${messageDeletionLedger.chatGuid} IS NULL OR ${messageDeletionLedger.chatGuid} = excluded.chat_guid`,
+          set: {
+            dateDeleted: sql`MAX(${messageDeletionLedger.dateDeleted}, excluded.date_deleted)`,
+            chatGuid: sql`COALESCE(${messageDeletionLedger.chatGuid}, excluded.chat_guid)`,
+          },
+        });
+    }
     const retractionByGuid = new Map(
       withChat.map(({ m }) => [
         m.guid,
         incomingRetractionProjection(m, existingLocationByGuid.get(m.guid)),
       ]),
     );
-
-    // Read retained deletion knowledge BEFORE the insert so an out-of-order/backfilled message is
-    // born tombstoned. Insert-then-UPDATE is observably unsafe: reactive queries flush after each
-    // statement and could briefly render or notify on server-deleted content.
-    const deletionRows = await db
-      .select({ guid: messageDeletionLedger.guid, dateDeleted: messageDeletionLedger.dateDeleted })
-      .from(messageDeletionLedger)
-      .where(
-        inArray(
-          messageDeletionLedger.guid,
-          withChat.map(({ m }) => m.guid),
-        ),
-      );
-    const deletionByGuid = new Map(deletionRows.map((row) => [row.guid, row.dateDeleted]));
 
     const rows = await db
       .insert(messages)
@@ -383,11 +553,11 @@ export function upsertMessagesWithinTransaction(
       )
       .onConflictDoUpdate({
         target: messages.guid,
+        // Defense in depth for another writer/process racing the ownership preflight. A conflicting
+        // owner updates nothing and RETURNING yields no row, so every later effect remains skipped.
+        setWhere: sql`${messages.chatId} = excluded.chat_id`,
         set: {
-          // GUID is the durable identity. A hydrated repair page is authoritative about the
-          // message's chat/ROWID, so it can correct a locally mis-linked or poisoned projection;
-          // partial events that omit ROWID retain the value already learned from the server.
-          chatId: sql`excluded.chat_id`,
+          // Chat ownership is deliberately absent: the first committed exact chat owns this GUID.
           originalRowId: sql`COALESCE(excluded.original_row_id, ${messages.originalRowId})`,
           // An EDIT empties the text column and re-fills it (server-side decode, or our local
           // attributedBody fallback above), so `excluded.text` carries the new body on a re-sync.
@@ -465,8 +635,8 @@ export function upsertMessagesWithinTransaction(
           ELSE COALESCE(excluded.message_part_topology, ${messages.messagePartTopology})
         END`,
           // Deletion is local durable knowledge, not a MessageV1 field. `excluded.date_deleted`
-          // comes only from message_deletion_ledger above; keep the later timestamp if an existing
-          // tombstone and retained marker differ after an upgrade or out-of-order repeat.
+          // comes from either a genuine message-deletion receipt or the destination chat's durable
+          // history boundary; keep the later timestamp across an out-of-order repeat.
           dateDeleted: sql`COALESCE(MAX(${messages.dateDeleted}, excluded.date_deleted), ${messages.dateDeleted}, excluded.date_deleted)`,
           // Reflect the LATEST server value (plain overwrite, not COALESCE-preserve like the delivery
           // tiers). The server emits is_scheduled=true for a schedule_type=2 row both while pending AND
@@ -537,38 +707,16 @@ export function upsertMessagesWithinTransaction(
           // ONLY by the send/outgoing layer, which both sets it (markMessageSendError) and clears it
           // on every promotion/retry — so leaving it out of the set can't strand a stale code.
           //
-          // NOTE — `date_deleted` is deliberately sourced ONLY from the local ledger, never the wire
-          // model. MessageV1 has no deletion field: only `message-deleted` events write the ledger.
-          // This keeps re-sync monotonic while also covering the harder event-before-row and
-          // purge-then-backfill cases that preserving only an existing messages row cannot cover.
+          // NOTE — `date_deleted` is deliberately sourced only from local deletion provenance,
+          // never the wire model. MessageV1 has no deletion field. Genuine per-message events use
+          // message_deletion_ledger; a chat delete uses chats.history_deleted_at so an explicit
+          // restore can distinguish and clear only the latter.
         },
       })
       .returning({ id: messages.id, guid: messages.guid });
 
     for (const r of rows) map.set(r.guid, r.id);
-
-    // A full repair can correct a GUID that was attached to the wrong chat. Hand any source-chat
-    // read floor off before recomputing its sort key; otherwise that chat keeps a marker pointing
-    // at a row it no longer owns and can miscount every remaining message as unread.
-    for (const moved of movedLocations) {
-      await db.run(sql`
-        UPDATE chats
-           SET last_read_message_guid = (
-             SELECT replacement.guid
-               FROM messages replacement
-              WHERE replacement.chat_id = ${moved.chatId}
-                AND replacement.is_from_me = 0
-                AND replacement.date_deleted IS NULL
-                AND ${moved.dateCreated} IS NOT NULL
-                AND replacement.date_created IS NOT NULL
-                AND replacement.date_created <= ${moved.dateCreated}
-              ORDER BY replacement.date_created DESC, replacement.id DESC
-              LIMIT 1
-           )
-         WHERE id = ${moved.chatId}
-           AND last_read_message_guid = ${moved.guid}
-      `);
-    }
+    const storedWithChat = withChat.filter(({ m }) => map.has(m.guid));
 
     // Link message SENDERS into chat_handles (additive) so a chat shows participant names even
     // when its participants were never synced via chat/query — e.g. a realtime-created group that
@@ -580,7 +728,7 @@ export function upsertMessagesWithinTransaction(
     // a chat that already lists the person would render them twice (duplicate collage avatar,
     // "Alice, Alice"). One key per person per chat also dedupes variants within this batch.
     const participantLinks = new Map<string, { chatId: number; handleId: number }>();
-    for (const { m, chatId } of withChat) {
+    for (const { m, chatId } of storedWithChat) {
       const h = m.handle;
       if (!h?.address) continue;
       const handleId = handleIdByKey.get(handleMapKey(h));
@@ -610,7 +758,7 @@ export function upsertMessagesWithinTransaction(
 
     // Upsert nested attachments now that we have message ids.
     const attRows: Array<{ att: Attachment; messageId: number }> = [];
-    for (const { m } of withChat) {
+    for (const { m } of storedWithChat) {
       const messageId = map.get(m.guid);
       if (messageId == null) continue;
       for (const att of m.attachments ?? []) {
@@ -622,7 +770,7 @@ export function upsertMessagesWithinTransaction(
     // Retraction visibility is committed with the message body and attachment upsert. Start every
     // classified aggregate hidden, then reveal only GUIDs whose exact original owner survives a
     // complete topology. Stale attachment rows omitted by the latest payload therefore fail closed.
-    for (const { m } of withChat) {
+    for (const { m } of storedWithChat) {
       const messageId = map.get(m.guid);
       const retraction = retractionByGuid.get(m.guid);
       const existing = existingLocationByGuid.get(m.guid);
@@ -695,10 +843,8 @@ export function upsertMessagesWithinTransaction(
     // DESC` in listChatsForInbox, i.e. exactly the "sinks to the bottom of the inbox" outcome that
     // upsert exists to prevent. So fall back to the unfiltered MAX: a reaction may not OUTRANK a real
     // message, but it may hold a position nothing else is holding.
-    const destinationChatIds = [...new Set(withChat.map((x) => x.chatId))];
-    const latestDateChatIds = [
-      ...new Set([...destinationChatIds, ...movedLocations.map((row) => row.chatId)]),
-    ];
+    const destinationChatIds = [...new Set(storedWithChat.map((x) => x.chatId))];
+    const latestDateChatIds = destinationChatIds;
     if (latestDateChatIds.length > 0) {
       await db
         .update(chats)
@@ -798,23 +944,48 @@ export function deleteMessageLocalWithinTransaction(
     // Resolve inside the SAME transaction as the tombstone. The real-guid promotion is serialized
     // on the same DB queue, so it is now wholly before or wholly after this lookup. Prefer an exact
     // current guid over an alias even if corrupted data ever makes the two namespaces overlap.
-    const targets = await db.all<{ guid: string; source: 'exact' | 'alias' }>(sql`
-      SELECT guid, source
+    const targets = await db.all<{
+      guid: string;
+      chatGuid: string | null;
+      source: 'exact' | 'alias';
+    }>(sql`
+      SELECT guid, chatGuid, source
         FROM (
-          SELECT guid, 'exact' AS source, 0 AS priority
-            FROM messages
-           WHERE guid = ${guid}
+          SELECT m.guid, c.guid AS chatGuid, 'exact' AS source, 0 AS priority
+            FROM messages m
+            JOIN chats c ON c.id = m.chat_id
+           WHERE m.guid = ${guid}
           UNION ALL
-          SELECT canonical_guid AS guid, 'alias' AS source, 1 AS priority
-            FROM message_guid_aliases
-           WHERE alias_guid = ${guid}
+          SELECT a.canonical_guid AS guid, a.chat_guid AS chatGuid,
+                 'alias' AS source, 1 AS priority
+            FROM message_guid_aliases a
+           WHERE a.alias_guid = ${guid}
+             AND a.chat_guid IS NOT NULL
+             AND (
+               NOT EXISTS (
+                 SELECT 1 FROM messages current_message
+                  WHERE current_message.guid = a.canonical_guid
+               )
+               OR EXISTS (
+                 SELECT 1
+                   FROM messages current_message
+                   JOIN chats owner ON owner.id = current_message.chat_id
+                  WHERE current_message.guid = a.canonical_guid
+                    AND owner.guid = a.chat_guid
+               )
+             )
         )
        ORDER BY priority
        LIMIT 1
     `);
     const target = targets[0];
     const targetGuid = target?.guid ?? guid;
-    const applied = await markMessageDeletedWithinTransaction(context, targetGuid, now);
+    const applied = await markMessageDeletedWithinTransaction(
+      context,
+      targetGuid,
+      now,
+      target?.chatGuid ?? undefined,
+    );
     if (applied) return 'applied';
     if (target?.source === 'alias' || !guid.startsWith('temp-')) return 'recorded';
     // Keep the temp-keyed ledger marker written above: a later authoritative HTTP ack can still
@@ -1155,9 +1326,10 @@ export async function revertLocalUnsend(
  * MAX(date_created) recompute — the two write the same column and any drift shows up as a chat that
  * jumps position on delete and jumps back on the next sync.
  *
- * Returns true if a local row matched the guid (tombstone applied), false when no message row is
- * present YET. False is not a no-op: the durable ledger still records the deletion so a later
- * ingestion starts hidden.
+ * Returns true if a local row matched the exact owner and was tombstoned. False means there was no
+ * local row or the supplied/retained owner conflicted. An unknown owner is retained as a NULL-
+ * scoped quarantine marker: it cannot tombstone a row, but it prevents later ingestion from
+ * resurrecting a deletion whose exact conversation has not yet been recovered.
  *
  * Transaction-only body for one durable message deletion.
  *
@@ -1169,26 +1341,65 @@ export function markMessageDeletedWithinTransaction(
   context: DbTransactionContext,
   guid: string,
   dateDeleted: number,
+  expectedChatGuid?: string,
 ): Promise<boolean> {
   return runInTransactionContext(context, async (db) => {
+    const storedOwners = await db.all<{ chatId: number; chatGuid: string }>(sql`
+      SELECT m.chat_id AS chatId, c.guid AS chatGuid
+        FROM messages m
+        JOIN chats c ON c.id = m.chat_id
+       WHERE m.guid = ${guid}
+       LIMIT 1
+    `);
+    const storedOwner = storedOwners[0];
+    const retainedRows = await db.all<{ dateDeleted: number; chatGuid: string | null }>(sql`
+      SELECT date_deleted AS dateDeleted, chat_guid AS chatGuid
+        FROM message_deletion_ledger
+       WHERE guid = ${guid}
+       LIMIT 1
+    `);
+    const retained = retainedRows[0];
+    const claimedOwner = expectedChatGuid && expectedChatGuid.length > 0 ? expectedChatGuid : null;
+    if (storedOwner && claimedOwner && storedOwner.chatGuid !== claimedOwner) return false;
+    const ownerChatGuid = storedOwner?.chatGuid ?? claimedOwner ?? retained?.chatGuid ?? null;
+    if (ownerChatGuid == null) {
+      await db
+        .insert(messageDeletionLedger)
+        .values({ guid, dateDeleted, chatGuid: null })
+        .onConflictDoUpdate({
+          target: messageDeletionLedger.guid,
+          set: {
+            dateDeleted: sql`MAX(${messageDeletionLedger.dateDeleted}, excluded.date_deleted)`,
+          },
+        });
+      return false;
+    }
+    if (retained?.chatGuid != null && retained.chatGuid !== ownerChatGuid) return false;
+
     await db
       .insert(messageDeletionLedger)
-      .values({ guid, dateDeleted })
+      .values({ guid, dateDeleted, chatGuid: ownerChatGuid })
       .onConflictDoUpdate({
         target: messageDeletionLedger.guid,
+        setWhere: sql`${messageDeletionLedger.chatGuid} IS NULL OR ${messageDeletionLedger.chatGuid} = excluded.chat_guid`,
         set: {
           dateDeleted: sql`MAX(${messageDeletionLedger.dateDeleted}, excluded.date_deleted)`,
+          chatGuid: sql`COALESCE(${messageDeletionLedger.chatGuid}, excluded.chat_guid)`,
         },
       });
 
     // Tombstone the row AND recover its chat id in one statement. An unknown guid updates 0 rows, so
-    // RETURNING yields nothing → false (the ledger above still commits). Read the retained maximum
-    // rather than blindly applying an older repeated event. db.all(sql`… RETURNING`) per the
-    // op-sqlite rules: we need the chat id back, which a non-returning db.run wouldn't give.
+    // RETURNING yields nothing → false (the scoped ledger above still commits). The exact chat
+    // predicate prevents a colliding delete from touching another provider/phone-number thread.
     const rows = await db.all<{ chatId: number }>(
       sql`UPDATE messages
-           SET date_deleted = (SELECT date_deleted FROM message_deletion_ledger WHERE guid = ${guid})
+           SET date_deleted = (
+                 SELECT date_deleted
+                   FROM message_deletion_ledger
+                  WHERE guid = ${guid} AND chat_guid = ${ownerChatGuid}
+               )
          WHERE guid = ${guid}
+           AND chat_id = (SELECT id FROM chats WHERE guid = ${ownerChatGuid} LIMIT 1)
          RETURNING chat_id AS chatId`,
     );
     const chatId = rows[0]?.chatId;
@@ -1224,10 +1435,11 @@ export async function markMessageDeleted(
   guid: string,
   dateDeleted: number,
   commitGuard?: DbCommitGuard,
+  expectedChatGuid?: string,
 ): Promise<boolean> {
   return withDbTransaction(
     db,
-    (context) => markMessageDeletedWithinTransaction(context, guid, dateDeleted),
+    (context) => markMessageDeletedWithinTransaction(context, guid, dateDeleted, expectedChatGuid),
     commitGuard,
   );
 }

@@ -2,9 +2,12 @@
 
 > **STATUS (2026-09-13): RETIRED V56 PREPARATION — NOT A CURRENT EXECUTION MATRIX.**
 > This file preserves the prepared `0.1.40` / version-code-`56` ledger and its synthetic-safe matrix history. It
-> contains no current or candidate-eligible Play-device result. Do not execute its historical rows, fill its result
-> fields, or transfer any checkmark or evidence to version code `57` or a future replacement. Explicitly labelled
-> local-development supporting results may be recorded separately without populating the 131 candidate result fields.
+> contains no current-candidate evidence. The explicitly labelled, bounded Play-v78 `UI-01`/`THEME-01A` reviews and
+> local-debug `HANDLE-COLOR-01` review added on 2026-09-27 are task-scoped evidence only; they do not rebind this
+> ledger or the v77 release candidate. Do
+> not execute its other historical rows, fill their result fields, or
+> transfer a checkmark or evidence to another artifact. Explicitly labelled local-development supporting results may
+> be recorded separately without populating the retired v56 candidate fields.
 >
 > The later version-code-57 through 62 artifacts are also superseded history. The current candidate
 > boundary is recorded in [`RELEASE_PLAN.md`](./RELEASE_PLAN.md) and
@@ -36,13 +39,8 @@ copy a result from a development build or an older Play build into the candidate
 | Distribution boundary      | Private Google Play Internal Testing only; no promotion                                           |
 | Current external state     | Not proven uploaded, accepted, published, Play-installed, or device-tested                        |
 
-**Reduce Motion applicability gate:** Git ancestry places the frozen source commit `5d367eb` 24
-commits before `8c5e783`, the commit containing the completed `A11Y-02A..L` host implementation.
-Version code `56` therefore cannot earn `A11Y-02` device credit, and the motion matrix below must not
-be executed on it. A later, separately approved Play candidate must be built locally from a commit
-that contains `8c5e7836b52df4207e315a7a445893f7b36b4a41`, then receive its own artifact/source/install ledger
-before motion testing. This documentation milestone neither authorizes nor creates that build,
-upload, install, or device session.
+**Accessibility scope:** The owner dropped `A11Y-01..03`, including Reduce Motion and TalkBack device
+matrices, on 2026-09-25. Do not schedule those historical checks against this or a later candidate.
 
 Do **not** rebuild this candidate. The production profile auto-increments, so another production
 build would consume version code `57` and create a different artifact. If a separate upload is later
@@ -70,7 +68,7 @@ alias rather than a tester's email address or device serial.
 | Android version / API level            | `[OPEN]`                                                               | OPEN   |
 | Device ABI                             | `[OPEN]`                                                               | OPEN   |
 | Navigation mode                        | `[OPEN — gesture or three-button]`                                     | OPEN   |
-| Display/font/TalkBack state            | `[OPEN]`                                                               | OPEN   |
+| Display/font state                     | `[OPEN]`                                                               | OPEN   |
 | Permission baseline                    | `[OPEN — fresh, denied, or previously granted]`                        | OPEN   |
 | Test branch                            | `[OPEN — clean Play install or approved prior-build Play update]`      | OPEN   |
 | Approved prior-build baseline          | `[OPEN — version, version code, and source label]`                     | OPEN   |
@@ -135,7 +133,7 @@ These boxes remain open until the release owner separately approves the Play/dev
 - [ ] After installation from Play, record the installer/source, exact package, version name, and
       version code, then verify the installed signing fingerprint against the Play App Signing
       delivery certificate.
-- [ ] Record permissions, display/font/TalkBack state, Android/API, ABI, navigation mode, test date,
+- [ ] Record permissions, display/font state, Android/API, ABI, navigation mode, test date,
       and private evidence reference before executing a refreshed behavior matrix.
 
 Stop immediately on a wrong file digest, package, version, version code, install source, or signing
@@ -504,8 +502,8 @@ legacy-shortcut cleanup path ran. A clean-install result must not be relabeled a
 
 Foreground uploads intentionally have no transport timeout, and the documented large-batch retry
 interaction after roughly 60 seconds remains open. Do not turn “eventually finished” into timeout
-or retry-safety evidence. Keyboard, wallpaper, and TalkBack presentation of the upload bar belong to
-`DEVICE-01B3`.
+or retry-safety evidence. Keyboard and wallpaper presentation of the upload bar belongs to the
+ordinary visual-device matrix; accessibility-specific presentation is outside remediation scope.
 
 ### 5. Document open, media viewer, outbound share, and Photos save
 
@@ -537,38 +535,48 @@ rendered the existing 186,575-byte synthetic image after an in-place reinstall a
 seed. The current item reported `1 of 3`; Share foregrounded Android's chooser, and Save created an
 exact 186,575-byte `DCIM/media-keynote.jpg` MediaStore row without a permission prompt. Only that
 new synthetic external row was deleted after verification; the app-private source remains. No share
-suggestions or unrelated MediaStore rows were inspected. Video, TalkBack, staged-server, and exact
+suggestions or unrelated MediaStore rows were inspected. Video, staged-server, and exact
 Play-candidate results remain open.
 
-### 6. Inbound-share containment and outbound preservation
+### 6. Owned inbound sharing and outbound preservation (`SHARE-02`)
 
-- [ ] **`STATIC/HOST`:** Retain exact source/packaged-boundary proof that Gator has no inbound
-      `SEND`/`SEND_MULTIPLE` filters, Direct Share target metadata/resource, `expo-share-intent`
-      dependency/autolinking, or active intake mount. Cleanup-only legacy shortcut code is not an
-      inbound capability.
-- [ ] **`EXACT PLAY CANDIDATE` + approved prior-build Play update:** Name the exact Play-delivered
-      shortcut-publishing baseline and its version code. Through that baseline's ordinary app/server
-      flow, use one distinct non-private synthetic chat/avatar and verify its shortcut label, avatar,
-      and legacy Direct Share category; never invoke inbound sharing or use `cmd shortcut` to create
-      or clear state. Pin that shortcut only through launcher UI when permitted. Update through Play
-      without uninstalling or clearing app data. Before the first candidate launch, run
-      `adb shell dumpsys shortcut com.bluegreengatorapps.messages` and verify that the same shortcut
-      ID and old pinned metadata survived the update; otherwise leave the pinned-survivor branch
-      open. Launch the candidate, then inspect that package-scoped dump and the launcher: old
-      dynamic/cached rows are gone, and the same retained pinned ID is disabled and generic, with no
-      old synthetic label, avatar, launch deep link, or Direct Share category. Launch again and
-      repeat the inspection to prove cleanup is safe to rerun. Retain only sanitized fields or a
-      private evidence reference—not the raw dump—and after review remove only the synthetic
-      home-screen pin through launcher UI. If publishing, pinning, or post-update survival cannot be
-      demonstrated, leave that branch `BLOCKED/OPEN`; do not substitute a clean install, sideloaded
-      build, DEV fixture, or command-created shortcut.
-- [ ] **`EXACT PLAY CANDIDATE`:** From another app's Android share sheet, try bounded synthetic text,
-      one image, multiple images, and a PDF. Gator and Gator conversation chips must not appear as
-      destinations. Use fixture labels and a private evidence reference; never capture another
-      app's real content or contact suggestions.
-- [ ] **`EXACT PLAY CANDIDATE`:** Reconfirm ordinary outbound sharing from downloaded synthetic
-      media opens Android's share sheet. Positive inbound intake is not a test branch; it is
-      deliberately disabled until a new approved bounded design exists.
+The former disabled-intake checks are retained in the historical IPC-01 proof. Current source uses
+only the product-owned bounded intake described in
+[`SHARE_02_DEVICE_PROOF_2026-09-28.md`](./SHARE_02_DEVICE_PROOF_2026-09-28.md).
+
+- [x] **`LOCAL-DEV SUPPORTING ONLY` — host/native boundary:** The third-party
+      `expo-share-intent` pre-handler remains absent. Owned intake policy/storage proof passed 29/29,
+      final native token proof passed 3/3, and focused JavaScript shortcut/navigation proof passed
+      2 suites / 31 tests. This does not provide packaged-candidate credit.
+- [x] **`LOCAL-DEV SUPPORTING ONLY` — hostile provider:** On the API-36 Samsung, exercise provider
+      open failure, false/actual over-size, empty/midstream failure, 11 items, aggregate overflow,
+      traversal-style names, the 60-second stalled-provider bound, process restart cleanup, and a
+      normal control. The app remained usable and no shared content was sent.
+- [x] **`LOCAL-DEV SUPPORTING ONLY` — payload/routing:** Exercise generic plus opaque Direct Share
+      routing for text, one image, a real video, a PDF, and two ordered images. Verify the selected
+      target or recipient review receives one exact staged batch, then discard it without sending.
+- [x] **`STATIC/HOST`:** The frozen SHARE slice passed strict TypeScript, 2 Node suites / 51 tests,
+      3 component suites / 133 tests, and the exact SHARE certificate 1/1. Its 21 reviewed records
+      are unique with zero stale or mismatched ids. Unrelated global scanner drift remains open and
+      is not represented as task-local failure or success.
+- [x] **`EXACT PACKAGED CANDIDATE`:** The current AAB's merged/protobuf manifest, generated
+      `<share-target>`, owned activity hooks, autolinking, and DEX passed the focused 3/3 contract.
+      Both owned modules and generic `SEND`/`SEND_MULTIPLE` are present; `expo-share-intent` is
+      absent. The full release guard remains separately red for deferred Maps metadata and reviewed
+      native-symbol path findings.
+- [x] **`VERSION-INCREASING UPGRADE` + `FRESH INSTALL`:** Without clearing data for the upgrade,
+      repeat bounded generic and Direct Share text/image/video/PDF/single/multiple routing across
+      warm, cold, and background entry. A real code-1-to-code-2 no-wipe upgrade preserved first
+      install time and completed all ten conservative route/payload pairs. The connected
+      embedded-release fresh-install/background replay routed every required representative batch
+      once, then a killed relaunch showed no retained composer or replay. Nothing was sent.
+- [x] **`OWNER-AUTHENTICATED APP LOCK`:** With the owner present, enabling App Lock removed all
+      personalized Direct Share targets. A killed-app generic image revealed no shared content
+      behind the lock gate; after fingerprint authentication it routed once with one attachment,
+      was discarded, and did not replay. The original App Lock-off setting was restored.
+- [x] **`EXACT PLAY V78, PRE-SHARE-02 SUPPORTING CONTROL`:** Ordinary outbound sharing of downloaded
+      synthetic media opened Android's chooser under completed `FEAT-07`. Repeat only if the frozen
+      SHARE-02 candidate changes the outbound bridge.
 
 ### 7. Received stickers
 
@@ -633,7 +641,7 @@ rotation, search, transfer, share, save, sticker, Disconnect, device command, or
 
 ---
 
-## Current matrix slice 3: permissions, UI, accessibility, and account transition — PREPARED, NOT EXECUTED
+## Current matrix slice 3: permissions, UI, and account transition — OPEN EXCEPT COMPLETED `UI-01`/`THEME-01A`/`HANDLE-COLOR-01`
 
 This section supersedes the remaining UI rows of historical section (j), all of section (k), and
 stale permission, embedded-browser, theme, and account-switch instructions elsewhere in the old
@@ -641,11 +649,13 @@ matrix. Functional transfer/viewer results remain owned by slice 2, and notifica
 FaceTime-alert results remain owned by slice 1. Do not begin this slice until section (a) is complete,
 `STORE-01G-TESTER-READINESS` has approved owners and dry runs, and the release owner separately
 approves Play distribution, the device session, controlled OS-setting changes, and both synthetic
-server identities used for account isolation.
+server identities used for account isolation. The bounded owner-authorized Play-v78 `UI-01` and
+`THEME-01A` reviews and the local-debug `HANDLE-COLOR-01` review in section 5 are the completed exceptions; they do
+not execute or close any other row.
 
-Except for the explicitly post-v56 motion matrix in section 5, use only the frozen Play-installed
-candidate, controlled tester profiles, synthetic contacts, neutral media, non-sensitive coordinates,
-and bounded staged-server fixtures. Do not rebuild, sideload, clear app data/cache/defaults, uninstall
+For every remaining row, use only its explicitly approved Play-installed candidate, controlled tester
+profiles, synthetic contacts, neutral media, non-sensitive coordinates, and bounded staged-server
+fixtures. Do not rebuild, sideload, clear app data/cache/defaults, uninstall
 or disable handler apps, use `run-as`, capture raw logs/QR payloads/private paths, install an
 interception certificate or proxy on a personal device, or manufacture cleanup, permission, storage,
 browser, or native failures. Stop on production data, an unexpected permission or intent, private
@@ -655,7 +665,7 @@ or a setting that cannot be restored safely.
 ### 1. Candidate state, fixtures, and Android applicability
 
 - [ ] **`EXACT PLAY CANDIDATE`:** Reconfirm section (a), then record the clean/update branch,
-      Android/API, navigation mode, OS appearance, display/font/TalkBack state, permission baseline,
+      Android/API, navigation mode, OS appearance, display/font state, permission baseline,
       launcher state, and private evidence reference. Record existing grants rather than resetting
       the app to force a first prompt.
 - [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Approve two isolated synthetic server identities
@@ -758,11 +768,30 @@ or Do Not Disturb access prompt is an unexpected failure.
 - [ ] **`STATIC/HOST` + `EXACT PLAY CANDIDATE`:** Retain scheme-allowlist proof and stage inert
       `intent:`, `javascript:`, `file:`, and `content:` text. It must not become an in-app actionable
       link or open another app. Do not attempt to make Android execute a rejected value.
-- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** With a finite synthetic Find My coordinate, the
-      route shows the privacy-disabled embedded-map placeholder and the observer sees no tile/script
-      request. Exercise both Find My **Open** and a synthetic shared-location card; only those explicit
-      actions may hand their finite points to the system Maps app. Gator requests no device-location
-      permission. Without finite fixtures, leave this result open.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** With a finite synthetic Find My coordinate, prove
+      Find My renders only the server-provided point, never invokes Android's location prompt or
+      phone-location layer, and limits external handoff to the explicit Find My **Open** action. Also
+      exercise a synthetic received shared-location card; its explicit action may hand its finite
+      point to the system Maps app. These server/received-coordinate flows are separate from sending
+      this phone's Current Location. Without finite fixtures, leave this result open.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE` (`FEAT-05A`):** Confirm the installed package declares
+      coarse/fine foreground location but not background location or
+      `FOREGROUND_SERVICE_LOCATION`. In a proven existing one-to-one supported conversation, the
+      Current Location control appears only with `supports_imessage_location`; SMS, group, reply-mode,
+      old-server, and stale-account cases expose no action. Confirmation must precede Android's
+      permission prompt.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE` (`FEAT-05A`):** Exercise approximate and precise
+      grants and record one server receipt from one foreground fix. Then separately exercise prompt
+      cancellation/denial, permanent denial, services off, acquisition error, the 15-second timeout,
+      backgrounding before a fix, capability revocation, and Disconnect. Every non-success
+      case must create no optimistic message/queue row and make no location POST; no delayed result may
+      cross accounts.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE` (`FEAT-05A`):** After one successful fix, force a
+      temporary server failure and prove the SQLCipher-encrypted outgoing row retains the exact
+      coordinate and original idempotency key. Retry must not reacquire location and must stop before
+      the snapshot reaches 15 minutes; an expired, malformed, terminal-uncertain, or
+      capability-disabled row must not POST. Observe background/killed recovery without granting or
+      declaring background location access.
 - [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** If the approved conditional FaceTime fixture
       exists, answering/starting shows Gator's browser handoff and then a system-owned custom tab or
       browser—never an embedded WebView. Do not require Chrome specifically. Any camera/microphone
@@ -795,20 +824,20 @@ result.
       arrival does not remount the composer, lose its draft/staged item, or strand messages behind
       translucent bars.
 - [ ] **`EXACT PLAY CANDIDATE`:** Under both gesture and three-button navigation, enter a long URL/password on manual
-      setup at large font and repeatedly open/close the keyboard. The Connect and insecure-HTTP controls remain
+      setup and repeatedly open/close the keyboard. The Connect and insecure-HTTP controls remain
       reachable while open, and no navigation-bar-sized residual gap remains after hide. Source now uses the shared
       padding-while-visible contract with zero vertical offset; host tests prove those props, not native movement or
-      layout. Record the exact candidate result before closing the manual-keyboard/accessibility-layout gap.
+      layout. Record the exact candidate result before closing the manual-keyboard/layout gap.
 - [ ] **`EXACT PLAY CANDIDATE`:** Open a long synthetic chat, confirm chronological rendering begins
       at the newest message, scroll to history, receive a new item while unpinned, use the newest-
       message affordance, and reopen through search/reply navigation. Late preview/attachment growth
       must not hide the tail, and Back returns to Messages rather than stacking prior chats.
 - [ ] **`EXACT PLAY CANDIDATE`:** Reuse slice 2's finite media/upload fixture only for presentation:
       media rings, generic-file spinner/byte text, and the single aggregate upload progressbar remain
-      legible with wallpaper on/off, keyboard open/closed, both themes, and large text. Appearance/
+      legible with wallpaper on/off, keyboard open/closed, and both themes. Appearance/
       removal must not strand the list. This does not duplicate transfer or byte-credit from B2.
 - [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Long-press synthetic sent/received bubbles at the
-      top, middle, and bottom under both navigation modes and large text. The lifted bubble, tapback
+      top, middle, and bottom under both navigation modes. The lifted bubble, tapback
       bar, scrollable action card, left/right alignment, arbitrary-emoji input, dismissal, and
       reaction toggle remain on-screen. Do not adjust layout code or safe-area values during a run.
 - [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** A newly arriving synthetic screen-effect message
@@ -816,105 +845,51 @@ result.
       not replay from history. Separately observe a bubble-effect row's mount/remount behavior:
       current source starts the effect on mount and guarantees only that unmount stops it, so record
       any replay rather than requiring a false history/remount one-shot result; verify no animation
-      bleeds into a recycled row. Screen effects are non-interactive; do not require tap-to-skip or
-      turn this into Reduce Motion evidence.
+      bleeds into a recycled row. Screen effects are non-interactive; do not require tap-to-skip.
 
-The app is portrait-only and predictive Back is disabled. Record rotation and predictive-Back as
-outside this candidate's supported product, not as proof for `ANDROID-02` or `ANDROID-03A/B`.
+The app remains portrait-only, but predictive Back is enabled and its task-scoped frozen-package
+matrix is complete under `ANDROID-02`. Rotation, landscape, tablet, and foldable behavior remain
+outside the supported product; an exact future Play candidate should still receive its ordinary
+root/navigation smoke without reopening the completed remediation matrix.
 
-### 5. Dark themes and accessibility — record known gaps, never pass them
+### 5. Dark themes and visual readability
 
-| Enabled built-in preset | Exact candidate appearance matrix                                                                                                                  | Result |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- | ------ |
-| OLED Dark               | Cold launch and navigate representative setup/inbox/chat/settings/media screens with Android OS appearance set to light, then dark; app stays dark | [ ]    |
-| Gator                   | Repeat OS light/dark cold launch and navigation; app stays dark and uses Gator tokens rather than claiming a system/light theme                    | [ ]    |
+| Enabled built-in preset | Task-scoped appearance matrix                                                                                                | Result |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------- | ------ |
+| OLED Dark               | Play-v78 cold launch and Settings checks under Android light and dark; app and system bars stay dark and the preset persists | [x]    |
+| Gator                   | Play-v78 cold launch and Settings checks under Android light and dark; Gator tokens and dark system bars persist             | [x]    |
 
-- [ ] **`EXACT PLAY CANDIDATE`:** Across the four branches above, inspect the black splash-to-first-
-      paint transition, status/navigation bars, adaptive launcher mask, and Android 13+ themed icon
-      where offered. No white flash or unreadable system bar is allowed; a missing themed-icon OS
-      branch is session-N/A only.
-- [ ] **`EXACT PLAY CANDIDATE`:** On both presets, run the approved screenshot/Accessibility Scanner
-      review at normal and maximum supported font/display size across setup, inbox, chat, Settings,
-      media/upload presentation, reaction/action menus, and Theme Studio. Record clipping, hidden
-      controls, contrast, touch-target, or focus-order defects individually; do not award a global
-      `UI-01`/`THEME-01A` pass from host ratios.
+- [x] **`TASK-SCOPED NEWER PLAY BUILD` / `THEME-01A`:** Across the four branches above, Play v78 on
+      the API-36 Samsung retained a black splash and dark first paint, readable status icons, and a
+      dark or theme-matched three-button navigation bar with visible light buttons. Both presets
+      persisted across cold starts and Settings rendering. Android light was only an environment
+      input; no app light theme is supported. The focused host gate passed 5 suites / 33 tests. This
+      closes only `THEME-01A`; it does not rebind the v77 release candidate or close release-only
+      launcher-icon, display-size, or exact-candidate rows.
+- [x] **`TASK-SCOPED NEWER PLAY BUILD` / `UI-01`:** Play v78 on the API-36 Samsung showed readable OLED
+      Dark and Gator Settings/inbox surfaces, unread badges, and the real filled Connect action.
+      An existing chat supplied a no-send/no-edit ordinary bubble review. The focused rendered
+      contrast and sent/received mention gate passed 7 suites / 113 tests. Accessibility Scanner,
+      TalkBack, maximum-font, focus-order, and touch-target review are not remediation requirements.
+      This closes only `UI-01`; it does not rebind the v77 release candidate. The separate
+      `THEME-01A` task-scoped matrix above is also complete.
 - [x] **`STATIC/HOST` / `THEME-02`:** Theme Studio now measures its editable text roles against all
       applicable surfaces, previews each failing pair and exact ratio, offers a safe foreground
       auto-fix, and requires a separate confirmation before an unresolved theme can be saved.
       Legacy light-theme continuity needs an approved natural Play-update baseline and otherwise
       remains `BLOCKED/OPEN`.
-- [ ] **`STAGED-SERVER` + future exact candidate / `HANDLE-COLOR-01`:** Provide valid pale and dark
-      six-digit colors for distinct direct/group handles, then observe a partial omitted/null
-      refresh and a later changed valid color. Direct and group avatars plus received bubbles must
-      retain/update the intended color without unreadable initials, body text, or mentions. This
-      post-v56 code is not evidence for frozen version code 56.
-- [ ] **`STATIC/HOST`:** Record the known `A11Y-01` gaps: visual `TextField` labels are not associated
-      with inputs, the manual HTTP switch lacks a programmatic label, and message bubbles expose no
-      TalkBack accessibility action for their long-press menu. These are findings, not candidate
-      passes even if an adjacent label is read incidentally.
+- [x] **`TASK-SCOPED LOCAL DEVELOPMENT` / `HANDLE-COLOR-01`:** On the Android 16/API-36 Samsung
+      SM-S938U1 running disposable `0.1.51-debug`, selecting **Pale yellow** and **Navy** updated the
+      selected Settings swatch and corresponding avatar/inbox presentation immediately. Pale yellow
+      survived a force-stop cold relaunch plus DEV fixture re-seed; a Mom fixture showed readable dark
+      text on its pale received bubble; both touched fixtures were restored to **Default**. Focused host
+      proof owns exact-service isolation, direct/group projections, contrast, and backup-v4 behavior.
+      The app deliberately ignores server color fields, so no staged-server color result is required or
+      claimed. This result is not Play-install, release-candidate, or release-checklist evidence.
 
-#### `DEVICE-01B4-A11Y-02-MOTION-MATRIX` — future eligible candidate only
-
-Every row below is **BLOCKED ON A POST-v56 SOURCE REFRESH**. Do not run or check one against version
-code `56`. First freeze a separately approved, locally built Play candidate that passes the
-applicability gate above and record its new artifact, source, Play-install, delivered-signature, and
-session ledger. For every applicable row, exercise Reduce Motion off and on, a cold first opening, a
-foreground live toggle, a toggle while backgrounded followed by resume, and restoration to off.
-Record Android/API, OEM/device, navigation mode, keyboard state, font/display scale, and TalkBack
-state. Keep query-failure ordering, native listener counts, and generation fencing as host evidence;
-do not infer them visually or manufacture a native failure.
-
-- [ ] **`BLOCKED — FUTURE EXACT PLAY CANDIDATE` / `A11Y-02A` — screen effects:** With Reduce Motion
-      on, a new synthetic screen effect shows no particles or first-frame flash; live enablement
-      stops and settles an active effect once without hiding content or controls. Restoring off
-      changes only future effects.
-- [ ] **`BLOCKED — FUTURE EXACT PLAY CANDIDATE` / `A11Y-02B` — bubble and invisible-ink effects:**
-      Bubble entrances remain static while reduced; live enablement lands final opacity/scale without
-      replay. Invisible ink stays concealed until explicit reveal, then reveals immediately while
-      reduced and with its existing animation while off; a consumed entrance does not replay
-      unexpectedly.
-- [ ] **`BLOCKED — FUTURE EXACT PLAY CANDIDATE` / `A11Y-02C` — typing pulse:** Reduced motion keeps
-      three visible static dots; live enablement stops the pulse, and restoring off starts one fresh,
-      non-overlapping pulse. Grouping, layout, and meaning remain usable.
-- [ ] **`BLOCKED — FUTURE EXACT PLAY CANDIDATE` / `A11Y-02D` — message-action overlay:** The anchored
-      action UI opens fully visible without its pop and leaves every control reachable. Live
-      enablement settles an active pop at its final values without replaying, recreating, dismissing,
-      or changing the anchored placement; restoring off affects only a later opening.
-- [ ] **`BLOCKED — FUTURE EXACT PLAY CANDIDATE` / `A11Y-02E` — server modals:** QR and log modals
-      suppress the slide while reduced and retain it while off; a visible opening stays latched, and
-      close/reopen uses the latest preference. Verify Back/Done, QR concealment, content, and focus.
-- [ ] **`BLOCKED — FUTURE EXACT PLAY CANDIDATE` / `A11Y-02F` — photo reset:** Pinch and pan remain
-      finger-controlled; automatic return snaps while reduced and springs while off. Live enablement
-      lands safely, and re-grab, pager/offscreen reuse, and TalkBack remain usable.
-- [ ] **`BLOCKED — FUTURE EXACT PLAY CANDIDATE` / `A11Y-02G` — message-list scroll:** Reply jump,
-      delayed own-send reveal, newest action, and near-bottom following are immediate while reduced
-      and animated while off. Direct scroll, target landing, pinning, and late growth stay correct;
-      record queued/in-flight native behavior without claiming cancellation that cannot be observed.
-- [ ] **`BLOCKED — FUTURE EXACT PLAY CANDIDATE` / `A11Y-02H/H1` — shared motion owner:** Long,
-      high-count message and conversation lists plus recycle/remount react consistently without stale
-      rows, flicker, or duplicated visible behavior. Only retained host tests—not visual inspection—
-      may prove one native query/listener owner.
-- [ ] **`BLOCKED — FUTURE EXACT PLAY CANDIDATE` / `A11Y-02I` — message swipe:** Left timestamp and
-      right reply tracking stay direct; automatic release snaps instead of springing while reduced.
-      Verify live toggles during held/return motion, rapid re-grab, recycling, keyboard-open and
-      vertical-list arbitration, and Samsung behavior.
-- [ ] **`BLOCKED — FUTURE EXACT PLAY CANDIDATE` / `A11Y-02J` — conversation swipe:** Left/right
-      tracking and actions stay direct; automatic destinations and action close snap while reduced,
-      with each callback firing once. Verify live toggles, rapid re-grab, recycling, and vertical-list/
-      OEM arbitration.
-- [ ] **`BLOCKED — FUTURE EXACT PLAY CANDIDATE` / `A11Y-02K` — global Theme Studio:** New/Edit opens
-      without a slide while reduced. A visible editor's identity, name, tokens, draft, and focus
-      survive live toggles; Back/Cancel write nothing, successful Apply closes, and reopen uses the
-      latest preference.
-- [ ] **`BLOCKED — FUTURE EXACT PLAY CANDIDATE` / `A11Y-02L` — per-chat Theme Studio:** Repeat the
-      modal, draft, focus, close, and reopen checks while proving Apply targets only the current chat
-      GUID. Retired callbacks stay inert, GUID/account replacement exposes no prior data, and the
-      route shows no duplicated preference behavior across keyed replacements.
-- [ ] **`EXACT PLAY CANDIDATE`:** Run separate TalkBack journeys for labeled inbox/header/composer/
-      tray/reaction/media controls and the aggregate upload progressbar, then record the known audio
-      load/retry, generic file chip, fullscreen zoom image, voice recorder, and Theme Studio semantic
-      gaps. Verify focus can escape every modal and system handoff. No single “TalkBack passes”
-      result may close `A11Y-01..03`; this row is a findings record.
+`A11Y-01`, `A11Y-02`, and `A11Y-03`, including the former motion and TalkBack device matrices, were
+owner-dropped on 2026-09-25. Existing implementation and historical evidence remain, but none of
+those rows is a current remediation or candidate requirement.
 
 ### 6. Synthetic account A → explicit Disconnect → account B
 
@@ -948,30 +923,26 @@ do not infer them visually or manufacture a native failure.
 
 ### 7. Claims and cleanup boundaries
 
-| Claim or boundary                                             | Required evidence / current disposition                                                                                                                           |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Native permission dialogs, limited media, IME/insets, intents | Exact Play-candidate observation on each applicable Android/API/navigation branch; host mocks cannot prove them                                                   |
-| Theme readability and accessibility                           | Exact-device screenshots/Scanner/TalkBack plus completed `THEME-02` host contrast/semantic evidence; remaining `A11Y-01..03` device gaps prevent a universal pass |
-| Embedded WebView/network absence                              | Static source plus controlled target/network observation; visual placeholder/browser handoff alone cannot prove traffic or hostile-navigation behavior            |
-| Account work cancellation and local wipe internals            | Host/native DB, file, notification, log, FCM, query, and lifecycle proof; visible B isolation cannot identify every deleted row/file or recalled native intent    |
-| State that deliberately survives Disconnect                   | Device-wide themes/settings/contacts/App Lock/OS grants and user-created external copies; remove synthetic contacts/copies separately in their owning systems     |
-| Browser/Maps/share/native work already admitted               | Cannot be recalled after external handoff; close it before Disconnect and verify only the observable cleanup boundary                                             |
+| Claim or boundary                                             | Required evidence / current disposition                                                                                                                                                     |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Native permission dialogs, limited media, IME/insets, intents | Exact Play-candidate observation on each applicable Android/API/navigation branch; host mocks cannot prove them                                                                             |
+| Theme and handle-color readability                            | Task-scoped device screenshots plus focused runtime contrast evidence; `UI-01`, `THEME-01A`, and `HANDLE-COLOR-01` are complete, while release-only candidate/display-size rows remain open |
+| Embedded WebView/network absence                              | Static source plus controlled target/network observation; visual placeholder/browser handoff alone cannot prove traffic or hostile-navigation behavior                                      |
+| Account work cancellation and local wipe internals            | Host/native DB, file, notification, log, FCM, query, and lifecycle proof; visible B isolation cannot identify every deleted row/file or recalled native intent                              |
+| State that deliberately survives Disconnect                   | Device-wide themes/settings/contacts/App Lock/OS grants and user-created external copies; remove synthetic contacts/copies separately in their owning systems                               |
+| Browser/Maps/share/native work already admitted               | Cannot be recalled after external handoff; close it before Disconnect and verify only the observable cleanup boundary                                                                       |
 
 At cleanup, close browser/Maps/settings/share/native surfaces; settle or cancel fixture work;
-restore only OS appearance, navigation, font/display/TalkBack, permission, theme, and feature
+restore only OS appearance, navigation, font/display, permission, theme, and feature
 settings changed by this slice; delete only the synthetic device contacts and external media/files
 actually created by this slice, in their owning apps; have the server owner remove A/B fixtures and
 device rows, retire credentials, and delete temporary captures after private review. Do not clear
 app data or uninstall as a substitute.
 
-All **51** result fields above remain open; the 12 motion fields are B4-owned refinements within this
-slice, not additional parent results. This offline reconciliation did not run a Play install,
-permission prompt, OS-setting change, browser/Maps handoff, network observation, synthetic server
-event, effect, accessibility scan, Disconnect, account transition, device command, or cleanup.
-`PERM-01`, `ONBOARD-01`, `UI-01`, `THEME-01A/B`, `THEME-02`, `HANDLE-COLOR-01`, `A11Y-01..03`,
-`TEST-01`, `UISEC-01`, `ANDROID-02/03A/03B`, `WEB-01..03`, `FACE-01`, `PLAY-02/03`, `REL-003/004/
-005A/005B`, `SHARE-01`, `IPC-01`, `ALIAS-SEND-01`, `STORE-01G`, and `DEVICE-01` retain their
-existing open, conditional, in-progress, or blocked status.
+The former 51-field reconciliation and B4 motion counts are historical and superseded by the
+authoritative work-plan register. `UI-01`, `THEME-01A`, and `HANDLE-COLOR-01` are complete and
+`A11Y-01..03` are owner-dropped; the other named non-accessibility candidate/device tasks retain their
+current work-plan status.
 
 ---
 
@@ -1257,13 +1228,13 @@ production-file behavior, signed/store provenance, scheduled CI, or release/phys
 
 ---
 
-## (h) Inbound Android sharing — deliberately disabled (IPC-01 containment)
+## (h) Historical disabled Android sharing — IPC-01/SHARE-01 containment
 
-`expo-share-intent@8.0.1` reads provider metadata/media and can copy a stream without byte or time
-limits before JavaScript receives an event. The release candidate therefore must not accept text,
-files, `SEND_MULTIPLE`, or Direct Share targets until an owned bounded native intake replaces it.
-This historical checklist is non-executable; current matrix slice 2, section 6 is the authoritative
-candidate procedure, including the pinned-shortcut survivor and approved-baseline rules.
+`expo-share-intent@8.0.1` read provider metadata/media and could copy a stream without byte or time
+limits before JavaScript received an event. The v75 containment candidate therefore accepted no
+text, files, `SEND_MULTIPLE`, or Direct Share targets. This checklist is a non-executable historical
+snapshot: the owned `SHARE-02` replacement now exists, and current matrix slice 2, section 6 is the
+authoritative candidate procedure.
 
 - [ ] Inspect the exact candidate manifest: MainActivity has no `android.intent.action.SEND` or
       `android.intent.action.SEND_MULTIPLE` filter.

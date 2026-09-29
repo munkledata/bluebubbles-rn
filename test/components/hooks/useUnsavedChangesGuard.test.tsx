@@ -50,8 +50,65 @@ it('deduplicates removal attempts and replays the exact action only after explic
   expect(useDialogStore.getState().queue).toHaveLength(0);
   expect(mockDispatch).not.toHaveBeenCalled();
 
-  fireEvent.press(screen.getByText('Discard'));
+  await act(async () => {
+    fireEvent.press(screen.getByText('Discard'));
+  });
   expect(mockDispatch).toHaveBeenCalledWith(action);
+});
+
+it('keeps the route mounted when asynchronous discard cleanup fails', async () => {
+  function FailingGuardProbe(): React.JSX.Element {
+    useUnsavedChangesGuard({ enabled: true, onDiscard: async () => false });
+    return <View />;
+  }
+  await renderWithTheme(
+    <>
+      <FailingGuardProbe />
+      <AppDialog />
+    </>,
+  );
+  const guardCall = mockUsePreventRemove.mock.calls[mockUsePreventRemove.mock.calls.length - 1];
+  const action = { type: 'GO_BACK', source: 'failed-cleanup' };
+  await act(async () => {
+    guardCall?.[1]({ data: { action } });
+  });
+
+  await act(async () => {
+    fireEvent.press(screen.getByText('Discard'));
+  });
+
+  expect(mockDispatch).not.toHaveBeenCalled();
+});
+
+it('starts follow-up work only after the confirmed route removal is dispatched', async () => {
+  const order: string[] = [];
+  mockDispatch.mockImplementation(() => order.push('dispatch'));
+  function SequencedGuardProbe(): React.JSX.Element {
+    useUnsavedChangesGuard({
+      enabled: true,
+      onDiscard: async () => {
+        order.push('cleanup');
+        return true;
+      },
+      onAfterDiscardNavigation: () => order.push('follow-up'),
+    });
+    return <View />;
+  }
+  await renderWithTheme(
+    <>
+      <SequencedGuardProbe />
+      <AppDialog />
+    </>,
+  );
+  const guardCall = mockUsePreventRemove.mock.calls[mockUsePreventRemove.mock.calls.length - 1];
+  await act(async () => {
+    guardCall?.[1]({ data: { action: { type: 'GO_BACK' } } });
+  });
+  await act(async () => {
+    fireEvent.press(screen.getByText('Discard'));
+  });
+
+  expect(order).toEqual(['cleanup', 'dispatch', 'follow-up']);
 });
 
 it('removes its open discard prompt when a successful operation navigates', async () => {

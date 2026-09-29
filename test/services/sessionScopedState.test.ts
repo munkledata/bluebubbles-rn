@@ -295,7 +295,9 @@ describe('resetSessionScopedState', () => {
     useSyncSettingsStore.setState({ messagesPerChat: 25 });
     useThemeStore.setState({ preset: 'gator' });
     useLockStore.setState({ enabled: true, locked: true });
-    useShareIntentStore.getState().set({
+    useShareIntentStore.getState().stageIfEmpty({
+      batchId: '1700000000000-1-0123456789abcdef',
+      createdAtMs: 1_700_000_000_000,
       text: 'shared while disconnected',
       files: [
         {
@@ -303,8 +305,10 @@ describe('resetSessionScopedState', () => {
           name: 'pending.pdf',
           mimeType: 'application/pdf',
           size: 10,
+          origin: 'share',
         },
       ],
+      targetToken: null,
     });
 
     resetSessionScopedState();
@@ -314,6 +318,7 @@ describe('resetSessionScopedState', () => {
     expect(useThemeStore.getState().preset).toBe('gator');
     expect(useLockStore.getState()).toMatchObject({ enabled: true, locked: true });
     expect(useShareIntentStore.getState()).toMatchObject({
+      batchId: '1700000000000-1-0123456789abcdef',
       text: 'shared while disconnected',
       files: [expect.objectContaining({ name: 'pending.pdf' })],
     });

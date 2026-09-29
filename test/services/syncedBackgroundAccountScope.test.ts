@@ -144,8 +144,10 @@ jest.mock('expo-file-system', () => ({
 }));
 
 import type { EventDeliveryContext } from '@core/realtime';
+import { ServerInfo } from '@core/models';
 import { logger } from '@core/secure';
 import type { AppDatabase } from '@db/types';
+import { useSessionStore } from '@state/sessionStore';
 import {
   deleteNativeSyncedBackgroundCacheFile,
   pruneNativeSyncedBackgroundCache,
@@ -204,6 +206,52 @@ function backgroundUri(generation: number, channel = 'channel-1'): string {
 }
 
 describe('account-scoped synced backgrounds', () => {
+  it('abandons an RCS metadata response when the Google provider epoch rotates', async () => {
+    const previousSession = useSessionStore.getState();
+    const epochA = `gpe1_${'A'.repeat(43)}`;
+    const epochB = `gpe1_${'B'.repeat(42)}A`;
+    const guid = `RCS;-;g1.${epochA}.${Buffer.from('wallpaper-chat').toString('base64url')}`;
+    const info = (epoch: string) =>
+      ServerInfo.parse({
+        version: '2.0.0',
+        rcs: true,
+        supports_rcs_epoch_qualified_ids: true,
+        rcs_provider_epoch: epoch,
+      });
+    let resolveChat!: (chat: { guid: string }) => void;
+    getChat.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveChat = resolve;
+        }),
+    );
+    try {
+      useSessionStore.getState().connected('https://server.test', 'password', info(epochA));
+      const run = ensureSyncedBackground(
+        {
+          snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),
+          isTransportCurrent: () => true,
+        } as never,
+        {} as AppDatabase,
+        guid,
+        { generation: 1, isCurrent: () => true },
+      );
+      for (let i = 0; i < 20 && getChat.mock.calls.length === 0; i += 1) await Promise.resolve();
+      const session = useSessionStore.getState();
+      expect(
+        session.setServerInfoForTransport(session.origin!, session.transportRevision, info(epochB)),
+      ).toBe(true);
+      resolveChat({ guid });
+      await run;
+
+      expect(persistServerChatWithinTransaction).not.toHaveBeenCalled();
+      expect(setSyncedBackgroundUriIfCurrent).not.toHaveBeenCalled();
+      expect(mockPendingDownloads).toEqual([]);
+    } finally {
+      useSessionStore.setState(previousSession);
+    }
+  });
+
   it('abandons a metadata result when the pinned server transport rotates', async () => {
     let resolveChat!: (chat: { guid: string }) => void;
     getChat.mockImplementationOnce(

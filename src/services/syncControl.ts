@@ -1,6 +1,7 @@
 import { isUnimplementedEndpoint } from '@core/api/errors';
 import { RepairSnapshotRcsActiveError } from '@core/api/endpoints/repairSnapshot';
 import { logger } from '@core/secure';
+import { currentRcsProviderEpoch } from '@core/rcs';
 import type { SyncMarker } from '@core/sync';
 import {
   captureFullRepairPruneExposure,
@@ -296,6 +297,13 @@ function startTargetedChatRepair(
 ): Promise<ChatRepairResult> {
   const guid = chatGuid.trim();
   if (!guid) return Promise.reject(new Error('A conversation is required for repair.'));
+  if (guid.startsWith('RCS;-;') && !sessionAccessors.acceptsRcsChat(guid)) {
+    return Promise.reject(
+      new Error(
+        'This RCS conversation is read-only because its Google pairing is no longer current.',
+      ),
+    );
+  }
   if (
     options.expectedDeletedAt != null &&
     (!Number.isSafeInteger(options.expectedDeletedAt) || options.expectedDeletedAt < 0)
@@ -304,6 +312,8 @@ function startTargetedChatRepair(
   }
 
   const epoch = sessionAccessors.getEpoch();
+  const expectedRcsProviderEpoch = sessionAccessors.rcsProviderEpoch();
+  const expectedRcsCapabilityKey = rcsProviderCapabilityKey(sessionAccessors.getServerInfo());
   const key = `${epoch}\u0000${guid}\u0000${options.expectedDeletedAt ?? 'repair'}`;
   const existing = targetedRepairByKey.get(key);
   if (existing) return existing.result;
@@ -317,7 +327,11 @@ function startTargetedChatRepair(
 
   const operation = settledAll([syncInFlight, trackedInFlight, predecessor]).then(async () => {
     const stopped = (): boolean =>
-      abortController.signal.aborted || sessionAccessors.getEpoch() !== epoch || !lease.isCurrent();
+      abortController.signal.aborted ||
+      sessionAccessors.getEpoch() !== epoch ||
+      !lease.isCurrent() ||
+      sessionAccessors.rcsProviderEpoch() !== expectedRcsProviderEpoch ||
+      rcsProviderCapabilityKey(sessionAccessors.getServerInfo()) !== expectedRcsCapabilityKey;
     if (stopped()) throw new Error('Conversation repair stopped because the account changed.');
     const db = await ensureDatabase();
     if (stopped()) throw new Error('Conversation repair stopped because the account changed.');
@@ -326,6 +340,7 @@ function startTargetedChatRepair(
     const synced = await syncSingleChat(db, api, guid, {
       shouldAbort: stopped,
       signal: abortController.signal,
+      rcsProviderInfo: sessionAccessors.getServerInfo(),
     });
     if (!synced || stopped()) {
       throw new Error('Conversation repair stopped before the chat was refreshed.');
@@ -337,6 +352,7 @@ function startTargetedChatRepair(
       signal: abortController.signal,
       probeExhaustion: options.expectedDeletedAt != null,
       readFloorAtOrBefore: options.expectedDeletedAt,
+      rcsProviderInfo: sessionAccessors.getServerInfo(),
     });
     if (stopped()) throw new Error('Conversation repair stopped before completion.');
 
@@ -472,6 +488,14 @@ interface SyncRunOptions {
 
 type SyncRunOutcome = 'running' | 'completed' | 'cancelled' | 'stale' | 'failed';
 
+function rcsProviderCapabilityKey(info: ReturnType<typeof sessionAccessors.getServerInfo>): string {
+  return JSON.stringify([
+    info?.rcs === true,
+    info?.supports_rcs_epoch_qualified_ids === true,
+    info?.rcs_provider_epoch ?? null,
+  ]);
+}
+
 async function runSync(options: SyncRunOptions = {}): Promise<void> {
   const sync = useSyncStore.getState();
   // Ordinary sync has no user cancellation, and `forget()` only waits 20s for one to unwind before
@@ -490,8 +514,15 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
   const repair = options.repair === true;
   const epochAtStart = options.expectedEpoch ?? sessionAccessors.getEpoch();
   const accountLease = options.accountLease ?? captureRealtimeDeliveryLease();
+  let expectedRcsProviderEpoch: string | null | undefined;
+  let expectedRcsProviderCapabilityKey: string | undefined;
   const sessionEnded = (): boolean =>
-    sessionAccessors.getEpoch() !== epochAtStart || !accountLease.isCurrent();
+    sessionAccessors.getEpoch() !== epochAtStart ||
+    !accountLease.isCurrent() ||
+    (expectedRcsProviderEpoch !== undefined &&
+      (sessionAccessors.rcsProviderEpoch() !== expectedRcsProviderEpoch ||
+        rcsProviderCapabilityKey(sessionAccessors.getServerInfo()) !==
+          expectedRcsProviderCapabilityKey));
   const cancelled = (): boolean => options.shouldCancel?.() ?? false;
   const shouldAbort = (): boolean => sessionEnded() || cancelled();
   const stoppedOutcome = (): SyncRunOutcome => (cancelled() ? 'cancelled' : 'stale');
@@ -579,6 +610,25 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
         outcome = stoppedOutcome();
         return;
       }
+      const session = useSessionStore.getState();
+      if (
+        !session.origin ||
+        !session.setServerInfoForTransport(session.origin, session.transportRevision, serverInfo)
+      ) {
+        outcome = 'stale';
+        return;
+      }
+      serverInfo = useSessionStore.getState().serverInfo;
+      if (!serverInfo) {
+        outcome = 'stale';
+        return;
+      }
+    }
+    expectedRcsProviderEpoch = currentRcsProviderEpoch(serverInfo);
+    expectedRcsProviderCapabilityKey = rcsProviderCapabilityKey(serverInfo);
+    if (shouldAbort()) {
+      outcome = stoppedOutcome();
+      return;
     }
     const snapshotSupported = serverInfo?.supports_repair_snapshot === true;
     deletionSupported = serverInfo?.supports_message_deleted === true;
@@ -702,6 +752,7 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
               firstSnapshot.view = view;
             }
           : undefined,
+        rcsProviderInfo: serverInfo,
       });
       if (shouldAbort()) {
         outcome = stoppedOutcome();
@@ -730,9 +781,17 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
       // Refresh the FULL chat list first so conversations the interrupted first sync never reached
       // (disproportionately older SMS threads) appear in the inbox; their history backfills on open.
       // Best-effort — a failure here must not block the incremental message sync below.
-      await syncAllChats(db, api, 200, shouldAbort, options.signal).catch((e) =>
-        logger.debug('[sync] chat-list refresh failed', e),
-      );
+      await syncAllChats(
+        db,
+        api,
+        200,
+        shouldAbort,
+        options.signal,
+        undefined,
+        undefined,
+        undefined,
+        serverInfo,
+      ).catch((e) => logger.debug('[sync] chat-list refresh failed', e));
       if (shouldAbort()) {
         outcome = stoppedOutcome();
         return;
@@ -750,6 +809,7 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
         },
         shouldAbort,
         signal: options.signal,
+        rcsProviderInfo: serverInfo,
       });
       if (!shouldAbort()) sync.done(result);
     }
@@ -771,6 +831,7 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
         shouldAbort,
         commitGuard: snapshotCommitGuard,
         signal: options.signal,
+        rcsProviderInfo: serverInfo,
       };
       if (activeSnapshotToken != null) {
         await syncDeletedMessages(db, initialSyncApi, {
@@ -976,10 +1037,20 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
  * was interrupted — independent of the global sync marker. Best-effort; never throws to the UI.
  */
 export async function ensureChatSynced(chatGuid: string): Promise<number> {
+  if (chatGuid.startsWith('RCS;-;') && !sessionAccessors.acceptsRcsChat(chatGuid)) return 0;
   const epochAtStart = sessionAccessors.getEpoch();
+  const rcsProviderInfo = sessionAccessors.getServerInfo();
+  const expectedRcsProviderEpoch = currentRcsProviderEpoch(rcsProviderInfo);
+  const expectedRcsCapabilityKey = rcsProviderCapabilityKey(rcsProviderInfo);
   const sessionEnded = (): boolean => {
     const session = useSessionStore.getState();
-    return session.epoch !== epochAtStart || session.origin == null || session.password == null;
+    return (
+      session.epoch !== epochAtStart ||
+      session.origin == null ||
+      session.password == null ||
+      sessionAccessors.rcsProviderEpoch() !== expectedRcsProviderEpoch ||
+      rcsProviderCapabilityKey(session.serverInfo) !== expectedRcsCapabilityKey
+    );
   };
   return runTrackedAuxiliarySync(async () => {
     try {
@@ -989,6 +1060,7 @@ export async function ensureChatSynced(chatGuid: string): Promise<number> {
       return await syncChatMessages(db, httpSyncApi(http), chatGuid, {
         maxMessages: 500,
         shouldAbort: sessionEnded,
+        rcsProviderInfo,
       });
     } catch (e) {
       // A retired request is expected teardown noise and must not become account B's diagnostic.

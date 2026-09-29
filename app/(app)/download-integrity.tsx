@@ -84,6 +84,7 @@ export default function DownloadIntegrityScreen(): React.JSX.Element {
   }, [accountLease]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- Initial diagnostics intentionally enter the same refresh lifecycle as a manual refresh.
     load();
   }, [load]);
 

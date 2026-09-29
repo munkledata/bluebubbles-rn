@@ -13,6 +13,7 @@ function lease(isCurrent: () => boolean): RealtimeDeliveryLease {
 
 const remoteHit = Message.parse({
   guid: 'remote-message',
+  chatGuid: 'iMessage;-;+15551234567',
   text: 'find this remote message',
   dateCreated: 2_000,
   handle: { address: '+15551234567', service: 'iMessage' },
@@ -53,7 +54,7 @@ describe('server message search adoption', () => {
     expect(await getChatIdByGuid(db, 'iMessage;-;+15551234567')).toBeNull();
   });
 
-  it('persists only the routed first chat from a malformed multi-chat response', async () => {
+  it('rejects a response whose embedded owners do not exactly match the selected chat', async () => {
     const { db } = await createTestDb();
     const malformedExtraChat = Message.parse({
       ...remoteHit,
@@ -69,9 +70,26 @@ describe('server message search adoption', () => {
       lease(() => true),
     );
 
-    expect(results.map((result) => result.guid)).toEqual(['remote-message']);
-    expect(await getChatIdByGuid(db, 'iMessage;-;+15551234567')).not.toBeNull();
+    expect(results).toEqual([]);
+    expect(await getChatIdByGuid(db, 'iMessage;-;+15551234567')).toBeNull();
     expect(await getChatIdByGuid(db, 'RCS;-;unexpected')).toBeNull();
+  });
+
+  it('rejects case-varied RCS identities before any search-result DB write', async () => {
+    const { db } = await createTestDb();
+    const malformedRcs = Message.parse({
+      ...remoteHit,
+      guid: 'RcS-malformed-message',
+    });
+
+    await expect(
+      adoptServerMessageSearchHits(
+        db,
+        [malformedRcs],
+        lease(() => true),
+      ),
+    ).resolves.toEqual([]);
+    expect(await getChatIdByGuid(db, 'iMessage;-;+15551234567')).toBeNull();
   });
 
   it('strips endpoint-impossible nested collections before the bounded transaction', async () => {

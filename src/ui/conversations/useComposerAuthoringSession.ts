@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from 'react';
 import { showToast } from '../toast/toastStore';
 import type { PendingAttachment } from './AttachmentTray';
 
@@ -16,12 +23,20 @@ export type ComposerTextAttachmentAdmission = ComposerTextAdmission;
 export type ComposerAttachmentAdmission =
   void | false | readonly string[] | Promise<void | false | readonly string[]>;
 
+export interface ComposerAdmissionResult {
+  text: string;
+  textAdmitted: boolean;
+  attachmentUris: readonly string[];
+  admittedAttachmentUris: readonly string[];
+}
+
 function isPromiseLike<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
   return value != null && typeof (value as PromiseLike<T>).then === 'function';
 }
 
 interface ComposerAuthoringSessionOptions {
   active: boolean;
+  editingText?: string | null;
   initialText?: string;
   initialAttachments?: PendingAttachment[];
   pending: PendingAttachment[];
@@ -32,14 +47,21 @@ interface ComposerAuthoringSessionOptions {
   onSendTextAttachment?: (text: string, item: PendingAttachment) => ComposerTextAttachmentAdmission;
   canSubmit?: (logicalSendCount: number) => boolean;
   isSubmitOwnerCurrent?: () => boolean;
+  onCancelEdit?: () => void;
   onDraftChange?: (text: string) => void;
   onTyping?: (isTyping: boolean) => void;
-  onRemovalStateChange?: (state: { hasUnsavedDraftMetadata: boolean }) => void;
+  onRemovalStateChange?: (state: {
+    hasUnsavedEdit: boolean;
+    hasUnsavedDraftMetadata: boolean;
+  }) => void;
+  /** Exact durable-admission result for an external handoff such as Android sharing. */
+  onAdmissionApplied?: (result: ComposerAdmissionResult) => void;
 }
 
-/** Own the plain-text, attachment, typing, draft, and submit lifecycle for one composer. */
+/** Own the plain-text, edit, attachment, typing, draft, and submit lifecycle for one composer. */
 export function useComposerAuthoringSession({
   active,
+  editingText,
   initialText,
   initialAttachments,
   pending,
@@ -50,37 +72,56 @@ export function useComposerAuthoringSession({
   onSendTextAttachment,
   canSubmit,
   isSubmitOwnerCurrent,
+  onCancelEdit,
   onDraftChange,
   onTyping,
   onRemovalStateChange,
+  onAdmissionApplied,
 }: ComposerAuthoringSessionOptions) {
   const [text, setText] = useState('');
   const [submissionPending, setSubmissionPending] = useState(false);
   const submissionPendingRef = useRef(false);
   const mountedRef = useRef(true);
   const trimmed = text.trim();
+  const isEditing = editingText != null;
   // Retain staged files across a temporary capability loss, but do not count them as sendable.
   // A typed caption must not silently fall back to a separate text-only send while a chip remains.
   const attachmentsSendable = onSendAttachments != null;
-  const canSend = trimmed.length > 0 || (attachmentsSendable && pending.length > 0);
+  const canSend = isEditing
+    ? trimmed.length > 0 && trimmed !== editingText?.trim()
+    : trimmed.length > 0 || (attachmentsSendable && pending.length > 0);
 
   // Debounced typing emit: start-typing on input, stop-typing after a pause / on send.
   const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const typingActive = useRef(false);
+  const typingCallback = useRef(onTyping);
+  useLayoutEffect(() => {
+    if (typingCallback.current !== onTyping && typingActive.current) {
+      // A chat or capability change must not leave the old conversation typing.
+      typingCallback.current?.(false);
+      typingActive.current = false;
+    }
+    typingCallback.current = onTyping;
+  }, [onTyping]);
   const emitTyping = (isActive: boolean): void => {
+    if (isActive && !typingCallback.current) return;
     if (isActive === typingActive.current) return;
     typingActive.current = isActive;
-    onTyping?.(isActive);
+    typingCallback.current?.(isActive);
   };
   useEffect(() => {
     if (active) return;
     if (typingTimer.current) clearTimeout(typingTimer.current);
     emitTyping(false);
-  }, [active]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [active]);
   const onChangeText = (value: string): void => {
     setText(value);
     queueDraft(value);
     if (typingTimer.current) clearTimeout(typingTimer.current);
+    if (isEditing) {
+      emitTyping(false);
+      return;
+    }
     if (value.length > 0) {
       emitTyping(true);
       typingTimer.current = setTimeout(() => emitTyping(false), 3000);
@@ -89,16 +130,16 @@ export function useComposerAuthoringSession({
     }
   };
   // Stop typing on unmount (leaving the chat).
-  useEffect(() => () => emitTyping(false), []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => emitTyping(false), []);
 
-  // Restore a persisted draft — only into an EMPTY composer (the draft loads async;
+  // Restore a persisted draft — only into an EMPTY, non-editing composer (the draft loads async;
   // never clobber something the user already typed).
   const restoredRef = useRef(false);
   useEffect(() => {
-    if (restoredRef.current || !initialText) return;
+    if (restoredRef.current || !initialText || isEditing) return;
     restoredRef.current = true;
     setText((current) => current || initialText);
-  }, [initialText]);
+  }, [initialText, isEditing]);
 
   // Seed shared attachments (Direct Share INTO this chat) into the tray once, on mount, without
   // clobbering anything the user may already have staged. Also opens the tray so they're visible.
@@ -106,25 +147,51 @@ export function useComposerAuthoringSession({
   useEffect(() => {
     if (seededRef.current || !initialAttachments || initialAttachments.length === 0) return;
     seededRef.current = true;
-    setPending((current) => (current.length > 0 ? current : initialAttachments));
+    setPending((current) => {
+      const seen = new Set(current.map((item) => item.uri));
+      return [...current, ...initialAttachments.filter((item) => !seen.has(item.uri))];
+    });
     setTrayOpen(true);
   }, [initialAttachments, setPending, setTrayOpen]);
 
-  // Draft persistence: debounced while typing; flushed on unmount so the last keystrokes aren't
-  // lost when backing out of the chat.
+  // Draft persistence: edits temporarily displace the ordinary chat draft but never overwrite it.
   const draftTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const draftStateRef = useRef({ text: '', onDraftChange });
+  const draftStateRef = useRef({ text: '', isEditing: false, onDraftChange });
   // The unmount cleanup needs the latest committed render, not the values from its first closure.
-  draftStateRef.current = { text, onDraftChange };
+  draftStateRef.current = { text, isEditing, onDraftChange };
+
+  const preEditRef = useRef('');
+  const editingActiveRef = useRef(false);
+  useEffect(() => {
+    if (editingText != null) {
+      if (!editingActiveRef.current) preEditRef.current = draftStateRef.current.text;
+      editingActiveRef.current = true;
+      // Entering edit mode deliberately replaces the local composer buffer with the exact
+      // server-admitted message text. This prop transition is the state-machine boundary.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setText(editingText);
+      emitTyping(false);
+      return;
+    }
+    if (!editingActiveRef.current) return;
+    editingActiveRef.current = false;
+    setText(preEditRef.current);
+    draftStateRef.current = {
+      ...draftStateRef.current,
+      text: preEditRef.current,
+      isEditing: false,
+    };
+  }, [editingText]);
 
   // Body text already flushes to the per-chat DB draft below. Report only the authored pieces
   // that cannot be reconstructed after this component or route is removed.
+  const hasUnsavedEdit = isEditing && text !== editingText;
   const hasUnsavedDraftMetadata = pending.length > 0;
   useEffect(() => {
-    onRemovalStateChange?.({ hasUnsavedDraftMetadata });
-  }, [hasUnsavedDraftMetadata, onRemovalStateChange]);
+    onRemovalStateChange?.({ hasUnsavedEdit, hasUnsavedDraftMetadata });
+  }, [hasUnsavedDraftMetadata, hasUnsavedEdit, onRemovalStateChange]);
   const queueDraft = (value: string): void => {
-    if (!onDraftChange) return;
+    if (!onDraftChange || isEditing) return;
     if (draftTimer.current) clearTimeout(draftTimer.current);
     draftTimer.current = setTimeout(() => onDraftChange(value), 500);
   };
@@ -132,7 +199,7 @@ export function useComposerAuthoringSession({
     () => () => {
       if (draftTimer.current) clearTimeout(draftTimer.current);
       const state = draftStateRef.current;
-      state.onDraftChange?.(state.text);
+      if (!state.isEditing) state.onDraftChange?.(state.text);
     },
     [],
   );
@@ -144,15 +211,15 @@ export function useComposerAuthoringSession({
     [],
   );
 
-  const submit = (): void => {
+  const submit = (textAdmissionOverride?: (text: string) => ComposerTextAdmission): void => {
     if (submissionPendingRef.current) return;
     const captured = trimmed;
     const capturedAuthoredText = text;
-    if (pending.length > 0 && !attachmentsSendable) {
+    if (!isEditing && pending.length > 0 && !attachmentsSendable) {
       showToast('Attachment sending is unavailable; remove the file to send text alone');
       return;
     }
-    const attachments = pending;
+    const attachments = isEditing ? [] : pending;
     if (!captured && attachments.length === 0) return;
     if (isSubmitOwnerCurrent && !isSubmitOwnerCurrent()) return;
     const isTextAttachment = !!captured && attachments.length > 0;
@@ -167,7 +234,7 @@ export function useComposerAuthoringSession({
     const logicalSendCount = isTextAttachment
       ? 1
       : (attachments.length > 0 ? 1 : 0) + (captured ? 1 : 0);
-    if (canSubmit && !canSubmit(logicalSendCount)) {
+    if (!isEditing && canSubmit && !canSubmit(logicalSendCount)) {
       showToast('Too many messages are waiting—try again in a moment');
       return;
     }
@@ -213,7 +280,7 @@ export function useComposerAuthoringSession({
     const admitText = (): boolean | Promise<boolean> => {
       if (!captured) return false;
       try {
-        const admission = onSend(captured);
+        const admission = (textAdmissionOverride ?? onSend)(captured);
         return isPromiseLike(admission)
           ? Promise.resolve(admission).then(normalizeTextAdmission, () => false)
           : normalizeTextAdmission(admission);
@@ -236,15 +303,14 @@ export function useComposerAuthoringSession({
       }
 
       if (textAdmitted) {
-        // Inputs are read-only during this short admission wait, which makes the captured value the
-        // value being cleared here.
-        const postText = '';
+        // An edit restores the ordinary draft it displaced; a new send consumes that draft.
+        const postText = isEditing ? preEditRef.current : '';
         if (mountedRef.current) {
           setText(postText);
         }
         if (typingTimer.current) clearTimeout(typingTimer.current);
         if (draftTimer.current) clearTimeout(draftTimer.current);
-        onDraftChange?.('');
+        if (!isEditing) onDraftChange?.('');
         // Keep an immediate unmount from restoring the admitted text before React rerenders.
         draftStateRef.current = { ...draftStateRef.current, text: postText };
         emitTyping(false);
@@ -260,6 +326,16 @@ export function useComposerAuthoringSession({
         (textAdmitted || attachments.length > 0)
       ) {
         setTrayOpen(false);
+      }
+      try {
+        onAdmissionApplied?.({
+          text: capturedAuthoredText,
+          textAdmitted,
+          attachmentUris: attachments.map((item) => item.uri),
+          admittedAttachmentUris,
+        });
+      } catch {
+        // Admission already committed. An optional observer must never roll authored UI back.
       }
     };
     const finishAdmission = (): void => {
@@ -309,13 +385,25 @@ export function useComposerAuthoringSession({
       .catch(() => undefined);
   };
 
+  const cancelEdit = (): void => {
+    setText(preEditRef.current);
+    draftStateRef.current = {
+      ...draftStateRef.current,
+      text: preEditRef.current,
+      isEditing: false,
+    };
+    onCancelEdit?.();
+  };
+
   return {
     text,
     setText,
     trimmed,
+    isEditing,
     canSend,
     submissionPending,
     onChangeText,
     submit,
+    cancelEdit,
   };
 }

@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { eq, inArray, sql } from 'drizzle-orm';
 import type { Attachment } from '@core/models';
 import { STICKER_ASSOCIATED_TYPE } from '@core/reactions/reactionType';
 import { firstUrl, mediaSection } from '@utils';
@@ -24,10 +24,45 @@ export function upsertAttachmentsWithinTransaction(
   items: Array<{ att: Attachment; messageId: number }>,
 ): Promise<void> {
   return runInTransactionContext(context, async (db) => {
-    const deduped = dedupeBy(
-      items.filter((x) => !!x.att?.guid),
-      (x) => x.att.guid,
+    const candidates = items.filter((x) => !!x.att?.guid);
+    if (candidates.length === 0) return;
+
+    // An attachment GUID has one immutable message owner. Reject every candidate for a GUID that
+    // claims multiple owners in one batch; last-item deduplication would otherwise pick one
+    // arbitrarily. Same-owner repeats remain ordinary metadata refreshes.
+    const batchOwnerByGuid = new Map<string, number>();
+    const batchConflicts = new Set<string>();
+    for (const { att, messageId } of candidates) {
+      const owner = batchOwnerByGuid.get(att.guid);
+      if (owner != null && owner !== messageId) batchConflicts.add(att.guid);
+      else batchOwnerByGuid.set(att.guid, messageId);
+    }
+    const unambiguous = dedupeBy(
+      candidates.filter(({ att }) => !batchConflicts.has(att.guid)),
+      ({ att }) => att.guid,
     );
+    if (unambiguous.length === 0) return;
+
+    // Preserve the first committed owner. A hostile, stale, or malformed payload must not move an
+    // already-downloaded file into another message/chat. A legacy ownerless row is ambiguous too:
+    // adopting it here could discard a same-message optimistic temp row and its cached local file.
+    const existingOwners = await db
+      .select({ guid: attachments.guid, messageId: attachments.messageId })
+      .from(attachments)
+      .where(
+        inArray(
+          attachments.guid,
+          unambiguous.map(({ att }) => att.guid),
+        ),
+      );
+    const existingOwnerByGuid = new Map(
+      existingOwners.map(({ guid, messageId }) => [guid, messageId]),
+    );
+    const deduped = unambiguous.filter(({ att, messageId }) => {
+      if (!existingOwnerByGuid.has(att.guid)) return true;
+      const owner = existingOwnerByGuid.get(att.guid);
+      return owner === messageId;
+    });
     if (deduped.length === 0) return;
 
     // Reconcile the optimistic-send path: the Gator attachment-send ack carries only the
@@ -40,7 +75,7 @@ export function upsertAttachmentsWithinTransaction(
     for (const { att, messageId } of deduped) {
       const temp = await db.all<{ guid: string; localPath: string | null }>(
         sql`SELECT guid, local_path AS localPath FROM attachments
-          WHERE message_id = ${messageId} AND guid LIKE '%-att' AND guid <> ${att.guid}
+          WHERE message_id = ${messageId} AND guid LIKE 'temp-%-att' AND guid <> ${att.guid}
           LIMIT 1`,
       );
       const t = temp[0];
@@ -80,10 +115,10 @@ export function upsertAttachmentsWithinTransaction(
       )
       .onConflictDoUpdate({
         target: attachments.guid,
+        setWhere: sql`${attachments.messageId} = excluded.message_id`,
         set: {
-          // A message repair can correct a corrupt local parent link without replacing the row and
-          // losing its already-downloaded local path.
-          messageId: sql`excluded.message_id`,
+          // Ownership is deliberately absent. setWhere also gates every metadata field so a
+          // cross-owner collision cannot modify the original row if another writer races preflight.
           mimeType: sql`excluded.mime_type`,
           totalBytes: sql`excluded.total_bytes`,
           blurhash: sql`excluded.blurhash`,
@@ -270,6 +305,7 @@ export interface StickerRow extends StickerMessageRow {
  */
 export async function listStickersForTargets(
   db: AppDatabase,
+  chatGuid: string,
   targetGuids: string[],
 ): Promise<Map<string, StickerRow[]>> {
   const out = new Map<string, StickerRow[]>();
@@ -290,6 +326,13 @@ export async function listStickersForTargets(
       m.date_created AS dateCreated
     FROM messages m
     WHERE m.associated_message_guid IN (${inList})
+      AND m.chat_id = (SELECT id FROM chats WHERE guid = ${chatGuid} LIMIT 1)
+      AND EXISTS (
+        SELECT 1 FROM messages target
+         WHERE target.guid = m.associated_message_guid
+           AND target.chat_id = m.chat_id
+           AND target.date_deleted IS NULL
+      )
       AND m.associated_message_type = ${STICKER_ASSOCIATED_TYPE}
       AND m.date_deleted IS NULL
       AND ${messageHasVisibleContentSql('m')}

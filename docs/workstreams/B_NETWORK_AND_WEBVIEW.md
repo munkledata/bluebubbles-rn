@@ -90,18 +90,18 @@ protected tree, no valid marker exists, or the account has been torn down.
 
 <a id="face-01"></a>
 
-## `FACE-01` / `POST-FACE-01` — retired FaceTime client; deferred new design
+## `FACE-01` / `POST-FACE-01` — embedded client retired; narrow replacement selected
 
 `FACE-01` left the active remediation inventory on 2026-09-14 because the embedded experience never
-worked reliably. [`POST-FACE-01`](../POST_REMEDIATION_PLAN.md#post-face-01) is the future status
-authority. `FP-006` subsequently retired the complete FaceTime client surface, including the former
-validated system-browser handoff. Stale server/helper state cannot restore it.
+worked reliably. `FP-006` retired that WebView/browser surface, including its media permissions and
+system-browser handoff; stale broad Private API state still cannot restore it.
 
-If the owner later selects a new embedded design, reuse the `WEB-02` navigation primitives. Enumerate
-exact required Apple HTTPS origins without a broad wildcard, and block or externally open every
-other destination. Compare the requesting origin before each camera or microphone grant, and deny
-popups and new windows. A prior Android permission grant must never become media access for an
-attacker-controlled origin.
+The owner later selected a different design under
+[`POST-FACE-01`](../POST_REMEDIATION_PLAN.md#post-face-01): exact, separately capability-gated requests
+to the connected Gator server for plain-link creation and one-to-one call start. No web content runs
+on the phone and no WebView receives camera or microphone access. Answer/leave plumbing remains
+hidden until a PII-free live probe establishes a trustworthy versioned call-event identity/state
+contract. The post-remediation plan owns the current checkpoint and remaining live evidence.
 
 <a id="rt-01a"></a>
 

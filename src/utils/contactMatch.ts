@@ -22,3 +22,22 @@ export function emailKey(raw: string): string {
 export function handleKey(address: string): string {
   return address.includes('@') ? emailKey(address) : phoneKey(address);
 }
+
+/**
+ * Type-scoped keys for automatic contact presentation. The prefix prevents malformed email data
+ * such as "1234" from colliding with a phone key, and an empty normalized value never becomes a
+ * shared key.
+ */
+export function contactPhoneMatchKey(raw: string): string {
+  const key = phoneKey(raw);
+  return key ? `phone:${key}` : '';
+}
+
+export function contactEmailMatchKey(raw: string): string {
+  const key = emailKey(raw);
+  return key ? `email:${key}` : '';
+}
+
+export function contactHandleMatchKey(address: string): string {
+  return address.includes('@') ? contactEmailMatchKey(address) : contactPhoneMatchKey(address);
+}

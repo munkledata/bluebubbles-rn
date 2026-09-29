@@ -37,6 +37,7 @@ import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
 const OUTGOING_RETRY_LEASE_MS = 120_000;
+const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
 
 const nextEventLoopTurn = (): Promise<void> =>
   new Promise((resolve) => {
@@ -654,18 +655,27 @@ describe('claimFailedOutgoingForRetry — "Try Again" vs the automatic drain', (
 
   it('carries a CONTACT card back as a contact payload, never as the bubble text', async () => {
     const { db } = await createTestDb();
-    const chatId = await seedChat(db, 'c1');
+    const chatGuid = `RCS;-;g1.${RCS_PROVIDER_EPOCH}.Y29udGFjdC1yZXRyeQ`;
+    const chatId = await seedChat(db, chatGuid);
     await insertOutgoingContact(db, {
       tempGuid: 'temp-card',
       chatId,
-      chatGuid: 'c1',
+      chatGuid,
       text: 'Craig Federighi',
       contact: { firstName: 'Craig', lastName: 'Federighi' },
       now: 100,
     });
     await reconcileOutgoingError(db, 'temp-card', 500, 1_000);
 
-    const res = await claimFailedOutgoingForRetry(db, 'temp-card', () => 2_000);
+    const res = await claimFailedOutgoingForRetry(
+      db,
+      'temp-card',
+      () => 2_000,
+      undefined,
+      undefined,
+      undefined,
+      (candidate) => candidate === chatGuid,
+    );
 
     expect(res.claim).toBe('claimed');
     expect(res.row?.kind).toBe('contact'); // 'text' here delivers "Craig Federighi" as a message
@@ -893,8 +903,10 @@ describe('countOutgoingQueueHealth — the boot diagnostic for the two crash gap
       )
       .run();
     raw
-      .prepare('INSERT INTO message_guid_aliases (alias_guid, canonical_guid) VALUES (?, ?)')
-      .run('temp-promoted-health', 'real-promoted-health');
+      .prepare(
+        'INSERT INTO message_guid_aliases (alias_guid, canonical_guid, chat_guid) VALUES (?, ?, ?)',
+      )
+      .run('temp-promoted-health', 'real-promoted-health', 'c1');
 
     expect(await countOutgoingQueueHealth(db)).toEqual({
       strandedSending: 0,

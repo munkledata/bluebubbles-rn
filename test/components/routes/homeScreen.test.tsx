@@ -11,13 +11,13 @@
  *   - the whole catch-up is best-effort: a rejected recovery is swallowed (logger.debug), never
  *     crashing the inbox.
  *   - all side-effects run ONCE on mount (useEffect []), not per re-render.
- *   - the DEV overlay bar routes/kicks the dev-seed helpers; Disconnect forgets the session and
- *     replaces to /welcome.
+ *   - the normal-flow DEV footer stays collapsed until explicitly opened, then routes/kicks the
+ *     dev-seed helpers; account removal remains behind Settings' confirmation dialog.
  *
- * In-file mocks: @ui (ConversationListScreen probe), expo-router (push/replace), @/services
- * (forget), @/services/send (the 3 recovery fns), @features/conversations/devSeed (the dev
- * helpers), @utils/isDev (isDevServer). The stores stay REAL — their `hydrate` action is spied
- * so we assert the call without running the DB-backed body.
+ * In-file mocks: @ui (ConversationListScreen probe), expo-router (push), @/services/send (the 3
+ * recovery fns), @features/conversations/devSeed (the dev helpers), @utils/isDev (isDevServer).
+ * The stores stay REAL — their `hydrate` action is spied so we assert the call without running the
+ * DB-backed body.
  */
 import React from 'react';
 import { act, renderWithTheme, screen, fireEvent, waitFor } from '../support/renderWithTheme';
@@ -25,23 +25,20 @@ import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useSyncSettingsStore } from '@state/syncSettingsStore';
 import { useThemeStore } from '@state/themeStore';
 import { logger } from '@core/secure';
-import { useDialogStore } from '@ui/dialog/dialogStore';
 import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
 
 const mockPush = jest.fn();
-const mockReplace = jest.fn();
 
-jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush, replace: mockReplace }) }));
+jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush }) }));
+jest.mock('react-native-safe-area-context', () => ({
+  useSafeAreaInsets: () => ({ top: 0, bottom: 48, left: 0, right: 0 }),
+}));
 
 jest.mock('@/services', () => ({
-  disconnectFailureMessage: jest.fn(
-    () =>
-      'Gator could not safely finish clearing the previous connection. Restart the app and try again before connecting.',
-  ),
-  forget: jest.fn().mockResolvedValue(undefined),
+  runDevPerf02InboxBenchmark: jest.fn().mockResolvedValue([]),
 }));
 
 jest.mock('@/services/send', () => ({
@@ -75,8 +72,6 @@ jest.mock('@ui', () => {
 // eslint-disable-next-line import/first
 import Home from '../../../app/(app)/home';
 // eslint-disable-next-line import/first
-import { forget } from '@/services';
-// eslint-disable-next-line import/first
 import {
   fireDueScheduled,
   fireDueScheduledWithDevelopmentSender,
@@ -97,7 +92,6 @@ const fireDueScheduledMock = fireDueScheduled as jest.Mock;
 const fireDueScheduledWithDevelopmentSenderMock =
   fireDueScheduledWithDevelopmentSender as jest.Mock;
 const recoverOutgoingMock = recoverOutgoing as jest.Mock;
-const forgetMock = forget as jest.Mock;
 const injectMessageMock = injectMessage as jest.Mock;
 const devQueueIncomingMessageMock = devQueueIncomingMessageWithoutDrain as jest.Mock;
 const devResumeQueuedMessagesMock = devResumeQueuedIncomingMessages as jest.Mock;
@@ -110,7 +104,6 @@ let hydrateSpies: jest.SpyInstance[] = [];
 beforeEach(() => {
   resumeRealtimeDeliveries();
   jest.clearAllMocks();
-  forgetMock.mockResolvedValue(undefined);
   isDevServerMock.mockReturnValue(false);
   fireDueScheduledMock.mockResolvedValue(0);
   fireDueScheduledWithDevelopmentSenderMock.mockResolvedValue(0);
@@ -118,7 +111,6 @@ beforeEach(() => {
   injectMessageMock.mockResolvedValue(undefined);
   devQueueIncomingMessageMock.mockResolvedValue(undefined);
   devResumeQueuedMessagesMock.mockResolvedValue(undefined);
-  useDialogStore.setState({ current: null, queue: [] });
   // Spy each store's hydrate so we can assert the launch-order re-hydrate WITHOUT running the
   // DB-backed body (getDatabase is stubbed by support/setup and would otherwise no-op/throw).
   hydrateSpies = STORES.map((s) =>
@@ -139,21 +131,34 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   return { promise, resolve };
 }
 
+async function openDevTools(): Promise<void> {
+  await fireEvent.press(screen.getByRole('button', { name: 'Open developer tools' }));
+  await screen.findByText('⚡ Inject');
+}
+
 describe('Home route — render', () => {
-  it('renders the conversation list (the inbox) and the DEV overlay bar', async () => {
+  it('renders the inbox with the DEV panel collapsed until explicitly opened', async () => {
     await renderWithTheme(<Home />);
     expect(screen.getByTestId('inbox')).toBeTruthy();
-    // __DEV__ is true under jest-expo, so the dev overlay renders its affordances.
+    expect(screen.getByTestId('home-dev-tools-footer')).not.toHaveStyle({ position: 'absolute' });
+    expect(screen.getByTestId('home-dev-tools-footer')).toHaveStyle({ paddingBottom: 48 });
+    expect(screen.getByRole('button', { name: 'Open developer tools' })).toBeTruthy();
+    expect(screen.queryByText('⚡ Inject')).toBeNull();
+    expect(screen.queryByText('Disconnect')).toBeNull();
+
+    await openDevTools();
     expect(screen.getByText('⚡ Inject')).toBeTruthy();
     expect(screen.queryByText('⏸ Queue')).toBeNull();
     expect(screen.queryByText('📞 FaceTime')).toBeNull();
     expect(screen.getByText('📍 Find My')).toBeTruthy();
-    expect(screen.getByText('Disconnect')).toBeTruthy();
+    expect(screen.getByText('Manage connection')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Close developer tools' })).toBeTruthy();
   });
 
   it('shows the persist-without-drain control only for the exact DEV fixture session', async () => {
     isDevServerMock.mockReturnValue(true);
     await renderWithTheme(<Home />);
+    await openDevTools();
     expect(screen.getByText('⏸ Queue')).toBeTruthy();
   });
 });
@@ -305,6 +310,7 @@ describe('Home route — DEV overlay actions', () => {
   it('kicks the retained inject and queue-without-drain helpers from their buttons', async () => {
     isDevServerMock.mockReturnValue(true);
     await renderWithTheme(<Home />);
+    await openDevTools();
     fireEvent.press(screen.getByText('⚡ Inject'));
     await waitFor(() =>
       expect(injectMessage).toHaveBeenCalledWith(
@@ -326,6 +332,7 @@ describe('Home route — DEV overlay actions', () => {
       new Error('SQL parameters included private fixture payload'),
     );
     await renderWithTheme(<Home />);
+    await openDevTools();
 
     fireEvent.press(screen.getByText('⏸ Queue'));
 
@@ -339,13 +346,22 @@ describe('Home route — DEV overlay actions', () => {
 
   it('routes Find My via expo-router push', async () => {
     await renderWithTheme(<Home />);
+    await openDevTools();
     fireEvent.press(screen.getByText('📍 Find My'));
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/findmy'));
+  });
+
+  it('routes connection management through Settings instead of deleting the account directly', async () => {
+    await renderWithTheme(<Home />);
+    await openDevTools();
+    fireEvent.press(screen.getByRole('button', { name: 'Manage connection in Settings' }));
+    await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/settings'));
   });
 
   it('quietly drops retained account-A DEV callbacks after account B is admitted', async () => {
     isDevServerMock.mockReturnValue(true);
     await renderWithTheme(<Home />);
+    await openDevTools();
     await waitFor(() => expect(fireDueScheduledWithDevelopmentSender).toHaveBeenCalledTimes(1));
     await pauseRealtimeDeliveries();
     resumeRealtimeDeliveries();
@@ -355,18 +371,18 @@ describe('Home route — DEV overlay actions', () => {
     await fireEvent.press(screen.getByText('⚡ Inject'));
     await fireEvent.press(screen.getByText('⏸ Queue'));
     await fireEvent.press(screen.getByText('📍 Find My'));
-    await fireEvent.press(screen.getByText('Disconnect'));
+    await fireEvent.press(screen.getByRole('button', { name: 'Manage connection in Settings' }));
 
     expect(injectMessage).not.toHaveBeenCalled();
     expect(devQueueIncomingMessageWithoutDrain).not.toHaveBeenCalled();
     expect(mockPush).not.toHaveBeenCalled();
-    expect(forget).not.toHaveBeenCalled();
   });
 
   it('drains an admitted DEV write before account-A teardown completes', async () => {
     const injectionA = deferred<void>();
     injectMessageMock.mockReturnValueOnce(injectionA.promise);
     await renderWithTheme(<Home />);
+    await openDevTools();
 
     fireEvent.press(screen.getByText('⚡ Inject'));
     await waitFor(() => expect(injectMessage).toHaveBeenCalledTimes(1));
@@ -384,45 +400,5 @@ describe('Home route — DEV overlay actions', () => {
     });
     expect(teardownFinished).toBe(true);
     resumeRealtimeDeliveries();
-  });
-
-  it('Disconnect forgets the session then replaces to /welcome', async () => {
-    await renderWithTheme(<Home />);
-    fireEvent.press(screen.getByText('Disconnect'));
-    await waitFor(() => expect(forget).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/welcome'));
-  });
-
-  it('lets forget own the teardown barrier without waiting on its own callback', async () => {
-    forgetMock.mockImplementationOnce(async () => {
-      await pauseRealtimeDeliveries();
-    });
-    await renderWithTheme(<Home />);
-    await waitFor(() => expect(fireDueScheduled).toHaveBeenCalledTimes(1));
-
-    fireEvent.press(screen.getByText('Disconnect'));
-
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/welcome'));
-    resumeRealtimeDeliveries();
-  });
-
-  it('reports incomplete account cleanup and still leaves the account UI', async () => {
-    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
-    forgetMock.mockRejectedValueOnce(new Error('credential removal unconfirmed'));
-    await renderWithTheme(<Home />);
-
-    fireEvent.press(screen.getByText('Disconnect'));
-
-    await waitFor(() => expect(mockReplace).toHaveBeenCalledWith('/welcome'));
-    expect(useDialogStore.getState().current).toMatchObject({
-      title: 'Disconnect incomplete',
-      message:
-        'Gator could not safely finish clearing the previous connection. Restart the app and try again before connecting.',
-    });
-    expect(warn).toHaveBeenCalledWith(
-      '[home] Disconnect cleanup remains incomplete',
-      expect.any(Error),
-    );
-    warn.mockRestore();
   });
 });

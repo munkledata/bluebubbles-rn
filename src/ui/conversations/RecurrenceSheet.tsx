@@ -6,6 +6,8 @@ import { useTheme } from '../theme';
 
 interface RecurrenceSheetProps {
   visible: boolean;
+  /** File schedules are one-time only; do not offer choices the server would reject. */
+  allowRepeat?: boolean;
   /** Dismiss WITHOUT scheduling (backdrop tap / Cancel / back button). */
   onClose: () => void;
   /** Schedule with the chosen cadence (null = send once). */
@@ -28,6 +30,7 @@ export const SCHEDULE_DELIVERY_TIMING_NOTE =
  */
 export function RecurrenceSheet({
   visible,
+  allowRepeat = true,
   onClose,
   onPick,
 }: RecurrenceSheetProps): React.JSX.Element {
@@ -51,7 +54,7 @@ export function RecurrenceSheet({
               {SCHEDULE_DELIVERY_TIMING_NOTE}
             </Text>
           </View>
-          {CHOICES.map((choice) => (
+          {CHOICES.filter((choice) => allowRepeat || choice.value === null).map((choice) => (
             <Pressable
               key={choice.label}
               style={[styles.action, { borderTopColor: theme.color.separator }]}

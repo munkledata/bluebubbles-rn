@@ -5,7 +5,8 @@
  * now blocks B when its drain times out, but the service layer must remain safe even if that outer
  * policy regresses: an old lease can never become current again after the generation increments.
  */
-import { Chat } from '@core/models';
+import { Chat, ServerInfo } from '@core/models';
+import type { HttpClient } from '@core/api/http';
 import {
   claimScheduled,
   getScheduledById,
@@ -16,6 +17,7 @@ import {
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
+import { useSessionStore } from '@state/sessionStore';
 import { createTestDb } from '../support/testDb';
 
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
@@ -42,6 +44,7 @@ jest.mock('@/services/send/sendService', () => ({
 // eslint-disable-next-line import/first
 import {
   cancelScheduled,
+  clearScheduledHistoryItem,
   editScheduled,
   fireDueScheduled,
   recoverStuckScheduled,
@@ -58,6 +61,10 @@ import {
 } from '@core/api/endpoints/scheduled';
 // eslint-disable-next-line import/first
 import { sendTextMessage } from '@/services/send/sendService';
+// eslint-disable-next-line import/first
+import { scheduleAttachmentMessage } from '@/services/send/scheduleService';
+// eslint-disable-next-line import/first
+import { fixedRcsCapabilitySource } from '@/services/send/rcsAttemptCapability';
 // eslint-disable-next-line import/first
 import {
   captureRealtimeDeliveryLease,
@@ -95,6 +102,16 @@ async function seedChat(db: AppDatabase): Promise<void> {
   );
 }
 
+async function seedProvenImessageChat(db: AppDatabase): Promise<void> {
+  const participant = { address: '+15551234567', service: 'iMessage' as const };
+  const handles = await upsertHandles(db, [participant]);
+  await upsertChats(
+    db,
+    [Chat.parse({ guid: 'iMessage;-;+15551234567', style: 45, participants: [participant] })],
+    handles,
+  );
+}
+
 const serverItem = (id: string, text = 'from A') => ({
   id,
   chatGuid: 'c1',
@@ -107,6 +124,17 @@ const mockGetScheduled = getScheduled as jest.Mock;
 const mockCreateScheduled = createScheduled as jest.Mock;
 const mockDeleteScheduled = deleteServerScheduled as jest.Mock;
 const mockSendTextMessage = sendTextMessage as jest.Mock;
+const RCS_EPOCH_A = `gpe1_${'A'.repeat(43)}`;
+const RCS_EPOCH_B = `gpe1_${'B'.repeat(42)}A`;
+const rcsChatGuid = (epoch: string): string =>
+  `RCS;-;g1.${epoch}.${Buffer.from('scheduled-chat', 'utf8').toString('base64url')}`;
+const rcsInfo = (epoch: string) =>
+  ServerInfo.parse({
+    version: '2.0.0',
+    rcs: true,
+    supports_rcs_epoch_qualified_ids: true,
+    rcs_provider_epoch: epoch,
+  });
 
 beforeEach(() => {
   jest.clearAllMocks();
@@ -118,7 +146,102 @@ afterEach(async () => {
   resumeRealtimeDeliveries();
 });
 
+it('stores only a server-backed file schedule after a confirmed narrow response', async () => {
+  const { db, raw } = await createTestDb();
+  await seedProvenImessageChat(db);
+  mockCreateScheduled.mockResolvedValue({
+    id: 'srv-file',
+    method: 'narrow-attachment',
+    attachmentName: 'small.png',
+  });
+  const capability = fixedRcsCapabilitySource(
+    ServerInfo.parse({
+      version: '2.0.15-bbd',
+      supports_imessage_attachment_upload: true,
+      supports_imessage_attachment_caption_upload: true,
+      supports_imessage_scheduled_attachment: true,
+    }),
+  );
+  const args = {
+    chatGuid: 'iMessage;-;+15551234567',
+    text: 'caption',
+    scheduledFor: Date.now() + 120_000,
+    attachmentName: 'small.png',
+    mimeType: 'image/png',
+    attachmentData: 'AQID',
+  };
+
+  await expect(
+    scheduleAttachmentMessage(db, {} as HttpClient, args, { isCurrent: () => true }, capability),
+  ).resolves.toEqual({ id: expect.any(Number), serverId: 'srv-file' });
+  expect(mockCreateScheduled).toHaveBeenCalledWith(expect.anything(), {
+    chatGuid: args.chatGuid,
+    message: 'caption',
+    scheduledFor: args.scheduledFor,
+    method: 'narrow-attachment',
+    attachmentName: 'small.png',
+    attachmentData: 'AQID',
+  });
+  expect((await listAllScheduled(db))[0]).toMatchObject({
+    serverId: 'srv-file',
+    attachmentName: 'small.png',
+  });
+  const payload = raw.prepare('SELECT payload FROM scheduled_messages').get() as {
+    payload: string;
+  };
+  expect(payload.payload).not.toContain('AQID');
+});
+
 describe('scheduled-message account ownership', () => {
+  it('keeps old-epoch RCS schedule rows read-only across cancel, edit, and history clear', async () => {
+    const previousSession = useSessionStore.getState();
+    const { db, raw } = await createTestDb();
+    (getDatabase as jest.Mock).mockReturnValue(db);
+    try {
+      useSessionStore.getState().connected('https://server.test', 'password', rcsInfo(RCS_EPOCH_A));
+      const pendingId = await insertScheduled(db, {
+        chatGuid: rcsChatGuid(RCS_EPOCH_A),
+        text: 'old pairing pending',
+        scheduledFor: 9_000_000,
+      });
+      const historyId = await insertScheduled(db, {
+        chatGuid: rcsChatGuid(RCS_EPOCH_A),
+        text: 'old pairing history',
+        scheduledFor: 8_000_000,
+      });
+      raw.prepare("UPDATE scheduled_messages SET status = 'sent' WHERE id = ?").run(historyId);
+      const session = useSessionStore.getState();
+      expect(
+        session.setServerInfoForTransport(
+          session.origin!,
+          session.transportRevision,
+          rcsInfo(RCS_EPOCH_B),
+        ),
+      ).toBe(true);
+
+      await expect(cancelScheduled({ id: pendingId, serverId: null })).rejects.toThrow(
+        'previous Google pairing',
+      );
+      await expect(
+        editScheduled(pendingId, { text: 'must not change', scheduledFor: 9_500_000 }),
+      ).rejects.toThrow('previous Google pairing');
+      await expect(clearScheduledHistoryItem(historyId)).rejects.toThrow('previous Google pairing');
+
+      expect(await getScheduledById(db, pendingId)).toMatchObject({
+        text: 'old pairing pending',
+        scheduledFor: 9_000_000,
+      });
+      expect(await getScheduledById(db, historyId)).toMatchObject({
+        text: 'old pairing history',
+        status: 'sent',
+      });
+      expect(mockDeleteScheduled).not.toHaveBeenCalled();
+      expect(mockCreateScheduled).not.toHaveBeenCalled();
+    } finally {
+      useSessionStore.setState(previousSession);
+    }
+  });
+
   it('rejects delayed UI actions carrying an already-retired A lease before any request or write', async () => {
     const { db } = await createTestDb();
     await seedChat(db);

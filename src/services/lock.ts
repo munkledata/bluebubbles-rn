@@ -8,6 +8,7 @@ import { flushErrorReports } from './errors';
 import { pauseRealtime, resumeRealtime } from './realtimeControl';
 import { recoverOutgoing } from './send';
 import { reconcileMessageNotificationGroup } from './notifications/notifeeService';
+import { clearCurrentShareShortcuts } from './shortcuts/shareShortcuts';
 
 // ── App lock ───────────────────────────────────────────────────────────────────
 // The lock setting lives in the vault (NOT the encrypted DB) so it's readable at
@@ -32,12 +33,21 @@ function syncNativeAppLockPolicy(enabled: boolean): void {
   }
 }
 
+function clearPersonalizedShareTargets(): void {
+  if (!clearCurrentShareShortcuts()) {
+    throw new Error('App Lock requires Direct Share privacy cleanup.');
+  }
+}
+
 /** Read the persisted app-lock setting from the vault (no DB needed) and apply it. */
 export async function hydrateLock(options: { shouldCommit?: () => boolean } = {}): Promise<void> {
   const v = await vault.get('appLockEnabled');
   if (v !== null && v !== 'true' && v !== 'false') throw new InvalidAppLockSettingError();
   if (options.shouldCommit && !options.shouldCommit()) return;
   const enabled = v === 'true';
+  // App Lock cannot publish while account-derived Direct Share labels remain visible in Android's
+  // chooser. Clear them synchronously before the protected React tree can render or unmount.
+  if (enabled) clearPersonalizedShareTargets();
   // Synchronize the native Recents owner before the gate can render protected routes. A build
   // without this post-v56 native module keeps the existing React gate but cannot claim Recents
   // protection until rebuilt and device-verified.
@@ -49,7 +59,10 @@ export async function hydrateLock(options: { shouldCommit?: () => boolean } = {}
 export async function setAppLockEnabled(enabled: boolean): Promise<void> {
   // Enabling is fail-closed: install the native Recents policy before persisting/unmounting the
   // protected React tree. Disabling may safely clear the native mirror after the vault commits.
-  if (enabled) syncNativeAppLockPolicy(true);
+  if (enabled) {
+    clearPersonalizedShareTargets();
+    syncNativeAppLockPolicy(true);
+  }
   await vault.set('appLockEnabled', enabled ? 'true' : 'false');
   useLockStore.getState().setEnabled(enabled);
   if (!enabled) syncNativeAppLockPolicy(false);

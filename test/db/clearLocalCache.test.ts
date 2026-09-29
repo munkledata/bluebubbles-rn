@@ -29,6 +29,7 @@ import {
   replaceCustomFolderMembership,
   searchMessages,
   setSyncMarker,
+  SHARE_INTAKE_RECEIPT_KV_PREFIX,
   setUrlPreview,
   THEME_PREF_KEY,
   upsertChats,
@@ -311,6 +312,19 @@ describe('clearLocalCache', () => {
     expect(await kvGet(db, THEME_PREF_KEY)).toBe('gator');
     expect(await kvGet(db, SETTING_KEY)).toBe('25');
     expect(count(raw, 'contacts')).toBe(1);
+  });
+
+  it('drops a deferred share-intake receipt after native account cleanup succeeds', async () => {
+    const { db } = await createTestDb();
+    const receiptKey = `${SHARE_INTAKE_RECEIPT_KV_PREFIX}1720000000000-1-0123456789abcdef`;
+    await kvSet(db, receiptKey, '{"account":"old","state":"native-already-settled"}');
+    expect(await kvGet(db, receiptKey)).not.toBeNull();
+    expect(await localCacheDirty(db)).toBe(true);
+
+    await clearLocalCache(db);
+
+    expect(await kvGet(db, receiptKey)).toBeNull();
+    expect(await localCacheDirty(db)).toBe(false);
   });
 
   it('is idempotent on an already-empty database', async () => {

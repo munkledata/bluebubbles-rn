@@ -1,0 +1,63 @@
+diff --git a/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainer.kt b/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainer.kt
+index 483ce36..f54c263 100644
+--- a/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainer.kt
++++ b/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainer.kt
+@@ -122,6 +122,25 @@ internal class StackContainer(
+     private fun applyOperationsAndComputeFragmentManagerOperations() {
+         fragmentOps.clear()
+ 
++        // Fabric can mount and unmount the same screen before this container receives its
++        // didMountItems callback. That screen never entered stackModel, so its queued push and pop
++        // cancel each other. Remove only those identity-matched pairs; a genuinely unmatched pop
++        // remains queued and still fails closed in the normal validation below.
++        pendingPopOperations.toList().forEach { popOperation ->
++            if (stackModel.none { it.stackScreen === popOperation.screen }) {
++                val matchingPushIndex =
++                    pendingPushOperations.indexOfLast { it.screen === popOperation.screen }
++                if (matchingPushIndex >= 0) {
++                    pendingPushOperations.removeAt(matchingPushIndex)
++                    pendingPopOperations.remove(popOperation)
++                }
++            }
++        }
++
++        if (!hasPendingOperations) {
++            return
++        }
++
+         // Handle pop operations first.
+         // We don't care about pop/push duplicates, as long as we don't let the main loop progress
+         // before we commit all the transactions, FragmentManager will handle that for us.
+@@ -149,12 +168,27 @@ internal class StackContainer(
+                 checkNotNull(stackModel.find { it.stackScreen === operation.screen }) {
+                     "[RNScreens] Unable to find a fragment to pop"
+                 }
+ 
+-            check(stackModel.size > 1) {
+-                "[RNScreens] Attempt to pop last screen from the stack"
+-            }
+-
+-            fragmentOps.add(PopBackStackOp(fragment))
++            // A root StackRouter REPLACE removes the only committed screen and mounts one distinct
++            // replacement in the same Fabric batch. The root fragment has no FragmentManager back
++            // stack entry, so popping it would be a no-op. Handle only that exact one-for-one shape
++            // with a direct removal; every other attempt to pop the final screen still fails closed.
++            val isRootReplacement =
++                stackModel.size == 1 &&
++                    pendingPopOperations.size == 1 &&
++                    pendingPushOperations.size == 1 &&
++                    stackModel.single().stackScreen === pendingPopOperations.single().screen &&
++                    pendingPushOperations.single().screen !== pendingPopOperations.single().screen
++
++            if (isRootReplacement) {
++                fragmentOps.add(RemoveOp(fragment))
++            } else {
++                check(stackModel.size > 1) {
++                    "[RNScreens] Attempt to pop last screen from the stack"
++                }
++
++                fragmentOps.add(PopBackStackOp(fragment))
++            }
+ 
+             check(stackModel.removeAt(stackModel.lastIndex) === fragment) {
+                 "[RNScreens] Attempt to pop non-top screen"

@@ -1,0 +1,41 @@
+diff --git a/node_modules/expo-router/build/layouts/experimental-stack/ExperimentalStackView.js b/node_modules/expo-router/build/layouts/experimental-stack/ExperimentalStackView.js
+index 78ce514..da3a3e7 100644
+--- a/node_modules/expo-router/build/layouts/experimental-stack/ExperimentalStackView.js
++++ b/node_modules/expo-router/build/layouts/experimental-stack/ExperimentalStackView.js
+@@ -98,18 +98,27 @@ function ExperimentalStackView({ state, navigation, descriptors, describe }) {
+                             data: undefined,
+                             target: route.key,
+                         });
++                        // The native stack prevented the dismissal, so dispatch the exact pop
++                        // through React Navigation. This supplies usePreventRemove listeners with
++                        // the blocked action they need to show a discard prompt or unwind local UI.
++                        navigation.dispatch({
++                            ...native_1.StackActions.pop(),
++                            source: route.key,
++                            target: state.key,
++                        });
+                     } }, route.key));
+             }) }) }));
+ }
+ function ScreenView({ routeKey, descriptor, options, isPreloaded, preventNativeDismiss, ...lifecycle }) {
+     useUnsupportedOptionsWarning(options, descriptor.route.name);
++    const { colors } = (0, native_1.useTheme)();
+     const headerConfigProps = {
+         title: options.title,
+         hidden: options.headerShown === undefined ? undefined : !options.headerShown,
+         transparent: options.headerTransparent,
+         backButtonHidden: options.headerBackVisible === undefined ? undefined : !options.headerBackVisible,
+     };
+-    return ((0, jsx_runtime_1.jsxs)(experimental_1.Stack.Screen, { activityMode: isPreloaded ? 'detached' : 'attached', screenKey: routeKey, preventNativeDismiss: preventNativeDismiss, ...lifecycle, children: [(0, jsx_runtime_1.jsx)(react_native_1.View, { style: styles.scene, children: descriptor.render() }), (0, jsx_runtime_1.jsx)(experimental_1.Stack.HeaderConfig, { ...headerConfigProps })] }));
++    return ((0, jsx_runtime_1.jsxs)(experimental_1.Stack.Screen, { activityMode: isPreloaded ? 'detached' : 'attached', screenKey: routeKey, preventNativeDismiss: preventNativeDismiss, ...lifecycle, children: [(0, jsx_runtime_1.jsx)(react_native_1.View, { style: [styles.scene, { backgroundColor: colors.background }], children: descriptor.render() }), headerConfigProps.hidden === true ? null : (0, jsx_runtime_1.jsx)(experimental_1.Stack.HeaderConfig, { ...headerConfigProps })] }));
+ }
+ // Composition components like <Stack.Screen.Title> and <Stack.Header> emit benign
+ // extras such as `headerTitleStyle: {}`, `headerLargeTitle: undefined`, or
+@@ -153,7 +162,6 @@ const styles = react_native_1.StyleSheet.create({
+     },
+     scene: {
+         flex: 1,
+-        backgroundColor: 'white',
+     },
+ });
+ //# sourceMappingURL=ExperimentalStackView.js.map

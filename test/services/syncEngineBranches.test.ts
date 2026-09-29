@@ -18,6 +18,19 @@ import { syncAllChats, syncChatMessages } from '@/services/sync/engine';
 import type { SyncApi } from '@/services/sync/types';
 import { createTestDb } from '../support/testDb';
 
+const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
+const rcsChatGuid = (sourceId: string): string =>
+  `RCS;-;g1.${RCS_PROVIDER_EPOCH}.${Buffer.from(sourceId).toString('base64url')}`;
+const rcsMessageGuid = (sourceId: string): string =>
+  `rcs-g1.${RCS_PROVIDER_EPOCH}.${Buffer.from(sourceId).toString('base64url')}`;
+const rcsAttachmentGuid = (messageId: string, mediaId: string): string =>
+  `rcs-media-g1.${RCS_PROVIDER_EPOCH}.${Buffer.from(messageId).toString('base64url')}.${Buffer.from(mediaId).toString('base64url')}`;
+const RCS_PROVIDER_INFO = {
+  rcs: true,
+  supports_rcs_epoch_qualified_ids: true,
+  rcs_provider_epoch: RCS_PROVIDER_EPOCH,
+} as const;
+
 /** A SyncApi whose message/chat fetchers are provided; unused ones are inert stubs. */
 function api(over: Partial<SyncApi>): SyncApi {
   return {
@@ -176,19 +189,22 @@ describe('syncChatMessages — on-demand backfill', () => {
 
   it('promotes an optimistic RCS picture in place on the sync path (local_path preserved, no dup)', async () => {
     const { db } = await createTestDb();
+    const chatGuid = rcsChatGuid('picture-chat');
+    const messageGuid = rcsMessageGuid('picture-message');
+    const attachmentGuid = rcsAttachmentGuid('picture-message', 'picture-media');
     const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
     await upsertChats(
       db,
-      [Chat.parse({ guid: 'cRcs', participants: [{ address: 'a@x.com' }] })],
+      [Chat.parse({ guid: chatGuid, participants: [{ address: 'a@x.com' }] })],
       hm,
     );
-    const chatId = (await getChatIdByGuid(db, 'cRcs'))!;
+    const chatId = (await getChatIdByGuid(db, chatGuid))!;
     // Optimistic outgoing picture (RCS: materialized by sync, not the live echo).
     await insertOutgoingAttachment(db, {
       tempGuid: 'temp-rcs',
       attachmentGuid: 'temp-rcs-att',
       chatId,
-      chatGuid: 'cRcs',
+      chatGuid,
       localPath: 'file:///rcs.jpg',
       mimeType: 'image/jpeg',
       transferName: 'rcs.jpg',
@@ -203,40 +219,53 @@ describe('syncChatMessages — on-demand backfill', () => {
           offset === 0
             ? [
                 Message.parse({
-                  guid: 'rcs-real',
+                  guid: messageGuid,
+                  providerEpoch: RCS_PROVIDER_EPOCH,
                   isFromMe: true,
                   dateCreated: 1000,
-                  attachments: [{ guid: 'rcs-real-att', mimeType: 'image/jpeg' }],
+                  attachments: [
+                    {
+                      guid: attachmentGuid,
+                      providerEpoch: RCS_PROVIDER_EPOCH,
+                      mimeType: 'image/jpeg',
+                    },
+                  ],
                 }),
               ]
             : [],
       }),
-      'cRcs',
+      chatGuid,
+      { rcsProviderInfo: RCS_PROVIDER_INFO },
     );
     expect(total).toBe(1);
     const msgs = (await listMessages(db, chatId)) as Array<{ id: number; guid: string }>;
-    expect(msgs.map((m) => m.guid)).toEqual(['rcs-real']); // temp promoted in place, no duplicate
+    expect(msgs.map((m) => m.guid)).toEqual([messageGuid]); // temp promoted in place, no duplicate
     const atts = (await listAttachmentsByMessageIds(db, [msgs[0]!.id])).get(msgs[0]!.id)!;
-    expect(atts[0]!.guid).toBe('rcs-real-att');
+    expect(atts[0]!.guid).toBe(attachmentGuid);
     expect(atts[0]!.localPath).toBe('file:///rcs.jpg'); // on-disk image kept, no re-download
   });
 
   it('rolls back an RCS picture reconcile retired mid-owner, then lets a fresh sync retry', async () => {
     const { db, raw } = await createTestDb();
+    const chatGuid = rcsChatGuid('guarded-picture-chat');
     const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
     await upsertChats(
       db,
-      [Chat.parse({ guid: 'cGuardedRcs', participants: [{ address: 'a@x.com' }] })],
+      [Chat.parse({ guid: chatGuid, participants: [{ address: 'a@x.com' }] })],
       hm,
     );
-    const chatId = (await getChatIdByGuid(db, 'cGuardedRcs'))!;
+    const chatId = (await getChatIdByGuid(db, chatGuid))!;
     const tempGuid = 'temp-guarded-rcs';
-    const realGuid = 'rcs-real-guarded';
+    const realGuid = rcsMessageGuid('guarded-picture-message');
+    const realAttachmentGuid = rcsAttachmentGuid(
+      'guarded-picture-message',
+      'guarded-picture-media',
+    );
     await insertOutgoingAttachment(db, {
       tempGuid,
       attachmentGuid: `${tempGuid}-att`,
       chatId,
-      chatGuid: 'cGuardedRcs',
+      chatGuid,
       localPath: 'file:///guarded-rcs.jpg',
       mimeType: 'image/jpeg',
       transferName: 'guarded-rcs.jpg',
@@ -246,9 +275,16 @@ describe('syncChatMessages — on-demand backfill', () => {
     const original = (await listMessages(db, chatId)) as Array<{ id: number; guid: string }>;
     const echo = Message.parse({
       guid: realGuid,
+      providerEpoch: RCS_PROVIDER_EPOCH,
       isFromMe: true,
       dateCreated: 1000,
-      attachments: [{ guid: `${realGuid}-att`, mimeType: 'image/jpeg' }],
+      attachments: [
+        {
+          guid: realAttachmentGuid,
+          providerEpoch: RCS_PROVIDER_EPOCH,
+          mimeType: 'image/jpeg',
+        },
+      ],
     });
     const syncApi = api({
       fetchChatMessages: async (_guid, offset) => (offset === 0 ? [echo] : []),
@@ -282,7 +318,10 @@ describe('syncChatMessages — on-demand backfill', () => {
 
     try {
       await expect(
-        syncChatMessages(db, syncApi, 'cGuardedRcs', { shouldAbort: () => retired }),
+        syncChatMessages(db, syncApi, chatGuid, {
+          shouldAbort: () => retired,
+          rcsProviderInfo: RCS_PROVIDER_INFO,
+        }),
       ).resolves.toBe(0);
 
       expect(triggerRan).toBe(true);
@@ -310,7 +349,10 @@ describe('syncChatMessages — on-demand backfill', () => {
       raw.exec('DROP TRIGGER retire_sync_chat_attachment');
       retired = false;
       await expect(
-        syncChatMessages(db, syncApi, 'cGuardedRcs', { shouldAbort: () => retired }),
+        syncChatMessages(db, syncApi, chatGuid, {
+          shouldAbort: () => retired,
+          rcsProviderInfo: RCS_PROVIDER_INFO,
+        }),
       ).resolves.toBe(1);
 
       expect(queueCount()).toBe(0);
@@ -331,7 +373,7 @@ describe('syncChatMessages — on-demand backfill', () => {
       )!;
       expect(committedAttachments).toEqual([
         expect.objectContaining({
-          guid: `${realGuid}-att`,
+          guid: realAttachmentGuid,
           localPath: 'file:///guarded-rcs.jpg',
         }),
       ]);

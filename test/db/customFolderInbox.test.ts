@@ -223,6 +223,29 @@ describe('listCustomFolderInboxPageWithinTransaction', () => {
     expect(oneCharacterFallsBackToBrowse).toMatchObject({ matchingCount: 6, hasMore: true });
   });
 
+  it('keeps commas inside one participant name while searching a folder', async () => {
+    const t = await createTestDb();
+    await seedChat(t, 'comma-name', {
+      displayName: 'chat123',
+      participant: 'doe@example.test',
+      messages: [{ guid: 'comma-message', text: 'ordinary', date: 100 }],
+    });
+    t.raw
+      .prepare("UPDATE handles SET display_name = 'Doe,Jane' WHERE address = 'doe@example.test'")
+      .run();
+    const folder = await createCustomFolder(t.db, 'Comma names');
+    await replaceCustomFolderMembership(t.db, folder.id, ['comma-name']);
+
+    await expect(loadFolderPage(t, folder.id, 10, 'doe,jane')).resolves.toMatchObject({
+      matchingCount: 1,
+      rows: [{ guid: 'comma-name' }],
+    });
+    await expect(loadFolderPage(t, folder.id, 10, 'doe, jane')).resolves.toMatchObject({
+      matchingCount: 0,
+      rows: [],
+    });
+  });
+
   it('normalizes Unicode and truncates search input at 128 code points', async () => {
     const t = await createTestDb();
     await seedChat(t, 'normalized-title', {

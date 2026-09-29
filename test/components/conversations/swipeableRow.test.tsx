@@ -144,13 +144,20 @@ describe('SwipeableRow', () => {
     resetKey = 'chat-1',
     left,
     right,
+    interactionDisabled,
   }: {
     resetKey?: string;
     left?: SwipeAction[];
     right?: SwipeAction[];
+    interactionDisabled?: boolean;
   } = {}) {
     return renderWithTheme(
-      <SwipeableRow resetKey={resetKey} left={left} right={right}>
+      <SwipeableRow
+        resetKey={resetKey}
+        left={left}
+        right={right}
+        interactionDisabled={interactionDisabled}
+      >
         <Text>row body</Text>
       </SwipeableRow>,
     );
@@ -199,6 +206,22 @@ describe('SwipeableRow', () => {
     expect(onPin).toHaveBeenCalledTimes(1);
     expect(onDelete).not.toHaveBeenCalled();
     expect(onArchive).toHaveBeenCalledTimes(1);
+  });
+
+  it('mounts the complete action tree but refuses gestures and actions when interaction is disabled', async () => {
+    const onDelete = jest.fn();
+    await mount({
+      interactionDisabled: true,
+      right: [action({ key: 'delete', label: 'Delete', onPress: onDelete })],
+    });
+
+    expect(screen.getByLabelText('Delete')).toBeDisabled();
+    expect(config().onMoveShouldSetPanResponder(EVENT, gesture(60, 2))).toBe(false);
+    expect(config().onMoveShouldSetPanResponderCapture(EVENT, gesture(60, 2))).toBe(false);
+    await drive(() => config().onPanResponderMove(EVENT, gesture(-100, 0)));
+    await drive(() => config().onPanResponderRelease(EVENT, gesture(-100, 0)));
+    await drive(() => fireEvent.press(screen.getByLabelText('Delete')));
+    expect(onDelete).not.toHaveBeenCalled();
   });
 
   it('keeps direct movement clamped to the latest action widths with one responder', async () => {

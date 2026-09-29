@@ -61,6 +61,180 @@ describe('contacts matching', () => {
     expect(h.c).not.toBeNull();
   });
 
+  it('leaves an endpoint unlinked when two stable contacts claim the same normalized address', async () => {
+    const { db, raw } = await createTestDb();
+    await upsertHandles(db, [
+      { address: '+15551234567', displayName: 'Server Phone' },
+      { address: 'shared@example.com', displayName: 'Server Email' },
+    ]);
+    await upsertContacts(db, [
+      contact({
+        sourceId: 'phone-us',
+        displayName: 'US Contact',
+        phones: ['+1 (555) 123-4567'],
+      }),
+      contact({
+        sourceId: 'phone-gb',
+        displayName: 'GB Contact',
+        phones: ['+44 555 123 4567'],
+      }),
+      contact({
+        sourceId: 'email-one',
+        displayName: 'Email One',
+        emails: ['Shared@Example.com'],
+      }),
+      contact({
+        sourceId: 'email-two',
+        displayName: 'Email Two',
+        emails: ['shared@example.com'],
+      }),
+    ]);
+
+    expect(await matchContactsToHandles(db)).toBe(0);
+    expect(
+      raw
+        .prepare(
+          'SELECT address, display_name AS name, avatar, contact_id AS contactId FROM handles ORDER BY address',
+        )
+        .all(),
+    ).toEqual([
+      {
+        address: '+15551234567',
+        name: 'Server Phone',
+        avatar: null,
+        contactId: null,
+      },
+      {
+        address: 'shared@example.com',
+        name: 'Server Email',
+        avatar: null,
+        contactId: null,
+      },
+    ]);
+  });
+
+  it('clears an old contact presentation when a later full sync proves the endpoint ambiguous', async () => {
+    const { db, raw } = await createTestDb();
+    await upsertHandles(db, [{ address: 'shared@example.com', displayName: 'Server Name' }]);
+    await upsertContacts(db, [
+      contact({
+        sourceId: 'first',
+        displayName: 'First Contact',
+        emails: ['shared@example.com'],
+        avatar: 'file:///first.jpg',
+      }),
+    ]);
+    expect(await matchContactsToHandles(db)).toBe(1);
+
+    await upsertContacts(db, [
+      contact({
+        sourceId: 'first',
+        displayName: 'First Contact',
+        emails: ['shared@example.com'],
+        avatar: 'file:///first.jpg',
+      }),
+      contact({
+        sourceId: 'second',
+        displayName: 'Second Contact',
+        emails: ['SHARED@example.com'],
+        avatar: 'file:///second.jpg',
+      }),
+    ]);
+
+    expect(await matchContactsToHandles(db)).toBe(1);
+    expect(
+      raw
+        .prepare(
+          "SELECT display_name AS name, avatar, contact_id AS contactId FROM handles WHERE address='shared@example.com'",
+        )
+        .get(),
+    ).toEqual({ name: 'Server Name', avatar: null, contactId: null });
+  });
+
+  it('treats overlapping rows for one stable contact source as one presentation owner', async () => {
+    const { db, raw } = await createTestDb();
+    await upsertHandles(db, [{ address: 'same@example.com', displayName: 'Server Name' }]);
+    await upsertContacts(db, [
+      contact({
+        sourceId: 'stable-contact',
+        displayName: 'Old Generation',
+        emails: ['same@example.com'],
+      }),
+      contact({
+        sourceId: 'stable-contact',
+        displayName: 'New Generation',
+        emails: ['SAME@example.com'],
+      }),
+    ]);
+
+    expect(await matchContactsToHandles(db)).toBe(1);
+    expect(
+      raw
+        .prepare(
+          "SELECT display_name AS name, contact_id AS contactId FROM handles WHERE address='same@example.com'",
+        )
+        .get(),
+    ).toEqual({ name: 'New Generation', contactId: expect.any(Number) });
+  });
+
+  it('fails closed when a second claimant is inserted after the unique index read', async () => {
+    const { db, raw } = await createTestDb();
+    await upsertHandles(db, [{ address: 'race@example.com', displayName: 'Server Name' }]);
+    await upsertContacts(db, [
+      contact({ sourceId: 'first', displayName: 'First', emails: ['race@example.com'] }),
+    ]);
+    let inserted = false;
+    const runner: ContactDbTaskRunner = async (task) => {
+      if (!inserted) {
+        inserted = true;
+        raw
+          .prepare(
+            `INSERT INTO contacts (source_id, display_name, phones, emails)
+             VALUES ('second', 'Second', '[]', '["race@example.com"]')`,
+          )
+          .run();
+      }
+      return task();
+    };
+
+    await expect(linkHandlesToContacts(db, ['race@example.com'], runner)).resolves.toBe(0);
+    expect(
+      raw
+        .prepare(
+          "SELECT display_name AS name, contact_id AS contactId FROM handles WHERE address='race@example.com'",
+        )
+        .get(),
+    ).toEqual({ name: 'Server Name', contactId: null });
+  });
+
+  it('treats a contact row without a stable source id as unusable association evidence', async () => {
+    const { db, raw } = await createTestDb();
+    await upsertHandles(db, [{ address: 'legacy@example.com', displayName: 'Server Name' }]);
+    raw
+      .prepare(
+        `INSERT INTO contacts (source_id, display_name, phones, emails)
+         VALUES (NULL, 'Legacy Guess', '[]', '["legacy@example.com"]')`,
+      )
+      .run();
+    const legacy = raw.prepare('SELECT id FROM contacts').get() as { id: number };
+    raw
+      .prepare(
+        `UPDATE handles
+            SET display_name = 'Legacy Guess', avatar = 'file:///legacy.jpg', contact_id = ?
+          WHERE address = 'legacy@example.com'`,
+      )
+      .run(legacy.id);
+
+    expect(await matchContactsToHandles(db)).toBe(1);
+    expect(
+      raw
+        .prepare(
+          "SELECT display_name AS name, avatar, contact_id AS contactId FROM handles WHERE address='legacy@example.com'",
+        )
+        .get(),
+    ).toEqual({ name: 'Server Name', avatar: null, contactId: null });
+  });
+
   it('matches a phone by last-10-digits despite formatting', async () => {
     const { db, raw } = await createTestDb();
     await upsertHandles(db, [{ address: '+15551234567', displayName: '+15551234567' }]);
@@ -573,6 +747,53 @@ describe('contacts account commit boundary', () => {
         )
         .get(),
     ).toEqual({ name: 'Server Name', contactId: null });
+  });
+
+  it('does not clear a valid link for an ambiguous claimant that rolls back', async () => {
+    const { db, raw } = await createTestDb();
+    await upsertHandles(db, [{ address: 'shared@example.com', displayName: 'Server Name' }]);
+    await upsertContacts(db, [
+      contact({ sourceId: 'kept', displayName: 'Kept Contact', emails: ['shared@example.com'] }),
+    ]);
+    await matchContactsToHandles(db);
+    const linked = raw
+      .prepare(
+        "SELECT display_name AS name, contact_id AS contactId FROM handles WHERE address='shared@example.com'",
+      )
+      .get() as { name: string; contactId: number };
+    const neighbour = await holdRollingBackNeighbour(db, () => {
+      raw
+        .prepare(
+          `INSERT INTO contacts (source_id, display_name, phones, emails)
+           VALUES ('rolling-back-rival', 'Rival', '[]', '["shared@example.com"]')`,
+        )
+        .run();
+    });
+
+    let runnerCalls = 0;
+    let writeReached!: () => void;
+    const reached = new Promise<void>((resolve) => {
+      writeReached = resolve;
+    });
+    const runner: ContactDbTaskRunner = async (task) => {
+      runnerCalls += 1;
+      const result = task();
+      if (runnerCalls === 3) writeReached();
+      return result;
+    };
+    const matching = matchContactsToHandles(db, runner);
+    await reached;
+
+    neighbour.release();
+    await expect(neighbour.finished).rejects.toThrow('neighbour rollback');
+    await expect(matching).resolves.toBe(0);
+    expect(
+      raw
+        .prepare(
+          "SELECT display_name AS name, contact_id AS contactId FROM handles WHERE address='shared@example.com'",
+        )
+        .get(),
+    ).toEqual(linked);
   });
 
   it('does not clear a contact link hidden by a rolling-back neighbour', async () => {

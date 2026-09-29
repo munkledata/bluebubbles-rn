@@ -1,15 +1,20 @@
 package expo.modules.gatorboundeddownload
 
 import java.io.File
+import java.io.InputStream
+import java.io.OutputStream
 import java.nio.ByteBuffer
 import java.nio.charset.CharacterCodingException
 import java.nio.charset.CodingErrorAction
 
 internal const val ATTACHMENT_CACHE_DIRECTORY = "attachments"
 internal const val PASTED_INPUT_CACHE_DIRECTORY = "pasted-in"
+internal const val SHARED_INPUT_CACHE_DIRECTORY = "shared-in"
+internal const val SHARED_INPUT_FILES_DIRECTORY = "files"
 internal const val MAX_ATTACHMENT_CACHE_PATH_CHARS = 4096
 internal const val MAX_LEGACY_ATTACHMENT_CACHE_SEGMENT_CHARS = 255
 internal const val MAX_PASTED_ATTACHMENT_BYTES = 128L * 1024 * 1024
+internal const val SHARED_ATTACHMENT_COPY_BUFFER_BYTES = 64 * 1024
 private const val MAX_PASTED_BATCH_FILES = 10
 private const val MEDIA_SEGMENT_PREFIX = "media-"
 private const val MAX_ENCODED_MEDIA_SEGMENT_CHARS = 180
@@ -19,6 +24,8 @@ private const val JS_MAX_SAFE_INTEGER = 9_007_199_254_740_991L
 private val ENCODED_MEDIA_VALUE = Regex("^(?:[A-Za-z0-9_.!~*'()-]|%[0-9A-F]{2})*$")
 private val GENERATION_SEGMENT = Regex("^generation-(?:0|[1-9][0-9]*|unscoped)$")
 private val COMMITTED_PASTE_BATCH = Regex("^(?:0|[1-9][0-9]*)(?:-(?:0|[1-9][0-9]*))?$")
+private val COMMITTED_SHARE_BATCH = Regex("^[0-9]{1,19}-[0-9]{1,19}-[a-f0-9]{16}$")
+private val COMMITTED_SHARE_FILE = Regex("^[0-9]{2}-[A-Za-z0-9._-]{1,100}$")
 
 /**
  * Canonicalize only ancestors of a native-fixed root, never the root entry itself.
@@ -204,6 +211,86 @@ internal fun requireOwnedPastedAttachment(root: File, candidate: File): File {
     "Pasted attachment is not in its batch"
   }
   return absoluteCandidate
+}
+
+/** Resolve one exact file from an atomically committed owned ACTION_SEND batch. */
+internal fun requireOwnedSharedAttachment(root: File, candidate: File): File {
+  val canonicalRoot = canonicalOwnedRoot(root, "Shared-input files root")
+  require(canonicalRoot.isDirectory) { "Shared-input files root is unavailable" }
+
+  val absoluteCandidate = candidate.absoluteFile
+  require(absoluteCandidate.path.length <= MAX_ATTACHMENT_CACHE_PATH_CHARS) {
+    "Shared attachment path is too long"
+  }
+  val canonicalTarget = canonicalOwnedDescendant(
+    root,
+    canonicalRoot,
+    candidate,
+    "Shared attachment path",
+  )
+  val canonicalBatch = canonicalTarget.parentFile
+    ?: throw IllegalArgumentException("Shared attachment has no batch")
+  require(
+    canonicalBatch.parentFile?.path == canonicalRoot.path &&
+      COMMITTED_SHARE_BATCH.matches(canonicalBatch.name),
+  ) {
+    "Shared attachment is outside a committed batch"
+  }
+  require(
+    canonicalBatch.isDirectory &&
+      canonicalTarget.isFile &&
+      COMMITTED_SHARE_FILE.matches(canonicalTarget.name),
+  ) {
+    "Shared attachment is not an owned regular file"
+  }
+
+  val rawBatch = absoluteCandidate.parentFile
+    ?: throw IllegalArgumentException("Shared attachment has no raw batch")
+  val siblings = rawBatch.listFiles()
+    ?: throw IllegalArgumentException("Shared attachment batch is unreadable")
+  require(siblings.isNotEmpty() && siblings.size <= MAX_PASTED_BATCH_FILES) {
+    "Shared attachment batch has an invalid file count"
+  }
+  siblings.forEach { raw ->
+    val sibling = canonicalOwnedDescendant(root, canonicalRoot, raw, "Shared attachment sibling")
+    require(
+      sibling.parentFile?.path == canonicalBatch.path &&
+        sibling.isFile &&
+        COMMITTED_SHARE_FILE.matches(sibling.name),
+    ) { "Shared attachment batch contains an invalid file" }
+  }
+  require(siblings.any { it.absoluteFile.path == absoluteCandidate.path }) {
+    "Shared attachment is not in its batch"
+  }
+  return absoluteCandidate
+}
+
+/** Copy exactly the manifest-owned byte count without consuming or deleting the source. */
+internal fun copyExactSharedAttachment(
+  input: InputStream,
+  output: OutputStream,
+  expectedBytes: Long,
+  bufferBytes: Int = SHARED_ATTACHMENT_COPY_BUFFER_BYTES,
+): Long {
+  require(expectedBytes in 1..MAX_PASTED_ATTACHMENT_BYTES) {
+    "Shared attachment byte count is invalid"
+  }
+  require(bufferBytes > 0) { "Shared attachment copy buffer is invalid" }
+  val buffer = ByteArray(bufferBytes)
+  var copied = 0L
+  while (true) {
+    val remaining = expectedBytes - copied
+    val readLimit = minOf(buffer.size.toLong(), remaining + 1L).toInt()
+    val read = input.read(buffer, 0, readLimit)
+    if (read < 0) break
+    if (read == 0) continue
+    require(read.toLong() <= remaining) { "Shared attachment grew during adoption" }
+    output.write(buffer, 0, read)
+    copied += read.toLong()
+  }
+  require(copied == expectedBytes) { "Shared attachment size changed during adoption" }
+  output.flush()
+  return copied
 }
 
 /** Remove only the two exact empty current-layout parents created for one reserved file. */

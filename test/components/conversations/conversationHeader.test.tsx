@@ -5,7 +5,7 @@
  *   - the SERVICE badge derives from the chat guid prefix via resolveChatService (RCS/SMS/iMessage);
  *   - the remaining affordances fire the right navigation side-effects: back → router.back();
  *     the centered avatar/title → router.push('/chat-settings/<encoded guid>'); the calendar
- *     button → router.push('/scheduled');
+ *     button → router.push('/scheduled') and exposes this chat's pending count;
  *   - retired FaceTime controls stay absent even when stale server data advertises Private API;
  *   - when the header row hasn't loaded (data null) no avatar renders and the details a11y label
  *     falls back to "Chat details".
@@ -23,6 +23,7 @@ import React from 'react';
 import { act, fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
 import { ConversationHeader } from '@ui/conversations/ConversationHeader';
 import type { ChatHeaderRow } from '@db/repositories';
+import { useScheduledMessageCount } from '@features/conversations/useScheduledMessageCount';
 import { useSessionStore } from '@state/sessionStore';
 
 const mockPush = jest.fn();
@@ -30,6 +31,10 @@ const mockBack = jest.fn();
 let mockHeaderData: ChatHeaderRow | null = null;
 
 jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush, back: mockBack }) }));
+
+jest.mock('@features/conversations/useScheduledMessageCount', () => ({
+  useScheduledMessageCount: jest.fn(),
+}));
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
@@ -56,6 +61,9 @@ const PRIVATE_GROUP_ADDRESS_A = 'private-header-group-address-a@example.test';
 const PRIVATE_GROUP_ADDRESS_B = '+15559876543';
 const PRIVATE_GROUP_AVATAR_A = 'file:///private-header-group-avatar-a-808d.jpg';
 const PRIVATE_GROUP_AVATAR_B = 'file:///private-header-group-avatar-b-d197.jpg';
+const mockUseScheduledMessageCount = useScheduledMessageCount as jest.MockedFunction<
+  typeof useScheduledMessageCount
+>;
 
 function retainConfiguredPress(node: { props: Record<string, unknown> }): () => void {
   const responder = node.props.onStartShouldSetResponder;
@@ -98,6 +106,8 @@ beforeEach(() => {
   useSessionStore.setState({ serverInfo: { version: 'test', private_api: true } as any });
   mockPush.mockClear();
   mockBack.mockClear();
+  mockUseScheduledMessageCount.mockClear();
+  mockUseScheduledMessageCount.mockReturnValue(0);
   mockHeaderData = null;
 });
 
@@ -332,8 +342,57 @@ describe('ConversationHeader — affordances', () => {
     await renderWithTheme(
       <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
     );
+    expect(screen.queryByText('0')).toBeNull();
     await fireEvent.press(screen.getByLabelText('View scheduled messages'));
     await waitFor(() => expect(mockPush).toHaveBeenCalledWith('/scheduled'));
+  });
+
+  it('shows the conversation pending count in the calendar badge and accessibility label', async () => {
+    mockHeaderData = makeHeader();
+    mockUseScheduledMessageCount.mockReturnValue(3);
+
+    await renderWithTheme(
+      <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
+    );
+
+    expect(mockUseScheduledMessageCount).toHaveBeenCalledWith(mockHeaderData.guid);
+    expect(screen.getByText('3')).toBeTruthy();
+    expect(
+      screen.getByRole('button', {
+        name: 'View 3 scheduled messages for this conversation',
+      }),
+    ).toBeEnabled();
+  });
+
+  it('uses singular wording for one scheduled message', async () => {
+    mockHeaderData = makeHeader();
+    mockUseScheduledMessageCount.mockReturnValue(1);
+
+    await renderWithTheme(
+      <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
+    );
+
+    expect(
+      screen.getByRole('button', {
+        name: 'View 1 scheduled message for this conversation',
+      }),
+    ).toBeEnabled();
+  });
+
+  it('caps the visual badge at 99+ while announcing the exact count', async () => {
+    mockHeaderData = makeHeader();
+    mockUseScheduledMessageCount.mockReturnValue(120);
+
+    await renderWithTheme(
+      <ConversationHeader chatGuid={mockHeaderData.guid} data={mockHeaderData} />,
+    );
+
+    expect(screen.getByText('99+')).toBeTruthy();
+    expect(
+      screen.getByRole('button', {
+        name: 'View 120 scheduled messages for this conversation',
+      }),
+    ).toBeEnabled();
   });
 
   it('never renders retired FaceTime controls when stale server data advertises Private API', async () => {

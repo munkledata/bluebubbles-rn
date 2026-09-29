@@ -169,7 +169,7 @@ export default function SettingsScreen(): React.JSX.Element {
     theme: 'theme appearance oled dark gator custom presets colors',
     contacts: 'contacts sync names photos address book',
     general:
-      'general app lock biometric secure screen screenshot recording capture reminders backup find my location',
+      'general app lock biometric secure screen screenshot recording capture reminders backup find my location facetime link call audio video',
     messaging: 'messaging typing indicators read receipts rcs privacy',
     conversation: 'conversation message view send with return enter delivery timestamps',
     chatlist:
@@ -182,7 +182,7 @@ export default function SettingsScreen(): React.JSX.Element {
     privacy:
       'privacy encryption key rotate security storage files plaintext attachments cache logs wallpaper backups app private error reports crashes diagnostics consent share download integrity',
     server:
-      'server connection live updates connecting reconnecting offline retry management restart logs statistics health diagnostics retired features rcs find my keys push uptime alerts',
+      'server connection live updates connecting reconnecting offline retry management restart logs statistics health diagnostics retired features rcs find my keys push uptime alerts imessage account aliases',
     about:
       'about app version build server version macos disconnect forget app logs debug diagnostics privacy data storage legal license notices third-party internal testing',
   } as const;
@@ -201,7 +201,7 @@ export default function SettingsScreen(): React.JSX.Element {
       // reminders, and unsent work remain local. `clearLocalCache` removes account A's device copy.
       'Forget this server and clear stored credentials?\n\n' +
         'Conversations, messages and downloaded attachments are deleted from this device and re-sync when you reconnect.\n\n' +
-        'Pins, mutes, custom chat names, chat themes and custom folders are removed from this device; a compatible encrypted backup made first can restore them. Wallpapers, saved reminders, scheduled messages, unsent messages and drafts are deleted permanently. Exported files and server backup slots are not deleted.',
+        'Pins, mutes, custom chat names, chat themes, custom folders and device-owned contact colors are removed from this device; a compatible encrypted backup made first can restore them. Wallpapers, saved reminders, scheduled messages, unsent messages and drafts are deleted permanently. Exported files and server backup slots are not deleted.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -560,6 +560,19 @@ export default function SettingsScreen(): React.JSX.Element {
               chevron={false}
               onPress={() => router.push('/findmy')}
             />
+            {visibleOrigin &&
+            (visibleServerInfo?.supports_facetime_link_creation === true ||
+              visibleServerInfo?.supports_facetime_call_start === true) ? (
+              <NavRow
+                label="FaceTime"
+                color="label"
+                chevron={false}
+                onPress={() => {
+                  if (accountCurrent) router.push('/facetime');
+                }}
+                disabled={!accountCurrent}
+              />
+            ) : null}
           </SettingsSection>
         )}
 
@@ -739,6 +752,13 @@ export default function SettingsScreen(): React.JSX.Element {
             />
             <NavRow label="Server Management…" onPress={() => router.push('/server-management')} />
             <NavRow label="Server Health…" onPress={() => router.push('/server-health')} />
+            {visibleServerInfo?.supports_imessage_account_status === true && (
+              <NavRow
+                label="iMessage Account…"
+                accessibilityLabel="View iMessage account"
+                onPress={() => router.push('/account')}
+              />
+            )}
           </SettingsSection>
         )}
 

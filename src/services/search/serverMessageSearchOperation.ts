@@ -27,7 +27,28 @@ function toAdoptableServerHit(message: Message): Message | null {
   const chat = message.chats?.[0];
   // The Mac endpoint searches chat.db only. Refuse an unexpected RCS sidecar result so the UI's
   // stated scope remains true and a malformed response cannot create a cross-service chat shell.
-  if (!message.guid || !chat?.guid || chat.guid.startsWith('RCS;-;')) return null;
+  const exposesRcsNamespace =
+    message.guid.toLowerCase().startsWith('rcs-') ||
+    message.chatGuid?.toLowerCase().startsWith('rcs;-;') === true ||
+    message.associatedMessageGuid?.toLowerCase().startsWith('rcs-') === true ||
+    message.providerEpoch != null ||
+    (message.chats ?? []).some(
+      (candidate) =>
+        candidate.guid.toLowerCase().startsWith('rcs;-;') || candidate.providerEpoch != null,
+    ) ||
+    (message.attachments ?? []).some(
+      (attachment) =>
+        attachment.guid.toLowerCase().startsWith('rcs-media-') || attachment.providerEpoch != null,
+    );
+  if (
+    !message.guid ||
+    !chat?.guid ||
+    message.chatGuid !== chat.guid ||
+    (message.chats ?? []).some((candidate) => candidate.guid !== chat.guid) ||
+    exposesRcsNamespace
+  ) {
+    return null;
+  }
   // Search needs only the full text, sender and first routable chat. Its server endpoint does not
   // hydrate attachments or participants, but Message is a shared model whose nested collections
   // are otherwise unbounded. Strip every such collection here so an endpoint-impossible response

@@ -1,0 +1,22 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.gator.shareintake'
+version = '0.1.0'
+
+dependencies {
+  testImplementation 'junit:junit:4.13.2'
+}
+
+android {
+  namespace "expo.modules.gatorshareintake"
+  defaultConfig {
+    versionCode 1
+    versionName "0.1.0"
+  }
+  lintOptions {
+    abortOnError false
+  }
+}

@@ -1,5 +1,9 @@
 import { and, eq, isNull, sql } from 'drizzle-orm';
-import { emailKey, handleKey, phoneKey } from '@utils/contactMatch';
+import {
+  contactEmailMatchKey,
+  contactHandleMatchKey,
+  contactPhoneMatchKey,
+} from '@utils/contactMatch';
 import { contacts, handles } from '../schema';
 import {
   type DbCommitGuard,
@@ -188,52 +192,113 @@ export async function searchContactAddresses(
 
 interface ContactMatch {
   id: number;
+  ownerId: string | null;
   displayName: string | null;
   avatar: string | null;
 }
 
+interface ContactBlock {
+  witnesses: ContactMatch[];
+}
+
+interface ContactIndex {
+  matches: Map<string, ContactMatch>;
+  blocked: Map<string, ContactBlock>;
+  hasContacts: boolean;
+  highWater: number;
+}
+
+function addContactIndexClaim(
+  matches: Map<string, ContactMatch>,
+  blocked: Map<string, ContactBlock>,
+  key: string,
+  candidate: ContactMatch,
+): void {
+  if (!key || blocked.has(key)) return;
+  const existing = matches.get(key);
+  if (candidate.ownerId == null) {
+    matches.delete(key);
+    blocked.set(key, { witnesses: existing ? [existing, candidate] : [candidate] });
+    return;
+  }
+  if (!existing || existing.ownerId === candidate.ownerId) {
+    matches.set(key, candidate);
+    return;
+  }
+  matches.delete(key);
+  blocked.set(key, { witnesses: [existing, candidate] });
+}
+
 /**
- * Build an address-key → contact index from the local contacts table (phones
- * keyed by last-10-digits, emails lowercased). Shared by the full match pass and
- * the opportunistic per-ingestion link.
+ * Build an address-key → contact index from the local contacts table (phones keyed by
+ * last-10-digits, emails lowercased). A key claimed by more than one stable contact source is
+ * deliberately absent from `matches`; immutable witness rows let the full pass safely clear a
+ * previous arbitrary link. Old/new generation rows are first collapsed by stable source id, with
+ * the newest immutable row owning that source's complete endpoint set. A row without a source id
+ * is not valid automatic-association evidence. Shared by the full match pass and the opportunistic
+ * per-ingestion link.
  */
 async function buildContactIndex(
   db: AppDatabase,
   runDbTask: ContactDbTaskRunner = runContactDbTaskDirect,
-): Promise<Map<string, ContactMatch>> {
+): Promise<ContactIndex> {
   const contactRows = await runDbTask<
     Array<{
       id: number;
+      sourceId: string | null;
       displayName: string | null;
       phones: string | null;
       emails: string | null;
       avatar: string | null;
+      highWater: number | null;
     }>
   >(() =>
     db.all<{
       id: number;
+      sourceId: string | null;
       displayName: string | null;
       phones: string | null;
       emails: string | null;
       avatar: string | null;
-    }>(sql`SELECT id, display_name AS displayName, phones, emails, avatar FROM contacts`),
+      highWater: number | null;
+    }>(
+      sql`SELECT id, source_id AS sourceId, display_name AS displayName, phones, emails, avatar,
+                 (SELECT MAX(id) FROM contacts) AS highWater
+            FROM contacts
+           ORDER BY id ASC`,
+    ),
   );
 
-  const index = new Map<string, ContactMatch>();
-  for (const c of contactRows) {
+  const matches = new Map<string, ContactMatch>();
+  const blocked = new Map<string, ContactBlock>();
+  const newestBySource = new Map<string, (typeof contactRows)[number]>();
+  const unidentified: Array<(typeof contactRows)[number]> = [];
+  for (const row of contactRows) {
+    if (row.sourceId?.trim()) newestBySource.set(row.sourceId, row);
+    else unidentified.push(row);
+  }
+  const ownerRows = [...newestBySource.values(), ...unidentified].sort((a, b) => a.id - b.id);
+  for (const c of ownerRows) {
     const phones: string[] = c.phones ? JSON.parse(c.phones) : [];
     const emails: string[] = c.emails ? JSON.parse(c.emails) : [];
-    const val: ContactMatch = { id: c.id, displayName: c.displayName, avatar: c.avatar };
-    for (const p of phones) {
-      const k = phoneKey(p);
-      if (k) index.set(k, val);
-    }
-    for (const e of emails) {
-      const k = emailKey(e);
-      if (k) index.set(k, val);
-    }
+    const candidate: ContactMatch = {
+      id: c.id,
+      ownerId: c.sourceId?.trim() ? c.sourceId : null,
+      displayName: c.displayName,
+      avatar: c.avatar,
+    };
+    const keys = new Set([
+      ...phones.map(contactPhoneMatchKey).filter(Boolean),
+      ...emails.map(contactEmailMatchKey).filter(Boolean),
+    ]);
+    for (const key of keys) addContactIndexClaim(matches, blocked, key, candidate);
   }
-  return index;
+  return {
+    matches,
+    blocked,
+    hasContacts: contactRows.length > 0,
+    highWater: contactRows[0]?.highWater ?? 0,
+  };
 }
 
 /**
@@ -247,6 +312,7 @@ function applyContactMatchWithinTransaction(
   handleId: number,
   match: ContactMatch,
   expectedContactId: number | null,
+  expectedContactHighWater: number,
 ): Promise<boolean> {
   return runInTransactionContext(context, async (db) => {
     if (!match.displayName && !match.avatar) return false;
@@ -269,6 +335,9 @@ function applyContactMatchWithinTransaction(
           // Contact generations are immutable: a row is inserted, then eventually pruned. Its
           // continued existence proves this match was not read from a neighbour that rolled back.
           sql`EXISTS (SELECT 1 FROM ${contacts} WHERE ${contacts.id} = ${match.id})`,
+          // A later inserted row could introduce a second claimant after the index read. Fail
+          // closed until a fresh pass classifies the new high-water mark.
+          sql`(SELECT COALESCE(MAX(${contacts.id}), 0) FROM ${contacts}) = ${expectedContactHighWater}`,
         ),
       )
       .returning({ id: handles.id });
@@ -289,7 +358,7 @@ export async function linkHandlesToContacts(
 ): Promise<number> {
   if (addresses.length === 0) return 0;
   const index = await buildContactIndex(db);
-  if (index.size === 0) return 0;
+  if (index.matches.size === 0) return 0;
 
   // Keep both potentially large reads outside the writer queue. Each actual match below owns one
   // short transaction and rechecks its optimistic contact/handle facts before updating.
@@ -303,13 +372,14 @@ export async function linkHandlesToContacts(
       sql`SELECT id, address FROM handles WHERE address IN (${inList}) AND contact_id IS NULL`,
     );
     for (const handle of handleRows) {
-      const match = index.get(handleKey(handle.address));
+      const match = index.matches.get(contactHandleMatchKey(handle.address));
       if (
         match &&
         (await runDbTask(() =>
           withDbTransaction(
             db,
-            (context) => applyContactMatchWithinTransaction(context, handle.id, match, null),
+            (context) =>
+              applyContactMatchWithinTransaction(context, handle.id, match, null, index.highWater),
             commitGuard,
           ),
         ))
@@ -342,7 +412,7 @@ export async function matchContactsToHandles(
   // linkHandlesToContacts. TRADE-OFF: a user who deletes their ENTIRE address book keeps the old
   // handle names until at least one contact exists again — a stale name is far cheaper than
   // blanking every name on the device.
-  if (index.size === 0) return 0;
+  if (!index.hasContacts) return 0;
 
   const handleRows = await runDbTask<
     Array<{
@@ -363,11 +433,13 @@ export async function matchContactsToHandles(
   );
   let updated = 0;
   for (const h of handleRows) {
-    const match = index.get(handleKey(h.address));
+    const key = contactHandleMatchKey(h.address);
+    const match = index.matches.get(key);
+    const blocked = index.blocked.get(key);
     const wroteMatch = match
       ? await runDbTask(() =>
           withDbTransaction(db, (context) =>
-            applyContactMatchWithinTransaction(context, h.id, match, h.contactId),
+            applyContactMatchWithinTransaction(context, h.id, match, h.contactId, index.highWater),
           ),
         )
       : false;
@@ -380,6 +452,18 @@ export async function matchContactsToHandles(
       const staleContactId = h.contactId;
       const reverted = await runDbTask(() =>
         withDbTransaction(db, async () => {
+          const contactEvidence = blocked
+            ? and(
+                ...blocked.witnesses.map(
+                  (witness) =>
+                    sql`EXISTS (
+                      SELECT 1 FROM ${contacts} WHERE ${contacts.id} = ${witness.id}
+                    )`,
+                ),
+              )
+            : sql`NOT EXISTS (
+                SELECT 1 FROM ${contacts} WHERE ${contacts.id} = ${staleContactId}
+              )`;
           const rows = await db
             .update(handles)
             .set({ displayName: h.serverDisplayName, avatar: null, contactId: null })
@@ -387,9 +471,9 @@ export async function matchContactsToHandles(
               and(
                 eq(handles.id, h.id),
                 eq(handles.contactId, staleContactId),
-                // If this contact reappears after we queue, the missing row came from an
-                // uncommitted delete that rolled back. Preserve the still-valid link.
-                sql`NOT EXISTS (SELECT 1 FROM ${contacts} WHERE ${contacts.id} = ${staleContactId})`,
+                // Preserve a still-valid link after a neighbour's rollback. A rejected key may
+                // clear it only while its immutable ambiguity/invalid-owner witnesses still exist.
+                contactEvidence,
               ),
             )
             .returning({ id: handles.id });
@@ -405,19 +489,26 @@ export async function matchContactsToHandles(
 // ---- Server-avatar backfill (contacts that exist on the Mac but not the phone) --------
 
 /**
- * Handles with NO avatar yet (device sync didn't find a photo) + a non-empty address —
- * candidates for a server-sourced contact avatar. Read-only; never touches device photos.
- * `rowLimit`, when present, is enforced by SQLite before any handle rows are materialized.
+ * Handles with no avatar plus, when `serverAvatarRootUri` is supplied, handles carrying an
+ * app-owned server-avatar path that needs revalidation. Device-contact photos are excluded.
+ * `rowLimit`, when present, is enforced by SQLite before any handle rows are materialized; empty
+ * slots are considered before existing server avatars so revalidation cannot displace new work.
  */
 export async function handlesNeedingAvatar(
   db: AppDatabase,
   rowLimit?: number,
-): Promise<{ id: number; address: string }[]> {
+  serverAvatarRootUri?: string,
+): Promise<{ id: number; address: string; avatar: string | null }[]> {
   if (rowLimit !== undefined && (!Number.isSafeInteger(rowLimit) || rowLimit <= 0)) return [];
-  return db.all<{ id: number; address: string }>(
-    sql`SELECT id, address FROM handles
-        WHERE avatar IS NULL AND address <> ''
-        ORDER BY id ASC
+  const ownedPrefix = serverAvatarRootUri ? `${serverAvatarRootUri.replace(/\/+$/, '')}/` : null;
+  return db.all<{ id: number; address: string; avatar: string | null }>(
+    sql`SELECT id, address, avatar FROM handles
+        WHERE address <> ''
+          AND (
+            avatar IS NULL
+            OR (${ownedPrefix} IS NOT NULL AND instr(avatar, ${ownedPrefix}) = 1)
+          )
+        ORDER BY (avatar IS NOT NULL) ASC, id ASC
         LIMIT ${rowLimit ?? -1}`,
   );
 }
@@ -425,8 +516,9 @@ export async function handlesNeedingAvatar(
 /**
  * Write a server-sourced avatar uri onto a handle (only the photo — not display_name /
  * contact_id, which stay device-contact-owned). Used by the server-avatar backfill for
- * handles a device contact didn't supply a photo for. The null guard is checked again in the
- * write, after the download, so a device-contact photo that arrived meanwhile always wins.
+ * handles a device contact didn't supply a photo for. `expectedAvatar` defaults to null for a new
+ * fill; revalidation may instead replace or clear one exact app-owned path. The compare-and-swap
+ * is checked again after the download, so a device-contact photo that arrived meanwhile wins.
  */
 export async function setHandleServerAvatar(
   db: AppDatabase,
@@ -441,13 +533,16 @@ export async function setHandleServerAvatar(
 export function setHandleServerAvatarWithinTransaction(
   context: DbTransactionContext,
   handleId: number,
-  uri: string,
+  uri: string | null,
+  expectedAvatar: string | null = null,
 ): Promise<boolean> {
   return runInTransactionContext(context, async (db) => {
+    const expected =
+      expectedAvatar == null ? isNull(handles.avatar) : eq(handles.avatar, expectedAvatar);
     const rows = await db
       .update(handles)
       .set({ avatar: uri })
-      .where(and(eq(handles.id, handleId), isNull(handles.avatar)))
+      .where(and(eq(handles.id, handleId), expected))
       .returning({ id: handles.id });
     return rows.length > 0;
   });

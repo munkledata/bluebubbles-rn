@@ -1,4 +1,12 @@
-import { digitsOnly, emailKey, handleKey, phoneKey } from '@utils';
+import {
+  contactEmailMatchKey,
+  contactHandleMatchKey,
+  contactPhoneMatchKey,
+  digitsOnly,
+  emailKey,
+  handleKey,
+  phoneKey,
+} from '@utils';
 
 describe('contactMatch', () => {
   it('digitsOnly strips non-digits', () => {
@@ -22,5 +30,14 @@ describe('contactMatch', () => {
   it('handleKey routes by address type', () => {
     expect(handleKey('a@b.com')).toBe('a@b.com');
     expect(handleKey('+1 555 123 4567')).toBe('5551234567');
+  });
+
+  it('contact match keys separate phone/email namespaces and reject empty values', () => {
+    expect(contactPhoneMatchKey('+1 555 123 4567')).toBe('phone:5551234567');
+    expect(contactEmailMatchKey(' 1234 ')).toBe('email:1234');
+    expect(contactHandleMatchKey('+1 555 123 4567')).toBe('phone:5551234567');
+    expect(contactHandleMatchKey('A@B.COM')).toBe('email:a@b.com');
+    expect(contactPhoneMatchKey('not-a-number')).toBe('');
+    expect(contactEmailMatchKey('   ')).toBe('');
   });
 });

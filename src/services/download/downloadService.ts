@@ -526,11 +526,10 @@ export async function ensureDownloadedOutcome(
       }
       // A row-deletion cancellation can lose the race to a transaction that already COMMITTED.
       // In that case leave the now-owned file in place: the deleting service re-checks the DB and
-      // removes it only if the row deletion itself succeeded. Discarding here would leave a live
-      // row pointing at a missing file when the subsequent delete fails.
+      // removes it only if the row deletion itself succeeded. Provider/account revocation in this
+      // same promise handoff follows the same rule: a won commit transferred file ownership to the
+      // DB, so deleting bytes here would leave a durable local_path pointing at a missing file.
       if (scope && !scope.isCurrent()) {
-        await discard(fetcher, completedPath);
-        completedPath = null;
         return { status: 'stale' };
       }
 

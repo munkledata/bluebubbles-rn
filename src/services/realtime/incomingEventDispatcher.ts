@@ -55,6 +55,7 @@ export interface DevPersistedIncomingEvent {
 }
 
 type PersistenceMode = 'ordinary' | 'locked-fcm-v3';
+type LockedPersistenceGuard = (event: NormalizedEvent) => boolean;
 
 /**
  * One durable-before-effect intake boundary shared by socket, unlocked FCM, and dev injection.
@@ -160,6 +161,7 @@ export class DurableRealtimeDispatcher {
     context: EventDeliveryContext,
     occurrence: EventOccurrenceMetadata,
     receivedAt = this.now(),
+    lockedPersistenceGuard?: LockedPersistenceGuard,
   ): Promise<EnqueueIncomingEventResult | null> {
     if (
       this.options.allowLockedFcmV3PersistWithoutDrain !== true ||
@@ -177,6 +179,7 @@ export class DurableRealtimeDispatcher {
       undefined,
       receivedAt,
       'locked-fcm-v3',
+      lockedPersistenceGuard,
     ).then((admission) => {
       if (!admission || !admission.isCurrent()) return null;
       return admission.result;
@@ -192,6 +195,7 @@ export class DurableRealtimeDispatcher {
     devLeaseToken?: string,
     receivedAt = this.now(),
     persistenceMode: PersistenceMode = 'ordinary',
+    lockedPersistenceGuard?: LockedPersistenceGuard,
   ): Promise<Admission | null> {
     // Claim a FIFO slot before the first await. The tail itself never rejects, so one bad envelope
     // cannot poison every later transport callback.
@@ -236,6 +240,7 @@ export class DurableRealtimeDispatcher {
           capturedOccurrence,
           devLeaseToken,
           persistenceMode,
+          lockedPersistenceGuard,
         );
       } finally {
         // The FIFO protects only normalization/hash/persistence. Required effects may be slow, but
@@ -255,6 +260,7 @@ export class DurableRealtimeDispatcher {
     occurrence?: EventOccurrenceMetadata,
     devLeaseToken?: string,
     persistenceMode: PersistenceMode = 'ordinary',
+    lockedPersistenceGuard?: LockedPersistenceGuard,
   ): Promise<Admission | null> {
     if (this.stopped || (context && !context.isCurrent())) return null;
     // Security eligibility is dynamic (App Lock can engage while SHA-256 or the write mutex is
@@ -267,7 +273,10 @@ export class DurableRealtimeDispatcher {
         !this.stopped &&
         (!context || context.isCurrent()) &&
         (persistenceMode === 'locked-fcm-v3'
-          ? event.type !== 'new-server'
+          ? event.type !== 'new-server' &&
+            (lockedPersistenceGuard
+              ? lockedPersistenceGuard(event)
+              : !this.options.canPersist || this.options.canPersist(event))
           : !this.options.canPersist || this.options.canPersist(event));
       if (!allowed) admissionRevoked = true;
       return allowed;

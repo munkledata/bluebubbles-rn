@@ -1,4 +1,5 @@
 import { z } from 'zod/v4';
+import { isRcsProviderEpoch } from '../rcs/providerIdentity';
 import { Handle } from './handle';
 
 /**
@@ -8,6 +9,8 @@ import { Handle } from './handle';
  */
 export const ChatSummary = z.object({
   guid: z.string(),
+  /** Google pairing generation when this summary owns an RCS message. */
+  providerEpoch: z.string().refine(isRcsProviderEpoch).nullish(),
   originalROWID: z.number().nullish(),
   chatIdentifier: z.string().nullish(),
   displayName: z.string().nullish(),

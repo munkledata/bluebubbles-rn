@@ -5,6 +5,7 @@ import {
   serverSendCapabilityKey,
   type ServerInfo,
 } from '@core/models/serverInfo';
+import { isCurrentRcsChatGuid } from '@core/rcs/providerIdentity';
 import type { MessageTargetServerAuthorization } from '@db/repositories';
 import { DbCommitGuardRejectedError, type DbCommitGuard } from '@db/transaction';
 import { captureSessionTransportLease, useSessionStore } from '@state/sessionStore';
@@ -212,6 +213,15 @@ export async function resolveRcsAttemptOwnership(
     if (capabilitySource?.kind === 'session' && !capabilitySource.publish(info)) {
       throw new DbCommitGuardRejectedError();
     }
+  }
+
+  // A bare `RCS;-;<source id>` survives in local history for display, but it is not a safe remote
+  // target: Google can reuse that source id after a re-pair. The same is true for a qualified id
+  // from an older epoch. Reject before optimistic DB admission or a network/native send starts.
+  if (isRcs && !isCurrentRcsChatGuid(info, chatGuid)) {
+    throw new RcsCapabilityUnavailableError(
+      'This RCS conversation belongs to an unavailable or previous Google pairing.',
+    );
   }
 
   return {

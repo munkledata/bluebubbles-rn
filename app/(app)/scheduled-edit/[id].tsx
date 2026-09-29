@@ -67,6 +67,12 @@ export default function ScheduledEditScreen(): React.JSX.Element {
         const row = await getScheduledById(getDatabase(), schedId);
         if (!accountLease.isCurrent()) return;
         if (row) {
+          if (row.attachmentName) {
+            setLoadError(
+              'File schedules cannot be edited. Cancel this schedule and create a new one.',
+            );
+            return;
+          }
           const nextRecurrence = asRecurrence(row.recurrence);
           setText(row.text);
           setWhen(row.scheduledFor);

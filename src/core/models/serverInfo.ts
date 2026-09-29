@@ -1,15 +1,33 @@
 import { z } from 'zod/v4';
+import { currentRcsProviderEpoch, isRcsProviderEpoch } from '../rcs/providerIdentity';
 
 /** Hard client ceiling even if a malformed server advertises a larger caption allowance. */
 export const MAX_SEND_ATTACHMENT_TEXT_BYTES = 65_536;
 /** The narrow helper-backed attachment slice admits one JPEG, PNG, or PDF up to 10 MiB. */
 export const MAX_IMESSAGE_ATTACHMENT_UPLOAD_BYTES = 10 * 1024 * 1024;
+/** One recorded AAC/MPEG-4 voice note uses the same bounded file budget. */
+export const MAX_IMESSAGE_VOICE_UPLOAD_BYTES = MAX_IMESSAGE_ATTACHMENT_UPLOAD_BYTES;
+/** Existing scheduled-message JSON/store budget permits one smaller file. */
+export const MAX_IMESSAGE_SCHEDULED_ATTACHMENT_BYTES = 512 * 1024;
+/** A group photo is streamed once and capped to match the narrow server route. */
+export const MAX_IMESSAGE_GROUP_PHOTO_BYTES = 20 * 1024 * 1024;
 
 export function isSupportedImessageAttachmentType(mimeType: string, name: string): boolean {
   return (
     (mimeType === 'image/jpeg' && /\.jpe?g$/i.test(name)) ||
     (mimeType === 'image/png' && /\.png$/i.test(name)) ||
     (mimeType === 'application/pdf' && /\.pdf$/i.test(name))
+  );
+}
+
+export function isSupportedImessageVoiceType(mimeType: string, name: string): boolean {
+  return mimeType === 'audio/mp4' && /\.m4a$/i.test(name);
+}
+
+export function isSupportedImessageGroupPhotoType(mimeType: string, name: string): boolean {
+  return (
+    (mimeType === 'image/jpeg' && /\.jpe?g$/i.test(name)) ||
+    (mimeType === 'image/png' && /\.png$/i.test(name))
   );
 }
 
@@ -47,6 +65,10 @@ export const ServerInfo = z
      * older servers keep the legacy temp-guid/content reconciliation path.
      */
     supports_rcs_send_attempt_ownership: z.boolean().nullish(),
+    /** Whether all app-facing RCS ids carry the current persisted Google pairing epoch. */
+    supports_rcs_epoch_qualified_ids: z.boolean().nullish(),
+    /** Opaque current Google pairing epoch; null while the RCS identity is unavailable. */
+    rcs_provider_epoch: z.string().refine(isRcsProviderEpoch).nullable().optional(),
     /**
      * Whether the server can detect message deletions (macOS "Recently Deleted") and emit the
      * `message-deleted` event. Additive; absent/false on older servers, which simply never emit the
@@ -75,8 +97,16 @@ export const ServerInfo = z
     supports_imessage_text_with_attachment: z.boolean().nullish(),
     /** Whether the server exposes the read-only iMessage reachability lookup. */
     supports_imessage_availability: z.boolean().nullish(),
+    /** Read-only status of the Mac's signed-in iMessage account; never authorizes alias changes. */
+    supports_imessage_account_status: z.boolean().nullish(),
+    /** A separately reviewed send-from-alias change with fresh vetted-alias checks and readback. */
+    supports_imessage_alias_change: z.boolean().nullish(),
+    /** Separately gated typing start/stop for a proven existing one-to-one iMessage chat. */
+    supports_imessage_typing: z.boolean().nullish(),
     /** Mark read/unread on a proven existing one-to-one iMessage chat. */
     supports_imessage_read_state: z.boolean().nullish(),
+    /** One recorded M4A voice note to an existing one-to-one iMessage chat. */
+    supports_imessage_voice_upload: z.boolean().nullish(),
     /** Whether the authenticated Messages helper can create one-to-one iMessage chats. */
     supports_imessage_new_chat: z.boolean().nullish(),
     /** One file upload to a proven existing one-to-one iMessage chat. */
@@ -85,15 +115,47 @@ export const ServerInfo = z
     supports_imessage_pdf_attachment_upload: z.boolean().nullish(),
     /** A separate narrow gate for nonblank text sent with that same one-file iMessage upload. */
     supports_imessage_attachment_caption_upload: z.boolean().nullish(),
+    /** Classic tapbacks on a proven existing one-to-one iMessage, independent of broad Private API. */
+    supports_imessage_reactions: z.boolean().nullish(),
+    /** Plain-text reply to exact part zero in a proven existing one-to-one iMessage chat. */
+    supports_imessage_replies: z.boolean().nullish(),
+    /** Plain-text edit of exact part zero in a proven existing one-to-one iMessage chat. */
+    supports_imessage_edit: z.boolean().nullish(),
+    /** Plain-text unsend of exact part zero in a proven existing one-to-one iMessage chat. */
+    supports_imessage_unsend: z.boolean().nullish(),
+    /** Delete one whole stored message from an exact existing iMessage chat on the Mac. */
+    supports_imessage_remote_delete: z.boolean().nullish(),
+    /** One allowlisted bubble/screen effect in a proven existing one-to-one iMessage chat. */
+    supports_imessage_effects: z.boolean().nullish(),
+    /** Rename one exact existing iMessage group through the dedicated helper command. */
+    supports_imessage_group_rename: z.boolean().nullish(),
+    /** Set or remove the photo for one exact existing iMessage group. */
+    supports_imessage_group_photo: z.boolean().nullish(),
+    /** Add one canonical address to one exact existing iMessage group. */
+    supports_imessage_group_participant_add: z.boolean().nullish(),
+    /** Remove one exact existing member from one exact iMessage group. */
+    supports_imessage_group_participant_remove: z.boolean().nullish(),
+    /** Leave one exact existing iMessage group through the dedicated narrow command. */
+    supports_imessage_group_leave: z.boolean().nullish(),
+    /** Create one plain Apple FaceTime bearer link through its dedicated narrow command. */
+    supports_facetime_link_creation: z.boolean().nullish(),
+    /** Start one audio/video FaceTime call to one canonical address. */
+    supports_facetime_call_start: z.boolean().nullish(),
+    /** Answer one exact incoming FaceTime call through its dedicated narrow command. */
+    supports_facetime_call_answer: z.boolean().nullish(),
+    /** Leave one exact FaceTime call through its dedicated narrow command. */
+    supports_facetime_call_leave: z.boolean().nullish(),
+    /** One text send with bounded mention ranges in a proven existing iMessage group. */
+    supports_imessage_mentions: z.boolean().nullish(),
+    /** One text send with bounded formatting ranges in a proven one-to-one iMessage chat. */
+    supports_imessage_formatted_messages: z.boolean().nullish(),
+    /** One foreground-acquired current-location card to a proven one-to-one iMessage chat. */
+    supports_imessage_location: z.boolean().nullish(),
+    /** One small, one-time server-owned iMessage attachment schedule. */
+    supports_imessage_scheduled_attachment: z.boolean().nullish(),
     /** Whether message payloads can carry bounded, exact Apple multipart topology. */
     supports_message_part_topology: z.boolean().nullish(),
-    /**
-     * Whether the server can read/modify the signed-in iMessage account — the `icloud/account`
-     * endpoints (Apple ID, display name, and the send-from alias picker) that require the Private-API
-     * helper. Additive; absent/false on older servers (the route 404s → the screen shows "unsupported").
-     * The app gates the Settings "iMessage Account" row on this. Reflects a LIVE capability (true iff
-     * Private API is on), so it can flip across reconnects — the account screen keeps a 404 fallback.
-     */
+    /** Retired broad iCloud account/alias-control flag; never enables the read-only status screen. */
     supports_icloud_account: z.boolean().nullish(),
     /**
      * Gator RCS bridge enabled (additive; absent/false on older servers). When true the server
@@ -149,15 +211,38 @@ export function retirePrivateApiCapabilities(info: ServerInfo): ServerInfo {
 /** Stable identity for only the server flags that can change outgoing-send safety or encoding. */
 export function serverSendCapabilityKey(info: ServerInfo | null | undefined): string {
   if (!info) return 'unknown';
-  return [
+  const flags = [
     info.rcs === true,
     info.supports_rcs_send_attempt_ownership === true,
+    info.supports_rcs_epoch_qualified_ids === true,
     info.supports_message_part_topology === true,
     info.supports_rcs_text_with_attachment === true,
     info.supports_imessage_attachment_upload === true,
     info.supports_imessage_pdf_attachment_upload === true,
     info.supports_imessage_attachment_caption_upload === true,
+    info.supports_imessage_reactions === true,
+    info.supports_imessage_replies === true,
+    info.supports_imessage_edit === true,
+    info.supports_imessage_unsend === true,
+    info.supports_imessage_remote_delete === true,
+    info.supports_imessage_effects === true,
+    info.supports_imessage_group_rename === true,
+    info.supports_imessage_group_photo === true,
+    info.supports_imessage_group_participant_add === true,
+    info.supports_imessage_group_participant_remove === true,
+    info.supports_imessage_group_leave === true,
+    info.supports_facetime_link_creation === true,
+    info.supports_facetime_call_start === true,
+    info.supports_facetime_call_answer === true,
+    info.supports_facetime_call_leave === true,
+    info.supports_imessage_mentions === true,
+    info.supports_imessage_formatted_messages === true,
+    info.supports_imessage_location === true,
+    info.supports_imessage_scheduled_attachment === true,
+    info.supports_imessage_voice_upload === true,
+    info.supports_send_contact === true,
   ]
     .map(Number)
     .join('');
+  return `${flags}|${currentRcsProviderEpoch(info) ?? ''}`;
 }

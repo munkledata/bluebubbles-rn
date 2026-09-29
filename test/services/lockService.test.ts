@@ -11,6 +11,7 @@ const isDevServer = jest.fn(() => false);
 const vaultGet = jest.fn(async () => null as string | null);
 const vaultSet = jest.fn(async () => undefined);
 const setNativeAppLockEnabled = jest.fn(() => true);
+const clearCurrentShareShortcuts = jest.fn(() => true);
 
 jest.mock('@/services/bootstrap', () => ({ hydrateSession }));
 jest.mock('@/services/realtimeControl', () => ({ pauseRealtime, resumeRealtime }));
@@ -25,6 +26,9 @@ jest.mock('@/services/clients', () => ({
 }));
 jest.mock('@native/screenSecurity', () => ({
   setNativeAppLockEnabled,
+}));
+jest.mock('@/services/shortcuts/shareShortcuts', () => ({
+  clearCurrentShareShortcuts,
 }));
 
 // Mock registration must precede the service import so no native notification module is loaded.
@@ -48,6 +52,7 @@ beforeEach(() => {
   vaultSet.mockReset().mockResolvedValue(undefined);
   vaultGet.mockReset().mockResolvedValue(null);
   setNativeAppLockEnabled.mockReset().mockReturnValue(true);
+  clearCurrentShareShortcuts.mockReset().mockReturnValue(true);
   useLockStore.setState({
     enabled: true,
     locked: true,
@@ -64,7 +69,11 @@ describe('setAppLockEnabled', () => {
 
     await hydrateLock();
 
+    expect(clearCurrentShareShortcuts).toHaveBeenCalledTimes(1);
     expect(setNativeAppLockEnabled).toHaveBeenCalledWith(true);
+    expect(clearCurrentShareShortcuts.mock.invocationCallOrder[0]!).toBeLessThan(
+      setNativeAppLockEnabled.mock.invocationCallOrder[0]!,
+    );
     expect(useLockStore.getState()).toMatchObject({ enabled: true, locked: true, hydrated: true });
   });
 
@@ -80,13 +89,30 @@ describe('setAppLockEnabled', () => {
     expect(useLockStore.getState()).toMatchObject({ enabled: false, locked: false });
   });
 
+  it('refuses to enable App Lock when personalized Direct Share rows cannot be cleared', async () => {
+    useLockStore.setState({ enabled: false, locked: false });
+    clearCurrentShareShortcuts.mockReturnValueOnce(false);
+
+    await expect(setAppLockEnabled(true)).rejects.toThrow(
+      'App Lock requires Direct Share privacy cleanup.',
+    );
+
+    expect(setNativeAppLockEnabled).not.toHaveBeenCalled();
+    expect(vaultSet).not.toHaveBeenCalled();
+    expect(useLockStore.getState()).toMatchObject({ enabled: false, locked: false });
+  });
+
   it('locks the gate and stops an existing realtime connection when enabled', async () => {
     useLockStore.setState({ enabled: false, locked: false });
 
     await setAppLockEnabled(true);
 
     expect(vaultSet).toHaveBeenCalledWith('appLockEnabled', 'true');
+    expect(clearCurrentShareShortcuts).toHaveBeenCalledTimes(1);
     expect(setNativeAppLockEnabled).toHaveBeenCalledWith(true);
+    expect(clearCurrentShareShortcuts.mock.invocationCallOrder[0]!).toBeLessThan(
+      setNativeAppLockEnabled.mock.invocationCallOrder[0]!,
+    );
     expect(setNativeAppLockEnabled.mock.invocationCallOrder[0]!).toBeLessThan(
       vaultSet.mock.invocationCallOrder[0]!,
     );

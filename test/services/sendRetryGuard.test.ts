@@ -235,7 +235,7 @@ describe('retry() — re-sends the QUEUED send, not the bubble', () => {
     expect(raw.prepare('SELECT COUNT(*) c FROM messages').get()).toEqual({ c: 1 });
   });
 
-  it('retires a legacy iMessage contact-card retry without POST', async () => {
+  it('refuses a legacy iMessage contact-card retry without POST or ladder mutation', async () => {
     const { db, raw } = await createTestDb();
     (getDatabase as jest.Mock).mockReturnValue(db);
     const chatId = await seedChat(db);
@@ -249,7 +249,7 @@ describe('retry() — re-sends the QUEUED send, not the bubble', () => {
     });
     raw.prepare("UPDATE messages SET send_state='error', error=502 WHERE guid='temp-card'").run();
 
-    await expect(retry('temp-card')).resolves.toBe('unsendable');
+    await expect(retry('temp-card')).resolves.toBe('unretryable');
 
     expect(posts).toHaveLength(0);
     expect(
@@ -260,11 +260,11 @@ describe('retry() — re-sends the QUEUED send, not the bubble', () => {
     expect(
       raw.prepare("SELECT attempts FROM outgoing_queue WHERE temp_guid='temp-card'").get(),
     ).toEqual({
-      attempts: 5,
+      attempts: 0,
     });
   });
 
-  it('retires a legacy iMessage reply/effect/subject retry without POST', async () => {
+  it('refuses a legacy iMessage reply/effect/subject retry without POST or ladder mutation', async () => {
     const { db, raw } = await createTestDb();
     (getDatabase as jest.Mock).mockReturnValue(db);
     const chatId = await seedChat(db);
@@ -282,7 +282,7 @@ describe('retry() — re-sends the QUEUED send, not the bubble', () => {
     });
     raw.prepare("UPDATE messages SET send_state='error', error=502 WHERE guid='temp-rich'").run();
 
-    await expect(retry('temp-rich')).resolves.toBe('unsendable');
+    await expect(retry('temp-rich')).resolves.toBe('unretryable');
 
     expect(posts).toHaveLength(0);
     expect(
@@ -293,7 +293,7 @@ describe('retry() — re-sends the QUEUED send, not the bubble', () => {
     expect(
       raw.prepare("SELECT attempts FROM outgoing_queue WHERE temp_guid='temp-rich'").get(),
     ).toEqual({
-      attempts: 5,
+      attempts: 0,
     });
   });
 });

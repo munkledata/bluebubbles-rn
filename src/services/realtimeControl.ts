@@ -3,6 +3,11 @@ import { serverApi } from '@core/api';
 import { strictServerOrigin } from '@core/config';
 import { inspectCredentialUpgradeJournal, logger } from '@core/secure';
 import {
+  admitsCurrentRcsEvent,
+  classifyRcsEventAdmission,
+  currentRcsProviderEpoch,
+} from '@core/rcs';
+import {
   captureIncomingEvent,
   snapshotIncomingEvent,
   type EventDeliveryContext,
@@ -17,6 +22,7 @@ import {
 } from '@core/realtime';
 import {
   chatHasKnownSender,
+  getChatGuidByMessageGuid,
   getIncomingEventQueueHealth,
   INCOMING_EVENT_DEPENDENCY_RETRY_MS,
 } from '@db/repositories';
@@ -24,7 +30,7 @@ import type { AppDatabase } from '@db/types';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useLockStore } from '@state/lockStore';
 import { useRcsHealthStore } from '@state/rcsHealthStore';
-import { useSessionStore } from '@state/sessionStore';
+import { sessionAccessors, useSessionStore } from '@state/sessionStore';
 import { useTransportHealthStore } from '@state/transportHealthStore';
 import { useTypingStore } from '@state/typingStore';
 import { isDevServer } from '@utils/isDev';
@@ -40,6 +46,7 @@ import {
   type RealtimePrerequisiteRecoveryOutcome,
 } from './background/realtimePrerequisiteRecovery';
 import { adoptRealtimeHeadlessEffect } from './background/realtimeHeadlessEffects';
+import { resolveAuthorizedRealtimeTransport } from './background/authorizedRealtimeTransport';
 import { ensureDatabase } from './databaseControl';
 import { maybeResumeSync } from './syncControl';
 import { autoDownloadMessageAttachmentsForRealtimeEvent } from './download/autoDownloadAttachments';
@@ -63,6 +70,7 @@ import { TypingEventSink } from './realtime/typingEventSink';
 import { FaceTimeEventSink } from './realtime/faceTimeEventSink';
 import { ServerUrlEventSink } from './realtime/serverUrlEventSink';
 import { RcsAlertEventSink } from './realtime/rcsAlertEventSink';
+import { RcsProviderEpochEventSink } from './realtime/rcsProviderEpochEventSink';
 import { SocketService } from './realtime/socketService';
 import { IncomingEventDrain } from './realtime/incomingEventDrain';
 import { DurableRealtimeDispatcher } from './realtime/incomingEventDispatcher';
@@ -481,6 +489,7 @@ function canPersistRealtimeEvent(event: NormalizedEvent): boolean {
     });
     return false;
   }
+  if (classifyRcsEventAdmission(sessionAccessors.getServerInfo(), event) === 'stale') return false;
   if (event.type !== 'new-server') return true;
   logger.warn('[realtime] kept new-server event out of durable persistence');
   return false;
@@ -491,137 +500,158 @@ function canPersistRealtimeEvent(event: NormalizedEvent): boolean {
 // events to UI state; inner layer writes the DB (source of truth) then notifies.
 let realtimeSinkInstance: EventSink | null = null;
 function realtimeSink(db: AppDatabase, accountGeneration: number): EventSink {
-  realtimeSinkInstance ??= new ServerUrlEventSink(
-    new RcsAlertEventSink(
-      new FaceTimeEventSink(
-        new TypingEventSink(
-          new GroupEventSideEffectSink(
-            new NotifyingEventSink(
-              new DbEventSink(
-                db,
-                async (messageId, source, context) => {
-                  if (source === 'fcm' && context) {
-                    if (context.generation !== accountGeneration) return;
-                    const adoption = adoptRealtimeHeadlessEffect(
-                      accountGeneration,
-                      `auto-download:${messageId}`,
-                      async (lifetime) => {
-                        const effectIsCurrent = (): boolean =>
-                          lifetime.isCurrent() && !realtimeIntakeLocked();
-                        if (!effectIsCurrent()) return;
-                        const outcome = await autoDownloadMessageAttachmentsForRealtimeEvent(
-                          db,
-                          messageId,
-                          accountGeneration,
-                          {
-                            isEffectCurrent: effectIsCurrent,
-                            // expo-media-library exposes no abort signal. Keep a killed-process
-                            // owner strictly bounded by persisting only the app-cache copy.
-                            allowExternalMediaSave: false,
-                          },
-                        );
-                        if (effectIsCurrent()) presentAutoDownloadOutcome(outcome);
-                      },
-                    );
-                    if (adoption.status === 'adopted') {
-                      await adoption.task;
-                      return;
+  realtimeSinkInstance ??= new RcsProviderEpochEventSink(
+    new ServerUrlEventSink(
+      new RcsAlertEventSink(
+        new FaceTimeEventSink(
+          new TypingEventSink(
+            new GroupEventSideEffectSink(
+              new NotifyingEventSink(
+                new DbEventSink(
+                  db,
+                  async (messageId, source, context) => {
+                    // The durable receipt itself can settle while a deliberately adopted download
+                    // continues. Retain only the provider identity from that receipt, and latch its
+                    // first revocation so an A -> B -> A re-pair cannot reopen native/network work.
+                    let providerRevoked = false;
+                    const providerIsCurrent = (): boolean => {
+                      if (providerRevoked) return false;
+                      const current = context?.isProviderCurrent?.() ?? true;
+                      if (!current) providerRevoked = true;
+                      return current;
+                    };
+                    if (source === 'fcm' && context) {
+                      if (context.generation !== accountGeneration) return;
+                      const adoption = adoptRealtimeHeadlessEffect(
+                        accountGeneration,
+                        `auto-download:${messageId}`,
+                        async (lifetime) => {
+                          const effectIsCurrent = (): boolean =>
+                            lifetime.isCurrent() && !realtimeIntakeLocked() && providerIsCurrent();
+                          if (!effectIsCurrent()) return;
+                          const outcome = await autoDownloadMessageAttachmentsForRealtimeEvent(
+                            db,
+                            messageId,
+                            accountGeneration,
+                            {
+                              isEffectCurrent: effectIsCurrent,
+                              // expo-media-library exposes no abort signal. Keep a killed-process
+                              // owner strictly bounded by persisting only the app-cache copy.
+                              allowExternalMediaSave: false,
+                            },
+                          );
+                          if (effectIsCurrent()) presentAutoDownloadOutcome(outcome);
+                        },
+                      );
+                      if (adoption.status === 'adopted') {
+                        await adoption.task;
+                        return;
+                      }
+                      // A matching callback exists but has expired/revoked. Never escape its bound by
+                      // capturing a fresh detached lease; a later foreground/manual path can fetch.
+                      if (adoption.status === 'rejected') return;
+                      // The collection can already have closed and disappeared before this late DB
+                      // continuation reaches adoption. Recheck its originating callback authority
+                      // before the ordinary detached fallback captures a fresh account lease.
+                      if (!context.isCurrent()) return;
                     }
-                    // A matching callback exists but has expired/revoked. Never escape its bound by
-                    // capturing a fresh detached lease; a later foreground/manual path can fetch.
-                    if (adoption.status === 'rejected') return;
-                    // The collection can already have closed and disappeared before this late DB
-                    // continuation reaches adoption. Recheck its originating callback authority
-                    // before the ordinary detached fallback captures a fresh account lease.
-                    if (!context.isCurrent()) return;
-                  }
-                  const lease = captureRealtimeDeliveryLease();
-                  if (!lease.isCurrent() || lease.generation !== accountGeneration) return;
-                  const outcome = await autoDownloadMessageAttachmentsForRealtimeEvent(
-                    db,
-                    messageId,
-                    accountGeneration,
-                  );
-                  if (lease.isCurrent()) presentAutoDownloadOutcome(outcome);
-                },
-                async (context) => {
-                  if (!context?.isCurrent()) return;
-                  const attachmentCacheScope = createAttachmentCacheAccountScope(context);
-                  await attachmentCacheCoordinator.retireInactiveEntries(db, {
-                    scope: attachmentCacheScope,
-                  });
-                  await attachmentCacheCoordinator.drainDueRetirements(db, {
-                    scope: attachmentCacheScope,
-                  });
-                },
-                (chatGuid, context) =>
-                  requestRealtimeRecovery(
-                    db,
-                    chatGuid ? { kind: 'sync-chat', chatGuid } : { kind: 'sync-account' },
-                    context,
-                    true,
-                  ),
-              ),
-              db,
-              buildMessageIntents,
-              async (intent, context) => {
-                if (context && !context.isCurrent()) return;
-                // Honor the global "Message Notifications" toggle (message-kind only; calls/reminders
-                // still post). Gated here (not in the pure buildMessageIntents) so the Node tests don't
-                // pull the kv-backed store — and the DB is still written regardless.
-                if (
-                  intent.kind === 'message' &&
-                  !(await prepareMessageNotificationSettings(context))
-                ) {
-                  return;
-                }
-                const featureSettings = useFeatureSettingsStore.getState();
-                if (
-                  intent.kind === 'message' &&
-                  !shouldPresentMessageNotification(featureSettings)
-                ) {
-                  return;
-                }
-                // "Filter Unknown Senders": a chat with no contact-matched participant notifies
-                // silently (DB/badge only) when the filter is on — parity with the old app's muted
-                // unknown-sender notifications. Same gating layer as the toggle above.
-                if (
-                  intent.kind === 'message' &&
-                  useFeatureSettingsStore.getState().filterUnknownSenders
-                ) {
-                  // Fail OPEN: if the known-sender lookup rejects (a DB read hiccup), still post the
-                  // notification rather than silently swallowing it as an unhandled rejection — a
-                  // dropped alert is worse than an occasional unfiltered one. The DB row is already
-                  // written regardless (this gate only decides whether to raise the notification).
-                  let knownSender = true;
-                  try {
-                    knownSender = await chatHasKnownSender(db, intent.chatGuid);
-                  } catch (e) {
-                    logger.warn('[notify] known-sender check failed — notifying anyway', e);
-                  }
-                  if (!knownSender) return;
+                    const lease = captureRealtimeDeliveryLease();
+                    const effectIsCurrent = (): boolean =>
+                      lease.isCurrent() &&
+                      lease.generation === accountGeneration &&
+                      providerIsCurrent();
+                    if (!effectIsCurrent()) return;
+                    const outcome = await autoDownloadMessageAttachmentsForRealtimeEvent(
+                      db,
+                      messageId,
+                      accountGeneration,
+                      { isEffectCurrent: effectIsCurrent },
+                    );
+                    if (effectIsCurrent()) presentAutoDownloadOutcome(outcome);
+                  },
+                  async (context) => {
+                    if (!context?.isCurrent()) return;
+                    const attachmentCacheScope = createAttachmentCacheAccountScope(context);
+                    await attachmentCacheCoordinator.retireInactiveEntries(db, {
+                      scope: attachmentCacheScope,
+                    });
+                    await attachmentCacheCoordinator.drainDueRetirements(db, {
+                      scope: attachmentCacheScope,
+                    });
+                  },
+                  (chatGuid, context) =>
+                    requestRealtimeRecovery(
+                      db,
+                      chatGuid ? { kind: 'sync-chat', chatGuid } : { kind: 'sync-account' },
+                      context,
+                      true,
+                    ),
+                  () => sessionAccessors.getServerInfo(),
+                ),
+                db,
+                buildMessageIntents,
+                async (intent, context) => {
                   if (context && !context.isCurrent()) return;
+                  // Honor the global "Message Notifications" toggle (message-kind only; calls/reminders
+                  // still post). Gated here (not in the pure buildMessageIntents) so the Node tests don't
+                  // pull the kv-backed store — and the DB is still written regardless.
+                  if (
+                    intent.kind === 'message' &&
+                    !(await prepareMessageNotificationSettings(context))
+                  ) {
+                    return;
+                  }
+                  const featureSettings = useFeatureSettingsStore.getState();
+                  if (
+                    intent.kind === 'message' &&
+                    !shouldPresentMessageNotification(featureSettings)
+                  ) {
+                    return;
+                  }
+                  // "Filter Unknown Senders": a chat with no contact-matched participant notifies
+                  // silently (DB/badge only) when the filter is on — parity with the old app's muted
+                  // unknown-sender notifications. Same gating layer as the toggle above.
+                  if (
+                    intent.kind === 'message' &&
+                    useFeatureSettingsStore.getState().filterUnknownSenders
+                  ) {
+                    // Fail OPEN: if the known-sender lookup rejects (a DB read hiccup), still post the
+                    // notification rather than silently swallowing it as an unhandled rejection — a
+                    // dropped alert is worse than an occasional unfiltered one. The DB row is already
+                    // written regardless (this gate only decides whether to raise the notification).
+                    let knownSender = true;
+                    try {
+                      knownSender = await chatHasKnownSender(db, intent.chatGuid);
+                    } catch (e) {
+                      logger.warn('[notify] known-sender check failed — notifying anyway', e);
+                    }
+                    if (!knownSender) return;
+                    if (context && !context.isCurrent()) return;
+                    await postNotificationSafely(intent, context);
+                    return;
+                  }
                   await postNotificationSafely(intent, context);
-                  return;
-                }
-                await postNotificationSafely(intent, context);
-              },
+                },
+              ),
+              // Chat-background changed/removed group event → refetch the synced wallpaper. Injected
+              // (not run inside DbEventSink) because it's a network + DB side effect. Change-detects
+              // internally, so calling it on ingestion — before the channel visibly syncs — is safe.
+              // Wallpaper transfer outlives the durable-event attempt. The dedicated entry point
+              // captures a fresh account lease and pins either the connected foreground transport or
+              // the authorized durable tuple used by a killed-process FCM wake.
+              (guid, accountGeneration) =>
+                ensureSyncedBackgroundForRealtimeEvent(db, guid, accountGeneration),
+              async (messageGuid, chatGuid) =>
+                (await getChatGuidByMessageGuid(db, messageGuid)) === chatGuid,
             ),
-            // Chat-background changed/removed group event → refetch the synced wallpaper. Injected
-            // (not run inside DbEventSink) because it's a network + DB side effect. Change-detects
-            // internally, so calling it on ingestion — before the channel visibly syncs — is safe.
-            // Wallpaper transfer outlives the durable-event attempt. The dedicated entry point
-            // captures a fresh account lease and pins either the connected foreground transport or
-            // the authorized durable tuple used by a killed-process FCM wake.
-            (guid, accountGeneration) =>
-              ensureSyncedBackgroundForRealtimeEvent(db, guid, accountGeneration),
+            (chatGuid, display) => useTypingStore.getState().setTyping(chatGuid, display),
           ),
-          (chatGuid, display) => useTypingStore.getState().setTyping(chatGuid, display),
         ),
+        (alertType) => useRcsHealthStore.getState().setAlert(alertType),
       ),
-      (alertType) => useRcsHealthStore.getState().setAlert(alertType),
+      (url, context) => applyNewServerUrl(url, context),
     ),
-    (url, context) => applyNewServerUrl(url, context),
+    () => sessionAccessors.getServerInfo(),
   );
   return realtimeSinkInstance;
 }
@@ -822,6 +852,43 @@ export async function persistAuthenticatedLockedFcmV3Event(
   }
   const captured = captureIncomingEvent(eventName, rawData);
   if (!captured || captured.eventName === 'new-server') return 'not-enqueued';
+  const normalized = snapshotIncomingEvent(captured.eventName, captured.rawData);
+  if (!normalized) return 'not-enqueued';
+  const transport = await resolveAuthorizedRealtimeTransport(context.generation);
+  if (!transport || !context.isCurrent() || !transport.lease.isCurrent()) return 'not-enqueued';
+  const initialProviderAdmission = classifyRcsEventAdmission(undefined, normalized);
+  let providerInfo: Awaited<ReturnType<typeof serverApi.serverInfo>> | undefined;
+  if (initialProviderAdmission === 'unavailable') {
+    try {
+      providerInfo = await serverApi.serverInfo(transport.http, context.signal);
+    } catch {
+      return 'not-enqueued';
+    }
+    if (
+      !context.isCurrent() ||
+      !transport.lease.isCurrent() ||
+      !admitsCurrentRcsEvent(providerInfo, normalized)
+    ) {
+      return 'not-enqueued';
+    }
+  }
+  const capturedProviderEpoch = currentRcsProviderEpoch(providerInfo);
+  const lockedAdmissionIsCurrent = (event: NormalizedEvent): boolean => {
+    const eventNeedsProviderAuthority =
+      classifyRcsEventAdmission(undefined, event) === 'unavailable';
+    if (!eventNeedsProviderAuthority) {
+      return context.isCurrent() && transport.lease.isCurrent();
+    }
+    const liveInfo = sessionAccessors.getServerInfo();
+    const liveEpoch = currentRcsProviderEpoch(liveInfo);
+    return (
+      context.isCurrent() &&
+      transport.lease.isCurrent() &&
+      providerInfo != null &&
+      (liveInfo == null || liveEpoch === capturedProviderEpoch) &&
+      admitsCurrentRcsEvent(providerInfo, event)
+    );
+  };
   const capturedOccurrence: EventOccurrenceMetadata = {
     serverEventId: occurrence.serverEventId,
     transportOccurrenceId: occurrence.transportOccurrenceId,
@@ -830,7 +897,7 @@ export async function persistAuthenticatedLockedFcmV3Event(
   };
   const receivedAt = capturedOccurrence.receivedAt ?? Date.now();
   const db = await ensureDatabase();
-  if (!context.isCurrent()) return 'not-enqueued';
+  if (!lockedAdmissionIsCurrent(normalized)) return 'not-enqueued';
   const runtime = getRealtimeRuntime(db, context);
   const result = await runtime?.dispatcher.persistLockedFcmV3WithoutDrain(
     captured.eventName,
@@ -838,8 +905,11 @@ export async function persistAuthenticatedLockedFcmV3Event(
     context,
     capturedOccurrence,
     receivedAt,
+    lockedAdmissionIsCurrent,
   );
-  return context.isCurrent() && result?.status === 'enqueued' ? 'enqueued' : 'not-enqueued';
+  return lockedAdmissionIsCurrent(normalized) && result?.status === 'enqueued'
+    ? 'enqueued'
+    : 'not-enqueued';
 }
 
 /**

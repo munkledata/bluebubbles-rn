@@ -256,7 +256,14 @@ describe('the Expo background task adapter', () => {
   it('passes explicit page/row caps and a current-account guard to schedule recovery', async () => {
     const db = { name: 'db' };
     const client = { name: 'http' };
-    const serverInfo = { server_version: '1.9.0', private_api: true };
+    const providerEpoch = `gpe1_${'A'.repeat(43)}`;
+    const serverInfo = {
+      server_version: '1.9.0',
+      private_api: true,
+      rcs: true,
+      supports_rcs_epoch_qualified_ids: true,
+      rcs_provider_epoch: providerEpoch,
+    };
     const scope = { generation: 9, isCurrent: () => true };
     mockRunBackgroundSync.mockImplementationOnce(async (deps) => {
       await deps.synchronize(db, client, '1.9.0', scope);
@@ -317,6 +324,8 @@ describe('the Expo background task adapter', () => {
       }),
       expect.any(Function),
       expect.any(AbortSignal),
+      expect.any(Function),
+      providerEpoch,
     );
     const attachmentTimeout = (mockRunOutgoingQueue.mock.calls[0] as unknown[] | undefined)?.[6] as
       number | undefined;
@@ -324,8 +333,14 @@ describe('the Expo background task adapter', () => {
     expect(attachmentTimeout).toBeLessThanOrEqual(BACKGROUND_CALLBACK_WORK_WINDOW_MS);
     expect(attachmentTimeout).toBeLessThan(BACKGROUND_ATTACHMENT_UPLOAD_TIMEOUT_MS);
     const rcsAvailable = (mockRunOutgoingQueue.mock.calls[0] as unknown[] | undefined)?.[8] as
-      (() => boolean) | undefined;
-    expect(rcsAvailable?.()).toBe(false);
+      ((chatGuid?: string) => boolean) | undefined;
+    expect(rcsAvailable?.()).toBe(true);
+    expect(rcsAvailable?.(`RCS;-;g1.${providerEpoch}.YQ`)).toBe(true);
+    expect(rcsAvailable?.(`RCS;-;g1.gpe1_${'B'.repeat(43)}.YQ`)).toBe(false);
+    const locationAvailable = (
+      mockRunOutgoingQueue.mock.calls[0] as unknown[] | undefined
+    )?.[10] as (() => boolean) | undefined;
+    expect(locationAvailable?.()).toBe(false);
   });
 
   it('keeps task registration idempotent', async () => {

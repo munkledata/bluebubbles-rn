@@ -15,6 +15,8 @@ import { buildMessageSnippet, formatTime } from '@utils';
 import { useTheme } from '../theme';
 
 interface ThreadSheetProps {
+  /** Exact conversation owner for every row returned by the thread lookup. */
+  chatGuid: string;
   /** The thread originator's guid (null → hidden). */
   originatorGuid: string | null;
   onClose: () => void;
@@ -23,26 +25,27 @@ interface ThreadSheetProps {
 }
 
 interface LoadedThread {
-  originatorGuid: string;
+  sourceKey: string;
   openLifetime: number;
   rows: MessageRow[];
 }
 
 interface CloseRequest {
-  originatorGuid: string;
+  sourceKey: string;
   openLifetime: number;
 }
 
 /** Keep the account's DB read inside Disconnect's drain boundary. */
 async function listThreadForAccount(
   lease: RealtimeDeliveryLease,
+  chatGuid: string,
   originatorGuid: string,
 ): Promise<MessageRow[] | null> {
   let rows: MessageRow[] | undefined;
   try {
     const status = await runTrackedRealtimeWork(lease, async (activeLease) => {
       if (!activeLease.isCurrent()) return;
-      rows = await listThreadMessages(getDatabase(), originatorGuid);
+      rows = await listThreadMessages(getDatabase(), chatGuid, originatorGuid);
     });
     if (status === 'paused' || !lease.isCurrent()) return null;
     return rows ?? null;
@@ -62,6 +65,7 @@ async function listThreadForAccount(
  * opening that happens to use the same originator guid.
  */
 export function ThreadSheet({
+  chatGuid,
   originatorGuid,
   onClose,
   onJump,
@@ -72,15 +76,16 @@ export function ThreadSheet({
   const openLifetimeRef = useRef(0);
   // The ref revokes synchronously; committed state gives a reopened sheet fresh callbacks.
   const [renderOpenLifetime, setRenderOpenLifetime] = useState(0);
-  const lifetimeSourceRef = useRef(originatorGuid);
-  const originatorGuidRef = useRef(originatorGuid);
+  const threadSourceKey = originatorGuid ? JSON.stringify([chatGuid, originatorGuid]) : null;
+  const lifetimeSourceRef = useRef(threadSourceKey);
+  const currentSourceRef = useRef(threadSourceKey);
   const onCloseRef = useRef(onClose);
   const onJumpRef = useRef(onJump);
   const closeRequestedForRef = useRef<CloseRequest | null>(null);
-  originatorGuidRef.current = originatorGuid;
+  currentSourceRef.current = threadSourceKey;
   onCloseRef.current = onClose;
   onJumpRef.current = onJump;
-  const sourceTransitionPending = lifetimeSourceRef.current !== originatorGuid;
+  const sourceTransitionPending = lifetimeSourceRef.current !== threadSourceKey;
 
   const revokeOpenLifetime = useCallback((): number => {
     const nextLifetime = openLifetimeRef.current + 1;
@@ -90,31 +95,32 @@ export function ThreadSheet({
   }, []);
 
   const requestCloseCurrentThread = useCallback((): void => {
-    const current = originatorGuidRef.current;
+    const current = currentSourceRef.current;
     if (!current) {
       return;
     }
     const currentLifetime = openLifetimeRef.current;
     const requested = closeRequestedForRef.current;
-    if (requested?.originatorGuid === current && requested.openLifetime === currentLifetime) {
+    if (requested?.sourceKey === current && requested.openLifetime === currentLifetime) {
       return;
     }
     const revokedLifetime = revokeOpenLifetime();
     closeRequestedForRef.current = {
-      originatorGuid: current,
+      sourceKey: current,
       openLifetime: revokedLifetime,
     };
     onCloseRef.current();
   }, [revokeOpenLifetime]);
 
-  // Prop identity defines an opening. Revoke before passive reads run, including A → null → A
-  // reopen and direct A → B replacement, then let the committed token create fresh row callbacks.
+  // Exact chat + originator identity defines an opening. Revoke before passive reads run,
+  // including A → null → A reopen, direct A → B replacement, or the same originator under a
+  // different chat, then let the committed token create fresh row callbacks.
   useLayoutEffect(() => {
-    if (lifetimeSourceRef.current === originatorGuid) return;
-    lifetimeSourceRef.current = originatorGuid;
+    if (lifetimeSourceRef.current === threadSourceKey) return;
+    lifetimeSourceRef.current = threadSourceKey;
     closeRequestedForRef.current = null;
     revokeOpenLifetime();
-  }, [originatorGuid, revokeOpenLifetime]);
+  }, [revokeOpenLifetime, threadSourceKey]);
 
   // An account switch permanently retires this mounted instance's lease. Close its selected
   // thread synchronously instead of waiting for a later route/store rerender to hide account A.
@@ -127,22 +133,22 @@ export function ThreadSheet({
   // The invalidation subscription handles a live handoff synchronously. This layout check also
   // covers a sheet mounted with a lease that was already retired.
   useLayoutEffect(() => {
-    if (originatorGuid && !accountLease.isCurrent()) requestCloseCurrentThread();
-  }, [accountLease, originatorGuid, requestCloseCurrentThread]);
+    if (threadSourceKey && !accountLease.isCurrent()) requestCloseCurrentThread();
+  }, [accountLease, requestCloseCurrentThread, threadSourceKey]);
 
   const accountCurrent = accountLease.isCurrent();
   const contentUnavailable = !accountCurrent || sourceTransitionPending;
 
   const threadGrantIsCurrent = useCallback(
-    (openLifetime: number, expectedOriginatorGuid: string): boolean => {
+    (openLifetime: number, expectedSourceKey: string): boolean => {
       const closeRequest = closeRequestedForRef.current;
       return (
         accountLease.isCurrent() &&
         openLifetimeRef.current === openLifetime &&
-        lifetimeSourceRef.current === expectedOriginatorGuid &&
-        originatorGuidRef.current === expectedOriginatorGuid &&
+        lifetimeSourceRef.current === expectedSourceKey &&
+        currentSourceRef.current === expectedSourceKey &&
         !(
-          closeRequest?.originatorGuid === expectedOriginatorGuid &&
+          closeRequest?.sourceKey === expectedSourceKey &&
           closeRequest.openLifetime === openLifetime
         )
       );
@@ -152,48 +158,50 @@ export function ThreadSheet({
 
   const reactiveThread = useReactiveQuery<LoadedThread | null>(
     async () => {
+      const sourceChatGuid = chatGuid;
       const sourceOriginatorGuid = originatorGuid;
+      const sourceKey = threadSourceKey;
       const loadOpenLifetime = renderOpenLifetime;
       if (
         !sourceOriginatorGuid ||
+        !sourceKey ||
         contentUnavailable ||
-        !threadGrantIsCurrent(loadOpenLifetime, sourceOriginatorGuid)
+        !threadGrantIsCurrent(loadOpenLifetime, sourceKey)
       ) {
         return null;
       }
-      const rows = await listThreadForAccount(accountLease, sourceOriginatorGuid);
-      if (rows == null || !threadGrantIsCurrent(loadOpenLifetime, sourceOriginatorGuid)) {
+      const rows = await listThreadForAccount(accountLease, sourceChatGuid, sourceOriginatorGuid);
+      if (rows == null || !threadGrantIsCurrent(loadOpenLifetime, sourceKey)) {
         return null;
       }
       return {
-        originatorGuid: sourceOriginatorGuid,
+        sourceKey,
         openLifetime: loadOpenLifetime,
         rows,
       };
     },
     ['messages', 'handles'],
-    [originatorGuid, renderOpenLifetime, contentUnavailable],
-    { enabled: !!originatorGuid && !contentUnavailable },
+    [chatGuid, originatorGuid, renderOpenLifetime, contentUnavailable, threadSourceKey],
+    { enabled: !!threadSourceKey && !contentUnavailable },
   );
 
   const closeRequest = closeRequestedForRef.current;
   const closeRequestedForCurrent =
-    closeRequest?.originatorGuid === originatorGuid &&
-    closeRequest.openLifetime === renderOpenLifetime;
+    closeRequest?.sourceKey === threadSourceKey && closeRequest.openLifetime === renderOpenLifetime;
 
-  if (!originatorGuid || contentUnavailable || closeRequestedForCurrent) {
+  if (!threadSourceKey || contentUnavailable || closeRequestedForCurrent) {
     return <></>;
   }
 
   // Hide a prior thread's rows immediately when the sheet closes or changes originator. The
   // matching async load makes them visible again without a synchronous reset effect.
   const rows =
-    reactiveThread.data?.originatorGuid === originatorGuid &&
+    reactiveThread.data?.sourceKey === threadSourceKey &&
     reactiveThread.data.openLifetime === renderOpenLifetime
       ? reactiveThread.data.rows
       : [];
   const rowOpenLifetime = renderOpenLifetime;
-  const rowOriginatorGuid = originatorGuid;
+  const rowSourceKey = threadSourceKey;
 
   return (
     <Modal visible transparent animationType="fade" onRequestClose={requestCloseCurrentThread}>
@@ -220,7 +228,7 @@ export function ThreadSheet({
                 <Pressable
                   key={m.guid}
                   onPress={() => {
-                    if (!threadGrantIsCurrent(rowOpenLifetime, rowOriginatorGuid)) return;
+                    if (!threadGrantIsCurrent(rowOpenLifetime, rowSourceKey)) return;
                     requestCloseCurrentThread();
                     if (m.dateCreated != null) {
                       onJumpRef.current({ guid: m.guid, dateCreated: m.dateCreated });

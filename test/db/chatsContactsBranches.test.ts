@@ -1,6 +1,6 @@
 /**
  * Branch top-ups for the chats + contacts repositories: `persistServerChat`,
- * `findChatByParticipantAddresses` (incl. the phone-normalize branch), the local read/unread
+ * `findChatByParticipantAddresses` (including fail-closed RCS presentation data), local read/unread
  * markers (`setChatUnreadLocal`, `markAllChatsReadLocal`), the server-avatar helpers, and
  * `searchContactAddresses`'s corrupt-JSON tolerance. Real in-memory DB (createTestDb).
  */
@@ -42,33 +42,41 @@ describe('persistServerChat + findChatByParticipantAddresses', () => {
     expect(members).toEqual(['+15551112222', 'craig@apple.com']);
   });
 
-  it('matches an existing chat by a phone-normalized, order-independent participant set', async () => {
+  it('never infers an RCS chat from cached participant presentation text', async () => {
     const { db } = await createTestDb();
-    await persistServerChat(
-      db,
-      Chat.parse({
-        guid: 'g1',
-        style: 43,
-        participants: [{ address: '+15551112222' }, { address: 'craig@apple.com' }],
-      }),
-    );
-    // Different formatting + case + order — still the same set.
-    expect(await findChatByParticipantAddresses(db, ['Craig@Apple.com', '+1 (555) 111-2222'])).toBe(
-      'g1',
-    );
+    for (const [guid, address] of [
+      ['RCS;-;google-exact-a', '+15551234567'],
+      ['RCS;-;google-exact-b', '+15551234567'],
+      ['RCS;-;google-suffix-collision', '+445551234567'],
+    ] as const) {
+      await persistServerChat(
+        db,
+        Chat.parse({ guid, style: 45, participants: [{ address, service: 'RCS' }] }),
+      );
+    }
+
+    await expect(findChatByParticipantAddresses(db, ['+15551234567'], 'RCS')).resolves.toBeNull();
+    await expect(
+      findChatByParticipantAddresses(db, ['+1 (555) 123-4567'], 'RCS'),
+    ).resolves.toBeNull();
+    await expect(findChatByParticipantAddresses(db, ['+445551234567'], 'RCS')).resolves.toBeNull();
   });
 
   it('returns null for an empty address list and for a non-matching set', async () => {
     const { db } = await createTestDb();
     await persistServerChat(
       db,
-      Chat.parse({ guid: 'g1', style: 43, participants: [{ address: '+15551112222' }] }),
+      Chat.parse({
+        guid: 'iMessage;-;+15551112222',
+        style: 45,
+        participants: [{ address: '+15551112222', service: 'iMessage' }],
+      }),
     );
-    expect(await findChatByParticipantAddresses(db, [])).toBeNull();
-    expect(await findChatByParticipantAddresses(db, ['+19998887777'])).toBeNull();
+    expect(await findChatByParticipantAddresses(db, [], 'iMessage')).toBeNull();
+    expect(await findChatByParticipantAddresses(db, ['+19998887777'], 'iMessage')).toBeNull();
   });
 
-  it('matches the selected service when RCS and iMessage share a recipient', async () => {
+  it('keeps RCS local lookup closed when RCS and iMessage share a recipient', async () => {
     const { db } = await createTestDb();
     for (const service of ['RCS', 'iMessage'] as const) {
       await persistServerChat(
@@ -80,9 +88,7 @@ describe('persistServerChat + findChatByParticipantAddresses', () => {
         }),
       );
     }
-    expect(await findChatByParticipantAddresses(db, ['+15551112222'], 'RCS')).toBe(
-      'RCS;-;+15551112222',
-    );
+    expect(await findChatByParticipantAddresses(db, ['+15551112222'], 'RCS')).toBeNull();
     expect(await findChatByParticipantAddresses(db, ['+15551112222'], 'iMessage')).toBe(
       'iMessage;-;+15551112222',
     );

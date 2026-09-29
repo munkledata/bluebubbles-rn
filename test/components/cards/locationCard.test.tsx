@@ -11,9 +11,9 @@
  *     safeOpenUrl(`geo:<lat>,<lon>?q=<lat>,<lon>`); localPath but loc null → NOTHING (no open, no
  *     download).
  *
- * NOTE on the coordinate order: Apple encodes `ll=<longitude>,<latitude>` (longitude first — see
- * vlocation.ts), so the fixture `ll=-122.4194,37.7749` parses to latitude 37.7749, longitude
- * -122.4194, and the geo URL uses lat,lon → `geo:37.7749,-122.4194?q=37.7749,-122.4194`.
+ * NOTE on the coordinate order: Apple encodes `ll=<latitude>,<longitude>`, so the fixture
+ * `ll=37.7749,-122.4194` parses to latitude 37.7749, longitude -122.4194, and the geo URL uses
+ * the same order → `geo:37.7749,-122.4194?q=37.7749,-122.4194`.
  *
  * In-file mocks: `expo-file-system` (controlled text via `mockLocText`), `@/services/download`
  * (native barrel — fn identity only), and `safeOpenUrl` on the `@utils` barrel (its REAL impl
@@ -26,7 +26,7 @@ import { useDownloadStore } from '@state/downloadStore';
 import type { AttachmentRow } from '@db/repositories';
 
 const SF_LOC =
-  'BEGIN:VCARD\nURL;type=pref:https://maps.apple.com/?ll=-122.4194\\,37.7749&q=-122.4194\\,37.7749\nEND:VCARD';
+  'BEGIN:VCARD\nURL;type=pref:https://maps.apple.com/?ll=37.7749\\,-122.4194&q=37.7749\\,-122.4194\nEND:VCARD';
 
 let mockLocText: string | ((path: string) => Promise<string>) = SF_LOC;
 let mockLocBytes = 200;
@@ -76,12 +76,12 @@ import {
 const PRIVATE_FILENAME = 'private-home-location-a71c.loc.vcf';
 const PRIVATE_PATH = 'file:///private-location-b82d.loc.vcf';
 const PRIVATE_LOC =
-  'BEGIN:VCARD\nURL;type=pref:https://maps.apple.com/?ll=-73.987654\\,40.765432&q=-73.987654\\,40.765432\nEND:VCARD';
+  'BEGIN:VCARD\nURL;type=pref:https://maps.apple.com/?ll=40.765432\\,-73.987654&q=40.765432\\,-73.987654\nEND:VCARD';
 const PRIVATE_COORDINATES = '40.7654, -73.9877';
 const PRIVATE_GEO = 'geo:40.765432,-73.987654?q=40.765432,-73.987654';
 const SECOND_PATH = 'file:///private-location-second-c93e.loc.vcf';
 const SECOND_LOC =
-  'BEGIN:VCARD\nURL;type=pref:https://maps.apple.com/?ll=151.2093\\,-33.8688&q=151.2093\\,-33.8688\nEND:VCARD';
+  'BEGIN:VCARD\nURL;type=pref:https://maps.apple.com/?ll=-33.8688\\,151.2093&q=-33.8688\\,151.2093\nEND:VCARD';
 const SECOND_COORDINATES = '-33.8688, 151.2093';
 const SECOND_GEO = 'geo:-33.8688,151.2093?q=-33.8688,151.2093';
 const UNAVAILABLE_COPY = 'Location unavailable.';

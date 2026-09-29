@@ -19,7 +19,22 @@ export const ClientErrorCode = {
   attachmentUnreadable: 10009,
   /** A one-shot iMessage attachment may have reached Messages despite a missing acknowledgement. */
   attachmentDeliveryUnconfirmed: 10010,
+  /** A one-shot iMessage reply may have reached Messages despite a missing acknowledgement. */
+  replyDeliveryUnconfirmed: 10011,
+  /** A current-location card may have reached Messages despite an outcome-unknown response. */
+  locationDeliveryUnconfirmed: 10012,
+  /** The server proved a current-location card was rejected before helper dispatch. */
+  locationRejected: 10013,
+  /** A one-shot iMessage effect may have reached Messages despite a missing acknowledgement. */
+  effectDeliveryUnconfirmed: 10014,
+  /** A one-shot iMessage mention may have reached Messages despite a missing acknowledgement. */
+  mentionDeliveryUnconfirmed: 10015,
+  /** A one-shot formatted iMessage may have reached Messages despite a missing acknowledgement. */
+  formattedDeliveryUnconfirmed: 10016,
 } as const;
+
+export const LOCATION_DELIVERY_UNCONFIRMED_COPY =
+  'This location may have been delivered. Check Messages before sending a new copy.';
 
 /** Friendly title per client error code (mirrors ClientMessageErrorExtension.friendlyTitles). */
 const CLIENT_ERROR_TITLES: Record<number, string> = {
@@ -33,6 +48,12 @@ const CLIENT_ERROR_TITLES: Record<number, string> = {
   [ClientErrorCode.userCanceled]: 'Manually Canceled',
   [ClientErrorCode.attachmentUnreadable]: 'Attachment Unavailable',
   [ClientErrorCode.attachmentDeliveryUnconfirmed]: 'Delivery Unconfirmed',
+  [ClientErrorCode.replyDeliveryUnconfirmed]: 'Delivery Unconfirmed',
+  [ClientErrorCode.locationDeliveryUnconfirmed]: 'Delivery Unconfirmed',
+  [ClientErrorCode.locationRejected]: 'Location Not Sent',
+  [ClientErrorCode.effectDeliveryUnconfirmed]: 'Delivery Unconfirmed',
+  [ClientErrorCode.mentionDeliveryUnconfirmed]: 'Mention Status Unconfirmed',
+  [ClientErrorCode.formattedDeliveryUnconfirmed]: 'Delivery Unconfirmed',
 };
 
 /**
@@ -79,7 +100,17 @@ export function errorTitleForCode(code: number | null | undefined): string {
 export function statusFor(msg: MessageRow): string | null {
   if (!msg.isFromMe) return null;
   if (msg.sendState === 'sending') return 'Sending…';
-  if (msg.error === ClientErrorCode.attachmentDeliveryUnconfirmed) return 'Delivery Unconfirmed';
+  if (
+    msg.error === ClientErrorCode.attachmentDeliveryUnconfirmed ||
+    msg.error === ClientErrorCode.replyDeliveryUnconfirmed ||
+    msg.error === ClientErrorCode.locationDeliveryUnconfirmed ||
+    msg.error === ClientErrorCode.effectDeliveryUnconfirmed ||
+    msg.error === ClientErrorCode.mentionDeliveryUnconfirmed ||
+    msg.error === ClientErrorCode.formattedDeliveryUnconfirmed
+  )
+    return msg.error === ClientErrorCode.mentionDeliveryUnconfirmed
+      ? 'Mention Status Unconfirmed'
+      : 'Delivery Unconfirmed';
   if (msg.sendState === 'error' || msg.error) return 'Not Delivered';
   if (msg.dateRead) return `Read ${formatTime(msg.dateRead)}`;
   if (msg.dateDelivered) return deliveredQuietly(msg) ? 'Delivered Quietly' : 'Delivered';

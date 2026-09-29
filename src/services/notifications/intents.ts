@@ -1,5 +1,6 @@
 import { resolveMessageChatGuid } from '@core/models';
 import type { NormalizedEvent, NotificationIntent } from '@core/realtime';
+import { sql } from 'drizzle-orm';
 import {
   getChatGuidByMessageGuid,
   getChatHeader,
@@ -8,10 +9,60 @@ import {
   isMessageNotificationEligible,
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
-import { buildMessageSnippet } from '@utils';
+import { buildMessageSnippet, participantDisplayNames } from '@utils';
 import { localFailedMessageRoute } from './notificationRouting';
 
 type MessageIntent = Extract<NotificationIntent, { kind: 'message' }>;
+type MessageEvent = Extract<
+  NormalizedEvent,
+  { type: 'new-message' | 'updated-message' }
+>['message'];
+
+/**
+ * Resolve the committed owner of a message event and reject contradictory envelope metadata.
+ * Updated-message payloads may legitimately omit chat metadata, but a claimed chat may never
+ * override the first chat that owns the GUID in the encrypted database.
+ */
+async function resolvePersistedMessageChatGuid(
+  db: AppDatabase,
+  message: MessageEvent,
+  allowMissingClaim: boolean,
+): Promise<string | null> {
+  const claimedChatGuid = resolveMessageChatGuid(message);
+  if (!claimedChatGuid && !allowMissingClaim) return null;
+  const storedChatGuid = message.guid ? await getChatGuidByMessageGuid(db, message.guid) : null;
+  if (!storedChatGuid || (claimedChatGuid && claimedChatGuid !== storedChatGuid)) return null;
+  return storedChatGuid;
+}
+
+/** Resolve a delete only through durable local ownership, including a row already purged. */
+async function resolvePersistedDeletionChatGuid(
+  db: AppDatabase,
+  messageGuid: string,
+): Promise<{ chatGuid: string | null; conflict: boolean }> {
+  const rows = await db.all<{
+    rowChatGuid: string | null;
+    ledgerChatGuid: string | null;
+  }>(sql`
+    SELECT
+      (SELECT c.guid
+         FROM messages m
+         JOIN chats c ON c.id = m.chat_id
+        WHERE m.guid = ${messageGuid}
+        LIMIT 1) AS rowChatGuid,
+      (SELECT chat_guid
+         FROM message_deletion_ledger
+        WHERE guid = ${messageGuid}
+        LIMIT 1) AS ledgerChatGuid
+  `);
+  const row = rows[0];
+  const rowChatGuid = row?.rowChatGuid ?? null;
+  const ledgerChatGuid = row?.ledgerChatGuid ?? null;
+  return {
+    chatGuid: rowChatGuid ?? ledgerChatGuid,
+    conflict: rowChatGuid != null && ledgerChatGuid != null && rowChatGuid !== ledgerChatGuid,
+  };
+}
 
 /** Build one notification line from current encrypted-DB truth after its event has committed. */
 async function buildCurrentMessageIntent(
@@ -20,7 +71,7 @@ async function buildCurrentMessageIntent(
   chatGuid: string,
 ): Promise<MessageIntent | null> {
   if (!(await isMessageNotificationEligible(db, message.guid))) return null;
-  const currentPreview = await getMessagePreviewByGuid(db, message.guid);
+  const currentPreview = await getMessagePreviewByGuid(db, chatGuid, message.guid);
   if (!currentPreview || currentPreview.isRetracted || currentPreview.isFromMe === 1) return null;
   const header = await getChatHeader(db, chatGuid);
   if (header?.muteType === 'mute') return null;
@@ -43,7 +94,9 @@ async function buildCurrentMessageIntent(
     'Unknown';
   const isGroup = (header?.participantCount ?? 0) > 1;
   const chatTitle =
-    header?.displayName || (isGroup ? header?.participantNames : senderName) || senderName;
+    header?.displayName ||
+    (isGroup ? participantDisplayNames(header?.participantNames ?? null) : senderName) ||
+    senderName;
 
   return {
     kind: 'message',
@@ -85,15 +138,14 @@ export async function buildMessageIntents(
         // Never RAISE a notice for our own message. A successful live echo may, however, be the
         // first proof that an earlier client-side failure actually landed. Withdraw its fixed-copy
         // failure notice using the reconciled row's stable local id.
-        const chatGuid =
-          resolveMessageChatGuid(m) ?? (m.guid ? await getChatGuidByMessageGuid(db, m.guid) : null);
+        const chatGuid = await resolvePersistedMessageChatGuid(db, m, true);
         return chatGuid && m.guid
           ? [{ kind: 'send-failure-cancel', chatGuid, messageGuid: m.guid }]
           : [];
       }
       // Prefer the hydrated chats[0].guid, falling back to the top-level chatGuid a live event
       // may carry — without this a chats-less event would build no notification.
-      const chatGuid = resolveMessageChatGuid(m);
+      const chatGuid = await resolvePersistedMessageChatGuid(db, m, false);
       if (!chatGuid || !m.guid) return [];
       // A durable notification retry must honor CURRENT DB truth, not resurrect the old envelope
       // after the user read/deleted it or the sender retracted it between attempts.
@@ -102,9 +154,19 @@ export async function buildMessageIntents(
     }
     case 'message-deleted': {
       // The DB tombstone is authoritative, but a notification already posted to Android is
-      // separate OS state. Remove only this line so unrelated unread messages remain visible.
-      const chatGuid =
-        (await getChatGuidByMessageGuid(db, event.payload.guid)) || event.payload.chatGuid;
+      // separate OS state. A colliding event that names another chat must not withdraw the stored
+      // owner's line; remove only after the persisted and claimed owners agree.
+      const persisted = await resolvePersistedDeletionChatGuid(db, event.payload.guid);
+      if (persisted.conflict) return [];
+      if (
+        persisted.chatGuid &&
+        event.payload.chatGuid &&
+        persisted.chatGuid !== event.payload.chatGuid
+      )
+        return [];
+      // The DB sink runs before this projection. A scoped ledger row therefore proves unknown-row
+      // deletes too; a legacy/ownerless NULL quarantine deliberately authorizes no native action.
+      const chatGuid = persisted.chatGuid;
       return chatGuid
         ? [{ kind: 'message-withdraw', chatGuid, messageGuid: event.payload.guid }]
         : [];
@@ -124,7 +186,7 @@ export async function buildMessageIntents(
       if (!hasRetractionSignal) return [];
       // Real FCM update payloads omit chats/chatGuid. The DB phase has already found the owner by
       // message guid, so use the same fallback after a lean unsend.
-      const chatGuid = resolveMessageChatGuid(m) ?? (await getChatGuidByMessageGuid(db, m.guid));
+      const chatGuid = await resolvePersistedMessageChatGuid(db, m, true);
       if (!chatGuid) return [];
       // Reconcile the displayed child once against current encrypted-DB truth. That lets a proven
       // partial retraction replace the same history line without raising a second alert, while

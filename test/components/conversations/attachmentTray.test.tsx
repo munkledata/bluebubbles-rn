@@ -427,6 +427,26 @@ describe('AttachmentTray — contact button (capability-gated)', () => {
   });
 });
 
+describe('AttachmentTray — current location button (capability-gated)', () => {
+  it('renders a location-only tray without inspecting media and invokes the supplied action', async () => {
+    const onShareLocation = jest.fn();
+    await renderWithTheme(
+      <AttachmentTray
+        onPick={jest.fn()}
+        onPickFiles={jest.fn()}
+        onShareLocation={onShareLocation}
+        mediaEnabled={false}
+      />,
+    );
+
+    expect(getPerm).not.toHaveBeenCalled();
+    expect(screen.queryByLabelText('Take a photo')).toBeNull();
+    expect(screen.queryByLabelText('Attach a file')).toBeNull();
+    fireEvent.press(screen.getByLabelText('Send current location'));
+    expect(onShareLocation).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('AttachmentTray — camera capture', () => {
   it('stages a captured photo via onPick', async () => {
     grantWith([]);

@@ -997,7 +997,7 @@ describe('reconcileOutgoingSuccess — backstops & branches', () => {
       now: 100,
     });
     await cancelOutgoing(db, 'temp-http-max', 9_000);
-    await markMessageDeleted(db, 'real-http-max', 9_500);
+    await markMessageDeleted(db, 'real-http-max', 9_500, undefined, 'c1');
 
     await reconcileOutgoingSuccess(db, 'temp-http-max', {
       guid: 'real-http-max',
@@ -1396,7 +1396,7 @@ describe('cancelOutgoing — branches', () => {
     expect(await listMessagesWithSenders(db, chatId)).toHaveLength(0);
   });
 
-  it('moves the durable temp marker when purge and a real echo both precede the late ack', async () => {
+  it('moves the durable temp marker when the active request proves the exact chat after purge', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seedChat(db, 'c1');
     await insertOutgoingText(db, {
@@ -1411,8 +1411,10 @@ describe('cancelOutgoing — branches', () => {
     expect(tombstone(raw, 'temp-purged-before-ack')).toBeUndefined();
     expect(deletionLedgerDate(raw, 'temp-purged-before-ack')).toBe(9_003);
 
-    // The real echo/backfill materializes before the HTTP request finally resolves. With no real
-    // ledger key yet, this row is initially live; the late ack's duplicate branch must repair it.
+    // The real echo/backfill materializes before the HTTP request finally resolves. The cancelled
+    // temp row and its queue owner are both gone, but the still-running request retains the exact
+    // chat it was sent to. That proof permits the late ack to move the deletion marker without
+    // guessing from a person, phone number, or message GUID.
     await withDbTransaction(db, (context) =>
       upsertMessagesWithinTransaction(
         context,
@@ -1430,15 +1432,113 @@ describe('cancelOutgoing — branches', () => {
     );
     expect(tombstone(raw, 'real-purged-before-ack')).toBeNull();
 
-    await reconcileOutgoingSuccess(db, 'temp-purged-before-ack', {
-      guid: 'real-purged-before-ack',
-      dateCreated: 10_000,
-      dateDelivered: null,
-    });
+    await reconcileOutgoingSuccess(
+      db,
+      'temp-purged-before-ack',
+      {
+        guid: 'real-purged-before-ack',
+        dateCreated: 10_000,
+        dateDelivered: null,
+      },
+      undefined,
+      'c1',
+    );
 
     expect(deletionLedgerDate(raw, 'temp-purged-before-ack')).toBeUndefined();
     expect(deletionLedgerDate(raw, 'real-purged-before-ack')).toBe(9_003);
     expect(tombstone(raw, 'real-purged-before-ack')).toBe(9_003);
+    expect(messageAliasTarget(raw, 'temp-purged-before-ack')).toBe('real-purged-before-ack');
+  });
+
+  it('binds an ack-first canonical identity to the exact request chat after purge', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db, 'c1');
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-purged-before-echo',
+      chatId,
+      chatGuid: 'c1',
+      text: 'ack arrives before echo',
+      now: 100,
+    });
+    await cancelOutgoing(db, 'temp-purged-before-echo', 9_004);
+    await deleteChatLocal(db, 'c1', 9_500);
+
+    await reconcileOutgoingSuccess(
+      db,
+      'temp-purged-before-echo',
+      {
+        guid: 'real-purged-before-echo',
+        dateCreated: 10_000,
+        dateDelivered: null,
+      },
+      undefined,
+      'c1',
+    );
+
+    expect(messageAliasTarget(raw, 'temp-purged-before-echo')).toBe('real-purged-before-echo');
+    expect(deletionLedgerDate(raw, 'temp-purged-before-echo')).toBeUndefined();
+    expect(deletionLedgerDate(raw, 'real-purged-before-echo')).toBe(9_004);
+    expect(tombstone(raw, 'real-purged-before-echo')).toBe(9_004);
+
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'real-purged-before-echo',
+          isFromMe: true,
+          dateCreated: 10_000,
+          text: 'ack arrives before echo',
+          chats: [{ guid: 'c1' }],
+        }),
+      ],
+      () => chatId,
+      new Map(),
+    );
+
+    expect(tombstone(raw, 'real-purged-before-echo')).toBe(9_004);
+    expect(await listMessagesWithSenders(db, chatId)).toHaveLength(0);
+  });
+
+  it('uses a surviving queue chat to prove a same-chat canonical row after temp-row loss', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db, 'c1');
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-queue-proved-owner',
+      chatId,
+      chatGuid: 'c1',
+      text: 'queue retains exact owner',
+      now: 100,
+    });
+    raw.prepare("DELETE FROM messages WHERE guid = 'temp-queue-proved-owner'").run();
+    expect(queueCount(raw, 'temp-queue-proved-owner')).toBe(1);
+    await withDbTransaction(db, (context) =>
+      upsertMessagesWithinTransaction(
+        context,
+        [
+          Message.parse({
+            guid: 'real-queue-proved-owner',
+            isFromMe: true,
+            text: 'queue retains exact owner',
+            dateCreated: 200,
+          }),
+        ],
+        () => chatId,
+        new Map(),
+      ),
+    );
+
+    await reconcileOutgoingSuccess(db, 'temp-queue-proved-owner', {
+      guid: 'real-queue-proved-owner',
+      dateCreated: 200,
+      dateDelivered: null,
+    });
+
+    expect(messageAliasTarget(raw, 'temp-queue-proved-owner')).toBe('real-queue-proved-owner');
+    expect(queueCount(raw, 'temp-queue-proved-owner')).toBe(0);
+    expect(outgoingIdentityRow(raw, 'real-queue-proved-owner')).toMatchObject({
+      guid: 'real-queue-proved-owner',
+      sendState: 'sent',
+    });
   });
 
   it('a late NO-GUID (AppleScript/RCS) ack after a cancel keeps the row hidden, not resurrected', async () => {

@@ -103,15 +103,20 @@ concern rather than being inferred from a successful native compile.
 ## `PERM-01` — least-privilege Android permissions
 
 Maintain a permission-to-call-site-to-user-flow inventory. Block `WRITE_CONTACTS`,
-`READ_MEDIA_AUDIO`, all coarse/fine/background/foreground-service location permissions, and other
-permissions with no approved flow through `android.blockedPermissions`; configure media access for
-photo/video-only granular permissions. Find My renders server-provided coordinates and must never
-silently become a phone-location feature merely because a map package is installed.
+`READ_MEDIA_AUDIO`, background location, location foreground-service access, and other permissions
+with no approved flow through `android.blockedPermissions`; configure media access for
+photo/video-only granular permissions. Coarse and fine location are owned only by the confirmed
+foreground Current Location action: one bounded fix, no background task or service, and no send on
+denial, cancellation, disabled services, error, or timeout. Find My remains a separate
+server-coordinate renderer and must never read the phone's location merely because map and location
+packages are installed.
 
 Automatic background behavior may check an existing grant but must not surprise the user with a
 prompt. Explicit user actions own permission requests, cancellation handling, denial guidance, and a
-usable fallback. The source request, generated manifest, packaged artifact, installed declarations,
-and visible Android dialog must all describe the same permission model.
+usable fallback. A successful current-location snapshot may remain only in the SQLCipher-encrypted
+outgoing queue and may be replayed for no more than 15 minutes without acquiring a new fix. The
+source request, generated manifest, packaged artifact, installed declarations, visible Android
+dialog, privacy copy, and Play declarations must all describe the same permission model.
 
 <a id="play-01"></a>
 
@@ -188,10 +193,12 @@ cleanup depend on the ordinary attachment ledger.
 
 ## `IPC-01` — bounded file intake above the lock gate
 
-Public `ACTION_SEND` and Direct Share intake remain disabled unless a newly approved design can reject
-count before copying, enforce per-file and aggregate actual-byte limits, impose a whole-capture
-deadline, cancel native work, and remove partial batches after failure or process death. No database
-state may be created until a complete bounded capture exists.
+`IPC-01` established the fail-closed baseline after the third-party pre-handler could not enforce
+bounds. The approved `SHARE-02` replacement now owns public `ACTION_SEND` and Direct Share intake:
+it rejects count before copying, enforces per-file and aggregate actual-byte limits, imposes a
+whole-capture deadline, cancels native work, and removes partial batches after failure or process
+death. No database state may be created until a complete bounded capture exists. Release/device
+qualification remains tracked only in the remediation plan.
 
 Foreground composer paste is a separate, narrower slice and does not reactivate public sharing. Its
 native receive-content boundary:

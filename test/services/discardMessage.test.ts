@@ -13,7 +13,7 @@
  * clients / expo uploader / contacts picker); the DB and every repository call are real.
  */
 import type Database from 'better-sqlite3';
-import { Chat, Message } from '@core/models';
+import { Chat, Message, ServerInfo } from '@core/models';
 import {
   deleteMessageLocal,
   getChatIdByGuid,
@@ -22,7 +22,6 @@ import {
   listAttachmentsByMessageIds,
   listMessagesWithSenders,
   MESSAGE_GUID_ALIAS_LIMIT,
-  MessageGuidAliasConflictError,
   reconcileEchoByContent,
   reconcileOutgoingAttachmentByContent,
   reconcileOutgoingSuccess,
@@ -33,6 +32,7 @@ import {
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
+import { useSessionStore } from '@state/sessionStore';
 import { createTestDb } from '../support/testDb';
 
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
@@ -106,6 +106,20 @@ const deletionDate = (raw: Database.Database, guid: string): number | null | und
     raw.prepare('SELECT date_deleted AS dateDeleted FROM messages WHERE guid = ?').get(guid) as
       { dateDeleted: number | null } | undefined
   )?.dateDeleted;
+
+const RCS_EPOCH_A = `gpe1_${'A'.repeat(43)}`;
+const RCS_EPOCH_B = `gpe1_${'B'.repeat(42)}A`;
+const rcsEncoded = (value: string): string => Buffer.from(value, 'utf8').toString('base64url');
+const rcsChatGuid = (epoch: string): string => `RCS;-;g1.${epoch}.${rcsEncoded('discard-chat')}`;
+const rcsMessageGuid = (epoch: string): string =>
+  `rcs-g1.${epoch}.${rcsEncoded('discard-message')}`;
+const rcsInfo = (epoch: string) =>
+  ServerInfo.parse({
+    version: '2.0.0',
+    rcs: true,
+    supports_rcs_epoch_qualified_ids: true,
+    rcs_provider_epoch: epoch,
+  });
 
 /**
  * The live fanout, exactly as DbEventSink applies it: content-reconcile the optimistic row, then
@@ -352,24 +366,24 @@ describe('discardMessage — the two guarded steps together', () => {
     }
   });
 
-  it('TOMBSTONES a real server guid rather than hard-deleting it', async () => {
+  it('TOMBSTONES a real Apple server guid rather than hard-deleting it', async () => {
     const { db, raw } = await createTestDb();
     (getDatabase as jest.Mock).mockReturnValue(db);
     const chatId = await seedChat(db);
     await upsertMessages(
       db,
-      [Message.parse({ guid: 'rcs-5', isFromMe: true, text: 'delivered', dateCreated: 100 })],
+      [Message.parse({ guid: 'server-5', isFromMe: true, text: 'delivered', dateCreated: 100 })],
       () => chatId,
       new Map(),
     );
 
-    await discardMessage('rcs-5', 6_000);
+    await discardMessage('server-5', 6_000);
 
-    expect(count(raw, 'guid = ? AND date_deleted IS NOT NULL', 'rcs-5')).toBe(1);
+    expect(count(raw, 'guid = ? AND date_deleted IS NOT NULL', 'server-5')).toBe(1);
     // A re-page of the thread must not undo it (date_deleted is absent from the conflict set).
     await upsertMessages(
       db,
-      [Message.parse({ guid: 'rcs-5', isFromMe: true, text: 'delivered', dateCreated: 100 })],
+      [Message.parse({ guid: 'server-5', isFromMe: true, text: 'delivered', dateCreated: 100 })],
       () => chatId,
       new Map(),
     );
@@ -401,6 +415,76 @@ describe('discardMessage — the two guarded steps together', () => {
     expect(aliasRows(raw)).toEqual([
       expect.objectContaining({ alias: 'temp-stale-http', canonical: 'real-stale-http' }),
     ]);
+  });
+
+  it('keeps a promoted old-epoch RCS alias, queue, and canonical message read-only', async () => {
+    const previousSession = useSessionStore.getState();
+    const { db, raw } = await createTestDb();
+    (getDatabase as jest.Mock).mockReturnValue(db);
+    const tempGuid = 'temp-old-epoch-discard';
+    const owner = rcsChatGuid(RCS_EPOCH_A);
+    const canonical = rcsMessageGuid(RCS_EPOCH_A);
+    const cancelUpload = jest.spyOn(uploadRegistry, 'cancel');
+    try {
+      useSessionStore.getState().connected('https://server.test', 'password', rcsInfo(RCS_EPOCH_A));
+      const handles = await upsertHandles(db, [{ address: '+15550000001', service: 'RCS' }]);
+      const chats = await upsertChats(
+        db,
+        [
+          Chat.parse({
+            guid: owner,
+            providerEpoch: RCS_EPOCH_A,
+            participants: [{ address: '+15550000001', service: 'RCS' }],
+          }),
+        ],
+        handles,
+      );
+      await upsertMessages(
+        db,
+        [
+          Message.parse({
+            guid: canonical,
+            providerEpoch: RCS_EPOCH_A,
+            chatGuid: owner,
+            isFromMe: true,
+            text: 'preserve old history',
+            dateCreated: 100,
+          }),
+        ],
+        () => chats.get(owner),
+        handles,
+      );
+      raw
+        .prepare(
+          'INSERT INTO message_guid_aliases (alias_guid, canonical_guid, chat_guid) VALUES (?, ?, ?)',
+        )
+        .run(tempGuid, canonical, owner);
+      raw
+        .prepare(
+          `INSERT INTO outgoing_queue
+             (temp_guid, chat_guid, kind, payload, attempts, next_retry_at)
+           VALUES (?, ?, 'text', '{}', 0, 0)`,
+        )
+        .run(tempGuid, owner);
+      const session = useSessionStore.getState();
+      expect(
+        session.setServerInfoForTransport(
+          session.origin!,
+          session.transportRevision,
+          rcsInfo(RCS_EPOCH_B),
+        ),
+      ).toBe(true);
+
+      await expect(discardMessage(tempGuid, 6_000)).resolves.toBe('message-changed');
+      expect(deletionDate(raw, canonical)).toBeNull();
+      expect(queueCount(raw, tempGuid)).toBe(1);
+      expect(aliasRows(raw)).toEqual([expect.objectContaining({ alias: tempGuid, canonical })]);
+      expect(ledgerRows(raw)).toEqual([]);
+      expect(cancelUpload).not.toHaveBeenCalled();
+    } finally {
+      cancelUpload.mockRestore();
+      useSessionStore.setState(previousSession);
+    }
   });
 
   it('resolves a stale temp confirmation when the HTTP ack took the duplicate-real branch', async () => {
@@ -667,7 +751,7 @@ describe('discardMessage — the two guarded steps together', () => {
     expect(deletionDate(raw, 'real-shared')).toBe(6_000);
   });
 
-  it('fails closed and rolls the promotion back when an alias conflicts with another canonical identity', async () => {
+  it('contains a confirmed-send alias conflict without retrying or replacing either identity', async () => {
     const { db, raw } = await createTestDb();
     (getDatabase as jest.Mock).mockReturnValue(db);
     const chatId = await seedChat(db);
@@ -690,27 +774,73 @@ describe('discardMessage — the two guarded steps together', () => {
       new Map(),
     );
 
-    const conflictError = await reconcileOutgoingSuccess(db, 'temp-conflict', {
-      guid: 'real-conflict-b',
-      dateCreated: 201,
-      dateDelivered: null,
-    }).then(
-      () => null,
-      (error: unknown) => error,
-    );
-    expect(conflictError).toBeInstanceOf(MessageGuidAliasConflictError);
-    expect(conflictError).toEqual(
-      expect.objectContaining({
-        message: 'message GUID alias conflicts with an existing canonical identity',
+    await expect(
+      reconcileOutgoingSuccess(db, 'temp-conflict', {
+        guid: 'real-conflict-b',
+        dateCreated: 201,
+        dateDelivered: null,
       }),
-    );
-    expect(String(conflictError)).not.toMatch(/temp-conflict|real-conflict/);
+    ).resolves.toBeUndefined();
 
     expect(aliasRows(raw)).toEqual([
       expect.objectContaining({ alias: 'temp-conflict', canonical: 'real-conflict-a' }),
     ]);
     expect(deletionDate(raw, 'real-conflict-a')).toBeNull();
     expect(deletionDate(raw, 'real-conflict-b')).toBeNull();
+  });
+
+  it('settles only the source when a canonical deletion reservation belongs to another chat', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db);
+    raw.prepare("INSERT INTO chats (guid) VALUES ('foreign-ledger-chat')").run();
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-ledger-conflict',
+      chatId,
+      chatGuid: 'c1',
+      text: 'confirmed once',
+      now: 100,
+    });
+    raw
+      .prepare(
+        `INSERT INTO message_deletion_ledger (guid, date_deleted, chat_guid)
+         VALUES ('real-ledger-conflict', 150, 'foreign-ledger-chat')`,
+      )
+      .run();
+
+    await expect(
+      reconcileOutgoingSuccess(db, 'temp-ledger-conflict', {
+        guid: 'real-ledger-conflict',
+        dateCreated: 200,
+        dateDelivered: null,
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(
+      raw
+        .prepare(
+          `SELECT send_state AS sendState, attempt_owner_pending AS pending
+             FROM messages
+            WHERE guid = 'temp-ledger-conflict'`,
+        )
+        .get(),
+    ).toEqual({ sendState: 'sent', pending: 0 });
+    expect(
+      raw.prepare("SELECT 1 FROM outgoing_queue WHERE temp_guid = 'temp-ledger-conflict'").get(),
+    ).toBeUndefined();
+    expect(
+      raw
+        .prepare(
+          `SELECT date_deleted AS dateDeleted, chat_guid AS chatGuid
+             FROM message_deletion_ledger
+            WHERE guid = 'real-ledger-conflict'`,
+        )
+        .get(),
+    ).toEqual({ dateDeleted: 150, chatGuid: 'foreign-ledger-chat' });
+    expect(
+      raw
+        .prepare("SELECT 1 FROM message_guid_aliases WHERE alias_guid = 'temp-ledger-conflict'")
+        .get(),
+    ).toBeUndefined();
   });
 
   it('prefers an exact current temp row over an older alias with the same key', async () => {

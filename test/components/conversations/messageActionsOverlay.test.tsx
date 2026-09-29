@@ -9,8 +9,8 @@
  *   - Reply requires a confirmed server identity; Remind Me Later remains available locally;
  *   - Copy + Forward appear only when there's trimmed text (hasText);
  *   - Save to Photos appears only when the message has attachments;
- *   - Edit + Unsend appear only for the user's OWN recent, non-retracted, non-temp message
- *     (canEditUnsend); Edit additionally requires text;
+ *   - Edit and Unsend appear only with their separate exact-part-zero proofs and time windows;
+ *     whole-message Delete from Mac and phone-local Delete remain distinct actions;
  *   - Cancel Sending / Remove appears only for an own optimistic message that is 'sending' or
  *     'error' (canCancel), with the label switching on sendState.
  *
@@ -103,6 +103,7 @@ function handlers() {
     onRemindLater: jest.fn(),
     onEdit: jest.fn(),
     onUnsend: jest.fn(),
+    onRemoteDeleteFromMac: jest.fn(),
     onCancelSend: jest.fn(),
     onCopy: jest.fn(),
     onForward: jest.fn(),
@@ -268,8 +269,8 @@ describe('MessageActionsOverlay — reaction picker', () => {
   });
 });
 
-describe('MessageActionsOverlay — retired helper actions + read-only history', () => {
-  it('keeps outgoing helper actions retired while preserving local thread/history views', async () => {
+describe('MessageActionsOverlay — narrow edit + read-only history', () => {
+  it('requires explicit edit proof while preserving local thread/history views', async () => {
     const h = await renderOverlay(
       makeSelected({
         targetPartIndex: 0,
@@ -287,6 +288,57 @@ describe('MessageActionsOverlay — retired helper actions + read-only history',
     await pressAndFlush(screen.getByText('View Edit History'), () =>
       expect(h.onViewEditHistory).toHaveBeenCalledTimes(1),
     );
+  });
+
+  it('offers only Edit for an admitted recent own plain-text part zero', async () => {
+    const h = handlers();
+    await renderOverlay(
+      makeSelected({
+        editPartIndex: 0,
+        isFromMe: true,
+        dateCreated: Date.now(),
+      }),
+      h,
+    );
+
+    expect(screen.queryByText('Unsend')).toBeNull();
+    await pressAndFlush(screen.getByText('Edit'), () => {
+      expect(h.onEdit).toHaveBeenCalledTimes(1);
+      expect(h.onClose).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('keeps confirmed Unsend separate from phone-local Delete', async () => {
+    const h = handlers();
+    await renderOverlay(
+      makeSelected({
+        unsendPartIndex: 0,
+        isFromMe: true,
+        dateCreated: Date.now(),
+      }),
+      h,
+    );
+
+    expect(screen.getByText('Delete')).toBeTruthy();
+    await pressAndFlush(screen.getByText('Unsend'), () => {
+      expect(h.onUnsend).toHaveBeenCalledTimes(1);
+      expect(h.onDelete).not.toHaveBeenCalled();
+      expect(h.onClose).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('keeps whole-message Delete from Mac separate from Unsend and phone-local Delete', async () => {
+    const h = handlers();
+    await renderOverlay(makeSelected({ canRemoteDeleteFromMac: true }), h);
+
+    expect(screen.getByText('Delete')).toBeTruthy();
+    expect(screen.queryByText('Unsend')).toBeNull();
+    await pressAndFlush(screen.getByText('Delete from Mac'), () => {
+      expect(h.onRemoteDeleteFromMac).toHaveBeenCalledTimes(1);
+      expect(h.onUnsend).not.toHaveBeenCalled();
+      expect(h.onDelete).not.toHaveBeenCalled();
+      expect(h.onClose).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('Remind Me Later fires onRemindLater + onClose', async () => {

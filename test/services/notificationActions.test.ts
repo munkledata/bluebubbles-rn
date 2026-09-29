@@ -59,6 +59,18 @@ jest.mock('react-native-notify-kit', () => ({
     getDisplayedNotifications: jest.fn(async () => []),
   },
 }));
+jest.mock('@core/api', () => ({
+  serverApi: {
+    serverInfo: jest.fn(async () => ({
+      version: 'test',
+      private_api: false,
+      rcs: true,
+      supports_rcs_epoch_qualified_ids: true,
+      rcs_provider_epoch: `gpe1_${'A'.repeat(43)}`,
+      supports_message_part_topology: false,
+    })),
+  },
+}));
 // A sentinel DB handle so we can prove ensureDatabase()'s value is threaded to the writes.
 // Must be `mock`-prefixed — jest.mock factories are hoisted and may only reference such vars.
 const mockDb = { __db: true, all: jest.fn(async (_query: unknown): Promise<unknown[]> => []) };
@@ -93,13 +105,30 @@ jest.mock('@/services/send/rcsAttemptCapability', () => ({
     kind: 'session',
     origin: 'https://foreground.test',
     revision: 7,
-    serverInfo: null,
+    serverInfo: {
+      version: 'test',
+      private_api: false,
+      rcs: true,
+      supports_rcs_epoch_qualified_ids: true,
+      rcs_provider_epoch: `gpe1_${'A'.repeat(43)}`,
+      supports_message_part_topology: false,
+    },
     isCurrent: () => true,
     publish: () => true,
   })),
   resolveRcsAttemptOwnership: jest.fn(async () => ({
     attemptAware: false,
-    serverInfo: { private_api: false, rcs: true, supports_message_part_topology: false },
+    serverInfo: {
+      private_api: false,
+      rcs: true,
+      supports_rcs_epoch_qualified_ids: true,
+      rcs_provider_epoch: `gpe1_${'A'.repeat(43)}`,
+      supports_message_part_topology: false,
+    },
+  })),
+  fixedRcsCapabilitySource: jest.fn((serverInfo: unknown) => ({
+    kind: 'fixed',
+    serverInfo,
   })),
   messageTargetServerAuthorization: jest.fn(
     (info: { supports_message_part_topology?: boolean } | null, isCurrent: () => boolean) =>
@@ -165,6 +194,20 @@ const mockDeleteReminder = deleteReminderByNotificationId as jest.Mock;
 const mockIsDevServer = isDevServer as jest.Mock;
 const mockDevSendFake = devSendFake as jest.Mock;
 const mockDevSendFakeReaction = devSendFakeReaction as jest.Mock;
+
+const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
+const rcsChatGuid = (sourceId: string): string =>
+  `RCS;-;g1.${RCS_PROVIDER_EPOCH}.${Buffer.from(sourceId).toString('base64url')}`;
+const rcsMessageGuid = (sourceId: string): string =>
+  `rcs-g1.${RCS_PROVIDER_EPOCH}.${Buffer.from(sourceId).toString('base64url')}`;
+const RCS_SERVER_INFO = {
+  version: 'test',
+  private_api: false,
+  rcs: true,
+  supports_rcs_epoch_qualified_ids: true,
+  rcs_provider_epoch: RCS_PROVIDER_EPOCH,
+  supports_message_part_topology: false,
+} as const;
 
 /** Build an EventDetail with a chat-message notification carrying `data` + an action id. */
 function chatDetail(
@@ -245,7 +288,7 @@ async function waitForCalls(mock: jest.Mock, count: number): Promise<void> {
 
 beforeEach(() => {
   useSessionStore.setState({
-    serverInfo: { version: 'test', private_api: true, rcs: true } as any,
+    serverInfo: { ...RCS_SERVER_INFO, private_api: true } as any,
   });
 });
 
@@ -395,8 +438,8 @@ describe('handleNotificationAction — reply', () => {
     await waitForCalls(mockSendText, 1);
     const loveAction = handleNotificationAction(
       safeChatDetail(ACTION_LOVE, {
-        chatGuid: 'RCS;-;ordered-chat',
-        messageGuid: 'rcs-ordered-message',
+        chatGuid: rcsChatGuid('ordered-chat'),
+        messageGuid: rcsMessageGuid('ordered-message'),
       }),
     );
     await Promise.resolve();
@@ -470,16 +513,16 @@ describe('handleNotificationAction — love (tapback)', () => {
   it('sends a love reaction for a live canonical RCS chat, then clears the notif', async () => {
     await handleNotificationAction(
       safeChatDetail(ACTION_LOVE, {
-        chatGuid: 'RCS;-;thread-2',
-        messageGuid: 'rcs-message-2',
+        chatGuid: rcsChatGuid('thread-2'),
+        messageGuid: rcsMessageGuid('message-2'),
       }),
     );
     expect(mockSendReaction).toHaveBeenCalledWith(
       mockDb,
       expect.anything(),
       {
-        chatGuid: 'RCS;-;thread-2',
-        targetGuid: 'rcs-message-2',
+        chatGuid: rcsChatGuid('thread-2'),
+        targetGuid: rcsMessageGuid('message-2'),
         reaction: 'love',
         partIndex: 0,
       },
@@ -503,7 +546,10 @@ describe('handleNotificationAction — love (tapback)', () => {
 
   it('ignores a noncanonical message id even inside an RCS chat', async () => {
     await handleNotificationAction(
-      safeChatDetail(ACTION_LOVE, { chatGuid: 'RCS;-;thread-2', messageGuid: 'legacy-message' }),
+      safeChatDetail(ACTION_LOVE, {
+        chatGuid: rcsChatGuid('thread-2'),
+        messageGuid: 'legacy-message',
+      }),
     );
 
     expect(mockSendReaction).not.toHaveBeenCalled();
@@ -512,17 +558,17 @@ describe('handleNotificationAction — love (tapback)', () => {
 
   it('targets a modern RCS notification as whole-message part zero', async () => {
     useSessionStore.setState({
-      serverInfo: { version: 'test', private_api: false, rcs: true } as any,
+      serverInfo: RCS_SERVER_INFO as any,
     });
     mockResolveRcsAttemptOwnership.mockResolvedValueOnce({
       attemptAware: true,
-      serverInfo: { private_api: false, rcs: true, supports_message_part_topology: true },
+      serverInfo: { ...RCS_SERVER_INFO, supports_message_part_topology: true },
     });
 
     await handleNotificationAction(
       safeChatDetail(ACTION_LOVE, {
-        chatGuid: 'RCS;-;thread-1',
-        messageGuid: 'rcs-message-1',
+        chatGuid: rcsChatGuid('thread-1'),
+        messageGuid: rcsMessageGuid('message-1'),
       }),
     );
 
@@ -530,8 +576,8 @@ describe('handleNotificationAction — love (tapback)', () => {
       mockDb,
       expect.anything(),
       {
-        chatGuid: 'RCS;-;thread-1',
-        targetGuid: 'rcs-message-1',
+        chatGuid: rcsChatGuid('thread-1'),
+        targetGuid: rcsMessageGuid('message-1'),
         reaction: 'love',
         partIndex: 0,
       },
@@ -550,8 +596,8 @@ describe('handleNotificationAction — love (tapback)', () => {
 
     await handleNotificationAction(
       safeChatDetail(ACTION_LOVE, {
-        chatGuid: 'RCS;-;thread-1',
-        messageGuid: 'rcs-message-1',
+        chatGuid: rcsChatGuid('thread-1'),
+        messageGuid: rcsMessageGuid('message-1'),
       }),
     );
 
@@ -565,8 +611,8 @@ describe('handleNotificationAction — love (tapback)', () => {
 
     await handleNotificationAction(
       safeChatDetail(ACTION_LOVE, {
-        chatGuid: 'RCS;-;headless',
-        messageGuid: 'rcs-headless-message',
+        chatGuid: rcsChatGuid('headless'),
+        messageGuid: rcsMessageGuid('headless-message'),
       }),
     );
 
@@ -574,8 +620,8 @@ describe('handleNotificationAction — love (tapback)', () => {
       mockDb,
       taskHttp,
       expect.objectContaining({
-        chatGuid: 'RCS;-;headless',
-        targetGuid: 'rcs-headless-message',
+        chatGuid: rcsChatGuid('headless'),
+        targetGuid: rcsMessageGuid('headless-message'),
         reaction: 'love',
       }),
       expect.any(Number),
@@ -585,7 +631,9 @@ describe('handleNotificationAction — love (tapback)', () => {
   });
 
   it('does nothing to react when the intent carried no messageGuid, but still clears', async () => {
-    await handleNotificationAction(safeChatDetail(ACTION_LOVE, { chatGuid: 'RCS;-;thread-2' }));
+    await handleNotificationAction(
+      safeChatDetail(ACTION_LOVE, { chatGuid: rcsChatGuid('thread-2') }),
+    );
     expect(mockSendReaction).not.toHaveBeenCalled();
     expect(mockNotifeeCancel).toHaveBeenCalledWith('gator-message-7');
   });
@@ -594,13 +642,13 @@ describe('handleNotificationAction — love (tapback)', () => {
     mockIsDevServer.mockReturnValueOnce(true);
     await handleNotificationAction(
       safeChatDetail(ACTION_LOVE, {
-        chatGuid: 'RCS;-;dev',
-        messageGuid: 'rcs-dev-message',
+        chatGuid: rcsChatGuid('dev'),
+        messageGuid: rcsMessageGuid('dev-message'),
       }),
     );
     expect(mockDevSendFakeReaction).toHaveBeenCalledWith(
-      'RCS;-;dev',
-      'rcs-dev-message',
+      rcsChatGuid('dev'),
+      rcsMessageGuid('dev-message'),
       'love',
       undefined,
       0,
@@ -612,8 +660,8 @@ describe('handleNotificationAction — love (tapback)', () => {
   it('love uses ensureDatabase(), never getDatabase()', async () => {
     await handleNotificationAction(
       safeChatDetail(ACTION_LOVE, {
-        chatGuid: 'RCS;-;thread-2',
-        messageGuid: 'rcs-message-2',
+        chatGuid: rcsChatGuid('thread-2'),
+        messageGuid: rcsMessageGuid('message-2'),
       }),
     );
     expect(mockEnsureDatabase).toHaveBeenCalledTimes(2);
@@ -772,8 +820,8 @@ describe('handleNotificationAction — a failing action still clears the tray', 
     await expect(
       handleNotificationAction(
         safeChatDetail(ACTION_LOVE, {
-          chatGuid: 'RCS;-;thread-9',
-          messageGuid: 'rcs-message-9',
+          chatGuid: rcsChatGuid('thread-9'),
+          messageGuid: rcsMessageGuid('message-9'),
         }),
       ),
     ).resolves.toBeUndefined();
@@ -909,8 +957,8 @@ describe('notification actions — account-switch containment', () => {
     mockEnsureDatabase.mockResolvedValueOnce(mockDb).mockReturnValueOnce(database.promise);
     const action = handleNotificationAction(
       safeChatDetail(ACTION_LOVE, {
-        chatGuid: 'RCS;-;account-a-chat',
-        messageGuid: 'rcs-account-a-message',
+        chatGuid: rcsChatGuid('account-a-chat'),
+        messageGuid: rcsMessageGuid('account-a-message'),
       }),
     );
     await waitForCalls(mockEnsureDatabase, 2);

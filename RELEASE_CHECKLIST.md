@@ -7,13 +7,16 @@ Testing snapshot lives in
 [`docs/STORE_01G_INTERNAL_TESTING_RUNBOOK.md`](./docs/STORE_01G_INTERNAL_TESTING_RUNBOOK.md) and must
 be refreshed before any current staged-server round;
 [`docs/DEVICE_VERIFICATION_CHECKLIST.md`](./docs/DEVICE_VERIFICATION_CHECKLIST.md) is retired v56
-history and is not executable evidence for a replacement candidate. Do not copy status from an older
-build into this file. Section 0 is the next private Internal Testing gate; Sections 1–7 remain the
-broader Closed/Open/Production release gate.
+history and is not executable evidence for a replacement candidate. Its explicitly labelled Play-v78
+`UI-01` and `THEME-01A` observations are task-scoped only and do not rebind this checklist's exact v77
+candidate. Do not copy status from an older build into this file. Section 0 is the next private
+Internal Testing gate; Sections 1–7 remain the broader Closed/Open/Production release gate.
 
-Current release-candidate status — **INTERNAL TESTING; broader release remains NO-GO.** Exact v77
-was built, validated, and submitted only to Google Play Internal Testing. The live Internal release
-reports `completed`. A Play-installed Android 16/API 36 Samsung now has a narrow v77 killed-FCM and
+Current frozen release-checklist status — **INTERNAL TESTING; broader release remains NO-GO.** Exact
+v77 was built, validated, and submitted only to Google Play Internal Testing; that submission
+reports `completed`. Play `0.1.57` / version code `78` is now the latest live Internal artifact, but
+its `PERM-01`, `UI-01`, and `THEME-01A` results are task-scoped and this checklist has not been
+rebound to it. A Play-installed Android 16/API 36 Samsung has a narrow v77 killed-FCM and
 attachment-download result, but not the full candidate journey or installed-split signature result.
 The superseded Play-delivered v75 passed the five-group `DL-01` matrix on a physical Android 16/API 36
 Samsung; its Play-signed, sideloaded Android 17/API 37 compatibility result remains supporting-only.
@@ -410,12 +413,21 @@ npm run check:android-build
       [`docs/NET_01_PLAY_DEVICE_PROOF_2026-09-13.md`](./docs/NET_01_PLAY_DEVICE_PROOF_2026-09-13.md).
       That historical device result has not been repeated on exact Play v77.
 - [ ] The exact map-enabled candidate keeps Find My marker data bounded/inert, contains exactly one
-      Maps API-key metadata value matching the release preflight digest, omits phone-location
-      permissions, leaves Google Maps attribution unobscured, and passes online/outage,
-      focus/background/App-Lock, TalkBack, fallback, and controlled network checks. Exact Play v75
+      Maps API-key metadata value matching the release preflight digest, leaves Google Maps
+      attribution unobscured, never asks for the phone's location from Find My, and passes
+      online/outage, focus/background/App-Lock, fallback, and controlled network checks. Exact Play v75
       passed the narrower native render/attribution/focus/fallback subset for `PKG-01`; the broader
       release matrix remains open. See the
       [bounded package proof](./docs/PKG_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md).
+- [ ] The exact candidate declares coarse/fine foreground location for the explicit Current Location
+      action, omits background location and `FOREGROUND_SERVICE_LOCATION`, and presents confirmation
+      before Android's prompt. On a supported one-to-one conversation, prove approximate and precise
+      success, plus denial, cancellation/backgrounding, services-off, acquisition-error, and
+      15-second-timeout paths with no queue row or server request. Prove that a successful coordinate
+      is encrypted at rest, retry reuses that exact snapshot without reacquisition, and no retry is
+      attempted at or after 15 minutes. Reconcile the exact privacy screen, Play Data Safety answers,
+      foreground-service declaration, merged manifest/AAB, and installed `dumpsys package`; historical
+      no-location-permission candidates do not satisfy this gate.
 - [x] The replacement clean isolated build, guarded autolinking, and exact-AAB inspection confirm
       that the app-owned `react-native-webview` package/native registration is absent. Exact v77 DEX
       omits `Lcom/reactnativecommunity/webview/RNCWebViewPackage;`; the Play-v75 map hierarchy
@@ -466,8 +478,19 @@ explicitly says so. Remaining work includes:
       `expo-sharing`; the exercised synthetic attachment path passed on Play v75. Backup export was
       not separately exercised and receives no additional task-specific credit from this row.
 - [ ] Keyboard/navigation-bar behavior passes gesture and three-button navigation.
-- [ ] Dark appearance, contrast, large text, TalkBack labels/focus order, reduced motion, and supported
-      display sizes pass. The store listing makes no light/system-theme promise.
+- [x] `UI-01` task closure passes the focused 7-suite / 113-test gate and the newer Play-v78 OLED
+      Dark/Gator Settings, inbox, filled-action, unread-badge, and ordinary-bubble visual review.
+      This task-scoped evidence does not rebind this checklist's exact v77 release candidate or close
+      any v77-only row.
+- [x] `THEME-01A` task closure passes the focused 5-suite / 33-test gate and the newer Play-v78 four-
+      branch OLED Dark/Gator × Android light/dark cold-start and Settings matrix on three-button
+      navigation. Android light is a regression-test condition, not an app light theme. This
+      task-scoped evidence does not rebind this checklist's exact v77 release candidate.
+- [ ] A future bound release candidate repeats dark appearance/system-bar verification and passes
+      the supported-display-size release matrix. Frozen v77 retains its known OS-light navigation-
+      bar failure; the newer task-scoped v78 result does not repair or close any v77-only row. The
+      store listing makes no light/system-theme promise. Large-text, TalkBack, focus-order, and
+      reduced-motion evidence are not release requirements.
 - [ ] The exact candidate enforces the selected Android support boundary: release configuration and
       the generated manifest/AAB report `minSdkVersion` 36, Play targeting and store copy exclude
       Android versions below Android 16 / API 36, and the candidate passes the applicable smoke

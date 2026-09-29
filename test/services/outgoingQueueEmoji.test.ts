@@ -38,8 +38,11 @@ const noIo = {
   fileExists: async () => true,
 };
 
-const RCS_CHAT_GUID = 'RCS;-;emoji-thread';
-const RCS_TARGET_GUID = 'rcs-message-target';
+const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
+const RCS_CHAT_GUID = `RCS;-;g1.${RCS_PROVIDER_EPOCH}.${Buffer.from('emoji-thread').toString('base64url')}`;
+const RCS_TARGET_GUID = `rcs-g1.${RCS_PROVIDER_EPOCH}.${Buffer.from('message-target').toString('base64url')}`;
+const rcsAvailable = (chatGuid?: string): boolean =>
+  chatGuid === undefined || chatGuid === RCS_CHAT_GUID;
 
 async function seed(db: AppDatabase): Promise<number> {
   const hm = await upsertHandles(db, [{ address: '+15550001111' }]);
@@ -118,6 +121,11 @@ describe('runOutgoingQueue — emoji tapback resend', () => {
       }),
       noIo,
       2_000_000,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      rcsAvailable,
     );
 
     expect(res).toEqual({ eligible: 1, sent: 1 });
@@ -160,6 +168,11 @@ describe('runOutgoingQueue — emoji tapback resend', () => {
       }),
       noIo,
       2_000_000,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      rcsAvailable,
     );
     expect(body).toMatchObject({ reactionType: '-emoji', reactionEmoji: '🫡' });
   });
@@ -183,6 +196,11 @@ describe('runOutgoingQueue — emoji tapback resend', () => {
       }),
       noIo,
       2_000_000,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      rcsAvailable,
     );
     expect(body).toMatchObject({ reactionType: 'love' });
     expect(Object.keys(body!)).not.toContain('reactionEmoji');

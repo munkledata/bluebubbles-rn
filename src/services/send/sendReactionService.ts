@@ -11,6 +11,7 @@ import {
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { isRcsChatGuid } from '@utils/chat';
+import { parseReactionType } from '@core/reactions/reactionType';
 import {
   handleSendFailure,
   reconcileSendOutcome,
@@ -46,7 +47,7 @@ export async function sendReactionMessage(
   serverAuthorization?: MessageTargetServerAuthorization,
 ): Promise<{ tempGuid: string }> {
   if (!isRcsChatGuid(args.chatGuid)) {
-    throw new Error('iMessage reactions were retired with the Private API helper.');
+    throw new Error('iMessage reactions were retired from this retryable RCS path.');
   }
   const targetPart = explicitMessageTargetPart(args.targetGuid, args.partIndex);
   if (!targetPart) throw new MessageTargetUnavailableError();
@@ -100,7 +101,9 @@ export async function sendReactionMessage(
       partIndex: finalTarget.partIndex,
     });
     // RCS reactions return the same send acknowledgement shape as other message writes.
-    await reconcileSendOutcome(db, tempGuid, server, now, commitGuard);
+    await reconcileSendOutcome(db, tempGuid, server, now, commitGuard, {
+      expectedChatGuid: args.chatGuid,
+    });
   } catch (e) {
     // A revoked success-settlement owner must not be reinterpreted as a transport failure and
     // followed by a second stale-account database write attempt.
@@ -117,4 +120,52 @@ export async function sendReactionMessage(
   }
 
   return { tempGuid };
+}
+
+/** No optimistic row or retry queue: an acknowledgement-lost iMessage tapback may have sent. */
+export async function sendIMessageReactionMessage(
+  db: AppDatabase,
+  http: HttpClient,
+  args: SendReactionArgs,
+  commitGuard: DbCommitGuard,
+  serverAuthorization: MessageTargetServerAuthorization | undefined,
+  allowIMessageReaction: () => boolean,
+): Promise<{ guid: string }> {
+  const parsed = parseReactionType(args.reaction);
+  if (
+    !allowIMessageReaction() ||
+    !/^(?:iMessage|any);-;/.test(args.chatGuid) ||
+    args.partIndex !== 0 ||
+    !parsed ||
+    parsed.baseType === 'emoji' ||
+    args.emoji !== undefined
+  ) {
+    throw new Error('This iMessage reaction is unavailable.');
+  }
+  const targetPart = explicitMessageTargetPart(args.targetGuid, args.partIndex);
+  if (!targetPart) throw new MessageTargetUnavailableError();
+  const targetCommitGuard = messageTargetCommitGuard(commitGuard, serverAuthorization);
+  const finalTarget = await resolveMessageTarget(
+    db,
+    {
+      chatGuid: args.chatGuid,
+      messageGuid: targetPart.messageGuid,
+      partIndex: targetPart.partIndex,
+      serverAuthorization,
+    },
+    targetCommitGuard,
+  );
+  if (!finalTarget || finalTarget.basis !== 'exact-topology') {
+    throw new MessageTargetUnavailableError();
+  }
+  if (!allowIMessageReaction() || !commitGuard()) throw new DbCommitGuardRejectedError();
+  const ack = await sendReaction(http, {
+    chatGuid: args.chatGuid,
+    selectedMessageGuid: finalTarget.messageGuid,
+    reaction: args.reaction,
+    partIndex: 0,
+  });
+  if (!ack.guid)
+    throw new Error('Reaction delivery could not be confirmed. Check the conversation.');
+  return { guid: ack.guid };
 }

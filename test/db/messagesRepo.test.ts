@@ -574,10 +574,62 @@ describe('conversation-view repositories', () => {
       () => chatId,
       handles,
     );
-    const thread = await listThreadMessages(db, 'm1');
+    const thread = await listThreadMessages(db, 'c1', 'm1');
     expect(thread.map((m) => m.guid)).toEqual(['m1', 'r1', 'r2']); // originator first, then replies
     // Unrelated messages (m2/m3) are excluded.
     expect(thread.some((m) => m.guid === 'm3')).toBe(false);
+  });
+
+  it('requires the exact owner chat for both the thread originator and every reply', async () => {
+    const { db } = await createTestDb();
+    const chatId = await seed(db);
+    const handles = await upsertHandles(db, [
+      { address: '+15550000001', service: 'iMessage' },
+      { address: '+15550000002', service: 'RCS' },
+    ]);
+    const foreignChats = await upsertChats(
+      db,
+      [
+        Chat.parse({
+          guid: 'RCS;-;foreign-thread',
+          participants: [{ address: '+15550000002', service: 'RCS' }],
+        }),
+      ],
+      handles,
+    );
+    const foreignChatId = foreignChats.get('RCS;-;foreign-thread')!;
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'local-thread-reply',
+          text: 'local reply',
+          dateCreated: 400,
+          threadOriginatorGuid: 'm1',
+        }),
+      ],
+      () => chatId,
+      handles,
+    );
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'foreign-thread-reply',
+          text: 'must not cross chats',
+          dateCreated: 500,
+          threadOriginatorGuid: 'm1',
+        }),
+      ],
+      () => foreignChatId,
+      handles,
+    );
+
+    expect((await listThreadMessages(db, 'c1', 'm1')).map((message) => message.guid)).toEqual([
+      'm1',
+      'local-thread-reply',
+    ]);
+    await expect(listThreadMessages(db, 'RCS;-;foreign-thread', 'm1')).resolves.toEqual([]);
   });
 
   it('getFirstUnreadInChat finds the oldest RECEIVED message past the read marker + count', async () => {
@@ -1063,9 +1115,11 @@ describe('markMessageDeleted (deletion tombstone)', () => {
       () => chatId,
       handles,
     );
-    expect((await listThreadMessages(db, 'm1')).map((m) => m.guid)).toEqual(['m1', 'r1']);
+    expect((await listThreadMessages(db, 'c1', 'm1')).map((m) => m.guid)).toEqual(['m1', 'r1']);
     await markMessageDeleted(db, 'r1', 5000);
-    expect((await listThreadMessages(db, 'm1')).map((m) => m.guid)).toEqual(['m1']); // reply gone
+    expect((await listThreadMessages(db, 'c1', 'm1')).map((m) => m.guid)).toEqual(['m1']); // reply gone
+    await markMessageDeleted(db, 'm1', 5001);
+    await expect(listThreadMessages(db, 'c1', 'm1')).resolves.toEqual([]);
   });
 
   it('recompute COUNTS retracted rows (they still render as tombstones) but excludes deleted ones', async () => {
@@ -1147,7 +1201,7 @@ describe('markMessageDeleted (deletion tombstone)', () => {
     expect(latestDate()).toBe(200);
   });
 
-  it('is a safe no-op for an unknown guid (returns false, changes nothing)', async () => {
+  it('quarantines an unknown guid without changing any chat row', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seed(db);
     const latestDate = (): number | null =>
@@ -1164,6 +1218,13 @@ describe('markMessageDeleted (deletion tombstone)', () => {
       .prepare('SELECT COUNT(*) c FROM messages WHERE date_deleted IS NOT NULL')
       .get() as { c: number };
     expect(anyDeleted.c).toBe(0);
+    expect(
+      raw
+        .prepare(
+          "SELECT date_deleted AS dateDeleted, chat_guid AS chatGuid FROM message_deletion_ledger WHERE guid = 'does-not-exist'",
+        )
+        .get(),
+    ).toEqual({ dateDeleted: 5_000, chatGuid: null });
   });
 });
 
@@ -1846,5 +1907,12 @@ describe('deleteMessageLocal (the user’s own delete)', () => {
       .prepare('SELECT COUNT(*) c FROM messages WHERE date_deleted IS NOT NULL')
       .get() as { c: number };
     expect(anyDeleted.c).toBe(0);
+    expect(
+      raw
+        .prepare(
+          "SELECT date_deleted AS dateDeleted, chat_guid AS chatGuid FROM message_deletion_ledger WHERE guid = 'never-synced'",
+        )
+        .get(),
+    ).toEqual({ dateDeleted: 6_000, chatGuid: null });
   });
 });

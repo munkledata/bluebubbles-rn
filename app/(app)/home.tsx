@@ -1,8 +1,9 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { logger } from '@core/secure';
-import { disconnectFailureMessage, forget } from '@/services';
+import { runDevPerf02InboxBenchmark } from '@/services';
 import { showDialog } from '@ui/dialog/dialogStore';
 import {
   fireDueScheduled,
@@ -26,14 +27,17 @@ import { ConversationListScreen } from '@ui';
 
 /**
  * The connected inbox. Renders the reactive conversation list; a DEV-only
- * overlay drives on-device verification (inject a live message, disconnect).
+ * footer drives on-device verification without covering the inbox controls.
  */
 export default function Home(): React.JSX.Element {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const showDevProofControls = __DEV__ && isDevServer();
   // One lease for this exact mounted inbox. A delayed continuation from account A must not call a
   // service after reconnect and let that service capture account B's otherwise-valid generation.
   const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const [benchmarkBusy, setBenchmarkBusy] = useState(false);
+  const [devToolsOpen, setDevToolsOpen] = useState(false);
 
   // Catch up on any scheduled messages that came due while the app was away. Every scheduled
   // runner now performs the crash-row recovery itself, through one shared account-generation gate.
@@ -100,57 +104,122 @@ export default function Home(): React.JSX.Element {
     );
   };
 
-  const onDisconnect = async (): Promise<void> => {
-    // A retained button callback from an unmounted A inbox must never disconnect B. Do NOT put
-    // forget() in runTrackedRealtimeWork: forget owns and waits for that very barrier.
-    if (!accountLease.isCurrent()) return;
-    try {
-      await forget();
-    } catch (e) {
-      logger.warn('[home] Disconnect cleanup remains incomplete', e);
-      showDialog('Disconnect incomplete', disconnectFailureMessage(e));
-    } finally {
-      router.replace('/welcome');
-    }
+  const onBenchmark = (): void => {
+    if (!__DEV__ || benchmarkBusy) return;
+    setBenchmarkBusy(true);
+    void runDevPerf02InboxBenchmark()
+      .then((results) => {
+        if (!accountLease.isCurrent()) return;
+        const summary = results
+          .map(
+            (result) =>
+              `${result.chats.toLocaleString()} chats: page p95 ${result.page.p95Ms} ms, indexed search p95 ${result.indexedSearch.p95Ms} ms`,
+          )
+          .join('\n');
+        showDialog('PERF-02 Android query measurement', summary);
+      })
+      .catch((error: unknown) => {
+        logger.warn('[home] DEV PERF-02 benchmark failed', {
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+        });
+        if (accountLease.isCurrent()) {
+          showDialog(
+            'PERF-02 benchmark failed',
+            error instanceof Error ? error.message : 'Unknown error',
+          );
+        }
+      })
+      .finally(() => setBenchmarkBusy(false));
   };
 
   return (
     <View style={styles.flex}>
       <ConversationListScreen />
       {__DEV__ ? (
-        <View style={styles.devBar} pointerEvents="box-none">
-          <View style={styles.devRow}>
-            <Pressable
-              style={[styles.devBtn, styles.devFlex]}
-              onPress={() => runDevAccountAction('message injection', injectMessage)}
-            >
-              <Text style={styles.devText}>⚡ Inject</Text>
-            </Pressable>
-            {showDevProofControls ? (
+        <View
+          style={[styles.devBar, { paddingBottom: Math.max(insets.bottom, 8) }]}
+          pointerEvents="box-none"
+          testID="home-dev-tools-footer"
+        >
+          {devToolsOpen ? (
+            <View style={styles.devPanel}>
               <Pressable
-                style={[styles.devBtn, styles.devFlex]}
-                onPress={() =>
-                  runDevAccountAction(
-                    'persist-without-drain proof',
-                    devQueueIncomingMessageWithoutDrain,
-                  )
-                }
+                style={[styles.devBtn, styles.devClose]}
+                onPress={() => setDevToolsOpen(false)}
+                accessibilityRole="button"
+                accessibilityLabel="Close developer tools"
               >
-                <Text style={styles.devText}>⏸ Queue</Text>
+                <Text style={styles.devText}>Hide DEV tools</Text>
               </Pressable>
-            ) : null}
+              <View style={styles.devRow}>
+                <Pressable
+                  style={[styles.devBtn, styles.devFlex]}
+                  onPress={() => runDevAccountAction('message injection', injectMessage)}
+                >
+                  <Text style={styles.devText}>⚡ Inject</Text>
+                </Pressable>
+                {showDevProofControls ? (
+                  <Pressable
+                    style={[styles.devBtn, styles.devFlex]}
+                    onPress={() =>
+                      runDevAccountAction(
+                        'persist-without-drain proof',
+                        devQueueIncomingMessageWithoutDrain,
+                      )
+                    }
+                  >
+                    <Text style={styles.devText}>⏸ Queue</Text>
+                  </Pressable>
+                ) : null}
+                <Pressable
+                  style={[styles.devBtn, styles.devFlex]}
+                  onPress={() => {
+                    if (accountLease.isCurrent()) router.push('/findmy');
+                  }}
+                >
+                  <Text style={styles.devText}>📍 Find My</Text>
+                </Pressable>
+              </View>
+              <Pressable
+                style={styles.devBtn}
+                onPress={() => router.push('/perf-inbox')}
+                disabled={benchmarkBusy}
+              >
+                <Text style={styles.devText}>📊 Measure rendered inbox</Text>
+              </Pressable>
+              <Pressable style={styles.devBtn} onPress={onBenchmark} disabled={benchmarkBusy}>
+                <Text style={styles.devText}>
+                  {benchmarkBusy ? '📈 Measuring disposable inbox…' : '📈 Measure PERF-02 queries'}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={styles.devBtn}
+                onPress={() => router.push('/perf-inbox-cold')}
+                disabled={benchmarkBusy}
+              >
+                <Text style={styles.devText}>❄️ Measure cold inbox</Text>
+              </Pressable>
+              <Pressable
+                style={styles.devBtn}
+                onPress={() => {
+                  if (accountLease.isCurrent()) router.push('/settings');
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Manage connection in Settings"
+              >
+                <Text style={styles.devText}>Manage connection</Text>
+              </Pressable>
+            </View>
+          ) : (
             <Pressable
-              style={[styles.devBtn, styles.devFlex]}
-              onPress={() => {
-                if (accountLease.isCurrent()) router.push('/findmy');
-              }}
+              style={styles.devToggle}
+              onPress={() => setDevToolsOpen(true)}
+              accessibilityRole="button"
+              accessibilityLabel="Open developer tools"
             >
-              <Text style={styles.devText}>📍 Find My</Text>
+              <Text style={styles.devText}>DEV</Text>
             </Pressable>
-          </View>
-          <Pressable style={[styles.devBtn, styles.devDanger]} onPress={onDisconnect}>
-            <Text style={styles.devText}>Disconnect</Text>
-          </Pressable>
+          )}
         </View>
       ) : null}
     </View>
@@ -159,7 +228,8 @@ export default function Home(): React.JSX.Element {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  devBar: { position: 'absolute', bottom: 24, left: 16, right: 16, gap: 10 },
+  devBar: { flexShrink: 0, paddingHorizontal: 16, paddingTop: 8 },
+  devPanel: { gap: 10 },
   devRow: { flexDirection: 'row', gap: 8 },
   devFlex: { flex: 1 },
   devBtn: {
@@ -169,6 +239,13 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     alignItems: 'center',
   },
-  devDanger: { backgroundColor: '#FF3B30ee' },
+  devToggle: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#1982FCee',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 14,
+  },
+  devClose: { backgroundColor: '#3A3A3Cee' },
   devText: { color: '#fff', fontWeight: '700', fontSize: 16 },
 });

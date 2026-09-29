@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
-import { Chat } from '@core/models';
+import { Chat, Message } from '@core/models';
 import { logger } from '@core/secure';
 import {
   listReactionsByMessageGuids,
@@ -11,9 +11,11 @@ import {
   upsertMessages,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError } from '@db/transaction';
-import { Message } from '@core/models';
 import type { AppDatabase } from '@db/types';
-import { sendReactionMessage } from '@/services/send/sendReactionService';
+import {
+  sendIMessageReactionMessage,
+  sendReactionMessage,
+} from '@/services/send/sendReactionService';
 import {
   captureRealtimeDeliveryLease,
   pauseRealtimeDeliveries,
@@ -74,6 +76,80 @@ async function seedWholeMessageRcsTarget(db: AppDatabase) {
   );
 }
 
+async function seedExactIMessageTarget(db: AppDatabase) {
+  const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
+  const chats = await upsertChats(
+    db,
+    [Chat.parse({ guid: 'iMessage;-;c1', participants: [{ address: 'a@x.com' }] })],
+    handles,
+  );
+  await upsertMessages(
+    db,
+    [
+      Message.parse({
+        guid: 'im-target',
+        text: 'hi',
+        dateCreated: 100,
+        messagePartTopology: {
+          complete: true,
+          originalPartIndexes: [0],
+          currentParts: [{ index: 0, kind: 'text' }],
+          attachmentOwnership: [],
+        },
+      }),
+    ],
+    () => chats.get('iMessage;-;c1')!,
+    handles,
+  );
+}
+
+describe('sendIMessageReactionMessage', () => {
+  it('sends one classic reaction without a retry row and requires a current capability', async () => {
+    const { db, raw } = await createTestDb();
+    await seedExactIMessageTarget(db);
+    const post = jest.fn(async () => ({ guid: 'im-reaction' }));
+    let allowed = false;
+    const args = {
+      chatGuid: 'iMessage;-;c1',
+      targetGuid: 'im-target',
+      reaction: 'like',
+      partIndex: 0,
+    };
+
+    await expect(
+      sendIMessageReactionMessage(
+        db,
+        fakeHttp(post),
+        args,
+        () => true,
+        undefined,
+        () => allowed,
+      ),
+    ).rejects.toThrow('unavailable');
+    expect(post).not.toHaveBeenCalled();
+
+    allowed = true;
+    await expect(
+      sendIMessageReactionMessage(
+        db,
+        fakeHttp(post),
+        args,
+        () => true,
+        undefined,
+        () => allowed,
+      ),
+    ).resolves.toEqual({ guid: 'im-reaction' });
+    expect(post).toHaveBeenCalledWith({
+      chatGuid: 'iMessage;-;c1',
+      messageGuid: 'im-target',
+      reactionType: 'like',
+      partIndex: 0,
+    });
+    expect(one(raw, 'SELECT COUNT(*) AS count FROM outgoing_queue')).toEqual({ count: 0 });
+    expect(one(raw, 'SELECT COUNT(*) AS count FROM messages')).toEqual({ count: 1 });
+  });
+});
+
 describe('sendReactionMessage', () => {
   it('rejects an iMessage reaction before DB or HTTP even with a stale caller', async () => {
     const { db, raw } = await createTestDb();
@@ -123,7 +199,9 @@ describe('sendReactionMessage', () => {
     expect(row.t).toBe('love');
     expect(row.p).toBe(0);
     expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
-    expect((await listReactionsByMessageGuids(db, ['rcs-mt'])).get('rcs-mt')).toHaveLength(1);
+    expect(
+      (await listReactionsByMessageGuids(db, 'RCS;-;c1', ['rcs-mt'])).get('rcs-mt'),
+    ).toHaveLength(1);
   });
 
   it('targets a confirmed RCS message as whole-message part zero without Apple topology', async () => {
@@ -362,7 +440,9 @@ describe('sendReactionMessage', () => {
       { chatGuid: 'RCS;-;c1', targetGuid: 'rcs-mt', reaction: '-love', partIndex: 0 },
       2000,
     );
-    expect((await listReactionsByMessageGuids(db, ['rcs-mt'])).get('rcs-mt') ?? []).toHaveLength(0);
+    expect(
+      (await listReactionsByMessageGuids(db, 'RCS;-;c1', ['rcs-mt'])).get('rcs-mt') ?? [],
+    ).toHaveLength(0);
   });
 
   it('marks the reaction errored on failure', async () => {

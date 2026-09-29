@@ -1,5 +1,37 @@
 import type { BubbleEffect, EffectDescriptor, ScreenEffect } from './types';
 
+export interface IMessageEffectOption {
+  readonly id: string;
+  readonly label: string;
+  readonly kind: 'bubble' | 'screen';
+}
+
+/** The complete, deliberately closed set accepted by Gator's narrow effect command. */
+export const IMESSAGE_EFFECT_OPTIONS = [
+  { id: 'com.apple.MobileSMS.expressivesend.impact', label: 'Slam', kind: 'bubble' },
+  { id: 'com.apple.MobileSMS.expressivesend.loud', label: 'Loud', kind: 'bubble' },
+  { id: 'com.apple.MobileSMS.expressivesend.gentle', label: 'Gentle', kind: 'bubble' },
+  {
+    id: 'com.apple.MobileSMS.expressivesend.invisibleink',
+    label: 'Invisible Ink',
+    kind: 'bubble',
+  },
+  { id: 'com.apple.messages.effect.CKEchoEffect', label: 'Echo', kind: 'screen' },
+  { id: 'com.apple.messages.effect.CKSpotlightEffect', label: 'Spotlight', kind: 'screen' },
+  { id: 'com.apple.messages.effect.CKHappyBirthdayEffect', label: 'Balloons', kind: 'screen' },
+  { id: 'com.apple.messages.effect.CKConfettiEffect', label: 'Confetti', kind: 'screen' },
+  { id: 'com.apple.messages.effect.CKHeartEffect', label: 'Love', kind: 'screen' },
+  { id: 'com.apple.messages.effect.CKLasersEffect', label: 'Lasers', kind: 'screen' },
+  { id: 'com.apple.messages.effect.CKFireworksEffect', label: 'Fireworks', kind: 'screen' },
+  { id: 'com.apple.messages.effect.CKSparklesEffect', label: 'Celebration', kind: 'screen' },
+] as const satisfies readonly IMessageEffectOption[];
+
+const SUPPORTED_EFFECT_IDS = new Set<string>(IMESSAGE_EFFECT_OPTIONS.map((effect) => effect.id));
+
+export function isSupportedIMessageEffectId(effectId: string): boolean {
+  return SUPPORTED_EFFECT_IDS.has(effectId);
+}
+
 // Exact iMessage expressiveSendStyleId → effect (from Flutter constants.dart effectMap).
 const BUBBLE_IDS: Record<string, BubbleEffect> = {
   'com.apple.MobileSMS.expressivesend.impact': 'slam',

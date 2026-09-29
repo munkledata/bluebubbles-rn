@@ -1,6 +1,12 @@
 import { mapWithConcurrency } from '@core/async/pool';
 import { SYNC_BATCH_SIZE } from '@core/config';
 import { logger } from '@core/secure';
+import {
+  classifyRcsChatRecord,
+  classifyRcsMessageRecord,
+  currentRcsProviderEpoch,
+  type RcsProviderServerInfo,
+} from '@core/rcs/providerIdentity';
 import { advanceMarker, buildSyncCursor, GuidDeduper, type SyncMarker } from '@core/sync';
 import {
   getChatIdByGuid,
@@ -103,6 +109,40 @@ export interface StoredChat {
 const CHAT_TX_CHUNK = 5;
 const WATERMARK_REAPPLY_CHUNK = CHAT_TX_CHUNK;
 
+export class RcsProviderEpochSyncError extends Error {
+  constructor() {
+    super('RCS sync response did not match the captured Google pairing epoch.');
+    this.name = 'RcsProviderEpochSyncError';
+  }
+}
+
+function admitsServerChat(info: RcsProviderServerInfo | null | undefined, chat: Chat): boolean {
+  const valid =
+    classifyRcsChatRecord(info, chat) !== 'invalid' &&
+    (chat.lastMessage == null ||
+      classifyRcsMessageRecord(info, chat.lastMessage, chat.guid) !== 'invalid');
+  if (!valid && currentRcsProviderEpoch(info) != null) throw new RcsProviderEpochSyncError();
+  return valid;
+}
+
+function admitsServerMessage(
+  info: RcsProviderServerInfo | null | undefined,
+  message: Message,
+  expectedChatGuid?: string,
+): boolean {
+  const admission = classifyRcsMessageRecord(info, message, expectedChatGuid);
+  // REST pages have no later owner-resolution phase. Unlike a lean realtime update, a qualified
+  // RCS row without any exact chat owner would otherwise be skipped by the repository while the
+  // sync cursor advanced past it permanently.
+  // Chat-page callers supply the route owner explicitly. Incremental pages do not: their writer
+  // can resolve only an embedded chat row, so a top-level chatGuid alone is not durable ownership.
+  const hasOwner =
+    expectedChatGuid != null || (message.chats ?? []).some((chat) => chat.guid.length > 0);
+  const valid = admission !== 'invalid' && (admission !== 'current' || hasOwner);
+  if (!valid && currentRcsProviderEpoch(info) != null) throw new RcsProviderEpochSyncError();
+  return valid;
+}
+
 /**
  * Re-apply the macOS read watermarks (`Chat.lastReadMessageTimestamp`) of chats we have ALREADY
  * stored, now that their messages exist locally.
@@ -183,6 +223,8 @@ export interface FullSyncOptions {
   onServerMarker?: (marker: SyncMarker) => void;
   /** Repair-only identity view consumed after the server validates its stable snapshot lease. */
   onServerView?: (view: FullSyncServerView) => void;
+  /** Current Google pairing identity; absent deliberately rejects newly received RCS rows. */
+  rcsProviderInfo?: RcsProviderServerInfo | null;
 }
 
 /**
@@ -203,6 +245,7 @@ export async function syncAllChats(
   ) => void,
   onServerChats?: (chats: readonly Chat[]) => void,
   transactionGuard?: DbCommitGuard,
+  rcsProviderInfo?: RcsProviderServerInfo | null,
 ): Promise<StoredChat[]> {
   const boundedPageSize =
     Number.isFinite(chatPageSize) && chatPageSize > 0 ? Math.min(Math.floor(chatPageSize), 200) : 0;
@@ -216,7 +259,8 @@ export async function syncAllChats(
     const batch = await api.fetchChats(offset, boundedPageSize, signal);
     if (!shouldContinue()) break;
     if (batch.length === 0) break;
-    const pageRows = batch.slice(0, boundedPageSize);
+    const receivedRows = batch.slice(0, boundedPageSize);
+    const pageRows = receivedRows.filter((chat) => admitsServerChat(rcsProviderInfo, chat));
     onServerChats?.(pageRows);
     const pageContactAddresses = new Set<string>();
     for (let i = 0; i < pageRows.length; i += CHAT_TX_CHUNK) {
@@ -299,7 +343,7 @@ export async function syncAllChats(
     }
     await linkHandlesAfterCommit(db, [...pageContactAddresses], commitGuard);
     if (!shouldContinue()) return stored;
-    offset += pageRows.length;
+    offset += receivedRows.length;
     if (batch.length < boundedPageSize) break;
   }
   return stored;
@@ -427,6 +471,7 @@ export async function fullSync(
     recordServerLastMessages,
     recordServerChats,
     commitGuard,
+    opts.rcsProviderInfo,
   );
   const chats = stored.length;
   if (shouldContinue()) opts.onProgress?.({ chats, messages });
@@ -451,8 +496,11 @@ export async function fullSync(
         const msgs = await api.fetchChatMessages(guid, mOffset, requestSize, opts.signal);
         if (!shouldContinue()) return;
         if (msgs.length === 0) break;
-        const pageRows = msgs.slice(0, requestSize);
-        const pageFingerprint = pageRows.map((message) => message.guid).join('\u0000');
+        const receivedRows = msgs.slice(0, requestSize);
+        const pageRows = receivedRows.filter((message) =>
+          admitsServerMessage(opts.rcsProviderInfo, message, guid),
+        );
+        const pageFingerprint = receivedRows.map((message) => message.guid).join('\u0000');
         if (seenPageFingerprints.has(pageFingerprint)) {
           logger.warn(
             `[sync] full-sync page repeated for chat ${guid} at offset ${mOffset} — stopping to avoid refetching it forever`,
@@ -465,7 +513,7 @@ export async function fullSync(
           break;
         }
         seenPageFingerprints.add(pageFingerprint);
-        advanceServerMarker(pageRows);
+        advanceServerMarker(receivedRows);
         recordServerMessages(guid, pageRows, 'page');
         const pageHandles = pageRows.flatMap((message) => (message.handle ? [message.handle] : []));
         for (let i = 0; i < pageRows.length; i += INCREMENTAL_TX_CHUNK) {
@@ -497,7 +545,7 @@ export async function fullSync(
         );
         if (!shouldContinue()) return;
         opts.onProgress?.({ chats, messages });
-        mOffset += pageRows.length;
+        mOffset += receivedRows.length;
         if (msgs.length < requestSize || mOffset >= maxPerChat) break;
       }
     },
@@ -597,19 +645,29 @@ export async function syncSingleChat(
   db: AppDatabase,
   api: SyncApi,
   chatGuid: string,
-  opts: { shouldAbort?: () => boolean; signal?: AbortSignal } = {},
+  opts: {
+    shouldAbort?: () => boolean;
+    signal?: AbortSignal;
+    rcsProviderInfo?: RcsProviderServerInfo | null;
+  } = {},
 ): Promise<boolean> {
   const fetchChat = api.fetchChat;
   if (!fetchChat) throw new Error('Targeted chat repair is unavailable for this sync adapter.');
   const shouldContinue = (): boolean => !(opts.shouldAbort?.() ?? false);
   const commitGuard = opts.shouldAbort ? shouldContinue : undefined;
-  if (!shouldContinue()) return false;
+  if (
+    !shouldContinue() ||
+    classifyRcsChatRecord(opts.rcsProviderInfo, { guid: chatGuid }) === 'invalid'
+  ) {
+    return false;
+  }
 
   const chat = await fetchChat(chatGuid, opts.signal);
   if (!shouldContinue()) return false;
   if (chat.guid !== chatGuid) {
     throw new Error('The server returned a different chat during targeted repair.');
   }
+  if (!admitsServerChat(opts.rcsProviderInfo, chat)) return false;
 
   const participants = chat.participants ?? [];
   let chatId: number | null = null;
@@ -676,6 +734,8 @@ export interface ChatMessageRangeOptions {
   probeExhaustion?: boolean;
   /** Collect a restore read-floor candidate from rows fetched by this crawl at/before this time. */
   readFloorAtOrBefore?: number;
+  /** Current Google pairing identity; absent deliberately rejects RCS network work. */
+  rcsProviderInfo?: RcsProviderServerInfo | null;
 }
 
 /**
@@ -720,7 +780,12 @@ export async function syncChatMessageRange(
     }
   };
 
-  if (opts.shouldAbort?.()) return result(0, false);
+  if (
+    opts.shouldAbort?.() ||
+    classifyRcsChatRecord(opts.rcsProviderInfo, { guid: chatGuid }) === 'invalid'
+  ) {
+    return result(0, false);
+  }
   const chatId = await getChatIdByGuid(db, chatGuid);
   if (opts.shouldAbort?.()) return result(0, false);
   if (chatId == null) return result(0, false);
@@ -756,7 +821,10 @@ export async function syncChatMessageRange(
     // Preserve the established page-granular cap: once a page has been requested, store its whole
     // bounded prefix and then stop when `total >= cap`. A cap that is not divisible by pageSize can
     // therefore include at most one partial-page overage (never more than 99 rows).
-    const pageRows = msgs.slice(0, pageSize);
+    const receivedRows = msgs.slice(0, pageSize);
+    const pageRows = receivedRows.filter((message) =>
+      admitsServerMessage(opts.rcsProviderInfo, message, chatGuid),
+    );
     pageRows.forEach(considerReadFloor);
     const pageHandles = pageRows.flatMap((message) => (message.handle ? [message.handle] : []));
     for (let i = 0; i < pageRows.length; i += INCREMENTAL_TX_CHUNK) {
@@ -803,12 +871,12 @@ export async function syncChatMessageRange(
       commitGuard,
     );
     if (!shouldContinue()) return result(total, false);
-    offset += pageRows.length;
+    offset += receivedRows.length;
     if (msgs.length < pageSize) {
       exhausted = true;
       break;
     }
-    if (total >= cap) {
+    if (offset >= cap) {
       if (opts.probeExhaustion && shouldContinue()) {
         const probe = await api.fetchChatMessages(chatGuid, offset, 1, opts.signal);
         if (!shouldContinue()) return result(total, false);
@@ -864,6 +932,8 @@ export interface IncrementalSyncOptions {
    * seen, `messages` the running count of fresh messages stored.
    */
   onProgress?: (p: SyncProgress) => void;
+  /** Current Google pairing identity; absent deliberately rejects newly received RCS rows. */
+  rcsProviderInfo?: RcsProviderServerInfo | null;
 }
 
 /**
@@ -916,7 +986,10 @@ export async function incrementalSync(
     if (!shouldContinue()) break;
     if (batch.length === 0) break;
 
-    const fresh = batch.filter((m) => deduper.markIfNew(m.guid));
+    const fresh = batch.filter(
+      (message) =>
+        admitsServerMessage(opts.rcsProviderInfo, message) && deduper.markIfNew(message.guid),
+    );
     // Page-level, for the progress counters only — the writes below work slice by slice.
     const embeddedChats = fresh.flatMap((m) => m.chats ?? []);
     const prevMarker = marker;

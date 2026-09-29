@@ -295,7 +295,7 @@ test('rejects mutation or shadowing of the claimed row and handoff bindings', ()
   );
 });
 
-test('fails closed on RCS reply targets and all retired Private API text features', () => {
+test('fails closed on RCS reply targets and retired rich text fields', () => {
   const rcsTarget =
     '  if (target && isRcsChatGuid(args.chatGuid)) {\n' +
     "    throw new Error('This server cannot send an RCS threaded reply.');\n" +
@@ -305,7 +305,7 @@ test('fails closed on RCS reply targets and all retired Private API text feature
     /RCS threaded target/,
   );
   const privateApiBarrier =
-    '  if (needsPrivateApi) {\n' +
+    '  if (hasRetiredRichFields) {\n' +
     "    throw new Error('Private API message features were retired in this release.');\n" +
     '  }\n';
   assertErrors(
@@ -317,6 +317,55 @@ test('fails closed on RCS reply targets and all retired Private API text feature
       ),
     ),
     /Private API-only text features must fail closed/,
+  );
+});
+
+test('admits only exact part-zero, bounded, well-formed, unscheduled iMessage replies', () => {
+  assertErrors(
+    scheduledHandoffSourceErrors(
+      replaceOnce(
+        validSendServiceSource,
+        '  if (target && target.partIndex !== 0) {',
+        '  if (target && target.partIndex < 0) {',
+      ),
+    ),
+    /exact message part zero/,
+  );
+  assertErrors(
+    scheduledHandoffSourceErrors(
+      replaceOnce(
+        validSendServiceSource,
+        'utf8Encode(args.text).byteLength > MAX_SEND_ATTACHMENT_TEXT_BYTES',
+        'args.text.length > MAX_SEND_ATTACHMENT_TEXT_BYTES',
+      ),
+    ),
+    /bounded, nonblank, NUL-free, well-formed plain text/,
+  );
+  assertErrors(
+    scheduledHandoffSourceErrors(
+      replaceOnce(validSendServiceSource, "args.text.includes('\\u0000') ||", 'false ||'),
+    ),
+    /NUL-free/,
+  );
+  assertErrors(
+    scheduledHandoffSourceErrors(
+      replaceOnce(
+        validSendServiceSource,
+        'utf8Decode(utf8Encode(args.text)) !== args.text ||',
+        'false ||',
+      ),
+    ),
+    /well-formed plain text/,
+  );
+  assertErrors(
+    scheduledHandoffSourceErrors(
+      replaceOnce(
+        validSendServiceSource,
+        '  if (target && scheduledHandover) {',
+        '  if (false && scheduledHandover) {',
+      ),
+    ),
+    /remain unscheduled/,
   );
 });
 
@@ -372,16 +421,16 @@ test('keeps the send method AppleScript-only', () => {
   );
 });
 
-test('requires pinned RCS capability before durable admission', () => {
+test('requires pinned RCS or reply capability before durable admission', () => {
   assertErrors(
     scheduledHandoffSourceErrors(
       replaceOnce(
         validSendServiceSource,
-        '{ requireServerInfo: rcsChat }',
+        '{ requireServerInfo: rcsChat || target != null }',
         '{ requireServerInfo: false }',
       ),
     ),
-    /require ServerInfo exactly for RCS/,
+    /require ServerInfo exactly for RCS or replies/,
   );
   assertErrors(
     scheduledHandoffSourceErrors(
@@ -405,6 +454,49 @@ test('requires pinned RCS capability before durable admission', () => {
   );
 });
 
+test('requires current reply capability and a proven existing one-to-one header', () => {
+  assertErrors(
+    scheduledHandoffSourceErrors(
+      replaceOnce(
+        validSendServiceSource,
+        'capability.serverInfo?.supports_imessage_replies !== true',
+        'capability.serverInfo?.supports_imessage_replies === false',
+      ),
+    ),
+    /exact reply capability/,
+  );
+  assertErrors(
+    scheduledHandoffSourceErrors(
+      replaceOnce(
+        validSendServiceSource,
+        '    const header = await getChatHeader(db, args.chatGuid);',
+        "    const header = await getChatHeader(db, 'other');",
+      ),
+    ),
+    /proven existing one-to-one/,
+  );
+  assertErrors(
+    scheduledHandoffSourceErrors(
+      replaceOnce(
+        validSendServiceSource,
+        '    if (!capabilityGuard()) throw new DbCommitGuardRejectedError();',
+        '    void capabilityGuard;',
+      ),
+    ),
+    /current lease/,
+  );
+  assertErrors(
+    scheduledHandoffSourceErrors(
+      replaceOnce(
+        validSendServiceSource,
+        'isProvenOneToOneIMessageChat(header)',
+        'isProvenOneToOneIMessageChat(undefined)',
+      ),
+    ),
+    /proven existing one-to-one/,
+  );
+});
+
 test('requires the guarded scheduled handoff and ordinary transaction owner', () => {
   const handoff =
     '          outgoing,\n' + '        },\n' + '        capabilityGuard,\n' + '      )';
@@ -422,21 +514,31 @@ test('requires the guarded scheduled handoff and ordinary transaction owner', ()
     scheduledHandoffSourceErrors(
       replaceOnce(
         validSendServiceSource,
-        '(context) => insertOutgoingTextWithinTransaction(context, outgoing)',
-        '(context) => insertOutgoingTextWithinTransaction(db, outgoing)',
+        "          if (authorizedTarget && resolvedTarget?.basis !== 'exact-topology') {",
+        '          if (false) {',
       ),
     ),
-    /ordinary text/,
+    /resolve exact reply topology/,
   );
   assertErrors(
     scheduledHandoffSourceErrors(
       replaceOnce(
         validSendServiceSource,
         '  const outgoing = {',
-        '  void resolveMessageTarget(db, target);\n  const outgoing = {',
+        '  messageTargetCommitGuard();\n  const outgoing = {',
       ),
     ),
-    /retired target authorization and revalidation paths must remain absent/,
+    /must not use legacy target authorization/,
+  );
+  assertErrors(
+    scheduledHandoffSourceErrors(
+      replaceOnce(
+        validSendServiceSource,
+        "    if (authorizedTarget && finalTarget?.basis !== 'exact-topology') {",
+        '    if (false) {',
+      ),
+    ),
+    /exact reply topology revalidation/,
   );
 });
 
@@ -486,7 +588,27 @@ test('keeps the exact canonical network payload and guarded settlement', () => {
         '      message: args.chatGuid,',
       ),
     ),
-    /canonical chat, temp id, attempt generation, message, and pinned method/,
+    /canonical chat, temp id, attempt generation, message, exact resolved reply target/,
+  );
+  assertErrors(
+    scheduledHandoffSourceErrors(
+      replaceOnce(
+        validSendServiceSource,
+        '      selectedMessageGuid: finalTarget?.messageGuid,',
+        '      selectedMessageGuid: target?.messageGuid,',
+      ),
+    ),
+    /exact resolved reply target/,
+  );
+  assertErrors(
+    scheduledHandoffSourceErrors(
+      replaceOnce(
+        validSendServiceSource,
+        '        server.viaPrivateApi !== true)',
+        '        server.viaPrivateApi === false)',
+      ),
+    ),
+    /exact bounded private-API acknowledgement/,
   );
   assertErrors(
     scheduledHandoffSourceErrors(
@@ -496,7 +618,7 @@ test('keeps the exact canonical network payload and guarded settlement', () => {
         '',
       ),
     ),
-    /ownership rejection rethrown before failure handling/,
+    /ownership rejection rethrown first/,
   );
   assertErrors(
     scheduledHandoffSourceErrors(
@@ -504,13 +626,35 @@ test('keeps the exact canonical network payload and guarded settlement', () => {
         validSendServiceSource,
         '    await reconcileSendOutcome(db, tempGuid, server, now, effectiveCommitGuard, {\n' +
           '      attemptOwnerToken: attemptOwnerToken ?? undefined,\n' +
+          '      expectedChatGuid: args.chatGuid,\n' +
           '    });',
         '    await reconcileSendOutcome(db, tempGuid, server, now, effectiveCommitGuard, {\n' +
           '      attemptOwnerToken: undefined,\n' +
+          '      expectedChatGuid: args.chatGuid,\n' +
           '    });',
       ),
     ),
     /success and failure settlement/,
+  );
+  assertErrors(
+    scheduledHandoffSourceErrors(
+      replaceOnce(
+        validSendServiceSource,
+        '      expectedChatGuid: args.chatGuid,',
+        '      expectedChatGuid: undefined,',
+      ),
+    ),
+    /success and failure settlement/,
+  );
+  assertErrors(
+    scheduledHandoffSourceErrors(
+      replaceOnce(
+        validSendServiceSource,
+        "        ...(target ? { terminalUncertainKind: 'reply' as const } : {}),",
+        "        ...(false ? { terminalUncertainKind: 'reply' as const } : {}),",
+      ),
+    ),
+    /one-shot uncertain outcomes/,
   );
 });
 
@@ -563,8 +707,8 @@ test('reviewed function fingerprints fail closed on otherwise unchecked edits', 
     scheduledHandoffSourceErrors(
       replaceOnce(
         validSendServiceSource,
-        '  return { tempGuid };',
-        '  void tempGuid;\n  return { tempGuid };',
+        '  return { tempGuid };\n}',
+        '  void tempGuid;\n  return { tempGuid };\n}',
       ),
       { expectedBodyHash: sendHash },
     ),

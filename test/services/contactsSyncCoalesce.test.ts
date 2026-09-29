@@ -108,6 +108,25 @@ describe('syncContacts coalescing', () => {
     expect(getContactsAsync).toHaveBeenCalledTimes(1);
   });
 
+  it('does not invent positional owners for contacts with missing or blank native ids', async () => {
+    getContactsAsync.mockResolvedValueOnce({
+      data: [
+        { id: undefined, name: 'Missing ID' },
+        { id: '   ', name: 'Blank ID' },
+        { id: 'stable-id', name: 'Stable ID' },
+      ],
+    });
+
+    await expect(syncContacts({ force: true })).resolves.toEqual({ contacts: 0, matched: 0 });
+
+    expect(upsertContacts).toHaveBeenCalledTimes(1);
+    expect(upsertContacts.mock.calls[0]?.[1]).toEqual([
+      expect.objectContaining({ sourceId: '', displayName: 'Missing ID' }),
+      expect.objectContaining({ sourceId: '', displayName: 'Blank ID' }),
+      expect.objectContaining({ sourceId: 'stable-id', displayName: 'Stable ID' }),
+    ]);
+  });
+
   it('shares one in-flight run, then allows a fresh one once it settles', async () => {
     let release!: () => void;
     getContactsAsync.mockImplementation(

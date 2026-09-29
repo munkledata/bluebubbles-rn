@@ -116,6 +116,11 @@ interface GatorBoundedDownloadNative {
     destinationUri: string,
     expectedBytes: number,
   ): Promise<NativeAdoptedPastedAttachmentResult>;
+  adoptSharedAttachment(
+    sourceUri: string,
+    destinationUri: string,
+    expectedBytes: number,
+  ): Promise<NativeAdoptedPastedAttachmentResult>;
   getAttachmentCacheAvailableBytes(): Promise<NativeAttachmentCacheAvailableBytesResult>;
   beginAttachmentCacheScan(): Promise<NativeAttachmentCacheScanBeginResult>;
   nextAttachmentCacheScanPage(scanId: string): Promise<NativeAttachmentCacheScanPageResult>;
@@ -469,6 +474,35 @@ export async function adoptNativePastedAttachment(
   let result: NativeAdoptedPastedAttachmentResult;
   try {
     result = await native.adoptPastedAttachment(sourceUri, destinationUri, expectedBytes);
+  } catch {
+    throw new NativeBoundedDownloadError('unavailable');
+  }
+  if (
+    result?.ok !== true ||
+    result.uri !== destinationUri ||
+    result.bytes !== expectedBytes ||
+    !Number.isSafeInteger(result.bytes)
+  ) {
+    throw new NativeBoundedDownloadError('unavailable');
+  }
+  return { uri: result.uri, bytes: result.bytes };
+}
+
+/** Move one exact completed ACTION_SEND file into its reserved ordinary-cache destination. */
+export async function adoptNativeSharedAttachment(
+  sourceUri: string,
+  destinationUri: string,
+  expectedBytes: number,
+): Promise<AdoptedPastedAttachment> {
+  const native = getNative();
+  if (!native) throw new NativeBoundedDownloadError('unavailable');
+  if (!Number.isSafeInteger(expectedBytes) || expectedBytes <= 0) {
+    throw new NativeBoundedDownloadError('size');
+  }
+
+  let result: NativeAdoptedPastedAttachmentResult;
+  try {
+    result = await native.adoptSharedAttachment(sourceUri, destinationUri, expectedBytes);
   } catch {
     throw new NativeBoundedDownloadError('unavailable');
   }

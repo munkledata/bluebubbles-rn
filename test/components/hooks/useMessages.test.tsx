@@ -197,10 +197,11 @@ describe('useMessages', () => {
     expect(mAtt).toHaveBeenCalledWith(undefined, [1, 2], undefined, {
       excludeRetractedAttachments: true,
     });
-    expect(mReactions).toHaveBeenCalledWith(undefined, ['msg-1', 'msg-2']);
+    expect(mReactions).toHaveBeenCalledWith(undefined, 'iMessage;-;c1', ['msg-1', 'msg-2']);
+    expect(mStickers).toHaveBeenCalledWith(undefined, 'iMessage;-;c1', ['msg-1', 'msg-2']);
     // Only the reply target is fetched.
     expect(mPreview).toHaveBeenCalledTimes(1);
-    expect(mPreview).toHaveBeenCalledWith(undefined, 'orig-1', null);
+    expect(mPreview).toHaveBeenCalledWith(undefined, 'iMessage;-;c1', 'orig-1', null);
   });
 
   it('dedupes repeated reply targets into a single preview fetch', async () => {
@@ -213,7 +214,7 @@ describe('useMessages', () => {
     await waitFor(() => expect(result.current.data).toHaveLength(2));
 
     expect(mPreview).toHaveBeenCalledTimes(1);
-    expect(mPreview).toHaveBeenCalledWith(undefined, 'orig-x', null);
+    expect(mPreview).toHaveBeenCalledWith(undefined, 'iMessage;-;c1', 'orig-x', null);
     // Both rows resolve the same preview.
     expect(result.current.data![0]!.replyPreview?.guid).toBe('orig-x');
     expect(result.current.data![1]!.replyPreview?.guid).toBe('orig-x');

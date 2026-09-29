@@ -1659,8 +1659,8 @@ describe('postNotification — failed send', () => {
     expect(n).toEqual(
       expect.objectContaining({
         id: 'gator-send-failure-101',
-        title: 'Message not sent',
-        body: 'Open Gator to review and retry.',
+        title: 'Message status needs review',
+        body: 'Open Gator to review.',
         data: {
           gatorOwner: 'gator',
           gatorSchema: '2',

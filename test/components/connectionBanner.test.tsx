@@ -2,8 +2,8 @@ import React from 'react';
 import { StyleSheet } from 'react-native';
 import type { TransportHealthStatus } from '@state/transportHealthStore';
 import { useTransportHealthStore } from '@state/transportHealthStore';
-import { ConnectionBanner } from '@ui/connection';
-import { fireEvent, renderWithTheme, screen } from './support/renderWithTheme';
+import { CONNECTION_BANNER_TRANSIENT_DELAY_MS, ConnectionBanner } from '@ui/connection';
+import { act, fireEvent, renderWithTheme, screen } from './support/renderWithTheme';
 
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 24, bottom: 0, left: 0, right: 0 }),
@@ -46,11 +46,95 @@ describe('ConnectionBanner', () => {
   });
 
   it.each([
-    ['connecting', 'Connecting…', false],
-    ['reconnecting', 'Reconnecting…', false],
-    ['offline', 'Offline', true],
-    ['error', 'Connection problem', true],
-  ] as const)('presents %s truthfully and accessibly', async (status, label, retryable) => {
+    ['connecting', 'Connecting…'],
+    ['reconnecting', 'Reconnecting…'],
+  ] as const)('shows persistent %s only after the transient delay', async (status, label) => {
+    jest.useFakeTimers();
+    let view: Awaited<ReturnType<typeof renderWithTheme>> | null = null;
+    try {
+      seedStatus(status);
+      view = await renderWithTheme(<ConnectionBanner onRetry={jest.fn()} />);
+
+      expect(screen.queryByRole('alert')).toBeNull();
+      await act(async () => {
+        jest.advanceTimersByTime(CONNECTION_BANNER_TRANSIENT_DELAY_MS - 1);
+      });
+      expect(screen.queryByRole('alert')).toBeNull();
+
+      await act(async () => {
+        jest.advanceTimersByTime(1);
+      });
+      const alert = screen.getByRole('alert');
+      expect(alert.props.accessibilityLabel).toBe(`Live updates: ${label}`);
+      expect(alert.props.accessibilityLiveRegion).toBe('polite');
+      expect(screen.getByText(label)).toBeTruthy();
+      expect(screen.queryByRole('button')).toBeNull();
+    } finally {
+      if (view) await act(async () => view?.unmount());
+      jest.useRealTimers();
+    }
+  });
+
+  it('keeps a brief reconnect hidden after the transport recovers', async () => {
+    jest.useFakeTimers();
+    let view: Awaited<ReturnType<typeof renderWithTheme>> | null = null;
+    try {
+      seedStatus('connected');
+      view = await renderWithTheme(<ConnectionBanner onRetry={jest.fn()} />);
+      const store = useTransportHealthStore.getState();
+
+      await act(async () => {
+        store.setSocketState(store.generation, 'reconnecting');
+      });
+      expect(screen.queryByRole('alert')).toBeNull();
+
+      await act(async () => {
+        jest.advanceTimersByTime(CONNECTION_BANNER_TRANSIENT_DELAY_MS - 1);
+        store.setSocketState(store.generation, 'connected');
+      });
+      await act(async () => {
+        jest.advanceTimersByTime(CONNECTION_BANNER_TRANSIENT_DELAY_MS);
+      });
+
+      expect(screen.queryByRole('alert')).toBeNull();
+    } finally {
+      if (view) await act(async () => view?.unmount());
+      jest.useRealTimers();
+    }
+  });
+
+  it('restarts the delay when the transient status changes', async () => {
+    jest.useFakeTimers();
+    let view: Awaited<ReturnType<typeof renderWithTheme>> | null = null;
+    try {
+      seedStatus('connecting');
+      view = await renderWithTheme(<ConnectionBanner onRetry={jest.fn()} />);
+      const store = useTransportHealthStore.getState();
+
+      await act(async () => {
+        jest.advanceTimersByTime(CONNECTION_BANNER_TRANSIENT_DELAY_MS - 1);
+        store.setSocketState(store.generation, 'connected');
+        store.setSocketState(store.generation, 'reconnecting');
+      });
+      await act(async () => {
+        jest.advanceTimersByTime(1);
+      });
+      expect(screen.queryByRole('alert')).toBeNull();
+
+      await act(async () => {
+        jest.advanceTimersByTime(CONNECTION_BANNER_TRANSIENT_DELAY_MS - 1);
+      });
+      expect(screen.getByText('Reconnecting…')).toBeTruthy();
+    } finally {
+      if (view) await act(async () => view?.unmount());
+      jest.useRealTimers();
+    }
+  });
+
+  it.each([
+    ['offline', 'Offline'],
+    ['error', 'Connection problem'],
+  ] as const)('presents %s immediately and accessibly', async (status, label) => {
     seedStatus(status);
 
     await renderWithTheme(<ConnectionBanner onRetry={jest.fn()} />);
@@ -59,11 +143,7 @@ describe('ConnectionBanner', () => {
     expect(alert.props.accessibilityLabel).toBe(`Live updates: ${label}`);
     expect(alert.props.accessibilityLiveRegion).toBe('polite');
     expect(screen.getByText(label)).toBeTruthy();
-    if (retryable) {
-      expect(screen.getByRole('button', { name: 'Retry live updates' })).toBeTruthy();
-    } else {
-      expect(screen.queryByRole('button')).toBeNull();
-    }
+    expect(screen.getByRole('button', { name: 'Retry live updates' })).toBeTruthy();
   });
 
   it('delegates Retry without mutating transport state itself', async () => {

@@ -3,6 +3,7 @@ import type { HttpClient } from '@core/api';
 import { getDatabase } from '@db/database';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
+import { sessionAccessors } from '@state/sessionStore';
 import { extensionForMime, isLocalFileUri } from '@utils';
 import { isDevServer } from '@utils/isDev';
 import { http } from '../clients';
@@ -132,13 +133,17 @@ function downloadWithFetcher(
   onVerifiedBytes?: (bytes: number) => void,
   maxBytesOverride?: number,
 ): Promise<string | null> {
-  const scope = downloadScope(deliveryLease, ownerFetcher);
+  const scope = downloadScope(deliveryLease, ownerFetcher, att);
   const key = retryKey(att.guid, scope);
   // A forced copy-on-write replacement owns both the damaged source pin and the terminal viewer
   // transition. A stale ordinary request must not revoke it merely to discover that the flight
   // layer considers the two destinations incompatible.
   const destinationIdentity = attachmentDownloadDestinationIdentity();
   if (hasIncompatibleRcsOwner(key, destinationIdentity)) return Promise.resolve(null);
+  if (!scope.isCurrent()) {
+    cancelRcsRetry(key);
+    return Promise.resolve(null);
+  }
   // A fresh UI or ingestion intent owns this guid now. Clear both the old count and its sleeping
   // timer; deleting only the count lets an older callback wake and start a second retry chain.
   cancelRcsRetry(key);
@@ -157,7 +162,7 @@ function downloadWithFetcher(
     return Promise.resolve(null);
   }
   const retryOwner =
-    att.service === 'RCS' && mode === 'manual'
+    isRcsAttachment(att) && mode === 'manual'
       ? beginRcsRetry(key, scope.generation, destinationIdentity)
       : undefined;
   return runDownload(att, scope, ownerFetcher, mode, onVerifiedBytes, maxBytesOverride, retryOwner);
@@ -174,7 +179,7 @@ export function redownload(
   deliveryLease: RealtimeDeliveryLease,
 ): Promise<string | null> {
   const ownerFetcher = attachmentFetcherForInvocation();
-  const scope = downloadScope(deliveryLease, ownerFetcher);
+  const scope = downloadScope(deliveryLease, ownerFetcher, att);
   const key = retryKey(att.guid, scope);
   const expectedLocalPath = att.localPath;
   const destinationIdentity = attachmentDownloadDestinationIdentity({
@@ -224,10 +229,9 @@ export function redownload(
   let retryOwner: symbol | undefined;
   let task: Promise<string | null>;
   try {
-    retryOwner =
-      att.service === 'RCS'
-        ? beginRcsRetry(key, scope.generation, destinationIdentity, oldPathProtection.release)
-        : undefined;
+    retryOwner = isRcsAttachment(att)
+      ? beginRcsRetry(key, scope.generation, destinationIdentity, oldPathProtection.release)
+      : undefined;
     task = runDownload(
       att,
       scope,
@@ -260,15 +264,18 @@ export function redownload(
 function downloadScope(
   lease: RealtimeDeliveryLease,
   ownerFetcher: AttachmentFetcher,
+  att: Pick<AttachmentRow, 'guid' | 'service'>,
 ): AttachmentDownloadScope {
+  const isCurrent = (): boolean =>
+    lease.isCurrent() && (!isRcsAttachment(att) || sessionAccessors.acceptsRcsAttachment(att.guid));
   const cacheScope: AttachmentCacheReservationScope = {
     generation: lease.generation,
-    isCurrent: () => lease.isCurrent(),
+    isCurrent,
     runTracked: (task) => runTrackedDownloadWork(lease, task),
   };
   return {
     generation: lease.generation,
-    isCurrent: () => lease.isCurrent(),
+    isCurrent,
     runCommit: async (task) => {
       let persisted = false;
       const delivery = await runTrackedRealtimeWork(lease, async () => {
@@ -296,6 +303,10 @@ function downloadScope(
         }
       : {}),
   };
+}
+
+function isRcsAttachment(att: Pick<AttachmentRow, 'guid' | 'service'>): boolean {
+  return att.service === 'RCS' || att.guid.startsWith('rcs-media-');
 }
 
 /** Track one short account-owned task without opening a DB transaction of its own. */

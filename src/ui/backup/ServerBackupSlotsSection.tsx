@@ -238,7 +238,7 @@ export function ServerBackupSlotsSection({
         setConfirmPassphrase('');
         showDialog(
           'Restored',
-          `Settings: ${result.kv}, themes: ${result.themes}, chats restored: ${result.chatCustomizations}, chats skipped: ${result.chatCustomizationsSkipped}, folders matched/restored: ${result.customFolders}, folders skipped: ${result.customFoldersSkipped}, folder members matched: ${result.customFolderMemberships}, folder members skipped: ${result.customFolderMembershipsSkipped}.`,
+          `Settings: ${result.kv}, themes: ${result.themes}, chats restored: ${result.chatCustomizations}, chats skipped: ${result.chatCustomizationsSkipped}, folders matched/restored: ${result.customFolders}, folders skipped: ${result.customFoldersSkipped}, folder members matched: ${result.customFolderMemberships}, folder members skipped: ${result.customFolderMembershipsSkipped}, handle colors restored: ${result.handleColors}, handle colors skipped: ${result.handleColorsSkipped}.`,
         );
       } catch (error) {
         if (!canPublish() || isBackupAccountChangedError(error)) return;
@@ -358,10 +358,10 @@ export function ServerBackupSlotsSection({
   return (
     <View style={styles.section}>
       <Text style={[styles.note, { color: theme.color.secondaryLabel }]}>
-        Server slots hold the same encrypted themes, selected settings, chat customizations, and
-        custom folders as a local backup. Folder identifiers can include phone numbers or email
-        addresses, but the passphrase stays on this device and the server receives only ciphertext.
-        Enter the original passphrase before Restore.
+        Server slots hold the same encrypted themes, selected settings, chat customizations, custom
+        folders, and device-owned contact colors as a local backup. Folder and color identifiers can
+        include phone numbers or email addresses, but the passphrase stays on this device and the
+        server receives only ciphertext. Enter the original passphrase before Restore.
       </Text>
 
       <SettingsSection label="SAVE TO SERVER">

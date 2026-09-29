@@ -12,9 +12,19 @@ interface FailedMessageSheetProps {
   onDelete: () => void;
   /** True when the failed message carries an attachment (tweaks the copy). */
   isAttachment?: boolean;
-  /** False for a one-shot attachment, whether rejected or delivery-uncertain. */
+  /** True when this is a one-shot iMessage reply that must never be replayed. */
+  isReply?: boolean;
+  /** True when this is a one-shot current-location card that must never be replayed. */
+  isLocation?: boolean;
+  /** True when this is a one-shot effect send that must never be replayed. */
+  isEffect?: boolean;
+  /** True when this is a one-shot mention send that must never be replayed. */
+  isMention?: boolean;
+  /** True when this is a one-shot formatted send that must never be replayed. */
+  isFormatted?: boolean;
+  /** False for any one-shot helper send that cannot be replayed safely. */
   retryAllowed?: boolean;
-  /** Only the new one-shot path carries a dedicated uncertain-delivery error. */
+  /** One-shot helper sends use this when dispatch may have happened but no ack arrived. */
   deliveryUnconfirmed?: boolean;
   /** Bounded/redacted server detail read from the encrypted failed-message row. */
   errorDetail?: string | null;
@@ -31,6 +41,11 @@ export function FailedMessageSheet({
   onRetry,
   onDelete,
   isAttachment,
+  isReply,
+  isLocation,
+  isEffect,
+  isMention,
+  isFormatted,
   retryAllowed = true,
   deliveryUnconfirmed = false,
   errorDetail,
@@ -52,16 +67,40 @@ export function FailedMessageSheet({
           <View style={styles.header}>
             <Text style={[styles.title, { color: theme.color.label }]}>
               {deliveryUnconfirmed
-                ? 'Attachment Status Unconfirmed'
+                ? isMention
+                  ? 'Mention Status Unconfirmed'
+                  : isEffect
+                    ? 'Effect Status Unconfirmed'
+                    : isLocation
+                      ? 'Location Status Unconfirmed'
+                      : isReply
+                        ? 'Reply Status Unconfirmed'
+                        : isFormatted
+                          ? 'Formatted Message Status Unconfirmed'
+                          : 'Attachment Status Unconfirmed'
                 : retryAllowed
                   ? 'Message Not Delivered'
-                  : 'Attachment Needs Review'}
+                  : isLocation
+                    ? 'Location Not Sent'
+                    : isReply
+                      ? 'Reply Needs Review'
+                      : 'Attachment Needs Review'}
             </Text>
             <Text style={[styles.subtitle, { color: theme.color.secondaryLabel }]}>
               {deliveryUnconfirmed
-                ? 'Delivery may have occurred. Check Messages before sending a new copy.'
+                ? isMention
+                  ? 'This mention message may have been delivered. Check Messages before sending a new copy.'
+                  : isEffect
+                    ? 'This effect message may have been delivered. Check Messages before sending a new copy.'
+                    : isFormatted
+                      ? 'This formatted message may have been delivered. Check Messages before sending a new copy.'
+                      : 'Delivery may have occurred. Check Messages before sending a new copy.'
                 : !retryAllowed
-                  ? 'This attachment cannot be retried. Review this copy before sending another.'
+                  ? isLocation
+                    ? 'This location was not sent and cannot be retried. Start a new location share if needed.'
+                    : isReply
+                      ? 'This reply cannot be retried. Check Messages before sending another copy.'
+                      : 'This attachment cannot be retried. Review this copy before sending another.'
                   : isAttachment
                     ? 'Your attachment couldn’t be sent.'
                     : 'Your message couldn’t be sent.'}

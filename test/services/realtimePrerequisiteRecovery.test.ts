@@ -124,6 +124,13 @@ describe('task-local realtime prerequisite recovery', () => {
       200,
       expect.any(Function),
       expect.any(AbortSignal),
+      undefined,
+      undefined,
+      undefined,
+      expect.objectContaining({
+        server_version: '1.9.0',
+        supports_message_deleted: true,
+      }),
     );
     expect(mockIncrementalSync).toHaveBeenCalledWith(
       db,

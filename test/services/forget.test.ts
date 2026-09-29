@@ -12,6 +12,7 @@
 const clearLocalCache = jest.fn(async () => undefined);
 const localCacheDirty = jest.fn(async () => false);
 const listReminders = jest.fn(async () => [] as unknown[]);
+const discardAccountBoundShareIntake = jest.fn(async () => undefined);
 const clearShareShortcuts = jest.fn(() => true);
 const vaultValues = new Map<string, string>();
 const vaultGet = jest.fn(
@@ -242,7 +243,11 @@ jest.mock('@/services/connection', () => ({ connectToServer }));
 jest.mock('@/services/lock', () => ({ hydrateLock: jest.fn() }));
 jest.mock('@native/deviceIntegrity', () => ({ checkDeviceIntegrity: jest.fn() }));
 jest.mock('@state/hydrateStores', () => ({ areCriticalSettingsHydrated, hydrateAllStores }));
-jest.mock('@/services/shortcuts/shareShortcuts', () => ({ clearShareShortcuts }));
+jest.mock('@/services/shortcuts/shareShortcuts', () => ({
+  clearShareShortcuts,
+  clearAllShareShortcuts: clearShareShortcuts,
+}));
+jest.mock('@/services/share/shareIntake', () => ({ discardAccountBoundShareIntake }));
 jest.mock('@/services/realtime/deliveryCoordinator', () => ({
   captureRealtimeDeliveryLease,
   pauseRealtimeDeliveries,
@@ -338,6 +343,7 @@ beforeEach(async () => {
   clearLocalCache.mockResolvedValue(undefined);
   localCacheDirty.mockResolvedValue(false);
   listReminders.mockResolvedValue([]);
+  discardAccountBoundShareIntake.mockReset().mockResolvedValue(undefined);
   awaitSyncIdle.mockResolvedValue(undefined);
   cancelAllNotifications.mockResolvedValue(undefined);
   cancelReminderNotification.mockResolvedValue(undefined);
@@ -2632,6 +2638,7 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
     expect(useSessionStore.getState().origin).toBeNull();
     expect(retireFcmDeviceEncryptionState).toHaveBeenCalledTimes(1);
     expect(clearLocalCache).toHaveBeenCalledTimes(1);
+    expect(discardAccountBoundShareIntake).toHaveBeenCalledTimes(1);
     expect(clearShareShortcuts).toHaveBeenCalledTimes(1);
   });
 

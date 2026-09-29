@@ -1,9 +1,9 @@
 import type { HttpClient } from '@core/api/http';
 import { sendContact, type ContactEmail, type ContactPhone } from '@core/api/endpoints/messages';
-import { insertOutgoingContactWithinTransaction } from '@db/repositories';
+import { getChatHeader, insertOutgoingContactWithinTransaction } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
-import { isRcsChatGuid } from '@utils';
+import { isProvenOneToOneIMessageChat, isRcsChatGuid } from '@utils';
 import {
   resolveRcsAttemptOwnership,
   sendCapabilityCommitGuard,
@@ -50,11 +50,11 @@ export function hasContactContent(c: ContactCard): boolean {
 
 /**
  * Optimistic contact-card send. Inserts a temp bubble showing the contact's name, POSTs the
- * STRUCTURED fields (the server builds the vCard 3.0 and ships it as an attachment), then
+ * STRUCTURED fields (the server builds the vCard 3.0 and uses the service-specific contact path), then
  * reconciles by tempGuid. The live `new-message` echo swaps the placeholder for the rendered
- * `.vcf` card seconds later. On error the bubble flips to sendState='error' (retryable via the
- * outgoing queue) — we don't rethrow into render. Pure orchestration (no React Native imports),
- * so it runs in Node tests against better-sqlite3, mirroring sendTextMessage.
+ * `.vcf` card seconds later. Safe pre-dispatch failures may retry; an uncertain iMessage handoff is
+ * retired so neither the queue nor “Try Again” can duplicate it. Pure orchestration (no React Native
+ * imports), so it runs in Node tests against better-sqlite3, mirroring sendTextMessage.
  */
 export async function sendContactMessage(
   db: AppDatabase,
@@ -73,11 +73,8 @@ export async function sendContactMessage(
   onQueued?: (tempGuid: string) => void | Promise<void>,
 ): Promise<{ tempGuid: string }> {
   const rcsChat = isRcsChatGuid(args.chatGuid);
-  if (!rcsChat) {
-    throw new Error('iMessage contact cards were retired with the Private API helper.');
-  }
   if (args.selectedMessageGuid !== undefined || args.partIndex !== undefined) {
-    throw new Error('This server cannot send an RCS contact-card reply.');
+    throw new Error('This server cannot send a contact-card reply.');
   }
   if (!hasContactContent(args.contact)) {
     throw new Error('a contact needs a name, organization, phone, or email');
@@ -92,8 +89,18 @@ export async function sendContactMessage(
     { requireServerInfo: true },
   );
   const capabilityGuard = sendCapabilityCommitGuard(transport.admissionGuard, capabilitySource);
-  if (capability.serverInfo?.rcs !== true) {
+  if (
+    (rcsChat && capability.serverInfo?.rcs !== true) ||
+    (!rcsChat && capability.serverInfo?.supports_send_contact !== true)
+  ) {
     throw new Error('This server cannot send a contact card for this chat service.');
+  }
+  if (!rcsChat) {
+    const header = await getChatHeader(db, args.chatGuid);
+    if (!capabilityGuard()) throw new DbCommitGuardRejectedError();
+    if (!isProvenOneToOneIMessageChat(header)) {
+      throw new Error('A proven existing one-to-one iMessage chat is required.');
+    }
   }
   // Derive the presentation label before claiming the process-wide writer. Native contact picking
   // already completed in the front door and stays entirely outside this DB-only owner.
@@ -133,6 +140,7 @@ export async function sendContactMessage(
     });
     await reconcileSendOutcome(db, tempGuid, server, now, commitGuard, {
       attemptOwnerToken: attemptOwnerToken ?? undefined,
+      expectedChatGuid: args.chatGuid,
     });
   } catch (e) {
     // A revoked success-settlement owner must not be reinterpreted as a transport failure and
@@ -149,6 +157,7 @@ export async function sendContactMessage(
       commitGuard,
       {
         attemptOwnerToken: attemptOwnerToken ?? undefined,
+        terminalUncertain: !rcsChat,
       },
     );
   }

@@ -1,7 +1,7 @@
 import type { SendAck } from '@core/api/endpoints/messages';
 import { ApiError } from '@core/api/errors';
 import { logger } from '@core/secure';
-import { ClientErrorCode, sendErrorCode } from '@utils';
+import { ClientErrorCode, LOCATION_DELIVERY_UNCONFIRMED_COPY, sendErrorCode } from '@utils';
 import {
   markOutgoingSentNoGuidWithinTransaction,
   reconcileOutgoingAttemptAckWithinTransaction,
@@ -23,13 +23,42 @@ export interface SendOutcomeOptions {
   readonly attemptOwnerToken?: SendAttemptOwnerToken;
   /** One-shot helper mutation: a failed HTTP/parse outcome may still have delivered. */
   readonly terminalUncertain?: boolean;
+  /** Identifies the one-shot surface so its terminal status and recovery copy stay truthful. */
+  readonly terminalUncertainKind?:
+    'attachment' | 'reply' | 'location' | 'effect' | 'mention' | 'formatted';
+  /** Exact locally selected conversation; survives temp-row/queue cleanup during a late ack. */
+  readonly expectedChatGuid?: string;
 }
 
 export const UNCERTAIN_IMESSAGE_ATTACHMENT_COPY =
   'Delivery may have occurred. Check Messages before sending a new copy.';
+export const UNCERTAIN_IMESSAGE_REPLY_COPY =
+  'This reply may have been delivered. Check Messages before sending a new copy.';
+export const UNCERTAIN_IMESSAGE_LOCATION_COPY = LOCATION_DELIVERY_UNCONFIRMED_COPY;
+export const UNCERTAIN_IMESSAGE_EFFECT_COPY =
+  'This effect message may have been delivered. Check Messages before sending a new copy.';
+export const UNCERTAIN_IMESSAGE_MENTION_COPY =
+  'This mention message may have been delivered. Check Messages before sending a new copy.';
+export const UNCERTAIN_IMESSAGE_FORMATTED_COPY =
+  'This formatted message may have been delivered. Check Messages before sending a new copy.';
+
+/** Fixed server outcomes that make another location attempt unsafe or invalid. */
+export function isTerminalLocationSendError(error: unknown): boolean {
+  if (!(error instanceof ApiError)) return false;
+  return (
+    error.serverErrorType === 'idempotency_outcome_unknown' ||
+    error.serverErrorType === 'imessage_location_outcome_unknown' ||
+    error.serverErrorType === 'idempotency_key_reused' ||
+    error.serverErrorType === 'imessage_location_invalid_target'
+  );
+}
 
 const REJECTED_IMESSAGE_ATTACHMENT_COPY =
   'The server rejected this upload before dispatch. This attempt was not sent.';
+const REJECTED_IMESSAGE_REPLY_COPY =
+  'The server rejected this reply before dispatch. This attempt was not sent.';
+const REJECTED_IMESSAGE_LOCATION_COPY =
+  'The server rejected this location before dispatch. This attempt was not sent.';
 
 const PRE_DISPATCH_ATTACHMENT_ERROR_TYPES: Readonly<Record<number, ReadonlySet<string>>> = {
   400: new Set([
@@ -42,21 +71,40 @@ const PRE_DISPATCH_ATTACHMENT_ERROR_TYPES: Readonly<Record<number, ReadonlySet<s
     'imessage_attachment_fields_unsupported',
     'imessage_attachment_type_unsupported',
     'imessage_retry_key_required',
+    'imessage_reply_invalid_target',
+    'imessage_voice_mode_invalid',
+    'imessage_voice_type_unsupported',
     'invalid_attachment_text',
     'invalid_filename',
     'invalid_imessage_chat_guid',
+    'imessage_contact_invalid_target',
+    'imessage_location_invalid_target',
     'malformed_multipart',
     'multipart_field_too_large',
   ]),
   404: new Set(['imessage_chat_not_found']),
-  413: new Set(['imessage_attachment_too_large', 'multipart_limit', 'staging_request_too_large']),
+  409: new Set(['idempotency_key_reused']),
+  413: new Set([
+    'imessage_attachment_too_large',
+    'imessage_contact_too_large',
+    'multipart_limit',
+    'staging_request_too_large',
+  ]),
+  503: new Set([
+    'idempotency_persistence_unavailable',
+    'imessage_contact_unavailable',
+    'imessage_reply_unavailable',
+    'staging_check_failed',
+    'staging_object_limit',
+    'staging_quota_exceeded',
+    'staging_space_low',
+  ]),
 };
 
-/** Only Gator upload-route machine types prove that a 4xx predates helper dispatch. */
-function isPreDispatchAttachmentRejection(err: unknown): boolean {
+/** Only reviewed machine types prove that a response predates a one-shot helper dispatch. */
+function isPreDispatchOneShotRejection(err: unknown): boolean {
   return (
     err instanceof ApiError &&
-    err.kind === 'bad_request' &&
     err.status !== undefined &&
     err.serverErrorType !== undefined &&
     PRE_DISPATCH_ATTACHMENT_ERROR_TYPES[err.status]?.has(err.serverErrorType) === true
@@ -127,6 +175,7 @@ export async function reconcileSendOutcome(
           guid: ackGuid,
           attemptGuid: ack.attemptGuid!,
           attemptOwnerToken,
+          expectedChatGuid: options?.expectedChatGuid,
           dateCreated: now,
           dateDelivered: null,
         }),
@@ -136,11 +185,16 @@ export async function reconcileSendOutcome(
     await withDbTransaction(
       db,
       (context) =>
-        reconcileOutgoingSuccessWithinTransaction(context, tempGuid, {
-          guid: ackGuid,
-          dateCreated: now,
-          dateDelivered: null,
-        }),
+        reconcileOutgoingSuccessWithinTransaction(
+          context,
+          tempGuid,
+          {
+            guid: ackGuid,
+            dateCreated: now,
+            dateDelivered: null,
+          },
+          options?.expectedChatGuid,
+        ),
       commitGuard,
     );
     disposition = 'sent';
@@ -155,11 +209,10 @@ export async function reconcileSendOutcome(
     (disposition === 'sent' || disposition === 'missing') &&
     options?.failureNoticeMode !== 'suppressed'
   ) {
-    await clearFailedSendNotice(
-      db,
-      ackGuid && ackGuid !== tempGuid ? ackGuid : tempGuid,
-      commitGuard,
-    );
+    // Failure notices are born under the optimistic temp row. Successful promotion leaves an
+    // alias back to that row; a cross-chat collision deliberately does not. Always following the
+    // temp identity therefore clears the source notice without ever touching a foreign canonical.
+    await clearFailedSendNotice(db, tempGuid, commitGuard);
   }
 }
 
@@ -192,11 +245,12 @@ export async function handleSendFailure(
           : kind === 'parse_error'
             ? ClientErrorCode.clientError
             : sendErrorCode(status);
-  const preDispatchRejection =
-    options?.terminalUncertain === true && isPreDispatchAttachmentRejection(err);
-  if (options?.terminalUncertain) {
+  const terminalKind =
+    options?.terminalUncertainKind ?? (options?.terminalUncertain === true ? 'attachment' : null);
+  const preDispatchRejection = terminalKind != null && isPreDispatchOneShotRejection(err);
+  if (terminalKind) {
     logger.warn(
-      `[${logTag}] one-shot attachment ${preDispatchRejection ? 'rejected before dispatch' : 'outcome unconfirmed'} (code ${code}${status != null ? `, HTTP ${status}` : ''})`,
+      `[${logTag}] one-shot ${terminalKind} ${preDispatchRejection ? 'rejected before dispatch' : 'outcome unconfirmed'} (code ${code}${status != null ? `, HTTP ${status}` : ''})`,
     );
   } else {
     logger.warn(
@@ -210,14 +264,43 @@ export async function handleSendFailure(
   const reconciled = await withDbTransaction(
     db,
     (context) =>
-      options?.terminalUncertain
+      terminalKind
         ? retireUncertainOutgoingWithinTransaction(
             context,
             tempGuid,
-            preDispatchRejection ? code : ClientErrorCode.attachmentDeliveryUnconfirmed,
             preDispatchRejection
-              ? REJECTED_IMESSAGE_ATTACHMENT_COPY
-              : UNCERTAIN_IMESSAGE_ATTACHMENT_COPY,
+              ? terminalKind === 'location'
+                ? ClientErrorCode.locationRejected
+                : code
+              : terminalKind === 'reply'
+                ? ClientErrorCode.replyDeliveryUnconfirmed
+                : terminalKind === 'location'
+                  ? ClientErrorCode.locationDeliveryUnconfirmed
+                  : terminalKind === 'effect'
+                    ? ClientErrorCode.effectDeliveryUnconfirmed
+                    : terminalKind === 'mention'
+                      ? ClientErrorCode.mentionDeliveryUnconfirmed
+                      : terminalKind === 'formatted'
+                        ? ClientErrorCode.formattedDeliveryUnconfirmed
+                        : ClientErrorCode.attachmentDeliveryUnconfirmed,
+            preDispatchRejection
+              ? terminalKind === 'reply'
+                ? REJECTED_IMESSAGE_REPLY_COPY
+                : terminalKind === 'location'
+                  ? REJECTED_IMESSAGE_LOCATION_COPY
+                  : REJECTED_IMESSAGE_ATTACHMENT_COPY
+              : terminalKind === 'reply'
+                ? UNCERTAIN_IMESSAGE_REPLY_COPY
+                : terminalKind === 'location'
+                  ? UNCERTAIN_IMESSAGE_LOCATION_COPY
+                  : terminalKind === 'effect'
+                    ? UNCERTAIN_IMESSAGE_EFFECT_COPY
+                    : terminalKind === 'mention'
+                      ? UNCERTAIN_IMESSAGE_MENTION_COPY
+                      : terminalKind === 'formatted'
+                        ? UNCERTAIN_IMESSAGE_FORMATTED_COPY
+                        : UNCERTAIN_IMESSAGE_ATTACHMENT_COPY,
+            terminalKind === 'location',
           )
         : reconcileOutgoingErrorWithinTransaction(
             context,

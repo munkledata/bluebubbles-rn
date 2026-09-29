@@ -1,7 +1,7 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   Keyboard,
   Modal,
@@ -19,16 +19,29 @@ import {
   getChatParticipants,
   getChatTheme,
   listChatAttachmentsByKind,
+  type ChatParticipant,
   type ChatMediaByKind,
 } from '@db/repositories';
 import { useReactiveQuery } from '@db/useReactiveQuery';
 import {
+  MAX_IMESSAGE_GROUP_PHOTO_BYTES,
+  isSupportedImessageGroupPhotoType,
+} from '@core/models/serverInfo';
+import { isCanonicalIMessageParticipantAddress } from '@core/api/endpoints/chats';
+import {
+  addAppleGroupParticipant,
   computeBackgroundIsLight,
+  leaveAppleGroup,
+  prepareAppleGroupPhotoSet,
+  renameAppleGroup,
+  removeAppleGroupPhoto,
+  removeAppleGroupParticipant,
   resetChatLocalPreferences,
   setChatMuted,
   startChatRepair,
   updateChatAppearance,
   updateChatCustomization,
+  updateHandleColor,
 } from '@/services';
 import { openChatNotificationSettings } from '@/services/notifications/notifeeService';
 import {
@@ -37,9 +50,10 @@ import {
   subscribeRealtimeGenerationInvalidation,
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
+import { useSessionStore } from '@state/sessionStore';
 import { useChatHeader } from '@features/conversations/useChatHeader';
 import { useSharedDocuments } from '@features/conversations/useSharedDocuments';
-import { isGroupRow, resolveTitle, safeOpenUrl } from '@utils';
+import { isGroupRow, isProvenIMessageGroupChat, resolveTitle, safeOpenUrl } from '@utils';
 import {
   NavRow,
   Screen,
@@ -70,8 +84,21 @@ const SWATCH_NAMES: Record<(typeof SWATCHES)[number], string> = {
   '#FF9500': 'Orange',
   '#5E81AC': 'Slate blue',
 };
+const HANDLE_COLOR_SWATCHES = [
+  { color: '#FFF3A3', name: 'Pale yellow' },
+  { color: '#F8B4C8', name: 'Pale pink' },
+  { color: '#69DB7C', name: 'Green' },
+  { color: '#4DABF7', name: 'Blue' },
+  { color: '#9775FA', name: 'Purple' },
+  { color: '#17324D', name: 'Navy' },
+  { color: '#3A235B', name: 'Deep purple' },
+] as const;
 type ChatSettingsLifetime = object;
 type PickerOperationToken = object;
+interface AcceptedAppleGroupNameOverlay {
+  displayName: string;
+  authoritativeDisplayNameAtSubmit: string | null;
+}
 interface ChatSettingsGrant {
   chatGuid: string;
   lifetime: ChatSettingsLifetime;
@@ -206,10 +233,26 @@ function ChatSettingsScreen({
   const theme = useTheme();
   const router = useRouter();
   const { data } = useChatHeader(guid);
+  const appleGroupRenameSupported = useSessionStore(
+    (state) => state.serverInfo?.supports_imessage_group_rename === true,
+  );
+  const appleGroupPhotoSupported = useSessionStore(
+    (state) => state.serverInfo?.supports_imessage_group_photo === true,
+  );
+  const appleGroupParticipantAddSupported = useSessionStore(
+    (state) => state.serverInfo?.supports_imessage_group_participant_add === true,
+  );
+  const appleGroupParticipantRemoveSupported = useSessionStore(
+    (state) => state.serverInfo?.supports_imessage_group_participant_remove === true,
+  );
+  const appleGroupLeaveSupported = useSessionStore(
+    (state) => state.serverInfo?.supports_imessage_group_leave === true,
+  );
   const mountAliveRef = useRef(true);
   const [lifetime] = useState<ChatSettingsLifetime>(() => ({}));
   const activeLifetimeRef = useRef<ChatSettingsLifetime | null>(lifetime);
   const activeLinkOpenRef = useRef<object | null>(null);
+  const appleGroupMembershipOperationActiveRef = useRef(false);
   const renderGrant: ChatSettingsGrant = { chatGuid: guid, lifetime, accountLease };
   const grantIsCurrent = (grant: ChatSettingsGrant): boolean =>
     mountAliveRef.current &&
@@ -261,16 +304,60 @@ function ChatSettingsScreen({
   // Local input state seeded once from the row; writes persist immediately.
   const [name, setName] = useState<string | null>(null);
   const customName = name ?? data?.customName ?? '';
+  const [appleGroupName, setAppleGroupName] = useState<string | null>(null);
+  const [acceptedAppleGroupNameOverlay, setAcceptedAppleGroupNameOverlay] =
+    useState<AcceptedAppleGroupNameOverlay | null>(null);
+  const [renamingAppleGroup, setRenamingAppleGroup] = useState(false);
+  const [changingAppleGroupPhoto, setChangingAppleGroupPhoto] = useState(false);
+  const [appleGroupParticipantAddress, setAppleGroupParticipantAddress] = useState('');
+  const [addingAppleGroupParticipant, setAddingAppleGroupParticipant] = useState(false);
+  const [removingAppleGroupParticipantAddress, setRemovingAppleGroupParticipantAddress] = useState<
+    string | null
+  >(null);
+  const [leavingAppleGroup, setLeavingAppleGroup] = useState(false);
+  const appleGroupNameValue =
+    appleGroupName ?? acceptedAppleGroupNameOverlay?.displayName ?? data?.displayName ?? '';
+  const appleGroupNameBaseline =
+    acceptedAppleGroupNameOverlay?.displayName ?? data?.displayName ?? '';
+  const appleGroupRenameAvailable =
+    appleGroupRenameSupported && data?.guid === guid && isProvenIMessageGroupChat(data);
+  const appleGroupPhotoAvailable =
+    appleGroupPhotoSupported && data?.guid === guid && isProvenIMessageGroupChat(data);
+  const appleGroupParticipantAddAvailable =
+    appleGroupParticipantAddSupported && data?.guid === guid && isProvenIMessageGroupChat(data);
+  const appleGroupParticipantRemoveAvailable =
+    appleGroupParticipantRemoveSupported &&
+    data?.guid === guid &&
+    isProvenIMessageGroupChat(data) &&
+    data.participantCount >= 3;
+  const appleGroupLeaveAvailable =
+    appleGroupLeaveSupported && data?.guid === guid && isProvenIMessageGroupChat(data);
+  const appleGroupNameChanged =
+    appleGroupNameValue.trim().length > 0 && appleGroupNameValue !== appleGroupNameBaseline;
   const muted = data?.muteType === 'mute';
   const accent = data?.customColor ?? null;
   // The placeholder shows what the title would be WITHOUT a custom name.
   const serverTitle = data ? resolveTitle({ ...data, customName: null }) : '';
 
+  useEffect(() => {
+    if (!acceptedAppleGroupNameOverlay) return;
+    const authoritativeDisplayName = data?.displayName ?? null;
+    if (
+      authoritativeDisplayName !== acceptedAppleGroupNameOverlay.authoritativeDisplayNameAtSubmit ||
+      authoritativeDisplayName === acceptedAppleGroupNameOverlay.displayName
+    ) {
+      // This short-lived overlay is synchronized to the external reactive chat row. Failure drafts
+      // remain separate and are deliberately not cleared by an authoritative name update.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setAcceptedAppleGroupNameOverlay(null);
+    }
+  }, [acceptedAppleGroupNameOverlay, data?.displayName]);
+
   const isGroup = data ? isGroupRow(data) : false;
 
-  // Group membership remains visible from the local database, but helper-only group mutations are
-  // retired. This section is deliberately read-only regardless of what an old server advertises.
-  const { data: membersData } = useReactiveQuery<{ address: string; name: string }[]>(
+  // Membership stays authoritative in the local database. The narrow add control never edits it
+  // optimistically; group name/photo/add controls each require their own live capability.
+  const { data: membersData } = useReactiveQuery<ChatParticipant[]>(
     () => getChatParticipants(getDatabase(), guid),
     ['chat_handles', 'handles', 'chats'],
     [guid],
@@ -450,6 +537,375 @@ function ChatSettingsScreen({
       ),
     );
   };
+  const renameAppleGroupName = (): void => {
+    const operationGrant = renderGrant;
+    if (
+      !grantIsCurrent(operationGrant) ||
+      !appleGroupRenameAvailable ||
+      !appleGroupNameChanged ||
+      renamingAppleGroup
+    ) {
+      return;
+    }
+    const submittedName = appleGroupNameValue;
+    const authoritativeDisplayNameAtSubmit = data?.displayName ?? null;
+    setRenamingAppleGroup(true);
+    void renameAppleGroup(
+      { chatGuid: operationGrant.chatGuid, displayName: submittedName },
+      operationGrant.accountLease,
+    )
+      .then((result) => {
+        if (!grantIsCurrent(operationGrant)) return;
+        setRenamingAppleGroup(false);
+        if (!result) return;
+        if (result.status === 'accepted') {
+          setAppleGroupName(null);
+          setAcceptedAppleGroupNameOverlay({
+            displayName: submittedName,
+            authoritativeDisplayNameAtSubmit,
+          });
+          return;
+        }
+        if (result.status === 'outcome-unknown') {
+          showDialog(
+            'Rename Not Confirmed',
+            'The request may have reached Messages. Check the group name in Messages on your Mac before trying again. The name you entered is still here.',
+          );
+          return;
+        }
+        showDialog(
+          'Apple Group Name Not Changed',
+          'Messages did not rename this group. Your name is still here so you can correct it or try again later.',
+        );
+      })
+      .catch(() => {
+        if (!grantIsCurrent(operationGrant)) return;
+        setRenamingAppleGroup(false);
+        showDialog(
+          'Couldn’t Rename Group',
+          'The Apple group name could not be changed. Your name is still here so you can correct it or try again later.',
+        );
+      });
+  };
+  const showAppleGroupPhotoResult = (
+    operation: 'set' | 'remove',
+    result: Awaited<ReturnType<typeof removeAppleGroupPhoto>>,
+  ): void => {
+    if (!result) return;
+    const changing = operation === 'set';
+    if (result.status === 'accepted') {
+      showDialog(
+        changing ? 'Group Photo Change Accepted' : 'Group Photo Removal Accepted',
+        changing
+          ? 'Messages accepted the photo change. Check the group in Messages on your Mac for the updated photo.'
+          : 'Messages accepted the photo removal. Check the group in Messages on your Mac to confirm it is gone.',
+      );
+      return;
+    }
+    if (result.status === 'outcome-unknown') {
+      showDialog(
+        changing ? 'Photo Change Not Confirmed' : 'Photo Removal Not Confirmed',
+        `The request may have reached Messages. Check the group photo in Messages on your Mac before trying ${
+          changing ? 'the change' : 'the removal'
+        } again.`,
+      );
+      return;
+    }
+    showDialog(
+      changing ? 'Group Photo Not Changed' : 'Group Photo Not Removed',
+      changing
+        ? 'Messages did not change this group photo. You can choose another JPEG or PNG and try again.'
+        : 'Messages did not remove this group photo. Check the group in Messages on your Mac before trying again.',
+    );
+  };
+  const changeAppleGroupPhoto = (): void => {
+    void (async () => {
+      const operationGrant = renderGrant;
+      if (!grantIsCurrent(operationGrant) || !appleGroupPhotoAvailable || changingAppleGroupPhoto) {
+        return;
+      }
+      const pickerToken = pickerOwner.acquire();
+      if (!pickerToken) return;
+      const pickerIsCurrent = (): boolean =>
+        pickerOwner.isCurrent(pickerToken) && grantIsCurrent(operationGrant);
+      let prepared: Awaited<ReturnType<typeof prepareAppleGroupPhotoSet>> = null;
+      setChangingAppleGroupPhoto(true);
+      try {
+        // Pin account, origin/auth, capability, and exact group proof before permission/picker UI.
+        prepared = await prepareAppleGroupPhotoSet(
+          operationGrant.chatGuid,
+          operationGrant.accountLease,
+        );
+        if (!prepared || !pickerIsCurrent()) {
+          if (pickerIsCurrent()) {
+            showDialog(
+              'Group Photo Unavailable',
+              'This Apple group photo cannot be changed on the current server connection.',
+            );
+          }
+          return;
+        }
+        if (!(await requestPhotoLibraryAccess(pickerIsCurrent)) || !pickerIsCurrent()) return;
+        const response = await ImagePicker.launchImageLibraryAsync({
+          mediaTypes: ['images'],
+          quality: 1,
+        }).catch(() => {
+          if (pickerIsCurrent()) showDialog('Photos', 'Couldn’t open the photo picker.');
+          return null;
+        });
+        if (!response || response.canceled || response.assets.length === 0 || !pickerIsCurrent()) {
+          return;
+        }
+
+        const asset = response.assets[0]!;
+        const fallbackName = asset.uri.split(/[?#]/u, 1)[0]?.split('/').pop() ?? '';
+        const name = asset.fileName?.trim() || fallbackName;
+        const mimeType = asset.mimeType?.trim().toLowerCase() ?? '';
+        if (!isSupportedImessageGroupPhotoType(mimeType, name)) {
+          showDialog(
+            'Unsupported Group Photo',
+            'Choose a JPEG (.jpg or .jpeg) or PNG (.png). HEIC photos are not supported for Apple group photos.',
+          );
+          return;
+        }
+        const size = typeof asset.fileSize === 'number' ? asset.fileSize : undefined;
+        if (size !== undefined && (size <= 0 || size > MAX_IMESSAGE_GROUP_PHOTO_BYTES)) {
+          showDialog('Group Photo Too Large', 'Choose a JPEG or PNG no larger than 20 MiB.');
+          return;
+        }
+
+        const result = await prepared.submit({ uri: asset.uri, name, mimeType, size });
+        prepared = null;
+        if (pickerIsCurrent()) showAppleGroupPhotoResult('set', result);
+      } catch {
+        if (pickerIsCurrent()) {
+          showDialog(
+            'Couldn’t Change Group Photo',
+            'The group photo request could not be completed. Check Messages on your Mac before trying again.',
+          );
+        }
+      } finally {
+        prepared?.cancel();
+        pickerOwner.release(pickerToken);
+        if (grantIsCurrent(operationGrant)) setChangingAppleGroupPhoto(false);
+      }
+    })();
+  };
+  const confirmRemoveAppleGroupPhoto = (): void => {
+    const dialogGrant = renderGrant;
+    if (!grantIsCurrent(dialogGrant) || !appleGroupPhotoAvailable || changingAppleGroupPhoto) {
+      return;
+    }
+    showDialog(
+      'Remove Apple Group Photo?',
+      'This removes the group photo for everyone in Apple Messages.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove Photo',
+          style: 'destructive',
+          onPress: () => {
+            if (!grantIsCurrent(dialogGrant) || changingAppleGroupPhoto) return;
+            setChangingAppleGroupPhoto(true);
+            void removeAppleGroupPhoto({ chatGuid: dialogGrant.chatGuid }, dialogGrant.accountLease)
+              .then((result) => {
+                if (grantIsCurrent(dialogGrant)) showAppleGroupPhotoResult('remove', result);
+              })
+              .catch(() => {
+                if (grantIsCurrent(dialogGrant)) {
+                  showDialog(
+                    'Couldn’t Remove Group Photo',
+                    'The removal request could not be completed. Check Messages on your Mac before trying again.',
+                  );
+                }
+              })
+              .finally(() => {
+                if (grantIsCurrent(dialogGrant)) setChangingAppleGroupPhoto(false);
+              });
+          },
+        },
+      ],
+    );
+  };
+  const addParticipantToAppleGroup = (): void => {
+    const operationGrant = renderGrant;
+    if (
+      !grantIsCurrent(operationGrant) ||
+      !appleGroupParticipantAddAvailable ||
+      appleGroupParticipantAddress.length === 0 ||
+      appleGroupMembershipOperationActiveRef.current
+    ) {
+      return;
+    }
+    const submittedAddress = appleGroupParticipantAddress;
+    appleGroupMembershipOperationActiveRef.current = true;
+    setAddingAppleGroupParticipant(true);
+    void addAppleGroupParticipant(
+      { chatGuid: operationGrant.chatGuid, address: submittedAddress },
+      operationGrant.accountLease,
+    )
+      .then((result) => {
+        if (!grantIsCurrent(operationGrant)) return;
+        if (!result) return;
+        if (result.status === 'accepted') {
+          setAppleGroupParticipantAddress('');
+          showDialog(
+            'Add Request Accepted',
+            'Messages accepted the add request. Gator will update this list after Messages syncs the roster.',
+          );
+          return;
+        }
+        if (result.status === 'outcome-unknown') {
+          showDialog(
+            'Add Not Confirmed',
+            'The request may have reached Messages. Check the group membership in Messages on your Mac before trying again. The address you entered is still here.',
+          );
+          return;
+        }
+        showDialog(
+          'Person Not Added',
+          'Messages did not add this person. Enter a canonical +country-code number or email address, or try again later. The address you entered is still here.',
+        );
+      })
+      .catch(() => {
+        if (!grantIsCurrent(operationGrant)) return;
+        showDialog(
+          'Couldn’t Add Person',
+          'The add request could not be completed. Check the group in Messages on your Mac before trying again. The address you entered is still here.',
+        );
+      })
+      .finally(() => {
+        appleGroupMembershipOperationActiveRef.current = false;
+        if (grantIsCurrent(operationGrant)) setAddingAppleGroupParticipant(false);
+      });
+  };
+  const confirmRemoveParticipantFromAppleGroup = (member: ChatParticipant): void => {
+    const dialogGrant = renderGrant;
+    if (
+      !grantIsCurrent(dialogGrant) ||
+      !appleGroupParticipantRemoveAvailable ||
+      member.service !== 'iMessage' ||
+      !isCanonicalIMessageParticipantAddress(member.address) ||
+      appleGroupMembershipOperationActiveRef.current
+    ) {
+      return;
+    }
+    showDialog(
+      'Remove Person from Apple Group?',
+      `This removes ${member.name} from the group for everyone in Apple Messages.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove Person',
+          style: 'destructive',
+          onPress: () => {
+            if (!grantIsCurrent(dialogGrant) || appleGroupMembershipOperationActiveRef.current) {
+              return;
+            }
+            appleGroupMembershipOperationActiveRef.current = true;
+            setRemovingAppleGroupParticipantAddress(member.address);
+            void removeAppleGroupParticipant(
+              { chatGuid: dialogGrant.chatGuid, address: member.address },
+              dialogGrant.accountLease,
+            )
+              .then((result) => {
+                if (!grantIsCurrent(dialogGrant) || !result) return;
+                if (result.status === 'accepted') {
+                  showDialog(
+                    'Removal Request Accepted',
+                    'Messages accepted the removal request. Gator will update this roster only after Messages sync confirms it.',
+                  );
+                  return;
+                }
+                if (result.status === 'outcome-unknown') {
+                  showDialog(
+                    'Removal Not Confirmed',
+                    'The request may have reached Messages. Check the group membership in Messages on your Mac before trying again. Gator has not changed this roster.',
+                  );
+                  return;
+                }
+                showDialog(
+                  'Person Not Removed',
+                  'Messages did not confirm this removal. Gator has kept the roster unchanged; let it sync and check Messages on your Mac before trying again.',
+                );
+              })
+              .catch(() => {
+                if (!grantIsCurrent(dialogGrant)) return;
+                showDialog(
+                  'Couldn’t Remove Person',
+                  'The removal request could not be completed. Gator has kept the roster unchanged; check Messages on your Mac before trying again.',
+                );
+              })
+              .finally(() => {
+                appleGroupMembershipOperationActiveRef.current = false;
+                if (grantIsCurrent(dialogGrant)) setRemovingAppleGroupParticipantAddress(null);
+              });
+          },
+        },
+      ],
+    );
+  };
+  const confirmLeaveAppleGroup = (): void => {
+    const dialogGrant = renderGrant;
+    if (
+      !grantIsCurrent(dialogGrant) ||
+      !appleGroupLeaveAvailable ||
+      appleGroupMembershipOperationActiveRef.current
+    ) {
+      return;
+    }
+    showDialog(
+      'Leave Apple Group?',
+      'This changes the group in Apple Messages for everyone and may remove your access to future messages.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Leave Group',
+          style: 'destructive',
+          onPress: () => {
+            if (!grantIsCurrent(dialogGrant) || appleGroupMembershipOperationActiveRef.current) {
+              return;
+            }
+            appleGroupMembershipOperationActiveRef.current = true;
+            setLeavingAppleGroup(true);
+            void leaveAppleGroup({ chatGuid: dialogGrant.chatGuid }, dialogGrant.accountLease)
+              .then((result) => {
+                if (!grantIsCurrent(dialogGrant) || !result) return;
+                if (result.status === 'accepted') {
+                  showDialog(
+                    'Leave Request Accepted',
+                    'Messages accepted the leave request. Gator will keep this conversation until authoritative sync updates it.',
+                  );
+                  return;
+                }
+                if (result.status === 'outcome-unknown') {
+                  showDialog(
+                    'Leave Not Confirmed',
+                    'The request may have reached Messages. Check the group in Messages on your Mac before trying again. Gator has not removed this conversation or changed its roster.',
+                  );
+                  return;
+                }
+                showDialog(
+                  'Group Not Left',
+                  'Messages did not confirm that you left. Gator has kept this conversation and roster unchanged; let it sync and check Messages on your Mac before trying again.',
+                );
+              })
+              .catch(() => {
+                if (!grantIsCurrent(dialogGrant)) return;
+                showDialog(
+                  'Couldn’t Leave Group',
+                  'The leave request could not be completed. Gator has kept this conversation and roster unchanged; check Messages on your Mac before trying again.',
+                );
+              })
+              .finally(() => {
+                appleGroupMembershipOperationActiveRef.current = false;
+                if (grantIsCurrent(dialogGrant)) setLeavingAppleGroup(false);
+              });
+          },
+        },
+      ],
+    );
+  };
   const pickColor = (color: string | null): void => {
     const operationGrant = renderGrant;
     if (!grantIsCurrent(operationGrant)) return;
@@ -457,6 +913,19 @@ function ChatSettingsScreen({
       updateChatCustomization(
         operationGrant.chatGuid,
         { customColor: color },
+        operationGrant.accountLease,
+      ),
+    );
+  };
+  const pickHandleColor = (member: ChatParticipant, color: string | null): void => {
+    const operationGrant = renderGrant;
+    if (!grantIsCurrent(operationGrant)) return;
+    queueScreenCommand(operationGrant, () =>
+      updateHandleColor(
+        operationGrant.chatGuid,
+        member.address,
+        member.service,
+        color,
         operationGrant.accountLease,
       ),
     );
@@ -576,15 +1045,141 @@ function ChatSettingsScreen({
   return (
     <>
       <ScrollView contentContainerStyle={styles.content}>
-        <SettingsSection label="NAME">
+        <SettingsSection label="PHONE-LOCAL NICKNAME">
           <TextInput
             value={customName}
             onChangeText={saveName}
             placeholder={serverTitle || 'Custom name'}
             placeholderTextColor={theme.color.tertiaryLabel}
+            accessibilityLabel="Phone-Local Nickname"
             style={[styles.input, { color: theme.color.label }]}
           />
         </SettingsSection>
+
+        {appleGroupRenameAvailable ? (
+          <SettingsSection label="APPLE GROUP NAME" style={styles.gap}>
+            <TextInput
+              value={appleGroupNameValue}
+              onChangeText={setAppleGroupName}
+              placeholder="Apple Group Name"
+              placeholderTextColor={theme.color.tertiaryLabel}
+              accessibilityLabel="Apple Group Name"
+              editable={!renamingAppleGroup}
+              style={[styles.input, { color: theme.color.label }]}
+            />
+            <Text style={[styles.help, { color: theme.color.secondaryLabel }]}>
+              This changes the group name for everyone in Apple Messages. It does not change the
+              phone-local nickname above.
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Rename in Apple Messages"
+              accessibilityState={{
+                disabled: renamingAppleGroup || !appleGroupNameChanged,
+              }}
+              disabled={renamingAppleGroup || !appleGroupNameChanged}
+              onPress={renameAppleGroupName}
+              style={styles.row}
+            >
+              <Text style={[styles.rowLabel, { color: theme.color.label }]}>
+                {renamingAppleGroup ? 'Renaming in Apple Messages…' : 'Rename in Apple Messages'}
+              </Text>
+            </Pressable>
+          </SettingsSection>
+        ) : null}
+
+        {appleGroupPhotoAvailable ? (
+          <SettingsSection label="APPLE GROUP PHOTO" style={styles.gap}>
+            <Text style={[styles.help, { color: theme.color.secondaryLabel }]}>
+              This changes the photo for everyone in Apple Messages. Gator waits for Messages sync
+              instead of changing local data immediately.
+            </Text>
+            <NavRow
+              label={changingAppleGroupPhoto ? 'Changing Apple Group Photo…' : 'Change Photo…'}
+              accessibilityLabel="Change Apple Group Photo"
+              color="label"
+              chevron={false}
+              disabled={changingAppleGroupPhoto}
+              onPress={changeAppleGroupPhoto}
+            />
+            <NavRow
+              label="Remove Photo"
+              accessibilityLabel="Remove Apple Group Photo"
+              color="destructive"
+              chevron={false}
+              disabled={changingAppleGroupPhoto}
+              onPress={confirmRemoveAppleGroupPhoto}
+            />
+          </SettingsSection>
+        ) : null}
+
+        {appleGroupParticipantAddAvailable ? (
+          <SettingsSection label="ADD TO APPLE GROUP" style={styles.gap}>
+            <TextInput
+              value={appleGroupParticipantAddress}
+              onChangeText={setAppleGroupParticipantAddress}
+              placeholder="+15551234567 or person@example.com"
+              placeholderTextColor={theme.color.tertiaryLabel}
+              accessibilityLabel="Apple Group Participant Address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={
+                !addingAppleGroupParticipant &&
+                removingAppleGroupParticipantAddress === null &&
+                !leavingAppleGroup
+              }
+              style={[styles.input, { color: theme.color.label }]}
+            />
+            <Text style={[styles.help, { color: theme.color.secondaryLabel }]}>
+              Enter a full international number beginning with + or an email address. Gator waits
+              for Messages sync to update the roster instead of changing it locally.
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Add Person to Apple Group"
+              accessibilityState={{
+                disabled:
+                  addingAppleGroupParticipant ||
+                  removingAppleGroupParticipantAddress !== null ||
+                  leavingAppleGroup ||
+                  appleGroupParticipantAddress.length === 0,
+              }}
+              disabled={
+                addingAppleGroupParticipant ||
+                removingAppleGroupParticipantAddress !== null ||
+                leavingAppleGroup ||
+                appleGroupParticipantAddress.length === 0
+              }
+              onPress={addParticipantToAppleGroup}
+              style={styles.row}
+            >
+              <Text style={[styles.rowLabel, { color: theme.color.label }]}>
+                {addingAppleGroupParticipant ? 'Adding in Apple Messages…' : 'Add Person'}
+              </Text>
+            </Pressable>
+          </SettingsSection>
+        ) : null}
+
+        {appleGroupLeaveAvailable ? (
+          <SettingsSection label="APPLE GROUP MEMBERSHIP" style={styles.gap}>
+            <Text style={[styles.help, { color: theme.color.secondaryLabel }]}>
+              Leaving changes Apple Messages for everyone and may remove your access. Gator waits
+              for Messages sync instead of deleting this conversation locally.
+            </Text>
+            <NavRow
+              label={leavingAppleGroup ? 'Leaving Apple Group…' : 'Leave Apple Group'}
+              accessibilityLabel="Leave Apple Group"
+              color="destructive"
+              chevron={false}
+              disabled={
+                leavingAppleGroup ||
+                addingAppleGroupParticipant ||
+                removingAppleGroupParticipantAddress !== null
+              }
+              onPress={confirmLeaveAppleGroup}
+            />
+          </SettingsSection>
+        ) : null}
 
         <SettingsSection label="BUBBLE COLOR" style={styles.gap}>
           <View style={styles.swatchRow}>
@@ -688,16 +1283,96 @@ function ChatSettingsScreen({
           />
         </SettingsSection>
 
-        {isGroup ? (
-          <SettingsSection label={`GROUP · ${members.length} PEOPLE`} style={styles.gap}>
-            {members.map((member, index) => (
-              <View key={`${member.address}-${index}`} style={styles.row}>
-                <Text
-                  numberOfLines={1}
-                  style={[styles.rowLabel, { color: theme.color.label, flex: 1 }]}
-                >
-                  {member.name}
-                </Text>
+        {members.length > 0 ? (
+          <SettingsSection
+            label={isGroup ? `GROUP · ${members.length} PEOPLE` : 'CONTACT COLOR'}
+            style={styles.gap}
+          >
+            {members.map((member) => (
+              <View key={JSON.stringify([member.address, member.service])}>
+                <View style={styles.handleHeader}>
+                  <View
+                    testID={`handle-color-preview-${member.address}-${member.service ?? ''}`}
+                    style={[
+                      styles.handlePreview,
+                      {
+                        backgroundColor: member.color ?? theme.color.tertiaryLabel,
+                        borderColor: theme.color.separator,
+                      },
+                    ]}
+                  />
+                  <Text
+                    numberOfLines={1}
+                    style={[styles.rowLabel, { color: theme.color.label, flex: 1 }]}
+                  >
+                    {member.name}
+                  </Text>
+                  {member.service ? (
+                    <Text style={[styles.handleService, { color: theme.color.tertiaryLabel }]}>
+                      {member.service}
+                    </Text>
+                  ) : null}
+                  {appleGroupParticipantRemoveAvailable &&
+                  member.service === 'iMessage' &&
+                  isCanonicalIMessageParticipantAddress(member.address) ? (
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Remove ${member.name} from Apple Group`}
+                      accessibilityState={{
+                        disabled:
+                          addingAppleGroupParticipant ||
+                          removingAppleGroupParticipantAddress !== null ||
+                          leavingAppleGroup,
+                      }}
+                      disabled={
+                        addingAppleGroupParticipant ||
+                        removingAppleGroupParticipantAddress !== null ||
+                        leavingAppleGroup
+                      }
+                      onPress={() => confirmRemoveParticipantFromAppleGroup(member)}
+                    >
+                      <Text style={[styles.handleAction, { color: theme.color.destructive }]}>
+                        {removingAppleGroupParticipantAddress === member.address
+                          ? 'Removing…'
+                          : 'Remove'}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+                <View style={styles.handleSwatchRow}>
+                  <Pressable
+                    onPress={() => pickHandleColor(member, null)}
+                    accessibilityRole="radio"
+                    accessibilityLabel={`Default color for ${member.name}`}
+                    accessibilityState={{ selected: member.color == null }}
+                    hitSlop={6}
+                    style={[
+                      styles.handleSwatch,
+                      styles.defaultSwatch,
+                      { borderColor: theme.color.separator },
+                      member.color == null && styles.swatchOn,
+                    ]}
+                  >
+                    <Text style={[styles.defaultMark, { color: theme.color.secondaryLabel }]}>
+                      ✕
+                    </Text>
+                  </Pressable>
+                  {HANDLE_COLOR_SWATCHES.map(({ color, name: colorName }) => (
+                    <Pressable
+                      key={color}
+                      onPress={() => pickHandleColor(member, color)}
+                      accessibilityRole="radio"
+                      accessibilityLabel={`${colorName} color for ${member.name}`}
+                      accessibilityState={{ selected: member.color === color }}
+                      hitSlop={6}
+                      style={[
+                        styles.handleSwatch,
+                        { backgroundColor: color },
+                        member.color === color && styles.swatchOn,
+                      ]}
+                    />
+                  ))}
+                </View>
               </View>
             ))}
           </SettingsSection>
@@ -742,6 +1417,7 @@ const styles = StyleSheet.create({
   accountChangedText: { textAlign: 'center', fontSize: 15 },
   gap: { marginTop: 24 },
   input: { paddingHorizontal: 16, paddingVertical: 14, fontSize: 16 },
+  help: { paddingHorizontal: 16, paddingBottom: 8, fontSize: 13, lineHeight: 18 },
   swatchRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, padding: 16 },
   swatch: { width: 36, height: 36, borderRadius: 18 },
   defaultSwatch: {
@@ -751,6 +1427,30 @@ const styles = StyleSheet.create({
   },
   defaultMark: { fontSize: 16 },
   swatchOn: { borderWidth: 3, borderColor: '#FFFFFF' },
+  handleHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+  },
+  handlePreview: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  handleService: { fontSize: 13 },
+  handleAction: { fontSize: 15, paddingVertical: 6 },
+  handleSwatchRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 14,
+  },
+  handleSwatch: { width: 32, height: 32, borderRadius: 16 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',

@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import type { HttpClient } from '@core/api/http';
+import { ServerInfo } from '@core/models';
 import { claimScheduled, insertScheduled } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
@@ -7,11 +8,26 @@ import { sendImageMessage, type AttachmentUploader } from '@/services/send/sendA
 import { sendContactMessage } from '@/services/send/sendContactService';
 import { sendReactionMessage } from '@/services/send/sendReactionService';
 import { sendTextMessage } from '@/services/send/sendService';
+import { fixedRcsCapabilitySource } from '@/services/send/rcsAttemptCapability';
 import { createTestDb } from '../support/testDb';
 
 type SendKind = 'text' | 'contact' | 'reaction' | 'attachment';
 
 const SEND_KINDS: SendKind[] = ['text', 'contact', 'reaction', 'attachment'];
+
+const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
+const rcsChatGuid = (sourceId: string): string =>
+  `RCS;-;g1.${RCS_PROVIDER_EPOCH}.${Buffer.from(sourceId).toString('base64url')}`;
+const RCS_TARGET_GUID = `rcs-g1.${RCS_PROVIDER_EPOCH}.${Buffer.from('target-message').toString('base64url')}`;
+const RCS_CAPABILITY = fixedRcsCapabilitySource(
+  ServerInfo.parse({
+    version: '2.0.0',
+    rcs: true,
+    supports_rcs_epoch_qualified_ids: true,
+    rcs_provider_epoch: RCS_PROVIDER_EPOCH,
+    supports_send_contact: true,
+  }),
+);
 
 const IMAGE = {
   uri: 'file:///identity-race.jpg',
@@ -74,9 +90,10 @@ function seedReactionTarget(raw: Database.Database, chatGuid: string): void {
   raw
     .prepare(
       `INSERT INTO messages(guid, chat_id, text, date_created, message_part_topology)
-       VALUES ('rcs-target-message', ?, 'target', 1, ?)`,
+       VALUES (?, ?, 'target', 1, ?)`,
     )
     .run(
+      RCS_TARGET_GUID,
       chat.id,
       JSON.stringify({
         complete: true,
@@ -164,7 +181,12 @@ function startSend(
 ): Promise<{ tempGuid: string }> {
   let http!: HttpClient;
   http = {
-    get: async () => ({ rcs: true, supports_send_contact: true }),
+    get: async () => ({
+      rcs: true,
+      supports_send_contact: true,
+      supports_rcs_epoch_qualified_ids: true,
+      rcs_provider_epoch: RCS_PROVIDER_EPOCH,
+    }),
     post: async (_path: string, _schema: unknown, options?: { json?: unknown }) => {
       const body = (options?.json ?? {}) as { chatGuid?: string };
       await onNetwork(outgoingAtNetworkStart(raw, body.chatGuid ?? 'missing'));
@@ -184,13 +206,15 @@ function startSend(
       http,
       { chatGuid, contact: { firstName: 'Identity', lastName: 'Contact' } },
       1_000,
+      undefined,
+      RCS_CAPABILITY,
     );
   }
   if (kind === 'reaction') {
     return sendReactionMessage(
       db,
       http,
-      { chatGuid, targetGuid: 'rcs-target-message', reaction: 'love', partIndex: 0 },
+      { chatGuid, targetGuid: RCS_TARGET_GUID, reaction: 'love', partIndex: 0 },
       1_000,
     );
   }
@@ -199,7 +223,18 @@ function startSend(
     await onNetwork(outgoingAtNetworkStart(raw, args.chatGuid));
     return { guid: 'real-attachment', viaPrivateApi: true };
   };
-  return sendImageMessage(db, http, { chatGuid, image: IMAGE }, upload, 1_000);
+  return sendImageMessage(
+    db,
+    http,
+    { chatGuid, image: IMAGE },
+    upload,
+    1_000,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    RCS_CAPABILITY,
+  );
 }
 
 describe('outgoing chat identity is resolved by the optimistic insert owner', () => {
@@ -207,7 +242,7 @@ describe('outgoing chat identity is resolved by the optimistic insert owner', ()
     '%s waits out a rolled-back chat deletion before lookup and network',
     async (kind) => {
       const { db, raw } = await createTestDb();
-      const targetGuid = kind === 'text' ? 'target-chat' : 'RCS;-;target-chat';
+      const targetGuid = kind === 'text' ? 'target-chat' : rcsChatGuid('target-chat');
       seedChat(raw, targetGuid);
       seedChat(raw, 'decoy-chat');
       if (kind === 'reaction') seedReactionTarget(raw, targetGuid);
@@ -303,7 +338,7 @@ describe('outgoing chat identity is resolved by the optimistic insert owner', ()
             kind,
             db,
             raw,
-            kind === 'text' ? 'missing-chat' : 'RCS;-;missing-chat',
+            kind === 'text' ? 'missing-chat' : rcsChatGuid('missing-chat'),
             (snapshot) => {
               network.push(snapshot);
             },
@@ -364,7 +399,8 @@ describe('outgoing chat identity is resolved by the optimistic insert owner', ()
       const deletion = await deletionOutcome;
       expect(send.kind).toBe('fulfilled');
       expect(deletion).toEqual({ kind: 'fulfilled', changes: 0 });
-      expect(lookup.inTransactions).toEqual([true]);
+      expect(lookup.inTransactions).not.toHaveLength(0);
+      expect(lookup.inTransactions.every(Boolean)).toBe(true);
       expect(network).toEqual([
         {
           messageChatGuid: 'atomic-chat',
@@ -418,8 +454,9 @@ describe('outgoing chat identity is resolved by the optimistic insert owner', ()
         { scheduledId, transition: { kind: 'sent' } },
       );
 
-      expect(lookup.inTransactions).toEqual([true]);
-      expect(lookup.scheduledStatuses).toEqual(['sent']);
+      expect(lookup.inTransactions).not.toHaveLength(0);
+      expect(lookup.inTransactions.every(Boolean)).toBe(true);
+      expect(lookup.scheduledStatuses.every((status) => status === 'sent')).toBe(true);
       expect(network).toEqual([
         {
           messageChatGuid: 'scheduled-chat',

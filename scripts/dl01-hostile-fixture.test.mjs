@@ -7,7 +7,10 @@ import { join } from 'node:path';
 import test from 'node:test';
 
 import {
+  createEncryptedFeat07Pdf,
+  createExactLengthFeat07Pdf,
   createExactLengthValidPng,
+  createFeat07Pdf,
   createFcmV3Frame,
   DL01_DEFAULT_ATTACHMENT_MAX_BYTES,
   DL01_DEFAULT_WALLPAPER_MAX_BYTES,
@@ -173,6 +176,198 @@ test('exact-cap fixture images remain complete PNGs at the production byte limit
     );
   }
   assert.throws(() => createExactLengthValidPng(DL01_VALID_PNG.length + 1), /needs at least/);
+});
+
+test('FEAT-07 PDF fixtures are deterministic, bounded, and structurally distinct', () => {
+  const valid = createFeat07Pdf();
+  assert.equal(valid.subarray(0, 8).toString('latin1'), '%PDF-1.4');
+  assert.equal(valid.includes(Buffer.from('startxref', 'ascii')), true);
+
+  const exact = createExactLengthFeat07Pdf(4_096);
+  assert.equal(exact.length, 4_096);
+  assert.equal(exact.subarray(0, 8).toString('latin1'), '%PDF-1.4');
+
+  const encrypted = createEncryptedFeat07Pdf('gator');
+  assert.equal(encrypted.subarray(0, 8).toString('latin1'), '%PDF-1.4');
+  assert.equal(encrypted.includes(Buffer.from('/Encrypt 6 0 R', 'ascii')), true);
+  assert.throws(() => createFeat07Pdf('bad\nlabel'), /label is invalid/);
+  assert.throws(() => createExactLengthFeat07Pdf(100), /exact PDF byte length/);
+});
+
+test('FEAT-07 fixture serves one authenticated paginated synthetic attachment corpus', async (t) => {
+  const video = Buffer.from('000000186674797069736f6d0000020069736f6d69736f32', 'hex');
+  const fixture = await startDl01FixtureServer({
+    authToken: AUTH_TOKEN,
+    port: 0,
+    fixtureSet: 'feat07',
+    feat07VideoBytes: video,
+    feat07LargePdfBytes: 4_096,
+    now: () => 1_788_912_000_000,
+  });
+  t.after(() => fixture.close());
+
+  const unauthorized = await fetch(`${fixture.origin}/api/v1/chat/query`, { method: 'POST' });
+  assert.equal(unauthorized.status, 401);
+
+  const info = await control(fixture, '/api/v1/server/info');
+  assert.equal(info.response.status, 200);
+  assert.equal(info.json.data.supports_scoped_device_credentials, false);
+  assert.equal(info.json.data.supports_fcm_push_encryption_v3, false);
+  assert.equal(info.json.data.rcs, false);
+
+  const chats = await control(fixture, '/api/v1/chat/query', { offset: 0, limit: 100 });
+  assert.equal(chats.response.status, 200);
+  assert.equal(chats.json.data.chats.length, 1);
+  const chat = chats.json.data.chats[0];
+  assert.equal(chat.displayName, 'FEAT-07 Fixture');
+  assert.equal(chat.guid, 'iMessage;-;feat07-fixture@example.invalid');
+
+  const chatPath = `/api/v1/chat/${encodeURIComponent(chat.guid)}/message`;
+  const firstPage = await control(fixture, `${chatPath}?offset=0&limit=50`);
+  const secondPage = await control(fixture, `${chatPath}?offset=50&limit=50`);
+  assert.equal(firstPage.json.data.messages.length, 50);
+  assert.equal(secondPage.json.data.messages.length, 5);
+  const allMessages = [...firstPage.json.data.messages, ...secondPage.json.data.messages];
+  const allAttachments = allMessages.map((message) => message.attachments[0]);
+  assert.equal(
+    allAttachments.filter((attachment) => attachment.mimeType === 'application/pdf').length,
+    51,
+  );
+  assert.equal(
+    allAttachments.filter((attachment) => attachment.mimeType === 'text/vcard').length,
+    1,
+  );
+  assert.equal(
+    allAttachments.filter((attachment) => attachment.mimeType === 'image/png').length,
+    2,
+  );
+  assert.equal(
+    allAttachments.filter((attachment) => attachment.mimeType === 'video/mp4').length,
+    1,
+  );
+  assert.equal(allAttachments.at(-1).transferName, '52-oldest-page.pdf');
+  assert.equal(new Set(allMessages.map((message) => message.guid)).size, 55);
+
+  const oldest = await control(fixture, '/api/v1/message/query', {
+    afterRowId: 0,
+    limit: 20,
+  });
+  assert.equal(oldest.json.data.messages.length, 20);
+  const cursor = oldest.json.data.messages.at(-1).originalROWID;
+  const remaining = await control(fixture, '/api/v1/message/query', {
+    afterRowId: cursor,
+    limit: 100,
+  });
+  assert.equal(remaining.json.data.messages.length, 35);
+  const globalMessages = [...oldest.json.data.messages, ...remaining.json.data.messages];
+  assert.equal(new Set(globalMessages.map((message) => message.guid)).size, 55);
+  assert.ok(
+    globalMessages.every(
+      (message, index, messages) =>
+        index === 0 || messages[index - 1].originalROWID < message.originalROWID,
+    ),
+  );
+
+  const contacts = await control(fixture, '/api/v1/contact/query', {
+    addresses: ['feat07-fixture@example.invalid'],
+  });
+  assert.equal(contacts.json.data.contacts[0].displayName, 'FEAT-07 Fixture');
+  assert.equal(contacts.json.data.contacts[0].hasAvatar, false);
+
+  const attachmentByName = new Map(
+    allAttachments.map((attachment) => [attachment.transferName, attachment]),
+  );
+  const download = (name) =>
+    fetch(
+      `${fixture.origin}/api/v1/attachment/${encodeURIComponent(attachmentByName.get(name).guid)}/download`,
+      { headers: { Authorization: `Bearer ${AUTH_TOKEN}` } },
+    );
+
+  const retryFailure = await download('02-retry.pdf');
+  assert.equal(retryFailure.status, 503);
+  const retrySuccess = await download('02-retry.pdf');
+  assert.equal(retrySuccess.status, 200);
+  const retryBytes = Buffer.from(await retrySuccess.arrayBuffer());
+  assert.equal(retrySuccess.headers.get('content-type'), 'application/pdf');
+  assert.equal(Number(retrySuccess.headers.get('content-length')), retryBytes.length);
+  assert.equal(retryBytes.length, attachmentByName.get('02-retry.pdf').totalBytes);
+  assert.equal(retryBytes.subarray(0, 4).toString('ascii'), '%PDF');
+
+  for (const [name, assertion] of [
+    ['01-valid.pdf', (bytes) => assert.equal(bytes.subarray(0, 4).toString('ascii'), '%PDF')],
+    [
+      '03-contact.vcf',
+      (bytes) => {
+        const text = bytes.toString('utf8');
+        assert.equal(text.startsWith('BEGIN:VCARD\r\nVERSION:3.0\r\n'), true);
+        assert.equal(text.includes('\r\nN:Fixture;Gator FEAT-07;;;\r\n'), true);
+        assert.equal(text.includes('\r\nFN:Gator FEAT-07 Fixture\r\n'), true);
+        assert.equal(text.endsWith('END:VCARD\r\n'), true);
+      },
+    ],
+    [
+      '04-encrypted-password-gator.pdf',
+      (bytes) => assert.equal(bytes.includes(Buffer.from('/Encrypt 6 0 R')), true),
+    ],
+    [
+      '05-malformed.pdf',
+      (bytes) => assert.equal(bytes.includes(Buffer.from('deliberately malformed')), true),
+    ],
+    ['06-large.pdf', (bytes) => assert.equal(bytes.length, 4_096)],
+    ['52-oldest-page.pdf', (bytes) => assert.equal(bytes.subarray(0, 4).toString('ascii'), '%PDF')],
+    ['feat07-image-one.png', (bytes) => assert.equal(bytes.length, 68)],
+    ['feat07-image-two.png', (bytes) => assert.equal(bytes.length, 128)],
+    ['feat07-video.mp4', (bytes) => assert.deepEqual(bytes, video)],
+  ]) {
+    const response = await download(name);
+    assert.equal(response.status, 200, name);
+    const attachment = attachmentByName.get(name);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    assert.equal(response.headers.get('content-type'), attachment.mimeType, name);
+    assert.equal(Number(response.headers.get('content-length')), bytes.length, name);
+    assert.equal(bytes.length, attachment.totalBytes, name);
+    assertion(bytes);
+  }
+
+  const missing = await fetch(`${fixture.origin}/api/v1/attachment/not-present/download`, {
+    headers: { Authorization: `Bearer ${AUTH_TOKEN}` },
+  });
+  assert.equal(missing.status, 404);
+  const hiddenDl01Attachment = await fetch(
+    `${fixture.origin}/api/v1/attachment/dl01-attachment-1/download`,
+    { headers: { Authorization: `Bearer ${AUTH_TOKEN}` } },
+  );
+  assert.equal(hiddenDl01Attachment.status, 404);
+  const hiddenDl01Messages = await control(fixture, '/api/v1/chat/dl01-chat-1/message');
+  assert.equal(hiddenDl01Messages.response.status, 404);
+  const hiddenDl01Chat = await control(fixture, '/api/v1/chat/dl01-chat-1');
+  assert.equal(hiddenDl01Chat.response.status, 404);
+  for (const path of ['/scenario', '/release-held', '/fcm/send-current']) {
+    const disabled = await control(fixture, `/_dl01/v1${path}`, {});
+    assert.equal(disabled.response.status, 404, path);
+  }
+
+  const status = await control(fixture, '/_dl01/v1/status');
+  assert.equal(status.json.fixtureSet, 'feat07');
+  assert.equal(status.json.feat07.messages, 55);
+  assert.equal(status.json.feat07.documents, 52);
+  assert.equal(status.json.feat07.media, 3);
+  assert.equal(
+    status.json.feat07.assets.find((asset) => asset.alias === 'document-retry').failures,
+    1,
+  );
+  const publicJson = JSON.stringify(status.json);
+  assert.equal(publicJson.includes(AUTH_TOKEN), false);
+  assert.equal(publicJson.includes('feat07-attachment-'), false);
+  assert.equal(publicJson.includes('.pdf'), false);
+
+  const revoked = await control(fixture, '/api/v1/device-credentials/revoke-self', {});
+  assert.equal(revoked.response.status, 200);
+  assert.equal(revoked.json.data.revoked, true);
+  const rejectedAfterRevoke = await control(fixture, '/api/v1/ping');
+  assert.equal(rejectedAfterRevoke.response.status, 401);
+  const controlAfterRevoke = await control(fixture, '/_dl01/v1/status');
+  assert.equal(controlAfterRevoke.response.status, 200);
 });
 
 test('DL-01 fixture exposes only authenticated synthetic sync and bounded hostile modes', async (t) => {
@@ -569,6 +764,8 @@ test('ADB runner requires one exact serial, package, and loopback base URL', () 
       base: { origin: 'http://127.0.0.1:43117', port: 43_117 },
       firebaseProjectId: null,
       rcsPermissions: false,
+      fixtureSet: 'dl01',
+      feat07VideoPath: null,
     },
   );
   assert.equal(
@@ -583,6 +780,61 @@ test('ADB runner requires one exact serial, package, and loopback base URL', () 
       'yes',
     ]).rcsPermissions,
     true,
+  );
+  assert.deepEqual(
+    parseDl01DeviceFixtureArgs([
+      '--serial',
+      'device-1234',
+      '--package',
+      'com.example.gator',
+      '--base-url',
+      'http://127.0.0.1:43149',
+      '--fixture-set',
+      'feat07',
+      '--feat07-video',
+      '/tmp/feat07.mp4',
+    ]),
+    {
+      serial: 'device-1234',
+      packageName: 'com.example.gator',
+      base: { origin: 'http://127.0.0.1:43149', port: 43_149 },
+      firebaseProjectId: null,
+      rcsPermissions: false,
+      fixtureSet: 'feat07',
+      feat07VideoPath: '/tmp/feat07.mp4',
+    },
+  );
+  assert.throws(
+    () =>
+      parseDl01DeviceFixtureArgs([
+        '--serial',
+        'device-1234',
+        '--package',
+        'com.example.gator',
+        '--base-url',
+        'http://127.0.0.1:43149',
+        '--fixture-set',
+        'feat07',
+      ]),
+    /--feat07-video is required/,
+  );
+  assert.throws(
+    () =>
+      parseDl01DeviceFixtureArgs([
+        '--serial',
+        'device-1234',
+        '--package',
+        'com.example.gator',
+        '--base-url',
+        'http://127.0.0.1:43149',
+        '--fixture-set',
+        'feat07',
+        '--feat07-video',
+        '/tmp/feat07.mp4',
+        '--rcs-permissions',
+        'yes',
+      ]),
+    /does not support FCM or RCS/,
   );
   assert.throws(() => parseDl01DeviceFixtureArgs([]), /--serial/);
   assert.throws(

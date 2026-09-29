@@ -205,6 +205,10 @@ function removeRepairMessagesWithinTransaction(
             sql`NOT EXISTS (
               SELECT 1 FROM message_deletion_ledger ledger
                WHERE ledger.guid = ${candidate.guid}
+                 AND ledger.chat_guid = (
+                   SELECT owner_chat.guid FROM chats owner_chat
+                    WHERE owner_chat.id = ${candidate.chatId}
+                 )
             )`,
             sql`NOT EXISTS (
               SELECT 1 FROM reminders reminder
@@ -302,6 +306,7 @@ function removeRepairAttachmentsWithinTransaction(
                  AND NOT EXISTS (
                    SELECT 1 FROM message_deletion_ledger ledger
                     WHERE ledger.guid = parent.guid
+                      AND ledger.chat_guid = parent_chat.guid
                  )
                  AND NOT EXISTS (
                    SELECT 1 FROM reminders reminder
@@ -336,6 +341,7 @@ interface CurrentRepairChatRow {
   lastReadMessageGuid: string | null;
   markedUnreadAt: number | null;
   deletedAt: number | null;
+  historyDeletedAt: number | null;
 }
 
 type ChatRetirement = 'removed' | 'retired' | 'local-work' | 'changed';
@@ -351,7 +357,8 @@ function retireRepairChatWithinTransaction(
              theme_tokens AS themeTokens, background_uri AS backgroundUri,
              background_is_light AS backgroundIsLight,
              last_read_message_guid AS lastReadMessageGuid,
-             marked_unread_at AS markedUnreadAt, deleted_at AS deletedAt
+             marked_unread_at AS markedUnreadAt, deleted_at AS deletedAt,
+             history_deleted_at AS historyDeletedAt
         FROM chats
        WHERE id = ${candidate.id} AND guid = ${candidate.guid}
        LIMIT 1
@@ -387,7 +394,8 @@ function retireRepairChatWithinTransaction(
       row.backgroundIsLight != null ||
       row.lastReadMessageGuid != null ||
       row.markedUnreadAt != null ||
-      row.deletedAt != null;
+      row.deletedAt != null ||
+      row.historyDeletedAt != null;
 
     if (!preservesLocalState) {
       const removed = await db

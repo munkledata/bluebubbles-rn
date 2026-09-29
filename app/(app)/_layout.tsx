@@ -1,4 +1,4 @@
-import { Redirect, Stack, useRouter } from 'expo-router';
+import { ExperimentalStack, Redirect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { AppState as NativeAppState, StyleSheet, View, type AppStateStatus } from 'react-native';
 import { isLockExpired } from '@core/security/lockTimeout';
@@ -34,6 +34,7 @@ import { useLockStore } from '@state/lockStore';
 import { useSessionStore } from '@state/sessionStore';
 import { ConnectionBanner } from '@ui/connection';
 import { ServerRotationApprovalHost } from '@ui/server-rotation';
+import { ShareIntentNavigator } from '@ui/ShareIntentHandler';
 import { useChatNavigator } from '@ui/useChatNavigator';
 import { completeNativeForegroundPrivacyTransition } from '@native/screenSecurity';
 
@@ -239,7 +240,8 @@ function ConnectedAppLayout(): React.JSX.Element {
 
   return (
     <View style={styles.root}>
-      <Stack screenOptions={{ headerShown: false }} />
+      <ExperimentalStack screenOptions={{ headerShown: false }} />
+      <ShareIntentNavigator />
       <ConnectionBanner onRetry={retryRealtimeConnection} />
       <ServerRotationApprovalHost />
     </View>

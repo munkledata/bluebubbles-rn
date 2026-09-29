@@ -21,6 +21,7 @@ let mockFeatureState = {
 type MockDeliveryContext = {
   generation: number;
   isCurrent: () => boolean;
+  isProviderCurrent?: () => boolean;
   durableEvent?: object;
   signal?: AbortSignal;
 };
@@ -530,10 +531,44 @@ function deliveryContext(durable = true): {
 }
 
 describe('realtime detached side-effect ownership', () => {
+  it('keeps socket auto-download bound to the originating provider-aware event context', async () => {
+    const onMessageStored = await startAndCaptureMessageStored();
+    let providerCurrent = true;
+    const context: MockDeliveryContext = {
+      generation: 0,
+      isCurrent: () => true,
+      isProviderCurrent: () => providerCurrent,
+    };
+    mockAutoDownloadForRealtimeEvent.mockImplementationOnce(async (...args: unknown[]) => {
+      const options = args[3] as { isEffectCurrent?: () => boolean } | undefined;
+      const effectIsCurrent = options?.isEffectCurrent;
+      expect(effectIsCurrent?.()).toBe(true);
+      providerCurrent = false;
+      expect(effectIsCurrent?.()).toBe(false);
+      providerCurrent = true;
+      expect(effectIsCurrent?.()).toBe(false);
+      return { savedImages: 0, destination: null };
+    });
+
+    await onMessageStored(416, 'socket', context);
+
+    expect(mockAutoDownloadForRealtimeEvent).toHaveBeenCalledWith(
+      expect.any(Object),
+      416,
+      expect.any(Number),
+      expect.objectContaining({ isEffectCurrent: expect.any(Function) }),
+    );
+  });
+
   it('adopts background-FCM auto-download into its bounded callback lifetime', async () => {
     const onMessageStored = await startAndCaptureMessageStored();
     const delivered = deliveryContext();
-    const context = { ...delivered.context, generation: 0 };
+    let providerCurrent = true;
+    const context = {
+      ...delivered.context,
+      generation: 0,
+      isProviderCurrent: () => providerCurrent,
+    };
     mockAdoptRealtimeHeadlessEffect.mockImplementationOnce(
       (
         _generation: number,
@@ -544,6 +579,16 @@ describe('realtime detached side-effect ownership', () => {
         task: effect({ generation: context.generation, isCurrent: () => true }),
       }),
     );
+    mockAutoDownloadForRealtimeEvent.mockImplementationOnce(async (...args: unknown[]) => {
+      const options = args[3] as { isEffectCurrent?: () => boolean } | undefined;
+      const effectIsCurrent = options?.isEffectCurrent;
+      expect(effectIsCurrent?.()).toBe(true);
+      providerCurrent = false;
+      expect(effectIsCurrent?.()).toBe(false);
+      providerCurrent = true;
+      expect(effectIsCurrent?.()).toBe(false);
+      return { savedImages: 0, destination: null };
+    });
 
     await onMessageStored(417, 'fcm', context);
 

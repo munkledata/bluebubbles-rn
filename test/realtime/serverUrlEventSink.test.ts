@@ -22,6 +22,9 @@ jest.mock('@/services/clients', () => ({
   accountRevocationMarker: { clear: jest.fn() },
 }));
 jest.mock('@/services/backgrounds/syncedBackground', () => ({ ensureSyncedBackground: jest.fn() }));
+jest.mock('@/services/background/authorizedRealtimeTransport', () => ({
+  resolveAuthorizedRealtimeTransport: jest.fn(),
+}));
 jest.mock('@/services/databaseControl', () => ({ ensureDatabase: jest.fn(async () => ({})) }));
 jest.mock('@/services/syncControl', () => ({ maybeResumeSync: jest.fn() }));
 jest.mock('@/services/download/autoDownloadAttachments', () => ({
@@ -58,6 +61,7 @@ import {
   approveNewServerUrl,
   dispatchRealtimeEvent,
   pauseRealtime,
+  persistAuthenticatedLockedFcmV3Event,
   resumeRealtime,
   setSocket,
   shouldPresentMessageNotification,
@@ -79,6 +83,10 @@ const { candidateClient: mockCandidateClient } = jest.requireMock('@/services/cl
 const { ensureDatabase: mockEnsureDatabase } = jest.requireMock('@/services/databaseControl') as {
   ensureDatabase: jest.Mock;
 };
+const { resolveAuthorizedRealtimeTransport: mockResolveAuthorizedRealtimeTransport } =
+  jest.requireMock('@/services/background/authorizedRealtimeTransport') as {
+    resolveAuthorizedRealtimeTransport: jest.Mock;
+  };
 
 const ev = (e: unknown): NormalizedEvent => e as NormalizedEvent;
 
@@ -160,6 +168,48 @@ describe('headless message-notification feature gate', () => {
       persist.mockRestore();
       useLockStore.setState({ enabled: false, hydrated: true, locked: false });
       setSocket(null);
+    }
+  });
+
+  it('enqueues an authenticated locked iMessage event without requesting RCS provider info', async () => {
+    resumeRealtimeDeliveries();
+    const context = captureRealtimeDeliveryLease();
+    const transportLease = { generation: context.generation, isCurrent: () => context.isCurrent() };
+    mockResolveAuthorizedRealtimeTransport.mockResolvedValue({
+      http: { name: 'locked-transport' },
+      lease: transportLease,
+    });
+    mockServerApi.serverInfo.mockRejectedValue(new Error('server unreachable'));
+    mockEnsureDatabase.mockResolvedValue({ name: 'encrypted-db' });
+    const persist = jest
+      .spyOn(DurableRealtimeDispatcher.prototype, 'persistLockedFcmV3WithoutDrain')
+      .mockResolvedValue({ status: 'enqueued', id: 1 });
+
+    try {
+      await expect(
+        persistAuthenticatedLockedFcmV3Event(
+          'new-message',
+          {
+            guid: 'locked-imessage',
+            chatGuid: 'iMessage;-;locked@example.com',
+            text: 'authenticated Apple event',
+            chats: [{ guid: 'iMessage;-;locked@example.com' }],
+          },
+          context,
+          {
+            serverEventId: 'fcm3:locked-imessage',
+            transportOccurrenceId: 'provider-locked-imessage',
+            receivedAt: 1_800_000_000_000,
+            authenticatedExpiresAt: 1_800_000_300_000,
+          },
+        ),
+      ).resolves.toBe('enqueued');
+      expect(mockServerApi.serverInfo).not.toHaveBeenCalled();
+      expect(persist).toHaveBeenCalledTimes(1);
+    } finally {
+      persist.mockRestore();
+      mockResolveAuthorizedRealtimeTransport.mockReset();
+      mockEnsureDatabase.mockReset();
     }
   });
 });

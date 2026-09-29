@@ -1,6 +1,14 @@
 import { and, eq, inArray, isNull, ne, notInArray, or, sql } from 'drizzle-orm';
 import type { Chat, ChatSummary } from '@core/models';
-import { chatHandles, chats, kv, outgoingQueue, scheduledMessages } from '../schema';
+import {
+  chatHandles,
+  chats,
+  kv,
+  messageDeletionLedger,
+  messages,
+  outgoingQueue,
+  scheduledMessages,
+} from '../schema';
 import {
   runInTransactionContext,
   withDbTransaction,
@@ -133,11 +141,12 @@ export function upsertChatsWithinTransaction(
     // ADD-THEN-PRUNE, never delete-then-add. Every write flushes the reactive queries and several
     // readers are UN-debounced (the chat header on mount, `chatHasKnownSender`'s unknown-sender
     // gate, `getChatHeader` behind the notification intents), so an intermediate state is genuinely
-    // rendered — and a chat with ZERO participant rows has no `participantNames`, so `resolveTitle`
-    // falls through to `chat_identifier`, i.e. the raw phone number, and the unknown-sender gate
-    // answers "unknown" and drops the notification for good. Resolving the handle ids first (pure
-    // JS, no writes) and inserting BEFORE pruning means the link set is only ever a superset of the
-    // truth, never empty: the worst observable state is one extra, since-removed member.
+    // rendered — and a chat with ZERO participant rows has an empty participant-name array, so
+    // `resolveTitle` falls through to `chat_identifier`, i.e. the raw phone number, and the
+    // unknown-sender gate answers "unknown" and drops the notification for good. Resolving the
+    // handle ids first (pure JS, no writes) and inserting BEFORE pruning means the link set is only
+    // ever a superset of the truth, never empty: the worst observable state is one extra,
+    // since-removed member.
     const links: { chatId: number; handleId: number }[] = [];
     const keepByChat = new Map<number, number[]>();
     for (const c of deduped) {
@@ -560,8 +569,8 @@ export function clearSupersededTombstonesWithinTransaction(
  * durably accomplished was destroying the user's own settings. Keeping the row keeps all of it.
  *
  * `chat_handles` is deliberately NOT deleted: the row survives now, and a chat with zero
- * participant links has no `participantNames`, so if it ever un-hides `resolveTitle` falls through
- * to the raw phone number.
+ * participant links has an empty participant-name array, so if it ever un-hides `resolveTitle`
+ * falls through to the raw phone number.
  *
  * THE DECISIONS ARE ONE TRANSACTION; THE BULK PURGE IS NOT. Everything that decides what the chat
  * IS after the delete — the tombstone stamp, the read-marker handover, and the queue/scheduled/draft
@@ -580,14 +589,14 @@ export function clearSupersededTombstonesWithinTransaction(
  * every unrelated autocommit issued in that window (a read marker, a download's local path) into an
  * atomicity it has nothing to do with. Chunking is safe here precisely because the tombstone has
  * ALREADY committed: a partially-purged chat is invisible either way (every surviving row is
- * `<= deleted_at` by the floor below, so `chatVisible` stays false).
+ * `<= history_deleted_at` by the floor below, so `chatVisible` stays false).
  *
  * THE FLIP SIDE OF CHUNKING IS THAT THE LOOP CAN BE INTERRUPTED — Android reclaims the process while
  * the tile has already vanished from the inbox — and the chunks already committed do not tell anyone
  * where it stopped. Nothing re-enters this function on its own, so the leftovers (rows, their
- * cascaded `attachments` rows and their FTS entries) would sit there forever, invisible but real,
- * and reappear the day the chat revives. `resumeChatPurges` is the resume: it finds every chat whose
- * tombstone still has purgeable rows under it and re-runs exactly this loop with the STORED stamp.
+ * cascaded `attachments` rows and their FTS entries) would survive after the chat revives.
+ * `resumeChatPurges` is the resume: it finds every chat whose persistent history boundary still
+ * has purgeable rows under it and re-runs exactly this loop with the STORED stamp.
  * Re-entry is safe by construction — the bound is a stored value, not a fresh clock reading, so a
  * second pass can only finish what the first started.
  *
@@ -634,6 +643,7 @@ export async function deleteChatLocal(
   db: AppDatabase,
   guid: string,
   now: number = Date.now(),
+  commitGuard?: DbCommitGuard,
 ): Promise<void> {
   const deleted = await withDbTransaction(
     db,
@@ -657,8 +667,14 @@ export async function deleteChatLocal(
       // if a message arriving mid-purge has since retired the tombstone.
       const stamped: Array<{ chatId: number; boundary: number }> = await db.all(sql`
       UPDATE chats
-         SET deleted_at = MAX(${now}, COALESCE(
-               (SELECT MAX(m.date_created) FROM messages m WHERE m.chat_id = ${chatId}), 0)),
+         SET deleted_at = MAX(${now},
+               COALESCE((SELECT MAX(m.date_created) FROM messages m
+                          WHERE m.chat_id = ${chatId}), 0),
+               COALESCE(history_deleted_at, 0)),
+             history_deleted_at = MAX(${now},
+               COALESCE((SELECT MAX(m.date_created) FROM messages m
+                          WHERE m.chat_id = ${chatId}), 0),
+               COALESCE(history_deleted_at, 0)),
              latest_message_date = NULL,
              last_read_message_guid = COALESCE(
                (SELECT fm.guid FROM messages fm
@@ -687,9 +703,10 @@ export async function deleteChatLocal(
       await db.delete(kv).where(eq(kv.key, `${DRAFT_KV_PREFIX}${guid}`));
       return deletion;
     },
+    commitGuard,
   );
   if (!deleted) return;
-  await purgeChatMessages(db, deleted.chatId, deleted.boundary);
+  await purgeChatMessages(db, deleted.chatId, deleted.boundary, commitGuard);
 }
 
 /**
@@ -717,17 +734,28 @@ const MESSAGE_PURGE_CHUNK = 500;
  * the boundary is deleted history, anything after it is new activity that brings the chat back. A
  * NULL date can never satisfy `> deleted_at`, so it counts as history and goes.
  */
-async function purgeChatMessages(db: AppDatabase, chatId: number, boundary: number): Promise<void> {
+async function purgeChatMessages(
+  db: AppDatabase,
+  chatId: number,
+  boundary: number,
+  commitGuard?: DbCommitGuard,
+): Promise<void> {
   for (;;) {
-    const purged: Array<{ id: number }> = await withDbTransaction(db, () =>
-      db.all(sql`
-        DELETE FROM messages
-         WHERE id IN (SELECT id FROM messages
-                       WHERE chat_id = ${chatId}
-                         AND (date_created IS NULL OR date_created <= ${boundary})
-                       LIMIT ${MESSAGE_PURGE_CHUNK})
-        RETURNING id
-      `),
+    const purged: Array<{ id: number }> = await withDbTransaction(
+      db,
+      () =>
+        db.all(sql`
+          DELETE FROM messages
+           WHERE id IN (SELECT id FROM messages
+                         WHERE chat_id = ${chatId}
+                           AND (date_created IS NULL OR date_created <= ${boundary})
+                           AND EXISTS (SELECT 1 FROM chats c
+                                        WHERE c.id = ${chatId}
+                                          AND c.history_deleted_at = ${boundary})
+                         LIMIT ${MESSAGE_PURGE_CHUNK})
+          RETURNING id
+        `),
+      commitGuard,
     );
     if (purged.length < MESSAGE_PURGE_CHUNK) return;
   }
@@ -743,27 +771,31 @@ async function purgeChatMessages(db: AppDatabase, chatId: number, boundary: numb
  *
  * IT SELECTS ONLY CHATS THAT ACTUALLY HAVE LEFTOVERS, so the normal case (nothing interrupted, but
  * possibly dozens of long-dead tombstones) costs ONE query and opens no transaction at all. Each
- * re-run uses the chat's STORED stamp, so it deletes exactly what the original pass would have and
- * nothing that arrived since — a chat whose tombstone was retired by a real message
- * (`clearSupersededTombstonesWithinTransaction`, which every ingestion path runs) is not selected
- * here at all, so a revived conversation's history is never touched. A still-stamped chat is by definition one the
- * user deleted and that has had no ingested activity since, and everything at or before the stamp is
- * what they asked to destroy.
+ * re-run uses the chat's STORED history boundary, so it deletes exactly what the original pass
+ * would have and nothing that arrived since. New activity may clear the active `deleted_at`
+ * tombstone and reveal the chat, but it deliberately does not clear `history_deleted_at`: the
+ * interrupted old-history purge must still finish while post-boundary messages survive. Only an
+ * explicit restore clears that boundary and stops later purge chunks.
  *
  * Driven from `deleteChat` — the one place a purge is ever started — so an interrupted purge is
  * finished by the next delete, including its own if `deleteChatLocal`'s loop is what threw. Cheap
  * and idempotent enough to run from a launch path as well.
  */
-export async function resumeChatPurges(db: AppDatabase): Promise<void> {
-  const pending: Array<{ id: number; deletedAt: number }> = await db.all(sql`
-    SELECT c.id, c.deleted_at AS deletedAt
+export async function resumeChatPurges(
+  db: AppDatabase,
+  commitGuard?: DbCommitGuard,
+): Promise<void> {
+  if (commitGuard && !commitGuard()) return;
+  const pending: Array<{ id: number; historyDeletedAt: number }> = await db.all(sql`
+    SELECT c.id, c.history_deleted_at AS historyDeletedAt
       FROM chats c
-     WHERE c.deleted_at IS NOT NULL
+     WHERE c.history_deleted_at IS NOT NULL
        AND EXISTS (SELECT 1 FROM messages m
                     WHERE m.chat_id = c.id
-                      AND (m.date_created IS NULL OR m.date_created <= c.deleted_at))
+                      AND (m.date_created IS NULL OR m.date_created <= c.history_deleted_at))
   `);
-  for (const c of pending) await purgeChatMessages(db, c.id, c.deletedAt);
+  if (commitGuard && !commitGuard()) return;
+  for (const c of pending) await purgeChatMessages(db, c.id, c.historyDeletedAt, commitGuard);
 }
 
 /**
@@ -805,8 +837,11 @@ export interface DeletedChatRow {
   style: number | null;
   deletedAt: number;
   participantCount: number;
+  /** JSON string array ordered by handle id. */
   participantNames: string | null;
+  /** JSON string/null array positionally aligned with participantNames. */
   participantAvatars: string | null;
+  /** JSON string/null array positionally aligned with participantNames. */
   participantColors: string | null;
   handleServices: string | null;
 }
@@ -834,15 +869,18 @@ export async function listDeletedChats(
       c.display_name AS displayName, c.custom_name AS customName, c.style,
       c.deleted_at AS deletedAt,
       (SELECT COUNT(*) FROM chat_handles ch WHERE ch.chat_id = c.id) AS participantCount,
-      (SELECT group_concat(COALESCE(h.display_name, h.address), ', ' ORDER BY h.id)
-         FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
-        WHERE ch.chat_id = c.id) AS participantNames,
-      (SELECT group_concat(COALESCE(h.avatar, ''), '|||' ORDER BY h.id)
-         FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
-        WHERE ch.chat_id = c.id) AS participantAvatars,
-      (SELECT group_concat(COALESCE(h.color, ''), '|||' ORDER BY h.id)
-         FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
-        WHERE ch.chat_id = c.id) AS participantColors,
+      (SELECT json_group_array(participant.name)
+         FROM (SELECT COALESCE(h.display_name, h.address) AS name
+                 FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+                WHERE ch.chat_id = c.id ORDER BY h.id) AS participant) AS participantNames,
+      (SELECT json_group_array(participant.avatar)
+         FROM (SELECT h.avatar
+                 FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+                WHERE ch.chat_id = c.id ORDER BY h.id) AS participant) AS participantAvatars,
+      (SELECT json_group_array(participant.color)
+         FROM (SELECT h.color
+                 FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+                WHERE ch.chat_id = c.id ORDER BY h.id) AS participant) AS participantColors,
       (SELECT group_concat(COALESCE(h.service, ''), ',' ORDER BY h.id)
          FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
         WHERE ch.chat_id = c.id) AS handleServices
@@ -880,13 +918,60 @@ export function restoreDeletedChatWithinTransaction(
   return runInTransactionContext(context, async (db) => {
     const floorGuid = target.repairedReadFloor?.guid ?? null;
     const floorDateCreated = target.repairedReadFloor?.dateCreated ?? null;
+    const candidates = await db.all<{ id: number; boundary: number }>(sql`
+      SELECT chats.id, chats.history_deleted_at AS boundary
+        FROM chats
+       WHERE guid = ${target.guid}
+         AND deleted_at = ${target.expectedDeletedAt}
+         AND history_deleted_at = ${target.expectedDeletedAt}
+         AND NOT EXISTS (SELECT 1 FROM kv rk
+                          WHERE rk.key = ${FULL_REPAIR_RETIRED_CHAT_KV_PREFIX} || chats.guid)
+         AND (
+           ${target.historyExhausted ? 1 : 0} = 1
+           OR EXISTS (SELECT 1 FROM messages fm
+                       WHERE fm.chat_id = chats.id AND fm.is_from_me = 0
+                         AND fm.associated_message_type IS NULL
+                         AND fm.guid = ${floorGuid}
+                         AND fm.date_created = ${floorDateCreated}
+                         AND fm.date_created <= chats.history_deleted_at
+                         AND NOT EXISTS (
+                               SELECT 1 FROM message_deletion_ledger mdl
+                                WHERE mdl.guid = fm.guid
+                                  AND mdl.chat_guid = chats.guid
+                             ))
+         )
+       LIMIT 1
+    `);
+    const candidate = candidates[0];
+    if (!candidate) return false;
+
+    // Remove only chat-history-derived hiding. A genuine scoped message-deletion receipt remains
+    // authoritative and is projected back onto the row in the same transaction.
+    await db
+      .update(messages)
+      .set({
+        dateDeleted: sql`(
+          SELECT ${messageDeletionLedger.dateDeleted}
+            FROM ${messageDeletionLedger}
+           WHERE ${messageDeletionLedger.guid} = ${messages.guid}
+             AND ${messageDeletionLedger.chatGuid} = ${target.guid}
+           LIMIT 1
+        )`,
+      })
+      .where(
+        and(
+          eq(messages.chatId, candidate.id),
+          sql`(${messages.dateCreated} IS NULL OR ${messages.dateCreated} <= ${candidate.boundary})`,
+        ),
+      );
+
     const restored = await db.all<{ id: number }>(sql`
       UPDATE chats
          SET last_read_message_guid = COALESCE(
                (SELECT fm.guid FROM messages fm
                  WHERE fm.chat_id = chats.id AND fm.is_from_me = 0
                    AND fm.date_deleted IS NULL AND fm.associated_message_type IS NULL
-                   AND fm.date_created <= chats.deleted_at
+                   AND fm.date_created <= chats.history_deleted_at
                    AND (${target.historyExhausted ? 1 : 0} = 1
                         OR (fm.guid = ${floorGuid} AND fm.date_created = ${floorDateCreated}))
                    AND fm.date_created > COALESCE(
@@ -895,23 +980,24 @@ export function restoreDeletedChatWithinTransaction(
                              AND lm.chat_id = chats.id), 0)
                  ORDER BY fm.date_created DESC, fm.id DESC LIMIT 1),
                chats.last_read_message_guid),
-             deleted_at = NULL
-       WHERE guid = ${target.guid}
+             latest_message_date = COALESCE(
+               (SELECT MAX(lm.date_created) FROM messages lm
+                 WHERE lm.chat_id = chats.id AND lm.date_deleted IS NULL
+                   AND lm.associated_message_type IS NULL),
+               (SELECT MAX(lm.date_created) FROM messages lm
+                 WHERE lm.chat_id = chats.id AND lm.date_deleted IS NULL)),
+             deleted_at = NULL,
+             history_deleted_at = NULL
+       WHERE id = ${candidate.id}
+         AND guid = ${target.guid}
          AND deleted_at = ${target.expectedDeletedAt}
-         AND NOT EXISTS (SELECT 1 FROM kv rk
-                          WHERE rk.key = ${FULL_REPAIR_RETIRED_CHAT_KV_PREFIX} || chats.guid)
-         AND (
-           ${target.historyExhausted ? 1 : 0} = 1
-           OR EXISTS (SELECT 1 FROM messages fm
-                       WHERE fm.chat_id = chats.id AND fm.is_from_me = 0
-                         AND fm.date_deleted IS NULL AND fm.associated_message_type IS NULL
-                         AND fm.guid = ${floorGuid}
-                         AND fm.date_created = ${floorDateCreated}
-                         AND fm.date_created <= chats.deleted_at)
-         )
+         AND history_deleted_at = ${candidate.boundary}
       RETURNING id
     `);
-    return restored.length === 1;
+    if (restored.length !== 1) {
+      throw new Error('Chat restore boundary changed inside its transaction.');
+    }
+    return true;
   });
 }
 
@@ -1002,12 +1088,10 @@ export async function listOrphanedAttachmentGuids(
  *
  * NO READ-MARKER HANDOVER HERE, unlike `clearSupersededTombstonesWithinTransaction` — and that is
  * not an oversight.
- * `deleted_at` also floors the unread count, so dropping it uncovers the whole re-synced history;
- * but the handover cannot be done at THIS point, because `deleteChatLocal` has already destroyed
- * every message that could serve as the marker (routing into the chat is what re-pages them, and
- * that happens after this returns). The floor is therefore pinned at DELETE time, while the
- * boundary message still exists — see `deleteChatLocal`. Keep it that way: adding a handover here
- * would be a second copy of the same SQL that provably matches nothing.
+ * Dropping `deleted_at` reveals the chat, but `history_deleted_at` continues hiding any old rows
+ * that a later history page re-inserts. The unread floor is still handed over at DELETE time,
+ * while the boundary message exists — see `deleteChatLocal`. Adding a handover here would be a
+ * second copy of the same SQL after the purge has already removed the row it needs.
  */
 export function clearChatTombstoneWithinTransaction(
   context: DbTransactionContext,
@@ -1136,6 +1220,7 @@ export async function setChatUnreadLocal(
  */
 export function markAllChatsReadLocalWithinTransaction(
   context: DbTransactionContext,
+  currentRcsProviderEpoch: string | null = null,
 ): Promise<void> {
   return runInTransactionContext(context, async (db) => {
     await db.run(sql`
@@ -1148,6 +1233,11 @@ export function markAllChatsReadLocalWithinTransaction(
         SELECT 1 FROM messages m2
          WHERE m2.chat_id = chats.id AND m2.is_from_me = 0 AND m2.date_deleted IS NULL
       )
+        AND (
+          chats.guid NOT GLOB 'RCS;-;*'
+          OR (${currentRcsProviderEpoch} IS NOT NULL
+            AND chats.guid GLOB ${`RCS;-;g1.${currentRcsProviderEpoch ?? ''}.*`})
+        )
     `);
   });
 }

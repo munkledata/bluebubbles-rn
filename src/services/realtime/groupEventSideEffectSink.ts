@@ -31,6 +31,7 @@ export class GroupEventSideEffectSink implements EventSink {
       chatGuid: string,
       accountGeneration?: number,
     ) => void | Promise<void>,
+    private readonly ownsStoredMessage: (messageGuid: string, chatGuid: string) => Promise<boolean>,
   ) {}
 
   async onEvent(
@@ -45,7 +46,17 @@ export class GroupEventSideEffectSink implements EventSink {
     if (event.type !== 'new-message' && event.type !== 'updated-message') return;
     if (!isChatBackgroundChangeEvent(event.message)) return;
     const chatGuid = resolveMessageChatGuid(event.message);
-    if (!chatGuid) return;
+    if (!chatGuid || !event.message.guid) return;
+    // The DB sink can reject a duplicate message GUID that claims a different chat. The outer
+    // side-effect layer must prove that this exact persisted row belongs to the claimed chat before
+    // using envelope metadata to select a wallpaper destination.
+    try {
+      if (!(await this.ownsStoredMessage(event.message.guid, chatGuid))) return;
+    } catch (e) {
+      logger.warn('[groupEvent] stored-message ownership lookup failed', e);
+      return;
+    }
+    if (context && !context.isCurrent()) return;
 
     if (!context) {
       // Direct/dev callers have no account-drain context; preserve the ordinary awaitable contract.

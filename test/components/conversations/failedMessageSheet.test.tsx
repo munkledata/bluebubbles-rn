@@ -63,6 +63,80 @@ describe('FailedMessageSheet — actions', () => {
     expect(h.onRetry).not.toHaveBeenCalled();
   });
 
+  it('keeps an uncertain one-shot reply distinct and never offers Retry', async () => {
+    const h = handlers();
+    await renderWithTheme(
+      <FailedMessageSheet visible isReply retryAllowed={false} deliveryUnconfirmed {...h} />,
+    );
+    expect(screen.getByText('Reply Status Unconfirmed')).toBeTruthy();
+    expect(screen.queryByText('Try Again')).toBeNull();
+  });
+
+  it('labels an uncertain current-location send without calling it an attachment', async () => {
+    const h = handlers();
+    await renderWithTheme(
+      <FailedMessageSheet visible isLocation retryAllowed={false} deliveryUnconfirmed {...h} />,
+    );
+    expect(screen.getByText('Location Status Unconfirmed')).toBeTruthy();
+    expect(screen.queryByText('Attachment Status Unconfirmed')).toBeNull();
+    expect(screen.queryByText('Try Again')).toBeNull();
+  });
+
+  it('labels an uncertain effect and never offers Retry', async () => {
+    const h = handlers();
+    await renderWithTheme(
+      <FailedMessageSheet visible isEffect retryAllowed={false} deliveryUnconfirmed {...h} />,
+    );
+    expect(screen.getByText('Effect Status Unconfirmed')).toBeTruthy();
+    expect(
+      screen.getByText(
+        'This effect message may have been delivered. Check Messages before sending a new copy.',
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText('Try Again')).toBeNull();
+  });
+
+  it('labels an uncertain mention generically and never offers Retry', async () => {
+    const h = handlers();
+    await renderWithTheme(
+      <FailedMessageSheet visible isMention retryAllowed={false} deliveryUnconfirmed {...h} />,
+    );
+    expect(screen.getByText('Mention Status Unconfirmed')).toBeTruthy();
+    expect(
+      screen.getByText(
+        'This mention message may have been delivered. Check Messages before sending a new copy.',
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText('Try Again')).toBeNull();
+  });
+
+  it('labels an uncertain formatted message without calling it an attachment', async () => {
+    const h = handlers();
+    await renderWithTheme(
+      <FailedMessageSheet visible isFormatted retryAllowed={false} deliveryUnconfirmed {...h} />,
+    );
+    expect(screen.getByText('Formatted Message Status Unconfirmed')).toBeTruthy();
+    expect(
+      screen.getByText(
+        'This formatted message may have been delivered. Check Messages before sending a new copy.',
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText('Attachment Status Unconfirmed')).toBeNull();
+    expect(screen.queryByText('Try Again')).toBeNull();
+  });
+
+  it('truthfully labels a location rejected before dispatch and never offers Retry', async () => {
+    const h = handlers();
+    await renderWithTheme(<FailedMessageSheet visible isLocation retryAllowed={false} {...h} />);
+    expect(screen.getByText('Location Not Sent')).toBeTruthy();
+    expect(
+      screen.getByText(
+        'This location was not sent and cannot be retried. Start a new location share if needed.',
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText('Try Again')).toBeNull();
+  });
+
   it('keeps retired attachment copy distinct from a confirmed uncertain outcome', async () => {
     const h = handlers();
     await renderWithTheme(<FailedMessageSheet visible isAttachment retryAllowed={false} {...h} />);

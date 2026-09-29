@@ -1,4 +1,5 @@
 import { z } from 'zod/v4';
+import { isCanonicalBase64Url, isRcsProviderEpoch } from '@core/rcs/providerIdentity';
 
 /**
  * Import limits are intentionally generous for real settings-only backups, but finite for
@@ -15,6 +16,7 @@ export const BACKUP_LIMITS = {
   kvEntries: 10_000,
   themes: 500,
   chatCustomizations: 2_000,
+  handleColors: 10_000,
   keyCharacters: 4_096,
   valueCharacters: 256 * 1024,
   themeNameCharacters: 256,
@@ -132,6 +134,20 @@ export const PortableChatIdentitySchema = z.object({
   service: z.string().max(BACKUP_LIMITS.chatServiceCharacters),
   kind: z.enum(['direct', 'group', 'unknown']),
   serverChatIdentifier: z.string().max(BACKUP_LIMITS.chatIdentifierCharacters).nullable(),
+  /** Required by restore for RCS; absent on old backups and non-Google identities. */
+  providerEpoch: z
+    .string()
+    .max(BACKUP_LIMITS.chatIdentifierCharacters)
+    .refine(isRcsProviderEpoch)
+    .nullable()
+    .optional(),
+  /** Opaque base64url source key from the epoch-qualified RCS conversation GUID. */
+  providerSourceId: z
+    .string()
+    .max(BACKUP_LIMITS.chatIdentifierCharacters)
+    .refine(isCanonicalBase64Url)
+    .nullable()
+    .optional(),
   participants: z
     .array(
       z.object({
@@ -174,6 +190,69 @@ const CustomFolderBackupSchema = z.object({
     .max(BACKUP_LIMITS.customFolderMembers),
 });
 
+const HandleColorBackupSchema = z.object({
+  address: z.string().min(1).max(BACKUP_LIMITS.chatParticipantAddressCharacters),
+  service: z.string().max(BACKUP_LIMITS.chatServiceCharacters),
+  color: z.string().regex(/^#[0-9A-F]{6}$/u),
+});
+
+interface FolderBackupValidationInput {
+  customFolderChatIdentities: readonly unknown[];
+  customFolders: readonly {
+    name: string;
+    sourceMemberCount: number;
+    memberIndexes: readonly number[];
+  }[];
+}
+
+function validateFolderBackup(
+  backup: FolderBackupValidationInput,
+  addIssue: (issue: { path: (string | number)[]; message: string }) => void,
+): void {
+  const names = new Set<string>();
+  let membershipCount = 0;
+  for (const [folderIndex, folder] of backup.customFolders.entries()) {
+    if (names.has(folder.name)) {
+      addIssue({
+        path: ['customFolders', folderIndex, 'name'],
+        message: 'Custom folder names must be unique.',
+      });
+    }
+    names.add(folder.name);
+
+    if (folder.sourceMemberCount < folder.memberIndexes.length) {
+      addIssue({
+        path: ['customFolders', folderIndex, 'sourceMemberCount'],
+        message: 'Custom folder source member count is smaller than its portable member list.',
+      });
+    }
+
+    const indexes = new Set<number>();
+    for (const [memberIndex, identityIndex] of folder.memberIndexes.entries()) {
+      if (identityIndex >= backup.customFolderChatIdentities.length) {
+        addIssue({
+          path: ['customFolders', folderIndex, 'memberIndexes', memberIndex],
+          message: 'Custom folder member index is out of range.',
+        });
+      }
+      if (indexes.has(identityIndex)) {
+        addIssue({
+          path: ['customFolders', folderIndex, 'memberIndexes', memberIndex],
+          message: 'Custom folder member indexes must be unique within a folder.',
+        });
+      }
+      indexes.add(identityIndex);
+    }
+    membershipCount += folder.sourceMemberCount;
+  }
+  if (membershipCount > BACKUP_LIMITS.customFolderMemberships) {
+    addIssue({
+      path: ['customFolders'],
+      message: 'Custom folder memberships exceed the aggregate backup limit.',
+    });
+  }
+}
+
 const BackupCommonShape = {
   exportedAt: z.number(),
   appVersion: z.string().max(128).optional(),
@@ -214,66 +293,55 @@ export const BackupV3Schema = z
     customFolders: z.array(CustomFolderBackupSchema).max(BACKUP_LIMITS.customFolders),
   })
   .superRefine((backup, context) => {
-    const names = new Set<string>();
-    let membershipCount = 0;
-    for (const [folderIndex, folder] of backup.customFolders.entries()) {
-      if (names.has(folder.name)) {
+    validateFolderBackup(backup, (issue) => context.addIssue({ code: 'custom', ...issue }));
+  });
+
+/**
+ * Version 4 adds device-owned handle colors. A new outer version prevents older clients from
+ * silently stripping the preference while reporting a successful restore.
+ */
+export const BackupV4Schema = z
+  .object({
+    version: z.literal(4),
+    ...BackupCommonShape,
+    chatCustomizations: z
+      .array(PortableChatCustomizationSchema)
+      .max(BACKUP_LIMITS.chatCustomizations),
+    customFolderChatIdentities: z
+      .array(PortableChatIdentitySchema)
+      .max(BACKUP_LIMITS.customFolderChatIdentities),
+    customFolders: z.array(CustomFolderBackupSchema).max(BACKUP_LIMITS.customFolders),
+    handleColors: z.array(HandleColorBackupSchema).max(BACKUP_LIMITS.handleColors),
+  })
+  .superRefine((backup, context) => {
+    validateFolderBackup(backup, (issue) => context.addIssue({ code: 'custom', ...issue }));
+    const identities = new Set<string>();
+    for (const [index, item] of backup.handleColors.entries()) {
+      const identity = JSON.stringify([item.address, item.service]);
+      if (identities.has(identity)) {
         context.addIssue({
           code: 'custom',
-          path: ['customFolders', folderIndex, 'name'],
-          message: 'Custom folder names must be unique.',
+          path: ['handleColors', index],
+          message: 'Handle-color identities must be unique.',
         });
       }
-      names.add(folder.name);
-
-      if (folder.sourceMemberCount < folder.memberIndexes.length) {
-        context.addIssue({
-          code: 'custom',
-          path: ['customFolders', folderIndex, 'sourceMemberCount'],
-          message: 'Custom folder source member count is smaller than its portable member list.',
-        });
-      }
-
-      const indexes = new Set<number>();
-      for (const [memberIndex, identityIndex] of folder.memberIndexes.entries()) {
-        if (identityIndex >= backup.customFolderChatIdentities.length) {
-          context.addIssue({
-            code: 'custom',
-            path: ['customFolders', folderIndex, 'memberIndexes', memberIndex],
-            message: 'Custom folder member index is out of range.',
-          });
-        }
-        if (indexes.has(identityIndex)) {
-          context.addIssue({
-            code: 'custom',
-            path: ['customFolders', folderIndex, 'memberIndexes', memberIndex],
-            message: 'Custom folder member indexes must be unique within a folder.',
-          });
-        }
-        indexes.add(identityIndex);
-      }
-      membershipCount += folder.sourceMemberCount;
-    }
-    if (membershipCount > BACKUP_LIMITS.customFolderMemberships) {
-      context.addIssue({
-        code: 'custom',
-        path: ['customFolders'],
-        message: 'Custom folder memberships exceed the aggregate backup limit.',
-      });
+      identities.add(identity);
     }
   });
 
-/** New encrypted exports are v3; v1/v2 remain accepted unchanged. */
+/** New encrypted exports are v4; v1-v3 remain accepted unchanged. */
 export const BackupSchema = z.discriminatedUnion('version', [
   BackupV1Schema,
   BackupV2Schema,
   BackupV3Schema,
+  BackupV4Schema,
 ]);
 
 export type Backup = z.infer<typeof BackupSchema>;
 export type BackupV1 = z.infer<typeof BackupV1Schema>;
 export type BackupV2 = z.infer<typeof BackupV2Schema>;
 export type BackupV3 = z.infer<typeof BackupV3Schema>;
+export type BackupV4 = z.infer<typeof BackupV4Schema>;
 export type PortableChatIdentity = z.infer<typeof PortableChatIdentitySchema>;
 
 /**

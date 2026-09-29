@@ -1,6 +1,10 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { logger } from '@core/secure';
+import { readableTextOn } from './theme/adaptiveFromImage';
+
+const RETRY_BUTTON_BACKGROUND = '#1982FC';
+const RETRY_BUTTON_FOREGROUND = readableTextOn(RETRY_BUTTON_BACKGROUND);
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -66,10 +70,10 @@ const styles = StyleSheet.create({
   title: { color: '#FFFFFF', fontSize: 22, fontWeight: '700', marginBottom: 8 },
   body: { color: '#A0A0A0', fontSize: 15, textAlign: 'center', lineHeight: 21, marginBottom: 28 },
   button: {
-    backgroundColor: '#1982FC',
+    backgroundColor: RETRY_BUTTON_BACKGROUND,
     paddingHorizontal: 28,
     paddingVertical: 14,
     borderRadius: 14,
   },
-  buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
+  buttonText: { color: RETRY_BUTTON_FOREGROUND, fontSize: 16, fontWeight: '600' },
 });

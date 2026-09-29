@@ -12,6 +12,10 @@ interface RawPart {
 // iMessage attributedBody attribute keys (see Flutter attributed_body.dart).
 const MENTION_KEY = '__kIMMentionConfirmedMention';
 const ATTACHMENT_KEY = '__kIMFileTransferGUIDAttributeName';
+const BOLD_KEY = '__kIMTextBoldAttributeName';
+const ITALIC_KEY = '__kIMTextItalicAttributeName';
+const UNDERLINE_KEY = '__kIMTextUnderlineAttributeName';
+const STRIKETHROUGH_KEY = '__kIMTextStrikethroughAttributeName';
 
 function attrPresent(attrs: Record<string, unknown> | null | undefined, key: string): boolean {
   return !!attrs && typeof attrs === 'object' && attrs[key] != null;
@@ -24,9 +28,8 @@ function attrPresent(attrs: Record<string, unknown> | null | undefined, key: str
  * flagged so the bubble can skip them in text. Unknown attributes are ignored
  * (forward-compatible). Any malformed input falls back to a single plain run.
  *
- * NOTE (Android-only v1): Gator's data carries no bold/italic/underline
- * styling attributes, so only mentions + attachment placeholders are extracted;
- * links are still handled downstream by the bubble's linkify.
+ * The four bounded formatting attributes emitted by Gator are retained. Links are still handled
+ * downstream by the bubble's entity parser, independently of these visual styles.
  */
 export function parseAttributedRuns(
   attributedBodyJson: string | null | undefined,
@@ -69,6 +72,10 @@ export function parseAttributedRuns(
         text,
         ...(attrPresent(attrs, MENTION_KEY) ? { mention: true } : {}),
         ...(attrPresent(attrs, ATTACHMENT_KEY) ? { attachment: true } : {}),
+        ...(attrPresent(attrs, BOLD_KEY) ? { bold: true } : {}),
+        ...(attrPresent(attrs, ITALIC_KEY) ? { italic: true } : {}),
+        ...(attrPresent(attrs, UNDERLINE_KEY) ? { underline: true } : {}),
+        ...(attrPresent(attrs, STRIKETHROUGH_KEY) ? { strikethrough: true } : {}),
       });
     }
     if (cursor < str.length) out.push({ text: str.substring(cursor) }); // trailing remainder

@@ -19,6 +19,7 @@ const mockCompleteUnlock = jest.fn<Promise<void>, []>();
 const mockAuthenticate = jest.fn<Promise<boolean>, [string]>();
 const mockPrepareNotificationPresentationState = jest.fn<Promise<void>, []>();
 const mockLoggerWarn = jest.fn();
+const mockShareIntentCapture = jest.fn(() => null);
 let mockSafeAreaProviderStyle: unknown;
 
 jest.mock('@/services/boot/foregroundBoot', () => ({
@@ -73,7 +74,7 @@ jest.mock('expo-router', () => {
   const React = jest.requireActual<typeof import('react')>('react');
   const { Text } = jest.requireActual<typeof import('react-native')>('react-native');
   return {
-    Stack: () => React.createElement(Text, null, 'Protected navigation stack'),
+    ExperimentalStack: () => React.createElement(Text, null, 'Protected navigation stack'),
     ThemeProvider: ({ children }: { children: React.ReactNode }) => children,
   };
 });
@@ -81,6 +82,10 @@ jest.mock('expo-router', () => {
 jest.mock('@ui/theme/dark-navigation-theme', () => ({
   DARK_STATUS_BAR_STYLE: 'light',
   buildDarkNavigationTheme: () => ({ dark: true, colors: {} }),
+}));
+
+jest.mock('@ui/ShareIntentHandler', () => ({
+  ShareIntentCapture: () => mockShareIntentCapture(),
 }));
 
 // Keep the real ThemeProvider so the test proves the root's fallback-theme option releases the
@@ -195,6 +200,7 @@ describe('RootLayout — foreground boot presentation', () => {
 
     expect(screen.getByRole('progressbar', { name: 'Loading Gator' })).toBeTruthy();
     expect(screen.queryByText('Protected navigation stack')).toBeNull();
+    expect(mockShareIntentCapture).toHaveBeenCalledTimes(1);
     expect(useThemeStore.getState().hydrated).toBe(false);
     expect(mockStartForegroundBoot).toHaveBeenCalledTimes(1);
     expect(mockSafeAreaProviderStyle).toEqual({ direction: 'rtl' });

@@ -12,6 +12,7 @@ import { Attachment, Chat, Message } from '@core/models';
 import {
   listMessagesWithSenders,
   listStickersForTargets,
+  markMessageDeleted,
   updateAttachmentLocalPath,
   upsertChats,
   upsertHandles,
@@ -88,7 +89,7 @@ async function sticker(
 describe('listStickersForTargets', () => {
   it('returns an empty map for no targets without touching the db', async () => {
     const { db } = await createTestDb();
-    await expect(listStickersForTargets(db, [])).resolves.toEqual(new Map());
+    await expect(listStickersForTargets(db, 'c1', [])).resolves.toEqual(new Map());
   });
 
   it('groups stickers under the guid of the message they were placed on', async () => {
@@ -96,7 +97,7 @@ describe('listStickersForTargets', () => {
     const { chatId, hm } = await setup(db);
     await sticker(db, chatId, hm, { guid: 's1', target: 'mt', date: 200, attGuid: 'sa1' });
 
-    const map = await listStickersForTargets(db, ['mt']);
+    const map = await listStickersForTargets(db, 'c1', ['mt']);
     const list = map.get('mt') ?? [];
     expect(list).toHaveLength(1);
     expect(list[0]?.stickerMessageGuid).toBe('s1');
@@ -114,7 +115,7 @@ describe('listStickersForTargets', () => {
     const { chatId, hm } = await setup(db);
     await sticker(db, chatId, hm, { guid: 's1', target: 'bp:0/mt', date: 200, attGuid: 'sa1' });
 
-    const map = await listStickersForTargets(db, ['mt']);
+    const map = await listStickersForTargets(db, 'c1', ['mt']);
     expect(map.get('mt')).toHaveLength(1);
   });
 
@@ -125,7 +126,7 @@ describe('listStickersForTargets', () => {
     const { chatId, hm } = await setup(db);
     await sticker(db, chatId, hm, { guid: 's1', target: 'mt', date: 200 });
 
-    const list = (await listStickersForTargets(db, ['mt'])).get('mt') ?? [];
+    const list = (await listStickersForTargets(db, 'c1', ['mt'])).get('mt') ?? [];
     expect(list).toHaveLength(1);
     expect(list[0]?.attachment).toBeNull();
   });
@@ -136,7 +137,7 @@ describe('listStickersForTargets', () => {
     await sticker(db, chatId, hm, { guid: 's1', target: 'mt', date: 200, attGuid: 'sa1' });
     await updateAttachmentLocalPath(db, 'sa1', 'file:///s/sa1.png');
 
-    const list = (await listStickersForTargets(db, ['mt'])).get('mt') ?? [];
+    const list = (await listStickersForTargets(db, 'c1', ['mt'])).get('mt') ?? [];
     expect(list[0]?.attachment?.localPath).toBe('file:///s/sa1.png');
   });
 
@@ -147,7 +148,7 @@ describe('listStickersForTargets', () => {
     raw.prepare("UPDATE messages SET retraction_state = 'partial' WHERE guid = 's1'").run();
     raw.prepare("UPDATE attachments SET is_retracted = 1 WHERE guid = 'sa1'").run();
 
-    expect((await listStickersForTargets(db, ['mt'])).get('mt')).toBeUndefined();
+    expect((await listStickersForTargets(db, 'c1', ['mt'])).get('mt')).toBeUndefined();
   });
 
   it('never mounts a hidden payload beside a visible sticker image', async () => {
@@ -161,7 +162,7 @@ describe('listStickersForTargets', () => {
       )
       .run();
 
-    const attachments = ((await listStickersForTargets(db, ['mt'])).get('mt') ?? []).map(
+    const attachments = ((await listStickersForTargets(db, 'c1', ['mt'])).get('mt') ?? []).map(
       (entry) => entry.attachment?.guid,
     );
     expect(attachments).toEqual(['sa1']);
@@ -180,9 +181,44 @@ describe('listStickersForTargets', () => {
     await sticker(db, chatId, hm, { guid: 's1', target: 'mt', date: 200, attGuid: 'sa1' });
     await sticker(db, chatId, hm, { guid: 's3', target: 'mt2', date: 400, attGuid: 'sa3' });
 
-    const map = await listStickersForTargets(db, ['mt', 'mt2']);
+    const map = await listStickersForTargets(db, 'c1', ['mt', 'mt2']);
     expect((map.get('mt') ?? []).map((s) => s.stickerMessageGuid)).toEqual(['s1', 's2']);
     expect((map.get('mt2') ?? []).map((s) => s.stickerMessageGuid)).toEqual(['s3']);
+  });
+
+  it('never mounts a foreign-chat sticker or its attachment on the owner target', async () => {
+    const { db } = await createTestDb();
+    const { chatId, hm } = await setup(db);
+    const foreignChats = await upsertChats(
+      db,
+      [
+        Chat.parse({
+          guid: 'SMS;-;+15550000002',
+          participants: [{ address: '+15550000002', service: 'SMS' }],
+        }),
+      ],
+      hm,
+    );
+    const foreignChatId = foreignChats.get('SMS;-;+15550000002')!;
+    await sticker(db, chatId, hm, {
+      guid: 'local-sticker',
+      target: 'bp:0/mt',
+      date: 200,
+      attGuid: 'local-sticker-image',
+    });
+    await sticker(db, foreignChatId, hm, {
+      guid: 'foreign-sticker',
+      target: 'bp:0/mt',
+      date: 300,
+      attGuid: 'foreign-sticker-image',
+    });
+
+    const local = (await listStickersForTargets(db, 'c1', ['mt'])).get('mt') ?? [];
+    expect(local.map((entry) => entry.stickerMessageGuid)).toEqual(['local-sticker']);
+    expect(local.map((entry) => entry.attachment?.guid)).toEqual(['local-sticker-image']);
+    await expect(listStickersForTargets(db, 'SMS;-;+15550000002', ['mt'])).resolves.toEqual(
+      new Map(),
+    );
   });
 
   it('ignores a reaction, a removal and a locally deleted sticker', async () => {
@@ -190,8 +226,15 @@ describe('listStickersForTargets', () => {
     const { chatId, hm } = await setup(db);
     await sticker(db, chatId, hm, { guid: 'r1', target: 'mt', date: 200, type: 'love' });
     await sticker(db, chatId, hm, { guid: 's-off', target: 'mt', date: 210, type: '-sticker' });
+    await sticker(db, chatId, hm, {
+      guid: 's-deleted',
+      target: 'mt',
+      date: 220,
+      attGuid: 's-deleted-image',
+    });
+    await markMessageDeleted(db, 's-deleted', 5000);
 
-    expect((await listStickersForTargets(db, ['mt'])).get('mt')).toBeUndefined();
+    expect((await listStickersForTargets(db, 'c1', ['mt'])).get('mt')).toBeUndefined();
   });
 });
 

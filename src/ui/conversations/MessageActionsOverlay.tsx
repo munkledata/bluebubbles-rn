@@ -39,8 +39,18 @@ export interface SelectedMessage {
   mine: ReactionBaseType[];
   /** Arbitrary-emoji tapback glyphs the current user has already applied. */
   myEmojis?: string[];
-  /** A confirmed RCS message can receive a whole-message reaction. */
+  /** A confirmed RCS message or narrowly admitted iMessage can receive a reaction. */
   canReact?: boolean;
+  /** Exact reply target admitted by the live narrow helper capability. */
+  replyPartIndex?: 0;
+  /** Exact plain-text edit target admitted by the live narrow helper capability. */
+  editPartIndex?: 0;
+  /** Exact plain-text unsend target admitted by the live narrow helper capability. */
+  unsendPartIndex?: 0;
+  /** Whole-message Mac deletion admitted by its separate live capability and chat proof. */
+  canRemoteDeleteFromMac?: boolean;
+  /** Arbitrary emoji remains RCS-only while the narrow iMessage path admits classic tapbacks. */
+  canUseEmojiReactions?: boolean;
   dateCreated: number | null;
   /** Delivery/read/edit timestamps + per-message service — surfaced by the "Details" sheet.
    *  Optional so existing SelectedMessage literals (tests) stay valid. */
@@ -51,7 +61,7 @@ export interface SelectedMessage {
   isRetracted: boolean;
   /** Internal proof that retires this frozen menu snapshot after a live retraction change. */
   sourceRetractionFingerprint?: string;
-  /** Read-only local edit history remains available after outgoing edit support is retired. */
+  /** Read-only local edit history is independent of outgoing edit availability. */
   isEdited?: boolean;
   messageSummaryInfo?: MessageSummaryInfo | null;
   isTemp: boolean;
@@ -77,6 +87,14 @@ interface MessageActionsOverlayProps {
   onCancelSend: () => void;
   /** Copy the message text to the clipboard. */
   onCopy: () => void;
+  /** Start a plain-text reply to exact message part zero. */
+  onReply?: () => void;
+  /** Start a plain-text edit of exact message part zero. */
+  onEdit?: () => void;
+  /** Confirm and retract exact plain-text message part zero for everyone. */
+  onUnsend?: () => void;
+  /** Confirm and delete this whole message from Messages on the Mac; never a part or whole chat. */
+  onRemoteDeleteFromMac?: () => void;
   /** Forward the message text and/or downloaded attachments (opens the new-message composer). */
   onForward?: () => void;
   /** Save the message's attachment(s) to the device gallery. */
@@ -151,6 +169,10 @@ export function MessageActionsOverlay({
   onRemindLater,
   onCancelSend,
   onCopy,
+  onReply,
+  onEdit,
+  onUnsend,
+  onRemoteDeleteFromMac,
   onForward,
   onSave,
   onShare,
@@ -271,32 +293,36 @@ export function MessageActionsOverlay({
           <Text style={styles.emoji}>{reactionMeta(t).emoji}</Text>
         </Pressable>
       ))}
-      {myEmojis.map((g) => (
+      {selected?.canUseEmojiReactions !== false
+        ? myEmojis.map((g) => (
+            <Pressable
+              key={`emoji-${g}`}
+              onPress={() => pickEmoji(g)}
+              style={[styles.tap, { backgroundColor: theme.color.tint }]}
+              accessibilityRole="button"
+              accessibilityState={{ selected: true }}
+              accessibilityLabel={`Remove ${g} reaction`}
+            >
+              <Text style={styles.emoji}>{g}</Text>
+            </Pressable>
+          ))
+        : null}
+      {selected?.canUseEmojiReactions !== false ? (
         <Pressable
-          key={`emoji-${g}`}
-          onPress={() => pickEmoji(g)}
-          style={[styles.tap, { backgroundColor: theme.color.tint }]}
+          onPress={() => setShowEmojiInput((v) => !v)}
+          style={styles.tap}
           accessibilityRole="button"
-          accessibilityState={{ selected: true }}
-          accessibilityLabel={`Remove ${g} reaction`}
+          accessibilityState={{ expanded: showEmojiInput }}
+          accessibilityLabel="React with any emoji"
         >
-          <Text style={styles.emoji}>{g}</Text>
+          <Text style={[styles.plus, { color: theme.color.secondaryLabel }]}>+</Text>
         </Pressable>
-      ))}
-      <Pressable
-        onPress={() => setShowEmojiInput((v) => !v)}
-        style={styles.tap}
-        accessibilityRole="button"
-        accessibilityState={{ expanded: showEmojiInput }}
-        accessibilityLabel="React with any emoji"
-      >
-        <Text style={[styles.plus, { color: theme.color.secondaryLabel }]}>+</Text>
-      </Pressable>
+      ) : null}
     </>
   );
 
   const emojiInputNode =
-    canReactToServerMessage && showEmojiInput ? (
+    canReactToServerMessage && selected?.canUseEmojiReactions !== false && showEmojiInput ? (
       <TextInput
         value={emojiDraft}
         onChangeText={setEmojiDraft}
@@ -313,9 +339,12 @@ export function MessageActionsOverlay({
       />
     ) : null;
 
-  // Assemble local actions once; the only server-targeted surface is the separately gated RCS
-  // reaction picker above.
+  // Assemble local actions once. Server-targeted reply is present only when the caller provides
+  // the separately capability-gated callback and this snapshot names exact part zero.
   const actions: ActionDef[] = [];
+  if (onReply && !selected?.isTemp && !selected?.isRetracted && selected?.replyPartIndex === 0) {
+    actions.push({ key: 'reply', label: 'Reply', onPress: onReply });
+  }
   if (hasText) actions.push({ key: 'copy', label: 'Copy', onPress: onCopy });
   if (onForward && (hasText || hasAttachments))
     actions.push({ key: 'forward', label: 'Forward', onPress: onForward });
@@ -330,6 +359,44 @@ export function MessageActionsOverlay({
   if (onDetails) actions.push({ key: 'details', label: 'Details', onPress: onDetails });
   if (onSelect) actions.push({ key: 'select', label: 'Select', onPress: onSelect });
   actions.push({ key: 'remind', label: 'Remind Me Later', onPress: onRemindLater });
+  if (
+    onEdit &&
+    selected?.editPartIndex === 0 &&
+    selected.isFromMe &&
+    !selected.isTemp &&
+    !selected.isRetracted &&
+    selected.sendState === 'sent' &&
+    hasText &&
+    !hasAttachments
+  ) {
+    actions.push({ key: 'edit', label: 'Edit', onPress: onEdit });
+  }
+  if (
+    onUnsend &&
+    selected?.unsendPartIndex === 0 &&
+    selected.isFromMe &&
+    !selected.isTemp &&
+    !selected.isRetracted &&
+    selected.sendState === 'sent' &&
+    hasText &&
+    !hasAttachments
+  ) {
+    actions.push({ key: 'unsend', label: 'Unsend', onPress: onUnsend, destructive: true });
+  }
+  if (
+    onRemoteDeleteFromMac &&
+    selected?.canRemoteDeleteFromMac === true &&
+    !selected.isTemp &&
+    !selected.isRetracted &&
+    !canCancel
+  ) {
+    actions.push({
+      key: 'remote-delete',
+      label: 'Delete from Mac',
+      onPress: onRemoteDeleteFromMac,
+      destructive: true,
+    });
+  }
   if (canCancel)
     actions.push({
       key: 'cancel',

@@ -29,7 +29,6 @@ class LegacyShortcutCleanupTest {
         "list#1",
         "replace:private-chat-id",
         "disable:private-chat-id",
-        "removeDynamic",
         "removeLongLived:private-chat-id",
         "list#2",
       ),
@@ -213,9 +212,51 @@ class LegacyShortcutCleanupTest {
     assertTrue(store.replacements.isEmpty())
     assertTrue(store.disabledIds.isEmpty())
     assertEquals(
-      listOf("list#1", "removeDynamic", "removeLongLived:pinned", "list#2"),
+      listOf("list#1", "removeLongLived:pinned", "list#2"),
       store.calls,
     )
+  }
+
+  @Test
+  fun `legacy and current cleanup own disjoint shortcut namespaces`() {
+    val store = FakeShortcutStore(
+      listOf(
+        state(id = "legacy-chat", isDynamic = true),
+        state(id = "${CURRENT_SHARE_SHORTCUT_PREFIX}${"a".repeat(43)}", isDynamic = true),
+      ),
+    )
+
+    clearLegacyShareShortcuts(store)
+
+    assertFalse(store.states.first { it.id == "legacy-chat" }.isDynamic)
+    assertTrue(store.states.first { it.id.startsWith(CURRENT_SHARE_SHORTCUT_PREFIX) }.isDynamic)
+
+    clearCurrentShareShortcuts(store)
+
+    assertTrue(store.states.none { it.isDynamic })
+  }
+
+  @Test
+  fun `publication cleanup retires stale current rows but preserves retained rows`() {
+    val retained = "${CURRENT_SHARE_SHORTCUT_PREFIX}${"a".repeat(43)}"
+    val stale = "${CURRENT_SHARE_SHORTCUT_PREFIX}${"b".repeat(43)}"
+    val store = FakeShortcutStore(
+      listOf(
+        state(id = retained, isDynamic = true, isCached = true, shortLabel = "Current"),
+        state(id = stale, isCached = true, isPinned = true, shortLabel = "Old private label"),
+        state(id = "legacy-chat", isCached = true, shortLabel = "Legacy"),
+      ),
+    )
+
+    clearStaleCurrentShareShortcuts(store, setOf(retained))
+
+    assertTrue(store.states.first { it.id == retained }.isDynamic)
+    assertTrue(store.states.first { it.id == retained }.isCached)
+    assertTrue(store.states.first { it.id == "legacy-chat" }.isCached)
+    val retired = store.states.first { it.id == stale }
+    assertFalse(retired.isCached)
+    assertFalse(retired.isEnabled)
+    assertTrue(retired.hasRetiredMetadata())
   }
 }
 
@@ -282,10 +323,12 @@ private class FakeShortcutStore(
     }
   }
 
-  override fun removeAllDynamic() {
+  override fun removeDynamic(ids: List<String>) {
     record("removeDynamic")
     if ("removeDynamic" !in ineffectiveOperations) {
-      states.replaceAll { current -> current.copy(isDynamic = false) }
+      states.replaceAll { current ->
+        if (current.id in ids) current.copy(isDynamic = false) else current
+      }
     }
   }
 

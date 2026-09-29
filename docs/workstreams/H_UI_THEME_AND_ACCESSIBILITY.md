@@ -42,10 +42,15 @@ filled controls, bubbles, and media overlays through the same policy.
 
 ## `HANDLE-COLOR-01` — per-handle color ownership
 
-Define whether handle color is server- or device-owned and apply one deterministic precedence rule.
-Missing, null, or malformed partial payloads must not erase the last valid value. Keep service
-variants distinct, preserve positional alignment through query projections, use readable foregrounds,
-and include the value in portable backup only if the approved model makes it device-local.
+Treat handle color as device-owned customization keyed by the exact `(address, service)` identity.
+Ignore every inbound server color field so sync/contact refresh cannot set, replace, or erase a local
+choice. Offer `Default` plus the reviewed fixed palette, and permit selection or reset only through
+the account-scoped command for a current member of the target chat; never merge service variants.
+
+Project participant names, avatar seeds, services, and colors as ordered JSON arrays so values
+containing commas cannot break positional alignment. Select readable foregrounds from the actual
+rendered background. Portable backup v4 carries only a bounded, validated set of exact-identity
+colors; v1-v3 restores leave existing device-owned colors unchanged.
 
 <a id="a11y-01"></a>
 

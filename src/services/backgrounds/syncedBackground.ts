@@ -12,6 +12,7 @@ import {
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
+import { sessionAccessors } from '@state/sessionStore';
 import {
   deleteNativeSyncedBackgroundCacheFile,
   prepareNativeSyncedBackgroundCacheForDownload,
@@ -54,6 +55,8 @@ interface SyncedBackgroundRequest {
   db: AppDatabase;
   guid: string;
   lease: RealtimeDeliveryLease;
+  /** Null for Apple chats; exact captured pairing epoch for qualified RCS chats. */
+  rcsProviderEpoch: string | null;
   revision: number;
 }
 
@@ -71,6 +74,7 @@ export async function ensureSyncedBackgroundForChat(
   guid: string,
   accountLease: RealtimeDeliveryLease,
 ): Promise<void> {
+  if (guid.startsWith('RCS;-;') && !sessionAccessors.acceptsRcsChat(guid)) return;
   const opened: { db?: AppDatabase } = {};
   try {
     const status = await runTrackedRealtimeWork(accountLease, async (activeLease) => {
@@ -139,12 +143,18 @@ export function ensureSyncedBackground(
   guid: string,
   context?: EventDeliveryContext,
 ): Promise<void> {
+  const isRcs = guid.startsWith('RCS;-;');
+  const rcsProviderEpoch = isRcs ? sessionAccessors.rcsProviderEpoch() : null;
+  if (isRcs && (rcsProviderEpoch == null || !sessionAccessors.acceptsRcsChat(guid))) {
+    return Promise.resolve();
+  }
   const lease: RealtimeDeliveryLease = context ?? captureRealtimeDeliveryLease();
   const request: SyncedBackgroundRequest = {
     http,
     db,
     guid,
     lease,
+    rcsProviderEpoch,
     revision: ++nextRevision,
   };
   const existing = perChatWork.get(guid);
@@ -184,10 +194,22 @@ async function runSyncedBackgroundRequest(
   request: SyncedBackgroundRequest,
   isLatest: () => boolean,
 ): Promise<void> {
-  const { http, db, guid, lease } = request;
+  const { http, db, guid, lease, rcsProviderEpoch } = request;
   // Bind every native URL/header pair to the account generation that started this operation.
   // The lease checks below prevent that generation from committing after Disconnect.
-  const ownsRequest = (): boolean => lease.isCurrent() && http.isTransportCurrent() && isLatest();
+  let revoked = false;
+  const ownsRequest = (): boolean => {
+    if (revoked) return false;
+    const current =
+      lease.isCurrent() &&
+      http.isTransportCurrent() &&
+      isLatest() &&
+      (rcsProviderEpoch == null ||
+        (sessionAccessors.rcsProviderEpoch() === rcsProviderEpoch &&
+          sessionAccessors.acceptsRcsChat(guid)));
+    if (!current) revoked = true;
+    return current;
+  };
   const commit = async (
     task: () => Promise<unknown>,
     onGuardRollback?: () => void,

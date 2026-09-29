@@ -14,7 +14,11 @@
  */
 import { renderHook, act } from '../support/renderWithTheme';
 import { useChatMatches } from '@features/search/useChatMatches';
-import { searchChatGuidsByMessage, searchChatsForInboxPage } from '@db/repositories';
+import {
+  InboxSearchCancelledError,
+  searchChatGuidsByMessage,
+  searchChatsForInboxPage,
+} from '@db/repositories';
 import { runInboxSearchIndexRebuildOnce } from '@/services/search/inboxSearchIndexRebuild';
 import {
   captureRealtimeDeliveryLease,
@@ -25,6 +29,7 @@ import {
 import { mkInboxRow } from './_fixtures';
 
 jest.mock('@db/repositories', () => ({
+  InboxSearchCancelledError: class InboxSearchCancelledError extends Error {},
   searchChatGuidsByMessage: jest.fn(),
   searchChatsForInboxPage: jest.fn(),
 }));
@@ -124,6 +129,7 @@ describe('useChatMatches', () => {
       query: 'lunch',
       messageMatchGuids: ['c-2'],
       limit: 50,
+      shouldContinue: expect.any(Function),
     });
     expect(result.current.data?.map((r) => r.id)).toEqual([2]);
   });
@@ -141,6 +147,7 @@ describe('useChatMatches', () => {
       query: 'work',
       messageMatchGuids: [],
       limit: 50,
+      shouldContinue: expect.any(Function),
     });
     // Still name-matches row 2 ("Work").
     expect(result.current.data?.map((r) => r.id)).toEqual([2]);
@@ -177,6 +184,31 @@ describe('useChatMatches', () => {
     await advance(1);
     expect(mockChatSearch).toHaveBeenCalledTimes(2);
     expect(result.current.data?.map((row) => row.guid)).toEqual(['c-2']);
+  });
+
+  it('cancels an obsolete term scan before publishing the new term', async () => {
+    let oldShouldContinue: (() => boolean) | undefined;
+    let rejectOld: ((error: Error) => void) | undefined;
+    mockChatSearch.mockImplementationOnce(
+      (_db, options) =>
+        new Promise((_, reject) => {
+          oldShouldContinue = options.shouldContinue;
+          rejectOld = reject;
+        }),
+    );
+    const { result, rerender } = await renderHook(
+      ({ q }: { q: string }) => useChatMatches(q, { contentMatches: false }),
+      { initialProps: { q: 'work' } },
+    );
+    await advance(200);
+    expect(oldShouldContinue?.()).toBe(true);
+
+    await act(async () => rerender({ q: 'trip' }));
+    expect(oldShouldContinue?.()).toBe(false);
+    await act(async () => rejectOld?.(new InboxSearchCancelledError()));
+    await advance(200);
+    expect(result.current.data?.map((row) => row.guid)).toEqual(['c-1']);
+    expect(result.current.error).toBeNull();
   });
 
   it('swallows a rejected content search and still returns name matches', async () => {

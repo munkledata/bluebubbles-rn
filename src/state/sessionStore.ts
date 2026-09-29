@@ -4,6 +4,12 @@ import {
   serverSendCapabilityKey,
   type ServerInfo,
 } from '@core/models';
+import {
+  currentRcsProviderEpoch,
+  isCurrentRcsAttachmentGuid,
+  isCurrentRcsChatGuid,
+  isCurrentRcsMessageGuid,
+} from '@core/rcs/providerIdentity';
 
 export type ConnectionStatus =
   | 'loading' // hydrating credentials from the vault at boot
@@ -220,11 +226,28 @@ export const sessionAccessors = {
   /** The current HTTP transport id; also changes on approved same-account origin rotation. */
   getTransportRevision: (): number => useSessionStore.getState().transportRevision,
   getPassword: (): string | undefined => useSessionStore.getState().password ?? undefined,
+  /** Immutable-by-convention capability snapshot for platform-free ingestion admission. */
+  getServerInfo: (): ServerInfo | null => useSessionStore.getState().serverInfo,
   /** Whether the connected server's Gator RCS bridge is enabled (absent/false → off). */
   rcsEnabled: (): boolean => !!useSessionStore.getState().serverInfo?.rcs,
+  /** Current persisted Google pairing epoch, or null until the qualified-id contract is live. */
+  rcsProviderEpoch: (): string | null =>
+    currentRcsProviderEpoch(useSessionStore.getState().serverInfo),
+  /** Only an exact current-epoch RCS conversation may start a server mutation. */
+  acceptsRcsChat: (chatGuid: string): boolean =>
+    isCurrentRcsChatGuid(useSessionStore.getState().serverInfo, chatGuid),
+  /** Only an exact current-epoch RCS message may be used as a remote action target. */
+  acceptsRcsMessage: (messageGuid: string): boolean =>
+    isCurrentRcsMessageGuid(useSessionStore.getState().serverInfo, messageGuid),
+  /** Only an exact current-epoch RCS attachment may start or finish a remote/native fetch. */
+  acceptsRcsAttachment: (attachmentGuid: string): boolean =>
+    isCurrentRcsAttachmentGuid(useSessionStore.getState().serverInfo, attachmentGuid),
   /** Narrow helper capability; independent of the retired broad Private API flag. */
   imessageNewChatEnabled: (): boolean =>
     useSessionStore.getState().serverInfo?.supports_imessage_new_chat === true,
+  /** Existing one-to-one iMessage typing only; does not depend on broad Private API. */
+  imessageTypingEnabled: (): boolean =>
+    useSessionStore.getState().serverInfo?.supports_imessage_typing === true,
   /** Existing one-to-one iMessage read state only; absent/false always fails closed. */
   imessageReadStateEnabled: (): boolean =>
     useSessionStore.getState().serverInfo?.supports_imessage_read_state === true,
@@ -257,6 +280,14 @@ export const sessionAccessors = {
 /** React hook: is the server's RCS bridge enabled? (Gate RCS-specific UI on this.) */
 export const useRcsEnabled = (): boolean => useSessionStore((s) => !!s.serverInfo?.rcs);
 
+/** React hook for RCS actions; legacy/stale conversations remain visible but read-only. */
+export const useRcsMutationEnabled = (chatGuid?: string): boolean =>
+  useSessionStore((s) =>
+    chatGuid === undefined
+      ? currentRcsProviderEpoch(s.serverInfo) !== null
+      : isCurrentRcsChatGuid(s.serverInfo, chatGuid),
+  );
+
 /** React hook: can the server emit `message-deleted`? (For future deletion affordances.) */
 export const useMessageDeletedSupported = (): boolean =>
   useSessionStore((s) => !!s.serverInfo?.supports_message_deleted);
@@ -269,7 +300,10 @@ export const useMessageSearchSupported = (): boolean =>
 export const useSendAttachmentTextSupported = (service: string | null | undefined): boolean =>
   useSessionStore((s) => {
     if (service === 'RCS') {
-      return s.serverInfo?.rcs === true && s.serverInfo.supports_rcs_text_with_attachment === true;
+      return (
+        currentRcsProviderEpoch(s.serverInfo) !== null &&
+        s.serverInfo?.supports_rcs_text_with_attachment === true
+      );
     }
     if (service === 'iMessage') {
       return (

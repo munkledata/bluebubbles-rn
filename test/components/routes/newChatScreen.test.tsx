@@ -23,6 +23,7 @@ import { renderWithTheme, screen, fireEvent, waitFor, act } from '../support/ren
 import { logger } from '@core/secure';
 import { ApiError } from '@core/api/errors';
 import type { ContactPick } from '@db/repositories';
+import { getDatabase } from '@db/database';
 import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
@@ -31,12 +32,24 @@ import {
 const mockPush = jest.fn();
 const mockBack = jest.fn();
 const mockReplace = jest.fn();
+const mockRouter = { push: mockPush, back: mockBack, replace: mockReplace };
 let mockSearchParams: {
   forwardText?: string;
   forwardAttachmentHandoff?: string;
+  shareBatch?: string;
   /** Legacy/public payload retained only to prove the route ignores it. */
   forwardAttachments?: string;
 } = {};
+let mockUnsavedChangesOptions:
+  | {
+      enabled: boolean;
+      onDiscard?: () => void | boolean | Promise<void | boolean>;
+      onAfterDiscardNavigation?: () => void;
+      title?: string;
+      message?: string;
+    }
+  | undefined;
+const mockNavigateWithoutPrompt = (navigate: () => void): void => navigate();
 // Per-uri fake filesystem for the forwarded-attachment validation (File.exists/.size).
 // Referenced LAZILY from the mock class's getters (safe under factory hoisting, like
 // mockSearchParams), and reset in beforeEach.
@@ -50,7 +63,7 @@ jest.mock('@ui', () => ({
   ...jest.requireActual('@ui/primitives'),
 }));
 jest.mock('expo-router', () => ({
-  useRouter: () => ({ push: mockPush, back: mockBack, replace: mockReplace }),
+  useRouter: () => mockRouter,
   useLocalSearchParams: () => mockSearchParams,
 }));
 jest.mock('expo-crypto', () => ({ randomUUID: jest.fn() }));
@@ -88,8 +101,29 @@ jest.mock('react-native-safe-area-context', () => ({
 }));
 jest.mock('@/services', () => ({ createNewChat: jest.fn(), http: {} }));
 jest.mock('@/services/send', () => ({ sendImages: jest.fn() }));
+jest.mock('@/services/share/shareIntake', () => ({
+  consumeShareIntakeBatchIfComplete: jest.fn(),
+  discardShareIntakeItem: jest.fn(() => Promise.resolve()),
+  discardShareIntakeBatch: jest.fn(),
+  drainShareIntake: jest.fn(() => Promise.resolve()),
+  isShareIntakeFileSettled: jest.fn(
+    (receipt: { items?: Record<string, unknown> } | null, index: number) =>
+      receipt?.items?.[`file:${String(index).padStart(2, '0')}`] != null,
+  ),
+  isShareIntakeNewChatRetryWindowOpen: jest.fn(
+    (identity: { nativeCreatedAtMs: number }, nowMs = Date.now()) =>
+      nowMs >= identity.nativeCreatedAtMs &&
+      nowMs - identity.nativeCreatedAtMs < 30 * 24 * 60 * 60 * 1_000,
+  ),
+  isShareIntakeReceiptComplete: jest.fn(),
+  prepareShareIntakeNewChatPlan: jest.fn(async (_identity: unknown, plan: unknown) => plan),
+  readShareIntakeReceipt: jest.fn(),
+}));
 jest.mock('@ui/hooks/useUnsavedChangesGuard', () => ({
-  useUnsavedChangesGuard: () => ({ navigateWithoutPrompt: (navigate: () => void) => navigate() }),
+  useUnsavedChangesGuard: (options: typeof mockUnsavedChangesOptions) => {
+    mockUnsavedChangesOptions = options;
+    return { navigateWithoutPrompt: mockNavigateWithoutPrompt };
+  },
 }));
 jest.mock('@db/repositories', () => ({
   ...jest.requireActual('@db/repositories'),
@@ -106,9 +140,22 @@ import { createNewChat } from '@/services';
 // eslint-disable-next-line import/first
 import { sendImages } from '@/services/send';
 // eslint-disable-next-line import/first
+import {
+  consumeShareIntakeBatchIfComplete,
+  discardShareIntakeBatch,
+  drainShareIntake,
+  isShareIntakeReceiptComplete,
+  prepareShareIntakeNewChatPlan,
+  readShareIntakeReceipt,
+} from '@/services/share/shareIntake';
+// eslint-disable-next-line import/first
 import { presentSendIssue } from '@ui/conversations/sendNotices';
 // eslint-disable-next-line import/first
-import { searchContactAddresses, findChatByParticipantAddresses } from '@db/repositories';
+import {
+  searchContactAddresses,
+  findChatByParticipantAddresses,
+  SHARE_INTAKE_NEW_CHAT_RETRY_WINDOW_MS,
+} from '@db/repositories';
 // eslint-disable-next-line import/first
 import { useDialogStore } from '@ui/dialog/dialogStore';
 // eslint-disable-next-line import/first
@@ -124,10 +171,17 @@ import {
 } from '@features/conversations/forwardAttachmentHandoff';
 
 const mockCreateNewChat = createNewChat as jest.Mock;
+const mockGetDatabase = getDatabase as jest.Mock;
 const mockRandomUUID = Crypto.randomUUID as jest.Mock;
 const mockSendImages = sendImages as jest.Mock;
+const mockConsumeShareIntakeBatchIfComplete = consumeShareIntakeBatchIfComplete as jest.Mock;
+const mockDiscardShareIntakeBatch = discardShareIntakeBatch as jest.Mock;
+const mockDrainShareIntake = drainShareIntake as jest.Mock;
 const mockSearchContacts = searchContactAddresses as jest.Mock;
 const mockFindChat = findChatByParticipantAddresses as jest.Mock;
+const mockGetShareIntakeReceipt = readShareIntakeReceipt as jest.Mock;
+const mockIsShareIntakeReceiptComplete = isShareIntakeReceiptComplete as jest.Mock;
+const mockPrepareSharePlan = prepareShareIntakeNewChatPlan as jest.Mock;
 const clearShareIntentStore = useShareIntentStore.getState().clear;
 
 const PRIVATE_NAME = 'new-chat-private-contact-7f31';
@@ -145,11 +199,20 @@ const FORWARD_NONCE = '44444444-4444-4444-8444-444444444444';
 const PRIVATE_EXISTING_GUID = 'iMessage;-;new-chat-private-existing-2b4e';
 const PRIVATE_CREATED_GUID = 'RCS;-;new-chat-private-created-d913';
 const SECOND_CREATED_GUID = 'RCS;-;new-chat-current-created-471a';
+const PRIVATE_SHARE_BATCH = '1700000000000-1-0123456789abcdef';
+const SECOND_SHARE_BATCH = '1700000000001-2-fedcba9876543210';
 const ACCOUNT_CHANGED_COPY = 'Account changed. Go back and start a new message again.';
+const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
+const RCS_SERVER_IDENTITY = {
+  supports_rcs_epoch_qualified_ids: true,
+  rcs_provider_epoch: RCS_PROVIDER_EPOCH,
+} as const;
 const rcsServerInfo = ServerInfo.parse({
   version: '1.9.0',
   private_api: true,
   rcs: true,
+  supports_rcs_send_attempt_ownership: true,
+  ...RCS_SERVER_IDENTITY,
 });
 let keyboardDismissSpy: jest.SpiedFunction<typeof Keyboard.dismiss>;
 
@@ -202,7 +265,25 @@ function sharedPrivateImage() {
     name: PRIVATE_FILENAME,
     mimeType: 'image/jpeg',
     size: 4096,
+    origin: 'share' as const,
+    shareItemIndex: 0,
   };
+}
+
+function stageShare(
+  batchId: string,
+  text: string | null = PRIVATE_MESSAGE,
+  files = [sharedPrivateImage()],
+): void {
+  mockSearchParams = { ...mockSearchParams, shareBatch: batchId };
+  useShareIntentStore.setState({
+    batchId,
+    createdAtMs: Date.now(),
+    text,
+    files,
+    targetToken: null,
+    failureReason: null,
+  });
 }
 
 function stageProtectedForward(release: jest.Mock): void {
@@ -260,15 +341,33 @@ beforeEach(() => {
   clearForwardAttachmentHandoffs();
   resumeRealtimeDeliveries();
   mockSearchParams = {};
+  mockUnsavedChangesOptions = undefined;
   for (const k of Object.keys(mockFiles)) delete mockFiles[k];
   mockFileInfoReads.length = 0;
   mockSendImages.mockReset().mockResolvedValue([]);
+  mockGetDatabase.mockReset();
+  mockConsumeShareIntakeBatchIfComplete.mockReset().mockResolvedValue(true);
+  mockDiscardShareIntakeBatch.mockReset().mockResolvedValue(true);
+  mockDrainShareIntake.mockClear();
   mockSearchContacts.mockReset().mockResolvedValue([] as ContactPick[]);
   mockFindChat.mockReset().mockResolvedValue(null);
+  mockGetShareIntakeReceipt.mockReset().mockResolvedValue(null);
+  mockIsShareIntakeReceiptComplete.mockReset().mockReturnValue(false);
+  mockPrepareSharePlan
+    .mockReset()
+    .mockImplementation(async (_identity: unknown, plan: unknown) => plan);
   mockCreateNewChat.mockReset().mockResolvedValue('RCS;-;+15551234567');
   mockRandomUUID.mockReset().mockReturnValue('00000000-0000-4000-8000-000000000001');
   useDialogStore.setState({ current: null, queue: [] });
-  useShareIntentStore.setState({ text: null, files: [], clear: clearShareIntentStore });
+  useShareIntentStore.setState({
+    batchId: null,
+    createdAtMs: null,
+    text: null,
+    files: [],
+    targetToken: null,
+    failureReason: null,
+    clear: clearShareIntentStore,
+  });
   keyboardDismissSpy = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => undefined);
   useSessionStore.setState({ serverInfo: rcsServerInfo });
 });
@@ -300,6 +399,8 @@ describe('NewChatScreen — service-scoped creation boundary', () => {
     expect(screen.queryByText('SMS')).toBeNull();
     expect(screen.queryByRole('radio')).toBeNull();
     await addRecipient('+15551230000');
+    expect(mockFindChat).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Open it/)).toBeNull();
     await act(async () => {
       fireEvent.changeText(screen.getByPlaceholderText('Message'), 'hi');
     });
@@ -364,6 +465,7 @@ describe('NewChatScreen — service-scoped creation boundary', () => {
       serverInfo: ServerInfo.parse({
         version: 'test',
         rcs: true,
+        ...RCS_SERVER_IDENTITY,
         supports_imessage_new_chat: true,
         private_api: false,
       }),
@@ -479,26 +581,24 @@ describe('NewChatScreen — service-scoped creation boundary', () => {
     );
   });
 
-  it('requires an international number and prevents text-only iMessage creation with staged files', async () => {
+  it('keeps SHARE-created new iMessage conversations blocked while preserving existing-chat routing', async () => {
     useSessionStore.setState({
       serverInfo: ServerInfo.parse({
         version: 'test',
         rcs: true,
+        ...RCS_SERVER_IDENTITY,
         supports_imessage_new_chat: true,
       }),
     });
-    useShareIntentStore.setState({
-      text: 'hello',
-      files: [sharedPrivateImage()],
-      clear: clearShareIntentStore,
-    });
+    stageShare(PRIVATE_SHARE_BATCH, 'hello', []);
     await renderWithTheme(<NewChatScreen />);
     await act(async () => {
       fireEvent.press(screen.getByRole('radio', { name: 'iMessage' }));
     });
-    await addRecipient('5551234567');
-    expect(screen.getByText(/number with country code/)).toBeTruthy();
-    expect(screen.getByText(/iMessage attachments are not available yet/)).toBeTruthy();
+    await addRecipient('+15551234567');
+    expect(
+      screen.getByText(/Starting a new iMessage conversation from Share is disabled/),
+    ).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Start' }).props.accessibilityState.disabled).toBe(
       true,
     );
@@ -606,21 +706,201 @@ describe('NewChatScreen — forward prefill', () => {
 });
 
 describe('NewChatScreen — shared-in prefill', () => {
-  it('captures shared text/files as initial state and clears the hand-off store after mount', async () => {
+  it('keeps recipient, service, and message controls inert until receipt reconciliation finishes', async () => {
+    const receiptRead = deferred<null>();
+    mockGetShareIntakeReceipt.mockReturnValue(receiptRead.promise);
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({
+        version: 'test',
+        rcs: true,
+        ...RCS_SERVER_IDENTITY,
+        supports_rcs_send_attempt_ownership: true,
+        supports_imessage_new_chat: true,
+      }),
+    });
+    stageShare(PRIVATE_SHARE_BATCH);
+
+    await renderWithTheme(<NewChatScreen />);
+
+    expect(screen.getByText(/Checking the shared item/)).toBeTruthy();
+    expect(screen.getByPlaceholderText('Phone or email').props.editable).toBe(false);
+    expect(screen.getByPlaceholderText('Message').props.editable).toBe(false);
+    expect(screen.getByRole('radio', { name: 'RCS' }).props.accessibilityState.disabled).toBe(true);
+    expect(screen.queryByLabelText('Remove attachment')).toBeNull();
+
+    await act(async () => {
+      receiptRead.resolve(null);
+      await receiptRead.promise;
+    });
+
+    await waitFor(() => expect(screen.queryByText(/Checking the shared item/)).toBeNull());
+    expect(screen.getByPlaceholderText('Phone or email').props.editable).toBe(true);
+    expect(screen.getByPlaceholderText('Message').props.editable).toBe(true);
+  });
+
+  it('freezes the exact shared RCS draft while its durable send plan is being saved', async () => {
+    const planPreparation = deferred<unknown>();
+    mockPrepareSharePlan.mockReturnValue(planPreparation.promise);
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({
+        version: 'test',
+        rcs: true,
+        supports_imessage_new_chat: true,
+        supports_rcs_send_attempt_ownership: true,
+        ...RCS_SERVER_IDENTITY,
+      }),
+    });
+    stageShare(PRIVATE_SHARE_BATCH, PRIVATE_MESSAGE, []);
+
+    await renderWithTheme(<NewChatScreen />);
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText('Phone or email').props.editable).toBe(true),
+    );
+    await addRecipient(PRIVATE_ADDRESS);
+
+    const toInput = screen.getByPlaceholderText('Add another…');
+    const messageInput = screen.getByPlaceholderText('Message');
+    const staleToChange = toInput.props.onChangeText as (text: string) => void;
+    const staleMessageChange = messageInput.props.onChangeText as (text: string) => void;
+    const staleRemoveRecipient = retainConfiguredPress(
+      screen.getByLabelText(`Remove ${PRIVATE_ADDRESS}`),
+    );
+    const staleSelectIMessage = retainConfiguredPress(
+      screen.getByRole('radio', { name: 'iMessage' }),
+    );
+    const staleStart = retainConfiguredPress(screen.getByRole('button', { name: 'Start' }));
+    const staleDiscard = mockUnsavedChangesOptions?.onDiscard;
+    expect(typeof staleDiscard).toBe('function');
+
+    fireEvent.press(screen.getByRole('button', { name: 'Start' }));
+    await waitFor(() => expect(mockPrepareSharePlan).toHaveBeenCalledTimes(1));
+
+    expect(screen.getByPlaceholderText('Add another…').props.editable).toBe(false);
+    expect(screen.getByPlaceholderText('Message').props.editable).toBe(false);
+    expect(screen.getByRole('radio', { name: 'RCS' }).props.accessibilityState.disabled).toBe(true);
+
+    let discardResult: void | boolean | undefined;
+    await act(async () => {
+      staleToChange(SECOND_ADDRESS);
+      staleMessageChange(SECOND_MESSAGE);
+      staleRemoveRecipient();
+      staleSelectIMessage();
+      staleStart();
+      discardResult = await staleDiscard?.();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByLabelText(`Remove ${PRIVATE_ADDRESS}`)).toBeTruthy();
+    expect(screen.getByPlaceholderText('Add another…').props.value).toBe('');
+    expect(screen.getByPlaceholderText('Message').props.value).toBe(PRIVATE_MESSAGE);
+    expect(screen.getByRole('radio', { name: 'RCS' }).props.accessibilityState.selected).toBe(true);
+    expect(mockPrepareSharePlan).toHaveBeenCalledTimes(1);
+    expect(discardResult).toBe(false);
+    expect(mockDiscardShareIntakeBatch).not.toHaveBeenCalled();
+
+    const preparedPlan = mockPrepareSharePlan.mock.calls[0]?.[1];
+    await act(async () => {
+      planPreparation.resolve(preparedPlan);
+      await planPreparation.promise;
+    });
+
+    await waitFor(() =>
+      expect(mockCreateNewChat).toHaveBeenCalledWith(
+        [PRIVATE_ADDRESS],
+        PRIVATE_MESSAGE,
+        expect.anything(),
+        'RCS',
+        `share-${PRIVATE_SHARE_BATCH}`,
+        expect.objectContaining({
+          plan: expect.objectContaining({
+            address: PRIVATE_ADDRESS,
+            body: PRIVATE_MESSAGE,
+            service: 'RCS',
+          }),
+        }),
+      ),
+    );
+  });
+
+  it('captures only the route-named batch and does not clear durable ownership on mount', async () => {
     const sharedFile = {
       uri: 'file:///cache/shared-in/report.pdf',
       name: 'report.pdf',
       mimeType: 'application/pdf',
       size: 42,
+      origin: 'share' as const,
+      shareItemIndex: 0,
     };
-    useShareIntentStore.setState({ text: 'Shared note', files: [sharedFile] });
+    stageShare(PRIVATE_SHARE_BATCH, 'Shared note', [sharedFile]);
 
     await renderWithTheme(<NewChatScreen />);
 
     expect(screen.getByPlaceholderText('Message').props.value).toBe('Shared note');
     expect(screen.getByLabelText('Remove attachment')).toBeTruthy();
-    expect(useShareIntentStore.getState().text).toBeNull();
-    expect(useShareIntentStore.getState().files).toEqual([]);
+    expect(useShareIntentStore.getState()).toMatchObject({
+      batchId: PRIVATE_SHARE_BATCH,
+      text: 'Shared note',
+      files: [sharedFile],
+    });
+    expect(mockConsumeShareIntakeBatchIfComplete).not.toHaveBeenCalled();
+    expect(mockDiscardShareIntakeBatch).not.toHaveBeenCalled();
+  });
+
+  it('blocks a SHARE new-chat retry after the server replay window safety margin', async () => {
+    stageShare(PRIVATE_SHARE_BATCH, 'Old shared note', []);
+    useShareIntentStore.setState({
+      createdAtMs: Date.now() - SHARE_INTAKE_NEW_CHAT_RETRY_WINDOW_MS,
+    });
+
+    await renderWithTheme(<NewChatScreen />);
+    await waitFor(() =>
+      expect(screen.getByPlaceholderText('Phone or email').props.editable).toBe(true),
+    );
+    await addRecipient(PRIVATE_ADDRESS);
+
+    expect(screen.getByText(/too old to retry safely/)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Start' }).props.accessibilityState.disabled).toBe(
+      true,
+    );
+    expect(mockCreateNewChat).not.toHaveBeenCalled();
+  });
+
+  it('ignores an ambient batch when the route does not carry that exact id', async () => {
+    useShareIntentStore.setState({
+      batchId: PRIVATE_SHARE_BATCH,
+      text: 'Must stay ambient',
+      files: [sharedPrivateImage()],
+      targetToken: null,
+    });
+    mockSearchParams = { shareBatch: SECOND_SHARE_BATCH };
+
+    await renderWithTheme(<NewChatScreen />);
+
+    expect(screen.getByPlaceholderText('Message').props.value).toBe('');
+    expect(screen.queryByLabelText('Remove attachment')).toBeNull();
+    expect(useShareIntentStore.getState().batchId).toBe(PRIVATE_SHARE_BATCH);
+  });
+
+  it('discards only its captured batch when the user explicitly abandons the draft', async () => {
+    stageShare(PRIVATE_SHARE_BATCH);
+    await renderWithTheme(<NewChatScreen />);
+
+    expect(mockUnsavedChangesOptions?.enabled).toBe(true);
+    await mockUnsavedChangesOptions?.onDiscard?.();
+
+    expect(mockDiscardShareIntakeBatch).toHaveBeenCalledTimes(1);
+    expect(mockDiscardShareIntakeBatch).toHaveBeenCalledWith(
+      PRIVATE_SHARE_BATCH,
+      expect.objectContaining({
+        drainNext: false,
+        lease: expect.objectContaining({ isCurrent: expect.any(Function) }),
+      }),
+    );
+    expect(mockConsumeShareIntakeBatchIfComplete).not.toHaveBeenCalled();
+    expect(mockDrainShareIntake).not.toHaveBeenCalled();
+
+    mockUnsavedChangesOptions?.onAfterDiscardNavigation?.();
+    expect(mockDrainShareIntake).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -665,9 +945,8 @@ describe('NewChatScreen — recipient entry + create', () => {
   });
 
   it('renders private compose data in confirmed normal mode and keeps exact actions internal', async () => {
-    useShareIntentStore.setState({ text: PRIVATE_MESSAGE, files: [sharedPrivateImage()] });
+    stageShare(PRIVATE_SHARE_BATCH);
     mockSearchContacts.mockResolvedValue([{ name: PRIVATE_NAME, address: PRIVATE_ADDRESS }]);
-    mockFindChat.mockResolvedValue(PRIVATE_EXISTING_GUID);
     mockCreateNewChat.mockResolvedValue(PRIVATE_CREATED_GUID);
     const view = await renderWithTheme(<NewChatScreen />);
 
@@ -688,10 +967,8 @@ describe('NewChatScreen — recipient entry + create', () => {
     expect(screen.getByText(`${PRIVATE_NAME} ✕`)).toBeTruthy();
     expect(screen.getByLabelText(`Remove ${PRIVATE_NAME}`)).toBeTruthy();
 
-    const existing = await screen.findByText(/Open it/);
-    await fireEvent.press(existing);
-    expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent(PRIVATE_EXISTING_GUID)}`);
-    mockReplace.mockClear();
+    expect(mockFindChat).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Open it/)).toBeNull();
 
     await act(async () => {
       fireEvent.changeText(screen.getByPlaceholderText('Message'), PRIVATE_MESSAGE);
@@ -703,15 +980,42 @@ describe('NewChatScreen — recipient entry + create', () => {
         [PRIVATE_ADDRESS],
         PRIVATE_MESSAGE,
         expect.anything(),
+        'RCS',
+        `share-${PRIVATE_SHARE_BATCH}`,
+        expect.objectContaining({
+          identity: expect.objectContaining({ batchId: PRIVATE_SHARE_BATCH, fileCount: 1 }),
+          plan: expect.objectContaining({
+            address: PRIVATE_ADDRESS,
+            body: PRIVATE_MESSAGE,
+            providerEpoch: RCS_PROVIDER_EPOCH,
+          }),
+        }),
       ),
     );
     const accountLease = mockCreateNewChat.mock.calls[0]?.[2];
     await waitFor(() =>
       expect(mockSendImages).toHaveBeenCalledWith(
-        { chatGuid: PRIVATE_CREATED_GUID, images: [sharedPrivateImage()] },
+        {
+          chatGuid: PRIVATE_CREATED_GUID,
+          images: [sharedPrivateImage()],
+          shareIntake: expect.objectContaining({ batchId: PRIVATE_SHARE_BATCH, fileCount: 1 }),
+        },
         accountLease,
         presentSendIssue,
+        expect.any(Function),
       ),
+    );
+    await waitFor(() =>
+      expect(mockConsumeShareIntakeBatchIfComplete).toHaveBeenCalledWith(
+        expect.objectContaining({ batchId: PRIVATE_SHARE_BATCH, fileCount: 1 }),
+        expect.objectContaining({
+          drainNext: false,
+          lease: expect.objectContaining({ isCurrent: expect.any(Function) }),
+        }),
+      ),
+    );
+    expect(mockSendImages.mock.invocationCallOrder[0]!).toBeLessThan(
+      mockConsumeShareIntakeBatchIfComplete.mock.invocationCallOrder[0]!,
     );
     expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent(PRIVATE_CREATED_GUID)}`);
     expect(JSON.stringify(view.toJSON())).toContain(PRIVATE_URI);
@@ -723,11 +1027,8 @@ describe('NewChatScreen — account ownership and handoff lifetime', () => {
     const release = jest.fn();
     const clearShareIntent = jest.fn(() => useShareIntentStore.setState({ text: null, files: [] }));
     stageProtectedForward(release);
-    useShareIntentStore.setState({
-      text: PRIVATE_MESSAGE,
-      files: [sharedPrivateImage()],
-      clear: clearShareIntent,
-    });
+    stageShare(PRIVATE_SHARE_BATCH);
+    useShareIntentStore.setState({ clear: clearShareIntent });
     await pauseRealtimeDeliveries();
 
     const staleView = await renderWithTheme(<NewChatScreen />);
@@ -753,8 +1054,12 @@ describe('NewChatScreen — account ownership and handoff lifetime', () => {
     expect(screen.getByDisplayValue(PRIVATE_MESSAGE)).toBeTruthy();
     expectImageUriHost(currentView.toJSON(), PRIVATE_URI);
     expect(mockFileInfoReads).toEqual([`exists:${FORWARD_URI}`, `size:${FORWARD_URI}`]);
-    expect(clearShareIntent).toHaveBeenCalledTimes(1);
-    expect(useShareIntentStore.getState()).toMatchObject({ text: null, files: [] });
+    expect(clearShareIntent).not.toHaveBeenCalled();
+    expect(useShareIntentStore.getState()).toMatchObject({
+      batchId: PRIVATE_SHARE_BATCH,
+      text: PRIVATE_MESSAGE,
+      files: [sharedPrivateImage()],
+    });
     expect(release).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -767,18 +1072,16 @@ describe('NewChatScreen — account ownership and handoff lifetime', () => {
   });
 
   it('automatically retires A host, blocks retained external actions, and fresh B stays exact', async () => {
-    useShareIntentStore.setState({ text: PRIVATE_MESSAGE, files: [sharedPrivateImage()] });
+    stageShare(PRIVATE_SHARE_BATCH);
     mockSearchContacts.mockResolvedValue([
       { name: PRIVATE_NAME, address: PRIVATE_ADDRESS },
       { name: SECOND_NAME, address: SECOND_ADDRESS },
     ]);
-    mockFindChat.mockResolvedValue(PRIVATE_EXISTING_GUID);
     mockCreateNewChat.mockResolvedValue(SECOND_CREATED_GUID);
     const oldView = await renderWithTheme(<NewChatScreen />);
 
     await fireEvent.changeText(screen.getByPlaceholderText('Phone or email'), PRIVATE_QUERY);
     await fireEvent.press(await screen.findByText(PRIVATE_NAME));
-    await screen.findByText(/Open it/);
     await fireEvent.changeText(screen.getByPlaceholderText('Add another…'), SECOND_ADDRESS);
     const oldToInput = screen.getByPlaceholderText('Add another…');
     const oldToChange = oldToInput.props.onChangeText as (text: string) => void;
@@ -789,7 +1092,6 @@ describe('NewChatScreen — account ownership and handoff lifetime', () => {
     const oldChip = retainConfiguredPress(screen.getByLabelText(`Remove ${PRIVATE_NAME}`));
     const oldAttachment = retainConfiguredPress(screen.getByLabelText('Remove attachment'));
     const oldSuggestion = retainConfiguredPress(await screen.findByText(SECOND_NAME));
-    const oldExisting = retainConfiguredPress(screen.getByText(/Open it/));
     const oldStart = retainConfiguredPress(screen.getByRole('button', { name: 'Start' }));
 
     await act(async () => {
@@ -806,7 +1108,6 @@ describe('NewChatScreen — account ownership and handoff lifetime', () => {
       oldChip();
       oldAttachment();
       oldSuggestion();
-      oldExisting();
       oldStart();
       await Promise.resolve();
     });
@@ -821,10 +1122,8 @@ describe('NewChatScreen — account ownership and handoff lifetime', () => {
     mockSearchParams = { forwardText: SECOND_MESSAGE };
     const currentView = await renderWithTheme(<NewChatScreen />);
     await addRecipient(SECOND_ADDRESS);
-    const freshExisting = await screen.findByText(/Open it/);
-    await fireEvent.press(freshExisting);
-    expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent(PRIVATE_EXISTING_GUID)}`);
-    mockReplace.mockClear();
+    expect(mockFindChat).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Open it/)).toBeNull();
     await fireEvent.press(screen.getByRole('button', { name: 'Start' }));
     await waitFor(() =>
       expect(mockCreateNewChat).toHaveBeenCalledWith(
@@ -840,6 +1139,9 @@ describe('NewChatScreen — account ownership and handoff lifetime', () => {
   it.each(['success', 'rejection'] as const)(
     'keeps fresh B existing-chat routing when retired A lookup settles with %s',
     async (outcome) => {
+      useSessionStore.setState({
+        serverInfo: ServerInfo.parse({ version: 'test', supports_imessage_new_chat: true }),
+      });
       const oldLookup = deferred<string | null>();
       const freshLookup = deferred<string | null>();
       mockFindChat.mockReturnValueOnce(oldLookup.promise).mockReturnValueOnce(freshLookup.promise);
@@ -918,7 +1220,7 @@ describe('NewChatScreen — account ownership and handoff lifetime', () => {
       });
       expect(release).toHaveBeenCalledTimes(1);
       resumeRealtimeDeliveries();
-      useShareIntentStore.setState({ text: SECOND_MESSAGE, files: [sharedPrivateImage()] });
+      stageShare(SECOND_SHARE_BATCH, SECOND_MESSAGE);
       const currentView = await renderWithTheme(<NewChatScreen />);
       await addRecipient(SECOND_ADDRESS);
       await fireEvent.press(screen.getByRole('button', { name: 'Start' }));
@@ -926,9 +1228,14 @@ describe('NewChatScreen — account ownership and handoff lifetime', () => {
       const currentLease = mockCreateNewChat.mock.calls[1]?.[2];
       expect(currentLease).not.toBe(oldLease);
       expect(mockSendImages).toHaveBeenLastCalledWith(
-        { chatGuid: SECOND_CREATED_GUID, images: [sharedPrivateImage()] },
+        {
+          chatGuid: SECOND_CREATED_GUID,
+          images: [sharedPrivateImage()],
+          shareIntake: expect.objectContaining({ batchId: SECOND_SHARE_BATCH, fileCount: 1 }),
+        },
         currentLease,
         presentSendIssue,
+        expect.any(Function),
       );
       expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent(SECOND_CREATED_GUID)}`);
       expect(currentView.toJSON()).not.toBeNull();
@@ -1003,6 +1310,12 @@ describe('NewChatScreen — validation', () => {
 });
 
 describe('NewChatScreen — existing conversation', () => {
+  beforeEach(() => {
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({ version: 'test', supports_imessage_new_chat: true }),
+    });
+  });
+
   it('offers to open an existing chat with the same recipients', async () => {
     mockFindChat.mockResolvedValue('iMessage;-;existing');
     await renderWithTheme(<NewChatScreen />);
@@ -1020,6 +1333,23 @@ describe('NewChatScreen — existing conversation', () => {
       fireEvent.press(banner);
     });
     expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent('iMessage;-;existing')}`);
+  });
+
+  it('transfers the exact share claim to an existing conversation without consuming it', async () => {
+    const existingGuid = 'iMessage;-;existing-share-target';
+    stageShare(PRIVATE_SHARE_BATCH);
+    mockFindChat.mockResolvedValue(existingGuid);
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient(PRIVATE_ADDRESS);
+
+    await fireEvent.press(await screen.findByText(/Open it/));
+
+    expect(mockReplace).toHaveBeenCalledWith(
+      `/chat/${encodeURIComponent(existingGuid)}?shareBatch=${encodeURIComponent(PRIVATE_SHARE_BATCH)}`,
+    );
+    expect(mockConsumeShareIntakeBatchIfComplete).not.toHaveBeenCalled();
+    expect(mockDiscardShareIntakeBatch).not.toHaveBeenCalled();
+    expect(useShareIntentStore.getState().batchId).toBe(PRIVATE_SHARE_BATCH);
   });
 
   it('hides a resolved A banner immediately while a new recipient-key lookup is pending', async () => {

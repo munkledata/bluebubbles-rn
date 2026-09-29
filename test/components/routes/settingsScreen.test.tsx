@@ -589,6 +589,25 @@ describe('SettingsScreen — navigation rows', () => {
     }
   });
 
+  it.each([{ supports_facetime_link_creation: true }, { supports_facetime_call_start: true }])(
+    'offers the FaceTime route for either exact narrow capability: %o',
+    async (capability) => {
+      await renderWithTheme(<SettingsScreen />);
+      expect(screen.queryByText('FaceTime')).toBeNull();
+
+      await act(async () => {
+        useSessionStore.setState({
+          origin: 'https://facetime-menu.test',
+          serverInfo: { version: 'test', ...capability },
+        });
+      });
+      await act(async () => {
+        fireEvent.press(screen.getByText('FaceTime'));
+      });
+      expect(mockPush).toHaveBeenCalledWith('/facetime');
+    },
+  );
+
   it('goes back from the header', async () => {
     await renderWithTheme(<SettingsScreen />);
     await act(async () => {
@@ -629,6 +648,10 @@ describe('SettingsScreen — destructive/confirm dialogs', () => {
     });
     const dialog = useDialogStore.getState().current;
     expect(dialog?.title).toBe('Disconnect');
+    expect(dialog?.message).toContain(
+      'custom folders and device-owned contact colors are removed from this device',
+    );
+    expect(dialog?.message).toContain('a compatible encrypted backup made first can restore them');
     const confirm = dialog!.buttons.find((b) => b.text === 'Disconnect');
     expect(confirm?.style).toBe('destructive');
     await act(async () => {
@@ -800,6 +823,21 @@ describe('SettingsScreen — account-owned server display', () => {
 
     expect(screen.getByText(PRIVATE_SERVER_SESSION.origin)).toBeTruthy();
     expect(screen.queryByText('iMessage Account…')).toBeNull();
+    expect(screen.getByRole('text', { name: 'Retired in this release' })).toBeTruthy();
+  });
+
+  it('shows read-only account status only for its separate narrow capability', async () => {
+    useSessionStore.setState({
+      ...PRIVATE_SERVER_SESSION,
+      serverInfo: {
+        ...PRIVATE_SERVER_SESSION.serverInfo,
+        supports_icloud_account: false,
+        supports_imessage_account_status: true,
+      },
+    });
+
+    await renderWithTheme(<SettingsScreen />);
+    expect(screen.getByRole('button', { name: 'View iMessage account' })).toBeTruthy();
     expect(screen.getByRole('text', { name: 'Retired in this release' })).toBeTruthy();
   });
 

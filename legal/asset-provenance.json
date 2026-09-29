@@ -21,10 +21,13 @@
     { "path": "modules/gator-bounded-download", "provenanceStatus": "unresolved" },
     { "path": "modules/gator-paste-input", "provenanceStatus": "unresolved" },
     { "path": "modules/gator-screen-security", "provenanceStatus": "unresolved" },
+    { "path": "modules/gator-share-intake", "provenanceStatus": "unresolved" },
     { "path": "modules/gator-share-shortcuts", "provenanceStatus": "unresolved" },
     { "path": "plugins/withArm64Only.js", "provenanceStatus": "unresolved" },
+    { "path": "plugins/withGradleJvmMemory.js", "provenanceStatus": "unresolved" },
     { "path": "plugins/withNoWebSocketRedirects.js", "provenanceStatus": "unresolved" },
     { "path": "plugins/withNotificationIcon.js", "provenanceStatus": "unresolved" },
-    { "path": "plugins/withShareTargets.js", "provenanceStatus": "unresolved" }
+    { "path": "plugins/withShareTargets.js", "provenanceStatus": "unresolved" },
+    { "path": "plugins/withSystemCaNetworkSecurity.js", "provenanceStatus": "unresolved" }
   ]
 }

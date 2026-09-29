@@ -82,7 +82,28 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
             Gator does not request this phone&apos;s own location for that map. When you explicitly
             open a web link or location, Android hands it to an external browser or maps app. That
             external provider may receive the URL or precise coordinates and, for a Find My
-            location, its displayed label. FaceTime calling from Gator is retired in this release.
+            location, its displayed label. FaceTime actions appear only when your connected server
+            advertises a separately gated capability. Starting a call sends the address you entered
+            to that server; Gator does not save that address on the phone. A created FaceTime link
+            stays in screen memory unless you explicitly copy it to the system clipboard or open the
+            system share sheet.
+          </Text>
+        </SettingsSection>
+
+        <SettingsSection label="CURRENT LOCATION SHARING" style={styles.gap}>
+          <Text style={textStyle}>
+            Find My is separate: it displays locations supplied by your server and does not read
+            this phone&apos;s location. In a supported one-to-one conversation, Send Current
+            Location appears only when your connected server offers it. After you confirm, Gator may
+            ask Android for foreground location access and waits up to 15 seconds for one
+            approximate or precise fix. Gator does not collect location in the background.
+          </Text>
+          <Text style={textStyle}>
+            After a fix is obtained, Gator stores that coordinate in its SQLCipher-encrypted
+            outgoing queue and sends it through your connected server. A temporary failure may retry
+            the same stored coordinate for no more than 15 minutes; a retry does not read a new
+            location. If you deny permission, cancel, turn off location services, or no fix arrives
+            before the timeout, nothing is queued or sent.
           </Text>
         </SettingsSection>
 
@@ -99,18 +120,30 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
         <SettingsSection label="ENCRYPTED DATABASE" style={styles.gap}>
           <Text style={textStyle}>
             Messages, contacts, drafts, reminders, and most non-secret preferences are stored in a
-            SQLCipher-encrypted database. Server credentials, the database key, the App Lock flag,
-            and a small set of boot-time secrets are kept separately in Android secure storage. App
-            Lock does not make the database key biometric-bound.
+            SQLCipher-encrypted database. Server credentials, the database key, the authoritative
+            App Lock setting, and a small set of boot-time secrets are kept separately in Android
+            secure storage. Android also keeps ordinary app-private on/off mirrors for App Lock’s
+            pre-JavaScript Recents policy and Secure Screen; those mirrors contain no message
+            content or credentials. App Lock does not make the database key biometric-bound.
           </Text>
         </SettingsSection>
 
         <SettingsSection label="FILES OUTSIDE THE DATABASE" style={styles.gap}>
           <Text style={textStyle}>
             Downloaded or staged attachments, chat wallpapers and synced backgrounds, cached contact
-            images, app logs, incoming-share copies, and image or other Android/Expo-managed caches
-            are ordinary files. Android keeps them in Gator’s app-private folders, so normal apps
-            cannot browse them, but SQLCipher and App Lock do not encrypt those files.
+            images, app logs, legacy incoming-share copies, and image or other Android/Expo-managed
+            caches are ordinary files. Android keeps them in Gator’s app-private folders, so normal
+            apps cannot browse them, but SQLCipher and App Lock do not encrypt those files.
+          </Text>
+          <Text style={textStyle}>
+            Android and bundled SDKs also keep ordinary app-private operational preferences and
+            databases for permissions, background tasks, media and web-view state, notifications,
+            and scheduling. SQLCipher does not protect those files. Firebase stores installation
+            identifiers and tokens, including the FCM registration token, in ordinary app-private
+            files. Disconnect asks Firebase to delete the registration token, but Android/Firebase
+            operational metadata may remain until you clear app data or uninstall. Gator also keeps
+            a non-secret, zero-byte account-revocation marker after Disconnect until a replacement
+            account fully activates.
           </Text>
           <Text style={textStyle}>
             Attachments you save to Photos—and images automatically exported to Photos or the Gator
@@ -155,13 +188,13 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
 
         <SettingsSection label="BACKUPS" style={styles.gap}>
           <Text style={textStyle}>
-            A backup contains your theme, selected app settings, per-chat customizations, and custom
-            folder names, order, unread-badge choices, and portable conversation identities. Those
-            identities can include participant phone numbers or email addresses. It does not contain
-            messages, drafts, unread state, diagnostic consent, files, or credentials. Unavailable
-            or ambiguous folder members are skipped and reported rather than guessed. Same-name
-            folders merge without removing local members; only newly created folders use the saved
-            order.
+            A backup contains your theme, selected app settings, per-chat customizations,
+            device-owned contact colors, and custom folder names, order, unread-badge choices, and
+            portable conversation identities. Folder and color identities can include participant
+            phone numbers or email addresses. It does not contain messages, drafts, unread state,
+            diagnostic consent, files, or credentials. Unavailable or ambiguous folder members are
+            skipped and reported rather than guessed. Same-name folders merge without removing local
+            members; only newly created folders use the saved order.
           </Text>
           <Text style={textStyle}>
             Gator encrypts a new backup before writing a temporary share file or sending ciphertext

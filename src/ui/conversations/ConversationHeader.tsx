@@ -3,6 +3,7 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ChatHeaderRow } from '@db/repositories';
+import { useScheduledMessageCount } from '@features/conversations/useScheduledMessageCount';
 import {
   addressMatchesTitle,
   avatarSeed,
@@ -18,7 +19,7 @@ import {
   resolveTitle,
 } from '@utils';
 import { Avatar, GroupAvatar, Icon, ServiceBadge } from '../primitives';
-import { useTheme, withAlpha } from '../theme';
+import { readableTextOn, useTheme, withAlpha } from '../theme';
 
 interface ConversationHeaderProps {
   chatGuid: string;
@@ -42,6 +43,13 @@ export function ConversationHeader({
   const theme = useTheme();
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const scheduledMessageCount = useScheduledMessageCount(chatGuid);
+  const scheduledBadgeLabel = scheduledMessageCount > 99 ? '99+' : String(scheduledMessageCount);
+  const scheduledMessageNoun = scheduledMessageCount === 1 ? 'message' : 'messages';
+  const scheduledActionLabel =
+    scheduledMessageCount > 0
+      ? `View ${scheduledMessageCount} scheduled ${scheduledMessageNoun} for this conversation`
+      : 'View scheduled messages';
   const title = data ? resolveTitle(data) : '';
   const group = data ? isGroupRow(data) : false;
   // Over a wallpaper the bar disappears and each control floats in its own frosted bubble.
@@ -181,10 +189,20 @@ export function ConversationHeader({
           hitSlop={12}
           style={styles.side}
           accessibilityRole="button"
-          accessibilityLabel="View scheduled messages"
+          accessibilityLabel={scheduledActionLabel}
         >
-          <View style={bubble}>
+          <View style={[styles.calendarIconWrap, bubble]}>
             <Icon name="calendar-outline" size={24} color={theme.color.tint} />
+            {scheduledMessageCount > 0 ? (
+              <View style={[styles.scheduledBadge, { backgroundColor: theme.color.tint }]}>
+                <Text
+                  numberOfLines={1}
+                  style={[styles.scheduledBadgeText, { color: readableTextOn(theme.color.tint) }]}
+                >
+                  {scheduledBadgeLabel}
+                </Text>
+              </View>
+            ) : null}
           </View>
         </Pressable>
       </View>
@@ -210,6 +228,30 @@ const styles = StyleSheet.create({
   },
   rightGroup: { width: 88, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' },
   side: { width: 44, alignItems: 'center', justifyContent: 'center' },
+  calendarIconWrap: {
+    width: 36,
+    minHeight: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scheduledBadge: {
+    position: 'absolute',
+    right: -3,
+    top: -3,
+    minWidth: 17,
+    minHeight: 17,
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scheduledBadgeText: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
   back: { fontSize: 34, fontWeight: '300', lineHeight: 36 },
   center: { flex: 1, alignItems: 'center', gap: 2 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 5, maxWidth: '90%' },

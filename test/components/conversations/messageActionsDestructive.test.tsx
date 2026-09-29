@@ -28,6 +28,9 @@ import type { EnrichedMessage } from '@features/conversations/useMessages';
 
 const mockIsDevServer = jest.fn(() => false);
 let mockRcsEnabled = false;
+const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
+const RCS_CHAT_GUID = `RCS;-;g1.${RCS_PROVIDER_EPOCH}.dGhyZWFkLTE`;
+const RCS_MESSAGE_GUID = `rcs-g1.${RCS_PROVIDER_EPOCH}.bWVzc2FnZS1h`;
 
 jest.mock('expo-router', () => ({ useRouter: () => ({ push: jest.fn() }) }));
 jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn() }));
@@ -46,12 +49,16 @@ jest.mock('@features/conversations/devSeed', () => ({
 jest.mock('@utils/isDev', () => ({ isDevServer: () => mockIsDevServer() }));
 jest.mock('@state/sessionStore', () => ({
   useRcsEnabled: () => mockRcsEnabled,
+  useRcsMutationEnabled: () => mockRcsEnabled,
 }));
 jest.mock('@ui/conversations/pickReminderTime', () => ({ pickReminderTime: jest.fn() }));
 jest.mock('@/services/send', () => ({
   discardMessage: jest.fn(async () => {}),
-  react: jest.fn(),
+  react: jest.fn().mockResolvedValue(null),
   unsend: jest.fn(),
+}));
+jest.mock('@/services/remoteMessageDeleteUiService', () => ({
+  deleteMessageFromMac: jest.fn(),
 }));
 
 interface DialogButton {
@@ -59,17 +66,19 @@ interface DialogButton {
   style?: string;
   onPress?: () => void;
 }
-const dialogs: Array<{ title: string; buttons: DialogButton[] }> = [];
+const dialogs: Array<{ title: string; body: string | undefined; buttons: DialogButton[] }> = [];
 jest.mock('@ui/dialog/dialogStore', () => ({
-  showDialog: jest.fn((title: string, _body?: string, buttons?: DialogButton[]) => {
-    dialogs.push({ title, buttons: buttons ?? [] });
+  showDialog: jest.fn((title: string, body?: string, buttons?: DialogButton[]) => {
+    dialogs.push({ title, body, buttons: buttons ?? [] });
   }),
 }));
 
 // eslint-disable-next-line import/first
 import { useMessageActions } from '@features/conversations/useMessageActions';
 // eslint-disable-next-line import/first
-import { discardMessage, react } from '@/services/send';
+import { discardMessage, react, unsend } from '@/services/send';
+// eslint-disable-next-line import/first
+import { deleteMessageFromMac } from '@/services/remoteMessageDeleteUiService';
 // eslint-disable-next-line import/first
 import { devSendFakeReaction } from '@features/conversations/devSeed';
 // eslint-disable-next-line import/first
@@ -79,6 +88,8 @@ import { pickReminderTime } from '@ui/conversations/pickReminderTime';
 
 const mockScheduleMessageReminder = scheduleMessageReminder as jest.Mock;
 const mockPickReminderTime = pickReminderTime as jest.Mock;
+const mockUnsend = unsend as jest.Mock;
+const mockDeleteMessageFromMac = deleteMessageFromMac as jest.Mock;
 
 /** Press the destructive button of the last dialog that was shown. */
 function pressDestructive(): void {
@@ -112,7 +123,13 @@ const msg = (guid: string, sendState: string | null): EnrichedMessage =>
 
 const rect = { x: 0, y: 0, width: 10, height: 10 };
 
-async function mount(messages: EnrichedMessage[], guid = 'iMessage;-;+15550001111') {
+async function mount(
+  messages: EnrichedMessage[],
+  guid = 'iMessage;-;+15550001111',
+  edit?: { enabled: boolean; setEditing: jest.Mock },
+  unsendEnabled = false,
+  remoteDeleteEnabled = false,
+) {
   const hook = await renderHook(() => {
     const [liveMessages, setLiveMessages] = useState(messages);
     return {
@@ -120,6 +137,10 @@ async function mount(messages: EnrichedMessage[], guid = 'iMessage;-;+1555000111
         guid,
         messages: liveMessages,
         chatTitle: 'Alice',
+        imessageEditsAvailable: edit?.enabled,
+        imessageUnsendsAvailable: unsendEnabled,
+        imessageRemoteDeleteAvailable: remoteDeleteEnabled,
+        setEditing: edit?.setEditing,
       }),
       setLiveMessages,
     };
@@ -133,10 +154,12 @@ beforeEach(() => {
   mockRcsEnabled = false;
   mockPickReminderTime.mockResolvedValue(2_000);
   mockScheduleMessageReminder.mockResolvedValue(1);
+  mockUnsend.mockResolvedValue({ status: 'accepted' });
+  mockDeleteMessageFromMac.mockResolvedValue({ status: 'accepted' });
   dialogs.length = 0;
 });
 
-describe('useMessageActions — retired helper actions and RCS reactions', () => {
+describe('useMessageActions — narrow iMessage actions and RCS reactions', () => {
   it('never exposes or sends an iMessage reaction, even when RCS exists elsewhere', async () => {
     mockRcsEnabled = true;
     mockIsDevServer.mockReturnValue(true);
@@ -153,20 +176,21 @@ describe('useMessageActions — retired helper actions and RCS reactions', () =>
     expect(result.current).not.toHaveProperty('onSwipeReply');
     expect(result.current).not.toHaveProperty('onEditSelected');
     expect(result.current).not.toHaveProperty('onUnsendSelected');
+    expect(result.current).not.toHaveProperty('onRemoteDeleteSelected');
   });
 
   it('allows whole-message reactions only for a confirmed RCS message with live capability', async () => {
     mockRcsEnabled = true;
-    const target = msg('rcs-message-a', null);
-    const { result } = await mount([target], 'RCS;-;thread-1');
+    const target = msg(RCS_MESSAGE_GUID, null);
+    const { result } = await mount([target], RCS_CHAT_GUID);
     await act(async () => result.current.onLongPressMessage(target, rect));
 
     expect(result.current.selected?.canReact).toBe(true);
     await act(async () => result.current.onReact('love'));
     expect(react).toHaveBeenCalledWith(
       expect.objectContaining({
-        chatGuid: 'RCS;-;thread-1',
-        targetGuid: 'rcs-message-a',
+        chatGuid: RCS_CHAT_GUID,
+        targetGuid: RCS_MESSAGE_GUID,
         reaction: 'love',
         partIndex: 0,
       }),
@@ -175,9 +199,204 @@ describe('useMessageActions — retired helper actions and RCS reactions', () =>
     );
   });
 
+  it('admits only a recent exact plain-text part-zero message into edit mode', async () => {
+    const setEditing = jest.fn();
+    const target = {
+      ...msg('message-editable', 'sent'),
+      dateCreated: Date.now(),
+      senderService: 'iMessage',
+      messagePartTopology: JSON.stringify({
+        complete: true,
+        originalPartIndexes: [0],
+        currentParts: [{ index: 0, kind: 'text' }],
+        attachmentOwnership: [],
+      }),
+    } as EnrichedMessage;
+    const { result } = await mount([target], 'iMessage;-;+15550001111', {
+      enabled: true,
+      setEditing,
+    });
+
+    await act(async () => result.current.onLongPressMessage(target, rect));
+    expect(result.current.selected?.editPartIndex).toBe(0);
+    await act(async () => result.current.onEditSelected?.());
+    expect(setEditing).toHaveBeenCalledWith({
+      guid: 'message-editable',
+      text: 'hi',
+      partIndex: 0,
+    });
+  });
+
+  it('requires confirmation before one narrow unsend and warns on unknown outcome', async () => {
+    mockUnsend.mockResolvedValueOnce({ status: 'outcome-unknown' });
+    const target = {
+      ...msg('message-unsendable', 'sent'),
+      dateCreated: Date.now(),
+      isSent: 1,
+      error: 0,
+      senderService: 'iMessage',
+      subject: null,
+      attributedBody: null,
+      payloadData: null,
+      balloonBundleId: null,
+      expressiveSendStyleId: null,
+      threadOriginatorGuid: null,
+      threadOriginatorPart: null,
+      associatedMessageGuid: null,
+      associatedMessageType: null,
+      associatedMessageEmoji: null,
+      messagePartTopology: JSON.stringify({
+        complete: true,
+        originalPartIndexes: [0],
+        currentParts: [{ index: 0, kind: 'text' }],
+        attachmentOwnership: [],
+      }),
+    } as EnrichedMessage;
+    const { result } = await mount([target], 'iMessage;-;+15550001111', undefined, true);
+
+    await act(async () => result.current.onLongPressMessage(target, rect));
+    expect(result.current.selected?.unsendPartIndex).toBe(0);
+    await act(async () => result.current.onUnsendSelected?.());
+    expect(mockUnsend).not.toHaveBeenCalled();
+    expect(dialogs.at(-1)?.title).toBe('Unsend message?');
+
+    await act(async () => pressDestructive());
+    await waitFor(() =>
+      expect(mockUnsend).toHaveBeenCalledWith(
+        {
+          messageGuid: 'message-unsendable',
+          chatGuid: 'iMessage;-;+15550001111',
+          partIndex: 0,
+        },
+        expect.objectContaining({ isCurrent: expect.any(Function) }),
+      ),
+    );
+    expect(mockUnsend).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(dialogs.at(-1)?.title).toBe('Unsend Not Confirmed'));
+    expect(dialogs.at(-1)?.buttons).toHaveLength(0);
+  });
+
+  it('warns about iCloud and never retries an unconfirmed whole-message Mac deletion', async () => {
+    mockDeleteMessageFromMac.mockResolvedValueOnce({ status: 'outcome-unknown' });
+    const target = {
+      ...msg('message-remote-delete', 'sent'),
+      senderService: 'iMessage',
+      hasAttachments: 1,
+      attachments: [
+        {
+          guid: 'attachment-1',
+          mimeType: 'image/jpeg',
+          localPath: null,
+          hideAttachment: 0,
+        },
+      ],
+    } as EnrichedMessage;
+    const { result } = await mount([target], 'iMessage;-;+15550001111', undefined, false, true);
+
+    await act(async () => result.current.onLongPressMessage(target, rect));
+    expect(result.current.selected?.canRemoteDeleteFromMac).toBe(true);
+    await act(async () => result.current.onRemoteDeleteSelected?.());
+    expect(mockDeleteMessageFromMac).not.toHaveBeenCalled();
+    expect(dialogs.at(-1)).toMatchObject({
+      title: 'Delete from Mac?',
+      body: expect.stringContaining('may also be deleted from your other Apple devices'),
+    });
+    expect(dialogs.at(-1)?.body).toContain('does not unsend it for anyone else');
+
+    await act(async () => pressDestructive());
+    await waitFor(() =>
+      expect(mockDeleteMessageFromMac).toHaveBeenCalledWith(
+        {
+          messageGuid: 'message-remote-delete',
+          chatGuid: 'iMessage;-;+15550001111',
+        },
+        expect.objectContaining({ isCurrent: expect.any(Function) }),
+      ),
+    );
+    expect(mockDeleteMessageFromMac).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(dialogs.at(-1)?.title).toBe('Deletion Not Confirmed'));
+    expect(dialogs.at(-1)?.body).toContain('Check Messages on your Mac before trying again');
+  });
+
+  it.each([
+    ['outside the two-minute window', { dateCreated: Date.now() - 120_001 }],
+    ['errored', { error: 1 }],
+    ['an edit marker', { dateEdited: Date.now() - 1_000 }],
+    [
+      'prior edit history',
+      {
+        messageSummaryInfo: JSON.stringify({
+          editedParts: { '0': [{ date: Date.now() - 1_000, text: 'old text' }] },
+        }),
+      },
+    ],
+    ['a subject', { subject: 'Subject' }],
+    ['an effect', { expressiveSendStyleId: 'com.apple.messages.effect.CKConfettiEffect' }],
+    ['a reply', { threadOriginatorGuid: 'reply-target', threadOriginatorPart: 0 }],
+    [
+      'an audio attachment',
+      {
+        hasAttachments: 1,
+        attachments: [
+          {
+            guid: 'audio-1',
+            mimeType: 'audio/mp4',
+            localPath: '/audio.m4a',
+            hideAttachment: 0,
+          },
+        ],
+      },
+    ],
+    [
+      'a mention',
+      {
+        attributedBody: JSON.stringify([
+          {
+            string: 'Hi @Alice',
+            runs: [
+              {
+                range: [3, 6],
+                attributes: { __kIMMentionConfirmedMention: 'handle-guid' },
+              },
+            ],
+          },
+        ]),
+      },
+    ],
+  ])('does not expose Unsend for %s', async (_label, overrides) => {
+    const target = {
+      ...msg('message-ineligible', 'sent'),
+      dateCreated: Date.now(),
+      isSent: 1,
+      error: 0,
+      senderService: 'iMessage',
+      subject: null,
+      attributedBody: null,
+      payloadData: null,
+      balloonBundleId: null,
+      expressiveSendStyleId: null,
+      threadOriginatorGuid: null,
+      threadOriginatorPart: null,
+      associatedMessageGuid: null,
+      associatedMessageType: null,
+      associatedMessageEmoji: null,
+      messagePartTopology: JSON.stringify({
+        complete: true,
+        originalPartIndexes: [0],
+        currentParts: [{ index: 0, kind: 'text' }],
+        attachmentOwnership: [],
+      }),
+      ...overrides,
+    } as EnrichedMessage;
+    const { result } = await mount([target], 'iMessage;-;+15550001111', undefined, true);
+
+    await act(async () => result.current.onLongPressMessage(target, rect));
+    expect(result.current.selected?.unsendPartIndex).toBeUndefined();
+  });
+
   it('blocks an RCS reaction when the live RCS capability is false', async () => {
-    const target = msg('rcs-message-a', null);
-    const { result } = await mount([target], 'RCS;-;thread-1');
+    const target = msg(RCS_MESSAGE_GUID, null);
+    const { result } = await mount([target], RCS_CHAT_GUID);
     await act(async () => result.current.onLongPressMessage(target, rect));
 
     expect(result.current.selected?.canReact).toBe(false);

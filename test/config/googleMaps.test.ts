@@ -52,17 +52,17 @@ describe('native Google Maps configuration', () => {
     );
   });
 
-  it('blocks phone-location permissions because Find My uses server-provided coordinates', () => {
+  it('keeps Find My server-coordinate-only while allowing foreground location sharing', () => {
     delete process.env.EAS_BUILD_PROFILE;
     const blocked = loadConfig().android?.blockedPermissions ?? [];
 
     expect(blocked).toEqual(
       expect.arrayContaining([
-        'android.permission.ACCESS_COARSE_LOCATION',
-        'android.permission.ACCESS_FINE_LOCATION',
         'android.permission.ACCESS_BACKGROUND_LOCATION',
         'android.permission.FOREGROUND_SERVICE_LOCATION',
       ]),
     );
+    expect(blocked).not.toContain('android.permission.ACCESS_COARSE_LOCATION');
+    expect(blocked).not.toContain('android.permission.ACCESS_FINE_LOCATION');
   });
 });

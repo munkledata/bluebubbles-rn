@@ -76,16 +76,17 @@ const config: ExpoConfig = {
       'android.permission.POST_NOTIFICATIONS',
       'android.permission.RECORD_AUDIO',
       'android.permission.MODIFY_AUDIO_SETTINGS',
+      // Requested only after the user confirms "Send Current Location" in an eligible chat.
+      'android.permission.ACCESS_COARSE_LOCATION',
+      'android.permission.ACCESS_FINE_LOCATION',
     ],
     // Keep permissions that transitive config plugins may merge out of the final manifest.
     // Contacts are read-only; the attachment tray browses photos/videos, never the music library.
     blockedPermissions: [
       'android.permission.WRITE_CONTACTS',
       'android.permission.READ_MEDIA_AUDIO',
-      // Find My renders server-provided coordinates. It never reads this phone's location, so a
-      // map dependency must not silently expand the Android permission surface.
-      'android.permission.ACCESS_COARSE_LOCATION',
-      'android.permission.ACCESS_FINE_LOCATION',
+      // Current-location sharing is foreground-only. Never allow a dependency to add background
+      // collection or a location foreground service.
       'android.permission.ACCESS_BACKGROUND_LOCATION',
       'android.permission.FOREGROUND_SERVICE_LOCATION',
       // FaceTime calling is retired. Never let a notification dependency restore automatic
@@ -123,6 +124,13 @@ const config: ExpoConfig = {
     ['expo-navigation-bar', { enforceContrast: false, style: 'light' }],
     'expo-secure-store',
     'expo-image',
+    [
+      'expo-location',
+      {
+        isAndroidBackgroundLocationEnabled: false,
+        isAndroidForegroundServiceEnabled: false,
+      },
+    ],
     // Native Google Maps replaces the retired Leaflet/WebView path. The key is restricted in
     // Google Cloud to this package + reviewed signing certificates + Maps SDK for Android only;
     // it is supplied by local/EAS environment and is never committed.
@@ -152,10 +160,11 @@ const config: ExpoConfig = {
     // Injects the dedicated Android notification status-bar icon (ic_stat_gator) into the
     // regenerated native res/ folders at prebuild. See plugins/withNotificationIcon.js.
     './plugins/withNotificationIcon',
-    // Inbound Android sharing is deliberately NOT configured here. `expo-share-intent@8.0.1`
-    // performs provider reads and an unbounded cache copy before JavaScript can enforce file,
-    // aggregate, or time limits. Until an owned bounded native intake replaces it, the release
-    // manifest must contain neither ACTION_SEND filters nor a Direct Share declaration (IPC-01).
+    // Owned Android share intake. This adds generic ACTION_SEND/ACTION_SEND_MULTIPLE filters and
+    // Direct Share metadata; the local native module streams provider content into bounded,
+    // app-private batches before JavaScript receives filenames or file:// URIs. Do not replace it
+    // with expo-share-intent or any JavaScript-side provider-copy path.
+    './plugins/withShareTargets',
     // Keep production arm64-v8a-only to bound the release compile, but retain x86_64 in
     // development/preview so the supported emulator path actually exists. EAS profile `env`
     // values are available while this dynamic config is evaluated; a plain local prebuild has no

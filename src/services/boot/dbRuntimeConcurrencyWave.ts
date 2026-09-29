@@ -28,9 +28,15 @@ interface UploadIdentity {
 }
 
 const PREFIX = 'gator-db-runtime-wave';
-const UPLOAD_CHAT_GUID = `RCS;-;${PREFIX}-sync-chat-0`;
+const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
+const RCS_PROVIDER_INFO = {
+  rcs: true,
+  supports_rcs_epoch_qualified_ids: true,
+  rcs_provider_epoch: RCS_PROVIDER_EPOCH,
+} as const;
+const UPLOAD_CHAT_GUID = `RCS;-;g1.${RCS_PROVIDER_EPOCH}.YQ`;
 const UPLOAD_PATH = `file:///${PREFIX}-attachment.jpg`;
-const UPLOAD_REAL_GUID = `${PREFIX}-attachment-message`;
+const UPLOAD_REAL_GUID = `rcs-g1.${RCS_PROVIDER_EPOCH}.Yg`;
 const ROLLBACK_KEY = `${PREFIX}-rollback`;
 const COMMITTED_KEY = `${PREFIX}-committed`;
 const SUCCESSOR_KEY = `${PREFIX}-successor`;
@@ -39,7 +45,7 @@ const ROLLBACK_SIGNAL = Symbol('db-runtime-wave-rollback');
 
 let dummyHttp!: HttpClient;
 dummyHttp = {
-  get: async () => ({ private_api: false, rcs: true }),
+  get: async () => ({ private_api: false, ...RCS_PROVIDER_INFO }),
   pinTransport: () => dummyHttp,
   isTransportCurrent: () => true,
   assertTransportCurrent: () => undefined,
@@ -88,6 +94,7 @@ function observe<T>(promise: Promise<T>): ObservedPromise<T> {
 function syncChat(index: number): Chat {
   return Chat.parse({
     guid: index === 0 ? UPLOAD_CHAT_GUID : `${PREFIX}-sync-chat-${index}`,
+    ...(index === 0 ? { providerEpoch: RCS_PROVIDER_EPOCH } : {}),
     // Empty by design: contact linking is a separate post-commit read/write path and is not part
     // of this disposable database lifetime proof.
     participants: [],
@@ -225,7 +232,17 @@ export async function runDbRuntimeConcurrencyWave(
   try {
     const chats = Array.from({ length: 10 }, (_, index) => syncChat(index));
     // Seed only the upload owner. The ten-row call below remains the measured two-slice sync.
-    await syncAllChats(db, syncApi([chats[0]!]), 1);
+    await syncAllChats(
+      db,
+      syncApi([chats[0]!]),
+      1,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      RCS_PROVIDER_INFO,
+    );
 
     sendRun = observe(
       sendImageMessage(
@@ -262,7 +279,17 @@ export async function runDbRuntimeConcurrencyWave(
         sql`SELECT COUNT(*) AS count FROM outgoing_queue WHERE temp_guid = ${identity.tempGuid}`,
       )) === 1;
 
-    const syncRun = syncAllChats(db, syncApi(chats), 10);
+    const syncRun = syncAllChats(
+      db,
+      syncApi(chats),
+      10,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      RCS_PROVIDER_INFO,
+    );
     retained.push(syncRun);
     // The resolved in-memory fetch resumes before this continuation, so slice one owns the queue
     // before the four calls below claim their slots synchronously.

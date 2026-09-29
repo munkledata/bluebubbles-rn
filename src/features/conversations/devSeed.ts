@@ -434,18 +434,25 @@ function queueDevSendReconcile(
   options: {
     delayMs: number;
     delivered: boolean;
+    chatGuid: string;
     accountLease: RealtimeDeliveryLease;
   },
 ): void {
-  const { delayMs, delivered, accountLease } = options;
+  const { delayMs, delivered, chatGuid, accountLease } = options;
   setTimeout(() => {
     if (!accountLease.isCurrent()) return;
     const reconcile = (): Promise<void> =>
-      reconcileOutgoingSuccess(db, tempGuid, {
-        guid: `real-${tempGuid}`,
-        dateCreated: now,
-        dateDelivered: delivered ? Date.now() : null,
-      });
+      reconcileOutgoingSuccess(
+        db,
+        tempGuid,
+        {
+          guid: `real-${tempGuid}`,
+          dateCreated: now,
+          dateDelivered: delivered ? Date.now() : null,
+        },
+        undefined,
+        chatGuid,
+      );
     const pending = runTrackedRealtimeWork(accountLease, reconcile);
     void pending.catch((error: unknown) => {
       if (accountLease.isCurrent()) logger.debug('[dev] fake-send reconcile failed', error);
@@ -480,6 +487,7 @@ export async function devSendFakeImage(
     queueDevSendReconcile(db, tempGuid, now, {
       delayMs: 700,
       delivered: true,
+      chatGuid,
       accountLease,
     });
   });
@@ -507,6 +515,7 @@ export async function devSendFake(
     queueDevSendReconcile(db, tempGuid, now, {
       delayMs: 700,
       delivered: true,
+      chatGuid,
       accountLease,
     });
     if (accountLease.isCurrent()) await onQueued?.();
@@ -541,6 +550,7 @@ export async function devSendFakeReaction(
     queueDevSendReconcile(db, tempGuid, now, {
       delayMs: 600,
       delivered: false,
+      chatGuid,
       accountLease,
     });
   });

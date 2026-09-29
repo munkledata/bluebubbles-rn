@@ -1066,4 +1066,105 @@ export const MIGRATIONS: Migration[] = [
       `INSERT INTO inbox_search_state (chat_id) SELECT id FROM chats`,
     ],
   },
+  {
+    // FEAT-06: a message/tombstone/optimistic alias belongs to one exact provider conversation.
+    // Keep the stable chat GUID rather than a local numeric id so delete-before-hydration and a
+    // later chat-row rebuild retain the same boundary. Legacy ownerless rows remain NULL and are
+    // deliberately non-authoritative until a repository path can prove their owner.
+    name: '0050_message_identity_owner_scope',
+    statements: [
+      `ALTER TABLE message_deletion_ledger ADD COLUMN chat_guid TEXT`,
+      `UPDATE message_deletion_ledger
+          SET chat_guid = (
+                SELECT c.guid
+                  FROM messages m
+                  JOIN chats c ON c.id = m.chat_id
+                 WHERE m.guid = message_deletion_ledger.guid
+                 LIMIT 1
+              )
+        WHERE chat_guid IS NULL
+          AND EXISTS (
+                SELECT 1
+                  FROM messages m
+                  JOIN chats c ON c.id = m.chat_id
+                 WHERE m.guid = message_deletion_ledger.guid
+              )`,
+      `ALTER TABLE message_guid_aliases ADD COLUMN chat_guid TEXT`,
+      `UPDATE message_guid_aliases
+          SET chat_guid = COALESCE(
+                (SELECT c.guid
+                   FROM messages m
+                   JOIN chats c ON c.id = m.chat_id
+                  WHERE m.guid = message_guid_aliases.alias_guid
+                  LIMIT 1),
+                (SELECT c.guid
+                   FROM messages m
+                   JOIN chats c ON c.id = m.chat_id
+                  WHERE m.guid = message_guid_aliases.canonical_guid
+                  LIMIT 1)
+              )
+        WHERE chat_guid IS NULL
+          AND (
+                (SELECT c.guid
+                   FROM messages m
+                   JOIN chats c ON c.id = m.chat_id
+                  WHERE m.guid = message_guid_aliases.alias_guid
+                  LIMIT 1) IS NULL
+                OR
+                (SELECT c.guid
+                   FROM messages m
+                   JOIN chats c ON c.id = m.chat_id
+                  WHERE m.guid = message_guid_aliases.canonical_guid
+                  LIMIT 1) IS NULL
+                OR
+                (SELECT c.guid
+                   FROM messages m
+                   JOIN chats c ON c.id = m.chat_id
+                  WHERE m.guid = message_guid_aliases.alias_guid
+                  LIMIT 1) =
+                (SELECT c.guid
+                   FROM messages m
+                   JOIN chats c ON c.id = m.chat_id
+                  WHERE m.guid = message_guid_aliases.canonical_guid
+                  LIMIT 1)
+      )`,
+    ],
+  },
+  {
+    // HANDLE-COLOR-01: valid legacy server-era values become the initial device preference;
+    // malformed values fall back to Default so they cannot poison every future portable export.
+    // The partial id index lets the max-plus-one selector skip the much larger uncolored set.
+    name: '0051_handle_color_backup_index',
+    statements: [
+      `UPDATE handles
+          SET color = CASE
+            WHEN TRIM(color) GLOB
+                 '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]'
+              THEN UPPER(TRIM(color))
+            ELSE NULL
+          END
+        WHERE color IS NOT NULL`,
+      `CREATE INDEX handles_backup_color_export_idx
+         ON handles (id)
+         WHERE color IS NOT NULL`,
+    ],
+  },
+  {
+    // RECOVERY-02: keep the history-deletion boundary after new activity makes a locally deleted
+    // chat visible. This provenance is separate from genuine per-message deletion receipts, so an
+    // explicit restore can reveal only chat-deleted history without resurrecting deleted messages.
+    // Full Repair's synthetic hidden shells use deleted_at=0 plus a KV owner and are deliberately
+    // excluded: they are reconciliation state, not a user chat deletion.
+    name: '0052_chat_history_deletion_boundary',
+    statements: [
+      `ALTER TABLE chats ADD COLUMN history_deleted_at INTEGER`,
+      `UPDATE chats
+          SET history_deleted_at = deleted_at
+        WHERE deleted_at IS NOT NULL
+          AND NOT EXISTS (
+                SELECT 1 FROM kv
+                 WHERE kv.key = 'sync.fullRepair.retiredChat.' || chats.guid
+              )`,
+    ],
+  },
 ];

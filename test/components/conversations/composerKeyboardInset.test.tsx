@@ -142,7 +142,7 @@ describe('Composer bottom inset — union of keyboard and nav bar, never their s
 describe('Composer — the attachment tray and the keyboard are mutually exclusive', () => {
   it('closes the tray when the keyboard comes up', async () => {
     await renderWithTheme(<Composer onSend={jest.fn()} onSendAttachments={jest.fn()} />);
-    fireEvent.press(screen.getByLabelText('Attach photo or file'));
+    fireEvent.press(screen.getByLabelText('Open attachment options'));
     expect(await screen.findByTestId('attachment-tray')).toBeTruthy();
 
     // Android's Back closes the IME WITHOUT blurring the input, so tapping the still-focused field
@@ -158,7 +158,7 @@ describe('Composer — the attachment tray and the keyboard are mutually exclusi
     // immediately close it again.
     mockKbVisible = true;
     await renderWithTheme(<Composer onSend={jest.fn()} onSendAttachments={jest.fn()} />);
-    fireEvent.press(screen.getByLabelText('Attach photo or file'));
+    fireEvent.press(screen.getByLabelText('Open attachment options'));
     expect(await screen.findByTestId('attachment-tray')).toBeTruthy();
     // …and it closes once the keyboard has actually gone.
     await setKeyboardVisible(false);

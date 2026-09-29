@@ -15,6 +15,8 @@ import {
   type CustomFolderSummaryRow,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
+import { sessionAccessors } from '@state/sessionStore';
+import { parseRcsChatGuid } from '@core/rcs';
 import { ensureDatabase } from './databaseControl';
 import {
   captureRealtimeDeliveryLease,
@@ -207,13 +209,35 @@ export function replaceCustomFolderMembership(
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<CustomFolderCommandResult<boolean>> {
   const snapshot = [...chatGuids];
+  const expectedRcsProviderEpoch = sessionAccessors.rcsProviderEpoch();
   return runCustomFolderCommand(accountLease, async (activeLease) => {
     const db = await ensureDatabase();
     assertCustomFolderCommandLease(activeLease);
+    let changedRcsGuids: string[] = [];
     return withDbTransaction(
       db,
-      (context) => replaceCustomFolderMembershipWithinTransaction(context, folderId, snapshot),
-      () => activeLease.isCurrent(),
+      async (context) => {
+        const previous = await listCustomFolderChatGuidsWithinTransaction(context, folderId);
+        const previousSet = new Set(previous);
+        const nextSet = new Set(snapshot);
+        changedRcsGuids = [...new Set([...previous, ...snapshot])].filter(
+          (guid) => guid.startsWith('RCS;-;') && previousSet.has(guid) !== nextSet.has(guid),
+        );
+        if (
+          changedRcsGuids.some(
+            (guid) =>
+              expectedRcsProviderEpoch == null ||
+              parseRcsChatGuid(guid)?.providerEpoch !== expectedRcsProviderEpoch,
+          )
+        ) {
+          return false;
+        }
+        return replaceCustomFolderMembershipWithinTransaction(context, folderId, snapshot);
+      },
+      () =>
+        activeLease.isCurrent() &&
+        (changedRcsGuids.length === 0 ||
+          sessionAccessors.rcsProviderEpoch() === expectedRcsProviderEpoch),
     );
   });
 }

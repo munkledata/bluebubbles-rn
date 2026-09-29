@@ -60,6 +60,8 @@ interface MessageListProps {
   /** Same, for the floating composer at the bottom. */
   bottomInset?: number;
   onLongPressMessage?: (msg: EnrichedMessage, rect: BubbleRect) => void;
+  /** Capability-gated plain-text reply selection for exact iMessage part zero. */
+  onSwipeReply?: (msg: EnrichedMessage) => void;
   /** Pull-to-refresh action (re-sync this thread). Omit to disable the gesture. */
   onRefresh?: () => Promise<unknown>;
   /** Scrolled to the OLDEST loaded message → grow the window (load older history). Omit or return
@@ -99,6 +101,7 @@ export function MessageList({
   topInset = 0,
   bottomInset = 0,
   onLongPressMessage,
+  onSwipeReply,
   onRefresh,
   onLoadOlder,
   focusGuid,
@@ -157,6 +160,20 @@ export function MessageList({
     [failedGuid, rows],
   );
   const stillFailed = failed != null && (failed.sendState === 'error' || failed.error !== 0);
+  const failedIMessageReply = chatService === 'iMessage' && failed?.threadOriginatorGuid != null;
+  const failedLocation =
+    failed?.error === ClientErrorCode.locationDeliveryUnconfirmed ||
+    failed?.error === ClientErrorCode.locationRejected;
+  const failedEffect = failed?.error === ClientErrorCode.effectDeliveryUnconfirmed;
+  const failedMention = failed?.error === ClientErrorCode.mentionDeliveryUnconfirmed;
+  const failedFormatted = failed?.error === ClientErrorCode.formattedDeliveryUnconfirmed;
+  const failedDeliveryUnconfirmed =
+    failed?.error === ClientErrorCode.attachmentDeliveryUnconfirmed ||
+    failed?.error === ClientErrorCode.replyDeliveryUnconfirmed ||
+    failed?.error === ClientErrorCode.locationDeliveryUnconfirmed ||
+    failedEffect ||
+    failedMention ||
+    failedFormatted;
   // Render-phase reset (React's "adjust state when the data changes" pattern), not an effect: the
   // target must be FORGOTTEN, not merely hidden, or a retry that fails again re-opens a sheet the
   // user never asked for a second time.
@@ -446,6 +463,7 @@ export function MessageList({
             isLastOutgoing={item.id === lastOutgoingId}
             onRetry={handleRetry}
             onLongPress={onLongPressMessage}
+            onSwipeReply={onSwipeReply}
             selecting={selectedGuids != null}
             isSelected={selectedGuids?.has(item.guid) ?? false}
             onToggleSelect={onToggleSelect}
@@ -501,9 +519,16 @@ export function MessageList({
       <FailedMessageSheet
         visible={stillFailed}
         isAttachment={failed?.hasAttachments === 1 || failedImage !== undefined}
-        deliveryUnconfirmed={failed?.error === ClientErrorCode.attachmentDeliveryUnconfirmed}
+        isReply={failedIMessageReply}
+        isLocation={failedLocation}
+        isEffect={failedEffect}
+        isMention={failedMention}
+        isFormatted={failedFormatted}
+        deliveryUnconfirmed={failedDeliveryUnconfirmed}
         retryAllowed={
-          failed?.error !== ClientErrorCode.attachmentDeliveryUnconfirmed &&
+          !failedDeliveryUnconfirmed &&
+          !failedLocation &&
+          !failedIMessageReply &&
           !(
             chatService === 'iMessage' &&
             (failed?.hasAttachments === 1 || failedImage !== undefined)

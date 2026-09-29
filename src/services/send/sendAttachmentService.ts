@@ -3,13 +3,17 @@ import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
 import {
   MAX_IMESSAGE_ATTACHMENT_UPLOAD_BYTES,
+  MAX_IMESSAGE_VOICE_UPLOAD_BYTES,
   MAX_SEND_ATTACHMENT_TEXT_BYTES,
   isSupportedImessageAttachmentType,
+  isSupportedImessageVoiceType,
 } from '@core/models/serverInfo';
 import {
   commitAttachmentCacheReservation,
+  claimShareIntakeFileWithinTransaction,
   getChatHeader,
   insertOutgoingAttachmentWithinTransaction,
+  type ShareIntakeManifestIdentity,
   type SendAttemptOwnerToken,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
@@ -36,8 +40,10 @@ export interface PickedImage {
   size: number;
   width?: number;
   height?: number;
-  /** Native-owned rich-paste cache file; production must adopt it before DB ownership. */
-  origin?: 'paste';
+  /** Native-owned transient file; production must adopt it before DB ownership. */
+  origin?: 'paste' | 'share';
+  /** Stable native-share manifest ordinal; meaningful only when origin is `share`. */
+  shareItemIndex?: number;
 }
 
 export type AttachmentTextService = 'iMessage' | 'RCS';
@@ -49,9 +55,13 @@ export interface SendImageMessageArgs {
   text?: string;
   /** Required for iMessage files and for RCS combined sends; never inferred from a GUID alone. */
   service?: AttachmentTextService;
+  /** Distinct one-file iMessage voice mode; never inferred from the MIME type alone. */
+  voice?: true;
   /** Optional reply target for helper-backed iMessage. RCS media replies currently fail closed. */
   selectedMessageGuid?: string;
   partIndex?: number;
+  /** Exact native batch identity required when this file came from Android share intake. */
+  shareIntake?: ShareIntakeManifestIdentity;
 }
 
 /**
@@ -72,6 +82,8 @@ export type AttachmentUploader = (args: {
   text?: string;
   /** Explicit transport mode; omitted for the existing RCS upload path. */
   service?: AttachmentTextService;
+  /** Exact audio-only upload mode; the server requires a matching multipart uploadKind. */
+  voice?: true;
   /**
    * The ATTACHMENT row's guid — the key byte progress is published under. It is not the message
    * temp guid because the attachment components render under `att.guid`, so this is what lets the
@@ -118,6 +130,15 @@ export function isSupportedImessageAttachmentFile(image: PickedImage): boolean {
   );
 }
 
+export function isSupportedImessageVoiceFile(image: PickedImage): boolean {
+  return (
+    Number.isSafeInteger(image.size) &&
+    image.size > 0 &&
+    image.size <= MAX_IMESSAGE_VOICE_UPLOAD_BYTES &&
+    isSupportedImessageVoiceType(image.mimeType, image.name)
+  );
+}
+
 /**
  * Optimistic file send: inserts one local attachment row (renders immediately from disk), streams
  * the file with optional caption to the server, then reconciles message + attachment guids. Mirrors `sendTextMessage`;
@@ -140,8 +161,18 @@ export async function sendImageMessage(
 ): Promise<{ tempGuid: string }> {
   const rcsChat = isRcsChatGuid(args.chatGuid);
   const imessageAttachment = !rcsChat && args.service === 'iMessage';
+  const imessageVoice = imessageAttachment && args.voice === true;
   if (!rcsChat && !imessageAttachment) {
     throw new Error('iMessage attachments require the narrow attachment-only capability.');
+  }
+  if ((args.image.origin === 'share') !== (args.shareIntake !== undefined)) {
+    throw new Error('Shared attachment is missing its exact native batch identity.');
+  }
+  if (
+    args.shareIntake &&
+    (!Number.isInteger(args.image.shareItemIndex) || args.image.shareItemIndex == null)
+  ) {
+    throw new Error('Shared attachment is missing its stable native item index.');
   }
   if (args.selectedMessageGuid !== undefined || args.partIndex !== undefined) {
     throw new Error(
@@ -151,8 +182,18 @@ export async function sendImageMessage(
     );
   }
   if (imessageAttachment) {
-    if (!isSupportedImessageAttachmentFile(args.image)) {
-      throw new Error('Choose one JPEG, PNG, or PDF file no larger than 10 MiB.');
+    const supportedFile = imessageVoice
+      ? isSupportedImessageVoiceFile(args.image)
+      : isSupportedImessageAttachmentFile(args.image);
+    if (!supportedFile) {
+      throw new Error(
+        imessageVoice
+          ? 'Choose one recorded M4A voice note no larger than 10 MiB.'
+          : 'Choose one JPEG, PNG, or PDF file no larger than 10 MiB.',
+      );
+    }
+    if (imessageVoice && args.text !== undefined) {
+      throw new Error('iMessage voice notes cannot include a caption.');
     }
     if (
       args.text !== undefined &&
@@ -162,6 +203,7 @@ export async function sendImageMessage(
       throw new Error('Attachment caption is blank or exceeds the 65,536-byte limit.');
     }
   } else {
+    if (args.voice === true) throw new Error('Voice mode requires an iMessage chat.');
     if (args.service === 'iMessage') {
       throw new Error('An RCS attachment cannot use the iMessage transport.');
     }
@@ -178,6 +220,7 @@ export async function sendImageMessage(
   let cacheReservation: AttachmentCacheReservation | undefined;
   let cacheProtectionHandoff = false;
   let attemptOwnerToken: SendAttemptOwnerToken | null = null;
+  let duplicateOwnerGuid: string | null = null;
   const capability = await resolveRcsAttemptOwnership(
     transport.http,
     args.chatGuid,
@@ -190,18 +233,28 @@ export async function sendImageMessage(
   // The retired helper was the only iMessage attachment transport; RCS remains independent but
   // still requires its own live bridge rather than inheriting authority from `private_api`.
   if (imessageAttachment) {
-    if (capability.serverInfo?.supports_imessage_attachment_upload !== true) {
-      throw new Error('This server cannot send iMessage attachments.');
+    const serverInfo = capability.serverInfo;
+    if (
+      !serverInfo ||
+      (imessageVoice
+        ? serverInfo.supports_imessage_voice_upload !== true
+        : serverInfo.supports_imessage_attachment_upload !== true)
+    ) {
+      throw new Error(
+        imessageVoice
+          ? 'This server cannot send iMessage voice notes.'
+          : 'This server cannot send iMessage attachments.',
+      );
     }
     if (
       image.mimeType === 'application/pdf' &&
-      capability.serverInfo.supports_imessage_pdf_attachment_upload !== true
+      serverInfo.supports_imessage_pdf_attachment_upload !== true
     ) {
       throw new Error('This server cannot send PDF iMessage attachments.');
     }
     if (
       args.text !== undefined &&
-      capability.serverInfo.supports_imessage_attachment_caption_upload !== true
+      serverInfo.supports_imessage_attachment_caption_upload !== true
     ) {
       throw new Error('This server cannot send text with an iMessage attachment.');
     }
@@ -225,9 +278,9 @@ export async function sendImageMessage(
       throw new Error('This server cannot send text with an attachment for this chat service.');
     }
   }
-  if (image.origin === 'paste') {
+  if (image.origin === 'paste' || image.origin === 'share') {
     if (!prepareOwnership) {
-      throw new Error('Pasted attachment ownership preparation is unavailable.');
+      throw new Error('Staged attachment ownership preparation is unavailable.');
     }
     const prepared = await prepareOwnership({ db, image, attachmentGuid });
     image = prepared.image;
@@ -242,9 +295,18 @@ export async function sendImageMessage(
       await cacheReservation?.release().catch(() => undefined);
       throw new Error('Prepared attachment ownership is inconsistent.');
     }
-    if (imessageAttachment && !isSupportedImessageAttachmentFile(image)) {
+    const preparedFileSupported =
+      !imessageAttachment ||
+      (imessageVoice
+        ? isSupportedImessageVoiceFile(image)
+        : isSupportedImessageAttachmentFile(image));
+    if (!preparedFileSupported) {
       await cacheReservation.release().catch(() => undefined);
-      throw new Error('Choose one JPEG, PNG, or PDF file no larger than 10 MiB.');
+      throw new Error(
+        imessageVoice
+          ? 'Choose one recorded M4A voice note no larger than 10 MiB.'
+          : 'Choose one JPEG, PNG, or PDF file no larger than 10 MiB.',
+      );
     }
     if (
       imessageAttachment &&
@@ -276,9 +338,21 @@ export async function sendImageMessage(
   }
 
   try {
-    const inserted = await withDbTransaction(
+    const admission = await withDbTransaction(
       db,
       async (context) => {
+        if (args.shareIntake) {
+          const shareClaim = await claimShareIntakeFileWithinTransaction(context, {
+            identity: args.shareIntake,
+            chatGuid: args.chatGuid,
+            itemIndex: image.shareItemIndex!,
+            ownerGuid: tempGuid,
+            appliedAtMs: now,
+          });
+          if (!shareClaim.claimed) {
+            return { kind: 'duplicate' as const, ownerGuid: shareClaim.ownerGuid };
+          }
+        }
         if (cacheReservation) {
           const promoted = await commitAttachmentCacheReservation(context, {
             path: image.uri,
@@ -290,7 +364,7 @@ export async function sendImageMessage(
           }
           cacheProtectionHandoff = true;
         }
-        return insertOutgoingAttachmentWithinTransaction(context, {
+        const inserted = await insertOutgoingAttachmentWithinTransaction(context, {
           tempGuid,
           attachmentGuid,
           chatGuid: args.chatGuid,
@@ -305,17 +379,19 @@ export async function sendImageMessage(
           attemptAware: capability.attemptAware,
           ...(imessageAttachment ? { imessageAttachmentV1: true } : {}),
         });
+        return { kind: 'inserted' as const, inserted };
       },
       capabilityGuard,
     );
-    attemptOwnerToken = inserted.attemptOwnerToken;
+    if (admission.kind === 'duplicate') duplicateOwnerGuid = admission.ownerGuid;
+    else attemptOwnerToken = admission.inserted.attemptOwnerToken;
   } catch (error) {
     if (cacheReservation && cacheProtectionHandoff) {
       cacheReservation.rollbackProtectionHandoff();
       cacheProtectionHandoff = false;
     }
     if (error === ATTACHMENT_CACHE_PROMOTION_CONFLICT) {
-      throw new Error('Pasted attachment ownership changed before it could be sent.');
+      throw new Error('Staged attachment ownership changed before it could be sent.');
     }
     throw error;
   } finally {
@@ -325,7 +401,9 @@ export async function sendImageMessage(
     if (cacheReservation) await cacheReservation.release().catch(() => undefined);
   }
 
-  await onQueued?.(tempGuid);
+  const queuedGuid = duplicateOwnerGuid ?? tempGuid;
+  await onQueued?.(queuedGuid);
+  if (duplicateOwnerGuid) return { tempGuid: duplicateOwnerGuid };
 
   // Disconnect can retire this operation immediately after COMMIT. Do not let that old
   // continuation register a brand-new native upload after the synchronous cancel sweep.
@@ -344,6 +422,7 @@ export async function sendImageMessage(
       },
       text: args.text,
       ...(imessageAttachment ? { service: 'iMessage' as const } : {}),
+      ...(imessageVoice ? { voice: true as const } : {}),
       attachmentGuid,
       name: image.name,
       uri: image.uri,
@@ -366,6 +445,7 @@ export async function sendImageMessage(
     const attemptOptions: SendOutcomeOptions = {
       ...outcomeOptions,
       attemptOwnerToken: attemptOwnerToken ?? undefined,
+      expectedChatGuid: args.chatGuid,
     };
     await reconcileSendOutcome(db, tempGuid, server, now, commitGuard, attemptOptions);
   } catch (e) {

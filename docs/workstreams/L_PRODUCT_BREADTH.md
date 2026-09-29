@@ -64,9 +64,17 @@ Deliver this as three independent slices:
    or `bp:<n>/` prefix and preserve a normalized received reply/reaction part. Complete topology is
    authoritative; malformed or incomplete topology fails closed. The topology still supports
    truthful received-message rendering and retraction-survivor classification, but `FP-006` retires
-   helper-dependent outgoing iMessage targets: reply, reaction, edit, unsend, contact-card
-   reply, and targeted schedule. A separate narrow attachment/caption upload does not restore
-   those targeted actions. A shared classifier uses complete
+   broad or generic helper-dependent outgoing iMessage targets: rich reply, effects, non-classic or
+   ambiguous reactions, contact-card or attachment reply, and targeted schedule. Separate
+   `supports_imessage_reactions` and `supports_imessage_replies` gates retain only reviewed classic
+   part-zero reactions and a nonblank plain-text reply to exact part zero of a stored message in a
+   proven existing one-to-one iMessage chat. Separate `supports_imessage_edit` and
+   `supports_imessage_unsend` gates likewise retain only a nonblank plain-text edit or retraction of
+   exact text part zero in that proven one-to-one chat. Edit and unsend each make one non-retried
+   request, require an exact acknowledgement, and report an uncertain handoff instead of replaying it.
+   The authoritative work plan owns app verification and status; server/helper packaging and live
+   acceptance remain under `POST-01`. The narrow attachment/caption upload does not imply any target
+   gate or restore another targeted action. A shared classifier uses complete
    topology to preserve only proven surviving text and attachments across bubbles, inbox/search,
    notifications, and attachment-cache ownership. RCS reactions may use part zero only for a proven
    whole `rcs-*` message; that exception must not enable RCS reply threading, edits, or unsend.
@@ -96,13 +104,19 @@ observable empty intermediate state.
 
 Implement these as three independent slices:
 
-1. `FEAT-05A` is blocked until a negotiated server transport can actually send the location
-   attachment. The narrow current iMessage upload accepts only JPEG, PNG, and PDF, not a location
-   attachment; AppleScript plain-text send does not fill that gap. Until that
-   capability exists, expose no Location action and add no location permission or dependency. Once
-   available, current-location sending must use an explicit foreground permission and one bounded,
-   user-initiated location attachment, with truthful denial/cancellation/error states and no
-   background location collection.
+1. `FEAT-05A` is an independent, capability-gated Current Location send. It appears only in a proven
+   existing one-to-one iMessage conversation when `supports_imessage_location` is live and reply mode
+   is inactive. Confirmation precedes any permission request. `expo-location` may then request coarse
+   or fine foreground access and wait at most 15 seconds for one balanced-accuracy fix; it must never
+   start a background task or location foreground service. Find My remains a separate server-coordinate
+   viewer and never reads the phone's location. Denial, cancellation/account retirement, disabled
+   services, acquisition error, or timeout creates no optimistic row and makes no location request to
+   the server. A successful fix is snapshotted into the SQLCipher-encrypted outgoing queue, sent through
+   the dedicated idempotent server operation, and may retry the same coordinate/key for less than 15
+   minutes without acquiring another fix. Expired, malformed, terminal-uncertain, capability-disabled,
+   or unsupported-target rows fail closed. Device sign-off must cover approximate and precise grants,
+   every no-send state, backgrounding during acquisition, helper receipt/duplicate containment,
+   process-death retry, exact expiry, encrypted-at-rest proof, and truthful error presentation.
 2. `FEAT-05B` groups only current, owned, ordinary Android message children under one fixed group.
    Two distinct valid chats first create one fixed, generic, non-alerting summary with the
    count-neutral body `New messages`; it alerts through its children only and opens the inbox without
@@ -121,7 +135,10 @@ Implement these as three independent slices:
    delivery able to retry.
 3. `FEAT-05C` adds server-assisted global-inbox search only behind an explicit capability. The
    server returns one fixed newest-50 page of nondeleted, nonretracted, non-overlay iMessage/SMS
-   text with stable message and chat GUIDs; partial chat.db schemas fail closed. The app shows its
+   text with stable message and chat GUIDs; partial chat.db schemas fail closed. When ordinary text
+   is empty/non-text, the server may use the existing bounded serializer-equivalent attributed-body
+   decoder, but a nonempty ordinary body always wins. Bounded message-summary parsing must exclude
+   partial/complete retractions and fail closed on malformed or oversized metadata. The app shows its
    encrypted local results first, persists valid Mac hits before navigation, rereads them through
    local visibility rules, and merges by message GUID with the local row winning and a deterministic
    newest-first order. Network failure and older servers remain local-only. Account retirement must
@@ -138,12 +155,24 @@ gallery-video selection, sending, receiving, or playback.
 
 <a id="feat-06"></a>
 
-## `FEAT-06` — unified service/contact identity research
+## `FEAT-06` — service-scoped conversation identity and contact-metadata research
 
-Define when iMessage, SMS, and RCS handles represent one person without merging distinct conversations
-or breaking server GUID identity. Resolve normalization, ambiguity, split/merge, backup, privacy,
-pagination, and bounded bulk contact/handle bootstrap in an approved cross-repository ADR before any
-schema or UI implementation.
+Never merge message histories through a contact match. Different phone numbers remain different
+conversations, and Google Messages remains separate from Apple SMS and iMessage even when the address
+or device contact matches. Contact association may contribute only non-owning metadata such as a name,
+photo, search hint, unambiguous known-contact classification, or links to separately opened conversations.
+
+The cross-repository [`FEAT-06 identity ADR`](../FEAT_06_IDENTITY_ADR.md) defines conversation,
+endpoint, contact-presentation, and message identities; exact normalization and ambiguity behavior;
+split/merge rejection; backup, privacy, pagination, provider-epoch, and server-compatibility rules;
+and the bounded bootstrap boundary. The owner approved that ADR on 2026-09-26. Its immutable-ownership,
+chat-scoped related-message, fail-closed local RCS-targeting, ambiguity-safe contact-metadata, and
+provider-epoch hardening slices are complete at the focused host boundary with independent review
+GO. The fifth slice completed on 2026-09-27 and added no database migration; migration
+`0050_message_identity_owner_scope` remains evidence for the first slice. Snapshot-bound, separately
+authorized identity bootstrap remains conditional on product adoption and is not adopted. Host proof
+does not establish a live Google pair or re-pair, a real sidecar/phone exchange, or physical-device
+behavior.
 
 <a id="feat-07"></a>
 
@@ -183,10 +212,11 @@ The accepted `FEAT-07C` boundary is:
   and system handoff; document-reading semantics, zoom, reflow, and TalkBack quality depend on the
   installed viewer.
 
-This decision closes no Android release checkbox. Exact-candidate FileProvider/ACTION_VIEW behavior,
-offline opening, cache-loss re-download, natural no-viewer fallback, large/encrypted/malformed files,
-URI-grant behavior, dynamic font, and TalkBack focus/announcement remain device evidence under the
-parent `FEAT-07` task.
+This decision closes no Android release checkbox. The parent `FEAT-07` task completed its task-scoped exact-candidate
+FileProvider/ACTION_VIEW, offline handoff, cache-loss re-download, large/encrypted/malformed-file, and URI-grant
+matrix on 2026-09-28. A natural no-viewer or failed native Share/Save branch remains conditional on a device that
+actually exposes it and is not forced for completion. Accessibility-specific evidence is outside remediation scope by
+owner decision.
 
 <a id="alias-send-01"></a>
 
@@ -198,11 +228,11 @@ it separate from the account-wide active-alias setting. Unsupported servers show
 
 <a id="feat-08"></a>
 
-## `FEAT-08` — internationalization foundation
+## `FEAT-08` — U.S.-English catalog foundation
 
-Extract the selected user-facing strings, use locale-aware dates, numbers, and plurals, define a
-translation/versioning workflow, and audit RTL, long strings, layout, and screen-reader output before
-claiming multilingual support.
+Centralize the selected setup journey's user-facing U.S.-English strings, keep English numbers and
+singular/plural wording correct in the supported `en-US` environment, and define stable catalog contribution and
+versioning rules. This item makes no multilingual or right-to-left support claim.
 
 The selected first-release surface is the first-run setup journey under `app/(setup)`. Keep English as
 the required source catalog and access it through the typed boundary in `src/utils/i18n.ts`. A contributor
@@ -212,16 +242,13 @@ transform. Technical tokens may use an explicitly reviewed non-transforming cata
 token would make a test unsafe or misleading.
 
 Catalog keys are stable identifiers once released. Rename or delete one only with every call site in the same
-change; backports add keys rather than repurposing an existing key with unrelated meaning. A future translated
-catalog must declare its supported locale and plural behavior alongside the English key set, and CI must reject
-missing or extra keys before that locale is advertised. Until then, unsupported locales deliberately use English
-text with locale-aware number formatting.
+change; backports add keys rather than repurposing an existing key with unrelated meaning. No translated UI locale
+is supported by this item. Adding one later is a separate owner-approved product change with its own complete key
+set, plural behavior, CI parity check, and device acceptance.
 
-`en-XA` provides deterministic accenting plus at least 30% proportional expansion of each nonempty catalog literal;
-`ar-XB` provides mirrored catalog text plus an RTL direction signal. These are development audit tools, not advertised
-translations. Each converted screen must be checked for pseudo text without transforming runtime values; the
-release-level task additionally requires native RTL layout, long-string/dynamic-font review, and screen-reader proof
-on Android.
+The existing `en-XA` expansion, `ar-XB` mirroring, and root-direction helpers remain non-gating development code.
+Their presence is not a product-support promise and requires no pseudo-locale, RTL, large-text, or screen-reader
+device matrix for this item.
 
 `FEAT-08A` extracts the Syncing screen's prose and fixes its English `1 chat` / `1 message` grammar. `FEAT-08B`
 extracts Manual Connection's fixed prose while keeping its URL/scheme tokens, typed credentials, and live session
@@ -235,8 +262,7 @@ session errors as untransformed data. Its parser now emits one of four typed cod
 message; Scan maps those codes exhaustively and never reads parser prose or passes raw QR data into formatting. Its
 paired builder also emits a typed fixed error rather than English presentation prose. All six routes are host-green
 foundations. `FEAT-08G` extracts the shared Contacts rationale/recovery/settings helper used by setup, Settings, and
-Send Contact; each operation resolves one current locale while preserving its session fences. `FEAT-08H` makes
-`en-XA` a meaningful deterministic long-string stress tool and applies the resolved direction to the safe-area app
-root once per mount, covering route and non-route content without persistent `I18nManager` mutation. Exact Android
-Hermes pseudo-locale activation, native-stack/camera/modal/TextInput RTL behavior, maximum-font-scale layout, and
-TalkBack reading order remain device-only evidence and keep the parent open.
+Send Contact; each operation resolves one current locale while preserving its session fences. `FEAT-08H` made
+`en-XA` a deterministic long-string stress tool and applied the resolved direction to the safe-area app root once per
+mount without persistent `I18nManager` mutation. Those retained helpers are outside current product acceptance. The
+owner's 2026-09-27 U.S.-English-only decision, focused host proof, and Android `en-US` setup smoke close the parent.

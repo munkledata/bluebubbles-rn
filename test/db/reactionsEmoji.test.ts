@@ -72,7 +72,7 @@ describe('emoji tapbacks in listReactionsByMessageGuids', () => {
       date: 200,
     });
 
-    const rows = (await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? [];
+    const rows = (await listReactionsByMessageGuids(db, 'c1', ['mt'])).get('mt') ?? [];
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ baseType: 'emoji', emoji: '🔥', isFromMe: 0 });
   });
@@ -95,7 +95,7 @@ describe('emoji tapbacks in listReactionsByMessageGuids', () => {
       date: 300,
     });
 
-    const rows = (await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? [];
+    const rows = (await listReactionsByMessageGuids(db, 'c1', ['mt'])).get('mt') ?? [];
     expect(rows.map((r) => r.emoji).sort()).toEqual(['🫡', '🔥'].sort());
   });
 
@@ -124,7 +124,7 @@ describe('emoji tapbacks in listReactionsByMessageGuids', () => {
       date: 400,
     });
 
-    const rows = (await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? [];
+    const rows = (await listReactionsByMessageGuids(db, 'c1', ['mt'])).get('mt') ?? [];
     expect(rows).toHaveLength(1);
     expect(rows[0]!.emoji).toBe('🫡');
   });
@@ -147,7 +147,7 @@ describe('emoji tapbacks in listReactionsByMessageGuids', () => {
       date: 300,
     });
 
-    const rows = (await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? [];
+    const rows = (await listReactionsByMessageGuids(db, 'c1', ['mt'])).get('mt') ?? [];
     expect(rows).toHaveLength(2);
   });
 
@@ -164,7 +164,7 @@ describe('emoji tapbacks in listReactionsByMessageGuids', () => {
     });
     await react(db, chatId, hm, { guid: 'r3', type: '-love', from: 'a@x.com', date: 400 });
 
-    const rows = (await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? [];
+    const rows = (await listReactionsByMessageGuids(db, 'c1', ['mt'])).get('mt') ?? [];
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({ baseType: 'emoji', emoji: '🔥' });
   });
@@ -174,7 +174,7 @@ describe('emoji tapbacks in listReactionsByMessageGuids', () => {
     const { chatId, hm } = await setup(db);
     await react(db, chatId, hm, { guid: 'r1', type: 'emoji', from: 'a@x.com', date: 200 });
 
-    const rows = (await listReactionsByMessageGuids(db, ['mt'])).get('mt') ?? [];
+    const rows = (await listReactionsByMessageGuids(db, 'c1', ['mt'])).get('mt') ?? [];
     expect(rows).toHaveLength(0);
   });
 

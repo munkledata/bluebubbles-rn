@@ -1,7 +1,11 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import { contactsApi } from '@core/api';
 import { logger } from '@core/secure';
-import { emailKey, handleKey, phoneKey } from '@utils/contactMatch';
+import {
+  contactEmailMatchKey,
+  contactHandleMatchKey,
+  contactPhoneMatchKey,
+} from '@utils/contactMatch';
 import { handlesNeedingAvatar, setHandleServerAvatarWithinTransaction } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
@@ -25,13 +29,13 @@ export const SERVER_AVATAR_MAX_FILES_PER_RUN = contactsApi.CONTACT_QUERY_MAX_ADD
 export const SERVER_AVATAR_MAX_TOTAL_DOWNLOAD_BYTES = 32 * 1024 * 1024; // 32 MiB
 
 /**
- * Backfill server-sourced avatars onto handles the DEVICE address book didn't supply a photo
- * for (e.g. a contact on the Mac but not the phone). Best-effort + additive: it only writes a
- * photo onto handles whose `avatar` is null — device photos are never touched — so a failure
- * here can't affect the primary device-contact sync. Avatars download beneath the captured
- * account-generation directory as `file://` uris. A late old-account file therefore cannot be
- * reused by the next account even when best-effort deletion fails; Forget still sweeps the shared
- * `server-contact-avatars` parent. Within one generation the client caches by contact id + etag.
+ * Backfill server-sourced avatars onto handles the DEVICE address book didn't supply a photo for
+ * (e.g. a contact on the Mac but not the phone). It also revalidates only its own previously stored
+ * avatar paths, clearing one when the endpoint becomes ambiguous; device photos are never selected
+ * or touched. Avatars download beneath the captured account-generation directory as `file://`
+ * uris. A late old-account file therefore cannot be reused by the next account even when
+ * best-effort deletion fails; Forget still sweeps the shared `server-contact-avatars` parent.
+ * Within one generation the client caches by contact id + etag.
  *
  * Returns the number of handles a server avatar was written to.
  */
@@ -41,10 +45,11 @@ export async function backfillServerAvatars(
   lease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<number> {
   if (!lease.isCurrent()) return 0;
+  const serverAvatarRoot = new Directory(Paths.document, 'server-contact-avatars');
   let needing: Awaited<ReturnType<typeof handlesNeedingAvatar>> = [];
   const readStatus = await runTrackedRealtimeWork(lease, async (activeLease) => {
     if (!activeLease.isCurrent()) return;
-    needing = await handlesNeedingAvatar(db, SERVER_AVATAR_MAX_FILES_PER_RUN);
+    needing = await handlesNeedingAvatar(db, SERVER_AVATAR_MAX_FILES_PER_RUN, serverAvatarRoot.uri);
   });
   if (readStatus === 'paused') return 0;
   if (!lease.isCurrent() || needing.length === 0) return 0;
@@ -60,13 +65,48 @@ export async function backfillServerAvatars(
   );
   if (!lease.isCurrent() || contacts.length === 0) return 0;
 
-  // Index address-key → contact-with-photo (last-10-digits phone / lowercased email — the
-  // same keys the device-contact matcher uses).
+  // Index address-key → one stable server contact (last-10-digits phone / lowercased email — the
+  // same keys the device-contact matcher uses). Two different contact ids claiming one key make
+  // that key ambiguous, even when only one has a photo; an arbitrary avatar is worse than none.
   const byKey = new Map<string, contactsApi.ServerContact>();
+  const ambiguousKeys = new Set<string>();
   for (const c of contacts) {
-    if (!c.hasAvatar || !c.id) continue;
-    for (const p of c.phoneNumbers ?? []) byKey.set(phoneKey(p), c);
-    for (const e of c.emails ?? []) byKey.set(emailKey(e), c);
+    const keys = new Set([
+      ...(c.phoneNumbers ?? []).map(contactPhoneMatchKey).filter(Boolean),
+      ...(c.emails ?? []).map(contactEmailMatchKey).filter(Boolean),
+    ]);
+    for (const key of keys) {
+      if (ambiguousKeys.has(key)) continue;
+      const existing = byKey.get(key);
+      if (!c.id?.trim() || (existing && existing.id !== c.id)) {
+        byKey.delete(key);
+        ambiguousKeys.add(key);
+      } else {
+        // Repeated rows for one stable server contact are not an identity conflict. Keep the last
+        // representation of that same owner, matching the endpoint response's normal semantics.
+        byKey.set(key, c);
+      }
+    }
+  }
+
+  // An avatar written by an older last-row-wins run must not survive once the same endpoint has
+  // multiple contact owners. Clear only the exact app-owned path read above; a concurrent device
+  // photo makes the compare-and-swap fail and is preserved.
+  for (const h of candidates) {
+    if (!h.avatar || !lease.isCurrent()) continue;
+    const key = contactHandleMatchKey(h.address);
+    const unique = byKey.get(key);
+    if (!ambiguousKeys.has(key) && unique?.hasAvatar) continue;
+    if (!ambiguousKeys.has(key) && unique === undefined) continue;
+    const commitStatus = await runTrackedRealtimeWork(lease, async (activeLease) => {
+      if (!activeLease.isCurrent()) return;
+      await withDbTransaction(
+        db,
+        (context) => setHandleServerAvatarWithinTransaction(context, h.id, null, h.avatar),
+        () => activeLease.isCurrent(),
+      );
+    });
+    if (commitStatus === 'paused' || !lease.isCurrent()) return 0;
   }
   if (byKey.size === 0) return 0;
 
@@ -80,8 +120,8 @@ export async function backfillServerAvatars(
   let downloadedBytes = 0;
   for (const h of candidates) {
     if (!lease.isCurrent()) return written;
-    const c = byKey.get(handleKey(h.address));
-    if (!c || !c.id) continue;
+    const c = byKey.get(contactHandleMatchKey(h.address));
+    if (!c?.hasAvatar || !c.id) continue;
     let downloadedNow = false;
     let aggregateBoundWasTighter = false;
     try {
@@ -112,6 +152,7 @@ export async function backfillServerAvatars(
         if (downloadedNow) discardFile(dest);
         return written;
       }
+      if (h.avatar === dest.uri) continue;
       let avatarWritten = false;
       const commitStatus = await runTrackedRealtimeWork(lease, async (activeLease) => {
         if (!activeLease.isCurrent()) return;
@@ -120,7 +161,8 @@ export async function backfillServerAvatars(
         try {
           avatarWritten = await withDbTransaction(
             db,
-            (context) => setHandleServerAvatarWithinTransaction(context, handleId, avatarUri),
+            (context) =>
+              setHandleServerAvatarWithinTransaction(context, handleId, avatarUri, h.avatar),
             () => activeLease.isCurrent(),
           );
         } catch (error) {

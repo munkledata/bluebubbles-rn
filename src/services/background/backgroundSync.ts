@@ -3,6 +3,11 @@ import * as TaskManager from 'expo-task-manager';
 import { HttpClient } from '@core/api/http';
 import * as serverApi from '@core/api/endpoints/server';
 import type { ServerInfo } from '@core/models/serverInfo';
+import {
+  currentRcsProviderEpoch,
+  isCurrentRcsChatGuid,
+  isCurrentRcsMessageGuid,
+} from '@core/rcs/providerIdentity';
 import { logger } from '@core/secure';
 import { kvGet } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
@@ -243,12 +248,13 @@ export async function executeBackgroundSyncTask(): Promise<BackgroundTask.Backgr
       openDatabase: ensureDatabase,
       fetchServerInfo: (client) => serverApi.serverInfo(client, callbackLifetime.signal),
       serverVersion: (info) => info.server_version ?? '',
-      synchronize: async (db, client, serverVersion, scope) => {
+      synchronize: async (db, client, serverVersion, scope, info) => {
         await incrementalSync(db, httpSyncApi(client), {
           serverVersion,
           maxPages: BACKGROUND_SYNC_MAX_PAGES,
           shouldAbort: () => !scope.isCurrent(),
           signal: callbackLifetime.signal,
+          rcsProviderInfo: info,
         });
         if (scope.isCurrent()) await reconcileBackgroundMessageNotifications(db, scope);
       },
@@ -269,8 +275,14 @@ export async function executeBackgroundSyncTask(): Promise<BackgroundTask.Backgr
             ),
           ),
           messageTargetServerAuthorization(info, () => scope.isCurrent()),
-          () => scope.isCurrent() && info.rcs === true,
+          (chatGuid?: string, messageGuid?: string) =>
+            scope.isCurrent() &&
+            currentRcsProviderEpoch(info) !== null &&
+            (chatGuid === undefined || isCurrentRcsChatGuid(info, chatGuid)) &&
+            (messageGuid === undefined || isCurrentRcsMessageGuid(info, messageGuid)),
           callbackLifetime.signal,
+          () => scope.isCurrent() && info.supports_imessage_location === true,
+          currentRcsProviderEpoch(info),
         );
       },
       flushDiagnostics: (db, client, info, scope) =>

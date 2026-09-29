@@ -1,4 +1,6 @@
 import { eq, sql } from 'drizzle-orm';
+import { normalizeHandleColor } from '@core/models';
+import { parseRcsChatGuid } from '@core/rcs/providerIdentity';
 import { chats } from '../schema';
 import {
   runInTransactionContext,
@@ -47,6 +49,10 @@ export interface PortableChatIdentityRow {
   service: string;
   kind: 'direct' | 'group' | 'unknown';
   serverChatIdentifier: string | null;
+  /** Present only for a valid epoch-qualified Google Messages conversation. */
+  providerEpoch?: string | null;
+  /** Opaque encoded source-conversation key from the qualified public GUID. */
+  providerSourceId?: string | null;
   participants: PortableChatParticipant[];
 }
 export interface PortableChatCustomizationRow {
@@ -57,6 +63,11 @@ export interface PortableChatCustomizationRow {
   isPinned: number;
   pinOrder: number | null;
   isArchived: number;
+}
+export interface HandleColorBackupRow {
+  address: string;
+  service: string;
+  color: string;
 }
 
 interface ChatCustomizationExportRow extends Omit<ChatCustomizationRow, 'guid'> {
@@ -175,6 +186,9 @@ export interface BackupBaseExportData {
 }
 
 export interface BackupV3ExportData extends BackupBaseExportData, CustomFolderBackupData {}
+export interface BackupV4ExportData extends BackupV3ExportData {
+  handleColors: HandleColorBackupRow[];
+}
 
 /** SQL fragments are composed into the single restore statement below. */
 const BACKUP_PHONE_COMPACT_SQL = sql`
@@ -243,19 +257,33 @@ function buildPortableChatIdentity(
   style: number | null,
   participants: PortableChatParticipant[],
 ): PortableChatIdentityRow {
+  const service = portableChatService(
+    guid,
+    participants.map((participant) => participant.service),
+  );
+  const scopedRcs = service === 'RCS' ? parseRcsChatGuid(guid) : null;
   return {
     version: 1,
-    service: portableChatService(
-      guid,
-      participants.map((participant) => participant.service),
-    ),
+    service,
     kind: portableChatKind(style, guid, participants.length),
     serverChatIdentifier: chatIdentifier?.trim() || null,
+    ...(service === 'RCS'
+      ? {
+          providerEpoch: scopedRcs?.providerEpoch ?? null,
+          providerSourceId: scopedRcs?.encodedConversationId ?? null,
+        }
+      : {}),
     participants,
   };
 }
 
 function hasPortableRestoreEvidence(identity: PortableChatIdentityRow): boolean {
+  if (
+    identity.service.toLowerCase() === 'rcs' &&
+    (!identity.providerEpoch || !identity.providerSourceId)
+  ) {
+    return false;
+  }
   return (
     identity.kind !== 'unknown' &&
     (identity.serverChatIdentifier !== null || identity.participants.length > 0)
@@ -274,12 +302,14 @@ export interface PreparedBackupRestore {
   chatCustomizationsJson: string;
   customFolderChatIdentitiesJson: string;
   customFoldersJson: string;
+  handleColorsJson: string;
 }
 
 export interface PreparedBackupRestoreResult {
   chatCustomizations: number;
   customFolders: number;
   customFolderMemberships: number;
+  handleColors: number;
 }
 
 /**
@@ -390,17 +420,23 @@ function buildPortableChatCustomizations(
       }
     }
   }
-  return [...grouped.values()].map(({ customization, guid, style }) => {
+  return [...grouped.values()].flatMap(({ customization, guid, style }) => {
     const participants = customization.identity.participants;
-    return {
-      ...customization,
-      identity: buildPortableChatIdentity(
-        guid,
-        customization.identity.serverChatIdentifier,
-        style,
-        participants,
-      ),
-    };
+    const identity = buildPortableChatIdentity(
+      guid,
+      customization.identity.serverChatIdentifier,
+      style,
+      participants,
+    );
+    if (identity.service === 'RCS' && (!identity.providerEpoch || !identity.providerSourceId)) {
+      return [];
+    }
+    return [
+      {
+        ...customization,
+        identity,
+      },
+    ];
   });
 }
 
@@ -422,6 +458,7 @@ export interface BackupExportLimits {
   kvEntries: number;
   themes: number;
   chatCustomizations: number;
+  handleColors: number;
   keyCharacters: number;
   valueCharacters: number;
   themeNameCharacters: number;
@@ -474,6 +511,26 @@ interface ChatCustomizationProbeRow {
   muteTypeCharacters: number;
   muteTypeBytes: number;
   participantStatsJson: string;
+}
+
+interface HandleColorProbeRow {
+  rowCount: number;
+  invalidTypeCount: number;
+  invalidColorCount: number;
+  maxServiceCharacters: number;
+  maxServiceBytes: number;
+  maxAddressCharacters: number;
+  maxAddressBytes: number;
+}
+
+interface HandleColorJsonProbeRow {
+  rowCount: number;
+  jsonBytes: number;
+}
+
+interface HandleColorExportRows {
+  handleColors: HandleColorBackupRow[];
+  estimatedBytes: number;
 }
 
 interface ParticipantProbeStats {
@@ -659,17 +716,28 @@ function buildBoundedPortableChatCustomizations(
   rows: readonly BoundedChatCustomizationExportRow[],
   maxParticipants: number,
 ): PortableChatCustomizationRow[] {
-  return rows.map((row) => {
+  return rows.flatMap((row) => {
     const participants = parseBoundedChatParticipants(row.participantsJson, maxParticipants);
-    return {
-      identity: buildPortableChatIdentity(row.guid, row.chatIdentifier, row.style, participants),
-      customName: row.customName,
-      customColor: row.customColor,
-      muteType: row.muteType,
-      isPinned: row.isPinned,
-      pinOrder: row.pinOrder ?? null,
-      isArchived: row.isArchived,
-    };
+    const identity = buildPortableChatIdentity(
+      row.guid,
+      row.chatIdentifier,
+      row.style,
+      participants,
+    );
+    if (identity.service === 'RCS' && (!identity.providerEpoch || !identity.providerSourceId)) {
+      return [];
+    }
+    return [
+      {
+        identity,
+        customName: row.customName,
+        customColor: row.customColor,
+        muteType: row.muteType,
+        isPinned: row.isPinned,
+        pinOrder: row.pinOrder ?? null,
+        isArchived: row.isArchived,
+      },
+    ];
   });
 }
 
@@ -1076,6 +1144,139 @@ function readBackupBaseRowsWithinTransaction(
        ORDER BY c.id
     `);
     return { kv, themes, chatCustomizations, estimatedBytes };
+  });
+}
+
+function readHandleColorBackupRowsWithinTransaction(
+  context: DbTransactionContext,
+  limits: BackupExportLimits,
+  initialEstimatedBytes: number,
+): Promise<HandleColorExportRows> {
+  return runInTransactionContext(context, async (db) => {
+    if (
+      !Number.isSafeInteger(initialEstimatedBytes) ||
+      initialEstimatedBytes < 0 ||
+      initialEstimatedBytes > limits.maxRawBytes
+    ) {
+      throw new Error('Handle-color backup export limits are invalid.');
+    }
+
+    const probe = requireProbeRow<HandleColorProbeRow>(
+      await db.all<HandleColorProbeRow>(sql`
+        WITH handle_ids AS MATERIALIZED (
+          SELECT id
+            FROM handles INDEXED BY handles_backup_color_export_idx
+           WHERE color IS NOT NULL
+           ORDER BY id
+           LIMIT ${limits.handleColors + 1}
+        )
+        SELECT COUNT(*) AS rowCount,
+               COALESCE(SUM(CASE
+                 WHEN typeof(selected.address) <> 'text'
+                   OR selected.address = ''
+                   OR typeof(selected.service) NOT IN ('text', 'null')
+                   OR typeof(selected.color) <> 'text'
+                 THEN 1 ELSE 0
+               END), 0) AS invalidTypeCount,
+               COALESCE(SUM(CASE
+                 WHEN typeof(selected.color) <> 'text'
+                   OR selected.color NOT GLOB
+                     '#[0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f][0-9A-Fa-f]'
+                 THEN 1 ELSE 0
+               END), 0) AS invalidColorCount,
+               COALESCE(MAX(length(substr(
+                 COALESCE(selected.service, ''), 1, ${limits.chatServiceCharacters + 1}
+               ))), 0) AS maxServiceCharacters,
+               COALESCE(MAX(length(CAST(COALESCE(selected.service, '') AS BLOB))), 0)
+                 AS maxServiceBytes,
+               COALESCE(MAX(length(substr(
+                 selected.address, 1, ${limits.chatParticipantAddressCharacters + 1}
+               ))), 0) AS maxAddressCharacters,
+               COALESCE(MAX(length(CAST(selected.address AS BLOB))), 0) AS maxAddressBytes
+          FROM handle_ids AS probe
+          JOIN handles AS selected ON selected.id = probe.id
+      `),
+      'handle color',
+    );
+    const count = requireProbeInteger(probe.rowCount, 'handle color count');
+    if (count > limits.handleColors) {
+      throw new Error('Handle-color count exceeds its backup safety bound.');
+    }
+    if (requireProbeInteger(probe.invalidTypeCount, 'handle color type') > 0) {
+      throw new Error('Handle-color backup data has an invalid type.');
+    }
+    if (requireProbeInteger(probe.invalidColorCount, 'handle color value') > 0) {
+      throw new Error('Handle-color backup data has an invalid color.');
+    }
+    assertProbeStringBound(
+      probe.maxServiceCharacters,
+      probe.maxServiceBytes,
+      limits.chatServiceCharacters,
+      'handle color service',
+    );
+    assertProbeStringBound(
+      probe.maxAddressCharacters,
+      probe.maxAddressBytes,
+      limits.chatParticipantAddressCharacters,
+      'handle color address',
+    );
+
+    // Only materialize JSON after every selected field has passed its type, value, character,
+    // and UTF-8 byte bounds. This keeps a corrupt multi-megabyte text value from being expanded
+    // again by json_object before the exporter can reject it.
+    const jsonProbe = requireProbeRow<HandleColorJsonProbeRow>(
+      await db.all<HandleColorJsonProbeRow>(sql`
+        WITH handle_ids AS MATERIALIZED (
+          SELECT id
+            FROM handles INDEXED BY handles_backup_color_export_idx
+           WHERE color IS NOT NULL
+           ORDER BY id
+           LIMIT ${limits.handleColors + 1}
+        )
+        SELECT COUNT(*) AS rowCount,
+               CASE WHEN COUNT(*) = 0 THEN 2 ELSE
+                 COALESCE(SUM(length(CAST(json_object(
+                   'address', selected.address,
+                   'service', COALESCE(selected.service, ''),
+                   'color', UPPER(selected.color)
+                 ) AS BLOB))), 0) + COUNT(*) + 1
+               END AS jsonBytes
+          FROM handle_ids AS probe
+          JOIN handles AS selected ON selected.id = probe.id
+      `),
+      'handle color JSON-byte',
+    );
+    if (requireProbeInteger(jsonProbe.rowCount, 'handle color JSON-byte count') !== count) {
+      throw new Error('Handle-color backup JSON-byte probe is incomplete.');
+    }
+    const estimatedBytes = addEstimatedBackupBytes(
+      initialEstimatedBytes,
+      requireProbeInteger(jsonProbe.jsonBytes, 'handle color JSON-byte'),
+      limits.maxRawBytes,
+      'handle-color data',
+    );
+
+    const rows = await db.all<HandleColorBackupRow>(sql`
+      SELECT address, COALESCE(service, '') AS service, color
+        FROM handles INDEXED BY handles_backup_color_export_idx
+       WHERE color IS NOT NULL
+       ORDER BY id
+       LIMIT ${limits.handleColors + 1}
+    `);
+    if (rows.length !== count) {
+      throw new Error('Handle-color backup probe is incomplete.');
+    }
+    const identities = new Set<string>();
+    const handleColors = rows.map((row: HandleColorBackupRow) => {
+      const color = normalizeHandleColor(row.color);
+      const identity = JSON.stringify([row.address, row.service]);
+      if (color === null || identities.has(identity)) {
+        throw new Error('Handle-color backup data is invalid.');
+      }
+      identities.add(identity);
+      return { ...row, color };
+    });
+    return { handleColors, estimatedBytes };
   });
 }
 
@@ -1826,6 +2027,38 @@ export async function getBackupV3ExportData(
   };
 }
 
+/** Read every v4 backup domain from one committed point in time on the shared connection. */
+export async function getBackupV4ExportData(
+  db: AppDatabase,
+  limits: BackupExportLimits,
+  commitGuard?: DbCommitGuard,
+): Promise<BackupV4ExportData> {
+  assertBackupExportLimits(limits);
+  const rows = await withDbTransaction(
+    db,
+    async (context) => {
+      const base = await readBackupBaseRowsWithinTransaction(context, limits);
+      const handleColors = await readHandleColorBackupRowsWithinTransaction(
+        context,
+        limits,
+        base.estimatedBytes,
+      );
+      const customFolders = await readCustomFolderBackupRowsWithinTransaction(
+        context,
+        limits,
+        handleColors.estimatedBytes,
+      );
+      return { base, customFolders, handleColors };
+    },
+    commitGuard,
+  );
+  return {
+    ...buildBackupBaseExportData(rows.base, limits),
+    ...buildCustomFolderBackupData(rows.customFolders),
+    handleColors: rows.handleColors.handleColors,
+  };
+}
+
 export async function restoreKv(
   db: AppDatabase,
   items: KvPair[],
@@ -2122,6 +2355,17 @@ export function restorePreparedBackupWithinTransaction(
        ORDER BY source.source_index
     `);
 
+    await db.run(sql`
+      INSERT INTO handles (address, service, color)
+      SELECT json_extract(entry.value, '$.address'),
+             json_extract(entry.value, '$.service'),
+             json_extract(entry.value, '$.color')
+        FROM json_each(${input.handleColorsJson}) AS entry
+       WHERE 1
+       ORDER BY CAST(entry.key AS INTEGER)
+      ON CONFLICT(address, service) DO UPDATE SET color = excluded.color
+    `);
+
     await db.run(sql`DROP TABLE IF EXISTS temp.gator_backup_restored_folder_members`);
     await db.run(sql`DROP TABLE IF EXISTS temp.gator_backup_restored_folders`);
     await db.run(sql`DROP TABLE IF EXISTS temp.gator_backup_resolved_chats`);
@@ -2163,6 +2407,10 @@ export function restorePreparedBackupWithinTransaction(
                  TRIM(json_extract(source_json, '$.identity.serverChatIdentifier')),
                  ''
                ) AS server_chat_identifier,
+               NULLIF(TRIM(json_extract(source_json, '$.identity.providerEpoch')), '')
+                 AS provider_epoch,
+               NULLIF(TRIM(json_extract(source_json, '$.identity.providerSourceId')), '')
+                 AS provider_source_id,
                json_extract(source_json, '$.customName') AS custom_name,
                json_extract(source_json, '$.customColor') AS custom_color,
                json_extract(source_json, '$.muteType') AS mute_type,
@@ -2286,6 +2534,28 @@ export function restorePreparedBackupWithinTransaction(
                  ELSE ''
                END AS guid_remainder,
                NULLIF(TRIM(chats.chat_identifier), '') AS server_chat_identifier,
+               CASE
+                 WHEN SUBSTR(chats.guid, 1, 9) = 'RCS;-;g1.'
+                  AND INSTR(SUBSTR(chats.guid, 10), '.') > 1
+                   THEN SUBSTR(
+                     chats.guid,
+                     10,
+                     INSTR(SUBSTR(chats.guid, 10), '.') - 1
+                   )
+                 ELSE NULL
+               END AS provider_epoch,
+               CASE
+                 WHEN SUBSTR(chats.guid, 1, 9) = 'RCS;-;g1.'
+                  AND INSTR(SUBSTR(chats.guid, 10), '.') > 1
+                   THEN NULLIF(
+                     SUBSTR(
+                       chats.guid,
+                       10 + INSTR(SUBSTR(chats.guid, 10), '.')
+                     ),
+                     ''
+                   )
+                 ELSE NULL
+               END AS provider_source_id,
                COALESCE(local_participant_counts.participant_count, 0) AS participant_count,
                COALESCE(local_service_summary.named_service_count, 0) AS named_service_count,
                COALESCE(local_service_summary.sms_service_count, 0) AS sms_service_count
@@ -2363,6 +2633,7 @@ export function restorePreparedBackupWithinTransaction(
          WHERE source_address_identities.identity_role = 'legacy'
            AND source_rows.identity_version IS NULL
            AND source_rows.kind = 'direct'
+           AND source_rows.service <> 'rcs'
            AND local_chats.kind = 'direct'
            AND local_chats.service = source_rows.service
       ),
@@ -2525,9 +2796,20 @@ export function restorePreparedBackupWithinTransaction(
          WHERE source_rows.identity_version = 1
       ),
       portable_resolved AS (
-        SELECT source_index, chat_id
+        SELECT portable_resolution.source_index, portable_resolution.chat_id
           FROM portable_resolution
-         WHERE chat_id IS NOT NULL
+          JOIN source_rows ON source_rows.source_index = portable_resolution.source_index
+          JOIN local_chats ON local_chats.chat_id = portable_resolution.chat_id
+         WHERE portable_resolution.chat_id IS NOT NULL
+           AND (
+             source_rows.service <> 'rcs'
+             OR (
+               source_rows.provider_epoch IS NOT NULL
+               AND source_rows.provider_source_id IS NOT NULL
+               AND local_chats.provider_epoch = source_rows.provider_epoch
+               AND local_chats.provider_source_id = source_rows.provider_source_id
+             )
+           )
       ),
       resolved_candidates AS (
         SELECT source_index, chat_id FROM legacy_resolved
@@ -2747,28 +3029,36 @@ export function restorePreparedBackupWithinTransaction(
       const resultRows = await db.all<{
         customFolders: number;
         customFolderMemberships: number;
+        handleColors: number;
       }>(sql`
         SELECT (
                  SELECT COUNT(*) FROM temp.gator_backup_restored_folders
                ) AS customFolders,
                (
                  SELECT COUNT(*) FROM temp.gator_backup_restored_folder_members
-               ) AS customFolderMemberships
+               ) AS customFolderMemberships,
+               (
+                 SELECT COUNT(*) FROM json_each(${input.handleColorsJson})
+               ) AS handleColors
       `);
       const customFolders = resultRows[0]?.customFolders ?? 0;
       const customFolderMemberships = resultRows[0]?.customFolderMemberships ?? 0;
+      const handleColors = resultRows[0]?.handleColors ?? 0;
       if (
         !Number.isSafeInteger(customFolders) ||
         customFolders < 0 ||
         !Number.isSafeInteger(customFolderMemberships) ||
-        customFolderMemberships < 0
+        customFolderMemberships < 0 ||
+        !Number.isSafeInteger(handleColors) ||
+        handleColors < 0
       ) {
-        throw new Error('Backup restore returned invalid custom folder counts.');
+        throw new Error('Backup restore returned invalid result counts.');
       }
       return {
         chatCustomizations: applied,
         customFolders,
         customFolderMemberships,
+        handleColors,
       };
     } finally {
       await db.run(sql`DROP TABLE IF EXISTS temp.gator_backup_restored_folder_members`);

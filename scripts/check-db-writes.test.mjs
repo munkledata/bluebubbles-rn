@@ -1563,6 +1563,127 @@ test('permits only the exact pinned release diagnostic CommonJS loader', () => {
   }
 });
 
+test('permits only the exact pinned group-photo upload CommonJS loader', () => {
+  const boundaryPath = 'src/services/groupPhotoUiService.ts';
+  const uploadPath = 'src/services/groupPhotoUpload.ts';
+  const boundarySource = readFileSync(resolve(PROJECT_ROOT, boundaryPath), 'utf8');
+  const uploadSource = readFileSync(resolve(PROJECT_ROOT, uploadPath), 'utf8');
+  const createRoot = () =>
+    fixture(
+      startupSingleFlightFixture({
+        extraFiles: {
+          [boundaryPath]: boundarySource,
+          [uploadPath]: uploadSource,
+        },
+      }),
+    );
+  const root = createRoot();
+  try {
+    const baseline = scanDbWrites({ root });
+    assert.equal(
+      startupContext(
+        baseline,
+        'src/services/consumer.ts',
+        'openDirectly',
+        'src/services/databaseControl.ts#ensureDatabase',
+      ),
+      'startup-single-flight-delegation',
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+
+  const cases = [
+    {
+      label: 'redirected group-photo uploader',
+      mutate(fixtureRoot) {
+        replaceFixtureSource(
+          fixtureRoot,
+          boundaryPath,
+          "require('./groupPhotoUpload')",
+          "require('./databaseControl')",
+        );
+      },
+    },
+    {
+      label: 'shadowed group-photo require',
+      mutate(fixtureRoot) {
+        writeFileSync(
+          resolve(fixtureRoot, boundaryPath),
+          `const require = (_path: string): never => { throw new Error('shadowed'); };\n${boundarySource}`,
+        );
+      },
+    },
+    {
+      label: 'duplicate group-photo require',
+      mutate(fixtureRoot) {
+        replaceFixtureSource(
+          fixtureRoot,
+          boundaryPath,
+          "const { expoGroupPhotoUploader } =\n    require('./groupPhotoUpload') as typeof import('./groupPhotoUpload');",
+          "require('./groupPhotoUpload');\n  const { expoGroupPhotoUploader } =\n    require('./groupPhotoUpload') as typeof import('./groupPhotoUpload');",
+        );
+      },
+    },
+    {
+      label: 'changed group-photo loader body',
+      mutate(fixtureRoot) {
+        replaceFixtureSource(
+          fixtureRoot,
+          boundaryPath,
+          'return expoGroupPhotoUploader(input);',
+          'return Promise.resolve(expoGroupPhotoUploader(input));',
+        );
+      },
+    },
+    {
+      label: 'same group-photo require outside loader',
+      mutate(fixtureRoot) {
+        writeFileSync(
+          resolve(fixtureRoot, boundaryPath),
+          `${boundarySource}\nexport const escapedUploader = require('./groupPhotoUpload');\n`,
+        );
+      },
+    },
+    {
+      label: 'changed group-photo importer',
+      mutate(fixtureRoot) {
+        writeFileSync(
+          resolve(fixtureRoot, boundaryPath),
+          `${boundarySource}\nexport const changed = true;\n`,
+        );
+      },
+    },
+    {
+      label: 'changed group-photo upload target',
+      mutate(fixtureRoot) {
+        writeFileSync(
+          resolve(fixtureRoot, uploadPath),
+          `${uploadSource}\nexport const changed = true;\n`,
+        );
+      },
+    },
+    {
+      label: 'second project-local group-photo require',
+      mutate(fixtureRoot) {
+        writeFileSync(
+          resolve(fixtureRoot, 'src/services/secondGroupPhotoLoader.ts'),
+          "export const uploader = require('./groupPhotoUpload');\n",
+        );
+      },
+    },
+  ];
+  for (const { label, mutate } of cases) {
+    const fixtureRoot = createRoot();
+    try {
+      mutate(fixtureRoot);
+      assertStartupCertificateRevoked(scanDbWrites({ root: fixtureRoot }), label);
+    } finally {
+      rmSync(fixtureRoot, { recursive: true, force: true });
+    }
+  }
+});
+
 test('certifies exactly the reviewed direct incoming-ingress edge nodes', () => {
   const findings = scanProjectDbWrites();
   const ingress = findings.filter(
@@ -1591,7 +1712,7 @@ test('certifies exactly the reviewed direct incoming-ingress edge nodes', () => 
       .filter((id) =>
         [
           'src/services/notifications/fcmMessaging.ts#deliver:mutator-call:e737f4b3c52e',
-          'src/services/realtimeControl.ts#persistAuthenticatedLockedFcmV3Event:mutator-call:f8c87fb52b5f',
+          'src/services/realtimeControl.ts#persistAuthenticatedLockedFcmV3Event:mutator-call:0783b2ad479c',
           'src/services/realtimeControl.ts#resumeRealtime:mutator-call:3bd87f6c9e52',
           'src/services/realtimeControl.ts#resumeRealtimeAfterCredentialUpgrade:mutator-call:bd79318d30a2',
         ].includes(id),
@@ -1599,7 +1720,7 @@ test('certifies exactly the reviewed direct incoming-ingress edge nodes', () => 
       .sort(),
     [
       'src/services/notifications/fcmMessaging.ts#deliver:mutator-call:e737f4b3c52e',
-      'src/services/realtimeControl.ts#persistAuthenticatedLockedFcmV3Event:mutator-call:f8c87fb52b5f',
+      'src/services/realtimeControl.ts#persistAuthenticatedLockedFcmV3Event:mutator-call:0783b2ad479c',
       'src/services/realtimeControl.ts#resumeRealtime:mutator-call:3bd87f6c9e52',
       'src/services/realtimeControl.ts#resumeRealtimeAfterCredentialUpgrade:mutator-call:bd79318d30a2',
     ],
@@ -1953,25 +2074,25 @@ test('certifies exactly the reviewed notification presentation and reminder-effe
   assert.deepEqual(
     createReminderTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:722548534e>.<callback:8aa1abdd3a>:mutator-call:0757a3beb09f',
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:722548534e>:mutator-call:03737ea89e3a',
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:722548534e>:mutator-call:22be9c89e2da',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:ac1a922b9c>.<callback:8aa1abdd3a>:mutator-call:e826c5cb7540',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:ac1a922b9c>:mutator-call:aeff8b41893f',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:ac1a922b9c>:mutator-call:f72eb0e606ce',
     ].sort(),
   );
   assert.deepEqual(
     scheduleReminderMoveTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:722548534e>.<callback:63ddd06ef2>:mutator-call:c942702ee702',
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:722548534e>:mutator-call:0c134e4aedd9',
-      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:722548534e>:mutator-call:715f896a04cf',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:ac1a922b9c>.<callback:63ddd06ef2>:mutator-call:41281d25ebe8',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:ac1a922b9c>:mutator-call:2105bc10b4b8',
+      'src/services/notifications/remindersService.ts#scheduleReminder.<callback:ac1a922b9c>:mutator-call:bbe5ce8ab77e',
     ].sort(),
   );
   assert.deepEqual(
     rescheduleReminderMoveTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:3444f7c0ea>.<callback:e57c656026>:mutator-call:79dcc8e4ff6e',
-      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:3444f7c0ea>:mutator-call:94b476307dbb',
-      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:3444f7c0ea>:mutator-call:b76bd9f2556f',
+      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:731021c678>.<callback:e57c656026>:mutator-call:5c5d8cff3f6f',
+      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:731021c678>:mutator-call:89491dc214ed',
+      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:731021c678>:mutator-call:9cce64c14a31',
     ].sort(),
   );
   assert.deepEqual(
@@ -1984,9 +2105,9 @@ test('certifies exactly the reviewed notification presentation and reminder-effe
   assert.deepEqual(
     cancelReminderTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/notifications/remindersService.ts#cancelReminder.<callback:e1c2492a6b>.<callback:e767effe3c>:mutator-call:8bd102043c73',
-      'src/services/notifications/remindersService.ts#cancelReminder.<callback:e1c2492a6b>:mutator-call:ad8222e0df7c',
-      'src/services/notifications/remindersService.ts#cancelReminder.<callback:e1c2492a6b>:mutator-call:d1aecba69f8f',
+      'src/services/notifications/remindersService.ts#cancelReminder.<callback:fa5a10f480>.<callback:e767effe3c>:mutator-call:023f96b06623',
+      'src/services/notifications/remindersService.ts#cancelReminder.<callback:fa5a10f480>:mutator-call:05b66955ae9e',
+      'src/services/notifications/remindersService.ts#cancelReminder.<callback:fa5a10f480>:mutator-call:62633b738a87',
     ].sort(),
   );
 });
@@ -2148,17 +2269,17 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
   assert.deepEqual(
     scheduledHistoryTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:48588e5ef4>.<callback:be2a685944>:mutator-call:211114e3d101',
-      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:48588e5ef4>:mutator-call:2a14c566d346',
-      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:48588e5ef4>:mutator-call:a18389a7fa4c',
+      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:b9eca62666>.<callback:be2a685944>:mutator-call:8b4ffa7e0233',
+      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:b9eca62666>:mutator-call:248ae638f046',
+      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:b9eca62666>:mutator-call:e7be6efd9c5f',
     ].sort(),
   );
   assert.deepEqual(
     markAllReadTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/chatActions.ts#markAllChatsRead.<callback:c1af206d58>.<callback:ce8558bae3>:mutator-call:06b61d4ce067',
-      'src/services/chatActions.ts#markAllChatsRead.<callback:c1af206d58>:mutator-call:b2a54e1ab9af',
-      'src/services/chatActions.ts#markAllChatsRead.<callback:c1af206d58>:mutator-call:f44a034cf669',
+      'src/services/chatActions.ts#markAllChatsRead.<callback:cc917b13d2>.<callback:51160cb185>:mutator-call:1569c12d346a',
+      'src/services/chatActions.ts#markAllChatsRead.<callback:cc917b13d2>:mutator-call:007a06b5a04e',
+      'src/services/chatActions.ts#markAllChatsRead.<callback:cc917b13d2>:mutator-call:24bb2559f583',
     ].sort(),
   );
   assert.deepEqual(
@@ -2177,6 +2298,381 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
   );
 });
 
+test('certifies exactly the reviewed message-preview delegation edge', () => {
+  const findings = scanProjectDbWrites().filter(
+    (finding) => finding.path === 'src/services/messagePreview.ts',
+  );
+
+  assert.deepEqual(
+    findings.map(({ id, target, detectedContext }) => ({ id, target, detectedContext })),
+    [
+      {
+        id: 'src/services/messagePreview.ts#readMessagePreview:mutator-call:ebc85b73faa7',
+        target: 'src/db/repositories/messageTargets.ts#resolveMessageTarget',
+        detectedContext: 'coordinated-delegation',
+      },
+    ],
+  );
+});
+
+test('certifies exactly the reviewed migration, handle-color, retry, backup, and mention additions', () => {
+  const migrationSymbols = new Set([
+    'migration:0050_message_identity_owner_scope',
+    'migration:0051_handle_color_backup_index',
+    'migration:0052_chat_history_deletion_boundary',
+  ]);
+  const findings = scanProjectDbWrites()
+    .filter(
+      (finding) =>
+        (finding.path === 'src/db/migrations.ts' && migrationSymbols.has(finding.symbol)) ||
+        (finding.path === 'src/db/repositories/backup.ts' &&
+          finding.symbol === 'getBackupV4ExportData') ||
+        (finding.path === 'src/db/repositories/handles.ts' &&
+          finding.symbol === 'setHandleColorWithinTransaction') ||
+        (finding.path === 'src/db/repositories/outgoingRetry.ts' &&
+          finding.symbol === 'applyServerSendErrorWithinTransaction' &&
+          finding.operation === 'drizzle-delete') ||
+        (finding.path === 'src/services/chatActions.ts' &&
+          finding.symbol.startsWith('updateHandleColor')) ||
+        (finding.path === 'src/services/send/index.ts' &&
+          finding.symbol.startsWith('sendMention.')),
+    )
+    .map(({ id, target, detectedContext }) => ({ id, target, detectedContext }))
+    .sort((left, right) => left.id.localeCompare(right.id));
+
+  assert.deepEqual(
+    findings,
+    [
+      {
+        id: 'src/db/migrations.ts#migration:0050_message_identity_owner_scope:sql-schema:860b080550f3',
+        target: 'message_guid_aliases',
+        detectedContext: 'startup-migration',
+      },
+      {
+        id: 'src/db/migrations.ts#migration:0050_message_identity_owner_scope:sql-schema:e9b9b8e430a7',
+        target: 'message_deletion_ledger',
+        detectedContext: 'startup-migration',
+      },
+      {
+        id: 'src/db/migrations.ts#migration:0050_message_identity_owner_scope:sql-update:db2ee73ad108',
+        target: 'message_deletion_ledger',
+        detectedContext: 'startup-migration',
+      },
+      {
+        id: 'src/db/migrations.ts#migration:0050_message_identity_owner_scope:sql-update:f811307c329a',
+        target: 'message_guid_aliases',
+        detectedContext: 'startup-migration',
+      },
+      {
+        id: 'src/db/migrations.ts#migration:0051_handle_color_backup_index:sql-schema:eaeda45347fd',
+        target: 'handles_backup_color_export_idx',
+        detectedContext: 'startup-migration',
+      },
+      {
+        id: 'src/db/migrations.ts#migration:0051_handle_color_backup_index:sql-update:5ed36d171a12',
+        target: 'handles',
+        detectedContext: 'startup-migration',
+      },
+      {
+        id: 'src/db/migrations.ts#migration:0052_chat_history_deletion_boundary:sql-schema:947f6325eefa',
+        target: 'chats',
+        detectedContext: 'startup-migration',
+      },
+      {
+        id: 'src/db/migrations.ts#migration:0052_chat_history_deletion_boundary:sql-update:917af7d8843e',
+        target: 'chats',
+        detectedContext: 'startup-migration',
+      },
+      {
+        id: 'src/db/repositories/backup.ts#getBackupV4ExportData:mutator-call:a2d299dbf859',
+        target: 'src/db/transaction.ts#withDbTransaction',
+        detectedContext: 'transaction-coordinator',
+      },
+      {
+        id: 'src/db/repositories/handles.ts#setHandleColorWithinTransaction:sql-update:ea2c828ba141',
+        target: 'handles',
+        detectedContext: 'withDbTransaction',
+      },
+      {
+        id: 'src/db/repositories/outgoingRetry.ts#applyServerSendErrorWithinTransaction:drizzle-delete:36f6239f5a90',
+        target: 'outgoingQueue',
+        detectedContext: 'withDbTransaction',
+      },
+      {
+        id: 'src/services/chatActions.ts#updateHandleColor.<callback:378c9d8851>.<callback:8b6dee697b>:mutator-call:2362719bd988',
+        target: 'src/db/repositories/handles.ts#setHandleColorWithinTransaction',
+        detectedContext: 'withDbTransaction',
+      },
+      {
+        id: 'src/services/chatActions.ts#updateHandleColor.<callback:378c9d8851>:mutator-call:47230c9cafef',
+        target:
+          'src/services/chatActions.ts#updateHandleColor.<callback:378c9d8851>.<callback:8b6dee697b>',
+        detectedContext: 'withDbTransaction',
+      },
+      {
+        id: 'src/services/chatActions.ts#updateHandleColor.<callback:378c9d8851>:mutator-call:4e245b552619',
+        target: 'src/services/databaseControl.ts#ensureDatabase',
+        detectedContext: 'startup-single-flight-delegation',
+      },
+      {
+        id: 'src/services/chatActions.ts#updateHandleColor.<callback:378c9d8851>:mutator-call:b5b8de464ab3',
+        target: 'src/db/transaction.ts#withDbTransaction',
+        detectedContext: 'transaction-coordinator',
+      },
+      {
+        id: 'src/services/send/index.ts#sendMention.<callback:f3e30f8bd8>:mutator-call:addd044d6c91',
+        target: 'src/services/send/sendMentionService.ts#sendIMessageMention',
+        detectedContext: 'coordinated-delegation',
+      },
+    ].sort((left, right) => left.id.localeCompare(right.id)),
+  );
+});
+
+test('certifies exactly the reviewed location-send service write path', () => {
+  const findings = scanProjectDbWrites().filter(
+    (finding) => finding.path === 'src/services/send/sendLocationService.ts',
+  );
+
+  assert.deepEqual(
+    findings
+      .map(({ id, target, detectedContext }) => ({ id, target, detectedContext }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
+    [
+      {
+        id: 'src/services/send/sendLocationService.ts#sendCurrentLocationMessage:mutator-call:5558cf02c486',
+        target: 'src/services/send/sendOutcome.ts#reconcileSendOutcome',
+        detectedContext: 'coordinated-delegation',
+      },
+      {
+        id: 'src/services/send/sendLocationService.ts#sendCurrentLocationMessage:mutator-call:a5842121fab1',
+        target:
+          'src/services/send/sendLocationService.ts#sendCurrentLocationMessage.<callback:804453d5cb>',
+        detectedContext: 'withDbTransaction',
+      },
+      {
+        id: 'src/services/send/sendLocationService.ts#sendCurrentLocationMessage:mutator-call:be2eaeaa64da',
+        target: 'src/services/send/sendOutcome.ts#handleSendFailure',
+        detectedContext: 'coordinated-delegation',
+      },
+      {
+        id: 'src/services/send/sendLocationService.ts#sendCurrentLocationMessage:mutator-call:c1d16314e7f5',
+        target: 'src/db/transaction.ts#withDbTransaction',
+        detectedContext: 'transaction-coordinator',
+      },
+      {
+        id: 'src/services/send/sendLocationService.ts#sendCurrentLocationMessage.<callback:804453d5cb>:mutator-call:cabbb413bf10',
+        target: 'src/db/repositories/outgoing.ts#insertOutgoingLocationWithinTransaction',
+        detectedContext: 'withDbTransaction',
+      },
+    ],
+  );
+});
+
+test('certifies exactly the reviewed one-shot effect service boundary', () => {
+  const findings = scanProjectDbWrites().filter(
+    (finding) => finding.path === 'src/services/send/sendEffectService.ts',
+  );
+  const byId = (left, right) => left.id.localeCompare(right.id);
+  const selected = findings
+    .map(({ id, target, detectedContext }) => ({ id, target, detectedContext }))
+    .sort(byId);
+
+  assert.equal(
+    selected.filter(({ detectedContext }) => detectedContext === 'coordinated-delegation').length,
+    9,
+  );
+  assert.equal(
+    selected.filter(({ detectedContext }) => detectedContext !== 'coordinated-delegation').length,
+    6,
+  );
+  assert.deepEqual(
+    selected,
+    [
+      {
+        id: 'src/services/send/sendEffectService.ts#discardDefiniteAttempt.<callback:39c4631cbf>:mutator-call:ea08b021a8e8',
+        target: 'src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction',
+        detectedContext: 'withDbTransaction',
+      },
+      {
+        id: 'src/services/send/sendEffectService.ts#discardDefiniteAttempt:mutator-call:52096c60e5ac',
+        target:
+          'src/services/send/sendEffectService.ts#discardDefiniteAttempt.<callback:39c4631cbf>',
+        detectedContext: 'withDbTransaction',
+      },
+      {
+        id: 'src/services/send/sendEffectService.ts#discardDefiniteAttempt:mutator-call:7fb4759d70ff',
+        target: 'src/db/transaction.ts#withDbTransaction',
+        detectedContext: 'transaction-coordinator',
+      },
+      {
+        id: 'src/services/send/sendEffectService.ts#sendIMessageEffect.<callback:5e7fa751cc>:mutator-call:f1e6127504df',
+        target: 'src/db/repositories/outgoing.ts#insertOutgoingTextWithinTransaction',
+        detectedContext: 'withDbTransaction',
+      },
+      {
+        id: 'src/services/send/sendEffectService.ts#sendIMessageEffect.retireOutcomeUnknown:mutator-call:414f53740674',
+        target: 'src/services/send/sendOutcome.ts#handleSendFailure',
+        detectedContext: 'coordinated-delegation',
+      },
+      {
+        id: 'src/services/send/sendEffectService.ts#sendIMessageEffect:mutator-call:39cf94b1f8fe',
+        target: 'src/services/send/sendEffectService.ts#sendIMessageEffect.retireOutcomeUnknown',
+        detectedContext: 'coordinated-delegation',
+      },
+      {
+        id: 'src/services/send/sendEffectService.ts#sendIMessageEffect:mutator-call:39cf94b1f8fe:2',
+        target: 'src/services/send/sendEffectService.ts#sendIMessageEffect.retireOutcomeUnknown',
+        detectedContext: 'coordinated-delegation',
+      },
+      {
+        id: 'src/services/send/sendEffectService.ts#sendIMessageEffect:mutator-call:a224e42be3da',
+        target: 'src/services/send/sendOutcome.ts#reconcileSendOutcome',
+        detectedContext: 'coordinated-delegation',
+      },
+      {
+        id: 'src/services/send/sendEffectService.ts#sendIMessageEffect:mutator-call:a6709ea88edd',
+        target: 'src/services/send/sendEffectService.ts#sendIMessageEffect.retireOutcomeUnknown',
+        detectedContext: 'coordinated-delegation',
+      },
+      {
+        id: 'src/services/send/sendEffectService.ts#sendIMessageEffect:mutator-call:a9634db56ac4',
+        target: 'src/services/send/sendEffectService.ts#discardDefiniteAttempt',
+        detectedContext: 'coordinated-delegation',
+      },
+      {
+        id: 'src/services/send/sendEffectService.ts#sendIMessageEffect:mutator-call:a9634db56ac4:2',
+        target: 'src/services/send/sendEffectService.ts#discardDefiniteAttempt',
+        detectedContext: 'coordinated-delegation',
+      },
+      {
+        id: 'src/services/send/sendEffectService.ts#sendIMessageEffect:mutator-call:a9634db56ac4:3',
+        target: 'src/services/send/sendEffectService.ts#discardDefiniteAttempt',
+        detectedContext: 'coordinated-delegation',
+      },
+      {
+        id: 'src/services/send/sendEffectService.ts#sendIMessageEffect:mutator-call:a9634db56ac4:4',
+        target: 'src/services/send/sendEffectService.ts#discardDefiniteAttempt',
+        detectedContext: 'coordinated-delegation',
+      },
+      {
+        id: 'src/services/send/sendEffectService.ts#sendIMessageEffect:mutator-call:b0502b578ab3',
+        target: 'src/services/send/sendEffectService.ts#sendIMessageEffect.<callback:5e7fa751cc>',
+        detectedContext: 'withDbTransaction',
+      },
+      {
+        id: 'src/services/send/sendEffectService.ts#sendIMessageEffect:mutator-call:d5a26507d810',
+        target: 'src/db/transaction.ts#withDbTransaction',
+        detectedContext: 'transaction-coordinator',
+      },
+    ].sort(byId),
+  );
+});
+
+test('certifies exactly the reviewed one-shot mention service boundary', () => {
+  const byId = (left, right) => left.id.localeCompare(right.id);
+  const findings = scanProjectDbWrites()
+    .filter((finding) => finding.path === 'src/services/send/sendMentionService.ts')
+    .map(({ id, target, detectedContext }) => ({ id, target, detectedContext }))
+    .sort(byId);
+
+  assert.deepEqual(
+    findings,
+    [
+      {
+        id: 'src/services/send/sendMentionService.ts#discardDefiniteAttempt.<callback:39c4631cbf>:mutator-call:a475496c7eb0',
+        target: 'src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction',
+        detectedContext: 'withDbTransaction',
+      },
+      {
+        id: 'src/services/send/sendMentionService.ts#discardDefiniteAttempt:mutator-call:138fd801c2bc',
+        target:
+          'src/services/send/sendMentionService.ts#discardDefiniteAttempt.<callback:39c4631cbf>',
+        detectedContext: 'withDbTransaction',
+      },
+      {
+        id: 'src/services/send/sendMentionService.ts#discardDefiniteAttempt:mutator-call:382af2306f89',
+        target: 'src/db/transaction.ts#withDbTransaction',
+        detectedContext: 'transaction-coordinator',
+      },
+      {
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention.<callback:7d215588bc>:mutator-call:8834e4abf3ac',
+        target: 'src/db/repositories/outgoing.ts#insertOutgoingTextWithinTransaction',
+        detectedContext: 'withDbTransaction',
+      },
+      {
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention.<callback:881b071cbb>:mutator-call:d68b4a18047c',
+        target: 'src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction',
+        detectedContext: 'withDbTransaction',
+      },
+      {
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention.retireOutcomeUnknown:mutator-call:a174fd88cd88',
+        target: 'src/services/send/sendOutcome.ts#handleSendFailure',
+        detectedContext: 'coordinated-delegation',
+      },
+      {
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:08f657773d2b',
+        target: 'src/services/send/sendMentionService.ts#sendIMessageMention.retireOutcomeUnknown',
+        detectedContext: 'coordinated-delegation',
+      },
+      {
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:08f657773d2b:2',
+        target: 'src/services/send/sendMentionService.ts#sendIMessageMention.retireOutcomeUnknown',
+        detectedContext: 'coordinated-delegation',
+      },
+      {
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:08f657773d2b:3',
+        target: 'src/services/send/sendMentionService.ts#sendIMessageMention.retireOutcomeUnknown',
+        detectedContext: 'coordinated-delegation',
+      },
+      {
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:0f419c7f91f6',
+        target: 'src/db/transaction.ts#withDbTransaction',
+        detectedContext: 'transaction-coordinator',
+      },
+      {
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:33dda488e2fa',
+        target: 'src/db/transaction.ts#withDbTransaction',
+        detectedContext: 'transaction-coordinator',
+      },
+      {
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:67aa22727ed1',
+        target: 'src/services/send/sendMentionService.ts#discardDefiniteAttempt',
+        detectedContext: 'coordinated-delegation',
+      },
+      {
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:67aa22727ed1:2',
+        target: 'src/services/send/sendMentionService.ts#discardDefiniteAttempt',
+        detectedContext: 'coordinated-delegation',
+      },
+      {
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:6c8548c9139f',
+        target: 'src/services/send/sendMentionService.ts#sendIMessageMention.retireOutcomeUnknown',
+        detectedContext: 'coordinated-delegation',
+      },
+      {
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:6c8548c9139f:2',
+        target: 'src/services/send/sendMentionService.ts#sendIMessageMention.retireOutcomeUnknown',
+        detectedContext: 'coordinated-delegation',
+      },
+      {
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:90b4bf3cbace',
+        target: 'src/services/send/sendMentionService.ts#sendIMessageMention.<callback:881b071cbb>',
+        detectedContext: 'withDbTransaction',
+      },
+      {
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:df3cb27d8c35',
+        target: 'src/services/send/sendOutcome.ts#reconcileSendOutcome',
+        detectedContext: 'coordinated-delegation',
+      },
+      {
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:e41ef298ce57',
+        target: 'src/services/send/sendMentionService.ts#sendIMessageMention.<callback:7d215588bc>',
+        detectedContext: 'withDbTransaction',
+      },
+    ].sort(byId),
+  );
+});
+
 test('certifies exactly the reviewed ordinary-send delegation edges', () => {
   const findings = scanProjectDbWrites();
   const paths = new Set([
@@ -2184,6 +2680,7 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
     'src/services/send/outgoingQueueService.ts',
     'src/services/send/sendAttachmentService.ts',
     'src/services/send/sendContactService.ts',
+    'src/services/send/sendLocationService.ts',
     'src/services/send/sendOutcome.ts',
     'src/services/send/sendReactionService.ts',
     'src/services/send/sendService.ts',
@@ -2220,12 +2717,14 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
             'src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:',
           ))),
   );
-  const outgoingQueueClaimAndDeferralTransactions = findings.filter(
+  const outgoingQueueClaimDeferralAndTerminalRetirementTransactions = findings.filter(
     (finding) =>
       finding.path === 'src/services/send/outgoingQueueService.ts' &&
       finding.symbol.startsWith('runOutgoingQueueBody.') &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
       (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target ===
+          'src/db/repositories/outgoing.ts#retireUncertainOutgoingWithinTransaction' ||
         finding.target ===
           'src/db/repositories/outgoingRetry.ts#claimOutgoingForSendWithinTransaction' ||
         finding.target ===
@@ -2247,10 +2746,10 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
             'src/services/send/outgoingQueueService.ts#retireUnsendableOutgoing.<callback:',
           ))),
   );
-  const outgoingQueueUncertainRetirementTransaction = findings.filter(
+  const outgoingQueueResendTransactions = findings.filter(
     (finding) =>
       finding.path === 'src/services/send/outgoingQueueService.ts' &&
-      finding.symbol.startsWith('resendOutgoingRow.retirePrivateApiRow.') &&
+      (finding.symbol === 'resendOutgoingRow' || finding.symbol.startsWith('resendOutgoingRow.')) &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext),
   );
   const outgoingAttachmentInsertTransaction = findings.filter(
@@ -2263,6 +2762,8 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
           'src/db/repositories/attachmentCache.ts#commitAttachmentCacheReservation' ||
         finding.target ===
           'src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction' ||
+        finding.target ===
+          'src/db/repositories/shareIntakeReceipts.ts#claimShareIntakeFileWithinTransaction' ||
         (finding.detectedContext === 'withDbTransaction' &&
           finding.target.startsWith(
             'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:',
@@ -2300,12 +2801,18 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       finding.symbol.startsWith('sendTextMessage') &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
       (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target ===
+          'src/db/repositories/messageTargets.ts#resolveMessageTargetWithinTransaction' ||
         finding.target === 'src/db/repositories/outgoing.ts#insertOutgoingTextWithinTransaction' ||
         (finding.detectedContext === 'withDbTransaction' &&
           finding.target.startsWith(
             'src/services/send/sendService.ts#sendTextMessage.<callback:',
           ))),
   );
+
+  // The reply path now resolves its exact message target in this same callback before inserting.
+  // That helper is a read-only runInTransactionContext join, so the scanner deliberately suppresses
+  // a separate write finding; the callback fingerprint below still certifies the reviewed body.
 
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
@@ -2315,39 +2822,45 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/notifications/actions.ts#handleNotificationActionForAccount:mutator-call:d1008c7afb46',
       'src/services/notifications/actions.ts#loveMessage:mutator-call:24b12380d8b6',
       'src/services/notifications/actions.ts#replyTo:mutator-call:16685310e2e9',
-      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:217b993890>:mutator-call:e29e08b5718a',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:34204b324b>:mutator-call:9543011de089',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:49d47bc9dc>:mutator-call:ad52ad6af0e9',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:49d47bc9dc>:mutator-call:ad52ad6af0e9:2',
-      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:e7bd01875e>:mutator-call:45e09bb6f5a8',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:93308b01f5>:mutator-call:6b28cf7dfef6',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.authorizeTarget:mutator-call:9a263ef84bb1',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retirePrivateApiRow.<callback:49d47bc9dc>:mutator-call:9ca1c09561f1',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retireTarget.<callback:603c120868>:mutator-call:8116c446048a',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow:mutator-call:676a94da498c',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow:mutator-call:676a94da498c:2',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow:mutator-call:676a94da498c:3',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueue.<callback:6cecc33135>:mutator-call:c14a009ea17d',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueue:mutator-call:660e0f2d1659',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody:mutator-call:2fb5831b19de',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueue.<callback:9c376e0185>:mutator-call:302b900108b0',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueue:mutator-call:090d2cd691d1',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody:mutator-call:79fd7f463521',
       'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:7b145a63f68d',
       'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:605604c1644f',
-      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:6e5f31342b9a',
-      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:94ed03d73c45',
+      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:090f5debeb06',
+      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:58b4c75fc545',
+      'src/services/send/sendLocationService.ts#sendCurrentLocationMessage:mutator-call:be2eaeaa64da',
+      'src/services/send/sendLocationService.ts#sendCurrentLocationMessage:mutator-call:5558cf02c486',
+      'src/services/send/sendReactionService.ts#sendIMessageReactionMessage:mutator-call:c5ee7e399fbe',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:0383d1f78e53',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:4722f6c1c506',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:519577ae83e1',
-      'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:e8547c9b8ebc',
+      'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:d1f18f459f6d',
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:8e8d9434e3c4',
-      'src/services/send/sendService.ts#sendTextMessage:mutator-call:d67f792bc542',
-      'src/services/send/sendService.ts#sendTextMessage:mutator-call:e3462acdb37d',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:018a729dfb2b',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:b26271a03910',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:c05517b0fccc',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:78177249e6a1',
     ].sort(),
   );
   assert.deepEqual(
     outgoingAttachmentInsertTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:d66e2c3d8a>:mutator-call:32653cf03649',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:d66e2c3d8a>:mutator-call:db4fcc11b38a',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:521bd5efa519',
-      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:802db95e2d31',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:13c0e413a1>:mutator-call:218fa7a8a023',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:13c0e413a1>:mutator-call:9bce367171d2',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage.<callback:13c0e413a1>:mutator-call:fcf1a0b94dee',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:deaa886e3e28',
+      'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:fe1d164cbb31',
     ].sort(),
   );
   assert.deepEqual(
@@ -2359,11 +2872,14 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
     ].sort(),
   );
   assert.deepEqual(
-    outgoingQueueClaimAndDeferralTransactions.map((finding) => finding.id).sort(),
+    outgoingQueueClaimDeferralAndTerminalRetirementTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:7074dbe4a3>.<callback:2da3f076f1>:mutator-call:4663866c59ef',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:7074dbe4a3>:mutator-call:bb5ed5290238',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:7074dbe4a3>:mutator-call:c04731bd2274',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:09c89c44e8>.<callback:e4bd60ecf9>:mutator-call:bea18d75eb96',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:09c89c44e8>:mutator-call:3b94f9081bcc',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:09c89c44e8>:mutator-call:41c2a6fb6561',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:732565dae3>.<callback:2da3f076f1>:mutator-call:09748f0ded48',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:732565dae3>:mutator-call:0e9b433bd880',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:732565dae3>:mutator-call:f7ba18174d5d',
       'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:7678a0d5ed>.<callback:58de47bad3>:mutator-call:3998f044069d',
       'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:7678a0d5ed>:mutator-call:a49bb208b031',
       'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:7678a0d5ed>:mutator-call:ced5adb9083e',
@@ -2378,11 +2894,14 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
     ].sort(),
   );
   assert.deepEqual(
-    outgoingQueueUncertainRetirementTransaction.map((finding) => finding.id).sort(),
+    outgoingQueueResendTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retirePrivateApiRow.<callback:e855d42cac>.<callback:358463adf2>:mutator-call:794310ffaa7e',
-      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retirePrivateApiRow.<callback:e855d42cac>:mutator-call:318f0016836c',
-      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retirePrivateApiRow.<callback:e855d42cac>:mutator-call:b5512f3c869d',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:09c89c44e8>.<callback:e4bd60ecf9>:mutator-call:d12b1c3b98a4',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:09c89c44e8>:mutator-call:100c6aed4262',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:09c89c44e8>:mutator-call:482f67ad8ac7',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retirePrivateApiRow.<callback:03183cf0e3>.<callback:db50043ee5>:mutator-call:73b5ccae325f',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retirePrivateApiRow.<callback:03183cf0e3>:mutator-call:7c35bde2a160',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retirePrivateApiRow.<callback:03183cf0e3>:mutator-call:b3398650b8e2',
     ].sort(),
   );
   assert.deepEqual(
@@ -2396,32 +2915,32 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
   assert.deepEqual(
     outgoingTextInsertTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendService.ts#sendTextMessage.<callback:3940f52b1d>:mutator-call:b8808f288fd5',
-      'src/services/send/sendService.ts#sendTextMessage:mutator-call:dbae6e23dc66',
-      'src/services/send/sendService.ts#sendTextMessage:mutator-call:df6b0bc3345b',
+      'src/services/send/sendService.ts#sendTextMessage.<callback:737ff5c650>:mutator-call:6d9769953a27',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:8592261ca87e',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:e3c2a8db0c93',
     ].sort(),
   );
   assert.deepEqual(
     successTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:697c6fbfc2>:mutator-call:3094df649745',
+      'src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:6c7fde92e0>:mutator-call:a542211f86f4',
       'src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:a142c06cb1>:mutator-call:83fb7347f21a',
-      'src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:bf68fd4b15>:mutator-call:49d1e686b3d7',
+      'src/services/send/sendOutcome.ts#reconcileSendOutcome.<callback:c197b89327>:mutator-call:955c597d7cd5',
       'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:337ad594df75',
-      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:7859b6c0463a',
-      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:8e03f0f2514e',
-      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:c0da22a68cc9',
+      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:28acf1761550',
+      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:898de1af1bad',
+      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:c6a829231b06',
       'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:c1122a9108a5',
-      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:e0d100734a46',
+      'src/services/send/sendOutcome.ts#reconcileSendOutcome:mutator-call:fd4bf486ed0c',
     ].sort(),
   );
   assert.deepEqual(
     failureTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendOutcome.ts#handleSendFailure.<callback:5356b32ae5>:mutator-call:a65aaefa929e',
-      'src/services/send/sendOutcome.ts#handleSendFailure.<callback:5356b32ae5>:mutator-call:d5a9d52ea303',
-      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:625c905681aa',
-      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:8ab9db6efe5d',
+      'src/services/send/sendOutcome.ts#handleSendFailure.<callback:c51018a664>:mutator-call:8e9ed10d1f25',
+      'src/services/send/sendOutcome.ts#handleSendFailure.<callback:c51018a664>:mutator-call:acb797b961ae',
+      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:37d6a9e1a17d',
+      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:83959afcc683',
     ].sort(),
   );
   assert.deepEqual(
@@ -2495,13 +3014,14 @@ test('certifies exactly the reviewed deferred-send service delegation edges', ()
   const scheduledInsertTransaction = findings.filter(
     (finding) =>
       finding.path === 'src/services/send/scheduleService.ts' &&
-      finding.symbol.startsWith('scheduleTextMessage') &&
+      (finding.symbol.startsWith('scheduleTextMessage') ||
+        finding.symbol.startsWith('scheduleAttachmentMessage')) &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
       (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
         finding.target === 'src/db/repositories/scheduled.ts#insertScheduledWithinTransaction' ||
         (finding.detectedContext === 'withDbTransaction' &&
           finding.target.startsWith(
-            'src/services/send/scheduleService.ts#scheduleTextMessage.<callback:',
+            `src/services/send/scheduleService.ts#${finding.symbol.split('.')[0]}.<callback:`,
           ))),
   );
 
@@ -2509,6 +3029,17 @@ test('certifies exactly the reviewed deferred-send service delegation edges', ()
     delegated.map((finding) => finding.id).sort(),
     [
       'src/db/repositories/scheduled.ts#reconcileServerScheduled:mutator-call:6df044728f30',
+      'src/services/send/sendEditService.ts#sendEdit.<callback:cee4f3aecd>:mutator-call:96fbefa9a803',
+      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:77fbf2e8dee5',
+      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:77fbf2e8dee5:2',
+      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:77fbf2e8dee5:3',
+      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:77fbf2e8dee5:4',
+      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:e76fdd58c0ef',
+      'src/services/send/sendEditService.ts#sendUnsend.<callback:e9d709b4f5>:mutator-call:b72f3c0fdd17',
+      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:3f22a481036f',
+      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:589e678b9fda',
+      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:589e678b9fda:2',
+      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:589e678b9fda:3',
       'src/services/send/scheduleService.ts#ensureScheduledRecovery.<callback:e4909b0f75>:mutator-call:b9ac52b2d1ee',
       'src/services/send/scheduleService.ts#recoverInterruptedScheduledRows:mutator-call:8fc2072469ba',
       'src/services/send/scheduleService.ts#runDueScheduled.settle:mutator-call:57f0ecf6912d',
@@ -2523,13 +3054,32 @@ test('certifies exactly the reviewed deferred-send service delegation edges', ()
       'src/services/send/scheduleService.ts#runDueScheduled:mutator-reference:28e61216ad29',
     ].sort(),
   );
-  assert.deepEqual(editApplyTransaction.map((finding) => finding.id).sort(), []);
-  assert.deepEqual(editRevertTransaction.map((finding) => finding.id).sort(), []);
-  assert.deepEqual(unsendApplyTransaction.map((finding) => finding.id).sort(), []);
-  assert.deepEqual(unsendRevertTransaction.map((finding) => finding.id).sort(), []);
+  assert.deepEqual(editApplyTransaction.map((finding) => finding.id).sort(), [
+    'src/services/send/sendEditService.ts#sendEditOnce.<callback:8b116289ce>:mutator-call:c0224c5abc09',
+    'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:133a8e36936e',
+    'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:da23f2c7488f',
+  ]);
+  assert.deepEqual(editRevertTransaction.map((finding) => finding.id).sort(), [
+    'src/services/send/sendEditService.ts#revertOptimisticEdit.<callback:bcbc86276a>:mutator-call:3a035e3ce559',
+    'src/services/send/sendEditService.ts#revertOptimisticEdit:mutator-call:536da85cdca4',
+    'src/services/send/sendEditService.ts#revertOptimisticEdit:mutator-call:bea2b441da12',
+  ]);
+  assert.deepEqual(unsendApplyTransaction.map((finding) => finding.id).sort(), [
+    'src/services/send/sendEditService.ts#sendUnsendOnce.<callback:b5ac380791>:mutator-call:d8925d23fcae',
+    'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:2720dc2e3b4e',
+    'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:9012df5d7cf5',
+  ]);
+  assert.deepEqual(unsendRevertTransaction.map((finding) => finding.id).sort(), [
+    'src/services/send/sendEditService.ts#revertOptimisticUnsend.<callback:c0dd9a9a7b>:mutator-call:34c201dc99ff',
+    'src/services/send/sendEditService.ts#revertOptimisticUnsend:mutator-call:18a5f375d42f',
+    'src/services/send/sendEditService.ts#revertOptimisticUnsend:mutator-call:3fd2e7fe20a8',
+  ]);
   assert.deepEqual(
     scheduledInsertTransaction.map((finding) => finding.id).sort(),
     [
+      'src/services/send/scheduleService.ts#scheduleAttachmentMessage.<callback:4fb59ebbe3>:mutator-call:227bf75f2417',
+      'src/services/send/scheduleService.ts#scheduleAttachmentMessage:mutator-call:6f036b81ff0a',
+      'src/services/send/scheduleService.ts#scheduleAttachmentMessage:mutator-call:e6017b2d0fc4',
       'src/services/send/scheduleService.ts#scheduleTextMessage.<callback:bcbf452138>:mutator-call:ef3b92e88431',
       'src/services/send/scheduleService.ts#scheduleTextMessage:mutator-call:31eb04a40935',
       'src/services/send/scheduleService.ts#scheduleTextMessage:mutator-call:c6c6102cb4ec',
@@ -2558,22 +3108,22 @@ test('certifies the exact residual repository delegations after explicit-owner c
   );
 
   assert.equal(devFixtures.length, 14);
-  assert.equal(intentionalBoundaries.length, 37);
-  assert.equal(scheduledStateMachine.length, 11);
+  assert.equal(intentionalBoundaries.length, 47);
+  assert.equal(scheduledStateMachine.length, 12);
   assert.deepEqual(
     findings.map((finding) => finding.id).sort(),
     [
-      'src/db/repositories/chats.ts#deleteChatLocal:mutator-call:4b0c893b8080',
-      'src/db/repositories/chats.ts#resumeChatPurges:mutator-call:09fe46a88daa',
+      'src/db/repositories/chats.ts#deleteChatLocal:mutator-call:4f80cbb6f44f',
+      'src/db/repositories/chats.ts#resumeChatPurges:mutator-call:9e5da82015da',
       'src/db/repositories/errorReports.ts#insertErrorReport:mutator-call:184b64238855',
       'src/db/repositories/maintenance.ts#clearLocalCache:mutator-call:5111af2df56f',
       'src/db/repositories/maintenance.ts#clearLocalCache:mutator-call:e64441bf4d7f',
       'src/db/repositories/messageTargets.ts#isPendingUnsendTargetAvailable:mutator-call:280d92fbf22d',
       'src/db/repositories/scheduled.ts#reconcileServerScheduled:mutator-call:6df044728f30',
-      'src/features/conversations/devSeed.ts#devSendFake.<callback:afb6e663ad>:mutator-call:02860e861312',
-      'src/features/conversations/devSeed.ts#devSendFakeImage.<callback:daefab75bd>:mutator-call:149c3a85dd8b',
-      'src/features/conversations/devSeed.ts#devSendFakeReaction.<callback:6d65226469>:mutator-call:46a3d5cbab9e',
-      'src/features/conversations/devSeed.ts#queueDevSendReconcile.<callback:a529712610>.reconcile:mutator-call:e5846ec828a7',
+      'src/features/conversations/devSeed.ts#devSendFake.<callback:aa9d83c161>:mutator-call:bccc7d8e3937',
+      'src/features/conversations/devSeed.ts#devSendFakeImage.<callback:9013644e83>:mutator-call:e1c487f58863',
+      'src/features/conversations/devSeed.ts#devSendFakeReaction.<callback:191d06baf6>:mutator-call:d7f94c27bd01',
+      'src/features/conversations/devSeed.ts#queueDevSendReconcile.<callback:23210be24c>.reconcile:mutator-call:3bcd92c0614f',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:263f9a2cf920',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:2d1329c7ad6c',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:4663da7605da',
@@ -2585,17 +3135,18 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:c27d9f7b2550',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:f915d3f0f0ea',
       'src/services/backup/backup.ts#buildBackup:mutator-call:50677029090e',
-      'src/services/backup/backup.ts#buildBackupWithCustomFolders:mutator-call:6eca578bbb50',
+      'src/services/backup/backup.ts#buildBackupWithCustomFolders:mutator-call:1204bfcb57bb',
       'src/services/bootstrap.ts#wipeLocalCache:mutator-call:80814999e829',
       'src/services/bootstrap.ts#wipeLocalCache:mutator-call:972629a8899e',
       'src/services/chatActions.ts#movePinnedChat.<callback:f539212418>:mutator-call:d3f83b7bb36a',
-      'src/services/chatActions.ts#deleteChatForAccount:mutator-call:93672ec10293',
-      'src/services/chatActions.ts#deleteChatForAccount:mutator-call:e98149765f27',
+      'src/services/chatActions.ts#deleteChatForAccount:mutator-call:207621cba542',
+      'src/services/chatActions.ts#deleteChatForAccount:mutator-call:5e3ebbd49e5d',
       'src/services/download/attachmentMediaExportQueue.ts#drainInsideNativeOwner:mutator-call:1f330c870a01',
       'src/services/download/attachmentMediaExportQueue.ts#drainInsideNativeOwner:mutator-call:af7f6f6a32a5',
       'src/services/download/attachmentMediaExportQueue.ts#drainInsideNativeOwner:mutator-call:c9b7c4b08447',
       'src/services/download/attachmentMediaExportQueue.ts#settleFailedExport:mutator-call:f9d37772cbae',
       'src/services/download/autoDownloadAttachments.ts#autoDownloadMessageAttachments:mutator-call:a014f805b5d6',
+      'src/services/messagePreview.ts#readMessagePreview:mutator-call:ebc85b73faa7',
       'src/services/paste/pasteInput.ts#loadPastedAttachmentProtectionPaths:mutator-call:2756cd6e5177',
       'src/services/realtime/incomingEventDispatcher.ts#DurableRealtimeDispatcher.persist:mutator-call:6fde253c2f8b',
       'src/services/realtime/incomingEventDispatcher.ts#DurableRealtimeDispatcher.persist:mutator-call:8c46c894d3aa',
@@ -2606,9 +3157,9 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/services/realtime/incomingEventDrain.ts#IncomingEventDrain.processClaim:mutator-call:b0a846e7dfb7',
       'src/services/realtime/incomingEventDrain.ts#IncomingEventDrain.processClaim:mutator-call:f36bbcf61ec1',
       'src/services/realtime/incomingEventDrain.ts#durableContext.markDbAppliedWithinTransaction:mutator-call:737d7a3d436b',
-      'src/services/send/index.ts#syncScheduledFromServer.<callback:c129c31bd8>:mutator-call:1a675a1023a2',
-      'src/services/send/index.ts#syncScheduledFromServer.<callback:c129c31bd8>:mutator-call:73312ae182ae',
-      'src/services/send/index.ts#retry.<callback:5dfb1a7072>:mutator-call:71b2c14e4854',
+      'src/services/send/index.ts#syncScheduledFromServer.<callback:ae558ebd6a>:mutator-call:e6cbeecf109b',
+      'src/services/send/index.ts#syncScheduledFromServer.<callback:ae558ebd6a>:mutator-call:ff05bdbab110',
+      'src/services/send/index.ts#retry.<callback:3885868ece>:mutator-call:e1c6f0512092',
       'src/services/send/scheduleService.ts#recoverInterruptedScheduledRows:mutator-call:8fc2072469ba',
       'src/services/send/scheduleService.ts#runDueScheduled.writeTerminal:mutator-call:934d3ba3156d',
       'src/services/send/scheduleService.ts#runDueScheduled.writeTerminal:mutator-call:ae2537472d84',
@@ -2616,10 +3167,20 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:d03c79eca4a4',
       'src/services/send/scheduleService.ts#runDueScheduled:mutator-call:fe7c5860f178',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.authorizeTarget:mutator-call:9a263ef84bb1',
+      'src/services/send/sendReactionService.ts#sendIMessageReactionMessage:mutator-call:c5ee7e399fbe',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:0383d1f78e53',
+      'src/services/send/sendEditService.ts#sendEditOnce:mutator-call:e76fdd58c0ef',
+      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:3f22a481036f',
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:8e8d9434e3c4',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:c05517b0fccc',
       'src/db/repositories/outgoing.ts#reconcileExactOutgoingAttemptSuccessWithinTransaction:mutator-call:e0ea8d72f9a8',
       'src/services/search/inboxSearchIndexRebuild.ts#runInboxSearchIndexRebuildPass.<callback:c1fe751ccd>:mutator-call:225fd9b8cc41',
+      'src/services/share/shareIntake.ts#consumeShareIntakeBatch.<callback:f66743b000>:mutator-call:620aadb85228',
+      'src/services/share/shareIntake.ts#consumeShareIntakeBatchIfComplete.<callback:b8c22ef1e5>:mutator-call:e93d618c77a1',
+      'src/services/share/shareIntake.ts#consumeShareIntakeBatchIfComplete.<callback:b8c22ef1e5>:mutator-call:faef10ff18f3',
+      'src/services/share/shareIntake.ts#discardAccountBoundShareIntake:mutator-call:9abbc352b6da',
+      'src/services/share/shareIntake.ts#discardShareIntakeBatch.<callback:49cb1846bc>:mutator-call:9283adeb4a6d',
+      'src/services/share/shareIntake.ts#readShareIntakeReceipt:mutator-call:0194b9ad5aaf',
       'src/services/sync/engine.ts#syncAllChats:mutator-call:d025e1f31f26',
       'src/services/sync/engine.ts#syncChatMessageRange:mutator-call:34deba18cbca',
       'src/services/sync/engine.ts#syncSingleChat:mutator-call:3c8efb8e47a5',
@@ -2636,6 +3197,7 @@ test('certifies exactly the reviewed coordinated-delegation path additions', () 
     'src/features/conversations/useChatScheduledCatchup.ts',
     'src/services/background/realtimePrerequisiteRecovery.ts',
     'src/services/credentialUpgrade.ts',
+    'src/services/remoteMessageDeleteUiService.ts',
   ]);
   const findings = scanProjectDbWrites().filter((finding) => reviewedPaths.has(finding.path));
 
@@ -2675,7 +3237,7 @@ test('certifies exactly the reviewed coordinated-delegation path additions', () 
         'transaction-coordinator',
       ],
       [
-        'src/db/repositories/messageTargets.ts#resolvePendingUnsendTarget:mutator-call:e492825f2b0e',
+        'src/db/repositories/messageTargets.ts#resolvePendingUnsendTarget:mutator-call:c91a3ca106a8',
         'transaction-coordinator',
       ],
       [
@@ -2691,23 +3253,23 @@ test('certifies exactly the reviewed coordinated-delegation path additions', () 
         'coordinated-delegation',
       ],
       [
-        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:ef6c73d2e3>:mutator-call:33836f5be583',
+        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:5b78467294>:mutator-call:542d51137fc0',
         'coordinated-delegation',
       ],
       [
-        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:ef6c73d2e3>:mutator-call:388a47c488a4',
+        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:5b78467294>:mutator-call:7518b28beb41',
         'coordinated-delegation',
       ],
       [
-        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:ef6c73d2e3>:mutator-call:c34bd13e0b20',
+        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:5b78467294>:mutator-call:c5217ff62b0c',
         'coordinated-delegation',
       ],
       [
-        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:ef6c73d2e3>:mutator-call:db9e859c0747',
+        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:5b78467294>:mutator-call:f6969f77e34f',
         'coordinated-delegation',
       ],
       [
-        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:ef6c73d2e3>:mutator-call:de8c9a13c5f0',
+        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:5b78467294>:mutator-call:fa82244b941a',
         'coordinated-delegation',
       ],
       [
@@ -2734,10 +3296,155 @@ test('certifies exactly the reviewed coordinated-delegation path additions', () 
         'src/services/credentialUpgrade.ts#runCredentialUpgrade:mutator-call:b60b6329bbde',
         'coordinated-delegation',
       ],
+      [
+        'src/services/remoteMessageDeleteUiService.ts#deleteMessageFromMac.<callback:72c537d206>:mutator-call:a09ff9975362',
+        'coordinated-delegation',
+      ],
     ].sort(),
   );
 });
 
+test('certifies exactly the reviewed SHARE-02 intake delegation edges', () => {
+  const findings = scanProjectDbWrites().filter((finding) => {
+    if (
+      finding.path === 'src/services/share/shareIntake.ts' ||
+      finding.path === 'src/ui/ShareIntentHandler.tsx'
+    ) {
+      return true;
+    }
+    if (finding.path === 'app/(app)/chat/[guid].tsx') {
+      return finding.target !== 'src/services/messagePreview.ts#readMessagePreview';
+    }
+    if (finding.path === 'app/(app)/new-chat.tsx') {
+      return (
+        finding.target !== 'src/services/chatActions.ts#createNewChat' &&
+        finding.target !== 'app/(app)/new-chat.tsx#NewChatScreen.onStart'
+      );
+    }
+    return false;
+  });
+
+  assert.deepEqual(
+    findings.map(({ id, target, detectedContext }) => [id, target, detectedContext]).sort(),
+    [
+      [
+        'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:06edea0af9>.<callback:f613d3ead3>:mutator-call:96070fc1908f',
+        'src/services/share/shareIntake.ts#readShareIntakeReceipt',
+        'coordinated-delegation',
+      ],
+      [
+        'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:414f8cbf59>.<callback:5a7bad110f>:mutator-call:599fa6a378a7',
+        'src/services/share/shareIntake.ts#discardShareIntakeItem',
+        'coordinated-delegation',
+      ],
+      [
+        'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:b8617f0f25>.<callback:16329d1004>:mutator-call:afd0ed6f1e46',
+        'src/services/share/shareIntake.ts#admitShareIntakeTextDraft',
+        'coordinated-delegation',
+      ],
+      [
+        'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:c8deb5b511>.<callback:293e0b6208>:mutator-call:a4cbb531c586',
+        'src/services/share/shareIntake.ts#readShareIntakeReceipt',
+        'coordinated-delegation',
+      ],
+      [
+        'app/(app)/new-chat.tsx#NewChatScreen.<callback:0c40702b3c>.<callback:ae3680910a>:mutator-call:f73d80d7970d',
+        'src/services/share/shareIntake.ts#readShareIntakeReceipt',
+        'coordinated-delegation',
+      ],
+      [
+        'app/(app)/new-chat.tsx#NewChatScreen.onStart.<callback:aa379435cb>:mutator-call:f07a3220abc4',
+        'src/services/share/shareIntake.ts#prepareShareIntakeNewChatPlan',
+        'coordinated-delegation',
+      ],
+      [
+        'app/(app)/new-chat.tsx#NewChatScreen.removeStaged.<callback:381edc2f98>:mutator-call:28ee2d86f7a3',
+        'src/services/share/shareIntake.ts#discardShareIntakeItem',
+        'coordinated-delegation',
+      ],
+      [
+        'src/services/share/shareIntake.ts#admitShareIntakeTextDraft.<callback:cb922ac992>:mutator-call:e2f680a53388',
+        'src/db/repositories/shareIntakeReceipts.ts#admitShareIntakeTextDraftWithinTransaction',
+        'withDbTransaction',
+      ],
+      [
+        'src/services/share/shareIntake.ts#admitShareIntakeTextDraft:mutator-call:22bf7194136e',
+        'src/services/share/shareIntake.ts#admitShareIntakeTextDraft.<callback:cb922ac992>',
+        'withDbTransaction',
+      ],
+      [
+        'src/services/share/shareIntake.ts#admitShareIntakeTextDraft:mutator-call:c840fba1e912',
+        'src/db/transaction.ts#withDbTransaction',
+        'transaction-coordinator',
+      ],
+      [
+        'src/services/share/shareIntake.ts#consumeShareIntakeBatch.<callback:f66743b000>:mutator-call:620aadb85228',
+        'src/db/repositories/shareIntakeReceipts.ts#deleteShareIntakeReceipt',
+        'coordinated-delegation',
+      ],
+      [
+        'src/services/share/shareIntake.ts#consumeShareIntakeBatchIfComplete.<callback:b8c22ef1e5>:mutator-call:e93d618c77a1',
+        'src/db/repositories/shareIntakeReceipts.ts#getShareIntakeReceipt',
+        'coordinated-delegation',
+      ],
+      [
+        'src/services/share/shareIntake.ts#consumeShareIntakeBatchIfComplete.<callback:b8c22ef1e5>:mutator-call:faef10ff18f3',
+        'src/db/repositories/shareIntakeReceipts.ts#deleteShareIntakeReceipt',
+        'coordinated-delegation',
+      ],
+      [
+        'src/services/share/shareIntake.ts#discardAccountBoundShareIntake:mutator-call:9abbc352b6da',
+        'src/db/repositories/shareIntakeReceipts.ts#listShareIntakeReceiptBatchIds',
+        'coordinated-delegation',
+      ],
+      [
+        'src/services/share/shareIntake.ts#discardShareIntakeBatch.<callback:49cb1846bc>:mutator-call:9283adeb4a6d',
+        'src/db/repositories/shareIntakeReceipts.ts#deleteShareIntakeReceipt',
+        'coordinated-delegation',
+      ],
+      [
+        'src/services/share/shareIntake.ts#discardShareIntakeItem.<callback:9777bdb4a6>:mutator-call:90282e904d8f',
+        'src/db/repositories/shareIntakeReceipts.ts#discardShareIntakeItemWithinTransaction',
+        'withDbTransaction',
+      ],
+      [
+        'src/services/share/shareIntake.ts#discardShareIntakeItem:mutator-call:35f793108f79',
+        'src/services/share/shareIntake.ts#discardShareIntakeItem.<callback:9777bdb4a6>',
+        'withDbTransaction',
+      ],
+      [
+        'src/services/share/shareIntake.ts#discardShareIntakeItem:mutator-call:e15b7c40f12d',
+        'src/db/transaction.ts#withDbTransaction',
+        'transaction-coordinator',
+      ],
+      [
+        'src/services/share/shareIntake.ts#prepareShareIntakeNewChatPlan.<callback:f45ff1fde5>:mutator-call:bd2ced2cf645',
+        'src/db/repositories/shareIntakeReceipts.ts#prepareShareIntakeNewChatPlanWithinTransaction',
+        'withDbTransaction',
+      ],
+      [
+        'src/services/share/shareIntake.ts#prepareShareIntakeNewChatPlan:mutator-call:3389a46ba1af',
+        'src/db/transaction.ts#withDbTransaction',
+        'transaction-coordinator',
+      ],
+      [
+        'src/services/share/shareIntake.ts#prepareShareIntakeNewChatPlan:mutator-call:b70d0164d34f',
+        'src/services/share/shareIntake.ts#prepareShareIntakeNewChatPlan.<callback:f45ff1fde5>',
+        'withDbTransaction',
+      ],
+      [
+        'src/services/share/shareIntake.ts#readShareIntakeReceipt:mutator-call:0194b9ad5aaf',
+        'src/db/repositories/shareIntakeReceipts.ts#getShareIntakeReceipt',
+        'coordinated-delegation',
+      ],
+      [
+        'src/ui/ShareIntentHandler.tsx#ShareIntentNavigatorInner.<callback:6c24eb213d>.<callback:6762af135c>.<callback:b17f885e16>:mutator-call:e7bd003c6756',
+        'src/services/share/shareIntake.ts#readShareIntakeReceipt',
+        'coordinated-delegation',
+      ],
+    ].sort(),
+  );
+});
 test('certifies only the reviewed PERF-02 inbox index worker delegation', () => {
   const findings = scanProjectDbWrites().filter(
     (finding) => finding.path === 'src/services/search/inboxSearchIndexRebuild.ts',
@@ -2806,73 +3513,81 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#discardMessage.<callback:f7610a8b8e>:mutator-call:62b0ffba8707',
-      'src/services/send/index.ts#discardMessage.<callback:f7610a8b8e>:mutator-call:bba07d1c582e',
-      'src/services/send/index.ts#editScheduled.<callback:f519119574>:mutator-call:3e0d7582bc2c',
-      'src/services/send/index.ts#editScheduled.<callback:f519119574>:mutator-call:3e0d7582bc2c:2',
-      'src/services/send/index.ts#editScheduled.<callback:f519119574>:mutator-call:b3039aaa43d0',
-      'src/services/send/index.ts#editScheduled.<callback:f519119574>:mutator-call:bdc77bdcd522',
+      'src/services/send/index.ts#acquireAndSendCurrentLocation.<callback:33ed800ebd>:mutator-call:e5e55f9928f0',
+      'src/services/send/index.ts#discardMessage.<callback:d56992311f>:mutator-call:711fed55d46c',
+      'src/services/send/index.ts#discardMessage.<callback:d56992311f>:mutator-call:e01b25cdb9f1',
+      'src/services/send/index.ts#editScheduled.<callback:99fe429786>:mutator-call:a904c149afd2',
+      'src/services/send/index.ts#editScheduled.<callback:99fe429786>:mutator-call:a904c149afd2:2',
+      'src/services/send/index.ts#editScheduled.<callback:99fe429786>:mutator-call:e134052c57c0',
+      'src/services/send/index.ts#editScheduled.<callback:99fe429786>:mutator-call:2ce18fb2b248',
       'src/services/send/index.ts#fireDueScheduled.<callback:5c87ee99e7>:mutator-call:60a4834011d2',
       'src/services/send/index.ts#fireDueScheduledWithDevelopmentSender.<callback:0d6a663823>:mutator-call:a9efdbe22d70',
       'src/services/send/index.ts#pickAndSendContact.<callback:9bcfe7b86a>:mutator-call:a2100e00af93',
-      'src/services/send/index.ts#react.<callback:2fba6f67ec>:mutator-call:e25ee15503af',
-      'src/services/send/index.ts#recoverOutgoing:mutator-call:03fa495ae369',
-      'src/services/send/index.ts#reply.<callback:693037f6f4>:mutator-call:9042a08c81dd',
-      'src/services/send/index.ts#retry.<callback:5dfb1a7072>:mutator-call:5d0ceeab3069',
-      'src/services/send/index.ts#retry.<callback:5dfb1a7072>:mutator-call:71b2c14e4854',
+      'src/services/send/index.ts#react.<callback:ee1497bc74>:mutator-call:23bf2daa57df',
+      'src/services/send/index.ts#react.<callback:ee1497bc74>:mutator-call:80dba72fdcd7',
+      'src/services/send/index.ts#recoverOutgoing:mutator-call:cb742ac578a2',
+      'src/services/send/index.ts#reply.<callback:f041cfa884>:mutator-call:d65d22823243',
+      'src/services/send/index.ts#retry.<callback:3885868ece>:mutator-call:22611de0becd',
+      'src/services/send/index.ts#retry.<callback:3885868ece>:mutator-call:e1c6f0512092',
       'src/services/send/index.ts#schedule.<callback:f60bffc979>:mutator-call:29e6d7bb7f61',
+      'src/services/send/index.ts#scheduleAttachment.<callback:dd8aacac8c>:mutator-call:636217d449b1',
       'src/services/send/index.ts#send.<callback:939d3d95aa>:mutator-call:9d6fc3b4c735',
       'src/services/send/index.ts#sendContactCard.<callback:4de55a3dfc>:mutator-call:6b3aa4db6f03',
+      'src/services/send/index.ts#sendEffect.<callback:641db7ef71>:mutator-call:6e5d06d3d0dd',
       'src/services/send/index.ts#sendImage.<callback:cb0dce58ca>:mutator-call:3f3c0bb5866e',
-      'src/services/send/index.ts#sendImages.<callback:edb2f7e555>.<callback:970ea1cb4e>:mutator-call:b79ae2665830',
+      'src/services/send/index.ts#sendFormatted.<callback:08752b6443>:mutator-call:dc5904fad430',
+      'src/services/send/index.ts#sendImages.<callback:62fc43aa6a>.<callback:1f05e49809>:mutator-call:fede9cf3d93a',
+      'src/services/send/index.ts#sendMention.<callback:f3e30f8bd8>:mutator-call:addd044d6c91',
       'src/services/send/index.ts#sendTextAttachment.<callback:d665192176>:mutator-call:db5414457e2a',
-      'src/services/send/index.ts#syncScheduledFromServer.<callback:c129c31bd8>:mutator-call:1a675a1023a2',
-      'src/services/send/index.ts#syncScheduledFromServer.<callback:c129c31bd8>:mutator-call:73312ae182ae',
+      'src/services/send/index.ts#sendVoice.<callback:8b03b83b03>:mutator-call:f57619a3df8b',
+      'src/services/send/index.ts#syncScheduledFromServer.<callback:ae558ebd6a>:mutator-call:e6cbeecf109b',
+      'src/services/send/index.ts#syncScheduledFromServer.<callback:ae558ebd6a>:mutator-call:ff05bdbab110',
     ].sort(),
   );
 
   assert.deepEqual(
     cancelScheduledTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#cancelScheduled.<callback:65476a8afb>.<callback:a851d931f6>:mutator-call:3c7e71894c98',
-      'src/services/send/index.ts#cancelScheduled.<callback:65476a8afb>:mutator-call:0b12396b320f',
-      'src/services/send/index.ts#cancelScheduled.<callback:65476a8afb>:mutator-call:ac5ab63b2745',
+      'src/services/send/index.ts#cancelScheduled.<callback:74990f5359>.<callback:a851d931f6>:mutator-call:98bd0c60c01b',
+      'src/services/send/index.ts#cancelScheduled.<callback:74990f5359>:mutator-call:8046b153df47',
+      'src/services/send/index.ts#cancelScheduled.<callback:74990f5359>:mutator-call:f07d151f400f',
     ].sort(),
   );
   assert.deepEqual(
     retryClaimTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#retry.<callback:5dfb1a7072>.<callback:26e204e71c>:mutator-call:19e925bb96fd',
-      'src/services/send/index.ts#retry.<callback:5dfb1a7072>:mutator-call:5337bdc97950',
-      'src/services/send/index.ts#retry.<callback:5dfb1a7072>:mutator-call:99e71b4c3048',
+      'src/services/send/index.ts#retry.<callback:3885868ece>.<callback:83b6f6c171>:mutator-call:2025f0e6e74c',
+      'src/services/send/index.ts#retry.<callback:3885868ece>:mutator-call:d2625ba0d157',
+      'src/services/send/index.ts#retry.<callback:3885868ece>:mutator-call:da3337f5ad26',
     ].sort(),
   );
   assert.deepEqual(
     discardMessageTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#discardMessage.<callback:f7610a8b8e>.<callback:5fed71ee07>:mutator-call:986b92faa7d9',
-      'src/services/send/index.ts#discardMessage.<callback:f7610a8b8e>.<callback:5fed71ee07>:mutator-call:a8d83da321cf',
-      'src/services/send/index.ts#discardMessage.<callback:f7610a8b8e>:mutator-call:1abb626333b6',
-      'src/services/send/index.ts#discardMessage.<callback:f7610a8b8e>:mutator-call:d2b77772e5ec',
+      'src/services/send/index.ts#discardMessage.<callback:d56992311f>.<callback:2f2bd8964d>:mutator-call:49877dc8889e',
+      'src/services/send/index.ts#discardMessage.<callback:d56992311f>.<callback:2f2bd8964d>:mutator-call:e7cdb3981cb4',
+      'src/services/send/index.ts#discardMessage.<callback:d56992311f>:mutator-call:48f2ef26a5f0',
+      'src/services/send/index.ts#discardMessage.<callback:d56992311f>:mutator-call:7eee8f497f7f',
+      'src/services/send/index.ts#discardMessage.<callback:d56992311f>:mutator-call:c7545b1ceff6',
     ].sort(),
   );
   assert.deepEqual(
     clearScheduledHistoryTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:48588e5ef4>.<callback:be2a685944>:mutator-call:211114e3d101',
-      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:48588e5ef4>:mutator-call:2a14c566d346',
-      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:48588e5ef4>:mutator-call:a18389a7fa4c',
+      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:b9eca62666>.<callback:be2a685944>:mutator-call:8b4ffa7e0233',
+      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:b9eca62666>:mutator-call:248ae638f046',
+      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:b9eca62666>:mutator-call:e7be6efd9c5f',
     ].sort(),
   );
   assert.deepEqual(
     editScheduledTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#editScheduled.<callback:f519119574>.persistPatch.<callback:4cb2405734>:mutator-call:580db6ed626e',
-      'src/services/send/index.ts#editScheduled.<callback:f519119574>.persistPatch:mutator-call:4c70b4d099b8',
-      'src/services/send/index.ts#editScheduled.<callback:f519119574>.persistPatch:mutator-call:9a5e1dfb2592',
+      'src/services/send/index.ts#editScheduled.<callback:99fe429786>.persistPatch.<callback:4cb2405734>:mutator-call:e89ad51388d0',
+      'src/services/send/index.ts#editScheduled.<callback:99fe429786>.persistPatch:mutator-call:17f8fd722d03',
+      'src/services/send/index.ts#editScheduled.<callback:99fe429786>.persistPatch:mutator-call:cf16b4c78713',
     ].sort(),
   );
-  assert.equal(sendFrontDoorFindings.length, 38);
+  assert.equal(sendFrontDoorFindings.length, 46);
 });
 
 test('certifies exactly the reviewed conversation-action delegation edges', () => {
@@ -2909,11 +3624,11 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
     [
-      'src/features/conversations/devSeed.ts#devSendFake.<callback:afb6e663ad>:mutator-call:02860e861312',
-      'src/features/conversations/devSeed.ts#devSendFakeImage.<callback:daefab75bd>:mutator-call:149c3a85dd8b',
-      'src/features/conversations/devSeed.ts#devSendFakeReaction.<callback:6d65226469>:mutator-call:46a3d5cbab9e',
-      'src/features/conversations/devSeed.ts#queueDevSendReconcile.<callback:a529712610>.reconcile:mutator-call:e5846ec828a7',
-      'src/features/conversations/devSeed.ts#queueDevSendReconcile.<callback:a529712610>:mutator-reference:7993eb4dd862',
+      'src/features/conversations/devSeed.ts#devSendFake.<callback:aa9d83c161>:mutator-call:bccc7d8e3937',
+      'src/features/conversations/devSeed.ts#devSendFakeImage.<callback:9013644e83>:mutator-call:e1c487f58863',
+      'src/features/conversations/devSeed.ts#devSendFakeReaction.<callback:191d06baf6>:mutator-call:d7f94c27bd01',
+      'src/features/conversations/devSeed.ts#queueDevSendReconcile.<callback:23210be24c>.reconcile:mutator-call:3bcd92c0614f',
+      'src/features/conversations/devSeed.ts#queueDevSendReconcile.<callback:23210be24c>:mutator-reference:ccd50e1f6192',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:263f9a2cf920',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:2d1329c7ad6c',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:4663da7605da',
@@ -2930,26 +3645,26 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:547b14db746a',
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:8ed8e4254d1b',
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:8ed8e4254d1b:2',
-      'src/services/chatActions.ts#deleteChatForAccount:mutator-call:93672ec10293',
+      'src/services/chatActions.ts#deleteChatForAccount:mutator-call:207621cba542',
       'src/services/chatActions.ts#deleteChatForAccount:mutator-call:d3a2be781833',
-      'src/services/chatActions.ts#deleteChatForAccount:mutator-call:e98149765f27',
+      'src/services/chatActions.ts#deleteChatForAccount:mutator-call:5e3ebbd49e5d',
       'src/services/chatActions.ts#movePinnedChat.<callback:f539212418>:mutator-call:d3f83b7bb36a',
     ].sort(),
   );
   assert.deepEqual(
     markReadTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/chatActions.ts#markRead.<callback:8454ed5eb1>.<callback:f2c8eca326>:mutator-call:75a7cd28ce05',
-      'src/services/chatActions.ts#markRead.<callback:8454ed5eb1>:mutator-call:496a45663e99',
-      'src/services/chatActions.ts#markRead.<callback:8454ed5eb1>:mutator-call:8a51b0a532fb',
+      'src/services/chatActions.ts#markRead.<callback:1c05883cfe>.<callback:d3e99abf2d>:mutator-call:ce0273675844',
+      'src/services/chatActions.ts#markRead.<callback:1c05883cfe>:mutator-call:4e01bfe9c298',
+      'src/services/chatActions.ts#markRead.<callback:1c05883cfe>:mutator-call:d60a61ea9709',
     ].sort(),
   );
   assert.deepEqual(
     markUnreadTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/chatActions.ts#markUnread.<callback:35dead9faf>.<callback:add0a7f05b>:mutator-call:d617aa51eac6',
-      'src/services/chatActions.ts#markUnread.<callback:35dead9faf>:mutator-call:2482c55a1134',
-      'src/services/chatActions.ts#markUnread.<callback:35dead9faf>:mutator-call:947e8e024b90',
+      'src/services/chatActions.ts#markUnread.<callback:2438a8f81e>.<callback:add0a7f05b>:mutator-call:ff13dcdb3b20',
+      'src/services/chatActions.ts#markUnread.<callback:2438a8f81e>:mutator-call:074ca3bcae7b',
+      'src/services/chatActions.ts#markUnread.<callback:2438a8f81e>:mutator-call:1fe3e7e0cbfd',
     ].sort(),
   );
   assert.deepEqual(
@@ -2999,34 +3714,34 @@ test('certifies exactly the reviewed sync delegation edges', () => {
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
     [
-      'src/services/background/backgroundSync.ts#executeBackgroundSyncTask.drainOutgoing:mutator-call:392f6b98c2d4',
-      'src/services/background/backgroundSync.ts#executeBackgroundSyncTask.synchronize:mutator-call:c2262a9f7184',
+      'src/services/background/backgroundSync.ts#executeBackgroundSyncTask.drainOutgoing:mutator-call:a18dc3e2d8d1',
+      'src/services/background/backgroundSync.ts#executeBackgroundSyncTask.synchronize:mutator-call:cdab1e96e395',
       'src/services/background/backgroundSync.ts#recoverAndDrainBackgroundSchedules.<callback:bb391a2ee5>:mutator-call:a0022079e125',
-      'src/services/sync/engine.ts#fullSync:mutator-call:c1a685cf20b7',
+      'src/services/sync/engine.ts#fullSync:mutator-call:adbb4138d2b0',
       'src/services/sync/engine.ts#fullSync:mutator-call:e0e0072c3545',
       'src/services/sync/engine.ts#syncAllChats:mutator-call:d025e1f31f26',
       'src/services/sync/engine.ts#syncChatMessageRange:mutator-call:34deba18cbca',
       'src/services/sync/engine.ts#syncChatMessages:mutator-call:2b2df2741e83',
       'src/services/sync/engine.ts#syncSingleChat:mutator-call:3c8efb8e47a5',
-      'src/services/syncControl.ts#ensureChatSynced.<callback:910670867e>:mutator-call:c1b6e98cef19',
+      'src/services/syncControl.ts#ensureChatSynced.<callback:30448c6a99>:mutator-call:d213a1898cbd',
       'src/services/syncControl.ts#runSync:mutator-call:15ffb54cca3e',
       'src/services/syncControl.ts#runSync:mutator-call:15ffb54cca3e:2',
       'src/services/syncControl.ts#runSync:mutator-call:3d1b923ea415',
-      'src/services/syncControl.ts#runSync:mutator-call:471d6b8fb139',
+      'src/services/syncControl.ts#runSync:mutator-call:1c0aa0474d53',
       'src/services/syncControl.ts#runSync:mutator-call:535bd795208b',
       'src/services/syncControl.ts#runSync:mutator-call:5e67ff4f7781',
-      'src/services/syncControl.ts#runSync:mutator-call:60ab7d89146f',
+      'src/services/syncControl.ts#runSync:mutator-call:a4f724183115',
       'src/services/syncControl.ts#runSync:mutator-call:62e252e57364',
       'src/services/syncControl.ts#runSync:mutator-call:969f8e9b7657',
       'src/services/syncControl.ts#runSync:mutator-call:cad4b657fd83',
       'src/services/syncControl.ts#runSync:mutator-call:d8dbede56cd8',
-      'src/services/syncControl.ts#runSync:mutator-call:e4e7d86ff911',
+      'src/services/syncControl.ts#runSync:mutator-call:f47292e12423',
       'src/services/syncControl.ts#runSync:mutator-call:f2bc335e17da',
       'src/services/syncControl.ts#runSync:mutator-call:f2bc335e17da:2',
       'src/services/syncControl.ts#startFullRepair.<callback:a019ed9cf6>:mutator-call:7349d6139eeb',
       'src/services/syncControl.ts#startSync.<callback:4c2f340da4>:mutator-call:7042cc5b18c2',
-      'src/services/syncControl.ts#startTargetedChatRepair.<callback:91c5cfd2af>:mutator-call:49a79397a62e',
-      'src/services/syncControl.ts#startTargetedChatRepair.<callback:91c5cfd2af>:mutator-call:be3392d89cc1',
+      'src/services/syncControl.ts#startTargetedChatRepair.<callback:53a6bf4b67>:mutator-call:aeccb187738d',
+      'src/services/syncControl.ts#startTargetedChatRepair.<callback:53a6bf4b67>:mutator-call:d8a6f64d5ae8',
     ].sort(),
   );
   assert.deepEqual(
@@ -3133,7 +3848,7 @@ test('certifies exactly the reviewed attachment-cache transaction-context bounda
       'src/services/download/attachmentCacheRecovery.ts#retireInactiveFiles:mutator-call:0004c1106585',
       'src/services/paste/pasteInput.ts#attachPasteListener:mutator-reference:b3d6e6429035',
       'src/services/paste/pasteInput.ts#loadPastedAttachmentProtectionPaths:mutator-call:2756cd6e5177',
-      'src/services/send/outgoingPasteOwnership.ts#createOutgoingPasteOwnershipPreparer.<callback:ca2b04b199>:mutator-call:4adc4cfd204e',
+      'src/services/send/outgoingPasteOwnership.ts#createOutgoingPasteOwnershipPreparer.<callback:59fde12f29>:mutator-call:98d3bf462332',
     ].sort(),
   );
   assert.equal(leaves.length, 16);
@@ -3177,7 +3892,7 @@ test('certifies exactly the reviewed attachment-download delegation boundary', (
       'app/(app)/media/[guid].tsx#MediaViewer:mutator-reference:d9da1c4d8c72',
       'app/(app)/media/[guid].tsx#MediaViewer:mutator-reference:f2d99eef8eea',
       'src/services/download/downloadService.ts#ensureDownloaded:mutator-call:aacca386ab26',
-      'src/services/download/downloadService.ts#ensureDownloadedOutcome:mutator-call:b92371d908fb',
+      'src/services/download/downloadService.ts#ensureDownloadedOutcome:mutator-call:61546bdff34b',
       'src/services/download/index.ts#download:mutator-call:31f3d4057a6a',
       'src/services/download/index.ts#downloadScope.reserveCache:mutator-call:9a68094fc094',
       'src/services/download/index.ts#downloadScope.reuseCache:mutator-call:18cfc11c39e4',
@@ -3225,17 +3940,23 @@ test('eliminates the reviewed generic cache and contact transaction callbacks', 
       finding.id ===
         'src/db/repositories/contacts.ts#applyContactMatchWithinTransaction:drizzle-update:5bf953ebc01e' ||
       finding.id ===
-        'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:f0572f0ddc>:mutator-call:098c54160192' ||
+        'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>:mutator-call:39217d2483ca' ||
       finding.id ===
-        'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:f0572f0ddc>:mutator-call:be38fd49cfc4' ||
+        'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>:mutator-call:57243fd8d6bd' ||
       finding.id ===
-        'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:f0572f0ddc>.<callback:85e2728caa>:mutator-call:cebe12beaa6a' ||
+        'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>.<callback:998d60ab14>:mutator-call:2c9931e83a2f' ||
       finding.id ===
-        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:ca444a7b8b>:mutator-call:81d14570571e' ||
+        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>:mutator-call:4d11d05b9300' ||
       finding.id ===
-        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:ca444a7b8b>:mutator-call:f096b5d8da50' ||
+        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>:mutator-call:85a839fda316' ||
       finding.id ===
-        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:ca444a7b8b>.<callback:d4b3663967>:mutator-call:efd43b2c46fc' ||
+        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>.<callback:b160d8104b>:mutator-call:6e98f3765bbd' ||
+      finding.id ===
+        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:fb9ecba88a>:mutator-call:03929b5466d2' ||
+      finding.id ===
+        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:fb9ecba88a>:mutator-call:1394e1a87db1' ||
+      finding.id ===
+        'src/db/repositories/contacts.ts#matchContactsToHandles:drizzle-update:39efd42dac33' ||
       finding.id ===
         'src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery.<callback:909eb19064>:mutator-call:95c779ab9d88',
   );
@@ -3248,27 +3969,39 @@ test('eliminates the reviewed generic cache and contact transaction callbacks', 
         'withDbTransaction',
       ],
       [
-        'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:f0572f0ddc>:mutator-call:098c54160192',
+        'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>:mutator-call:39217d2483ca',
         'withDbTransaction',
       ],
       [
-        'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:f0572f0ddc>:mutator-call:be38fd49cfc4',
+        'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>:mutator-call:57243fd8d6bd',
         'transaction-coordinator',
       ],
       [
-        'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:f0572f0ddc>.<callback:85e2728caa>:mutator-call:cebe12beaa6a',
+        'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>.<callback:998d60ab14>:mutator-call:2c9931e83a2f',
         'withDbTransaction',
       ],
       [
-        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:ca444a7b8b>:mutator-call:81d14570571e',
+        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>:mutator-call:4d11d05b9300',
         'transaction-coordinator',
       ],
       [
-        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:ca444a7b8b>:mutator-call:f096b5d8da50',
+        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>:mutator-call:85a839fda316',
         'withDbTransaction',
       ],
       [
-        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:ca444a7b8b>.<callback:d4b3663967>:mutator-call:efd43b2c46fc',
+        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>.<callback:b160d8104b>:mutator-call:6e98f3765bbd',
+        'withDbTransaction',
+      ],
+      [
+        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:fb9ecba88a>:mutator-call:03929b5466d2',
+        'transaction-coordinator',
+      ],
+      [
+        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:fb9ecba88a>:mutator-call:1394e1a87db1',
+        'withDbTransaction',
+      ],
+      [
+        'src/db/repositories/contacts.ts#matchContactsToHandles:drizzle-update:39efd42dac33',
         'withDbTransaction',
       ],
       [
@@ -3355,8 +4088,8 @@ test('certifies exactly the reviewed outer-lifecycle delegation boundary', () =>
       'src/services/realtimeControl.ts#approveNewServerUrl.reconnect:mutator-call:8f17c75f698b',
       'src/services/realtimeControl.ts#dispatchWithContext:mutator-call:723b4235f7f7',
       'src/services/realtimeControl.ts#finishRealtimeRecoveryCollector:mutator-call:4b930e6e8a7e',
-      'src/services/realtimeControl.ts#realtimeSink.<callback:c9e203ee58>.<callback:df541decac>:mutator-call:3c328ee86acb',
-      'src/services/realtimeControl.ts#realtimeSink.<callback:c9e203ee58>:mutator-call:d71d8edcccb5',
+      'src/services/realtimeControl.ts#realtimeSink.<callback:d8c17dcb97>.<callback:c545060ff3>:mutator-call:73ae70201f6e',
+      'src/services/realtimeControl.ts#realtimeSink.<callback:d8c17dcb97>:mutator-call:63bbf00efc38',
       'src/services/realtimeControl.ts#resumeDesiredRealtime.<callback:edf3121ba2>:mutator-call:ab508913e108',
       'src/services/realtimeControl.ts#resumeDesiredRealtime:mutator-call:2c6798b642a8',
       'src/services/realtimeControl.ts#startRealtime.<callback:edf3121ba2>:mutator-call:3cd6e7e8d376',
@@ -3405,6 +4138,165 @@ test('certifies exactly the five reviewed startup and runtime driver adapter cal
     false,
   );
 });
+
+test('certifies exactly the DEV-only disposable PERF-02 Android benchmark path', () => {
+  const findings = scanProjectDbWrites();
+  const benchmark = findings.filter(
+    (finding) =>
+      (finding.path === 'app/(app)/home.tsx' &&
+        (finding.symbol === 'Home.onBenchmark' ||
+          finding.target === 'app/(app)/home.tsx#Home.onBenchmark')) ||
+      (finding.path === 'src/db/database.ts' &&
+        ['deletePerf02BenchmarkDatabase', 'runPerf02DeviceInboxBenchmark'].includes(
+          finding.symbol,
+        )) ||
+      (finding.path === 'src/db/database.ts' &&
+        finding.symbol.startsWith('runPerf02DeviceInboxBenchmark.')) ||
+      finding.path === 'src/db/performance/deviceInboxBenchmark.ts' ||
+      (finding.path === 'src/services/index.ts' &&
+        finding.symbol === 'runDevPerf02InboxBenchmark') ||
+      finding.path === 'src/ui/conversations/PerfInboxBenchmarkScreen.tsx',
+  );
+  assert.deepEqual(
+    benchmark.map((finding) => finding.id).sort(),
+    [
+      'app/(app)/home.tsx#Home.onBenchmark:mutator-call:404657efb4ed',
+      'app/(app)/home.tsx#Home:mutator-reference:2c3804b5d218',
+      'src/db/database.ts#deletePerf02BenchmarkDatabase:native-database-delete:625cf98f5fe0',
+      'src/db/database.ts#runPerf02DeviceInboxBenchmark.bump.<callback:b9bbd67d96>:mutator-call:8e9f67feff84',
+      'src/db/database.ts#runPerf02DeviceInboxBenchmark:mutator-call:261695433070',
+      'src/db/database.ts#runPerf02DeviceInboxBenchmark:mutator-call:40f3a5d86089',
+      'src/db/database.ts#runPerf02DeviceInboxBenchmark:sql-pragma:d0b6d4d17bda',
+      'src/db/database.ts#runPerf02DeviceInboxBenchmark:mutator-call:f3670fbe6904',
+      'src/db/database.ts#runPerf02DeviceInboxBenchmark:mutator-call:35d19c00534b',
+      'src/db/database.ts#runPerf02DeviceInboxBenchmark:mutator-call:40f3a5d86089:2',
+      'src/db/performance/deviceInboxBenchmark.ts#bumpDeviceInboxBenchmarkFixture:mutator-call:2d9a4382f5e3',
+      'src/db/performance/deviceInboxBenchmark.ts#bumpDeviceInboxBenchmarkFixture:mutator-call:a1193f95efba',
+      'src/db/performance/deviceInboxBenchmark.ts#bumpDeviceInboxBenchmarkFixture:sql-insert:365869a94c0b',
+      'src/db/performance/deviceInboxBenchmark.ts#bumpDeviceInboxBenchmarkFixture:sql-update:a57808001967',
+      'src/db/performance/deviceInboxBenchmark.ts#seedFixture:mutator-call:1678bfc56fc9',
+      'src/db/performance/deviceInboxBenchmark.ts#seedFixture:mutator-call:eae4b93f3a8c',
+      'src/db/performance/deviceInboxBenchmark.ts#seedFixture:sql-insert:6e5c9de934e3',
+      'src/db/performance/deviceInboxBenchmark.ts#seedFixture:sql-insert:5745bda7cb08',
+      'src/db/performance/deviceInboxBenchmark.ts#seedFixture:sql-insert:ae0c929d63d0',
+      'src/db/performance/deviceInboxBenchmark.ts#seedFixture:sql-insert:d5daeec433fb',
+      'src/db/performance/deviceInboxBenchmark.ts#seedDeviceInboxBenchmarkFixture:mutator-call:fe340ba6909e',
+      'src/db/performance/deviceInboxBenchmark.ts#seedDeviceInboxBenchmarkFixture:sql-pragma:93bcca4be38e',
+      'src/db/performance/deviceInboxBenchmark.ts#runDeviceInboxBenchmarkFixture:mutator-call:5cf65cbe9fcc',
+      'src/db/performance/deviceInboxBenchmark.ts#runDeviceInboxBenchmarkFixture:mutator-call:d977bfc6d9a9',
+      'src/services/index.ts#runDevPerf02InboxBenchmark:mutator-call:bfd388c60341',
+      'src/ui/conversations/PerfInboxBenchmarkScreen.tsx#PerfInboxBenchmarkScreen.<callback:06033cb5f4>:mutator-call:ca3cce143976',
+    ].sort(),
+  );
+  assert.ok(benchmark.every((finding) => finding.detectedContext === 'throwaway-database'));
+  assert.equal(
+    benchmark.find((finding) => finding.symbol === 'deletePerf02BenchmarkDatabase')
+      ?.detectedContext,
+    'throwaway-database',
+  );
+});
+
+test('discovers exactly the fixed PERF-01 cold fixture write path', () => {
+  const cold = scanProjectDbWrites().filter(
+    (finding) =>
+      (finding.path === 'src/db/database.ts' && /Perf01Cold/.test(finding.symbol)) ||
+      finding.path === 'src/ui/conversations/ColdInboxBenchmarkScreen.tsx',
+  );
+  assert.deepEqual(
+    cold.map((finding) => finding.id).sort(),
+    [
+      'src/db/database.ts#deletePerf01ColdFixture:native-database-delete:9a4d94084922',
+      'src/db/database.ts#preparePerf01ColdFixture:native-database-delete:8405deee85cd',
+      'src/db/database.ts#preparePerf01ColdFixture:sql-pragma:133307a5048f',
+      'src/db/database.ts#preparePerf01ColdFixture:mutator-call:ea7d253ae9ee',
+      'src/db/database.ts#preparePerf01ColdFixture:mutator-call:97f3f37435ea',
+      'src/db/database.ts#preparePerf01ColdFixture:sql-pragma:95a909b0e621',
+      'src/db/database.ts#preparePerf01ColdFixture:mutator-call:91dac4eef041',
+      'src/ui/conversations/ColdInboxBenchmarkScreen.tsx#ColdInboxBenchmarkScreen.prepare:mutator-call:7692d0d163bf',
+      'src/ui/conversations/ColdInboxBenchmarkScreen.tsx#ColdInboxBenchmarkScreen.cleanup:mutator-call:9a1e5600f44b',
+      'src/ui/conversations/ColdInboxBenchmarkScreen.tsx#ColdInboxBenchmarkScreen.cleanup.<callback:496ce4bb44>:mutator-call:87785f856887',
+      'src/ui/conversations/ColdInboxBenchmarkScreen.tsx#ColdInboxBenchmarkScreen.<callback:0690d89356>:mutator-call:fa09cf8e5aae',
+      'src/ui/conversations/ColdInboxBenchmarkScreen.tsx#ColdInboxBenchmarkScreen.<callback:2b65ff5cd8>:mutator-call:116bbe50271c',
+      'src/ui/conversations/ColdInboxBenchmarkScreen.tsx#ColdInboxBenchmarkScreen:mutator-reference:d0e4f2f0744e',
+    ].sort(),
+  );
+  // Approval is deliberately asserted by the global certificate test only after all pinned
+  // source paths have been reconciled. This exact-set test does not imply write ownership.
+});
+
+fullOnlyTest(
+  'PERF-02 disposable certificate fails closed on account and lifetime mutations',
+  () => {
+    const cases = [
+      {
+        label: 'fixed filename points at account DB',
+        path: 'src/db/database.ts',
+        before: "const PERF02_BENCHMARK_DB_NAME = 'perf02-inbox-benchmark.db';",
+        after: 'const PERF02_BENCHMARK_DB_NAME = DB_NAME;',
+      },
+      {
+        label: 'DEV-only gate is removed',
+        path: 'src/db/database.ts',
+        before: "  if (!__DEV__) throw new Error('PERF-02 benchmark is development-only.');",
+        after: '  if (false) return [];',
+      },
+      {
+        label: 'service DEV-only gate is removed',
+        path: 'src/services/index.ts',
+        before: "  if (!__DEV__) throw new Error('PERF-02 benchmark is development-only.');",
+        after: '  if (false) return [];',
+      },
+      {
+        label: 'final cleanup is removed',
+        path: 'src/db/database.ts',
+        before: '          deletePerf02BenchmarkDatabase();',
+        after: '          void 0;',
+      },
+      {
+        label: 'production raw handle is passed into fixture',
+        path: 'src/db/database.ts',
+        before: 'runDeviceInboxBenchmarkFixture(database, chatCount, capturePlan)',
+        after:
+          'runDeviceInboxBenchmarkFixture(rawDb! as unknown as AppDatabase, chatCount, capturePlan)',
+      },
+      {
+        label: 'shared adapter row extraction bypasses the certified call path',
+        path: 'src/db/database.ts',
+        before: 'const explained = extractRows(',
+        after: 'const explained = String(',
+      },
+      {
+        label: 'runner gains another caller',
+        path: 'app/(app)/home.tsx',
+        before: 'export default function Home(): React.JSX.Element {',
+        after:
+          'void runDevPerf02InboxBenchmark();\nexport default function Home(): React.JSX.Element {',
+      },
+    ];
+    const root = incomingIngressFixture();
+    try {
+      for (const scenario of cases) {
+        const file = resolve(root, scenario.path);
+        const original = readFileSync(file, 'utf8');
+        try {
+          replaceFixtureSource(root, scenario.path, scenario.before, scenario.after);
+          const findings = scanDbWrites({ root });
+          const deletion = findings.find(
+            (finding) =>
+              finding.path === 'src/db/database.ts' &&
+              finding.symbol === 'deletePerf02BenchmarkDatabase' &&
+              finding.operation === 'native-database-delete',
+          );
+          assert.notEqual(deletion?.detectedContext, 'throwaway-database', scenario.label);
+        } finally {
+          writeFileSync(file, original);
+        }
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
 
 test('certifies exactly the disposable driver self-test writes', () => {
   const findings = scanProjectDbWrites();
@@ -4033,11 +4925,11 @@ test('certifies exactly the DB-02C runtime-concurrency writes and exclusive hand
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:03e440125172',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:04b4fca63da2',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:04b4fca63da2:2',
-      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:150264484d1d',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:2668af1ff7a6',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:46ae37afbaa9',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:2c5121e200af',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:3509064feb66',
-      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:45be8e671e33',
+      'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:b7d0d7b26fc5',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:45f44e962bfd',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:6f56de572180',
       'src/services/boot/dbRuntimeConcurrencyWave.ts#runDbRuntimeConcurrencyWave:mutator-call:6fa4b9d0433f',
@@ -4476,9 +5368,9 @@ fullOnlyTest(
         label: 'image-send callee detaches its optimistic DB owner',
         path: 'src/services/send/sendAttachmentService.ts',
         before:
-          '    const inserted = await withDbTransaction(\n      db,\n      async (context) => {',
+          '    const admission = await withDbTransaction(\n      db,\n      async (context) => {',
         after:
-          '    const inserted = void withDbTransaction(\n      db,\n      async (context) => {',
+          '    const admission = void withDbTransaction(\n      db,\n      async (context) => {',
       },
       {
         label: 'image-send callee weakens capability-fenced DB admission',
@@ -4491,6 +5383,12 @@ fullOnlyTest(
         path: 'src/services/sync/engine.ts',
         before: '    await linkHandlesToContacts(db, unique, undefined, commitGuard);',
         after: '    void linkHandlesToContacts(db, unique, undefined, commitGuard);',
+      },
+      {
+        label: 'mention send bypasses its server-capability gate',
+        path: 'src/services/send/sendMentionService.ts',
+        before: '    if (capability.serverInfo?.supports_imessage_mentions !== true) {',
+        after: '    if (false) {',
       },
       {
         label: 'realtime sink constructor installs a detached default hook',
@@ -4535,6 +5433,7 @@ fullOnlyTest(
         before:
           '    await reconcileSendOutcome(db, tempGuid, server, now, effectiveCommitGuard, {\n' +
           '      attemptOwnerToken: attemptOwnerToken ?? undefined,\n' +
+          '      expectedChatGuid: args.chatGuid,\n' +
           '    });',
         after:
           '    await reconcileSendOutcome(\n' +
@@ -4544,7 +5443,7 @@ fullOnlyTest(
           '        server,\n' +
           '        now,\n' +
           '        effectiveCommitGuard,\n' +
-          "        { attemptOwnerToken: attemptOwnerToken ?? undefined, failureNoticeMode: 'suppressed' },\n" +
+          "        { attemptOwnerToken: attemptOwnerToken ?? undefined, expectedChatGuid: args.chatGuid, failureNoticeMode: 'suppressed' },\n" +
           '      ] as const),\n' +
           '    );',
       },
@@ -4560,7 +5459,10 @@ fullOnlyTest(
           '      args.chatGuid,\n' +
           '      undefined,\n' +
           '      effectiveCommitGuard,\n' +
-          '      { attemptOwnerToken: attemptOwnerToken ?? undefined },\n' +
+          '      {\n' +
+          '        attemptOwnerToken: attemptOwnerToken ?? undefined,\n' +
+          "        ...(target ? { terminalUncertainKind: 'reply' as const } : {}),\n" +
+          '      },\n' +
           '    );',
         after:
           '    await handleSendFailure.apply(null, [\n' +
@@ -4571,16 +5473,15 @@ fullOnlyTest(
           '      args.chatGuid,\n' +
           '      undefined,\n' +
           '      effectiveCommitGuard,\n' +
-          "      { attemptOwnerToken: attemptOwnerToken ?? undefined, failureNoticeMode: 'suppressed' },\n" +
+          "      { attemptOwnerToken: attemptOwnerToken ?? undefined, ...(target ? { terminalUncertainKind: 'reply' as const } : {}), failureNoticeMode: 'suppressed' },\n" +
           '    ]);',
       },
       {
         label: 'success outcome ignores OS-notice suppression',
         path: 'src/services/send/sendOutcome.ts',
         before:
-          "  if (\n    (disposition === 'sent' || disposition === 'missing') &&\n    options?.failureNoticeMode !== 'suppressed'\n  ) {\n    await clearFailedSendNotice(",
-        after:
-          "  if (disposition === 'sent' || disposition === 'missing') {\n    await clearFailedSendNotice(",
+          "  if (\n    (disposition === 'sent' || disposition === 'missing') &&\n    options?.failureNoticeMode !== 'suppressed'\n  ) {",
+        after: "  if (disposition === 'sent' || disposition === 'missing') {",
       },
       {
         label: 'failure outcome ignores OS-notice suppression',
@@ -4679,6 +5580,12 @@ fullOnlyTest('DB-03B1 relaunch proof fails closed on scope and process-boundary 
       path: 'src/db/database.ts',
       before: "const DB_PROCESS_RELAUNCH_SELF_TEST_NAME = 'driver-relaunch-selftest.db';",
       after: "const DB_PROCESS_RELAUNCH_SELF_TEST_NAME = 'gator.db';",
+    },
+    {
+      label: 'voice send flag is removed',
+      path: 'src/services/send/index.ts',
+      before: "    service: 'iMessage' as const,\n    voice: true as const,",
+      after: "    service: 'iMessage' as const,\n    voice: false as const,",
     },
     {
       label: 'continuity open may recreate the database',
@@ -5611,7 +6518,7 @@ fullOnlyTest('driver adapter proof fails closed on forwarding, escape, and scope
         replaceFixtureSource(
           root,
           'src/db/database.ts',
-          "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0049_inbox_search_postings' as const;",
+          "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0052_chat_history_deletion_boundary' as const;",
           "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0039_message_error_message' as const;",
         );
       },
@@ -5985,6 +6892,7 @@ fullOnlyTest(
         before:
           '          <ThemeProvider renderWithFallbackTheme>\n' +
           '            <StatusBar style={DARK_STATUS_BAR_STYLE} />\n' +
+          '            <ShareIntentCapture />\n' +
           '            <ForegroundLockGate\n' +
           '              bootState={bootState}\n' +
           '              lockHydrated={lockHydrated}\n' +
@@ -5995,6 +6903,7 @@ fullOnlyTest(
         after:
           '          <ThemeProvider renderWithFallbackTheme onWarmUnlock={completeUnlock}>\n' +
           '            <StatusBar style={DARK_STATUS_BAR_STYLE} />\n' +
+          '            <ShareIntentCapture />\n' +
           '            <ForegroundLockGate\n' +
           '              bootState={bootState}\n' +
           '              lockHydrated={lockHydrated}\n' +
@@ -6084,14 +6993,12 @@ test('certifies exactly the reviewed account-transition delegation boundary', ()
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
     [
-      'app/(app)/home.tsx#Home.onDisconnect:mutator-call:5c664d7c8961',
-      'app/(app)/home.tsx#Home:mutator-reference:386e7d319726',
       'app/(app)/settings.tsx#SettingsScreen.onDisconnect.onPress:mutator-call:d4cf58af3ec2',
       'src/services/realtimeControl.ts#realtimeSink.<callback:68fe0014d7>:mutator-call:017af705079d',
       'src/services/realtimeControl.ts#realtimeSink.<callback:68fe0014d7>:mutator-call:83761d97b204',
     ].sort(),
   );
-  assert.equal(delegated.length, 5);
+  assert.equal(delegated.length, 3);
   assert.equal(
     findings.find((finding) => finding.id.endsWith('a9efdbe22d70'))?.detectedContext,
     'coordinated-delegation',
@@ -6103,26 +7010,68 @@ test('certifies exactly the reviewed account-transition delegation boundary', ()
 });
 
 fullOnlyTest('account-transition proof fails closed when one exact handoff is redirected', () => {
+  const candidateTargets = new Set([
+    'app/(app)/settings.tsx|src/services/bootstrap.ts#forget',
+    'src/services/realtimeControl.ts|src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries',
+    'src/services/realtimeControl.ts|src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.drainDueRetirements',
+  ]);
+  const candidates = (findings) =>
+    findings.filter((finding) => candidateTargets.has(`${finding.path}|${finding.target}`));
+  const cases = [
+    {
+      label: 'Settings disconnect is removed',
+      path: 'app/(app)/settings.tsx',
+      before: '            void forget().catch((e: unknown) => {',
+      after: '            void Promise.resolve().catch((e: unknown) => {',
+      candidateCount: 2,
+    },
+    {
+      label: 'retire handoff is redirected to drain',
+      path: 'src/services/realtimeControl.ts',
+      before: 'await attachmentCacheCoordinator.retireInactiveEntries(db, {',
+      after: 'await attachmentCacheCoordinator.drainDueRetirements(db, {',
+      candidateCount: 3,
+    },
+    {
+      label: 'drain handoff is redirected to retire',
+      path: 'src/services/realtimeControl.ts',
+      before: 'await attachmentCacheCoordinator.drainDueRetirements(db, {',
+      after: 'await attachmentCacheCoordinator.retireInactiveEntries(db, {',
+      candidateCount: 3,
+    },
+  ];
   const root = incomingIngressFixture();
   try {
     const baseline = scanDbWrites({ root });
     assert.equal(
       baseline.filter((finding) => finding.detectedContext === 'account-transition-delegation')
         .length,
-      5,
+      3,
     );
-    replaceFixtureSource(
-      root,
-      'app/(app)/home.tsx',
-      '      await forget();',
-      '      await runDueScheduled();',
-    );
-    const mutated = scanDbWrites({ root });
-    assert.equal(
-      mutated.filter((finding) => finding.detectedContext === 'account-transition-delegation')
-        .length,
-      0,
-    );
+    assert.equal(candidates(baseline).length, 3);
+    for (const scenario of cases) {
+      const file = resolve(root, scenario.path);
+      const original = readFileSync(file, 'utf8');
+      try {
+        replaceFixtureSource(root, scenario.path, scenario.before, scenario.after);
+        const mutated = scanDbWrites({ root });
+        assert.equal(
+          mutated.filter((finding) => finding.detectedContext === 'account-transition-delegation')
+            .length,
+          0,
+          scenario.label,
+        );
+        const retainedCandidates = candidates(mutated);
+        assert.equal(retainedCandidates.length, scenario.candidateCount, scenario.label);
+        assert.equal(
+          retainedCandidates.every((finding) => finding.detectedContext === 'unresolved'),
+          true,
+          scenario.label,
+        );
+      } finally {
+        writeFileSync(file, original);
+      }
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -6163,6 +7112,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'claimFailedOutgoingForRetryWithinTransaction',
     'insertOutgoingAttachmentWithinTransaction',
     'insertOutgoingContactWithinTransaction',
+    'insertOutgoingLocationWithinTransaction',
     'insertOutgoingReactionWithinTransaction',
     'insertScheduledWithinTransaction',
     'listRetryableErrorReportsWithinTransaction',
@@ -6376,6 +7326,20 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
             'src/db/repositories/outgoing.ts#insertOutgoingReaction.<callback:',
           ))),
   );
+  const insertOutgoingLocationTransactions = findings.filter(
+    (finding) =>
+      finding.path === 'src/db/repositories/outgoing.ts' &&
+      finding.symbol.startsWith('insertOutgoingLocation') &&
+      !finding.symbol.startsWith('insertOutgoingLocationWithinTransaction') &&
+      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
+      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
+        finding.target ===
+          'src/db/repositories/outgoing.ts#insertOutgoingLocationWithinTransaction' ||
+        (finding.detectedContext === 'withDbTransaction' &&
+          finding.target.startsWith(
+            'src/db/repositories/outgoing.ts#insertOutgoingLocation.<callback:',
+          ))),
+  );
   const insertOutgoingContactTransactions = findings.filter(
     (finding) =>
       finding.path === 'src/db/repositories/outgoing.ts' &&
@@ -6454,13 +7418,22 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
   assert.deepEqual(
     selected.map((finding) => finding.id).sort(),
     [
+      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:a2637fe808>.<callback:de6db739c6>:mutator-call:ecf46f2d08d9',
+      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:06edea0af9>.<callback:f613d3ead3>:mutator-call:96070fc1908f',
+      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:414f8cbf59>.<callback:5a7bad110f>:mutator-call:599fa6a378a7',
+      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:b8617f0f25>.<callback:16329d1004>:mutator-call:afd0ed6f1e46',
+      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:c8deb5b511>.<callback:293e0b6208>:mutator-call:a4cbb531c586',
+      'app/(app)/new-chat.tsx#NewChatScreen.<callback:0c40702b3c>.<callback:ae3680910a>:mutator-call:f73d80d7970d',
       'app/(app)/new-chat.tsx#NewChatScreen.<callback:6cde4fbfd5>:mutator-call:b4a563a44345',
-      'app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:4206cc986735',
-      'app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:cefa95463ae3',
-      'src/db/repositories/chats.ts#deleteChatLocal:mutator-call:4b0c893b8080',
-      'src/db/repositories/chats.ts#markAllChatsReadLocalWithinTransaction:sql-update:52eca3e393a6',
+      'app/(app)/new-chat.tsx#NewChatScreen.onStart.<callback:aa379435cb>:mutator-call:f07a3220abc4',
+      'app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:3b5433f877f0',
+      'app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:9410811e7530',
+      'app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:d6c241088f98',
+      'app/(app)/new-chat.tsx#NewChatScreen.removeStaged.<callback:381edc2f98>:mutator-call:28ee2d86f7a3',
+      'src/db/repositories/chats.ts#deleteChatLocal:mutator-call:4f80cbb6f44f',
+      'src/db/repositories/chats.ts#markAllChatsReadLocalWithinTransaction:sql-update:9df4bb6cbd1b',
       'src/db/repositories/chats.ts#reconcileReadMarkersFromTimestamps:sql-update:9a087251324f',
-      'src/db/repositories/chats.ts#resumeChatPurges:mutator-call:09fe46a88daa',
+      'src/db/repositories/chats.ts#resumeChatPurges:mutator-call:9e5da82015da',
       'src/db/repositories/chatAppearance.ts#setChatAppearanceWithinTransaction:drizzle-update:dcdfc8b2ae2e',
       'src/db/repositories/chats.ts#setChatArchiveWithinTransaction:drizzle-update:3391b90becf2',
       'src/db/repositories/chatAppearance.ts#setChatCustomizationWithinTransaction:drizzle-update:619f3250f770',
@@ -6488,10 +7461,11 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-delete:1baa5d376435',
       'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:06ff79484d3e',
       'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:42d5bf1453d2',
+      'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:70056dfca126',
       'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:a9908ef95877',
       'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-insert:d7e3e27b0ac0',
       'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:0593854a2ac8',
-      'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:1cf95359657b',
+      'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:44b85d35a964',
       'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:55a93fa5b2ff',
       'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:55a93fa5b2ff:2',
       'src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction:sql-schema:9a38cb1ceb72',
@@ -6523,8 +7497,10 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoingRetry.ts#deferOutgoingSendClaimWithinTransaction:sql-update:5e49fca77b02',
       'src/db/repositories/outgoingRetry.ts#deferOutgoingSendClaimWithinTransaction:sql-update:b34b6cdc2b14',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:drizzle-update:7bbea9e0b4c6',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:drizzle-update:7bbea9e0b4c6:2',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:drizzle-update:bf7b74884a04',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:drizzle-update:bf7b74884a04:2',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:drizzle-update:bf7b74884a04:3',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:sql-update:59013bfa2e13',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:sql-update:8331c562b8bf',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:sql-update:d829b7a21431',
@@ -6535,11 +7511,14 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoing.ts#insertOutgoingContactWithinTransaction:drizzle-insert:325cfa72fa07',
       'src/db/repositories/outgoing.ts#insertOutgoingContactWithinTransaction:drizzle-insert:5371eb923c6f',
       'src/db/repositories/outgoing.ts#insertOutgoingContactWithinTransaction:drizzle-update:f9ebc8cf63d8',
+      'src/db/repositories/outgoing.ts#insertOutgoingLocationWithinTransaction:drizzle-insert:6984c686cdcc',
+      'src/db/repositories/outgoing.ts#insertOutgoingLocationWithinTransaction:drizzle-insert:f1fa1de6950c',
+      'src/db/repositories/outgoing.ts#insertOutgoingLocationWithinTransaction:drizzle-update:839ab9453e44',
       'src/db/repositories/outgoing.ts#insertOutgoingReactionWithinTransaction:drizzle-insert:60b18ede0ce6',
       'src/db/repositories/outgoing.ts#insertOutgoingReactionWithinTransaction:drizzle-insert:8ad15d9f2163',
       'src/db/repositories/outgoing.ts#retireOutgoingWithinTransaction:drizzle-update:235ea7732450',
       'src/db/repositories/outgoing.ts#retireOutgoingWithinTransaction:drizzle-update:c06b002a01f7',
-      'src/db/repositories/messages.ts#deleteMessageLocalWithinTransaction.<callback:4315b7c2a1>:mutator-call:8f577f345052',
+      'src/db/repositories/messages.ts#deleteMessageLocalWithinTransaction.<callback:1313ced55a>:mutator-call:73723ad397ea',
       'src/db/repositories/messages.ts#deleteMessageLocalWithinTransaction:drizzle-delete:d78d925090ff',
       'src/db/repositories/messages.ts#applyLocalEditWithinTransaction:drizzle-update:a52bab6f4d6f',
       'src/db/repositories/messages.ts#applyLocalUnsendWithinTransaction:drizzle-update:48649e2b1746',
@@ -6549,24 +7528,29 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction:drizzle-delete:2cde35e0f6d4',
       'src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction:sql-update:1320d8a402de',
       'src/db/repositories/outgoing.ts#reconcileExactOutgoingAttemptSuccessWithinTransaction:mutator-call:e0ea8d72f9a8',
-      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:26be0b1670>:mutator-call:00574102b188',
-      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:26be0b1670>:mutator-call:a51102a0c114',
-      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:26be0b1670>:mutator-call:bad50ebad51d',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:4d3915eba9>:mutator-call:373d530f1927',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:4d3915eba9>:mutator-call:80ee315fb0d9',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:4d3915eba9>:mutator-call:80ee315fb0d9:2',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:4d3915eba9>:mutator-call:9b76830275a3',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:4d3915eba9>:mutator-call:9b76830275a3:2',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:4d3915eba9>:mutator-call:9b76830275a3:3',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction:drizzle-insert:0eef01113095',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction:drizzle-delete:0bd89180f0e1',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction:drizzle-delete:3374b727a87f',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction:drizzle-delete:3374b727a87f:2',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction:drizzle-update:caa13f78f819',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction:drizzle-update:caa13f78f819:2',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction:sql-update:fb0297907ce8',
       'src/db/repositories/chats.ts#setChatUnreadLocalWithinTransaction:drizzle-update:bc72f0e85266',
       'src/db/repositories/sync.ts#setSyncMarkerWithinTransaction:drizzle-update:7582ca63d697',
       'src/services/backup/backup.ts#buildBackup:mutator-call:50677029090e',
-      'src/services/backup/backup.ts#buildBackupWithCustomFolders:mutator-call:6eca578bbb50',
+      'src/services/backup/backup.ts#buildBackupWithCustomFolders:mutator-call:1204bfcb57bb',
       'src/services/backup/backupService.ts#buildCurrentBackup.<callback:2bd1ecedc4>:mutator-call:3ea042f4e17e',
       'src/services/backup/backupService.ts#restoreCurrentBackup.<callback:93bf63133c>:mutator-call:27d17cbc08f6',
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 110);
+  assert.equal(selected.length, 130);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [
@@ -6594,9 +7578,12 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
   assert.deepEqual(
     serverAvatarTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:ce605bb71a>.<callback:77cdb8c804>:mutator-call:300095ddd30c',
-      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:ce605bb71a>:mutator-call:478f5d06d71e',
-      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:ce605bb71a>:mutator-call:9f5be45386f3',
+      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:c50932e614>.<callback:f60ab1f80c>:mutator-call:41ca6c4297af',
+      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:c50932e614>:mutator-call:e3874437fe75',
+      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:c50932e614>:mutator-call:e8f26a3863e3',
+      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:f825ab541f>.<callback:62e2e33d9c>:mutator-call:560760fae756',
+      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:f825ab541f>:mutator-call:5b53f755ddd8',
+      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:f825ab541f>:mutator-call:b52fdca006d4',
     ].sort(),
   );
   assert.deepEqual(
@@ -6638,19 +7625,19 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoing.ts#markOutgoingSentNoGuid:mutator-call:c4172f69161a',
       'src/db/repositories/outgoing.ts#markOutgoingSentNoGuid:mutator-call:d9dedcf418e8',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess.<callback:a142c06cb1>:mutator-call:dd151c6d7808',
-      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess.<callback:350f3c11ce>:mutator-call:466aed95663c',
-      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:43b965ef483f',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess.<callback:3512d97f02>:mutator-call:bb8ac1d4582d',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:73a6a7ceb3de',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:9efd07b3e6a8',
-      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:7cffdc80344c',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:6a3664104d66',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:dc16ee7659f0',
     ].sort(),
   );
   assert.deepEqual(
     retryClaimTransactions.map((finding) => finding.id).sort(),
     [
-      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry.<callback:7da63d797b>:mutator-call:6d8d66f7449c',
-      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry:mutator-call:4bb5e2d3a680',
-      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry:mutator-call:b718e1c9d6f4',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry.<callback:0205a23c0a>:mutator-call:2e64f81fc79c',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry:mutator-call:09fd69a1a338',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry:mutator-call:0e924b7a5028',
     ].sort(),
   );
   assert.deepEqual(
@@ -6691,6 +7678,14 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoing.ts#insertOutgoingContact.<callback:98f48e222c>:mutator-call:09a076f2e3c8',
       'src/db/repositories/outgoing.ts#insertOutgoingContact:mutator-call:bc8c5c28d457',
       'src/db/repositories/outgoing.ts#insertOutgoingContact:mutator-call:d628f90e07c7',
+    ].sort(),
+  );
+  assert.deepEqual(
+    insertOutgoingLocationTransactions.map((finding) => finding.id).sort(),
+    [
+      'src/db/repositories/outgoing.ts#insertOutgoingLocation.<callback:1ed31bb3a2>:mutator-call:69dcc9361df4',
+      'src/db/repositories/outgoing.ts#insertOutgoingLocation:mutator-call:31e99ba4355d',
+      'src/db/repositories/outgoing.ts#insertOutgoingLocation:mutator-call:875e9370d77e',
     ].sort(),
   );
   assert.deepEqual(
@@ -6869,9 +7864,9 @@ function incomingIngressMutationCases() {
       label: 'late FCM auto-download captures a fresh lease after callback expiry',
       path: 'src/services/realtimeControl.ts',
       before:
-        '                    if (!context.isCurrent()) return;\n                  }\n                  const lease = captureRealtimeDeliveryLease();',
+        '                      if (!context.isCurrent()) return;\n                    }\n                    const lease = captureRealtimeDeliveryLease();',
       after:
-        '                    void context;\n                  }\n                  const lease = captureRealtimeDeliveryLease();',
+        '                      void context;\n                    }\n                    const lease = captureRealtimeDeliveryLease();',
     },
     {
       label: 'dispatcher recovery context drops callback signal',
@@ -7111,7 +8106,7 @@ function incomingIngressMutationCases() {
       label: 'dispatcher persistence guard always permits admission',
       path: 'src/services/realtime/incomingEventDispatcher.ts',
       before:
-        "      const allowed =\n        !this.stopped &&\n        (!context || context.isCurrent()) &&\n        (persistenceMode === 'locked-fcm-v3'\n          ? event.type !== 'new-server'\n          : !this.options.canPersist || this.options.canPersist(event));",
+        "      const allowed =\n        !this.stopped &&\n        (!context || context.isCurrent()) &&\n        (persistenceMode === 'locked-fcm-v3'\n          ? event.type !== 'new-server' &&\n            (lockedPersistenceGuard\n              ? lockedPersistenceGuard(event)\n              : !this.options.canPersist || this.options.canPersist(event))\n          : !this.options.canPersist || this.options.canPersist(event));",
       after: '      const allowed = true;',
     },
     {

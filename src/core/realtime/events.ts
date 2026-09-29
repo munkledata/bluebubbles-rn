@@ -31,7 +31,13 @@ export const GroupChangePayload = z.object({ chats: z.array(z.unknown()).nullish
  * `GAIA_LOGGED_OUT`, `PHONE_NOT_RESPONDING`, `BROWSER_INACTIVE`). Permissive: newer bridge builds
  * may add alert types the app hasn't seen.
  */
-export const RcsAlertPayload = z.object({ alertType: z.string().nullish() }).loose();
+export const RcsAlertPayload = z
+  .object({
+    alertType: z.string().nullish(),
+    /** Exact Google pairing epoch that produced this bridge status. */
+    providerEpoch: z.string().nullish(),
+  })
+  .loose();
 
 /**
  * The server's `rcs-bridge-down` FCM push — fired (high priority) when the RCS bridge drops or its
@@ -44,6 +50,8 @@ export const RcsBridgeDownPayload = z
     title: z.string().nullish(),
     body: z.string().nullish(),
     reason: z.string().nullish(),
+    /** Exact Google pairing epoch that produced this bridge status. */
+    providerEpoch: z.string().nullish(),
   })
   .loose();
 
@@ -123,6 +131,8 @@ export const MessageSendErrorPayload = z
     attemptGuid: OptionalSendAttemptGuid,
     /** Client-side request generation echoed through the server's durable RCS correlation. */
     clientAttemptGeneration: z.number().int().min(1).max(2_147_483_647).nullish(),
+    /** Exact scoped owner on modern RCS failures. */
+    chatGuid: OptionalSendErrorId,
     guid: OptionalSendErrorId,
     tempGuid: OptionalSendErrorId,
     messageGuid: OptionalSendErrorId,

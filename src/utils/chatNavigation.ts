@@ -12,7 +12,8 @@
  *   - already on the SAME plain thread   → 'none'    (do nothing — no reload)
  *   - on a DIFFERENT thread              → 'replace' (swap, so Back still → Messages)
  *
- * A reminder ANCHOR (`?focus=…`) or a Direct-Share (`?share=1`) target always (re)navigates,
+ * A reminder ANCHOR (`?focus=…`) or an exact Direct-Share (`?shareBatch=…`) target always
+ * (re)navigates,
  * even into the open chat: the reminder must jump to its old message, and the share must
  * re-stage its files. Only a PLAIN message tap into the thread already on screen is a no-op —
  * which is exactly the case that used to reload.
@@ -24,7 +25,7 @@ export type ChatNavAction = 'push' | 'replace' | 'none';
 
 /**
  * @param currentPathname the current route path WITHOUT query (expo-router `usePathname()`)
- * @param targetPath      a `/chat/<encoded-guid>[?focus=…&focusDate=…][?share=1]` deep-link
+ * @param targetPath      a `/chat/<encoded-guid>[?focus=…&focusDate=…][?shareBatch=…]` deep-link
  */
 export function resolveChatNavigation(currentPathname: string, targetPath: string): ChatNavAction {
   // Not inside a thread → a plain push keeps the stack at [Messages, thread].
@@ -34,7 +35,7 @@ export function resolveChatNavigation(currentPathname: string, targetPath: strin
   // A malformed/non-chat target while in a chat shouldn't happen (all callers pass /chat/…);
   // navigate rather than silently swallow it.
   if (!current || !target) return 'replace';
-  // A reminder anchor or a Direct Share must always (re)navigate, even into the open chat.
+  // A reminder anchor or exact Direct Share claim must always (re)navigate into the open chat.
   if (target.focus || target.share) return 'replace';
   // Same plain thread → we're already here; do nothing. Different thread → swap it.
   return target.guid === current.guid ? 'none' : 'replace';
@@ -45,7 +46,7 @@ interface ParsedChatPath {
   guid: string;
   /** The anchored-message guid from `?focus=…`, decoded (`''` when absent). */
   focus: string;
-  /** Whether the link carries `?share=1` (a Direct Share into the chat). */
+  /** Whether the link carries an exact nonempty `?shareBatch=` claim. */
   share: boolean;
 }
 
@@ -61,7 +62,7 @@ function parseChatPath(path: string): ParsedChatPath | null {
   return {
     guid: safeDecode(encGuid),
     focus: params.focus ?? '',
-    share: params.share === '1',
+    share: (params.shareBatch ?? '').length > 0,
   };
 }
 

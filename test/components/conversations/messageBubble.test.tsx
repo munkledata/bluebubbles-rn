@@ -538,6 +538,42 @@ describe('MessageBubble accessibility actions', () => {
     expect(host.props.accessibilityHint).toBeUndefined();
     expect(host.props.onAccessibilityAction).toBeUndefined();
   });
+
+  it('keeps an independent preview action and exposes a static private-safe message action', async () => {
+    const onLongPress = jest.fn();
+    const rect = { x: 11, y: 22, width: 33, height: 44 };
+    mockMeasureInWindow.mockImplementationOnce(
+      (callback: (x: number, y: number, width: number, height: number) => void) =>
+        callback(rect.x, rect.y, rect.width, rect.height),
+    );
+    await renderWithTheme(
+      <MessageBubble
+        msg={makeMsg({
+          text: '',
+          balloonBundleId: 'com.apple.messages.URLBalloonProvider',
+          payloadData: PRIVATE_PAYLOAD,
+        })}
+        showTail
+        onLongPress={onLongPress}
+      />,
+    );
+
+    expect(screen.getByTestId('url-preview-card')).toBeTruthy();
+    const actionTarget = screen.getByLabelText('Message actions');
+    expect(actionTarget.props.accessibilityRole).toBeUndefined();
+    expect(actionTarget.props.accessibilityLabel).not.toContain(PRIVATE_PAYLOAD_TITLE);
+    expect(actionTarget.props.accessibilityActions).toEqual([
+      { name: 'longpress', label: 'Show message actions' },
+    ]);
+    expect(actionTarget.props.accessibilityHint).toBe('Double tap and hold for message actions');
+
+    await act(async () => {
+      fireEvent(actionTarget, 'accessibilityAction', {
+        nativeEvent: { actionName: 'longpress' },
+      });
+    });
+    expect(onLongPress).toHaveBeenCalledWith(rect);
+  });
 });
 
 describe('MessageBubble text rendering', () => {
@@ -576,6 +612,32 @@ describe('MessageBubble text rendering', () => {
     expect(style.fontWeight).toBe('600');
     // The surrounding plain runs are still present (no text dropped by the gap-filling parser).
     expect(screen.getByText('Hi ', { exact: false })).toBeTruthy();
+  });
+
+  it('keeps an entity actionable across formatting boundaries and combines link decoration', async () => {
+    const body = JSON.stringify([
+      {
+        string: 'Open https://example.com now',
+        runs: [
+          { range: [5, 8], attributes: { __kIMTextBoldAttributeName: 1 } },
+          { range: [13, 7], attributes: { __kIMTextStrikethroughAttributeName: 1 } },
+          { range: [20, 4], attributes: { __kIMTextUnderlineAttributeName: 1 } },
+        ],
+      },
+    ]);
+    await renderWithTheme(
+      <MessageBubble msg={makeMsg({ text: '', attributedBody: body })} showTail />,
+    );
+
+    const link = screen.getByLabelText('Link https://example.com');
+    expect(link.props.accessibilityRole).toBe('link');
+    expect(StyleSheet.flatten(screen.getByText('https://').props.style)).toMatchObject({
+      fontWeight: '700',
+      textDecorationLine: 'underline',
+    });
+    expect(StyleSheet.flatten(screen.getByText('example').props.style)).toMatchObject({
+      textDecorationLine: 'underline line-through',
+    });
   });
 
   it('uses the readable sent-bubble foreground for a sent @mention, not the theme tint', async () => {
@@ -639,6 +701,30 @@ describe('MessageBubble text rendering', () => {
     const node = screen.getByText('😀😍');
     const style = StyleSheet.flatten(node.props.style);
     expect(style.fontSize).toBeGreaterThan(darkTheme.font.size.body); // ~3× the body size
+  });
+
+  it('keeps formatting on an emoji-only body', async () => {
+    const body = JSON.stringify([
+      {
+        string: '😀',
+        runs: [
+          {
+            range: [0, 2],
+            attributes: {
+              __kIMTextUnderlineAttributeName: 1,
+              __kIMTextStrikethroughAttributeName: 1,
+            },
+          },
+        ],
+      },
+    ]);
+    await renderWithTheme(
+      <MessageBubble msg={makeMsg({ text: '', attributedBody: body })} showTail />,
+    );
+
+    expect(StyleSheet.flatten(screen.getByText('😀').props.style)).toMatchObject({
+      textDecorationLine: 'underline line-through',
+    });
   });
 
   it('collapses an image-only multi-attachment message into the gallery grid', async () => {

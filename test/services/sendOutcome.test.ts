@@ -75,7 +75,59 @@ describe('reconcileSendOutcome', () => {
     expect(msgRow(raw, 'real-1')?.s).toBe('sent');
     expect(msgRow(raw, 'real-1')?.d).toBeNull();
     expect(queueCount(raw)).toBe(0);
-    expect(mockClearFailedSendNotice).toHaveBeenCalledWith(db, 'real-1', undefined);
+    expect(mockClearFailedSendNotice).toHaveBeenCalledWith(db, 'temp-aaaa0000', undefined);
+  });
+
+  it('clears only the source notice when a canonical GUID belongs to another chat', async () => {
+    const { db, raw } = await createTestDb();
+    const tempGuid = 'temp-notice-owner';
+    const foreignGuid = 'foreign-notice-owner';
+    await seedOutgoing(db, tempGuid, 1000);
+    await upsertChats(db, [Chat.parse({ guid: 'c2' })], new Map());
+    const foreignChatId = await getChatIdByGuid(db, 'c2');
+    raw
+      .prepare(
+        `INSERT INTO messages (guid, chat_id, text, is_from_me, date_created, send_state)
+         VALUES (?, ?, 'foreign row', 1, 900, 'sent')`,
+      )
+      .run(foreignGuid, foreignChatId);
+
+    await reconcileSendOutcome(db, tempGuid, { guid: foreignGuid }, 1100, undefined, {
+      expectedChatGuid: 'c1',
+    });
+
+    expect(msgRow(raw, tempGuid)?.s).toBe('sent');
+    expect(aliasTarget(raw, tempGuid)).toBeUndefined();
+    expect(mockClearFailedSendNotice).toHaveBeenCalledWith(db, tempGuid, undefined);
+    expect(mockClearFailedSendNotice).not.toHaveBeenCalledWith(db, foreignGuid, undefined);
+  });
+
+  it('binds an ack-first canonical GUID to the exact request chat after purge', async () => {
+    const { db, raw } = await createTestDb();
+    const tempGuid = 'temp-purged-outcome';
+    const realGuid = 'real-purged-outcome';
+    await seedOutgoing(db, tempGuid, 1000);
+    await markMessageDeleted(db, tempGuid, 900);
+    const chatId = (raw.prepare("SELECT id FROM chats WHERE guid = 'c1'").get() as { id: number })
+      .id;
+    raw.prepare('DELETE FROM outgoing_queue WHERE temp_guid = ?').run(tempGuid);
+    raw.prepare('DELETE FROM messages WHERE guid = ?').run(tempGuid);
+
+    await reconcileSendOutcome(db, tempGuid, { guid: realGuid }, 1000, undefined, {
+      expectedChatGuid: 'c1',
+    });
+
+    expect(aliasTarget(raw, tempGuid)).toBe(realGuid);
+    expect(ledgerDate(raw, tempGuid)).toBeUndefined();
+    expect(ledgerDate(raw, realGuid)).toBe(900);
+    expect(
+      raw
+        .prepare(
+          'SELECT chat_id AS chatId, date_deleted AS dateDeleted FROM messages WHERE guid = ?',
+        )
+        .get(realGuid),
+    ).toEqual({ chatId, dateDeleted: 900 });
+    expect(mockClearFailedSendNotice).toHaveBeenCalledWith(db, tempGuid, undefined);
   });
 
   it('marks sent-no-guid (row keeps its temp guid) when the ack has NO guid', async () => {
@@ -219,7 +271,7 @@ describe('reconcileSendOutcome', () => {
     expect(ledgerDate(raw, tempGuid)).toBeUndefined();
     expect(ledgerDate(raw, realGuid)).toBe(900);
     expect(queueCount(raw)).toBe(0);
-    expect(mockClearFailedSendNotice).toHaveBeenCalledWith(db, realGuid, expect.any(Function));
+    expect(mockClearFailedSendNotice).toHaveBeenCalledWith(db, tempGuid, expect.any(Function));
   });
 
   it('treats an RCS ack echoing our OWN tempGuid as guid-absent (row survives)', async () => {

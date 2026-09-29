@@ -10,3 +10,4 @@ export * as realtime from './realtime';
 export * as sync from './sync';
 export * as secure from './secure';
 export * as config from './config';
+export * as rcs from './rcs';

@@ -3,6 +3,7 @@ import { Animated, PanResponder, Pressable, StyleSheet, Text, View } from 'react
 import { isHorizontalSwipe } from '@utils';
 import { useReduceMotionPreferenceRef } from '../hooks/useReduceMotionPreference';
 import { Icon } from '../primitives';
+import { readableTextOn } from '../theme/adaptiveFromImage';
 
 export interface SwipeAction {
   key: string;
@@ -20,6 +21,8 @@ interface SwipeableRowProps {
   /** Changing this closes/re-centers the row — pass the item id so a RECYCLED FlashList row
    *  never inherits the previous item's open-swipe offset. */
   resetKey: string;
+  /** Mount the production wrapper but refuse gestures/actions (used by the disposable benchmark). */
+  interactionDisabled?: boolean;
   children: React.ReactNode;
 }
 
@@ -39,6 +42,7 @@ export function SwipeableRow({
   left,
   right,
   resetKey,
+  interactionDisabled = false,
   children,
 }: SwipeableRowProps): React.JSX.Element {
   const tx = useRef(new Animated.Value(0)).current;
@@ -50,6 +54,8 @@ export function SwipeableRow({
   // (same MessageSwipeWrapper onReplyRef pattern) isn't stale inside its closures.
   const widthsRef = useRef({ leftW, rightW });
   widthsRef.current = { leftW, rightW };
+  const interactionDisabledRef = useRef(interactionDisabled);
+  interactionDisabledRef.current = interactionDisabled;
 
   const stopActiveSnap = (): boolean => {
     const animation = activeSnap.current;
@@ -105,19 +111,26 @@ export function SwipeableRow({
       onStartShouldSetPanResponder: () => false,
       // Claim only a mostly-horizontal drag (so vertical list scrolling still works) — in BOTH the
       // bubble and capture phases so the swipe is recognised before the FlashList scroll engages.
-      onMoveShouldSetPanResponder: (_e, g) => isHorizontalSwipe(g.dx, g.dy),
-      onMoveShouldSetPanResponderCapture: (_e, g) => isHorizontalSwipe(g.dx, g.dy),
+      onMoveShouldSetPanResponder: (_e, g) =>
+        !interactionDisabledRef.current && isHorizontalSwipe(g.dx, g.dy),
+      onMoveShouldSetPanResponderCapture: (_e, g) =>
+        !interactionDisabledRef.current && isHorizontalSwipe(g.dx, g.dy),
       onPanResponderGrant: () => {
         // A fresh finger owns the value now; stop an older automatic snap without moving it.
         stopActiveSnap();
       },
       onPanResponderMove: (_e, g) => {
+        if (interactionDisabledRef.current) return;
         let next = offset.current + g.dx;
         // Clamp to the available action width per side (no overscroll past the panel).
         next = Math.max(-widthsRef.current.rightW, Math.min(widthsRef.current.leftW, next));
         tx.setValue(next);
       },
       onPanResponderRelease: (_e, g) => {
+        if (interactionDisabledRef.current) {
+          snap(0);
+          return;
+        }
         const next = offset.current + g.dx;
         const { leftW: lw, rightW: rw } = widthsRef.current;
         if (next <= -OPEN_THRESHOLD && rw > 0) snap(-rw);
@@ -135,6 +148,7 @@ export function SwipeableRow({
 
   const fire = (a: SwipeAction): void => {
     snap(0);
+    if (interactionDisabledRef.current) return;
     a.onPress();
   };
 
@@ -144,7 +158,12 @@ export function SwipeableRow({
       {leftW > 0 ? (
         <View style={[styles.panel, styles.panelLeft]}>
           {left!.map((a) => (
-            <ActionButton key={a.key} action={a} onPress={() => fire(a)} />
+            <ActionButton
+              key={a.key}
+              action={a}
+              disabled={interactionDisabled}
+              onPress={() => fire(a)}
+            />
           ))}
         </View>
       ) : null}
@@ -152,7 +171,12 @@ export function SwipeableRow({
       {rightW > 0 ? (
         <View style={[styles.panel, styles.panelRight]}>
           {right!.map((a) => (
-            <ActionButton key={a.key} action={a} onPress={() => fire(a)} />
+            <ActionButton
+              key={a.key}
+              action={a}
+              disabled={interactionDisabled}
+              onPress={() => fire(a)}
+            />
           ))}
         </View>
       ) : null}
@@ -165,13 +189,18 @@ export function SwipeableRow({
 
 function ActionButton({
   action,
+  disabled,
   onPress,
 }: {
   action: SwipeAction;
+  disabled: boolean;
   onPress: () => void;
 }): React.JSX.Element {
+  const foregroundColor = readableTextOn(action.color);
+
   return (
     <Pressable
+      disabled={disabled}
       onPress={onPress}
       style={[styles.action, { backgroundColor: action.color }]}
       accessibilityRole="button"
@@ -180,9 +209,9 @@ function ActionButton({
       <Icon
         name={action.icon as React.ComponentProps<typeof Icon>['name']}
         size={20}
-        color="#fff"
+        color={foregroundColor}
       />
-      <Text style={styles.actionLabel}>{action.label}</Text>
+      <Text style={[styles.actionLabel, { color: foregroundColor }]}>{action.label}</Text>
     </Pressable>
   );
 }
@@ -193,5 +222,5 @@ const styles = StyleSheet.create({
   panelLeft: { left: 0 },
   panelRight: { right: 0 },
   action: { width: ACTION_W, alignItems: 'center', justifyContent: 'center', gap: 3 },
-  actionLabel: { color: '#fff', fontSize: 11, fontWeight: '600' },
+  actionLabel: { fontSize: 11, fontWeight: '600' },
 });

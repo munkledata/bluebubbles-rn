@@ -3,19 +3,29 @@ import * as Crypto from 'expo-crypto';
 import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Share } from 'react-native';
-import { isAggregateRetractionTombstone } from '@core/messages/retraction';
-import { parseMessageSummaryInfo, type MessageSummaryInfo } from '@core/models';
+import {
+  isAggregateRetractionTombstone,
+  isExactMessagePartTopology,
+} from '@core/messages/retraction';
+import {
+  parseMessagePartTopology,
+  parseMessageSummaryInfo,
+  type MessageSummaryInfo,
+} from '@core/models';
 import { parseReactionType, type ReactionBaseType } from '@core/reactions/reactionType';
+import { parseRcsChatGuid, parseRcsMessageGuid } from '@core/rcs/providerIdentity';
 import { bodyTextFromRuns, parseAttributedRuns } from '@core/richtext';
+import type { MessagePreview } from '@db/repositories';
 import { saveAttachmentsToPhotos, shareAttachment } from '@/services/media';
 import { attachmentCacheCoordinator } from '@/services/download/attachmentCacheCoordinator';
 import { scheduleMessageReminder } from '@/services/notifications/remindersService';
+import { deleteMessageFromMac } from '@/services/remoteMessageDeleteUiService';
 import {
   captureRealtimeDeliveryLease,
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
-import { discardMessage, react } from '@/services/send';
-import { useRcsEnabled } from '@state/sessionStore';
+import { discardMessage, react, unsend } from '@/services/send';
+import { useRcsMutationEnabled } from '@state/sessionStore';
 import type { SelectedMessage } from '@ui';
 import { pickReminderTime } from '@ui/conversations/pickReminderTime';
 import { presentDiscardMessageResult, presentSendIssue } from '@ui/conversations/sendNotices';
@@ -28,7 +38,8 @@ import { buildForwardParams } from './forwardParams';
 import type { EnrichedMessage } from './useMessages';
 
 function actionContentOf(msg: EnrichedMessage) {
-  const bodyText = bodyTextFromRuns(parseAttributedRuns(msg.attributedBody, msg.text));
+  const bodyRuns = parseAttributedRuns(msg.attributedBody, msg.text);
+  const bodyText = bodyTextFromRuns(bodyRuns);
   // Private Messages-extension payloads are not visible user attachments and therefore cannot own
   // a part in this aggregate action target. Keep the same conservative filter as MessageBubble.
   const visibleAttachments = msg.balloonBundleId
@@ -36,9 +47,126 @@ function actionContentOf(msg: EnrichedMessage) {
     : (msg.attachments ?? []).filter((attachment) => !attachment.hideAttachment);
   const visibleAttachmentCount = visibleAttachments.length;
   return {
+    bodyRuns,
     bodyText,
     visibleAttachments,
     visibleAttachmentCount,
+  };
+}
+
+const IMESSAGE_EDIT_WINDOW_MS = 15 * 60_000;
+const IMESSAGE_UNSEND_WINDOW_MS = 2 * 60_000;
+
+function canEditExactPlainTextPartZero(msg: EnrichedMessage, now: number): boolean {
+  const { bodyRuns, bodyText, visibleAttachmentCount } = actionContentOf(msg);
+  const topology = parseMessagePartTopology(msg.messagePartTopology);
+  const age = msg.dateCreated == null ? null : now - msg.dateCreated;
+  return (
+    msg.isFromMe === 1 &&
+    msg.sendState === 'sent' &&
+    !msg.guid.startsWith('temp-') &&
+    !isAggregateRetractionTombstone(msg) &&
+    msg.dateRetracted == null &&
+    (msg.senderService == null || msg.senderService === 'iMessage') &&
+    age != null &&
+    age >= 0 &&
+    age <= IMESSAGE_EDIT_WINDOW_MS &&
+    bodyText.trim().length > 0 &&
+    !bodyText.includes('\uFFFC') &&
+    bodyRuns.every((run) => !run.attachment && !run.mention) &&
+    !msg.subject?.trim() &&
+    !msg.balloonBundleId &&
+    visibleAttachmentCount === 0 &&
+    msg.attachments.length === 0 &&
+    !msg.hasAttachments &&
+    isExactMessagePartTopology(topology) &&
+    topology.currentParts.length === 1 &&
+    topology.currentParts[0]?.index === 0 &&
+    topology.currentParts[0]?.kind === 'text'
+  );
+}
+
+function canUnsendExactPlainTextPartZero(msg: EnrichedMessage, now: number): boolean {
+  const { bodyRuns, bodyText, visibleAttachmentCount } = actionContentOf(msg);
+  const topology = parseMessagePartTopology(msg.messagePartTopology);
+  const summary = parseMessageSummaryInfo(msg.messageSummaryInfo);
+  const hasEditedPartHistory = Object.values(summary?.editedParts ?? {}).some(
+    (revisions) => (revisions?.length ?? 0) > 0,
+  );
+  const age = msg.dateCreated == null ? null : now - msg.dateCreated;
+  return (
+    msg.isFromMe === 1 &&
+    msg.sendState === 'sent' &&
+    msg.isSent === 1 &&
+    msg.error === 0 &&
+    !msg.guid.startsWith('temp-') &&
+    !isAggregateRetractionTombstone(msg) &&
+    msg.dateRetracted == null &&
+    msg.dateEdited == null &&
+    !hasEditedPartHistory &&
+    (msg.senderService == null || msg.senderService === 'iMessage') &&
+    age != null &&
+    age >= 0 &&
+    age <= IMESSAGE_UNSEND_WINDOW_MS &&
+    bodyText.trim().length > 0 &&
+    !bodyText.includes('\uFFFC') &&
+    bodyRuns.every((run) => !run.attachment && !run.mention) &&
+    !msg.subject?.trim() &&
+    !msg.balloonBundleId &&
+    !msg.payloadData &&
+    !msg.expressiveSendStyleId &&
+    !msg.threadOriginatorGuid &&
+    msg.threadOriginatorPart == null &&
+    !msg.associatedMessageGuid &&
+    !msg.associatedMessageType &&
+    !msg.associatedMessageEmoji &&
+    visibleAttachmentCount === 0 &&
+    msg.attachments.length === 0 &&
+    !msg.hasAttachments &&
+    isExactMessagePartTopology(topology) &&
+    topology.currentParts.length === 1 &&
+    topology.currentParts[0]?.index === 0 &&
+    topology.currentParts[0]?.kind === 'text'
+  );
+}
+
+function canTargetReplyPartZero(msg: EnrichedMessage): boolean {
+  const topology = parseMessagePartTopology(msg.messagePartTopology);
+  return (
+    !msg.guid.startsWith('temp-') &&
+    !isAggregateRetractionTombstone(msg) &&
+    (msg.senderService == null || msg.senderService === 'iMessage') &&
+    isExactMessagePartTopology(topology) &&
+    topology.currentParts.some((part) => part.index === 0)
+  );
+}
+
+/** Whole-message deletion needs stable server identity but deliberately does not inspect parts. */
+function canRemoteDeleteWholeMessage(msg: EnrichedMessage): boolean {
+  return (
+    msg.guid.length > 0 &&
+    msg.guid.trim() === msg.guid &&
+    !msg.guid.startsWith('temp-') &&
+    !isAggregateRetractionTombstone(msg) &&
+    (msg.senderService == null || msg.senderService === 'iMessage')
+  );
+}
+
+function replyPreviewOf(msg: EnrichedMessage): MessagePreview {
+  const content = actionContentOf(msg);
+  return {
+    guid: msg.guid,
+    text: content.bodyText || msg.text,
+    subject: msg.subject,
+    senderName: msg.senderName,
+    isFromMe: msg.isFromMe,
+    hasAttachments: msg.hasAttachments,
+    attachmentDescription: msg.attachmentDescription,
+    balloonBundleId: msg.balloonBundleId,
+    partCount: msg.partCount,
+    targetPartIndex: 0,
+    hasVisibleAttachments: content.visibleAttachmentCount > 0 ? 1 : 0,
+    isRetracted: false,
   };
 }
 
@@ -59,6 +187,20 @@ export interface MessageActionsArgs {
   chatTitle: string;
   /** Account generation captured when the owning chat screen mounted. */
   accountLease?: RealtimeDeliveryLease;
+  /** Proven existing one-to-one chat plus live narrow helper reaction capability. */
+  imessageReactionsAvailable?: boolean;
+  /** Proven existing one-to-one chat plus live narrow helper reply capability. */
+  imessageRepliesAvailable?: boolean;
+  /** Proven existing one-to-one chat plus live narrow helper edit capability. */
+  imessageEditsAvailable?: boolean;
+  /** Proven existing one-to-one chat plus live narrow helper unsend capability. */
+  imessageUnsendsAvailable?: boolean;
+  /** Proven existing one-to-one or group chat plus live whole-message remote-delete capability. */
+  imessageRemoteDeleteAvailable?: boolean;
+  /** Select one exact message-part-zero target for the composer. */
+  setReplyTo?: (preview: MessagePreview | null) => void;
+  /** Switch the existing composer into exact-part-zero edit mode. */
+  setEditing?: (editing: { guid: string; text: string; partIndex: 0 } | null) => void;
 }
 
 /**
@@ -69,11 +211,27 @@ export interface MessageActionsArgs {
  * (useCallback over refs/setters only) — they feed the memoized MessageList → MessageRow
  * chain, and a fresh closure per render would silently kill the row memoization.
  */
-export function useMessageActions({ guid, messages, chatTitle, accountLease }: MessageActionsArgs) {
+export function useMessageActions({
+  guid,
+  messages,
+  chatTitle,
+  accountLease,
+  imessageReactionsAvailable = false,
+  imessageRepliesAvailable = false,
+  imessageEditsAvailable = false,
+  imessageUnsendsAvailable = false,
+  imessageRemoteDeleteAvailable = false,
+  setReplyTo,
+  setEditing,
+}: MessageActionsArgs) {
   const router = useRouter();
   const isDev = isDevServer;
-  const rcsEnabled = useRcsEnabled();
+  const rcsEnabled = useRcsMutationEnabled(guid);
   const [screenLease] = useState(() => accountLease ?? captureRealtimeDeliveryLease());
+  const imessageReactionInFlight = useRef(false);
+  const imessageUnsendInFlight = useRef(false);
+  const imessageRemoteDeleteInFlight = useRef(false);
+  const rcsProviderEpoch = parseRcsChatGuid(guid)?.providerEpoch ?? null;
 
   // Latest messages for the stable long-press callback (thread membership check).
   const messagesRef = useRef(messages);
@@ -100,14 +258,32 @@ export function useMessageActions({ guid, messages, chatTitle, accountLease }: M
     (msg: EnrichedMessage, rect: BubbleRect): void => {
       if (isAggregateRetractionTombstone(msg)) return;
       const { bodyText, visibleAttachments, visibleAttachmentCount } = actionContentOf(msg);
-      const canReact = rcsEnabled && isRcsChatGuid(guid) && msg.guid.startsWith('rcs-');
+      const rcsReaction =
+        rcsEnabled &&
+        rcsProviderEpoch !== null &&
+        parseRcsMessageGuid(msg.guid)?.providerEpoch === rcsProviderEpoch;
+      const topology = parseMessagePartTopology(msg.messagePartTopology);
+      const imessageReaction =
+        imessageReactionsAvailable &&
+        !isRcsChatGuid(guid) &&
+        !msg.guid.startsWith('temp-') &&
+        isExactMessagePartTopology(topology) &&
+        topology.currentParts.length === 1 &&
+        topology.currentParts[0]?.index === 0;
+      const imessageReply = imessageRepliesAvailable && canTargetReplyPartZero(msg);
+      const imessageEdit = imessageEditsAvailable && canEditExactPlainTextPartZero(msg, Date.now());
+      const imessageUnsend =
+        imessageUnsendsAvailable && canUnsendExactPlainTextPartZero(msg, Date.now());
+      const imessageRemoteDelete =
+        imessageRemoteDeleteAvailable && canRemoteDeleteWholeMessage(msg);
+      const canReact = rcsReaction || imessageReaction;
       const mine = canReact
         ? msg.reactions
             .filter((r) => r.isFromMe && r.baseType !== 'emoji')
             .map((r) => r.baseType)
             .filter((t): t is ReactionBaseType => !!parseReactionType(t))
         : [];
-      const myEmojis = canReact
+      const myEmojis = rcsReaction
         ? msg.reactions
             .filter((r) => r.isFromMe && r.baseType === 'emoji' && !!r.emoji)
             .map((r) => r.emoji as string)
@@ -128,6 +304,11 @@ export function useMessageActions({ guid, messages, chatTitle, accountLease }: M
         mine,
         myEmojis,
         canReact,
+        canUseEmojiReactions: rcsReaction,
+        replyPartIndex: imessageReply ? 0 : undefined,
+        editPartIndex: imessageEdit ? 0 : undefined,
+        unsendPartIndex: imessageUnsend ? 0 : undefined,
+        canRemoteDeleteFromMac: imessageRemoteDelete,
         dateCreated: msg.dateCreated,
         // For the "Details" sheet: delivery/read/edit timestamps + this message's own service.
         dateDelivered: msg.dateDelivered,
@@ -136,8 +317,7 @@ export function useMessageActions({ guid, messages, chatTitle, accountLease }: M
         senderService: msg.senderService,
         isRetracted: isAggregateRetractionTombstone(msg),
         sourceRetractionFingerprint: retractionFingerprintOf(msg),
-        // These are read-only views of received/persisted message state. They remain useful even
-        // though helper-backed reply, edit, and unsend commands are retired.
+        // Read-only history remains useful independently of the narrow outgoing edit command.
         isEdited: !!msg.dateEdited,
         messageSummaryInfo: parseMessageSummaryInfo(msg.messageSummaryInfo),
         isTemp: msg.guid.startsWith('temp-'),
@@ -159,8 +339,172 @@ export function useMessageActions({ guid, messages, chatTitle, accountLease }: M
         anchorRect: rect,
       });
     },
-    [guid, rcsEnabled],
+    [
+      guid,
+      imessageEditsAvailable,
+      imessageReactionsAvailable,
+      imessageRepliesAvailable,
+      imessageRemoteDeleteAvailable,
+      imessageUnsendsAvailable,
+      rcsEnabled,
+      rcsProviderEpoch,
+    ],
   );
+
+  const onSwipeReply = useCallback(
+    (msg: EnrichedMessage): void => {
+      if (!imessageRepliesAvailable || !setReplyTo || !canTargetReplyPartZero(msg)) return;
+      setReplyTo(replyPreviewOf(msg));
+    },
+    [imessageRepliesAvailable, setReplyTo],
+  );
+
+  const onReplyToSelected = (): void => {
+    const current = currentSelectedMessage();
+    if (
+      !imessageRepliesAvailable ||
+      !setReplyTo ||
+      selected?.replyPartIndex !== 0 ||
+      !current ||
+      !canTargetReplyPartZero(current)
+    ) {
+      return;
+    }
+    setReplyTo(replyPreviewOf(current));
+  };
+
+  const onEditSelected = (): void => {
+    const current = currentSelectedMessage();
+    if (
+      !imessageEditsAvailable ||
+      !setEditing ||
+      selected?.editPartIndex !== 0 ||
+      !current ||
+      !canEditExactPlainTextPartZero(current, Date.now())
+    ) {
+      return;
+    }
+    const bodyText = actionContentOf(current).bodyText;
+    setReplyTo?.(null);
+    setEditing({ guid: current.guid, text: bodyText, partIndex: 0 });
+  };
+
+  const onUnsendSelected = (): void => {
+    const initial = currentSelectedMessage();
+    if (
+      !imessageUnsendsAvailable ||
+      selected?.unsendPartIndex !== 0 ||
+      !initial ||
+      !canUnsendExactPlainTextPartZero(initial, Date.now())
+    ) {
+      return;
+    }
+    const targetGuid = initial.guid;
+    showDialog(
+      'Unsend message?',
+      'This retracts the message for everyone. You can still delete your local copy separately.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unsend',
+          style: 'destructive',
+          onPress: () => {
+            if (imessageUnsendInFlight.current) return;
+            const current = messagesRef.current.find((message) => message.guid === targetGuid);
+            if (
+              !imessageUnsendsAvailable ||
+              !current ||
+              !canUnsendExactPlainTextPartZero(current, Date.now())
+            ) {
+              showDialog('Unsend Unavailable', 'This message can no longer be safely unsent.');
+              return;
+            }
+            imessageUnsendInFlight.current = true;
+            void unsend({ messageGuid: current.guid, chatGuid: guid, partIndex: 0 }, screenLease)
+              .then((result) => {
+                if (!screenLease.isCurrent()) return;
+                if (result == null || result.status === 'rejected') {
+                  showDialog('Unsend Not Sent', 'The message was not retracted.');
+                } else if (result.status === 'outcome-unknown') {
+                  showDialog(
+                    'Unsend Not Confirmed',
+                    'It may have been retracted. Check the conversation before taking any further action.',
+                  );
+                }
+              })
+              .catch(() => {
+                if (!screenLease.isCurrent()) return;
+                showDialog(
+                  'Unsend Not Confirmed',
+                  'Couldn’t confirm whether the message was retracted. Check the conversation before taking any further action.',
+                );
+              })
+              .finally(() => {
+                imessageUnsendInFlight.current = false;
+              });
+          },
+        },
+      ],
+    );
+  };
+
+  const onRemoteDeleteSelected = (): void => {
+    const initial = currentSelectedMessage();
+    if (
+      !imessageRemoteDeleteAvailable ||
+      selected?.canRemoteDeleteFromMac !== true ||
+      !initial ||
+      !canRemoteDeleteWholeMessage(initial)
+    ) {
+      return;
+    }
+    const targetGuid = initial.guid;
+    showDialog(
+      'Delete from Mac?',
+      'Delete this whole message from Messages on your Mac? If Messages in iCloud is enabled, it may also be deleted from your other Apple devices. This does not unsend it for anyone else.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete from Mac',
+          style: 'destructive',
+          onPress: () => {
+            if (imessageRemoteDeleteInFlight.current) return;
+            const current = messagesRef.current.find((message) => message.guid === targetGuid);
+            if (!current || !canRemoteDeleteWholeMessage(current)) {
+              showDialog(
+                'Remote Delete Unavailable',
+                'This message can no longer be safely deleted from the Mac.',
+              );
+              return;
+            }
+            imessageRemoteDeleteInFlight.current = true;
+            void deleteMessageFromMac({ messageGuid: current.guid, chatGuid: guid }, screenLease)
+              .then((result) => {
+                if (!screenLease.isCurrent()) return;
+                if (result == null || result.status === 'rejected') {
+                  showDialog('Not Deleted from Mac', 'The message was not deleted from the Mac.');
+                } else if (result.status === 'outcome-unknown') {
+                  showDialog(
+                    'Deletion Not Confirmed',
+                    'Couldn’t confirm whether the message was deleted. Check Messages on your Mac before trying again.',
+                  );
+                }
+              })
+              .catch(() => {
+                if (!screenLease.isCurrent()) return;
+                showDialog(
+                  'Deletion Not Confirmed',
+                  'Couldn’t confirm whether the message was deleted. Check Messages on your Mac before trying again.',
+                );
+              })
+              .finally(() => {
+                imessageRemoteDeleteInFlight.current = false;
+              });
+          },
+        },
+      ],
+    );
+  };
 
   // Read-only received-message affordances do not depend on the retired helper send path.
   const [threadFor, setThreadFor] = useState<string | null>(null);
@@ -315,15 +659,25 @@ export function useMessageActions({ guid, messages, chatTitle, accountLease }: M
 
   const onReact = (reaction: string, emoji?: string): void => {
     const current = currentSelectedMessage();
-    if (
-      !rcsEnabled ||
-      !isRcsChatGuid(guid) ||
-      !current ||
-      !current.guid.startsWith('rcs-') ||
-      !parseReactionType(reaction)
-    ) {
+    const parsed = parseReactionType(reaction);
+    const rcsReaction =
+      rcsEnabled &&
+      rcsProviderEpoch !== null &&
+      parseRcsMessageGuid(current?.guid)?.providerEpoch === rcsProviderEpoch;
+    const topology = current ? parseMessagePartTopology(current.messagePartTopology) : null;
+    const imessageReaction =
+      imessageReactionsAvailable &&
+      current != null &&
+      !isRcsChatGuid(guid) &&
+      isExactMessagePartTopology(topology) &&
+      topology.currentParts.length === 1 &&
+      topology.currentParts[0]?.index === 0 &&
+      parsed?.baseType !== 'emoji' &&
+      emoji === undefined;
+    if (!current || !parsed || (!rcsReaction && !imessageReaction)) {
       return;
     }
+    if (imessageReaction && imessageReactionInFlight.current) return;
     const { bodyText } = actionContentOf(current);
     const partIndex = 0;
     const args = {
@@ -334,9 +688,24 @@ export function useMessageActions({ guid, messages, chatTitle, accountLease }: M
       partIndex,
       selectedMessageText: bodyText || current.text || '',
     };
-    if (isDev())
+    if (isDev() && rcsReaction)
       void devSendFakeReaction(guid, current.guid, reaction, emoji, partIndex, screenLease);
-    else void react(args, screenLease, presentSendIssue);
+    else {
+      if (imessageReaction) imessageReactionInFlight.current = true;
+      void react(args, screenLease, presentSendIssue)
+        .catch(() => {
+          if (!screenLease.isCurrent()) return;
+          showDialog(
+            'Reaction not confirmed',
+            imessageReaction
+              ? 'It may have sent. Check the conversation before trying again.'
+              : 'Couldn’t send this reaction.',
+          );
+        })
+        .finally(() => {
+          if (imessageReaction) imessageReactionInFlight.current = false;
+        });
+    }
   };
 
   const onCopySelected = (): void => {
@@ -511,6 +880,10 @@ export function useMessageActions({ guid, messages, chatTitle, accountLease }: M
     setDetails,
     onDetailsSelected,
     onLongPressMessage,
+    ...(imessageRepliesAvailable ? { onSwipeReply, onReplyToSelected } : {}),
+    ...(imessageEditsAvailable ? { onEditSelected } : {}),
+    ...(imessageUnsendsAvailable ? { onUnsendSelected } : {}),
+    ...(imessageRemoteDeleteAvailable ? { onRemoteDeleteSelected } : {}),
     onToggleSelect,
     onEnterSelect,
     onBulkCopy,

@@ -3,6 +3,14 @@ import { Chat, resolveMessageChatGuid } from '@core/models';
 import type { EventDeliveryContext, EventSink, EventSource, NormalizedEvent } from '@core/realtime';
 import { logger } from '@core/secure';
 import {
+  classifyRcsEventAdmission,
+  classifyRcsMessageRecord,
+  isCurrentRcsChatGuid,
+  looksLikeRcsChatGuid,
+  looksLikeRcsMessageGuid,
+  type RcsProviderServerInfo,
+} from '@core/rcs';
+import {
   applyServerSendErrorWithinTransaction,
   getChatIdByGuid,
   getChatGuidByMessageGuid,
@@ -10,6 +18,7 @@ import {
   linkHandlesToContacts,
   markMessageDeletedWithinTransaction,
   reconcileEchoByContent,
+  resolveServerSendErrorOwnersWithinTransaction,
   setLastReadMessageGuidWithinTransaction,
   upsertChatsWithinTransaction,
   upsertHandlesWithinTransaction,
@@ -78,21 +87,31 @@ async function withCurrentDeliveryTransaction<T>(
   db: AppDatabase,
   context: EventDeliveryContext | undefined,
   task: (transactionContext: DbTransactionContext) => Promise<T>,
+  additionalGuard?: () => boolean,
 ): Promise<T | null> {
   try {
     return await withDbTransaction(
       db,
       async (transactionContext) => {
-        if (context && !context.isCurrent()) return null;
+        if ((context && !context.isCurrent()) || additionalGuard?.() === false) return null;
         const result = await task(transactionContext);
-        if (context && !context.isCurrent()) throw STALE_REALTIME_DELIVERY;
+        if ((context && !context.isCurrent()) || additionalGuard?.() === false) {
+          throw STALE_REALTIME_DELIVERY;
+        }
         return result;
       },
-      context ? () => context.isCurrent() : undefined,
+      context || additionalGuard
+        ? () => (context?.isCurrent() ?? true) && (additionalGuard?.() ?? true)
+        : undefined,
     );
   } catch (error) {
     if (error === STALE_REALTIME_DELIVERY) return null;
-    if (error instanceof DbCommitGuardRejectedError && context && !context.isCurrent()) return null;
+    if (
+      error instanceof DbCommitGuardRejectedError &&
+      ((context && !context.isCurrent()) || additionalGuard?.() === false)
+    ) {
+      return null;
+    }
     throw error;
   }
 }
@@ -151,6 +170,8 @@ export class DbEventSink implements EventSink {
       chatGuid: string | null,
       context?: EventDeliveryContext,
     ) => void | Promise<void>,
+    /** Production admission snapshot; omitted only by legacy unit tests with non-RCS fixtures. */
+    private readonly getRcsProviderInfo?: () => RcsProviderServerInfo | null | undefined,
   ) {}
 
   private async requestRecovery(
@@ -174,18 +195,28 @@ export class DbEventSink implements EventSink {
   private async linkContactsAfterCommit(
     addresses: string[],
     context?: EventDeliveryContext,
+    additionalGuard?: () => boolean,
   ): Promise<void> {
     const unique = [...new Set(addresses.filter((address) => address.length > 0))];
-    if (unique.length === 0 || (context && !context.isCurrent())) return;
+    if (unique.length === 0 || (context && !context.isCurrent()) || additionalGuard?.() === false) {
+      return;
+    }
     try {
       await linkHandlesToContacts(
         this.db,
         unique,
         undefined,
-        context ? () => context.isCurrent() : undefined,
+        context || additionalGuard
+          ? () => (context?.isCurrent() ?? true) && (additionalGuard?.() ?? true)
+          : undefined,
       );
     } catch (error) {
-      if (error instanceof DbCommitGuardRejectedError && context && !context.isCurrent()) return;
+      if (
+        error instanceof DbCommitGuardRejectedError &&
+        ((context && !context.isCurrent()) || additionalGuard?.() === false)
+      ) {
+        return;
+      }
       logger.debug('[dbEventSink] post-commit contact linking skipped', error);
     }
   }
@@ -196,6 +227,27 @@ export class DbEventSink implements EventSink {
     context?: EventDeliveryContext,
   ): Promise<void> {
     if (context && !context.isCurrent()) return;
+    let entryProviderAdmission: ReturnType<typeof classifyRcsEventAdmission> = 'non-rcs';
+    if (this.getRcsProviderInfo) {
+      entryProviderAdmission = classifyRcsEventAdmission(this.getRcsProviderInfo(), event);
+      if (entryProviderAdmission === 'stale') return;
+      if (entryProviderAdmission === 'unavailable') {
+        if (context?.durableEvent) throw new IncomingEventDependencyPendingError();
+        return;
+      }
+    }
+    let providerAdmissionRevoked = false;
+    const providerAdmissionIsCurrent = (): boolean => {
+      if (!this.getRcsProviderInfo) return true;
+      if (providerAdmissionRevoked) return false;
+      const liveAdmission = classifyRcsEventAdmission(this.getRcsProviderInfo(), event);
+      const current =
+        entryProviderAdmission === 'current'
+          ? liveAdmission === 'current'
+          : liveAdmission === 'non-rcs';
+      if (!current) providerAdmissionRevoked = true;
+      return current;
+    };
     // A prior attempt committed the authoritative DB writes and their queue checkpoint together.
     // Replay resumes only the outer presentation/optional side-effect phases.
     if (context?.durableEvent?.dbAppliedAt != null && hasAuthoritativeDbPhase(event)) return;
@@ -209,6 +261,19 @@ export class DbEventSink implements EventSink {
         // (no resolvable chat) → no row, no notification. Pure (no DB), so it runs BEFORE the
         // transaction — an unusable event must not take the write lock at all.
         let targetChatGuid: string | null = resolveMessageChatGuid(message) ?? null;
+        const providerInfo = this.getRcsProviderInfo?.();
+        if (providerInfo && classifyRcsMessageRecord(providerInfo, message) === 'current') {
+          // Lean updated-message events may omit both chat fields. Resolve the already-stored owner
+          // with a read, then require that owner to be current before taking a write lock.
+          targetChatGuid ??= await getChatGuidByMessageGuid(this.db, message.guid);
+          if (!targetChatGuid || !isCurrentRcsChatGuid(providerInfo, targetChatGuid)) return;
+        }
+        const messageProviderAdmissionIsCurrent = (): boolean =>
+          providerAdmissionIsCurrent() &&
+          (entryProviderAdmission !== 'current' ||
+            (targetChatGuid != null &&
+              classifyRcsMessageRecord(this.getRcsProviderInfo?.(), message, targetChatGuid) ===
+                'current'));
         if (!targetChatGuid && event.type === 'new-message' && !context?.durableEvent) {
           // The legacy direct path has no receipt to retry. Keep its historical fail-safe skip;
           // durable delivery below instead requests recovery and retains the queue row.
@@ -294,11 +359,14 @@ export class DbEventSink implements EventSink {
             }
             return { stored, reconciliation };
           },
+          messageProviderAdmissionIsCurrent,
         );
         if (messageResult == null) {
           // A stale delivery also returns null, but was deliberately rolled back and needs no
           // recovery request or misleading "chat not found" diagnostic.
-          if (context && !context.isCurrent()) break;
+          if ((context && !context.isCurrent()) || !messageProviderAdmissionIsCurrent()) {
+            break;
+          }
           if (context?.durableEvent) {
             await this.requestRecovery(targetChatGuid, context, {
               chatGuid: targetChatGuid,
@@ -312,12 +380,17 @@ export class DbEventSink implements EventSink {
           });
           break;
         }
+        if (!messageProviderAdmissionIsCurrent()) break;
         if (messageResult.reconciliation === 'attempt-owner-pending' && context?.durableEvent) {
           // Keep this exact success queued until the newer local request installs its owner. The
           // canonical server message was still upserted above, so history remains truthful.
           throw new IncomingEventDependencyPendingError();
         }
-        await this.linkContactsAfterCommit(contactAddresses, context);
+        await this.linkContactsAfterCommit(
+          contactAddresses,
+          context,
+          messageProviderAdmissionIsCurrent,
+        );
         // Notify the app (attachment auto-download) that this message + its rows are persisted.
         // Deliberately after COMMIT: it kicks off network/native work, which must never run with
         // the write lock held.
@@ -326,7 +399,12 @@ export class DbEventSink implements EventSink {
           message.messageSummaryInfoInvalid === true ||
           message.dateRetracted != null ||
           (message.messageSummaryInfo?.retractedParts?.length ?? 0) > 0;
-        if (storedId != null && hasRetractionSignal && (!context || context.isCurrent())) {
+        if (
+          storedId != null &&
+          hasRetractionSignal &&
+          (!context || context.isCurrent()) &&
+          messageProviderAdmissionIsCurrent()
+        ) {
           try {
             // Retraction can make an already-downloaded attachment unreachable. Retire it only
             // after the visibility transaction commits; a cleanup failure is recoverable later.
@@ -338,7 +416,11 @@ export class DbEventSink implements EventSink {
         // Invoke the hook synchronously so a background-FCM callback can register the returned task
         // before this delivery settles. The task itself remains detached: downloads can take much
         // longer than this queue attempt and must not hold its transaction or teardown slot open.
-        if (storedId != null && (!context || context.isCurrent())) {
+        if (
+          storedId != null &&
+          (!context || context.isCurrent()) &&
+          messageProviderAdmissionIsCurrent()
+        ) {
           try {
             const task = this.onMessageStored?.(storedId, source, context);
             void Promise.resolve(task).catch((error: unknown) => {
@@ -355,7 +437,9 @@ export class DbEventSink implements EventSink {
         // hard delete): the message REMAINS in the Mac's chat.db (~30 days) and the server's
         // query/sync paths keep returning it, so a hard delete would be UNDONE by the next sync
         // re-inserting the row. markMessageDeleted resolves the owning chat from the message row
-        // itself (the payload's chatGuid, when present, is not needed) and recomputes the chat's
+        // and requires any payload chatGuid to agree before it changes either the row or ledger.
+        // A scoped delete-before-message receipt can be retained safely; an ownerless legacy
+        // receipt stays quarantined. The helper also recomputes the chat's
         // inbox position. An absent dateDeleted (some transports omit it) falls back to now() — fine
         // for a tombstone whose only job is to hide the row. An unknown guid is still a durable
         // write: markMessageDeleted records it in the deletion ledger, so a later message backfill
@@ -382,12 +466,15 @@ export class DbEventSink implements EventSink {
                 transactionContext,
                 guid,
                 dateDeleted,
+                p.chatGuid ?? undefined,
               );
-              // `result` says whether a local MESSAGE row existed. The ledger write is authoritative
-              // either way, so checkpoint the durable event in this same transaction.
+              // `result` says whether the exact local MESSAGE owner was tombstoned. A matching
+              // scoped ledger write is authoritative even without a row; a conflict is safely
+              // rejected and checkpointed rather than retried forever.
               await markDurableDbPhase(transactionContext, context);
               return result;
             },
+            providerAdmissionIsCurrent,
           );
           if (found == null) break;
           applied = found;
@@ -399,9 +486,9 @@ export class DbEventSink implements EventSink {
           break;
         }
         if (!applied) {
-          logger.debug('[dbEventSink] durable deletion ledger recorded for unknown guid', { guid });
+          logger.debug('[dbEventSink] message deletion had no matching stored row', { guid });
         }
-        if (applied && (!context || context.isCurrent())) {
+        if (applied && (!context || context.isCurrent()) && providerAdmissionIsCurrent()) {
           try {
             // markMessageDeleted claimed ledger paths in the transaction above. Physical deletion
             // is deliberately post-commit and remains part of this tracked realtime delivery.
@@ -428,6 +515,7 @@ export class DbEventSink implements EventSink {
             await markDurableDbPhase(transactionContext, context);
             return 'applied' as const;
           },
+          providerAdmissionIsCurrent,
         );
         if (result == null || result === 'applied' || !context?.durableEvent) break;
         // The exact-chat refresh carries the Mac watermark and latest message. It is both faster
@@ -469,17 +557,85 @@ export class DbEventSink implements EventSink {
               }
             : undefined;
         const incompleteAttemptIdentity = hasModernAttemptMetadata && attemptIdentity == null;
+        const canonicalRcsIds = candidates.filter(looksLikeRcsMessageGuid);
+        let resolvedRcsOwner: string | null = null;
+        let rcsMutationAdmission: 'unresolved' | 'non-rcs' | 'current' | 'unavailable' | 'stale' =
+          'unresolved';
+        const errorIdentityIsCurrent = (): boolean => {
+          if (!providerAdmissionIsCurrent()) return false;
+          if (rcsMutationAdmission !== 'current') return true;
+          const providerInfo = this.getRcsProviderInfo?.();
+          return (
+            providerInfo != null &&
+            resolvedRcsOwner != null &&
+            p.chatGuid === resolvedRcsOwner &&
+            isCurrentRcsChatGuid(providerInfo, resolvedRcsOwner) &&
+            canonicalRcsIds.every(
+              (guid) =>
+                classifyRcsMessageRecord(providerInfo, {
+                  guid,
+                  chatGuid: resolvedRcsOwner,
+                }) === 'current',
+            )
+          );
+        };
         const now = Date.now();
         const sendErrorResult = await withCurrentDeliveryTransaction(
           this.db,
           context,
           async (transactionContext) => {
+            const ownerResolution = await resolveServerSendErrorOwnersWithinTransaction(
+              transactionContext,
+              candidates,
+            );
+            const rcsOwners = ownerResolution.chatGuids.filter(looksLikeRcsChatGuid);
+            const requiresRcsOwnership =
+              rcsOwners.length > 0 ||
+              looksLikeRcsChatGuid(p.chatGuid) ||
+              canonicalRcsIds.length > 0;
+            if (requiresRcsOwnership) {
+              const providerInfo = this.getRcsProviderInfo?.();
+              if (providerInfo == null) {
+                rcsMutationAdmission = 'unavailable';
+                return {
+                  commitEffect: null,
+                  disposition: 'provider-unavailable' as const,
+                };
+              }
+              resolvedRcsOwner =
+                ownerResolution.chatGuids.length === 1
+                  ? (ownerResolution.chatGuids[0] ?? null)
+                  : null;
+              const exactOwnerIsCurrent =
+                ownerResolution.hasEvidence &&
+                !ownerResolution.hasConflict &&
+                resolvedRcsOwner != null &&
+                typeof p.chatGuid === 'string' &&
+                p.chatGuid === resolvedRcsOwner &&
+                isCurrentRcsChatGuid(providerInfo, resolvedRcsOwner) &&
+                canonicalRcsIds.every(
+                  (guid) =>
+                    classifyRcsMessageRecord(providerInfo, {
+                      guid,
+                      chatGuid: resolvedRcsOwner,
+                    }) === 'current',
+                ) &&
+                (canonicalRcsIds.length > 0 || attemptIdentity != null);
+              if (!exactOwnerIsCurrent) {
+                rcsMutationAdmission = 'stale';
+                return { commitEffect: null, disposition: 'provider-rejected' as const };
+              }
+              rcsMutationAdmission = 'current';
+            } else {
+              rcsMutationAdmission = 'non-rcs';
+            }
             let commitEffect: (() => void) | null = null;
             let disposition:
               | 'applied'
               | 'attempt-owner-pending'
               | 'attempt-identity-missing'
               | 'stale-attempt'
+              | 'owner-conflict'
               | 'unmatched' = incompleteAttemptIdentity ? 'attempt-identity-missing' : 'unmatched';
             if (!incompleteAttemptIdentity) {
               for (const guid of candidates) {
@@ -508,8 +664,24 @@ export class DbEventSink implements EventSink {
             }
             return { commitEffect, disposition };
           },
+          errorIdentityIsCurrent,
         );
-        if (sendErrorResult == null) break;
+        if (sendErrorResult == null) {
+          if (
+            resolvedRcsOwner != null &&
+            this.getRcsProviderInfo?.() == null &&
+            context?.durableEvent
+          ) {
+            throw new IncomingEventDependencyPendingError();
+          }
+          break;
+        }
+        if (sendErrorResult.disposition === 'provider-unavailable') {
+          if (context?.durableEvent) throw new IncomingEventDependencyPendingError();
+          break;
+        }
+        if (sendErrorResult.disposition === 'provider-rejected') break;
+        if (!errorIdentityIsCurrent()) break;
         sendErrorResult.commitEffect?.();
         if (sendErrorResult.disposition === 'attempt-owner-pending' && context?.durableEvent) {
           throw new IncomingEventDependencyPendingError();
@@ -556,8 +728,11 @@ export class DbEventSink implements EventSink {
             await markDurableDbPhase(transactionContext, context);
             return true;
           },
+          providerAdmissionIsCurrent,
         );
-        if (applied) await this.linkContactsAfterCommit(contactAddresses, context);
+        if (applied && providerAdmissionIsCurrent()) {
+          await this.linkContactsAfterCommit(contactAddresses, context, providerAdmissionIsCurrent);
+        }
         break;
       }
       default:

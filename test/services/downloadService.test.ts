@@ -1055,6 +1055,45 @@ describe('ensureDownloaded', () => {
     );
   });
 
+  it('keeps DB-owned bytes when the provider scope becomes stale after commit', async () => {
+    const { db } = await createTestDb();
+    await seedAttachment(db, 'provider-stale-after-commit');
+    const finalPath = 'file:///docs/provider-stale-after-commit.jpg';
+    const fetcher: AttachmentFetcher = {
+      exists: () => false,
+      download: jest.fn(async () => fetched(finalPath, 20)),
+      discard: jest.fn(),
+    };
+    let current = true;
+    const scope: AttachmentDownloadScope = {
+      generation: 79,
+      isCurrent: () => current,
+      runCommit: jest.fn(async (task) => {
+        const committed = await task();
+        current = false;
+        return committed;
+      }),
+    };
+
+    await expect(
+      ensureDownloadedOutcome(
+        db,
+        fetcher,
+        {
+          guid: 'provider-stale-after-commit',
+          transferName: 'photo.jpg',
+          localPath: null,
+        },
+        undefined,
+        scope,
+      ),
+    ).resolves.toEqual({ status: 'stale' });
+    expect(fetcher.discard).not.toHaveBeenCalled();
+    expect((await getAttachmentByGuid(db, 'provider-stale-after-commit'))?.localPath).toBe(
+      finalPath,
+    );
+  });
+
   it('discards a transfer that finishes after its account generation was revoked', async () => {
     const { db } = await createTestDb();
     await seedAttachment(db, 'stale-download');

@@ -25,7 +25,7 @@ const REVIEWED_RESERVE_SCHEDULED_RUN_BODY_HASH =
 const REVIEWED_ENSURE_SCHEDULED_RECOVERY_BODY_HASH =
   '4b623fa83b24c1602c60e02c1a226e3b2cfd7e5b06bde9e947dc5b35a7a851fb';
 const REVIEWED_SEND_TEXT_BODY_HASH =
-  'cac6456de2aa30f90e47ed0dae521ef06d0bcd77c6b6f6bd5c98403a85e0a9b6';
+  '65b1983e46e78e7e5df22c38bbbfcc70d4431d9d719a07d77db0f3da5fdf020c';
 const HOME_PATH = 'app/(app)/home.tsx';
 const CHAT_ROUTE_PATH = 'app/(app)/chat/[guid].tsx';
 const CHAT_CATCHUP_PATH = 'src/features/conversations/useChatScheduledCatchup.ts';
@@ -36,13 +36,13 @@ const OUTGOING_QUEUE_SERVICE_PATH = 'src/services/send/outgoingQueueService.ts';
 const ATTACHMENT_UPLOAD_PATH = 'src/services/send/attachmentUpload.ts';
 const HTTP_CLIENT_PATH = 'src/core/api/http.ts';
 const REVIEWED_CALLBACK_DEPENDENCY_FILE_HASHES = new Map([
-  [BACKGROUND_SYNC_PATH, 'a9f27cdeb38edc321d99d7991702297a76f81e6083f46c3343092d53449f3b38'],
+  [BACKGROUND_SYNC_PATH, 'f21467ec5992dbd141a13e0b5b805325872a0248a92c3db1cc55775e1f6e8387'],
   [
     BACKGROUND_SYNC_ORCHESTRATOR_PATH,
-    '364aa2052974bef32055640230d9c9f4cbf6757de072104245ac66de5a06ca83',
+    '0575b99f99bba923bb06204fda63871e7c15499c6e1d916923447bc5c6ae8b31',
   ],
-  [OUTGOING_QUEUE_SERVICE_PATH, '2ec21e083b82858b1a4aaa480772949ca31f70e415a5380ccea9506a65700b76'],
-  [ATTACHMENT_UPLOAD_PATH, '7f6a08a86e12d21620f98e1d0a7ce65f68c3ae86a77b6f737ed669fecabaa8e5'],
+  [OUTGOING_QUEUE_SERVICE_PATH, 'adeafad16abf36822767d6319dd17e36d0e4d5ae228aedf90e50b814d14a1efd'],
+  [ATTACHMENT_UPLOAD_PATH, 'fc91ad4cbeca8e94c39167d4c93c1879e3d81e375f6599eedbb8d7f97b30235a'],
   [HTTP_CLIENT_PATH, '9de33f6afa815241607d4a93162b0cbb962cdfd2dacf3b7dfbef47044fcc4480'],
 ]);
 const REVIEWED_SCHEDULED_SYNTAX_HASHES = new Map([
@@ -68,7 +68,7 @@ const REVIEWED_SCHEDULED_SYNTAX_HASHES = new Map([
   ],
   [
     `${BACKGROUND_SYNC_PATH}#executeBackgroundSyncTask`,
-    'ffa8bfb34823d9f8df4784384ffe259dd4c015414dfc3e100b68b2daba6d67ee',
+    'bf4335159d9f32a554bb5f2bbaa39ccc96841611fad16584cab8e256e74b2497',
   ],
   [
     `${CHAT_CATCHUP_PATH}#useChatScheduledCatchup`,
@@ -76,7 +76,7 @@ const REVIEWED_SCHEDULED_SYNTAX_HASHES = new Map([
   ],
   [
     `${CHAT_ROUTE_PATH}#ChatScreen`,
-    'dc96ee03b5ee747b737a9db1235e67e1c3b48899404f70b472248a496d17d978',
+    'a099f555db9e001c31fe9e66e1a8aa1599e2a99ed786f80c1d88b3231a9e948d',
   ],
   [
     `${HOME_PATH}#Home.scheduledEffect`,
@@ -193,6 +193,10 @@ function functionBodyHash(declaration, sourceFile) {
 
 function normalizedNodeText(node, sourceFile) {
   return node.getText(sourceFile).replace(/\s+/g, ' ').trim();
+}
+
+function hasExactCompactText(node, sourceFile, expected) {
+  return !!node && node.getText(sourceFile).replace(/\s+/g, '') === expected.replace(/\s+/g, '');
 }
 
 function syntaxHash(node, sourceFile) {
@@ -319,25 +323,30 @@ function isDirectOptionalPropertyAccess(expression, owner, name) {
   );
 }
 
-function isExactAttemptOwnerOptions(expression) {
+function isExactSuccessSettlementOptions(expression) {
   if (!expression || !ts.isObjectLiteralExpression(expression)) return false;
-  if (expression.properties.length !== 1) return false;
-  const property = expression.properties[0];
+  if (expression.properties.length !== 2) return false;
+  const attemptOwnerProperty = expression.properties[0];
   if (
-    !property ||
-    !ts.isPropertyAssignment(property) ||
-    propertyNameText(property) !== 'attemptOwnerToken'
+    !attemptOwnerProperty ||
+    !ts.isPropertyAssignment(attemptOwnerProperty) ||
+    propertyNameText(attemptOwnerProperty) !== 'attemptOwnerToken'
   ) {
     return false;
   }
-  const initializer = property.initializer;
+  const initializer = attemptOwnerProperty.initializer;
+  const expectedChatProperty = expression.properties[1];
   return (
     ts.isBinaryExpression(initializer) &&
     initializer.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken &&
     ts.isIdentifier(initializer.left) &&
     initializer.left.text === 'attemptOwnerToken' &&
     ts.isIdentifier(initializer.right) &&
-    initializer.right.text === 'undefined'
+    initializer.right.text === 'undefined' &&
+    !!expectedChatProperty &&
+    ts.isPropertyAssignment(expectedChatProperty) &&
+    propertyNameText(expectedChatProperty) === 'expectedChatGuid' &&
+    isDirectPropertyAccess(expectedChatProperty.initializer, 'args', 'chatGuid')
   );
 }
 
@@ -352,7 +361,18 @@ function isExactTextCapabilityOptions(expression, sourceFile) {
   ) {
     return false;
   }
-  return property.initializer.getText(sourceFile).replace(/\s+/g, '') === 'rcsChat';
+  return property.initializer.getText(sourceFile).replace(/\s+/g, '') === 'rcsChat||target!=null';
+}
+
+function isExactReplyFailureOptions(expression, sourceFile) {
+  return hasExactCompactText(
+    expression,
+    sourceFile,
+    `{
+      attemptOwnerToken: attemptOwnerToken ?? undefined,
+      ...(target ? { terminalUncertainKind: 'reply' as const } : {}),
+    }`,
+  );
 }
 
 function isExactThrowGuard(statement, sourceFile, condition, errorName, message) {
@@ -947,8 +967,20 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     ...bindingIntegrityErrors(declaration.body, 'capabilityGuard', {
       label: 'combined send capability guard',
     }),
-    ...bindingIntegrityErrors(declaration.body, 'needsPrivateApi', {
-      label: 'retired Private API send requirement',
+    ...bindingIntegrityErrors(declaration.body, 'hasRetiredRichFields', {
+      label: 'retired rich-field send requirement',
+    }),
+    ...bindingIntegrityErrors(declaration.body, 'targetAuthorization', {
+      label: 'reply target authorization',
+    }),
+    ...bindingIntegrityErrors(declaration.body, 'authorizedTarget', {
+      label: 'authorized reply target',
+    }),
+    ...bindingIntegrityErrors(declaration.body, 'resolvedTarget', {
+      label: 'admission-time reply target',
+    }),
+    ...bindingIntegrityErrors(declaration.body, 'finalTarget', {
+      label: 'network-time reply target',
     }),
     ...bindingIntegrityErrors(declaration.body, 'attemptOwnerToken', {
       label: 'attempt-owner token',
@@ -986,6 +1018,9 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
   const targetPartIndex = targetPartStatement ? bodyStatements.indexOf(targetPartStatement) : -1;
   const targetIndex = targetStatement ? bodyStatements.indexOf(targetStatement) : -1;
   const rcsTargetStatement = targetIndex >= 0 ? bodyStatements[targetIndex + 1] : undefined;
+  const exactPartStatement = targetIndex >= 0 ? bodyStatements[targetIndex + 2] : undefined;
+  const replyTextStatement = targetIndex >= 0 ? bodyStatements[targetIndex + 3] : undefined;
+  const scheduledReplyStatement = targetIndex >= 0 ? bodyStatements[targetIndex + 4] : undefined;
   const rcsGuidCalls = callsNamed(declaration.body, new Set(['isRcsChatGuid']));
   if (
     targetPartCalls.length !== 1 ||
@@ -1007,6 +1042,17 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     !ts.isConditionalExpression(targetBinding.initializer) ||
     !ts.isIdentifier(targetBinding.initializer.condition) ||
     targetBinding.initializer.condition.text !== 'targetPart' ||
+    !hasExactCompactText(
+      targetBinding.initializer,
+      sourceFile,
+      `targetPart
+        ? {
+            chatGuid: args.chatGuid,
+            messageGuid: targetPart.messageGuid,
+            partIndex: targetPart.partIndex,
+          }
+        : null`,
+    ) ||
     targetBinding.initializer.whenFalse.kind !== ts.SyntaxKind.NullKeyword ||
     !targetStatement ||
     !ts.isVariableStatement(targetStatement) ||
@@ -1028,39 +1074,74 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
       'an RCS threaded target must be rejected exactly once immediately after target normalization and before capability lookup or durable admission',
     );
   }
-
-  const needsPrivateApiBindings = bindingDeclarationsNamed(
-    declaration.body,
-    'needsPrivateApi',
-  ).filter(ts.isVariableDeclaration);
-  const needsPrivateApiBinding = needsPrivateApiBindings[0];
-  const needsPrivateApiStatement = needsPrivateApiBinding?.parent?.parent;
-  const needsPrivateApiInitializer = needsPrivateApiBinding?.initializer
-    ?.getText(sourceFile)
-    .replace(/\s+/g, '');
-  const needsPrivateApiIndex = needsPrivateApiStatement
-    ? bodyStatements.indexOf(needsPrivateApiStatement)
-    : -1;
-  const retiredPrivateApiStatement =
-    needsPrivateApiIndex >= 0 ? bodyStatements[needsPrivateApiIndex + 1] : undefined;
   if (
-    needsPrivateApiBindings.length !== 1 ||
-    !needsPrivateApiBinding ||
-    !needsPrivateApiStatement ||
-    !ts.isVariableStatement(needsPrivateApiStatement) ||
-    needsPrivateApiStatement.parent !== declaration.body ||
-    needsPrivateApiInitializer !==
-      'target!=null||args.effectId!==undefined||args.subject!==undefined||!!args.mentions?.length'
+    !isExactThrowGuard(
+      exactPartStatement,
+      sourceFile,
+      'target&&target.partIndex!==0',
+      'Error',
+      'An iMessage reply needs exact message part zero.',
+    )
+  ) {
+    errors.push('an iMessage reply must require exact message part zero before durable admission');
+  }
+  if (
+    !isExactThrowGuard(
+      replyTextStatement,
+      sourceFile,
+      "target&&(args.text.trim().length===0||args.text.includes('\\u0000')||utf8Decode(utf8Encode(args.text))!==args.text||utf8Encode(args.text).byteLength>MAX_SEND_ATTACHMENT_TEXT_BYTES)",
+      'Error',
+      'An iMessage reply must be nonblank, well-formed text without NUL and no more than 65,536 UTF-8 bytes.',
+    )
   ) {
     errors.push(
-      'retired Private API requirements must be derived from target, effect, subject, or mentions',
+      'an iMessage reply must remain bounded, nonblank, NUL-free, well-formed plain text',
+    );
+  }
+  if (
+    !isExactThrowGuard(
+      scheduledReplyStatement,
+      sourceFile,
+      'target&&scheduledHandover',
+      'Error',
+      'Scheduled replies are not supported.',
+    )
+  ) {
+    errors.push('an iMessage reply must remain unscheduled before durable admission');
+  }
+
+  const retiredRichFieldBindings = bindingDeclarationsNamed(
+    declaration.body,
+    'hasRetiredRichFields',
+  ).filter(ts.isVariableDeclaration);
+  const retiredRichFieldBinding = retiredRichFieldBindings[0];
+  const retiredRichFieldStatement = retiredRichFieldBinding?.parent?.parent;
+  const retiredRichFieldInitializer = retiredRichFieldBinding?.initializer
+    ?.getText(sourceFile)
+    .replace(/\s+/g, '');
+  const retiredRichFieldIndex = retiredRichFieldStatement
+    ? bodyStatements.indexOf(retiredRichFieldStatement)
+    : -1;
+  const retiredPrivateApiStatement =
+    retiredRichFieldIndex >= 0 ? bodyStatements[retiredRichFieldIndex + 1] : undefined;
+  if (
+    retiredRichFieldBindings.length !== 1 ||
+    !retiredRichFieldBinding ||
+    !retiredRichFieldStatement ||
+    !ts.isVariableStatement(retiredRichFieldStatement) ||
+    retiredRichFieldStatement.parent !== declaration.body ||
+    retiredRichFieldInitializer !==
+      'args.effectId!==undefined||args.subject!==undefined||(target?args.mentions!==undefined:!!args.mentions?.length)'
+  ) {
+    errors.push(
+      'retired rich fields must be derived exactly from effect, subject, or mentions without retiring the narrow reply target',
     );
   }
   if (
     !isExactThrowGuard(
       retiredPrivateApiStatement,
       sourceFile,
-      'needsPrivateApi',
+      'hasRetiredRichFields',
       'Error',
       'Private API message features were retired in this release.',
     )
@@ -1169,7 +1250,7 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     capabilityStatement.parent !== declaration.body
   ) {
     errors.push(
-      'RCS classification and attempt capability must use the pinned transport and require ServerInfo exactly for RCS',
+      'RCS classification and attempt capability must use the pinned transport and require ServerInfo exactly for RCS or replies',
     );
   }
 
@@ -1214,6 +1295,105 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     errors.push('RCS must require capability.serverInfo.rcs === true before durable admission');
   }
 
+  const targetAuthorizationBindings = bindingDeclarationsNamed(
+    declaration.body,
+    'targetAuthorization',
+  ).filter(ts.isVariableDeclaration);
+  const targetAuthorizationBinding = targetAuthorizationBindings[0];
+  const targetAuthorizationStatement = targetAuthorizationBinding?.parent?.parent;
+  const authorizedTargetBindings = bindingDeclarationsNamed(
+    declaration.body,
+    'authorizedTarget',
+  ).filter(ts.isVariableDeclaration);
+  const authorizedTargetBinding = authorizedTargetBindings[0];
+  const authorizedTargetStatement = authorizedTargetBinding?.parent?.parent;
+  const authorizedTargetIndex = authorizedTargetStatement
+    ? bodyStatements.indexOf(authorizedTargetStatement)
+    : -1;
+  const replyProofStatement =
+    authorizedTargetIndex >= 0 ? bodyStatements[authorizedTargetIndex + 1] : undefined;
+  const replyProofBlock =
+    replyProofStatement && ts.isIfStatement(replyProofStatement)
+      ? replyProofStatement.thenStatement
+      : undefined;
+  const replyCapabilityStatement =
+    replyProofBlock && ts.isBlock(replyProofBlock) ? replyProofBlock.statements[0] : undefined;
+  const headerStatement =
+    replyProofBlock && ts.isBlock(replyProofBlock) ? replyProofBlock.statements[1] : undefined;
+  const headerCurrentStatement =
+    replyProofBlock && ts.isBlock(replyProofBlock) ? replyProofBlock.statements[2] : undefined;
+  const oneToOneStatement =
+    replyProofBlock && ts.isBlock(replyProofBlock) ? replyProofBlock.statements[3] : undefined;
+  const headerCalls = callsNamed(declaration.body, new Set(['getChatHeader']));
+  const oneToOneCalls = callsNamed(declaration.body, new Set(['isProvenOneToOneIMessageChat']));
+  if (
+    targetAuthorizationBindings.length !== 1 ||
+    !targetAuthorizationBinding ||
+    !targetAuthorizationStatement ||
+    !ts.isVariableStatement(targetAuthorizationStatement) ||
+    targetAuthorizationStatement.parent !== declaration.body ||
+    !hasExactCompactText(
+      targetAuthorizationBinding.initializer,
+      sourceFile,
+      `target
+        ? Object.freeze({ allowsLegacyPartZero: false, isCurrent: capabilityGuard })
+        : undefined`,
+    ) ||
+    authorizedTargetBindings.length !== 1 ||
+    !authorizedTargetBinding ||
+    !authorizedTargetStatement ||
+    !ts.isVariableStatement(authorizedTargetStatement) ||
+    authorizedTargetStatement.parent !== declaration.body ||
+    !hasExactCompactText(
+      authorizedTargetBinding.initializer,
+      sourceFile,
+      'target ? { ...target, serverAuthorization: targetAuthorization } : null',
+    )
+  ) {
+    errors.push(
+      'reply authorization must fail closed on exact topology and the same current capability guard',
+    );
+  }
+  if (
+    !replyProofStatement ||
+    !ts.isIfStatement(replyProofStatement) ||
+    !ts.isIdentifier(replyProofStatement.expression) ||
+    replyProofStatement.expression.text !== 'authorizedTarget' ||
+    !replyProofBlock ||
+    !ts.isBlock(replyProofBlock) ||
+    replyProofBlock.statements.length !== 4 ||
+    !isExactThrowGuard(
+      replyCapabilityStatement,
+      sourceFile,
+      'capability.serverInfo?.supports_imessage_replies!==true',
+      'Error',
+      'This server cannot send iMessage replies.',
+    ) ||
+    headerCalls.length !== 1 ||
+    !hasExactCompactText(
+      headerStatement,
+      sourceFile,
+      'const header = await getChatHeader(db, args.chatGuid);',
+    ) ||
+    !hasExactCompactText(
+      headerCurrentStatement,
+      sourceFile,
+      'if (!capabilityGuard()) throw new DbCommitGuardRejectedError();',
+    ) ||
+    oneToOneCalls.length !== 1 ||
+    !isExactThrowGuard(
+      oneToOneStatement,
+      sourceFile,
+      '!isProvenOneToOneIMessageChat(header)',
+      'Error',
+      'A proven existing one-to-one iMessage chat is required.',
+    )
+  ) {
+    errors.push(
+      'reply admission must require the exact reply capability, its current lease, and a proven existing one-to-one iMessage header',
+    );
+  }
+
   const outgoingBindings = bindingDeclarationsNamed(declaration.body, 'outgoing').filter(
     ts.isVariableDeclaration,
   );
@@ -1223,15 +1403,23 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     outgoingBinding?.initializer && ts.isObjectLiteralExpression(outgoingBinding.initializer)
       ? outgoingBinding.initializer.properties
       : [];
-  const [tempGuidProperty, chatGuidProperty, textProperty, nowProperty, attemptAwareProperty] =
-    outgoingProperties;
+  const [
+    tempGuidProperty,
+    chatGuidProperty,
+    textProperty,
+    nowProperty,
+    selectedMessageProperty,
+    partIndexProperty,
+    threadOriginatorProperty,
+    attemptAwareProperty,
+  ] = outgoingProperties;
   if (
     outgoingBindings.length !== 1 ||
     !outgoingBinding ||
     !outgoingStatement ||
     !ts.isVariableStatement(outgoingStatement) ||
     outgoingStatement.parent !== declaration.body ||
-    outgoingProperties.length !== 5 ||
+    outgoingProperties.length !== 8 ||
     !tempGuidProperty ||
     !ts.isShorthandPropertyAssignment(tempGuidProperty) ||
     tempGuidProperty.name.text !== 'tempGuid' ||
@@ -1246,13 +1434,29 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     !nowProperty ||
     !ts.isShorthandPropertyAssignment(nowProperty) ||
     nowProperty.name.text !== 'now' ||
+    !selectedMessageProperty ||
+    !ts.isPropertyAssignment(selectedMessageProperty) ||
+    propertyNameText(selectedMessageProperty) !== 'selectedMessageGuid' ||
+    !isDirectOptionalPropertyAccess(selectedMessageProperty.initializer, 'target', 'messageGuid') ||
+    !partIndexProperty ||
+    !ts.isPropertyAssignment(partIndexProperty) ||
+    propertyNameText(partIndexProperty) !== 'partIndex' ||
+    !isDirectOptionalPropertyAccess(partIndexProperty.initializer, 'target', 'partIndex') ||
+    !threadOriginatorProperty ||
+    !ts.isPropertyAssignment(threadOriginatorProperty) ||
+    propertyNameText(threadOriginatorProperty) !== 'threadOriginatorGuid' ||
+    !isDirectOptionalPropertyAccess(
+      threadOriginatorProperty.initializer,
+      'target',
+      'messageGuid',
+    ) ||
     !attemptAwareProperty ||
     !ts.isPropertyAssignment(attemptAwareProperty) ||
     propertyNameText(attemptAwareProperty) !== 'attemptAware' ||
     !isDirectPropertyAccess(attemptAwareProperty.initializer, 'capability', 'attemptAware')
   ) {
     errors.push(
-      'outgoing text must contain only tempGuid, chatGuid, text, now, and the pinned attempt capability',
+      'outgoing text must contain only the canonical ordinary fields, exact reply identity, and pinned attempt capability',
     );
   }
 
@@ -1352,6 +1556,10 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
   );
   const transactionInsertCall = transactionInsertCalls[0];
   const publicInsertCalls = callsNamed(declaration.body, new Set(['insertOutgoingText']));
+  const admissionTargetCalls = callsNamed(
+    declaration.body,
+    new Set(['resolveMessageTargetWithinTransaction']),
+  );
   const ownerCallback = ordinaryOwnerCall?.arguments[1];
   if (
     ordinaryOwnerCalls.length !== 1 ||
@@ -1361,37 +1569,46 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     !isIdentifierArgument(ordinaryOwnerCall, 2, 'capabilityGuard') ||
     !ownerCallback ||
     !ts.isArrowFunction(ownerCallback) ||
-    ownerCallback.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword) ||
+    !ownerCallback.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword) ||
     ownerCallback.parameters.length !== 1 ||
     !ownerCallback.parameters[0] ||
     !ts.isIdentifier(ownerCallback.parameters[0].name) ||
     ownerCallback.parameters[0].name.text !== 'context' ||
     !transactionInsertCall ||
     transactionInsertCalls.length !== 1 ||
-    ownerCallback.body !== transactionInsertCall ||
-    transactionInsertCall.arguments.length !== 2 ||
-    !isIdentifierArgument(transactionInsertCall, 0, 'context') ||
-    !isIdentifierArgument(transactionInsertCall, 1, 'outgoing') ||
+    admissionTargetCalls.length !== 1 ||
+    !hasExactCompactText(
+      ownerCallback,
+      sourceFile,
+      `async (context) => {
+        const resolvedTarget = authorizedTarget
+          ? await resolveMessageTargetWithinTransaction(context, authorizedTarget)
+          : null;
+        if (authorizedTarget && resolvedTarget?.basis !== 'exact-topology') {
+          throw new MessageTargetUnavailableError();
+        }
+        return insertOutgoingTextWithinTransaction(context, {
+          ...outgoing,
+          selectedMessageGuid: resolvedTarget?.messageGuid,
+          partIndex: resolvedTarget?.partIndex,
+          threadOriginatorGuid: resolvedTarget?.messageGuid,
+        });
+      }`,
+    ) ||
     publicInsertCalls.length !== 0
   ) {
     errors.push(
-      'ordinary text must use the sole direct guarded context insert in the false ownership arm',
+      'ordinary text must resolve exact reply topology and use the sole guarded context insert in the false ownership arm',
     );
   }
 
   const forbiddenTargetCalls = callsNamed(
     declaration.body,
-    new Set([
-      'messageTargetServerAuthorization',
-      'messageTargetCommitGuard',
-      'resolveMessageTarget',
-      'resolveMessageTargetWithinTransaction',
-      'retireUnavailableMessageTarget',
-    ]),
+    new Set(['messageTargetServerAuthorization', 'messageTargetCommitGuard']),
   );
   if (forbiddenTargetCalls.length !== 0) {
     errors.push(
-      'retired target authorization and revalidation paths must remain absent from sendTextMessage',
+      'reply authorization must not use legacy target authorization or commit-guard helpers',
     );
   }
 
@@ -1405,19 +1622,25 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     targetPartIndex !== 0 ||
     targetIndex !== 1 ||
     bodyStatements[2] !== rcsTargetStatement ||
-    needsPrivateApiIndex !== 3 ||
-    bodyStatements[4] !== retiredPrivateApiStatement ||
-    effectiveIndex !== 6 ||
-    transportIndex !== 7 ||
-    rcsChatIndex !== 8 ||
-    capabilityIndex !== 9 ||
-    capabilityGuardIndex !== 10 ||
-    bodyStatements[11] !== rcsSupportStatement ||
-    outgoingIndex !== 12 ||
-    ownershipIndex !== 13
+    bodyStatements[3] !== exactPartStatement ||
+    bodyStatements[4] !== replyTextStatement ||
+    bodyStatements[5] !== scheduledReplyStatement ||
+    retiredRichFieldIndex !== 6 ||
+    bodyStatements[7] !== retiredPrivateApiStatement ||
+    effectiveIndex !== 9 ||
+    transportIndex !== 10 ||
+    rcsChatIndex !== 11 ||
+    capabilityIndex !== 12 ||
+    capabilityGuardIndex !== 13 ||
+    bodyStatements[14] !== rcsSupportStatement ||
+    bodyStatements[15] !== targetAuthorizationStatement ||
+    bodyStatements[16] !== authorizedTargetStatement ||
+    bodyStatements[17] !== replyProofStatement ||
+    outgoingIndex !== 18 ||
+    ownershipIndex !== 19
   ) {
     errors.push(
-      'target retirement, effective guard, pinned transport, RCS capability, outgoing payload, and ownership handoff must remain in reviewed order',
+      'reply rejection, rich-field retirement, guards, capabilities, topology proof, outgoing payload, and ownership handoff must remain in reviewed order',
     );
   }
 
@@ -1480,20 +1703,27 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
   );
   const currentnessCall = currentnessCalls[0];
   const currentnessStatement = currentnessCall?.parent;
-  const postAwaitAccountGuardStatement = networkTryBlock?.statements[1];
-  const capabilityCurrentStatement = networkTryBlock?.statements[2];
+  const finalTargetStatement = networkTryBlock?.statements[0];
+  const finalTargetGuardStatement = networkTryBlock?.statements[1];
+  const postAwaitAccountGuardStatement = networkTryBlock?.statements[3];
+  const capabilityCurrentStatement = networkTryBlock?.statements[4];
   const capabilityCurrentCalls = propertyCallsNamed(
     declaration.body,
     'capabilitySource',
     'isCurrent',
   );
+  const networkTargetCalls = callsNamed(declaration.body, new Set(['resolveMessageTarget']));
+  const retireTargetCalls = callsNamed(
+    declaration.body,
+    new Set(['retireUnavailableMessageTarget']),
+  );
   const methodCalls = callsNamed(declaration.body, new Set(['chooseSendMethod']));
   const methodCall = methodCalls[0];
-  const methodDeclaration = methodCall?.parent;
-  const methodStatement =
-    methodDeclaration && ts.isVariableDeclaration(methodDeclaration)
-      ? methodDeclaration.parent?.parent
-      : undefined;
+  const methodBindings = bindingDeclarationsNamed(declaration.body, 'method').filter(
+    ts.isVariableDeclaration,
+  );
+  const methodBinding = methodBindings[0];
+  const methodStatement = methodBinding?.parent?.parent;
   if (
     networkCalls.length !== 1 ||
     !networkCall ||
@@ -1521,7 +1751,24 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     !ts.isExpressionStatement(currentnessStatement) ||
     currentnessStatement.expression !== currentnessCall ||
     currentnessStatement.parent !== networkTryBlock ||
-    networkTryBlock.statements[0] !== currentnessStatement ||
+    networkTargetCalls.length !== 1 ||
+    retireTargetCalls.length !== 1 ||
+    !hasExactCompactText(
+      finalTargetStatement,
+      sourceFile,
+      `const finalTarget = authorizedTarget
+        ? await resolveMessageTarget(db, authorizedTarget, capabilityGuard)
+        : null;`,
+    ) ||
+    !hasExactCompactText(
+      finalTargetGuardStatement,
+      sourceFile,
+      `if (authorizedTarget && finalTarget?.basis !== 'exact-topology') {
+        await retireUnavailableMessageTarget(db, tempGuid, capabilityGuard);
+        return { tempGuid };
+      }`,
+    ) ||
+    networkTryBlock.statements[2] !== currentnessStatement ||
     !isExactThrowGuard(
       postAwaitAccountGuardStatement,
       sourceFile,
@@ -1538,30 +1785,39 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     methodCalls.length !== 1 ||
     !methodCall ||
     methodCall.arguments.length !== 1 ||
-    !isIdentifierArgument(methodCall, 0, 'needsPrivateApi') ||
-    !methodDeclaration ||
-    !ts.isVariableDeclaration(methodDeclaration) ||
-    !ts.isIdentifier(methodDeclaration.name) ||
-    methodDeclaration.name.text !== 'method' ||
-    methodDeclaration.initializer !== methodCall ||
+    methodCall.arguments[0]?.kind !== ts.SyntaxKind.FalseKeyword ||
+    methodBindings.length !== 1 ||
+    !methodBinding ||
+    !hasExactCompactText(
+      methodBinding.initializer,
+      sourceFile,
+      'target ? undefined : chooseSendMethod(false)',
+    ) ||
     !methodStatement ||
     !ts.isVariableStatement(methodStatement) ||
     methodStatement.parent !== networkTryBlock ||
-    networkTryBlock.statements[3] !== methodStatement ||
-    networkTryBlock.statements[4] !== networkStatement
+    networkTryBlock.statements[5] !== methodStatement ||
+    networkTryBlock.statements[6] !== networkStatement
   ) {
     errors.push(
-      'the one sendText call must follow transport.assertNetworkCurrent and the exact post-await account/capability checks',
+      'the one sendText call must follow exact reply topology revalidation, transport currentness, and post-await account/capability checks',
     );
   }
 
   const networkPayload = networkCall?.arguments[1];
   const networkProperties =
     networkPayload && ts.isObjectLiteralExpression(networkPayload) ? networkPayload.properties : [];
-  const [networkChatGuid, networkTempGuid, generationProperty, networkMessage, networkMethod] =
-    networkProperties;
+  const [
+    networkChatGuid,
+    networkTempGuid,
+    generationProperty,
+    networkMessage,
+    networkSelectedMessage,
+    networkPartIndex,
+    networkMethod,
+  ] = networkProperties;
   if (
-    networkProperties.length !== 5 ||
+    networkProperties.length !== 7 ||
     !networkChatGuid ||
     !ts.isPropertyAssignment(networkChatGuid) ||
     propertyNameText(networkChatGuid) !== 'chatGuid' ||
@@ -1581,13 +1837,48 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     !ts.isPropertyAssignment(networkMessage) ||
     propertyNameText(networkMessage) !== 'message' ||
     !isDirectPropertyAccess(networkMessage.initializer, 'args', 'text') ||
+    !networkSelectedMessage ||
+    !ts.isPropertyAssignment(networkSelectedMessage) ||
+    propertyNameText(networkSelectedMessage) !== 'selectedMessageGuid' ||
+    !isDirectOptionalPropertyAccess(
+      networkSelectedMessage.initializer,
+      'finalTarget',
+      'messageGuid',
+    ) ||
+    !networkPartIndex ||
+    !ts.isPropertyAssignment(networkPartIndex) ||
+    propertyNameText(networkPartIndex) !== 'partIndex' ||
+    !isDirectOptionalPropertyAccess(networkPartIndex.initializer, 'finalTarget', 'partIndex') ||
     !networkMethod ||
     !ts.isShorthandPropertyAssignment(networkMethod) ||
     networkMethod.name.text !== 'method'
   ) {
     errors.push(
-      'sendText must receive only the canonical chat, temp id, attempt generation, message, and pinned method',
+      'sendText must receive only the canonical chat, temp id, attempt generation, message, exact resolved reply target, and ordinary-only method',
     );
+  }
+
+  const replyAckStatement = networkTryBlock?.statements[7];
+  if (
+    !hasExactCompactText(
+      replyAckStatement,
+      sourceFile,
+      `if (
+        target &&
+        (typeof server.guid !== 'string' ||
+          server.guid.trim().length === 0 ||
+          server.guid.trim() !== server.guid ||
+          server.guid === tempGuid ||
+          server.guid === finalTarget?.messageGuid ||
+          utf8Encode(server.guid).byteLength > 1_024 ||
+          utf8Decode(utf8Encode(server.guid)) !== server.guid ||
+          server.viaPrivateApi !== true)
+      ) {
+        throw new ApiError('parse_error', 'iMessage reply acknowledgement was incomplete');
+      }`,
+    )
+  ) {
+    errors.push('an iMessage reply must require the exact bounded private-API acknowledgement');
   }
 
   const reconcileCalls = callsNamed(declaration.body, new Set(['reconcileSendOutcome']));
@@ -1610,12 +1901,13 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     !reconcileCalls[0] ||
     reconcileCalls[0].arguments.length !== 6 ||
     !isIdentifierArgument(reconcileCalls[0], 4, 'effectiveCommitGuard') ||
-    !isExactAttemptOwnerOptions(reconcileCalls[0].arguments[5]) ||
+    !isExactSuccessSettlementOptions(reconcileCalls[0].arguments[5]) ||
+    directAwaitedCallStatement(reconcileCalls[0]) !== networkTryBlock?.statements[8] ||
     failureCalls.length !== 1 ||
     !failureCall ||
     failureCall.arguments.length !== 8 ||
     !isIdentifierArgument(failureCall, 6, 'effectiveCommitGuard') ||
-    !isExactAttemptOwnerOptions(failureCall.arguments[7]) ||
+    !isExactReplyFailureOptions(failureCall.arguments[7], sourceFile) ||
     catchClauses.length !== 1 ||
     !catchClause ||
     !catchVariable ||
@@ -1637,7 +1929,7 @@ export function scheduledHandoffSourceErrors(source, { expectedBodyHash } = {}) 
     catchClause.block.statements[1] !== failureStatement
   ) {
     errors.push(
-      'success and failure settlement must receive the effective guard and attempt-owner token, with ownership rejection rethrown before failure handling',
+      'success and failure settlement must retain guarded ownership, with replies retired as one-shot uncertain outcomes and ownership rejection rethrown first',
     );
   }
 

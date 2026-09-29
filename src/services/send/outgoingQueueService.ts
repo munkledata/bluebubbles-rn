@@ -1,11 +1,15 @@
 import type { HttpClient } from '@core/api/http';
 import { ApiError } from '@core/api/errors';
+import { isRcsProviderEpoch } from '@core/rcs';
 import {
+  CURRENT_LOCATION_MAX_REPLAY_AGE_MS,
   sendContact,
+  sendLocation,
   sendReaction,
   sendText,
   type ContactEmail,
   type ContactPhone,
+  type IMessageTextFormattingRange,
   type MessageMention,
 } from '@core/api/endpoints/messages';
 import { logger } from '@core/secure';
@@ -33,8 +37,14 @@ import {
 } from '../realtime/deliveryCoordinator';
 import {
   handleSendFailure,
+  isTerminalLocationSendError,
   reconcileSendOutcome,
   UNCERTAIN_IMESSAGE_ATTACHMENT_COPY,
+  UNCERTAIN_IMESSAGE_EFFECT_COPY,
+  UNCERTAIN_IMESSAGE_LOCATION_COPY,
+  UNCERTAIN_IMESSAGE_MENTION_COPY,
+  UNCERTAIN_IMESSAGE_FORMATTED_COPY,
+  UNCERTAIN_IMESSAGE_REPLY_COPY,
 } from './sendOutcome';
 import { notifyFailedSend } from './sendFailureNotice';
 import type { AttachmentUploader } from './sendAttachmentService';
@@ -47,6 +57,10 @@ interface TextPayload {
   effectId?: string;
   subject?: string;
   mentions?: MessageMention[];
+  textFormatting?: IMessageTextFormattingRange[];
+  imessageEffectV1?: true;
+  imessageMentionV1?: true;
+  imessageFormattedV1?: true;
 }
 interface ReactionPayload {
   selectedMessageGuid: string;
@@ -77,26 +91,77 @@ interface ContactPayload {
   selectedMessageGuid?: string;
   partIndex?: number;
 }
+interface LocationPayload {
+  latitude: number;
+  longitude: number;
+}
+
+function parseLocationPayload(payload: string): LocationPayload | null {
+  try {
+    const value = JSON.parse(payload) as unknown;
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+    const record = value as Record<string, unknown>;
+    if (Object.keys(record).sort().join(',') !== 'latitude,longitude') return null;
+    const { latitude, longitude } = record;
+    if (
+      typeof latitude !== 'number' ||
+      !Number.isFinite(latitude) ||
+      latitude < -90 ||
+      latitude > 90 ||
+      typeof longitude !== 'number' ||
+      !Number.isFinite(longitude) ||
+      longitude < -180 ||
+      longitude > 180
+    ) {
+      return null;
+    }
+    return { latitude, longitude };
+  } catch {
+    return null;
+  }
+}
+
+function isExpiredLocationReplay(row: QueueRowShape & { createdAt: number }, now: number): boolean {
+  return (
+    row.kind === 'location' &&
+    (!Number.isSafeInteger(row.createdAt) ||
+      row.createdAt < 0 ||
+      row.createdAt > now ||
+      now - row.createdAt >= CURRENT_LOCATION_MAX_REPLAY_AGE_MS)
+  );
+}
 
 type QueueRowShape = Pick<RetryableOutgoing, 'chatGuid' | 'kind' | 'payload'>;
 
-/** Retire helper-dependent queued work, including new one-shot iMessage file sends. */
+/** Retire helper-dependent queued work, including marked one-shot iMessage sends. */
 function requiresRetiredPrivateApi(row: QueueRowShape): boolean {
+  if (row.kind === 'text') {
+    try {
+      const payload = JSON.parse(row.payload) as TextPayload;
+      // This explicit bit overrides a stale/malformed chat classification as well as a missing
+      // rich field. Once marked one-shot, this row must never reach an ordinary text transport.
+      if (
+        payload.imessageEffectV1 === true ||
+        payload.imessageMentionV1 === true ||
+        payload.imessageFormattedV1 === true
+      )
+        return true;
+      if (isRcsChatGuid(row.chatGuid)) return false;
+      return (
+        payload.selectedMessageGuid !== undefined ||
+        payload.effectId !== undefined ||
+        payload.subject !== undefined ||
+        payload.mentions !== undefined ||
+        payload.textFormatting !== undefined
+      );
+    } catch {
+      // Malformed payloads follow the existing invalid-row retirement path.
+      return false;
+    }
+  }
   if (isRcsChatGuid(row.chatGuid)) return false;
   if (row.kind === 'reaction' || row.kind === 'contact' || row.kind === 'attachment') return true;
-  if (row.kind !== 'text') return false;
-  try {
-    const payload = JSON.parse(row.payload) as TextPayload;
-    return (
-      payload.selectedMessageGuid !== undefined ||
-      payload.effectId !== undefined ||
-      payload.subject !== undefined ||
-      payload.mentions !== undefined
-    );
-  } catch {
-    // Malformed payloads follow the existing invalid-row retirement path.
-    return false;
-  }
+  return false;
 }
 
 /** Only a new, explicitly marked one-shot attachment gets the uncertain-delivery outcome. */
@@ -105,6 +170,61 @@ function isMarkedImessageAttachment(row: QueueRowShape): boolean {
   try {
     const payload = JSON.parse(row.payload) as AttachmentPayload;
     return payload?.imessageAttachmentV1 === true;
+  } catch {
+    return false;
+  }
+}
+
+/** A narrow plain-text iMessage reply is one-shot and may never be replayed after interruption. */
+function isNarrowImessageReply(row: QueueRowShape): boolean {
+  if (row.kind !== 'text' || isRcsChatGuid(row.chatGuid)) return false;
+  try {
+    const payload = JSON.parse(row.payload) as TextPayload;
+    return (
+      typeof payload.selectedMessageGuid === 'string' &&
+      payload.selectedMessageGuid.length > 0 &&
+      payload.partIndex === 0 &&
+      payload.effectId === undefined &&
+      payload.subject === undefined &&
+      payload.mentions === undefined &&
+      payload.textFormatting === undefined
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** A recovered marked effect may already have dispatched and must never enter text replay. */
+function isNarrowImessageEffect(row: QueueRowShape): boolean {
+  if (row.kind !== 'text') return false;
+  try {
+    const payload = JSON.parse(row.payload) as TextPayload;
+    // Treat the one-shot bit as authoritative even when another payload field is malformed or
+    // absent. Recovery may downgrade presentation, but it must never downgrade delivery safety.
+    return payload.imessageEffectV1 === true;
+  } catch {
+    return false;
+  }
+}
+
+/** A recovered marked mention may already have dispatched and must never enter text replay. */
+function isNarrowImessageMention(row: QueueRowShape): boolean {
+  if (row.kind !== 'text') return false;
+  try {
+    const payload = JSON.parse(row.payload) as TextPayload;
+    // The marker, not reparsing the mutable rich payload, is the durable one-shot authority.
+    return payload.imessageMentionV1 === true;
+  } catch {
+    return false;
+  }
+}
+
+/** A recovered marked formatted message may already have dispatched and must never be replayed. */
+function isNarrowImessageFormatted(row: QueueRowShape): boolean {
+  if (row.kind !== 'text') return false;
+  try {
+    const payload = JSON.parse(row.payload) as TextPayload;
+    return payload.imessageFormattedV1 === true;
   } catch {
     return false;
   }
@@ -120,6 +240,9 @@ export interface OutgoingQueueIO {
   fileExists: (uri: string) => Promise<boolean>;
 }
 
+/** Current RCS mutation authority. Omit ids only for the coarse "any current epoch?" SQL filter. */
+export type RcsAvailability = (chatGuid?: string, messageGuid?: string) => boolean;
+
 /** What one re-POST attempt did. 'unsendable' = retired for good (nothing can ever fix it). */
 export type ResendOutcome = 'sent' | 'failed' | 'unsendable' | 'paused' | 'deferred';
 
@@ -127,6 +250,13 @@ class RcsCapabilityUnavailableError extends Error {
   constructor() {
     super('RCS capability changed before the request started.');
     this.name = 'RcsCapabilityUnavailableError';
+  }
+}
+
+class LocationCapabilityUnavailableError extends Error {
+  constructor() {
+    super('Current-location capability changed before the request started.');
+    this.name = 'LocationCapabilityUnavailableError';
   }
 }
 
@@ -243,17 +373,41 @@ export async function resendOutgoingRow(
   attachmentTimeoutMs?: number,
   attemptOwnerToken?: SendAttemptOwnerToken,
   serverAuthorization?: MessageTargetServerAuthorization,
-  rcsAvailable?: () => boolean,
+  rcsAvailable?: RcsAvailability,
   attachmentSignal?: AbortSignal,
+  locationAvailable?: () => boolean,
 ): Promise<ResendOutcome> {
   if (!accountIsCurrent(accountLease)) return 'paused';
   const rcsChat = isRcsChatGuid(row.chatGuid);
-  const rcsIsCurrent = (): boolean => !rcsChat || (rcsAvailable?.() ?? true);
+  const rcsIsCurrent = (): boolean => !rcsChat || rcsAvailable?.(row.chatGuid) === true;
+  const locationIsCurrent = (): boolean =>
+    row.kind !== 'location' || locationAvailable?.() === true;
   if (!rcsIsCurrent()) return 'deferred';
+  const locationReplayNow = row.kind === 'location' ? clock() : null;
+  if (locationReplayNow !== null && isExpiredLocationReplay(row, locationReplayNow)) {
+    return (await runAccountCommit(accountLease, (guard) =>
+      withDbTransaction(
+        db,
+        (context) =>
+          retireUncertainOutgoingWithinTransaction(
+            context,
+            row.tempGuid,
+            ClientErrorCode.locationDeliveryUnconfirmed,
+            UNCERTAIN_IMESSAGE_LOCATION_COPY,
+            true,
+          ),
+        guard,
+      ),
+    ))
+      ? 'unsendable'
+      : 'paused';
+  }
+  if (!locationIsCurrent()) return 'deferred';
   let networkStarted = false;
   const assertNetworkStart = (): void => {
     if (!accountIsCurrent(accountLease)) throw new DbCommitGuardRejectedError();
     if (!rcsIsCurrent()) throw new RcsCapabilityUnavailableError();
+    if (!locationIsCurrent()) throw new LocationCapabilityUnavailableError();
     networkStarted = true;
   };
   const retiredPrivateApiRow = requiresRetiredPrivateApi(row);
@@ -280,9 +434,19 @@ export async function resendOutgoingRow(
       ? 'unsendable'
       : 'paused';
   const retirePrivateApiRow = async (): Promise<ResendOutcome> => {
-    if (isMarkedImessageAttachment(row)) {
+    const narrowReply = isNarrowImessageReply(row);
+    const narrowEffect = isNarrowImessageEffect(row);
+    const narrowMention = isNarrowImessageMention(row);
+    const narrowFormatted = isNarrowImessageFormatted(row);
+    if (
+      isMarkedImessageAttachment(row) ||
+      narrowReply ||
+      narrowEffect ||
+      narrowMention ||
+      narrowFormatted
+    ) {
       // A process death may have hidden a successful helper dispatch. Never replay this key or
-      // present the generic "not sent" notification; keep its local file for user review.
+      // present the generic "not sent" notification; keep the authored local row for review.
       return (await runAccountCommit(accountLease, (guard) =>
         withDbTransaction(
           db,
@@ -290,8 +454,24 @@ export async function resendOutgoingRow(
             retireUncertainOutgoingWithinTransaction(
               context,
               row.tempGuid,
-              ClientErrorCode.attachmentDeliveryUnconfirmed,
-              UNCERTAIN_IMESSAGE_ATTACHMENT_COPY,
+              narrowReply
+                ? ClientErrorCode.replyDeliveryUnconfirmed
+                : narrowEffect
+                  ? ClientErrorCode.effectDeliveryUnconfirmed
+                  : narrowMention
+                    ? ClientErrorCode.mentionDeliveryUnconfirmed
+                    : narrowFormatted
+                      ? ClientErrorCode.formattedDeliveryUnconfirmed
+                      : ClientErrorCode.attachmentDeliveryUnconfirmed,
+              narrowReply
+                ? UNCERTAIN_IMESSAGE_REPLY_COPY
+                : narrowEffect
+                  ? UNCERTAIN_IMESSAGE_EFFECT_COPY
+                  : narrowMention
+                    ? UNCERTAIN_IMESSAGE_MENTION_COPY
+                    : narrowFormatted
+                      ? UNCERTAIN_IMESSAGE_FORMATTED_COPY
+                      : UNCERTAIN_IMESSAGE_ATTACHMENT_COPY,
             ),
           guard,
         ),
@@ -337,7 +517,8 @@ export async function resendOutgoingRow(
       row.kind === 'text' ||
       row.kind === 'reaction' ||
       row.kind === 'contact' ||
-      row.kind === 'attachment'
+      row.kind === 'attachment' ||
+      row.kind === 'location'
         ? http.pinTransport()
         : http;
     // The row is already flipped to 'sending' — that happens in the SAME transaction as the lease
@@ -368,6 +549,9 @@ export async function resendOutgoingRow(
       if (!accountIsCurrent(accountLease)) return 'paused';
       const resolvedTarget = await authorizeTarget();
       if (!resolvedTarget) return retireTarget();
+      if (rcsChat && rcsAvailable?.(row.chatGuid, resolvedTarget.messageGuid) === false) {
+        return 'deferred';
+      }
       retryHttp.assertTransportCurrent();
       assertNetworkStart();
       server = await sendReaction(retryHttp, {
@@ -394,6 +578,21 @@ export async function resendOutgoingRow(
         emails: p.emails,
         selectedMessageGuid: resolvedTarget?.messageGuid,
         partIndex: resolvedTarget?.partIndex,
+      });
+    } else if (row.kind === 'location') {
+      const p = parseLocationPayload(row.payload);
+      if (!p) {
+        logger.warn('[queue] invalid location retry payload — retiring');
+        return retireTarget();
+      }
+      if (!accountIsCurrent(accountLease)) return 'paused';
+      retryHttp.assertTransportCurrent();
+      assertNetworkStart();
+      server = await sendLocation(retryHttp, {
+        chatGuid: row.chatGuid,
+        tempGuid: row.tempGuid,
+        latitude: p.latitude,
+        longitude: p.longitude,
       });
     } else if (row.kind === 'attachment') {
       // One deadline spans the queue's DB/stat preflight AND the uploader's own preflight, FIFO
@@ -464,6 +663,7 @@ export async function resendOutgoingRow(
     return (await runAccountCommit(accountLease, (guard) =>
       reconcileSendOutcome(db, row.tempGuid, server, clock(), guard, {
         attemptOwnerToken,
+        expectedChatGuid: row.chatGuid,
       }),
     ))
       ? 'sent'
@@ -472,6 +672,7 @@ export async function resendOutgoingRow(
     if (!accountIsCurrent(accountLease)) return 'paused';
     if (
       e instanceof RcsCapabilityUnavailableError ||
+      e instanceof LocationCapabilityUnavailableError ||
       (rcsChat && !networkStarted && !rcsIsCurrent())
     ) {
       return 'deferred';
@@ -479,9 +680,11 @@ export async function resendOutgoingRow(
     if (e instanceof DbCommitGuardRejectedError) return 'paused';
     if (e instanceof MessageTargetCapabilityUnknownError) return 'paused';
     if (e instanceof MessageTargetUnavailableError) return retireTarget();
+    const terminalLocation = row.kind === 'location' && isTerminalLocationSendError(e);
     return (await runAccountCommit(accountLease, (guard) =>
       handleSendFailure(db, row.tempGuid, e, 'queue', row.chatGuid, clock(), guard, {
         attemptOwnerToken,
+        ...(terminalLocation ? { terminalUncertainKind: 'location' as const } : {}),
       }),
     ))
       ? 'failed'
@@ -508,13 +711,30 @@ async function runOutgoingQueueBody(
   maxRows?: number,
   attachmentTimeoutMs?: number,
   serverAuthorization?: MessageTargetServerAuthorization,
-  rcsAvailable?: () => boolean,
+  rcsAvailable?: RcsAvailability,
   attachmentSignal?: AbortSignal,
+  locationAvailable?: () => boolean,
+  currentRcsProviderEpoch?: string | null,
 ): Promise<{ eligible: number; sent: number }> {
   if (!accountIsCurrent(accountLease)) return { eligible: 0, sent: 0 };
-  // Filter disabled RCS work in SQLite before applying the headless work cap. Fetching every
-  // eligible row merely to skip RCS in JavaScript would make one background pass unbounded.
-  const rows = await listRetryableOutgoing(db, now, maxRows, rcsAvailable?.() === false);
+  // Filter disabled or old-provider RCS work in SQLite before applying the headless work cap.
+  // Otherwise stale rows can occupy every bounded candidate slot and hide later sendable work.
+  // An unbounded foreground drain may retain its JavaScript exact check; a bounded caller without
+  // a validated epoch fails closed for RCS so it cannot reintroduce starvation or cross-epoch send.
+  const boundedRcsProviderEpoch =
+    maxRows === undefined
+      ? undefined
+      : isRcsProviderEpoch(currentRcsProviderEpoch)
+        ? currentRcsProviderEpoch
+        : null;
+  const rows = await listRetryableOutgoing(
+    db,
+    now,
+    maxRows,
+    rcsAvailable?.() !== true || boundedRcsProviderEpoch === null,
+    locationAvailable?.() !== true,
+    boundedRcsProviderEpoch ?? undefined,
+  );
   if (!accountIsCurrent(accountLease)) return { eligible: rows.length, sent: 0 };
   // `now` anchors the drain (and is injectable, so tests keep a deterministic clock), but every
   // claim and every outcome reads the time AGAIN through here. A single loop-start value both
@@ -528,9 +748,34 @@ async function runOutgoingQueueBody(
   for (const row of rows) {
     if (!accountIsCurrent(accountLease)) break;
     const rcsRow = isRcsChatGuid(row.chatGuid);
-    const rcsIsCurrent = (): boolean => !rcsRow || (rcsAvailable?.() ?? true);
+    const rcsIsCurrent = (): boolean => !rcsRow || rcsAvailable?.(row.chatGuid) === true;
+    const locationRow = row.kind === 'location';
+    const expiredLocation = locationRow && isExpiredLocationReplay(row, clock());
+    if (expiredLocation) {
+      if (maxRows !== undefined && attemptedRows >= maxRows) break;
+      attemptedRows += 1;
+      const retired = await runAccountCommit(accountLease, (guard) =>
+        withDbTransaction(
+          db,
+          (context) =>
+            retireUncertainOutgoingWithinTransaction(
+              context,
+              row.tempGuid,
+              ClientErrorCode.locationDeliveryUnconfirmed,
+              UNCERTAIN_IMESSAGE_LOCATION_COPY,
+              true,
+            ),
+          guard,
+        ),
+      );
+      if (!retired) break;
+      continue;
+    }
+    const locationIsCurrent = (): boolean => !locationRow || locationAvailable?.() === true;
     // Capability-disabled RCS rows remain untouched and must not starve later AppleScript work.
     if (!rcsIsCurrent()) continue;
+    // Location rows likewise wait untouched for an exact live capability snapshot.
+    if (!locationIsCurrent()) continue;
     if (maxRows !== undefined && attemptedRows >= maxRows) break;
     attemptedRows += 1;
     // THE LEASE AND THE VISIBLE STATE FLIP ARE ONE STEP. This service owns their short guarded
@@ -559,7 +804,8 @@ async function runOutgoingQueueBody(
         : serverAuthorization;
     try {
       claimCommitted = await runAccountCommit(accountLease, async (guard) => {
-        const claimGuard = (): boolean => (guard?.() ?? true) && rcsIsCurrent();
+        const claimGuard = (): boolean =>
+          (guard?.() ?? true) && rcsIsCurrent() && locationIsCurrent();
         claim = await withDbTransaction(
           db,
           (context) =>
@@ -577,7 +823,7 @@ async function runOutgoingQueueBody(
         error instanceof MessageTargetCapabilityUnknownError ||
         error instanceof DbCommitGuardRejectedError
       ) {
-        if (rcsRow && !rcsIsCurrent()) continue;
+        if ((rcsRow && !rcsIsCurrent()) || (locationRow && !locationIsCurrent())) continue;
         break;
       }
       throw error;
@@ -596,6 +842,7 @@ async function runOutgoingQueueBody(
       privateApiRetirementAuthorization,
       rcsAvailable,
       attachmentSignal,
+      locationAvailable,
     );
     if (outcome === 'sent') sent += 1;
     if (outcome === 'deferred') {
@@ -630,8 +877,10 @@ export async function runOutgoingQueue(
   maxRows?: number,
   attachmentTimeoutMs?: number,
   serverAuthorization?: MessageTargetServerAuthorization,
-  rcsAvailable?: () => boolean,
+  rcsAvailable?: RcsAvailability,
   attachmentSignal?: AbortSignal,
+  locationAvailable?: () => boolean,
+  currentRcsProviderEpoch?: string | null,
 ): Promise<{ eligible: number; sent: number }> {
   if (!accountLease) {
     return runOutgoingQueueBody(
@@ -645,6 +894,8 @@ export async function runOutgoingQueue(
       serverAuthorization,
       rcsAvailable,
       attachmentSignal,
+      locationAvailable,
+      currentRcsProviderEpoch,
     );
   }
 
@@ -661,6 +912,8 @@ export async function runOutgoingQueue(
       serverAuthorization,
       rcsAvailable,
       attachmentSignal,
+      locationAvailable,
+      currentRcsProviderEpoch,
     );
   });
   return status === 'delivered' && completed.value ? completed.value : { eligible: 0, sent: 0 };

@@ -16,6 +16,52 @@ export function serverInfo(http: HttpClient, signal?: AbortSignal): Promise<Serv
   return http.get('/server/info', ServerInfo, { signal });
 }
 
+/** Narrow, read-only account status. The older iCloud alias-management routes stay retired. */
+const IMessageAccountStatus = z
+  .object({
+    appleId: z.string().max(512).nullable(),
+    displayName: z.string().max(512).nullable(),
+    activeAlias: z.string().max(512).nullable(),
+    aliases: z.array(z.string().min(1).max(512)).max(32),
+    vettedAliases: z.array(z.string().min(1).max(512)).max(32),
+    loginStatusMessage: z.string().max(2048).nullable(),
+  })
+  .strict();
+export type IMessageAccountStatus = z.infer<typeof IMessageAccountStatus>;
+
+export function imessageAccountStatus(
+  http: HttpClient,
+  signal?: AbortSignal,
+): Promise<IMessageAccountStatus> {
+  return typedRoute('/imessage/account/status', () =>
+    http.get('/imessage/account/status', IMessageAccountStatus, { signal }),
+  );
+}
+
+const IMessageAliasChangeResult = z.object({ activeAlias: z.string().min(1).max(254) }).strict();
+
+/** One explicitly chosen, vetted send-from alias; never use the retired iCloud mutation route. */
+export function changeImessageActiveAlias(
+  http: HttpClient,
+  alias: string,
+  signal?: AbortSignal,
+): Promise<z.infer<typeof IMessageAliasChangeResult>> {
+  const selected = z
+    .string()
+    .min(1)
+    .max(254)
+    .regex(/^[^\x00-\x1f\x7f]+$/)
+    .parse(alias);
+  return typedRoute('/imessage/account/alias', () =>
+    http.post('/imessage/account/alias', IMessageAliasChangeResult, {
+      json: { alias: selected },
+      retry: false,
+      captureErrorDetail: true,
+      signal,
+    }),
+  );
+}
+
 // ---- Server management (F-9) ----
 // Current Gator servers expose typed password-authenticated routes for statistics and health.
 // Remote restart is intentionally unsupported and has no client wrapper.

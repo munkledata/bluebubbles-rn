@@ -14,3 +14,4 @@ export * as backupsApi from './endpoints/backups';
 export * as repairSnapshotApi from './endpoints/repairSnapshot';
 export * as deviceCredentialsApi from './endpoints/deviceCredentials';
 export * as urlPreviewsApi from './endpoints/urlPreviews';
+export * as facetimeApi from './endpoints/facetime';

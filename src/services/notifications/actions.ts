@@ -1,4 +1,11 @@
+import { serverApi } from '@core/api';
 import type { HttpClient } from '@core/api/http';
+import { retirePrivateApiCapabilities } from '@core/models';
+import {
+  currentRcsProviderEpoch,
+  isCurrentRcsChatGuid,
+  isCurrentRcsMessageGuid,
+} from '@core/rcs/providerIdentity';
 import { logger, readAccountRevocationState } from '@core/secure';
 import { deleteReminderByNotificationId } from '@db/repositories';
 import { isDevServer } from '@utils/isDev';
@@ -16,6 +23,7 @@ import {
 import { sendTextMessage } from '@/services/send/sendService';
 import {
   captureSessionRcsCapabilityLease,
+  fixedRcsCapabilitySource,
   messageTargetServerAuthorization,
   resolveRcsAttemptOwnership,
   type RcsCapabilitySource,
@@ -70,6 +78,7 @@ function assertCurrentTransport(transport: NotificationActionTransport): void {
  */
 async function resolveNotificationActionTransport(
   accountLease: RealtimeDeliveryLease,
+  rcsChatGuid?: string,
 ): Promise<NotificationActionTransport> {
   assertCurrentAccount(accountLease);
   const capabilitySource = captureSessionRcsCapabilityLease();
@@ -91,6 +100,9 @@ async function resolveNotificationActionTransport(
       accountIsCurrent,
       isCurrent,
       capabilitySource,
+      rcsProviderEpoch: currentRcsProviderEpoch(capabilitySource.serverInfo),
+      acceptsRcsChat: (chatGuid: string) =>
+        isCurrent() && isCurrentRcsChatGuid(capabilitySource.serverInfo, chatGuid),
     });
   }
 
@@ -108,7 +120,18 @@ async function resolveNotificationActionTransport(
   );
   const isCurrent = (): boolean => accountIsCurrent() && actionHttp.isTransportCurrent();
   if (!isCurrent()) throw STALE_NOTIFICATION_ACTION;
-  return Object.freeze({ http: actionHttp, accountIsCurrent, isCurrent });
+  if (!rcsChatGuid) return Object.freeze({ http: actionHttp, accountIsCurrent, isCurrent });
+
+  const info = retirePrivateApiCapabilities(await serverApi.serverInfo(actionHttp));
+  if (!isCurrent()) throw STALE_NOTIFICATION_ACTION;
+  return Object.freeze({
+    http: actionHttp,
+    accountIsCurrent,
+    isCurrent,
+    capabilitySource: fixedRcsCapabilitySource(info),
+    rcsProviderEpoch: currentRcsProviderEpoch(info),
+    acceptsRcsChat: (guid: string) => isCurrent() && isCurrentRcsChatGuid(info, guid),
+  });
 }
 
 /**
@@ -232,7 +255,7 @@ async function handleNotificationActionForAccount(
       case ACTION_MARK_READ:
         assertCurrentAccount(accountLease);
         await markRead(chatGuid, accountLease, {
-          resolveReceiptTransport: () => resolveNotificationActionTransport(accountLease),
+          resolveReceiptTransport: () => resolveNotificationActionTransport(accountLease, chatGuid),
         });
         assertCurrentAccount(accountLease);
         break;
@@ -402,7 +425,12 @@ async function loveMessage(
 
     // DEV: simulate the reaction round-trip locally without a server.
     if (isDevServer()) {
-      if (!sessionAccessors.rcsEnabled()) return;
+      if (
+        !sessionAccessors.acceptsRcsChat(chatGuid) ||
+        !sessionAccessors.acceptsRcsMessage(messageGuid)
+      ) {
+        return;
+      }
       const { devSendFakeReaction } = await import('@features/conversations/devSeed');
       assertCurrentAccount(accountLease);
       await devSendFakeReaction(chatGuid, messageGuid, 'love', undefined, 0, accountLease);
@@ -421,7 +449,12 @@ async function loveMessage(
     assertCurrentTransport(transport);
     // A killed-process RCS action has no trustworthy foreground store. Require the task-local
     // server-info fetch above to affirm the RCS bridge before a stale notification can react.
-    if (capability.serverInfo?.rcs !== true) return;
+    if (
+      !isCurrentRcsChatGuid(capability.serverInfo, chatGuid) ||
+      !isCurrentRcsMessageGuid(capability.serverInfo, messageGuid)
+    ) {
+      return;
+    }
     await sendReactionMessage(
       db,
       transport.http,

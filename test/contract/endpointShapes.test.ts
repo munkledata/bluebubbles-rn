@@ -9,6 +9,7 @@ import {
   SERVER_MESSAGE_SEARCH_LIMIT,
   ServerMessageSearchList,
   SendAck,
+  UnsendAck,
   deletedMessages,
   queryMessages,
   searchMessagesOnServer,
@@ -19,6 +20,9 @@ import { ChatList, createChat, getChat, queryChats } from '@core/api/endpoints/c
 import { registerDevice } from '@core/api/endpoints/fcm';
 import { SYNC_WITH_QUERY } from '@core/config/constants';
 import { Chat } from '@core/models';
+
+const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
+const RCS_CHAT_GUID = `RCS;-;g1.${RCS_PROVIDER_EPOCH}.${Buffer.from('+15551234567').toString('base64url')}`;
 
 /**
  * Endpoint-shape contract gate. The entity-level wire contract (wireContract.test.ts)
@@ -306,16 +310,37 @@ describe('endpoint shapes: send / action acks (NOT bare Messages)', () => {
     );
   });
 
-  it('rejects retired Unsend before HTTP', () => {
+  it('rejects NUL in a narrow iMessage reply before HTTP', () => {
     const post = jest.fn();
     expect(() =>
+      sendText({ post } as unknown as HttpClient, {
+        chatGuid: 'iMessage;-;+15551234567',
+        tempGuid: 'temp-reply',
+        message: 'before\u0000after',
+        selectedMessageGuid: 'reply-target',
+        partIndex: 0,
+      }),
+    ).toThrow('cannot be blank or contain NUL');
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it('sends narrow Unsend with exact target identity and no transport retry', async () => {
+    const post = jest.fn(async (_path: string, schema: z.ZodType, options: unknown) => {
+      void options;
+      return schema.parseAsync({ unsent: true, guid: 'm1' });
+    });
+    await expect(
       unsendMessage({ post } as unknown as HttpClient, {
-        chatGuid: 'c1',
+        chatGuid: 'iMessage;-;+15551234567',
         messageGuid: 'm1',
         partIndex: 0,
       }),
-    ).toThrow('Unsend was retired');
-    expect(post).not.toHaveBeenCalled();
+    ).resolves.toEqual({ unsent: true, guid: 'm1' });
+    expect(post).toHaveBeenCalledWith('/message/m1/unsend', UnsendAck, {
+      captureErrorDetail: true,
+      retry: false,
+      json: { chatGuid: 'iMessage;-;+15551234567', partIndex: 0 },
+    });
   });
 });
 
@@ -330,7 +355,7 @@ describe('endpoint shapes: single-chat read/create wrapper-or-bare', () => {
     const wrapped = {
       chat: {
         ...base,
-        guid: 'RCS;-;+15551234567',
+        guid: RCS_CHAT_GUID,
         participants: [{ address: '+15551234567', service: 'RCS' }],
       },
     };
@@ -338,8 +363,9 @@ describe('endpoint shapes: single-chat read/create wrapper-or-bare', () => {
       address: '+1555',
       message: 'hi',
       service: 'RCS',
+      providerEpoch: RCS_PROVIDER_EPOCH,
     });
-    expect(chat.guid).toBe('RCS;-;+15551234567');
+    expect(chat.guid).toBe(RCS_CHAT_GUID);
   });
 });
 

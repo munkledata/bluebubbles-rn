@@ -5,6 +5,14 @@ import {
 } from '@core/api/endpoints/messages';
 import { ApiError } from '@core/api/errors';
 import {
+  currentRcsProviderEpoch,
+  isCurrentRcsChatGuid,
+  isCurrentRcsMessageGuid,
+  looksLikeRcsChatGuid,
+  looksLikeRcsMessageGuid,
+  type RcsProviderServerInfo,
+} from '@core/rcs';
+import {
   kvGetWithinTransaction,
   kvSetWithinTransaction,
   markMessageDeletedWithinTransaction,
@@ -42,7 +50,8 @@ export type DeletionSyncProtocolErrorCode =
   | 'timestamp-before-watermark'
   | 'timestamp-out-of-order'
   | 'cursor-not-advanced'
-  | 'cursor-restart-loop';
+  | 'cursor-restart-loop'
+  | 'rcs-provider-epoch-mismatch';
 
 /**
  * A server response violated the deletion cursor contract. The message and code deliberately name
@@ -175,6 +184,8 @@ export interface DeletionSyncOptions {
   commitGuard?: DbCommitGuard;
   /** Cancel the active deletion request/retry wait. */
   signal?: AbortSignal;
+  /** Captured current Google pairing identity; absent drops legacy RCS while advancing compat cursors. */
+  rcsProviderInfo?: RcsProviderServerInfo | null;
 }
 
 export interface DeletionSnapshotInitializationReadOptions {
@@ -371,10 +382,27 @@ export async function syncDeletedMessages(
     const rows = response.deleted;
     const ledgerOrdered = response.protocol === 'continuation' && response.cursor.startsWith('v2.');
     const validated = validateDeletionPage(rows, requestedAfterMs, pageSize, ledgerOrdered);
-    const preparedRows = rows.map((row) => ({
-      guid: row.guid,
-      dateDeleted: row.dateDeleted ?? now(),
-    }));
+    const expectedRcsProviderEpoch = currentRcsProviderEpoch(opts.rcsProviderInfo);
+    const preparedRows = rows.flatMap((row) => {
+      const rcsMessage = looksLikeRcsMessageGuid(row.guid);
+      const rcsChat = looksLikeRcsChatGuid(row.chatGuid);
+      if (!rcsMessage && !rcsChat) {
+        return [{ guid: row.guid, chatGuid: row.chatGuid, dateDeleted: row.dateDeleted ?? now() }];
+      }
+      // Old/unqualified servers are compatibility-read-only: ignore their RCS rows but consume the
+      // mixed page so Apple deletion catch-up keeps moving. Once an exact epoch was captured, any
+      // mismatch signals rotation/protocol drift and the cursor must remain before this page.
+      if (expectedRcsProviderEpoch == null) return [];
+      if (
+        !rcsMessage ||
+        !rcsChat ||
+        !isCurrentRcsMessageGuid(opts.rcsProviderInfo, row.guid) ||
+        !isCurrentRcsChatGuid(opts.rcsProviderInfo, row.chatGuid)
+      ) {
+        throw new DeletionSyncProtocolError('rcs-provider-epoch-mismatch');
+      }
+      return [{ guid: row.guid, chatGuid: row.chatGuid, dateDeleted: row.dateDeleted ?? now() }];
+    });
     const nextAfterMs = Math.max(requestedAfterMs, validated.maxTimestamp);
 
     let nextState: DeletionSyncState;
@@ -409,7 +437,12 @@ export async function syncDeletedMessages(
       db,
       async (transactionContext) => {
         for (const row of preparedRows) {
-          await markMessageDeletedWithinTransaction(transactionContext, row.guid, row.dateDeleted);
+          await markMessageDeletedWithinTransaction(
+            transactionContext,
+            row.guid,
+            row.dateDeleted,
+            row.chatGuid ?? undefined,
+          );
         }
         await kvSetWithinTransaction(
           transactionContext,
@@ -421,7 +454,7 @@ export async function syncDeletedMessages(
     );
 
     // Advertise progress only after the page and its continuation committed together.
-    applied += rows.length;
+    applied += preparedRows.length;
     committedPages++;
     state = nextState;
     if (response.protocol === 'continuation') seenCursors.add(response.cursor);

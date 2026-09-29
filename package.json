@@ -83,6 +83,7 @@
     "expo-intent-launcher": "~57.0.1",
     "expo-linking": "~57.0.9",
     "expo-local-authentication": "~57.0.2",
+    "expo-location": "~57.0.20",
     "expo-media-library": "~57.0.4",
     "expo-navigation-bar": "~57.0.2",
     "expo-network": "~57.0.1",
@@ -106,6 +107,7 @@
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
     "socket.io-client": "^4.8.3",
+    "unicode-segmenter": "^0.17.3",
     "zod": "^4.4.3",
     "zustand": "^5.0.14"
   },

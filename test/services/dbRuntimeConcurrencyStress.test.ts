@@ -24,8 +24,14 @@ jest.mock('expo-crypto', () => ({
 }));
 
 let dummyHttp!: HttpClient;
+const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
+const RCS_PROVIDER_INFO = {
+  rcs: true,
+  supports_rcs_epoch_qualified_ids: true,
+  rcs_provider_epoch: RCS_PROVIDER_EPOCH,
+} as const;
 dummyHttp = {
-  get: async () => ({ private_api: false, rcs: true }),
+  get: async () => ({ private_api: false, ...RCS_PROVIDER_INFO }),
   pinTransport: () => dummyHttp,
   isTransportCurrent: () => true,
   assertTransportCurrent: () => undefined,
@@ -38,7 +44,8 @@ const IMAGE = {
   width: 800,
   height: 600,
 };
-const UPLOAD_CHAT_GUID = 'RCS;-;db02c-sync-upload-chat';
+const UPLOAD_CHAT_GUID = `RCS;-;g1.${RCS_PROVIDER_EPOCH}.YQ`;
+const UPLOAD_REAL_GUID = `rcs-g1.${RCS_PROVIDER_EPOCH}.Yg`;
 const DEADLINE_MS = 2_000;
 
 interface Gate {
@@ -143,6 +150,7 @@ describe('DB-02C mixed runtime concurrency', () => {
     const syncChats = Array.from({ length: 10 }, (_, index) =>
       Chat.parse({
         guid: index === 0 ? UPLOAD_CHAT_GUID : `db02c-sync-chat-${index}`,
+        ...(index === 0 ? { providerEpoch: RCS_PROVIDER_EPOCH } : {}),
         participants: [{ address: `sync-${index}@example.com` }],
       }),
     );
@@ -176,7 +184,19 @@ describe('DB-02C mixed runtime concurrency', () => {
       await deadline(neighbour.entered, 'rolling-back neighbour entry');
 
       // syncAllChats submits its first five-chat owner before the other production paths.
-      syncRun = retain(syncAllChats(db, api, 10));
+      syncRun = retain(
+        syncAllChats(
+          db,
+          api,
+          10,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          RCS_PROVIDER_INFO,
+        ),
+      );
       await deadline(pageFetched.promise, 'sync page fetch');
       await nextTurn();
 
@@ -195,7 +215,7 @@ describe('DB-02C mixed runtime concurrency', () => {
             uploadTransactionStates.push(raw.inTransaction);
             uploadEntered.release();
             await uploadGate.promise;
-            return { guid: 'db02c-real-attachment-message' };
+            return { guid: UPLOAD_REAL_GUID };
           },
           20_000,
         ),
@@ -272,7 +292,8 @@ describe('DB-02C mixed runtime concurrency', () => {
         count(
           raw,
           `SELECT COUNT(*) count FROM chats
-            WHERE guid LIKE 'db02c-sync-%' OR guid LIKE 'RCS;-;db02c-sync-%'`,
+            WHERE guid LIKE 'db02c-sync-%' OR guid = ?`,
+          UPLOAD_CHAT_GUID,
         ),
       ).toBe(5);
       expect(
@@ -296,7 +317,8 @@ describe('DB-02C mixed runtime concurrency', () => {
         count(
           raw,
           `SELECT COUNT(*) count FROM chats
-            WHERE guid LIKE 'db02c-sync-%' OR guid LIKE 'RCS;-;db02c-sync-%'`,
+            WHERE guid LIKE 'db02c-sync-%' OR guid = ?`,
+          UPLOAD_CHAT_GUID,
         ),
       ).toBe(10);
       expect(
@@ -306,12 +328,9 @@ describe('DB-02C mixed runtime concurrency', () => {
       uploadGate.release();
       const sent = await deadline(sendRun.promise, 'attachment settlement');
 
-      expect(
-        count(
-          raw,
-          `SELECT COUNT(*) count FROM messages WHERE guid='db02c-real-attachment-message'`,
-        ),
-      ).toBe(1);
+      expect(count(raw, 'SELECT COUNT(*) count FROM messages WHERE guid=?', UPLOAD_REAL_GUID)).toBe(
+        1,
+      );
       expect(count(raw, `SELECT COUNT(*) count FROM messages WHERE guid=?`, sent.tempGuid)).toBe(0);
       expect(
         count(
@@ -319,7 +338,8 @@ describe('DB-02C mixed runtime concurrency', () => {
           `SELECT COUNT(*) count
              FROM attachments a
              JOIN messages m ON m.id = a.message_id
-            WHERE m.guid='db02c-real-attachment-message' AND a.local_path=?`,
+            WHERE m.guid=? AND a.local_path=?`,
+          UPLOAD_REAL_GUID,
           IMAGE.uri,
         ),
       ).toBe(1);

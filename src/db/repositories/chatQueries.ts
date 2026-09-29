@@ -13,7 +13,7 @@ import {
   type InboxSenderFilter,
 } from './chatVisibility';
 import { MAX_CUSTOM_FOLDER_MEMBERS, type CustomFolderRow } from './customFolders';
-import { firstInboxSearchBigram, foldInboxSearchText } from './inboxSearchText';
+import { foldInboxSearchText, uniqueInboxSearchBigrams } from './inboxSearchText';
 import { searchCustomFolderChatGuidsByMessage } from './messageQueries';
 
 export type { InboxArchiveFilter, InboxSenderFilter } from './chatVisibility';
@@ -77,9 +77,11 @@ export interface InboxRow {
   /** 1 when the latest message has an attachment the UI does not hide. */
   lastHasVisibleAttachments?: number;
   participantCount: number;
+  /** JSON string array ordered by handle id. */
   participantNames: string | null;
+  /** JSON string/null array positionally aligned with participantNames. */
   participantAvatars: string | null;
-  /** `|||`-joined handle colors, positionally aligned with participant names/avatars. */
+  /** JSON string/null array positionally aligned with participant names/avatars. */
   participantColors?: string | null;
   /** Comma-joined participant handle services ('iMessage'/'SMS'), for `resolveChatService`. */
   handleServices: string | null;
@@ -106,6 +108,8 @@ export interface InboxSearchOptions {
   messageMatchGuids?: readonly string[];
   /** Search surfaces render at most 50 conversation tiles. */
   limit?: number;
+  /** Stop an obsolete term/account scan between bounded SQL pages. */
+  shouldContinue?: () => boolean;
 }
 
 export interface CustomFolderInboxPage extends InboxPage {
@@ -118,6 +122,8 @@ export interface CustomFolderInboxPage extends InboxPage {
 
 const MAX_CUSTOM_FOLDER_SEARCH_CODE_POINTS = 128;
 const INBOX_SEARCH_CANDIDATE_PAGE_SIZE = 128;
+const INBOX_SEARCH_PARTICIPANT_PAGE_SIZE = 128;
+const INBOX_SEARCH_PAGES_PER_YIELD = 8;
 const MAX_INBOX_SEARCH_RESULTS = 50;
 const MAX_INBOX_MESSAGE_MATCH_GUIDS = 300;
 
@@ -129,13 +135,245 @@ interface CustomFolderSearchCandidate {
   style: number | null;
   participantCount: number;
   participantNames: string | null;
+  participantSearchText: string | null;
 }
 
-interface InboxSearchCandidate extends CustomFolderSearchCandidate {
+interface InboxSearchCandidate extends Omit<
+  CustomFolderSearchCandidate,
+  'participantCount' | 'participantNames' | 'participantSearchText'
+> {
   id: number;
   isPinned: number;
   pinOrder: number | null;
   latestMessageDate: number | null;
+}
+
+interface InboxSearchTextSummary {
+  matched: boolean;
+  prefix: string;
+  suffix: string;
+  hasText: boolean;
+}
+
+interface InboxSearchParticipantState {
+  candidate: InboxSearchCandidate;
+  participantCount: number;
+  rawValueCount: number;
+  participantTitlePartCount: number;
+  rawParticipants: InboxSearchTextSummary;
+  participantTitle: InboxSearchTextSummary;
+  staticTitle: string | null;
+}
+
+export class InboxSearchCancelledError extends Error {
+  constructor() {
+    super('Inbox search was cancelled.');
+    this.name = 'InboxSearchCancelledError';
+  }
+}
+
+function emptyInboxSearchTextSummary(): InboxSearchTextSummary {
+  return { matched: false, prefix: '', suffix: '', hasText: false };
+}
+
+function appendInboxSearchText(
+  summary: InboxSearchTextSummary,
+  text: string,
+  foldedQuery: string,
+): void {
+  const folded = foldInboxSearchText(text);
+  const retainedUnits = Math.max(0, foldedQuery.length - 1);
+  if (summary.prefix.length < retainedUnits) {
+    summary.prefix += folded.slice(0, retainedUnits - summary.prefix.length);
+  }
+  const window = `${summary.suffix}${folded}`;
+  if (window.includes(foldedQuery)) summary.matched = true;
+  summary.suffix = retainedUnits === 0 ? '' : window.slice(-retainedUnits);
+  if (folded.length > 0) summary.hasText = true;
+}
+
+function summarizeInboxSearchText(text: string, foldedQuery: string): InboxSearchTextSummary {
+  const summary = emptyInboxSearchTextSummary();
+  appendInboxSearchText(summary, text, foldedQuery);
+  return summary;
+}
+
+const INBOX_SEARCH_PARTICIPANT_TITLE_PROBE_A = '__gator_participant_title_probe_a__';
+const INBOX_SEARCH_PARTICIPANT_TITLE_PROBE_B = '__gator_participant_title_probe_b__';
+
+/**
+ * Ask the shared title resolver whether participants own this title without duplicating its name
+ * and weak-fallback rules here. Different participant-only probes can change the answer only when
+ * the resolver reaches its participant fallback.
+ */
+function resolveStaticInboxSearchTitle(candidate: InboxSearchCandidate): string | null {
+  const input = { ...candidate, participantCount: 0 };
+  const first = resolveTitle({
+    ...input,
+    participantNames: JSON.stringify([INBOX_SEARCH_PARTICIPANT_TITLE_PROBE_A]),
+  });
+  const second = resolveTitle({
+    ...input,
+    participantNames: JSON.stringify([INBOX_SEARCH_PARTICIPANT_TITLE_PROBE_B]),
+  });
+  return first === second ? first : null;
+}
+
+/**
+ * Verify participant text without asking SQLite to materialize a data-sized group_concat. The
+ * row and bridge result of every call are capped; exact scans may still need multiple cancellable
+ * pages for a very large group. Rolling prefix/suffix summaries preserve matches across both the
+ * literal participant separator and the resolved-title/participant boundary.
+ */
+async function exactInboxSearchNameMatches(
+  db: AppDatabase,
+  candidates: readonly InboxSearchCandidate[],
+  foldedQuery: string,
+  checkCurrent: () => void,
+): Promise<Set<number>> {
+  const matches = new Set<number>();
+  const candidateIds = new Set<number>();
+  const states = new Map<number, InboxSearchParticipantState>();
+  for (const candidate of candidates) {
+    if (
+      !Number.isSafeInteger(candidate.id) ||
+      candidate.id <= 0 ||
+      candidateIds.has(candidate.id)
+    ) {
+      throw new Error('Inbox search participant candidate id is invalid.');
+    }
+    candidateIds.add(candidate.id);
+    const staticTitle = resolveStaticInboxSearchTitle(candidate);
+    if (staticTitle != null && summarizeInboxSearchText(staticTitle, foldedQuery).matched) {
+      matches.add(candidate.id);
+      continue;
+    }
+    states.set(candidate.id, {
+      candidate,
+      participantCount: 0,
+      rawValueCount: 0,
+      participantTitlePartCount: 0,
+      rawParticipants: emptyInboxSearchTextSummary(),
+      participantTitle: emptyInboxSearchTextSummary(),
+      staticTitle,
+    });
+  }
+
+  let cursorChatId = 0;
+  let cursorHandleId = 0;
+  let pages = 0;
+  while (states.size > 0) {
+    checkCurrent();
+    if (pages > 0 && pages % INBOX_SEARCH_PAGES_PER_YIELD === 0) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      checkCurrent();
+    }
+    const activeIdsJson = JSON.stringify([...states.keys()]);
+    const participants = await db.all<{
+      chatId: number;
+      handleId: number;
+      participantName: string | null;
+    }>(sql`
+      SELECT ch.chat_id AS chatId, h.id AS handleId,
+             COALESCE(h.display_name, h.address) AS participantName
+        FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+       WHERE ch.chat_id IN (
+               SELECT CAST(value AS INTEGER) FROM json_each(${activeIdsJson})
+             )
+         AND (ch.chat_id > ${cursorChatId}
+              OR (ch.chat_id = ${cursorChatId} AND h.id > ${cursorHandleId}))
+       ORDER BY ch.chat_id ASC, h.id ASC
+       LIMIT ${INBOX_SEARCH_PARTICIPANT_PAGE_SIZE}
+    `);
+    checkCurrent();
+    if (participants.length > INBOX_SEARCH_PARTICIPANT_PAGE_SIZE) {
+      throw new Error('Inbox search participant page exceeds its safety bound.');
+    }
+    if (participants.length === 0) break;
+
+    let previousChatId = cursorChatId;
+    let previousHandleId = cursorHandleId;
+    for (const participant of participants) {
+      if (
+        !Number.isSafeInteger(participant.chatId) ||
+        !Number.isSafeInteger(participant.handleId) ||
+        participant.chatId <= 0 ||
+        participant.handleId <= 0 ||
+        !candidateIds.has(participant.chatId) ||
+        participant.chatId < previousChatId ||
+        (participant.chatId === previousChatId && participant.handleId <= previousHandleId)
+      ) {
+        throw new Error('Inbox search participant cursor is invalid.');
+      }
+      previousChatId = participant.chatId;
+      previousHandleId = participant.handleId;
+
+      const state = states.get(participant.chatId);
+      if (!state) continue;
+      state.participantCount += 1;
+      if (!Number.isSafeInteger(state.participantCount)) {
+        throw new Error('Inbox search participant count is invalid.');
+      }
+      if (participant.participantName == null) continue;
+      if (typeof participant.participantName !== 'string') {
+        throw new Error('Inbox search participant name is invalid.');
+      }
+
+      if (state.rawValueCount > 0) {
+        appendInboxSearchText(state.rawParticipants, ', ', foldedQuery);
+      }
+      appendInboxSearchText(state.rawParticipants, participant.participantName, foldedQuery);
+      state.rawValueCount += 1;
+
+      const titlePart = participant.participantName.trim();
+      if (titlePart) {
+        if (state.participantTitlePartCount > 0) {
+          appendInboxSearchText(state.participantTitle, ', ', foldedQuery);
+        }
+        appendInboxSearchText(state.participantTitle, titlePart, foldedQuery);
+        state.participantTitlePartCount += 1;
+      }
+
+      if (
+        state.rawParticipants.matched ||
+        (state.staticTitle == null && state.participantTitle.matched)
+      ) {
+        matches.add(participant.chatId);
+        states.delete(participant.chatId);
+      }
+    }
+
+    const last = participants[participants.length - 1]!;
+    cursorChatId = last.chatId;
+    cursorHandleId = last.handleId;
+    pages += 1;
+    if (participants.length < INBOX_SEARCH_PARTICIPANT_PAGE_SIZE) break;
+  }
+
+  checkCurrent();
+  for (const state of states.values()) {
+    const title =
+      state.staticTitle != null
+        ? summarizeInboxSearchText(state.staticTitle, foldedQuery)
+        : state.participantTitle.hasText
+          ? state.participantTitle
+          : summarizeInboxSearchText(
+              resolveTitle({
+                ...state.candidate,
+                participantCount: state.participantCount,
+                participantNames: null,
+              }),
+              foldedQuery,
+            );
+    if (
+      title.matched ||
+      state.rawParticipants.matched ||
+      `${title.suffix} ${state.rawParticipants.prefix}`.includes(foldedQuery)
+    ) {
+      matches.add(state.candidate.id);
+    }
+  }
+  return matches;
 }
 
 function requireCustomFolderId(folderId: number): void {
@@ -240,15 +478,18 @@ async function queryChatsForInbox(
                  WHERE a.message_id = l.id AND a.hide_attachment = 0 AND a.is_retracted = 0)
       ELSE 0 END AS lastHasVisibleAttachments,
       (SELECT COUNT(*) FROM chat_handles ch WHERE ch.chat_id = c.id) AS participantCount,
-      (SELECT group_concat(COALESCE(h.display_name, h.address), ', ' ORDER BY h.id)
-         FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
-        WHERE ch.chat_id = c.id) AS participantNames,
-      (SELECT group_concat(COALESCE(h.avatar, ''), '|||' ORDER BY h.id)
-         FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
-        WHERE ch.chat_id = c.id) AS participantAvatars,
-      (SELECT group_concat(COALESCE(h.color, ''), '|||' ORDER BY h.id)
-         FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
-        WHERE ch.chat_id = c.id) AS participantColors,
+      (SELECT json_group_array(participant.name)
+         FROM (SELECT COALESCE(h.display_name, h.address) AS name
+                 FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+                WHERE ch.chat_id = c.id ORDER BY h.id) AS participant) AS participantNames,
+      (SELECT json_group_array(participant.avatar)
+         FROM (SELECT h.avatar
+                 FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+                WHERE ch.chat_id = c.id ORDER BY h.id) AS participant) AS participantAvatars,
+      (SELECT json_group_array(participant.color)
+         FROM (SELECT h.color
+                 FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+                WHERE ch.chat_id = c.id ORDER BY h.id) AS participant) AS participantColors,
       (SELECT group_concat(COALESCE(h.service, ''), ',' ORDER BY h.id)
          FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
         WHERE ch.chat_id = c.id) AS handleServices,
@@ -349,12 +590,15 @@ function boundedMessageMatchSet(guids: readonly string[] | undefined): Set<strin
 
 /**
  * Search active inbox identities without retaining/decorating the entire inbox. A persisted bigram
- * posting narrows indexed identities; dirty/unindexable identities and bounded message hits are
+ * postings narrow indexed identities; dirty/unindexable identities and bounded message hits are
  * unioned in, so indexing never decides exact text matches. One SQL statement snapshots all three
  * candidate sources per page; an indexer cannot move an id from dirty to indexed between reads.
- * The immutable AUTOINCREMENT chat id is the cursor, and a starting high-water mark prevents
- * sustained inserts from extending one refresh forever. Common bigrams or a dirty migration
- * backlog can still cover many ids; each native result and the decorated set remain capped.
+ * Each source first contributes a bounded raw id window, and only that merged raw page receives
+ * the remaining-gram checks. The immutable AUTOINCREMENT chat id is the cursor, and a starting
+ * high-water mark prevents sustained inserts from extending one refresh forever. Common bigrams
+ * or a dirty migration backlog can still require many pages; each candidate-id call, returned row
+ * set, decorated set, and participant result page remain capped. An exact participant scan may
+ * still require data-sized total pages, and an individual participant field remains data-sized.
  */
 export async function searchChatsForInboxPage(
   db: AppDatabase,
@@ -369,83 +613,137 @@ export async function searchChatsForInboxPage(
     : MAX_INBOX_SEARCH_RESULTS;
   const retainedLimit = limit + 1;
   const foldedQuery = foldInboxSearchText(query);
-  const firstGram = firstInboxSearchBigram(foldedQuery);
+  const [firstGram, ...otherGrams] = uniqueInboxSearchBigrams(foldedQuery);
+  if (firstGram == null) throw new Error('Inbox search has no bigram.');
+  const otherGramsJson = JSON.stringify(otherGrams);
+  const checkCurrent = (): void => {
+    if (opts.shouldContinue?.() === false) throw new InboxSearchCancelledError();
+  };
+  checkCurrent();
   const messageMatchGuids = boundedMessageMatchSet(opts.messageMatchGuids);
   const messageMatchJson = JSON.stringify([...messageMatchGuids]);
   const horizonRows = await db.all<{ maxId: number | null }>(sql`
     SELECT MAX(id) AS maxId FROM chats
   `);
   const highWater = horizonRows[0]?.maxId ?? 0;
+  checkCurrent();
   if (!Number.isSafeInteger(highWater) || highWater < 0) {
     throw new Error('Inbox search high-water id is invalid.');
   }
   if (highWater === 0) return { rows: [], hasMore: false };
 
   let cursor = 0;
+  let pages = 0;
   const retained: InboxSearchCandidate[] = [];
   while (cursor < highWater) {
-    const candidateIds = await db.all<{ id: number }>(sql`
-      WITH posting_ids AS (
-        SELECT chat_id AS id FROM inbox_search_postings
-         WHERE gram = ${firstGram} AND chat_id > ${cursor} AND chat_id <= ${highWater}
-         ORDER BY chat_id ASC LIMIT ${INBOX_SEARCH_CANDIDATE_PAGE_SIZE}
-      ), dirty_ids AS (
+    checkCurrent();
+    if (pages > 0 && pages % INBOX_SEARCH_PAGES_PER_YIELD === 0) {
+      // Let a changed term/account retire this scan without monopolizing the JS turn.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      checkCurrent();
+    }
+    const rawCandidates = (await db.all<{ id: number; isCandidate: number }>(sql`
+      WITH posting_window AS MATERIALIZED (
+        SELECT p.chat_id AS id FROM inbox_search_postings p
+         WHERE p.gram = ${firstGram} AND p.chat_id > ${cursor} AND p.chat_id <= ${highWater}
+         ORDER BY p.chat_id ASC LIMIT ${INBOX_SEARCH_CANDIDATE_PAGE_SIZE}
+      ), dirty_window AS MATERIALIZED (
         SELECT chat_id AS id FROM inbox_search_state
          WHERE is_dirty = 1 AND chat_id > ${cursor} AND chat_id <= ${highWater}
          ORDER BY chat_id ASC LIMIT ${INBOX_SEARCH_CANDIDATE_PAGE_SIZE}
-      ), message_ids AS (
+      ), message_window AS MATERIALIZED (
         SELECT id FROM chats
          WHERE id > ${cursor} AND id <= ${highWater}
            AND guid IN (SELECT CAST(value AS TEXT) FROM json_each(${messageMatchJson}))
          ORDER BY id ASC LIMIT ${INBOX_SEARCH_CANDIDATE_PAGE_SIZE}
-      ), combined AS (
-        SELECT id FROM posting_ids UNION SELECT id FROM dirty_ids UNION SELECT id FROM message_ids
+      ), raw_ids AS MATERIALIZED (
+        SELECT id FROM (
+          SELECT id FROM posting_window
+          UNION SELECT id FROM dirty_window
+          UNION SELECT id FROM message_window
+        )
+        ORDER BY id ASC LIMIT ${INBOX_SEARCH_CANDIDATE_PAGE_SIZE}
       )
-      SELECT id FROM combined ORDER BY id ASC LIMIT ${INBOX_SEARCH_CANDIDATE_PAGE_SIZE}
-    `);
-    if (candidateIds.length === 0) break;
-    for (const row of candidateIds) {
-      if (!Number.isSafeInteger(row.id) || row.id <= cursor || row.id > highWater) {
+      SELECT raw.id,
+             CASE WHEN
+               EXISTS (SELECT 1 FROM inbox_search_state dirty
+                        WHERE dirty.chat_id = raw.id AND dirty.is_dirty = 1)
+               OR EXISTS (SELECT 1 FROM chats message_match
+                           WHERE message_match.id = raw.id
+                             AND message_match.guid IN (
+                               SELECT CAST(value AS TEXT) FROM json_each(${messageMatchJson})
+                             ))
+               OR (
+                 EXISTS (SELECT 1 FROM posting_window source WHERE source.id = raw.id)
+                 AND NOT EXISTS (
+                   SELECT 1 FROM json_each(${otherGramsJson}) required
+                    WHERE NOT EXISTS (
+                      SELECT 1 FROM inbox_search_postings present
+                       WHERE present.chat_id = raw.id
+                         AND present.gram = CAST(required.value AS INTEGER)
+                    )
+                 )
+               )
+             THEN 1 ELSE 0 END AS isCandidate
+        FROM raw_ids raw ORDER BY raw.id ASC
+    `)) as Array<{ id: number; isCandidate: number }>;
+    checkCurrent();
+    if (rawCandidates.length === 0) break;
+    for (const row of rawCandidates) {
+      if (
+        !Number.isSafeInteger(row.id) ||
+        row.id <= cursor ||
+        row.id > highWater ||
+        (row.isCandidate !== 0 && row.isCandidate !== 1)
+      ) {
         throw new Error('Inbox search candidate cursor is invalid.');
       }
     }
-    const candidateIdsJson = JSON.stringify(candidateIds.map((row: { id: number }) => row.id));
-    const candidates = await db.all<InboxSearchCandidate>(sql`
-      SELECT c.id, c.guid, c.chat_identifier AS chatIdentifier,
-             c.display_name AS displayName, c.custom_name AS customName, c.style,
-             c.is_pinned AS isPinned, c.pin_order AS pinOrder,
-             c.latest_message_date AS latestMessageDate,
-             (SELECT COUNT(*) FROM chat_handles ch
-               WHERE ch.chat_id = c.id) AS participantCount,
-             (SELECT group_concat(COALESCE(h.display_name, h.address), ', ' ORDER BY h.id)
-                FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
-               WHERE ch.chat_id = c.id) AS participantNames
-        FROM chats c
-       WHERE c.id IN (SELECT CAST(value AS INTEGER) FROM json_each(${candidateIdsJson}))
-         AND c.is_archived = 0
-         AND c.is_pinned IN (0, 1)
-         AND ${chatVisible('c')}
-       ORDER BY c.id ASC
-    `);
+    const candidateIds = rawCandidates.filter((row) => row.isCandidate === 1).map((row) => row.id);
+    const candidates: InboxSearchCandidate[] =
+      candidateIds.length === 0
+        ? []
+        : await db.all<InboxSearchCandidate>(sql`
+            SELECT c.id, c.guid, c.chat_identifier AS chatIdentifier,
+                   c.display_name AS displayName, c.custom_name AS customName, c.style,
+                   c.is_pinned AS isPinned, c.pin_order AS pinOrder,
+                   c.latest_message_date AS latestMessageDate
+              FROM chats c
+             WHERE c.id IN (
+               SELECT CAST(value AS INTEGER) FROM json_each(${JSON.stringify(candidateIds)})
+             )
+               AND c.is_archived = 0
+               AND c.is_pinned IN (0, 1)
+               AND ${chatVisible('c')}
+             ORDER BY c.id ASC
+          `);
+    checkCurrent();
+
+    const nameMatches = await exactInboxSearchNameMatches(
+      db,
+      candidates.filter((candidate) => !messageMatchGuids.has(candidate.guid)),
+      foldedQuery,
+      checkCurrent,
+    );
+    checkCurrent();
 
     for (const candidate of candidates) {
-      const nameMatches = foldInboxSearchText(
-        `${resolveTitle(candidate)} ${candidate.participantNames ?? ''}`,
-      ).includes(foldedQuery);
-      if (!nameMatches && !messageMatchGuids.has(candidate.guid)) continue;
+      if (!nameMatches.has(candidate.id) && !messageMatchGuids.has(candidate.guid)) continue;
       retained.push(candidate);
       retained.sort(compareInboxSearchCandidates);
       if (retained.length > retainedLimit) retained.pop();
     }
 
-    const nextCursor = candidateIds[candidateIds.length - 1]!.id;
+    const nextCursor = rawCandidates[rawCandidates.length - 1]!.id;
     if (!Number.isSafeInteger(nextCursor) || nextCursor <= cursor || nextCursor > highWater) {
       throw new Error('Inbox search candidate cursor did not advance.');
     }
     cursor = nextCursor;
-    if (candidateIds.length < INBOX_SEARCH_CANDIDATE_PAGE_SIZE) break;
+    pages += 1;
+    if (rawCandidates.length < INBOX_SEARCH_CANDIDATE_PAGE_SIZE) break;
   }
 
+  checkCurrent();
   const selectedGuids = retained.slice(0, limit).map((candidate) => candidate.guid);
   const rows =
     selectedGuids.length === 0
@@ -456,6 +754,7 @@ export async function searchChatsForInboxPage(
           chatGuids: selectedGuids,
           limit,
         });
+  checkCurrent();
   return { rows, hasMore: retained.length > limit };
 }
 
@@ -516,9 +815,13 @@ export function listCustomFolderInboxPageWithinTransaction(
         SELECT c.guid, c.chat_identifier AS chatIdentifier, c.display_name AS displayName,
                c.custom_name AS customName, c.style,
                (SELECT COUNT(*) FROM chat_handles ch WHERE ch.chat_id = c.id) AS participantCount,
+               (SELECT json_group_array(participant.name)
+                  FROM (SELECT COALESCE(h.display_name, h.address) AS name
+                          FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+                         WHERE ch.chat_id = c.id ORDER BY h.id) AS participant) AS participantNames,
                (SELECT group_concat(COALESCE(h.display_name, h.address), ', ' ORDER BY h.id)
                   FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
-                 WHERE ch.chat_id = c.id) AS participantNames
+                 WHERE ch.chat_id = c.id) AS participantSearchText
           FROM chats c
          WHERE ${chatVisible('c')} ${membership}
          ORDER BY c.is_pinned DESC,
@@ -538,7 +841,7 @@ export function listCustomFolderInboxPageWithinTransaction(
       matchingChatGuids = candidates
         .filter(
           (candidate: CustomFolderSearchCandidate) =>
-            `${resolveTitle(candidate)} ${candidate.participantNames ?? ''}`
+            `${resolveTitle(candidate)} ${candidate.participantSearchText ?? ''}`
               .normalize('NFC')
               .toLowerCase()
               .includes(foldedQuery) || messageMatchGuids.has(candidate.guid),
@@ -624,9 +927,11 @@ export interface ChatHeaderRow {
   muteType: string | null;
   style: number | null;
   participantCount: number;
+  /** JSON string array ordered by handle id. */
   participantNames: string | null;
+  /** JSON string/null array positionally aligned with participantNames. */
   participantAvatars: string | null;
-  /** `|||`-joined handle colors, positionally aligned with participant names/avatars. */
+  /** JSON string/null array positionally aligned with participant names/avatars. */
   participantColors?: string | null;
   /**
    * `|||`-joined participant handle ADDRESSES (the raw phone/email), positionally aligned with
@@ -673,15 +978,18 @@ export async function getChatHeader(db: AppDatabase, guid: string): Promise<Chat
       c.custom_name AS customName, c.custom_color AS customColor, c.mute_type AS muteType, c.style,
       c.deleted_at AS deletedAt,
       (SELECT COUNT(*) FROM chat_handles ch WHERE ch.chat_id = c.id) AS participantCount,
-      (SELECT group_concat(COALESCE(h.display_name, h.address), ', ' ORDER BY h.id)
-         FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
-        WHERE ch.chat_id = c.id) AS participantNames,
-      (SELECT group_concat(COALESCE(h.avatar, ''), '|||' ORDER BY h.id)
-         FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
-        WHERE ch.chat_id = c.id) AS participantAvatars,
-      (SELECT group_concat(COALESCE(h.color, ''), '|||' ORDER BY h.id)
-         FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
-        WHERE ch.chat_id = c.id) AS participantColors,
+      (SELECT json_group_array(participant.name)
+         FROM (SELECT COALESCE(h.display_name, h.address) AS name
+                 FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+                WHERE ch.chat_id = c.id ORDER BY h.id) AS participant) AS participantNames,
+      (SELECT json_group_array(participant.avatar)
+         FROM (SELECT h.avatar
+                 FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+                WHERE ch.chat_id = c.id ORDER BY h.id) AS participant) AS participantAvatars,
+      (SELECT json_group_array(participant.color)
+         FROM (SELECT h.color
+                 FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+                WHERE ch.chat_id = c.id ORDER BY h.id) AS participant) AS participantColors,
       (SELECT group_concat(COALESCE(h.address, ''), '|||' ORDER BY h.id)
          FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
         WHERE ch.chat_id = c.id) AS participantAddresses,
@@ -693,31 +1001,26 @@ export async function getChatHeader(db: AppDatabase, guid: string): Promise<Chat
   return rows[0] ?? null;
 }
 
-/** Normalize an address for participant-set comparison: emails lowercased, phones to last 10
- *  digits (so +1 (555) 123-4567 matches 5551234567). */
-function normalizeAddr(a: string): string {
-  return a.includes('@') ? a.trim().toLowerCase() : a.replace(/\D/g, '').slice(-10);
-}
-
 /** New iMessage creation admits E.164 numbers, where the country code is part of identity. */
-function normalizeAddrForMatch(a: string, service?: 'RCS' | 'iMessage'): string {
-  if (service !== 'iMessage') return normalizeAddr(a);
+function normalizeIMessageAddrForMatch(a: string): string {
   return a.includes('@') ? a.trim().toLowerCase() : a.trim();
 }
 
 /**
- * Find an existing chat whose participant set equals `addresses` (order-independent). Legacy/RCS
- * matching uses phone suffixes; selected iMessage requires exact E.164 numbers so another country
- * code cannot open the wrong conversation. Returns the chat guid or null.
+ * Find an existing iMessage chat whose participant set equals `addresses` (order-independent).
+ *
+ * RCS deliberately returns no local match. Its cached participant string is presentation data: the
+ * sidecar may supply a display name, formatted number, or opaque participant id without canonical
+ * endpoint provenance. It therefore cannot authorize navigation to a Google conversation, even on
+ * exact string equality. Starting an RCS message uses the server's Google-owned find/create route.
  */
 export async function findChatByParticipantAddresses(
   db: AppDatabase,
   addresses: string[],
-  service?: 'RCS' | 'iMessage',
+  service: 'RCS' | 'iMessage',
 ): Promise<string | null> {
-  const want = new Set(
-    addresses.map((address) => normalizeAddrForMatch(address, service)).filter(Boolean),
-  );
+  if (service !== 'iMessage') return null;
+  const want = new Set(addresses.map(normalizeIMessageAddrForMatch).filter(Boolean));
   if (want.size === 0) return null;
   const rows = await db.all<{
     guid: string;
@@ -741,7 +1044,7 @@ export async function findChatByParticipantAddresses(
       addresses: new Set<string>(),
       allIMessageHandles: true,
     };
-    match.addresses.add(normalizeAddrForMatch(r.address, service));
+    match.addresses.add(normalizeIMessageAddrForMatch(r.address));
     match.allIMessageHandles &&= r.handleService === 'iMessage';
     byChat.set(r.guid, match);
   }
@@ -749,22 +1052,17 @@ export async function findChatByParticipantAddresses(
   for (const [guid, match] of byChat) {
     const { addresses: set } = match;
     const exactNativeIMessage =
-      service === 'iMessage' &&
       singleWantedAddress !== undefined &&
       match.allIMessageHandles &&
       guid.startsWith('any;-;') &&
-      normalizeAddrForMatch(guid.slice('any;-;'.length), service) === singleWantedAddress;
-    if (service === 'iMessage') {
-      // A service-prefixed GUID alone is not DM proof: sparse group and SMS rows can carry one
-      // matching handle. Wait for authoritative style/handle data after a create.
-      if (
-        match.style !== 45 ||
-        !match.allIMessageHandles ||
-        (!guid.startsWith('iMessage;-;') && !exactNativeIMessage)
-      ) {
-        continue;
-      }
-    } else if (service && !guid.startsWith(`${service};`)) {
+      normalizeIMessageAddrForMatch(guid.slice('any;-;'.length)) === singleWantedAddress;
+    // A service-prefixed GUID alone is not DM proof: sparse group and SMS rows can carry one
+    // matching handle. Wait for authoritative style/handle data after a create.
+    if (
+      match.style !== 45 ||
+      !match.allIMessageHandles ||
+      (!guid.startsWith('iMessage;-;') && !exactNativeIMessage)
+    ) {
       continue;
     }
     if (set.size === want.size && [...want].every((a) => set.has(a))) return guid;
@@ -772,13 +1070,21 @@ export async function findChatByParticipantAddresses(
   return null;
 }
 
-/** A chat's participants with their addresses — for group add/remove (needs the address). */
+export interface ChatParticipant {
+  address: string;
+  name: string;
+  service: string | null;
+  color: string | null;
+}
+
+/** A chat's exact participant handles for details and device-local color customization. */
 export async function getChatParticipants(
   db: AppDatabase,
   guid: string,
-): Promise<{ address: string; name: string }[]> {
-  return db.all<{ address: string; name: string }>(sql`
-    SELECT h.address AS address, COALESCE(h.display_name, h.address) AS name
+): Promise<ChatParticipant[]> {
+  return db.all<ChatParticipant>(sql`
+    SELECT h.address AS address, COALESCE(h.display_name, h.address) AS name,
+           NULLIF(h.service, '') AS service, h.color
       FROM chat_handles ch
       JOIN handles h ON h.id = ch.handle_id
       JOIN chats c ON c.id = ch.chat_id

@@ -2,9 +2,24 @@ import * as Crypto from 'expo-crypto';
 import { open } from '@op-engineering/op-sqlite';
 import { eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/op-sqlite';
+import type { InboxFilters } from '@core/models';
 import { runMigrations, type SqlRunner } from './migrate';
 import { MIGRATIONS } from './migrations';
 import { handles } from './schema';
+import {
+  bumpDeviceInboxBenchmarkFixture,
+  runDeviceInboxBenchmarkFixture,
+  seedDeviceInboxBenchmarkFixture,
+  type DeviceInboxBenchmarkResult,
+  type DeviceInboxQueryPlanCapture,
+} from './performance/deviceInboxBenchmark';
+import {
+  countChatsForInbox,
+  listChatsForInboxPage,
+  type InboxArchiveFilter,
+  type InboxRow,
+  type InboxSenderFilter,
+} from './repositories/chatQueries';
 import type {
   AppDatabase,
   DbBackupRestoreWaveChecks,
@@ -163,8 +178,8 @@ export function getRawDatabase(): RawDb {
 const DRIVER_SELF_TEST_DB_NAME = 'driver-selftest.db';
 const DRIVER_SELF_TEST_KEY_BYTES = 32;
 const DRIVER_SELF_TEST_REACTIVE_TIMEOUT_MS = 5_000;
-const DRIVER_SELF_TEST_MIGRATION_COUNT = 49 as const;
-const DRIVER_SELF_TEST_MIGRATION_HEAD = '0049_inbox_search_postings' as const;
+const DRIVER_SELF_TEST_MIGRATION_COUNT = 52 as const;
+const DRIVER_SELF_TEST_MIGRATION_HEAD = '0052_chat_history_deletion_boundary' as const;
 const DRIVER_SELF_TEST_PARTIAL_MIGRATION_COUNT = 29;
 const DRIVER_HISTORY_SELF_TEST_DB_NAME = 'driver-history-selftest.db';
 const DRIVER_HISTORY_SELF_TEST_KEY = 'db-03b2a-public-throwaway-key-v1';
@@ -1751,8 +1766,9 @@ const DB_RUNTIME_CONCURRENCY_SELF_TEST_NAME = 'driver-runtime-concurrency-selfte
 // These public DEV-only keys protect no user data and open only the fixed disposable file above.
 const DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_A = 'db-02c-public-throwaway-key-a-v1';
 const DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_B = 'db-02c-public-throwaway-key-b-v1';
-const DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_COUNT = 49 as const;
-const DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_HEAD = '0049_inbox_search_postings' as const;
+const DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_COUNT = 52 as const;
+const DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_HEAD =
+  '0052_chat_history_deletion_boundary' as const;
 const DB_RUNTIME_CONCURRENCY_SENTINEL_KEY = 'gator-db-runtime-wave-sentinel';
 const DB_RUNTIME_CONCURRENCY_SENTINEL_VALUE = 'committed';
 
@@ -2014,8 +2030,8 @@ export async function runDbRuntimeConcurrencySelfTest(
 const DB_BACKUP_RESTORE_SELF_TEST_NAME = 'driver-backup-restore-selftest.db';
 // This public DEV-only key protects no user data and opens only the fixed disposable file above.
 const DB_BACKUP_RESTORE_SELF_TEST_KEY = 'backup-02-public-throwaway-key-v1';
-const DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_COUNT = 49 as const;
-const DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_HEAD = '0049_inbox_search_postings' as const;
+const DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_COUNT = 52 as const;
+const DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_HEAD = '0052_chat_history_deletion_boundary' as const;
 
 export interface DbBackupRestoreDatabaseChecks extends DbBackupRestoreWaveChecks {
   readonly preCleanup: boolean;
@@ -2249,8 +2265,8 @@ const DB_PROCESS_RELAUNCH_SELF_TEST_SENTINEL = 'driver-relaunch-continuity-v1';
 const DB_PROCESS_RELAUNCH_SELF_TEST_PARTIAL_MIGRATION_COUNT = 29;
 const DB_PROCESS_RELAUNCH_SELF_TEST_PARTIAL_MIGRATION_HEAD = '0029_chats_deleted_at';
 const DB_PROCESS_RELAUNCH_SELF_TEST_RETRY_MIGRATION_START = '0030_attachment_cache_entries';
-const DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_COUNT = 49 as const;
-const DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_HEAD = '0049_inbox_search_postings' as const;
+const DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_COUNT = 52 as const;
+const DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_HEAD = '0052_chat_history_deletion_boundary' as const;
 
 export interface DbProcessRelaunchPrepareChecks {
   preCleanup: boolean;
@@ -3094,8 +3110,8 @@ const DB_ACTIVE_MIGRATION_DEATH_SELF_TEST_KEY = 'db-03b2b2-public-throwaway-key-
 const DB_ACTIVE_MIGRATION_DEATH_PREFIX_COUNT = 37;
 const DB_ACTIVE_MIGRATION_DEATH_PREFIX_HEAD = '0037_purge_legacy_redacted_mode_setting' as const;
 const DB_ACTIVE_MIGRATION_DEATH_TARGET = '0038_scrub_reaction_selected_message_text' as const;
-const DB_ACTIVE_MIGRATION_DEATH_HEAD = '0049_inbox_search_postings' as const;
-const DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT = 49 as const;
+const DB_ACTIVE_MIGRATION_DEATH_HEAD = '0052_chat_history_deletion_boundary' as const;
+const DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT = 52 as const;
 const DB_ACTIVE_MIGRATION_DEATH_TARGET_COUNT = 128;
 const DB_ACTIVE_MIGRATION_DEATH_SELECTED_TEXT_LENGTH = 8_192;
 const DB_ACTIVE_MIGRATION_DEATH_TARGET_SQL = `UPDATE outgoing_queue
@@ -3765,5 +3781,337 @@ export async function resumeDbActiveMigrationDeathSelfTest(
     migrationHead: DB_ACTIVE_MIGRATION_DEATH_HEAD,
     checks,
     failureCode: failureCode ?? 'internal',
+  };
+}
+
+const PERF02_BENCHMARK_DB_NAME = 'perf02-inbox-benchmark.db';
+const PERF02_BENCHMARK_KEY = 'perf02-public-throwaway-key-v1';
+let perf02BenchmarkRunning = false;
+
+/** No raw driver or Drizzle handle crosses this DEV-only fixture boundary. */
+export interface Perf02RenderFixtureSource {
+  readonly key: string;
+  readonly query: (request: {
+    limit: number | null;
+    archive: InboxArchiveFilter;
+    sender: InboxSenderFilter;
+    filters: InboxFilters;
+    countUnknown: boolean;
+  }) => Promise<{ rows: InboxRow[]; hasMore: boolean; unknownCount: number }>;
+  readonly subscribe: (tables: readonly string[], onChange: () => void) => () => void;
+  readonly bump: (revision: number) => Promise<void>;
+}
+
+function deletePerf02BenchmarkDatabase(): void {
+  const cleanup = open({ name: PERF02_BENCHMARK_DB_NAME });
+  cleanup.delete();
+}
+
+/**
+ * Run the production inbox queries against an encrypted, disposable Android database.
+ * This fixed-purpose DEV path never publishes its handle as the production singleton.
+ */
+export async function runPerf02DeviceInboxBenchmark(
+  onFixtureReady?: (source: Perf02RenderFixtureSource, chats: 1_000 | 10_000) => Promise<void>,
+  signal?: AbortSignal,
+): Promise<DeviceInboxBenchmarkResult[]> {
+  if (!__DEV__) throw new Error('PERF-02 benchmark is development-only.');
+  if (perf02BenchmarkRunning) throw new Error('PERF-02 benchmark is already running.');
+  perf02BenchmarkRunning = true;
+  try {
+    const results: DeviceInboxBenchmarkResult[] = [];
+    for (const chatCount of [1_000, 10_000] as const) {
+      if (signal?.aborted) throw new Error('PERF-02 benchmark was cancelled.');
+      deletePerf02BenchmarkDatabase();
+      const opened = open({ name: PERF02_BENCHMARK_DB_NAME, encryptionKey: PERF02_BENCHMARK_KEY });
+      const inFlight = new Set<Promise<unknown>>();
+      const listeners = new Set<() => void>();
+      let nativeUnsubscribe: (() => void) | undefined;
+      let fixtureActive = true;
+      const track = <T>(run: () => Promise<T>): Promise<T> => {
+        if (!fixtureActive) return Promise.reject(new Error('PERF-02 fixture is closed.'));
+        const task = run();
+        inFlight.add(task);
+        void task.then(
+          () => inFlight.delete(task),
+          () => inFlight.delete(task),
+        );
+        return task;
+      };
+      try {
+        await opened.execute('PRAGMA foreign_keys = ON');
+        await runMigrations(opRunner(opened));
+        let capturedPlanQueries: Array<{ statement: string; params: unknown[] }> | null = null;
+        const database = drizzle(drizzleAdapter(opened), {
+          logger: {
+            logQuery(statement, params) {
+              capturedPlanQueries?.push({ statement, params: [...params] });
+            },
+          },
+        }) as unknown as AppDatabase;
+        const capturePlan: DeviceInboxQueryPlanCapture = async <T>(run: () => Promise<T>) => {
+          if (capturedPlanQueries) {
+            throw new Error('PERF-02 query-plan capture overlapped another capture.');
+          }
+          const captured: Array<{ statement: string; params: unknown[] }> = [];
+          capturedPlanQueries = captured;
+          let result: T;
+          try {
+            result = await run();
+          } finally {
+            capturedPlanQueries = null;
+          }
+          if (captured.length !== 1) {
+            throw new Error('PERF-02 query-plan capture expected exactly one statement.');
+          }
+          const query = captured[0]!;
+          const explained = extractRows(
+            await opened.execute(`EXPLAIN QUERY PLAN ${query.statement}`, query.params as never[]),
+          );
+          const plan = explained.map((row) =>
+            String(row.detail ?? '')
+              .replace(/\s+/g, ' ')
+              .trim(),
+          );
+          if (plan.length === 0 || plan.some((detail) => detail.length === 0)) {
+            throw new Error('PERF-02 query-plan capture returned an invalid plan.');
+          }
+          return { result, plan };
+        };
+        if (onFixtureReady) {
+          await seedDeviceInboxBenchmarkFixture(database, chatCount, signal);
+          if (signal?.aborted) throw new Error('PERF-02 benchmark was cancelled.');
+          nativeUnsubscribe = opened.reactiveExecute({
+            query: 'SELECT 1',
+            arguments: [],
+            fireOn: ['messages', 'chats', 'chat_handles', 'handles'].map((table) => ({ table })),
+            callback: () => {
+              if (!fixtureActive) return;
+              for (const notify of listeners) notify();
+            },
+          });
+          const source: Perf02RenderFixtureSource = {
+            key: `perf02-disposable-${chatCount}`,
+            query: (request) =>
+              track(async () => {
+                if (
+                  request.limit == null ||
+                  !Number.isSafeInteger(request.limit) ||
+                  request.limit < 1 ||
+                  request.limit > chatCount
+                ) {
+                  throw new RangeError('PERF-02 fixture page limit is out of range.');
+                }
+                const page = await listChatsForInboxPage(database, {
+                  limit: request.limit,
+                  archive: request.archive,
+                  sender: request.sender,
+                  filters: request.filters,
+                });
+                const unknownCount = request.countUnknown
+                  ? await countChatsForInbox(database, { archive: 'active', sender: 'unknown' })
+                  : 0;
+                return { ...page, unknownCount };
+              }),
+            subscribe: (tables, onChange) => {
+              if (!fixtureActive) throw new Error('PERF-02 fixture is closed.');
+              if (tables.join(',') !== 'messages,chats,chat_handles,handles') {
+                throw new Error('PERF-02 fixture subscription has unexpected tables.');
+              }
+              listeners.add(onChange);
+              let released = false;
+              const release = (): void => {
+                if (released) return;
+                released = true;
+                listeners.delete(onChange);
+              };
+              return release;
+            },
+            bump: (revision) =>
+              track(() => bumpDeviceInboxBenchmarkFixture(database, chatCount, revision)),
+          };
+          let timeout: ReturnType<typeof setTimeout> | undefined;
+          const onAbort = (): void => rejectWait(new Error('PERF-02 benchmark was cancelled.'));
+          let rejectWait: (error: Error) => void = () => undefined;
+          const stopWaiting = new Promise<never>((_, reject) => {
+            rejectWait = reject;
+            timeout = setTimeout(
+              () => reject(new Error('PERF-02 fixture display timed out.')),
+              5 * 60_000,
+            );
+            signal?.addEventListener('abort', onAbort, { once: true });
+            if (signal?.aborted) onAbort();
+          });
+          try {
+            await Promise.race([onFixtureReady(source, chatCount), stopWaiting]);
+            if (signal?.aborted) throw new Error('PERF-02 benchmark was cancelled.');
+          } finally {
+            if (timeout) clearTimeout(timeout);
+            signal?.removeEventListener('abort', onAbort);
+          }
+        } else {
+          results.push(await runDeviceInboxBenchmarkFixture(database, chatCount, capturePlan));
+        }
+      } finally {
+        fixtureActive = false;
+        try {
+          await Promise.allSettled(inFlight);
+          try {
+            await opened.flushPendingReactiveQueries();
+          } finally {
+            listeners.clear();
+            nativeUnsubscribe?.();
+          }
+        } finally {
+          try {
+            opened.close();
+          } finally {
+            deletePerf02BenchmarkDatabase();
+          }
+        }
+      }
+    }
+    return results;
+  } finally {
+    perf02BenchmarkRunning = false;
+  }
+}
+
+const PERF01_COLD_KEY = 'perf01-public-throwaway-key-v1';
+let perf01ColdPreparing = false;
+let perf01ColdOpen = false;
+
+function perf01ColdName(chats: 1_000 | 10_000): string {
+  if (chats !== 1_000 && chats !== 10_000) {
+    throw new RangeError('PERF-01 cold fixture scale is invalid.');
+  }
+  return `perf01-cold-${chats}.db`;
+}
+
+/** The caller chooses the exact disposable fixture; the real account DB is never selected here. */
+export function deletePerf01ColdFixture(chats: 1_000 | 10_000): void {
+  if (!__DEV__) throw new Error('PERF-01 cold fixture is development-only.');
+  if (perf01ColdPreparing || perf01ColdOpen) {
+    throw new Error('PERF-01 cold fixture is still in use.');
+  }
+  const cleanup = open({ name: perf01ColdName(chats) });
+  cleanup.delete();
+}
+
+/** Seed once, close the handle, and retain only this fixed disposable file across process death. */
+export async function preparePerf01ColdFixture(chats: 1_000 | 10_000): Promise<void> {
+  if (!__DEV__) throw new Error('PERF-01 cold fixture is development-only.');
+  if (perf01ColdPreparing || perf01ColdOpen || perf02BenchmarkRunning) {
+    throw new Error('Another inbox fixture operation is running.');
+  }
+  const name = perf01ColdName(chats);
+  perf01ColdPreparing = true;
+  let prepared = false;
+  try {
+    const cleanup = open({ name });
+    cleanup.delete();
+    const opened = open({ name, encryptionKey: PERF01_COLD_KEY });
+    try {
+      await opened.execute('PRAGMA foreign_keys = ON');
+      await runMigrations(opRunner(opened));
+      const database = drizzle(drizzleAdapter(opened)) as unknown as AppDatabase;
+      await seedDeviceInboxBenchmarkFixture(database, chats);
+      const counts = extractRows(
+        await opened.execute(
+          'SELECT (SELECT COUNT(*) FROM chats) AS chats, (SELECT COUNT(*) FROM messages) AS messages',
+        ),
+      );
+      if (Number(counts[0]?.chats) !== chats || Number(counts[0]?.messages) !== chats * 4) {
+        throw new Error('PERF-01 cold fixture row counts are invalid.');
+      }
+      if (extractRows(await opened.execute('PRAGMA foreign_key_check')).length !== 0) {
+        throw new Error('PERF-01 cold fixture has a foreign-key violation.');
+      }
+    } finally {
+      opened.close();
+    }
+    prepared = true;
+  } finally {
+    perf01ColdPreparing = false;
+    if (!prepared) deletePerf01ColdFixture(chats);
+  }
+}
+
+export type Perf01ColdFixtureSource = Pick<
+  Perf02RenderFixtureSource,
+  'key' | 'query' | 'subscribe'
+>;
+
+export interface Perf01ColdFixtureHandle {
+  readonly openedAtMs: number;
+  readonly openMs: number;
+  readonly source: Perf01ColdFixtureSource;
+  readonly close: () => Promise<void>;
+}
+
+/** Open read-only after process restart. No validation query precedes the timed first page. */
+export function openPerf01ColdFixture(chats: 1_000 | 10_000): Perf01ColdFixtureHandle {
+  if (!__DEV__) throw new Error('PERF-01 cold fixture is development-only.');
+  if (perf01ColdPreparing || perf01ColdOpen || perf02BenchmarkRunning) {
+    throw new Error('Another inbox fixture operation is running.');
+  }
+  const name = perf01ColdName(chats);
+  const openedAtMs = performance.now();
+  const opened = open({ name, encryptionKey: PERF01_COLD_KEY, readOnly: true });
+  let database: AppDatabase;
+  try {
+    database = drizzle(drizzleAdapter(opened)) as unknown as AppDatabase;
+  } catch (cause) {
+    opened.close();
+    throw cause;
+  }
+  const openMs = performance.now() - openedAtMs;
+  perf01ColdOpen = true;
+  let closed = false;
+  let closing: Promise<void> | undefined;
+  const inFlight = new Set<Promise<unknown>>();
+  const source: Perf01ColdFixtureSource = {
+    key: `perf01-cold-${chats}`,
+    query: (request) => {
+      if (closed) return Promise.reject(new Error('PERF-01 cold fixture is closed.'));
+      if (
+        request.limit !== 50 ||
+        request.archive !== 'active' ||
+        request.sender !== 'any' ||
+        request.countUnknown
+      ) {
+        return Promise.reject(new Error('PERF-01 cold fixture received an unexpected query.'));
+      }
+      const task = listChatsForInboxPage(database, {
+        limit: request.limit,
+        archive: request.archive,
+        sender: request.sender,
+        filters: request.filters,
+      }).then((page) => ({ ...page, unknownCount: 0 }));
+      inFlight.add(task);
+      void task.then(
+        () => inFlight.delete(task),
+        () => inFlight.delete(task),
+      );
+      return task;
+    },
+    subscribe: () => () => undefined,
+  };
+  return {
+    openedAtMs,
+    openMs,
+    source,
+    close: () => {
+      if (closing) return closing;
+      closed = true;
+      closing = Promise.allSettled(inFlight).then(() => {
+        try {
+          opened.close();
+        } finally {
+          perf01ColdOpen = false;
+        }
+      });
+      return closing;
+    },
   };
 }

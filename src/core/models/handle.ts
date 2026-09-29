@@ -3,10 +3,7 @@ import { ServiceType } from './common';
 
 const HANDLE_COLOR_RE = /^#[0-9a-f]{6}$/i;
 
-/**
- * Canonicalize a server-supplied handle color for storage/rendering. Invalid values are treated as
- * absent so a partial or malformed sync cannot replace a previously valid presentation hint.
- */
+/** Canonicalize a device-owned handle color for storage/rendering. */
 export function normalizeHandleColor(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null;
   const color = value.trim();
@@ -20,7 +17,7 @@ export const Handle = z.object({
   service: ServiceType.nullish(),
   country: z.string().nullish(),
   uncanonicalizedId: z.string().nullish(),
-  /** Server-owned per-handle avatar/bubble color. Missing/null means "no new color information". */
+  /** Device-owned per-handle avatar/bubble color. Inbound server values are ignored. */
   color: z.string().nullish(),
   displayName: z.string().nullish(),
 });

@@ -69,7 +69,7 @@ describe('custom-folder backup v3', () => {
       exportedAt: 123,
       appVersion: '1.0.0',
     });
-    expect(backup.version).toBe(3);
+    expect(backup.version).toBe(4);
     expect(backup.customFolderChatIdentities).toHaveLength(2);
     expect(backup.customFolders.map((folder) => folder.name)).toEqual(['Work', 'Family']);
     const workBackup = backup.customFolders[0]!;

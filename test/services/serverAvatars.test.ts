@@ -208,6 +208,113 @@ describe('backfillServerAvatars', () => {
     expect(await backfillServerAvatars(t.db, http)).toBe(0);
   });
 
+  it('downloads nothing when two server contacts claim the same normalized endpoint', async () => {
+    const t = await seedNeedy();
+    mockQuery.mockResolvedValue([
+      contactWithPhoto,
+      {
+        id: 'c2',
+        hasAvatar: false,
+        phoneNumbers: ['+44 555 123 4567'],
+      },
+    ]);
+
+    expect(await backfillServerAvatars(t.db, http)).toBe(0);
+    expect(MockFile.createDownloadTask).not.toHaveBeenCalled();
+    expect(
+      (
+        t.raw.prepare("SELECT avatar FROM handles WHERE address='+15551234567'").get() as {
+          avatar: string | null;
+        }
+      ).avatar,
+    ).toBeNull();
+  });
+
+  it('clears an app-owned avatar when a formerly unique endpoint becomes ambiguous', async () => {
+    const t = await seedNeedy();
+    mockQuery.mockResolvedValueOnce([contactWithPhoto]).mockResolvedValueOnce([
+      contactWithPhoto,
+      {
+        id: 'c2',
+        hasAvatar: true,
+        phoneNumbers: ['+44 555 123 4567'],
+        avatarEtag: 'e2',
+      },
+    ]);
+
+    expect(await backfillServerAvatars(t.db, http)).toBe(1);
+    expect(await backfillServerAvatars(t.db, http)).toBe(0);
+    expect(MockFile.createDownloadTask).toHaveBeenCalledTimes(1);
+    expect(
+      (
+        t.raw.prepare("SELECT avatar FROM handles WHERE address='+15551234567'").get() as {
+          avatar: string | null;
+        }
+      ).avatar,
+    ).toBeNull();
+  });
+
+  it('rejects a blank server contact id and clears an older app-owned avatar', async () => {
+    const t = await seedNeedy();
+    mockQuery
+      .mockResolvedValueOnce([contactWithPhoto])
+      .mockResolvedValueOnce([{ id: '   ', hasAvatar: true, phoneNumbers: ['+1 (555) 123-4567'] }]);
+
+    expect(await backfillServerAvatars(t.db, http)).toBe(1);
+    expect(await backfillServerAvatars(t.db, http)).toBe(0);
+    expect(MockFile.createDownloadTask).toHaveBeenCalledTimes(1);
+    expect(
+      (
+        t.raw.prepare("SELECT avatar FROM handles WHERE address='+15551234567'").get() as {
+          avatar: string | null;
+        }
+      ).avatar,
+    ).toBeNull();
+  });
+
+  it('preserves a device photo installed while an ambiguous server response is in flight', async () => {
+    const t = await seedNeedy();
+    let resolveAmbiguous!: (contacts: unknown[]) => void;
+    const ambiguousResponse = new Promise<unknown[]>((resolve) => {
+      resolveAmbiguous = resolve;
+    });
+    mockQuery.mockResolvedValueOnce([contactWithPhoto]).mockReturnValueOnce(ambiguousResponse);
+    expect(await backfillServerAvatars(t.db, http)).toBe(1);
+
+    const revalidation = backfillServerAvatars(t.db, http);
+    for (let attempt = 0; attempt < 10 && mockQuery.mock.calls.length < 2; attempt += 1) {
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    expect(mockQuery).toHaveBeenCalledTimes(2);
+    t.raw
+      .prepare("UPDATE handles SET avatar='content://device-photo' WHERE address='+15551234567'")
+      .run();
+    resolveAmbiguous([
+      contactWithPhoto,
+      { id: 'c2', hasAvatar: true, phoneNumbers: ['+44 555 123 4567'] },
+    ]);
+
+    await expect(revalidation).resolves.toBe(0);
+    expect(
+      (
+        t.raw.prepare("SELECT avatar FROM handles WHERE address='+15551234567'").get() as {
+          avatar: string;
+        }
+      ).avatar,
+    ).toBe('content://device-photo');
+  });
+
+  it('accepts repeated rows for one stable server contact id as one owner', async () => {
+    const t = await seedNeedy();
+    mockQuery.mockResolvedValue([
+      { ...contactWithPhoto, hasAvatar: false },
+      { ...contactWithPhoto, phoneNumbers: ['+1 (555) 123-4567'] },
+    ]);
+
+    expect(await backfillServerAvatars(t.db, http)).toBe(1);
+    expect(MockFile.createDownloadTask).toHaveBeenCalledTimes(1);
+  });
+
   it('downloads and writes the avatar onto a matching handle', async () => {
     const t = await seedNeedy();
     mockQuery.mockResolvedValue([contactWithPhoto]);

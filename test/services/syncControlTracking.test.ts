@@ -115,6 +115,7 @@ jest.mock('@db/repositories', () => ({
 }));
 
 import type { ServerInfo } from '@core/models';
+import { currentRcsProviderEpoch } from '@core/rcs/providerIdentity';
 import { RepairSnapshotRcsActiveError } from '@core/api/endpoints/repairSnapshot';
 import { useSessionStore } from '@state/sessionStore';
 import { useSyncStore } from '@state/syncStore';
@@ -651,6 +652,64 @@ describe('full repair — cancellation ownership', () => {
     expect(mockReleaseInvalidation).toHaveBeenCalledTimes(1);
   });
 
+  it('abandons a repair when the RCS provider epoch rotates during its crawl', async () => {
+    const crawl = gate();
+    let shouldAbort: (() => boolean) | undefined;
+    fullSync.mockImplementation(async (_db, _api, options) => {
+      shouldAbort = options.shouldAbort;
+      await crawl.promise;
+      return { chats: 0, messages: 0 };
+    });
+    const providerEpochA = `gpe1_${'A'.repeat(43)}`;
+    const providerEpochB = `gpe1_${'E'.repeat(43)}`;
+    const serverInfoA: ServerInfo = {
+      ...SNAPSHOT_SERVER_INFO,
+      rcs: true,
+      supports_rcs_epoch_qualified_ids: true,
+      rcs_provider_epoch: providerEpochA,
+    };
+    const serverInfoB: ServerInfo = {
+      ...serverInfoA,
+      rcs_provider_epoch: providerEpochB,
+    };
+    const origin = 'https://provider-rotation.example';
+
+    expect(currentRcsProviderEpoch(serverInfoA)).toBe(providerEpochA);
+    expect(currentRcsProviderEpoch(serverInfoB)).toBe(providerEpochB);
+    expect(providerEpochB).not.toBe(providerEpochA);
+
+    connectSession(origin, serverInfoA);
+    const running = startFullRepair();
+    await settle();
+
+    expect(fullSync).toHaveBeenCalledTimes(1);
+    expect(shouldAbort?.()).toBe(false);
+    const { transportRevision } = useSessionStore.getState();
+    expect(
+      useSessionStore.getState().setServerInfoForTransport(origin, transportRevision, serverInfoB),
+    ).toBe(true);
+    expect(shouldAbort?.()).toBe(true);
+
+    crawl.open();
+    await expect(running).resolves.toBeUndefined();
+
+    expect(cancelRepairSnapshot).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000001');
+    expect(syncDeletedMessages).not.toHaveBeenCalled();
+    expect(finishRepairSnapshot).not.toHaveBeenCalled();
+    expect(reconcileFullRepairPruneExposure).not.toHaveBeenCalled();
+    expect(setSyncMarkerWithinTransaction).not.toHaveBeenCalled();
+    expect(kvSetWithinTransaction).not.toHaveBeenCalled();
+    expect(mockReconcileMessageNotifications).not.toHaveBeenCalled();
+    expect(syncContacts).not.toHaveBeenCalled();
+    expect(useSyncStore.getState()).toMatchObject({
+      repairStatus: 'cancelled',
+      repairPhase: 'Repair stopped',
+      repairLog: expect.arrayContaining([
+        'Repair stopped because the connection changed. Restart it to continue.',
+      ]),
+    });
+  });
+
   it('releases the server lease when snapshot finish fails', async () => {
     fullSync.mockImplementation(async (_db, _api, options) => {
       options.onServerMarker?.({ lastSyncedRowId: 42, lastSyncedTimestamp: 4_200 });
@@ -783,6 +842,7 @@ describe('startSync vs. the tracked slot', () => {
   });
 
   it('still runs the WHOLE pipeline when a tracked run holds the slot', async () => {
+    connectSession('https://tracked-slot.example');
     const background = gate();
     const tracked = runTrackedSync(() => background.promise);
 
@@ -897,6 +957,7 @@ describe('startSync vs. the tracked slot', () => {
   });
 
   it('a foreground run in flight is still shared by other foreground callers', async () => {
+    connectSession('https://foreground-coalesce.example');
     const foregroundGate = gate();
     incrementalSync.mockImplementation(async () => {
       await foregroundGate.promise;
@@ -913,6 +974,7 @@ describe('startSync vs. the tracked slot', () => {
   });
 
   it('uses one pre-open account scope for both attachment-cache retirement phases', async () => {
+    connectSession('https://cache-scope.example');
     const callOrder: string[] = [];
     mockEnsureDatabase.mockImplementationOnce(async () => {
       // The account lease must be captured before the first await can cross a Disconnect boundary.

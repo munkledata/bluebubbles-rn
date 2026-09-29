@@ -20,3 +20,4 @@ export * from './handleFormat';
 export * from './vcard';
 export * from './vlocation';
 export * from './location';
+export * from './grapheme';

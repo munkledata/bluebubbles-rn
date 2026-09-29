@@ -146,7 +146,7 @@ beforeEach(() => {
   setRows([]);
   mockCancelScheduled.mockResolvedValue(undefined);
   mockClearScheduledHistoryItem.mockResolvedValue(undefined);
-  mockSyncScheduled.mockResolvedValue(undefined);
+  mockSyncScheduled.mockResolvedValue(true);
   useDialogStore.setState({ current: null, queue: [] });
 });
 
@@ -168,6 +168,14 @@ describe('ScheduledScreen', () => {
     await renderWithTheme(<ScheduledScreen />);
     expect(screen.getByText(/Scheduled delivery is best effort, not exact/)).toBeTruthy();
     expect(screen.getByText('No scheduled messages')).toBeTruthy();
+  });
+
+  it('does not call an unverified server list empty after a failed refresh', async () => {
+    mockSyncScheduled.mockResolvedValue(false);
+    setRows([]);
+    await renderWithTheme(<ScheduledScreen />);
+    await waitFor(() => expect(screen.getByText(/Couldn’t verify schedules/)).toBeTruthy());
+    expect(screen.queryByText('No scheduled messages')).toBeNull();
   });
 
   it('renders each scheduled row with its text', async () => {

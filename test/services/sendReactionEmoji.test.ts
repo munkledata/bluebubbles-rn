@@ -88,7 +88,8 @@ describe('sendReactionMessage — emoji tapbacks', () => {
     );
     expect(row.e).toBe('🔥');
     // And the reactions repo renders it as an own emoji badge.
-    const rows = (await listReactionsByMessageGuids(db, ['rcs-mt'])).get('rcs-mt') ?? [];
+    const rows =
+      (await listReactionsByMessageGuids(db, 'RCS;-;c1', ['rcs-mt'])).get('rcs-mt') ?? [];
     expect(rows[0]).toMatchObject({ baseType: 'emoji', emoji: '🔥', isFromMe: 1 });
   });
 

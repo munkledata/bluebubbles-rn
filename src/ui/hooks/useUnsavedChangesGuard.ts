@@ -9,7 +9,10 @@ export interface UnsavedChangesGuardOptions {
   title?: string;
   message?: string;
   /** Runs only after the user explicitly confirms the discard. */
-  onDiscard?: () => void;
+  /** Return false or reject to keep the route mounted when external cleanup did not finish. */
+  onDiscard?: () => void | boolean | Promise<void | boolean>;
+  /** Runs after the confirmed route removal is dispatched. */
+  onAfterDiscardNavigation?: () => void;
 }
 
 export interface UnsavedChangesGuard {
@@ -27,6 +30,7 @@ export function useUnsavedChangesGuard({
   title = 'Discard changes?',
   message = 'Your unsaved changes will be lost.',
   onDiscard,
+  onAfterDiscardNavigation,
 }: UnsavedChangesGuardOptions): UnsavedChangesGuard {
   const navigation = useNavigation();
   const bypassNextRemovalRef = useRef(false);
@@ -73,8 +77,19 @@ export function useUnsavedChangesGuard({
         confirmationIdRef.current = null;
         confirmationPendingRef.current = false;
         if (!mountedRef.current) return;
-        onDiscard?.();
-        navigation.dispatch(data.action);
+        void Promise.resolve()
+          .then(() => onDiscard?.())
+          .then(
+            (discarded) => {
+              if (discarded !== false && mountedRef.current) {
+                navigation.dispatch(data.action);
+                onAfterDiscardNavigation?.();
+              }
+            },
+            () => {
+              // The owner keeps the route and its authored state when cleanup fails.
+            },
+          );
       },
     });
   });

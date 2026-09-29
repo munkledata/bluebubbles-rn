@@ -44,10 +44,31 @@ describe('StoragePrivacyScreen', () => {
       screen.getByText(/asks Google to center on the server-provided precise coordinates/),
     ).toBeTruthy();
     expect(screen.getByText(/Maps SDK crash diagnostics/)).toBeTruthy();
-    expect(screen.getByText(/does not request this phone's own location/)).toBeTruthy();
+    expect(
+      screen.getByText(/Find My is separate.*does not read this phone's location/),
+    ).toBeTruthy();
+    expect(screen.getByText(/only when your connected server offers it/)).toBeTruthy();
+    expect(screen.getByText(/foreground location access.*15 seconds/)).toBeTruthy();
+    expect(screen.getByText(/does not collect location in the background/)).toBeTruthy();
+    expect(screen.getByText(/SQLCipher-encrypted outgoing queue/)).toBeTruthy();
+    expect(screen.getByText(/no more than 15 minutes.*does not read a new location/)).toBeTruthy();
+    expect(
+      screen.getByText(
+        /deny permission.*cancel.*turn off location services.*nothing is queued or sent/,
+      ),
+    ).toBeTruthy();
     expect(
       screen.getByText(/external provider may receive the URL or precise coordinates/),
     ).toBeTruthy();
+    expect(
+      screen.getByText(/FaceTime actions appear only.*separately gated capability/),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        /Starting a call sends the address.*does not save that address on the phone/,
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText(/copy it to the system clipboard.*system share sheet/)).toBeTruthy();
     expect(screen.getByText(/no longer has a configurable Redacted Mode/)).toBeTruthy();
     expect(screen.getByText(/keeps protected content out of Android Recents/)).toBeTruthy();
     expect(screen.getByText(/Secure Screen setting blocks screenshots/)).toBeTruthy();
@@ -57,15 +78,21 @@ describe('StoragePrivacyScreen', () => {
     await renderWithTheme(<StoragePrivacyScreen />);
 
     expect(screen.getByText(/SQLCipher-encrypted database/)).toBeTruthy();
-    expect(
-      screen.getByText(/Server credentials, the database key, the App Lock flag/),
-    ).toBeTruthy();
+    expect(screen.getByText(/authoritative App Lock setting/)).toBeTruthy();
+    expect(screen.getByText(/ordinary app-private on\/off mirrors/)).toBeTruthy();
+    expect(screen.getByText(/no message content or credentials/)).toBeTruthy();
     expect(
       screen.getByText(/App Lock does not make the database key biometric-bound/),
     ).toBeTruthy();
     expect(screen.getByText(/Downloaded or staged attachments/)).toBeTruthy();
-    expect(screen.getByText(/incoming-share copies/)).toBeTruthy();
+    expect(screen.getByText(/legacy incoming-share copies/)).toBeTruthy();
     expect(screen.getByText(/image or other Android\/Expo-managed caches/)).toBeTruthy();
+    expect(screen.getByText(/operational preferences and databases/)).toBeTruthy();
+    expect(screen.getByText(/Firebase stores installation.*FCM registration token/)).toBeTruthy();
+    expect(
+      screen.getByText(/operational metadata may remain until you clear app data or uninstall/),
+    ).toBeTruthy();
+    expect(screen.getByText(/non-secret, zero-byte account-revocation marker/)).toBeTruthy();
     expect(screen.getByText(/automatically exported to Photos or the Gator album/)).toBeTruthy();
     expect(screen.getByText(/shared media storage/)).toBeTruthy();
     expect(
@@ -97,6 +124,8 @@ describe('StoragePrivacyScreen', () => {
         /does not contain messages, drafts, unread state, diagnostic consent, files, or credentials/,
       ),
     ).toBeTruthy();
+    expect(screen.getByText(/device-owned contact colors/)).toBeTruthy();
+    expect(screen.getByText(/Folder and color identities can include participant/)).toBeTruthy();
     expect(screen.getByText(/attempts to delete the temporary file/)).toBeTruthy();
     expect(screen.getByText(/no longer has a plaintext export path/)).toBeTruthy();
   });

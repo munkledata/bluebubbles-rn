@@ -77,6 +77,7 @@ function upload(
     timeoutMs?: number;
     clientAttemptGeneration?: number;
     service?: 'iMessage' | 'RCS';
+    voice?: true;
     text?: string;
     totalBytes?: number;
     name?: string;
@@ -92,6 +93,7 @@ function upload(
     tempGuid: 'temp-1',
     clientAttemptGeneration: options.clientAttemptGeneration,
     service: options.service,
+    voice: options.voice,
     text: options.text,
     assertNetworkStart: options.assertNetworkStart,
     attachmentGuid: 'att-1',
@@ -109,6 +111,33 @@ async function flushMicrotasks(count = 8): Promise<void> {
 }
 
 describe('native attachment upload account scope', () => {
+  it('marks only an explicit M4A iMessage voice upload', async () => {
+    mockUploadAsync.mockResolvedValueOnce({
+      status: 200,
+      body: JSON.stringify({ status: 200, data: { guid: 'voice-guid', viaPrivateApi: true } }),
+    });
+    const http = new HttpClient({
+      getOrigin: () => 'https://old.example',
+      getPassword: () => 'old-password',
+    });
+    const run = upload(http, {
+      chatGuid: 'any;-;+15551234567',
+      service: 'iMessage',
+      voice: true,
+      assertNetworkStart: () => undefined,
+      totalBytes: 2048,
+      name: 'voice.m4a',
+      uri: 'file:///cache/voice.m4a',
+      mimeType: 'audio/mp4',
+    });
+    finishFileCheck({ exists: true, size: 2048 });
+    await expect(run).resolves.toMatchObject({ guid: 'voice-guid' });
+    expect(mockCreateUploadTask.mock.calls[0]?.[2]?.parameters).toMatchObject({
+      uploadKind: 'imessage_voice',
+      chatGuid: 'any;-;+15551234567',
+    });
+  });
+
   it('uses the multipart filename for an iMessage Files-picker cache copy', async () => {
     mockUploadAsync.mockResolvedValueOnce({
       status: 200,

@@ -66,6 +66,8 @@ export interface EventDeliveryContext {
   readonly durableEvent?: DurableEventCheckpoint;
   /** Optional shorter native-callback lifetime layered over the account generation. */
   readonly signal?: AbortSignal;
+  /** Optional event-identity guard that deliberately outlives a single durable receipt attempt. */
+  readonly isProviderCurrent?: () => boolean;
   isCurrent(): boolean;
 }
 

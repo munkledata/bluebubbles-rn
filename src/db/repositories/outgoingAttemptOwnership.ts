@@ -34,22 +34,27 @@ export async function recordMessageGuidAliasWithinTransaction(
   context: DbTransactionContext,
   aliasGuid: string,
   canonicalGuid: string,
+  chatGuid: string,
 ): Promise<void> {
   return runInTransactionContext(context, async (db) => {
-    const existing = await db.all<{ canonicalGuid: string }>(sql`
-      SELECT canonical_guid AS canonicalGuid
+    const existing = await db.all<{ canonicalGuid: string; chatGuid: string | null }>(sql`
+      SELECT canonical_guid AS canonicalGuid, chat_guid AS chatGuid
         FROM message_guid_aliases
        WHERE alias_guid = ${aliasGuid}
        LIMIT 1
     `);
     const previous = existing[0]?.canonicalGuid;
-    if (previous != null && previous !== canonicalGuid) {
+    const previousChatGuid = existing[0]?.chatGuid;
+    if (
+      previous != null &&
+      (previous !== canonicalGuid || (previousChatGuid != null && previousChatGuid !== chatGuid))
+    ) {
       throw new MessageGuidAliasConflictError();
     }
     if (previous != null) {
       await db.delete(messageGuidAliases).where(eq(messageGuidAliases.aliasGuid, aliasGuid));
     }
-    await db.insert(messageGuidAliases).values({ aliasGuid, canonicalGuid });
+    await db.insert(messageGuidAliases).values({ aliasGuid, canonicalGuid, chatGuid });
     await db.run(sql`
       DELETE FROM message_guid_aliases AS candidate
        WHERE candidate.id IN (

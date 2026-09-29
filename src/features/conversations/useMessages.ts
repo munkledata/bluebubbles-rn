@@ -116,12 +116,12 @@ export function useMessages(
           excludeRetractedAttachments: true,
         });
         const guids = msgs.map((m) => m.guid);
-        const reactionsByGuid = await listReactionsByMessageGuids(db, guids);
+        const reactionsByGuid = await listReactionsByMessageGuids(db, chatGuid, guids);
         // Stickers target a message the same way a reaction does, so they key off the same guid list.
         // No new watched TABLE is needed: 'messages' covers the sticker row arriving and
         // 'attachments' covers its local_path being written, which is what makes the image appear
         // once downloaded.
-        const stickersByGuid = await listStickersForTargets(db, guids);
+        const stickersByGuid = await listStickersForTargets(db, chatGuid, guids);
 
         // Reply originals: dedupe the target guids, fetch each once.
         const replyTargets = new Map<string, { guid: string; partIndex: number | null }>();
@@ -136,7 +136,12 @@ export function useMessages(
         const previews = new Map<string, MessagePreview>();
         await Promise.all(
           [...replyTargets].map(async ([key, target]) => {
-            const preview = await getMessagePreviewByGuid(db, target.guid, target.partIndex);
+            const preview = await getMessagePreviewByGuid(
+              db,
+              chatGuid,
+              target.guid,
+              target.partIndex,
+            );
             if (preview) previews.set(key, preview);
           }),
         );

@@ -26,6 +26,8 @@ export const ScheduledItem = z
     /** Epoch ms. */
     scheduledFor: z.number(),
     status: z.string().nullish(), // 'pending' | 'sent' | 'failed'
+    method: z.string().nullish(),
+    attachmentName: z.string().nullish(),
   })
   .loose();
 export type ScheduledItem = z.infer<typeof ScheduledItem>;
@@ -40,6 +42,10 @@ export interface ScheduledArgs {
   message: string;
   /** Epoch ms. */
   scheduledFor: number;
+  /** Only the separately admitted one-time iMessage file schedule uses these fields. */
+  method?: 'narrow-attachment';
+  attachmentName?: string;
+  attachmentData?: string;
 }
 
 /** GET /scheduled-message — every scheduled message Gator is tracking. */
@@ -54,7 +60,18 @@ export async function createScheduled(
   args: ScheduledArgs,
 ): Promise<ScheduledItem | null> {
   return http.post('/scheduled-message', ItemResponse, {
-    json: { chatGuid: args.chatGuid, text: args.message, scheduledFor: args.scheduledFor },
+    json: {
+      chatGuid: args.chatGuid,
+      text: args.message,
+      scheduledFor: args.scheduledFor,
+      ...(args.method === 'narrow-attachment'
+        ? {
+            method: args.method,
+            attachmentName: args.attachmentName,
+            attachmentData: args.attachmentData,
+          }
+        : {}),
+    },
   });
 }
 

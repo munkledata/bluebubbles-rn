@@ -1,5 +1,7 @@
 package expo.modules.gatorboundeddownload
 
+import java.io.ByteArrayInputStream
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.file.Files
 import org.junit.Assert.assertEquals
@@ -264,6 +266,55 @@ class AttachmentCachePolicyTest {
     assertTrue(
       runCatching {
         requireOwnedPastedAttachment(aliasRoot, File(realRoot, "1000-1/photo.jpg"))
+      }.isFailure,
+    )
+  }
+
+  @Test
+  fun `validates only committed owned share intake files`() {
+    val root = temporary.newFolder("shared-files").canonicalFile
+    val batch = File(root, "1000-1-0123456789abcdef").apply { mkdirs() }
+    val first = File(batch, "00-photo.jpg").apply { writeBytes(byteArrayOf(1, 2)) }
+    File(batch, "01-document.pdf").writeBytes(byteArrayOf(3))
+    val pending = File(root, "1001-1-0123456789abcdef.pending/00-partial.jpg").apply {
+      parentFile?.mkdirs()
+      writeBytes(byteArrayOf(4))
+    }
+    val malformedName = File(root, "1002-1-0123456789abcdef/photo.jpg").apply {
+      parentFile?.mkdirs()
+      writeBytes(byteArrayOf(5))
+    }
+    val outside = temporary.newFile("outside-share.bin").apply { writeBytes(byteArrayOf(6)) }
+    val linked = File(root, "1003-1-0123456789abcdef/00-linked.bin").apply {
+      parentFile?.mkdirs()
+      Files.createSymbolicLink(toPath(), outside.toPath())
+    }
+
+    assertEquals(first.canonicalFile, requireOwnedSharedAttachment(root, first))
+    assertTrue(runCatching { requireOwnedSharedAttachment(root, pending) }.isFailure)
+    assertTrue(runCatching { requireOwnedSharedAttachment(root, malformedName) }.isFailure)
+    assertTrue(runCatching { requireOwnedSharedAttachment(root, outside) }.isFailure)
+    assertTrue(runCatching { requireOwnedSharedAttachment(root, linked) }.isFailure)
+    assertTrue(outside.exists())
+  }
+
+  @Test
+  fun `shared adoption copies exact bytes without consuming the source`() {
+    val source = temporary.newFile("share-source.bin").apply {
+      writeBytes(byteArrayOf(1, 2, 3, 4))
+    }
+    val output = ByteArrayOutputStream()
+
+    source.inputStream().use { input ->
+      assertEquals(4L, copyExactSharedAttachment(input, output, 4L, bufferBytes = 2))
+    }
+
+    assertTrue(source.exists())
+    assertEquals(listOf<Byte>(1, 2, 3, 4), source.readBytes().toList())
+    assertEquals(listOf<Byte>(1, 2, 3, 4), output.toByteArray().toList())
+    assertTrue(
+      runCatching {
+        copyExactSharedAttachment(ByteArrayInputStream(byteArrayOf(1, 2, 3)), ByteArrayOutputStream(), 2L)
       }.isFailure,
     )
   }

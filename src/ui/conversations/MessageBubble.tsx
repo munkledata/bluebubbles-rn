@@ -135,7 +135,11 @@ export const MessageBubble = React.memo(function MessageBubble({
   const isSms = effectiveService === 'SMS';
   const isRcs = effectiveService === 'RCS';
   const isError = msg.sendState === 'error' || msg.error !== 0;
-  const deliveryUnconfirmed = msg.error === ClientErrorCode.attachmentDeliveryUnconfirmed;
+  const deliveryUnconfirmed =
+    msg.error === ClientErrorCode.attachmentDeliveryUnconfirmed ||
+    msg.error === ClientErrorCode.replyDeliveryUnconfirmed ||
+    msg.error === ClientErrorCode.locationDeliveryUnconfirmed ||
+    msg.error === ClientErrorCode.formattedDeliveryUnconfirmed;
   const isSending = msg.sendState === 'sending';
   const interactiveLabel = interactiveMessageLabel(msg.balloonBundleId);
   // Skip iMessage's hidden rich-link / plugin-payload attachments (URL previews, App Store,
@@ -160,16 +164,7 @@ export const MessageBubble = React.memo(function MessageBubble({
     return { runs: parsed, bodyText: bodyTextFromRuns(parsed) };
   }, [msg.attributedBody, msg.text]);
   const hasText = bodyText.trim().length > 0;
-  const hasActionableEntities = useMemo(
-    () =>
-      runs.some(
-        (run) =>
-          !run.mention &&
-          !run.attachment &&
-          splitMessageEntitySpans(run.text).some((span) => span.kind === 'entity'),
-      ),
-    [runs],
-  );
+  const hasActionableEntities = useMemo(() => runsHaveActionableEntities(runs), [runs]);
   const isRetracted = isAggregateRetractionTombstone(msg);
   const isEdited = !isRetracted && !!msg.dateEdited;
   // Apple "Send Later": a small "Scheduled" badge under the bubble ONLY while the row is pending
@@ -357,10 +352,6 @@ export const MessageBubble = React.memo(function MessageBubble({
   const corners = isFromMe
     ? { borderBottomRightRadius: textTail }
     : { borderBottomLeftRadius: textTail };
-  const messageActionLabel = (
-    bodyText.replace(/\s+/g, ' ').trim() ||
-    (showInteractiveFallback ? (interactiveLabel ?? '') : '')
-  ).slice(0, 120);
 
   const bubble = (
     <Pressable
@@ -385,10 +376,7 @@ export const MessageBubble = React.memo(function MessageBubble({
           collapsable={false}
           accessible
           importantForAccessibility="yes"
-          accessibilityRole="button"
-          accessibilityLabel={
-            messageActionLabel ? `Message actions for ${messageActionLabel}` : 'Message actions'
-          }
+          accessibilityLabel="Message actions"
           accessibilityHint="Double tap and hold for message actions"
           accessibilityActions={MESSAGE_ACTIONS}
           onAccessibilityAction={handleAccessibilityAction}
@@ -433,7 +421,7 @@ export const MessageBubble = React.memo(function MessageBubble({
               },
             ]}
           >
-            {bodyText}
+            {renderRuns(runs, theme.color.label, theme.color.label)}
           </Text>
           {showReactionCluster ? (
             <ReactionCluster reactions={reactions} isFromMe={isFromMe} onPress={onShowReactions} />
@@ -588,16 +576,30 @@ export const MessageBubble = React.memo(function MessageBubble({
 const OBJECT_REPLACEMENT = /￼/g;
 
 /**
- * Unknown attributed-body styling is intentionally rendered as plain text. Merge adjacent plain
- * runs so a URL/phone/date split only by such metadata remains one entity; mentions and attachment
- * placeholders stay as hard boundaries and keep their existing styling/ownership.
+ * Merge adjacent truly plain runs so unknown metadata does not create needless render fragments.
+ * The renderer below separately scans across visual-formatting boundaries while keeping mentions
+ * and attachment placeholders as hard entity boundaries.
  */
 function mergeAdjacentPlainRuns(runs: TextRun[]): TextRun[] {
   const merged: TextRun[] = [];
   for (const run of runs) {
     const previous = merged.at(-1);
-    const plain = !run.mention && !run.attachment;
-    if (plain && previous && !previous.mention && !previous.attachment) {
+    const plain =
+      !run.mention &&
+      !run.attachment &&
+      !run.bold &&
+      !run.italic &&
+      !run.underline &&
+      !run.strikethrough;
+    const previousPlain =
+      previous &&
+      !previous.mention &&
+      !previous.attachment &&
+      !previous.bold &&
+      !previous.italic &&
+      !previous.underline &&
+      !previous.strikethrough;
+    if (plain && previousPlain) {
       merged[merged.length - 1] = { text: previous.text + run.text };
     } else {
       merged.push(run);
@@ -612,18 +614,173 @@ function mergeAdjacentPlainRuns(runs: TextRun[]): TextRun[] {
  * is what makes EDITED messages show — their edited text lives in attributedBody while the `text`
  * column is empty.
  */
-function renderRuns(runs: TextRun[], color: string, mentionColor: string): React.ReactNode {
-  return runs.map((run: TextRun, i) => {
-    if (run.attachment) return null; // rendered separately as an attachment
+interface RenderableTextRun extends TextRun {
+  text: string;
+}
+
+interface RenderableRunGroup {
+  runs: RenderableTextRun[];
+  detectEntities: boolean;
+}
+
+interface IndexedTextRun {
+  run: RenderableTextRun;
+  start: number;
+  end: number;
+}
+
+/**
+ * Group adjacent visible body runs for entity detection. Visual styles may split a URL/phone/date,
+ * so they stay in one scan group. Mentions and attachments remain hard semantic boundaries.
+ */
+function renderableRunGroups(runs: TextRun[]): RenderableRunGroup[] {
+  const groups: RenderableRunGroup[] = [];
+  let current: RenderableTextRun[] = [];
+  const flush = (): void => {
+    if (current.length === 0) return;
+    groups.push({ runs: current, detectEntities: true });
+    current = [];
+  };
+
+  for (const run of runs) {
+    if (run.attachment) {
+      flush();
+      continue;
+    }
     const text = run.text.replace(OBJECT_REPLACEMENT, '');
-    if (!text) return null;
-    if (run.mention)
+    if (!text) continue;
+    const renderable = { ...run, text };
+    if (run.mention) {
+      flush();
+      groups.push({ runs: [renderable], detectEntities: false });
+    } else {
+      current.push(renderable);
+    }
+  }
+  flush();
+  return groups;
+}
+
+function runsHaveActionableEntities(runs: TextRun[]): boolean {
+  return renderableRunGroups(runs).some(
+    (group) =>
+      group.detectEntities &&
+      splitMessageEntitySpans(group.runs.map((run) => run.text).join('')).some(
+        (span) => span.kind === 'entity',
+      ),
+  );
+}
+
+function indexedRuns(runs: RenderableTextRun[]): IndexedTextRun[] {
+  let cursor = 0;
+  return runs.map((run) => {
+    const indexed = { run, start: cursor, end: cursor + run.text.length };
+    cursor = indexed.end;
+    return indexed;
+  });
+}
+
+function runStyle(
+  run: TextRun,
+  color: string,
+  mentionColor: string,
+  actionable: boolean,
+): {
+  color: string;
+  fontWeight: '400' | '600' | '700';
+  fontStyle: 'italic' | 'normal';
+  textDecorationLine: 'none' | 'underline' | 'line-through' | 'underline line-through';
+} {
+  const underline = actionable || run.underline;
+  return {
+    color: run.mention ? mentionColor : color,
+    fontWeight: run.bold ? '700' : run.mention ? '600' : '400',
+    fontStyle: run.italic ? 'italic' : 'normal',
+    textDecorationLine: underline
+      ? run.strikethrough
+        ? 'underline line-through'
+        : 'underline'
+      : run.strikethrough
+        ? 'line-through'
+        : 'none',
+  };
+}
+
+function renderRunRange(
+  runs: IndexedTextRun[],
+  start: number,
+  end: number,
+  color: string,
+  mentionColor: string,
+  actionable: boolean,
+  keyPrefix: string,
+): React.ReactNode {
+  return runs.map(({ run, start: runStart, end: runEnd }, index) => {
+    const sliceStart = Math.max(start, runStart);
+    const sliceEnd = Math.min(end, runEnd);
+    if (sliceEnd <= sliceStart) return null;
+    const text = run.text.slice(sliceStart - runStart, sliceEnd - runStart);
+    const formatted = run.bold || run.italic || run.underline || run.strikethrough;
+    if (run.mention || formatted || actionable) {
       return (
-        <Text key={i} style={{ color: mentionColor, fontWeight: '600' }}>
+        <Text
+          key={`${keyPrefix}:${index}:${sliceStart}`}
+          style={runStyle(run, color, mentionColor, actionable)}
+        >
           {text}
         </Text>
       );
-    return <React.Fragment key={i}>{renderEntityText(text, color)}</React.Fragment>;
+    }
+    return <React.Fragment key={`${keyPrefix}:${index}:${sliceStart}`}>{text}</React.Fragment>;
+  });
+}
+
+function renderRuns(runs: TextRun[], color: string, mentionColor: string): React.ReactNode {
+  return renderableRunGroups(runs).flatMap((group, groupIndex) => {
+    const indexed = indexedRuns(group.runs);
+    const text = group.runs.map((run) => run.text).join('');
+    if (!group.detectEntities) {
+      return renderRunRange(
+        indexed,
+        0,
+        text.length,
+        color,
+        mentionColor,
+        false,
+        `group:${groupIndex}`,
+      );
+    }
+
+    let cursor = 0;
+    return splitMessageEntitySpans(text).map((span, spanIndex) => {
+      const start = span.kind === 'entity' ? span.entity.start : cursor;
+      const end = span.kind === 'entity' ? span.entity.end : start + span.text.length;
+      cursor = end;
+      const key = `group:${groupIndex}:span:${spanIndex}`;
+      const content = renderRunRange(
+        indexed,
+        start,
+        end,
+        color,
+        mentionColor,
+        span.kind === 'entity',
+        key,
+      );
+      if (span.kind === 'text') return <React.Fragment key={key}>{content}</React.Fragment>;
+
+      const accessibility = entityAccessibility(span.entity);
+      return (
+        <Text
+          key={key}
+          onPress={() => activateMessageEntity(span.entity)}
+          accessibilityRole={accessibility.role}
+          accessibilityLabel={accessibility.label}
+          accessibilityHint={accessibility.hint}
+        >
+          {content}
+        </Text>
+      );
+    });
   });
 }
 
@@ -724,25 +881,6 @@ function entityAccessibility(entity: MessageEntity): {
         role: 'button',
       };
   }
-}
-
-function renderEntityText(text: string, color: string): React.ReactNode {
-  return splitMessageEntitySpans(text).map((span, index) => {
-    if (span.kind === 'text') return <React.Fragment key={index}>{span.text}</React.Fragment>;
-    const accessibility = entityAccessibility(span.entity);
-    return (
-      <Text
-        key={`${span.entity.kind}:${span.entity.start}`}
-        style={{ color, textDecorationLine: 'underline' }}
-        onPress={() => activateMessageEntity(span.entity)}
-        accessibilityRole={accessibility.role}
-        accessibilityLabel={accessibility.label}
-        accessibilityHint={accessibility.hint}
-      >
-        {span.entity.text}
-      </Text>
-    );
-  });
 }
 
 const styles = StyleSheet.create({

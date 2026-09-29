@@ -34,9 +34,23 @@ import { fixedRcsCapabilitySource } from '@/services/send/rcsAttemptCapability';
 import { ClientErrorCode } from '@utils';
 import { createTestDb as createBaseTestDb } from '../support/testDb';
 
+const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
+const rcsChatGuid = (sourceId: string): string =>
+  `RCS;-;g1.${RCS_PROVIDER_EPOCH}.${Buffer.from(sourceId).toString('base64url')}`;
+const RCS_CHAT_GUID = rcsChatGuid('attachment-chat');
+const RCS_THREAD_GUID = rcsChatGuid('thread-1');
+const RCS_CAPABILITY_FIELDS = {
+  rcs: true,
+  supports_rcs_epoch_qualified_ids: true,
+  rcs_provider_epoch: RCS_PROVIDER_EPOCH,
+} as const;
+
 let dummyHttp!: HttpClient;
 dummyHttp = {
-  get: async () => ({ rcs: true, supports_rcs_text_with_attachment: true }),
+  get: async () => ({
+    ...RCS_CAPABILITY_FIELDS,
+    supports_rcs_text_with_attachment: true,
+  }),
   pinTransport: () => dummyHttp,
   isTransportCurrent: () => true,
   assertTransportCurrent: () => undefined,
@@ -103,7 +117,7 @@ async function seedReplyTarget(db: AppDatabase) {
   const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
   const chats = await upsertChats(
     db,
-    [Chat.parse({ guid: 'RCS;-;c1', participants: [{ address: 'a@x.com' }] })],
+    [Chat.parse({ guid: RCS_CHAT_GUID, participants: [{ address: 'a@x.com' }] })],
     handles,
   );
   await upsertMessages(
@@ -121,7 +135,7 @@ async function seedReplyTarget(db: AppDatabase) {
         },
       }),
     ],
-    () => chats.get('RCS;-;c1')!,
+    () => chats.get(RCS_CHAT_GUID)!,
     handles,
   );
 }
@@ -143,7 +157,7 @@ async function echoMessageWithAttachment(
 ) {
   const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
   const chatId = (
-    raw.prepare('SELECT id FROM chats WHERE guid=?').get('RCS;-;c1') as { id: number }
+    raw.prepare('SELECT id FROM chats WHERE guid=?').get(RCS_CHAT_GUID) as { id: number }
   ).id;
   await upsertMessages(
     db,
@@ -162,6 +176,113 @@ async function echoMessageWithAttachment(
 }
 
 describe('sendImageMessage', () => {
+  const voice = {
+    uri: 'file:///cache/voice.m4a',
+    name: 'voice.m4a',
+    mimeType: 'audio/mp4',
+    size: 2048,
+  };
+  const voiceCapability = (enabled: boolean) =>
+    fixedRcsCapabilitySource(
+      ServerInfo.parse({ version: '2.0.15-bbd', supports_imessage_voice_upload: enabled }),
+    );
+
+  it('admits one bounded voice note only through the separate voice capability', async () => {
+    const { db, raw } = await createTestDb();
+    const chatGuid = 'any;-;+15551234567';
+    await seedProvenImessageChat(db, chatGuid);
+    const up = fakeUploader(async (args) => {
+      expect(args.service).toBe('iMessage');
+      expect(args.voice).toBe(true);
+      expect(args.text).toBeUndefined();
+      expect(
+        JSON.parse(String(one(raw, 'SELECT payload FROM outgoing_queue').payload)),
+      ).toMatchObject({
+        imessageAttachmentV1: true,
+      });
+      return { guid: 'voice-message-guid', viaPrivateApi: true };
+    });
+
+    await sendImageMessage(
+      db,
+      dummyHttp,
+      { chatGuid, image: voice, service: 'iMessage', voice: true },
+      up.upload,
+      1_000,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      voiceCapability(true),
+    );
+    expect(one(raw, 'SELECT guid FROM messages').guid).toBe('voice-message-guid');
+  });
+
+  it('keeps voice out of the queue when only broad or image capability is present', async () => {
+    const { db, raw } = await createTestDb();
+    const chatGuid = 'any;-;+15551234567';
+    await seedProvenImessageChat(db, chatGuid);
+    const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+
+    await expect(
+      sendImageMessage(
+        db,
+        dummyHttp,
+        { chatGuid, image: voice, service: 'iMessage', voice: true },
+        up.upload,
+        1_000,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        voiceCapability(false),
+      ),
+    ).rejects.toThrow('cannot send iMessage voice notes');
+    expect(up.captured).toBeUndefined();
+    expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
+  });
+
+  it.each(['imessage_voice_mode_invalid', 'imessage_voice_type_unsupported'] as const)(
+    'labels a definite voice rejection (%s) as not sent without replaying it',
+    async (serverErrorType) => {
+      const { db, raw } = await createTestDb();
+      const chatGuid = 'any;-;+15551234567';
+      await seedProvenImessageChat(db, chatGuid);
+      const up = fakeUploader(async () => {
+        throw ApiError.fromStatus(400, 'voice upload failed', undefined, serverErrorType);
+      });
+
+      const result = await sendImageMessage(
+        db,
+        dummyHttp,
+        { chatGuid, image: voice, service: 'iMessage', voice: true },
+        up.upload,
+        1_000,
+        undefined,
+        { failureNoticeMode: 'suppressed' },
+        undefined,
+        undefined,
+        voiceCapability(true),
+      );
+
+      expect(up.captured?.voice).toBe(true);
+      expect(
+        one(
+          raw,
+          'SELECT send_state AS state, error AS code, error_message AS detail FROM messages',
+        ),
+      ).toMatchObject({
+        state: 'error',
+        code: 400,
+        detail: 'The server rejected this upload before dispatch. This attempt was not sent.',
+      });
+      expect(one(raw, 'SELECT attempts FROM outgoing_queue').attempts).toBe(OUTGOING_MAX_ATTEMPTS);
+      await expect(claimFailedOutgoingForRetry(db, result.tempGuid)).resolves.toMatchObject({
+        claim: 'unsendable',
+      });
+    },
+  );
+
   const imessageCapability = (pdf = false, captions = false) =>
     fixedRcsCapabilitySource(
       ServerInfo.parse({
@@ -459,6 +580,7 @@ describe('sendImageMessage', () => {
     [400, 'imessage_attachment_caption_unavailable', true],
     [400, 'invalid_attachment_text', true],
     [400, 'attachment_text_too_large', true],
+    [409, 'idempotency_key_reused', false],
   ] as const)(
     'labels a definite HTTP %i image rejection (%s) as not sent without replaying it',
     async (status, serverErrorType, withCaption) => {
@@ -516,7 +638,7 @@ describe('sendImageMessage', () => {
 
   it.each([
     [400, undefined],
-    [409, 'idempotency_key_reused'],
+    [409, undefined],
   ] as const)(
     'keeps an unproven HTTP %i image failure delivery-unconfirmed',
     async (status, serverErrorType) => {
@@ -612,7 +734,7 @@ describe('sendImageMessage', () => {
       sendImageMessage(
         db,
         dummyHttp,
-        { chatGuid: 'RCS;-;thread-1', image: IMG },
+        { chatGuid: RCS_THREAD_GUID, image: IMG },
         up.upload,
         1_000,
         undefined,
@@ -623,7 +745,7 @@ describe('sendImageMessage', () => {
           ServerInfo.parse({ version: '2.0.0', private_api: true, rcs: false }),
         ),
       ),
-    ).rejects.toThrow('cannot send RCS attachments without RCS support');
+    ).rejects.toThrow('unavailable or previous Google pairing');
 
     expect(protect).not.toHaveBeenCalled();
     expect(up.captured).toBeUndefined();
@@ -641,7 +763,7 @@ describe('sendImageMessage', () => {
         db,
         dummyHttp,
         {
-          chatGuid: 'RCS;-;thread-1',
+          chatGuid: RCS_THREAD_GUID,
           image: IMG,
           // A stale caller cannot bypass the guard with the wrong service label.
           service: 'iMessage',
@@ -702,7 +824,7 @@ describe('sendImageMessage', () => {
 
   it('fails closed before DB, cache, or upload work when the server omits combined-send support', async () => {
     const { db, raw } = await createTestDb();
-    await seedChat(db, 'RCS;-;c1');
+    await seedChat(db, RCS_CHAT_GUID);
     const protect = jest.spyOn(attachmentCacheCoordinator, 'protect');
     const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
 
@@ -710,7 +832,7 @@ describe('sendImageMessage', () => {
       sendImageMessage(
         db,
         dummyHttp,
-        { chatGuid: 'RCS;-;c1', image: IMG, text: 'keep me', service: 'RCS' },
+        { chatGuid: RCS_CHAT_GUID, image: IMG, text: 'keep me', service: 'RCS' },
         up.upload,
         1_000,
         undefined,
@@ -721,7 +843,7 @@ describe('sendImageMessage', () => {
           ServerInfo.parse({
             version: '1.0.0',
             private_api: true,
-            rcs: true,
+            ...RCS_CAPABILITY_FIELDS,
             supports_rcs_text_with_attachment: false,
           }),
         ),
@@ -737,12 +859,12 @@ describe('sendImageMessage', () => {
 
   it('fails before DB/network work when cache retirement already owns the source path', async () => {
     const { db, raw } = await createTestDb();
-    await seedChat(db, 'RCS;-;c1');
+    await seedChat(db, RCS_CHAT_GUID);
     const protect = jest.spyOn(attachmentCacheCoordinator, 'protect').mockReturnValueOnce(null);
     const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
 
     await expect(
-      sendImageMessage(db, dummyHttp, { chatGuid: 'RCS;-;c1', image: IMG }, up.upload),
+      sendImageMessage(db, dummyHttp, { chatGuid: RCS_CHAT_GUID, image: IMG }, up.upload),
     ).rejects.toThrow('Attachment is no longer available for sending.');
 
     expect(protect).toHaveBeenCalledWith(IMG.uri);
@@ -753,7 +875,7 @@ describe('sendImageMessage', () => {
 
   it('keeps the source pinned through the durable outgoing commit, then releases before upload', async () => {
     const { db, raw } = await createTestDb();
-    await seedChat(db, 'RCS;-;c1');
+    await seedChat(db, RCS_CHAT_GUID);
     const release = jest.fn();
     const protect = jest
       .spyOn(attachmentCacheCoordinator, 'protect')
@@ -764,7 +886,7 @@ describe('sendImageMessage', () => {
       return { guid: 'real-msg', viaPrivateApi: true };
     });
 
-    await sendImageMessage(db, dummyHttp, { chatGuid: 'RCS;-;c1', image: IMG }, up.upload);
+    await sendImageMessage(db, dummyHttp, { chatGuid: RCS_CHAT_GUID, image: IMG }, up.upload);
 
     expect(protect.mock.invocationCallOrder[0]).toBeLessThan(release.mock.invocationCallOrder[0]!);
     expect(release).toHaveBeenCalledTimes(1);
@@ -773,12 +895,12 @@ describe('sendImageMessage', () => {
 
   it('refuses a pasted path unless ownership preparation returns its exact reservation', async () => {
     const { db, raw } = await createTestDb();
-    await seedChat(db, 'RCS;-;c1');
+    await seedChat(db, RCS_CHAT_GUID);
     const image = { ...IMG, origin: 'paste' as const };
     const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
 
     await expect(
-      sendImageMessage(db, dummyHttp, { chatGuid: 'RCS;-;c1', image }, up.upload),
+      sendImageMessage(db, dummyHttp, { chatGuid: RCS_CHAT_GUID, image }, up.upload),
     ).rejects.toThrow('ownership preparation is unavailable');
 
     const incompletePrepare: AttachmentOwnershipPreparer = async () => ({ image });
@@ -786,7 +908,7 @@ describe('sendImageMessage', () => {
       sendImageMessage(
         db,
         dummyHttp,
-        { chatGuid: 'RCS;-;c1', image },
+        { chatGuid: RCS_CHAT_GUID, image },
         up.upload,
         1_000,
         undefined,
@@ -801,7 +923,7 @@ describe('sendImageMessage', () => {
 
   it('atomically promotes an adopted paste path with the attachment and retry row', async () => {
     const { db, raw } = await createTestDb();
-    await seedChat(db, 'RCS;-;c1');
+    await seedChat(db, RCS_CHAT_GUID);
     const durableUri = 'file:///documents/attachments/media-temp/generation-7/media-photo.jpg';
     raw
       .prepare(
@@ -839,7 +961,7 @@ describe('sendImageMessage', () => {
     await sendImageMessage(
       db,
       dummyHttp,
-      { chatGuid: 'RCS;-;c1', image: { ...IMG, origin: 'paste' } },
+      { chatGuid: RCS_CHAT_GUID, image: { ...IMG, origin: 'paste' } },
       up.upload,
       1000,
       undefined,
@@ -853,7 +975,7 @@ describe('sendImageMessage', () => {
 
   it('rolls an adopted paste promotion back to reserved when the outgoing transaction fails', async () => {
     const { db, raw } = await createTestDb();
-    await seedChat(db, 'RCS;-;c1');
+    await seedChat(db, RCS_CHAT_GUID);
     const durableUri = 'file:///documents/attachments/media-temp/generation-7/media-photo.jpg';
     raw
       .prepare(
@@ -885,7 +1007,7 @@ describe('sendImageMessage', () => {
       sendImageMessage(
         db,
         dummyHttp,
-        { chatGuid: 'RCS;-;c1', image: { ...IMG, origin: 'paste' } },
+        { chatGuid: RCS_CHAT_GUID, image: { ...IMG, origin: 'paste' } },
         up.upload,
         1000,
         undefined,
@@ -909,8 +1031,8 @@ describe('sendImageMessage', () => {
 
   it('rolls back a retired attachment insert before upload and lets a fresh lease send', async () => {
     const { db, raw } = await createTestDb();
-    await seedChat(db, 'RCS;-;c1');
-    raw.prepare("UPDATE chats SET latest_message_date = 321 WHERE guid = 'RCS;-;c1'").run();
+    await seedChat(db, RCS_CHAT_GUID);
+    raw.prepare('UPDATE chats SET latest_message_date = 321 WHERE guid = ?').run(RCS_CHAT_GUID);
     let drain: Promise<void> | undefined;
     let triggerRan = false;
     raw.function('pause_attachment_during_chat_update', () => {
@@ -920,7 +1042,7 @@ describe('sendImageMessage', () => {
     });
     raw.exec(`CREATE TRIGGER pause_attachment_during_chat_update
       AFTER UPDATE OF latest_message_date ON chats
-      WHEN NEW.guid = 'RCS;-;c1' AND NEW.latest_message_date = 1000
+      WHEN NEW.guid = '${RCS_CHAT_GUID}' AND NEW.latest_message_date = 1000
       BEGIN SELECT pause_attachment_during_chat_update(); END`);
 
     const oldRelease = jest.fn();
@@ -960,7 +1082,7 @@ describe('sendImageMessage', () => {
         sendImageMessage(
           db,
           dummyHttp,
-          { chatGuid: 'RCS;-;c1', image: IMG },
+          { chatGuid: RCS_CHAT_GUID, image: IMG },
           up.upload,
           1_000,
           () => lease.isCurrent(),
@@ -979,7 +1101,13 @@ describe('sendImageMessage', () => {
       expect((one(raw, 'SELECT COUNT(*) c FROM messages') as { c: number }).c).toBe(0);
       expect((one(raw, 'SELECT COUNT(*) c FROM attachments') as { c: number }).c).toBe(0);
       expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
-      expect(one(raw, "SELECT latest_message_date d FROM chats WHERE guid='RCS;-;c1'").d).toBe(321);
+      expect(
+        (
+          raw
+            .prepare('SELECT latest_message_date d FROM chats WHERE guid = ?')
+            .get(RCS_CHAT_GUID) as { d: number }
+        ).d,
+      ).toBe(321);
 
       raw.exec('DROP TRIGGER pause_attachment_during_chat_update');
       resumeRealtimeDeliveries();
@@ -990,7 +1118,7 @@ describe('sendImageMessage', () => {
           result = await sendImageMessage(
             db,
             dummyHttp,
-            { chatGuid: 'RCS;-;c1', image: IMG },
+            { chatGuid: RCS_CHAT_GUID, image: IMG },
             up.upload,
             2_000,
             () => lease.isCurrent(),
@@ -1043,7 +1171,7 @@ describe('sendImageMessage', () => {
 
   it('atomically rejects a path already owned by crash-surviving retirement', async () => {
     const { db, raw } = await createTestDb();
-    await seedChat(db, 'RCS;-;c1');
+    await seedChat(db, RCS_CHAT_GUID);
     raw
       .prepare(
         "INSERT INTO attachment_cache_entries(path, bytes, last_used_at, state, attempts, next_retry_at) VALUES (?, 1000, 1, 'retiring', 0, 0)",
@@ -1056,7 +1184,7 @@ describe('sendImageMessage', () => {
     const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
 
     await expect(
-      sendImageMessage(db, dummyHttp, { chatGuid: 'RCS;-;c1', image: IMG }, up.upload),
+      sendImageMessage(db, dummyHttp, { chatGuid: RCS_CHAT_GUID, image: IMG }, up.upload),
     ).rejects.toEqual(expect.objectContaining({ message: 'attachment cache path is not active' }));
 
     expect(release).toHaveBeenCalledTimes(1);
@@ -1068,14 +1196,14 @@ describe('sendImageMessage', () => {
 
   it('promotes the message on the ack; the attachment keeps its local guid+path until the echo', async () => {
     const { db, raw } = await createTestDb();
-    await seedChat(db, 'RCS;-;c1');
+    await seedChat(db, RCS_CHAT_GUID);
     // Gator's attachment-send ack carries ONLY the message guid (no attachment guid).
     const up = fakeUploader(async () => ({ guid: 'real-msg', viaPrivateApi: true }));
-    await sendImageMessage(db, dummyHttp, { chatGuid: 'RCS;-;c1', image: IMG }, up.upload);
+    await sendImageMessage(db, dummyHttp, { chatGuid: RCS_CHAT_GUID, image: IMG }, up.upload);
 
     // The service hands the picked file's fields to the uploader (production streams them natively).
     expect(up.captured).toMatchObject({
-      chatGuid: 'RCS;-;c1',
+      chatGuid: RCS_CHAT_GUID,
       name: 'photo.jpg',
       uri: 'file:///photo.jpg',
       mimeType: 'image/jpeg',
@@ -1104,9 +1232,9 @@ describe('sendImageMessage', () => {
 
   it('reconciles the temp attachment to the real guid (preserving local_path) on the socket echo', async () => {
     const { db, raw } = await createTestDb();
-    await seedChat(db, 'RCS;-;c1');
+    await seedChat(db, RCS_CHAT_GUID);
     const up = fakeUploader(async () => ({ guid: 'real-msg', viaPrivateApi: true }));
-    await sendImageMessage(db, dummyHttp, { chatGuid: 'RCS;-;c1', image: IMG }, up.upload);
+    await sendImageMessage(db, dummyHttp, { chatGuid: RCS_CHAT_GUID, image: IMG }, up.upload);
 
     await echoMessageWithAttachment(db, raw, 'real-msg', 'real-att');
 
@@ -1120,7 +1248,7 @@ describe('sendImageMessage', () => {
 
   it('does not duplicate the attachment when the echo real guid already exists', async () => {
     const { db, raw } = await createTestDb();
-    await seedChat(db, 'RCS;-;c1');
+    await seedChat(db, RCS_CHAT_GUID);
     const up = fakeUploader(async () => {
       // A prior echo already inserted the real attachment guid (message_id nullable).
       raw
@@ -1128,7 +1256,7 @@ describe('sendImageMessage', () => {
         .run();
       return { guid: 'real-msg2', viaPrivateApi: true };
     });
-    await sendImageMessage(db, dummyHttp, { chatGuid: 'RCS;-;c1', image: IMG }, up.upload);
+    await sendImageMessage(db, dummyHttp, { chatGuid: RCS_CHAT_GUID, image: IMG }, up.upload);
 
     await echoMessageWithAttachment(db, raw, 'real-msg2', 'real-att2');
     // The temp row is dropped (the real guid pre-existed) → exactly one 'real-att2'.
@@ -1142,9 +1270,9 @@ describe('sendImageMessage', () => {
     // guid — the real `rcs-<id>` only arrives on the live `new-message` fanout). This must NOT
     // delete the optimistic row (which would lose the picture's on-disk local_path → reload button).
     const { db, raw } = await createTestDb();
-    await seedChat(db, 'RCS;-;c1');
+    await seedChat(db, RCS_CHAT_GUID);
     const up = fakeUploader(async (args) => ({ guid: args.tempGuid, viaPrivateApi: false }));
-    await sendImageMessage(db, dummyHttp, { chatGuid: 'RCS;-;c1', image: IMG }, up.upload, 1000);
+    await sendImageMessage(db, dummyHttp, { chatGuid: RCS_CHAT_GUID, image: IMG }, up.upload, 1000);
     const tempGuid = up.captured!.tempGuid;
 
     // The image survives: one message, flipped to 'sent', still its temp guid, local_path intact.
@@ -1162,7 +1290,7 @@ describe('sendImageMessage', () => {
     // reconcileEchoByContent promotes the optimistic row in place; upsertMessages/Attachments then
     // reconcile the temp attachment → real guid, preserving local_path (no duplicate, no download).
     const chatId = (
-      raw.prepare('SELECT id FROM chats WHERE guid=?').get('RCS;-;c1') as { id: number }
+      raw.prepare('SELECT id FROM chats WHERE guid=?').get(RCS_CHAT_GUID) as { id: number }
     ).id;
     const echo = Message.parse({
       guid: 'rcs-99',
@@ -1191,13 +1319,13 @@ describe('sendImageMessage', () => {
     // attachment lands with local_path NULL (a second, image-less bubble). This reproduces the sync
     // ordering: reconcileOutgoingAttachmentByContent BEFORE upsertMessages (exactly the engine.ts wiring).
     const { db, raw } = await createTestDb();
-    await seedChat(db, 'RCS;-;c1');
+    await seedChat(db, RCS_CHAT_GUID);
     const up = fakeUploader(async (args) => ({ guid: args.tempGuid, viaPrivateApi: false }));
-    await sendImageMessage(db, dummyHttp, { chatGuid: 'RCS;-;c1', image: IMG }, up.upload, 1000);
+    await sendImageMessage(db, dummyHttp, { chatGuid: RCS_CHAT_GUID, image: IMG }, up.upload, 1000);
     const tempGuid = up.captured!.tempGuid;
 
     const chatId = (
-      raw.prepare('SELECT id FROM chats WHERE guid=?').get('RCS;-;c1') as { id: number }
+      raw.prepare('SELECT id FROM chats WHERE guid=?').get(RCS_CHAT_GUID) as { id: number }
     ).id;
     const echo = Message.parse({
       guid: 'rcs-99',
@@ -1227,16 +1355,16 @@ describe('sendImageMessage', () => {
     // while the server actually delivered. The sync materialization must promote the errored temp
     // row in place — keeping the on-disk image and clearing the queue row (no duplicate upload).
     const { db, raw } = await createTestDb();
-    await seedChat(db, 'RCS;-;c1');
+    await seedChat(db, RCS_CHAT_GUID);
     const up = fakeUploader(async () => {
       throw new ApiError('server_error', 'bad gateway', 502);
     });
-    await sendImageMessage(db, dummyHttp, { chatGuid: 'RCS;-;c1', image: IMG }, up.upload, 1000);
+    await sendImageMessage(db, dummyHttp, { chatGuid: RCS_CHAT_GUID, image: IMG }, up.upload, 1000);
     const tempGuid = up.captured!.tempGuid;
     expect(one(raw, 'SELECT send_state s FROM messages').s).toBe('error');
 
     const chatId = (
-      raw.prepare('SELECT id FROM chats WHERE guid=?').get('RCS;-;c1') as { id: number }
+      raw.prepare('SELECT id FROM chats WHERE guid=?').get(RCS_CHAT_GUID) as { id: number }
     ).id;
     const echo = Message.parse({
       guid: 'rcs-77',
@@ -1260,7 +1388,7 @@ describe('sendImageMessage', () => {
     expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(
-      '[send-attachment] failed for chat RCS;-;c1 (code 10002, HTTP 502): bad gateway',
+      `[send-attachment] failed for chat ${RCS_CHAT_GUID} (code 10002, HTTP 502): bad gateway`,
     );
     warn.mockRestore();
   });
@@ -1270,20 +1398,20 @@ describe('sendImageMessage', () => {
     // claim the fresh pending optimistic row — the ±5min window rejects it. This is exactly why the
     // sync path needs a NARROW helper rather than reconcileEchoByContent.
     const { db, raw } = await createTestDb();
-    await seedChat(db, 'RCS;-;c1');
+    await seedChat(db, RCS_CHAT_GUID);
     const up = fakeUploader(async (args) => ({ guid: args.tempGuid, viaPrivateApi: false }));
     // Fresh send "now" = 10_000_000.
     await sendImageMessage(
       db,
       dummyHttp,
-      { chatGuid: 'RCS;-;c1', image: IMG },
+      { chatGuid: RCS_CHAT_GUID, image: IMG },
       up.upload,
       10_000_000,
     );
     const tempGuid = up.captured!.tempGuid;
 
     const chatId = (
-      raw.prepare('SELECT id FROM chats WHERE guid=?').get('RCS;-;c1') as { id: number }
+      raw.prepare('SELECT id FROM chats WHERE guid=?').get(RCS_CHAT_GUID) as { id: number }
     ).id;
     const old = Message.parse({
       guid: 'rcs-old',
@@ -1305,11 +1433,11 @@ describe('sendImageMessage', () => {
   it('marks the message errored but keeps the local attachment so it still renders', async () => {
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const { db, raw } = await createTestDb();
-    await seedChat(db, 'RCS;-;c1');
+    await seedChat(db, RCS_CHAT_GUID);
     const up = fakeUploader(async () => {
       throw new ApiError('server_error', 'boom', 500);
     });
-    await sendImageMessage(db, dummyHttp, { chatGuid: 'RCS;-;c1', image: IMG }, up.upload);
+    await sendImageMessage(db, dummyHttp, { chatGuid: RCS_CHAT_GUID, image: IMG }, up.upload);
     const msg = one(raw, 'SELECT send_state s, error e FROM messages');
     expect(msg.s).toBe('error');
     expect(msg.e).toBe(500);
@@ -1318,7 +1446,7 @@ describe('sendImageMessage', () => {
     );
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith(
-      '[send-attachment] failed for chat RCS;-;c1 (code 500, HTTP 500): boom',
+      `[send-attachment] failed for chat ${RCS_CHAT_GUID} (code 500, HTTP 500): boom`,
     );
     warn.mockRestore();
   });
@@ -1326,7 +1454,7 @@ describe('sendImageMessage', () => {
   it('multi-select: N picked images → N messages + N attachments + N queue rows', async () => {
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const { db, raw } = await createTestDb();
-    await seedChat(db, 'RCS;-;c1');
+    await seedChat(db, RCS_CHAT_GUID);
     const fail = fakeUploader(async () => {
       throw new ApiError('server_error', 'boom', 500);
     });
@@ -1335,7 +1463,7 @@ describe('sendImageMessage', () => {
       await sendImageMessage(
         db,
         dummyHttp,
-        { chatGuid: 'RCS;-;c1', image: { ...IMG, name: `p${i}.jpg` } },
+        { chatGuid: RCS_CHAT_GUID, image: { ...IMG, name: `p${i}.jpg` } },
         fail.upload,
       );
     }
@@ -1344,7 +1472,7 @@ describe('sendImageMessage', () => {
     expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(3);
     expect(warn.mock.calls).toEqual(
       Array.from({ length: 3 }, () => [
-        '[send-attachment] failed for chat RCS;-;c1 (code 500, HTTP 500): boom',
+        `[send-attachment] failed for chat ${RCS_CHAT_GUID} (code 500, HTTP 500): boom`,
       ]),
     );
     warn.mockRestore();

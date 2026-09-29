@@ -43,6 +43,11 @@ export const handles = sqliteTable(
     // SMS (mirrors Apple's chat.db). Unknown service is stored as '' — never NULL — because
     // SQLite unique indexes treat NULLs as distinct, which would break the upsert.
     addressServiceIdx: uniqueIndex('handles_address_service_idx').on(t.address, t.service),
+    // Portable backups inspect only handles with a device-owned color. Keep that max-plus-one
+    // selector off the much larger uncolored population.
+    backupColorExportIdx: index('handles_backup_color_export_idx')
+      .on(t.id)
+      .where(sql`${t.color} IS NOT NULL`),
   }),
 );
 
@@ -83,6 +88,10 @@ export const chats = sqliteTable(
      *  tombstone: the row survives so the columns above do, and the chat is hidden from the inbox
      *  until a message NEWER than this arrives (see `deleteChatLocal` / `chatVisible`). */
     deletedAt: integer('deleted_at'),
+    /** Durable boundary for history removed by a local chat deletion. Unlike `deletedAt`, this is
+     *  not cleared by new activity or re-composing the chat: old history stays hidden until the
+     *  user explicitly restores this exact deletion. */
+    historyDeletedAt: integer('history_deleted_at'),
     /** Denormalized for fast inbox sorting without a join. */
     latestMessageDate: integer('latest_message_date'),
   },
@@ -391,6 +400,9 @@ export const messages = sqliteTable(
 export const messageDeletionLedger = sqliteTable('message_deletion_ledger', {
   guid: text('guid').primaryKey(),
   dateDeleted: integer('date_deleted').notNull(),
+  /** Exact conversation owner. NULL quarantines a legacy or ownerless deletion whose conversation
+   * could not be proved; repository reads never apply an unscoped row to a new message. */
+  chatGuid: text('chat_guid'),
 });
 
 /**
@@ -407,6 +419,8 @@ export const messageGuidAliases = sqliteTable(
     id: integer('id').primaryKey({ autoIncrement: true }),
     aliasGuid: text('alias_guid').notNull(),
     canonicalGuid: text('canonical_guid').notNull(),
+    /** Conversation that proved this temp-to-canonical handoff. */
+    chatGuid: text('chat_guid'),
   },
   (t) => ({
     aliasGuidIdx: uniqueIndex('message_guid_aliases_alias_guid_idx').on(t.aliasGuid),
@@ -667,7 +681,7 @@ export const outgoingQueue = sqliteTable('outgoing_queue', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   tempGuid: text('temp_guid').notNull(),
   chatGuid: text('chat_guid').notNull(),
-  kind: text('kind').notNull(), // 'text' | 'attachment' | 'reaction'
+  kind: text('kind').notNull(), // 'text' | 'attachment' | 'reaction' | 'contact' | 'location'
   payload: text('payload').notNull(),
   attempts: integer('attempts').default(0),
   createdAt: integer('created_at').default(sql`(unixepoch() * 1000)`),

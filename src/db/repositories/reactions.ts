@@ -26,6 +26,7 @@ export interface ReactionRow {
  */
 export async function listReactionsByMessageGuids(
   db: AppDatabase,
+  chatGuid: string,
   guids: string[],
 ): Promise<Map<string, ReactionRow[]>> {
   const out = new Map<string, ReactionRow[]>();
@@ -53,6 +54,13 @@ export async function listReactionsByMessageGuids(
     FROM messages m
     LEFT JOIN handles h ON h.id = m.handle_id
     WHERE m.associated_message_guid IN (${inList})
+      AND m.chat_id = (SELECT id FROM chats WHERE guid = ${chatGuid} LIMIT 1)
+      AND EXISTS (
+        SELECT 1 FROM messages target
+         WHERE target.guid = m.associated_message_guid
+           AND target.chat_id = m.chat_id
+           AND target.date_deleted IS NULL
+      )
       AND m.associated_message_type IS NOT NULL
       AND m.date_deleted IS NULL
     ORDER BY m.date_created ASC, m.id ASC

@@ -6,11 +6,11 @@ export interface VLocationData {
 
 /**
  * Parse an Apple location attachment (.loc.vcf / text/x-vlocation) — a vCard whose
- * URL line is an Apple Maps link. CRITICAL: Apple encodes the coordinate as
- * `ll=<longitude>,<latitude>` (longitude first — confirmed in the Flutter
- * `createAppleLocation(longitude, latitude)` template), and the comma is usually
- * backslash-escaped (`\,`) or percent-encoded (`%2C`). Returns null if no parseable
- * URL/coords. Pure + Node-testable.
+ * URL line is an Apple Maps link. Apple encodes the coordinate as
+ * `ll=<latitude>,<longitude>`; the comma is commonly backslash-escaped (`\,`) in
+ * vCards or percent-encoded (`%2C`). Returns null if the URL or coordinates are
+ * missing, malformed, non-finite, or outside the valid latitude/longitude ranges.
+ * Pure + Node-testable.
  */
 export function parseVLocation(content: string): VLocationData | null {
   const unfolded = content.replace(/\r\n/g, '\n').replace(/\n[ \t]/g, '');
@@ -18,11 +18,22 @@ export function parseVLocation(content: string): VLocationData | null {
   if (!urlLine) return null;
   const url = urlLine[1]!.trim();
 
-  const ll = url.match(/[?&]ll=(-?[0-9.]+)(?:\\,|%2C|,)(-?[0-9.]+)/i);
+  const ll = url.match(
+    /[?&]ll=(-?(?:\d+(?:\.\d+)?|\.\d+))(?:\\,|%2C|,)(-?(?:\d+(?:\.\d+)?|\.\d+))(?:[&#]|$)/i,
+  );
   if (!ll) return null;
-  const longitude = Number.parseFloat(ll[1]!);
-  const latitude = Number.parseFloat(ll[2]!);
-  if (Number.isNaN(latitude) || Number.isNaN(longitude)) return null;
+  const latitude = Number.parseFloat(ll[1]!);
+  const longitude = Number.parseFloat(ll[2]!);
+  if (
+    !Number.isFinite(latitude) ||
+    !Number.isFinite(longitude) ||
+    latitude < -90 ||
+    latitude > 90 ||
+    longitude < -180 ||
+    longitude > 180
+  ) {
+    return null;
+  }
 
   return { latitude, longitude, url };
 }

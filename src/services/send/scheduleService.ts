@@ -2,12 +2,19 @@ import type { HttpClient } from '@core/api/http';
 // Import the endpoint module directly (not the @core/api barrel) so this stays
 // node-importable in tests without pulling in ky (ESM).
 import * as scheduledApi from '@core/api/endpoints/scheduled';
+import {
+  MAX_SEND_ATTACHMENT_TEXT_BYTES,
+  MAX_IMESSAGE_SCHEDULED_ATTACHMENT_BYTES,
+  isSupportedImessageAttachmentType,
+} from '@core/models/serverInfo';
 import { asRecurrence, nextOccurrence, type Recurrence } from '@core/schedule';
 import { logger } from '@core/secure';
+import { isCurrentRcsChatGuid } from '@core/rcs/providerIdentity';
 import {
   claimDueScheduled,
   deferScheduledClaim,
   insertScheduledWithinTransaction,
+  getChatHeader,
   listDueScheduled,
   markScheduledFailed,
   markScheduledSent,
@@ -20,8 +27,13 @@ import {
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
-import { isRcsChatGuid } from '@utils/chat';
-import { RcsCapabilityUnavailableError, type RcsCapabilitySource } from './rcsAttemptCapability';
+import { isProvenOneToOneIMessageChat, isRcsChatGuid } from '@utils/chat';
+import { utf8Encode } from '@utils/bytes';
+import {
+  RcsCapabilityUnavailableError,
+  sendCapabilityCommitGuard,
+  type RcsCapabilitySource,
+} from './rcsAttemptCapability';
 import { sendTextMessage } from './sendService';
 
 export interface ScheduleArgs {
@@ -33,6 +45,27 @@ export interface ScheduleArgs {
   selectedMessagePartIndex?: number;
   /** null/undefined = one-shot; a recurring message is LOCAL-ONLY (the server can't repeat). */
   recurrence?: Recurrence | null;
+}
+
+export interface ScheduleAttachmentArgs {
+  chatGuid: string;
+  text: string;
+  scheduledFor: number;
+  attachmentName: string;
+  mimeType: string;
+  /** Canonical base64 bytes already read from a bounded local file. */
+  attachmentData: string;
+}
+
+function decodedBase64Size(value: string): number {
+  if (
+    value.length === 0 ||
+    value.length % 4 !== 0 ||
+    !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)
+  ) {
+    return -1;
+  }
+  return (value.length / 4) * 3 - (value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0);
 }
 
 /** Minimal account-ownership seam; production passes a RealtimeDeliveryLease, tests may omit it. */
@@ -223,13 +256,26 @@ export async function scheduleTextMessage(
   http: HttpClient,
   args: ScheduleArgs,
   accountScope?: ScheduledOperationScope,
-  _capabilitySource?: RcsCapabilitySource,
+  capabilitySource?: RcsCapabilitySource,
 ): Promise<{ id: number; serverId: string | null }> {
   assertScheduledScope(accountScope);
   if (args.selectedMessageGuid !== undefined || args.selectedMessagePartIndex !== undefined) {
     throw new Error('Scheduled replies were retired in this release.');
   }
-  const commitGuard = accountScope ? () => accountScope.isCurrent() : undefined;
+  if (isRcsChatGuid(args.chatGuid)) {
+    if (
+      !isCurrentRcsChatGuid(capabilitySource?.serverInfo, args.chatGuid) ||
+      (capabilitySource?.kind === 'session' && !capabilitySource.isCurrent())
+    ) {
+      throw new RcsCapabilityUnavailableError(
+        'This RCS conversation belongs to an unavailable or previous Google pairing.',
+      );
+    }
+  }
+  const commitGuard = sendCapabilityCommitGuard(
+    accountScope ? () => accountScope.isCurrent() : undefined,
+    capabilitySource,
+  );
   let serverId: string | null = null;
   if (!isRcsChatGuid(args.chatGuid) && !args.selectedMessageGuid && !args.recurrence) {
     try {
@@ -257,6 +303,81 @@ export async function scheduleTextMessage(
   );
   assertScheduledScope(accountScope);
   return { id, serverId };
+}
+
+/**
+ * Store one small file on the Mac for a one-time iMessage send. Unlike text schedules, this has
+ * NO phone-only fallback: the phone does not retain the bytes in its scheduled-message row.
+ * An uncertain create response must be checked in Scheduled before the user tries again.
+ */
+export async function scheduleAttachmentMessage(
+  db: AppDatabase,
+  http: HttpClient,
+  args: ScheduleAttachmentArgs,
+  accountScope: ScheduledOperationScope,
+  capabilitySource: RcsCapabilitySource | undefined,
+): Promise<{ id: number; serverId: string }> {
+  const capability = capabilitySource?.serverInfo;
+  const current = sendCapabilityCommitGuard(() => accountScope.isCurrent(), capabilitySource);
+  if (!current()) throw new ScheduledSessionChangedError();
+  if (
+    capability?.supports_imessage_scheduled_attachment !== true ||
+    capability.supports_imessage_attachment_upload !== true ||
+    (args.mimeType === 'application/pdf' &&
+      capability.supports_imessage_pdf_attachment_upload !== true) ||
+    (args.text.length > 0 && capability.supports_imessage_attachment_caption_upload !== true)
+  ) {
+    throw new Error('Scheduled iMessage attachments are unavailable on this server.');
+  }
+  const byteSize = decodedBase64Size(args.attachmentData);
+  if (
+    !/^(?:iMessage|any);-;/.test(args.chatGuid) ||
+    !isSupportedImessageAttachmentType(args.mimeType, args.attachmentName) ||
+    byteSize <= 0 ||
+    byteSize > MAX_IMESSAGE_SCHEDULED_ATTACHMENT_BYTES ||
+    (args.text.length > 0 &&
+      (args.text.trim().length === 0 ||
+        utf8Encode(args.text).byteLength > MAX_SEND_ATTACHMENT_TEXT_BYTES))
+  ) {
+    throw new Error('Choose one JPEG, PNG, or PDF up to 512 KiB and a plain caption.');
+  }
+  const header = await getChatHeader(db, args.chatGuid);
+  if (!current()) throw new ScheduledSessionChangedError();
+  if (!isProvenOneToOneIMessageChat(header)) {
+    throw new Error('A proven existing one-to-one iMessage chat is required.');
+  }
+  const created = await scheduledApi.createScheduled(http, {
+    chatGuid: args.chatGuid,
+    message: args.text,
+    scheduledFor: args.scheduledFor,
+    method: 'narrow-attachment',
+    attachmentName: args.attachmentName,
+    attachmentData: args.attachmentData,
+  });
+  if (!current()) throw new ScheduledSessionChangedError();
+  if (
+    !created?.id ||
+    created.method !== 'narrow-attachment' ||
+    created.attachmentName !== args.attachmentName
+  ) {
+    throw new Error(
+      'Schedule creation could not be confirmed. Check Scheduled before trying again.',
+    );
+  }
+  const id = await withDbTransaction(
+    db,
+    (context) =>
+      insertScheduledWithinTransaction(context, {
+        chatGuid: args.chatGuid,
+        text: args.text,
+        scheduledFor: args.scheduledFor,
+        attachmentName: args.attachmentName,
+        serverId: created.id,
+      }),
+    current,
+  );
+  if (!current()) throw new ScheduledSessionChangedError();
+  return { id, serverId: created.id };
 }
 
 /**

@@ -61,7 +61,7 @@ describe('balloon bundle identity persistence', () => {
       hasVisibleAttachments: 0,
       attachmentDescription: null,
     });
-    await expect(getMessagePreviewByGuid(db, row.guid)).resolves.toMatchObject({
+    await expect(getMessagePreviewByGuid(db, 'chat-balloon', row.guid)).resolves.toMatchObject({
       balloonBundleId: HANDWRITING,
       hasVisibleAttachments: 0,
       attachmentDescription: null,
@@ -125,8 +125,10 @@ describe('balloon bundle identity persistence', () => {
     await expect(
       upsertMessages(db, [nulIdentifier], () => chatId, new Map()),
     ).resolves.toBeDefined();
-    await expect(getMessagePreviewByGuid(db, 'nul-balloon')).resolves.toMatchObject({
-      balloonBundleId: expect.any(String),
-    });
+    await expect(getMessagePreviewByGuid(db, 'chat-balloon', 'nul-balloon')).resolves.toMatchObject(
+      {
+        balloonBundleId: expect.any(String),
+      },
+    );
   });
 });

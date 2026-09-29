@@ -22,6 +22,17 @@ import {
 import { buildMessageIntents } from '@/services/notifications/intents';
 import { createTestDb } from '../support/testDb';
 
+const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
+const RCS_PROVIDER_INFO = {
+  rcs: true,
+  supports_rcs_epoch_qualified_ids: true,
+  rcs_provider_epoch: RCS_PROVIDER_EPOCH,
+} as const;
+const RCS_RETRY_CHAT_GUID = `RCS;-;g1.${RCS_PROVIDER_EPOCH}.YQ`;
+const RCS_CHECKPOINT_CHAT_GUID = `RCS;-;g1.${RCS_PROVIDER_EPOCH}.Yg`;
+const RCS_RETRY_MESSAGE_GUID = `rcs-g1.${RCS_PROVIDER_EPOCH}.bTE`;
+const RCS_CHECKPOINT_MESSAGE_GUID = `rcs-g1.${RCS_PROVIDER_EPOCH}.bTI`;
+
 /** Current at sink entry + transaction admission, revoked immediately before commit. */
 function revokedBeforeCommit(): EventDeliveryContext {
   let checks = 0;
@@ -278,19 +289,27 @@ describe('DbEventSink (live path)', () => {
     // the async send-phase failure (retryable:true) must re-enqueue the ladder — the wire flag
     // flows raw through the eventRouter payload into applyServerSendError.
     const { db, raw } = await createTestDb();
-    const router = new EventRouter(new DbEventSink(db));
-    const handles = await upsertHandles(db, [{ address: 'rcs@x.com' }]);
+    const router = new EventRouter(
+      new DbEventSink(db, undefined, undefined, undefined, () => RCS_PROVIDER_INFO),
+    );
+    const handles = await upsertHandles(db, [{ address: 'rcs@x.com', service: 'RCS' }]);
     await upsertChats(
       db,
-      [Chat.parse({ guid: 'RCS;-;conv-1', participants: [{ address: 'rcs@x.com' }] })],
+      [
+        Chat.parse({
+          guid: RCS_RETRY_CHAT_GUID,
+          providerEpoch: RCS_PROVIDER_EPOCH,
+          participants: [{ address: 'rcs@x.com', service: 'RCS' }],
+        }),
+      ],
       handles,
     );
-    const chatId = await getChatIdByGuid(db, 'RCS;-;conv-1');
+    const chatId = await getChatIdByGuid(db, RCS_RETRY_CHAT_GUID);
     await insertOutgoingAttachment(db, {
       tempGuid: 'temp-sink-pic',
       attachmentGuid: 'temp-sink-pic-att',
       chatId: chatId!,
-      chatGuid: 'RCS;-;conv-1',
+      chatGuid: RCS_RETRY_CHAT_GUID,
       localPath: 'file:///sink.jpg',
       mimeType: 'image/jpeg',
       transferName: 'sink.jpg',
@@ -303,7 +322,8 @@ describe('DbEventSink (live path)', () => {
     await router.handle(
       'message-send-error',
       JSON.stringify({
-        guid: 'server-real-sink-pic',
+        guid: RCS_RETRY_MESSAGE_GUID,
+        chatGuid: RCS_RETRY_CHAT_GUID,
         tempGuid: 'temp-sink-pic',
         error: 502,
         retryable: true,
@@ -315,7 +335,8 @@ describe('DbEventSink (live path)', () => {
     await router.handle(
       'message-send-error',
       JSON.stringify({
-        guid: 'server-real-sink-pic',
+        guid: RCS_RETRY_MESSAGE_GUID,
+        chatGuid: RCS_RETRY_CHAT_GUID,
         tempGuid: 'temp-sink-pic',
         error: 502,
         retryable: true,
@@ -335,23 +356,24 @@ describe('DbEventSink (live path)', () => {
 
   it('does not spend a retry cycle when the durable checkpoint rolls back', async () => {
     const { db, raw } = await createTestDb();
-    const handles = await upsertHandles(db, [{ address: 'checkpoint-rcs@x.com' }]);
+    const handles = await upsertHandles(db, [{ address: 'checkpoint-rcs@x.com', service: 'RCS' }]);
     await upsertChats(
       db,
       [
         Chat.parse({
-          guid: 'RCS;-;checkpoint-conv',
-          participants: [{ address: 'checkpoint-rcs@x.com' }],
+          guid: RCS_CHECKPOINT_CHAT_GUID,
+          providerEpoch: RCS_PROVIDER_EPOCH,
+          participants: [{ address: 'checkpoint-rcs@x.com', service: 'RCS' }],
         }),
       ],
       handles,
     );
-    const chatId = await getChatIdByGuid(db, 'RCS;-;checkpoint-conv');
+    const chatId = await getChatIdByGuid(db, RCS_CHECKPOINT_CHAT_GUID);
     await insertOutgoingAttachment(db, {
       tempGuid: 'temp-checkpoint-requeue',
       attachmentGuid: 'temp-checkpoint-requeue-att',
       chatId: chatId!,
-      chatGuid: 'RCS;-;checkpoint-conv',
+      chatGuid: RCS_CHECKPOINT_CHAT_GUID,
       localPath: 'file:///checkpoint.jpg',
       mimeType: 'image/jpeg',
       transferName: 'checkpoint.jpg',
@@ -373,9 +395,15 @@ describe('DbEventSink (live path)', () => {
     };
     const event = {
       type: 'message-send-error' as const,
-      payload: { tempGuid: 'temp-checkpoint-requeue', error: 502, retryable: true },
+      payload: {
+        guid: RCS_CHECKPOINT_MESSAGE_GUID,
+        tempGuid: 'temp-checkpoint-requeue',
+        chatGuid: RCS_CHECKPOINT_CHAT_GUID,
+        error: 502,
+        retryable: true,
+      },
     };
-    const sink = new DbEventSink(db);
+    const sink = new DbEventSink(db, undefined, undefined, undefined, () => RCS_PROVIDER_INFO);
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       const error = await sink.onEvent(event, 'fcm', context).then(
@@ -1020,18 +1048,85 @@ describe('DbEventSink — message-deleted (tombstone)', () => {
     const { db, raw } = await createTestDb();
     const router = new EventRouter(new DbEventSink(db));
     await expect(
-      router.handle('message-deleted', { guid: 'never-synced', dateDeleted: 1 }, 'socket'),
+      router.handle(
+        'message-deleted',
+        { guid: 'never-synced', chatGuid: 'cNeverSynced', dateDeleted: 1 },
+        'socket',
+      ),
     ).resolves.toBeDefined();
     expect(
       raw
         .prepare(
-          `SELECT guid, date_deleted AS dateDeleted
+          `SELECT guid, date_deleted AS dateDeleted, chat_guid AS chatGuid
              FROM message_deletion_ledger WHERE guid = 'never-synced'`,
         )
         .get(),
-    ).toEqual({ guid: 'never-synced', dateDeleted: 1 });
+    ).toEqual({ guid: 'never-synced', dateDeleted: 1, chatGuid: 'cNeverSynced' });
     expect(
       raw.prepare("SELECT id FROM messages WHERE guid = 'never-synced'").get(),
+    ).toBeUndefined();
+  });
+
+  it('quarantines an ownerless unknown deletion without assigning it to a chat', async () => {
+    const { db, raw } = await createTestDb();
+    const router = new EventRouter(new DbEventSink(db));
+
+    await expect(
+      router.handle('message-deleted', { guid: 'unknown-without-owner', dateDeleted: 2 }, 'socket'),
+    ).resolves.toBeDefined();
+
+    expect(
+      raw
+        .prepare(
+          "SELECT guid, date_deleted AS dateDeleted, chat_guid AS chatGuid FROM message_deletion_ledger WHERE guid = 'unknown-without-owner'",
+        )
+        .get(),
+    ).toEqual({ guid: 'unknown-without-owner', dateDeleted: 2, chatGuid: null });
+
+    await router.handle(
+      'new-message',
+      {
+        guid: 'unknown-without-owner',
+        text: 'must remain quarantined',
+        dateCreated: 3,
+        chats: [{ guid: 'cLaterClaim' }],
+      },
+      'socket',
+    );
+    expect(
+      raw.prepare("SELECT id FROM messages WHERE guid = 'unknown-without-owner'").get(),
+    ).toBeUndefined();
+  });
+
+  it('rejects a deletion whose claimed chat conflicts with the stored message owner', async () => {
+    const { db, raw } = await createTestDb();
+    const router = await seedInbound(db, 'cross-chat-delete-target', 'cDeleteOwner');
+    await router.handle(
+      'new-message',
+      Message.parse({
+        guid: 'other-chat-message',
+        text: 'other chat',
+        dateCreated: 1700000000001,
+        chats: [{ guid: 'cDeleteOther' }],
+      }),
+      'socket',
+    );
+
+    await router.handle(
+      'message-deleted',
+      { guid: 'cross-chat-delete-target', chatGuid: 'cDeleteOther', dateDeleted: 500 },
+      'socket',
+    );
+
+    expect(
+      raw
+        .prepare('SELECT date_deleted AS dateDeleted FROM messages WHERE guid = ?')
+        .get('cross-chat-delete-target'),
+    ).toEqual({ dateDeleted: null });
+    expect(
+      raw
+        .prepare("SELECT guid FROM message_deletion_ledger WHERE guid = 'cross-chat-delete-target'")
+        .get(),
     ).toBeUndefined();
   });
 

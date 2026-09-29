@@ -1,9 +1,12 @@
 import { z } from 'zod/v4';
+import { isRcsProviderEpoch } from '../rcs/providerIdentity';
 
 /** A file/media attachment on a message (Flutter: Attachment). */
 export const Attachment = z.object({
   originalROWID: z.number().nullish(),
   guid: z.string(),
+  /** Google pairing generation for an epoch-qualified RCS attachment. */
+  providerEpoch: z.string().refine(isRcsProviderEpoch).nullish(),
   uti: z.string().nullish(),
   mimeType: z.string().nullish(),
   transferName: z.string().nullish(),

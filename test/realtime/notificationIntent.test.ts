@@ -112,6 +112,91 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     }
   });
 
+  it('decodes the ordered participant projection for a group notification title', async () => {
+    const { db } = await createTestDb();
+    const { intents, router } = wire(db);
+    await router.handle(
+      'new-message',
+      {
+        guid: 'comma-name-notification',
+        text: 'hello group',
+        dateCreated: 1_700_000_000_001,
+        handle: { address: 'jane@example.test', displayName: 'Doe, Jane' },
+        chats: [
+          {
+            guid: 'iMessage;-;comma-name-notification-group',
+            style: 43,
+            participants: [
+              { address: 'jane@example.test', displayName: 'Doe, Jane' },
+              { address: 'bob@example.test', displayName: 'Bob' },
+            ],
+          },
+        ],
+      },
+      'socket',
+    );
+
+    const intent = intents[0];
+    expect(intent?.kind).toBe('message');
+    if (intent?.kind === 'message') expect(intent.chatTitle).toBe('Doe, Jane, Bob');
+  });
+
+  it('does not present or withdraw under a different provider chat for a colliding message GUID', async () => {
+    const { db } = await createTestDb();
+    const first = wire(db);
+    await first.router.handle(
+      'new-message',
+      {
+        guid: 'cross-provider-notification-collision',
+        text: 'Apple-owned private body',
+        dateCreated: 1,
+        handle: { address: '+15550000001', service: 'SMS' },
+        chats: [
+          {
+            guid: 'SMS;-;+15550000001',
+            participants: [{ address: '+15550000001', service: 'SMS' }],
+          },
+        ],
+      },
+      'socket',
+    );
+    expect(first.intents).toHaveLength(1);
+
+    // Use a fresh router so legacy in-memory event deduplication cannot make this pass without the
+    // persisted-owner check that durable replay also relies on.
+    const collision = wire(db);
+
+    await collision.router.handle(
+      'new-message',
+      {
+        guid: 'cross-provider-notification-collision',
+        text: 'must not relabel the Apple body',
+        dateCreated: 2,
+        handle: { address: '+15550000002', service: 'RCS' },
+        chats: [
+          {
+            guid: 'RCS;-;google-conversation-2',
+            participants: [{ address: '+15550000002', service: 'RCS' }],
+          },
+        ],
+      },
+      'socket',
+    );
+    await collision.router.handle(
+      'updated-message',
+      {
+        guid: 'cross-provider-notification-collision',
+        text: null,
+        dateCreated: 2,
+        dateRetracted: 3,
+        chats: [{ guid: 'RCS;-;google-conversation-2' }],
+      },
+      'socket',
+    );
+
+    expect(collision.intents).toEqual([]);
+  });
+
   it('does not resurrect a notification after the message was read before presentation retry', async () => {
     const { db } = await createTestDb();
     const { router } = wire(db);
@@ -161,10 +246,6 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
   it.each([
     ['payload chat guid', { guid: 'delete-cancel-with-chat', chatGuid: 'cDeleteCancel' }],
     ['row-resolved chat guid', { guid: 'delete-cancel-without-chat' }],
-    [
-      'row owner instead of stale payload metadata',
-      { guid: 'delete-cancel-stale-chat', chatGuid: 'cWrong' },
-    ],
   ])('withdraws an existing notification after deletion using the %s', async (_label, deletion) => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
@@ -191,6 +272,82 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
         messageGuid: deletion.guid,
       },
     ]);
+  });
+
+  it('does not withdraw another chat notification for conflicting deletion metadata', async () => {
+    const { db } = await createTestDb();
+    const { intents, router } = wire(db);
+    await router.handle(
+      'new-message',
+      {
+        guid: 'delete-cancel-stale-chat',
+        text: 'keep this notification',
+        dateCreated: 250,
+        handle: { address: 'delete@x.com' },
+        chats: [{ guid: 'cDeleteCancel', participants: [{ address: 'delete@x.com' }] }],
+      },
+      'socket',
+    );
+    intents.length = 0;
+
+    await router.handle(
+      'message-deleted',
+      { guid: 'delete-cancel-stale-chat', chatGuid: 'cWrong', dateDeleted: 300 },
+      'socket',
+    );
+
+    expect(intents).toEqual([]);
+  });
+
+  it('uses the scoped deletion ledger after row purge and rejects a different chat claim', async () => {
+    const { db, raw } = await createTestDb();
+    const original = wire(db);
+    await original.router.handle(
+      'new-message',
+      {
+        guid: 'purged-delete-owner',
+        text: 'owned by the first chat',
+        dateCreated: 250,
+        handle: { address: '+15550000001', service: 'SMS' },
+        chats: [
+          {
+            guid: 'SMS;-;+15550000001',
+            participants: [{ address: '+15550000001', service: 'SMS' }],
+          },
+        ],
+      },
+      'socket',
+    );
+    await original.router.handle(
+      'message-deleted',
+      {
+        guid: 'purged-delete-owner',
+        chatGuid: 'SMS;-;+15550000001',
+        dateDeleted: 300,
+      },
+      'socket',
+    );
+    raw.prepare("DELETE FROM messages WHERE guid = 'purged-delete-owner'").run();
+
+    const collision = wire(db);
+    await collision.router.handle(
+      'message-deleted',
+      {
+        guid: 'purged-delete-owner',
+        chatGuid: 'RCS;-;google-conversation-2',
+        dateDeleted: 400,
+      },
+      'socket',
+    );
+
+    expect(collision.intents).toEqual([]);
+    expect(
+      raw
+        .prepare(
+          "SELECT date_deleted AS dateDeleted, chat_guid AS chatGuid FROM message_deletion_ledger WHERE guid = 'purged-delete-owner'",
+        )
+        .get(),
+    ).toEqual({ dateDeleted: 300, chatGuid: 'SMS;-;+15550000001' });
   });
 
   it('shows an attachment label (not a U+FFFC box) for an attachment-only message', async () => {
@@ -380,7 +537,7 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
   it('does not raise a message notice for our own message and only withdraws a prior failure notice', async () => {
     const { db } = await createTestDb();
     const { intents, router } = wire(db);
-    await router.handle(
+    const event = await router.handle(
       'new-message',
       { guid: 'mine', text: 'sent', isFromMe: true, dateCreated: 1, chats: [{ guid: 'cMe' }] },
       'socket',
@@ -388,6 +545,13 @@ describe('NotifyingEventSink + buildMessageIntents', () => {
     expect(intents).toEqual([
       { kind: 'send-failure-cancel', chatGuid: 'cMe', messageGuid: 'mine' },
     ]);
+    if (!event || event.type !== 'new-message') throw new Error('new-message did not normalize');
+    expect(
+      await buildMessageIntents(db, {
+        ...event,
+        message: { ...event.message, chats: undefined, chatGuid: undefined },
+      }),
+    ).toEqual([{ kind: 'send-failure-cancel', chatGuid: 'cMe', messageGuid: 'mine' }]);
   });
 
   it('derives a generic failed-send intent only after the server error is committed to the DB', async () => {

@@ -278,8 +278,8 @@ async function runContactsSync(
   });
   assertCurrentAccount(accountLease);
 
-  const items: DeviceContact[] = data.map((c, i) => ({
-    sourceId: c.id ?? `c-${i}`,
+  const items: DeviceContact[] = data.map((c) => ({
+    sourceId: c.id?.trim() ? c.id : '',
     displayName: (c.name ?? [c.firstName, c.lastName].filter(Boolean).join(' ')) || null,
     givenName: c.firstName ?? null,
     familyName: c.lastName ?? null,

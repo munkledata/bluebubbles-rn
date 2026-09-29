@@ -96,6 +96,33 @@ describe('contact-link on handle ingestion (1.5)', () => {
     expect(h.c).not.toBeNull();
   });
 
+  it('does not opportunistically link a handle when two contacts claim its normalized endpoint', async () => {
+    const { db, raw } = await createTestDb();
+    await upsertContacts(db, [
+      contact({ sourceId: 'one', displayName: 'One', phones: ['+1 (555) 123-4567'] }),
+      contact({ sourceId: 'two', displayName: 'Two', phones: ['+44 555 123 4567'] }),
+    ]);
+
+    await upsertHandles(db, [
+      { address: '+15551234567', service: 'iMessage', displayName: 'Server iMessage' },
+      { address: '+15551234567', service: 'RCS', displayName: 'Server RCS' },
+    ]);
+
+    expect(
+      raw
+        .prepare(
+          `SELECT service, display_name AS name, contact_id AS contactId
+             FROM handles
+            WHERE address = '+15551234567'
+            ORDER BY service`,
+        )
+        .all(),
+    ).toEqual([
+      { service: 'RCS', name: 'Server RCS', contactId: null },
+      { service: 'iMessage', name: 'Server iMessage', contactId: null },
+    ]);
+  });
+
   it('no-op when no contacts are synced yet (handle keeps the server name)', async () => {
     const { db, raw } = await createTestDb();
     await upsertHandles(db, [{ address: 'craig@apple.com', displayName: 'Server Craig' }]);
@@ -141,8 +168,18 @@ describe('contact-link on handle ingestion (1.5)', () => {
     );
 
     const members = await getChatParticipants(db, 'g1');
-    expect(members).toContainEqual({ address: '+15551112222', name: 'Mom' });
-    expect(members).toContainEqual({ address: 'unknown@x.com', name: 'unknown@x.com' });
+    expect(members).toContainEqual({
+      address: '+15551112222',
+      name: 'Mom',
+      service: null,
+      color: null,
+    });
+    expect(members).toContainEqual({
+      address: 'unknown@x.com',
+      name: 'unknown@x.com',
+      service: null,
+      color: null,
+    });
   });
 
   it('linkHandlesToContacts only touches the requested addresses', async () => {

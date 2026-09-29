@@ -61,6 +61,9 @@ describe('migration 0045_backup_export_indexes', () => {
         '0047_message_retraction_topology',
         '0048_attachment_media_exports',
         '0049_inbox_search_postings',
+        '0050_message_identity_owner_scope',
+        '0051_handle_color_backup_index',
+        '0052_chat_history_deletion_boundary',
       ]);
 
       expect(indexColumns(raw, 'themes_backup_export_idx')).toEqual(['is_preset', 'id']);

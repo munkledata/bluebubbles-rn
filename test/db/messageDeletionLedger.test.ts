@@ -35,15 +35,17 @@ const message = (guid: string) =>
 describe('message deletion ledger', () => {
   it('records an unknown deletion and tombstones a later message in its initial INSERT', async () => {
     const { db, raw } = await createTestDb();
-    await expect(markMessageDeleted(db, 'late-message', 5000)).resolves.toBe(false);
+    await expect(markMessageDeleted(db, 'late-message', 5000, undefined, 'chat-1')).resolves.toBe(
+      false,
+    );
     expect(
       raw
         .prepare(
-          `SELECT guid, date_deleted AS dateDeleted
+          `SELECT guid, date_deleted AS dateDeleted, chat_guid AS chatGuid
              FROM message_deletion_ledger WHERE guid = 'late-message'`,
         )
         .get(),
-    ).toEqual({ guid: 'late-message', dateDeleted: 5000 });
+    ).toEqual({ guid: 'late-message', dateDeleted: 5000, chatGuid: 'chat-1' });
 
     const { chatId, handles } = await seedChat(db);
     raw.exec(`
@@ -112,7 +114,7 @@ describe('message deletion ledger', () => {
 
   it('retains protection when ingestion cannot yet resolve a chat', async () => {
     const { db, raw } = await createTestDb();
-    await markMessageDeleted(db, 'missing-chat-message', 5000);
+    await markMessageDeleted(db, 'missing-chat-message', 5000, undefined, 'chat-1');
     await expect(
       withDbTransaction(db, (context) =>
         upsertMessagesWithinTransaction(

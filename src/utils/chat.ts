@@ -4,7 +4,8 @@ export interface TitleInput {
   chatIdentifier: string | null;
   style: number | null;
   participantCount: number;
-  participantNames: string | null; // "Alice, Bob"
+  /** JSON string array in DB-backed rows; legacy hand-built rows may still use "Alice, Bob". */
+  participantNames: string | null;
 }
 
 /**
@@ -32,7 +33,8 @@ const RAW_CHAT_GUID = /^chat[0-9]+$/i;
 export function resolveTitle(c: TitleInput): string {
   if (c.customName?.trim()) return c.customName.trim();
   if (isMeaningfulName(c.displayName)) return c.displayName!.trim();
-  if (c.participantNames?.trim()) return c.participantNames.trim();
+  const participantNames = participantDisplayNames(c.participantNames);
+  if (participantNames) return participantNames;
   // Weak fallbacks — but NEVER surface a raw chat-guid ("chat<digits>") as a name.
   const dn = c.displayName?.trim();
   if (dn && !RAW_CHAT_GUID.test(dn)) return dn; // e.g. a phone-number list beats nothing
@@ -112,6 +114,29 @@ export function isProvenOneToOneIMessageChat(
   return services.length > 0 && services.every((service) => service === 'iMessage');
 }
 
+/** A loaded, exact iMessage group whose complete participant set is explicitly iMessage. */
+export function isProvenIMessageGroupChat(
+  chat:
+    | {
+        guid: string;
+        style: number | null;
+        participantCount: number;
+        handleServices: string | null;
+      }
+    | null
+    | undefined,
+): boolean {
+  if (!chat || !/^iMessage;\+;.+$/su.test(chat.guid)) return false;
+  if (chat.style !== 43 || chat.participantCount < 2) return false;
+  const services = (chat.handleServices ?? '')
+    .split(',')
+    .map((service) => service.trim())
+    .filter(Boolean);
+  return (
+    services.length === chat.participantCount && services.every((service) => service === 'iMessage')
+  );
+}
+
 /** A valid 6-digit hex color (e.g. "#1982FC"), used for per-chat accent colors. */
 export function isHexColor(s: string | null | undefined): s is string {
   return !!s && /^#[0-9a-f]{6}$/i.test(s);
@@ -142,35 +167,64 @@ export function isGroupRow(c: { style: number | null; participantCount: number }
 }
 
 function firstParticipant(names: string | null): string | null {
-  if (!names) return null;
-  const first = names.split(',')[0]?.trim();
+  const first = participantList(names)[0];
   return first && first.length > 0 ? first : null;
 }
 
 /** Name used to seed a single Avatar's initials + color (1:1 uses the other party). */
 export function avatarSeed(c: TitleInput): string {
   if (!isGroupRow(c)) return firstParticipant(c.participantNames) ?? c.chatIdentifier ?? '?';
-  return c.displayName?.trim() || c.participantNames || '?';
+  return c.displayName?.trim() || participantDisplayNames(c.participantNames) || '?';
 }
 
-/** Participant display names as an array (for the stacked GroupAvatar). */
+function parseParticipantJsonArray(s: string): (string | null)[] | null {
+  try {
+    const parsed: unknown = JSON.parse(s);
+    if (
+      !Array.isArray(parsed) ||
+      !parsed.every((value): value is string | null => value == null || typeof value === 'string')
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/** Participant display names as a position-preserving array for the stacked GroupAvatar. */
 export function participantList(names: string | null): string[] {
   if (!names) return [];
+  const jsonNames = parseParticipantJsonArray(names);
+  if (jsonNames) return jsonNames.map((name) => name?.trim() ?? '');
+
+  // Backward compatibility for hand-built rows and tests from before the DB projection used JSON.
   return names
     .split(',')
     .map((n) => n.trim())
     .filter((n) => n.length > 0);
 }
 
-/** Pipe-delimited contact-avatar uris (from a query), positionally aligned with names. */
+/** Human-readable participant list for titles and notification text. */
+export function participantDisplayNames(names: string | null): string {
+  return participantList(names)
+    .filter((name) => name.length > 0)
+    .join(', ');
+}
+
+/** Contact-avatar slots, positionally aligned with names; accepts legacy `|||` rows. */
 export function participantAvatars(s: string | null): (string | null)[] {
   if (!s) return [];
+  const jsonAvatars = parseParticipantJsonArray(s);
+  if (jsonAvatars) return jsonAvatars.map((uri) => (uri ? uri : null));
   return s.split('|||').map((u) => (u && u.length > 0 ? u : null));
 }
 
-/** Pipe-delimited handle colors from a query, positionally aligned with participant names. */
+/** Handle-color slots, positionally aligned with names; accepts legacy `|||` rows. */
 export function participantColors(s: string | null | undefined): (string | null)[] {
   if (!s) return [];
+  const jsonColors = parseParticipantJsonArray(s);
+  if (jsonColors) return jsonColors.map((color) => (isHexColor(color) ? color : null));
   return s.split('|||').map((color) => (isHexColor(color) ? color : null));
 }
 

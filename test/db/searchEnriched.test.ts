@@ -198,17 +198,15 @@ describe('searchMessagesEnriched', () => {
     );
     expect(await searchMessagesEnriched(db, 'keynote')).toEqual([]);
 
-    // A genuinely NEW message un-hides the conversation, and its search hits come back with it.
+    // A genuinely NEW message un-hides the conversation, but the older pre-delete message keeps
+    // its own deletion marker. Only the new visible message may return as a search hit.
     await upsertMessages(
       db,
       [Message.parse({ guid: 'm9', text: 'keynote again?', dateCreated: 9000 })],
       () => chatId,
       new Map(),
     );
-    expect((await searchMessagesEnriched(db, 'keynote')).map((r) => r.guid).sort()).toEqual([
-      'm1',
-      'm9',
-    ]);
+    expect((await searchMessagesEnriched(db, 'keynote')).map((r) => r.guid)).toEqual(['m9']);
   });
 });
 

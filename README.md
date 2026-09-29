@@ -126,17 +126,24 @@ the EAS profiles intentionally have no update-channel fields.
   authorization header/socket auth payload. The explicitly selected legacy compatibility mode can
   put credentials in a TLS-protected URL and is not the default.
 - **Database:** messages, contacts, drafts, reminders, and most non-secret preferences live in a
-  SQLCipher-encrypted SQLite database. Server credentials, its random key, the App Lock flag, and
-  a few boot-time secrets live separately in Android SecureStore/Keystore.
+  SQLCipher-encrypted SQLite database. Server credentials, its random key, the authoritative App Lock
+  setting, and a few boot-time secrets live separately in Android SecureStore/Keystore. A native
+  app-private preferences file mirrors only the App Lock and Secure Screen on/off state so those
+  protections can apply before JavaScript starts.
 - **App Lock:** this is a foreground/policy screen gate, not biometric-bound key custody. Locked
   pushes post a generic notice. Server-state-backed message content may catch up after unlock and
   sync, but one-time events such as `message-send-error` are not reconstructed unless another live
   transport delivers them. When enabled, App Lock keeps protected content out of Android Recents,
   including during its grace period. The independent Secure Screen setting blocks screenshots and
   screen recording. Neither setting adds encryption to files.
-- **Files:** attachments, wallpapers/backgrounds, cached contact images, app logs, incoming-share
-  copies, and image or other Android/Expo-managed caches are ordinary plaintext files in Android
+- **Files:** attachments, wallpapers/backgrounds, cached contact images, app logs, legacy
+  incoming-share copies, and image or other Android/Expo-managed caches are ordinary plaintext files in Android
   app-private storage.
+  Android and bundled SDKs also keep ordinary app-private operational preferences and databases for
+  permissions, tasks, media/web-view state, notifications, and scheduling; Firebase stores
+  installation and push tokens there. Disconnect requests FCM-token deletion, but SDK metadata may
+  remain until app data is cleared or the app is uninstalled. A non-secret, zero-byte account-
+  revocation marker remains after Disconnect until a replacement account fully activates.
   Files explicitly saved—or images automatically exported—to Photos/the Gator album are plaintext
   copies in Android shared media storage and are not removed by disconnect or uninstall. When
   Gallery or Gator Album is selected, background delivery of an eligible incoming non-sticker image
@@ -152,12 +159,19 @@ the EAS profiles intentionally have no update-channel fields.
   authorities. Certificate authorities added by the user in Android Settings are not trusted.
   There is no application-level certificate pinning or bad-certificate bypass.
 - **Push/providers:** Firebase Cloud Messaging may carry push data. The visible, unlocked Find My
-  screen uses the native Google Maps Android SDK for server-provided coordinates; it does not request
-  the phone's own location. Google can receive those precise coordinates, the phone IP, displayed
-  map region, device/request metadata, a Maps-specific identifier, Maps SDK crash diagnostics, and
-  map interactions. FaceTime entry points and embedded FaceTime web surfaces are retired; explicit
-  Find My system-map actions can contact external mapping services. Do not claim that no third party
-  is involved.
+  screen uses the native Google Maps Android SDK for server-provided coordinates; Find My does not
+  read the phone's own location. Google can receive those precise coordinates, the phone IP,
+  displayed map region, device/request metadata, a Maps-specific identifier, Maps SDK crash
+  diagnostics, and map interactions. FaceTime entry points and embedded FaceTime web surfaces are
+  retired; explicit Find My system-map actions can contact external mapping services. Do not claim
+  that no third party is involved.
+- **Current Location sharing:** In a supported one-to-one conversation, an explicit confirmed action
+  can request one approximate or precise foreground fix and send it through the connected server.
+  Gator does not collect location in the background. Denial, cancellation/account retirement,
+  disabled services, acquisition error, or the 15-second timeout queues and sends nothing. After a
+  successful fix, the exact coordinate lives only in the SQLCipher-encrypted outgoing queue; an
+  ordinary temporary failure may retry that same snapshot for no more than 15 minutes without
+  acquiring a new location.
 - **Previews:** no client Open Graph fetch/parser or arbitrary-host fallback exists. When the paired
   server advertises the preview capability, the app automatically requests bounded text and an
   optional validated JPEG/PNG data image through its authenticated `HttpClient`; it never mounts a

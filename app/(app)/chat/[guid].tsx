@@ -1,11 +1,15 @@
 import { Image } from 'expo-image';
 import { useLocalSearchParams, useNavigation, useRoute, useRouter } from 'expo-router';
 import { usePreventRemove } from 'expo-router/react-navigation';
+import { isAggregateRetractionTombstone } from '@core/messages/retraction';
+import type { IMessageTextFormattingRange } from '@core/api/endpoints/messages';
 import type { Recurrence } from '@core/schedule';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   KeyboardAvoidingView,
+  Linking,
   Pressable,
   StyleSheet,
   Text,
@@ -13,8 +17,15 @@ import {
 } from 'react-native';
 import { showConfirm, showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { DRAFT_KV_PREFIX, kvGet, type MessageWindowAnchor } from '@db/repositories';
+import {
+  DRAFT_KV_PREFIX,
+  kvGet,
+  type MessagePreview,
+  type MessageWindowAnchor,
+  type ShareIntakeManifestIdentity,
+} from '@db/repositories';
 import { saveChatDraft, sendTyping } from '@/services';
+import { readMessagePreview } from '@/services/messagePreview';
 import { getDatabase } from '@db/database';
 import { getContactsPermissionState } from '@/services/contacts/contactsService';
 import {
@@ -22,18 +33,38 @@ import {
   runTrackedRealtimeWork,
 } from '@/services/realtime/deliveryCoordinator';
 import {
+  admitShareIntakeTextDraft,
+  consumeShareIntakeBatch,
+  discardShareIntakeItem,
+  discardShareIntakeBatch,
+  drainShareIntake,
+  isShareIntakeFileSettled,
+  isShareIntakeReceiptComplete,
+  readShareIntakeReceipt,
+} from '@/services/share/shareIntake';
+import {
   hasLogicalSendCapacity,
+  acquireAndSendCurrentLocation,
+  editText,
   isContactsPermissionDeniedError,
   isSupportedImessageAttachmentFile,
   pickAndSendContact,
+  reply,
   schedule,
+  scheduleAttachment,
   send,
+  sendEffect,
+  sendFormatted,
+  sendMention,
   sendImage,
   sendImages,
+  sendVoice,
   sendTextAttachment,
   type AttachmentQueueAdmission,
 } from '@/services/send';
 import { logger } from '@core/secure';
+import { MAX_IMESSAGE_VOICE_UPLOAD_BYTES } from '@core/models/serverInfo';
+import { isCurrentRcsChatGuid } from '@core/rcs/providerIdentity';
 import { useSendAttachmentTextSupported, useSessionStore } from '@state/sessionStore';
 import { devSendFake } from '@features/conversations/devSeed';
 import { useChatHeader } from '@features/conversations/useChatHeader';
@@ -74,9 +105,17 @@ import {
 } from '@ui/permissions/contactsPermission';
 import { LoadErrorBoundary } from '@ui/LoadErrorBoundary';
 import { presentSendIssue } from '@ui/conversations/sendNotices';
+import type { ComposerAdmissionResult } from '@ui/conversations/useComposerAuthoringSession';
 import { useTypingStore } from '@state/typingStore';
 import { useShareIntentStore } from '@state/shareIntentStore';
-import { isGroupRow, isProvenOneToOneIMessageChat, resolveChatService, resolveTitle } from '@utils';
+import {
+  isGroupRow,
+  isProvenIMessageGroupChat,
+  isProvenOneToOneIMessageChat,
+  participantList,
+  resolveChatService,
+  resolveTitle,
+} from '@utils';
 
 interface DocumentPickerModule {
   getDocumentAsync(options: {
@@ -193,11 +232,11 @@ const VoiceRecorder = lazy(() =>
  */
 export default function ChatScreen(): React.JSX.Element {
   // `focus`/`focusDate` arrive when opened from a search hit — scroll to + highlight that message.
-  const { guid, focus, share } = useLocalSearchParams<{
+  const { guid, focus, shareBatch } = useLocalSearchParams<{
     guid: string;
     focus?: string;
     focusDate?: string;
-    share?: string;
+    shareBatch?: string;
   }>();
   const route = useRoute();
   // Remount the whole per-chat subtree when the chat (or its open mode) changes. The screen
@@ -208,11 +247,11 @@ export default function ChatScreen(): React.JSX.Element {
   // Route identity changes on replace/push, but remains stable when this screen clears its own
   // focus params with setParams. That preserves the mounted Composer during local anchor exit while
   // still resetting pagination, jumps, reply/edit targets, and selection for a genuine navigation.
-  // Keep guid/share as defensive reset boundaries for same-route mutations and future share intake.
-  const screenKey = `${route.key}|${guid}|${share ?? ''}`;
+  // Keep the exact share claim as a reset boundary for same-thread Direct Share navigation.
+  const screenKey = `${route.key}|${guid}|${shareBatch ?? ''}`;
   return (
     <ChatThemeProvider key={screenKey} guid={guid}>
-      <ChatScreenInner guid={guid} focusGuid={focus} fromShare={share === '1'} />
+      <ChatScreenInner guid={guid} focusGuid={focus} shareBatchId={shareBatch} />
     </ChatThemeProvider>
   );
 }
@@ -220,11 +259,11 @@ export default function ChatScreen(): React.JSX.Element {
 function ChatScreenInner({
   guid,
   focusGuid,
-  fromShare = false,
+  shareBatchId,
 }: {
   guid: string;
   focusGuid?: string;
-  fromShare?: boolean;
+  shareBatchId?: string;
 }): React.JSX.Element {
   // This lease belongs to THIS mounted chat. Dialogs, pickers and lazy callbacks can outlive the
   // account that rendered them; passing the mount lease prevents such an A callback from capturing
@@ -237,7 +276,7 @@ function ChatScreenInner({
   // The chat's service for the badge, composer placeholder, and outgoing-bubble colour. Resolved
   // from the participant handle service (not just the guid prefix) so an SMS-only thread reads SMS.
   const chatService = resolveChatService(guid, header.data?.handleServices);
-  const rcsAvailable = useSessionStore((s) => s.serverInfo?.rcs === true);
+  const rcsAvailable = useSessionStore((s) => isCurrentRcsChatGuid(s.serverInfo, guid));
   const rcsInteractiveFeaturesAvailable = rcsAvailable && chatService === 'RCS';
   const imessageAttachmentSupported = useSessionStore(
     (s) => s.serverInfo?.supports_imessage_attachment_upload === true,
@@ -245,12 +284,135 @@ function ChatScreenInner({
   const imessagePdfSupported = useSessionStore(
     (s) => s.serverInfo?.supports_imessage_pdf_attachment_upload === true,
   );
+  const imessageReactionSupported = useSessionStore(
+    (s) => s.serverInfo?.supports_imessage_reactions === true,
+  );
+  const imessageReplySupported = useSessionStore(
+    (s) => s.serverInfo?.supports_imessage_replies === true,
+  );
+  const imessageEditSupported = useSessionStore(
+    (s) => s.serverInfo?.supports_imessage_edit === true,
+  );
+  const imessageUnsendSupported = useSessionStore(
+    (s) => s.serverInfo?.supports_imessage_unsend === true,
+  );
+  const imessageRemoteDeleteSupported = useSessionStore(
+    (s) => s.serverInfo?.supports_imessage_remote_delete === true,
+  );
+  const imessageEffectsSupported = useSessionStore(
+    (s) => s.serverInfo?.supports_imessage_effects === true,
+  );
+  const imessageMentionsSupported = useSessionStore(
+    (s) => s.serverInfo?.supports_imessage_mentions === true,
+  );
+  const imessageFormattedSupported = useSessionStore(
+    (s) => s.serverInfo?.supports_imessage_formatted_messages === true,
+  );
+  const imessageTypingSupported = useSessionStore(
+    (s) => s.serverInfo?.supports_imessage_typing === true,
+  );
+  const imessageVoiceSupported = useSessionStore(
+    (s) => s.serverInfo?.supports_imessage_voice_upload === true,
+  );
+  const imessageScheduledAttachmentSupported = useSessionStore(
+    (s) => s.serverInfo?.supports_imessage_scheduled_attachment === true,
+  );
+  const imessageContactSupported = useSessionStore(
+    (s) => s.serverInfo?.supports_send_contact === true,
+  );
+  const imessageLocationSupported = useSessionStore(
+    (s) => s.serverInfo?.supports_imessage_location === true,
+  );
   const imessageAttachmentFeaturesAvailable =
     imessageAttachmentSupported &&
     chatService === 'iMessage' &&
     header.data?.guid === guid &&
     isProvenOneToOneIMessageChat(header.data);
   const imessagePdfFeaturesAvailable = imessageAttachmentFeaturesAvailable && imessagePdfSupported;
+  const imessageReactionsAvailable =
+    imessageReactionSupported &&
+    chatService === 'iMessage' &&
+    header.data?.guid === guid &&
+    isProvenOneToOneIMessageChat(header.data);
+  const imessageRepliesAvailable =
+    imessageReplySupported &&
+    chatService === 'iMessage' &&
+    header.data?.guid === guid &&
+    isProvenOneToOneIMessageChat(header.data);
+  const imessageEditsAvailable =
+    imessageEditSupported &&
+    chatService === 'iMessage' &&
+    header.data?.guid === guid &&
+    isProvenOneToOneIMessageChat(header.data);
+  const imessageUnsendsAvailable =
+    imessageUnsendSupported &&
+    chatService === 'iMessage' &&
+    header.data?.guid === guid &&
+    isProvenOneToOneIMessageChat(header.data);
+  const imessageRemoteDeleteAvailable =
+    imessageRemoteDeleteSupported &&
+    chatService === 'iMessage' &&
+    header.data?.guid === guid &&
+    (isProvenOneToOneIMessageChat(header.data) || isProvenIMessageGroupChat(header.data));
+  const imessageEffectsAvailable =
+    imessageEffectsSupported &&
+    chatService === 'iMessage' &&
+    header.data?.guid === guid &&
+    header.data.participantCount === 1 &&
+    isProvenOneToOneIMessageChat(header.data);
+  const imessageFormattedAvailable =
+    imessageFormattedSupported &&
+    chatService === 'iMessage' &&
+    header.data?.guid === guid &&
+    isProvenOneToOneIMessageChat(header.data);
+  const imessageMentionsAvailable =
+    imessageMentionsSupported &&
+    chatService === 'iMessage' &&
+    header.data?.guid === guid &&
+    isProvenIMessageGroupChat(header.data);
+  const mentionParticipants = useMemo(() => {
+    if (!imessageMentionsAvailable || !header.data) return [];
+    const names = participantList(header.data.participantNames);
+    const addresses = (header.data.participantAddresses ?? '').split('|||');
+    if (
+      addresses.length !== header.data.participantCount ||
+      names.length !== header.data.participantCount
+    ) {
+      return [];
+    }
+    const participants = addresses.map((rawAddress, index) => {
+      const address = rawAddress;
+      const rawName = names[index]?.trim() ?? '';
+      const label = rawName && !/[\u0000-\u001f\u007f-\u009f]/u.test(rawName) ? rawName : address;
+      return { address, label };
+    });
+    const hasUniqueAddresses =
+      new Set(participants.map((participant) => participant.address)).size === participants.length;
+    return hasUniqueAddresses &&
+      participants.every(
+        (participant) =>
+          participant.address.length > 0 &&
+          participant.address === participant.address.trim() &&
+          !/[\u0000-\u001f\u007f-\u009f]/u.test(participant.address) &&
+          participant.label.length > 0,
+      )
+      ? participants
+      : [];
+  }, [header.data, imessageMentionsAvailable]);
+  const imessageTypingAvailable =
+    imessageTypingSupported &&
+    chatService === 'iMessage' &&
+    header.data?.guid === guid &&
+    isProvenOneToOneIMessageChat(header.data);
+  const typingFeaturesAvailable = rcsInteractiveFeaturesAvailable || imessageTypingAvailable;
+  const imessageVoiceAvailable =
+    imessageVoiceSupported &&
+    chatService === 'iMessage' &&
+    header.data?.guid === guid &&
+    isProvenOneToOneIMessageChat(header.data);
+  const voiceFeaturesAvailable = rcsInteractiveFeaturesAvailable || imessageVoiceAvailable;
+  const imessageScheduledAttachmentsAvailable =
+    imessageAttachmentFeaturesAvailable && imessageScheduledAttachmentSupported;
   const attachmentFeaturesAvailable =
     rcsInteractiveFeaturesAvailable || imessageAttachmentFeaturesAvailable;
   const supportsSendAttachmentText = useSendAttachmentTextSupported(chatService);
@@ -358,7 +520,6 @@ function ChatScreenInner({
     }
     // This acknowledges an async DB result for the requested newest window; it is not derived
     // render state. The flag must reset so a later search close establishes a fresh barrier.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setReturningToNewest(false);
   }, [accountLease, hasMessageAnchor, isCurrentWindow, returningToNewest]);
   const exitSearchAnchor = useCallback((): void => {
@@ -453,29 +614,100 @@ function ChatScreenInner({
   }, [moveToSearchResult, searchIndex]);
   const isTyping = useTypingStore((s) => !!s.typing[guid]);
   const [recording, setRecording] = useState(false);
+  const [replyTo, setReplyTo] = useState<MessagePreview | null>(null);
+  const [editing, setEditing] = useState<{
+    guid: string;
+    text: string;
+    partIndex: 0;
+  } | null>(null);
+  const cancelReply = useCallback((): void => setReplyTo(null), []);
+  const cancelEdit = useCallback((): void => setEditing(null), []);
+  const replyTargetGuid = replyTo?.guid ?? null;
+  const replyTargetRow = replyTargetGuid
+    ? messages.find((message) => message.guid === replyTargetGuid)
+    : undefined;
+  const replyTargetProof = replyTargetRow
+    ? JSON.stringify([
+        replyTargetRow.guid,
+        replyTargetRow.dateRetracted,
+        replyTargetRow.retractionState,
+        replyTargetRow.messagePartTopology,
+      ])
+    : null;
+  useEffect(() => {
+    if (imessageRepliesAvailable) return;
+    // A live capability/header change revokes the composer target immediately.
+    setReplyTo(null);
+  }, [imessageRepliesAvailable]);
+  useEffect(() => {
+    if (!replyTargetGuid || !imessageRepliesAvailable) return;
+    let alive = true;
+    void runTrackedRealtimeWork(accountLease, async () => {
+      const preview = await readMessagePreview(guid, replyTargetGuid, 0);
+      if (!alive || !accountLease.isCurrent()) return;
+      setReplyTo((current) => {
+        if (current?.guid !== replyTargetGuid) return current;
+        return preview ? { ...preview, targetPartIndex: 0 } : null;
+      });
+    }).catch((error) => {
+      if (alive && accountLease.isCurrent()) {
+        logger.warn('[chat] could not refresh exact reply target', error);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, [accountLease, guid, imessageRepliesAvailable, replyTargetGuid, replyTargetProof]);
+  useEffect(() => {
+    if (!editing) return;
+    const current = messages.find((message) => message.guid === editing.guid);
+    if (current && !isAggregateRetractionTombstone(current)) return;
+    setEditing(null);
+  }, [editing, messages]);
   useEffect(() => {
     if (attachmentFeaturesAvailable) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRecording(false);
   }, [attachmentFeaturesAvailable]);
 
-  // Dormant future bounded-share handoff. IPC-01 currently exposes no inbound Android share target,
-  // so production navigation never supplies `?share=1`. If an owned bounded intake is added later,
-  // capture the already-materialized batch ONCE in these lazy initializers; the effect then clears
-  // the store so a normal chat open never picks it up.
+  // Capture only the exact native claim carried by this route. Keep provenance so durable send
+  // adoption copies from the native no-backup queue into the ordinary attachment cache.
+  const [ownedShareIdentity] = useState<ShareIntakeManifestIdentity | null>(() => {
+    const share = useShareIntentStore.getState();
+    return typeof shareBatchId === 'string' &&
+      share.batchId === shareBatchId &&
+      share.createdAtMs != null
+      ? {
+          batchId: share.batchId,
+          nativeCreatedAtMs: share.createdAtMs,
+          hasText: share.text !== null,
+          fileCount: share.files.length,
+        }
+      : null;
+  });
+  const ownedShareBatchId = ownedShareIdentity?.batchId ?? null;
   const [sharedAttachments] = useState<PendingAttachment[]>(() =>
-    fromShare
-      ? useShareIntentStore
-          .getState()
-          .files.map((f) => ({ uri: f.uri, name: f.name, mimeType: f.mimeType, size: f.size }))
+    ownedShareBatchId
+      ? useShareIntentStore.getState().files.map((file) => ({
+          uri: file.uri,
+          name: file.name,
+          mimeType: file.mimeType,
+          size: file.size,
+          origin: file.origin,
+          shareItemIndex: file.shareItemIndex,
+        }))
       : [],
   );
   const [sharedText] = useState<string | null>(() =>
-    fromShare ? useShareIntentStore.getState().text : null,
+    ownedShareBatchId ? useShareIntentStore.getState().text : null,
   );
-  useEffect(() => {
-    if (fromShare) useShareIntentStore.getState().clear();
-  }, [fromShare]);
+  const [shareBatchPending, setShareBatchPending] = useState(ownedShareBatchId !== null);
+  const [remainingSharedAttachments, setRemainingSharedAttachments] = useState<PendingAttachment[]>(
+    [],
+  );
+  const [shareReceiptLoaded, setShareReceiptLoaded] = useState(ownedShareBatchId === null);
+  const [sharedTextReady, setSharedTextReady] = useState(sharedText === null);
+  const [sharedTextAlreadyApplied, setSharedTextAlreadyApplied] = useState(false);
+  const shareFinalizingRef = useRef(false);
   const screenEffect = useNewScreenEffect(guid, messages);
   const { firstUnread, setFirstUnread, screenFocused } = useChatReadLifecycle({
     guid,
@@ -506,8 +738,102 @@ function ChatScreenInner({
     [accountLease, guid],
   );
 
+  const onScheduleAttachment = useCallback(
+    async (text: string, item: PendingAttachment, scheduledFor: number): Promise<boolean> => {
+      if (!imessageScheduledAttachmentsAvailable || !accountLease.isCurrent()) return false;
+      try {
+        await scheduleAttachment(
+          { chatGuid: guid, text, scheduledFor, attachment: { ...item } },
+          accountLease,
+        );
+        return accountLease.isCurrent();
+      } catch (error) {
+        if (accountLease.isCurrent()) {
+          logger.warn('[chat] file schedule could not be confirmed', error);
+          showDialog(
+            'Scheduled file',
+            'Couldn’t confirm this schedule. Check Scheduled before trying again; your draft and file are still here.',
+          );
+        }
+        return false;
+      }
+    },
+    [accountLease, guid, imessageScheduledAttachmentsAvailable],
+  );
+
   const onSend = useCallback(
     (text: string): Promise<boolean> => {
+      const editTarget = editing;
+      if (editTarget) {
+        if (!imessageEditsAvailable || editTarget.partIndex !== 0) {
+          showToast('Editing is unavailable right now. Your changes are still here');
+          return Promise.resolve(false);
+        }
+        return editText(
+          {
+            chatGuid: guid,
+            messageGuid: editTarget.guid,
+            newText: text,
+            partIndex: 0,
+          },
+          accountLease,
+        )
+          .then((result) => {
+            if (!accountLease.isCurrent()) return false;
+            if (result == null || result.status === 'rejected') {
+              showDialog('Edit Not Sent', 'Your edited text is still here so you can try again.');
+              return false;
+            }
+            setEditing((current) => (current?.guid === editTarget.guid ? null : current));
+            if (result.status === 'outcome-unknown') {
+              showDialog(
+                'Edit Not Confirmed',
+                'It may have been applied. Check the conversation before trying another edit.',
+              );
+            }
+            return true;
+          })
+          .catch((error: unknown) => {
+            if (accountLease.isCurrent()) {
+              logger.warn('[chat] edit submission failed', error);
+              showDialog('Edit Not Sent', 'Your edited text is still here so you can try again.');
+            }
+            return false;
+          });
+      }
+      const target = replyTo;
+      if (target) {
+        if (!imessageRepliesAvailable || target.targetPartIndex !== 0) {
+          return Promise.resolve(false);
+        }
+        return observeQueueAdmission(
+          (onQueued) =>
+            reply(
+              {
+                chatGuid: guid,
+                text,
+                replyToGuid: target.guid,
+                replyToPartIndex: 0,
+              },
+              accountLease,
+              presentSendIssue,
+              onQueued,
+            ).then((result) => {
+              if (result == null && accountLease.isCurrent()) {
+                throw new Error('The iMessage reply capability changed before queue admission.');
+              }
+              return result;
+            }),
+          () => {
+            setReplyTo((current) => (current?.guid === target.guid ? null : current));
+          },
+          (error) => {
+            if (!accountLease.isCurrent()) return;
+            logger.warn('[chat] reply queue admission failed', error);
+            showToast('Couldn’t queue that reply. Your draft is still here');
+          },
+        );
+      }
       // DEV: when on the local dev session, simulate the server round-trip so the
       // optimistic → sent flow is visible without a real Gator server.
       return observeQueueAdmission(
@@ -527,7 +853,118 @@ function ChatScreenInner({
         },
       );
     },
-    [accountLease, guid, isDev],
+    [accountLease, editing, guid, imessageEditsAvailable, imessageRepliesAvailable, isDev, replyTo],
+  );
+
+  const onSendEffect = useCallback(
+    async (text: string, effectId: string): Promise<boolean> => {
+      if (!imessageEffectsAvailable || !accountLease.isCurrent()) return false;
+      try {
+        const result = await sendEffect(
+          { chatGuid: guid, text, effectId },
+          accountLease,
+          presentSendIssue,
+        );
+        if (!accountLease.isCurrent()) return false;
+        if (result == null || result.status === 'rejected') {
+          showDialog('Effect Not Sent', 'Your message is still here so you can try again.');
+          return false;
+        }
+        if (result.status === 'outcome-unknown') {
+          showDialog(
+            'Effect Not Confirmed',
+            'It may have been delivered. Check the conversation before sending another copy.',
+          );
+        }
+        return true;
+      } catch (error) {
+        if (accountLease.isCurrent()) {
+          logger.warn('[chat] effect submission failed', error);
+          showDialog('Effect Not Sent', 'Your message is still here so you can try again.');
+        }
+        return false;
+      }
+    },
+    [accountLease, guid, imessageEffectsAvailable],
+  );
+
+  const onSendMention = useCallback(
+    async (
+      text: string,
+      mentions: Array<{ start: number; length: number; address: string }>,
+    ): Promise<boolean> => {
+      if (
+        !imessageMentionsAvailable ||
+        mentionParticipants.length < 2 ||
+        !accountLease.isCurrent()
+      ) {
+        return false;
+      }
+      try {
+        const result = await sendMention(
+          { chatGuid: guid, text, mentions },
+          accountLease,
+          presentSendIssue,
+        );
+        if (!accountLease.isCurrent()) return false;
+        if (result == null || result.status === 'rejected') {
+          showDialog('Mention Not Sent', 'Your message is still here so you can try again.');
+          return false;
+        }
+        if (result.status === 'outcome-unknown') {
+          showDialog(
+            'Mention Not Confirmed',
+            'It may have been delivered. Check the conversation before sending another copy.',
+          );
+        }
+        return true;
+      } catch (error) {
+        if (accountLease.isCurrent()) {
+          logger.warn('[chat] mention submission failed', error);
+          showDialog('Mention Not Sent', 'Your message is still here so you can try again.');
+        }
+        return false;
+      }
+    },
+    [accountLease, guid, imessageMentionsAvailable, mentionParticipants.length],
+  );
+
+  const onSendFormatted = useCallback(
+    async (text: string, textFormatting: IMessageTextFormattingRange[]): Promise<boolean> => {
+      if (!imessageFormattedAvailable || !accountLease.isCurrent()) return false;
+      try {
+        const result = await sendFormatted(
+          { chatGuid: guid, text, textFormatting },
+          accountLease,
+          presentSendIssue,
+        );
+        if (!accountLease.isCurrent()) return false;
+        if (result == null || result.status === 'rejected') {
+          showDialog(
+            'Formatted Message Not Sent',
+            'Your message is still here so you can try again.',
+          );
+          return false;
+        }
+        if (result.status === 'outcome-unknown') {
+          showDialog(
+            'Formatted Message Not Confirmed',
+            'It may have been delivered. Check the conversation before sending another copy.',
+          );
+        }
+        return true;
+      } catch (error) {
+        if (accountLease.isCurrent()) {
+          logger.warn('[chat] formatted-message submission failed', error);
+          showDialog(
+            'Formatted Message Not Sent',
+            'Your message is still here so you can try again.',
+          );
+        }
+        return false;
+      }
+    },
+    [accountLease, guid, imessageFormattedAvailable],
   );
 
   // Long-press and multi-select handlers. Stable callbacks feed the memoized list/row chain.
@@ -545,6 +982,11 @@ function ChatScreenInner({
     setDetails,
     onDetailsSelected,
     onLongPressMessage,
+    onSwipeReply,
+    onReplyToSelected,
+    onEditSelected,
+    onUnsendSelected,
+    onRemoteDeleteSelected,
     onToggleSelect,
     onEnterSelect,
     onBulkCopy,
@@ -563,14 +1005,39 @@ function ChatScreenInner({
     messages,
     chatTitle: header.data ? resolveTitle(header.data) : 'Gator',
     accountLease,
+    imessageReactionsAvailable,
+    imessageRepliesAvailable,
+    imessageEditsAvailable,
+    imessageUnsendsAvailable,
+    imessageRemoteDeleteAvailable,
+    setReplyTo,
+    setEditing,
   });
   const actionSelected = useMemo(() => {
     if (!selected) return null;
     return {
       ...selected,
-      canReact: selected.canReact === true && rcsInteractiveFeaturesAvailable,
+      canReact:
+        selected.canReact === true &&
+        (rcsInteractiveFeaturesAvailable || imessageReactionsAvailable),
+      replyPartIndex:
+        imessageRepliesAvailable && selected.replyPartIndex === 0 ? (0 as const) : undefined,
+      editPartIndex:
+        imessageEditsAvailable && selected.editPartIndex === 0 ? (0 as const) : undefined,
+      unsendPartIndex:
+        imessageUnsendsAvailable && selected.unsendPartIndex === 0 ? (0 as const) : undefined,
+      canRemoteDeleteFromMac:
+        imessageRemoteDeleteAvailable && selected.canRemoteDeleteFromMac === true,
     };
-  }, [rcsInteractiveFeaturesAvailable, selected]);
+  }, [
+    imessageReactionsAvailable,
+    imessageRepliesAvailable,
+    imessageRemoteDeleteAvailable,
+    imessageEditsAvailable,
+    imessageUnsendsAvailable,
+    rcsInteractiveFeaturesAvailable,
+    selected,
+  ]);
 
   const toggleSearch = useCallback((): void => {
     if (searchOpenRef.current) {
@@ -616,13 +1083,220 @@ function ChatScreenInner({
     },
     [accountLease, guid],
   );
+  const composerInitialText = useMemo(
+    () => (draft === null || !sharedTextReady ? undefined : draft || undefined),
+    [draft, sharedTextReady],
+  );
+
+  const finalizeShareIfReady = useCallback((): void => {
+    if (!ownedShareBatchId || !shareBatchPending || !accountLease.isCurrent()) return;
+    if (!ownedShareIdentity || shareFinalizingRef.current) return;
+    shareFinalizingRef.current = true;
+    let completed = false;
+    void runTrackedRealtimeWork(accountLease, async () => {
+      const receipt = await readShareIntakeReceipt(ownedShareIdentity);
+      if (!receipt || !isShareIntakeReceiptComplete(receipt)) return;
+      completed = await consumeShareIntakeBatch(ownedShareBatchId, {
+        lease: accountLease,
+        drainNext: false,
+      });
+    })
+      .then((outcome) => {
+        if (outcome === 'delivered' && completed && accountLease.isCurrent()) {
+          setShareBatchPending(false);
+          void drainShareIntake();
+        } else {
+          shareFinalizingRef.current = false;
+        }
+      })
+      .catch((error: unknown) => {
+        shareFinalizingRef.current = false;
+        if (!accountLease.isCurrent()) return;
+        logger.warn('[chat] shared batch completion failed', {
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+        });
+        showToast('Gator could not finish the share handoff. Your draft is still here.');
+      });
+  }, [accountLease, ownedShareBatchId, ownedShareIdentity, shareBatchPending]);
+
+  const onShareAdmissionApplied = useCallback(
+    (_result: ComposerAdmissionResult): void => {
+      if (!ownedShareBatchId || !shareBatchPending || !accountLease.isCurrent()) return;
+      finalizeShareIfReady();
+    },
+    [accountLease, finalizeShareIfReady, ownedShareBatchId, shareBatchPending],
+  );
+
+  const onRemoveSharedAttachment = useCallback(
+    async (item: PendingAttachment): Promise<boolean> => {
+      if (item.origin !== 'share') return true;
+      if (!ownedShareIdentity || item.shareItemIndex == null || !accountLease.isCurrent()) {
+        return false;
+      }
+      try {
+        const outcome = await runTrackedRealtimeWork(accountLease, async () =>
+          discardShareIntakeItem(
+            {
+              identity: ownedShareIdentity,
+              chatGuid: guid,
+              itemIndex: item.shareItemIndex!,
+              appliedAtMs: Date.now(),
+            },
+            () => accountLease.isCurrent(),
+          ),
+        );
+        if (outcome !== 'delivered' || !accountLease.isCurrent()) return false;
+        finalizeShareIfReady();
+        return true;
+      } catch (error) {
+        if (accountLease.isCurrent()) {
+          logger.warn('[chat] shared attachment discard failed', {
+            errorName: error instanceof Error ? error.name : 'UnknownError',
+          });
+          showToast('Gator could not safely remove that shared file. Try again.');
+        }
+        return false;
+      }
+    },
+    [accountLease, finalizeShareIfReady, guid, ownedShareIdentity],
+  );
+
+  // Load the durable receipt before exposing native files. A replay filters already-admitted file
+  // ordinals and forces any partially handled batch back to its original destination.
+  useEffect(() => {
+    if (!ownedShareIdentity || !accountLease.isCurrent()) return;
+    let alive = true;
+    let loadedReceipt: Awaited<ReturnType<typeof readShareIntakeReceipt>> = null;
+    void runTrackedRealtimeWork(accountLease, async () => {
+      loadedReceipt = await readShareIntakeReceipt(ownedShareIdentity);
+    })
+      .then((outcome) => {
+        if (outcome === 'paused' || !alive || !accountLease.isCurrent()) return;
+        const receipt = loadedReceipt;
+        if (receipt?.destination && receipt.destination.chatGuid !== guid) {
+          router.replace(
+            `/chat/${encodeURIComponent(receipt.destination.chatGuid)}?shareBatch=${encodeURIComponent(ownedShareIdentity.batchId)}`,
+          );
+          return;
+        }
+        if (receipt?.newChatPlan && !receipt.destination) {
+          router.replace(`/new-chat?shareBatch=${encodeURIComponent(ownedShareIdentity.batchId)}`);
+          return;
+        }
+        setRemainingSharedAttachments(
+          sharedAttachments.filter(
+            (file) =>
+              file.shareItemIndex == null ||
+              !isShareIntakeFileSettled(receipt, file.shareItemIndex),
+          ),
+        );
+        if (sharedText && receipt?.items.text) {
+          setSharedTextAlreadyApplied(true);
+          setSharedTextReady(true);
+        }
+        setShareReceiptLoaded(true);
+        if (receipt && isShareIntakeReceiptComplete(receipt)) finalizeShareIfReady();
+      })
+      .catch((error: unknown) => {
+        if (!alive || !accountLease.isCurrent()) return;
+        logger.warn('[chat] shared receipt reconciliation failed', {
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+        });
+        showToast('Gator could not safely resume this share. Its files were not sent.');
+      });
+    return () => {
+      alive = false;
+    };
+  }, [
+    accountLease,
+    finalizeShareIfReady,
+    guid,
+    ownedShareIdentity,
+    router,
+    sharedAttachments,
+    sharedText,
+  ]);
+
+  // Text becomes removable from native storage only when its exact draft merge and replay receipt
+  // commit together in the encrypted database.
+  const sharedTextPersistStartedRef = useRef(false);
+  useEffect(() => {
+    if (
+      !ownedShareBatchId ||
+      !ownedShareIdentity ||
+      !sharedText ||
+      draft === null ||
+      !shareReceiptLoaded ||
+      sharedTextAlreadyApplied ||
+      sharedTextPersistStartedRef.current ||
+      !accountLease.isCurrent()
+    ) {
+      return;
+    }
+    sharedTextPersistStartedRef.current = true;
+    let admittedDraft: string | null = null;
+    void runTrackedRealtimeWork(accountLease, async () => {
+      const result = await admitShareIntakeTextDraft(
+        {
+          identity: ownedShareIdentity,
+          chatGuid: guid,
+          sharedText,
+          draftKey: `${DRAFT_KV_PREFIX}${guid}`,
+          appliedAtMs: Date.now(),
+        },
+        () => accountLease.isCurrent(),
+      );
+      admittedDraft = result.draft;
+    })
+      .then((outcome) => {
+        if (outcome !== 'delivered' || admittedDraft === null || !accountLease.isCurrent()) return;
+        setDraft(admittedDraft);
+        setSharedTextReady(true);
+        finalizeShareIfReady();
+      })
+      .catch((error: unknown) => {
+        sharedTextPersistStartedRef.current = false;
+        if (accountLease.isCurrent()) {
+          logger.warn('[chat] shared text draft persist failed', {
+            errorName: error instanceof Error ? error.name : 'UnknownError',
+          });
+        }
+      });
+  }, [
+    accountLease,
+    draft,
+    finalizeShareIfReady,
+    guid,
+    ownedShareBatchId,
+    ownedShareIdentity,
+    shareReceiptLoaded,
+    sharedText,
+    sharedTextAlreadyApplied,
+  ]);
+
+  useEffect(() => {
+    if (
+      !ownedShareBatchId ||
+      remainingSharedAttachments.length === 0 ||
+      attachmentFeaturesAvailable
+    )
+      return;
+    showToast('This conversation cannot accept the shared files. Choose another conversation.');
+  }, [attachmentFeaturesAvailable, ownedShareBatchId, remainingSharedAttachments.length]);
 
   const [composerRemovalState, setComposerRemovalState] = useState<ComposerRemovalState>({
     hasUnsavedDraftMetadata: false,
   });
   const backConfirmationPendingRef = useRef(false);
   const shouldHandleBack =
-    searchOpen || selectedGuids != null || composerRemovalState.hasUnsavedDraftMetadata;
+    searchOpen ||
+    selectedGuids != null ||
+    replyTo != null ||
+    editing != null ||
+    composerRemovalState.hasOpenAttachmentTray === true ||
+    composerRemovalState.hasUnsavedEdit === true ||
+    composerRemovalState.hasUnsavedDraftMetadata ||
+    shareBatchPending;
 
   // Android/Header Back peels the active chat layer before removing the route. Ordinary body text
   // is not included: Composer already flushes it to the per-chat DB draft on route removal.
@@ -635,19 +1309,89 @@ function ChatScreenInner({
       setSelectedGuids(null);
       return;
     }
-    if (!composerRemovalState.hasUnsavedDraftMetadata || backConfirmationPendingRef.current) return;
+    if (composerRemovalState.hasOpenAttachmentTray) {
+      composerRemovalState.dismissAttachmentTray?.();
+      return;
+    }
+    if (replyTo) {
+      setReplyTo(null);
+      return;
+    }
+    if (editing) {
+      if (!composerRemovalState.hasUnsavedEdit || backConfirmationPendingRef.current) {
+        if (!composerRemovalState.hasUnsavedEdit) setEditing(null);
+        return;
+      }
+      backConfirmationPendingRef.current = true;
+      showConfirm({
+        title: 'Discard this edit?',
+        message: 'Your edited text has not been sent.',
+        confirmText: 'Discard Edit',
+        destructive: true,
+        onCancel: () => {
+          backConfirmationPendingRef.current = false;
+        },
+        onConfirm: () => {
+          backConfirmationPendingRef.current = false;
+          setEditing(null);
+        },
+      });
+      return;
+    }
+    if (
+      (!composerRemovalState.hasUnsavedDraftMetadata && !shareBatchPending) ||
+      backConfirmationPendingRef.current
+    )
+      return;
     backConfirmationPendingRef.current = true;
+    const discardsMentions = composerRemovalState.hasUnsavedMentionMetadata === true;
+    const discardsFormatting = composerRemovalState.hasUnsavedFormattingMetadata === true;
+    const discardsMessageDetails = discardsMentions || discardsFormatting;
     showConfirm({
-      title: 'Discard message attachments?',
-      message: 'Attachments are not part of the saved text draft.',
+      title: shareBatchPending
+        ? 'Discard shared item?'
+        : discardsMessageDetails
+          ? 'Discard message details?'
+          : 'Discard message attachments?',
+      message: shareBatchPending
+        ? 'The shared text and files that have not been saved or sent will be removed.'
+        : discardsMentions && discardsFormatting
+          ? 'Mention identities and text formatting are not part of the saved plain-text draft.'
+          : discardsMentions
+            ? 'Mention identities are not part of the saved plain-text draft.'
+            : discardsFormatting
+              ? 'Text formatting is not part of the saved plain-text draft.'
+              : 'Attachments are not part of the saved text draft.',
       confirmText: 'Discard',
       destructive: true,
       onCancel: () => {
         backConfirmationPendingRef.current = false;
       },
       onConfirm: () => {
-        backConfirmationPendingRef.current = false;
-        navigation.dispatch(data.action);
+        if (!ownedShareBatchId || !shareBatchPending) {
+          backConfirmationPendingRef.current = false;
+          navigation.dispatch(data.action);
+          return;
+        }
+        void discardShareIntakeBatch(ownedShareBatchId, {
+          lease: accountLease,
+          drainNext: false,
+        })
+          .then((discarded) => {
+            backConfirmationPendingRef.current = false;
+            if (!discarded || !accountLease.isCurrent()) return;
+            setShareBatchPending(false);
+            navigation.dispatch(data.action);
+            void drainShareIntake();
+          })
+          .catch((error: unknown) => {
+            backConfirmationPendingRef.current = false;
+            if (!accountLease.isCurrent()) return;
+            logger.warn('[chat] shared batch discard failed', {
+              errorName: error instanceof Error ? error.name : 'UnknownError',
+            });
+            showToast('Gator could not discard the shared item. Try again.');
+          });
       },
     });
   });
@@ -724,6 +1468,7 @@ function ChatScreenInner({
               {
                 chatGuid: guid,
                 images: items,
+                shareIntake: ownedShareIdentity ?? undefined,
                 ...(imessageAttachmentFeaturesAvailable ? { service: 'iMessage' as const } : {}),
               },
               accountLease,
@@ -764,6 +1509,7 @@ function ChatScreenInner({
       guid,
       imessageAttachmentFeaturesAvailable,
       imessagePdfFeaturesAvailable,
+      ownedShareIdentity,
     ],
   );
   const onSendTextAttachment = useCallback(
@@ -793,6 +1539,7 @@ function ChatScreenInner({
               image: item,
               text,
               service: chatService,
+              shareIntake: item.origin === 'share' ? (ownedShareIdentity ?? undefined) : undefined,
             },
             accountLease,
             presentSendIssue,
@@ -815,35 +1562,50 @@ function ChatScreenInner({
       guid,
       imessageCaptionFeaturesAvailable,
       imessagePdfFeaturesAvailable,
+      ownedShareIdentity,
     ],
   );
   const onTyping = useCallback(
     (active: boolean): void => {
       // Composer debounce/unmount callbacks can run after Disconnect. The socket emit itself is
       // synchronous, so a lease check is the complete atomic boundary here.
-      if (accountLease.isCurrent() && rcsInteractiveFeaturesAvailable) {
+      if (accountLease.isCurrent() && typingFeaturesAvailable) {
         void sendTyping(guid, active);
       }
     },
-    [accountLease, guid, rcsInteractiveFeaturesAvailable],
+    [accountLease, guid, typingFeaturesAvailable],
   );
   const onStartVoice = useCallback((): void => {
-    if (rcsInteractiveFeaturesAvailable) setRecording(true);
-  }, [rcsInteractiveFeaturesAvailable]);
+    if (voiceFeaturesAvailable) setRecording(true);
+  }, [voiceFeaturesAvailable]);
   const onSendVoice = useCallback(
-    (uri: string): Promise<boolean> =>
-      !rcsInteractiveFeaturesAvailable
-        ? Promise.resolve(false)
-        : observeQueueAdmission(
+    async (uri: string): Promise<boolean> => {
+      if (!accountLease.isCurrent() || !voiceFeaturesAvailable) return false;
+      if (imessageVoiceAvailable) {
+        if (!uri.startsWith('file://') || !/\.m4a$/i.test(uri)) return false;
+        try {
+          const FileSystem = await import('expo-file-system/legacy');
+          if (!accountLease.isCurrent()) return false;
+          const info = await FileSystem.getInfoAsync(uri);
+          if (
+            !accountLease.isCurrent() ||
+            !info.exists ||
+            !Number.isSafeInteger(info.size) ||
+            info.size <= 0 ||
+            info.size > MAX_IMESSAGE_VOICE_UPLOAD_BYTES
+          ) {
+            return false;
+          }
+          return observeQueueAdmission(
             (onQueued) =>
-              sendImage(
+              sendVoice(
                 {
                   chatGuid: guid,
-                  image: {
+                  audio: {
                     uri,
                     name: uri.split('/').pop() ?? 'voice.m4a',
                     mimeType: 'audio/mp4',
-                    size: 0,
+                    size: info.size,
                   },
                 },
                 accountLease,
@@ -853,18 +1615,50 @@ function ChatScreenInner({
             () => undefined,
             (error) => {
               if (!accountLease.isCurrent()) return;
-              logger.warn('[chat] voice message queue admission failed', error);
+              logger.warn('[chat] voice note queue admission failed', error);
               showToast('Couldn’t queue that recording. It’s still here—try again when connected');
             },
+          );
+        } catch (error) {
+          if (accountLease.isCurrent()) logger.warn('[chat] voice note file check failed', error);
+          return false;
+        }
+      }
+      return observeQueueAdmission(
+        (onQueued) =>
+          sendImage(
+            {
+              chatGuid: guid,
+              image: {
+                uri,
+                name: uri.split('/').pop() ?? 'voice.m4a',
+                mimeType: 'audio/mp4',
+                size: 0,
+              },
+            },
+            accountLease,
+            presentSendIssue,
+            onQueued,
           ),
-    [accountLease, rcsInteractiveFeaturesAvailable, guid],
+        () => undefined,
+        (error) => {
+          if (!accountLease.isCurrent()) return;
+          logger.warn('[chat] voice message queue admission failed', error);
+          showToast('Couldn’t queue that recording. It’s still here—try again when connected');
+        },
+      );
+    },
+    [accountLease, voiceFeaturesAvailable, imessageVoiceAvailable, guid],
   );
 
-  // Contact cards use the retained RCS attachment path. The old helper-era capability flag is no
-  // longer advertised, so canonical live RCS capability is the complete UI gate.
-  const contactCardAvailable = rcsInteractiveFeaturesAvailable;
+  const imessageContactAvailable =
+    imessageContactSupported &&
+    chatService === 'iMessage' &&
+    header.data?.guid === guid &&
+    isProvenOneToOneIMessageChat(header.data);
+  const contactCardAvailable = rcsInteractiveFeaturesAvailable || imessageContactAvailable;
   const runContactPicker = useCallback((): void => {
-    if (!attachmentFeaturesAvailable) return;
+    if (!contactCardAvailable) return;
     const attempt = (): void => {
       void observeQueueAdmission(
         (onQueued) => pickAndSendContact(guid, accountLease, presentSendIssue, undefined, onQueued),
@@ -884,7 +1678,7 @@ function ChatScreenInner({
       );
     };
     attempt();
-  }, [accountLease, attachmentFeaturesAvailable, guid]);
+  }, [accountLease, contactCardAvailable, guid]);
   const onPickContact = useCallback((): void => {
     void getContactsPermissionState()
       .then((permission) => {
@@ -917,6 +1711,97 @@ function ChatScreenInner({
         }
       });
   }, [accountLease, runContactPicker]);
+
+  const currentLocationAvailable =
+    imessageLocationSupported &&
+    chatService === 'iMessage' &&
+    header.data?.guid === guid &&
+    isProvenOneToOneIMessageChat(header.data);
+  const locationSendInFlightRef = useRef(false);
+  const runCurrentLocationSend = useCallback(
+    function runCurrentLocationSend(): void {
+      if (
+        locationSendInFlightRef.current ||
+        !currentLocationAvailable ||
+        !accountLease.isCurrent()
+      ) {
+        return;
+      }
+      locationSendInFlightRef.current = true;
+      void acquireAndSendCurrentLocation(guid, {
+        foregroundLifecycle: {
+          isActive: () => AppState.currentState === 'active',
+          subscribeToInactive: (cancel) => {
+            const subscription = AppState.addEventListener('change', (state) => {
+              if (state !== 'active') cancel();
+            });
+            return () => subscription.remove();
+          },
+        },
+        accountLease,
+        reportIssue: presentSendIssue,
+      })
+        .then((result) => {
+          if (!accountLease.isCurrent()) return;
+          if (result.status === 'queued' || result.status === 'cancelled') return;
+          if (result.status === 'unavailable') {
+            showDialog(
+              'Location Sharing Unavailable',
+              'The connected server no longer offers current-location sharing.',
+            );
+            return;
+          }
+          if (result.status === 'services-off') {
+            showDialog('Location Services Are Off', 'Turn on location services, then try again.', [
+              { text: 'Not Now', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => void Linking.openSettings() },
+            ]);
+            return;
+          }
+          if (result.status === 'denied') {
+            showDialog(
+              'Location Permission Needed',
+              'Gator needs foreground location access to send your current location. No location is read in the background.',
+              result.canAskAgain
+                ? [
+                    { text: 'Not Now', style: 'cancel' },
+                    { text: 'Try Again', onPress: runCurrentLocationSend },
+                  ]
+                : [
+                    { text: 'Not Now', style: 'cancel' },
+                    { text: 'Open Settings', onPress: () => void Linking.openSettings() },
+                  ],
+            );
+            return;
+          }
+          showDialog(
+            'Couldn’t Get Location',
+            result.status === 'timeout'
+              ? 'Gator did not get a current location within 15 seconds. Nothing was sent.'
+              : 'Gator could not read a current location. Nothing was sent.',
+          );
+        })
+        .catch((error) => {
+          if (!accountLease.isCurrent()) return;
+          logger.warn('[chat] current-location send failed', error);
+          showDialog('Couldn’t Send Location', 'Your location was not queued. Please try again.');
+        })
+        .finally(() => {
+          locationSendInFlightRef.current = false;
+        });
+    },
+    [accountLease, currentLocationAvailable, guid],
+  );
+  const onShareCurrentLocation = useCallback((): void => {
+    if (!currentLocationAvailable || locationSendInFlightRef.current) return;
+    showConfirm({
+      title: 'Send Current Location?',
+      message:
+        'Gator will request one current location and send it to this conversation through your server. It does not track your location in the background.',
+      confirmText: 'Send Location',
+      onConfirm: runCurrentLocationSend,
+    });
+  }, [currentLocationAvailable, runCurrentLocationSend]);
 
   // Only let the KeyboardAvoidingView pad WHILE the keyboard is up, so it can't leave a residual
   // gap under the composer after a show/hide cycle (Android edge-to-edge). Same fix as the inbox.
@@ -1019,6 +1904,9 @@ function ChatScreenInner({
       topInset={hasWallpaper ? topBar + BAR_GAP : 0}
       bottomInset={hasWallpaper ? bottomBar + BAR_GAP : 0}
       onLongPressMessage={searchOpen ? undefined : onLongPressMessage}
+      onSwipeReply={
+        !searchOpen && imessageRepliesAvailable && selectedGuids == null ? onSwipeReply : undefined
+      }
       onRefresh={() => backfillChatUnlessDeleted(guid, accountLease)}
       onLoadOlder={onLoadOlder}
       focusGuid={effFocusGuid}
@@ -1061,6 +1949,7 @@ function ChatScreenInner({
   ) : null;
 
   const composerHidden = selectedGuids != null || searchOpen || returningToNewest;
+  const shareComposerReady = ownedShareBatchId === null || (shareReceiptLoaded && sharedTextReady);
   const composerStack = (
     <View
       style={composerHidden ? styles.hiddenComposer : null}
@@ -1068,45 +1957,80 @@ function ChatScreenInner({
       accessibilityElementsHidden={composerHidden}
       importantForAccessibility={composerHidden ? 'no-hide-descendants' : 'auto'}
     >
-      {isTyping && rcsInteractiveFeaturesAvailable ? <TypingBubble /> : null}
+      {isTyping && typingFeaturesAvailable ? <TypingBubble /> : null}
       {/* Renders nothing unless this chat has an upload in flight. It lives INSIDE the measured
           bottom bar, so appearing/disappearing re-lands the message list through the wrapper's
           existing onLayout → pin convergence rather than stranding it behind the composer. */}
       <UploadStatusBar chatGuid={guid} translucent={hasWallpaper} />
-      <Composer
-        placeholder={
-          chatService === 'RCS'
-            ? 'RCS Message'
-            : chatService === 'SMS'
-              ? 'Text Message'
-              : 'iMessage'
-        }
-        onSend={onSend}
-        onSendAttachments={attachmentFeaturesAvailable ? onSendAttachments : undefined}
-        onSendTextAttachment={
-          attachmentFeaturesAvailable && supportsSendAttachmentText
-            ? onSendTextAttachment
-            : undefined
-        }
-        canSubmit={hasLogicalSendCapacity}
-        isSubmitOwnerCurrent={accountLease.isCurrent}
-        onPickFiles={attachmentFeaturesAvailable ? pickFiles : undefined}
-        imessageImageOnly={imessageAttachmentFeaturesAvailable}
-        onPickContact={contactCardAvailable ? onPickContact : undefined}
-        onSchedule={onSchedule}
-        onTyping={rcsInteractiveFeaturesAvailable ? onTyping : undefined}
-        onStartVoice={isDev() || !rcsInteractiveFeaturesAvailable ? undefined : onStartVoice}
-        translucent={hasWallpaper}
-        initialText={draft ?? sharedText ?? undefined}
-        onDraftChange={onDraftChange}
-        initialAttachments={
-          attachmentFeaturesAvailable && sharedAttachments.length > 0
-            ? sharedAttachments
-            : undefined
-        }
-        active={!composerHidden && screenFocused}
-        onRemovalStateChange={setComposerRemovalState}
-      />
+      {shareComposerReady ? (
+        <Composer
+          placeholder={
+            chatService === 'RCS'
+              ? 'RCS Message'
+              : chatService === 'SMS'
+                ? 'Text Message'
+                : 'iMessage'
+          }
+          onSend={onSend}
+          onSendEffect={!replyTo && !editing && imessageEffectsAvailable ? onSendEffect : undefined}
+          onSendMention={
+            !replyTo && !editing && imessageMentionsAvailable && mentionParticipants.length >= 2
+              ? onSendMention
+              : undefined
+          }
+          onSendFormatted={
+            !replyTo && !editing && imessageFormattedAvailable ? onSendFormatted : undefined
+          }
+          mentionParticipants={mentionParticipants}
+          {...(replyTo ? { replyTo, onCancelReply: cancelReply } : {})}
+          {...(editing ? { editingText: editing.text, onCancelEdit: cancelEdit } : {})}
+          onSendAttachments={
+            !replyTo && !editing && attachmentFeaturesAvailable ? onSendAttachments : undefined
+          }
+          onSendTextAttachment={
+            !replyTo && !editing && attachmentFeaturesAvailable && supportsSendAttachmentText
+              ? onSendTextAttachment
+              : undefined
+          }
+          canSubmit={hasLogicalSendCapacity}
+          isSubmitOwnerCurrent={accountLease.isCurrent}
+          onPickFiles={!replyTo && !editing && attachmentFeaturesAvailable ? pickFiles : undefined}
+          onRemoveAttachment={ownedShareBatchId ? onRemoveSharedAttachment : undefined}
+          imessageImageOnly={imessageAttachmentFeaturesAvailable}
+          onPickContact={!replyTo && !editing && contactCardAvailable ? onPickContact : undefined}
+          onShareLocation={
+            !replyTo && !editing && currentLocationAvailable ? onShareCurrentLocation : undefined
+          }
+          onSchedule={replyTo || editing ? undefined : onSchedule}
+          onScheduleAttachment={
+            !replyTo && !editing && imessageScheduledAttachmentsAvailable
+              ? onScheduleAttachment
+              : undefined
+          }
+          onTyping={typingFeaturesAvailable ? onTyping : undefined}
+          onStartVoice={
+            replyTo || editing || isDev() || !voiceFeaturesAvailable ? undefined : onStartVoice
+          }
+          translucent={hasWallpaper}
+          initialText={composerInitialText}
+          onDraftChange={onDraftChange}
+          initialAttachments={
+            shareReceiptLoaded &&
+            attachmentFeaturesAvailable &&
+            remainingSharedAttachments.length > 0
+              ? remainingSharedAttachments
+              : undefined
+          }
+          active={!composerHidden && screenFocused}
+          onRemovalStateChange={setComposerRemovalState}
+          onAdmissionApplied={ownedShareBatchId ? onShareAdmissionApplied : undefined}
+        />
+      ) : (
+        <View style={styles.sharePreparing} pointerEvents="none">
+          <ActivityIndicator size="small" color={theme.color.tint} />
+          <Text style={{ color: theme.color.secondaryLabel }}>Preparing shared item…</Text>
+        </View>
+      )}
     </View>
   );
   const bottomStack = (
@@ -1198,6 +2122,12 @@ function ChatScreenInner({
         onRemindLater={onRemindLater}
         onCancelSend={onCancelSelected}
         onCopy={onCopySelected}
+        {...(imessageRepliesAvailable ? { onReply: onReplyToSelected } : {})}
+        {...(imessageEditsAvailable ? { onEdit: onEditSelected } : {})}
+        {...(imessageUnsendsAvailable ? { onUnsend: onUnsendSelected } : {})}
+        {...(imessageRemoteDeleteAvailable
+          ? { onRemoteDeleteFromMac: onRemoteDeleteSelected }
+          : {})}
         onForward={rcsAvailable ? onForwardSelected : undefined}
         onSave={onSaveSelected}
         onShare={onShareSelected}
@@ -1208,6 +2138,7 @@ function ChatScreenInner({
         onSelect={onEnterSelect}
       />
       <ThreadSheet
+        chatGuid={guid}
         originatorGuid={threadFor}
         onClose={() => setThreadFor(null)}
         onJump={(message) => setJump({ guid: message.guid })}
@@ -1232,6 +2163,14 @@ const BAR_GAP = 28;
 const styles = StyleSheet.create({
   flex: { flex: 1 },
   hiddenComposer: { display: 'none' },
+  sharePreparing: {
+    minHeight: 56,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+  },
   // Placeholder while the first message page loads, so the list mounts already-populated
   // (see messagesLoading) — occupies the list's slot so the layout doesn't jump on arrival.
   listLoading: { alignItems: 'center', justifyContent: 'center' },

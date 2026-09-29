@@ -41,6 +41,7 @@ import type { InboxRow } from '@db/repositories';
 
 const mockPush = jest.fn();
 const mockScrollToTop = jest.fn();
+const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
 /** Focus callbacks the mounted screen registered — `emitFocus()` replays them as a re-focus. */
 const mockFocusCallbacks: Array<() => void> = [];
 /** Last props the screen handed the list — the config-level guard reads the scroll handlers here. */
@@ -249,7 +250,13 @@ const mockMovePinnedChat = movePinnedChat as jest.Mock;
 beforeEach(() => {
   resumeRealtimeDeliveries();
   useSessionStore.setState({
-    serverInfo: { version: 'test', private_api: true, rcs: true } as any,
+    serverInfo: {
+      version: 'test',
+      private_api: true,
+      rcs: true,
+      supports_rcs_epoch_qualified_ids: true,
+      rcs_provider_epoch: RCS_PROVIDER_EPOCH,
+    } as any,
   });
   // The confirm dialog lives in the store (AppDialog is mounted at the app root, not here).
   useDialogStore.setState({ current: null, queue: [] });

@@ -4,13 +4,22 @@ import { logger } from '@core/secure';
 
 const SOURCE = 'socket' as EventSource;
 const ev = (e: unknown): NormalizedEvent => e as NormalizedEvent;
+const ownsStoredMessage = async () => true;
 
 describe('GroupEventSideEffectSink', () => {
   it('refetches the wallpaper on a background-CHANGED group event (itemType 3, gAT 4)', async () => {
     const inner: EventSink = { onEvent: jest.fn() };
     const refetch = jest.fn();
-    await new GroupEventSideEffectSink(inner, refetch).onEvent(
-      ev({ type: 'new-message', message: { itemType: 3, groupActionType: 4, chatGuid: 'chat-1' } }),
+    await new GroupEventSideEffectSink(inner, refetch, ownsStoredMessage).onEvent(
+      ev({
+        type: 'new-message',
+        message: {
+          guid: 'background-changed-1',
+          itemType: 3,
+          groupActionType: 4,
+          chatGuid: 'chat-1',
+        },
+      }),
       SOURCE,
     );
     expect(refetch).toHaveBeenCalledWith('chat-1');
@@ -21,10 +30,15 @@ describe('GroupEventSideEffectSink', () => {
   it('refetches on a background-REMOVED group event (itemType 3, gAT 6) and resolves chats[] guid', async () => {
     const inner: EventSink = { onEvent: jest.fn() };
     const refetch = jest.fn();
-    await new GroupEventSideEffectSink(inner, refetch).onEvent(
+    await new GroupEventSideEffectSink(inner, refetch, ownsStoredMessage).onEvent(
       ev({
         type: 'new-message',
-        message: { itemType: 3, groupActionType: 6, chats: [{ guid: 'chat-embedded' }] },
+        message: {
+          guid: 'background-removed-1',
+          itemType: 3,
+          groupActionType: 6,
+          chats: [{ guid: 'chat-embedded' }],
+        },
       }),
       SOURCE,
     );
@@ -34,10 +48,15 @@ describe('GroupEventSideEffectSink', () => {
   it('refetches on an UPDATED-message background change too (not just new-message)', async () => {
     const inner: EventSink = { onEvent: jest.fn() };
     const refetch = jest.fn();
-    await new GroupEventSideEffectSink(inner, refetch).onEvent(
+    await new GroupEventSideEffectSink(inner, refetch, ownsStoredMessage).onEvent(
       ev({
         type: 'updated-message',
-        message: { itemType: 3, groupActionType: 4, chatGuid: 'chat-2' },
+        message: {
+          guid: 'background-updated-1',
+          itemType: 3,
+          groupActionType: 4,
+          chatGuid: 'chat-2',
+        },
       }),
       SOURCE,
     );
@@ -47,7 +66,7 @@ describe('GroupEventSideEffectSink', () => {
   it('does NOT refetch for a normal message or other itemType-3 actions, but still delegates', async () => {
     const inner: EventSink = { onEvent: jest.fn() };
     const refetch = jest.fn();
-    const sink = new GroupEventSideEffectSink(inner, refetch);
+    const sink = new GroupEventSideEffectSink(inner, refetch, ownsStoredMessage);
     // normal message
     await sink.onEvent(
       ev({ type: 'new-message', message: { itemType: 0, groupActionType: 0, chatGuid: 'c' } }),
@@ -70,7 +89,7 @@ describe('GroupEventSideEffectSink', () => {
   it('passes non-message events straight through without a refetch', async () => {
     const inner: EventSink = { onEvent: jest.fn() };
     const refetch = jest.fn();
-    await new GroupEventSideEffectSink(inner, refetch).onEvent(
+    await new GroupEventSideEffectSink(inner, refetch, ownsStoredMessage).onEvent(
       ev({ type: 'typing-indicator', payload: { chatGuid: 'c1', display: true } }),
       SOURCE,
     );
@@ -81,7 +100,7 @@ describe('GroupEventSideEffectSink', () => {
   it('skips the refetch when the bg-change message has no resolvable chat guid', async () => {
     const inner: EventSink = { onEvent: jest.fn() };
     const refetch = jest.fn();
-    await new GroupEventSideEffectSink(inner, refetch).onEvent(
+    await new GroupEventSideEffectSink(inner, refetch, ownsStoredMessage).onEvent(
       ev({ type: 'new-message', message: { itemType: 3, groupActionType: 4 } }),
       SOURCE,
     );
@@ -89,15 +108,70 @@ describe('GroupEventSideEffectSink', () => {
     expect(inner.onEvent).toHaveBeenCalledTimes(1);
   });
 
+  it('skips a background refetch when the committed message belongs to another chat', async () => {
+    const inner: EventSink = { onEvent: jest.fn() };
+    const refetch = jest.fn();
+    const owns = jest.fn(async () => false);
+    await new GroupEventSideEffectSink(inner, refetch, owns).onEvent(
+      ev({
+        type: 'new-message',
+        message: {
+          guid: 'cross-chat-background-collision',
+          itemType: 3,
+          groupActionType: 4,
+          chatGuid: 'wrong-chat',
+        },
+      }),
+      SOURCE,
+    );
+
+    expect(owns).toHaveBeenCalledWith('cross-chat-background-collision', 'wrong-chat');
+    expect(refetch).not.toHaveBeenCalled();
+  });
+
+  it('logs and swallows a stored-owner lookup failure without starting a refetch', async () => {
+    const inner: EventSink = { onEvent: jest.fn() };
+    const refetch = jest.fn();
+    const owns = jest.fn().mockRejectedValue(new Error('owner lookup failed'));
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+    await expect(
+      new GroupEventSideEffectSink(inner, refetch, owns).onEvent(
+        ev({
+          type: 'new-message',
+          message: {
+            guid: 'background-owner-lookup-failure',
+            itemType: 3,
+            groupActionType: 4,
+            chatGuid: 'chat-1',
+          },
+        }),
+        SOURCE,
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(refetch).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      '[groupEvent] stored-message ownership lookup failed',
+      expect.any(Error),
+    );
+    warn.mockRestore();
+  });
+
   it('logs and swallows a refetch failure — never throws into the router', async () => {
     const inner: EventSink = { onEvent: jest.fn() };
     const refetch = jest.fn().mockRejectedValue(new Error('boom'));
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     await expect(
-      new GroupEventSideEffectSink(inner, refetch).onEvent(
+      new GroupEventSideEffectSink(inner, refetch, ownsStoredMessage).onEvent(
         ev({
           type: 'new-message',
-          message: { itemType: 3, groupActionType: 4, chatGuid: 'chat-1' },
+          message: {
+            guid: 'background-failure-1',
+            itemType: 3,
+            groupActionType: 4,
+            chatGuid: 'chat-1',
+          },
         }),
         SOURCE,
       ),
@@ -124,8 +198,16 @@ describe('GroupEventSideEffectSink', () => {
       refetchFinished = true;
     });
 
-    await new GroupEventSideEffectSink(inner, refetch).onEvent(
-      ev({ type: 'new-message', message: { itemType: 3, groupActionType: 4, chatGuid: 'chat-1' } }),
+    await new GroupEventSideEffectSink(inner, refetch, ownsStoredMessage).onEvent(
+      ev({
+        type: 'new-message',
+        message: {
+          guid: 'background-detached-1',
+          itemType: 3,
+          groupActionType: 4,
+          chatGuid: 'chat-1',
+        },
+      }),
       SOURCE,
       context,
     );
@@ -141,14 +223,55 @@ describe('GroupEventSideEffectSink', () => {
     expect(refetchFinished).toBe(true);
   });
 
+  it('does not start a refetch when delivery is retired during the stored-owner lookup', async () => {
+    const inner: EventSink = { onEvent: jest.fn() };
+    const refetch = jest.fn();
+    let current = true;
+    const context: EventDeliveryContext = { generation: 8, isCurrent: () => current };
+    let releaseOwner!: () => void;
+    const ownerGate = new Promise<void>((resolve) => {
+      releaseOwner = resolve;
+    });
+    const owns = jest.fn(async () => {
+      await ownerGate;
+      return true;
+    });
+    const handling = new GroupEventSideEffectSink(inner, refetch, owns).onEvent(
+      ev({
+        type: 'new-message',
+        message: {
+          guid: 'background-retired-during-owner-check',
+          itemType: 3,
+          groupActionType: 4,
+          chatGuid: 'chat-1',
+        },
+      }),
+      SOURCE,
+      context,
+    );
+    await Promise.resolve();
+    expect(owns).toHaveBeenCalledTimes(1);
+
+    current = false;
+    releaseOwner();
+    await handling;
+
+    expect(refetch).not.toHaveBeenCalled();
+  });
+
   it('propagates an inner-sink failure and does not attempt the refetch', async () => {
     const inner: EventSink = { onEvent: jest.fn().mockRejectedValue(new Error('db write failed')) };
     const refetch = jest.fn();
     await expect(
-      new GroupEventSideEffectSink(inner, refetch).onEvent(
+      new GroupEventSideEffectSink(inner, refetch, ownsStoredMessage).onEvent(
         ev({
           type: 'new-message',
-          message: { itemType: 3, groupActionType: 4, chatGuid: 'chat-1' },
+          message: {
+            guid: 'background-inner-failure-1',
+            itemType: 3,
+            groupActionType: 4,
+            chatGuid: 'chat-1',
+          },
         }),
         SOURCE,
       ),

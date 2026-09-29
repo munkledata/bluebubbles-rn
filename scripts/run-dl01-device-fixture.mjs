@@ -7,7 +7,11 @@ import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { DL01_FIXTURE_TOKEN_ENV, startDl01FixtureServer } from './dl01-hostile-fixture.mjs';
+import {
+  DL01_FIXTURE_SETS,
+  DL01_FIXTURE_TOKEN_ENV,
+  startDl01FixtureServer,
+} from './dl01-hostile-fixture.mjs';
 
 const SERIAL = /^[A-Za-z0-9._:-]{1,128}$/;
 const PACKAGE = /^[A-Za-z][A-Za-z0-9_]*(?:\.[A-Za-z][A-Za-z0-9_]*)+$/;
@@ -241,7 +245,15 @@ export function parseDeviceBaseUrl(value) {
 export function parseDl01DeviceFixtureArgs(argv) {
   const values = parsePairs(
     argv,
-    new Set(['--serial', '--package', '--base-url', '--firebase-project-id', '--rcs-permissions']),
+    new Set([
+      '--serial',
+      '--package',
+      '--base-url',
+      '--firebase-project-id',
+      '--rcs-permissions',
+      '--fixture-set',
+      '--feat07-video',
+    ]),
   );
   const serial = requiredString(values.get('--serial'), '--serial', SERIAL);
   const packageName = requiredString(values.get('--package'), '--package', PACKAGE);
@@ -254,7 +266,31 @@ export function parseDl01DeviceFixtureArgs(argv) {
   if (rcsPermissions !== undefined && rcsPermissions !== 'yes') {
     throw new Error('--rcs-permissions must be yes when provided.');
   }
-  return { serial, packageName, base, firebaseProjectId, rcsPermissions: rcsPermissions === 'yes' };
+  const fixtureSet = values.get('--fixture-set') ?? 'dl01';
+  if (!DL01_FIXTURE_SETS.includes(fixtureSet)) {
+    throw new Error('--fixture-set must be dl01 or feat07.');
+  }
+  const videoValue = values.get('--feat07-video');
+  const feat07VideoPath =
+    videoValue === undefined ? null : requiredPath(videoValue, '--feat07-video');
+  if (fixtureSet === 'feat07' && feat07VideoPath === null) {
+    throw new Error('--feat07-video is required for the feat07 fixture set.');
+  }
+  if (fixtureSet !== 'feat07' && feat07VideoPath !== null) {
+    throw new Error('--feat07-video is only valid for the feat07 fixture set.');
+  }
+  if (fixtureSet === 'feat07' && (firebaseProjectId !== null || rcsPermissions === 'yes')) {
+    throw new Error('The feat07 fixture set does not support FCM or RCS options.');
+  }
+  return {
+    serial,
+    packageName,
+    base,
+    firebaseProjectId,
+    rcsPermissions: rcsPermissions === 'yes',
+    fixtureSet,
+    feat07VideoPath,
+  };
 }
 
 export function parseDl01CandidateArgs(argv, options = {}) {
@@ -1061,6 +1097,8 @@ async function serveFixture(argv) {
     port: args.base.port,
     firebaseProjectId: args.firebaseProjectId,
     rcsPermissions: args.rcsPermissions,
+    fixtureSet: args.fixtureSet,
+    ...(args.feat07VideoPath === null ? {} : { feat07VideoPath: args.feat07VideoPath }),
   });
   let reverseAdded = false;
   let stopping = false;
@@ -1088,7 +1126,7 @@ async function serveFixture(argv) {
   try {
     await adb(args.serial, ['reverse', '--no-rebind', remote, local]);
     reverseAdded = true;
-    process.stdout.write(`DL-01 device fixture is ready at ${args.base.origin}\n`);
+    process.stdout.write(`${args.fixtureSet} device fixture is ready at ${args.base.origin}\n`);
     process.stdout.write('The exact device and installed package were verified.\n');
     process.stdout.write(
       'No app install, uninstall, launch, stop, or process kill was performed.\n',
@@ -1106,7 +1144,8 @@ async function serveFixture(argv) {
 
 function usage() {
   return `Usage:
-  node scripts/run-dl01-device-fixture.mjs serve --serial SERIAL --package PACKAGE --base-url http://127.0.0.1:PORT [--firebase-project-id ID] [--rcs-permissions yes]
+  node scripts/run-dl01-device-fixture.mjs serve --serial SERIAL --package PACKAGE --base-url http://127.0.0.1:PORT [--fixture-set dl01] [--firebase-project-id ID] [--rcs-permissions yes]
+  node scripts/run-dl01-device-fixture.mjs serve --serial SERIAL --package PACKAGE --base-url http://127.0.0.1:PORT --fixture-set feat07 --feat07-video /absolute/video.mp4
   node scripts/run-dl01-device-fixture.mjs verify-candidate <candidate options>
   node scripts/run-dl01-device-fixture.mjs capture-diagnostics <candidate options> [--scrolls 0..12]
 

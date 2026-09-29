@@ -101,8 +101,8 @@ const STATUS_ALIAS_ID = 'bb-aliases-removed';
 const LEGACY_FACETIME_CHANNEL_ID = 'com.bluegreengatorapps.messages.facetime';
 const MESSAGE_GROUP_ID = 'gator-message-group';
 const MESSAGE_GROUP_SUMMARY_ID = 'gator-message-summary';
-const SEND_FAILURE_TITLE = 'Message not sent';
-const SEND_FAILURE_BODY = 'Open Gator to review and retry.';
+const SEND_FAILURE_TITLE = 'Message status needs review';
+const SEND_FAILURE_BODY = 'Open Gator to review.';
 
 function dataString(data: Notification['data'], key: string): string | undefined {
   const value = data?.[key];

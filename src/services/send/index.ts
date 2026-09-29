@@ -1,5 +1,14 @@
 import * as scheduledApi from '@core/api/endpoints/scheduled';
+import {
+  MAX_IMESSAGE_SCHEDULED_ATTACHMENT_BYTES,
+  isSupportedImessageAttachmentType,
+} from '@core/models/serverInfo';
 import { logger } from '@core/secure';
+import {
+  currentRcsProviderEpoch,
+  isCurrentRcsChatGuid,
+  isCurrentRcsMessageGuid,
+} from '@core/rcs/providerIdentity';
 import { getDatabase } from '@db/database';
 import {
   claimFailedOutgoingForRetryWithinTransaction,
@@ -8,27 +17,42 @@ import {
   deleteScheduledHistoryWithinTransaction,
   deleteScheduledWithinTransaction,
   discardOutgoingMessageWithinTransaction,
+  getOutgoingRetryChatGuid,
   getScheduledById,
   listServerScheduledPruneExposure,
   MessageTargetCapabilityUnknownError,
   MessageTargetUnavailableError,
   reconcileOutgoingError,
   reconcileServerScheduled,
+  resolveServerSendErrorOwnersWithinTransaction,
   updateScheduledWithinTransaction,
   type UpdateScheduledPatch,
+  type ShareIntakeManifestIdentity,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
+import { useSessionStore } from '@state/sessionStore';
 import { isRcsChatGuid } from '@utils/chat';
 import { http } from '../clients';
 import { sendTextMessage, type SendTextArgs } from './sendService';
-import { sendReactionMessage, type SendReactionArgs } from './sendReactionService';
-import { sendEdit, sendUnsend } from './sendEditService';
+import {
+  sendIMessageReactionMessage,
+  sendReactionMessage,
+  type SendReactionArgs,
+} from './sendReactionService';
+import {
+  sendEdit,
+  sendUnsend,
+  type SendEditResult,
+  type SendUnsendResult,
+} from './sendEditService';
 import {
   ensureScheduledRecovery,
   runDueScheduled,
   scheduleTextMessage,
+  scheduleAttachmentMessage,
   ScheduledSessionChangedError,
   type ScheduleArgs,
+  type ScheduleAttachmentArgs,
 } from './scheduleService';
 import {
   sendImageMessage,
@@ -36,10 +60,32 @@ import {
   type PickedImage,
 } from './sendAttachmentService';
 import { sendContactMessage, hasContactContent, type ContactCard } from './sendContactService';
+import {
+  sendCurrentLocationMessage,
+  type CurrentLocationCoordinates as SendLocationCoordinates,
+} from './sendLocationService';
+import {
+  sendIMessageEffect,
+  type SendEffectArgs,
+  type SendEffectResult,
+} from './sendEffectService';
+import {
+  sendIMessageMention,
+  type SendMentionArgs,
+  type SendMentionResult,
+} from './sendMentionService';
+import {
+  sendIMessageFormatted,
+  type SendFormattedArgs,
+  type SendFormattedResult,
+} from './sendFormattedService';
 import { pickContact } from '../contacts/contactsService';
+import { acquireCurrentLocation, type CurrentLocationOutcome } from '../location/currentLocation';
+import { getExpoLocationAdapter } from '../location/expoLocationAdapter';
 import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
+  subscribeRealtimeGenerationInvalidation,
   type RealtimeDeliveryLease,
 } from '../realtime/deliveryCoordinator';
 import { expoAttachmentUploader, expoFileExists } from './attachmentUpload';
@@ -64,6 +110,23 @@ export type SendOperationIssue = 'queue-capacity';
 export type SendIssueReporter = (issue: SendOperationIssue) => void;
 /** UI handoff fired only after the optimistic row and outgoing queue row are durable. */
 export type SendQueuedObserver = (tempGuid: string) => void;
+export type ShareCurrentLocationResult =
+  | CurrentLocationOutcome
+  | { readonly status: 'unavailable' }
+  | { readonly status: 'queued'; readonly tempGuid: string };
+export interface ForegroundLocationLifecycle {
+  /** Unknown/native-transition states fail closed until the app is active again. */
+  isActive(): boolean;
+  /** Subscribe only for the pre-fix permission/watch lifetime. */
+  subscribeToInactive(listener: () => void): () => void;
+}
+export interface ShareCurrentLocationOptions {
+  /** Required AppState owner injected by the confirming screen. */
+  readonly foregroundLifecycle: ForegroundLocationLifecycle;
+  readonly accountLease?: RealtimeDeliveryLease;
+  readonly reportIssue?: SendIssueReporter;
+  readonly onQueued?: SendQueuedObserver;
+}
 export interface AttachmentQueueAdmission {
   /** Stable source identity captured before the async send starts. */
   uri: string;
@@ -137,6 +200,30 @@ export function hasLogicalSendCapacity(logicalSendCount = 1): boolean {
 
 function assertScheduledLease(lease: RealtimeDeliveryLease): void {
   if (!lease.isCurrent()) throw new ScheduledSessionChangedError();
+}
+
+function captureScheduledChatMutationGuard(chatGuid: string): () => boolean {
+  if (!isRcsChatGuid(chatGuid)) return () => true;
+  const providerEpoch = currentRcsProviderEpoch(useSessionStore.getState().serverInfo);
+  if (
+    providerEpoch == null ||
+    !isCurrentRcsChatGuid(useSessionStore.getState().serverInfo, chatGuid)
+  ) {
+    throw new Error('This scheduled RCS message belongs to a previous Google pairing.');
+  }
+  return () =>
+    currentRcsProviderEpoch(useSessionStore.getState().serverInfo) === providerEpoch &&
+    isCurrentRcsChatGuid(useSessionStore.getState().serverInfo, chatGuid);
+}
+
+function assertScheduledMutationCurrent(
+  lease: RealtimeDeliveryLease,
+  identityIsCurrent: () => boolean,
+): void {
+  assertScheduledLease(lease);
+  if (!identityIsCurrent()) {
+    throw new Error('This scheduled RCS message belongs to a previous Google pairing.');
+  }
 }
 
 /**
@@ -227,6 +314,7 @@ export const outgoingQueueIO: OutgoingQueueIO = {
 export { generateTempGuid, sendTextMessage, type SendTextArgs } from './sendService';
 export {
   isSupportedImessageAttachmentFile,
+  isSupportedImessageVoiceFile,
   sendImageMessage,
   type AttachmentTextService,
   type PickedImage,
@@ -238,7 +326,19 @@ export {
   type ContactCard,
 } from './sendContactService';
 export { sendReactionMessage, type SendReactionArgs } from './sendReactionService';
-export { sendEdit, sendUnsend, type SendEditArgs, type SendUnsendArgs } from './sendEditService';
+export {
+  sendEdit,
+  sendUnsend,
+  type SendEditArgs,
+  type SendEditResult,
+  type SendUnsendArgs,
+  type SendUnsendResult,
+} from './sendEditService';
+export {
+  sendIMessageEffect,
+  type SendEffectArgs,
+  type SendEffectResult,
+} from './sendEffectService';
 export { runDueScheduled, scheduleTextMessage, type ScheduleArgs } from './scheduleService';
 
 /** UI-facing image send: bound to the composition-root DB + HttpClient. */
@@ -246,6 +346,7 @@ export function sendImage(
   args: {
     chatGuid: string;
     image: PickedImage;
+    shareIntake?: ShareIntakeManifestIdentity;
   },
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
   reportIssue?: SendIssueReporter,
@@ -256,6 +357,7 @@ export function sendImage(
   const snapshot = {
     chatGuid: args.chatGuid,
     image: snapshotPickedImage(args.image),
+    shareIntake: args.shareIntake,
   };
   const pasteOwnership = createOutgoingPasteOwnershipPreparer(
     createAttachmentCacheAccountScope(accountLease),
@@ -289,6 +391,47 @@ export function sendImage(
   );
 }
 
+/** One recorded voice note through the separately gated, one-shot iMessage file path. */
+export function sendVoice(
+  args: { chatGuid: string; audio: PickedImage },
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+  reportIssue?: SendIssueReporter,
+  onQueued?: SendQueuedObserver,
+): Promise<{ tempGuid: string } | null> {
+  const snapshot = {
+    chatGuid: args.chatGuid,
+    image: snapshotPickedImage(args.audio),
+    service: 'iMessage' as const,
+    voice: true as const,
+  };
+  return runUiAccountOperation(
+    accountLease,
+    () =>
+      sendImageMessage(
+        getDatabase(),
+        http,
+        snapshot,
+        expoAttachmentUploader,
+        Date.now(),
+        () => accountLease.isCurrent(),
+        undefined,
+        createOutgoingPasteOwnershipPreparer(createAttachmentCacheAccountScope(accountLease), () =>
+          isAttachmentCacheRecoveryReady(accountLease),
+        ),
+        (tempGuid) => {
+          try {
+            if (accountLease.isCurrent()) onQueued?.(tempGuid);
+          } catch (error) {
+            logger.warn('[send] optional voice queue observer failed', error);
+          }
+        },
+        captureSessionRcsCapabilityLease(),
+      ),
+    'logical-send',
+    reportIssue,
+  );
+}
+
 /**
  * UI-facing one-attachment + text send. Both authored pieces cross the DB handoff and every retry
  * under one temp guid; capability refusal happens before native ownership or optimistic mutation.
@@ -301,6 +444,7 @@ export function sendTextAttachment(
     service: AttachmentTextService;
     selectedMessageGuid?: string;
     partIndex?: number;
+    shareIntake?: ShareIntakeManifestIdentity;
   },
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
   reportIssue?: SendIssueReporter,
@@ -346,6 +490,7 @@ export function sendImages(
     chatGuid: string;
     images: PickedImage[];
     service?: AttachmentTextService;
+    shareIntake?: ShareIntakeManifestIdentity;
   },
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
   reportIssue?: SendIssueReporter,
@@ -355,6 +500,7 @@ export function sendImages(
     chatGuid: args.chatGuid,
     images: args.images.map(snapshotPickedImage),
     service: args.service,
+    shareIntake: args.shareIntake,
   };
   if (snapshot.service === 'iMessage' && snapshot.images.length !== 1) {
     return Promise.reject(new Error('Send one iMessage attachment at a time.'));
@@ -374,7 +520,12 @@ export function sendImages(
             return await sendImageMessage(
               db,
               http,
-              { chatGuid: snapshot.chatGuid, image, service: snapshot.service },
+              {
+                chatGuid: snapshot.chatGuid,
+                image,
+                service: snapshot.service,
+                shareIntake: image.origin === 'share' ? snapshot.shareIntake : undefined,
+              },
               expoAttachmentUploader,
               Date.now(),
               () => accountLease.isCurrent(),
@@ -522,6 +673,12 @@ export async function pickAndSendContact(
   onQueued?: SendQueuedObserver,
 ): Promise<{ tempGuid: string } | null> {
   if (!accountLease.isCurrent()) return null;
+  if (
+    isRcsChatGuid(chatGuid) &&
+    !isCurrentRcsChatGuid(useSessionStore.getState().serverInfo, chatGuid)
+  ) {
+    return null;
+  }
   const targetSnapshot = replyTarget ? { ...replyTarget } : undefined;
   // The native picker may sit open for minutes, but has not touched account data yet. Keep it
   // outside the Disconnect drain, then validate the screen's PRE-picker lease before admitting the
@@ -564,33 +721,141 @@ export async function pickAndSendContact(
   );
 }
 
+/**
+ * Acquire one foreground fix and send it through the dedicated idempotent location operation.
+ * Native permission/watch work stays outside the account drain and is cancelled by AppState or
+ * generation invalidation. Foreground ownership ends at the first fix; only then is the short
+ * durable queue + network operation admitted under its existing bounded replay contract.
+ */
+export async function acquireAndSendCurrentLocation(
+  chatGuid: string,
+  options: ShareCurrentLocationOptions,
+): Promise<ShareCurrentLocationResult> {
+  const accountLease = options.accountLease ?? captureRealtimeDeliveryLease();
+  if (!accountLease.isCurrent() || !options.foregroundLifecycle.isActive()) {
+    return { status: 'cancelled' };
+  }
+  const capability = captureSessionRcsCapabilityLease();
+  if (isRcsChatGuid(chatGuid)) return { status: 'unavailable' };
+  if (
+    capability?.isCurrent() !== true ||
+    capability.serverInfo?.supports_imessage_location !== true
+  ) {
+    return { status: 'unavailable' };
+  }
+
+  const controller = new AbortController();
+  const abort = (): void => controller.abort();
+  const unsubscribeForeground = options.foregroundLifecycle.subscribeToInactive(abort);
+  accountLease.signal?.addEventListener('abort', abort, { once: true });
+  const unsubscribeGeneration = subscribeRealtimeGenerationInvalidation(
+    accountLease.generation,
+    abort,
+  );
+  const unsubscribeCapability = useSessionStore.subscribe(() => {
+    if (!capability.isCurrent()) abort();
+  });
+  // Close the check/listener race at every injected lifetime boundary.
+  if (
+    !options.foregroundLifecycle.isActive() ||
+    accountLease.signal?.aborted ||
+    !capability.isCurrent()
+  ) {
+    abort();
+  }
+  let acquisition: CurrentLocationOutcome;
+  try {
+    acquisition = await acquireCurrentLocation(getExpoLocationAdapter(), {
+      signal: controller.signal,
+    });
+  } finally {
+    // Foreground ownership deliberately ends at the first fix. A durable location admitted after
+    // this point keeps the existing bounded idempotent/process-death retry contract.
+    unsubscribeForeground();
+    unsubscribeGeneration();
+    unsubscribeCapability();
+    accountLease.signal?.removeEventListener('abort', abort);
+  }
+  if (!accountLease.isCurrent()) return { status: 'cancelled' };
+  if (!capability.isCurrent()) return { status: 'unavailable' };
+  if (controller.signal.aborted) return { status: 'cancelled' };
+  if (acquisition.status !== 'success') return acquisition;
+
+  const coordinates: SendLocationCoordinates = {
+    latitude: acquisition.location.coords.latitude,
+    longitude: acquisition.location.coords.longitude,
+  };
+  const result = await runUiAccountOperation(
+    accountLease,
+    () =>
+      sendCurrentLocationMessage(
+        getDatabase(),
+        http,
+        { chatGuid, coordinates },
+        Date.now(),
+        () => accountLease.isCurrent(),
+        capability,
+        (tempGuid) => {
+          try {
+            if (accountLease.isCurrent()) options.onQueued?.(tempGuid);
+          } catch (error) {
+            logger.warn('[send] optional queue observer failed', error);
+          }
+        },
+      ),
+    'logical-send',
+    options.reportIssue,
+  );
+  return result ? { status: 'queued', tempGuid: result.tempGuid } : { status: 'cancelled' };
+}
+
 /** UI-facing tapback send (toggle: pass '-love' to remove). */
 export function react(
   args: SendReactionArgs,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
   reportIssue?: SendIssueReporter,
-): Promise<{ tempGuid: string } | null> {
+): Promise<{ tempGuid: string } | { guid: string } | null> {
   const snapshot = { ...args };
-  return runUiAccountOperation(
+  return runUiAccountOperation<{ tempGuid: string } | { guid: string }>(
     accountLease,
     () => {
       const capability = captureSessionRcsCapabilityLease();
       if (isRcsChatGuid(snapshot.chatGuid)) {
-        if (capability?.serverInfo?.rcs !== true) throw new SendCapabilityUnavailableError();
+        if (
+          !isCurrentRcsChatGuid(capability?.serverInfo, snapshot.chatGuid) ||
+          !isCurrentRcsMessageGuid(capability?.serverInfo, snapshot.targetGuid)
+        ) {
+          throw new SendCapabilityUnavailableError();
+        }
       } else {
-        assertPrivateApiAvailable(capability);
+        if (capability?.serverInfo?.supports_imessage_reactions !== true) {
+          throw new SendCapabilityUnavailableError();
+        }
       }
       const serverAuthorization = messageTargetServerAuthorization(
         capability?.serverInfo,
         () => accountLease.isCurrent() && capability?.isCurrent() === true,
       );
-      return sendReactionMessage(
+      if (isRcsChatGuid(snapshot.chatGuid)) {
+        return sendReactionMessage(
+          getDatabase(),
+          http,
+          snapshot,
+          Date.now(),
+          () => accountLease.isCurrent(),
+          serverAuthorization,
+        );
+      }
+      return sendIMessageReactionMessage(
         getDatabase(),
         http,
         snapshot,
-        Date.now(),
         () => accountLease.isCurrent(),
         serverAuthorization,
+        () =>
+          accountLease.isCurrent() &&
+          capability?.isCurrent() === true &&
+          capability?.serverInfo?.supports_imessage_reactions === true,
       );
     },
     'logical-send',
@@ -605,7 +870,8 @@ export function reply(
     text: string;
     replyToGuid: string;
     /** Part of the selected message that this reply targets. */
-    replyToPartIndex?: number;
+    replyToPartIndex: 0;
+    /** Retained only to reject stale callers; effects are not part of the narrow reply command. */
     effectId?: string;
   },
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
@@ -619,7 +885,15 @@ export function reply(
     accountLease,
     () => {
       const capability = captureSessionRcsCapabilityLease();
-      assertPrivateApiAvailable(capability);
+      if (
+        snapshot.effectId !== undefined ||
+        snapshot.replyToPartIndex !== 0 ||
+        isRcsChatGuid(snapshot.chatGuid) ||
+        capability?.serverInfo?.supports_imessage_replies !== true ||
+        !capability.isCurrent()
+      ) {
+        throw new SendCapabilityUnavailableError();
+      }
       return sendTextMessage(
         getDatabase(),
         http,
@@ -627,8 +901,7 @@ export function reply(
           chatGuid: snapshot.chatGuid,
           text: snapshot.text,
           selectedMessageGuid: snapshot.replyToGuid,
-          partIndex: snapshot.replyToPartIndex,
-          effectId: snapshot.effectId,
+          partIndex: 0,
         },
         Date.now(),
         (tempGuid) => {
@@ -648,24 +921,140 @@ export function reply(
   );
 }
 
+/** UI-facing one-shot iMessage bubble/screen effect. Ordinary text sends stay on `send()`. */
+export function sendEffect(
+  args: SendEffectArgs,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+  reportIssue?: SendIssueReporter,
+): Promise<SendEffectResult | null> {
+  const snapshot = { ...args };
+  return runUiAccountOperation(
+    accountLease,
+    () => {
+      const capability = captureSessionRcsCapabilityLease();
+      if (
+        !capability ||
+        isRcsChatGuid(snapshot.chatGuid) ||
+        capability.serverInfo?.supports_imessage_effects !== true ||
+        !capability.isCurrent()
+      ) {
+        throw new SendCapabilityUnavailableError();
+      }
+      return sendIMessageEffect(
+        getDatabase(),
+        http,
+        snapshot,
+        Date.now(),
+        () => accountLease.isCurrent(),
+        capability,
+      );
+    },
+    'logical-send',
+    reportIssue,
+  );
+}
+
+/** UI-facing one-shot group message with exact Apple mention ranges. */
+export function sendMention(
+  args: SendMentionArgs,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+  reportIssue?: SendIssueReporter,
+): Promise<SendMentionResult | null> {
+  const snapshot: SendMentionArgs = {
+    ...args,
+    mentions: args.mentions.map((mention) => ({ ...mention })),
+  };
+  return runUiAccountOperation(
+    accountLease,
+    () => {
+      const capability = captureSessionRcsCapabilityLease();
+      if (
+        !capability ||
+        !/^iMessage;\+;.+$/u.test(snapshot.chatGuid) ||
+        capability.serverInfo?.supports_imessage_mentions !== true ||
+        !capability.isCurrent()
+      ) {
+        throw new SendCapabilityUnavailableError();
+      }
+      return sendIMessageMention(
+        getDatabase(),
+        http,
+        snapshot,
+        Date.now(),
+        () => accountLease.isCurrent(),
+        capability,
+      );
+    },
+    'logical-send',
+    reportIssue,
+  );
+}
+
+/** UI-facing one-shot message with bounded Apple text-formatting ranges. */
+export function sendFormatted(
+  args: SendFormattedArgs,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+  reportIssue?: SendIssueReporter,
+): Promise<SendFormattedResult | null> {
+  const snapshot: SendFormattedArgs = {
+    ...args,
+    textFormatting: args.textFormatting.map((range) => ({
+      ...range,
+      styles: [...range.styles],
+    })),
+  };
+  return runUiAccountOperation(
+    accountLease,
+    () => {
+      const capability = captureSessionRcsCapabilityLease();
+      if (
+        !capability ||
+        !/^(?:iMessage|any);-;.+$/u.test(snapshot.chatGuid) ||
+        capability.serverInfo?.supports_imessage_formatted_messages !== true ||
+        !capability.isCurrent()
+      ) {
+        throw new SendCapabilityUnavailableError();
+      }
+      return sendIMessageFormatted(
+        getDatabase(),
+        http,
+        snapshot,
+        Date.now(),
+        () => accountLease.isCurrent(),
+        capability,
+      );
+    },
+    'logical-send',
+    reportIssue,
+  );
+}
+
 /** UI-facing edit of a sent message's text (optimistic + revert on failure). */
 export function editText(
   args: {
     messageGuid: string;
     newText: string;
-    chatGuid?: string;
-    partIndex?: number;
+    chatGuid: string;
+    partIndex: 0;
   },
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
-): Promise<{
-  ok: boolean;
-} | null> {
+): Promise<SendEditResult | null> {
   return runUiAccountOperation(accountLease, () => {
     const capability = captureSessionRcsCapabilityLease();
-    assertPrivateApiAvailable(capability);
+    if (
+      isRcsChatGuid(args.chatGuid) ||
+      args.partIndex !== 0 ||
+      capability?.serverInfo?.supports_imessage_edit !== true ||
+      !capability.isCurrent()
+    ) {
+      throw new SendCapabilityUnavailableError();
+    }
     const serverAuthorization = messageTargetServerAuthorization(
       capability?.serverInfo,
-      () => accountLease.isCurrent() && capability?.isCurrent() === true,
+      () =>
+        accountLease.isCurrent() &&
+        capability.isCurrent() &&
+        capability.serverInfo?.supports_imessage_edit === true,
     );
     return sendEdit(
       getDatabase(),
@@ -680,15 +1069,25 @@ export function editText(
 
 /** UI-facing unsend/retract of a sent message. */
 export function unsend(
-  args: { messageGuid: string; chatGuid?: string; partIndex?: number },
+  args: { messageGuid: string; chatGuid: string; partIndex: 0 },
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
-): Promise<{ ok: boolean } | null> {
+): Promise<SendUnsendResult | null> {
   return runUiAccountOperation(accountLease, () => {
     const capability = captureSessionRcsCapabilityLease();
-    assertPrivateApiAvailable(capability);
+    if (
+      isRcsChatGuid(args.chatGuid) ||
+      args.partIndex !== 0 ||
+      capability?.serverInfo?.supports_imessage_unsend !== true ||
+      !capability.isCurrent()
+    ) {
+      throw new SendCapabilityUnavailableError();
+    }
     const serverAuthorization = messageTargetServerAuthorization(
       capability?.serverInfo,
-      () => accountLease.isCurrent() && capability?.isCurrent() === true,
+      () =>
+        accountLease.isCurrent() &&
+        capability.isCurrent() &&
+        capability.serverInfo?.supports_imessage_unsend === true,
     );
     return sendUnsend(
       getDatabase(),
@@ -712,6 +1111,66 @@ export function schedule(
   });
 }
 
+/** Server-owned, one-time file schedule; failure never starts the phone's text fallback. */
+export function scheduleAttachment(
+  args: { chatGuid: string; text: string; scheduledFor: number; attachment: PickedImage },
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<{ id: number; serverId: string }> {
+  const snapshot = { ...args, attachment: snapshotPickedImage(args.attachment) };
+  return runScheduledAccountOperation(accountLease, async () => {
+    const capability = captureSessionRcsCapabilityLease();
+    if (isRcsChatGuid(snapshot.chatGuid)) {
+      throw new Error('Scheduled attachments are available only in iMessage conversations.');
+    }
+    if (
+      capability?.serverInfo?.supports_imessage_scheduled_attachment !== true ||
+      !capability.isCurrent()
+    ) {
+      throw new Error('Scheduled iMessage attachments are unavailable on this server.');
+    }
+    const file = snapshot.attachment;
+    if (
+      !file.uri.startsWith('file://') ||
+      !isSupportedImessageAttachmentType(file.mimeType, file.name) ||
+      !Number.isSafeInteger(file.size) ||
+      file.size <= 0 ||
+      file.size > MAX_IMESSAGE_SCHEDULED_ATTACHMENT_BYTES
+    ) {
+      throw new Error('Choose one local JPEG, PNG, or PDF no larger than 512 KiB.');
+    }
+    const FileSystem = await import('expo-file-system/legacy');
+    assertScheduledLease(accountLease);
+    const info = await FileSystem.getInfoAsync(file.uri);
+    assertScheduledLease(accountLease);
+    if (
+      !info.exists ||
+      !Number.isSafeInteger(info.size) ||
+      info.size <= 0 ||
+      info.size > MAX_IMESSAGE_SCHEDULED_ATTACHMENT_BYTES
+    ) {
+      throw new Error('The selected file is unavailable or larger than 512 KiB.');
+    }
+    const attachmentData = await FileSystem.readAsStringAsync(file.uri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+    assertScheduledLease(accountLease);
+    return scheduleAttachmentMessage(
+      getDatabase(),
+      http,
+      {
+        chatGuid: snapshot.chatGuid,
+        text: snapshot.text,
+        scheduledFor: snapshot.scheduledFor,
+        attachmentName: file.name,
+        mimeType: file.mimeType,
+        attachmentData,
+      } satisfies ScheduleAttachmentArgs,
+      accountLease,
+      capability,
+    );
+  });
+}
+
 /**
  * Cancel a scheduled message. For a server-backed row the SERVER delete must succeed FIRST —
  * if it fails we keep the local row and rethrow (the message is still scheduled server-side,
@@ -723,19 +1182,24 @@ export async function cancelScheduled(
 ): Promise<void> {
   const db = getDatabase();
   const id = row.id;
-  const serverId = row.serverId;
   await runScheduledAccountOperation(accountLease, async () => {
     assertScheduledLease(accountLease);
+    const stored = await getScheduledById(db, id);
+    assertScheduledLease(accountLease);
+    if (!stored) return;
+    const identityIsCurrent = captureScheduledChatMutationGuard(stored.chatGuid);
+    assertScheduledMutationCurrent(accountLease, identityIsCurrent);
+    const serverId = stored.serverId;
     if (serverId != null) {
       await scheduledApi.deleteScheduled(http, serverId); // throws → local kept, UI alerts
-      assertScheduledLease(accountLease);
+      assertScheduledMutationCurrent(accountLease, identityIsCurrent);
     }
     await withDbTransaction(
       db,
       (context) => deleteScheduledWithinTransaction(context, id),
-      () => accountLease.isCurrent(),
+      () => accountLease.isCurrent() && identityIsCurrent(),
     );
-    assertScheduledLease(accountLease);
+    assertScheduledMutationCurrent(accountLease, identityIsCurrent);
   });
 }
 
@@ -747,12 +1211,17 @@ export function clearScheduledHistoryItem(
   return runScheduledAccountOperation(accountLease, async () => {
     const db = getDatabase();
     assertScheduledLease(accountLease);
+    const stored = await getScheduledById(db, id);
+    assertScheduledLease(accountLease);
+    if (!stored) return;
+    const identityIsCurrent = captureScheduledChatMutationGuard(stored.chatGuid);
+    assertScheduledMutationCurrent(accountLease, identityIsCurrent);
     await withDbTransaction(
       db,
       (context) => deleteScheduledHistoryWithinTransaction(context, id),
-      () => accountLease.isCurrent(),
+      () => accountLease.isCurrent() && identityIsCurrent(),
     );
-    assertScheduledLease(accountLease);
+    assertScheduledMutationCurrent(accountLease, identityIsCurrent);
   });
 }
 
@@ -771,24 +1240,32 @@ export async function editScheduled(
 ): Promise<void> {
   await runScheduledAccountOperation(accountLease, async () => {
     const db = getDatabase();
+    assertScheduledLease(accountLease);
+    const row = await getScheduledById(db, id);
+    assertScheduledLease(accountLease);
+    if (!row) return;
+    const identityIsCurrent = captureScheduledChatMutationGuard(row.chatGuid);
+    const assertMutationCurrent = (): void =>
+      assertScheduledMutationCurrent(accountLease, identityIsCurrent);
     const persistPatch = (localPatch: UpdateScheduledPatch): Promise<void> =>
       withDbTransaction(
         db,
         (context) => updateScheduledWithinTransaction(context, id, localPatch),
-        () => accountLease.isCurrent(),
+        () => accountLease.isCurrent() && identityIsCurrent(),
       );
-    assertScheduledLease(accountLease);
-    const row = await getScheduledById(db, id);
-    assertScheduledLease(accountLease);
+    assertMutationCurrent();
+    if (row?.attachmentName) {
+      throw new Error('File schedules cannot be edited; cancel and create a new schedule.');
+    }
     if (row?.serverId != null) {
       // No PUT on Gator: delete the old server-side message, then create a replacement.
       await scheduledApi.deleteScheduled(http, row.serverId); // throws → local untouched, UI alerts
-      assertScheduledLease(accountLease);
+      assertMutationCurrent();
       if (patch.recurrence) {
         // Now recurring → keep it local-only so the ticker (which skips server-backed rows)
         // fires and re-arms it. The server row is already gone; just drop the serverId.
         await persistPatch({ ...patch, serverId: null });
-        assertScheduledLease(accountLease);
+        assertMutationCurrent();
         return;
       }
       let newServerId: string | null;
@@ -798,43 +1275,45 @@ export async function editScheduled(
           message: patch.text,
           scheduledFor: patch.scheduledFor ?? row.scheduledFor,
         });
-        assertScheduledLease(accountLease);
+        assertMutationCurrent();
         newServerId = created?.id ?? null;
       } catch (e) {
         // A revoked A request must not turn into a B-local fallback row.
-        assertScheduledLease(accountLease);
+        assertMutationCurrent();
         // DELETE succeeded but the re-create failed: the old server message is gone. DROP the
         // serverId so the on-device worker fires the edited message as a fallback (rather than
         // orphaning it — a non-null serverId would make the local worker skip it forever), apply
         // the edit locally, then surface the failure.
         await persistPatch({ ...patch, serverId: null });
-        assertScheduledLease(accountLease);
+        assertMutationCurrent();
         throw e;
       }
       // Repoint the local row at the fresh uuid alongside the text/time change.
       await persistPatch({ ...patch, serverId: newServerId });
-      assertScheduledLease(accountLease);
+      assertMutationCurrent();
       return;
     }
     await persistPatch(patch);
-    assertScheduledLease(accountLease);
+    assertMutationCurrent();
   });
 }
 
-/** Gator scheduled status (pending|sent|failed) → local {pending,sent,error} so pending rows stay visible. */
-function normalizeSchedStatus(s: string | null | undefined): string {
+/** File delivery can be ambiguous after a helper timeout, so a failed file row is not a proved miss. */
+function normalizeSchedStatus(s: string | null | undefined, method?: string | null): string {
   const v = (s ?? '').toLowerCase();
   if (v === 'complete' || v === 'completed' || v === 'sent') return 'sent';
-  if (v === 'error' || v === 'failed') return 'error';
+  if (v === 'error' || v === 'failed') {
+    return method === 'narrow-attachment' ? 'uncertain' : 'error';
+  }
   return 'pending'; // pending / scheduled → keep visible + cancellable
 }
 
 /** Pull the server's scheduled list into the local DB (keeps server-backed rows accurate). */
 export async function syncScheduledFromServer(
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
-): Promise<void> {
+): Promise<boolean> {
   try {
-    await runScheduledAccountOperation(accountLease, async () => {
+    return await runScheduledAccountOperation(accountLease, async () => {
       const db = getDatabase();
       // Snapshot which rows this reconcile is ALLOWED to prune BEFORE the round trip. The server's
       // answer describes the instant it was built, and the Scheduled screen's Edit re-creates a
@@ -850,7 +1329,7 @@ export async function syncScheduledFromServer(
         items = await scheduledApi.getScheduled(http);
       } catch {
         assertScheduledLease(accountLease);
-        return; // older/offline server — keep local rows as-is
+        return false; // older/offline server — keep local rows, but do not call them verified
       }
       assertScheduledLease(accountLease);
       // EVERY id the server reported (even malformed items) — the prune set, so a row dropped by
@@ -863,8 +1342,9 @@ export async function syncScheduledFromServer(
             serverId: it.id,
             chatGuid: it.chatGuid,
             text: it.text,
+            attachmentName: it.attachmentName ?? undefined,
             scheduledFor: it.scheduledFor,
-            status: normalizeSchedStatus(it.status),
+            status: normalizeSchedStatus(it.status, it.method),
           };
         })
         .filter((x): x is NonNullable<typeof x> => x != null);
@@ -874,11 +1354,12 @@ export async function syncScheduledFromServer(
         commitGuard: () => accountLease.isCurrent(),
       });
       assertScheduledLease(accountLease);
+      return true;
     });
   } catch (error) {
     // This is called fire-and-forget on screen mount. A deliberate Disconnect is a quiet no-op,
     // not an unhandled rejection in the newly connected UI.
-    if (error instanceof ScheduledSessionChangedError) return;
+    if (error instanceof ScheduledSessionChangedError) return false;
     throw error;
   }
 }
@@ -975,10 +1456,20 @@ export async function recoverOutgoing(
     capability?.serverInfo,
     () => accountLease.isCurrent() && capability?.isCurrent() === true,
   );
-  const rcsAvailable = (): boolean =>
+  const rcsAvailable = (chatGuid?: string, messageGuid?: string): boolean => {
+    const info = capability?.serverInfo;
+    return (
+      accountLease.isCurrent() &&
+      capability?.isCurrent() === true &&
+      currentRcsProviderEpoch(info) !== null &&
+      (chatGuid === undefined || isCurrentRcsChatGuid(info, chatGuid)) &&
+      (messageGuid === undefined || isCurrentRcsMessageGuid(info, messageGuid))
+    );
+  };
+  const locationAvailable = (): boolean =>
     accountLease.isCurrent() &&
     capability?.isCurrent() === true &&
-    capability.serverInfo?.rcs === true;
+    capability.serverInfo?.supports_imessage_location === true;
   return runOutgoingQueue(
     getDatabase(),
     http,
@@ -989,6 +1480,8 @@ export async function recoverOutgoing(
     undefined,
     serverAuthorization,
     rcsAvailable,
+    undefined,
+    locationAvailable,
   );
 }
 
@@ -1029,10 +1522,25 @@ export async function retry(
           capability?.serverInfo,
           () => accountLease.isCurrent() && capability?.isCurrent() === true,
         );
-        const rcsAvailable = (): boolean =>
+        const rcsAvailable = (chatGuid?: string, messageGuid?: string): boolean => {
+          const info = capability?.serverInfo;
+          return (
+            accountLease.isCurrent() &&
+            capability?.isCurrent() === true &&
+            currentRcsProviderEpoch(info) !== null &&
+            (chatGuid === undefined || isCurrentRcsChatGuid(info, chatGuid)) &&
+            (messageGuid === undefined || isCurrentRcsMessageGuid(info, messageGuid))
+          );
+        };
+        const locationAvailable = (): boolean =>
           accountLease.isCurrent() &&
           capability?.isCurrent() === true &&
-          capability.serverInfo?.rcs === true;
+          capability.serverInfo?.supports_imessage_location === true;
+        const retryChatGuid = await getOutgoingRetryChatGuid(db, tempGuid);
+        if (!accountLease.isCurrent()) return 'stale';
+        if (retryChatGuid && isRcsChatGuid(retryChatGuid) && !rcsAvailable(retryChatGuid)) {
+          return 'unretryable';
+        }
         const { claim, row, attemptOwnerToken } = await withDbTransaction(
           db,
           (context) =>
@@ -1041,8 +1549,15 @@ export async function retry(
               tempGuid,
               Date.now,
               serverAuthorization,
+              locationAvailable,
+              (chatGuid) => rcsAvailable(chatGuid),
             ),
-          messageTargetCommitGuard(() => accountLease.isCurrent(), serverAuthorization),
+          messageTargetCommitGuard(
+            () =>
+              accountLease.isCurrent() &&
+              (!retryChatGuid || !isRcsChatGuid(retryChatGuid) || rcsAvailable(retryChatGuid)),
+            serverAuthorization,
+          ),
         );
         if (!accountLease.isCurrent()) return 'stale';
         if (claim !== 'claimed' || !row) {
@@ -1064,6 +1579,8 @@ export async function retry(
           attemptOwnerToken,
           serverAuthorization,
           rcsAvailable,
+          undefined,
+          locationAvailable,
         );
         if (!accountLease.isCurrent()) return 'stale';
         // Retired for good: the attachment's on-disk file is gone, so no re-send can ever work. The
@@ -1085,7 +1602,9 @@ export async function retry(
               1,
               Date.now(),
               () => accountLease.isCurrent(),
-              'RCS is unavailable.',
+              row.kind === 'location'
+                ? 'Current-location sharing is unavailable.'
+                : 'RCS is unavailable.',
               attemptOwnerToken,
             );
             return 'failed';
@@ -1132,33 +1651,72 @@ export async function discardMessage(
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<DiscardMessageResult> {
   const outcome = await runUiAccountOperation(accountLease, async () => {
+    const db = getDatabase();
+    const ownerResolution = await withDbTransaction(
+      db,
+      (context) => resolveServerSendErrorOwnersWithinTransaction(context, [guid]),
+      () => accountLease.isCurrent(),
+    );
+    if (!accountLease.isCurrent()) return 'stale';
+    if (ownerResolution.hasConflict || ownerResolution.chatGuids.length > 1) {
+      return 'message-changed';
+    }
+    const ownerChatGuid = ownerResolution.chatGuids[0] ?? null;
+    const ownerIsRcs = ownerChatGuid?.startsWith('RCS;-;') === true;
+    const messageIsRcs = guid.startsWith('rcs-');
+    const expectedRcsEpoch =
+      ownerIsRcs || messageIsRcs
+        ? currentRcsProviderEpoch(useSessionStore.getState().serverInfo)
+        : null;
+    const rcsIdentityIsCurrent = (): boolean =>
+      (!ownerIsRcs ||
+        (expectedRcsEpoch != null &&
+          currentRcsProviderEpoch(useSessionStore.getState().serverInfo) === expectedRcsEpoch &&
+          ownerChatGuid != null &&
+          isCurrentRcsChatGuid(useSessionStore.getState().serverInfo, ownerChatGuid))) &&
+      (!messageIsRcs || isCurrentRcsMessageGuid(useSessionStore.getState().serverInfo, guid)) &&
+      (!messageIsRcs || ownerIsRcs);
+    if (!rcsIdentityIsCurrent()) return 'message-changed';
     // STOP THE BYTES FIRST, before either tombstone. "Cancel Sending" used to be a pure DB write:
     // the bubble vanished while the phone carried on streaming the entire file to the server — on a
     // large video, for minutes, over the user's data. The upload simply had no cancel handle to
     // reach for. Cancelling is safe for every other message kind too: nothing is registered under a
     // text/reaction/contact temp guid, so this is a no-op for them.
     uploadRegistry.cancel(guid);
-    const db = getDatabase();
     const attachmentCacheScope = createAttachmentCacheAccountScope(accountLease);
-    const result = await withDbTransaction(
+    const transactionResult = await withDbTransaction(
       db,
       async (context) => {
+        const currentOwner = await resolveServerSendErrorOwnersWithinTransaction(context, [guid]);
+        if (
+          currentOwner.hasConflict ||
+          currentOwner.chatGuids.length !== ownerResolution.chatGuids.length ||
+          (currentOwner.chatGuids[0] ?? null) !== ownerChatGuid ||
+          !rcsIdentityIsCurrent()
+        ) {
+          return { kind: 'identity-changed' as const };
+        }
         const outgoingOwned = await discardOutgoingMessageWithinTransaction(context, guid, now);
-        return outgoingOwned ? null : deleteMessageLocalWithinTransaction(context, guid, now);
+        const result = outgoingOwned
+          ? null
+          : await deleteMessageLocalWithinTransaction(context, guid, now);
+        return { kind: 'applied' as const, result };
       },
-      () => accountLease.isCurrent(),
+      () => accountLease.isCurrent() && rcsIdentityIsCurrent(),
     );
-    if (!accountLease.isCurrent()) return 'stale';
+    if (transactionResult.kind === 'identity-changed') return 'message-changed';
+    const result = transactionResult.result;
+    if (!accountLease.isCurrent() || !rcsIdentityIsCurrent()) return 'stale';
     // The fixed-size alias ledger may have retired an extremely old mapping. Never claim the
     // destructive action succeeded against an identity we cannot prove; the reactive list now
     // carries the real GUID, so selecting the message again gives the user a safe retry.
     const disposition: DiscardMessageResult =
       result === 'unresolved-temp' ? 'message-changed' : 'discarded';
-    if (!accountLease.isCurrent()) return 'stale';
+    if (!accountLease.isCurrent() || !rcsIdentityIsCurrent()) return 'stale';
     // The tombstone commits before native mutation. Failed-send notices are keyed by the retained
     // local message id, so removing the bubble must also withdraw its already-posted tray record.
-    await clearFailedSendNotice(db, guid, () => accountLease.isCurrent());
-    if (!accountLease.isCurrent()) return 'stale';
+    await clearFailedSendNotice(db, guid, () => accountLease.isCurrent() && rcsIdentityIsCurrent());
+    if (!accountLease.isCurrent() || !rcsIdentityIsCurrent()) return 'stale';
     // Tombstone + ledger/ref changes committed above. Exact native deletion stays outside their DB
     // transaction and inside this account-scoped operation, so Disconnect drains it before wipe.
     await attachmentCacheCoordinator

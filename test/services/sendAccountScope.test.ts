@@ -16,6 +16,11 @@ jest.mock('@db/repositories', () => {
     deleteMessageLocalWithinTransaction: jest.fn(
       actual.deleteMessageLocalWithinTransaction as () => unknown,
     ),
+    resolveServerSendErrorOwnersWithinTransaction: jest.fn(async () => ({
+      chatGuids: [],
+      hasEvidence: false,
+      hasConflict: false,
+    })),
   };
 });
 jest.mock('@/services/clients', () => ({ http: { account: 'A' } }));
@@ -43,6 +48,15 @@ jest.mock('@/services/send/sendContactService', () => ({
   ),
   sendContactMessage: jest.fn(),
 }));
+jest.mock('@/services/send/sendLocationService', () => ({
+  sendCurrentLocationMessage: jest.fn(),
+}));
+jest.mock('@/services/location/currentLocation', () => ({
+  acquireCurrentLocation: jest.fn(),
+}));
+jest.mock('@/services/location/expoLocationAdapter', () => ({
+  getExpoLocationAdapter: jest.fn(() => ({ native: 'location' })),
+}));
 jest.mock('@/services/contacts/contactsService', () => ({ pickContact: jest.fn() }));
 jest.mock('@/services/send/attachmentUpload', () => ({
   expoAttachmentUploader: jest.fn(),
@@ -53,6 +67,7 @@ jest.mock('@/services/send/uploadControl', () => ({
 }));
 // eslint-disable-next-line import/first
 import {
+  acquireAndSendCurrentLocation,
   discardMessage,
   editText,
   pickAndSendContact,
@@ -69,6 +84,10 @@ import {
 import { pickContact } from '@/services/contacts/contactsService';
 // eslint-disable-next-line import/first
 import { sendContactMessage } from '@/services/send/sendContactService';
+// eslint-disable-next-line import/first
+import { sendCurrentLocationMessage } from '@/services/send/sendLocationService';
+// eslint-disable-next-line import/first
+import { acquireCurrentLocation } from '@/services/location/currentLocation';
 // eslint-disable-next-line import/first
 import { sendTextMessage } from '@/services/send/sendService';
 // eslint-disable-next-line import/first
@@ -89,6 +108,10 @@ import {
 // eslint-disable-next-line import/first
 import { getDatabase } from '@db/database';
 // eslint-disable-next-line import/first
+import { useSessionStore } from '@state/sessionStore';
+// eslint-disable-next-line import/first
+import { ServerInfo } from '@core/models';
+// eslint-disable-next-line import/first
 import { createAttachmentCacheAccountScope } from '@/services/download/attachmentCacheAccountScope';
 // eslint-disable-next-line import/first
 import { attachmentCacheCoordinator } from '@/services/download/attachmentCacheCoordinator';
@@ -100,6 +123,25 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 // eslint-disable-next-line import/first
 import { createTestDb } from '../support/testDb';
+
+const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
+const rcsChatGuid = (sourceId: string): string =>
+  `RCS;-;g1.${RCS_PROVIDER_EPOCH}.${Buffer.from(sourceId).toString('base64url')}`;
+const rcsMessageGuid = (sourceId: string): string =>
+  `rcs-g1.${RCS_PROVIDER_EPOCH}.${Buffer.from(sourceId).toString('base64url')}`;
+const RCS_CHAT_A = rcsChatGuid('chat-a');
+const RCS_CHAT_B = rcsChatGuid('chat-b');
+const RCS_MESSAGE_A = rcsMessageGuid('message-a');
+const RCS_SERVER_INFO = ServerInfo.parse({
+  version: '2.0.0',
+  private_api: true,
+  rcs: true,
+  supports_rcs_epoch_qualified_ids: true,
+  rcs_provider_epoch: RCS_PROVIDER_EPOCH,
+  supports_message_part_topology: true,
+  supports_send_contact: true,
+  supports_imessage_location: true,
+});
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -122,9 +164,21 @@ async function waitUntil(predicate: () => boolean): Promise<void> {
   throw new Error('deferred operation did not reach its test seam');
 }
 
+function activeForegroundLifecycle(): {
+  isActive(): boolean;
+  subscribeToInactive(listener: () => void): () => void;
+} {
+  return {
+    isActive: () => true,
+    subscribeToInactive: () => () => undefined,
+  };
+}
+
 const mockSendText = sendTextMessage as jest.Mock;
 const mockPickContact = pickContact as jest.Mock;
 const mockSendContact = sendContactMessage as jest.Mock;
+const mockSendLocation = sendCurrentLocationMessage as jest.Mock;
+const mockAcquireLocation = acquireCurrentLocation as jest.Mock;
 const mockSendImage = sendImageMessage as jest.Mock;
 const mockSendReaction = sendReactionMessage as jest.Mock;
 const mockSendEdit = sendEdit as jest.Mock;
@@ -138,23 +192,35 @@ beforeEach(() => {
   resumeRealtimeDeliveries();
   mockSendText.mockResolvedValue({ tempGuid: 'temp-text' });
   mockSendContact.mockResolvedValue({ tempGuid: 'temp-contact' });
+  mockSendLocation.mockResolvedValue({ tempGuid: 'temp-location' });
+  mockAcquireLocation.mockResolvedValue({
+    status: 'success',
+    location: {
+      coords: {
+        latitude: 39.7392,
+        longitude: -104.9903,
+        altitude: null,
+        accuracy: 25,
+        altitudeAccuracy: null,
+        heading: null,
+        speed: null,
+      },
+      timestamp: 1_000,
+    },
+  });
   mockSendImage.mockResolvedValue({ tempGuid: 'temp-image' });
   mockSendReaction.mockResolvedValue({ tempGuid: 'temp-reaction' });
-  mockSendEdit.mockResolvedValue({ ok: true });
-  mockSendUnsend.mockResolvedValue({ ok: true });
+  mockSendEdit.mockResolvedValue({ status: 'accepted' });
+  mockSendUnsend.mockResolvedValue({ status: 'accepted' });
   mockCaptureCapability.mockReturnValue({
     kind: 'session',
     origin: 'https://capability.test',
     revision: 1,
-    serverInfo: {
-      private_api: true,
-      rcs: true,
-      supports_message_part_topology: true,
-      supports_send_contact: true,
-    },
+    serverInfo: RCS_SERVER_INFO,
     isCurrent: () => true,
     publish: () => true,
   });
+  useSessionStore.setState({ serverInfo: RCS_SERVER_INFO });
 });
 
 afterEach(async () => {
@@ -163,12 +229,171 @@ afterEach(async () => {
 });
 
 describe('UI send account lease', () => {
+  it('does not invoke native location acquisition without the exact server capability', async () => {
+    mockCaptureCapability.mockReturnValueOnce({
+      kind: 'session',
+      origin: 'https://capability.test',
+      revision: 1,
+      serverInfo: { supports_imessage_location: false },
+      isCurrent: () => true,
+      publish: () => true,
+    });
+
+    await expect(
+      acquireAndSendCurrentLocation('any;-;+15551234567', {
+        foregroundLifecycle: activeForegroundLifecycle(),
+      }),
+    ).resolves.toEqual({ status: 'unavailable' });
+    expect(mockAcquireLocation).not.toHaveBeenCalled();
+    expect(mockSendLocation).not.toHaveBeenCalled();
+  });
+
+  it('passes one captured fix and the original capability lease into the location send', async () => {
+    const capabilityLease = mockCaptureCapability();
+    mockCaptureCapability.mockReturnValueOnce(capabilityLease);
+    const unsubscribeForeground = jest.fn();
+    mockSendLocation.mockImplementationOnce(async () => {
+      expect(unsubscribeForeground).toHaveBeenCalledTimes(1);
+      return { tempGuid: 'temp-location' };
+    });
+
+    await expect(
+      acquireAndSendCurrentLocation('any;-;+15551234567', {
+        foregroundLifecycle: {
+          isActive: () => true,
+          subscribeToInactive: () => unsubscribeForeground,
+        },
+      }),
+    ).resolves.toEqual({ status: 'queued', tempGuid: 'temp-location' });
+
+    expect(mockAcquireLocation).toHaveBeenCalledTimes(1);
+    expect(mockSendLocation).toHaveBeenCalledWith(
+      { account: 'A' },
+      { account: 'A' },
+      {
+        chatGuid: 'any;-;+15551234567',
+        coordinates: { latitude: 39.7392, longitude: -104.9903 },
+      },
+      expect.any(Number),
+      expect.any(Function),
+      capabilityLease,
+      expect.any(Function),
+    );
+    expect(unsubscribeForeground).toHaveBeenCalledTimes(1);
+  });
+
+  it('aborts native acquisition when the confirming foreground lifetime ends', async () => {
+    let cancelForBackground: (() => void) | undefined;
+    const unsubscribeForeground = jest.fn();
+    let observedSignal: AbortSignal | undefined;
+    mockAcquireLocation.mockImplementationOnce(
+      (_adapter: unknown, options: { signal?: AbortSignal }) =>
+        new Promise((resolve) => {
+          observedSignal = options.signal;
+          options.signal?.addEventListener('abort', () => resolve({ status: 'cancelled' }), {
+            once: true,
+          });
+        }),
+    );
+
+    const pending = acquireAndSendCurrentLocation('any;-;+15551234567', {
+      foregroundLifecycle: {
+        isActive: () => true,
+        subscribeToInactive: (cancel) => {
+          cancelForBackground = cancel;
+          return unsubscribeForeground;
+        },
+      },
+    });
+    await waitUntil(() => mockAcquireLocation.mock.calls.length === 1);
+    cancelForBackground?.();
+
+    await expect(pending).resolves.toEqual({ status: 'cancelled' });
+    expect(observedSignal?.aborted).toBe(true);
+    expect(unsubscribeForeground).toHaveBeenCalledTimes(1);
+    expect(getDatabase).not.toHaveBeenCalled();
+    expect(mockSendLocation).not.toHaveBeenCalled();
+  });
+
+  it('aborts native acquisition when the captured send capability is revoked', async () => {
+    let capabilityCurrent = true;
+    mockCaptureCapability.mockReturnValueOnce({
+      kind: 'session',
+      origin: 'https://capability.test',
+      revision: 1,
+      serverInfo: { supports_imessage_location: true },
+      isCurrent: () => capabilityCurrent,
+      publish: () => true,
+    });
+    let observedSignal: AbortSignal | undefined;
+    mockAcquireLocation.mockImplementationOnce(
+      (_adapter: unknown, options: { signal?: AbortSignal }) =>
+        new Promise((resolve) => {
+          observedSignal = options.signal;
+          options.signal?.addEventListener('abort', () => resolve({ status: 'cancelled' }), {
+            once: true,
+          });
+        }),
+    );
+
+    const pending = acquireAndSendCurrentLocation('any;-;+15551234567', {
+      foregroundLifecycle: activeForegroundLifecycle(),
+    });
+    await waitUntil(() => mockAcquireLocation.mock.calls.length === 1);
+    capabilityCurrent = false;
+    useSessionStore.setState((state) => ({
+      sendCapabilityRevision: state.sendCapabilityRevision + 1,
+    }));
+
+    await expect(pending).resolves.toEqual({ status: 'unavailable' });
+    expect(observedSignal?.aborted).toBe(true);
+    expect(mockSendLocation).not.toHaveBeenCalled();
+  });
+
+  it('closes a capability revocation race while acquisition listeners are registering', async () => {
+    let capabilityCurrent = true;
+    mockCaptureCapability.mockReturnValueOnce({
+      kind: 'session',
+      origin: 'https://capability.test',
+      revision: 1,
+      serverInfo: { supports_imessage_location: true },
+      isCurrent: () => capabilityCurrent,
+      publish: () => true,
+    });
+    let observedSignal: AbortSignal | undefined;
+    mockAcquireLocation.mockImplementationOnce(
+      async (_adapter: unknown, options: { signal?: AbortSignal }) => {
+        observedSignal = options.signal;
+        return { status: 'cancelled' };
+      },
+    );
+
+    await expect(
+      acquireAndSendCurrentLocation('any;-;+15551234567', {
+        foregroundLifecycle: {
+          isActive: () => true,
+          subscribeToInactive: () => {
+            capabilityCurrent = false;
+            return () => undefined;
+          },
+        },
+      }),
+    ).resolves.toEqual({ status: 'unavailable' });
+
+    expect(observedSignal?.aborted).toBe(true);
+    expect(getDatabase).not.toHaveBeenCalled();
+    expect(mockSendLocation).not.toHaveBeenCalled();
+  });
+
   it('fails closed for helper-only mutations while preserving an enabled RCS reaction', async () => {
     mockCaptureCapability.mockReturnValue({
       kind: 'session',
       origin: 'https://capability.test',
       revision: 1,
-      serverInfo: { private_api: false, rcs: true, supports_message_part_topology: true },
+      serverInfo: {
+        ...RCS_SERVER_INFO,
+        private_api: false,
+      },
       isCurrent: () => true,
       publish: () => true,
     });
@@ -177,16 +402,26 @@ describe('UI send account lease', () => {
       react({ chatGuid: 'iMessage;-;+15551234567', targetGuid: 'm1', reaction: 'love' }),
     ).resolves.toBeNull();
     await expect(
-      editText({ chatGuid: 'iMessage;-;+15551234567', messageGuid: 'm1', newText: 'edited' }),
+      editText({
+        chatGuid: 'iMessage;-;+15551234567',
+        messageGuid: 'm1',
+        newText: 'edited',
+        partIndex: 0,
+      }),
     ).resolves.toBeNull();
     await expect(
-      unsend({ chatGuid: 'iMessage;-;+15551234567', messageGuid: 'm1' }),
+      unsend({ chatGuid: 'iMessage;-;+15551234567', messageGuid: 'm1', partIndex: 0 }),
     ).resolves.toBeNull();
     await expect(
       send({ chatGuid: 'iMessage;-;+15551234567', text: 'party', effectId: 'confetti' }),
     ).resolves.toBeNull();
     await expect(
-      reply({ chatGuid: 'iMessage;-;+15551234567', text: 'reply', replyToGuid: 'm1' }),
+      reply({
+        chatGuid: 'iMessage;-;+15551234567',
+        text: 'reply',
+        replyToGuid: 'm1',
+        replyToPartIndex: 0,
+      }),
     ).resolves.toBeNull();
 
     expect(mockSendReaction).not.toHaveBeenCalled();
@@ -200,7 +435,11 @@ describe('UI send account lease', () => {
     expect(mockSendText).toHaveBeenCalledTimes(1);
 
     await expect(
-      react({ chatGuid: 'RCS;-;+15551234567', targetGuid: 'rcs-m1', reaction: 'love' }),
+      react({
+        chatGuid: rcsChatGuid('+15551234567'),
+        targetGuid: rcsMessageGuid('m1'),
+        reaction: 'love',
+      }),
     ).resolves.toEqual({ tempGuid: 'temp-reaction' });
     expect(mockSendReaction).toHaveBeenCalledTimes(1);
   });
@@ -340,13 +579,24 @@ describe('UI send account lease', () => {
       react({ chatGuid: 'chat-a', targetGuid: 'message-a', reaction: 'love' }, screenLease),
     ).resolves.toBeNull();
     await expect(
-      reply({ chatGuid: 'chat-a', text: 'reply', replyToGuid: 'message-a' }, screenLease),
+      reply(
+        {
+          chatGuid: 'chat-a',
+          text: 'reply',
+          replyToGuid: 'message-a',
+          replyToPartIndex: 0,
+        },
+        screenLease,
+      ),
     ).resolves.toBeNull();
     await expect(
-      editText({ messageGuid: 'message-a', newText: 'edited', chatGuid: 'chat-a' }, screenLease),
+      editText(
+        { messageGuid: 'message-a', newText: 'edited', chatGuid: 'chat-a', partIndex: 0 },
+        screenLease,
+      ),
     ).resolves.toBeNull();
     await expect(
-      unsend({ messageGuid: 'message-a', chatGuid: 'chat-a' }, screenLease),
+      unsend({ messageGuid: 'message-a', chatGuid: 'chat-a', partIndex: 0 }, screenLease),
     ).resolves.toBeNull();
     await expect(retry('temp-a', screenLease)).resolves.toBe('stale');
     await expect(discardMessage('message-a', 1_000, screenLease)).resolves.toBe('stale');
@@ -424,7 +674,7 @@ describe('UI send account lease', () => {
     await expect(
       sendContactCard(
         {
-          chatGuid: 'RCS;-;chat-a',
+          chatGuid: RCS_CHAT_A,
           contact: { firstName: 'Alice' },
         },
         directLease,
@@ -436,7 +686,7 @@ describe('UI send account lease', () => {
     mockPickContact.mockResolvedValueOnce({ firstName: 'Bob' });
     const pickerLease = captureRealtimeDeliveryLease();
     await expect(
-      pickAndSendContact('RCS;-;chat-b', pickerLease, undefined, undefined, pickerQueued),
+      pickAndSendContact(RCS_CHAT_B, pickerLease, undefined, undefined, pickerQueued),
     ).resolves.toEqual({ tempGuid: 'temp-contact' });
 
     expect(mockSendContact).toHaveBeenNthCalledWith(
@@ -444,7 +694,7 @@ describe('UI send account lease', () => {
       expect.anything(),
       expect.anything(),
       {
-        chatGuid: 'RCS;-;chat-a',
+        chatGuid: RCS_CHAT_A,
         contact: { firstName: 'Alice' },
         selectedMessageGuid: undefined,
         partIndex: undefined,
@@ -459,7 +709,7 @@ describe('UI send account lease', () => {
       expect.anything(),
       expect.anything(),
       {
-        chatGuid: 'RCS;-;chat-b',
+        chatGuid: RCS_CHAT_B,
         contact: { firstName: 'Bob' },
         selectedMessageGuid: undefined,
         partIndex: undefined,
@@ -499,7 +749,7 @@ describe('UI send account lease', () => {
     await expect(
       sendImage(
         {
-          chatGuid: 'RCS;-;chat-a',
+          chatGuid: RCS_CHAT_A,
           image: { uri: 'file:///a.jpg', name: 'a.jpg', mimeType: 'image/jpeg', size: 10 },
         },
         singleLease,
@@ -512,7 +762,7 @@ describe('UI send account lease', () => {
     await expect(
       sendImages(
         {
-          chatGuid: 'RCS;-;chat-b',
+          chatGuid: RCS_CHAT_B,
           images: [
             { uri: 'file:///b.jpg', name: 'b.jpg', mimeType: 'image/jpeg', size: 20 },
             { uri: 'file:///c.jpg', name: 'c.jpg', mimeType: 'image/jpeg', size: 30 },
@@ -529,7 +779,9 @@ describe('UI send account lease', () => {
       expect(call).toEqual([
         expect.anything(),
         expect.anything(),
-        expect.objectContaining({ chatGuid: expect.stringMatching(/^RCS;-;chat-[ab]$/) }),
+        expect.objectContaining({
+          chatGuid: expect.stringMatching(new RegExp(`^RCS;-;g1\\.${RCS_PROVIDER_EPOCH}\\.`)),
+        }),
         expect.anything(),
         expect.any(Number),
         expect.any(Function),
@@ -574,16 +826,13 @@ describe('UI send account lease', () => {
   it('passes React persistence a commit guard tied to the captured screen lease', async () => {
     const screenLease = captureRealtimeDeliveryLease();
     await expect(
-      react(
-        { chatGuid: 'RCS;-;chat-a', targetGuid: 'rcs-message-a', reaction: 'love' },
-        screenLease,
-      ),
+      react({ chatGuid: RCS_CHAT_A, targetGuid: RCS_MESSAGE_A, reaction: 'love' }, screenLease),
     ).resolves.toEqual({ tempGuid: 'temp-reaction' });
 
     expect(mockSendReaction).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
-      { chatGuid: 'RCS;-;chat-a', targetGuid: 'rcs-message-a', reaction: 'love' },
+      { chatGuid: RCS_CHAT_A, targetGuid: RCS_MESSAGE_A, reaction: 'love' },
       expect.any(Number),
       expect.any(Function),
       expect.anything(),
@@ -626,19 +875,19 @@ describe('UI send account lease', () => {
 
     const text = send({ chatGuid: 'chat-a', text: 'first' });
     const contact = sendContactCard({
-      chatGuid: 'RCS;-;contact-chat',
+      chatGuid: rcsChatGuid('contact-chat'),
       contact: { firstName: 'Alice' },
     });
     const images = sendImages({
-      chatGuid: 'RCS;-;image-chat',
+      chatGuid: rcsChatGuid('image-chat'),
       images: [
         { uri: 'file:///one.jpg', name: 'one.jpg', mimeType: 'image/jpeg', size: 1 },
         { uri: 'file:///two.jpg', name: 'two.jpg', mimeType: 'image/jpeg', size: 2 },
       ],
     });
     const reaction = react({
-      chatGuid: 'RCS;-;reaction-chat',
-      targetGuid: 'rcs-target-a',
+      chatGuid: rcsChatGuid('reaction-chat'),
+      targetGuid: rcsMessageGuid('target-a'),
       reaction: 'love',
     });
 
@@ -670,14 +919,19 @@ describe('UI send account lease', () => {
     ]);
   });
 
-  it('rejects retired edit and unsend immediately instead of retaining them in the send queue', async () => {
+  it('fails closed before the send queue when narrow edit and unsend flags are absent', async () => {
     const sendResult = deferred<{ tempGuid: string }>();
     mockSendText.mockReturnValueOnce(sendResult.promise);
 
     const pendingSend = send({ chatGuid: 'chat-a', text: 'slow send' });
     await waitUntil(() => mockSendText.mock.calls.length === 1);
-    const edit = editText({ messageGuid: 'message-a', newText: 'edited', chatGuid: 'chat-a' });
-    const retract = unsend({ messageGuid: 'message-b', chatGuid: 'chat-a' });
+    const edit = editText({
+      messageGuid: 'message-a',
+      newText: 'edited',
+      chatGuid: 'chat-a',
+      partIndex: 0,
+    });
+    const retract = unsend({ messageGuid: 'message-b', chatGuid: 'chat-a', partIndex: 0 });
 
     await expect(edit).resolves.toBeNull();
     await expect(retract).resolves.toBeNull();
@@ -686,6 +940,73 @@ describe('UI send account lease', () => {
 
     sendResult.resolve({ tempGuid: 'temp-slow' });
     await expect(pendingSend).resolves.toEqual({ tempGuid: 'temp-slow' });
+  });
+
+  it('delegates enabled narrow edit and unsend once while a revoked lease does no work', async () => {
+    mockCaptureCapability.mockReturnValue({
+      kind: 'session',
+      origin: 'https://capability.test',
+      revision: 1,
+      serverInfo: {
+        ...RCS_SERVER_INFO,
+        supports_imessage_edit: true,
+        supports_imessage_unsend: true,
+      },
+      isCurrent: () => true,
+      publish: () => true,
+    });
+
+    await expect(
+      editText({
+        messageGuid: 'message-edit',
+        newText: 'edited',
+        chatGuid: 'iMessage;-;+15551234567',
+        partIndex: 0,
+      }),
+    ).resolves.toEqual({ status: 'accepted' });
+    await expect(
+      unsend({
+        messageGuid: 'message-unsend',
+        chatGuid: 'iMessage;-;+15551234567',
+        partIndex: 0,
+      }),
+    ).resolves.toEqual({ status: 'accepted' });
+    expect(mockSendEdit).toHaveBeenCalledTimes(1);
+    expect(mockSendUnsend).toHaveBeenCalledTimes(1);
+
+    const revokedLease = captureRealtimeDeliveryLease();
+    await pauseRealtimeDeliveries();
+    resumeRealtimeDeliveries();
+    (getDatabase as jest.Mock).mockClear();
+    mockCaptureCapability.mockClear();
+    mockSendEdit.mockClear();
+    mockSendUnsend.mockClear();
+
+    await expect(
+      editText(
+        {
+          messageGuid: 'message-edit',
+          newText: 'edited again',
+          chatGuid: 'iMessage;-;+15551234567',
+          partIndex: 0,
+        },
+        revokedLease,
+      ),
+    ).resolves.toBeNull();
+    await expect(
+      unsend(
+        {
+          messageGuid: 'message-unsend',
+          chatGuid: 'iMessage;-;+15551234567',
+          partIndex: 0,
+        },
+        revokedLease,
+      ),
+    ).resolves.toBeNull();
+    expect(mockCaptureCapability).not.toHaveBeenCalled();
+    expect(getDatabase).not.toHaveBeenCalled();
+    expect(mockSendEdit).not.toHaveBeenCalled();
+    expect(mockSendUnsend).not.toHaveBeenCalled();
   });
 
   it('snapshots mutable send payloads before they wait behind an earlier job', async () => {
@@ -699,7 +1020,7 @@ describe('UI send account lease', () => {
       text: 'original text',
     };
     const singleImageArgs = {
-      chatGuid: 'RCS;-;single-image-chat',
+      chatGuid: rcsChatGuid('single-image-chat'),
       image: {
         uri: 'file:///single.jpg',
         name: 'single.jpg',
@@ -708,11 +1029,11 @@ describe('UI send account lease', () => {
       },
     };
     const imageBatchArgs = {
-      chatGuid: 'RCS;-;batch-chat',
+      chatGuid: rcsChatGuid('batch-chat'),
       images: [{ uri: 'file:///batch.jpg', name: 'batch.jpg', mimeType: 'image/jpeg', size: 20 }],
     };
     const contactArgs = {
-      chatGuid: 'RCS;-;contact-chat',
+      chatGuid: rcsChatGuid('contact-chat'),
       contact: {
         firstName: 'Alice',
         phones: [{ number: '+15550000001', label: 'cell' }],
@@ -720,8 +1041,8 @@ describe('UI send account lease', () => {
       },
     };
     const reactionArgs = {
-      chatGuid: 'RCS;-;reaction-chat',
-      targetGuid: 'rcs-reaction-target',
+      chatGuid: rcsChatGuid('reaction-chat'),
+      targetGuid: rcsMessageGuid('reaction-target'),
       reaction: 'love',
       selectedMessageText: 'original target',
     };
@@ -763,7 +1084,7 @@ describe('UI send account lease', () => {
       mentions: undefined,
     });
     expect(mockSendImage.mock.calls[0]?.[2]).toEqual({
-      chatGuid: 'RCS;-;single-image-chat',
+      chatGuid: rcsChatGuid('single-image-chat'),
       image: {
         uri: 'file:///single.jpg',
         name: 'single.jpg',
@@ -772,7 +1093,7 @@ describe('UI send account lease', () => {
       },
     });
     expect(mockSendImage.mock.calls[1]?.[2]).toEqual({
-      chatGuid: 'RCS;-;batch-chat',
+      chatGuid: rcsChatGuid('batch-chat'),
       image: {
         uri: 'file:///batch.jpg',
         name: 'batch.jpg',
@@ -781,7 +1102,7 @@ describe('UI send account lease', () => {
       },
     });
     expect(mockSendContact.mock.calls[0]?.[2]).toEqual({
-      chatGuid: 'RCS;-;contact-chat',
+      chatGuid: rcsChatGuid('contact-chat'),
       contact: {
         firstName: 'Alice',
         phones: [{ number: '+15550000001', label: 'cell' }],
@@ -791,8 +1112,8 @@ describe('UI send account lease', () => {
       partIndex: undefined,
     });
     expect(mockSendReaction.mock.calls[0]?.[2]).toEqual({
-      chatGuid: 'RCS;-;reaction-chat',
-      targetGuid: 'rcs-reaction-target',
+      chatGuid: rcsChatGuid('reaction-chat'),
+      targetGuid: rcsMessageGuid('reaction-target'),
       reaction: 'love',
       selectedMessageText: 'original target',
     });
@@ -849,7 +1170,7 @@ describe('UI send account lease', () => {
       .mockReturnValueOnce(slowImage.promise);
 
     const pending = sendImages({
-      chatGuid: 'RCS;-;chat-a',
+      chatGuid: RCS_CHAT_A,
       images: [
         { uri: 'file:///one.jpg', name: 'one.jpg', mimeType: 'image/jpeg', size: 1 },
         { uri: 'file:///two.jpg', name: 'two.jpg', mimeType: 'image/jpeg', size: 2 },
@@ -876,7 +1197,7 @@ describe('UI send account lease', () => {
     mockPickContact.mockReturnValueOnce(picked.promise);
     const screenLease = captureRealtimeDeliveryLease();
 
-    const pending = pickAndSendContact('RCS;-;chat-a', screenLease);
+    const pending = pickAndSendContact(RCS_CHAT_A, screenLease);
     await waitUntil(() => mockPickContact.mock.calls.length === 1);
 
     // No account mutation has begun, so Disconnect need not wait for a user-controlled OS sheet.

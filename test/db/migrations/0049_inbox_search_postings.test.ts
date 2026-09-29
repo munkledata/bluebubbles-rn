@@ -45,7 +45,12 @@ describe('migration 0049_inbox_search_postings', () => {
         .run(chatId, handleId);
 
       stopBefore0049.value = false;
-      await expect(runMigrations(runner)).resolves.toEqual([MIGRATION_NAME]);
+      await expect(runMigrations(runner)).resolves.toEqual([
+        MIGRATION_NAME,
+        '0050_message_identity_owner_scope',
+        '0051_handle_color_backup_index',
+        '0052_chat_history_deletion_boundary',
+      ]);
       const state = () =>
         raw
           .prepare(

@@ -60,6 +60,8 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 
 const ORIGIN_A = 'private-thread-origin-a-z-8d31';
+const CHAT_A = 'iMessage;-;private-thread-chat-a-z-2f91';
+const CHAT_B = 'RCS;-;replacement-thread-chat-b-z-4ac7';
 const ORIGIN_A_TEXT = 'private original body A z-51f0';
 const REPLY_A_GUID = 'private-thread-reply-a-z-7c42';
 const REPLY_A_SENDER = 'private-thread-sender-a-z-93b7@example.test';
@@ -241,7 +243,12 @@ function StatefulThread({
 
   return (
     <>
-      <ThreadSheet originatorGuid={originatorGuid} onClose={close} onJump={onJump} />
+      <ThreadSheet
+        chatGuid={CHAT_A}
+        originatorGuid={originatorGuid}
+        onClose={close}
+        onJump={onJump}
+      />
       <Pressable
         accessibilityRole="button"
         accessibilityLabel="Open thread A"
@@ -260,6 +267,33 @@ function StatefulThread({
   );
 }
 
+function StatefulThreadOwner({
+  onClose,
+  onJump,
+}: {
+  onClose: () => void;
+  onJump: (message: { guid: string; dateCreated: number }) => void;
+}): React.JSX.Element {
+  const [chatGuid, setChatGuid] = React.useState(CHAT_A);
+  return (
+    <>
+      <ThreadSheet
+        chatGuid={chatGuid}
+        originatorGuid={ORIGIN_A}
+        onClose={onClose}
+        onJump={onJump}
+      />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Switch chat owner"
+        onPress={() => setChatGuid(CHAT_B)}
+      >
+        <Text>Switch chat owner</Text>
+      </Pressable>
+    </>
+  );
+}
+
 describe('ThreadSheet', () => {
   beforeEach(() => {
     resetCapturedAccount();
@@ -267,7 +301,7 @@ describe('ThreadSheet', () => {
     mockReactiveExecute.mockClear();
     mockListThreadMessages
       .mockReset()
-      .mockImplementation(async (_db, originatorGuid: string) =>
+      .mockImplementation(async (_db, _chatGuid: string, originatorGuid: string) =>
         originatorGuid === ORIGIN_B ? THREAD_B : THREAD_A,
       );
   });
@@ -278,13 +312,18 @@ describe('ThreadSheet', () => {
 
   it('loads a high-entropy thread through tracked account work and renders its exact host/a11y data', async () => {
     const view = await renderWithTheme(
-      <ThreadSheet originatorGuid={ORIGIN_A} onClose={jest.fn()} onJump={jest.fn()} />,
+      <ThreadSheet
+        chatGuid={CHAT_A}
+        originatorGuid={ORIGIN_A}
+        onClose={jest.fn()}
+        onJump={jest.fn()}
+      />,
     );
 
     expect(await screen.findByText('Thread · 2 replies')).toBeTruthy();
     expect(mockCaptureRealtimeDeliveryLease).toHaveBeenCalledTimes(1);
     expect(mockCapturedLease?.isCurrent()).toBe(true);
-    expect(mockListThreadMessages).toHaveBeenCalledWith(undefined, ORIGIN_A);
+    expect(mockListThreadMessages).toHaveBeenCalledWith(undefined, CHAT_A, ORIGIN_A);
     expect(screen.getByText('You · original')).toBeTruthy();
     expect(screen.getByText(ORIGIN_A_TEXT)).toBeTruthy();
     expect(screen.getByText(REPLY_A_SENDER)).toBeTruthy();
@@ -302,7 +341,12 @@ describe('ThreadSheet', () => {
   it('does not issue the DB read when tracked account admission returns paused', async () => {
     mockRunTrackedRealtimeWork.mockResolvedValueOnce('paused');
     const view = await renderWithTheme(
-      <ThreadSheet originatorGuid={ORIGIN_A} onClose={jest.fn()} onJump={jest.fn()} />,
+      <ThreadSheet
+        chatGuid={CHAT_A}
+        originatorGuid={ORIGIN_A}
+        onClose={jest.fn()}
+        onJump={jest.fn()}
+      />,
     );
 
     await waitFor(() => expect(mockRunTrackedRealtimeWork).toHaveBeenCalledTimes(1));
@@ -340,7 +384,12 @@ describe('ThreadSheet', () => {
   it('uses the singular label for exactly one reply', async () => {
     mockListThreadMessages.mockResolvedValue(THREAD_A.slice(0, 2));
     await renderWithTheme(
-      <ThreadSheet originatorGuid={ORIGIN_A} onClose={jest.fn()} onJump={jest.fn()} />,
+      <ThreadSheet
+        chatGuid={CHAT_A}
+        originatorGuid={ORIGIN_A}
+        onClose={jest.fn()}
+        onJump={jest.fn()}
+      />,
     );
     expect(await screen.findByText('Thread · 1 reply')).toBeTruthy();
   });
@@ -357,7 +406,12 @@ describe('ThreadSheet', () => {
       }),
     ]);
     await renderWithTheme(
-      <ThreadSheet originatorGuid={ORIGIN_A} onClose={jest.fn()} onJump={jest.fn()} />,
+      <ThreadSheet
+        chatGuid={CHAT_A}
+        originatorGuid={ORIGIN_A}
+        onClose={jest.fn()}
+        onJump={jest.fn()}
+      />,
     );
 
     expect(await screen.findByText('Unknown')).toBeTruthy();
@@ -369,7 +423,12 @@ describe('ThreadSheet', () => {
     let currentRows = THREAD_A;
     mockListThreadMessages.mockImplementation(async () => currentRows);
     await renderWithTheme(
-      <ThreadSheet originatorGuid={ORIGIN_A} onClose={jest.fn()} onJump={jest.fn()} />,
+      <ThreadSheet
+        chatGuid={CHAT_A}
+        originatorGuid={ORIGIN_A}
+        onClose={jest.fn()}
+        onJump={jest.fn()}
+      />,
     );
     expect(await screen.findByText(REPLY_A_TEXT)).toBeTruthy();
     expect(reactiveCallback).not.toBeNull();
@@ -392,7 +451,7 @@ describe('ThreadSheet', () => {
     const onClose = jest.fn();
     const onJump = jest.fn();
     await renderWithTheme(
-      <ThreadSheet originatorGuid={ORIGIN_A} onClose={onClose} onJump={onJump} />,
+      <ThreadSheet chatGuid={CHAT_A} originatorGuid={ORIGIN_A} onClose={onClose} onJump={onJump} />,
     );
     await fireEvent.press(
       await screen.findByRole('button', { name: `Jump to ${REPLY_A_SENDER}'s message` }),
@@ -409,7 +468,7 @@ describe('ThreadSheet', () => {
     const onClose = jest.fn();
     const onJump = jest.fn();
     await renderWithTheme(
-      <ThreadSheet originatorGuid={ORIGIN_A} onClose={onClose} onJump={onJump} />,
+      <ThreadSheet chatGuid={CHAT_A} originatorGuid={ORIGIN_A} onClose={onClose} onJump={onJump} />,
     );
     await fireEvent.press(
       await screen.findByRole('button', { name: `Jump to ${REPLY_A_SENDER}'s message` }),
@@ -421,7 +480,7 @@ describe('ThreadSheet', () => {
   it('renders nothing, never queries, and never closes when originatorGuid is null', async () => {
     const onClose = jest.fn();
     await renderWithTheme(
-      <ThreadSheet originatorGuid={null} onClose={onClose} onJump={jest.fn()} />,
+      <ThreadSheet chatGuid={CHAT_A} originatorGuid={null} onClose={onClose} onJump={jest.fn()} />,
     );
     await waitFor(() => expect(screen.queryByText(/Thread ·/, HIDDEN)).toBeNull());
     expect(mockListThreadMessages).not.toHaveBeenCalled();
@@ -470,7 +529,7 @@ describe('ThreadSheet', () => {
     const onClose = jest.fn();
     const onJump = jest.fn();
     const view = await renderWithTheme(
-      <ThreadSheet originatorGuid={ORIGIN_A} onClose={onClose} onJump={onJump} />,
+      <ThreadSheet chatGuid={CHAT_A} originatorGuid={ORIGIN_A} onClose={onClose} onJump={onJump} />,
     );
     const oldPress = retainConfiguredPress(
       await screen.findByRole('button', { name: `Jump to ${REPLY_A_SENDER}'s message` }),
@@ -493,7 +552,7 @@ describe('ThreadSheet', () => {
 
     resumeRealtimeDeliveries();
     await renderWithTheme(
-      <ThreadSheet originatorGuid={ORIGIN_A} onClose={onClose} onJump={onJump} />,
+      <ThreadSheet chatGuid={CHAT_A} originatorGuid={ORIGIN_A} onClose={onClose} onJump={onJump} />,
     );
     const freshPress = retainConfiguredPress(
       await screen.findByRole('button', { name: `Jump to ${REPLY_A_SENDER}'s message` }),
@@ -543,16 +602,20 @@ describe('ThreadSheet', () => {
     async (outcome) => {
       const oldRead = deferred<MessageRow[]>();
       const rawError = 'private-thread-originator-read-error-z-5b38';
-      mockListThreadMessages.mockImplementation(async (_db, originatorGuid: string) => {
-        if (originatorGuid === ORIGIN_A) return oldRead.promise;
-        return THREAD_B;
-      });
+      mockListThreadMessages.mockImplementation(
+        async (_db, _chatGuid: string, originatorGuid: string) => {
+          if (originatorGuid === ORIGIN_A) return oldRead.promise;
+          return THREAD_B;
+        },
+      );
       const onClose = jest.fn();
       const onJump = jest.fn();
       const view = await renderWithTheme(
         <StatefulThread initialOriginatorGuid={ORIGIN_A} onClose={onClose} onJump={onJump} />,
       );
-      await waitFor(() => expect(mockListThreadMessages).toHaveBeenCalledWith(undefined, ORIGIN_A));
+      await waitFor(() =>
+        expect(mockListThreadMessages).toHaveBeenCalledWith(undefined, CHAT_A, ORIGIN_A),
+      );
 
       await fireEvent.press(screen.getByRole('button', { name: 'Open thread B' }));
       expect(await screen.findByText(REPLY_B_TEXT)).toBeTruthy();
@@ -571,6 +634,35 @@ describe('ThreadSheet', () => {
       expect(onJump).not.toHaveBeenCalled();
     },
   );
+
+  it('does not let a deferred chat-A read publish after the same originator moves to chat B', async () => {
+    const oldRead = deferred<MessageRow[]>();
+    mockListThreadMessages.mockImplementation(async (_db, chatGuid: string) =>
+      chatGuid === CHAT_A ? oldRead.promise : THREAD_B,
+    );
+    const onClose = jest.fn();
+    const onJump = jest.fn();
+    const view = await renderWithTheme(<StatefulThreadOwner onClose={onClose} onJump={onJump} />);
+    await waitFor(() =>
+      expect(mockListThreadMessages).toHaveBeenCalledWith(undefined, CHAT_A, ORIGIN_A),
+    );
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Switch chat owner' }));
+    await waitFor(() =>
+      expect(mockListThreadMessages).toHaveBeenCalledWith(undefined, CHAT_B, ORIGIN_A),
+    );
+    expect(await screen.findByText(REPLY_B_TEXT)).toBeTruthy();
+
+    await act(async () => {
+      oldRead.resolve(THREAD_A);
+      await oldRead.promise;
+    });
+
+    expect(screen.getByText(REPLY_B_TEXT)).toBeTruthy();
+    expectCanariesAbsent(view.toJSON());
+    expect(onClose).not.toHaveBeenCalled();
+    expect(onJump).not.toHaveBeenCalled();
+  });
 
   it('revokes an already-loaded A row callback when the controlled source changes to B', async () => {
     const onClose = jest.fn();

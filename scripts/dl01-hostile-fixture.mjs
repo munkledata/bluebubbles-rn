@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { execFile } from 'node:child_process';
-import { createCipheriv, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
+import { open } from 'node:fs/promises';
 import net from 'node:net';
 import { pathToFileURL } from 'node:url';
 
@@ -24,9 +25,13 @@ export const DL01_MODES = Object.freeze([
 ]);
 export const DL01_TARGETS = Object.freeze(['attachment', 'wallpaper']);
 export const DL01_MAX_ATTACHMENT_COUNT = 16;
+export const DL01_FIXTURE_SETS = Object.freeze(['dl01', 'feat07']);
+export const FEAT07_DOCUMENT_COUNT = 52;
+export const FEAT07_LARGE_PDF_BYTES = 6 * 1024 * 1024;
 
 const MODE_SET = new Set(DL01_MODES);
 const TARGET_SET = new Set(DL01_TARGETS);
+const FIXTURE_SET = new Set(DL01_FIXTURE_SETS);
 const API_PREFIX = '/api/v1';
 const CONTROL_PREFIX = '/_dl01/v1';
 const MAX_REQUEST_HEADER_BYTES = 16 * 1024;
@@ -104,6 +109,156 @@ function pngWithDimensions(width, height) {
 // 64-Mi-pixel cap (and therefore also the wallpaper 16-Mi-pixel cap).
 export const DL01_OVERSIZED_DIMENSION_PNG = pngWithDimensions(8_193, 8_193);
 const INVALID_IMAGE = Buffer.from('gator-dl01-not-an-image', 'ascii');
+
+const PDF_PASSWORD_PADDING = Buffer.from(
+  '28bf4e5e4e758a4164004e56fffa01082e2e00b6d0683e802f0ca9fe6453697a',
+  'hex',
+);
+
+function pdfPasswordBytes(value) {
+  const bytes = Buffer.from(value, 'latin1').subarray(0, 32);
+  return bytes.length === 32
+    ? bytes
+    : Buffer.concat([bytes, PDF_PASSWORD_PADDING.subarray(0, 32 - bytes.length)]);
+}
+
+function rc4(key, input) {
+  const state = Uint8Array.from({ length: 256 }, (_, index) => index);
+  let swapIndex = 0;
+  for (let index = 0; index < state.length; index += 1) {
+    swapIndex = (swapIndex + state[index] + key[index % key.length]) & 0xff;
+    [state[index], state[swapIndex]] = [state[swapIndex], state[index]];
+  }
+  const output = Buffer.alloc(input.length);
+  let left = 0;
+  let right = 0;
+  for (let index = 0; index < input.length; index += 1) {
+    left = (left + 1) & 0xff;
+    right = (right + state[left]) & 0xff;
+    [state[left], state[right]] = [state[right], state[left]];
+    output[index] = input[index] ^ state[(state[left] + state[right]) & 0xff];
+  }
+  return output;
+}
+
+function assemblePdf(objects, trailerFields = '', paddingBytes = 0) {
+  const header = Buffer.from('%PDF-1.4\n%\xe2\xe3\xcf\xd3\n', 'latin1');
+  const chunks = [header];
+  const offsets = [0];
+  let offset = header.length;
+  for (const [number, body] of objects) {
+    if (number !== offsets.length) throw new Error('PDF fixture objects must be contiguous.');
+    offsets.push(offset);
+    const prefix = Buffer.from(`${number} 0 obj\n`, 'ascii');
+    const suffix = Buffer.from('\nendobj\n', 'ascii');
+    chunks.push(prefix, body, suffix);
+    offset += prefix.length + body.length + suffix.length;
+  }
+  if (paddingBytes > 0) {
+    const padding = Buffer.alloc(paddingBytes, 0x20);
+    chunks.push(padding);
+    offset += padding.length;
+  }
+  const xrefOffset = offset;
+  const xref = [
+    `xref\n0 ${objects.length + 1}\n`,
+    '0000000000 65535 f \n',
+    ...offsets.slice(1).map((value) => `${String(value).padStart(10, '0')} 00000 n \n`),
+    `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R${trailerFields} >>\n`,
+    `startxref\n${xrefOffset}\n%%EOF\n`,
+  ].join('');
+  chunks.push(Buffer.from(xref, 'ascii'));
+  return Buffer.concat(chunks);
+}
+
+function simplePdfObjects(content) {
+  return [
+    [1, Buffer.from('<< /Type /Catalog /Pages 2 0 R >>', 'ascii')],
+    [2, Buffer.from('<< /Type /Pages /Kids [3 0 R] /Count 1 >>', 'ascii')],
+    [
+      3,
+      Buffer.from(
+        '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+        'ascii',
+      ),
+    ],
+    [
+      4,
+      Buffer.concat([
+        Buffer.from(`<< /Length ${content.length} >>\nstream\n`, 'ascii'),
+        content,
+        Buffer.from('\nendstream', 'ascii'),
+      ]),
+    ],
+    [5, Buffer.from('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>', 'ascii')],
+  ];
+}
+
+export function createFeat07Pdf(label = 'Gator FEAT-07 synthetic PDF') {
+  if (typeof label !== 'string' || !/^[A-Za-z0-9 ._-]{1,80}$/u.test(label)) {
+    throw new Error('The FEAT-07 PDF label is invalid.');
+  }
+  const escaped = label.replaceAll('\\', '\\\\').replaceAll('(', '\\(').replaceAll(')', '\\)');
+  const content = Buffer.from(`BT /F1 18 Tf 72 720 Td (${escaped}) Tj ET\n`, 'ascii');
+  return assemblePdf(simplePdfObjects(content));
+}
+
+export function createExactLengthFeat07Pdf(totalBytes) {
+  requireInteger(totalBytes, 'exact PDF byte length', 1_024, 512 * 1024 * 1024);
+  const content = Buffer.from('BT /F1 18 Tf 72 720 Td (Gator FEAT-07 large PDF) Tj ET\n', 'ascii');
+  let paddingBytes = Math.max(0, totalBytes - assemblePdf(simplePdfObjects(content)).length);
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const candidate = assemblePdf(simplePdfObjects(content), '', paddingBytes);
+    const difference = totalBytes - candidate.length;
+    if (difference === 0) return candidate;
+    paddingBytes += difference;
+    if (paddingBytes < 0) break;
+  }
+  throw new Error('The exact FEAT-07 PDF length could not be constructed.');
+}
+
+export function createEncryptedFeat07Pdf(password = 'gator') {
+  if (typeof password !== 'string' || !/^[A-Za-z0-9_-]{1,32}$/u.test(password)) {
+    throw new Error('The FEAT-07 PDF password is invalid.');
+  }
+  const userPassword = pdfPasswordBytes(password);
+  const ownerPassword = pdfPasswordBytes('gator-owner');
+  const ownerKey = createHash('md5').update(ownerPassword).digest().subarray(0, 5);
+  const ownerEntry = rc4(ownerKey, userPassword);
+  const permissions = Buffer.alloc(4);
+  permissions.writeInt32LE(-4);
+  const fileId = createHash('md5').update('gator-feat07-encrypted-pdf').digest();
+  const fileKey = createHash('md5')
+    .update(userPassword)
+    .update(ownerEntry)
+    .update(permissions)
+    .update(fileId)
+    .digest()
+    .subarray(0, 5);
+  const userEntry = rc4(fileKey, PDF_PASSWORD_PADDING);
+  const plainContent = Buffer.from(
+    'BT /F1 18 Tf 72 720 Td (Gator FEAT-07 encrypted PDF) Tj ET\n',
+    'ascii',
+  );
+  const objectKey = createHash('md5')
+    .update(fileKey)
+    .update(Buffer.from([4, 0, 0, 0, 0]))
+    .digest()
+    .subarray(0, 10);
+  const encryptedContent = rc4(objectKey, plainContent);
+  const objects = simplePdfObjects(encryptedContent);
+  objects.push([
+    6,
+    Buffer.from(
+      `<< /Filter /Standard /V 1 /R 2 /Length 40 /O <${ownerEntry.toString('hex')}> /U <${userEntry.toString('hex')}> /P -4 >>`,
+      'ascii',
+    ),
+  ]);
+  return assemblePdf(
+    objects,
+    ` /Encrypt 6 0 R /ID [<${fileId.toString('hex')}><${fileId.toString('hex')}>]`,
+  );
+}
 
 /**
  * Return a structurally valid 1x1 PNG of exactly `totalBytes` bytes. The padding lives in a
@@ -429,6 +584,218 @@ function createCase(generation, mode, target, now, attachmentCount = 1, rcsPermi
     message,
     downloadRequests: 0,
   };
+}
+
+const FEAT07_CHAT_GUID = 'iMessage;-;feat07-fixture@example.invalid';
+const FEAT07_CONTACT_ADDRESS = 'feat07-fixture@example.invalid';
+
+function feat07Attachment(alias, index, options) {
+  const guid = `feat07-attachment-${String(index + 1).padStart(2, '0')}`;
+  return {
+    alias,
+    guid,
+    retryOnce: options.retryOnce === true,
+    bytes: options.bytes,
+    contentType: options.mimeType,
+    transferName: options.transferName,
+    requests: 0,
+    failures: 0,
+    bytesServed: 0,
+    model: {
+      originalROWID: 7_000 + index,
+      guid,
+      uti: options.uti,
+      mimeType: options.mimeType,
+      transferName: options.transferName,
+      totalBytes: options.bytes.length,
+      height: options.height ?? null,
+      width: options.width ?? null,
+      webUrl: null,
+      hasLivePhoto: false,
+      isSticker: false,
+      hideAttachment: false,
+      blurhash: null,
+      metadata: null,
+    },
+  };
+}
+
+function feat07Message(asset, index, chatSummary, handle, now) {
+  return {
+    originalROWID: 8_000 - index,
+    guid: `feat07-message-${String(index + 1).padStart(2, '0')}`,
+    text: null,
+    subject: null,
+    handleId: handle.originalROWID,
+    handle,
+    isFromMe: false,
+    isSent: true,
+    dateCreated: now - index * 1_000,
+    hasAttachments: true,
+    attachments: [asset.model],
+    chats: [chatSummary],
+    chatGuid: FEAT07_CHAT_GUID,
+  };
+}
+
+function createFeat07FixtureSet(now, videoBytes, largePdfBytes) {
+  if (
+    !Buffer.isBuffer(videoBytes) ||
+    videoBytes.length < 12 ||
+    videoBytes.length > 128 * 1024 * 1024 ||
+    videoBytes.subarray(4, 8).toString('ascii') !== 'ftyp'
+  ) {
+    throw new Error('The FEAT-07 video must be a bounded MP4 file.');
+  }
+  requireInteger(largePdfBytes, 'FEAT-07 large PDF bytes', 1_024, 64 * 1024 * 1024);
+
+  const assetSpecs = [
+    {
+      alias: 'video',
+      bytes: Buffer.from(videoBytes),
+      mimeType: 'video/mp4',
+      transferName: 'feat07-video.mp4',
+      uti: 'public.mpeg-4',
+    },
+    {
+      alias: 'image-two',
+      bytes: createExactLengthValidPng(128),
+      mimeType: 'image/png',
+      transferName: 'feat07-image-two.png',
+      uti: 'public.png',
+      width: 1,
+      height: 1,
+    },
+    {
+      alias: 'image-one',
+      bytes: Buffer.from(DL01_VALID_PNG),
+      mimeType: 'image/png',
+      transferName: 'feat07-image-one.png',
+      uti: 'public.png',
+      width: 1,
+      height: 1,
+    },
+    {
+      alias: 'document-valid',
+      bytes: createFeat07Pdf('Gator FEAT-07 valid document'),
+      mimeType: 'application/pdf',
+      transferName: '01-valid.pdf',
+      uti: 'com.adobe.pdf',
+    },
+    {
+      alias: 'document-retry',
+      bytes: createFeat07Pdf('Gator FEAT-07 retry document'),
+      mimeType: 'application/pdf',
+      transferName: '02-retry.pdf',
+      uti: 'com.adobe.pdf',
+      retryOnce: true,
+    },
+    {
+      alias: 'document-vcard',
+      bytes: Buffer.from(
+        'BEGIN:VCARD\r\nVERSION:3.0\r\nN:Fixture;Gator FEAT-07;;;\r\nFN:Gator FEAT-07 Fixture\r\nEMAIL:feat07@example.invalid\r\nEND:VCARD\r\n',
+        'utf8',
+      ),
+      mimeType: 'text/vcard',
+      transferName: '03-contact.vcf',
+      uti: 'public.vcard',
+    },
+    {
+      alias: 'document-encrypted',
+      bytes: createEncryptedFeat07Pdf(),
+      mimeType: 'application/pdf',
+      transferName: '04-encrypted-password-gator.pdf',
+      uti: 'com.adobe.pdf',
+    },
+    {
+      alias: 'document-malformed',
+      bytes: Buffer.from(
+        '%PDF-1.7\nGator FEAT-07 deliberately malformed document\n%%EOF\n',
+        'ascii',
+      ),
+      mimeType: 'application/pdf',
+      transferName: '05-malformed.pdf',
+      uti: 'com.adobe.pdf',
+    },
+    {
+      alias: 'document-large',
+      bytes: createExactLengthFeat07Pdf(largePdfBytes),
+      mimeType: 'application/pdf',
+      transferName: '06-large.pdf',
+      uti: 'com.adobe.pdf',
+    },
+    ...Array.from({ length: FEAT07_DOCUMENT_COUNT - 6 }, (_, index) => ({
+      alias: `document-page-${String(index + 1).padStart(2, '0')}`,
+      bytes: createFeat07Pdf(`Gator FEAT-07 page document ${String(index + 1).padStart(2, '0')}`),
+      mimeType: 'application/pdf',
+      transferName:
+        index === FEAT07_DOCUMENT_COUNT - 7
+          ? '52-oldest-page.pdf'
+          : `${String(index + 7).padStart(2, '0')}-page.pdf`,
+      uti: 'com.adobe.pdf',
+    })),
+  ];
+  const assets = assetSpecs.map((spec, index) => feat07Attachment(spec.alias, index, spec));
+  const handle = {
+    originalROWID: 707,
+    address: FEAT07_CONTACT_ADDRESS,
+    service: 'iMessage',
+    country: null,
+    uncanonicalizedId: null,
+    color: '#336699',
+    displayName: 'FEAT-07 Fixture',
+  };
+  const chatSummary = {
+    guid: FEAT07_CHAT_GUID,
+    originalROWID: 707,
+    chatIdentifier: FEAT07_CONTACT_ADDRESS,
+    displayName: 'FEAT-07 Fixture',
+    style: 45,
+    isArchived: false,
+    isPinned: false,
+    muteType: null,
+    participants: [handle],
+    backgroundChannelGuid: null,
+  };
+  const messages = assets.map((asset, index) =>
+    feat07Message(asset, index, chatSummary, handle, now),
+  );
+  const chat = { ...chatSummary, lastMessage: messages[0], lastReadMessageGuid: null };
+  return {
+    chat,
+    messages,
+    assets,
+    assetsByGuid: new Map(assets.map((asset) => [asset.guid, asset])),
+    documentCount: assets.filter(
+      (asset) =>
+        !asset.model.mimeType.startsWith('image/') && !asset.model.mimeType.startsWith('video/'),
+    ).length,
+  };
+}
+
+async function loadFeat07Video(configuration) {
+  const supplied = configuration?.feat07VideoBytes;
+  const path = configuration?.feat07VideoPath;
+  if (supplied !== undefined && path !== undefined) {
+    throw new Error('Provide FEAT-07 video bytes or a path, not both.');
+  }
+  if (supplied !== undefined) return Buffer.from(supplied);
+  if (typeof path !== 'string' || path.length === 0 || path.includes('\0')) {
+    throw new Error('The FEAT-07 fixture requires one local MP4 path.');
+  }
+  let file;
+  try {
+    file = await open(path, 'r');
+    const metadata = await file.stat();
+    if (!metadata.isFile() || metadata.size < 12 || metadata.size > 128 * 1024 * 1024) {
+      throw new Error('invalid bounded MP4');
+    }
+    return await file.readFile();
+  } catch {
+    throw new Error('The FEAT-07 MP4 could not be read.');
+  } finally {
+    await file?.close();
+  }
 }
 
 function socketLifetime(socket, milliseconds) {
@@ -887,6 +1254,38 @@ function clearRegistration(registration) {
 }
 
 function publicStatus(state, firebaseProjectId) {
+  if (state.feat07 !== null) {
+    return {
+      fixtureSet: 'feat07',
+      feat07: {
+        messages: state.feat07.messages.length,
+        documents: state.feat07.documentCount,
+        media: state.feat07.messages.length - state.feat07.documentCount,
+        assets: state.feat07.assets.map((asset) => ({
+          alias: asset.alias,
+          requests: asset.requests,
+          failures: asset.failures,
+          bytesServed: asset.bytesServed,
+        })),
+      },
+      totals: {
+        apiRequests: state.apiRequests,
+        controlRequests: state.controlRequests,
+        unauthorizedRequests: state.unauthorizedRequests,
+        downloadRequests: state.downloadRequests,
+        activeDownloadConnections: state.activeDownloadConnections,
+        fcmSends: state.fcmSends,
+      },
+      transfers: {
+        started: state.transferStarted,
+        bytesAttempted: state.transferBytesAttempted,
+        responsesFinished: state.transferResponsesFinished,
+        closedEarly: state.transferClosedEarly,
+        held: state.heldTransfers.size,
+      },
+      fcm: { enabled: false, registrationReady: false },
+    };
+  }
   const current = state.current;
   return {
     scenario: {
@@ -1025,18 +1424,44 @@ function appendHistory(state, scenario) {
   }
 }
 
+function serveFeat07Download(socket, asset, state) {
+  if (asset.retryOnce && asset.requests === 1) {
+    asset.failures += 1;
+    sendApiError(socket, 503);
+    return;
+  }
+  const transfer = beginTransfer(socket, state);
+  transfer.attempt(asset.bytes.length);
+  asset.bytesServed += asset.bytes.length;
+  socket.write(
+    responseHead(200, {
+      'Content-Type': asset.contentType,
+      'Content-Length': asset.bytes.length,
+    }),
+  );
+  socket.end(asset.bytes);
+}
+
 /**
  * Start a loopback-only raw HTTP fixture. It intentionally uses net.Server so responses may violate
  * HTTP body framing in ways node:http correctly refuses to generate.
  */
 export async function startDl01FixtureServer(configuration) {
   const authToken = requireAuthToken(configuration?.authToken);
+  const fixtureSet = configuration?.fixtureSet ?? 'dl01';
+  if (!FIXTURE_SET.has(fixtureSet)) throw new Error('The fixture set is invalid.');
   const host = configuration?.host ?? '127.0.0.1';
   if (host !== '127.0.0.1' && host !== '::1') {
     throw new Error('The DL-01 fixture may bind only to a loopback address.');
   }
   const port = requireInteger(configuration?.port ?? 0, 'port', 0, 65_535);
   const firebaseProjectId = requireProjectId(configuration?.firebaseProjectId);
+  if (
+    fixtureSet === 'feat07' &&
+    (firebaseProjectId !== null || configuration?.rcsPermissions === true)
+  ) {
+    throw new Error('The FEAT-07 fixture does not support FCM or RCS options.');
+  }
   const options = {
     requestReadTimeoutMs: requireInteger(
       configuration?.requestReadTimeoutMs ?? DEFAULT_REQUEST_READ_TIMEOUT_MS,
@@ -1091,6 +1516,14 @@ export async function startDl01FixtureServer(configuration) {
   if (typeof options.fetchImpl !== 'function')
     throw new Error('A fetch implementation is required.');
 
+  const feat07 =
+    fixtureSet === 'feat07'
+      ? createFeat07FixtureSet(
+          options.now(),
+          await loadFeat07Video(configuration),
+          configuration?.feat07LargePdfBytes ?? FEAT07_LARGE_PDF_BYTES,
+        )
+      : null;
   const first = createCase(
     1,
     'valid-image',
@@ -1100,6 +1533,8 @@ export async function startDl01FixtureServer(configuration) {
     options.rcsPermissions,
   );
   const state = {
+    fixtureSet,
+    feat07,
     generation: 1,
     current: first,
     history: new Map([[first.chatGuid, first]]),
@@ -1144,6 +1579,7 @@ export async function startDl01FixtureServer(configuration) {
     }
     if (pathname === `${CONTROL_PREFIX}/scenario`) {
       requireMethod(request, 'POST');
+      if (state.feat07 !== null) throw new FixtureHttpError(404);
       const body = parseJsonBody(request);
       if (!MODE_SET.has(body.mode) || !TARGET_SET.has(body.target)) {
         throw new FixtureHttpError(400);
@@ -1180,6 +1616,7 @@ export async function startDl01FixtureServer(configuration) {
     }
     if (pathname === `${CONTROL_PREFIX}/release-held`) {
       requireMethod(request, 'POST');
+      if (state.feat07 !== null) throw new FixtureHttpError(404);
       const body = parseJsonBody(request);
       if (Object.keys(body).length !== 0) throw new FixtureHttpError(400);
       let released = 0;
@@ -1191,6 +1628,7 @@ export async function startDl01FixtureServer(configuration) {
     }
     if (pathname === `${CONTROL_PREFIX}/fcm/send-current`) {
       requireMethod(request, 'POST');
+      if (state.feat07 !== null) throw new FixtureHttpError(404);
       const body = parseJsonBody(request);
       if (Object.keys(body).length !== 0) throw new FixtureHttpError(400);
       await sendCurrentFcm(state, options);
@@ -1200,7 +1638,7 @@ export async function startDl01FixtureServer(configuration) {
 
     if (pathname === `${API_PREFIX}/server/info`) {
       requireMethod(request, 'GET');
-      const scoped = SCOPED_CREDENTIAL.test(authToken);
+      const scoped = state.feat07 === null && SCOPED_CREDENTIAL.test(authToken);
       sendJson(
         socket,
         200,
@@ -1231,7 +1669,9 @@ export async function startDl01FixtureServer(configuration) {
     }
     if (pathname === `${API_PREFIX}/devices`) {
       requireMethod(request, 'POST');
-      if (!SCOPED_CREDENTIAL.test(authToken)) throw new FixtureHttpError(409);
+      if (state.feat07 !== null || !SCOPED_CREDENTIAL.test(authToken)) {
+        throw new FixtureHttpError(409);
+      }
       const ack = registrationAck(state.registration, parseJsonBody(request), options.now());
       sendJson(socket, 201, envelope(ack, 201));
       return;
@@ -1254,22 +1694,34 @@ export async function startDl01FixtureServer(configuration) {
       const body = parseJsonBody(request);
       const offset = boundedNumber(body.offset, 0);
       const limit = boundedNumber(body.limit, 1, 1);
-      sendJson(
-        socket,
-        200,
-        envelope({ chats: offset === 0 && limit > 0 ? [state.current.chat] : [] }),
-      );
+      const chat = state.feat07?.chat ?? state.current.chat;
+      sendJson(socket, 200, envelope({ chats: offset === 0 && limit > 0 ? [chat] : [] }));
       return;
     }
     if (pathname === `${API_PREFIX}/message/query`) {
       requireMethod(request, 'POST');
       const body = parseJsonBody(request);
-      const afterRowId = boundedNumber(body.afterRowId, 0);
-      const afterTimestamp = boundedNumber(body.after, 0);
-      const include =
-        state.current.message.originalROWID > afterRowId &&
-        (body.afterRowId !== undefined || state.current.message.dateCreated > afterTimestamp);
-      sendJson(socket, 200, envelope({ messages: include ? [state.current.message] : [] }));
+      if (state.feat07 !== null) {
+        const limit = boundedNumber(body.limit, 1_000, 1);
+        const rowCursor = boundedNumber(body.afterRowId, 0);
+        const timeCursor = boundedNumber(body.after, 0);
+        const messages = [...state.feat07.messages]
+          .filter((message) =>
+            body.afterRowId !== undefined
+              ? message.originalROWID > rowCursor
+              : message.dateCreated > timeCursor,
+          )
+          .sort((left, right) => left.originalROWID - right.originalROWID)
+          .slice(0, limit);
+        sendJson(socket, 200, envelope({ messages }));
+      } else {
+        const afterRowId = boundedNumber(body.afterRowId, 0);
+        const afterTimestamp = boundedNumber(body.after, 0);
+        const include =
+          state.current.message.originalROWID > afterRowId &&
+          (body.afterRowId !== undefined || state.current.message.dateCreated > afterTimestamp);
+        sendJson(socket, 200, envelope({ messages: include ? [state.current.message] : [] }));
+      }
       return;
     }
 
@@ -1282,7 +1734,23 @@ export async function startDl01FixtureServer(configuration) {
       ) {
         throw new FixtureHttpError(400);
       }
-      const contacts = body.addresses.includes(FIXTURE_CONTACT_ADDRESS) ? [fixtureContact()] : [];
+      const contacts =
+        state.feat07 !== null && body.addresses.includes(FEAT07_CONTACT_ADDRESS)
+          ? [
+              {
+                id: 'feat07-fixture-contact',
+                displayName: 'FEAT-07 Fixture',
+                firstName: 'FEAT-07',
+                lastName: 'Fixture',
+                phoneNumbers: [],
+                emails: [FEAT07_CONTACT_ADDRESS],
+                hasAvatar: false,
+                avatarEtag: null,
+              },
+            ]
+          : state.feat07 === null && body.addresses.includes(FIXTURE_CONTACT_ADDRESS)
+            ? [fixtureContact()]
+            : [];
       sendJson(socket, 200, envelope({ contacts }));
       return;
     }
@@ -1290,6 +1758,10 @@ export async function startDl01FixtureServer(configuration) {
     const contactAvatarMatch = /^\/api\/v1\/contact\/([^/]+)\/avatar$/.exec(pathname);
     if (contactAvatarMatch) {
       requireMethod(request, 'GET');
+      if (state.feat07 !== null) {
+        sendApiError(socket, 404);
+        return;
+      }
       const id = decodePathSegment(contactAvatarMatch[1]);
       if (id !== FIXTURE_CONTACT_ID) {
         sendApiError(socket, 404);
@@ -1311,6 +1783,17 @@ export async function startDl01FixtureServer(configuration) {
     if (attachmentMatch) {
       requireMethod(request, 'GET');
       const guid = decodePathSegment(attachmentMatch[1]);
+      const feat07Asset = state.feat07?.assetsByGuid.get(guid);
+      if (feat07Asset) {
+        feat07Asset.requests += 1;
+        state.downloadRequests += 1;
+        serveFeat07Download(socket, feat07Asset, state);
+        return;
+      }
+      if (state.feat07 !== null) {
+        sendApiError(socket, 404);
+        return;
+      }
       const scenario = [...state.history.values()].find(
         (candidate) =>
           candidate.target === 'attachment' && candidate.attachmentGuids.includes(guid),
@@ -1329,6 +1812,10 @@ export async function startDl01FixtureServer(configuration) {
     const backgroundMatch = /^\/api\/v1\/chat\/([^/]+)\/background$/.exec(pathname);
     if (backgroundMatch) {
       requireMethod(request, 'GET');
+      if (state.feat07 !== null) {
+        sendApiError(socket, 404);
+        return;
+      }
       const scenario = responseCaseForChat(state, backgroundMatch[1]);
       if (!scenario || scenario.target !== 'wallpaper') {
         sendApiError(socket, 404);
@@ -1344,6 +1831,21 @@ export async function startDl01FixtureServer(configuration) {
     const chatMessagesMatch = /^\/api\/v1\/chat\/([^/]+)\/message$/.exec(pathname);
     if (chatMessagesMatch) {
       requireMethod(request, 'GET');
+      const guid = decodePathSegment(chatMessagesMatch[1]);
+      if (state.feat07 !== null && guid === FEAT07_CHAT_GUID) {
+        const offset = numericQuery(request.url, 'offset', 0);
+        const limit = numericQuery(request.url, 'limit', 100);
+        sendJson(
+          socket,
+          200,
+          envelope({ messages: state.feat07.messages.slice(offset, offset + limit) }),
+        );
+        return;
+      }
+      if (state.feat07 !== null) {
+        sendApiError(socket, 404);
+        return;
+      }
       const scenario = responseCaseForChat(state, chatMessagesMatch[1]);
       if (!scenario) {
         sendApiError(socket, 404);
@@ -1362,6 +1864,15 @@ export async function startDl01FixtureServer(configuration) {
     const chatMatch = /^\/api\/v1\/chat\/([^/]+)$/.exec(pathname);
     if (chatMatch) {
       requireMethod(request, 'GET');
+      const guid = decodePathSegment(chatMatch[1]);
+      if (state.feat07 !== null && guid === FEAT07_CHAT_GUID) {
+        sendJson(socket, 200, envelope({ chat: state.feat07.chat }));
+        return;
+      }
+      if (state.feat07 !== null) {
+        sendApiError(socket, 404);
+        return;
+      }
       const scenario = responseCaseForChat(state, chatMatch[1]);
       if (!scenario) {
         sendApiError(socket, 404);
@@ -1394,6 +1905,7 @@ export async function startDl01FixtureServer(configuration) {
   }
   let closed = false;
   return Object.freeze({
+    fixtureSet,
     host,
     port: address.port,
     origin: `http://${host === '::1' ? '[::1]' : host}:${address.port}`,

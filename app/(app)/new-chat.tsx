@@ -6,19 +6,36 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { ApiError } from '@core/api/errors';
+import { currentRcsProviderEpoch } from '@core/rcs/providerIdentity';
 import { getDatabase } from '@db/database';
-import { findChatByParticipantAddresses } from '@db/repositories';
+import {
+  findChatByParticipantAddresses,
+  type ShareIntakeManifestIdentity,
+  type ShareIntakeNewChatPlan,
+} from '@db/repositories';
 import { createNewChat } from '@/services';
 import type { NewChatService } from '@/services/chatActions';
 import {
+  consumeShareIntakeBatchIfComplete,
+  discardShareIntakeItem,
+  discardShareIntakeBatch,
+  drainShareIntake,
+  isShareIntakeFileSettled,
+  isShareIntakeNewChatRetryWindowOpen,
+  isShareIntakeReceiptComplete,
+  prepareShareIntakeNewChatPlan,
+  readShareIntakeReceipt,
+} from '@/services/share/shareIntake';
+import {
   captureRealtimeDeliveryLease,
+  runTrackedRealtimeWork,
   subscribeRealtimeGenerationInvalidation,
 } from '@/services/realtime/deliveryCoordinator';
 import { sendImages } from '@/services/send';
 import { logger } from '@core/secure';
 import { consumeForwardAttachmentHandoff } from '@features/conversations/forwardAttachmentHandoff';
 import { useContactSearch } from '@features/contacts/useContactSearch';
-import { useRcsEnabled, useSessionStore } from '@state/sessionStore';
+import { useRcsMutationEnabled, useSessionStore } from '@state/sessionStore';
 import { useShareIntentStore, type SharedAttachment } from '@state/shareIntentStore';
 import { Icon, readableTextOn, Screen, ScreenHeader, useTheme } from '@ui';
 import { ContactSuggestionList } from '@ui/ContactSuggestionList';
@@ -78,29 +95,42 @@ export default function NewChatScreen(): React.JSX.Element {
   const [accountInvalidated, setAccountInvalidated] = useState(() => !accountLease.isCurrent());
   // A forwarded message pre-fills the composer. File paths stay out of this public route: the
   // only attachment parameter is an opaque, one-time key into a process-local handoff.
-  const { forwardText, forwardAttachmentHandoff } = useLocalSearchParams<{
+  const { forwardText, forwardAttachmentHandoff, shareBatch } = useLocalSearchParams<{
     forwardText?: string;
     forwardAttachmentHandoff?: string;
+    shareBatch?: string;
   }>();
   const [initialForwardHandoff] = useState(forwardAttachmentHandoff);
   const [recipients, setRecipients] = useState<Recipient[]>([]);
   const [query, setQuery] = useState('');
-  // Capture the dormant native-share store as mount-only state. The protected forward token is
-  // intentionally consumed from an effect below: a render that React abandons before commit must
-  // not remove its expiry timer and leak the file pins forever.
+  // Capture only the exact native claim named by this route. A stale/external URL cannot consume
+  // whichever share happens to be ambient in the process.
   const [initialContent] = useState(() => {
-    const { text, files, clear } = useShareIntentStore.getState();
+    const { batchId, createdAtMs, text, files } = useShareIntentStore.getState();
+    const ownsShare = typeof shareBatch === 'string' && batchId === shareBatch;
     return {
-      message: (forwardText ?? '') || text || '',
-      attachments: files,
-      clearShareIntent: text != null || files.length > 0 ? clear : null,
+      batchId: ownsShare ? batchId : null,
+      identity:
+        ownsShare && batchId && createdAtMs != null
+          ? ({
+              batchId,
+              nativeCreatedAtMs: createdAtMs,
+              hasText: text !== null,
+              fileCount: files.length,
+            } satisfies ShareIntakeManifestIdentity)
+          : null,
+      message: (forwardText ?? '') || (ownsShare ? text : null) || '',
+      attachments: ownsShare ? files : [],
     };
   });
   const [message, setMessage] = useState(initialContent.message);
   // A narrow live server capability admits new iMessage chats without restoring broad Private API.
   // Preserve the user's explicit choice if that capability disappears; never silently switch the
   // destination to another service while the draft is open.
-  const rcsEnabled = useRcsEnabled();
+  const rcsEnabled = useRcsMutationEnabled();
+  const rcsAttemptOwnershipSupported = useSessionStore(
+    (s) => s.serverInfo?.supports_rcs_send_attempt_ownership === true,
+  );
   const imessageEnabled = useSessionStore((s) => s.serverInfo?.supports_imessage_new_chat === true);
   const [requestedService, setRequestedService] = useState<NewChatService | null>(null);
   const selectedService: NewChatService | null =
@@ -108,7 +138,10 @@ export default function NewChatScreen(): React.JSX.Element {
   // Once a default becomes available, pin it for this draft. A later capability refresh must not
   // silently change a prepared RCS message into an iMessage (or the reverse).
   useEffect(() => {
-    if (!requestedService && selectedService) setRequestedService(selectedService);
+    if (!requestedService && selectedService) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- Pin the first available service for the lifetime of this authored draft.
+      setRequestedService(selectedService);
+    }
   }, [requestedService, selectedService]);
   const serviceAvailable =
     selectedService === 'RCS' ? rcsEnabled : selectedService === 'iMessage' && imessageEnabled;
@@ -123,9 +156,13 @@ export default function NewChatScreen(): React.JSX.Element {
     guid: string | null;
   } | null>(null);
   const [busy, setBusy] = useState(false);
-  // Dormant bounded-share handoff. IPC-01 currently has no producer or Android share target; a
-  // future owned native intake may populate this only after completing a bounded atomic batch.
-  const [staged, setStaged] = useState<SharedAttachment[]>(initialContent.attachments);
+  const submissionInFlightRef = useRef(false);
+  // Native-owned share files remain replayable until this screen confirms durable send ownership.
+  const [staged, setStaged] = useState<SharedAttachment[]>(
+    initialContent.identity ? [] : initialContent.attachments,
+  );
+  const [shareResumeReady, setShareResumeReady] = useState(initialContent.identity === null);
+  const [sharePlanPrepared, setSharePlanPrepared] = useState(false);
   const forwardConsumedRef = useRef(false);
   const abandonedRef = useRef(false);
   const forwardProtectionReleaseRef = useRef<(() => void) | null>(null);
@@ -150,7 +187,8 @@ export default function NewChatScreen(): React.JSX.Element {
 
   // Retained native/test callbacks must consult the lease itself: accountInvalidated drives the
   // host render, but an old closure could have captured its earlier false value.
-  const screenInteractionIsCurrent = (): boolean => accountLease.isCurrent();
+  const screenInteractionIsCurrent = (): boolean =>
+    accountLease.isCurrent() && shareResumeReady && !submissionInFlightRef.current;
   const accountUnavailable = accountInvalidated || !accountLease.isCurrent();
 
   // The synchronous subscription covers live retirement. This layout pass also dismisses an IME
@@ -158,13 +196,6 @@ export default function NewChatScreen(): React.JSX.Element {
   useLayoutEffect(() => {
     if (accountUnavailable) Keyboard.dismiss();
   }, [accountUnavailable]);
-
-  // Clear dormant external share state only after this consumer mounts, so an abandoned render
-  // cannot lose pending content.
-  useEffect(() => {
-    if (!accountLease.isCurrent()) return;
-    initialContent.clearShareIntent?.();
-  }, [accountLease, initialContent]);
 
   // Adopt the forward handoff only after React commits this screen. Every file is re-statted while
   // its stage-time protection is still held; the lease then survives until a successful durable
@@ -231,33 +262,134 @@ export default function NewChatScreen(): React.JSX.Element {
 
   const hasUnsavedChanges =
     !accountUnavailable &&
-    (recipients.length > 0 || query.length > 0 || message.length > 0 || staged.length > 0);
+    (initialContent.identity !== null ||
+      recipients.length > 0 ||
+      query.length > 0 ||
+      message.length > 0 ||
+      staged.length > 0);
   const { navigateWithoutPrompt } = useUnsavedChangesGuard({
     enabled: hasUnsavedChanges,
     title: busy ? 'Leave while starting the conversation?' : 'Discard new message?',
     message: busy
       ? 'The send may already be in progress, but this screen will not reopen after you leave.'
       : 'The recipients, message, and attachments in this draft will be cleared.',
-    onDiscard: () => {
+    onDiscard: async () => {
+      if (submissionInFlightRef.current || busy) {
+        showDialog('Shared item', 'Wait for the current send attempt to finish before leaving.');
+        return false;
+      }
+      if (initialContent.batchId) {
+        try {
+          const discarded = await discardShareIntakeBatch(initialContent.batchId, {
+            lease: accountLease,
+            drainNext: false,
+          });
+          if (!discarded || !accountLease.isCurrent()) return false;
+        } catch (error) {
+          if (!accountLease.isCurrent()) return false;
+          logger.warn('[new-chat] shared batch discard failed', {
+            errorName: error instanceof Error ? error.name : 'UnknownError',
+          });
+          showDialog('Shared item', 'Gator could not safely discard this share. Try again.');
+          return false;
+        }
+      }
       abandonedRef.current = true;
       releaseForwardProtection();
+      return true;
+    },
+    onAfterDiscardNavigation: () => {
+      if (initialContent.batchId) void drainShareIntake();
     },
   });
+
+  // Reconcile crash-safe receipts before exposing native files or allowing another /chat/new.
+  // This must sit below useUnsavedChangesGuard: its memoized navigation function is referenced by
+  // both the effect body and dependency list and cannot be read before that hook initializes it.
+  useEffect(() => {
+    const identity = initialContent.identity;
+    if (!identity || !accountLease.isCurrent()) return;
+    let active = true;
+    let receipt: Awaited<ReturnType<typeof readShareIntakeReceipt>> = null;
+    void runTrackedRealtimeWork(accountLease, async () => {
+      receipt = await readShareIntakeReceipt(identity);
+    })
+      .then(async (outcome) => {
+        if (outcome !== 'delivered' || !active || !accountLease.isCurrent()) return;
+        if (receipt?.destination) {
+          if (isShareIntakeReceiptComplete(receipt)) {
+            const consumed = await consumeShareIntakeBatchIfComplete(identity, {
+              lease: accountLease,
+              drainNext: false,
+            });
+            if (!consumed || !active || !accountLease.isCurrent()) return;
+            navigateWithoutPrompt(() =>
+              router.replace(`/chat/${encodeURIComponent(receipt!.destination!.chatGuid)}`),
+            );
+            void drainShareIntake();
+          } else {
+            navigateWithoutPrompt(() =>
+              router.replace(
+                `/chat/${encodeURIComponent(receipt!.destination!.chatGuid)}?shareBatch=${encodeURIComponent(identity.batchId)}`,
+              ),
+            );
+          }
+          return;
+        }
+        if (receipt?.newChatPlan) {
+          const plan = receipt.newChatPlan;
+          setRecipients([{ address: plan.address, name: plan.address }]);
+          setQuery('');
+          setMessage(plan.body);
+          setRequestedService(plan.service);
+          setSharePlanPrepared(true);
+        }
+        const replayableShareAttachments = initialContent.attachments.filter(
+          (file) =>
+            file.shareItemIndex == null || !isShareIntakeFileSettled(receipt, file.shareItemIndex),
+        );
+        setStaged((current) => {
+          const byUri = new Map(
+            [
+              ...current.filter((file) => file.origin !== 'share'),
+              ...replayableShareAttachments,
+            ].map((file) => [file.uri, file]),
+          );
+          return [...byUri.values()];
+        });
+        setShareResumeReady(true);
+      })
+      .catch((error: unknown) => {
+        if (!active || !accountLease.isCurrent()) return;
+        logger.warn('[new-chat] shared receipt reconciliation failed', {
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+        });
+        showDialog(
+          'Shared item',
+          'Gator could not safely resume this share. Its files were not sent.',
+        );
+      });
+    return () => {
+      active = false;
+    };
+  }, [accountLease, initialContent, navigateWithoutPrompt, router]);
 
   const chosen = new Set(recipients.map((r) => r.address.toLowerCase()));
 
   // Already-chosen recipients are filtered out of the shared hook's suggestions.
   const suggestions = useContactSearch(query).filter((c) => !chosen.has(c.address.toLowerCase()));
 
-  // Detect whether a chat with exactly these recipients already exists → offer to continue it.
-  // Effect cleanup plus the exact recipient key prevent an older set from publishing its shortcut;
-  // the captured account lease prevents a retired route from adopting a result into the next one.
+  // Offer a local existing-chat shortcut only where the stored participant is authoritative.
+  // Cached RCS participant strings are presentation data (display name, formatted number, or opaque
+  // id), so they can never choose a Google conversation; Start uses Google's find/create route.
+  // Effect cleanup plus the exact recipient key prevent an older iMessage set from publishing its
+  // shortcut, and the captured account lease prevents a retired route from adopting a result.
   const recipientKey = JSON.stringify([selectedService, recipients.map((r) => r.address)]);
   useEffect(() => {
     let active = true;
     if (
       recipients.length === 0 ||
-      !selectedService ||
+      selectedService !== 'iMessage' ||
       accountUnavailable ||
       !accountLease.isCurrent()
     )
@@ -282,23 +414,52 @@ export default function NewChatScreen(): React.JSX.Element {
     };
   }, [accountLease, accountUnavailable, recipients, recipientKey, selectedService]);
   const existingGuid =
-    !accountUnavailable && existingMatch?.recipientKey === recipientKey ? existingMatch.guid : null;
+    !accountUnavailable &&
+    shareResumeReady &&
+    !sharePlanPrepared &&
+    existingMatch?.recipientKey === recipientKey
+      ? existingMatch.guid
+      : null;
 
   const addRecipient = (r: Recipient): void => {
-    if (!screenInteractionIsCurrent()) return;
+    if (!screenInteractionIsCurrent() || sharePlanPrepared) return;
     if (chosen.has(r.address.toLowerCase())) return;
     setRecipients((prev) => [...prev, r]);
     setQuery('');
   };
 
   const removeRecipient = (address: string): void => {
-    if (!screenInteractionIsCurrent()) return;
+    if (!screenInteractionIsCurrent() || sharePlanPrepared) return;
     setRecipients((prev) => prev.filter((r) => r.address !== address));
   };
 
-  const removeStaged = (uri: string): void => {
-    if (!screenInteractionIsCurrent()) return;
-    setStaged((prev) => prev.filter((f) => f.uri !== uri));
+  const removeStaged = async (file: SharedAttachment): Promise<void> => {
+    if (!screenInteractionIsCurrent() || busy) return;
+    const identity = initialContent.identity;
+    if (identity && file.origin === 'share') {
+      if (file.shareItemIndex == null) return;
+      try {
+        const outcome = await runTrackedRealtimeWork(accountLease, (lease) =>
+          discardShareIntakeItem(
+            {
+              identity,
+              itemIndex: file.shareItemIndex!,
+              appliedAtMs: Date.now(),
+            },
+            () => lease.isCurrent(),
+          ),
+        );
+        if (outcome !== 'delivered' || !accountLease.isCurrent()) return;
+      } catch (error) {
+        if (!accountLease.isCurrent()) return;
+        logger.warn('[new-chat] shared attachment discard failed', {
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+        });
+        showDialog('Shared item', 'Gator could not safely remove this shared file.');
+        return;
+      }
+    }
+    setStaged((prev) => prev.filter((candidate) => candidate.uri !== file.uri));
   };
 
   // Backspace on an empty input removes the last chip (iOS token-field behavior).
@@ -357,6 +518,11 @@ export default function NewChatScreen(): React.JSX.Element {
   const imessageTextTooLong =
     selectedService === 'iMessage' &&
     new TextEncoder().encode(message.trim()).byteLength > MAX_INITIAL_IMESSAGE_TEXT_BYTES;
+  const shareNewIMessageBlocked =
+    initialContent.identity !== null && selectedService === 'iMessage';
+  const shareRetryExpired =
+    initialContent.identity !== null &&
+    !isShareIntakeNewChatRetryWindowOpen(initialContent.identity);
 
   // This slice creates only 1:1 chats. Group creation is a later helper capability.
   const tooManyRecipients = effectiveRecipients.length > 1;
@@ -366,8 +532,14 @@ export default function NewChatScreen(): React.JSX.Element {
   const canStart =
     !accountUnavailable &&
     !busy &&
+    shareResumeReady &&
     !!selectedService &&
     serviceAvailable &&
+    !shareNewIMessageBlocked &&
+    !shareRetryExpired &&
+    (initialContent.identity === null ||
+      selectedService !== 'RCS' ||
+      rcsAttemptOwnershipSupported) &&
     effectiveRecipients.length === 1 &&
     message.trim().length > 0 &&
     (selectedService !== 'iMessage' ||
@@ -375,16 +547,71 @@ export default function NewChatScreen(): React.JSX.Element {
 
   const onStart = async (): Promise<void> => {
     const recipient = effectiveRecipients[0];
-    if (!canStart || !recipient || !selectedService || !accountLease.isCurrent()) return;
+    if (
+      !canStart ||
+      !recipient ||
+      !selectedService ||
+      !accountLease.isCurrent() ||
+      submissionInFlightRef.current
+    )
+      return;
+    if (initialContent.identity && !isShareIntakeNewChatRetryWindowOpen(initialContent.identity)) {
+      showDialog(
+        'Shared item',
+        'This share is too old to retry without risking a duplicate message. Go Back and choose Discard.',
+      );
+      return;
+    }
     // Bind navigation, follow-up attachment sends, and error UI to the account that owned the tap.
     // createNewChat receives this exact lease before its first await; retaining it here also
     // prevents an old completion from routing or showing a dialog after reconnect.
+    submissionInFlightRef.current = true;
     setBusy(true);
     try {
       const body = message.trim();
-      const attemptKey = JSON.stringify([selectedService, recipient.address.trim(), body]);
+      const address = recipient.address.trim();
+      const identity = initialContent.identity;
+      let sharePlan: ShareIntakeNewChatPlan | undefined;
       let tempGuid: string | undefined;
-      if (selectedService === 'iMessage') {
+      if (identity) {
+        const providerEpoch =
+          selectedService === 'RCS'
+            ? currentRcsProviderEpoch(useSessionStore.getState().serverInfo)
+            : null;
+        if (
+          selectedService === 'RCS' &&
+          (!providerEpoch ||
+            useSessionStore.getState().serverInfo?.supports_rcs_send_attempt_ownership !== true)
+        ) {
+          throw new Error('Safe retry ownership is unavailable for this RCS conversation.');
+        }
+        const proposedPlan: ShareIntakeNewChatPlan = {
+          address,
+          body,
+          service: selectedService,
+          providerEpoch,
+          tempGuid: `share-${identity.batchId}`,
+          clientAttemptGeneration: 1,
+        };
+        let persistedPlan: ShareIntakeNewChatPlan | undefined;
+        const preparation = await runTrackedRealtimeWork(accountLease, async (lease) => {
+          persistedPlan = await prepareShareIntakeNewChatPlan(
+            identity,
+            proposedPlan,
+            () =>
+              lease.isCurrent() &&
+              (selectedService !== 'RCS' ||
+                (currentRcsProviderEpoch(useSessionStore.getState().serverInfo) === providerEpoch &&
+                  useSessionStore.getState().serverInfo?.supports_rcs_send_attempt_ownership ===
+                    true)),
+          );
+        });
+        if (preparation !== 'delivered' || !persistedPlan) return;
+        sharePlan = persistedPlan;
+        tempGuid = persistedPlan.tempGuid;
+        setSharePlanPrepared(true);
+      } else if (selectedService === 'iMessage') {
+        const attemptKey = JSON.stringify([selectedService, address, body]);
         tempGuid = createAttemptsRef.current.get(attemptKey);
         if (!tempGuid) {
           tempGuid = `temp-${Crypto.randomUUID()}`;
@@ -392,18 +619,39 @@ export default function NewChatScreen(): React.JSX.Element {
         }
       }
       const guid =
-        selectedService === 'RCS'
-          ? await createNewChat([recipient.address], body, accountLease)
-          : await createNewChat([recipient.address], body, accountLease, 'iMessage', tempGuid);
+        identity && sharePlan
+          ? await createNewChat([address], body, accountLease, selectedService, tempGuid, {
+              identity,
+              plan: sharePlan,
+            })
+          : selectedService === 'RCS'
+            ? await createNewChat([address], body, accountLease)
+            : await createNewChat([address], body, accountLease, 'iMessage', tempGuid);
       if (!accountLease.isCurrent() || abandonedRef.current) return;
       // Send any shared files into the new (or matched) chat.
       if (staged.length > 0) {
-        const sent = await sendImages(
-          { chatGuid: guid, images: staged },
-          accountLease,
-          presentSendIssue,
-        );
+        const sent = identity
+          ? await sendImages(
+              { chatGuid: guid, images: staged, shareIntake: identity },
+              accountLease,
+              presentSendIssue,
+              (admission) => {
+                if (admission.queued && accountLease.isCurrent()) {
+                  setStaged((current) => current.filter((file) => file.uri !== admission.uri));
+                }
+              },
+            )
+          : await sendImages({ chatGuid: guid, images: staged }, accountLease, presentSendIssue);
         if (sent == null) return;
+      }
+      if (
+        identity &&
+        !(await consumeShareIntakeBatchIfComplete(identity, {
+          lease: accountLease,
+          drainNext: false,
+        }))
+      ) {
+        throw new Error('The shared content is not fully owned yet.');
       }
       // The submission fully succeeded. Sent files now have durable outgoing owners, while any
       // removed forward files were deliberately excluded; neither case needs the handoff pins.
@@ -411,6 +659,7 @@ export default function NewChatScreen(): React.JSX.Element {
       releaseForwardProtection();
       if (!accountLease.isCurrent() || abandonedRef.current) return;
       navigateWithoutPrompt(() => router.replace(`/chat/${encodeURIComponent(guid)}`));
+      if (identity) void drainShareIntake();
     } catch (e) {
       if (!accountLease.isCurrent() || abandonedRef.current) return;
       // Log at ERROR: only error-level lines reach ErrorReportSink, and this is a user-visible
@@ -424,9 +673,14 @@ export default function NewChatScreen(): React.JSX.Element {
           ? knownNotDispatched
             ? 'Couldn’t start the iMessage conversation. The address or Messages helper may be unavailable. Your draft is still here.'
             : 'We could not confirm whether the iMessage was sent. Check Messages or the conversation before trying again. Your draft is still here.'
-          : 'Couldn’t start the conversation. Check the address and your server connection.',
+          : initialContent.identity
+            ? knownNotDispatched
+              ? 'Couldn’t start the conversation. Check the address and your server connection. Your shared item is still here.'
+              : 'Gator could not confirm whether the first RCS message was sent. Check Google Messages. To stop this share, go Back and choose Discard; Gator will not retry it automatically.'
+            : 'Couldn’t start the conversation. Check the address and your server connection.',
       );
     } finally {
+      submissionInFlightRef.current = false;
       if (accountLease.isCurrent() && !abandonedRef.current) setBusy(false);
     }
   };
@@ -469,6 +723,11 @@ export default function NewChatScreen(): React.JSX.Element {
         </Text>
       ) : (
         <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.content}>
+          {!shareResumeReady ? (
+            <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
+              Checking the shared item before it can be edited…
+            </Text>
+          ) : null}
           <View style={[styles.toLine, { borderBottomColor: theme.color.separator }]}>
             <Text style={[styles.toLabel, { color: theme.color.secondaryLabel }]}>To:</Text>
             <View style={styles.chipsWrap}>
@@ -478,6 +737,7 @@ export default function NewChatScreen(): React.JSX.Element {
                   <Pressable
                     key={r.address}
                     onPress={() => removeRecipient(r.address)}
+                    disabled={busy || !shareResumeReady || sharePlanPrepared}
                     style={[styles.chip, { backgroundColor: chipColor }]}
                     accessibilityRole="button"
                     accessibilityLabel={`Remove ${r.name}`}
@@ -490,6 +750,7 @@ export default function NewChatScreen(): React.JSX.Element {
               })}
               <TextInput
                 value={query}
+                editable={!busy && shareResumeReady && !sharePlanPrepared}
                 onChangeText={(text) => {
                   if (!screenInteractionIsCurrent()) return;
                   if (text.endsWith(',')) onCommaCommit(text);
@@ -509,9 +770,14 @@ export default function NewChatScreen(): React.JSX.Element {
 
           {existingGuid ? (
             <Pressable
+              disabled={busy}
               onPress={() => {
                 if (!screenInteractionIsCurrent()) return;
-                router.replace(`/chat/${encodeURIComponent(existingGuid)}`);
+                router.replace(
+                  initialContent.batchId
+                    ? `/chat/${encodeURIComponent(existingGuid)}?shareBatch=${encodeURIComponent(initialContent.batchId)}`
+                    : `/chat/${encodeURIComponent(existingGuid)}`,
+                );
               }}
               style={[styles.existing, { backgroundColor: theme.color.secondaryBackground }]}
             >
@@ -536,10 +802,15 @@ export default function NewChatScreen(): React.JSX.Element {
                     key={service}
                     accessibilityRole="radio"
                     accessibilityLabel={service}
-                    accessibilityState={{ selected, disabled: !available }}
-                    disabled={!available}
+                    accessibilityState={{
+                      selected,
+                      disabled: busy || !available || !shareResumeReady || sharePlanPrepared,
+                    }}
+                    disabled={busy || !available || !shareResumeReady || sharePlanPrepared}
                     onPress={() => {
-                      if (screenInteractionIsCurrent()) setRequestedService(service);
+                      if (screenInteractionIsCurrent() && !sharePlanPrepared) {
+                        setRequestedService(service);
+                      }
                     }}
                     style={[
                       styles.serviceChoice,
@@ -570,6 +841,32 @@ export default function NewChatScreen(): React.JSX.Element {
                 ? 'New conversations use RCS and support one recipient.'
                 : 'Starting a new conversation requires an available RCS bridge. Open an existing conversation to send a message.'}
           </Text>
+
+          {shareNewIMessageBlocked ? (
+            <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
+              To share with iMessage, open an existing conversation above. Starting a new iMessage
+              conversation from Share is disabled because a retry could use the wrong Messages
+              account. Choose RCS when no existing iMessage conversation is available.
+            </Text>
+          ) : null}
+
+          {shareRetryExpired ? (
+            <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
+              This share is too old to retry safely. Go Back and choose Discard.
+            </Text>
+          ) : null}
+
+          {initialContent.identity && selectedService === 'RCS' && !rcsAttemptOwnershipSupported ? (
+            <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
+              This server cannot safely retry a shared RCS conversation yet.
+            </Text>
+          ) : null}
+
+          {sharePlanPrepared ? (
+            <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
+              Recipient, service, and message are locked so retrying cannot send the share twice.
+            </Text>
+          ) : null}
 
           {tooManyRecipients ? (
             <Text style={[styles.rcsNote, { color: theme.color.secondaryLabel }]}>
@@ -632,7 +929,8 @@ export default function NewChatScreen(): React.JSX.Element {
                     </View>
                   )}
                   <Pressable
-                    onPress={() => removeStaged(f.uri)}
+                    onPress={() => void removeStaged(f)}
+                    disabled={busy || !shareResumeReady}
                     hitSlop={6}
                     style={styles.stagedRemove}
                     accessibilityRole="button"
@@ -647,6 +945,7 @@ export default function NewChatScreen(): React.JSX.Element {
 
           <TextInput
             value={message}
+            editable={!busy && shareResumeReady && !sharePlanPrepared}
             onChangeText={(text) => {
               if (!screenInteractionIsCurrent()) return;
               setMessage(text);

@@ -1,5 +1,10 @@
 import { and, eq, ne, sql } from 'drizzle-orm';
-import type { MessageMention } from '@core/api/endpoints/messages';
+import {
+  CURRENT_LOCATION_MAX_REPLAY_AGE_MS,
+  type IMessageTextFormattingRange,
+  type MessageMention,
+} from '@core/api/endpoints/messages';
+import { ClientErrorCode, LOCATION_DELIVERY_UNCONFIRMED_COPY } from '@utils';
 import { isRcsChatGuid } from '@utils/chat';
 import { chats, messageDeletionLedger, messages, outgoingQueue } from '../schema';
 import {
@@ -55,21 +60,81 @@ export interface ExactOutgoingAttemptSuccess {
   readonly attemptGuid: string;
   readonly clientAttemptGeneration: number;
   readonly guid: string;
+  /** Exact chat resolved by the ingestion owner. Required to recover after the temp row is purged. */
+  readonly claimedChatId?: number;
   readonly dateCreated: number | null;
   readonly dateDelivered: number | null;
 }
 
 export type ExactOutgoingAttemptSuccessDisposition =
-  'reconciled' | 'already-reconciled' | 'attempt-owner-pending' | 'stale-attempt' | 'unmatched';
+  | 'reconciled'
+  | 'already-reconciled'
+  | 'attempt-owner-pending'
+  | 'stale-attempt'
+  | 'owner-conflict'
+  | 'unmatched';
 
 interface AttemptOwnerSnapshot {
   readonly guid: string;
+  readonly chatId: number;
+  readonly chatGuid: string;
   readonly activeSendAttemptGuid: string | null;
   readonly attemptOwnerPending: number;
   readonly attemptOwnerGeneration: number;
   readonly sendState: string | null;
   readonly error: number | null;
   readonly errorMessage: string | null;
+}
+
+/**
+ * Contain a confirmed exact success whose canonical identity conflicts with retained ownership.
+ * The source bubble is independently proven before this helper is called. Never install the
+ * disputed attempt GUID or alter the canonical/alias/ledger reservation.
+ */
+function settleProvenExactOwnerConflictWithinTransaction(
+  context: DbTransactionContext,
+  owner: AttemptOwnerSnapshot,
+  success: ExactOutgoingAttemptSuccess,
+  stickyError: boolean,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    await db
+      .update(messages)
+      .set({
+        attemptOwnerPending: false,
+        ...(stickyError ? {} : { sendState: 'sent' as const, error: 0, errorMessage: null }),
+      })
+      .where(
+        and(
+          eq(messages.guid, owner.guid),
+          eq(messages.chatId, owner.chatId),
+          eq(messages.attemptOwnerGeneration, owner.attemptOwnerGeneration),
+        ),
+      );
+    if (!stickyError) {
+      await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, success.tempGuid));
+    }
+  });
+}
+
+/** Keep a confirmed legacy/private-API send from retrying when identity promotion is ambiguous. */
+function settleConfirmedLegacyIdentityConflictWithinTransaction(
+  context: DbTransactionContext,
+  tempGuid: string,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    await db
+      .update(messages)
+      .set({
+        sendState: 'sent',
+        error: 0,
+        errorMessage: null,
+        activeSendAttemptGuid: null,
+        attemptOwnerPending: false,
+      })
+      .where(eq(messages.guid, tempGuid));
+    await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
+  });
 }
 
 /** Resolve the durable temp identity first, then its alias, with a canonical fallback for repair. */
@@ -80,37 +145,105 @@ async function findAttemptOwnerSnapshotWithinTransaction(
 ): Promise<AttemptOwnerSnapshot | null> {
   return runInTransactionContext(context, async (db) => {
     const direct = await db.all<AttemptOwnerSnapshot>(sql`
-      SELECT guid, active_send_attempt_guid AS activeSendAttemptGuid,
-             attempt_owner_pending AS attemptOwnerPending,
-             attempt_owner_generation AS attemptOwnerGeneration,
-             send_state AS sendState, error, error_message AS errorMessage
-        FROM messages
-       WHERE guid = ${tempGuid}
+      SELECT m.guid, m.chat_id AS chatId, c.guid AS chatGuid,
+             m.active_send_attempt_guid AS activeSendAttemptGuid,
+             m.attempt_owner_pending AS attemptOwnerPending,
+             m.attempt_owner_generation AS attemptOwnerGeneration,
+             m.send_state AS sendState, m.error, m.error_message AS errorMessage
+        FROM messages m
+        JOIN chats c ON c.id = m.chat_id
+       WHERE m.guid = ${tempGuid}
        LIMIT 1
     `);
     if (direct[0]) return direct[0];
     const aliased = await db.all<AttemptOwnerSnapshot>(sql`
-      SELECT m.guid, m.active_send_attempt_guid AS activeSendAttemptGuid,
+      SELECT m.guid, m.chat_id AS chatId, c.guid AS chatGuid,
+             m.active_send_attempt_guid AS activeSendAttemptGuid,
              m.attempt_owner_pending AS attemptOwnerPending,
              m.attempt_owner_generation AS attemptOwnerGeneration,
              m.send_state AS sendState, m.error, m.error_message AS errorMessage
         FROM message_guid_aliases a
         JOIN messages m ON m.guid = a.canonical_guid
+        JOIN chats c ON c.id = m.chat_id
        WHERE a.alias_guid = ${tempGuid}
+         AND a.chat_guid = c.guid
        LIMIT 1
     `);
     if (aliased[0]) return aliased[0];
+    const aliasReservations = await db.all<{ aliasGuid: string }>(sql`
+      SELECT alias_guid AS aliasGuid
+        FROM message_guid_aliases
+       WHERE alias_guid = ${tempGuid}
+       LIMIT 1
+    `);
+    // A retained alias that did not satisfy the scoped join above is a quarantine/conflict, not
+    // permission to trust a payload-selected canonical fallback.
+    if (aliasReservations[0]) return null;
     if (!fallbackGuid || fallbackGuid === tempGuid) return null;
     const fallback = await db.all<AttemptOwnerSnapshot>(sql`
-      SELECT guid, active_send_attempt_guid AS activeSendAttemptGuid,
-             attempt_owner_pending AS attemptOwnerPending,
-             attempt_owner_generation AS attemptOwnerGeneration,
-             send_state AS sendState, error, error_message AS errorMessage
-        FROM messages
-       WHERE guid = ${fallbackGuid}
+      SELECT m.guid, m.chat_id AS chatId, c.guid AS chatGuid,
+             m.active_send_attempt_guid AS activeSendAttemptGuid,
+             m.attempt_owner_pending AS attemptOwnerPending,
+             m.attempt_owner_generation AS attemptOwnerGeneration,
+             m.send_state AS sendState, m.error, m.error_message AS errorMessage
+        FROM messages m
+        JOIN chats c ON c.id = m.chat_id
+       WHERE m.guid = ${fallbackGuid}
        LIMIT 1
     `);
     return fallback[0] ?? null;
+  });
+}
+
+/** Check before mutating attempt ownership whether a temp-to-canonical handoff is ambiguous. */
+async function hasOutgoingIdentityHandoverConflictWithinTransaction(
+  context: DbTransactionContext,
+  tempGuid: string,
+  realGuid: string,
+  ownerChatGuid: string,
+): Promise<boolean> {
+  return runInTransactionContext(context, async (db) => {
+    if (tempGuid === realGuid) return false;
+    const messageOwners: Array<{ guid: string; chatGuid: string }> = await db.all(sql`
+      SELECT m.guid, c.guid AS chatGuid
+        FROM messages m
+        JOIN chats c ON c.id = m.chat_id
+       WHERE m.guid IN (${tempGuid}, ${realGuid})
+    `);
+    if (messageOwners.some((owner) => owner.chatGuid !== ownerChatGuid)) return true;
+    const messageOwnerByGuid = new Map(messageOwners.map((owner) => [owner.guid, owner.chatGuid]));
+    const tombstones: Array<{ guid: string; chatGuid: string | null }> = await db.all(sql`
+      SELECT guid, chat_guid AS chatGuid
+        FROM message_deletion_ledger
+       WHERE guid IN (${tempGuid}, ${realGuid})
+    `);
+    for (const tombstone of tombstones) {
+      if (tombstone.chatGuid != null && tombstone.chatGuid !== ownerChatGuid) {
+        return true;
+      }
+      if (
+        tombstone.chatGuid == null &&
+        tombstone.guid === realGuid &&
+        messageOwnerByGuid.get(realGuid) !== ownerChatGuid
+      ) {
+        return true;
+      }
+    }
+    const aliases = await db.all<{ canonicalGuid: string; chatGuid: string | null }>(sql`
+      SELECT canonical_guid AS canonicalGuid, chat_guid AS chatGuid
+        FROM message_guid_aliases
+       WHERE alias_guid = ${tempGuid}
+       LIMIT 1
+    `);
+    const alias = aliases[0];
+    if (
+      alias &&
+      (alias.canonicalGuid !== realGuid ||
+        (alias.chatGuid != null && alias.chatGuid !== ownerChatGuid))
+    ) {
+      return true;
+    }
+    return false;
   });
 }
 
@@ -141,32 +274,52 @@ async function handoverOutgoingIdentityWithinTransaction(
   context: DbTransactionContext,
   tempGuid: string,
   realGuid: string,
+  ownerChatGuid: string,
 ): Promise<number | null> {
   return runInTransactionContext(context, async (db) => {
     if (tempGuid === realGuid) return null;
-    await recordMessageGuidAliasWithinTransaction(context, tempGuid, realGuid);
-    const tombstones: Array<{ dateDeleted: number }> = await db.all<{ dateDeleted: number }>(sql`
-      SELECT date_deleted AS dateDeleted
+    if (
+      await hasOutgoingIdentityHandoverConflictWithinTransaction(
+        context,
+        tempGuid,
+        realGuid,
+        ownerChatGuid,
+      )
+    ) {
+      throw new MessageGuidAliasConflictError();
+    }
+    const tombstones: Array<{
+      guid: string;
+      dateDeleted: number;
+      chatGuid: string | null;
+    }> = await db.all(sql`
+      SELECT guid, date_deleted AS dateDeleted, chat_guid AS chatGuid
         FROM message_deletion_ledger
        WHERE guid IN (${tempGuid}, ${realGuid})
-      UNION ALL
+    `);
+    await recordMessageGuidAliasWithinTransaction(context, tempGuid, realGuid, ownerChatGuid);
+    const messageTombstones: Array<{ dateDeleted: number }> = await db.all(sql`
       SELECT date_deleted AS dateDeleted
         FROM messages
-       WHERE guid = ${tempGuid} AND date_deleted IS NOT NULL
+       WHERE guid = ${tempGuid}
+         AND date_deleted IS NOT NULL
+         AND chat_id = (SELECT id FROM chats WHERE guid = ${ownerChatGuid} LIMIT 1)
     `);
     const dateDeleted = tombstones.reduce<number | null>(
       (latest, row) => (latest == null || row.dateDeleted > latest ? row.dateDeleted : latest),
-      null,
+      messageTombstones[0]?.dateDeleted ?? null,
     );
     if (dateDeleted == null) return null;
 
     await db
       .insert(messageDeletionLedger)
-      .values({ guid: realGuid, dateDeleted })
+      .values({ guid: realGuid, dateDeleted, chatGuid: ownerChatGuid })
       .onConflictDoUpdate({
         target: messageDeletionLedger.guid,
+        setWhere: sql`${messageDeletionLedger.chatGuid} IS NULL OR ${messageDeletionLedger.chatGuid} = excluded.chat_guid`,
         set: {
           dateDeleted: sql`MAX(${messageDeletionLedger.dateDeleted}, excluded.date_deleted)`,
+          chatGuid: sql`COALESCE(${messageDeletionLedger.chatGuid}, excluded.chat_guid)`,
         },
       });
     await db
@@ -175,7 +328,11 @@ async function handoverOutgoingIdentityWithinTransaction(
         dateDeleted: sql`COALESCE(MAX(${messages.dateDeleted}, ${dateDeleted}), ${messages.dateDeleted}, ${dateDeleted})`,
       })
       .where(eq(messages.guid, tempGuid));
-    await db.delete(messageDeletionLedger).where(eq(messageDeletionLedger.guid, tempGuid));
+    await db.run(sql`
+      DELETE FROM message_deletion_ledger
+       WHERE guid = ${tempGuid}
+         AND (chat_guid IS NULL OR chat_guid = ${ownerChatGuid})
+    `);
     return dateDeleted;
   });
 }
@@ -202,7 +359,7 @@ async function handoverOutgoingIdentityWithinTransaction(
  */
 
 /**
- * INSERT ATOMICITY, shared by all four optimistic-send helpers: the queue row and the visible
+ * INSERT ATOMICITY, shared by all optimistic-send helpers: the queue row and the visible
  * message row commit TOGETHER, in ONE transaction. Neither half is any use alone, and both
  * failure modes are silent:
  *  - message without a queue row → a bubble frozen on 'sending' forever. Nothing recovers it (the
@@ -233,8 +390,15 @@ export interface InsertOutgoingTextArgs {
   effectId?: string;
   subject?: string;
   mentions?: MessageMention[];
+  textFormatting?: IMessageTextFormattingRange[];
   /** Current server promises exact RCS success/failure attempt correlation for this send. */
   attemptAware?: boolean;
+  /** Marks the dedicated one-shot effect payload for crash recovery without enabling replay. */
+  oneShotEffect?: boolean;
+  /** Marks the dedicated one-shot mention payload for crash recovery without enabling replay. */
+  oneShotMention?: boolean;
+  /** Marks the dedicated one-shot formatted payload for crash recovery without enabling replay. */
+  oneShotFormatted?: boolean;
 }
 
 /**
@@ -258,10 +422,14 @@ export async function insertOutgoingTextWithinTransaction(
         selectedMessageGuid: args.selectedMessageGuid,
         partIndex: args.selectedMessageGuid ? args.partIndex : undefined,
         effectId: args.effectId,
+        imessageEffectV1: args.oneShotEffect === true ? true : undefined,
+        imessageMentionV1: args.oneShotMention === true ? true : undefined,
+        imessageFormattedV1: args.oneShotFormatted === true ? true : undefined,
         subject: args.subject,
         // Persisted so a crash-recovery resend keeps the subject + mention spans
         // (the queue re-POST builds its request from this payload alone).
         mentions: args.mentions?.length ? args.mentions : undefined,
+        textFormatting: args.textFormatting?.length ? args.textFormatting : undefined,
       }),
     });
     await db.insert(messages).values({
@@ -280,6 +448,28 @@ export async function insertOutgoingTextWithinTransaction(
       threadOriginatorGuid: args.threadOriginatorGuid ?? null,
       threadOriginatorPart: args.threadOriginatorGuid ? (args.partIndex ?? null) : null,
       expressiveSendStyleId: args.effectId ?? null,
+      attributedBody: args.textFormatting?.length
+        ? JSON.stringify([
+            {
+              string: args.text,
+              runs: args.textFormatting.map((range) => ({
+                range: [range.start, range.length],
+                attributes: Object.fromEntries(
+                  range.styles.map((style) => [
+                    style === 'bold'
+                      ? '__kIMTextBoldAttributeName'
+                      : style === 'italic'
+                        ? '__kIMTextItalicAttributeName'
+                        : style === 'underline'
+                          ? '__kIMTextUnderlineAttributeName'
+                          : '__kIMTextStrikethroughAttributeName',
+                    1,
+                  ]),
+                ),
+              })),
+            },
+          ])
+        : null,
     });
     await db
       .update(chats)
@@ -390,6 +580,64 @@ export async function insertOutgoingContact(
 ): Promise<OutgoingInsertResult> {
   // ONE transaction — see the insert-atomicity note above insertOutgoingText.
   return withDbTransaction(db, (context) => insertOutgoingContactWithinTransaction(context, args));
+}
+
+export interface InsertOutgoingLocationArgs {
+  tempGuid: string;
+  chatGuid: string;
+  latitude: number;
+  longitude: number;
+  now: number;
+}
+
+/** Transaction-only optimistic current-location insert with its durable idempotent retry row. */
+export function insertOutgoingLocationWithinTransaction(
+  context: DbTransactionContext,
+  args: InsertOutgoingLocationArgs,
+): Promise<OutgoingInsertResult> {
+  if (!Number.isFinite(args.latitude) || args.latitude < -90 || args.latitude > 90) {
+    throw new RangeError('latitude must be finite and between -90 and 90');
+  }
+  if (!Number.isFinite(args.longitude) || args.longitude < -180 || args.longitude > 180) {
+    throw new RangeError('longitude must be finite and between -180 and 180');
+  }
+  const latitude = Object.is(args.latitude, -0) ? 0 : args.latitude;
+  const longitude = Object.is(args.longitude, -0) ? 0 : args.longitude;
+  return runInTransactionContext(context, async (db) => {
+    const chatId = await requireChatIdByGuidWithinTransaction(context, args.chatGuid);
+    await db.insert(outgoingQueue).values({
+      tempGuid: args.tempGuid,
+      chatGuid: args.chatGuid,
+      kind: 'location',
+      payload: JSON.stringify({ latitude, longitude }),
+    });
+    await db.insert(messages).values({
+      guid: args.tempGuid,
+      chatId,
+      text: 'Current Location',
+      isFromMe: true,
+      dateCreated: args.now,
+      sendState: 'sending',
+      attemptOwnerPending: false,
+      attemptOwnerGeneration: 0,
+      error: 0,
+    });
+    await db
+      .update(chats)
+      .set({
+        latestMessageDate: sql`MAX(${args.now}, COALESCE(${chats.latestMessageDate}, ${args.now}))`,
+      })
+      .where(eq(chats.id, chatId));
+    return { attemptOwnerToken: null };
+  });
+}
+
+/** Standalone optimistic location owner; composing services use the transaction-only body. */
+export function insertOutgoingLocation(
+  db: AppDatabase,
+  args: InsertOutgoingLocationArgs,
+): Promise<OutgoingInsertResult> {
+  return withDbTransaction(db, (context) => insertOutgoingLocationWithinTransaction(context, args));
 }
 
 /**
@@ -554,6 +802,43 @@ export interface RetryHandover {
   attemptOwnerToken?: SendAttemptOwnerToken;
 }
 
+function isQueuedOneShotText(row: Pick<RetryableOutgoing, 'kind' | 'payload'>): boolean {
+  if (row.kind !== 'text') return false;
+  try {
+    const payload = JSON.parse(row.payload) as {
+      imessageEffectV1?: unknown;
+      imessageMentionV1?: unknown;
+      imessageFormattedV1?: unknown;
+    };
+    // The durable markers are authoritative. Missing/corrupt rich fields must fail closed rather
+    // than convert a possibly-dispatched helper send into manually replayable plain text.
+    return (
+      payload.imessageEffectV1 === true ||
+      payload.imessageMentionV1 === true ||
+      payload.imessageFormattedV1 === true
+    );
+  } catch {
+    return false;
+  }
+}
+
+/** Read-only preflight for the UI retry gate; the transaction below still revalidates this row. */
+export async function getOutgoingRetryChatGuid(
+  db: AppDatabase,
+  guid: string,
+): Promise<string | null> {
+  const rows = await db.all<{ chatGuid: string }>(sql`
+    SELECT q.chat_guid AS chatGuid
+      FROM outgoing_queue q
+      LEFT JOIN message_guid_aliases a
+        ON a.alias_guid = q.temp_guid AND a.chat_guid = q.chat_guid
+     WHERE q.temp_guid = ${guid} OR a.canonical_guid = ${guid}
+     ORDER BY (q.temp_guid = ${guid}) DESC, q.id DESC
+     LIMIT 1
+  `);
+  return rows[0]?.chatGuid ?? null;
+}
+
 /**
  * Take over a FAILED optimistic send so the caller can re-send it — under the SAME temp guid, from
  * the SAME queue payload.
@@ -594,6 +879,8 @@ export function claimFailedOutgoingForRetryWithinTransaction(
   guid: string,
   clock: () => number = Date.now,
   serverAuthorization?: MessageTargetServerAuthorization,
+  locationAvailable?: () => boolean,
+  rcsAvailable?: (chatGuid: string) => boolean,
 ): Promise<RetryHandover> {
   return runInTransactionContext(context, async (db) => {
     const now = clock();
@@ -601,15 +888,31 @@ export function claimFailedOutgoingForRetryWithinTransaction(
         SELECT q.id, q.temp_guid AS tempGuid, q.chat_guid AS chatGuid, q.kind, q.payload,
                q.attempts, q.created_at AS createdAt
           FROM outgoing_queue q
-          LEFT JOIN message_guid_aliases a ON a.alias_guid = q.temp_guid
+          LEFT JOIN message_guid_aliases a
+            ON a.alias_guid = q.temp_guid AND a.chat_guid = q.chat_guid
          WHERE q.temp_guid = ${guid} OR a.canonical_guid = ${guid}
          ORDER BY (q.temp_guid = ${guid}) DESC, q.id DESC
          LIMIT 1`);
     const row = queued[0];
     if (!row) return { claim: 'unsendable' };
-    // Neither historical nor newly marked iMessage attachment rows may be manually replayed:
-    // a lost HTTP acknowledgement can mean the helper already dispatched the file.
-    if (row.kind === 'attachment' && !isRcsChatGuid(row.chatGuid)) {
+    // A Google source id can be reused after a re-pair. Keep the old failed bubble/ladder intact;
+    // never flip it to sending or mutate its retry bookkeeping without exact current-epoch proof.
+    if (isRcsChatGuid(row.chatGuid) && rcsAvailable?.(row.chatGuid) !== true) {
+      return { claim: 'unsendable' };
+    }
+    if (row.kind === 'location' && locationAvailable?.() !== true) {
+      return { claim: 'unsendable' };
+    }
+    const queuedTarget = queuedMessageTarget(row.kind, row.payload);
+    // One-shot iMessage attachments, contacts, replies, effects, mentions, and formatted messages
+    // may not be manually replayed: a lost HTTP acknowledgement can mean the helper dispatched them.
+    if (
+      isQueuedOneShotText(row) ||
+      (!isRcsChatGuid(row.chatGuid) &&
+        (row.kind === 'attachment' ||
+          row.kind === 'contact' ||
+          (row.kind === 'text' && queuedTarget.kind === 'target')))
+    ) {
       return { claim: 'unsendable' };
     }
 
@@ -617,20 +920,32 @@ export function claimFailedOutgoingForRetryWithinTransaction(
       guid: string;
       sendState: string | null;
       generation: number;
+      error: number | null;
     }>(sql`
-      SELECT guid, send_state AS sendState, attempt_owner_generation AS generation
-        FROM messages
-       WHERE guid = ${row.tempGuid}
+      SELECT m.guid, m.send_state AS sendState,
+             m.attempt_owner_generation AS generation, m.error
+        FROM messages m
+        JOIN chats c ON c.id = m.chat_id
+       WHERE m.guid = ${row.tempGuid}
+         AND c.guid = ${row.chatGuid}
        LIMIT 1
     `);
     const aliased = direct[0]
       ? []
-      : await db.all<{ guid: string; sendState: string | null; generation: number }>(sql`
+      : await db.all<{
+          guid: string;
+          sendState: string | null;
+          generation: number;
+          error: number | null;
+        }>(sql`
           SELECT m.guid, m.send_state AS sendState,
-                 m.attempt_owner_generation AS generation
+                 m.attempt_owner_generation AS generation, m.error
             FROM message_guid_aliases a
             JOIN messages m ON m.guid = a.canonical_guid
+            JOIN chats c ON c.id = m.chat_id
            WHERE a.alias_guid = ${row.tempGuid}
+             AND a.chat_guid = ${row.chatGuid}
+             AND c.guid = ${row.chatGuid}
            LIMIT 1
     `);
     const current = direct[0] ?? aliased[0];
@@ -644,7 +959,38 @@ export function claimFailedOutgoingForRetryWithinTransaction(
         .where(eq(outgoingQueue.id, row.id));
       return { claim: 'settled' };
     }
-    const queuedTarget = queuedMessageTarget(row.kind, row.payload);
+    if (
+      current.error === ClientErrorCode.effectDeliveryUnconfirmed ||
+      current.error === ClientErrorCode.mentionDeliveryUnconfirmed ||
+      current.error === ClientErrorCode.formattedDeliveryUnconfirmed
+    ) {
+      // Effects, mentions, and formatted messages are one-shot even when their payload survives for
+      // reconciliation. A manual retry could mint another helper dispatch after an ambiguity.
+      return { claim: 'unsendable' };
+    }
+    if (
+      row.kind === 'location' &&
+      (current.error === ClientErrorCode.locationDeliveryUnconfirmed ||
+        current.error === ClientErrorCode.locationRejected ||
+        !Number.isSafeInteger(row.createdAt) ||
+        row.createdAt < 0 ||
+        row.createdAt > now ||
+        now - row.createdAt >= CURRENT_LOCATION_MAX_REPLAY_AGE_MS)
+    ) {
+      await db
+        .update(outgoingQueue)
+        .set({ attempts: OUTGOING_MAX_ATTEMPTS, payload: '{}' })
+        .where(eq(outgoingQueue.id, row.id));
+      await db
+        .update(messages)
+        .set({
+          sendState: 'error',
+          error: ClientErrorCode.locationDeliveryUnconfirmed,
+          errorMessage: LOCATION_DELIVERY_UNCONFIRMED_COPY,
+        })
+        .where(eq(messages.guid, current.guid));
+      return { claim: 'unsendable' };
+    }
     const unsupportedRcsReply =
       queuedTarget.kind === 'target' && row.kind !== 'reaction' && isRcsChatGuid(row.chatGuid);
     const targetAvailable =
@@ -722,11 +1068,20 @@ export async function claimFailedOutgoingForRetry(
   clock: () => number = Date.now,
   commitGuard?: DbCommitGuard,
   serverAuthorization?: MessageTargetServerAuthorization,
+  locationAvailable?: () => boolean,
+  rcsAvailable?: (chatGuid: string) => boolean,
 ): Promise<RetryHandover> {
   return withDbTransaction(
     db,
     (context) =>
-      claimFailedOutgoingForRetryWithinTransaction(context, guid, clock, serverAuthorization),
+      claimFailedOutgoingForRetryWithinTransaction(
+        context,
+        guid,
+        clock,
+        serverAuthorization,
+        locationAvailable,
+        rcsAvailable,
+      ),
     commitGuard,
   );
 }
@@ -754,6 +1109,7 @@ export async function reconcileOutgoingSuccess(
   tempGuid: string,
   server: ServerMsgFields,
   commitGuard?: DbCommitGuard,
+  expectedChatGuid?: string,
 ): Promise<void> {
   // Preserve the standalone helper's exact historical backstops before it opens an owner. A false
   // guard must not turn an invalid empty-GUID input from a quiet no-op into a rejection.
@@ -768,7 +1124,8 @@ export async function reconcileOutgoingSuccess(
   }
   await withDbTransaction(
     db,
-    (context) => reconcileOutgoingSuccessWithinTransaction(context, tempGuid, server),
+    (context) =>
+      reconcileOutgoingSuccessWithinTransaction(context, tempGuid, server, expectedChatGuid),
     commitGuard,
   );
 }
@@ -784,15 +1141,91 @@ export function reconcileOutgoingSuccessWithinTransaction(
   context: DbTransactionContext,
   tempGuid: string,
   server: ServerMsgFields,
+  expectedChatGuid?: string,
 ): Promise<void> {
   return runInTransactionContext(context, async (db) => {
     // Backstop transaction-context callers too: only a distinct server identity belongs in this
     // body. The public wrapper and shared send-outcome service route absent/self GUIDs through the
     // no-GUID settlement instead.
     if (!server.guid || server.guid === tempGuid) return;
-    const dup = await db.all<{ id: number }>(
-      sql`SELECT id FROM messages WHERE guid = ${server.guid} LIMIT 1`,
+    const dup = await db.all<{ id: number; chatGuid: string }>(
+      sql`SELECT m.id, c.guid AS chatGuid
+            FROM messages m
+            JOIN chats c ON c.id = m.chat_id
+           WHERE m.guid = ${server.guid}
+           LIMIT 1`,
     );
+    const tempOwner = await db.all<{ chatId: number; chatGuid: string }>(sql`
+      SELECT m.chat_id AS chatId, c.guid AS chatGuid
+        FROM messages m
+        JOIN chats c ON c.id = m.chat_id
+       WHERE m.guid = ${tempGuid}
+       LIMIT 1
+    `);
+    const queuedOwner = await db.all<{ chatGuid: string }>(sql`
+      SELECT chat_guid AS chatGuid
+        FROM outgoing_queue
+       WHERE temp_guid = ${tempGuid}
+       LIMIT 1
+    `);
+    const retainedAliases = await db.all<{
+      canonicalGuid: string;
+      chatGuid: string | null;
+    }>(sql`
+      SELECT canonical_guid AS canonicalGuid, chat_guid AS chatGuid
+        FROM message_guid_aliases
+       WHERE alias_guid = ${tempGuid}
+       LIMIT 1
+    `);
+    const retainedAlias = retainedAliases[0];
+    const aliasCanonicalConflict =
+      retainedAlias != null && retainedAlias.canonicalGuid !== server.guid;
+    const tempChatGuid = tempOwner[0]?.chatGuid ?? null;
+    const queuedChatGuid = queuedOwner[0]?.chatGuid ?? null;
+    const independentlyProvenOwners = [
+      tempChatGuid,
+      queuedChatGuid,
+      expectedChatGuid ?? null,
+    ].filter((value): value is string => value != null);
+    if (retainedAlias?.chatGuid == null && independentlyProvenOwners.length === 0) {
+      // No source row/queue/expected chat remains to settle. Preserve the quarantine and treat the
+      // confirmed response as terminal instead of turning it into a retryable transport failure.
+      return;
+    }
+    const sourceOwners = [retainedAlias?.chatGuid ?? null, ...independentlyProvenOwners].filter(
+      (value): value is string => value != null,
+    );
+    const distinctSourceOwners = new Set(sourceOwners);
+    const sourceOwnersConflict = distinctSourceOwners.size > 1;
+    const sourceChatGuid = sourceOwners[0] ?? null;
+    const canonicalOwnerConflict = dup[0] != null && sourceChatGuid !== dup[0].chatGuid;
+    if (
+      aliasCanonicalConflict ||
+      sourceOwnersConflict ||
+      sourceChatGuid == null ||
+      canonicalOwnerConflict
+    ) {
+      // The server confirmed this send, but its canonical GUID either belongs to another exact
+      // conversation or the source evidence disagrees. Never guess from a GUID alone: keep the
+      // foreign canonical row/ledger untouched. When the source bubble still exists, settle it
+      // under its temp identity; dequeue any surviving request so a confirmed send is not retried.
+      // A purged, cancelled send retains its temp ledger marker without a cross-chat alias.
+      await settleConfirmedLegacyIdentityConflictWithinTransaction(context, tempGuid);
+      return;
+    }
+    if (
+      await hasOutgoingIdentityHandoverConflictWithinTransaction(
+        context,
+        tempGuid,
+        server.guid,
+        sourceChatGuid,
+      )
+    ) {
+      // A server-confirmed physical send must not be retried merely because the canonical GUID is
+      // reserved by a scoped/ownerless deletion. Preserve that reservation and settle only source.
+      await settleConfirmedLegacyIdentityConflictWithinTransaction(context, tempGuid);
+      return;
+    }
     if (dup[0]) {
       // The live echo already inserted the real message (it beat this ack, and content-match
       // didn't promote our temp row — e.g. an edge where the text differs). Carry any on-disk
@@ -818,6 +1251,7 @@ export function reconcileOutgoingSuccessWithinTransaction(
         context,
         tempGuid,
         server.guid,
+        sourceChatGuid,
       );
       // A live/content echo can materialize the canonical row before the HTTP acknowledgement.
       // Carry the temp row's attempt-owner state onto that canonical row before deleting it; a
@@ -846,10 +1280,20 @@ export function reconcileOutgoingSuccessWithinTransaction(
           .where(eq(messages.guid, server.guid));
       }
       if (dateDeleted != null)
-        await markMessageDeletedWithinTransaction(context, server.guid, dateDeleted);
+        await markMessageDeletedWithinTransaction(
+          context,
+          server.guid,
+          dateDeleted,
+          sourceChatGuid,
+        );
       await db.delete(messages).where(eq(messages.guid, tempGuid));
-    } else {
-      await handoverOutgoingIdentityWithinTransaction(context, tempGuid, server.guid);
+    } else if (tempOwner[0]) {
+      await handoverOutgoingIdentityWithinTransaction(
+        context,
+        tempGuid,
+        server.guid,
+        sourceChatGuid,
+      );
       await db
         .update(messages)
         .set({
@@ -864,6 +1308,44 @@ export function reconcileOutgoingSuccessWithinTransaction(
           attemptOwnerPending: false,
         })
         .where(eq(messages.guid, tempGuid));
+    } else {
+      // A chat purge can remove both the optimistic row and its queue while the HTTP request is
+      // still in flight. The active request's exact chat GUID is then the only surviving ownership
+      // proof. Materialize a minimal canonical row under that owner before moving an alias or
+      // deletion marker. A later echo in the same chat safely hydrates it; a conflicting provider
+      // or phone-number chat is rejected by immutable message ownership instead of inheriting the
+      // deleted send's ledger entry.
+      const sourceChat = await db.all<{ id: number }>(sql`
+        SELECT id
+          FROM chats
+         WHERE guid = ${sourceChatGuid}
+         LIMIT 1
+      `);
+      const sourceChatId = sourceChat[0]?.id;
+      if (sourceChatId == null) {
+        if (queuedOwner[0]) {
+          await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
+        }
+        return;
+      }
+      const dateDeleted = await handoverOutgoingIdentityWithinTransaction(
+        context,
+        tempGuid,
+        server.guid,
+        sourceChatGuid,
+      );
+      await db.insert(messages).values({
+        guid: server.guid,
+        chatId: sourceChatId,
+        isFromMe: true,
+        dateCreated: server.dateCreated,
+        dateDelivered: server.dateDelivered,
+        dateDeleted,
+        sendState: 'sent',
+        error: 0,
+        activeSendAttemptGuid: null,
+        attemptOwnerPending: false,
+      });
     }
     await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
   });
@@ -995,7 +1477,93 @@ function reconcileExactOutgoingAttemptSuccessCoreWithinTransaction(
       success.tempGuid,
       success.guid,
     );
-    if (!owner) return 'unmatched';
+    if (!owner) {
+      if (success.claimedChatId == null) {
+        const blockedAliases = await db.all<{ aliasGuid: string }>(sql`
+          SELECT alias_guid AS aliasGuid
+            FROM message_guid_aliases
+           WHERE alias_guid = ${success.tempGuid}
+           LIMIT 1
+        `);
+        if (!blockedAliases[0]) return 'unmatched';
+        // The exact event proves that this temp request reached a terminal success, but the
+        // quarantined alias does not prove which canonical row owns it. Leave every message row
+        // untouched; only prevent the same temp request from being POSTed again on the live-event
+        // path. The HTTP-ack path retains its sticky retry/error behavior.
+        if (!preservePendingError) {
+          await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, success.tempGuid));
+        }
+        return 'owner-conflict';
+      }
+      const claimedChats = await db.all<{ chatGuid: string }>(sql`
+        SELECT guid AS chatGuid
+          FROM chats
+         WHERE id = ${success.claimedChatId}
+         LIMIT 1
+      `);
+      const claimedChatGuid = claimedChats[0]?.chatGuid;
+      if (!claimedChatGuid) return 'owner-conflict';
+      const retained = await db.all<{ dateDeleted: number; chatGuid: string | null }>(sql`
+        SELECT date_deleted AS dateDeleted, chat_guid AS chatGuid
+          FROM message_deletion_ledger
+         WHERE guid = ${success.tempGuid}
+         LIMIT 1
+      `);
+      const aliases = await db.all<{ canonicalGuid: string; chatGuid: string | null }>(sql`
+        SELECT canonical_guid AS canonicalGuid, chat_guid AS chatGuid
+          FROM message_guid_aliases
+         WHERE alias_guid = ${success.tempGuid}
+         LIMIT 1
+      `);
+      const deletionReservation = retained[0];
+      const aliasReservation = aliases[0];
+      if (!deletionReservation && !aliasReservation) return 'unmatched';
+      if (
+        (deletionReservation && deletionReservation.chatGuid !== claimedChatGuid) ||
+        (aliasReservation &&
+          (aliasReservation.chatGuid !== claimedChatGuid ||
+            aliasReservation.canonicalGuid !== success.guid))
+      ) {
+        return 'owner-conflict';
+      }
+      if (
+        await hasOutgoingIdentityHandoverConflictWithinTransaction(
+          context,
+          success.tempGuid,
+          success.guid,
+          claimedChatGuid,
+        )
+      ) {
+        if (!preservePendingError) {
+          await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, success.tempGuid));
+        }
+        return 'owner-conflict';
+      }
+      const dateDeleted = await handoverOutgoingIdentityWithinTransaction(
+        context,
+        success.tempGuid,
+        success.guid,
+        claimedChatGuid,
+      );
+      await db.insert(messages).values({
+        guid: success.guid,
+        chatId: success.claimedChatId,
+        isFromMe: true,
+        dateCreated: success.dateCreated,
+        dateDelivered: success.dateDelivered,
+        dateDeleted,
+        sendState: 'sent',
+        error: 0,
+        activeSendAttemptGuid: success.attemptGuid,
+        attemptOwnerPending: false,
+        attemptOwnerGeneration: success.clientAttemptGeneration,
+      });
+      await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, success.tempGuid));
+      return 'reconciled';
+    }
+    if (success.claimedChatId != null && owner.chatId !== success.claimedChatId) {
+      return 'owner-conflict';
+    }
 
     const wasPending = owner.attemptOwnerPending !== 0;
     if (wasPending) {
@@ -1004,6 +1572,40 @@ function reconcileExactOutgoingAttemptSuccessCoreWithinTransaction(
         // will settle the newer local generation, after which this attempt becomes match/stale.
         return 'attempt-owner-pending';
       }
+    } else if (owner.activeSendAttemptGuid !== success.attemptGuid) {
+      return 'stale-attempt';
+    }
+
+    const stickyError = owner.sendState === 'error' && (!wasPending || preservePendingError);
+    if (owner.guid !== success.tempGuid && owner.guid !== success.guid) {
+      await settleProvenExactOwnerConflictWithinTransaction(context, owner, success, stickyError);
+      return 'owner-conflict';
+    }
+
+    let duplicate: { id: number; chatId: number } | undefined;
+    if (owner.guid === success.tempGuid && success.guid !== success.tempGuid) {
+      const duplicates = await db.all<{ id: number; chatId: number }>(
+        sql`SELECT id, chat_id AS chatId FROM messages WHERE guid = ${success.guid} LIMIT 1`,
+      );
+      duplicate = duplicates[0];
+      if (duplicate && duplicate.chatId !== owner.chatId) {
+        await settleProvenExactOwnerConflictWithinTransaction(context, owner, success, stickyError);
+        return 'owner-conflict';
+      }
+      if (
+        await hasOutgoingIdentityHandoverConflictWithinTransaction(
+          context,
+          success.tempGuid,
+          success.guid,
+          owner.chatGuid,
+        )
+      ) {
+        await settleProvenExactOwnerConflictWithinTransaction(context, owner, success, stickyError);
+        return 'owner-conflict';
+      }
+    }
+
+    if (wasPending) {
       const installed = await db.all<{ id: number }>(sql`
         UPDATE messages
            SET active_send_attempt_guid = ${success.attemptGuid}, attempt_owner_pending = 0
@@ -1013,11 +1615,8 @@ function reconcileExactOutgoingAttemptSuccessCoreWithinTransaction(
         RETURNING id
       `);
       if (installed.length === 0) return 'attempt-owner-pending';
-    } else if (owner.activeSendAttemptGuid !== success.attemptGuid) {
-      return 'stale-attempt';
     }
 
-    const stickyError = owner.sendState === 'error' && (!wasPending || preservePendingError);
     const alreadyCanonical = owner.guid === success.guid;
     if (alreadyCanonical) {
       // When exact success itself installs a pending owner, it is affirmative evidence that the
@@ -1038,8 +1637,12 @@ function reconcileExactOutgoingAttemptSuccessCoreWithinTransaction(
     // repaired database. Re-establish the exact mapping; a conflicting existing mapping throws and
     // fails closed instead of attaching the event to the wrong bubble.
     if (owner.guid !== success.tempGuid) {
-      await recordMessageGuidAliasWithinTransaction(context, success.tempGuid, success.guid);
-      if (owner.guid !== success.guid) throw new MessageGuidAliasConflictError();
+      await recordMessageGuidAliasWithinTransaction(
+        context,
+        success.tempGuid,
+        success.guid,
+        owner.chatGuid,
+      );
       if (wasPending && !stickyError) {
         await db
           .update(messages)
@@ -1051,10 +1654,9 @@ function reconcileExactOutgoingAttemptSuccessCoreWithinTransaction(
       return wasPending ? 'reconciled' : 'already-reconciled';
     }
 
-    const duplicate = await db.all<{ id: number }>(
-      sql`SELECT id FROM messages WHERE guid = ${success.guid} LIMIT 1`,
-    );
-    if (duplicate[0]) {
+    if (duplicate) {
+      // Cross-chat duplicates returned above before attempt ownership changed. The remaining row
+      // is the same exact conversation and may safely receive the temp row's local attachment.
       const tempAttachment = await db.all<{ localPath: string | null }>(sql`
         SELECT a.local_path AS localPath
           FROM attachments a
@@ -1063,18 +1665,19 @@ function reconcileExactOutgoingAttemptSuccessCoreWithinTransaction(
          LIMIT 1
       `);
       const localPath = tempAttachment[0]?.localPath;
-      if (localPath) {
-        await db.run(sql`
-          UPDATE attachments
-             SET local_path = ${localPath}
-           WHERE message_id = ${duplicate[0].id} AND local_path IS NULL
-        `);
-      }
       const dateDeleted = await handoverOutgoingIdentityWithinTransaction(
         context,
         success.tempGuid,
         success.guid,
+        owner.chatGuid,
       );
+      if (localPath) {
+        await db.run(sql`
+          UPDATE attachments
+             SET local_path = ${localPath}
+           WHERE message_id = ${duplicate.id} AND local_path IS NULL
+        `);
+      }
       await db
         .update(messages)
         .set({
@@ -1091,11 +1694,21 @@ function reconcileExactOutgoingAttemptSuccessCoreWithinTransaction(
         })
         .where(eq(messages.guid, success.guid));
       if (dateDeleted != null) {
-        await markMessageDeletedWithinTransaction(context, success.guid, dateDeleted);
+        await markMessageDeletedWithinTransaction(
+          context,
+          success.guid,
+          dateDeleted,
+          owner.chatGuid,
+        );
       }
       await db.delete(messages).where(eq(messages.guid, success.tempGuid));
     } else {
-      await handoverOutgoingIdentityWithinTransaction(context, success.tempGuid, success.guid);
+      await handoverOutgoingIdentityWithinTransaction(
+        context,
+        success.tempGuid,
+        success.guid,
+        owner.chatGuid,
+      );
       await db
         .update(messages)
         .set({
@@ -1128,6 +1741,8 @@ export interface OutgoingAttemptAck {
   readonly attemptGuid: string;
   /** The local generation captured before this request began. */
   readonly attemptOwnerToken: SendAttemptOwnerToken;
+  /** Exact locally selected conversation retained by the active request. */
+  readonly expectedChatGuid?: string;
   readonly dateCreated: number | null;
   readonly dateDelivered: number | null;
 }
@@ -1153,10 +1768,119 @@ export function reconcileOutgoingAttemptAckWithinTransaction(
       distinctGuid,
     );
     if (!ownerBefore) {
-      // Preserve the historical orphan cleanup. A successful request must not remain eligible for
-      // blind re-send solely because its optimistic bubble was independently purged.
+      const queuedOwner = await db.all<{ chatGuid: string }>(sql`
+        SELECT chat_guid AS chatGuid
+          FROM outgoing_queue
+         WHERE temp_guid = ${tempGuid}
+         LIMIT 1
+      `);
+      const sourceOwners = [queuedOwner[0]?.chatGuid ?? null, ack.expectedChatGuid ?? null].filter(
+        (value): value is string => value != null,
+      );
+      const distinctSourceOwners = new Set(sourceOwners);
+      const sourceChatGuid = sourceOwners[0] ?? null;
+      if (distinctSourceOwners.size > 1) {
+        // The request-local expected chat and durable queue disagree. Do not let the ack mutate or
+        // retire the legitimate queued source until its owner resolves that contradiction.
+        return 'stale-attempt-owner';
+      }
+      if (sourceChatGuid == null) {
+        // Preserve the historical orphan cleanup. A successful request must not remain eligible
+        // for blind re-send solely because its optimistic bubble was independently purged.
+        await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
+        return 'missing';
+      }
+      const retainedAliases = await db.all<{ aliasGuid: string }>(sql`
+        SELECT alias_guid AS aliasGuid
+          FROM message_guid_aliases
+         WHERE alias_guid = ${tempGuid}
+         LIMIT 1
+      `);
+      if (retainedAliases[0]) {
+        // Owner lookup already proved that this retained alias could not safely join its canonical
+        // row. The exact HTTP response retires only its temp request; it must not recreate the temp
+        // identity, adopt an ownerless alias, or collide with the retained canonical row.
+        await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
+        return 'missing';
+      }
+      const sourceChat = await db.all<{ id: number }>(sql`
+        SELECT id
+          FROM chats
+         WHERE guid = ${sourceChatGuid}
+         LIMIT 1
+      `);
+      const sourceChatId = sourceChat[0]?.id;
+      if (sourceChatId == null) {
+        await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
+        return 'missing';
+      }
+
+      // A local chat purge can remove both optimistic ownership records while this exact request
+      // remains in flight. Recreate only a minimal, request-owned row before moving any deletion
+      // ledger. The exact success fanout can hydrate/promote it later; another provider/chat cannot
+      // claim it first and inherit this send's tombstone.
+      let dateDeleted: number | null;
+      if (distinctGuid) {
+        if (
+          await hasOutgoingIdentityHandoverConflictWithinTransaction(
+            context,
+            tempGuid,
+            distinctGuid,
+            sourceChatGuid,
+          )
+        ) {
+          await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
+          return 'missing';
+        }
+        dateDeleted = await handoverOutgoingIdentityWithinTransaction(
+          context,
+          tempGuid,
+          distinctGuid,
+          sourceChatGuid,
+        );
+      } else {
+        const deletion = await db.all<{ dateDeleted: number; chatGuid: string | null }>(sql`
+          SELECT date_deleted AS dateDeleted, chat_guid AS chatGuid
+            FROM message_deletion_ledger
+           WHERE guid = ${tempGuid}
+           LIMIT 1
+        `);
+        if (deletion[0]?.chatGuid != null && deletion[0].chatGuid !== sourceChatGuid) {
+          await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
+          return 'stale-attempt-owner';
+        }
+        if (deletion[0]?.chatGuid == null && deletion[0]) {
+          await db
+            .update(messageDeletionLedger)
+            .set({ chatGuid: sourceChatGuid })
+            .where(eq(messageDeletionLedger.guid, tempGuid));
+        }
+        dateDeleted = deletion[0]?.dateDeleted ?? null;
+      }
+      await db.insert(messages).values({
+        guid: distinctGuid ?? tempGuid,
+        chatId: sourceChatId,
+        isFromMe: true,
+        dateCreated: ack.dateCreated,
+        dateDelivered: ack.dateDelivered,
+        dateDeleted,
+        sendState: 'sent',
+        error: 0,
+        activeSendAttemptGuid: ack.attemptGuid,
+        attemptOwnerPending: false,
+        attemptOwnerGeneration: ack.attemptOwnerToken.generation,
+      });
       await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
-      return 'missing';
+      return 'sent';
+    }
+    if (ack.expectedChatGuid) {
+      const expectedChat = await db.all<{ id: number }>(sql`
+        SELECT id
+          FROM chats
+         WHERE guid = ${ack.expectedChatGuid}
+         LIMIT 1
+      `);
+      if (expectedChat[0]?.id !== ownerBefore.chatId) return 'stale-attempt-owner';
     }
 
     const result = await reconcileExactOutgoingAttemptSuccessCoreWithinTransaction(
@@ -1173,6 +1897,12 @@ export function reconcileOutgoingAttemptAckWithinTransaction(
     );
     if (result === 'attempt-owner-pending' || result === 'stale-attempt') {
       return 'stale-attempt-owner';
+    }
+    if (result === 'owner-conflict') {
+      // The core either settled the independently proven source or retained a sticky server error.
+      // Surface that terminal state so callers do not retry a confirmed request and can clear a
+      // stale failure notice only for the settled case.
+      return ownerBefore.sendState === 'error' ? 'sticky-error' : 'sent';
     }
     if (result === 'unmatched') return 'missing';
 
@@ -1260,6 +1990,7 @@ export async function reconcileEchoByContent(
         attemptGuid: m.attemptGuid,
         clientAttemptGeneration: m.clientAttemptGeneration,
         guid: m.guid,
+        claimedChatId: chatId,
         dateCreated: m.dateCreated ?? null,
         dateDelivered: m.dateDelivered ?? null,
       });
@@ -1330,7 +2061,22 @@ export async function reconcileEchoByContent(
     if (requiresUniqueUnknownPartMatch && rows.length !== 1) return null;
     const temp = rows[0];
     if (!temp) return null;
-    await handoverOutgoingIdentityWithinTransaction(context, temp.guid, m.guid);
+    const owners = await db.all<{ chatGuid: string }>(sql`
+      SELECT guid AS chatGuid FROM chats WHERE id = ${chatId} LIMIT 1
+    `);
+    const ownerChatGuid = owners[0]?.chatGuid;
+    if (!ownerChatGuid) return null;
+    if (
+      await hasOutgoingIdentityHandoverConflictWithinTransaction(
+        context,
+        temp.guid,
+        m.guid,
+        ownerChatGuid,
+      )
+    ) {
+      return null;
+    }
+    await handoverOutgoingIdentityWithinTransaction(context, temp.guid, m.guid, ownerChatGuid);
     // Drop the queue row BEFORE promoting, so a concurrent retry tick in the gap can't claim and
     // re-POST a send that's already being reconciled.
     await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, temp.guid));
@@ -1386,6 +2132,7 @@ export async function reconcileOutgoingAttachmentByContent(
           attemptGuid: m.attemptGuid,
           clientAttemptGeneration: m.clientAttemptGeneration,
           guid: m.guid,
+          claimedChatId: chatId,
           dateCreated: m.dateCreated ?? null,
           dateDelivered: m.dateDelivered ?? null,
         });
@@ -1425,9 +2172,24 @@ export async function reconcileOutgoingAttachmentByContent(
                  mm.date_created ASC, mm.id ASC LIMIT 1`);
       const temp = rows[0];
       if (!temp) return null;
+      const owners = await db.all<{ chatGuid: string }>(sql`
+        SELECT guid AS chatGuid FROM chats WHERE id = ${chatId} LIMIT 1
+      `);
+      const ownerChatGuid = owners[0]?.chatGuid;
+      if (!ownerChatGuid) return null;
+      if (
+        await hasOutgoingIdentityHandoverConflictWithinTransaction(
+          context,
+          temp.guid,
+          m.guid,
+          ownerChatGuid,
+        )
+      ) {
+        return null;
+      }
       // Queue deletion and identity promotion are one commit. Otherwise a crash/rollback between
       // them can either re-send an acknowledged attachment or strand the optimistic temp row.
-      await handoverOutgoingIdentityWithinTransaction(context, temp.guid, m.guid);
+      await handoverOutgoingIdentityWithinTransaction(context, temp.guid, m.guid, ownerChatGuid);
       await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, temp.guid));
       await db
         .update(messages)
@@ -1457,7 +2219,9 @@ export function retireOutgoingWithinTransaction(
         and(
           sql`(${messages.guid} = ${tempGuid} OR EXISTS (
             SELECT 1 FROM message_guid_aliases a
+            JOIN chats c ON c.id = messages.chat_id
              WHERE a.alias_guid = ${tempGuid} AND a.canonical_guid = ${messages.guid}
+               AND a.chat_guid = c.guid
           ))`,
           ne(messages.sendState, 'sent'),
         ),
@@ -1471,11 +2235,12 @@ export function retireUncertainOutgoingWithinTransaction(
   tempGuid: string,
   errorCode: number,
   detail: string,
+  scrubPayload = false,
 ): Promise<boolean> {
   return runInTransactionContext(context, async (db) => {
     const owned = await db
       .update(outgoingQueue)
-      .set({ attempts: OUTGOING_MAX_ATTEMPTS })
+      .set({ attempts: OUTGOING_MAX_ATTEMPTS, ...(scrubPayload ? { payload: '{}' } : {}) })
       .where(eq(outgoingQueue.tempGuid, tempGuid))
       .returning({ id: outgoingQueue.id });
     if (owned.length === 0) return false;
@@ -1486,7 +2251,9 @@ export function retireUncertainOutgoingWithinTransaction(
         and(
           sql`(${messages.guid} = ${tempGuid} OR EXISTS (
             SELECT 1 FROM message_guid_aliases a
+            JOIN chats c ON c.id = messages.chat_id
              WHERE a.alias_guid = ${tempGuid} AND a.canonical_guid = ${messages.guid}
+               AND a.chat_guid = c.guid
           ))`,
           ne(messages.sendState, 'sent'),
         ),

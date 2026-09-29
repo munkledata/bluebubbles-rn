@@ -1,4 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
+import { CURRENT_LOCATION_MAX_REPLAY_AGE_MS } from '@core/api/endpoints/messages';
 import { isRcsChatGuid } from '@utils/chat';
 import { messages, outgoingQueue } from '../schema';
 import {
@@ -130,7 +131,9 @@ export async function reconcileOutgoingErrorWithinTransaction(
                  m.attempt_owner_generation AS generation
             FROM message_guid_aliases a
             JOIN messages m ON m.guid = a.canonical_guid
+            JOIN chats c ON c.id = m.chat_id
            WHERE a.alias_guid = ${tempGuid}
+             AND a.chat_guid = c.guid
            LIMIT 1
         `);
     const owner = direct[0] ?? aliased[0];
@@ -341,6 +344,8 @@ export type ServerSendErrorDisposition =
   | 'attempt-identity-missing'
   /** The bubble has a different (or deliberately unowned legacy) active attempt. */
   | 'stale-attempt'
+  /** A retained alias contradicts the event-selected canonical owner. */
+  | 'owner-conflict'
   /** No local message or live queue matched this candidate guid. */
   | 'unmatched';
 
@@ -358,6 +363,83 @@ export interface ServerSendErrorTransactionResult {
   disposition: ServerSendErrorDisposition;
   /** Invoke only after the SQL transaction commits; idempotent and null if no cycle began. */
   onCommitted: RequeueCommitEffect | null;
+}
+
+/**
+ * Read-only ownership evidence for one server send-error while its mutation transaction is owned.
+ * A delayed error may name a temp guid whose message row has already been promoted, so admission
+ * must consult the retained alias and retry queue in addition to the canonical message table.
+ */
+export interface ServerSendErrorOwnerResolution {
+  readonly chatGuids: readonly string[];
+  readonly hasEvidence: boolean;
+  readonly hasConflict: boolean;
+}
+
+export function resolveServerSendErrorOwnersWithinTransaction(
+  context: DbTransactionContext,
+  candidateGuids: readonly string[],
+): Promise<ServerSendErrorOwnerResolution> {
+  return runInTransactionContext(context, async (db) => {
+    const owners = new Set<string>();
+    let hasEvidence = false;
+    let hasConflict = false;
+
+    for (const guid of [...new Set(candidateGuids.filter((candidate) => candidate.length > 0))]) {
+      const direct = await db.all<{ chatGuid: string }>(sql`
+        SELECT c.guid AS chatGuid
+          FROM messages m
+          JOIN chats c ON c.id = m.chat_id
+         WHERE m.guid = ${guid}
+         LIMIT 2
+      `);
+      if (direct.length > 0) hasEvidence = true;
+      direct.forEach((row: { chatGuid: string }) => owners.add(row.chatGuid));
+
+      const aliases = await db.all<{
+        aliasChatGuid: string | null;
+        canonicalChatGuid: string | null;
+      }>(sql`
+        SELECT a.chat_guid AS aliasChatGuid, c.guid AS canonicalChatGuid
+          FROM message_guid_aliases a
+          LEFT JOIN messages m ON m.guid = a.canonical_guid
+          LEFT JOIN chats c ON c.id = m.chat_id
+         WHERE a.alias_guid = ${guid}
+         LIMIT 2
+      `);
+      if (aliases.length > 0) hasEvidence = true;
+      for (const row of aliases) {
+        if (row.aliasChatGuid == null) {
+          // A pre-owner-scope alias is not authority for a durable RCS mutation.
+          hasConflict = true;
+        } else {
+          owners.add(row.aliasChatGuid);
+        }
+        if (row.canonicalChatGuid != null) {
+          owners.add(row.canonicalChatGuid);
+          if (row.aliasChatGuid != null && row.aliasChatGuid !== row.canonicalChatGuid) {
+            hasConflict = true;
+          }
+        }
+      }
+
+      const queued = await db.all<{ chatGuid: string }>(sql`
+        SELECT chat_guid AS chatGuid
+          FROM outgoing_queue
+         WHERE temp_guid = ${guid}
+         LIMIT 2
+      `);
+      if (queued.length > 0) hasEvidence = true;
+      queued.forEach((row: { chatGuid: string }) => owners.add(row.chatGuid));
+    }
+
+    if (owners.size > 1) hasConflict = true;
+    return {
+      chatGuids: [...owners],
+      hasEvidence,
+      hasConflict,
+    };
+  });
 }
 
 /**
@@ -388,6 +470,7 @@ export async function applyServerSendErrorWithinTransaction(
   return runInTransactionContext(context, async (db) => {
     type AttemptOwnerRow = {
       guid: string;
+      chatGuid: string;
       activeSendAttemptGuid: string | null;
       attemptOwnerPending: number;
       attemptOwnerGeneration: number;
@@ -397,31 +480,45 @@ export async function applyServerSendErrorWithinTransaction(
       fallbackGuid: string,
     ): Promise<AttemptOwnerRow | null> => {
       const direct = await db.all<AttemptOwnerRow>(sql`
-        SELECT guid, active_send_attempt_guid AS activeSendAttemptGuid,
-               attempt_owner_pending AS attemptOwnerPending,
-               attempt_owner_generation AS attemptOwnerGeneration
-          FROM messages
-         WHERE guid = ${tempGuid}
+        SELECT m.guid, c.guid AS chatGuid,
+               m.active_send_attempt_guid AS activeSendAttemptGuid,
+               m.attempt_owner_pending AS attemptOwnerPending,
+               m.attempt_owner_generation AS attemptOwnerGeneration
+          FROM messages m
+          JOIN chats c ON c.id = m.chat_id
+         WHERE m.guid = ${tempGuid}
          LIMIT 1
       `);
       if (direct[0]) return direct[0];
       const aliased = await db.all<AttemptOwnerRow>(sql`
-        SELECT m.guid, m.active_send_attempt_guid AS activeSendAttemptGuid,
+        SELECT m.guid, c.guid AS chatGuid,
+               m.active_send_attempt_guid AS activeSendAttemptGuid,
                m.attempt_owner_pending AS attemptOwnerPending,
                m.attempt_owner_generation AS attemptOwnerGeneration
           FROM message_guid_aliases a
           JOIN messages m ON m.guid = a.canonical_guid
+          JOIN chats c ON c.id = m.chat_id
          WHERE a.alias_guid = ${tempGuid}
+           AND a.chat_guid = c.guid
          LIMIT 1
       `);
       if (aliased[0]) return aliased[0];
+      const aliasReservations = await db.all<{ aliasGuid: string }>(sql`
+        SELECT alias_guid AS aliasGuid
+          FROM message_guid_aliases
+         WHERE alias_guid = ${tempGuid}
+         LIMIT 1
+      `);
+      if (aliasReservations[0]) return null;
       if (fallbackGuid !== tempGuid) {
         const fallback = await db.all<AttemptOwnerRow>(sql`
-          SELECT guid, active_send_attempt_guid AS activeSendAttemptGuid,
-                 attempt_owner_pending AS attemptOwnerPending,
-                 attempt_owner_generation AS attemptOwnerGeneration
-            FROM messages
-           WHERE guid = ${fallbackGuid}
+          SELECT m.guid, c.guid AS chatGuid,
+                 m.active_send_attempt_guid AS activeSendAttemptGuid,
+                 m.attempt_owner_pending AS attemptOwnerPending,
+                 m.attempt_owner_generation AS attemptOwnerGeneration
+            FROM messages m
+            JOIN chats c ON c.id = m.chat_id
+           WHERE m.guid = ${fallbackGuid}
            LIMIT 1
         `);
         if (fallback[0]) return fallback[0];
@@ -444,14 +541,30 @@ export async function applyServerSendErrorWithinTransaction(
       let owner = await findOwner(attemptIdentity.tempGuid, guid);
       let recoveredAfterAliasPrune = false;
       if (!owner) {
+        const blockedAliases = await db.all<{ aliasGuid: string }>(sql`
+          SELECT alias_guid AS aliasGuid
+            FROM message_guid_aliases
+           WHERE alias_guid = ${attemptIdentity.tempGuid}
+           LIMIT 1
+        `);
+        if (blockedAliases[0]) {
+          // The canonical fallback is quarantined. Retire only the temp-keyed automatic retry;
+          // never install this error's attempt identity on the unproven canonical row.
+          await db
+            .delete(outgoingQueue)
+            .where(eq(outgoingQueue.tempGuid, attemptIdentity.tempGuid));
+          return { matched: true, disposition: 'owner-conflict', onCommitted: null };
+        }
         // A bounded alias may have been pruned before a delayed failure arrives. Recover only when
         // the exact active attempt identifies one and only one canonical row; ambiguity fails closed.
         const activeOwners = await db.all<AttemptOwnerRow>(sql`
-          SELECT guid, active_send_attempt_guid AS activeSendAttemptGuid,
-                 attempt_owner_pending AS attemptOwnerPending,
-                 attempt_owner_generation AS attemptOwnerGeneration
-            FROM messages
-           WHERE active_send_attempt_guid = ${attemptIdentity.attemptGuid}
+          SELECT m.guid, c.guid AS chatGuid,
+                 m.active_send_attempt_guid AS activeSendAttemptGuid,
+                 m.attempt_owner_pending AS attemptOwnerPending,
+                 m.attempt_owner_generation AS attemptOwnerGeneration
+            FROM messages m
+            JOIN chats c ON c.id = m.chat_id
+           WHERE m.active_send_attempt_guid = ${attemptIdentity.attemptGuid}
            LIMIT 2
         `);
         owner = activeOwners.length === 1 ? activeOwners[0] : null;
@@ -466,6 +579,7 @@ export async function applyServerSendErrorWithinTransaction(
           context,
           attemptIdentity.tempGuid,
           owner.guid,
+          owner.chatGuid,
         );
       }
       queueGuid = attemptIdentity.tempGuid;
@@ -579,6 +693,8 @@ export async function listRetryableOutgoing(
   now: number,
   limit?: number,
   excludeRcs = false,
+  excludeLocation = false,
+  currentRcsProviderEpoch?: string,
 ): Promise<RetryableOutgoing[]> {
   // SQLite's -1 means "all rows" for existing foreground callers. Any explicit invalid cap is a
   // safe empty run rather than an accidental unbounded headless drain.
@@ -587,10 +703,39 @@ export async function listRetryableOutgoing(
   return db.all<RetryableOutgoing>(sql`
     SELECT id, temp_guid AS tempGuid, chat_guid AS chatGuid, kind, payload, attempts, created_at AS createdAt
     FROM outgoing_queue
-    WHERE attempts < ${OUTGOING_MAX_ATTEMPTS}
-      AND next_retry_at <= ${now}
-      AND (attempts >= 1 OR created_at <= ${now - OUTGOING_GRACE_MS})
+    WHERE (
+        (
+          attempts < ${OUTGOING_MAX_ATTEMPTS}
+          AND next_retry_at <= ${now}
+          AND (attempts >= 1 OR created_at <= ${now - OUTGOING_GRACE_MS})
+        )
+        OR (
+          kind = 'location'
+          AND payload <> '{}'
+          AND (
+            created_at IS NULL
+            OR typeof(created_at) <> 'integer'
+            OR created_at < 0
+            OR created_at > ${now}
+            OR created_at <= ${now - CURRENT_LOCATION_MAX_REPLAY_AGE_MS}
+          )
+        )
+      )
       AND (${excludeRcs ? 1 : 0} = 0 OR chat_guid NOT LIKE 'RCS;-;%')
+      AND (
+        ${currentRcsProviderEpoch === undefined ? 1 : 0} = 1
+        OR chat_guid NOT GLOB 'RCS;-;*'
+        OR chat_guid GLOB ${`RCS;-;g1.${currentRcsProviderEpoch ?? ''}.*`}
+      )
+      AND (
+        ${excludeLocation ? 1 : 0} = 0
+        OR kind <> 'location'
+        OR created_at IS NULL
+        OR typeof(created_at) <> 'integer'
+        OR created_at < 0
+        OR created_at > ${now}
+        OR created_at <= ${now - CURRENT_LOCATION_MAX_REPLAY_AGE_MS}
+      )
     ORDER BY created_at ASC
     LIMIT ${rowLimit}`);
 }
@@ -656,10 +801,12 @@ export function claimOutgoingForSendWithinTransaction(
       error: number | null;
       errorMessage: string | null;
     }>(sql`
-      SELECT guid, attempt_owner_generation AS generation, send_state AS sendState,
-             error, error_message AS errorMessage
-        FROM messages
-       WHERE guid = ${claimed.tempGuid}
+      SELECT m.guid, m.attempt_owner_generation AS generation, m.send_state AS sendState,
+             m.error, m.error_message AS errorMessage
+        FROM messages m
+        JOIN chats c ON c.id = m.chat_id
+       WHERE m.guid = ${claimed.tempGuid}
+         AND c.guid = ${claimed.chatGuid}
        LIMIT 1
     `);
     const aliased = direct[0]
@@ -675,7 +822,10 @@ export function claimOutgoingForSendWithinTransaction(
                  m.send_state AS sendState, m.error, m.error_message AS errorMessage
             FROM message_guid_aliases a
             JOIN messages m ON m.guid = a.canonical_guid
+            JOIN chats c ON c.id = m.chat_id
            WHERE a.alias_guid = ${claimed.tempGuid}
+             AND a.chat_guid = ${claimed.chatGuid}
+             AND c.guid = ${claimed.chatGuid}
            LIMIT 1
     `);
     const owner = direct[0] ?? aliased[0];
@@ -899,7 +1049,10 @@ export async function countOutgoingQueueHealth(db: AppDatabase): Promise<Outgoin
             SELECT 1
               FROM message_guid_aliases a
               JOIN messages m ON m.guid = a.canonical_guid
+              JOIN chats c ON c.id = m.chat_id
              WHERE a.alias_guid = q.temp_guid
+               AND a.chat_guid = q.chat_guid
+               AND c.guid = q.chat_guid
           )
       ) AS orphanQueueRows`);
   return rows[0] ?? { strandedSending: 0, orphanQueueRows: 0 };

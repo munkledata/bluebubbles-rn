@@ -8,7 +8,7 @@ import {
 } from '@core/api/endpoints/messages';
 
 describe('message endpoint error-detail capture', () => {
-  it('opts in only the three retained optimistic send endpoint wrappers', async () => {
+  it('opts narrow edit and unsend into detail capture without transport retry', async () => {
     const post = jest.fn<Promise<unknown>, [string, unknown, RequestOptions]>(async () => ({}));
     const http = { post } as unknown as HttpClient;
     const rcsChatGuid = 'RCS;-;chat-1';
@@ -25,21 +25,44 @@ describe('message endpoint error-detail capture', () => {
       reaction: 'love',
       partIndex: 0,
     });
+    await editMessage(http, {
+      chatGuid: 'iMessage;-;+15551234567',
+      messageGuid: 'message-1',
+      editedMessage: 'edited',
+      partIndex: 0,
+    });
+    await unsendMessage(http, {
+      chatGuid: 'iMessage;-;+15551234567',
+      messageGuid: 'message-1',
+      partIndex: 0,
+    });
 
-    expect(() =>
-      editMessage(http, {
-        chatGuid: 'chat-1',
-        messageGuid: 'message-1',
-        editedMessage: 'edited',
-        backwardsCompatibilityMessage: 'Edited to “edited”',
+    expect(post).toHaveBeenCalledTimes(5);
+    expect(post.mock.calls.map((call) => call[2]?.captureErrorDetail)).toEqual([
+      true,
+      true,
+      true,
+      true,
+      true,
+    ]);
+    expect(post.mock.calls[3]?.[0]).toBe('/message/message-1/edit');
+    expect(post.mock.calls[3]?.[2]).toMatchObject({
+      retry: false,
+      json: {
+        chatGuid: 'iMessage;-;+15551234567',
+        editedText: 'edited',
         partIndex: 0,
-      }),
-    ).toThrow('Editing iMessages was retired with the Private API helper.');
-    expect(() =>
-      unsendMessage(http, { chatGuid: 'chat-1', messageGuid: 'message-1', partIndex: 0 }),
-    ).toThrow('Unsend was retired with the Private API helper.');
-
-    expect(post).toHaveBeenCalledTimes(3);
-    expect(post.mock.calls.map((call) => call[2]?.captureErrorDetail)).toEqual([true, true, true]);
+      },
+    });
+    expect(post.mock.calls[3]?.[2]?.json).not.toHaveProperty('backwardsCompatText');
+    expect(post.mock.calls[4]).toEqual([
+      '/message/message-1/unsend',
+      expect.anything(),
+      {
+        captureErrorDetail: true,
+        retry: false,
+        json: { chatGuid: 'iMessage;-;+15551234567', partIndex: 0 },
+      },
+    ]);
   });
 });

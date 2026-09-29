@@ -243,14 +243,27 @@ describe('notificationRouting — native privacy boundary', () => {
   it('retains the same local failure-notice id when a stale temp guid resolves through its alias', async () => {
     mockRaw
       .prepare(
-        `INSERT INTO message_guid_aliases (alias_guid, canonical_guid)
-         VALUES (?, ?)`,
+        `INSERT INTO message_guid_aliases (alias_guid, canonical_guid, chat_guid)
+         VALUES (?, ?, ?)`,
       )
-      .run('temp-stale-failure-guid', 'p:0/private-message-guid');
+      .run('temp-stale-failure-guid', 'p:0/private-message-guid', 'iMessage;-;+15551234567');
 
     await expect(localRouteForMessageGuid('temp-stale-failure-guid', mockDb)).resolves.toEqual(
       await localRouteForMessageGuid('p:0/private-message-guid', mockDb),
     );
+  });
+
+  it('does not route through an ownerless legacy message alias', async () => {
+    mockRaw
+      .prepare(
+        `INSERT INTO message_guid_aliases (alias_guid, canonical_guid, chat_guid)
+         VALUES (?, ?, NULL)`,
+      )
+      .run('temp-ownerless-failure-guid', 'p:0/private-message-guid');
+
+    await expect(
+      localRouteForMessageGuid('temp-ownerless-failure-guid', mockDb),
+    ).resolves.toBeNull();
   });
 
   it('clears the encrypted FaceTime route table during account teardown', async () => {

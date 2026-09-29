@@ -47,6 +47,9 @@ describe('migration 0042_message_part_identity', () => {
         '0047_message_retraction_topology',
         '0048_attachment_media_exports',
         '0049_inbox_search_postings',
+        '0050_message_identity_owner_scope',
+        '0051_handle_color_backup_index',
+        '0052_chat_history_deletion_boundary',
       ]);
       expect(
         raw

@@ -29,6 +29,7 @@ export interface MessageActionPartLayoutRow {
 /** Minimal aggregate layout needed by a headless notification reaction action. */
 export async function getMessageActionPartLayoutByGuid(
   db: AppDatabase,
+  chatGuid: string,
   guid: string,
 ): Promise<MessageActionPartLayoutRow | null> {
   const rows = await db.all<
@@ -37,7 +38,8 @@ export async function getMessageActionPartLayoutByGuid(
     SELECT m.text, m.attributed_body AS attributedBody, m.part_count AS partCount,
            m.message_part_topology AS messagePartTopology
       FROM messages m
-     WHERE m.guid = ${guid} AND m.date_deleted IS NULL
+     WHERE m.chat_id = (SELECT id FROM chats WHERE guid = ${chatGuid} LIMIT 1)
+       AND m.guid = ${guid} AND m.date_deleted IS NULL
        AND ${messageHasVisibleContentSql('m')}
      LIMIT 1
   `);
@@ -47,7 +49,8 @@ export async function getMessageActionPartLayoutByGuid(
   const attachmentRows = await db.all<{ guid: string }>(sql`
     SELECT a.guid
       FROM attachments a JOIN messages m ON m.id = a.message_id
-     WHERE m.guid = ${guid}
+     WHERE m.chat_id = (SELECT id FROM chats WHERE guid = ${chatGuid} LIMIT 1)
+       AND m.guid = ${guid}
        AND m.balloon_bundle_id IS NULL
        AND COALESCE(a.hide_attachment, 0) = 0
        AND a.is_retracted = 0
@@ -466,11 +469,20 @@ export async function searchMessagesEnrichedByGuids(
  */
 export async function listThreadMessages(
   db: AppDatabase,
+  chatGuid: string,
   originatorGuid: string,
 ): Promise<MessageRow[]> {
   return db.all<MessageRow>(sql`
     ${MESSAGE_ROW_SELECT}
-    WHERE (m.guid = ${originatorGuid} OR m.thread_originator_guid = ${originatorGuid})
+    WHERE m.chat_id = (SELECT id FROM chats WHERE guid = ${chatGuid} LIMIT 1)
+      AND EXISTS (
+        SELECT 1 FROM messages originator
+         WHERE originator.guid = ${originatorGuid}
+           AND originator.chat_id = m.chat_id
+           AND originator.associated_message_type IS NULL
+           AND originator.date_deleted IS NULL
+      )
+      AND (m.guid = ${originatorGuid} OR m.thread_originator_guid = ${originatorGuid})
       AND m.associated_message_type IS NULL
       AND m.date_deleted IS NULL
     ORDER BY m.date_created ASC, m.id ASC
@@ -591,7 +603,7 @@ export interface MessageRow {
   senderAddress: string | null;
   senderName: string | null;
   senderAvatar: string | null;
-  /** Last known valid server-supplied handle color. */
+  /** Device-owned color for the exact sender handle identity. */
   senderColor?: string | null;
   senderService: string | null;
   // Group/chat-event fields (utils/groupEvent.ts). Optional so hand-built test literals need not
@@ -904,6 +916,7 @@ export interface MessagePreview {
 /** A compact preview of a message by guid (for the reply quote). */
 export async function getMessagePreviewByGuid(
   db: AppDatabase,
+  chatGuid: string,
   guid: string,
   partIndex?: number | null,
 ): Promise<MessagePreview | null> {
@@ -952,7 +965,8 @@ export async function getMessagePreviewByGuid(
                         AND a.is_retracted = 0 ${partFilter})
            ELSE 0 END AS hasVisibleAttachments
     FROM messages m LEFT JOIN handles h ON h.id = m.handle_id
-    WHERE m.guid = ${guid} AND m.date_deleted IS NULL LIMIT 1
+    WHERE m.chat_id = (SELECT id FROM chats WHERE guid = ${chatGuid} LIMIT 1)
+      AND m.guid = ${guid} AND m.date_deleted IS NULL LIMIT 1
   `);
   const row = rows[0];
   if (!row) return null;

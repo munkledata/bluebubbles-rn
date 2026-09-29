@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query';
-import { Stack, ThemeProvider as NavThemeProvider } from 'expo-router';
+import { ExperimentalStack, ThemeProvider as NavThemeProvider } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useMemo, useRef } from 'react';
 import { AppState } from 'react-native';
@@ -20,6 +20,7 @@ import { ForegroundLockGate } from '@features/lock/ForegroundLockGate';
 import { useLockStore } from '@state/lockStore';
 import { queryClient } from '@state/queryClient';
 import { AppDialog, AppToast, ErrorBoundary, ThemeProvider, useTheme } from '@ui';
+import { ShareIntentCapture } from '@ui/ShareIntentHandler';
 import { showToast } from '@ui/toast/toastStore';
 import { servicePresentationAdapter } from '@ui/servicePresentation';
 import { buildDarkNavigationTheme, DARK_STATUS_BAR_STYLE } from '@ui/theme/dark-navigation-theme';
@@ -46,7 +47,7 @@ function ThemedStack(): React.JSX.Element {
   );
   return (
     <NavThemeProvider value={navTheme}>
-      <Stack screenOptions={{ headerShown: false }} />
+      <ExperimentalStack screenOptions={{ headerShown: false }} />
     </NavThemeProvider>
   );
 }
@@ -184,6 +185,7 @@ export default function RootLayout(): React.JSX.Element {
         <QueryClientProvider client={queryClient}>
           <ThemeProvider renderWithFallbackTheme>
             <StatusBar style={DARK_STATUS_BAR_STYLE} />
+            <ShareIntentCapture />
             <ForegroundLockGate
               bootState={bootState}
               lockHydrated={lockHydrated}

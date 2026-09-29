@@ -24,8 +24,8 @@ export interface MessageTargetServerAuthorization {
 }
 
 export interface ExactMessageTarget {
-  /** Optional only for mutation services that resolve the owning chat from this same row. */
-  readonly chatGuid?: string;
+  /** Exact conversation owner; a GUID alone never authorizes a reply or message action. */
+  readonly chatGuid: string;
   readonly messageGuid: string;
   readonly partIndex: number;
   readonly partKind?: MessageTargetPartKind;
@@ -108,7 +108,7 @@ export function resolveMessageTargetWithinTransaction(
 ): Promise<ResolvedMessageTarget | null> {
   return runInTransactionContext(context, async (db) => {
     if (
-      (target.chatGuid !== undefined && !target.chatGuid) ||
+      !target.chatGuid ||
       !target.messageGuid ||
       !isBoundedPartIndex(target.partIndex) ||
       (target.partKind !== undefined && target.partKind !== 'any' && target.partKind !== 'text') ||
@@ -132,12 +132,14 @@ export function resolveMessageTargetWithinTransaction(
              m.message_part_topology AS messagePartTopology
         FROM messages m
         JOIN chats c ON c.id = m.chat_id
-       WHERE m.guid = ${target.messageGuid}
+       WHERE c.guid = ${target.chatGuid}
+         AND (m.guid = ${target.messageGuid}
           OR m.guid IN (
                SELECT canonical_guid
-                 FROM message_guid_aliases
-                WHERE alias_guid = ${target.messageGuid}
-             )
+                 FROM message_guid_aliases a
+                WHERE a.alias_guid = ${target.messageGuid}
+                  AND a.chat_guid = c.guid
+             ))
        ORDER BY CASE WHEN m.guid = ${target.messageGuid} THEN 0 ELSE 1 END
        LIMIT 2
     `);
@@ -145,7 +147,7 @@ export function resolveMessageTargetWithinTransaction(
     // choose whichever happens to sort first.
     if (rows.length !== 1) return null;
     const row = rows[0]!;
-    if (target.chatGuid !== undefined && row.chatGuid !== target.chatGuid) return null;
+    if (row.chatGuid !== target.chatGuid) return null;
     if (row.dateDeleted != null) return null;
     if (row.retractionState === 'fully-retracted' || row.retractionState === 'unknown') return null;
     if (row.dateRetracted != null && row.retractionState !== 'partial') return null;
@@ -155,7 +157,6 @@ export function resolveMessageTargetWithinTransaction(
     // threaded reply, edit, unsend, attachment reply, or an arbitrary/noncanonical message id.
     if (target.allowRcsWholeMessage === true) {
       if (
-        target.chatGuid === undefined ||
         !isRcsChatGuid(target.chatGuid) ||
         !isRcsChatGuid(row.chatGuid) ||
         !row.guid.startsWith('rcs-') ||
@@ -260,11 +261,7 @@ export function resolvePendingUnsendTarget(
     db,
     (context) =>
       runInTransactionContext(context, async (owner) => {
-        if (
-          (target.chatGuid !== undefined && !target.chatGuid) ||
-          !target.messageGuid ||
-          !isBoundedPartIndex(target.partIndex)
-        ) {
+        if (!target.chatGuid || !target.messageGuid || !isBoundedPartIndex(target.partIndex)) {
           return null;
         }
         const rows = await owner.all<{
@@ -276,11 +273,13 @@ export function resolvePendingUnsendTarget(
                  m.pending_retraction_part_index AS pendingPartIndex
             FROM messages m
             JOIN chats c ON c.id = m.chat_id
-           WHERE (m.guid = ${target.messageGuid}
+           WHERE c.guid = ${target.chatGuid}
+             AND (m.guid = ${target.messageGuid}
               OR m.guid IN (
                    SELECT canonical_guid
-                     FROM message_guid_aliases
-                    WHERE alias_guid = ${target.messageGuid}
+                     FROM message_guid_aliases a
+                    WHERE a.alias_guid = ${target.messageGuid}
+                      AND a.chat_guid = c.guid
                  ))
              AND m.date_deleted IS NULL
            ORDER BY CASE WHEN m.guid = ${target.messageGuid} THEN 0 ELSE 1 END
@@ -288,7 +287,7 @@ export function resolvePendingUnsendTarget(
         `);
         if (rows.length !== 1) return null;
         const row = rows[0]!;
-        if (target.chatGuid !== undefined && row.chatGuid !== target.chatGuid) return null;
+        if (row.chatGuid !== target.chatGuid) return null;
         if (row.pendingPartIndex !== target.partIndex) return null;
         return {
           messageGuid: row.guid,

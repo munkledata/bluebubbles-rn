@@ -350,8 +350,8 @@ describe('ServerHealthScreen — query-backed cards', () => {
   it('fills each card as its channel resolves', async () => {
     await renderScreen();
     expect(await screen.findByText('proj-x')).toBeTruthy();
-    expect(screen.getByText('RETIRED FEATURES')).toBeTruthy();
-    expect(screen.getAllByText('Retired in this release')).toHaveLength(2);
+    expect(screen.getByText('LEGACY PRIVATE API')).toBeTruthy();
+    expect(screen.getAllByText('Retired; narrow features are gated')).toHaveLength(2);
     expect(screen.getByText('1.9.9')).toBeTruthy();
     expect(screen.getByText('Direct')).toBeTruthy();
     expect(screen.getByText('203.0.113.9')).toBeTruthy();
@@ -363,10 +363,10 @@ describe('ServerHealthScreen — query-backed cards', () => {
     }
   });
 
-  it('presents retired helper features without requesting helper status', async () => {
+  it('presents retired broad helper transports without requesting helper status', async () => {
     await renderScreen();
 
-    expect(await screen.findAllByText('Retired in this release')).toHaveLength(2);
+    expect(await screen.findAllByText('Retired; narrow features are gated')).toHaveLength(2);
     expect(screen.queryByText('Disabled')).toBeNull();
   });
 

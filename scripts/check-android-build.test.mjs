@@ -18,15 +18,18 @@ import {
   NETWORK_SECURITY_CONFIG_REFERENCE,
   REQUIRED_BACKGROUND_TASK_RETRY_DEX_MARKERS,
   REQUIRED_PINNED_SHORTCUT_CLEANUP_DEX_MARKERS,
+  REQUIRED_SHARE_INTAKE_DEX_MARKERS,
   REQUIRED_TASK_MANAGER_SETTLEMENT_DEX_MARKERS,
   REQUIRED_PERMISSIONS,
   runAndroidBuildCheck,
   validateAndroidBuild,
   validateExpoBackgroundTaskRetryBridge,
   validateExpoFileSystemRedirectContainment,
+  validateExpoRouterPredictiveBackBridge,
   validateExpoTaskManagerPreJsSettlement,
   validateHeadlessEntry,
   validatePackagedAndroidBundle,
+  validateShareIntakeMainActivity,
   validateSystemCaNetworkSecurityConfig,
 } from './check-android-build.mjs';
 
@@ -37,10 +40,13 @@ const {
   applySystemCaManifestPolicy,
   writeSystemCaNetworkSecurityConfig,
 } = require('../plugins/withSystemCaNetworkSecurity');
+const { applyMainActivityShareCapture } = require('../plugins/withShareTargets');
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 
 const androidNamespace = 'http://schemas.android.com/apk/res/android';
 const intendedPermissions = [
+  'android.permission.ACCESS_COARSE_LOCATION',
+  'android.permission.ACCESS_FINE_LOCATION',
   'android.permission.POST_NOTIFICATIONS',
   'android.permission.READ_CONTACTS',
   'android.permission.READ_MEDIA_IMAGES',
@@ -100,14 +106,30 @@ const manifestNode = xmlNode(
       {
         'android:allowBackup': 'false',
         'android:networkSecurityConfig': NETWORK_SECURITY_CONFIG_REFERENCE,
+        'android:enableOnBackInvokedCallback': 'true',
       },
       [
+        xmlNode('service', {
+          'android:name': 'expo.modules.location.services.LocationTaskService',
+          'android:exported': 'false',
+          'android:foregroundServiceType': 'location',
+        }),
         xmlNode('meta-data', {
           'android:name': GOOGLE_MAPS_API_KEY_METADATA_NAME,
           'android:value': mapsApiKeyFixture,
         }),
         xmlNode('activity', { 'android:name': '.MainActivity', 'android:exported': 'true' }, [
           intentFilter('android.intent.action.MAIN', 'android.intent.category.LAUNCHER'),
+          intentFilter('android.intent.action.SEND', 'android.intent.category.DEFAULT', '*/*'),
+          intentFilter(
+            'android.intent.action.SEND_MULTIPLE',
+            'android.intent.category.DEFAULT',
+            '*/*',
+          ),
+          xmlNode('meta-data', {
+            'android:name': 'android.app.shortcuts',
+            'android:resource': '@xml/shortcuts',
+          }),
         ]),
         xmlNode('service', {
           'android:name': 'app.notifee.core.ReceiverService',
@@ -143,11 +165,18 @@ const systemCaNetworkSecurityConfigNode = xmlNode('network-security-config', {},
   ]),
 ]);
 
-function forbiddenShareTargetNode() {
+function ownedShareTargetNode() {
   return xmlNode('shortcuts', {}, [
-    xmlNode('share-target', { 'android:targetClass': '.MainActivity' }, [
-      xmlNode('data', { 'android:mimeType': '*/*' }),
-    ]),
+    xmlNode(
+      'share-target',
+      { 'android:targetClass': 'com.bluegreengatorapps.messages.MainActivity' },
+      [
+        xmlNode('data', { 'android:mimeType': '*/*' }),
+        xmlNode('category', {
+          'android:name': 'com.bluegreengatorapps.messages.category.SHARE_TARGET',
+        }),
+      ],
+    ),
   ]);
 }
 
@@ -274,6 +303,20 @@ import './src/services/notifications/registerFcmBackgroundHandler';
 import './src/services/download/registerBoundedNativeDownloadCleanup';
 import 'expo-router/entry';
 `;
+const baseMainActivitySource = `
+package com.bluegreengatorapps.messages
+
+import android.os.Bundle
+import com.facebook.react.ReactActivity
+
+class MainActivity : ReactActivity() {
+  override fun onCreate(savedInstanceState: Bundle?) {
+    prepareSplash()
+    super.onCreate(null)
+  }
+}
+`;
+const shareMainActivitySource = applyMainActivityShareCapture(baseMainActivitySource);
 
 const redirectContainmentPackageJson = {
   main: 'index.js',
@@ -281,7 +324,9 @@ const redirectContainmentPackageJson = {
   dependencies: {
     'expo-background-task': '57.0.16',
     'expo-file-system': '57.0.6',
+    'expo-router': '~57.0.20',
     'expo-task-manager': '57.0.16',
+    'react-native-screens': '~4.26.0',
   },
   devDependencies: { 'patch-package': '8.0.1' },
   expo: {
@@ -303,13 +348,17 @@ const redirectContainmentPackageLock = {
       dependencies: {
         'expo-background-task': '57.0.16',
         'expo-file-system': '57.0.6',
+        'expo-router': '~57.0.20',
         'expo-task-manager': '57.0.16',
+        'react-native-screens': '~4.26.0',
       },
       devDependencies: { 'patch-package': '8.0.1' },
     },
     'node_modules/expo-background-task': { version: '57.0.16' },
     'node_modules/expo-file-system': { version: '57.0.6' },
+    'node_modules/expo-router': { version: '57.0.20' },
     'node_modules/expo-task-manager': { version: '57.0.16' },
+    'node_modules/react-native-screens': { version: '4.26.2' },
     'node_modules/unimodules-app-loader': { version: '57.0.1' },
     'node_modules/patch-package': { version: '8.0.1' },
   },
@@ -335,6 +384,11 @@ client = builder.build()
 const redirectContainmentAppConfigSource = `
 const rnFetchEscapeHatch = process.env.EXPO_PUBLIC_USE_RN_FETCH?.trim().toLowerCase();
 if (rnFetchEscapeHatch === '1' || rnFetchEscapeHatch === 'true') throw new Error();
+const config = {
+  android: {
+    predictiveBackGestureEnabled: true,
+  },
+};
 `;
 const backgroundTaskRetryPatchSource = `
 diff --git a/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskScheduler.kt b/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskScheduler.kt
@@ -601,9 +655,28 @@ function writeRedirectContainmentFixture(root) {
     ),
     { recursive: true },
   );
+  mkdirSync(join(root, 'node_modules/expo-router/build/layouts/experimental-stack'), {
+    recursive: true,
+  });
+  mkdirSync(
+    join(
+      root,
+      'node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host',
+    ),
+    { recursive: true },
+  );
+  mkdirSync(join(root, 'app/(app)'), { recursive: true });
+  mkdirSync(join(root, 'app/(setup)'), { recursive: true });
+  mkdirSync(join(root, 'android/app/src/main/java/com/bluegreengatorapps/messages'), {
+    recursive: true,
+  });
   writeFileSync(join(root, 'package.json'), JSON.stringify(input.packageJson));
   writeFileSync(join(root, 'package-lock.json'), JSON.stringify(input.packageLock));
   writeFileSync(join(root, 'app.config.ts'), input.appConfigSource);
+  writeFileSync(
+    join(root, 'android/app/src/main/java/com/bluegreengatorapps/messages/MainActivity.kt'),
+    shareMainActivitySource,
+  );
   writeFileSync(join(root, 'patches/expo-file-system+57.0.6.patch'), input.patchSource);
   writeFileSync(
     join(root, 'patches/expo-background-task+57.0.16.patch'),
@@ -612,6 +685,14 @@ function writeRedirectContainmentFixture(root) {
   writeFileSync(
     join(root, 'patches/expo-task-manager+57.0.16.patch'),
     taskManagerSettlementPatchSource,
+  );
+  writeFileSync(
+    join(root, 'patches/expo-router+57.0.20.patch'),
+    readFileSync(join(ROOT, 'patches/expo-router+57.0.20.patch'), 'utf8'),
+  );
+  writeFileSync(
+    join(root, 'patches/react-native-screens+4.26.2.patch'),
+    readFileSync(join(ROOT, 'patches/react-native-screens+4.26.2.patch'), 'utf8'),
   );
   writeFileSync(
     join(
@@ -669,6 +750,41 @@ function writeRedirectContainmentFixture(root) {
     ),
     taskManagerManagedRepositorySource,
   );
+  writeFileSync(
+    join(
+      root,
+      'node_modules/expo-router/build/layouts/experimental-stack/ExperimentalStackView.js',
+    ),
+    readFileSync(
+      join(
+        ROOT,
+        'node_modules/expo-router/build/layouts/experimental-stack/ExperimentalStackView.js',
+      ),
+      'utf8',
+    ),
+  );
+  writeFileSync(
+    join(
+      root,
+      'node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainer.kt',
+    ),
+    readFileSync(
+      join(
+        ROOT,
+        'node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainer.kt',
+      ),
+      'utf8',
+    ),
+  );
+  writeFileSync(join(root, 'app/_layout.tsx'), readFileSync(join(ROOT, 'app/_layout.tsx'), 'utf8'));
+  writeFileSync(
+    join(root, 'app/(setup)/_layout.tsx'),
+    readFileSync(join(ROOT, 'app/(setup)/_layout.tsx'), 'utf8'),
+  );
+  writeFileSync(
+    join(root, 'app/(app)/_layout.tsx'),
+    readFileSync(join(ROOT, 'app/(app)/_layout.tsx'), 'utf8'),
+  );
   mkdirSync(join(root, 'android/app/src/main/res/xml'), { recursive: true });
   writeFileSync(
     join(root, 'android/app/src/main/res/xml/network_security_config.xml'),
@@ -685,6 +801,7 @@ function cleanupDexFixture({ omitRequiredMarker, extraMarkers = [] } = {}) {
       ...REQUIRED_BACKGROUND_TASK_RETRY_DEX_MARKERS.filter(
         (marker) => marker !== omitRequiredMarker,
       ),
+      ...REQUIRED_SHARE_INTAKE_DEX_MARKERS.filter((marker) => marker !== omitRequiredMarker),
       ...REQUIRED_TASK_MANAGER_SETTLEMENT_DEX_MARKERS.filter(
         (marker) => marker !== omitRequiredMarker,
       ),
@@ -762,6 +879,32 @@ test('requires exactly one Android 16 minimum in merged and packaged manifests',
   );
 });
 
+test('requires predictive Back in merged and packaged manifests', () => {
+  assert.ok(
+    validate({
+      manifest: manifest.replace('android:enableOnBackInvokedCallback="true"', ''),
+    }).some((error) => error.includes('android:enableOnBackInvokedCallback="true"')),
+  );
+  assert.ok(
+    validate({
+      manifest: manifest.replace(
+        'android:enableOnBackInvokedCallback="true"',
+        'android:enableOnBackInvokedCallback="false"',
+      ),
+    }).some((error) => error.includes('android:enableOnBackInvokedCallback="true"')),
+  );
+
+  const packagedWrong = structuredClone(manifestNode);
+  const application = packagedWrong.children.find((child) => child.name === 'application');
+  assert.ok(application);
+  application.attributes['android:enableOnBackInvokedCallback'] = 'false';
+  assert.ok(
+    validatePackagedAndroidBundle({ manifestProto: encodeXmlDocument(packagedWrong) }).some(
+      (error) => error.includes('android:enableOnBackInvokedCallback="true"'),
+    ),
+  );
+});
+
 test('generates and enforces the system-CA-only Android network policy', () => {
   const androidManifest = {
     manifest: {
@@ -813,6 +956,290 @@ test('generates and enforces the system-CA-only Android network policy', () => {
 
 test('accepts the pinned Expo file-system redirect containment chain', () => {
   assert.deepEqual(validateExpoFileSystemRedirectContainment(redirectContainmentInput()), []);
+});
+
+test('guards the Expo Router predictive-Back bridge against drift', () => {
+  const currentInput = () => ({
+    packageJson: JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')),
+    packageLock: JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8')),
+    appConfigSource: readFileSync(join(ROOT, 'app.config.ts'), 'utf8'),
+    patchSource: readFileSync(join(ROOT, 'patches/expo-router+57.0.20.patch'), 'utf8'),
+    experimentalStackSource: readFileSync(
+      join(
+        ROOT,
+        'node_modules/expo-router/build/layouts/experimental-stack/ExperimentalStackView.js',
+      ),
+      'utf8',
+    ),
+    screensPatchSource: readFileSync(
+      join(ROOT, 'patches/react-native-screens+4.26.2.patch'),
+      'utf8',
+    ),
+    stackContainerSource: readFileSync(
+      join(
+        ROOT,
+        'node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainer.kt',
+      ),
+      'utf8',
+    ),
+    rootLayoutSource: readFileSync(join(ROOT, 'app/_layout.tsx'), 'utf8'),
+    setupLayoutSource: readFileSync(join(ROOT, 'app/(setup)/_layout.tsx'), 'utf8'),
+    appLayoutSource: readFileSync(join(ROOT, 'app/(app)/_layout.tsx'), 'utf8'),
+  });
+
+  assert.deepEqual(validateExpoRouterPredictiveBackBridge(currentInput()), []);
+
+  const mutations = [
+    {
+      label: 'app config opt-in',
+      mutate(input) {
+        input.appConfigSource = input.appConfigSource.replace(
+          'predictiveBackGestureEnabled: true',
+          'predictiveBackGestureEnabled: false',
+        );
+      },
+      error: 'must set android.predictiveBackGestureEnabled to true exactly once',
+    },
+    {
+      label: 'dependency pin',
+      mutate(input) {
+        input.packageJson.dependencies['expo-router'] = '~57.0.21';
+      },
+      error: 'must remain pinned',
+    },
+    {
+      label: 'lockfile resolution',
+      mutate(input) {
+        input.packageLock.packages['node_modules/expo-router'].version = '57.0.21';
+      },
+      error: 'package-lock must resolve',
+    },
+    {
+      label: 'native dependency resolution',
+      mutate(input) {
+        input.packageLock.packages['node_modules/react-native-screens'].version = '4.26.3';
+      },
+      error: 'package-lock must resolve react-native-screens',
+    },
+    {
+      label: 'patch scope',
+      mutate(input) {
+        input.patchSource +=
+          '\ndiff --git a/node_modules/expo-router/build/other.js b/node_modules/expo-router/build/other.js\n';
+      },
+      error: 'must patch only the reviewed experimental stack file',
+    },
+    {
+      label: 'durable pop patch',
+      mutate(input) {
+        input.patchSource = input.patchSource.replace(
+          '+                            ...native_1.StackActions.pop(),\n',
+          '',
+        );
+      },
+      error: 'must carry the reviewed pop and theme repairs',
+    },
+    {
+      label: 'installed pop bridge',
+      mutate(input) {
+        input.experimentalStackSource = input.experimentalStackSource.replaceAll(
+          '...native_1.StackActions.pop(),',
+          '...native_1.StackActions.push(),',
+        );
+      },
+      error: 'must redispatch the exact prevented pop action',
+    },
+    {
+      label: 'installed theme bridge',
+      mutate(input) {
+        input.experimentalStackSource = input.experimentalStackSource.replace(
+          'style: [styles.scene, { backgroundColor: colors.background }]',
+          "style: [styles.scene, { backgroundColor: 'white' }]",
+        );
+      },
+      error: 'must use the navigation theme background',
+    },
+    {
+      label: 'hidden native header omission',
+      mutate(input) {
+        input.experimentalStackSource = input.experimentalStackSource.replace(
+          'headerConfigProps.hidden === true ? null :',
+          'false ? null :',
+        );
+      },
+      error: 'must omit native HeaderConfig when explicitly hidden',
+    },
+    {
+      label: 'native patch scope',
+      mutate(input) {
+        input.screensPatchSource +=
+          '\ndiff --git a/node_modules/react-native-screens/android/generated.txt b/node_modules/react-native-screens/android/generated.txt\n';
+      },
+      error: 'must patch only the reviewed gamma stack container',
+    },
+    {
+      label: 'native identity match',
+      mutate(input) {
+        input.stackContainerSource = input.stackContainerSource.replace(
+          'it.screen === popOperation.screen',
+          'it.screen == popOperation.screen',
+        );
+      },
+      error: 'must cancel only identity-matched uncommitted pairs',
+    },
+    {
+      label: 'durable native root replacement',
+      mutate(input) {
+        input.screensPatchSource = input.screensPatchSource.replace(
+          '+                    pendingPopOperations.size == 1 &&\n',
+          '',
+        );
+      },
+      error: 'must carry the reviewed uncommitted-pair and root-replacement repairs',
+    },
+    {
+      label: 'durable native root replacement additive broadening',
+      mutate(input) {
+        input.screensPatchSource = input.screensPatchSource.replace(
+          '+                    pendingPushOperations.single().screen !== pendingPopOperations.single().screen\n',
+          '+                    pendingPushOperations.single().screen !== pendingPopOperations.single().screen || pendingPushOperations.isNotEmpty()\n',
+        );
+      },
+      error: 'must preserve the exact reviewed root-replacement predicate and branches',
+    },
+    {
+      label: 'installed native root replacement',
+      mutate(input) {
+        input.stackContainerSource = input.stackContainerSource.replace(
+          'fragmentOps.add(RemoveOp(fragment))',
+          'fragmentOps.add(PopBackStackOp(fragment))',
+        );
+      },
+      error: 'must cancel only identity-matched uncommitted pairs',
+    },
+    {
+      label: 'installed native root replacement exact cardinality',
+      mutate(input) {
+        input.stackContainerSource = input.stackContainerSource.replace(
+          'pendingPushOperations.size == 1 &&',
+          'pendingPushOperations.isNotEmpty() &&',
+        );
+      },
+      error: 'must cancel only identity-matched uncommitted pairs',
+    },
+    {
+      label: 'installed native root replacement single pop',
+      mutate(input) {
+        input.stackContainerSource = input.stackContainerSource.replace(
+          'pendingPopOperations.size == 1 &&',
+          'pendingPopOperations.isNotEmpty() &&',
+        );
+      },
+      error: 'must cancel only identity-matched uncommitted pairs',
+    },
+    {
+      label: 'installed native root replacement pop identity',
+      mutate(input) {
+        input.stackContainerSource = input.stackContainerSource.replace(
+          'stackModel.single().stackScreen === pendingPopOperations.single().screen &&',
+          'stackModel.single().stackScreen == pendingPopOperations.single().screen &&',
+        );
+      },
+      error: 'must cancel only identity-matched uncommitted pairs',
+    },
+    {
+      label: 'installed native root replacement distinct push',
+      mutate(input) {
+        input.stackContainerSource = input.stackContainerSource.replace(
+          'pendingPushOperations.single().screen !== pendingPopOperations.single().screen',
+          'pendingPushOperations.single().screen === pendingPopOperations.single().screen',
+        );
+      },
+      error: 'must cancel only identity-matched uncommitted pairs',
+    },
+    {
+      label: 'installed native root replacement additive broadening',
+      mutate(input) {
+        input.stackContainerSource = input.stackContainerSource.replace(
+          'pendingPushOperations.single().screen !== pendingPopOperations.single().screen\n',
+          'pendingPushOperations.single().screen !== pendingPopOperations.single().screen || pendingPushOperations.isNotEmpty()\n',
+        );
+      },
+      error: 'must cancel only identity-matched uncommitted pairs',
+    },
+    {
+      label: 'last-pop hard failure',
+      mutate(input) {
+        input.stackContainerSource = input.stackContainerSource.replace(
+          '[RNScreens] Attempt to pop last screen from the stack',
+          '[RNScreens] Ignoring final pop',
+        );
+      },
+      error: 'must cancel only identity-matched uncommitted pairs',
+    },
+    {
+      label: 'native stale-operation clear ordering',
+      mutate(input) {
+        input.stackContainerSource = input.stackContainerSource
+          .replace('        fragmentOps.clear()\n\n', '')
+          .replace(
+            '        // Handle pop operations first.',
+            '        fragmentOps.clear()\n\n        // Handle pop operations first.',
+          );
+      },
+      error: 'must cancel only identity-matched uncommitted pairs',
+    },
+    {
+      label: 'unmatched-pop hard failure',
+      mutate(input) {
+        input.stackContainerSource = input.stackContainerSource.replace(
+          '[RNScreens] Unable to find a fragment to pop',
+          '[RNScreens] Ignoring unmatched pop',
+        );
+      },
+      error: 'must cancel only identity-matched uncommitted pairs',
+    },
+    {
+      label: 'root stack selection',
+      mutate(input) {
+        input.rootLayoutSource = input.rootLayoutSource.replace('<ExperimentalStack', '<Stack');
+      },
+      error: 'root layout must render Expo Router ExperimentalStack',
+    },
+    {
+      label: 'nested stack selection',
+      mutate(input) {
+        input.appLayoutSource = input.appLayoutSource.replace('<ExperimentalStack', '<Stack');
+      },
+      error: 'authenticated layout must render Expo Router ExperimentalStack',
+    },
+    {
+      label: 'setup stack selection',
+      mutate(input) {
+        input.setupLayoutSource = input.setupLayoutSource.replace('<ExperimentalStack', '<Stack');
+      },
+      error: 'setup layout must render Expo Router ExperimentalStack',
+    },
+    {
+      label: 'root stack header contract',
+      mutate(input) {
+        input.rootLayoutSource = input.rootLayoutSource.replace(
+          'screenOptions={{ headerShown: false }}',
+          'screenOptions={{ headerShown: true }}',
+        );
+      },
+      error: 'root layout must keep its experimental stack explicitly headerless',
+    },
+  ];
+
+  for (const { label, mutate, error } of mutations) {
+    const input = currentInput();
+    mutate(input);
+    assert.ok(
+      validateExpoRouterPredictiveBackBridge(input).some((message) => message.includes(error)),
+      `${label} must fail closed`,
+    );
+  }
 });
 
 test('guards the source-built Expo background-task retry bridge against drift', () => {
@@ -1495,16 +1922,49 @@ test('does not accept component names in comments or on the wrong XML element', 
   assert.ok(wrongElementErrors.some((error) => error.includes('<service>')));
 });
 
-test('allows outbound ACTION_SEND queries but rejects inbound component filters and metadata', () => {
+test('requires Expo Location service to remain non-exported and location-scoped', () => {
+  const service =
+    '<service android:name="expo.modules.location.services.LocationTaskService" android:exported="false" android:foregroundServiceType="location" />';
+  const exported = validate({
+    manifest: manifest.replace(
+      service,
+      service.replace('android:exported="false"', 'android:exported="true"'),
+    ),
+  });
+  assert.ok(
+    exported.some((error) =>
+      error.includes('LocationTaskService must set android:exported="false"'),
+    ),
+  );
+
+  const unscoped = validate({
+    manifest: manifest.replace(
+      service,
+      service.replace(
+        'android:foregroundServiceType="location"',
+        'android:foregroundServiceType="dataSync"',
+      ),
+    ),
+  });
+  assert.ok(
+    unscoped.some((error) =>
+      error.includes('LocationTaskService must set android:foregroundServiceType="location"'),
+    ),
+  );
+});
+
+test('requires exact owned inbound share filters and Direct Share metadata', () => {
   assert.deepEqual(validate(), []);
 
   for (const action of ['android.intent.action.SEND', 'android.intent.action.SEND_MULTIPLE']) {
-    const inboundFilter = renderXml(intentFilter(action, 'android.intent.category.DEFAULT', '*/*'));
     const errors = validate({
-      manifest: manifest.replace('</activity>', `${inboundFilter}</activity>`),
+      manifest: manifest.replace(
+        renderXml(intentFilter(action, 'android.intent.category.DEFAULT', '*/*')),
+        '',
+      ),
     });
     assert.ok(
-      errors.some((error) => error.includes(`must not declare inbound ${action}`)),
+      errors.some((error) => error.includes(`must declare inbound ${action} exactly once`)),
       action,
     );
   }
@@ -1517,19 +1977,76 @@ test('allows outbound ACTION_SEND queries but rejects inbound component filters 
   const aliasErrors = validate({
     manifest: manifest.replace('</application>', `${alias}</application>`),
   });
-  assert.ok(aliasErrors.some((error) => error.includes('.ShareAlias must not declare inbound')));
-
-  const metadata = renderXml(
-    xmlNode('meta-data', {
-      'android:name': 'android.app.shortcuts',
-      'android:resource': '@xml/shortcuts',
-    }),
+  assert.ok(
+    aliasErrors.some((error) => error.includes('.ShareAlias must not declare owned inbound')),
   );
-  const metadataErrors = validate({
-    manifest: manifest.replace('</activity>', `${metadata}</activity>`),
+
+  const wrongMime = validate({
+    manifest: manifest.replace(
+      renderXml(
+        intentFilter('android.intent.action.SEND', 'android.intent.category.DEFAULT', '*/*'),
+      ),
+      renderXml(
+        intentFilter('android.intent.action.SEND', 'android.intent.category.DEFAULT', 'image/*'),
+      ),
+    ),
+  });
+  assert.ok(wrongMime.some((error) => error.includes('must contain only its action')));
+
+  const missingMetadata = validate({
+    manifest: manifest.replace(
+      '<meta-data android:name="android.app.shortcuts" android:resource="@xml/shortcuts" />',
+      '',
+    ),
   });
   assert.ok(
-    metadataErrors.some((error) => error.includes('must not declare android.app.shortcuts')),
+    missingMetadata.some((error) =>
+      error.includes('must declare android.app.shortcuts meta-data exactly once'),
+    ),
+  );
+
+  const wrongMetadata = validate({
+    manifest: manifest.replace('@xml/shortcuts', '@xml/not_shortcuts'),
+  });
+  assert.ok(wrongMetadata.some((error) => error.includes('must reference "@xml/shortcuts"')));
+});
+
+test('requires owned MainActivity share capture before ReactActivity sees either intent', () => {
+  assert.deepEqual(validateShareIntakeMainActivity(shareMainActivitySource), []);
+
+  const lateCreate = shareMainActivitySource
+    .replace(
+      'expo.modules.gatorshareintake.GatorShareIntakeActivityBridge.captureOnCreate(this, intent, savedInstanceState)',
+      '',
+    )
+    .replace(
+      'super.onCreate(null)',
+      'super.onCreate(null)\n    expo.modules.gatorshareintake.GatorShareIntakeActivityBridge.captureOnCreate(this, intent, savedInstanceState)',
+    );
+  assert.ok(
+    validateShareIntakeMainActivity(lateCreate).some((error) =>
+      error.includes('capture the owned share before super.onCreate'),
+    ),
+  );
+
+  const workBeforeCapture = shareMainActivitySource.replace(
+    'override fun onNewIntent(intent: android.content.Intent) {',
+    'override fun onNewIntent(intent: android.content.Intent) {\n    inspectIntent(intent)',
+  );
+  assert.ok(
+    validateShareIntakeMainActivity(workBeforeCapture).some((error) =>
+      error.includes('onNewIntent owned share capture must be its first statement'),
+    ),
+  );
+
+  const duplicate = shareMainActivitySource.replace(
+    'super.onNewIntent(intent)',
+    'expo.modules.gatorshareintake.GatorShareIntakeActivityBridge.captureOnNewIntent(this, intent)\n    super.onNewIntent(intent)',
+  );
+  assert.ok(
+    validateShareIntakeMainActivity(duplicate).some((error) =>
+      error.includes('onNewIntent must call the owned share capture exactly once'),
+    ),
   );
 });
 
@@ -1580,13 +2097,15 @@ test('rejects a bypassed or late expo-router bundle entry', () => {
   assert.ok(lateRegistration.some((error) => error.includes('must load before')));
 });
 
-test('validates the packaged protobuf manifest and rejects a Direct Share resource', () => {
+test('validates the packaged manifest, owned share target, and native intake markers', () => {
   const manifestProto = encodeXmlDocument(manifestNode);
   const networkSecurityConfigProto = encodeXmlDocument(systemCaNetworkSecurityConfigNode);
+  const shortcutsProto = encodeXmlDocument(ownedShareTargetNode());
   assert.deepEqual(
     validatePackagedAndroidBundle({
       manifestProto,
       networkSecurityConfigProto,
+      shortcutsProto,
       dexBytes: cleanupDexFixture(),
     }),
     [],
@@ -1706,6 +2225,20 @@ test('validates the packaged protobuf manifest and rejects a Direct Share resour
     );
   }
 
+  for (const marker of REQUIRED_SHARE_INTAKE_DEX_MARKERS) {
+    const missingOwnedIntake = validatePackagedAndroidBundle({
+      manifestProto,
+      shortcutsProto,
+      dexBytes: cleanupDexFixture({ omitRequiredMarker: marker }),
+    });
+    assert.ok(
+      missingOwnedIntake.includes(
+        `packaged DEX is missing required owned-share intake marker: ${marker}`,
+      ),
+      marker,
+    );
+  }
+
   for (const marker of FORBIDDEN_LEGACY_SHORTCUT_PUBLISHER_DEX_MARKERS) {
     const legacyPublisher = validatePackagedAndroidBundle({
       manifestProto,
@@ -1719,11 +2252,19 @@ test('validates the packaged protobuf manifest and rejects a Direct Share resour
     );
   }
 
-  const forbiddenTarget = validatePackagedAndroidBundle({
+  const wrongTarget = structuredClone(ownedShareTargetNode());
+  wrongTarget.children[0].attributes['android:targetClass'] = '.MainActivity';
+  const invalidTarget = validatePackagedAndroidBundle({
     manifestProto,
-    shortcutsProto: encodeXmlDocument(forbiddenShareTargetNode()),
+    shortcutsProto: encodeXmlDocument(wrongTarget),
   });
-  assert.ok(forbiddenTarget.some((error) => error.includes('must not contain <share-target>')));
+  assert.ok(invalidTarget.some((error) => error.includes('must target')));
+
+  assert.ok(
+    validatePackagedAndroidBundle({ manifestProto }).some((error) =>
+      error.includes('packaged owned shortcuts.xml is missing'),
+    ),
+  );
 
   const forbiddenNativeModule = validatePackagedAndroidBundle({
     manifestProto,
@@ -1760,6 +2301,7 @@ test('rejects direct community WebView code without rejecting the supported Expo
     validatePackagedAndroidBundle({
       manifestProto,
       networkSecurityConfigProto: encodeXmlDocument(systemCaNetworkSecurityConfigNode),
+      shortcutsProto: encodeXmlDocument(ownedShareTargetNode()),
       dexBytes: cleanupDexFixture({
         extraMarkers: ['Lexpo/modules/webview/DomWebViewModule;'],
       }),
@@ -1850,13 +2392,15 @@ function writeTestAab(
     mkdirSync(dirname(sensitivePath), { recursive: true });
     writeFileSync(sensitivePath, sensitiveArchiveContents);
   }
+  mkdirSync(join(staging, 'base', 'res', 'xml'), { recursive: true });
+  const shareTarget = ownedShareTargetNode();
   if (includeForbiddenShareTarget) {
-    mkdirSync(join(staging, 'base', 'res', 'xml'), { recursive: true });
-    writeFileSync(
-      join(staging, 'base', 'res', 'xml', 'shortcuts.xml'),
-      encodeXmlDocument(forbiddenShareTargetNode()),
-    );
+    shareTarget.children[0].attributes['android:targetClass'] = '.MainActivity';
   }
+  writeFileSync(
+    join(staging, 'base', 'res', 'xml', 'shortcuts.xml'),
+    encodeXmlDocument(shareTarget),
+  );
   const result = spawnSync('zip', ['-q', '-X', '-r', absolutePath, 'base'], {
     cwd: staging,
     encoding: 'utf8',
@@ -1897,6 +2441,24 @@ test('artifact runner inspects both variants and the final release AAB contents'
 
     writeTestAab(root, releaseBundlePath);
     assert.doesNotThrow(() => runAndroidBuildCheck(options));
+
+    const experimentalStackPath = join(
+      root,
+      'node_modules/expo-router/build/layouts/experimental-stack/ExperimentalStackView.js',
+    );
+    const experimentalStackSource = readFileSync(experimentalStackPath, 'utf8');
+    writeFileSync(
+      experimentalStackPath,
+      experimentalStackSource.replaceAll(
+        '...native_1.StackActions.pop(),',
+        '...native_1.StackActions.push(),',
+      ),
+    );
+    assert.throws(
+      () => runAndroidBuildCheck(options),
+      /predictive Back bridge:.*exact prevented pop action/s,
+    );
+    writeFileSync(experimentalStackPath, experimentalStackSource);
 
     const backgroundSchedulerPath = join(
       root,
@@ -2024,10 +2586,7 @@ test('artifact runner inspects both variants and the final release AAB contents'
     );
 
     writeTestAab(root, releaseBundlePath, { includeForbiddenShareTarget: true });
-    assert.throws(
-      () => runAndroidBuildCheck(options),
-      /packaged shortcuts.xml must not contain <share-target>/,
-    );
+    assert.throws(() => runAndroidBuildCheck(options), /packaged share-target must target/);
 
     writeTestAab(root, releaseBundlePath, { includeForbiddenNativeModule: true });
     assert.throws(

@@ -57,8 +57,8 @@ const DB_WAL_WRITE_DEATH_RESUMING_FILE = '.gator-db-wal-write-death-resuming-v1'
 const DB_ACTIVE_MIGRATION_DEATH_PREPARING_FILE = '.gator-db-active-migration-death-preparing-v1';
 const DB_ACTIVE_MIGRATION_DEATH_READY_FILE = '.gator-db-active-migration-death-ready-v1';
 const DB_ACTIVE_MIGRATION_DEATH_RESUMING_FILE = '.gator-db-active-migration-death-resuming-v1';
-const DB_RELAUNCH_MIGRATION_COUNT = 49 as const;
-const DB_RELAUNCH_MIGRATION_HEAD = '0049_inbox_search_postings' as const;
+const DB_RELAUNCH_MIGRATION_COUNT = 52 as const;
+const DB_RELAUNCH_MIGRATION_HEAD = '0052_chat_history_deletion_boundary' as const;
 const WAIT_FOR_HOST_PROCESS_KILL = new Promise<never>(() => undefined);
 
 type DbRelaunchMarkerFileName =

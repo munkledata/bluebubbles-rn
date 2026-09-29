@@ -33,8 +33,10 @@ export interface PendingAttachment {
   size: number;
   width?: number;
   height?: number;
-  /** Preserved while a native-owned pasted file moves through the ordinary attachment tray. */
-  origin?: 'paste';
+  /** Preserved while a native-owned transient file moves into ordinary attachment storage. */
+  origin?: 'paste' | 'share';
+  /** Stable native-share manifest ordinal used only for crash-safe handoff receipts. */
+  shareItemIndex?: number;
 }
 
 export const ATTACHMENT_TRAY_HEIGHT = 104;
@@ -74,6 +76,10 @@ interface AttachmentTrayProps {
   /** Pick a device contact and send it as a card. Omitted when the server can't build vCards, so
    *  the "Contact" button appears only when its RCS chat supports interactive attachments. */
   onPickContact?: () => void;
+  /** Confirm and send one foreground-acquired current location. */
+  onShareLocation?: () => void;
+  /** False when the tray exists only for non-media actions such as Location. */
+  mediaEnabled?: boolean;
   /** The first iMessage upload slice accepts a single bounded still image with known bytes. */
   imessageImageOnly?: boolean;
 }
@@ -88,6 +94,8 @@ export function AttachmentTray({
   onPick,
   onPickFiles,
   onPickContact,
+  onShareLocation,
+  mediaEnabled = true,
   imessageImageOnly = false,
 }: AttachmentTrayProps): React.JSX.Element {
   const theme = useTheme();
@@ -168,6 +176,20 @@ export function AttachmentTray({
 
   useEffect(() => {
     mountedRef.current = true;
+    if (!mediaEnabled) {
+      let cancelled = false;
+      // Capability loss must clear any prior media result without synchronously cascading a render
+      // from this effect. The local fence prevents this cleanup from racing a later re-enable.
+      void Promise.resolve().then(() => {
+        if (cancelled || !mountedRef.current) return;
+        setAssets([]);
+        setPermissionDialogVisible(false);
+      });
+      return () => {
+        cancelled = true;
+        mountedRef.current = false;
+      };
+    }
     const unsubscribeInvalidation = subscribeRealtimeGenerationInvalidation(
       accountLease.generation,
       () => {
@@ -191,7 +213,7 @@ export function AttachmentTray({
       unsubscribeInvalidation();
       subscription.remove();
     };
-  }, [accountLease.generation, inspectMediaPermission]);
+  }, [accountLease.generation, inspectMediaPermission, mediaEnabled]);
 
   const requestMediaPermission = async (): Promise<void> => {
     if (!isCurrent() || mediaRequestInFlightRef.current) return;
@@ -353,27 +375,45 @@ export function AttachmentTray({
         contentContainerStyle={styles.row}
         keyboardShouldPersistTaps="handled"
       >
-        <Pressable
-          onPress={() => void capture()}
-          style={[styles.files, { backgroundColor: theme.color.secondaryBackground }]}
-          accessibilityRole="button"
-          accessibilityLabel="Take a photo"
-        >
-          <Icon name="camera-outline" size={26} color={theme.color.tint} />
-          <Text style={[styles.filesText, { color: theme.color.secondaryLabel }]}>Camera</Text>
-        </Pressable>
+        {mediaEnabled ? (
+          <>
+            <Pressable
+              onPress={() => void capture()}
+              style={[styles.files, { backgroundColor: theme.color.secondaryBackground }]}
+              accessibilityRole="button"
+              accessibilityLabel="Take a photo"
+            >
+              <Icon name="camera-outline" size={26} color={theme.color.tint} />
+              <Text style={[styles.filesText, { color: theme.color.secondaryLabel }]}>Camera</Text>
+            </Pressable>
 
-        <Pressable
-          onPress={() => {
-            if (isCurrent()) onPickFiles();
-          }}
-          style={[styles.files, { backgroundColor: theme.color.secondaryBackground }]}
-          accessibilityRole="button"
-          accessibilityLabel="Attach a file"
-        >
-          <Icon name="document-outline" size={26} color={theme.color.tint} />
-          <Text style={[styles.filesText, { color: theme.color.secondaryLabel }]}>Files</Text>
-        </Pressable>
+            <Pressable
+              onPress={() => {
+                if (isCurrent()) onPickFiles();
+              }}
+              style={[styles.files, { backgroundColor: theme.color.secondaryBackground }]}
+              accessibilityRole="button"
+              accessibilityLabel="Attach a file"
+            >
+              <Icon name="document-outline" size={26} color={theme.color.tint} />
+              <Text style={[styles.filesText, { color: theme.color.secondaryLabel }]}>Files</Text>
+            </Pressable>
+          </>
+        ) : null}
+
+        {onShareLocation ? (
+          <Pressable
+            onPress={() => {
+              if (isCurrent()) onShareLocation();
+            }}
+            style={[styles.files, { backgroundColor: theme.color.secondaryBackground }]}
+            accessibilityRole="button"
+            accessibilityLabel="Send current location"
+          >
+            <Icon name="location-outline" size={26} color={theme.color.tint} />
+            <Text style={[styles.filesText, { color: theme.color.secondaryLabel }]}>Location</Text>
+          </Pressable>
+        ) : null}
 
         {onPickContact ? (
           <Pressable
@@ -389,7 +429,7 @@ export function AttachmentTray({
           </Pressable>
         ) : null}
 
-        {cameraPermissionIssue ? (
+        {mediaEnabled && cameraPermissionIssue ? (
           <View style={styles.msg}>
             <Text style={[styles.msgText, { color: theme.color.secondaryLabel }]}>
               {cameraPermissionIssue === 'denied'
@@ -399,7 +439,7 @@ export function AttachmentTray({
           </View>
         ) : null}
 
-        {mediaPermission === 'granted' ? (
+        {mediaEnabled && mediaPermission === 'granted' ? (
           assets.map((a) => (
             <Pressable
               key={a.id}
@@ -418,7 +458,7 @@ export function AttachmentTray({
               ) : null}
             </Pressable>
           ))
-        ) : (
+        ) : mediaEnabled ? (
           <Pressable
             onPress={() => setPermissionDialogVisible(true)}
             disabled={mediaPermission === 'checking' || mediaPermission === 'requesting'}
@@ -439,12 +479,15 @@ export function AttachmentTray({
             <Icon name="images-outline" size={24} color={theme.color.tint} />
             <Text style={[styles.filesText, { color: theme.color.secondaryLabel }]}>Photos</Text>
           </Pressable>
-        )}
+        ) : null}
       </ScrollView>
 
       <Modal
         visible={
-          permissionDialogVisible && mediaPermission !== 'checking' && mediaPermission !== 'granted'
+          mediaEnabled &&
+          permissionDialogVisible &&
+          mediaPermission !== 'checking' &&
+          mediaPermission !== 'granted'
         }
         transparent
         animationType="fade"

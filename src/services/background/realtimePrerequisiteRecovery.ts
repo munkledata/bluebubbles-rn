@@ -106,9 +106,17 @@ export async function recoverRealtimePrerequisite(
 
     const api = httpSyncApi(transport.http);
     if (recovery.kind === 'sync-chat') {
+      const info = recovery.chatGuid.startsWith('RCS;-;')
+        ? await serverApi.serverInfo(transport.http, controller.signal)
+        : null;
+      if (stopped()) {
+        outcome = 'stale';
+        return;
+      }
       const refreshed = await syncSingleChat(db, api, recovery.chatGuid, {
         shouldAbort: stopped,
         signal: controller.signal,
+        rcsProviderInfo: info,
       });
       if (!refreshed || stopped()) {
         outcome = stopped() ? 'stale' : 'unavailable';
@@ -118,6 +126,7 @@ export async function recoverRealtimePrerequisite(
         maxMessages: REALTIME_PREREQUISITE_CHAT_MAX_MESSAGES,
         shouldAbort: stopped,
         signal: controller.signal,
+        rcsProviderInfo: info,
       });
     } else {
       const info = await serverApi.serverInfo(transport.http, controller.signal);
@@ -126,7 +135,17 @@ export async function recoverRealtimePrerequisite(
         return;
       }
       if (recovery.kind === 'sync-account') {
-        await syncAllChats(db, api, 200, stopped, controller.signal);
+        await syncAllChats(
+          db,
+          api,
+          200,
+          stopped,
+          controller.signal,
+          undefined,
+          undefined,
+          undefined,
+          info,
+        );
         if (stopped()) {
           outcome = 'stale';
           return;
@@ -136,6 +155,7 @@ export async function recoverRealtimePrerequisite(
           maxPages: REALTIME_PREREQUISITE_ACCOUNT_MAX_PAGES,
           shouldAbort: stopped,
           signal: controller.signal,
+          rcsProviderInfo: info,
         });
       }
       if (stopped()) {
@@ -147,6 +167,7 @@ export async function recoverRealtimePrerequisite(
         maxPages: REALTIME_PREREQUISITE_DELETION_MAX_PAGES,
         shouldAbort: stopped,
         signal: controller.signal,
+        rcsProviderInfo: info,
       });
     }
 

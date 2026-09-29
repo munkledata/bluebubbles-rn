@@ -1,4 +1,5 @@
 import { z } from 'zod/v4';
+import { isRcsProviderEpoch } from '../rcs/providerIdentity';
 import {
   MAX_RETRACTION_ATTACHMENT_GUID_BYTES,
   MAX_RETRACTION_ATTACHMENTS,
@@ -173,6 +174,8 @@ const MessagePartIndex = z
 const MessageWire = z.object({
   originalROWID: z.number().nullish(),
   guid: z.string(),
+  /** Google pairing generation for an epoch-qualified RCS message. */
+  providerEpoch: z.string().refine(isRcsProviderEpoch).nullish(),
   text: z.string().nullish(),
   /**
    * Gator's FCM payload cap marks a long message whose text was shortened for push delivery.

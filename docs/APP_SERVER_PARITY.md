@@ -2,8 +2,8 @@
 
 _Initial baseline generated 2026-07-01 from a bidirectional API/feature reconciliation between the RN app (`~/github/bluebubbles-rn`) and the Gator server (`~/github/BB/bluebubbles-server`, then-current `master`). Later dated annotations record subsequent verification and closure; counts and `CONFIRMED` labels without a newer date describe that original baseline, not a fresh whole-repository scan._
 
-> **Current-client boundary (updated 2026-09-20; `FP-006`):** The current Gator client retires
-> helper-dependent targeted iMessage actions and FaceTime paths. Advertised or stale broad helper
+> **Current-client boundary (updated 2026-09-25; `FP-006`):** The current Gator client retires
+> broad helper-dependent targeted iMessage actions and FaceTime paths. Advertised or stale broad helper
 > flags are normalized to unavailable and cannot restore UI, notification actions, or network calls.
 > New chat remains one-to-one: RCS requires its own capability. Text-only iMessage creation
 > separately requires `supports_imessage_new_chat`; SMS, groups, and staged files on a new iMessage
@@ -13,7 +13,17 @@ _Initial baseline generated 2026-07-01 from a bidirectional API/feature reconcil
 > iMessage chat, `supports_imessage_attachment_upload` permits one JPEG or PNG; PDF also needs
 > `supports_imessage_pdf_attachment_upload`, and optional caption text needs
 > `supports_imessage_attachment_caption_upload`. That attachment path does not restore the broad
-> iMessage combined-send flag or any targeted/reply action. Read, unread, and delete actions are
+> iMessage combined-send flag and does not authorize any targeted action. A separate
+> `supports_imessage_replies` gate permits only one nonblank plain-text reply to exact part zero of
+> a stored message in a proven existing one-to-one iMessage chat; uncertain delivery is never replayed.
+> Local packaged-Mac and
+> physical-Samsung development-client acceptance passed on 2026-09-25 with exactly one Send action
+> and no retry. A separate `supports_imessage_reactions` gate
+> retains only reviewed classic part-zero reactions. Separate `supports_imessage_edit` and
+> `supports_imessage_unsend` gates permit only a nonblank plain-text edit or retraction of exact
+> text part zero in that proven one-to-one chat; broad or generic edit/unsend authority remains
+> retired. Their app, server, and helper paths are source-complete, but packaged-Mac and physical
+> Samsung live acceptance remains open under `FEAT-03B`/`POST-01`. Read, unread, and delete actions are
 > device-local. There is no backward-compatibility promise for the retired Flutter client or older
 > BlueBubbles server/helper contracts. Dated sections below remain historical
 > evidence unless they explicitly say they describe the current client.
@@ -50,7 +60,7 @@ a complete repair. This is host/source alignment only; the authoritative work pl
 `RECOVERY-01` open for a matching packaged deployment and real Mac/Android cancellation,
 session-switch, RCS-refusal, and final database comparison evidence.
 
-## 🟡 Source-aligned with local dev-client proof (updated 2026-09-20) — multipart topology and combined sends (`FEAT-03`)
+## 🟡 Source-aligned with local dev-client proof (updated 2026-09-28) — multipart topology and combined sends (`FEAT-03`)
 
 The app and Gator server now share a bounded normalized per-part topology and exact received-message
 reply/reaction part identity. Migration `0047_message_retraction_topology` persists the topology and
@@ -61,31 +71,77 @@ bubble, inbox, search, notification, and attachment-cache surfaces instead of tr
 as an empty message.
 
 Incoming topology remains useful for truthful rendering and retraction-survivor classification, but
-the current client does not expose or transmit helper-dependent iMessage reply, reaction, edit,
-unsend, contact-card reply, or targeted schedule actions. Plain text in an existing iMessage chat
+the current client does not expose or transmit broad helper-dependent iMessage edit/unsend,
+contact-card reply, or targeted schedule actions. Plain text in an existing iMessage chat
 uses AppleScript without a message target. A separate `supports_imessage_attachment_upload`
 capability permits one JPEG or PNG (up to 10 MiB) in an existing one-to-one iMessage chat. PDF
 also requires `supports_imessage_pdf_attachment_upload`; optional nonblank caption text (up to
 65,536 UTF-8 bytes) requires `supports_imessage_attachment_caption_upload`. The broad
 `supports_imessage_text_with_attachment` flag remains false; this upload does not enable
-reply targeting, groups, or other attachment types. New iMessage chat is a separate, text-only
+reply targeting, groups, or other attachment types. A distinct `supports_imessage_replies` gate
+admits only nonblank plain text to exact part zero of a stored message in a proven existing
+one-to-one chat, with no retry after an uncertain handoff. New iMessage chat is a separate, text-only
 `supports_imessage_new_chat` capability, not implied by the attachment flags. Google Messages
 reactions may
 target a proven `rcs-*` message as the whole message at part zero; that exception does not enable RCS
-reply threading. RCS text plus one attachment travels under `supports_rcs_text_with_attachment` as
+reply threading. Separately, `supports_imessage_reactions` permits only the reviewed classic
+part-zero reaction path in a proven one-to-one iMessage chat. Separately gated
+`supports_imessage_edit` and `supports_imessage_unsend` paths permit only a nonblank plain-text edit
+or retraction of exact text part zero in that same proven chat. Each uses one non-retried request,
+requires exact acknowledgement, and preserves an uncertain outcome rather than replaying it.
+The dedicated formatted-message contract is also source-aligned: the app calls authenticated
+`POST /api/v1/message/formatted` only under `supports_imessage_formatted_messages`, for one proven
+existing one-to-one iMessage chat and 1–64 exact selected ranges using only bold, italic, underline,
+and strikethrough. The helper action is present in isolated commit `33c3d9c...` and canonical local
+commit `844219d`, but production `enableIMessageFormattedMessages` remains false and the
+installed/admitted `6ac7253...` helper lacks that action. This is not artifact admission or live
+Mac/Samsung proof, and it does not revive the retired generic attributed-body sender. RCS text plus
+one attachment travels under `supports_rcs_text_with_attachment` as
 one logical optimistic/retry identity and older servers fail closed. RCS capability is independent
 of every retired iMessage helper flag.
 
 Focused host suites exercise the app and server contracts, including capability fallback, received
-topology/survivor presentation, retired-iMessage negative boundaries, and whole-message RCS reactions.
+topology/survivor presentation, broad-retirement negative boundaries, the narrow edit/unsend seams,
+and whole-message RCS reactions.
 On 2026-09-20, a local Samsung dev client sent exactly one 1,667-byte PDF with its caption as the
 same iMessage: the Mac Messages database recorded the exact caption and one PDF on ROWID 76267;
 delivery completed without a duplicate. This is local dev-client proof of the narrow iMessage path,
 not Play-release or packaged-candidate proof. The matching staged server and packaged Android
-candidate still need to prove the supported RCS cross-repository path. `FEAT-03` remains
-**IN_PROGRESS** for that RCS device proof.
+candidate still need to prove the supported RCS cross-repository path. The narrow edit and unsend
+source is complete, but its matching helper package and one-attempt live Mac/Samsung acceptance are
+also still pending under server follow-up `POST-01`. `FEAT-03` remains **IN_PROGRESS** for those
+device/deployment proofs.
 
-## 🟡 Source-aligned (2026-09-04) — capability-gated global message search (`FEAT-05C`)
+## 🟡 Source-aligned (updated 2026-09-26) — foreground Current Location send (`FEAT-05A`)
+
+The server advertises `supports_imessage_location` only for its dedicated private operation. The app
+exposes Send Current Location only in a proven existing one-to-one iMessage chat with that exact live
+capability, confirms first, and then acquires one foreground fix. Find My is unrelated: it renders
+coordinates already supplied by the server and never invokes the phone-location adapter.
+
+Foreground ownership is explicit rather than inferred from the screen remaining mounted. The app
+subscribes to Android app-state changes before the first native permission/location await, immediately
+rechecks the state to close the registration race, and aborts acquisition if the app becomes inactive or
+backgrounded. That listener, plus the account- and capability-cancellation listeners, is released as soon
+as acquisition settles and before the durable queue/network phase begins. A coordinate that was already
+admitted therefore retains the existing bounded retry contract; a background transition while native
+acquisition is still pending creates no optimistic row and sends no request.
+
+The authenticated `POST /api/v1/message/location` request carries exactly `chatGuid`, `latitude`,
+`longitude`, and the stable `tempGuid`. The server builds the Apple location card and must acknowledge
+one real bounded GUID with `viaPrivateApi: true`; malformed or outcome-unknown acknowledgements are
+terminal so automatic or manual retry cannot duplicate a possibly delivered card. Ordinary temporary
+failures retain the exact coordinate and original idempotency key in the encrypted outgoing queue and
+may replay them for less than 15 minutes. Retry never reacquires the phone's location; expired,
+malformed, unsupported-target, or capability-disabled rows make no request.
+
+This is source/host alignment, not packaged or end-to-end release evidence. A matching deployed
+server/helper and exact Android candidate must still prove one-card delivery, duplicate containment,
+approximate/precise foreground permission behavior, every no-send outcome, background containment,
+process-death replay, exact expiry, encrypted-at-rest storage, capability removal, and truthful
+terminal-error presentation. The authoritative work plan keeps `FEAT-05A` and parent `FEAT-05` open.
+
+## 🟡 Source-aligned (updated 2026-09-26) — capability-gated global message search (`FEAT-05C`)
 
 The server and app now share an additive, fail-closed search contract. The authenticated
 `POST /api/v1/message/search/bounded` route accepts normalized text only, returns at most the newest
@@ -93,6 +149,13 @@ The server and app now share an additive, fail-closed search contract. The authe
 reaction/sticker overlays, retracted rows, Recently Deleted rows, empty GUIDs, and unroutable rows.
 `/server/info` emits `supports_message_search` only when the live chat.db schema proves every column
 and join needed by that contract. The older `/message/search` route is unchanged for deployed clients.
+
+The Mac-side reader also handles the two Messages storage cases that otherwise produce incorrect search
+results. When the ordinary text column is empty or non-text, a bounded serializer-equivalent scalar may
+extract the attributed-body text; a nonempty ordinary text value always wins. A second bounded scalar
+parses `message_summary_info` and excludes partial or complete retractions, including rows whose legacy
+`date_retracted` value is still zero. Missing schema support, scalar-registration failure, malformed data,
+or oversized input fails closed by withholding the capability or excluding the row.
 
 The app calls the new route only when that capability is explicitly true. It shows local encrypted-DB
 matches first, fetches outside the database writer lock, persists each valid first-chat result before
@@ -104,10 +167,10 @@ only a match-centered 240-code-point snippet while the encrypted DB retains the 
 labels whether message search is local, still searching the Mac, combined, or unavailable, and
 explicitly excludes RCS from only the Mac scope because locally stored RCS matches may still appear.
 
-This closes source-level app/server parity, not release evidence. The new server route/capability and
-app consumer must still be committed, built, deployed together, and exercised on Android against a
-realistic Mac Messages database. `WORK_PLAN_2026-08-03.md` remains authoritative for that device and
-release tail.
+This closes source-level app/server parity, not release evidence. A fresh local staging package contains
+the route, capability, and both bounded scalars, but it has not replaced the installed Mac server. The new
+server and app builds must still be deployed together and exercised on Android against a realistic Mac
+Messages database. `WORK_PLAN_2026-08-03.md` remains authoritative for that device and release tail.
 
 ## ✅ Closed (2026-07-01)
 
@@ -117,12 +180,13 @@ The top gaps have since been wired app-side against capabilities the server alre
   **Durable fanout update (2026-09-04; current-server client path host-green, end-to-end FCM device proof open):** server commit `e55f1210` now gives each admitted physical RCS attempt one immutable UUID `attemptGuid`, combines it with the logical `tempGuid` in an opaque sidecar `tmpID`, and retains the echoed correlation by exact physical-phone namespace plus message id. Duplicate requests retain the same attempt id; an exact delivery failure releases only that generation so a genuine retry gets a new id and a delayed old failure cannot evict it from the server. One logical DTO is reused across authenticated socket, webhook, and attempt-aware FCM before transport-specific serialization/encryption. Managed-device FCM requires `messages:write`; unmanaged legacy push rows retain the existing shared-password compatibility policy. A canonical per-device key encrypts the DTO; without one, FCM receives only the event type plus empty-object metadata, never temp/chat/attempt ids in plaintext. `PUSH-CRYPTO-01A` now gives the app a host-green current-server `AEAD_GCM_V2_DEVICE` enrollment/decryption path, so this attempt payload is eligible for device testing. Matching deployment, killed-app convergence, and the broader authenticated identity/replay protocol remain open under the parent `PUSH-CRYPTO-01`. Legacy temp-only failures remain socket/webhook-only. Host coverage proves the server composition contract, restart recovery, re-pair isolation, release races, authorization, and logical fanout equality. A paired phone and matching release still need to prove Google text/media echo at the supported `tmpID` length, destination-registration identity, and the documented crash-before-first-frame boundary. Two client tails remain: a queue-less post-ack delivery error cannot be manually retried, and a first old-attempt event delayed until after a newer attempt is not fenced against that bubble because the app does not persist current-attempt ownership. Automatic A → B evidence must use a certified pre-dispatch `retryable: true` failure, and only a replay of an already-processed A is currently deduplicated. The client continues to move a cancelled temp message's deletion-ledger marker and records every learned temp→real mapping in a bounded encrypted local alias table, so stale user actions can resolve after purge/re-ingest. A content-only echo cannot reconstruct a mapping that was never learned; the server attempt id makes failure copies exact but does not invent that missing temp→real mapping.
   **Active-attempt ownership update (2026-09-07; host/source verified, device proof open):** this supersedes the delayed-A ownership limitation immediately above. A modern RCS send resolves the server capability before inserting its optimistic row and enables ownership only when `supports_rcs_send_attempt_ownership` is explicitly true. The app then correlates each physical send with the complete `{tempGuid, attemptGuid, clientAttemptGeneration}` tuple. Migration `0046_message_send_attempt_owner` durably stores the monotonic generation, pending state, and active attempt; retries use a compare-and-swap guard (the update succeeds only while the expected owner is still current). HTTP acknowledgements, live echoes, and send-error events reconcile only against that exact owner. Partial or malformed correlation fails closed, an old attempt cannot overwrite a newer one, and idempotent replay remains safe even after the bounded temp-to-real alias is pruned because one unambiguous active-attempt match can recover its owner. The server forwards `clientAttemptGeneration` through listener, composition, and fanout boundaries, and an RCS new-chat acknowledgement now also returns its `tempGuid`. Focused app/server host checks cover those paths, but this is not a shipped or release claim. `PUSH-RETRY-01` remains open until a matching deployed server and real phone prove the A → B races across HTTP, socket, and FCM, including killed-process/restart boundaries. One deliberate limitation also remains: after acknowledgement removes the exact queue payload, a queue-less retry can be reconstructed only for a message with a local attachment. Contact cards, mention metadata, and other non-attachment payloads are not recreated from the lossy message row; they fail closed and require a fresh user send.
 - **`new-server`** (tunnel-URL rotation) — the post-v56 RT-01A flow now intercepts every instruction before database access. Invalid and downgrade attempts fail closed; an eligible foreign origin is held only in process memory and requires a foreground, unlocked approval modal, a freshly entered password, and separate cleartext consent when applicable. The candidate is validated before an exclusive, session-guarded credential commit and socket replacement. Exact Play v63 passed cleartext rejection/approval and persistence, late-result discard, interrupted-SecureStore fail-safe recovery, and Android-trusted HTTPS downgrade rejection. The exact device evidence is in [`RT_01A_PLAY_DEVICE_PROOF_2026-09-13.md`](./RT_01A_PLAY_DEVICE_PROOF_2026-09-13.md); none of it applies to frozen v56.
-- **Server Health screen** (Settings › SERVER › "Server Health…", and from Server Management) — surfaces password-authenticated, remote-readable diagnostics for Find My key state, FCM, environment, uptime, proxy/TLS state, public IP, and alerts. The Private API rows are fixed retired/unavailable disclosures, not capability controls or network reads. **Contract correction (2026-09-17):** current servers are read through the typed `/server/environment`, `/notifications/fcm/status`, `/tls/status`, `/alerts`, `/admin/findmy/keys/status`, `/admin/network/public-ip`, and `/admin/status` routes. Statistics use `/statistics/snapshot`. A typed-route 404 is final and never falls back to the retired dispatcher; helper-status, zrok-specific presentation, and remote restart/log controls are unsupported. Proxy identity now comes from `/server/info`. The current public Caddy policy still blocks the two typed `/admin` reads (Find My keys and public IP), and its backend is older than these routes. Deploy the current server first, then allow only those two exact authenticated GET paths before the `/api/v1/admin/*` 404 rule—never the wildcard. All non-admin typed reads already pass through the proxy.
+- **Server Health screen** (Settings › SERVER › "Server Health…", and from Server Management) — surfaces password-authenticated, remote-readable diagnostics for Find My key state, FCM, environment, uptime, proxy/TLS state, public IP, and alerts. Its legacy Private API rows disclose that the broad Messages and FaceTime transports are retired; separately capability-gated narrow features are reported and exposed at their own product surfaces. These rows are not controls or helper-status network reads. **Contract correction (2026-09-17):** current servers are read through the typed `/server/environment`, `/notifications/fcm/status`, `/tls/status`, `/alerts`, `/admin/findmy/keys/status`, `/admin/network/public-ip`, and `/admin/status` routes. Statistics use `/statistics/snapshot`. A typed-route 404 is final and never falls back to the retired dispatcher; helper-status, zrok-specific presentation, and remote restart/log controls are unsupported. Proxy identity now comes from `/server/info`. The current public Caddy policy still blocks the two typed `/admin` reads (Find My keys and public IP), and its backend is older than these routes. Deploy the current server first, then allow only those two exact authenticated GET paths before the `/api/v1/admin/*` 404 rule—never the wildcard. All non-admin typed reads already pass through the proxy.
   Current typed responses are validated against strict schemas. A malformed HTTP 200 fails closed;
   404, authentication, transport, and validation failures are not masked by another request.
   Remote Mac server-log viewing/export is permanently unsupported. **Settings → App Logs** contains
   only the phone's bounded client diagnostics; inspect Mac server logs in the local desktop dashboard.
-  Private API is presented as permanently retired without requesting helper status. The detailed RCS status route is
+  Broad Private API transports are presented as retired without requesting helper status; narrow
+  features remain controlled by their live capability flags. The detailed RCS status route is
   local-admin-only; the phone uses the `/server/info` capability plus the latest live `rcs-alert`.
   The empty-body `/rcs/reauth-now` action accepts only the strict applied-or-staged result and sends
   no phone-held Google credential.
@@ -144,9 +208,13 @@ adversarially reviewed (per-chat/message details in the wave commits `75cfb25..d
   inline emoji-sized (gallery `cellSize` still wins in multi-attachment grids).
 - **Edit history (`messageSummaryInfo`)** — persisted (JSON column, COALESCE-preserved) and
   surfaced via a long-press "View Edit History" sheet (revisions + removed parts; redaction-safe).
-- **Reply threads and received screen effects** — remain read-only presentation features. Retiring
-  helper-backed reply/effect sending does not remove "View Thread", edit history, or playback of an
-  expressive effect already present on an incoming message.
+- **Reply threads and received screen effects** — at this 2026-07-17 closure, these were read-only
+  presentation features. The later `FP-006` retirement did not remove "View Thread", edit history,
+  or playback of an expressive effect already present on an incoming message. **Later current
+  exception (2026-09-25):** as documented in the current-client boundary
+  above, the separately gated client may originate only a narrow plain-text, exact-part-zero reply
+  in a proven one-to-one iMessage chat. Richer reply/effect sending remains retired; the narrow
+  slice passed the local packaged-Mac/physical-Samsung development-client acceptance recorded above.
 - **Group events** — `itemType 6` relabeled SharePlay (was mislabeled FaceTime), background
   changed/removed (`gAT 4/6`) render properly, and a bg-change ingestion side-effect sink
   refetches the chat wallpaper (`ensureSyncedBackground`) without requiring a chat re-open.
@@ -184,12 +252,80 @@ or network work:
   in the rendered card; a failure flips it to the retryable error state (mirrors `sendTextMessage`).
   See `sendContactService.ts` + `sendContact` (`endpoints/messages.ts`).
 
+## Narrow iMessage edit and unsend (`FEAT-03B` app source; `POST-01` live acceptance, 2026-09-28)
+
+The current app exposes Edit and Unsend only for an eligible, exact text part zero in a proven
+existing one-to-one iMessage chat and only while the matching `supports_imessage_edit` or
+`supports_imessage_unsend` capability is current. The authenticated endpoints are
+`POST /api/v1/message/{guid}/edit` and `POST /api/v1/message/{guid}/unsend`; both carry the owning
+chat GUID and literal `partIndex: 0`. Edit additionally carries one bounded nonblank plain-text
+replacement. Neither request retries automatically. The client accepts only the exact target GUID
+acknowledgement, preserves optimistic state safely, and presents a lost or ambiguous response as
+outcome-unknown instead of risking a duplicate mutation.
+
+The app, server, and helper paths are source-complete. This is a narrow exception, not restoration
+of broad Private API authority: RCS, groups, ambiguous/multipart targets, rich edits, and generic
+helper flags cannot enter these paths. App ownership and remaining status sit under the narrow
+`FEAT-03B` child in the remediation plan. Signing/installing the matching helper package and proving
+one real edit plus one real unsend from the physical Samsung against the packaged Mac remain open
+server/helper acceptance under `POST-01`; no live or release-candidate success is claimed here.
+
+## Whole-message deletion from Mac (`FEAT-03B` app source; `POST-01` activation, 2026-09-28)
+
+The current app has a separate **Delete from Mac** action for a stable, non-retracted message in a
+proven existing iMessage one-to-one or group chat. It appears only while
+`supports_imessage_remote_delete` is live. It does not replace phone-local **Delete** and it is not
+recipient-facing **Unsend**. The confirmation says the whole message will be removed from Messages
+on the Mac, warns that Messages in iCloud may propagate the deletion to other Apple devices, and
+states that the action does not unsend for anyone else.
+
+The client sends one non-retrying `POST /api/v1/message/{guid}/remote-delete` with body exactly
+`{chatGuid}` and accepts only exact `{deleted:true,guid}` confirmation for the selected message. A
+definite refusal or uncertain outcome leaves the phone row visible; only exact confirmation writes
+the phone's local deletion tombstone. Individual-part and whole-chat remote deletion are not
+exposed. The matching helper, server, and app source passed 182 helper checks, 50 server/protocol
+checks, 71 app service/UI checks, and their TypeScript checks. The production server gate remains
+false because the installed helper lacks this new action. Build, signing, admission, packaging,
+installation, and one owner-approved disposable live deletion remain under server `POST-01`; this
+section does not claim device or release-candidate acceptance.
+
+## Read-only iMessage account status (POST-01, 2026-09-20)
+
+The current app shows Settings → iMessage Account only when the current server advertises
+`supports_imessage_account_status`. It reads `GET /api/v1/imessage/account/status` through the
+authenticated HTTP client and displays Apple ID, account name, active alias, and alias lists.
+Account-generation and server-transport fences hide stale identity results. A separate, confirmed
+send-from-alias choice is staged behind `supports_imessage_alias_change`; that server source gate
+is still off and the installed app remains read-only. The legacy `supports_icloud_account` flag,
+`GET /icloud/account`, and its alias-changing POST remain disabled; neither narrow route restores
+broad Private API authority.
+
+## Outgoing iMessage typing (POST-01, local gate live 2026-09-20)
+
+The composer can emit start/stop typing and show incoming typing only for a proven existing
+one-to-one iMessage chat when `supports_imessage_typing` is live. The server accepts only a
+validated, scoped native typing event. The exact helper is signed, pinned, and installed in the
+verified local package, and this narrow gate is on; a real start/stop and incoming-display check
+still needs a safe test chat. iMessage read/unread actions are
+a separate privacy-sensitive slice. Stale `private_api` does not enable any of these controls.
+
+## iMessage voice note (POST-01, local gate live 2026-09-20)
+
+The existing recorder can offer one M4A voice note in a proven existing one-to-one iMessage
+chat when `supports_imessage_voice_upload` is live. It checks the local file size (10 MiB max)
+before queueing, sends explicit `uploadKind=imessage_voice`, and retains the recording if queue
+admission fails. The server and helper have a separate bounded voice-mode path. Its narrow gate
+is on in the verified local package; the Samsung shows the recorder, and one canceled recording's
+actual M4A `mp42` header passed the helper's file-type rule. No live send or playback has been
+accepted. It does not enable contact
+cards, audio calls, FaceTime, or the broad Private API.
+
 ## ⏹️ Historical closure, superseded by `FP-006` (2026-09-16) — iMessage account (`icloud/account`)
 
-The implementation record below is retained as history. The current client removed the endpoint
-wrapper, capability hook, Settings row, and interactive account/alias UI. The route is a static
-retirement screen if reached directly, and stale `supports_icloud_account` or Private API fields do
-not reactivate it.
+The implementation record below is retained as history. The current client removed that old endpoint
+wrapper, capability hook, and alias UI. Stale `supports_icloud_account` or Private API fields do
+not reactivate them; the separately gated account status and staged alias choice above are the
+current account surface.
 
 Was an **App → Server** gap: the app called `GET /api/v1/icloud/account` (+ the alias POST), which
 the Gator daemon never implemented → 404 → the screen always errored. Now wired on BOTH sides
@@ -393,17 +529,17 @@ endpoints** as iMessage, so the app needs no new sync pipeline — RCS traffic i
 shaped like iMessage traffic. The app now accepts, renders, sends, and creates capability-gated
 one-to-one RCS conversations.
 
-| Direction    | Item                                                                                                                                                                                 | Status                                                                                                                                                                                                                                                                                                                                                   |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Server → App | `get-chats` returns RCS chats: guid `RCS;-;<id>`, `style` 45/43, participants `HandleV1{service:"RCS"}`                                                                              | ✅ App accepts — `service` is an open `z.string()` (`ServiceType`), so RCS never fails the page parse; `KNOWN_SERVICES` now includes `'RCS'`.                                                                                                                                                                                                            |
-| Server → App | RCS `MessageV1` (`service:"RCS"`, `originalROWID:null`, ms dates, status on `isSent`/`isDelivered`/`isRead`) via `get-chat/:guid/message` + realtime `new-message`/`updated-message` | ✅ Flows through the existing chat-open backfill + `EventRouter` unchanged (no service filter drops it).                                                                                                                                                                                                                                                 |
-| Server → App | RCS attachment bytes on the **separate** route `GET /api/v1/rcs/attachment/{mediaID}/download`                                                                                       | ✅ App branches on the owning chat's service — `attachmentDownloadUrl(http, guid, service)` builds `/rcs/attachment/…` when `service === 'RCS'`. Service is derived (chat-guid `LIKE 'RCS;-;%'` JOIN) onto `AttachmentRow`.                                                                                                                              |
-| Server → App | `ServerInfoV1.rcs?: boolean` capability flag                                                                                                                                         | ✅ Added to the `ServerInfo` zod model (nullish → older servers omit it, no throw); `sessionAccessors.rcsEnabled()` / `useRcsEnabled()` gate RCS-specific UI.                                                                                                                                                                                            |
-| Server → App | `rcs-alert` realtime event (bridge health: `alertType` + message)                                                                                                                    | ✅ Subscribed (`SERVER_EVENTS`) + zod-normalized in `EventRouter`; `RcsAlertEventSink` maps it to a Server Health RCS row (`rcsHealth.ts`).                                                                                                                                                                                                              |
-| Server → App | `rcs-bridge-down` high-priority push (`{title, body, reason}`)                                                                                                                       | ✅ Subscribed + normalized; posts a content-less status notification (`intents.ts` → `notifeeService`), honoring the hide-preview toggle.                                                                                                                                                                                                                |
-| App UI       | RCS bubble colour + badge                                                                                                                                                            | ✅ New `rcsBackground` teal token (distinct from iMessage blue + SMS green) across all presets; `MessageBubble` mirrors the SMS-green branch for `senderService === 'RCS'`; a subtle "RCS" `ServiceBadge` pill shows in `ConversationHeader` + `ConversationTile` (keyed off the `RCS;-;` guid).                                                         |
+| Direction    | Item                                                                                                                                                                                 | Status                                                                                                                                                                                                                                                                                                                                          |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Server → App | `get-chats` returns RCS chats: guid `RCS;-;<id>`, `style` 45/43, participants `HandleV1{service:"RCS"}`                                                                              | ✅ App accepts — `service` is an open `z.string()` (`ServiceType`), so RCS never fails the page parse; `KNOWN_SERVICES` now includes `'RCS'`.                                                                                                                                                                                                   |
+| Server → App | RCS `MessageV1` (`service:"RCS"`, `originalROWID:null`, ms dates, status on `isSent`/`isDelivered`/`isRead`) via `get-chat/:guid/message` + realtime `new-message`/`updated-message` | ✅ Flows through the existing chat-open backfill + `EventRouter` unchanged (no service filter drops it).                                                                                                                                                                                                                                        |
+| Server → App | RCS attachment bytes on the **separate** route `GET /api/v1/rcs/attachment/{mediaID}/download`                                                                                       | ✅ App branches on the owning chat's service — `attachmentDownloadUrl(http, guid, service)` builds `/rcs/attachment/…` when `service === 'RCS'`. Service is derived (chat-guid `LIKE 'RCS;-;%'` JOIN) onto `AttachmentRow`.                                                                                                                     |
+| Server → App | `ServerInfoV1.rcs?: boolean` capability flag                                                                                                                                         | ✅ Added to the `ServerInfo` zod model (nullish → older servers omit it, no throw); `sessionAccessors.rcsEnabled()` / `useRcsEnabled()` gate RCS-specific UI.                                                                                                                                                                                   |
+| Server → App | `rcs-alert` realtime event (bridge health: `alertType` + message)                                                                                                                    | ✅ Subscribed (`SERVER_EVENTS`) + zod-normalized in `EventRouter`; `RcsAlertEventSink` maps it to a Server Health RCS row (`rcsHealth.ts`).                                                                                                                                                                                                     |
+| Server → App | `rcs-bridge-down` high-priority push (`{title, body, reason}`)                                                                                                                       | ✅ Subscribed + normalized; posts a content-less status notification (`intents.ts` → `notifeeService`), honoring the hide-preview toggle.                                                                                                                                                                                                       |
+| App UI       | RCS bubble colour + badge                                                                                                                                                            | ✅ New `rcsBackground` teal token (distinct from iMessage blue + SMS green) across all presets; `MessageBubble` mirrors the SMS-green branch for `senderService === 'RCS'`; a subtle "RCS" `ServiceBadge` pill shows in `ConversationHeader` + `ConversationTile` (keyed off the `RCS;-;` guid).                                                |
 | App → Server | Create a new RCS conversation                                                                                                                                                        | ✅ `new-chat` offers RCS only when `ServerInfoV1.rcs` is enabled, requires the server's non-empty initial text before enabling Start, passes `service: 'RCS'` to the create endpoint, and rejects multiple recipients because the server's RCS branch is one-to-one. Staged attachments send only after that text creates or resolves the chat. |
-| App → Server | Create a new iMessage conversation                                                                                                                                                    | 🟡 Separately gated by `supports_imessage_new_chat`: one E.164 number or email, non-empty text, and a stable retry ID. SMS/group creation and staged files remain unavailable. Host/source proof exists; a current packaged Android candidate has not proved it. |
+| App → Server | Create a new iMessage conversation                                                                                                                                                   | 🟡 Separately gated by `supports_imessage_new_chat`: one E.164 number or email, non-empty text, and a stable retry ID. SMS/group creation and staged files remain unavailable. Host/source proof exists; a current packaged Android candidate has not proved it.                                                                                |
 
 **Intentional non-alignments (RCS):**
 
@@ -427,7 +563,7 @@ remain useful context, but the `PARITY-01` register that follows is the current 
   the app's hybrid schedule list. Track that explicit parity decision under `PARITY-01` rather than
   calling the whole model local-only.
 - **`group-icon-changed` / `group-icon-removed`** — the app renders group avatars as **participant collages** (`GroupAvatar`) and does not display a server-supplied custom group photo, so there's nothing to refresh. Wiring it would be a no-op until group-photo display is added. Deferred with the (still-open) group-photo feature.
-- **The remaining admin / config surface** (set-config/get-config writes, TLS/zrok/VAPID/Cloudflare **management**, webhooks, FCM **setup**, device purge) — still untapped by design: either **local-console-only** (403 to remote app clients) or **low mobile value**. The selected read-only diagnostics subset (keys, push, environment, proxy/TLS, public IP, and alerts) is surfaced by the **Server Health screen** (see Closed above); Private API appears only as a fixed retired disclosure. What remains are the _write_/management ops, which belong on the trusted local server console, not a remote app.
+- **The remaining admin / config surface** (set-config/get-config writes, TLS/zrok/VAPID/Cloudflare **management**, webhooks, FCM **setup**, device purge) — still untapped by design: either **local-console-only** (403 to remote app clients) or **low mobile value**. The selected read-only diagnostics subset (keys, push, environment, proxy/TLS, public IP, and alerts) is surfaced by the **Server Health screen** (see Closed above); only the broad legacy Private API transports appear there as fixed retired disclosures. What remains are the _write_/management ops, which belong on the trusted local server console, not a remote app.
 
 ### `PARITY-01` authoritative disposition register — approved 2026-08-27
 
@@ -488,7 +624,7 @@ mobile value or local-console-only; the genuinely app-relevant ones are ranked H
 | ✅ CLOSED 2026-07-01 (was 🔴 High — read via Server Health, see _✅ Closed_ above)                             | admin-channel: get-config                                                                                                                          | POST /admin/command {channel:'get-config'} — read config (secrets stripped, snake_cased), NOT admin-only, remote-readable. App has zero hits. Would power a read-only server-settings/status view in-app.                                                                                                                                                                                                            |
 | ✅ CLOSED 2026-07-01 (was 🔴 High — see _✅ Closed_ above)                                                     | socket-emit: message-send-error                                                                                                                    | _(Historical snapshot below — now wired via SERVER_EVENTS → EventRouter → `DbEventSink` → `applyServerSendErrorWithinTransaction`.)_ Server forwards the helper's message-send-error (outgoing message failed in Messages). App's SERVER_EVENTS list did not include it in the original baseline — the app never surfaced send failures pushed from the server and relied solely on its optimistic-send/retry queue. |
 | ✅ get-fcm-status CLOSED 2026-07-01 (Server Health; write/setup channels still untapped — was 🟡 Medium)       | admin-channel: get-fcm-status / set-fcm-server / clear-fcm / set-fcm-oauth-client / start-firebase-setup / get-firebase-setup-status               | FCM/Firebase provisioning + status channels. App never reads even get-fcm-status (0 hits). get-fcm-status is read-only/remote-readable and could confirm push is configured before the app relies on FCM delivery; the write/setup ones are admin-only local-console.                                                                                                                                                |
-| ⏹️ RETIRED 2026-09-16 (historically read by Server Health)                                                     | admin-channel: get-private-api-status / get-private-api-requirements / reinject-helper                                                             | Historical server operations remain server-local context. The current client treats the helper as permanently unavailable, exposes no reinjection control, and never uses these reads to enable effects, edit, unsend, reactions, account, group, or FaceTime UI.                                                                                                                                                    |
+| ⏹️ RETIRED 2026-09-16 (historically read by Server Health)                                                     | admin-channel: get-private-api-status / get-private-api-requirements / reinject-helper                                                             | Historical server operations remain server-local context. The current client exposes no reinjection control, and these legacy reads can never authorize UI or network work. Separately advertised `supports_imessage_edit` and `supports_imessage_unsend` flags may gate only the narrow exact-part-zero paths documented above; they do not revive this retired admin/Private API surface.                          |
 | 🟡 Medium (CONFIRMED)                                                                                          | admin-channel: check-permissions / get-current-permissions / contact-permission-status / request-contact-permission                                | macOS permission status + contact-permission request. App has 0 hits. Useful for an onboarding/diagnostics screen to tell the user the server is missing Full Disk / Contacts access.                                                                                                                                                                                                                                |
 | ✅ CLOSED 2026-07-01 (get-alerts + Clear via Server Health — was 🟡 Medium)                                    | admin-channel: get-alerts / clear-alerts / mark-alerts-as-read                                                                                     | In-memory server alert log (read + clear/mark-read, all NOT admin-only, remote-invokable). App has 0 hits. Could surface server-side warnings (helper crashes, auth failures) in the app.                                                                                                                                                                                                                            |
 | ✅ CLOSED 2026-07-01 (Server Health — was 🟡 Medium)                                                           | admin-channel: get-env                                                                                                                             | POST /admin/command {channel:'get-env'} — version/platform/node/findmyNeedsKeys/isMinMonterey. Read-only, remote-readable. App has 0 hits; findmyNeedsKeys would let the app tell the user Find My decryption keys aren't imported before showing empty FindMy tabs.                                                                                                                                                 |

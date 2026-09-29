@@ -24,22 +24,103 @@ function sourceFiles(root: string): string[] {
 }
 
 describe('IPC-01 inbound-share containment', () => {
-  it('does not install or configure the unsafe native intake package', () => {
+  it('keeps the unsafe community intake package absent', () => {
     expect(packageJson.dependencies?.['expo-share-intent']).toBeUndefined();
     expect(JSON.stringify(packageLock)).not.toContain('expo-share-intent');
     expect((config.plugins ?? []).map(pluginName)).not.toContain('expo-share-intent');
   });
 
-  it('does not configure generic or Direct Share manifest declarations', () => {
+  it('configures the owned manifest plugin exactly once', () => {
     const plugins = (config.plugins ?? []).map(pluginName);
-    expect(plugins).not.toContain('./plugins/withShareTargets');
+    expect(plugins.filter((plugin) => plugin === './plugins/withShareTargets')).toHaveLength(1);
 
-    const filters = config.android?.intentFilters ?? [];
-    const serialized = JSON.stringify(filters);
-    expect(serialized).not.toMatch(/android\.intent\.action\.(?:SEND|SEND_MULTIPLE)/);
+    const plugin = require('../../plugins/withShareTargets') as {
+      INBOUND_SHARE_ACTIONS: string[];
+      SHARE_TARGET_CATEGORY: string;
+      SHORTCUTS_XML: string;
+      ON_CREATE_CAPTURE: string;
+      ON_NEW_INTENT_CAPTURE: string;
+      applyShareIntentManifestPolicy: (activity: Record<string, unknown>) => void;
+      applyMainActivityShareCapture: (source: string) => string;
+    };
+    const activity: Record<string, unknown> = {
+      'intent-filter': [
+        {
+          action: [{ $: { 'android:name': 'android.intent.action.MAIN' } }],
+          category: [{ $: { 'android:name': 'android.intent.category.LAUNCHER' } }],
+        },
+      ],
+    };
+    plugin.applyShareIntentManifestPolicy(activity);
+    plugin.applyShareIntentManifestPolicy(activity);
+
+    const filters = activity['intent-filter'] as Array<{
+      action: Array<{ $: { 'android:name': string } }>;
+      category: Array<{ $: { 'android:name': string } }>;
+      data?: Array<{ $: { 'android:mimeType': string } }>;
+    }>;
+    for (const action of plugin.INBOUND_SHARE_ACTIONS) {
+      const matches = filters.filter((filter) => filter.action[0]?.$['android:name'] === action);
+      expect(matches).toEqual([
+        {
+          action: [{ $: { 'android:name': action } }],
+          category: [{ $: { 'android:name': 'android.intent.category.DEFAULT' } }],
+          data: [{ $: { 'android:mimeType': '*/*' } }],
+        },
+      ]);
+    }
+    expect(activity['meta-data']).toEqual([
+      { $: { 'android:name': 'android.app.shortcuts', 'android:resource': '@xml/shortcuts' } },
+    ]);
+    expect(plugin.SHORTCUTS_XML).toContain(
+      'android:targetClass="com.bluegreengatorapps.messages.MainActivity"',
+    );
+    expect(plugin.SHORTCUTS_XML).toContain('android:mimeType="*/*"');
+    expect(plugin.SHORTCUTS_XML).toContain(`android:name="${plugin.SHARE_TARGET_CATEGORY}"`);
+
+    const generated = plugin.applyMainActivityShareCapture(`
+class MainActivity : ReactActivity() {
+  override fun onCreate(savedInstanceState: Bundle?) {
+    prepareSplash()
+    super.onCreate(null)
+  }
+}
+`);
+    expect(plugin.applyMainActivityShareCapture(generated)).toBe(generated);
+    expect(generated.split(plugin.ON_CREATE_CAPTURE)).toHaveLength(2);
+    expect(generated.split(plugin.ON_NEW_INTENT_CAPTURE)).toHaveLength(2);
+    expect(generated.indexOf(plugin.ON_CREATE_CAPTURE)).toBeLessThan(
+      generated.indexOf('prepareSplash()'),
+    );
+    expect(generated.indexOf(plugin.ON_CREATE_CAPTURE)).toBeLessThan(
+      generated.indexOf('super.onCreate('),
+    );
+    expect(generated.indexOf(plugin.ON_NEW_INTENT_CAPTURE)).toBeLessThan(
+      generated.indexOf('super.onNewIntent('),
+    );
   });
 
-  it('does not import the native package anywhere in production TypeScript', () => {
+  it('autolinks the owned native bridge module', () => {
+    const moduleConfig = JSON.parse(
+      readFileSync(resolve(repoRoot, 'modules/gator-share-intake/expo-module.config.json'), 'utf8'),
+    ) as { platforms?: string[]; android?: { modules?: string[] } };
+    expect(moduleConfig).toEqual({
+      platforms: ['android'],
+      android: { modules: ['expo.modules.gatorshareintake.GatorShareIntakeModule'] },
+    });
+
+    const moduleSource = readFileSync(
+      resolve(
+        repoRoot,
+        'modules/gator-share-intake/android/src/main/java/expo/modules/gatorshareintake/GatorShareIntakeModule.kt',
+      ),
+      'utf8',
+    );
+    expect(moduleSource).toMatch(/Name\("GatorShareIntake"\)/);
+    expect(moduleSource).toMatch(/AsyncFunction\("takeNext"\)/);
+  });
+
+  it('does not import the unsafe package anywhere in production TypeScript', () => {
     const files = [
       ...sourceFiles(resolve(repoRoot, 'app')),
       ...sourceFiles(resolve(repoRoot, 'src')),
@@ -51,87 +132,16 @@ describe('IPC-01 inbound-share containment', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('keeps both root and connected layouts free of capture/provider/navigation mounts', () => {
-    const root = readFileSync(resolve(repoRoot, 'app/_layout.tsx'), 'utf8');
-    const connected = readFileSync(resolve(repoRoot, 'app/(app)/_layout.tsx'), 'utf8');
-
-    expect(root).not.toMatch(/ShareIntent(?:Provider|Capture)/);
-    expect(connected).not.toMatch(/ShareIntentNavigator/);
-  });
-
-  it('clears legacy shortcuts from root-owned process boot and never republishes rows', () => {
-    const root = readFileSync(resolve(repoRoot, 'app/_layout.tsx'), 'utf8');
-    const foregroundBoot = readFileSync(
-      resolve(repoRoot, 'src/services/boot/foregroundBoot.ts'),
-      'utf8',
-    );
-    const connected = readFileSync(resolve(repoRoot, 'app/(app)/_layout.tsx'), 'utf8');
-    const inbox = readFileSync(
-      resolve(repoRoot, 'src/ui/conversations/ConversationListScreen.tsx'),
-      'utf8',
-    );
-    const contacts = readFileSync(
-      resolve(repoRoot, 'src/services/contacts/contactsService.ts'),
-      'utf8',
-    );
-    const chatNavigator = readFileSync(resolve(repoRoot, 'src/ui/useChatNavigator.ts'), 'utf8');
-    const shortcutBridge = readFileSync(
-      resolve(repoRoot, 'src/services/shortcuts/shareShortcuts.ts'),
-      'utf8',
-    );
-    const nativeShortcutBridge = readFileSync(
-      resolve(
-        repoRoot,
-        'modules/gator-share-shortcuts/android/src/main/java/expo/modules/gatorshareshortcuts/GatorShareShortcutsModule.kt',
-      ),
-      'utf8',
-    );
-
-    expect(root).toMatch(/startForegroundBoot\(\)/);
-    expect(foregroundBoot).toMatch(/clearShareShortcuts\(\)/);
-    expect(connected).not.toMatch(/refreshShareShortcuts/);
-    expect(inbox).not.toMatch(/publishShareShortcuts/);
-    expect(contacts).not.toMatch(/refreshShareShortcuts/);
-    expect(chatNavigator).not.toMatch(/reportChatOpened/);
-    expect(shortcutBridge).not.toMatch(/setShareShortcuts/);
-    expect(nativeShortcutBridge).toMatch(/Function\("clearShareShortcuts"\)/);
-    expect(nativeShortcutBridge).not.toMatch(/runCatching|getOrDefault\(emptyList\(\)\)/);
-    for (const marker of [
-      'ShortcutManagerCompat.FLAG_MATCH_DYNAMIC',
-      'ShortcutManagerCompat.FLAG_MATCH_CACHED',
-      'ShortcutManagerCompat.FLAG_MATCH_PINNED',
-      'com.bluegreengatorapps.messages.category.RETIRED_SHORTCUT',
-      'val before = store.list()',
-      'val unsafe = store.list().filter',
-      'check(unsafe.isEmpty())',
-      'categories == setOf(RETIRED_SHORTCUT_CATEGORY)',
-      'IconCompat.createWithResource(context, context.applicationInfo.icon)',
-      'val launchIntent = Intent(Intent.ACTION_VIEW)',
-      'setPackage(context.packageName)',
-      'ShortcutInfoCompat.Builder(context, replacement.id)',
-      '.setName(replacement.personName)',
-      '.setKey(replacement.personKey)',
-      '.setShortLabel(replacement.shortLabel)',
-      '.setLongLabel(replacement.longLabel)',
-      '.setDisabledMessage(replacement.disabledMessage)',
-      '.setIntent(Intent(launchIntent))',
-      '.setPerson(person)',
-      '.setCategories(setOf(RETIRED_SHORTCUT_CATEGORY))',
-      '.setLocusId(LocusIdCompat(replacement.locusId))',
-      '.setLongLived(false)',
-      '.setExtras(',
-      'putString(RETIRED_SHORTCUT_MARKER_KEY, RETIRED_SHORTCUT_MARKER_VALUE)',
-      'ShortcutManagerCompat.updateShortcuts(context, retired)',
-      'ShortcutManagerCompat.disableShortcuts',
-      'ShortcutManagerCompat.removeAllDynamicShortcuts',
-      'ShortcutManagerCompat.removeLongLivedShortcuts',
-      'clearLegacyShareShortcuts(AndroidLegacyShortcutStore(context))',
+  it('keeps provider URIs and provider-copy APIs out of the active JavaScript boundary', () => {
+    for (const path of [
+      resolve(repoRoot, 'src/native/shareIntake.ts'),
+      resolve(repoRoot, 'src/services/share/shareIntake.ts'),
     ]) {
-      expect(nativeShortcutBridge).toContain(marker);
+      const source = readFileSync(path, 'utf8');
+      expect(source).not.toMatch(/content:\/\/|ContentResolver|copyAsync|expo-share-intent/);
     }
-    expect(nativeShortcutBridge.match(/\.setIcon\(appIcon\)/g)).toHaveLength(2);
-    expect(nativeShortcutBridge).not.toMatch(
-      /setShareShortcuts|reportShortcutUsed|getLaunchShortcutId|OnNewIntent|ShareShortcutRecord/,
-    );
+    const nativeBridge = readFileSync(resolve(repoRoot, 'src/native/shareIntake.ts'), 'utf8');
+    expect(nativeBridge).toMatch(/requireOptionalNativeModule.*GatorShareIntake/s);
+    expect(nativeBridge).toMatch(/\/shared-in\/files\//);
   });
 });

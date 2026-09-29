@@ -36,6 +36,12 @@ export interface SocketLifecycleEvent {
   readonly recovered?: boolean;
 }
 
+export type SocketRequestResult =
+  | { readonly kind: 'ack'; readonly response: unknown }
+  | { readonly kind: 'unavailable' }
+  | { readonly kind: 'no-ack' }
+  | { readonly kind: 'stale' };
+
 let processSocketOpenSequence = 0;
 
 function makeProcessSocketOccurrenceNonce(): string {
@@ -86,6 +92,8 @@ const SOCKET_BACKOFF_BASE_MS = 1_000;
 const SOCKET_BACKOFF_MAX_MS = 60_000;
 /** Window within which a duplicate socket-error signature is suppressed. */
 const SOCKET_ERROR_THROTTLE_MS = 60_000;
+/** Longer than the server helper's five-second typing-operation deadline. */
+const SOCKET_REQUEST_TIMEOUT_MS = 8_000;
 
 /**
  * Capped exponential backoff (with jitter) for the app-level reconnect escalation.
@@ -618,6 +626,36 @@ export class SocketService {
   /** Emit an event to the server (e.g. start-typing/stop-typing). No-op if disconnected. */
   emit(event: string, payload?: unknown): void {
     this.socket?.emit(event, payload);
+  }
+
+  /**
+   * Send one bounded request whose result belongs only to this exact socket/account lifecycle.
+   * Callers can retry safe cleanup operations without leaking old-account work into a replacement.
+   */
+  async request(event: string, payload?: unknown): Promise<SocketRequestResult> {
+    const openedSocket = this.socket;
+    const lifecycleGeneration = this.lifecycleGeneration;
+    const accountLease = this.accountLease;
+
+    if (this.stopped) return { kind: 'stale' };
+    if (!openedSocket?.connected) return { kind: 'unavailable' };
+    if (!accountLease?.isCurrent()) return { kind: 'stale' };
+
+    const isCurrent = (): boolean =>
+      !this.stopped &&
+      lifecycleGeneration === this.lifecycleGeneration &&
+      openedSocket === this.socket &&
+      this.accountLease === accountLease &&
+      accountLease.isCurrent();
+
+    try {
+      const response: unknown = await openedSocket
+        .timeout(SOCKET_REQUEST_TIMEOUT_MS)
+        .emitWithAck(event, payload);
+      return isCurrent() ? { kind: 'ack', response } : { kind: 'stale' };
+    } catch {
+      return isCurrent() ? { kind: 'no-ack' } : { kind: 'stale' };
+    }
   }
 
   disconnect(): void {

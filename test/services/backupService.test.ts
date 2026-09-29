@@ -489,6 +489,8 @@ describe('exportEncryptedBackup / importBackupAuto', () => {
       customFoldersSkipped: 0,
       customFolderMemberships: 0,
       customFolderMembershipsSkipped: 0,
+      handleColors: 0,
+      handleColorsSkipped: 0,
     });
     expect(await kvGet(fresh.db, 'theme.preset')).toBe('nord');
   });

@@ -36,6 +36,35 @@ describe('scheduledApi', () => {
     expect(res).toEqual(item);
   });
 
+  it('sends the narrow file fields only for an attachment schedule', async () => {
+    const post = jest.fn((..._a: unknown[]) =>
+      Promise.resolve({
+        ...item,
+        method: 'narrow-attachment',
+        attachmentName: 'small.png',
+      }),
+    );
+    const http = { post } as unknown as HttpClient;
+    await createScheduled(http, {
+      chatGuid: item.chatGuid,
+      message: 'caption',
+      scheduledFor: item.scheduledFor,
+      method: 'narrow-attachment',
+      attachmentName: 'small.png',
+      attachmentData: 'AQID',
+    });
+    expect(post).toHaveBeenCalledWith('/scheduled-message', expect.anything(), {
+      json: {
+        chatGuid: item.chatGuid,
+        text: 'caption',
+        scheduledFor: item.scheduledFor,
+        method: 'narrow-attachment',
+        attachmentName: 'small.png',
+        attachmentData: 'AQID',
+      },
+    });
+  });
+
   it('deleteScheduled DELETEs /scheduled-message/{id}', async () => {
     const del = jest.fn((..._a: unknown[]) => Promise.resolve({ removed: true }));
     const http = { delete: del } as unknown as HttpClient;

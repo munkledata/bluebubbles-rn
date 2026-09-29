@@ -9,6 +9,7 @@ import {
   isRcsChatGuid,
   participantAvatars,
   participantColors,
+  participantDisplayNames,
   participantList,
   primaryParticipantColor,
   resolveBubbleColor,
@@ -52,6 +53,16 @@ describe('resolveTitle', () => {
         participantNames: 'Alice, Bob',
       }),
     ).toBe('Alice, Bob');
+  });
+
+  it('renders JSON-projected participant names without exposing their storage encoding', () => {
+    expect(
+      resolveTitle({
+        ...base,
+        displayName: 'chat947991747861991169',
+        participantNames: '["Doe, Jane","Bob"]',
+      }),
+    ).toBe('Doe, Jane, Bob');
   });
 
   it('skips a phone-number-list display name in favor of participant names', () => {
@@ -196,6 +207,19 @@ describe('participantList / participantAvatars / participantColors', () => {
   it('splits, trims, and drops empty names', () => {
     expect(participantList(' Alice ,Bob,, ')).toEqual(['Alice', 'Bob']);
     expect(participantList(null)).toEqual([]);
+  });
+
+  it('parses JSON arrays without splitting a comma inside one participant name', () => {
+    const names = '["Doe, Jane","Bob"]';
+    expect(participantList(names)).toEqual(['Doe, Jane', 'Bob']);
+    expect(participantDisplayNames(names)).toBe('Doe, Jane, Bob');
+    expect(participantAvatars('["file:///jane.png",null]')).toEqual(['file:///jane.png', null]);
+    expect(participantColors('["#112233","bad",null,"#AABBCC"]')).toEqual([
+      '#112233',
+      null,
+      null,
+      '#AABBCC',
+    ]);
   });
 
   it('splits pipe-delimited avatar uris, mapping empties to null', () => {

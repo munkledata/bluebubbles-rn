@@ -2,6 +2,7 @@ import { inArray, sql } from 'drizzle-orm';
 import { kv } from '../schema';
 import { withDbTransaction, withDbWriteLock } from '../transaction';
 import type { AppDatabase } from '../types';
+import { SHARE_INTAKE_RECEIPT_KV_PREFIX } from './shareIntakeReceipts';
 import { setSyncMarkerWithinTransaction } from './sync';
 
 // ---- Whole-cache maintenance ----------------------------------------------
@@ -37,7 +38,6 @@ export const FULL_REPAIR_RETIRED_CHAT_KV_PREFIX = 'sync.fullRepair.retiredChat.'
  * server's call UUID and must not survive when native notification cleanup is unavailable.
  */
 export const NOTIFICATION_ROUTE_KV_PREFIX = 'notification.route.v2.facetime.';
-
 /** Maximum rows one cache-delete statement may hold the shared write queue for. */
 const CACHE_DELETE_BATCH_SIZE = 500;
 
@@ -445,6 +445,24 @@ export async function clearLocalCache(db: AppDatabase): Promise<void> {
       return rows.length;
     });
   }
+
+  let deletedShareIntakeReceipts = CACHE_DELETE_BATCH_SIZE;
+  while (deletedShareIntakeReceipts === CACHE_DELETE_BATCH_SIZE) {
+    deletedShareIntakeReceipts = await withDbWriteLock(async () => {
+      const rows = await db.all<{ rowid: number }>(sql`
+        DELETE FROM kv
+         WHERE rowid IN (
+           SELECT rowid
+             FROM kv
+            WHERE key LIKE ${`${SHARE_INTAKE_RECEIPT_KV_PREFIX}%`}
+            ORDER BY rowid
+            LIMIT ${CACHE_DELETE_BATCH_SIZE}
+         )
+        RETURNING rowid
+      `);
+      return rows.length;
+    });
+  }
 }
 
 /**
@@ -496,7 +514,8 @@ export async function localCacheDirty(db: AppDatabase): Promise<boolean> {
                           OR key = ${DELETION_SNAPSHOT_INITIALIZED_KV_KEY}
                           OR key LIKE ${`${DRAFT_KV_PREFIX}%`}
                           OR key LIKE ${`${FULL_REPAIR_RETIRED_CHAT_KV_PREFIX}%`}
-                          OR key LIKE ${`${NOTIFICATION_ROUTE_KV_PREFIX}%`})
+                          OR key LIKE ${`${NOTIFICATION_ROUTE_KV_PREFIX}%`}
+                          OR key LIKE ${`${SHARE_INTAKE_RECEIPT_KV_PREFIX}%`})
         THEN 1 ELSE 0 END AS dirty
     `);
     return (rows[0]?.dirty ?? 0) > 0;
