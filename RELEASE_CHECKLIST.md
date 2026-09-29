@@ -17,9 +17,11 @@ v77 was built, validated, and submitted only to Google Play Internal Testing; th
 reports `completed`. Play `0.1.57` / version code `78` is now the latest live Internal artifact, but
 its `PERM-01`, `UI-01`, and `THEME-01A` results are task-scoped and this checklist has not been
 rebound to it. A newer `0.1.58` / code `79` artifact was successfully submitted to Internal Testing,
-but has no Android Publisher live-track readback or Play-installed device proof and does not rebind
-this checklist; an immediate Samsung Play install still delivered v78. A Play-installed Android
-16/API 36 Samsung has a narrow v77 killed-FCM and
+then Play-updated the enrolled Android 16/API 36 Samsung from v78 to v79 after a short propagation
+delay. The non-debuggable arm64 split passed only Welcome-screen cold/hot/ordinary-kill relaunch
+smoke; it has no Android Publisher readback, authenticated staged journey, installed-certificate
+inspection, or broader matrix and does not rebind this checklist. A Play-installed Android 16/API 36
+Samsung has a narrow v77 killed-FCM and
 attachment-download result, but not the full candidate journey or installed-split signature result.
 The superseded Play-delivered v75 passed the five-group `DL-01` matrix on a physical Android 16/API 36
 Samsung; its Play-signed, sideloaded Android 17/API 37 compatibility result remains supporting-only.

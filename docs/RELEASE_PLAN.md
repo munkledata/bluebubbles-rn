@@ -59,10 +59,14 @@ source `a0add484c00fdda06b7ee2c0a5bb5221d256d292` and promoted as release commit
 `gator-release-0.1.58-v79-4cbb050.aab` is 58,215,008 bytes with SHA-256
 `c60cc661a318399afc5d30ed6d914303df41674cfafadfef9d835bfe3c442e19`. EAS submission
 `3138fc9b-c658-4fbc-b144-6a19f68a9e6e` finished successfully for Internal Testing with release
-status `COMPLETED`. This proves the bounded submission, not Android Publisher live-track state,
-tester availability, Play installation, or device behavior. An immediate Samsung Play install still
-delivered v78, so v78 remains the latest verified-live and Play-installed artifact until v79
-propagates and receives separate readback/device proof.
+status `COMPLETED`. After a short propagation delay, Google Play updated the enrolled Android
+16/API-36 Samsung from v78 to v79. Package Manager reported `com.android.vending` as installer,
+version `0.1.58` / code `79`, a non-debuggable arm64/en/xxhdpi split set, and min/target SDK 36. A
+bounded unauthenticated smoke passed: 439 ms cold Welcome launch, 22 ms hot resume, ordinary process
+kill, and 430 ms cold relaunch, with a live replacement PID and no scoped fatal exception. This
+proves one tester's Play delivery and basic lifecycle only—not Android Publisher live-track readback,
+the tester-list boundary, signing-certificate inspection, authentication, staged-server behavior, or
+the broader device matrix.
 
 | Field             | Frozen value                                                                                                                                                  |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
