@@ -2822,7 +2822,7 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/notifications/actions.ts#handleNotificationActionForAccount:mutator-call:d1008c7afb46',
       'src/services/notifications/actions.ts#loveMessage:mutator-call:24b12380d8b6',
       'src/services/notifications/actions.ts#replyTo:mutator-call:16685310e2e9',
-      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:34204b324b>:mutator-call:9543011de089',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:6b9630e321>:mutator-call:830d11e78790',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:49d47bc9dc>:mutator-call:ad52ad6af0e9',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:49d47bc9dc>:mutator-call:ad52ad6af0e9:2',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:93308b01f5>:mutator-call:6b28cf7dfef6',
@@ -2832,9 +2832,9 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow:mutator-call:676a94da498c',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow:mutator-call:676a94da498c:2',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow:mutator-call:676a94da498c:3',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueue.<callback:9c376e0185>:mutator-call:302b900108b0',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueue:mutator-call:090d2cd691d1',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody:mutator-call:79fd7f463521',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueue.<callback:9ee380cbf9>:mutator-call:b479d717c50a',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueue:mutator-call:809160422a8f',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody:mutator-call:45cd1446a8ad',
       'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:7b145a63f68d',
       'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:605604c1644f',
       'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:090f5debeb06',
@@ -2847,7 +2847,7 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:519577ae83e1',
       'src/services/send/sendReactionService.ts#sendReactionMessage:mutator-call:d1f18f459f6d',
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:8e8d9434e3c4',
-      'src/services/send/sendService.ts#sendTextMessage:mutator-call:018a729dfb2b',
+      'src/services/send/sendService.ts#sendTextMessage:mutator-call:b33c4cc8cb99',
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:b26271a03910',
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:c05517b0fccc',
       'src/services/send/sendService.ts#sendTextMessage:mutator-call:78177249e6a1',
@@ -2877,9 +2877,9 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:09c89c44e8>.<callback:e4bd60ecf9>:mutator-call:bea18d75eb96',
       'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:09c89c44e8>:mutator-call:3b94f9081bcc',
       'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:09c89c44e8>:mutator-call:41c2a6fb6561',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:732565dae3>.<callback:2da3f076f1>:mutator-call:09748f0ded48',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:732565dae3>:mutator-call:0e9b433bd880',
-      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:732565dae3>:mutator-call:f7ba18174d5d',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:c5dc8d4ea4>.<callback:c9e9c88d98>:mutator-call:a710f6b71717',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:c5dc8d4ea4>:mutator-call:ad9b3dfbe480',
+      'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:c5dc8d4ea4>:mutator-call:5106267cb572',
       'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:7678a0d5ed>.<callback:58de47bad3>:mutator-call:3998f044069d',
       'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:7678a0d5ed>:mutator-call:a49bb208b031',
       'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody.<callback:7678a0d5ed>:mutator-call:ced5adb9083e',
@@ -2937,10 +2937,10 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
   assert.deepEqual(
     failureTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendOutcome.ts#handleSendFailure.<callback:c51018a664>:mutator-call:8e9ed10d1f25',
-      'src/services/send/sendOutcome.ts#handleSendFailure.<callback:c51018a664>:mutator-call:acb797b961ae',
-      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:37d6a9e1a17d',
-      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:83959afcc683',
+      'src/services/send/sendOutcome.ts#handleSendFailure.<callback:ba259567db>:mutator-call:e72b72692e8c',
+      'src/services/send/sendOutcome.ts#handleSendFailure.<callback:ba259567db>:mutator-call:db0635154754',
+      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:c3d48312b659',
+      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:74cf79c0ac34',
     ].sort(),
   );
   assert.deepEqual(
@@ -3108,7 +3108,7 @@ test('certifies the exact residual repository delegations after explicit-owner c
   );
 
   assert.equal(devFixtures.length, 14);
-  assert.equal(intentionalBoundaries.length, 47);
+  assert.equal(intentionalBoundaries.length, 48);
   assert.equal(scheduledStateMachine.length, 12);
   assert.deepEqual(
     findings.map((finding) => finding.id).sort(),
@@ -3159,7 +3159,7 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/services/realtime/incomingEventDrain.ts#durableContext.markDbAppliedWithinTransaction:mutator-call:737d7a3d436b',
       'src/services/send/index.ts#syncScheduledFromServer.<callback:ae558ebd6a>:mutator-call:e6cbeecf109b',
       'src/services/send/index.ts#syncScheduledFromServer.<callback:ae558ebd6a>:mutator-call:ff05bdbab110',
-      'src/services/send/index.ts#retry.<callback:3885868ece>:mutator-call:e1c6f0512092',
+      'src/services/send/index.ts#retry.<callback:ae80b2827d>:mutator-call:323fb883d088',
       'src/services/send/scheduleService.ts#recoverInterruptedScheduledRows:mutator-call:8fc2072469ba',
       'src/services/send/scheduleService.ts#runDueScheduled.writeTerminal:mutator-call:934d3ba3156d',
       'src/services/send/scheduleService.ts#runDueScheduled.writeTerminal:mutator-call:ae2537472d84',
@@ -3181,6 +3181,7 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/services/share/shareIntake.ts#discardAccountBoundShareIntake:mutator-call:9abbc352b6da',
       'src/services/share/shareIntake.ts#discardShareIntakeBatch.<callback:49cb1846bc>:mutator-call:9283adeb4a6d',
       'src/services/share/shareIntake.ts#readShareIntakeReceipt:mutator-call:0194b9ad5aaf',
+      'src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:c642780c7d08',
       'src/services/sync/engine.ts#syncAllChats:mutator-call:d025e1f31f26',
       'src/services/sync/engine.ts#syncChatMessageRange:mutator-call:34deba18cbca',
       'src/services/sync/engine.ts#syncSingleChat:mutator-call:3c8efb8e47a5',
@@ -3253,23 +3254,27 @@ test('certifies exactly the reviewed coordinated-delegation path additions', () 
         'coordinated-delegation',
       ],
       [
-        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:5b78467294>:mutator-call:542d51137fc0',
+        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:90014dc595>:mutator-call:e68476a9b725',
         'coordinated-delegation',
       ],
       [
-        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:5b78467294>:mutator-call:7518b28beb41',
+        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:90014dc595>:mutator-call:d67f2f617e41',
         'coordinated-delegation',
       ],
       [
-        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:5b78467294>:mutator-call:c5217ff62b0c',
+        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:90014dc595>:mutator-call:1e7ca1dbe100',
         'coordinated-delegation',
       ],
       [
-        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:5b78467294>:mutator-call:f6969f77e34f',
+        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:90014dc595>:mutator-call:aa834d72dc90',
         'coordinated-delegation',
       ],
       [
-        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:5b78467294>:mutator-call:fa82244b941a',
+        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:90014dc595>:mutator-call:ef45372eb323',
+        'coordinated-delegation',
+      ],
+      [
+        'src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:90014dc595>:mutator-call:573c69b6c8dd',
         'coordinated-delegation',
       ],
       [
@@ -3525,10 +3530,10 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
       'src/services/send/index.ts#pickAndSendContact.<callback:9bcfe7b86a>:mutator-call:a2100e00af93',
       'src/services/send/index.ts#react.<callback:ee1497bc74>:mutator-call:23bf2daa57df',
       'src/services/send/index.ts#react.<callback:ee1497bc74>:mutator-call:80dba72fdcd7',
-      'src/services/send/index.ts#recoverOutgoing:mutator-call:cb742ac578a2',
+      'src/services/send/index.ts#recoverOutgoing:mutator-call:81cb22c9c9f3',
       'src/services/send/index.ts#reply.<callback:f041cfa884>:mutator-call:d65d22823243',
-      'src/services/send/index.ts#retry.<callback:3885868ece>:mutator-call:22611de0becd',
-      'src/services/send/index.ts#retry.<callback:3885868ece>:mutator-call:e1c6f0512092',
+      'src/services/send/index.ts#retry.<callback:ae80b2827d>:mutator-call:7eb816923e6e',
+      'src/services/send/index.ts#retry.<callback:ae80b2827d>:mutator-call:323fb883d088',
       'src/services/send/index.ts#schedule.<callback:f60bffc979>:mutator-call:29e6d7bb7f61',
       'src/services/send/index.ts#scheduleAttachment.<callback:dd8aacac8c>:mutator-call:636217d449b1',
       'src/services/send/index.ts#send.<callback:939d3d95aa>:mutator-call:9d6fc3b4c735',
@@ -3556,9 +3561,9 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
   assert.deepEqual(
     retryClaimTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#retry.<callback:3885868ece>.<callback:83b6f6c171>:mutator-call:2025f0e6e74c',
-      'src/services/send/index.ts#retry.<callback:3885868ece>:mutator-call:d2625ba0d157',
-      'src/services/send/index.ts#retry.<callback:3885868ece>:mutator-call:da3337f5ad26',
+      'src/services/send/index.ts#retry.<callback:ae80b2827d>.<callback:d0fc418541>:mutator-call:2c0e30c7ad05',
+      'src/services/send/index.ts#retry.<callback:ae80b2827d>:mutator-call:58bd478d2cc6',
+      'src/services/send/index.ts#retry.<callback:ae80b2827d>:mutator-call:88146f66001f',
     ].sort(),
   );
   assert.deepEqual(
@@ -3654,9 +3659,9 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
   assert.deepEqual(
     markReadTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/chatActions.ts#markRead.<callback:1c05883cfe>.<callback:d3e99abf2d>:mutator-call:ce0273675844',
-      'src/services/chatActions.ts#markRead.<callback:1c05883cfe>:mutator-call:4e01bfe9c298',
-      'src/services/chatActions.ts#markRead.<callback:1c05883cfe>:mutator-call:d60a61ea9709',
+      'src/services/chatActions.ts#markRead.<callback:c7e5881d2e>.<callback:d3e99abf2d>:mutator-call:6d484728b976',
+      'src/services/chatActions.ts#markRead.<callback:c7e5881d2e>:mutator-call:70bc257ed28b',
+      'src/services/chatActions.ts#markRead.<callback:c7e5881d2e>:mutator-call:f29fc28ec83f',
     ].sort(),
   );
   assert.deepEqual(
@@ -3714,7 +3719,7 @@ test('certifies exactly the reviewed sync delegation edges', () => {
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
     [
-      'src/services/background/backgroundSync.ts#executeBackgroundSyncTask.drainOutgoing:mutator-call:a18dc3e2d8d1',
+      'src/services/background/backgroundSync.ts#executeBackgroundSyncTask.drainOutgoing:mutator-call:a20f74733af0',
       'src/services/background/backgroundSync.ts#executeBackgroundSyncTask.synchronize:mutator-call:cdab1e96e395',
       'src/services/background/backgroundSync.ts#recoverAndDrainBackgroundSchedules.<callback:bb391a2ee5>:mutator-call:a0022079e125',
       'src/services/sync/engine.ts#fullSync:mutator-call:adbb4138d2b0',
@@ -3726,8 +3731,10 @@ test('certifies exactly the reviewed sync delegation edges', () => {
       'src/services/syncControl.ts#ensureChatSynced.<callback:30448c6a99>:mutator-call:d213a1898cbd',
       'src/services/syncControl.ts#runSync:mutator-call:15ffb54cca3e',
       'src/services/syncControl.ts#runSync:mutator-call:15ffb54cca3e:2',
+      'src/services/syncControl.ts#runSync:mutator-call:15ffb54cca3e:3',
       'src/services/syncControl.ts#runSync:mutator-call:3d1b923ea415',
       'src/services/syncControl.ts#runSync:mutator-call:1c0aa0474d53',
+      'src/services/syncControl.ts#runSync:mutator-call:40827cd3edd7',
       'src/services/syncControl.ts#runSync:mutator-call:535bd795208b',
       'src/services/syncControl.ts#runSync:mutator-call:5e67ff4f7781',
       'src/services/syncControl.ts#runSync:mutator-call:a4f724183115',
@@ -3738,6 +3745,7 @@ test('certifies exactly the reviewed sync delegation edges', () => {
       'src/services/syncControl.ts#runSync:mutator-call:f47292e12423',
       'src/services/syncControl.ts#runSync:mutator-call:f2bc335e17da',
       'src/services/syncControl.ts#runSync:mutator-call:f2bc335e17da:2',
+      'src/services/syncControl.ts#runSync:mutator-call:f2bc335e17da:3',
       'src/services/syncControl.ts#startFullRepair.<callback:a019ed9cf6>:mutator-call:7349d6139eeb',
       'src/services/syncControl.ts#startSync.<callback:4c2f340da4>:mutator-call:7042cc5b18c2',
       'src/services/syncControl.ts#startTargetedChatRepair.<callback:53a6bf4b67>:mutator-call:aeccb187738d',
@@ -5461,7 +5469,13 @@ fullOnlyTest(
           '      effectiveCommitGuard,\n' +
           '      {\n' +
           '        attemptOwnerToken: attemptOwnerToken ?? undefined,\n' +
-          "        ...(target ? { terminalUncertainKind: 'reply' as const } : {}),\n" +
+          '        ...(retrySafePlainText\n' +
+          '          ? { imessagePlainTextRetrySafe: true }\n' +
+          '          : useIMessagePlainText\n' +
+          "            ? { terminalUncertainKind: 'plain' as const }\n" +
+          '            : target\n' +
+          "              ? { terminalUncertainKind: 'reply' as const }\n" +
+          '              : {}),\n' +
           '      },\n' +
           '    );',
         after:
@@ -6518,7 +6532,7 @@ fullOnlyTest('driver adapter proof fails closed on forwarding, escape, and scope
         replaceFixtureSource(
           root,
           'src/db/database.ts',
-          "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0052_chat_history_deletion_boundary' as const;",
+          "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0053_versioned_server_message_state' as const;",
           "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0039_message_error_message' as const;",
         );
       },
@@ -7492,16 +7506,16 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoingRetry.ts#claimOutgoingForSendWithinTransaction:drizzle-update:7f620d3bb4f5',
       'src/db/repositories/outgoingRetry.ts#claimOutgoingForSendWithinTransaction:drizzle-update:7f620d3bb4f5:2',
       'src/db/repositories/outgoingRetry.ts#claimOutgoingForSendWithinTransaction:sql-update:67eaad07e164',
-      'src/db/repositories/outgoingRetry.ts#claimOutgoingForSendWithinTransaction:sql-update:0cd3bdcc38d0',
+      'src/db/repositories/outgoingRetry.ts#claimOutgoingForSendWithinTransaction:sql-update:1bd0ddad217a',
       'src/db/repositories/outgoingRetry.ts#deferOutgoingSendClaimWithinTransaction:sql-update:15e05dd06ec0',
       'src/db/repositories/outgoingRetry.ts#deferOutgoingSendClaimWithinTransaction:sql-update:5e49fca77b02',
-      'src/db/repositories/outgoingRetry.ts#deferOutgoingSendClaimWithinTransaction:sql-update:b34b6cdc2b14',
+      'src/db/repositories/outgoingRetry.ts#deferOutgoingSendClaimWithinTransaction:sql-update:7c9b9bf3edca',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:drizzle-update:7bbea9e0b4c6',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:drizzle-update:7bbea9e0b4c6:2',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:drizzle-update:bf7b74884a04',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:drizzle-update:bf7b74884a04:2',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:drizzle-update:bf7b74884a04:3',
-      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:sql-update:59013bfa2e13',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:sql-update:bdfef7c81150',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:sql-update:8331c562b8bf',
       'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetryWithinTransaction:sql-update:d829b7a21431',
       'src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction:drizzle-insert:5374f7183358',
@@ -7528,12 +7542,12 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction:drizzle-delete:2cde35e0f6d4',
       'src/db/repositories/outgoing.ts#discardOutgoingMessageWithinTransaction:sql-update:1320d8a402de',
       'src/db/repositories/outgoing.ts#reconcileExactOutgoingAttemptSuccessWithinTransaction:mutator-call:e0ea8d72f9a8',
-      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:4d3915eba9>:mutator-call:373d530f1927',
-      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:4d3915eba9>:mutator-call:80ee315fb0d9',
-      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:4d3915eba9>:mutator-call:80ee315fb0d9:2',
-      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:4d3915eba9>:mutator-call:9b76830275a3',
-      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:4d3915eba9>:mutator-call:9b76830275a3:2',
-      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:4d3915eba9>:mutator-call:9b76830275a3:3',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:ac04e2b9bb>:mutator-call:5ca68eec2aac',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:ac04e2b9bb>:mutator-call:491c123dad49',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:ac04e2b9bb>:mutator-call:491c123dad49:2',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:ac04e2b9bb>:mutator-call:f4a1ae735583',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:ac04e2b9bb>:mutator-call:f4a1ae735583:2',
+      'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction.<callback:ac04e2b9bb>:mutator-call:f4a1ae735583:3',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction:drizzle-insert:0eef01113095',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction:drizzle-delete:0bd89180f0e1',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction:drizzle-delete:3374b727a87f',
@@ -7635,9 +7649,9 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
   assert.deepEqual(
     retryClaimTransactions.map((finding) => finding.id).sort(),
     [
-      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry.<callback:0205a23c0a>:mutator-call:2e64f81fc79c',
-      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry:mutator-call:09fd69a1a338',
-      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry:mutator-call:0e924b7a5028',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry.<callback:1d21b95537>:mutator-call:df1e48ce3efe',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry:mutator-call:ea4f20927bb8',
+      'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry:mutator-call:dbf95f3e0abb',
     ].sort(),
   );
   assert.deepEqual(

@@ -62,6 +62,11 @@ import {
 
 const notificationTextEncoder = new TextEncoder();
 
+jest.mock('@/services/clients', () => ({ vault: { get: jest.fn(async () => 'true') } }));
+const { vault: mockVault } = jest.requireMock('@/services/clients') as {
+  vault: { get: jest.Mock };
+};
+
 const ALARM_IDLE = 3;
 const LEGACY_FACETIME_CHANNEL_ID = 'com.bluegreengatorapps.messages.facetime';
 jest.mock('react-native-notify-kit', () => ({
@@ -373,6 +378,7 @@ function messageTruth(
 
 beforeEach(() => {
   resumeRealtimeDeliveries();
+  mockVault.get.mockReset().mockResolvedValue('true');
   useSessionStore.setState({
     serverInfo: { version: 'test', private_api: true, rcs: true } as any,
   });
@@ -982,7 +988,7 @@ describe('postNotification — detailed message', () => {
     }
   });
 
-  it('does not inspect or rebuild native children before persisted App Lock state is hydrated', async () => {
+  it('does not inspect or rebuild native children when headless App Lock requires protection', async () => {
     const first = displayedMessageChild(1, 101);
     const state = installStatefulTray([first, displayedMessageChild(3, 199)]);
     try {
@@ -996,6 +1002,195 @@ describe('postNotification — detailed message', () => {
       expect(state.tray.has('gator-message-summary')).toBe(false);
     } finally {
       state.restore();
+    }
+  });
+
+  it.each([null, 'false'])(
+    'repairs only the generic summary for headless App Lock OFF (%s)',
+    async (stored) => {
+      const state = installStatefulTray();
+      try {
+        useLockStore.setState({ hydrated: false });
+        const lockSnapshot = useLockStore.getState();
+        mockVault.get.mockResolvedValue(stored);
+
+        await postNotification(messageIntent());
+        expect(state.tray.has('gator-message-summary')).toBe(false);
+        await postNotification(messageIntent({ chatGuid: 'chat-3', messageGuid: 'msg-other' }));
+
+        const summary = state.tray.get('gator-message-summary');
+        const survivor = state.tray.get('gator-message-3');
+        expect(summary).toEqual(
+          expect.objectContaining({
+            title: 'Gator',
+            body: 'New messages',
+            data: { gatorOwner: 'gator', gatorSchema: '2', gatorKind: 'message-summary' },
+            android: expect.objectContaining({
+              groupSummary: true,
+              groupAlertBehavior: 2,
+              onlyAlertOnce: true,
+            }),
+          }),
+        );
+        expect(useLockStore.getState()).toBe(lockSnapshot);
+        expect(mockVault.get).toHaveBeenCalledWith('appLockEnabled');
+        expect(mockDisplay).toHaveBeenCalledTimes(3);
+
+        state.tray.delete('gator-message-1');
+        await reconcileMessageNotificationGroup();
+        expect(state.tray.get('gator-message-3')).toBe(survivor);
+        expect(state.tray.get('gator-message-summary')).toBe(summary);
+        state.tray.delete('gator-message-3');
+        await reconcileMessageNotificationGroup();
+        expect(state.tray.size).toBe(0);
+        expect(mockDisplay).toHaveBeenCalledTimes(3);
+      } finally {
+        state.restore();
+      }
+    },
+  );
+
+  it.each(['invalid', 'unavailable'])(
+    'leaves a headless group untouched for %s persisted lock state',
+    async (failure) => {
+      const first = {
+        ...displayedMessageChild(1, 101),
+        android: {
+          ...displayedMessageChild(1, 101).android,
+          groupId: 'gator-message-group',
+          groupAlertBehavior: 2,
+        },
+      };
+      const second = {
+        ...displayedMessageChild(3, 199),
+        android: {
+          ...displayedMessageChild(3, 199).android,
+          groupId: 'gator-message-group',
+          groupAlertBehavior: 2,
+        },
+      };
+      const state = installStatefulTray([first, second]);
+      try {
+        useLockStore.setState({ hydrated: false });
+        if (failure === 'unavailable')
+          mockVault.get.mockRejectedValue(new Error('vault unavailable'));
+        else mockVault.get.mockResolvedValue('invalid');
+
+        await reconcileMessageNotificationGroup();
+
+        expect(mockGetDisplayed).not.toHaveBeenCalled();
+        expect(mockDisplay).not.toHaveBeenCalled();
+        expect(mockCancel).not.toHaveBeenCalled();
+        expect([...state.tray.values()]).toEqual([first, second]);
+      } finally {
+        state.restore();
+      }
+    },
+  );
+
+  it.each(['lock-change', 'account-retirement'])(
+    'rejects a headless OFF read after %s',
+    async (change) => {
+      let finishRead!: (value: string) => void;
+      let readStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        readStarted = resolve;
+      });
+      useLockStore.setState({ hydrated: false });
+      mockVault.get.mockImplementation(() => {
+        readStarted();
+        return new Promise<string>((resolve) => {
+          finishRead = resolve;
+        });
+      });
+      const pending = reconcileMessageNotificationGroup();
+      await started;
+      if (change === 'account-retirement') pauseRealtimeDeliveries();
+      else {
+        useLockStore.getState().setEnabled(true);
+        useLockStore.getState().setEnabled(false);
+      }
+      finishRead('false');
+      await pending;
+      expect(mockGetDisplayed).not.toHaveBeenCalled();
+      expect(mockDisplay).not.toHaveBeenCalled();
+      expect(mockCancel).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rechecks the headless policy after native enumeration without reposting its children', async () => {
+    const first = displayedMessageChild(1, 101);
+    const second = displayedMessageChild(3, 199);
+    first.android.groupId = second.android.groupId = 'gator-message-group';
+    first.android.groupAlertBehavior = second.android.groupAlertBehavior = 2;
+    const state = installStatefulTray([first, second]);
+    try {
+      useLockStore.setState({ hydrated: false });
+      mockVault.get.mockResolvedValue('false');
+      mockGetDisplayed.mockImplementationOnce(async () => {
+        useLockStore.getState().setEnabled(true);
+        return [...state.tray].map(([id, notification]) => ({ id, notification }));
+      });
+      await reconcileMessageNotificationGroup();
+      expect(mockDisplay).not.toHaveBeenCalled();
+      expect(mockCancel).not.toHaveBeenCalled();
+      expect([...state.tray.values()]).toEqual([first, second]);
+    } finally {
+      state.restore();
+    }
+  });
+
+  it('contains a headless summary if its implicit account lease retires during native posting', async () => {
+    const state = installStatefulTray();
+    try {
+      useLockStore.setState({ hydrated: false });
+      mockVault.get.mockResolvedValue('false');
+      await postNotification(messageIntent());
+      mockDisplay.mockImplementation(async (notification: Record<string, any>) => {
+        state.tray.set(notification.id, notification);
+        if (notification.id === 'gator-message-summary') pauseRealtimeDeliveries();
+      });
+
+      await postNotification(messageIntent({ chatGuid: 'chat-3', messageGuid: 'msg-other' }));
+
+      expect(mockCancel).toHaveBeenCalledWith('gator-message-summary');
+      expect(state.tray.size).toBe(0);
+    } finally {
+      state.restore();
+    }
+  });
+
+  it('bounds a hung headless lock read and ignores its late result', async () => {
+    jest.useFakeTimers();
+    let finishRead!: (value: string) => void;
+    let readStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      readStarted = resolve;
+    });
+    try {
+      useLockStore.setState({ hydrated: false });
+      mockVault.get.mockImplementationOnce(() => {
+        readStarted();
+        return new Promise<string>((resolve) => {
+          finishRead = resolve;
+        });
+      });
+      const pending = reconcileMessageNotificationGroup();
+      await started;
+      await jest.advanceTimersByTimeAsync(2_000);
+      await pending;
+      expect(mockGetDisplayed).not.toHaveBeenCalled();
+      useLockStore.setState({ hydrated: true });
+      await reconcileMessageNotificationGroup();
+      expect(mockGetDisplayed).toHaveBeenCalledTimes(1);
+      const displayCount = mockDisplay.mock.calls.length;
+      const cancelCount = mockCancel.mock.calls.length;
+      finishRead('false');
+      await Promise.resolve();
+      expect(mockDisplay).toHaveBeenCalledTimes(displayCount);
+      expect(mockCancel).toHaveBeenCalledTimes(cancelCount);
+    } finally {
+      jest.useRealTimers();
     }
   });
 

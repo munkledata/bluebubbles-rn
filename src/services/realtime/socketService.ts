@@ -177,6 +177,9 @@ export class SocketService {
   private stopped = false;
   /** Invalidates native callbacks / async escalation work from every prior connect lifecycle. */
   private lifecycleGeneration = 0;
+  /** Namespace rejection stops Socket.IO's own retries; retain only this lifecycle's decision. */
+  private terminalAuthGeneration: number | null = null;
+  private rateLimitedGeneration: number | null = null;
   /** Account generation this socket opened under; native callbacks never recapture a newer one. */
   private accountLease: RealtimeDeliveryLease | null = null;
 
@@ -372,15 +375,41 @@ export class SocketService {
       this.publishObservedLifecycle({ phase: 'connected', recovered });
     };
     const onDisconnect = (): void => {
-      if (!ownsSocket()) return;
+      if (!ownsSocket() || this.terminalAuthGeneration === lifecycleGeneration) return;
       this.lifecycleIsReconnecting = true;
       const current = this.publishObservedLifecycle({ phase: 'reconnecting' });
       // Socket.IO will not retry an `io server disconnect`; reuse the existing trusted-origin
       // escalation ladder whenever the native socket says no automatic attempt is active.
-      if (current && !openedSocket.active) this.scheduleEscalation('server-disconnect');
+      if (current && ownsSocket() && !openedSocket.active) {
+        this.scheduleEscalation('server-disconnect');
+      }
     };
-    const onConnectError = (): void => {
+    const onConnectError = (error: unknown): void => {
       if (!ownsSocket()) return;
+      if (!openedSocket.active) {
+        // Namespace CONNECT_ERROR destroys Socket.IO's reconnect subscriptions. Only the
+        // server's finite wire codes authorize a retry; human-readable messages are not a contract.
+        const data =
+          error !== null && typeof error === 'object' && 'data' in error ? error.data : null;
+        const code = data !== null && typeof data === 'object' && 'code' in data ? data.code : null;
+        if (code !== 'AUTH_UNAVAILABLE' && code !== 'AUTH_RATE_LIMITED') {
+          this.terminalAuthGeneration = lifecycleGeneration;
+          this.cancelEscalation();
+          this.publishObservedLifecycle({ phase: 'error' });
+          return;
+        }
+        if (this.terminalAuthGeneration === lifecycleGeneration) return;
+        if (code === 'AUTH_RATE_LIMITED' && this.rateLimitedGeneration !== lifecycleGeneration) {
+          this.rateLimitedGeneration = lifecycleGeneration;
+          // Upgrade any already-queued short retry to the server's conservative 60-second floor.
+          // Duplicate errors must neither create another timer nor keep pushing its deadline out.
+          this.cancelEscalation();
+        }
+        const current = this.publishObservedLifecycle({ phase: 'error' });
+        if (current && ownsSocket()) this.scheduleEscalation('namespace-unavailable');
+        return;
+      }
+      if (this.terminalAuthGeneration === lifecycleGeneration) return;
       this.publishObservedLifecycle({
         phase:
           this.lifecycleHasConnected || this.lifecycleIsReconnecting
@@ -389,7 +418,7 @@ export class SocketService {
       });
     };
     const onReconnectAttempt = (): void => {
-      if (!ownsSocket()) return;
+      if (!ownsSocket() || this.terminalAuthGeneration === lifecycleGeneration) return;
       this.lifecycleIsReconnecting = true;
       this.publishObservedLifecycle({ phase: 'reconnecting' });
     };
@@ -495,26 +524,45 @@ export class SocketService {
    * pending/in-progress escalation is not re-scheduled.
    */
   private scheduleEscalation(
-    reason: 'retries-exhausted' | 'server-disconnect' = 'retries-exhausted',
+    reason:
+      'retries-exhausted' | 'server-disconnect' | 'namespace-unavailable' = 'retries-exhausted',
   ): void {
-    if (this.stopped || this.escalationTimer != null || this.escalationInProgress) return;
-    const delay = nextSocketBackoffMs(this.escalationAttempt);
+    const lifecycleGeneration = this.lifecycleGeneration;
+    const accountLease = this.accountLease;
+    const ownsAttempt = (): boolean =>
+      !this.stopped &&
+      lifecycleGeneration === this.lifecycleGeneration &&
+      this.terminalAuthGeneration !== lifecycleGeneration &&
+      accountLease === this.accountLease &&
+      Boolean(accountLease?.isCurrent());
+    if (!ownsAttempt() || this.escalationTimer != null || this.escalationInProgress) return;
+    const delay =
+      this.rateLimitedGeneration === lifecycleGeneration
+        ? SOCKET_BACKOFF_MAX_MS
+        : reason === 'namespace-unavailable'
+          ? Math.min(nextSocketBackoffMs(this.escalationAttempt), SOCKET_BACKOFF_MAX_MS)
+          : nextSocketBackoffMs(this.escalationAttempt);
     this.escalationAttempt += 1;
     logger.warn(
       reason === 'retries-exhausted'
         ? `[socket] reconnect attempts exhausted — restarting in ${delay}ms`
-        : `[socket] server ended the connection — restarting in ${delay}ms`,
+        : reason === 'namespace-unavailable'
+          ? `[socket] authentication temporarily unavailable — restarting in ${delay}ms`
+          : `[socket] server ended the connection — restarting in ${delay}ms`,
     );
-    this.escalationTimer = setTimeout(() => {
+    const timer = setTimeout(() => {
+      if (this.escalationTimer !== timer) return;
       this.escalationTimer = null;
+      if (!ownsAttempt()) return;
       if (this.lifecycleObserver && !this.publishObservedLifecycle({ phase: 'reconnecting' })) {
         return;
       }
-      if (this.stopped) return;
+      if (!ownsAttempt()) return;
       this.lifecycleIsReconnecting = true;
       this.runEscalation();
       this.attachLifecycleObserver();
     }, delay);
+    this.escalationTimer = timer;
   }
 
   /** Restart the socket against the same already-approved origin. */

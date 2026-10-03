@@ -13,6 +13,29 @@ private const val RELEASE_RUNTIME_FAILURE = "runtime.fatal [UnknownError]"
 private class ReleaseReactInstanceException :
   RuntimeException(RELEASE_RUNTIME_FAILURE, null, false, false)
 
+private class ReleaseReactStartupException :
+  RuntimeException("runtime.startup_failed [UnknownError]", null, false, false)
+
+/** Called directly from MainApplication, before Expo's lifecycle listeners exist. */
+object GatorStartupPrivacy {
+  fun run(debuggable: Boolean, startup: () -> Unit) {
+    // This is the application's compiled BuildConfig.DEBUG, never a JS/runtime flag.
+    if (debuggable) {
+      startup()
+      return
+    }
+    try {
+      FLog.setMinimumLoggingLevel(Int.MAX_VALUE)
+      startup()
+    } catch (_: Exception) {
+      throw ReleaseReactStartupException()
+    } catch (_: LinkageError) {
+      throw ReleaseReactStartupException()
+    }
+    // VM exhaustion, thread termination, and native signals are not recovery paths.
+  }
+}
+
 private fun isDebuggable(context: Context?): Boolean =
   context != null &&
     (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0

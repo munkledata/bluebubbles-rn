@@ -12,7 +12,14 @@ const criticalFileThreshold = {
 
 module.exports = {
   ...baseConfig,
-  collectCoverageFrom: ['src/ui/**/*.{ts,tsx}', '!src/ui/**/index.ts'],
+  // Measure production UI. These two device benchmark harnesses have release-blocked routes;
+  // perfRoutes.test.tsx keeps that boundary covered. All production screens retain their floors.
+  collectCoverageFrom: [
+    'src/ui/**/*.{ts,tsx}',
+    '!src/ui/**/index.ts',
+    '!src/ui/conversations/ColdInboxBenchmarkScreen.tsx',
+    '!src/ui/conversations/PerfInboxBenchmarkScreen.tsx',
+  ],
   coverageReporters: ['text', 'json-summary'],
   coverageThreshold: {
     [`${uiRoot}/`]: {

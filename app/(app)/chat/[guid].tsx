@@ -1,5 +1,11 @@
 import { Image } from 'expo-image';
-import { useLocalSearchParams, useNavigation, useRoute, useRouter } from 'expo-router';
+import {
+  useFocusEffect,
+  useLocalSearchParams,
+  useNavigation,
+  useRoute,
+  useRouter,
+} from 'expo-router';
 import { usePreventRemove } from 'expo-router/react-navigation';
 import { isAggregateRetractionTombstone } from '@core/messages/retraction';
 import type { IMessageTextFormattingRange } from '@core/api/endpoints/messages';
@@ -15,7 +21,7 @@ import {
   Text,
   View,
 } from 'react-native';
-import { showConfirm, showDialog } from '@ui/dialog/dialogStore';
+import { showConfirm, showDialog, useDialogStore, type DialogButton } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   DRAFT_KV_PREFIX,
@@ -31,7 +37,14 @@ import { getContactsPermissionState } from '@/services/contacts/contactsService'
 import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
+  subscribeRealtimeGenerationInvalidation,
 } from '@/services/realtime/deliveryCoordinator';
+import {
+  prepareCurrentLocationPermission,
+  type CurrentLocationPermissionOutcome,
+} from '@/services/location/currentLocation';
+import { getExpoLocationAdapter } from '@/services/location/expoLocationAdapter';
+import { captureSessionRcsCapabilityLease } from '@/services/send/rcsAttemptCapability';
 import {
   admitShareIntakeTextDraft,
   consumeShareIntakeBatch,
@@ -61,6 +74,7 @@ import {
   sendVoice,
   sendTextAttachment,
   type AttachmentQueueAdmission,
+  type ShareCurrentLocationResult,
 } from '@/services/send';
 import { logger } from '@core/secure';
 import { MAX_IMESSAGE_VOICE_UPLOAD_BYTES } from '@core/models/serverInfo';
@@ -514,14 +528,11 @@ function ChatScreenInner({
     exitAnchor();
   }, [exitAnchor]);
   const hasMessageAnchor = anchor != null;
-  useEffect(() => {
-    if (!returningToNewest || hasMessageAnchor || !isCurrentWindow || !accountLease.isCurrent()) {
-      return;
-    }
-    // This acknowledges an async DB result for the requested newest window; it is not derived
-    // render state. The flag must reset so a later search close establishes a fresh barrier.
+  if (returningToNewest && !hasMessageAnchor && isCurrentWindow && accountLease.isCurrent()) {
+    // Acknowledge the settled newest window before committing children. Resetting this state
+    // also lets a later search close establish a fresh barrier.
     setReturningToNewest(false);
-  }, [accountLease, hasMessageAnchor, isCurrentWindow, returningToNewest]);
+  }
   const exitSearchAnchor = useCallback((): void => {
     if (searchOpenRef.current) closeSearch();
     else exitAnchor();
@@ -634,11 +645,10 @@ function ChatScreenInner({
         replyTargetRow.messagePartTopology,
       ])
     : null;
-  useEffect(() => {
-    if (imessageRepliesAvailable) return;
+  if (replyTo !== null && !imessageRepliesAvailable) {
     // A live capability/header change revokes the composer target immediately.
     setReplyTo(null);
-  }, [imessageRepliesAvailable]);
+  }
   useEffect(() => {
     if (!replyTargetGuid || !imessageRepliesAvailable) return;
     let alive = true;
@@ -658,16 +668,13 @@ function ChatScreenInner({
       alive = false;
     };
   }, [accountLease, guid, imessageRepliesAvailable, replyTargetGuid, replyTargetProof]);
-  useEffect(() => {
-    if (!editing) return;
+  if (editing !== null) {
     const current = messages.find((message) => message.guid === editing.guid);
-    if (current && !isAggregateRetractionTombstone(current)) return;
-    setEditing(null);
-  }, [editing, messages]);
-  useEffect(() => {
-    if (attachmentFeaturesAvailable) return;
+    if (!current || isAggregateRetractionTombstone(current)) setEditing(null);
+  }
+  if (recording && !voiceFeaturesAvailable) {
     setRecording(false);
-  }, [attachmentFeaturesAvailable]);
+  }
 
   // Capture only the exact native claim carried by this route. Keep provenance so durable send
   // adoption copies from the native no-backup queue into the ordinary attachment cache.
@@ -1717,91 +1724,218 @@ function ChatScreenInner({
     chatService === 'iMessage' &&
     header.data?.guid === guid &&
     isProvenOneToOneIMessageChat(header.data);
-  const locationSendInFlightRef = useRef(false);
-  const runCurrentLocationSend = useCallback(
-    function runCurrentLocationSend(): void {
-      if (
-        locationSendInFlightRef.current ||
-        !currentLocationAvailable ||
-        !accountLease.isCurrent()
-      ) {
+  const locationScreenRef = useRef<object | null>(null);
+  const locationFlowRef = useRef<{ cancel(): void } | null>(null);
+  useFocusEffect(
+    useCallback(() => {
+      if (!currentLocationAvailable || !accountLease.isCurrent()) return;
+      locationScreenRef.current = { guid };
+      return () => {
+        locationScreenRef.current = null;
+        locationFlowRef.current?.cancel();
+      };
+    }, [accountLease, currentLocationAvailable, guid]),
+  );
+  const onShareCurrentLocation = useCallback((): void => {
+    const screen = locationScreenRef.current;
+    const capability = captureSessionRcsCapabilityLease();
+    if (
+      locationFlowRef.current ||
+      !screen ||
+      !currentLocationAvailable ||
+      !accountLease.isCurrent() ||
+      AppState.currentState !== 'active' ||
+      capability?.isCurrent() !== true ||
+      capability.serverInfo?.supports_imessage_location !== true
+    )
+      return;
+
+    const controller = new AbortController();
+    let alive = true;
+    let permissionOnly = false;
+    let pendingFeedback: (() => void) | null = null;
+    let dialogId: number | null = null;
+    let dialogToken: object | null = null;
+    let cancelAcquisition: (() => void) | null = null;
+    const cleanups: Array<() => void> = [];
+    const current = (): boolean =>
+      alive &&
+      locationScreenRef.current === screen &&
+      accountLease.isCurrent() &&
+      capability.isCurrent();
+    const foreground = (): boolean => current() && AppState.currentState === 'active';
+    const finish = (): void => {
+      if (!alive) return;
+      alive = false;
+      controller.abort();
+      cancelAcquisition?.();
+      pendingFeedback = null;
+      dialogToken = null;
+      if (dialogId !== null) useDialogStore.getState().dismissById(dialogId);
+      for (const cleanup of cleanups) cleanup();
+      if (locationFlowRef.current === flow) locationFlowRef.current = null;
+    };
+    const flow = { cancel: finish };
+    locationFlowRef.current = flow;
+    const registerCleanup = (cleanup: () => void): void => {
+      if (alive) cleanups.push(cleanup);
+      else cleanup();
+    };
+    // One-shot callbacks remain owned even though AppDialog dismisses before invoking them.
+    const guardButton =
+      (action: () => void, token: object): (() => void) =>
+      () => {
+        if (dialogToken !== token || !foreground()) return;
+        dialogToken = null;
+        dialogId = null;
+        action();
+      };
+    const explain = (title: string, message: string, buttons?: DialogButton[]): void => {
+      if (!foreground()) return;
+      const token = {};
+      dialogToken = token;
+      dialogId = showDialog(
+        title,
+        message,
+        (buttons ?? [{ text: 'OK' }]).map((button) => ({
+          ...button,
+          onPress: guardButton(button.onPress ?? finish, token),
+        })),
+      );
+    };
+    const confirm = (action: () => void, afterPermission = false): void => {
+      if (!foreground()) return;
+      const token = {};
+      dialogToken = token;
+      dialogId = showConfirm({
+        title: 'Send Current Location?',
+        message: afterPermission
+          ? 'Location access is allowed. Tap Send Location to get one current location and send it to this conversation. Nothing has been sent yet.'
+          : 'Gator will request one current location and send it to this conversation through your server. It does not track your location in the background.',
+        confirmText: 'Send Location',
+        onConfirm: guardButton(action, token),
+        onCancel: guardButton(finish, token),
+      });
+    };
+    const openSettings = (): void => {
+      if (!foreground()) return;
+      finish();
+      void Linking.openSettings().catch(() => undefined);
+    };
+    const report = (
+      result:
+        | Exclude<CurrentLocationPermissionOutcome, { status: 'granted' }>
+        | ShareCurrentLocationResult,
+    ): void => {
+      if (!foreground()) return;
+      if (result.status === 'queued' || result.status === 'cancelled') {
+        finish();
         return;
       }
-      locationSendInFlightRef.current = true;
+      if (result.status === 'unavailable') {
+        explain(
+          'Location Sharing Unavailable',
+          'The connected server no longer offers current-location sharing.',
+        );
+      } else if (result.status === 'services-off') {
+        explain('Location Services Are Off', 'Turn on location services, then try again.', [
+          { text: 'Not Now', style: 'cancel' },
+          { text: 'Open Settings', onPress: openSettings },
+        ]);
+      } else if (result.status === 'denied') {
+        explain(
+          'Location Permission Needed',
+          'Gator needs foreground location access to send your current location. No location is read in the background.',
+          [
+            { text: 'Not Now', style: 'cancel' },
+            result.canAskAgain
+              ? { text: 'Try Again', onPress: prepare }
+              : { text: 'Open Settings', onPress: openSettings },
+          ],
+        );
+      } else {
+        explain(
+          'Couldn’t Get Location',
+          result.status === 'timeout'
+            ? 'Gator did not get a current location within 15 seconds. Nothing was sent.'
+            : 'Gator could not read a current location. Nothing was sent.',
+        );
+      }
+    };
+    const fail = (error: unknown): void => {
+      if (!foreground()) return;
+      logger.warn('[chat] current-location send failed', error);
+      explain('Couldn’t Send Location', 'Your location was not queued. Please try again.');
+    };
+    const sendLocation = (): void => {
+      if (!foreground()) return;
       void acquireAndSendCurrentLocation(guid, {
         foregroundLifecycle: {
-          isActive: () => AppState.currentState === 'active',
+          isActive: foreground,
           subscribeToInactive: (cancel) => {
-            const subscription = AppState.addEventListener('change', (state) => {
-              if (state !== 'active') cancel();
-            });
-            return () => subscription.remove();
+            cancelAcquisition = cancel;
+            if (!foreground()) cancel();
+            return () => {
+              if (cancelAcquisition === cancel) cancelAcquisition = null;
+            };
           },
         },
         accountLease,
         reportIssue: presentSendIssue,
       })
-        .then((result) => {
-          if (!accountLease.isCurrent()) return;
-          if (result.status === 'queued' || result.status === 'cancelled') return;
-          if (result.status === 'unavailable') {
-            showDialog(
-              'Location Sharing Unavailable',
-              'The connected server no longer offers current-location sharing.',
-            );
-            return;
-          }
-          if (result.status === 'services-off') {
-            showDialog('Location Services Are Off', 'Turn on location services, then try again.', [
-              { text: 'Not Now', style: 'cancel' },
-              { text: 'Open Settings', onPress: () => void Linking.openSettings() },
-            ]);
-            return;
-          }
-          if (result.status === 'denied') {
-            showDialog(
-              'Location Permission Needed',
-              'Gator needs foreground location access to send your current location. No location is read in the background.',
-              result.canAskAgain
-                ? [
-                    { text: 'Not Now', style: 'cancel' },
-                    { text: 'Try Again', onPress: runCurrentLocationSend },
-                  ]
-                : [
-                    { text: 'Not Now', style: 'cancel' },
-                    { text: 'Open Settings', onPress: () => void Linking.openSettings() },
-                  ],
-            );
-            return;
-          }
-          showDialog(
-            'Couldn’t Get Location',
-            result.status === 'timeout'
-              ? 'Gator did not get a current location within 15 seconds. Nothing was sent.'
-              : 'Gator could not read a current location. Nothing was sent.',
-          );
-        })
-        .catch((error) => {
-          if (!accountLease.isCurrent()) return;
-          logger.warn('[chat] current-location send failed', error);
-          showDialog('Couldn’t Send Location', 'Your location was not queued. Please try again.');
-        })
-        .finally(() => {
-          locationSendInFlightRef.current = false;
+        .then(report)
+        .catch(fail);
+    };
+    const prepare = (): void => {
+      if (!foreground()) return;
+      void (async () => {
+        const result = await prepareCurrentLocationPermission(getExpoLocationAdapter(), {
+          signal: controller.signal,
+          isCurrent: () => current() && (permissionOnly || AppState.currentState === 'active'),
+          beforePrompt: () => {
+            if (!foreground()) return false;
+            permissionOnly = true;
+            return true;
+          },
         });
-    },
-    [accountLease, currentLocationAvailable, guid],
-  );
-  const onShareCurrentLocation = useCallback((): void => {
-    if (!currentLocationAvailable || locationSendInFlightRef.current) return;
-    showConfirm({
-      title: 'Send Current Location?',
-      message:
-        'Gator will request one current location and send it to this conversation through your server. It does not track your location in the background.',
-      confirmText: 'Send Location',
-      onConfirm: runCurrentLocationSend,
+        if (!current()) return;
+        const present = (): void => {
+          if (!foreground()) return;
+          permissionOnly = false;
+          if (result.status === 'granted') {
+            if (result.prompted) confirm(sendLocation, true);
+            else sendLocation();
+          } else report(result);
+        };
+        if (foreground()) present();
+        else pendingFeedback = present;
+      })().catch(fail);
+    };
+    const appStateSubscription = AppState.addEventListener('change', (state) => {
+      if (!current()) {
+        finish();
+        return;
+      }
+      if (state !== 'active') {
+        // Android's permission Activity also pauses us. This phase can only prepare feedback;
+        // even a granted late result must ask for a new send intent on a current foreground screen.
+        if (!permissionOnly) finish();
+      } else {
+        const present = pendingFeedback;
+        pendingFeedback = null;
+        present?.();
+      }
     });
-  }, [currentLocationAvailable, runCurrentLocationSend]);
+    registerCleanup(() => appStateSubscription.remove());
+    registerCleanup(subscribeRealtimeGenerationInvalidation(accountLease.generation, finish));
+    registerCleanup(
+      useSessionStore.subscribe(() => {
+        if (!current()) finish();
+      }),
+    );
+    if (!foreground()) finish();
+    else confirm(prepare);
+  }, [accountLease, currentLocationAvailable, guid]);
 
   // Only let the KeyboardAvoidingView pad WHILE the keyboard is up, so it can't leave a residual
   // gap under the composer after a show/hide cycle (Android edge-to-edge). Same fix as the inbox.

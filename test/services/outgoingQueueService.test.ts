@@ -9,6 +9,7 @@ import {
   applyServerSendError,
   claimFailedOutgoingForRetry,
   getChatIdByGuid,
+  imessagePlainTextQueueState,
   insertOutgoingAttachment,
   insertOutgoingContact,
   insertOutgoingReaction,
@@ -344,6 +345,285 @@ describe('outgoingBackoffMs', () => {
 });
 
 describe('runOutgoingQueue', () => {
+  it('consumes the narrow retry proof before POST, restores it only for exact unavailable, and retires other uncertainty', async () => {
+    const { db, raw } = await createTestDb();
+    const chatGuid = 'any;-;+15551234567';
+    const tempGuid = 'temp-plain-retry';
+    await seedChat(db, chatGuid);
+    await insertOutgoingText(db, {
+      tempGuid,
+      chatGuid,
+      text: 'one certified retry',
+      now: 1_000,
+      imessagePlainTextV1: true,
+    });
+    const queued = raw
+      .prepare('SELECT payload FROM outgoing_queue WHERE temp_guid = ?')
+      .get(tempGuid) as { payload: string };
+    raw
+      .prepare(
+        `UPDATE outgoing_queue
+            SET payload = ?, attempts = 1, next_retry_at = 0
+          WHERE temp_guid = ?`,
+      )
+      .run(
+        JSON.stringify({
+          ...(JSON.parse(queued.payload) as Record<string, unknown>),
+          imessagePlainTextRetrySafeV1: true,
+        }),
+        tempGuid,
+      );
+    raw
+      .prepare("UPDATE messages SET send_state = 'error', error = 503 WHERE guid = ?")
+      .run(tempGuid);
+
+    let calls = 0;
+    const http = fakeHttp(async () => {
+      calls += 1;
+      const inFlight = raw
+        .prepare('SELECT payload FROM outgoing_queue WHERE temp_guid = ?')
+        .get(tempGuid) as { payload: string };
+      expect(JSON.parse(inFlight.payload)).toMatchObject({ imessagePlainTextV1: true });
+      expect(JSON.parse(inFlight.payload)).not.toHaveProperty('imessagePlainTextRetrySafeV1');
+      if (calls === 1) {
+        throw ApiError.fromStatus(
+          503,
+          'helper unavailable',
+          undefined,
+          'imessage_plain_text_unavailable',
+        );
+      }
+      throw ApiError.fromStatus(
+        503,
+        'settlement unavailable',
+        undefined,
+        'idempotency_persistence_unavailable',
+      );
+    });
+    const run = (now: number, available = true) =>
+      runOutgoingQueue(
+        db,
+        http,
+        noAttachmentIo,
+        now,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        () => available,
+      );
+
+    await expect(run(1_500_000, false)).resolves.toEqual({ eligible: 0, sent: 0 });
+    expect(calls).toBe(0);
+    expect(
+      JSON.parse(
+        (raw.prepare('SELECT payload FROM outgoing_queue').get() as { payload: string }).payload,
+      ),
+    ).toMatchObject({
+      imessagePlainTextRetrySafeV1: true,
+    });
+    await expect(run(2_000_000)).resolves.toEqual({ eligible: 1, sent: 0 });
+    const retryable = raw.prepare('SELECT attempts, payload FROM outgoing_queue').get() as {
+      attempts: number;
+      payload: string;
+    };
+    expect(retryable.attempts).toBe(2);
+    expect(JSON.parse(retryable.payload)).toMatchObject({
+      imessagePlainTextV1: true,
+      imessagePlainTextRetrySafeV1: true,
+    });
+
+    await expect(run(3_000_000)).resolves.toEqual({ eligible: 1, sent: 0 });
+    const retired = raw.prepare('SELECT attempts, payload FROM outgoing_queue').get() as {
+      attempts: number;
+      payload: string;
+    };
+    expect(retired.attempts).toBe(OUTGOING_MAX_ATTEMPTS);
+    expect(JSON.parse(retired.payload)).toMatchObject({ imessagePlainTextV1: true });
+    expect(JSON.parse(retired.payload)).not.toHaveProperty('imessagePlainTextRetrySafeV1');
+    await expect(run(4_000_000)).resolves.toEqual({ eligible: 0, sent: 0 });
+    expect(calls).toBe(2);
+  });
+
+  it('retires interrupted or corrupt narrow markers without downgrading to AppleScript', async () => {
+    const { db, raw } = await createTestDb();
+    const chatGuid = 'iMessage;-;+15551234567';
+    await seedChat(db, chatGuid);
+    const corruptions: Array<[string, Record<string, unknown>]> = [
+      ['temp-plain-interrupted', { imessagePlainTextV1: true }],
+      ['temp-plain-false', { imessagePlainTextV1: false }],
+      ['temp-plain-string', { imessagePlainTextV1: 'true' }],
+      ['temp-plain-stray-proof', { imessagePlainTextRetrySafeV1: true }],
+      ['temp-plain-numeric', { imessagePlainTextV1: 1, imessagePlainTextRetrySafeV1: 1 }],
+      ['temp-plain-proof-numeric', { imessagePlainTextV1: true, imessagePlainTextRetrySafeV1: 1 }],
+      ...Object.entries({
+        subject: 'must retain subject',
+        effectId: 'com.apple.messages.effect.CKConfettiEffect',
+        mentions: [],
+        textFormatting: [],
+        imessageEffectV1: true,
+        imessageMentionV1: true,
+        imessageFormattedV1: true,
+        unexpected: true,
+      }).map(([key, value]): [string, Record<string, unknown>] => [
+        `temp-plain-conflict-${key}`,
+        {
+          imessagePlainTextV1: true,
+          imessagePlainTextRetrySafeV1: true,
+          [key]: value,
+        },
+      ]),
+    ];
+    expect(
+      imessagePlainTextQueueState(
+        'contact',
+        JSON.stringify({
+          message: 'wrong kind',
+          imessagePlainTextV1: true,
+          imessagePlainTextRetrySafeV1: true,
+        }),
+      ),
+    ).toBe('unsafe');
+    for (const [tempGuid, marker] of corruptions) {
+      await insertOutgoingText(db, { tempGuid, chatGuid, text: 'must not replay', now: 1_000 });
+      const queued = raw
+        .prepare('SELECT payload FROM outgoing_queue WHERE temp_guid = ?')
+        .get(tempGuid) as { payload: string };
+      raw
+        .prepare(
+          `UPDATE outgoing_queue
+              SET payload = ?, attempts = 1, next_retry_at = 0
+            WHERE temp_guid = ?`,
+        )
+        .run(JSON.stringify({ ...(JSON.parse(queued.payload) as object), ...marker }), tempGuid);
+      raw
+        .prepare("UPDATE messages SET send_state = 'error', error = 500 WHERE guid = ?")
+        .run(tempGuid);
+    }
+
+    const request = jest.fn(async () => {
+      throw new Error('unexpected HTTP request');
+    });
+    await expect(
+      runOutgoingQueue(
+        db,
+        fakeHttp(request),
+        noAttachmentIo,
+        2_000_000,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        () => false,
+      ),
+    ).resolves.toEqual({ eligible: corruptions.length, sent: 0 });
+    expect(request).not.toHaveBeenCalled();
+    for (const [tempGuid] of corruptions) {
+      expect(attemptsOf(raw, tempGuid)).toBe(OUTGOING_MAX_ATTEMPTS);
+      expect(errorOf(raw, tempGuid)).toBe(ClientErrorCode.attachmentDeliveryUnconfirmed);
+    }
+  });
+
+  it('does not reuse a listed retry proof after another drain consumed and retired it', async () => {
+    const { db, raw } = await createTestDb();
+    const chatGuid = 'any;-;+15551234567';
+    await seedChat(db, chatGuid);
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-blocking-first',
+      chatGuid,
+      text: 'first',
+      now: 1_000,
+    });
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-plain-stale-proof',
+      chatGuid,
+      text: 'one certified attempt',
+      now: 2_000,
+      imessagePlainTextV1: true,
+    });
+    const queued = raw
+      .prepare('SELECT payload FROM outgoing_queue WHERE temp_guid = ?')
+      .get('temp-plain-stale-proof') as { payload: string };
+    raw.prepare('UPDATE outgoing_queue SET payload = ? WHERE temp_guid = ?').run(
+      JSON.stringify({
+        ...(JSON.parse(queued.payload) as object),
+        imessagePlainTextRetrySafeV1: true,
+      }),
+      'temp-plain-stale-proof',
+    );
+    raw.prepare('UPDATE outgoing_queue SET attempts = 1, next_retry_at = 0').run();
+    raw.prepare("UPDATE messages SET send_state = 'error', error = 500").run();
+
+    let entered!: () => void;
+    let release!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const request = jest.fn(async (json: unknown) => {
+      const payload = json as { tempGuid: string };
+      if (payload.tempGuid === 'temp-blocking-first') {
+        entered();
+        await blocked;
+        return { guid: 'real-blocking-first' };
+      }
+      throw ApiError.fromStatus(
+        409,
+        'unknown delivery outcome',
+        undefined,
+        'imessage_plain_text_outcome_unknown',
+      );
+    });
+    let now = 2_000_000;
+    const dateNow = jest.spyOn(Date, 'now').mockImplementation(() => now);
+    const run = () =>
+      runOutgoingQueue(
+        db,
+        fakeHttp(request),
+        noAttachmentIo,
+        now,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        () => true,
+      );
+    const first = run();
+    try {
+      await started;
+      await expect(run()).resolves.toEqual({ eligible: 1, sent: 0 });
+      expect(attemptsOf(raw, 'temp-plain-stale-proof')).toBe(OUTGOING_MAX_ATTEMPTS);
+      now += 120_001;
+      release();
+      await expect(first).resolves.toEqual({ eligible: 2, sent: 1 });
+      expect(request).toHaveBeenCalledTimes(2);
+      expect(attemptsOf(raw, 'temp-plain-stale-proof')).toBe(OUTGOING_MAX_ATTEMPTS);
+      expect(
+        JSON.parse(
+          (raw.prepare('SELECT payload FROM outgoing_queue').get() as { payload: string }).payload,
+        ),
+      ).not.toHaveProperty('imessagePlainTextRetrySafeV1');
+    } finally {
+      release();
+      await first;
+      dateNow.mockRestore();
+    }
+  });
+
   it('skips disabled RCS work before claim and still sends a later AppleScript row', async () => {
     const { db, raw } = await createTestDb();
     const rcsGuid = 'RCS;-;disabled-recovery-thread';

@@ -10,13 +10,18 @@ import notifyKit, {
 } from 'react-native-notify-kit';
 import type {
   DisplayedNotification,
-  Event,
-  EventDetail,
-  InitialNotification,
+  Event as NativeEvent,
+  EventDetail as NativeEventDetail,
+  InitialNotification as NativeInitialNotification,
   Notification,
   TimestampTrigger,
   TriggerNotification,
 } from 'react-native-notify-kit';
+
+/** The pinned Android patch adds receipt identity outside notification.data. */
+type EventDetail = NativeEventDetail & { pressOccurrenceId?: string };
+type Event = Omit<NativeEvent, 'detail'> & { detail: EventDetail };
+type InitialNotification = NativeInitialNotification & { pressOccurrenceId?: string };
 
 /**
  * The sole production boundary around react-native-notify-kit.
@@ -51,16 +56,16 @@ export const nativeNotificationAdapter = {
     notifyKit.getChannels(...args),
   getDisplayedNotifications: (...args: Parameters<typeof notifyKit.getDisplayedNotifications>) =>
     notifyKit.getDisplayedNotifications(...args),
-  getInitialNotification: (...args: Parameters<typeof notifyKit.getInitialNotification>) =>
-    notifyKit.getInitialNotification(...args),
+  getInitialNotification: (
+    ...args: Parameters<typeof notifyKit.getInitialNotification>
+  ): Promise<InitialNotification | null> => notifyKit.getInitialNotification(...args),
   getNotificationSettings: (...args: Parameters<typeof notifyKit.getNotificationSettings>) =>
     notifyKit.getNotificationSettings(...args),
   getTriggerNotifications: (...args: Parameters<typeof notifyKit.getTriggerNotifications>) =>
     notifyKit.getTriggerNotifications(...args),
-  onBackgroundEvent: (...args: Parameters<typeof notifyKit.onBackgroundEvent>) =>
-    notifyKit.onBackgroundEvent(...args),
-  onForegroundEvent: (...args: Parameters<typeof notifyKit.onForegroundEvent>) =>
-    notifyKit.onForegroundEvent(...args),
+  onBackgroundEvent: (observer: (event: Event) => Promise<void>) =>
+    notifyKit.onBackgroundEvent(observer),
+  onForegroundEvent: (observer: (event: Event) => void) => notifyKit.onForegroundEvent(observer),
   openNotificationSettings: (...args: Parameters<typeof notifyKit.openNotificationSettings>) =>
     notifyKit.openNotificationSettings(...args),
   requestPermission: (...args: Parameters<typeof notifyKit.requestPermission>) =>

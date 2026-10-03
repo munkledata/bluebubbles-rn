@@ -3,7 +3,15 @@ import {
   captureRealtimeDeliveryLease,
   type RealtimeDeliveryLease,
 } from '../realtime/deliveryCoordinator';
-import { stashPendingNotification } from './pendingNav';
+import {
+  claimNotificationTap,
+  isCurrentNotificationTap,
+  reserveNotificationTap,
+  settleNotificationTap,
+  stashPendingNotification,
+  type NotificationPressOccurrence,
+  type NotificationTapReservation,
+} from './pendingNav';
 import { resolveNotificationData } from './notificationRouting';
 
 /**
@@ -95,11 +103,12 @@ export async function openFromNotification(
   data: Record<string, unknown> | undefined,
   navigation: NotificationNavigation,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+  isCurrentTap: () => boolean = () => true,
 ): Promise<boolean> {
-  if (!accountLease.isCurrent()) return true;
+  if (!accountLease.isCurrent() || !isCurrentTap()) return true;
   try {
     const resolved = await resolveNotificationData(data);
-    if (!accountLease.isCurrent()) return true;
+    if (!accountLease.isCurrent() || !isCurrentTap()) return true;
     if (resolved?.inbox === '1') {
       navigation.openInbox();
       return true;
@@ -108,7 +117,7 @@ export async function openFromNotification(
     if (target) navigation.openChat(chatDeepLink(target));
     return true;
   } catch (error) {
-    if (!accountLease.isCurrent()) return true;
+    if (!accountLease.isCurrent() || !isCurrentTap()) return true;
     // New native payloads need the encrypted DB to resolve local keys. A foreground caller invokes
     // this fire-and-forget, so contain a failed DB open here rather than creating an unhandled
     // rejection. Returning false lets the one-shot tap drain preserve its payload for a later retry.
@@ -118,13 +127,34 @@ export async function openFromNotification(
 }
 
 /** Minimal structural shape of a notify-kit InitialNotification / EventDetail read here. */
-export interface TappedNotification {
-  notification?: { data?: Record<string, unknown> };
-  /**
-   * The press action the user interacted with. Present on a genuine press event and ABSENT on
-   * Android's launch-intent echo — the discriminator `drainNotificationTap` relies on.
-   */
-  pressAction?: { id?: string };
+export type TappedNotification = NotificationPressOccurrence;
+
+async function openReservedNotificationTap(
+  tap: NotificationTapReservation,
+  navigation: NotificationNavigation,
+): Promise<{ claimed: boolean; handled: boolean }> {
+  if (!claimNotificationTap(tap)) return { claimed: false, handled: true };
+  let handled = false;
+  try {
+    handled = await openFromNotification(tap.data, navigation, tap.accountLease, () =>
+      isCurrentNotificationTap(tap),
+    );
+    return { claimed: true, handled };
+  } finally {
+    settleNotificationTap(tap, handled);
+  }
+}
+
+/** Foreground presses share the exact same occurrence claim as initial/background delivery. */
+export async function openNotificationPress(
+  detail: TappedNotification,
+  navigation: NotificationNavigation,
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<void> {
+  const tap = reserveNotificationTap(detail, accountLease);
+  if (!tap) return;
+  const result = await openReservedNotificationTap(tap, navigation);
+  if (!result.handled && accountLease.isCurrent()) stashPendingNotification(tap);
 }
 
 /**
@@ -133,9 +163,9 @@ export interface TappedNotification {
  * `getInitialNotification()` is not read-once on Android. It pops the sticky press event, and when
  * there is none it falls back to `activity.getIntent()` — which still carries the `notification`
  * extra that the tap put there, for the Activity's ENTIRE lifetime (RN never calls `setIntent`).
- * The sticky event's bundle carries the `pressAction` alongside the notification; the launch-intent
- * fallback copies only `notification`. So a missing pressAction means "you have already seen this
- * one", and every notification this app posts sets a `pressAction` on its body tap.
+ * The sticky bundle carries `pressAction`; the fallback copies only `notification`. This rejects
+ * the fallback, but is NOT sufficient for one-shot delivery: a late genuine channel copy still
+ * has pressAction. The shared native occurrence reservation below rejects that duplicate.
  */
 function isRealPress(initial: TappedNotification | null): boolean {
   return !!initial?.pressAction;
@@ -150,38 +180,36 @@ function isRealPress(initial: TappedNotification | null): boolean {
  *  - the `pendingNav` stash set by `onBackgroundEvent` (the deterministic same-JS-context backstop
  *    for a background-alive press, in case the sticky event isn't delivered).
  *
- * The pending stash is destructively read (takePending empties the slot), and the launch event is
- * accepted only when it is a genuine press (see `isRealPress`) — Android keeps re-serving the
- * launching notification from the Activity's intent, which would otherwise TRAP the user:
- * cold-start into chat A, press Back, and the next drain pushes straight back into A. Then a SINGLE
- * `openFromNotification` runs — the two channels describe the same press, so navigating once
- * (preferring the initial's data) avoids pushing the chat twice onto the stack. A failed route lookup
- * restores that one chosen payload to the pending slot; a successful open consumes it permanently.
+ * The native receiver gives both copies one process-epoch/sequence identity. A copy delivered
+ * after a successful open cannot be reserved again, even if it still carries a pressAction. A
+ * newer physical press supersedes old held work. Preparing the background copy does not claim
+ * navigation; the first active caller does. A failed lookup releases that claim and preserves the
+ * same leased reservation for retry. Tokenless Activity-intent echoes are never navigation.
  * Navigation (or restoration) happens BEFORE best-effort press cleanup, so a cleanup failure cannot
  * cost the one-shot tap. Every dependency is injected, so this is unit-testable without notifee or
  * expo-router.
  */
 export async function drainNotificationTap<T extends TappedNotification>(
   getInitial: () => Promise<T | null>,
-  takePending: () => Record<string, unknown> | null,
+  takePending: () => NotificationTapReservation | null,
   runPressSideEffects: (detail: T) => void | Promise<void>,
   navigation: NotificationNavigation,
-  restorePending: (data: Record<string, unknown>) => void = stashPendingNotification,
+  restorePending: (tap: NotificationTapReservation) => void = stashPendingNotification,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
   if (!accountLease.isCurrent()) return;
   const raw = await getInitial();
   if (!accountLease.isCurrent()) return;
   const initial = isRealPress(raw) ? raw : null;
+  const initialTap = initial ? reserveNotificationTap(initial, accountLease) : null;
   const pending = takePending();
-  const tapData = initial?.notification?.data ?? pending ?? undefined;
-  const handled = await openFromNotification(tapData, navigation, accountLease);
+  const tap = initialTap ?? pending;
+  if (!tap) return;
+  const result = await openReservedNotificationTap(tap, navigation);
   if (!accountLease.isCurrent()) return;
-  // Both native launch state and the pending slot are destructive reads. Preserve ONE copy when
-  // the encrypted route lookup failed so the next foreground drain can retry instead of silently
-  // losing the tap. When both sources described the same press, `tapData` already chose one.
-  if (!handled && tapData) restorePending(tapData);
+  if (!result.claimed) return;
+  if (!result.handled) restorePending(tap);
   // A cleanup failure is still reported to the layout-level task boundary, but only after the
   // one-shot route either opened successfully or was preserved for a later retry.
-  if (initial && accountLease.isCurrent()) await runPressSideEffects(initial);
+  if (initial && initialTap === tap && accountLease.isCurrent()) await runPressSideEffects(initial);
 }

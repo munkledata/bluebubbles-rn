@@ -56,6 +56,7 @@ describe('migration 0047_message_retraction_topology', () => {
         '0050_message_identity_owner_scope',
         '0051_handle_color_backup_index',
         '0052_chat_history_deletion_boundary',
+        '0053_versioned_server_message_state',
       ]);
       expect(
         raw

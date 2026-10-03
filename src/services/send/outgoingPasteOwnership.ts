@@ -1,8 +1,16 @@
 import { Directory, File, Paths } from 'expo-file-system';
-import { adoptNativePastedAttachment, adoptNativeSharedAttachment } from '@native/boundedDownload';
+import {
+  adoptNativePastedAttachment,
+  adoptNativeSharedAttachment,
+  hashNativeAttachmentCacheGuid,
+} from '@native/boundedDownload';
 import type { AttachmentCacheReservationScope } from '../download/attachmentCacheCoordinator';
 import { attachmentCacheCoordinator } from '../download/attachmentCacheCoordinator';
-import { encodedMediaPathSegment, mediaGenerationPathSegment } from '../download/pathSafety';
+import {
+  attachmentIdentityPathSegment,
+  encodedMediaPathSegment,
+  mediaGenerationPathSegment,
+} from '../download/pathSafety';
 import type { AttachmentOwnershipPreparer } from './sendAttachmentService';
 
 const MAX_PASTED_ATTACHMENT_BYTES = 128 * 1024 * 1024;
@@ -19,7 +27,7 @@ function outgoingPasteDestination(
   const directory = new Directory(
     Paths.document,
     'attachments',
-    encodedMediaPathSegment(attachmentGuid),
+    attachmentIdentityPathSegment(attachmentGuid, hashNativeAttachmentCacheGuid),
     mediaGenerationPathSegment(generation),
   );
   return new File(directory, encodedMediaPathSegment(transferName)).uri;

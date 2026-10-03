@@ -8,6 +8,8 @@ import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { runInNewContext } from 'node:vm';
+import ts from 'typescript';
 
 import {
   FORBIDDEN_COMMUNITY_WEBVIEW_DEX_MARKERS,
@@ -322,10 +324,10 @@ const redirectContainmentPackageJson = {
   main: 'index.js',
   scripts: { postinstall: 'patch-package' },
   dependencies: {
-    'expo-background-task': '57.0.16',
-    'expo-file-system': '57.0.6',
-    'expo-router': '~57.0.20',
-    'expo-task-manager': '57.0.16',
+    'expo-background-task': '57.0.21',
+    'expo-file-system': '57.0.7',
+    'expo-router': '~57.0.24',
+    'expo-task-manager': '57.0.21',
     'react-native-screens': '~4.26.0',
   },
   devDependencies: { 'patch-package': '8.0.1' },
@@ -346,20 +348,20 @@ const redirectContainmentPackageLock = {
   packages: {
     '': {
       dependencies: {
-        'expo-background-task': '57.0.16',
-        'expo-file-system': '57.0.6',
-        'expo-router': '~57.0.20',
-        'expo-task-manager': '57.0.16',
+        'expo-background-task': '57.0.21',
+        'expo-file-system': '57.0.7',
+        'expo-router': '~57.0.24',
+        'expo-task-manager': '57.0.21',
         'react-native-screens': '~4.26.0',
       },
       devDependencies: { 'patch-package': '8.0.1' },
     },
-    'node_modules/expo-background-task': { version: '57.0.16' },
-    'node_modules/expo-file-system': { version: '57.0.6' },
-    'node_modules/expo-router': { version: '57.0.20' },
-    'node_modules/expo-task-manager': { version: '57.0.16' },
+    'node_modules/expo-background-task': { version: '57.0.21' },
+    'node_modules/expo-file-system': { version: '57.0.7' },
+    'node_modules/expo-router': { version: '57.0.24' },
+    'node_modules/expo-task-manager': { version: '57.0.21' },
     'node_modules/react-native-screens': { version: '4.26.2' },
-    'node_modules/unimodules-app-loader': { version: '57.0.1' },
+    'node_modules/unimodules-app-loader': { version: '57.0.2' },
     'node_modules/patch-package': { version: '8.0.1' },
   },
 };
@@ -461,7 +463,15 @@ catch (e: CancellationException) {
 doWork: Worker failed; requesting retry
 return Result.retry()
 `;
+const taskManagerKeeperSource = `
+if (Platform.OS === 'android') {
+  AppRegistry.registerHeadlessTask('expo-task-manager', () => () => new Promise<void>(() => {}));
+}
+`;
+const taskManagerKeeperRuntimeSource = taskManagerKeeperSource.replace('<void>', '');
 const taskManagerSettlementPatchSource = `
+diff --git a/node_modules/expo-task-manager/android/build.gradle b/node_modules/expo-task-manager/android/build.gradle
+diff --git a/node_modules/expo-task-manager/android/src/test/java/expo/modules/taskManager/TaskServiceContextLifetimeTest.java b/node_modules/expo-task-manager/android/src/test/java/expo/modules/taskManager/TaskServiceContextLifetimeTest.java
 diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java
 +        callback.onFinished(Collections.emptyMap());
 diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java
@@ -478,6 +488,18 @@ diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/t
 +  boolean removeEventForAppScopeKey(String appScopeKey, Bundle body);
 diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/BareTasksAndEventsRepository.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/BareTasksAndEventsRepository.java
 diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/ManagedTasksAndEventsRepository.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/ManagedTasksAndEventsRepository.java
+diff --git a/node_modules/expo-task-manager/src/TaskManager.ts b/node_modules/expo-task-manager/src/TaskManager.ts
+${taskManagerKeeperSource
+  .trim()
+  .split('\n')
+  .map((line) => `+${line}`)
+  .join('\n')}
+diff --git a/node_modules/expo-task-manager/build/TaskManager.js b/node_modules/expo-task-manager/build/TaskManager.js
+${taskManagerKeeperRuntimeSource
+  .trim()
+  .split('\n')
+  .map((line) => `+${line}`)
+  .join('\n')}
 `;
 const taskManagerUtilsSource = `
 if (task == null) {
@@ -494,6 +516,13 @@ private static final Map<String, Object> sHeadlessStartTokens = new HashMap<>();
 Task execution body is missing execution info; completing callback with failure.
 Task execution body is missing an event ID; completing callback with failure.
 public void setTaskManager(TaskManagerInterface taskManager, String appScopeKey, String appUrl) {
+  if (taskManager == null) {
+    synchronized (sTaskExecutionLock) {
+      sTaskManagers.remove(appScopeKey);
+      sHeadlessTaskManagers.remove(appScopeKey);
+    }
+    return;
+  }
   final List<Bundle> eventsQueue;
   synchronized (sTaskExecutionLock) {
     taskManagers.put(appScopeKey, new WeakReference<>(taskManager));
@@ -561,6 +590,12 @@ private void finishTaskExecutionWithFailure(String appScopeKey, String eventId, 
   }
 }
 //endregion
+private void invalidateAppRecord(String appScopeKey) {
+  HeadlessAppLoader appLoader = getAppLoader();
+  if (appLoader != null) {
+    appLoader.invalidateApp(appScopeKey);
+  }
+}
 private void invokeStartHeadlessTask(ReactContext reactContext, String appScopeKey, Object headlessStartToken) {
   synchronized (sTaskExecutionLock) {
     if (sHeadlessStartTokens.get(appScopeKey) != headlessStartToken) {
@@ -623,6 +658,8 @@ function taskManagerSettlementInput(overrides = {}) {
     repositorySource: taskManagerRepositorySource,
     bareRepositorySource: taskManagerBareRepositorySource,
     managedRepositorySource: taskManagerManagedRepositorySource,
+    taskManagerSource: taskManagerKeeperSource,
+    taskManagerRuntimeSource: taskManagerKeeperRuntimeSource,
     ...overrides,
   };
 }
@@ -658,6 +695,9 @@ function writeRedirectContainmentFixture(root) {
   mkdirSync(join(root, 'node_modules/expo-router/build/layouts/experimental-stack'), {
     recursive: true,
   });
+  for (const folder of ['src', 'build']) {
+    mkdirSync(join(root, 'node_modules/expo-task-manager', folder), { recursive: true });
+  }
   mkdirSync(
     join(
       root,
@@ -677,18 +717,26 @@ function writeRedirectContainmentFixture(root) {
     join(root, 'android/app/src/main/java/com/bluegreengatorapps/messages/MainActivity.kt'),
     shareMainActivitySource,
   );
-  writeFileSync(join(root, 'patches/expo-file-system+57.0.6.patch'), input.patchSource);
+  writeFileSync(join(root, 'patches/expo-file-system+57.0.7.patch'), input.patchSource);
   writeFileSync(
-    join(root, 'patches/expo-background-task+57.0.16.patch'),
+    join(root, 'patches/expo-background-task+57.0.21.patch'),
     backgroundTaskRetryPatchSource,
   );
   writeFileSync(
-    join(root, 'patches/expo-task-manager+57.0.16.patch'),
+    join(root, 'patches/expo-task-manager+57.0.21.patch'),
     taskManagerSettlementPatchSource,
   );
   writeFileSync(
-    join(root, 'patches/expo-router+57.0.20.patch'),
-    readFileSync(join(ROOT, 'patches/expo-router+57.0.20.patch'), 'utf8'),
+    join(root, 'node_modules/expo-task-manager/src/TaskManager.ts'),
+    taskManagerKeeperSource,
+  );
+  writeFileSync(
+    join(root, 'node_modules/expo-task-manager/build/TaskManager.js'),
+    taskManagerKeeperRuntimeSource,
+  );
+  writeFileSync(
+    join(root, 'patches/expo-router+57.0.24.patch'),
+    readFileSync(join(ROOT, 'patches/expo-router+57.0.24.patch'), 'utf8'),
   );
   writeFileSync(
     join(root, 'patches/react-native-screens+4.26.2.patch'),
@@ -963,7 +1011,7 @@ test('guards the Expo Router predictive-Back bridge against drift', () => {
     packageJson: JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')),
     packageLock: JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8')),
     appConfigSource: readFileSync(join(ROOT, 'app.config.ts'), 'utf8'),
-    patchSource: readFileSync(join(ROOT, 'patches/expo-router+57.0.20.patch'), 'utf8'),
+    patchSource: readFileSync(join(ROOT, 'patches/expo-router+57.0.24.patch'), 'utf8'),
     experimentalStackSource: readFileSync(
       join(
         ROOT,
@@ -1248,7 +1296,7 @@ test('guards the source-built Expo background-task retry bridge against drift', 
     validateExpoBackgroundTaskRetryBridge({
       packageJson: JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')),
       packageLock: JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8')),
-      patchSource: readFileSync(join(ROOT, 'patches/expo-background-task+57.0.16.patch'), 'utf8'),
+      patchSource: readFileSync(join(ROOT, 'patches/expo-background-task+57.0.21.patch'), 'utf8'),
       schedulerSource: readFileSync(
         join(
           ROOT,
@@ -1271,7 +1319,7 @@ test('guards the source-built Expo background-task retry bridge against drift', 
     {
       label: 'dependency pin',
       mutate(input) {
-        input.packageJson.dependencies['expo-background-task'] = '~57.0.16';
+        input.packageJson.dependencies['expo-background-task'] = '~57.0.21';
       },
       error: 'must be pinned exactly',
     },
@@ -1391,13 +1439,56 @@ test('guards the source-built Expo background-task retry bridge against drift', 
   }
 });
 
+test('Expo task-manager keeper waits for native completion without allocating timers', async () => {
+  for (const entry of ['src/TaskManager.ts', 'build/TaskManager.js']) {
+    const source = readFileSync(join(ROOT, 'node_modules/expo-task-manager', entry), 'utf8');
+    const { outputText } = ts.transpileModule(source, {
+      fileName: entry,
+      compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    });
+    for (const os of ['android', 'ios']) {
+      const registrations = [];
+      runInNewContext(outputText, {
+        exports: {},
+        require(name) {
+          if (name === 'expo-modules-core') return { Platform: { OS: os } };
+          if (name === './ExpoTaskManager') return { __esModule: true, default: null };
+          if (name === 'react-native') {
+            return {
+              AppRegistry: {
+                registerHeadlessTask: (key, provider) => registrations.push({ key, provider }),
+              },
+            };
+          }
+          throw new Error(`Unexpected keeper dependency: ${name}`);
+        },
+        setTimeout: () => assert.fail('Keeper must not allocate a timer'),
+        setInterval: () => assert.fail('Keeper must not allocate an interval'),
+      });
+      assert.equal(registrations.length, os === 'android' ? 1 : 0, `${entry}: ${os}`);
+      if (os !== 'android') continue;
+      const [{ key, provider }] = registrations;
+      assert.equal(key, 'expo-task-manager');
+      let automaticallyFinished = false;
+      provider()({}).then(
+        () => {
+          automaticallyFinished = true;
+        },
+        () => assert.fail('Keeper must not reject'),
+      );
+      await new Promise(setImmediate);
+      assert.equal(automaticallyFinished, false, `${entry}: React Native must not finish early`);
+    }
+  }
+});
+
 test('guards Expo task-manager pre-JavaScript failure settlement against drift', () => {
   assert.deepEqual(validateExpoTaskManagerPreJsSettlement(taskManagerSettlementInput()), []);
   assert.deepEqual(
     validateExpoTaskManagerPreJsSettlement({
       packageJson: JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')),
       packageLock: JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8')),
-      patchSource: readFileSync(join(ROOT, 'patches/expo-task-manager+57.0.16.patch'), 'utf8'),
+      patchSource: readFileSync(join(ROOT, 'patches/expo-task-manager+57.0.21.patch'), 'utf8'),
       utilsSource: readFileSync(
         join(
           ROOT,
@@ -1433,6 +1524,14 @@ test('guards Expo task-manager pre-JavaScript failure settlement against drift',
         ),
         'utf8',
       ),
+      taskManagerSource: readFileSync(
+        join(ROOT, 'node_modules/expo-task-manager/src/TaskManager.ts'),
+        'utf8',
+      ),
+      taskManagerRuntimeSource: readFileSync(
+        join(ROOT, 'node_modules/expo-task-manager/build/TaskManager.js'),
+        'utf8',
+      ),
     }),
     [],
   );
@@ -1441,7 +1540,7 @@ test('guards Expo task-manager pre-JavaScript failure settlement against drift',
     {
       label: 'dependency pin',
       mutate(input) {
-        input.packageJson.dependencies['expo-task-manager'] = '~57.0.16';
+        input.packageJson.dependencies['expo-task-manager'] = '~57.0.21';
       },
       error: 'must be pinned exactly',
     },
@@ -1470,7 +1569,27 @@ test('guards Expo task-manager pre-JavaScript failure settlement against drift',
       mutate(input) {
         input.packageLock.packages['node_modules/unimodules-app-loader'].version = '57.0.0';
       },
-      error: 'must resolve unimodules-app-loader 57.0.1',
+      error: 'must resolve unimodules-app-loader 57.0.2',
+    },
+    {
+      label: 'headless manager retained after context destruction',
+      mutate(input) {
+        input.serviceSource = input.serviceSource.replace(
+          'sHeadlessTaskManagers.remove(appScopeKey);',
+          '',
+        );
+      },
+      error: 'must remove both managers at context destruction',
+    },
+    {
+      label: 'headless manager removed before context destruction',
+      mutate(input) {
+        input.serviceSource = input.serviceSource.replace(
+          'appLoader.invalidateApp(appScopeKey);',
+          'appLoader.invalidateApp(appScopeKey); sHeadlessTaskManagers.remove(appScopeKey);',
+        );
+      },
+      error: 'must remove both managers at context destruction',
     },
     {
       label: 'patch source scope',
@@ -1478,7 +1597,51 @@ test('guards Expo task-manager pre-JavaScript failure settlement against drift',
         input.patchSource +=
           '\ndiff --git a/node_modules/expo-task-manager/android/build/generated.txt b/node_modules/expo-task-manager/android/build/generated.txt\n';
       },
-      error: 'must patch only the five reviewed source files',
+      error: 'must patch only the nine reviewed source/test files',
+    },
+    {
+      label: 'source keeper finishes early',
+      mutate(input) {
+        input.taskManagerSource = input.taskManagerSource.replace(
+          '() => () => new Promise<void>(() => {})',
+          '() => async () => {}',
+        );
+      },
+      error: 'must retain one Android timer keeper until native completion',
+    },
+    {
+      label: 'shipped runtime keeper finishes early',
+      mutate(input) {
+        input.taskManagerRuntimeSource = input.taskManagerRuntimeSource.replace(
+          '() => () => new Promise(() => {})',
+          '() => async () => {}',
+        );
+      },
+      error: 'must retain one Android timer keeper until native completion',
+    },
+    {
+      label: 'runtime correction absent from durable patch',
+      mutate(input) {
+        input.patchSource = input.patchSource.replace(
+          '() => () => new Promise(() => {})',
+          '() => async () => {}',
+        );
+      },
+      error: 'must retain one Android timer keeper until native completion',
+    },
+    {
+      label: 'commented-out keeper',
+      mutate(input) {
+        input.taskManagerSource = `/* ${input.taskManagerSource} */`;
+      },
+      error: 'must retain one Android timer keeper until native completion',
+    },
+    {
+      label: 'truncated installed keeper block',
+      mutate(input) {
+        input.taskManagerSource = input.taskManagerSource.trimEnd().slice(0, -1);
+      },
+      error: 'must retain one Android timer keeper until native completion',
     },
     {
       label: 'durable patch',
@@ -1655,21 +1818,21 @@ test('rejects drift anywhere in the Expo file-system redirect containment chain'
     {
       label: 'dependency pin',
       mutate(input) {
-        input.packageJson.dependencies['expo-file-system'] = '~57.0.6';
+        input.packageJson.dependencies['expo-file-system'] = '~57.0.7';
       },
       error: 'expo-file-system must be pinned exactly',
     },
     {
       label: 'lockfile resolution',
       mutate(input) {
-        input.packageLock.packages['node_modules/expo-file-system'].version = '57.0.7';
+        input.packageLock.packages['node_modules/expo-file-system'].version = '57.0.6';
       },
       error: 'package-lock must resolve expo-file-system',
     },
     {
       label: 'lockfile root dependency pin',
       mutate(input) {
-        input.packageLock.packages[''].dependencies['expo-file-system'] = '~57.0.6';
+        input.packageLock.packages[''].dependencies['expo-file-system'] = '~57.0.7';
       },
       error: 'package-lock root must pin expo-file-system exactly',
     },

@@ -1,8 +1,47 @@
 # App ↔ Server Parity
 
+## Versioned provider recovery — 2026-10-03 candidate
+
+`POST /sync/message-state` version 1 and provider-scoped `/sync/repair-snapshot` version 2
+separate Apple Messages history (including Apple SMS) from RCS. The client accepts the new
+protocol only with all advertised capabilities and an explicit provider identity. A complete,
+finished Apple snapshot installs its exact signed cursor and sequence in the same local transaction
+as the rebuilt message marker. Its full history crawl is independent of the initial-sync message cap.
+RCS remains an additive refresh, capped at 100 messages per chat per run; it does not authorize
+Apple absence cleanup. A competing local writer invalidates the repair's existing write fence.
+
+Server deletion/restore state has its own table. Local and historical ambiguous deletion receipts,
+chat-history deletion boundaries, outgoing ownership, and user-hidden chats retain their protections.
+Exact owners retained by local deletion receipts or canonical outgoing aliases remain binding after
+message eviction; conflicting server transitions, hydration, and snapshot owner binding are rejected.
+Snapshot absence produces a reversible server hide, not a local deletion receipt. A later versioned
+restore or successful scoped snapshot can reveal that row. Ordinary delayed message ingestion cannot
+clear a current snapshot hide. An absent GUID that the server never recorded in its transition ledger
+may therefore require another scoped repair when it reappears.
+
+Realtime sequences order each message but never advance the REST cursor. REST commits each bounded
+500-event page and its cursor together. All page events are validated, then only each message's final
+state is projected, avoiding intermediate restoration when the same page ends in deletion. Earlier
+exact chat ownership is preserved, and conflicting owners invalidate the page before any writes.
+Foreground sync drains the captured boundary up to 1,000 pages;
+headless recovery retains a five-page and time budget. Reaching either page cap with work remaining
+reports incomplete progress and retains the cursor for the next refresh, rather than reporting success.
+Exact restored-message hydration uses
+`POST /sync/message-state/message`; a missing current message requests another scoped repair without
+revealing cached content or advancing that page. Proven ownership and payload may commit before the
+page finishes, while transition sequence/kind and the REST cursor remain in its final transaction.
+Old provider/ledger state is retired or rebased in
+bounded transactions during successful repair. Legacy delete events cannot supersede the new authority.
+
+This section describes the implementation candidate and host-test contract. It does not claim physical
+Android process-death, SQLCipher, or packaged-server acceptance.
+The development-only database self-tests and native result validators target migration 53; their
+historical migration prefixes remain unchanged. Their previous migration-52 pins rejected the newer
+test database, but did not affect ordinary production startup.
+
 _Initial baseline generated 2026-07-01 from a bidirectional API/feature reconciliation between the RN app (`~/github/bluebubbles-rn`) and the Gator server (`~/github/BB/bluebubbles-server`, then-current `master`). Later dated annotations record subsequent verification and closure; counts and `CONFIRMED` labels without a newer date describe that original baseline, not a fresh whole-repository scan._
 
-> **Current-client boundary (updated 2026-09-25; `FP-006`):** The current Gator client retires
+> **Current-client boundary (updated 2026-09-30; `FP-006`):** The current Gator client retires
 > broad helper-dependent targeted iMessage actions and FaceTime paths. Advertised or stale broad helper
 > flags are normalized to unavailable and cannot restore UI, notification actions, or network calls.
 > New chat remains one-to-one: RCS requires its own capability. Text-only iMessage creation
@@ -22,8 +61,10 @@ _Initial baseline generated 2026-07-01 from a bidirectional API/feature reconcil
 > retains only reviewed classic part-zero reactions. Separate `supports_imessage_edit` and
 > `supports_imessage_unsend` gates permit only a nonblank plain-text edit or retraction of exact
 > text part zero in that proven one-to-one chat; broad or generic edit/unsend authority remains
-> retired. Their app, server, and helper paths are source-complete, but packaged-Mac and physical
-> Samsung live acceptance remains open under `FEAT-03B`/`POST-01`. Read, unread, and delete actions are
+> retired. Their app, server, and helper paths are source-complete. The server's dated local-Mac /
+> Samsung Play v79 Edit and Unsend checks passed; the newer plain-send identity repair still needs
+> its matching Android update and bounded send/reopen/Unsend acceptance under `FEAT-03B`/`POST-01`.
+> Read, unread, and ordinary Delete actions are
 > device-local. There is no backward-compatibility promise for the retired Flutter client or older
 > BlueBubbles server/helper contracts. Dated sections below remain historical
 > evidence unless they explicitly say they describe the current client.
@@ -41,6 +82,31 @@ _Initial baseline generated 2026-07-01 from a bidirectional API/feature reconcil
 
 **Original 2026-07-01 baseline:** 44 surface items matched on both sides (the core messaging, sync,
 group management, FaceTime, Find My, stats, and restart/logs flows all lined up).
+
+## Source-aligned (2026-10-03) — socket authentication recovery
+
+The coordinated server repair rejects namespace authentication before publishing a socket connection or dispatching
+application operations. Its Socket.IO `connect_error.data.code` contract is finite:
+
+| Code                | Current client behavior                                                                                                                                                               |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AUTH_REQUIRED`     | Error state; no automatic retry in this socket lifecycle. Explicit manual Retry creates a new lifecycle.                                                                              |
+| `AUTH_UNAVAILABLE`  | Retry the same trusted origin and credential snapshot after a capped, jittered 1–60 second exponential delay.                                                                         |
+| `AUTH_RATE_LIMITED` | Wait a conservative 60 seconds before automatic retry. The current server sends `retryAfterMs: 60000`; this client pins that agreed floor and does not parse arbitrary future delays. |
+
+Unknown inactive-namespace failures stop automatic retries. Human-readable messages are not parsed for control
+flow. Transport errors for which `socket.active` remains true retain Socket.IO's own retry path. A namespace
+rejection makes it false and requires the app-level retry path above. Timer identity, socket lifecycle, and account
+lease checks prevent duplicate or stale callbacks from reopening a replaced account or shortening a rate-limit wait.
+
+The client sends no application operation automatically on its first socket connection. Handshake authentication
+continues to use `auth.password` for shared passwords or `auth.token` for scoped device credentials, never query
+parameters. Ordinary HTTP onboarding and socket verification are separate operations; successful HTTP onboarding
+does not itself prove a live socket connection.
+
+Client source/focused checks pass (3 socket suites / 46 tests), and the coordinating server session reports passing
+real-listener wire tests. Paired app/server device evidence remains pending in the
+[October 3 remediation report](./REVIEW_REMEDIATION_2026-10-03.md). This is not a release or device acceptance claim.
 
 ## 🟡 Source-aligned (2026-09-07) — atomic full-repair snapshot (`RECOVERY-01`)
 
@@ -60,7 +126,7 @@ a complete repair. This is host/source alignment only; the authoritative work pl
 `RECOVERY-01` open for a matching packaged deployment and real Mac/Android cancellation,
 session-switch, RCS-refusal, and final database comparison evidence.
 
-## 🟡 Source-aligned with local dev-client proof (updated 2026-09-28) — multipart topology and combined sends (`FEAT-03`)
+## 🟡 Source-aligned with dated local-Mac / Samsung proof (updated 2026-09-30) — multipart topology and combined sends (`FEAT-03`)
 
 The app and Gator server now share a bounded normalized per-part topology and exact received-message
 reply/reaction part identity. Migration `0047_message_retraction_topology` persists the topology and
@@ -92,10 +158,14 @@ requires exact acknowledgement, and preserves an uncertain outcome rather than r
 The dedicated formatted-message contract is also source-aligned: the app calls authenticated
 `POST /api/v1/message/formatted` only under `supports_imessage_formatted_messages`, for one proven
 existing one-to-one iMessage chat and 1–64 exact selected ranges using only bold, italic, underline,
-and strikethrough. The helper action is present in isolated commit `33c3d9c...` and canonical local
-commit `844219d`, but production `enableIMessageFormattedMessages` remains false and the
-installed/admitted `6ac7253...` helper lacks that action. This is not artifact admission or live
-Mac/Samsung proof, and it does not revive the retired generic attributed-body sender. RCS text plus
+and strikethrough. The helper action originated in isolated commit `33c3d9c...` and canonical local
+commit `844219d...`; it is now retained in the signed, repository-admitted `49514a1...` helper.
+The active Gator server source enables its dedicated gate only with artifact admission and live
+helper authentication. The earlier disabled-gate / `6ac7253...` checkpoint is superseded. Server
+`POST-01` records an outbound four-style message with helper `859636d...`, followed by a canonical
+serialization fix and a fresh Mac-originated Samsung rendering pass without an optimistic draft.
+These are dated native/device results, not a new-artifact or clean-release acceptance claim.
+The generic attributed-body sender remains retired. RCS text plus
 one attachment travels under `supports_rcs_text_with_attachment` as
 one logical optimistic/retry identity and older servers fail closed. RCS capability is independent
 of every retired iMessage helper flag.
@@ -107,10 +177,23 @@ On 2026-09-20, a local Samsung dev client sent exactly one 1,667-byte PDF with i
 same iMessage: the Mac Messages database recorded the exact caption and one PDF on ROWID 76267;
 delivery completed without a duplicate. This is local dev-client proof of the narrow iMessage path,
 not Play-release or packaged-candidate proof. The matching staged server and packaged Android
-candidate still need to prove the supported RCS cross-repository path. The narrow edit and unsend
-source is complete, but its matching helper package and one-attempt live Mac/Samsung acceptance are
-also still pending under server follow-up `POST-01`. `FEAT-03` remains **IN_PROGRESS** for those
-device/deployment proofs.
+candidate still need to prove the supported RCS cross-repository path; the server's latest receipt
+reports degraded RCS readiness, so ping/helper health alone does not authorize that lane. Narrow
+Edit passed with helper `859636d...`; narrow Unsend and cold reopen passed with `c4741a5...` and the
+server correction package built at `2026-09-29T21:28:26Z`. A separate ordinary-phone-send defect
+stranded a temporary bubble when AppleScript acknowledged no canonical GUID. The current dirty
+app/server source and admitted `49514a1...` helper repair this through separately gated
+`supports_imessage_plain_text` / `POST /api/v1/message/imessage-text`, requiring exact
+`{guid,tempGuid,viaPrivateApi:true}` acknowledgement and certified not-dispatched retry authority;
+unknown outcomes cannot fall back or replay. The matching Android build and phone acceptance remain
+owner-deferred. Existing stranded copies are not guessed away by body/time matching.
+
+`FEAT-03` remains **IN_PROGRESS**. The authoritative
+[prepared handoff](./WORK_PLAN_2026-08-03.md#feat-03--multipart-and-unsupported-message-correctness)
+binds the active server checkout, app/server/helper versions, existing freeze failures, and the
+small next batch: plain send/reopen with a timely **unedited** target Unsend, one formatted send,
+and one RCS combined-send retry/live/sync check. No historical pass is silently rebound to the
+newer helper or a replacement Android candidate.
 
 ## 🟡 Source-aligned (updated 2026-09-26) — foreground Current Location send (`FEAT-05A`)
 
@@ -266,9 +349,15 @@ outcome-unknown instead of risking a duplicate mutation.
 The app, server, and helper paths are source-complete. This is a narrow exception, not restoration
 of broad Private API authority: RCS, groups, ambiguous/multipart targets, rich edits, and generic
 helper flags cannot enter these paths. App ownership and remaining status sit under the narrow
-`FEAT-03B` child in the remediation plan. Signing/installing the matching helper package and proving
-one real edit plus one real unsend from the physical Samsung against the packaged Mac remain open
-server/helper acceptance under `POST-01`; no live or release-candidate success is claimed here.
+`FEAT-03B` child in the remediation plan. The server's dated `POST-01` records now include local
+packaged-Mac / Samsung Play v79 Edit acceptance with helper `859636d...`, and scoped Unsend /
+cold-reopen acceptance with `c4741a5...` and the server-only correction at
+`2026-09-29T21:28:26Z`. The exact Mac retracted-part marker `[0]` and one surviving phone tombstone
+prove that Unsend; physical deletion or a nonzero `dateRetracted` is not required on that host.
+The newer `49514a1...` helper's ordinary-send identity repair and matching Android update still need
+their bounded phone send/reopen/Unsend check. This does not repeat already-passed Edit wholesale or
+claim clean-release acceptance. Use a fresh **unedited** target for Unsend; the helper rejects an
+edited part.
 
 ## Whole-message deletion from Mac (`FEAT-03B` app source; `POST-01` activation, 2026-09-28)
 
@@ -284,10 +373,12 @@ The client sends one non-retrying `POST /api/v1/message/{guid}/remote-delete` wi
 definite refusal or uncertain outcome leaves the phone row visible; only exact confirmation writes
 the phone's local deletion tombstone. Individual-part and whole-chat remote deletion are not
 exposed. The matching helper, server, and app source passed 182 helper checks, 50 server/protocol
-checks, 71 app service/UI checks, and their TypeScript checks. The production server gate remains
-false because the installed helper lacks this new action. Build, signing, admission, packaging,
-installation, and one owner-approved disposable live deletion remain under server `POST-01`; this
-section does not claim device or release-candidate acceptance.
+checks, 71 app service/UI checks, and their TypeScript checks. The earlier disabled-gate / missing
+artifact checkpoint is superseded: server `POST-01` records one exact synthetic whole-message
+deletion and cold-reopen phone disappearance with the admitted `859636d...` helper and Samsung
+Play v79. The newer admitted `49514a1...` helper retains this separately gated command, but the
+dated pass is not new-artifact or clean-release proof. Remote deletion is not part of the next
+bounded FEAT-03 batch, and no additional deletion was performed in this reconciliation.
 
 ## Read-only iMessage account status (POST-01, 2026-09-20)
 

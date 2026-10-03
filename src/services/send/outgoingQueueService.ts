@@ -3,7 +3,9 @@ import { ApiError } from '@core/api/errors';
 import { isRcsProviderEpoch } from '@core/rcs';
 import {
   CURRENT_LOCATION_MAX_REPLAY_AGE_MS,
+  isRetryableIMessagePlainTextUnavailable,
   sendContact,
+  sendIMessagePlainText,
   sendLocation,
   sendReaction,
   sendText,
@@ -17,6 +19,7 @@ import {
   claimOutgoingForSendWithinTransaction,
   deferOutgoingSendClaimWithinTransaction,
   getAttachmentByGuid,
+  imessagePlainTextQueueState,
   listRetryableOutgoing,
   MessageTargetCapabilityUnknownError,
   MessageTargetUnavailableError,
@@ -61,6 +64,8 @@ interface TextPayload {
   imessageEffectV1?: true;
   imessageMentionV1?: true;
   imessageFormattedV1?: true;
+  imessagePlainTextV1?: true;
+  imessagePlainTextRetrySafeV1?: true;
 }
 interface ReactionPayload {
   selectedMessageGuid: string;
@@ -138,6 +143,7 @@ function requiresRetiredPrivateApi(row: QueueRowShape): boolean {
   if (row.kind === 'text') {
     try {
       const payload = JSON.parse(row.payload) as TextPayload;
+      if (payload.imessagePlainTextV1 === true) return false;
       // This explicit bit overrides a stale/malformed chat classification as well as a missing
       // rich field. Once marked one-shot, this row must never reach an ordinary text transport.
       if (
@@ -242,6 +248,8 @@ export interface OutgoingQueueIO {
 
 /** Current RCS mutation authority. Omit ids only for the coarse "any current epoch?" SQL filter. */
 export type RcsAvailability = (chatGuid?: string, messageGuid?: string) => boolean;
+/** Current exact capability proof for the durable narrow plain-text route. */
+export type IMessagePlainTextAvailability = (chatGuid?: string) => boolean;
 
 /** What one re-POST attempt did. 'unsendable' = retired for good (nothing can ever fix it). */
 export type ResendOutcome = 'sent' | 'failed' | 'unsendable' | 'paused' | 'deferred';
@@ -257,6 +265,20 @@ class LocationCapabilityUnavailableError extends Error {
   constructor() {
     super('Current-location capability changed before the request started.');
     this.name = 'LocationCapabilityUnavailableError';
+  }
+}
+
+class IMessagePlainTextCapabilityUnavailableError extends Error {
+  constructor() {
+    super('Narrow iMessage plain-text capability changed before the request started.');
+    this.name = 'IMessagePlainTextCapabilityUnavailableError';
+  }
+}
+
+class IMessagePlainTextInterruptedError extends Error {
+  constructor() {
+    super('A narrow iMessage plain-text attempt was interrupted with an unknown outcome.');
+    this.name = 'IMessagePlainTextInterruptedError';
   }
 }
 
@@ -376,12 +398,17 @@ export async function resendOutgoingRow(
   rcsAvailable?: RcsAvailability,
   attachmentSignal?: AbortSignal,
   locationAvailable?: () => boolean,
+  imessagePlainTextAvailable?: IMessagePlainTextAvailability,
 ): Promise<ResendOutcome> {
   if (!accountIsCurrent(accountLease)) return 'paused';
   const rcsChat = isRcsChatGuid(row.chatGuid);
   const rcsIsCurrent = (): boolean => !rcsChat || rcsAvailable?.(row.chatGuid) === true;
   const locationIsCurrent = (): boolean =>
     row.kind !== 'location' || locationAvailable?.() === true;
+  const plainTextState = imessagePlainTextQueueState(row.kind, row.payload);
+  const plainTextIsCurrent = (): boolean =>
+    plainTextState !== 'retry-safe' || imessagePlainTextAvailable?.(row.chatGuid) === true;
+  if (!plainTextIsCurrent()) return 'deferred';
   if (!rcsIsCurrent()) return 'deferred';
   const locationReplayNow = row.kind === 'location' ? clock() : null;
   if (locationReplayNow !== null && isExpiredLocationReplay(row, locationReplayNow)) {
@@ -408,6 +435,7 @@ export async function resendOutgoingRow(
     if (!accountIsCurrent(accountLease)) throw new DbCommitGuardRejectedError();
     if (!rcsIsCurrent()) throw new RcsCapabilityUnavailableError();
     if (!locationIsCurrent()) throw new LocationCapabilityUnavailableError();
+    if (!plainTextIsCurrent()) throw new IMessagePlainTextCapabilityUnavailableError();
     networkStarted = true;
   };
   const retiredPrivateApiRow = requiresRetiredPrivateApi(row);
@@ -510,6 +538,7 @@ export async function resendOutgoingRow(
     return { messageGuid: resolved.messageGuid, partIndex: resolved.partIndex };
   };
   try {
+    if (plainTextState === 'unsafe') throw new IMessagePlainTextInterruptedError();
     // Bind the whole physical retry to the transport present at entry. Attachment retries perform
     // DB and native-file awaits before upload; retaining the live client there could otherwise make
     // an account-A row start on account B's newly selected origin/credential.
@@ -531,18 +560,25 @@ export async function resendOutgoingRow(
       const resolvedTarget = await authorizeTarget();
       retryHttp.assertTransportCurrent();
       assertNetworkStart();
-      server = await sendText(retryHttp, {
-        chatGuid: row.chatGuid,
-        tempGuid: row.tempGuid,
-        clientAttemptGeneration: attemptOwnerToken?.generation,
-        message: p.message,
-        method: rcsChat ? undefined : 'apple-script',
-        selectedMessageGuid: resolvedTarget?.messageGuid,
-        partIndex: resolvedTarget?.partIndex,
-        effectId: p.effectId,
-        subject: p.subject,
-        mentions: p.mentions,
-      });
+      server =
+        plainTextState === 'retry-safe'
+          ? await sendIMessagePlainText(retryHttp, {
+              chatGuid: row.chatGuid,
+              tempGuid: row.tempGuid,
+              message: p.message,
+            })
+          : await sendText(retryHttp, {
+              chatGuid: row.chatGuid,
+              tempGuid: row.tempGuid,
+              clientAttemptGeneration: attemptOwnerToken?.generation,
+              message: p.message,
+              method: rcsChat ? undefined : 'apple-script',
+              selectedMessageGuid: resolvedTarget?.messageGuid,
+              partIndex: resolvedTarget?.partIndex,
+              effectId: p.effectId,
+              subject: p.subject,
+              mentions: p.mentions,
+            });
     } else if (row.kind === 'reaction') {
       const p = JSON.parse(row.payload) as ReactionPayload;
       if (!target) return retireTarget();
@@ -673,6 +709,7 @@ export async function resendOutgoingRow(
     if (
       e instanceof RcsCapabilityUnavailableError ||
       e instanceof LocationCapabilityUnavailableError ||
+      e instanceof IMessagePlainTextCapabilityUnavailableError ||
       (rcsChat && !networkStarted && !rcsIsCurrent())
     ) {
       return 'deferred';
@@ -681,10 +718,18 @@ export async function resendOutgoingRow(
     if (e instanceof MessageTargetCapabilityUnknownError) return 'paused';
     if (e instanceof MessageTargetUnavailableError) return retireTarget();
     const terminalLocation = row.kind === 'location' && isTerminalLocationSendError(e);
+    const retrySafePlainText =
+      plainTextState === 'retry-safe' && isRetryableIMessagePlainTextUnavailable(e);
     return (await runAccountCommit(accountLease, (guard) =>
       handleSendFailure(db, row.tempGuid, e, 'queue', row.chatGuid, clock(), guard, {
         attemptOwnerToken,
-        ...(terminalLocation ? { terminalUncertainKind: 'location' as const } : {}),
+        ...(retrySafePlainText
+          ? { imessagePlainTextRetrySafe: true }
+          : plainTextState !== 'legacy'
+            ? { terminalUncertainKind: 'plain' as const }
+            : terminalLocation
+              ? { terminalUncertainKind: 'location' as const }
+              : {}),
       }),
     ))
       ? 'failed'
@@ -715,6 +760,7 @@ async function runOutgoingQueueBody(
   attachmentSignal?: AbortSignal,
   locationAvailable?: () => boolean,
   currentRcsProviderEpoch?: string | null,
+  imessagePlainTextAvailable?: IMessagePlainTextAvailability,
 ): Promise<{ eligible: number; sent: number }> {
   if (!accountIsCurrent(accountLease)) return { eligible: 0, sent: 0 };
   // Filter disabled or old-provider RCS work in SQLite before applying the headless work cap.
@@ -734,6 +780,7 @@ async function runOutgoingQueueBody(
     rcsAvailable?.() !== true || boundedRcsProviderEpoch === null,
     locationAvailable?.() !== true,
     boundedRcsProviderEpoch ?? undefined,
+    imessagePlainTextAvailable?.() !== true,
   );
   if (!accountIsCurrent(accountLease)) return { eligible: rows.length, sent: 0 };
   // `now` anchors the drain (and is injectable, so tests keep a deterministic clock), but every
@@ -750,6 +797,7 @@ async function runOutgoingQueueBody(
     const rcsRow = isRcsChatGuid(row.chatGuid);
     const rcsIsCurrent = (): boolean => !rcsRow || rcsAvailable?.(row.chatGuid) === true;
     const locationRow = row.kind === 'location';
+    const plainTextState = imessagePlainTextQueueState(row.kind, row.payload);
     const expiredLocation = locationRow && isExpiredLocationReplay(row, clock());
     if (expiredLocation) {
       if (maxRows !== undefined && attemptedRows >= maxRows) break;
@@ -776,6 +824,9 @@ async function runOutgoingQueueBody(
     if (!rcsIsCurrent()) continue;
     // Location rows likewise wait untouched for an exact live capability snapshot.
     if (!locationIsCurrent()) continue;
+    if (plainTextState === 'retry-safe' && imessagePlainTextAvailable?.(row.chatGuid) !== true) {
+      continue;
+    }
     if (maxRows !== undefined && attemptedRows >= maxRows) break;
     attemptedRows += 1;
     // THE LEASE AND THE VISIBLE STATE FLIP ARE ONE STEP. This service owns their short guarded
@@ -805,7 +856,10 @@ async function runOutgoingQueueBody(
     try {
       claimCommitted = await runAccountCommit(accountLease, async (guard) => {
         const claimGuard = (): boolean =>
-          (guard?.() ?? true) && rcsIsCurrent() && locationIsCurrent();
+          (guard?.() ?? true) &&
+          rcsIsCurrent() &&
+          locationIsCurrent() &&
+          (plainTextState !== 'retry-safe' || imessagePlainTextAvailable?.(row.chatGuid) === true);
         claim = await withDbTransaction(
           db,
           (context) =>
@@ -814,6 +868,8 @@ async function runOutgoingQueueBody(
               row.id,
               clock,
               privateApiRetirementAuthorization,
+              imessagePlainTextAvailable,
+              row.payload,
             ),
           messageTargetCommitGuard(claimGuard, privateApiRetirementAuthorization),
         );
@@ -843,6 +899,7 @@ async function runOutgoingQueueBody(
       rcsAvailable,
       attachmentSignal,
       locationAvailable,
+      imessagePlainTextAvailable,
     );
     if (outcome === 'sent') sent += 1;
     if (outcome === 'deferred') {
@@ -881,6 +938,7 @@ export async function runOutgoingQueue(
   attachmentSignal?: AbortSignal,
   locationAvailable?: () => boolean,
   currentRcsProviderEpoch?: string | null,
+  imessagePlainTextAvailable?: IMessagePlainTextAvailability,
 ): Promise<{ eligible: number; sent: number }> {
   if (!accountLease) {
     return runOutgoingQueueBody(
@@ -896,6 +954,7 @@ export async function runOutgoingQueue(
       attachmentSignal,
       locationAvailable,
       currentRcsProviderEpoch,
+      imessagePlainTextAvailable,
     );
   }
 
@@ -914,6 +973,7 @@ export async function runOutgoingQueue(
       attachmentSignal,
       locationAvailable,
       currentRcsProviderEpoch,
+      imessagePlainTextAvailable,
     );
   });
   return status === 'delivered' && completed.value ? completed.value : { eligible: 0, sent: 0 };

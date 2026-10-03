@@ -1,11 +1,16 @@
 import { Directory, File, Paths } from 'expo-file-system';
+import { hashNativeAttachmentCacheGuid } from '@native/boundedDownload';
 import {
   MANUAL_ATTACHMENT_MAX_BYTES,
   MANUAL_DOWNLOAD_TIMEOUT_MS,
   type AttachmentFetcher,
 } from './downloadService';
 import { deleteOwnedFile, downloadBoundedNativeFile } from './boundedNativeDownload';
-import { encodedMediaPathSegment, mediaGenerationPathSegment } from './pathSafety';
+import {
+  attachmentIdentityPathSegment,
+  encodedMediaPathSegment,
+  mediaGenerationPathSegment,
+} from './pathSafety';
 
 // The bounded downloader deliberately rejects redirects. Keep this synthetic DEV fixture on the
 // direct Picsum CDN object instead of the public seed endpoint, which responds with HTTP 302.
@@ -17,7 +22,7 @@ function developmentDestination(
   transferName: string,
   generation?: number,
 ): { dir: Directory; file: File } {
-  const safeGuid = encodedMediaPathSegment(guid);
+  const safeGuid = attachmentIdentityPathSegment(guid, hashNativeAttachmentCacheGuid);
   const dir = new Directory(
     Paths.document,
     'attachments',

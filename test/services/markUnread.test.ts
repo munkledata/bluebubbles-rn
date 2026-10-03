@@ -537,6 +537,40 @@ describe('markUnread', () => {
 });
 
 describe('markRead', () => {
+  it.each([
+    ['queued', 'disabled'],
+    ['queued', 'unhydrated'],
+    ['transport', 'disabled'],
+    ['transport', 'unhydrated'],
+  ])('keeps the local read when receipts become %s / %s before dispatch', async (wait, change) => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    const guid = 'iMessage;-;privacy-race@example.test';
+    await seedChat(db, guid);
+    mockImessageReadStateEnabled = true;
+    const blocked = deferred<unknown>();
+    mockMarkChatUnread.mockImplementationOnce(() => blocked.promise);
+    const predecessor = markUnread(guid);
+    await waitForCall(mockMarkChatUnread);
+    const transport = deferred<void>();
+    const resolveReceiptTransport = jest.fn(async () => {
+      if (wait === 'transport') await transport.promise;
+      return { http: { __http: true } as never, isCurrent: () => true };
+    });
+    const read = markRead(guid, undefined, { resolveReceiptTransport });
+    await waitForCall(resolveReceiptTransport);
+    expect(readState(raw, guid).markedUnreadAt).toBeNull();
+
+    if (change === 'disabled') mockSendReadReceipts = false;
+    else mockSettingsHydrated = false;
+    transport.resolve();
+    blocked.resolve({});
+    await Promise.all([predecessor, read]);
+
+    expect(mockMarkChatRead).not.toHaveBeenCalled();
+    expect(readState(raw, guid).markedUnreadAt).toBeNull();
+  });
+
   it('preserves killed-process RCS reads before session ServerInfo has hydrated', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;

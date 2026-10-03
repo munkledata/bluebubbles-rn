@@ -61,6 +61,7 @@ describe('migration 0051_handle_color_backup_index', () => {
       await expect(runMigrations(runner)).resolves.toEqual([
         MIGRATION_NAME,
         '0052_chat_history_deletion_boundary',
+        '0053_versioned_server_message_state',
       ]);
 
       expect(indexColumns(raw, INDEX_NAME)).toEqual(['id']);

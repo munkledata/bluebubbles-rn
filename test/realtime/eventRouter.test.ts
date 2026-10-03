@@ -17,6 +17,17 @@ function collector() {
  * router silently dropped every one of them (`default: return null`).
  */
 const MINIMAL_PAYLOAD: Record<ServerEventName, unknown> = {
+  'message-state-changed': {
+    version: 1,
+    provider: 'imessage',
+    providerEpoch: '11111111-1111-4111-8111-111111111111',
+    ledgerEpoch: '22222222-2222-4222-8222-222222222222',
+    sequence: '12',
+    kind: 'restored',
+    guid: 'restore',
+    chatGuid: 'chat',
+    dateDeleted: null,
+  },
   'new-message': { guid: 'tbl-new-1', text: 'hi' },
   'updated-message': { guid: 'tbl-upd-1', dateDelivered: 1700000000000 },
   'message-deleted': { guid: 'tbl-del-1' },

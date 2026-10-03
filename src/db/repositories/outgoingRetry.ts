@@ -23,7 +23,9 @@ import {
   OUTGOING_GRACE_MS,
   OUTGOING_LEASE_MS,
   OUTGOING_MAX_ATTEMPTS,
+  imessagePlainTextQueueState,
   outgoingBackoffMs,
+  withIMessagePlainTextRetrySafety,
 } from './outgoingRetryPolicy';
 
 /** Retry, async-error, requeue, claim, and queue-health ownership for outgoing sends. */
@@ -47,6 +49,7 @@ async function reconcileOutgoingErrorForMessageWithinTransaction(
   errorCode: number,
   now: number = Date.now(),
   errorMessage?: string | null,
+  imessagePlainTextRetrySafe = false,
 ): Promise<boolean> {
   return runInTransactionContext(context, async (db) => {
     const cur = await db.all<{
@@ -54,9 +57,10 @@ async function reconcileOutgoingErrorForMessageWithinTransaction(
       sendState: string | null;
       currentError: number | null;
       currentErrorMessage: string | null;
+      payload: string;
     }>(sql`
         SELECT q.attempts, m.send_state AS sendState, m.error AS currentError,
-               m.error_message AS currentErrorMessage
+               m.error_message AS currentErrorMessage, q.payload
           FROM outgoing_queue q LEFT JOIN messages m ON m.guid = ${messageGuid}
          WHERE q.temp_guid = ${tempGuid} LIMIT 1`);
     const current = cur[0];
@@ -77,7 +81,12 @@ async function reconcileOutgoingErrorForMessageWithinTransaction(
     // copy has moved the bubble to this error and advanced/rebuilt a ladder, so accepting a matching
     // second copy avoids consuming two attempts. A later retry first flips the bubble to
     // `sending`/error=0, making its next failure distinguishable again.
-    if (prior > 0 && current.sendState === 'error' && current.currentError === errorCode) {
+    if (
+      !imessagePlainTextRetrySafe &&
+      prior > 0 &&
+      current.sendState === 'error' &&
+      current.currentError === errorCode
+    ) {
       if (errorMessage !== undefined && current.currentErrorMessage !== errorMessage) {
         await db.update(messages).set({ errorMessage }).where(eq(messages.guid, messageGuid));
       }
@@ -92,9 +101,17 @@ async function reconcileOutgoingErrorForMessageWithinTransaction(
       })
       .where(eq(messages.guid, messageGuid));
     const attempts = prior + 1;
+    const nextPayload = imessagePlainTextRetrySafe
+      ? withIMessagePlainTextRetrySafety(current.payload, true)
+      : current.payload;
+    if (nextPayload == null) {
+      throw new Error('narrow iMessage text retry proof has no matching route marker');
+    }
     const bumped = await db.all<{ id: number }>(sql`
-        UPDATE outgoing_queue SET attempts = ${attempts}, next_retry_at = ${now + outgoingBackoffMs(attempts)}
-         WHERE temp_guid = ${tempGuid} AND attempts = ${prior}
+        UPDATE outgoing_queue
+           SET attempts = ${attempts}, next_retry_at = ${now + outgoingBackoffMs(attempts)},
+               payload = ${nextPayload}
+         WHERE temp_guid = ${tempGuid} AND attempts = ${prior} AND payload = ${current.payload}
         RETURNING id`);
     return bumped.length > 0;
   });
@@ -111,6 +128,7 @@ export async function reconcileOutgoingErrorWithinTransaction(
   now: number = Date.now(),
   errorMessage?: string | null,
   attemptOwnerToken?: SendAttemptOwnerToken,
+  imessagePlainTextRetrySafe = false,
 ): Promise<boolean> {
   return runInTransactionContext(context, async (db) => {
     const direct = await db.all<{
@@ -153,6 +171,7 @@ export async function reconcileOutgoingErrorWithinTransaction(
       errorCode,
       now,
       errorMessage,
+      imessagePlainTextRetrySafe,
     );
   });
 }
@@ -166,6 +185,7 @@ export async function reconcileOutgoingError(
   commitGuard?: DbCommitGuard,
   errorMessage?: string | null,
   attemptOwnerToken?: SendAttemptOwnerToken,
+  imessagePlainTextRetrySafe = false,
 ): Promise<boolean> {
   return withDbTransaction(
     db,
@@ -177,6 +197,7 @@ export async function reconcileOutgoingError(
         now,
         errorMessage,
         attemptOwnerToken,
+        imessagePlainTextRetrySafe,
       ),
     commitGuard,
   );
@@ -695,6 +716,7 @@ export async function listRetryableOutgoing(
   excludeRcs = false,
   excludeLocation = false,
   currentRcsProviderEpoch?: string,
+  excludeRetrySafeIMessagePlainText = false,
 ): Promise<RetryableOutgoing[]> {
   // SQLite's -1 means "all rows" for existing foreground callers. Any explicit invalid cap is a
   // safe empty run rather than an accidental unbounded headless drain.
@@ -736,6 +758,20 @@ export async function listRetryableOutgoing(
         OR created_at > ${now}
         OR created_at <= ${now - CURRENT_LOCATION_MAX_REPLAY_AGE_MS}
       )
+      AND (
+        ${excludeRetrySafeIMessagePlainText ? 1 : 0} = 0
+        OR CASE
+          WHEN kind = 'text' AND json_valid(payload)
+          THEN NOT (
+            json_type(payload) = 'object'
+            AND COALESCE(json_type(payload, '$.message'), '') = 'text'
+            AND COALESCE(json_type(payload, '$.imessagePlainTextV1'), '') = 'true'
+            AND COALESCE(json_type(payload, '$.imessagePlainTextRetrySafeV1'), '') = 'true'
+            AND (SELECT COUNT(*) FROM json_each(payload)) = 3
+          )
+          ELSE 1
+        END
+      )
     ORDER BY created_at ASC
     LIMIT ${rowLimit}`);
 }
@@ -763,6 +799,8 @@ export interface OutgoingSendClaimDeferToken {
   readonly tempGuid: string;
   readonly leaseUntil: number;
   readonly previousAttempts: number;
+  readonly previousPayload: string;
+  readonly claimedPayload: string;
   readonly ownerGuid: string;
   readonly ownerGeneration: number;
   readonly previousSendState: string | null;
@@ -775,24 +813,52 @@ export function claimOutgoingForSendWithinTransaction(
   id: number,
   clock: () => number,
   serverAuthorization?: MessageTargetServerAuthorization,
+  imessagePlainTextAvailable?: (chatGuid: string) => boolean,
+  expectedPayload?: string,
 ): Promise<OutgoingSendClaim> {
   return runInTransactionContext(context, async (db) => {
     // Read AFTER acquiring the process-wide lock. A timestamp captured before a long queue wait
     // can make the two-minute lease expire as soon as it commits, allowing a second sender in.
     const now = clock();
     const leaseUntil = now + OUTGOING_LEASE_MS;
-    const rows = await db.all<{
+    const candidates = await db.all<{
       tempGuid: string;
       chatGuid: string;
       kind: string;
       payload: string;
       attempts: number;
     }>(sql`
-        UPDATE outgoing_queue SET next_retry_at = ${leaseUntil}
-        WHERE id = ${id} AND next_retry_at <= ${now}
-        RETURNING temp_guid AS tempGuid, chat_guid AS chatGuid, kind, payload, attempts`);
-    const claimed = rows[0];
-    if (!claimed) return { claimed: false };
+        SELECT temp_guid AS tempGuid, chat_guid AS chatGuid, kind, payload, attempts
+         FROM outgoing_queue
+         WHERE id = ${id} AND next_retry_at <= ${now}
+           AND attempts < ${OUTGOING_MAX_ATTEMPTS}
+         LIMIT 1`);
+    const candidate = candidates[0];
+    if (!candidate || (expectedPayload !== undefined && candidate.payload !== expectedPayload)) {
+      return { claimed: false };
+    }
+    const plainTextState = imessagePlainTextQueueState(candidate.kind, candidate.payload);
+    if (
+      plainTextState === 'retry-safe' &&
+      imessagePlainTextAvailable?.(candidate.chatGuid) !== true
+    ) {
+      return { claimed: false };
+    }
+    const claimedPayload =
+      plainTextState === 'retry-safe'
+        ? withIMessagePlainTextRetrySafety(candidate.payload, false)
+        : candidate.payload;
+    if (claimedPayload == null) {
+      throw new Error('narrow iMessage text retry proof could not be consumed');
+    }
+    const rows = await db.all<{ id: number }>(sql`
+        UPDATE outgoing_queue SET next_retry_at = ${leaseUntil}, payload = ${claimedPayload}
+         WHERE id = ${id} AND next_retry_at <= ${now} AND temp_guid = ${candidate.tempGuid}
+           AND payload = ${candidate.payload} AND attempts = ${candidate.attempts}
+           AND attempts < ${OUTGOING_MAX_ATTEMPTS}
+        RETURNING id`);
+    if (!rows[0]) return { claimed: false };
+    const claimed = candidate;
 
     const direct = await db.all<{
       guid: string;
@@ -884,6 +950,8 @@ export function claimOutgoingForSendWithinTransaction(
           tempGuid: claimed.tempGuid,
           leaseUntil,
           previousAttempts: claimed.attempts,
+          previousPayload: claimed.payload,
+          claimedPayload,
           ownerGuid: owner.guid,
           ownerGeneration: 0,
           previousSendState: owner.sendState,
@@ -919,6 +987,8 @@ export function claimOutgoingForSendWithinTransaction(
         tempGuid: claimed.tempGuid,
         leaseUntil,
         previousAttempts: claimed.attempts,
+        previousPayload: claimed.payload,
+        claimedPayload,
         ownerGuid: owner.guid,
         ownerGeneration: advanced[0].generation,
         previousSendState: owner.sendState,
@@ -940,11 +1010,12 @@ export function deferOutgoingSendClaimWithinTransaction(
   return runInTransactionContext(context, async (db) => {
     const released = await db.all<{ id: number }>(sql`
       UPDATE outgoing_queue
-         SET next_retry_at = 0
+         SET next_retry_at = 0, payload = ${token.previousPayload}
        WHERE id = ${token.queueId}
          AND temp_guid = ${token.tempGuid}
          AND next_retry_at = ${token.leaseUntil}
          AND attempts = ${token.previousAttempts}
+         AND payload = ${token.claimedPayload}
       RETURNING id
     `);
     if (!released[0]) return false;

@@ -263,8 +263,10 @@ describe('the Expo background task adapter', () => {
       rcs: true,
       supports_rcs_epoch_qualified_ids: true,
       rcs_provider_epoch: providerEpoch,
+      supports_imessage_plain_text: true,
     };
-    const scope = { generation: 9, isCurrent: () => true };
+    let scopeCurrent = true;
+    const scope = { generation: 9, isCurrent: () => scopeCurrent };
     mockRunBackgroundSync.mockImplementationOnce(async (deps) => {
       await deps.synchronize(db, client, '1.9.0', scope);
       await deps.recoverAndDrainSchedules(db, client, scope, serverInfo);
@@ -326,6 +328,7 @@ describe('the Expo background task adapter', () => {
       expect.any(AbortSignal),
       expect.any(Function),
       providerEpoch,
+      expect.any(Function),
     );
     const attachmentTimeout = (mockRunOutgoingQueue.mock.calls[0] as unknown[] | undefined)?.[6] as
       number | undefined;
@@ -341,6 +344,23 @@ describe('the Expo background task adapter', () => {
       mockRunOutgoingQueue.mock.calls[0] as unknown[] | undefined
     )?.[10] as (() => boolean) | undefined;
     expect(locationAvailable?.()).toBe(false);
+    const plainTextAvailable = (
+      mockRunOutgoingQueue.mock.calls[0] as unknown[] | undefined
+    )?.[12] as ((chatGuid?: string) => boolean) | undefined;
+    expect(plainTextAvailable).toEqual(expect.any(Function));
+    expect(plainTextAvailable?.()).toBe(true);
+    expect(plainTextAvailable?.('iMessage;-;fixture')).toBe(true);
+    expect(plainTextAvailable?.('any;-;fixture')).toBe(true);
+    expect(plainTextAvailable?.('iMessage;+;group')).toBe(false);
+    expect(plainTextAvailable?.('iMessage;-;')).toBe(false);
+    expect(plainTextAvailable?.(`RCS;-;g1.${providerEpoch}.YQ`)).toBe(false);
+    serverInfo.supports_imessage_plain_text = false;
+    expect(plainTextAvailable?.()).toBe(false);
+    expect(plainTextAvailable?.('iMessage;-;fixture')).toBe(false);
+    serverInfo.supports_imessage_plain_text = true;
+    scopeCurrent = false;
+    expect(plainTextAvailable?.()).toBe(false);
+    expect(plainTextAvailable?.('iMessage;-;fixture')).toBe(false);
   });
 
   it('keeps task registration idempotent', async () => {

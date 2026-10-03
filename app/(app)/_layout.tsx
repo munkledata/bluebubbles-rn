@@ -14,9 +14,12 @@ import {
 import { reconcileMessageNotificationGroupAfterRemoval } from '@/services/notifications/notifeeService';
 import {
   drainNotificationTap,
-  openFromNotification,
+  openNotificationPress,
 } from '@/services/notifications/notificationOpen';
-import { takePendingNotification } from '@/services/notifications/pendingNav';
+import {
+  reserveNotificationTap,
+  takePendingNotification,
+} from '@/services/notifications/pendingNav';
 import {
   flushErrorReports,
   pauseRealtime,
@@ -202,12 +205,17 @@ function ConnectedAppLayout(): React.JSX.Element {
         if (type === EventType.ACTION_PRESS) {
           runNotificationTask('action', accountLease, () => handleNotificationAction(detail));
         } else if (type === EventType.PRESS) {
+          // Reserve at native callback entry, not in the queued task: a newer physical press must
+          // fence an older DB lookup before that lookup's already-queued continuation can navigate.
+          const tap = reserveNotificationTap(detail, accountLease);
           runNotificationTask('press-side-effect', accountLease, () =>
             handleNotificationPress(detail),
           );
-          runNotificationTask('press-navigation', accountLease, () =>
-            openFromNotification(detail.notification?.data, { openChat, openInbox }, accountLease),
-          );
+          if (tap) {
+            runNotificationTask('press-navigation', accountLease, () =>
+              openNotificationPress(detail, { openChat, openInbox }, accountLease),
+            );
+          }
           runNotificationTask('message-group-press', accountLease, () =>
             reconcileMessageNotificationGroupAfterRemoval(detail.notification),
           );

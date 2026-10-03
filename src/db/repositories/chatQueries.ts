@@ -123,6 +123,8 @@ export interface CustomFolderInboxPage extends InboxPage {
 const MAX_CUSTOM_FOLDER_SEARCH_CODE_POINTS = 128;
 const INBOX_SEARCH_CANDIDATE_PAGE_SIZE = 128;
 const INBOX_SEARCH_PARTICIPANT_PAGE_SIZE = 128;
+const INBOX_SEARCH_INLINE_NAME_BYTES = 512;
+const INBOX_SEARCH_NAME_CHUNK_BYTES = 4096;
 const INBOX_SEARCH_PAGES_PER_YIELD = 8;
 const MAX_INBOX_SEARCH_RESULTS = 50;
 const MAX_INBOX_MESSAGE_MATCH_GUIDS = 300;
@@ -147,6 +149,19 @@ interface InboxSearchCandidate extends Omit<
   pinOrder: number | null;
   latestMessageDate: number | null;
 }
+
+type InboxSearchRankedIdentity = Pick<
+  InboxSearchCandidate,
+  'id' | 'guid' | 'isPinned' | 'pinOrder' | 'latestMessageDate'
+>;
+
+type InboxSearchRawCandidate = {
+  id: number;
+  isCandidate: number;
+  candidateId: number | null;
+} & {
+  [Key in keyof Omit<InboxSearchCandidate, 'id'>]: InboxSearchCandidate[Key] | null;
+};
 
 interface InboxSearchTextSummary {
   matched: boolean;
@@ -219,11 +234,116 @@ function resolveStaticInboxSearchTitle(candidate: InboxSearchCandidate): string 
   return first === second ? first : null;
 }
 
+class InboxSearchTextChangedError extends Error {
+  constructor() {
+    super('Inbox search text changed while reading. Please try again.');
+    this.name = 'InboxSearchTextChangedError';
+  }
+}
+
+/**
+ * Bound each oversized-name transfer, not total name memory or native SQLite work. Byte slices
+ * preserve embedded NULs; hex avoids native/host blob-shape differences. Decode across slices,
+ * then let the existing matcher fold the COMPLETE name: NFC and contextual lowercasing cannot
+ * safely be applied to independent chunks. Preserve an initial U+FEFF just like a text read.
+ */
+async function readLargeInboxSearchParticipantName(
+  db: AppDatabase,
+  chatId: number,
+  handleId: number,
+  checkCurrent: () => void,
+): Promise<string> {
+  type Chunk = {
+    byteLength: number;
+    revision: number;
+    changes: number;
+    participantChunk: string;
+  };
+  for (let attempt = 0; ; attempt += 1) {
+    checkCurrent();
+    try {
+      // Retry owns fresh fragments/decoder state; never stitch two versions of a name together.
+      const decoder = new TextDecoder('utf-8', { ignoreBOM: true });
+      const parts: string[] = [];
+      let snapshot: Omit<Chunk, 'participantChunk'> | undefined;
+      let offset = 0;
+      let pages = 0;
+      for (;;) {
+        checkCurrent();
+        if (pages > 0 && pages % INBOX_SEARCH_PAGES_PER_YIELD === 0) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+          checkCurrent();
+        }
+        const chunks = await db.all<Chunk>(sql`
+          SELECT length(CAST(COALESCE(h.display_name, h.address) AS BLOB)) AS byteLength,
+                 s.revision, total_changes() AS changes,
+                 hex(substr(CAST(COALESCE(h.display_name, h.address) AS BLOB),
+                            ${offset + 1}, ${INBOX_SEARCH_NAME_CHUNK_BYTES})) AS participantChunk
+            FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
+            JOIN inbox_search_state s ON s.chat_id = ch.chat_id
+           WHERE ch.chat_id = ${chatId} AND ch.handle_id = ${handleId}
+           LIMIT 1
+        `);
+        checkCurrent();
+        if (chunks.length === 0) throw new InboxSearchTextChangedError();
+        const chunk = chunks[0]!;
+        if (
+          chunks.length !== 1 ||
+          !Number.isSafeInteger(chunk.byteLength) ||
+          chunk.byteLength < 0 ||
+          !Number.isSafeInteger(chunk.revision) ||
+          chunk.revision < 1 ||
+          !Number.isSafeInteger(chunk.changes) ||
+          chunk.changes < 0
+        ) {
+          throw new Error('Inbox search participant text snapshot is invalid.');
+        }
+        if (
+          snapshot &&
+          (chunk.byteLength !== snapshot.byteLength ||
+            chunk.revision !== snapshot.revision ||
+            chunk.changes !== snapshot.changes)
+        ) {
+          throw new InboxSearchTextChangedError();
+        }
+        // Revision catches rollback; the connection counter catches rollback + same-revision
+        // rewrite. Unrelated writes can also retire this rare oversized-name read conservatively.
+        snapshot ??= {
+          byteLength: chunk.byteLength,
+          revision: chunk.revision,
+          changes: chunk.changes,
+        };
+        const byteCount = Math.min(INBOX_SEARCH_NAME_CHUNK_BYTES, snapshot.byteLength - offset);
+        const hex = chunk.participantChunk;
+        if (typeof hex !== 'string' || hex.length !== byteCount * 2 || !/^[0-9A-F]*$/.test(hex)) {
+          throw new Error('Inbox search participant text chunk is invalid.');
+        }
+        const bytes = new Uint8Array(byteCount);
+        for (let index = 0; index < byteCount; index += 1) {
+          bytes[index] = Number.parseInt(hex.slice(index * 2, index * 2 + 2), 16);
+        }
+        parts.push(decoder.decode(bytes, { stream: true }));
+        offset += byteCount;
+        if (offset === snapshot.byteLength) {
+          parts.push(decoder.decode());
+          return parts.join('');
+        }
+        pages += 1;
+      }
+    } catch (error) {
+      if (!(error instanceof InboxSearchTextChangedError) || attempt >= 1) throw error;
+      checkCurrent();
+      // One fresh attempt lets a completed rename/index update settle, without unbounded retries.
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+  }
+}
+
 /**
  * Verify participant text without asking SQLite to materialize a data-sized group_concat. The
- * row and bridge result of every call are capped; exact scans may still need multiple cancellable
- * pages for a very large group. Rolling prefix/suffix summaries preserve matches across both the
- * literal participant separator and the resolved-title/participant boundary.
+ * participant pages cap both row count and inline name bytes; larger names use cancellable byte
+ * reads. Full-name folding and total group work remain data-sized. Rolling prefix/suffix summaries
+ * preserve matches across the participant separator and resolved-title/participant boundary.
  */
 async function exactInboxSearchNameMatches(
   db: AppDatabase,
@@ -273,9 +393,13 @@ async function exactInboxSearchNameMatches(
       chatId: number;
       handleId: number;
       participantName: string | null;
+      participantBytes: number | null;
     }>(sql`
       SELECT ch.chat_id AS chatId, h.id AS handleId,
-             COALESCE(h.display_name, h.address) AS participantName
+             length(CAST(COALESCE(h.display_name, h.address) AS BLOB)) AS participantBytes,
+             CASE WHEN length(CAST(COALESCE(h.display_name, h.address) AS BLOB))
+                         <= ${INBOX_SEARCH_INLINE_NAME_BYTES}
+                  THEN COALESCE(h.display_name, h.address) ELSE NULL END AS participantName
         FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
        WHERE ch.chat_id IN (
                SELECT CAST(value AS INTEGER) FROM json_each(${activeIdsJson})
@@ -314,18 +438,34 @@ async function exactInboxSearchNameMatches(
       if (!Number.isSafeInteger(state.participantCount)) {
         throw new Error('Inbox search participant count is invalid.');
       }
-      if (participant.participantName == null) continue;
-      if (typeof participant.participantName !== 'string') {
+      const nameBytes = participant.participantBytes;
+      if (nameBytes == null) {
+        if (participant.participantName == null) continue;
+        throw new Error('Inbox search participant text length is invalid.');
+      }
+      if (!Number.isSafeInteger(nameBytes) || nameBytes < 0) {
+        throw new Error('Inbox search participant text length is invalid.');
+      }
+      const participantName =
+        nameBytes > INBOX_SEARCH_INLINE_NAME_BYTES
+          ? await readLargeInboxSearchParticipantName(
+              db,
+              participant.chatId,
+              participant.handleId,
+              checkCurrent,
+            )
+          : participant.participantName;
+      if (typeof participantName !== 'string') {
         throw new Error('Inbox search participant name is invalid.');
       }
 
       if (state.rawValueCount > 0) {
         appendInboxSearchText(state.rawParticipants, ', ', foldedQuery);
       }
-      appendInboxSearchText(state.rawParticipants, participant.participantName, foldedQuery);
+      appendInboxSearchText(state.rawParticipants, participantName, foldedQuery);
       state.rawValueCount += 1;
 
-      const titlePart = participant.participantName.trim();
+      const titlePart = participantName.trim();
       if (titlePart) {
         if (state.participantTitlePartCount > 0) {
           appendInboxSearchText(state.participantTitle, ', ', foldedQuery);
@@ -544,8 +684,8 @@ export async function listChatsForInboxPage(
 }
 
 function compareInboxSearchCandidates(
-  left: InboxSearchCandidate,
-  right: InboxSearchCandidate,
+  left: InboxSearchRankedIdentity,
+  right: InboxSearchRankedIdentity,
 ): number {
   if (left.isPinned !== right.isPinned) return left.isPinned === 1 ? -1 : 1;
 
@@ -598,7 +738,8 @@ function boundedMessageMatchSet(guids: readonly string[] | undefined): Set<strin
  * high-water mark prevents sustained inserts from extending one refresh forever. Common bigrams
  * or a dirty migration backlog can still require many pages; each candidate-id call, returned row
  * set, decorated set, and participant result page remain capped. An exact participant scan may
- * still require data-sized total pages, and an individual participant field remains data-sized.
+ * still require data-sized total pages. Participant transfers are byte-bounded, but reconstructing
+ * and folding one full name, candidate title fields, and final decoration remain data-sized.
  */
 export async function searchChatsForInboxPage(
   db: AppDatabase,
@@ -634,7 +775,7 @@ export async function searchChatsForInboxPage(
 
   let cursor = 0;
   let pages = 0;
-  const retained: InboxSearchCandidate[] = [];
+  const retained: InboxSearchRankedIdentity[] = [];
   while (cursor < highWater) {
     checkCurrent();
     if (pages > 0 && pages % INBOX_SEARCH_PAGES_PER_YIELD === 0) {
@@ -642,7 +783,7 @@ export async function searchChatsForInboxPage(
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
       checkCurrent();
     }
-    const rawCandidates = (await db.all<{ id: number; isCandidate: number }>(sql`
+    const rawCandidates = await db.all<InboxSearchRawCandidate>(sql`
       WITH posting_window AS MATERIALIZED (
         SELECT p.chat_id AS id FROM inbox_search_postings p
          WHERE p.gram = ${firstGram} AND p.chat_id > ${cursor} AND p.chat_id <= ${highWater}
@@ -663,7 +804,7 @@ export async function searchChatsForInboxPage(
           UNION SELECT id FROM message_window
         )
         ORDER BY id ASC LIMIT ${INBOX_SEARCH_CANDIDATE_PAGE_SIZE}
-      )
+      ), classified_ids AS MATERIALIZED (
       SELECT raw.id,
              CASE WHEN
                EXISTS (SELECT 1 FROM inbox_search_state dirty
@@ -685,8 +826,26 @@ export async function searchChatsForInboxPage(
                  )
                )
              THEN 1 ELSE 0 END AS isCandidate
-        FROM raw_ids raw ORDER BY raw.id ASC
-    `)) as Array<{ id: number; isCandidate: number }>;
+        FROM raw_ids raw
+      ), candidate_details AS MATERIALIZED (
+        SELECT c.id, c.guid, c.chat_identifier AS chatIdentifier,
+               c.display_name AS displayName, c.custom_name AS customName, c.style,
+               c.is_pinned AS isPinned, c.pin_order AS pinOrder,
+               c.latest_message_date AS latestMessageDate
+          -- Resolve capped ids by rowid, not an archive-index scan of the active inbox per page.
+          FROM chats c NOT INDEXED
+         WHERE c.id IN (SELECT id FROM classified_ids WHERE isCandidate = 1)
+           AND c.is_archived = 0
+           AND c.is_pinned IN (0, 1)
+           AND ${chatVisible('c')}
+      )
+      SELECT raw.id, raw.isCandidate, details.id AS candidateId,
+             details.guid, details.chatIdentifier, details.displayName, details.customName,
+             details.style, details.isPinned, details.pinOrder, details.latestMessageDate
+        FROM classified_ids raw
+        LEFT JOIN candidate_details details ON details.id = raw.id
+       ORDER BY raw.id ASC
+    `);
     checkCurrent();
     if (rawCandidates.length === 0) break;
     for (const row of rawCandidates) {
@@ -699,24 +858,37 @@ export async function searchChatsForInboxPage(
         throw new Error('Inbox search candidate cursor is invalid.');
       }
     }
-    const candidateIds = rawCandidates.filter((row) => row.isCandidate === 1).map((row) => row.id);
-    const candidates: InboxSearchCandidate[] =
-      candidateIds.length === 0
-        ? []
-        : await db.all<InboxSearchCandidate>(sql`
-            SELECT c.id, c.guid, c.chat_identifier AS chatIdentifier,
-                   c.display_name AS displayName, c.custom_name AS customName, c.style,
-                   c.is_pinned AS isPinned, c.pin_order AS pinOrder,
-                   c.latest_message_date AS latestMessageDate
-              FROM chats c
-             WHERE c.id IN (
-               SELECT CAST(value AS INTEGER) FROM json_each(${JSON.stringify(candidateIds)})
-             )
-               AND c.is_archived = 0
-               AND c.is_pinned IN (0, 1)
-               AND ${chatVisible('c')}
-             ORDER BY c.id ASC
-          `);
+    // Until the extra exact match is known, even a worse-ranked candidate may establish hasMore.
+    // Once full, the retained threshold can only improve; a dominated candidate cannot affect
+    // either the result page or its sentinel, regardless of its title/participants.
+    const worstRetained =
+      retained.length === retainedLimit ? retained[retained.length - 1] : undefined;
+    const candidates: InboxSearchCandidate[] = [];
+    for (const row of rawCandidates) {
+      // Hidden/rejected rows still advance the raw cursor even though their details are absent.
+      if (row.candidateId === null) continue;
+      if (
+        row.candidateId !== row.id ||
+        row.isCandidate !== 1 ||
+        typeof row.guid !== 'string' ||
+        (row.isPinned !== 0 && row.isPinned !== 1)
+      ) {
+        throw new Error('Inbox search candidate details are invalid.');
+      }
+      const candidate: InboxSearchCandidate = {
+        id: row.id,
+        guid: row.guid,
+        chatIdentifier: row.chatIdentifier,
+        displayName: row.displayName,
+        customName: row.customName,
+        style: row.style,
+        isPinned: row.isPinned,
+        pinOrder: row.pinOrder,
+        latestMessageDate: row.latestMessageDate,
+      };
+      if (worstRetained && compareInboxSearchCandidates(candidate, worstRetained) >= 0) continue;
+      candidates.push(candidate);
+    }
     checkCurrent();
 
     const nameMatches = await exactInboxSearchNameMatches(
@@ -729,7 +901,10 @@ export async function searchChatsForInboxPage(
 
     for (const candidate of candidates) {
       if (!nameMatches.has(candidate.id) && !messageMatchGuids.has(candidate.guid)) continue;
-      retained.push(candidate);
+      // The complete title fields are needed only during this page's exact match, not while
+      // keeping the best identities across every later candidate page.
+      const { id, guid, isPinned, pinOrder, latestMessageDate } = candidate;
+      retained.push({ id, guid, isPinned, pinOrder, latestMessageDate });
       retained.sort(compareInboxSearchCandidates);
       if (retained.length > retainedLimit) retained.pop();
     }

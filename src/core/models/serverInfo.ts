@@ -79,6 +79,10 @@ export const ServerInfo = z
     supports_message_deleted: z.boolean().nullish(),
     /** Whether the server can hold one stable view across multi-request sync/repair crawls. */
     supports_repair_snapshot: z.boolean().nullish(),
+    supports_message_state_sync: z.boolean().nullish(),
+    message_state_sync_version: z.number().int().nullish(),
+    imessage_provider_epoch: z.string().uuid().nullish(),
+    supports_provider_repair_snapshot: z.boolean().nullish(),
     /**
      * Whether the server exposes bounded text search over its live Messages database. Additive;
      * absent/false on older servers, so global search remains local-only until support is explicit.
@@ -115,6 +119,8 @@ export const ServerInfo = z
     supports_imessage_pdf_attachment_upload: z.boolean().nullish(),
     /** A separate narrow gate for nonblank text sent with that same one-file iMessage upload. */
     supports_imessage_attachment_caption_upload: z.boolean().nullish(),
+    /** One bounded plain-text send whose durable acknowledgement carries the native message GUID. */
+    supports_imessage_plain_text: z.boolean().nullish(),
     /** Classic tapbacks on a proven existing one-to-one iMessage, independent of broad Private API. */
     supports_imessage_reactions: z.boolean().nullish(),
     /** Plain-text reply to exact part zero in a proven existing one-to-one iMessage chat. */
@@ -220,6 +226,7 @@ export function serverSendCapabilityKey(info: ServerInfo | null | undefined): st
     info.supports_imessage_attachment_upload === true,
     info.supports_imessage_pdf_attachment_upload === true,
     info.supports_imessage_attachment_caption_upload === true,
+    info.supports_imessage_plain_text === true,
     info.supports_imessage_reactions === true,
     info.supports_imessage_replies === true,
     info.supports_imessage_edit === true,

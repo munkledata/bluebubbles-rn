@@ -123,3 +123,9 @@ The selected UI aggregate must fail CI below 82% statements, 76% branches, 78% f
 at or above 70% statements/lines and 60% branches/functions, unless the master plan records a stricter
 behavior-based exception. Coverage gained only through barrel imports, empty renders, snapshots, or
 mock echoes does not satisfy this boundary.
+
+The aggregate measures production UI. It excludes only UI barrel exports and the two development-only
+device harnesses, `ColdInboxBenchmarkScreen.tsx` and `PerfInboxBenchmarkScreen.tsx`. The release-route
+guards are exercised in `test/components/routes/perfRoutes.test.tsx`; production conversation-list
+code remains covered and all numeric floors remain unchanged. This scope does not establish device
+performance or prove that benchmark code is absent from the release bundle.

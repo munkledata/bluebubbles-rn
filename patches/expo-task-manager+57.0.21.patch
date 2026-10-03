@@ -1,15 +1,27 @@
+diff --git a/node_modules/expo-task-manager/android/build.gradle b/node_modules/expo-task-manager/android/build.gradle
+index 44ed4fd..00e6e20 100644
+--- a/node_modules/expo-task-manager/android/build.gradle
++++ b/node_modules/expo-task-manager/android/build.gradle
+@@ -19,6 +19,7 @@ dependencies {
+   implementation project(':unimodules-app-loader')
+   api "androidx.core:core:1.17.0"
+   compileOnly "com.facebook.react:react-android"
++  testRuntimeOnly "com.facebook.react:react-android"
+   testImplementation 'junit:junit:4.13.2'
+   testImplementation 'org.robolectric:robolectric:4.16'
+ }
 diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java
 index 82bc0db..5c61a89 100644
 --- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java
 +++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java
 @@ -15,6 +15,7 @@ import android.os.PersistableBundle;
  import android.util.Log;
-
+ 
  import java.util.ArrayList;
 +import java.util.Collections;
  import java.util.List;
  import java.util.Map;
-
+ 
 @@ -73,7 +74,10 @@ public class TaskManagerUtils implements TaskManagerUtilsInterface {
    @Override
    public void executeTask(TaskInterface task, Bundle data, @Nullable TaskExecutionCallback callback) {
@@ -23,7 +35,7 @@ index 82bc0db..5c61a89 100644
        task.execute(data, null, callback);
      }
 diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java
-index de829ca..330e839 100644
+index 8416444..b5a05ed 100644
 --- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java
 +++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java
 @@ -16,6 +16,7 @@ import org.json.JSONObject;
@@ -39,13 +51,13 @@ index de829ca..330e839 100644
    private static final String SHARED_PREFERENCES_NAME = "TaskManagerModule";
    private static final int MAX_TASK_EXECUTION_TIME_MS = 15000; // 15 seconds
 +  private static final Object sTaskExecutionLock = new Object();
-
+ 
    private WeakReference<Context> mContextRef;
    private TaskManagerUtilsInterface mTaskManagerUtils;
 @@ -76,9 +78,12 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
    // Map of callbacks for task execution events. Schema: { "<eventId>": TaskExecutionCallback }
    private static final Map<String, TaskExecutionCallback> sTaskCallbacks = new HashMap<>();
-
+ 
 -  // Tracks headless JS task IDs per appScopeKey, used to keep JS timers alive
 -  // during background task execution. See maybeStartHeadlessTask().
 -  private static final Map<String, Integer> sHeadlessTaskIds = new HashMap<>();
@@ -55,7 +67,7 @@ index de829ca..330e839 100644
 +
 +  // Identifies the only event generation allowed to start a headless JS timer keeper.
 +  private static final Map<String, Object> sHeadlessStartTokens = new HashMap<>();
-
+ 
    public TaskService(Context context) {
      super();
 @@ -208,29 +213,38 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
@@ -65,7 +77,7 @@ index de829ca..330e839 100644
 -    List<String> appEvents = sEvents.get(appScopeKey);
 -
      Log.i(TAG, "Finished task '" + taskName + "' with eventId '" + eventId + "'.");
-
+ 
 -    if (appEvents != null) {
 -      appEvents.remove(eventId);
 -
@@ -78,7 +90,7 @@ index de829ca..330e839 100644
 +      List<String> appEvents = sEvents.get(appScopeKey);
 +      if (appEvents != null) {
 +        appEvents.remove(eventId);
-
+ 
 -        // Invalidate app record but after 2 seconds delay so we can still take batched events.
 -        Handler handler = new Handler();
 -        handler.postDelayed(() -> {
@@ -93,7 +105,7 @@ index de829ca..330e839 100644
        }
 +      taskCallback = sTaskCallbacks.remove(eventId);
      }
-
+ 
 -    // Invoke task callback
 -    TaskExecutionCallback taskCallback = sTaskCallbacks.remove(eventId);
 +    if (finishedHeadlessStartToken != null) {
@@ -111,24 +123,26 @@ index de829ca..330e839 100644
 +        }
 +      }, 2000);
 +    }
-
+ 
      if (taskCallback != null) {
        taskCallback.onFinished(response);
-@@ -241,7 +255,9 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+@@ -241,8 +255,10 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
    public void setTaskManager(TaskManagerInterface taskManager, String appScopeKey, String appUrl) {
      // It may be called with null when the host activity is destroyed.
      if (taskManager == null) {
 -      sTaskManagers.remove(appScopeKey);
+-      sHeadlessTaskManagers.remove(appScopeKey);
 +      synchronized (sTaskExecutionLock) {
 +        sTaskManagers.remove(appScopeKey);
++        sHeadlessTaskManagers.remove(appScopeKey);
 +      }
        return;
      }
-
-@@ -251,21 +267,30 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+ 
+@@ -252,21 +268,30 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
      boolean isHeadless = isStartedByHeadlessLoader(appScopeKey);
      Map<String, WeakReference<TaskManagerInterface>> taskManagers = isHeadless ? sHeadlessTaskManagers : sTaskManagers;
-
+ 
 -    // Set task manager in appropriate map.
 -    taskManagers.put(appScopeKey, new WeakReference<>(taskManager));
 -
@@ -142,7 +156,7 @@ index de829ca..330e839 100644
 +      eventsQueue = mTasksAndEventsRepository.getEvents(appScopeKey);
 +      mTasksAndEventsRepository.removeEvents(appScopeKey);
 +    }
-
+ 
 +    // Execute events only after releasing the handoff lock so JavaScript cannot call back into it.
      if (eventsQueue != null) {
        for (Bundle body : eventsQueue) {
@@ -158,21 +172,21 @@ index de829ca..330e839 100644
 +        }
        }
      }
-
+ 
 -    // Remove events queue for that app.
 -    mTasksAndEventsRepository.removeEvents(appScopeKey);
 -
      if (!isHeadless) {
        // Maybe update app url in user defaults. It might change only in non-headless mode.
        maybeUpdateAppUrlForAppScopeKey(appUrl, appScopeKey);
-@@ -377,66 +402,147 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
-
+@@ -378,66 +403,147 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+ 
    public void executeTask(TaskInterface task, Bundle data, Error error, TaskExecutionCallback callback) {
      String appScopeKey = task.getAppScopeKey();
 -    TaskManagerInterface taskManager = getTaskManager(appScopeKey);
      Bundle body = createExecutionEventBody(task, data, error);
      Bundle executionInfo = body.getBundle("executionInfo");
-
+ 
      if (executionInfo == null) {
 -      // it should never happen, just to suppress warnings :)
 +      Log.e(TAG, "Task execution body is missing execution info; completing callback with failure.");
@@ -181,7 +195,7 @@ index de829ca..330e839 100644
 +      }
        return;
      }
-
+ 
      String eventId = executionInfo.getString("eventId");
 -
 -    if (callback != null) {
@@ -193,7 +207,7 @@ index de829ca..330e839 100644
 +      }
 +      return;
      }
-
+ 
 -    boolean isFirstEvent = sEvents.get(appScopeKey) == null;
 -    final List<String> appEvents;
 -    if (isFirstEvent) {
@@ -209,7 +223,7 @@ index de829ca..330e839 100644
 +    final Object headlessStartToken;
 +    synchronized (sTaskExecutionLock) {
 +      taskManager = getTaskManager(appScopeKey);
-
+ 
 -    // Register with HeadlessJsTaskContext to keep JS timers alive while
 -    // the app is backgrounded. Without this, JavaTimerManager pauses all
 -    // timers when the Activity is paused (isPaused=true && isRunningTasks=false),
@@ -241,7 +255,7 @@ index de829ca..330e839 100644
 +        mTasksAndEventsRepository.putEventForAppScopeKey(appScopeKey, body);
 +      }
      }
-
+ 
      if (taskManager != null) {
 -      taskManager.executeTaskWithBody(body);
 +      if (headlessStartToken != null) {
@@ -253,29 +267,22 @@ index de829ca..330e839 100644
 +        Log.e(TAG, "Task manager threw before JavaScript dispatch; completing task with failure.", e);
 +        finishClaimedTaskExecutionWithFailure(appScopeKey, eventId);
 +      }
-+      return;
-+    }
-+
+       return;
+     }
+ 
+-    // The app is not fully loaded as its task manager is not there yet.
+-    // We need to add event's body to the queue from which events will be executed once the task manager is ready.
+-    if (!mTasksAndEventsRepository.hasEvents(appScopeKey)) {
+-      mTasksAndEventsRepository.putEvents(appScopeKey, new ArrayList<>());
 +    HeadlessAppLoader appLoader = getAppLoader();
 +    Context context = mContextRef.get();
 +    if (appLoader == null || context == null) {
 +      Log.e(TAG, "Headless app loader is unavailable; completing pending tasks with failure.");
 +      finishPendingTaskExecutionWithFailure(appScopeKey, eventId, body);
-       return;
-     }
-
--    // The app is not fully loaded as its task manager is not there yet.
--    // We need to add event's body to the queue from which events will be executed once the task manager is ready.
--    if (!mTasksAndEventsRepository.hasEvents(appScopeKey)) {
--      mTasksAndEventsRepository.putEvents(appScopeKey, new ArrayList<>());
-+    // Register with HeadlessJsTaskContext to keep JS timers alive while
-+    // the app is backgrounded. Resolve the loader first so an unavailable native bootstrap does
-+    // not leave a dormant ReactContext listener behind on every WorkManager retry.
-+    if (headlessStartToken != null) {
-+      maybeStartHeadlessTask(appScopeKey, headlessStartToken);
++      return;
      }
 -    mTasksAndEventsRepository.putEventForAppScopeKey(appScopeKey, body);
-
+ 
 -    getAppLoader().loadApp(mContextRef.get(),
 -      new HeadlessAppLoader.Params(appScopeKey, task.getAppUrl()),
 -      () -> {
@@ -284,6 +291,15 @@ index de829ca..330e839 100644
 -        if (!success) {
 -          sEvents.remove(appScopeKey);
 -          mTasksAndEventsRepository.removeEvents(appScopeKey);
++    // Register with HeadlessJsTaskContext to keep JS timers alive while
++    // the app is backgrounded. Resolve the loader first so an unavailable native bootstrap does
++    // not leave a dormant ReactContext listener behind on every WorkManager retry.
++    if (headlessStartToken != null) {
++      maybeStartHeadlessTask(appScopeKey, headlessStartToken);
++    }
+ 
+-          // Host unreachable? Unregister all tasks for that app.
+-          unregisterAllTasksForAppScopeKey(appScopeKey);
 +    try {
 +      appLoader.loadApp(context,
 +        new HeadlessAppLoader.Params(appScopeKey, task.getAppUrl()),
@@ -296,16 +312,14 @@ index de829ca..330e839 100644
 +            Log.e(TAG, "Headless app load failed; completing pending tasks with failure.");
 +            finishPendingTaskExecutionWithFailure(appScopeKey, eventId, body);
 +          }
-+        }
+         }
 +      );
 +    } catch (Exception e) {
 +      Log.e(TAG, "Headless app loader threw before JavaScript dispatch; completing pending tasks with failure.", e);
 +      finishPendingTaskExecutionWithFailure(appScopeKey, eventId, body);
 +    }
 +  }
-
--          // Host unreachable? Unregister all tasks for that app.
--          unregisterAllTasksForAppScopeKey(appScopeKey);
++
 +  /**
 +   * Settles exactly one event only while it remains in the pre-JavaScript queue. A late loader
 +   * failure cannot complete work that setTaskManager already handed to JavaScript, and a failed
@@ -326,7 +340,8 @@ index de829ca..330e839 100644
 +    synchronized (sTaskExecutionLock) {
 +      if (pendingBody != null && !mTasksAndEventsRepository.removeEventForAppScopeKey(appScopeKey, pendingBody)) {
 +        return;
-+      }
+       }
+-    );
 +
 +      List<String> appEvents = sEvents.get(appScopeKey);
 +      if (appEvents != null) {
@@ -334,9 +349,8 @@ index de829ca..330e839 100644
 +        if (appEvents.isEmpty()) {
 +          sEvents.remove(appScopeKey);
 +          finishedHeadlessStartToken = sHeadlessStartTokens.remove(appScopeKey);
-         }
-       }
--    );
++        }
++      }
 +      taskCallback = sTaskCallbacks.remove(eventId);
 +    }
 +
@@ -349,12 +363,12 @@ index de829ca..330e839 100644
 +      taskCallback.onFinished(response);
 +    }
    }
-
+ 
    //endregion
-@@ -450,6 +556,12 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+@@ -451,6 +557,12 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
      }
    }
-
+ 
 +  @Nullable
 +  private String getTaskEventId(Bundle body) {
 +    Bundle executionInfo = body.getBundle("executionInfo");
@@ -364,7 +378,7 @@ index de829ca..330e839 100644
    private void internalRegisterTask(String taskName, String appScopeKey, String appUrl, Class<TaskConsumerInterface> consumerClass, Map<String, Object> options) throws TaskRegisteringFailedException {
      Constructor<?> consumerConstructor;
      TaskConsumerInterface consumer;
-@@ -599,20 +711,24 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+@@ -600,13 +712,15 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
     */
    @Nullable
    private TaskManagerInterface getTaskManager(String appScopeKey) {
@@ -373,7 +387,7 @@ index de829ca..330e839 100644
 +    synchronized (sTaskExecutionLock) {
 +      WeakReference<TaskManagerInterface> weakRef = sTaskManagers.get(appScopeKey);
 +      TaskManagerInterface taskManager = weakRef == null ? null : weakRef.get();
-
+ 
 -    if (taskManager == null) {
 -      weakRef = sHeadlessTaskManagers.get(appScopeKey);
 +      if (taskManager == null) {
@@ -383,19 +397,9 @@ index de829ca..330e839 100644
      }
 -    return weakRef == null ? null : weakRef.get();
    }
-
+ 
    private void invalidateAppRecord(String appScopeKey) {
-     HeadlessAppLoader appLoader = getAppLoader();
-     if (appLoader != null) {
-       if (getAppLoader().invalidateApp(appScopeKey)) {
--        sHeadlessTaskManagers.remove(appScopeKey);
-+        synchronized (sTaskExecutionLock) {
-+          sHeadlessTaskManagers.remove(appScopeKey);
-+        }
-       }
-     }
-   }
-@@ -630,24 +746,24 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+@@ -629,24 +743,24 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
     *
     * @see <a href="https://github.com/facebook/react-native/blob/63800af9438ea9ddaec84b6f17793a4f1bffe342/packages/react-native/ReactAndroid/src/main/java/com/facebook/react/modules/core/JavaTimerManager.kt#L291">JavaTimerManager timer guard</a>
     */
@@ -404,7 +408,7 @@ index de829ca..330e839 100644
      try {
        Context context = mContextRef.get();
        if (context == null) return;
-
+ 
        ReactContext reactContext = getReactContext(context);
        if (reactContext != null) {
 -        invokeStartHeadlessTask(reactContext, appScopeKey);
@@ -418,14 +422,14 @@ index de829ca..330e839 100644
        Log.w(TAG, "Failed to start headless task: " + e.getMessage());
      }
    }
-
+ 
 -  private void invokeStartHeadlessTask(ReactContext reactContext, String appScopeKey) {
 +  private void invokeStartHeadlessTask(ReactContext reactContext, String appScopeKey, Object headlessStartToken) {
      HeadlessJsTaskContext headlessContext = HeadlessJsTaskContext.getInstance(reactContext);
      HeadlessJsTaskConfig taskConfig = new HeadlessJsTaskConfig(
        "expo-task-manager",
-@@ -658,8 +774,21 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
-
+@@ -657,8 +771,21 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+ 
      UiThreadUtil.runOnUiThread(() -> {
        try {
 +        synchronized (sTaskExecutionLock) {
@@ -447,16 +451,16 @@ index de829ca..330e839 100644
          Log.i(TAG, "Started headless task " + taskId + " to keep JS timers alive for '" + appScopeKey + "'");
        } catch (Exception e) {
          Log.w(TAG, "Failed to start headless task: " + e.getMessage());
-@@ -667,7 +796,7 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+@@ -666,7 +793,7 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
      });
    }
-
+ 
 -  private void waitForReactContextAndStartTask(Context context, String appScopeKey) {
 +  private void waitForReactContextAndStartTask(Context context, String appScopeKey, Object headlessStartToken) {
      ReactApplication app = (ReactApplication) context.getApplicationContext();
      ReactHost reactHost = app.getReactHost();
      if (reactHost == null) return;
-@@ -675,8 +804,14 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+@@ -674,8 +801,14 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
      reactHost.addReactInstanceEventListener(new ReactInstanceEventListener() {
        @Override
        public void onReactContextInitialized(@NonNull ReactContext reactContext) {
@@ -472,7 +476,7 @@ index de829ca..330e839 100644
        }
      });
    }
-@@ -685,11 +820,11 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+@@ -684,11 +817,11 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
     * Finishes the headless JS task for the given appScopeKey, allowing JavaTimerManager
     * to pause timers again when all background tasks are complete.
     */
@@ -484,7 +488,7 @@ index de829ca..330e839 100644
 -      Integer taskId = sHeadlessTaskIds.remove(appScopeKey);
 +      Integer taskId = sHeadlessTaskIds.remove(headlessStartToken);
        if (taskId == null) return;
-
+ 
        try {
 diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/BareTasksAndEventsRepository.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/BareTasksAndEventsRepository.java
 index 5d20b8a..581042d 100644
@@ -493,7 +497,7 @@ index 5d20b8a..581042d 100644
 @@ -48,6 +48,18 @@ public class BareTasksAndEventsRepository implements TasksAndEventsRepository {
      sEvents.get(appScopeKey).add(body);
    }
-
+ 
 +  @Override
 +  public boolean removeEventForAppScopeKey(String appScopeKey, Bundle body) {
 +    List<Bundle> events = sEvents.get(appScopeKey);
@@ -516,7 +520,7 @@ index df04404..b7f8a4f 100644
 @@ -39,6 +39,18 @@ public class ManagedTasksAndEventsRepository implements TasksAndEventsRepository
      sEvents.get(appScopeKey).add(body);
    }
-
+ 
 +  @Override
 +  public boolean removeEventForAppScopeKey(String appScopeKey, Bundle body) {
 +    List<Bundle> events = sEvents.get(appScopeKey);
@@ -537,10 +541,323 @@ index 185a391..db4f67d 100644
 --- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/TasksAndEventsRepository.java
 +++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/TasksAndEventsRepository.java
 @@ -53,6 +53,7 @@ public interface TasksAndEventsRepository {
-
+ 
    void putEvents(String appScopeKey, List<Bundle> events);
    void putEventForAppScopeKey(String appScopeKey, Bundle body);
 +  boolean removeEventForAppScopeKey(String appScopeKey, Bundle body);
    boolean hasEvents(String appScopeKey);
    void removeEvents(String appScopeKey);
    List<Bundle> getEvents(String appScopeKey);
+diff --git a/node_modules/expo-task-manager/android/src/test/java/expo/modules/taskManager/TaskServiceContextLifetimeTest.java b/node_modules/expo-task-manager/android/src/test/java/expo/modules/taskManager/TaskServiceContextLifetimeTest.java
+new file mode 100644
+index 0000000..d9a8694
+--- /dev/null
++++ b/node_modules/expo-task-manager/android/src/test/java/expo/modules/taskManager/TaskServiceContextLifetimeTest.java
+@@ -0,0 +1,267 @@
++package expo.modules.taskManager;
++
++import static org.junit.Assert.assertFalse;
++import static org.junit.Assert.assertNull;
++import static org.junit.Assert.assertSame;
++import static org.junit.Assert.assertTrue;
++import static org.robolectric.Shadows.shadowOf;
++
++import android.app.Application;
++import android.content.Context;
++import android.content.pm.ApplicationInfo;
++import android.os.Bundle;
++
++import java.lang.ref.WeakReference;
++import java.lang.reflect.Field;
++import java.lang.reflect.Method;
++import java.util.ArrayList;
++import java.util.HashMap;
++import java.util.HashSet;
++import java.util.List;
++import java.util.Map;
++import java.util.Set;
++import java.util.UUID;
++
++import org.junit.After;
++import org.junit.Before;
++import org.junit.Test;
++import org.junit.runner.RunWith;
++import org.robolectric.RobolectricTestRunner;
++import org.robolectric.RuntimeEnvironment;
++import org.robolectric.annotation.Config;
++
++import expo.modules.apploader.AppLoaderProvider;
++import expo.modules.apploader.HeadlessAppLoader;
++import expo.modules.core.interfaces.Consumer;
++import expo.modules.interfaces.taskManager.TaskManagerInterface;
++import expo.modules.taskManager.repository.BareTasksAndEventsRepository;
++
++/** Exercises the real TaskService; only the app loader and JS managers are fakes. */
++@RunWith(RobolectricTestRunner.class)
++// Robolectric's API 36 image requires Java 21. These map-lifecycle transitions
++// use no API 36 behavior, so API 35 keeps the test runnable with the build's JDK 17.
++@Config(manifest = Config.NONE, sdk = 35, application = Application.class)
++public class TaskServiceContextLifetimeTest {
++  private final List<AutoCloseable> restorations = new ArrayList<>();
++  private final FakeLoader loader = new FakeLoader();
++  private final String scopeA = "context-lifetime-a-" + UUID.randomUUID();
++  private final String scopeB = "context-lifetime-b-" + UUID.randomUUID();
++  private Map<Object, Object> foregroundManagers;
++  private Map<Object, Object> headlessManagers;
++  private TaskService service;
++
++  @Before
++  public void setUp() throws Exception {
++    Application application = RuntimeEnvironment.getApplication();
++    // TaskService's repository factory expects manifest metadata. Mutate the shadow's
++    // actual package record, rather than the copy returned by getApplicationInfo().
++    ApplicationInfo applicationInfo = shadowOf(application.getPackageManager())
++        .getInternalMutablePackageInfo(application.getPackageName()).applicationInfo;
++    Bundle originalMetadata = applicationInfo.metaData;
++    restorations.add(() -> applicationInfo.metaData = originalMetadata);
++    applicationInfo.metaData = originalMetadata == null
++        ? new Bundle() : new Bundle(originalMetadata);
++    applicationInfo.metaData.putBoolean("expo.modules.taskManager.oneAppId", true);
++
++    foregroundManagers = isolateMap(TaskService.class, "sTaskManagers");
++    headlessManagers = isolateMap(TaskService.class, "sHeadlessTaskManagers");
++    isolateMap(AppLoaderProvider.class, "loaders").put("react-native-headless", loader);
++    // Non-null empty tasks avoid constructor restoration from shared preferences.
++    // Keep the original map objects and their contents intact for the next test.
++    replaceField(BareTasksAndEventsRepository.class, "sTasks", new HashMap<>());
++    replaceField(BareTasksAndEventsRepository.class, "sEvents", new HashMap<>());
++    service = new TaskService(application);
++  }
++
++  @After
++  public void tearDown() throws Exception {
++    Exception failure = null;
++    for (int index = restorations.size() - 1; index >= 0; index--) {
++      try {
++        restorations.get(index).close();
++      } catch (Exception error) {
++        if (failure == null) {
++          failure = error;
++        } else {
++          failure.addSuppressed(error);
++        }
++      }
++    }
++    restorations.clear();
++    if (failure != null) {
++      throw failure;
++    }
++  }
++
++  @Test
++  public void successfulLoaderInvalidationRetainsManagerUntilContextDestruction()
++      throws Exception {
++    assertInvalidationRetainsManager(true);
++  }
++
++  @Test
++  public void unsuccessfulLoaderInvalidationRetainsManagerUntilContextDestruction()
++      throws Exception {
++    assertInvalidationRetainsManager(false);
++  }
++
++  @Test
++  public void contextDestructionRemovesBothManagersOnlyForItsScope() throws Exception {
++    FakeManager foregroundA = register(scopeA, false);
++    FakeManager headlessA = register(scopeA, true);
++    FakeManager foregroundB = register(scopeB, false);
++    FakeManager headlessB = register(scopeB, true);
++    assertSame(foregroundA, resolveManager(scopeA));
++    assertSame(headlessA, storedManager(headlessManagers, scopeA));
++
++    service.setTaskManager(null, scopeA, null);
++
++    assertFalse(foregroundManagers.containsKey(scopeA));
++    assertFalse(headlessManagers.containsKey(scopeA));
++    assertNull(resolveManager(scopeA));
++    assertSame(foregroundB, resolveManager(scopeB));
++    assertSame(foregroundB, storedManager(foregroundManagers, scopeB));
++    assertSame(headlessB, storedManager(headlessManagers, scopeB));
++    assertTrue(loader.invalidatedScopes.isEmpty());
++  }
++
++  @Test
++  public void newHeadlessManagerCanRegisterAfterContextDestruction() throws Exception {
++    FakeManager oldManager = register(scopeA, true);
++    assertSame(oldManager, resolveManager(scopeA));
++    service.setTaskManager(null, scopeA, null);
++    assertNull(resolveManager(scopeA));
++
++    FakeManager newManager = register(scopeA, true);
++
++    assertSame(newManager, resolveManager(scopeA));
++    assertSame(newManager, storedManager(headlessManagers, scopeA));
++  }
++
++  private void assertInvalidationRetainsManager(boolean invalidationResult) throws Exception {
++    FakeManager manager = register(scopeA, true);
++    assertSame(manager, resolveManager(scopeA));
++    loader.invalidationResult = invalidationResult;
++
++    Method invalidate = TaskService.class.getDeclaredMethod("invalidateAppRecord", String.class);
++    invalidate.setAccessible(true);
++    invalidate.invoke(service, scopeA);
++
++    assertTrue(loader.invalidatedScopes.contains(scopeA));
++    assertSame(manager, storedManager(headlessManagers, scopeA));
++    assertSame(manager, resolveManager(scopeA));
++    service.setTaskManager(null, scopeA, null);
++    assertNull(resolveManager(scopeA));
++    assertFalse(headlessManagers.containsKey(scopeA));
++  }
++
++  private FakeManager register(String scope, boolean headless) {
++    if (headless) {
++      loader.runningScopes.add(scope);
++    } else {
++      loader.runningScopes.remove(scope);
++    }
++    FakeManager manager = new FakeManager(scope);
++    // Unique scope keys have no persisted config, so foreground registration only
++    // reads preferences and cannot rewrite a previous test's saved task config.
++    service.setTaskManager(manager, scope, "test://context-lifetime");
++    return manager;
++  }
++
++  private TaskManagerInterface resolveManager(String scope) throws Exception {
++    Method getManager = TaskService.class.getDeclaredMethod("getTaskManager", String.class);
++    getManager.setAccessible(true);
++    return (TaskManagerInterface) getManager.invoke(service, scope);
++  }
++
++  private static Object storedManager(Map<Object, Object> managers, String scope) {
++    WeakReference<?> reference = (WeakReference<?>) managers.get(scope);
++    return reference == null ? null : reference.get();
++  }
++
++  @SuppressWarnings("unchecked")
++  private Map<Object, Object> isolateMap(Class<?> owner, String name) throws Exception {
++    Field field = owner.getDeclaredField(name);
++    field.setAccessible(true);
++    Map<Object, Object> map = (Map<Object, Object>) field.get(null);
++    Map<Object, Object> originalContents = new HashMap<>(map);
++    restorations.add(() -> {
++      map.clear();
++      map.putAll(originalContents);
++    });
++    map.clear();
++    return map;
++  }
++
++  private void replaceField(Class<?> owner, String name, Object replacement) throws Exception {
++    Field field = owner.getDeclaredField(name);
++    field.setAccessible(true);
++    Object original = field.get(null);
++    restorations.add(() -> field.set(null, original));
++    field.set(null, replacement);
++  }
++
++  private static final class FakeLoader implements HeadlessAppLoader {
++    final Set<String> runningScopes = new HashSet<>();
++    final Set<String> invalidatedScopes = new HashSet<>();
++    boolean invalidationResult;
++
++    @Override
++    public void loadApp(Context context, Params params, Runnable alreadyRunning,
++        Consumer<Boolean> callback) {
++      throw new AssertionError("These lifecycle tests must not launch a React context");
++    }
++
++    @Override
++    public boolean invalidateApp(String scope) {
++      invalidatedScopes.add(scope);
++      // A loader record can disappear before the still-live JS context is destroyed.
++      if (invalidationResult) {
++        runningScopes.remove(scope);
++      }
++      return invalidationResult;
++    }
++
++    @Override
++    public boolean isRunning(String scope) {
++      return runningScopes.contains(scope);
++    }
++  }
++
++  @SuppressWarnings("rawtypes")
++  private static final class FakeManager implements TaskManagerInterface {
++    private final String scope;
++
++    FakeManager(String scope) {
++      this.scope = scope;
++    }
++
++    @Override
++    public void registerTask(String name, Class consumerClass, Map<String, Object> options) {
++      throw new AssertionError("Unexpected task registration");
++    }
++
++    @Override
++    public void unregisterTask(String name, Class consumerClass) {
++      throw new AssertionError("Unexpected task unregistration");
++    }
++
++    @Override
++    public void executeTaskWithBody(Bundle body) {
++      throw new AssertionError("Unexpected queued event");
++    }
++
++    @Override
++    public boolean taskHasConsumerOfClass(String name, Class consumerClass) {
++      return false;
++    }
++
++    @Override
++    public void flushQueuedEvents() {}
++
++    @Override
++    public String getAppScopeKey() {
++      return scope;
++    }
++  }
++}
+diff --git a/node_modules/expo-task-manager/build/TaskManager.js b/node_modules/expo-task-manager/build/TaskManager.js
+index 8c25150..b342472 100644
+--- a/node_modules/expo-task-manager/build/TaskManager.js
++++ b/node_modules/expo-task-manager/build/TaskManager.js
+@@ -1,11 +1,11 @@
+ import { LegacyEventEmitter, Platform, UnavailabilityError } from 'expo-modules-core';
+ import { AppRegistry } from 'react-native';
+ import ExpoTaskManager from './ExpoTaskManager';
+-// Register a no-op headless task so that HeadlessJsTaskContext.startTask()
+-// doesn't log a warning. On Android, TaskService registers a headless task
+-// in native code to keep JS timers alive during background task execution.
++// Native TaskService owns this timer keeper's lifetime and finishes its exact task ID.
++// Resolving here makes React Native finish early and pause background retry/deadline timers.
++// Keep this promise resource-free: no timers, listeners, or retained resolver are needed.
+ if (Platform.OS === 'android') {
+-    AppRegistry.registerHeadlessTask('expo-task-manager', () => async () => { });
++    AppRegistry.registerHeadlessTask('expo-task-manager', () => () => new Promise(() => { }));
+ }
+ const tasks = new Map();
+ function _validate(taskName) {
+diff --git a/node_modules/expo-task-manager/src/TaskManager.ts b/node_modules/expo-task-manager/src/TaskManager.ts
+index 7e77c18..c117ecb 100644
+--- a/node_modules/expo-task-manager/src/TaskManager.ts
++++ b/node_modules/expo-task-manager/src/TaskManager.ts
+@@ -3,11 +3,11 @@ import { AppRegistry } from 'react-native';
+ 
+ import ExpoTaskManager from './ExpoTaskManager';
+ 
+-// Register a no-op headless task so that HeadlessJsTaskContext.startTask()
+-// doesn't log a warning. On Android, TaskService registers a headless task
+-// in native code to keep JS timers alive during background task execution.
++// Native TaskService owns this timer keeper's lifetime and finishes its exact task ID.
++// Resolving here makes React Native finish early and pause background retry/deadline timers.
++// Keep this promise resource-free: no timers, listeners, or retained resolver are needed.
+ if (Platform.OS === 'android') {
+-  AppRegistry.registerHeadlessTask('expo-task-manager', () => async () => {});
++  AppRegistry.registerHeadlessTask('expo-task-manager', () => () => new Promise<void>(() => {}));
+ }
+ 
+ // @needsAudit @docsMissing

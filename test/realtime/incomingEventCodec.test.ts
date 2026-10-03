@@ -20,6 +20,17 @@ const digest: DigestBackend = {
 const RECEIVED_AT = 1_800_000_000_000;
 
 const FIXTURES: Record<ServerEventName, unknown> = {
+  'message-state-changed': {
+    version: 1,
+    provider: 'imessage',
+    providerEpoch: '11111111-1111-4111-8111-111111111111',
+    ledgerEpoch: '22222222-2222-4222-8222-222222222222',
+    sequence: '12',
+    kind: 'restored',
+    guid: 'codec-restore',
+    chatGuid: 'codec-chat',
+    dateDeleted: null,
+  },
   'new-message': {
     guid: 'codec-new',
     text: 'hello',

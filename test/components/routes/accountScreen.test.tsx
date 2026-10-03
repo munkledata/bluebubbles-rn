@@ -1,5 +1,5 @@
 import React from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { notifyManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { renderWithTheme, screen, fireEvent, act, waitFor } from '../support/renderWithTheme';
 
 const mockBack = jest.fn();
@@ -58,6 +58,22 @@ async function renderScreen(): Promise<void> {
   );
 }
 
+// TanStack delivers observers synchronously through this adapter, including during
+// waitFor's temporary act-environment override. Scope the flag to that delivery.
+beforeAll(() =>
+  notifyManager.setNotifyFunction((callback) => {
+    const environment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    const previous = environment.IS_REACT_ACT_ENVIRONMENT;
+    environment.IS_REACT_ACT_ENVIRONMENT = true;
+    try {
+      React.act(callback);
+    } finally {
+      environment.IS_REACT_ACT_ENVIRONMENT = previous;
+    }
+  }),
+);
+afterAll(() => notifyManager.setNotifyFunction((callback) => callback()));
+
 describe('AccountScreen — narrow read-only status', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -85,7 +101,9 @@ describe('AccountScreen — narrow read-only status', () => {
     useSessionStore.setState({
       serverInfo: { version: '2.0.15', supports_imessage_account_status: true },
     });
-    accountStatus.mockResolvedValue(account);
+    accountStatus
+      .mockResolvedValueOnce(account)
+      .mockResolvedValue({ ...account, displayName: 'Account A refreshed' });
     await renderScreen();
 
     expect(await screen.findByText('account-a@example.test')).toBeTruthy();
@@ -93,10 +111,9 @@ describe('AccountScreen — narrow read-only status', () => {
     expect(screen.getByText(/Changing the send-from alias is not available/i)).toBeTruthy();
     expect(screen.queryByRole('button', { name: /change alias/i })).toBeNull();
     expect(accountStatus).toHaveBeenCalledTimes(1);
-    await act(async () => {
-      fireEvent.press(screen.getByRole('button', { name: 'Refresh iMessage account' }));
-    });
-    await waitFor(() => expect(accountStatus).toHaveBeenCalledTimes(2));
+    await fireEvent.press(screen.getByRole('button', { name: 'Refresh iMessage account' }));
+    expect(await screen.findByText('Account A refreshed')).toBeTruthy();
+    expect(accountStatus).toHaveBeenCalledTimes(2);
   });
 
   it('hides identity immediately when the owning account is retired', async () => {
@@ -134,9 +151,9 @@ describe('AccountScreen — narrow read-only status', () => {
     await renderScreen();
     await screen.findByRole('button', { name: `Use ${nextAlias} as send-from alias` });
 
-    await act(async () => {
-      fireEvent.press(screen.getByRole('button', { name: `Use ${nextAlias} as send-from alias` }));
-    });
+    await fireEvent.press(
+      screen.getByRole('button', { name: `Use ${nextAlias} as send-from alias` }),
+    );
     expect(changeAlias).not.toHaveBeenCalled();
     const confirm = useDialogStore
       .getState()
@@ -146,7 +163,12 @@ describe('AccountScreen — narrow read-only status', () => {
       confirm?.onPress?.();
     });
 
-    await waitFor(() => expect(changeAlias).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(
+        screen.getByRole('button', { name: `Use ${account.activeAlias} as send-from alias` }),
+      ).toBeEnabled(),
+    );
+    expect(changeAlias).toHaveBeenCalledTimes(1);
     expect(changeAlias.mock.calls[0]?.[1]).toBe(nextAlias);
   });
 
@@ -165,9 +187,9 @@ describe('AccountScreen — narrow read-only status', () => {
     });
     await renderScreen();
     await screen.findByRole('button', { name: `Use ${nextAlias} as send-from alias` });
-    await act(async () => {
-      fireEvent.press(screen.getByRole('button', { name: `Use ${nextAlias} as send-from alias` }));
-    });
+    await fireEvent.press(
+      screen.getByRole('button', { name: `Use ${nextAlias} as send-from alias` }),
+    );
     const confirm = useDialogStore
       .getState()
       .current?.buttons.find((button) => button.text === 'Change');
@@ -183,9 +205,7 @@ describe('AccountScreen — narrow read-only status', () => {
   it('keeps Back available for an unsupported deep link', async () => {
     await renderScreen();
 
-    await act(async () => {
-      fireEvent.press(screen.getByText('‹ Back'));
-    });
+    await fireEvent.press(screen.getByText('‹ Back'));
     expect(mockBack).toHaveBeenCalledTimes(1);
   });
 });

@@ -2,6 +2,7 @@ const progressListeners = new Set<
   (event: { requestId: string; loaded: number; total: number }) => void
 >();
 const native = {
+  attachmentCacheGuidSha256: jest.fn(),
   prepare: jest.fn(),
   cancel: jest.fn(),
   releasePrepared: jest.fn(),
@@ -38,6 +39,7 @@ jest.mock('expo', () => ({
 // Relative import deliberately bypasses Jest's @native production-boundary mapper.
 // eslint-disable-next-line import/first
 import {
+  hashNativeAttachmentCacheGuid,
   adoptNativePastedAttachment,
   deleteNativeAttachmentCacheFile,
   downloadNativeBoundedFile,
@@ -54,6 +56,7 @@ import {
 } from '../../src/native/boundedDownload';
 
 beforeEach(() => {
+  native.attachmentCacheGuidSha256.mockReset().mockReturnValue('a'.repeat(64));
   moduleRef.current = native;
   progressListeners.clear();
   native.prepare.mockReset();
@@ -125,6 +128,37 @@ beforeEach(() => {
   });
   native.closeAttachmentCacheScan.mockReset().mockResolvedValue({ ok: true, closed: false });
   native.addListener.mockClear();
+});
+
+describe('synchronous native attachment identity hashing', () => {
+  it('passes the exact GUID and accepts only the canonical digest', () => {
+    expect(hashNativeAttachmentCacheGuid('exact / 😀')).toBe('a'.repeat(64));
+    expect(native.attachmentCacheGuidSha256).toHaveBeenCalledWith('exact / 😀');
+  });
+
+  it.each([
+    undefined,
+    null,
+    2,
+    '',
+    'A'.repeat(64),
+    `${'a'.repeat(64)}\n`,
+    'a'.repeat(63),
+    Promise.resolve('a'.repeat(64)),
+  ])('rejects malformed bridge results', (digest) => {
+    native.attachmentCacheGuidSha256.mockReturnValue(digest);
+    expect(() => hashNativeAttachmentCacheGuid('x')).toThrow(NativeBoundedDownloadError);
+  });
+
+  it('fails closed when the module or the newly required native method is missing', () => {
+    moduleRef.current = null;
+    expect(() => hashNativeAttachmentCacheGuid('x')).toThrow(NativeBoundedDownloadError);
+    moduleRef.current = {
+      ...native,
+      attachmentCacheGuidSha256: undefined,
+    } as unknown as typeof native;
+    expect(() => hashNativeAttachmentCacheGuid('x')).toThrow(NativeBoundedDownloadError);
+  });
 });
 
 it('prepares synchronously, forwards only its own progress, and removes the listener', async () => {

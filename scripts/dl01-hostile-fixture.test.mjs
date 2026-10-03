@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
 import { createDecipheriv, createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { inflateSync } from 'node:zlib';
 
 import {
   createEncryptedFeat07Pdf,
@@ -18,7 +20,10 @@ import {
   DL01_MODES,
   DL01_OVERSIZED_DIMENSION_PNG,
   DL01_VALID_PNG,
+  NOTIF03_STEPS,
+  SEND01_FAILURE_STEPS,
   encodeFcmPushIdentityV3,
+  parseDl01FixtureArgs,
   startDl01FixtureServer,
 } from './dl01-hostile-fixture.mjs';
 import {
@@ -163,6 +168,778 @@ function decryptV3Frame(frame, key) {
     ]).toString('utf8'),
   };
 }
+
+test('FEAT-05C exposes remote-only search hits without seeding ordinary sync', async (t) => {
+  assert.equal(parseDl01FixtureArgs(['--fixture-set', 'feat05c']).fixtureSet, 'feat05c');
+  const fixture = await startDl01FixtureServer({
+    authToken: AUTH_TOKEN,
+    fixtureSet: 'feat05c',
+    now: () => 1_800_000_000_000,
+  });
+  t.after(() => fixture.close());
+  const sync = () => control(fixture, '/api/v1/message/query', { afterRowId: 0, limit: 100 });
+  const chats = (await control(fixture, '/api/v1/chat/query', { limit: 10 })).json.data.chats;
+  assert.equal(chats.length, 2);
+  assert.equal(chats[1].lastMessage, null);
+  assert.deepEqual(
+    (await sync()).json.data.messages.map((row) => row.guid),
+    ['feat05c-message-1'],
+  );
+  const history = (index) =>
+    control(fixture, `/api/v1/chat/${encodeURIComponent(chats[index].guid)}/message`);
+  assert.equal((await history(1)).json.data.messages.length, 0);
+  const result = await control(fixture, '/api/v1/message/search/bounded', {
+    text: 'Searchneedle',
+    limit: 50,
+  });
+  assert.equal(result.response.status, 200);
+  assert.deepEqual(Object.keys(result.json.data), ['messages']);
+  const hits = result.json.data.messages;
+  assert.deepEqual(
+    hits.map((row) => row.guid),
+    ['feat05c-message-3', 'feat05c-message-2', 'feat05c-message-1'],
+  );
+  assert.ok(hits.every((row) => row.chatGuid === row.chats[0].guid));
+  assert.equal(hits[0].handle.service, 'SMS');
+  assert.equal(hits[1].handle.service, 'iMessage');
+  assert.deepEqual(hits[2], (await sync()).json.data.messages[0]);
+  assert.deepEqual((await history(1)).json.data.messages, [hits[0]]);
+  assert.deepEqual((await history(0)).json.data.messages, [hits[1], hits[2]]);
+  assert.deepEqual(
+    (await sync()).json.data.messages.map((row) => row.guid),
+    ['feat05c-message-1'],
+  );
+  for (const path of ['scenario', 'release-held', 'fcm/send-current']) {
+    assert.equal((await control(fixture, `/_dl01/v1/${path}`, {})).response.status, 404);
+  }
+  assert.equal((await control(fixture, '/api/v1/message/text', {})).response.status, 404);
+  assert.equal(fixture.status().totals.fcmSends, 0);
+  assert.equal(fixture.status().totals.downloadRequests, 0);
+});
+
+test('FEAT-05C bounds requests and advances only fixed authenticated failure stages', async (t) => {
+  for (const config of [{ firebaseProjectId: 'fixture-project' }, { rcsPermissions: true }]) {
+    await assert.rejects(
+      startDl01FixtureServer({ authToken: AUTH_TOKEN, fixtureSet: 'feat05c', ...config }),
+    );
+  }
+  const fixture = await startDl01FixtureServer({ authToken: AUTH_TOKEN, fixtureSet: 'feat05c' });
+  t.after(() => fixture.close());
+  const search = (body) => control(fixture, '/api/v1/message/search/bounded', body);
+  for (const body of [
+    { text: 'x', limit: 50 },
+    { text: 'x'.repeat(129), limit: 50 },
+    { text: ' Searchneedle', limit: 50 },
+    { text: 'Searchneedle', limit: 51 },
+    { text: 'Searchneedle', limit: 50, messages: [] },
+  ])
+    assert.equal((await search(body)).response.status, 400);
+  const stage = (body) => control(fixture, '/_dl01/v1/feat05c/stage', body);
+  const unauthorized = splitResponse(
+    await rawRequest(fixture.port, '/_dl01/v1/feat05c/stage', {
+      method: 'POST',
+      body: JSON.stringify({ stage: 'unavailable' }),
+      authorization: 'wrong',
+    }),
+  );
+  assert.equal(unauthorized.status, 401);
+  assert.equal((await stage({ stage: 'old-server' })).response.status, 409);
+  assert.equal((await stage({ stage: 'unavailable', text: 'override' })).response.status, 400);
+  assert.equal((await stage({ stage: 'unavailable' })).response.status, 200);
+  assert.equal((await search({ text: 'Searchneedle', limit: 50 })).response.status, 503);
+  assert.equal(
+    (await control(fixture, '/api/v1/server/info')).json.data.supports_message_search,
+    true,
+  );
+  assert.equal((await stage({ stage: 'old-server' })).response.status, 200);
+  assert.equal(
+    (await control(fixture, '/api/v1/server/info')).json.data.supports_message_search,
+    false,
+  );
+  assert.equal((await stage({ stage: 'supported' })).response.status, 400);
+  assert.equal((await stage({ stage: 'old-server' })).response.status, 409);
+  assert.equal(
+    (await control(fixture, '/api/v1/device-credentials/revoke-self', {})).response.status,
+    200,
+  );
+  assert.equal((await search({ text: 'Searchneedle', limit: 50 })).response.status, 401);
+  assert.equal((await stage({ stage: 'unavailable' })).response.status, 401);
+});
+
+test('FEAT-05C full search caps tied results and leaves the navigation target off-screen', async (t) => {
+  const fixture = await startDl01FixtureServer({
+    authToken: AUTH_TOKEN,
+    fixtureSet: 'feat05c',
+    searchScenario: 'full',
+  });
+  t.after(() => fixture.close());
+  const snapshot = fixture.searchFixtureData();
+  assert.equal(snapshot.messages.length, 264);
+  snapshot.messages.length = 0;
+  assert.equal(fixture.searchFixtureData().messages.length, 264);
+  const result = (
+    await control(fixture, '/api/v1/message/search/bounded', { text: 'Searchneedle', limit: 50 })
+  ).json.data.messages;
+  assert.equal(result.length, 50);
+  assert.equal(new Set(result.map((row) => row.guid)).size, 50);
+  assert.equal(result[0].guid, 'feat05c-message-3');
+  assert.equal(result[1].guid, 'feat05c-match-058');
+  assert.equal(result[2].guid, 'feat05c-match-059');
+  const chat = fixture.searchFixtureData().chats[0];
+  const history = (
+    await control(fixture, `/api/v1/chat/${encodeURIComponent(chat.guid)}/message?limit=100`)
+  ).json.data.messages;
+  assert.equal(history.length, 100);
+  assert.ok(history.every((row) => row.text.startsWith('Context line ')));
+  assert.equal(
+    (await control(fixture, '/api/v1/message/search/bounded', { text: 'Anchorneedle', limit: 50 }))
+      .json.data.messages[0].guid,
+    'feat05c-message-2',
+  );
+});
+
+test('FEAT-05C injected results fail closed and held account-A replies remain on their original socket', async (t) => {
+  let supplied;
+  const fixture = await startDl01FixtureServer({
+    authToken: AUTH_TOKEN,
+    fixtureSet: 'feat05c',
+    searchScenario: 'full',
+    searchMessages: () => supplied,
+  });
+  t.after(() => fixture.close());
+  const row = fixture
+    .searchFixtureData()
+    .messages.find((message) => message.guid === 'feat05c-held');
+  for (const malformed of [
+    [{ ...row, chatGuid: 'wrong' }],
+    Array(51).fill(row),
+    [{ ...row, chats: [row.chats[0], row.chats[0]] }],
+  ]) {
+    supplied = malformed;
+    assert.equal(
+      (
+        await control(fixture, '/api/v1/message/search/bounded', {
+          text: 'Retireneedle',
+          limit: 50,
+        })
+      ).response.status,
+      500,
+    );
+  }
+  supplied = [row];
+  assert.equal((await control(fixture, '/_dl01/v1/feat05c/hold', {})).response.status, 200);
+  const controller = new AbortController();
+  const pending = fetch(`${fixture.origin}/api/v1/message/search/bounded`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${AUTH_TOKEN}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text: 'Retireneedle', limit: 50 }),
+    signal: controller.signal,
+  }).catch((error) => error.name);
+  for (let attempt = 0; !fixture.status().search.heldPending && attempt < 100; attempt += 1)
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(fixture.status().search.heldPending, true);
+  controller.abort();
+  assert.equal(await pending, 'AbortError');
+  for (let attempt = 0; fixture.status().search.heldClosed === 0 && attempt < 100; attempt += 1)
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(fixture.status().search.heldClosed, 1);
+  assert.equal(
+    (await control(fixture, '/api/v1/device-credentials/revoke-self', {})).response.status,
+    200,
+  );
+  assert.equal(
+    (await control(fixture, '/_dl01/v1/feat05c/release-search', {})).response.status,
+    200,
+  );
+  assert.equal(fixture.status().search.releasedSearches, 1);
+  assert.equal(fixture.status().search.heldPending, false);
+});
+
+function sendFailureBody(index) {
+  return {
+    chatGuid: 'iMessage;-;notif01-a@example.invalid',
+    tempGuid: `temp-proof00${index}`,
+    method: 'apple-script',
+    text: `Send failure check ${index}`,
+    clientAttemptGeneration: 1,
+  };
+}
+
+test('SEND-01 proof is programmatic opt-in only, NOTIF-01 only, and cannot enable outbound FCM', async (t) => {
+  for (const sendFailureProof of ['yes', 1, null, {}]) {
+    await assert.rejects(
+      startDl01FixtureServer({ authToken: AUTH_TOKEN, fixtureSet: 'notif01', sendFailureProof }),
+      /must be a boolean/,
+    );
+  }
+  for (const fixtureSet of ['dl01', 'feat07', 'notif03', 'feat05c']) {
+    await assert.rejects(
+      startDl01FixtureServer({ authToken: AUTH_TOKEN, fixtureSet, sendFailureProof: true }),
+      /requires the NOTIF-01 fixture/,
+    );
+  }
+  await assert.rejects(
+    startDl01FixtureServer({
+      authToken: AUTH_TOKEN,
+      fixtureSet: 'notif01',
+      sendFailureProof: true,
+      firebaseProjectId: 'fixture-project',
+    }),
+    /does not support outbound FCM/,
+  );
+  assert.throws(() => parseDl01FixtureArgs(['--send-failure-proof', 'yes']), /Unknown/);
+  assert.equal(Object.hasOwn(parseDl01FixtureArgs([]), 'sendFailureProof'), false);
+  const fixture = await startDl01FixtureServer({ authToken: AUTH_TOKEN, fixtureSet: 'notif01' });
+  t.after(() => fixture.close());
+  assert.equal(Object.hasOwn(fixture.status(), 'sendFailureProof'), false);
+  assert.equal(
+    (await control(fixture, '/api/v1/message/text', sendFailureBody(1))).response.status,
+    404,
+  );
+  assert.equal(
+    (await control(fixture, '/_dl01/v1/send01/release', { step: 'other-chat' })).response.status,
+    404,
+  );
+});
+
+test('SEND-01 releases exactly three fixed synthetic failures with authenticated one-at-a-time holds', async (t) => {
+  let outboundRequests = 0;
+  const fixture = await startDl01FixtureServer({
+    authToken: AUTH_TOKEN,
+    fixtureSet: 'notif01',
+    sendFailureProof: true,
+    fetchImpl: async () => {
+      outboundRequests += 1;
+      throw new Error('no outbound transport is permitted');
+    },
+  });
+  t.after(() => fixture.close());
+  const post = (body) => control(fixture, '/api/v1/message/text', body);
+  const release = (step) => control(fixture, '/_dl01/v1/send01/release', { step });
+  assert.equal((await release('other-chat')).response.status, 409);
+  for (const changes of [
+    { chatGuid: 'iMessage;-;real@example.com' },
+    { chatGuid: 'iMessage;-;notif01-b@example.invalid' },
+    { text: 'arbitrary message' },
+    { text: 'Send failure check 2' },
+    { tempGuid: 'arbitrary' },
+    { tempGuid: `temp-${'a'.repeat(500)}` },
+    { method: 'private-api' },
+    { clientAttemptGeneration: 0 },
+    { clientAttemptGeneration: 2_147_483_648 },
+    { clientAttemptGeneration: null },
+    { recipient: 'outside@example.com' },
+    { selectedMessageGuid: 'unexpected' },
+  ])
+    assert.equal((await post({ ...sendFailureBody(1), ...changes })).response.status, 400);
+  assert.equal(
+    splitResponse(
+      await rawRequest(fixture.port, '/api/v1/message/text', {
+        method: 'POST',
+        body: JSON.stringify(sendFailureBody(1)),
+        authorization: 'wrong-credential',
+      }),
+    ).status,
+    401,
+  );
+  assert.equal(fixture.status().sendFailureProof.acceptedRequests, 0);
+  const assertFailure = ({ response, json }) => {
+    assert.equal(response.status, 400);
+    assert.deepEqual(json, {
+      status: 400,
+      message: 'fixture request rejected',
+      data: null,
+      error: { message: 'The test server rejected this message. No message was delivered.' },
+    });
+    assert.ok(Buffer.byteLength(JSON.stringify(json)) < 512);
+  };
+  const firstBody = sendFailureBody(1);
+  delete firstBody.clientAttemptGeneration;
+  assertFailure(await post(firstBody));
+  for (const [index, step] of SEND01_FAILURE_STEPS.entries()) {
+    if (index === 0) continue;
+    const pending = post(sendFailureBody(index + 1));
+    await waitForStatus(fixture, (status) => status.sendFailureProof.heldPending);
+    assert.equal(fixture.status().sendFailureProof.pendingStep, step);
+    assert.equal((await post(sendFailureBody(index + 1))).response.status, 409);
+    assert.equal(
+      splitResponse(
+        await rawRequest(fixture.port, '/_dl01/v1/send01/release', {
+          method: 'POST',
+          body: JSON.stringify({ step }),
+          authorization: 'wrong-credential',
+        }),
+      ).status,
+      401,
+    );
+    assert.equal(
+      (await release(step === 'other-chat' ? 'background' : 'other-chat')).response.status,
+      409,
+    );
+    assert.equal(
+      (await control(fixture, '/_dl01/v1/send01/release', { step, error: 'override' })).response
+        .status,
+      400,
+    );
+    assert.equal(fixture.status().sendFailureProof.heldPending, true);
+    assert.deepEqual((await release(step)).json, { ok: true, released: 1 });
+    assertFailure(await pending);
+    assert.equal((await release(step)).response.status, 409);
+  }
+  assert.equal((await post(sendFailureBody(4))).response.status, 409);
+  assert.deepEqual(fixture.status().sendFailureProof, {
+    acceptedRequests: 3,
+    releasedResponses: 3,
+    cancelledRequests: 0,
+    heldPending: false,
+    pendingStep: null,
+    nextStep: null,
+    halted: false,
+  });
+  const info = (await control(fixture, '/api/v1/server/info')).json.data;
+  assert.equal(info.supports_imessage_plain_text, undefined);
+  assert.equal(outboundRequests, 0);
+  assert.equal(fixture.status().totals.fcmSends, 0);
+  const status = JSON.stringify(fixture.status());
+  for (const secret of [
+    AUTH_TOKEN,
+    firstBody.chatGuid,
+    firstBody.tempGuid,
+    firstBody.text,
+    'test server rejected',
+  ]) {
+    assert.equal(status.includes(secret), false);
+  }
+  assert.equal((await control(fixture, '/api/v1/message/query', {})).json.data.messages.length, 2);
+});
+
+test('SEND-01 held failures halt on revocation, close, client abort, or finite timeout', async (t) => {
+  for (const stop of ['revoke', 'close', 'abort', 'timeout']) {
+    await t.test(stop, async (t) => {
+      const fixture = await startDl01FixtureServer({
+        authToken: AUTH_TOKEN,
+        fixtureSet: 'notif01',
+        sendFailureProof: true,
+        connectionCapMs: stop === 'timeout' ? 150 : 1_000,
+      });
+      t.after(() => fixture.close());
+      await control(fixture, '/api/v1/message/text', sendFailureBody(1));
+      const controller = new AbortController();
+      const pending = fetch(`${fixture.origin}/api/v1/message/text`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${AUTH_TOKEN}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(sendFailureBody(2)),
+        signal: controller.signal,
+      }).then(
+        () => 'unexpected response',
+        () => 'closed',
+      );
+      await waitForStatus(fixture, (status) => status.sendFailureProof.heldPending);
+      if (stop === 'revoke') {
+        assert.equal(
+          (await control(fixture, '/api/v1/device-credentials/revoke-self', {})).response.status,
+          200,
+        );
+      } else if (stop === 'close') {
+        await fixture.close();
+      } else if (stop === 'abort') {
+        controller.abort();
+      }
+      assert.equal(await pending, 'closed');
+      if (stop !== 'close') {
+        await waitForStatus(fixture, (status) => status.sendFailureProof.halted);
+        assert.equal(
+          (await control(fixture, '/_dl01/v1/send01/release', { step: 'other-chat' })).response
+            .status,
+          stop === 'revoke' ? 401 : 409,
+        );
+        assert.equal(
+          (await control(fixture, '/api/v1/message/text', sendFailureBody(3))).response.status,
+          stop === 'revoke' ? 401 : 409,
+        );
+      }
+      assert.deepEqual(fixture.status().sendFailureProof, {
+        acceptedRequests: 2,
+        releasedResponses: 1,
+        cancelledRequests: 1,
+        heldPending: false,
+        pendingStep: null,
+        nextStep: null,
+        halted: true,
+      });
+    });
+  }
+});
+
+test('NOTIF-01 isolates two stable chats and six distinct authenticated V3 pushes', async (t) => {
+  assert.equal(parseDl01FixtureArgs([]).fixtureSet, 'dl01');
+  assert.equal(parseDl01FixtureArgs(['--fixture-set', 'notif01']).fixtureSet, 'notif01');
+  const pushes = [];
+  const fixture = await startDl01FixtureServer({
+    authToken: AUTH_TOKEN,
+    fixtureSet: 'notif01',
+    firebaseProjectId: 'fixture-project',
+    now: () => 1_800_000_000_000,
+    getAccessToken: async () => ACCESS_TOKEN,
+    fetchImpl: async (_url, init) => {
+      pushes.push(JSON.parse(init.body).message);
+      return { ok: true };
+    },
+  });
+  t.after(() => fixture.close());
+  const send = (body) => control(fixture, '/_dl01/v1/notif01/send', body);
+  assert.equal((await send({ chat: 'a' })).response.status, 409);
+  for (const body of [{}, { chat: 'c' }, { chat: 'a', text: 'override' }]) {
+    assert.equal((await send(body)).response.status, 400);
+  }
+  const unauthorized = splitResponse(
+    await rawRequest(fixture.port, '/_dl01/v1/notif01/send', {
+      method: 'POST',
+      body: JSON.stringify({ chat: 'a' }),
+      authorization: 'not-the-credential',
+    }),
+  );
+  assert.equal(unauthorized.status, 401);
+  for (const path of ['scenario', 'release-held', 'fcm/send-current']) {
+    assert.equal((await control(fixture, `/_dl01/v1/${path}`, {})).response.status, 404);
+  }
+  assert.equal((await control(fixture, '/api/v1/message/text', {})).response.status, 404);
+  const initial = (await control(fixture, '/api/v1/chat/query', { limit: 10 })).json.data.chats;
+  assert.equal(initial.length, 2);
+  assert.notEqual(initial[0].guid, initial[1].guid);
+  assert.notEqual(
+    initial[0].participants[0].originalROWID,
+    initial[1].participants[0].originalROWID,
+  );
+  assert.equal(
+    initial.every((chat) => chat.lastMessage.isFromMe && !chat.lastMessage.hasAttachments),
+    true,
+  );
+  const page = (await control(fixture, '/api/v1/chat/query', { offset: 1, limit: 1 })).json.data
+    .chats;
+  assert.deepEqual(page, [initial[1]]);
+  const registration = await control(fixture, '/api/v1/devices', {
+    name: 'Fixture Android',
+    provider: 'fcm',
+    token: FCM_TOKEN,
+    pushEncryption: { type: 'AEAD_GCM_V3_IDENTITY', key: PUSH_KEY },
+  });
+  assert.equal(registration.response.status, 201);
+  for (const chat of ['a', 'b', 'a', 'b', 'a', 'b']) {
+    assert.equal((await send({ chat })).response.status, 200);
+  }
+  assert.equal((await send({ chat: 'a' })).response.status, 409);
+  const messages = (await control(fixture, '/api/v1/message/query', { afterRowId: 0, limit: 100 }))
+    .json.data.messages;
+  assert.equal(messages.length, 8);
+  assert.equal(new Set(messages.map((message) => message.guid)).size, 8);
+  assert.deepEqual(
+    messages.map((message) => message.originalROWID),
+    [1, 2, 3, 4, 5, 6, 7, 8],
+  );
+  assert.equal(
+    messages.every(
+      (message, index) => index === 0 || message.dateCreated > messages[index - 1].dateCreated,
+    ),
+    true,
+  );
+  assert.equal(pushes.length, 6);
+  for (const [index, push] of pushes.entries()) {
+    assert.equal(push.token, FCM_TOKEN);
+    assert.equal(push.data.encryptionType, 'AEAD_GCM_V3_IDENTITY');
+    const message = JSON.parse(decryptV3Frame(push.data.data, PUSH_KEY).plaintext);
+    assert.deepEqual(message, messages[index + 2]);
+    assert.equal(message.isFromMe, false);
+    assert.equal(message.hasAttachments, false);
+    assert.deepEqual(message.attachments, []);
+    assert.equal(message.chatGuid, initial[index % 2].guid);
+  }
+  const cursor = (await control(fixture, '/api/v1/message/query', { afterRowId: 6, limit: 1 })).json
+    .data.messages;
+  assert.deepEqual(cursor, [messages[6]]);
+  const timeCursor = (
+    await control(fixture, '/api/v1/message/query', { after: messages[6].dateCreated })
+  ).json.data.messages;
+  assert.deepEqual(timeCursor, [messages[7]]);
+  const history = (
+    await control(
+      fixture,
+      `/api/v1/chat/${encodeURIComponent(initial[0].guid)}/message?offset=1&limit=2`,
+    )
+  ).json.data.messages;
+  assert.deepEqual(history, [messages[2], messages[4]]);
+  const latest = (await control(fixture, `/api/v1/chat/${encodeURIComponent(initial[1].guid)}`))
+    .json.data.chat;
+  assert.deepEqual(latest.lastMessage, messages[7]);
+  const contacts = (
+    await control(fixture, '/api/v1/contact/query', {
+      addresses: initial.map((chat) => chat.chatIdentifier),
+    })
+  ).json.data.contacts;
+  assert.equal(contacts.length, 2);
+  assert.equal(
+    contacts.every((contact) => !contact.hasAvatar),
+    true,
+  );
+  const status = fixture.status();
+  assert.equal(status.incomingMessages, 6);
+  assert.equal(status.totals.fcmSends, 6);
+  assert.equal(status.totals.downloadRequests, 0);
+  for (const secret of [
+    AUTH_TOKEN,
+    FCM_TOKEN,
+    PUSH_KEY,
+    ACCESS_TOKEN,
+    messages[2].text,
+    messages[2].guid,
+  ]) {
+    assert.equal(JSON.stringify(status).includes(secret), false);
+  }
+  assert.equal(
+    (await control(fixture, '/api/v1/device-credentials/revoke-self', {})).response.status,
+    200,
+  );
+  assert.equal(fixture.status().fcm.registrationReady, false);
+  assert.equal((await send({ chat: 'a' })).response.status, 409);
+});
+
+test('NOTIF-01 allows only fixed A/B grouped withdrawals and canonical retraction', async (t) => {
+  const pushes = [];
+  let finishWithdrawal;
+  const fixture = await startDl01FixtureServer({
+    authToken: AUTH_TOKEN,
+    fixtureSet: 'notif01',
+    firebaseProjectId: 'fixture-project',
+    getAccessToken: async () => ACCESS_TOKEN,
+    fetchImpl: async (_url, init) => {
+      const push = JSON.parse(init.body).message;
+      pushes.push(push);
+      if (push.data.type === 'updated-message' && pushes.length === 3) {
+        return new Promise((resolve) => {
+          finishWithdrawal = resolve;
+        });
+      }
+      return { ok: true };
+    },
+  });
+  t.after(() => fixture.close());
+  const send = (chat) => control(fixture, '/_dl01/v1/notif01/send', { chat });
+  const withdraw = (body) => control(fixture, '/_dl01/v1/notif01/withdraw-grouped', body);
+  assert.equal((await withdraw({ chat: 'a' })).response.status, 409);
+  for (const body of [{}, { chat: 'c' }, { chat: 'a', guid: 'override' }]) {
+    assert.equal((await withdraw(body)).response.status, 400);
+  }
+  await control(fixture, '/api/v1/devices', {
+    name: 'Fixture Android',
+    provider: 'fcm',
+    token: FCM_TOKEN,
+    pushEncryption: { type: 'AEAD_GCM_V3_IDENTITY', key: PUSH_KEY },
+  });
+  assert.equal((await send('a')).response.status, 200);
+  assert.equal((await withdraw({ chat: 'a' })).response.status, 409);
+  assert.equal((await send('b')).response.status, 200);
+  assert.equal((await withdraw({ chat: 'b' })).response.status, 409);
+  const pending = withdraw({ chat: 'a' });
+  await waitForStatus(fixture, () => typeof finishWithdrawal === 'function');
+  assert.equal((await withdraw({ chat: 'a' })).response.status, 409);
+  assert.equal((await send('a')).response.status, 409);
+  finishWithdrawal({ ok: true });
+  assert.equal((await pending).response.status, 200);
+  assert.equal((await withdraw({ chat: 'a' })).response.status, 409);
+  assert.equal((await send('a')).response.status, 409);
+  assert.equal((await withdraw({ chat: 'b' })).response.status, 200);
+  assert.equal((await withdraw({ chat: 'b' })).response.status, 409);
+  const messages = (await control(fixture, '/api/v1/message/query', { limit: 100 })).json.data
+    .messages;
+  assert.equal(pushes.length, 4);
+  for (const [index, push] of pushes.entries()) {
+    const decoded = decryptV3Frame(push.data.data, PUSH_KEY);
+    assert.ok(decoded.aad.includes(push.data.type));
+    const payload = JSON.parse(decoded.plaintext);
+    assert.equal(push.data.type, index < 2 ? 'new-message' : 'updated-message');
+    const target = messages[(index % 2) + 2];
+    if (index < 2) {
+      assert.equal(payload.guid, target.guid);
+      assert.equal(payload.text, `Notification check ${index + 1}`);
+    } else {
+      assert.deepEqual(payload, { guid: target.guid, dateRetracted: target.dateRetracted });
+      assert.equal(target.text, null);
+      assert.ok(target.dateRetracted > target.dateCreated);
+    }
+  }
+  assert.equal(fixture.status().incomingMessages, 2);
+  assert.equal(fixture.status().totals.fcmSends, 4);
+  await control(fixture, '/api/v1/device-credentials/revoke-self', {});
+  assert.equal((await withdraw({ chat: 'a' })).response.status, 409);
+});
+
+test('NOTIF-01 refuses concurrent delivery and stops after an uncertain FCM result', async (t) => {
+  let finishDelivery;
+  const fixture = await startDl01FixtureServer({
+    authToken: AUTH_TOKEN,
+    fixtureSet: 'notif01',
+    firebaseProjectId: 'fixture-project',
+    getAccessToken: async () => ACCESS_TOKEN,
+    fetchImpl: () =>
+      new Promise((resolve) => {
+        finishDelivery = resolve;
+      }),
+  });
+  t.after(() => fixture.close());
+  await control(fixture, '/api/v1/devices', {
+    name: 'Fixture Android',
+    provider: 'fcm',
+    token: FCM_TOKEN,
+    pushEncryption: { type: 'AEAD_GCM_V3_IDENTITY', key: PUSH_KEY },
+  });
+  const first = control(fixture, '/_dl01/v1/notif01/send', { chat: 'a' });
+  await waitForStatus(fixture, (status) => status.incomingMessages === 1);
+  assert.equal(
+    (await control(fixture, '/_dl01/v1/notif01/send', { chat: 'b' })).response.status,
+    409,
+  );
+  finishDelivery({ ok: false });
+  assert.equal((await first).response.status, 503);
+  assert.equal(fixture.status().deliveryHalted, true);
+  assert.equal(fixture.status().totals.fcmSends, 0);
+  assert.equal(
+    (await control(fixture, '/_dl01/v1/notif01/send', { chat: 'b' })).response.status,
+    409,
+  );
+  assert.equal(fixture.status().incomingMessages, 1);
+});
+
+test('fixture revocation during OAuth prevents dispatch to a stale enrollment', async (t) => {
+  let finishOAuth;
+  let dispatches = 0;
+  const fixture = await startDl01FixtureServer({
+    authToken: AUTH_TOKEN,
+    fixtureSet: 'notif01',
+    firebaseProjectId: 'fixture-project',
+    getAccessToken: () =>
+      new Promise((resolve) => {
+        finishOAuth = resolve;
+      }),
+    fetchImpl: async () => {
+      dispatches += 1;
+      return { ok: true };
+    },
+  });
+  t.after(() => fixture.close());
+  await control(fixture, '/api/v1/devices', {
+    name: 'Fixture Android',
+    provider: 'fcm',
+    token: FCM_TOKEN,
+    pushEncryption: { type: 'AEAD_GCM_V3_IDENTITY', key: PUSH_KEY },
+  });
+  const pending = control(fixture, '/_dl01/v1/notif01/send', { chat: 'a' });
+  await waitForStatus(fixture, (status) => status.incomingMessages === 1);
+  await control(fixture, '/api/v1/device-credentials/revoke-self', {});
+  finishOAuth(ACCESS_TOKEN);
+  assert.equal((await pending).response.status, 409);
+  assert.equal(dispatches, 0);
+  assert.equal(fixture.status().deliveryHalted, true);
+});
+
+test('NOTIF-03 fixes a finite burst/withdrawal/late/resource sequence with bounded encrypted frames', async (t) => {
+  assert.equal(parseDl01FixtureArgs(['--fixture-set', 'notif03']).fixtureSet, 'notif03');
+  const pushes = [];
+  const fixture = await startDl01FixtureServer({
+    authToken: AUTH_TOKEN,
+    fixtureSet: 'notif03',
+    firebaseProjectId: 'fixture-project',
+    now: () => 1_800_000_000_000,
+    getAccessToken: async () => ACCESS_TOKEN,
+    fetchImpl: async (_url, init) => {
+      pushes.push(JSON.parse(init.body).message);
+      return { ok: true };
+    },
+  });
+  t.after(() => fixture.close());
+  const step = (body) => control(fixture, '/_dl01/v1/notif03/step', body);
+  assert.equal((await step({ step: 'history-1' })).response.status, 409);
+  assert.equal((await step({ step: 'history-1', text: 'override' })).response.status, 400);
+  assert.equal(
+    (await control(fixture, '/_dl01/v1/notif01/send', { chat: 'a' })).response.status,
+    404,
+  );
+  assert.equal((await control(fixture, '/api/v1/message/text', {})).response.status, 404);
+  await control(fixture, '/api/v1/devices', {
+    name: 'Fixture Android',
+    provider: 'fcm',
+    token: FCM_TOKEN,
+    pushEncryption: { type: 'AEAD_GCM_V3_IDENTITY', key: PUSH_KEY },
+  });
+  assert.equal((await step({ step: 'history-7' })).response.status, 409);
+  for (const value of NOTIF03_STEPS) {
+    const result = await step({ step: value });
+    assert.equal(result.response.status, 200);
+    assert.equal(result.json.sends, value === 'history-pair' ? 2 : 1);
+    assert.equal((await step({ step: value })).response.status, 409);
+  }
+  const decoded = pushes.map((push) => {
+    assert.ok(Buffer.byteLength(push.data.data) <= 4_096);
+    assert.ok(
+      Object.entries(push.data).reduce(
+        (bytes, [key, value]) => bytes + Buffer.byteLength(key) + Buffer.byteLength(value),
+        0,
+      ) <= 4_096,
+    );
+    const frame = decryptV3Frame(push.data.data, PUSH_KEY);
+    assert.ok(frame.aad.includes(push.data.type));
+    return JSON.parse(frame.plaintext);
+  });
+  assert.deepEqual(
+    decoded.slice(0, 7).map((message) => message.text),
+    Array.from({ length: 7 }, (_, index) => `History line ${index + 1}`),
+  );
+  assert.equal(pushes[8].data.type, 'updated-message');
+  assert.equal(decoded[8].guid, decoded[3].guid);
+  assert.equal(decoded[8].dateRetracted, 1_800_000_000_000);
+  assert.equal(decoded[7].dateCreated, decoded[0].dateCreated);
+  assert.ok(decoded[7].dateCreated < decoded[1].dateCreated);
+  assert.ok(decoded[7].dateCreated > 1_800_000_000_000);
+  assert.equal(
+    new Set(decoded.filter((_, index) => index !== 8).map((message) => message.guid)).size,
+    14,
+  );
+  assert.ok(decoded.slice(9).every((message) => [...message.text].length === 520));
+  const messages = (await control(fixture, '/api/v1/message/query', { afterRowId: 0, limit: 100 }))
+    .json.data.messages;
+  assert.equal(messages.length, 17);
+  assert.equal(messages.find((message) => message.guid === decoded[3].guid).text, null);
+  assert.equal(
+    messages.find((message) => message.guid === decoded[3].guid).dateRetracted,
+    decoded[8].dateRetracted,
+  );
+  const contacts = (
+    await control(fixture, '/api/v1/contact/query', { addresses: ['notif03-c@example.invalid'] })
+  ).json.data.contacts;
+  assert.equal(contacts[0].hasAvatar, true);
+  assert.equal([...contacts[0].displayName].length, 130);
+  const avatar = splitResponse(
+    await rawRequest(fixture.port, '/api/v1/contact/notif03-contact-3/avatar'),
+  );
+  assert.equal(avatar.status, 200);
+  assert.equal(avatar.body.readUInt32BE(16), 1_024);
+  assert.equal(avatar.body.readUInt32BE(20), 1_024);
+  const idatOffset = 8 + 12 + 13;
+  const idatLength = avatar.body.readUInt32BE(idatOffset);
+  assert.equal(
+    inflateSync(avatar.body.subarray(idatOffset + 8, idatOffset + 8 + idatLength)).length,
+    1_024 * (1 + 1_024 * 4),
+  );
+  assert.ok(avatar.body.length < 5 * 1024 * 1024);
+  assert.equal(
+    (await control(fixture, '/api/v1/contact/notif03-contact-1/avatar')).response.status,
+    404,
+  );
+  assert.equal(fixture.status().completedSteps, 14);
+  assert.equal(fixture.status().nextStep, null);
+  assert.equal(fixture.status().totals.fcmSends, 15);
+  assert.equal(fixture.status().incomingMessages, 14);
+  assert.equal(fixture.status().avatarRequests, 1);
+});
 
 test('exact-cap fixture images remain complete PNGs at the production byte limits', () => {
   for (const byteLimit of [DL01_DEFAULT_ATTACHMENT_MAX_BYTES, DL01_DEFAULT_WALLPAPER_MAX_BYTES]) {

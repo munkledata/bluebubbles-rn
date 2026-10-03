@@ -334,7 +334,7 @@ decisions.
 
 ### `SEND-01C` — failed-send notification
 
-Post a fixed app-authored `Message not sent` notice only after the encrypted database records an
+Post a fixed app-authored `Message status needs review` / `Open Gator to review.` notice only after the encrypted database records an
 undeleted outgoing failure. Native state contains only an opaque local route key and stable local
 message id—never message text, contact data, server detail, or raw GUIDs. The body tap opens the chat;
 inline actions remain unavailable, and App Lock substitutes the existing generic locked notice.

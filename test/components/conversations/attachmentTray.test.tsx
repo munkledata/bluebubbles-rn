@@ -138,7 +138,7 @@ describe('AttachmentTray — always-visible controls', () => {
     grantWith([]);
     await renderWithTheme(<AttachmentTray onPick={jest.fn()} onPickFiles={onPickFiles} />);
     await waitForMediaCheckToSettle();
-    fireEvent.press(screen.getByLabelText('Attach a file'));
+    await fireEvent.press(screen.getByLabelText('Attach a file'));
     expect(onPickFiles).toHaveBeenCalledTimes(1);
   });
 });
@@ -175,7 +175,7 @@ describe('AttachmentTray — media library', () => {
     ).toBeTruthy();
     expect(requestPerm).not.toHaveBeenCalled();
 
-    fireEvent.press(screen.getByRole('button', { name: 'Continue' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(requestPerm).toHaveBeenCalledWith(false, ['photo', 'video']));
     await waitFor(() => expect(getAssets).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.queryByText('Photos and videos')).toBeNull());
@@ -205,7 +205,7 @@ describe('AttachmentTray — media library', () => {
     getAssetInfo.mockResolvedValue({ localUri: 'file://real/IMG_1.jpg' });
     const onPick = jest.fn();
     await renderWithTheme(<AttachmentTray onPick={onPick} onPickFiles={jest.fn()} />);
-    fireEvent.press(await screen.findByLabelText('Attach photo'));
+    await fireEvent.press(await screen.findByLabelText('Attach photo'));
     await waitFor(() =>
       expect(onPick).toHaveBeenCalledWith({
         uri: 'file://real/IMG_1.jpg',
@@ -226,7 +226,7 @@ describe('AttachmentTray — media library', () => {
     await renderWithTheme(
       <AttachmentTray onPick={onPick} onPickFiles={jest.fn()} imessageImageOnly />,
     );
-    fireEvent.press(await screen.findByLabelText('Attach photo'));
+    await fireEvent.press(await screen.findByLabelText('Attach photo'));
     await waitFor(() =>
       expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ size: 321 })),
     );
@@ -241,7 +241,7 @@ describe('AttachmentTray — media library', () => {
     getAssetInfo.mockResolvedValue({ localUri: 'file://real/clip.mov' });
     const onPick = jest.fn();
     await renderWithTheme(<AttachmentTray onPick={onPick} onPickFiles={jest.fn()} />);
-    fireEvent.press(await screen.findByLabelText('Attach video'));
+    await fireEvent.press(await screen.findByLabelText('Attach video'));
     await waitFor(() =>
       expect(onPick).toHaveBeenCalledWith(
         expect.objectContaining({ uri: 'file://real/clip.mov', mimeType: 'video/quicktime' }),
@@ -256,7 +256,7 @@ describe('AttachmentTray — media library', () => {
     getAssetInfo.mockRejectedValue(error);
     const onPick = jest.fn();
     await renderWithTheme(<AttachmentTray onPick={onPick} onPickFiles={jest.fn()} />);
-    fireEvent.press(await screen.findByLabelText('Attach photo'));
+    await fireEvent.press(await screen.findByLabelText('Attach photo'));
     await waitFor(() =>
       expect(onPick).toHaveBeenCalledWith(expect.objectContaining({ uri: 'ph://p1' })),
     );
@@ -280,7 +280,7 @@ describe('AttachmentTray — media library', () => {
     expect(screen.getByLabelText('Take a photo')).toBeTruthy();
     expect(screen.getByLabelText('Attach a file')).toBeTruthy();
     expect(screen.queryByLabelText('Attach photo')).toBeNull();
-    fireEvent.press(screen.getByRole('button', { name: 'Open Settings' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Open Settings' }));
     await waitFor(() => expect(openSettings).toHaveBeenCalledTimes(1));
   });
 
@@ -303,7 +303,7 @@ describe('AttachmentTray — media library', () => {
     expect(screen.getByText(/Android previously denied access/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Open Settings' })).toBeTruthy();
 
-    fireEvent.press(screen.getByRole('button', { name: 'Try Again' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Try Again' }));
     await waitFor(() => expect(requestPerm).toHaveBeenCalledWith(false, ['photo', 'video']));
     expect(screen.getByText(/Gator can show recent photos and videos/)).toBeTruthy();
   });
@@ -331,7 +331,7 @@ describe('AttachmentTray — media library', () => {
     const openSettings = jest.spyOn(Linking, 'openSettings').mockResolvedValue(undefined);
 
     await renderWithTheme(<AttachmentTray onPick={jest.fn()} onPickFiles={jest.fn()} />);
-    fireEvent.press(await screen.findByRole('button', { name: 'Open Settings' }));
+    await fireEvent.press(await screen.findByRole('button', { name: 'Open Settings' }));
     await waitFor(() => expect(openSettings).toHaveBeenCalledTimes(1));
     await act(async () => {
       onAppStateChange?.('active');
@@ -374,7 +374,7 @@ describe('AttachmentTray — media library', () => {
     requestPerm.mockReturnValue(pendingRequest);
 
     await renderWithTheme(<AttachmentTray onPick={jest.fn()} onPickFiles={jest.fn()} />);
-    fireEvent.press(await screen.findByRole('button', { name: 'Continue' }));
+    await fireEvent.press(await screen.findByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(requestPerm).toHaveBeenCalledTimes(1));
     expect(screen.queryByText('Photos and videos')).toBeNull();
     mockLeaseCurrent = false;
@@ -422,7 +422,7 @@ describe('AttachmentTray — contact button (capability-gated)', () => {
       <AttachmentTray onPick={jest.fn()} onPickFiles={jest.fn()} onPickContact={onPickContact} />,
     );
     await waitForMediaCheckToSettle();
-    fireEvent.press(screen.getByLabelText('Send a contact'));
+    await fireEvent.press(screen.getByLabelText('Send a contact'));
     expect(onPickContact).toHaveBeenCalledTimes(1);
   });
 });
@@ -442,7 +442,7 @@ describe('AttachmentTray — current location button (capability-gated)', () => 
     expect(getPerm).not.toHaveBeenCalled();
     expect(screen.queryByLabelText('Take a photo')).toBeNull();
     expect(screen.queryByLabelText('Attach a file')).toBeNull();
-    fireEvent.press(screen.getByLabelText('Send current location'));
+    await fireEvent.press(screen.getByLabelText('Send current location'));
     expect(onShareLocation).toHaveBeenCalledTimes(1);
   });
 });
@@ -468,7 +468,7 @@ describe('AttachmentTray — camera capture', () => {
     const onPick = jest.fn();
     await renderWithTheme(<AttachmentTray onPick={onPick} onPickFiles={jest.fn()} />);
     await waitForMediaCheckToSettle();
-    fireEvent.press(screen.getByLabelText('Take a photo'));
+    await fireEvent.press(screen.getByLabelText('Take a photo'));
     await waitFor(() =>
       expect(onPick).toHaveBeenCalledWith({
         uri: 'file://cap.jpg',
@@ -491,7 +491,7 @@ describe('AttachmentTray — camera capture', () => {
     const onPick = jest.fn();
     await renderWithTheme(<AttachmentTray onPick={onPick} onPickFiles={jest.fn()} />);
     await waitForMediaCheckToSettle();
-    fireEvent.press(screen.getByLabelText('Take a photo'));
+    await fireEvent.press(screen.getByLabelText('Take a photo'));
     await waitFor(() =>
       expect(onPick).toHaveBeenCalledWith({
         uri: 'file://v',
@@ -510,10 +510,7 @@ describe('AttachmentTray — camera capture', () => {
     const onPick = jest.fn();
     await renderWithTheme(<AttachmentTray onPick={onPick} onPickFiles={jest.fn()} />);
     await waitForMediaCheckToSettle();
-    await act(async () => {
-      fireEvent.press(screen.getByLabelText('Take a photo'));
-      await Promise.resolve();
-    });
+    await fireEvent.press(screen.getByLabelText('Take a photo'));
     expect(requestCamera).toHaveBeenCalled();
     expect(launchCamera).not.toHaveBeenCalled();
     expect(onPick).not.toHaveBeenCalled();
@@ -531,10 +528,7 @@ describe('AttachmentTray — camera capture', () => {
     const onPick = jest.fn();
     await renderWithTheme(<AttachmentTray onPick={onPick} onPickFiles={jest.fn()} />);
     await waitForMediaCheckToSettle();
-    await act(async () => {
-      fireEvent.press(screen.getByLabelText('Take a photo'));
-      await Promise.resolve();
-    });
+    await fireEvent.press(screen.getByLabelText('Take a photo'));
     expect(requestCamera).toHaveBeenCalled();
     expect(launchCamera).not.toHaveBeenCalled();
     expect(onPick).not.toHaveBeenCalled();
@@ -556,7 +550,7 @@ describe('AttachmentTray — camera capture', () => {
     const onPick = jest.fn();
     await renderWithTheme(<AttachmentTray onPick={onPick} onPickFiles={jest.fn()} />);
     await waitForMediaCheckToSettle();
-    fireEvent.press(screen.getByLabelText('Take a photo'));
+    await fireEvent.press(screen.getByLabelText('Take a photo'));
     await waitFor(() => expect(launchCamera).toHaveBeenCalled());
     expect(onPick).not.toHaveBeenCalled();
   });

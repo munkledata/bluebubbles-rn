@@ -1,5 +1,6 @@
 import {
   acquireCurrentLocation,
+  prepareCurrentLocationPermission,
   CURRENT_LOCATION_TIMEOUT_MS,
   type CurrentLocationFix,
   type CurrentLocationSubscription,
@@ -83,7 +84,7 @@ describe('acquireCurrentLocation', () => {
     expect(remove).toHaveBeenCalledTimes(1);
   });
 
-  it('requests foreground permission after an askable check and reports denial truthfully', async () => {
+  it('refuses missing permission without opening native UI during acquisition', async () => {
     const adapter = makeAdapter({
       getForegroundPermissionsAsync: jest
         .fn()
@@ -95,9 +96,9 @@ describe('acquireCurrentLocation', () => {
 
     await expect(acquireCurrentLocation(adapter)).resolves.toEqual({
       status: 'denied',
-      canAskAgain: false,
+      canAskAgain: true,
     });
-    expect(adapter.requestForegroundPermissionsAsync).toHaveBeenCalledTimes(1);
+    expect(adapter.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
     expect(adapter.watchPositionAsync).not.toHaveBeenCalled();
   });
 
@@ -256,5 +257,107 @@ describe('acquireCurrentLocation', () => {
     });
 
     await expect(acquireCurrentLocation(adapter)).resolves.toEqual({ status: 'error' });
+  });
+});
+
+describe('prepareCurrentLocationPermission', () => {
+  const options = (controller = new AbortController()) => ({
+    signal: controller.signal,
+    isCurrent: () => true,
+    beforePrompt: jest.fn(() => true),
+  });
+
+  it.each([true, false])(
+    'returns an existing grant=%s without prompting or starting a watch',
+    async (granted) => {
+      const adapter = makeAdapter({
+        getForegroundPermissionsAsync: jest.fn().mockResolvedValue({ granted, canAskAgain: false }),
+      });
+      const owner = options();
+      await expect(prepareCurrentLocationPermission(adapter, owner)).resolves.toEqual(
+        granted ? { status: 'granted', prompted: false } : { status: 'denied', canAskAgain: false },
+      );
+      expect(owner.beforePrompt).not.toHaveBeenCalled();
+      expect(adapter.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+      expect(adapter.watchPositionAsync).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([true, false])(
+    'returns a prompted grant=%s as permission-only feedback',
+    async (granted) => {
+      const adapter = makeAdapter({
+        getForegroundPermissionsAsync: jest
+          .fn()
+          .mockResolvedValue({ granted: false, canAskAgain: true }),
+        requestForegroundPermissionsAsync: jest
+          .fn()
+          .mockResolvedValue({ granted, canAskAgain: true }),
+      });
+      const owner = options();
+      await expect(prepareCurrentLocationPermission(adapter, owner)).resolves.toEqual(
+        granted ? { status: 'granted', prompted: true } : { status: 'denied', canAskAgain: true },
+      );
+      expect(owner.beforePrompt).toHaveBeenCalledTimes(1);
+      expect(adapter.requestForegroundPermissionsAsync).toHaveBeenCalledTimes(1);
+      expect(adapter.watchPositionAsync).not.toHaveBeenCalled();
+    },
+  );
+
+  it('stops before permission when services are off', async () => {
+    const adapter = makeAdapter({ hasServicesEnabledAsync: jest.fn().mockResolvedValue(false) });
+    await expect(prepareCurrentLocationPermission(adapter, options())).resolves.toEqual({
+      status: 'services-off',
+    });
+    expect(adapter.getForegroundPermissionsAsync).not.toHaveBeenCalled();
+    expect(adapter.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+  });
+
+  it('rejects a retired lifetime before opening the native prompt', async () => {
+    let current = true;
+    const permission = deferred<ForegroundLocationPermission>();
+    const adapter = makeAdapter({
+      getForegroundPermissionsAsync: jest.fn(() => permission.promise),
+    });
+    const pending = prepareCurrentLocationPermission(adapter, {
+      ...options(),
+      isCurrent: () => current,
+    });
+    await settle();
+    current = false;
+    permission.resolve({ granted: false, canAskAgain: true });
+    await expect(pending).resolves.toEqual({ status: 'cancelled' });
+    expect(adapter.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+  });
+
+  it('honors the last foreground check immediately before native UI', async () => {
+    const adapter = makeAdapter({
+      getForegroundPermissionsAsync: jest
+        .fn()
+        .mockResolvedValue({ granted: false, canAskAgain: true }),
+    });
+    await expect(
+      prepareCurrentLocationPermission(adapter, { ...options(), beforePrompt: () => false }),
+    ).resolves.toEqual({ status: 'cancelled' });
+    expect(adapter.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+  });
+
+  it('settles on owner abort while the native prompt is pending and discards a late grant', async () => {
+    const controller = new AbortController();
+    const permission = deferred<ForegroundLocationPermission>();
+    const adapter = makeAdapter({
+      getForegroundPermissionsAsync: jest
+        .fn()
+        .mockResolvedValue({ granted: false, canAskAgain: true }),
+      requestForegroundPermissionsAsync: jest.fn(() => permission.promise),
+    });
+    const pending = prepareCurrentLocationPermission(adapter, options(controller));
+    await settle();
+    expect(adapter.requestForegroundPermissionsAsync).toHaveBeenCalledTimes(1);
+    controller.abort();
+    await expect(pending).resolves.toEqual({ status: 'cancelled' });
+    permission.resolve(GRANTED);
+    await settle();
+    expect(adapter.watchPositionAsync).not.toHaveBeenCalled();
   });
 });

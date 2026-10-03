@@ -1,4 +1,5 @@
 import { Message } from '@core/models';
+import { MessageStateChanged } from '@core/models/messageState';
 import { MAX_SERVER_ORIGIN_INPUT_LENGTH } from '@core/config';
 import { logger } from '@core/secure';
 import {
@@ -231,6 +232,10 @@ export function normalizeRealtimeEvent(
     case 'message-deleted': {
       const p = MessageDeletedPayload.safeParse(data);
       return p.success ? { type: 'message-deleted', payload: p.data } : null;
+    }
+    case 'message-state-changed': {
+      const p = MessageStateChanged.safeParse(data);
+      return p.success ? { type: 'message-state-changed', payload: p.data } : null;
     }
     case 'typing-indicator': {
       const p = TypingIndicatorPayload.safeParse(data);

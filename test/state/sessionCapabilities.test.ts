@@ -231,6 +231,29 @@ describe('session send-capability leases', () => {
     }
   });
 
+  it('parses the narrow plain-text capability and invalidates its captured send lease', () => {
+    const previousSession = useSessionStore.getState();
+    const enabled = ServerInfo.parse({
+      version: '2.0.15-bbd',
+      supports_imessage_plain_text: true,
+    });
+    const disabled = ServerInfo.parse({ version: '2.0.15-bbd' });
+    try {
+      expect(enabled.supports_imessage_plain_text).toBe(true);
+      useSessionStore.getState().connected('https://same-transport.test', 'password', enabled);
+      const lease = captureSessionRcsCapabilityLease();
+      if (!lease) throw new Error('expected connected capability lease');
+      expect(
+        useSessionStore
+          .getState()
+          .setServerInfoForTransport(lease.origin, lease.revision, disabled),
+      ).toBe(true);
+      expect(lease.isCurrent()).toBe(false);
+    } finally {
+      useSessionStore.setState(previousSession);
+    }
+  });
+
   it('keeps a lease current when refreshed server info has identical send capabilities', () => {
     const previousSession = useSessionStore.getState();
     const originalInfo = ServerInfo.parse({

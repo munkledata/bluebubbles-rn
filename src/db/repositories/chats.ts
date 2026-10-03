@@ -27,6 +27,7 @@ import {
 import { linkHandlesToContacts } from './contacts';
 import { handleMapKey, upsertHandlesWithinTransaction } from './handles';
 import { DRAFT_KV_PREFIX, FULL_REPAIR_RETIRED_CHAT_KV_PREFIX } from './maintenance';
+import { getMessageStateAuthorityWithinTransaction } from './messageState';
 
 export { chatVisible };
 
@@ -917,6 +918,7 @@ export function restoreDeletedChatWithinTransaction(
 ): Promise<boolean> {
   return runInTransactionContext(context, async (db) => {
     const floorGuid = target.repairedReadFloor?.guid ?? null;
+    const serverAuthority = await getMessageStateAuthorityWithinTransaction(context);
     const floorDateCreated = target.repairedReadFloor?.dateCreated ?? null;
     const candidates = await db.all<{ id: number; boundary: number }>(sql`
       SELECT chats.id, chats.history_deleted_at AS boundary
@@ -950,13 +952,16 @@ export function restoreDeletedChatWithinTransaction(
     await db
       .update(messages)
       .set({
-        dateDeleted: sql`(
-          SELECT ${messageDeletionLedger.dateDeleted}
+        dateDeleted: sql`(SELECT MAX(value) FROM (
+          SELECT ${messageDeletionLedger.dateDeleted} AS value
             FROM ${messageDeletionLedger}
            WHERE ${messageDeletionLedger.guid} = ${messages.guid}
              AND ${messageDeletionLedger.chatGuid} = ${target.guid}
-           LIMIT 1
-        )`,
+          UNION ALL
+          SELECT COALESCE(date_deleted, 0) FROM message_server_states
+           WHERE guid = ${messages.guid} AND chat_guid = ${target.guid} AND kind = 'deleted'
+             AND provider_epoch = ${serverAuthority?.providerEpoch ?? null} AND ledger_epoch = ${serverAuthority?.ledgerEpoch ?? null}
+        ))`,
       })
       .where(
         and(

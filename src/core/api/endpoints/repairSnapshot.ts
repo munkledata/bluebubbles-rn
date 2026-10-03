@@ -1,6 +1,7 @@
 import { z } from 'zod/v4';
 import type { HttpClient } from '../http';
 import { ApiError, UnimplementedEndpointError } from '../errors';
+import { MessageStateSequence } from '@core/models/messageState';
 
 const ENDPOINT = '/sync/repair-snapshot';
 const Token = z.string().uuid();
@@ -18,6 +19,76 @@ const FinishResult = z
 const CancelResult = z
   .object({ version: z.literal(1), action: z.literal('cancel'), cancelled: z.boolean() })
   .strict();
+
+const ProviderBoundary = {
+  version: z.literal(2),
+  provider: z.literal('imessage'),
+  providerEpoch: z.string().uuid(),
+  ledgerEpoch: z.string().uuid(),
+  checkpoint: z.string().min(1).max(2048),
+  sequence: MessageStateSequence,
+};
+const ProviderBeginResult = z
+  .object({
+    ...ProviderBoundary,
+    action: z.literal('begin'),
+    token: Token,
+    expiresAt: z.number().int().positive(),
+  })
+  .strict();
+const ProviderFinishResult = z
+  .object({ ...ProviderBoundary, action: z.literal('finish'), stable: z.literal(true) })
+  .strict();
+export type ProviderRepairLease = z.infer<typeof ProviderBeginResult>;
+export type ProviderRepairFinish = z.infer<typeof ProviderFinishResult>;
+
+export function beginProvider(
+  http: HttpClient,
+  signal?: AbortSignal,
+): Promise<ProviderRepairLease> {
+  return http.post(ENDPOINT, ProviderBeginResult, {
+    json: { action: 'begin', version: 2, provider: 'imessage' },
+    signal,
+    retry: false,
+  });
+}
+export function finishProvider(
+  http: HttpClient,
+  token: string,
+  signal?: AbortSignal,
+): Promise<ProviderRepairFinish> {
+  return http.post(ENDPOINT, ProviderFinishResult, {
+    json: { action: 'finish', version: 2, provider: 'imessage', token },
+    signal,
+    retry: false,
+  });
+}
+export async function cancelProvider(
+  http: HttpClient,
+  token: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  try {
+    await http.post(
+      ENDPOINT,
+      z
+        .object({
+          version: z.literal(2),
+          action: z.literal('cancel'),
+          cancelled: z.boolean(),
+          provider: z.literal('imessage'),
+        })
+        .strict(),
+      {
+        json: { action: 'cancel', version: 2, provider: 'imessage', token },
+        signal,
+        retry: false,
+      },
+    );
+  } catch {
+    /* The lease expires if the connection has already retired. */
+  }
+}
 
 export interface RepairSnapshotLease {
   readonly token: string;

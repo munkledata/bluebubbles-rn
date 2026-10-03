@@ -25,6 +25,7 @@ import { useSyncSettingsStore } from '@state/syncSettingsStore';
 import { http } from './clients';
 import { ensureDatabase } from './databaseControl';
 import { syncContacts } from './contacts/contactsService';
+import { supportsMessageStateSync, syncProviderMessages } from './sync/providerRepair';
 import { createAttachmentCacheAccountScope } from './download/attachmentCacheAccountScope';
 import { attachmentCacheCoordinator } from './download/attachmentCacheCoordinator';
 import {
@@ -516,9 +517,13 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
   const accountLease = options.accountLease ?? captureRealtimeDeliveryLease();
   let expectedRcsProviderEpoch: string | null | undefined;
   let expectedRcsProviderCapabilityKey: string | undefined;
+  let expectedIMessageProviderEpoch: string | null | undefined;
   const sessionEnded = (): boolean =>
     sessionAccessors.getEpoch() !== epochAtStart ||
     !accountLease.isCurrent() ||
+    (expectedIMessageProviderEpoch !== undefined &&
+      (sessionAccessors.getServerInfo()?.imessage_provider_epoch ?? null) !==
+        expectedIMessageProviderEpoch) ||
     (expectedRcsProviderEpoch !== undefined &&
       (sessionAccessors.rcsProviderEpoch() !== expectedRcsProviderEpoch ||
         rcsProviderCapabilityKey(sessionAccessors.getServerInfo()) !==
@@ -625,9 +630,45 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
       }
     }
     expectedRcsProviderEpoch = currentRcsProviderEpoch(serverInfo);
+    expectedIMessageProviderEpoch = serverInfo.imessage_provider_epoch ?? null;
     expectedRcsProviderCapabilityKey = rcsProviderCapabilityKey(serverInfo);
     if (shouldAbort()) {
       outcome = stoppedOutcome();
+      return;
+    }
+    if (supportsMessageStateSync(serverInfo)) {
+      const pinned = http.pinTransport();
+      const result = await syncProviderMessages(db, {
+        api,
+        controlApi: httpSyncApi(pinned),
+        bindSnapshot: (token) => httpSyncApi(pinned.bindRepairSnapshot(token)),
+        serverInfo,
+        repair,
+        shouldAbort,
+        signal: options.signal,
+        onProgress: (progress) => {
+          if (!shouldAbort()) sync.progress(progress);
+        },
+      });
+      if (shouldAbort()) {
+        outcome = stoppedOutcome();
+        return;
+      }
+      if (!repair) sync.done(result);
+      else
+        sync.noteRepair(
+          'Repair complete',
+          'Installed the stable iMessage snapshot; RCS history was refreshed additively.',
+        );
+      outcome = 'completed';
+      // The initial cleanup predates this run's hides. Retire their cache entries after the
+      // completed sync, outside its DB owners and under the same captured account scope.
+      await attachmentCacheCoordinator
+        .retireInactiveEntries(db, { scope: attachmentCacheScope })
+        .catch((error) => logger.debug('[sync] deleted-message cache retirement deferred', error));
+      await attachmentCacheCoordinator
+        .drainDueRetirements(db, { scope: attachmentCacheScope })
+        .catch((error) => logger.debug('[sync] deleted-message cache cleanup deferred', error));
       return;
     }
     const snapshotSupported = serverInfo?.supports_repair_snapshot === true;

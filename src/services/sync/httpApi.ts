@@ -1,4 +1,11 @@
-import { chatsApi, type HttpClient, messagesApi, repairSnapshotApi, serverApi } from '@core/api';
+import {
+  chatsApi,
+  type HttpClient,
+  messagesApi,
+  repairSnapshotApi,
+  messageStateApi,
+  serverApi,
+} from '@core/api';
 import type { Chat, Message } from '@core/models';
 import type { SyncApi } from './types';
 
@@ -13,6 +20,12 @@ export function httpSyncApi(http: HttpClient): SyncApi {
     beginRepairSnapshot: (signal) => repairSnapshotApi.begin(http, signal),
     finishRepairSnapshot: (token, signal) => repairSnapshotApi.finish(http, token, signal),
     cancelRepairSnapshot: (token, signal) => repairSnapshotApi.cancel(http, token, signal),
+    beginProviderRepair: (signal) => repairSnapshotApi.beginProvider(http, signal),
+    finishProviderRepair: (token, signal) => repairSnapshotApi.finishProvider(http, token, signal),
+    cancelProviderRepair: (token, signal) => repairSnapshotApi.cancelProvider(http, token, signal),
+    fetchMessageState: (cursor, signal) => messageStateApi.page(http, cursor, signal),
+    fetchActiveMessage: (guid, providerEpoch, signal) =>
+      messageStateApi.activeMessage(http, guid, providerEpoch, signal),
     fetchChat: (chatGuid, signal): Promise<Chat> => chatsApi.getChat(http, chatGuid, signal),
     fetchChats: (offset, limit, signal): Promise<Chat[]> =>
       chatsApi.queryChats(http, { offset, limit }, signal),

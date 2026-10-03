@@ -190,6 +190,26 @@ it('publishes only fixed aggregate fields from matching DB and native snapshots'
   expect(mockRunTrackedRealtimeWork).toHaveBeenCalledTimes(2);
 });
 
+it('classifies hashed identities by account generation without exposing their digest', async () => {
+  const deps = dependencies();
+  const identity = `id-sha256-${'a'.repeat(64)}`;
+  deps.scanAttachmentCache = async () =>
+    ['7', '8', 'unscoped'].map((generation) => ({
+      uri: `file:///private/attachments/${identity}/generation-${generation}/media-photo.png`,
+      bytes: 5,
+      mtimeMs: 100,
+    }));
+  const report = await collectDownloadIntegrityDiagnostics(currentLease, deps);
+  expect(report?.cache).toMatchObject({
+    nativeFiles: 3,
+    currentGenerationFiles: 1,
+    foreignGenerationFiles: 1,
+    unscopedGenerationFiles: 1,
+    legacyLayoutFiles: 0,
+  });
+  expect(JSON.stringify(report)).not.toContain(identity);
+});
+
 it('uses a fixed rejected status and never returns native exception text', async () => {
   const deps = dependencies();
   deps.inspectPartials = async () => {

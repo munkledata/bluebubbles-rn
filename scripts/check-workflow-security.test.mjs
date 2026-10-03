@@ -836,9 +836,11 @@ test('requires every local native module unit-test task that has test sources', 
   for (const task of [
     ':gator-paste-input:testDebugUnitTest',
     ':gator-share-shortcuts:testDebugUnitTest',
+    ':gator-share-intake:testDebugUnitTest',
     ':gator-bounded-document:testDebugUnitTest',
     ':gator-bounded-download:testDebugUnitTest',
     ':expo-file-system:testDebugUnitTest',
+    ':expo-task-manager:testDebugUnitTest',
   ]) {
     const mutated = workflow.replace(task, `${task.slice(0, task.lastIndexOf(':'))}:tasks`);
     assert.notEqual(mutated, workflow, `${task} mutation must change the fixture`);
@@ -858,9 +860,11 @@ test('requires the exact blocking native test step immediately before packaging'
     '          ./gradlew',
     '          :gator-paste-input:testDebugUnitTest',
     '          :gator-share-shortcuts:testDebugUnitTest',
+    '          :gator-share-intake:testDebugUnitTest',
     '          :gator-bounded-document:testDebugUnitTest',
     '          :gator-bounded-download:testDebugUnitTest',
     '          :expo-file-system:testDebugUnitTest',
+    '          :expo-task-manager:testDebugUnitTest',
     '          --no-daemon',
   ].join('\n');
   for (const control of ['if: false', 'continue-on-error: true']) {

@@ -1,0 +1,38 @@
+diff --git a/node_modules/@op-engineering/op-sqlite/android/src/main/java/com/op/sqlite/OPSQLiteModule.kt b/node_modules/@op-engineering/op-sqlite/android/src/main/java/com/op/sqlite/OPSQLiteModule.kt
+--- a/node_modules/@op-engineering/op-sqlite/android/src/main/java/com/op/sqlite/OPSQLiteModule.kt
++++ b/node_modules/@op-engineering/op-sqlite/android/src/main/java/com/op/sqlite/OPSQLiteModule.kt
+@@ -1,5 +1,6 @@
+ package com.op.sqlite
+ 
++import android.content.pm.ApplicationInfo
+ import android.util.Log
+ import com.facebook.react.bridge.Promise
+ import com.facebook.react.bridge.ReactApplicationContext
+@@ -44,7 +45,12 @@
+             OPSQLiteBridge.instance.install(reactApplicationContext)
+             true
+         } catch (exception: Exception) {
+-            Log.e(NAME, "Install exception: $exception")
++            // Use the installed app's flag, not the library's build variant.
++            if ((reactApplicationContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
++                Log.e(NAME, "Install exception: $exception")
++            } else {
++                Log.e(NAME, "database.install_failed [UnknownError]")
++            }
+             false
+         }
+     }
+@@ -98,7 +104,12 @@
+ 
+             promise.resolve(true)
+         } catch (exception: Exception) {
+-            RNLog.e(this.reactApplicationContext, "Exception: $exception")
++            // Release must not evaluate or forward the raw exception to either log sink.
++            if ((reactApplicationContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
++                RNLog.e(this.reactApplicationContext, "Exception: $exception")
++            } else {
++                Log.e(NAME, "database.asset_copy_failed [UnknownError]")
++            }
+             promise.resolve(false)
+         }
+     }

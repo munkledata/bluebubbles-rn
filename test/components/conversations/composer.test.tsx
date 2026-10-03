@@ -313,37 +313,94 @@ describe('Composer — typing enables send + trimmed send + clear', () => {
     await waitFor(() => expect(input().props.value).toBe(''));
   });
 
-  it('keeps the visible draft but drops stale mention metadata when the participant roster changes', async () => {
-    const onSend = jest.fn(() => true);
+  it('preserves a selected mention through temporary inactivity', async () => {
+    const onSend = jest.fn();
     const onSendMention = jest.fn(() => true);
-    const view = await renderWithTheme(
-      <Composer
-        onSend={onSend}
-        onSendMention={onSendMention}
-        mentionParticipants={[
-          { address: 'alice@example.test', label: 'Alice' },
-          { address: '+15551234567', label: 'Bob' },
-        ]}
-      />,
-    );
-
+    const props = {
+      onSend,
+      onSendMention,
+      mentionParticipants: [
+        { address: 'alice@example.test', label: 'Alice' },
+        { address: '+15551234567', label: 'Bob' },
+      ],
+    };
+    const view = await renderWithTheme(<Composer {...props} />);
     await fireEvent.changeText(input(), 'Hello @ali');
     await fireEvent.press(await screen.findByLabelText('Mention Alice'));
-    await view.rerender(
-      <Composer
-        onSend={onSend}
-        onSendMention={onSendMention}
-        mentionParticipants={[
-          { address: 'charlie@example.test', label: 'Charlie' },
-          { address: '+15557654321', label: 'Dana' },
-        ]}
-      />,
-    );
+    await view.rerender(<Composer {...props} active={false} />);
+    expect(input().props.value).toBe('Hello Alice');
+    expect(screen.queryByLabelText('Mention Alice')).toBeNull();
+    await view.rerender(<Composer {...props} active />);
     await fireEvent.press(await screen.findByLabelText('Send message'));
-
-    expect(onSend).toHaveBeenCalledWith('Hello Alice');
-    expect(onSendMention).not.toHaveBeenCalled();
+    expect(onSendMention).toHaveBeenCalledWith('Hello Alice', [
+      { start: 6, length: 5, address: 'alice@example.test' },
+    ]);
+    expect(onSend).not.toHaveBeenCalled();
   });
+
+  it('dismisses an unfinished mention query across inactivity without losing draft text', async () => {
+    const props = {
+      onSend: jest.fn(),
+      onSendMention: jest.fn(() => true),
+      mentionParticipants: [
+        { address: 'alice@example.test', label: 'Alice' },
+        { address: '+15551234567', label: 'Bob' },
+      ],
+    };
+    const view = await renderWithTheme(<Composer {...props} />);
+    await fireEvent.changeText(input(), 'Hello @ali');
+    expect(await screen.findByLabelText('Mention Alice')).toBeTruthy();
+    await view.rerender(<Composer {...props} active={false} />);
+    await view.rerender(<Composer {...props} active />);
+    expect(input().props.value).toBe('Hello @ali');
+    expect(screen.queryByLabelText('Mention Alice')).toBeNull();
+  });
+
+  it.each([true, false])(
+    'drops stale mention metadata when the roster changes while active=%s',
+    async (active) => {
+      const onSend = jest.fn(() => true);
+      const onSendMention = jest.fn(() => true);
+      const view = await renderWithTheme(
+        <Composer
+          onSend={onSend}
+          onSendMention={onSendMention}
+          mentionParticipants={[
+            { address: 'alice@example.test', label: 'Alice' },
+            { address: '+15551234567', label: 'Bob' },
+          ]}
+        />,
+      );
+
+      await fireEvent.changeText(input(), 'Hello @ali');
+      await fireEvent.press(await screen.findByLabelText('Mention Alice'));
+      await view.rerender(
+        <Composer
+          active={active}
+          onSend={onSend}
+          onSendMention={onSendMention}
+          mentionParticipants={[
+            { address: 'charlie@example.test', label: 'Charlie' },
+            { address: '+15557654321', label: 'Dana' },
+          ]}
+        />,
+      );
+      await view.rerender(
+        <Composer
+          onSend={onSend}
+          onSendMention={onSendMention}
+          mentionParticipants={[
+            { address: 'charlie@example.test', label: 'Charlie' },
+            { address: '+15557654321', label: 'Dana' },
+          ]}
+        />,
+      );
+      await fireEvent.press(await screen.findByLabelText('Send message'));
+
+      expect(onSend).toHaveBeenCalledWith('Hello Alice');
+      expect(onSendMention).not.toHaveBeenCalled();
+    },
+  );
 });
 
 describe('Composer — formatted messages', () => {

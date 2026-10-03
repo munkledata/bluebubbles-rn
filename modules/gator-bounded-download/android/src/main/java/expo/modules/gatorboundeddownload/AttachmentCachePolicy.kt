@@ -82,7 +82,8 @@ internal fun canonicalOwnedDescendant(
  * Canonical equality rejects `..`, symlinks (including a symlinked parent), and alternate path
  * spellings. Two layouts are accepted during the pre-ledger upgrade:
  *
- * - current: `attachments/media-<encoded>/generation-(<digits>|unscoped)/media-<encoded>`
+ * - current: `attachments/<identity>/generation-(<digits>|unscoped)/media-<encoded>`, where
+ *   identity is `media-<encoded>` or `id-sha256-<64 lowercase hex>` for a long bounded GUID
  * - legacy: `attachments/<safePathSegment(guid)>/<safePathSegment(name)>`
  *
  * Legacy names are deliberately broader because the old lossy writer preserved spaces, Unicode,
@@ -128,7 +129,7 @@ internal fun requireOwnedAttachmentCachePath(root: File, candidate: File): File 
   require(mediaDirectory.parentFile?.path == canonicalRoot.path) {
     "Attachment cache path is outside the owned namespace"
   }
-  require(isEncodedMediaSegment(mediaDirectory.name)) {
+  require(isAttachmentCacheIdentitySegment(mediaDirectory.name)) {
     "Attachment cache media directory is invalid"
   }
   require(isAttachmentCacheGenerationSegment(parentDirectory.name)) {
@@ -150,7 +151,7 @@ internal fun requireOwnedCurrentAttachmentCachePath(root: File, candidate: File)
   require(mediaDirectory.parentFile?.path == root.absoluteFile.path) {
     "Outgoing attachment destination must use the current cache namespace"
   }
-  require(isEncodedMediaSegment(mediaDirectory.name)) {
+  require(isAttachmentCacheIdentitySegment(mediaDirectory.name)) {
     "Outgoing attachment media directory is invalid"
   }
   require(isAttachmentCacheGenerationSegment(generationDirectory.name)) {

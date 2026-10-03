@@ -56,6 +56,21 @@ const target = {
   abi: 'arm64-v8a',
 };
 
+test('requires the reviewed migration 53 boundary and rejects stale device results', () => {
+  assert.equal(CONTRACT_MIGRATION_COUNT, 53);
+  assert.equal(CONTRACT_MIGRATION_HEAD, '0053_versioned_server_message_state');
+  assert.throws(
+    () =>
+      validateContractResult(
+        result({
+          migrationCount: 52,
+          migrationHead: '0052_chat_history_deletion_boundary',
+        }),
+      ),
+    /migration count or head/,
+  );
+});
+
 test('parses adb device state without requiring adb', () => {
   assert.deepEqual(
     parseAdbDevices(

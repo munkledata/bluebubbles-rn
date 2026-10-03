@@ -14,7 +14,15 @@ import {
   drainNotificationTap,
   notificationOpenTarget,
   openFromNotification,
+  openNotificationPress,
 } from '@/services/notifications/notificationOpen';
+import {
+  reserveNotificationTap,
+  resetPendingNotification,
+  stashPendingNotification,
+  takePendingNotification,
+  type NotificationTapReservation,
+} from '@/services/notifications/pendingNav';
 import { logger } from '@core/secure';
 import { resolveNotificationData } from '@/services/notifications/notificationRouting';
 import {
@@ -30,6 +38,19 @@ jest.mock('@/services/notifications/notificationRouting', () => ({
 }));
 
 const mockResolveNotificationData = resolveNotificationData as jest.Mock;
+
+let occurrenceSequence = 0;
+function notificationPress(data: Record<string, unknown>) {
+  return {
+    notification: { data },
+    pressAction: { id: 'open-chat' },
+    pressOccurrenceId: `11111111-1111-4111-8111-111111111111:${++occurrenceSequence}`,
+  };
+}
+
+function pendingTap(data: Record<string, unknown>): NotificationTapReservation {
+  return reserveNotificationTap(notificationPress(data))!;
+}
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -50,6 +71,7 @@ function notificationNavigation() {
 
 beforeEach(() => {
   resumeRealtimeDeliveries();
+  resetPendingNotification();
 });
 
 afterEach(() => {
@@ -244,10 +266,10 @@ describe('openFromNotification', () => {
 describe('drainNotificationTap', () => {
   // A genuine press event carries the pressAction bundle alongside the notification; Android's
   // launch-intent echo (below) carries only the notification.
-  const messageInitial = {
-    notification: { data: { chatGuid: 'c1', messageGuid: 'm1' } },
-    pressAction: { id: 'open-chat' },
-  };
+  let messageInitial: ReturnType<typeof notificationPress>;
+  beforeEach(() => {
+    messageInitial = notificationPress({ chatGuid: 'c1', messageGuid: 'm1' });
+  });
 
   it('does nothing when neither source has a tap (a plain foreground/resume tick)', async () => {
     const navigate = notificationNavigation();
@@ -283,7 +305,7 @@ describe('drainNotificationTap', () => {
     const press = jest.fn();
     await drainNotificationTap(
       async () => null,
-      () => ({ chatGuid: 'c2', messageGuid: 'm2', messageDate: '9' }),
+      () => pendingTap({ chatGuid: 'c2', messageGuid: 'm2', messageDate: '9' }),
       press,
       navigate,
     );
@@ -297,7 +319,8 @@ describe('drainNotificationTap', () => {
   it('drains BOTH sources but navigates only once (same press, no double-push)', async () => {
     const navigate = notificationNavigation();
     const press = jest.fn();
-    const takePending = jest.fn(() => ({ chatGuid: 'c1', messageGuid: 'm1' }));
+    const tap = reserveNotificationTap(messageInitial);
+    const takePending = jest.fn(() => tap);
     await drainNotificationTap(async () => messageInitial, takePending, press, navigate);
     // Both the launch event and the stash describe the same tap — clear both, open once.
     expect(takePending).toHaveBeenCalledTimes(1);
@@ -312,7 +335,8 @@ describe('drainNotificationTap', () => {
     const press = jest.fn(async () => {
       throw failure;
     });
-    const takePending = jest.fn(() => ({ chatGuid: 'c1', messageGuid: 'm1' }));
+    const tap = reserveNotificationTap(messageInitial);
+    const takePending = jest.fn(() => tap);
 
     await expect(
       drainNotificationTap(async () => messageInitial, takePending, press, navigate),
@@ -329,17 +353,15 @@ describe('drainNotificationTap', () => {
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     const navigate = notificationNavigation();
     const press = jest.fn();
-    let pending: Record<string, unknown> | null = {
-      chatGuid: 'c1',
-      messageGuid: 'm1',
-    };
+    const tap = reserveNotificationTap(messageInitial)!;
+    let pending: NotificationTapReservation | null = tap;
     const takePending = jest.fn(() => {
       const value = pending;
       pending = null;
       return value;
     });
-    const restorePending = jest.fn((data: Record<string, unknown>) => {
-      pending = data;
+    const restorePending = jest.fn((reservation: NotificationTapReservation) => {
+      pending = reservation;
     });
     const echo = { notification: messageInitial.notification };
     const getInitial = jest
@@ -355,7 +377,7 @@ describe('drainNotificationTap', () => {
     expect(navigate.openChat).not.toHaveBeenCalled();
     expect(navigate.openInbox).not.toHaveBeenCalled();
     expect(restorePending).toHaveBeenCalledTimes(1);
-    expect(restorePending).toHaveBeenCalledWith(messageInitial.notification.data);
+    expect(restorePending).toHaveBeenCalledWith(tap);
     // The genuine launch press still owns its cleanup exactly once; the restored pending copy is
     // navigation-only on retry.
     expect(press).toHaveBeenCalledTimes(1);
@@ -374,10 +396,7 @@ describe('drainNotificationTap', () => {
   it('runs press side-effects but does NOT navigate for a launch that is not about a chat', async () => {
     const navigate = notificationNavigation();
     const press = jest.fn();
-    const reminderInitial = {
-      notification: { data: { reminder: '1' } },
-      pressAction: { id: 'reminder' },
-    };
+    const reminderInitial = notificationPress({ reminder: '1' });
     await drainNotificationTap(
       async () => reminderInitial,
       () => null,
@@ -437,7 +456,7 @@ describe('drainNotificationTap', () => {
     const echo = { notification: { data: { chatGuid: 'c1', messageGuid: 'm1' } } };
     await drainNotificationTap(
       async () => echo,
-      () => ({ chatGuid: 'c2', messageGuid: 'm2' }),
+      () => pendingTap({ chatGuid: 'c2', messageGuid: 'm2' }),
       press,
       navigate,
     );
@@ -450,7 +469,7 @@ describe('drainNotificationTap', () => {
   it('does not consume or navigate a tap when account A retires during the initial read', async () => {
     const initial = deferred<typeof messageInitial | null>();
     const getInitial = jest.fn(() => initial.promise);
-    const takePending = jest.fn(() => ({ chatGuid: 'account-b-chat' }));
+    const takePending = jest.fn(() => pendingTap({ chatGuid: 'account-b-chat' }));
     const press = jest.fn();
     const navigate = notificationNavigation();
     const restorePending = jest.fn();
@@ -475,5 +494,97 @@ describe('drainNotificationTap', () => {
     expect(navigate.openInbox).not.toHaveBeenCalled();
     expect(press).not.toHaveBeenCalled();
     expect(restorePending).not.toHaveBeenCalled();
+  });
+
+  it('rejects a background copy whose validated callback arrives after initial navigation', async () => {
+    const tap = reserveNotificationTap(messageInitial)!;
+    const navigate = notificationNavigation();
+    await drainNotificationTap(
+      async () => messageInitial,
+      takePendingNotification,
+      jest.fn(),
+      navigate,
+    );
+    stashPendingNotification(tap);
+    const echo = { notification: messageInitial.notification };
+    await drainNotificationTap(async () => echo, takePendingNotification, jest.fn(), navigate);
+    expect(navigate.openChat).toHaveBeenCalledTimes(1);
+    expect(takePendingNotification()).toBeNull();
+  });
+
+  it('rejects a late sticky copy after the pending channel already opened the chat', async () => {
+    const tap = reserveNotificationTap(messageInitial)!;
+    stashPendingNotification(tap);
+    const navigate = notificationNavigation();
+    await drainNotificationTap(async () => null, takePendingNotification, jest.fn(), navigate);
+    await drainNotificationTap(
+      async () => messageInitial,
+      takePendingNotification,
+      jest.fn(),
+      navigate,
+    );
+    expect(navigate.openChat).toHaveBeenCalledTimes(1);
+  });
+
+  it('coalesces foreground and initial copies in flight but accepts a new tap on identical data', async () => {
+    const route = deferred<Record<string, unknown> | null>();
+    mockResolveNotificationData.mockReturnValueOnce(route.promise);
+    const navigate = notificationNavigation();
+    const opening = openNotificationPress(messageInitial, navigate);
+    await drainNotificationTap(
+      async () => messageInitial,
+      takePendingNotification,
+      jest.fn(),
+      navigate,
+    );
+    expect(mockResolveNotificationData).toHaveBeenCalledTimes(1);
+    route.resolve(messageInitial.notification.data);
+    await opening;
+    await drainNotificationTap(
+      async () => messageInitial,
+      takePendingNotification,
+      jest.fn(),
+      navigate,
+    );
+    expect(navigate.openChat).toHaveBeenCalledTimes(1);
+    await openNotificationPress(notificationPress(messageInitial.notification.data), navigate);
+    expect(navigate.openChat).toHaveBeenCalledTimes(2);
+  });
+
+  it('a newer pending press fences a held route and survives an older sticky event', async () => {
+    const route = deferred<Record<string, unknown> | null>();
+    mockResolveNotificationData.mockReturnValueOnce(route.promise);
+    const navigate = notificationNavigation();
+    const opening = openNotificationPress(messageInitial, navigate);
+    const newer = notificationPress({ chatGuid: 'c2' });
+    const tap = reserveNotificationTap(newer)!;
+    stashPendingNotification(tap);
+    route.resolve(messageInitial.notification.data);
+    await opening;
+    expect(navigate.openChat).not.toHaveBeenCalled();
+    await drainNotificationTap(
+      async () => messageInitial,
+      takePendingNotification,
+      jest.fn(),
+      navigate,
+    );
+    expect(navigate.openChat).toHaveBeenCalledTimes(1);
+    expect(navigate.openChat).toHaveBeenCalledWith('/chat/c2');
+  });
+
+  it('does not adopt a known A tap under B after account retirement during navigation', async () => {
+    const route = deferred<Record<string, unknown> | null>();
+    mockResolveNotificationData.mockReturnValueOnce(route.promise);
+    const navigate = notificationNavigation();
+    const opening = openNotificationPress(messageInitial, navigate);
+    await pauseRealtimeDeliveries();
+    resetPendingNotification();
+    resumeRealtimeDeliveries();
+    route.resolve(messageInitial.notification.data);
+    await opening;
+    await openNotificationPress(messageInitial, navigate);
+    expect(navigate.openChat).not.toHaveBeenCalled();
+    await openNotificationPress(notificationPress({ chatGuid: 'account-b-chat' }), navigate);
+    expect(navigate.openChat).toHaveBeenCalledWith('/chat/account-b-chat');
   });
 });

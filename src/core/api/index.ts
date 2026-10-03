@@ -12,6 +12,7 @@ export * as contactsApi from './endpoints/contacts';
 export * as errorReportsApi from './endpoints/errorReports';
 export * as backupsApi from './endpoints/backups';
 export * as repairSnapshotApi from './endpoints/repairSnapshot';
+export * as messageStateApi from './endpoints/messageState';
 export * as deviceCredentialsApi from './endpoints/deviceCredentials';
 export * as urlPreviewsApi from './endpoints/urlPreviews';
 export * as facetimeApi from './endpoints/facetime';

@@ -86,6 +86,12 @@ async function seedChat(db: AppDatabase, guid: string) {
   );
 }
 
+async function seedProvenIMessageChat(db: AppDatabase, guid: string) {
+  const participant = { address: '+15551234567', service: 'iMessage' as const };
+  const handles = await upsertHandles(db, [participant]);
+  await upsertChats(db, [Chat.parse({ guid, style: 45, participants: [participant] })], handles);
+}
+
 function countMessages(raw: Database.Database) {
   return (raw.prepare('SELECT COUNT(*) c FROM messages').get() as { c: number }).c;
 }
@@ -433,6 +439,108 @@ describe('sendTextMessage', () => {
       new Map(),
     );
     expect(countMessages(raw)).toBe(1);
+  });
+
+  it('promotes the narrow exact GUID before later history upsert, leaving one canonical bubble', async () => {
+    const { db, raw } = await createTestDb();
+    const chatGuid = 'any;-;+15551234567';
+    const guid = '11111111-2222-4333-8444-555555555555';
+    await seedProvenIMessageChat(db, chatGuid);
+    const post = jest.fn(
+      async (_path: string, _schema: unknown, options: { json?: Record<string, unknown> }) => ({
+        guid,
+        tempGuid: options.json?.tempGuid,
+        viaPrivateApi: true,
+      }),
+    );
+    let client!: HttpClient;
+    client = {
+      post,
+      pinTransport: () => client,
+      isTransportCurrent: () => true,
+      assertTransportCurrent: () => undefined,
+    } as unknown as HttpClient;
+
+    await sendTextMessage(
+      db,
+      client,
+      { chatGuid, text: 'exact identity' },
+      1_000,
+      undefined,
+      undefined,
+      undefined,
+      fixedRcsCapabilitySource(
+        ServerInfo.parse({ version: '2.0.0', supports_imessage_plain_text: true }),
+      ),
+    );
+
+    expect(post).toHaveBeenCalledWith('/message/imessage-text', expect.anything(), {
+      captureErrorDetail: true,
+      retry: false,
+      json: {
+        chatGuid,
+        message: 'exact identity',
+        tempGuid: expect.stringMatching(/^temp-/),
+      },
+    });
+    expect(raw.prepare('SELECT guid, send_state AS sendState FROM messages').get()).toEqual({
+      guid,
+      sendState: 'sent',
+    });
+    expect(raw.prepare('SELECT COUNT(*) AS count FROM outgoing_queue').get()).toEqual({ count: 0 });
+
+    const chatId = (
+      raw.prepare('SELECT id FROM chats WHERE guid = ?').get(chatGuid) as { id: number }
+    ).id;
+    await upsertMessages(
+      db,
+      [Message.parse({ guid, text: 'exact identity', isFromMe: true, dateCreated: 1_000 })],
+      () => chatId,
+      new Map(),
+    );
+    expect(raw.prepare('SELECT COUNT(*) AS count FROM messages').get()).toEqual({ count: 1 });
+    expect(raw.prepare('SELECT guid FROM messages').get()).toEqual({ guid });
+  });
+
+  it('arms one narrow retry only for the exact pre-dispatch unavailable response', async () => {
+    const { db, raw } = await createTestDb();
+    const chatGuid = 'iMessage;-;+15551234567';
+    await seedProvenIMessageChat(db, chatGuid);
+    const unavailable = ApiError.fromStatus(
+      503,
+      'helper unavailable',
+      undefined,
+      'imessage_plain_text_unavailable',
+    );
+
+    await sendTextMessage(
+      db,
+      fakeHttp(async () => {
+        throw unavailable;
+      }),
+      { chatGuid, text: 'retry only this route' },
+      1_000,
+      undefined,
+      undefined,
+      undefined,
+      fixedRcsCapabilitySource(
+        ServerInfo.parse({ version: '2.0.0', supports_imessage_plain_text: true }),
+      ),
+    );
+
+    const row = raw
+      .prepare(
+        `SELECT m.send_state AS sendState, q.attempts, q.payload
+           FROM messages m JOIN outgoing_queue q ON q.temp_guid = m.guid`,
+      )
+      .get() as { sendState: string; attempts: number; payload: string };
+    expect(row.sendState).toBe('error');
+    expect(row.attempts).toBe(1);
+    expect(JSON.parse(row.payload)).toMatchObject({
+      message: 'retry only this route',
+      imessagePlainTextV1: true,
+      imessagePlainTextRetrySafeV1: true,
+    });
   });
 
   it('marks the message errored on failure (one row, queue attempt bumped)', async () => {

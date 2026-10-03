@@ -43,6 +43,18 @@ export const SendAck = z
   .loose();
 export type SendAck = z.infer<typeof SendAck>;
 
+const CANONICAL_MESSAGE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+
+/** The narrow plain-text route succeeds only with its exact key and native Messages GUID. */
+export const IMessagePlainTextAck = z
+  .object({
+    guid: z.string().regex(CANONICAL_MESSAGE_UUID),
+    tempGuid: z.string().min(1),
+    viaPrivateApi: z.literal(true),
+  })
+  .strict();
+export type IMessagePlainTextAck = z.infer<typeof IMessagePlainTextAck>;
+
 const IMessageEffectAck = z.object({ guid: z.string(), viaPrivateApi: z.literal(true) }).loose();
 
 const IMessageMentionAck = z.object({ guid: z.string(), viaPrivateApi: z.literal(true) }).strict();
@@ -67,6 +79,14 @@ const DEFINITE_IMESSAGE_FORMATTED_ERRORS = new Map<string, number>([
   ['idempotency_persistence_unavailable', 503],
 ]);
 
+const KNOWN_IMESSAGE_PLAIN_TEXT_ERRORS = new Map<string, number>([
+  ['imessage_plain_text_invalid_target', 400],
+  ['imessage_plain_text_unavailable', 503],
+  ['imessage_plain_text_rejected', 409],
+  ['imessage_plain_text_outcome_unknown', 409],
+  ['idempotency_outcome_unknown', 500],
+]);
+
 /** Only exact reviewed status/type pairs prove that the mention helper did not dispatch. */
 export function isDefiniteIMessageMentionError(error: unknown): error is ApiError {
   if (!(error instanceof ApiError) || error.serverErrorType == null) return false;
@@ -79,6 +99,20 @@ export function isDefiniteIMessageFormattedError(error: unknown): error is ApiEr
   if (!(error instanceof ApiError) || error.serverErrorType == null) return false;
   const expectedStatus = DEFINITE_IMESSAGE_FORMATTED_ERRORS.get(error.serverErrorType);
   return expectedStatus !== undefined && error.status === expectedStatus;
+}
+
+function isKnownIMessagePlainTextError(error: unknown): error is ApiError {
+  if (!(error instanceof ApiError) || error.serverErrorType == null) return false;
+  return KNOWN_IMESSAGE_PLAIN_TEXT_ERRORS.get(error.serverErrorType) === error.status;
+}
+
+/** The sole response that proves the narrow helper did not dispatch and may be retried. */
+export function isRetryableIMessagePlainTextUnavailable(error: unknown): error is ApiError {
+  return (
+    error instanceof ApiError &&
+    error.status === 503 &&
+    error.serverErrorType === 'imessage_plain_text_unavailable'
+  );
 }
 
 /** The narrow unsend route must confirm both the operation and its exact target identity. */
@@ -111,6 +145,8 @@ const MENTION_ID_CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/u;
 const REMOTE_DELETE_CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/u;
 const DISALLOWED_MENTION_CONTROL_CHARACTER =
   /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f]/u;
+const IMESSAGE_PLAIN_TEXT_DISALLOWED_CHARACTER =
+  /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\ufffc]/u;
 
 function requireWellFormedBoundedUtf8(value: string, maxBytes: number, label: string): string {
   const bytes = utf8Encode(value);
@@ -145,6 +181,87 @@ function requireNarrowReply(params: SendTextParams): void {
     IMESSAGE_REPLY_TEMP_GUID_MAX_BYTES,
     'reply tempGuid',
   );
+}
+
+export interface SendIMessagePlainTextParams {
+  chatGuid: string;
+  message: string;
+  /** Durable idempotency identity generated before optimistic admission. */
+  tempGuid: string;
+}
+
+/** Validate the exact helper envelope before optimistic admission and again at the endpoint. */
+export function requireIMessagePlainTextRequest(params: SendIMessagePlainTextParams): void {
+  if (
+    !/^(?:iMessage|any);-;.+$/u.test(params.chatGuid) ||
+    params.chatGuid.trim() !== params.chatGuid ||
+    CONTROL_CHARACTER.test(params.chatGuid)
+  ) {
+    throw new Error('A narrow iMessage text needs an exact existing iMessage conversation.');
+  }
+  requireWellFormedBoundedUtf8(params.chatGuid, IMESSAGE_REPLY_ID_MAX_BYTES, 'chatGuid');
+  if (
+    params.message.trim().length === 0 ||
+    IMESSAGE_PLAIN_TEXT_DISALLOWED_CHARACTER.test(params.message)
+  ) {
+    throw new Error(
+      'A narrow iMessage text cannot be blank or contain unsupported control or attachment characters.',
+    );
+  }
+  requireWellFormedBoundedUtf8(
+    params.message,
+    IMESSAGE_REPLY_TEXT_MAX_BYTES,
+    'plain iMessage text',
+  );
+  if (params.tempGuid.length === 0) {
+    throw new Error('A narrow iMessage text needs a nonempty temporary identity.');
+  }
+  requireWellFormedBoundedUtf8(
+    params.tempGuid,
+    IMESSAGE_REPLY_TEMP_GUID_MAX_BYTES,
+    'plain iMessage tempGuid',
+  );
+}
+
+function imessagePlainTextOutcomeUnknown(cause: unknown): ApiError {
+  return new ApiError(
+    'parse_error',
+    'The iMessage delivery outcome is unknown',
+    undefined,
+    cause,
+    undefined,
+    'imessage_plain_text_outcome_unknown',
+  );
+}
+
+/** POST one proven one-to-one iMessage body and require its exact durable/native identities. */
+export async function sendIMessagePlainText(
+  http: HttpClient,
+  params: SendIMessagePlainTextParams,
+): Promise<IMessagePlainTextAck> {
+  requireIMessagePlainTextRequest(params);
+  let ack: IMessagePlainTextAck;
+  try {
+    const raw = await http.post('/message/imessage-text', IMessagePlainTextAck, {
+      captureErrorDetail: true,
+      retry: false,
+      json: {
+        chatGuid: params.chatGuid,
+        message: params.message,
+        tempGuid: params.tempGuid,
+      },
+    });
+    ack = IMessagePlainTextAck.parse(raw);
+  } catch (error) {
+    if (isKnownIMessagePlainTextError(error)) throw error;
+    throw imessagePlainTextOutcomeUnknown(error);
+  }
+  if (ack.tempGuid !== params.tempGuid || ack.guid === params.tempGuid) {
+    throw imessagePlainTextOutcomeUnknown(
+      new Error('iMessage plain-text acknowledgement echoed a different temporary identity'),
+    );
+  }
+  return ack;
 }
 
 /** GET /api/v1/chat/{guid}/message — messages for a chat, newest first. */

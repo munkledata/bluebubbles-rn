@@ -52,6 +52,18 @@ describe('isLocalFileUri', () => {
 });
 
 describe('attachmentFileName', () => {
+  it('keeps missing-name fallbacks within the encoded limit, including the MIME extension', () => {
+    expect(attachmentFileName(null, 'x'.repeat(176), 'image/png')).toBe(`${'x'.repeat(176)}.png`);
+    expect(attachmentFileName(null, 'x'.repeat(177), 'image/png')).toBe('attachment.png');
+    expect(attachmentFileName(null, '€'.repeat(20), 'image/png')).toBe('attachment.png');
+    expect(attachmentFileName(null, 'x'.repeat(2795), 'video/mp4')).toBe('attachment.mp4');
+    expect(attachmentFileName(null, 'x'.repeat(2795), null)).toBe('attachment');
+    expect(attachmentFileName('original.png', 'x'.repeat(2795), 'image/png')).toBe('original.png');
+  });
+
+  it('leaves malformed Unicode rejection to the guarded destination boundary', () => {
+    expect(attachmentFileName(null, '\ud800', 'image/png')).toBe('\ud800.png');
+  });
   it('prefers the server-supplied transfer name', () => {
     expect(attachmentFileName('holiday.jpg', 'guid-1', 'image/jpeg')).toBe('holiday.jpg');
   });

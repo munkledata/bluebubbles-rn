@@ -1167,4 +1167,18 @@ export const MIGRATIONS: Migration[] = [
               )`,
     ],
   },
+  {
+    name: '0053_versioned_server_message_state',
+    statements: [
+      `CREATE TABLE message_server_states (
+        guid TEXT PRIMARY KEY NOT NULL,
+        chat_guid TEXT,
+        provider_epoch TEXT NOT NULL,
+        ledger_epoch TEXT NOT NULL,
+        sequence TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('deleted', 'restored')),
+        date_deleted INTEGER
+      )`,
+    ],
+  },
 ];

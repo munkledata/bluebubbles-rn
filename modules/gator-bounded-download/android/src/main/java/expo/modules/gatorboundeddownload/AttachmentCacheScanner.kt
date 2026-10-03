@@ -400,7 +400,7 @@ private class AttachmentCacheScanSession(
     generationDirectory?.let { directory ->
       val parent = attachmentDirectory
         ?: fail(AttachmentCacheScanFailure.CORRUPT, "generation parent state is missing")
-      if (!isEncodedMediaSegment(parent.name)) {
+      if (!isAttachmentCacheIdentitySegment(parent.name)) {
         fail(AttachmentCacheScanFailure.CORRUPT, "legacy attachment directory is nested")
       }
       verifyDirectory(
@@ -426,7 +426,7 @@ private class AttachmentCacheScanSession(
   private fun openGeneration(directory: File) {
     val parent = attachmentDirectory
       ?: fail(AttachmentCacheScanFailure.CORRUPT, "generation parent state is missing")
-    if (!isEncodedMediaSegment(parent.name)) {
+    if (!isAttachmentCacheIdentitySegment(parent.name)) {
       fail(AttachmentCacheScanFailure.CORRUPT, "legacy attachment directory is nested")
     }
     verifyDirectory(

@@ -138,6 +138,11 @@ jest.mock('@/services', () => ({
   markAllChatsRead: jest.fn(() => Promise.resolve()),
   movePinnedChat: jest.fn(() => Promise.resolve()),
 }));
+// Shortcut DB/native ownership is exercised by shareShortcuts.test.ts. Keep this screen's
+// service boundary consistent with the other inbox effects above.
+jest.mock('@/services/shortcuts/shareShortcuts', () => ({
+  refreshShareShortcuts: jest.fn().mockResolvedValue(true),
+}));
 
 jest.mock('@ui/conversations/ConversationTile', () => {
   const ReactLib = require('react');

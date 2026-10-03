@@ -1,6 +1,8 @@
 import type { DeletedMessage, DeletedMessagePage } from '@core/api/endpoints/messages';
 import type { Chat, Message, ServerInfo } from '@core/models';
 import type { SyncCursor } from '@core/sync';
+import type { MessageStatePage } from '@core/models/messageState';
+import type { ProviderRepairLease, ProviderRepairFinish } from '@core/api/endpoints/repairSnapshot';
 
 /**
  * Data source for the sync engine. Implemented by httpApi.ts (over the typed
@@ -16,6 +18,15 @@ export interface SyncApi {
   beginRepairSnapshot?(signal?: AbortSignal): Promise<{ token: string; expiresAt: number }>;
   finishRepairSnapshot?(token: string, signal?: AbortSignal): Promise<void>;
   cancelRepairSnapshot?(token: string, signal?: AbortSignal): Promise<void>;
+  beginProviderRepair?(signal?: AbortSignal): Promise<ProviderRepairLease>;
+  finishProviderRepair?(token: string, signal?: AbortSignal): Promise<ProviderRepairFinish>;
+  cancelProviderRepair?(token: string, signal?: AbortSignal): Promise<void>;
+  fetchMessageState?(cursor: string, signal?: AbortSignal): Promise<MessageStatePage>;
+  fetchActiveMessage?(
+    guid: string,
+    providerEpoch: string,
+    signal?: AbortSignal,
+  ): Promise<Message | null>;
   /** One exact chat for targeted repair; optional only for legacy/test adapters. */
   fetchChat?(chatGuid: string, signal?: AbortSignal): Promise<Chat>;
   fetchChats(offset: number, limit: number, signal?: AbortSignal): Promise<Chat[]>;

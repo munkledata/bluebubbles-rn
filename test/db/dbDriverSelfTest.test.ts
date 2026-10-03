@@ -675,8 +675,8 @@ describe('runDbDriverSelfTest', () => {
       schema: 3,
       suite: 'android-db-contract',
       status: 'pass',
-      migrationCount: 52,
-      migrationHead: '0052_chat_history_deletion_boundary',
+      migrationCount: 53,
+      migrationHead: '0053_versioned_server_message_state',
       checks: passingChecks,
     });
 
@@ -946,8 +946,8 @@ describe('runDbDriverSelfTest', () => {
       schema: 3,
       suite: 'android-db-contract',
       status: 'fail',
-      migrationCount: 52,
-      migrationHead: '0052_chat_history_deletion_boundary',
+      migrationCount: 53,
+      migrationHead: '0053_versioned_server_message_state',
       checks: { oldKeyRejected: true, cleanup: false },
       failureCode: 'cleanup',
     });

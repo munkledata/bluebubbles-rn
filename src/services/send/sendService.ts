@@ -1,6 +1,12 @@
 import type { HttpClient } from '@core/api/http';
 import { ApiError } from '@core/api/errors';
-import { sendText, type MessageMention } from '@core/api/endpoints/messages';
+import {
+  isRetryableIMessagePlainTextUnavailable,
+  requireIMessagePlainTextRequest,
+  sendIMessagePlainText,
+  sendText,
+  type MessageMention,
+} from '@core/api/endpoints/messages';
 import { MAX_SEND_ATTACHMENT_TEXT_BYTES } from '@core/models/serverInfo';
 import {
   getChatHeader,
@@ -139,12 +145,15 @@ export async function sendTextMessage(
   const effectiveCommitGuard = scheduledHandover?.commitGuard ?? ordinaryCommitGuard;
   const transport = pinSendTransport(http, effectiveCommitGuard);
   const rcsChat = isRcsChatGuid(args.chatGuid);
+  const candidatePlainTextHeader =
+    !rcsChat && target == null ? await getChatHeader(db, args.chatGuid) : null;
+  const provenPlainTextChat = isProvenOneToOneIMessageChat(candidatePlainTextHeader);
   const capability = await resolveRcsAttemptOwnership(
     transport.http,
     args.chatGuid,
     transport.admissionGuard,
     capabilitySource,
-    { requireServerInfo: rcsChat || target != null },
+    { requireServerInfo: rcsChat || target != null || provenPlainTextChat },
   );
   const capabilityGuard = sendCapabilityCommitGuard(transport.admissionGuard, capabilitySource);
   if (rcsChat && capability.serverInfo?.rcs !== true) {
@@ -166,6 +175,11 @@ export async function sendTextMessage(
       throw new Error('A proven existing one-to-one iMessage chat is required.');
     }
   }
+  const useIMessagePlainText =
+    provenPlainTextChat && capability.serverInfo?.supports_imessage_plain_text === true;
+  if (useIMessagePlainText) {
+    requireIMessagePlainTextRequest({ chatGuid: args.chatGuid, message: args.text, tempGuid });
+  }
   const outgoing = {
     tempGuid,
     chatGuid: args.chatGuid,
@@ -175,6 +189,7 @@ export async function sendTextMessage(
     partIndex: target?.partIndex,
     threadOriginatorGuid: target?.messageGuid,
     attemptAware: capability.attemptAware,
+    imessagePlainTextV1: useIMessagePlainText,
   };
   const { attemptOwnerToken } = scheduledHandover
     ? await handoverScheduledTextToOutgoing(
@@ -214,6 +229,7 @@ export async function sendTextMessage(
     throw new DbCommitGuardRejectedError();
   }
 
+  let networkStarted = false;
   try {
     const finalTarget = authorizedTarget
       ? await resolveMessageTarget(db, authorizedTarget, capabilityGuard)
@@ -230,15 +246,22 @@ export async function sendTextMessage(
       throw new DbCommitGuardRejectedError();
     }
     const method = target ? undefined : chooseSendMethod(false);
-    const server = await sendText(transport.http, {
-      chatGuid: args.chatGuid,
-      tempGuid,
-      clientAttemptGeneration: attemptOwnerToken?.generation,
-      message: args.text,
-      selectedMessageGuid: finalTarget?.messageGuid,
-      partIndex: finalTarget?.partIndex,
-      method,
-    });
+    networkStarted = true;
+    const server = useIMessagePlainText
+      ? await sendIMessagePlainText(transport.http, {
+          chatGuid: args.chatGuid,
+          tempGuid,
+          message: args.text,
+        })
+      : await sendText(transport.http, {
+          chatGuid: args.chatGuid,
+          tempGuid,
+          clientAttemptGeneration: attemptOwnerToken?.generation,
+          message: args.text,
+          selectedMessageGuid: finalTarget?.messageGuid,
+          partIndex: finalTarget?.partIndex,
+          method,
+        });
     if (
       target &&
       (typeof server.guid !== 'string' ||
@@ -257,7 +280,17 @@ export async function sendTextMessage(
       expectedChatGuid: args.chatGuid,
     });
   } catch (e) {
-    if (e instanceof DbCommitGuardRejectedError) throw e;
+    if (e instanceof DbCommitGuardRejectedError) {
+      if (
+        !useIMessagePlainText ||
+        networkStarted ||
+        (effectiveCommitGuard && !effectiveCommitGuard())
+      ) {
+        throw e;
+      }
+    }
+    const retrySafePlainText =
+      useIMessagePlainText && (!networkStarted || isRetryableIMessagePlainTextUnavailable(e));
     await handleSendFailure(
       db,
       tempGuid,
@@ -268,7 +301,13 @@ export async function sendTextMessage(
       effectiveCommitGuard,
       {
         attemptOwnerToken: attemptOwnerToken ?? undefined,
-        ...(target ? { terminalUncertainKind: 'reply' as const } : {}),
+        ...(retrySafePlainText
+          ? { imessagePlainTextRetrySafe: true }
+          : useIMessagePlainText
+            ? { terminalUncertainKind: 'plain' as const }
+            : target
+              ? { terminalUncertainKind: 'reply' as const }
+              : {}),
       },
     );
   }

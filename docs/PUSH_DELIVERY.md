@@ -527,6 +527,21 @@ Keep `index.js` importing `backgroundEvents` before `expo-router/entry`. Passing
 not make route-time registration safe: the background callback must still reach notify-kit during bundle-entry
 evaluation.
 
+**Body-tap occurrence ownership (2026-09-30 source fix):** the pinned
+`patches/react-native-notify-kit+10.4.8.patch` mints one `pressOccurrenceId` at native body-press
+receipt, outside `notification.data`. A process UUID plus atomic increasing sequence is shared by
+the PRESS event and sticky initial event; Kotlin explicitly forwards it to foreground/headless
+JavaScript. The Activity-intent fallback stays tokenless. A second real press on an identical
+notice gets a new sequence, not a permanently suppressed chat/payload identity.
+`pendingNav` reserves before background route lookup and before the foreground task is queued.
+Initial, pending and foreground paths share one leased navigation claim, reject delayed consumed
+copies, and let a newer press fence an older held lookup. A failed current lookup remains retryable.
+Disconnect drops data/claims while retaining the known retired sequence floor. Tracking is
+constant-sized and no identity is logged or persisted. Malformed/tokenless handoffs fail closed;
+this source therefore requires a clean native replacement build containing the saved patch.
+Focused host/source-contract checks do not prove Android bridging or fix the installed Play v79;
+the exact cold-tap/Back/Home/launcher-resume device check remains under `FEAT-05B`.
+
 Before a notify-kit upgrade, verify all of the following against the pinned Expo/RN versions and an Android build:
 
 - maintained release/security posture, license continuity, React Native New Architecture support, and no unresolved

@@ -16,6 +16,8 @@ import {
   kvGetWithinTransaction,
   kvSetWithinTransaction,
   markMessageDeletedWithinTransaction,
+  getMessageStateAuthority,
+  getMessageStateAuthorityWithinTransaction,
 } from '@db/repositories';
 import { withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
@@ -266,6 +268,9 @@ export async function syncDeletedMessages(
   api: SyncApi,
   opts: DeletionSyncOptions,
 ): Promise<number> {
+  // A legacy response cannot overwrite a versioned restore. Historical receipts remain local
+  // protections, but new legacy observations have no authority after a successful scoped repair.
+  if (opts.shouldAbort?.() || (await getMessageStateAuthority(db))) return 0;
   const exhaustive = opts.exhaustive === true;
   // A bound repair snapshot reads the retained v2 ledger even when the server cannot currently
   // discover new live deletions. Exhaustive mode therefore owns its own capability contract.
@@ -436,6 +441,7 @@ export async function syncDeletedMessages(
     await withDbTransaction(
       db,
       async (transactionContext) => {
+        if (await getMessageStateAuthorityWithinTransaction(transactionContext)) return;
         for (const row of preparedRows) {
           await markMessageDeletedWithinTransaction(
             transactionContext,

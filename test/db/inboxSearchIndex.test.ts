@@ -159,21 +159,161 @@ describe('inbox search candidate index', () => {
         t.raw.prepare("SELECT id FROM chats WHERE guid = 'exact'").get() as { id: number }
       ).id;
 
-      const statements: { query: string; params: unknown[] }[] = [];
-      const observedDb = drizzle(t.raw, {
+      const statements: string[] = [];
+      const loggedDb = drizzle(t.raw, {
         logger: {
-          logQuery(query, params) {
-            statements.push({ query, params: [...params] });
+          logQuery(query) {
+            statements.push(query);
           },
         },
       }) as unknown as AppDatabase;
+      const detailedIds: number[] = [];
+      const observedDb = new Proxy(loggedDb, {
+        get(target, property, receiver) {
+          if (property !== 'all') return Reflect.get(target, property, receiver);
+          return async (...args: Parameters<AppDatabase['all']>) => {
+            const rows = (await target.all(...args)) as Record<string, unknown>[];
+            for (const row of rows) {
+              if (typeof row.candidateId === 'number') detailedIds.push(row.candidateId);
+            }
+            return rows;
+          };
+        },
+      });
       const result = await searchChatsForInboxPage(observedDb, { query: 'abcd' });
       expect(result.rows.map((row) => row.guid)).toEqual(['exact']);
-      const detail = statements.find(({ query }) =>
-        /c\.id IN \(\s*SELECT CAST\(value AS INTEGER\) FROM json_each\(/.test(query),
+      const detail = statements.find((query) =>
+        query.includes('candidate_details AS MATERIALIZED'),
       );
       expect(detail).toBeDefined();
-      expect(detail?.params).toContain(JSON.stringify([exactId]));
+      expect(detail).toContain('SELECT id FROM classified_ids WHERE isCandidate = 1');
+      expect(detailedIds).toEqual([exactId]);
+    } finally {
+      t.raw.close();
+    }
+  });
+
+  it('keeps a full hidden raw page and loads later visible details in the same read', async () => {
+    const t = await createTestDb();
+    try {
+      const insert = t.raw.prepare(
+        'INSERT INTO chats (guid, display_name, is_archived, deleted_at) VALUES (?, ?, ?, ?)',
+      );
+      t.raw.transaction(() => {
+        for (let index = 0; index < 128; index += 1) {
+          insert.run(`hidden-${index}`, 'Needle hidden', index % 2, index % 2 === 0 ? 100 : null);
+        }
+        insert.run('late-visible', 'Needle visible', 0, null);
+      })();
+
+      const statements: string[] = [];
+      const candidatePlans: string[][] = [];
+      const loggedDb = drizzle(t.raw, {
+        logger: {
+          logQuery(query, params) {
+            statements.push(query);
+            if (query.includes('candidate_details AS MATERIALIZED')) {
+              const plan = t.raw.prepare(`EXPLAIN QUERY PLAN ${query}`).all(...params) as {
+                detail: string;
+              }[];
+              candidatePlans.push(plan.map((row) => row.detail));
+            }
+          },
+        },
+      }) as unknown as AppDatabase;
+      const rawPages: { id: number; candidateId: number | null }[][] = [];
+      const observedDb = new Proxy(loggedDb, {
+        get(target, property, receiver) {
+          if (property !== 'all') return Reflect.get(target, property, receiver);
+          return async (...args: Parameters<AppDatabase['all']>) => {
+            const rows = (await target.all(...args)) as Record<string, unknown>[];
+            if (rows.length > 0 && Object.hasOwn(rows[0]!, 'isCandidate')) {
+              rawPages.push(rows as { id: number; candidateId: number | null }[]);
+            }
+            return rows;
+          };
+        },
+      });
+
+      const result = await searchChatsForInboxPage(observedDb, { query: 'needle' });
+      expect(result.rows.map((row) => row.guid)).toEqual(['late-visible']);
+      expect(result.hasMore).toBe(false);
+      expect(rawPages.map((page) => page.length)).toEqual([128, 1]);
+      expect(rawPages[0]?.every((row) => row.candidateId === null)).toBe(true);
+      expect(rawPages[1]).toEqual([expect.objectContaining({ id: 129, candidateId: 129 })]);
+      expect(
+        statements.filter((query) => query.includes('candidate_details AS MATERIALIZED')),
+      ).toHaveLength(2);
+      // One horizon, two fused candidate/detail reads, and one final decoration read.
+      expect(statements).toHaveLength(4);
+      expect(candidatePlans).toHaveLength(2);
+      expect(
+        candidatePlans.every((plan) =>
+          plan.some((step) => step.includes('SEARCH c USING INTEGER PRIMARY KEY')),
+        ),
+      ).toBe(true);
+    } finally {
+      t.raw.close();
+    }
+  });
+
+  it('verifies the extra match before pruning dominated names and still admits a later better match', async () => {
+    const t = await createTestDb();
+    try {
+      const insertChat = t.raw.prepare(
+        'INSERT INTO chats (guid, display_name, latest_message_date, is_archived, is_pinned, pin_order) VALUES (?, ?, ?, ?, ?, ?)',
+      );
+      const insertHandle = t.raw.prepare(
+        'INSERT INTO handles (address, service, display_name) VALUES (?, ?, ?)',
+      );
+      const attachHandle = t.raw.prepare(
+        'INSERT INTO chat_handles (chat_id, handle_id) VALUES (?, ?)',
+      );
+      t.raw.transaction(() => {
+        insertChat.run('early-first', 'Needle first', 1_000, 0, 0, null);
+        insertChat.run('early-second', 'Needle second', 900, 0, 0, null);
+        for (let id = 3; id <= 128; id += 1) {
+          insertChat.run(`hidden-${id}`, 'Needle hidden', 0, 1, 0, null);
+        }
+        // The first page fills the visible limit, but this worse-ranked name must still be read
+        // to establish the extra exact match. It is intentionally larger than one text chunk.
+        insertChat.run('extra-match', 'Known Group', 100, 0, 0, null);
+        insertHandle.run('extra@example.test', '', `${'x'.repeat(4_097)}Needle`);
+        attachHandle.run(129, 1);
+        for (let id = 130; id <= 256; id += 1) {
+          insertChat.run(`hidden-${id}`, 'Needle hidden', 0, 1, 0, null);
+        }
+        insertChat.run('dominated-match', 'Known Group', 0, 0, 0, null);
+        insertHandle.run('dominated@example.test', '', `${'x'.repeat(4_097)}Needle`);
+        attachHandle.run(257, 2);
+        insertChat.run('late-pinned', 'Known Group', 0, 0, 1, 0);
+        insertHandle.run('late@example.test', '', 'Needle late');
+        attachHandle.run(258, 3);
+      })();
+
+      const participantChatIds: number[] = [];
+      let chunkReads = 0;
+      const observedDb = new Proxy(t.db, {
+        get(target, property, receiver) {
+          if (property !== 'all') return Reflect.get(target, property, receiver);
+          return async (...args: Parameters<AppDatabase['all']>) => {
+            const rows = (await target.all(...args)) as Record<string, unknown>[];
+            for (const row of rows) {
+              if (Object.hasOwn(row, 'participantBytes')) {
+                participantChatIds.push(row.chatId as number);
+              }
+              if (Object.hasOwn(row, 'participantChunk')) chunkReads += 1;
+            }
+            return rows;
+          };
+        },
+      });
+
+      const result = await searchChatsForInboxPage(observedDb, { query: 'needle', limit: 2 });
+      expect(result.rows.map((row) => row.guid)).toEqual(['late-pinned', 'early-first']);
+      expect(result.hasMore).toBe(true);
+      expect(participantChatIds).toEqual([129, 258]);
+      expect(chunkReads).toBe(2);
     } finally {
       t.raw.close();
     }
@@ -341,6 +481,191 @@ describe('inbox search candidate index', () => {
       expect(await rebuildInboxSearchIndexBatch(t.db)).toMatchObject({ settled: 1, deferred: 0 });
       expect(await guids('doe,jane')).toEqual(['comma-name']);
       expect(await guids('doe, jane')).toEqual([]);
+    } finally {
+      t.raw.close();
+    }
+  });
+
+  async function largeNameFixture(name: string) {
+    const t = await createTestDb();
+    t.raw
+      .prepare("INSERT INTO chats (guid, display_name) VALUES ('large-name', 'Known Group')")
+      .run();
+    t.raw
+      .prepare('INSERT INTO handles (address, service, display_name) VALUES (?, ?, ?)')
+      .run('large@example.test', '', name);
+    t.raw.prepare('INSERT INTO chat_handles (chat_id, handle_id) VALUES (1, 1)').run();
+    return t;
+  }
+
+  function observeReads(
+    db: AppDatabase,
+    observe: (rows: Record<string, unknown>[]) => void,
+  ): AppDatabase {
+    return new Proxy(db, {
+      get(target, property, receiver) {
+        if (property !== 'all') return Reflect.get(target, property, receiver);
+        return async (...args: Parameters<AppDatabase['all']>) => {
+          const rows = (await target.all(...args)) as Record<string, unknown>[];
+          observe(rows);
+          return rows;
+        };
+      },
+    });
+  }
+
+  it('bounds participant transfers without losing a match at the end of an oversized name', async () => {
+    const t = await largeNameFixture(`${'x'.repeat(4096 * 10)}Tailneedle`);
+    try {
+      const insert = t.raw.prepare(
+        'INSERT INTO handles (address, service, display_name) VALUES (?, ?, ?)',
+      );
+      const attach = t.raw.prepare('INSERT INTO chat_handles (chat_id, handle_id) VALUES (1, ?)');
+      t.raw.transaction(() => {
+        for (let id = 2; id <= 128; id += 1) {
+          // Multi-byte names fit the exact 512-byte inline threshold, not 512 characters.
+          insert.run(`person-${id}@example.test`, '', 'é'.repeat(256));
+          attach.run(id);
+        }
+      })();
+      const pages: Record<string, unknown>[][] = [];
+      const chunks: Record<string, unknown>[] = [];
+      const observed = observeReads(t.db, (rows) => {
+        if (rows[0] && Object.hasOwn(rows[0], 'participantName')) pages.push(rows);
+        if (rows[0] && Object.hasOwn(rows[0], 'participantChunk')) chunks.push(...rows);
+      });
+      const result = await searchChatsForInboxPage(observed, { query: 'tailneedle' });
+      expect(result.rows.map((row) => row.guid)).toEqual(['large-name']);
+      expect(pages.map((page) => page.length)).toEqual([128]);
+      expect(pages[0]?.[0]).toMatchObject({ participantName: null, participantBytes: 40970 });
+      expect(
+        pages[0]?.every(
+          (row) =>
+            row.participantName == null || Buffer.byteLength(String(row.participantName)) <= 512,
+        ),
+      ).toBe(true);
+      expect(chunks).toHaveLength(11);
+      expect(chunks.every((row) => String(row.participantChunk).length <= 8192)).toBe(true);
+      expect(String(chunks.at(-1)?.participantChunk)).toBe(
+        Buffer.from('Tailneedle').toString('hex').toUpperCase(),
+      );
+    } finally {
+      t.raw.close();
+    }
+  });
+
+  it('preserves split UTF-8, NFC and case context, initial BOM and embedded NUL in large names', async () => {
+    const cases = [
+      { name: `\uFEFF${'x'.repeat(4092)}🚀tail`, queries: ['🚀tail', 'known group \uFEFFxx'] },
+      { name: `${'x'.repeat(4095)}A\u030Aend`, queries: ['åend'] },
+      { name: `${'x'.repeat(4094)}AΣAend`, queries: ['aσaend'], absent: 'aςaend' },
+      { name: `${'x'.repeat(5000)}xy\0needle`, queries: ['xy\0needle'] },
+    ];
+    for (const fixture of cases) {
+      const t = await largeNameFixture(fixture.name);
+      try {
+        for (const query of fixture.queries) {
+          expect(
+            (await searchChatsForInboxPage(t.db, { query })).rows.map((row) => row.guid),
+          ).toEqual(['large-name']);
+        }
+        if (fixture.absent) {
+          expect((await searchChatsForInboxPage(t.db, { query: fixture.absent })).rows).toEqual([]);
+        }
+      } finally {
+        t.raw.close();
+      }
+    }
+  });
+
+  it.each(['after-read', 'yield'] as const)(
+    'stops an oversized-name continuation at %s cancellation',
+    async (when) => {
+      const t = await largeNameFixture('x'.repeat(4096 * 10));
+      try {
+        let cancelled = false;
+        let chunkReads = 0;
+        const observed = observeReads(t.db, (rows) => {
+          if (!rows[0] || !Object.hasOwn(rows[0], 'participantChunk')) return;
+          chunkReads += 1;
+          if (when === 'after-read') cancelled = true;
+          else if (chunkReads === 8)
+            setTimeout(() => {
+              cancelled = true;
+            }, 0);
+        });
+        await expect(
+          searchChatsForInboxPage(observed, {
+            query: 'absent',
+            shouldContinue: () => !cancelled,
+          }),
+        ).rejects.toBeInstanceOf(InboxSearchCancelledError);
+        expect(chunkReads).toBe(when === 'after-read' ? 1 : 8);
+      } finally {
+        t.raw.close();
+      }
+    },
+  );
+
+  it.each(['rename', 'rollback-and-rewrite'] as const)(
+    'restarts a changed name once without inventing a cross-version match after %s',
+    async (change) => {
+      const original = `${'x'.repeat(4094)}AB${'q'.repeat(32)}`;
+      const replacement = `${'x'.repeat(4094)}zzCD${'q'.repeat(30)}`;
+      const t = await largeNameFixture(
+        change === 'rename' ? original : 'x'.repeat(original.length),
+      );
+      try {
+        if (change === 'rollback-and-rewrite') {
+          t.raw.exec('BEGIN');
+          t.raw.prepare('UPDATE handles SET display_name = ? WHERE id = 1').run(original);
+        }
+        let chunkReads = 0;
+        const observed = observeReads(t.db, (rows) => {
+          if (!rows[0] || !Object.hasOwn(rows[0], 'participantChunk')) return;
+          chunkReads += 1;
+          if (chunkReads !== 1) return;
+          const first = rows[0];
+          if (change === 'rollback-and-rewrite') t.raw.exec('ROLLBACK');
+          t.raw.prepare('UPDATE handles SET display_name = ? WHERE id = 1').run(replacement);
+          const current = t.raw
+            .prepare(
+              'SELECT revision, total_changes() AS changes FROM inbox_search_state WHERE chat_id = 1',
+            )
+            .get() as { revision: number; changes: number };
+          // Rollback + rewrite reuses the revision; the connection counter must still reject it.
+          expect(current.revision).toBe(Number(first.revision) + (change === 'rename' ? 1 : 0));
+          expect(current.changes).toBeGreaterThan(Number(first.changes));
+        });
+        const result = await searchChatsForInboxPage(observed, { query: 'abcd' });
+        expect(result.rows).toEqual([]);
+        expect(chunkReads).toBe(4); // Two discarded chunks, then two from the fresh complete name.
+        expect(
+          (await searchChatsForInboxPage(t.db, { query: 'zzcd' })).rows.map((row) => row.guid),
+        ).toEqual(['large-name']);
+      } finally {
+        if (t.raw.inTransaction) t.raw.exec('ROLLBACK');
+        t.raw.close();
+      }
+    },
+  );
+
+  it('reports repeated snapshot changes instead of looping or returning partial search results', async () => {
+    const t = await largeNameFixture('x'.repeat(5000));
+    try {
+      let chunkReads = 0;
+      const observed = observeReads(t.db, (rows) => {
+        if (!rows[0] || !Object.hasOwn(rows[0], 'participantChunk')) return;
+        chunkReads += 1;
+        if (chunkReads % 2 === 1) {
+          // Even an unrelated same-connection write conservatively invalidates this rare path.
+          t.raw.prepare('UPDATE chats SET latest_message_date = ? WHERE id = 1').run(chunkReads);
+        }
+      });
+      await expect(searchChatsForInboxPage(observed, { query: 'absent' })).rejects.toThrow(
+        'Inbox search text changed while reading. Please try again.',
+      );
+      expect(chunkReads).toBe(4);
     } finally {
       t.raw.close();
     }

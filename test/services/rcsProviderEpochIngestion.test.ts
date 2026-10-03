@@ -92,6 +92,102 @@ async function seedOptimisticRcsMessage(db: AppDatabase, guid: string): Promise<
 }
 
 describe('RCS provider-epoch ingestion admission', () => {
+  it.each(['account', 'provider'] as const)(
+    'starts no missing-owner recovery after %s revocation during lookup',
+    async (kind) => {
+      const { db, raw } = await createTestDb();
+      let current = true;
+      let info = providerInfo(EPOCH_A);
+      let release!: () => void;
+      let started!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const lookupStarted = new Promise<void>((resolve) => {
+        started = resolve;
+      });
+      type All = (...args: Parameters<AppDatabase['all']>) => ReturnType<AppDatabase['all']>;
+      const realAll = db.all.bind(db) as All;
+      const lookup = jest.spyOn(db, 'all').mockImplementationOnce((async (...args) => {
+        const result = await realAll(...args);
+        started();
+        await gate;
+        return result;
+      }) as AppDatabase['all']);
+      const recover = jest.fn(async () => undefined);
+      const context = durableContext();
+      context.isCurrent = () => current;
+      const checkpoint = jest.fn(async () => undefined);
+      context.durableEvent!.markDbAppliedWithinTransaction = checkpoint;
+      const sink = new DbEventSink(db, undefined, undefined, recover, () => info);
+      try {
+        const pending = sink.onEvent(
+          {
+            type: 'updated-message',
+            message: Message.parse({ guid: messageGuid(EPOCH_A), dateDelivered: 2000 }),
+          },
+          'fcm',
+          context,
+        );
+        await lookupStarted;
+        if (kind === 'account') current = false;
+        else info = providerInfo(EPOCH_B);
+        release();
+        await pending;
+        expect(recover).not.toHaveBeenCalled();
+        expect(checkpoint).not.toHaveBeenCalled();
+        expect(messageCount(raw)).toBe(0);
+      } finally {
+        release();
+        lookup.mockRestore();
+        raw.close();
+      }
+    },
+  );
+
+  it.each(['apple', 'stale-rcs', 'stale-event', 'non-durable'] as const)(
+    'does not recover or apply an inadmissible lean receipt: %s',
+    async (kind) => {
+      const { db, raw } = await createTestDb();
+      const guid = messageGuid(kind === 'stale-event' ? EPOCH_B : EPOCH_A);
+      if (kind === 'apple' || kind === 'stale-rcs') {
+        const owner = kind === 'apple' ? appleMessage.chatGuid! : chatGuid(EPOCH_B);
+        const handles = await upsertHandles(db, []);
+        const chats = await upsertChats(db, [{ guid: owner }], handles);
+        await upsertMessages(
+          db,
+          [Message.parse({ guid, text: 'Original body' })],
+          () => chats.get(owner),
+          handles,
+        );
+      }
+      const recover = jest.fn(async () => undefined);
+      const markDbAppliedWithinTransaction = jest.fn(async () => undefined);
+      const context = durableContext();
+      context.durableEvent!.markDbAppliedWithinTransaction = markDbAppliedWithinTransaction;
+      const sink = new RcsProviderEpochEventSink(
+        new DbEventSink(db, undefined, undefined, recover, () => providerInfo(EPOCH_A)),
+        () => providerInfo(EPOCH_A),
+      );
+      try {
+        await sink.onEvent(
+          { type: 'updated-message', message: Message.parse({ guid, dateDelivered: 2000 }) },
+          'fcm',
+          kind === 'non-durable' ? undefined : context,
+        );
+        expect(recover).not.toHaveBeenCalled();
+        expect(markDbAppliedWithinTransaction).not.toHaveBeenCalled();
+        expect(
+          raw
+            .prepare('SELECT COUNT(*) AS count FROM messages WHERE date_delivered IS NOT NULL')
+            .get(),
+        ).toEqual({ count: 0 });
+      } finally {
+        raw.close();
+      }
+    },
+  );
+
   it('revokes the downstream delivery context when the provider epoch rotates mid-event', async () => {
     let liveInfo = providerInfo(EPOCH_A);
     let release!: () => void;

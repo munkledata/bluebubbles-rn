@@ -32,6 +32,11 @@ import {
   ATTACHMENT_CACHE_MIN_FREE_BYTES,
 } from '@/services/download/attachmentCacheQuotaPolicy';
 import { AUTO_IMAGE_MAX_BYTES } from '@utils/attachment';
+import {
+  attachmentIdentityPathSegment,
+  encodedMediaPathSegment,
+} from '@/services/download/pathSafety';
+import { hashNativeAttachmentCacheGuid } from '@native/boundedDownload';
 import { createTestDb } from '../support/testDb';
 
 const fetched = (localPath: string, bytes = 1) => ({ localPath, bytes });
@@ -506,76 +511,85 @@ describe('ensureDownloaded', () => {
     expect(fetcher.discard).toHaveBeenCalledWith('file:///docs/deleted-during-download.jpg');
   });
 
-  it('reserves before native work and commits verified bytes with localPath atomically', async () => {
-    const { db } = await createTestDb();
-    await seedAttachment(db, 'quota-success');
-    const finalPath =
-      'file:///documents/attachments/media-quota-success/generation-9/media-photo.jpg';
-    const release = jest.fn(async () => undefined);
-    const beginProtectionHandoff = jest.fn(() => true);
-    const rollbackProtectionHandoff = jest.fn(() => true);
-    const reserveCache = jest.fn(async (_path: string, maxBytes: number) => {
-      await withDbTransaction(db, (context) =>
-        createAttachmentCacheReservation(context, {
-          path: finalPath,
-          maxBytes,
-          createdAt: 1,
-        }),
-      );
-      return {
-        status: 'reserved' as const,
-        reservation: {
-          path: finalPath,
-          maxBytes,
-          generation: 9 as const,
-          beginProtectionHandoff,
-          rollbackProtectionHandoff,
-          release,
-        },
+  it.each([
+    ['quota-success', 'photo.jpg', 'photo.jpg'],
+    ['x'.repeat(2795), 'photo.jpg', 'photo.jpg'],
+    ['y'.repeat(2795), null, 'attachment.png'],
+  ])(
+    'reserves before native work and commits verified bytes with the original identity (%s)',
+    async (guid, transferName, destinationName) => {
+      const attachmentGuid = guid!;
+      const { db } = await createTestDb();
+      await seedAttachment(db, attachmentGuid);
+      const finalPath = `file:///documents/attachments/${attachmentIdentityPathSegment(attachmentGuid, hashNativeAttachmentCacheGuid)}/generation-9/${encodedMediaPathSegment(destinationName!)}`;
+      const release = jest.fn(async () => undefined);
+      const beginProtectionHandoff = jest.fn(() => true);
+      const rollbackProtectionHandoff = jest.fn(() => true);
+      const reserveCache = jest.fn(async (_path: string, maxBytes: number) => {
+        await withDbTransaction(db, (context) =>
+          createAttachmentCacheReservation(context, {
+            path: finalPath,
+            maxBytes,
+            createdAt: 1,
+          }),
+        );
+        return {
+          status: 'reserved' as const,
+          reservation: {
+            path: finalPath,
+            maxBytes,
+            generation: 9 as const,
+            beginProtectionHandoff,
+            rollbackProtectionHandoff,
+            release,
+          },
+        };
+      });
+      const download = jest.fn(async () => fetched(finalPath, 20));
+      const fetcher: AttachmentFetcher = {
+        exists: () => false,
+        destinationUri: () => finalPath,
+        download,
       };
-    });
-    const download = jest.fn(async () => fetched(finalPath, 20));
-    const fetcher: AttachmentFetcher = {
-      exists: () => false,
-      destinationUri: () => finalPath,
-      download,
-    };
-    const scope: AttachmentDownloadScope = {
-      generation: 9,
-      isCurrent: () => true,
-      runCommit: (task) => task(),
-      reserveCache,
-    };
+      const scope: AttachmentDownloadScope = {
+        generation: 9,
+        isCurrent: () => true,
+        runCommit: (task) => task(),
+        reserveCache,
+      };
 
-    await expect(
-      ensureDownloadedOutcome(
-        db,
-        fetcher,
-        {
-          guid: 'quota-success',
-          transferName: 'photo.jpg',
-          localPath: null,
-          totalBytes: 100,
-        },
-        undefined,
-        scope,
-      ),
-    ).resolves.toEqual({ status: 'success', localPath: finalPath, bytes: 20 });
+      await expect(
+        ensureDownloadedOutcome(
+          db,
+          fetcher,
+          {
+            guid: attachmentGuid,
+            transferName,
+            mimeType: 'image/png',
+            localPath: null,
+            totalBytes: 100,
+          },
+          undefined,
+          scope,
+        ),
+      ).resolves.toEqual({ status: 'success', localPath: finalPath, bytes: 20 });
 
-    expect(reserveCache).toHaveBeenCalledWith(finalPath, MANUAL_ATTACHMENT_MAX_BYTES);
-    expect(reserveCache.mock.invocationCallOrder[0]).toBeLessThan(
-      download.mock.invocationCallOrder[0]!,
-    );
-    expect((await getAttachmentByGuid(db, 'quota-success'))?.localPath).toBe(finalPath);
-    expect(await getAttachmentCacheEntry(db, finalPath)).toMatchObject({
-      path: finalPath,
-      bytes: 20,
-      state: 'active',
-    });
-    expect(beginProtectionHandoff).toHaveBeenCalledTimes(1);
-    expect(rollbackProtectionHandoff).not.toHaveBeenCalled();
-    expect(release).toHaveBeenCalledTimes(1);
-  });
+      expect(reserveCache).toHaveBeenCalledWith(finalPath, MANUAL_ATTACHMENT_MAX_BYTES);
+      expect(reserveCache.mock.invocationCallOrder[0]).toBeLessThan(
+        download.mock.invocationCallOrder[0]!,
+      );
+      expect(download.mock.calls[0]?.slice(0, 2)).toEqual([attachmentGuid, destinationName]);
+      expect((await getAttachmentByGuid(db, attachmentGuid))?.localPath).toBe(finalPath);
+      expect(await getAttachmentCacheEntry(db, finalPath)).toMatchObject({
+        path: finalPath,
+        bytes: 20,
+        state: 'active',
+      });
+      expect(beginProtectionHandoff).toHaveBeenCalledTimes(1);
+      expect(rollbackProtectionHandoff).not.toHaveBeenCalled();
+      expect(release).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it('copy-on-write promotes a distinct replacement while leaving the protected old path active', async () => {
     const { db } = await createTestDb();

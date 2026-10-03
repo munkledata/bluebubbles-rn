@@ -4,6 +4,7 @@ import { withDbTransaction, withDbWriteLock } from '../transaction';
 import type { AppDatabase } from '../types';
 import { SHARE_INTAKE_RECEIPT_KV_PREFIX } from './shareIntakeReceipts';
 import { setSyncMarkerWithinTransaction } from './sync';
+import { MESSAGE_STATE_AUTHORITY_KEY } from './messageState';
 
 // ---- Whole-cache maintenance ----------------------------------------------
 
@@ -179,6 +180,18 @@ export async function clearLocalCache(db: AppDatabase): Promise<void> {
             LIMIT ${CACHE_DELETE_BATCH_SIZE}
          )
         RETURNING rowid
+      `);
+      return rows.length;
+    });
+  }
+
+  let deletedServerStates = CACHE_DELETE_BATCH_SIZE;
+  while (deletedServerStates === CACHE_DELETE_BATCH_SIZE) {
+    deletedServerStates = await withDbWriteLock(async () => {
+      const rows = await db.all<{ rowid: number }>(sql`
+        DELETE FROM message_server_states WHERE rowid IN (
+          SELECT rowid FROM message_server_states ORDER BY rowid LIMIT ${CACHE_DELETE_BATCH_SIZE}
+        ) RETURNING rowid
       `);
       return rows.length;
     });
@@ -382,7 +395,13 @@ export async function clearLocalCache(db: AppDatabase): Promise<void> {
   await withDbWriteLock(async () =>
     db
       .delete(kv)
-      .where(inArray(kv.key, [DELETIONS_WATERMARK_KV_KEY, DELETION_SNAPSHOT_INITIALIZED_KV_KEY])),
+      .where(
+        inArray(kv.key, [
+          DELETIONS_WATERMARK_KV_KEY,
+          DELETION_SNAPSHOT_INITIALIZED_KV_KEY,
+          MESSAGE_STATE_AUTHORITY_KEY,
+        ]),
+      ),
   );
   // Composer drafts are the one CHAT-SCOPED thing in kv: unsent, user-authored text about a chat
   // whose row was deleted five statements ago, keyed by a guid that is identical across servers.
@@ -492,6 +511,7 @@ export async function localCacheDirty(db: AppDatabase): Promise<boolean> {
              EXISTS (SELECT 1 FROM incoming_event_queue)
           OR EXISTS (SELECT 1 FROM message_guid_aliases)
           OR EXISTS (SELECT 1 FROM message_deletion_ledger)
+          OR EXISTS (SELECT 1 FROM message_server_states)
           OR EXISTS (SELECT 1 FROM attachments)
           OR EXISTS (SELECT 1 FROM attachment_media_exports)
           OR EXISTS (SELECT 1 FROM attachment_cache_entries)
@@ -512,6 +532,7 @@ export async function localCacheDirty(db: AppDatabase): Promise<boolean> {
           OR EXISTS (SELECT 1 FROM kv
                        WHERE key = ${DELETIONS_WATERMARK_KV_KEY}
                           OR key = ${DELETION_SNAPSHOT_INITIALIZED_KV_KEY}
+                          OR key = ${MESSAGE_STATE_AUTHORITY_KEY}
                           OR key LIKE ${`${DRAFT_KV_PREFIX}%`}
                           OR key LIKE ${`${FULL_REPAIR_RETIRED_CHAT_KV_PREFIX}%`}
                           OR key LIKE ${`${NOTIFICATION_ROUTE_KV_PREFIX}%`}

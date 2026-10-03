@@ -537,9 +537,9 @@ describe('claimFailedOutgoingForRetry — "Try Again" vs the automatic drain', (
     const before = setSpentRetryLadder(raw, tempGuid, 15_000);
     const retryNow = 700_000;
 
-    type Run = (query: unknown) => unknown;
-    const originalRun = db.run as Run;
-    const realRun = db.run.bind(db) as Run;
+    type All = (query: unknown) => unknown;
+    const originalAll = db.all as All;
+    const realAll = db.all.bind(db) as All;
     let rearmDidStart = false;
     let releaseRearm!: () => void;
     let markRearmFinished!: () => void;
@@ -549,19 +549,20 @@ describe('claimFailedOutgoingForRetry — "Try Again" vs the automatic drain', (
     const rearmFinished = new Promise<void>((resolve) => {
       markRearmFinished = resolve;
     });
-    (db as unknown as { run: Run }).run = (query) => {
+    (db as unknown as { all: All }).all = (query) => {
       const sqlShape = JSON.stringify(query);
       if (
         !rearmDidStart &&
         sqlShape.includes('outgoing_queue') &&
         sqlShape.includes('attempts = 0') &&
         sqlShape.includes('next_retry_at') &&
-        sqlShape.includes('temp_guid')
+        sqlShape.includes('temp_guid') &&
+        sqlShape.includes('RETURNING id')
       ) {
         rearmDidStart = true;
-        return rearmHeld.then(() => realRun(query)).finally(markRearmFinished);
+        return rearmHeld.then(() => realAll(query)).finally(markRearmFinished);
       }
-      return realRun(query);
+      return realAll(query);
     };
 
     const clock = jest.fn(() => retryNow);
@@ -617,7 +618,7 @@ describe('claimFailedOutgoingForRetry — "Try Again" vs the automatic drain', (
         if (rearmDidStart) drains.push(rearmFinished);
         await Promise.allSettled(drains);
       } finally {
-        (db as unknown as { run: Run }).run = originalRun;
+        (db as unknown as { all: All }).all = originalAll;
       }
     }
   });

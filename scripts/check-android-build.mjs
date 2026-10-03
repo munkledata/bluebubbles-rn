@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import ts from 'typescript';
 
 import {
   extractZipEntry,
@@ -45,11 +46,11 @@ const SHARE_ON_CREATE_CAPTURE =
   'expo.modules.gatorshareintake.GatorShareIntakeActivityBridge.captureOnCreate(this, intent, savedInstanceState)';
 const SHARE_ON_NEW_INTENT_CAPTURE =
   'expo.modules.gatorshareintake.GatorShareIntakeActivityBridge.captureOnNewIntent(this, intent)';
-const EXPO_BACKGROUND_TASK_VERSION = '57.0.16';
-const EXPO_TASK_MANAGER_VERSION = '57.0.16';
-const UNIMODULES_APP_LOADER_VERSION = '57.0.1';
-const EXPO_FILE_SYSTEM_VERSION = '57.0.6';
-const EXPO_ROUTER_VERSION = '57.0.20';
+const EXPO_BACKGROUND_TASK_VERSION = '57.0.21';
+const EXPO_TASK_MANAGER_VERSION = '57.0.21';
+const UNIMODULES_APP_LOADER_VERSION = '57.0.2';
+const EXPO_FILE_SYSTEM_VERSION = '57.0.7';
+const EXPO_ROUTER_VERSION = '57.0.24';
 const REACT_NATIVE_SCREENS_VERSION = '4.26.2';
 const REACT_NATIVE_SCREENS_RANGE = '~4.26.0';
 const PATCH_PACKAGE_VERSION = '8.0.1';
@@ -59,10 +60,15 @@ const EXPO_BACKGROUND_TASK_SCHEDULER_PATH =
 const EXPO_BACKGROUND_TASK_WORK_PATH =
   'node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskWork.kt';
 const EXPO_TASK_MANAGER_PATCH_PATH = `patches/expo-task-manager+${EXPO_TASK_MANAGER_VERSION}.patch`;
+const EXPO_TASK_MANAGER_SOURCE_PATH = 'node_modules/expo-task-manager/src/TaskManager.ts';
+const EXPO_TASK_MANAGER_RUNTIME_PATH = 'node_modules/expo-task-manager/build/TaskManager.js';
 const EXPO_TASK_MANAGER_UTILS_PATH =
   'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java';
 const EXPO_TASK_SERVICE_PATH =
   'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java';
+const EXPO_TASK_MANAGER_BUILD_PATH = 'node_modules/expo-task-manager/android/build.gradle';
+const EXPO_TASK_MANAGER_LIFETIME_TEST_PATH =
+  'node_modules/expo-task-manager/android/src/test/java/expo/modules/taskManager/TaskServiceContextLifetimeTest.java';
 const EXPO_TASKS_REPOSITORY_PATH =
   'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/TasksAndEventsRepository.java';
 const EXPO_BARE_TASKS_REPOSITORY_PATH =
@@ -265,8 +271,46 @@ export function validateExpoBackgroundTaskRetryBridge({
   return errors;
 }
 
+function hasNativeOwnedTaskKeeper(source, path, partialPatchContext = false) {
+  if (typeof source !== 'string') return false;
+  const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
+  if (!partialPatchContext && file.parseDiagnostics.length > 0) return false;
+  const registrations = [];
+  function visit(node) {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.expression.getText(file) === 'AppRegistry' &&
+      ['registerHeadlessTask', 'registerCancellableHeadlessTask'].includes(
+        node.expression.name.text,
+      )
+    )
+      registrations.push(node);
+    ts.forEachChild(node, visit);
+  }
+  visit(file);
+  if (registrations.length !== 1) return false;
+  const call = registrations[0];
+  const statement = call.parent;
+  const block = statement.parent;
+  const condition = block.parent;
+  const type = path === EXPO_TASK_MANAGER_SOURCE_PATH ? '<void>' : '';
+  return (
+    ts.isExpressionStatement(statement) &&
+    ts.isBlock(block) &&
+    block.statements.length === 1 &&
+    ts.isIfStatement(condition) &&
+    condition.parent === file &&
+    condition.thenStatement === block &&
+    !condition.elseStatement &&
+    condition.expression.getText(file).replace(/\s+/g, '') === "Platform.OS==='android'" &&
+    call.getText(file).replace(/\s+/g, '') ===
+      `AppRegistry.registerHeadlessTask('expo-task-manager',()=>()=>newPromise${type}(()=>{}))`
+  );
+}
+
 /**
- * Keep Expo TaskManager's pre-JavaScript failure settlement source-built and fail closed on drift.
+ * Keep Expo TaskManager's native settlement and JavaScript timer keeper paired and fail closed on drift.
  * A missing task or failed headless loader must resolve only its still-queued native callback so
  * WorkManager can retry; it must never unregister durable tasks or race work already handed to JS.
  */
@@ -279,6 +323,8 @@ export function validateExpoTaskManagerPreJsSettlement({
   repositorySource,
   bareRepositorySource,
   managedRepositorySource,
+  taskManagerSource,
+  taskManagerRuntimeSource,
 }) {
   const errors = [];
   if (packageJson?.dependencies?.['expo-task-manager'] !== EXPO_TASK_MANAGER_VERSION) {
@@ -320,11 +366,15 @@ export function validateExpoTaskManagerPreJsSettlement({
   }
 
   const expectedPatchPaths = [
+    EXPO_TASK_MANAGER_BUILD_PATH,
+    EXPO_TASK_MANAGER_LIFETIME_TEST_PATH,
     EXPO_TASK_MANAGER_UTILS_PATH,
     EXPO_TASK_SERVICE_PATH,
     EXPO_TASKS_REPOSITORY_PATH,
     EXPO_BARE_TASKS_REPOSITORY_PATH,
     EXPO_MANAGED_TASKS_REPOSITORY_PATH,
+    EXPO_TASK_MANAGER_SOURCE_PATH,
+    EXPO_TASK_MANAGER_RUNTIME_PATH,
   ].sort();
   const patchHeaders =
     typeof patchSource === 'string'
@@ -335,7 +385,9 @@ export function validateExpoTaskManagerPreJsSettlement({
     patchHeaders.some((match) => match[1] !== match[2]) ||
     JSON.stringify(patchedPaths) !== JSON.stringify(expectedPatchPaths)
   ) {
-    errors.push(`${EXPO_TASK_MANAGER_PATCH_PATH} must patch only the five reviewed source files`);
+    errors.push(
+      `${EXPO_TASK_MANAGER_PATCH_PATH} must patch only the nine reviewed source/test files`,
+    );
   }
 
   const patchMarkers = [
@@ -355,6 +407,28 @@ export function validateExpoTaskManagerPreJsSettlement({
     errors.push(
       `${EXPO_TASK_MANAGER_PATCH_PATH} must carry the reviewed pre-JavaScript settlement repair`,
     );
+  }
+
+  for (const [path, source] of [
+    [EXPO_TASK_MANAGER_SOURCE_PATH, taskManagerSource],
+    [EXPO_TASK_MANAGER_RUNTIME_PATH, taskManagerRuntimeSource],
+  ]) {
+    const patchSection = patchSource
+      ?.split(/(?=^diff --git )/m)
+      .find((section) => section.startsWith(`diff --git a/${path} b/${path}\n`));
+    const patchAfter = patchSection
+      ?.split('\n')
+      .filter((line) => line.startsWith(' ') || (line.startsWith('+') && !line.startsWith('+++')))
+      .map((line) => line.slice(1))
+      .join('\n');
+    if (
+      !hasNativeOwnedTaskKeeper(source, path) ||
+      !hasNativeOwnedTaskKeeper(patchAfter, path, true)
+    ) {
+      errors.push(
+        `${path} and its patch must retain one Android timer keeper until native completion`,
+      );
+    }
   }
 
   const utilsMarkers = [
@@ -389,6 +463,25 @@ export function validateExpoTaskManagerPreJsSettlement({
   const managerHandoffRegion = serviceSource?.match(
     /final List<Bundle> eventsQueue;[\s\S]*?Execute events only after releasing the handoff lock/,
   )?.[0];
+  const managerDestructionRegion = serviceSource?.match(
+    /if \(taskManager == null\) \{[\s\S]*?return;/,
+  )?.[0];
+  const loaderInvalidationRegion = serviceSource?.match(
+    /private void invalidateAppRecord\(String appScopeKey\) \{[\s\S]*?\n {0,2}}/,
+  )?.[0];
+  if (
+    !managerDestructionRegion
+      ?.replace(/\s+/g, '')
+      .includes(
+        'synchronized(sTaskExecutionLock){sTaskManagers.remove(appScopeKey);sHeadlessTaskManagers.remove(appScopeKey);}',
+      ) ||
+    !loaderInvalidationRegion?.includes('appLoader.invalidateApp(appScopeKey);') ||
+    loaderInvalidationRegion.includes('sHeadlessTaskManagers.remove')
+  ) {
+    errors.push(
+      'expo-task-manager must remove both managers at context destruction, not loader invalidation',
+    );
+  }
   const enqueueDecisionRegion = serviceSource?.match(
     /final TaskManagerInterface taskManager;[\s\S]*?if \(headlessStartToken != null\)/,
   )?.[0];
@@ -468,7 +561,7 @@ export function validateExpoTaskManagerPreJsSettlement({
 /**
  * Keep SDK 57's experimental Router stack safe for Gator's predictive-Back contract.
  *
- * Upstream 57.0.20 does not redispatch a native dismissal that usePreventRemove blocked, so
+ * Upstream 57.0.24 does not redispatch a native dismissal that usePreventRemove blocked, so
  * authored-work guards never receive the pending pop action. It also paints every scene white,
  * which flashes during the preview in this dark-only app. Every route layout must use the same
  * stack on Android; mixing the standard and experimental navigators disables the native preview
@@ -1965,6 +2058,8 @@ export function runAndroidBuildCheck({
         resolve(root, EXPO_MANAGED_TASKS_REPOSITORY_PATH),
         'utf8',
       ),
+      taskManagerSource: readFileSync(resolve(root, EXPO_TASK_MANAGER_SOURCE_PATH), 'utf8'),
+      taskManagerRuntimeSource: readFileSync(resolve(root, EXPO_TASK_MANAGER_RUNTIME_PATH), 'utf8'),
     }).map((error) => `task-manager pre-JavaScript settlement: ${error}`),
   );
   errors.push(

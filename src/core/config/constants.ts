@@ -38,6 +38,7 @@ export const SERVER_EVENTS = [
   // hard-deleting it, so the deletion survives the next sync (which still returns the row). Old
   // servers simply never emit it (see the `supports_message_deleted` capability).
   'message-deleted',
+  'message-state-changed',
   'typing-indicator',
   'chat-read-status-changed',
   'group-name-change',

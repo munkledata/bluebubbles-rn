@@ -16,6 +16,41 @@ class AttachmentCachePolicyTest {
   val temporary = TemporaryFolder()
 
   @Test
+  fun `hash identities retain the same fixed depth generation filename and symlink protections`() {
+    val root = temporary.newFolder(ATTACHMENT_CACHE_DIRECTORY).canonicalFile
+    val identity = "id-sha256-" + attachmentCacheGuidSha256("x".repeat(2795))
+    val generation = File(root, "$identity/generation-7").apply { mkdirs() }
+    val file = File(generation, "media-photo.png").apply { writeBytes(byteArrayOf(1)) }
+    assertEquals(file, requireOwnedAttachmentCachePath(root, file))
+    assertEquals(file, requireOwnedCurrentAttachmentCachePath(root, file))
+    val outside = temporary.newFile("outside").apply { writeBytes(byteArrayOf(9)) }
+    val link = File(generation, "media-link.png")
+    Files.createSymbolicLink(link.toPath(), outside.toPath())
+    for (invalid in listOf(
+      File(root, "${identity.uppercase()}/generation-7/media-photo.png"),
+      File(root, "${identity.dropLast(1)}/generation-7/media-photo.png"),
+      File(root, "$identity/generation-07/media-photo.png"),
+      File(root, "$identity/extra/generation-7/media-photo.png"),
+      File(generation, identity),
+      link,
+    )) {
+      assertTrue(runCatching { requireOwnedAttachmentCachePath(root, invalid) }.isFailure)
+    }
+    assertTrue(file.exists())
+    assertTrue(outside.exists())
+  }
+
+  @Test
+  fun `preserves hash-looking legacy names including a generation filename collision`() {
+    val root = temporary.newFolder(ATTACHMENT_CACHE_DIRECTORY).canonicalFile
+    val directory = File(root, "id-sha256-" + "a".repeat(64)).apply { mkdirs() }
+    val legacy = File(directory, "generation-7").apply { writeBytes(byteArrayOf(9)) }
+    assertEquals(legacy, requireOwnedAttachmentCachePath(root, legacy))
+    assertFalse(legacy.mkdirs())
+    assertEquals(listOf<Byte>(9), legacy.readBytes().toList())
+  }
+
+  @Test
   fun `accepts the current scoped and unscoped namespace including a missing file`() {
     val root = temporary.newFolder(ATTACHMENT_CACHE_DIRECTORY).canonicalFile
     val scopedGeneration = File(root, "media-a%2Fb/generation-7").apply { mkdirs() }

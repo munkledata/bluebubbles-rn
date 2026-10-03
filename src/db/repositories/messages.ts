@@ -18,6 +18,7 @@ import {
   chatHandles,
   chats,
   messageDeletionLedger,
+  messageServerStates,
   messageGuidAliases,
   messages,
   outgoingQueue,
@@ -33,6 +34,7 @@ import { dedupeBy } from './_shared';
 import { upsertAttachmentsWithinTransaction } from './attachments';
 import { clearSupersededTombstonesWithinTransaction } from './chats';
 import { handleMapKey } from './handles';
+import { getMessageStateAuthorityWithinTransaction } from './messageState';
 
 type PersistedRetractionState = Exclude<MessageRetractionState, 'intact'>;
 
@@ -320,6 +322,20 @@ export function upsertMessagesWithinTransaction(
       .from(messageDeletionLedger)
       .where(inArray(messageDeletionLedger.guid, identityGuids));
     const deletionByIdentity = new Map(deletionRows.map((row) => [row.guid, row]));
+    const serverStateRows = await db
+      .select()
+      .from(messageServerStates)
+      .where(inArray(messageServerStates.guid, canonicalGuids));
+    const serverAuthority = await getMessageStateAuthorityWithinTransaction(context);
+    const serverStateByGuid = new Map(
+      serverStateRows
+        .filter(
+          (row) =>
+            row.providerEpoch === serverAuthority?.providerEpoch &&
+            row.ledgerEpoch === serverAuthority?.ledgerEpoch,
+        )
+        .map((row) => [row.guid, row]),
+    );
 
     // A promoted outgoing identity can outlive its message row. Its alias is therefore an
     // independent ownership reservation, just like a deletion ledger row. Legacy NULL-scoped
@@ -359,6 +375,14 @@ export function upsertMessagesWithinTransaction(
       if (!destination) return false;
       const existing = existingLocationByGuid.get(m.guid);
       const canonicalDeletion = deletionByIdentity.get(m.guid);
+      const serverState = serverStateByGuid.get(m.guid);
+      if (
+        serverState &&
+        (serverState.chatGuid == null
+          ? existing == null
+          : serverState.chatGuid !== destination.guid)
+      )
+        return false;
       if (
         canonicalDeletion &&
         (canonicalDeletion.chatGuid == null
@@ -415,12 +439,23 @@ export function upsertMessagesWithinTransaction(
         (m.dateCreated == null || m.dateCreated <= destination.historyDeletedAt)
           ? destination.historyDeletedAt
           : null;
-      const dateDeleted =
+      const localDateDeleted =
         retainedDeletionDate == null
           ? chatHistoryDate
           : chatHistoryDate == null
             ? retainedDeletionDate
             : Math.max(retainedDeletionDate, chatHistoryDate);
+      const serverState = serverStateByGuid.get(m.guid);
+      const serverDateDeleted =
+        serverState?.kind === 'deleted' && serverState.chatGuid === destination.guid
+          ? (serverState.dateDeleted ?? 0)
+          : null;
+      const dateDeleted =
+        localDateDeleted == null
+          ? serverDateDeleted
+          : serverDateDeleted == null
+            ? localDateDeleted
+            : Math.max(localDateDeleted, serverDateDeleted);
       if (retainedDeletionDate != null) {
         // Canonicalize a genuine temp/alias deletion onto the incoming identity. A later explicit
         // chat restore can then recompute visibility from this exact scoped receipt.
@@ -637,7 +672,10 @@ export function upsertMessagesWithinTransaction(
           // Deletion is local durable knowledge, not a MessageV1 field. `excluded.date_deleted`
           // comes from either a genuine message-deletion receipt or the destination chat's durable
           // history boundary; keep the later timestamp across an out-of-order repeat.
-          dateDeleted: sql`COALESCE(MAX(${messages.dateDeleted}, excluded.date_deleted), ${messages.dateDeleted}, excluded.date_deleted)`,
+          dateDeleted: sql`CASE WHEN EXISTS (
+            SELECT 1 FROM message_server_states s WHERE s.guid = ${messages.guid}
+              AND NOT (s.provider_epoch IS ${serverAuthority?.providerEpoch ?? null} AND s.ledger_epoch IS ${serverAuthority?.ledgerEpoch ?? null})
+          ) THEN excluded.date_deleted ELSE COALESCE(MAX(${messages.dateDeleted}, excluded.date_deleted), ${messages.dateDeleted}, excluded.date_deleted) END`,
           // Reflect the LATEST server value (plain overwrite, not COALESCE-preserve like the delivery
           // tiers). The server emits is_scheduled=true for a schedule_type=2 row both while pending AND
           // after it sends, so this flag does NOT clear on send — the "Scheduled" badge is instead

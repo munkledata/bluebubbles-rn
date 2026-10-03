@@ -352,6 +352,17 @@ function identityDescriptor(
         quality: 'content-revision',
         recovery: recoveryFor(event),
       };
+    case 'message-state-changed':
+      return {
+        value: [
+          event.type,
+          event.payload.providerEpoch,
+          event.payload.ledgerEpoch,
+          event.payload.sequence,
+        ],
+        quality: 'exact',
+        recovery: { kind: 'sync-deletions' },
+      };
     case 'message-deleted':
       return event.payload.dateDeleted != null
         ? {
@@ -479,6 +490,7 @@ function orderingDescriptor(
       return { domain: 'message', value: ['message', messageGuid] };
     }
     case 'message-deleted':
+    case 'message-state-changed':
       return { domain: 'message', value: ['message', event.payload.guid] };
     case 'typing-indicator': {
       const target = nonEmptyString(event.payload.chatGuid) ?? nonEmptyString(event.payload.guid);
@@ -551,6 +563,7 @@ function ttlMs(event: NormalizedEvent): number {
     case 'updated-message':
     case 'message-deleted':
     case 'message-send-error':
+    case 'message-state-changed':
       return 24 * 60 * 60_000;
   }
 }
@@ -627,6 +640,8 @@ function reactionRevisionProjection(message: Message): unknown {
 
 function recoveryFor(event: NormalizedEvent): IncomingEventConflictRecovery {
   switch (event.type) {
+    case 'message-state-changed':
+      return { kind: 'sync-deletions' };
     case 'new-message':
     case 'updated-message': {
       const chatGuid = resolveMessageChatGuid(event.message);

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -205,11 +206,111 @@ test('runtime notice conversion is plain text and release checking preserves ope
   );
 });
 
-test('current repository inventory pins the 14 assets, 12 local components, and SQLCipher notice', () => {
+test('checkout discovery includes untracked source but excludes ignored output and preserves deletion/symlink failures', (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'gator-legal-checkout-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', args, { cwd: root });
+  const write = (path, source = path) => {
+    directory(join(root, path, '..'));
+    writeFileSync(join(root, path), source);
+  };
+  git('init', '--quiet');
+  write('package-lock.json', JSON.stringify({ lockfileVersion: 3, packages: {} }));
+  write('LICENSE', 'private project');
+  write('THIRD_PARTY_NOTICES.md', 'third-party notices');
+  write('.gitignore', 'node_modules/\n.env\nplugins/ignored.js\nmodules/*/android/build/\n');
+  const provenance = {
+    assets: [{ path: 'assets/tracked.png', provenanceStatus: 'unresolved' }],
+    localComponents: [
+      { path: 'plugins/tracked.js', provenanceStatus: 'unresolved' },
+      { path: 'plugins/staged-delete.js', provenanceStatus: 'unresolved' },
+    ],
+  };
+  write('legal/asset-provenance.json', JSON.stringify(provenance));
+  const tracked = [
+    'assets/tracked.png',
+    'modules/gator-one/source.kt',
+    'plugins/tracked.js',
+    'plugins/staged-delete.js',
+    'plugins/index-removed.js',
+    'plugins/missing.js',
+  ];
+  for (const path of tracked) write(path);
+  git('add', '--', ...tracked);
+  git('rm', '--quiet', '--force', '--', 'plugins/staged-delete.js');
+  git('rm', '--quiet', '--cached', '--', 'plugins/index-removed.js');
+  rmSync(join(root, 'plugins/missing.js'));
+  for (const path of [
+    'assets/new.png',
+    'store-assets/new.png',
+    'modules/gator-one/added.kt',
+    'modules/gator-one/android/build/generated.kt',
+    'modules/gator-one/node_modules/private-package/source.js',
+    'modules/gator-one/.env',
+    'plugins/active-untracked.js',
+    'plugins/ignored.js',
+    'unrelated/private.js',
+  ])
+    write(path);
+  write('outside.js', 'must not be read');
+  symlinkSync(join(root, 'outside.js'), join(root, 'plugins/link.js'));
+  directory(join(root, 'outside-module'));
+  write('outside-module/secret.kt', 'must not be read');
+  symlinkSync(join(root, 'outside-module'), join(root, 'modules/gator-link'), 'dir');
+
+  const { inventory } = buildInventory(root);
+  assert.deepEqual(
+    inventory.assets.map((item) => item.path),
+    ['assets/new.png', 'assets/tracked.png', 'store-assets/new.png'],
+  );
+  assert.deepEqual(
+    inventory.localComponents.map((item) => item.path),
+    [
+      'modules/gator-link',
+      'modules/gator-one',
+      'plugins/active-untracked.js',
+      'plugins/index-removed.js',
+      'plugins/link.js',
+      'plugins/missing.js',
+      'plugins/tracked.js',
+    ],
+  );
+  assert.equal(
+    inventory.localComponents.find((item) => item.path === 'modules/gator-one').files,
+    2,
+  );
+  assert.equal(
+    inventory.localComponents.find((item) => item.path === 'plugins/tracked.js').files,
+    1,
+  );
+  assert.ok(
+    inventory.inventoryIssues.includes(
+      'stale local-component provenance: plugins/staged-delete.js',
+    ),
+  );
+  for (const path of ['modules/gator-link', 'plugins/link.js', 'plugins/missing.js']) {
+    assert.ok(inventory.inventoryIssues.includes(`unreadable local component: ${path}`));
+  }
+  assert.ok(
+    inventory.inventoryIssues.includes(
+      'missing local-component provenance: plugins/active-untracked.js',
+    ),
+  );
+  assert.deepEqual(buildInventory(root).inventory, inventory, 'discovery must be deterministic');
+
+  const duplicates = ['modules/gator-one/source.kt', 'assets/tracked.png', 'plugins/tracked.js'];
+  assert.deepEqual(
+    collectAssetsAndComponents(root, provenance, [...duplicates, ...duplicates].reverse()),
+    collectAssetsAndComponents(root, provenance, duplicates),
+    'duplicate or reordered discovery records must not change hashes or counts',
+  );
+});
+
+test('current repository inventory pins the 14 assets, 13 local components, and SQLCipher notice', () => {
   const { inventory } = buildInventory(ROOT);
 
   assert.equal(inventory.summary.assetFiles, 14);
-  assert.equal(inventory.summary.localComponents, 12);
+  assert.equal(inventory.summary.localComponents, 13);
   assert.equal(inventory.summary.pendingAssetProvenance, 14);
   assert.equal(inventory.coverage.exactAab, false);
   assert.deepEqual(inventory.inventoryIssues, []);

@@ -14,8 +14,9 @@ TypeScript, and a compatible self-hosted Mac server.
 The codebase includes conversation sync, sending and retry, reactions/replies, group management,
 search, contacts, attachments and voice messages, scheduled messages/reminders, privacy-aware
 Android notifications, Find My views, dark themes, backups, and an optional App Lock screen.
-Receiving text/files from Android's share sheet is deliberately disabled
-until Gator owns a native intake that can cap bytes and time while streaming.
+Receiving text/files through Android's share sheet and Direct Share uses Gator's owned native
+intake, with bounded streaming and durable batch ownership. See
+[`docs/SHARE_INTENT_RELIABILITY.md`](./docs/SHARE_INTENT_RELIABILITY.md) for its acceptance boundary.
 
 Many capabilities depend on a compatible server version or private server APIs. Native behavior
 such as killed-process push, notifications, SQLCipher, WebViews, permissions, and outbound file

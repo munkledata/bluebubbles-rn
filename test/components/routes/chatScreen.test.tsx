@@ -25,6 +25,7 @@
  * The REAL `useTypingStore` (zustand) is driven via setState to exercise the typing-bubble branch.
  */
 import React from 'react';
+import { AppState } from 'react-native';
 import { renderWithTheme, screen, act, fireEvent, waitFor } from '../support/renderWithTheme';
 import type { EnrichedMessage } from '@features/conversations/useMessages';
 import type { ChatSearchResultRow } from '@db/repositories';
@@ -44,6 +45,18 @@ const mockRouter = { push: mockPush, replace: mockReplace, setParams: mockSetPar
 const mockNavigationDispatch = jest.fn();
 const mockUsePreventRemove = jest.fn();
 const mockShowConfirm = jest.fn();
+const mockDismissLocationDialog = jest.fn();
+let mockDialogId = 0;
+let mockScreenFocused = true;
+const mockFocusCleanups = new Set<() => void>();
+const mockAppStateListeners = new Set<(state: string) => void>();
+const mockLocationAdapter = {
+  Accuracy: { Balanced: 3 },
+  hasServicesEnabledAsync: jest.fn(),
+  getForegroundPermissionsAsync: jest.fn(),
+  requestForegroundPermissionsAsync: jest.fn(),
+  watchPositionAsync: jest.fn(),
+};
 const mockIsDevServer = jest.fn(() => false);
 const mockUseChatSearch = jest.fn();
 const mockRefreshWindow = jest.fn();
@@ -76,7 +89,9 @@ jest.mock('react', () => {
     ...actual,
     lazy: () => (props: Record<string, any>) => {
       mockVoiceRecorderProps = props;
-      return null;
+      return actual.createElement(jest.requireActual('react-native').View, {
+        testID: 'voice-recorder',
+      });
     },
   };
 });
@@ -85,7 +100,17 @@ jest.mock('expo-router', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   const R = require('react');
   return {
-    useFocusEffect: (callback: () => void | (() => void)) => R.useEffect(callback, [callback]),
+    useFocusEffect: (callback: () => void | (() => void)) =>
+      R.useEffect(() => {
+        if (!mockScreenFocused) return;
+        const cleanup = callback();
+        if (!cleanup) return;
+        mockFocusCleanups.add(cleanup);
+        return () => {
+          mockFocusCleanups.delete(cleanup);
+          cleanup();
+        };
+      }, [callback]),
     useLocalSearchParams: () => ({
       guid: mockGuid,
       focus: mockFocus,
@@ -97,6 +122,19 @@ jest.mock('expo-router', () => {
     useRouter: () => mockRouter,
   };
 });
+jest.mock('react-native/Libraries/AppState/AppState', () => ({
+  __esModule: true,
+  default: {
+    currentState: 'active',
+    addEventListener: (_event: string, listener: (state: string) => void) => {
+      mockAppStateListeners.add(listener);
+      return { remove: () => mockAppStateListeners.delete(listener) };
+    },
+  },
+}));
+jest.mock('@/services/location/expoLocationAdapter', () => ({
+  getExpoLocationAdapter: () => mockLocationAdapter,
+}));
 jest.mock('expo-router/react-navigation', () => ({
   usePreventRemove: (enabled: boolean, callback: (options: unknown) => void) =>
     mockUsePreventRemove(enabled, callback),
@@ -187,7 +225,8 @@ jest.mock('@ui/theme/ChatThemeProvider', () => ({
 }));
 jest.mock('@ui/dialog/dialogStore', () => ({
   showConfirm: (...args: unknown[]) => mockShowConfirm(...args),
-  showDialog: jest.fn(),
+  showDialog: jest.fn(() => ++mockDialogId),
+  useDialogStore: { getState: () => ({ dismissById: mockDismissLocationDialog }) },
 }));
 jest.mock('@ui/conversations/pickDateTime', () => ({ pickFutureDateTime: jest.fn() }));
 jest.mock('@ui/LoadErrorBoundary', () => ({
@@ -216,6 +255,7 @@ jest.mock('@db/repositories', () => ({
   getChatParticipants: jest.fn(async () => []),
   getFirstUnreadInChat: jest.fn(async () => null),
   getMessagePreviewByGuid: jest.fn(async () => mockMessagePreview),
+  resolveMessageTarget: jest.fn(async (_db, target) => ({ ...target, basis: 'exact-topology' })),
   isChatHiddenByDeletion: jest.fn(async () => false),
   kvGet: jest.fn(async () => null),
 }));
@@ -479,6 +519,19 @@ function stageExactShare(
 beforeEach(() => {
   resumeRealtimeDeliveries();
   jest.clearAllMocks();
+  AppState.currentState = 'active';
+  mockScreenFocused = true;
+  mockFocusCleanups.clear();
+  mockAppStateListeners.clear();
+  mockShowConfirm.mockImplementation(() => ++mockDialogId);
+  mockLocationAdapter.hasServicesEnabledAsync.mockReset().mockResolvedValue(true);
+  mockLocationAdapter.getForegroundPermissionsAsync
+    .mockReset()
+    .mockResolvedValue({ granted: true, canAskAgain: true });
+  mockLocationAdapter.requestForegroundPermissionsAsync
+    .mockReset()
+    .mockResolvedValue({ granted: true, canAskAgain: true });
+  mockLocationAdapter.watchPositionAsync.mockReset();
   mockGetDatabase.mockReset().mockReturnValue(ACCOUNT_A_DB);
   (saveChatDraft as jest.Mock).mockReset().mockResolvedValue(undefined);
   (fireDueScheduledWithDevelopmentSender as jest.Mock).mockReset().mockResolvedValue(0);
@@ -1303,14 +1356,47 @@ describe('ChatScreen — send routing', () => {
     expect(mockCaptured.composer?.onPickContact).toBeUndefined();
   });
 
-  it('confirms one current-location send only for a capable exact iMessage DM', async () => {
+  function configureLocationChat(): void {
     useSessionStore.setState({
+      status: 'connected',
+      origin: 'https://location.test',
+      password: 'synthetic-location-credential',
       serverInfo: { version: 'test', supports_imessage_location: true } as any,
     });
     useChatHeaderMock.mockReturnValue({
       data: { id: 1, guid: GUID, style: 45, participantCount: 1, handleServices: 'iMessage' },
       error: null,
     });
+  }
+
+  const changeLocationAppState = (state: 'active' | 'background'): void => {
+    AppState.currentState = state;
+    for (const listener of [...mockAppStateListeners]) listener(state);
+  };
+
+  async function beginLocationPermission(): Promise<
+    (value: { granted: boolean; canAskAgain: boolean }) => void
+  > {
+    let resolve!: (value: { granted: boolean; canAskAgain: boolean }) => void;
+    mockLocationAdapter.getForegroundPermissionsAsync.mockResolvedValue({
+      granted: false,
+      canAskAgain: true,
+    });
+    mockLocationAdapter.requestForegroundPermissionsAsync.mockImplementation(() => {
+      changeLocationAppState('background'); // Android pauses Gator for its own permission Activity.
+      return new Promise((done) => {
+        resolve = done;
+      });
+    });
+    await act(async () => mockCaptured.composer?.onShareLocation());
+    await act(async () => mockShowConfirm.mock.calls.at(-1)?.[0].onConfirm());
+    expect(mockLocationAdapter.requestForegroundPermissionsAsync).toHaveBeenCalledTimes(1);
+    expect(acquireAndSendCurrentLocation).not.toHaveBeenCalled();
+    return resolve;
+  }
+
+  it('confirms one current-location send only for a capable exact iMessage DM', async () => {
+    configureLocationChat();
     const view = await renderWithTheme(<ChatScreen />);
     expect(mockCaptured.composer?.onShareLocation).toEqual(expect.any(Function));
 
@@ -1364,6 +1450,104 @@ describe('ChatScreen — send routing', () => {
     expect(mockCaptured.composer?.onShareLocation).toBeUndefined();
   });
 
+  it('shows location denial recovery after the permission Activity returns to the foreground', async () => {
+    configureLocationChat();
+    await renderWithTheme(<ChatScreen />);
+    const resolve = await beginLocationPermission();
+    await act(async () => resolve({ granted: false, canAskAgain: true }));
+    expect(showDialog).not.toHaveBeenCalled();
+    await act(async () => changeLocationAppState('active'));
+    expect(showDialog).toHaveBeenCalledWith('Location Permission Needed', expect.any(String), [
+      expect.objectContaining({ text: 'Not Now' }),
+      expect.objectContaining({ text: 'Try Again' }),
+    ]);
+    expect(acquireAndSendCurrentLocation).not.toHaveBeenCalled();
+    expect(mockLocationAdapter.watchPositionAsync).not.toHaveBeenCalled();
+  });
+
+  it('requires a fresh one-shot location send confirmation after a prompted grant, including a Home interval', async () => {
+    configureLocationChat();
+    await renderWithTheme(<ChatScreen />);
+    const resolve = await beginLocationPermission();
+    await act(async () => {
+      changeLocationAppState('background');
+      resolve({ granted: true, canAskAgain: true });
+    });
+    expect(mockShowConfirm).toHaveBeenCalledTimes(1);
+    await act(async () => changeLocationAppState('active'));
+    expect(mockShowConfirm).toHaveBeenCalledTimes(2);
+    expect(mockShowConfirm.mock.calls[1]?.[0].message).toContain('Nothing has been sent yet');
+    expect(acquireAndSendCurrentLocation).not.toHaveBeenCalled();
+    expect(mockLocationAdapter.watchPositionAsync).not.toHaveBeenCalled();
+    await act(async () => {
+      mockShowConfirm.mock.calls[1]?.[0].onConfirm();
+      mockShowConfirm.mock.calls[1]?.[0].onConfirm();
+    });
+    expect(acquireAndSendCurrentLocation).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['blur', 'unmount', 'account', 'capability'] as const)(
+    'discards a late location permission result after %s retirement',
+    async (reason) => {
+      configureLocationChat();
+      const view = await renderWithTheme(<ChatScreen />);
+      const resolve = await beginLocationPermission();
+      // RNTL's unmount already owns act. Complete that commit before settling native work.
+      if (reason === 'unmount') await view.unmount();
+      await act(async () => {
+        if (reason === 'blur') {
+          mockScreenFocused = false;
+          for (const cleanup of [...mockFocusCleanups]) cleanup();
+        } else if (reason === 'account') await pauseRealtimeDeliveries();
+        else if (reason === 'capability')
+          useSessionStore.setState((state) => ({
+            sendCapabilityRevision: state.sendCapabilityRevision + 1,
+          }));
+        resolve({ granted: true, canAskAgain: true });
+        changeLocationAppState('active');
+      });
+      expect(mockShowConfirm).toHaveBeenCalledTimes(1);
+      expect(showDialog).not.toHaveBeenCalled();
+      expect(acquireAndSendCurrentLocation).not.toHaveBeenCalled();
+      expect(mockLocationAdapter.watchPositionAsync).not.toHaveBeenCalled();
+    },
+  );
+
+  it('retires a retained location confirmation when Home is pressed after granting permission', async () => {
+    configureLocationChat();
+    await renderWithTheme(<ChatScreen />);
+    const resolve = await beginLocationPermission();
+    await act(async () => {
+      changeLocationAppState('active');
+      resolve({ granted: true, canAskAgain: true });
+    });
+    const confirmation = mockShowConfirm.mock.calls[1]?.[0];
+    const ownedId = mockShowConfirm.mock.results[1]?.value;
+    await act(async () => {
+      changeLocationAppState('background');
+      changeLocationAppState('active');
+      confirmation.onConfirm();
+    });
+    expect(mockDismissLocationDialog).toHaveBeenCalledWith(ownedId);
+    expect(acquireAndSendCurrentLocation).not.toHaveBeenCalled();
+  });
+
+  it('still cancels an already-permitted location acquisition when the foreground lifetime ends', async () => {
+    configureLocationChat();
+    const cancel = jest.fn();
+    (acquireAndSendCurrentLocation as jest.Mock).mockImplementationOnce((_guid, options) => {
+      options.foregroundLifecycle.subscribeToInactive(cancel);
+      return new Promise(() => undefined);
+    });
+    await renderWithTheme(<ChatScreen />);
+    await act(async () => mockCaptured.composer?.onShareLocation());
+    await act(async () => mockShowConfirm.mock.calls[0]?.[0].onConfirm());
+    expect(acquireAndSendCurrentLocation).toHaveBeenCalledTimes(1);
+    expect(mockLocationAdapter.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
+    await act(async () => changeLocationAppState('background'));
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
   it('offers iMessage typing only for a proven chat with its separate live capability', async () => {
     useSessionStore.setState({
       serverInfo: { version: 'test', supports_imessage_typing: true } as any,
@@ -1390,6 +1574,71 @@ describe('ChatScreen — send routing', () => {
     expect(screen.queryByText('typing…')).toBeNull();
   });
 
+  it('cancels a reply permanently when its capability is revoked', async () => {
+    const enabled = { version: 'test', supports_imessage_replies: true } as any;
+    useSessionStore.setState({ serverInfo: enabled });
+    useChatHeaderMock.mockReturnValue({
+      data: { id: 1, guid: GUID, style: 45, participantCount: 1, handleServices: 'iMessage' },
+      error: null,
+    });
+    await renderWithTheme(<ChatScreen />);
+    const target = makeMsg({
+      guid: 'reply-revoked',
+      text: 'Reply target',
+      messagePartTopology: JSON.stringify({
+        complete: true,
+        originalPartIndexes: [0],
+        currentParts: [{ index: 0, kind: 'text' }],
+        attachmentOwnership: [],
+      }),
+    });
+    await longPressMessage(target);
+    await run(() => mockCaptured.overlay!.onReply());
+    expect(mockCaptured.composer?.replyTo?.guid).toBe(target.guid);
+    await act(async () => {
+      useSessionStore.setState({ serverInfo: { version: 'test' } as any });
+    });
+    expect(mockCaptured.composer?.replyTo).toBeUndefined();
+    await act(async () => {
+      useSessionStore.setState({ serverInfo: enabled });
+    });
+    expect(mockCaptured.composer?.replyTo).toBeUndefined();
+  });
+
+  it('cancels editing when the target disappears even if the row returns', async () => {
+    useSessionStore.setState({
+      serverInfo: { version: 'test', supports_imessage_edit: true } as any,
+    });
+    useChatHeaderMock.mockReturnValue({
+      data: { id: 1, guid: GUID, style: 45, participantCount: 1, handleServices: 'iMessage' },
+      error: null,
+    });
+    const view = await renderWithTheme(<ChatScreen />);
+    const target = makeMsg({
+      guid: 'edit-removed',
+      text: 'Edit target',
+      isFromMe: 1,
+      sendState: 'sent',
+      dateCreated: Date.now(),
+      messagePartTopology: JSON.stringify({
+        complete: true,
+        originalPartIndexes: [0],
+        currentParts: [{ index: 0, kind: 'text' }],
+        attachmentOwnership: [],
+      }),
+    });
+    await longPressMessage(target);
+    await run(() => mockCaptured.overlay!.onEdit());
+    expect(mockCaptured.composer?.editingText).toBe('Edit target');
+    const currentWindow = useMessagesMock.mock.results.at(-1)!.value;
+    useMessagesMock.mockReturnValue({ ...currentWindow, data: [] });
+    await view.rerender(<ChatScreen />);
+    expect(mockCaptured.composer?.editingText).toBeUndefined();
+    useMessagesMock.mockReturnValue({ ...currentWindow, data: [target] });
+    await view.rerender(<ChatScreen />);
+    expect(mockCaptured.composer?.editingText).toBeUndefined();
+  });
+
   it('offers the voice recorder only with the separate iMessage voice capability', async () => {
     useSessionStore.setState({
       serverInfo: { version: 'test', supports_imessage_voice_upload: true } as any,
@@ -1401,11 +1650,21 @@ describe('ChatScreen — send routing', () => {
     await renderWithTheme(<ChatScreen />);
     expect(mockCaptured.composer?.onStartVoice).toEqual(expect.any(Function));
     expect(sendVoice).not.toHaveBeenCalled();
+    await run(() => mockCaptured.composer!.onStartVoice());
+    expect(screen.getByTestId('voice-recorder')).toBeTruthy();
 
     await act(async () => {
       useSessionStore.setState({ serverInfo: { version: 'test', private_api: true } as any });
     });
     expect(mockCaptured.composer?.onStartVoice).toBeUndefined();
+    expect(screen.queryByTestId('voice-recorder')).toBeNull();
+    await act(async () => {
+      useSessionStore.setState({
+        serverInfo: { version: 'test', supports_imessage_voice_upload: true } as any,
+      });
+    });
+    expect(mockCaptured.composer?.onStartVoice).toEqual(expect.any(Function));
+    expect(screen.queryByTestId('voice-recorder')).toBeNull();
   });
 
   it('ignores injected effect arguments and sends ordinary text', async () => {
@@ -1957,30 +2216,32 @@ describe('ChatScreen — current-chat search orchestration', () => {
     try {
       view = await renderWithTheme(<ChatScreen />);
       const composerInstance = mockCaptured.composer!.__instance;
-      await run(() => mockCaptured.header!.onSearchPress());
-      await run(() => mockCaptured.search!.onChangeText('needle'));
-      await act(async () => {
-        jest.advanceTimersByTime(250);
-      });
-      expect(useMessagesMock).toHaveBeenLastCalledWith(GUID, 250, {
-        id: searchHit.id,
-        guid: searchHit.guid,
-      });
+      for (let cycle = 1; cycle <= 2; cycle++) {
+        await run(() => mockCaptured.header!.onSearchPress());
+        await run(() => mockCaptured.search!.onChangeText('needle'));
+        await act(async () => {
+          jest.advanceTimersByTime(250);
+        });
+        expect(useMessagesMock).toHaveBeenLastCalledWith(GUID, 250, {
+          id: searchHit.id,
+          guid: searchHit.guid,
+        });
 
-      // Close before the anchored message query settles. The older retained newest rows cannot
-      // prove that the fresh return-to-newest request triggered by this close has completed.
-      await run(() => mockCaptured.header!.onSearchPress());
-      expect(mockRefreshWindow).toHaveBeenCalledTimes(1);
-      expect(useMessagesMock).toHaveBeenLastCalledWith(GUID, 250, undefined);
-      expect(mockCaptured.composer?.__instance).toBe(composerInstance);
-      expect(mockCaptured.composer?.active).toBe(false);
-      expect(hiddenComposerGateCount(view.toJSON())).toBe(1);
+        // Close before the anchored message query settles. The older retained newest rows cannot
+        // prove that the fresh return-to-newest request triggered by this close has completed.
+        await run(() => mockCaptured.header!.onSearchPress());
+        expect(mockRefreshWindow).toHaveBeenCalledTimes(cycle);
+        expect(useMessagesMock).toHaveBeenLastCalledWith(GUID, 250, undefined);
+        expect(mockCaptured.composer?.__instance).toBe(composerInstance);
+        expect(mockCaptured.composer?.active).toBe(false);
+        expect(hiddenComposerGateCount(view.toJSON())).toBe(1);
 
-      newestWindowCurrent = true;
-      await act(async () => view?.rerender(<ChatScreen />));
-      await waitFor(() => expect(mockCaptured.composer?.active).toBe(true));
-      expect(mockCaptured.composer?.__instance).toBe(composerInstance);
-      expect(hiddenComposerGateCount(view.toJSON())).toBe(0);
+        newestWindowCurrent = true;
+        await act(async () => view?.rerender(<ChatScreen />));
+        await waitFor(() => expect(mockCaptured.composer?.active).toBe(true));
+        expect(mockCaptured.composer?.__instance).toBe(composerInstance);
+        expect(hiddenComposerGateCount(view.toJSON())).toBe(0);
+      }
     } finally {
       if (view) await act(async () => view?.unmount());
       jest.useRealTimers();

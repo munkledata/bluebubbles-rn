@@ -855,7 +855,7 @@ describe('MediaViewer save button', () => {
     save.mockResolvedValue({ status: 'saved', saved: 1 });
     await renderViewer();
 
-    fireEvent.press(pills()[1]!);
+    await fireEvent.press(pills()[1]!);
 
     await waitFor(() => expect(useToastStore.getState().current?.message).toBe('Saved to Photos'));
     expect(save).toHaveBeenCalledWith([PRIVATE_IMAGE_URI], expect.any(Function));
@@ -865,7 +865,7 @@ describe('MediaViewer save button', () => {
     save.mockResolvedValue({ status: 'denied' });
     await renderViewer();
 
-    fireEvent.press(pills()[1]!);
+    await fireEvent.press(pills()[1]!);
 
     await waitFor(() => expect(useDialogStore.getState().current?.title).toBe('Save'));
     expect(useDialogStore.getState().current?.message).toMatch(/permission/i);
@@ -876,7 +876,7 @@ describe('MediaViewer save button', () => {
     save.mockResolvedValue({ status: 'error' });
     await renderViewer();
 
-    fireEvent.press(pills()[1]!);
+    await fireEvent.press(pills()[1]!);
 
     await waitFor(() =>
       expect(useToastStore.getState().current?.message).toMatch(/couldn’t save/i),
@@ -889,7 +889,7 @@ describe('MediaViewer share button', () => {
     share.mockResolvedValue({ ok: true });
     await renderViewer();
 
-    fireEvent.press(pills()[0]!);
+    await fireEvent.press(pills()[0]!);
 
     await waitFor(() =>
       expect(share).toHaveBeenCalledWith(PRIVATE_IMAGE_URI, 'image/jpeg', expect.any(Function)),
@@ -904,7 +904,7 @@ describe('MediaViewer share button', () => {
     share.mockResolvedValue({ ok: false, reason: 'failed' });
     await renderViewer();
 
-    fireEvent.press(pills()[0]!);
+    await fireEvent.press(pills()[0]!);
 
     await waitFor(() => expect(useDialogStore.getState().current?.title).toBe('Share'));
     expect(useDialogStore.getState().current?.message).toMatch(/App Logs/);
@@ -914,7 +914,7 @@ describe('MediaViewer share button', () => {
     share.mockResolvedValue({ ok: false, reason: 'unavailable' });
     await renderViewer();
 
-    fireEvent.press(pills()[0]!);
+    await fireEvent.press(pills()[0]!);
 
     await waitFor(() =>
       expect(useDialogStore.getState().current?.message).toMatch(/isn’t available/i),
@@ -941,20 +941,15 @@ describe('MediaViewer double-tap', () => {
     return { promise, settle };
   }
 
-  /**
-   * Let a pending handler run to completion. NOT `act()` — the handlers under test touch refs and
-   * the toast/dialog stores, never component state, and a bare `act(async () => {})` between
-   * RNTL's own act-wrapped calls trips React 19's overlapping-act detection, which silently
-   * corrupts every LATER test in the file (they fail to render at all).
-   */
+  // Await each RNTL interaction before starting another act scope or settling native work.
   it('ignores a second share tap while the first is still in flight', async () => {
     const d = deferred<{ ok: true }>();
     share.mockReturnValue(d.promise);
     await renderViewer();
 
-    fireEvent.press(pills()[0]!);
+    await fireEvent.press(pills()[0]!);
     await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
-    fireEvent.press(pills()[0]!);
+    await fireEvent.press(pills()[0]!);
     await flush(); // let the second tap's handler run (or be refused)
 
     expect(share).toHaveBeenCalledTimes(1);
@@ -970,9 +965,9 @@ describe('MediaViewer double-tap', () => {
     save.mockReturnValue(d.promise);
     await renderViewer();
 
-    fireEvent.press(pills()[1]!);
+    await fireEvent.press(pills()[1]!);
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
-    fireEvent.press(pills()[1]!);
+    await fireEvent.press(pills()[1]!);
     await flush();
 
     expect(save).toHaveBeenCalledTimes(1);
@@ -988,9 +983,9 @@ describe('MediaViewer double-tap', () => {
     save.mockResolvedValue({ status: 'saved', saved: 1 });
     await renderViewer();
 
-    fireEvent.press(pills()[0]!);
+    await fireEvent.press(pills()[0]!);
     await waitFor(() => expect(share).toHaveBeenCalledTimes(1));
-    fireEvent.press(pills()[1]!);
+    await fireEvent.press(pills()[1]!);
 
     await waitFor(() => expect(useToastStore.getState().current?.message).toBe('Saved to Photos'));
     d.settle({ ok: true });

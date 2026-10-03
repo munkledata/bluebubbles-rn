@@ -43,6 +43,7 @@ const ANDROID_NATIVE_PATH_ENV_LINES = [
 const LOCAL_NATIVE_COMPILE_TASKS = [
   ':gator-paste-input:compileDebugKotlin',
   ':gator-share-shortcuts:compileDebugKotlin',
+  ':gator-share-intake:compileDebugKotlin',
   ':gator-bounded-document:compileDebugKotlin',
   ':gator-bounded-download:compileDebugKotlin',
   ':gator-screen-security:compileDebugKotlin',
@@ -50,9 +51,11 @@ const LOCAL_NATIVE_COMPILE_TASKS = [
 const LOCAL_NATIVE_TEST_TASKS = [
   ':gator-paste-input:testDebugUnitTest',
   ':gator-share-shortcuts:testDebugUnitTest',
+  ':gator-share-intake:testDebugUnitTest',
   ':gator-bounded-document:testDebugUnitTest',
   ':gator-bounded-download:testDebugUnitTest',
   ':expo-file-system:testDebugUnitTest',
+  ':expo-task-manager:testDebugUnitTest',
 ];
 const SCHEDULED_DB_CRON = "- cron: '17 7 * * 2'";
 const SCHEDULED_DB_CONDITION =

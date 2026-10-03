@@ -150,8 +150,9 @@ but its affected-row count is not portable. Use`RETURNING` or a builder when own
   terminal path. See `docs/UPLOAD_PROGRESS.md`.
 - Native stat/download/delete work stays outside DB transactions. Attachment-cache claims and
   settlement use short guarded owners; recovery and reference scans retain their documented bounds.
-- Public ACTION_SEND/Direct Share intake is intentionally disabled. Do not reactivate historical
-  `expo-share-intent` or custom native intake paths without a new approved design. See
+- ACTION_SEND, ACTION_SEND_MULTIPLE, and Direct Share use the owned `gator-share-intake` and
+  `gator-share-shortcuts` modules. Preserve their bounded streaming, durable batch ownership, and
+  account/App Lock guards. Do not restore the retired `expo-share-intent` path. See
   `docs/SHARE_INTENT_RELIABILITY.md`.
 - Validate server/user-controlled URLs and file paths before native access. Automatic previews use
   only the authenticated, bounded Gator-server proxy completed under `NET-01`; the app must never

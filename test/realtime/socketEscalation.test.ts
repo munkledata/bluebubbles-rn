@@ -57,6 +57,10 @@ jest.mock('socket.io-client', () => ({ io: mockIo }));
 
 import { logger } from '@core/secure';
 import { SocketService, type RawRealtimeEventHandler } from '@/services/realtime/socketService';
+import {
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+} from '@/services/realtime/deliveryCoordinator';
 
 const handleRawEvent: RawRealtimeEventHandler = async () => null;
 
@@ -265,6 +269,169 @@ describe('SocketService reconnect escalation', () => {
     expect(warn).toHaveBeenCalledWith('[socket] lifecycle observer failed', {
       phase: 'connecting',
       errorName: 'Error',
+    });
+  });
+
+  describe('namespace authentication rejection', () => {
+    function reject(code?: unknown): void {
+      sockets[sockets.length - 1]!.active = false;
+      fireSocketEvent('connect_error', Object.assign(new Error('not parsed'), { data: { code } }));
+    }
+
+    function open(): { service: SocketService; observer: jest.Mock } {
+      jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+      jest.spyOn(Math, 'random').mockReturnValue(0);
+      const service = new SocketService(handleRawEvent);
+      const observer = jest.fn();
+      service.connect('https://trusted.example', 'account-password');
+      service.observeLifecycle(observer);
+      return { service, observer };
+    }
+
+    it.each(['AUTH_REQUIRED', 'unknown', undefined, { code: 'AUTH_UNAVAILABLE' }])(
+      'stops automatic retries for a terminal or unrecognized code: %p',
+      (code) => {
+        const { observer } = open();
+        fireReconnectFailed();
+        reject(code);
+        expect(observer).toHaveBeenLastCalledWith({ phase: 'error' });
+        fireReconnectFailed();
+        fireManagerEvent('reconnect_attempt');
+        fireSocketEvent('disconnect', 'io server disconnect');
+        reject('AUTH_UNAVAILABLE');
+        jest.advanceTimersByTime(120_000);
+        expect(mockIo).toHaveBeenCalledTimes(1);
+        expect(observer).toHaveBeenLastCalledWith({ phase: 'error' });
+      },
+    );
+
+    it('leaves active transport errors to Socket.IO automatic retries', () => {
+      const { observer } = open();
+      fireSocketEvent(
+        'connect_error',
+        Object.assign(new Error('transport'), {
+          data: { code: 'AUTH_UNAVAILABLE' },
+        }),
+      );
+      jest.advanceTimersByTime(120_000);
+      expect(mockIo).toHaveBeenCalledTimes(1);
+      expect(observer).toHaveBeenLastCalledWith({ phase: 'connecting' });
+    });
+
+    it('retries unavailable authentication once per capped backoff against the same transport', () => {
+      const { observer } = open();
+      for (const delay of [1_000, 2_000, 4_000, 8_000, 16_000, 32_000, 60_000, 60_000]) {
+        const calls = mockIo.mock.calls.length;
+        reject('AUTH_UNAVAILABLE');
+        reject('AUTH_UNAVAILABLE');
+        fireReconnectFailed();
+        expect(observer).toHaveBeenLastCalledWith({ phase: 'error' });
+        jest.advanceTimersByTime(delay - 1);
+        expect(mockIo).toHaveBeenCalledTimes(calls);
+        jest.advanceTimersByTime(1);
+        expect(mockIo).toHaveBeenCalledTimes(calls + 1);
+        expect(observer).toHaveBeenLastCalledWith({ phase: 'reconnecting' });
+      }
+      for (const call of mockIo.mock.calls) {
+        expect(call).toEqual([
+          'https://trusted.example',
+          expect.objectContaining({ auth: { password: 'account-password' } }),
+        ]);
+      }
+      fireSocketEvent('connect');
+      expect(observer).toHaveBeenLastCalledWith({ phase: 'connected', recovered: false });
+      reject('AUTH_UNAVAILABLE');
+      jest.advanceTimersByTime(1_000);
+      expect(mockIo).toHaveBeenCalledTimes(10);
+    });
+
+    it('upgrades a queued retry to 60 seconds without duplicate errors extending the wait', () => {
+      open();
+      reject('AUTH_UNAVAILABLE');
+      jest.advanceTimersByTime(500);
+      reject('AUTH_RATE_LIMITED');
+      jest.advanceTimersByTime(30_000);
+      reject('AUTH_RATE_LIMITED');
+      reject('AUTH_UNAVAILABLE');
+      fireReconnectFailed();
+      jest.advanceTimersByTime(29_999);
+      expect(mockIo).toHaveBeenCalledTimes(1);
+      jest.advanceTimersByTime(1);
+      expect(mockIo).toHaveBeenCalledTimes(2);
+    });
+
+    it('ignores a cancelled callback already queued before a rate-limit upgrade', () => {
+      open();
+      const timers = jest.spyOn(globalThis, 'setTimeout');
+      reject('AUTH_UNAVAILABLE');
+      const queued = timers.mock.calls[0]![0] as () => void;
+      reject('AUTH_RATE_LIMITED');
+      queued();
+      expect(mockIo).toHaveBeenCalledTimes(1);
+      jest.advanceTimersByTime(60_000);
+      expect(mockIo).toHaveBeenCalledTimes(2);
+    });
+
+    it.each(['AUTH_UNAVAILABLE', 'AUTH_RATE_LIMITED'])(
+      'cancels a pending %s retry at terminal disconnect',
+      (code) => {
+        const { service } = open();
+        reject(code);
+        service.disconnect();
+        jest.advanceTimersByTime(120_000);
+        expect(mockIo).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it('rejects queued retries and late errors after the account lease is revoked', async () => {
+      const { observer } = open();
+      reject('AUTH_UNAVAILABLE');
+      await pauseRealtimeDeliveries();
+      try {
+        observer.mockClear();
+        reject('AUTH_RATE_LIMITED');
+        jest.advanceTimersByTime(120_000);
+        expect(mockIo).toHaveBeenCalledTimes(1);
+        expect(observer).not.toHaveBeenCalled();
+      } finally {
+        resumeRealtimeDeliveries();
+      }
+    });
+
+    it('allows manual retry after terminal rejection and ignores the retired socket errors', () => {
+      const { service, observer } = open();
+      const oldErrors = [...sockets[0]!.handlers.get('connect_error')!];
+      reject('AUTH_REQUIRED');
+      expect(service.retryConnection()).toBe(true);
+      expect(mockIo).toHaveBeenCalledTimes(2);
+      for (const error of oldErrors) error({ data: { code: 'AUTH_REQUIRED' } });
+      reject('AUTH_UNAVAILABLE');
+      jest.advanceTimersByTime(1_000);
+      expect(mockIo).toHaveBeenCalledTimes(3);
+      expect(observer).toHaveBeenLastCalledWith({ phase: 'reconnecting' });
+    });
+
+    it('does not schedule old credentials when an error observer replaces the connection', () => {
+      const { service } = open();
+      service.observeLifecycle(({ phase }) => {
+        if (phase === 'error') service.connect('https://next.example', 'next-account-password');
+      });
+      reject('AUTH_UNAVAILABLE');
+      jest.advanceTimersByTime(120_000);
+      expect(mockIo).toHaveBeenCalledTimes(2);
+      expect(mockIo.mock.calls[1]![0]).toBe('https://next.example');
+    });
+
+    it('does not restart a replacement made by the timer lifecycle observer', () => {
+      const { service } = open();
+      service.observeLifecycle(({ phase }) => {
+        if (phase === 'reconnecting')
+          service.connect('https://next.example', 'next-account-password');
+      });
+      reject('AUTH_UNAVAILABLE');
+      jest.advanceTimersByTime(1_000);
+      expect(mockIo).toHaveBeenCalledTimes(2);
+      expect(mockIo.mock.calls[1]![0]).toBe('https://next.example');
     });
   });
 

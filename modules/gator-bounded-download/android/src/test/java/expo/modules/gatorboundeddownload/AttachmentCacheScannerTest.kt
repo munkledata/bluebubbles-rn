@@ -34,15 +34,42 @@ class AttachmentCacheScannerTest {
     val collidingLegacy = cacheFile(mixedDirectory, "generation-01", 2)
     val generation = File(mixedDirectory, "generation-0").apply { mkdirs() }
     val current = cacheFile(generation, "media-current%20photo.pdf", 3)
+    val hashedDirectory = File(root, "id-sha256-" + "a".repeat(64)).apply { mkdirs() }
+    val hashedLegacy = cacheFile(hashedDirectory, "generation-7", 4)
+    val hashedGeneration = File(hashedDirectory, "generation-8").apply { mkdirs() }
+    val hashedCurrent = cacheFile(hashedGeneration, "media-photo.png", 5)
     val manager = manager(root)
 
     val entries = collectAll(manager)
 
     assertEquals(
-      setOf(legacy.path, collidingLegacy.path, current.path),
+      setOf(legacy.path, collidingLegacy.path, current.path, hashedLegacy.path, hashedCurrent.path),
       entries.map { entry -> entry.file.path }.toSet(),
     )
-    assertEquals(setOf(1L, 2L, 3L), entries.map { entry -> entry.bytes }.toSet())
+    assertEquals(setOf(1L, 2L, 3L, 4L, 5L), entries.map { entry -> entry.bytes }.toSet())
+  }
+
+  @Test
+  fun `rejects malformed hash directories hashed filenames and symlinks`() {
+    val identity = "id-sha256-" + "a".repeat(64)
+    val paths = listOf(
+      "${identity.uppercase()}/generation-7/media-photo.png",
+      "${identity.dropLast(1)}/generation-7/media-photo.png",
+      "$identity/generation-07/media-photo.png",
+      "$identity/generation-7/$identity",
+      "$identity/extra/generation-7/media-photo.png",
+    )
+    for ((index, path) in paths.withIndex()) {
+      val root = temporary.newFolder("malformed-$index").canonicalFile
+      File(root, path).apply { parentFile?.mkdirs(); writeBytes(byteArrayOf(1)) }
+      assertFailure(AttachmentCacheScanFailure.CORRUPT) { collectAll(manager(root)) }
+    }
+    val root = temporary.newFolder("symlinked").canonicalFile
+    val generation = File(root, "$identity/generation-7").apply { mkdirs() }
+    val outside = temporary.newFile("outside-hash-scan")
+    Files.createSymbolicLink(File(generation, "media-linked.png").toPath(), outside.toPath())
+    assertFailure(AttachmentCacheScanFailure.CORRUPT) { collectAll(manager(root)) }
+    assertTrue(outside.exists())
   }
 
   @Test

@@ -89,6 +89,10 @@ class GatorBoundedDownloadModule : Module() {
     Name("GatorBoundedDownload")
     Events(EVENT_PROGRESS)
 
+    Function("attachmentCacheGuidSha256") { guid: String ->
+      attachmentCacheGuidSha256(guid)
+    }
+
     Function("prepare") { requestId: String ->
       requireValidRequestId(requestId)
       // Keep the resource cap exact even if two React runtimes/headless callers prepare at once.

@@ -137,6 +137,8 @@ const COORDINATED_DELEGATION_PATHS = new Set([
   'src/features/conversations/devSeed.ts',
   'src/services/syncControl.ts',
   'src/services/sync/engine.ts',
+  'src/services/sync/messageStateSync.ts',
+  'src/services/sync/providerRepair.ts',
   'src/services/backgrounds/syncedBackground.ts',
   'src/services/background/backgroundSync.ts',
   'src/services/background/realtimePrerequisiteRecovery.ts',
@@ -2328,10 +2330,10 @@ function dbProcessRelaunchCertificateCandidate({
       'DB_ACTIVE_MIGRATION_DEATH_RESUMING_FILE',
       [ts.NodeFlags.Const, "'.gator-db-active-migration-death-resuming-v1'"],
     ],
-    ['DB_RELAUNCH_MIGRATION_COUNT', [ts.NodeFlags.Const, '52 as const']],
+    ['DB_RELAUNCH_MIGRATION_COUNT', [ts.NodeFlags.Const, '53 as const']],
     [
       'DB_RELAUNCH_MIGRATION_HEAD',
-      [ts.NodeFlags.Const, "'0052_chat_history_deletion_boundary' as const"],
+      [ts.NodeFlags.Const, "'0053_versioned_server_message_state' as const"],
     ],
     ['WAIT_FOR_HOST_PROCESS_KILL', [ts.NodeFlags.Const, 'new Promise<never>(() => undefined)']],
     ['activeDbRelaunchContract', [ts.NodeFlags.Let, undefined]],
@@ -2363,19 +2365,19 @@ function dbProcessRelaunchCertificateCandidate({
     ['DB_RUNTIME_CONCURRENCY_SELF_TEST_NAME', "'driver-runtime-concurrency-selftest.db'"],
     ['DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_A', "'db-02c-public-throwaway-key-a-v1'"],
     ['DB_RUNTIME_CONCURRENCY_SELF_TEST_KEY_B', "'db-02c-public-throwaway-key-b-v1'"],
-    ['DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_COUNT', '52 as const'],
+    ['DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_COUNT', '53 as const'],
     [
       'DB_RUNTIME_CONCURRENCY_SELF_TEST_MIGRATION_HEAD',
-      "'0052_chat_history_deletion_boundary' as const",
+      "'0053_versioned_server_message_state' as const",
     ],
     ['DB_RUNTIME_CONCURRENCY_SENTINEL_KEY', "'gator-db-runtime-wave-sentinel'"],
     ['DB_RUNTIME_CONCURRENCY_SENTINEL_VALUE', "'committed'"],
     ['DB_BACKUP_RESTORE_SELF_TEST_NAME', "'driver-backup-restore-selftest.db'"],
     ['DB_BACKUP_RESTORE_SELF_TEST_KEY', "'backup-02-public-throwaway-key-v1'"],
-    ['DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_COUNT', '52 as const'],
+    ['DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_COUNT', '53 as const'],
     [
       'DB_BACKUP_RESTORE_SELF_TEST_MIGRATION_HEAD',
-      "'0052_chat_history_deletion_boundary' as const",
+      "'0053_versioned_server_message_state' as const",
     ],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_NAME', "'driver-relaunch-selftest.db'"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_KEY', "'db-03b1-public-throwaway-key-v1'"],
@@ -2383,10 +2385,10 @@ function dbProcessRelaunchCertificateCandidate({
     ['DB_PROCESS_RELAUNCH_SELF_TEST_PARTIAL_MIGRATION_COUNT', '29'],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_PARTIAL_MIGRATION_HEAD', "'0029_chats_deleted_at'"],
     ['DB_PROCESS_RELAUNCH_SELF_TEST_RETRY_MIGRATION_START', "'0030_attachment_cache_entries'"],
-    ['DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_COUNT', '52 as const'],
+    ['DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_COUNT', '53 as const'],
     [
       'DB_PROCESS_RELAUNCH_SELF_TEST_MIGRATION_HEAD',
-      "'0052_chat_history_deletion_boundary' as const",
+      "'0053_versioned_server_message_state' as const",
     ],
     ['DB_ACTIVE_WAL_WRITE_DEATH_SELF_TEST_NAME', "'driver-wal-write-death-selftest.db'"],
     ['DB_ACTIVE_WAL_WRITE_DEATH_SELF_TEST_KEY', "'db-03b2b1-public-throwaway-key-v1'"],
@@ -2399,8 +2401,8 @@ function dbProcessRelaunchCertificateCandidate({
     ['DB_ACTIVE_MIGRATION_DEATH_PREFIX_COUNT', '37'],
     ['DB_ACTIVE_MIGRATION_DEATH_PREFIX_HEAD', "'0037_purge_legacy_redacted_mode_setting' as const"],
     ['DB_ACTIVE_MIGRATION_DEATH_TARGET', "'0038_scrub_reaction_selected_message_text' as const"],
-    ['DB_ACTIVE_MIGRATION_DEATH_HEAD', "'0052_chat_history_deletion_boundary' as const"],
-    ['DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT', '52 as const'],
+    ['DB_ACTIVE_MIGRATION_DEATH_HEAD', "'0053_versioned_server_message_state' as const"],
+    ['DB_ACTIVE_MIGRATION_DEATH_MIGRATION_COUNT', '53 as const'],
     ['DB_ACTIVE_MIGRATION_DEATH_TARGET_COUNT', '128'],
     ['DB_ACTIVE_MIGRATION_DEATH_SELECTED_TEXT_LENGTH', '8_192'],
     [
@@ -2624,7 +2626,7 @@ function dbProcessRelaunchCertificateCandidate({
     [sendIMessageMention, 'bfd922d5ff2918e6911ae7f7939b4ee1fc894cca10d779a88cdce9ca848b0bbd'],
     [sendIMessageFormatted, '6c53108d0cdd11091b68ae3119de718bd1c94220d6cf3204bafbe0e03bf8a68d'],
     [reconcileSendOutcome, 'aedfc0bb25afbf331d39a1eb1e425b726dee99a5878b04a4fbb9bdca5f9636b1'],
-    [handleSendFailure, '0e3e0eb474d0bdec7ba6fa8f7a54ca86b0909c10b41dbb25efc64de2f17affb1'],
+    [handleSendFailure, '38c10b2c388e1f31b51c12f9846c1eccd5b12566e15945cb0fa8da96b8770bfc'],
     [
       isTerminalLocationSendError,
       'c4476403a6dd9484f45fbb35fa032c97e2f48d81d058482f880c3dd1a163a2d5',
@@ -2633,9 +2635,9 @@ function dbProcessRelaunchCertificateCandidate({
       withCurrentDeliveryTransaction,
       '89571d272f5cd53c5d70cc98412afbb3ba505b2b6705982475a1400aa38dbf89',
     ],
-    [dbEventSinkConstructor, '711559bd22c0abe4cd4616c02abcc11716e9fbeadbbc1b034fae93668b9249eb'],
+    [dbEventSinkConstructor, '96103a4c091104c1b661ae2272312893db59c8de80e38eacdbc87ae2b23134c2'],
     [dbEventSinkLinkContacts, '0815eb9769042c9b5d8be504720e727f05cdde857fd255d692afdb391b3e3e2d'],
-    [dbEventSinkOnEvent, '16da4006d5b5d0411feb51e4657a145a3694801d98d6bbeb1bac61ab5b2800c9'],
+    [dbEventSinkOnEvent, 'aba02945ae36f7e890426f1cbf0203ca42011b21cfe616291d9064b0aaaeb0ad'],
     [restoreBackup, '288e2048756fcdf32695da44b9cb685160fa82baf12399b615b055924bd62437'],
     [
       restorePreparedBackupWithinTransaction,
@@ -3827,7 +3829,7 @@ function dbProcessRelaunchCertificateCandidate({
       optionedFailureEdges,
       sendTextMessage,
       7,
-      "{ attemptOwnerToken: attemptOwnerToken ?? undefined, ...(target ? { terminalUncertainKind: 'reply' as const } : {}), }",
+      "{ attemptOwnerToken: attemptOwnerToken ?? undefined, ...(retrySafePlainText ? { imessagePlainTextRetrySafe: true } : useIMessagePlainText ? { terminalUncertainKind: 'plain' as const } : target ? { terminalUncertainKind: 'reply' as const } : {}), }",
     ) ||
     !hasExactOptionedEdge(
       optionedFailureEdges,
@@ -3869,7 +3871,7 @@ function dbProcessRelaunchCertificateCandidate({
       optionedFailureEdges,
       resendOutgoingRow,
       7,
-      "{ attemptOwnerToken, ...(terminalLocation ? { terminalUncertainKind: 'location' as const } : {}), }",
+      "{ attemptOwnerToken, ...(retrySafePlainText ? { imessagePlainTextRetrySafe: true } : plainTextState !== 'legacy' ? { terminalUncertainKind: 'plain' as const } : terminalLocation ? { terminalUncertainKind: 'location' as const } : {}), }",
     ) ||
     edges.filter((edge) => edge.callee === runtimeConcurrencyCount).length !== 15 ||
     edges.filter((edge) => edge.callee === submitOrderedCoordinatorWave).length !== 1 ||
@@ -5338,10 +5340,10 @@ function driverSelfTestCertificateCandidate({
     nameState.declaration.initializer.text !== 'driver-selftest.db' ||
     !(migrationCountState.declarationList.flags & ts.NodeFlags.Const) ||
     normalizedSnippet(migrationCountState.declaration.initializer, databaseFile) !==
-      '52 as const' ||
+      '53 as const' ||
     !(migrationHeadState.declarationList.flags & ts.NodeFlags.Const) ||
     normalizedSnippet(migrationHeadState.declaration.initializer, databaseFile) !==
-      "'0052_chat_history_deletion_boundary' as const" ||
+      "'0053_versioned_server_message_state' as const" ||
     !(partialMigrationCountState.declarationList.flags & ts.NodeFlags.Const) ||
     normalizedSnippet(partialMigrationCountState.declaration.initializer, databaseFile) !== '29' ||
     !(internalFailureState.declarationList.flags & ts.NodeFlags.Const) ||
@@ -9246,7 +9248,7 @@ function incomingIngressCertifiedNodes({
       .digest('hex') !== '64ef0ee4c27ead97edc14f2ca49d638de4c08666c7867036c77e1f15f1287468' ||
     createHash('sha256')
       .update(normalizedSnippet(prerequisiteRecoveryFile, prerequisiteRecoveryFile))
-      .digest('hex') !== '4cfcd16e370a6604fefff1e394e2b9b0e63d6d941c2200f46a7e33d95606435c' ||
+      .digest('hex') !== 'd320840770a7e55b8d290c85d04d4b7630e4c49014689dc4b02b933ace4e3539' ||
     createHash('sha256').update(normalizedSnippet(fileLogFile, fileLogFile)).digest('hex') !==
       '58120b0f2dd9cd52685c83894333ee06db8e32b69569fb76ddcafd8cc13fbdbe' ||
     createHash('sha256')

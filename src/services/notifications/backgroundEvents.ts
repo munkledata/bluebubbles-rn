@@ -1,9 +1,10 @@
 import { logger } from '@core/secure';
 import { flushPersistentLogsForHeadlessCompletion } from '../logging/fileLogSink';
+import { captureRealtimeDeliveryLease } from '../realtime/deliveryCoordinator';
 import { handleNotificationAction, handleNotificationPress } from './actions';
 import { EventType, nativeNotificationAdapter as notifee } from './nativeNotificationAdapter';
 import { reconcileMessageNotificationGroupAfterRemoval } from './notifeeService';
-import { stashPendingNotification } from './pendingNav';
+import { reserveNotificationTap, stashPendingNotification } from './pendingNav';
 
 /**
  * Headless background notification handler. MUST be registered at module top
@@ -29,8 +30,14 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
       // case, same JS context), and run the headless side-effects (reminder cleanup) now. A
       // killed-app tap ALSO deep-links via getInitialNotification() on next mount; the layout
       // drains both, once.
-      await handleNotificationPress(detail, stashPendingNotification);
-      await reconcileMessageNotificationGroupAfterRemoval(detail.notification);
+      const accountLease = captureRealtimeDeliveryLease();
+      // Reserve before the handler's first DB await. Its validated callback may arrive after the
+      // initial/foreground copy has already navigated; the consumed occurrence then rejects it.
+      const tap = reserveNotificationTap(detail, accountLease);
+      await handleNotificationPress(detail, tap ? () => stashPendingNotification(tap) : undefined);
+      if (accountLease.isCurrent()) {
+        await reconcileMessageNotificationGroupAfterRemoval(detail.notification);
+      }
     } else if (type === EventType.DISMISSED) {
       await reconcileMessageNotificationGroupAfterRemoval(detail.notification);
     }

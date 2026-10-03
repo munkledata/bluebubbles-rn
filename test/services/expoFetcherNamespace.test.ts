@@ -82,6 +82,9 @@ import {
   cleanupAbandonedBoundedDownloadPartials,
 } from '@/services/download/boundedNativeDownload';
 import { expoFetcher } from '@/services/download/expoFetcher';
+import { hashNativeAttachmentCacheGuid } from '@native/boundedDownload';
+import { attachmentFileName } from '@utils/attachment';
+import { parseRcsAttachmentGuid } from '@core/rcs/providerIdentity';
 
 const MockDirectory = Directory as unknown as jest.Mock;
 const MockFile = File as unknown as jest.Mock & {
@@ -103,6 +106,43 @@ beforeEach(() => {
 });
 
 describe('expoFetcher bounded account-generation destinations', () => {
+  it.each(['synthetic.png', null])(
+    'keeps long RCS identity in the URL and a bounded matching quota/download path (%s)',
+    async (name) => {
+      const guid = `rcs-media-g1.gpe1_${'A'.repeat(43)}.${Buffer.from('m'.repeat(1024)).toString('base64url')}.${Buffer.from('a'.repeat(1024)).toString('base64url')}`;
+      expect(guid).toHaveLength(2795);
+      expect(parseRcsAttachmentGuid(guid)).not.toBeNull();
+      const filename = attachmentFileName(name, guid, 'image/png');
+      const fetcher = expoFetcher(http);
+      const path = fetcher.destinationUri!(guid, filename, 71);
+      expect(path).toMatch(
+        /\/attachments\/id-sha256-[0-9a-f]{64}\/generation-71\/media-(synthetic|attachment)\.png$/,
+      );
+      expect(MockFile.createDownloadTask).not.toHaveBeenCalled();
+      expect(
+        (MockDirectory.mock.instances.at(-1) as { create: jest.Mock }).create,
+      ).not.toHaveBeenCalled();
+      const downloaded = await fetcher.download(guid, filename, undefined, 'RCS', 71);
+      expect(downloaded.localPath).toBe(path);
+      expect(hashNativeAttachmentCacheGuid).toHaveBeenCalledWith(guid);
+      expect(MockFile.createDownloadTask.mock.calls.at(-1)?.[0]).toBe(
+        `https://server.example/api/v1/rcs/attachment/${encodeURIComponent(guid)}/download`,
+      );
+      expect(fetcher.destinationUri!(guid, filename, 72)).not.toBe(path);
+      expect(fetcher.destinationUri!(guid, 'other.png', 71)).not.toBe(path);
+    },
+  );
+
+  it.each(['x'.repeat(4097), '\ud800'])(
+    'rejects invalid identities before constructing filesystem objects',
+    (guid) => {
+      MockFile.mockClear();
+      expect(() => expoFetcher(http).destinationUri!(guid, 'photo.png', 1)).toThrow();
+      expect(MockFile).not.toHaveBeenCalled();
+      expect(MockDirectory).not.toHaveBeenCalled();
+      expect(MockFile.createDownloadTask).not.toHaveBeenCalled();
+    },
+  );
   it('resolves the exact final quota path without creating a directory or starting native work', () => {
     const fetcher = expoFetcher(http);
 

@@ -1,6 +1,7 @@
 import { findMyApi } from '@core/api';
 import { resetSessionScopedState } from '@/services/sessionScopedState';
 import {
+  reserveNotificationTap,
   stashPendingNotification,
   takePendingNotification,
 } from '@/services/notifications/pendingNav';
@@ -122,7 +123,12 @@ describe('resetSessionScopedState', () => {
     });
     showDialog('Previous account', 'Private dialog copy');
     showToast('Private toast copy');
-    stashPendingNotification({ chatGuid: 'old-chat' });
+    const tap = reserveNotificationTap({
+      notification: { data: { chatGuid: 'old-chat' } },
+      pressAction: { id: 'open-chat' },
+      pressOccurrenceId: '11111111-1111-4111-8111-111111111111:1',
+    })!;
+    stashPendingNotification(tap);
 
     resetSessionScopedState();
 

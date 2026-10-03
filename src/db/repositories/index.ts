@@ -20,6 +20,7 @@ export * from './outgoing';
 export * from './incomingEvents';
 export * from './errorReports';
 export * from './kv';
+export * from './messageState';
 export * from './themes';
 export * from './customFolders';
 export * from './backup';

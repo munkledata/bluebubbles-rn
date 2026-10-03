@@ -1,51 +1,97 @@
-/**
- * Unit tests for the one-slot pending-notification stash
- * (`src/services/notifications/pendingNav.ts`).
- *
- * This is the deterministic backstop for the "tapping a notification while the app is
- * alive-but-backgrounded doesn't open the thread" fix: the headless onBackgroundEvent handler
- * stashes the tapped chat here, and the connected layout drains it on the next AppState 'active'.
- */
 import {
+  claimNotificationTap,
+  reserveNotificationTap,
   resetPendingNotification,
+  settleNotificationTap,
   stashPendingNotification,
   takePendingNotification,
 } from '@/services/notifications/pendingNav';
+import {
+  captureRealtimeDeliveryLease,
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+} from '@/services/realtime/deliveryCoordinator';
 
-describe('pendingNav', () => {
-  // The module holds a single slot of process-global state; empty it before each test so one
-  // test's stash can't leak into the next.
-  beforeEach(() => {
-    resetPendingNotification();
-  });
+let sequence = 0;
+function press(chatGuid = 'c1') {
+  return {
+    notification: { data: { chatGuid } },
+    pressAction: { id: 'open-chat' },
+    pressOccurrenceId: `11111111-1111-4111-8111-111111111111:${++sequence}`,
+  };
+}
 
-  it('returns null when nothing has been stashed', () => {
-    expect(takePendingNotification()).toBeNull();
-  });
+beforeEach(() => {
+  resumeRealtimeDeliveries();
+  resetPendingNotification();
+});
 
-  it('stashes a tap and returns it once, then clears the slot', () => {
-    stashPendingNotification({ chatGuid: 'c1', messageGuid: 'm1' });
-    expect(takePendingNotification()).toEqual({ chatGuid: 'c1', messageGuid: 'm1' });
-    // A second drain must be empty — a stale tap can't re-fire on a later resume.
-    expect(takePendingNotification()).toBeNull();
-  });
+it('destructively takes a validated pending reservation', () => {
+  expect(takePendingNotification()).toBeNull();
+  const tap = reserveNotificationTap(press())!;
+  stashPendingNotification(tap);
+  expect(takePendingNotification()).toBe(tap);
+  expect(takePendingNotification()).toBeNull();
+});
 
-  it('keeps only the most recent tap (a newer notification supersedes an un-drained one)', () => {
-    stashPendingNotification({ chatGuid: 'old' });
-    stashPendingNotification({ chatGuid: 'new' });
-    expect(takePendingNotification()).toEqual({ chatGuid: 'new' });
-  });
+it('coalesces one occurrence but a newer physical press supersedes old preparation', () => {
+  const first = press('old');
+  const old = reserveNotificationTap(first)!;
+  expect(reserveNotificationTap(first)).toBe(old);
+  const newer = reserveNotificationTap(press('new'))!;
+  stashPendingNotification(newer);
+  stashPendingNotification(old);
+  expect(takePendingNotification()).toBe(newer);
+  expect(reserveNotificationTap(first)).toBeNull();
+});
 
-  it('ignores an undefined data bag (a content-less press stashes nothing)', () => {
-    stashPendingNotification(undefined);
-    expect(takePendingNotification()).toBeNull();
-  });
+it('claims navigation once, releases a failed lookup, and rejects a consumed copy', () => {
+  const detail = press();
+  const tap = reserveNotificationTap(detail)!;
+  expect(claimNotificationTap(tap)).toBe(true);
+  expect(claimNotificationTap(tap)).toBe(false);
+  settleNotificationTap(tap, false);
+  expect(claimNotificationTap(tap)).toBe(true);
+  settleNotificationTap(tap, true);
+  stashPendingNotification(tap);
+  expect(takePendingNotification()).toBeNull();
+  expect(reserveNotificationTap(detail)).toBeNull();
+});
 
-  it('drops an old-account tap during session reset', () => {
-    stashPendingNotification({ chatGuid: 'same-guid-on-account-a-and-b' });
+it('keeps the retired-token floor while clearing payload and navigation ownership', () => {
+  const detail = press();
+  const tap = reserveNotificationTap(detail)!;
+  stashPendingNotification(tap);
+  resetPendingNotification();
+  expect(takePendingNotification()).toBeNull();
+  expect(claimNotificationTap(tap)).toBe(false);
+  expect(reserveNotificationTap(detail)).toBeNull();
+  expect(reserveNotificationTap(press())).not.toBeNull();
+});
 
-    resetPendingNotification();
+it('does not pin identity or advance the floor using a retired lease', async () => {
+  const lease = captureRealtimeDeliveryLease();
+  await pauseRealtimeDeliveries();
+  resumeRealtimeDeliveries();
+  const detail = press();
+  expect(reserveNotificationTap(detail, lease)).toBeNull();
+  expect(reserveNotificationTap(detail)).not.toBeNull();
+});
 
-    expect(takePendingNotification()).toBeNull();
-  });
+it('rejects malformed, tokenless, foreign-epoch, unsafe and contentless handoffs', () => {
+  const detail = press();
+  expect(reserveNotificationTap(detail)).not.toBeNull();
+  for (const pressOccurrenceId of [
+    undefined,
+    '',
+    'private-message-guid',
+    '11111111-1111-4111-8111-111111111111:0',
+    '11111111-1111-4111-8111-111111111111:01',
+    '11111111-1111-4111-8111-111111111111:9007199254740992',
+    '22222222-2222-4222-8222-222222222222:1',
+  ]) {
+    expect(reserveNotificationTap({ ...detail, pressOccurrenceId })).toBeNull();
+  }
+  expect(reserveNotificationTap({ ...press(), notification: {} })).toBeNull();
+  expect(reserveNotificationTap({ ...press(), pressAction: undefined })).toBeNull();
 });

@@ -38,3 +38,126 @@ index b8c3b7e..1edb503 100644
      if (inputConnection != null && onKeyPress) {
        inputConnection =
            ReactEditTextInputConnectionWrapper(
+diff --git a/node_modules/react-native/ReactCommon/jserrorhandler/CMakeLists.txt b/node_modules/react-native/ReactCommon/jserrorhandler/CMakeLists.txt
+--- a/node_modules/react-native/ReactCommon/jserrorhandler/CMakeLists.txt
++++ b/node_modules/react-native/ReactCommon/jserrorhandler/CMakeLists.txt
+@@ -24,3 +24,9 @@
+         react_featureflags
+ )
+ target_compile_reactnative_options(jserrorhandler PRIVATE)
++
++# Gator: protect errors raised before the JavaScript privacy boundary is ready.
++# debugOptimized uses a Release CMake configuration but must keep dev diagnostics.
++if(ANDROID AND NOT (CMAKE_BUILD_TYPE MATCHES "Debug" OR REACT_NATIVE_DEBUG_OPTIMIZED))
++  target_compile_definitions(jserrorhandler PRIVATE GATOR_RELEASE_ERROR_PRIVACY=1)
++endif()
+diff --git a/node_modules/react-native/ReactCommon/jserrorhandler/JsErrorHandler.cpp b/node_modules/react-native/ReactCommon/jserrorhandler/JsErrorHandler.cpp
+--- a/node_modules/react-native/ReactCommon/jserrorhandler/JsErrorHandler.cpp
++++ b/node_modules/react-native/ReactCommon/jserrorhandler/JsErrorHandler.cpp
+@@ -26,6 +26,7 @@
+   return exceptionId++;
+ }
+ 
++#if !defined(GATOR_RELEASE_ERROR_PRIVACY)
+ bool isLooselyNull(const jsi::Value& value) {
+   return value.isNull() || value.isUndefined();
+ }
+@@ -67,6 +68,7 @@
+       : Error.callAsConstructor(runtime, value).getObject(runtime);
+   return error;
+ }
++#endif
+ 
+ class SetFalseOnDestruct {
+   std::shared_ptr<bool> _value;
+@@ -87,12 +89,17 @@
+     std::string message,
+     jsi::JSError& error,
+     jsi::JSError& originalError) {
++#if defined(GATOR_RELEASE_ERROR_PRIVACY)
++  LOG(ERROR) << "runtime.reporting_failed [UnknownError]";
++#else
+   LOG(ERROR) << "JsErrorHandler::" << message << std::endl
+              << "Js error message: " << error.getMessage() << std::endl
+              << "Original js error message: " << originalError.getMessage()
+              << std::endl;
++#endif
+ }
+ 
++#if !defined(GATOR_RELEASE_ERROR_PRIVACY)
+ jsi::Value getBundleMetadata(jsi::Runtime& runtime, jsi::JSError& error) {
+   auto jsGetBundleMetadataValue =
+       runtime.global().getProperty(runtime, "__getBundleMetadata");
+@@ -120,6 +127,7 @@
+ 
+   return jsi::Value::null();
+ }
++#endif
+ } // namespace
+ 
+ namespace facebook::react {
+@@ -261,6 +269,21 @@
+   *_inErrorHandler = true;
+   SetFalseOnDestruct temp{_inErrorHandler};
+ 
++#if defined(GATOR_RELEASE_ERROR_PRIVACY)
++  // Error properties can execute getters. Do not inspect the opaque error, even
++  // for its type, stack, component flag, cause, or bundle metadata in release.
++  ProcessedError processedError = {
++      .message = isFatal ? "runtime.fatal [UnknownError]"
++                         : "runtime.uncaught [UnknownError]",
++      .originalMessage = std::nullopt,
++      .name = std::nullopt,
++      .componentStack = std::nullopt,
++      .stack = {},
++      .id = nextExceptionId(),
++      .isFatal = isFatal,
++      .extraData = jsi::Object(runtime),
++  };
++#else
+   auto message = error.getMessage();
+   auto errorObj = wrapInErrorIfNecessary(runtime, error.value());
+   auto componentStackValue = errorObj.getProperty(runtime, "componentStack");
+@@ -336,11 +359,16 @@
+       .isFatal = isFatal,
+       .extraData = std::move(extraData),
+   };
++#endif
+ 
+   auto data = bridging::toJs(runtime, processedError);
+ 
++#if defined(GATOR_RELEASE_ERROR_PRIVACY)
++  auto isComponentError = false;
++#else
+   auto isComponentError =
+       isTruthy(runtime, errorObj.getProperty(runtime, "isComponentError"));
++#endif
+   data.setProperty(runtime, "isComponentError", isComponentError);
+ 
+   if (logToConsole) {
+@@ -389,8 +417,13 @@
+     return;
+   }
+ 
++#if defined(GATOR_RELEASE_ERROR_PRIVACY)
++  // Opaque native-fallback warnings remain nonfatal but lose categorization.
++  auto isWarn = false;
++#else
+   auto errorType = errorObj.getProperty(runtime, "type");
+   auto isWarn = isEqualTo(runtime, errorType, "warn");
++#endif
+ 
+   if (isFatal || !isWarn) {
+     if (isFatal) {
+@@ -400,6 +433,11 @@
+       _hasHandledFatalError = true;
+     }
+ 
++#if defined(GATOR_RELEASE_ERROR_PRIVACY)
++    // Listeners share the bridged extraData object; discard their mutations
++    // before the native bridge consumes it. Fatal/default handling is unchanged.
++    processedError.extraData = jsi::Object(runtime);
++#endif
+     _onJsError(runtime, processedError);
+   }
+ }

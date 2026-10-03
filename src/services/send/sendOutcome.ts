@@ -1,7 +1,12 @@
 import type { SendAck } from '@core/api/endpoints/messages';
 import { ApiError } from '@core/api/errors';
 import { logger } from '@core/secure';
-import { ClientErrorCode, LOCATION_DELIVERY_UNCONFIRMED_COPY, sendErrorCode } from '@utils';
+import {
+  ClientErrorCode,
+  IMESSAGE_PLAIN_TEXT_DELIVERY_UNCONFIRMED_COPY,
+  LOCATION_DELIVERY_UNCONFIRMED_COPY,
+  sendErrorCode,
+} from '@utils';
 import {
   markOutgoingSentNoGuidWithinTransaction,
   reconcileOutgoingAttemptAckWithinTransaction,
@@ -25,7 +30,9 @@ export interface SendOutcomeOptions {
   readonly terminalUncertain?: boolean;
   /** Identifies the one-shot surface so its terminal status and recovery copy stay truthful. */
   readonly terminalUncertainKind?:
-    'attachment' | 'reply' | 'location' | 'effect' | 'mention' | 'formatted';
+    'attachment' | 'reply' | 'location' | 'effect' | 'mention' | 'formatted' | 'plain';
+  /** Exact helper refusal proved that no dispatch began, authorizing one future narrow retry. */
+  readonly imessagePlainTextRetrySafe?: boolean;
   /** Exact locally selected conversation; survives temp-row/queue cleanup during a late ack. */
   readonly expectedChatGuid?: string;
 }
@@ -41,6 +48,7 @@ export const UNCERTAIN_IMESSAGE_MENTION_COPY =
   'This mention message may have been delivered. Check Messages before sending a new copy.';
 export const UNCERTAIN_IMESSAGE_FORMATTED_COPY =
   'This formatted message may have been delivered. Check Messages before sending a new copy.';
+export const UNCERTAIN_IMESSAGE_PLAIN_TEXT_COPY = IMESSAGE_PLAIN_TEXT_DELIVERY_UNCONFIRMED_COPY;
 
 /** Fixed server outcomes that make another location attempt unsafe or invalid. */
 export function isTerminalLocationSendError(error: unknown): boolean {
@@ -59,6 +67,8 @@ const REJECTED_IMESSAGE_REPLY_COPY =
   'The server rejected this reply before dispatch. This attempt was not sent.';
 const REJECTED_IMESSAGE_LOCATION_COPY =
   'The server rejected this location before dispatch. This attempt was not sent.';
+const REJECTED_IMESSAGE_PLAIN_TEXT_COPY =
+  'The server rejected this message before dispatch. This attempt was not sent.';
 
 const PRE_DISPATCH_ATTACHMENT_ERROR_TYPES: Readonly<Record<number, ReadonlySet<string>>> = {
   400: new Set([
@@ -79,11 +89,12 @@ const PRE_DISPATCH_ATTACHMENT_ERROR_TYPES: Readonly<Record<number, ReadonlySet<s
     'invalid_imessage_chat_guid',
     'imessage_contact_invalid_target',
     'imessage_location_invalid_target',
+    'imessage_plain_text_invalid_target',
     'malformed_multipart',
     'multipart_field_too_large',
   ]),
   404: new Set(['imessage_chat_not_found']),
-  409: new Set(['idempotency_key_reused']),
+  409: new Set(['idempotency_key_reused', 'imessage_plain_text_rejected']),
   413: new Set([
     'imessage_attachment_too_large',
     'imessage_contact_too_large',
@@ -288,7 +299,9 @@ export async function handleSendFailure(
                 ? REJECTED_IMESSAGE_REPLY_COPY
                 : terminalKind === 'location'
                   ? REJECTED_IMESSAGE_LOCATION_COPY
-                  : REJECTED_IMESSAGE_ATTACHMENT_COPY
+                  : terminalKind === 'plain'
+                    ? REJECTED_IMESSAGE_PLAIN_TEXT_COPY
+                    : REJECTED_IMESSAGE_ATTACHMENT_COPY
               : terminalKind === 'reply'
                 ? UNCERTAIN_IMESSAGE_REPLY_COPY
                 : terminalKind === 'location'
@@ -299,7 +312,9 @@ export async function handleSendFailure(
                       ? UNCERTAIN_IMESSAGE_MENTION_COPY
                       : terminalKind === 'formatted'
                         ? UNCERTAIN_IMESSAGE_FORMATTED_COPY
-                        : UNCERTAIN_IMESSAGE_ATTACHMENT_COPY,
+                        : terminalKind === 'plain'
+                          ? UNCERTAIN_IMESSAGE_PLAIN_TEXT_COPY
+                          : UNCERTAIN_IMESSAGE_ATTACHMENT_COPY,
             terminalKind === 'location',
           )
         : reconcileOutgoingErrorWithinTransaction(
@@ -309,6 +324,7 @@ export async function handleSendFailure(
             failedAt,
             serverDetail,
             options?.attemptOwnerToken,
+            options?.imessagePlainTextRetrySafe === true,
           ),
     commitGuard,
   );

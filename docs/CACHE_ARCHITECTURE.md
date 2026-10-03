@@ -136,6 +136,13 @@ content_rowid='id')`, created in migration 0001, kept current by AFTER INSERT/DE
   a verified `*.part` file,
   concurrency-capped at a configurable limit (default `DEFAULT_MAX_CONCURRENT_DOWNLOADS = 2`,
   adjustable up to `MAX_CONCURRENT_DOWNLOADS_LIMIT = 6`), with per-guid dedup of concurrent calls.
+  Short identities retain this exact spelling. A GUID whose percent-encoded form exceeds 180
+  characters uses `id-sha256-{64 lowercase hex}` for its identity directory. Both JavaScript and
+  the native hasher require nonempty valid Unicode and at most 4,096 UTF-8 bytes; hashing preserves
+  the exact original bytes without normalization. Filenames retain the existing `media-` grammar.
+  An absent transfer name uses the GUID plus MIME extension when it fits, otherwise
+  `attachment` plus that extension. Reservation and download calculate the same path synchronously,
+  before native filesystem work. Existing stored paths and legacy files are not renamed.
 - Unlocked background FCM may make one bounded best-effort app-cache attempt after the message DB
   commit. It deliberately does not invoke `expo-media-library`, whose Photos write has no abort
   signal. For an eligible incoming non-sticker image with a Gallery/Gator Album preference, it
@@ -171,7 +178,9 @@ content_rowid='id')`, created in migration 0001, kept current by AFTER INSERT/DE
   cache mutation, adopts old pre-ledger files in 100-row transactions, repairs missing entries,
   retires zero-byte/orphan/crash-owned files, and proactively conforms the quota before persistent
   downloads open. The scanner supports both the legacy `attachments/{safe-guid}/{safe-name}`
-  layout and the canonical generation layout, with hard limits of 8,192 files and 32,768 nodes.
+  layout and the canonical generation layout, including hashed identity directories, with hard
+  limits of 8,192 files and 32,768 nodes. A hash identifies a directory; it cannot recover the
+  original GUID and is never accepted in the current transfer-filename position.
   Malformed/symlinked/partial inventories fail closed. The selected product boundary begins at
   Android 16 / API 36, and Android 17 / API 37 is the current latest supported release. The native
   API-below-26 failure branch remains defense in depth, not an advertised degraded support mode.

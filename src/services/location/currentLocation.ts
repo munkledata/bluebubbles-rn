@@ -59,10 +59,78 @@ export interface AcquireCurrentLocationOptions {
   readonly signal?: AbortSignal;
 }
 
+export type CurrentLocationPermissionOutcome =
+  | { readonly status: 'granted'; readonly prompted: boolean }
+  | { readonly status: 'denied'; readonly canAskAgain: boolean }
+  | { readonly status: 'services-off' | 'cancelled' | 'error' };
+
+/** Permission setup never starts a watch. A prompted grant needs a new foreground send intent. */
+export function prepareCurrentLocationPermission(
+  location: ExpoLocationAdapter,
+  options: {
+    readonly signal: AbortSignal;
+    readonly isCurrent: () => boolean;
+    /** Check foreground ownership and mark the permission-only phase immediately before native UI. */
+    readonly beforePrompt: () => boolean;
+  },
+): Promise<CurrentLocationPermissionOutcome> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result: CurrentLocationPermissionOutcome): void => {
+      if (settled) return;
+      settled = true;
+      options.signal.removeEventListener('abort', onAbort);
+      resolve(result);
+    };
+    const onAbort = (): void => finish({ status: 'cancelled' });
+    const current = (): boolean => {
+      if (settled) return false;
+      if (options.signal.aborted || !options.isCurrent()) {
+        onAbort();
+        return false;
+      }
+      return true;
+    };
+    options.signal.addEventListener('abort', onAbort, { once: true });
+    const run = async (): Promise<void> => {
+      try {
+        if (!current()) return;
+        const servicesEnabled = await location.hasServicesEnabledAsync();
+        if (!current()) return;
+        if (!servicesEnabled) {
+          finish({ status: 'services-off' });
+          return;
+        }
+        let permission = await location.getForegroundPermissionsAsync();
+        if (!current()) return;
+        let prompted = false;
+        if (!permission.granted && permission.canAskAgain) {
+          if (!options.beforePrompt() || !current()) {
+            onAbort();
+            return;
+          }
+          prompted = true;
+          permission = await location.requestForegroundPermissionsAsync();
+          if (!current()) return;
+        }
+        finish(
+          permission.granted
+            ? { status: 'granted', prompted }
+            : { status: 'denied', canAskAgain: permission.canAskAgain },
+        );
+      } catch {
+        if (current()) finish({ status: 'error' });
+      }
+    };
+    void run();
+  });
+}
+
 /**
  * Acquire exactly one current position while the app is in the foreground.
  *
- * Permission is checked before it is requested, the watch uses balanced accuracy, and the live
+ * Permission must already be granted: this send phase never opens Android's permission Activity.
+ * The watch uses balanced accuracy, and the live
  * subscription is bounded to 15 seconds. The abort listener is installed before the first native
  * await so a retired account cannot publish a late fix.
  */
@@ -112,12 +180,8 @@ export function acquireCurrentLocation(
           return;
         }
 
-        let permission = await location.getForegroundPermissionsAsync();
+        const permission = await location.getForegroundPermissionsAsync();
         if (settled) return;
-        if (!permission.granted && permission.canAskAgain) {
-          permission = await location.requestForegroundPermissionsAsync();
-          if (settled) return;
-        }
         if (!permission.granted) {
           finish({ status: 'denied', canAskAgain: permission.canAskAgain });
           return;

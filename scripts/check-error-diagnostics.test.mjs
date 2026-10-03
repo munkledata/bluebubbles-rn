@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import test from 'node:test';
 import ts from 'typescript';
+import withStartupPrivacy from '../plugins/withStartupPrivacy.js';
+import withNoWebSocketRedirects from '../plugins/withNoWebSocketRedirects.js';
 
 import {
   ALLOWED_ERROR_SITE_PROPERTIES_BY_MESSAGE,
@@ -12,6 +15,7 @@ import {
   EXPECTED_PROJECTOR_SITE_PROPERTIES_BY_MESSAGE,
   findDiagnosticSiteDefinitions,
   findExactProjectorMessages,
+  findNativeErrorPrivacyFindings,
   findProjectorSitePairs,
   findUnsafeNativeLogCalls,
   findUnstructuredErrorCalls,
@@ -29,6 +33,29 @@ const runtimePrivacyNativeFile = join(
   'modules/gator-screen-security/android/src/main/java/expo/modules/gatorscreensecurity/GatorRuntimePrivacyPackage.kt',
 );
 const runtimePrivacyNativeSource = readFileSync(runtimePrivacyNativeFile, 'utf8');
+const nativeErrorPrivacyFiles = [
+  'plugins/withStartupPrivacy.js',
+  'app.config.ts',
+  'package.json',
+  'node_modules/react-native/package.json',
+  'patches/react-native+0.86.3.patch',
+  'node_modules/react-native/ReactCommon/jserrorhandler/CMakeLists.txt',
+  'node_modules/react-native/ReactCommon/jserrorhandler/JsErrorHandler.cpp',
+  'node_modules/@op-engineering/op-sqlite/package.json',
+  'node_modules/@op-engineering/op-sqlite/android/src/main/java/com/op/sqlite/OPSQLiteModule.kt',
+  'patches/@op-engineering+op-sqlite+17.1.2.patch',
+];
+const { applyStartupPrivacy } = withStartupPrivacy;
+const { applyWebSocketRedirectPolicy } = withNoWebSocketRedirects;
+const startupTemplate = execFileSync(
+  'tar',
+  [
+    '-xOzf',
+    join(root, 'node_modules/expo/template.tgz'),
+    'package/android/app/src/main/java/com/helloworld/MainApplication.kt',
+  ],
+  { encoding: 'utf8' },
+);
 
 function writeFixtureFile(fixtureRoot, relativePath, source) {
   const path = join(fixtureRoot, relativePath);
@@ -37,6 +64,9 @@ function writeFixtureFile(fixtureRoot, relativePath, source) {
 }
 
 function initializeGuardFixture(fixtureRoot) {
+  for (const path of nativeErrorPrivacyFiles) {
+    writeFixtureFile(fixtureRoot, path, readFileSync(join(root, path), 'utf8'));
+  }
   const projectorDefinitions = [...EXPECTED_PROJECTOR_SITE_PROPERTIES_BY_MESSAGE]
     .map(
       ([message, sites]) =>
@@ -1027,6 +1057,235 @@ test('pins the complete owned native source against android shadowing and decoys
   }
 });
 
+test('pins release C++ error containment, committed patch, and source-build wiring', (context) => {
+  assert.deepEqual(findNativeErrorPrivacyFindings({ root }), []);
+  const fixtureRoot = mkdtempSync(join(tmpdir(), 'gator-native-error-privacy-'));
+  context.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
+  initializeGuardFixture(fixtureRoot);
+  assert.deepEqual(findNativeErrorPrivacyFindings({ root: fixtureRoot }), []);
+  const cppPath = 'node_modules/react-native/ReactCommon/jserrorhandler/JsErrorHandler.cpp';
+  const cmakePath = 'node_modules/react-native/ReactCommon/jserrorhandler/CMakeLists.txt';
+  const patchPath = 'patches/react-native+0.86.3.patch';
+  const cases = [
+    [cppPath, (source) => source.replace('"runtime.fatal [UnknownError]"', 'error.getMessage()')],
+    [cppPath, (source) => source.replace('processedError.extraData = jsi::Object(runtime);', '')],
+    [
+      cppPath,
+      (source) => source.replace('"runtime.reporting_failed [UnknownError]"', 'error.getMessage()'),
+    ],
+    [cppPath, (source) => source.replace('if (_hasHandledFatalError)', 'if (false)')],
+    [cmakePath, (source) => source.replace(' OR REACT_NATIVE_DEBUG_OPTIMIZED', '')],
+    [
+      cmakePath,
+      (source) => source.replace('GATOR_RELEASE_ERROR_PRIVACY=1', 'GATOR_RELEASE_ERROR_PRIVACY=0'),
+    ],
+    [
+      patchPath,
+      (source) =>
+        source.slice(0, source.indexOf('diff --git a/node_modules/react-native/ReactCommon/')),
+    ],
+    [
+      patchPath,
+      (source) =>
+        source +
+        source.slice(source.indexOf('diff --git a/node_modules/react-native/ReactCommon/')),
+    ],
+    [
+      'app.config.ts',
+      (source) =>
+        source.replace('buildReactNativeFromSource: true', 'buildReactNativeFromSource: false'),
+    ],
+    [
+      'app.config.ts',
+      (source) =>
+        source.replace('buildReactNativeFromSource: true,', '// buildReactNativeFromSource: true,'),
+    ],
+    [
+      'package.json',
+      (source) => source.replace('"postinstall": "patch-package"', '"postinstall": "echo skipped"'),
+    ],
+    ['app.config.ts', (source) => source + '\nconfig.plugins = [];\n'],
+    ['app.config.ts', (source) => source.replace("'./plugins/withStartupPrivacy',", '')],
+    [
+      'app.config.ts',
+      (source) =>
+        source.replace("'./plugins/withStartupPrivacy',", "// './plugins/withStartupPrivacy',"),
+    ],
+    [
+      'app.config.ts',
+      (source) =>
+        source.replace(
+          "'./plugins/withStartupPrivacy',",
+          "'./plugins/withStartupPrivacy', './plugins/withStartupPrivacy',",
+        ),
+    ],
+    ['plugins/withStartupPrivacy.js', (source) => source.replace('BuildConfig.DEBUG', 'true')],
+    [
+      'app.config.ts',
+      (source) =>
+        source.replace('export default config;', 'config.plugins = [];\nexport default config;'),
+    ],
+    [
+      'node_modules/react-native/package.json',
+      (source) => source.replace('"version": "0.86.3"', '"version": "0.86.4"'),
+    ],
+  ];
+  for (const [path, mutate] of cases) {
+    const original = readFileSync(join(root, path), 'utf8');
+    const mutated = mutate(original);
+    assert.notEqual(mutated, original, `mutation must change ${path}`);
+    writeFixtureFile(fixtureRoot, path, mutated);
+    assert.ok(findNativeErrorPrivacyFindings({ root: fixtureRoot }).length > 0, path);
+    writeFixtureFile(fixtureRoot, path, original);
+  }
+  const settings =
+    'includeBuild(expoAutolinking.reactNative) {\n' +
+    '  dependencySubstitution {\n' +
+    '    substitute(module("com.facebook.react:react-android")).using(project(":packages:react-native:ReactAndroid"))\n' +
+    '  }\n}\n';
+  for (const decoy of [
+    `/* ${settings} */`,
+    `if (false) {\n${settings}}`,
+    `def unused = '''${settings}'''`,
+  ]) {
+    writeFixtureFile(fixtureRoot, 'android/settings.gradle', decoy);
+    assert.ok(
+      findNativeErrorPrivacyFindings({ root: fixtureRoot }).some((finding) =>
+        finding.includes('source substitution'),
+      ),
+    );
+  }
+});
+
+test('pins op-sqlite release exception containment to the app flag, installed source, and patch', (context) => {
+  const fixtureRoot = mkdtempSync(join(tmpdir(), 'gator-op-sqlite-error-privacy-'));
+  context.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
+  initializeGuardFixture(fixtureRoot);
+  assert.deepEqual(findNativeErrorPrivacyFindings({ root: fixtureRoot }), []);
+  const sourcePath =
+    'node_modules/@op-engineering/op-sqlite/android/src/main/java/com/op/sqlite/OPSQLiteModule.kt';
+  const patchPath = 'patches/@op-engineering+op-sqlite+17.1.2.patch';
+  const appFlag =
+    '(reactApplicationContext.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0';
+  const cases = [
+    [sourcePath, (source) => source.replaceAll(appFlag, 'true')],
+    [sourcePath, (source) => source.replaceAll(appFlag, 'BuildConfig.DEBUG')],
+    [sourcePath, (source) => source.replaceAll(appFlag, appFlag.replace('!=', '=='))],
+    [
+      sourcePath,
+      (source) =>
+        source.replace(
+          'Log.e(NAME, "database.install_failed [UnknownError]")',
+          'Log.e(NAME, "database.install_failed [UnknownError]", exception)',
+        ),
+    ],
+    [
+      sourcePath,
+      (source) =>
+        source.replace('"database.asset_copy_failed [UnknownError]"', '"Exception: $exception"'),
+    ],
+    [sourcePath, (source) => source.replace('Log.e(NAME, "Install exception: $exception")', '')],
+    [
+      sourcePath,
+      (source) =>
+        source.replace('RNLog.e(this.reactApplicationContext, "Exception: $exception")', ''),
+    ],
+    [sourcePath, (source) => source.replace('promise.resolve(false)', 'promise.resolve(true)')],
+    [patchPath, () => ''],
+    [patchPath, (source) => source + source],
+    [patchPath, (source) => source.replaceAll('FLAG_DEBUGGABLE', 'FLAG_SYSTEM')],
+    [
+      'package.json',
+      (source) =>
+        source.replace(
+          '"@op-engineering/op-sqlite": "17.1.2"',
+          '"@op-engineering/op-sqlite": "^17.1.2"',
+        ),
+    ],
+    [
+      'node_modules/@op-engineering/op-sqlite/package.json',
+      (source) => source.replace('"version": "17.1.2"', '"version": "17.1.3"'),
+    ],
+  ];
+  for (const [path, mutate] of cases) {
+    const original = readFileSync(join(root, path), 'utf8');
+    const mutated = mutate(original);
+    assert.notEqual(mutated, original, `mutation must change ${path}`);
+    writeFixtureFile(fixtureRoot, path, mutated);
+    assert.ok(findNativeErrorPrivacyFindings({ root: fixtureRoot }).length > 0, path);
+    writeFixtureFile(fixtureRoot, path, original);
+  }
+  for (const path of [sourcePath, patchPath]) {
+    rmSync(join(fixtureRoot, path));
+    assert.ok(
+      findNativeErrorPrivacyFindings({ root: fixtureRoot }).some((finding) =>
+        finding.includes(`requires regular source: ${path}`),
+      ),
+      path,
+    );
+    writeFixtureFile(fixtureRoot, path, readFileSync(join(root, path), 'utf8'));
+  }
+});
+
+test('startup privacy wraps the actual Expo template and composes with WebSocket policy', async () => {
+  const wrapped = applyStartupPrivacy(startupTemplate);
+  assert.match(
+    wrapped,
+    /GatorStartupPrivacy\.run\(BuildConfig\.DEBUG\) \{\n      loadReactNative\(this\)\n    \}/,
+  );
+  assert.equal(applyStartupPrivacy(wrapped), wrapped);
+  assert.equal(applyStartupPrivacy(startupTemplate.replace(/\n/g, '\r\n')), wrapped);
+  const combined = applyWebSocketRedirectPolicy(wrapped);
+  assert.equal(applyStartupPrivacy(applyWebSocketRedirectPolicy(startupTemplate)), combined);
+  assert.equal(applyStartupPrivacy(applyWebSocketRedirectPolicy(combined)), combined);
+  assert.ok(
+    combined.indexOf('builder.followSslRedirects(false)') <
+      combined.indexOf('GatorStartupPrivacy.run'),
+  );
+  assert.ok(
+    combined.indexOf('loadReactNative(this)') <
+      combined.indexOf('ApplicationLifecycleDispatcher.onApplicationCreate(this)'),
+  );
+  // Exercise Expo's registered mod callbacks, not just the exported transform helper.
+  for (const order of [
+    [withNoWebSocketRedirects, withStartupPrivacy],
+    [withStartupPrivacy, withNoWebSocketRedirects],
+  ]) {
+    const config = order.reduce((value, plugin) => plugin(value), {
+      name: 'Fixture',
+      slug: 'fixture',
+    });
+    const result = await config.mods.android.mainApplication({
+      ...config,
+      modRequest: {},
+      modResults: { language: 'kt', contents: startupTemplate },
+    });
+    assert.equal(result.modResults.contents, combined);
+  }
+});
+
+test('startup privacy fails closed on missing, conditional, duplicate, or decoy wiring', () => {
+  const load = '    loadReactNative(this)';
+  const protectedSource = applyStartupPrivacy(startupTemplate);
+  const mutations = [
+    startupTemplate.replace(load, ''),
+    startupTemplate.replace(load, `${load}\n${load}`),
+    startupTemplate.replace(load, `    if (false) {\n${load}\n    }`),
+    startupTemplate.replace(load, `//${load}`),
+    `/*\n${startupTemplate}\n*/`,
+    `val decoy = """${startupTemplate}"""`,
+    protectedSource.replace('BuildConfig.DEBUG) {', 'true) {'),
+    protectedSource.replace('GatorStartupPrivacy.run', 'GatorStartupPrivacy.other'),
+    protectedSource.replace(
+      '      loadReactNative(this)',
+      '      startupExecutor { loadReactNative(this) }',
+    ),
+  ];
+  for (const source of mutations)
+    assert.throws(() => applyStartupPrivacy(source), /withStartupPrivacy/);
+  assert.throws(() => applyStartupPrivacy(startupTemplate, 'java'), /only Kotlin/);
+});
+
 test('pins release native runtime logging and host-exception containment', () => {
   assert.deepEqual(
     findUnsafeNativeLogCalls(runtimePrivacyNativeSource, runtimePrivacyNativeFile),
@@ -1048,6 +1307,14 @@ test('pins release native runtime logging and host-exception containment', () =>
     ),
     runtimePrivacyNativeSource.replace('throw ReleaseReactInstanceException()', 'throw exception'),
     runtimePrivacyNativeSource.replace('false, false', 'true, true'),
+    runtimePrivacyNativeSource.replace('if (debuggable)', 'if (true)'),
+    runtimePrivacyNativeSource.replace('catch (_: Exception)', 'catch (_: Throwable)'),
+    runtimePrivacyNativeSource.replace('catch (_: LinkageError)', 'catch (_: VirtualMachineError)'),
+    runtimePrivacyNativeSource.replace('throw ReleaseReactStartupException()', 'return'),
+    runtimePrivacyNativeSource.replace(
+      'FLog.setMinimumLoggingLevel(Int.MAX_VALUE)\n      startup()',
+      'startup()\n      FLog.setMinimumLoggingLevel(Int.MAX_VALUE)',
+    ),
   ];
   for (const mutated of mutations) {
     assert.notEqual(

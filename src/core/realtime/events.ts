@@ -1,4 +1,5 @@
 import { z } from 'zod/v4';
+import type { MessageStateChanged } from '@core/models/messageState';
 import { projectServerErrorDetail } from '@core/api/serverErrorDetail';
 import { Message, epochMillis } from '@core/models';
 import type { ServerEventName } from '@core/config/constants';
@@ -159,6 +160,7 @@ export type NormalizedEvent =
   // delete — the message stays in the Mac's chat.db and the sync path keeps returning it), so the
   // deletion survives the next sync. See DbEventSink → markMessageDeleted.
   | { type: 'message-deleted'; payload: z.infer<typeof MessageDeletedPayload> }
+  | { type: 'message-state-changed'; payload: MessageStateChanged }
   | { type: 'typing-indicator'; payload: z.infer<typeof TypingIndicatorPayload> }
   | { type: 'chat-read-status-changed'; payload: z.infer<typeof ReadStatusPayload> }
   | { type: 'group-name-change'; payload: z.infer<typeof GroupChangePayload> }

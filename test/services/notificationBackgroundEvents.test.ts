@@ -3,7 +3,10 @@ import {
   handleNotificationAction,
   handleNotificationPress,
 } from '@/services/notifications/actions';
-import { stashPendingNotification } from '@/services/notifications/pendingNav';
+import {
+  reserveNotificationTap,
+  stashPendingNotification,
+} from '@/services/notifications/pendingNav';
 import { reconcileMessageNotificationGroupAfterRemoval } from '@/services/notifications/notifeeService';
 
 const mockOnBackgroundEvent = jest.fn();
@@ -19,6 +22,7 @@ jest.mock('@/services/notifications/actions', () => ({
   handleNotificationPress: jest.fn(async () => undefined),
 }));
 jest.mock('@/services/notifications/pendingNav', () => ({
+  reserveNotificationTap: jest.fn(),
   stashPendingNotification: jest.fn(),
 }));
 jest.mock('@/services/notifications/notifeeService', () => ({
@@ -49,13 +53,26 @@ describe('notification background event registration', () => {
       pressAction: { id: 'open' },
       notification: { data: { gatorOwner: 'gator', gatorSchema: '2' } },
     } as unknown as EventDetail;
+    const tap = {
+      occurrenceId: 'native-test-receipt',
+      data: { gatorOwner: 'gator', gatorSchema: '2' },
+      accountLease: { generation: 0, isCurrent: () => true },
+    };
+    jest.mocked(reserveNotificationTap).mockReturnValueOnce(tap);
 
     await backgroundHandler({ type: 1, detail });
 
-    expect(handleNotificationPress).toHaveBeenCalledWith(detail, stashPendingNotification);
+    expect(reserveNotificationTap).toHaveBeenCalledWith(detail, expect.any(Object));
+    expect(handleNotificationPress).toHaveBeenCalledWith(detail, expect.any(Function));
+    expect(jest.mocked(reserveNotificationTap).mock.invocationCallOrder[0]).toBeLessThan(
+      jest.mocked(handleNotificationPress).mock.invocationCallOrder[0]!,
+    );
     expect(reconcileMessageNotificationGroupAfterRemoval).toHaveBeenCalledWith(detail.notification);
     // The background bridge no longer writes the session-scoped slot before route validation.
     expect(stashPendingNotification).not.toHaveBeenCalled();
+    const validated = jest.mocked(handleNotificationPress).mock.calls[0]?.[1];
+    validated?.({ gatorOwner: 'gator', gatorSchema: '2' });
+    expect(stashPendingNotification).toHaveBeenCalledWith(tap);
     expect(mockFlushPersistentLogs).toHaveBeenCalledTimes(1);
   });
 

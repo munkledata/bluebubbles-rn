@@ -12,6 +12,8 @@ import {
 } from '@core/rcs';
 import {
   applyServerSendErrorWithinTransaction,
+  applyMessageStateWithinTransaction,
+  getMessageStateAuthorityWithinTransaction,
   getChatIdByGuid,
   getChatGuidByMessageGuid,
   getNewestReceivedGuid,
@@ -121,6 +123,7 @@ function hasAuthoritativeDbPhase(event: NormalizedEvent): boolean {
     case 'new-message':
     case 'updated-message':
     case 'message-deleted':
+    case 'message-state-changed':
     case 'chat-read-status-changed':
     case 'message-send-error':
     case 'group-name-change':
@@ -171,7 +174,13 @@ export class DbEventSink implements EventSink {
       context?: EventDeliveryContext,
     ) => void | Promise<void>,
     /** Production admission snapshot; omitted only by legacy unit tests with non-RCS fixtures. */
-    private readonly getRcsProviderInfo?: () => RcsProviderServerInfo | null | undefined,
+    private readonly getRcsProviderInfo?: () =>
+      | (RcsProviderServerInfo & {
+          imessage_provider_epoch?: string | null;
+          supports_message_state_sync?: boolean | null;
+        })
+      | null
+      | undefined,
   ) {}
 
   private async requestRecovery(
@@ -240,6 +249,13 @@ export class DbEventSink implements EventSink {
     const providerAdmissionIsCurrent = (): boolean => {
       if (!this.getRcsProviderInfo) return true;
       if (providerAdmissionRevoked) return false;
+      if (event.type === 'message-state-changed') {
+        const liveEpoch = this.getRcsProviderInfo()?.imessage_provider_epoch;
+        if (liveEpoch != null && liveEpoch !== event.payload.providerEpoch) {
+          providerAdmissionRevoked = true;
+          return false;
+        }
+      }
       const liveAdmission = classifyRcsEventAdmission(this.getRcsProviderInfo(), event);
       const current =
         entryProviderAdmission === 'current'
@@ -266,7 +282,16 @@ export class DbEventSink implements EventSink {
           // Lean updated-message events may omit both chat fields. Resolve the already-stored owner
           // with a read, then require that owner to be current before taking a write lock.
           targetChatGuid ??= await getChatGuidByMessageGuid(this.db, message.guid);
-          if (!targetChatGuid || !isCurrentRcsChatGuid(providerInfo, targetChatGuid)) return;
+          if (!targetChatGuid) {
+            // A lean current-epoch receipt may precede its chat/message. Keep its durable payload
+            // until recovery supplies that owner; absence is not proof of a conflicting owner.
+            if (context?.durableEvent && context.isCurrent() && providerAdmissionIsCurrent()) {
+              await this.requestRecovery(null, context, { chatGuid: null, guid: message.guid });
+              throw new RealtimeMessageChatUnavailableError(message.guid, null);
+            }
+            return;
+          }
+          if (!isCurrentRcsChatGuid(providerInfo, targetChatGuid)) return;
         }
         const messageProviderAdmissionIsCurrent = (): boolean =>
           providerAdmissionIsCurrent() &&
@@ -432,6 +457,30 @@ export class DbEventSink implements EventSink {
         }
         break;
       }
+      case 'message-state-changed': {
+        const applied = await withCurrentDeliveryTransaction(
+          this.db,
+          context,
+          async (transactionContext) => {
+            const result = await applyMessageStateWithinTransaction(
+              transactionContext,
+              event.payload,
+            );
+            await markDurableDbPhase(transactionContext, context);
+            return result;
+          },
+          providerAdmissionIsCurrent,
+        );
+        if (applied && event.payload.kind === 'deleted' && (!context || context.isCurrent())) {
+          await this.onAttachmentCacheRetirement?.(context);
+        }
+        // REST remains the authority for gaps and unknown restored payloads. A realtime receipt
+        // deliberately never moves its checkpoint, even when a higher sequence arrived first.
+        if (event.payload.kind === 'restored' && context?.isCurrent()) {
+          await this.requestRecovery(null, context, { eventType: event.type });
+        }
+        break;
+      }
       case 'message-deleted': {
         // The server saw a message enter macOS "Recently Deleted". TOMBSTONE the local row (never a
         // hard delete): the message REMAINS in the Mac's chat.db (~30 days) and the server's
@@ -462,6 +511,14 @@ export class DbEventSink implements EventSink {
             this.db,
             context,
             async (transactionContext) => {
+              if (
+                !looksLikeRcsMessageGuid(guid) &&
+                (this.getRcsProviderInfo?.()?.supports_message_state_sync === true ||
+                  (await getMessageStateAuthorityWithinTransaction(transactionContext)))
+              ) {
+                await markDurableDbPhase(transactionContext, context);
+                return false;
+              }
               const result = await markMessageDeletedWithinTransaction(
                 transactionContext,
                 guid,

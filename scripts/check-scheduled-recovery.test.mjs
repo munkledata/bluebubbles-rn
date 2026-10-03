@@ -426,7 +426,7 @@ test('requires pinned RCS or reply capability before durable admission', () => {
     scheduledHandoffSourceErrors(
       replaceOnce(
         validSendServiceSource,
-        '{ requireServerInfo: rcsChat || target != null }',
+        '{ requireServerInfo: rcsChat || target != null || provenPlainTextChat }',
         '{ requireServerInfo: false }',
       ),
     ),
@@ -584,8 +584,8 @@ test('keeps the exact canonical network payload and guarded settlement', () => {
     scheduledHandoffSourceErrors(
       replaceOnce(
         validSendServiceSource,
-        '      message: args.text,',
-        '      message: args.chatGuid,',
+        '          clientAttemptGeneration: attemptOwnerToken?.generation,\n          message: args.text,',
+        '          clientAttemptGeneration: attemptOwnerToken?.generation,\n          message: args.chatGuid,',
       ),
     ),
     /canonical chat, temp id, attempt generation, message, exact resolved reply target/,
@@ -612,11 +612,7 @@ test('keeps the exact canonical network payload and guarded settlement', () => {
   );
   assertErrors(
     scheduledHandoffSourceErrors(
-      replaceOnce(
-        validSendServiceSource,
-        '    if (e instanceof DbCommitGuardRejectedError) throw e;\n',
-        '',
-      ),
+      replaceOnce(validSendServiceSource, '        networkStarted ||\n', ''),
     ),
     /ownership rejection rethrown first/,
   );
@@ -650,12 +646,108 @@ test('keeps the exact canonical network payload and guarded settlement', () => {
     scheduledHandoffSourceErrors(
       replaceOnce(
         validSendServiceSource,
-        "        ...(target ? { terminalUncertainKind: 'reply' as const } : {}),",
-        "        ...(false ? { terminalUncertainKind: 'reply' as const } : {}),",
+        "              ? { terminalUncertainKind: 'reply' as const }",
+        '              ? {}',
       ),
     ),
     /one-shot uncertain outcomes/,
   );
+});
+
+test('keeps the plain-text route proof, exclusive dispatch, and certified retry boundary', () => {
+  const mutations = [
+    [
+      '!rcsChat && target == null ? await getChatHeader(db, args.chatGuid) : null',
+      'await getChatHeader(db, args.chatGuid)',
+      /plain-text admission/,
+    ],
+    [
+      'const provenPlainTextChat = isProvenOneToOneIMessageChat(candidatePlainTextHeader);',
+      'const provenPlainTextChat = true;',
+      /plain-text admission/,
+    ],
+    [
+      'provenPlainTextChat && capability.serverInfo?.supports_imessage_plain_text === true',
+      'provenPlainTextChat || capability.serverInfo?.supports_imessage_plain_text === true',
+      /plain-text route must require/,
+    ],
+    [
+      '    requireIMessagePlainTextRequest({ chatGuid: args.chatGuid, message: args.text, tempGuid });',
+      '',
+      /validate before ownership/,
+    ],
+    [
+      '    imessagePlainTextV1: useIMessagePlainText,',
+      '    imessagePlainTextV1: false,',
+      /outgoing text must contain/,
+    ],
+    [
+      'const server = useIMessagePlainText',
+      'const server = false',
+      /exclusively opposite the exact plain-text call/,
+    ],
+    [
+      'await sendIMessagePlainText(transport.http, {',
+      'await sendIMessagePlainText(http, {',
+      /exclusively opposite the exact plain-text call/,
+    ],
+    [
+      '          chatGuid: args.chatGuid,\n          tempGuid,\n          message: args.text,',
+      '          chatGuid: args.chatGuid,\n          tempGuid,\n          message: args.text,\n          method,',
+      /exclusively opposite the exact plain-text call/,
+    ],
+    [
+      '    networkStarted = true;\n',
+      '    networkStarted = false;\n',
+      /assigned true only immediately before dispatch/,
+    ],
+    [
+      '    networkStarted = true;\n',
+      '    networkStarted = true;\n    const escaped = networkStarted;\n',
+      /networkStarted may not be.*escaped/,
+    ],
+    [
+      'useIMessagePlainText && (!networkStarted || isRetryableIMessagePlainTextUnavailable(e))',
+      'useIMessagePlainText && (!networkStarted || e instanceof ApiError)',
+      /canonical unavailable proof/,
+    ],
+    [
+      '(effectiveCommitGuard && !effectiveCommitGuard())\n      )',
+      'false\n      )',
+      /ownership rejection rethrown first/,
+    ],
+    [
+      "            ? { terminalUncertainKind: 'plain' as const }",
+      '            ? { imessagePlainTextRetrySafe: true }',
+      /canonical unavailable proof/,
+    ],
+    [
+      '  isRetryableIMessagePlainTextUnavailable,',
+      '  sendText as isRetryableIMessagePlainTextUnavailable,',
+      /isRetryableIMessagePlainTextUnavailable must retain its unaliased canonical import/,
+    ],
+    [
+      '    const retrySafePlainText =',
+      '    function isRetryableIMessagePlainTextUnavailable() { return true; }\n    const retrySafePlainText =',
+      /isRetryableIMessagePlainTextUnavailable must retain its unaliased canonical import/,
+    ],
+    [
+      '  if (useIMessagePlainText) {',
+      '  if (useIMessagePlainText) {\n    const useIMessagePlainText = true;',
+      /useIMessagePlainText must have exactly one variable binding/,
+    ],
+    [
+      '  const outgoing = {',
+      '  const routeAlias = useIMessagePlainText;\n  const outgoing = {',
+      /useIMessagePlainText may not be.*escaped/,
+    ],
+  ];
+  for (const [before, after, expected] of mutations) {
+    assertErrors(
+      scheduledHandoffSourceErrors(replaceOnce(validSendServiceSource, before, after)),
+      expected,
+    );
+  }
 });
 
 test('reviewed function fingerprints fail closed on otherwise unchecked edits', () => {

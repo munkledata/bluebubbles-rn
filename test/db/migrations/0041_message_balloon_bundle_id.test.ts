@@ -64,6 +64,7 @@ describe('migration 0041_message_balloon_bundle_id', () => {
         '0050_message_identity_owner_scope',
         '0051_handle_color_backup_index',
         '0052_chat_history_deletion_boundary',
+        '0053_versioned_server_message_state',
       ]);
       expect(hasBalloonColumn(raw)).toBe(true);
       expect(

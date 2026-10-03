@@ -417,13 +417,70 @@ function nativeFailureName(error: unknown): string {
 
 function messageGroupMutationAllowed(): boolean {
   const lock = useLockStore.getState();
-  // A killed/headless process has not loaded the persisted App Lock choice yet. Unknown must not be
-  // treated as unlocked because reconciliation can repost detailed message bodies from native state.
+  // Detailed-history replacement still requires foreground hydration. The headless exception
+  // below is deliberately summary-only and must never authorize reposting private child content.
   return lock.hydrated && !effectivelyLocked(lock, false);
 }
 
-async function cancelMessageGroupSummaryBestEffort(context?: EventDeliveryContext): Promise<void> {
-  if (!deliveryIsCurrent(context) || !messageGroupMutationAllowed()) return;
+const MESSAGE_GROUP_LOCK_READ_TIMEOUT_MS = 2_000;
+
+/** Resolve one summary-only policy without hydrating or caching the foreground App Lock state. */
+async function resolveMessageGroupMutationGuard(
+  context?: EventDeliveryContext,
+): Promise<() => boolean> {
+  const lease = context ?? captureRealtimeDeliveryLease();
+  const lockSnapshot = useLockStore.getState();
+  if (!lease.isCurrent()) return () => false;
+  if (lockSnapshot.hydrated) {
+    return () => lease.isCurrent() && messageGroupMutationAllowed();
+  }
+  if (lockSnapshot.enabled || lockSnapshot.locked) return () => false;
+
+  let readActive = true;
+  let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+  let abortRead: (() => void) | undefined;
+  let persistedLockDisabled = false;
+  const unavailable = new Promise<'true'>((resolve) => {
+    // A stuck SecureStore read must not wedge the serialized native queue or account teardown.
+    abortRead = () => resolve('true');
+    timeoutHandle = setTimeout(abortRead, MESSAGE_GROUP_LOCK_READ_TIMEOUT_MS);
+    lease.signal?.addEventListener('abort', abortRead, { once: true });
+    if (lease.signal?.aborted) abortRead();
+  });
+  try {
+    const value = await Promise.race([
+      (async () => {
+        const { vault } = await import('../clients');
+        if (!readActive || !lease.isCurrent() || useLockStore.getState() !== lockSnapshot) {
+          return 'true';
+        }
+        return vault.get('appLockEnabled');
+      })(),
+      unavailable,
+    ]);
+    // Match FCM's persisted policy: only a successful missing/default or explicit OFF is safe.
+    persistedLockDisabled = value === null || value === 'false';
+  } catch (error) {
+    if (lease.isCurrent()) {
+      logger.warn('[notif] message-group lock-state read failed', {
+        errorName: nativeFailureName(error),
+      });
+    }
+  } finally {
+    readActive = false;
+    if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
+    if (abortRead) lease.signal?.removeEventListener('abort', abortRead);
+  }
+  // Object identity also rejects OFF -> ON -> OFF and foreground hydration during native waits.
+  return () =>
+    persistedLockDisabled && lease.isCurrent() && useLockStore.getState() === lockSnapshot;
+}
+
+async function cancelMessageGroupSummaryBestEffort(
+  canMutate: () => boolean,
+  context?: EventDeliveryContext,
+): Promise<void> {
+  if (!canMutate()) return;
   try {
     await notifee.cancelNotification(MESSAGE_GROUP_SUMMARY_ID);
   } catch (error) {
@@ -445,12 +502,15 @@ async function reconcileMessageGroupFromDisplayedNow(
   displayed: readonly DisplayedNotificationSnapshot[],
   context?: EventDeliveryContext,
   excludedId?: string,
+  mutationGuard?: () => boolean,
 ): Promise<void> {
+  context ??= captureRealtimeDeliveryLease();
   if (!deliveryIsCurrent(context)) return;
   // App Lock changes presentation policy, not existing Android tray ownership. Leave both the
   // generic summary and already-displayed children untouched until unlocked maintenance can safely
   // reconcile them; cancelling only the summary can make Android surface its detailed children.
-  if (!messageGroupMutationAllowed()) return;
+  const canMutate = mutationGuard ?? (await resolveMessageGroupMutationGuard(context));
+  if (!canMutate()) return;
 
   const children = strictDisplayedMessageChildren(displayed, excludedId).filter((child) => {
     const source = displayed.find(
@@ -471,7 +531,7 @@ async function reconcileMessageGroupFromDisplayedNow(
     // member of this group. Never let that turn into destructive cleanup of the rejected record;
     // if a summary already exists, fall through so private or stale fields are repaired in place.
     if (!hasDisplayedMessageGroupMember(displayed)) {
-      await cancelMessageGroupSummaryBestEffort(context);
+      await cancelMessageGroupSummaryBestEffort(canMutate, context);
       return;
     }
     if (!hasSummary) return;
@@ -485,7 +545,7 @@ async function reconcileMessageGroupFromDisplayedNow(
   try {
     await ensureChannel();
     if (!deliveryIsCurrent(context)) return;
-    if (!messageGroupMutationAllowed()) return;
+    if (!canMutate()) return;
     await notifee.displayNotification(fixedMessageGroupSummary());
     if (!deliveryIsCurrent(context)) {
       // Disconnect also queues a store-wide sweep, but contain this just-created old-account
@@ -509,7 +569,10 @@ async function reconcileMessageGroupNow(
   context?: EventDeliveryContext,
   excludedId?: string,
 ): Promise<void> {
-  if (!deliveryIsCurrent(context) || !messageGroupMutationAllowed()) return;
+  context ??= captureRealtimeDeliveryLease();
+  if (!deliveryIsCurrent(context)) return;
+  const canMutate = await resolveMessageGroupMutationGuard(context);
+  if (!canMutate()) return;
   let displayed: DisplayedNotification[];
   try {
     displayed = await notifee.getDisplayedNotifications();
@@ -523,8 +586,8 @@ async function reconcileMessageGroupNow(
     // group, so an enumeration failure must preserve the entire native group for the next retry.
     return;
   }
-  if (!deliveryIsCurrent(context)) return;
-  await reconcileMessageGroupFromDisplayedNow(displayed, context, excludedId);
+  if (!canMutate()) return;
+  await reconcileMessageGroupFromDisplayedNow(displayed, context, excludedId, canMutate);
 }
 
 interface OwnedDisplayedMessageHistory {

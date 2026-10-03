@@ -43,7 +43,10 @@ describe('migration 0052_chat_history_deletion_boundary', () => {
         .run('sync.fullRepair.retiredChat.repair-shell', '0');
 
       stopBefore0052.value = false;
-      await expect(runMigrations(runner)).resolves.toEqual([MIGRATION_NAME]);
+      await expect(runMigrations(runner)).resolves.toEqual([
+        MIGRATION_NAME,
+        '0053_versioned_server_message_state',
+      ]);
 
       expect(
         raw

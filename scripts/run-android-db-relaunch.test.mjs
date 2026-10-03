@@ -633,6 +633,27 @@ test('pins the exact resume result schema and migration identity', () => {
   );
 });
 
+test('requires migration 53 across relaunch, active migration, runtime, and backup lanes', () => {
+  assert.equal(RELAUNCH_MIGRATION_COUNT, 53);
+  assert.equal(RELAUNCH_MIGRATION_HEAD, '0053_versioned_server_message_state');
+  for (const [validate, fixture] of [
+    [validateRelaunchMarker, finalResult],
+    [validateActiveMigrationDeathMarker, activeMigrationDeathFinal],
+    [validateRuntimeConcurrencyMarker, runtimeConcurrencyResult],
+    [validateBackupRestoreMarker, backupRestoreResult],
+  ])
+    assert.throws(
+      () =>
+        validate(
+          fixture({
+            migrationCount: 52,
+            migrationHead: '0052_chat_history_deletion_boundary',
+          }),
+        ),
+      /migration count or head/,
+    );
+});
+
 test('accepts recovery only as a finite failure', () => {
   assert.deepEqual(
     validateRelaunchMarker(failingFinal({ phase: 'recovery', failureCode: 'interrupted-resume' })),

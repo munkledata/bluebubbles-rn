@@ -1,12 +1,17 @@
 import { Directory, File, Paths } from 'expo-file-system';
 import { attachmentsApi, type HttpClient } from '@core/api';
+import { hashNativeAttachmentCacheGuid } from '@native/boundedDownload';
 import {
   MANUAL_ATTACHMENT_MAX_BYTES,
   MANUAL_DOWNLOAD_TIMEOUT_MS,
   type AttachmentFetcher,
 } from './downloadService';
 import { deleteOwnedFile, downloadBoundedNativeFile } from './boundedNativeDownload';
-import { encodedMediaPathSegment, mediaGenerationPathSegment } from './pathSafety';
+import {
+  attachmentIdentityPathSegment,
+  encodedMediaPathSegment,
+  mediaGenerationPathSegment,
+} from './pathSafety';
 
 function attachmentDestination(
   guid: string,
@@ -16,7 +21,7 @@ function attachmentDestination(
   const dir = new Directory(
     Paths.document,
     'attachments',
-    encodedMediaPathSegment(guid),
+    attachmentIdentityPathSegment(guid, hashNativeAttachmentCacheGuid),
     mediaGenerationPathSegment(generation),
   );
   return { dir, file: new File(dir, encodedMediaPathSegment(transferName)) };
@@ -27,7 +32,8 @@ function attachmentDestination(
  * {documents}/attachments/{guid}/{generation}/{name} with header auth (URL stays clean). The
  * account generation prevents a late old-account transfer from becoming the next account's cache
  * hit even if its best-effort post-Disconnect deletion fails. Keeping `guid` first preserves the
- * per-chat cleanup boundary; Forget still removes the top-level `attachments` directory.
+ * per-chat cleanup boundary; Forget still removes the top-level `attachments` directory. IDs above
+ * the short encoded-name limit use a full SHA-256 identity directory, bounded to 4096 UTF-8 bytes.
  */
 export function expoFetcher(http: HttpClient): AttachmentFetcher {
   return {

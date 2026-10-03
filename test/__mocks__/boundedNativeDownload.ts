@@ -6,6 +6,12 @@
  * Expo's ESM native bridge in the plain ts-jest project. The real JS/native handshake has its own
  * direct test via a relative import of src/native/boundedDownload.ts.
  */
+import { createHash } from 'node:crypto';
+
+export const hashNativeAttachmentCacheGuid = jest.fn((guid: string) =>
+  createHash('sha256').update(guid, 'utf8').digest('hex'),
+);
+
 export type NativeBoundedDownloadFailure =
   'cancelled' | 'missing' | 'network' | 'size' | 'timeout' | 'unavailable';
 

@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import {
+  attachmentIdentityPathSegment,
   encodedMediaPathSegment,
   isPotentialAttachmentCacheFileUri,
   MAX_ENCODED_MEDIA_SEGMENT_CHARS,
@@ -77,6 +79,33 @@ describe('encodedMediaPathSegment (collision-safe server media namespace)', () =
 });
 
 describe('parseAttachmentCacheFileUri (startup recovery namespace)', () => {
+  it('recognizes hashed identity without inventing a decoded GUID', () => {
+    const digest = 'a'.repeat(64);
+    for (const generation of ['7', 'unscoped']) {
+      expect(
+        parseAttachmentCacheFileUri(
+          `file:///x/attachments/id-sha256-${digest}/generation-${generation}/media-photo.png`,
+        ),
+      ).toEqual({
+        attachmentGuid: null,
+        attachmentGuidSha256: digest,
+        generation: generation === '7' ? 7 : 'unscoped',
+        transferName: 'photo.png',
+      });
+    }
+  });
+
+  it.each([
+    `id-sha256-${'A'.repeat(64)}/generation-1/media-photo.png`,
+    `id-sha256-${'a'.repeat(63)}/generation-1/media-photo.png`,
+    `id-sha256-${'a'.repeat(65)}/generation-1/media-photo.png`,
+    `id-sha256-${'a'.repeat(64)}%0A/generation-1/media-photo.png`,
+    `id-sha256-${'a'.repeat(64)}/generation-01/media-photo.png`,
+    `id-sha256-${'a'.repeat(64)}/generation-1/id-sha256-${'b'.repeat(64)}`,
+    `id-sha256-${'a'.repeat(64)}/extra/generation-1/media-photo.png`,
+  ])('rejects malformed hashed cache paths: %s', (tail) => {
+    expect(parseAttachmentCacheFileUri(`file:///x/attachments/${tail}`)).toBeNull();
+  });
   it('round-trips a native scanner URI including twice-escaped server separators', () => {
     expect(
       parseAttachmentCacheFileUri(
@@ -105,6 +134,60 @@ describe('parseAttachmentCacheFileUri (startup recovery namespace)', () => {
     ['fragment', 'file:///x/attachments/media-guid/generation-1/media-file.jpg#other'],
   ])('rejects %s', (_label, uri) => {
     expect(parseAttachmentCacheFileUri(uri)).toBeNull();
+  });
+});
+
+describe('attachmentIdentityPathSegment', () => {
+  const hash = jest.fn((value: string) => createHash('sha256').update(value).digest('hex'));
+  beforeEach(() => hash.mockClear());
+
+  it('preserves exact existing spellings through the encoded 180-character boundary', () => {
+    for (const guid of ['a/b', 'x'.repeat(180), '€'.repeat(20)]) {
+      expect(attachmentIdentityPathSegment(guid, hash)).toBe(encodedMediaPathSegment(guid));
+    }
+    expect(hash).not.toHaveBeenCalled();
+  });
+
+  it('hashes the exact original value starting at 181 encoded characters', () => {
+    for (const guid of ['x'.repeat(181), `${'€'.repeat(20)}x`, '😀'.repeat(1024)]) {
+      expect(attachmentIdentityPathSegment(guid, hash)).toBe(
+        `id-sha256-${createHash('sha256').update(guid).digest('hex')}`,
+      );
+      expect(hash).toHaveBeenLastCalledWith(guid);
+    }
+  });
+
+  it('accepts 4096 UTF-8 bytes and keeps similar long values and prefix-like short IDs distinct', () => {
+    const long = 'x'.repeat(4096);
+    const first = attachmentIdentityPathSegment(long, hash);
+    expect(first).toMatch(/^id-sha256-[a-f0-9]{64}$/);
+    expect(attachmentIdentityPathSegment(`${long.slice(1)}y`, hash)).not.toBe(first);
+    expect(attachmentIdentityPathSegment(first, hash)).toBe(`media-${first}`);
+    expect(attachmentIdentityPathSegment('é'.repeat(100), hash)).not.toBe(
+      attachmentIdentityPathSegment('e\u0301'.repeat(100), hash),
+    );
+  });
+
+  it.each(['', '\ud800', '\udc00', `x${'😀'.repeat(1024)}`, 'x'.repeat(4097)])(
+    'rejects invalid or oversized identifiers before invoking native hashing',
+    (guid) => {
+      expect(() => attachmentIdentityPathSegment(guid, hash)).toThrow();
+      expect(hash).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    '',
+    'a'.repeat(63),
+    'A'.repeat(64),
+    `${'a'.repeat(64)}\n`,
+    `${'a'.repeat(64)}/..`,
+    null,
+    1,
+  ])('refuses malformed native digest results', (digest) => {
+    expect(() => attachmentIdentityPathSegment('x'.repeat(181), () => digest as string)).toThrow(
+      'hash is unavailable',
+    );
   });
 });
 

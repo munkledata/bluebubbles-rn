@@ -405,6 +405,17 @@ export const messageDeletionLedger = sqliteTable('message_deletion_ledger', {
   chatGuid: text('chat_guid'),
 });
 
+/** Server transitions never overwrite the user's local or historical deletion receipts. */
+export const messageServerStates = sqliteTable('message_server_states', {
+  guid: text('guid').primaryKey(),
+  chatGuid: text('chat_guid'),
+  providerEpoch: text('provider_epoch').notNull(),
+  ledgerEpoch: text('ledger_epoch').notNull(),
+  sequence: text('sequence').notNull(),
+  kind: text('kind').notNull(),
+  dateDeleted: integer('date_deleted'),
+});
+
 /**
  * Bounded, account-scoped identity handoffs for optimistic outgoing messages.
  *
@@ -948,6 +959,7 @@ export const schema = {
   chatHandles,
   messages,
   messageDeletionLedger,
+  messageServerStates,
   messageGuidAliases,
   attachments,
   attachmentCacheEntries,

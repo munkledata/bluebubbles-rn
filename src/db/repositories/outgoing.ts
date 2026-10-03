@@ -14,6 +14,10 @@ import {
   type DbTransactionContext,
 } from '../transaction';
 import type { AppDatabase } from '../types';
+import {
+  projectMessageStateWithinTransaction,
+  getMessageStateAuthorityWithinTransaction,
+} from './messageState';
 import { requireChatIdByGuidWithinTransaction } from './chats';
 import {
   MAX_SEND_ATTEMPT_OWNER_GENERATION,
@@ -22,7 +26,12 @@ import {
   type SendAttemptOwnerToken,
 } from './outgoingAttemptOwnership';
 import type { RetryableOutgoing } from './outgoingRetry';
-import { OUTGOING_LEASE_MS, OUTGOING_MAX_ATTEMPTS } from './outgoingRetryPolicy';
+import {
+  imessagePlainTextQueueState,
+  OUTGOING_LEASE_MS,
+  OUTGOING_MAX_ATTEMPTS,
+  withIMessagePlainTextRetrySafety,
+} from './outgoingRetryPolicy';
 import {
   isMessageTargetAvailableWithinTransaction,
   queuedMessageTarget,
@@ -204,6 +213,7 @@ async function hasOutgoingIdentityHandoverConflictWithinTransaction(
 ): Promise<boolean> {
   return runInTransactionContext(context, async (db) => {
     if (tempGuid === realGuid) return false;
+    const serverAuthority = await getMessageStateAuthorityWithinTransaction(context);
     const messageOwners: Array<{ guid: string; chatGuid: string }> = await db.all(sql`
       SELECT m.guid, c.guid AS chatGuid
         FROM messages m
@@ -216,6 +226,10 @@ async function hasOutgoingIdentityHandoverConflictWithinTransaction(
       SELECT guid, chat_guid AS chatGuid
         FROM message_deletion_ledger
        WHERE guid IN (${tempGuid}, ${realGuid})
+      UNION ALL
+      SELECT guid, chat_guid AS chatGuid FROM message_server_states
+       WHERE guid = ${realGuid}
+         AND provider_epoch = ${serverAuthority?.providerEpoch ?? null} AND ledger_epoch = ${serverAuthority?.ledgerEpoch ?? null}
     `);
     for (const tombstone of tombstones) {
       if (tombstone.chatGuid != null && tombstone.chatGuid !== ownerChatGuid) {
@@ -309,7 +323,23 @@ async function handoverOutgoingIdentityWithinTransaction(
       (latest, row) => (latest == null || row.dateDeleted > latest ? row.dateDeleted : latest),
       messageTombstones[0]?.dateDeleted ?? null,
     );
-    if (dateDeleted == null) return null;
+    const serverAuthority = await getMessageStateAuthorityWithinTransaction(context);
+    const serverStates = await db.all<{ dateDeleted: number }>(sql`
+      SELECT COALESCE(date_deleted, 0) AS dateDeleted FROM message_server_states
+       WHERE guid = ${realGuid} AND chat_guid = ${ownerChatGuid} AND kind = 'deleted'
+         AND provider_epoch = ${serverAuthority?.providerEpoch ?? null} AND ledger_epoch = ${serverAuthority?.ledgerEpoch ?? null}
+       LIMIT 1
+    `);
+    const serverDate = serverStates[0]?.dateDeleted ?? null;
+    // Server deletion knowledge affects visibility but never becomes a permanent local receipt.
+    if (dateDeleted == null) {
+      if (serverDate != null)
+        await db
+          .update(messages)
+          .set({ dateDeleted: serverDate })
+          .where(eq(messages.guid, tempGuid));
+      return serverDate;
+    }
 
     await db
       .insert(messageDeletionLedger)
@@ -333,7 +363,7 @@ async function handoverOutgoingIdentityWithinTransaction(
        WHERE guid = ${tempGuid}
          AND (chat_guid IS NULL OR chat_guid = ${ownerChatGuid})
     `);
-    return dateDeleted;
+    return serverDate == null ? dateDeleted : Math.max(dateDeleted, serverDate);
   });
 }
 
@@ -399,6 +429,8 @@ export interface InsertOutgoingTextArgs {
   oneShotMention?: boolean;
   /** Marks the dedicated one-shot formatted payload for crash recovery without enabling replay. */
   oneShotFormatted?: boolean;
+  /** Pins this row to the separately gated exact-GUID plain-text route. */
+  imessagePlainTextV1?: boolean;
 }
 
 /**
@@ -425,6 +457,7 @@ export async function insertOutgoingTextWithinTransaction(
         imessageEffectV1: args.oneShotEffect === true ? true : undefined,
         imessageMentionV1: args.oneShotMention === true ? true : undefined,
         imessageFormattedV1: args.oneShotFormatted === true ? true : undefined,
+        imessagePlainTextV1: args.imessagePlainTextV1 === true ? true : undefined,
         subject: args.subject,
         // Persisted so a crash-recovery resend keeps the subject + mention spans
         // (the queue re-POST builds its request from this payload alone).
@@ -881,6 +914,7 @@ export function claimFailedOutgoingForRetryWithinTransaction(
   serverAuthorization?: MessageTargetServerAuthorization,
   locationAvailable?: () => boolean,
   rcsAvailable?: (chatGuid: string) => boolean,
+  imessagePlainTextAvailable?: (chatGuid: string) => boolean,
 ): Promise<RetryHandover> {
   return runInTransactionContext(context, async (db) => {
     const now = clock();
@@ -901,6 +935,13 @@ export function claimFailedOutgoingForRetryWithinTransaction(
       return { claim: 'unsendable' };
     }
     if (row.kind === 'location' && locationAvailable?.() !== true) {
+      return { claim: 'unsendable' };
+    }
+    const imessagePlainTextState = imessagePlainTextQueueState(row.kind, row.payload);
+    if (
+      imessagePlainTextState === 'retry-safe' &&
+      imessagePlainTextAvailable?.(row.chatGuid) !== true
+    ) {
       return { claim: 'unsendable' };
     }
     const queuedTarget = queuedMessageTarget(row.kind, row.payload);
@@ -1047,9 +1088,22 @@ export function claimFailedOutgoingForRetryWithinTransaction(
       );
       return { claim: cur[0]?.sendState === 'sending' ? 'sending' : 'settled' };
     }
-    await db.run(sql`
-        UPDATE outgoing_queue SET attempts = 0, next_retry_at = ${now + OUTGOING_LEASE_MS}
-         WHERE temp_guid = ${row.tempGuid}`);
+    const claimedPayload =
+      imessagePlainTextState === 'retry-safe'
+        ? withIMessagePlainTextRetrySafety(row.payload, false)
+        : row.payload;
+    if (claimedPayload == null) {
+      throw new Error('narrow iMessage text retry proof could not be consumed');
+    }
+    const queueTaken = await db.all<{ id: number }>(sql`
+        UPDATE outgoing_queue
+           SET attempts = 0, next_retry_at = ${now + OUTGOING_LEASE_MS},
+               payload = ${claimedPayload}
+         WHERE temp_guid = ${row.tempGuid} AND payload = ${row.payload}
+        RETURNING id`);
+    if (queueTaken.length === 0) {
+      throw new Error('outgoing retry payload changed during guarded claim');
+    }
     return {
       claim: 'claimed',
       row: { ...row, attempts: 0 },
@@ -1070,6 +1124,7 @@ export async function claimFailedOutgoingForRetry(
   serverAuthorization?: MessageTargetServerAuthorization,
   locationAvailable?: () => boolean,
   rcsAvailable?: (chatGuid: string) => boolean,
+  imessagePlainTextAvailable?: (chatGuid: string) => boolean,
 ): Promise<RetryHandover> {
   return withDbTransaction(
     db,
@@ -1081,6 +1136,7 @@ export async function claimFailedOutgoingForRetry(
         serverAuthorization,
         locationAvailable,
         rcsAvailable,
+        imessagePlainTextAvailable,
       ),
     commitGuard,
   );
@@ -1280,12 +1336,7 @@ export function reconcileOutgoingSuccessWithinTransaction(
           .where(eq(messages.guid, server.guid));
       }
       if (dateDeleted != null)
-        await markMessageDeletedWithinTransaction(
-          context,
-          server.guid,
-          dateDeleted,
-          sourceChatGuid,
-        );
+        await projectMessageStateWithinTransaction(context, server.guid, sourceChatGuid);
       await db.delete(messages).where(eq(messages.guid, tempGuid));
     } else if (tempOwner[0]) {
       await handoverOutgoingIdentityWithinTransaction(
@@ -1694,12 +1745,7 @@ function reconcileExactOutgoingAttemptSuccessCoreWithinTransaction(
         })
         .where(eq(messages.guid, success.guid));
       if (dateDeleted != null) {
-        await markMessageDeletedWithinTransaction(
-          context,
-          success.guid,
-          dateDeleted,
-          owner.chatGuid,
-        );
+        await projectMessageStateWithinTransaction(context, success.guid, owner.chatGuid);
       }
       await db.delete(messages).where(eq(messages.guid, success.tempGuid));
     } else {
@@ -2286,5 +2332,10 @@ export async function retireOutgoing(
   );
 }
 
-export { OUTGOING_GRACE_MS, OUTGOING_MAX_ATTEMPTS, outgoingBackoffMs } from './outgoingRetryPolicy';
+export {
+  imessagePlainTextQueueState,
+  OUTGOING_GRACE_MS,
+  OUTGOING_MAX_ATTEMPTS,
+  outgoingBackoffMs,
+} from './outgoingRetryPolicy';
 export * from './outgoingRetry';

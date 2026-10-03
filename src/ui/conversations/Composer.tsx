@@ -298,13 +298,9 @@ export const Composer = React.memo(function Composer({
     const participantIdentityChanged =
       previousMentionParticipantIdentityRef.current !== mentionParticipantIdentity;
     previousMentionParticipantIdentityRef.current = mentionParticipantIdentity;
-    if (
-      !participantIdentityChanged &&
-      mentionParticipantsAvailable &&
-      active &&
-      !editingText &&
-      !replyTo
-    ) {
+    // Search, selection and focus changes hide suggestions without changing the saved draft.
+    if (!active) setMentionQuery(null);
+    if (!participantIdentityChanged && mentionParticipantsAvailable && !editingText && !replyTo) {
       return;
     }
     // A capability/participant change removes only the metadata. The visible words stay in the

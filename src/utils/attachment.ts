@@ -1,3 +1,5 @@
+import { MEDIA_PATH_ENCODED_VALUE_MAX_CHARS } from './mediaPathLimits';
+
 export type AttachmentKind = 'image' | 'video' | 'audio' | 'contact' | 'location' | 'file';
 
 /** Dispatch an attachment to a render type by MIME. */
@@ -84,7 +86,8 @@ export function extensionForMime(mimeType: string | null | undefined): string {
 
 /**
  * Local file name for a downloaded attachment: the server's transfer name when there is one,
- * else the guid PLUS a MIME-derived extension.
+ * else the guid PLUS a MIME-derived extension, or a short `attachment` basename when it will not
+ * fit the bounded local filename namespace.
  *
  * The extension is load-bearing, not cosmetic: expo-media-library derives the MediaStore type
  * from the file name and REJECTS a name with no dot at all ("Could not get the file's
@@ -98,7 +101,20 @@ export function attachmentFileName(
   mimeType?: string | null,
 ): string {
   if (transferName) return transferName;
-  return `${guid}${extensionForMime(mimeType)}`;
+  const extension = extensionForMime(mimeType);
+  const candidate = `${guid}${extension}`;
+  // Identity already lives in its own directory; an absent server filename need not repeat an
+  // arbitrarily long opaque GUID. Keep existing short spellings and the MIME extension.
+  const fallback = `attachment${extension}`;
+  if (candidate.length > MEDIA_PATH_ENCODED_VALUE_MAX_CHARS) return fallback;
+  try {
+    return encodeURIComponent(candidate).length <= MEDIA_PATH_ENCODED_VALUE_MAX_CHARS
+      ? candidate
+      : fallback;
+  } catch {
+    // The guarded destination calculation owns rejection of malformed identifiers/names.
+    return candidate;
+  }
 }
 
 /**

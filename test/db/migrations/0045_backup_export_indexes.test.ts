@@ -64,6 +64,7 @@ describe('migration 0045_backup_export_indexes', () => {
         '0050_message_identity_owner_scope',
         '0051_handle_color_backup_index',
         '0052_chat_history_deletion_boundary',
+        '0053_versioned_server_message_state',
       ]);
 
       expect(indexColumns(raw, 'themes_backup_export_idx')).toEqual(['is_preset', 'id']);

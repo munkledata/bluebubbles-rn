@@ -89,6 +89,7 @@ interface NativeSubscription {
 }
 
 interface GatorBoundedDownloadNative {
+  attachmentCacheGuidSha256(guid: string): string;
   prepare(requestId: string): void;
   cancel(requestId: string): void;
   releasePrepared(requestId: string): void;
@@ -244,6 +245,19 @@ function getNative(): GatorBoundedDownloadNative | null {
   } catch {
     return null;
   }
+}
+
+/** Pure, bounded synchronous hashing; no filesystem work or account state is touched. */
+export function hashNativeAttachmentCacheGuid(guid: string): string {
+  const native = getNative();
+  if (typeof native?.attachmentCacheGuidSha256 !== 'function') {
+    throw new NativeBoundedDownloadError('unavailable');
+  }
+  const digest = native.attachmentCacheGuidSha256(guid);
+  if (typeof digest !== 'string' || !/^[0-9a-f]{64}$/.test(digest)) {
+    throw new NativeBoundedDownloadError('unavailable');
+  }
+  return digest;
 }
 
 /**

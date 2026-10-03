@@ -969,7 +969,10 @@ export function markRead(
       try {
         if (isIMessage && readStateSync) {
           await readStateSync.run(async () => {
+            const currentSettings = useFeatureSettingsStore.getState();
             if (
+              !currentSettings.hydrated ||
+              !currentSettings.sendReadReceipts ||
               !activeLease.isCurrent() ||
               !receiptTransport.isCurrent() ||
               !sessionAccessors.imessageReadStateEnabled()
@@ -979,6 +982,8 @@ export function markRead(
             await chatsApi.markChatRead(receiptTransport.http, chatGuid);
           });
         } else {
+          const currentSettings = useFeatureSettingsStore.getState();
+          if (!currentSettings.hydrated || !currentSettings.sendReadReceipts) return;
           if (isRcs && !mutationIsCurrent()) return;
           await chatsApi.markChatRead(receiptTransport.http, chatGuid);
         }

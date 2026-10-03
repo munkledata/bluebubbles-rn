@@ -19,6 +19,7 @@ import {
   discardOutgoingMessageWithinTransaction,
   getOutgoingRetryChatGuid,
   getScheduledById,
+  imessagePlainTextQueueState,
   listServerScheduledPruneExposure,
   MessageTargetCapabilityUnknownError,
   MessageTargetUnavailableError,
@@ -1470,6 +1471,11 @@ export async function recoverOutgoing(
     accountLease.isCurrent() &&
     capability?.isCurrent() === true &&
     capability.serverInfo?.supports_imessage_location === true;
+  const imessagePlainTextAvailable = (chatGuid?: string): boolean =>
+    accountLease.isCurrent() &&
+    capability?.isCurrent() === true &&
+    capability.serverInfo?.supports_imessage_plain_text === true &&
+    (chatGuid === undefined || /^(?:iMessage|any);-;.+$/u.test(chatGuid));
   return runOutgoingQueue(
     getDatabase(),
     http,
@@ -1482,6 +1488,8 @@ export async function recoverOutgoing(
     rcsAvailable,
     undefined,
     locationAvailable,
+    undefined,
+    imessagePlainTextAvailable,
   );
 }
 
@@ -1536,6 +1544,11 @@ export async function retry(
           accountLease.isCurrent() &&
           capability?.isCurrent() === true &&
           capability.serverInfo?.supports_imessage_location === true;
+        const imessagePlainTextAvailable = (chatGuid?: string): boolean =>
+          accountLease.isCurrent() &&
+          capability?.isCurrent() === true &&
+          capability.serverInfo?.supports_imessage_plain_text === true &&
+          (chatGuid === undefined || /^(?:iMessage|any);-;.+$/u.test(chatGuid));
         const retryChatGuid = await getOutgoingRetryChatGuid(db, tempGuid);
         if (!accountLease.isCurrent()) return 'stale';
         if (retryChatGuid && isRcsChatGuid(retryChatGuid) && !rcsAvailable(retryChatGuid)) {
@@ -1551,6 +1564,7 @@ export async function retry(
               serverAuthorization,
               locationAvailable,
               (chatGuid) => rcsAvailable(chatGuid),
+              (chatGuid) => imessagePlainTextAvailable(chatGuid),
             ),
           messageTargetCommitGuard(
             () =>
@@ -1581,6 +1595,7 @@ export async function retry(
           rcsAvailable,
           undefined,
           locationAvailable,
+          imessagePlainTextAvailable,
         );
         if (!accountLease.isCurrent()) return 'stale';
         // Retired for good: the attachment's on-disk file is gone, so no re-send can ever work. The
@@ -1595,19 +1610,25 @@ export async function retry(
             return 'unsendable';
           case 'paused':
             return 'stale';
-          case 'deferred':
+          case 'deferred': {
+            const retrySafePlainText =
+              imessagePlainTextQueueState(row.kind, row.payload) === 'retry-safe';
             await reconcileOutgoingError(
               db,
               row.tempGuid,
               1,
               Date.now(),
               () => accountLease.isCurrent(),
-              row.kind === 'location'
-                ? 'Current-location sharing is unavailable.'
-                : 'RCS is unavailable.',
+              retrySafePlainText
+                ? 'Narrow iMessage delivery is temporarily unavailable.'
+                : row.kind === 'location'
+                  ? 'Current-location sharing is unavailable.'
+                  : 'RCS is unavailable.',
               attemptOwnerToken,
+              retrySafePlainText,
             );
             return 'failed';
+          }
         }
       },
     );

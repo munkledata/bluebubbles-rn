@@ -1,3 +1,5 @@
+import { MEDIA_PATH_ENCODED_VALUE_MAX_CHARS } from '@utils/mediaPathLimits';
+
 /**
  * Make a SERVER-supplied string safe to use as a single filesystem path segment.
  *
@@ -25,7 +27,7 @@ export function safePathSegment(s: string): string {
  * Very long encoded names are rejected instead of being truncated into another collision or
  * exceeding filesystem filename limits.
  */
-export const MAX_ENCODED_MEDIA_SEGMENT_CHARS = 180;
+export const MAX_ENCODED_MEDIA_SEGMENT_CHARS = MEDIA_PATH_ENCODED_VALUE_MAX_CHARS;
 
 export function encodedMediaPathSegment(value: string): string {
   if (value.length === 0) throw new Error('Media path identifier must not be empty');
@@ -39,6 +41,37 @@ export function encodedMediaPathSegment(value: string): string {
     throw new Error('Media path identifier is too long');
   }
   return `media-${encoded}`;
+}
+
+export const MAX_ATTACHMENT_GUID_UTF8_BYTES = 4096;
+const ATTACHMENT_GUID_SHA256 = /^[0-9a-f]{64}$/;
+const HASHED_ATTACHMENT_IDENTITY = /^id-sha256-([0-9a-f]{64})$/;
+
+/** Keep existing short cache identities; bound long opaque IDs before synchronous native hashing. */
+export function attachmentIdentityPathSegment(
+  guid: string,
+  sha256: (value: string) => string,
+): string {
+  if (guid.length === 0) throw new Error('Attachment identifier must not be empty');
+  if (guid.length > MAX_ATTACHMENT_GUID_UTF8_BYTES) {
+    throw new Error('Attachment identifier is too long');
+  }
+  let encoded: string;
+  try {
+    encoded = encodeURIComponent(guid);
+  } catch {
+    throw new Error('Attachment identifier contains invalid Unicode');
+  }
+  // Every escaped byte occupies three ASCII characters; every unescaped character is one byte.
+  if (encoded.replace(/%[0-9A-F]{2}/g, '_').length > MAX_ATTACHMENT_GUID_UTF8_BYTES) {
+    throw new Error('Attachment identifier is too long');
+  }
+  if (encoded.length <= MAX_ENCODED_MEDIA_SEGMENT_CHARS) return `media-${encoded}`;
+  const digest = sha256(guid);
+  if (typeof digest !== 'string' || !ATTACHMENT_GUID_SHA256.test(digest)) {
+    throw new Error('Attachment identifier hash is unavailable');
+  }
+  return `id-sha256-${digest}`;
 }
 
 /** Stable namespace for callers that deliberately run without an account-generation lease. */
@@ -59,7 +92,8 @@ export function mediaGenerationPathSegment(generation?: number | null): string {
 }
 
 export interface ParsedAttachmentCacheFileUri {
-  readonly attachmentGuid: string;
+  readonly attachmentGuid: string | null;
+  readonly attachmentGuidSha256?: string;
   readonly generation: number | typeof UNSCOPED_MEDIA_GENERATION;
   readonly transferName: string;
 }
@@ -115,9 +149,10 @@ function decodeMediaPathSegment(segment: string): string | null {
  *
  * `Uri.fromFile` percent-escapes the physical `%` characters written by
  * {@link encodedMediaPathSegment}, so each URL component is decoded once to recover the physical
- * filename and the `media-…` payload is decoded a second time. Re-encoding both payloads rejects
- * alternate spellings such as `%41` for `A`; exact depth/name checks prevent nearby app-private
- * files from being mistaken for attachment cache entries.
+ * filename and each `media-…` payload is decoded a second time. Long attachment identities use
+ * `id-sha256-<64 lowercase hex>` instead; the original GUID cannot be recovered from that path.
+ * Re-encoding media payloads rejects aliases such as `%41` for `A`; exact depth/name checks prevent
+ * nearby app-private files from being mistaken for attachment cache entries.
  */
 export function parseAttachmentCacheFileUri(uri: string): ParsedAttachmentCacheFileUri | null {
   if (
@@ -160,15 +195,22 @@ export function parseAttachmentCacheFileUri(uri: string): ParsedAttachmentCacheF
       return null;
     }
     const attachmentGuid = decodeMediaPathSegment(guidSegment);
+    const attachmentGuidSha256 = HASHED_ATTACHMENT_IDENTITY.exec(guidSegment)?.[1];
     const transferName = decodeMediaPathSegment(transferSegment);
-    if (attachmentGuid === null || transferName === null) return null;
+    if ((attachmentGuid === null && attachmentGuidSha256 == null) || transferName === null) {
+      return null;
+    }
+    const identity =
+      attachmentGuidSha256 == null
+        ? { attachmentGuid }
+        : { attachmentGuid: null, attachmentGuidSha256 };
     const generationValue = generationSegment.slice('generation-'.length);
     if (generationValue === UNSCOPED_MEDIA_GENERATION) {
-      return { attachmentGuid, generation: UNSCOPED_MEDIA_GENERATION, transferName };
+      return { ...identity, generation: UNSCOPED_MEDIA_GENERATION, transferName };
     }
     const generation = Number(generationValue);
     if (!Number.isSafeInteger(generation) || generation < 0) return null;
-    return { attachmentGuid, generation, transferName };
+    return { ...identity, generation, transferName };
   } catch {
     return null;
   }

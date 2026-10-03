@@ -12,6 +12,8 @@ import {
   syncSingleChat,
 } from '../sync';
 import { resolveAuthorizedRealtimeTransport } from './authorizedRealtimeTransport';
+import { supportsMessageStateSync } from '../sync/providerRepair';
+import { syncMessageState } from '../sync/messageStateSync';
 
 export const REALTIME_PREREQUISITE_RECOVERY_BUDGET_MS = 20_000;
 export const REALTIME_PREREQUISITE_CHAT_RECOVERY_BUDGET_MS = 8_000;
@@ -162,13 +164,20 @@ export async function recoverRealtimePrerequisite(
         outcome = 'stale';
         return;
       }
-      await syncDeletedMessages(db, api, {
-        supported: info.supports_message_deleted === true,
-        maxPages: REALTIME_PREREQUISITE_DELETION_MAX_PAGES,
-        shouldAbort: stopped,
-        signal: controller.signal,
-        rcsProviderInfo: info,
-      });
+      if (supportsMessageStateSync(info) && info.imessage_provider_epoch) {
+        await syncMessageState(db, api, {
+          providerEpoch: info.imessage_provider_epoch,
+          shouldAbort: stopped,
+          signal: controller.signal,
+        });
+      } else
+        await syncDeletedMessages(db, api, {
+          supported: info.supports_message_deleted === true,
+          maxPages: REALTIME_PREREQUISITE_DELETION_MAX_PAGES,
+          shouldAbort: stopped,
+          signal: controller.signal,
+          rcsProviderInfo: info,
+        });
     }
 
     outcome = stopped() ? 'stale' : 'recovered';

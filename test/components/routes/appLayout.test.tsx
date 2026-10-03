@@ -60,9 +60,10 @@ jest.mock('@/services/notifications/actions', () => ({
 }));
 jest.mock('@/services/notifications/notificationOpen', () => ({
   drainNotificationTap: jest.fn(() => Promise.resolve()),
-  openFromNotification: jest.fn(() => Promise.resolve()),
+  openNotificationPress: jest.fn(() => Promise.resolve()),
 }));
 jest.mock('@/services/notifications/pendingNav', () => ({
+  reserveNotificationTap: jest.fn(() => ({ occurrenceId: 'mock-press' })),
   takePendingNotification: jest.fn(() => null),
 }));
 jest.mock('@/services/notifications/notifeeService', () => ({
@@ -111,8 +112,10 @@ import {
 // eslint-disable-next-line import/first
 import {
   drainNotificationTap,
-  openFromNotification,
+  openNotificationPress,
 } from '@/services/notifications/notificationOpen';
+// eslint-disable-next-line import/first
+import { reserveNotificationTap } from '@/services/notifications/pendingNav';
 // eslint-disable-next-line import/first
 import { reconcileMessageNotificationGroupAfterRemoval } from '@/services/notifications/notifeeService';
 // eslint-disable-next-line import/first
@@ -132,7 +135,7 @@ const mockDrainMediaExports = drainPendingAttachmentMediaExports as jest.Mock;
 const mockHandleNotificationAction = handleNotificationAction as jest.Mock;
 const mockHandleNotificationPress = handleNotificationPress as jest.Mock;
 const mockDrainNotificationTap = drainNotificationTap as jest.Mock;
-const mockOpenFromNotification = openFromNotification as jest.Mock;
+const mockOpenFromNotification = openNotificationPress as jest.Mock;
 const mockReconcileMessageGroup = reconcileMessageNotificationGroupAfterRemoval as jest.Mock;
 
 type AppStateHandler = (state: AppStateStatus) => void;
@@ -407,5 +410,23 @@ describe('AppLayout — active AppState lock gate', () => {
 
     expect(mockDismissTo).toHaveBeenCalledWith('/home');
     expect(mockOpenChat).not.toHaveBeenCalled();
+  });
+
+  it('reserves a foreground occurrence before queuing its navigation task', async () => {
+    await mountLayout();
+    const detail = { pressOccurrenceId: 'native-receipt', notification: {} };
+
+    await act(async () => {
+      mockForegroundHandlers[0]?.({ type: EventType.PRESS, detail });
+      expect(reserveNotificationTap).toHaveBeenCalledWith(detail, expect.any(Object));
+      expect(mockOpenFromNotification).not.toHaveBeenCalled();
+      await Promise.resolve();
+    });
+
+    expect(mockOpenFromNotification).toHaveBeenCalledWith(
+      detail,
+      expect.any(Object),
+      expect.any(Object),
+    );
   });
 });

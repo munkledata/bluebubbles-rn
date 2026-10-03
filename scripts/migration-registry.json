@@ -230,6 +230,16 @@
       "upgradeTest": "test/db/migrations/0052_chat_history_deletion_boundary.test.ts",
       "schemaEvidence": "src/db/schema.ts",
       "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 53,
+      "name": "0053_versioned_server_message_state",
+      "task": "POST-02",
+      "branchPr": "codex/post02-sync-2026-10-03",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0053_versioned_server_message_state.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/services/messageStateSync.test.ts"
     }
   ]
 }

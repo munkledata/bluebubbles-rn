@@ -35,6 +35,8 @@ export const ClientErrorCode = {
 
 export const LOCATION_DELIVERY_UNCONFIRMED_COPY =
   'This location may have been delivered. Check Messages before sending a new copy.';
+export const IMESSAGE_PLAIN_TEXT_DELIVERY_UNCONFIRMED_COPY =
+  'This message may have been delivered. Check Messages before sending a new copy.';
 
 /** Friendly title per client error code (mirrors ClientMessageErrorExtension.friendlyTitles). */
 const CLIENT_ERROR_TITLES: Record<number, string> = {

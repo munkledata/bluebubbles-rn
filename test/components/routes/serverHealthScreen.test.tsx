@@ -15,7 +15,7 @@
  * every query and action remains owned by the screen's originally captured server account.
  */
 import React from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { notifyManager, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   renderWithTheme,
   screen,
@@ -284,6 +284,22 @@ async function unmountScreen(rendered: RenderedScreen): Promise<void> {
   const index = renderedScreens.indexOf(rendered);
   if (index >= 0) renderedScreens.splice(index, 1);
 }
+
+// TanStack calls this adapter synchronously, while RNTL temporarily disables the act
+// environment inside waitFor. Scope the flag to each synchronous observer delivery.
+beforeAll(() =>
+  notifyManager.setNotifyFunction((callback) => {
+    const environment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    const previous = environment.IS_REACT_ACT_ENVIRONMENT;
+    environment.IS_REACT_ACT_ENVIRONMENT = true;
+    try {
+      React.act(callback);
+    } finally {
+      environment.IS_REACT_ACT_ENVIRONMENT = previous;
+    }
+  }),
+);
+afterAll(() => notifyManager.setNotifyFunction((callback) => callback()));
 
 beforeEach(() => {
   resumeRealtimeDeliveries();

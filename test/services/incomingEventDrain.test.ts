@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { sql } from 'drizzle-orm';
+import { Message } from '@core/models';
 import {
   encodeIncomingEvent,
   EventRouter,
@@ -20,6 +21,7 @@ import { IncomingEventDrain } from '@/services/realtime/incomingEventDrain';
 import { effectivelyLocked } from '@/services/notifications/lockGate';
 import { DbEventSink, RealtimeMessageChatUnavailableError } from '@/services/realtime/dbEventSink';
 import { NotifyingEventSink } from '@/services/realtime/notifyingEventSink';
+import { RcsProviderEpochEventSink } from '@/services/realtime/rcsProviderEpochEventSink';
 import { createTestDb } from '../support/testDb';
 
 const digest: DigestBackend = {
@@ -88,6 +90,94 @@ async function waitForCondition(label: string, condition: () => boolean): Promis
 }
 
 describe('incoming event drain', () => {
+  it('retains a lean RCS receipt until recovery supplies its owner, then applies it once', async () => {
+    const { db, raw } = await createTestDb();
+    const epoch = `gpe1_${'A'.repeat(43)}`;
+    const info = { rcs: true, supports_rcs_epoch_qualified_ids: true, rcs_provider_epoch: epoch };
+    const guid = `rcs-g1.${epoch}.${Buffer.from('receipt-message').toString('base64url')}`;
+    const chatGuid = `RCS;-;g1.${epoch}.${Buffer.from('receipt-chat').toString('base64url')}`;
+    const receipt = normalizeRealtimeEvent('updated-message', { guid, dateDelivered: START });
+    if (!receipt) throw new Error('receipt fixture failed');
+    await enqueue(db, receipt);
+    let clock = START;
+    let claim = 0;
+    const recover = jest.fn(async () => undefined);
+    const sink = new DbEventSink(db, undefined, undefined, recover, () => info);
+    const router = new EventRouter(new RcsProviderEpochEventSink(sink, () => info));
+    const drain = new IncomingEventDrain(db, router, digest, {
+      now: () => clock,
+      makeLeaseToken: () => `receipt-lease-${++claim}`,
+      canScheduleWake: () => false,
+    });
+    try {
+      await drain.kick(lease());
+      expect(
+        raw
+          .prepare(
+            `SELECT state, payload, attempts, db_applied_at AS dbAppliedAt,
+        last_error_code AS lastErrorCode, next_attempt_at AS nextAttemptAt
+        FROM incoming_event_queue`,
+          )
+          .get(),
+      ).toEqual({
+        state: 'pending',
+        payload: expect.any(String),
+        attempts: 0,
+        dbAppliedAt: null,
+        lastErrorCode: 'dependency-pending',
+        nextAttemptAt: START + INCOMING_EVENT_DEPENDENCY_RETRY_MS,
+      });
+      expect(recover).toHaveBeenCalledTimes(1);
+      expect(recover).toHaveBeenCalledWith(null, expect.objectContaining({ generation: 7 }));
+      expect(raw.prepare('SELECT COUNT(*) AS count FROM messages').get()).toEqual({ count: 0 });
+
+      await sink.onEvent(
+        {
+          type: 'new-message',
+          message: Message.parse({
+            guid,
+            chatGuid,
+            providerEpoch: epoch,
+            text: 'Recovered body',
+            dateCreated: START - 1,
+            chats: [{ guid: chatGuid, providerEpoch: epoch }],
+          }),
+        },
+        'socket',
+        lease(),
+      );
+      raw.exec(`CREATE TEMP TABLE receipt_applications (count INTEGER);
+        INSERT INTO receipt_applications VALUES (0);
+        CREATE TEMP TRIGGER count_receipt_application AFTER UPDATE OF date_delivered ON messages
+        WHEN NEW.date_delivered IS NOT OLD.date_delivered
+        BEGIN UPDATE receipt_applications SET count = count + 1; END;`);
+      clock += INCOMING_EVENT_DEPENDENCY_RETRY_MS;
+      await drain.kick(lease());
+      await drain.kick(lease());
+      expect(raw.prepare('SELECT text, date_delivered AS delivered FROM messages').get()).toEqual({
+        text: 'Recovered body',
+        delivered: START,
+      });
+      expect(
+        raw
+          .prepare(
+            `SELECT state, payload, db_applied_at AS dbAppliedAt
+        FROM incoming_event_queue`,
+          )
+          .get(),
+      ).toEqual({
+        state: 'completed',
+        payload: null,
+        dbAppliedAt: expect.any(Number),
+      });
+      expect(raw.prepare('SELECT count FROM receipt_applications').get()).toEqual({ count: 1 });
+      expect(recover).toHaveBeenCalledTimes(1);
+    } finally {
+      drain.dispose();
+      raw.close();
+    }
+  });
+
   it('claims, verifies, checkpoints the domain write, and scrubs a completed payload', async () => {
     const { db, raw } = await createTestDb();
     await enqueue(db, message('drain-success'));

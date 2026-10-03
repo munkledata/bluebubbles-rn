@@ -15,6 +15,7 @@ const incrementalSync = jest.fn();
 const fullSync = jest.fn();
 const syncAllChats = jest.fn();
 const syncChatMessages = jest.fn();
+const syncProviderMessages = jest.fn();
 const getSyncMarker = jest.fn();
 const setSyncMarkerWithinTransaction = jest.fn();
 const kvSetWithinTransaction = jest.fn();
@@ -104,6 +105,10 @@ jest.mock('@/services/sync', () => ({
   syncChatMessages,
   syncDeletedMessages,
 }));
+jest.mock('@/services/sync/providerRepair', () => ({
+  ...jest.requireActual('@/services/sync/providerRepair'),
+  syncProviderMessages,
+}));
 // The stores syncControl pulls in reach `@db/database`, which loads op-sqlite's native binding.
 jest.mock('@db/database', () => ({ getDatabase: () => ({}) }));
 jest.mock('@db/repositories', () => ({
@@ -159,6 +164,7 @@ beforeEach(() => {
   syncAllChats.mockResolvedValue([]);
   incrementalSync.mockResolvedValue({ chats: 0, messages: 0 });
   fullSync.mockResolvedValue({ chats: 0, messages: 0 });
+  syncProviderMessages.mockResolvedValue({ chats: 0, messages: 0 });
   captureFullRepairPruneExposure.mockResolvedValue({
     capturedAt: 0,
     attachmentIdHighWater: 0,
@@ -1016,6 +1022,56 @@ describe('startSync vs. the tracked slot', () => {
       scope: mockAttachmentCacheScope,
     });
     expect(callOrder).toEqual(['retire', 'drain', 'retire', 'drain']);
+  });
+
+  it.each([false, true])(
+    'cleans newly hidden attachment cache after provider sync (repair=%s)',
+    async (repair) => {
+      connectSession('https://provider-cache.example', {
+        server_version: '2.0.0',
+        supports_message_state_sync: true,
+        message_state_sync_version: 1,
+        supports_provider_repair_snapshot: true,
+        imessage_provider_epoch: '11111111-1111-4111-8111-111111111111',
+      });
+      const order: string[] = [];
+      mockRetireInactiveEntries.mockImplementation(async () => {
+        order.push('retire');
+      });
+      mockDrainDueRetirements.mockImplementation(async () => {
+        order.push('drain');
+      });
+      syncProviderMessages.mockImplementationOnce(async () => {
+        order.push('provider-state');
+        return { chats: 1, messages: 2 };
+      });
+      await (repair ? startFullRepair() : startSync());
+      expect(order).toEqual(['retire', 'drain', 'provider-state', 'retire', 'drain']);
+      expect(mockRetireInactiveEntries).toHaveBeenLastCalledWith(mockSyncDb, {
+        scope: mockAttachmentCacheScope,
+      });
+      expect(mockDrainDueRetirements).toHaveBeenLastCalledWith(mockSyncDb, {
+        scope: mockAttachmentCacheScope,
+      });
+    },
+  );
+
+  it('does not start provider cleanup after account ownership is revoked', async () => {
+    connectSession('https://provider-cache.example', {
+      server_version: '2.0.0',
+      supports_message_state_sync: true,
+      message_state_sync_version: 1,
+      supports_provider_repair_snapshot: true,
+      imessage_provider_epoch: '11111111-1111-4111-8111-111111111111',
+    });
+    syncProviderMessages.mockImplementationOnce(async () => {
+      mockAccountLeaseCurrent = false;
+      return { chats: 1, messages: 2 };
+    });
+    await startSync();
+    expect(mockRetireInactiveEntries).toHaveBeenCalledTimes(1);
+    expect(mockDrainDueRetirements).toHaveBeenCalledTimes(1);
+    expect(useSyncStore.getState().status).toBe('syncing');
   });
 
   it('stops after account ownership expires without a session-epoch change', async () => {

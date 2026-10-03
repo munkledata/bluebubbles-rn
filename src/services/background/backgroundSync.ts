@@ -283,6 +283,10 @@ export async function executeBackgroundSyncTask(): Promise<BackgroundTask.Backgr
           callbackLifetime.signal,
           () => scope.isCurrent() && info.supports_imessage_location === true,
           currentRcsProviderEpoch(info),
+          (chatGuid?: string) =>
+            scope.isCurrent() &&
+            info.supports_imessage_plain_text === true &&
+            (chatGuid === undefined || /^(?:iMessage|any);-;.+$/u.test(chatGuid)),
         );
       },
       flushDiagnostics: (db, client, info, scope) =>
