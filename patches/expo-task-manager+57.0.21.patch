@@ -6,7 +6,7 @@ index 44ed4fd..00e6e20 100644
    implementation project(':unimodules-app-loader')
    api "androidx.core:core:1.17.0"
    compileOnly "com.facebook.react:react-android"
-+  testRuntimeOnly "com.facebook.react:react-android"
++  testImplementation "com.facebook.react:react-android"
    testImplementation 'junit:junit:4.13.2'
    testImplementation 'org.robolectric:robolectric:4.16'
  }
