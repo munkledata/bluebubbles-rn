@@ -799,11 +799,18 @@ All configured aggregate and critical-file floors passed.
 The simultaneous ordinary Jest run crashed after 152 passing suites with exit 139. The macOS
 report identifies `EXC_BAD_ACCESS / SIGSEGV` in V8 garbage collection; it reports no failed test
 assertion. That incomplete run is not a pass. The coverage configuration includes both complete
-base Jest projects, but an ordinary serial rerun remains scheduled on the final source. The
+base Jest projects. The ordinary serial rerun on final executable source
+`b7b92e84b697adb05df4756daf4002f33e705848` then passed **540 suites / 6,798 tests**, with two
+existing skips, in 128.810 seconds. The
 reviewed native watchdog follow-up changes only its durable patch and two build-guard files;
-it changes no TypeScript or DB source. Its own 27 guard tests pass. Native tests, compilation,
+it changes no TypeScript or DB source. Its own 27 guard tests pass; the final combined artifact,
+native-path and legal-AAB guard suite passes **39 tests**. Fresh dependency installation, Android
+JavaScript export and clean native project generation also pass with a clean source tree. No JVM
+ran. The final documentation-only child is bound by the new release preparation receipt. Native tests, compilation,
 signed artifacts and replacement-device proof remain pending. Receipts: `native-fix-host-gates.json`,
 `native-fix-ui-coverage.log`, `native-fix-jest-crash.json`, and `bg-watchdog-implementation-receipt.md`.
+Final rerun and generation receipts are `watchdog-final-jest-serial.log`,
+`watchdog-final-verification.json`, and `watchdog-final-gates.json`.
 
 ## Current conclusion and remaining acceptance
 
@@ -831,6 +838,9 @@ Settings, banner/copy, filename and App Lock repairs pass the combined **539-sui
 host milestone, but the installed v80 does not contain them. The initial sync failure's cause remains
 unexplained; added diagnostics support a future reproduction. Successful scoped observations
 do not close the remaining device matrix or the raw dependency, legal, and wider-release gates.
+The later native corrections and watchdog pass the **540-suite / 6,798-test** ordinary host gate and
+39 final artifact-guard tests. Their **42 native registry, TaskService, deadline and Screens tests**
+remain uncompiled/unrun, and Play v80 contains none of these new native corrections.
 
 1. Bind any new Android artifact containing the host-verified combined repairs to its own
    source/release identity. Repeat automatic expired-cursor repair, invalidated-page recovery, and

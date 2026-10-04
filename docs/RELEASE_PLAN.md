@@ -96,7 +96,10 @@ prepared Android candidate predates these corrections and must be superseded bef
 The reviewed combined source checkpoint `15874ff` includes those corrections and passes its static
 gates. Its full coverage run passes 540 suites / 6,798 tests and all UI floors, with two existing
 skips. The simultaneous ordinary Jest process crashed in V8 garbage collection (exit 139), so that
-incomplete run is not a pass; a serial ordinary rerun remains scheduled. A later v80 warm-background
+incomplete run is not a pass. The serial ordinary rerun on final executable source
+`b7b92e84b697adb05df4756daf4002f33e705848` passes **540 suites / 6,798 tests**, with two existing
+skips. Final artifact/native-path guard units pass **39 tests**; fresh dependency installation,
+Android JavaScript export and clean native generation pass without a JVM. A later v80 warm-background
 unreachable-server lane took 194.059 seconds to return RETRY, only after foregrounding. A separate
 native scheduler-wait watchdog now passes independent source review and 27 focused guard tests;
 its six additional native tests remain uncompiled/unrun. `15874ff` is not the final
