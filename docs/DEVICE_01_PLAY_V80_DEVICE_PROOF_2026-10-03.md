@@ -812,6 +812,115 @@ signed artifacts and replacement-device proof remain pending. Receipts: `native-
 Final rerun and generation receipts are `watchdog-final-jest-serial.log`,
 `watchdog-final-verification.json`, and `watchdog-final-gates.json`.
 
+### Renewed installed-v80 evidence through capture 283 — 2026-10-04 UTC
+
+The owner continued bounded tests on the same installed Play v80 before the rebuild. These
+observations supplement the original 81-record ledger; no new aggregate observation count is
+assigned here. Private receipts and captures remain under `BB/gator-prebuild-remaining-20261003/`.
+The independently reconciled notes are `RENEWED_DEVICE_REPORT_APPENDIX.md`,
+`DL01_REMAINDER_FINDINGS.md`, and `FEAT07_MEDIA_REMAINDER_FINDINGS.md`.
+
+| Case                                          | New evidence                                                                                                                                                                                                                                                                                                                                                                       | Limit                                                                                                                                                                                                                                                                       |
+| --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Four finite hostile-download cases            | False-larger length rejected without a settled file; missing-length EOF accepted 68 bytes; finite chunked response brought the total to two files / 136 bytes; oversized image dimensions retained those two files across four attachment rows. All six live ownership fields and temporary files/bytes were zero in each episode. Captures 148/151, 155/156, 158/159 and 160/161. | False-larger made two requests, automatic plus manual retry; the other cases made one each. The first report was PARTIAL because six unrelated rows were missing; the other three were COMPLETE. Socket finish counters are not native download success.                    |
+| Reminder arrival and consumption              | Two generic reminders opened the synthetic chat on tap; captures 174 and 179 show No reminders afterward.                                                                                                                                                                                                                                                                          | Both were warm-process cases. The second ordinary kill retained PID 21680, so it supplies no cold-process or exact-alarm proof.                                                                                                                                             |
+| Audio and camera                              | After fixture connectivity returned, a three-second audio attachment showed progressing playback controls through its endpoint; the fixture counted one download. A one-time camera grant opened Samsung Camera and returned to Gator.                                                                                                                                             | No independent audible-output measurement, camera capture, staged camera result or send.                                                                                                                                                                                    |
+| Gallery selection and revocation              | One owned synthetic image was staged and removed in captures 192–193. After explicit permission revocation, 240 shows the denied-access explanation and 241 returns to the usable attachment tray with Camera and Files.                                                                                                                                                           | The gallery initially contained 13 preselected items, so this is not a clean one-item grant test. The owned selection is operator-attributed; unrelated gallery content stays private.                                                                                      |
+| Distinct A/B account canaries                 | After normal A Disconnect, B showed its own chats, empty composers, no results for the known A search phrase, and positive B search results in captures 209–214.                                                                                                                                                                                                                   | Covers these visible canaries and the authored draft, not exhaustive DB/cache erasure or device-global preference isolation.                                                                                                                                                |
+| Active upload cancellation                    | B's first upload consumed the full 6,291,975-byte multipart body, then its connection closed after Cancel Sending, 43.502 seconds after admission. The fixture recorded one client closure, zero expiry/release and zero successful sends; captures 216–218.                                                                                                                       | A genuine native cancellation pass while the response was held. UI-to-close latency and cancellation during blocked body transfer were not measured. Earlier A attempts were inconclusive: one expired before cancellation; the other's paused observer could hide closure. |
+| Two-slot upload limit and queued cancellation | Capture 232 shows Sending 3 files; 233 shows Sending 2 files after cancelling the third. Both admitted requests remained fully read with responses held; starts stayed at 11 with two active requests. Releasing exactly those two after 51.386 seconds left active zero and no twelfth request.                                                                                   | `upload-queue-proven-{before,after,settled}.json` and later restart receipts establish this finite queued-cancel episode. Earlier timing attempts remain inconclusive. This is not successful message delivery or every queue/crash boundary.                               |
+| Shared-image discard and cold no-replay       | One owned image opened New Message. Confirmed Discard returned to the prior B chat, then Back reached inbox. A later verified force-stop / explicit MainActivity cold launch opened inbox; a separate new-chat route was blank without a staged attachment, captures 228–239.                                                                                                      | `share-discard-restart.json` establishes manual cold relaunch, not killed-process push. Native staging-file deletion is unobserved. Capture 236 is excluded after a failed launch command; 237 alone proves only a blank deep-link route.                                   |
+| Video playback, Home and resume               | Video progressed from 0:00 to 0:04, returned HOT after 3.0897 seconds at Home, retained position at 0:05, then played to 0:08 and paused at 0:09; captures 255–256 and 260–262.                                                                                                                                                                                                    | Supports brief Home/resume and subsequent play/pause, not uninterrupted background playback, exact pause timing, audible output, cold recovery or playback to the end. Private Home-transition capture 257 is excluded.                                                     |
+| Video Save and Share                          | The new owned MediaStore video and the copy received through local Termux Share both matched the fixture's SHA-256 and 14,704,688-byte asset identity.                                                                                                                                                                                                                             | `media-video-save-result.json`, `media-video-share-result.json` and capture 272 prove this asset's byte-preserving local export. No network recipient or universal provider/codec claim.                                                                                    |
+| PDF pixels                                    | The exact 610-byte valid fixture rendered visibly in Firefox, capture 278. Independent host reproduction validated and rendered it with installed Poppler tools without errors.                                                                                                                                                                                                    | Drive PDF Viewer remained blank at 277. Firefox closes the earlier missing pixel proof for this viewer; Drive compatibility remains unresolved, without a demonstrated Gator/PDF defect or a phone-file hash comparison.                                                    |
+
+The final queue/restart receipts retain 11 starts, zero active uploads and zero successful sends.
+General API traffic continued normally; this is not network silence. The shared-image intake
+preceded the final queue trial's two requests, so only the later restart interval had constant upload
+counts. A's normal Disconnect had a separate 54.9155-second quiet observation. No equivalent
+renewed B quiet-window claim is made.
+
+The photo tests also exposed an action-target problem: holding the image center opened the viewer,
+while holding the parent bubble's narrow padding reached Cancel Sending. The source correction
+described below forwards the existing long-press action to single/gallery images; the installed-v80
+parent-padding gesture was sufficient for the positive cancellation cases above.
+
+Cleanup restored the image auto-save destination to **Gator album** in capture 282. The permission
+receipt `media-final-permission-state.json` matches the grant baseline: notifications granted;
+selected-photo, broad image/video, camera and microphone access denied. This records actual final
+grants, not automatic expiry of the one-time camera permission. `owned-upload-file-cleanup.json`
+verifies the owned test PNG's matching MediaStore row and file were removed. The saved video row
+was absent after its identity-checked removal (`media-video-export-cleanup.json`); capture 273
+shows the exact Termux copy removed and its absence checked. These are specific exported-file
+cleanup results, not complete private-cache or share-staging erasure.
+
+The operator selected Close for the current Firefox PDF tab through capture 280; no Download or
+Add to Drive action was taken. Normal FEAT07 Disconnect returned to Get Started at 283. Its helper
+result (`feat07-remaining-result-d650e25a-7d6d-4126-8e12-fcedaeaafb0e.json`) records
+`closed: true`, `privateRemoved: true`, no failure, and zero active download connections.
+Those fixture totals are not an additional quiet-account or complete Android cleanup proof.
+
+### Warm notification actions and cleanup through capture 306 — 2026-10-04 UTC
+
+The fresh `notif01` episode produced two synthetic conversation notices plus one summary. Mark as
+read on A removed its child while retaining B and the summary: the projected native records changed
+from three to two. Capture 290 independently shows A read and B with one unread message. This is
+scoped evidence that the action affected the intended conversation while preserving the sibling.
+The UI-inspector attempts at 285–286 failed with ADB exit 1 in the system shade and are not credited
+as successful tree inspections; later screenshots 287–299 and the native projections supply the
+action evidence.
+
+The operator authored a disposable inline reply on B in capture 295 and tapped Send. Capture 297
+shows the authored preview in B; 298 shows its retained bubble with Not Found / Not Delivered;
+299 exposes the failure options. The fixture deliberately returns HTTP 404 for `/message/text`
+and has no real outbound messaging transport. This proves warm inline input, correct-conversation
+handoff and visible retained failure, not a successful send, delivery, retry or recipient read.
+The ordinary-kill attempt retained the same process (`notif-inline-ordinary-kill.json`), so the
+episode is warm-only and no cold reminder repeat or killed-process inline action is credited.
+
+Normal Disconnect was confirmed through 304 and settled at Welcome / Get Started in 306. The
+post-Disconnect projection contains zero Gator notification records. The helper ended without
+failure, removed its private receipt, and the owned reverse mapping was removed successfully
+(`notification-inline-cleanup.json`). Notification projections `notif-inline-{initial,after-mark-A,
+after-reply,after-disconnect}.json` and
+`notification-result-8c08b7af-cfa5-4642-ae90-5084f5ea9c99.json` are retained under
+`BB/gator-play-v80-device-20261003/`; the captures, ordinary-kill and reverse-cleanup receipts are in
+the continuation directory. These cleanup observations do not establish a general quiet interval,
+private SDK erasure or new-build notification privacy behavior. The scoped notification-action
+episode is complete; cold, locked and successful-delivery branches remain open.
+
+### Current scheduling and photo-action source checkpoint — 2026-10-04 UTC
+
+The current clean host-tested candidate is **`2f853fa053e51145db6c586e45efd84b39897035`**.
+Its production source is **`5d34c223c825152330a7d13bbf2d6fc8d157257c`**; the child changes only
+the Settings component test's awaited interactions. The previously prepared `5aadc5a` candidate
+is superseded. No new native build, signed artifact, version consumption or upload is claimed.
+
+The production changes make scheduling dismissal and editing explicit, preserve the exact pending
+occurrence during cancellation, and forward photo long-press actions through single/gallery
+attachments. Server cancellation accepts only the declared typed absence as idempotent success;
+other failures retain the local handle, and a local occurrence that changed or began sending is not
+silently deleted. Removing a Mac schedule cannot recall an already-dispatched message.
+These source repairs require new-build scheduling modal/keyboard and physical
+photo tap/hold acceptance.
+
+`scheduling-final-verification.json` binds serial full Jest and UI-coverage passes to this candidate:
+**542 suites / 6,849 tests** in each run, with two existing opt-in suites/tests skipped, zero failed
+tests and zero console warning/error blocks. Coverage passes aggregate and critical-file floors:
+**88.76% statements, 83.11% branches, 89.10% functions and 91.73% lines**. Typecheck, strict lint,
+formatting, architecture **52**, migrations **5**, fast DB **101 passed / 14 full-only skipped**,
+and **39** Android build/native-path host guard tests pass. The scanner records **2,249 mutations,
+zero errors**, with zero reconciliation shifts, rekeys or additions. The initial full run's three
+console-error blocks and the attempted artifact check's failure remain retained; the later test-only
+correction supplies the clean final host runs. Actual merged-manifest and release-AAB validation
+remain pending because no new native artifacts exist. No host test substitutes for the unrun native
+tests or replacement-device replays described above.
+
+The Android JavaScript export subsequently passed on the unchanged clean `2f853fa` candidate in
+**11.802 seconds** (`scheduling-final-export-result.json`). It did not launch the JVM or perform a
+native build. `2f853fa` remains the tested source parent; the final documentation-only child's
+identity is recorded in an external receipt rather than recursively naming its own commit here.
+
 ## Current conclusion and remaining acceptance
 
 **Continuation authorized, 2026-10-03:** The owner requested the remaining tests and fixes,
@@ -825,8 +934,9 @@ session owns Mac source repairs and connectivity diagnostics. Biometric, actual-
 second-device, and genuine API-37 acceptance remain dependent on their respective participation
 or hardware. Optional and owner-dropped scope is unchanged.
 
-The original bounded testing round completed its cleanup. The active continuation has its own
-fixture, phone reservation, wake helper, and pending owner actions. The original round established useful exact-v80 native
+The original bounded testing round completed its cleanup. The renewed fixture episodes also ended
+through normal Disconnect and scoped helper cleanup; the phone reservation and wake helper remain
+owner-controlled. The original round established useful exact-v80 native
 behavior: normal encrypted-DB rekey/restart continuity, selected long-ID/cache and download cases,
 one local encrypted-backup customization roundtrip, notification arrival/tap/grouping cases, and
 authorized live text/edit/reaction/reply/attachment operations within the limits above. The initial
@@ -841,6 +951,9 @@ do not close the remaining device matrix or the raw dependency, legal, and wider
 The later native corrections and watchdog pass the **540-suite / 6,798-test** ordinary host gate and
 39 final artifact-guard tests. Their **42 native registry, TaskService, deadline and Screens tests**
 remain uncompiled/unrun, and Play v80 contains none of these new native corrections.
+The subsequent scheduling/photo-action candidate `2f853fa` passes **542 suites / 6,849 tests** and
+all configured coverage floors. That supersedes the prepared `5aadc5a` source candidate, not the
+installed Play v80 artifact; native build and exact-device acceptance still have not happened.
 
 1. Bind any new Android artifact containing the host-verified combined repairs to its own
    source/release identity. Repeat automatic expired-cursor repair, invalidated-page recovery, and
@@ -854,17 +967,25 @@ remain uncompiled/unrun, and Play v80 contains none of these new native correcti
    metadata; Kotlin execution, on-device keyboard/font layout and actual upload bytes/name remain open.
 4. Verify the source App Lock old-notice privacy repair on the replacement candidate. Warm biometric
    unlock and the finite grace timing passed in the continuation; cold launch, post-unlock drain,
-   all locked envelope/action versions, replay/isolation, notification
-   inline actions, and native cancellation-failure cases were not established by this round.
+   all locked envelope/action versions, replay/isolation and native cancellation-failure cases remain
+   open. Warm Mark as read and correct-conversation inline-reply failure retention now pass within
+   the stated fixture scope. Cold/locked actions, successful inline delivery and a cold reminder
+   repeat are not established.
 5. Keep messaging proof bounded. Direct recipient-device reading/rendering, exact-B server unsend
    attribution, live inbound messages, RCS/SMS service, new-conversation creation, complete
-   thread/receipt behavior, real scheduled-message delivery, upload cancellation/retry, audio upload, and provider
-   capability transitions remain untested here. C, the image, and D lack retained delivery proof.
-6. Keep download/media/backup results scoped. Missing off-screen owner rows, remaining hostile
-   length/content/concurrency and quota cases, uninterrupted video resume, PDF pixel rendering,
-   downloaded/uploaded content hashes, temporary export deletion, server-slot and interrupted
-   restore, and recording-file deletion remain open. Positive customization categories and the
-   bounded cross-account import now pass; they do not establish complete account isolation.
+   thread/receipt behavior, real scheduled-message delivery, blocked-body upload cancellation/retry,
+   audio upload, and provider capability transitions remain untested here. Active held-response and
+   two-slot queued cancellation now pass within their stated limits. C, the image, and D lack
+   retained delivery proof. New scheduling and photo-action source still needs rebuilt-device replay.
+6. Keep download/media/backup results scoped. The four additional length/dimension cases now show
+   all six live owners zero; this does not fill missing rows in earlier captures or prove every
+   concurrency/quota case. Brief video Home/resume, byte-identical video Save/Share, Firefox PDF
+   pixels, and the named exported-file removals now pass. Uninterrupted background playback,
+   Drive viewer compatibility, arbitrary downloaded/uploaded hashes, private temporary-export or
+   share-staging deletion, server-slot/interrupted restore and recording-file deletion remain open.
+   Positive customization categories, known distinct-account canaries and the bounded cross-account
+   import do not establish complete account isolation. The scoped camera/gallery/revocation checks
+   also leave the broader permission matrix open.
 7. Keep native DB claims bounded. This session does not prove death during migration, an active WAL
    write or rekey, wrong-key rejection, concurrent SQLCipher behavior, interrupted backup restore,
    or complete cache/account erasure. Prepared prior-version migration, exhaustive distinct-account

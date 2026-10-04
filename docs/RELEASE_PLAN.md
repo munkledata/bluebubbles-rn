@@ -113,6 +113,23 @@ observations retain their distinct delivery limits. Automatic retry reached the 
 sync failure; independently reconciled history parity, general privacy, and the full journey remain
 unproven. Raw dependency audit failures remain unresolved and are not waived by the local mitigations.
 
+**Current combined-build checkpoint, 2026-10-04 UTC:** clean host-tested source
+`2f853fa053e51145db6c586e45efd84b39897035` includes the approved Gator scheduling sheet,
+both cancellation repairs and photo tap/hold actions. Production source is `5d34c22`; the child
+only awaits two Settings-test interactions. Serial full Jest and UI coverage each pass
+**542 suites / 6,849 tests**, with two existing skips and zero console warning/error blocks.
+Coverage floors, static/database gates and Android JavaScript export pass. The renewed
+[v80 device report](./DEVICE_01_PLAY_V80_DEVICE_PROOF_2026-10-03.md) records the remaining bounded
+download, account, upload, share, media and notification-action checks and their limitations.
+All older `0.1.60` preparations, including `android-0.1.60-5aadc5a-20261004015037`, are
+superseded. Final documentation is copied into a clean child; its exact source/tree and fresh
+preparation are retained in `BB/gator-prebuild-remaining-20261003/combined-build-handoff.json`.
+Preparation consumes no Android version code. The 42 added native tests, native compilation,
+signed artifact validation and replacement-phone replays remain pending until the coordinated
+AMFI-on build window. Mac source `5d9ac754` remains installed; its session confirmed signature,
+HTTP health and saved boot-setting rollback checks. This checkpoint changes no task status or
+the frozen v77 checklist boundary, and is not approval for a broader release.
+
 **Historical v79 submission/device checkpoint:** `0.1.58` / version code `79` was built from
 source `a0add484c00fdda06b7ee2c0a5bb5221d256d292` and promoted as release commit
 `4cbb05064ec9f891f00cb0a4f697435206f54fce` by run
