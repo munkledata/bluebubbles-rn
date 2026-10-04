@@ -29,6 +29,7 @@ jest.mock('@ui/toast/toastStore', () => ({ showToast: jest.fn() }));
 // Mocks must be registered before these modules evaluate their native imports.
 // eslint-disable-next-line import/first
 import { ApiError } from '@core/api/errors';
+// eslint-disable-next-line import/first
 import {
   MAX_IMESSAGE_ATTACHMENT_UPLOAD_BYTES,
   MAX_SEND_ATTACHMENT_TEXT_BYTES,
@@ -74,6 +75,7 @@ function upload(
   http: HttpClient,
   options: {
     chatGuid?: string;
+    tempGuid?: string;
     timeoutMs?: number;
     clientAttemptGeneration?: number;
     service?: 'iMessage' | 'RCS';
@@ -90,13 +92,13 @@ function upload(
   return expoAttachmentUploader({
     http,
     chatGuid: options.chatGuid ?? 'RCS;-;chat-1',
-    tempGuid: 'temp-1',
+    tempGuid: options.tempGuid ?? 'temp-1',
     clientAttemptGeneration: options.clientAttemptGeneration,
     service: options.service,
     voice: options.voice,
     text: options.text,
     assertNetworkStart: options.assertNetworkStart,
-    attachmentGuid: 'att-1',
+    attachmentGuid: `att-${options.tempGuid ?? '1'}`,
     name: options.name ?? 'photo.jpg',
     uri: options.uri ?? 'file:///photo.jpg',
     mimeType: options.mimeType ?? 'image/jpeg',
@@ -111,6 +113,54 @@ async function flushMicrotasks(count = 8): Promise<void> {
 }
 
 describe('native attachment upload account scope', () => {
+  it.each(['../report.pdf', 'report".pdf', '\ud800.pdf', 'a'.repeat(256) + '.pdf'])(
+    'rejects unsafe names before reading a file or starting a native task',
+    async (name) => {
+      const http = new HttpClient({
+        getOrigin: () => 'https://test.example',
+        getPassword: () => 'test-password',
+      });
+      await expect(upload(http, { name })).rejects.toMatchObject({
+        name: 'ApiError',
+        kind: 'local_file',
+        message: 'Attachment filename is invalid; choose another file or rename it.',
+      });
+      expect(mockGetInfoAsync).not.toHaveBeenCalled();
+      expect(mockCreateUploadTask).not.toHaveBeenCalled();
+      expect(uploadRegistry.cancelAll()).toBe(0);
+    },
+  );
+
+  it('keeps same-name concurrent uploads tied to their separate source files', async () => {
+    mockGetInfoAsync.mockResolvedValue({ exists: true, size: 42 });
+    const http = new HttpClient({
+      getOrigin: () => 'https://test.example',
+      getPassword: () => 'test-password',
+    });
+    await Promise.all(
+      ['first', 'second'].map((id) =>
+        upload(http, {
+          tempGuid: id,
+          name: 'résumé%22.pdf',
+          mimeType: 'application/pdf',
+          uri: `file:///cache/${id}.pdf`,
+        }),
+      ),
+    );
+    expect(
+      mockCreateUploadTask.mock.calls.map((call) => ({
+        uri: call[1],
+        name: call[2].gatorFileName,
+        tempGuid: call[2].parameters.tempGuid,
+      })),
+    ).toEqual([
+      { uri: 'file:///cache/first.pdf', name: 'résumé%22.pdf', tempGuid: 'first' },
+      { uri: 'file:///cache/second.pdf', name: 'résumé%22.pdf', tempGuid: 'second' },
+    ]);
+    expect(mockRemoveSubscription).toHaveBeenCalledTimes(2);
+    expect(uploadRegistry.cancelAll()).toBe(0);
+  });
+
   it('marks only an explicit M4A iMessage voice upload', async () => {
     mockUploadAsync.mockResolvedValueOnce({
       status: 200,
@@ -138,7 +188,7 @@ describe('native attachment upload account scope', () => {
     });
   });
 
-  it('uses the multipart filename for an iMessage Files-picker cache copy', async () => {
+  it('preserves the original multipart filename for an iMessage Files-picker cache copy', async () => {
     mockUploadAsync.mockResolvedValueOnce({
       status: 200,
       body: JSON.stringify({
@@ -164,6 +214,7 @@ describe('native attachment upload account scope', () => {
     expect(assertNetworkStart).toHaveBeenCalledTimes(1);
     const [, nativeUri, options] = mockCreateUploadTask.mock.calls[0]!;
     expect(nativeUri).toBe('file:///cache/DocumentPicker/uuid-copy.jpg');
+    expect(options.gatorFileName).toBe('original-photo.jpg');
     expect(options.parameters).toMatchObject({
       chatGuid: 'any;-;+15551234567',
       tempGuid: 'temp-1',
@@ -199,6 +250,7 @@ describe('native attachment upload account scope', () => {
     await expect(run).resolves.toMatchObject({ guid: 'pdf-message-guid' });
     const [, , options] = mockCreateUploadTask.mock.calls[0]!;
     expect(options.mimeType).toBe('application/pdf');
+    expect(options.gatorFileName).toBe('original-report.pdf');
     expect(options.parameters).not.toHaveProperty('name');
   });
 
@@ -235,6 +287,7 @@ describe('native attachment upload account scope', () => {
       expect(mockCreateUploadTask).toHaveBeenCalledTimes(1);
       const [, , options] = mockCreateUploadTask.mock.calls[0]!;
       expect(options.parameters.text).toBe(caption);
+      expect(options.gatorFileName).toBe(name);
       expect(options.parameters).not.toHaveProperty('name');
       expect(options.parameters).not.toHaveProperty('clientAttemptGeneration');
     },

@@ -1,5 +1,6 @@
 import ky from 'ky';
 import { HttpClient } from '@core/api/http';
+import { ApiError } from '@core/api/errors';
 import * as messageStateApi from '@core/api/endpoints/messageState';
 import * as repairApi from '@core/api/endpoints/repairSnapshot';
 
@@ -109,4 +110,103 @@ it('rejects overlarge or mixed-provider state payloads before returning a page',
     }),
   );
   await expect(messageStateApi.page(client, 'previous')).rejects.toThrow();
+});
+
+describe.each(['page', 'activeMessage'] as const)('%s recovery error boundary', (endpoint) => {
+  const request = (http = client, signal?: AbortSignal): Promise<unknown> =>
+    endpoint === 'page'
+      ? messageStateApi.page(http, 'previous-cursor', signal)
+      : messageStateApi.activeMessage(http, 'restored-message', providerEpoch, signal);
+  const errorResponse = (body: string, status = 409) =>
+    new Response(body, { status, headers: { 'content-type': 'application/json' } });
+  const repairBody = JSON.stringify({
+    status: 409,
+    error: { type: 'repair_required', message: 'message state requires provider-scoped repair' },
+  });
+
+  it('classifies the declared repair_required JSON response through HttpClient', async () => {
+    mockKy.mockResolvedValueOnce(errorResponse(repairBody));
+
+    const error = await request().catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(messageStateApi.MessageStateRepairRequiredError);
+    expect(error).toMatchObject({
+      cause: { status: 409, kind: 'bad_request', serverErrorType: 'repair_required' },
+    });
+    expect(mockKy).toHaveBeenCalledTimes(1);
+    expect(mockKy.mock.calls[0][1].headers.Authorization).toBe('Bearer fixture-only');
+  });
+
+  it.each([
+    ['unrecognized type', JSON.stringify({ error: { type: 'other_conflict' } })],
+    ['missing type', JSON.stringify({ error: { message: 'repair_required' } })],
+    ['malformed JSON', '{broken'],
+    [
+      'oversized body',
+      JSON.stringify({ error: { type: 'repair_required', message: 'x'.repeat(4096) } }),
+    ],
+  ])('keeps %s conflicts as ordinary HTTP errors', async (_name, body) => {
+    mockKy.mockResolvedValueOnce(errorResponse(body));
+
+    const error = await request().catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(ApiError);
+    expect(error).toMatchObject({ status: 409, kind: 'bad_request' });
+    expect(error).not.toBeInstanceOf(messageStateApi.MessageStateRepairRequiredError);
+    expect(mockKy).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([401, 403])(
+    'preserves HTTP %i authorization failure despite a repair type',
+    async (status) => {
+      mockKy.mockResolvedValueOnce(errorResponse(repairBody, status));
+
+      await expect(request()).rejects.toMatchObject({ status, kind: 'unauthorized' });
+
+      expect(mockKy).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it('keeps cancellation authoritative when a repair response arrives after retirement', async () => {
+    const lifetime = new AbortController();
+    const retiredClient = new HttpClient({
+      getOrigin: () => 'https://fixture.example',
+      getPassword: () => 'fixture-only',
+      lifetimeSignal: lifetime.signal,
+    }).pinTransport();
+    mockKy.mockImplementationOnce(async () => {
+      lifetime.abort('session retired');
+      return errorResponse(repairBody);
+    });
+
+    await expect(request(retiredClient)).rejects.toMatchObject({ kind: 'cancelled' });
+    await expect(request(retiredClient)).rejects.toMatchObject({ kind: 'cancelled' });
+
+    expect(mockKy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not send a request with a revoked pinned account credential', async () => {
+    let password = 'original-fixture';
+    const pinned = new HttpClient({
+      getOrigin: () => 'https://fixture.example',
+      getPassword: () => password,
+    }).pinTransport();
+    password = 'replacement-fixture';
+
+    await expect(request(pinned)).rejects.toMatchObject({ kind: 'cancelled' });
+
+    expect(mockKy).not.toHaveBeenCalled();
+  });
+});
+
+it('preserves missing restored-message hydration as null', async () => {
+  mockKy.mockResolvedValueOnce(
+    new Response(JSON.stringify({ error: { type: 'message_not_found' } }), {
+      status: 404,
+      headers: { 'content-type': 'application/json' },
+    }),
+  );
+
+  await expect(messageStateApi.activeMessage(client, 'missing', providerEpoch)).resolves.toBeNull();
+  expect(mockKy).toHaveBeenCalledTimes(1);
 });

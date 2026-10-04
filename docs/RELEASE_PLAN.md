@@ -1,6 +1,6 @@
 # Release plan
 
-> **Status:** ACTIVE — created 2026-09-13.
+> **Status:** ACTIVE — created 2026-09-13; latest artifact checkpoint updated 2026-10-03.
 >
 > **Authority:** This document is the only task-status authority for `RELEASE-01`, `STORE-01`,
 > `RELEASE-02`, and `RELEASE-GATE-01`. The remediation tracker remains authoritative for its 107
@@ -16,6 +16,9 @@ Use the related documents for their narrower purposes:
   `DEVICE-01` and every task-specific Android acceptance result.
 - [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md) is the operational checklist for one exact
   candidate.
+- [`DEVICE_01_PLAY_V80_DEVICE_PROOF_2026-10-03.md`](./DEVICE_01_PLAY_V80_DEVICE_PROOF_2026-10-03.md)
+  records the completed bounded v80 phone-testing round and separate host proof for two subsequent fixes;
+  it does not close the general journey or broader release gates.
 - [`STORE_01G_INTERNAL_TESTING_RUNBOOK.md`](./STORE_01G_INTERNAL_TESTING_RUNBOOK.md) is the
   superseded v63 execution snapshot and must be refreshed before any current staged-server round.
 - [`DL_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md`](./DL_01_PLAY_V75_DEVICE_PROOF_2026-09-18.md)
@@ -46,13 +49,39 @@ the staged-server journey and broader release gates are not complete.
 ## Current candidate
 
 The current candidate table is the frozen release-checklist boundary, not the latest artifact on the
-Internal track. Play `0.1.57` / version code `78` is the latest live Internal Testing artifact and supplies the
-task-scoped `PERM-01`, `UI-01`, and `THEME-01A` evidence recorded in the remediation plan. The table
-below deliberately remains frozen to v77 because the operational release checklist has not been
-rebound to v78 and v78 has not completed the broader staged journey, artifact ledger, or release
-matrix. No v78 task result transfers into a v77-only release row.
+Internal track. Play `0.1.59` / version code `80` is the latest live Internal Testing artifact.
+The table below deliberately remains frozen to v77 because the operational release checklist has
+not been rebound. No later artifact's task result transfers into a v77-only release row. V78's
+task-scoped `PERM-01`, `UI-01`, and `THEME-01A` evidence remains recorded in the remediation plan.
 
-**Latest submitted artifact — not a checklist rebind:** `0.1.58` / version code `79` was built from
+**Latest live artifact, 2026-10-03 — not a checklist rebind:** `0.1.59` / code `80` was built from
+source `bf1a9116463aed2bc5e420a3b5d8b6e7c963ead2` and promoted as release commit
+`acf08e7ee2ad68aceb2fbc104f409124627034a7`. The retained
+`gator-release-0.1.59-v80-acf08e7.aab` is 58,153,376 bytes with SHA-256
+`4430c8edb5fc29484b75a73ed8afd3755ed0a9bc80e3a04e673f5e794eb755cd`.
+The private release receipt (`BB/gator-android-release-2026-10-03/RELEASE_REPORT.json`) records the clean
+successful build, artifact validation, independent review, and completed Internal submission
+`5c4dce7e-d8af-4c9a-909a-7bfa4e455e3c`. Android Publisher read-back confirmed Internal `completed`
+with no releases on the other tracks. The later
+[v80 device report](./DEVICE_01_PLAY_V80_DEVICE_PROOF_2026-10-03.md) binds the Play-installed,
+nondebuggable API-36 package to scoped verification of its four delivered APKs. The release receipt's
+original no-device-evidence statement describes the earlier submission checkpoint, not the later
+phone session. Neither this update nor the device report changes the four task statuses below.
+Private receipt paths in this checkpoint are relative to the checkout's parent directory.
+
+The phone has since reproduced automatic sync-repair failure and loss of surviving notification
+history on cold-process withdrawal. Their subsequent source fixes pass the combined host milestone
+(`BB/gator-play-v80-device-20261003/combined-repair-milestone-cjZ2Bd/result.json`)
+(538 suites / 6,702 tests, two existing opt-in skips; architecture 52/52; migrations 5/5), but
+**neither fix is installed in v80**. A new candidate and exact-device replays remain required.
+Settings-label search, banner/offline-copy findings, and the documented App Lock exposure of older
+detailed notices remain open. Live text/edit/reaction, reply, Unsend, image, and captioned-PDF
+observations are recorded with their distinct delivery limits; the PDF filename-preservation issue
+also remains open. Automatic retry reached the UI's up-to-date state after an unexplained
+sync failure; independently reconciled history parity, general privacy, and the full journey remain
+unproven. Raw dependency audit failures remain unresolved and are not waived by the local mitigations.
+
+**Historical v79 submission/device checkpoint:** `0.1.58` / version code `79` was built from
 source `a0add484c00fdda06b7ee2c0a5bb5221d256d292` and promoted as release commit
 `4cbb05064ec9f891f00cb0a4f697435206f54fce` by run
 `android-0.1.58-a0add48-20260929062534`. The retained
@@ -86,7 +115,7 @@ and the revised privacy/store disclosures. It therefore provides no Current Loca
 send, retry, background-containment, or Data Safety evidence. Shipping that feature requires an
 explicit rebind to a new source-frozen candidate and the exact checks in
 [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md); neither historical no-location-permission results
-nor the narrow v78 task results transfer to the frozen v77 rows.
+nor later v78–v80 task results transfer to the frozen v77 rows.
 
 The validated v77 AAB binds the exact package, version, source/release tree, upload certificate,
 Maps-key digest, artifact hash, and native-path proof. The first 0.1.56 build from `f95d4f3`
@@ -154,32 +183,35 @@ historical unless an owning task explicitly combines them.
 - **Verify:** Confirm repository track/config, the live track and tester list, exact AAB identity,
   hash, and Play signing, install or update through Play, staged-server journeys, feedback path,
   cleanup, and every Play prompt shown for this artifact.
-- **Current status (2026-09-29):** **IN_PROGRESS — v79 supplies the validated Current Location
-  replacement artifact and its Internal submission finished successfully, but live-track readback,
-  disclosure, and exact-candidate device proof remain open.** The v77 live Internal `completed`
-  state and narrow Play-installed v77/API-36 killed-FCM slice remain historical proof. The
+- **Current status (2026-10-03):** **IN_PROGRESS — v80 is validated, Internal `completed` is confirmed
+  by Publisher read-back, and the Play-installed API-36 candidate has scoped identity/signature and
+  device proof; the full selected journey, disclosures, and broader release gates remain open.** See
+  the [device report](./DEVICE_01_PLAY_V80_DEVICE_PROOF_2026-10-03.md) for the exact evidence
+  and limits. The two subsequent source fixes still require a replacement candidate and device proof.
+  The v77 live Internal `completed` state and narrow Play-installed v77/API-36 killed-FCM slice remain
+  historical proof. The
   superseded v75 natural Play build-73→75 update and scoped Samsung `DL-01` matrix remain task history,
   while its Play-signed API-37 result remains supporting-only.
-  Remaining work is tester/track administration, genuine API-37 Play delivery, a stable
-  non-production server and general fixtures, the full selected
-  connect/sync/send/receive/notification/restart/disconnect journey, general cleanup and candidate
-  limitations, and artifact-specific Play declarations or prompts. V79 must additionally
+  Remaining work is tester administration, genuine API-37 Play delivery, coverage beyond the bounded
+  synthetic fixtures, the full selected connect/sync/send/receive/notification/restart/disconnect
+  journey, general cleanup and candidate
+  limitations, and artifact-specific Play declarations or prompts. Exact-candidate proof must also
   reconcile foreground coarse/fine location, absence of background/location-service permission,
   Current Location success/no-send/retry behavior, privacy copy, and Data Safety. No wider-track
   promotion is authorized.
 
 Current child disposition:
 
-| Child                                   | Status      | Remaining boundary                                                                                                                            |
-| --------------------------------------- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `STORE-01A-UGC-SAFETY`                  | Deferred    | Required before Closed, Open, or Production promotion, or earlier if Play requires it                                                         |
-| `STORE-01B-SDK57-DEPS`                  | Done        | Historical slice remains done; a replacement candidate must resolve or disposition the current 19/20 Doctor result and 27 recommended patches |
-| `STORE-01C-FIREBASE-EAS`                | Done        | Runtime Firebase behavior remains task-specific device evidence                                                                               |
-| `STORE-01D-RELEASE-NOISE`               | Done        | None for deterministic host-test noise                                                                                                        |
-| `STORE-01E-SOURCE-FREEZE`               | Done        | Exact v77 source and release identities are recorded above                                                                                    |
-| `STORE-01F-LOCAL-AAB`                   | Done        | Exact v77 build/validation identity and retained local AAB are recorded above                                                                 |
-| `STORE-01G-TESTER-READINESS`            | In progress | Tester, staged-server, Current Location disclosure/device, journey, and cleanup evidence                                                      |
-| `STORE-01H-INTERNAL-TRACK-CONFIG-GUARD` | Done        | Live v77 Internal status is verified; tester readiness remains separate                                                                       |
+| Child                                   | Status      | Remaining boundary                                                                                         |
+| --------------------------------------- | ----------- | ---------------------------------------------------------------------------------------------------------- |
+| `STORE-01A-UGC-SAFETY`                  | Deferred    | Required before Closed, Open, or Production promotion, or earlier if Play requires it                      |
+| `STORE-01B-SDK57-DEPS`                  | Done        | V80 release receipt records Doctor 20/20; raw dependency audits still fail and remain a separate open gate |
+| `STORE-01C-FIREBASE-EAS`                | Done        | Runtime Firebase behavior remains task-specific device evidence                                            |
+| `STORE-01D-RELEASE-NOISE`               | Done        | None for deterministic host-test noise                                                                     |
+| `STORE-01E-SOURCE-FREEZE`               | Done        | Exact v77 source and release identities are recorded above                                                 |
+| `STORE-01F-LOCAL-AAB`                   | Done        | Exact v77 build/validation identity and retained local AAB are recorded above                              |
+| `STORE-01G-TESTER-READINESS`            | In progress | Tester, staged-server, Current Location disclosure/device, journey, and cleanup evidence                   |
+| `STORE-01H-INTERNAL-TRACK-CONFIG-GUARD` | Done        | Live v77 Internal status is verified; tester readiness remains separate                                    |
 
 The deferred UGC-safety branch is the code-bearing exception inside this release plan: before any
 wider promotion, children A1–A4 require app/server terms, blocking, reporting, and enforcement code;

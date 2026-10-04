@@ -273,7 +273,7 @@ function startProcessWork(): void {
           reportOptionalFailure(
             'fcm',
             'foreground-fcm-start-failed',
-            'Push updates are unavailable; live socket updates still work.',
+            'Push updates are unavailable. Check Live Updates in Settings.',
           );
         }
       })
@@ -281,7 +281,7 @@ function startProcessWork(): void {
         reportOptionalFailure(
           'fcm',
           'foreground-fcm-start-failed',
-          'Push updates are unavailable; live socket updates still work.',
+          'Push updates are unavailable. Check Live Updates in Settings.',
           error,
         ),
       );

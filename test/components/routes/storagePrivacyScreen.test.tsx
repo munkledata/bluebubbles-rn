@@ -72,6 +72,9 @@ describe('StoragePrivacyScreen', () => {
     expect(screen.getByText(/no longer has a configurable Redacted Mode/)).toBeTruthy();
     expect(screen.getByText(/keeps protected content out of Android Recents/)).toBeTruthy();
     expect(screen.getByText(/Secure Screen setting blocks screenshots/)).toBeTruthy();
+    expect(screen.getByText(/App Lock clears displayed notifications/)).toBeTruthy();
+    expect(screen.getByText(/including after unlock and during its grace period/)).toBeTruthy();
+    expect(screen.getByText(/Generic scheduled reminders remain scheduled/)).toBeTruthy();
   });
 
   it('names both the encrypted rows and every plaintext file class', async () => {

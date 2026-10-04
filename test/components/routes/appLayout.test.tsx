@@ -10,8 +10,21 @@ import React from 'react';
 
 const mockRedirect = jest.fn((_props: { href: string }) => null);
 const mockServerRotationApprovalHost = jest.fn(() => null);
-const mockConnectionBanner = jest.fn((_props: { onRetry: () => unknown }) => null);
+const mockConnectionBanner = jest.fn(
+  (_props: { onRetry: () => unknown; onHeightChange: (height: number) => void }) => null,
+);
 const mockShareIntentNavigator = jest.fn(() => null);
+const mockRouteInsets = jest.fn();
+const mockRouteMounted = jest.fn();
+const mockBannerInsets = jest.fn();
+jest.mock('react-native-safe-area-context', () => {
+  const React = jest.requireActual<typeof import('react')>('react');
+  const SafeAreaInsetsContext = React.createContext({ top: 24, bottom: 32, left: 4, right: 6 });
+  return {
+    SafeAreaInsetsContext,
+    useSafeAreaInsets: () => React.useContext(SafeAreaInsetsContext),
+  };
+});
 const mockOpenChat = jest.fn();
 const mockDismissTo = jest.fn();
 const mockLoggerWarn = jest.fn();
@@ -33,7 +46,19 @@ jest.mock('react-native-notify-kit', () => ({
   EventType: { DISMISSED: 0, ACTION_PRESS: 1, PRESS: 2 },
 }));
 jest.mock('expo-router', () => ({
-  ExperimentalStack: () => null,
+  ExperimentalStack: () => {
+    jest.requireActual<typeof import('react')>('react').useEffect(() => {
+      mockRouteMounted();
+    }, []);
+    mockRouteInsets(
+      jest
+        .requireMock<typeof import('react-native-safe-area-context')>(
+          'react-native-safe-area-context',
+        )
+        .useSafeAreaInsets(),
+    );
+    return null;
+  },
   Redirect: (props: { href: string }) => {
     mockRedirect(props);
     return null;
@@ -70,7 +95,19 @@ jest.mock('@/services/notifications/notifeeService', () => ({
   reconcileMessageNotificationGroupAfterRemoval: jest.fn(() => Promise.resolve()),
 }));
 jest.mock('@ui/connection', () => ({
-  ConnectionBanner: (props: { onRetry: () => unknown }) => mockConnectionBanner(props),
+  ConnectionBanner: (props: {
+    onRetry: () => unknown;
+    onHeightChange: (height: number) => void;
+  }) => {
+    mockBannerInsets(
+      jest
+        .requireMock<typeof import('react-native-safe-area-context')>(
+          'react-native-safe-area-context',
+        )
+        .useSafeAreaInsets(),
+    );
+    return mockConnectionBanner(props);
+  },
 }));
 jest.mock('@ui/server-rotation', () => ({
   ServerRotationApprovalHost: () => mockServerRotationApprovalHost(),
@@ -267,6 +304,24 @@ describe('AppLayout — active AppState lock gate', () => {
 
     expect(mockConnectionBanner).toHaveBeenCalledTimes(1);
     expect(mockConnectionBanner.mock.calls[0]?.[0].onRetry).toBe(mockRetryRealtime);
+    expect(mockConnectionBanner.mock.calls[0]?.[0].onHeightChange).toEqual(expect.any(Function));
+  });
+
+  it('changes only route top clearance and restores it without remounting the navigator', async () => {
+    await mountLayout();
+    expect(mockRouteInsets).toHaveBeenLastCalledWith({ top: 24, bottom: 32, left: 4, right: 6 });
+    const resize = mockConnectionBanner.mock.calls[0]![0].onHeightChange;
+    for (const height of [52, 96, 0]) {
+      await act(async () => resize(height));
+      expect(mockRouteInsets).toHaveBeenLastCalledWith({
+        top: 24 + height,
+        bottom: 32,
+        left: 4,
+        right: 6,
+      });
+      expect(mockBannerInsets).toHaveBeenLastCalledWith({ top: 24, bottom: 32, left: 4, right: 6 });
+      expect(mockRouteMounted).toHaveBeenCalledTimes(1);
+    }
   });
 
   it('keeps in-flight account-A recovery rejections silent after account B connects', async () => {

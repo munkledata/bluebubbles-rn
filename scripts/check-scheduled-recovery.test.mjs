@@ -27,6 +27,7 @@ const runnerPaths = [
   'src/services/background/backgroundSyncOrchestrator.ts',
   'src/services/send/outgoingQueueService.ts',
   'src/services/send/attachmentUpload.ts',
+  'src/utils/uploadFilename.ts',
   'src/core/api/http.ts',
   'src/services/send/index.ts',
   schedulePath,
@@ -985,6 +986,19 @@ test('pins the complete background callback dependency chain', () => {
   assertErrors(
     scheduledRunnerUsageErrors(disabledUploadAbort),
     /reviewed REL-001 callback dependency fingerprint/,
+  );
+  const unboundedFilename = mutateRunnerSource('src/utils/uploadFilename.ts', (source) =>
+    replaceOnce(source, 'name.length > 255', 'name.length > Number.MAX_SAFE_INTEGER'),
+  );
+  assertErrors(
+    scheduledRunnerUsageErrors(unboundedFilename),
+    /reviewed REL-001 callback dependency fingerprint/,
+  );
+  assertErrors(
+    scheduledRunnerUsageErrors(
+      validRunnerSources.filter((entry) => entry.path !== 'src/utils/uploadFilename.ts'),
+    ),
+    /uploadFilename/,
   );
 });
 

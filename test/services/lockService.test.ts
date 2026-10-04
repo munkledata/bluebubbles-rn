@@ -3,13 +3,15 @@ const pauseRealtime = jest.fn();
 const resumeRealtime = jest.fn<Promise<void>, []>(() => Promise.resolve());
 const flushErrorReports = jest.fn<Promise<void>, []>(() => Promise.resolve());
 const reconcileMessageNotificationGroup = jest.fn<Promise<void>, []>(() => Promise.resolve());
+const beginAppLockNotificationPrivacy = jest.fn<Promise<void>, []>(() => Promise.resolve());
+const commitAppLockNotificationPrivacy = jest.fn();
 const recoverOutgoing = jest.fn<Promise<{ eligible: number; sent: number }>, []>(async () => ({
   eligible: 0,
   sent: 0,
 }));
 const isDevServer = jest.fn(() => false);
 const vaultGet = jest.fn(async () => null as string | null);
-const vaultSet = jest.fn(async () => undefined);
+const vaultSet = jest.fn<Promise<void>, [string, string]>(async () => undefined);
 const setNativeAppLockEnabled = jest.fn(() => true);
 const clearCurrentShareShortcuts = jest.fn(() => true);
 
@@ -18,6 +20,8 @@ jest.mock('@/services/realtimeControl', () => ({ pauseRealtime, resumeRealtime }
 jest.mock('@/services/errors', () => ({ flushErrorReports }));
 jest.mock('@/services/notifications/notifeeService', () => ({
   reconcileMessageNotificationGroup,
+  beginAppLockNotificationPrivacy,
+  commitAppLockNotificationPrivacy,
 }));
 jest.mock('@/services/send', () => ({ recoverOutgoing }));
 jest.mock('@utils/isDev', () => ({ isDevServer }));
@@ -40,13 +44,21 @@ import { useLockStore } from '@state/lockStore';
 import { useSessionStore } from '@state/sessionStore';
 // eslint-disable-next-line import/first
 import { completeUnlock, hydrateLock, setAppLockEnabled } from '@/services/lock';
+// eslint-disable-next-line import/first
+import {
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+} from '@/services/realtime/deliveryCoordinator';
 
 beforeEach(() => {
+  resumeRealtimeDeliveries();
   hydrateSession.mockReset().mockResolvedValue(undefined);
   pauseRealtime.mockReset();
   resumeRealtime.mockReset().mockResolvedValue(undefined);
   flushErrorReports.mockReset().mockResolvedValue(undefined);
   reconcileMessageNotificationGroup.mockReset().mockResolvedValue(undefined);
+  beginAppLockNotificationPrivacy.mockReset().mockResolvedValue(undefined);
+  commitAppLockNotificationPrivacy.mockReset();
   recoverOutgoing.mockReset().mockResolvedValue({ eligible: 0, sent: 0 });
   isDevServer.mockReset().mockReturnValue(false);
   vaultSet.mockReset().mockResolvedValue(undefined);
@@ -64,6 +76,159 @@ beforeEach(() => {
 });
 
 describe('setAppLockEnabled', () => {
+  it('drains a held scrub and drops its setting write after account retirement', async () => {
+    useLockStore.setState({ enabled: false, locked: false });
+    let finish!: () => void;
+    beginAppLockNotificationPrivacy.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const enable = setAppLockEnabled(true);
+    const rejection = expect(enable).rejects.toThrow('interrupted by Disconnect');
+    let drained = false;
+    const teardown = pauseRealtimeDeliveries().then(() => {
+      drained = true;
+    });
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    finish();
+    await Promise.all([rejection, teardown]);
+    resumeRealtimeDeliveries();
+    expect(vaultSet).not.toHaveBeenCalled();
+    expect(useLockStore.getState().enabled).toBe(false);
+    expect(commitAppLockNotificationPrivacy).not.toHaveBeenCalled();
+  });
+
+  it('settles an admitted device-policy vault write before account teardown can finish', async () => {
+    useLockStore.setState({ enabled: false, locked: false });
+    let finish!: () => void;
+    vaultSet.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const enable = setAppLockEnabled(true);
+    await Promise.resolve();
+    expect(finish).toBeDefined();
+    let drained = false;
+    const teardown = pauseRealtimeDeliveries().then(() => {
+      drained = true;
+    });
+    await Promise.resolve();
+    expect(drained).toBe(false);
+    finish();
+    await Promise.all([enable, teardown]);
+    expect(drained).toBe(true);
+    resumeRealtimeDeliveries();
+    expect(useLockStore.getState()).toMatchObject({ enabled: true, locked: true });
+    expect(commitAppLockNotificationPrivacy).toHaveBeenCalledTimes(1);
+  });
+
+  it('installs privacy synchronously and waits for the sweep before persisting or publishing', async () => {
+    useLockStore.setState({ enabled: false, locked: false });
+    let finish!: () => void;
+    beginAppLockNotificationPrivacy.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const enable = setAppLockEnabled(true);
+    expect(beginAppLockNotificationPrivacy).toHaveBeenCalledTimes(1);
+    expect(vaultSet).not.toHaveBeenCalled();
+    expect(useLockStore.getState().enabled).toBe(false);
+    finish();
+    await enable;
+    expect(commitAppLockNotificationPrivacy).toHaveBeenCalledTimes(1);
+    expect(useLockStore.getState().enabled).toBe(true);
+  });
+
+  it('rejects overlapping opposite toggles and hydration rather than reordering vault writes', async () => {
+    let finish!: () => void;
+    vaultSet.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const enable = setAppLockEnabled(true);
+    await Promise.resolve();
+    await expect(setAppLockEnabled(false)).rejects.toThrow('already in progress');
+    await expect(hydrateLock()).rejects.toThrow('already in progress');
+    finish();
+    await enable;
+    expect(vaultSet).toHaveBeenCalledTimes(1);
+    await setAppLockEnabled(false);
+    expect(useLockStore.getState().enabled).toBe(false);
+  });
+
+  it.each(['native cleanup', 'vault write'])(
+    'keeps the privacy barrier on failed %s without claiming App Lock enabled',
+    async (stage) => {
+      useLockStore.setState({ enabled: false, locked: false });
+      if (stage === 'native cleanup')
+        beginAppLockNotificationPrivacy.mockRejectedValueOnce(new Error('native cleanup'));
+      else vaultSet.mockRejectedValueOnce(new Error('vault write'));
+      await expect(setAppLockEnabled(true)).rejects.toThrow(stage);
+      expect(commitAppLockNotificationPrivacy).not.toHaveBeenCalled();
+      expect(useLockStore.getState().enabled).toBe(false);
+      expect(pauseRealtime).not.toHaveBeenCalled();
+      await setAppLockEnabled(true);
+      expect(useLockStore.getState().enabled).toBe(true);
+    },
+  );
+
+  it('does not open a cold protected gate until the native sweep completes', async () => {
+    useLockStore.setState({ enabled: false, locked: false, hydrated: false });
+    vaultGet.mockResolvedValueOnce('true');
+    let finish!: () => void;
+    beginAppLockNotificationPrivacy.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const hydrate = hydrateLock();
+    await Promise.resolve();
+    expect(useLockStore.getState().hydrated).toBe(false);
+    finish();
+    await hydrate;
+    expect(useLockStore.getState()).toMatchObject({ enabled: true, locked: true, hydrated: true });
+  });
+
+  it('does not publish a cold hydration retired during native cleanup', async () => {
+    useLockStore.setState({ enabled: false, locked: false, hydrated: false });
+    vaultGet.mockResolvedValueOnce('true');
+    let finish!: () => void;
+    let current = true;
+    beginAppLockNotificationPrivacy.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const hydrate = hydrateLock({ shouldCommit: () => current });
+    await Promise.resolve();
+    current = false;
+    finish();
+    await hydrate;
+    expect(useLockStore.getState().hydrated).toBe(false);
+    expect(commitAppLockNotificationPrivacy).not.toHaveBeenCalled();
+    expect(setNativeAppLockEnabled).not.toHaveBeenCalled();
+  });
+
+  it('rejects failed cold cleanup without publishing hydrated state', async () => {
+    useLockStore.setState({ enabled: false, locked: false, hydrated: false });
+    vaultGet.mockResolvedValueOnce('true');
+    beginAppLockNotificationPrivacy.mockRejectedValueOnce(new Error('native cleanup'));
+    await expect(hydrateLock()).rejects.toThrow('native cleanup');
+    expect(useLockStore.getState().hydrated).toBe(false);
+    expect(commitAppLockNotificationPrivacy).not.toHaveBeenCalled();
+  });
+
   it('hydrates the native Recents owner before publishing the persisted App Lock choice', async () => {
     vaultGet.mockResolvedValueOnce('true');
 
@@ -127,6 +292,14 @@ describe('setAppLockEnabled', () => {
     expect(setNativeAppLockEnabled).toHaveBeenCalledWith(false);
     expect(useLockStore.getState()).toMatchObject({ enabled: false, locked: false });
     expect(pauseRealtime).not.toHaveBeenCalled();
+  });
+
+  it('retains the enabled gate and native privacy policy when disabling cannot persist', async () => {
+    vaultSet.mockRejectedValueOnce(new Error('vault unavailable'));
+    await expect(setAppLockEnabled(false)).rejects.toThrow('vault unavailable');
+    expect(useLockStore.getState()).toMatchObject({ enabled: true, locked: true });
+    expect(setNativeAppLockEnabled).not.toHaveBeenCalled();
+    expect(commitAppLockNotificationPrivacy).not.toHaveBeenCalled();
   });
 });
 

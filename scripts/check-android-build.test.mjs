@@ -22,11 +22,14 @@ import {
   REQUIRED_PINNED_SHORTCUT_CLEANUP_DEX_MARKERS,
   REQUIRED_SHARE_INTAKE_DEX_MARKERS,
   REQUIRED_TASK_MANAGER_SETTLEMENT_DEX_MARKERS,
+  REQUIRED_UPLOAD_FILENAME_DEX_MARKERS,
+  UPLOAD_FILENAME_SOURCE_PATHS,
   REQUIRED_PERMISSIONS,
   runAndroidBuildCheck,
   validateAndroidBuild,
   validateExpoBackgroundTaskRetryBridge,
   validateExpoFileSystemRedirectContainment,
+  validateUploadFilenameBridge,
   validateExpoRouterPredictiveBackBridge,
   validateExpoTaskManagerPreJsSettlement,
   validateHeadlessEntry,
@@ -637,6 +640,57 @@ function redirectContainmentInput(overrides = {}) {
   };
 }
 
+function uploadFilenameInput() {
+  return {
+    patchSource: readFileSync(join(ROOT, 'patches/expo-file-system+57.0.7.patch'), 'utf8'),
+    ...Object.fromEntries(
+      Object.entries(UPLOAD_FILENAME_SOURCE_PATHS).map(([key, path]) => [
+        key,
+        readFileSync(join(ROOT, path), 'utf8'),
+      ]),
+    ),
+  };
+}
+
+test('upload filename guard rejects missing native wiring, types, validation, or durable patch', () => {
+  assert.deepEqual(validateUploadFilenameBridge(uploadFilenameInput()), []);
+  for (const field of [
+    'legacyModuleSource',
+    'recordsSource',
+    'filenameSource',
+    'typesSource',
+    'declarationsSource',
+    'patchSource',
+  ]) {
+    const input = uploadFilenameInput();
+    input[field] = '';
+    assert.ok(validateUploadFilenameBridge(input).length > 0, field);
+  }
+  for (const oldValue of [
+    'options.gatorFileName?.let(GatorUploadFilename::validate) ?: file.name',
+    'bodyBuilder.addFormDataPart(fieldName, uploadName,',
+  ]) {
+    const input = uploadFilenameInput();
+    input.legacyModuleSource = input.legacyModuleSource.replace(oldValue, 'file.name');
+    assert.ok(
+      validateUploadFilenameBridge(input).some((message) =>
+        message.includes('original streaming body'),
+      ),
+      oldValue,
+    );
+  }
+  const stalePatch = uploadFilenameInput();
+  stalePatch.patchSource = stalePatch.patchSource.replace(
+    'name.length in 1..255',
+    'name.isNotEmpty()',
+  );
+  assert.ok(
+    validateUploadFilenameBridge(stalePatch).some((message) =>
+      message.includes('patch must restore'),
+    ),
+  );
+});
+
 function backgroundTaskRetryInput(overrides = {}) {
   return {
     packageJson: structuredClone(redirectContainmentPackageJson),
@@ -717,7 +771,14 @@ function writeRedirectContainmentFixture(root) {
     join(root, 'android/app/src/main/java/com/bluegreengatorapps/messages/MainActivity.kt'),
     shareMainActivitySource,
   );
-  writeFileSync(join(root, 'patches/expo-file-system+57.0.7.patch'), input.patchSource);
+  writeFileSync(
+    join(root, 'patches/expo-file-system+57.0.7.patch'),
+    uploadFilenameInput().patchSource,
+  );
+  for (const path of Object.values(UPLOAD_FILENAME_SOURCE_PATHS)) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), readFileSync(join(ROOT, path), 'utf8'));
+  }
   writeFileSync(
     join(root, 'patches/expo-background-task+57.0.21.patch'),
     backgroundTaskRetryPatchSource,
@@ -747,7 +808,7 @@ function writeRedirectContainmentFixture(root) {
       root,
       'node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemLegacyModule.kt',
     ),
-    input.legacyModuleSource,
+    uploadFilenameInput().legacyModuleSource,
   );
   writeFileSync(
     join(
@@ -849,6 +910,7 @@ function cleanupDexFixture({ omitRequiredMarker, extraMarkers = [] } = {}) {
       ...REQUIRED_BACKGROUND_TASK_RETRY_DEX_MARKERS.filter(
         (marker) => marker !== omitRequiredMarker,
       ),
+      ...REQUIRED_UPLOAD_FILENAME_DEX_MARKERS.filter((marker) => marker !== omitRequiredMarker),
       ...REQUIRED_SHARE_INTAKE_DEX_MARKERS.filter((marker) => marker !== omitRequiredMarker),
       ...REQUIRED_TASK_MANAGER_SETTLEMENT_DEX_MARKERS.filter(
         (marker) => marker !== omitRequiredMarker,
@@ -2385,6 +2447,16 @@ test('validates the packaged manifest, owned share target, and native intake mar
         `packaged DEX is missing required task-manager settlement marker: ${marker}`,
       ),
       marker,
+    );
+  }
+
+  for (const marker of REQUIRED_UPLOAD_FILENAME_DEX_MARKERS) {
+    const errors = validatePackagedAndroidBundle({
+      manifestProto,
+      dexBytes: cleanupDexFixture({ omitRequiredMarker: marker }),
+    });
+    assert.ok(
+      errors.includes(`packaged DEX is missing required upload-filename marker: ${marker}`),
     );
   }
 

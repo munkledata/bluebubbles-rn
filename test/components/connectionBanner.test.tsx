@@ -169,4 +169,26 @@ describe('ConnectionBanner', () => {
       zIndex: 50,
     });
   });
+
+  it('reserves the measured height as text grows and releases it on recovery', async () => {
+    seedStatus('offline');
+    const onHeightChange = jest.fn();
+    await renderWithTheme(<ConnectionBanner onRetry={jest.fn()} onHeightChange={onHeightChange} />);
+
+    for (const height of [44, 88]) {
+      await act(async () => {
+        fireEvent(screen.getByRole('alert'), 'layout', {
+          nativeEvent: { layout: { x: 0, y: 0, width: 240, height } },
+        });
+      });
+      expect(onHeightChange).toHaveBeenLastCalledWith(height + 8);
+    }
+    await act(async () => {
+      const store = useTransportHealthStore.getState();
+      store.setNetworkState(store.generation, 'online');
+      store.setSocketState(store.generation, 'connected');
+    });
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(onHeightChange).toHaveBeenLastCalledWith(0);
+  });
 });

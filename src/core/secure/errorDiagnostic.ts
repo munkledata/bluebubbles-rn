@@ -30,6 +30,7 @@ export const ERROR_DIAGNOSTIC_SITES = {
   socketEvent: 's1v3iohm10',
   socketConnection: 's8uz0091sa',
   lockUnlock: 'sfnkpmyuai',
+  syncRun: 's7q4nv2mp0',
   runtimeFatal: 's9b2ygxnbx',
   runtimeUncaught: 'sfdpe2gt2k',
   runtimeUnhandledRejection: 'sgddkqme19',
@@ -59,6 +60,7 @@ export interface ErrorDiagnosticSiteByMessage {
   '[socket] event handling failed': typeof ERROR_DIAGNOSTIC_SITES.socketEvent;
   '[socket] connection failed': typeof ERROR_DIAGNOSTIC_SITES.socketConnection;
   '[lock] unlock failed after successful auth': typeof ERROR_DIAGNOSTIC_SITES.lockUnlock;
+  '[sync] run failed': typeof ERROR_DIAGNOSTIC_SITES.syncRun;
   '[fatal] runtime error': typeof ERROR_DIAGNOSTIC_SITES.runtimeFatal;
   '[uncaught] runtime error': typeof ERROR_DIAGNOSTIC_SITES.runtimeUncaught;
   '[unhandledRejection] runtime error': typeof ERROR_DIAGNOSTIC_SITES.runtimeUnhandledRejection;
@@ -211,6 +213,12 @@ const EVENT_DEFINITIONS: readonly EventDefinition[] = [
     ),
   },
   {
+    code: 'sync.run_failed',
+    tag: 'sync',
+    siteTokens: [ERROR_DIAGNOSTIC_SITES.syncRun],
+    matches: exact('[sync] run failed'),
+  },
+  {
     code: 'runtime.fatal',
     tag: 'fatal',
     siteTokens: [ERROR_DIAGNOSTIC_SITES.runtimeFatal],
@@ -254,6 +262,7 @@ const ERROR_DETAIL_EVENT_CODES = new Set([
   'socket.event_handling_failed',
   'socket.connection_failed',
   'lock.unlock_failed',
+  'sync.run_failed',
   'runtime.fatal',
   'runtime.recoverable',
   'runtime.uncaught',
@@ -273,6 +282,7 @@ const SAFE_ERROR_NAMES = new Set([
   'ContactsAccountChangedError',
   'ContactsPermissionDeniedError',
   'DbCommitGuardRejectedError',
+  'DbWriteFenceRejectedError',
   'DeletionSyncProtocolError',
   'Error',
   'EvalError',
@@ -282,6 +292,7 @@ const SAFE_ERROR_NAMES = new Set([
   'IncomingEventCodecError',
   'IncomingEventDeliveryTimeoutError',
   'InvalidAppLockSettingError',
+  'MessageStateRepairRequiredError',
   'NativeBoundedDownloadError',
   'RangeError',
   'RealtimeGroupMutationUnavailableError',
@@ -290,12 +301,14 @@ const SAFE_ERROR_NAMES = new Set([
   'RealtimeReadStatusUnavailableError',
   'ReferenceError',
   'ReminderSessionChangedError',
+  'RepairSnapshotRcsActiveError',
   'ScheduledSessionChangedError',
   'SyntaxError',
   'TypeError',
   'URIError',
   'UnimplementedEndpointError',
   'UploadGateCancelledError',
+  'ZodError',
 ]);
 
 const SAFE_ERROR_CODES = new Set([
@@ -532,6 +545,11 @@ function buildMeta(
   const result: SafeErrorDiagnosticMeta = { schemaVersion: ERROR_REPORT_ENVELOPE_VERSION };
   const code = definition.code;
   const error = errorRecord(rawMeta);
+  // Snapshot endpoints can wrap a typed HTTP failure in UI-only server prose. Inspect at most one
+  // cause for this finite event, retaining only its allowlisted ApiError kind/status; never copy
+  // that wrapper's message, cause body, server detail, identifiers, or source stack.
+  const cause = code === 'sync.run_failed' ? asRecord(read(error, 'cause')) : undefined;
+  const apiCause = read(cause, 'name') === 'ApiError' ? cause : undefined;
 
   if (ERROR_DETAIL_EVENT_CODES.has(code) && hasErrorEvidence(error)) {
     result.errorName =
@@ -542,10 +560,13 @@ function buildMeta(
       safeSetValue(read(rawMeta, 'errorCode'), SAFE_API_KINDS) ??
       safeSetValue(read(rawMeta, 'errorCode'), SAFE_ERROR_CODES) ??
       safeSetValue(read(error, 'kind'), SAFE_API_KINDS) ??
-      safeSetValue(read(error, 'code'), SAFE_ERROR_CODES);
+      safeSetValue(read(error, 'code'), SAFE_ERROR_CODES) ??
+      safeSetValue(read(apiCause, 'kind'), SAFE_API_KINDS);
     if (errorCode !== undefined) result.errorCode = errorCode;
     const status =
-      safeInteger(read(rawMeta, 'status'), 599) ?? safeInteger(read(error, 'status'), 599);
+      safeInteger(read(rawMeta, 'status'), 599) ??
+      safeInteger(read(error, 'status'), 599) ??
+      safeInteger(read(apiCause, 'status'), 599);
     if (status === 0 || (status !== undefined && status >= 100)) result.status = status;
     const retryable =
       safeBoolean(read(rawMeta, 'retryable')) ?? safeBoolean(read(error, 'retryable'));

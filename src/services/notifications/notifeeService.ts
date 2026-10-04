@@ -22,7 +22,6 @@ import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
 } from '../realtime/deliveryCoordinator';
-import { effectivelyLocked } from './lockGate';
 import { isActiveChat } from './activeChat';
 import {
   MESSAGE_HISTORY_IDS_KEY,
@@ -82,6 +81,23 @@ export const ACTION_DECLINE_FACETIME = 'decline-facetime';
  * slot. Calling an exported queued helper there would wait on the slot it already owns.
  */
 let notificationOperationTail: Promise<void> = Promise.resolve();
+// Installed synchronously before enabling App Lock crosses any native/vault await. Keep the
+// barrier after a failed transition; only a successful policy commit may release it.
+let appLockPrivacyBarrier = false;
+let notificationPrivacyEpoch = 0;
+
+/** Call only after the lock store reflects a successfully committed/read vault policy. */
+export function commitAppLockNotificationPrivacy(): void {
+  notificationPrivacyEpoch += 1;
+  appLockPrivacyBarrier = false;
+}
+
+function capturePresentationContext(context?: EventDeliveryContext): EventDeliveryContext {
+  const account = context ?? captureRealtimeDeliveryLease();
+  const epoch = notificationPrivacyEpoch;
+  return { ...account, isCurrent: () => account.isCurrent() && epoch === notificationPrivacyEpoch };
+}
+
 function enqueueNotificationOperation<T>(operation: () => Promise<T>): Promise<T> {
   const result = notificationOperationTail.then(operation);
   // A failed native call is returned to its caller, but must not poison every later operation.
@@ -415,26 +431,29 @@ function nativeFailureName(error: unknown): string {
   return error instanceof Error ? error.name : 'UnknownError';
 }
 
-function messageGroupMutationAllowed(): boolean {
+function hydratedMessageMutationAllowed(): boolean {
   const lock = useLockStore.getState();
-  // Detailed-history replacement still requires foreground hydration. The headless exception
-  // below is deliberately summary-only and must never authorize reposting private child content.
-  return lock.hydrated && !effectivelyLocked(lock, false);
+  return lock.hydrated && !privateNotificationMustBeHidden();
 }
 
 const MESSAGE_GROUP_LOCK_READ_TIMEOUT_MS = 2_000;
 
-/** Resolve one summary-only policy without hydrating or caching the foreground App Lock state. */
-async function resolveMessageGroupMutationGuard(
+/**
+ * Resolve one mutation policy without hydrating or caching foreground App Lock state. A verified
+ * headless OFF read can authorize a generic summary or replacement of DB-reconciled existing
+ * history. Every guard requires the captured account to remain current; headless guards also
+ * require the original lock snapshot, while hydrated guards recheck the live lock policy.
+ */
+async function resolveMessageNotificationMutationGuard(
   context?: EventDeliveryContext,
 ): Promise<() => boolean> {
-  const lease = context ?? captureRealtimeDeliveryLease();
+  const lease = capturePresentationContext(context);
   const lockSnapshot = useLockStore.getState();
   if (!lease.isCurrent()) return () => false;
   if (lockSnapshot.hydrated) {
-    return () => lease.isCurrent() && messageGroupMutationAllowed();
+    return () => lease.isCurrent() && hydratedMessageMutationAllowed();
   }
-  if (lockSnapshot.enabled || lockSnapshot.locked) return () => false;
+  if (privateNotificationMustBeHidden()) return () => false;
 
   let readActive = true;
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
@@ -506,10 +525,9 @@ async function reconcileMessageGroupFromDisplayedNow(
 ): Promise<void> {
   context ??= captureRealtimeDeliveryLease();
   if (!deliveryIsCurrent(context)) return;
-  // App Lock changes presentation policy, not existing Android tray ownership. Leave both the
-  // generic summary and already-displayed children untouched until unlocked maintenance can safely
-  // reconcile them; cancelling only the summary can make Android surface its detailed children.
-  const canMutate = mutationGuard ?? (await resolveMessageGroupMutationGuard(context));
+  // The App Lock transition owns its separate displayed-state sweep. Ordinary group repair must
+  // never cancel just the summary while private children remain underneath it.
+  const canMutate = mutationGuard ?? (await resolveMessageNotificationMutationGuard(context));
   if (!canMutate()) return;
 
   const children = strictDisplayedMessageChildren(displayed, excludedId).filter((child) => {
@@ -571,7 +589,7 @@ async function reconcileMessageGroupNow(
 ): Promise<void> {
   context ??= captureRealtimeDeliveryLease();
   if (!deliveryIsCurrent(context)) return;
-  const canMutate = await resolveMessageGroupMutationGuard(context);
+  const canMutate = await resolveMessageNotificationMutationGuard(context);
   if (!canMutate()) return;
   let displayed: DisplayedNotification[];
   try {
@@ -752,6 +770,9 @@ async function reconcileDisplayedMessageHistoriesNow(
   db?: AppDatabase,
   context?: EventDeliveryContext,
 ): Promise<void> {
+  context ??= captureRealtimeDeliveryLease();
+  if (!deliveryIsCurrent(context)) return;
+  const canReplaceHistory = await resolveMessageNotificationMutationGuard(context);
   if (!deliveryIsCurrent(context)) return;
   let firstDisplayed: DisplayedNotification[];
   try {
@@ -862,7 +883,7 @@ async function reconcileDisplayedMessageHistoriesNow(
       if (!current) continue;
       const reconciled = reconciledMessageHistory(current, truthByMessageId);
       if (!reconciled.changed) continue;
-      if (reconciled.entries.length === 0 || !messageGroupMutationAllowed()) {
+      if (reconciled.entries.length === 0 || !canReplaceHistory()) {
         await notifee.cancelNotification(id);
         mutated = true;
         continue;
@@ -881,13 +902,13 @@ async function reconcileDisplayedMessageHistoriesNow(
         ),
       );
       mutated = true;
-      if (!deliveryIsCurrent(context)) {
-        // The bridge may have committed just as Disconnect revoked this account. Remove the exact
-        // stable id now; account teardown's queued store-wide sweep remains the backstop.
+      if (!deliveryIsCurrent(context) || !canReplaceHistory()) {
+        // The bridge may have committed as the account or lock policy changed. Remove the exact
+        // stable id now. Account teardown and App Lock admission also queue their own sweeps.
         try {
           await notifee.cancelNotification(id);
         } catch {
-          // Match reminder re-arm compensation: the authoritative teardown is already pending.
+          // Best effort: native cancellation can fail even after a successful replacement.
         }
         return;
       }
@@ -1625,6 +1646,84 @@ async function sanitizePerChatChannels(
   if (failures.length > 0) throw privacyError('could not sanitize conversation channels', failures);
 }
 
+/** Native-only check: cold App Lock must not open SQLCipher to inspect a pending alarm. */
+function isGenericReminderAlarm(source: Notification): boolean {
+  const data = source.data;
+  const android = source.android;
+  return (
+    isSafeReminderNotificationId(source.id) &&
+    source.title === 'Reminder' &&
+    source.body === 'Reminder' &&
+    source.subtitle == null &&
+    markerKind(source) === 'reminder' &&
+    data != null &&
+    Object.keys(data).every((key) =>
+      ['gatorOwner', 'gatorSchema', 'gatorKind', 'chatId', 'messageId', 'messageDate'].includes(
+        key,
+      ),
+    ) &&
+    positiveLocalId(data.chatId) != null &&
+    (data.messageId == null || positiveLocalId(data.messageId) != null) &&
+    (data.messageDate == null || /^\d{1,16}$/.test(String(data.messageDate))) &&
+    android?.channelId === CHANNEL_REMINDERS &&
+    android.smallIcon === 'ic_stat_gator' &&
+    android.style == null &&
+    android.largeIcon == null &&
+    android.ticker == null &&
+    android.inputHistory == null &&
+    (android.actions == null || android.actions.length === 0) &&
+    android.fullScreenAction == null &&
+    android.groupId == null &&
+    android.sortKey == null &&
+    android.tag == null &&
+    (android.sound == null || android.sound === 'default') &&
+    android.pressAction?.id === PRESS_REMINDER &&
+    android.pressAction.launchActivity === 'default' &&
+    Object.keys(android.pressAction).every((key) => key === 'id' || key === 'launchActivity')
+  );
+}
+
+async function scrubAppLockNotificationStateNow(): Promise<void> {
+  const failures: unknown[] = [];
+  try {
+    const triggers = await notifee.getTriggerNotifications();
+    for (const { notification } of triggers) {
+      if (isGenericReminderAlarm(notification)) continue;
+      if (!notification.id) throw new Error('a scheduled notification has no cancellable id');
+      await notifee.cancelTriggerNotification(notification.id);
+    }
+  } catch {
+    // Unknown/partially cancelled alarms may still fire private text. Contain them even though
+    // this can lose native alarms; encrypted reminders remain available after unlock.
+    try {
+      await notifee.cancelTriggerNotifications();
+    } catch {
+      failures.push(new Error('scheduled notification privacy cleanup failed'));
+    }
+    failures.push(new Error('scheduled notification privacy could not be verified'));
+  }
+  try {
+    await sanitizePerChatChannels(true);
+  } catch {
+    failures.push(new Error('conversation channel privacy cleanup failed'));
+  }
+  // Always sweep displayed state LAST: an old alarm could have fired while triggers were inspected.
+  // Displayed-only cancellation deliberately preserves verified generic future alarms.
+  try {
+    await notifee.cancelDisplayedNotifications();
+  } catch {
+    failures.push(new Error('displayed notification privacy cleanup failed'));
+  }
+  if (failures.length > 0) throw privacyError('App Lock notification cleanup failed', failures);
+}
+
+/** Install the synchronous barrier, then wait for all older queued native writes and their sweep. */
+export function beginAppLockNotificationPrivacy(): Promise<void> {
+  appLockPrivacyBarrier = true;
+  notificationPrivacyEpoch += 1;
+  return enqueueNotificationOperation(scrubAppLockNotificationStateNow);
+}
+
 /**
  * Keep native privacy maintenance in one FIFO slot. Future reminder triggers are sanitized first;
  * displayed reminders are deliberately last so an alarm that fires during the pass is still swept.
@@ -1632,6 +1731,11 @@ async function sanitizePerChatChannels(
 async function prepareNotificationPresentationStateNow(
   context?: EventDeliveryContext,
 ): Promise<void> {
+  if (privateNotificationMustBeHidden()) {
+    if (deliveryIsCurrent(context)) await scrubAppLockNotificationStateNow();
+    // This connected-startup entry already has DB admission after authentication. Continue its
+    // generic reminder recovery; cold hydration calls the native-only sweep directly instead.
+  }
   const failures: unknown[] = [];
   let nativeStateSanitized = false;
   try {
@@ -1754,7 +1858,26 @@ function deliveryIsCurrent(context?: EventDeliveryContext): boolean {
 }
 
 function privateNotificationMustBeHidden(): boolean {
-  return effectivelyLocked(useLockStore.getState(), false);
+  const lock = useLockStore.getState();
+  // Authentication/grace permits private in-app UI, never private OS notification presentation.
+  return appLockPrivacyBarrier || lock.enabled || lock.locked;
+}
+
+/** A rejected bridge call may still have committed. Contain retired results on both exit paths. */
+async function displayWithPresentationGuard(
+  notification: Notification & { id: string },
+  context: EventDeliveryContext | undefined,
+  containsPrivateContent: boolean,
+): Promise<boolean> {
+  const canPresent = (): boolean =>
+    deliveryIsCurrent(context) && (!containsPrivateContent || !privateNotificationMustBeHidden());
+  if (!canPresent()) return false;
+  try {
+    await notifee.displayNotification(notification);
+  } finally {
+    if (!canPresent()) await notifee.cancelNotification(notification.id);
+  }
+  return canPresent();
 }
 
 async function containPrivateNotificationIfLocked(
@@ -1789,18 +1912,23 @@ async function postStatusNotification(
   await ensureChannel();
   if (!deliveryIsCurrent(context)) return;
   const hidePrivate = hidePrivateWhenLocked && privateNotificationMustBeHidden();
-  await notifee.displayNotification({
-    id: hidePrivate ? STATUS_LOCKED_ID : id,
-    title: hidePrivate ? 'Gator' : title,
-    body: hidePrivate ? 'You have new messages' : body,
-    data: nativeStatusData(hidePrivate ? 'locked' : kind),
-    android: {
-      channelId: CHANNEL_NEW_MESSAGE,
-      smallIcon: 'ic_stat_gator',
-      ...(hidePrivate || kind === 'locked' ? { onlyAlertOnce: true } : {}),
-      pressAction: { id: PRESS_OPEN, launchActivity: 'default' },
+  const postedId = hidePrivate ? STATUS_LOCKED_ID : id;
+  await displayWithPresentationGuard(
+    {
+      id: postedId,
+      title: hidePrivate ? 'Gator' : title,
+      body: hidePrivate ? 'You have new messages' : body,
+      data: nativeStatusData(hidePrivate ? 'locked' : kind),
+      android: {
+        channelId: CHANNEL_NEW_MESSAGE,
+        smallIcon: 'ic_stat_gator',
+        ...(hidePrivate || kind === 'locked' ? { onlyAlertOnce: true } : {}),
+        pressAction: { id: PRESS_OPEN, launchActivity: 'default' },
+      },
     },
-  });
+    context,
+    hidePrivateWhenLocked && !hidePrivate,
+  );
 }
 
 /** Stable channel id derived only from a local integer key (never a phone/email-bearing GUID). */
@@ -1819,13 +1947,16 @@ export function openChatNotificationSettings(
   title: string,
   context?: EventDeliveryContext,
 ): Promise<void> {
+  context = capturePresentationContext(context);
   return enqueueNotificationOperation(async () => {
     if (!deliveryIsCurrent(context)) return;
     const route = await localRouteForGuids(chatGuid);
     if (!deliveryIsCurrent(context)) return;
     if (!route) throw new Error('cannot open notification settings for an unknown conversation');
     const id = chatChannelId(route.chatId);
-    const channelName = normalizeMessageNotificationTitle(title) ?? 'Conversation';
+    const channelName = privateNotificationMustBeHidden()
+      ? 'Conversation'
+      : (normalizeMessageNotificationTitle(title) ?? 'Conversation');
     await notifee.createChannel({
       id,
       name: channelName,
@@ -1916,6 +2047,7 @@ export function postNotification(
   intent: NotificationIntent,
   context?: EventDeliveryContext,
 ): Promise<void> {
+  if (isPresentationIntent(intent)) context = capturePresentationContext(context);
   return enqueueNotificationOperation(async () => {
     // A realtime event can sit behind account cleanup in this queue. Check its account lease at
     // the actual native-mutation boundary, not only before it joined the queue, so Disconnect
@@ -2107,8 +2239,14 @@ async function postNotificationNow(
       messageGuid: latest.messageId === route.messageId ? intent.messageGuid : undefined,
     },
   );
-  await notifee.displayNotification(notification);
-  if (!deliveryIsCurrent(context)) return;
+  if (
+    !(await displayWithPresentationGuard(
+      { ...notification, id: chatNotificationId(route.chatId) },
+      context,
+      true,
+    ))
+  )
+    return;
   // Read the tray again after the post instead of trusting the earlier history snapshot. Another
   // child may have been swiped during this operation; a cached snapshot must not create a stale
   // summary (and, critically, is never used to repost that child).
@@ -2154,7 +2292,14 @@ async function postSendFailureNotificationNow(
   if (!deliveryIsCurrent(context)) return;
   if (await containPrivateNotificationIfLocked(context)) return;
   if (!target || target.chatGuid !== intent.chatGuid || isActiveChat(intent.chatGuid)) return;
-  await notifee.displayNotification(fixedSendFailureNotification(target.route));
+  await displayWithPresentationGuard(
+    {
+      ...fixedSendFailureNotification(target.route),
+      id: sendFailureNotificationId(target.route.messageId),
+    },
+    context,
+    true,
+  );
 }
 
 async function cancelSendFailureNotificationNow(
@@ -2180,6 +2325,7 @@ export function postSendFailureNotification(
   messageGuid: string,
   context?: EventDeliveryContext,
 ): Promise<void> {
+  context = capturePresentationContext(context);
   return enqueueNotificationOperation(() =>
     postNotificationNow({ kind: 'send-failure', chatGuid, messageGuid }, context, db),
   );
@@ -2364,6 +2510,7 @@ export function cancelAllNotifications(): Promise<void> {
  * prevents repeated replacements from re-alerting.
  */
 export function postLockedNotification(context?: EventDeliveryContext): Promise<void> {
+  context ??= captureRealtimeDeliveryLease();
   return enqueueNotificationOperation(() =>
     postStatusNotification(STATUS_LOCKED_ID, 'locked', 'Gator', 'You have new messages', context),
   );

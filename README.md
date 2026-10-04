@@ -131,8 +131,10 @@ the EAS profiles intentionally have no update-channel fields.
   setting, and a few boot-time secrets live separately in Android SecureStore/Keystore. A native
   app-private preferences file mirrors only the App Lock and Secure Screen on/off state so those
   protections can apply before JavaScript starts.
-- **App Lock:** this is a foreground/policy screen gate, not biometric-bound key custody. Locked
-  pushes post a generic notice. Server-state-backed message content may catch up after unlock and
+- **App Lock:** this is a foreground/policy screen gate, not biometric-bound key custody. Enabling
+  clears displayed notifications; new message notices stay generic whenever enabled, including after
+  unlock and during its grace period. Verified generic scheduled reminders remain scheduled.
+  Server-state-backed message content may catch up after unlock and
   sync, but one-time events such as `message-send-error` are not reconstructed unless another live
   transport delivers them. When enabled, App Lock keeps protected content out of Android Recents,
   including during its grace period. The independent Secure Screen setting blocks screenshots and

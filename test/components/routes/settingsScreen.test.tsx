@@ -503,7 +503,11 @@ describe('SettingsScreen — App Lock biometric gate', () => {
     expect(screen.getByText(/keeps their content out of Android Recents/)).toBeTruthy();
     expect(screen.getByText(/Neither setting makes the database key biometric-bound/)).toBeTruthy();
     expect(screen.getByText(/Secure Screen separately blocks screenshots/)).toBeTruthy();
-    expect(screen.getByText(/Locked pushes stay generic and sync after unlock/)).toBeTruthy();
+    expect(
+      screen.getByText(
+        /new message notices stay generic while it is enabled, including after unlock/,
+      ),
+    ).toBeTruthy();
   });
 
   it('toggles the independent native Secure Screen preference', async () => {
@@ -552,6 +556,74 @@ describe('SettingsScreen — App Lock biometric gate', () => {
     await waitFor(() => expect(mockSetAppLock).toHaveBeenCalledWith(true));
     expect(useDialogStore.getState().current).toBeNull();
   });
+
+  it.each(['unmount', 'account retirement'])(
+    'drops delayed biometric results after %s',
+    async (retirement) => {
+      let finish!: (available: boolean) => void;
+      mockIsBiometricAvailable.mockReturnValueOnce(
+        new Promise<boolean>((resolve) => {
+          finish = resolve;
+        }),
+      );
+      const view = await renderWithTheme(<SettingsScreen />);
+      await act(async () => {
+        fireEvent(
+          screen.getByLabelText('Require biometric unlock to open the app'),
+          'valueChange',
+          true,
+        );
+      });
+      if (retirement === 'unmount') await view.unmount();
+      else {
+        await act(async () => {
+          await pauseRealtimeDeliveries();
+          resumeRealtimeDeliveries();
+        });
+      }
+      await act(async () => {
+        finish(true);
+      });
+      expect(mockSetAppLock).not.toHaveBeenCalled();
+      expect(useDialogStore.getState().current).toBeNull();
+    },
+  );
+
+  it('ignores a second toggle while biometric availability is pending', async () => {
+    let finish!: (available: boolean) => void;
+    mockIsBiometricAvailable.mockReturnValueOnce(
+      new Promise<boolean>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    await renderWithTheme(<SettingsScreen />);
+    await act(async () => {
+      const toggle = screen.getByLabelText('Require biometric unlock to open the app');
+      fireEvent(toggle, 'valueChange', true);
+      fireEvent(toggle, 'valueChange', false);
+      finish(true);
+    });
+    expect(mockIsBiometricAvailable).toHaveBeenCalledTimes(1);
+    expect(mockSetAppLock).toHaveBeenCalledTimes(1);
+    expect(mockSetAppLock).toHaveBeenCalledWith(true);
+  });
+
+  it('reports an incomplete privacy transition without promising rollback', async () => {
+    mockIsBiometricAvailable.mockResolvedValue(true);
+    mockSetAppLock.mockRejectedValueOnce(new Error('native cleanup failed'));
+    await renderWithTheme(<SettingsScreen />);
+    await act(async () => {
+      fireEvent(
+        screen.getByLabelText('Require biometric unlock to open the app'),
+        'valueChange',
+        true,
+      );
+    });
+    expect(useDialogStore.getState().current?.message).toMatch(
+      /Try again before relying on App Lock/,
+    );
+    expect(useDialogStore.getState().current?.message).not.toMatch(/unchanged/);
+  });
 });
 
 describe('SettingsScreen — theme presets', () => {
@@ -567,6 +639,21 @@ describe('SettingsScreen — theme presets', () => {
 });
 
 describe('SettingsScreen — navigation rows', () => {
+  it.each([
+    ['Server Management', 'Server Management…'],
+    ['  SERVER   MANAGEMENT…  ', 'Server Management…'],
+    ['Storage & File Privacy', 'Storage & File Privacy…'],
+    ['Legal & Third-Party Notices', 'Legal & Third-Party Notices…'],
+  ])('finds the visible label for %s', async (query, label) => {
+    await renderWithTheme(<SettingsScreen />);
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Search settings'), query);
+    });
+    expect(screen.getByText(label)).toBeTruthy();
+    expect(screen.queryByText(/No settings match/)).toBeNull();
+    expect(screen.queryByText('THEME')).toBeNull();
+  });
+
   it('routes each disclosure row via the router', async () => {
     await renderWithTheme(<SettingsScreen />);
     const cases: [string, string][] = [

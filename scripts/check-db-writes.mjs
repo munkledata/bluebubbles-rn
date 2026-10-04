@@ -1528,7 +1528,7 @@ const CERTIFIED_ERROR_DIAGNOSTIC_COMMONJS_LOAD = Object.freeze({
   loaderName: 'loadErrorDiagnosticApi',
   loaderHash: '3400aa7c47d860d8e3bdba99a2cd6d52a20e58ff11c2ca7e478672ab453105d7',
   specifier: '@core/secure/errorDiagnostic',
-  targetHash: '074a4c2b7847aca48492ec8807fb3e327baf1074d3ac88e50936fd477e7ce5c3',
+  targetHash: 'c3f152fcba6c7a5687dd5aaecefeb7450c27e9fa6d843827415b33c122b0ad70',
   targetPath: 'src/core/secure/errorDiagnostic.ts',
 });
 
@@ -9225,7 +9225,7 @@ function incomingIngressCertifiedNodes({
   }
   if (
     createHash('sha256').update(normalizedSnippet(controlFile, controlFile)).digest('hex') !==
-      '053302982d068b5784bb88f94cfb882d1b6cbbfef431b6afa44af66a67d7e8d1' ||
+      'c9ed49bac53fd2ef38e779eb24be8a133a7118b7cdca61d0712968396e523254' ||
     createHash('sha256')
       .update(normalizedSnippet(autoDownloadFile, autoDownloadFile))
       .digest('hex') !== 'dfc68841889263b004ffd03f2f819fa8eb783ac3fac9689327dbdd78c6863fc9' ||

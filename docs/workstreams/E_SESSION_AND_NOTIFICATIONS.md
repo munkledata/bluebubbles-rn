@@ -121,14 +121,25 @@ policy remains explicit and separate from system-notification suppression.
 
 ## `NOTIF-02` — preserve notification privacy without configurable redaction
 
-Normal message and reminder notifications use the detailed policy, with Android controlling
-lock-screen presentation. Keep App Lock's generic new-delivery path independent of the removed
-Redacted Mode setting.
+With App Lock disabled, ordinary message notifications use the detailed policy, with Android
+controlling lock-screen presentation. Scheduled reminder payloads are always generic. With App Lock
+enabled, message and alias notices remain generic even after authentication and during the UI grace
+period. Keep that policy independent of the removed Redacted Mode setting.
 
 Retain schema-2 opaque routes, cleanup of legacy raw GUID/payload/channel data, account-owned queue
 and drain guards, and generic repair for a missing durable reminder trigger. Maintenance may preserve
-or repair an already generic notice, but it must not rewrite a current detailed notice merely because
-startup ran. Inspection or cleanup uncertainty fails closed rather than exposing legacy data.
+or repair an already generic notice; App Lock OFF startup does not rewrite a current detailed notice
+merely because startup ran. Enabling App Lock installs a synchronous presentation barrier, then waits
+for the native notification queue to remove displayed notices and private channel names before the
+setting can succeed. Cold hydration of persisted ON applies the same no-DB sweep before publishing
+the protected gate. Verified generic reminder alarms are preserved; unsafe/unknown legacy alarms are
+cancelled before the displayed sweep. Failure rejects the transition and retains generic-only
+presentation in that process until a successful policy commit. Concurrent setting/hydration changes
+are rejected, and old presentation epochs cannot revive detail after an OFF/ON/OFF sequence.
+
+The 2026-10-03 host repair does not retroactively change Play v80. Acceptance still requires a rebuilt
+candidate to prove old detailed tray removal, late native post containment, generic warm-unlocked and
+grace-period notices, preserved generic alarms, cold ON cleanup, and return to detail after disabling.
 
 <a id="notif-03"></a>
 

@@ -28,6 +28,15 @@ Ten links. Any one can break it, and until this work most of them broke it _sile
 
 Properties worth knowing:
 
+**App Lock notification policy (2026-10-03 repair; replacement-device proof pending):** new message
+and alias notices remain generic whenever App Lock is enabled, including warm unlock and the UI grace
+period. Enabling installs a synchronous presentation barrier and waits for a serialized native-only
+sweep of displayed notices/private channel labels; cold persisted ON performs the same sweep before
+the protected gate succeeds. Verified generic reminder alarms survive. Unsafe legacy alarms are
+cancelled before sweeping displayed state. Failure does not claim successful protection and retains
+the process-local generic-only barrier. Epoch/account checks contain late native posts. UI grace and
+locked V3 durable-admission rules are unchanged. Play v80 does not contain this repair.
+
 The table describes ordinary message fanout. Attempt-aware RCS failures instead enter through
 `RcsListener`/`composeRcsOutbound`, then call the same notification registry; only `new-message`
 uses `capMessagePushPayload`.

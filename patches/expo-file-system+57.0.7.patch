@@ -1,22 +1,84 @@
 diff --git a/node_modules/expo-file-system/android/build.gradle b/node_modules/expo-file-system/android/build.gradle
-index 334030a..b16f9aa 100644
+index 3b1270b..1121dab 100644
 --- a/node_modules/expo-file-system/android/build.gradle
 +++ b/node_modules/expo-file-system/android/build.gradle
-@@ -30,2 +30,3 @@ dependencies {
+@@ -28,6 +28,7 @@ dependencies {
+   implementation 'com.facebook.react:react-android'
+ 
    testImplementation 'junit:junit:4.13.2'
 +  testImplementation 'com.squareup.okhttp3:mockwebserver:4.9.2'
    testImplementation 'org.robolectric:robolectric:4.16'
+ 
+   if (project.findProject(':expo-modules-test-core')) {
 diff --git a/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemLegacyModule.kt b/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemLegacyModule.kt
-index 4626dac..24ae887 100644
+index 4626dac..09cd876 100644
 --- a/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemLegacyModule.kt
 +++ b/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemLegacyModule.kt
-@@ -998,3 +998,5 @@ open class FileSystemLegacyModule : Module() {
+@@ -903,7 +903,8 @@ open class FileSystemLegacyModule : Module() {
+         val mimeType: String = options.mimeType ?: URLConnection.guessContentTypeFromName(file.name)
+ 
+         val fieldName = options.fieldName ?: file.name
+-        bodyBuilder.addFormDataPart(fieldName, file.name, decorator.decorate(file.asRequestBody(mimeType.toMediaTypeOrNull())))
++        val uploadName = options.gatorFileName?.let(GatorUploadFilename::validate) ?: file.name
++        bodyBuilder.addFormDataPart(fieldName, uploadName, decorator.decorate(file.asRequestBody(mimeType.toMediaTypeOrNull())))
+         bodyBuilder.build()
+       }
+     }
+@@ -996,6 +997,8 @@ open class FileSystemLegacyModule : Module() {
+           .connectTimeout(60, TimeUnit.SECONDS)
+           .readTimeout(60, TimeUnit.SECONDS)
            .writeTimeout(60, TimeUnit.SECONDS)
 +          .followRedirects(false)
 +          .followSslRedirects(false)
--
-+
+ 
          client = builder.build()
+       }
+diff --git a/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemRecords.kt b/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemRecords.kt
+index 2226cd6..18e3af0 100644
+--- a/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemRecords.kt
++++ b/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemRecords.kt
+@@ -91,7 +91,10 @@ data class FileSystemUploadOptions(
+   @Field
+   val mimeType: String?,
+   @Field
+-  val parameters: Map<String, String>?
++  val parameters: Map<String, String>?,
++  /** Gator Android extension: multipart metadata only; never changes the local file path. */
++  @Field
++  val gatorFileName: String? = null
+ ) : Record
+ 
+ enum class HttpMethod(val value: String) : Enumerable {
+diff --git a/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/GatorUploadFilename.kt b/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/GatorUploadFilename.kt
+new file mode 100644
+index 0000000..1c0c230
+--- /dev/null
++++ b/node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/GatorUploadFilename.kt
+@@ -0,0 +1,24 @@
++package expo.modules.filesystem.legacy
++
++/** A bounded multipart basename, never a path or a separately staged copy. */
++internal object GatorUploadFilename {
++  fun validate(name: String): String {
++    require(name.length in 1..255 && name != "." && name != "..") { "Invalid Gator multipart filename" }
++    require(name.toByteArray(Charsets.UTF_8).size <= 255) { "Invalid Gator multipart filename" }
++    require(name.none { it <= '\u001f' || it in '\u007f'..'\u009f' || it == '/' || it == '\\' || it == '"' }) {
++      "Invalid Gator multipart filename"
++    }
++    var index = 0
++    while (index < name.length) {
++      val character = name[index]
++      if (Character.isHighSurrogate(character)) {
++        require(index + 1 < name.length && Character.isLowSurrogate(name[index + 1])) { "Invalid Gator multipart filename" }
++        index += 2
++      } else {
++        require(!Character.isLowSurrogate(character)) { "Invalid Gator multipart filename" }
++        index += 1
++      }
++    }
++    return name
++  }
++}
 diff --git a/node_modules/expo-file-system/android/src/test/java/expo/modules/filesystem/legacy/FileSystemLegacyRedirectPolicyTest.kt b/node_modules/expo-file-system/android/src/test/java/expo/modules/filesystem/legacy/FileSystemLegacyRedirectPolicyTest.kt
 new file mode 100644
 index 0000000..5851ca5
@@ -158,3 +220,137 @@ index 0000000..5851ca5
 +    }
 +  }
 +}
+diff --git a/node_modules/expo-file-system/android/src/test/java/expo/modules/filesystem/legacy/GatorUploadFilenameTest.kt b/node_modules/expo-file-system/android/src/test/java/expo/modules/filesystem/legacy/GatorUploadFilenameTest.kt
+new file mode 100644
+index 0000000..6987380
+--- /dev/null
++++ b/node_modules/expo-file-system/android/src/test/java/expo/modules/filesystem/legacy/GatorUploadFilenameTest.kt
+@@ -0,0 +1,21 @@
++package expo.modules.filesystem.legacy
++
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertThrows
++import org.junit.Test
++
++class GatorUploadFilenameTest {
++  @Test
++  fun `safe names keep their exact UTF8 spelling`() {
++    listOf("original report.pdf", "résumé 📄.pdf", "literal%22.pdf", "a".repeat(251) + ".pdf", "é".repeat(125) + ".pdf").forEach {
++      assertEquals(it, GatorUploadFilename.validate(it))
++    }
++  }
++
++  @Test
++  fun `unsafe names cannot become multipart headers or paths`() {
++    listOf("", ".", "..", "../photo.jpg", "folder/photo.jpg", "folder\\photo.jpg", "bad\r\nname.pdf", "nul\u0000.pdf", "bad\u007f.pdf", "bad\u0085.pdf", "quote\".pdf", "\ud800.pdf", "\udc00.pdf", "a".repeat(252) + ".pdf", "é".repeat(126) + ".pdf").forEach {
++      assertThrows(IllegalArgumentException::class.java) { GatorUploadFilename.validate(it) }
++    }
++  }
++}
+diff --git a/node_modules/expo-file-system/android/src/test/java/expo/modules/filesystem/legacy/GatorUploadMultipartTest.kt b/node_modules/expo-file-system/android/src/test/java/expo/modules/filesystem/legacy/GatorUploadMultipartTest.kt
+new file mode 100644
+index 0000000..b487394
+--- /dev/null
++++ b/node_modules/expo-file-system/android/src/test/java/expo/modules/filesystem/legacy/GatorUploadMultipartTest.kt
+@@ -0,0 +1,75 @@
++package expo.modules.filesystem.legacy
++
++import java.io.File
++import okhttp3.MultipartBody
++import okhttp3.RequestBody
++import okio.Buffer
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertNull
++import org.junit.Assert.assertTrue
++import org.junit.Test
++
++class GatorUploadMultipartTest {
++  private fun body(file: File, name: String?, binary: Boolean = false): RequestBody {
++    val method = FileSystemLegacyModule::class.java.getDeclaredMethod(
++      "createRequestBody", FileSystemUploadOptions::class.java, RequestBodyDecorator::class.java, File::class.java
++    )
++    method.isAccessible = true
++    val options = FileSystemUploadOptions(
++      headers = null,
++      uploadType = if (binary) FileSystemUploadType.BINARY_CONTENT else FileSystemUploadType.MULTIPART,
++      fieldName = "attachment",
++      mimeType = "application/pdf",
++      parameters = mapOf("text" to "caption"),
++      gatorFileName = name
++    )
++    var decorated = 0
++    val result = method.invoke(FileSystemLegacyModule(), options, RequestBodyDecorator {
++      decorated += 1
++      assertEquals(file.length(), it.contentLength())
++      it
++    }, file) as RequestBody
++    assertEquals(1, decorated)
++    return result
++  }
++
++  @Test
++  fun `metadata override preserves file bytes and the progress decorator`() {
++    val file = File.createTempFile("uuid-copy", ".pdf")
++    try {
++      file.writeText("%PDF-1.4\nGator disposable fixture\n")
++      for (name in listOf("original report.pdf", "résumé 📄.pdf", "re\u0301sume\u0301.pdf", "literal%22.pdf", "literal%20.pdf")) {
++        val body = body(file, name) as MultipartBody
++        val part = body.part(1)
++        assertEquals("form-data; name=\"attachment\"; filename=\"$name\"", part.headers?.get("Content-Disposition"))
++        assertEquals("application/pdf", part.body.contentType().toString())
++        val contents = Buffer()
++        part.body.writeTo(contents)
++        assertEquals(file.readText(), contents.readUtf8())
++        val wire = Buffer()
++        body.writeTo(wire)
++        assertTrue(wire.readUtf8().contains("filename=\"$name\""))
++      }
++      assertTrue(file.exists())
++    } finally {
++      file.delete()
++    }
++  }
++
++  @Test
++  fun `omitted override keeps the legacy basename and binary uploads ignore it`() {
++    val file = File.createTempFile("uuid-copy", ".pdf")
++    try {
++      file.writeText("owned bytes")
++      val multipart = body(file, null) as MultipartBody
++      assertEquals("form-data; name=\"attachment\"; filename=\"${file.name}\"", multipart.part(1).headers?.get("Content-Disposition"))
++      val binary = body(file, "../ignored", binary = true)
++      assertNull(binary.contentType())
++      val contents = Buffer()
++      binary.writeTo(contents)
++      assertEquals("owned bytes", contents.readUtf8())
++    } finally {
++      file.delete()
++    }
++  }
++}
+diff --git a/node_modules/expo-file-system/build/legacy/FileSystem.types.d.ts b/node_modules/expo-file-system/build/legacy/FileSystem.types.d.ts
+index 2bc953f..059ac29 100644
+--- a/node_modules/expo-file-system/build/legacy/FileSystem.types.d.ts
++++ b/node_modules/expo-file-system/build/legacy/FileSystem.types.d.ts
+@@ -111,6 +111,8 @@ export type UploadOptionsMultipart = {
+      * The name of the field which will hold uploaded file. Defaults to the file name without an extension.
+      */
+     fieldName?: string;
++    /** Gator Android extension: validated multipart basename, independent of the local URI. */
++    gatorFileName?: string;
+     /**
+      * The MIME type of the provided file. If not provided, the module will try to guess it based on the extension.
+      */
+diff --git a/node_modules/expo-file-system/src/legacy/FileSystem.types.ts b/node_modules/expo-file-system/src/legacy/FileSystem.types.ts
+index 8a0b807..1d59b7b 100644
+--- a/node_modules/expo-file-system/src/legacy/FileSystem.types.ts
++++ b/node_modules/expo-file-system/src/legacy/FileSystem.types.ts
+@@ -121,6 +121,8 @@ export type UploadOptionsMultipart = {
+    * The name of the field which will hold uploaded file. Defaults to the file name without an extension.
+    */
+   fieldName?: string;
++  /** Gator Android extension: validated multipart basename, independent of the local URI. */
++  gatorFileName?: string;
+   /**
+    * The MIME type of the provided file. If not provided, the module will try to guess it based on the extension.
+    */

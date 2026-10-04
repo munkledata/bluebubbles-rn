@@ -7,8 +7,16 @@ import { vault } from './clients';
 import { flushErrorReports } from './errors';
 import { pauseRealtime, resumeRealtime } from './realtimeControl';
 import { recoverOutgoing } from './send';
-import { reconcileMessageNotificationGroup } from './notifications/notifeeService';
+import {
+  beginAppLockNotificationPrivacy,
+  commitAppLockNotificationPrivacy,
+  reconcileMessageNotificationGroup,
+} from './notifications/notifeeService';
 import { clearCurrentShareShortcuts } from './shortcuts/shareShortcuts';
+import {
+  captureRealtimeDeliveryLease,
+  runTrackedRealtimeWork,
+} from './realtime/deliveryCoordinator';
 
 // ── App lock ───────────────────────────────────────────────────────────────────
 // The lock setting lives in the vault (NOT the encrypted DB) so it's readable at
@@ -39,37 +47,75 @@ function clearPersonalizedShareTargets(): void {
   }
 }
 
+let lockPolicyOperationPending = false;
+
+function beginLockPolicyOperation(): void {
+  if (lockPolicyOperationPending) throw new Error('An App Lock update is already in progress.');
+  lockPolicyOperationPending = true;
+}
+
 /** Read the persisted app-lock setting from the vault (no DB needed) and apply it. */
 export async function hydrateLock(options: { shouldCommit?: () => boolean } = {}): Promise<void> {
-  const v = await vault.get('appLockEnabled');
-  if (v !== null && v !== 'true' && v !== 'false') throw new InvalidAppLockSettingError();
-  if (options.shouldCommit && !options.shouldCommit()) return;
-  const enabled = v === 'true';
-  // App Lock cannot publish while account-derived Direct Share labels remain visible in Android's
-  // chooser. Clear them synchronously before the protected React tree can render or unmount.
-  if (enabled) clearPersonalizedShareTargets();
-  // Synchronize the native Recents owner before the gate can render protected routes. A build
-  // without this post-v56 native module keeps the existing React gate but cannot claim Recents
-  // protection until rebuilt and device-verified.
-  syncNativeAppLockPolicy(enabled);
-  useLockStore.getState().hydrate(enabled);
+  beginLockPolicyOperation();
+  try {
+    const v = await vault.get('appLockEnabled');
+    if (v !== null && v !== 'true' && v !== 'false') throw new InvalidAppLockSettingError();
+    if (options.shouldCommit && !options.shouldCommit()) return;
+    const enabled = v === 'true';
+    if (enabled) {
+      await beginAppLockNotificationPrivacy();
+      if (options.shouldCommit && !options.shouldCommit()) return;
+    }
+    // App Lock cannot publish while account-derived Direct Share labels remain visible in Android's
+    // chooser. Clear them synchronously before the protected React tree can render or unmount.
+    if (enabled) clearPersonalizedShareTargets();
+    // Synchronize the native Recents owner before the gate can render protected routes. A build
+    // without this post-v56 native module keeps the existing React gate but cannot claim Recents
+    // protection until rebuilt and device-verified.
+    syncNativeAppLockPolicy(enabled);
+    useLockStore.getState().hydrate(enabled);
+    commitAppLockNotificationPrivacy();
+  } finally {
+    lockPolicyOperationPending = false;
+  }
 }
 
 /** Persist the app-lock setting. Callers must confirm biometrics exist before enabling. */
 export async function setAppLockEnabled(enabled: boolean): Promise<void> {
-  // Enabling is fail-closed: install the native Recents policy before persisting/unmounting the
-  // protected React tree. Disabling may safely clear the native mirror after the vault commits.
-  if (enabled) {
-    clearPersonalizedShareTargets();
-    syncNativeAppLockPolicy(true);
+  beginLockPolicyOperation();
+  const accountLease = captureRealtimeDeliveryLease();
+  try {
+    const result = await runTrackedRealtimeWork(accountLease, async (activeLease) => {
+      // Enabling is fail-closed: install the native Recents policy before persisting/unmounting the
+      // protected React tree. Disabling may safely clear the native mirror after the vault commits.
+      if (enabled) {
+        // Admission is synchronous, before the first await. A failed scrub or vault write retains the
+        // notification barrier; do not claim protection succeeded or resume private OS presentation.
+        await beginAppLockNotificationPrivacy();
+        if (!activeLease.isCurrent())
+          throw new Error('The App Lock update was interrupted by Disconnect.');
+        clearPersonalizedShareTargets();
+        syncNativeAppLockPolicy(true);
+      }
+      if (!activeLease.isCurrent())
+        throw new Error('The App Lock update was interrupted by Disconnect.');
+      // App Lock is device policy and survives Disconnect. Once this vault write is admitted, finish
+      // its matching store/native commit while teardown drains us; a replacement account cannot
+      // overtake it. Before this point, retirement cancels the old Settings request.
+      await vault.set('appLockEnabled', enabled ? 'true' : 'false');
+      useLockStore.getState().setEnabled(enabled);
+      if (!enabled) syncNativeAppLockPolicy(false);
+      commitAppLockNotificationPrivacy();
+      // Settings is inside the connected layout. Turning App Lock on replaces that layout with the
+      // lock gate, whose unmount cleanup removes listeners but does not itself close the live socket.
+      // Stop intake in the same synchronous state transition so no private event can write behind it.
+      if (enabled) pauseRealtime();
+    });
+    if (result !== 'delivered')
+      throw new Error('The App Lock update was interrupted by Disconnect.');
+  } finally {
+    lockPolicyOperationPending = false;
   }
-  await vault.set('appLockEnabled', enabled ? 'true' : 'false');
-  useLockStore.getState().setEnabled(enabled);
-  if (!enabled) syncNativeAppLockPolicy(false);
-  // Settings is inside the connected layout. Turning App Lock on replaces that layout with the
-  // lock gate, whose unmount cleanup removes listeners but does not itself close the live socket.
-  // Stop intake in the same synchronous state transition so no private event can write behind it.
-  if (enabled) pauseRealtime();
 }
 
 /** After a successful WARM unlock, clear the gate and resume optional connected work. */

@@ -80,6 +80,7 @@ describe('error-report structured privacy envelope', () => {
       'lock.unlock_failed',
       ERROR_DIAGNOSTIC_SITES.lockUnlock,
     ],
+    ['[sync] run failed', 'sync.run_failed', ERROR_DIAGNOSTIC_SITES.syncRun],
     ['[fatal] runtime error', 'runtime.fatal', ERROR_DIAGNOSTIC_SITES.runtimeFatal],
     ['[uncaught] runtime error', 'runtime.uncaught', ERROR_DIAGNOSTIC_SITES.runtimeUncaught],
     [
@@ -148,6 +149,67 @@ describe('error-report structured privacy envelope', () => {
     ]) {
       expect(serialized).not.toContain(privateValue);
     }
+  });
+
+  it('retains only finite sync classification from one ApiError cause and survives re-projection', () => {
+    const privateValue = 'PRIVATE_SYNC_BODY /private/path +13035550123 secret-token chat-guid';
+    const report = projectCapturedErrorReport(
+      '[sync] run failed',
+      {
+        name: 'MessageStateRepairRequiredError',
+        message: privateValue,
+        stack: privateValue,
+        cause: {
+          name: 'ApiError',
+          kind: 'bad_request',
+          status: 409,
+          message: privateValue,
+          serverDetail: privateValue,
+          serverErrorType: privateValue,
+          cause: { name: 'ApiError', kind: 'timeout', status: 504, message: privateValue },
+        },
+      },
+      ERROR_DIAGNOSTIC_SITES.syncRun,
+    );
+    expect(parsedMeta(report)).toEqual({
+      schemaVersion: 1,
+      errorName: 'MessageStateRepairRequiredError',
+      errorCode: 'bad_request',
+      status: 409,
+    });
+    expect(report.stack).toBe(`at gator.site.${ERROR_DIAGNOSTIC_SITES.syncRun}`);
+    expect(projectStoredErrorReport(report)).toEqual(report);
+    expect(JSON.stringify(report)).not.toMatch(
+      /PRIVATE_SYNC|private\/path|13035550123|secret-token|chat-guid|serverDetail|serverErrorType/,
+    );
+  });
+
+  it.each(['DbWriteFenceRejectedError', 'RepairSnapshotRcsActiveError', 'ZodError'])(
+    'retains the finite sync class %s without its text',
+    (name) => {
+      const report = projectCapturedErrorReport(
+        '[sync] run failed',
+        { name, message: 'PRIVATE_TEXT', stack: 'PRIVATE_STACK' },
+        ERROR_DIAGNOSTIC_SITES.syncRun,
+      );
+      expect(parsedMeta(report)).toEqual({ schemaVersion: 1, errorName: name });
+      expect(JSON.stringify(report)).not.toMatch(/PRIVATE_/);
+    },
+  );
+
+  it('does not retain arbitrary sync error names, codes, out-of-range status, or nested cause graphs', () => {
+    const report = projectCapturedErrorReport(
+      '[sync] run failed',
+      {
+        name: 'PRIVATE_NAME',
+        kind: 'PRIVATE_KIND',
+        status: 600,
+        cause: { name: 'Error', cause: { name: 'ApiError', kind: 'timeout', status: 504 } },
+      },
+      ERROR_DIAGNOSTIC_SITES.syncRun,
+    );
+    expect(parsedMeta(report)).toEqual({ schemaVersion: 1, errorName: 'UnknownError' });
+    expect(JSON.stringify(report)).not.toMatch(/PRIVATE_|timeout|504/);
   });
 
   it('drops unknown prose, arbitrary fields, unsafe enum values, and malformed stored metadata', () => {

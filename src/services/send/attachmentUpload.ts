@@ -16,6 +16,7 @@ import { DbCommitGuardRejectedError } from '@db/transaction';
 import { uploadStoreSink } from '@state/uploadStore';
 import { isRcsChatGuid } from '@utils/chat';
 import { utf8Encode } from '@utils/bytes';
+import { assertSafeUploadFilename } from '@utils/uploadFilename';
 import type { AttachmentUploader } from './sendAttachmentService';
 import { runTrackedUpload } from './trackedUpload';
 import { uploadGate, uploadRegistry } from './uploadControl';
@@ -93,6 +94,15 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
   signal,
   timeoutMs,
 }) => {
+  // Reject unsafe metadata before native file reads or any network/cancellation registration.
+  try {
+    assertSafeUploadFilename(name);
+  } catch {
+    throw new ApiError(
+      'local_file',
+      'Attachment filename is invalid; choose another file or rename it.',
+    );
+  }
   // An explicit, capability-fenced one-to-one file path is the sole iMessage exception. The
   // existing RCS uploader remains unchanged, and a stale queue row cannot infer this mode.
   const imessageAttachment = service === 'iMessage';
@@ -261,14 +271,13 @@ export const expoAttachmentUploader: AttachmentUploader = async ({
                 httpMethod: 'POST',
                 uploadType: FileSystem.FileSystemUploadType.MULTIPART,
                 fieldName: 'attachment',
+                gatorFileName: name,
                 mimeType,
                 parameters: {
                   chatGuid,
                   tempGuid,
-                  // Expo names the multipart file part from the on-disk URI. Android's Files
-                  // picker often caches it under a UUID, so a separate original `name` would
-                  // disagree and the narrow iMessage server route would reject it before send.
-                  // With no override, the server uses the actual file-part filename.
+                  // The patched native multipart filename preserves the original basename even
+                  // when the picker caches under a UUID. Keep the narrow iMessage form minimal.
                   ...(imessageAttachment ? {} : { name }),
                   ...(imessageVoice ? { uploadKind: 'imessage_voice' } : {}),
                   ...(text === undefined ? {} : { text }),

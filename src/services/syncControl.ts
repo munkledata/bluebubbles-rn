@@ -1,4 +1,4 @@
-import { isUnimplementedEndpoint } from '@core/api/errors';
+import { ApiError, isUnimplementedEndpoint } from '@core/api/errors';
 import { RepairSnapshotRcsActiveError } from '@core/api/endpoints/repairSnapshot';
 import { logger } from '@core/secure';
 import { currentRcsProviderEpoch } from '@core/rcs';
@@ -1022,6 +1022,15 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
     if (cancelled()) outcome = 'cancelled';
     else if (sessionEnded()) outcome = 'stale';
     else {
+      // Keep one finite release diagnostic for genuine failures. Cancellation and retired runs
+      // must not become error reports; the logger projects away all Error/server prose before any
+      // console, memory, file, or optional report sink can observe it.
+      if (
+        !(e instanceof ApiError && e.kind === 'cancelled') &&
+        !(e instanceof Error && e.name === 'AbortError')
+      ) {
+        logger.error('[sync] run failed', 's7q4nv2mp0', e);
+      }
       failureMessage =
         e instanceof DbWriteFenceRejectedError
           ? repair

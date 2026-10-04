@@ -271,19 +271,21 @@ owns lock-screen presentation, and App Lock's limited generic-new-delivery behav
       grace period follows the unlocked path and a resume after expiry or a cold launch presents the
       lock gate before private DB-backed UI.
 - [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Separate the push axes: App Lock disabled permits
-      detailed background and killed-process presentation; App Lock enabled in a still-live process
-      permits detail only within its unexpired grace period; and an expired live process uses the
-      generic path.
+      detailed background and killed-process presentation; App Lock enabled keeps notices generic
+      in a still-live process, including after unlock and within its unexpired UI grace period.
 - [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** With persisted App Lock enabled, a fresh ordinary
       killed-process wake has no trustworthy warm-process grace and must always use the generic path.
       Expect one fixed `Gator` / `You have new messages` notice with no sender, chat title, body,
       avatar, or private route; repeated locked deliveries update the same generic notice.
 - [ ] **`EXACT PLAY CANDIDATE`:** Tap the generic notice, unlock, and confirm sync makes the synthetic
       message available in the app. Do not expect a detailed per-chat notice to replay after unlock.
-- [ ] **`EXACT PLAY CANDIDATE`:** Record the current boundary explicitly: enabling or expiring App
-      Lock does not retroactively rewrite a detailed notice or reminder trigger Android already
-      owns. App Lock is a UI/policy gate, not encryption-key custody; this observation does not close
-      `NOTIF-02`.
+- [ ] **`EXACT PLAY CANDIDATE`:** On a candidate containing the 2026-10-03 privacy repair, first post
+      detailed notices with App Lock OFF, then enable it and verify the entire displayed group and
+      private conversation-channel names are cleared before success. Repeat with a delivery in
+      flight. Verify a generic scheduled reminder still fires, cold persisted ON clears old tray
+      content before protected boot succeeds, and disabling restores detail only for fresh posts.
+      Play v80 predates this repair and exposed old details after enabling; retain that historical
+      failure. App Lock remains a UI/policy gate, not encryption-key custody.
 - [ ] **`STATIC/HOST`:** Retain the fail-closed source/test evidence that a locked/unknown lock state
       never reveals content. An enrolled V2 delivery before its exclusive 2027-02-01 cutoff posts
       only the generic notice without opening the database; absent/V1/plaintext state posts no

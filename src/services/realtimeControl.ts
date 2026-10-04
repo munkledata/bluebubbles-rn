@@ -1258,7 +1258,7 @@ export async function startRealtime(options: StartRealtimeOptions = {}): Promise
             stage: 'fcm',
             level: 'degraded',
             code: 'fcm-token-registration-failed',
-            userMessage: 'Push updates are unavailable; live socket updates still work.',
+            userMessage: 'Push updates are unavailable. Check Live Updates in Settings.',
           });
         }
       })
@@ -1268,7 +1268,7 @@ export async function startRealtime(options: StartRealtimeOptions = {}): Promise
           stage: 'fcm',
           level: 'degraded',
           code: 'fcm-registration-unavailable',
-          userMessage: 'Push updates are unavailable; live socket updates still work.',
+          userMessage: 'Push updates are unavailable. Check Live Updates in Settings.',
         });
       });
   }

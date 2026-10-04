@@ -22,7 +22,7 @@ const CHOICES: { label: string; value: Recurrence | null }[] = [
 ];
 
 export const SCHEDULE_DELIVERY_TIMING_NOTE =
-  'Scheduled delivery is best effort, not exact. One-time messages ask the server to schedule when available. Repeating messages, replies, and offline fallbacks rely on Android background work; sleep, battery limits, connectivity, or an unavailable Mac/server can delay them.';
+  'Scheduled delivery is best effort, not exact. One-time messages ask the server to schedule when available. Repeating messages and offline fallbacks rely on Android background work; sleep, battery limits, connectivity, or an unavailable Mac/server can delay them.';
 
 /**
  * Third step of the schedule flow (after the native date + time pickers): choose whether

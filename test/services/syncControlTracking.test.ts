@@ -119,9 +119,13 @@ jest.mock('@db/repositories', () => ({
   setSyncMarkerWithinTransaction,
 }));
 
+/* eslint-disable import/first -- register native/service mocks before evaluating these imports */
 import type { ServerInfo } from '@core/models';
 import { currentRcsProviderEpoch } from '@core/rcs/providerIdentity';
 import { RepairSnapshotRcsActiveError } from '@core/api/endpoints/repairSnapshot';
+import { ApiError } from '@core/api/errors';
+import { ERROR_DIAGNOSTIC_SITES, memoryLogSink } from '@core/secure';
+import { DbWriteFenceRejectedError } from '@db/transaction';
 import { useSessionStore } from '@state/sessionStore';
 import { useSyncStore } from '@state/syncStore';
 import {
@@ -132,6 +136,7 @@ import {
   startFullRepair,
   startSync,
 } from '@/services/syncControl';
+/* eslint-enable import/first */
 
 /** Let every pending microtask AND timer callback run. */
 const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
@@ -158,6 +163,8 @@ function gate(): { promise: Promise<void>; open: () => void } {
 }
 
 beforeEach(() => {
+  memoryLogSink.clear();
+  jest.spyOn(console, 'error').mockImplementation(() => undefined);
   mockAccountLeaseCurrent = true;
   // Non-null marker → runSync takes the incremental branch (no full sync).
   getSyncMarker.mockResolvedValue({ lastSyncedRowId: 10, lastSyncedTimestamp: 1000 });
@@ -197,6 +204,96 @@ beforeEach(() => {
   // The slot is keyed by the session INSTANCE it belongs to, so start each test from a fresh one
   // (`reset` mints a new epoch, so nothing a previous test parked in the slot is shareable here).
   disconnectSession();
+});
+
+describe('runSync — retained finite failure diagnostics', () => {
+  const syncDiagnostics = () =>
+    memoryLogSink.entries().filter((entry) => entry.message.startsWith('sync.run_failed'));
+
+  it('retains one real logger diagnostic with ApiError kind/status and no private failure material', async () => {
+    const privateValue = 'PRIVATE_SYNC_BODY /private/path account-guid user@example.com token-123';
+    const error = new ApiError(
+      'server_error',
+      privateValue,
+      503,
+      { response: privateValue },
+      privateValue,
+      privateValue,
+    );
+    error.stack = privateValue;
+    incrementalSync.mockRejectedValueOnce(error);
+    connectSession('https://diagnostic.example');
+
+    await startSync();
+
+    expect(useSyncStore.getState()).toMatchObject({ status: 'error', error: privateValue });
+    expect(syncDiagnostics()).toHaveLength(1);
+    const diagnostic = syncDiagnostics()[0]!;
+    expect(diagnostic.message).toBe('sync.run_failed [ApiError|server_error|http_5xx]');
+    expect(JSON.parse(diagnostic.meta!)).toEqual({
+      schemaVersion: 1,
+      errorName: 'ApiError',
+      errorCode: 'server_error',
+      status: 503,
+      stack: `at gator.site.${ERROR_DIAGNOSTIC_SITES.syncRun}`,
+    });
+    expect(JSON.stringify(diagnostic)).not.toMatch(
+      /PRIVATE_SYNC|private\/path|account-guid|user@example|token-123|serverDetail|serverErrorType/,
+    );
+  });
+
+  it('records a genuine DB fence failure with its finite class', async () => {
+    incrementalSync.mockRejectedValueOnce(new DbWriteFenceRejectedError());
+    connectSession('https://diagnostic.example');
+    await startSync();
+    expect(syncDiagnostics()).toHaveLength(1);
+    expect(JSON.parse(syncDiagnostics()[0]!.meta!).errorName).toBe('DbWriteFenceRejectedError');
+    expect(useSyncStore.getState().error).toMatch(/Retry sync to finish safely/);
+  });
+
+  it.each([
+    new ApiError('cancelled', 'PRIVATE_CANCEL'),
+    Object.assign(new Error('PRIVATE_ABORT'), { name: 'AbortError' }),
+  ])('does not report a cancelled transport ($name)', async (error) => {
+    incrementalSync.mockRejectedValueOnce(error);
+    connectSession('https://diagnostic.example');
+    await startSync();
+    expect(syncDiagnostics()).toHaveLength(0);
+  });
+
+  it('does not retain a late failure after account or lease retirement', async () => {
+    const request = gate();
+    incrementalSync.mockImplementationOnce(async () => {
+      await request.promise;
+      throw new ApiError('timeout', 'PRIVATE_STALE', 504);
+    });
+    connectSession('https://old.example');
+    const running = startSync();
+    await settle();
+    mockAccountLeaseCurrent = false;
+    disconnectSession();
+    connectSession('https://new.example');
+    request.open();
+    await running;
+    expect(syncDiagnostics()).toHaveLength(0);
+  });
+
+  it('does not retain a failure unwinding an explicitly cancelled repair', async () => {
+    const request = gate();
+    fullSync.mockImplementationOnce(async () => {
+      await request.promise;
+      throw new ApiError('timeout', 'PRIVATE_CANCELLED_REPAIR', 504);
+    });
+    connectSession('https://diagnostic.example', SNAPSHOT_SERVER_INFO);
+    const running = startFullRepair();
+    await settle();
+    expect(fullSync).toHaveBeenCalledTimes(1);
+    expect(cancelFullRepair()).toBe(true);
+    request.open();
+    await running;
+    expect(syncDiagnostics()).toHaveLength(0);
+    expect(useSyncStore.getState().repairStatus).toBe('cancelled');
+  });
 });
 
 describe('ensureChatSynced — on-demand work participates in account teardown', () => {

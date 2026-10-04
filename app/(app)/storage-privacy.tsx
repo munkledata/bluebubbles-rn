@@ -53,8 +53,9 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
             (FCM) token and device label with your connected server. Push event data then passes
             from that server through Google FCM to this device. Gator’s own push-payload encryption
             depends on the server’s push setting, so it is not always enabled. While App Lock is
-            engaged, a newly received push produces a generic notice without opening the encrypted
-            database.
+            enabled, new message notices remain generic. A locked V3 push may store an authenticated
+            event in the encrypted database for processing after unlock; legacy locked delivery does
+            not open the database.
           </Text>
         </SettingsSection>
 
@@ -112,8 +113,11 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
             Gator no longer has a configurable Redacted Mode or Hide Preview mode. App Lock is a
             foreground screen gate; it is not file encryption or biometric-bound key custody. It
             keeps protected content out of Android Recents, including during its grace period. The
-            independent Secure Screen setting blocks screenshots and screen recording. Neither
-            setting retroactively replaces detailed notifications that Android already displayed.
+            independent Secure Screen setting blocks screenshots and screen recording. Enabling App
+            Lock clears displayed notifications and keeps new message notices generic while enabled,
+            including after unlock and during its grace period. Generic scheduled reminders remain
+            scheduled; unsafe legacy alarms are removed. Secure Screen alone does not change
+            notification previews.
           </Text>
         </SettingsSection>
 

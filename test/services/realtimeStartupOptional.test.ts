@@ -1339,7 +1339,7 @@ describe('startRealtime optional setup containment', () => {
       stage: 'fcm',
       level: 'degraded',
       code: 'fcm-token-registration-failed',
-      userMessage: 'Push updates are unavailable; live socket updates still work.',
+      userMessage: 'Push updates are unavailable. Check Live Updates in Settings.',
     });
   });
 

@@ -1,6 +1,7 @@
 import { ExperimentalStack, Redirect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AppState as NativeAppState, StyleSheet, View, type AppStateStatus } from 'react-native';
+import { SafeAreaInsetsContext, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isLockExpired } from '@core/security/lockTimeout';
 import { logger as secureLogger } from '@core/secure';
 import {
@@ -115,6 +116,14 @@ function ConnectedAppLayout(): React.JSX.Element {
   // Every listener/effect below belongs to this mounted account. Native/AppState callbacks may be
   // queued past unmount, so they must not capture the replacement account when they finally run.
   const [accountLease] = useState(captureRealtimeDeliveryLease);
+  const [connectionBannerHeight, setConnectionBannerHeight] = useState(0);
+  const physicalInsets = useSafeAreaInsets();
+  // Reserve banner space in route headers, not around the navigator: moving a nested
+  // KeyboardAvoidingView changes its local origin while Android reports screen coordinates.
+  const contentInsets = useMemo(
+    () => ({ ...physicalInsets, top: physicalInsets.top + connectionBannerHeight }),
+    [physicalInsets, connectionBannerHeight],
+  );
   const [AppState] = useState(() => createAccountOwnedAppState(accountLease));
   // Preserve the exact certified AppState orchestration callback while making its asynchronous
   // catch handlers obey the same mount lease as callback entry.
@@ -248,9 +257,14 @@ function ConnectedAppLayout(): React.JSX.Element {
 
   return (
     <View style={styles.root}>
-      <ExperimentalStack screenOptions={{ headerShown: false }} />
+      <SafeAreaInsetsContext.Provider value={contentInsets}>
+        <ExperimentalStack screenOptions={{ headerShown: false }} />
+      </SafeAreaInsetsContext.Provider>
       <ShareIntentNavigator />
-      <ConnectionBanner onRetry={retryRealtimeConnection} />
+      <ConnectionBanner
+        onRetry={retryRealtimeConnection}
+        onHeightChange={setConnectionBannerHeight}
+      />
       <ServerRotationApprovalHost />
     </View>
   );

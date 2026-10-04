@@ -341,7 +341,7 @@ describe('RootLayout — foreground boot presentation', () => {
         stage: 'fcm',
         level: 'degraded',
         code: 'foreground-fcm-start-failed',
-        userMessage: 'Push updates are unavailable; live socket updates still work.',
+        userMessage: 'Push updates are unavailable. Check Live Updates in Settings.',
       },
     ]);
     const view = await render(<RootLayout />);
@@ -452,7 +452,7 @@ describe('RootLayout — foreground boot presentation', () => {
         stage: 'fcm',
         level: 'degraded',
         code: 'foreground-fcm-start-failed',
-        userMessage: 'Push updates are unavailable; live socket updates still work.',
+        userMessage: 'Push updates are unavailable. Check Live Updates in Settings.',
       },
     ]);
 
@@ -461,7 +461,7 @@ describe('RootLayout — foreground boot presentation', () => {
     await waitFor(() =>
       expect(useToastStore.getState().current).toEqual(
         expect.objectContaining({
-          message: 'Push updates are unavailable; live socket updates still work.',
+          message: 'Push updates are unavailable. Check Live Updates in Settings.',
           durationMs: 6_000,
         }),
       ),

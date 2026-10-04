@@ -80,6 +80,15 @@ const EXPO_FILE_SYSTEM_LEGACY_ANDROID_PATH =
   'node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemLegacyModule.kt';
 const EXPO_FILE_SYSTEM_REDIRECT_TEST_PATH =
   'node_modules/expo-file-system/android/src/test/java/expo/modules/filesystem/legacy/FileSystemLegacyRedirectPolicyTest.kt';
+export const UPLOAD_FILENAME_SOURCE_PATHS = {
+  legacyModuleSource: EXPO_FILE_SYSTEM_LEGACY_ANDROID_PATH,
+  recordsSource:
+    'node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/FileSystemRecords.kt',
+  filenameSource:
+    'node_modules/expo-file-system/android/src/main/java/expo/modules/filesystem/legacy/GatorUploadFilename.kt',
+  typesSource: 'node_modules/expo-file-system/src/legacy/FileSystem.types.ts',
+  declarationsSource: 'node_modules/expo-file-system/build/legacy/FileSystem.types.d.ts',
+};
 const EXPO_ROUTER_PATCH_PATH = `patches/expo-router+${EXPO_ROUTER_VERSION}.patch`;
 const EXPO_ROUTER_EXPERIMENTAL_STACK_PATH =
   'node_modules/expo-router/build/layouts/experimental-stack/ExperimentalStackView.js';
@@ -112,6 +121,12 @@ export const REQUIRED_SHARE_INTAKE_DEX_MARKERS = [
 export const REQUIRED_BACKGROUND_TASK_RETRY_DEX_MARKERS = [
   'Task finished; success=',
   'doWork: Worker failed; requesting retry',
+];
+
+// The Expo record field and product-owned validation text must survive into the shipped runtime.
+export const REQUIRED_UPLOAD_FILENAME_DEX_MARKERS = [
+  'gatorFileName',
+  'Invalid Gator multipart filename',
 ];
 
 // These messages exist only in the patched task-manager sources. They prove the packaged runtime
@@ -952,6 +967,88 @@ export function validateExpoFileSystemRedirectContainment({
   return errors;
 }
 
+/** Bind the optional multipart metadata override to the installed sources and durable patch. */
+export function validateUploadFilenameBridge({
+  patchSource,
+  legacyModuleSource,
+  recordsSource,
+  filenameSource,
+  typesSource,
+  declarationsSource,
+}) {
+  const errors = [];
+  // Inspect the bounded upload method: unrelated Kotlin MIME strings contain comment delimiters.
+  const nativeModule = withoutKotlinComments(
+    String(legacyModuleSource ?? '').match(
+      /(?:^|\n)  private fun createRequestBody\([\s\S]*?\n  }/,
+    )?.[0] ?? '',
+  );
+  if (
+    !nativeModule.includes(
+      'val uploadName = options.gatorFileName?.let(GatorUploadFilename::validate) ?: file.name',
+    ) ||
+    !nativeModule.includes(
+      'bodyBuilder.addFormDataPart(fieldName, uploadName, decorator.decorate(file.asRequestBody(mimeType.toMediaTypeOrNull())))',
+    )
+  )
+    errors.push(
+      'legacy multipart upload must validate and use gatorFileName on the original streaming body',
+    );
+  if (
+    !/@Field\s+val gatorFileName: String\? = null/.test(withoutKotlinComments(recordsSource ?? ''))
+  ) {
+    errors.push('native upload options must expose the nullable gatorFileName record field');
+  }
+  for (const [label, source] of [
+    ['source', typesSource],
+    ['declarations', declarationsSource],
+  ]) {
+    if (!/gatorFileName\?: string;/.test(source ?? ''))
+      errors.push(`legacy upload ${label} must expose gatorFileName`);
+  }
+  const validationMarkers = [
+    'name.length in 1..255',
+    'name.toByteArray(Charsets.UTF_8).size <= 255',
+    'Character.isHighSurrogate(character)',
+    'Character.isLowSurrogate(name[index + 1])',
+    'require(!Character.isLowSurrogate(character))',
+    'Invalid Gator multipart filename',
+  ];
+  if (
+    validationMarkers.some(
+      (marker) => !withoutKotlinComments(filenameSource ?? '').includes(marker),
+    )
+  ) {
+    errors.push('native filename validation must retain bounded UTF-8 and surrogate checks');
+  }
+  const patchMarkers = [
+    ...Object.values(UPLOAD_FILENAME_SOURCE_PATHS).map((path) => `b/${path}`),
+    '+  val gatorFileName: String? = null',
+    '+        val uploadName = options.gatorFileName?.let(GatorUploadFilename::validate) ?: file.name',
+    'b/node_modules/expo-file-system/android/src/test/java/expo/modules/filesystem/legacy/GatorUploadFilenameTest.kt',
+    'b/node_modules/expo-file-system/android/src/test/java/expo/modules/filesystem/legacy/GatorUploadMultipartTest.kt',
+    '+        body.writeTo(wire)',
+  ];
+  // The new helper is wholly patch-owned: every nonblank source line must be restored by npm ci.
+  const helperLines = String(filenameSource ?? '')
+    .split(/\r?\n/)
+    .filter((line) => line.trim());
+  if (
+    patchMarkers.some((marker) => !patchSource?.includes(marker)) ||
+    helperLines.some(
+      (line) =>
+        !String(patchSource ?? '')
+          .split(/\r?\n/)
+          .includes(`+${line}`),
+    )
+  ) {
+    errors.push(
+      'expo-file-system patch must restore the filename bridge, validator, types, and native wire tests',
+    );
+  }
+  return errors;
+}
+
 // Expo's dev-client overlay legitimately needs this in a debuggable build. It remains forbidden
 // in the release manifest and packaged AAB, which are the artifacts shipped to users.
 const DEBUG_ONLY_ALLOWED_PERMISSIONS = new Set(['android.permission.SYSTEM_ALERT_WINDOW']);
@@ -1573,6 +1670,11 @@ export function validatePackagedAndroidBundle({
   }
 
   if (dexBytes) {
+    for (const marker of REQUIRED_UPLOAD_FILENAME_DEX_MARKERS) {
+      if (!dexBytes.includes(Buffer.from(marker, 'utf8'))) {
+        errors.push(`packaged DEX is missing required upload-filename marker: ${marker}`);
+      }
+    }
     for (const marker of REQUIRED_BACKGROUND_TASK_RETRY_DEX_MARKERS) {
       if (!dexBytes.includes(Buffer.from(marker, 'utf8'))) {
         errors.push(`packaged DEX is missing required background-task retry marker: ${marker}`);
@@ -2036,6 +2138,17 @@ export function runAndroidBuildCheck({
     legacyModuleSource: readFileSync(resolve(root, EXPO_FILE_SYSTEM_LEGACY_ANDROID_PATH), 'utf8'),
     appConfigSource: readFileSync(resolve(root, 'app.config.ts'), 'utf8'),
   }).map((error) => `network redirect containment: ${error}`);
+  errors.push(
+    ...validateUploadFilenameBridge({
+      patchSource: readFileSync(resolve(root, EXPO_FILE_SYSTEM_PATCH_PATH), 'utf8'),
+      ...Object.fromEntries(
+        Object.entries(UPLOAD_FILENAME_SOURCE_PATHS).map(([key, path]) => [
+          key,
+          readFileSync(resolve(root, path), 'utf8'),
+        ]),
+      ),
+    }).map((error) => `upload filename bridge: ${error}`),
+  );
   errors.push(
     ...validateExpoBackgroundTaskRetryBridge({
       packageJson,

@@ -21,6 +21,7 @@ export async function page(
       json: { version: 1, provider: 'imessage', ...(cursor ? { cursor } : {}) },
       signal,
       retry: false,
+      captureErrorDetail: true,
     });
   } catch (error) {
     if (
@@ -48,6 +49,7 @@ export async function activeMessage(
         json: { version: 1, provider: 'imessage', providerEpoch, guid },
         signal,
         retry: false,
+        captureErrorDetail: true,
       },
     );
     return result.message;

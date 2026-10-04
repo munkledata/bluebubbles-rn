@@ -100,6 +100,7 @@ export default function SettingsScreen(): React.JSX.Element {
   const preset = useThemeStore((s) => s.preset);
   const setPreset = useThemeStore((s) => s.setPreset);
   const appLock = useLockStore((s) => s.enabled);
+  const appLockChangePending = useRef(false);
   const [secureScreen, setSecureScreen] = useState<SecureScreenState>(getSecureScreenState);
   const maxDownloads = useFeatureSettingsStore((s) => s.maxConcurrentDownloads);
   const setMaxDownloads = useFeatureSettingsStore((s) => s.setMaxConcurrentDownloads);
@@ -163,8 +164,8 @@ export default function SettingsScreen(): React.JSX.Element {
       subscription.remove();
     };
   }, [accountLease]);
-  const q = query.trim().toLowerCase();
-  // Keyword bag per section — a section is shown when the query is empty OR matches its bag.
+  const queryWords = query.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+  // Match every search word independently, including labels whose words are separated in the bag.
   const SECTIONS = {
     theme: 'theme appearance oled dark gator custom presets colors',
     contacts: 'contacts sync names photos address book',
@@ -186,7 +187,7 @@ export default function SettingsScreen(): React.JSX.Element {
     about:
       'about app version build server version macos disconnect forget app logs debug diagnostics privacy data storage legal license notices third-party internal testing',
   } as const;
-  const match = (terms: string): boolean => q.length === 0 || terms.includes(q);
+  const match = (terms: string): boolean => queryWords.every((word) => terms.includes(word));
   const anyMatch = Object.values(SECTIONS).some(match);
 
   const onDisconnect = (): void => {
@@ -257,19 +258,31 @@ export default function SettingsScreen(): React.JSX.Element {
 
   // Enabling requires enrolled biometrics, else the user could lock themselves out.
   const onToggleAppLock = async (next: boolean): Promise<void> => {
-    if (next && !(await isBiometricAvailable())) {
-      showDialog(
-        'Biometrics required',
-        'Set up a fingerprint, face unlock, or device PIN before enabling App Lock.',
-      );
-      return;
-    }
+    if (!screenCurrent() || appLockChangePending.current) return;
+    appLockChangePending.current = true;
     try {
+      if (next) {
+        const available = await isBiometricAvailable();
+        if (!screenCurrent()) return;
+        if (!available) {
+          showDialog(
+            'Biometrics required',
+            'Set up a fingerprint, face unlock, or device PIN before enabling App Lock.',
+          );
+          return;
+        }
+      }
+      if (!screenCurrent()) return;
       await setAppLockEnabled(next);
     } catch {
       if (screenCurrent()) {
-        showDialog('App Lock', 'Couldn’t update App Lock. The previous setting is unchanged.');
+        showDialog(
+          'App Lock',
+          'Couldn’t finish updating App Lock. Notification previews may remain hidden. Try again before relying on App Lock.',
+        );
       }
+    } finally {
+      appLockChangePending.current = false;
     }
   };
 
@@ -541,7 +554,7 @@ export default function SettingsScreen(): React.JSX.Element {
               disabled={!secureScreen.available}
               accessibilityLabel="Block Android screenshots and screen recording"
             />
-            <NoteRow text="App Lock blocks protected routes and keeps their content out of Android Recents, including during its grace period. Secure Screen separately blocks screenshots and screen recording. Neither setting makes the database key biometric-bound or encrypts files. Locked pushes stay generic and sync after unlock." />
+            <NoteRow text="App Lock blocks protected routes and keeps their content out of Android Recents, including during its grace period. Enabling it clears displayed notifications; new message notices stay generic while it is enabled, including after unlock. Generic scheduled reminders are preserved. Secure Screen separately blocks screenshots and screen recording. Neither setting makes the database key biometric-bound or encrypts files." />
             <NavRow
               label="Reminders"
               color="label"
@@ -795,7 +808,7 @@ export default function SettingsScreen(): React.JSX.Element {
           </SettingsSection>
         )}
 
-        {q.length > 0 && !anyMatch && (
+        {queryWords.length > 0 && !anyMatch && (
           <Text style={[styles.noResults, { color: theme.color.secondaryLabel }]}>
             No settings match “{query}”.
           </Text>
