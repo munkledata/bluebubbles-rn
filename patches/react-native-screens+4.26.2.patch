@@ -172,7 +172,7 @@ new file mode 100644
 +
 +    @Before
 +    fun setUp() {
-+        val application = RuntimeEnvironment.getApplication<Application>()
++        val application = RuntimeEnvironment.getApplication()
 +        // A context wrapper only: no Catalyst instance, JS queues, or native runtime is started.
 +        reactContext = ThemedReactContext(BridgeReactContext(application), application, "stack-test", 1)
 +        val delegate =
