@@ -56,6 +56,8 @@ const LOCAL_NATIVE_TEST_TASKS = [
   ':gator-bounded-download:testDebugUnitTest',
   ':expo-file-system:testDebugUnitTest',
   ':expo-task-manager:testDebugUnitTest',
+  ':expo-background-task:testDebugUnitTest',
+  ':react-native-screens:testDebugUnitTest',
 ];
 const SCHEDULED_DB_CRON = "- cron: '17 7 * * 2'";
 const SCHEDULED_DB_CONDITION =

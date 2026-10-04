@@ -18,16 +18,19 @@ import {
   GOOGLE_MAPS_API_KEY_METADATA_NAME,
   inspectPackagedAndroidBundle,
   NETWORK_SECURITY_CONFIG_REFERENCE,
+  REACT_NATIVE_SCREENS_SOURCE_PATHS,
   REQUIRED_BACKGROUND_TASK_RETRY_DEX_MARKERS,
   REQUIRED_PINNED_SHORTCUT_CLEANUP_DEX_MARKERS,
   REQUIRED_SHARE_INTAKE_DEX_MARKERS,
   REQUIRED_TASK_MANAGER_SETTLEMENT_DEX_MARKERS,
   REQUIRED_UPLOAD_FILENAME_DEX_MARKERS,
   UPLOAD_FILENAME_SOURCE_PATHS,
+  BACKGROUND_EXECUTION_SOURCE_PATHS,
   REQUIRED_PERMISSIONS,
   runAndroidBuildCheck,
   validateAndroidBuild,
   validateExpoBackgroundTaskRetryBridge,
+  validateBackgroundExecutionLifetime,
   validateExpoFileSystemRedirectContainment,
   validateUploadFilenameBridge,
   validateExpoRouterPredictiveBackBridge,
@@ -454,6 +457,10 @@ catch (e: CancellationException) {
   cancel(true)
   throw e
 }
+catch (e: CancellationException) {
+  backgroundTaskExecutions.cancel(execution)
+  throw e
+}
 `;
 const backgroundTaskRetryWorkerSource = `
 if (appScopeKey == null) {
@@ -474,6 +481,7 @@ if (Platform.OS === 'android') {
 const taskManagerKeeperRuntimeSource = taskManagerKeeperSource.replace('<void>', '');
 const taskManagerSettlementPatchSource = `
 diff --git a/node_modules/expo-task-manager/android/build.gradle b/node_modules/expo-task-manager/android/build.gradle
+diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerModule.kt b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerModule.kt
 diff --git a/node_modules/expo-task-manager/android/src/test/java/expo/modules/taskManager/TaskServiceContextLifetimeTest.java b/node_modules/expo-task-manager/android/src/test/java/expo/modules/taskManager/TaskServiceContextLifetimeTest.java
 diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java
 +        callback.onFinished(Collections.emptyMap());
@@ -484,8 +492,8 @@ diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/t
 +      finishPendingTaskExecutionWithFailure(appScopeKey, eventId, body);
 +      if (pendingBody != null && !mTasksAndEventsRepository.removeEventForAppScopeKey(appScopeKey, pendingBody)) {
 +          finishedHeadlessStartToken = sHeadlessStartTokens.remove(appScopeKey);
-+        sHeadlessTaskIds.put(headlessStartToken, taskId);
-+      Integer taskId = sHeadlessTaskIds.remove(headlessStartToken);
++        sHeadlessTaskOwners.put(headlessStartToken, new HeadlessTaskOwner(headlessContext, taskId));
++      HeadlessTaskOwner owner = sHeadlessTaskOwners.remove(headlessStartToken);
 -          unregisterAllTasksForAppScopeKey(appScopeKey);
 diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/TasksAndEventsRepository.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/TasksAndEventsRepository.java
 +  boolean removeEventForAppScopeKey(String appScopeKey, Bundle body);
@@ -514,7 +522,7 @@ if (task == null) {
 `;
 const taskManagerServiceSource = `
 private static final Object sTaskExecutionLock = new Object();
-private static final Map<Object, Integer> sHeadlessTaskIds = new HashMap<>();
+private static final Map<Object, HeadlessTaskOwner> sHeadlessTaskOwners = new HashMap<>();
 private static final Map<String, Object> sHeadlessStartTokens = new HashMap<>();
 Task execution body is missing execution info; completing callback with failure.
 Task execution body is missing an event ID; completing callback with failure.
@@ -607,13 +615,13 @@ private void invokeStartHeadlessTask(ReactContext reactContext, String appScopeK
   }
   int taskId = headlessContext.startTask(taskConfig);
   stillOwnsHeadlessStart = sHeadlessStartTokens.get(appScopeKey) == headlessStartToken;
-  sHeadlessTaskIds.put(headlessStartToken, taskId);
+  sHeadlessTaskOwners.put(headlessStartToken, new HeadlessTaskOwner(headlessContext, taskId));
 }
 private void waitForReactContextAndStartTask() {
   hasPendingEvents = sHeadlessStartTokens.get(appScopeKey) == headlessStartToken;
 }
 private void maybeFinishHeadlessTask(String appScopeKey, Object headlessStartToken) {
-  Integer taskId = sHeadlessTaskIds.remove(headlessStartToken);
+  HeadlessTaskOwner owner = sHeadlessTaskOwners.remove(headlessStartToken);
   if (taskId == null) {
     return;
   }
@@ -699,6 +707,19 @@ function backgroundTaskRetryInput(overrides = {}) {
     schedulerSource: backgroundTaskRetrySchedulerSource,
     workerSource: backgroundTaskRetryWorkerSource,
     ...overrides,
+  };
+}
+
+function backgroundExecutionInput() {
+  return {
+    sources: Object.fromEntries(
+      Object.entries(BACKGROUND_EXECUTION_SOURCE_PATHS).map(([key, path]) => [
+        key,
+        readFileSync(join(ROOT, path), 'utf8'),
+      ]),
+    ),
+    backgroundPatch: readFileSync(join(ROOT, 'patches/expo-background-task+57.0.21.patch'), 'utf8'),
+    taskManagerPatch: readFileSync(join(ROOT, 'patches/expo-task-manager+57.0.21.patch'), 'utf8'),
   };
 }
 
@@ -859,6 +880,15 @@ function writeRedirectContainmentFixture(root) {
     ),
     taskManagerManagedRepositorySource,
   );
+  // Lifetime guards inspect installed production code and its corresponding durable patch.
+  for (const path of [
+    ...Object.values(BACKGROUND_EXECUTION_SOURCE_PATHS),
+    'patches/expo-background-task+57.0.21.patch',
+    'patches/expo-task-manager+57.0.21.patch',
+  ]) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), readFileSync(join(ROOT, path), 'utf8'));
+  }
   writeFileSync(
     join(
       root,
@@ -872,19 +902,10 @@ function writeRedirectContainmentFixture(root) {
       'utf8',
     ),
   );
-  writeFileSync(
-    join(
-      root,
-      'node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainer.kt',
-    ),
-    readFileSync(
-      join(
-        ROOT,
-        'node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainer.kt',
-      ),
-      'utf8',
-    ),
-  );
+  for (const path of Object.values(REACT_NATIVE_SCREENS_SOURCE_PATHS)) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), readFileSync(join(ROOT, path), 'utf8'));
+  }
   writeFileSync(join(root, 'app/_layout.tsx'), readFileSync(join(ROOT, 'app/_layout.tsx'), 'utf8'));
   writeFileSync(
     join(root, 'app/(setup)/_layout.tsx'),
@@ -1085,12 +1106,11 @@ test('guards the Expo Router predictive-Back bridge against drift', () => {
       join(ROOT, 'patches/react-native-screens+4.26.2.patch'),
       'utf8',
     ),
-    stackContainerSource: readFileSync(
-      join(
-        ROOT,
-        'node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainer.kt',
-      ),
-      'utf8',
+    ...Object.fromEntries(
+      Object.entries(REACT_NATIVE_SCREENS_SOURCE_PATHS).map(([key, path]) => [
+        key,
+        readFileSync(join(ROOT, path), 'utf8'),
+      ]),
     ),
     rootLayoutSource: readFileSync(join(ROOT, 'app/_layout.tsx'), 'utf8'),
     setupLayoutSource: readFileSync(join(ROOT, 'app/(setup)/_layout.tsx'), 'utf8'),
@@ -1100,6 +1120,126 @@ test('guards the Expo Router predictive-Back bridge against drift', () => {
   assert.deepEqual(validateExpoRouterPredictiveBackBridge(currentInput()), []);
 
   const mutations = [
+    {
+      label: 'ascending committed sort',
+      mutate(input) {
+        input.stackContainerSource = input.stackContainerSource.replace(
+          '.sortedByDescending { it.first }',
+          '.sortedBy { it.first }',
+        );
+      },
+      error: 'must cancel only identity-matched uncommitted pairs',
+    },
+    {
+      label: 'nonidentity committed lookup',
+      mutate(input) {
+        input.stackContainerSource = input.stackContainerSource.replace(
+          'it.stackScreen === operation.screen',
+          'it.stackScreen == operation.screen',
+        );
+      },
+      error: 'must cancel only identity-matched uncommitted pairs',
+    },
+    {
+      label: 'duplicate-pop check weakened',
+      mutate(input) {
+        input.stackContainerSource = input.stackContainerSource.replace(
+          'orderedPopOperations.map { it.first }.distinct().size == orderedPopOperations.size',
+          'true',
+        );
+      },
+      error: 'must cancel only identity-matched uncommitted pairs',
+    },
+    {
+      label: 'suffix gap accepted',
+      mutate(input) {
+        input.stackContainerSource = input.stackContainerSource.replace(
+          'index == stackModel.lastIndex - offset',
+          'index <= stackModel.lastIndex - offset',
+        );
+      },
+      error: 'must cancel only identity-matched uncommitted pairs',
+    },
+    {
+      label: 'root-pop precheck broadened',
+      mutate(input) {
+        input.stackContainerSource = input.stackContainerSource.replace(
+          'orderedPopOperations.size < stackModel.size || isRootReplacement',
+          'orderedPopOperations.size <= stackModel.size || isRootReplacement',
+        );
+      },
+      error: 'must cancel only identity-matched uncommitted pairs',
+    },
+    {
+      label: 'pop removes before identity check',
+      mutate(input) {
+        input.stackContainerSource = input.stackContainerSource.replace(
+          'check(stackModel.last() === fragment)',
+          'check(stackModel.removeAt(stackModel.lastIndex) === fragment)',
+        );
+      },
+      error: 'must cancel only identity-matched uncommitted pairs',
+    },
+    {
+      label: 'durable suffix gap accepted',
+      mutate(input) {
+        input.screensPatchSource = input.screensPatchSource.replace(
+          '+            check(index == stackModel.lastIndex - offset)',
+          '+            check(index <= stackModel.lastIndex - offset)',
+        );
+      },
+      error: 'must carry the reviewed uncommitted-pair, root-replacement, and ordered-pop repairs',
+    },
+    {
+      label: 'coordinator reverses pops',
+      mutate(input) {
+        input.stackCoordinatorSource = input.stackCoordinatorSource.replace(
+          'pendingPopOperations.forEach { operation ->',
+          'pendingPopOperations.asReversed().forEach { operation ->',
+        );
+      },
+      error: 'must forward pops without rendered-index reordering',
+    },
+    {
+      label: 'durable coordinator reverses pops',
+      mutate(input) {
+        input.screensPatchSource = input.screensPatchSource.replace(
+          '+        pendingPopOperations.forEach { operation ->',
+          '+        pendingPopOperations.asReversed().forEach { operation ->',
+        );
+      },
+      error: 'must forward pops to the committed-model ordering owner',
+    },
+    {
+      label: 'missing native test dependency',
+      mutate(input) {
+        input.screensBuildGradleSource = input.screensBuildGradleSource.replace(
+          "testImplementation 'org.robolectric:robolectric:4.16'",
+          '',
+        );
+      },
+      error: 'must retain their reviewed test dependencies',
+    },
+    {
+      label: 'missing adversarial native case',
+      mutate(input) {
+        input.screensPopOrderTestSource = input.screensPopOrderTestSource.replace(
+          'fun gapBelowValidTopIsRejectedBeforeTopIsRemoved(',
+          'fun unrelatedCase(',
+        );
+      },
+      error: 'must retain the reviewed adversarial cases',
+    },
+    {
+      label: 'durable native test case drift',
+      mutate(input) {
+        input.screensPatchSource = input.screensPatchSource.replace(
+          '+    fun duplicatePopFailsBeforeAnyCommittedMutation(',
+          '+    fun unrelatedCase(',
+        );
+      },
+      error: 'must retain the reviewed adversarial cases',
+    },
     {
       label: 'app config opt-in',
       mutate(input) {
@@ -1185,7 +1325,7 @@ test('guards the Expo Router predictive-Back bridge against drift', () => {
         input.screensPatchSource +=
           '\ndiff --git a/node_modules/react-native-screens/android/generated.txt b/node_modules/react-native-screens/android/generated.txt\n';
       },
-      error: 'must patch only the reviewed gamma stack container',
+      error: 'must patch only the reviewed gamma stack repair and tests',
     },
     {
       label: 'native identity match',
@@ -1201,18 +1341,18 @@ test('guards the Expo Router predictive-Back bridge against drift', () => {
       label: 'durable native root replacement',
       mutate(input) {
         input.screensPatchSource = input.screensPatchSource.replace(
-          '+                    pendingPopOperations.size == 1 &&\n',
+          '+                pendingPopOperations.size == 1 &&\n',
           '',
         );
       },
-      error: 'must carry the reviewed uncommitted-pair and root-replacement repairs',
+      error: 'must carry the reviewed uncommitted-pair, root-replacement, and ordered-pop repairs',
     },
     {
       label: 'durable native root replacement additive broadening',
       mutate(input) {
         input.screensPatchSource = input.screensPatchSource.replace(
-          '+                    pendingPushOperations.single().screen !== pendingPopOperations.single().screen\n',
-          '+                    pendingPushOperations.single().screen !== pendingPopOperations.single().screen || pendingPushOperations.isNotEmpty()\n',
+          '+                pendingPushOperations.single().screen !== pendingPopOperations.single().screen\n',
+          '+                pendingPushOperations.single().screen !== pendingPopOperations.single().screen || pendingPushOperations.isNotEmpty()\n',
         );
       },
       error: 'must preserve the exact reviewed root-replacement predicate and branches',
@@ -1293,8 +1433,8 @@ test('guards the Expo Router predictive-Back bridge against drift', () => {
         input.stackContainerSource = input.stackContainerSource
           .replace('        fragmentOps.clear()\n\n', '')
           .replace(
-            '        // Handle pop operations first.',
-            '        fragmentOps.clear()\n\n        // Handle pop operations first.',
+            '        pendingPopOperations.toList().forEach',
+            '        fragmentOps.clear()\n        pendingPopOperations.toList().forEach',
           );
       },
       error: 'must cancel only identity-matched uncommitted pairs',
@@ -1344,7 +1484,9 @@ test('guards the Expo Router predictive-Back bridge against drift', () => {
 
   for (const { label, mutate, error } of mutations) {
     const input = currentInput();
+    const before = structuredClone(input);
     mutate(input);
+    assert.notDeepEqual(input, before, `${label} mutation must change its intended input`);
     assert.ok(
       validateExpoRouterPredictiveBackBridge(input).some((message) => message.includes(error)),
       `${label} must fail closed`,
@@ -1499,6 +1641,59 @@ test('guards the source-built Expo background-task retry bridge against drift', 
       `${label} must fail closed`,
     );
   }
+});
+
+test('guards execution cancellation and continuation retention in installed code and durable patches', () => {
+  assert.deepEqual(validateBackgroundExecutionLifetime(backgroundExecutionInput()), []);
+  const mutations = [
+    ['registry', 'if (current != null) return null', ''],
+    [
+      'registry',
+      'if (current !== execution || execution.cancelled) return',
+      'if (execution.cancelled) return',
+    ],
+    ['registry', 'execution.retainedEvents[eventId] != leaseToken', 'false'],
+    ['registry', 'listeners.values.toList()', 'listOf(listeners.values.first())'],
+    ['registry', 'listeners.remove(owner)', 'listeners.clear()'],
+    ['registry', '&& execution.retainedEvents.isEmpty()', ''],
+    [
+      'consumer',
+      'putString("gatorExecutionId", executionId)',
+      'putString("gatorExecutionId", "fixed")',
+    ],
+    ['scheduler', 'backgroundTaskExecutions.cancel(execution)', ''],
+    ['scheduler', 'backgroundTaskExecutions.finishDispatch(execution)', ''],
+    ['service', 'retention.resultReceived = true', 'removeExecutionLocked(appScopeKey, eventId)'],
+    ['service', 'if (retention.resultReceived)', 'if (true)'],
+    ['service', 'retention.manager.get() != manager', 'false'],
+    [
+      'service',
+      'owner.context.finishTask(owner.taskId)',
+      'currentContext.finishTask(owner.taskId)',
+    ],
+    ['service', 'sHeadlessTaskOwners.containsKey(headlessStartToken)', 'false'],
+    ['taskManager', 'Function("retainTaskExecution")', 'AsyncFunction("retainTaskExecution")'],
+  ];
+  for (const [key, before, after] of mutations) {
+    const input = backgroundExecutionInput();
+    assert.ok(input.sources[key].includes(before), `mutation exists: ${key}/${before}`);
+    input.sources[key] = input.sources[key].replace(before, after);
+    assert.ok(validateBackgroundExecutionLifetime(input).length > 0, `${key}/${before}`);
+  }
+  const stalePatch = backgroundExecutionInput();
+  stalePatch.backgroundPatch = stalePatch.backgroundPatch.replace(
+    'listeners.values.toList()',
+    'listOf()',
+  );
+  assert.ok(validateBackgroundExecutionLifetime(stalePatch).length > 0);
+  const extraPath = backgroundExecutionInput();
+  extraPath.backgroundPatch +=
+    '\ndiff --git a/node_modules/expo-background-task/unreviewed b/node_modules/expo-background-task/unreviewed\n';
+  assert.ok(
+    validateBackgroundExecutionLifetime(extraPath).some((message) =>
+      message.includes('seven reviewed'),
+    ),
+  );
 });
 
 test('Expo task-manager keeper waits for native completion without allocating timers', async () => {
@@ -1659,7 +1854,7 @@ test('guards Expo task-manager pre-JavaScript failure settlement against drift',
         input.patchSource +=
           '\ndiff --git a/node_modules/expo-task-manager/android/build/generated.txt b/node_modules/expo-task-manager/android/build/generated.txt\n';
       },
-      error: 'must patch only the nine reviewed source/test files',
+      error: 'must patch only the ten reviewed source/test files',
     },
     {
       label: 'source keeper finishes early',
@@ -1769,7 +1964,7 @@ test('guards Expo task-manager pre-JavaScript failure settlement against drift',
       label: 'generation-keyed task id',
       mutate(input) {
         input.serviceSource = input.serviceSource.replace(
-          'sHeadlessTaskIds.put(headlessStartToken, taskId);',
+          'sHeadlessTaskOwners.put(headlessStartToken, new HeadlessTaskOwner(headlessContext, taskId));',
           'sHeadlessTaskIds.put(appScopeKey, taskId);',
         );
       },
@@ -2699,18 +2894,18 @@ test('artifact runner inspects both variants and the final release AAB contents'
       root,
       'node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskScheduler.kt',
     );
-    writeFileSync(
-      backgroundSchedulerPath,
-      backgroundTaskRetrySchedulerSource.replace(
-        '    if (!succeeded) {\n      return false\n    }\n',
-        '',
-      ),
+    const backgroundSchedulerSource = readFileSync(backgroundSchedulerPath, 'utf8');
+    const missingRetryBranch = backgroundSchedulerSource.replace(
+      /\s*if \(!succeeded\) \{\s*return false\s*\}/,
+      '',
     );
+    assert.notEqual(missingRetryBranch, backgroundSchedulerSource);
+    writeFileSync(backgroundSchedulerPath, missingRetryBranch);
     assert.throws(
       () => runAndroidBuildCheck(options),
       /background task retry bridge:.*reviewed retry flow/s,
     );
-    writeFileSync(backgroundSchedulerPath, backgroundTaskRetrySchedulerSource);
+    writeFileSync(backgroundSchedulerPath, backgroundSchedulerSource);
 
     assert.equal(
       inspectPackagedAndroidBundle(join(root, releaseBundlePath)).googleMapsApiKeySha256,

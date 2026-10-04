@@ -81,8 +81,22 @@ and UI coverage passes all configured floors. Production JavaScript export and c
 generation pass; Kotlin execution, signed Android build and exact-device replays remain pending.
 The clean-install review also refreshed one stale bounded-download component count/digest in the
 generated legal inventory. Documentation/data refreshes require a fresh final source identity and
-release receipts; the initial 0.1.60 preflight/prepare consumed no remote build number and cannot
-stand in for a completed build. The Mac server package at `917bd819` is verified but not installed.
+release receipts. Earlier source `ea7054a4c011fa4d7598070236fac9a2e2684053` is prepared as
+`android-0.1.60-ea7054a-20261004001707`; earlier unused preparations are superseded. No remote
+build number was consumed and no Android build or submission occurred. The Mac server package at
+`917bd819` is installed with verified package, signature, state preservation and local/public HTTP
+health. A later explicit helper/status refresh showed authenticated CONNECTED and HEALTHY/READY;
+the [device continuation](./DEVICE_01_PLAY_V80_DEVICE_PROOF_2026-10-03.md) records its scope.
+Further v80 background testing passed uninterrupted request/deadline lanes but exposed missing
+native-stop propagation and a timer-keeper lifetime gap. Folder deletion also caused a native
+process crash; review found a concrete Screens multi-pop ordering defect, though the redacted
+device error does not establish exact attribution. Both corrections passed independent source
+review and await final integrated host checks, native compilation, and exact-phone replay. The
+prepared Android candidate predates these corrections and must be superseded before building.
+The Mac session has since installed `5d9ac754` with automatic visible-status polling; its 5,480
+JS/TS tests, nine Python tests, Go checks, package/signature and state-preservation checks pass.
+Latest-build owner visual confirmation and coordinated reboot recovery remain pending. Expanded
+encrypted-backup and bounded account-switch tests now pass on v80, with scope in the device report.
 Live text/edit/reaction, reply, Unsend, image, and captioned-PDF
 observations retain their distinct delivery limits. Automatic retry reached the UI's up-to-date state after an unexplained
 sync failure; independently reconciled history parity, general privacy, and the full journey remain

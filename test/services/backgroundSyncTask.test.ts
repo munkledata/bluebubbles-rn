@@ -15,12 +15,21 @@ const mockFlushPersistentLogs = jest.fn(async () => true);
 const mockKvGet = jest.fn<Promise<string | null>, [unknown, string]>(async () => null);
 const mockRunErrorReportQueue = jest.fn(async () => ({ eligible: 0, uploaded: 0 }));
 const mockReconcileMessageNotifications = jest.fn(async () => undefined);
+const mockRetainExecution = jest.fn();
+
+jest.mock('@/native/backgroundTaskExecution', () => ({
+  retainBackgroundTaskExecution: mockRetainExecution,
+}));
 
 let task: (() => Promise<unknown>) | undefined;
 
 jest.mock('expo-task-manager', () => ({
-  defineTask: (_name: string, fn: () => Promise<unknown>) => {
-    task = fn;
+  defineTask: (_name: string, fn: (body: unknown) => Promise<unknown>) => {
+    task = () =>
+      fn({
+        executionInfo: { eventId: '00000000-0000-0000-0000-000000000001' },
+        data: { gatorExecutionId: '00000000-0000-0000-0000-000000000002' },
+      });
   },
   isTaskRegisteredAsync: mockIsTaskRegisteredAsync,
 }));
@@ -117,6 +126,10 @@ async function settleMicrotasks(): Promise<void> {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  mockRetainExecution.mockImplementation(() => ({
+    signal: new AbortController().signal,
+    release: jest.fn(() => true),
+  }));
   mockIsTaskRegisteredAsync.mockResolvedValue(true);
   mockGetStatusAsync.mockResolvedValue('available');
   mockFlushPersistentLogs.mockResolvedValue(true);
@@ -129,6 +142,105 @@ beforeEach(() => {
 });
 
 describe('the Expo background task adapter', () => {
+  it('rejects missing native ownership before bootstrap, database, or network work', async () => {
+    mockRetainExecution.mockReturnValueOnce(null);
+    await expect(task?.()).resolves.toBe('failed');
+    expect(mockRunBackgroundSync).not.toHaveBeenCalled();
+    expect(mockHttpClient).not.toHaveBeenCalled();
+    expect(mockRetainExecution).toHaveBeenCalledWith(
+      '00000000-0000-0000-0000-000000000001',
+      '00000000-0000-0000-0000-000000000002',
+    );
+  });
+
+  it('rejects an already cancelled native execution before bootstrap and releases its retention', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const release = jest.fn(() => true);
+    mockRetainExecution.mockReturnValueOnce({ signal: controller.signal, release });
+    await expect(task?.()).resolves.toBe('failed');
+    expect(mockRunBackgroundSync).not.toHaveBeenCalled();
+    expect(mockHttpClient).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains failed-admission cleanup and refuses another claim until its exact release succeeds', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const release = jest
+      .fn()
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(false)
+      .mockReturnValue(true);
+    mockRetainExecution.mockReturnValueOnce({ signal: controller.signal, release });
+    await expect(task?.()).resolves.toBe('failed');
+    await expect(task?.()).resolves.toBe('failed');
+    expect(mockRetainExecution).toHaveBeenCalledTimes(1);
+    expect(mockRunBackgroundSync).not.toHaveBeenCalled();
+    await expect(task?.()).resolves.toBe('success');
+    expect(mockRetainExecution).toHaveBeenCalledTimes(2);
+    expect(mockRunBackgroundSync).toHaveBeenCalledTimes(1);
+  });
+
+  it('revokes native-cancelled work promptly but retains the keeper and replacement fence until real settlement', async () => {
+    const controller = new AbortController();
+    const release = jest.fn(() => true);
+    const lateRun = deferred<{ result: 'success'; reason: 'completed' }>();
+    let scope: { isCurrent(): boolean } | undefined;
+    let requestSignal: AbortSignal | undefined;
+    mockRetainExecution.mockReturnValueOnce({ signal: controller.signal, release });
+    mockRunBackgroundSync.mockImplementationOnce(async (deps) => {
+      scope = deps.captureAccountScope();
+      deps.createClient({ origin: 'https://vault.example', password: 'vault-secret' });
+      requestSignal = (mockHttpClient.mock.calls.at(-1)![0] as { lifetimeSignal: AbortSignal })
+        .lifetimeSignal;
+      return lateRun.promise;
+    });
+    const first = Promise.resolve(task?.());
+    await settleMicrotasks();
+    controller.abort();
+    await expect(first).resolves.toBe('failed');
+    expect(scope?.isCurrent()).toBe(false);
+    expect(requestSignal?.aborted).toBe(true);
+    expect(release).not.toHaveBeenCalled();
+    await expect(task?.()).resolves.toBe('failed');
+    expect(mockRunBackgroundSync).toHaveBeenCalledTimes(1);
+    lateRun.resolve({ result: 'success', reason: 'completed' });
+    await settleMicrotasks();
+    expect(release).toHaveBeenCalledTimes(1);
+    await expect(task?.()).resolves.toBe('success');
+  });
+
+  it('keeps native ownership through final logging even after the real continuation settles', async () => {
+    const finalization = deferred<boolean>();
+    const release = jest.fn(() => true);
+    mockRetainExecution.mockReturnValueOnce({ signal: new AbortController().signal, release });
+    mockFlushPersistentLogs.mockReturnValueOnce(finalization.promise);
+    const first = Promise.resolve(task?.());
+    await settleMicrotasks();
+    expect(release).not.toHaveBeenCalled();
+    await expect(task?.()).resolves.toBe('failed');
+    expect(mockRunBackgroundSync).toHaveBeenCalledTimes(1);
+    finalization.resolve(true);
+    await expect(first).resolves.toBe('success');
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not publish a new owner when native retention release fails', async () => {
+    const release = jest
+      .fn()
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(false)
+      .mockReturnValue(true);
+    mockRetainExecution.mockReturnValueOnce({ signal: new AbortController().signal, release });
+    await expect(task?.()).resolves.toBe('success');
+    await expect(task?.()).resolves.toBe('failed');
+    expect(mockRunBackgroundSync).toHaveBeenCalledTimes(1);
+    await expect(task?.()).resolves.toBe('success');
+    expect(mockRunBackgroundSync).toHaveBeenCalledTimes(2);
+    expect(release).toHaveBeenCalledTimes(3);
+  });
+
   it('maps deterministic orchestrator success/retry outcomes onto Expo task results', async () => {
     await expect(task?.()).resolves.toBe('success');
     expect(mockFlushPersistentLogs).toHaveBeenCalledTimes(1);
@@ -170,6 +282,8 @@ describe('the Expo background task adapter', () => {
     const lateRun = deferred<{ result: 'success'; reason: 'completed' }>();
     let capturedScope: { isCurrent(): boolean } | undefined;
     let lifetimeSignal: AbortSignal | undefined;
+    const release = jest.fn(() => true);
+    mockRetainExecution.mockReturnValueOnce({ signal: new AbortController().signal, release });
     mockRunBackgroundSync.mockImplementationOnce(async (deps) => {
       capturedScope = deps.captureAccountScope();
       deps.createClient({ origin: 'https://vault.example', password: 'vault-secret' });
@@ -188,6 +302,7 @@ describe('the Expo background task adapter', () => {
       await settleMicrotasks();
 
       await expect(first).resolves.toBe('failed');
+      expect(release).not.toHaveBeenCalled();
       expect(capturedScope?.isCurrent()).toBe(false);
       expect(lifetimeSignal?.aborted).toBe(true);
       expect(mockFlushPersistentLogs).toHaveBeenNthCalledWith(
@@ -200,6 +315,7 @@ describe('the Expo background task adapter', () => {
 
       lateRun.resolve({ result: 'success', reason: 'completed' });
       await settleMicrotasks();
+      expect(release).toHaveBeenCalledTimes(1);
       await expect(task?.()).resolves.toBe('success');
       expect(mockRunBackgroundSync).toHaveBeenCalledTimes(2);
     } finally {

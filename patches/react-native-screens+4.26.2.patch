@@ -1,11 +1,21 @@
+diff --git a/node_modules/react-native-screens/android/build.gradle b/node_modules/react-native-screens/android/build.gradle
+--- a/node_modules/react-native-screens/android/build.gradle
++++ b/node_modules/react-native-screens/android/build.gradle
+@@ -204,4 +204,6 @@
+     implementation 'androidx.swiperefreshlayout:swiperefreshlayout:1.1.0'
+     implementation 'com.google.android.material:material:1.13.0'
+     implementation "androidx.core:core-ktx:1.17.0"
+-}
++    testImplementation 'junit:junit:4.13.2'
++    testImplementation 'org.robolectric:robolectric:4.16'
++}
 diff --git a/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainer.kt b/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainer.kt
-index 483ce36..f54c263 100644
 --- a/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainer.kt
 +++ b/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainer.kt
-@@ -122,6 +122,25 @@ internal class StackContainer(
-     private fun applyOperationsAndComputeFragmentManagerOperations() {
-         fragmentOps.clear()
+@@ -120,11 +120,63 @@
+     }
  
+     private fun applyOperationsAndComputeFragmentManagerOperations() {
 +        // Fabric can mount and unmount the same screen before this container receives its
 +        // didMountItems callback. That screen never entered stackModel, so its queued push and pop
 +        // cancel each other. Remove only those identity-matched pairs; a genuinely unmatched pop
@@ -22,13 +32,59 @@ index 483ce36..f54c263 100644
 +        }
 +
 +        if (!hasPendingOperations) {
++            fragmentOps.clear()
 +            return
 +        }
 +
++        // Removed React children are already absent from StackHost.renderedScreens. Order pops
++        // against the committed model here, including batches queued while the container was
++        // detached. Validate the entire suffix before changing either the model or fragment ops.
++        val orderedPopOperations =
++            pendingPopOperations
++                .map { operation ->
++                    val index = stackModel.indexOfFirst { it.stackScreen === operation.screen }
++                    check(index >= 0) { "[RNScreens] Unable to find a fragment to pop" }
++                    Pair(index, operation)
++                }.sortedByDescending { it.first }
++
++        check(orderedPopOperations.map { it.first }.distinct().size == orderedPopOperations.size) {
++            "[RNScreens] Attempt to pop the same screen more than once"
++        }
++        orderedPopOperations.forEachIndexed { offset, (index, _) ->
++            check(index == stackModel.lastIndex - offset) {
++                "[RNScreens] Attempt to pop non-top screen"
++            }
++        }
++
++        // A root StackRouter REPLACE removes the only committed screen and mounts one distinct
++        // replacement in the same Fabric batch. Keep only that exact one-for-one exception.
++        val isRootReplacement =
++            stackModel.size == 1 &&
++                pendingPopOperations.size == 1 &&
++                pendingPushOperations.size == 1 &&
++                stackModel.single().stackScreen === pendingPopOperations.single().screen &&
++                pendingPushOperations.single().screen !== pendingPopOperations.single().screen
++
++        check(orderedPopOperations.isEmpty() || orderedPopOperations.size < stackModel.size || isRootReplacement) {
++            "[RNScreens] Attempt to pop last screen from the stack"
++        }
++
+         fragmentOps.clear()
+ 
          // Handle pop operations first.
-         // We don't care about pop/push duplicates, as long as we don't let the main loop progress
-         // before we commit all the transactions, FragmentManager will handle that for us.
-@@ -149,12 +168,27 @@ internal class StackContainer(
+-        // We don't care about pop/push duplicates, as long as we don't let the main loop progress
+-        // before we commit all the transactions, FragmentManager will handle that for us.
++        // The validated pops remove a contiguous suffix before replacement screens are pushed.
+ 
+         if (hasPendingOperations) {
+             // Top fragment is the primary navigation fragment. If we're going to change anything
+@@ -146,21 +198,27 @@
+             )
+         }
+ 
+-        pendingPopOperations.forEach { operation ->
++        orderedPopOperations.forEach { (_, operation) ->
+             val fragment =
                  checkNotNull(stackModel.find { it.stackScreen === operation.screen }) {
                      "[RNScreens] Unable to find a fragment to pop"
                  }
@@ -38,18 +94,10 @@ index 483ce36..f54c263 100644
 -            }
 -
 -            fragmentOps.add(PopBackStackOp(fragment))
-+            // A root StackRouter REPLACE removes the only committed screen and mounts one distinct
-+            // replacement in the same Fabric batch. The root fragment has no FragmentManager back
-+            // stack entry, so popping it would be a no-op. Handle only that exact one-for-one shape
-+            // with a direct removal; every other attempt to pop the final screen still fails closed.
-+            val isRootReplacement =
-+                stackModel.size == 1 &&
-+                    pendingPopOperations.size == 1 &&
-+                    pendingPushOperations.size == 1 &&
-+                    stackModel.single().stackScreen === pendingPopOperations.single().screen &&
-+                    pendingPushOperations.single().screen !== pendingPopOperations.single().screen
-+
+-
+-            check(stackModel.removeAt(stackModel.lastIndex) === fragment) {
 +            if (isRootReplacement) {
++                // The sole root has no FragmentManager back-stack entry to pop.
 +                fragmentOps.add(RemoveOp(fragment))
 +            } else {
 +                check(stackModel.size > 1) {
@@ -58,6 +106,326 @@ index 483ce36..f54c263 100644
 +
 +                fragmentOps.add(PopBackStackOp(fragment))
 +            }
- 
-             check(stackModel.removeAt(stackModel.lastIndex) === fragment) {
++
++            check(stackModel.last() === fragment) {
                  "[RNScreens] Attempt to pop non-top screen"
+             }
++            stackModel.removeAt(stackModel.lastIndex)
+         }
+ 
+         pendingPushOperations.forEach { operation ->
+diff --git a/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainerUpdateCoordinator.kt b/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainerUpdateCoordinator.kt
+--- a/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainerUpdateCoordinator.kt
++++ b/node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainerUpdateCoordinator.kt
+@@ -24,11 +24,9 @@
+             return
+         }
+ 
+-        pendingPopOperations
+-            .map { Pair(renderedScreens.indexOf(it.screen), it) }
+-            .sortedBy { it.first }
+-            .asReversed()
+-            .forEach { (_, operation) -> container.enqueuePopOperation(operation.screen) }
++        // StackContainer orders pops against its committed model. Unmounted screens have already
++        // been removed from renderedScreens, so their former positions cannot be recovered here.
++        pendingPopOperations.forEach { operation -> container.enqueuePopOperation(operation.screen) }
+ 
+         pendingPushOperations
+             .map { Pair(renderedScreens.indexOf(it.screen), it) }
+diff --git a/node_modules/react-native-screens/android/src/test/java/com/swmansion/rnscreens/gamma/stack/host/StackContainerPopOrderTest.kt b/node_modules/react-native-screens/android/src/test/java/com/swmansion/rnscreens/gamma/stack/host/StackContainerPopOrderTest.kt
+new file mode 100644
+--- /dev/null
++++ b/node_modules/react-native-screens/android/src/test/java/com/swmansion/rnscreens/gamma/stack/host/StackContainerPopOrderTest.kt
+@@ -0,0 +1,292 @@
++package com.swmansion.rnscreens.gamma.stack.host
++
++import android.app.Application
++import com.facebook.react.bridge.BridgeReactContext
++import com.facebook.react.uimanager.ThemedReactContext
++import com.swmansion.rnscreens.gamma.stack.screen.StackScreen
++import com.swmansion.rnscreens.gamma.stack.screen.StackScreenFragment
++import java.lang.ref.WeakReference
++import java.lang.reflect.InvocationTargetException
++import org.junit.Assert.assertEquals
++import org.junit.Assert.assertFalse
++import org.junit.Assert.assertSame
++import org.junit.Assert.assertThrows
++import org.junit.Assert.assertTrue
++import org.junit.Before
++import org.junit.Test
++import org.junit.runner.RunWith
++import org.robolectric.RobolectricTestRunner
++import org.robolectric.RuntimeEnvironment
++import org.robolectric.annotation.Config
++
++/**
++ * Exercises the actual coordinator and container computation, without committing FragmentManager
++ * transactions or starting a React runtime. Device replay still owns animation/Back integration.
++ */
++@RunWith(RobolectricTestRunner::class)
++// API 36's Robolectric image requires JDK 21; this ordering logic uses no API 36 behavior.
++@Config(manifest = Config.NONE, sdk = [35], application = Application::class)
++@Suppress("DEPRECATION")
++class StackContainerPopOrderTest {
++    private lateinit var reactContext: ThemedReactContext
++    private lateinit var container: StackContainer
++
++    @Before
++    fun setUp() {
++        val application = RuntimeEnvironment.getApplication<Application>()
++        // A context wrapper only: no Catalyst instance, JS queues, or native runtime is started.
++        reactContext = ThemedReactContext(BridgeReactContext(application), application, "stack-test", 1)
++        val delegate =
++            object : StackContainerDelegate {
++                override fun onScreenDismissCommitted(stackScreen: StackScreen) = Unit
++            }
++        container = StackContainer(application, WeakReference<StackContainerDelegate>(delegate))
++    }
++
++    @Test
++    fun firstPushCreatesRootWithoutPop() {
++        val root = screen("folders")
++        container.enqueuePushOperation(root)
++
++        applyOperations()
++
++        assertEquals(listOf(root), screens())
++        val add = operations().filterIsInstance<AddAndSetAsPrimaryOp>().single()
++        assertSame(root, add.fragment.stackScreen)
++        assertFalse(add.addToBackStack)
++    }
++
++    @Test
++    fun removedEditorAndBrowserPopInCommittedOrder() {
++        val (root, browse, editor) = commit("folders", "browse", "editor")
++        val coordinator = StackContainerUpdateCoordinator()
++        // Fabric removes tail children in descending order. Neither removed child is rendered now.
++        coordinator.addPopOperation(editor)
++        coordinator.addPopOperation(browse)
++        coordinator.executePendingOperationsIfNeeded(container, listOf(root))
++
++        applyOperations()
++
++        assertEquals(listOf(root), screens())
++        assertEquals(listOf(editor, browse), poppedScreens())
++    }
++
++    @Test
++    fun reverseIncomingOrderStillUsesCommittedStack() {
++        val (root, browse, editor) = commit("folders", "browse", "editor")
++        container.enqueuePopOperation(browse)
++        container.enqueuePopOperation(editor)
++
++        applyOperations()
++
++        assertEquals(listOf(root), screens())
++        assertEquals(listOf(editor, browse), poppedScreens())
++    }
++
++    @Test
++    fun threePopsMayArriveInMixedOrder() {
++        val (root, first, second, third) = commit("root", "first", "second", "third")
++        listOf(second, first, third).forEach(container::enqueuePopOperation)
++
++        applyOperations()
++
++        assertEquals(listOf(root), screens())
++        assertEquals(listOf(third, second, first), poppedScreens())
++    }
++
++    @Test
++    fun batchesAccumulatedWhileUnattachedAreOrderedTogether() {
++        val (root, browse, editor) = commit("folders", "browse", "editor")
++        val coordinator = StackContainerUpdateCoordinator()
++        coordinator.addPopOperation(browse)
++        coordinator.executePendingOperationsIfNeeded(container, listOf(root, editor))
++        coordinator.addPopOperation(editor)
++        coordinator.executePendingOperationsIfNeeded(container, listOf(root))
++        assertEquals(listOf(root, browse, editor), screens())
++
++        applyOperations()
++
++        assertEquals(listOf(root), screens())
++        assertEquals(listOf(editor, browse), poppedScreens())
++    }
++
++    @Test
++    fun ordinaryTopPopAndPushRetainTheirExistingOrder() {
++        val (root, old) = commit("root", "old")
++        val replacement = screen("new")
++        container.enqueuePushOperation(replacement)
++        container.enqueuePopOperation(old)
++
++        applyOperations()
++
++        assertEquals(listOf(root, replacement), screens())
++        assertEquals(listOf(old), poppedScreens())
++        assertTrue(operations().filterIsInstance<AddAndSetAsPrimaryOp>().single().addToBackStack)
++    }
++
++    @Test
++    fun sameBatchTransientScreenCancelsBeforeMultiPopValidation() {
++        val (root, browse, editor) = commit("folders", "browse", "editor")
++        val transient = screen("transient")
++        container.enqueuePushOperation(transient)
++        listOf(browse, transient, editor).forEach(container::enqueuePopOperation)
++
++        applyOperations()
++
++        assertEquals(listOf(root), screens())
++        assertEquals(listOf(editor, browse), poppedScreens())
++        assertTrue(operations().none { it is AddAndSetAsPrimaryOp || it is RemoveOp })
++    }
++
++    @Test
++    fun transientOnlyBatchLeavesNoFragmentOperations() {
++        val (root) = commit("root")
++        val transient = screen("transient")
++        container.enqueuePushOperation(transient)
++        container.enqueuePopOperation(transient)
++
++        applyOperations()
++
++        assertEquals(listOf(root), screens())
++        assertTrue(operations().isEmpty())
++    }
++
++    @Test
++    fun exactSoleRootReplacementUsesDirectRemoval() {
++        val (old) = commit("old")
++        val replacement = screen("replacement")
++        container.enqueuePopOperation(old)
++        container.enqueuePushOperation(replacement)
++
++        applyOperations()
++
++        assertEquals(listOf(replacement), screens())
++        assertSame(old, operations().filterIsInstance<RemoveOp>().single().fragment.stackScreen)
++        assertTrue(poppedScreens().isEmpty())
++        assertFalse(operations().filterIsInstance<AddAndSetAsPrimaryOp>().single().addToBackStack)
++    }
++
++    @Test
++    fun unknownPopFailsBeforeAnyCommittedMutation() {
++        val (_, top) = commit("root", "top")
++        container.enqueuePopOperation(top)
++        container.enqueuePopOperation(screen("unknown"))
++
++        assertAtomicFailure("[RNScreens] Unable to find a fragment to pop")
++    }
++
++    @Test
++    fun equalScreenKeysDoNotSubstituteForIdentity() {
++        commit("root", "top")
++        container.enqueuePopOperation(screen("top"))
++
++        assertAtomicFailure("[RNScreens] Unable to find a fragment to pop")
++    }
++
++    @Test
++    fun duplicatePopFailsBeforeAnyCommittedMutation() {
++        val (_, top) = commit("root", "top")
++        container.enqueuePopOperation(top)
++        container.enqueuePopOperation(top)
++
++        assertAtomicFailure("[RNScreens] Attempt to pop the same screen more than once")
++    }
++
++    @Test
++    fun missingTopPopIsRejected() {
++        val (_, middle, _) = commit("root", "middle", "top")
++        container.enqueuePopOperation(middle)
++
++        assertAtomicFailure("[RNScreens] Attempt to pop non-top screen")
++    }
++
++    @Test
++    fun gapBelowValidTopIsRejectedBeforeTopIsRemoved() {
++        val (_, first, _, top) = commit("root", "first", "second", "top")
++        container.enqueuePopOperation(top)
++        container.enqueuePopOperation(first)
++
++        assertAtomicFailure("[RNScreens] Attempt to pop non-top screen")
++    }
++
++    @Test
++    fun removingSoleRootWithoutReplacementIsRejected() {
++        val (root) = commit("root")
++        container.enqueuePopOperation(root)
++
++        assertAtomicFailure("[RNScreens] Attempt to pop last screen from the stack")
++    }
++
++    @Test
++    fun fullStackPopWithNewRootDoesNotBroadenRootReplacement() {
++        val (root, top) = commit("root", "top")
++        container.enqueuePopOperation(top)
++        container.enqueuePopOperation(root)
++        container.enqueuePushOperation(screen("new"))
++
++        assertAtomicFailure("[RNScreens] Attempt to pop last screen from the stack")
++    }
++
++    @Test
++    fun rootReplacementRejectsSameIdentity() {
++        val (root) = commit("root")
++        container.enqueuePopOperation(root)
++        container.enqueuePushOperation(root)
++
++        assertAtomicFailure("[RNScreens] Attempt to pop last screen from the stack")
++    }
++
++    @Test
++    fun rootReplacementRejectsMultiplePushes() {
++        val (root) = commit("root")
++        container.enqueuePopOperation(root)
++        container.enqueuePushOperation(screen("first"))
++        container.enqueuePushOperation(screen("second"))
++
++        assertAtomicFailure("[RNScreens] Attempt to pop last screen from the stack")
++    }
++
++    private fun screen(key: String): StackScreen = StackScreen(reactContext).apply { screenKey = key }
++
++    private fun commit(vararg keys: String): List<StackScreen> =
++        keys.map(::screen).also { created ->
++            created.forEach(container::enqueuePushOperation)
++            applyOperations()
++        }
++
++    private fun assertAtomicFailure(message: String) {
++        val beforeScreens = screens()
++        val beforeOperations = operations()
++        val error = assertThrows(IllegalStateException::class.java) { applyOperations() }
++        assertEquals(message, error.message)
++        assertEquals(beforeScreens, screens())
++        assertEquals(beforeOperations, operations())
++    }
++
++    private fun applyOperations() {
++        val method = StackContainer::class.java.getDeclaredMethod("applyOperationsAndComputeFragmentManagerOperations")
++        method.isAccessible = true
++        try {
++            method.invoke(container)
++        } catch (error: InvocationTargetException) {
++            throw error.targetException
++        }
++    }
++
++    @Suppress("UNCHECKED_CAST")
++    private fun screens(): List<StackScreen> {
++        val field = StackContainer::class.java.getDeclaredField("stackModel")
++        field.isAccessible = true
++        return (field.get(container) as List<StackScreenFragment>).map { it.stackScreen }
++    }
++
++    @Suppress("UNCHECKED_CAST")
++    private fun operations(): List<FragmentOperation> {
++        val field = StackContainer::class.java.getDeclaredField("fragmentOps")
++        field.isAccessible = true
++        return (field.get(container) as List<FragmentOperation>).toList()
++    }
++
++    private fun poppedScreens(): List<StackScreen> =
++        operations().filterIsInstance<PopBackStackOp>().map { it.fragment.stackScreen }
++}

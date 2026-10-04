@@ -335,6 +335,8 @@ cd android
   :gator-bounded-download:testDebugUnitTest \
   :expo-file-system:testDebugUnitTest \
   :expo-task-manager:testDebugUnitTest \
+  :expo-background-task:testDebugUnitTest \
+  :react-native-screens:testDebugUnitTest \
   --no-daemon
 ./gradlew :app:assembleDebug --no-daemon
 ./gradlew :app:bundleRelease --no-daemon

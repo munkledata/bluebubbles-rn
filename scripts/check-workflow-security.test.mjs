@@ -841,6 +841,8 @@ test('requires every local native module unit-test task that has test sources', 
     ':gator-bounded-download:testDebugUnitTest',
     ':expo-file-system:testDebugUnitTest',
     ':expo-task-manager:testDebugUnitTest',
+    ':expo-background-task:testDebugUnitTest',
+    ':react-native-screens:testDebugUnitTest',
   ]) {
     const mutated = workflow.replace(task, `${task.slice(0, task.lastIndexOf(':'))}:tasks`);
     assert.notEqual(mutated, workflow, `${task} mutation must change the fixture`);
@@ -865,6 +867,8 @@ test('requires the exact blocking native test step immediately before packaging'
     '          :gator-bounded-download:testDebugUnitTest',
     '          :expo-file-system:testDebugUnitTest',
     '          :expo-task-manager:testDebugUnitTest',
+    '          :expo-background-task:testDebugUnitTest',
+    '          :react-native-screens:testDebugUnitTest',
     '          --no-daemon',
   ].join('\n');
   for (const control of ['if: false', 'continue-on-error: true']) {

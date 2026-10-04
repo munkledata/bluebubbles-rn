@@ -210,6 +210,8 @@ jobs:
           :gator-bounded-download:testDebugUnitTest
           :expo-file-system:testDebugUnitTest
           :expo-task-manager:testDebugUnitTest
+          :expo-background-task:testDebugUnitTest
+          :react-native-screens:testDebugUnitTest
           --no-daemon
 
       - name: Assemble debug APK

@@ -24,6 +24,8 @@ const runnerPaths = [
   'app/(app)/chat/[guid].tsx',
   'src/features/conversations/useChatScheduledCatchup.ts',
   'src/services/background/backgroundSync.ts',
+  'src/native/backgroundTaskExecution.ts',
+  'src/services/background/registerBackgroundSyncHeadlessTask.ts',
   'src/services/background/backgroundSyncOrchestrator.ts',
   'src/services/send/outgoingQueueService.ts',
   'src/services/send/attachmentUpload.ts',
@@ -865,10 +867,14 @@ test('requires the background callback to wire its reviewed schedule owner direc
 
   const conditional = mutateRunnerSource('src/services/background/backgroundSync.ts', (source) =>
     replaceOnce(
-      source,
-      '    const run = runBackgroundSync({',
-      '    const run = true ? runBackgroundSync({',
-    ).replace('    });\n\n    owner = {', '    }) : Promise.reject(new Error());\n\n    owner = {'),
+      replaceOnce(
+        source,
+        '    const run = runBackgroundSync({',
+        '    const run = true ? runBackgroundSync({',
+      ),
+      '    });\n\n    owner.continuationFinished = false;',
+      '    }) : Promise.reject(new Error());\n\n    owner.continuationFinished = false;',
+    ),
   );
   assertErrors(scheduledRunnerUsageErrors(conditional), /background schedule owner directly/);
 
@@ -884,8 +890,8 @@ test('requires the background callback to wire its reviewed schedule owner direc
   const unownedRun = mutateRunnerSource('src/services/background/backgroundSync.ts', (source) =>
     replaceOnce(
       source,
-      '    });\n\n    owner = { callbackFinished: false, continuationFinished: false };',
-      '    });\n\n    return BackgroundTask.BackgroundTaskResult.Success;\n    owner = { callbackFinished: false, continuationFinished: false };',
+      '    });\n\n    owner.continuationFinished = false;',
+      '    });\n\n    return BackgroundTask.BackgroundTaskResult.Success;\n    owner.continuationFinished = false;',
     ),
   );
   assertErrors(scheduledRunnerUsageErrors(unownedRun), /reviewed scheduled-owner fingerprint/);
@@ -934,6 +940,29 @@ test('pins the complete background callback lifetime and work graph', () => {
 });
 
 test('pins the complete background callback dependency chain', () => {
+  for (const [path, before, after] of [
+    [
+      'src/native/backgroundTaskExecution.ts',
+      'if (event?.executionId === executionId) cancel();',
+      'if (true) cancel();',
+    ],
+    [
+      'src/services/background/registerBackgroundSyncHeadlessTask.ts',
+      'retainBackgroundTaskExecution(body.executionInfo.eventId, body.data?.gatorExecutionId)',
+      'null',
+    ],
+  ]) {
+    assertErrors(
+      scheduledRunnerUsageErrors(
+        mutateRunnerSource(path, (source) => replaceOnce(source, before, after)),
+      ),
+      /reviewed REL-001 callback dependency fingerprint/,
+    );
+    assertErrors(
+      scheduledRunnerUsageErrors(validRunnerSources.filter((entry) => entry.path !== path)),
+      /reviewed REL-001 callback dependency fingerprint/,
+    );
+  }
   const detachedOutgoingDrain = mutateRunnerSource(
     'src/services/background/backgroundSyncOrchestrator.ts',
     (source) =>

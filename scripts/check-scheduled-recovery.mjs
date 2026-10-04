@@ -36,7 +36,15 @@ const OUTGOING_QUEUE_SERVICE_PATH = 'src/services/send/outgoingQueueService.ts';
 const ATTACHMENT_UPLOAD_PATH = 'src/services/send/attachmentUpload.ts';
 const HTTP_CLIENT_PATH = 'src/core/api/http.ts';
 const REVIEWED_CALLBACK_DEPENDENCY_FILE_HASHES = new Map([
-  [BACKGROUND_SYNC_PATH, '45d33cb1751c91f97421ff5b036a59e8e4310cd7f6ab55ca3d06571c0f7632e0'],
+  [BACKGROUND_SYNC_PATH, 'a8d29d10257bb5960987b6cae3c0c06158a614892de3c5246c9ecb6ad96b6667'],
+  [
+    'src/native/backgroundTaskExecution.ts',
+    '81a55c2b984ad740c0160dbce50ecc71d711c10ac18f8d83c8da9fe1e4576541',
+  ],
+  [
+    'src/services/background/registerBackgroundSyncHeadlessTask.ts',
+    'eedf77478f9479465c46af5df103c1be282991b1a0d0f686feb6ccf87c197cd0',
+  ],
   [
     BACKGROUND_SYNC_ORCHESTRATOR_PATH,
     '23521a4ea573372ae0ee825b2882a7a9571279bc05d8e3bd3ca7e84e7dd38f1f',
@@ -72,7 +80,7 @@ const REVIEWED_SCHEDULED_SYNTAX_HASHES = new Map([
   ],
   [
     `${BACKGROUND_SYNC_PATH}#executeBackgroundSyncTask`,
-    'cb052e38efa3c467b84d66f2c7f646806fbee7da5783df68fa6c15fc8324e3cf',
+    'a28df95a6b753a3400debbacf3d20fc79c47286394a597be9982e21543a15343',
   ],
   [
     `${CHAT_CATCHUP_PATH}#useChatScheduledCatchup`,

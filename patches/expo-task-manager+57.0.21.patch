@@ -10,6 +10,27 @@ index 44ed4fd..00e6e20 100644
    testImplementation 'junit:junit:4.13.2'
    testImplementation 'org.robolectric:robolectric:4.16'
  }
+diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerModule.kt b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerModule.kt
+index fc42f02..8e71a22 100644
+--- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerModule.kt
++++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerModule.kt
+@@ -60,6 +60,16 @@ class TaskManagerModule : Module() {
+       taskService.notifyTaskFinished(taskName, appScopeKey, response)
+     }
+ 
++    Function("retainTaskExecution") { eventId: String ->
++      val manager = taskManagerInternal ?: throw Exceptions.ModuleNotFound(TaskManagerInterface::class)
++      (taskService as TaskService).retainTaskExecution(appScopeKey, eventId, manager)
++    }
++
++    Function("releaseTaskExecution") { eventId: String, leaseToken: String ->
++      val manager = taskManagerInternal ?: throw Exceptions.ModuleNotFound(TaskManagerInterface::class)
++      (taskService as TaskService).releaseTaskExecution(appScopeKey, eventId, leaseToken, manager)
++    }
++
+     AsyncFunction("isTaskRegisteredAsync") { taskName: String ->
+       taskService.hasRegisteredTask(taskName, appScopeKey)
+     }
 diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java
 index 82bc0db..5c61a89 100644
 --- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java
@@ -35,7 +56,7 @@ index 82bc0db..5c61a89 100644
        task.execute(data, null, callback);
      }
 diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java
-index 8416444..b5a05ed 100644
+index 8416444..0e50a49 100644
 --- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java
 +++ b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java
 @@ -16,6 +16,7 @@ import org.json.JSONObject;
@@ -54,23 +75,48 @@ index 8416444..b5a05ed 100644
  
    private WeakReference<Context> mContextRef;
    private TaskManagerUtilsInterface mTaskManagerUtils;
-@@ -76,9 +78,12 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+@@ -75,10 +77,37 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+ 
    // Map of callbacks for task execution events. Schema: { "<eventId>": TaskExecutionCallback }
    private static final Map<String, TaskExecutionCallback> sTaskCallbacks = new HashMap<>();
++  private static final Map<String, WeakReference<TaskManagerInterface>> sExecutionManagers = new HashMap<>();
++  private static final Map<String, RetainedExecution> sRetainedExecutions = new HashMap<>();
  
 -  // Tracks headless JS task IDs per appScopeKey, used to keep JS timers alive
 -  // during background task execution. See maybeStartHeadlessTask().
 -  private static final Map<String, Integer> sHeadlessTaskIds = new HashMap<>();
++  private static final class RetainedExecution {
++    final String scope;
++    final String leaseToken = UUID.randomUUID().toString();
++    final WeakReference<TaskManagerInterface> manager;
++    boolean resultReceived;
++
++    RetainedExecution(String scope, TaskManagerInterface manager) {
++      this.scope = scope;
++      this.manager = new WeakReference<>(manager);
++    }
++  }
++
++  private static final class HeadlessTaskOwner {
++    final HeadlessJsTaskContext context;
++    final int taskId;
++
++    HeadlessTaskOwner(HeadlessJsTaskContext context, int taskId) {
++      this.context = context;
++      this.taskId = taskId;
++    }
++  }
++
 +  // Tracks headless JS task IDs by their event-generation token, used to keep JS timers alive
 +  // during background task execution without letting one retry finish another. See maybeStartHeadlessTask().
-+  private static final Map<Object, Integer> sHeadlessTaskIds = new HashMap<>();
++  private static final Map<Object, HeadlessTaskOwner> sHeadlessTaskOwners = new HashMap<>();
 +
 +  // Identifies the only event generation allowed to start a headless JS timer keeper.
 +  private static final Map<String, Object> sHeadlessStartTokens = new HashMap<>();
  
    public TaskService(Context context) {
      super();
-@@ -208,29 +213,38 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+@@ -208,41 +237,97 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
    @Override
    public void notifyTaskFinished(String taskName, final String appScopeKey, Map<String, Object> response) {
      String eventId = (String) response.get("eventId");
@@ -80,16 +126,29 @@ index 8416444..b5a05ed 100644
  
 -    if (appEvents != null) {
 -      appEvents.remove(eventId);
--
--      if (appEvents.isEmpty()) {
--        sEvents.remove(appScopeKey);
--        maybeFinishHeadlessTask(appScopeKey);
 +    Object finishedHeadlessStartToken = null;
 +    TaskExecutionCallback taskCallback;
 +    synchronized (sTaskExecutionLock) {
 +      List<String> appEvents = sEvents.get(appScopeKey);
-+      if (appEvents != null) {
-+        appEvents.remove(eventId);
++      if (appEvents == null || !appEvents.contains(eventId)) return;
++      RetainedExecution retention = sRetainedExecutions.get(eventId);
++      if (retention != null) {
++        // Deliver the bounded worker result now, but keep its real continuation's timer owner.
++        retention.resultReceived = true;
++      } else {
++        finishedHeadlessStartToken = removeExecutionLocked(appScopeKey, eventId);
++      }
++      taskCallback = sTaskCallbacks.remove(eventId);
++    }
+ 
+-      if (appEvents.isEmpty()) {
+-        sEvents.remove(appScopeKey);
+-        maybeFinishHeadlessTask(appScopeKey);
++    finishExecutionKeeper(appScopeKey, finishedHeadlessStartToken);
++    if (taskCallback != null) {
++      taskCallback.onFinished(response);
++    }
++  }
  
 -        // Invalidate app record but after 2 seconds delay so we can still take batched events.
 -        Handler handler = new Handler();
@@ -98,21 +157,57 @@ index 8416444..b5a05ed 100644
 -            invalidateAppRecord(appScopeKey);
 -          }
 -        }, 2000);
-+        if (appEvents.isEmpty()) {
-+          sEvents.remove(appScopeKey);
-+          finishedHeadlessStartToken = sHeadlessStartTokens.remove(appScopeKey);
-+        }
++  /** Called synchronously by the exact JS manager, before its first asynchronous operation. */
++  @Nullable
++  public String retainTaskExecution(String appScopeKey, String eventId, TaskManagerInterface manager) {
++    synchronized (sTaskExecutionLock) {
++      List<String> events = sEvents.get(appScopeKey);
++      WeakReference<TaskManagerInterface> assigned = sExecutionManagers.get(eventId);
++      if (events == null || !events.contains(eventId) || assigned == null || assigned.get() != manager ||
++          !sTaskCallbacks.containsKey(eventId) || sRetainedExecutions.containsKey(eventId)) return null;
++      RetainedExecution retention = new RetainedExecution(appScopeKey, manager);
++      sRetainedExecutions.put(eventId, retention);
++      return retention.leaseToken;
++    }
++  }
++
++  public boolean releaseTaskExecution(String appScopeKey, String eventId, String leaseToken, TaskManagerInterface manager) {
++    Object finishedHeadlessStartToken = null;
++    synchronized (sTaskExecutionLock) {
++      RetainedExecution retention = sRetainedExecutions.get(eventId);
++      if (retention == null || !retention.scope.equals(appScopeKey) ||
++          !retention.leaseToken.equals(leaseToken) || retention.manager.get() != manager) return false;
++      sRetainedExecutions.remove(eventId);
++      if (retention.resultReceived) {
++        finishedHeadlessStartToken = removeExecutionLocked(appScopeKey, eventId);
        }
-+      taskCallback = sTaskCallbacks.remove(eventId);
      }
++    finishExecutionKeeper(appScopeKey, finishedHeadlessStartToken);
++    return true;
++  }
  
 -    // Invoke task callback
 -    TaskExecutionCallback taskCallback = sTaskCallbacks.remove(eventId);
++  /** The caller holds sTaskExecutionLock. No native/JS effects happen under the lock. */
++  @Nullable
++  private Object removeExecutionLocked(String appScopeKey, String eventId) {
++    sExecutionManagers.remove(eventId);
++    List<String> appEvents = sEvents.get(appScopeKey);
++    if (appEvents != null && appEvents.remove(eventId) && appEvents.isEmpty()) {
++      sEvents.remove(appScopeKey);
++      return sHeadlessStartTokens.remove(appScopeKey);
++    }
++    return null;
++  }
+ 
+-    if (taskCallback != null) {
+-      taskCallback.onFinished(response);
++  private void finishExecutionKeeper(String appScopeKey, Object finishedHeadlessStartToken) {
 +    if (finishedHeadlessStartToken != null) {
 +      maybeFinishHeadlessTask(appScopeKey, finishedHeadlessStartToken);
 +
 +      // Invalidate app record but after 2 seconds delay so we can still take batched events.
-+      Handler handler = new Handler();
++      Handler handler = new Handler(android.os.Looper.getMainLooper());
 +      handler.postDelayed(() -> {
 +        boolean hasEvents;
 +        synchronized (sTaskExecutionLock) {
@@ -122,11 +217,11 @@ index 8416444..b5a05ed 100644
 +          invalidateAppRecord(appScopeKey);
 +        }
 +      }, 2000);
-+    }
+     }
++
+   }
  
-     if (taskCallback != null) {
-       taskCallback.onFinished(response);
-@@ -241,8 +255,10 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+   @Override
    public void setTaskManager(TaskManagerInterface taskManager, String appScopeKey, String appUrl) {
      // It may be called with null when the host activity is destroyed.
      if (taskManager == null) {
@@ -139,7 +234,7 @@ index 8416444..b5a05ed 100644
        return;
      }
  
-@@ -252,21 +268,30 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+@@ -252,21 +337,36 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
      boolean isHeadless = isStartedByHeadlessLoader(appScopeKey);
      Map<String, WeakReference<TaskManagerInterface>> taskManagers = isHeadless ? sHeadlessTaskManagers : sTaskManagers;
  
@@ -155,6 +250,12 @@ index 8416444..b5a05ed 100644
 +      taskManagers.put(appScopeKey, new WeakReference<>(taskManager));
 +      eventsQueue = mTasksAndEventsRepository.getEvents(appScopeKey);
 +      mTasksAndEventsRepository.removeEvents(appScopeKey);
++      if (eventsQueue != null) {
++        for (Bundle body : eventsQueue) {
++          String eventId = getTaskEventId(body);
++          if (eventId != null) sExecutionManagers.put(eventId, new WeakReference<>(taskManager));
++        }
++      }
 +    }
  
 +    // Execute events only after releasing the handoff lock so JavaScript cannot call back into it.
@@ -179,7 +280,7 @@ index 8416444..b5a05ed 100644
      if (!isHeadless) {
        // Maybe update app url in user defaults. It might change only in non-headless mode.
        maybeUpdateAppUrlForAppScopeKey(appUrl, appScopeKey);
-@@ -378,66 +403,147 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+@@ -378,66 +478,155 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
  
    public void executeTask(TaskInterface task, Bundle data, Error error, TaskExecutionCallback callback) {
      String appScopeKey = task.getAppScopeKey();
@@ -223,6 +324,9 @@ index 8416444..b5a05ed 100644
 +    final Object headlessStartToken;
 +    synchronized (sTaskExecutionLock) {
 +      taskManager = getTaskManager(appScopeKey);
++      if (taskManager != null) {
++        sExecutionManagers.put(eventId, new WeakReference<>(taskManager));
++      }
  
 -    // Register with HeadlessJsTaskContext to keep JS timers alive while
 -    // the app is backgrounded. Without this, JavaTimerManager pauses all
@@ -297,9 +401,7 @@ index 8416444..b5a05ed 100644
 +    if (headlessStartToken != null) {
 +      maybeStartHeadlessTask(appScopeKey, headlessStartToken);
 +    }
- 
--          // Host unreachable? Unregister all tasks for that app.
--          unregisterAllTasksForAppScopeKey(appScopeKey);
++
 +    try {
 +      appLoader.loadApp(context,
 +        new HeadlessAppLoader.Params(appScopeKey, task.getAppUrl()),
@@ -312,7 +414,7 @@ index 8416444..b5a05ed 100644
 +            Log.e(TAG, "Headless app load failed; completing pending tasks with failure.");
 +            finishPendingTaskExecutionWithFailure(appScopeKey, eventId, body);
 +          }
-         }
++        }
 +      );
 +    } catch (Exception e) {
 +      Log.e(TAG, "Headless app loader threw before JavaScript dispatch; completing pending tasks with failure.", e);
@@ -340,17 +442,24 @@ index 8416444..b5a05ed 100644
 +    synchronized (sTaskExecutionLock) {
 +      if (pendingBody != null && !mTasksAndEventsRepository.removeEventForAppScopeKey(appScopeKey, pendingBody)) {
 +        return;
-       }
--    );
++      }
 +
++      // A manager which synchronously entered JS may throw only after JS retained the event.
++      // Its real continuation, not native failure settlement, owns that retained execution.
++      if (sRetainedExecutions.containsKey(eventId)) return;
++      sExecutionManagers.remove(eventId);
+ 
+-          // Host unreachable? Unregister all tasks for that app.
+-          unregisterAllTasksForAppScopeKey(appScopeKey);
 +      List<String> appEvents = sEvents.get(appScopeKey);
 +      if (appEvents != null) {
 +        appEvents.remove(eventId);
 +        if (appEvents.isEmpty()) {
 +          sEvents.remove(appScopeKey);
 +          finishedHeadlessStartToken = sHeadlessStartTokens.remove(appScopeKey);
-+        }
-+      }
+         }
+       }
+-    );
 +      taskCallback = sTaskCallbacks.remove(eventId);
 +    }
 +
@@ -365,7 +474,7 @@ index 8416444..b5a05ed 100644
    }
  
    //endregion
-@@ -451,6 +557,12 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+@@ -451,6 +640,12 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
      }
    }
  
@@ -378,7 +487,7 @@ index 8416444..b5a05ed 100644
    private void internalRegisterTask(String taskName, String appScopeKey, String appUrl, Class<TaskConsumerInterface> consumerClass, Map<String, Object> options) throws TaskRegisteringFailedException {
      Constructor<?> consumerConstructor;
      TaskConsumerInterface consumer;
-@@ -600,13 +712,15 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+@@ -600,13 +795,15 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
     */
    @Nullable
    private TaskManagerInterface getTaskManager(String appScopeKey) {
@@ -399,7 +508,7 @@ index 8416444..b5a05ed 100644
    }
  
    private void invalidateAppRecord(String appScopeKey) {
-@@ -629,24 +743,24 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+@@ -629,24 +826,24 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
     *
     * @see <a href="https://github.com/facebook/react-native/blob/63800af9438ea9ddaec84b6f17793a4f1bffe342/packages/react-native/ReactAndroid/src/main/java/com/facebook/react/modules/core/JavaTimerManager.kt#L291">JavaTimerManager timer guard</a>
     */
@@ -428,12 +537,13 @@ index 8416444..b5a05ed 100644
      HeadlessJsTaskContext headlessContext = HeadlessJsTaskContext.getInstance(reactContext);
      HeadlessJsTaskConfig taskConfig = new HeadlessJsTaskConfig(
        "expo-task-manager",
-@@ -657,8 +771,21 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+@@ -657,8 +854,22 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
  
      UiThreadUtil.runOnUiThread(() -> {
        try {
 +        synchronized (sTaskExecutionLock) {
-+          if (sHeadlessStartTokens.get(appScopeKey) != headlessStartToken || !sEvents.containsKey(appScopeKey)) {
++          if (sHeadlessStartTokens.get(appScopeKey) != headlessStartToken || !sEvents.containsKey(appScopeKey) ||
++              sHeadlessTaskOwners.containsKey(headlessStartToken)) {
 +            return;
 +          }
 +        }
@@ -447,11 +557,11 @@ index 8416444..b5a05ed 100644
 +          headlessContext.finishTask(taskId);
 +          return;
 +        }
-+        sHeadlessTaskIds.put(headlessStartToken, taskId);
++        sHeadlessTaskOwners.put(headlessStartToken, new HeadlessTaskOwner(headlessContext, taskId));
          Log.i(TAG, "Started headless task " + taskId + " to keep JS timers alive for '" + appScopeKey + "'");
        } catch (Exception e) {
          Log.w(TAG, "Failed to start headless task: " + e.getMessage());
-@@ -666,7 +793,7 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+@@ -666,7 +877,7 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
      });
    }
  
@@ -460,7 +570,7 @@ index 8416444..b5a05ed 100644
      ReactApplication app = (ReactApplication) context.getApplicationContext();
      ReactHost reactHost = app.getReactHost();
      if (reactHost == null) return;
-@@ -674,8 +801,14 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+@@ -674,8 +885,14 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
      reactHost.addReactInstanceEventListener(new ReactInstanceEventListener() {
        @Override
        public void onReactContextInitialized(@NonNull ReactContext reactContext) {
@@ -476,20 +586,37 @@ index 8416444..b5a05ed 100644
        }
      });
    }
-@@ -684,11 +817,11 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
+@@ -684,23 +901,17 @@ public class TaskService implements SingletonModule, TaskServiceInterface {
     * Finishes the headless JS task for the given appScopeKey, allowing JavaTimerManager
     * to pause timers again when all background tasks are complete.
     */
 -  private void maybeFinishHeadlessTask(String appScopeKey) {
+-    // Run on UI thread to match startTask and ensure sHeadlessTaskIds
 +  private void maybeFinishHeadlessTask(String appScopeKey, Object headlessStartToken) {
-     // Run on UI thread to match startTask and ensure sHeadlessTaskIds
++    // Run on UI thread to match startTask and ensure sHeadlessTaskOwners
      // is only accessed from the UI thread.
      UiThreadUtil.runOnUiThread(() -> {
 -      Integer taskId = sHeadlessTaskIds.remove(appScopeKey);
-+      Integer taskId = sHeadlessTaskIds.remove(headlessStartToken);
-       if (taskId == null) return;
+-      if (taskId == null) return;
++      HeadlessTaskOwner owner = sHeadlessTaskOwners.remove(headlessStartToken);
++      if (owner == null) return;
  
        try {
+-        Context context = mContextRef.get();
+-        if (context == null) return;
+-
+-        ReactContext reactContext = getReactContext(context);
+-        if (reactContext == null) return;
+-
+-        HeadlessJsTaskContext headlessContext = HeadlessJsTaskContext.getInstance(reactContext);
+-        headlessContext.finishTask(taskId);
+-        Log.i(TAG, "Finished headless task " + taskId + " for '" + appScopeKey + "'");
++        // Numeric IDs are local to a ReactContext. Never finish the same number in a newer one.
++        owner.context.finishTask(owner.taskId);
++        Log.i(TAG, "Finished headless task " + owner.taskId + " for '" + appScopeKey + "'");
+       } catch (Exception e) {
+         Log.w(TAG, "Failed to finish headless task: " + e.getMessage());
+       }
 diff --git a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/BareTasksAndEventsRepository.java b/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/BareTasksAndEventsRepository.java
 index 5d20b8a..581042d 100644
 --- a/node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/repository/BareTasksAndEventsRepository.java
@@ -550,13 +677,15 @@ index 185a391..db4f67d 100644
    List<Bundle> getEvents(String appScopeKey);
 diff --git a/node_modules/expo-task-manager/android/src/test/java/expo/modules/taskManager/TaskServiceContextLifetimeTest.java b/node_modules/expo-task-manager/android/src/test/java/expo/modules/taskManager/TaskServiceContextLifetimeTest.java
 new file mode 100644
-index 0000000..d9a8694
+index 0000000..1eef373
 --- /dev/null
 +++ b/node_modules/expo-task-manager/android/src/test/java/expo/modules/taskManager/TaskServiceContextLifetimeTest.java
-@@ -0,0 +1,267 @@
+@@ -0,0 +1,384 @@
 +package expo.modules.taskManager;
 +
 +import static org.junit.Assert.assertFalse;
++import static org.junit.Assert.assertEquals;
++import static org.junit.Assert.assertNotNull;
 +import static org.junit.Assert.assertNull;
 +import static org.junit.Assert.assertSame;
 +import static org.junit.Assert.assertTrue;
@@ -566,17 +695,22 @@ index 0000000..d9a8694
 +import android.content.Context;
 +import android.content.pm.ApplicationInfo;
 +import android.os.Bundle;
++import android.os.Looper;
++import com.facebook.react.bridge.BridgeReactContext;
++import com.facebook.react.jstasks.HeadlessJsTaskContext;
 +
 +import java.lang.ref.WeakReference;
 +import java.lang.reflect.Field;
 +import java.lang.reflect.Method;
 +import java.util.ArrayList;
++import java.util.Collections;
 +import java.util.HashMap;
 +import java.util.HashSet;
 +import java.util.List;
 +import java.util.Map;
 +import java.util.Set;
 +import java.util.UUID;
++import java.util.concurrent.atomic.AtomicInteger;
 +
 +import org.junit.After;
 +import org.junit.Before;
@@ -590,6 +724,7 @@ index 0000000..d9a8694
 +import expo.modules.apploader.HeadlessAppLoader;
 +import expo.modules.core.interfaces.Consumer;
 +import expo.modules.interfaces.taskManager.TaskManagerInterface;
++import expo.modules.interfaces.taskManager.TaskExecutionCallback;
 +import expo.modules.taskManager.repository.BareTasksAndEventsRepository;
 +
 +/** Exercises the real TaskService; only the app loader and JS managers are fakes. */
@@ -605,6 +740,11 @@ index 0000000..d9a8694
 +  private Map<Object, Object> foregroundManagers;
 +  private Map<Object, Object> headlessManagers;
 +  private TaskService service;
++  private Map<Object, Object> executionEvents;
++  private Map<Object, Object> executionManagers;
++  private Map<Object, Object> executionCallbacks;
++  private Map<Object, Object> headlessStarts;
++  private Map<Object, Object> headlessOwners;
 +
 +  @Before
 +  public void setUp() throws Exception {
@@ -621,6 +761,12 @@ index 0000000..d9a8694
 +
 +    foregroundManagers = isolateMap(TaskService.class, "sTaskManagers");
 +    headlessManagers = isolateMap(TaskService.class, "sHeadlessTaskManagers");
++    executionEvents = isolateMap(TaskService.class, "sEvents");
++    executionManagers = isolateMap(TaskService.class, "sExecutionManagers");
++    executionCallbacks = isolateMap(TaskService.class, "sTaskCallbacks");
++    headlessStarts = isolateMap(TaskService.class, "sHeadlessStartTokens");
++    headlessOwners = isolateMap(TaskService.class, "sHeadlessTaskOwners");
++    isolateMap(TaskService.class, "sRetainedExecutions");
 +    isolateMap(AppLoaderProvider.class, "loaders").put("react-native-headless", loader);
 +    // Non-null empty tasks avoid constructor restoration from shared preferences.
 +    // Keep the original map objects and their contents intact for the next test.
@@ -692,6 +838,104 @@ index 0000000..d9a8694
 +
 +    assertSame(newManager, resolveManager(scopeA));
 +    assertSame(newManager, storedManager(headlessManagers, scopeA));
++  }
++
++  @Test
++  public void resultIsDeliveredOnceWhileTheRealContinuationRetainsItsEvent() throws Exception {
++    FakeManager manager = register(scopeA, true);
++    AtomicInteger completions = new AtomicInteger();
++    String eventId = pendingEvent(scopeA, manager, completions);
++    Object generation = headlessStarts.get(scopeA);
++    String lease = service.retainTaskExecution(scopeA, eventId, manager);
++    assertNotNull(lease);
++    service.notifyTaskFinished("gator-bg-sync", scopeA, Collections.singletonMap("eventId", eventId));
++    service.notifyTaskFinished("gator-bg-sync", scopeA, Collections.singletonMap("eventId", eventId));
++    assertEquals(1, completions.get());
++    assertTrue(executionEvents.containsKey(scopeA));
++    assertSame(generation, headlessStarts.get(scopeA));
++    assertTrue(service.releaseTaskExecution(scopeA, eventId, lease, manager));
++    assertFalse(executionEvents.containsKey(scopeA));
++    assertFalse(headlessStarts.containsKey(scopeA));
++    assertEquals(1, completions.get());
++  }
++
++  @Test
++  public void releaseBeforeResultKeepsTheEventUntilResultArrives() throws Exception {
++    FakeManager manager = register(scopeA, true);
++    AtomicInteger completions = new AtomicInteger();
++    String eventId = pendingEvent(scopeA, manager, completions);
++    String lease = service.retainTaskExecution(scopeA, eventId, manager);
++    assertTrue(service.releaseTaskExecution(scopeA, eventId, lease, manager));
++    assertTrue(executionEvents.containsKey(scopeA));
++    assertEquals(0, completions.get());
++    service.notifyTaskFinished("gator-bg-sync", scopeA, Collections.singletonMap("eventId", eventId));
++    assertFalse(executionEvents.containsKey(scopeA));
++    assertEquals(1, completions.get());
++  }
++
++  @Test
++  public void foreignScopeManagerAndLeaseCannotRetainOrReleaseTheExecution() throws Exception {
++    FakeManager manager = register(scopeA, true);
++    FakeManager other = register(scopeB, true);
++    String eventId = pendingEvent(scopeA, manager, new AtomicInteger());
++    assertNull(service.retainTaskExecution(scopeB, eventId, manager));
++    assertNull(service.retainTaskExecution(scopeA, eventId, other));
++    assertNull(service.retainTaskExecution(scopeA, "missing", manager));
++    String lease = service.retainTaskExecution(scopeA, eventId, manager);
++    assertNull(service.retainTaskExecution(scopeA, eventId, manager));
++    assertFalse(service.releaseTaskExecution(scopeB, eventId, lease, manager));
++    assertFalse(service.releaseTaskExecution(scopeA, eventId, lease, other));
++    assertFalse(service.releaseTaskExecution(scopeA, eventId, "stale", manager));
++    service.notifyTaskFinished("gator-bg-sync", scopeA, Collections.singletonMap("eventId", eventId));
++    assertTrue(executionEvents.containsKey(scopeA));
++    assertTrue(service.releaseTaskExecution(scopeA, eventId, lease, manager));
++  }
++
++  @Test
++  public void oldReleaseCannotFinishANewerGeneration() throws Exception {
++    FakeManager manager = register(scopeA, true);
++    String oldEvent = pendingEvent(scopeA, manager, new AtomicInteger());
++    String oldLease = service.retainTaskExecution(scopeA, oldEvent, manager);
++    service.notifyTaskFinished("gator-bg-sync", scopeA, Collections.singletonMap("eventId", oldEvent));
++    assertTrue(service.releaseTaskExecution(scopeA, oldEvent, oldLease, manager));
++    String nextEvent = pendingEvent(scopeA, manager, new AtomicInteger());
++    Object nextGeneration = headlessStarts.get(scopeA);
++    assertFalse(service.releaseTaskExecution(scopeA, oldEvent, oldLease, manager));
++    service.notifyTaskFinished("gator-bg-sync", scopeA, Collections.singletonMap("eventId", oldEvent));
++    assertSame(nextGeneration, headlessStarts.get(scopeA));
++    assertTrue(((List<?>) executionEvents.get(scopeA)).contains(nextEvent));
++  }
++
++  @Test
++  public void finishingOldHeadlessTaskUsesItsOriginalContextWhenNumericIdsAreReused() throws Exception {
++    Application app = RuntimeEnvironment.getApplication();
++    HeadlessJsTaskContext oldContext = HeadlessJsTaskContext.getInstance(new BridgeReactContext(app));
++    HeadlessJsTaskContext newContext = HeadlessJsTaskContext.getInstance(new BridgeReactContext(app));
++    Field tasks = HeadlessJsTaskContext.class.getDeclaredField("activeTasks");
++    tasks.setAccessible(true);
++    ((Set<Integer>) tasks.get(oldContext)).add(7);
++    ((Set<Integer>) tasks.get(newContext)).add(7);
++    Class<?> ownerClass = Class.forName("expo.modules.taskManager.TaskService$HeadlessTaskOwner");
++    java.lang.reflect.Constructor<?> constructor = ownerClass.getDeclaredConstructor(HeadlessJsTaskContext.class, int.class);
++    constructor.setAccessible(true);
++    Object generation = new Object();
++    headlessOwners.put(generation, constructor.newInstance(oldContext, 7));
++    Method finish = TaskService.class.getDeclaredMethod("maybeFinishHeadlessTask", String.class, Object.class);
++    finish.setAccessible(true);
++    finish.invoke(service, scopeA, generation);
++    shadowOf(Looper.getMainLooper()).idle();
++    assertFalse(oldContext.isTaskRunning(7));
++    assertTrue(newContext.isTaskRunning(7));
++    newContext.finishTask(7);
++  }
++
++  private String pendingEvent(String scope, FakeManager manager, AtomicInteger completions) {
++    String eventId = UUID.randomUUID().toString();
++    executionEvents.put(scope, new ArrayList<>(Collections.singletonList(eventId)));
++    executionManagers.put(eventId, new WeakReference<>(manager));
++    executionCallbacks.put(eventId, (TaskExecutionCallback) response -> completions.incrementAndGet());
++    headlessStarts.put(scope, new Object());
++    return eventId;
 +  }
 +
 +  private void assertInvalidationRetainsManager(boolean invalidationResult) throws Exception {
@@ -822,7 +1066,7 @@ index 0000000..d9a8694
 +  }
 +}
 diff --git a/node_modules/expo-task-manager/build/TaskManager.js b/node_modules/expo-task-manager/build/TaskManager.js
-index 8c25150..b342472 100644
+index 8c25150..9289652 100644
 --- a/node_modules/expo-task-manager/build/TaskManager.js
 +++ b/node_modules/expo-task-manager/build/TaskManager.js
 @@ -1,11 +1,11 @@

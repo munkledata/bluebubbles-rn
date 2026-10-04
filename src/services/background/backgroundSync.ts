@@ -12,6 +12,7 @@ import { logger } from '@core/secure';
 import { kvGet } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { ERROR_REPORTING_CONSENT_KEY, useFeatureSettingsStore } from '@state/featureSettingsStore';
+import type { BackgroundTaskExecution } from '@/native/backgroundTaskExecution';
 import { accountRevocationMarker, vault } from '../clients';
 import { ensureDatabase } from '../databaseControl';
 import { runErrorReportQueue } from '../errors/errorReportQueueService';
@@ -63,7 +64,10 @@ interface BackgroundCallbackLifetime {
 const callbackMonotonicNow = (): number => globalThis.performance?.now?.() ?? Date.now();
 
 /** One absolute owner for a native WorkManager callback and every continuation it launches. */
-function createBackgroundCallbackLifetime(callbackStartedAt: number): BackgroundCallbackLifetime {
+function createBackgroundCallbackLifetime(
+  callbackStartedAt: number,
+  executionSignal?: AbortSignal,
+): BackgroundCallbackLifetime {
   const controller = new AbortController();
   const workDeadlineAt = callbackMonotonicNow() + BACKGROUND_CALLBACK_WORK_WINDOW_MS;
   const finalizationDeadlineAt = callbackStartedAt + BACKGROUND_CALLBACK_FINALIZATION_WINDOW_MS;
@@ -81,6 +85,8 @@ function createBackgroundCallbackLifetime(callbackStartedAt: number): Background
     resolveExpired();
   };
   const deadlineTimer = setTimeout(expire, BACKGROUND_CALLBACK_WORK_WINDOW_MS);
+  executionSignal?.addEventListener('abort', expire, { once: true });
+  if (executionSignal?.aborted) expire();
   if (typeof deadlineTimer === 'object' && 'unref' in deadlineTimer) deadlineTimer.unref();
   const expireIfDue = (): void => {
     if (current && callbackMonotonicNow() >= workDeadlineAt) expire();
@@ -104,6 +110,7 @@ function createBackgroundCallbackLifetime(callbackStartedAt: number): Background
     },
     finish: () => {
       clearTimeout(deadlineTimer);
+      executionSignal?.removeEventListener('abort', expire);
       current = false;
     },
   };
@@ -116,12 +123,17 @@ function createBackgroundCallbackLifetime(callbackStartedAt: number): Background
 interface ActiveBackgroundSyncOwner {
   callbackFinished: boolean;
   continuationFinished: boolean;
+  execution?: BackgroundTaskExecution;
 }
 
 let activeBackgroundSyncOwner: ActiveBackgroundSyncOwner | null = null;
 
 function releaseBackgroundSyncOwner(owner: ActiveBackgroundSyncOwner): void {
   if (activeBackgroundSyncOwner === owner && owner.callbackFinished && owner.continuationFinished) {
+    if (owner.execution?.release() === false) {
+      logger.warn('[bg] native background execution remains retained');
+      return;
+    }
     activeBackgroundSyncOwner = null;
   }
 }
@@ -214,18 +226,27 @@ async function flushBackgroundDiagnostics(
 }
 
 /** Callable task body: unit tests exercise result semantics without waiting for WorkManager. */
-export async function executeBackgroundSyncTask(): Promise<BackgroundTask.BackgroundTaskResult> {
+export async function executeBackgroundSyncTask(
+  retainExecution?: () => BackgroundTaskExecution | null,
+): Promise<BackgroundTask.BackgroundTaskResult> {
   const callbackStartedAt = Date.now();
   const finalizationDeadlineAt = callbackStartedAt + BACKGROUND_CALLBACK_FINALIZATION_WINDOW_MS;
   let lifetime: BackgroundCallbackLifetime | null = null;
   let owner: ActiveBackgroundSyncOwner | null = null;
+  let execution: BackgroundTaskExecution | undefined;
   try {
+    if (activeBackgroundSyncOwner) releaseBackgroundSyncOwner(activeBackgroundSyncOwner);
     if (activeBackgroundSyncOwner) {
       logger.warn('[bg] replacement worker deferred while the prior callback is still settling');
       return BackgroundTask.BackgroundTaskResult.Failed;
     }
+    execution = retainExecution?.() ?? undefined;
+    if (retainExecution && !execution) return BackgroundTask.BackgroundTaskResult.Failed;
+    owner = { callbackFinished: false, continuationFinished: true, execution };
+    activeBackgroundSyncOwner = owner;
+    if (execution?.signal.aborted) return BackgroundTask.BackgroundTaskResult.Failed;
 
-    lifetime = createBackgroundCallbackLifetime(callbackStartedAt);
+    lifetime = createBackgroundCallbackLifetime(callbackStartedAt, execution?.signal);
     const callbackLifetime = lifetime;
     const run = runBackgroundSync({
       wakeBudgetMs: BACKGROUND_WAKE_ADMISSION_BUDGET_MS,
@@ -302,8 +323,7 @@ export async function executeBackgroundSyncTask(): Promise<BackgroundTask.Backgr
         logger.debug('[bg] background diagnostics skipped after failure', error),
     });
 
-    owner = { callbackFinished: false, continuationFinished: false };
-    activeBackgroundSyncOwner = owner;
+    owner.continuationFinished = false;
     const ownedRun = owner;
     void run
       .then(
@@ -321,7 +341,11 @@ export async function executeBackgroundSyncTask(): Promise<BackgroundTask.Backgr
     ]);
 
     if (result.kind === 'deadline' || callbackLifetime.didExpire()) {
-      logger.warn('[bg] background callback reached its work deadline; requesting retry');
+      logger.warn(
+        execution?.signal.aborted
+          ? '[bg] background callback cancelled; requesting retry'
+          : '[bg] background callback reached its work deadline; requesting retry',
+      );
       return BackgroundTask.BackgroundTaskResult.Failed;
     }
     const { outcome } = result;

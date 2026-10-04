@@ -99,14 +99,14 @@ and documented older-notification privacy gap retain their own classifications.
 
 ## Observed failures, open issues, and repair status
 
-| Finding                                            | Exact installed-v80 result                                                                                                                 | Current disposition                                                                               |
-| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| `SYNC-04`: expired message-state cursor            | Cold launch and manual Sync Now repeatedly show Error after retention pruning; no repair snapshot starts                                   | Source fix and full host milestone pass; new build and phone recovery proof required              |
-| `NOTIF-03` / `NOTIFICATION-09`: cold withdrawal    | With six retained native history entries, withdrawing only entry 4 removes the entire conversation notice                                  | Source fix, focused checks, and combined full host milestone pass; new-build phone replay pending |
-| `NOTIF-02` / `APPLOCK-02`: older detailed notices  | Previously displayed detailed content remains readable after enabling App Lock; a new generic notice coexists with it                      | Reviewed source privacy sweep and generic policy pass host tests; native replacement proof open |
-| `UI-02`: connection banner and offline explanation | Persistent banner covers chat/Settings titles; the offline explanation says live socket updates still work while the UI reports Offline    | Measured header inset and truthful copy repaired in source; keyboard/font/device replay pending |
-| `SEARCH-02`: exact Settings label                  | Verified input `Server Management` produced No settings match; the control query `Server` exposed both Server Management and Server Health | Word-based visible-label search repaired and host-tested; rebuilt-device replay pending |
-| `LIVE-08` / `LIVE-11`: initial live history sync   | Initial sync showed trouble/Error; a later automatic retry reached Up to date with 75,503 messages                                         | Initial cause unresolved; finite privacy-safe diagnostics added for a repeat; history parity unproved |
+| Finding                                            | Exact installed-v80 result                                                                                                                 | Current disposition                                                                                        |
+| -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| `SYNC-04`: expired message-state cursor            | Cold launch and manual Sync Now repeatedly show Error after retention pruning; no repair snapshot starts                                   | Source fix and full host milestone pass; new build and phone recovery proof required                       |
+| `NOTIF-03` / `NOTIFICATION-09`: cold withdrawal    | With six retained native history entries, withdrawing only entry 4 removes the entire conversation notice                                  | Source fix, focused checks, and combined full host milestone pass; new-build phone replay pending          |
+| `NOTIF-02` / `APPLOCK-02`: older detailed notices  | Previously displayed detailed content remains readable after enabling App Lock; a new generic notice coexists with it                      | Reviewed source privacy sweep and generic policy pass host tests; native replacement proof open            |
+| `UI-02`: connection banner and offline explanation | Persistent banner covers chat/Settings titles; the offline explanation says live socket updates still work while the UI reports Offline    | Measured header inset and truthful copy repaired in source; keyboard/font/device replay pending            |
+| `SEARCH-02`: exact Settings label                  | Verified input `Server Management` produced No settings match; the control query `Server` exposed both Server Management and Server Health | Word-based visible-label search repaired and host-tested; rebuilt-device replay pending                    |
+| `LIVE-08` / `LIVE-11`: initial live history sync   | Initial sync showed trouble/Error; a later automatic retry reached Up to date with 75,503 messages                                         | Initial cause unresolved; finite privacy-safe diagnostics added for a repeat; history parity unproved      |
 | `LIVE-09`: PDF filename preservation               | Uploaded PDF first showed its selected name, then a UUID PDF name; exact marked server attachment also lacked the selected filename        | Reviewed native streaming filename override and host guards added; Kotlin and rebuilt upload proof pending |
 
 ### SYNC-04 — expired cursor is not classified for automatic repair
@@ -629,15 +629,135 @@ executes the JVM, compiles Kotlin, builds an AAB, or proves native runtime behav
 also exposed a preexisting stale legal component record: v80's bounded-download module already had
 14 files, while its generated inventory still recorded 12. Only that count/digest and the matching
 notices row were refreshed; dependency/provenance statuses and runtime notices remain unchanged.
-The final documentation/data refresh must receive a new source identity and fresh release receipts.
+The final documentation/data refresh received its own source identity and fresh release receipts,
+recorded in the post-freeze checkpoint below.
 Raw dependency warnings and legal review remain open.
 
 Evidence under the continuation directory includes `combined-jest.log`, `ui-coverage.log`,
 `typecheck-final.log`, architecture/migration/lint/format logs, `candidate-*.log`,
 `candidate-legal-drift.json`, and `source-copy-receipt.json`. The separately prepared Mac package
-contains reviewed server fixes at `917bd8191a1355effeeb4fbf1257ef9194c5f77b`; installation and a live
-HTTPS acceptance window are still pending. The phone remains on v80; fingerprint participation,
+contains reviewed server fixes at `917bd8191a1355effeeb4fbf1257ef9194c5f77b`; installation was pending
+at the source freeze and subsequently completed as recorded below. The phone remains on v80; fingerprint participation,
 temporary credential creation, and additional-hardware availability were requested separately.
+
+### Post-freeze operation checkpoint — 2026-10-04 UTC
+
+The earlier clean Android candidate is `ea7054a4c011fa4d7598070236fac9a2e2684053`; its two children
+after the tested executable checkpoint change only eight documentation/legal-data files. The native
+release checklist now matches CI's six owned modules and includes the share-intake and task-manager
+unit tasks. Release run `android-0.1.60-ea7054a-20261004001707` passed preflight and preparation for
+**0.1.60**, with no JVM launch, Android build, remote version consumption, or submission. The two
+earlier unused preparation receipts are explicitly superseded in private `combined-milestone.json`.
+All 1,344 source files matched the working checkout at this freeze. This later report update does
+not modify that retained candidate.
+
+The Mac session installed exact `917bd819` and independently verified all 893 retained package
+entries plus its strict signature. Local and public HTTPS ping returned 200; unauthenticated info
+returned 401. Six protected state tables and the sync witness were unchanged, as were boot settings
+and the repaired LAN tunnel. The previous app and matching stopped state are retained for rollback.
+Evidence: `BB/gator-mac-fixes-install-2026-10-03-7n4wb1qu/completion.json`. Two initial desktop
+inspection attempts timed out. A later explicit Refresh Messages Helper showed **CONNECTED,
+authenticated**; Refresh Status showed **HEALTHY / READY**. The initial waiting/degraded display
+was stale. Evidence: `BB/gator-prod-readiness-2026-10-03-ukr6o7x1/helper-health-verification.json`.
+This finite helper check does not substitute for the matching updated-client live acceptance.
+
+The Mac session subsequently installed `c8df5a16`, with owner-confirmed Connected and Healthy/Ready
+status, then `5d9ac754`, which adds automatic status polling while visible and on focus. The latter
+passed 5,480 JS/TS tests, nine Python tests, Go checks, package/signature verification and state
+preservation; one optional GUI test was skipped. Its owner visual confirmation and coordinated
+reboot recovery remain pending. Evidence: `BB/gator-status-refresh-2026-10-03-31ctxtpm/install/completion.json`.
+Earlier helper confirmation is not relabeled as a visual check of the latest installation.
+
+The phone remains awake. Owner authentication opened protected Settings on Play v80. A warm
+Home/resume interval of **5.09 seconds** returned to Settings without another prompt; a second
+interval of **35.10 seconds** in the same process presented the fingerprint prompt and removed
+Settings from the UI tree. This proves the finite successful-unlock/30-second-grace slice only;
+it does not prove cold launch, locked push drain, or the replacement source's notification sweep.
+The owner completed the second fingerprint unlock, returning to the inbox. Settings was reopened
+and App Lock was turned off for background testing; capture `036` verifies the unchecked control.
+Evidence: `applock-grace-result.json` and captures `028`–`036` in the continuation directory.
+Capture `034` is an inbox view despite its filename and is not App Lock-off evidence.
+
+The synthetic fixture retains exactly
+two schedule requests and zero diagnostic uploads. Its recorder-only shutdown race was fixed and
+independently retested in a separate process; the resumed active fixture keeps the same connection.
+Isolated phone tests continue. Live HTTPS credentials were not
+created, and no live acceptance window started. AMFI remains unchanged; native Kotlin/unit/build
+work requires the coordinated later AMFI/reboot step.
+
+### Background deadline and native-stop continuation — 2026-10-04 UTC
+
+The same authenticated synthetic fixture has no external messaging transport. App Lock is off,
+diagnostic consent remains off, and the phone stays awake. Eligible JobScheduler invocations used
+the constraint-respecting `-s` option; native worker events and fixture request timings establish
+execution, rather than the command's acknowledgment alone.
+
+| Case                            | Observed result                                                                                                                                                                                                                                           | Acceptance limit                                                                                                                                                        |
+| ------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Stalled server-info request     | First request closed at 29.957 seconds; retry closed after another 19.369 seconds. Native task failure and WorkManager RETRY occurred 51.364 seconds after worker start.                                                                                  | Pass for this uninterrupted request timeout/absolute work budget; native start includes JS startup, not exact callback-entry instrumentation.                           |
+| Slow sequential phases          | Server-info completed after 27.002 seconds; the subsequent message query closed after 22.553 seconds. Native failure/RETRY occurred after 51.314 seconds.                                                                                                 | The next phase used the remaining overall budget; it did not receive a fresh 50 seconds.                                                                                |
+| Duplicate active trigger        | A second constraint-respecting trigger during the slow query created no second observed worker or request chain.                                                                                                                                          | Native serialization in this episode; an outstanding uncooperative JS continuation was not exercised.                                                                   |
+| Native timeout/cancellation     | Android logged worker cancellation 37 ms after the command, but HTTP completed naturally at 40.002 seconds, about 22.584 seconds after cancellation.                                                                                                      | Prompt network cancellation was not achieved. Native stop does not prove JS cleanup.                                                                                    |
+| Later replacement               | The old failure callback appeared immediately before a replacement worker; the old request had already ended. Replacement requests then closed at 30.003 and 19.724 seconds; the replacement logged failure/RETRY after 50.011 seconds.                   | This did not exercise overlapping HTTP, and the cancelled worker's later callback cannot be credited as WorkManager RETRY. Its callback timing/cleanup remain unproved. |
+| Offline constraint and recovery | With Wi-Fi and mobile data off, the due job refused a constraint-respecting trigger and showed unsatisfied CONNECTIVITY. Restoring both settings caused an automatic worker run, one info/query pair, and native WorkManager SUCCESS after 1.489 seconds. | Scoped OS connectivity/recovery pass; no force bypass or post-restoration run command. A reachable-network/unreachable-server failure remains a distinct test.          |
+
+The cancellation result exposes a source-level gap: WorkManager cancellation stops the Kotlin wait
+without revoking the JavaScript callback's abort signal. Separately, a callback can report its
+deadline result while its protected continuation remains alive; normal TaskManager completion can
+then release the native timer keeper too early. The existing continuation fence must remain until
+actual settlement. Native-stop propagation and keeper lifetime require a focused correction and
+replacement-build proof. `REL-001` remains open.
+
+No additional synthetic sends or diagnostic uploads occurred in these lanes. Receipts include
+`stall-info-holds-result.json`, `slow-cycle-holds-result.json`,
+`overlap-trigger-during-slow-cycle.json`, the cancellation observer's 21 samples, and its separate
+native-timeout/replacement-trigger receipts, `cancellation-result.json`, and
+`offline-and-normal-recovery-result.json`. The initial bounded line-tail capture missed late native
+events. A separate UID/tag-filtered, byte-bounded capture recovered the replacement RETRY and normal
+recovery SUCCESS; finite projected events are in `background-native-late-capture.json`. Wi-Fi,
+mobile data and airplane-mode settings match their baseline. Settled HTTP holds alone are not native
+terminal-result proof.
+
+### Expanded backup and account-switch continuation — 2026-10-04 UTC
+
+An encrypted local backup on fixture A included a compact-list setting, one custom theme, and one
+folder with one member. After reversing those settings, native file selection and restore recovered
+all three visibly. A second encrypted backup added a phone-local nickname, pin, mute, bubble color,
+and contact color. The operator retained ciphertext and a separately protected random passphrase;
+host decryption verified the expected category counts without printing private contents. An initial
+automated password entry was incomplete; paced entry succeeded with the same validated file/key.
+This was an input-automation failure, not evidence of a cryptographic defect.
+
+Fixture A was disconnected through Gator's normal UI, without clearing app data. Fixture B used a
+different loopback URL and credential. Before import, B showed no A draft, nickname, pin, mute,
+bubble/contact colors, custom folder, or A-only scheduled messages. Global compact-list and custom
+theme preferences deliberately survived. A's request counts stopped and its active holds were zero.
+The fixtures share seeded conversation/message identities, so this is local-marker and credential
+replacement evidence, not exhaustive distinct-server-history isolation.
+
+Explicitly importing A's full backup into B reported **one setting, theme, chat customization,
+folder, folder member, and handle color, with zero skipped entries**. The nickname, pin, mute,
+purple bubble color, and navy contact color were visibly verified; the composer remained empty.
+Capture `127` shows the restored folder with one saved conversation; `132` shows the pinned tile
+in the actual inbox. Earlier covered-route XML alone is not visible pin proof. The synthetic
+fixture supports authenticated HTTP but no working socket; Reconnecting remains expected.
+Drafts are not part of the customization backup. Evidence includes `backup-expanded-result.json`,
+`backup-full-content-check.json`, `account-B-connected.json`,
+`account-B-customization-baseline.json`, `backup-cross-account-visible.json`, and captures
+`109`–`134` in the continuation directory. Capture `098` is Settings despite its filename; capture
+`101` is the actual reopened A-draft proof. Private temporary-export deletion, interrupted restore,
+server-slot restore, and complete account erasure remain unproved. Compact-list mode was returned
+to its original off setting, the owned theme was deleted, and the two owned Termux/share-storage
+backup copies were removed. Private operator ciphertext remains separately protected evidence.
+
+Deleting the first test folder from its nested editor also caused a real Play-v80 process crash:
+`expo.modules.gatorscreensecurity.ReleaseReactInstanceException: runtime.fatal [UnknownError]`.
+Cold relaunch recovered, the folder was gone, and conversations remained. Capture `063` is Termux
+after the crash, not deletion proof. Native source review found a concrete multi-pop ordering defect
+in Screens 4.26.2, consistent with the earlier predictive-back incident. The reviewed correction
+orders removals by the committed stack and validates the complete batch before mutation. Eighteen
+native regression tests are authored but have not been compiled or run. The redacted phone error
+does not establish exact attribution; the rebuilt folder-delete/Back replay remains mandatory.
 
 ## Current conclusion and remaining acceptance
 
@@ -676,8 +796,9 @@ do not close the remaining device matrix or the raw dependency, legal, and wider
 3. Install and retest the source repairs for Settings-label search, banner/copy findings,
    and multipart filename preservation. Host regressions cover invalid names and preserved source
    metadata; Kotlin execution, on-device keyboard/font layout and actual upload bytes/name remain open.
-4. Verify the source App Lock old-notice privacy repair on the replacement candidate. Successful biometric unlock and grace
-   timing, post-unlock drain, all locked envelope/action versions, replay/isolation, notification
+4. Verify the source App Lock old-notice privacy repair on the replacement candidate. Warm biometric
+   unlock and the finite grace timing passed in the continuation; cold launch, post-unlock drain,
+   all locked envelope/action versions, replay/isolation, notification
    inline actions, and native cancellation-failure cases were not established by this round.
 5. Keep messaging proof bounded. Direct recipient-device reading/rendering, exact-B server unsend
    attribution, live inbound messages, RCS/SMS service, new-conversation creation, complete
@@ -685,8 +806,9 @@ do not close the remaining device matrix or the raw dependency, legal, and wider
    capability transitions remain untested here. C, the image, and D lack retained delivery proof.
 6. Keep download/media/backup results scoped. Missing off-screen owner rows, remaining hostile
    length/content/concurrency and quota cases, uninterrupted video resume, PDF pixel rendering,
-   downloaded/uploaded content hashes, temporary export deletion, zero-count backup categories, cross-account/server-slot
-   and interrupted restore, and recording-file deletion remain open.
+   downloaded/uploaded content hashes, temporary export deletion, server-slot and interrupted
+   restore, and recording-file deletion remain open. Positive customization categories and the
+   bounded cross-account import now pass; they do not establish complete account isolation.
 7. Keep native DB claims bounded. This session does not prove death during migration, an active WAL
    write or rekey, wrong-key rejection, concurrent SQLCipher behavior, interrupted backup restore,
    or complete cache/account erasure. Prepared prior-version migration, exhaustive distinct-account

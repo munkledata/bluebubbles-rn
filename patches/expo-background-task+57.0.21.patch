@@ -1,5 +1,184 @@
+diff --git a/node_modules/expo-background-task/android/build.gradle b/node_modules/expo-background-task/android/build.gradle
+index fa51230..1834f81 100644
+--- a/node_modules/expo-background-task/android/build.gradle
++++ b/node_modules/expo-background-task/android/build.gradle
+@@ -18,4 +18,5 @@ android {
+ dependencies {
+   implementation 'androidx.work:work-runtime-ktx:2.9.1'
+   implementation 'com.facebook.react:react-android'
++  testImplementation 'junit:junit:4.13.2'
+ }
+diff --git a/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskConsumer.kt b/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskConsumer.kt
+index c8e51de..ba74a33 100644
+--- a/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskConsumer.kt
++++ b/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskConsumer.kt
+@@ -1,6 +1,7 @@
+ package expo.modules.backgroundtask
+ 
+ import android.content.Context
++import android.os.Bundle
+ import android.util.Log
+ import expo.modules.interfaces.taskManager.TaskConsumer
+ import expo.modules.interfaces.taskManager.TaskConsumerInterface
+@@ -27,9 +28,10 @@ class BackgroundTaskConsumer(context: Context?, taskManagerUtils: TaskManagerUti
+    * can execute the inner task. A task is only executed if the app is in the background.
+    * This only applies when the app is in release mode.
+    */
+-  fun executeTask(callback: TaskExecutionCallback) {
++  fun executeTask(executionId: String, callback: TaskExecutionCallback) {
+     Log.d(TAG, "Executing task '${task?.name}'")
+-    taskManagerUtils.executeTask(task, null, callback)
++    val data = Bundle().apply { putString("gatorExecutionId", executionId) }
++    taskManagerUtils.executeTask(task, data, callback)
+   }
+ 
+   override fun didRegister(task: TaskInterface) {
+diff --git a/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskExecutionRegistry.kt b/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskExecutionRegistry.kt
+new file mode 100644
+index 0000000..a1132f8
+--- /dev/null
++++ b/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskExecutionRegistry.kt
+@@ -0,0 +1,94 @@
++package expo.modules.backgroundtask
++
++import java.util.UUID
++import java.util.WeakHashMap
++
++/** One process-local owner, retained until dispatched callbacks and their real continuations settle. */
++internal class BackgroundTaskExecutionRegistry {
++  internal class Execution(val scope: String) {
++    val id: String = UUID.randomUUID().toString()
++    var cancelled = false
++    var dispatchFinished = false
++    var issuedConsumers = 0
++    val consumers = mutableSetOf<Any>()
++    val retainedEvents = mutableMapOf<String, String>()
++  }
++
++  private var current: Execution? = null
++  private val listeners = WeakHashMap<Any, (String) -> Unit>()
++
++  @Synchronized
++  fun begin(scope: String): Execution? {
++    if (current != null) return null
++    return Execution(scope).also { current = it }
++  }
++
++  @Synchronized
++  fun registerConsumer(execution: Execution): Any? {
++    if (current !== execution || execution.cancelled || execution.dispatchFinished) return null
++    execution.issuedConsumers += 1
++    return Any().also { execution.consumers.add(it) }
++  }
++
++  @Synchronized
++  fun completeConsumer(execution: Execution, consumer: Any) {
++    if (current !== execution || !execution.consumers.remove(consumer)) return
++    releaseIfSettled(execution)
++  }
++
++  @Synchronized
++  fun finishDispatch(execution: Execution) {
++    if (current !== execution) return
++    execution.dispatchFinished = true
++    releaseIfSettled(execution)
++  }
++
++  @Synchronized
++  fun retain(id: String, scope: String, eventId: String): Map<String, Any>? {
++    val execution = current ?: return null
++    if (execution.id != id || execution.scope != scope || execution.consumers.isEmpty() ||
++      execution.retainedEvents.containsKey(eventId) ||
++      execution.retainedEvents.size >= execution.issuedConsumers) return null
++    val leaseToken = UUID.randomUUID().toString()
++    execution.retainedEvents[eventId] = leaseToken
++    return mapOf("leaseToken" to leaseToken, "cancelled" to execution.cancelled)
++  }
++
++  @Synchronized
++  fun release(id: String, scope: String, eventId: String, leaseToken: String): Boolean {
++    val execution = current ?: return false
++    if (execution.id != id || execution.scope != scope ||
++      execution.retainedEvents[eventId] != leaseToken) return false
++    execution.retainedEvents.remove(eventId)
++    releaseIfSettled(execution)
++    return true
++  }
++
++  fun cancel(execution: Execution) {
++    val notify = synchronized(this) {
++      if (current !== execution || execution.cancelled) return
++      // Latch before notification: JavaScript may not have a context/listener yet.
++      execution.cancelled = true
++      listeners.values.toList()
++    }
++    notify.forEach { it(execution.id) }
++  }
++
++  @Synchronized
++  fun observe(owner: Any, notify: (String) -> Unit) {
++    listeners[owner] = notify
++  }
++
++  @Synchronized
++  fun removeObserver(owner: Any) {
++    listeners.remove(owner)
++  }
++
++  private fun releaseIfSettled(execution: Execution) {
++    if (execution.dispatchFinished && execution.consumers.isEmpty() && execution.retainedEvents.isEmpty()) {
++      current = null
++    }
++  }
++}
++
++internal val backgroundTaskExecutions = BackgroundTaskExecutionRegistry()
+diff --git a/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskModule.kt b/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskModule.kt
+index 6620196..f106b72 100644
+--- a/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskModule.kt
++++ b/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskModule.kt
+@@ -6,6 +6,7 @@ import expo.modules.interfaces.taskManager.TaskManagerInterface
+ import expo.modules.kotlin.functions.Coroutine
+ import expo.modules.kotlin.modules.Module
+ import expo.modules.kotlin.modules.ModuleDefinition
++import java.lang.ref.WeakReference
+ 
+ class BackgroundTaskModule : Module() {
+   companion object {
+@@ -15,9 +16,31 @@ class BackgroundTaskModule : Module() {
+   private val _taskManager by lazy { appContext.legacyModule<TaskManagerInterface>() }
+   private val taskManager: TaskManagerInterface
+     get() = _taskManager ?: throw TaskMangerInterfaceNotFoundException()
++  private val executionObserverOwner = Any()
+ 
+   override fun definition() = ModuleDefinition {
+     Name("ExpoBackgroundTask")
++    Events("onExecutionCancelled")
++
++    OnCreate {
++      val module = WeakReference(this@BackgroundTaskModule)
++      backgroundTaskExecutions.observe(executionObserverOwner) { executionId ->
++        try {
++          module.get()?.sendEvent("onExecutionCancelled", mapOf("executionId" to executionId))
++        } catch (_: Exception) {
++          // The latched native state remains authoritative if the JS context is unavailable.
++          Log.w(TAG, "Background execution cancellation notification unavailable")
++        }
++      }
++    }
++    OnDestroy { backgroundTaskExecutions.removeObserver(executionObserverOwner) }
++
++    Function("retainExecution") { executionId: String, eventId: String ->
++      backgroundTaskExecutions.retain(executionId, taskManager.appScopeKey, eventId)
++    }
++    Function("releaseExecution") { executionId: String, eventId: String, leaseToken: String ->
++      backgroundTaskExecutions.release(executionId, taskManager.appScopeKey, eventId, leaseToken)
++    }
+ 
+     AsyncFunction("getStatusAsync") {
+       return@AsyncFunction 2 // WorkManager is always available on Android.
 diff --git a/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskScheduler.kt b/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskScheduler.kt
-index 74c5719..562a96d 100644
+index 74c5719..0e96147 100644
 --- a/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskScheduler.kt
 +++ b/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskScheduler.kt
 @@ -11,7 +11,6 @@ import androidx.work.NetworkType
@@ -10,10 +189,19 @@ index 74c5719..562a96d 100644
  import androidx.work.WorkManager
  import com.google.common.util.concurrent.ListenableFuture
  import expo.modules.interfaces.taskManager.TaskServiceProviderHelper
-@@ -79,16 +78,11 @@ object BackgroundTaskScheduler {
+@@ -21,6 +20,8 @@ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.awaitAll
+ import kotlinx.coroutines.runBlocking
+ import kotlinx.coroutines.withContext
++import kotlinx.coroutines.ensureActive
++import kotlin.coroutines.coroutineContext
+ import java.time.Duration
+ import java.util.concurrent.TimeUnit
+ 
+@@ -79,16 +80,11 @@ object BackgroundTaskScheduler {
        return false
      }
-
+ 
 -    val existingWorkInfo = getWorkerInfo(context)
 -
      // During startup/headless restore, task consumers register again while the
@@ -28,25 +216,25 @@ index 74c5719..562a96d 100644
        Log.d(TAG, "Worker is already scheduled, skipping cancel-and-replace scheduling.")
        return true
      }
-@@ -141,6 +135,8 @@ object BackgroundTaskScheduler {
+@@ -141,6 +137,8 @@ object BackgroundTaskScheduler {
          ).await()
-
+ 
          true
 +      } catch (e: CancellationException) {
 +        throw e
        } catch (e: Exception) {
          Log.e(TAG, "Worker failed to start with error " + e.message)
          false
-@@ -163,6 +159,8 @@ object BackgroundTaskScheduler {
+@@ -163,6 +161,8 @@ object BackgroundTaskScheduler {
          ).await()
-
+ 
          true
 +      } catch (e: CancellationException) {
 +        throw e
        } catch (e: Exception) {
          Log.e(TAG, "Worker failed to start with error " + e.message)
          false
-@@ -174,7 +172,7 @@ object BackgroundTaskScheduler {
+@@ -174,7 +174,7 @@ object BackgroundTaskScheduler {
     * Cancels the worker task
     */
    private suspend fun stopWorker(context: Context): Boolean {
@@ -54,8 +242,8 @@ index 74c5719..562a96d 100644
 +    if (!hasUnfinishedWorker(context)) {
        return false
      }
-
-@@ -184,25 +182,18 @@ object BackgroundTaskScheduler {
+ 
+@@ -184,25 +184,18 @@ object BackgroundTaskScheduler {
      val workManager = WorkManager.getInstance(context)
      return try {
        workManager.cancelUniqueWork(WORKER_IDENTIFIER).await()
@@ -66,7 +254,7 @@ index 74c5719..562a96d 100644
        false
      }
    }
-
+ 
 -  /**
 -   * Returns true if the worker task is pending
 -   */
@@ -84,21 +272,21 @@ index 74c5719..562a96d 100644
      // Get task service
      val taskService = TaskServiceProviderHelper.getTaskServiceImpl(context)
        ?: throw MissingTaskServiceException()
-@@ -211,10 +202,11 @@ object BackgroundTaskScheduler {
-
+@@ -211,10 +204,11 @@ object BackgroundTaskScheduler {
+ 
      // Get all task consumers
      val consumers = taskService.getTaskConsumers(appScopeKey)
 -    Log.d(TAG, "runTasks: number of consumers ${consumers.size}")
 +      .filterIsInstance<BackgroundTaskConsumer>()
 +    Log.d(TAG, "runTasks: number of background task consumers ${consumers.size}")
-
+ 
      if (consumers.isEmpty()) {
 -      return
 +      return true
      }
-
+ 
      // Make sure we're in the background before running a task
-@@ -223,49 +215,64 @@ object BackgroundTaskScheduler {
+@@ -223,49 +217,83 @@ object BackgroundTaskScheduler {
        // we don't want to run anything to avoid performance issues.
        Log.d(TAG, "runTasks: App is in the foreground")
        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -116,53 +304,68 @@ index 74c5719..562a96d 100644
 -      return
 +      return true
      }
-
+ 
 -    val tasks = consumers.filterIsInstance<BackgroundTaskConsumer>()
 -      .map { bgTaskConsumer ->
--        Log.d(TAG, "runTasks: executing tasks for consumer of type ${bgTaskConsumer.taskType()}")
++    coroutineContext.ensureActive()
++    val execution = backgroundTaskExecutions.begin(appScopeKey)
++    if (execution == null) {
++      Log.d(TAG, "Background execution deferred until prior continuation settles")
++      return false
++    }
++    try {
++      val tasks = consumers.map { bgTaskConsumer ->
++        coroutineContext.ensureActive()
+         Log.d(TAG, "runTasks: executing tasks for consumer of type ${bgTaskConsumer.taskType()}")
 -        val taskCompletion = CompletableDeferred<Unit>()
 -        try {
 -          bgTaskConsumer.executeTask {
 -            Log.d(TAG, "Task successfully finished")
 -            taskCompletion.complete(Unit)
--          }
--        } catch (e: Exception) {
--          Log.e(TAG, "Task failed: ${e.message}")
-+    val tasks = consumers.map { bgTaskConsumer ->
-+      Log.d(TAG, "runTasks: executing tasks for consumer of type ${bgTaskConsumer.taskType()}")
-+      val taskCompletion = CompletableDeferred<Boolean>()
-+      try {
-+        bgTaskConsumer.executeTask { response ->
-+          val result = response["result"]
-+          val succeeded = result is Number && result.toDouble() == 1.0
-+          Log.d(TAG, "Task finished; success=$succeeded")
-+          taskCompletion.complete(succeeded)
++        val taskCompletion = CompletableDeferred<Boolean>()
++        val consumer = backgroundTaskExecutions.registerConsumer(execution)
++        if (consumer == null) {
++          taskCompletion.complete(false)
++        } else try {
++          bgTaskConsumer.executeTask(execution.id) { response ->
++            val result = response["result"]
++            val succeeded = result is Number && result.toDouble() == 1.0
++            Log.d(TAG, "Task finished; success=$succeeded")
++            taskCompletion.complete(succeeded)
++            backgroundTaskExecutions.completeConsumer(execution, consumer)
+           }
++        } catch (e: CancellationException) {
++          throw e
+         } catch (e: Exception) {
+           Log.e(TAG, "Task failed: ${e.message}")
++          taskCompletion.complete(false)
++          backgroundTaskExecutions.completeConsumer(execution, consumer)
          }
--        taskCompletion
-+      } catch (e: CancellationException) {
-+        throw e
-+      } catch (e: Exception) {
-+        Log.e(TAG, "Task failed: ${e.message}")
-+        taskCompletion.complete(false)
+         taskCompletion
        }
-+      taskCompletion
-+    }
-     // Await all tasks to complete
+-    // Await all tasks to complete
 -    tasks.awaitAll()
-+    val succeeded = tasks.awaitAll().all { it }
-
++      // Await results, while native execution ownership may outlive an early JS deadline result.
++      val succeeded = tasks.awaitAll().all { it }
+ 
 -    // Schedule next task
 -    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 -      scheduleWorker(context, appScopeKey, false)
-+    // A failed task asks WorkManager to retry this exact work with backoff. Appending the ordinary
-+    // interval successor too would create two independent future runs for one failed attempt.
-+    if (!succeeded) {
-+      return false
++      // A failed task asks WorkManager to retry this exact work with backoff. Appending the ordinary
++      // interval successor too would create two independent future runs for one failed attempt.
++      if (!succeeded) {
++        return false
++      }
++      return Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
++        scheduleWorker(context, appScopeKey, false)
++    } catch (e: CancellationException) {
++      backgroundTaskExecutions.cancel(execution)
++      throw e
++    } finally {
++      backgroundTaskExecutions.finishDispatch(execution)
      }
-+    return Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
-+      scheduleWorker(context, appScopeKey, false)
    }
-
+ 
    /**
 -   * Returns the worker info object from the WorkManager if the worker has been
 -   * registered, otherwise returns null
@@ -173,7 +376,7 @@ index 74c5719..562a96d 100644
 +  private suspend fun hasUnfinishedWorker(context: Context): Boolean {
      // Get work manager
      val workManager = WorkManager.getInstance(context)
-
+ 
      return try {
        val workInfos = workManager.getWorkInfosForUniqueWork(WORKER_IDENTIFIER).await()
 -      return workInfos.firstOrNull()
@@ -186,14 +389,14 @@ index 74c5719..562a96d 100644
 +      false
      }
    }
-
+ 
 diff --git a/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskWork.kt b/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskWork.kt
 index 33fea94..5e88d08 100644
 --- a/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskWork.kt
 +++ b/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskWork.kt
 @@ -19,24 +19,26 @@ class BackgroundTaskWork(context: Context, params: WorkerParameters) : Coroutine
      Log.i(TAG, "doWork: Running worker")
-
+ 
      // Get the app scope key
 -    val appScopeKey = inputData.getString("appScopeKey") ?: throw MissingAppScopeKey()
 +    val appScopeKey = inputData.getString("appScopeKey")
@@ -204,7 +407,7 @@ index 33fea94..5e88d08 100644
 +        .build()
 +      return Result.failure(outputData)
 +    }
-
+ 
      try {
        // Run tasks async using the task service. This call will return when the task has finished
        // ie. When JS task executor has notified the task manager that it is done.
@@ -228,3 +431,143 @@ index 33fea94..5e88d08 100644
 -    return Result.success()
    }
  }
+diff --git a/node_modules/expo-background-task/android/src/test/java/expo/modules/backgroundtask/BackgroundTaskExecutionRegistryTest.kt b/node_modules/expo-background-task/android/src/test/java/expo/modules/backgroundtask/BackgroundTaskExecutionRegistryTest.kt
+new file mode 100644
+index 0000000..133e221
+--- /dev/null
++++ b/node_modules/expo-background-task/android/src/test/java/expo/modules/backgroundtask/BackgroundTaskExecutionRegistryTest.kt
+@@ -0,0 +1,134 @@
++package expo.modules.backgroundtask
++
++import org.junit.Assert.*
++import org.junit.Test
++
++class BackgroundTaskExecutionRegistryTest {
++  private val registry = BackgroundTaskExecutionRegistry()
++
++  @Test
++  fun cancellationBeforeJavascriptIsLatchedUntilTheExactCallbackSettles() {
++    val execution = registry.begin("a")!!
++    val consumer = registry.registerConsumer(execution)!!
++    registry.cancel(execution)
++    registry.finishDispatch(execution)
++    val claim = registry.retain(execution.id, "a", "event")!!
++    assertEquals(true, claim["cancelled"])
++    registry.completeConsumer(execution, consumer)
++    assertNull(registry.begin("a"))
++    assertTrue(registry.release(execution.id, "a", "event", claim["leaseToken"] as String))
++    assertNotNull(registry.begin("a"))
++  }
++
++  @Test
++  fun callbackResultCannotReleaseAnUnsettledContinuation() {
++    val execution = registry.begin("a")!!
++    val consumer = registry.registerConsumer(execution)!!
++    val claim = registry.retain(execution.id, "a", "event")!!
++    registry.finishDispatch(execution)
++    registry.completeConsumer(execution, consumer)
++    registry.completeConsumer(execution, consumer)
++    assertNull(registry.begin("a"))
++    assertTrue(registry.release(execution.id, "a", "event", claim["leaseToken"] as String))
++    assertNotNull(registry.begin("a"))
++  }
++
++  @Test
++  fun continuationReleaseCannotReleaseAnUnfinishedCallback() {
++    val execution = registry.begin("a")!!
++    val consumer = registry.registerConsumer(execution)!!
++    val claim = registry.retain(execution.id, "a", "event")!!
++    registry.finishDispatch(execution)
++    assertTrue(registry.release(execution.id, "a", "event", claim["leaseToken"] as String))
++    assertNull(registry.begin("a"))
++    registry.completeConsumer(execution, consumer)
++    assertNotNull(registry.begin("a"))
++  }
++
++  @Test
++  fun synchronousFailureDoesNotReleaseTheStillDispatchingInvocation() {
++    val execution = registry.begin("a")!!
++    val first = registry.registerConsumer(execution)!!
++    registry.completeConsumer(execution, first)
++    assertNull(registry.begin("a"))
++    val second = registry.registerConsumer(execution)!!
++    registry.finishDispatch(execution)
++    assertNull(registry.begin("a"))
++    registry.completeConsumer(execution, second)
++    assertNotNull(registry.begin("a"))
++  }
++
++  @Test
++  fun staleCancelReleaseAndCompletionCannotTouchANewerInvocation() {
++    val old = registry.begin("a")!!
++    val consumer = registry.registerConsumer(old)!!
++    val claim = registry.retain(old.id, "a", "event")!!
++    registry.finishDispatch(old)
++    registry.completeConsumer(old, consumer)
++    registry.release(old.id, "a", "event", claim["leaseToken"] as String)
++    val next = registry.begin("a")!!
++    val nextConsumer = registry.registerConsumer(next)!!
++    assertNotEquals(old.id, next.id)
++    registry.cancel(old)
++    registry.completeConsumer(old, consumer)
++    registry.finishDispatch(old)
++    assertFalse(registry.release(old.id, "a", "event", claim["leaseToken"] as String))
++    assertEquals(false, registry.retain(next.id, "a", "new-event")!!["cancelled"])
++    assertNull(registry.begin("a"))
++    registry.completeConsumer(next, nextConsumer)
++  }
++
++  @Test
++  fun wrongScopeEventLeaseAndDuplicateClaimFailClosed() {
++    val execution = registry.begin("a")!!
++    registry.registerConsumer(execution)!!
++    assertNull(registry.retain(execution.id, "b", "event"))
++    assertNull(registry.retain("unknown", "a", "event"))
++    val claim = registry.retain(execution.id, "a", "event")!!
++    assertNull(registry.retain(execution.id, "a", "event"))
++    assertNull(registry.retain(execution.id, "a", "extra-event"))
++    assertFalse(registry.release(execution.id, "b", "event", claim["leaseToken"] as String))
++    assertFalse(registry.release(execution.id, "a", "other", claim["leaseToken"] as String))
++    assertFalse(registry.release(execution.id, "a", "event", "unknown"))
++    assertNull(registry.begin("b"))
++  }
++
++  @Test
++  fun stoppedBeforeDispatchDoesNotCreateAConsumerOrLeakOwnership() {
++    val execution = registry.begin("a")!!
++    registry.cancel(execution)
++    assertNull(registry.registerConsumer(execution))
++    registry.finishDispatch(execution)
++    assertNotNull(registry.begin("a"))
++  }
++
++  @Test
++  fun overlappingContextsBothObserveCancellationAndRemoveOnlyTheirOwnObserver() {
++    val firstOwner = Any()
++    val nextOwner = Any()
++    val calls = mutableListOf<String>()
++    registry.observe(firstOwner) { calls.add("old") }
++    registry.observe(nextOwner) { calls.add(it) }
++    val execution = registry.begin("a")!!
++    registry.registerConsumer(execution)
++    registry.cancel(execution)
++    registry.cancel(execution)
++    assertEquals(setOf("old", execution.id), calls.toSet())
++    assertEquals(2, calls.size)
++    registry.removeObserver(nextOwner)
++    assertEquals(true, registry.retain(execution.id, "a", "event")!!["cancelled"])
++  }
++
++  @Test
++  fun destroyingOneModuleDoesNotRemoveAnotherModulesObserver() {
++    val firstOwner = Any()
++    val nextOwner = Any()
++    val calls = mutableListOf<String>()
++    registry.observe(firstOwner) { calls.add("old") }
++    registry.observe(nextOwner) { calls.add(it) }
++    registry.removeObserver(firstOwner)
++    val execution = registry.begin("a")!!
++    registry.cancel(execution)
++    assertEquals(listOf(execution.id), calls)
++  }
++}

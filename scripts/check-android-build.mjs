@@ -66,6 +66,19 @@ const EXPO_TASK_MANAGER_UTILS_PATH =
   'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerUtils.java';
 const EXPO_TASK_SERVICE_PATH =
   'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskService.java';
+const EXPO_TASK_MANAGER_MODULE_PATH =
+  'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerModule.kt';
+export const BACKGROUND_EXECUTION_SOURCE_PATHS = {
+  registry:
+    'node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskExecutionRegistry.kt',
+  consumer:
+    'node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskConsumer.kt',
+  module:
+    'node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskModule.kt',
+  scheduler: EXPO_BACKGROUND_TASK_SCHEDULER_PATH,
+  taskManager: EXPO_TASK_MANAGER_MODULE_PATH,
+  service: EXPO_TASK_SERVICE_PATH,
+};
 const EXPO_TASK_MANAGER_BUILD_PATH = 'node_modules/expo-task-manager/android/build.gradle';
 const EXPO_TASK_MANAGER_LIFETIME_TEST_PATH =
   'node_modules/expo-task-manager/android/src/test/java/expo/modules/taskManager/TaskServiceContextLifetimeTest.java';
@@ -93,8 +106,15 @@ const EXPO_ROUTER_PATCH_PATH = `patches/expo-router+${EXPO_ROUTER_VERSION}.patch
 const EXPO_ROUTER_EXPERIMENTAL_STACK_PATH =
   'node_modules/expo-router/build/layouts/experimental-stack/ExperimentalStackView.js';
 const REACT_NATIVE_SCREENS_PATCH_PATH = `patches/react-native-screens+${REACT_NATIVE_SCREENS_VERSION}.patch`;
-const REACT_NATIVE_SCREENS_STACK_CONTAINER_PATH =
-  'node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainer.kt';
+export const REACT_NATIVE_SCREENS_SOURCE_PATHS = {
+  stackContainerSource:
+    'node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainer.kt',
+  stackCoordinatorSource:
+    'node_modules/react-native-screens/android/src/main/java/com/swmansion/rnscreens/gamma/stack/host/StackContainerUpdateCoordinator.kt',
+  screensBuildGradleSource: 'node_modules/react-native-screens/android/build.gradle',
+  screensPopOrderTestSource:
+    'node_modules/react-native-screens/android/src/test/java/com/swmansion/rnscreens/gamma/stack/host/StackContainerPopOrderTest.kt',
+};
 
 // These exact product-owned runtime values bind an AAB to the pinned-shortcut retirement added in
 // 9d97eab. Generic ShortcutManager method names are deliberately excluded because AndroidX itself
@@ -121,6 +141,8 @@ export const REQUIRED_SHARE_INTAKE_DEX_MARKERS = [
 export const REQUIRED_BACKGROUND_TASK_RETRY_DEX_MARKERS = [
   'Task finished; success=',
   'doWork: Worker failed; requesting retry',
+  'Background execution deferred until prior continuation settles',
+  'onExecutionCancelled',
 ];
 
 // The Expo record field and product-owned validation text must survive into the shipped runtime.
@@ -137,6 +159,8 @@ export const REQUIRED_TASK_MANAGER_SETTLEMENT_DEX_MARKERS = [
   'Headless app is already running without a task manager; completing pending task with failure.',
   'Headless app load failed; completing pending tasks with failure.',
   'Headless app loader threw before JavaScript dispatch; completing pending tasks with failure.',
+  'retainTaskExecution',
+  'releaseTaskExecution',
 ];
 
 export const FORBIDDEN_LEGACY_SHORTCUT_PUBLISHER_DEX_MARKERS = [
@@ -223,12 +247,16 @@ export function validateExpoBackgroundTaskRetryBridge({
     '+        return scheduled',
     '+          val succeeded = result is Number && result.toDouble() == 1.0',
     '+        taskCompletion.complete(false)',
-    '+    if (!succeeded) {\n+      return false\n     }',
+    '+    if (!succeeded) {',
     '+      workInfos.any { !it.state.isFinished }',
     '+      return if (succeeded) Result.success() else Result.retry()',
     '+      return Result.retry()',
   ];
-  if (patchMarkers.some((marker) => !patchSource?.includes(marker))) {
+  if (
+    patchMarkers.some(
+      (marker) => !patchSource?.replace(/\s+/g, '').includes(marker.replace(/\s+/g, '')),
+    )
+  ) {
     errors.push(
       `${EXPO_BACKGROUND_TASK_PATCH_PATH} must carry the reviewed retry and unfinished-chain repair`,
     );
@@ -248,13 +276,17 @@ export function validateExpoBackgroundTaskRetryBridge({
     'private suspend fun hasUnfinishedWorker(context: Context): Boolean',
     'workInfos.any { !it.state.isFinished }',
   ];
-  if (schedulerMarkers.some((marker) => !schedulerSource?.includes(marker))) {
+  if (
+    schedulerMarkers.some(
+      (marker) => !schedulerSource?.replace(/\s+/g, '').includes(marker.replace(/\s+/g, '')),
+    )
+  ) {
     errors.push('expo-background-task scheduler source must preserve the reviewed retry flow');
   }
   const cancellationHandlers =
     schedulerSource?.match(/catch \(e: CancellationException\) \{[\s\S]*?\n\s*\}/g) ?? [];
   if (
-    cancellationHandlers.length !== 6 ||
+    cancellationHandlers.length !== 7 ||
     cancellationHandlers.some((handler) => !handler.includes('throw e')) ||
     schedulerSource?.includes('workInfos.firstOrNull()') ||
     schedulerSource?.includes('.toInt() == 1')
@@ -324,6 +356,118 @@ function hasNativeOwnedTaskKeeper(source, path, partialPatchContext = false) {
   );
 }
 
+/** Source/patch containment; native execution and cancellation still require Android evidence. */
+export function validateBackgroundExecutionLifetime({
+  sources,
+  backgroundPatch,
+  taskManagerPatch,
+}) {
+  const errors = [];
+  const backgroundRoot = 'node_modules/expo-background-task/android';
+  const expectedPaths = [
+    `${backgroundRoot}/build.gradle`,
+    BACKGROUND_EXECUTION_SOURCE_PATHS.registry,
+    BACKGROUND_EXECUTION_SOURCE_PATHS.consumer,
+    BACKGROUND_EXECUTION_SOURCE_PATHS.module,
+    BACKGROUND_EXECUTION_SOURCE_PATHS.scheduler,
+    EXPO_BACKGROUND_TASK_WORK_PATH,
+    `${backgroundRoot}/src/test/java/expo/modules/backgroundtask/BackgroundTaskExecutionRegistryTest.kt`,
+  ].sort();
+  const headers = [...(backgroundPatch ?? '').matchAll(/^diff --git a\/(.+) b\/(.+)$/gm)];
+  if (
+    headers.some((match) => match[1] !== match[2]) ||
+    JSON.stringify(headers.map((match) => match[2]).sort()) !== JSON.stringify(expectedPaths)
+  ) {
+    errors.push(
+      'background execution patch must contain exactly the seven reviewed native source/test paths',
+    );
+  }
+  const required = {
+    registry: [
+      'val id: String = UUID.randomUUID().toString()',
+      'if (current != null) return null',
+      'if (current !== execution || !execution.consumers.remove(consumer)) return',
+      'execution.id != id || execution.scope != scope',
+      'execution.retainedEvents[eventId] != leaseToken',
+      'if (current !== execution || execution.cancelled) return',
+      'execution.cancelled = true',
+      'listeners.values.toList()',
+      'WeakHashMap<Any, (String) -> Unit>()',
+      'listeners.remove(owner)',
+      'execution.dispatchFinished && execution.consumers.isEmpty() && execution.retainedEvents.isEmpty()',
+    ],
+    consumer: [
+      'putString("gatorExecutionId", executionId)',
+      'taskManagerUtils.executeTask(task, data, callback)',
+    ],
+    module: [
+      'Events("onExecutionCancelled")',
+      'backgroundTaskExecutions.observe(executionObserverOwner)',
+      'backgroundTaskExecutions.removeObserver(executionObserverOwner)',
+      'backgroundTaskExecutions.retain(executionId, taskManager.appScopeKey, eventId)',
+      'backgroundTaskExecutions.release(executionId, taskManager.appScopeKey, eventId, leaseToken)',
+    ],
+    scheduler: [
+      'backgroundTaskExecutions.begin(appScopeKey)',
+      'backgroundTaskExecutions.registerConsumer(execution)',
+      'bgTaskConsumer.executeTask(execution.id)',
+      'backgroundTaskExecutions.completeConsumer(execution, consumer)',
+      'backgroundTaskExecutions.cancel(execution)',
+      'backgroundTaskExecutions.finishDispatch(execution)',
+    ],
+    taskManager: [
+      'Function("retainTaskExecution")',
+      'Function("releaseTaskExecution")',
+      'retainTaskExecution(appScopeKey, eventId, manager)',
+      'releaseTaskExecution(appScopeKey, eventId, leaseToken, manager)',
+    ],
+    service: [
+      'if (appEvents == null || !appEvents.contains(eventId)) return',
+      'retention.resultReceived = true',
+      'taskCallback = sTaskCallbacks.remove(eventId)',
+      'assigned.get() != manager',
+      '!retention.leaseToken.equals(leaseToken) || retention.manager.get() != manager',
+      'if (retention.resultReceived)',
+      'if (sRetainedExecutions.containsKey(eventId)) return',
+      'new HeadlessTaskOwner(headlessContext, taskId)',
+      'sHeadlessTaskOwners.containsKey(headlessStartToken)',
+      'owner.context.finishTask(owner.taskId)',
+    ],
+  };
+  const compact = (value) => String(value ?? '').replace(/\s+/g, '');
+  for (const [key, markers] of Object.entries(required)) {
+    const path = BACKGROUND_EXECUTION_SOURCE_PATHS[key];
+    const patch = path.includes('/expo-task-manager/') ? taskManagerPatch : backgroundPatch;
+    const section = patch
+      ?.split(/(?=^diff --git )/m)
+      .find((value) => value.startsWith(`diff --git a/${path} b/${path}\n`));
+    const patchAfter = section
+      ?.split('\n')
+      .filter((line) => line.startsWith(' ') || (line.startsWith('+') && !line.startsWith('+++')))
+      .map((line) => line.slice(1))
+      .join('\n');
+    if (
+      (key === 'taskManager' &&
+        ['retainTaskExecution', 'releaseTaskExecution'].some((name) => {
+          const synchronousHook = new RegExp(`(?:^|\\n)\\s*Function\\("${name}"\\)`);
+          return (
+            !synchronousHook.test(sources?.[key] ?? '') || !synchronousHook.test(patchAfter ?? '')
+          );
+        })) ||
+      markers.some(
+        (marker) =>
+          !compact(sources?.[key]).includes(compact(marker)) ||
+          !compact(patchAfter).includes(compact(marker)),
+      )
+    ) {
+      errors.push(
+        `${path} and its durable patch must preserve execution cancellation/continuation ownership`,
+      );
+    }
+  }
+  return errors;
+}
+
 /**
  * Keep Expo TaskManager's native settlement and JavaScript timer keeper paired and fail closed on drift.
  * A missing task or failed headless loader must resolve only its still-queued native callback so
@@ -385,6 +529,7 @@ export function validateExpoTaskManagerPreJsSettlement({
     EXPO_TASK_MANAGER_LIFETIME_TEST_PATH,
     EXPO_TASK_MANAGER_UTILS_PATH,
     EXPO_TASK_SERVICE_PATH,
+    EXPO_TASK_MANAGER_MODULE_PATH,
     EXPO_TASKS_REPOSITORY_PATH,
     EXPO_BARE_TASKS_REPOSITORY_PATH,
     EXPO_MANAGED_TASKS_REPOSITORY_PATH,
@@ -401,7 +546,7 @@ export function validateExpoTaskManagerPreJsSettlement({
     JSON.stringify(patchedPaths) !== JSON.stringify(expectedPatchPaths)
   ) {
     errors.push(
-      `${EXPO_TASK_MANAGER_PATCH_PATH} must patch only the nine reviewed source/test files`,
+      `${EXPO_TASK_MANAGER_PATCH_PATH} must patch only the ten reviewed source/test files`,
     );
   }
 
@@ -413,8 +558,8 @@ export function validateExpoTaskManagerPreJsSettlement({
     '+      finishPendingTaskExecutionWithFailure(appScopeKey, eventId, body);',
     '+      if (pendingBody != null && !mTasksAndEventsRepository.removeEventForAppScopeKey(appScopeKey, pendingBody)) {',
     '+          finishedHeadlessStartToken = sHeadlessStartTokens.remove(appScopeKey);',
-    '+        sHeadlessTaskIds.put(headlessStartToken, taskId);',
-    '+      Integer taskId = sHeadlessTaskIds.remove(headlessStartToken);',
+    '+        sHeadlessTaskOwners.put(headlessStartToken, new HeadlessTaskOwner(headlessContext, taskId));',
+    '+      HeadlessTaskOwner owner = sHeadlessTaskOwners.remove(headlessStartToken);',
     '+  boolean removeEventForAppScopeKey(String appScopeKey, Bundle body);',
     '-          unregisterAllTasksForAppScopeKey(appScopeKey);',
   ];
@@ -456,7 +601,7 @@ export function validateExpoTaskManagerPreJsSettlement({
 
   const serviceMarkers = [
     'private static final Object sTaskExecutionLock = new Object();',
-    'private static final Map<Object, Integer> sHeadlessTaskIds = new HashMap<>();',
+    'private static final Map<Object, HeadlessTaskOwner> sHeadlessTaskOwners = new HashMap<>();',
     'private static final Map<String, Object> sHeadlessStartTokens = new HashMap<>();',
     'Task execution body is missing execution info; completing callback with failure.',
     'Task execution body is missing an event ID; completing callback with failure.',
@@ -471,8 +616,8 @@ export function validateExpoTaskManagerPreJsSettlement({
     'pendingBody != null && !mTasksAndEventsRepository.removeEventForAppScopeKey(appScopeKey, pendingBody)',
     'finishedHeadlessStartToken = sHeadlessStartTokens.remove(appScopeKey);',
     'sHeadlessStartTokens.get(appScopeKey) != headlessStartToken',
-    'sHeadlessTaskIds.put(headlessStartToken, taskId);',
-    'sHeadlessTaskIds.remove(headlessStartToken);',
+    'sHeadlessTaskOwners.put(headlessStartToken, new HeadlessTaskOwner(headlessContext, taskId));',
+    'sHeadlessTaskOwners.remove(headlessStartToken);',
     'response.put("eventId", eventId);',
   ];
   const managerHandoffRegion = serviceSource?.match(
@@ -538,7 +683,7 @@ export function validateExpoTaskManagerPreJsSettlement({
     !headlessTokenRegion?.includes(
       'stillOwnsHeadlessStart = sHeadlessStartTokens.get(appScopeKey) == headlessStartToken',
     ) ||
-    !headlessTokenRegion.includes('sHeadlessTaskIds.remove(headlessStartToken)') ||
+    !headlessTokenRegion.includes('sHeadlessTaskOwners.remove(headlessStartToken)') ||
     queuedLoaderGuardIndex == null ||
     queuedLoaderGuardIndex < 0 ||
     queuedKeeperIndex == null ||
@@ -590,6 +735,9 @@ export function validateExpoRouterPredictiveBackBridge({
   experimentalStackSource,
   screensPatchSource,
   stackContainerSource,
+  stackCoordinatorSource,
+  screensBuildGradleSource,
+  screensPopOrderTestSource,
   rootLayoutSource,
   setupLayoutSource,
   appLayoutSource,
@@ -665,43 +813,97 @@ export function validateExpoRouterPredictiveBackBridge({
     typeof screensPatchSource === 'string'
       ? [...screensPatchSource.matchAll(/^diff --git a\/(.+) b\/(.+)$/gm)]
       : [];
+  const expectedScreensPaths = Object.values(REACT_NATIVE_SCREENS_SOURCE_PATHS);
   if (
-    screensPatchHeaders.length !== 1 ||
-    screensPatchHeaders[0]?.[1] !== REACT_NATIVE_SCREENS_STACK_CONTAINER_PATH ||
-    screensPatchHeaders[0]?.[2] !== REACT_NATIVE_SCREENS_STACK_CONTAINER_PATH
+    screensPatchHeaders.length !== expectedScreensPaths.length ||
+    new Set(screensPatchHeaders.map((header) => header[1])).size !== expectedScreensPaths.length ||
+    screensPatchHeaders.some(
+      (header) => header[1] !== header[2] || !expectedScreensPaths.includes(header[1]),
+    )
   ) {
     errors.push(
-      `${REACT_NATIVE_SCREENS_PATCH_PATH} must patch only the reviewed gamma stack container`,
+      `${REACT_NATIVE_SCREENS_PATCH_PATH} must patch only the reviewed gamma stack repair and tests`,
     );
   }
-  const screensPatchMarkers = [
-    '+        pendingPopOperations.toList().forEach { popOperation ->',
-    '+            if (stackModel.none { it.stackScreen === popOperation.screen }) {',
-    '+                    pendingPushOperations.indexOfLast { it.screen === popOperation.screen }',
-    '+                    pendingPushOperations.removeAt(matchingPushIndex)',
-    '+                    pendingPopOperations.remove(popOperation)',
-    '+        if (!hasPendingOperations) {',
-    '+            val isRootReplacement =',
-    '+                stackModel.size == 1 &&',
-    '+                    pendingPopOperations.size == 1 &&',
-    '+                    pendingPushOperations.size == 1 &&',
-    '+                    stackModel.single().stackScreen === pendingPopOperations.single().screen &&',
-    '+                    pendingPushOperations.single().screen !== pendingPopOperations.single().screen',
-    '+            if (isRootReplacement) {',
-    '+                fragmentOps.add(RemoveOp(fragment))',
-    '+                check(stackModel.size > 1) {',
-    '+                    "[RNScreens] Attempt to pop last screen from the stack"',
-    '+                fragmentOps.add(PopBackStackOp(fragment))',
-  ];
-  const exactRootReplacementBlock = [
-    '            val isRootReplacement =',
-    '                stackModel.size == 1 &&',
-    '                    pendingPopOperations.size == 1 &&',
-    '                    pendingPushOperations.size == 1 &&',
-    '                    stackModel.single().stackScreen === pendingPopOperations.single().screen &&',
-    '                    pendingPushOperations.single().screen !== pendingPopOperations.single().screen',
+  // Read only the post-patch lines from each corresponding production diff. Test strings cannot
+  // satisfy a missing production repair, and deleted upstream lines cannot satisfy the guard.
+  const screensPatchedSource = (path) => {
+    const header = `diff --git a/${path} b/${path}\n`;
+    const start = String(screensPatchSource ?? '').indexOf(header);
+    if (start < 0) return '';
+    const next = screensPatchSource.indexOf('\ndiff --git ', start + header.length);
+    return screensPatchSource
+      .slice(start + header.length, next < 0 ? undefined : next)
+      .split('\n')
+      .filter((line) => line.startsWith(' ') || (line.startsWith('+') && !line.startsWith('+++')))
+      .map((line) => line.slice(1))
+      .join('\n');
+  };
+  const exactPopPreparation = [
+    '        // Fabric can mount and unmount the same screen before this container receives its',
+    '        // didMountItems callback. That screen never entered stackModel, so its queued push and pop',
+    '        // cancel each other. Remove only those identity-matched pairs; a genuinely unmatched pop',
+    '        // remains queued and still fails closed in the normal validation below.',
+    '        pendingPopOperations.toList().forEach { popOperation ->',
+    '            if (stackModel.none { it.stackScreen === popOperation.screen }) {',
+    '                val matchingPushIndex =',
+    '                    pendingPushOperations.indexOfLast { it.screen === popOperation.screen }',
+    '                if (matchingPushIndex >= 0) {',
+    '                    pendingPushOperations.removeAt(matchingPushIndex)',
+    '                    pendingPopOperations.remove(popOperation)',
+    '                }',
+    '            }',
+    '        }',
+    '',
+    '        if (!hasPendingOperations) {',
+    '            fragmentOps.clear()',
+    '            return',
+    '        }',
+    '',
+    '        // Removed React children are already absent from StackHost.renderedScreens. Order pops',
+    '        // against the committed model here, including batches queued while the container was',
+    '        // detached. Validate the entire suffix before changing either the model or fragment ops.',
+    '        val orderedPopOperations =',
+    '            pendingPopOperations',
+    '                .map { operation ->',
+    '                    val index = stackModel.indexOfFirst { it.stackScreen === operation.screen }',
+    '                    check(index >= 0) { "[RNScreens] Unable to find a fragment to pop" }',
+    '                    Pair(index, operation)',
+    '                }.sortedByDescending { it.first }',
+    '',
+    '        check(orderedPopOperations.map { it.first }.distinct().size == orderedPopOperations.size) {',
+    '            "[RNScreens] Attempt to pop the same screen more than once"',
+    '        }',
+    '        orderedPopOperations.forEachIndexed { offset, (index, _) ->',
+    '            check(index == stackModel.lastIndex - offset) {',
+    '                "[RNScreens] Attempt to pop non-top screen"',
+    '            }',
+    '        }',
+    '',
+    '        // A root StackRouter REPLACE removes the only committed screen and mounts one distinct',
+    '        // replacement in the same Fabric batch. Keep only that exact one-for-one exception.',
+    '        val isRootReplacement =',
+    '            stackModel.size == 1 &&',
+    '                pendingPopOperations.size == 1 &&',
+    '                pendingPushOperations.size == 1 &&',
+    '                stackModel.single().stackScreen === pendingPopOperations.single().screen &&',
+    '                pendingPushOperations.single().screen !== pendingPopOperations.single().screen',
+    '',
+    '        check(orderedPopOperations.isEmpty() || orderedPopOperations.size < stackModel.size || isRootReplacement) {',
+    '            "[RNScreens] Attempt to pop last screen from the stack"',
+    '        }',
+    '',
+    '        fragmentOps.clear()',
+  ].join('\n');
+  const exactPopApplication = [
+    '        orderedPopOperations.forEach { (_, operation) ->',
+    '            val fragment =',
+    '                checkNotNull(stackModel.find { it.stackScreen === operation.screen }) {',
+    '                    "[RNScreens] Unable to find a fragment to pop"',
+    '                }',
     '',
     '            if (isRootReplacement) {',
+    '                // The sole root has no FragmentManager back-stack entry to pop.',
     '                fragmentOps.add(RemoveOp(fragment))',
     '            } else {',
     '                check(stackModel.size > 1) {',
@@ -710,23 +912,92 @@ export function validateExpoRouterPredictiveBackBridge({
     '',
     '                fragmentOps.add(PopBackStackOp(fragment))',
     '            }',
+    '',
+    '            check(stackModel.last() === fragment) {',
+    '                "[RNScreens] Attempt to pop non-top screen"',
+    '            }',
+    '            stackModel.removeAt(stackModel.lastIndex)',
+    '        }',
   ].join('\n');
-  const exactRootReplacementPatchBlock = exactRootReplacementBlock
-    .split('\n')
-    .map((line) => `+${line}`)
-    .join('\n');
-  if (screensPatchMarkers.some((marker) => !screensPatchSource?.includes(marker))) {
+  const exactPopForwarding = [
+    '        // StackContainer orders pops against its committed model. Unmounted screens have already',
+    '        // been removed from renderedScreens, so their former positions cannot be recovered here.',
+    '        pendingPopOperations.forEach { operation -> container.enqueuePopOperation(operation.screen) }',
+  ].join('\n');
+  const durableContainer = screensPatchedSource(
+    REACT_NATIVE_SCREENS_SOURCE_PATHS.stackContainerSource,
+  );
+  if (
+    !durableContainer.includes(exactPopPreparation) ||
+    !durableContainer.includes(exactPopApplication)
+  ) {
     errors.push(
-      `${REACT_NATIVE_SCREENS_PATCH_PATH} must carry the reviewed uncommitted-pair and root-replacement repairs`,
+      `${REACT_NATIVE_SCREENS_PATCH_PATH} must carry the reviewed uncommitted-pair, root-replacement, and ordered-pop repairs`,
     );
   }
+  const rootPredicateStart = exactPopPreparation.indexOf('        val isRootReplacement =');
+  const rootPredicateEnd = exactPopPreparation.indexOf('\n\n', rootPredicateStart);
+  const exactRootPredicate = exactPopPreparation.slice(rootPredicateStart, rootPredicateEnd);
   if (
-    screensPatchSource?.split('+            val isRootReplacement =').length !== 2 ||
-    !screensPatchSource.includes(exactRootReplacementPatchBlock)
+    durableContainer.split('val isRootReplacement =').length !== 2 ||
+    !durableContainer.includes(`${exactRootPredicate}\n`)
   ) {
     errors.push(
       `${REACT_NATIVE_SCREENS_PATCH_PATH} must preserve the exact reviewed root-replacement predicate and branches`,
     );
+  }
+  const durableCoordinator = screensPatchedSource(
+    REACT_NATIVE_SCREENS_SOURCE_PATHS.stackCoordinatorSource,
+  );
+  if (!durableCoordinator.includes(exactPopForwarding)) {
+    errors.push(
+      `${REACT_NATIVE_SCREENS_PATCH_PATH} must forward pops to the committed-model ordering owner`,
+    );
+  }
+  for (const dependency of [
+    "testImplementation 'junit:junit:4.13.2'",
+    "testImplementation 'org.robolectric:robolectric:4.16'",
+  ]) {
+    if (
+      !screensBuildGradleSource?.includes(dependency) ||
+      !screensPatchedSource(REACT_NATIVE_SCREENS_SOURCE_PATHS.screensBuildGradleSource).includes(
+        dependency,
+      )
+    ) {
+      errors.push('screens native pop-order tests must retain their reviewed test dependencies');
+    }
+  }
+  const nativePopTests = [
+    'firstPushCreatesRootWithoutPop',
+    'removedEditorAndBrowserPopInCommittedOrder',
+    'reverseIncomingOrderStillUsesCommittedStack',
+    'threePopsMayArriveInMixedOrder',
+    'batchesAccumulatedWhileUnattachedAreOrderedTogether',
+    'ordinaryTopPopAndPushRetainTheirExistingOrder',
+    'sameBatchTransientScreenCancelsBeforeMultiPopValidation',
+    'transientOnlyBatchLeavesNoFragmentOperations',
+    'exactSoleRootReplacementUsesDirectRemoval',
+    'unknownPopFailsBeforeAnyCommittedMutation',
+    'equalScreenKeysDoNotSubstituteForIdentity',
+    'duplicatePopFailsBeforeAnyCommittedMutation',
+    'missingTopPopIsRejected',
+    'gapBelowValidTopIsRejectedBeforeTopIsRemoved',
+    'removingSoleRootWithoutReplacementIsRejected',
+    'fullStackPopWithNewRootDoesNotBroadenRootReplacement',
+    'rootReplacementRejectsSameIdentity',
+    'rootReplacementRejectsMultiplePushes',
+  ];
+  for (const testName of nativePopTests) {
+    const marker = `@Test\n    fun ${testName}(`;
+    if (
+      !screensPopOrderTestSource?.includes(marker) ||
+      !screensPatchedSource(REACT_NATIVE_SCREENS_SOURCE_PATHS.screensPopOrderTestSource).includes(
+        marker,
+      )
+    ) {
+      errors.push('screens native pop-order tests must retain the reviewed adversarial cases');
+      break;
+    }
   }
 
   const preventedStart = experimentalStackSource?.indexOf('onNativeDismissPrevented: () => {');
@@ -766,88 +1037,42 @@ export function validateExpoRouterPredictiveBackBridge({
     );
   }
 
-  const fragmentOpsClearStart = stackContainerSource?.indexOf('fragmentOps.clear()');
-  const reconciliationStart = stackContainerSource?.indexOf(
-    'pendingPopOperations.toList().forEach { popOperation ->',
-  );
-  const emptyBatchReturnStart = stackContainerSource?.indexOf(
-    'if (!hasPendingOperations) {\n            return\n        }',
-  );
-  const ordinaryPopStart = stackContainerSource?.indexOf('// Handle pop operations first.');
-  const popLoopStart = stackContainerSource?.indexOf('pendingPopOperations.forEach { operation ->');
-  const rootReplacementStart = stackContainerSource?.indexOf('val isRootReplacement =');
-  const rootRemovalStart = stackContainerSource?.indexOf('fragmentOps.add(RemoveOp(fragment))');
-  const finalPopGuardStart = stackContainerSource?.indexOf(
-    'check(stackModel.size > 1)',
-    rootReplacementStart,
-  );
-  const ordinaryPopOperationStart = stackContainerSource?.indexOf(
-    'fragmentOps.add(PopBackStackOp(fragment))',
-    rootReplacementStart,
-  );
-  const pushLoopStart = stackContainerSource?.indexOf(
-    'pendingPushOperations.forEach { operation ->',
-    rootReplacementStart,
-  );
-  const pushBackStackDecisionStart = stackContainerSource?.indexOf(
-    'addToBackStack = stackModel.isNotEmpty()',
-    pushLoopStart,
-  );
+  const preparationStart = stackContainerSource?.indexOf(exactPopPreparation) ?? -1;
+  const popLoopStart = stackContainerSource?.indexOf(exactPopApplication) ?? -1;
+  const modelRemovalStart =
+    stackContainerSource?.indexOf('stackModel.removeAt(stackModel.lastIndex)') ?? -1;
+  const firstFragmentAdd = stackContainerSource?.indexOf('fragmentOps.add(') ?? -1;
+  const pushLoopStart =
+    stackContainerSource?.indexOf('pendingPushOperations.forEach { operation ->', popLoopStart) ??
+    -1;
   if (
-    fragmentOpsClearStart == null ||
-    fragmentOpsClearStart < 0 ||
-    reconciliationStart == null ||
-    reconciliationStart < 0 ||
-    fragmentOpsClearStart >= reconciliationStart ||
-    emptyBatchReturnStart == null ||
-    emptyBatchReturnStart <= reconciliationStart ||
-    ordinaryPopStart == null ||
-    ordinaryPopStart <= emptyBatchReturnStart ||
-    popLoopStart == null ||
-    popLoopStart <= ordinaryPopStart ||
-    rootReplacementStart == null ||
-    rootReplacementStart <= popLoopStart ||
-    rootRemovalStart == null ||
-    rootRemovalStart <= rootReplacementStart ||
-    finalPopGuardStart == null ||
-    finalPopGuardStart <= rootRemovalStart ||
-    ordinaryPopOperationStart == null ||
-    ordinaryPopOperationStart <= finalPopGuardStart ||
-    pushLoopStart == null ||
-    pushLoopStart <= ordinaryPopOperationStart ||
-    pushBackStackDecisionStart == null ||
-    pushBackStackDecisionStart <= pushLoopStart ||
+    preparationStart < 0 ||
     !stackContainerSource.includes(
-      'if (stackModel.none { it.stackScreen === popOperation.screen })',
+      `private fun applyOperationsAndComputeFragmentManagerOperations() {\n${exactPopPreparation}`,
     ) ||
-    !stackContainerSource.includes(
-      'pendingPushOperations.indexOfLast { it.screen === popOperation.screen }',
-    ) ||
-    !stackContainerSource.includes('pendingPushOperations.removeAt(matchingPushIndex)') ||
-    !stackContainerSource.includes('pendingPopOperations.remove(popOperation)') ||
+    popLoopStart < preparationStart + exactPopPreparation.length ||
+    firstFragmentAdd < preparationStart + exactPopPreparation.length ||
+    modelRemovalStart < popLoopStart ||
+    pushLoopStart < popLoopStart + exactPopApplication.length ||
     stackContainerSource.split('val isRootReplacement =').length !== 2 ||
-    !stackContainerSource.includes(exactRootReplacementBlock) ||
-    !stackContainerSource.includes('stackModel.size == 1 &&') ||
-    !stackContainerSource.includes('pendingPopOperations.size == 1 &&') ||
-    !stackContainerSource.includes('pendingPushOperations.size == 1 &&') ||
-    !stackContainerSource.includes(
-      'stackModel.single().stackScreen === pendingPopOperations.single().screen &&',
-    ) ||
-    !stackContainerSource.includes(
-      'pendingPushOperations.single().screen !== pendingPopOperations.single().screen',
-    ) ||
-    !stackContainerSource.includes('if (isRootReplacement) {') ||
-    !stackContainerSource.includes('check(stackModel.size > 1) {') ||
-    !stackContainerSource.includes('[RNScreens] Attempt to pop last screen from the stack') ||
-    !stackContainerSource.includes('[RNScreens] Attempt to pop non-top screen') ||
-    !stackContainerSource.includes('[RNScreens] Stack should never be empty after updates') ||
-    !stackContainerSource.includes(
-      'checkNotNull(stackModel.find { it.stackScreen === operation.screen })',
-    ) ||
-    !stackContainerSource.includes('[RNScreens] Unable to find a fragment to pop')
+    !stackContainerSource.includes('addToBackStack = stackModel.isNotEmpty()', pushLoopStart) ||
+    !stackContainerSource.includes('[RNScreens] Stack should never be empty after updates')
   ) {
     errors.push(
-      'installed gamma stack must cancel only identity-matched uncommitted pairs, safely replace a sole root, and reject unmatched pops',
+      'installed gamma stack must cancel only identity-matched uncommitted pairs, validate and order the full committed suffix before mutation, and preserve exact root replacement',
+    );
+  }
+  if (
+    !stackCoordinatorSource?.includes(exactPopForwarding) ||
+    stackCoordinatorSource.includes('.asReversed()') ||
+    stackCoordinatorSource.split('container.enqueuePopOperation(').length !== 2 ||
+    stackCoordinatorSource.split('renderedScreens.indexOf(it.screen)').length !== 2 ||
+    !stackCoordinatorSource.includes(
+      'pendingPushOperations\n            .map { Pair(renderedScreens.indexOf(it.screen), it) }\n            .sortedBy { it.first }',
+    )
+  ) {
+    errors.push(
+      'installed gamma stack coordinator must forward pops without rendered-index reordering',
     );
   }
 
@@ -2176,6 +2401,18 @@ export function runAndroidBuildCheck({
     }).map((error) => `task-manager pre-JavaScript settlement: ${error}`),
   );
   errors.push(
+    ...validateBackgroundExecutionLifetime({
+      sources: Object.fromEntries(
+        Object.entries(BACKGROUND_EXECUTION_SOURCE_PATHS).map(([key, path]) => [
+          key,
+          readFileSync(resolve(root, path), 'utf8'),
+        ]),
+      ),
+      backgroundPatch: readFileSync(resolve(root, EXPO_BACKGROUND_TASK_PATCH_PATH), 'utf8'),
+      taskManagerPatch: readFileSync(resolve(root, EXPO_TASK_MANAGER_PATCH_PATH), 'utf8'),
+    }),
+  );
+  errors.push(
     ...validateExpoRouterPredictiveBackBridge({
       packageJson,
       packageLock,
@@ -2186,9 +2423,11 @@ export function runAndroidBuildCheck({
         'utf8',
       ),
       screensPatchSource: readFileSync(resolve(root, REACT_NATIVE_SCREENS_PATCH_PATH), 'utf8'),
-      stackContainerSource: readFileSync(
-        resolve(root, REACT_NATIVE_SCREENS_STACK_CONTAINER_PATH),
-        'utf8',
+      ...Object.fromEntries(
+        Object.entries(REACT_NATIVE_SCREENS_SOURCE_PATHS).map(([key, path]) => [
+          key,
+          readFileSync(resolve(root, path), 'utf8'),
+        ]),
       ),
       rootLayoutSource: readFileSync(resolve(root, 'app/_layout.tsx'), 'utf8'),
       setupLayoutSource: readFileSync(resolve(root, 'app/(setup)/_layout.tsx'), 'utf8'),
