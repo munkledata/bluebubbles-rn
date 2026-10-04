@@ -718,6 +718,26 @@ recovery SUCCESS; finite projected events are in `background-native-late-capture
 mobile data and airplane-mode settings match their baseline. Settled HTTP holds alone are not native
 terminal-result proof.
 
+The later **network-up/server-unreachable** lane failed its bounded native-result expectation.
+Fixture B's owned loopback reverse was removed while Wi-Fi/mobile data stayed enabled. Ordinary
+`am kill` left PID 21680 alive because Termux retained Gator's sharing provider, so this is explicitly
+a warm-background lane. Android started the due worker automatically; no operator run command
+was sent. TaskService logged that its timer keeper started one millisecond later. Restoring the
+route after **130.874 seconds** did not itself settle the worker. Bringing Gator forward was followed
+immediately by task failure and WorkManager RETRY, **194.059 seconds** after native start.
+The following retry completed only by taking the foreground-deferral branch, so its SUCCESS is not
+background-sync recovery proof. Evidence: `server-unreachable-result.json`, the 55 finite observer
+samples, `server-unreachable-lifecycle.json`, and the route/foreground receipts.
+
+Native consumer dispatch does not prove JavaScript callback entry, and fixture counters cannot
+observe refused connections while the route is removed. The keeper-start event does not establish
+the cause of the stall. The reviewed retention correction alone is not claimed to solve it. A
+separate native 60-second watchdog now wraps the cancellable scheduler wait, preserving
+external cancellation and the outstanding-consumer fence. Its own timeout must request retry;
+it cannot guarantee interruption of blocking native calls or execution while Android suspends the
+process. Independent review and 27 host guard tests pass. Six additional virtual-time native tests
+are authored but uncompiled/unrun; exact rebuilt-phone replay remains required.
+
 ### Expanded backup and account-switch continuation — 2026-10-04 UTC
 
 An encrypted local backup on fixture A included a compact-list setting, one custom theme, and one
@@ -758,6 +778,32 @@ in Screens 4.26.2, consistent with the earlier predictive-back incident. The rev
 orders removals by the committed stack and validates the complete batch before mutation. Eighteen
 native regression tests are authored but have not been compiled or run. The redacted phone error
 does not establish exact attribution; the rebuilt folder-delete/Back replay remains mandatory.
+
+The continuation ended fixture B through normal Disconnect, then verified Welcome, Back out of
+Gator, and Welcome again on relaunch (`139`–`141`). No B sends or diagnostic uploads occurred.
+The dormant registered background job remains recorded; Welcome and quiet fixture counters are
+not proof that every Android task or private SDK artifact has been erased. Both owned fixture
+processes and reverse mappings were stopped after quiet-account checks; B stayed quiet for
+31.766 seconds after its final Disconnect receipt. The wake-only helper remains active.
+
+### Native correction host checkpoint — 2026-10-04 UTC
+
+Source `15874ff552168070286bafdf83e9a60b93401821` freezes the cancellation/continuation and
+Screens corrections. Fresh dependency installation applied every retained patch. Fifteen static
+gates passed, including types, lint/format, architecture, migrations, fast DB scanner/report and
+reconciliation, workflow/native guards, diagnostics, legal inventory, documentation, secret hygiene,
+and toolchain checks. The full coverage run passed **540 suites / 6,798 tests**, with two existing
+skips; UI coverage was **88.37% statements, 82.17% branches, 88.77% functions, 91.32% lines**.
+All configured aggregate and critical-file floors passed.
+
+The simultaneous ordinary Jest run crashed after 152 passing suites with exit 139. The macOS
+report identifies `EXC_BAD_ACCESS / SIGSEGV` in V8 garbage collection; it reports no failed test
+assertion. That incomplete run is not a pass. The coverage configuration includes both complete
+base Jest projects, but an ordinary serial rerun remains scheduled on the final source. The
+reviewed native watchdog follow-up changes only its durable patch and two build-guard files;
+it changes no TypeScript or DB source. Its own 27 guard tests pass. Native tests, compilation,
+signed artifacts and replacement-device proof remain pending. Receipts: `native-fix-host-gates.json`,
+`native-fix-ui-coverage.log`, `native-fix-jest-crash.json`, and `bg-watchdog-implementation-receipt.md`.
 
 ## Current conclusion and remaining acceptance
 

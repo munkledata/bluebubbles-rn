@@ -69,6 +69,10 @@ const EXPO_TASK_SERVICE_PATH =
 const EXPO_TASK_MANAGER_MODULE_PATH =
   'node_modules/expo-task-manager/android/src/main/java/expo/modules/taskManager/TaskManagerModule.kt';
 export const BACKGROUND_EXECUTION_SOURCE_PATHS = {
+  deadline:
+    'node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskDeadline.kt',
+  worker: EXPO_BACKGROUND_TASK_WORK_PATH,
+  buildGradle: 'node_modules/expo-background-task/android/build.gradle',
   registry:
     'node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskExecutionRegistry.kt',
   consumer:
@@ -142,6 +146,7 @@ export const REQUIRED_BACKGROUND_TASK_RETRY_DEX_MARKERS = [
   'Task finished; success=',
   'doWork: Worker failed; requesting retry',
   'Background execution deferred until prior continuation settles',
+  'doWork: Native deadline reached; requesting retry',
   'onExecutionCancelled',
 ];
 
@@ -366,12 +371,14 @@ export function validateBackgroundExecutionLifetime({
   const backgroundRoot = 'node_modules/expo-background-task/android';
   const expectedPaths = [
     `${backgroundRoot}/build.gradle`,
+    BACKGROUND_EXECUTION_SOURCE_PATHS.deadline,
     BACKGROUND_EXECUTION_SOURCE_PATHS.registry,
     BACKGROUND_EXECUTION_SOURCE_PATHS.consumer,
     BACKGROUND_EXECUTION_SOURCE_PATHS.module,
     BACKGROUND_EXECUTION_SOURCE_PATHS.scheduler,
     EXPO_BACKGROUND_TASK_WORK_PATH,
     `${backgroundRoot}/src/test/java/expo/modules/backgroundtask/BackgroundTaskExecutionRegistryTest.kt`,
+    `${backgroundRoot}/src/test/java/expo/modules/backgroundtask/BackgroundTaskDeadlineTest.kt`,
   ].sort();
   const headers = [...(backgroundPatch ?? '').matchAll(/^diff --git a\/(.+) b\/(.+)$/gm)];
   if (
@@ -379,10 +386,21 @@ export function validateBackgroundExecutionLifetime({
     JSON.stringify(headers.map((match) => match[2]).sort()) !== JSON.stringify(expectedPaths)
   ) {
     errors.push(
-      'background execution patch must contain exactly the seven reviewed native source/test paths',
+      'background execution patch must contain exactly the nine reviewed native source/test paths',
     );
   }
   const required = {
+    deadline: [
+      'internal const val BACKGROUND_TASK_NATIVE_DEADLINE_MS = 60_000L',
+      'val result = withTimeoutOrNull(BACKGROUND_TASK_NATIVE_DEADLINE_MS) { runTasks() }',
+      'coroutineContext.ensureActive()',
+      'if (result == null) { onTimeout() return false } return result',
+    ],
+    worker: [
+      'val succeeded = runBackgroundTaskWithDeadline( onTimeout = { Log.w(TAG, "doWork: Native deadline reached; requesting retry") } ) { BackgroundTaskScheduler.runTasks(applicationContext, appScopeKey) }',
+      'return if (succeeded) Result.success() else Result.retry()',
+    ],
+    buildGradle: ["testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2'"],
     registry: [
       'val id: String = UUID.randomUUID().toString()',
       'if (current != null) return null',

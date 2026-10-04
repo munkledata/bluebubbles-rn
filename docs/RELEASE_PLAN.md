@@ -93,6 +93,14 @@ process crash; review found a concrete Screens multi-pop ordering defect, though
 device error does not establish exact attribution. Both corrections passed independent source
 review and await final integrated host checks, native compilation, and exact-phone replay. The
 prepared Android candidate predates these corrections and must be superseded before building.
+The reviewed combined source checkpoint `15874ff` includes those corrections and passes its static
+gates. Its full coverage run passes 540 suites / 6,798 tests and all UI floors, with two existing
+skips. The simultaneous ordinary Jest process crashed in V8 garbage collection (exit 139), so that
+incomplete run is not a pass; a serial ordinary rerun remains scheduled. A later v80 warm-background
+unreachable-server lane took 194.059 seconds to return RETRY, only after foregrounding. A separate
+native scheduler-wait watchdog now passes independent source review and 27 focused guard tests;
+its six additional native tests remain uncompiled/unrun. `15874ff` is not the final
+build authorization or a claim that this later runtime failure is resolved.
 The Mac session has since installed `5d9ac754` with automatic visible-status polling; its 5,480
 JS/TS tests, nine Python tests, Go checks, package/signature and state-preservation checks pass.
 Latest-build owner visual confirmation and coordinated reboot recovery remain pending. Expanded

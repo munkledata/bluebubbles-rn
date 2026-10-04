@@ -1647,6 +1647,16 @@ test('guards execution cancellation and continuation retention in installed code
   assert.deepEqual(validateBackgroundExecutionLifetime(backgroundExecutionInput()), []);
   const mutations = [
     ['registry', 'if (current != null) return null', ''],
+    ['deadline', '60_000L', '300_000L'],
+    [
+      'deadline',
+      'withTimeoutOrNull(BACKGROUND_TASK_NATIVE_DEADLINE_MS)',
+      'withTimeout(BACKGROUND_TASK_NATIVE_DEADLINE_MS)',
+    ],
+    ['deadline', 'coroutineContext.ensureActive()', 'Unit'],
+    ['deadline', 'if (result == null)', 'if (result == false)'],
+    ['worker', 'val succeeded = runBackgroundTaskWithDeadline(', 'val succeeded = runUnbounded('],
+    ['buildGradle', 'kotlinx-coroutines-test:1.10.2', 'kotlinx-coroutines-test:1.6.4'],
     [
       'registry',
       'if (current !== execution || execution.cancelled) return',
@@ -1691,7 +1701,7 @@ test('guards execution cancellation and continuation retention in installed code
     '\ndiff --git a/node_modules/expo-background-task/unreviewed b/node_modules/expo-background-task/unreviewed\n';
   assert.ok(
     validateBackgroundExecutionLifetime(extraPath).some((message) =>
-      message.includes('seven reviewed'),
+      message.includes('nine reviewed'),
     ),
   );
 });

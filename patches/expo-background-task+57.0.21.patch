@@ -1,12 +1,13 @@
 diff --git a/node_modules/expo-background-task/android/build.gradle b/node_modules/expo-background-task/android/build.gradle
-index fa51230..1834f81 100644
+index fa51230..f5dda61 100644
 --- a/node_modules/expo-background-task/android/build.gradle
 +++ b/node_modules/expo-background-task/android/build.gradle
-@@ -18,4 +18,5 @@ android {
+@@ -18,4 +18,6 @@ android {
  dependencies {
    implementation 'androidx.work:work-runtime-ktx:2.9.1'
    implementation 'com.facebook.react:react-android'
 +  testImplementation 'junit:junit:4.13.2'
++  testImplementation 'org.jetbrains.kotlinx:kotlinx-coroutines-test:1.10.2'
  }
 diff --git a/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskConsumer.kt b/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskConsumer.kt
 index c8e51de..ba74a33 100644
@@ -33,6 +34,34 @@ index c8e51de..ba74a33 100644
    }
  
    override fun didRegister(task: TaskInterface) {
+diff --git a/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskDeadline.kt b/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskDeadline.kt
+new file mode 100644
+index 0000000..c934b12
+--- /dev/null
++++ b/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskDeadline.kt
+@@ -0,0 +1,22 @@
++package expo.modules.backgroundtask
++
++import kotlin.coroutines.coroutineContext
++import kotlinx.coroutines.ensureActive
++import kotlinx.coroutines.withTimeoutOrNull
++
++internal const val BACKGROUND_TASK_NATIVE_DEADLINE_MS = 60_000L
++
++/** Bounds cooperative native suspension independently of JavaScript timers; never clears ownership. */
++internal suspend fun runBackgroundTaskWithDeadline(
++  onTimeout: () -> Unit,
++  runTasks: suspend () -> Boolean
++): Boolean {
++  // Only this timeout becomes null. A nested timeout or external worker cancellation propagates.
++  val result = withTimeoutOrNull(BACKGROUND_TASK_NATIVE_DEADLINE_MS) { runTasks() }
++  coroutineContext.ensureActive()
++  if (result == null) {
++    onTimeout()
++    return false
++  }
++  return result
++}
 diff --git a/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskExecutionRegistry.kt b/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskExecutionRegistry.kt
 new file mode 100644
 index 0000000..a1132f8
@@ -391,10 +420,10 @@ index 74c5719..0e96147 100644
    }
  
 diff --git a/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskWork.kt b/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskWork.kt
-index 33fea94..5e88d08 100644
+index 33fea94..f6c302e 100644
 --- a/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskWork.kt
 +++ b/node_modules/expo-background-task/android/src/main/java/expo/modules/backgroundtask/BackgroundTaskWork.kt
-@@ -19,24 +19,26 @@ class BackgroundTaskWork(context: Context, params: WorkerParameters) : Coroutine
+@@ -19,24 +19,30 @@ class BackgroundTaskWork(context: Context, params: WorkerParameters) : Coroutine
      Log.i(TAG, "doWork: Running worker")
  
      // Get the app scope key
@@ -412,7 +441,11 @@ index 33fea94..5e88d08 100644
        // Run tasks async using the task service. This call will return when the task has finished
        // ie. When JS task executor has notified the task manager that it is done.
 -      BackgroundTaskScheduler.runTasks(applicationContext, appScopeKey)
-+      val succeeded = BackgroundTaskScheduler.runTasks(applicationContext, appScopeKey)
++      val succeeded = runBackgroundTaskWithDeadline(
++        onTimeout = { Log.w(TAG, "doWork: Native deadline reached; requesting retry") }
++      ) {
++        BackgroundTaskScheduler.runTasks(applicationContext, appScopeKey)
++      }
 +      return if (succeeded) Result.success() else Result.retry()
      } catch (e: CancellationException) {
        Log.i(TAG, "doWork: Worker was cancelled")
@@ -431,6 +464,155 @@ index 33fea94..5e88d08 100644
 -    return Result.success()
    }
  }
+diff --git a/node_modules/expo-background-task/android/src/test/java/expo/modules/backgroundtask/BackgroundTaskDeadlineTest.kt b/node_modules/expo-background-task/android/src/test/java/expo/modules/backgroundtask/BackgroundTaskDeadlineTest.kt
+new file mode 100644
+index 0000000..f702236
+--- /dev/null
++++ b/node_modules/expo-background-task/android/src/test/java/expo/modules/backgroundtask/BackgroundTaskDeadlineTest.kt
+@@ -0,0 +1,143 @@
++package expo.modules.backgroundtask
++
++import kotlinx.coroutines.CancellationException
++import kotlinx.coroutines.CompletableDeferred
++import kotlinx.coroutines.ExperimentalCoroutinesApi
++import kotlinx.coroutines.async
++import kotlinx.coroutines.awaitCancellation
++import kotlinx.coroutines.delay
++import kotlinx.coroutines.test.advanceTimeBy
++import kotlinx.coroutines.test.runCurrent
++import kotlinx.coroutines.test.runTest
++import kotlinx.coroutines.withTimeout
++import org.junit.Assert.*
++import org.junit.Test
++
++@OptIn(ExperimentalCoroutinesApi::class)
++class BackgroundTaskDeadlineTest {
++  @Test
++  fun ownDeadlineReturnsRetryAtSixtySeconds() = runTest {
++    var timeouts = 0
++    val result = async {
++      runBackgroundTaskWithDeadline({ timeouts += 1 }) { awaitCancellation() }
++    }
++    runCurrent()
++    advanceTimeBy(59_999)
++    runCurrent()
++    assertFalse(result.isCompleted)
++    advanceTimeBy(1)
++    runCurrent()
++    assertFalse(result.await())
++    assertEquals(1, timeouts)
++  }
++
++  @Test
++  fun normalSuccessAndFailurePreserveTheirResultWithoutTimeout() = runTest {
++    for (expected in listOf(true, false)) {
++      val actual = runBackgroundTaskWithDeadline({ fail("unexpected timeout") }) {
++        delay(10)
++        expected
++      }
++      assertEquals(expected, actual)
++    }
++  }
++
++  @Test
++  fun externalCancellationPropagatesWithoutBecomingRetry() = runTest {
++    var timeouts = 0
++    var returned = false
++    val result = async {
++      runBackgroundTaskWithDeadline({ timeouts += 1 }) { awaitCancellation() }
++      returned = true
++    }
++    runCurrent()
++    result.cancel(CancellationException("test stop"))
++    runCurrent()
++    assertTrue(result.isCancelled)
++    assertFalse(returned)
++    assertEquals(0, timeouts)
++  }
++
++  @Test
++  fun nestedTimeoutIsNotMistakenForTheNativeDeadline() = runTest {
++    var timeouts = 0
++    val result = async {
++      runBackgroundTaskWithDeadline({ timeouts += 1 }) {
++        withTimeout(100) { awaitCancellation() }
++      }
++    }
++    runCurrent()
++    advanceTimeBy(100)
++    runCurrent()
++    assertTrue(result.isCancelled)
++    assertEquals(0, timeouts)
++  }
++
++  @Test
++  fun ownTimeoutCancelsBeforeResultAndRetainsLateCallbackAndContinuation() = runTest {
++    val registry = BackgroundTaskExecutionRegistry()
++    val execution = registry.begin("a")!!
++    val consumer = registry.registerConsumer(execution)!!
++    val claim = registry.retain(execution.id, "a", "event")!!
++    val callback = CompletableDeferred<Boolean>()
++    val order = mutableListOf<String>()
++    val result = async {
++      runBackgroundTaskWithDeadline({ order.add("retry") }) {
++        try {
++          callback.await()
++        } catch (error: CancellationException) {
++          registry.cancel(execution)
++          order.add("cancel")
++          throw error
++        } finally {
++          registry.finishDispatch(execution)
++        }
++      }
++    }
++    runCurrent()
++    advanceTimeBy(60_000)
++    runCurrent()
++    assertFalse(result.await())
++    assertEquals(listOf("cancel", "retry"), order)
++    assertTrue(execution.cancelled)
++    assertNull(registry.begin("a"))
++    callback.complete(true)
++    registry.completeConsumer(execution, consumer)
++    assertNull(registry.begin("a"))
++    assertTrue(registry.release(execution.id, "a", "event", claim["leaseToken"] as String))
++    val next = registry.begin("a")!!
++    registry.cancel(execution)
++    registry.finishDispatch(execution)
++    assertFalse(next.cancelled)
++  }
++
++  @Test
++  fun timeoutBeforeJavascriptClaimLatchesUntilPendingConsumerSettles() = runTest {
++    val registry = BackgroundTaskExecutionRegistry()
++    val execution = registry.begin("a")!!
++    val consumer = registry.registerConsumer(execution)!!
++    val result = async {
++      runBackgroundTaskWithDeadline({}) {
++        try {
++          awaitCancellation()
++        } catch (error: CancellationException) {
++          registry.cancel(execution)
++          throw error
++        } finally {
++          registry.finishDispatch(execution)
++        }
++      }
++    }
++    runCurrent()
++    advanceTimeBy(60_000)
++    runCurrent()
++    assertFalse(result.await())
++    assertNull(registry.begin("a"))
++    val lateClaim = registry.retain(execution.id, "a", "event")!!
++    assertEquals(true, lateClaim["cancelled"])
++    registry.completeConsumer(execution, consumer)
++    assertNull(registry.begin("a"))
++    assertTrue(registry.release(execution.id, "a", "event", lateClaim["leaseToken"] as String))
++    assertNotNull(registry.begin("a"))
++  }
++}
 diff --git a/node_modules/expo-background-task/android/src/test/java/expo/modules/backgroundtask/BackgroundTaskExecutionRegistryTest.kt b/node_modules/expo-background-task/android/src/test/java/expo/modules/backgroundtask/BackgroundTaskExecutionRegistryTest.kt
 new file mode 100644
 index 0000000..133e221
