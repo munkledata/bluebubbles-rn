@@ -599,8 +599,8 @@ describe('SettingsScreen — App Lock biometric gate', () => {
     await renderWithTheme(<SettingsScreen />);
     await act(async () => {
       const toggle = screen.getByLabelText('Require biometric unlock to open the app');
-      fireEvent(toggle, 'valueChange', true);
-      fireEvent(toggle, 'valueChange', false);
+      await fireEvent(toggle, 'valueChange', true);
+      await fireEvent(toggle, 'valueChange', false);
       finish(true);
     });
     expect(mockIsBiometricAvailable).toHaveBeenCalledTimes(1);
