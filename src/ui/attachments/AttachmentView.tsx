@@ -23,6 +23,7 @@ interface AttachmentViewProps {
   att: AttachmentRow;
   isFromMe: boolean;
   showTail: boolean;
+  onLongPress?: () => void;
 }
 
 /** Renders one attachment by MIME type (audio + unknown fall back to a file chip). */
@@ -30,6 +31,7 @@ export function AttachmentView({
   att,
   isFromMe,
   showTail,
+  onLongPress,
 }: AttachmentViewProps): React.JSX.Element {
   // Every mounted bubble kind may hand its local file to a native decoder/player/share action.
   // Pin once at the dispatcher so image, video, audio, contact, location, and document paths all
@@ -43,7 +45,14 @@ export function AttachmentView({
   }
   switch (attachmentKind(att.mimeType)) {
     case 'image':
-      return <ImageAttachment att={att} isFromMe={isFromMe} showTail={showTail} />;
+      return (
+        <ImageAttachment
+          att={att}
+          isFromMe={isFromMe}
+          showTail={showTail}
+          onLongPress={onLongPress}
+        />
+      );
     case 'video':
       return <VideoPlayer att={att} isFromMe={isFromMe} showTail={showTail} />;
     case 'contact':

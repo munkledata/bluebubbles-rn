@@ -80,6 +80,18 @@ async function renderKind(mimeType: string | null): Promise<void> {
 }
 
 describe('AttachmentView — MIME dispatch (attachmentKind)', () => {
+  it('passes the bubble action handler to its image press target', async () => {
+    const onLongPress = jest.fn();
+    await renderWithTheme(
+      <AttachmentView
+        att={makeAtt('image/png')}
+        isFromMe={false}
+        showTail
+        onLongPress={onLongPress}
+      />,
+    );
+    expect(mockLeafProps).toHaveBeenCalledWith('image', expect.objectContaining({ onLongPress }));
+  });
   it('renders ImageAttachment for an image/* type', async () => {
     await renderKind('image/png');
     expect(screen.getByText('CHILD:image')).toBeTruthy();

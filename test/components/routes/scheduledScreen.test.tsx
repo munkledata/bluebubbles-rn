@@ -15,6 +15,7 @@
  * the REAL singleton.
  */
 import React from 'react';
+import { ApiError } from '@core/api/errors';
 import { renderWithTheme, screen, fireEvent, waitFor, act } from '../support/renderWithTheme';
 
 const mockPush = jest.fn();
@@ -65,6 +66,7 @@ jest.mock('@ui', () => ({
 jest.mock('@db/useReactiveQuery', () => ({ useReactiveQuery: jest.fn() }));
 jest.mock('@db/database', () => ({ getDatabase: jest.fn(() => ({ testDb: true })) }));
 jest.mock('@/services/send', () => ({
+  ScheduledCancellationChangedError: class ScheduledCancellationChangedError extends Error {},
   cancelScheduled: jest.fn(),
   clearScheduledHistoryItem: jest.fn(),
   syncScheduledFromServer: jest.fn(),
@@ -82,6 +84,7 @@ import type { ScheduledRow } from '@db/repositories';
 import { useReactiveQuery } from '@db/useReactiveQuery';
 // eslint-disable-next-line import/first
 import {
+  ScheduledCancellationChangedError,
   cancelScheduled,
   clearScheduledHistoryItem,
   syncScheduledFromServer,
@@ -214,6 +217,43 @@ describe('ScheduledScreen', () => {
       fireEvent.press(screen.getByText('Cancel'));
     });
     await waitFor(() => expect(useDialogStore.getState().current?.title).toBe('Scheduled'));
+    expect(useDialogStore.getState().current?.message).toBe('Couldn’t cancel that message.');
+  });
+
+  it('explains a changed or already sending occurrence without claiming recall', async () => {
+    mockCancelScheduled.mockRejectedValue(new ScheduledCancellationChangedError());
+    setRows([makeRow({ id: 9, text: 'Cancel me' })]);
+    await renderWithTheme(<ScheduledScreen />);
+    await act(async () => {
+      await fireEvent.press(screen.getByText('Cancel'));
+    });
+    await waitFor(() =>
+      expect(useDialogStore.getState().current?.message).toBe(
+        'This message has started sending or its schedule changed. Check the conversation and the remaining schedule before trying again.',
+      ),
+    );
+  });
+
+  it('explains the exact server in-flight refusal without exposing server prose', async () => {
+    mockCancelScheduled.mockRejectedValue(
+      new ApiError(
+        'bad_request',
+        'private server prose',
+        409,
+        undefined,
+        'private detail',
+        'scheduled_message_in_flight',
+      ),
+    );
+    setRows([makeRow({ id: 9, text: 'Cancel me' })]);
+    await renderWithTheme(<ScheduledScreen />);
+    await act(async () => {
+      await fireEvent.press(screen.getByText('Cancel'));
+    });
+    await waitFor(() =>
+      expect(useDialogStore.getState().current?.message).toContain('started sending'),
+    );
+    expect(JSON.stringify(useDialogStore.getState().current)).not.toContain('private');
   });
 
   it('goes back from the header', async () => {

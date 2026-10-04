@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { StyleSheet, Text } from 'react-native';
 import { asRecurrence, recurrenceLabel } from '@core/schedule';
+import { ApiError } from '@core/api/errors';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { getDatabase } from '@db/database';
 import { listAllScheduled, listScheduledHistory, type ScheduledRow } from '@db/repositories';
@@ -11,6 +12,7 @@ import {
   cancelScheduled,
   clearScheduledHistoryItem,
   syncScheduledFromServer,
+  ScheduledCancellationChangedError,
 } from '@/services/send';
 import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import { ActionListRow, Screen, ScreenHeader, useTheme } from '@ui';
@@ -131,9 +133,19 @@ export default function ScheduledScreen(): React.JSX.Element {
                       label: 'Cancel',
                       color: theme.color.destructive,
                       onPress: () =>
-                        void cancelScheduled(row, accountLease).catch(() => {
+                        void cancelScheduled(row, accountLease).catch((error: unknown) => {
                           if (accountLease.isCurrent()) {
-                            showDialog('Scheduled', 'Couldn’t cancel that message.');
+                            const changed =
+                              error instanceof ScheduledCancellationChangedError ||
+                              (error instanceof ApiError &&
+                                error.status === 409 &&
+                                error.serverErrorType === 'scheduled_message_in_flight');
+                            showDialog(
+                              'Scheduled',
+                              changed
+                                ? 'This message has started sending or its schedule changed. Check the conversation and the remaining schedule before trying again.'
+                                : 'Couldn’t cancel that message.',
+                            );
                           }
                         }),
                     }

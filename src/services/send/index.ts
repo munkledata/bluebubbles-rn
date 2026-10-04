@@ -1,4 +1,5 @@
 import * as scheduledApi from '@core/api/endpoints/scheduled';
+import { ApiError } from '@core/api/errors';
 import {
   MAX_IMESSAGE_SCHEDULED_ATTACHMENT_BYTES,
   isSupportedImessageAttachmentType,
@@ -15,7 +16,7 @@ import {
   countOutgoingQueueHealth,
   deleteMessageLocalWithinTransaction,
   deleteScheduledHistoryWithinTransaction,
-  deleteScheduledWithinTransaction,
+  cancelPendingScheduledWithinTransaction,
   discardOutgoingMessageWithinTransaction,
   getOutgoingRetryChatGuid,
   getScheduledById,
@@ -29,6 +30,7 @@ import {
   updateScheduledWithinTransaction,
   type UpdateScheduledPatch,
   type ShareIntakeManifestIdentity,
+  type ScheduledCancellationTarget,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import { useSessionStore } from '@state/sessionStore';
@@ -1172,35 +1174,67 @@ export function scheduleAttachment(
   });
 }
 
+/** The displayed occurrence no longer belongs to pending cancellation. */
+export class ScheduledCancellationChangedError extends Error {
+  constructor() {
+    super('Scheduled occurrence changed or already started sending');
+    this.name = 'ScheduledCancellationChangedError';
+  }
+}
+
 /**
- * Cancel a scheduled message. For a server-backed row the SERVER delete must succeed FIRST —
- * if it fails we keep the local row and rethrow (the message is still scheduled server-side,
- * so the user must be able to retry the cancel rather than lose the only handle to it).
+ * Cancel a remaining occurrence; this does not recall a message already handed off for sending.
+ * A remote delete must succeed or confirm typed absence before the exact pending row is removed.
+ * All other failures retain the local handle so cancellation can be retried.
  */
 export async function cancelScheduled(
-  row: { id: number; serverId: string | null },
+  row: ScheduledCancellationTarget,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
+  const expected = {
+    id: row.id,
+    chatGuid: row.chatGuid,
+    serverId: row.serverId,
+    scheduledFor: row.scheduledFor,
+  };
   const db = getDatabase();
-  const id = row.id;
   await runScheduledAccountOperation(accountLease, async () => {
     assertScheduledLease(accountLease);
-    const stored = await getScheduledById(db, id);
+    const stored = await getScheduledById(db, expected.id);
     assertScheduledLease(accountLease);
     if (!stored) return;
     const identityIsCurrent = captureScheduledChatMutationGuard(stored.chatGuid);
     assertScheduledMutationCurrent(accountLease, identityIsCurrent);
+    if (
+      stored.status !== 'pending' ||
+      stored.serverId !== expected.serverId ||
+      stored.scheduledFor !== expected.scheduledFor ||
+      stored.chatGuid !== expected.chatGuid
+    ) {
+      throw new ScheduledCancellationChangedError();
+    }
     const serverId = stored.serverId;
     if (serverId != null) {
-      await scheduledApi.deleteScheduled(http, serverId); // throws → local kept, UI alerts
+      try {
+        await scheduledApi.deleteScheduled(http, serverId);
+      } catch (error) {
+        // The Mac's exact typed absence is idempotent cancellation, never a generic 404.
+        if (!(
+          error instanceof ApiError &&
+          error.status === 404 &&
+          error.serverErrorType === 'scheduled_message_not_found'
+        ))
+          throw error;
+      }
       assertScheduledMutationCurrent(accountLease, identityIsCurrent);
     }
-    await withDbTransaction(
+    const result = await withDbTransaction(
       db,
-      (context) => deleteScheduledWithinTransaction(context, id),
+      (context) => cancelPendingScheduledWithinTransaction(context, expected),
       () => accountLease.isCurrent() && identityIsCurrent(),
     );
     assertScheduledMutationCurrent(accountLease, identityIsCurrent);
+    if (result === 'changed') throw new ScheduledCancellationChangedError();
   });
 }
 

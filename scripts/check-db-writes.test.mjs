@@ -3553,9 +3553,9 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
   assert.deepEqual(
     cancelScheduledTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#cancelScheduled.<callback:74990f5359>.<callback:a851d931f6>:mutator-call:98bd0c60c01b',
-      'src/services/send/index.ts#cancelScheduled.<callback:74990f5359>:mutator-call:8046b153df47',
-      'src/services/send/index.ts#cancelScheduled.<callback:74990f5359>:mutator-call:f07d151f400f',
+      'src/services/send/index.ts#cancelScheduled.<callback:e09912a235>.<callback:86b1cd18b6>:mutator-call:b2dcde94a492',
+      'src/services/send/index.ts#cancelScheduled.<callback:e09912a235>:mutator-call:3361f3f0ff16',
+      'src/services/send/index.ts#cancelScheduled.<callback:e09912a235>:mutator-call:8ae567cac219',
     ].sort(),
   );
   assert.deepEqual(

@@ -300,7 +300,11 @@ export const MessageBubble = React.memo(function MessageBubble({
   const imageOnlyGallery =
     atts.length >= 2 && atts.every((a) => (a.mimeType ?? '').startsWith('image/'));
   const attachmentsNode = imageOnlyGallery ? (
-    <AttachmentGalleryGrid atts={atts} isFromMe={isFromMe} />
+    <AttachmentGalleryGrid
+      atts={atts}
+      isFromMe={isFromMe}
+      onLongPress={onLongPress ? handleLongPress : undefined}
+    />
   ) : (
     atts.map((att, i) => (
       <AttachmentView
@@ -308,6 +312,7 @@ export const MessageBubble = React.memo(function MessageBubble({
         att={att}
         isFromMe={isFromMe}
         showTail={showTail && !hasText && i === atts.length - 1}
+        onLongPress={onLongPress ? handleLongPress : undefined}
       />
     ))
   );

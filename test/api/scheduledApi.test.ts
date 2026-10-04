@@ -69,6 +69,9 @@ describe('scheduledApi', () => {
     const del = jest.fn((..._a: unknown[]) => Promise.resolve({ removed: true }));
     const http = { delete: del } as unknown as HttpClient;
     await deleteScheduled(http, 'uuid-1');
-    expect(del).toHaveBeenCalledWith('/scheduled-message/uuid-1', expect.anything());
+    expect(del).toHaveBeenCalledWith('/scheduled-message/uuid-1', expect.anything(), {
+      captureErrorDetail: true,
+      retry: false,
+    });
   });
 });

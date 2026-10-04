@@ -66,8 +66,13 @@ describe('AttachmentGalleryGrid', () => {
   });
 
   it('renders one cell per attachment with a shared cellSize and no tail', async () => {
+    const onLongPress = jest.fn();
     await renderWithTheme(
-      <AttachmentGalleryGrid atts={[att('a'), att('b'), att('c')]} isFromMe={false} />,
+      <AttachmentGalleryGrid
+        atts={[att('a'), att('b'), att('c')]}
+        isFromMe={false}
+        onLongPress={onLongPress}
+      />,
     );
     expect(screen.getByText('CELL:a')).toBeTruthy();
     expect(screen.getByText('CELL:b')).toBeTruthy();
@@ -77,6 +82,7 @@ describe('AttachmentGalleryGrid', () => {
     expect(new Set(sizes).size).toBe(1); // every cell gets the SAME size
     expect(typeof sizes[0]).toBe('number');
     expect(mockCell.mock.calls.every(([p]) => p.showTail === false)).toBe(true);
+    expect(mockCell.mock.calls.every(([p]) => p.onLongPress === onLongPress)).toBe(true);
   });
 
   it('aligns to the right for own messages', async () => {

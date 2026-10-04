@@ -219,9 +219,14 @@ describe('scheduled-message account ownership', () => {
         ),
       ).toBe(true);
 
-      await expect(cancelScheduled({ id: pendingId, serverId: null })).rejects.toThrow(
-        'previous Google pairing',
-      );
+      await expect(
+        cancelScheduled({
+          id: pendingId,
+          serverId: null,
+          chatGuid: rcsChatGuid(RCS_EPOCH_A),
+          scheduledFor: 9_000_000,
+        }),
+      ).rejects.toThrow('previous Google pairing');
       await expect(
         editScheduled(pendingId, { text: 'must not change', scheduledFor: 9_500_000 }),
       ).rejects.toThrow('previous Google pairing');
@@ -253,9 +258,12 @@ describe('scheduled-message account ownership', () => {
     await expect(
       schedule({ chatGuid: 'c1', text: 'stale callback', scheduledFor: 9_000_000 }, accountLease),
     ).rejects.toThrow('account session changed');
-    await expect(cancelScheduled({ id: 7, serverId: 'srv-a' }, accountLease)).rejects.toThrow(
-      'account session changed',
-    );
+    await expect(
+      cancelScheduled(
+        { id: 7, serverId: 'srv-a', chatGuid: 'c1', scheduledFor: 9_000_000 },
+        accountLease,
+      ),
+    ).rejects.toThrow('account session changed');
     await expect(
       editScheduled(7, { text: 'stale edit', scheduledFor: 9_500_000 }, accountLease),
     ).rejects.toThrow('account session changed');
@@ -435,7 +443,12 @@ describe('scheduled-message account ownership', () => {
     const response = deferred<unknown>();
     mockDeleteScheduled.mockReturnValue(response.promise);
 
-    const pending = cancelScheduled({ id, serverId: 'srv-a' });
+    const pending = cancelScheduled({
+      id,
+      serverId: 'srv-a',
+      chatGuid: 'c1',
+      scheduledFor: 9_000_000,
+    });
     await waitUntil(() => mockDeleteScheduled.mock.calls.length === 1);
     const rejected = expect(pending).rejects.toThrow('account session changed');
     const drain = pauseRealtimeDeliveries();
@@ -459,9 +472,9 @@ describe('scheduled-message account ownership', () => {
     });
     mockDeleteScheduled.mockRejectedValue(new Error('server delete failed'));
 
-    await expect(cancelScheduled({ id, serverId: 'srv-a' })).rejects.toThrow(
-      'server delete failed',
-    );
+    await expect(
+      cancelScheduled({ id, serverId: 'srv-a', chatGuid: 'c1', scheduledFor: 9_000_000 }),
+    ).rejects.toThrow('server delete failed');
 
     expect(await getScheduledById(db, id)).toMatchObject({ id, serverId: 'srv-a' });
   });
@@ -499,7 +512,12 @@ describe('scheduled-message account ownership', () => {
       END
     `);
 
-    const action = cancelScheduled({ id, serverId: 'srv-a' });
+    const action = cancelScheduled({
+      id,
+      serverId: 'srv-a',
+      chatGuid: 'c1',
+      scheduledFor: 9_000_000,
+    });
     try {
       await expect(action).rejects.toThrow('account session changed');
       if (!drain) throw new Error('scheduled cancel did not revoke the account lease');

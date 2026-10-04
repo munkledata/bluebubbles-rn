@@ -6,7 +6,7 @@
  * This suite locks in the behavior derived from the source:
  *   - the two-step flow: it opens a `date` picker first (minimumDate = now), then a `time` picker
  *     seeded with the chosen date;
- *   - cancelling EITHER step (a dismissed dialog yields no date) resolves to null, and cancelling
+ *   - cancelling EITHER step (Android supplies the original date) resolves to null, and cancelling
  *     the date step never opens the time step;
  *   - a clearly-past minute resolves to null;
  *   - a comfortably-future pick resolves to the chosen epoch floored to the minute (seconds = 0);
@@ -86,19 +86,25 @@ describe('pickFutureDateTime — two-step flow', () => {
 });
 
 describe('pickFutureDateTime — cancellation', () => {
-  it('cancelling the date step resolves null and never opens the time step', async () => {
-    const p = pickFutureDateTime();
-    cfgOf(0).onChange({ type: 'dismissed' }, undefined);
-    expect(await p).toBeNull();
-    expect(openMock).toHaveBeenCalledTimes(1); // time picker never opened
-  });
+  it.each(['dismissed', 'neutralButtonPressed'])(
+    '%s at the date step resolves null despite an original Date',
+    async (type) => {
+      const p = pickFutureDateTime();
+      cfgOf(0).onChange({ type }, NOW);
+      expect(await p).toBeNull();
+      expect(openMock).toHaveBeenCalledTimes(1); // time picker never opened
+    },
+  );
 
-  it('cancelling the time step resolves null', async () => {
-    const p = pickFutureDateTime();
-    cfgOf(0).onChange({ type: 'set' }, new Date(2026, 6, 17));
-    cfgOf(1).onChange({ type: 'dismissed' }, undefined);
-    expect(await p).toBeNull();
-  });
+  it.each(['dismissed', 'neutralButtonPressed'])(
+    '%s at the time step resolves null despite an original Date',
+    async (type) => {
+      const p = pickFutureDateTime();
+      cfgOf(0).onChange({ type: 'set' }, new Date(2026, 6, 17));
+      cfgOf(1).onChange({ type }, new Date(2026, 6, 17));
+      expect(await p).toBeNull();
+    },
+  );
 });
 
 describe('pickFutureDateTime — future guarantee', () => {

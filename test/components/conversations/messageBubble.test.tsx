@@ -496,6 +496,39 @@ describe('MessageBubble content paths', () => {
 describe('MessageBubble accessibility actions', () => {
   beforeEach(() => mockMeasureInWindow.mockReset());
 
+  it.each([1, 2])(
+    'shares the measured bubble menu handler with %i photo targets',
+    async (count) => {
+      const onLongPress = jest.fn();
+      const rect = { x: 11, y: 22, width: 33, height: 44 };
+      mockMeasureInWindow.mockImplementation(
+        (callback: (x: number, y: number, width: number, height: number) => void) =>
+          callback(rect.x, rect.y, rect.width, rect.height),
+      );
+      await renderWithTheme(
+        <MessageBubble
+          msg={makeMsg({
+            text: '',
+            hasAttachments: 1,
+            attachments: PRIVATE_GALLERY_ATTACHMENTS.slice(0, count),
+          })}
+          showTail
+          onLongPress={onLongPress}
+        />,
+      );
+      const leaf =
+        count === 1
+          ? attachmentModuleMocks.AttachmentView
+          : attachmentModuleMocks.AttachmentGalleryGrid;
+      const props = leaf.mock.calls.at(-1)?.[0];
+      expect(props.onLongPress).toEqual(expect.any(Function));
+      await act(async () => props.onLongPress());
+      expect(onLongPress).toHaveBeenCalledTimes(1);
+      expect(onLongPress).toHaveBeenCalledWith(rect);
+      expect(mockMeasureInWindow).toHaveBeenCalledTimes(1);
+    },
+  );
+
   it('opens the measured message menu for the standard longpress action only', async () => {
     const onLongPress = jest.fn();
     const rect = { x: 11, y: 22, width: 33, height: 44 };

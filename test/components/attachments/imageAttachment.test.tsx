@@ -26,9 +26,11 @@ import {
   screen,
   fireEvent,
   act,
+  userEvent,
   type RenderResult,
 } from '../support/renderWithTheme';
 import { useDownloadStore } from '@state/downloadStore';
+import { useUploadStore } from '@state/uploadStore';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import type { AttachmentRow } from '@db/repositories';
 
@@ -104,6 +106,7 @@ beforeEach(() => {
   mockPush.mockClear();
   mockNet.type = 'WIFI';
   useDownloadStore.setState({ progress: {}, status: {} });
+  useUploadStore.getState().reset();
   // Feature-settings defaults: autoDownload ON, WiFi-only OFF (the app's prior behavior).
   useFeatureSettingsStore.setState({
     autoDownloadAttachments: true,
@@ -113,6 +116,52 @@ beforeEach(() => {
 });
 
 const source = (): unknown => screen.getByTestId('expo-image').props.source;
+
+describe('photo tap versus message-menu hold', () => {
+  it.each([undefined, 120])(
+    'opens the viewer on tap but only the menu on a hold (cell size %s)',
+    async (cellSize) => {
+      const onLongPress = jest.fn();
+      await renderWithTheme(
+        <ImageAttachment
+          att={makeImg({ localPath: 'file:///cache/photo.jpg' })}
+          isFromMe
+          showTail
+          cellSize={cellSize}
+          onLongPress={onLongPress}
+        />,
+      );
+      const user = userEvent.setup();
+      await user.press(screen.getByRole('imagebutton', { name: 'Photo' }));
+      expect(mockPush).toHaveBeenCalledTimes(1);
+      expect(mockPush).toHaveBeenCalledWith('/media/img-1');
+      expect(onLongPress).not.toHaveBeenCalled();
+      mockPush.mockClear();
+      await user.longPress(screen.getByRole('imagebutton', { name: 'Photo' }), { duration: 400 });
+      expect(onLongPress).toHaveBeenCalledTimes(1);
+      expect(mockPush).not.toHaveBeenCalled();
+      expect(mockDownload).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps the measured message actions reachable through an upload overlay', async () => {
+    const onLongPress = jest.fn();
+    useUploadStore.getState().start('img-1', { chatGuid: 'c1', name: 'photo.jpg', total: 500_000 });
+    await renderWithTheme(
+      <ImageAttachment
+        att={makeImg({ localPath: 'file:///cache/photo.jpg' })}
+        isFromMe
+        showTail
+        onLongPress={onLongPress}
+      />,
+    );
+    await userEvent
+      .setup()
+      .longPress(screen.getByRole('imagebutton', { name: 'Photo, uploading' }), { duration: 400 });
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+});
 const isSpinner = (n: { type: unknown }): boolean => n.type === 'ActivityIndicator';
 
 /** `root` is typed nullable, but a rendered tree always has one — narrow it. */

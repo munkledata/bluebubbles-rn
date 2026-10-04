@@ -77,5 +77,8 @@ export async function createScheduled(
 
 /** DELETE /scheduled-message/{id}. */
 export function deleteScheduled(http: HttpClient, id: string): Promise<unknown> {
-  return http.delete(`/scheduled-message/${id}`, DeleteResponse);
+  return http.delete(`/scheduled-message/${id}`, DeleteResponse, {
+    captureErrorDetail: true,
+    retry: false,
+  });
 }

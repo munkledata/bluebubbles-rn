@@ -22,6 +22,8 @@ interface ImageAttachmentProps {
   /** Render as a fixed square grid cell (gallery grid) instead of a self-sized bubble image —
    *  the parent grid owns spacing + corner rounding; download/tap behavior is unchanged. */
   cellSize?: number;
+  /** Share the bubble's measured action-menu handler with the image's own press target. */
+  onLongPress?: () => void;
 }
 
 /** In-bubble image with an expo-image blurhash placeholder + download progress/retry. */
@@ -30,6 +32,7 @@ export function ImageAttachment({
   isFromMe,
   showTail,
   cellSize,
+  onLongPress,
 }: ImageAttachmentProps): React.JSX.Element {
   const theme = useTheme();
   const [accountLease] = React.useState(() => captureRealtimeDeliveryLease());
@@ -105,6 +108,8 @@ export function ImageAttachment({
   return (
     <Pressable
       onPress={onPress}
+      onLongPress={onLongPress}
+      delayLongPress={onLongPress ? 350 : undefined}
       // Genmoji carry a natural-language description ("a smiling cat wearing a top hat") — surface it
       // as the accessibility label (alt text). Ordinary images have none, and leaving the label
       // UNDEFINED made every photo bubble a focusable, clickable node that TalkBack announces with

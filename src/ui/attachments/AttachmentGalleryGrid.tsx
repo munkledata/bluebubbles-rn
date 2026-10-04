@@ -13,6 +13,7 @@ interface AttachmentGalleryGridProps {
   /** Image attachments of ONE message (the bubble routes here for image-only sets of ≥2). */
   atts: AttachmentRow[];
   isFromMe: boolean;
+  onLongPress?: () => void;
 }
 
 /**
@@ -24,6 +25,7 @@ interface AttachmentGalleryGridProps {
 export function AttachmentGalleryGrid({
   atts,
   isFromMe,
+  onLongPress,
 }: AttachmentGalleryGridProps): React.JSX.Element {
   const theme = useTheme();
   const total = Math.min(Dimensions.get('window').width * 0.6, 300);
@@ -40,7 +42,13 @@ export function AttachmentGalleryGrid({
       ]}
     >
       {atts.map((att) => (
-        <ProtectedGalleryCell key={att.guid} att={att} isFromMe={isFromMe} cellSize={cell} />
+        <ProtectedGalleryCell
+          key={att.guid}
+          att={att}
+          isFromMe={isFromMe}
+          cellSize={cell}
+          onLongPress={onLongPress}
+        />
       ))}
     </View>
   );
@@ -51,10 +59,12 @@ function ProtectedGalleryCell({
   att,
   isFromMe,
   cellSize,
+  onLongPress,
 }: {
   att: AttachmentRow;
   isFromMe: boolean;
   cellSize: number;
+  onLongPress?: () => void;
 }): React.JSX.Element {
   const protectedPath = useAttachmentCachePathProtection(att.localPath);
   if (isLocalFileUri(att.localPath) && protectedPath !== att.localPath) {
@@ -62,7 +72,15 @@ function ProtectedGalleryCell({
     // "undownloaded" auto-fetch effect against a path currently owned by retirement.
     return <View style={{ width: cellSize, height: cellSize }} />;
   }
-  return <ImageAttachment att={att} isFromMe={isFromMe} showTail={false} cellSize={cellSize} />;
+  return (
+    <ImageAttachment
+      att={att}
+      isFromMe={isFromMe}
+      showTail={false}
+      cellSize={cellSize}
+      onLongPress={onLongPress}
+    />
+  );
 }
 
 const styles = StyleSheet.create({

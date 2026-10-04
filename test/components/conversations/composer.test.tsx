@@ -8,7 +8,7 @@
  *   - staged-attachment chips render (one "Remove attachment" control each) and removing drops one;
  *   - edit mode replaces the draft temporarily and keeps typed edit text after a refused send;
  *   - the narrow effect picker appears only from a capability-provided long press;
- *   - the schedule button drives the two-step native date/time picker → onSchedule(text, when);
+ *   - the themed schedule sheet commits only on explicit confirmation;
  *   - the voice/mic affordance shows only when empty and onStartVoice is provided;
  *   - the debounced typing emitter: true on first keystroke, deduped, false on clear / debounce /
  *     unmount.
@@ -18,8 +18,6 @@
  *     expo-media-library (native). Composer only routes onPick/onPickFiles through it, so a tiny
  *     stub with two buttons drives both staging paths. (The real tray is covered in
  *     attachmentTray.test.tsx.)
- *   - `@react-native-community/datetimepicker`: DateTimePickerAndroid.open is driven directly so
- *     the two-step schedule flow can be exercised without the native dialog.
  *   - `expo-image`: the staged image thumbnail uses expo-image; stub it to a plain host View.
  *   - `react-native-safe-area-context`: Composer calls useSafeAreaInsets (needs a provider);
  *     return zero insets.
@@ -50,11 +48,6 @@ jest.mock('expo-image', () => {
   const { View } = require('react-native');
   return { Image: (props: Record<string, unknown>) => React.createElement(View, props) };
 });
-
-// Drive the two-step schedule picker directly (no native dialog).
-jest.mock('@react-native-community/datetimepicker', () => ({
-  DateTimePickerAndroid: { open: jest.fn() },
-}));
 
 // The real tray imports native pickers; stub it to buttons that exercise Composer's staging paths.
 // `tray-pick-a` stages ONE item; `tray-pick-two` stages TWO in a single press (both onPick calls in
@@ -96,11 +89,7 @@ jest.mock('@ui/conversations/AttachmentTray', () => {
 // eslint-disable-next-line import/first
 import { Composer } from '@ui/conversations/Composer';
 // eslint-disable-next-line import/first
-import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
-// eslint-disable-next-line import/first
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
-
-const openMock = DateTimePickerAndroid.open as unknown as jest.Mock;
 
 /** The two items the mock tray stages via onPick (must equal the mock's A/B by value). */
 const ITEM_A: PendingAttachment = {
@@ -142,6 +131,16 @@ afterEach(() => {
 
 function input() {
   return screen.getByPlaceholderText('iMessage');
+}
+
+function retainSchedulePress(): () => void {
+  const node = screen.getByRole('button', { name: 'Schedule' });
+  const responder = node.props.onStartShouldSetResponder;
+  const readConfig = responder?.testOnly_pressabilityConfig;
+  if (typeof readConfig !== 'function') throw new Error('Expected native Pressable configuration');
+  const onPress = readConfig().onPress;
+  if (typeof onPress !== 'function') throw new Error('Expected Schedule handler');
+  return () => onPress({ nativeEvent: {} });
 }
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
@@ -946,129 +945,225 @@ describe('Composer — staged attachments', () => {
   });
 });
 
-describe('Composer — schedule (two-step native picker + recurrence sheet)', () => {
-  it('shows the schedule button only after typing and drives date→time→repeat→onSchedule', async () => {
+describe('Composer — themed scheduling', () => {
+  const future = new Date(2035, 6, 15, 9, 15).getTime();
+  async function chooseTime(): Promise<void> {
+    await fireEvent.changeText(screen.getByLabelText('Schedule date'), '2035-07-15');
+    await fireEvent.changeText(screen.getByLabelText('Schedule time'), '09:15');
+  }
+
+  it('shows the schedule control after typing and commits once only on Schedule', async () => {
     const onSchedule = jest.fn();
     await renderWithTheme(<Composer onSend={jest.fn()} onSchedule={onSchedule} />);
     expect(screen.queryByLabelText('Schedule message')).toBeNull();
-    await fireEvent.changeText(input(), 'later');
-    await fireEvent.press(await screen.findByLabelText('Schedule message'));
-
-    expect(openMock).toHaveBeenCalledTimes(1);
-    const dateCfg = openMock.mock.calls[0]![0];
-    expect(dateCfg.mode).toBe('date');
-    const future = new Date(Date.now() + 2 * 86_400_000);
-    await act(() => dateCfg.onChange({ type: 'set' }, future));
-
-    expect(openMock).toHaveBeenCalledTimes(2);
-    const timeCfg = openMock.mock.calls[1]![0];
-    expect(timeCfg.mode).toBe('time');
-    await act(() => timeCfg.onChange({ type: 'set' }, future));
-
-    // Step 3: the recurrence sheet opens; nothing is scheduled until a choice is made.
+    await fireEvent.changeText(input(), '  later  ');
+    await fireEvent.press(screen.getByLabelText('Schedule message'));
+    await chooseTime();
     expect(onSchedule).not.toHaveBeenCalled();
-    await fireEvent.press(await screen.findByText('Send once'));
-
-    await waitFor(() => expect(onSchedule).toHaveBeenCalledTimes(1));
-    const [text, when, recurrence] = onSchedule.mock.calls[0]!;
-    expect(text).toBe('later');
-    expect(when).toBeGreaterThan(Date.now());
-    expect(recurrence).toBeNull(); // "Send once" = one-shot
-    await waitFor(() => expect(input().props.value).toBe(''));
+    await fireEvent.press(screen.getByRole('button', { name: 'Schedule' }));
+    expect(onSchedule).toHaveBeenCalledWith('later', future, null);
+    expect(onSchedule).toHaveBeenCalledTimes(1);
+    expect(input().props.value).toBe('');
   });
 
-  it('picking a repeat cadence passes it to onSchedule', async () => {
+  it('changing repeat does not send until the separate Schedule action', async () => {
     const onSchedule = jest.fn();
     await renderWithTheme(<Composer onSend={jest.fn()} onSchedule={onSchedule} />);
     await fireEvent.changeText(input(), 'daily later');
-    await fireEvent.press(await screen.findByLabelText('Schedule message'));
-    const future = new Date(Date.now() + 2 * 86_400_000);
-    await act(() => openMock.mock.calls[0]![0].onChange({ type: 'set' }, future));
-    await act(() => openMock.mock.calls[1]![0].onChange({ type: 'set' }, future));
-    await fireEvent.press(await screen.findByText('Repeat daily'));
-    await waitFor(() => expect(onSchedule).toHaveBeenCalledTimes(1));
-    expect(onSchedule.mock.calls[0]![0]).toBe('daily later');
-    expect(onSchedule.mock.calls[0]![2]).toBe('daily');
-    await waitFor(() => expect(input().props.value).toBe(''));
-  });
-
-  it('cancelling the recurrence sheet aborts scheduling and keeps the typed text', async () => {
-    const onSchedule = jest.fn();
-    await renderWithTheme(<Composer onSend={jest.fn()} onSchedule={onSchedule} />);
-    await fireEvent.changeText(input(), 'keep me');
-    await fireEvent.press(await screen.findByLabelText('Schedule message'));
-    const future = new Date(Date.now() + 2 * 86_400_000);
-    await act(() => openMock.mock.calls[0]![0].onChange({ type: 'set' }, future));
-    await act(() => openMock.mock.calls[1]![0].onChange({ type: 'set' }, future));
-    await fireEvent.press(await screen.findByText('Cancel'));
-    await waitFor(() => expect(screen.queryByText('Send once')).toBeNull());
+    await fireEvent.press(screen.getByLabelText('Schedule message'));
+    await chooseTime();
+    await fireEvent.press(screen.getByRole('radio', { name: 'Repeat daily' }));
     expect(onSchedule).not.toHaveBeenCalled();
-    expect(input().props.value).toBe('keep me'); // draft not lost on cancel
+    await fireEvent.press(screen.getByRole('button', { name: 'Schedule' }));
+    expect(onSchedule).toHaveBeenCalledWith('daily later', future, 'daily');
   });
 
-  it('cancelling the date step aborts scheduling (no time picker, no callback)', async () => {
+  it('Cancel keeps the exact draft and a new opening starts with no repeat', async () => {
     const onSchedule = jest.fn();
     await renderWithTheme(<Composer onSend={jest.fn()} onSchedule={onSchedule} />);
-    await fireEvent.changeText(input(), 'later');
-    await fireEvent.press(await screen.findByLabelText('Schedule message'));
-    const dateCfg = openMock.mock.calls[0]![0];
-    await act(() => dateCfg.onChange({ type: 'dismissed' }, undefined));
-    expect(openMock).toHaveBeenCalledTimes(1); // no time picker opened
+    await fireEvent.changeText(input(), '  keep me  ');
+    await fireEvent.press(screen.getByLabelText('Schedule message'));
+    await fireEvent.press(screen.getByRole('radio', { name: 'Repeat daily' }));
+    await fireEvent.press(screen.getByRole('button', { name: 'Cancel' }));
+    expect(screen.queryByLabelText('Schedule date')).toBeNull();
     expect(onSchedule).not.toHaveBeenCalled();
+    expect(input().props.value).toBe('  keep me  ');
+    await fireEvent.press(screen.getByLabelText('Schedule message'));
+    expect(screen.getByRole('radio', { name: 'Send once' }).props.accessibilityState.checked).toBe(
+      true,
+    );
   });
 
-  it('cancelling the time step aborts scheduling', async () => {
+  it.each(['inactive', 'reply', 'edit', 'capability'] as const)(
+    'invalidates an open schedule across %s and does not revive it on restoration',
+    async (reason) => {
+      const onSchedule = jest.fn(),
+        onSend = jest.fn();
+      const props = { onSend, onSchedule };
+      const view = await renderWithTheme(<Composer {...props} />);
+      await fireEvent.changeText(input(), 'keep this draft');
+      await fireEvent.press(screen.getByLabelText('Schedule message'));
+      const confirm = retainSchedulePress();
+      const revoked =
+        reason === 'inactive'
+          ? { active: false }
+          : reason === 'reply'
+            ? { replyTo: REPLY_TARGET }
+            : reason === 'edit'
+              ? { editingText: 'edit target' }
+              : { onSchedule: undefined };
+      await view.rerender(<Composer {...props} {...revoked} />);
+      await act(async () => confirm());
+      await view.rerender(<Composer {...props} />);
+      await act(async () => confirm());
+      expect(onSchedule).not.toHaveBeenCalled();
+      expect(screen.queryByLabelText('Schedule date')).toBeNull();
+      expect(input().props.value).toBe('keep this draft');
+    },
+  );
+
+  it('checks live account ownership at confirmation without needing another render', async () => {
+    let current = true;
     const onSchedule = jest.fn();
-    await renderWithTheme(<Composer onSend={jest.fn()} onSchedule={onSchedule} />);
-    await fireEvent.changeText(input(), 'later');
-    await fireEvent.press(await screen.findByLabelText('Schedule message'));
-    const dateCfg = openMock.mock.calls[0]![0];
-    await act(() => dateCfg.onChange({ type: 'set' }, new Date(Date.now() + 2 * 86_400_000)));
-    const timeCfg = openMock.mock.calls[1]![0];
-    await act(() => timeCfg.onChange({ type: 'dismissed' }, undefined));
-    // Same reasoning as the past-time test: the sheet never opened, so a queryBy-null would be
-    // vacuous. findBy must run to timeout and reject.
-    await expect(screen.findByText('Send once', {}, { timeout: 600 })).rejects.toBeTruthy();
+    await renderWithTheme(
+      <Composer onSend={jest.fn()} onSchedule={onSchedule} isSubmitOwnerCurrent={() => current} />,
+    );
+    await fireEvent.changeText(input(), 'keep old account draft');
+    await fireEvent.press(screen.getByLabelText('Schedule message'));
+    const confirm = retainSchedulePress();
+    current = false;
+    await act(async () => confirm());
     expect(onSchedule).not.toHaveBeenCalled();
+    expect(input().props.value).toBe('keep old account draft');
   });
 
-  /**
-   * The past-time guard lives at `Composer.tsx`'s `if (when < currentMinute) return;`, which
-   * decides whether the RECURRENCE sheet (step 3) opens at all. `onSchedule` only fires after a
-   * further "Send once" press, so asserting `onSchedule` alone proves nothing — that assertion
-   * held even with the guard deleted (verified by mutation). The sheet's absence is the real
-   * discriminator, exactly as the neighbouring cancel test asserts it.
-   */
-  it('rejects a fully-past time: no recurrence sheet, no schedule', async () => {
+  it.each(['owner', 'callback'] as const)(
+    'rejects replacement %s with the identical draft',
+    async (replacement) => {
+      const ownerA = jest.fn(() => true);
+      const ownerB = jest.fn(() => true);
+      const scheduleA = jest.fn(),
+        scheduleB = jest.fn(),
+        onSend = jest.fn();
+      const view = await renderWithTheme(
+        <Composer onSend={onSend} onSchedule={scheduleA} isSubmitOwnerCurrent={ownerA} />,
+      );
+      await fireEvent.changeText(input(), 'identical draft');
+      await fireEvent.press(screen.getByLabelText('Schedule message'));
+      const confirm = retainSchedulePress();
+      await view.rerender(
+        <Composer
+          onSend={onSend}
+          onSchedule={replacement === 'callback' ? scheduleB : scheduleA}
+          isSubmitOwnerCurrent={replacement === 'owner' ? ownerB : ownerA}
+        />,
+      );
+      await act(async () => confirm());
+      expect(scheduleA).not.toHaveBeenCalled();
+      expect(scheduleB).not.toHaveBeenCalled();
+      expect(screen.queryByLabelText('Schedule date')).toBeNull();
+      expect(input().props.value).toBe('identical draft');
+    },
+  );
+
+  it('retains the admitting owner through a delayed file schedule result', async () => {
+    const result = deferred<boolean>();
+    const ownerA = jest.fn(() => true),
+      ownerB = jest.fn(() => true);
+    const scheduleA = jest.fn(() => result.promise),
+      scheduleB = jest.fn();
+    const props = { onSend: jest.fn(), onSendAttachments: jest.fn(), initialAttachments: [FILE_A] };
+    const view = await renderWithTheme(
+      <Composer {...props} onScheduleAttachment={scheduleA} isSubmitOwnerCurrent={ownerA} />,
+    );
+    await fireEvent.changeText(input(), 'identical caption');
+    await fireEvent.press(screen.getByLabelText('Schedule attachment'));
+    await chooseTime();
+    await fireEvent.press(screen.getByRole('button', { name: 'Schedule' }));
+    expect(scheduleA).toHaveBeenCalledTimes(1);
+    ownerA.mockReturnValue(false);
+    await view.rerender(
+      <Composer {...props} onScheduleAttachment={scheduleB} isSubmitOwnerCurrent={ownerB} />,
+    );
+    await act(async () => result.resolve(true));
+    expect(input().props.value).toBe('identical caption');
+    expect(screen.getByLabelText('Remove attachment')).toBeTruthy();
+    expect(scheduleB).not.toHaveBeenCalled();
+  });
+
+  it('does not submit a replaced draft through a retained confirmation', async () => {
     const onSchedule = jest.fn();
     await renderWithTheme(<Composer onSend={jest.fn()} onSchedule={onSchedule} />);
-    await fireEvent.changeText(input(), 'later');
-    await fireEvent.press(await screen.findByLabelText('Schedule message'));
-    const dateCfg = openMock.mock.calls[0]![0];
-    const past = new Date(Date.now() - 2 * 86_400_000);
-    await act(() => dateCfg.onChange({ type: 'set' }, past));
-    const timeCfg = openMock.mock.calls[1]![0];
-    await act(() => timeCfg.onChange({ type: 'set' }, past));
-    // THE discriminating assertion. The sheet is a Modal, so it appears asynchronously —
-    // `waitFor(() => expect(queryByText(...)).toBeNull())` is USELESS here because it passes on
-    // its first tick, before the sheet could have rendered (verified: that spelling still passed
-    // with the guard deleted). Letting findBy run to its timeout and asserting it REJECTS is the
-    // assertion that actually fails when the sheet opens.
-    await expect(screen.findByText('Send once', {}, { timeout: 600 })).rejects.toBeTruthy();
+    await fireEvent.changeText(input(), 'old draft');
+    const composerInput = input();
+    await fireEvent.press(screen.getByLabelText('Schedule message'));
+    const confirm = retainSchedulePress();
+    await fireEvent.changeText(composerInput, 'new draft');
+    await act(async () => confirm());
     expect(onSchedule).not.toHaveBeenCalled();
+    expect(input().props.value).toBe('new draft');
   });
 
-  it('accepts a FUTURE time (proves the guard rejects for the right reason)', async () => {
+  it('consumes confirmation identity synchronously and rejects callbacks after unmount', async () => {
     const onSchedule = jest.fn();
-    await renderWithTheme(<Composer onSend={jest.fn()} onSchedule={onSchedule} />);
-    await fireEvent.changeText(input(), 'later');
-    await fireEvent.press(await screen.findByLabelText('Schedule message'));
-    const future = new Date(Date.now() + 2 * 86_400_000);
-    await act(() => openMock.mock.calls[0]![0].onChange({ type: 'set' }, future));
-    await act(() => openMock.mock.calls[1]![0].onChange({ type: 'set' }, future));
-    // The sheet DOES open here — so the assertion above is sensitive to the guard, not to the
-    // fact that the sheet never opens in this flow.
-    expect(await screen.findByText('Send once')).toBeTruthy();
+    const view = await renderWithTheme(<Composer onSend={jest.fn()} onSchedule={onSchedule} />);
+    await fireEvent.changeText(input(), 'once');
+    await fireEvent.press(screen.getByLabelText('Schedule message'));
+    const confirm = retainSchedulePress();
+    await act(async () => {
+      confirm();
+      confirm();
+    });
+    expect(onSchedule).toHaveBeenCalledTimes(1);
+    await fireEvent.changeText(input(), 'leave unsent');
+    await fireEvent.press(screen.getByLabelText('Schedule message'));
+    const abandoned = retainSchedulePress();
+    await view.unmount();
+    await act(async () => abandoned());
+    expect(onSchedule).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves a staged file and caption on Cancel and on rejected scheduling', async () => {
+    const onScheduleAttachment = jest.fn().mockResolvedValue(false);
+    await renderWithTheme(
+      <Composer
+        onSend={jest.fn()}
+        onSendAttachments={jest.fn()}
+        onScheduleAttachment={onScheduleAttachment}
+        initialAttachments={[FILE_A]}
+      />,
+    );
+    await fireEvent.changeText(input(), 'file caption');
+    await fireEvent.press(screen.getByLabelText('Schedule attachment'));
+    expect(screen.queryByText('Repeat daily')).toBeNull();
+    await fireEvent.press(screen.getByRole('button', { name: 'Cancel' }));
+    expect(input().props.value).toBe('file caption');
+    expect(screen.getByLabelText('Remove attachment')).toBeTruthy();
+    expect(onScheduleAttachment).not.toHaveBeenCalled();
+    await fireEvent.press(screen.getByLabelText('Schedule attachment'));
+    await chooseTime();
+    await fireEvent.press(screen.getByRole('button', { name: 'Schedule' }));
+    expect(onScheduleAttachment).toHaveBeenCalledWith('file caption', FILE_A, future);
+    expect(input().props.value).toBe('file caption');
+    expect(screen.getByLabelText('Remove attachment')).toBeTruthy();
+  });
+
+  it('invalidates a file schedule when its staged file is removed', async () => {
+    const onScheduleAttachment = jest.fn().mockResolvedValue(true);
+    await renderWithTheme(
+      <Composer
+        onSend={jest.fn()}
+        onSendAttachments={jest.fn()}
+        onScheduleAttachment={onScheduleAttachment}
+        initialAttachments={[FILE_A]}
+      />,
+    );
+    const remove = screen.getByLabelText('Remove attachment');
+    await fireEvent.press(screen.getByLabelText('Schedule attachment'));
+    const confirm = retainSchedulePress();
+    await fireEvent.press(remove);
+    await act(async () => confirm());
+    expect(onScheduleAttachment).not.toHaveBeenCalled();
   });
 });
 

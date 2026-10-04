@@ -9,9 +9,8 @@ import { getScheduledById } from '@db/repositories';
 import { editScheduled } from '@/services/send';
 import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import { Screen, ScreenHeader, useTheme } from '@ui';
-import { pickFutureDateTime } from '@ui/conversations/pickDateTime';
 import { RecurrencePicker } from '@ui/conversations/RecurrencePicker';
-import { SCHEDULE_DELIVERY_TIMING_NOTE } from '@ui/conversations/RecurrenceSheet';
+import { ScheduleSheet, SCHEDULE_DELIVERY_TIMING_NOTE } from '@ui/conversations/RecurrenceSheet';
 import { formatChatDate, formatTime } from '@utils';
 import { useUnsavedChangesGuard } from '@ui/hooks/useUnsavedChangesGuard';
 
@@ -35,6 +34,9 @@ export default function ScheduledEditScreen(): React.JSX.Element {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [initialDraft, setInitialDraft] = useState<ScheduledDraft | null>(null);
   const [saving, setSaving] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerWhen, setPickerWhen] = useState(0);
+  const pickerOpenRef = useRef(false);
   const abandonedRef = useRef(false);
 
   const hasUnsavedChanges =
@@ -51,6 +53,7 @@ export default function ScheduledEditScreen(): React.JSX.Element {
       : 'Your edited message, time, and repeat setting will be lost.',
     onDiscard: () => {
       abandonedRef.current = true;
+      pickerOpenRef.current = false;
     },
   });
 
@@ -58,6 +61,7 @@ export default function ScheduledEditScreen(): React.JSX.Element {
     abandonedRef.current = false;
     return () => {
       abandonedRef.current = true;
+      pickerOpenRef.current = false;
     };
   }, []);
 
@@ -94,20 +98,17 @@ export default function ScheduledEditScreen(): React.JSX.Element {
     })();
   }, [accountLease, schedId]);
 
-  const reschedule = async (): Promise<void> => {
-    if (!accountLease.isCurrent()) return;
-    try {
-      const picked = await pickFutureDateTime();
-      if (picked != null && accountLease.isCurrent()) setWhen(picked);
-    } catch {
-      if (accountLease.isCurrent()) {
-        showDialog('Scheduled', 'Couldn’t open the date picker.');
-      }
-    }
+  const reschedule = (): void => {
+    if (!accountLease.isCurrent() || abandonedRef.current || saving || pickerOpenRef.current)
+      return;
+    pickerOpenRef.current = true;
+    setPickerWhen(when ?? Math.ceil((Date.now() + 60_000) / 60_000) * 60_000);
+    setPickerOpen(true);
   };
 
   const save = (): void => {
-    if (!accountLease.isCurrent() || saving) return;
+    if (!accountLease.isCurrent() || abandonedRef.current || saving || pickerOpenRef.current)
+      return;
     const trimmed = text.trim();
     if (!trimmed) return;
     setSaving(true);
@@ -176,7 +177,7 @@ export default function ScheduledEditScreen(): React.JSX.Element {
             ]}
           />
           <Pressable
-            onPress={() => void reschedule()}
+            onPress={reschedule}
             style={[styles.timeRow, { backgroundColor: theme.color.secondaryBackground }]}
             accessibilityRole="button"
             accessibilityLabel="Reschedule"
@@ -192,6 +193,26 @@ export default function ScheduledEditScreen(): React.JSX.Element {
           <Text style={[styles.repeatLabel, { color: theme.color.secondaryLabel }]}>Repeat</Text>
           <RecurrencePicker value={recurrence} onChange={setRecurrence} />
         </View>
+      ) : null}
+      {pickerOpen && !saving && accountLease.isCurrent() ? (
+        <ScheduleSheet
+          initialWhen={pickerWhen}
+          title="Reschedule message"
+          confirmLabel="Use this time"
+          showRepeat={false}
+          onClose={() => {
+            pickerOpenRef.current = false;
+            setPickerOpen(false);
+          }}
+          onConfirm={(picked) => {
+            if (!pickerOpenRef.current) return;
+            pickerOpenRef.current = false;
+            setPickerOpen(false);
+            if (!accountLease.isCurrent() || abandonedRef.current || saving || picked <= Date.now())
+              return;
+            setWhen(picked);
+          }}
+        />
       ) : null}
     </Screen>
   );

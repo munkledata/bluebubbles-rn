@@ -11,9 +11,9 @@ export function pickFutureDateTime(): Promise<number | null> {
       value: now,
       mode: 'date',
       minimumDate: now,
-      onChange: (_e, date) => {
-        // A dismissed dialog yields no date (matches the proven Composer picker).
-        if (!date) {
+      onChange: (event, date) => {
+        // Android supplies the original Date even on dismissal; only an explicit set commits.
+        if (event.type !== 'set' || !date) {
           resolve(null);
           return;
         }
@@ -21,8 +21,8 @@ export function pickFutureDateTime(): Promise<number | null> {
           value: date,
           mode: 'time',
           is24Hour: false,
-          onChange: (_e2, time) => {
-            if (!time) {
+          onChange: (event, time) => {
+            if (event.type !== 'set' || !time) {
               resolve(null);
               return;
             }

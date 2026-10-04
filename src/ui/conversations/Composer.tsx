@@ -1,4 +1,3 @@
-import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { Image } from 'expo-image';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -33,7 +32,7 @@ import {
   isSupportedImessageAttachmentType,
 } from '@core/models/serverInfo';
 import { AttachmentTray, type PendingAttachment } from './AttachmentTray';
-import { RecurrenceSheet } from './RecurrenceSheet';
+import { ScheduleSheet } from './RecurrenceSheet';
 import { EffectPicker } from './effects';
 import {
   findMentionQuery,
@@ -207,22 +206,28 @@ export const Composer = React.memo(function Composer({
   const chip = withAlpha(theme.color.background, 0.62);
   const bubble = translucent ? [styles.ctrlBubble, { backgroundColor: chip }] : null;
   const [trayOpen, setTrayOpen] = useState(false);
-  // Set once the date+time pickers resolve; the RecurrenceSheet (step 3) commits or cancels it.
+  // One opening owns an immutable draft snapshot; only its explicit confirmation can commit.
   const [pendingSchedule, setPendingSchedule] = useState<{
     text: string;
+    draft: string;
     when: number;
     attachment?: PendingAttachment;
+    owner: ComposerProps['isSubmitOwnerCurrent'];
+    onSchedule: ComposerProps['onSchedule'];
+    onScheduleAttachment: ComposerProps['onScheduleAttachment'];
   } | null>(null);
+  const pendingScheduleRef = useRef(pendingSchedule);
+  pendingScheduleRef.current = pendingSchedule;
   const [scheduleSaving, setScheduleSaving] = useState(false);
   const scheduleSavingRef = useRef(false);
   const [pending, setPending] = useState<PendingAttachment[]>([]);
   const mountedRef = useRef(true);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
       mountedRef.current = false;
-    },
-    [],
-  );
+    };
+  }, []);
   const [effectPickerOpen, setEffectPickerOpen] = useState(false);
   const [mentions, setMentions] = useState<MessageMention[]>([]);
   const mentionsRef = useRef<MessageMention[]>([]);
@@ -498,6 +503,8 @@ export const Composer = React.memo(function Composer({
   selectionRef.current = selection;
   const changeText = (next: string): void => {
     if (scheduleSavingRef.current) return;
+    pendingScheduleRef.current = null;
+    setPendingSchedule(null);
     const reconciled = reconcileAuthoredMentions(currentTextRef.current, next, mentionsRef.current);
     const formatted = reconcileAuthoredFormatting(
       currentTextRef.current,
@@ -684,12 +691,62 @@ export const Composer = React.memo(function Composer({
       }) || 'Message'
     : '';
 
-  // Two-step native pickers (date → time); cancelling either aborts scheduling.
+  const scheduleAvailable =
+    active &&
+    !isEditing &&
+    !replyTo &&
+    !submissionPending &&
+    !scheduleSaving &&
+    mentions.length === 0 &&
+    textFormatting.length === 0 &&
+    ((pending.length === 0 && !!trimmed && !!onSchedule) ||
+      (pending.length === 1 && !!onScheduleAttachment));
+  const scheduleContext = useRef({
+    scheduleAvailable,
+    text,
+    pending,
+    onSchedule,
+    onScheduleAttachment,
+    isSubmitOwnerCurrent,
+  });
+  scheduleContext.current = {
+    scheduleAvailable,
+    text,
+    pending,
+    onSchedule,
+    onScheduleAttachment,
+    isSubmitOwnerCurrent,
+  };
+  if (
+    pendingSchedule &&
+    (!scheduleAvailable ||
+      text !== pendingSchedule.draft ||
+      isSubmitOwnerCurrent !== pendingSchedule.owner ||
+      pendingSchedule.owner?.() === false ||
+      (pendingSchedule.attachment
+        ? pending.length !== 1 ||
+          pending[0] !== pendingSchedule.attachment ||
+          onScheduleAttachment !== pendingSchedule.onScheduleAttachment
+        : pending.length !== 0 || onSchedule !== pendingSchedule.onSchedule) ||
+      isSubmitOwnerCurrent?.() === false)
+  ) {
+    pendingScheduleRef.current = null;
+    setPendingSchedule(null);
+  }
+
   const pickSchedule = (): void => {
-    if (scheduleSavingRef.current || submissionPending || !active) return;
-    const attachment = pending.length === 1 ? pending[0] : undefined;
-    if (pending.length > 0) {
-      if (!attachment || !onScheduleAttachment) return;
+    const current = scheduleContext.current;
+    if (
+      !mountedRef.current ||
+      !current.scheduleAvailable ||
+      scheduleSavingRef.current ||
+      pendingScheduleRef.current ||
+      current.isSubmitOwnerCurrent?.() === false
+    )
+      return;
+    const attachment = current.pending.length === 1 ? current.pending[0] : undefined;
+    if (current.pending.length > 0) {
+      if (!attachment || !current.onScheduleAttachment) return;
       if (
         !attachment.uri.startsWith('file://') ||
         !isSupportedImessageAttachmentType(attachment.mimeType, attachment.name) ||
@@ -700,48 +757,19 @@ export const Composer = React.memo(function Composer({
         showToast('Schedule one local JPEG, PNG, or PDF no larger than 512 KiB');
         return;
       }
-    } else if (!trimmed || !onSchedule) return;
-    const captured = trimmed;
-    const now = new Date();
-    DateTimePickerAndroid.open({
-      value: now,
-      mode: 'date',
-      minimumDate: now,
-      onChange: (_e, date) => {
-        if (!date) return;
-        DateTimePickerAndroid.open({
-          value: date,
-          mode: 'time',
-          is24Hour: false,
-          onChange: (_e2, time) => {
-            if (!time) return;
-            const when = new Date(
-              date.getFullYear(),
-              date.getMonth(),
-              date.getDate(),
-              time.getHours(),
-              time.getMinutes(),
-              0,
-              0,
-            ).getTime();
-            // `when` is floored to the minute; reject only minutes that have fully
-            // passed (so picking the current minute is allowed — it fires next tick).
-            const currentMinute = Math.floor(Date.now() / 60_000) * 60_000;
-            if (when < currentMinute) return;
-            if (attachment && when <= Date.now()) {
-              showToast('Choose a future minute for the attachment');
-              return;
-            }
-            // Step 3: pick a recurrence (or Send once) before committing the schedule.
-            setPendingSchedule({
-              text: captured,
-              when,
-              ...(attachment ? { attachment: { ...attachment } } : {}),
-            });
-          },
-        });
-      },
-    });
+    } else if (!current.text.trim() || !current.onSchedule) return;
+    Keyboard.dismiss();
+    const request = {
+      text: current.text.trim(),
+      draft: current.text,
+      when: Math.ceil((Date.now() + 60_000) / 60_000) * 60_000,
+      owner: current.isSubmitOwnerCurrent,
+      onSchedule: current.onSchedule,
+      onScheduleAttachment: current.onScheduleAttachment,
+      ...(attachment ? { attachment } : {}),
+    };
+    pendingScheduleRef.current = request;
+    setPendingSchedule(request);
   };
 
   return (
@@ -1014,11 +1042,7 @@ export const Composer = React.memo(function Composer({
             },
           ]}
         />
-        {!isEditing &&
-        mentions.length === 0 &&
-        textFormatting.length === 0 &&
-        ((pending.length === 0 && trimmed && onSchedule) ||
-          (pending.length === 1 && onScheduleAttachment)) ? (
+        {scheduleAvailable ? (
           <Pressable
             onPress={pickSchedule}
             disabled={submissionPending || scheduleSaving}
@@ -1105,52 +1129,74 @@ export const Composer = React.memo(function Composer({
           }
         />
       ) : null}
-      <RecurrenceSheet
-        visible={pendingSchedule != null}
-        allowRepeat={!pendingSchedule?.attachment}
-        onClose={() => setPendingSchedule(null)} /* cancel keeps the typed text */
-        onPick={(recurrence) => {
-          const sched = pendingSchedule;
-          setPendingSchedule(null);
-          if (!sched) return;
-          if (sched.attachment) {
-            if (recurrence !== null || !onScheduleAttachment || scheduleSavingRef.current) return;
-            if (sched.when <= Date.now()) {
+      {pendingSchedule && scheduleAvailable ? (
+        <ScheduleSheet
+          initialWhen={pendingSchedule.when}
+          title={pendingSchedule.attachment ? 'Schedule attachment' : 'Schedule message'}
+          allowRepeat={!pendingSchedule.attachment}
+          onClose={() => {
+            pendingScheduleRef.current = null;
+            setPendingSchedule(null);
+          }}
+          onConfirm={(when, recurrence) => {
+            const sched = pendingSchedule;
+            if (!mountedRef.current || pendingScheduleRef.current !== sched) return;
+            pendingScheduleRef.current = null;
+            setPendingSchedule(null);
+            const current = scheduleContext.current;
+            if (
+              !mountedRef.current ||
+              !current.scheduleAvailable ||
+              scheduleSavingRef.current ||
+              sched.owner?.() === false ||
+              current.isSubmitOwnerCurrent !== sched.owner ||
+              current.isSubmitOwnerCurrent?.() === false ||
+              current.text !== sched.draft ||
+              (sched.attachment
+                ? current.pending.length !== 1 ||
+                  current.pending[0] !== sched.attachment ||
+                  current.onScheduleAttachment !== sched.onScheduleAttachment
+                : current.pending.length !== 0 || current.onSchedule !== sched.onSchedule)
+            )
+              return;
+            if (!Number.isFinite(when) || when <= Date.now()) {
               showToast('That time has passed; choose Schedule again');
               return;
             }
-            if (
-              trimmed !== sched.text ||
-              pending.length !== 1 ||
-              pending[0]?.uri !== sched.attachment.uri
-            ) {
-              showToast('Draft changed; choose Schedule again');
+            if (sched.attachment) {
+              if (recurrence !== null || !sched.onScheduleAttachment) return;
+              scheduleSavingRef.current = true;
+              setScheduleSaving(true);
+              void sched
+                .onScheduleAttachment(sched.text, sched.attachment, when)
+                .then((accepted) => {
+                  if (
+                    !accepted ||
+                    !mountedRef.current ||
+                    sched.owner?.() === false ||
+                    scheduleContext.current.isSubmitOwnerCurrent !== sched.owner ||
+                    scheduleContext.current.onScheduleAttachment !== sched.onScheduleAttachment ||
+                    scheduleContext.current.isSubmitOwnerCurrent?.() === false
+                  )
+                    return;
+                  setPending((current) => current.filter((item) => item !== sched.attachment));
+                  if (currentTextRef.current === sched.draft) onChangeText('');
+                })
+                .catch(() => {
+                  // The screen owns the visible error; keep both authored pieces for inspection.
+                })
+                .finally(() => {
+                  scheduleSavingRef.current = false;
+                  if (mountedRef.current) setScheduleSaving(false);
+                });
               return;
             }
-            scheduleSavingRef.current = true;
-            setScheduleSaving(true);
-            void onScheduleAttachment(sched.text, sched.attachment, sched.when)
-              .then((accepted) => {
-                if (!accepted || (isSubmitOwnerCurrent && !isSubmitOwnerCurrent())) return;
-                setPending((current) =>
-                  current.filter((item) => item.uri !== sched.attachment?.uri),
-                );
-                if (currentTextRef.current.trim() === sched.text) onChangeText('');
-              })
-              .catch(() => {
-                // The screen owns the visible error; keep both authored pieces for inspection.
-              })
-              .finally(() => {
-                scheduleSavingRef.current = false;
-                setScheduleSaving(false);
-              });
-            return;
-          }
-          if (!onSchedule) return;
-          setText('');
-          onSchedule(sched.text, sched.when, recurrence);
-        }}
-      />
+            if (!sched.onSchedule) return;
+            setText('');
+            sched.onSchedule(sched.text, when, recurrence);
+          }}
+        />
+      ) : null}
       <EffectPicker
         visible={effectPickerOpen}
         onClose={() => setEffectPickerOpen(false)}

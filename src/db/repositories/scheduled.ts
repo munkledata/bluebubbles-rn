@@ -35,6 +35,12 @@ export interface ScheduledRow {
   recurrence?: string | null;
 }
 
+/** The exact occurrence shown when the user chose Cancel. */
+export type ScheduledCancellationTarget = Pick<
+  ScheduledRow,
+  'id' | 'chatGuid' | 'serverId' | 'scheduledFor'
+>;
+
 interface ScheduledPayload {
   text: string;
   attachmentName?: string;
@@ -738,6 +744,36 @@ export async function resetStuckScheduled(
     },
     commitGuard,
   );
+}
+
+/** Cancel only the exact still-pending occurrence inside its authenticated writer owner. */
+export function cancelPendingScheduledWithinTransaction(
+  context: DbTransactionContext,
+  target: ScheduledCancellationTarget,
+): Promise<'cancelled' | 'missing' | 'changed'> {
+  return runInTransactionContext(context, async (db) => {
+    const removed = await db
+      .delete(scheduledMessages)
+      .where(
+        and(
+          eq(scheduledMessages.id, target.id),
+          eq(scheduledMessages.chatGuid, target.chatGuid),
+          eq(scheduledMessages.status, 'pending'),
+          eq(scheduledMessages.scheduledFor, target.scheduledFor),
+          target.serverId === null
+            ? isNull(scheduledMessages.serverId)
+            : eq(scheduledMessages.serverId, target.serverId),
+        ),
+      )
+      .returning({ id: scheduledMessages.id });
+    if (removed.length > 0) return 'cancelled';
+    const remaining = await db
+      .select({ id: scheduledMessages.id })
+      .from(scheduledMessages)
+      .where(eq(scheduledMessages.id, target.id))
+      .limit(1);
+    return remaining.length > 0 ? 'changed' : 'missing';
+  });
 }
 
 /** Delete one scheduled row while joining an authenticated transaction owner. */
