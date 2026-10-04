@@ -322,6 +322,7 @@ cd android
 ./gradlew \
   :gator-paste-input:compileDebugKotlin \
   :gator-share-shortcuts:compileDebugKotlin \
+  :gator-share-intake:compileDebugKotlin \
   :gator-bounded-document:compileDebugKotlin \
   :gator-bounded-download:compileDebugKotlin \
   :gator-screen-security:compileDebugKotlin \
@@ -329,9 +330,11 @@ cd android
 ./gradlew \
   :gator-paste-input:testDebugUnitTest \
   :gator-share-shortcuts:testDebugUnitTest \
+  :gator-share-intake:testDebugUnitTest \
   :gator-bounded-document:testDebugUnitTest \
   :gator-bounded-download:testDebugUnitTest \
   :expo-file-system:testDebugUnitTest \
+  :expo-task-manager:testDebugUnitTest \
   --no-daemon
 ./gradlew :app:assembleDebug --no-daemon
 ./gradlew :app:bundleRelease --no-daemon
@@ -340,7 +343,7 @@ npm run check:android-native-paths
 npm run check:android-build
 ```
 
-- [ ] All five local Expo modules are discovered by autolinking and compile through Expo's aggregate
+- [ ] All six local Expo modules are discovered by autolinking and compile through Expo's aggregate
       Android module during the replacement app build.
 - [ ] Every discovered release/RelWithDebInfo native compiler command contains exactly one correct
       source and Gradle file/debug prefix map; the checker rejects missing, duplicate, conflicting,
