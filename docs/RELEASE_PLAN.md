@@ -17,7 +17,7 @@ Use the related documents for their narrower purposes:
 - [`RELEASE_CHECKLIST.md`](../RELEASE_CHECKLIST.md) is the operational checklist for one exact
   candidate.
 - [`DEVICE_01_PLAY_V80_DEVICE_PROOF_2026-10-03.md`](./DEVICE_01_PLAY_V80_DEVICE_PROOF_2026-10-03.md)
-  records the completed bounded v80 phone-testing round and separate host proof for two subsequent fixes;
+  records the completed bounded v80 phone-testing round, its active continuation, and separate host proof for subsequent fixes;
   it does not close the general journey or broader release gates.
 - [`STORE_01G_INTERNAL_TESTING_RUNBOOK.md`](./STORE_01G_INTERNAL_TESTING_RUNBOOK.md) is the
   superseded v63 execution snapshot and must be refreshed before any current staged-server round.
@@ -74,10 +74,17 @@ history on cold-process withdrawal. Their subsequent source fixes pass the combi
 (`BB/gator-play-v80-device-20261003/combined-repair-milestone-cjZ2Bd/result.json`)
 (538 suites / 6,702 tests, two existing opt-in skips; architecture 52/52; migrations 5/5), but
 **neither fix is installed in v80**. A new candidate and exact-device replays remain required.
-Settings-label search, banner/offline-copy findings, and the documented App Lock exposure of older
-detailed notices remain open. Live text/edit/reaction, reply, Unsend, image, and captioned-PDF
-observations are recorded with their distinct delivery limits; the PDF filename-preservation issue
-also remains open. Automatic retry reached the UI's up-to-date state after an unexplained
+The later combined executable-source checkpoint `58b2759a3a3a8a4e3bd3c218151d7c6fa2452af1`
+adds reviewed Settings-label search, banner/offline-copy, App Lock old-notice privacy and multipart
+filename repairs, plus finite sync diagnostics. Its final full run passes **539 suites / 6,778 tests**,
+and UI coverage passes all configured floors. Production JavaScript export and clean native project
+generation pass; Kotlin execution, signed Android build and exact-device replays remain pending.
+The clean-install review also refreshed one stale bounded-download component count/digest in the
+generated legal inventory. Documentation/data refreshes require a fresh final source identity and
+release receipts; the initial 0.1.60 preflight/prepare consumed no remote build number and cannot
+stand in for a completed build. The Mac server package at `917bd819` is verified but not installed.
+Live text/edit/reaction, reply, Unsend, image, and captioned-PDF
+observations retain their distinct delivery limits. Automatic retry reached the UI's up-to-date state after an unexplained
 sync failure; independently reconciled history parity, general privacy, and the full journey remain
 unproven. Raw dependency audit failures remain unresolved and are not waived by the local mitigations.
 

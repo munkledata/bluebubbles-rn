@@ -20370,8 +20370,8 @@
     {
       "path": "modules/gator-bounded-download",
       "provenanceStatus": "unresolved",
-      "files": 12,
-      "sha256": "22777bef8ef2fa5190600871baafc83315915f13b68b4a6289a2e8aa14c9c4fb",
+      "files": 14,
+      "sha256": "916feb9f6558b4ed89c3bb8176811ff9f10fc7fba7a799f3defda4faf224c70f",
       "issue": null
     },
     {

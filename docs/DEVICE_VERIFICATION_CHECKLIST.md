@@ -315,14 +315,15 @@ owns lock-screen presentation, and App Lock's limited generic-new-delivery behav
 ### 7. Reminders and best-effort background work
 
 - [ ] **`EXACT PLAY CANDIDATE`:** Schedule a reminder for a synthetic message, background the app,
-      and allow it to fire. Expect detailed reminder text near, not exactly at, the requested time;
+      and allow it to fire. Expect fixed generic `Reminder` title/body near, not exactly at, the requested time;
       Gator uses an inexact Doze-capable alarm and requests no exact-alarm permission.
 - [ ] **`EXACT PLAY CANDIDATE`:** Tap the fired reminder and confirm it opens the correct
       chat/message and removes that reminder from Gator. Repeat after an ordinary package kill if the
       approved session has enough time; do not use force-stop.
-- [ ] **`EXACT PLAY CANDIDATE`:** If a detailed reminder was scheduled before App Lock engaged,
-      record that Android may still fire the existing detailed trigger. Do not claim App Lock
-      retroactively sanitizes it.
+- [ ] **`EXACT PLAY CANDIDATE`:** On a candidate containing the 2026-10-03 privacy repair, verify
+      enabling App Lock preserves an already-scheduled generic reminder and cancels unsafe legacy
+      detailed triggers. Keep native alarm/enable races and cancellation failures open until observed.
+      Earlier candidate limitations remain historical evidence, not the replacement candidate's policy.
 - [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Record one observable, synthetic catch-up result
       after the app has been backgrounded long enough for Android to choose whether to run work.
       Disable App Lock before this branch: a fresh background worker with persisted App Lock enabled

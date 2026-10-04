@@ -4,7 +4,8 @@
 > report records the exact installed Google Play `0.1.59` / version-code-`80` session through the
 > final ledger cutoff **2026-10-03 20:48:40 UTC**. It includes synthetic episodes, authorized live
 > messaging, font-scale, microphone, sync recovery, final cleanup, and the separate host proof for
-> two subsequent source fixes. No overall device, privacy, native-readiness, or release sign-off is
+> subsequent source fixes. The separately dated continuation below records later testing and the
+> combined source milestone. No overall device, privacy, native-readiness, or release sign-off is
 > claimed. The
 > [work plan](./WORK_PLAN_2026-08-03.md) and
 > [release plan](./RELEASE_PLAN.md) remain authoritative; this report does not change task statuses.
@@ -12,8 +13,9 @@
 The phone reproduced an automatic sync-repair failure (`SYNC-04`) and loss of surviving
 notification history during a cold-process withdrawal (`NOTIF-03`, ledger `NOTIFICATION-09`).
 Both have reviewed source fixes with host tests, but **neither fix is installed in Play v80**.
-An exact Settings-label search also failed on the phone (`SEARCH-02`) and remains unfixed.
-The known `NOTIF-02` App Lock limitation also remains visible: new locked deliveries are generic,
+An exact Settings-label search also failed on the phone (`SEARCH-02`); its later source repair is
+host-verified, with replacement-device proof pending. The installed `NOTIF-02` App Lock limitation
+also remains visible: new locked deliveries are generic,
 while older detailed notifications remain readable in Android's shade.
 The live episode also found a PDF filename-preservation issue and an initial history-sync failure
 whose cause remains unknown. An automatic retry subsequently reached the app's up-to-date state;
@@ -101,11 +103,11 @@ and documented older-notification privacy gap retain their own classifications.
 | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
 | `SYNC-04`: expired message-state cursor            | Cold launch and manual Sync Now repeatedly show Error after retention pruning; no repair snapshot starts                                   | Source fix and full host milestone pass; new build and phone recovery proof required              |
 | `NOTIF-03` / `NOTIFICATION-09`: cold withdrawal    | With six retained native history entries, withdrawing only entry 4 removes the entire conversation notice                                  | Source fix, focused checks, and combined full host milestone pass; new-build phone replay pending |
-| `NOTIF-02` / `APPLOCK-02`: older detailed notices  | Previously displayed detailed content remains readable after enabling App Lock; a new generic notice coexists with it                      | Documented privacy limitation remains open; no repair or full privacy pass claimed                |
-| `UI-02`: connection banner and offline explanation | Persistent banner covers chat/Settings titles; the offline explanation says live socket updates still work while the UI reports Offline    | Observed UI/copy issue; no fix or closure in this report                                          |
-| `SEARCH-02`: exact Settings label                  | Verified input `Server Management` produced No settings match; the control query `Server` exposed both Server Management and Server Health | Confirmed device failure with source explanation; no fix or rebuilt-device pass claimed           |
-| `LIVE-08` / `LIVE-11`: initial live history sync   | Initial sync showed trouble/Error; a later automatic retry reached Up to date with 75,503 messages                                         | Initial cause unresolved; completed UI state observed, exact history parity unproved              |
-| `LIVE-09`: PDF filename preservation               | Uploaded PDF first showed its selected name, then a UUID PDF name; exact marked server attachment also lacked the selected filename        | Existing upload-path metadata defect/limitation; source diagnosis only, no fix or rebuilt proof   |
+| `NOTIF-02` / `APPLOCK-02`: older detailed notices  | Previously displayed detailed content remains readable after enabling App Lock; a new generic notice coexists with it                      | Reviewed source privacy sweep and generic policy pass host tests; native replacement proof open |
+| `UI-02`: connection banner and offline explanation | Persistent banner covers chat/Settings titles; the offline explanation says live socket updates still work while the UI reports Offline    | Measured header inset and truthful copy repaired in source; keyboard/font/device replay pending |
+| `SEARCH-02`: exact Settings label                  | Verified input `Server Management` produced No settings match; the control query `Server` exposed both Server Management and Server Health | Word-based visible-label search repaired and host-tested; rebuilt-device replay pending |
+| `LIVE-08` / `LIVE-11`: initial live history sync   | Initial sync showed trouble/Error; a later automatic retry reached Up to date with 75,503 messages                                         | Initial cause unresolved; finite privacy-safe diagnostics added for a repeat; history parity unproved |
+| `LIVE-09`: PDF filename preservation               | Uploaded PDF first showed its selected name, then a UUID PDF name; exact marked server attachment also lacked the selected filename        | Reviewed native streaming filename override and host guards added; Kotlin and rebuilt upload proof pending |
 
 ### SYNC-04 — expired cursor is not classified for automatic repair
 
@@ -222,7 +224,7 @@ is a presentation gate, not evidence of encryption-key custody.
 The connection banner overlapped the chat title and Settings title during the observed degraded
 connection state. The offline explanation also claimed that live socket updates still work while
 the connection state was Offline. This report records those observations without claiming a
-layout or wording fix.
+layout or wording fix in that installed candidate. The later source repair is recorded below.
 
 Settings search at `app/(app)/settings.tsx:166–189` normalizes the full input, then calls
 `terms.includes(q)` on a keyword bag for each section. Its server bag contains `server`,
@@ -236,8 +238,8 @@ phrase and other multiword inputs remain source predictions rather than device-t
 
 The earlier capture containing the truncated query `ervermanagement` remains invalid device
 proof. The later exact-input test supplies separate evidence; it does not rehabilitate that
-attempt. The successful conversation-search test below is a different feature. No search fix or
-corrected-build pass is claimed.
+attempt. The successful conversation-search test below is a different feature. The later source
+repair does not establish a corrected-build phone pass.
 
 ### LIVE-08 / LIVE-11 — an initial failure followed by automatic sync recovery
 
@@ -276,7 +278,7 @@ exact marked caption message to a sent `application/pdf` attachment of 618 bytes
 name did not match the supplied name. No byte hash or recipient rendering was obtained, so this
 is a filename-preservation finding, not evidence of payload corruption.
 
-The source chain explains the mismatch. The picker retains the original display name while Expo
+The initial v80 source review explains the mismatch. The picker retains the original display name while Expo
 copies the selected document to a UUID-named cache file. The optimistic attachment stores that
 original name, but `src/services/send/attachmentUpload.ts:257–272` deliberately omits the separate
 name parameter for the narrow iMessage route. The installed legacy Expo uploader takes the actual
@@ -285,8 +287,8 @@ multipart file-part filename from `file.name`; it offers no independent filename
 The server stages the file using that multipart filename and rejects a conflicting separate name
 in its narrow iMessage guard, because the helper receives the staged path. When canonical metadata
 arrives, `src/db/repositories/attachments.ts:134` accepts a non-null canonical transfer name, and
-the file chip displays it. The reviewed upload/send/repository/display files are identical in the
-main checkout and released v80 source. Existing upload tests explicitly expect the UUID URI and
+the file chip displays it. At that initial checkpoint, the reviewed upload/send/repository/display
+files were identical in the main checkout and released v80 source. Those upload tests explicitly expected the UUID URI and
 omitted original name, including for PDFs and captions; they do not establish filename fidelity.
 
 This is an existing upload-path defect/limitation, separate from the two subsequent repairs.
@@ -295,10 +297,10 @@ reconciliation timing was not captured, so Activity recreation is an observation
 proven cause. Simply restoring a name parameter would conflict with the server guard; refusing
 canonical names in the DB would conceal the wrong transmitted filename on one client.
 
-A future correction must preserve the safe original basename in the actual multipart file part
-while retaining legacy streaming, progress, cancellation, and account ownership. That needs either
-a narrowly validated native filename option and rebuild, or privately owned, bounded staging with
-quota and cleanup guards. Neither approach is implemented here. The private
+A correction must preserve the safe original basename in the actual multipart file part
+while retaining legacy streaming, progress, cancellation, and account ownership. The later combined
+source milestone below implements a narrowly validated native filename option. Its Kotlin tests,
+replacement build, and actual device upload proof remain pending. The initial private
 `pdf-filename-source-review.md` retains the precise Expo/server references and proposed regression
 boundaries, including unsafe names, concurrent same-name uploads, retirement, and canonical echo.
 
@@ -597,7 +599,7 @@ private native worker log, and captures `016`–`023`. Credentials stay in priva
 The sole wake helper continued throughout. Offline, deadline, cancellation and overlapping-worker
 cases remain separate tests.
 
-### Source repairs under verification
+### Combined source repairs and host verification
 
 Settings search now matches words in visible labels. The measured connection banner reserves space
 inside routed headers without shifting the navigator/keyboard coordinate origin or bottom inset.
@@ -609,8 +611,33 @@ App Lock waits for old detailed notices/private channel labels to be cleared and
 notices generic whenever enabled, including after unlock and during grace. The repair preserves
 verified generic reminder alarms and fences delayed native posts/account changes. A new finite sync
 failure diagnostic retains approved classifications instead of private error prose; it cannot
-recover the earlier v80 failure's cause. The combined host gate is running. These repairs require a
-replacement build and applicable device replays.
+recover the earlier v80 failure's cause. These repairs require a replacement build and applicable
+device replays.
+
+The executable source is frozen at `58b2759a3a3a8a4e3bd3c218151d7c6fa2452af1` in the isolated
+`gator-release-20261003-combined` checkout. The final full run passed **539 suites / 6,778 tests**,
+with two existing opt-in skips. The separate UI-coverage run passed the same suites/tests and all
+configured floors: statements **88.34%**, branches **82.14%**, functions **88.77%**, lines **91.27%**.
+Typecheck, source lint, formatting, architecture **52**, migrations **5**, workflow security **37**,
+diagnostic guards **37**, native/artifact guard unit tests **38**, Expo compatibility and Doctor
+**20/20** passed. The fast DB scanner passed **101**, with 14 intentionally full-only skips; all
+**2,248** approved mutations match, and final reconciliation reports zero drift. Reviewed data-only
+proof-pin updates changed no scanner algorithm or ingress certificate logic.
+
+The production Android JavaScript export and clean native project generation passed. Neither
+executes the JVM, compiles Kotlin, builds an AAB, or proves native runtime behavior. A clean install
+also exposed a preexisting stale legal component record: v80's bounded-download module already had
+14 files, while its generated inventory still recorded 12. Only that count/digest and the matching
+notices row were refreshed; dependency/provenance statuses and runtime notices remain unchanged.
+The final documentation/data refresh must receive a new source identity and fresh release receipts.
+Raw dependency warnings and legal review remain open.
+
+Evidence under the continuation directory includes `combined-jest.log`, `ui-coverage.log`,
+`typecheck-final.log`, architecture/migration/lint/format logs, `candidate-*.log`,
+`candidate-legal-drift.json`, and `source-copy-receipt.json`. The separately prepared Mac package
+contains reviewed server fixes at `917bd8191a1355effeeb4fbf1257ef9194c5f77b`; installation and a live
+HTTPS acceptance window are still pending. The phone remains on v80; fingerprint participation,
+temporary credential creation, and additional-hardware availability were requested separately.
 
 ## Current conclusion and remaining acceptance
 
@@ -625,17 +652,18 @@ session owns Mac source repairs and connectivity diagnostics. Biometric, actual-
 second-device, and genuine API-37 acceptance remain dependent on their respective participation
 or hardware. Optional and owner-dropped scope is unchanged.
 
-The bounded testing round is complete, including cleanup. It established useful exact-v80 native
+The original bounded testing round completed its cleanup. The active continuation has its own
+fixture, phone reservation, wake helper, and pending owner actions. The original round established useful exact-v80 native
 behavior: normal encrypted-DB rekey/restart continuity, selected long-ID/cache and download cases,
 one local encrypted-backup customization roundtrip, notification arrival/tap/grouping cases, and
 authorized live text/edit/reaction/reply/attachment operations within the limits above. The initial
 live sync failure later recovered to the app's completed state, and the former test credential is
 now rejected.
 
-**Release readiness is not established.** Two reproduced defects have reviewed source repairs and
-a combined **538-suite / 6,702-test** host pass, but the installed v80 still contains both defects.
-The Settings-label failure, banner/copy findings, filename preservation issue, older-notification
-privacy gap, and unexplained initial sync failure remain recorded. Successful scoped observations
+**Release readiness is not established.** The reproduced sync/notification defects and subsequent
+Settings, banner/copy, filename and App Lock repairs pass the combined **539-suite / 6,778-test**
+host milestone, but the installed v80 does not contain them. The initial sync failure's cause remains
+unexplained; added diagnostics support a future reproduction. Successful scoped observations
 do not close the remaining device matrix or the raw dependency, legal, and wider-release gates.
 
 1. Bind any new Android artifact containing the host-verified combined repairs to its own
@@ -645,15 +673,15 @@ do not close the remaining device matrix or the raw dependency, legal, and wider
 2. Diagnose any repeat of the initial live sync failure with a retained, redacted classification.
    Exact server/client history reconciliation, missing/duplicate-row checks, and every native
    sync transaction boundary were not tested by the Up to date counter.
-3. Correct and retest the confirmed Settings-label search failure, observed banner/copy findings,
-   and multipart filename preservation. Additional search phrases, unsafe/concurrent filenames,
-   and corrected native upload behavior remain untested.
-4. Preserve the open App Lock old-notice privacy boundary. Successful biometric unlock and grace
+3. Install and retest the source repairs for Settings-label search, banner/copy findings,
+   and multipart filename preservation. Host regressions cover invalid names and preserved source
+   metadata; Kotlin execution, on-device keyboard/font layout and actual upload bytes/name remain open.
+4. Verify the source App Lock old-notice privacy repair on the replacement candidate. Successful biometric unlock and grace
    timing, post-unlock drain, all locked envelope/action versions, replay/isolation, notification
    inline actions, and native cancellation-failure cases were not established by this round.
 5. Keep messaging proof bounded. Direct recipient-device reading/rendering, exact-B server unsend
    attribution, live inbound messages, RCS/SMS service, new-conversation creation, complete
-   thread/receipt behavior, scheduled sends, upload cancellation/retry, audio upload, and provider
+   thread/receipt behavior, real scheduled-message delivery, upload cancellation/retry, audio upload, and provider
    capability transitions remain untested here. C, the image, and D lack retained delivery proof.
 6. Keep download/media/backup results scoped. Missing off-screen owner rows, remaining hostile
    length/content/concurrency and quota cases, uninterrupted video resume, PDF pixel rendering,

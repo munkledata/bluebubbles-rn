@@ -73,8 +73,8 @@ A separate POST-02 synthetic fixture is prepared against the reviewed server che
 `d06e26db55f07c18d7333c80dcfe12f0f6595e9f`. Its host self-test passes 509 transitions,
 500-row retention pruning, stale-lease rejection, deleted/restored owner checks, and unchanged
 SMS/RCS controls. The fixture and validation receipt are in
-`BB/bluebubbles-sync-evidence-2026-10-03`; the [controls](../../BB/bluebubbles-sync-evidence-2026-10-03/phone-sync-controls.md)
-describe its isolated phone port 43127. Phone acceptance remains pending: live delete/restore,
+`BB/bluebubbles-sync-evidence-2026-10-03`, relative to the checkout's parent directory; its private
+`phone-sync-controls.md` describes isolated phone port 43127. Phone acceptance remains pending: live delete/restore,
 offline burst convergence, local deletion protection of the controlled target, retention repair
 with a deliberate page invalidation and retry, and SMS/RCS sentinel preservation. This fixture
 has no attachment or push support. Socket/media port 43125 and notification port 43126 remain
