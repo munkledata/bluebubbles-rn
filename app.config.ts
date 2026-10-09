@@ -163,6 +163,9 @@ const config: ExpoConfig = {
     // Injects the dedicated Android notification status-bar icon (ic_stat_gator) into the
     // regenerated native res/ folders at prebuild. See plugins/withNotificationIcon.js.
     './plugins/withNotificationIcon',
+    // notify-kit exports its notification tap activity; keep it private so no other app can
+    // forge Reply / Mark-as-read / Love actions. See plugins/withPrivateNotificationActivity.js.
+    './plugins/withPrivateNotificationActivity',
     // Owned Android share intake. This adds generic ACTION_SEND/ACTION_SEND_MULTIPLE filters and
     // Direct Share metadata; the local native module streams provider content into bounded,
     // app-private batches before JavaScript receives filenames or file:// URIs. Do not replace it

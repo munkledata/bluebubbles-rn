@@ -1339,6 +1339,13 @@ const REQUIRED_COMPONENTS = [
     attributes: { 'android:exported': 'false' },
   },
   {
+    // notify-kit exports this tap activity; plugins/withPrivateNotificationActivity.js keeps it
+    // private so no other app can forge notification Reply / Mark-as-read / Love actions.
+    tag: 'activity',
+    name: 'app.notifee.core.NotificationReceiverActivity',
+    attributes: { 'android:exported': 'false' },
+  },
+  {
     tag: 'service',
     name: 'io.invertase.firebase.messaging.ReactNativeFirebaseMessagingHeadlessService',
     attributes: { 'android:exported': 'false' },

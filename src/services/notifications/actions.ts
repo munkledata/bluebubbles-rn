@@ -10,6 +10,7 @@ import { logger, readAccountRevocationState } from '@core/secure';
 import { deleteReminderByNotificationId } from '@db/repositories';
 import { isDevServer } from '@utils/isDev';
 import { isRcsChatGuid } from '@utils/chat';
+import { useLockStore } from '@state/lockStore';
 import { sessionAccessors } from '@state/sessionStore';
 import { accountRevocationMarker, fixedCredentialClient, http, vault } from '../clients';
 import { inspectBackgroundSession } from '../background/backgroundSyncOrchestrator';
@@ -155,6 +156,24 @@ function hasPrivateRouteSchema(
   );
 }
 
+/**
+ * App Lock hides every private notification: while it is enabled Gator posts only generic,
+ * button-less notices, and enabling it scrubs the tray. So no genuine Reply / Mark-as-read / Love
+ * button can exist then, and an action press is stale or forged. Check both the live lock store
+ * and the persisted setting (a cold headless process has no hydrated store); like the FCM policy,
+ * only a successful read of a missing or explicit 'false' setting counts as disabled.
+ */
+async function appLockForbidsNotificationActions(): Promise<boolean> {
+  const lock = useLockStore.getState();
+  if (lock.enabled || lock.locked) return true;
+  try {
+    const persisted = await vault.get('appLockEnabled');
+    return persisted !== null && persisted !== 'false';
+  } catch {
+    return true;
+  }
+}
+
 type CurrentChatPress = (data: Record<string, unknown>) => void;
 
 /**
@@ -188,6 +207,9 @@ async function handleNotificationActionForAccount(
         ? 'message'
         : null;
   if (!expectedKind || !hasPrivateRouteSchema(detail.notification?.data, [expectedKind])) return;
+  // Before the encrypted DB is touched: with App Lock enabled, no action press resolves or acts.
+  if (await appLockForbidsNotificationActions()) return;
+  if (!accountLease.isCurrent()) return;
 
   let route: Awaited<ReturnType<typeof resolveNotificationData>>;
   try {

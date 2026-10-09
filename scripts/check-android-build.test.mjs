@@ -143,6 +143,10 @@ const manifestNode = xmlNode(
           'android:name': 'app.notifee.core.ReceiverService',
           'android:exported': 'false',
         }),
+        xmlNode('activity', {
+          'android:name': 'app.notifee.core.NotificationReceiverActivity',
+          'android:exported': 'false',
+        }),
         xmlNode('service', {
           'android:name':
             'io.invertase.firebase.messaging.ReactNativeFirebaseMessagingHeadlessService',
@@ -2350,6 +2354,31 @@ test('does not accept component names in comments or on the wrong XML element', 
     ),
   });
   assert.ok(wrongElementErrors.some((error) => error.includes('<service>')));
+});
+
+test('requires the notify-kit notification tap activity to stay private', () => {
+  const activity =
+    '<activity android:name="app.notifee.core.NotificationReceiverActivity" android:exported="false" />';
+  assert.ok(manifest.includes(activity), 'the fixture must declare the private activity');
+
+  const exported = validate({
+    manifest: manifest.replace(
+      activity,
+      activity.replace('android:exported="false"', 'android:exported="true"'),
+    ),
+  });
+  assert.ok(
+    exported.some((error) =>
+      error.includes('NotificationReceiverActivity must set android:exported="false"'),
+    ),
+  );
+
+  const missing = validate({ manifest: manifest.replace(activity, '') });
+  assert.ok(
+    missing.some((error) =>
+      error.includes('missing <activity> app.notifee.core.NotificationReceiverActivity'),
+    ),
+  );
 });
 
 test('requires Expo Location service to remain non-exported and location-scoped', () => {

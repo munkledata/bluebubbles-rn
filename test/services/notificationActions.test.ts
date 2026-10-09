@@ -48,6 +48,7 @@ import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
+import { useLockStore } from '@state/lockStore';
 import { useSessionStore } from '@state/sessionStore';
 
 // notifee: the shared stub isn't a jest.fn, so mock it here to spy on cancelNotification.
@@ -74,6 +75,8 @@ jest.mock('@core/api', () => ({
 // A sentinel DB handle so we can prove ensureDatabase()'s value is threaded to the writes.
 // Must be `mock`-prefixed — jest.mock factories are hoisted and may only reference such vars.
 const mockDb = { __db: true, all: jest.fn(async (_query: unknown): Promise<unknown[]> => []) };
+// Persisted App Lock setting; a missing value (null) means App Lock is off.
+const mockVaultGet = jest.fn(async (_key: string): Promise<string | null> => null);
 const mockPinnedForegroundHttp = {
   __pinnedHttp: true,
   snapshotTransport: jest.fn(() => ({
@@ -87,7 +90,7 @@ jest.mock('@/services/databaseControl', () => ({
 }));
 jest.mock('@/services/clients', () => ({
   http: { __http: true, pinTransport: jest.fn(() => mockPinnedForegroundHttp) },
-  vault: { __vault: true },
+  vault: { __vault: true, get: (key: string) => mockVaultGet(key) },
   accountRevocationMarker: { isRevoked: jest.fn(() => false) },
   fixedCredentialClient: jest.fn(() => ({
     __taskHttp: true,
@@ -296,6 +299,69 @@ afterEach(() => {
   // Race tests close admission synchronously. Always reopen it, even if an assertion fails, so the
   // next independent example cannot inherit a deliberately paused coordinator.
   resumeRealtimeDeliveries();
+});
+
+describe('handleNotificationAction — App Lock', () => {
+  afterEach(() => {
+    useLockStore.setState({ enabled: false, locked: false });
+    // A refused press never consumes the route row safeChatDetail queued for it.
+    mockDb.all.mockReset();
+    mockDb.all.mockImplementation(async () => []);
+  });
+
+  it.each([ACTION_REPLY, ACTION_MARK_READ, ACTION_LOVE])(
+    'refuses %s while the persisted App Lock setting is on, before reading the encrypted DB',
+    async (action) => {
+      mockVaultGet.mockResolvedValueOnce('true');
+
+      await handleNotificationAction(
+        safeChatDetail(action, { chatGuid: 'c1', messageGuid: 'm1' }, { input: 'forged' }),
+      );
+
+      expect(mockVaultGet).toHaveBeenCalledWith('appLockEnabled');
+      expect(mockDb.all).not.toHaveBeenCalled();
+      expect(mockSendText).not.toHaveBeenCalled();
+      expect(mockMarkRead).not.toHaveBeenCalled();
+      expect(mockSendReaction).not.toHaveBeenCalled();
+      expect(mockNotifeeCancel).not.toHaveBeenCalled();
+    },
+  );
+
+  it('refuses while the live lock store has App Lock enabled', async () => {
+    useLockStore.setState({ enabled: true });
+
+    await handleNotificationAction(
+      safeChatDetail(ACTION_REPLY, { chatGuid: 'c1' }, { input: 'forged' }),
+    );
+
+    expect(mockDb.all).not.toHaveBeenCalled();
+    expect(mockSendText).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['an unreadable setting', () => mockVaultGet.mockRejectedValueOnce(new Error('keystore busy'))],
+    ['an unexpected setting value', () => mockVaultGet.mockResolvedValueOnce('maybe')],
+  ])('fails closed on %s', async (_label, arrange) => {
+    arrange();
+
+    await handleNotificationAction(
+      safeChatDetail(ACTION_REPLY, { chatGuid: 'c1' }, { input: 'forged' }),
+    );
+
+    expect(mockDb.all).not.toHaveBeenCalled();
+    expect(mockSendText).not.toHaveBeenCalled();
+  });
+
+  it('acts when the persisted setting is explicitly off', async () => {
+    mockVaultGet.mockResolvedValueOnce('false');
+
+    await handleNotificationAction(
+      safeChatDetail(ACTION_REPLY, { chatGuid: 'c1' }, { input: 'hello' }),
+    );
+
+    expect(mockSendText).toHaveBeenCalledTimes(1);
+    expect(mockNotifeeCancel).toHaveBeenCalledWith('gator-message-7');
+  });
 });
 
 describe('handleNotificationAction — reply', () => {
