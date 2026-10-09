@@ -2,7 +2,7 @@
 
 > Generated from the current lockfile and tracked/nonignored working-tree source assets. This is not legal approval and does not prove exact AAB coverage.
 
-- Package-lock SHA-256: `f470993f2bb1c7d0f5423379e99bb5f71a1b3435f87602563cbe9d0881d211c7`
+- Package-lock SHA-256: `2a9cf455bca243cc16dc5f50010be4ddc74166500b95ce022b5b0d62c31c4011`
 - Production package records: 1012
 - Unique package versions: 920
 - Source assets: 14
@@ -945,7 +945,7 @@
 | `shallowequal` | `1.1.0` | MIT | no | `709e45bb17277819ce27e9abe5dc8e56fe93081e54adb6e6385517f28aa11ac4` | none |
 | `shebang-command` | `2.0.0` | MIT | no | `69dee148a2cc470554dfa7142e830662062394d0fe67cddd379aba90dc60d6b3` | none |
 | `shebang-regex` | `3.0.0` | MIT | no | `48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0` | none |
-| `shell-quote` | `1.10.0` | MIT | no | `8bb16db1b047019e4395965f2cf3611b06c34bf86dc2d0210b3c3f91b53c21fe` | none |
+| `shell-quote` | `1.12.0` | MIT | no | `8bb16db1b047019e4395965f2cf3611b06c34bf86dc2d0210b3c3f91b53c21fe` | none |
 | `signal-exit` | `3.0.7` | ISC | no | `e05b1eaf5b5f99b7ad75cd1f38858ff9a311780b97715ead67936d60bf96aa7e` | none |
 | `simple-concat` | `1.0.1` | MIT | no | `d4c2065e2b936e62a4eb400efb4576edec9ca1388a9f78aa288e147275e7bc8b` | none |
 | `simple-get` | `4.0.1` | MIT | no | `d4c2065e2b936e62a4eb400efb4576edec9ca1388a9f78aa288e147275e7bc8b` | none |

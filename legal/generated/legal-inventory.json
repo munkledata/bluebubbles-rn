@@ -5,7 +5,7 @@
     "exactAab": false
   },
   "inputs": {
-    "packageLockSha256": "f470993f2bb1c7d0f5423379e99bb5f71a1b3435f87602563cbe9d0881d211c7",
+    "packageLockSha256": "2a9cf455bca243cc16dc5f50010be4ddc74166500b95ce022b5b0d62c31c4011",
     "projectNoticeSha256": "d9f6c2d9d6d7e0511ceadec93411c11f762ebeafb7cf11f7a3d0fef091a0e912",
     "thirdPartyNoticesSha256": "78cc50de9647e81d034807909ed2b0be5fce4ce8aebb5a5e1a54a7379a9af79d",
     "assetProvenanceSha256": "8b2bbab3c9ce316b96eb993dda48e047cf595c2d57e5839f8d158f7421e15ee1"
@@ -16,7 +16,7 @@
     "assetFiles": 14,
     "pendingAssetProvenance": 14,
     "localComponents": 13,
-    "packageLockSha256": "f470993f2bb1c7d0f5423379e99bb5f71a1b3435f87602563cbe9d0881d211c7",
+    "packageLockSha256": "2a9cf455bca243cc16dc5f50010be4ddc74166500b95ce022b5b0d62c31c4011",
     "unresolvedPackageRecords": 127,
     "exactAabCoverage": false
   },
@@ -14836,10 +14836,10 @@
     {
       "installPath": "node_modules/shell-quote",
       "name": "shell-quote",
-      "version": "1.10.0",
+      "version": "1.12.0",
       "spdx": "MIT",
-      "resolved": "https://registry.npmjs.org/shell-quote/-/shell-quote-1.10.0.tgz",
-      "integrity": "sha512-w1aiOKwKuRgtwAReIIj89puqg+I7GvX4IbLrvmhXbzQsj1+Zwi4VO3+fa6ZF91TWSjIxoEkKnMeHcLEODK5ZXA==",
+      "resolved": "https://registry.npmjs.org/shell-quote/-/shell-quote-1.12.0.tgz",
+      "integrity": "sha512-PcByqNyT/38F2kDNi006HAMRJaULuBzq/FOsw3qdZvX/GA9W/jamDaRskgHjubHiftXK5sIFxLNkvrXUwcof6Q==",
       "optional": false,
       "legalDocuments": [
         {
