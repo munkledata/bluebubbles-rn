@@ -3,9 +3,9 @@
 import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import ts from 'typescript';
 
 import {
   extractZipEntry,
@@ -13,6 +13,15 @@ import {
   REVIEWED_ANDROID_ABSOLUTE_PATH_EXCEPTIONS,
   scanZipArchiveForSensitiveMetadata,
 } from './legal-aab-inventory.mjs';
+
+// Loaded on first use, not at startup: CI runs the release-script tests (which import this module)
+// before `npm ci`, so a top-level import of an npm package would crash that step.
+const requireFromScripts = createRequire(import.meta.url);
+let typescript;
+function loadTypeScript() {
+  typescript ??= requireFromScripts('typescript');
+  return typescript;
+}
 
 const DEFAULT_DEBUG_MANIFESTS = [
   'android/app/build/intermediates/merged_manifest/debug/processDebugMainManifest/AndroidManifest.xml',
@@ -325,6 +334,7 @@ export function validateExpoBackgroundTaskRetryBridge({
 
 function hasNativeOwnedTaskKeeper(source, path, partialPatchContext = false) {
   if (typeof source !== 'string') return false;
+  const ts = loadTypeScript();
   const file = ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true);
   if (!partialPatchContext && file.parseDiagnostics.length > 0) return false;
   const registrations = [];

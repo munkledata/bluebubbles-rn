@@ -14,8 +14,9 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import {
   MANAGED_DIRECTORY_REMOVAL_OPTIONS,
@@ -776,4 +777,30 @@ test('refuses wrong tokens, unsafe modes, symlinks, and unexpected run entries',
       /temporary root must be a real directory/,
     );
   });
+});
+
+// Static import statements only; lazy require/import() inside functions is allowed.
+const STATIC_IMPORT = /^\s*(?:import|export)\s+(?:[\w\s{},*$]+\s+from\s+)?['"]([^'"]+)['"]/gm;
+
+test('scripts CI runs before npm ci import only Node built-ins and local files at startup', () => {
+  // CI's "Test toolchain policy" step runs these two test files before dependencies are installed.
+  // Locally node_modules always exists, so a stray npm import only fails in CI; catch it here.
+  const scriptsDir = dirname(fileURLToPath(import.meta.url));
+  const queue = ['check-toolchain.test.mjs', 'release-android.test.mjs'].map((name) =>
+    join(scriptsDir, name),
+  );
+  const seen = new Set();
+  const npmImports = [];
+  while (queue.length > 0) {
+    const file = queue.pop();
+    if (seen.has(file)) continue;
+    seen.add(file);
+    for (const [, specifier] of readFileSync(file, 'utf8').matchAll(STATIC_IMPORT)) {
+      if (specifier.startsWith('node:')) continue;
+      if (specifier.startsWith('.')) queue.push(join(dirname(file), specifier));
+      else npmImports.push(`${relative(scriptsDir, file)} imports '${specifier}'`);
+    }
+  }
+  assert.ok(seen.size > 3, 'expected to follow the release script import chain');
+  assert.deepEqual(npmImports, []);
 });
