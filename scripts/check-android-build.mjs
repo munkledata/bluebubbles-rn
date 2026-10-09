@@ -55,6 +55,9 @@ const SHARE_ON_CREATE_CAPTURE =
   'expo.modules.gatorshareintake.GatorShareIntakeActivityBridge.captureOnCreate(this, intent, savedInstanceState)';
 const SHARE_ON_NEW_INTENT_CAPTURE =
   'expo.modules.gatorshareintake.GatorShareIntakeActivityBridge.captureOnNewIntent(this, intent)';
+// These packages carry local patches, so their versions are pinned here and listed in
+// package.json `expo.install.exclude` (otherwise `expo install --check` fails CI on every upstream
+// patch release). Upgrade one by moving its version, its patches/ file and this constant together.
 const EXPO_BACKGROUND_TASK_VERSION = '57.0.21';
 const EXPO_TASK_MANAGER_VERSION = '57.0.21';
 const UNIMODULES_APP_LOADER_VERSION = '57.0.2';

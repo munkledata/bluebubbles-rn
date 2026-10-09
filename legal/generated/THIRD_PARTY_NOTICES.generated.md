@@ -2,7 +2,7 @@
 
 > Generated from the current lockfile and tracked/nonignored working-tree source assets. This is not legal approval and does not prove exact AAB coverage.
 
-- Package-lock SHA-256: `2a9cf455bca243cc16dc5f50010be4ddc74166500b95ce022b5b0d62c31c4011`
+- Package-lock SHA-256: `17012f7356967c2eb81d500f44681eb8937787ca98452f712f6cedc903362629`
 - Production package records: 1012
 - Unique package versions: 920
 - Source assets: 14
@@ -141,8 +141,8 @@
 | `@borewit/text-codec` | `0.2.2` | MIT | no | `5b3af80f317313a8b8c227b0c8bffae67728cfec1786137b0553e625f2affec9` | none |
 | `@expo-google-fonts/material-symbols` | `0.4.48` | MIT AND Apache-2.0 | no | `f81a99a72ec5e64e3f74fad0db3df27ab69ab0edd4878368f83379d3e4fc9313`<br>`58d1e17ffe5109a7ae296caafcadfdbe6a7d176f0bc4ab01e12a689b0499d8bd` | none |
 | `@expo/code-signing-certificates` | `0.0.6` | MIT | no | `41f2eef190265a6ea435951170947e35461707f91631821b3a67421bea5b2a7c` | none |
-| `@expo/config` | `57.0.9` | MIT | no | `16feb932ce2ba7bc7712657bb28afe409eaa4334f9f05d0e1b7a5f12bf6132f4` | none |
-| `@expo/config-plugins` | `57.0.9` | MIT | no | `16feb932ce2ba7bc7712657bb28afe409eaa4334f9f05d0e1b7a5f12bf6132f4` | none |
+| `@expo/config` | `57.0.10` | MIT | no | `16feb932ce2ba7bc7712657bb28afe409eaa4334f9f05d0e1b7a5f12bf6132f4` | none |
+| `@expo/config-plugins` | `57.0.10` | MIT | no | `16feb932ce2ba7bc7712657bb28afe409eaa4334f9f05d0e1b7a5f12bf6132f4` | none |
 | `semver` | `7.8.5` | ISC | no | `4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b` | none |
 | `@expo/config-types` | `57.0.2` | MIT | no | `8dacb1e00ec1cf679e7987c87c9953ce6a4d96e7ef361dd04cd453643e9b3351` | none |
 | `semver` | `7.8.5` | ISC | no | `4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b` | none |
@@ -157,15 +157,15 @@
 | `brace-expansion` | `5.0.12` | MIT | no | `9c63a23124d68cd30cd316a94a1a0bca34f032786df6df69fc4b5f136bac8d2e` | none |
 | `minimatch` | `10.2.6` | BlueOak-1.0.0 | no | `2c7c5d22ed5a8ee968c64757710979afcd77438c48b4a265b94e615babd8a901` | none |
 | `semver` | `7.8.5` | ISC | no | `4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b` | none |
-| `@expo/image-utils` | `0.11.5` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
+| `@expo/image-utils` | `0.11.6` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `semver` | `7.8.5` | ISC | no | `4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b` | none |
 | `@expo/inline-modules` | `0.1.7` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `@expo/json-file` | `11.0.1` | MIT | no | `16feb932ce2ba7bc7712657bb28afe409eaa4334f9f05d0e1b7a5f12bf6132f4` | none |
 | `@expo/local-build-cache-provider` | `57.0.8` | MIT | no | `16feb932ce2ba7bc7712657bb28afe409eaa4334f9f05d0e1b7a5f12bf6132f4` | none |
 | `@expo/log-box` | `57.0.4` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `@expo/metro` | `56.0.2` | MIT | no | `0c0fc06d178272faaf09281aff0cb014d52c56fb0d9516b964808d4cccb65c93` | none |
-| `@expo/metro-config` | `57.0.12` | MIT | no | `16feb932ce2ba7bc7712657bb28afe409eaa4334f9f05d0e1b7a5f12bf6132f4` | none |
-| `@expo/metro-file-map` | `57.0.3` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
+| `@expo/metro-config` | `57.0.13` | MIT | no | `16feb932ce2ba7bc7712657bb28afe409eaa4334f9f05d0e1b7a5f12bf6132f4` | none |
+| `@expo/metro-file-map` | `57.0.4` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `@expo/metro-runtime` | `57.0.16` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `ansi-styles` | `5.2.0` | MIT | no | `48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0` | none |
 | `pretty-format` | `29.7.0` | MIT | no | `da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93` | none |
@@ -173,9 +173,9 @@
 | `@expo/osascript` | `2.7.1` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `@expo/package-manager` | `1.13.1` | MIT | no | `16feb932ce2ba7bc7712657bb28afe409eaa4334f9f05d0e1b7a5f12bf6132f4` | none |
 | `@expo/plist` | `0.8.1` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
-| `@expo/prebuild-config` | `57.0.16` | MIT | no | `16feb932ce2ba7bc7712657bb28afe409eaa4334f9f05d0e1b7a5f12bf6132f4` | none |
+| `@expo/prebuild-config` | `57.0.17` | MIT | no | `16feb932ce2ba7bc7712657bb28afe409eaa4334f9f05d0e1b7a5f12bf6132f4` | none |
 | `semver` | `7.8.5` | ISC | no | `4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b` | none |
-| `@expo/require-utils` | `57.0.5` | MIT | no | `49c5f9c7097c9a940ff663a54c27a4c60e379df6cc2b3052df0d37a09a85df93` | none |
+| `@expo/require-utils` | `57.0.6` | MIT | no | `49c5f9c7097c9a940ff663a54c27a4c60e379df6cc2b3052df0d37a09a85df93` | none |
 | `@expo/schema-utils` | `57.0.2` | MIT | no | `49c5f9c7097c9a940ff663a54c27a4c60e379df6cc2b3052df0d37a09a85df93` | none |
 | `@expo/sdk-runtime-versions` | `1.0.0` | MIT | no | none | no legal text file found |
 | `@expo/spawn-async` | `1.8.0` | MIT | no | `736835b6c374cbfb66ccfbfc4f8819bcbeae3cfd5f5e5507f25f4caeabf9540e` | none |
@@ -398,7 +398,7 @@
 | `hermes-parser` | `0.36.1` | MIT | no | `da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93` | none |
 | `babel-plugin-transform-flow-enums` | `0.0.2` | MIT | no | `52412d7bc7ce4157ea628bbaacb8829e0a9cb3c58f57f99176126bc8cf2bfc85` | none |
 | `babel-preset-current-node-syntax` | `1.2.0` | MIT | no | `dddddf170b975dc55422b4a7d852fb000b9088aea454730df07b36ebb40a8953` | none |
-| `babel-preset-expo` | `57.0.13` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
+| `babel-preset-expo` | `57.0.14` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `babel-preset-jest` | `29.6.3` | MIT | no | `da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93` | none |
 | `balanced-match` | `1.0.2` | MIT | no | `a1bd5deadb6a06dd74efa852c1b8b23f63b67f2214fbe9c8bd591da51da69268` | none |
 | `barcode-detector` | `3.2.1` | MIT | no | `fb506e4ade12d7a9efa67c9d76a9a28c8e15d347ca49a69e48e29b40b34ad2ab` | none |
@@ -499,16 +499,16 @@
 | `jest-matcher-utils` | `29.7.0` | MIT | no | `da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93` | none |
 | `pretty-format` | `29.7.0` | MIT | no | `da6d3703ed11cbe42bd212c725957c98da23cbff1998c05fa4b3d976d1a58e93` | none |
 | `react-is` | `18.3.1` | MIT | no | `52412d7bc7ce4157ea628bbaacb8829e0a9cb3c58f57f99176126bc8cf2bfc85` | none |
-| `expo` | `57.0.26` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
+| `expo` | `57.0.27` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-application` | `57.0.3` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
-| `expo-asset` | `57.0.18` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
+| `expo-asset` | `57.0.19` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-audio` | `57.0.5` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-background-task` | `57.0.21` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-build-properties` | `57.0.22` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `semver` | `7.8.5` | ISC | no | `4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b` | none |
 | `expo-camera` | `57.0.6` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-clipboard` | `57.0.2` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
-| `expo-constants` | `57.0.20` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
+| `expo-constants` | `57.0.21` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-contacts` | `57.0.6` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-crypto` | `57.0.3` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-dev-client` | `57.0.19` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
@@ -525,13 +525,13 @@
 | `expo-intent-launcher` | `57.0.1` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-json-utils` | `57.0.2` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-keep-awake` | `57.0.2` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
-| `expo-linking` | `57.0.11` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
+| `expo-linking` | `57.0.12` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-local-authentication` | `57.0.3` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-location` | `57.0.20` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-manifests` | `57.0.2` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-media-library` | `57.0.5` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
-| `expo-modules-autolinking` | `57.0.13` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
-| `expo-modules-core` | `57.0.20` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
+| `expo-modules-autolinking` | `57.0.14` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
+| `expo-modules-core` | `57.0.21` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-modules-jsi` | `57.1.1` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-navigation-bar` | `57.0.3` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-network` | `57.0.2` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
@@ -546,8 +546,8 @@
 | `expo-task-manager` | `57.0.21` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-updates-interface` | `57.0.2` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `expo-video` | `57.0.5` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
-| `@expo/cli` | `57.0.27` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
-| `@expo/router-server` | `57.0.11` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
+| `@expo/cli` | `57.0.28` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
+| `@expo/router-server` | `57.0.12` | MIT | no | `fb3ca4a837f5779e83cef89b78253a8949cfb9429c340309f62d0465ec6610b4` | none |
 | `accepts` | `1.3.8` | MIT | no | `71f83c4c0621102a56d9853812777b85751bce7e9726f686f5b056c1f8a4b0e6` | none |
 | `ansi-styles` | `5.2.0` | MIT | no | `48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0` | none |
 | `negotiator` | `0.6.3` | MIT | no | `553d4d20029a24e315b428a1a54a9e109eaa340f2e958a4f50a92362c2c4070b` | none |
@@ -781,7 +781,7 @@
 | `mkdirp-classic` | `0.5.3` | MIT | no | `a255b85c1a510ecfe660c4d442ecdbc1e9d07f4b4d3d7f90443f7e5570591e0a` | none |
 | `ms` | `2.1.3` | MIT | no | `1662fae9b5314d11cf51284e2dcd1f006a354f7343f08712a730fcff9a359801` | none |
 | `multitars` | `1.0.2` | MIT | no | `479b48ab7acdf844b2f44d6a3ce806f932ad009d84d2c71651355b372a2ad0ad` | none |
-| `nanoid` | `3.3.18` | MIT | no | `da4db1480d9beea3483a2eda5c53b22238d0827d57da162b48f122e04d2d9987` | none |
+| `nanoid` | `3.3.20` | MIT | no | `da4db1480d9beea3483a2eda5c53b22238d0827d57da162b48f122e04d2d9987` | none |
 | `napi-build-utils` | `2.0.0` | MIT | no | `9c6a91d2847bd9bfd493c1ca87b9c3f96302cfd069667e6dd4a6278e69a33a31` | none |
 | `natural-compare` | `1.4.0` | MIT | no | none | no legal text file found |
 | `negotiator` | `1.0.0` | MIT | no | `553d4d20029a24e315b428a1a54a9e109eaa340f2e958a4f50a92362c2c4070b` | none |
@@ -841,7 +841,7 @@
 | `plist` | `3.1.1` | MIT | no | `3677dc86e6e5f119b500c308cc24cf533e2eb44c41050ea64584e049e5b70161` | none |
 | `@xmldom/xmldom` | `0.9.12` | MIT | no | `4da724fc305d81606b245b324d4d2586916b9d248b23d82183df753ace0fdf71` | none |
 | `pngjs` | `3.4.0` | MIT | no | `176b07a18c0bb3836aaeb61088fd0bf11a38f66e6f15e3fbda85faa225250d6e` | none |
-| `postcss` | `8.5.28` | MIT | no | `5be1f3465bba68a626777f984878814aaf35e7ef8e9fd314d469bcf887050fb8` | none |
+| `postcss` | `8.5.29` | MIT | no | `5be1f3465bba68a626777f984878814aaf35e7ef8e9fd314d469bcf887050fb8` | none |
 | `prebuild-install` | `7.1.3` | MIT | no | `0aa9add6a9158efad3e6649e3affd607c7e2629f6677af19f9988c8fbb0757b0` | none |
 | `pretty-format` | `30.4.1` | MIT | no | `9d5211db733ccdd26f9170bec24cdca84093f60415da6b769ee9cdf23d04e19f` | none |
 | `@jest/schemas` | `30.4.1` | MIT | no | `9d5211db733ccdd26f9170bec24cdca84093f60415da6b769ee9cdf23d04e19f` | none |
