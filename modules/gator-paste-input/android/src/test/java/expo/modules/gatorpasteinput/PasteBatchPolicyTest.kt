@@ -64,6 +64,19 @@ class PasteBatchPolicyTest {
   }
 
   @Test
+  fun `content URIs served by Gator's own providers are recognized, including userId prefixes`() {
+    val own = "com.bluegreengatorapps.messages"
+    val clipboard = "com.bluegreengatorapps.messages.ClipboardFileProvider"
+    val keyboard = "com.google.android.inputmethod.latin.fileprovider"
+    val owner = mapOf(clipboard to own, keyboard to "com.google.android.inputmethod.latin")::get
+    assertTrue(isOwnPasteProvider(clipboard, own, owner))
+    assertTrue(isOwnPasteProvider("0@$clipboard", own, owner))
+    assertFalse(isOwnPasteProvider(keyboard, own, owner))
+    assertFalse(isOwnPasteProvider("com.example.unknown", own, owner))
+    assertFalse(isOwnPasteProvider(null, own, owner))
+  }
+
+  @Test
   fun `deadline helper rejects the exact boundary and anything later`() {
     requirePasteDeadline(nowMs = 9L, deadlineAtMs = 10L)
     expectFailure(PasteBatchFailure.DEADLINE) {

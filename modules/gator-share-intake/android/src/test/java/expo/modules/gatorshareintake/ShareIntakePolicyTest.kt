@@ -108,6 +108,21 @@ class ShareIntakePolicyTest {
       ShareIntakeFailure.COUNT,
       assertThrows(ShareIntakeException::class.java) { requireValidShareCount(11) }.reason,
     )
+    val own = "com.bluegreengatorapps.messages"
+    val files = "com.bluegreengatorapps.messages.FileSystemFileProvider"
+    val owner = mapOf(files to own, "media" to "com.android.providers.media.module")::get
+    for (authority in listOf(files, "0@$files", "10@$files")) {
+      assertEquals(
+        ShareIntakeFailure.PERMISSION,
+        assertThrows(ShareIntakeException::class.java) {
+          requireForeignShareProvider(authority, own, owner)
+        }.reason,
+      )
+    }
+    // Another app's provider, or one Gator cannot see, stays eligible.
+    for (authority in listOf("media", "0@media", "com.example.unknown")) {
+      requireForeignShareProvider(authority, own, owner)
+    }
     assertEquals(
       ShareIntakeFailure.TEXT_SIZE,
       assertThrows(ShareIntakeException::class.java) {

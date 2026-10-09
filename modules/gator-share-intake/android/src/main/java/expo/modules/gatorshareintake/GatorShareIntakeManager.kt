@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ContentResolver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.database.Cursor
 import android.net.Uri
 import android.os.CancellationSignal
@@ -244,6 +245,11 @@ internal object GatorShareIntakeManager {
     fun add(uri: Uri?) {
       if (uri == null) return
       requireSupportedContentUri(uri)
+      requireForeignShareProvider(uri.authority.orEmpty(), context.packageName) { authority ->
+        context.packageManager
+          .resolveContentProvider(authority, PackageManager.ComponentInfoFlags.of(0))
+          ?.packageName
+      }
       uris.putIfAbsent(uri.toString(), ShareInput(uri, mimeHint))
       if (uris.size > MAX_SHARED_FILES) throw ShareIntakeException(ShareIntakeFailure.COUNT)
     }

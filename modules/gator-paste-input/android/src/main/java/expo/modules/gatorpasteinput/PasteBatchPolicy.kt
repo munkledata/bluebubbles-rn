@@ -118,6 +118,19 @@ internal fun requirePasteDeadline(nowMs: Long, deadlineAtMs: Long) {
 /** Only grant-mediated ContentProviders may act as rich-paste sources. */
 internal fun isSupportedPasteUriScheme(scheme: String?): Boolean = scheme == "content"
 
+/**
+ * True for a content URI served by one of Gator's own providers. A keyboard could commit one, and
+ * Gator would then copy its own private file with its own access (a confused deputy). Gator never
+ * puts its own files on the clipboard, so no genuine paste needs one. Android resolves
+ * `userId@authority` to the same provider, so the user prefix is stripped first. Same rule as
+ * gator-share-intake's requireForeignShareProvider.
+ */
+internal fun isOwnPasteProvider(
+  authority: String?,
+  ownPackage: String,
+  providerPackage: (String) -> String?,
+): Boolean = authority != null && providerPackage(authority.substringAfterLast('@')) == ownPackage
+
 internal fun requireValidPasteCount(count: Int) {
   if (count !in 1..MAX_PASTED_FILES) throw PasteBatchException(PasteBatchFailure.COUNT)
 }

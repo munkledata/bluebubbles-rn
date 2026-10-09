@@ -142,6 +142,23 @@ internal fun requireSupportedShareUriScheme(scheme: String?) {
   if (scheme != "content") throw ShareIntakeException(ShareIntakeFailure.SCHEME)
 }
 
+/**
+ * Refuse a content URI served by one of Gator's own providers. Another app can name one in a share,
+ * and Gator would then read its own private file with its own access on the sender's behalf (a
+ * confused deputy). Android resolves `userId@authority` to the same provider, so the user prefix is
+ * stripped as ContentProvider.getAuthorityWithoutUserId does. [providerPackage] returns the package
+ * that owns a bare authority, or null when no such provider is visible.
+ */
+internal fun requireForeignShareProvider(
+  authority: String,
+  ownPackage: String,
+  providerPackage: (String) -> String?,
+) {
+  if (providerPackage(authority.substringAfterLast('@')) == ownPackage) {
+    throw ShareIntakeException(ShareIntakeFailure.PERMISSION)
+  }
+}
+
 internal fun requireValidSharedText(text: String?): String? {
   val normalized = text?.takeIf { it.isNotEmpty() } ?: return null
   if (normalized.toByteArray(Charsets.UTF_8).size > MAX_SHARED_TEXT_BYTES) {

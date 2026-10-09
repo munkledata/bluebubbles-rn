@@ -2,6 +2,7 @@ package expo.modules.gatorpasteinput
 
 import android.content.ContentResolver
 import android.content.Context
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -324,7 +325,10 @@ class GatorPasteInputModule : Module() {
     // URI extraction is in-memory ClipData access, not a provider read. `withUris` came from a
     // URI predicate, but fail the whole batch if a malformed item contradicts that partition.
     val uris = (0 until count).mapNotNull { index -> clip.getItemAt(index)?.uri }
-    if (uris.size != count || uris.any { !isSupportedPasteUriScheme(it.scheme) }) {
+    if (
+      uris.size != count ||
+      uris.any { !isSupportedPasteUriScheme(it.scheme) || isOwnProvider(context, it) }
+    ) {
       permission.release()
       emitRejected(tag, count)
       return remaining
@@ -568,6 +572,16 @@ class GatorPasteInputModule : Module() {
         android.util.Log.w("GatorPasteInput", "paste committed-batch cleanup failed")
       }
   }
+
+  /** Fails closed: a provider lookup that throws rejects the paste like an own-provider URI. */
+  private fun isOwnProvider(context: Context, uri: Uri): Boolean =
+    runCatching {
+      isOwnPasteProvider(uri.authority, context.packageName) { authority ->
+        context.packageManager
+          .resolveContentProvider(authority, PackageManager.ComponentInfoFlags.of(0))
+          ?.packageName
+      }
+    }.getOrDefault(true)
 
   private fun capturePermissionLease(payload: ContentInfoCompat): PermissionLease? {
     return if (Build.VERSION.SDK_INT >= 25) {
