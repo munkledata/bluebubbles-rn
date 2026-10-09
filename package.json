@@ -31,6 +31,7 @@
     "check:db-writes:full": "DB_WRITE_SCANNER_FULL=1 node --test scripts/check-db-writes.test.mjs",
     "reconcile:db-writes": "node scripts/check-db-writes.mjs --reconcile",
     "check:secret-hygiene": "node --test scripts/check-secret-hygiene.test.mjs && node scripts/check-secret-hygiene.mjs",
+    "check:npm-audit": "node --test scripts/check-npm-audit.test.mjs && node scripts/check-npm-audit.mjs",
     "check:error-diagnostics": "node --test scripts/check-error-diagnostics.test.mjs && node scripts/check-error-diagnostics.mjs",
     "check:migrations": "node scripts/check-migrations.mjs && node --test scripts/check-migrations.test.mjs",
     "check:android-build": "node --test scripts/check-android-build.test.mjs scripts/legal-aab-inventory.test.mjs && node scripts/check-android-build.mjs",

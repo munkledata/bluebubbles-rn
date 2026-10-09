@@ -19,6 +19,12 @@ const INSTALL_COMMAND = 'npm ci';
 const DATABASE_WRITE_APPROVAL_NAME = 'Database write approval guard';
 const FAST_DATABASE_WRITE_TEST_NAME = 'Fast database-write scanner suite';
 const FAST_DATABASE_WRITE_TEST_COMMAND = 'npm run check:db-writes:fast';
+const DEPENDENCY_AUDIT_NAME = 'Dependency audit (reviewed exceptions only)';
+const DEPENDENCY_AUDIT_LINES = [
+  'run: |',
+  'node --test scripts/check-npm-audit.test.mjs',
+  'node scripts/check-npm-audit.mjs',
+];
 const ANDROID_NATIVE_PATH_GUARD_NAME = 'Verify Android native path hygiene';
 const ANDROID_NATIVE_PATH_GUARD_COMMAND = 'npm run check:android-native-paths';
 const ANDROID_NATIVE_PATH_ENV_LINES = [
@@ -438,17 +444,19 @@ function validatePermissions(workflow, errors) {
   }
 }
 
-function requireSafeAuditStep(checkJob, name, command, errors) {
-  const step = extractNamedStep(checkJob, name);
-  if (!step) {
-    errors.push(`CI check job is missing the "${name}" step.`);
-    return;
-  }
-  if (!step.includes(`run: ${command}`)) {
-    errors.push(`"${name}" must run exactly: ${command}`);
-  }
-  if (/continue-on-error:\s*true|\|\|\s*true/.test(step)) {
-    errors.push(`"${name}" must fail the job when npm reports a vulnerability.`);
+function requireDependencyAuditGate(checkJob, errors) {
+  // Runs last so a newly published advisory cannot stop typecheck, lint and tests from running,
+  // while any high or critical advisory without a reviewed, unexpired exception still fails CI.
+  // The exact-lines check also rejects `if`, `continue-on-error` and `|| true`.
+  requireExactNamedStep(
+    checkJob,
+    DEPENDENCY_AUDIT_NAME,
+    DEPENDENCY_AUDIT_LINES,
+    errors,
+    'CI check job',
+  );
+  if (topLevelStepHeaders(checkJob).at(-1) !== `- name: ${DEPENDENCY_AUDIT_NAME}`) {
+    errors.push(`"${DEPENDENCY_AUDIT_NAME}" must be the last step of the CI check job.`);
   }
 }
 
@@ -576,24 +584,7 @@ function validateCheckJob(workflow, errors) {
   requireDatabaseWriteApprovalGuard(check.source, installIndex, errors);
   requireFastDatabaseWriteTests(check.source, errors);
   requireUiCoverageGate(check.source, installIndex, errors);
-  const fullAuditIndex = check.source.indexOf('run: npm audit --audit-level=high');
-  const productionAuditIndex = check.source.indexOf('run: npm audit --omit=dev --audit-level=high');
-  if (installIndex < 0 || fullAuditIndex < installIndex || productionAuditIndex < installIndex) {
-    errors.push('Both high-severity npm audits must run after the clean npm ci install.');
-  }
-
-  requireSafeAuditStep(
-    check.source,
-    'Audit clean lockfile (all dependencies)',
-    'npm audit --audit-level=high',
-    errors,
-  );
-  requireSafeAuditStep(
-    check.source,
-    'Audit production dependencies',
-    'npm audit --omit=dev --audit-level=high',
-    errors,
-  );
+  requireDependencyAuditGate(check.source, errors);
 }
 
 function validateAndroidJob(workflow, errors) {

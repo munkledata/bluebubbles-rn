@@ -574,8 +574,8 @@ test('requires a separate fail-closed fast database-write suite immediately afte
   const moved = workflow
     .replace(`${fastStep}\n\n`, '')
     .replace(
-      '      - name: Audit production dependencies',
-      `${fastStep}\n\n      - name: Audit production dependencies`,
+      '      - name: Production Expo export',
+      `${fastStep}\n\n      - name: Production Expo export`,
     );
   assert.notEqual(moved, workflow);
   assert.ok(errorsFor(moved).some((error) => error.includes('must immediately follow')));
@@ -994,23 +994,53 @@ test('requires the packaged Android artifact guard', () => {
   assert.ok(errorsFor(mutated).some((error) => error.includes('npm run check:android-build')));
 });
 
-test('rejects either missing high-severity npm audit gate', () => {
-  const missingFull = workflow.replace('run: npm audit --audit-level=high', 'run: npm --version');
-  assert.ok(errorsFor(missingFull).some((error) => error.includes('Audit clean lockfile')));
+const auditStepName = 'Dependency audit (reviewed exceptions only)';
+const auditStep = [
+  `      - name: ${auditStepName}`,
+  '        run: |',
+  '          node --test scripts/check-npm-audit.test.mjs',
+  '          node scripts/check-npm-audit.mjs',
+].join('\n');
 
-  const missingProduction = workflow.replace(
-    'run: npm audit --omit=dev --audit-level=high',
-    'run: npm --version',
+test('requires the reviewed dependency audit gate as the last check-job step', () => {
+  assert.ok(workflow.includes(auditStep), 'the fixture must contain the reviewed audit step');
+  const exactStepError = `must declare the exact reviewed "${auditStepName}" step once`;
+
+  const missing = workflow.replace(`\n\n${auditStep}`, '');
+  assert.notEqual(missing, workflow);
+  assert.ok(errorsFor(missing).some((error) => error.includes(exactStepError)));
+
+  const untested = workflow.replace('          node --test scripts/check-npm-audit.test.mjs\n', '');
+  assert.notEqual(untested, workflow);
+  assert.ok(errorsFor(untested).some((error) => error.includes(exactStepError)));
+
+  const rawAudit = workflow.replace(
+    '          node scripts/check-npm-audit.mjs',
+    '          npm audit --audit-level=high || true',
   );
-  assert.ok(errorsFor(missingProduction).some((error) => error.includes('Audit production')));
+  assert.notEqual(rawAudit, workflow);
+  assert.ok(errorsFor(rawAudit).some((error) => error.includes(exactStepError)));
+
+  const notLast = workflow
+    .replace(`\n\n${auditStep}`, '')
+    .replace(
+      '      - name: Unit tests and UI coverage gate',
+      `${auditStep}\n\n      - name: Unit tests and UI coverage gate`,
+    );
+  assert.notEqual(notLast, workflow);
+  assert.ok(errorsFor(notLast).some((error) => error.includes('must be the last step')));
 });
 
 test('rejects a non-blocking audit or dependency review outside pull requests', () => {
-  const ignoredAudit = workflow.replace(
-    'run: npm audit --audit-level=high',
-    'continue-on-error: true\n        run: npm audit --audit-level=high',
-  );
-  assert.ok(errorsFor(ignoredAudit).some((error) => error.includes('must fail the job')));
+  const exactStepError = `must declare the exact reviewed "${auditStepName}" step once`;
+  for (const control of ['continue-on-error: true', 'if: always()']) {
+    const neutralized = workflow.replace(
+      `      - name: ${auditStepName}\n`,
+      `      - name: ${auditStepName}\n        ${control}\n`,
+    );
+    assert.notEqual(neutralized, workflow);
+    assert.ok(errorsFor(neutralized).some((error) => error.includes(exactStepError)));
+  }
 
   const allEvents = workflow.replace("if: github.event_name == 'pull_request'", 'if: always()');
   assert.ok(errorsFor(allEvents).some((error) => error.includes('only for pull_request')));

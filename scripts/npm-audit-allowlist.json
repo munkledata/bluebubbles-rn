@@ -1,0 +1,16 @@
+{
+  "exceptions": [
+    {
+      "id": "GHSA-vfj7-8cjw-p6xm",
+      "package": "braces",
+      "reason": "Build-machine only: glob matching in Metro, Jest and patch-package over trusted project config. Absent from the app bundle. Locally patched by patches/braces+3.0.3.patch (depth limit backported from upstream PR 72, which closed unmerged); no fixed upstream release yet.",
+      "expires": "2027-01-31"
+    },
+    {
+      "id": "GHSA-86w9-cpqp-85rv",
+      "package": "node-forge",
+      "reason": "Build-machine only: Expo CLI manifest code signing; the app ships no expo-updates. Absent from the app bundle. Locally patched by patches/node-forge+1.4.0.patch (upstream PR 1152). Remove when node-forge 1.4.1 or later is installed.",
+      "expires": "2027-01-31"
+    }
+  ]
+}
