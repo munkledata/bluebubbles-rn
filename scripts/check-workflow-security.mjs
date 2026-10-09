@@ -601,7 +601,7 @@ function validateAndroidJob(workflow, errors) {
     new Map([
       ['    name: Clean Android prebuild · native modules · APK + AAB', 'name'],
       ['    runs-on: ubuntu-latest', 'runs-on'],
-      ['    timeout-minutes: 45', 'timeout-minutes'],
+      ['    timeout-minutes: 120', 'timeout-minutes'],
       ['    env:', 'env'],
       ['    steps:', 'steps'],
     ]),

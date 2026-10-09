@@ -125,7 +125,9 @@ jobs:
   android:
     name: Clean Android prebuild · native modules · APK + AAB
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # React Native and Hermes compile from source (buildReactNativeFromSource), so the debug APK
+    # alone takes over 30 minutes on a hosted runner; 45 minutes timed out before the AAB step.
+    timeout-minutes: 120
     env:
       GRADLE_USER_HOME: /var/tmp/gator-gradle
       CFLAGS: >-
