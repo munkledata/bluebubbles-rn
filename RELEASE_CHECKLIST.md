@@ -285,7 +285,9 @@ V77 completed the isolated build, validation, promotion, and separately authoriz
 submission recorded above. Its exact local runner receipts are retained under `dist/release/`;
 do not rerun a consumed phase or silently reuse a superseded artifact. The failed code-76 run is
 terminal and never produced an uploadable AAB.
-For a future candidate only, run each phase separately and review its receipt before continuing:
+For a future candidate only, run each phase separately and review its receipt before continuing.
+Preflight refuses a `--source` commit that is not on GitHub or has no passing CI run, so push the
+source and wait for CI first:
 
 ```sh
 npm run release:android:preflight -- --version <x.y.z> --source <full-sha>

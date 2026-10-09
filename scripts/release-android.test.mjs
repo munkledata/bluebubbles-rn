@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import {
   MANAGED_DIRECTORY_REMOVAL_OPTIONS,
   androidReleaseWorkspacePaths,
+  assertSourceVerifiedByCi,
   createAndroidReleaseBuildEnvironment,
   classifyReleaseEvidenceFailure,
   finalizeVerifiedReleaseBuild,
@@ -803,4 +804,54 @@ test('scripts CI runs before npm ci import only Node built-ins and local files a
   }
   assert.ok(seen.size > 3, 'expected to follow the release script import chain');
   assert.deepEqual(npmImports, []);
+});
+
+test('refuses to release source that is unpushed or has no passing CI run', () => {
+  const commit = 'a'.repeat(40);
+  function fakeCommands({
+    remoteBranches = 'origin/master',
+    ciRuns = '[{"status":"completed","conclusion":"success"}]',
+  } = {}) {
+    const calls = [];
+    const run = (command, args) => {
+      calls.push([command, ...args].join(' '));
+      if (command === 'git' && args[0] === 'branch') return { stdout: remoteBranches };
+      if (command === 'gh') return { stdout: ciRuns };
+      return { stdout: '' };
+    };
+    return { run, calls };
+  }
+
+  const verified = fakeCommands();
+  assert.doesNotThrow(() => assertSourceVerifiedByCi(commit, { run: verified.run }));
+  assert.deepEqual(verified.calls, [
+    'git fetch --quiet origin',
+    `git branch --remotes --contains ${commit} --format=%(refname:short)`,
+    `gh run list --commit ${commit} --workflow CI --json status,conclusion`,
+  ]);
+
+  const unpushed = fakeCommands({ remoteBranches: '' });
+  assert.throws(() => assertSourceVerifiedByCi(commit, { run: unpushed.run }), /is not on GitHub/);
+  assert.ok(!unpushed.calls.some((call) => call.startsWith('gh ')));
+
+  for (const ciRuns of [
+    '[]',
+    '[{"status":"in_progress","conclusion":""}]',
+    '[{"status":"completed","conclusion":"failure"}]',
+  ]) {
+    assert.throws(
+      () => assertSourceVerifiedByCi(commit, { run: fakeCommands({ ciRuns }).run }),
+      /no passing GitHub CI run/,
+    );
+  }
+  assert.throws(
+    () => assertSourceVerifiedByCi(commit, { run: fakeCommands({ ciRuns: 'not json' }).run }),
+    /could not read GitHub CI results/,
+  );
+
+  const ghMissing = (command) => {
+    if (command === 'gh') throw new Error('gh could not start: spawn gh ENOENT');
+    return { stdout: 'origin/master' };
+  };
+  assert.throws(() => assertSourceVerifiedByCi(commit, { run: ghMissing }), /gh could not start/);
 });

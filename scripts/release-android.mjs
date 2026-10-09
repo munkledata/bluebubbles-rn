@@ -184,6 +184,44 @@ export function findLocalBranchObjectId(branch, { cwd = ROOT } = {}) {
   return result.stdout;
 }
 
+/**
+ * A release must be built from source GitHub CI has already checked: a pushed branch must contain
+ * the commit and the CI workflow must have a successful run for it. Any command failure (no
+ * network, gh not installed or not logged in) refuses the release. `run` is injectable for tests.
+ */
+export function assertSourceVerifiedByCi(commit, { cwd = ROOT, run = runCapture } = {}) {
+  run('git', ['fetch', '--quiet', 'origin'], { cwd });
+  const remoteBranches = run(
+    'git',
+    ['branch', '--remotes', '--contains', commit, '--format=%(refname:short)'],
+    { cwd },
+  ).stdout;
+  if (remoteBranches === '') {
+    throw new Error(
+      `source ${commit} is not on GitHub; push it and wait for CI to pass before releasing`,
+    );
+  }
+  const ciRuns = run(
+    'gh',
+    ['run', 'list', '--commit', commit, '--workflow', 'CI', '--json', 'status,conclusion'],
+    { cwd },
+  ).stdout;
+  let runs;
+  try {
+    runs = JSON.parse(ciRuns);
+  } catch {
+    throw new Error(`could not read GitHub CI results for ${commit}`);
+  }
+  const passed =
+    Array.isArray(runs) &&
+    runs.some((entry) => entry?.status === 'completed' && entry?.conclusion === 'success');
+  if (!passed) {
+    throw new Error(
+      `source ${commit} has no passing GitHub CI run yet; check with: gh run list --commit ${commit}`,
+    );
+  }
+}
+
 function processGroupIsRunning(processGroupId) {
   if (process.platform === 'win32' || !Number.isSafeInteger(processGroupId) || processGroupId < 1) {
     return false;
@@ -1130,6 +1168,7 @@ async function preflight(options) {
     if (sourceCommit !== requestedSource) {
       throw new Error(`--source ${requestedSource} is not the current clean HEAD ${sourceCommit}`);
     }
+    assertSourceVerifiedByCi(sourceCommit);
     const sourceTree = git(['show', '-s', '--format=%T', sourceCommit]);
     const branch = git(['branch', '--show-current']) || 'detached';
     const project = readProjectVersionState();
@@ -2298,6 +2337,7 @@ function usage() {
   reconcile --run <run-id>
   cleanup [--run <run-id>]
 
+Preflight requires the source commit to be on GitHub with a passing CI run.
 Build is local but contacts EAS and may consume a remote versionCode. Submit defaults to a dry
 command preview and requires an interactive candidate-specific confirmation when --execute is used.
 `;
