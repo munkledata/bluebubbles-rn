@@ -10,6 +10,33 @@ updates:
       timezone: America/Denver
     open-pull-requests-limit: 5
     versioning-strategy: increase-if-necessary
+    ignore:
+      # Pinned exactly by scripts/check-toolchain.mjs or carrying a local patches/ file. Upgrade
+      # these by hand, moving the pin or re-basing the patch in the same change.
+      - dependency-name: '@op-engineering/op-sqlite'
+      - dependency-name: '@react-native-firebase/*'
+      - dependency-name: '@shopify/flash-list'
+      - dependency-name: 'drizzle-orm'
+      - dependency-name: 'expo-background-task'
+      - dependency-name: 'expo-file-system'
+      - dependency-name: 'expo-router'
+      - dependency-name: 'expo-task-manager'
+      - dependency-name: 'react-native'
+      - dependency-name: 'react-native-libsodium'
+      - dependency-name: 'react-native-maps'
+      - dependency-name: 'react-native-notify-kit'
+      - dependency-name: 'react-native-screens'
+      # A new Expo SDK (or React) major is a coordinated `npx expo install` upgrade, not a bump.
+      - dependency-name: 'expo'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'expo-*'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@expo/*'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'jest-expo'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'react'
+        update-types: ['version-update:semver-major']
     groups:
       expo-sdk:
         patterns:
