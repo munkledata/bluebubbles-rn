@@ -316,6 +316,10 @@ them to `/gator/source` and `/gator/gradle`. The release runner creates equivale
 run-scoped directories beneath `/private/tmp`; do not inherit a caller-selected Gradle home, C/C++
 flags, or retained EAS local-build workspace.
 
+The two packaging commands pass `-PreactNativeArchitectures` because React Native and Hermes build
+from source in their own included Gradle build, which ignores `android/gradle.properties`; without
+the flag they compile all four ABIs, which pushed the CI Android job past two hours.
+
 ```sh
 GOOGLE_SERVICES_JSON=./test/fixtures/google-services.ci.json \
   npx expo prebuild --platform android --clean --no-install
@@ -340,8 +344,8 @@ cd android
   :expo-background-task:testDebugUnitTest \
   :react-native-screens:testDebugUnitTest \
   --no-daemon
-./gradlew :app:assembleDebug --no-daemon
-./gradlew :app:bundleRelease --no-daemon
+./gradlew :app:assembleDebug -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon
+./gradlew :app:bundleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon
 cd ..
 npm run check:android-native-paths
 npm run check:android-build

@@ -125,8 +125,11 @@ jobs:
   android:
     name: Clean Android prebuild · native modules · APK + AAB
     runs-on: ubuntu-latest
-    # React Native and Hermes compile from source (buildReactNativeFromSource), so the debug APK
-    # alone takes over 30 minutes on a hosted runner; 45 minutes timed out before the AAB step.
+    # React Native and Hermes compile from source (buildReactNativeFromSource keeps the reviewed
+    # react-native patch) in their own included Gradle build, which ignores the app's
+    # gradle.properties. Without the -PreactNativeArchitectures flags on the packaging steps it
+    # compiled all four ABIs and ran past two hours; with them, the debug APK builds the
+    # development ABIs and the release AAB only the shipped arm64-v8a.
     timeout-minutes: 120
     env:
       GRADLE_USER_HOME: /var/tmp/gator-gradle
@@ -219,11 +222,11 @@ jobs:
 
       - name: Assemble debug APK
         working-directory: android
-        run: ./gradlew :app:assembleDebug --no-daemon
+        run: ./gradlew :app:assembleDebug -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon
 
       - name: Bundle release AAB
         working-directory: android
-        run: ./gradlew :app:bundleRelease --no-daemon
+        run: ./gradlew :app:bundleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon
 
       - name: Verify Android native path hygiene
         run: npm run check:android-native-paths

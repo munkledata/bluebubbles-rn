@@ -946,8 +946,8 @@ test('requires the exact blocking native path guard immediately after the releas
 
 test('requires debug and release packaging to use separate Gradle invocations', () => {
   const combined = workflow.replace(
-    'run: ./gradlew :app:assembleDebug --no-daemon',
-    'run: ./gradlew :app:assembleDebug :app:bundleRelease --no-daemon',
+    'run: ./gradlew :app:assembleDebug -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon',
+    'run: ./gradlew :app:assembleDebug :app:bundleRelease -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon',
   );
   assert.notEqual(combined, workflow, 'the combined-build mutation must change the fixture');
   assert.ok(errorsFor(combined).some((error) => error.includes('debug APK in its own')));
@@ -956,10 +956,10 @@ test('requires debug and release packaging to use separate Gradle invocations', 
   assert.ok(errorsFor(missingDebug).some((error) => error.includes('debug APK in its own')));
 
   const overwriteAfterAssemble = workflow.replace(
-    '        run: ./gradlew :app:assembleDebug --no-daemon',
+    '        run: ./gradlew :app:assembleDebug -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon',
     [
       '        run: |',
-      '          ./gradlew :app:assembleDebug --no-daemon',
+      '          ./gradlew :app:assembleDebug -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon',
       "          printf 'unreviewed' > app/build/outputs/apk/debug/app-debug.apk",
     ].join('\n'),
   );
@@ -983,6 +983,34 @@ test('requires debug and release packaging to use separate Gradle invocations', 
   assert.ok(
     errorsFor(extraTailStep).some((error) => error.includes('exact reviewed build, verification')),
   );
+});
+
+test('requires each packaging step to pass its reviewed ABI list to the React Native build', () => {
+  const debugFlag = ':app:assembleDebug -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon';
+  const releaseFlag = ':app:bundleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon';
+  for (const [label, from, to, stepName] of [
+    ['debug flag removed', debugFlag, ':app:assembleDebug --no-daemon', 'Assemble debug APK'],
+    [
+      'debug ABIs widened',
+      debugFlag,
+      ':app:assembleDebug -PreactNativeArchitectures=armeabi-v7a,arm64-v8a,x86,x86_64 --no-daemon',
+      'Assemble debug APK',
+    ],
+    ['release flag removed', releaseFlag, ':app:bundleRelease --no-daemon', 'Bundle release AAB'],
+    [
+      'release ABIs widened',
+      releaseFlag,
+      ':app:bundleRelease -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon',
+      'Bundle release AAB',
+    ],
+  ]) {
+    const mutated = workflow.replace(from, to);
+    assert.notEqual(mutated, workflow, `${label} mutation must change the fixture`);
+    assert.ok(
+      errorsFor(mutated).some((error) => error.includes(`exact reviewed "${stepName}" step`)),
+      `${label} must fail closed`,
+    );
+  }
 });
 
 test('requires the packaged Android artifact guard', () => {

@@ -65,6 +65,13 @@ const LOCAL_NATIVE_TEST_TASKS = [
   ':expo-background-task:testDebugUnitTest',
   ':react-native-screens:testDebugUnitTest',
 ];
+// React Native and Hermes compile from source in their own included Gradle build, which does not
+// read the app's gradle.properties; only a command-line -P reaches it. Without these flags it
+// compiles all four ABIs and the Android job runs past its time limit.
+const DEBUG_APK_COMMAND =
+  'run: ./gradlew :app:assembleDebug -PreactNativeArchitectures=arm64-v8a,x86_64 --no-daemon';
+const RELEASE_AAB_COMMAND =
+  'run: ./gradlew :app:bundleRelease -PreactNativeArchitectures=arm64-v8a --no-daemon';
 const SCHEDULED_DB_CRON = "- cron: '17 7 * * 2'";
 const SCHEDULED_DB_CONDITION =
   "if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'";
@@ -689,11 +696,11 @@ function validateAndroidJob(workflow, errors) {
   const debugBuild = requireExactNamedStep(
     android.source,
     'Assemble debug APK',
-    ['working-directory: android', 'run: ./gradlew :app:assembleDebug --no-daemon'],
+    ['working-directory: android', DEBUG_APK_COMMAND],
     errors,
     'The Android build job',
   );
-  if (!hasStandaloneLine(debugBuild, 'run: ./gradlew :app:assembleDebug --no-daemon')) {
+  if (!hasStandaloneLine(debugBuild, DEBUG_APK_COMMAND)) {
     errors.push('The Android job must assemble the debug APK in its own Gradle invocation.');
   }
 
@@ -714,11 +721,11 @@ function validateAndroidJob(workflow, errors) {
   const releaseBuild = requireExactNamedStep(
     android.source,
     'Bundle release AAB',
-    ['working-directory: android', 'run: ./gradlew :app:bundleRelease --no-daemon'],
+    ['working-directory: android', RELEASE_AAB_COMMAND],
     errors,
     'The Android build job',
   );
-  if (!hasStandaloneLine(releaseBuild, 'run: ./gradlew :app:bundleRelease --no-daemon')) {
+  if (!hasStandaloneLine(releaseBuild, RELEASE_AAB_COMMAND)) {
     errors.push('The Android job must bundle the release AAB in its own Gradle invocation.');
   }
 
