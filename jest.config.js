@@ -13,6 +13,13 @@
  * The `.test.ts` vs `.test.tsx` extension is the routing rule between projects.
  */
 
+// Run every test in one fixed, non-UTC time zone so results don't depend on the machine: tests
+// that check local-calendar behaviour (all-day calendar drafts, schedule pickers, DST gaps) passed
+// on a Denver Mac but failed on UTC CI runners. A non-UTC zone also keeps local-vs-UTC date bugs
+// visible. It must be set here, before Jest builds its test environments: assigning process.env.TZ
+// inside a test changes only Jest's copy of the environment, not the clock.
+process.env.TZ = 'America/Denver';
+
 // Path-alias mapper shared by both projects (mirrors tsconfig.json paths).
 const moduleNameMapper = {
   // Native module: swap for a runtime stub (types still resolve to the real .d.ts).

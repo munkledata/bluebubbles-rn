@@ -116,30 +116,21 @@ describe('message entities', () => {
   });
 
   it('keeps an all-day calendar draft on the parsed local calendar date', () => {
-    const originalTimezone = process.env.TZ;
-    process.env.TZ = 'America/Denver';
-    try {
-      const entity = findMessageEntities('October 15, 2026').find(
-        (candidate): candidate is MessageDateEntity => candidate.kind === 'date',
-      )!;
-      const { beginTime, endTime } = localCalendarDraftBounds(entity);
-      const begin = new Date(beginTime);
-      const end = new Date(endTime);
+    // jest.config.js runs the suite in America/Denver, so local midnight differs from UTC midnight.
+    const entity = findMessageEntities('October 15, 2026').find(
+      (candidate): candidate is MessageDateEntity => candidate.kind === 'date',
+    )!;
+    const { beginTime, endTime } = localCalendarDraftBounds(entity);
+    const begin = new Date(beginTime);
+    const end = new Date(endTime);
 
-      expect(beginTime).toBe(1_792_044_000_000);
-      expect(endTime).toBe(1_792_130_400_000);
-      expect([
-        begin.getFullYear(),
-        begin.getMonth() + 1,
-        begin.getDate(),
-        begin.getHours(),
-      ]).toEqual([2026, 10, 15, 0]);
-      expect([end.getFullYear(), end.getMonth() + 1, end.getDate(), end.getHours()]).toEqual([
-        2026, 10, 16, 0,
-      ]);
-    } finally {
-      if (originalTimezone == null) delete process.env.TZ;
-      else process.env.TZ = originalTimezone;
-    }
+    expect(beginTime).toBe(1_792_044_000_000);
+    expect(endTime).toBe(1_792_130_400_000);
+    expect([begin.getFullYear(), begin.getMonth() + 1, begin.getDate(), begin.getHours()]).toEqual([
+      2026, 10, 15, 0,
+    ]);
+    expect([end.getFullYear(), end.getMonth() + 1, end.getDate(), end.getHours()]).toEqual([
+      2026, 10, 16, 0,
+    ]);
   });
 });
