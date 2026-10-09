@@ -1,5 +1,6 @@
 {
   "baselineHead": "0029_chats_deleted_at",
+  "shippedHead": "0053_versioned_server_message_state",
   "allocations": [
     {
       "number": 30,
@@ -9,7 +10,8 @@
       "status": "prepared",
       "upgradeTest": "test/db/migrations/0030_attachment_cache_entries.test.ts",
       "schemaEvidence": "src/db/schema.ts",
-      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts",
+      "sqlSha256": "427ecb38e2b9189d2cc1942d4327ff805430a3008fabf83bfbe1c0835624ed94"
     },
     {
       "number": 31,
@@ -19,7 +21,8 @@
       "status": "prepared",
       "upgradeTest": "test/db/migrations/0031_incoming_event_queue.test.ts",
       "schemaEvidence": "src/db/schema.ts",
-      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts",
+      "sqlSha256": "335a4c5203f0e5bcf30264e4e3080ea525a386ef00de002cb049986e1fc5a0df"
     },
     {
       "number": 32,
@@ -29,7 +32,8 @@
       "status": "prepared",
       "upgradeTest": "test/db/migrations/0032_theme_restore_lookup_index.test.ts",
       "schemaEvidence": "src/db/schema.ts",
-      "cacheWipeEvidence": "N/A: index only; no persistent rows"
+      "cacheWipeEvidence": "N/A: index only; no persistent rows",
+      "sqlSha256": "bd16b56fefeafcacaf3edd5da7c653416b74686fa19e2cd13c66d8fb897b6d32"
     },
     {
       "number": 33,
@@ -39,7 +43,8 @@
       "status": "prepared",
       "upgradeTest": "test/db/migrations/0033_message_deletion_ledger.test.ts",
       "schemaEvidence": "src/db/schema.ts",
-      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts",
+      "sqlSha256": "8d47f442a019d7f6087593d40b8a11a680f3df94ee5ee0f0ccc8a7eaf83668eb"
     },
     {
       "number": 34,
@@ -49,7 +54,8 @@
       "status": "prepared",
       "upgradeTest": "test/db/migrations/0034_purge_legacy_error_reports.test.ts",
       "schemaEvidence": "N/A: one-time row purge; schema unchanged",
-      "cacheWipeEvidence": "N/A: error reports are already included in account cache wipe"
+      "cacheWipeEvidence": "N/A: error reports are already included in account cache wipe",
+      "sqlSha256": "649040778046ff34feeeb4e3badfa094a838177647ee4ea992fc25d95c9bf07c"
     },
     {
       "number": 35,
@@ -59,7 +65,8 @@
       "status": "prepared",
       "upgradeTest": "test/db/migrations/0035_retire_legacy_scheduled_sending.test.ts",
       "schemaEvidence": "N/A: one-time scheduled-row state repair; schema unchanged",
-      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts",
+      "sqlSha256": "26fef124c71503a4c9c8911edc8d5e6398d8e4149e2f8a41ba69d9d90e7299a2"
     },
     {
       "number": 36,
@@ -69,7 +76,8 @@
       "status": "prepared",
       "upgradeTest": "test/db/migrations/0036_message_guid_aliases.test.ts",
       "schemaEvidence": "src/db/schema.ts",
-      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts",
+      "sqlSha256": "f1b1d755bdec4bee10d6f229e517497155231b5df19cf1d539817b51a759bd25"
     },
     {
       "number": 37,
@@ -79,7 +87,8 @@
       "status": "prepared",
       "upgradeTest": "test/db/migrations/0037_purge_legacy_redacted_mode_setting.test.ts",
       "schemaEvidence": "N/A: one-time kv row purge; schema unchanged",
-      "cacheWipeEvidence": "N/A: retired device preference; this migration permanently deletes the exact key"
+      "cacheWipeEvidence": "N/A: retired device preference; this migration permanently deletes the exact key",
+      "sqlSha256": "c1de2e06b0200b06cb6942efd4c1ad3841163d6df939f51e3d257f81327605c6"
     },
     {
       "number": 38,
@@ -89,7 +98,8 @@
       "status": "prepared",
       "upgradeTest": "test/db/migrations/0038_scrub_reaction_selected_message_text.test.ts",
       "schemaEvidence": "N/A: one-time outgoing-queue payload repair; schema unchanged",
-      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts",
+      "sqlSha256": "cb214a82270bd594472a25fe348b287c2deb24f462eed4566291ed38c78461c9"
     },
     {
       "number": 39,
@@ -99,7 +109,8 @@
       "status": "prepared",
       "upgradeTest": "test/db/migrations/0039_message_error_message.test.ts",
       "schemaEvidence": "src/db/schema.ts",
-      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts",
+      "sqlSha256": "6cc825ff0e8c68dc086d5577a1264cef6ea5b46931c8cd207d19d19515304aa7"
     },
     {
       "number": 40,
@@ -109,7 +120,8 @@
       "status": "prepared",
       "upgradeTest": "test/db/migrations/0040_chats_pin_order.test.ts",
       "schemaEvidence": "src/db/schema.ts",
-      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts",
+      "sqlSha256": "1470d2bc35f25257ad089808b4366aefb6e8540b164cb266385f9ef9abd600bd"
     },
     {
       "number": 41,
@@ -119,7 +131,8 @@
       "status": "prepared",
       "upgradeTest": "test/db/migrations/0041_message_balloon_bundle_id.test.ts",
       "schemaEvidence": "src/db/schema.ts",
-      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts",
+      "sqlSha256": "406005b409608e477e2628b7132ce163c5e9ec02976b39b2c9299a98c5b1fd9f"
     },
     {
       "number": 42,
@@ -129,7 +142,8 @@
       "status": "prepared",
       "upgradeTest": "test/db/migrations/0042_message_part_identity.test.ts",
       "schemaEvidence": "src/db/schema.ts",
-      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts",
+      "sqlSha256": "017fc92d4ade861350b9306f2e8b54c6bb524a27b7f840851fef6037ec45e862"
     },
     {
       "number": 43,
@@ -139,7 +153,8 @@
       "status": "prepared",
       "upgradeTest": "test/db/migrations/0043_custom_folders.test.ts",
       "schemaEvidence": "src/db/schema.ts",
-      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts",
+      "sqlSha256": "51120eda70da3088841507f21baa540b67974919875b71360a21554981f00ed2"
     },
     {
       "number": 44,
@@ -149,7 +164,8 @@
       "status": "prepared",
       "upgradeTest": "test/db/migrations/0044_custom_folder_unread_badge.test.ts",
       "schemaEvidence": "src/db/schema.ts",
-      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts",
+      "sqlSha256": "91514604fb1311e77d0d33d2569a4311ff45a68cdfa830043c9c5aab37ddf7e8"
     },
     {
       "number": 45,
@@ -159,7 +175,8 @@
       "status": "prepared",
       "upgradeTest": "test/db/migrations/0045_backup_export_indexes.test.ts",
       "schemaEvidence": "src/db/schema.ts",
-      "cacheWipeEvidence": "N/A: index only; no persistent rows"
+      "cacheWipeEvidence": "N/A: index only; no persistent rows",
+      "sqlSha256": "df34039192b6e4dbc2c02c499420e11032c58bbed73e54e609004a6451275ac0"
     },
     {
       "number": 46,
@@ -169,7 +186,8 @@
       "status": "prepared",
       "upgradeTest": "test/db/migrations/0046_message_send_attempt_owner.test.ts",
       "schemaEvidence": "src/db/schema.ts",
-      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts",
+      "sqlSha256": "c58e793d1be82904106492fe02b5c4fed0eba65249fbfe7cd4e043b6a5498bd0"
     },
     {
       "number": 47,
@@ -179,7 +197,8 @@
       "status": "prepared",
       "upgradeTest": "test/db/migrations/0047_message_retraction_topology.test.ts",
       "schemaEvidence": "src/db/schema.ts",
-      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts",
+      "sqlSha256": "070893842a22683f2d0bdec7eb1aeaabaf79f048db01cf980d1c23caceb12102"
     },
     {
       "number": 48,
@@ -189,7 +208,8 @@
       "status": "prepared",
       "upgradeTest": "test/db/migrations/0048_attachment_media_exports.test.ts",
       "schemaEvidence": "src/db/schema.ts",
-      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts",
+      "sqlSha256": "df4c1cf607c6a1feb970ebf806ad6ac6a5086af9c81683b3c2cd596e2d75ec54"
     },
     {
       "number": 49,
@@ -199,7 +219,8 @@
       "status": "prepared",
       "upgradeTest": "test/db/migrations/0049_inbox_search_postings.test.ts",
       "schemaEvidence": "src/db/schema.ts",
-      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts",
+      "sqlSha256": "b5f531b666bd97330a4847704e9f9c0b73024fb48a44cb84cec817958668c7f1"
     },
     {
       "number": 50,
@@ -209,7 +230,8 @@
       "status": "prepared",
       "upgradeTest": "test/db/migrations/0050_message_identity_owner_scope.test.ts",
       "schemaEvidence": "src/db/schema.ts",
-      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts",
+      "sqlSha256": "19dd473e1a14fb4f5310e98a1d4c36a37b82589f2e2a50f5b77cf2bdcc5e70fb"
     },
     {
       "number": 51,
@@ -219,7 +241,8 @@
       "status": "prepared",
       "upgradeTest": "test/db/migrations/0051_handle_color_backup_index.test.ts",
       "schemaEvidence": "src/db/schema.ts",
-      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts",
+      "sqlSha256": "e83f7184b7705e045ac902e9307c23d18630f89599852c71672fb34e4bc5cabb"
     },
     {
       "number": 52,
@@ -229,7 +252,8 @@
       "status": "prepared",
       "upgradeTest": "test/db/migrations/0052_chat_history_deletion_boundary.test.ts",
       "schemaEvidence": "src/db/schema.ts",
-      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts",
+      "sqlSha256": "331f5f58e5249847686f2bb5fe80dd4bd5abbbf054fa7b897e4ccaf767f322da"
     },
     {
       "number": 53,
@@ -239,7 +263,8 @@
       "status": "prepared",
       "upgradeTest": "test/db/migrations/0053_versioned_server_message_state.test.ts",
       "schemaEvidence": "src/db/schema.ts",
-      "cacheWipeEvidence": "test/services/messageStateSync.test.ts"
+      "cacheWipeEvidence": "test/services/messageStateSync.test.ts",
+      "sqlSha256": "3c1481b50eb5b83f5c987c1069a82e21d923ec6116d06539a97f0ffbea0351d8"
     }
   ]
 }

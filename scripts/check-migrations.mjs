@@ -10,6 +10,7 @@ const DEFAULT_REGISTRY = 'scripts/migration-registry.json';
 // This value is deliberately independent of migration-registry.json. Advancing the registry's
 // baseline together with an unreviewed migration must not turn that migration into trusted history.
 export const AUDITED_BASELINE_HEAD = '0029_chats_deleted_at';
+const SHA256_HEX = /^[a-f0-9]{64}$/;
 
 export function extractMigrationNames(source) {
   return [...source.matchAll(/\bname:\s*['"](\d{4}_[a-z0-9_]+)['"]/g)].map((match) => match[1]);
@@ -46,6 +47,22 @@ export function validateMigrationState({ names, registry, evidenceExists = () =>
     errors.push(`Audited baseline ${AUDITED_BASELINE_HEAD} does not match the migration source.`);
   }
 
+  // Shipped migrations are frozen: a phone that already ran one never runs it again, so editing it
+  // only makes fresh installs differ from upgraded phones. Every allocation up to shippedHead records
+  // the SHA-256 of its exact { name, statements }, and test/db/shippedMigrations.test.ts compares it
+  // with the code. Change the schema with a new migration instead.
+  const shippedHead = registry?.shippedHead;
+  const shippedNumber = typeof shippedHead === 'string' ? numberOf(shippedHead) : Number.NaN;
+  if (
+    typeof shippedHead !== 'string' ||
+    !(shippedNumber >= baselineNumber) ||
+    names[shippedNumber - 1] !== shippedHead
+  ) {
+    errors.push(
+      `Registry shippedHead must name a migration at or after ${AUDITED_BASELINE_HEAD}; received ${String(shippedHead)}.`,
+    );
+  }
+
   const allocations = Array.isArray(registry?.allocations) ? registry.allocations : [];
   const seenNumbers = new Set();
   const seenAllocationNames = new Set();
@@ -75,6 +92,13 @@ export function validateMigrationState({ names, registry, evidenceExists = () =>
     }
     if (!['prepared', 'merged'].includes(allocation.status)) {
       errors.push(`Allocation ${name} status must be prepared or merged.`);
+    }
+    if (allocation.sqlSha256 !== undefined && !SHA256_HEX.test(allocation.sqlSha256)) {
+      errors.push(`Allocation ${name} sqlSha256 must be 64 lowercase hexadecimal characters.`);
+    } else if (allocation.sqlSha256 === undefined && number <= shippedNumber) {
+      errors.push(
+        `Allocation ${name} has shipped (through ${shippedHead}) and must record sqlSha256.`,
+      );
     }
 
     const expectedTest = `test/db/migrations/${name}.test.ts`;
@@ -111,7 +135,7 @@ export function runMigrationCheck({ root = process.cwd(), sourcePath, registryPa
     evidenceExists: (path) => existsSync(resolve(root, path)),
   });
   if (errors.length > 0) throw new Error(errors.map((error) => `- ${error}`).join('\n'));
-  return { count: names.length, head: names.at(-1) };
+  return { count: names.length, head: names.at(-1), shippedHead: registry.shippedHead };
 }
 
 const invokedDirectly =
@@ -120,7 +144,7 @@ if (invokedDirectly) {
   try {
     const result = runMigrationCheck();
     console.log(
-      `Migration guard passed: ${result.count} sequential migrations; head ${result.head}.`,
+      `Migration guard passed: ${result.count} sequential migrations; head ${result.head}; shipped and frozen through ${result.shippedHead}.`,
     );
   } catch (error) {
     console.error(
