@@ -889,9 +889,9 @@ the continuation directory. These cleanup observations do not establish a genera
 private SDK erasure or new-build notification privacy behavior. The scoped notification-action
 episode is complete; cold, locked and successful-delivery branches remain open.
 
-### Current scheduling and photo-action source checkpoint — 2026-10-04 UTC
+### Prebuild scheduling and photo-action source checkpoint — 2026-10-04 UTC
 
-The current clean host-tested candidate is **`2f853fa053e51145db6c586e45efd84b39897035`**.
+The clean host-tested candidate at this prebuild checkpoint was **`2f853fa053e51145db6c586e45efd84b39897035`**.
 Its production source is **`5d34c223c825152330a7d13bbf2d6fc8d157257c`**; the child changes only
 the Settings component test's awaited interactions. The previously prepared `5aadc5a` candidate
 is superseded. No new native build, signed artifact, version consumption or upload is claimed.
@@ -920,6 +920,50 @@ The Android JavaScript export subsequently passed on the unchanged clean `2f853f
 **11.802 seconds** (`scheduling-final-export-result.json`). It did not launch the JVM or perform a
 native build. `2f853fa` remains the tested source parent; the final documentation-only child's
 identity is recorded in an external receipt rather than recursively naming its own commit here.
+
+### Combined native build and Internal release — 2026-10-04 UTC
+
+The combined production changes are now packaged in **0.1.60 / version code 81**, from source
+`2c09378b495b11efdd145cdaa6ef0cc54c12f54a`, release commit
+`ec5beee552253b9c73f95b66034fb6f76c29b97e`, release tree
+`eec1e98ee7d784dd0e343fe746afdc90dc1258be`. The source after host-tested parent `2f853fa`
+adds three documentation files and two native-test-only compiler corrections; production
+application source remains `5d34c22`.
+
+The first native run failed because the TaskManager test imported React Native classes that were
+only present at test runtime. Changing that test dependency to `testImplementation` supplied its
+compile classpath without changing production `compileOnly`. The next run reached Screens and
+failed because `RuntimeEnvironment.getApplication()` is not generic; removing the test's type
+argument corrected it. Both original failures are retained. The final Gradle run passes **177
+tests across 9 modules / 18 classes**, with **zero failures, errors or skips**, including all
+**42** added registry, TaskService, deadline and Screens tests. Six local Kotlin modules compile;
+the debug APK, release merged manifest and **34** final native/artifact host guard tests pass.
+The prior full Jest/coverage result remains **542 suites / 6,849 tests** on `2f853fa`; it was not
+rerun for these native-test-only corrections.
+
+The separate clean production build used local Homebrew **OpenJDK 17.0.20.1 aarch64**, pinned
+Node **24.19.0**, npm **11.17.0** and EAS **21.5.0**, reporting **BUILD SUCCESSFUL in 35m 16s**.
+The promoted `gator-release-0.1.60-v81-ec5beee.aab` is **58,172,630 bytes**, SHA-256
+`7ecad1e31bb3a55a25695681c8a57813d0f79dc84216f4b9192825ca80b5221b`. Validation and independent
+review confirm the expected upload certificate, **33 arm64-v8a libraries**, package/version,
+Maps/source/release-tree bindings and native path proof covering **16 compile databases / 4,690
+commands**. Jarsigner's streaming-reader warning matches v80's last-position manifest; cryptographic
+verification and all **1,756** payload digests pass, with no unsigned non-META-INF payload entries.
+The private review records the exact warning and does not claim streaming-reader equivalence.
+
+Internal submission completed. Android Publisher readback at **2026-10-04T12:15:29.413Z** confirms
+**0.1.60 / 81 / completed**, with no other-track releases. The submission credential's temporary
+mode-0600 copy was removed; the main credential was preserved. Evidence is retained in
+`BB/gator-android-0.1.60-20261004/RELEASE_REPORT.json`, `native-test-results.json`,
+`artifact-review.json`, `artifact-guard.json` and `play-after.json`.
+The Samsung subsequently updated through Google Play to **0.1.60 / 81**, nondebuggable, with
+min/target SDK 36. All four delivered APKs pass signature verification against the expected
+Play signing certificate. Disconnected Welcome/Get Started was visible after a **372 ms** warm
+launch. Home followed by ordinary `am kill` removed the observed process; a **461 ms** cold
+relaunch passed. Receipts: `phone/installed-identity.json` and `phone/basic-launch.json` under
+the same evidence directory. These establish Play delivery and bounded unauthenticated launch,
+not scheduling, messaging, or other repaired-feature acceptance. AMFI remains on for the
+separately owner-approved Mac helper correction; RN retains the phone lease and wake helper.
 
 ## Current conclusion and remaining acceptance
 
@@ -950,13 +994,14 @@ unexplained; added diagnostics support a future reproduction. Successful scoped 
 do not close the remaining device matrix or the raw dependency, legal, and wider-release gates.
 The later native corrections and watchdog pass the **540-suite / 6,798-test** ordinary host gate and
 39 final artifact-guard tests. Their **42 native registry, TaskService, deadline and Screens tests**
-remain uncompiled/unrun, and Play v80 contains none of these new native corrections.
+now pass within the **177-test** native run above; Play v80 contains none of these new corrections.
 The subsequent scheduling/photo-action candidate `2f853fa` passes **542 suites / 6,849 tests** and
 all configured coverage floors. That supersedes the prepared `5aadc5a` source candidate, not the
-installed Play v80 artifact; native build and exact-device acceptance still have not happened.
+installed Play v80 artifact. The new **0.1.60 / 81** native build and Internal release now pass;
+exact-device acceptance still requires its own evidence.
 
-1. Bind any new Android artifact containing the host-verified combined repairs to its own
-   source/release identity. Repeat automatic expired-cursor repair, invalidated-page recovery, and
+1. On the now Play-installed, identity-bound v81 artifact above, repeat automatic
+   expired-cursor repair, invalidated-page recovery, and
    the cold six-entry notification withdrawal on that exact installation. Do not relabel the v80
    failures as passes or use a forced full refresh as proof of automatic repair.
 2. Diagnose any repeat of the initial live sync failure with a retained, redacted classification.
@@ -964,7 +1009,8 @@ installed Play v80 artifact; native build and exact-device acceptance still have
    sync transaction boundary were not tested by the Up to date counter.
 3. Install and retest the source repairs for Settings-label search, banner/copy findings,
    and multipart filename preservation. Host regressions cover invalid names and preserved source
-   metadata; Kotlin execution, on-device keyboard/font layout and actual upload bytes/name remain open.
+   metadata, and the native filename tests now pass; on-device keyboard/font layout and actual
+   upload bytes/name remain open.
 4. Verify the source App Lock old-notice privacy repair on the replacement candidate. Warm biometric
    unlock and the finite grace timing passed in the continuation; cold launch, post-unlock drain,
    all locked envelope/action versions, replay/isolation and native cancellation-failure cases remain

@@ -1,6 +1,6 @@
 # Release plan
 
-> **Status:** ACTIVE — created 2026-09-13; latest artifact checkpoint updated 2026-10-03.
+> **Status:** ACTIVE — created 2026-09-13; latest artifact checkpoint updated 2026-10-04.
 >
 > **Authority:** This document is the only task-status authority for `RELEASE-01`, `STORE-01`,
 > `RELEASE-02`, and `RELEASE-GATE-01`. The remediation tracker remains authoritative for its 107
@@ -49,12 +49,34 @@ the staged-server journey and broader release gates are not complete.
 ## Current candidate
 
 The current candidate table is the frozen release-checklist boundary, not the latest artifact on the
-Internal track. Play `0.1.59` / version code `80` is the latest live Internal Testing artifact.
+Internal track. Play `0.1.60` / version code `81` is the latest live Internal Testing artifact.
 The table below deliberately remains frozen to v77 because the operational release checklist has
 not been rebound. No later artifact's task result transfers into a v77-only release row. V78's
 task-scoped `PERM-01`, `UI-01`, and `THEME-01A` evidence remains recorded in the remediation plan.
 
-**Latest live artifact, 2026-10-03 — not a checklist rebind:** `0.1.59` / code `80` was built from
+**Latest live artifact, 2026-10-04 — not a checklist rebind:** **`0.1.60` / code `81`** was built
+from source `2c09378b495b11efdd145cdaa6ef0cc54c12f54a` and promoted as release commit
+`ec5beee552253b9c73f95b66034fb6f76c29b97e` on local branch `release/android-0.1.60`.
+Run `android-0.1.60-2c09378-20261004112548` produced
+`gator-release-0.1.60-v81-ec5beee.aab`, **58,172,630 bytes**, SHA-256
+`7ecad1e31bb3a55a25695681c8a57813d0f79dc84216f4b9192825ca80b5221b`.
+The clean local production build, merged-manifest/packaged-artifact checks, expected upload
+certificate, arm64-only libraries, source/tree/Maps bindings and independent review pass.
+Android Publisher readback at **2026-10-04T12:15:29.413Z** confirms Internal `completed`, with
+no releases on other tracks. The temporary submission credential was removed after use.
+All **177 native tests** pass with zero failures/errors/skips, including the **42** previously
+pending tests; the debug APK and six local Kotlin modules also compile successfully.
+The earlier **542 suites / 6,849 tests** and coverage results remain bound to host-tested parent
+`2f853fa`; subsequent source changes are documentation and two native-test-only compiler fixes.
+Private evidence: `BB/gator-android-0.1.60-20261004/RELEASE_REPORT.json`.
+The Samsung subsequently updated through Google Play to v81; all four delivered APK signatures
+match the expected Play signer, and disconnected Welcome plus a **461 ms** cold relaunch after
+an observed ordinary process kill pass. Repaired-feature acceptance and existing
+security/legal/wider-release gates remain separate.
+AMFI stays enabled for the owner-approved Mac helper correction. No task status or frozen v77
+checklist row is changed by this Internal release.
+
+**Historical v80 artifact, 2026-10-03:** `0.1.59` / code `80` was built from
 source `bf1a9116463aed2bc5e420a3b5d8b6e7c963ead2` and promoted as release commit
 `acf08e7ee2ad68aceb2fbc104f409124627034a7`. The retained
 `gator-release-0.1.59-v80-acf08e7.aab` is 58,153,376 bytes with SHA-256
@@ -113,7 +135,7 @@ observations retain their distinct delivery limits. Automatic retry reached the 
 sync failure; independently reconciled history parity, general privacy, and the full journey remain
 unproven. Raw dependency audit failures remain unresolved and are not waived by the local mitigations.
 
-**Current combined-build checkpoint, 2026-10-04 UTC:** clean host-tested source
+**Historical prebuild checkpoint, 2026-10-04 UTC:** clean host-tested source
 `2f853fa053e51145db6c586e45efd84b39897035` includes the approved Gator scheduling sheet,
 both cancellation repairs and photo tap/hold actions. Production source is `5d34c22`; the child
 only awaits two Settings-test interactions. Serial full Jest and UI coverage each pass
