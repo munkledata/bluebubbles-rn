@@ -21,11 +21,22 @@ export const INCOMING_EVENT_MAX_PENDING_AGE_MS = 24 * 60 * 60 * 1000;
 /** Payload-cleared success/poison receipts suppress duplicates for seven days. */
 export const INCOMING_EVENT_TERMINAL_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 /**
- * Protect terminal receipts through the longest valid V3 envelope plus accepted future-clock skew.
+ * Protect pushed (FCM) terminal receipts through the longest valid V3 envelope plus accepted
+ * future-clock skew, so an authenticated push can never be replayed into a second effect.
  */
 export const INCOMING_EVENT_REPLAY_RECEIPT_MIN_AGE_MS = 24 * 60 * 60 * 1000 + 5 * 60 * 1000;
-/** Hard row/receipt bound; the stricter pending count and byte bounds still apply independently. */
-export const INCOMING_EVENT_RECEIPT_CAPACITY = 2_000;
+/**
+ * A live-connection (socket/dev) receipt cannot be replayed as an authenticated push. Under capacity
+ * pressure it may be evicted once its own event has expired plus the same clock margin, so short-lived
+ * typing and read-status receipts stop counting against the cap within minutes.
+ */
+export const INCOMING_EVENT_LIVE_RECEIPT_EXPIRY_MARGIN_MS = 5 * 60 * 1000;
+/**
+ * Hard row/receipt bound; the stricter pending count and byte bounds still apply independently.
+ * Because protected receipts hold their slots, this is also a throughput bound: push receipts hold
+ * one for a day, live-connection receipts only until their own event expires.
+ */
+export const INCOMING_EVENT_RECEIPT_CAPACITY = 10_000;
 /** Backwards-compatible name retained for diagnostics and existing callers. */
 export const INCOMING_EVENT_TERMINAL_CAPACITY = INCOMING_EVENT_RECEIPT_CAPACITY;
 /** A claim increments attempts, so five process deaths also stop a poison envelope. */
@@ -285,10 +296,22 @@ async function terminalizeExpiredOrExhausted(
 }
 
 /**
+ * Terminal receipts whose duplicate protection has ended. A push receipt keeps the full replay window;
+ * a live-connection receipt ends with its own event plus the clock margin.
+ */
+function evictableReceiptSql(now: number) {
+  return sql`state IN ('completed', 'poisoned')
+    AND CASE source
+          WHEN 'fcm' THEN terminal_at <= ${now - INCOMING_EVENT_REPLAY_RECEIPT_MIN_AGE_MS}
+          ELSE expires_at <= ${now - INCOMING_EVENT_LIVE_RECEIPT_EXPIRY_MARGIN_MS}
+        END`;
+}
+
+/**
  * Delete old/excess terminal receipts without evicting pending work or a still-valid replay receipt.
  *
- * Existing databases can temporarily exceed the current hard bound. Only receipts older than every
- * valid V3 replay window may be removed; protected rows fail new intake closed until a slot is safe.
+ * Existing databases can temporarily exceed the current hard bound. Only receipts whose protection has
+ * ended may be removed; protected rows fail new intake closed until a slot is safe.
  */
 async function trimTerminalReceipts(context: DbTransactionContext, now: number): Promise<void> {
   await runInTransactionContext(context, async (db) => {
@@ -305,8 +328,7 @@ async function trimTerminalReceipts(context: DbTransactionContext, now: number):
       ), removable AS (
         SELECT id
           FROM incoming_event_queue
-         WHERE state IN ('completed', 'poisoned')
-           AND terminal_at <= ${now - INCOMING_EVENT_REPLAY_RECEIPT_MIN_AGE_MS}
+         WHERE ${evictableReceiptSql(now)}
          ORDER BY terminal_at ASC, id ASC
          LIMIT (SELECT rows FROM overflow)
       )
@@ -332,8 +354,7 @@ async function ensureIncomingEventReceiptSlot(
        WHERE id IN (
          SELECT id
            FROM incoming_event_queue
-          WHERE state IN ('completed', 'poisoned')
-            AND terminal_at <= ${now - INCOMING_EVENT_REPLAY_RECEIPT_MIN_AGE_MS}
+          WHERE ${evictableReceiptSql(now)}
           ORDER BY terminal_at ASC, id ASC
           LIMIT ${slotsNeeded}
        )`);

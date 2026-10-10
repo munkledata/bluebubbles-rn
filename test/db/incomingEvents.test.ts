@@ -3,11 +3,13 @@ import { sql } from 'drizzle-orm';
 import {
   INCOMING_EVENT_DEPENDENCY_RETRY_MS,
   INCOMING_EVENT_LEASE_MS,
+  INCOMING_EVENT_LIVE_RECEIPT_EXPIRY_MARGIN_MS,
   INCOMING_EVENT_MAX_CLAIM_PAYLOAD_BYTES,
   INCOMING_EVENT_MAX_ATTEMPTS,
   INCOMING_EVENT_MAX_PAYLOAD_BYTES,
   INCOMING_EVENT_PENDING_BYTE_BUDGET,
   INCOMING_EVENT_PENDING_CAPACITY,
+  INCOMING_EVENT_RECEIPT_CAPACITY,
   INCOMING_EVENT_REPLAY_RECEIPT_MIN_AGE_MS,
   INCOMING_EVENT_TERMINAL_CAPACITY,
   INCOMING_EVENT_TERMINAL_MAX_AGE_MS,
@@ -41,6 +43,9 @@ const BASE = 1_000;
 const NOW = 10_000;
 const EXPIRY = 1_200_000;
 const DIGEST_A = 'a'.repeat(64);
+const HOUR_MS = 60 * 60 * 1000;
+/** A clock late enough that a full day of receipts keeps every timestamp non-negative. */
+const DAY_NOW = 3 * 24 * HOUR_MS;
 const DIGEST_B = 'b'.repeat(64);
 const ALLOW: DbCommitGuard = () => true;
 const TERMINAL_MATRIX_ERROR = 'matrix-failure';
@@ -2647,6 +2652,201 @@ describe('incoming event queue repository', () => {
       ),
     ).resolves.toEqual({ status: 'enqueued', id: expect.any(Number) });
     expect(queueCount(raw)).toBe(INCOMING_EVENT_TERMINAL_CAPACITY);
+  });
+
+  it('clears expired live-connection receipts under pressure so a busy day cannot block intake', async () => {
+    const { db, raw } = await createTestDb();
+    const insert = raw.prepare(`
+      INSERT INTO incoming_event_queue (
+        event_key, payload_digest, ordering_key, event_name, source, payload,
+        received_at, expires_at, state, terminal_at
+      ) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, 'completed', ?)`);
+    // A realistic day: mostly short-lived typing signals over the live connection, plus message
+    // receipts from both transports that still guard against a late duplicate copy.
+    const messageReceipts = 500;
+    const typingReceipts = INCOMING_EVENT_RECEIPT_CAPACITY - 2 * messageReceipts;
+    const seedDay = raw.transaction(() => {
+      for (let index = 0; index < typingReceipts; index += 1) {
+        const receivedAt = DAY_NOW - 12 * HOUR_MS + index;
+        insert.run(
+          `typing:${index}`,
+          DIGEST_A,
+          `ordering:typing:${index}`,
+          'typing-indicator',
+          'socket',
+          receivedAt,
+          receivedAt + 15_000,
+          receivedAt + 1_000,
+        );
+      }
+      for (let index = 0; index < messageReceipts; index += 1) {
+        const receivedAt = DAY_NOW - HOUR_MS + index;
+        for (const source of ['socket', 'fcm'] as const) {
+          insert.run(
+            `${source}-message:${index}`,
+            DIGEST_A,
+            `ordering:${source}-message:${index}`,
+            'new-message',
+            source,
+            receivedAt,
+            receivedAt + 24 * HOUR_MS,
+            receivedAt + 1_000,
+          );
+        }
+      }
+    });
+    seedDay();
+    expect(queueCount(raw)).toBe(INCOMING_EVENT_RECEIPT_CAPACITY);
+
+    await expect(
+      enqueueIncomingEvent(
+        db,
+        incoming('evening-message', { receivedAt: DAY_NOW, expiresAt: DAY_NOW + 60_000 }),
+        ALLOW,
+        DAY_NOW,
+      ),
+    ).resolves.toEqual({ status: 'enqueued', id: expect.any(Number) });
+
+    expect(queueCount(raw)).toBe(INCOMING_EVENT_RECEIPT_CAPACITY);
+    expect(
+      raw
+        .prepare(
+          `SELECT COUNT(*) AS count FROM incoming_event_queue
+            WHERE event_name = 'new-message' AND state = 'completed'`,
+        )
+        .get(),
+    ).toEqual({ count: 2 * messageReceipts });
+    await expect(
+      enqueueIncomingEvent(
+        db,
+        incoming('socket-message:0', {
+          orderingKey: 'ordering:socket-message:0',
+          receivedAt: DAY_NOW,
+          expiresAt: DAY_NOW + 60_000,
+        }),
+        ALLOW,
+        DAY_NOW,
+      ),
+    ).resolves.toEqual({ status: 'duplicate', id: expect.any(Number), state: 'completed' });
+  });
+
+  it('keeps accepting a heavy day of pushed messages, each still replay-protected', async () => {
+    const { db, raw } = await createTestDb();
+    const pushedMessages = 5_000;
+    const insert = raw.prepare(`
+      INSERT INTO incoming_event_queue (
+        event_key, payload_digest, ordering_key, event_name, source, payload,
+        received_at, expires_at, state, terminal_at
+      ) VALUES (?, ?, ?, 'new-message', 'fcm', NULL, ?, ?, 'completed', ?)`);
+    const seedDay = raw.transaction(() => {
+      for (let index = 0; index < pushedMessages; index += 1) {
+        const receivedAt = DAY_NOW - 20 * HOUR_MS + index * 10_000;
+        insert.run(
+          `pushed:${index}`,
+          DIGEST_A,
+          `ordering:pushed:${index}`,
+          receivedAt,
+          receivedAt + 24 * HOUR_MS,
+          receivedAt + 1_000,
+        );
+      }
+    });
+    seedDay();
+
+    await expect(
+      enqueueIncomingEvent(
+        db,
+        incoming('next-pushed-message', { receivedAt: DAY_NOW, expiresAt: DAY_NOW + 60_000 }),
+        ALLOW,
+        DAY_NOW,
+      ),
+    ).resolves.toEqual({ status: 'enqueued', id: expect.any(Number) });
+    expect(queueCount(raw)).toBe(pushedMessages + 1);
+  });
+
+  it('keeps a live-connection receipt until its own event expires plus the clock margin', async () => {
+    const { db, raw } = await createTestDb();
+    const expiresAt = DAY_NOW - INCOMING_EVENT_LIVE_RECEIPT_EXPIRY_MARGIN_MS + 1;
+    const insert = raw.prepare(`
+      INSERT INTO incoming_event_queue (
+        event_key, payload_digest, ordering_key, event_name, source, payload,
+        received_at, expires_at, state, terminal_at
+      ) VALUES (?, ?, ?, 'typing-indicator', 'socket', NULL, ?, ?, 'completed', ?)`);
+    const seedReceipts = raw.transaction(() => {
+      for (let index = 0; index < INCOMING_EVENT_RECEIPT_CAPACITY; index += 1) {
+        insert.run(
+          `margin:${index}`,
+          DIGEST_A,
+          `ordering:margin:${index}`,
+          expiresAt - 15_000,
+          expiresAt,
+          expiresAt - 14_000,
+        );
+      }
+    });
+    seedReceipts();
+
+    await expect(
+      enqueueIncomingEvent(
+        db,
+        incoming('inside-margin', { receivedAt: DAY_NOW, expiresAt: DAY_NOW + 60_000 }),
+        ALLOW,
+        DAY_NOW,
+      ),
+    ).resolves.toEqual({ status: 'capacity-rejected', reason: 'receipt-capacity' });
+    await expect(
+      enqueueIncomingEvent(
+        db,
+        incoming('after-margin', { receivedAt: DAY_NOW + 1, expiresAt: DAY_NOW + 60_000 }),
+        ALLOW,
+        DAY_NOW + 1,
+      ),
+    ).resolves.toEqual({ status: 'enqueued', id: expect.any(Number) });
+  });
+
+  it('keeps the 24-hour replay protection for push receipts after their event expired', async () => {
+    const { db, raw } = await createTestDb();
+    const terminalAt = DAY_NOW - 2 * HOUR_MS;
+    const insert = raw.prepare(`
+      INSERT INTO incoming_event_queue (
+        event_key, payload_digest, ordering_key, event_name, source, payload,
+        received_at, expires_at, state, terminal_at
+      ) VALUES (?, ?, ?, 'rcs-bridge-down', 'fcm', NULL, ?, ?, 'completed', ?)`);
+    const seedReceipts = raw.transaction(() => {
+      for (let index = 0; index < INCOMING_EVENT_RECEIPT_CAPACITY; index += 1) {
+        // Each push expired an hour ago, but a replay of it could still authenticate.
+        insert.run(
+          `push:${index}`,
+          DIGEST_A,
+          `ordering:push:${index}`,
+          terminalAt,
+          terminalAt + HOUR_MS,
+          terminalAt,
+        );
+      }
+    });
+    seedReceipts();
+
+    await expect(
+      enqueueIncomingEvent(
+        db,
+        incoming('push-still-protected', { receivedAt: DAY_NOW, expiresAt: DAY_NOW + 60_000 }),
+        ALLOW,
+        DAY_NOW,
+      ),
+    ).resolves.toEqual({ status: 'capacity-rejected', reason: 'receipt-capacity' });
+    const protectionEndsAt = terminalAt + INCOMING_EVENT_REPLAY_RECEIPT_MIN_AGE_MS;
+    await expect(
+      enqueueIncomingEvent(
+        db,
+        incoming('push-after-protection', {
+          receivedAt: protectionEndsAt,
+          expiresAt: protectionEndsAt + 60_000,
+        }),
+        ALLOW,
+        protectionEndsAt,
+      ),
+    ).resolves.toEqual({ status: 'enqueued', id: expect.any(Number) });
   });
 
   it('reports bounded queue health without exposing event keys or payloads', async () => {

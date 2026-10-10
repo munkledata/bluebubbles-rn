@@ -89,6 +89,11 @@ FTS5 search index.
   exception and may post only a generic notice. Authenticated, active-bound V3 may only enqueue into
   SQLCipher; it cannot read, claim, route, or apply queued content before unlock, and only a newly
   admitted row can produce the generic notice. Absent/V1/plaintext/invalid delivery posts nothing.
+- The incoming queue holds at most 10,000 rows, and protected receipts keep their slots, so the bound
+  limits daily throughput as well as storage. A push (FCM) receipt keeps its slot for the full
+  24-hour-plus-five-minute replay window. A live-connection (socket/dev) receipt may be evicted under
+  pressure once its own event has expired plus five minutes, so typing and read-status traffic cannot
+  exhaust intake. Below the bound, every receipt still suppresses duplicates for up to seven days.
 - A background-FCM message commit synchronously queues its keyed attachment app-cache effect under
   the native callback. The collector starts deduplicated factories sequentially after dispatch and
   notification presentation, awaits them outside account teardown, and revokes them at an absolute
