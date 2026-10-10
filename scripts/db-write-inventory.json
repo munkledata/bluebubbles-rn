@@ -54,10 +54,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/foregroundBoot.test.ts; test/components/routes/rootLayout.test.tsx; test/services/lockService.test.ts; test/db/dbKeyRotation.test.ts"
     },
     {
-      "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:3e37ca06e7>.<callback:da2b6409fb>:mutator-call:091ec211eccf",
+      "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>:mutator-call:96e551b4af14",
       "path": "app/(app)/_layout.tsx",
       "line": 146,
-      "symbol": "ConnectedAppLayout.<callback:3e37ca06e7>.<callback:da2b6409fb>",
+      "symbol": "ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#flushErrorReports",
       "detectedContext": "error-report-lifecycle-delegation",
@@ -67,10 +67,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/errorReportsRepo.test.ts; test/db/withDbTransaction.test.ts; test/services/errorReportQueueService.test.ts; test/services/errorReportSink.test.ts; test/services/globalErrorHandlers.test.ts; test/state/featureSettingsStore.test.ts; test/services/backgroundSyncTask.test.ts; test/services/backgroundSyncOrchestrator.test.ts; test/services/foregroundBoot.test.ts; test/services/lockService.test.ts; test/components/routes/appLayout.test.tsx"
     },
     {
-      "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:3e37ca06e7>.<callback:da2b6409fb>:mutator-call:809651c0aeae",
+      "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>:mutator-call:b2420ad62c5c",
       "path": "app/(app)/_layout.tsx",
-      "line": 161,
-      "symbol": "ConnectedAppLayout.<callback:3e37ca06e7>.<callback:da2b6409fb>",
+      "line": 166,
+      "symbol": "ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#resumeRealtime",
       "detectedContext": "coordinated-delegation",
@@ -80,10 +80,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/bootCoordinator.test.ts; test/services/foregroundBoot.test.ts; test/services/forget.test.ts; test/services/lockService.test.ts; test/services/realtimeStartupOptional.test.ts; test/services/scheduledRecoveryBarrier.test.ts; test/components/routes/homeScreen.test.tsx; test/features/conversations/devSeedAccountScope.test.ts"
     },
     {
-      "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:3e37ca06e7>.<callback:da2b6409fb>:mutator-call:091ec211eccf:2",
+      "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>:mutator-call:96e551b4af14:2",
       "path": "app/(app)/_layout.tsx",
-      "line": 164,
-      "symbol": "ConnectedAppLayout.<callback:3e37ca06e7>.<callback:da2b6409fb>",
+      "line": 169,
+      "symbol": "ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#flushErrorReports",
       "detectedContext": "error-report-lifecycle-delegation",
@@ -93,10 +93,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/errorReportsRepo.test.ts; test/db/withDbTransaction.test.ts; test/services/errorReportQueueService.test.ts; test/services/errorReportSink.test.ts; test/services/globalErrorHandlers.test.ts; test/state/featureSettingsStore.test.ts; test/services/backgroundSyncTask.test.ts; test/services/backgroundSyncOrchestrator.test.ts; test/services/foregroundBoot.test.ts; test/services/lockService.test.ts; test/components/routes/appLayout.test.tsx"
     },
     {
-      "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:3e37ca06e7>.<callback:da2b6409fb>:mutator-call:b0d360769201",
+      "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>:mutator-call:cc9500dd8a49",
       "path": "app/(app)/_layout.tsx",
-      "line": 169,
-      "symbol": "ConnectedAppLayout.<callback:3e37ca06e7>.<callback:da2b6409fb>",
+      "line": 174,
+      "symbol": "ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>",
       "operation": "mutator-call",
       "target": "src/services/send/index.ts#recoverOutgoing",
       "detectedContext": "coordinated-delegation",
@@ -108,7 +108,7 @@
     {
       "id": "app/(app)/_layout.tsx#ConnectedAppLayout.<callback:5bd646a3ed>:mutator-call:4ffa3931c74a",
       "path": "app/(app)/_layout.tsx",
-      "line": 188,
+      "line": 193,
       "symbol": "ConnectedAppLayout.<callback:5bd646a3ed>",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#flushErrorReports",

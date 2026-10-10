@@ -125,6 +125,8 @@ import { EventType } from 'react-native-notify-kit';
 // eslint-disable-next-line import/first
 import AppLayout from '../../../app/(app)/_layout';
 // eslint-disable-next-line import/first
+import { effectivelyLocked } from '@/services/notifications/lockGate';
+// eslint-disable-next-line import/first
 import { useLockStore } from '@state/lockStore';
 // eslint-disable-next-line import/first
 import { useSessionStore } from '@state/sessionStore';
@@ -297,6 +299,32 @@ describe('AppLayout — active AppState lock gate', () => {
     expect(mockFlushErrorReports).toHaveBeenCalledTimes(1);
     expect(mockRecoverOutgoing).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(mockDrainMediaExports).toHaveBeenCalledTimes(1));
+  });
+
+  it('clears the background time on an in-grace resume so live intake stays unlocked', async () => {
+    // The shared setup stubs noteBackgrounded; use the real stamp and a realistic grace period.
+    useLockStore.setState({
+      lastBackgrounded: null,
+      timeoutMs: 30_000,
+      noteBackgrounded: (now: number) => useLockStore.setState({ lastBackgrounded: now }),
+    });
+    await mountLayout();
+    const clock = jest.spyOn(Date, 'now');
+    try {
+      clock.mockReturnValue(1_000_000);
+      await emitAppState('background');
+      expect(useLockStore.getState().lastBackgrounded).toBe(1_000_000);
+
+      clock.mockReturnValue(1_005_000); // back after 5 s, inside the grace period
+      await emitAppState('active');
+      expect(mockLock).not.toHaveBeenCalled();
+      expect(mockResumeRealtime).toHaveBeenCalledTimes(1);
+
+      // 31 s after the user left (26 s into an open, unlocked session) live intake must still run.
+      expect(effectivelyLocked(useLockStore.getState(), false, 1_031_000)).toBe(false);
+    } finally {
+      clock.mockRestore();
+    }
   });
 
   it('mounts the shared connection banner with the service-owned Retry action', async () => {

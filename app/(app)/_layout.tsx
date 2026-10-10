@@ -155,6 +155,11 @@ function ConnectedAppLayout(): React.JSX.Element {
           pauseRealtime();
           return;
         }
+        // The resume is accepted inside the grace period, so the background interval is over.
+        // Without this, every later effectivelyLocked() check (live intake, realtime recovery) would
+        // see the old timestamp expire ~timeout after the user LEFT and silently reject events while
+        // the app is open and unlocked.
+        lock.noteForegrounded();
         // Android 12 and older use a transient secure-window fallback for App Lock Recents. Keep
         // it through native resume until this exact grace-period decision says content may show.
         completeNativeForegroundPrivacyTransition();

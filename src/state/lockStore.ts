@@ -13,6 +13,8 @@ interface LockState {
   setEnabled: (v: boolean) => void;
   setTimeoutMs: (ms: number) => void;
   noteBackgrounded: (now: number) => void;
+  /** A resume accepted inside the grace period ends the background interval. */
+  noteForegrounded: () => void;
   lock: () => void;
   unlock: () => void;
 }
@@ -35,6 +37,7 @@ export const useLockStore = create<LockState>((set) => ({
   setEnabled: (v) => set(v ? { enabled: true, locked: true } : { enabled: false, locked: false }),
   setTimeoutMs: (ms) => set({ timeoutMs: ms }),
   noteBackgrounded: (now) => set({ lastBackgrounded: now }),
+  noteForegrounded: () => set({ lastBackgrounded: null }),
   lock: () => set({ locked: true }),
   unlock: () =>
     set((state) => ({

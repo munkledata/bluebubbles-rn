@@ -4060,8 +4060,8 @@ test('certifies exactly the reviewed outer-lifecycle delegation boundary', () =>
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
     [
-      'app/(app)/_layout.tsx#ConnectedAppLayout.<callback:3e37ca06e7>.<callback:da2b6409fb>:mutator-call:809651c0aeae',
-      'app/(app)/_layout.tsx#ConnectedAppLayout.<callback:3e37ca06e7>.<callback:da2b6409fb>:mutator-call:b0d360769201',
+      'app/(app)/_layout.tsx#ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>:mutator-call:b2420ad62c5c',
+      'app/(app)/_layout.tsx#ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>:mutator-call:cc9500dd8a49',
       'app/(setup)/manual.tsx#Manual.submit:mutator-call:5e0818285fda',
       'app/(setup)/manual.tsx#Manual:mutator-reference:cb409be66510',
       'app/(setup)/manual.tsx#Manual:mutator-reference:cb409be66510:2',
