@@ -1,4 +1,5 @@
 import { deviceCredentialsApi, serverApi } from '@core/api';
+import { ApiError } from '@core/api/errors';
 import { isCleartext, sanitizeServerAddress, strictServerOrigin } from '@core/config';
 import { FCM_ENABLED } from '@core/realtime';
 import {
@@ -1218,10 +1219,25 @@ async function revokeScopedCredentialRemotely(
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), SCOPED_SELF_REVOKE_DEADLINE_MS);
   try {
-    const result = await deviceCredentialsApi.revokeSelf(
-      fixedCredentialClient(target.origin, target.credential),
-      controller.signal,
-    );
+    const client = fixedCredentialClient(target.origin, target.credential);
+    let result: Awaited<ReturnType<typeof deviceCredentialsApi.revokeSelf>>;
+    try {
+      result = await deviceCredentialsApi.revokeSelf(client, controller.signal);
+    } catch (error) {
+      // A revoked, never-issued or mistyped bearer cannot call revoke-self. As in the upgrade
+      // discard path, only an independent 401 from the bearer-authenticated info endpoint proves it
+      // holds no server authority; any other answer keeps the bearer for another attempt.
+      if (!(error instanceof ApiError && error.status === 401)) throw error;
+      try {
+        await serverApi.serverInfo(client, controller.signal);
+      } catch (infoError) {
+        if (infoError instanceof ApiError && infoError.status === 401) {
+          logger.warn('[forget] scoped credential was already rejected by its server');
+          return;
+        }
+      }
+      throw error;
+    }
     if (!result.deviceRemoved) {
       logger.warn('[forget] scoped credential revoked but its server push row needs admin cleanup');
     }

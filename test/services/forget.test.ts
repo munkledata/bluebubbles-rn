@@ -2191,6 +2191,53 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
     expect(clearLocalCache).toHaveBeenCalledTimes(2);
   });
 
+  it('finishes Disconnect for a bearer the server proves dead with two independent 401s', async () => {
+    const scopedCredential = `bbd_device_v1_${'D'.repeat(43)}`;
+    vaultValues.set('serverSessionState', SERVER_SESSION_STATE.active);
+    vaultValues.set('serverAddress', 'https://old.example');
+    vaultValues.set('serverPassword', scopedCredential);
+    useSessionStore.setState({
+      status: 'connected',
+      origin: 'https://old.example',
+      password: scopedCredential,
+    });
+    // A mistyped, never-issued or already-revoked bearer: revoke-self AND the bearer-authenticated
+    // info endpoint both reject it, so no server authority remains to revoke.
+    revokeSelf.mockRejectedValueOnce(ApiError.fromStatus(401, 'unknown device credential'));
+    serverInfo.mockRejectedValueOnce(ApiError.fromStatus(401, 'unknown device credential'));
+
+    await expect(forget()).resolves.toBeUndefined();
+
+    expect(serverInfo).toHaveBeenCalledWith(
+      scopedHttp,
+      expect.objectContaining({ aborted: false }),
+    );
+    expect(vaultValues.get('serverCredentialUpgrade')).toBe('{"version":1,"phase":"revoked"}');
+    expect(vaultValues.has('serverAddress')).toBe(false);
+    expect(vaultValues.has('serverPassword')).toBe(false);
+  });
+
+  it('keeps a scoped bearer when revoke-self 401s but the info check is inconclusive', async () => {
+    const scopedCredential = `bbd_device_v1_${'U'.repeat(43)}`;
+    vaultValues.set('serverSessionState', SERVER_SESSION_STATE.active);
+    vaultValues.set('serverAddress', 'https://old.example');
+    vaultValues.set('serverPassword', scopedCredential);
+    useSessionStore.setState({
+      status: 'connected',
+      origin: 'https://old.example',
+      password: scopedCredential,
+    });
+    revokeSelf.mockRejectedValueOnce(ApiError.fromStatus(401, 'proxy unauthorized'));
+    serverInfo.mockRejectedValueOnce(new ApiError('no_connection', 'Network request failed'));
+
+    await expect(forget()).rejects.toThrow(
+      'Scoped credential retirement for the previous connection could not be confirmed.',
+    );
+
+    expect(vaultValues.get('serverSessionState')).toBe(SERVER_SESSION_STATE.forgotten);
+    expect(vaultValues.get('serverPassword')).toBe(scopedCredential);
+  });
+
   it('bounds a hung scoped-custody read, wipes locally, then finishes its quarantined cleanup', async () => {
     jest.useFakeTimers();
     jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
