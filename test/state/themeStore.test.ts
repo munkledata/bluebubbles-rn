@@ -8,13 +8,14 @@ import {
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import { useThemeStore } from '@state/themeStore';
-import { DEFAULT_PRESET, lightTheme, type ThemeTokens } from '@ui/theme/tokens';
+import { DEFAULT_PRESET, darkTheme, lightTheme, type ThemeTokens } from '@ui/theme/tokens';
 import { createTestDb } from '../support/testDb';
 
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
 const mockGetDatabase = getDatabase as jest.Mock;
 
-const TOKENS = { mode: 'dark', color: { tint: '#FF0000' } } as unknown as ThemeTokens;
+// A complete stored theme: incomplete token sets now fall back to the preset instead of loading.
+const TOKENS: ThemeTokens = { ...darkTheme, color: { ...darkTheme.color, tint: '#FF0000' } };
 
 async function openTestContext() {
   const t = await createTestDb();
@@ -92,6 +93,18 @@ describe('themeStore.hydrate', () => {
   it('falls back to the preset when the stored tokens are corrupt JSON', async () => {
     const db = await openTestDb();
     const id = await createCustomTheme(db, { name: 'Bad', mode: 'dark', tokens: '{not json' });
+    await kvSet(db, THEME_CUSTOM_KEY, String(id));
+    await useThemeStore.getState().hydrate();
+    expect(useThemeStore.getState()).toMatchObject({ customThemeId: null, customTokens: null });
+  });
+
+  it('falls back to the preset when stored tokens parse but cannot render', async () => {
+    const db = await openTestDb();
+    const id = await createCustomTheme(db, {
+      name: 'My Theme',
+      mode: 'dark',
+      tokens: JSON.stringify({ ...TOKENS, color: { ...TOKENS.color, tint: 'rgb(25,130,252)' } }),
+    });
     await kvSet(db, THEME_CUSTOM_KEY, String(id));
     await useThemeStore.getState().hydrate();
     expect(useThemeStore.getState()).toMatchObject({ customThemeId: null, customTokens: null });
@@ -278,7 +291,7 @@ describe('themeStore setters', () => {
       tokens: JSON.stringify(TOKENS),
     });
     useThemeStore.setState({ customThemeId: id, customTokens: TOKENS });
-    const edited = { ...TOKENS, color: { tint: '#00FF00' } } as unknown as ThemeTokens;
+    const edited: ThemeTokens = { ...TOKENS, color: { ...TOKENS.color, tint: '#00FF00' } };
     const { updateCustomTheme } = await import('@db/repositories');
     await updateCustomTheme(db, id, { name: 'Mine', mode: 'dark', tokens: JSON.stringify(edited) });
     await useThemeStore.getState().reloadCustomTokens();

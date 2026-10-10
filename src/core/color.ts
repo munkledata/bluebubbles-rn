@@ -5,6 +5,9 @@ export interface RgbColor {
   readonly b: number;
 }
 
+/** Exactly `#RGB` / `#RRGGBB`: the forms the theme editor accepts and every Gator theme stores. */
+export const HEX_COLOR_PATTERN = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+
 /** Parse `#RGB` / `#RRGGBB` into 0–255 channels. */
 export function parseHexColor(hex: string): RgbColor {
   let value = hex.trim().replace(/^#/, '');

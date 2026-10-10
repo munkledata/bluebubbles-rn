@@ -12,6 +12,7 @@ import {
   DEFAULT_PRESET,
   isDarkThemeTokens,
   resolvePresetKey,
+  safeParseTokens,
   type PresetKey,
   type ThemeTokens,
 } from '@ui/theme/tokens';
@@ -35,12 +36,9 @@ interface ThemeState {
   clearCustomTheme: () => Promise<void>;
 }
 
+/** A stored custom theme that is corrupt or incomplete falls back to the preset (never crashes). */
 function parseTokens(json: string): ThemeTokens | null {
-  try {
-    return JSON.parse(json) as ThemeTokens;
-  } catch {
-    return null;
-  }
+  return safeParseTokens(json);
 }
 
 /**

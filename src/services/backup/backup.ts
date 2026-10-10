@@ -10,6 +10,7 @@ import {
   SecretBoxPlaintextLimitError,
   type SecretBox,
 } from '@core/crypto';
+import { parseThemeTokensJson } from '@core/themeTokens';
 import { utf8Encode } from '@utils/bytes';
 import {
   BACKUP_LIMITS,
@@ -159,7 +160,11 @@ export async function restoreBackup(
   ownershipGuard?: DbCommitGuard,
 ): Promise<RestoreResult> {
   const kv = backup.kv.filter((p) => isBackupKey(p.key));
-  const themes = backup.themes.map((theme) => ({ ...theme, isPreset: 0 }));
+  // Restore upserts by name + mode, so an unusable token set must be dropped here: otherwise it
+  // would overwrite a working theme with the same name (the editor default is "My Theme").
+  const themes = backup.themes
+    .filter((theme) => parseThemeTokensJson(theme.tokens) !== null)
+    .map((theme) => ({ ...theme, isPreset: 0 }));
   // A backup is untrusted and older files have no rank. Canonicalize the bounded pinned subset
   // outside the DB mutex: explicit ranks keep their relative order, duplicates tie by file order,
   // and legacy pins append in file order. Dense ranks prevent hostile gaps/collisions while keeping

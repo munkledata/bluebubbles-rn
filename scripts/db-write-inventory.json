@@ -15669,7 +15669,7 @@
     {
       "id": "src/services/backup/backup.ts#buildBackup:mutator-call:50677029090e",
       "path": "src/services/backup/backup.ts",
-      "line": 104,
+      "line": 105,
       "symbol": "buildBackup",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#getBackupBaseExportData",
@@ -15682,7 +15682,7 @@
     {
       "id": "src/services/backup/backup.ts#buildBackupWithCustomFolders:mutator-call:1204bfcb57bb",
       "path": "src/services/backup/backup.ts",
-      "line": 120,
+      "line": 121,
       "symbol": "buildBackupWithCustomFolders",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#getBackupV4ExportData",
@@ -15695,7 +15695,7 @@
     {
       "id": "src/services/backup/backup.ts#restoreBackup:mutator-call:712f6a809fbc",
       "path": "src/services/backup/backup.ts",
-      "line": 212,
+      "line": 217,
       "symbol": "restoreBackup",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -15708,7 +15708,7 @@
     {
       "id": "src/services/backup/backup.ts#restoreBackup:mutator-call:cedfc911f115",
       "path": "src/services/backup/backup.ts",
-      "line": 212,
+      "line": 217,
       "symbol": "restoreBackup",
       "operation": "mutator-call",
       "target": "src/services/backup/backup.ts#restoreBackup.<callback:0154bc3d51>",
@@ -15721,7 +15721,7 @@
     {
       "id": "src/services/backup/backup.ts#restoreBackup.<callback:0154bc3d51>:mutator-call:7ecb8b973875",
       "path": "src/services/backup/backup.ts",
-      "line": 214,
+      "line": 219,
       "symbol": "restoreBackup.<callback:0154bc3d51>",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction",
@@ -28708,7 +28708,7 @@
     {
       "id": "src/state/themeStore.ts#<callback:2281b2e3e0>.setPreset:mutator-call:671bf4c26dca",
       "path": "src/state/themeStore.ts",
-      "line": 88,
+      "line": 86,
       "symbol": "<callback:2281b2e3e0>.setPreset",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -28721,7 +28721,7 @@
     {
       "id": "src/state/themeStore.ts#<callback:2281b2e3e0>.setPreset:mutator-call:f3c01970de86",
       "path": "src/state/themeStore.ts",
-      "line": 88,
+      "line": 86,
       "symbol": "<callback:2281b2e3e0>.setPreset",
       "operation": "mutator-call",
       "target": "src/state/themeStore.ts#<callback:2281b2e3e0>.setPreset.<callback:93c6c92c61>",
@@ -28734,7 +28734,7 @@
     {
       "id": "src/state/themeStore.ts#<callback:2281b2e3e0>.setPreset.<callback:93c6c92c61>:mutator-call:22186fcdc34a",
       "path": "src/state/themeStore.ts",
-      "line": 89,
+      "line": 87,
       "symbol": "<callback:2281b2e3e0>.setPreset.<callback:93c6c92c61>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
@@ -28747,7 +28747,7 @@
     {
       "id": "src/state/themeStore.ts#<callback:2281b2e3e0>.setPreset.<callback:93c6c92c61>:mutator-call:7df19c23c279",
       "path": "src/state/themeStore.ts",
-      "line": 90,
+      "line": 88,
       "symbol": "<callback:2281b2e3e0>.setPreset.<callback:93c6c92c61>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
@@ -28760,7 +28760,7 @@
     {
       "id": "src/state/themeStore.ts#<callback:2281b2e3e0>.setCustomTheme:mutator-call:07c82ca7ed59",
       "path": "src/state/themeStore.ts",
-      "line": 102,
+      "line": 100,
       "symbol": "<callback:2281b2e3e0>.setCustomTheme",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -28773,7 +28773,7 @@
     {
       "id": "src/state/themeStore.ts#<callback:2281b2e3e0>.setCustomTheme:mutator-call:8783edd1784f",
       "path": "src/state/themeStore.ts",
-      "line": 102,
+      "line": 100,
       "symbol": "<callback:2281b2e3e0>.setCustomTheme",
       "operation": "mutator-call",
       "target": "src/state/themeStore.ts#<callback:2281b2e3e0>.setCustomTheme.<callback:096d9b3756>",
@@ -28786,7 +28786,7 @@
     {
       "id": "src/state/themeStore.ts#<callback:2281b2e3e0>.setCustomTheme.<callback:096d9b3756>:mutator-call:1207f46aa710",
       "path": "src/state/themeStore.ts",
-      "line": 103,
+      "line": 101,
       "symbol": "<callback:2281b2e3e0>.setCustomTheme.<callback:096d9b3756>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
@@ -28799,7 +28799,7 @@
     {
       "id": "src/state/themeStore.ts#<callback:2281b2e3e0>.clearCustomTheme:mutator-call:07ee3458db41",
       "path": "src/state/themeStore.ts",
-      "line": 124,
+      "line": 122,
       "symbol": "<callback:2281b2e3e0>.clearCustomTheme",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -28812,7 +28812,7 @@
     {
       "id": "src/state/themeStore.ts#<callback:2281b2e3e0>.clearCustomTheme:mutator-call:9c61595b9b7e",
       "path": "src/state/themeStore.ts",
-      "line": 124,
+      "line": 122,
       "symbol": "<callback:2281b2e3e0>.clearCustomTheme",
       "operation": "mutator-call",
       "target": "src/state/themeStore.ts#<callback:2281b2e3e0>.clearCustomTheme.<callback:3d4db5413f>",
@@ -28825,7 +28825,7 @@
     {
       "id": "src/state/themeStore.ts#<callback:2281b2e3e0>.clearCustomTheme.<callback:3d4db5413f>:mutator-call:48f115f8f4e7",
       "path": "src/state/themeStore.ts",
-      "line": 125,
+      "line": 123,
       "symbol": "<callback:2281b2e3e0>.clearCustomTheme.<callback:3d4db5413f>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",

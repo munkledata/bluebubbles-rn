@@ -29,6 +29,7 @@ import {
 import { SecretBox } from '@core/crypto';
 import { createLibsodiumBackend } from '../support/libsodiumBackend';
 import { createTestDb } from '../support/testDb';
+import { themeTokens } from '../support/themeTokens';
 
 type TestDb = Awaited<ReturnType<typeof createTestDb>>;
 
@@ -140,7 +141,7 @@ describe('backup v3 custom folders', () => {
     await kvSet(source.db, 'theme.preset', 'committed-theme');
     source.raw
       .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?, ?, ?, 0)')
-      .run('Committed theme', 'dark', '{"generation":"committed"}');
+      .run('Committed theme', 'dark', themeTokens({ generation: 'committed' }));
     await seedChat(source, 'snapshot-chat', { chatIdentifier: 'snapshot-stable' });
     await setChatCustomization(source.db, 'snapshot-chat', { customName: 'Committed chat' });
     await createCustomFolder(source.db, 'Committed folder');
@@ -189,7 +190,10 @@ describe('backup v3 custom folders', () => {
     expect(backup.kv).toContainEqual({ key: 'theme.preset', value: 'committed-theme' });
     expect(backup.kv).not.toContainEqual({ key: 'theme.preset', value: 'phantom-theme' });
     expect(backup.themes).toContainEqual(
-      expect.objectContaining({ name: 'Committed theme', tokens: '{"generation":"committed"}' }),
+      expect.objectContaining({
+        name: 'Committed theme',
+        tokens: themeTokens({ generation: 'committed' }),
+      }),
     );
     expect(backup.chatCustomizations).toContainEqual(
       expect.objectContaining({ customName: 'Committed chat' }),
@@ -1019,7 +1023,9 @@ describe('backup v3 custom folders', () => {
     const backup: BackupV3 = {
       ...emptyV3(),
       kv: [{ key: 'theme.preset', value: 'after' }],
-      themes: [{ name: 'Imported theme', mode: 'dark', tokens: '{"accent":"#123456"}' }],
+      themes: [
+        { name: 'Imported theme', mode: 'dark', tokens: themeTokens({ accent: '#123456' }) },
+      ],
       chatCustomizations: [
         {
           identity: directIdentity('rollback-stable'),

@@ -39,7 +39,9 @@ import {
   type Backup,
 } from '@/services/backup/backupSchema';
 import { createLibsodiumBackend } from '../support/libsodiumBackend';
+import { darkTheme } from '@ui/theme/tokens';
 import { createTestDb } from '../support/testDb';
+import { themeTokens } from '../support/themeTokens';
 
 type Db = Awaited<ReturnType<typeof createTestDb>>;
 
@@ -117,7 +119,7 @@ describe('buildBackup', () => {
     await kvSet(t.db, 'theme.preset', 'oledDark');
     t.raw
       .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)')
-      .run('Mine', 'dark', '{"x":1}');
+      .run('Mine', 'dark', themeTokens({ x: 1 }));
     const guid = 'unprefixed-chat';
     await seedChat(t, guid, { style: 45 });
     await setChatCustomization(t.db, guid, { customName: 'Best', customColor: '#34C759' });
@@ -127,7 +129,7 @@ describe('buildBackup', () => {
     expect(b.exportedAt).toBe(123);
     expect(b.kv).toContainEqual({ key: 'theme.preset', value: 'oledDark' });
     expect(b.themes).toContainEqual(
-      expect.objectContaining({ name: 'Mine', mode: 'dark', tokens: '{"x":1}' }),
+      expect.objectContaining({ name: 'Mine', mode: 'dark', tokens: themeTokens({ x: 1 }) }),
     );
     expect(b.chatCustomizations).toContainEqual(
       expect.objectContaining({
@@ -281,7 +283,7 @@ describe('restoreBackup round-trip', () => {
     await kvSet(src.db, 'theme.preset', 'brightWhite');
     src.raw
       .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)')
-      .run('Custom', 'light', '{"a":2}');
+      .run('Custom', 'light', themeTokens({ a: 2 }));
     const guid = 'iMessage;-;a@b.com';
     await seedChat(src, guid);
     await setChatCustomization(src.db, guid, { customName: 'Squad', customColor: '#AF52DE' });
@@ -537,7 +539,7 @@ describe('restoreBackup round-trip', () => {
     const neighbour = withDbTransaction(t.db, async () => {
       t.raw
         .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)')
-        .run('Mine', 'dark', '{"phantom":1}');
+        .run('Mine', 'dark', themeTokens({ phantom: 1 }));
       neighbourStarted();
       await release;
       throw new Error('neighbour rollback');
@@ -545,18 +547,18 @@ describe('restoreBackup round-trip', () => {
     await started;
 
     const restore = restoreThemes(t.db, [
-      { name: 'Mine', mode: 'dark', tokens: '{"safe":1}', isPreset: 0 },
+      { name: 'Mine', mode: 'dark', tokens: themeTokens({ safe: 1 }), isPreset: 0 },
     ]);
     await Promise.resolve();
     expect(t.raw.prepare("SELECT tokens FROM themes WHERE name='Mine'").get()).toEqual({
-      tokens: '{"phantom":1}',
+      tokens: themeTokens({ phantom: 1 }),
     });
 
     releaseNeighbour();
     await expect(neighbour).rejects.toThrow('neighbour rollback');
     await restore;
     expect(t.raw.prepare("SELECT tokens FROM themes WHERE name='Mine'").get()).toEqual({
-      tokens: '{"safe":1}',
+      tokens: themeTokens({ safe: 1 }),
     });
   });
 
@@ -627,9 +629,9 @@ describe('restoreBackup round-trip', () => {
         exportedAt: 1,
         kv: [{ key: 'theme.preset', value: 'nord' }],
         themes: [
-          { name: 'committed-prefix', mode: 'dark', tokens: '{"a":1}', isPreset: 0 },
-          { name: 'revoke-here', mode: 'dark', tokens: '{"b":2}', isPreset: 0 },
-          { name: 'must-not-run', mode: 'dark', tokens: '{"c":3}', isPreset: 0 },
+          { name: 'committed-prefix', mode: 'dark', tokens: themeTokens({ a: 1 }), isPreset: 0 },
+          { name: 'revoke-here', mode: 'dark', tokens: themeTokens({ b: 2 }), isPreset: 0 },
+          { name: 'must-not-run', mode: 'dark', tokens: themeTokens({ c: 3 }), isPreset: 0 },
         ],
         chatCustomizations: [],
       });
@@ -669,20 +671,20 @@ describe('restoreBackup round-trip', () => {
     const insert = t.raw.prepare(
       'INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)',
     );
-    insert.run('A', 'dark', '{"oldA1":1}');
-    insert.run('B', 'light', '{"oldB":1}');
-    insert.run('A', 'dark', '{"oldA2":1}');
+    insert.run('A', 'dark', themeTokens({ oldA1: 1 }));
+    insert.run('B', 'light', themeTokens({ oldB: 1 }));
+    insert.run('A', 'dark', themeTokens({ oldA2: 1 }));
 
     await restoreThemes(t.db, [
-      { name: 'A', mode: 'dark', tokens: '{"newA1":1}', isPreset: 0 },
-      { name: 'A', mode: 'dark', tokens: '{"newA2":1}', isPreset: 0 },
-      { name: 'B', mode: 'light', tokens: '{"newB":1}', isPreset: 0 },
+      { name: 'A', mode: 'dark', tokens: themeTokens({ newA1: 1 }), isPreset: 0 },
+      { name: 'A', mode: 'dark', tokens: themeTokens({ newA2: 1 }), isPreset: 0 },
+      { name: 'B', mode: 'light', tokens: themeTokens({ newB: 1 }), isPreset: 0 },
     ]);
 
     expect(t.raw.prepare('SELECT id, tokens FROM themes ORDER BY id').all()).toEqual([
-      { id: 1, tokens: '{"newA1":1}' },
-      { id: 2, tokens: '{"newB":1}' },
-      { id: 3, tokens: '{"newA2":1}' },
+      { id: 1, tokens: themeTokens({ newA1: 1 }) },
+      { id: 2, tokens: themeTokens({ newB: 1 }) },
+      { id: 3, tokens: themeTokens({ newA2: 1 }) },
     ]);
   });
 
@@ -705,12 +707,12 @@ describe('restoreBackup round-trip', () => {
     // restoreThemes claims its cutoff queue slot synchronously. This editor write queues after the
     // cutoff but before the restore's per-item transaction.
     const restore = restoreThemes(t.db, [
-      { name: 'Mine', mode: 'dark', tokens: '{"backup":1}', isPreset: 0 },
+      { name: 'Mine', mode: 'dark', tokens: themeTokens({ backup: 1 }), isPreset: 0 },
     ]);
     const editorInsert = withDbTransaction(t.db, async () => {
       t.raw
         .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)')
-        .run('Mine', 'dark', '{"editor":1}');
+        .run('Mine', 'dark', themeTokens({ editor: 1 }));
     });
 
     releaseNeighbour();
@@ -718,8 +720,8 @@ describe('restoreBackup round-trip', () => {
     await editorInsert;
     await restore;
     expect(t.raw.prepare("SELECT tokens FROM themes WHERE name='Mine' ORDER BY id").all()).toEqual([
-      { tokens: '{"editor":1}' },
-      { tokens: '{"backup":1}' },
+      { tokens: themeTokens({ editor: 1 }) },
+      { tokens: themeTokens({ backup: 1 }) },
     ]);
   });
 
@@ -727,7 +729,7 @@ describe('restoreBackup round-trip', () => {
     const src = await createTestDb();
     src.raw
       .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)')
-      .run('Mine', 'dark', '{"a":1}');
+      .run('Mine', 'dark', themeTokens({ a: 1 }));
     const backup = await buildBackup(src.db, { exportedAt: 1 });
 
     const dst = await createTestDb();
@@ -737,14 +739,14 @@ describe('restoreBackup round-trip', () => {
       tokens: string;
     }[];
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.tokens).toBe('{"a":1}');
+    expect(rows[0]?.tokens).toBe(themeTokens({ a: 1 }));
   });
 
   it('a restore REFRESHES an existing theme of the same name+mode instead of adding a twin', async () => {
     const t = await createTestDb();
     t.raw
       .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)')
-      .run('Mine', 'dark', '{"old":1}');
+      .run('Mine', 'dark', themeTokens({ old: 1 }));
     const id = (t.raw.prepare("SELECT id FROM themes WHERE name='Mine'").get() as { id: number })
       .id;
 
@@ -752,7 +754,7 @@ describe('restoreBackup round-trip', () => {
       version: 1,
       exportedAt: 1,
       kv: [],
-      themes: [{ name: 'Mine', mode: 'dark', tokens: '{"new":2}', isPreset: 0 }],
+      themes: [{ name: 'Mine', mode: 'dark', tokens: themeTokens({ new: 2 }), isPreset: 0 }],
       chatCustomizations: [],
     });
 
@@ -761,10 +763,43 @@ describe('restoreBackup round-trip', () => {
       tokens: string;
     }[];
     expect(rows).toHaveLength(1);
-    expect(rows[0]?.tokens).toBe('{"new":2}');
+    expect(rows[0]?.tokens).toBe(themeTokens({ new: 2 }));
     // Same row id: the theme is updated in place, never deleted-and-recreated, so a kv pointer at
     // the active custom theme (and the reactive theme list) never sees it missing.
     expect(rows[0]?.id).toBe(id);
+  });
+
+  it('drops a theme that cannot render instead of overwriting a working same-name theme', async () => {
+    const t = await createTestDb();
+    t.raw
+      .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)')
+      .run('My Theme', 'dark', themeTokens({ local: 1 }));
+    // Valid JSON, but readableTextOn cannot parse the tint: before validation this restored over
+    // the active theme and crashed every launch.
+    const unrenderable = JSON.stringify({
+      ...darkTheme,
+      color: { ...darkTheme.color, tint: 'rgb(25,130,252)' },
+    });
+
+    const res = await restoreBackup(t.db, {
+      version: 1,
+      exportedAt: 1,
+      kv: [],
+      themes: [
+        { name: 'My Theme', mode: 'dark', tokens: unrenderable, isPreset: 0 },
+        { name: 'No colours', mode: 'dark', tokens: '{"mode":"dark"}', isPreset: 0 },
+        { name: 'Kept', mode: 'dark', tokens: themeTokens({ kept: 1 }), isPreset: 0 },
+      ],
+      chatCustomizations: [],
+    });
+
+    expect(res.themes).toBe(1);
+    expect(
+      t.raw.prepare('SELECT name, tokens FROM themes WHERE is_preset = 0 ORDER BY name').all(),
+    ).toEqual([
+      { name: 'Kept', tokens: themeTokens({ kept: 1 }) },
+      { name: 'My Theme', tokens: themeTokens({ local: 1 }) },
+    ]);
   });
 
   it('same name in a different mode is a DIFFERENT theme (the key is name + mode)', async () => {
@@ -774,8 +809,8 @@ describe('restoreBackup round-trip', () => {
       exportedAt: 1,
       kv: [],
       themes: [
-        { name: 'Mine', mode: 'dark', tokens: '{"d":1}', isPreset: 0 },
-        { name: 'Mine', mode: 'light', tokens: '{"l":1}', isPreset: 0 },
+        { name: 'Mine', mode: 'dark', tokens: themeTokens({ d: 1 }), isPreset: 0 },
+        { name: 'Mine', mode: 'light', tokens: themeTokens({ l: 1 }), isPreset: 0 },
       ],
       chatCustomizations: [],
     });
@@ -787,20 +822,20 @@ describe('restoreBackup round-trip', () => {
     const t = await createTestDb();
     t.raw
       .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,1)')
-      .run('Mine', 'dark', '{"preset":1}');
+      .run('Mine', 'dark', themeTokens({ preset: 1 }));
     await restoreBackup(t.db, {
       version: 1,
       exportedAt: 1,
       kv: [],
-      themes: [{ name: 'Mine', mode: 'dark', tokens: '{"user":1}', isPreset: 0 }],
+      themes: [{ name: 'Mine', mode: 'dark', tokens: themeTokens({ user: 1 }), isPreset: 0 }],
       chatCustomizations: [],
     });
     const rows = t.raw
       .prepare("SELECT tokens, is_preset FROM themes WHERE name='Mine' ORDER BY is_preset")
       .all() as { tokens: string; is_preset: number }[];
     expect(rows).toEqual([
-      { tokens: '{"user":1}', is_preset: 0 },
-      { tokens: '{"preset":1}', is_preset: 1 },
+      { tokens: themeTokens({ user: 1 }), is_preset: 0 },
+      { tokens: themeTokens({ preset: 1 }), is_preset: 1 },
     ]);
   });
 
@@ -811,19 +846,19 @@ describe('restoreBackup round-trip', () => {
     const ins = src.raw.prepare(
       'INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)',
     );
-    ins.run('My Theme', 'dark', '{"a":1}');
-    ins.run('My Theme', 'dark', '{"b":2}');
+    ins.run('My Theme', 'dark', themeTokens({ a: 1 }));
+    ins.run('My Theme', 'dark', themeTokens({ b: 2 }));
     const backup = await buildBackup(src.db, { exportedAt: 1 });
 
     // Fresh device (the primary use of a backup): BOTH palettes must land, not one.
     const dst = await createTestDb();
     await restoreBackup(dst.db, backup);
     const after = (): unknown[] => dst.raw.prepare('SELECT tokens FROM themes ORDER BY id').all();
-    expect(after()).toEqual([{ tokens: '{"a":1}' }, { tokens: '{"b":2}' }]);
+    expect(after()).toEqual([{ tokens: themeTokens({ a: 1 }) }, { tokens: themeTokens({ b: 2 }) }]);
 
     // A second recovery attempt pairs 1:1 with the rows it just created — no twins multiply.
     await restoreBackup(dst.db, backup);
-    expect(after()).toEqual([{ tokens: '{"a":1}' }, { tokens: '{"b":2}' }]);
+    expect(after()).toEqual([{ tokens: themeTokens({ a: 1 }) }, { tokens: themeTokens({ b: 2 }) }]);
   });
 
   it('a restore onto the SOURCE device leaves each twin its own palette', async () => {
@@ -831,16 +866,16 @@ describe('restoreBackup round-trip', () => {
     const ins = t.raw.prepare(
       'INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)',
     );
-    ins.run('My Theme', 'dark', '{"a":1}');
-    ins.run('My Theme', 'dark', '{"b":2}');
+    ins.run('My Theme', 'dark', themeTokens({ a: 1 }));
+    ins.run('My Theme', 'dark', themeTokens({ b: 2 }));
     const backup = await buildBackup(t.db, { exportedAt: 1 });
 
     await restoreBackup(t.db, backup);
     // Same ids, each with the tokens it was exported with — a hand-built palette is never
     // overwritten by its twin's.
     expect(t.raw.prepare('SELECT id, tokens FROM themes ORDER BY id').all()).toEqual([
-      { id: 1, tokens: '{"a":1}' },
-      { id: 2, tokens: '{"b":2}' },
+      { id: 1, tokens: themeTokens({ a: 1 }) },
+      { id: 2, tokens: themeTokens({ b: 2 }) },
     ]);
   });
 
@@ -849,19 +884,21 @@ describe('restoreBackup round-trip', () => {
     const ins = t.raw.prepare(
       'INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)',
     );
-    ins.run('My Theme', 'dark', '{"local1":1}');
-    ins.run('My Theme', 'dark', '{"local2":1}');
+    ins.run('My Theme', 'dark', themeTokens({ local1: 1 }));
+    ins.run('My Theme', 'dark', themeTokens({ local2: 1 }));
 
     await restoreBackup(t.db, {
       version: 1,
       exportedAt: 1,
       kv: [],
-      themes: [{ name: 'My Theme', mode: 'dark', tokens: '{"fromBackup":1}', isPreset: 0 }],
+      themes: [
+        { name: 'My Theme', mode: 'dark', tokens: themeTokens({ fromBackup: 1 }), isPreset: 0 },
+      ],
       chatCustomizations: [],
     });
     expect(t.raw.prepare('SELECT tokens FROM themes ORDER BY id').all()).toEqual([
-      { tokens: '{"fromBackup":1}' },
-      { tokens: '{"local2":1}' },
+      { tokens: themeTokens({ fromBackup: 1 }) },
+      { tokens: themeTokens({ local2: 1 }) },
     ]);
   });
 
@@ -1378,7 +1415,7 @@ describe('new backup passphrase policy', () => {
 
 describe('looksEncrypted', () => {
   it('distinguishes plaintext JSON from an encrypted envelope', () => {
-    expect(looksEncrypted('{"version":1}')).toBe(false);
+    expect(looksEncrypted(themeTokens({ version: 1 }))).toBe(false);
     expect(looksEncrypted('  \n{"version":1}')).toBe(false);
     expect(looksEncrypted('Qk0BabcdEF==')).toBe(true);
   });

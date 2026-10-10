@@ -93,10 +93,20 @@ export function hslToHex(h: number, s: number, l: number): string {
   return `#${channelHex((r + m) * 255)}${channelHex((g + m) * 255)}${channelHex((b + m) * 255)}`;
 }
 
-/** WCAG contrast ratio between two colours (1–21). Order-independent. */
+/**
+ * WCAG contrast ratio between two colours (1–21). Order-independent. Runs at render time on theme
+ * colours, so an unparseable colour scores 1 (no contrast) instead of throwing: callers then pick
+ * their readable fallback, and readableTextOn returns near-white.
+ */
 export function contrastRatio(a: string, b: string): number {
-  const la = relativeLuminance(a);
-  const lb = relativeLuminance(b);
+  let la: number;
+  let lb: number;
+  try {
+    la = relativeLuminance(a);
+    lb = relativeLuminance(b);
+  } catch {
+    return 1;
+  }
   const lighter = Math.max(la, lb);
   const darker = Math.min(la, lb);
   return (lighter + 0.05) / (darker + 0.05);

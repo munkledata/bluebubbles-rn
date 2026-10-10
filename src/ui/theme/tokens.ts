@@ -6,6 +6,8 @@
  * Pure data so it is consumable by the ThemeProvider, tests, and any non-React
  * code (e.g. notification styling).
  */
+import { parseThemeTokensJson } from '@core/themeTokens';
+
 export type ThemeMode = 'light' | 'dark';
 
 export interface BubbleColors {
@@ -285,15 +287,11 @@ export function resolvePreset(key: string | null | undefined): ThemeTokens {
 }
 
 /**
- * Safe parse of a stored tokens blob. Returns null for null/empty/corrupt input so
- * callers (the theme editor, the per-chat ChatThemeProvider) fall back to a known
+ * Safe parse of a stored tokens blob. Returns null for null/empty/corrupt input, and for any blob
+ * that is not a complete token set with `#RGB` / `#RRGGBB` colours (see @core/themeTokens), so
+ * callers (the theme store, the theme editor, the per-chat ChatThemeProvider) fall back to a known
  * theme rather than crash. Pure, so it's usable in non-React code + tests.
  */
 export function safeParseTokens(json: string | null | undefined): ThemeTokens | null {
-  if (!json) return null;
-  try {
-    return JSON.parse(json) as ThemeTokens;
-  } catch {
-    return null;
-  }
+  return parseThemeTokensJson(json);
 }
