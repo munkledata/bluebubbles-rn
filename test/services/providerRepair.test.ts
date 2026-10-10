@@ -1,6 +1,8 @@
 import type Database from 'better-sqlite3';
 import { Chat, Message, ServerInfo } from '@core/models';
+import { logger } from '@core/secure';
 import type { ProviderRepairLease } from '@core/api/endpoints/repairSnapshot';
+import { MessageStateRepairRequiredError } from '@core/api/endpoints/messageState';
 import {
   upsertChats,
   upsertHandles,
@@ -8,6 +10,7 @@ import {
   markMessageDeleted,
   getSyncMarker,
   kvSet,
+  setSyncMarker,
 } from '@db/repositories';
 import {
   getMessageStateAuthority,
@@ -121,6 +124,17 @@ describe('provider-scoped repair', () => {
           bindSnapshot: () => bound,
           serverInfo,
           repair: true,
+          shouldAbort: () => false,
+        }),
+      /** An automatic (not user-started) sync that needs a repair because no authority exists. */
+      runAuto: () =>
+        syncProviderMessages(db, {
+          api: base,
+          controlApi: control,
+          bindSnapshot: () => bound,
+          serverInfo,
+          repair: false,
+          messagesPerChat: 25,
           shouldAbort: () => false,
         }),
     };
@@ -347,6 +361,115 @@ describe('provider-scoped repair', () => {
     expect(f.cancel).toHaveBeenCalledWith(lease.token);
     expect(raw.prepare('SELECT date_deleted FROM messages').get()).toEqual({ date_deleted: null });
   });
+  it('keeps ordinary sync running when a local write interrupts an automatic repair', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    await seed('existing');
+    await setSyncMarker(db, { lastSyncedRowId: 3, lastSyncedTimestamp: 50 });
+    const f = fixture();
+    f.bound.fetchChatMessages = async () => {
+      await kvSet(db, 'fixture.concurrent', 'writer');
+      return [];
+    };
+    const fetchChats = jest.spyOn(f.base, 'fetchChats');
+    const fetchMessagesAfter = jest.spyOn(f.base, 'fetchMessagesAfter');
+    const fetchMessageState = jest.spyOn(f.base, 'fetchMessageState');
+
+    await expect(f.runAuto()).resolves.toBeDefined();
+
+    // The chat list refresh and the incremental catch-up still ran after the failed repair.
+    expect(fetchChats).toHaveBeenCalled();
+    expect(fetchMessagesAfter).toHaveBeenCalled();
+    // Without an installed authority, message-state catch-up stays paused.
+    expect(fetchMessageState).not.toHaveBeenCalled();
+    expect(await getMessageStateAuthority(db)).toBeNull();
+    expect(f.cancel).toHaveBeenCalledWith(lease.token);
+    expect(raw.prepare('SELECT date_deleted FROM messages').get()).toEqual({ date_deleted: null });
+    expect(warn).toHaveBeenCalledWith('[sync] provider repair failed; ordinary sync continues', {
+      errorName: expect.any(String),
+    });
+    warn.mockRestore();
+  });
+
+  it('runs the first sync with the chosen per-chat limit when a fresh install cannot repair', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const f = fixture();
+    f.control.beginProviderRepair = async () => {
+      throw new Error('repair_snapshot_changed');
+    };
+    f.base.fetchChats = async (offset) => (offset === 0 ? [Chat.parse({ guid: chatGuid })] : []);
+    const fetchChatMessages = jest.fn(async (_chat: string, offset: number) =>
+      offset === 0 ? [message('first-sync-row')] : [],
+    );
+    f.base.fetchChatMessages = fetchChatMessages;
+    const fetchMessagesAfter = jest.spyOn(f.base, 'fetchMessagesAfter');
+
+    await expect(f.runAuto()).resolves.toBeDefined();
+
+    expect(fetchChatMessages).toHaveBeenCalledWith(chatGuid, 0, 25, undefined);
+    // A fresh install never pages all history through the incremental cursor.
+    expect(fetchMessagesAfter).not.toHaveBeenCalled();
+    expect(raw.prepare('SELECT guid FROM messages').all()).toEqual([{ guid: 'first-sync-row' }]);
+    expect((await getSyncMarker(db)).lastSyncedRowId).toBe(3);
+    expect(await getMessageStateAuthority(db)).toBeNull();
+    warn.mockRestore();
+  });
+
+  it('does not fail the sync when the ledger demands a repair mid-run that cannot finish', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    await seed('existing');
+    await setSyncMarker(db, { lastSyncedRowId: 3, lastSyncedTimestamp: 50 });
+    await withDbTransaction(db, (context) =>
+      setMessageStateAuthorityWithinTransaction(context, {
+        version: 1,
+        provider: 'imessage',
+        providerEpoch,
+        ledgerEpoch,
+        cursor: 'current-cursor',
+        snapshotSequence: '10',
+        sequence: '10',
+      }),
+    );
+    const f = fixture();
+    const readPage = f.base.fetchMessageState!;
+    let stateReads = 0;
+    f.base.fetchMessageState = async (cursor, signal) => {
+      stateReads += 1;
+      if (stateReads === 1) return readPage(cursor, signal);
+      throw new MessageStateRepairRequiredError();
+    };
+    f.control.beginProviderRepair = async () => {
+      throw new Error('repair_snapshot_changed');
+    };
+
+    await expect(f.runAuto()).resolves.toBeDefined();
+
+    // The stale authority is not read again after its repair failed in this run.
+    expect(stateReads).toBe(2);
+    warn.mockRestore();
+  });
+
+  it('still reports a failed user-run repair after finishing ordinary sync', async () => {
+    await seed('existing');
+    await setSyncMarker(db, { lastSyncedRowId: 3, lastSyncedTimestamp: 50 });
+    const f = fixture();
+    f.finish.mockImplementation(async () => ({
+      version: 2,
+      action: 'finish',
+      stable: true,
+      provider: 'imessage',
+      providerEpoch,
+      ledgerEpoch,
+      checkpoint: 'wrong',
+      sequence: '10',
+    }));
+    const fetchMessagesAfter = jest.spyOn(f.base, 'fetchMessagesAfter');
+
+    await expect(f.run()).rejects.toThrow('captured boundary');
+
+    expect(fetchMessagesAfter).toHaveBeenCalled();
+    expect(await getMessageStateAuthority(db)).toBeNull();
+  });
+
   it('rejects a mixed provider snapshot before absence changes or authority install', async () => {
     const f = fixture();
     f.bound.fetchChats = async (offset) =>

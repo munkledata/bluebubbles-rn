@@ -644,6 +644,7 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
         bindSnapshot: (token) => httpSyncApi(pinned.bindRepairSnapshot(token)),
         serverInfo,
         repair,
+        messagesPerChat: useSyncSettingsStore.getState().messagesPerChat,
         shouldAbort,
         signal: options.signal,
         onProgress: (progress) => {

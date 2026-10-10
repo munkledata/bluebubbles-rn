@@ -3734,7 +3734,7 @@ test('certifies exactly the reviewed sync delegation edges', () => {
       'src/services/syncControl.ts#runSync:mutator-call:15ffb54cca3e:3',
       'src/services/syncControl.ts#runSync:mutator-call:3d1b923ea415',
       'src/services/syncControl.ts#runSync:mutator-call:1c0aa0474d53',
-      'src/services/syncControl.ts#runSync:mutator-call:40827cd3edd7',
+      'src/services/syncControl.ts#runSync:mutator-call:4ddbd229451a',
       'src/services/syncControl.ts#runSync:mutator-call:535bd795208b',
       'src/services/syncControl.ts#runSync:mutator-call:5e67ff4f7781',
       'src/services/syncControl.ts#runSync:mutator-call:a4f724183115',
