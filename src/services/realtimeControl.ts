@@ -1,6 +1,7 @@
 import * as Crypto from 'expo-crypto';
 import { serverApi } from '@core/api';
 import { strictServerOrigin } from '@core/config';
+import type { ServerInfo } from '@core/models';
 import { inspectCredentialUpgradeJournal, logger } from '@core/secure';
 import {
   admitsCurrentRcsEvent,
@@ -46,7 +47,10 @@ import {
   type RealtimePrerequisiteRecoveryOutcome,
 } from './background/realtimePrerequisiteRecovery';
 import { adoptRealtimeHeadlessEffect } from './background/realtimeHeadlessEffects';
-import { resolveAuthorizedLockedFcmV3Transport } from './background/authorizedRealtimeTransport';
+import {
+  resolveAuthorizedLockedFcmV3Transport,
+  resolveAuthorizedRealtimeTransport,
+} from './background/authorizedRealtimeTransport';
 import { ensureDatabase } from './databaseControl';
 import { maybeResumeSync } from './syncControl';
 import { autoDownloadMessageAttachmentsForRealtimeEvent } from './download/autoDownloadAttachments';
@@ -482,6 +486,78 @@ function realtimeIntakeLocked(): boolean {
   return effectivelyLocked(useLockStore.getState(), false);
 }
 
+/** How long one push waits for the server's current RCS pairing before it is queued without it. */
+const RCS_PROVIDER_LOAN_DEADLINE_MS = 5_000;
+
+interface RcsProviderLoan {
+  readonly info: ServerInfo;
+  isCurrent(): boolean;
+}
+
+// A killed-process FCM wake never runs the foreground bootstrap, so the session store holds no
+// server info and every RCS event would wait in the queue until the app is opened. Such a callback
+// fetches the current pairing once through its authorized transport and lends it to the sink chain
+// until the callback settles. The loan follows that callback's own lease, not the transport
+// revision, so a foreground launch mid-push cannot strand an event it already admitted. FCM
+// callbacks run strictly one at a time, and live foreground state always takes precedence.
+const rcsProviderLoans = new Set<RcsProviderLoan>();
+
+/** The RCS pairing the realtime sink chain admits against: foreground state, else a current loan. */
+function realtimeRcsProviderInfo(): ServerInfo | null {
+  const live = sessionAccessors.getServerInfo();
+  if (live) return live;
+  let lent: ServerInfo | null = null;
+  for (const loan of rcsProviderLoans) {
+    if (loan.isCurrent()) lent = loan.info;
+  }
+  return lent;
+}
+
+/**
+ * Borrow the server's current RCS pairing for one FCM callback whose event needs it. Never throws:
+ * without a loan the event is queued exactly as before and waits for a later push or app launch.
+ * Returns the loan's release, or null when nothing was borrowed.
+ */
+async function borrowRcsProviderAuthority(
+  eventName: string,
+  rawData: unknown,
+  context: EventDeliveryContext,
+): Promise<(() => void) | null> {
+  const controller = new AbortController();
+  const abort = (): void => controller.abort();
+  let deadline: ReturnType<typeof setTimeout> | null = null;
+  let releaseInvalidation = (): void => undefined;
+  try {
+    if (!context.isCurrent() || realtimeIntakeLocked() || realtimeRcsProviderInfo()) return null;
+    const event = snapshotIncomingEvent(eventName, rawData);
+    if (!event || classifyRcsEventAdmission(undefined, event) !== 'unavailable') return null;
+    deadline = setTimeout(abort, RCS_PROVIDER_LOAN_DEADLINE_MS);
+    releaseInvalidation = subscribeRealtimeGenerationInvalidation(context.generation, abort);
+    context.signal?.addEventListener('abort', abort, { once: true });
+    if (context.signal?.aborted) return null;
+    const transport = await resolveAuthorizedRealtimeTransport(context.generation);
+    if (!transport || !context.isCurrent()) return null;
+    const info = await serverApi.serverInfo(transport.http, controller.signal);
+    // While the server is re-establishing its RCS link it reports no current pairing. Lending that
+    // would make every RCS event look stale and drop it; without a loan the event simply waits.
+    if (!context.isCurrent() || currentRcsProviderEpoch(info) === null) return null;
+    const loan: RcsProviderLoan = { info, isCurrent: () => context.isCurrent() };
+    rcsProviderLoans.add(loan);
+    return () => {
+      rcsProviderLoans.delete(loan);
+    };
+  } catch (error) {
+    logger.warn('[incomingEvents] RCS pairing unavailable for a background push', {
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    });
+    return null;
+  } finally {
+    if (deadline != null) clearTimeout(deadline);
+    releaseInvalidation();
+    context.signal?.removeEventListener('abort', abort);
+  }
+}
+
 /** Reject locked intake and keep every credential-bearing URL rotation out of SQLite. */
 function canPersistRealtimeEvent(event: NormalizedEvent): boolean {
   if (realtimeIntakeLocked()) {
@@ -587,7 +663,7 @@ function realtimeSink(db: AppDatabase, accountGeneration: number): EventSink {
                       context,
                       true,
                     ),
-                  () => sessionAccessors.getServerInfo(),
+                  () => realtimeRcsProviderInfo(),
                 ),
                 db,
                 buildMessageIntents,
@@ -652,7 +728,7 @@ function realtimeSink(db: AppDatabase, accountGeneration: number): EventSink {
       ),
       (url, context) => applyNewServerUrl(url, context),
     ),
-    () => sessionAccessors.getServerInfo(),
+    () => realtimeRcsProviderInfo(),
   );
   return realtimeSinkInstance;
 }
@@ -817,18 +893,24 @@ async function dispatchWithContext(
   occurrence?: EventOccurrenceMetadata,
   receivedAt?: number,
 ): Promise<void> {
-  if (!context.isCurrent() || realtimeIntakeLocked()) return;
-  const db = await ensureDatabase();
-  if (!context.isCurrent() || realtimeIntakeLocked()) return;
-  const runtime = getRealtimeRuntime(db, context);
-  if (!runtime) return;
-  const recoveryCollector = source === 'fcm' ? beginRealtimeRecoveryCollector(db, context) : null;
+  const releaseRcsProviderLoan =
+    source === 'fcm' ? await borrowRcsProviderAuthority(eventName, rawData, context) : null;
   try {
-    await runtime.dispatcher.handle(eventName, rawData, source, context, occurrence, receivedAt);
-  } finally {
-    if (recoveryCollector) {
-      await finishRealtimeRecoveryCollector(recoveryCollector, runtime);
+    if (!context.isCurrent() || realtimeIntakeLocked()) return;
+    const db = await ensureDatabase();
+    if (!context.isCurrent() || realtimeIntakeLocked()) return;
+    const runtime = getRealtimeRuntime(db, context);
+    if (!runtime) return;
+    const recoveryCollector = source === 'fcm' ? beginRealtimeRecoveryCollector(db, context) : null;
+    try {
+      await runtime.dispatcher.handle(eventName, rawData, source, context, occurrence, receivedAt);
+    } finally {
+      if (recoveryCollector) {
+        await finishRealtimeRecoveryCollector(recoveryCollector, runtime);
+      }
     }
+  } finally {
+    releaseRcsProviderLoan?.();
   }
 }
 

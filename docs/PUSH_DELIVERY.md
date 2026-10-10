@@ -421,6 +421,38 @@ matching app/server deployment evidence remain open under `REL-001` and `PUSH-RE
 under Play v75; the remaining matching-candidate killed-process execution and device proof are
 owned by `REL-001` and `PUSH-RETRY-01`.
 
+### 2.13 Killed-process RCS pushes confirm the current pairing (2026-10-10)
+
+Every RCS-looking realtime event (RCS message/chat ids, send errors, read status, `rcs-alert`,
+`rcs-bridge-down`) is admitted only against the server's current Google pairing epoch. That epoch
+used to come only from foreground session state, which a killed-process FCM wake never hydrates, so
+the event was persisted, deferred on every retry, and stayed queued without a notification until the
+user opened Gator.
+
+An unlocked FCM callback whose event needs that authority, and that finds no foreground server info,
+now fetches `/server/info` once through the authorized warm/cold transport (sections 2.10–2.12)
+before it queues the event. The fetch has a five-second deadline and stops at once when the callback
+is cancelled or the account generation retires (Disconnect). The result is lent to the sink chain
+only while that same callback is current and is released when its dispatch, including the
+dependency retry, settles. Live foreground state always wins over the loan. A response with no
+current pairing (the server reports `rcs_provider_epoch: null` while it re-establishes its RCS link)
+is never lent, because it would make every RCS event look stale and drop it. A failed, slow, or
+pairing-less fetch leaves the event queued exactly as before. FCM callbacks are serialized by
+`fcmAdmissionTail`, so the short wait before persistence cannot reorder deliveries. The locked V3
+enqueue path keeps its own fetch.
+
+Known limits, tracked as follow-ups: RCS attachment auto-download (including Gallery/Album export)
+still requires foreground authority, so it is skipped for RCS messages processed while the app is
+killed; images still download when the chat is opened. A row admitted under the loan can still lose
+authority mid-event if another delivery flight is processing it when the loan is released, which
+requires opening the app during that push.
+
+Host tests cover the loan reaching both admission layers, Apple and warm pushes fetching nothing,
+fetch failure, the deadline, callback and Disconnect cancellation, a pairing-less response,
+foreground precedence, a foreground launch mid-push, the dependency retry, and release on failure.
+The incoming-ingress certificate pins the loan around the unchanged dispatch body. Exact Android
+killed-process execution remains device-only evidence.
+
 ---
 
 ## 3. How to diagnose push next time

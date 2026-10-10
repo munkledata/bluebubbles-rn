@@ -9225,7 +9225,7 @@ function incomingIngressCertifiedNodes({
   }
   if (
     createHash('sha256').update(normalizedSnippet(controlFile, controlFile)).digest('hex') !==
-      'aa00dbd4f58ae38269f86d473dae644c9b7bdc522791487e5f236e9d6ec8e11f' ||
+      '7a4fe302ff73f0e0b68c3cb26a0512f3e3d22272765f9eb10e89970f6772cf25' ||
     createHash('sha256')
       .update(normalizedSnippet(autoDownloadFile, autoDownloadFile))
       .digest('hex') !== 'dfc68841889263b004ffd03f2f819fa8eb783ac3fac9689327dbdd78c6863fc9' ||
@@ -10328,20 +10328,22 @@ function incomingIngressCertifiedNodes({
   approved.push(...dispatchCalls.map((edge) => edge.node));
 
   // The database opens between identical current+lock guards, and the exact captured arguments
-  // are awaited into the one durable dispatcher instance.
+  // are awaited into the one durable dispatcher instance. A killed-process FCM callback may first
+  // borrow the server's RCS pairing; that loan wraps the unchanged body and is always released.
   const databaseCall = sole(exactCallEdges(edges, dispatchWithContext, ensureDatabase));
   const durableHandleCall = sole(exactCallEdges(edges, dispatchWithContext, durableHandle));
-  const dispatchRuntimeDeclaration = singleConstDeclaration(
-    dispatchWithContext.body.statements[3],
-    'runtime',
-  );
+  const dispatchLoanScope = dispatchWithContext.body.statements[1];
+  const dispatchBody =
+    dispatchLoanScope && ts.isTryStatement(dispatchLoanScope)
+      ? dispatchLoanScope.tryBlock.statements
+      : [];
+  const dispatchBodyText = (index) =>
+    dispatchBody[index] ? normalizedSnippet(dispatchBody[index], controlFile) : undefined;
+  const dispatchRuntimeDeclaration = singleConstDeclaration(dispatchBody[3], 'runtime');
   const runtimeCall = dispatchRuntimeDeclaration?.initializer
     ? callableCall(dispatchRuntimeDeclaration.initializer, getRealtimeRuntime, checker)
     : undefined;
-  const recoveryCollectorDeclaration = singleConstDeclaration(
-    dispatchWithContext.body.statements[5],
-    'recoveryCollector',
-  );
+  const recoveryCollectorDeclaration = singleConstDeclaration(dispatchBody[5], 'recoveryCollector');
   const beginRecoveryCall = sole(
     exactCallEdges(edges, dispatchWithContext, beginRealtimeRecoveryCollector),
   );
@@ -10352,17 +10354,23 @@ function incomingIngressCertifiedNodes({
     exactCallEdges(edges, requestRealtimeRecovery, recoverRealtimePrerequisite),
   );
   if (
-    dispatchWithContext.body.statements.length !== 7 ||
+    dispatchWithContext.body.statements.length !== 2 ||
     statementText(dispatchWithContext, 0) !==
-      'if (!context.isCurrent() || realtimeIntakeLocked()) return;' ||
-    statementText(dispatchWithContext, 1) !== 'const db = await ensureDatabase();' ||
-    statementText(dispatchWithContext, 2) !==
-      'if (!context.isCurrent() || realtimeIntakeLocked()) return;' ||
-    statementText(dispatchWithContext, 3) !== 'const runtime = getRealtimeRuntime(db, context);' ||
-    statementText(dispatchWithContext, 4) !== 'if (!runtime) return;' ||
-    statementText(dispatchWithContext, 5) !==
+      "const releaseRcsProviderLoan = source === 'fcm' ? await borrowRcsProviderAuthority(eventName, rawData, context) : null;" ||
+    !ts.isTryStatement(dispatchLoanScope) ||
+    dispatchLoanScope.catchClause ||
+    !dispatchLoanScope.finallyBlock ||
+    normalizedSnippet(dispatchLoanScope.finallyBlock, controlFile) !==
+      '{ releaseRcsProviderLoan?.(); }' ||
+    dispatchBody.length !== 7 ||
+    dispatchBodyText(0) !== 'if (!context.isCurrent() || realtimeIntakeLocked()) return;' ||
+    dispatchBodyText(1) !== 'const db = await ensureDatabase();' ||
+    dispatchBodyText(2) !== 'if (!context.isCurrent() || realtimeIntakeLocked()) return;' ||
+    dispatchBodyText(3) !== 'const runtime = getRealtimeRuntime(db, context);' ||
+    dispatchBodyText(4) !== 'if (!runtime) return;' ||
+    dispatchBodyText(5) !==
       "const recoveryCollector = source === 'fcm' ? beginRealtimeRecoveryCollector(db, context) : null;" ||
-    statementText(dispatchWithContext, 6) !==
+    dispatchBodyText(6) !==
       'try { await runtime.dispatcher.handle(eventName, rawData, source, context, occurrence, receivedAt); } finally { if (recoveryCollector) { await finishRealtimeRecoveryCollector(recoveryCollector, runtime); } }' ||
     !databaseCall ||
     !dispatchRuntimeDeclaration ||
@@ -10373,12 +10381,12 @@ function incomingIngressCertifiedNodes({
     !recoveryCollectorDeclaration ||
     !beginRecoveryCall ||
     beginRecoveryCall.node.arguments.length !== 2 ||
-    !nodeIsInside(beginRecoveryCall.node, dispatchWithContext.body.statements[5]) ||
+    !nodeIsInside(beginRecoveryCall.node, dispatchBody[5]) ||
     !snippetIs(beginRecoveryCall.node.arguments[0], 'db') ||
     !snippetIs(beginRecoveryCall.node.arguments[1], 'context') ||
     !finishRecoveryCall ||
     finishRecoveryCall.node.arguments.length !== 2 ||
-    !nodeIsInside(finishRecoveryCall.node, dispatchWithContext.body.statements[6]) ||
+    !nodeIsInside(finishRecoveryCall.node, dispatchBody[6]) ||
     !ts.isAwaitExpression(unwrapExpression(finishRecoveryCall.node.parent)) ||
     !sameSymbol(
       unwrapExpression(finishRecoveryCall.node.arguments[0]),
@@ -10400,8 +10408,8 @@ function incomingIngressCertifiedNodes({
       "{ isAllowed: () => context.isCurrent() && accountLease.isCurrent() && !realtimeIntakeLocked(), subscribeInvalidation: (invalidate) => { const unsubscribeLock = useLockStore.subscribe((state) => { if (effectivelyLocked(state, false)) invalidate(); }); const abortFromCallback = (): void => invalidate(); context.signal?.addEventListener('abort', abortFromCallback, { once: true }); if (context.signal?.aborted) abortFromCallback(); return () => { context.signal?.removeEventListener('abort', abortFromCallback); unsubscribeLock(); }; }, }",
     ) ||
     !durableHandleCall ||
-    !nodeIsInside(databaseCall.node, dispatchWithContext.body.statements[1]) ||
-    !nodeIsInside(durableHandleCall.node, dispatchWithContext.body.statements[6]) ||
+    !nodeIsInside(databaseCall.node, dispatchBody[1]) ||
+    !nodeIsInside(durableHandleCall.node, dispatchBody[6]) ||
     !ts.isAwaitExpression(unwrapExpression(durableHandleCall.node.parent)) ||
     !coordinatorCallbackAdoptsInvocation(durableHandleCall.node, dispatchWithContext) ||
     !snippetIs(

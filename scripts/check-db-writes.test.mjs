@@ -7784,6 +7784,12 @@ function incomingIngressMutationCases() {
       after: 'void finishRealtimeRecoveryCollector(recoveryCollector, runtime);',
     },
     {
+      label: 'borrowed RCS pairing outlives its callback',
+      path: 'src/services/realtimeControl.ts',
+      before: 'releaseRcsProviderLoan?.();',
+      after: 'void releaseRcsProviderLoan;',
+    },
+    {
       label: 'recovered-event retry drops its runtime and account fence',
       path: 'src/services/realtimeControl.ts',
       before:

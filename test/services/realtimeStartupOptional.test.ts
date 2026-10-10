@@ -166,13 +166,25 @@ let mockSession = {
   origin: 'https://server.example',
   password: 'secret',
 };
+// A connected session always holds server info; killed-process FCM tests clear it explicitly.
+const mockConnectedServerInfo = { rcs: false };
+let mockSessionServerInfo: unknown = mockConnectedServerInfo;
+const mockServerInfo = jest.fn<Promise<unknown>, [unknown, AbortSignal?]>();
+const mockResolveAuthorizedRealtimeTransport = jest.fn<
+  Promise<{ http: unknown; lease: { generation: number; isCurrent(): boolean } } | undefined>,
+  [number?]
+>(async () => undefined);
+let mockEdgeProviderInfo: (() => unknown) | undefined;
+let mockDbProviderInfo: (() => unknown) | undefined;
 let mockRecoveryRequest:
   | ((
       chatGuid: string | null,
       context?: { generation: number; signal?: AbortSignal; isCurrent(): boolean },
     ) => Promise<void> | void)
   | undefined;
-jest.mock('@core/api', () => ({ serverApi: { ping: jest.fn(async () => undefined) } }));
+jest.mock('@core/api', () => ({
+  serverApi: { ping: jest.fn(async () => undefined), serverInfo: mockServerInfo },
+}));
 jest.mock('@core/config', () => ({ strictServerOrigin: jest.fn((value) => value) }));
 jest.mock('@core/secure', () => ({
   logger: { debug: jest.fn(), info: jest.fn(), warn: mockWarn, error: jest.fn() },
@@ -192,7 +204,9 @@ jest.mock('@core/realtime', () => ({
               ? rawData
               : ((rawData as { url?: string } | null)?.url ?? ''),
         }
-      : { type: eventName },
+      : eventName === 'new-message'
+        ? { type: eventName, message: rawData }
+        : { type: eventName },
   EventRouter: class {
     async handle(): Promise<void> {}
   },
@@ -217,6 +231,7 @@ jest.mock('@state/sessionStore', () => ({
       setServerUrl: jest.fn(),
     }),
   },
+  sessionAccessors: { getServerInfo: () => mockSessionServerInfo },
 }));
 jest.mock('@state/transportHealthStore', () => ({
   useTransportHealthStore: {
@@ -253,6 +268,10 @@ jest.mock('@/services/backgrounds/realtimeSyncedBackground', () => ({
 }));
 jest.mock('@/services/background/realtimePrerequisiteRecovery', () => ({
   recoverRealtimePrerequisite: mockRecoverRealtimePrerequisite,
+}));
+jest.mock('@/services/background/authorizedRealtimeTransport', () => ({
+  resolveAuthorizedRealtimeTransport: mockResolveAuthorizedRealtimeTransport,
+  resolveAuthorizedLockedFcmV3Transport: jest.fn(async () => undefined),
 }));
 jest.mock('@/services/background/realtimeHeadlessEffects', () => ({
   adoptRealtimeHeadlessEffect: mockAdoptRealtimeHeadlessEffect,
@@ -298,10 +317,20 @@ jest.mock('@/services/realtime/dbEventSink', () => ({
       onMessageStored?: MockMessageStored,
       onAttachmentCacheRetirement?: MockAttachmentCacheRetirement,
       onRecoveryNeeded?: typeof mockRecoveryRequest,
+      getRcsProviderInfo?: () => unknown,
     ) {
       mockMessageStored = onMessageStored;
       mockAttachmentCacheRetirement = onAttachmentCacheRetirement;
       mockRecoveryRequest = onRecoveryNeeded;
+      mockDbProviderInfo = getRcsProviderInfo;
+    }
+  },
+}));
+
+jest.mock('@/services/realtime/rcsProviderEpochEventSink', () => ({
+  RcsProviderEpochEventSink: class {
+    constructor(_inner: unknown, getServerInfo: () => unknown) {
+      mockEdgeProviderInfo = getServerInfo;
     }
   },
 }));
@@ -427,6 +456,11 @@ beforeEach(() => {
   mockSocketRetryConnection.mockReset().mockReturnValue(true);
   mockStopSocketLifecycleObservation.mockClear();
   mockRecoveryRequest = undefined;
+  mockSessionServerInfo = mockConnectedServerInfo;
+  mockServerInfo.mockReset();
+  mockResolveAuthorizedRealtimeTransport.mockReset().mockResolvedValue(undefined);
+  mockEdgeProviderInfo = undefined;
+  mockDbProviderInfo = undefined;
   mockDispatcherOptions = undefined;
   mockDrainOptions = undefined;
   mockNotifyIntent = undefined;
@@ -1664,5 +1698,255 @@ describe('startRealtime optional setup containment', () => {
       expect(mockQueueHealth).not.toHaveBeenCalled();
       expect(mockDurablePersistWithoutDrain).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('killed-process RCS provider authority', () => {
+  const EPOCH = `gpe1_${'K'.repeat(42)}A`;
+  const PROVIDER_INFO = {
+    rcs: true,
+    supports_rcs_epoch_qualified_ids: true,
+    rcs_provider_epoch: EPOCH,
+  };
+  const RCS_MESSAGE = { guid: `rcs-g1.${EPOCH}.bWVzc2FnZQ`, chatGuid: `RCS;-;g1.${EPOCH}.Y2hhdA` };
+  const durableTransport = { testId: 'killed-process-durable-transport' };
+  let transportCurrent = true;
+
+  beforeEach(() => {
+    // A killed-process FCM wake never runs the foreground bootstrap, so no server info is held.
+    mockSessionServerInfo = null;
+    transportCurrent = true;
+    mockResolveAuthorizedRealtimeTransport.mockResolvedValue({
+      http: durableTransport,
+      lease: { generation: 0, isCurrent: () => transportCurrent },
+    });
+    mockServerInfo.mockResolvedValue(PROVIDER_INFO);
+  });
+
+  async function dispatchFcm(eventName: string, payload: unknown): Promise<void> {
+    jest.resetModules();
+    const { dispatchRealtimeEvent } = await import('@/services/realtimeControl');
+    await dispatchRealtimeEvent(eventName, payload, 'fcm');
+  }
+
+  it('lends the server-confirmed RCS pairing to the whole sink chain for one push', async () => {
+    const seen: unknown[] = [];
+    mockDurableHandle.mockImplementationOnce(async () => {
+      seen.push(mockEdgeProviderInfo?.(), mockDbProviderInfo?.());
+    });
+
+    await dispatchFcm('new-message', RCS_MESSAGE);
+
+    expect(mockResolveAuthorizedRealtimeTransport).toHaveBeenCalledWith(0);
+    expect(mockServerInfo).toHaveBeenCalledTimes(1);
+    expect(mockServerInfo).toHaveBeenCalledWith(durableTransport, expect.any(AbortSignal));
+    expect(seen).toEqual([PROVIDER_INFO, PROVIDER_INFO]);
+    // The loan ends with its callback; a later push must confirm the pairing again.
+    expect(mockEdgeProviderInfo?.()).toBeNull();
+    expect(mockDbProviderInfo?.()).toBeNull();
+  });
+
+  it('fetches nothing for an Apple push or when the foreground already holds the pairing', async () => {
+    await dispatchFcm('new-message', {
+      guid: 'apple-message',
+      chatGuid: 'iMessage;-;apple@example.com',
+    });
+    mockSessionServerInfo = PROVIDER_INFO;
+    await dispatchFcm('new-message', RCS_MESSAGE);
+
+    expect(mockDurableHandle).toHaveBeenCalledTimes(2);
+    expect(mockResolveAuthorizedRealtimeTransport).not.toHaveBeenCalled();
+    expect(mockServerInfo).not.toHaveBeenCalled();
+  });
+
+  it('still queues the push when the pairing cannot be fetched', async () => {
+    mockServerInfo.mockRejectedValueOnce(new Error('server unreachable'));
+    let seen: unknown = 'not-called';
+    mockDurableHandle.mockImplementationOnce(async () => {
+      seen = mockEdgeProviderInfo?.();
+    });
+
+    await dispatchFcm('new-message', RCS_MESSAGE);
+
+    expect(mockDurableHandle).toHaveBeenCalledTimes(1);
+    expect(seen).toBeNull();
+    expect(mockWarn).toHaveBeenCalledWith(
+      '[incomingEvents] RCS pairing unavailable for a background push',
+      { errorName: 'Error' },
+    );
+  });
+
+  it('stops waiting for a stalled pairing fetch after five seconds and still queues the push', async () => {
+    jest.useFakeTimers();
+    try {
+      mockServerInfo.mockImplementationOnce(
+        (_http, signal) =>
+          new Promise((_resolve, reject) => {
+            signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+          }),
+      );
+      jest.resetModules();
+      const { dispatchRealtimeEvent } = await import('@/services/realtimeControl');
+      const dispatch = dispatchRealtimeEvent('new-message', RCS_MESSAGE, 'fcm');
+      await settle();
+      jest.advanceTimersByTime(4_999);
+      await settle();
+      expect(mockDurableHandle).not.toHaveBeenCalled();
+
+      jest.advanceTimersByTime(1);
+      await expect(dispatch).resolves.toBeUndefined();
+      expect(mockDurableHandle).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('prefers a pairing the foreground publishes mid-push over the loan', async () => {
+    const foregroundInfo = { ...PROVIDER_INFO, rcs_provider_epoch: `gpe1_${'F'.repeat(42)}A` };
+    let seen: unknown = 'not-called';
+    mockDurableHandle.mockImplementationOnce(async () => {
+      mockSessionServerInfo = foregroundInfo;
+      seen = mockEdgeProviderInfo?.();
+    });
+
+    await dispatchFcm('new-message', RCS_MESSAGE);
+
+    expect(seen).toBe(foregroundInfo);
+  });
+
+  it('keeps the loan when the foreground launches mid-push and replaces the transport', async () => {
+    let seenAfterLaunch: unknown = 'not-called';
+    mockDurableHandle.mockImplementationOnce(async () => {
+      // Foreground boot bumps the transport revision while server info is still empty.
+      transportCurrent = false;
+      seenAfterLaunch = mockDbProviderInfo?.();
+    });
+
+    await dispatchFcm('new-message', RCS_MESSAGE);
+
+    expect(seenAfterLaunch).toEqual(PROVIDER_INFO);
+  });
+
+  it('ends the loan with the push callback that borrowed it', async () => {
+    let callbackCurrent = true;
+    let seenAfterCallbackEnded: unknown = 'not-called';
+    mockDurableHandle.mockImplementationOnce(async () => {
+      callbackCurrent = false;
+      seenAfterCallbackEnded = mockDbProviderInfo?.();
+    });
+    jest.resetModules();
+    const { dispatchRealtimeEvent } = await import('@/services/realtimeControl');
+
+    await dispatchRealtimeEvent('new-message', RCS_MESSAGE, 'fcm', {
+      generation: 0,
+      isCurrent: () => callbackCurrent,
+    });
+
+    expect(seenAfterCallbackEnded).toBeNull();
+  });
+
+  it('never lends a server answer that names no current RCS pairing', async () => {
+    // The server reports no pairing while it re-establishes its RCS link. Lending that would make
+    // every RCS event look stale and drop it instead of letting it wait.
+    mockServerInfo.mockResolvedValueOnce({ ...PROVIDER_INFO, rcs_provider_epoch: null });
+    let seen: unknown = 'not-called';
+    mockDurableHandle.mockImplementationOnce(async () => {
+      seen = mockEdgeProviderInfo?.();
+    });
+
+    await dispatchFcm('new-message', RCS_MESSAGE);
+
+    expect(mockDurableHandle).toHaveBeenCalledTimes(1);
+    expect(seen).toBeNull();
+  });
+
+  it('keeps the loan through the dependency retry of the same push', async () => {
+    jest.useFakeTimers();
+    try {
+      let seenByRetry: unknown = 'not-called';
+      mockDurableHandle.mockImplementationOnce(async (...args: unknown[]) => {
+        mockDrainOptions?.onDependencyDeferred?.(args[3] as MockDeliveryContext);
+      });
+      mockDurableResume.mockImplementationOnce(async () => {
+        seenByRetry = mockDbProviderInfo?.();
+      });
+      jest.resetModules();
+      const { dispatchRealtimeEvent } = await import('@/services/realtimeControl');
+      const dispatch = dispatchRealtimeEvent('new-message', RCS_MESSAGE, 'fcm');
+      await settle();
+      jest.advanceTimersByTime(5_000);
+
+      await expect(dispatch).resolves.toBeUndefined();
+      expect(mockDurableResume).toHaveBeenCalledTimes(1);
+      expect(seenByRetry).toEqual(PROVIDER_INFO);
+      expect(mockDbProviderInfo?.()).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('releases the loan when queueing the push fails', async () => {
+    mockDurableHandle.mockRejectedValueOnce(new Error('queue write failed'));
+
+    await expect(dispatchFcm('new-message', RCS_MESSAGE)).rejects.toThrow('queue write failed');
+
+    expect(mockEdgeProviderInfo?.()).toBeNull();
+  });
+
+  it('stops a pending pairing fetch at once when the push callback is cancelled', async () => {
+    jest.useFakeTimers();
+    try {
+      mockServerInfo.mockImplementationOnce(
+        (_http, signal) =>
+          new Promise((_resolve, reject) => {
+            signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+          }),
+      );
+      const callback = new AbortController();
+      jest.resetModules();
+      const { dispatchRealtimeEvent } = await import('@/services/realtimeControl');
+      const dispatch = dispatchRealtimeEvent('new-message', RCS_MESSAGE, 'fcm', {
+        generation: 0,
+        signal: callback.signal,
+        isCurrent: () => true,
+      });
+      await settle();
+      expect(mockDurableHandle).not.toHaveBeenCalled();
+
+      callback.abort();
+
+      // No timer advanced: only the callback's own cancellation ended the wait.
+      await expect(dispatch).resolves.toBeUndefined();
+      expect(mockDurableHandle).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('stops a pending pairing fetch at once on Disconnect without queueing the push', async () => {
+    jest.useFakeTimers();
+    try {
+      mockServerInfo.mockImplementationOnce(
+        (_http, signal) =>
+          new Promise((_resolve, reject) => {
+            signal?.addEventListener('abort', () => reject(new Error('aborted')), { once: true });
+          }),
+      );
+      jest.resetModules();
+      const { dispatchRealtimeEvent } = await import('@/services/realtimeControl');
+      const { pauseRealtimeDeliveries, resumeRealtimeDeliveries } =
+        await import('@/services/realtime/deliveryCoordinator');
+      const dispatch = dispatchRealtimeEvent('new-message', RCS_MESSAGE, 'fcm');
+      await settle();
+
+      // No timer advanced: retiring the account aborts the fetch instead of waiting five seconds.
+      const retirement = pauseRealtimeDeliveries();
+      await expect(dispatch).resolves.toBeUndefined();
+      await expect(retirement).resolves.toBeUndefined();
+      expect(mockDurableHandle).not.toHaveBeenCalled();
+      resumeRealtimeDeliveries();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
