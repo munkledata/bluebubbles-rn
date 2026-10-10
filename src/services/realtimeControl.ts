@@ -61,6 +61,7 @@ import {
 import { startDeviceNetworkWatch, stopDeviceNetworkWatch } from './networkReachability';
 import { buildMessageIntents } from './notifications/intents';
 import { getNotificationPermissionState, postNotification } from './notifications/notifeeService';
+import { moveFcmPushKeyStateToOrigin } from './notifications/fcmEncryptionState';
 import { effectivelyLocked } from './notifications/lockGate';
 import { DbEventSink } from './realtime/dbEventSink';
 import { expoDigestBackend } from './realtime/expoDigestBackend';
@@ -1473,6 +1474,19 @@ export async function approveNewServerUrl(
         });
       });
       return delivery === 'paused' ? cancelledRotationResult() : result;
+    },
+    moveFcmPushKeyState: async (fromOrigin, toOrigin, lease, isCurrent) => {
+      // Tracked so Disconnect's key retirement drains this write instead of racing it.
+      await runTrackedRealtimeWork(lease, async (activeLease) => {
+        if (!activeLease.isCurrent() || !isCurrent()) return;
+        try {
+          await moveFcmPushKeyStateToOrigin(vault, fromOrigin, toOrigin);
+        } catch (error) {
+          logger.warn('[fcm] push key did not follow the approved server change', {
+            errorName: error instanceof Error ? error.name : 'UnknownError',
+          });
+        }
+      });
     },
     publishCandidate: (origin, info) => {
       socket?.disconnect();

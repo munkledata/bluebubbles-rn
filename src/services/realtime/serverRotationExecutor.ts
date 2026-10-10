@@ -28,6 +28,16 @@ export interface ServerRotationExecutorDeps {
     lease: RealtimeDeliveryLease,
     isCurrent: () => boolean,
   ) => Promise<ConnectResult>;
+  /**
+   * After the durable commit: carry a live V3 push-key record from the old origin to the new one
+   * as tracked account work. Never throws; a failure leaves push to report itself unavailable.
+   */
+  readonly moveFcmPushKeyState: (
+    fromOrigin: string,
+    toOrigin: string,
+    lease: RealtimeDeliveryLease,
+    isCurrent: () => boolean,
+  ) => Promise<void>;
   /** Synchronous handoff after the complete durable tuple is active. */
   readonly publishCandidate: (origin: string, info: ServerInfo) => void;
   readonly reconnect: (lease: RealtimeDeliveryLease, isCurrent: () => boolean) => Promise<void>;
@@ -213,6 +223,16 @@ export async function approveServerRotation(
         terminal: true,
       };
     }
+    if (!durableCommitCurrent()) return staleResult();
+
+    // Same server installation and credential at a new URL: move the V3 push-key record before the
+    // reconnect registers push again, or V3 push stays broken with no re-enrollment path.
+    await deps.moveFcmPushKeyState(
+      request.currentOrigin,
+      request.candidateOrigin,
+      lease,
+      durableCommitCurrent,
+    );
     if (!durableCommitCurrent()) return staleResult();
 
     deps.publishCandidate(request.candidateOrigin, persistence.serverInfo);

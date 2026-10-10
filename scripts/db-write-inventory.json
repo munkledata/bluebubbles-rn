@@ -22858,7 +22858,7 @@
     {
       "id": "src/services/realtimeControl.ts#resumeRecoveredRealtimeEvents:mutator-call:08e1b915b538",
       "path": "src/services/realtimeControl.ts",
-      "line": 419,
+      "line": 420,
       "symbol": "resumeRecoveredRealtimeEvents",
       "operation": "mutator-call",
       "target": "src/services/realtime/incomingEventDispatcher.ts#DurableRealtimeDispatcher.resume",
@@ -22871,7 +22871,7 @@
     {
       "id": "src/services/realtimeControl.ts#finishRealtimeRecoveryCollector:mutator-call:4b930e6e8a7e",
       "path": "src/services/realtimeControl.ts",
-      "line": 471,
+      "line": 472,
       "symbol": "finishRealtimeRecoveryCollector",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#resumeRecoveredRealtimeEvents",
@@ -22884,7 +22884,7 @@
     {
       "id": "src/services/realtimeControl.ts#realtimeSink.<callback:d8c17dcb97>.<callback:c545060ff3>:mutator-call:73ae70201f6e",
       "path": "src/services/realtimeControl.ts",
-      "line": 532,
+      "line": 533,
       "symbol": "realtimeSink.<callback:d8c17dcb97>.<callback:c545060ff3>",
       "operation": "mutator-call",
       "target": "src/services/download/autoDownloadAttachments.ts#autoDownloadMessageAttachmentsForRealtimeEvent",
@@ -22897,7 +22897,7 @@
     {
       "id": "src/services/realtimeControl.ts#realtimeSink.<callback:d8c17dcb97>:mutator-call:63bbf00efc38",
       "path": "src/services/realtimeControl.ts",
-      "line": 564,
+      "line": 565,
       "symbol": "realtimeSink.<callback:d8c17dcb97>",
       "operation": "mutator-call",
       "target": "src/services/download/autoDownloadAttachments.ts#autoDownloadMessageAttachmentsForRealtimeEvent",
@@ -22910,7 +22910,7 @@
     {
       "id": "src/services/realtimeControl.ts#realtimeSink.<callback:68fe0014d7>:mutator-call:017af705079d",
       "path": "src/services/realtimeControl.ts",
-      "line": 575,
+      "line": 576,
       "symbol": "realtimeSink.<callback:68fe0014d7>",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries",
@@ -22923,7 +22923,7 @@
     {
       "id": "src/services/realtimeControl.ts#realtimeSink.<callback:68fe0014d7>:mutator-call:83761d97b204",
       "path": "src/services/realtimeControl.ts",
-      "line": 578,
+      "line": 579,
       "symbol": "realtimeSink.<callback:68fe0014d7>",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.drainDueRetirements",
@@ -22936,7 +22936,7 @@
     {
       "id": "src/services/realtimeControl.ts#dispatchWithContext:mutator-call:1b8f244e24e1",
       "path": "src/services/realtimeControl.ts",
-      "line": 820,
+      "line": 821,
       "symbol": "dispatchWithContext",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -22949,7 +22949,7 @@
     {
       "id": "src/services/realtimeControl.ts#dispatchWithContext:mutator-call:52bcfe0b9200",
       "path": "src/services/realtimeControl.ts",
-      "line": 826,
+      "line": 827,
       "symbol": "dispatchWithContext",
       "operation": "mutator-call",
       "target": "src/services/realtime/incomingEventDispatcher.ts#DurableRealtimeDispatcher.handle",
@@ -22962,7 +22962,7 @@
     {
       "id": "src/services/realtimeControl.ts#dispatchWithContext:mutator-call:723b4235f7f7",
       "path": "src/services/realtimeControl.ts",
-      "line": 829,
+      "line": 830,
       "symbol": "dispatchWithContext",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#finishRealtimeRecoveryCollector",
@@ -22975,7 +22975,7 @@
     {
       "id": "src/services/realtimeControl.ts#persistAuthenticatedLockedFcmV3Event:mutator-call:24a72c935b54",
       "path": "src/services/realtimeControl.ts",
-      "line": 899,
+      "line": 900,
       "symbol": "persistAuthenticatedLockedFcmV3Event",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -22988,7 +22988,7 @@
     {
       "id": "src/services/realtimeControl.ts#persistAuthenticatedLockedFcmV3Event:mutator-call:0783b2ad479c",
       "path": "src/services/realtimeControl.ts",
-      "line": 902,
+      "line": 903,
       "symbol": "persistAuthenticatedLockedFcmV3Event",
       "operation": "mutator-call",
       "target": "src/services/realtime/incomingEventDispatcher.ts#DurableRealtimeDispatcher.persistLockedFcmV3WithoutDrain",
@@ -23001,7 +23001,7 @@
     {
       "id": "src/services/realtimeControl.ts#dispatchRealtimeEvent.<callback:83dbff7b14>:mutator-call:49708f331ebc",
       "path": "src/services/realtimeControl.ts",
-      "line": 957,
+      "line": 958,
       "symbol": "dispatchRealtimeEvent.<callback:83dbff7b14>",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#dispatchWithContext",
@@ -23014,7 +23014,7 @@
     {
       "id": "src/services/realtimeControl.ts#dispatchRealtimeEvent.<callback:83dbff7b14>:mutator-call:49708f331ebc:2",
       "path": "src/services/realtimeControl.ts",
-      "line": 967,
+      "line": 968,
       "symbol": "dispatchRealtimeEvent.<callback:83dbff7b14>",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#dispatchWithContext",
@@ -23027,7 +23027,7 @@
     {
       "id": "src/services/realtimeControl.ts#devPersistRealtimeEventWithoutDrain:mutator-call:6e5ab18cc859",
       "path": "src/services/realtimeControl.ts",
-      "line": 1040,
+      "line": 1041,
       "symbol": "devPersistRealtimeEventWithoutDrain",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -23040,7 +23040,7 @@
     {
       "id": "src/services/realtimeControl.ts#devPersistRealtimeEventWithoutDrain:mutator-call:aef29daf2c33",
       "path": "src/services/realtimeControl.ts",
-      "line": 1047,
+      "line": 1048,
       "symbol": "devPersistRealtimeEventWithoutDrain",
       "operation": "mutator-call",
       "target": "src/services/realtime/incomingEventDispatcher.ts#DurableRealtimeDispatcher.persistWithoutDrainForDev",
@@ -23053,7 +23053,7 @@
     {
       "id": "src/services/realtimeControl.ts#devResumePersistedRealtimeEvents:mutator-call:e21851c784e7",
       "path": "src/services/realtimeControl.ts",
-      "line": 1076,
+      "line": 1077,
       "symbol": "devResumePersistedRealtimeEvents",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -23066,7 +23066,7 @@
     {
       "id": "src/services/realtimeControl.ts#devResumePersistedRealtimeEvents:mutator-call:b3b56902cbb1",
       "path": "src/services/realtimeControl.ts",
-      "line": 1080,
+      "line": 1081,
       "symbol": "devResumePersistedRealtimeEvents",
       "operation": "mutator-call",
       "target": "src/services/realtime/incomingEventDispatcher.ts#DurableRealtimeDispatcher.resume",
@@ -23079,7 +23079,7 @@
     {
       "id": "src/services/realtimeControl.ts#inject:mutator-call:e94b748b753f",
       "path": "src/services/realtimeControl.ts",
-      "line": 1094,
+      "line": 1095,
       "symbol": "inject",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#dispatchRealtimeEvent",
@@ -23092,7 +23092,7 @@
     {
       "id": "src/services/realtimeControl.ts#startRealtime.<callback:edf3121ba2>:mutator-call:3cd6e7e8d376",
       "path": "src/services/realtimeControl.ts",
-      "line": 1109,
+      "line": 1110,
       "symbol": "startRealtime.<callback:edf3121ba2>",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#resumeScopedCredentialUpgrade",
@@ -23105,7 +23105,7 @@
     {
       "id": "src/services/realtimeControl.ts#startRealtime:mutator-call:d95a386d71e0",
       "path": "src/services/realtimeControl.ts",
-      "line": 1126,
+      "line": 1127,
       "symbol": "startRealtime",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -23118,7 +23118,7 @@
     {
       "id": "src/services/realtimeControl.ts#startRealtime:mutator-reference:75992e767e3c",
       "path": "src/services/realtimeControl.ts",
-      "line": 1148,
+      "line": 1149,
       "symbol": "startRealtime",
       "operation": "mutator-reference",
       "target": "src/services/realtimeControl.ts#dispatchRealtimeEvent",
@@ -23131,7 +23131,7 @@
     {
       "id": "src/services/realtimeControl.ts#startRealtime.<callback:31d740386d>:mutator-call:ab8cd05669e0",
       "path": "src/services/realtimeControl.ts",
-      "line": 1182,
+      "line": 1183,
       "symbol": "startRealtime.<callback:31d740386d>",
       "operation": "mutator-call",
       "target": "src/services/realtime/incomingEventDispatcher.ts#DurableRealtimeDispatcher.resume",
@@ -23144,7 +23144,7 @@
     {
       "id": "src/services/realtimeControl.ts#resumeDesiredRealtime.<callback:edf3121ba2>:mutator-call:ab508913e108",
       "path": "src/services/realtimeControl.ts",
-      "line": 1322,
+      "line": 1323,
       "symbol": "resumeDesiredRealtime.<callback:edf3121ba2>",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#resumeScopedCredentialUpgrade",
@@ -23157,7 +23157,7 @@
     {
       "id": "src/services/realtimeControl.ts#resumeDesiredRealtime:mutator-call:2c6798b642a8",
       "path": "src/services/realtimeControl.ts",
-      "line": 1339,
+      "line": 1340,
       "symbol": "resumeDesiredRealtime",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#startRealtime",
@@ -23170,7 +23170,7 @@
     {
       "id": "src/services/realtimeControl.ts#resumeDesiredRealtime.<callback:e5528a3fb5>:mutator-call:e8033036c343",
       "path": "src/services/realtimeControl.ts",
-      "line": 1352,
+      "line": 1353,
       "symbol": "resumeDesiredRealtime.<callback:e5528a3fb5>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -23183,7 +23183,7 @@
     {
       "id": "src/services/realtimeControl.ts#resumeDesiredRealtime.<callback:e5528a3fb5>:mutator-call:a6f5f9d66e35",
       "path": "src/services/realtimeControl.ts",
-      "line": 1360,
+      "line": 1361,
       "symbol": "resumeDesiredRealtime.<callback:e5528a3fb5>",
       "operation": "mutator-call",
       "target": "src/services/realtime/incomingEventDispatcher.ts#DurableRealtimeDispatcher.resume",
@@ -23196,7 +23196,7 @@
     {
       "id": "src/services/realtimeControl.ts#resumeRealtime:mutator-call:3bd87f6c9e52",
       "path": "src/services/realtimeControl.ts",
-      "line": 1368,
+      "line": 1369,
       "symbol": "resumeRealtime",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#resumeDesiredRealtime",
@@ -23209,7 +23209,7 @@
     {
       "id": "src/services/realtimeControl.ts#resumeRealtimeAfterCredentialUpgrade:mutator-call:bd79318d30a2",
       "path": "src/services/realtimeControl.ts",
-      "line": 1373,
+      "line": 1374,
       "symbol": "resumeRealtimeAfterCredentialUpgrade",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#resumeDesiredRealtime",
@@ -23222,7 +23222,7 @@
     {
       "id": "src/services/realtimeControl.ts#approveNewServerUrl.reconnect:mutator-call:8f17c75f698b",
       "path": "src/services/realtimeControl.ts",
-      "line": 1484,
+      "line": 1498,
       "symbol": "approveNewServerUrl.reconnect",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#startRealtime",

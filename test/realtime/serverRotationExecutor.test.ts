@@ -27,6 +27,10 @@ function setup(
     Promise<ConnectResult>,
     Parameters<ServerRotationExecutorDeps['persistCandidate']>
   >;
+  moveFcmPushKeyState: jest.Mock<
+    Promise<void>,
+    Parameters<ServerRotationExecutorDeps['moveFcmPushKeyState']>
+  >;
   publishCandidate: jest.Mock;
   reconnect: jest.Mock;
 } {
@@ -57,6 +61,10 @@ function setup(
     Promise<ConnectResult>,
     Parameters<ServerRotationExecutorDeps['persistCandidate']>
   >(async () => ({ ok: true, serverInfo: SERVER_INFO }));
+  const moveFcmPushKeyState = jest.fn<
+    Promise<void>,
+    Parameters<ServerRotationExecutorDeps['moveFcmPushKeyState']>
+  >(async () => undefined);
   const publishCandidate = jest.fn((origin: string) => {
     session.origin = origin;
   });
@@ -67,6 +75,7 @@ function setup(
     captureLease: () => lease,
     validateCandidate,
     persistCandidate,
+    moveFcmPushKeyState,
     publishCandidate,
     reconnect,
   };
@@ -83,6 +92,7 @@ function setup(
     },
     validateCandidate,
     persistCandidate,
+    moveFcmPushKeyState,
     publishCandidate,
     reconnect,
   };
@@ -260,6 +270,12 @@ describe('approveServerRotation', () => {
       order.push('persist');
       return { ok: true, serverInfo: SERVER_INFO };
     });
+    h.moveFcmPushKeyState.mockImplementation(async (fromOrigin, toOrigin, lease, isCurrent) => {
+      expect([fromOrigin, toOrigin]).toEqual(['https://current.example', 'https://next.example']);
+      expect(lease.generation).toBe(4);
+      expect(isCurrent()).toBe(true);
+      order.push('move push key');
+    });
     h.publishCandidate.mockImplementation((origin: string) => {
       order.push('publish');
       h.session.origin = origin;
@@ -272,7 +288,8 @@ describe('approveServerRotation', () => {
     await expect(
       approveServerRotation(h.requestId, 'correct-password', false, h.deps),
     ).resolves.toEqual({ ok: true });
-    expect(order).toEqual(['validate', 'persist', 'publish', 'reconnect']);
+    // The V3 push-key record must follow the committed origin before reconnect re-registers push.
+    expect(order).toEqual(['validate', 'persist', 'move push key', 'publish', 'reconnect']);
     expect(h.session.origin).toBe('https://next.example');
     expect(h.deps.coordinator.getSnapshot()).toBeNull();
   });
@@ -324,6 +341,7 @@ describe('approveServerRotation', () => {
     await expect(
       approveServerRotation(h.requestId, 'correct-password', false, h.deps),
     ).resolves.toEqual(expect.objectContaining({ ok: false, kind: 'stale' }));
+    expect(h.moveFcmPushKeyState).not.toHaveBeenCalled();
     expect(h.publishCandidate).not.toHaveBeenCalled();
     expect(h.reconnect).not.toHaveBeenCalled();
   });

@@ -169,7 +169,10 @@ import {
   registerFcmToken,
   startFcm,
 } from '@/services/notifications/fcmMessaging';
-import { retireFcmDeviceEncryptionState } from '@/services/notifications/fcmEncryptionState';
+import {
+  moveFcmPushKeyStateToOrigin,
+  retireFcmDeviceEncryptionState,
+} from '@/services/notifications/fcmEncryptionState';
 import '@/services/notifications/registerFcmBackgroundHandler';
 
 function setConnectedSession(
@@ -1156,5 +1159,50 @@ describe('FCM registration account ownership', () => {
     expect(extension.key).not.toBe(oldKey);
     expect(vaultValues.get('fcmPushEncryptionV2')).toContain('https://new.test');
     expect(vaultValues.get('fcmPushEncryptionV2')).not.toContain(oldKey);
+  });
+
+  it('keeps the same V3 key after an approved server origin change carries the record', async () => {
+    const rotatedAt = 1_700_000_000_000;
+    const scopedCredential = `bbd_device_v1_${'R'.repeat(43)}`;
+    const binding = {
+      serverInstallationId: '11111111-1111-4111-8111-111111111111',
+      principalId: '22222222-2222-4222-8222-222222222222',
+      deviceId: '33333333-3333-4333-8333-333333333333',
+    } as const;
+    const key = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
+    jest.spyOn(Date, 'now').mockReturnValue(rotatedAt);
+    vaultValues.set(
+      'fcmPushEncryptionV2',
+      serializeFcmDeviceEncryptionState(
+        activeFcmPushKeyState(key, 1, binding, 'https://old.test', rotatedAt),
+      ),
+    );
+    // The approved rotation (serverRotationExecutor) carries the record to the new origin.
+    await moveFcmPushKeyStateToOrigin(
+      { get: mockVaultGet, set: mockVaultSet, delete: mockVaultDelete } as unknown as SecureVault,
+      'https://old.test',
+      'https://new.test',
+    );
+    setConnectedSession('https://new.test', scopedCredential, 101, true, true, true);
+    mockRegisterDevice.mockResolvedValueOnce({
+      id: binding.deviceId,
+      pushEncryptionType: FCM_PUSH_ENCRYPTION_TYPE_V3,
+      pushEncryptionIdentity: binding,
+      pushEncryptionKeyVersion: 1,
+    });
+
+    await expect(registerFcmToken()).resolves.toBe('registered');
+
+    // Same server installation, credential and key: no re-enrollment, only the URL moved.
+    expect(mockRegisterDevice.mock.calls[0]?.[3]).toMatchObject({
+      type: FCM_PUSH_ENCRYPTION_TYPE_V3,
+      key,
+    });
+    expect(inspectFcmDeviceEncryptionState(vaultValues.get('fcmPushEncryptionV2') ?? null)).toEqual(
+      {
+        kind: 'valid',
+        state: activeFcmPushKeyState(key, 1, binding, 'https://new.test', rotatedAt),
+      },
+    );
   });
 });
