@@ -297,8 +297,11 @@ import {
 import {
   activateForegroundBootSession,
   connect,
+  disconnectFailureMessage,
   forget,
+  forgetOnThisPhoneOnly,
   hydrateForegroundBootSettings,
+  PREVIOUS_CREDENTIAL_UNREVOKED_MESSAGE,
   hydrateSession,
   inspectForegroundBootSession,
   openForegroundBootDatabase,
@@ -2236,6 +2239,39 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
 
     expect(vaultValues.get('serverSessionState')).toBe(SERVER_SESSION_STATE.forgotten);
     expect(vaultValues.get('serverPassword')).toBe(scopedCredential);
+  });
+
+  it('forgets an unreachable server bearer on this phone only, without the server step', async () => {
+    const scopedCredential = `bbd_device_v1_${'G'.repeat(43)}`;
+    vaultValues.set('serverSessionState', SERVER_SESSION_STATE.active);
+    vaultValues.set('serverAddress', 'https://gone.example');
+    vaultValues.set('serverPassword', scopedCredential);
+    useSessionStore.setState({
+      status: 'connected',
+      origin: 'https://gone.example',
+      password: scopedCredential,
+    });
+    revokeSelf.mockRejectedValueOnce(new ApiError('no_connection', 'Network request failed'));
+
+    // An ordinary Disconnect cannot reach the old server, so it keeps the bearer and explains why.
+    const failure = await forget().catch((error: unknown) => error);
+    expect(disconnectFailureMessage(failure)).toBe(PREVIOUS_CREDENTIAL_UNREVOKED_MESSAGE);
+    expect(vaultValues.get('serverPassword')).toBe(scopedCredential);
+    expect(revokeSelf).toHaveBeenCalledTimes(1);
+
+    await flushMicrotasks();
+    await expect(forgetOnThisPhoneOnly()).resolves.toBeUndefined();
+
+    // The local-only run never contacts the server, then retires local custody completely.
+    expect(revokeSelf).toHaveBeenCalledTimes(1);
+    expect(vaultValues.get('serverCredentialUpgrade')).toBe('{"version":1,"phase":"revoked"}');
+    expect(vaultValues.has('serverAddress')).toBe(false);
+    expect(vaultValues.has('serverPassword')).toBe(false);
+    expect(useSessionStore.getState()).toMatchObject({
+      status: 'unauthenticated',
+      origin: null,
+      password: null,
+    });
   });
 
   it('bounds a hung scoped-custody read, wipes locally, then finishes its quarantined cleanup', async () => {

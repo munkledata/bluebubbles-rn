@@ -125,7 +125,15 @@ export {
   retryRealtimeConnection,
   applyNewServerUrl,
 } from './realtimeControl';
-export { connect, forget, disconnectFailureMessage } from './bootstrap';
+export {
+  connect,
+  forget,
+  forgetOnThisPhoneOnly,
+  disconnectFailureMessage,
+  isUnconfirmedCredentialRetirement,
+  PREVIOUS_CREDENTIAL_UNREVOKED_MESSAGE,
+  previousUnrevokedServerOrigin,
+} from './bootstrap';
 export {
   beginScopedCredentialReplacement,
   beginScopedCredentialUpgrade,

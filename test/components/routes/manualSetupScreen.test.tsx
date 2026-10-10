@@ -20,7 +20,13 @@ jest.mock('expo-router', () => ({ useRouter: () => ({ replace: mockReplace }) })
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
-jest.mock('@/services', () => ({ connect: jest.fn() }));
+jest.mock('@/services', () => ({
+  connect: jest.fn(),
+  disconnectFailureMessage: jest.fn(() => 'still blocked'),
+  forgetOnThisPhoneOnly: jest.fn(async () => undefined),
+  PREVIOUS_CREDENTIAL_UNREVOKED_MESSAGE: 'previous server never confirmed revoking this phone',
+  previousUnrevokedServerOrigin: jest.fn(async () => 'https://gone.example'),
+}));
 // RNTL exposes only the host tree, so capture the composite KeyboardAvoidingView props through a
 // small stand-in. Its native movement remains device-only evidence.
 jest.mock('react-native/Libraries/Components/Keyboard/KeyboardAvoidingView', () => {
@@ -54,6 +60,20 @@ beforeEach(() => {
 });
 
 describe('ManualSetupScreen', () => {
+  it('offers "Forget on this phone only" only for an unconfirmed previous-credential revocation', async () => {
+    useSessionStore.setState({ status: 'error', error: 'some other connection error' });
+    await renderWithTheme(<ManualSetupScreen />);
+    expect(screen.queryByRole('button', { name: 'Forget on this phone only' })).toBeNull();
+
+    await act(async () => {
+      useSessionStore.setState({
+        status: 'error',
+        error: 'previous server never confirmed revoking this phone',
+      });
+    });
+    expect(screen.getByRole('button', { name: 'Forget on this phone only' })).toBeTruthy();
+  });
+
   it('states the system-CA-only HTTPS policy', async () => {
     await renderWithTheme(<ManualSetupScreen />);
 

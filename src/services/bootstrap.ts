@@ -807,9 +807,22 @@ function unavailableConnectionMessage(
   return ACCOUNT_STATE_UNAVAILABLE_MESSAGE;
 }
 
+/** The previous server could not confirm revoking this phone's scoped credential. */
+export const PREVIOUS_CREDENTIAL_UNREVOKED_MESSAGE =
+  "Gator couldn't reach the previous server to remove this phone's access, so it can't safely " +
+  'connect yet. If that server is gone for good, you can forget it on this phone only.';
+
+/** True when a cleanup failed because a scoped credential's server revocation was not confirmed. */
+export function isUnconfirmedCredentialRetirement(error: unknown): boolean {
+  return error instanceof Error && error.message === CREDENTIAL_UPGRADE_RETIREMENT_FAILURE_MESSAGE;
+}
+
 export function disconnectFailureMessage(error: unknown): string {
-  return error instanceof Error && error.message === CREDENTIAL_REMOVAL_FAILURE_MESSAGE
-    ? error.message
+  if (error instanceof Error && error.message === CREDENTIAL_REMOVAL_FAILURE_MESSAGE) {
+    return error.message;
+  }
+  return isUnconfirmedCredentialRetirement(error)
+    ? PREVIOUS_CREDENTIAL_UNREVOKED_MESSAGE
     : RESIDUAL_CLEANUP_FAILURE_MESSAGE;
 }
 
@@ -1312,8 +1325,16 @@ async function finishScopedCredentialRetirement(
   snapshot: ScopedCredentialRevocationSnapshot,
   credentialTupleWasPreserved: boolean,
   independentlyRevoked: boolean,
+  waiveRemoteRevocation = false,
 ): Promise<void> {
-  if (snapshot.targets.length > 0) await revokeAllScopedCredentials(snapshot.targets);
+  if (snapshot.targets.length > 0) {
+    if (waiveRemoteRevocation) {
+      // The user chose "Forget on this phone only": erase local custody without the server step.
+      logger.warn('[forget] scoped credential forgotten on this device without server revocation');
+    } else {
+      await revokeAllScopedCredentials(snapshot.targets);
+    }
+  }
   await writeCredentialUpgradeRevokedTombstone();
   if (!credentialTupleWasPreserved) return;
   const removalFailure = await retireDurableCredentials(independentlyRevoked);
@@ -1398,7 +1419,10 @@ async function cleanupAccountDatabase(): Promise<DatabaseAccountCleanupResult> {
  * it — the session reset happens early, so the user is already back on the setup screen while this
  * is still deleting.
  */
-async function runForget(invalidateForegroundBoot: boolean): Promise<void> {
+async function runForget(
+  invalidateForegroundBoot: boolean,
+  waiveRemoteRevocation = false,
+): Promise<void> {
   // FIRST instruction: revoke a candidate suspended in server validation or SecureStore. The
   // connection layer checks this epoch after every await and before clearing the durable marker;
   // bootstrap checks it again before publishing Connected/starting account work.
@@ -1611,6 +1635,7 @@ async function runForget(invalidateForegroundBoot: boolean): Promise<void> {
         snapshotResult.value,
         true,
         independentlyRevoked,
+        waiveRemoteRevocation,
       );
       scopedCredentialRetirement = settleWithinDeadline(
         retirement,
@@ -1635,7 +1660,12 @@ async function runForget(invalidateForegroundBoot: boolean): Promise<void> {
             if (failure) throw failure;
           }),
         ]).then(([lateSnapshot]) =>
-          finishScopedCredentialRetirement(lateSnapshot, true, independentlyRevoked),
+          finishScopedCredentialRetirement(
+            lateSnapshot,
+            true,
+            independentlyRevoked,
+            waiveRemoteRevocation,
+          ),
         );
         quarantineAccountCleanup(lateRetirement);
       }
@@ -1654,7 +1684,12 @@ async function runForget(invalidateForegroundBoot: boolean): Promise<void> {
     ])
       .then(() => captureScopedCredentialRevocationTargets(liveScopedTarget))
       .then((lateSnapshot) =>
-        finishScopedCredentialRetirement(lateSnapshot, true, independentlyRevoked),
+        finishScopedCredentialRetirement(
+          lateSnapshot,
+          true,
+          independentlyRevoked,
+          waiveRemoteRevocation,
+        ),
       );
     quarantineAccountCleanup(lateRetirement);
     credentialUpgradeRetirementFailure = new Error(CREDENTIAL_UPGRADE_RETIREMENT_FAILURE_MESSAGE);
@@ -1937,7 +1972,10 @@ function dispatchForgetRestart(run: ForgetRun): void {
  * stopped, and parking a rejecting promise in a module slot that nobody awaits would surface as an
  * unhandled rejection. The caller still receives the real promise, with the real error.
  */
-function startForget(invalidateForegroundBoot: boolean): Promise<void> {
+function startForget(
+  invalidateForegroundBoot: boolean,
+  waiveRemoteRevocation = false,
+): Promise<void> {
   // Public Disconnect owns the user's intent even when Connect has not reached candidate
   // validation/captured connectionAttemptEpoch yet. Internal residual cleanup belongs to that
   // same Connect and must not revoke it, so only the public path calls this hook.
@@ -1994,7 +2032,7 @@ function startForget(invalidateForegroundBoot: boolean): Promise<void> {
     restartAccepted: false,
   };
   forgetInFlight = tracked;
-  const cleanup = runForget(invalidateForegroundBoot);
+  const cleanup = runForget(invalidateForegroundBoot, waiveRemoteRevocation);
   // `runForget` executes synchronously through epoch revocation, coordinator invalidation, account
   // admission closure, and its first durable mutation before yielding this Promise. Starting the
   // successor now is therefore safe; its session adapter sees `forgetInFlight` and joins this run.
@@ -2005,6 +2043,28 @@ function startForget(invalidateForegroundBoot: boolean): Promise<void> {
 
 export function forget(): Promise<void> {
   return startForget(true);
+}
+
+/**
+ * "Forget on this phone only" for a previous server that cannot confirm revoking this phone's scoped
+ * credential (gone, unreachable, reinstalled offline). Runs the same full Disconnect wipe but skips
+ * the server revoke-self step, so the retained bearer is erased from this phone and new connections
+ * unblock. The old server may keep listing this phone until it is removed there; callers must say so
+ * before the user confirms. Waits out any running cleanup first, so the waiver applies only to a
+ * fresh run and never shortcuts one already in flight.
+ */
+export async function forgetOnThisPhoneOnly(): Promise<void> {
+  while (forgetInFlight) await awaitForgetIdle();
+  return startForget(true, true);
+}
+
+/** The server a retained, unrevoked scoped credential belongs to, for confirmation text only. */
+export async function previousUnrevokedServerOrigin(): Promise<string | null> {
+  try {
+    return strictServerOrigin(await vault.get('serverAddress'));
+  } catch {
+    return null;
+  }
 }
 
 /** Resolve with a running wipe's outcome, or null when none was active. Never rejects. */

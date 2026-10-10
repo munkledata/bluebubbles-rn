@@ -485,7 +485,7 @@
     {
       "id": "app/(app)/settings.tsx#SettingsScreen.onDisconnect.onPress:mutator-call:d4cf58af3ec2",
       "path": "app/(app)/settings.tsx",
-      "line": 216,
+      "line": 224,
       "symbol": "SettingsScreen.onDisconnect.onPress",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#forget",
@@ -498,7 +498,7 @@
     {
       "id": "app/(app)/settings.tsx#SettingsScreen.onRotateKey.onPress.<callback:e1dc7f6ab7>:mutator-call:ac9fcd609606",
       "path": "app/(app)/settings.tsx",
-      "line": 241,
+      "line": 267,
       "symbol": "SettingsScreen.onRotateKey.onPress.<callback:e1dc7f6ab7>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#rotateDatabaseKey",
@@ -511,7 +511,7 @@
     {
       "id": "app/(setup)/manual.tsx#Manual.submit:mutator-call:5e0818285fda",
       "path": "app/(setup)/manual.tsx",
-      "line": 25,
+      "line": 32,
       "symbol": "Manual.submit",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#connect",
@@ -524,7 +524,7 @@
     {
       "id": "app/(setup)/manual.tsx#Manual:mutator-reference:cb409be66510",
       "path": "app/(setup)/manual.tsx",
-      "line": 66,
+      "line": 73,
       "symbol": "Manual",
       "operation": "mutator-reference",
       "target": "app/(setup)/manual.tsx#Manual.submit",
@@ -535,9 +535,22 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/bootCoordinator.test.ts; test/services/foregroundBoot.test.ts; test/services/forget.test.ts; test/services/lockService.test.ts; test/services/realtimeStartupOptional.test.ts; test/services/scheduledRecoveryBarrier.test.ts; test/components/routes/homeScreen.test.tsx; test/features/conversations/devSeedAccountScope.test.ts"
     },
     {
+      "id": "app/(setup)/manual.tsx#Manual:mutator-reference:9d60163bfff7",
+      "path": "app/(setup)/manual.tsx",
+      "line": 100,
+      "symbol": "Manual",
+      "operation": "mutator-reference",
+      "target": "src/services/bootstrap.ts#forgetOnThisPhoneOnly",
+      "detectedContext": "coordinated-delegation",
+      "owner": "Manual forget on this phone only",
+      "transactionContext": "coordinated-delegation",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/forget.test.ts; test/components/routes/manualSetupScreen.test.tsx; test/components/connection/forgetPreviousServer.test.tsx"
+    },
+    {
       "id": "app/(setup)/manual.tsx#Manual:mutator-reference:cb409be66510:2",
       "path": "app/(setup)/manual.tsx",
-      "line": 94,
+      "line": 108,
       "symbol": "Manual",
       "operation": "mutator-reference",
       "target": "app/(setup)/manual.tsx#Manual.submit",
@@ -550,7 +563,7 @@
     {
       "id": "app/(setup)/scan.tsx#Scan.onBarcodeScanned:mutator-call:a94b6122a495",
       "path": "app/(setup)/scan.tsx",
-      "line": 49,
+      "line": 56,
       "symbol": "Scan.onBarcodeScanned",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#connect",
@@ -563,7 +576,7 @@
     {
       "id": "app/(setup)/scan.tsx#Scan:mutator-reference:1cff632b86f3",
       "path": "app/(setup)/scan.tsx",
-      "line": 97,
+      "line": 104,
       "symbol": "Scan",
       "operation": "mutator-reference",
       "target": "app/(setup)/scan.tsx#Scan.onBarcodeScanned",
@@ -572,6 +585,19 @@
       "transactionContext": "coordinated-delegation",
       "disposition": "coordinated",
       "evidence": "scripts/check-db-writes.test.mjs; test/services/bootCoordinator.test.ts; test/services/foregroundBoot.test.ts; test/services/forget.test.ts; test/services/lockService.test.ts; test/services/realtimeStartupOptional.test.ts; test/services/scheduledRecoveryBarrier.test.ts; test/components/routes/homeScreen.test.tsx; test/features/conversations/devSeedAccountScope.test.ts"
+    },
+    {
+      "id": "app/(setup)/scan.tsx#Scan:mutator-reference:2e00f574c549",
+      "path": "app/(setup)/scan.tsx",
+      "line": 119,
+      "symbol": "Scan",
+      "operation": "mutator-reference",
+      "target": "src/services/bootstrap.ts#forgetOnThisPhoneOnly",
+      "detectedContext": "coordinated-delegation",
+      "owner": "Scan forget on this phone only",
+      "transactionContext": "coordinated-delegation",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/forget.test.ts; test/components/routes/scanScreen.test.tsx; test/components/connection/forgetPreviousServer.test.tsx"
     },
     {
       "id": "app/(setup)/welcome.tsx#Welcome.devSeedAndOpen:mutator-call:da967f4afb4d",
@@ -17801,7 +17827,7 @@
     {
       "id": "src/services/bootstrap.ts#prepareCandidateConnection:mutator-call:21c31fa08724",
       "path": "src/services/bootstrap.ts",
-      "line": 846,
+      "line": 859,
       "symbol": "prepareCandidateConnection",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#runOrAwaitForget",
@@ -17814,7 +17840,7 @@
     {
       "id": "src/services/bootstrap.ts#prepareCandidateConnection:mutator-call:a35e092f20bd",
       "path": "src/services/bootstrap.ts",
-      "line": 851,
+      "line": 864,
       "symbol": "prepareCandidateConnection",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#prepareCandidateConnection",
@@ -17827,7 +17853,7 @@
     {
       "id": "src/services/bootstrap.ts#connect:mutator-call:0215e207799e",
       "path": "src/services/bootstrap.ts",
-      "line": 949,
+      "line": 962,
       "symbol": "connect",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#prepareCandidateConnection",
@@ -17840,7 +17866,7 @@
     {
       "id": "src/services/bootstrap.ts#connect:mutator-call:f72fb8307767",
       "path": "src/services/bootstrap.ts",
-      "line": 1047,
+      "line": 1060,
       "symbol": "connect",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -17853,7 +17879,7 @@
     {
       "id": "src/services/bootstrap.ts#connect:mutator-call:e75fcdcefedc",
       "path": "src/services/bootstrap.ts",
-      "line": 1129,
+      "line": 1142,
       "symbol": "connect",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#startRealtime",
@@ -17866,7 +17892,7 @@
     {
       "id": "src/services/bootstrap.ts#cleanupAccountDatabase:mutator-call:bd0a1be3afa9",
       "path": "src/services/bootstrap.ts",
-      "line": 1332,
+      "line": 1353,
       "symbol": "cleanupAccountDatabase",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -17879,7 +17905,7 @@
     {
       "id": "src/services/bootstrap.ts#cleanupAccountDatabase:mutator-call:9c87d79ec275",
       "path": "src/services/bootstrap.ts",
-      "line": 1373,
+      "line": 1394,
       "symbol": "cleanupAccountDatabase",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#wipeLocalCache",
@@ -17892,7 +17918,7 @@
     {
       "id": "src/services/bootstrap.ts#runForget:mutator-call:8d5a9e357850",
       "path": "src/services/bootstrap.ts",
-      "line": 1774,
+      "line": 1809,
       "symbol": "runForget",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#cleanupAccountDatabase",
@@ -17905,7 +17931,7 @@
     {
       "id": "src/services/bootstrap.ts#wipeLocalCache:mutator-call:80814999e829",
       "path": "src/services/bootstrap.ts",
-      "line": 1901,
+      "line": 1936,
       "symbol": "wipeLocalCache",
       "operation": "mutator-call",
       "target": "src/db/repositories/maintenance.ts#clearLocalCache",
@@ -17918,7 +17944,7 @@
     {
       "id": "src/services/bootstrap.ts#wipeLocalCache:mutator-call:972629a8899e",
       "path": "src/services/bootstrap.ts",
-      "line": 1905,
+      "line": 1940,
       "symbol": "wipeLocalCache",
       "operation": "mutator-call",
       "target": "src/db/repositories/maintenance.ts#localCacheDirty",
@@ -17929,9 +17955,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/bootCoordinator.test.ts; test/services/foregroundBoot.test.ts; test/services/forget.test.ts; test/services/lockService.test.ts; test/services/realtimeStartupOptional.test.ts; test/services/scheduledRecoveryBarrier.test.ts; test/components/routes/homeScreen.test.tsx; test/features/conversations/devSeedAccountScope.test.ts"
     },
     {
-      "id": "src/services/bootstrap.ts#startForget:mutator-call:976b6c7c71bc",
+      "id": "src/services/bootstrap.ts#startForget:mutator-call:56e44cd9d18f",
       "path": "src/services/bootstrap.ts",
-      "line": 1997,
+      "line": 2035,
       "symbol": "startForget",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#runForget",
@@ -17944,7 +17970,7 @@
     {
       "id": "src/services/bootstrap.ts#forget:mutator-call:fde5b98b6a5c",
       "path": "src/services/bootstrap.ts",
-      "line": 2007,
+      "line": 2045,
       "symbol": "forget",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#startForget",
@@ -17955,9 +17981,22 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/bootCoordinator.test.ts; test/services/foregroundBoot.test.ts; test/services/forget.test.ts; test/services/lockService.test.ts; test/services/realtimeStartupOptional.test.ts; test/services/scheduledRecoveryBarrier.test.ts; test/components/routes/homeScreen.test.tsx; test/features/conversations/devSeedAccountScope.test.ts"
     },
     {
+      "id": "src/services/bootstrap.ts#forgetOnThisPhoneOnly:mutator-call:aa633e0b631a",
+      "path": "src/services/bootstrap.ts",
+      "line": 2058,
+      "symbol": "forgetOnThisPhoneOnly",
+      "operation": "mutator-call",
+      "target": "src/services/bootstrap.ts#startForget",
+      "detectedContext": "coordinated-delegation",
+      "owner": "forgetOnThisPhoneOnly",
+      "transactionContext": "coordinated-delegation",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/forget.test.ts; test/components/connection/forgetPreviousServer.test.tsx; test/components/routes/settingsScreen.test.tsx"
+    },
+    {
       "id": "src/services/bootstrap.ts#runOrAwaitForget:mutator-call:a0e09cd34906",
       "path": "src/services/bootstrap.ts",
-      "line": 2021,
+      "line": 2081,
       "symbol": "runOrAwaitForget",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#startForget",

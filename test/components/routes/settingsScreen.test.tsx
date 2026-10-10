@@ -65,6 +65,9 @@ jest.mock('@/services', () => ({
       'Gator could not safely finish clearing the previous connection. Restart the app and try again before connecting.',
   ),
   forget: jest.fn().mockResolvedValue(undefined),
+  forgetOnThisPhoneOnly: jest.fn().mockResolvedValue(undefined),
+  isUnconfirmedCredentialRetirement: jest.fn(() => false),
+  previousUnrevokedServerOrigin: jest.fn().mockResolvedValue('https://gone.example'),
   rotateDatabaseKey: jest.fn(),
   setAppLockEnabled: jest.fn(),
 }));
@@ -95,7 +98,12 @@ import { isBiometricAvailable } from '@native/biometrics';
 // eslint-disable-next-line import/first
 import { getSecureScreenState, setSecureScreenEnabled } from '@native/screenSecurity';
 // eslint-disable-next-line import/first
-import { forget, rotateDatabaseKey, setAppLockEnabled } from '@/services';
+import {
+  forget,
+  isUnconfirmedCredentialRetirement,
+  rotateDatabaseKey,
+  setAppLockEnabled,
+} from '@/services';
 // eslint-disable-next-line import/first
 import { getContactsPermissionState, syncContacts } from '@/services/contacts/contactsService';
 // eslint-disable-next-line import/first
@@ -134,6 +142,7 @@ const mockIsBiometricAvailable = isBiometricAvailable as jest.Mock;
 const mockGetSecureScreenState = getSecureScreenState as jest.Mock;
 const mockSetSecureScreenEnabled = setSecureScreenEnabled as jest.Mock;
 const mockForget = forget as jest.Mock;
+const mockIsUnconfirmedCredentialRetirement = isUnconfirmedCredentialRetirement as jest.Mock;
 const mockRotate = rotateDatabaseKey as jest.Mock;
 const mockSetAppLock = setAppLockEnabled as jest.Mock;
 const mockSyncContacts = syncContacts as jest.Mock;
@@ -745,6 +754,39 @@ describe('SettingsScreen — destructive/confirm dialogs', () => {
       confirm!.onPress?.();
     });
     expect(mockForget).toHaveBeenCalled();
+  });
+
+  it('offers "Forget on this phone only" when the old server never confirmed revocation', async () => {
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    mockForget.mockRejectedValueOnce(new Error('scoped retirement unconfirmed'));
+    mockIsUnconfirmedCredentialRetirement.mockReturnValueOnce(true);
+    await renderWithTheme(<SettingsScreen />);
+    await act(async () => {
+      fireEvent.press(screen.getByLabelText('Disconnect from server'));
+    });
+    const confirm = useDialogStore.getState().current!.buttons.find((b) => b.text === 'Disconnect');
+    useDialogStore.getState().dismiss();
+
+    await act(async () => {
+      confirm!.onPress?.();
+      await Promise.resolve();
+    });
+
+    await waitFor(() =>
+      expect(useDialogStore.getState().current?.title).toBe('Disconnect incomplete'),
+    );
+    const escape = useDialogStore
+      .getState()
+      .current!.buttons.find((b) => b.text === 'Forget on this phone only');
+    expect(escape).toBeDefined();
+    useDialogStore.getState().dismiss();
+    await act(async () => {
+      escape!.onPress?.();
+    });
+    await waitFor(() =>
+      expect(useDialogStore.getState().current?.title).toBe('Forget on this phone only?'),
+    );
+    warn.mockRestore();
   });
 
   it('warns when Disconnect cannot confirm complete account cleanup', async () => {

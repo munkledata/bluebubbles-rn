@@ -4063,10 +4063,12 @@ test('certifies exactly the reviewed outer-lifecycle delegation boundary', () =>
       'app/(app)/_layout.tsx#ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>:mutator-call:b2420ad62c5c',
       'app/(app)/_layout.tsx#ConnectedAppLayout.<callback:a2e3e20ce9>.<callback:c01eb44b5c>:mutator-call:cc9500dd8a49',
       'app/(setup)/manual.tsx#Manual.submit:mutator-call:5e0818285fda',
+      'app/(setup)/manual.tsx#Manual:mutator-reference:9d60163bfff7',
       'app/(setup)/manual.tsx#Manual:mutator-reference:cb409be66510',
       'app/(setup)/manual.tsx#Manual:mutator-reference:cb409be66510:2',
       'app/(setup)/scan.tsx#Scan.onBarcodeScanned:mutator-call:a94b6122a495',
       'app/(setup)/scan.tsx#Scan:mutator-reference:1cff632b86f3',
+      'app/(setup)/scan.tsx#Scan:mutator-reference:2e00f574c549',
       'app/(setup)/welcome.tsx#Welcome.<callback:b1fa990a01>:mutator-call:7469e4d131fc',
       'app/(setup)/welcome.tsx#Welcome.devSeedAndOpen:mutator-call:da967f4afb4d',
       'src/features/conversations/devFixtureSession.ts#startDevFixtureSession.<callback:da7ab6f8ed>:mutator-call:05b010927a61',
@@ -4079,6 +4081,7 @@ test('certifies exactly the reviewed outer-lifecycle delegation boundary', () =>
       'src/services/bootstrap.ts#connect:mutator-call:0215e207799e',
       'src/services/bootstrap.ts#connect:mutator-call:e75fcdcefedc',
       'src/services/bootstrap.ts#forget:mutator-call:fde5b98b6a5c',
+      'src/services/bootstrap.ts#forgetOnThisPhoneOnly:mutator-call:aa633e0b631a',
       'src/services/bootstrap.ts#hydrateSession:mutator-call:8cea0fe82b02',
       'src/services/bootstrap.ts#hydrateSession:mutator-call:8cea0fe82b02:2',
       'src/services/bootstrap.ts#hydrateSession:mutator-call:c52a509eefea',
@@ -4088,7 +4091,7 @@ test('certifies exactly the reviewed outer-lifecycle delegation boundary', () =>
       'src/services/bootstrap.ts#resolveBootSession:mutator-call:4be60ae765e3',
       'src/services/bootstrap.ts#runForget:mutator-call:8d5a9e357850',
       'src/services/bootstrap.ts#runOrAwaitForget:mutator-call:a0e09cd34906',
-      'src/services/bootstrap.ts#startForget:mutator-call:976b6c7c71bc',
+      'src/services/bootstrap.ts#startForget:mutator-call:56e44cd9d18f',
       'src/services/bootstrap.ts#wipeLocalCache:mutator-call:80814999e829',
       'src/services/bootstrap.ts#wipeLocalCache:mutator-call:972629a8899e',
       'src/services/lock.ts#completeUnlock:mutator-call:9644c273a5cd',
@@ -4103,7 +4106,7 @@ test('certifies exactly the reviewed outer-lifecycle delegation boundary', () =>
       'src/services/realtimeControl.ts#startRealtime.<callback:edf3121ba2>:mutator-call:3cd6e7e8d376',
     ].sort(),
   );
-  assert.equal(delegated.length, 41);
+  assert.equal(delegated.length, 44);
 
   for (const suffix of [
     '8c40f7e0add0',

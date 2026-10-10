@@ -11,7 +11,15 @@ import {
   setSecureScreenEnabled,
   type SecureScreenState,
 } from '@native/screenSecurity';
-import { disconnectFailureMessage, forget, rotateDatabaseKey, setAppLockEnabled } from '@/services';
+import {
+  disconnectFailureMessage,
+  forget,
+  forgetOnThisPhoneOnly,
+  isUnconfirmedCredentialRetirement,
+  previousUnrevokedServerOrigin,
+  rotateDatabaseKey,
+  setAppLockEnabled,
+} from '@/services';
 import { requestDisableBatteryOptimization } from '@/services/battery';
 import {
   setAttachmentAutoDownloadDestination,
@@ -57,7 +65,7 @@ import {
   SwitchRow,
   useTheme,
 } from '@ui';
-import { transportHealthStatusLabel } from '@ui/connection';
+import { confirmForgetPreviousServer, transportHealthStatusLabel } from '@ui/connection';
 import {
   showContactsPermissionRationale,
   showContactsPermissionRecovery,
@@ -215,7 +223,25 @@ export default function SettingsScreen(): React.JSX.Element {
             if (!accountLease.isCurrent()) return;
             void forget().catch((e: unknown) => {
               logger.warn('[settings] Disconnect cleanup remains incomplete', e);
-              showDialog('Disconnect incomplete', disconnectFailureMessage(e));
+              showDialog(
+                'Disconnect incomplete',
+                disconnectFailureMessage(e),
+                isUnconfirmedCredentialRetirement(e)
+                  ? [
+                      { text: 'OK', style: 'cancel' },
+                      {
+                        text: 'Forget on this phone only',
+                        onPress: () => {
+                          void confirmForgetPreviousServer({
+                            previousServerOrigin: previousUnrevokedServerOrigin,
+                            forgetOnThisPhoneOnly,
+                            failureMessage: disconnectFailureMessage,
+                          });
+                        },
+                      },
+                    ]
+                  : undefined,
+              );
             });
           },
         },

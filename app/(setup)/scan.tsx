@@ -3,10 +3,17 @@ import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { connect } from '@/services';
+import {
+  connect,
+  disconnectFailureMessage,
+  forgetOnThisPhoneOnly,
+  PREVIOUS_CREDENTIAL_UNREVOKED_MESSAGE,
+  previousUnrevokedServerOrigin,
+} from '@/services';
 import { parseSetupQr, SetupQrParseError, type SetupQrParseErrorCode } from '@features/setup/qr';
 import { useSessionStore } from '@state/sessionStore';
 import { Button, Screen, useTheme } from '@ui';
+import { ForgetPreviousServerAction } from '@ui/connection';
 import { createI18n, type I18n, type TranslationKey } from '@utils/i18n';
 
 const SCAN_ERROR_KEYS = {
@@ -106,6 +113,13 @@ export default function Scan(): React.JSX.Element {
         </Text>
         <View style={styles.reticle} />
         {message ? <Text style={styles.error}>{message}</Text> : <View />}
+        {!scanError && connectError === PREVIOUS_CREDENTIAL_UNREVOKED_MESSAGE ? (
+          <ForgetPreviousServerAction
+            previousServerOrigin={previousUnrevokedServerOrigin}
+            forgetOnThisPhoneOnly={forgetOnThisPhoneOnly}
+            failureMessage={disconnectFailureMessage}
+          />
+        ) : null}
       </View>
     </View>
   );

@@ -29,7 +29,13 @@ jest.mock('expo-camera', () => ({
   },
   useCameraPermissions: () => [mockPermission, mockRequestPermission],
 }));
-jest.mock('@/services', () => ({ connect: jest.fn() }));
+jest.mock('@/services', () => ({
+  connect: jest.fn(),
+  disconnectFailureMessage: jest.fn(() => 'still blocked'),
+  forgetOnThisPhoneOnly: jest.fn(async () => undefined),
+  PREVIOUS_CREDENTIAL_UNREVOKED_MESSAGE: 'previous server never confirmed revoking this phone',
+  previousUnrevokedServerOrigin: jest.fn(async () => 'https://gone.example'),
+}));
 jest.mock('@state/sessionStore', () => ({
   useSessionStore: (
     selector: (state: { readonly status: string; readonly error: string | null }) => unknown,

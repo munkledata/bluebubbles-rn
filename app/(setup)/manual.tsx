@@ -2,9 +2,16 @@ import { useRouter } from 'expo-router';
 import { useEffect, useMemo, useState } from 'react';
 import { KeyboardAvoidingView, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { connect } from '@/services';
+import {
+  connect,
+  disconnectFailureMessage,
+  forgetOnThisPhoneOnly,
+  PREVIOUS_CREDENTIAL_UNREVOKED_MESSAGE,
+  previousUnrevokedServerOrigin,
+} from '@/services';
 import { useSessionStore } from '@state/sessionStore';
 import { Button, Screen, TextField, useTheme } from '@ui';
+import { ForgetPreviousServerAction } from '@ui/connection';
 import { useKeyboardVisible } from '@ui/hooks/useKeyboardVisible';
 import { createI18n } from '@utils/i18n';
 
@@ -86,6 +93,13 @@ export default function Manual(): React.JSX.Element {
           ) : null}
           {error ? (
             <Text style={[styles.error, { color: theme.color.destructive }]}>{error}</Text>
+          ) : null}
+          {error === PREVIOUS_CREDENTIAL_UNREVOKED_MESSAGE ? (
+            <ForgetPreviousServerAction
+              previousServerOrigin={previousUnrevokedServerOrigin}
+              forgetOnThisPhoneOnly={forgetOnThisPhoneOnly}
+              failureMessage={disconnectFailureMessage}
+            />
           ) : null}
           <Button
             title={i18n.text('manual.action.connect')}
