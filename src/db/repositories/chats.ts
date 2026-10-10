@@ -1225,7 +1225,6 @@ export async function setChatUnreadLocal(
  */
 export function markAllChatsReadLocalWithinTransaction(
   context: DbTransactionContext,
-  currentRcsProviderEpoch: string | null = null,
 ): Promise<void> {
   return runInTransactionContext(context, async (db) => {
     await db.run(sql`
@@ -1238,11 +1237,6 @@ export function markAllChatsReadLocalWithinTransaction(
         SELECT 1 FROM messages m2
          WHERE m2.chat_id = chats.id AND m2.is_from_me = 0 AND m2.date_deleted IS NULL
       )
-        AND (
-          chats.guid NOT GLOB 'RCS;-;*'
-          OR (${currentRcsProviderEpoch} IS NOT NULL
-            AND chats.guid GLOB ${`RCS;-;g1.${currentRcsProviderEpoch ?? ''}.*`})
-        )
     `);
   });
 }

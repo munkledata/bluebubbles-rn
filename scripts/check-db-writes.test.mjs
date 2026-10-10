@@ -2277,9 +2277,9 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
   assert.deepEqual(
     markAllReadTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/chatActions.ts#markAllChatsRead.<callback:cc917b13d2>.<callback:51160cb185>:mutator-call:1569c12d346a',
-      'src/services/chatActions.ts#markAllChatsRead.<callback:cc917b13d2>:mutator-call:007a06b5a04e',
-      'src/services/chatActions.ts#markAllChatsRead.<callback:cc917b13d2>:mutator-call:24bb2559f583',
+      'src/services/chatActions.ts#markAllChatsRead.<callback:c1af206d58>.<callback:ce8558bae3>:mutator-call:06b61d4ce067',
+      'src/services/chatActions.ts#markAllChatsRead.<callback:c1af206d58>:mutator-call:b2a54e1ab9af',
+      'src/services/chatActions.ts#markAllChatsRead.<callback:c1af206d58>:mutator-call:f44a034cf669',
     ].sort(),
   );
   assert.deepEqual(
@@ -3659,9 +3659,9 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
   assert.deepEqual(
     markReadTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/chatActions.ts#markRead.<callback:c7e5881d2e>.<callback:d3e99abf2d>:mutator-call:6d484728b976',
-      'src/services/chatActions.ts#markRead.<callback:c7e5881d2e>:mutator-call:70bc257ed28b',
-      'src/services/chatActions.ts#markRead.<callback:c7e5881d2e>:mutator-call:f29fc28ec83f',
+      'src/services/chatActions.ts#markRead.<callback:db679e3065>.<callback:dc5434bf32>:mutator-call:5d77502674b6',
+      'src/services/chatActions.ts#markRead.<callback:db679e3065>:mutator-call:4e18c7d69f11',
+      'src/services/chatActions.ts#markRead.<callback:db679e3065>:mutator-call:b7eeb59b4f3c',
     ].sort(),
   );
   assert.deepEqual(
@@ -7445,7 +7445,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'app/(app)/new-chat.tsx#NewChatScreen.onStart:mutator-call:d6c241088f98',
       'app/(app)/new-chat.tsx#NewChatScreen.removeStaged.<callback:381edc2f98>:mutator-call:28ee2d86f7a3',
       'src/db/repositories/chats.ts#deleteChatLocal:mutator-call:4f80cbb6f44f',
-      'src/db/repositories/chats.ts#markAllChatsReadLocalWithinTransaction:sql-update:9df4bb6cbd1b',
+      'src/db/repositories/chats.ts#markAllChatsReadLocalWithinTransaction:sql-update:52eca3e393a6',
       'src/db/repositories/chats.ts#reconcileReadMarkersFromTimestamps:sql-update:9a087251324f',
       'src/db/repositories/chats.ts#resumeChatPurges:mutator-call:9e5da82015da',
       'src/db/repositories/chatAppearance.ts#setChatAppearanceWithinTransaction:drizzle-update:dcdfc8b2ae2e',

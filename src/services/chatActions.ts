@@ -110,8 +110,13 @@ function assertChatActionLease(lease: RealtimeDeliveryLease): void {
   if (!lease.isCurrent()) throw STALE_CHAT_ACTION;
 }
 
-/** Apple chats remain mutable; an RCS history row is mutable only for the active pairing. */
-function captureChatMutationGuard(...chatGuids: readonly string[]): (() => boolean) | null {
+/**
+ * Guard for a step that reaches the SERVER about a chat. Apple chats always pass; an RCS chat needs
+ * the active Google pairing, because a re-pair can reuse provider ids at the server. Local state
+ * (tombstones, archive, pin, mute, read markers, drafts, folders) never uses this: it is keyed by
+ * the exact stored guid, so any RCS history row, including one from an older pairing, stays editable.
+ */
+function captureRcsServerStepGuard(...chatGuids: readonly string[]): (() => boolean) | null {
   const rcsTargets = chatGuids.filter((guid) => guid.startsWith('RCS;-;'));
   if (rcsTargets.length === 0) return () => true;
   const expectedEpoch = sessionAccessors.rcsProviderEpoch();
@@ -212,25 +217,19 @@ export function setChatMuted(
   muted: boolean,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
-  const mutationGuard = captureChatMutationGuard(chatGuid);
-  if (!mutationGuard) return Promise.resolve();
-  return runChatAction(
-    accountLease,
-    async (activeLease) => {
-      const db = await ensureDatabase();
-      assertChatActionLease(activeLease);
-      await withDbTransaction(
-        db,
-        async (context) => {
-          assertChatActionLease(activeLease);
-          await setChatMuteWithinTransaction(context, chatGuid, muted ? 'mute' : null);
-          assertChatActionLease(activeLease);
-        },
-        () => activeLease.isCurrent(),
-      );
-    },
-    mutationGuard,
-  );
+  return runChatAction(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    await withDbTransaction(
+      db,
+      async (context) => {
+        assertChatActionLease(activeLease);
+        await setChatMuteWithinTransaction(context, chatGuid, muted ? 'mute' : null);
+        assertChatActionLease(activeLease);
+      },
+      () => activeLease.isCurrent(),
+    );
+  });
 }
 
 /** Move a conversation into or out of the device-local archive. */
@@ -239,25 +238,19 @@ export function setChatArchived(
   archived: boolean,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
-  const mutationGuard = captureChatMutationGuard(chatGuid);
-  if (!mutationGuard) return Promise.resolve();
-  return runChatAction(
-    accountLease,
-    async (activeLease) => {
-      const db = await ensureDatabase();
-      assertChatActionLease(activeLease);
-      await withDbTransaction(
-        db,
-        async (context) => {
-          assertChatActionLease(activeLease);
-          await setChatArchiveWithinTransaction(context, chatGuid, archived);
-          assertChatActionLease(activeLease);
-        },
-        () => activeLease.isCurrent(),
-      );
-    },
-    mutationGuard,
-  );
+  return runChatAction(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    await withDbTransaction(
+      db,
+      async (context) => {
+        assertChatActionLease(activeLease);
+        await setChatArchiveWithinTransaction(context, chatGuid, archived);
+        assertChatActionLease(activeLease);
+      },
+      () => activeLease.isCurrent(),
+    );
+  });
 }
 
 /** Set or clear the device-local pinned state for one conversation. */
@@ -266,25 +259,19 @@ export function setChatPinned(
   pinned: boolean,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
-  const mutationGuard = captureChatMutationGuard(chatGuid);
-  if (!mutationGuard) return Promise.resolve();
-  return runChatAction(
-    accountLease,
-    async (activeLease) => {
-      const db = await ensureDatabase();
-      assertChatActionLease(activeLease);
-      await withDbTransaction(
-        db,
-        async (context) => {
-          assertChatActionLease(activeLease);
-          await setChatPinWithinTransaction(context, chatGuid, pinned);
-          assertChatActionLease(activeLease);
-        },
-        () => activeLease.isCurrent(),
-      );
-    },
-    mutationGuard,
-  );
+  return runChatAction(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    await withDbTransaction(
+      db,
+      async (context) => {
+        assertChatActionLease(activeLease);
+        await setChatPinWithinTransaction(context, chatGuid, pinned);
+        assertChatActionLease(activeLease);
+      },
+      () => activeLease.isCurrent(),
+    );
+  });
 }
 
 /** Local name/color fields accepted by the chat-settings command boundary. */
@@ -299,25 +286,19 @@ export function updateChatCustomization(
   patch: ChatCustomizationPatch,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
-  const mutationGuard = captureChatMutationGuard(chatGuid);
-  if (!mutationGuard) return Promise.resolve();
-  return runChatAction(
-    accountLease,
-    async (activeLease) => {
-      const db = await ensureDatabase();
-      assertChatActionLease(activeLease);
-      await withDbTransaction(
-        db,
-        async (context) => {
-          assertChatActionLease(activeLease);
-          await setChatCustomizationWithinTransaction(context, chatGuid, patch);
-          assertChatActionLease(activeLease);
-        },
-        () => activeLease.isCurrent(),
-      );
-    },
-    mutationGuard,
-  );
+  return runChatAction(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    await withDbTransaction(
+      db,
+      async (context) => {
+        assertChatActionLease(activeLease);
+        await setChatCustomizationWithinTransaction(context, chatGuid, patch);
+        assertChatActionLease(activeLease);
+      },
+      () => activeLease.isCurrent(),
+    );
+  });
 }
 
 /** Set or reset a device-local participant color from the exact conversation that selected it. */
@@ -328,33 +309,27 @@ export function updateHandleColor(
   color: string | null,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
-  const mutationGuard = captureChatMutationGuard(chatGuid);
-  if (!mutationGuard) return Promise.resolve();
-  return runChatAction(
-    accountLease,
-    async (activeLease) => {
-      const db = await ensureDatabase();
-      assertChatActionLease(activeLease);
-      await withDbTransaction(
-        db,
-        async (context) => {
-          assertChatActionLease(activeLease);
-          const updated = await setHandleColorWithinTransaction(
-            context,
-            chatGuid,
-            address,
-            service,
-            color,
-          );
-          if (!updated)
-            throw new Error('The selected participant is no longer in this conversation.');
-          assertChatActionLease(activeLease);
-        },
-        () => activeLease.isCurrent(),
-      );
-    },
-    mutationGuard,
-  );
+  return runChatAction(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    await withDbTransaction(
+      db,
+      async (context) => {
+        assertChatActionLease(activeLease);
+        const updated = await setHandleColorWithinTransaction(
+          context,
+          chatGuid,
+          address,
+          service,
+          color,
+        );
+        if (!updated)
+          throw new Error('The selected participant is no longer in this conversation.');
+        assertChatActionLease(activeLease);
+      },
+      () => activeLease.isCurrent(),
+    );
+  });
 }
 
 /** Update one or more device-local theme/background fields for a conversation. */
@@ -363,25 +338,19 @@ export function updateChatAppearance(
   patch: ChatAppearancePatch,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
-  const mutationGuard = captureChatMutationGuard(chatGuid);
-  if (!mutationGuard) return Promise.resolve();
-  return runChatAction(
-    accountLease,
-    async (activeLease) => {
-      const db = await ensureDatabase();
-      assertChatActionLease(activeLease);
-      await withDbTransaction(
-        db,
-        async (context) => {
-          assertChatActionLease(activeLease);
-          await setChatAppearanceWithinTransaction(context, chatGuid, patch);
-          assertChatActionLease(activeLease);
-        },
-        () => activeLease.isCurrent(),
-      );
-    },
-    mutationGuard,
-  );
+  return runChatAction(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    await withDbTransaction(
+      db,
+      async (context) => {
+        assertChatActionLease(activeLease);
+        await setChatAppearanceWithinTransaction(context, chatGuid, patch);
+        assertChatActionLease(activeLease);
+      },
+      () => activeLease.isCurrent(),
+    );
+  });
 }
 
 /** Atomically clear the local name, accent color, and mute preference for one conversation. */
@@ -389,30 +358,24 @@ export function resetChatLocalPreferences(
   chatGuid: string,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
-  const mutationGuard = captureChatMutationGuard(chatGuid);
-  if (!mutationGuard) return Promise.resolve();
-  return runChatAction(
-    accountLease,
-    async (activeLease) => {
-      const db = await ensureDatabase();
-      assertChatActionLease(activeLease);
-      await withDbTransaction(
-        db,
-        async (context) => {
-          assertChatActionLease(activeLease);
-          await setChatCustomizationWithinTransaction(context, chatGuid, {
-            customName: null,
-            customColor: null,
-          });
-          assertChatActionLease(activeLease);
-          await setChatMuteWithinTransaction(context, chatGuid, null);
-          assertChatActionLease(activeLease);
-        },
-        () => activeLease.isCurrent(),
-      );
-    },
-    mutationGuard,
-  );
+  return runChatAction(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    await withDbTransaction(
+      db,
+      async (context) => {
+        assertChatActionLease(activeLease);
+        await setChatCustomizationWithinTransaction(context, chatGuid, {
+          customName: null,
+          customColor: null,
+        });
+        assertChatActionLease(activeLease);
+        await setChatMuteWithinTransaction(context, chatGuid, null);
+        assertChatActionLease(activeLease);
+      },
+      () => activeLease.isCurrent(),
+    );
+  });
 }
 
 export interface MovePinnedChatOptions {
@@ -427,49 +390,37 @@ export function movePinnedChat(
   options: MovePinnedChatOptions,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
-  const mutationGuard = captureChatMutationGuard(options.chatGuid, options.adjacentChatGuid);
-  if (!mutationGuard) return Promise.resolve();
-  return runChatAction(
-    accountLease,
-    async (activeLease) => {
-      const db = await ensureDatabase();
-      assertChatActionLease(activeLease);
-      await swapPinnedChatOrder(
-        db,
-        options.chatGuid,
-        options.adjacentChatGuid,
-        options.direction,
-        () => activeLease.isCurrent(),
-        options.sender ?? 'any',
-      );
-    },
-    mutationGuard,
-  );
+  return runChatAction(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    await swapPinnedChatOrder(
+      db,
+      options.chatGuid,
+      options.adjacentChatGuid,
+      options.direction,
+      () => activeLease.isCurrent(),
+      options.sender ?? 'any',
+    );
+  });
 }
 
 /** Clear every local inbox unread marker without sending server read receipts. */
 export function markAllChatsRead(
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
-  const rcsProviderEpoch = sessionAccessors.rcsProviderEpoch();
-  const mutationGuard = (): boolean => sessionAccessors.rcsProviderEpoch() === rcsProviderEpoch;
-  return runChatAction(
-    accountLease,
-    async (activeLease) => {
-      const db = await ensureDatabase();
-      assertChatActionLease(activeLease);
-      await withDbTransaction(
-        db,
-        async (context) => {
-          assertChatActionLease(activeLease);
-          await markAllChatsReadLocalWithinTransaction(context, rcsProviderEpoch);
-          assertChatActionLease(activeLease);
-        },
-        () => activeLease.isCurrent(),
-      );
-    },
-    mutationGuard,
-  );
+  return runChatAction(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    await withDbTransaction(
+      db,
+      async (context) => {
+        assertChatActionLease(activeLease);
+        await markAllChatsReadLocalWithinTransaction(context);
+        assertChatActionLease(activeLease);
+      },
+      () => activeLease.isCurrent(),
+    );
+  });
 }
 
 /** Persist the current body-text draft for one conversation. */
@@ -478,25 +429,19 @@ export function saveChatDraft(
   text: string,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
-  const mutationGuard = captureChatMutationGuard(chatGuid);
-  if (!mutationGuard) return Promise.resolve();
-  return runChatAction(
-    accountLease,
-    async (activeLease) => {
-      const db = await ensureDatabase();
-      assertChatActionLease(activeLease);
-      await withDbTransaction(
-        db,
-        async (context) => {
-          assertChatActionLease(activeLease);
-          await kvSetWithinTransaction(context, `${DRAFT_KV_PREFIX}${chatGuid}`, text);
-          assertChatActionLease(activeLease);
-        },
-        () => activeLease.isCurrent(),
-      );
-    },
-    mutationGuard,
-  );
+  return runChatAction(accountLease, async (activeLease) => {
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    await withDbTransaction(
+      db,
+      async (context) => {
+        assertChatActionLease(activeLease);
+        await kvSetWithinTransaction(context, `${DRAFT_KV_PREFIX}${chatGuid}`, text);
+        assertChatActionLease(activeLease);
+      },
+      () => activeLease.isCurrent(),
+    );
+  });
 }
 
 /**
@@ -846,9 +791,10 @@ function resolveMarkReadTargetWithinTransaction(
 }
 
 /**
- * Mark a current chat read locally, and send the server read receipt ONLY when the "Send Read
- * Receipts" toggle is on. Legacy/stale Google conversations remain readable history but are
- * read-only: they cannot change their marker or address a reused provider id.
+ * Mark a chat read locally, and send the server read receipt ONLY when the "Send Read Receipts"
+ * toggle is on. The read marker is local state, so it is written for every chat, including RCS
+ * history from an older Google pairing and a killed-app wake that cannot reach the server. Only the
+ * RCS receipt needs current pairing authority: it addresses a provider id the server may reuse.
  */
 export function markRead(
   chatGuid: string,
@@ -856,144 +802,135 @@ export function markRead(
   options: MarkReadOptions = {},
 ): Promise<void> {
   const isRcs = chatGuid.startsWith('RCS;-;');
-  // A killed-process notification action has no hydrated foreground ServerInfo. RCS authority is
-  // therefore captured from the authenticated task transport below; Apple actions can keep using
-  // the ordinary foreground/session guard.
-  const chatMutationGuard = isRcs ? () => true : captureChatMutationGuard(chatGuid);
-  if (!chatMutationGuard) return Promise.resolve();
   const readStateSync = isIMessageReadStateGuid(chatGuid)
     ? reserveReadStateSync(accountLease.generation, chatGuid)
     : null;
-  const action = runChatAction(
-    accountLease,
-    async (activeLease) => {
-      let receiptTransport: ReadReceiptTransport | null = null;
-      let expectedRcsEpoch: string | null = null;
-      let rcsAuthorityRevoked = false;
-      const rcsAuthorityIsCurrent = (): boolean => {
-        if (!isRcs) return true;
-        if (rcsAuthorityRevoked) return false;
-        let current = false;
-        try {
-          current =
-            expectedRcsEpoch != null &&
-            parseRcsChatGuid(chatGuid)?.providerEpoch === expectedRcsEpoch &&
-            receiptTransport?.rcsProviderEpoch === expectedRcsEpoch &&
-            receiptTransport.isCurrent() &&
-            receiptTransport.acceptsRcsChat?.(chatGuid) === true;
-        } catch {
-          current = false;
-        }
-        if (!current) rcsAuthorityRevoked = true;
-        return current;
-      };
-      if (isRcs) {
-        try {
-          if (options.resolveReceiptTransport) {
-            receiptTransport = await options.resolveReceiptTransport();
-          } else {
-            const rcsProviderEpoch = sessionAccessors.rcsProviderEpoch();
-            receiptTransport = {
-              http,
-              isCurrent: () => activeLease.isCurrent(),
-              rcsProviderEpoch,
-              acceptsRcsChat: (guid) => sessionAccessors.acceptsRcsChat(guid),
-            };
-          }
-        } catch {
-          return;
-        }
-        expectedRcsEpoch = receiptTransport?.rcsProviderEpoch ?? null;
-        if (!activeLease.isCurrent() || !rcsAuthorityIsCurrent()) return;
-      }
-      const mutationIsCurrent = (): boolean => activeLease.isCurrent() && rcsAuthorityIsCurrent();
-      // ensureDatabase, never getDatabase: the tray's "Mark as read" button runs HEADLESS on a
-      // killed-app wake, where no React tree ever mounted, boot() never ran and the eager accessor
-      // throws "Database not initialized". That rejection escaped the whole action handler, so the
-      // notification wasn't even cleared — the button looked completely dead, but only when the app
-      // had been killed, which is exactly when the button is most useful.
-      const db = await ensureDatabase();
-      if (!mutationIsCurrent()) return;
-      const target = await withDbTransaction(
-        db,
-        async (context) => {
-          if (!mutationIsCurrent()) throw STALE_CHAT_ACTION;
-          const resolved = await resolveMarkReadTargetWithinTransaction(context, chatGuid);
-          if (!mutationIsCurrent()) throw STALE_CHAT_ACTION;
-          // Even an outgoing-only chat can carry a deliberate mark-as-unread stamp. Writing null is
-          // still necessary there: it clears that stamp so this device's badge changes before any
-          // optional server request.
-          await setLastReadMessageGuidWithinTransaction(
-            context,
-            chatGuid,
-            resolved.newestReceivedGuid,
-          );
-          if (!mutationIsCurrent()) throw STALE_CHAT_ACTION;
-          return resolved;
-        },
-        mutationIsCurrent,
-      );
-      if (!mutationIsCurrent()) return;
-      if (!target.chatExists) return;
-      const isIMessage = isIMessageReadStateGuid(chatGuid);
-      if (!isRcs && (!isIMessage || !sessionAccessors.imessageReadStateEnabled())) return;
-
-      let fs: FeatureSettings;
+  const action = runChatAction(accountLease, async (activeLease) => {
+    let receiptTransport: ReadReceiptTransport | null = null;
+    let expectedRcsEpoch: string | null = null;
+    let rcsAuthorityRevoked = false;
+    const rcsAuthorityIsCurrent = (): boolean => {
+      if (!isRcs) return true;
+      if (rcsAuthorityRevoked) return false;
+      let current = false;
       try {
-        fs = await hydratedFeatureSettings();
+        current =
+          expectedRcsEpoch != null &&
+          parseRcsChatGuid(chatGuid)?.providerEpoch === expectedRcsEpoch &&
+          receiptTransport?.rcsProviderEpoch === expectedRcsEpoch &&
+          receiptTransport.isCurrent() &&
+          receiptTransport.acceptsRcsChat?.(chatGuid) === true;
       } catch {
-        // An unreadable persisted preference is not permission to disclose read state.
+        current = false;
+      }
+      if (!current) rcsAuthorityRevoked = true;
+      return current;
+    };
+    // ensureDatabase, never getDatabase: the tray's "Mark as read" button runs HEADLESS on a
+    // killed-app wake, where no React tree ever mounted, boot() never ran and the eager accessor
+    // throws "Database not initialized". That rejection escaped the whole action handler, so the
+    // notification wasn't even cleared — the button looked completely dead, but only when the app
+    // had been killed, which is exactly when the button is most useful.
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    const target = await withDbTransaction(
+      db,
+      async (context) => {
+        assertChatActionLease(activeLease);
+        const resolved = await resolveMarkReadTargetWithinTransaction(context, chatGuid);
+        assertChatActionLease(activeLease);
+        // Even an outgoing-only chat can carry a deliberate mark-as-unread stamp. Writing null is
+        // still necessary there: it clears that stamp so this device's badge changes before any
+        // optional server request.
+        await setLastReadMessageGuidWithinTransaction(
+          context,
+          chatGuid,
+          resolved.newestReceivedGuid,
+        );
+        assertChatActionLease(activeLease);
+        return resolved;
+      },
+      () => activeLease.isCurrent(),
+    );
+    assertChatActionLease(activeLease);
+    if (!target.chatExists) return;
+    const isIMessage = isIMessageReadStateGuid(chatGuid);
+    if (!isRcs && (!isIMessage || !sessionAccessors.imessageReadStateEnabled())) return;
+
+    let fs: FeatureSettings;
+    try {
+      fs = await hydratedFeatureSettings();
+    } catch {
+      // An unreadable persisted preference is not permission to disclose read state.
+      return;
+    }
+    assertChatActionLease(activeLease);
+    // Hydration deliberately leaves `hydrated=false` on a DB/read failure. The module defaults are
+    // enabled for normal first use, but they are not proof of the user's persisted privacy choice.
+    if (!fs.hydrated || !fs.sendReadReceipts) return;
+    if (isIMessage && !sessionAccessors.imessageReadStateEnabled()) return;
+
+    if (isRcs) {
+      // A killed-process notification action has no hydrated foreground ServerInfo, so RCS
+      // authority is captured from the authenticated task transport. Without it, no receipt.
+      try {
+        if (options.resolveReceiptTransport) {
+          receiptTransport = await options.resolveReceiptTransport();
+        } else {
+          const rcsProviderEpoch = sessionAccessors.rcsProviderEpoch();
+          receiptTransport = {
+            http,
+            isCurrent: () => activeLease.isCurrent(),
+            rcsProviderEpoch,
+            acceptsRcsChat: (guid) => sessionAccessors.acceptsRcsChat(guid),
+          };
+        }
+      } catch {
         return;
       }
-      assertChatActionLease(activeLease);
-      // Hydration deliberately leaves `hydrated=false` on a DB/read failure. The module defaults are
-      // enabled for normal first use, but they are not proof of the user's persisted privacy choice.
-      if (!fs.hydrated || !fs.sendReadReceipts) return;
-      if (isIMessage && !sessionAccessors.imessageReadStateEnabled()) return;
-      if (isRcs && !mutationIsCurrent()) return;
+      expectedRcsEpoch = receiptTransport?.rcsProviderEpoch ?? null;
+      if (!activeLease.isCurrent() || !rcsAuthorityIsCurrent()) return;
+    }
+    const receiptIsCurrent = (): boolean => activeLease.isCurrent() && rcsAuthorityIsCurrent();
 
-      if (!receiptTransport) {
-        try {
-          receiptTransport = options.resolveReceiptTransport
-            ? await options.resolveReceiptTransport()
-            : { http, isCurrent: () => activeLease.isCurrent() };
-        } catch {
-          // The local iMessage marker is authoritative for this device. Vault/client discovery is
-          // best-effort and must never restore the unread badge.
-          return;
-        }
-      }
-      if (!mutationIsCurrent() || !receiptTransport?.isCurrent()) return;
-      if (isIMessage && !sessionAccessors.imessageReadStateEnabled()) return;
-      if (isRcs && !mutationIsCurrent()) return;
+    if (!receiptTransport) {
       try {
-        if (isIMessage && readStateSync) {
-          await readStateSync.run(async () => {
-            const currentSettings = useFeatureSettingsStore.getState();
-            if (
-              !currentSettings.hydrated ||
-              !currentSettings.sendReadReceipts ||
-              !activeLease.isCurrent() ||
-              !receiptTransport.isCurrent() ||
-              !sessionAccessors.imessageReadStateEnabled()
-            ) {
-              return;
-            }
-            await chatsApi.markChatRead(receiptTransport.http, chatGuid);
-          });
-        } else {
-          const currentSettings = useFeatureSettingsStore.getState();
-          if (!currentSettings.hydrated || !currentSettings.sendReadReceipts) return;
-          if (isRcs && !mutationIsCurrent()) return;
-          await chatsApi.markChatRead(receiptTransport.http, chatGuid);
-        }
+        receiptTransport = options.resolveReceiptTransport
+          ? await options.resolveReceiptTransport()
+          : { http, isCurrent: () => activeLease.isCurrent() };
       } catch {
-        // Offline / not connected — the local marker still clears the badge.
+        // The local iMessage marker is authoritative for this device. Vault/client discovery is
+        // best-effort and must never restore the unread badge.
+        return;
       }
-      if (!mutationIsCurrent()) return;
-    },
-    chatMutationGuard,
-  );
+    }
+    if (!receiptIsCurrent() || !receiptTransport?.isCurrent()) return;
+    if (isIMessage && !sessionAccessors.imessageReadStateEnabled()) return;
+    try {
+      if (isIMessage && readStateSync) {
+        await readStateSync.run(async () => {
+          const currentSettings = useFeatureSettingsStore.getState();
+          if (
+            !currentSettings.hydrated ||
+            !currentSettings.sendReadReceipts ||
+            !activeLease.isCurrent() ||
+            !receiptTransport.isCurrent() ||
+            !sessionAccessors.imessageReadStateEnabled()
+          ) {
+            return;
+          }
+          await chatsApi.markChatRead(receiptTransport.http, chatGuid);
+        });
+      } else {
+        const currentSettings = useFeatureSettingsStore.getState();
+        if (!currentSettings.hydrated || !currentSettings.sendReadReceipts) return;
+        if (isRcs && !receiptIsCurrent()) return;
+        await chatsApi.markChatRead(receiptTransport.http, chatGuid);
+      }
+    } catch {
+      // Offline / not connected — the local marker still clears the badge.
+    }
+  });
   return action.finally(() => readStateSync?.releaseWithoutSync());
 }
 
@@ -1002,44 +939,38 @@ export function markUnread(
   chatGuid: string,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
-  const mutationGuard = captureChatMutationGuard(chatGuid);
-  if (!mutationGuard) return Promise.resolve();
   const readStateSync = isIMessageReadStateGuid(chatGuid)
     ? reserveReadStateSync(accountLease.generation, chatGuid)
     : null;
-  const action = runChatAction(
-    accountLease,
-    async (activeLease) => {
-      // ensureDatabase for the same headless reason as markRead — this shares the
-      // notification-action and background-event code paths.
-      const db = await ensureDatabase();
-      assertChatActionLease(activeLease);
-      const markedUnreadAt = Date.now();
-      await withDbTransaction(
-        db,
-        async (context) => {
-          assertChatActionLease(activeLease);
-          await setChatUnreadLocalWithinTransaction(context, chatGuid, markedUnreadAt);
-          assertChatActionLease(activeLease);
-        },
-        () => activeLease.isCurrent(),
-      );
-      assertChatActionLease(activeLease);
-      if (!isIMessageReadStateGuid(chatGuid) || !sessionAccessors.imessageReadStateEnabled()) {
-        return;
-      }
-      try {
-        await readStateSync?.run(async () => {
-          if (!activeLease.isCurrent() || !sessionAccessors.imessageReadStateEnabled()) return;
-          await chatsApi.markChatUnread(http, chatGuid);
-        });
-      } catch {
-        // The local marker remains authoritative for this device when Mac sync is unavailable.
-      }
-      assertChatActionLease(activeLease);
-    },
-    mutationGuard,
-  );
+  const action = runChatAction(accountLease, async (activeLease) => {
+    // ensureDatabase for the same headless reason as markRead — this shares the
+    // notification-action and background-event code paths.
+    const db = await ensureDatabase();
+    assertChatActionLease(activeLease);
+    const markedUnreadAt = Date.now();
+    await withDbTransaction(
+      db,
+      async (context) => {
+        assertChatActionLease(activeLease);
+        await setChatUnreadLocalWithinTransaction(context, chatGuid, markedUnreadAt);
+        assertChatActionLease(activeLease);
+      },
+      () => activeLease.isCurrent(),
+    );
+    assertChatActionLease(activeLease);
+    if (!isIMessageReadStateGuid(chatGuid) || !sessionAccessors.imessageReadStateEnabled()) {
+      return;
+    }
+    try {
+      await readStateSync?.run(async () => {
+        if (!activeLease.isCurrent() || !sessionAccessors.imessageReadStateEnabled()) return;
+        await chatsApi.markChatUnread(http, chatGuid);
+      });
+    } catch {
+      // The local marker remains authoritative for this device when Mac sync is unavailable.
+    }
+    assertChatActionLease(activeLease);
+  });
   return action.finally(() => readStateSync?.releaseWithoutSync());
 }
 
@@ -1074,13 +1005,7 @@ export function deleteChat(
   chatGuid: string,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
-  const mutationGuard = captureChatMutationGuard(chatGuid);
-  if (!mutationGuard) return Promise.resolve();
-  return runChatAction(
-    accountLease,
-    (activeLease) => deleteChatForAccount(chatGuid, activeLease),
-    mutationGuard,
-  );
+  return runChatAction(accountLease, (activeLease) => deleteChatForAccount(chatGuid, activeLease));
 }
 
 async function deleteChatForAccount(
@@ -1136,7 +1061,11 @@ async function deleteChatForAccount(
     // conversation the user just deleted must not survive that.
     await cancelChatNotification(chatGuid, accountLease);
     assertChatActionLease(accountLease);
-    await cancelServerScheduledForChat(db, chatGuid, accountLease);
+    // The only server-facing step: an RCS chat outside the active pairing keeps its local delete
+    // but must not address a possibly reused provider id at the server.
+    if (captureRcsServerStepGuard(chatGuid)?.()) {
+      await cancelServerScheduledForChat(db, chatGuid, accountLease);
+    }
     assertChatActionLease(accountLease);
     await cancelRemindersForChat(db, chatGuid, accountLease);
     assertChatActionLease(accountLease);

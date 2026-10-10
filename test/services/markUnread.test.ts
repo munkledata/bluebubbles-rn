@@ -602,7 +602,7 @@ describe('markRead', () => {
     expect(mockMarkChatRead).toHaveBeenCalledWith(killedProcessHttp, guid);
   });
 
-  it('does not reopen an RCS read after task-local provider authority briefly revokes', async () => {
+  it('commits an RCS read locally but sends no receipt while provider authority is revoked', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
     const guid = CURRENT_RCS_CHAT_GUID;
@@ -618,10 +618,8 @@ describe('markRead', () => {
     await setLastReadMessageGuid(db, guid, 'previous-marker');
     let providerCurrent = true;
     raw.function('rotate_provider_during_mark_read', () => {
+      // The Google pairing rotates while the local marker is written, and stays rotated.
       providerCurrent = false;
-      setImmediate(() => {
-        providerCurrent = true;
-      });
       return 0;
     });
     raw.exec(`
@@ -639,10 +637,9 @@ describe('markRead', () => {
     }));
 
     await expect(markRead(guid, undefined, { resolveReceiptTransport })).resolves.toBeUndefined();
-    await new Promise<void>((resolve) => setImmediate(resolve));
 
-    expect(providerCurrent).toBe(true);
-    expect(readMarker(raw, guid)).toBe('previous-marker');
+    // The read marker is local state and commits; the receipt needs current pairing authority.
+    expect(readMarker(raw, guid)).toBe('rcs-current');
     expect(mockMarkChatRead).not.toHaveBeenCalled();
   });
 
@@ -849,7 +846,7 @@ describe('markRead', () => {
     expect(mockMarkChatRead).toHaveBeenCalledWith({ __http: true }, guid);
   });
 
-  it('leaves stale RCS history read-only when killed-process authorization is unavailable', async () => {
+  it('clears a legacy RCS badge locally even when killed-process authorization is unavailable', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
     const guid = 'RCS;-;+15551234567';
@@ -870,8 +867,9 @@ describe('markRead', () => {
 
     await expect(markRead(guid, undefined, { resolveReceiptTransport })).resolves.toBeUndefined();
 
-    expect(readMarker(raw, guid)).toBeNull();
-    expect(markerAtResolution).toBeNull();
+    // The marker is written before (and without) any server authority; only the receipt needs it.
+    expect(readMarker(raw, guid)).toBe('m-local');
+    expect(markerAtResolution).toBe('m-local');
     expect(resolveReceiptTransport).toHaveBeenCalledTimes(1);
     expect(mockMarkChatRead).not.toHaveBeenCalled();
   });
