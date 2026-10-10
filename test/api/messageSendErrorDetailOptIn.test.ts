@@ -2,6 +2,7 @@ import type { HttpClient, RequestOptions } from '@core/api/http';
 import { ApiError } from '@core/api/errors';
 import {
   editMessage,
+  isRetryableIMessagePlainTextUnavailable,
   sendIMessagePlainText,
   sendContact,
   sendReaction,
@@ -104,15 +105,30 @@ describe('narrow plain iMessage endpoint', () => {
     expect((malformed as ApiError).serverErrorType).toBe('imessage_plain_text_outcome_unknown');
   });
 
-  it('preserves only the exact certified pre-dispatch unavailable response', async () => {
-    const unavailable = ApiError.fromStatus(
-      503,
-      'unavailable',
-      undefined,
-      'imessage_plain_text_unavailable',
-    );
+  it.each([
+    [
+      'the helper being unavailable',
+      ApiError.fromStatus(503, 'unavailable', undefined, 'imessage_plain_text_unavailable'),
+    ],
+    [
+      'durable retry protection being down',
+      ApiError.fromStatus(
+        503,
+        'settlement unavailable',
+        undefined,
+        'idempotency_persistence_unavailable',
+      ),
+    ],
+    [
+      'the retry cache being full',
+      ApiError.fromStatus(503, 'capacity', undefined, 'idempotency_capacity_exhausted'),
+    ],
+    ['no connection', new ApiError('no_connection', 'Network request failed')],
+    ['a client timeout', new ApiError('timeout', 'Request timed out')],
+    ['an untyped proxy 502', ApiError.fromStatus(502, 'Bad Gateway')],
+  ])('passes %s through as retry-safe instead of "may have been delivered"', async (_l, error) => {
     const post = jest.fn(async () => {
-      throw unavailable;
+      throw error;
     });
     await expect(
       sendIMessagePlainText({ post } as unknown as HttpClient, {
@@ -120,21 +136,45 @@ describe('narrow plain iMessage endpoint', () => {
         message: 'hello',
         tempGuid,
       }),
-    ).rejects.toBe(unavailable);
+    ).rejects.toBe(error);
+    expect(isRetryableIMessagePlainTextUnavailable(error)).toBe(true);
+  });
 
-    const uncertain = ApiError.fromStatus(
-      503,
-      'settlement unavailable',
-      undefined,
-      'idempotency_persistence_unavailable',
-    );
-    post.mockRejectedValueOnce(uncertain);
+  it.each([
+    [
+      'the server itself reporting an unknown outcome',
+      ApiError.fromStatus(409, 'unknown', undefined, 'imessage_plain_text_outcome_unknown'),
+    ],
+    [
+      'the retry cache reporting an unknown outcome',
+      ApiError.fromStatus(500, 'unknown', undefined, 'idempotency_outcome_unknown'),
+    ],
+  ])('keeps %s terminal', async (_label, error) => {
+    const post = jest.fn(async () => {
+      throw error;
+    });
+    await expect(
+      sendIMessagePlainText({ post } as unknown as HttpClient, {
+        chatGuid,
+        message: 'hello',
+        tempGuid,
+      }),
+    ).rejects.toBe(error);
+    expect(isRetryableIMessagePlainTextUnavailable(error)).toBe(false);
+  });
+
+  it('treats an unreadable success response as possibly sent', async () => {
+    const malformedBody = new ApiError('parse_error', 'Response body could not be read', 200);
+    const post = jest.fn(async () => {
+      throw malformedBody;
+    });
     const wrapped = await sendIMessagePlainText({ post } as unknown as HttpClient, {
       chatGuid,
       message: 'hello',
       tempGuid,
     }).catch((error: unknown) => error);
     expect((wrapped as ApiError).serverErrorType).toBe('imessage_plain_text_outcome_unknown');
-    expect((wrapped as ApiError).cause).toBe(uncertain);
+    expect((wrapped as ApiError).cause).toBe(malformedBody);
+    expect(isRetryableIMessagePlainTextUnavailable(wrapped)).toBe(false);
   });
 });

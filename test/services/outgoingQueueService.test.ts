@@ -345,7 +345,7 @@ describe('outgoingBackoffMs', () => {
 });
 
 describe('runOutgoingQueue', () => {
-  it('consumes the narrow retry proof before POST, restores it only for exact unavailable, and retires other uncertainty', async () => {
+  it('consumes the narrow retry proof before POST, restores it for pre-dispatch failures, and retires server-reported uncertainty', async () => {
     const { db, raw } = await createTestDb();
     const chatGuid = 'any;-;+15551234567';
     const tempGuid = 'temp-plain-retry';
@@ -393,12 +393,8 @@ describe('runOutgoingQueue', () => {
           'imessage_plain_text_unavailable',
         );
       }
-      throw ApiError.fromStatus(
-        503,
-        'settlement unavailable',
-        undefined,
-        'idempotency_persistence_unavailable',
-      );
+      // The server itself says this attempt may have been sent: never replay it.
+      throw ApiError.fromStatus(500, 'outcome unknown', undefined, 'idempotency_outcome_unknown');
     });
     const run = (now: number, available = true) =>
       runOutgoingQueue(
@@ -447,6 +443,79 @@ describe('runOutgoingQueue', () => {
     expect(JSON.parse(retired.payload)).not.toHaveProperty('imessagePlainTextRetrySafeV1');
     await expect(run(4_000_000)).resolves.toEqual({ eligible: 0, sent: 0 });
     expect(calls).toBe(2);
+  });
+
+  it('keeps an offline retry on the ladder and sends it with the same tempGuid when the network returns', async () => {
+    const { db, raw } = await createTestDb();
+    const chatGuid = 'any;-;+15551234567';
+    const tempGuid = 'temp-plain-offline';
+    await seedChat(db, chatGuid);
+    await insertOutgoingText(db, {
+      tempGuid,
+      chatGuid,
+      text: 'On my way',
+      now: 1_000,
+      imessagePlainTextV1: true,
+    });
+    const queued = raw
+      .prepare('SELECT payload FROM outgoing_queue WHERE temp_guid = ?')
+      .get(tempGuid) as { payload: string };
+    raw
+      .prepare(
+        `UPDATE outgoing_queue
+            SET payload = ?, attempts = 1, next_retry_at = 0
+          WHERE temp_guid = ?`,
+      )
+      .run(
+        JSON.stringify({
+          ...(JSON.parse(queued.payload) as Record<string, unknown>),
+          imessagePlainTextRetrySafeV1: true,
+        }),
+        tempGuid,
+      );
+    raw
+      .prepare("UPDATE messages SET send_state = 'error', error = 503 WHERE guid = ?")
+      .run(tempGuid);
+
+    let online = false;
+    const posted: string[] = [];
+    const http = fakeHttp(async (json) => {
+      posted.push((json as { tempGuid: string }).tempGuid);
+      if (!online) throw new ApiError('no_connection', 'Network request failed');
+      return { guid: '11111111-2222-4333-8444-666666666666', tempGuid, viaPrivateApi: true };
+    });
+    const run = (now: number) =>
+      runOutgoingQueue(
+        db,
+        http,
+        noAttachmentIo,
+        now,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        () => true,
+      );
+
+    await expect(run(2_000_000)).resolves.toEqual({ eligible: 1, sent: 0 });
+    const offline = raw.prepare('SELECT attempts, payload FROM outgoing_queue').get() as {
+      attempts: number;
+      payload: string;
+    };
+    expect(offline.attempts).toBe(2);
+    expect(JSON.parse(offline.payload)).toMatchObject({ imessagePlainTextRetrySafeV1: true });
+
+    online = true;
+    await expect(run(3_000_000)).resolves.toEqual({ eligible: 1, sent: 1 });
+    // Same tempGuid both times, so bbd's idempotency cache absorbs any ack-lost duplicate.
+    expect(posted).toEqual([tempGuid, tempGuid]);
+    expect(raw.prepare('SELECT send_state AS sendState FROM messages').get()).toEqual({
+      sendState: 'sent',
+    });
   });
 
   it('retires interrupted or corrupt narrow markers without downgrading to AppleScript', async () => {

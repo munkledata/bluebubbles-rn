@@ -106,12 +106,35 @@ function isKnownIMessagePlainTextError(error: unknown): error is ApiError {
   return KNOWN_IMESSAGE_PLAIN_TEXT_ERRORS.get(error.serverErrorType) === error.status;
 }
 
-/** The sole response that proves the narrow helper did not dispatch and may be retried. */
+/** Typed server refusals raised before the plain-text helper runs (status/type pairs as served). */
+const PRE_DISPATCH_IMESSAGE_PLAIN_TEXT_ERRORS = new Map<string, number>([
+  ['imessage_plain_text_unavailable', 503],
+  ['idempotency_capacity_exhausted', 503],
+  ['idempotency_persistence_unavailable', 503],
+]);
+
+/**
+ * True when the server never processed this plain-text send, so the same tempGuid may be POSTed
+ * again: no response at all (no connection, timeout, cancelled), an HTTP error without a server
+ * error type (a proxy 502/504 while bbd restarts), or a typed pre-dispatch refusal. Re-POSTing is
+ * safe because bbd runs the route inside its durable idempotency cache keyed by tempGuid: a repeat
+ * joins an in-flight attempt or replays a stored outcome and never sends twice. Only the server's
+ * own outcome-unknown answers, and malformed acknowledgements, retire a message as possibly sent.
+ */
 export function isRetryableIMessagePlainTextUnavailable(error: unknown): error is ApiError {
+  if (!(error instanceof ApiError)) return false;
+  if (error.serverErrorType != null) {
+    // Any other typed answer (including the status-less outcome-unknown wrapper) is not retry-safe.
+    const status = PRE_DISPATCH_IMESSAGE_PLAIN_TEXT_ERRORS.get(error.serverErrorType);
+    return status !== undefined && status === error.status;
+  }
   return (
-    error instanceof ApiError &&
-    error.status === 503 &&
-    error.serverErrorType === 'imessage_plain_text_unavailable'
+    error.kind === 'no_connection' ||
+    error.kind === 'timeout' ||
+    error.kind === 'cancelled' ||
+    error.kind === 'server_error' ||
+    error.kind === 'unauthorized' ||
+    error.kind === 'bad_request'
   );
 }
 
@@ -253,7 +276,10 @@ export async function sendIMessagePlainText(
     });
     ack = IMessagePlainTextAck.parse(raw);
   } catch (error) {
-    if (isKnownIMessagePlainTextError(error)) throw error;
+    // Keep retry-safe failures intact so callers arm the retry ladder for the same tempGuid.
+    if (isKnownIMessagePlainTextError(error) || isRetryableIMessagePlainTextUnavailable(error)) {
+      throw error;
+    }
     throw imessagePlainTextOutcomeUnknown(error);
   }
   if (ack.tempGuid !== params.tempGuid || ack.guid === params.tempGuid) {

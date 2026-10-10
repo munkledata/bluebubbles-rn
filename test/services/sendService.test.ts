@@ -7,6 +7,7 @@ import {
   claimScheduled,
   getScheduledById,
   insertScheduled,
+  OUTGOING_MAX_ATTEMPTS,
   upsertChats,
   upsertHandles,
   upsertMessages,
@@ -541,6 +542,74 @@ describe('sendTextMessage', () => {
       imessagePlainTextV1: true,
       imessagePlainTextRetrySafeV1: true,
     });
+  });
+
+  it.each([
+    ['no connection', new ApiError('no_connection', 'Network request failed')],
+    ['a client timeout', new ApiError('timeout', 'Request timed out')],
+    ['an untyped proxy 502 while the server restarts', ApiError.fromStatus(502, 'Bad Gateway')],
+  ])('keeps an offline plain-text send queued for retry after %s', async (_label, failure) => {
+    const { db, raw } = await createTestDb();
+    const chatGuid = 'iMessage;-;+15551234567';
+    await seedProvenIMessageChat(db, chatGuid);
+
+    await sendTextMessage(
+      db,
+      fakeHttp(async () => {
+        throw failure;
+      }),
+      { chatGuid, text: 'On my way' },
+      1_000,
+      undefined,
+      undefined,
+      undefined,
+      fixedRcsCapabilitySource(
+        ServerInfo.parse({ version: '2.0.0', supports_imessage_plain_text: true }),
+      ),
+    );
+
+    // Not "may have been delivered": bbd's idempotency cache makes a same-tempGuid re-POST safe.
+    const row = raw
+      .prepare(
+        `SELECT m.send_state AS sendState, q.attempts, q.payload
+           FROM messages m JOIN outgoing_queue q ON q.temp_guid = m.guid`,
+      )
+      .get() as { sendState: string; attempts: number; payload: string };
+    expect(row.sendState).toBe('error');
+    expect(row.attempts).toBe(1);
+    expect(JSON.parse(row.payload)).toMatchObject({
+      message: 'On my way',
+      imessagePlainTextV1: true,
+      imessagePlainTextRetrySafeV1: true,
+    });
+  });
+
+  it('still retires a plain-text send the server says may have been delivered', async () => {
+    const { db, raw } = await createTestDb();
+    const chatGuid = 'iMessage;-;+15551234567';
+    await seedProvenIMessageChat(db, chatGuid);
+
+    await sendTextMessage(
+      db,
+      fakeHttp(async () => {
+        throw ApiError.fromStatus(409, 'unknown', undefined, 'imessage_plain_text_outcome_unknown');
+      }),
+      { chatGuid, text: 'maybe sent' },
+      1_000,
+      undefined,
+      undefined,
+      undefined,
+      fixedRcsCapabilitySource(
+        ServerInfo.parse({ version: '2.0.0', supports_imessage_plain_text: true }),
+      ),
+    );
+
+    const row = raw.prepare('SELECT attempts, payload FROM outgoing_queue').get() as {
+      attempts: number;
+      payload: string;
+    };
+    expect(row.attempts).toBe(OUTGOING_MAX_ATTEMPTS);
+    expect(JSON.parse(row.payload)).not.toHaveProperty('imessagePlainTextRetrySafeV1');
   });
 
   it('marks the message errored on failure (one row, queue attempt bumped)', async () => {
