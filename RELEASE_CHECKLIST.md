@@ -318,7 +318,9 @@ flags, or retained EAS local-build workspace.
 
 The two packaging commands pass `-PreactNativeArchitectures` because React Native and Hermes build
 from source in their own included Gradle build, which ignores `android/gradle.properties`; without
-the flag they compile all four ABIs, which pushed the CI Android job past two hours.
+the flag they compile all four ABIs, which pushed the CI Android job past two hours. EAS builds,
+including the local release runner's, get the same flag from each profile's `gradleCommand` in
+`eas.json`, which `npm run check:toolchain` pins to EAS's default task plus the profile's ABIs.
 
 ```sh
 GOOGLE_SERVICES_JSON=./test/fixtures/google-services.ci.json \

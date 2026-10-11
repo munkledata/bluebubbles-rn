@@ -7,6 +7,7 @@ import {
   FORBIDDEN_NATIVE_BOUNDARY_PACKAGES,
   REQUIRED_ANDROID_ARCHITECTURES,
   REQUIRED_EAS_CLI_VERSION,
+  REQUIRED_EAS_GRADLE_COMMANDS,
   REQUIRED_EAS_SUBMIT_CONFIG,
   REQUIRED_NATIVE_BOUNDARY_PINS,
   REQUIRED_NODE_ENGINE,
@@ -32,6 +33,13 @@ const EXPECTED_NATIVE_BOUNDARY_PINS = Object.freeze({
   'drizzle-orm': '0.45.2',
   'react-native-maps': '1.27.2',
   'react-native-notify-kit': '10.4.8',
+});
+// EAS's own default task for each profile (pinned eas-cli 21.5.0 build tools), plus the ABIs that
+// React Native's from-source included build compiles: it reads only -P, never gradle.properties.
+const EXPECTED_EAS_GRADLE_COMMANDS = Object.freeze({
+  development: ':app:assembleDebug -PreactNativeArchitectures=arm64-v8a,x86_64',
+  preview: ':app:assembleRelease -PreactNativeArchitectures=arm64-v8a,x86_64',
+  production: ':app:bundleRelease -PreactNativeArchitectures=arm64-v8a',
 });
 const EXPECTED_FORBIDDEN_NATIVE_BOUNDARY_PACKAGES = Object.freeze([
   'expo-share-intent',
@@ -75,6 +83,7 @@ function validInput() {
             extends: 'base',
             environment: profile,
             env: { GATOR_ANDROID_ARCHITECTURES: REQUIRED_ANDROID_ARCHITECTURES[profile] },
+            android: { gradleCommand: EXPECTED_EAS_GRADLE_COMMANDS[profile] },
           },
         ]),
       ]),
@@ -107,6 +116,38 @@ test('rejects Android architecture drift in every EAS environment', () => {
       expectToolchainError(
         input,
         `EAS ${profile} profile env`,
+        `${profile}: ${String(replacement)}`,
+      );
+    }
+  }
+});
+
+test('pins each EAS gradle command to its default task and shipped ABIs', () => {
+  assert.deepEqual(REQUIRED_EAS_GRADLE_COMMANDS, EXPECTED_EAS_GRADLE_COMMANDS);
+  for (const profile of ['development', 'preview', 'production'])
+    assert.ok(
+      EXPECTED_EAS_GRADLE_COMMANDS[profile].endsWith(
+        `-PreactNativeArchitectures=${REQUIRED_ANDROID_ARCHITECTURES[profile]}`,
+      ),
+      `${profile} builds React Native for exactly its packaged ABIs`,
+    );
+});
+
+test('rejects React Native ABI drift in every EAS gradle command', () => {
+  for (const profile of ['development', 'preview', 'production']) {
+    const task = EXPECTED_EAS_GRADLE_COMMANDS[profile].split(' ')[0];
+    const wrongTask = profile === 'preview' ? ':app:bundleRelease' : ':app:assembleRelease';
+    for (const replacement of [
+      undefined,
+      task,
+      `${task} -PreactNativeArchitectures=armeabi-v7a,arm64-v8a,x86,x86_64`,
+      `${wrongTask} -PreactNativeArchitectures=${REQUIRED_ANDROID_ARCHITECTURES[profile]}`,
+    ]) {
+      const input = validInput();
+      input.eas.build[profile].android.gradleCommand = replacement;
+      expectToolchainError(
+        input,
+        `EAS ${profile} profile must build with gradleCommand`,
         `${profile}: ${String(replacement)}`,
       );
     }

@@ -15,6 +15,16 @@ export const REQUIRED_ANDROID_ARCHITECTURES = Object.freeze({
   preview: 'arm64-v8a,x86_64',
   production: 'arm64-v8a',
 });
+/**
+ * EAS's own default task for each profile, plus the ABIs React Native compiles. With React Native
+ * built from source, React Native and Hermes are an included Gradle build that never reads the app's
+ * gradle.properties, so without -P it compiles all four ABIs while the app packages only these.
+ */
+export const REQUIRED_EAS_GRADLE_COMMANDS = Object.freeze({
+  development: `:app:assembleDebug -PreactNativeArchitectures=${REQUIRED_ANDROID_ARCHITECTURES.development}`,
+  preview: `:app:assembleRelease -PreactNativeArchitectures=${REQUIRED_ANDROID_ARCHITECTURES.preview}`,
+  production: `:app:bundleRelease -PreactNativeArchitectures=${REQUIRED_ANDROID_ARCHITECTURES.production}`,
+});
 export const REQUIRED_NATIVE_BOUNDARY_PINS = Object.freeze({
   '@op-engineering/op-sqlite': '17.1.2',
   '@react-native-firebase/app': '25.1.0',
@@ -402,6 +412,11 @@ export function validateToolchain({
     if (!isDeepStrictEqual(config?.env, expectedEnvironment)) {
       errors.push(
         `EAS ${profile} profile env must contain only GATOR_ANDROID_ARCHITECTURES=${REQUIRED_ANDROID_ARCHITECTURES[profile]}`,
+      );
+    }
+    if (config?.android?.gradleCommand !== REQUIRED_EAS_GRADLE_COMMANDS[profile]) {
+      errors.push(
+        `EAS ${profile} profile must build with gradleCommand "${REQUIRED_EAS_GRADLE_COMMANDS[profile]}" so React Native compiles only the ABIs the app ships`,
       );
     }
   }

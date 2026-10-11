@@ -14,21 +14,30 @@
       "env": { "GATOR_ANDROID_ARCHITECTURES": "arm64-v8a,x86_64" },
       "developmentClient": true,
       "distribution": "internal",
-      "android": { "buildType": "apk" }
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleDebug -PreactNativeArchitectures=arm64-v8a,x86_64"
+      }
     },
     "preview": {
       "extends": "base",
       "environment": "preview",
       "env": { "GATOR_ANDROID_ARCHITECTURES": "arm64-v8a,x86_64" },
       "distribution": "internal",
-      "android": { "buildType": "apk" }
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease -PreactNativeArchitectures=arm64-v8a,x86_64"
+      }
     },
     "production": {
       "extends": "base",
       "environment": "production",
       "env": { "GATOR_ANDROID_ARCHITECTURES": "arm64-v8a" },
       "autoIncrement": true,
-      "android": { "buildType": "app-bundle" }
+      "android": {
+        "buildType": "app-bundle",
+        "gradleCommand": ":app:bundleRelease -PreactNativeArchitectures=arm64-v8a"
+      }
     }
   },
   "submit": {
