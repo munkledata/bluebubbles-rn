@@ -1170,7 +1170,8 @@ function ChatScreenInner({
   );
 
   // The route's own share redirects keep their batch, so the removal guard below must let them
-  // through. Expo Router runs the guard synchronously inside replace; clear an unused bypass after.
+  // through. Expo Router queues replace and runs the guard from that queue during the render it
+  // schedules; clear an unused bypass only on a later task, after that has happened.
   const bypassNextRemovalRef = useRef(false);
   const replaceWithoutPrompt = useCallback(
     (href: Href): void => {
@@ -1178,9 +1179,9 @@ function ChatScreenInner({
       try {
         router.replace(href);
       } finally {
-        queueMicrotask(() => {
+        setTimeout(() => {
           bypassNextRemovalRef.current = false;
-        });
+        }, 0);
       }
     },
     [router],

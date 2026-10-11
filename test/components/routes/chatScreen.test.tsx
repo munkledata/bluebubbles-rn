@@ -867,7 +867,7 @@ describe('ChatScreen — exact native share handoff', () => {
       newChatPlan: null,
       items: {},
     });
-    // Expo Router runs the removal guard synchronously inside replace.
+    // Stand in for Expo Router running the removal guard for this replace.
     mockReplace.mockImplementationOnce(() => {
       const guard = mockUsePreventRemove.mock.calls[mockUsePreventRemove.mock.calls.length - 1];
       if (guard?.[0]) guard[1]({ data: { action: { type: 'REPLACE' } } });
