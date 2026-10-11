@@ -635,6 +635,35 @@ describe('ensureDownloaded', () => {
       expect(reserveCache).toHaveBeenCalledWith(expect.any(String), expected);
     });
 
+    it('reserves the full cap on the next try after a declared size proved too small', async () => {
+      const { db } = await createTestDb();
+      await seedAttachment(db, 'understated');
+      const download = jest.fn(async (..._args: unknown[]) =>
+        fetched('file:///docs/understated.pdf', 2 * MiB),
+      );
+      const fetcher: AttachmentFetcher = {
+        exists: () => false,
+        destinationUri: () => 'file:///docs/understated.pdf',
+        download,
+      };
+      const att = {
+        guid: 'understated',
+        transferName: 'understated.pdf',
+        mimeType: 'application/pdf',
+        localPath: null,
+        totalBytes: 100,
+      };
+
+      await expect(ensureDownloadedOutcome(db, fetcher, att)).resolves.toMatchObject({
+        status: 'size',
+      });
+      // The server's size was low for this file, so the user's next tap gets the full cap.
+      await expect(ensureDownloadedOutcome(db, fetcher, att)).resolves.toMatchObject({
+        status: 'success',
+      });
+      expect(download.mock.calls[1]?.[5]).toMatchObject({ maxBytes: MANUAL_ATTACHMENT_MAX_BYTES });
+    });
+
     it('stops a download that grows past its declared size', async () => {
       const { db } = await createTestDb();
       await seedAttachment(db, 'grew');

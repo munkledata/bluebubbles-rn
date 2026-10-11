@@ -134,6 +134,8 @@ export function downloadMaxBytes(mode: AttachmentDownloadMode): number {
 
 /** Headroom above a declared size; never less than this many bytes. */
 const DECLARED_SIZE_HEADROOM_MIN_BYTES = 1024 * 1024;
+/** Attachments whose stream outgrew their declared size; until restart they reserve the full cap. */
+const understatedDeclaredSizes = new Set<string>();
 
 /**
  * The most one transfer may write, which is also what it reserves in the cache. An iMessage size
@@ -143,12 +145,18 @@ const DECLARED_SIZE_HEADROOM_MIN_BYTES = 1024 * 1024;
  * sized by the bridge's own metadata, keep the hard cap.
  */
 export function downloadReservationBytes(
-  att: Pick<AttachmentDownloadTarget, 'totalBytes' | 'service'>,
+  att: Pick<AttachmentDownloadTarget, 'guid' | 'totalBytes' | 'service'>,
   mode: AttachmentDownloadMode,
 ): number {
   const cap = downloadMaxBytes(mode);
   const declared = att.totalBytes;
-  if (att.service === 'RCS' || declared == null || !Number.isSafeInteger(declared) || declared <= 0)
+  if (
+    att.service === 'RCS' ||
+    understatedDeclaredSizes.has(att.guid) ||
+    declared == null ||
+    !Number.isSafeInteger(declared) ||
+    declared <= 0
+  )
     return cap;
   return Math.min(
     cap,
@@ -587,11 +595,21 @@ export async function ensureDownloadedOutcome(
       release();
     }
   })();
-  const settled = task.finally(() => {
-    const current = inFlight.get(flightKey);
-    current?.delete(flight);
-    if (current?.size === 0) inFlight.delete(flightKey);
-  });
+  // A 'size' failure under the declared-size reservation proves this server's size is low for the
+  // file, so the next attempt reserves the full cap; a caller's own smaller budget proves nothing.
+  const limitedByDeclaredSize =
+    maxBytes < downloadMaxBytes(mode) && maxBytes === downloadReservationBytes(att, mode);
+  const settled = task
+    .then((outcome) => {
+      if (outcome.status === 'size' && limitedByDeclaredSize)
+        understatedDeclaredSizes.add(att.guid);
+      return outcome;
+    })
+    .finally(() => {
+      const current = inFlight.get(flightKey);
+      current?.delete(flight);
+      if (current?.size === 0) inFlight.delete(flightKey);
+    });
   flight.task = settled;
   const nextFlights = flights ?? new Set<DownloadFlight>();
   nextFlights.add(flight);
