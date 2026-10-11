@@ -544,6 +544,174 @@ describe('provider-scoped repair', () => {
     expect(f.cancel).toHaveBeenCalled();
   });
 
+  describe('restarting the sync bookmark from the server', () => {
+    const otherProvider = '99999999-9999-4999-8999-999999999999';
+    const newest = (guid: string, rowId: number, owner = chatGuid) =>
+      Message.parse({
+        guid,
+        dateCreated: rowId * 10,
+        originalROWID: rowId,
+        text: 'fixture',
+        chats: [{ guid: owner, participants: [{ address: 'test@example.test' }] }],
+      });
+    /** The chat list names `listed` as newest; the history pass also returns a later arrival. */
+    function serverWith(f: ReturnType<typeof fixture>, listed: Message, arrived: Message) {
+      f.base.fetchChats = async (offset) =>
+        offset === 0
+          ? [
+              Chat.parse({
+                guid: chatGuid,
+                participants: [{ address: 'test@example.test' }],
+                lastMessage: listed,
+              }),
+            ]
+          : [];
+      f.base.fetchChatMessages = async (chat, offset) =>
+        chat === chatGuid && offset === 0 ? [arrived, listed] : [];
+      return f;
+    }
+    async function previousProvider(epoch: string) {
+      await withDbTransaction(db, (context) =>
+        setMessageStateAuthorityWithinTransaction(context, {
+          version: 1,
+          provider: 'imessage',
+          providerEpoch: epoch,
+          ledgerEpoch,
+          cursor: 'old-cursor',
+          snapshotSequence: '0',
+          sequence: '0',
+        }),
+      );
+    }
+
+    it('rebuilds the bookmark from the server after the Messages database changes', async () => {
+      await previousProvider(otherProvider);
+      await setSyncMarker(db, { lastSyncedRowId: 9_000_000, lastSyncedTimestamp: 90_000_000 });
+      const f = serverWith(fixture(), newest('listed', 120), newest('arrived', 130));
+      const pages = jest.spyOn(f.base, 'fetchChatMessages');
+
+      await f.runAuto();
+
+      // Recent history is refreshed with the user's per-chat limit...
+      expect(pages).toHaveBeenCalledWith(chatGuid, 0, 25, undefined);
+      // ...and the old database's row numbers no longer decide where sync resumes.
+      expect(await getSyncMarker(db)).toEqual({ lastSyncedRowId: 120, lastSyncedTimestamp: 1200 });
+    });
+
+    it('starts a first sync where the server listed its newest message', async () => {
+      const f = serverWith(fixture(), newest('listed', 120), newest('arrived', 130));
+
+      await f.runAuto();
+
+      // A message that arrived during the pass stays after the bookmark, so it cannot be skipped.
+      expect(await getSyncMarker(db)).toEqual({ lastSyncedRowId: 120, lastSyncedTimestamp: 1200 });
+    });
+
+    it('keeps the bookmark when only the ledger restarts on the same Messages database', async () => {
+      await installOldLedgerDeletions([]);
+      await setSyncMarker(db, { lastSyncedRowId: 500, lastSyncedTimestamp: 5000 });
+      const f = serverWith(fixture(), newest('listed', 120), newest('arrived', 130));
+      const pages = jest.spyOn(f.base, 'fetchChatMessages');
+
+      await f.runAuto();
+
+      expect(await getSyncMarker(db)).toEqual({ lastSyncedRowId: 500, lastSyncedTimestamp: 5000 });
+      expect(pages).not.toHaveBeenCalled();
+    });
+
+    it('rebuilds the bookmark on a later sync when the first refresh after a change fails', async () => {
+      await previousProvider(otherProvider);
+      await setSyncMarker(db, { lastSyncedRowId: 9_000_000, lastSyncedTimestamp: 90_000_000 });
+      const f = serverWith(fixture(), newest('listed', 120), newest('arrived', 130));
+      const listChats = f.base.fetchChats;
+      f.base.fetchChats = async () => {
+        throw new Error('connection dropped');
+      };
+
+      await expect(f.runAuto()).rejects.toThrow('connection dropped');
+      // The old database's bookmark is already gone, so sync can never resume past new rows.
+      expect(await getSyncMarker(db)).toEqual({ lastSyncedRowId: null, lastSyncedTimestamp: null });
+
+      f.base.fetchChats = listChats;
+      await f.runAuto();
+      expect(await getSyncMarker(db)).toEqual({ lastSyncedRowId: 120, lastSyncedTimestamp: 1200 });
+    });
+
+    it("does not sync from the old database's bookmark while the new one cannot be set up", async () => {
+      await previousProvider(otherProvider);
+      await setSyncMarker(db, { lastSyncedRowId: 9_000_000, lastSyncedTimestamp: 90_000_000 });
+      const f = serverWith(fixture(), newest('listed', 120), newest('arrived', 130));
+      f.control.beginProviderRepair = async () => {
+        throw new ApiError('server_error', 'busy', 503);
+      };
+      const incremental = jest.spyOn(f.base, 'fetchMessagesAfter');
+
+      await f.runAuto();
+
+      expect(incremental).not.toHaveBeenCalled();
+      // The chat list still refreshes each conversation's newest message.
+      expect(raw.prepare('SELECT guid FROM messages').all()).toEqual([{ guid: 'listed' }]);
+
+      // Once setup succeeds after its wait, the bookmark restarts from the server.
+      f.control.beginProviderRepair = async () => lease;
+      const later = Date.now() + 25 * 60 * 60 * 1000;
+      jest.spyOn(Date, 'now').mockReturnValue(later);
+      await f.runAuto();
+      expect(await getSyncMarker(db)).toEqual({ lastSyncedRowId: 120, lastSyncedTimestamp: 1200 });
+    });
+
+    it('keeps a bookmark saved before deleted-message sync existed', async () => {
+      await setSyncMarker(db, { lastSyncedRowId: 500, lastSyncedTimestamp: 5000 });
+      const f = serverWith(fixture(), newest('listed', 120), newest('arrived', 130));
+      const pages = jest.spyOn(f.base, 'fetchChatMessages');
+
+      await f.runAuto();
+
+      // Without an earlier provider identity there is no sign the Messages database changed.
+      expect(await getSyncMarker(db)).toEqual({ lastSyncedRowId: 500, lastSyncedTimestamp: 5000 });
+      expect(pages).not.toHaveBeenCalled();
+    });
+
+    it('never restarts the bookmark from an RCS conversation', async () => {
+      const rcsEpoch = `gpe1_${'A'.repeat(43)}`;
+      const encoded = (value: string) => Buffer.from(value, 'utf8').toString('base64url');
+      const rcsChat = `RCS;-;g1.${rcsEpoch}.${encoded('conversation-a')}`;
+      const rcsInfo = ServerInfo.parse({
+        server_version: '2.0.0',
+        supports_message_state_sync: true,
+        message_state_sync_version: 1,
+        imessage_provider_epoch: providerEpoch,
+        supports_provider_repair_snapshot: true,
+        rcs: true,
+        supports_rcs_epoch_qualified_ids: true,
+        rcs_provider_epoch: rcsEpoch,
+      });
+      const f = serverWith(fixture(), newest('listed', 120), newest('arrived', 130));
+      const appleChats = f.base.fetchChats;
+      f.base.fetchChats = async (offset, limit, signal) =>
+        offset === 0
+          ? [
+              ...(await appleChats(offset, limit, signal)),
+              Chat.parse({
+                guid: rcsChat,
+                participants: [{ address: '+15550000001', service: 'RCS' }],
+                lastMessage: Message.parse({
+                  guid: `rcs-g1.${rcsEpoch}.${encoded('message-a')}`,
+                  dateCreated: 999_990,
+                  originalROWID: 99_999,
+                  text: 'fixture',
+                  chats: [{ guid: rcsChat }],
+                }),
+              }),
+            ]
+          : [];
+
+      await f.runAuto({ serverInfo: rcsInfo });
+
+      expect(await getSyncMarker(db)).toEqual({ lastSyncedRowId: 120, lastSyncedTimestamp: 1200 });
+    });
+  });
+
   describe('waiting after a failed repair', () => {
     const MINUTE_MS = 60_000;
     const DAY_MS = 24 * 60 * MINUTE_MS;

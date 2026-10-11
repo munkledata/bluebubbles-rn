@@ -10,7 +10,7 @@ import {
   classifyRcsChatRecord,
   classifyRcsMessageRecord,
 } from '@core/rcs';
-import type { SyncMarker } from '@core/sync';
+import { advanceMarker, type SyncMarker } from '@core/sync';
 import {
   captureFullRepairPruneExposure,
   getSyncMarker,
@@ -18,6 +18,7 @@ import {
 } from '@db/repositories';
 import {
   getMessageStateAuthority,
+  getMessageStateAuthorityWithinTransaction,
   getMessageStateAudit,
   getProviderRepairBackoff,
   installCheckpointAuthorityWithinTransaction,
@@ -104,8 +105,10 @@ async function beginProviderRepairWhenReady(
 /**
  * The ledger checkpoint is a complete authority for everything fetched afterwards: server reads
  * exclude Recently Deleted, so each such row was active when fetched, and later deletions replay
- * from the checkpoint. Messages already on the phone are only recorded for a later server check:
- * today's per-message lookup cannot prove a deletion, so nothing is hidden on its word.
+ * from the checkpoint. Messages already on the phone are recorded for a later check that trusts
+ * only the server's typed presence answers. A new provider identity means a different Messages
+ * database, whose row numbers the old sync bookmark does not describe: clearing it in this same
+ * owner makes sync restart it from the server, retried on later syncs until a refresh finishes.
  */
 async function installAuthorityFromCheckpoint(
   db: AppDatabase,
@@ -117,8 +120,9 @@ async function installAuthorityFromCheckpoint(
   // The checkpoint is a self-contained ledger cursor; the snapshot lease itself is not needed.
   await controlApi.cancelProviderRepair?.(lease.token).catch(() => undefined);
   if (lease.providerEpoch !== providerEpoch) throw new MessageStateRepairRequiredError();
-  await withDbTransaction(db, (context) =>
-    installCheckpointAuthorityWithinTransaction(context, {
+  await withDbTransaction(db, async (context) => {
+    const previous = await getMessageStateAuthorityWithinTransaction(context);
+    await installCheckpointAuthorityWithinTransaction(context, {
       version: 1,
       provider: 'imessage',
       providerEpoch,
@@ -126,8 +130,16 @@ async function installAuthorityFromCheckpoint(
       cursor: lease.checkpoint,
       snapshotSequence: lease.sequence,
       sequence: lease.sequence,
-    }),
-  );
+    });
+    if (previous && previous.providerEpoch !== providerEpoch)
+      await setSyncMarkerWithinTransaction(context, NO_SYNC_MARKER);
+  });
+}
+
+const NO_SYNC_MARKER: SyncMarker = { lastSyncedRowId: null, lastSyncedTimestamp: null };
+
+function hasSyncPosition(marker: SyncMarker | null): marker is SyncMarker {
+  return marker != null && (marker.lastSyncedRowId != null || marker.lastSyncedTimestamp != null);
 }
 
 const MESSAGE_STATE_AUDIT_BUDGET = 2_000;
@@ -373,6 +385,8 @@ export async function syncProviderMessages(
   const providerEpoch = serverInfo.imessage_provider_epoch;
   if (!providerEpoch) throw new Error('The iMessage provider identity is unavailable.');
   const authority = await getMessageStateAuthority(db);
+  // A new provider identity is a different Messages database; see installAuthorityFromCheckpoint.
+  const providerChanged = authority != null && authority.providerEpoch !== providerEpoch;
   let needsRepair =
     options.repair ||
     options.forceRepair === true ||
@@ -596,13 +610,31 @@ export async function syncProviderMessages(
   if (shouldAbort()) return progress;
   // The general chat refresh is additive; RCS pages never participate in Apple absence cleanup
   // or advance its message cursor. Their independently owned history remains bounded per run.
+  // It also notes the newest Apple message the server lists before any history is fetched. A
+  // first sync's bookmark there stays below anything that arrives after the listing; a message
+  // arriving during a multi-page listing is read by the history pass that follows.
+  let listed = NO_SYNC_MARKER;
   const chats = await syncAllChats(
     db,
     api,
     200,
     shouldAbort,
     signal,
-    undefined,
+    (messages, chatGuidByMessage) => {
+      listed = advanceMarker(
+        listed,
+        messages
+          .filter(
+            (message) =>
+              !looksLikeRcsMessageGuid(message.guid) &&
+              !looksLikeRcsChatGuid(chatGuidByMessage.get(message.guid) ?? ''),
+          )
+          .map((message) => ({
+            rowId: message.originalROWID ?? null,
+            timestamp: message.dateCreated ?? null,
+          })),
+      );
+    },
     undefined,
     undefined,
     serverInfo,
@@ -618,25 +650,44 @@ export async function syncProviderMessages(
       });
   }
   if (!repaired && !shouldAbort()) {
-    const marker = await getSyncMarker(db);
     // Without a marker, incremental sync would page the whole history from the epoch, so an
     // unfinished repair falls back to the ordinary first sync and the user's per-chat cap.
-    progress =
-      marker.lastSyncedRowId == null && marker.lastSyncedTimestamp == null
-        ? await fullSync(db, api, {
-            maxMessagesPerChat: options.messagesPerChat,
-            shouldAbort,
-            signal,
-            rcsProviderInfo: serverInfo,
-            onProgress: options.onProgress,
-          })
-        : await incrementalSync(db, api, {
-            serverVersion: serverInfo.server_version ?? '',
-            shouldAbort,
-            signal,
-            rcsProviderInfo: serverInfo,
-            onProgress: options.onProgress,
-          });
+    if (hasSyncPosition(await getSyncMarker(db))) {
+      // Until a new Messages database is set up, the old bookmark describes none of its rows, so
+      // only the chat list above refreshes; setup then clears the bookmark for a first sync.
+      if (providerChanged && !installedFromCheckpoint)
+        logger.debug('[sync] holding incremental sync until the new Messages database is set up');
+      else
+        progress = await incrementalSync(db, api, {
+          serverVersion: serverInfo.server_version ?? '',
+          shouldAbort,
+          signal,
+          rcsProviderInfo: serverInfo,
+          onProgress: options.onProgress,
+        });
+    } else {
+      let crawled: SyncMarker | null = null;
+      progress = await fullSync(db, api, {
+        maxMessagesPerChat: options.messagesPerChat,
+        commitMarker: false,
+        shouldAbort,
+        signal,
+        rcsProviderInfo: serverInfo,
+        onProgress: options.onProgress,
+        onServerMarker: (marker) => {
+          crawled = marker;
+        },
+      });
+      // The bookmark comes from the server, never from this phone's rows, which may still carry
+      // another Messages database's row numbers; the history pass is only a fallback position.
+      const restart = hasSyncPosition(listed) ? listed : crawled;
+      if (!shouldAbort() && hasSyncPosition(restart))
+        await withDbTransaction(
+          db,
+          (context) => setSyncMarkerWithinTransaction(context, restart),
+          () => !shouldAbort(),
+        );
+    }
   }
   // Message-state catch-up needs a usable authority of this exact provider. One whose repair failed
   // in this run is known to be stale, so it waits for the next attempt instead of failing the run.
