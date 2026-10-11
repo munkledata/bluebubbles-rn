@@ -298,6 +298,8 @@ async function sendEditOnce(
   }
 
   try {
+    // Once the request has started only the account may abort settlement. A capability refresh
+    // while it was out says nothing about whether the server applied it: report it unconfirmed.
     const ack = await editMessage(http, {
       chatGuid,
       messageGuid: finalTarget.messageGuid,
@@ -306,7 +308,7 @@ async function sendEditOnce(
     });
     if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
     if (serverAuthorization && !serverAuthorization.isCurrent()) {
-      throw new DbCommitGuardRejectedError();
+      return { status: 'outcome-unknown' };
     }
     return ack.guid === finalTarget.messageGuid
       ? { status: 'accepted' }
@@ -315,7 +317,7 @@ async function sendEditOnce(
     if (error instanceof DbCommitGuardRejectedError) throw error;
     if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
     if (serverAuthorization && !serverAuthorization.isCurrent()) {
-      throw new DbCommitGuardRejectedError();
+      return { status: 'outcome-unknown' };
     }
     if (editOutcomeIsUnknown(error)) return { status: 'outcome-unknown' };
   }
@@ -423,6 +425,8 @@ async function sendUnsendOnce(
   }
 
   try {
+    // Once the request has started only the account may abort settlement. A capability refresh
+    // while it was out says nothing about whether the server applied it: report it unconfirmed.
     const ack = await unsendMessage(http, {
       chatGuid: args.chatGuid,
       messageGuid: finalTarget.messageGuid,
@@ -430,7 +434,7 @@ async function sendUnsendOnce(
     });
     if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
     if (serverAuthorization && !serverAuthorization.isCurrent()) {
-      throw new DbCommitGuardRejectedError();
+      return { status: 'outcome-unknown' };
     }
     return ack.unsent === true && ack.guid === finalTarget.messageGuid
       ? { status: 'accepted' }
@@ -439,7 +443,7 @@ async function sendUnsendOnce(
     if (error instanceof DbCommitGuardRejectedError) throw error;
     if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
     if (serverAuthorization && !serverAuthorization.isCurrent()) {
-      throw new DbCommitGuardRejectedError();
+      return { status: 'outcome-unknown' };
     }
     if (unsendOutcomeIsUnknown(error)) return { status: 'outcome-unknown' };
   }

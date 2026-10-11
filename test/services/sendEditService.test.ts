@@ -104,6 +104,71 @@ describe('narrow one-to-one iMessage edit', () => {
     expect(row(raw)).toEqual({ text: 'edited', dateEdited: 5_000 });
   });
 
+  // A sync or push can refresh server capabilities while the request is out; that says nothing
+  // about whether the server applied the change, so the user is told it is unconfirmed.
+  const capabilityChangesDuring = (respond: () => Promise<unknown>) => {
+    let current = true;
+    const transport = fakeHttp(async () => {
+      current = false;
+      return respond();
+    });
+    return { transport, authorization: { allowsLegacyPartZero: false, isCurrent: () => current } };
+  };
+  // Even a refusal: the request may have reached a server the app no longer has a current view of.
+  const replies = (refusal: string): Array<[string, () => Promise<unknown>]> => [
+    ['an acknowledgement', async () => ({ guid: MESSAGE_GUID, viaPrivateApi: true, unsent: true })],
+    [
+      'a timeout',
+      async () => {
+        throw new ApiError('timeout', 'Request timed out');
+      },
+    ],
+    [
+      'a refusal',
+      async () => {
+        throw ApiError.fromStatus(409, 'rejected', undefined, refusal);
+      },
+    ],
+  ];
+
+  it.each(replies('imessage_edit_rejected'))(
+    'reports an edit as unconfirmed, keeping it, when capabilities change after %s',
+    async (_label, respond) => {
+      const { transport, authorization } = capabilityChangesDuring(respond);
+
+      await expect(
+        sendEdit(
+          db,
+          transport.http,
+          { chatGuid: CHAT_GUID, messageGuid: MESSAGE_GUID, newText: 'edited', partIndex: 0 },
+          5_000,
+          undefined,
+          authorization,
+        ),
+      ).resolves.toEqual({ status: 'outcome-unknown' });
+      expect(row(raw)).toEqual({ text: 'edited', dateEdited: 5_000 });
+    },
+  );
+
+  it.each(replies('imessage_unsend_rejected'))(
+    'reports an unsend as unconfirmed, keeping it, when capabilities change after %s',
+    async (_label, respond) => {
+      const { transport, authorization } = capabilityChangesDuring(respond);
+
+      await expect(
+        sendUnsend(
+          db,
+          transport.http,
+          { chatGuid: CHAT_GUID, messageGuid: MESSAGE_GUID, partIndex: 0 },
+          6_000,
+          undefined,
+          authorization,
+        ),
+      ).resolves.toEqual({ status: 'outcome-unknown' });
+      expect(retractionRow(raw)).toMatchObject({ retractionState: 'unknown', pendingPartIndex: 0 });
+    },
+  );
+
   it('restores the prior row on a definite typed failure without retrying', async () => {
     const transport = fakeHttp(async () => {
       throw new ApiError(
