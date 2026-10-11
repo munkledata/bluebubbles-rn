@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { CURRENT_LOCATION_MAX_REPLAY_AGE_MS } from '@core/api/endpoints/messages';
 import { isRcsChatGuid } from '@utils/chat';
 import { messages, outgoingQueue } from '../schema';
@@ -66,6 +66,9 @@ async function reconcileOutgoingErrorForMessageWithinTransaction(
     const current = cur[0];
     const prior = current?.attempts;
     if (prior == null) {
+      // No queue row: the send already settled. A live echo or ack that proved delivery promoted
+      // the row and removed its queue entry, so a late failure of that same send (a timeout after
+      // the server had sent it) must never relabel the delivered message.
       await db
         .update(messages)
         .set({
@@ -73,7 +76,7 @@ async function reconcileOutgoingErrorForMessageWithinTransaction(
           error: errorCode,
           ...(errorMessage === undefined ? {} : { errorMessage }),
         })
-        .where(eq(messages.guid, messageGuid));
+        .where(and(eq(messages.guid, messageGuid), sql`${messages.sendState} IS NOT 'sent'`));
       return false;
     }
     // This is the legacy/temp-only duplicate defense. Modern attemptGuid copies are deduplicated

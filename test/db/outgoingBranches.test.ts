@@ -986,6 +986,32 @@ describe('reconcileOutgoingSuccess — backstops & branches', () => {
     );
   });
 
+  it('never relabels a delivered message when a late failure of the same send arrives', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db, 'c1');
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-late-failure',
+      chatId,
+      chatGuid: 'c1',
+      text: 'delivered before the request failed',
+      now: 100,
+    });
+    await reconcileOutgoingSuccess(db, 'temp-late-failure', {
+      guid: 'real-late-failure',
+      dateCreated: 100,
+      dateDelivered: null,
+    });
+
+    // The request then times out, after the server had already sent the message.
+    await reconcileOutgoingError(db, 'temp-late-failure', 10010);
+
+    const row = raw
+      .prepare('SELECT send_state AS state, error FROM messages WHERE guid = ?')
+      .get('real-late-failure') as { state: string; error: number | null };
+    expect(row.state).toBe('sent');
+    expect(row.error).not.toBe(10010);
+  });
+
   it('keeps the later real-guid deletion timestamp when it precedes HTTP-ack promotion', async () => {
     const { db, raw } = await createTestDb();
     const chatId = await seedChat(db, 'c1');
