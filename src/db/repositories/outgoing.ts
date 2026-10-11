@@ -944,6 +944,9 @@ export function claimFailedOutgoingForRetryWithinTransaction(
     ) {
       return { claim: 'unsendable' };
     }
+    // A narrow plain text without a retry proof was refused by the server or may have been sent;
+    // a manual re-send could only stop before the network and relabel the bubble "maybe sent".
+    if (imessagePlainTextState === 'unsafe') return { claim: 'unsendable' };
     const queuedTarget = queuedMessageTarget(row.kind, row.payload);
     // One-shot iMessage attachments, contacts, replies, effects, mentions, and formatted messages
     // may not be manually replayed: a lost HTTP acknowledgement can mean the helper dispatched them.

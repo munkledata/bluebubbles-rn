@@ -654,6 +654,41 @@ describe('claimFailedOutgoingForRetry — "Try Again" vs the automatic drain', (
     expect(q.n).toBeGreaterThan(1_000);
   });
 
+  it('refuses Try Again for a plain text the server refused, leaving its status alone', async () => {
+    const { db, raw } = await createTestDb();
+    const chatId = await seedChat(db, 'c1');
+    await insertOutgoingText(db, {
+      tempGuid: 'temp-plain-rejected',
+      chatId,
+      chatGuid: 'c1',
+      text: 'refused before sending',
+      now: 100,
+      imessagePlainTextV1: true,
+    });
+    // The server proved it refused this attempt (409) and armed no retry proof.
+    raw
+      .prepare("UPDATE messages SET send_state = 'error', error = 409 WHERE guid = ?")
+      .run('temp-plain-rejected');
+
+    const res = await claimFailedOutgoingForRetry(
+      db,
+      'temp-plain-rejected',
+      () => 1_000,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => true,
+    );
+
+    expect(res.claim).toBe('unsendable');
+    expect(
+      raw
+        .prepare('SELECT send_state AS state, error FROM messages WHERE guid = ?')
+        .get('temp-plain-rejected'),
+    ).toEqual({ state: 'error', error: 409 });
+  });
+
   it('carries a CONTACT card back as a contact payload, never as the bubble text', async () => {
     const { db } = await createTestDb();
     const chatGuid = `RCS;-;g1.${RCS_PROVIDER_EPOCH}.Y29udGFjdC1yZXRyeQ`;
