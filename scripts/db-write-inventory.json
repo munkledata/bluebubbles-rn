@@ -27499,7 +27499,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#auditMessagesOnPhone:mutator-call:0cb8085730e2",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 213,
+      "line": 218,
       "symbol": "auditMessagesOnPhone",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -27512,7 +27512,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#auditMessagesOnPhone:mutator-call:743fce02f300",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 225,
+      "line": 230,
       "symbol": "auditMessagesOnPhone",
       "operation": "mutator-call",
       "target": "src/services/sync/providerRepair.ts#auditMessagesOnPhone.<callback:99e695721a>",
@@ -27525,7 +27525,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#auditMessagesOnPhone:mutator-call:af54db271a47",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 225,
+      "line": 230,
       "symbol": "auditMessagesOnPhone",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -27538,7 +27538,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#auditMessagesOnPhone.<callback:99e695721a>:mutator-call:46007abf6898",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 230,
+      "line": 235,
       "symbol": "auditMessagesOnPhone.<callback:99e695721a>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#setMessageStateAuditWithinTransaction",
@@ -27551,7 +27551,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#auditMessagesOnPhone:mutator-call:2045d7dbaa47",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 266,
+      "line": 271,
       "symbol": "auditMessagesOnPhone",
       "operation": "mutator-call",
       "target": "src/services/sync/providerRepair.ts#auditMessagesOnPhone.<callback:b0e692a958>",
@@ -27564,7 +27564,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#auditMessagesOnPhone:mutator-call:cce529a4ae6e",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 266,
+      "line": 271,
       "symbol": "auditMessagesOnPhone",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -27577,7 +27577,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#auditMessagesOnPhone.<callback:b0e692a958>:mutator-call:037818b989dc",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 273,
+      "line": 278,
       "symbol": "auditMessagesOnPhone.<callback:b0e692a958>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#reconcileMessageStateAuditReceiptsWithinTransaction",
@@ -27590,7 +27590,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#auditMessagesOnPhone.<callback:b0e692a958>:mutator-call:58b575bb7ba6",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 282,
+      "line": 287,
       "symbol": "auditMessagesOnPhone.<callback:b0e692a958>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#setMessageStateAuditWithinTransaction",
@@ -27603,7 +27603,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#auditMessagesOnPhone:mutator-call:3e93def56b83",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 299,
+      "line": 304,
       "symbol": "auditMessagesOnPhone",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -27616,7 +27616,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#auditMessagesOnPhone:mutator-call:42141f298efe",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 299,
+      "line": 304,
       "symbol": "auditMessagesOnPhone",
       "operation": "mutator-call",
       "target": "src/services/sync/providerRepair.ts#auditMessagesOnPhone.<callback:29f5904fa4>",
@@ -27629,7 +27629,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#auditMessagesOnPhone.<callback:29f5904fa4>:mutator-call:e8e4db0cb81c",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 303,
+      "line": 308,
       "symbol": "auditMessagesOnPhone.<callback:29f5904fa4>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#setMessageStateAuditWithinTransaction",
@@ -27642,7 +27642,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#auditMessagesOnPhone:mutator-call:8285f379b364",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 329,
+      "line": 334,
       "symbol": "auditMessagesOnPhone",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -27655,7 +27655,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#auditMessagesOnPhone:mutator-call:8981c2051410",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 329,
+      "line": 334,
       "symbol": "auditMessagesOnPhone",
       "operation": "mutator-call",
       "target": "src/services/sync/providerRepair.ts#auditMessagesOnPhone.<callback:8e77ee2413>",
@@ -27668,7 +27668,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#auditMessagesOnPhone.<callback:8e77ee2413>:mutator-call:f5f4522f9fa5",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 335,
+      "line": 340,
       "symbol": "auditMessagesOnPhone.<callback:8e77ee2413>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#hideSnapshotMessagesWithinTransaction",
@@ -27681,7 +27681,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#auditMessagesOnPhone.<callback:8e77ee2413>:mutator-call:5acbe90ced88",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 340,
+      "line": 345,
       "symbol": "auditMessagesOnPhone.<callback:8e77ee2413>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#setMessageStateAuditWithinTransaction",
@@ -27692,9 +27692,48 @@
       "evidence": "test/services/providerRepair.test.ts; test/api/messageState.test.ts"
     },
     {
+      "id": "src/services/sync/providerRepair.ts#fullRepairReader.fetchChatMessages:mutator-call:ac61324f2489",
+      "path": "src/services/sync/providerRepair.ts",
+      "line": 387,
+      "symbol": "fullRepairReader.fetchChatMessages",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "POST-02 provider message-state ownership",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "test/services/providerRepair.test.ts"
+    },
+    {
+      "id": "src/services/sync/providerRepair.ts#fullRepairReader.fetchChatMessages:mutator-call:c40349a1f793",
+      "path": "src/services/sync/providerRepair.ts",
+      "line": 387,
+      "symbol": "fullRepairReader.fetchChatMessages",
+      "operation": "mutator-call",
+      "target": "src/services/sync/providerRepair.ts#fullRepairReader.fetchChatMessages.<callback:91be025737>",
+      "detectedContext": "withDbTransaction",
+      "owner": "POST-02 provider message-state ownership",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "test/services/providerRepair.test.ts"
+    },
+    {
+      "id": "src/services/sync/providerRepair.ts#fullRepairReader.fetchChatMessages.<callback:91be025737>:mutator-call:86749e753344",
+      "path": "src/services/sync/providerRepair.ts",
+      "line": 390,
+      "symbol": "fullRepairReader.fetchChatMessages.<callback:91be025737>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/messageState.ts#bindSnapshotMessageOwnersWithinTransaction",
+      "detectedContext": "withDbTransaction",
+      "owner": "POST-02 provider message-state ownership",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "test/services/providerRepair.test.ts"
+    },
+    {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:9fcddb262368",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 398,
+      "line": 445,
       "symbol": "syncProviderMessages",
       "operation": "mutator-call",
       "target": "src/services/sync/messageStateSync.ts#syncMessageState",
@@ -27707,7 +27746,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:3b85501bbd1b",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 421,
+      "line": 471,
       "symbol": "syncProviderMessages",
       "operation": "mutator-call",
       "target": "src/services/sync/providerRepair.ts#installAuthorityFromCheckpoint",
@@ -27720,7 +27759,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:c642780c7d08",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 430,
+      "line": 483,
       "symbol": "syncProviderMessages",
       "operation": "mutator-call",
       "target": "src/db/repositories/repair.ts#captureFullRepairPruneExposure",
@@ -27733,7 +27772,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages.fetchChatMessages:mutator-call:4a8f7ce241b3",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 465,
+      "line": 518,
       "symbol": "syncProviderMessages.fetchChatMessages",
       "operation": "mutator-call",
       "target": "src/services/sync/providerRepair.ts#syncProviderMessages.fetchChatMessages.<callback:04a56b500b>",
@@ -27746,7 +27785,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages.fetchChatMessages:mutator-call:dceca73d52fd",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 465,
+      "line": 518,
       "symbol": "syncProviderMessages.fetchChatMessages",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -27759,7 +27798,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages.fetchChatMessages.<callback:04a56b500b>:mutator-call:d2aea3adb682",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 468,
+      "line": 521,
       "symbol": "syncProviderMessages.fetchChatMessages.<callback:04a56b500b>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#bindSnapshotMessageOwnersWithinTransaction",
@@ -27772,7 +27811,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:26f49c19fc68",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 480,
+      "line": 533,
       "symbol": "syncProviderMessages",
       "operation": "mutator-call",
       "target": "src/services/sync/engine.ts#fullSync",
@@ -27785,7 +27824,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:8393913a63c9",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 531,
+      "line": 584,
       "symbol": "syncProviderMessages",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -27798,7 +27837,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:bf55e95cfb61",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 531,
+      "line": 584,
       "symbol": "syncProviderMessages",
       "operation": "mutator-call",
       "target": "src/services/sync/providerRepair.ts#syncProviderMessages.<callback:5d8f14b361>",
@@ -27811,7 +27850,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages.<callback:5d8f14b361>:mutator-call:58a7b7926895",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 534,
+      "line": 587,
       "symbol": "syncProviderMessages.<callback:5d8f14b361>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#rebaseOldMessageStateBatchWithinTransaction",
@@ -27824,7 +27863,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:4cd65c9c24f0",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 544,
+      "line": 597,
       "symbol": "syncProviderMessages",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -27837,7 +27876,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:e0f779a33b7c",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 544,
+      "line": 597,
       "symbol": "syncProviderMessages",
       "operation": "mutator-call",
       "target": "src/services/sync/providerRepair.ts#syncProviderMessages.<callback:a19faaa848>",
@@ -27850,7 +27889,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages.<callback:a19faaa848>:mutator-call:4cea5d5d53ad",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 547,
+      "line": 600,
       "symbol": "syncProviderMessages.<callback:a19faaa848>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#restoreSnapshotMessagesWithinTransaction",
@@ -27863,7 +27902,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:1f88e7cf2514",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 566,
+      "line": 619,
       "symbol": "syncProviderMessages",
       "operation": "mutator-call",
       "target": "src/services/sync/providerRepair.ts#syncProviderMessages.<callback:e2e15f3262>",
@@ -27876,7 +27915,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:b7a90fdde6d6",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 566,
+      "line": 619,
       "symbol": "syncProviderMessages",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -27889,7 +27928,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages.<callback:e2e15f3262>:mutator-call:27f4a8fbf53b",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 569,
+      "line": 622,
       "symbol": "syncProviderMessages.<callback:e2e15f3262>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#hideSnapshotMessagesWithinTransaction",
@@ -27902,7 +27941,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:55cdeebceedb",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 577,
+      "line": 630,
       "symbol": "syncProviderMessages",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -27915,7 +27954,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:751873a33098",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 577,
+      "line": 630,
       "symbol": "syncProviderMessages",
       "operation": "mutator-call",
       "target": "src/services/sync/providerRepair.ts#syncProviderMessages.<callback:8b052cb350>",
@@ -27928,7 +27967,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages.<callback:8b052cb350>:mutator-call:70a6af6c5c78",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 580,
+      "line": 633,
       "symbol": "syncProviderMessages.<callback:8b052cb350>",
       "operation": "mutator-call",
       "target": "src/db/repositories/sync.ts#setSyncMarkerWithinTransaction",
@@ -27941,7 +27980,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages.<callback:8b052cb350>:mutator-call:de60eb02bdaa",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 581,
+      "line": 634,
       "symbol": "syncProviderMessages.<callback:8b052cb350>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#setMessageStateAuthorityWithinTransaction",
@@ -27954,7 +27993,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages.<callback:8b052cb350>:mutator-call:b9059ce2530b",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 582,
+      "line": 635,
       "symbol": "syncProviderMessages.<callback:8b052cb350>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#clearProviderRepairBackoffWithinTransaction",
@@ -27967,7 +28006,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages.<callback:8b052cb350>:mutator-call:790f89da3251",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 584,
+      "line": 637,
       "symbol": "syncProviderMessages.<callback:8b052cb350>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#setMessageStateAuditWithinTransaction",
@@ -27980,7 +28019,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:a185d60d76b1",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 601,
+      "line": 654,
       "symbol": "syncProviderMessages",
       "operation": "mutator-call",
       "target": "src/services/sync/providerRepair.ts#syncProviderMessages.<callback:c2e8540004>",
@@ -27993,7 +28032,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:e1b6de73db24",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 601,
+      "line": 654,
       "symbol": "syncProviderMessages",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -28006,7 +28045,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages.<callback:c2e8540004>:mutator-call:89b270af5a12",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 602,
+      "line": 655,
       "symbol": "syncProviderMessages.<callback:c2e8540004>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#recordProviderRepairFailureWithinTransaction",
@@ -28019,7 +28058,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:61fd861689b5",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 617,
+      "line": 670,
       "symbol": "syncProviderMessages",
       "operation": "mutator-call",
       "target": "src/services/sync/engine.ts#syncAllChats",
@@ -28032,7 +28071,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:abb13ccccad7",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 645,
+      "line": 698,
       "symbol": "syncProviderMessages",
       "operation": "mutator-call",
       "target": "src/services/sync/engine.ts#syncChatMessages",
@@ -28045,7 +28084,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:633af0a08dee",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 661,
+      "line": 715,
       "symbol": "syncProviderMessages",
       "operation": "mutator-call",
       "target": "src/services/sync/engine.ts#incrementalSync",
@@ -28056,9 +28095,9 @@
       "evidence": "test/services/messageStateSync.test.ts; test/services/providerRepair.test.ts; test/db/outgoingBranches.test.ts; test/db/chatActionsRepo.test.ts; test/db/clearLocalCache.test.ts; test/db/migrations/0053_versioned_server_message_state.test.ts"
     },
     {
-      "id": "src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:4477d5daf266",
+      "id": "src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:2b311fba6b86",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 670,
+      "line": 726,
       "symbol": "syncProviderMessages",
       "operation": "mutator-call",
       "target": "src/services/sync/engine.ts#fullSync",
@@ -28071,7 +28110,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:b1e07bb85dcd",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 685,
+      "line": 743,
       "symbol": "syncProviderMessages",
       "operation": "mutator-call",
       "target": "src/services/sync/providerRepair.ts#syncProviderMessages.<callback:5b3cd40efe>",
@@ -28084,7 +28123,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:ef35731d24dc",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 685,
+      "line": 743,
       "symbol": "syncProviderMessages",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -28097,7 +28136,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages.<callback:5b3cd40efe>:mutator-call:df550ff63410",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 687,
+      "line": 745,
       "symbol": "syncProviderMessages.<callback:5b3cd40efe>",
       "operation": "mutator-call",
       "target": "src/db/repositories/sync.ts#setSyncMarkerWithinTransaction",
@@ -28110,7 +28149,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:9fcddb262368:2",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 700,
+      "line": 758,
       "symbol": "syncProviderMessages",
       "operation": "mutator-call",
       "target": "src/services/sync/messageStateSync.ts#syncMessageState",
@@ -28123,7 +28162,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:3ef44f03f69a",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 709,
+      "line": 767,
       "symbol": "syncProviderMessages",
       "operation": "mutator-call",
       "target": "src/services/sync/providerRepair.ts#syncProviderMessages",
@@ -28136,7 +28175,7 @@
     {
       "id": "src/services/sync/providerRepair.ts#syncProviderMessages:mutator-call:36e0573c2a47",
       "path": "src/services/sync/providerRepair.ts",
-      "line": 714,
+      "line": 777,
       "symbol": "syncProviderMessages",
       "operation": "mutator-call",
       "target": "src/services/sync/providerRepair.ts#auditMessagesOnPhone",
@@ -28149,7 +28188,7 @@
     {
       "id": "src/services/syncControl.ts#startSync.<callback:4c2f340da4>:mutator-call:7042cc5b18c2",
       "path": "src/services/syncControl.ts",
-      "line": 160,
+      "line": 164,
       "symbol": "startSync.<callback:4c2f340da4>",
       "operation": "mutator-call",
       "target": "src/services/syncControl.ts#runSync",
@@ -28162,7 +28201,7 @@
     {
       "id": "src/services/syncControl.ts#startFullRepair.<callback:a019ed9cf6>:mutator-call:7349d6139eeb",
       "path": "src/services/syncControl.ts",
-      "line": 250,
+      "line": 254,
       "symbol": "startFullRepair.<callback:a019ed9cf6>",
       "operation": "mutator-call",
       "target": "src/services/syncControl.ts#runSync",
@@ -28175,7 +28214,7 @@
     {
       "id": "src/services/syncControl.ts#startTargetedChatRepair.<callback:53a6bf4b67>:mutator-call:38d11d47e1ea",
       "path": "src/services/syncControl.ts",
-      "line": 337,
+      "line": 341,
       "symbol": "startTargetedChatRepair.<callback:53a6bf4b67>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -28188,7 +28227,7 @@
     {
       "id": "src/services/syncControl.ts#startTargetedChatRepair.<callback:53a6bf4b67>:mutator-call:d8a6f64d5ae8",
       "path": "src/services/syncControl.ts",
-      "line": 341,
+      "line": 345,
       "symbol": "startTargetedChatRepair.<callback:53a6bf4b67>",
       "operation": "mutator-call",
       "target": "src/services/sync/engine.ts#syncSingleChat",
@@ -28201,7 +28240,7 @@
     {
       "id": "src/services/syncControl.ts#startTargetedChatRepair.<callback:53a6bf4b67>:mutator-call:aeccb187738d",
       "path": "src/services/syncControl.ts",
-      "line": 350,
+      "line": 354,
       "symbol": "startTargetedChatRepair.<callback:53a6bf4b67>",
       "operation": "mutator-call",
       "target": "src/services/sync/engine.ts#syncChatMessageRange",
@@ -28214,7 +28253,7 @@
     {
       "id": "src/services/syncControl.ts#startTargetedChatRepair.<callback:53a6bf4b67>:mutator-call:9c076da708b3",
       "path": "src/services/syncControl.ts",
-      "line": 362,
+      "line": 366,
       "symbol": "startTargetedChatRepair.<callback:53a6bf4b67>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -28227,7 +28266,7 @@
     {
       "id": "src/services/syncControl.ts#startTargetedChatRepair.<callback:53a6bf4b67>:mutator-call:f3e03ada40b9",
       "path": "src/services/syncControl.ts",
-      "line": 362,
+      "line": 366,
       "symbol": "startTargetedChatRepair.<callback:53a6bf4b67>",
       "operation": "mutator-call",
       "target": "src/services/syncControl.ts#startTargetedChatRepair.<callback:53a6bf4b67>.<callback:27228069a4>",
@@ -28240,7 +28279,7 @@
     {
       "id": "src/services/syncControl.ts#startTargetedChatRepair.<callback:53a6bf4b67>.<callback:27228069a4>:mutator-call:934be95f210c",
       "path": "src/services/syncControl.ts",
-      "line": 365,
+      "line": 369,
       "symbol": "startTargetedChatRepair.<callback:53a6bf4b67>.<callback:27228069a4>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#restoreDeletedChatWithinTransaction",
@@ -28253,7 +28292,7 @@
     {
       "id": "src/services/syncControl.ts#runSync:mutator-call:319958051ebc",
       "path": "src/services/syncControl.ts",
-      "line": 558,
+      "line": 570,
       "symbol": "runSync",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -28266,7 +28305,7 @@
     {
       "id": "src/services/syncControl.ts#runSync:mutator-call:15ffb54cca3e",
       "path": "src/services/syncControl.ts",
-      "line": 567,
+      "line": 579,
       "symbol": "runSync",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries",
@@ -28279,7 +28318,7 @@
     {
       "id": "src/services/syncControl.ts#runSync:mutator-call:f2bc335e17da",
       "path": "src/services/syncControl.ts",
-      "line": 570,
+      "line": 582,
       "symbol": "runSync",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.drainDueRetirements",
@@ -28290,9 +28329,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/backgroundSyncTask.test.ts; test/services/backgroundSyncOrchestrator.test.ts; test/services/syncControlTracking.test.ts; test/services/syncEngine.test.ts; test/services/syncEngineBranches.test.ts; test/services/deletionSync.test.ts; test/services/syncedBackgroundAccountScope.test.ts"
     },
     {
-      "id": "src/services/syncControl.ts#runSync:mutator-call:4ddbd229451a",
+      "id": "src/services/syncControl.ts#runSync:mutator-call:9b62b1f54ff6",
       "path": "src/services/syncControl.ts",
-      "line": 641,
+      "line": 653,
       "symbol": "runSync",
       "operation": "mutator-call",
       "target": "src/services/sync/providerRepair.ts#syncProviderMessages",
@@ -28305,7 +28344,7 @@
     {
       "id": "src/services/syncControl.ts#runSync:mutator-call:15ffb54cca3e:2",
       "path": "src/services/syncControl.ts",
-      "line": 667,
+      "line": 685,
       "symbol": "runSync",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries",
@@ -28318,7 +28357,7 @@
     {
       "id": "src/services/syncControl.ts#runSync:mutator-call:f2bc335e17da:2",
       "path": "src/services/syncControl.ts",
-      "line": 670,
+      "line": 688,
       "symbol": "runSync",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.drainDueRetirements",
@@ -28331,7 +28370,7 @@
     {
       "id": "src/services/syncControl.ts#runSync:mutator-call:969f8e9b7657",
       "path": "src/services/syncControl.ts",
-      "line": 681,
+      "line": 699,
       "symbol": "runSync",
       "operation": "mutator-call",
       "target": "src/services/sync/deletionSync.ts#isDeletionSnapshotInitialized",
@@ -28344,7 +28383,7 @@
     {
       "id": "src/services/syncControl.ts#runSync:mutator-call:535bd795208b",
       "path": "src/services/syncControl.ts",
-      "line": 751,
+      "line": 769,
       "symbol": "runSync",
       "operation": "mutator-call",
       "target": "src/db/repositories/repair.ts#captureFullRepairPruneExposure",
@@ -28357,7 +28396,7 @@
     {
       "id": "src/services/syncControl.ts#runSync:mutator-call:a4f724183115",
       "path": "src/services/syncControl.ts",
-      "line": 773,
+      "line": 791,
       "symbol": "runSync",
       "operation": "mutator-call",
       "target": "src/services/sync/engine.ts#fullSync",
@@ -28370,7 +28409,7 @@
     {
       "id": "src/services/syncControl.ts#runSync:mutator-call:f47292e12423",
       "path": "src/services/syncControl.ts",
-      "line": 826,
+      "line": 844,
       "symbol": "runSync",
       "operation": "mutator-call",
       "target": "src/services/sync/engine.ts#syncAllChats",
@@ -28383,7 +28422,7 @@
     {
       "id": "src/services/syncControl.ts#runSync:mutator-call:1c0aa0474d53",
       "path": "src/services/syncControl.ts",
-      "line": 847,
+      "line": 865,
       "symbol": "runSync",
       "operation": "mutator-call",
       "target": "src/services/sync/engine.ts#incrementalSync",
@@ -28396,7 +28435,7 @@
     {
       "id": "src/services/syncControl.ts#runSync:mutator-call:5e67ff4f7781",
       "path": "src/services/syncControl.ts",
-      "line": 879,
+      "line": 897,
       "symbol": "runSync",
       "operation": "mutator-call",
       "target": "src/services/sync/deletionSync.ts#syncDeletedMessages",
@@ -28409,7 +28448,7 @@
     {
       "id": "src/services/syncControl.ts#runSync:mutator-call:3d1b923ea415",
       "path": "src/services/syncControl.ts",
-      "line": 884,
+      "line": 902,
       "symbol": "runSync",
       "operation": "mutator-call",
       "target": "src/services/sync/deletionSync.ts#syncDeletedMessages",
@@ -28422,7 +28461,7 @@
     {
       "id": "src/services/syncControl.ts#runSync:mutator-call:1211c3e0c6bc",
       "path": "src/services/syncControl.ts",
-      "line": 925,
+      "line": 943,
       "symbol": "runSync",
       "operation": "mutator-call",
       "target": "src/services/syncControl.ts#runSync.<callback:9b3f2552db>",
@@ -28435,7 +28474,7 @@
     {
       "id": "src/services/syncControl.ts#runSync:mutator-call:4a42bc61cca8",
       "path": "src/services/syncControl.ts",
-      "line": 925,
+      "line": 943,
       "symbol": "runSync",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -28448,7 +28487,7 @@
     {
       "id": "src/services/syncControl.ts#runSync.<callback:9b3f2552db>:mutator-call:73b2a1610276",
       "path": "src/services/syncControl.ts",
-      "line": 928,
+      "line": 946,
       "symbol": "runSync.<callback:9b3f2552db>",
       "operation": "mutator-call",
       "target": "src/db/repositories/sync.ts#setSyncMarkerWithinTransaction",
@@ -28461,7 +28500,7 @@
     {
       "id": "src/services/syncControl.ts#runSync.<callback:9b3f2552db>:mutator-call:cefeb71431d5",
       "path": "src/services/syncControl.ts",
-      "line": 929,
+      "line": 947,
       "symbol": "runSync.<callback:9b3f2552db>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
@@ -28474,7 +28513,7 @@
     {
       "id": "src/services/syncControl.ts#runSync:mutator-call:d8dbede56cd8",
       "path": "src/services/syncControl.ts",
-      "line": 955,
+      "line": 973,
       "symbol": "runSync",
       "operation": "mutator-call",
       "target": "src/db/repositories/repair.ts#reconcileFullRepairPruneExposure",
@@ -28487,7 +28526,7 @@
     {
       "id": "src/services/syncControl.ts#runSync:mutator-call:489e43b1e357",
       "path": "src/services/syncControl.ts",
-      "line": 979,
+      "line": 997,
       "symbol": "runSync",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -28500,7 +28539,7 @@
     {
       "id": "src/services/syncControl.ts#runSync:mutator-call:fc259ece4940",
       "path": "src/services/syncControl.ts",
-      "line": 979,
+      "line": 997,
       "symbol": "runSync",
       "operation": "mutator-call",
       "target": "src/services/syncControl.ts#runSync.<callback:88923016a4>",
@@ -28513,7 +28552,7 @@
     {
       "id": "src/services/syncControl.ts#runSync.<callback:88923016a4>:mutator-call:1f510d05e6ec",
       "path": "src/services/syncControl.ts",
-      "line": 982,
+      "line": 1000,
       "symbol": "runSync.<callback:88923016a4>",
       "operation": "mutator-call",
       "target": "src/db/repositories/sync.ts#setSyncMarkerWithinTransaction",
@@ -28526,7 +28565,7 @@
     {
       "id": "src/services/syncControl.ts#runSync.<callback:88923016a4>:mutator-call:59003523d7e4",
       "path": "src/services/syncControl.ts",
-      "line": 983,
+      "line": 1001,
       "symbol": "runSync.<callback:88923016a4>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
@@ -28539,7 +28578,7 @@
     {
       "id": "src/services/syncControl.ts#runSync:mutator-call:15ffb54cca3e:3",
       "path": "src/services/syncControl.ts",
-      "line": 997,
+      "line": 1015,
       "symbol": "runSync",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries",
@@ -28552,7 +28591,7 @@
     {
       "id": "src/services/syncControl.ts#runSync:mutator-call:f2bc335e17da:3",
       "path": "src/services/syncControl.ts",
-      "line": 1000,
+      "line": 1018,
       "symbol": "runSync",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.drainDueRetirements",
@@ -28565,7 +28604,7 @@
     {
       "id": "src/services/syncControl.ts#runSync:mutator-call:cad4b657fd83",
       "path": "src/services/syncControl.ts",
-      "line": 1006,
+      "line": 1024,
       "symbol": "runSync",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries",
@@ -28578,7 +28617,7 @@
     {
       "id": "src/services/syncControl.ts#runSync:mutator-call:62e252e57364",
       "path": "src/services/syncControl.ts",
-      "line": 1012,
+      "line": 1030,
       "symbol": "runSync",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.drainDueRetirements",
@@ -28591,7 +28630,7 @@
     {
       "id": "src/services/syncControl.ts#ensureChatSynced.<callback:30448c6a99>:mutator-call:e35decbbda6b",
       "path": "src/services/syncControl.ts",
-      "line": 1109,
+      "line": 1127,
       "symbol": "ensureChatSynced.<callback:30448c6a99>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -28604,7 +28643,7 @@
     {
       "id": "src/services/syncControl.ts#ensureChatSynced.<callback:30448c6a99>:mutator-call:d213a1898cbd",
       "path": "src/services/syncControl.ts",
-      "line": 1111,
+      "line": 1129,
       "symbol": "ensureChatSynced.<callback:30448c6a99>",
       "operation": "mutator-call",
       "target": "src/services/sync/engine.ts#syncChatMessages",

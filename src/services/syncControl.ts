@@ -25,7 +25,11 @@ import { useSyncSettingsStore } from '@state/syncSettingsStore';
 import { http } from './clients';
 import { ensureDatabase } from './databaseControl';
 import { syncContacts } from './contacts/contactsService';
-import { supportsMessageStateSync, syncProviderMessages } from './sync/providerRepair';
+import {
+  supportsMessageStateSync,
+  syncProviderMessages,
+  type ProviderSyncProgress,
+} from './sync/providerRepair';
 import { createAttachmentCacheAccountScope } from './download/attachmentCacheAccountScope';
 import { attachmentCacheCoordinator } from './download/attachmentCacheCoordinator';
 import {
@@ -497,6 +501,13 @@ function rcsProviderCapabilityKey(info: ReturnType<typeof sessionAccessors.getSe
   ]);
 }
 
+/** How a provider-scoped repair settled, as the repair screen explains it. */
+function providerRepairNote(result: ProviderSyncProgress['repairResult']): string {
+  if (result === 'checked')
+    return 'Re-downloaded every chat and checked deleted messages with the server; RCS history was refreshed additively.';
+  return 'Installed the stable iMessage snapshot; RCS history was refreshed additively.';
+}
+
 async function runSync(options: SyncRunOptions = {}): Promise<void> {
   const sync = useSyncStore.getState();
   // Ordinary sync has no user cancellation, and `forget()` only waits 20s for one to unwind before
@@ -542,6 +553,7 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
   let snapshotCommitGuard: DbCommitGuard | undefined;
   let repairCandidateView: FullSyncServerView | null = null;
   let repairLimited = false;
+  let repairLimitedNote: string | undefined;
   let deletionSupported = false;
   let stableInitialization = false;
   let syncDb: import('@db/types').AppDatabase | null = null;
@@ -650,17 +662,23 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
         onProgress: (progress) => {
           if (!shouldAbort()) sync.progress(progress);
         },
+        onRepairNote: repair
+          ? (phase, message) => {
+              if (!shouldAbort()) sync.noteRepair(phase, message);
+            }
+          : undefined,
       });
       if (shouldAbort()) {
         outcome = stoppedOutcome();
         return;
       }
       if (!repair) sync.done(result);
-      else
-        sync.noteRepair(
-          'Repair complete',
-          'Installed the stable iMessage snapshot; RCS history was refreshed additively.',
-        );
+      else if (result.repairResult === 'check-paused') {
+        // Everything was re-downloaded; the remaining check resumes on ordinary syncs.
+        repairLimited = true;
+        repairLimitedNote =
+          'Re-downloaded every chat; the deleted-message check did not finish, so it continues automatically on later syncs.';
+      } else sync.noteRepair('Repair complete', providerRepairNote(result.repairResult));
       outcome = 'completed';
       // The initial cleanup predates this run's hides. Retire their cache entries after the
       // completed sync, outside its DB owners and under the same captured account scope.
@@ -1071,7 +1089,7 @@ async function runSync(options: SyncRunOptions = {}): Promise<void> {
     // lease retirement (for example a transport rotation) is still useful feedback to this account.
     if (repair && sessionAccessors.getEpoch() === epochAtStart) {
       if (outcome === 'completed') {
-        if (repairLimited) sync.finishRepairLimited();
+        if (repairLimited) sync.finishRepairLimited(repairLimitedNote);
         else sync.finishRepair();
       } else if (outcome === 'cancelled') sync.cancelRepair();
       else if (outcome === 'failed') sync.failRepair(failureMessage);

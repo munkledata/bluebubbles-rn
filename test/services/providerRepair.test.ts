@@ -192,6 +192,18 @@ describe('provider-scoped repair', () => {
           repair: true,
           shouldAbort: () => false,
         }),
+      /** A user-started Full Repair on a server that answers batch presence. */
+      runRepair: (extra: Partial<ProviderSyncOptions> = {}) =>
+        syncProviderMessages(db, {
+          api: base,
+          controlApi: control,
+          bindSnapshot: () => bound,
+          serverInfo: presenceInfo,
+          repair: true,
+          messagesPerChat: 25,
+          shouldAbort: () => false,
+          ...extra,
+        }),
       /** An automatic (not user-started) sync that needs a repair because no authority exists. */
       runAuto: (extra: Partial<ProviderSyncOptions> = {}) =>
         syncProviderMessages(db, {
@@ -709,6 +721,247 @@ describe('provider-scoped repair', () => {
       await f.runAuto({ serverInfo: rcsInfo });
 
       expect(await getSyncMarker(db)).toEqual({ lastSyncedRowId: 120, lastSyncedTimestamp: 1200 });
+    });
+  });
+
+  describe('Full Repair on a server with presence answers', () => {
+    const history = (count: number) =>
+      Array.from({ length: count }, (_, index) =>
+        Message.parse({
+          guid: `history-${String(index).padStart(3, '0')}`,
+          dateCreated: 1_000 + index,
+          originalROWID: 1_000 + index,
+          text: 'fixture',
+          chats: [{ guid: chatGuid, participants: [{ address: 'test@example.test' }] }],
+        }),
+      );
+    /** A busy server: ordinary reads work, but any frozen snapshot changes before it finishes. */
+    function busyServer(f: ReturnType<typeof fixture>, messages: Message[]) {
+      f.base.fetchChats = async (offset) =>
+        offset === 0
+          ? [
+              Chat.parse({
+                guid: chatGuid,
+                participants: [{ address: 'test@example.test' }],
+                lastMessage: messages.at(-1),
+              }),
+            ]
+          : [];
+      f.base.fetchChatMessages = async (chat, offset, limit) =>
+        chat === chatGuid ? messages.slice(offset, offset + limit) : [];
+      f.finish.mockRejectedValue(new Error('the Mac changed during the snapshot'));
+      return f;
+    }
+    const count = (pattern: string, where = '') =>
+      (
+        raw
+          .prepare(`SELECT COUNT(*) AS n FROM messages WHERE guid LIKE ? ${where}`)
+          .get(pattern) as { n: number }
+      ).n;
+
+    it('re-downloads every chat and checks deleted messages without a frozen snapshot', async () => {
+      await seed('gone');
+      await setSyncMarker(db, { lastSyncedRowId: 9_000_000, lastSyncedTimestamp: 90_000_000 });
+      const messages = history(150);
+      const f = busyServer(fixture(messages.map((message) => message.guid)), messages);
+      const snapshot = jest.fn(() => f.bound);
+
+      const result = await f.runRepair({ bindSnapshot: snapshot });
+
+      expect(snapshot).not.toHaveBeenCalled();
+      expect(f.finish).not.toHaveBeenCalled();
+      expect(count('history-%')).toBe(150);
+      expect(
+        raw.prepare("SELECT date_deleted AS d FROM messages WHERE guid = 'gone'").get(),
+      ).toEqual({
+        d: 0,
+      });
+      // A bookmark that went stale restarts where the server listed its newest message.
+      expect(await getSyncMarker(db)).toEqual({
+        lastSyncedRowId: 1_149,
+        lastSyncedTimestamp: 1_149,
+      });
+      expect(await kvGet(db, MESSAGE_STATE_AUDIT_KEY)).toBeNull();
+      expect(result.repairResult).toBe('checked');
+    });
+
+    it('checks every message to the end, beyond the per-sync budget and time limit', async () => {
+      for (let index = 0; index < 30; index += 1)
+        await seed(`gone-${String(index).padStart(2, '0')}`);
+      const f = busyServer(fixture(), history(1));
+      const startedAt = Date.now();
+      let asked = false;
+      jest.spyOn(Date, 'now').mockImplementation(() => startedAt + (asked ? 60_000 : 0));
+      const original = f.base.fetchMessagePresence!;
+      f.base.fetchMessagePresence = async (epoch, guids, signal) => {
+        asked = true;
+        return original(epoch, guids, signal);
+      };
+
+      const result = await f.runRepair({ auditBudget: 10 });
+
+      expect(count('gone-%', 'AND date_deleted IS NOT NULL')).toBe(30);
+      expect(result.repairResult).toBe('checked');
+    });
+
+    it('reports a deleted-message check the server could not finish', async () => {
+      await seed('gone');
+      const f = busyServer(fixture(), history(3));
+      f.base.fetchMessagePresence = async () => {
+        throw new ApiError('server_error', 'busy', 503);
+      };
+
+      const result = await f.runRepair();
+
+      expect(result.repairResult).toBe('check-paused');
+      expect(count('history-%')).toBe(3);
+      expect(await kvGet(db, MESSAGE_STATE_AUDIT_KEY)).not.toBeNull();
+    });
+
+    it('keeps RCS history to its bounded refresh', async () => {
+      const rcsEpoch = `gpe1_${'A'.repeat(43)}`;
+      const encoded = (value: string) => Buffer.from(value, 'utf8').toString('base64url');
+      const rcsChat = `RCS;-;g1.${rcsEpoch}.${encoded('conversation-a')}`;
+      const rcsInfo = ServerInfo.parse({
+        server_version: '2.0.0',
+        supports_message_state_sync: true,
+        message_state_sync_version: 1,
+        imessage_provider_epoch: providerEpoch,
+        supports_provider_repair_snapshot: true,
+        supports_message_state_presence: true,
+        rcs: true,
+        supports_rcs_epoch_qualified_ids: true,
+        rcs_provider_epoch: rcsEpoch,
+      });
+      const f = busyServer(fixture(), history(2));
+      const appleChats = f.base.fetchChats;
+      f.base.fetchChats = async (offset, limit, signal) =>
+        offset === 0
+          ? [
+              ...(await appleChats(offset, limit, signal)),
+              Chat.parse({
+                guid: rcsChat,
+                participants: [{ address: '+15550000001', service: 'RCS' }],
+              }),
+            ]
+          : [];
+      const pages = jest.spyOn(f.base, 'fetchChatMessages');
+
+      await f.runRepair({ serverInfo: rcsInfo });
+
+      // Only the bounded RCS refresh reads it; the full re-download covers Apple history only.
+      expect(pages.mock.calls.filter(([chat]) => chat === rcsChat)).toHaveLength(1);
+    });
+
+    it('fails, keeping the bookmark, when a chat cannot be downloaded', async () => {
+      await setSyncMarker(db, { lastSyncedRowId: 500, lastSyncedTimestamp: 5_000 });
+      const f = busyServer(fixture(), history(3));
+      f.base.fetchChatMessages = async () => {
+        throw new Error('chat download failed');
+      };
+
+      await expect(f.runRepair()).rejects.toThrow();
+
+      expect(await getSyncMarker(db)).toEqual({ lastSyncedRowId: 500, lastSyncedTimestamp: 5_000 });
+    });
+
+    it('stores a message whose earlier deletion was recorded without a chat', async () => {
+      // This ledger's ownerless deletion from before the repair would keep the message out.
+      await withDbTransaction(db, (context) =>
+        setMessageStateAuthorityWithinTransaction(context, {
+          version: 1,
+          provider: 'imessage',
+          providerEpoch,
+          ledgerEpoch,
+          cursor: 'old-cursor',
+          snapshotSequence: '0',
+          sequence: '5',
+        }),
+      );
+      await withDbTransaction(db, (context) =>
+        applyMessageStateWithinTransaction(context, {
+          version: 1,
+          provider: 'imessage',
+          providerEpoch,
+          ledgerEpoch,
+          sequence: '5',
+          kind: 'deleted',
+          guid: 'history-001',
+          chatGuid: null,
+          dateDeleted: 5,
+        }),
+      );
+      const messages = history(3);
+      const f = busyServer(fixture(messages.map((message) => message.guid)), messages);
+
+      await f.runRepair();
+
+      expect(
+        raw.prepare("SELECT date_deleted AS d FROM messages WHERE guid = 'history-001'").get(),
+      ).toEqual({ d: null });
+      expect(
+        raw.prepare('SELECT chat_guid AS chat, kind FROM message_server_states').get(),
+      ).toEqual({ chat: chatGuid, kind: 'restored' });
+    });
+
+    it('tells the repair screen when it starts checking deleted messages', async () => {
+      await seed('gone');
+      const phases: string[] = [];
+      const f = busyServer(fixture(), history(1));
+
+      await f.runRepair({ onRepairNote: (phase) => phases.push(phase) });
+
+      expect(phases).toEqual(['Checking deleted messages']);
+    });
+
+    it('keeps a good bookmark when the server lists no newest message', async () => {
+      await setSyncMarker(db, { lastSyncedRowId: 500, lastSyncedTimestamp: 5_000 });
+      const messages = history(2);
+      const f = busyServer(fixture(messages.map((message) => message.guid)), messages);
+      f.base.fetchChats = async (offset) =>
+        offset === 0
+          ? [Chat.parse({ guid: chatGuid, participants: [{ address: 'test@example.test' }] })]
+          : [];
+
+      await f.runRepair();
+
+      expect(await getSyncMarker(db)).toEqual({ lastSyncedRowId: 500, lastSyncedTimestamp: 5_000 });
+    });
+
+    it('keeps the crawl when the adapter cannot ask for presence', async () => {
+      const f = fixture();
+      delete f.base.fetchMessagePresence;
+      const snapshot = jest.fn(() => f.bound);
+
+      const result = await f.runRepair({ bindSnapshot: snapshot });
+
+      expect(snapshot).toHaveBeenCalled();
+      expect(result.repairResult).toBe('snapshot');
+    });
+
+    it('stops a cancelled Full Repair during its check', async () => {
+      for (let index = 0; index < 3; index += 1) await seed(`gone-${index}`);
+      let cancelled = false;
+      const f = busyServer(fixture(), history(1));
+      const original = f.base.fetchMessagePresence!;
+      f.base.fetchMessagePresence = async (epoch, guids, signal) => {
+        cancelled = true;
+        return original(epoch, guids, signal);
+      };
+
+      await f.runRepair({ shouldAbort: () => cancelled });
+
+      expect(count('gone-%', 'AND date_deleted IS NOT NULL')).toBe(0);
+    });
+
+    it('keeps the snapshot crawl on servers without presence answers', async () => {
+      const f = fixture();
+      const snapshot = jest.fn(() => f.bound);
+
+      const result = await f.runRepair({ serverInfo, bindSnapshot: snapshot });
+
+      expect(snapshot).toHaveBeenCalled();
+      expect(result.repairResult).toBe('snapshot');
     });
   });
 

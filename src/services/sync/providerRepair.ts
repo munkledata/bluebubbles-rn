@@ -194,8 +194,13 @@ async function auditMessagesOnPhone(
   const fetchPresence = api.fetchMessagePresence;
   if (serverInfo.supports_message_state_presence !== true || !fetchPresence) return;
   const keepGoing = () => !shouldAbort();
-  let budget = options.auditBudget ?? MESSAGE_STATE_AUDIT_BUDGET;
-  const deadline = Date.now() + MESSAGE_STATE_AUDIT_TIME_BOX_MS;
+  // A user-started repair checks every message; an automatic sync spends a bounded share of its run.
+  let budget = options.repair
+    ? Number.POSITIVE_INFINITY
+    : (options.auditBudget ?? MESSAGE_STATE_AUDIT_BUDGET);
+  const deadline = options.repair
+    ? Number.POSITIVE_INFINITY
+    : Date.now() + MESSAGE_STATE_AUDIT_TIME_BOX_MS;
   try {
     while (budget > 0 && !shouldAbort() && Date.now() < deadline) {
       const audit = await getMessageStateAudit(db);
@@ -354,6 +359,46 @@ async function auditMessagesOnPhone(
   }
 }
 
+/** A user-started repair also says how it settled, for the repair screen. */
+export interface ProviderSyncProgress extends SyncProgress {
+  /**
+   * 'snapshot': a finished snapshot crawl. 'checked': every chat re-downloaded and every message
+   * checked with the server. 'check-paused': re-downloaded, but the check continues on later syncs.
+   */
+  readonly repairResult?: 'snapshot' | 'checked' | 'check-paused';
+}
+
+/**
+ * Full Repair's reader: Apple history only (RCS keeps its own bounded refresh). Before a page is
+ * saved, its chat is bound to any ownerless server receipt of its messages, as the snapshot crawl
+ * did: ordinary reads skip Recently Deleted, so the page's chat is each message's active chat, and an
+ * ownerless receipt would otherwise keep the message out. Pages are read by offset, so a deletion on
+ * the Mac during a chat's download can shift one older message past the next page; a later Full
+ * Repair reads it.
+ */
+function fullRepairReader(db: AppDatabase, api: SyncApi, shouldAbort: () => boolean): SyncApi {
+  return {
+    ...api,
+    fetchChatMessages: async (chatGuid, offset, limit, signal) => {
+      if (looksLikeRcsChatGuid(chatGuid)) return [];
+      const messages = await api.fetchChatMessages(chatGuid, offset, limit, signal);
+      for (let index = 0; index < messages.length; index += 25) {
+        const slice = messages.slice(index, index + 25);
+        await withDbTransaction(
+          db,
+          (context) =>
+            bindSnapshotMessageOwnersWithinTransaction(
+              context,
+              slice.map((message) => ({ guid: message.guid, chatGuid })),
+            ),
+          () => !shouldAbort(),
+        );
+      }
+      return messages;
+    },
+  };
+}
+
 export interface ProviderSyncOptions {
   api: SyncApi;
   /** Pinned transport; the bound reader must verify the server's snapshot header echo. */
@@ -365,8 +410,10 @@ export interface ProviderSyncOptions {
   messagesPerChat?: number;
   /** Set only by this module when the ledger demands a repair mid-run; a failure stays silent. */
   forceRepair?: boolean;
-  /** Most messages one run checks against the server's presence answers. */
+  /** Most messages one automatic sync checks against presence answers; a user repair checks all. */
   auditBudget?: number;
+  /** A user-started repair's progress notes for the repair screen. */
+  onRepairNote?: (phase: string, message: string) => void;
   shouldAbort: () => boolean;
   signal?: AbortSignal;
   onProgress?: (progress: SyncProgress) => void;
@@ -380,7 +427,7 @@ export interface ProviderSyncOptions {
 export async function syncProviderMessages(
   db: AppDatabase,
   options: ProviderSyncOptions,
-): Promise<SyncProgress> {
+): Promise<ProviderSyncProgress> {
   const { api, controlApi, serverInfo, shouldAbort, signal } = options;
   const providerEpoch = serverInfo.imessage_provider_epoch;
   if (!providerEpoch) throw new Error('The iMessage provider identity is unavailable.');
@@ -409,6 +456,9 @@ export async function syncProviderMessages(
   if (shouldAbort()) return progress;
   let repaired = false;
   let installedFromCheckpoint = false;
+  let refreshAll = false;
+  const presenceCapable =
+    serverInfo.supports_message_state_presence === true && api.fetchMessagePresence != null;
   let repairFailed = false;
   let repairFailure: unknown;
   if (needsRepair && !options.repair && (await providerRepairIsWaiting(db, providerEpoch))) {
@@ -417,9 +467,12 @@ export async function syncProviderMessages(
     try {
       if (!controlApi.beginProviderRepair || !controlApi.finishProviderRepair)
         throw new Error('The advertised provider snapshot endpoint is unavailable.');
-      if (!options.repair) {
+      if (!options.repair || presenceCapable) {
         await installAuthorityFromCheckpoint(db, controlApi, providerEpoch, signal);
         installedFromCheckpoint = true;
+        // A user-started repair on such a server re-downloads every chat below and checks each
+        // message, instead of crawling a frozen snapshot that a busy account changes first.
+        refreshAll = options.repair;
       } else {
         const lease = await controlApi.beginProviderRepair(signal);
         let consumed = false;
@@ -652,7 +705,8 @@ export async function syncProviderMessages(
   if (!repaired && !shouldAbort()) {
     // Without a marker, incremental sync would page the whole history from the epoch, so an
     // unfinished repair falls back to the ordinary first sync and the user's per-chat cap.
-    if (hasSyncPosition(await getSyncMarker(db))) {
+    const hasMarker = hasSyncPosition(await getSyncMarker(db));
+    if (hasMarker && !refreshAll) {
       // Until a new Messages database is set up, the old bookmark describes none of its rows, so
       // only the chat list above refreshes; setup then clears the bookmark for a first sync.
       if (providerChanged && !installedFromCheckpoint)
@@ -667,8 +721,11 @@ export async function syncProviderMessages(
         });
     } else {
       let crawled: SyncMarker | null = null;
-      progress = await fullSync(db, api, {
-        maxMessagesPerChat: options.messagesPerChat,
+      // A first sync reads each chat's newest messages. A Full Repair reads every Apple chat's whole
+      // history and fails rather than finish with a chat missing.
+      progress = await fullSync(db, refreshAll ? fullRepairReader(db, api, shouldAbort) : api, {
+        maxMessagesPerChat: refreshAll ? 0 : options.messagesPerChat,
+        failOnChatError: refreshAll,
         commitMarker: false,
         shouldAbort,
         signal,
@@ -679,8 +736,9 @@ export async function syncProviderMessages(
         },
       });
       // The bookmark comes from the server, never from this phone's rows, which may still carry
-      // another Messages database's row numbers; the history pass is only a fallback position.
-      const restart = hasSyncPosition(listed) ? listed : crawled;
+      // another Messages database's row numbers. The history pass is only a first sync's fallback;
+      // a Full Repair keeps an existing bookmark when the server lists no newest message.
+      const restart = hasSyncPosition(listed) ? listed : hasMarker ? null : crawled;
       if (!shouldAbort() && hasSyncPosition(restart))
         await withDbTransaction(
           db,
@@ -710,8 +768,22 @@ export async function syncProviderMessages(
       throw error;
     }
   }
-  if (!shouldAbort() && (!needsRepair || repaired || installedFromCheckpoint))
+  if (!shouldAbort() && (!needsRepair || repaired || installedFromCheckpoint)) {
+    if (refreshAll)
+      options.onRepairNote?.(
+        'Checking deleted messages',
+        'Asking the server which messages on this phone it still has.',
+      );
     await auditMessagesOnPhone(db, options, providerEpoch);
+  }
   if (options.repair && repairFailed) throw repairFailure;
-  return progress;
+  if (!options.repair) return progress;
+  return {
+    ...progress,
+    repairResult: !refreshAll
+      ? 'snapshot'
+      : (await getMessageStateAudit(db))
+        ? 'check-paused'
+        : 'checked',
+  };
 }

@@ -1153,6 +1153,59 @@ describe('startSync vs. the tracked slot', () => {
     },
   );
 
+  it.each([
+    [
+      'checked',
+      'Repair complete',
+      'Re-downloaded every chat and checked deleted messages with the server; RCS history was refreshed additively.',
+    ],
+    [
+      'check-paused',
+      'Refresh complete (limited)',
+      'Re-downloaded every chat; the deleted-message check did not finish, so it continues automatically on later syncs.',
+    ],
+  ] as const)(
+    'reports a Full Repair whose deleted-message check %s',
+    async (repairResult, phase, note) => {
+      connectSession('https://provider-repair.example', {
+        server_version: '2.0.0',
+        supports_message_state_sync: true,
+        message_state_sync_version: 1,
+        supports_provider_repair_snapshot: true,
+        imessage_provider_epoch: '11111111-1111-4111-8111-111111111111',
+      });
+      syncProviderMessages.mockResolvedValueOnce({ chats: 1, messages: 2, repairResult });
+
+      await startFullRepair();
+
+      expect(useSyncStore.getState()).toMatchObject({ repairStatus: 'done', repairPhase: phase });
+      expect(useSyncStore.getState().repairLog).toContain(note);
+    },
+  );
+
+  it("shows the provider repair's progress notes on the repair screen", async () => {
+    connectSession('https://provider-repair.example', {
+      server_version: '2.0.0',
+      supports_message_state_sync: true,
+      message_state_sync_version: 1,
+      supports_provider_repair_snapshot: true,
+      imessage_provider_epoch: '11111111-1111-4111-8111-111111111111',
+    });
+    syncProviderMessages.mockImplementationOnce(
+      async (
+        _db: unknown,
+        options: { onRepairNote?: (phase: string, message: string) => void },
+      ) => {
+        options.onRepairNote?.('Checking deleted messages', 'Asking the server.');
+        return { chats: 1, messages: 2, repairResult: 'checked' };
+      },
+    );
+
+    await startFullRepair();
+
+    expect(useSyncStore.getState().repairLog).toContain('Asking the server.');
+  });
+
   it('does not start provider cleanup after account ownership is revoked', async () => {
     connectSession('https://provider-cache.example', {
       server_version: '2.0.0',
