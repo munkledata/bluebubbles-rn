@@ -3,6 +3,7 @@ import { Chat, Message, ServerInfo } from '@core/models';
 import { logger } from '@core/secure';
 import type { ProviderRepairLease } from '@core/api/endpoints/repairSnapshot';
 import { MessageStateRepairRequiredError } from '@core/api/endpoints/messageState';
+import { ApiError } from '@core/api/errors';
 import {
   upsertChats,
   upsertHandles,
@@ -625,6 +626,142 @@ describe('provider-scoped repair', () => {
 
       expect(await kvGet(db, PROVIDER_REPAIR_BACKOFF_KEY)).toBeNull();
       expect(await localCacheDirty(db)).toBe(false);
+    });
+  });
+
+  describe('installing deleted-message sync from the checkpoint', () => {
+    beforeEach(() => {
+      jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    });
+    afterEach(() => jest.restoreAllMocks());
+    const changedWhilePreparing = () =>
+      new ApiError('bad_request', 'conflict', 409, undefined, undefined, 'repair_snapshot_changed');
+
+    it('installs from the checkpoint on a fresh install without crawling history', async () => {
+      const f = fixture();
+      const begin = jest.spyOn(f.control, 'beginProviderRepair');
+      const crawl = jest.spyOn(f.bound, 'fetchChats');
+      const stateReads = jest.spyOn(f.base, 'fetchMessageState');
+
+      await expect(f.runAuto()).resolves.toBeDefined();
+
+      expect(begin).toHaveBeenCalledTimes(1);
+      expect(f.cancel).toHaveBeenCalledWith(lease.token);
+      expect(f.finish).not.toHaveBeenCalled();
+      expect(crawl).not.toHaveBeenCalled();
+      // Deletions after the checkpoint replay right away, advancing the installed cursor.
+      expect(stateReads).toHaveBeenCalledWith(lease.checkpoint, undefined);
+      expect(await getMessageStateAuthority(db)).toEqual({
+        version: 1,
+        provider: 'imessage',
+        providerEpoch,
+        ledgerEpoch,
+        cursor: 'terminal-cursor',
+        snapshotSequence: lease.sequence,
+        sequence: lease.sequence,
+      });
+    });
+
+    it('treats a phone holding only RCS history as having nothing to check', async () => {
+      const rcsChat = 'RCS;-;g1.fixture';
+      await seed('rcs-g1.fixture.message', rcsChat);
+      const f = fixture();
+      const crawl = jest.spyOn(f.bound, 'fetchChats');
+      const stateReads = jest.spyOn(f.base, 'fetchMessageState');
+
+      await f.runAuto();
+
+      expect(crawl).not.toHaveBeenCalled();
+      expect(stateReads).toHaveBeenCalledWith(lease.checkpoint, undefined);
+    });
+
+    it('keeps the full repair when Apple history is already on the phone', async () => {
+      await seed('existing');
+      const f = fixture(['existing']);
+      const crawl = jest.spyOn(f.bound, 'fetchChats');
+
+      await f.runAuto();
+
+      expect(crawl).toHaveBeenCalled();
+      expect(f.finish).toHaveBeenCalled();
+    });
+
+    it('falls back to the full repair when a message lands before the checkpoint installs', async () => {
+      const f = fixture(['late-arrival']);
+      const original = f.control.beginProviderRepair!;
+      const begin = jest
+        .fn<Promise<ProviderRepairLease>, [AbortSignal?]>()
+        .mockImplementationOnce(async (signal) => {
+          await seed('late-arrival');
+          return original(signal);
+        })
+        .mockImplementation((signal) => original(signal));
+      f.control.beginProviderRepair = begin;
+      const crawl = jest.spyOn(f.bound, 'fetchChats');
+
+      await f.runAuto();
+
+      expect(begin).toHaveBeenCalledTimes(2);
+      expect(crawl).toHaveBeenCalled();
+      expect(raw.prepare('SELECT date_deleted FROM messages').get()).toEqual({
+        date_deleted: null,
+      });
+    });
+
+    it('refuses a checkpoint from a different pairing and keeps ordinary sync running', async () => {
+      const f = fixture();
+      f.control.beginProviderRepair = async () => ({
+        ...lease,
+        providerEpoch: '99999999-9999-4999-8999-999999999999',
+      });
+      const firstSync = jest.spyOn(f.base, 'fetchChats');
+
+      await expect(f.runAuto()).resolves.toBeDefined();
+
+      expect(await getMessageStateAuthority(db)).toBeNull();
+      expect(await kvGet(db, PROVIDER_REPAIR_BACKOFF_KEY)).not.toBeNull();
+      expect(firstSync).toHaveBeenCalled();
+    });
+
+    it('retries while the server is still preparing, up to three times', async () => {
+      const f = fixture();
+      const original = f.control.beginProviderRepair!;
+      const begin = jest
+        .fn<Promise<ProviderRepairLease>, [AbortSignal?]>()
+        .mockRejectedValueOnce(changedWhilePreparing())
+        .mockRejectedValueOnce(changedWhilePreparing())
+        .mockImplementation((signal) => original(signal));
+      f.control.beginProviderRepair = begin;
+      const stateReads = jest.spyOn(f.base, 'fetchMessageState');
+
+      await f.runAuto();
+
+      expect(begin).toHaveBeenCalledTimes(3);
+      expect(stateReads).toHaveBeenCalledWith(lease.checkpoint, undefined);
+    });
+
+    it('gives up after three busy answers and waits for the next attempt', async () => {
+      const f = fixture();
+      const begin = jest.fn(async (): Promise<ProviderRepairLease> => {
+        throw changedWhilePreparing();
+      });
+      f.control.beginProviderRepair = begin;
+
+      await expect(f.runAuto()).resolves.toBeDefined();
+
+      expect(begin).toHaveBeenCalledTimes(3);
+      expect(await getMessageStateAuthority(db)).toBeNull();
+      expect(await kvGet(db, PROVIDER_REPAIR_BACKOFF_KEY)).not.toBeNull();
+    });
+
+    it('still crawls when the user starts a full repair, even on an empty phone', async () => {
+      const f = fixture();
+      const crawl = jest.spyOn(f.bound, 'fetchChats');
+
+      await f.run();
+
+      expect(crawl).toHaveBeenCalled();
+      expect(f.finish).toHaveBeenCalled();
     });
   });
 });

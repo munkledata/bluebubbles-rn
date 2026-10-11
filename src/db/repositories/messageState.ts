@@ -111,6 +111,41 @@ export async function clearProviderRepairBackoffWithinTransaction(
   });
 }
 
+/**
+ * True when no local Apple message or prior server-state row could need reconciling with the
+ * provider ledger. Temporary and RCS rows never take part in Apple absence cleanup.
+ */
+async function hasNothingToReconcile(db: AppDatabase): Promise<boolean> {
+  const rows = await db.all<{ pending: number }>(sql`
+    SELECT (EXISTS (SELECT 1 FROM message_server_states)
+            OR EXISTS (SELECT 1 FROM messages
+                        WHERE date_deleted IS NULL
+                          AND guid NOT LIKE 'temp-%'
+                          AND guid NOT LIKE 'rcs-%')) AS pending
+  `);
+  return rows[0]?.pending === 0;
+}
+
+export async function providerRepairHasNothingToReconcile(db: AppDatabase): Promise<boolean> {
+  return hasNothingToReconcile(db);
+}
+
+/**
+ * Install a ledger-checkpoint authority only while nothing local needs reconciling, and end any
+ * repair wait. Returns false, installing nothing, when a local Apple row arrived meanwhile.
+ */
+export async function installCheckpointAuthorityWithinTransaction(
+  context: DbTransactionContext,
+  authority: MessageStateAuthority,
+): Promise<boolean> {
+  return runInTransactionContext(context, async (db) => {
+    if (!(await hasNothingToReconcile(db))) return false;
+    await setMessageStateAuthorityWithinTransaction(context, authority);
+    await clearProviderRepairBackoffWithinTransaction(context);
+    return true;
+  });
+}
+
 /** Eviction does not release an exact owner retained by local deletion or outgoing promotion. */
 async function hasRetainedMessageOwnerConflictWithinTransaction(
   context: DbTransactionContext,
