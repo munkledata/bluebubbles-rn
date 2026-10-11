@@ -105,6 +105,7 @@ jest.mock('@ui/conversations/FailedMessageSheet', () => {
       isLocation?: boolean;
       isEffect?: boolean;
       isFormatted?: boolean;
+      isContact?: boolean;
       retryAllowed?: boolean;
       errorDetail?: string | null;
       onRetry: () => void;
@@ -128,6 +129,7 @@ jest.mock('@ui/conversations/FailedMessageSheet', () => {
               { testID: 'sheet-formatted' },
               String(!!props.isFormatted),
             ),
+            ReactLib.createElement(Text, { testID: 'sheet-contact' }, String(!!props.isContact)),
             ReactLib.createElement(Text, { testID: 'sheet-detail' }, props.errorDetail ?? ''),
             props.retryAllowed === false
               ? null
@@ -517,6 +519,25 @@ describe('MessageList — failed-message flow', () => {
 
     expect(await screen.findByTestId('sheet')).toBeTruthy();
     expect(screen.getByTestId('sheet-formatted').props.children).toBe('true');
+    expect(screen.queryByTestId('sheet-retry')).toBeNull();
+  });
+
+  it.each([
+    ['an unconfirmed plain text', ClientErrorCode.messageDeliveryUnconfirmed, false],
+    ['a refused plain text', ClientErrorCode.messageRejected, false],
+    ['an unconfirmed contact card', ClientErrorCode.contactDeliveryUnconfirmed, true],
+    ['a refused contact card', ClientErrorCode.contactRejected, true],
+  ])('never offers Retry for %s', async (_label, error, contact) => {
+    const messages = [
+      make({ id: 1, guid: 'one-shot-x', text: 'Ada', isFromMe: 1, sendState: 'error', error }),
+    ];
+    await renderWithTheme(
+      <MessageList chatGuid="iMessage;-;+15550001111" isGroup={false} messages={messages} />,
+    );
+    fireEvent.press(screen.getByTestId('retry-one-shot-x'));
+
+    expect(await screen.findByTestId('sheet')).toBeTruthy();
+    expect(screen.getByTestId('sheet-contact').props.children).toBe(String(contact));
     expect(screen.queryByTestId('sheet-retry')).toBeNull();
   });
 

@@ -2837,7 +2837,7 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/send/outgoingQueueService.ts#runOutgoingQueueBody:mutator-call:45cd1446a8ad',
       'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:7b145a63f68d',
       'src/services/send/sendAttachmentService.ts#sendImageMessage:mutator-call:605604c1644f',
-      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:090f5debeb06',
+      'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:0ed9ad7211f1',
       'src/services/send/sendContactService.ts#sendContactMessage:mutator-call:58b4c75fc545',
       'src/services/send/sendLocationService.ts#sendCurrentLocationMessage:mutator-call:be2eaeaa64da',
       'src/services/send/sendLocationService.ts#sendCurrentLocationMessage:mutator-call:5558cf02c486',
@@ -2899,9 +2899,9 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:09c89c44e8>.<callback:e4bd60ecf9>:mutator-call:d12b1c3b98a4',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:09c89c44e8>:mutator-call:100c6aed4262',
       'src/services/send/outgoingQueueService.ts#resendOutgoingRow.<callback:09c89c44e8>:mutator-call:482f67ad8ac7',
-      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retirePrivateApiRow.<callback:03183cf0e3>.<callback:db50043ee5>:mutator-call:73b5ccae325f',
-      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retirePrivateApiRow.<callback:03183cf0e3>:mutator-call:7c35bde2a160',
-      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retirePrivateApiRow.<callback:03183cf0e3>:mutator-call:b3398650b8e2',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retirePrivateApiRow.<callback:e7429091ad>.<callback:26e1d0be0d>:mutator-call:b9a5d9f33f46',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retirePrivateApiRow.<callback:e7429091ad>:mutator-call:3f3cf6bcaf4c',
+      'src/services/send/outgoingQueueService.ts#resendOutgoingRow.retirePrivateApiRow.<callback:e7429091ad>:mutator-call:5132ce72c5d7',
     ].sort(),
   );
   assert.deepEqual(
@@ -2937,10 +2937,10 @@ test('certifies exactly the reviewed ordinary-send delegation edges', () => {
   assert.deepEqual(
     failureTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/sendOutcome.ts#handleSendFailure.<callback:ba259567db>:mutator-call:e72b72692e8c',
-      'src/services/send/sendOutcome.ts#handleSendFailure.<callback:ba259567db>:mutator-call:db0635154754',
-      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:c3d48312b659',
-      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:74cf79c0ac34',
+      'src/services/send/sendOutcome.ts#handleSendFailure.<callback:3ed81732b5>:mutator-call:668eaaf4df49',
+      'src/services/send/sendOutcome.ts#handleSendFailure.<callback:3ed81732b5>:mutator-call:07a7f0f0afe0',
+      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:7b62f333993f',
+      'src/services/send/sendOutcome.ts#handleSendFailure:mutator-call:30e7fe128762',
     ].sort(),
   );
   assert.deepEqual(

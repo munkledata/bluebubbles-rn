@@ -41,13 +41,10 @@ import {
 import {
   handleSendFailure,
   isTerminalLocationSendError,
+  ONE_SHOT_FAILURES,
   reconcileSendOutcome,
-  UNCERTAIN_IMESSAGE_ATTACHMENT_COPY,
-  UNCERTAIN_IMESSAGE_EFFECT_COPY,
   UNCERTAIN_IMESSAGE_LOCATION_COPY,
-  UNCERTAIN_IMESSAGE_MENTION_COPY,
-  UNCERTAIN_IMESSAGE_FORMATTED_COPY,
-  UNCERTAIN_IMESSAGE_REPLY_COPY,
+  type OneShotSendKind,
 } from './sendOutcome';
 import { notifyFailedSend } from './sendFailureNotice';
 import type { AttachmentUploader } from './sendAttachmentService';
@@ -462,45 +459,29 @@ export async function resendOutgoingRow(
       ? 'unsendable'
       : 'paused';
   const retirePrivateApiRow = async (): Promise<ResendOutcome> => {
-    const narrowReply = isNarrowImessageReply(row);
-    const narrowEffect = isNarrowImessageEffect(row);
-    const narrowMention = isNarrowImessageMention(row);
-    const narrowFormatted = isNarrowImessageFormatted(row);
-    if (
-      isMarkedImessageAttachment(row) ||
-      narrowReply ||
-      narrowEffect ||
-      narrowMention ||
-      narrowFormatted
-    ) {
+    // Only reached for iMessage rows, so a contact card here is a one-shot helper send.
+    const oneShotKind: OneShotSendKind | null = isNarrowImessageReply(row)
+      ? 'reply'
+      : isNarrowImessageEffect(row)
+        ? 'effect'
+        : isNarrowImessageMention(row)
+          ? 'mention'
+          : isNarrowImessageFormatted(row)
+            ? 'formatted'
+            : isMarkedImessageAttachment(row)
+              ? 'attachment'
+              : row.kind === 'contact'
+                ? 'contact'
+                : null;
+    if (oneShotKind) {
       // A process death may have hidden a successful helper dispatch. Never replay this key or
       // present the generic "not sent" notification; keep the authored local row for review.
+      const { code, detail } = ONE_SHOT_FAILURES[oneShotKind].unconfirmed;
       return (await runAccountCommit(accountLease, (guard) =>
         withDbTransaction(
           db,
           (context) =>
-            retireUncertainOutgoingWithinTransaction(
-              context,
-              row.tempGuid,
-              narrowReply
-                ? ClientErrorCode.replyDeliveryUnconfirmed
-                : narrowEffect
-                  ? ClientErrorCode.effectDeliveryUnconfirmed
-                  : narrowMention
-                    ? ClientErrorCode.mentionDeliveryUnconfirmed
-                    : narrowFormatted
-                      ? ClientErrorCode.formattedDeliveryUnconfirmed
-                      : ClientErrorCode.attachmentDeliveryUnconfirmed,
-              narrowReply
-                ? UNCERTAIN_IMESSAGE_REPLY_COPY
-                : narrowEffect
-                  ? UNCERTAIN_IMESSAGE_EFFECT_COPY
-                  : narrowMention
-                    ? UNCERTAIN_IMESSAGE_MENTION_COPY
-                    : narrowFormatted
-                      ? UNCERTAIN_IMESSAGE_FORMATTED_COPY
-                      : UNCERTAIN_IMESSAGE_ATTACHMENT_COPY,
-            ),
+            retireUncertainOutgoingWithinTransaction(context, row.tempGuid, code, detail),
           guard,
         ),
       ))

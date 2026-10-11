@@ -597,7 +597,7 @@ describe('runOutgoingQueue', () => {
     expect(request).not.toHaveBeenCalled();
     for (const [tempGuid] of corruptions) {
       expect(attemptsOf(raw, tempGuid)).toBe(OUTGOING_MAX_ATTEMPTS);
-      expect(errorOf(raw, tempGuid)).toBe(ClientErrorCode.attachmentDeliveryUnconfirmed);
+      expect(errorOf(raw, tempGuid)).toBe(ClientErrorCode.messageDeliveryUnconfirmed);
     }
   });
 
@@ -1034,6 +1034,46 @@ describe('runOutgoingQueue', () => {
     await expect(claimFailedOutgoingForRetry(db, 'temp-effect-recovery')).resolves.toMatchObject({
       claim: 'unsendable',
     });
+  });
+
+  it('retires a recovered iMessage contact card as delivery-unconfirmed without a failure notice', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'any;-;+15551234567');
+    await insertOutgoingContact(db, {
+      tempGuid: 'temp-contact-recovery',
+      chatGuid: 'any;-;+15551234567',
+      text: 'Ada Lovelace',
+      contact: { firstName: 'Ada', lastName: 'Lovelace' },
+      now: 1_000,
+    });
+    raw
+      .prepare(
+        `UPDATE outgoing_queue
+            SET created_at = 0, next_retry_at = 0
+          WHERE temp_guid = 'temp-contact-recovery'`,
+      )
+      .run();
+
+    await expect(runOutgoingQueue(db, noRequestHttp, noAttachmentIo, 2_000_000)).resolves.toEqual({
+      eligible: 1,
+      sent: 0,
+    });
+
+    expect(attemptsOf(raw, 'temp-contact-recovery')).toBe(OUTGOING_MAX_ATTEMPTS);
+    expect(
+      raw
+        .prepare(
+          `SELECT send_state AS state, error, error_message AS detail
+             FROM messages WHERE guid = 'temp-contact-recovery'`,
+        )
+        .get(),
+    ).toEqual({
+      state: 'error',
+      error: ClientErrorCode.contactDeliveryUnconfirmed,
+      detail:
+        'This contact card may have been delivered. Check Messages before sending a new copy.',
+    });
+    expect(mockNotifyFailedSend).not.toHaveBeenCalled();
   });
 
   it('refuses manual replay of a marker-only iMessage effect before mutating its ladder', async () => {

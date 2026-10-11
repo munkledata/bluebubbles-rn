@@ -150,6 +150,50 @@ describe('FailedMessageSheet — actions', () => {
     expect(screen.queryByText('Try Again')).toBeNull();
   });
 
+  it('labels an uncertain plain text as a message, not an attachment', async () => {
+    const h = handlers();
+    await renderWithTheme(
+      <FailedMessageSheet visible retryAllowed={false} deliveryUnconfirmed {...h} />,
+    );
+    expect(screen.getByText('Message Status Unconfirmed')).toBeTruthy();
+    expect(screen.queryByText('Attachment Status Unconfirmed')).toBeNull();
+    expect(screen.queryByText('Try Again')).toBeNull();
+  });
+
+  it('says a refused message was not sent and offers no Try Again', async () => {
+    const h = handlers();
+    await renderWithTheme(<FailedMessageSheet visible retryAllowed={false} {...h} />);
+    expect(screen.getByText('Message Not Sent')).toBeTruthy();
+    expect(
+      screen.getByText(
+        'This message was not sent and cannot be retried. Send a new message if needed.',
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText('Attachment Needs Review')).toBeNull();
+    expect(screen.queryByText('Try Again')).toBeNull();
+  });
+
+  it('labels an uncertain contact card as a contact card', async () => {
+    const h = handlers();
+    await renderWithTheme(
+      <FailedMessageSheet visible isContact retryAllowed={false} deliveryUnconfirmed {...h} />,
+    );
+    expect(screen.getByText('Contact Card Status Unconfirmed')).toBeTruthy();
+    expect(screen.queryByText('Try Again')).toBeNull();
+  });
+
+  it('says a refused contact card was not sent and offers no Try Again', async () => {
+    const h = handlers();
+    await renderWithTheme(<FailedMessageSheet visible isContact retryAllowed={false} {...h} />);
+    expect(screen.getByText('Contact Card Not Sent')).toBeTruthy();
+    expect(
+      screen.getByText(
+        'This contact card was not sent and cannot be retried. Share the contact again if needed.',
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText('Try Again')).toBeNull();
+  });
+
   it('Try Again fires onRetry then onClose', async () => {
     const h = handlers();
     await renderWithTheme(<FailedMessageSheet visible {...h} />);

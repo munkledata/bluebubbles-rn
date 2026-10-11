@@ -334,6 +334,64 @@ describe('handleSendFailure', () => {
     expect(mockNotifyFailedSend.mock.calls[0]?.slice(1)).not.toContain(detail);
   });
 
+  const refusedBeforeDispatch = ApiError.fromStatus(
+    503,
+    'unavailable',
+    undefined,
+    'idempotency_persistence_unavailable',
+  );
+  const outcomeUnknown = new ApiError('timeout', 'Request timed out');
+  it.each([
+    [
+      'plain',
+      'with an unknown outcome',
+      outcomeUnknown,
+      ClientErrorCode.messageDeliveryUnconfirmed,
+      'This message may have been delivered. Check Messages before sending a new copy.',
+    ],
+    [
+      'plain',
+      'refused before dispatch',
+      refusedBeforeDispatch,
+      ClientErrorCode.messageRejected,
+      'The server rejected this message before dispatch. This attempt was not sent.',
+    ],
+    [
+      'effect',
+      'refused before dispatch',
+      refusedBeforeDispatch,
+      ClientErrorCode.messageRejected,
+      'The server rejected this message before dispatch. This attempt was not sent.',
+    ],
+    [
+      'contact',
+      'with an unknown outcome',
+      outcomeUnknown,
+      ClientErrorCode.contactDeliveryUnconfirmed,
+      'This contact card may have been delivered. Check Messages before sending a new copy.',
+    ],
+    [
+      'contact',
+      'refused before dispatch',
+      refusedBeforeDispatch,
+      ClientErrorCode.contactRejected,
+      'The server rejected this contact card before dispatch. This attempt was not sent.',
+    ],
+  ] as const)(
+    'records a one-shot %s send %s with its own code and copy',
+    async (kind, _outcome, error, code, detail) => {
+      const { db, raw } = await createTestDb();
+      await seedOutgoing(db, 'temp-one-shot0000', 1000);
+      jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+      await handleSendFailure(db, 'temp-one-shot0000', error, 'send', 'c1', undefined, undefined, {
+        terminalUncertainKind: kind,
+      });
+
+      expect(msgRow(raw, 'temp-one-shot0000')).toMatchObject({ s: 'error', e: code, d: detail });
+    },
+  );
+
   it('maps a local-file ApiError to "Attachment Unavailable", NOT the connection code', async () => {
     // Both are status-less, so without the explicit kind check they'd collapse to the same
     // "Connection Refused" bubble — blaming the server for a file problem on this device.

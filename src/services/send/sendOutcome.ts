@@ -29,8 +29,7 @@ export interface SendOutcomeOptions {
   /** One-shot helper mutation: a failed HTTP/parse outcome may still have delivered. */
   readonly terminalUncertain?: boolean;
   /** Identifies the one-shot surface so its terminal status and recovery copy stay truthful. */
-  readonly terminalUncertainKind?:
-    'attachment' | 'reply' | 'location' | 'effect' | 'mention' | 'formatted' | 'plain';
+  readonly terminalUncertainKind?: OneShotSendKind;
   /** Exact helper refusal proved that no dispatch began, authorizing one future narrow retry. */
   readonly imessagePlainTextRetrySafe?: boolean;
   /** Exact locally selected conversation; survives temp-row/queue cleanup during a late ack. */
@@ -49,6 +48,8 @@ export const UNCERTAIN_IMESSAGE_MENTION_COPY =
 export const UNCERTAIN_IMESSAGE_FORMATTED_COPY =
   'This formatted message may have been delivered. Check Messages before sending a new copy.';
 export const UNCERTAIN_IMESSAGE_PLAIN_TEXT_COPY = IMESSAGE_PLAIN_TEXT_DELIVERY_UNCONFIRMED_COPY;
+export const UNCERTAIN_IMESSAGE_CONTACT_COPY =
+  'This contact card may have been delivered. Check Messages before sending a new copy.';
 
 /** Fixed server outcomes that make another location attempt unsafe or invalid. */
 export function isTerminalLocationSendError(error: unknown): boolean {
@@ -69,6 +70,90 @@ const REJECTED_IMESSAGE_LOCATION_COPY =
   'The server rejected this location before dispatch. This attempt was not sent.';
 const REJECTED_IMESSAGE_PLAIN_TEXT_COPY =
   'The server rejected this message before dispatch. This attempt was not sent.';
+const REJECTED_IMESSAGE_CONTACT_COPY =
+  'The server rejected this contact card before dispatch. This attempt was not sent.';
+
+/** A send that is never replayed: any failure is final, so it must be recorded truthfully. */
+export type OneShotSendKind =
+  'attachment' | 'reply' | 'location' | 'effect' | 'mention' | 'formatted' | 'plain' | 'contact';
+
+interface OneShotFailureRecord {
+  readonly code: number;
+  readonly detail: string;
+}
+
+/**
+ * How each one-shot kind records a failure: `unconfirmed` when it may have reached Messages,
+ * `refused` when the server proved it refused the send before dispatch. A refusal without its own
+ * code keeps the HTTP status; the failed-message sheet tells attachments and replies apart from
+ * the row itself. The sheet keys its wording and its missing Try Again off these codes.
+ */
+export const ONE_SHOT_FAILURES: Readonly<
+  Record<
+    OneShotSendKind,
+    {
+      readonly unconfirmed: OneShotFailureRecord;
+      readonly refused: Omit<OneShotFailureRecord, 'code'> & { readonly code?: number };
+    }
+  >
+> = {
+  attachment: {
+    unconfirmed: {
+      code: ClientErrorCode.attachmentDeliveryUnconfirmed,
+      detail: UNCERTAIN_IMESSAGE_ATTACHMENT_COPY,
+    },
+    refused: { detail: REJECTED_IMESSAGE_ATTACHMENT_COPY },
+  },
+  reply: {
+    unconfirmed: {
+      code: ClientErrorCode.replyDeliveryUnconfirmed,
+      detail: UNCERTAIN_IMESSAGE_REPLY_COPY,
+    },
+    refused: { detail: REJECTED_IMESSAGE_REPLY_COPY },
+  },
+  location: {
+    unconfirmed: {
+      code: ClientErrorCode.locationDeliveryUnconfirmed,
+      detail: UNCERTAIN_IMESSAGE_LOCATION_COPY,
+    },
+    refused: { code: ClientErrorCode.locationRejected, detail: REJECTED_IMESSAGE_LOCATION_COPY },
+  },
+  effect: {
+    unconfirmed: {
+      code: ClientErrorCode.effectDeliveryUnconfirmed,
+      detail: UNCERTAIN_IMESSAGE_EFFECT_COPY,
+    },
+    refused: { code: ClientErrorCode.messageRejected, detail: REJECTED_IMESSAGE_PLAIN_TEXT_COPY },
+  },
+  mention: {
+    unconfirmed: {
+      code: ClientErrorCode.mentionDeliveryUnconfirmed,
+      detail: UNCERTAIN_IMESSAGE_MENTION_COPY,
+    },
+    refused: { code: ClientErrorCode.messageRejected, detail: REJECTED_IMESSAGE_PLAIN_TEXT_COPY },
+  },
+  formatted: {
+    unconfirmed: {
+      code: ClientErrorCode.formattedDeliveryUnconfirmed,
+      detail: UNCERTAIN_IMESSAGE_FORMATTED_COPY,
+    },
+    refused: { code: ClientErrorCode.messageRejected, detail: REJECTED_IMESSAGE_PLAIN_TEXT_COPY },
+  },
+  plain: {
+    unconfirmed: {
+      code: ClientErrorCode.messageDeliveryUnconfirmed,
+      detail: UNCERTAIN_IMESSAGE_PLAIN_TEXT_COPY,
+    },
+    refused: { code: ClientErrorCode.messageRejected, detail: REJECTED_IMESSAGE_PLAIN_TEXT_COPY },
+  },
+  contact: {
+    unconfirmed: {
+      code: ClientErrorCode.contactDeliveryUnconfirmed,
+      detail: UNCERTAIN_IMESSAGE_CONTACT_COPY,
+    },
+    refused: { code: ClientErrorCode.contactRejected, detail: REJECTED_IMESSAGE_CONTACT_COPY },
+  },
+};
 
 const PRE_DISPATCH_ATTACHMENT_ERROR_TYPES: Readonly<Record<number, ReadonlySet<string>>> = {
   400: new Set([
@@ -272,49 +357,21 @@ export async function handleSendFailure(
   }
   const failedAt = now === undefined ? Date.now() : now;
   const serverDetail = err instanceof ApiError ? err.serverDetail : undefined;
+  const oneShot = terminalKind ? ONE_SHOT_FAILURES[terminalKind] : null;
+  const oneShotRecord = oneShot
+    ? preDispatchRejection
+      ? { code: oneShot.refused.code ?? code, detail: oneShot.refused.detail }
+      : oneShot.unconfirmed
+    : null;
   const reconciled = await withDbTransaction(
     db,
     (context) =>
-      terminalKind
+      oneShotRecord
         ? retireUncertainOutgoingWithinTransaction(
             context,
             tempGuid,
-            preDispatchRejection
-              ? terminalKind === 'location'
-                ? ClientErrorCode.locationRejected
-                : code
-              : terminalKind === 'reply'
-                ? ClientErrorCode.replyDeliveryUnconfirmed
-                : terminalKind === 'location'
-                  ? ClientErrorCode.locationDeliveryUnconfirmed
-                  : terminalKind === 'effect'
-                    ? ClientErrorCode.effectDeliveryUnconfirmed
-                    : terminalKind === 'mention'
-                      ? ClientErrorCode.mentionDeliveryUnconfirmed
-                      : terminalKind === 'formatted'
-                        ? ClientErrorCode.formattedDeliveryUnconfirmed
-                        : ClientErrorCode.attachmentDeliveryUnconfirmed,
-            preDispatchRejection
-              ? terminalKind === 'reply'
-                ? REJECTED_IMESSAGE_REPLY_COPY
-                : terminalKind === 'location'
-                  ? REJECTED_IMESSAGE_LOCATION_COPY
-                  : terminalKind === 'plain'
-                    ? REJECTED_IMESSAGE_PLAIN_TEXT_COPY
-                    : REJECTED_IMESSAGE_ATTACHMENT_COPY
-              : terminalKind === 'reply'
-                ? UNCERTAIN_IMESSAGE_REPLY_COPY
-                : terminalKind === 'location'
-                  ? UNCERTAIN_IMESSAGE_LOCATION_COPY
-                  : terminalKind === 'effect'
-                    ? UNCERTAIN_IMESSAGE_EFFECT_COPY
-                    : terminalKind === 'mention'
-                      ? UNCERTAIN_IMESSAGE_MENTION_COPY
-                      : terminalKind === 'formatted'
-                        ? UNCERTAIN_IMESSAGE_FORMATTED_COPY
-                        : terminalKind === 'plain'
-                          ? UNCERTAIN_IMESSAGE_PLAIN_TEXT_COPY
-                          : UNCERTAIN_IMESSAGE_ATTACHMENT_COPY,
+            oneShotRecord.code,
+            oneShotRecord.detail,
             terminalKind === 'location',
           )
         : reconcileOutgoingErrorWithinTransaction(

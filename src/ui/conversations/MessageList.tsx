@@ -19,6 +19,8 @@ import {
   ClientErrorCode,
   chatServiceFromGuid,
   initialPinState,
+  isDeliveryUnconfirmedError,
+  isFinalOneShotError,
   isGroupEvent,
   pinExplicitly,
   pinOnDragStart,
@@ -167,13 +169,10 @@ export function MessageList({
   const failedEffect = failed?.error === ClientErrorCode.effectDeliveryUnconfirmed;
   const failedMention = failed?.error === ClientErrorCode.mentionDeliveryUnconfirmed;
   const failedFormatted = failed?.error === ClientErrorCode.formattedDeliveryUnconfirmed;
-  const failedDeliveryUnconfirmed =
-    failed?.error === ClientErrorCode.attachmentDeliveryUnconfirmed ||
-    failed?.error === ClientErrorCode.replyDeliveryUnconfirmed ||
-    failed?.error === ClientErrorCode.locationDeliveryUnconfirmed ||
-    failedEffect ||
-    failedMention ||
-    failedFormatted;
+  const failedContact =
+    failed?.error === ClientErrorCode.contactDeliveryUnconfirmed ||
+    failed?.error === ClientErrorCode.contactRejected;
+  const failedDeliveryUnconfirmed = isDeliveryUnconfirmedError(failed?.error);
   // Render-phase reset (React's "adjust state when the data changes" pattern), not an effect: the
   // target must be FORGOTTEN, not merely hidden, or a retry that fails again re-opens a sheet the
   // user never asked for a second time.
@@ -524,10 +523,10 @@ export function MessageList({
         isEffect={failedEffect}
         isMention={failedMention}
         isFormatted={failedFormatted}
+        isContact={failedContact}
         deliveryUnconfirmed={failedDeliveryUnconfirmed}
         retryAllowed={
-          !failedDeliveryUnconfirmed &&
-          !failedLocation &&
+          !isFinalOneShotError(failed?.error) &&
           !failedIMessageReply &&
           !(
             chatService === 'iMessage' &&

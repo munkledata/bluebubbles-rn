@@ -2626,7 +2626,7 @@ function dbProcessRelaunchCertificateCandidate({
     [sendIMessageMention, 'bfd922d5ff2918e6911ae7f7939b4ee1fc894cca10d779a88cdce9ca848b0bbd'],
     [sendIMessageFormatted, '6c53108d0cdd11091b68ae3119de718bd1c94220d6cf3204bafbe0e03bf8a68d'],
     [reconcileSendOutcome, 'aedfc0bb25afbf331d39a1eb1e425b726dee99a5878b04a4fbb9bdca5f9636b1'],
-    [handleSendFailure, '38c10b2c388e1f31b51c12f9846c1eccd5b12566e15945cb0fa8da96b8770bfc'],
+    [handleSendFailure, '16815d45d756b1065f2145bcff8165e290f3216dece16fb5c2df705cce3bd80a'],
     [
       isTerminalLocationSendError,
       'c4476403a6dd9484f45fbb35fa032c97e2f48d81d058482f880c3dd1a163a2d5',
@@ -3835,7 +3835,7 @@ function dbProcessRelaunchCertificateCandidate({
       optionedFailureEdges,
       sendContactMessage,
       7,
-      '{ attemptOwnerToken: attemptOwnerToken ?? undefined, terminalUncertain: !rcsChat, }',
+      "{ attemptOwnerToken: attemptOwnerToken ?? undefined, ...(rcsChat ? {} : { terminalUncertainKind: 'contact' as const }), }",
     ) ||
     !hasExactOptionedEdge(
       optionedFailureEdges,

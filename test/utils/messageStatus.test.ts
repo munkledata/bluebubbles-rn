@@ -1,6 +1,10 @@
 import type { MessageRow } from '@db/repositories';
 import { deliveredQuietly, errorTitleForCode, sendErrorCode, statusFor } from '@utils';
-import { ClientErrorCode } from '@utils/messageStatus';
+import {
+  ClientErrorCode,
+  isDeliveryUnconfirmedError,
+  isFinalOneShotError,
+} from '@utils/messageStatus';
 
 function m(p: Partial<MessageRow>): MessageRow {
   return {
@@ -128,5 +132,54 @@ describe('sendErrorCode', () => {
     // Previously collapsed to -1 ("Message Failed to Send"); now a specific title.
     expect(sendErrorCode(null)).toBe(ClientErrorCode.connectionRefused);
     expect(errorTitleForCode(sendErrorCode(null))).toBe('Connection Refused');
+  });
+});
+
+describe('one-shot failure codes', () => {
+  const unconfirmed = [
+    ClientErrorCode.attachmentDeliveryUnconfirmed,
+    ClientErrorCode.replyDeliveryUnconfirmed,
+    ClientErrorCode.locationDeliveryUnconfirmed,
+    ClientErrorCode.effectDeliveryUnconfirmed,
+    ClientErrorCode.mentionDeliveryUnconfirmed,
+    ClientErrorCode.formattedDeliveryUnconfirmed,
+    ClientErrorCode.messageDeliveryUnconfirmed,
+    ClientErrorCode.contactDeliveryUnconfirmed,
+  ];
+  const refused = [
+    ClientErrorCode.locationRejected,
+    ClientErrorCode.messageRejected,
+    ClientErrorCode.contactRejected,
+  ];
+
+  it('treats every unconfirmed code alike', () => {
+    for (const code of unconfirmed) {
+      expect(isDeliveryUnconfirmedError(code)).toBe(true);
+      expect(isFinalOneShotError(code)).toBe(true);
+      expect(statusFor(m({ error: code, sendState: 'error' }))).toMatch(/Unconfirmed$/);
+    }
+  });
+
+  it('keeps a refusal final without calling it unconfirmed', () => {
+    for (const code of refused) {
+      expect(isDeliveryUnconfirmedError(code)).toBe(false);
+      expect(isFinalOneShotError(code)).toBe(true);
+      expect(statusFor(m({ error: code, sendState: 'error' }))).toBe('Not Delivered');
+    }
+    for (const code of [0, 409, 503, ClientErrorCode.gatewayTimeout, null, undefined]) {
+      expect(isDeliveryUnconfirmedError(code)).toBe(false);
+      expect(isFinalOneShotError(code)).toBe(false);
+    }
+  });
+
+  it('names plain-text and contact-card outcomes', () => {
+    expect(errorTitleForCode(ClientErrorCode.messageDeliveryUnconfirmed)).toBe(
+      'Delivery Unconfirmed',
+    );
+    expect(errorTitleForCode(ClientErrorCode.messageRejected)).toBe('Message Not Sent');
+    expect(errorTitleForCode(ClientErrorCode.contactDeliveryUnconfirmed)).toBe(
+      'Delivery Unconfirmed',
+    );
+    expect(errorTitleForCode(ClientErrorCode.contactRejected)).toBe('Contact Card Not Sent');
   });
 });

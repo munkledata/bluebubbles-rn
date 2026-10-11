@@ -1025,6 +1025,21 @@ describe('MessageBubble send-error state', () => {
     expect(screen.getByRole('button', { name: 'Delivery unconfirmed. Show options' })).toBeTruthy();
     expect(screen.queryByLabelText('Message not delivered. Show options')).toBeNull();
   });
+  it.each([
+    ['effect', ClientErrorCode.effectDeliveryUnconfirmed],
+    ['mention', ClientErrorCode.mentionDeliveryUnconfirmed],
+    ['plain text', ClientErrorCode.messageDeliveryUnconfirmed],
+    ['contact card', ClientErrorCode.contactDeliveryUnconfirmed],
+  ])('tells a screen reader an unconfirmed %s is unconfirmed', async (_label, error) => {
+    await renderWithTheme(
+      <MessageBubble
+        msg={makeMsg({ isFromMe: 1, error, sendState: 'error' })}
+        showTail
+        onRetry={jest.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: 'Delivery unconfirmed. Show options' })).toBeTruthy();
+  });
   it('renders the error badge + title and fires onRetry when the badge is pressed', async () => {
     const onRetry = jest.fn();
     await renderWithTheme(

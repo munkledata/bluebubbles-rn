@@ -52,9 +52,10 @@ export function hasContactContent(c: ContactCard): boolean {
  * Optimistic contact-card send. Inserts a temp bubble showing the contact's name, POSTs the
  * STRUCTURED fields (the server builds the vCard 3.0 and uses the service-specific contact path), then
  * reconciles by tempGuid. The live `new-message` echo swaps the placeholder for the rendered
- * `.vcf` card seconds later. Safe pre-dispatch failures may retry; an uncertain iMessage handoff is
- * retired so neither the queue nor “Try Again” can duplicate it. Pure orchestration (no React Native
- * imports), so it runs in Node tests against better-sqlite3, mirroring sendTextMessage.
+ * `.vcf` card seconds later. A failed RCS card retries. An iMessage card is one-shot: any failure is
+ * final, recorded as not sent when the server proved it refused the card and as unconfirmed
+ * otherwise, so neither the queue nor “Try Again” can duplicate it. Pure orchestration (no React
+ * Native imports), so it runs in Node tests against better-sqlite3, mirroring sendTextMessage.
  */
 export async function sendContactMessage(
   db: AppDatabase,
@@ -157,7 +158,7 @@ export async function sendContactMessage(
       commitGuard,
       {
         attemptOwnerToken: attemptOwnerToken ?? undefined,
-        terminalUncertain: !rcsChat,
+        ...(rcsChat ? {} : { terminalUncertainKind: 'contact' as const }),
       },
     );
   }

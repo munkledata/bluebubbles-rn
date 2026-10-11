@@ -31,7 +31,42 @@ export const ClientErrorCode = {
   mentionDeliveryUnconfirmed: 10015,
   /** A one-shot formatted iMessage may have reached Messages despite a missing acknowledgement. */
   formattedDeliveryUnconfirmed: 10016,
+  /** A one-shot plain iMessage text may have reached Messages despite a missing acknowledgement. */
+  messageDeliveryUnconfirmed: 10017,
+  /** The server proved a one-shot iMessage text was refused before dispatch. */
+  messageRejected: 10018,
+  /** A one-shot iMessage contact card may have reached Messages despite a missing acknowledgement. */
+  contactDeliveryUnconfirmed: 10019,
+  /** The server proved a one-shot iMessage contact card was refused before dispatch. */
+  contactRejected: 10020,
 } as const;
+
+/** One-shot sends that may have reached Messages: never "not delivered", never retried. */
+const DELIVERY_UNCONFIRMED_CODES: ReadonlySet<number> = new Set([
+  ClientErrorCode.attachmentDeliveryUnconfirmed,
+  ClientErrorCode.replyDeliveryUnconfirmed,
+  ClientErrorCode.locationDeliveryUnconfirmed,
+  ClientErrorCode.effectDeliveryUnconfirmed,
+  ClientErrorCode.mentionDeliveryUnconfirmed,
+  ClientErrorCode.formattedDeliveryUnconfirmed,
+  ClientErrorCode.messageDeliveryUnconfirmed,
+  ClientErrorCode.contactDeliveryUnconfirmed,
+]);
+
+/** True when a one-shot send failed after it may already have reached Messages. */
+export function isDeliveryUnconfirmedError(code: number | null | undefined): boolean {
+  return code != null && DELIVERY_UNCONFIRMED_CODES.has(code);
+}
+
+/** True when a one-shot send can never be retried: possibly delivered, or refused before dispatch. */
+export function isFinalOneShotError(code: number | null | undefined): boolean {
+  return (
+    isDeliveryUnconfirmedError(code) ||
+    code === ClientErrorCode.locationRejected ||
+    code === ClientErrorCode.messageRejected ||
+    code === ClientErrorCode.contactRejected
+  );
+}
 
 export const LOCATION_DELIVERY_UNCONFIRMED_COPY =
   'This location may have been delivered. Check Messages before sending a new copy.';
@@ -56,6 +91,10 @@ const CLIENT_ERROR_TITLES: Record<number, string> = {
   [ClientErrorCode.effectDeliveryUnconfirmed]: 'Delivery Unconfirmed',
   [ClientErrorCode.mentionDeliveryUnconfirmed]: 'Mention Status Unconfirmed',
   [ClientErrorCode.formattedDeliveryUnconfirmed]: 'Delivery Unconfirmed',
+  [ClientErrorCode.messageDeliveryUnconfirmed]: 'Delivery Unconfirmed',
+  [ClientErrorCode.messageRejected]: 'Message Not Sent',
+  [ClientErrorCode.contactDeliveryUnconfirmed]: 'Delivery Unconfirmed',
+  [ClientErrorCode.contactRejected]: 'Contact Card Not Sent',
 };
 
 /**
@@ -102,14 +141,7 @@ export function errorTitleForCode(code: number | null | undefined): string {
 export function statusFor(msg: MessageRow): string | null {
   if (!msg.isFromMe) return null;
   if (msg.sendState === 'sending') return 'Sending…';
-  if (
-    msg.error === ClientErrorCode.attachmentDeliveryUnconfirmed ||
-    msg.error === ClientErrorCode.replyDeliveryUnconfirmed ||
-    msg.error === ClientErrorCode.locationDeliveryUnconfirmed ||
-    msg.error === ClientErrorCode.effectDeliveryUnconfirmed ||
-    msg.error === ClientErrorCode.mentionDeliveryUnconfirmed ||
-    msg.error === ClientErrorCode.formattedDeliveryUnconfirmed
-  )
+  if (isDeliveryUnconfirmedError(msg.error))
     return msg.error === ClientErrorCode.mentionDeliveryUnconfirmed
       ? 'Mention Status Unconfirmed'
       : 'Delivery Unconfirmed';

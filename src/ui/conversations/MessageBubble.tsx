@@ -27,11 +27,11 @@ import { useUrlPreview } from '@features/conversations/useUrlPreview';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { showToast } from '@ui/toast/toastStore';
 import {
-  ClientErrorCode,
   errorTitleForCode,
   firstUrl,
   interactiveMessageLabel,
   isBigEmoji,
+  isDeliveryUnconfirmedError,
   isHexColor,
   resolveBubbleColor,
   type BubbleRect,
@@ -135,11 +135,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   const isSms = effectiveService === 'SMS';
   const isRcs = effectiveService === 'RCS';
   const isError = msg.sendState === 'error' || msg.error !== 0;
-  const deliveryUnconfirmed =
-    msg.error === ClientErrorCode.attachmentDeliveryUnconfirmed ||
-    msg.error === ClientErrorCode.replyDeliveryUnconfirmed ||
-    msg.error === ClientErrorCode.locationDeliveryUnconfirmed ||
-    msg.error === ClientErrorCode.formattedDeliveryUnconfirmed;
+  const deliveryUnconfirmed = isDeliveryUnconfirmedError(msg.error);
   const isSending = msg.sendState === 'sending';
   const interactiveLabel = interactiveMessageLabel(msg.balloonBundleId);
   // Skip iMessage's hidden rich-link / plugin-payload attachments (URL previews, App Store,

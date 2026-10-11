@@ -228,15 +228,16 @@ describe('sendContactMessage', () => {
     );
 
     expect(one(raw, 'SELECT error AS code, error_message AS detail FROM messages')).toMatchObject({
-      code: ClientErrorCode.attachmentDeliveryUnconfirmed,
-      detail: 'Delivery may have occurred. Check Messages before sending a new copy.',
+      code: ClientErrorCode.contactDeliveryUnconfirmed,
+      detail:
+        'This contact card may have been delivered. Check Messages before sending a new copy.',
     });
     expect(one(raw, 'SELECT attempts FROM outgoing_queue').attempts).toBe(OUTGOING_MAX_ATTEMPTS);
     await expect(claimFailedOutgoingForRetry(db, result.tempGuid)).resolves.toMatchObject({
       claim: 'unsendable',
     });
     expect(warn).toHaveBeenCalledWith(
-      '[send-contact] one-shot attachment outcome unconfirmed (code 409, HTTP 409)',
+      '[send-contact] one-shot contact outcome unconfirmed (code 409, HTTP 409)',
     );
     warn.mockRestore();
   });
