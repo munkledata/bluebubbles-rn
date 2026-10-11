@@ -257,6 +257,56 @@ describe('SocketService reconnect escalation', () => {
     expect(mockIo).toHaveBeenCalledTimes(2);
   });
 
+  it('backs off when the server keeps accepting the socket and kicking it at once', () => {
+    const service = new SocketService(handleRawEvent);
+    service.connect('https://srv', 'pw', {});
+    service.observeLifecycle(jest.fn());
+    const kickRightAfterConnecting = (): void => {
+      fireSocketEvent('connect');
+      sockets[sockets.length - 1]!.active = false;
+      fireSocketEvent('disconnect', 'io server disconnect');
+    };
+
+    kickRightAfterConnecting();
+    jest.advanceTimersByTime(1_200);
+    expect(mockIo).toHaveBeenCalledTimes(2);
+
+    // Each quick kick waits longer (about 2 s, then 4 s) instead of retrying every second.
+    kickRightAfterConnecting();
+    jest.advanceTimersByTime(1_200);
+    expect(mockIo).toHaveBeenCalledTimes(2);
+    jest.advanceTimersByTime(1_100);
+    expect(mockIo).toHaveBeenCalledTimes(3);
+    kickRightAfterConnecting();
+    jest.advanceTimersByTime(3_900);
+    expect(mockIo).toHaveBeenCalledTimes(3);
+    jest.advanceTimersByTime(500);
+    expect(mockIo).toHaveBeenCalledTimes(4);
+  });
+
+  it('starts the backoff over after a connection that stayed up', () => {
+    const service = new SocketService(handleRawEvent);
+    service.connect('https://srv', 'pw', {});
+    service.observeLifecycle(jest.fn());
+    const kick = (): void => {
+      sockets[sockets.length - 1]!.active = false;
+      fireSocketEvent('disconnect', 'io server disconnect');
+    };
+    fireSocketEvent('connect');
+    kick();
+    jest.advanceTimersByTime(1_200);
+    fireSocketEvent('connect');
+    kick();
+    jest.advanceTimersByTime(2_300);
+    expect(mockIo).toHaveBeenCalledTimes(3);
+
+    fireSocketEvent('connect');
+    jest.advanceTimersByTime(30_000);
+    kick();
+    jest.advanceTimersByTime(1_200);
+    expect(mockIo).toHaveBeenCalledTimes(4);
+  });
+
   it('contains a throwing lifecycle observer without breaking the socket', () => {
     const onLifecycleEvent = jest.fn(() => {
       throw new Error('observer sentinel');
@@ -340,6 +390,8 @@ describe('SocketService reconnect escalation', () => {
       }
       fireSocketEvent('connect');
       expect(observer).toHaveBeenLastCalledWith({ phase: 'connected', recovered: false });
+      // A connection that stays up starts the ladder over.
+      jest.advanceTimersByTime(30_000);
       reject('AUTH_UNAVAILABLE');
       jest.advanceTimersByTime(1_000);
       expect(mockIo).toHaveBeenCalledTimes(10);

@@ -94,6 +94,8 @@ const SOCKET_BACKOFF_MAX_MS = 60_000;
 const SOCKET_ERROR_THROTTLE_MS = 60_000;
 /** Longer than the server helper's five-second typing-operation deadline. */
 const SOCKET_REQUEST_TIMEOUT_MS = 8_000;
+/** How long a connection must stay up before the next retry starts the backoff ladder over. */
+const SOCKET_STABLE_CONNECTION_MS = 30_000;
 
 /**
  * Capped exponential backoff (with jitter) for the app-level reconnect escalation.
@@ -172,6 +174,8 @@ export class SocketService {
   private password = '';
   private opts: SocketAuthOptions = {};
   private escalationAttempt = 0;
+  /** When the socket last connected, kept until the next retry is scheduled. */
+  private connectedAt: number | null = null;
   private escalationTimer: ReturnType<typeof setTimeout> | null = null;
   private escalationInProgress = false;
   private stopped = false;
@@ -287,7 +291,8 @@ export class SocketService {
       });
     }
 
-    // A clean (re)connect resets the escalation ladder and the suppression window.
+    // A (re)connect cancels a pending retry and resets the suppression window. It notes when it
+    // connected; the escalation ladder starts over only once the connection has stayed up.
     this.socket.on('connect', () => {
       if (lifecycleGeneration !== this.lifecycleGeneration) return;
       if (hasConnected) {
@@ -296,7 +301,7 @@ export class SocketService {
       } else {
         hasConnected = true;
       }
-      this.escalationAttempt = 0;
+      this.connectedAt = Date.now();
       this.cancelEscalation();
       this.lastErrorLoggedAt.clear();
     });
@@ -536,6 +541,12 @@ export class SocketService {
       accountLease === this.accountLease &&
       Boolean(accountLease?.isCurrent());
     if (!ownsAttempt() || this.escalationTimer != null || this.escalationInProgress) return;
+    // Only a connection that stayed up starts the ladder over. A server that accepts the socket
+    // and kicks it at once (while restarting, or after a credential change) would otherwise be
+    // retried about once a second for as long as the app stays open.
+    if (this.connectedAt != null && Date.now() - this.connectedAt >= SOCKET_STABLE_CONNECTION_MS)
+      this.escalationAttempt = 0;
+    this.connectedAt = null;
     const delay =
       this.rateLimitedGeneration === lifecycleGeneration
         ? SOCKET_BACKOFF_MAX_MS
