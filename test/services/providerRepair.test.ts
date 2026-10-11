@@ -19,6 +19,7 @@ import {
 import {
   getMessageStateAuthority,
   applyMessageStateWithinTransaction,
+  MESSAGE_STATE_AUDIT_KEY,
   PROVIDER_REPAIR_BACKOFF_KEY,
   setMessageStateAuthorityWithinTransaction,
 } from '@db/repositories/messageState';
@@ -366,14 +367,13 @@ describe('provider-scoped repair', () => {
     expect(f.cancel).toHaveBeenCalledWith(lease.token);
     expect(raw.prepare('SELECT date_deleted FROM messages').get()).toEqual({ date_deleted: null });
   });
-  it('keeps ordinary sync running when a local write interrupts an automatic repair', async () => {
+  it('keeps ordinary sync running when an automatic repair cannot reach the server', async () => {
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     await seed('existing');
     await setSyncMarker(db, { lastSyncedRowId: 3, lastSyncedTimestamp: 50 });
     const f = fixture();
-    f.bound.fetchChatMessages = async () => {
-      await kvSet(db, 'fixture.concurrent', 'writer');
-      return [];
+    f.control.beginProviderRepair = async () => {
+      throw new ApiError('no_connection', 'offline');
     };
     const fetchChats = jest.spyOn(f.base, 'fetchChats');
     const fetchMessagesAfter = jest.spyOn(f.base, 'fetchMessagesAfter');
@@ -387,7 +387,6 @@ describe('provider-scoped repair', () => {
     // Without an installed authority, message-state catch-up stays paused.
     expect(fetchMessageState).not.toHaveBeenCalled();
     expect(await getMessageStateAuthority(db)).toBeNull();
-    expect(f.cancel).toHaveBeenCalledWith(lease.token);
     expect(raw.prepare('SELECT date_deleted FROM messages').get()).toEqual({ date_deleted: null });
     expect(warn).toHaveBeenCalledWith('[sync] provider repair failed; ordinary sync continues', {
       errorName: expect.any(String),
@@ -675,34 +674,43 @@ describe('provider-scoped repair', () => {
       expect(stateReads).toHaveBeenCalledWith(lease.checkpoint, undefined);
     });
 
-    it('keeps the full repair when Apple history is already on the phone', async () => {
+    it('sets up from the checkpoint even with Apple history on the phone', async () => {
       await seed('existing');
       const f = fixture(['existing']);
       const crawl = jest.spyOn(f.bound, 'fetchChats');
 
       await f.runAuto();
 
-      expect(crawl).toHaveBeenCalled();
-      expect(f.finish).toHaveBeenCalled();
+      expect(crawl).not.toHaveBeenCalled();
+      expect(f.finish).not.toHaveBeenCalled();
+      expect((await getMessageStateAuthority(db))?.snapshotSequence).toBe(lease.sequence);
+      expect(raw.prepare('SELECT date_deleted FROM messages').get()).toEqual({
+        date_deleted: null,
+      });
     });
 
-    it('falls back to the full repair when a message lands before the checkpoint installs', async () => {
+    it('includes a message that lands before the checkpoint in the recorded check', async () => {
       const f = fixture(['late-arrival']);
       const original = f.control.beginProviderRepair!;
-      const begin = jest
+      f.control.beginProviderRepair = jest
         .fn<Promise<ProviderRepairLease>, [AbortSignal?]>()
         .mockImplementationOnce(async (signal) => {
           await seed('late-arrival');
           return original(signal);
         })
         .mockImplementation((signal) => original(signal));
-      f.control.beginProviderRepair = begin;
       const crawl = jest.spyOn(f.bound, 'fetchChats');
 
       await f.runAuto();
 
-      expect(begin).toHaveBeenCalledTimes(2);
-      expect(crawl).toHaveBeenCalled();
+      expect(crawl).not.toHaveBeenCalled();
+      const lateId = (
+        raw.prepare('SELECT id FROM messages WHERE guid = ?').get('late-arrival') as { id: number }
+      ).id;
+      expect(JSON.parse((await kvGet(db, MESSAGE_STATE_AUDIT_KEY))!)).toMatchObject({
+        phase: 'hide',
+        throughMessageId: lateId,
+      });
       expect(raw.prepare('SELECT date_deleted FROM messages').get()).toEqual({
         date_deleted: null,
       });
@@ -762,6 +770,143 @@ describe('provider-scoped repair', () => {
 
       expect(crawl).toHaveBeenCalled();
       expect(f.finish).toHaveBeenCalled();
+    });
+  });
+
+  describe('recording messages that still need a server check', () => {
+    beforeEach(() => {
+      jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    });
+    afterEach(() => jest.restoreAllMocks());
+    const dates = () =>
+      raw.prepare('SELECT guid, date_deleted AS d FROM messages ORDER BY guid').all();
+    const record = async () =>
+      JSON.parse((await kvGet(db, MESSAGE_STATE_AUDIT_KEY)) ?? 'null') as Record<
+        string,
+        unknown
+      > | null;
+
+    it('sets up an existing install from the checkpoint and hides nothing yet', async () => {
+      await seed('absent');
+      await seed('present');
+      await seed('rcs-local', 'RCS;-;old');
+      const f = fixture(['present']);
+      const crawl = jest.spyOn(f.bound, 'fetchChats');
+
+      await f.runAuto();
+
+      expect(crawl).not.toHaveBeenCalled();
+      // Today's server cannot prove a deletion, so every row keeps its visibility.
+      expect(dates()).toEqual([
+        { guid: 'absent', d: null },
+        { guid: 'present', d: null },
+        { guid: 'rcs-local', d: null },
+      ]);
+      const maxId = (raw.prepare('SELECT MAX(id) AS id FROM messages').get() as { id: number }).id;
+      expect(await record()).toEqual({
+        version: 1,
+        providerEpoch,
+        ledgerEpoch,
+        snapshotSequence: lease.sequence,
+        phase: 'hide',
+        afterGuid: null,
+        afterMessageId: 0,
+        throughMessageId: maxId,
+      });
+    });
+
+    it('records deletions kept from an older ledger for the restore phase', async () => {
+      await seed('kept-hidden');
+      const oldLedger = lease.token;
+      await withDbTransaction(db, (context) =>
+        setMessageStateAuthorityWithinTransaction(context, {
+          version: 1,
+          provider: 'imessage',
+          providerEpoch,
+          ledgerEpoch: oldLedger,
+          cursor: 'old-cursor',
+          snapshotSequence: '0',
+          sequence: '0',
+        }),
+      );
+      await withDbTransaction(db, (context) =>
+        applyMessageStateWithinTransaction(context, {
+          version: 1,
+          provider: 'imessage',
+          providerEpoch,
+          ledgerEpoch: oldLedger,
+          sequence: '100',
+          kind: 'deleted',
+          guid: 'kept-hidden',
+          chatGuid,
+          dateDeleted: 100,
+        }),
+      );
+
+      await fixture().runAuto();
+
+      expect(await record()).toMatchObject({ ledgerEpoch, phase: 'restore' });
+      // The older deletion stays in force until a server check can restore it.
+      expect(dates()).toEqual([{ guid: 'kept-hidden', d: 100 }]);
+    });
+
+    it('records same-ledger deletions from before a re-setup for the restore phase', async () => {
+      await seed('deleted-before');
+      await withDbTransaction(db, (context) =>
+        setMessageStateAuthorityWithinTransaction(context, {
+          version: 1,
+          provider: 'imessage',
+          providerEpoch,
+          ledgerEpoch,
+          cursor: 'stale-cursor',
+          snapshotSequence: '0',
+          sequence: '5',
+        }),
+      );
+      await withDbTransaction(db, (context) =>
+        applyMessageStateWithinTransaction(context, {
+          version: 1,
+          provider: 'imessage',
+          providerEpoch,
+          ledgerEpoch,
+          sequence: '5',
+          kind: 'deleted',
+          guid: 'deleted-before',
+          chatGuid,
+          dateDeleted: 5,
+        }),
+      );
+      const f = fixture();
+      // The server no longer accepts the stored cursor (for example after a credential change),
+      // but it does accept the fresh checkpoint it just issued.
+      const readPage = f.base.fetchMessageState!;
+      f.base.fetchMessageState = async (cursor, signal) => {
+        if (cursor === 'stale-cursor') throw new MessageStateRepairRequiredError();
+        return readPage(cursor, signal);
+      };
+
+      await f.runAuto();
+
+      // The re-setup jumps to checkpoint 10; a restoration between 5 and 10 must be rechecked.
+      expect(await record()).toMatchObject({ phase: 'restore', snapshotSequence: lease.sequence });
+    });
+
+    it('records nothing to check when the phone holds no Apple history', async () => {
+      await seed('rcs-only', 'RCS;-;only');
+
+      await fixture().runAuto();
+
+      expect(await kvGet(db, MESSAGE_STATE_AUDIT_KEY)).toBeNull();
+    });
+
+    it('forgets an unfinished check when changing accounts', async () => {
+      await kvSet(db, MESSAGE_STATE_AUDIT_KEY, JSON.stringify({ version: 1 }));
+      expect(await localCacheDirty(db)).toBe(true);
+
+      await clearLocalCache(db);
+
+      expect(await kvGet(db, MESSAGE_STATE_AUDIT_KEY)).toBeNull();
+      expect(await localCacheDirty(db)).toBe(false);
     });
   });
 });

@@ -4,7 +4,11 @@ import { withDbTransaction, withDbWriteLock } from '../transaction';
 import type { AppDatabase } from '../types';
 import { SHARE_INTAKE_RECEIPT_KV_PREFIX } from './shareIntakeReceipts';
 import { setSyncMarkerWithinTransaction } from './sync';
-import { MESSAGE_STATE_AUTHORITY_KEY, PROVIDER_REPAIR_BACKOFF_KEY } from './messageState';
+import {
+  MESSAGE_STATE_AUDIT_KEY,
+  MESSAGE_STATE_AUTHORITY_KEY,
+  PROVIDER_REPAIR_BACKOFF_KEY,
+} from './messageState';
 
 // ---- Whole-cache maintenance ----------------------------------------------
 
@@ -401,6 +405,7 @@ export async function clearLocalCache(db: AppDatabase): Promise<void> {
           DELETION_SNAPSHOT_INITIALIZED_KV_KEY,
           MESSAGE_STATE_AUTHORITY_KEY,
           PROVIDER_REPAIR_BACKOFF_KEY,
+          MESSAGE_STATE_AUDIT_KEY,
         ]),
       ),
   );
@@ -535,6 +540,7 @@ export async function localCacheDirty(db: AppDatabase): Promise<boolean> {
                           OR key = ${DELETION_SNAPSHOT_INITIALIZED_KV_KEY}
                           OR key = ${MESSAGE_STATE_AUTHORITY_KEY}
                           OR key = ${PROVIDER_REPAIR_BACKOFF_KEY}
+                          OR key = ${MESSAGE_STATE_AUDIT_KEY}
                           OR key LIKE ${`${DRAFT_KV_PREFIX}%`}
                           OR key LIKE ${`${FULL_REPAIR_RETIRED_CHAT_KV_PREFIX}%`}
                           OR key LIKE ${`${NOTIFICATION_ROUTE_KV_PREFIX}%`}

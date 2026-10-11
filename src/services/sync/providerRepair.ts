@@ -20,7 +20,6 @@ import {
   getMessageStateAuthority,
   getProviderRepairBackoff,
   installCheckpointAuthorityWithinTransaction,
-  providerRepairHasNothingToReconcile,
   recordProviderRepairFailureWithinTransaction,
   clearProviderRepairBackoffWithinTransaction,
   bindSnapshotMessageOwnersWithinTransaction,
@@ -95,22 +94,22 @@ async function beginProviderRepairWhenReady(
 }
 
 /**
- * With no local Apple history to reconcile, the ledger checkpoint alone is a complete authority:
- * every row fetched afterwards was active when fetched, and later deletions replay from it. Returns
- * false, installing nothing, when local rows still need reconciling.
+ * The ledger checkpoint is a complete authority for everything fetched afterwards: server reads
+ * exclude Recently Deleted, so each such row was active when fetched, and later deletions replay
+ * from the checkpoint. Messages already on the phone are only recorded for a later server check:
+ * today's per-message lookup cannot prove a deletion, so nothing is hidden on its word.
  */
 async function installAuthorityFromCheckpoint(
   db: AppDatabase,
   controlApi: SyncApi,
   providerEpoch: string,
   signal?: AbortSignal,
-): Promise<boolean> {
-  if (!(await providerRepairHasNothingToReconcile(db))) return false;
+): Promise<void> {
   const lease = await beginProviderRepairWhenReady(controlApi, signal);
   // The checkpoint is a self-contained ledger cursor; the snapshot lease itself is not needed.
   await controlApi.cancelProviderRepair?.(lease.token).catch(() => undefined);
   if (lease.providerEpoch !== providerEpoch) throw new MessageStateRepairRequiredError();
-  return withDbTransaction(db, (context) =>
+  await withDbTransaction(db, (context) =>
     installCheckpointAuthorityWithinTransaction(context, {
       version: 1,
       provider: 'imessage',
@@ -182,10 +181,8 @@ export async function syncProviderMessages(
     try {
       if (!controlApi.beginProviderRepair || !controlApi.finishProviderRepair)
         throw new Error('The advertised provider snapshot endpoint is unavailable.');
-      if (
-        !options.repair &&
-        (await installAuthorityFromCheckpoint(db, controlApi, providerEpoch, signal))
-      ) {
+      if (!options.repair) {
+        await installAuthorityFromCheckpoint(db, controlApi, providerEpoch, signal);
         installedFromCheckpoint = true;
       } else {
         const lease = await controlApi.beginProviderRepair(signal);

@@ -11,6 +11,8 @@ import { kvGet, kvGetWithinTransaction, kvSetWithinTransaction } from './kv';
 import type { FullRepairMessageExposure } from './repair';
 
 export const MESSAGE_STATE_AUTHORITY_KEY = 'sync.messageState.imessage';
+/** Progress of checking messages that were already on the phone when a checkpoint installed. */
+export const MESSAGE_STATE_AUDIT_KEY = 'sync.messageState.imessage.audit';
 /** When an automatic provider repair may next run after a failure, for one provider pairing. */
 export const PROVIDER_REPAIR_BACKOFF_KEY = 'sync.messageState.imessage.repairBackoff';
 
@@ -111,38 +113,76 @@ export async function clearProviderRepairBackoffWithinTransaction(
   });
 }
 
-/**
- * True when no local Apple message or prior server-state row could need reconciling with the
- * provider ledger. Temporary and RCS rows never take part in Apple absence cleanup.
- */
-async function hasNothingToReconcile(db: AppDatabase): Promise<boolean> {
-  const rows = await db.all<{ pending: number }>(sql`
-    SELECT (EXISTS (SELECT 1 FROM message_server_states)
-            OR EXISTS (SELECT 1 FROM messages
-                        WHERE date_deleted IS NULL
-                          AND guid NOT LIKE 'temp-%'
-                          AND guid NOT LIKE 'rcs-%')) AS pending
-  `);
-  return rows[0]?.pending === 0;
+export interface MessageStateAudit {
+  readonly version: 1;
+  readonly providerEpoch: string;
+  readonly ledgerEpoch: string;
+  /** The checkpoint the authority was installed at; a check never stamps an older position. */
+  readonly snapshotSequence: string;
+  /** First recheck retained deletions (older ledger, or this ledger before the checkpoint). */
+  readonly phase: 'restore' | 'hide';
+  readonly afterGuid: string | null;
+  readonly afterMessageId: number;
+  /** Messages above this id arrived after the checkpoint, so they were active when fetched. */
+  readonly throughMessageId: number;
 }
 
-export async function providerRepairHasNothingToReconcile(db: AppDatabase): Promise<boolean> {
-  return hasNothingToReconcile(db);
+/** Record which messages still need a server check, or clear the record with null. */
+export async function setMessageStateAuditWithinTransaction(
+  context: DbTransactionContext,
+  audit: MessageStateAudit | null,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    if (audit)
+      await kvSetWithinTransaction(context, MESSAGE_STATE_AUDIT_KEY, JSON.stringify(audit));
+    else await db.delete(kv).where(eq(kv.key, MESSAGE_STATE_AUDIT_KEY));
+  });
 }
 
 /**
- * Install a ledger-checkpoint authority only while nothing local needs reconciling, and end any
- * repair wait. Returns false, installing nothing, when a local Apple row arrived meanwhile.
+ * Install a ledger-checkpoint authority and end any repair wait. Messages already on the phone,
+ * and deletions retained from before the checkpoint (an older ledger, or this one before a
+ * re-setup), are recorded for a later server check; nothing is hidden or restored here.
  */
 export async function installCheckpointAuthorityWithinTransaction(
   context: DbTransactionContext,
   authority: MessageStateAuthority,
-): Promise<boolean> {
+): Promise<void> {
   return runInTransactionContext(context, async (db) => {
-    if (!(await hasNothingToReconcile(db))) return false;
+    const checkpoint = authority.snapshotSequence;
+    const scope = (
+      await db.all<{ retained: number; visibleApple: number; throughMessageId: number }>(sql`
+        SELECT EXISTS (SELECT 1 FROM message_server_states
+                        WHERE provider_epoch != ${authority.providerEpoch}
+                           OR ledger_epoch != ${authority.ledgerEpoch}
+                           OR (kind = 'deleted'
+                               AND (length(sequence) < length(${checkpoint})
+                                    OR (length(sequence) = length(${checkpoint})
+                                        AND sequence < ${checkpoint})))) AS retained,
+               EXISTS (SELECT 1 FROM messages
+                        WHERE date_deleted IS NULL
+                          AND guid NOT LIKE 'temp-%'
+                          AND guid NOT LIKE 'rcs-%') AS visibleApple,
+               COALESCE((SELECT MAX(id) FROM messages), 0) AS throughMessageId
+      `)
+    )[0];
     await setMessageStateAuthorityWithinTransaction(context, authority);
     await clearProviderRepairBackoffWithinTransaction(context);
-    return true;
+    await setMessageStateAuditWithinTransaction(
+      context,
+      scope && (scope.retained || scope.visibleApple)
+        ? {
+            version: 1,
+            providerEpoch: authority.providerEpoch,
+            ledgerEpoch: authority.ledgerEpoch,
+            snapshotSequence: checkpoint,
+            phase: scope.retained ? 'restore' : 'hide',
+            afterGuid: null,
+            afterMessageId: 0,
+            throughMessageId: scope.throughMessageId,
+          }
+        : null,
+    );
   });
 }
 
