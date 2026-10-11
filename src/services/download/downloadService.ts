@@ -132,6 +132,30 @@ export function downloadMaxBytes(mode: AttachmentDownloadMode): number {
   return mode === 'automatic' ? AUTO_IMAGE_MAX_BYTES : MANUAL_ATTACHMENT_MAX_BYTES;
 }
 
+/** Headroom above a declared size; never less than this many bytes. */
+const DECLARED_SIZE_HEADROOM_MIN_BYTES = 1024 * 1024;
+
+/**
+ * The most one transfer may write, which is also what it reserves in the cache. An iMessage size
+ * comes from chat.db's total_bytes, which in practice never understates the stored file (the
+ * server streams the original), so it reserves that size plus a quarter (at least 1 MiB) instead
+ * of the mode's hard cap; a stream that outgrows it fails as 'size'. An unknown size and RCS media,
+ * sized by the bridge's own metadata, keep the hard cap.
+ */
+export function downloadReservationBytes(
+  att: Pick<AttachmentDownloadTarget, 'totalBytes' | 'service'>,
+  mode: AttachmentDownloadMode,
+): number {
+  const cap = downloadMaxBytes(mode);
+  const declared = att.totalBytes;
+  if (att.service === 'RCS' || declared == null || !Number.isSafeInteger(declared) || declared <= 0)
+    return cap;
+  return Math.min(
+    cap,
+    declared + Math.max(DECLARED_SIZE_HEADROOM_MIN_BYTES, Math.ceil(declared / 4)),
+  );
+}
+
 export function downloadTimeoutMs(mode: AttachmentDownloadMode): number {
   return mode === 'automatic' ? AUTOMATIC_DOWNLOAD_TIMEOUT_MS : MANUAL_DOWNLOAD_TIMEOUT_MS;
 }
@@ -265,7 +289,10 @@ export async function ensureDownloadedOutcome(
   ) {
     return { status: 'size' };
   }
-  const maxBytes = Math.min(downloadMaxBytes(mode), maxBytesOverride ?? Number.MAX_SAFE_INTEGER);
+  const maxBytes = Math.min(
+    downloadReservationBytes(att, mode),
+    maxBytesOverride ?? Number.MAX_SAFE_INTEGER,
+  );
   const timeoutMs = downloadTimeoutMs(mode);
   const transferName =
     replacement?.destinationName ?? attachmentFileName(att.transferName, att.guid, att.mimeType);

@@ -574,7 +574,8 @@ describe('ensureDownloaded', () => {
         ),
       ).resolves.toEqual({ status: 'success', localPath: finalPath, bytes: 20 });
 
-      expect(reserveCache).toHaveBeenCalledWith(finalPath, MANUAL_ATTACHMENT_MAX_BYTES);
+      // The declared 100 bytes plus headroom, not the 512 MiB manual cap.
+      expect(reserveCache).toHaveBeenCalledWith(finalPath, 100 + 1024 * 1024);
       expect(reserveCache.mock.invocationCallOrder[0]).toBeLessThan(
         download.mock.invocationCallOrder[0]!,
       );
@@ -590,6 +591,71 @@ describe('ensureDownloaded', () => {
       expect(release).toHaveBeenCalledTimes(1);
     },
   );
+
+  describe('sizing the reservation', () => {
+    const MiB = 1024 * 1024;
+    const neverFetched: AttachmentFetcher = {
+      exists: () => false,
+      destinationUri: () => 'file:///documents/attachments/sized/file.pdf',
+      download: jest.fn(async () => {
+        throw new Error('a refused reservation never downloads');
+      }),
+    };
+
+    it.each([
+      ['a declared iMessage size', { totalBytes: 20_000 }, 20_000 + MiB],
+      ['a large declared size', { totalBytes: 100 * MiB }, 125 * MiB],
+      ['an unknown size', { totalBytes: null }, MANUAL_ATTACHMENT_MAX_BYTES],
+      ['RCS media', { totalBytes: 20_000, service: 'RCS' }, MANUAL_ATTACHMENT_MAX_BYTES],
+      ['a size near the cap', { totalBytes: 500 * MiB }, MANUAL_ATTACHMENT_MAX_BYTES],
+    ])('reserves for %s', async (_label, sized, expected) => {
+      const { db } = await createTestDb();
+      const reserveCache = jest.fn(async () => ({ status: 'storage' as const }));
+      const scope: AttachmentDownloadScope = {
+        generation: 9,
+        isCurrent: () => true,
+        runCommit: (task) => task(),
+        reserveCache,
+      };
+
+      await ensureDownloadedOutcome(
+        db,
+        neverFetched,
+        {
+          guid: 'sized-reservation',
+          transferName: 'file.pdf',
+          mimeType: 'application/pdf',
+          localPath: null,
+          ...sized,
+        },
+        undefined,
+        scope,
+      );
+
+      expect(reserveCache).toHaveBeenCalledWith(expect.any(String), expected);
+    });
+
+    it('stops a download that grows past its declared size', async () => {
+      const { db } = await createTestDb();
+      await seedAttachment(db, 'grew');
+      const download = jest.fn(async () => fetched('file:///docs/grew.pdf', 2 * MiB));
+
+      const outcome = await ensureDownloadedOutcome(
+        db,
+        { exists: () => false, destinationUri: () => 'file:///docs/grew.pdf', download },
+        {
+          guid: 'grew',
+          transferName: 'grew.pdf',
+          mimeType: 'application/pdf',
+          localPath: null,
+          totalBytes: 100,
+        },
+      );
+
+      expect(outcome).toMatchObject({ status: 'size' });
+      expect((await getAttachmentByGuid(db, 'grew'))?.localPath).toBeNull();
+    });
+  });
 
   it('copy-on-write promotes a distinct replacement while leaving the protected old path active', async () => {
     const { db } = await createTestDb();

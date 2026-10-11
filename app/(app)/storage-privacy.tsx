@@ -166,11 +166,12 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
         <SettingsSection label="CLEANUP" style={styles.gap}>
           <Text style={textStyle}>
             Gator limits its ordinary downloaded-attachment cache to 2 GiB and 4,096 files while
-            preserving at least 512 MiB of free app storage. It removes the least recently used old
-            files first. Files currently on screen, used by an in-progress operation, needed for an
-            outgoing send, or awaiting an automatic Photos copy are protected; a new download is
-            refused when space cannot be freed safely. This release requires Android 16 or newer;
-            older Android versions cannot install it.
+            preserving at least 512 MiB of free app storage. A download also needs room for its own
+            size, or up to 512 MiB when the server does not report one. It removes the least
+            recently used old files first. Files currently on screen, used by an in-progress
+            operation, needed for an outgoing send, or awaiting an automatic Photos copy are
+            protected; a new download is refused when space cannot be freed safely. This release
+            requires Android 16 or newer; older Android versions cannot install it.
           </Text>
           <Text style={textStyle}>
             Deleting a chat removes Gator-owned downloaded files after its database purge when

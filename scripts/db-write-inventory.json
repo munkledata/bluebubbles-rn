@@ -20869,7 +20869,7 @@
     {
       "id": "src/services/download/downloadService.ts#ensureDownloadedOutcome:mutator-call:61546bdff34b",
       "path": "src/services/download/downloadService.ts",
-      "line": 301,
+      "line": 328,
       "symbol": "ensureDownloadedOutcome",
       "operation": "mutator-call",
       "target": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:047f471346>",
@@ -20882,7 +20882,7 @@
     {
       "id": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:047f471346>.persistPathAndLedger:mutator-call:b62da14f0d55",
       "path": "src/services/download/downloadService.ts",
-      "line": 453,
+      "line": 480,
       "symbol": "ensureDownloadedOutcome.<callback:047f471346>.persistPathAndLedger",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentCache.ts#commitAttachmentCacheReservation",
@@ -20895,7 +20895,7 @@
     {
       "id": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:047f471346>.persistPathAndLedger:mutator-call:01f3173adce4",
       "path": "src/services/download/downloadService.ts",
-      "line": 470,
+      "line": 497,
       "symbol": "ensureDownloadedOutcome.<callback:047f471346>.persistPathAndLedger",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#replaceVisibleAttachmentLocalPathWithinTransaction",
@@ -20908,7 +20908,7 @@
     {
       "id": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:047f471346>.persistPathAndLedger:mutator-call:cfd7461b4388",
       "path": "src/services/download/downloadService.ts",
-      "line": 475,
+      "line": 502,
       "symbol": "ensureDownloadedOutcome.<callback:047f471346>.persistPathAndLedger",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#updateAttachmentLocalPathWithinTransaction",
@@ -20921,7 +20921,7 @@
     {
       "id": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:047f471346>.<callback:f61df74359>:mutator-call:3c041c3d7a51",
       "path": "src/services/download/downloadService.ts",
-      "line": 496,
+      "line": 523,
       "symbol": "ensureDownloadedOutcome.<callback:047f471346>.<callback:f61df74359>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -20934,7 +20934,7 @@
     {
       "id": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:047f471346>.<callback:f61df74359>:mutator-call:e08474c25551",
       "path": "src/services/download/downloadService.ts",
-      "line": 496,
+      "line": 523,
       "symbol": "ensureDownloadedOutcome.<callback:047f471346>.<callback:f61df74359>",
       "operation": "mutator-call",
       "target": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:047f471346>.persistPathAndLedger",
@@ -20947,7 +20947,7 @@
     {
       "id": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:047f471346>:mutator-call:886626e1aa23",
       "path": "src/services/download/downloadService.ts",
-      "line": 504,
+      "line": 531,
       "symbol": "ensureDownloadedOutcome.<callback:047f471346>",
       "operation": "mutator-call",
       "target": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:047f471346>.persistPathAndLedger",
@@ -20960,7 +20960,7 @@
     {
       "id": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:047f471346>:mutator-call:d9b292287c4a",
       "path": "src/services/download/downloadService.ts",
-      "line": 504,
+      "line": 531,
       "symbol": "ensureDownloadedOutcome.<callback:047f471346>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -20973,7 +20973,7 @@
     {
       "id": "src/services/download/downloadService.ts#ensureDownloaded:mutator-call:aacca386ab26",
       "path": "src/services/download/downloadService.ts",
-      "line": 586,
+      "line": 613,
       "symbol": "ensureDownloaded",
       "operation": "mutator-call",
       "target": "src/services/download/downloadService.ts#ensureDownloadedOutcome",
