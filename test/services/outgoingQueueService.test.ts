@@ -30,6 +30,7 @@ import {
   runOutgoingQueue,
   type OutgoingQueueIO,
 } from '@/services/send/outgoingQueueService';
+import { uploadRegistry } from '@/services/send/uploadControl';
 import {
   captureRealtimeDeliveryLease,
   pauseRealtimeDeliveries,
@@ -1034,6 +1035,44 @@ describe('runOutgoingQueue', () => {
     await expect(claimFailedOutgoingForRetry(db, 'temp-effect-recovery')).resolves.toMatchObject({
       claim: 'unsendable',
     });
+  });
+
+  it('leaves a row alone while this process is still uploading it', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'any;-;+15551234567');
+    await insertOutgoingAttachment(db, {
+      tempGuid: 'temp-slow-upload',
+      attachmentGuid: 'temp-slow-upload-att',
+      chatGuid: 'any;-;+15551234567',
+      localPath: 'file:///slow-photo.jpg',
+      mimeType: 'image/jpeg',
+      transferName: 'slow-photo.jpg',
+      totalBytes: 8_000_000,
+      now: 1_000,
+      imessageAttachmentV1: true,
+    });
+    raw.prepare('UPDATE outgoing_queue SET created_at = 0, next_retry_at = 0').run();
+    const upload = jest.fn(async () => ({ guid: 'must-not-send' }));
+    const io: OutgoingQueueIO = { upload, fileExists: async () => true };
+    // Well past the 60 s grace window, but the live send is still uploading on a slow link.
+    const release = uploadRegistry.add('temp-slow-upload', {
+      cancel: () => undefined,
+      settled: Promise.resolve(),
+    });
+    try {
+      await runOutgoingQueue(db, noRequestHttp, io, 2_000_000);
+
+      expect(upload).not.toHaveBeenCalled();
+      expect(attemptsOf(raw, 'temp-slow-upload')).toBe(0);
+      expect(stateOf(raw, 'temp-slow-upload')).toBe('sending');
+    } finally {
+      release();
+    }
+
+    // Once that upload ends without settling the row, the drain takes it over as before.
+    await runOutgoingQueue(db, noRequestHttp, io, 2_000_000);
+    expect(attemptsOf(raw, 'temp-slow-upload')).toBe(OUTGOING_MAX_ATTEMPTS);
+    expect(errorOf(raw, 'temp-slow-upload')).toBe(ClientErrorCode.attachmentDeliveryUnconfirmed);
   });
 
   it('retires a recovered iMessage contact card as delivery-unconfirmed without a failure notice', async () => {

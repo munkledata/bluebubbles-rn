@@ -192,6 +192,19 @@ describe('createUploadRegistry', () => {
     expect(registry.size).toBe(0);
   });
 
+  it('reports which temp guids are still uploading', () => {
+    const registry = createUploadRegistry();
+    const first = registry.add('temp-1', { cancel: jest.fn(), settled: Promise.resolve() });
+    const second = registry.add('temp-1', { cancel: jest.fn(), settled: Promise.resolve() });
+
+    expect(registry.has('temp-1')).toBe(true);
+    expect(registry.has('temp-2')).toBe(false);
+    first();
+    expect(registry.has('temp-1')).toBe(true);
+    second();
+    expect(registry.has('temp-1')).toBe(false);
+  });
+
   it('release removes the handle it registered', () => {
     const registry = createUploadRegistry();
     const cancel = jest.fn();

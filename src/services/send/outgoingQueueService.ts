@@ -49,6 +49,7 @@ import {
 import { notifyFailedSend } from './sendFailureNotice';
 import type { AttachmentUploader } from './sendAttachmentService';
 import { messageTargetCommitGuard } from './rcsAttemptCapability';
+import { uploadRegistry } from './uploadControl';
 
 interface TextPayload {
   message: string;
@@ -775,6 +776,10 @@ async function runOutgoingQueueBody(
   let attemptedRows = 0;
   for (const row of rows) {
     if (!accountIsCurrent(accountLease)) break;
+    // This process is still uploading the send that owns this row. A slow upload can outlast the
+    // 60 s grace window; claiming it would retire a one-shot iMessage attachment as "may have
+    // been delivered" mid-upload, or start a second upload of the same file.
+    if (uploadRegistry.has(row.tempGuid)) continue;
     const rcsRow = isRcsChatGuid(row.chatGuid);
     const rcsIsCurrent = (): boolean => !rcsRow || rcsAvailable?.(row.chatGuid) === true;
     const locationRow = row.kind === 'location';

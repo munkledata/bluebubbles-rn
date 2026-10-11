@@ -12,12 +12,10 @@
  * unbounded saturates a phone's (much narrower) uplink so every file's percentage crawls at once
  * and the readout stops meaning anything.
  *
- * KNOWN INTERACTION, pre-existing and unchanged by the gate: `listRetryableOutgoing` treats a queue
- * row older than `OUTGOING_GRACE_MS` (60 s) as no longer owned by its live UI send, so a very large
- * batch can have its tail claimed by the retry drain while the first send is still running. The
- * gate does not create that — uploads are bandwidth-bound, so the same 20 files run past 60 s
- * unbounded too (all 20 sharing the link) — it only changes which ones finish first. The re-send
- * reuses the original temp guid, so the server's idempotency cache absorbs it.
+ * `listRetryableOutgoing` treats a queue row older than `OUTGOING_GRACE_MS` (60 s) as no longer
+ * owned by its live UI send, but uploads are bandwidth-bound and routinely run longer, gated or
+ * not. The retry drain therefore skips any temp guid still in `uploadRegistry`
+ * ({@link UploadRegistry.has}), so it never claims a send this process is still uploading.
  */
 
 export const DEFAULT_MAX_CONCURRENT_UPLOADS = 2;
@@ -122,6 +120,8 @@ export interface UploadRegistry {
    * Returns a release function to call when the attempt ends.
    */
   add(key: string, handle: CancellableUpload): () => void;
+  /** True while any attempt is still registered under `key`. */
+  has(key: string): boolean;
   /** Stop the upload registered under `key`. Returns false when there is nothing in flight. */
   cancel(key: string): boolean;
   /**
@@ -180,6 +180,9 @@ export function createUploadRegistry(): UploadRegistry {
         current?.delete(handle);
         if (current?.size === 0) byKey.delete(key);
       };
+    },
+    has(key) {
+      return byKey.has(key);
     },
     cancel(key) {
       const handles = byKey.get(key);

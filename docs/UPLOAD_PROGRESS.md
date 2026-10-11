@@ -145,14 +145,19 @@ reissues native cancellation before joining the same exact tail.
 `reconcileOutgoingError` is UPDATE-only and returns early when the queue row is gone, so it can
 never resurrect a cancelled send.
 
-### Known interaction (pre-existing, not caused by the gate)
+### Long uploads and the retry drain
 
 `listRetryableOutgoing` treats a queue row older than `OUTGOING_GRACE_MS` (60 s) as no longer owned
-by its live UI send, so a very large batch can have its tail claimed by the retry drain while the
-first send is still running. The gate does not create this — uploads are bandwidth-bound, so the
-same 20 files run past 60 s unbounded too (all 20 sharing the link); the gate only changes which
-finish first. The re-send reuses the original temp guid, so the server's idempotency cache absorbs
-it. Worth fixing properly one day by having the drain skip temp guids currently in `uploadRegistry`.
+by its live UI send, but uploads are bandwidth-bound and routinely run longer (a 10 MiB photo on a
+weak link, or the tail of a 20-file batch sharing the link). The drain used to claim such a row
+mid-upload: a one-shot iMessage attachment was retired as "Delivery may have occurred" while its
+progress ring was still moving, and an RCS attachment started a second upload of the same file.
+
+The drain now skips any temp guid still registered in `uploadRegistry` (`uploadRegistry.has`). The
+registry holds every attempt from before its first await until it settles, so the skip covers the
+file pre-flight, the gate wait, and the transfer. It is in-memory on purpose: an upload can only be
+in flight in a live process, and a killed process leaves the registry empty, so the drain takes the
+row over exactly as before.
 
 ---
 
