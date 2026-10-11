@@ -1,6 +1,53 @@
 # App ↔ Server Parity
 
+## Checkpoint setup and server presence checks — 2026-10-11
+
+The provider-scoped crawl in the next section can finish only while the Mac's `chat.db` does not
+change. On an active account it failed and, until this change, blocked all ordinary sync. Host-tested
+app behavior in `src/services/sync/providerRepair.ts`:
+
+- **A repair never blocks sync.** A failed repair is logged; the chat list, RCS refresh and incremental
+  (or first) sync still run, and only a user-started repair reports its failure afterwards. Automatic
+  attempts wait 15 minutes, doubling to 24 hours (±20%), per provider identity
+  (`sync.messageState.imessage.repairBackoff`).
+- **Automatic repairs install from the checkpoint.** Version 2 `begin` returns a self-contained ledger
+  checkpoint; the app cancels the lease at once and installs the authority there. The ledger covers
+  everything fetched afterwards; messages already on the phone are recorded for a deleted-message
+  check (`sync.messageState.imessage.audit`).
+- **The check trusts only typed presence answers.** It runs only when the server advertises
+  `supports_message_state_presence` (`POST /sync/message-state/presence`, up to 500 GUIDs; the app
+  asks for 200). Each answer is `active` in exactly one chat, `absent`, or `ambiguous`, at a ledger
+  position no older than the checkpoint. Retained deletions are settled first: restored only when
+  `active` in the same chat, and an ownerless one takes the answer's chat only without a conflict.
+  Then visible Apple messages are hidden only when `absent`. Proven answers are stamped at the
+  answer's position; unproven older-ledger deletions keep their old ledger. Each 25-row batch re-reads
+  its plan in its own transaction and writes nothing if anything changed. Any error, including an
+  untyped 404 or a mismatched answer, pauses without advancing. An automatic sync checks at most
+  2,000 rows or 15 seconds per run.
+- **Catch-up.** A restoration already decided by a newer stored transition is not hydrated; a
+  conflicting transition at the same position requests a repair instead of failing every later sync.
+- **Full Repair.** On a presence server it installs from a fresh checkpoint, re-downloads every Apple
+  chat's full history with ordinary reads (RCS keeps its bounded refresh), and runs the check to
+  completion. As the crawl did, each page's chat is bound to its messages' ownerless server receipts
+  before the page is saved, and any chat that cannot be downloaded fails the repair. A check that does
+  not finish is reported as a limited refresh that continues on later syncs. Pages are read by offset,
+  so a deletion on the Mac during a chat's download can shift one older message past the next page; a
+  later Full Repair reads it. Servers without presence keep the snapshot crawl.
+- **Sync bookmark.** A new provider identity means a different Messages database. Setup clears the
+  row-id bookmark in its own transaction, incremental sync waits until setup succeeds, and the first
+  sync restarts the bookmark at the newest Apple message the server's chat list names before any
+  history is fetched, never at this phone's own rows or at RCS rows. Full Repair restarts it the same
+  way, but keeps an existing bookmark when the server lists no newest message. A ledger reset on the
+  same database, and a bookmark saved before message-state sync existed, keep the bookmark.
+
+Server dependency: the presence route and flag are on server branch `step8/batch-presence`
+(`c5fef29d`), not deployed as of this entry. Until then the check stays recorded and Full Repair keeps
+the crawl. This is host-test evidence only; it claims no device or packaged-server acceptance.
+
 ## Versioned provider recovery — 2026-10-03 candidate
+
+Since 2026-10-11, automatic repairs and Full Repair on presence servers no longer use this crawl; see
+the section above.
 
 `POST /sync/message-state` version 1 and provider-scoped `/sync/repair-snapshot` version 2
 separate Apple Messages history (including Apple SMS) from RCS. The client accepts the new
