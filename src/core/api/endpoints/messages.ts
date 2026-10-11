@@ -85,6 +85,9 @@ const KNOWN_IMESSAGE_PLAIN_TEXT_ERRORS = new Map<string, number>([
   ['imessage_plain_text_rejected', 409],
   ['imessage_plain_text_outcome_unknown', 409],
   ['idempotency_outcome_unknown', 500],
+  // Refused by the retry cache before the helper runs; the failure handler reads them as not sent.
+  ['idempotency_key_invalid', 400],
+  ['idempotency_key_reused', 409],
 ]);
 
 /** Only exact reviewed status/type pairs prove that the mention helper did not dispatch. */

@@ -163,6 +163,29 @@ describe('narrow plain iMessage endpoint', () => {
     expect(isRetryableIMessagePlainTextUnavailable(error)).toBe(false);
   });
 
+  it.each([
+    [
+      'an invalid retry key',
+      ApiError.fromStatus(400, 'invalid', undefined, 'idempotency_key_invalid'),
+    ],
+    [
+      'a retry key used for a different request',
+      ApiError.fromStatus(409, 'reused', undefined, 'idempotency_key_reused'),
+    ],
+  ])('passes %s through intact so it reads as not sent', async (_label, error) => {
+    const post = jest.fn(async () => {
+      throw error;
+    });
+    await expect(
+      sendIMessagePlainText({ post } as unknown as HttpClient, {
+        chatGuid,
+        message: 'hello',
+        tempGuid,
+      }),
+    ).rejects.toBe(error);
+    expect(isRetryableIMessagePlainTextUnavailable(error)).toBe(false);
+  });
+
   it('treats an unreadable success response as possibly sent', async () => {
     const malformedBody = new ApiError('parse_error', 'Response body could not be read', 200);
     const post = jest.fn(async () => {
