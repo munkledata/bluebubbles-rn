@@ -49,7 +49,7 @@ let mockUnsavedChangesOptions:
       message?: string;
     }
   | undefined;
-const mockNavigateWithoutPrompt = (navigate: () => void): void => navigate();
+const mockNavigateWithoutPrompt = jest.fn((navigate: () => void): void => navigate());
 // Per-uri fake filesystem for the forwarded-attachment validation (File.exists/.size).
 // Referenced LAZILY from the mock class's getters (safe under factory hoisting, like
 // mockSearchParams), and reset in beforeEach.
@@ -338,6 +338,7 @@ function expectImageUriHost(tree: unknown, uri = PRIVATE_URI): void {
 }
 
 beforeEach(() => {
+  mockNavigateWithoutPrompt.mockReset().mockImplementation((navigate) => navigate());
   clearForwardAttachmentHandoffs();
   resumeRealtimeDeliveries();
   mockSearchParams = {};
@@ -390,6 +391,56 @@ async function addRecipient(address: string): Promise<void> {
     fireEvent(toInput, 'submitEditing');
   });
 }
+
+describe('NewChatScreen — opening an existing conversation', () => {
+  const openIt = async (): Promise<void> => {
+    await fireEvent.press(await screen.findByRole('button', { name: /Open it/ }));
+  };
+  beforeEach(() => {
+    useSessionStore.setState({
+      serverInfo: ServerInfo.parse({ version: 'test', supports_imessage_new_chat: true }),
+    });
+    mockFindChat.mockResolvedValue(PRIVATE_EXISTING_GUID);
+  });
+
+  it('opens it with a shared item, keeping the share instead of asking to discard it', async () => {
+    stageShare(SECOND_SHARE_BATCH);
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient(PRIVATE_ADDRESS);
+
+    await openIt();
+
+    expect(mockNavigateWithoutPrompt).toHaveBeenCalledTimes(1);
+    expect(mockReplace).toHaveBeenCalledWith(
+      `/chat/${encodeURIComponent(PRIVATE_EXISTING_GUID)}?shareBatch=${encodeURIComponent(SECOND_SHARE_BATCH)}`,
+    );
+    expect(mockDiscardShareIntakeBatch).not.toHaveBeenCalled();
+  });
+
+  it('opens it without asking when only the recipient was chosen', async () => {
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient(PRIVATE_ADDRESS);
+
+    await openIt();
+
+    expect(mockNavigateWithoutPrompt).toHaveBeenCalledTimes(1);
+    expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent(PRIVATE_EXISTING_GUID)}`);
+  });
+
+  it('leaves the discard question to the guard when typed text would not carry over', async () => {
+    await renderWithTheme(<NewChatScreen />);
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Message'), 'Typed before choosing');
+    });
+    await addRecipient(PRIVATE_ADDRESS);
+
+    await openIt();
+
+    // The real guard asks "Discard new message?" for this replace; it never touches a share.
+    expect(mockNavigateWithoutPrompt).not.toHaveBeenCalled();
+    expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent(PRIVATE_EXISTING_GUID)}`);
+  });
+});
 
 describe('NewChatScreen — service-scoped creation boundary', () => {
   it('creates one RCS conversation when the authoritative capability is available', async () => {

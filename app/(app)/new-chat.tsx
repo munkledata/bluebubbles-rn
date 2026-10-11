@@ -770,14 +770,22 @@ export default function NewChatScreen(): React.JSX.Element {
 
           {existingGuid ? (
             <Pressable
+              accessibilityRole="button"
               disabled={busy}
               onPress={() => {
                 if (!screenInteractionIsCurrent()) return;
-                router.replace(
-                  initialContent.batchId
-                    ? `/chat/${encodeURIComponent(existingGuid)}?shareBatch=${encodeURIComponent(initialContent.batchId)}`
-                    : `/chat/${encodeURIComponent(existingGuid)}`,
-                );
+                const destination = initialContent.batchId
+                  ? `/chat/${encodeURIComponent(existingGuid)}?shareBatch=${encodeURIComponent(initialContent.batchId)}`
+                  : `/chat/${encodeURIComponent(existingGuid)}`;
+                // A share travels with the route, so it must never reach the guard's discard, which
+                // deletes it; with nothing typed, staged or forwarded there is nothing to ask about.
+                // Otherwise the guard asks before dropping work that does not carry over.
+                const sharedItemTravels = initialContent.batchId !== null;
+                const nothingAuthored =
+                  message.length === 0 && staged.length === 0 && initialForwardHandoff == null;
+                if (sharedItemTravels || nothingAuthored)
+                  navigateWithoutPrompt(() => router.replace(destination));
+                else router.replace(destination);
               }}
               style={[styles.existing, { backgroundColor: theme.color.secondaryBackground }]}
             >
