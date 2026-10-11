@@ -61,6 +61,10 @@ jest.mock('@/services/notifications/fcmEncryptionState', () => ({
   readFcmDeviceEncryptionState: jest.fn(),
   writeFcmDeviceEncryptionState: jest.fn(),
 }));
+jest.mock('@react-native-firebase/messaging', () => ({
+  getMessaging: () => ({}),
+  getToken: async () => 'fcm-token',
+}));
 jest.mock('@/services/notifications/fcmRegistrationCoordinator', () => ({
   runSerializedFcmRegistration: mockRunSerializedFcmRegistration,
 }));
@@ -68,7 +72,12 @@ jest.mock('@/services/notifications/fcmRegistrationCoordinator', () => ({
 // eslint-disable-next-line import/first
 import { ApiError } from '@core/api/errors';
 // eslint-disable-next-line import/first
-import { FCM_PUSH_ENCRYPTION_TYPE_V3 } from '@core/realtime';
+import { FCM_PUSH_ENCRYPTION_TYPE_V3, revokedFcmDeviceEncryptionState } from '@core/realtime';
+// eslint-disable-next-line import/first
+import {
+  readFcmDeviceEncryptionState,
+  writeFcmDeviceEncryptionState,
+} from '@/services/notifications/fcmEncryptionState';
 // eslint-disable-next-line import/first
 import {
   beginScopedCredentialReplacement,
@@ -268,4 +277,48 @@ it('retains candidate custody when self-revocation receives a generic 401', asyn
     expect.any(Function),
   );
   expect(mockRevokeSelf).toHaveBeenCalledTimes(1);
+});
+
+it('adopts a device credential after Disconnect left a revoked push-key marker', async () => {
+  // Disconnect replaces a V3 key with a keyless marker; adoption is the documented way back.
+  jest.mocked(readFcmDeviceEncryptionState).mockResolvedValue({
+    kind: 'valid',
+    state: revokedFcmDeviceEncryptionState(FCM_PUSH_ENCRYPTION_TYPE_V3),
+  });
+  jest.mocked(writeFcmDeviceEncryptionState).mockClear();
+  mockBeginCredentialUpgradeRuntime.mockImplementationOnce(
+    async (
+      _candidate: string,
+      dependencies: {
+        prepareV3Registration(origin: string): Promise<{
+          name: string;
+          provider: 'fcm';
+          token: string;
+          pushEncryption: { type: typeof FCM_PUSH_ENCRYPTION_TYPE_V3; key: string };
+        }>;
+        persistPendingV3(
+          origin: string,
+          registration: Awaited<ReturnType<typeof dependencies.prepareV3Registration>>,
+        ): Promise<void>;
+      },
+    ) => {
+      const registration = await dependencies.prepareV3Registration(mockSession.origin);
+      expect(registration.pushEncryption.type).toBe(FCM_PUSH_ENCRYPTION_TYPE_V3);
+      await dependencies.persistPendingV3(mockSession.origin, registration);
+      expect(writeFcmDeviceEncryptionState).toHaveBeenCalledWith(
+        mockVault,
+        expect.objectContaining({
+          encryptionType: FCM_PUSH_ENCRYPTION_TYPE_V3,
+          status: 'pending',
+          key: registration.pushEncryption.key,
+          origin: mockSession.origin,
+        }),
+      );
+      return { kind: 'adopted' as const };
+    },
+  );
+
+  await expect(beginScopedCredentialUpgrade(`bbd_device_v1_${'Z'.repeat(43)}`)).resolves.toEqual({
+    kind: 'adopted',
+  });
 });

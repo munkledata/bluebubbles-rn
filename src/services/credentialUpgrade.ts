@@ -150,10 +150,9 @@ function createRuntimeDependencies(
         readFcmDeviceEncryptionState(vault),
       ]);
       if (!isCurrent()) throw new Error('credential upgrade was cancelled');
-      if (
-        stored.kind === 'invalid' ||
-        (stored.kind === 'valid' && stored.state.status === 'revoked')
-      ) {
+      // Disconnect leaves a revoked, keyless marker: it is no active key, so adoption mints a fresh
+      // V3 key exactly as a scoped login does. Only an unreadable record stays ineligible.
+      if (stored.kind === 'invalid') {
         throw new Error('FCM encryption state is not eligible for credential adoption');
       }
       if (
@@ -192,10 +191,8 @@ function createRuntimeDependencies(
       }
       const stored = await readFcmDeviceEncryptionState(vault);
       if (!isCurrent()) throw new Error('credential upgrade was cancelled');
-      if (
-        stored.kind === 'invalid' ||
-        (stored.kind === 'valid' && stored.state.status === 'revoked')
-      ) {
+      // A revoked marker is replaced by the pending fresh key (see prepareV3Registration).
+      if (stored.kind === 'invalid') {
         throw new Error('FCM encryption state is not eligible for credential adoption');
       }
       if (stored.kind === 'valid' && stored.state.status !== 'revoked') {
