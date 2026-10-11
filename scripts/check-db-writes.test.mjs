@@ -3333,7 +3333,7 @@ test('certifies exactly the reviewed SHARE-02 intake delegation edges', () => {
     findings.map(({ id, target, detectedContext }) => [id, target, detectedContext]).sort(),
     [
       [
-        'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:06edea0af9>.<callback:f613d3ead3>:mutator-call:96070fc1908f',
+        'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:6507bcabdf>.<callback:f613d3ead3>:mutator-call:17abad682076',
         'src/services/share/shareIntake.ts#readShareIntakeReceipt',
         'coordinated-delegation',
       ],
@@ -7436,7 +7436,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     selected.map((finding) => finding.id).sort(),
     [
       'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:a2637fe808>.<callback:de6db739c6>:mutator-call:ecf46f2d08d9',
-      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:06edea0af9>.<callback:f613d3ead3>:mutator-call:96070fc1908f',
+      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:6507bcabdf>.<callback:f613d3ead3>:mutator-call:17abad682076',
       'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:414f8cbf59>.<callback:5a7bad110f>:mutator-call:599fa6a378a7',
       'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:b8617f0f25>.<callback:16329d1004>:mutator-call:afd0ed6f1e46',
       'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:c8deb5b511>.<callback:293e0b6208>:mutator-call:a4cbb531c586',

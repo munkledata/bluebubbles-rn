@@ -859,6 +859,27 @@ describe('ChatScreen — exact native share handoff', () => {
     expect(screen.queryByText('Preparing shared item…')).toBeNull();
   });
 
+  it('redirects its own share to the receipt destination without asking to discard it', async () => {
+    configureRcsChat();
+    stageExactShare();
+    mockGetShareIntakeReceipt.mockResolvedValue({
+      destination: { chatGuid: 'iMessage;-;elsewhere@example.test', routeKind: 'existing_chat' },
+      newChatPlan: null,
+      items: {},
+    });
+    // Expo Router runs the removal guard synchronously inside replace.
+    mockReplace.mockImplementationOnce(() => {
+      const guard = mockUsePreventRemove.mock.calls[mockUsePreventRemove.mock.calls.length - 1];
+      if (guard?.[0]) guard[1]({ data: { action: { type: 'REPLACE' } } });
+    });
+
+    await renderWithTheme(<ChatScreen />);
+
+    await waitFor(() => expect(mockReplace).toHaveBeenCalled());
+    expect(mockShowConfirm).not.toHaveBeenCalled();
+    expect(mockNavigationDispatch).toHaveBeenCalledWith({ type: 'REPLACE' });
+  });
+
   it('returns a plan-owned share to new-chat instead of exposing the wrong composer', async () => {
     configureRcsChat();
     stageExactShare();
@@ -2553,6 +2574,81 @@ describe('ChatScreen — keyboard avoidance contract', () => {
       expect(mockNavigationDispatch).not.toHaveBeenCalled();
     },
   );
+
+  const latestGuard = () =>
+    mockUsePreventRemove.mock.calls[mockUsePreventRemove.mock.calls.length - 1];
+
+  it('opens another chat from a notification tap without closing layers first', async () => {
+    await renderWithTheme(<ChatScreen />);
+    await longPressMessage(makeMsg({ guid: 'm1' }));
+    await run(() => mockCaptured.overlay!.onSelect());
+    expect(latestGuard()?.[0]).toBe(true);
+
+    const openOtherChat = { type: 'REPLACE', payload: { name: 'chat/[guid]' } };
+    await run(() => latestGuard()?.[1]({ data: { action: openOtherChat } }));
+
+    expect(mockNavigationDispatch).toHaveBeenCalledWith(openOtherChat);
+    expect(mockShowConfirm).not.toHaveBeenCalled();
+  });
+
+  it('leaves for another chat while the attachment tray is open', async () => {
+    await renderWithTheme(<ChatScreen />);
+    const dismissAttachmentTray = jest.fn();
+    await run(() =>
+      mockCaptured.composer!.onRemovalStateChange({
+        hasUnsavedDraftMetadata: false,
+        hasOpenAttachmentTray: true,
+        dismissAttachmentTray,
+      }),
+    );
+
+    await run(() => latestGuard()?.[1]({ data: { action: { type: 'NAVIGATE' } } }));
+
+    expect(mockNavigationDispatch).toHaveBeenCalledWith({ type: 'NAVIGATE' });
+    expect(dismissAttachmentTray).not.toHaveBeenCalled();
+  });
+
+  it('asks once before another chat discards staged attachments', async () => {
+    await renderWithTheme(<ChatScreen />);
+    await run(() =>
+      mockCaptured.composer!.onRemovalStateChange({
+        hasUnsavedDraftMetadata: true,
+        hasOpenAttachmentTray: true,
+        dismissAttachmentTray: jest.fn(),
+      }),
+    );
+
+    await run(() => latestGuard()?.[1]({ data: { action: { type: 'REPLACE' } } }));
+
+    expect(mockShowConfirm).toHaveBeenCalledTimes(1);
+    expect(mockShowConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Discard message attachments?' }),
+    );
+    expect(mockNavigationDispatch).not.toHaveBeenCalled();
+    const confirmation = mockShowConfirm.mock.calls[0]?.[0] as { onConfirm?: () => void };
+    await run(() => confirmation.onConfirm?.());
+    expect(mockNavigationDispatch).toHaveBeenCalledWith({ type: 'REPLACE' });
+  });
+
+  it('asks before another chat discards an unsaved edit', async () => {
+    await renderWithTheme(<ChatScreen />);
+    await run(() =>
+      mockCaptured.composer!.onRemovalStateChange({
+        hasUnsavedDraftMetadata: false,
+        hasUnsavedEdit: true,
+      }),
+    );
+
+    await run(() => latestGuard()?.[1]({ data: { action: { type: 'REPLACE' } } }));
+
+    expect(mockShowConfirm).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'Discard this edit?' }),
+    );
+    expect(mockNavigationDispatch).not.toHaveBeenCalled();
+    const confirmation = mockShowConfirm.mock.calls[0]?.[0] as { onConfirm?: () => void };
+    await run(() => confirmation.onConfirm?.());
+    expect(mockNavigationDispatch).toHaveBeenCalledWith({ type: 'REPLACE' });
+  });
 
   it('warns that formatted draft metadata will be discarded on route removal', async () => {
     await renderWithTheme(<ChatScreen />);

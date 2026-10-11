@@ -5,6 +5,7 @@ import {
   useNavigation,
   useRoute,
   useRouter,
+  type Href,
 } from 'expo-router';
 import { usePreventRemove } from 'expo-router/react-navigation';
 import { isAggregateRetractionTombstone } from '@core/messages/retraction';
@@ -1168,6 +1169,23 @@ function ChatScreenInner({
     [accountLease, finalizeShareIfReady, guid, ownedShareIdentity],
   );
 
+  // The route's own share redirects keep their batch, so the removal guard below must let them
+  // through. Expo Router runs the guard synchronously inside replace; clear an unused bypass after.
+  const bypassNextRemovalRef = useRef(false);
+  const replaceWithoutPrompt = useCallback(
+    (href: Href): void => {
+      bypassNextRemovalRef.current = true;
+      try {
+        router.replace(href);
+      } finally {
+        queueMicrotask(() => {
+          bypassNextRemovalRef.current = false;
+        });
+      }
+    },
+    [router],
+  );
+
   // Load the durable receipt before exposing native files. A replay filters already-admitted file
   // ordinals and forces any partially handled batch back to its original destination.
   useEffect(() => {
@@ -1181,13 +1199,15 @@ function ChatScreenInner({
         if (outcome === 'paused' || !alive || !accountLease.isCurrent()) return;
         const receipt = loadedReceipt;
         if (receipt?.destination && receipt.destination.chatGuid !== guid) {
-          router.replace(
+          replaceWithoutPrompt(
             `/chat/${encodeURIComponent(receipt.destination.chatGuid)}?shareBatch=${encodeURIComponent(ownedShareIdentity.batchId)}`,
           );
           return;
         }
         if (receipt?.newChatPlan && !receipt.destination) {
-          router.replace(`/new-chat?shareBatch=${encodeURIComponent(ownedShareIdentity.batchId)}`);
+          replaceWithoutPrompt(
+            `/new-chat?shareBatch=${encodeURIComponent(ownedShareIdentity.batchId)}`,
+          );
           return;
         }
         setRemainingSharedAttachments(
@@ -1219,7 +1239,7 @@ function ChatScreenInner({
     finalizeShareIfReady,
     guid,
     ownedShareIdentity,
-    router,
+    replaceWithoutPrompt,
     sharedAttachments,
     sharedText,
   ]);
@@ -1306,29 +1326,16 @@ function ChatScreenInner({
     shareBatchPending;
 
   // Android/Header Back peels the active chat layer before removing the route. Ordinary body text
-  // is not included: Composer already flushes it to the per-chat DB draft on route removal.
+  // is not included: Composer already flushes it to the per-chat DB draft on route removal. Any
+  // other removal (opening another chat from a notification or Direct Share, a reset) leaves at
+  // once, asking first only when it would discard an unsaved edit, staged work or a pending share.
   usePreventRemove(shouldHandleBack, ({ data }) => {
-    if (searchOpen) {
-      closeSearch();
+    if (bypassNextRemovalRef.current) {
+      bypassNextRemovalRef.current = false;
+      navigation.dispatch(data.action);
       return;
     }
-    if (selectedGuids != null) {
-      setSelectedGuids(null);
-      return;
-    }
-    if (composerRemovalState.hasOpenAttachmentTray) {
-      composerRemovalState.dismissAttachmentTray?.();
-      return;
-    }
-    if (replyTo) {
-      setReplyTo(null);
-      return;
-    }
-    if (editing) {
-      if (!composerRemovalState.hasUnsavedEdit || backConfirmationPendingRef.current) {
-        if (!composerRemovalState.hasUnsavedEdit) setEditing(null);
-        return;
-      }
+    const confirmDiscardEdit = (onDiscard: () => void): void => {
       backConfirmationPendingRef.current = true;
       showConfirm({
         title: 'Discard this edit?',
@@ -1340,9 +1347,44 @@ function ChatScreenInner({
         },
         onConfirm: () => {
           backConfirmationPendingRef.current = false;
-          setEditing(null);
+          onDiscard();
         },
       });
+    };
+    if (data.action.type === 'GO_BACK' || data.action.type === 'POP') {
+      if (searchOpen) {
+        closeSearch();
+        return;
+      }
+      if (selectedGuids != null) {
+        setSelectedGuids(null);
+        return;
+      }
+      if (composerRemovalState.hasOpenAttachmentTray) {
+        composerRemovalState.dismissAttachmentTray?.();
+        return;
+      }
+      if (replyTo) {
+        setReplyTo(null);
+        return;
+      }
+      if (editing) {
+        if (!composerRemovalState.hasUnsavedEdit || backConfirmationPendingRef.current) {
+          if (!composerRemovalState.hasUnsavedEdit) setEditing(null);
+          return;
+        }
+        confirmDiscardEdit(() => setEditing(null));
+        return;
+      }
+    } else if (composerRemovalState.hasUnsavedEdit === true) {
+      if (!backConfirmationPendingRef.current)
+        confirmDiscardEdit(() => {
+          setEditing(null);
+          navigation.dispatch(data.action);
+        });
+      return;
+    } else if (!composerRemovalState.hasUnsavedDraftMetadata && !shareBatchPending) {
+      navigation.dispatch(data.action);
       return;
     }
     if (
