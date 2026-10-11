@@ -9,12 +9,16 @@ import {
   upsertMessages,
   markMessageDeleted,
   getSyncMarker,
+  kvGet,
   kvSet,
   setSyncMarker,
+  clearLocalCache,
+  localCacheDirty,
 } from '@db/repositories';
 import {
   getMessageStateAuthority,
   applyMessageStateWithinTransaction,
+  PROVIDER_REPAIR_BACKOFF_KEY,
   setMessageStateAuthorityWithinTransaction,
 } from '@db/repositories/messageState';
 import { withDbTransaction } from '@db/transaction';
@@ -477,5 +481,150 @@ describe('provider-scoped repair', () => {
     await expect(f.run()).rejects.toThrow();
     expect(await getMessageStateAuthority(db)).toBeNull();
     expect(f.cancel).toHaveBeenCalled();
+  });
+
+  describe('waiting after a failed repair', () => {
+    const MINUTE_MS = 60_000;
+    const DAY_MS = 24 * 60 * MINUTE_MS;
+    let now = 1_800_000_000_000;
+    beforeEach(() => {
+      now = 1_800_000_000_000;
+      jest.spyOn(Date, 'now').mockImplementation(() => now);
+      // 0.5 is the midpoint of the ±20% jitter, so waits are exact.
+      jest.spyOn(Math, 'random').mockReturnValue(0.5);
+      jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    });
+    afterEach(() => jest.restoreAllMocks());
+
+    function failingRepair() {
+      const f = fixture();
+      const begin = jest.fn(async (): Promise<ProviderRepairLease> => {
+        throw new Error('repair_snapshot_changed');
+      });
+      f.control.beginProviderRepair = begin;
+      return { f, begin };
+    }
+    const backoff = async () =>
+      JSON.parse((await kvGet(db, PROVIDER_REPAIR_BACKOFF_KEY)) ?? 'null');
+
+    it('waits 15 minutes after a failed automatic repair, then doubles the wait', async () => {
+      await setSyncMarker(db, { lastSyncedRowId: 3, lastSyncedTimestamp: 50 });
+      const { f, begin } = failingRepair();
+      const fetchMessagesAfter = jest.spyOn(f.base, 'fetchMessagesAfter');
+
+      await f.runAuto();
+      expect(begin).toHaveBeenCalledTimes(1);
+      expect(await backoff()).toEqual({
+        version: 1,
+        providerEpoch,
+        failures: 1,
+        nextAttemptAt: now + 15 * MINUTE_MS,
+      });
+
+      now += 14 * MINUTE_MS;
+      await f.runAuto();
+      expect(begin).toHaveBeenCalledTimes(1);
+      // Ordinary sync still runs while the repair waits.
+      expect(fetchMessagesAfter).toHaveBeenCalledTimes(2);
+
+      now += 2 * MINUTE_MS;
+      await f.runAuto();
+      expect(begin).toHaveBeenCalledTimes(2);
+      expect((await backoff()).nextAttemptAt).toBe(now + 30 * MINUTE_MS);
+
+      now += 29 * MINUTE_MS;
+      await f.runAuto();
+      expect(begin).toHaveBeenCalledTimes(2);
+    });
+
+    it('never waits longer than a day', async () => {
+      const { f } = failingRepair();
+      await kvSet(
+        db,
+        PROVIDER_REPAIR_BACKOFF_KEY,
+        JSON.stringify({ version: 1, providerEpoch, failures: 20, nextAttemptAt: now - 1 }),
+      );
+
+      await f.runAuto();
+
+      expect(await backoff()).toMatchObject({ failures: 21, nextAttemptAt: now + DAY_MS });
+    });
+
+    it('tries again when the stored wait is impossibly far ahead, as after a clock change', async () => {
+      const { f, begin } = failingRepair();
+      await kvSet(
+        db,
+        PROVIDER_REPAIR_BACKOFF_KEY,
+        JSON.stringify({
+          version: 1,
+          providerEpoch,
+          failures: 3,
+          nextAttemptAt: now + 10 * DAY_MS,
+        }),
+      );
+
+      await f.runAuto();
+
+      expect(begin).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignores a wait recorded for a different provider pairing', async () => {
+      const { f, begin } = failingRepair();
+      await kvSet(
+        db,
+        PROVIDER_REPAIR_BACKOFF_KEY,
+        JSON.stringify({
+          version: 1,
+          providerEpoch: '99999999-9999-4999-8999-999999999999',
+          failures: 4,
+          nextAttemptAt: now + 60 * MINUTE_MS,
+        }),
+      );
+
+      await f.runAuto();
+
+      expect(begin).toHaveBeenCalledTimes(1);
+      expect(await backoff()).toMatchObject({ providerEpoch, failures: 1 });
+    });
+
+    it('lets a user-started repair skip the wait', async () => {
+      const { f, begin } = failingRepair();
+      await f.runAuto();
+
+      await expect(f.run()).rejects.toThrow('repair_snapshot_changed');
+
+      expect(begin).toHaveBeenCalledTimes(2);
+    });
+
+    it('clears the wait once a repair succeeds', async () => {
+      const f = fixture();
+      const succeed = f.control.beginProviderRepair!;
+      f.control.beginProviderRepair = jest
+        .fn<Promise<ProviderRepairLease>, [AbortSignal?]>()
+        .mockRejectedValueOnce(new Error('repair_snapshot_changed'))
+        .mockImplementation((signal) => succeed(signal));
+      await f.runAuto();
+      expect(await backoff()).not.toBeNull();
+
+      now += 16 * MINUTE_MS;
+      await f.runAuto();
+
+      expect(await getMessageStateAuthority(db)).not.toBeNull();
+      expect(await kvGet(db, PROVIDER_REPAIR_BACKOFF_KEY)).toBeNull();
+    });
+
+    it('forgets a pending wait when changing accounts', async () => {
+      await kvSet(
+        db,
+        PROVIDER_REPAIR_BACKOFF_KEY,
+        JSON.stringify({ version: 1, providerEpoch, failures: 1, nextAttemptAt: now + MINUTE_MS }),
+      );
+      expect(await localCacheDirty(db)).toBe(true);
+
+      await clearLocalCache(db);
+
+      expect(await kvGet(db, PROVIDER_REPAIR_BACKOFF_KEY)).toBeNull();
+      expect(await localCacheDirty(db)).toBe(false);
+    });
   });
 });

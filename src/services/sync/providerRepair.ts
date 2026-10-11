@@ -16,6 +16,9 @@ import {
 } from '@db/repositories';
 import {
   getMessageStateAuthority,
+  getProviderRepairBackoff,
+  recordProviderRepairFailureWithinTransaction,
+  clearProviderRepairBackoffWithinTransaction,
   bindSnapshotMessageOwnersWithinTransaction,
   rebaseOldMessageStateBatchWithinTransaction,
   hideSnapshotMessagesWithinTransaction,
@@ -41,6 +44,29 @@ export function supportsMessageStateSync(info: ServerInfo): boolean {
     info.message_state_sync_version === 1 &&
     info.supports_provider_repair_snapshot === true &&
     typeof info.imessage_provider_epoch === 'string'
+  );
+}
+
+const PROVIDER_REPAIR_FIRST_DELAY_MS = 15 * 60 * 1000;
+const PROVIDER_REPAIR_MAX_DELAY_MS = 24 * 60 * 60 * 1000;
+
+/** 15 minutes after the first failure, doubling up to a day, with ±20% jitter that never exceeds it. */
+function providerRepairDelayMs(failures: number): number {
+  const base = Math.min(
+    PROVIDER_REPAIR_FIRST_DELAY_MS * 2 ** (failures - 1),
+    PROVIDER_REPAIR_MAX_DELAY_MS,
+  );
+  return Math.min(Math.round(base * (0.8 + 0.4 * Math.random())), PROVIDER_REPAIR_MAX_DELAY_MS);
+}
+
+/** A failed automatic repair waits; a wait further ahead than the maximum means the clock moved. */
+async function providerRepairIsWaiting(db: AppDatabase, providerEpoch: string): Promise<boolean> {
+  const backoff = await getProviderRepairBackoff(db);
+  const now = Date.now();
+  return (
+    backoff?.providerEpoch === providerEpoch &&
+    now < backoff.nextAttemptAt &&
+    backoff.nextAttemptAt - now <= PROVIDER_REPAIR_MAX_DELAY_MS
   );
 }
 
@@ -96,7 +122,9 @@ export async function syncProviderMessages(
   let repaired = false;
   let repairFailed = false;
   let repairFailure: unknown;
-  if (needsRepair) {
+  if (needsRepair && !options.repair && (await providerRepairIsWaiting(db, providerEpoch))) {
+    logger.debug('[sync] provider repair is waiting for its next attempt; ordinary sync continues');
+  } else if (needsRepair) {
     try {
       if (!controlApi.beginProviderRepair || !controlApi.finishProviderRepair)
         throw new Error('The advertised provider snapshot endpoint is unavailable.');
@@ -253,6 +281,7 @@ export async function syncProviderMessages(
           async (context) => {
             await setSyncMarkerWithinTransaction(context, marker);
             await setMessageStateAuthorityWithinTransaction(context, nextAuthority);
+            await clearProviderRepairBackoffWithinTransaction(context);
           },
           fence.commitGuard,
         );
@@ -267,6 +296,13 @@ export async function syncProviderMessages(
       logger.warn('[sync] provider repair failed; ordinary sync continues', {
         errorName: error instanceof Error ? error.name : 'UnknownError',
       });
+      await withDbTransaction(db, (context) =>
+        recordProviderRepairFailureWithinTransaction(
+          context,
+          providerEpoch,
+          (failures) => Date.now() + providerRepairDelayMs(failures),
+        ),
+      );
     }
   }
   if (shouldAbort()) return progress;

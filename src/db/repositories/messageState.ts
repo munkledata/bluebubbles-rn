@@ -4,13 +4,15 @@ import {
   compareMessageStateSequence,
   type MessageStateChanged,
 } from '@core/models/messageState';
-import { messageServerStates } from '../schema';
+import { kv, messageServerStates } from '../schema';
 import { runInTransactionContext, type DbTransactionContext } from '../transaction';
 import type { AppDatabase } from '../types';
 import { kvGet, kvGetWithinTransaction, kvSetWithinTransaction } from './kv';
 import type { FullRepairMessageExposure } from './repair';
 
 export const MESSAGE_STATE_AUTHORITY_KEY = 'sync.messageState.imessage';
+/** When an automatic provider repair may next run after a failure, for one provider pairing. */
+export const PROVIDER_REPAIR_BACKOFF_KEY = 'sync.messageState.imessage.repairBackoff';
 
 function parseAuthority(raw: string | null): MessageStateAuthority | null {
   if (raw == null) return null;
@@ -46,6 +48,66 @@ export async function setMessageStateAuthorityWithinTransaction(
       MESSAGE_STATE_AUTHORITY_KEY,
       JSON.stringify(MessageStateAuthority.parse(authority)),
     );
+  });
+}
+
+export interface ProviderRepairBackoff {
+  readonly version: 1;
+  readonly providerEpoch: string;
+  /** Consecutive failed repairs for this pairing; resets on success or a new pairing. */
+  readonly failures: number;
+  readonly nextAttemptAt: number;
+}
+
+function parseProviderRepairBackoff(raw: string | null): ProviderRepairBackoff | null {
+  if (raw == null) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<ProviderRepairBackoff> | null;
+    return value?.version === 1 &&
+      typeof value.providerEpoch === 'string' &&
+      Number.isSafeInteger(value.failures) &&
+      (value.failures ?? 0) > 0 &&
+      Number.isSafeInteger(value.nextAttemptAt)
+      ? (value as ProviderRepairBackoff)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getProviderRepairBackoff(
+  db: AppDatabase,
+): Promise<ProviderRepairBackoff | null> {
+  return parseProviderRepairBackoff(await kvGet(db, PROVIDER_REPAIR_BACKOFF_KEY));
+}
+
+/** Count one more failed repair for this pairing and persist when the next one may run. */
+export async function recordProviderRepairFailureWithinTransaction(
+  context: DbTransactionContext,
+  providerEpoch: string,
+  nextAttemptAt: (failures: number) => number,
+): Promise<void> {
+  return runInTransactionContext(context, async () => {
+    const previous = parseProviderRepairBackoff(
+      await kvGetWithinTransaction(context, PROVIDER_REPAIR_BACKOFF_KEY),
+    );
+    const failures = previous?.providerEpoch === providerEpoch ? previous.failures + 1 : 1;
+    const backoff: ProviderRepairBackoff = {
+      version: 1,
+      providerEpoch,
+      failures,
+      nextAttemptAt: nextAttemptAt(failures),
+    };
+    await kvSetWithinTransaction(context, PROVIDER_REPAIR_BACKOFF_KEY, JSON.stringify(backoff));
+  });
+}
+
+/** A finished repair ends any wait; called in the transaction that installs its authority. */
+export async function clearProviderRepairBackoffWithinTransaction(
+  context: DbTransactionContext,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    await db.delete(kv).where(eq(kv.key, PROVIDER_REPAIR_BACKOFF_KEY));
   });
 }
 
