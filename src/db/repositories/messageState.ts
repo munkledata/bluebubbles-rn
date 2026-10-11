@@ -11,6 +11,8 @@ import { kvGet, kvGetWithinTransaction, kvSetWithinTransaction } from './kv';
 import type { FullRepairMessageExposure } from './repair';
 
 export const MESSAGE_STATE_AUTHORITY_KEY = 'sync.messageState.imessage';
+/** A recent outgoing row with no source row id may not have reached chat.db yet; never judge it. */
+export const RECENT_UNFENCED_OUTGOING_GRACE_MS = 60 * 60 * 1000;
 /** Progress of checking messages that were already on the phone when a checkpoint installed. */
 export const MESSAGE_STATE_AUDIT_KEY = 'sync.messageState.imessage.audit';
 /** When an automatic provider repair may next run after a failure, for one provider pairing. */
@@ -125,6 +127,230 @@ export interface MessageStateAudit {
   readonly afterMessageId: number;
   /** Messages above this id arrived after the checkpoint, so they were active when fetched. */
   readonly throughMessageId: number;
+}
+
+function parseMessageStateAudit(raw: string | null): MessageStateAudit | null {
+  if (raw == null) return null;
+  try {
+    const value = JSON.parse(raw) as Partial<MessageStateAudit> | null;
+    return value?.version === 1 &&
+      typeof value.providerEpoch === 'string' &&
+      typeof value.ledgerEpoch === 'string' &&
+      typeof value.snapshotSequence === 'string' &&
+      (value.phase === 'restore' || value.phase === 'hide') &&
+      (value.afterGuid === null || typeof value.afterGuid === 'string') &&
+      Number.isSafeInteger(value.afterMessageId) &&
+      Number.isSafeInteger(value.throughMessageId)
+      ? (value as MessageStateAudit)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function getMessageStateAudit(db: AppDatabase): Promise<MessageStateAudit | null> {
+  return parseMessageStateAudit(await kvGet(db, MESSAGE_STATE_AUDIT_KEY));
+}
+
+export async function getMessageStateAuditWithinTransaction(
+  context: DbTransactionContext,
+): Promise<MessageStateAudit | null> {
+  return runInTransactionContext(context, async () =>
+    parseMessageStateAudit(await kvGetWithinTransaction(context, MESSAGE_STATE_AUDIT_KEY)),
+  );
+}
+
+/** One retained receipt as the restore phase planned it; compared again before any write. */
+export interface MessageStateAuditReceipt {
+  readonly guid: string;
+  readonly chatGuid: string | null;
+  readonly localOwner: string | null;
+  readonly kind: string;
+  readonly providerEpoch: string;
+  readonly ledgerEpoch: string;
+  readonly sequence: string;
+  readonly dateDeleted: number | null;
+}
+
+/** A typed presence answer for one message. */
+export type MessagePresenceAnswer =
+  | { readonly state: 'active'; readonly chatGuid: string }
+  | { readonly state: 'absent' }
+  | { readonly state: 'ambiguous' };
+
+/**
+ * The next retained receipts the restore phase rechecks, in guid order: receipts from an older
+ * ledger, and this ledger's deletions recorded before the audit's checkpoint.
+ */
+export async function readMessageStateAuditReceiptsWithinTransaction(
+  context: DbTransactionContext,
+  audit: MessageStateAudit,
+  limit: number,
+  throughGuid: string | null = null,
+): Promise<MessageStateAuditReceipt[]> {
+  return runInTransactionContext(context, async (db) =>
+    db.all<MessageStateAuditReceipt>(sql`
+      SELECT s.guid, s.chat_guid AS chatGuid, c.guid AS localOwner, s.kind,
+             s.provider_epoch AS providerEpoch, s.ledger_epoch AS ledgerEpoch, s.sequence,
+             s.date_deleted AS dateDeleted
+        FROM message_server_states s
+        LEFT JOIN messages m ON m.guid = s.guid LEFT JOIN chats c ON c.id = m.chat_id
+       WHERE (s.provider_epoch != ${audit.providerEpoch}
+              OR s.ledger_epoch != ${audit.ledgerEpoch}
+              OR (s.kind = 'deleted'
+                  AND (length(s.sequence) < length(${audit.snapshotSequence})
+                       OR (length(s.sequence) = length(${audit.snapshotSequence})
+                           AND s.sequence < ${audit.snapshotSequence}))))
+         AND (${audit.afterGuid} IS NULL OR s.guid > ${audit.afterGuid})
+         AND (${throughGuid} IS NULL OR s.guid <= ${throughGuid})
+       ORDER BY s.guid
+       LIMIT ${limit}
+    `),
+  );
+}
+
+/** Visible Apple messages that were on the phone at the checkpoint, oldest local id first. */
+export async function readMessageStateAuditCandidates(
+  db: AppDatabase,
+  audit: MessageStateAudit,
+  limit: number,
+  now: number,
+): Promise<Array<FullRepairMessageExposure & { chatGuid: string }>> {
+  return db.all(sql`
+    SELECT m.id, m.guid, m.original_row_id AS originalRowId, m.chat_id AS chatId,
+           m.date_created AS dateCreated, c.guid AS chatGuid
+      FROM messages m JOIN chats c ON c.id = m.chat_id
+     WHERE m.id > ${audit.afterMessageId} AND m.id <= ${audit.throughMessageId}
+       AND m.date_deleted IS NULL
+       AND m.guid NOT LIKE 'temp-%'
+       AND m.guid NOT LIKE 'rcs-%'
+       AND c.guid NOT LIKE 'RCS;-;%'
+       AND (m.send_state IS NULL OR m.send_state = 'sent')
+       AND NOT EXISTS (SELECT 1 FROM reminders r WHERE r.message_guid = m.guid)
+       AND NOT (
+         m.is_from_me = 1
+         AND m.original_row_id IS NULL
+         AND m.date_created >= ${now - RECENT_UNFENCED_OUTGOING_GRACE_MS}
+       )
+     ORDER BY m.id ASC
+     LIMIT ${limit}
+  `);
+}
+
+/** The audit and authority a batch was planned against are still the stored ones. */
+export async function messageStateAuditIsCurrentWithinTransaction(
+  context: DbTransactionContext,
+  audit: MessageStateAudit,
+): Promise<boolean> {
+  return runInTransactionContext(context, async () => {
+    const current = await getMessageStateAuditWithinTransaction(context);
+    const authority = await getMessageStateAuthorityWithinTransaction(context);
+    return (
+      JSON.stringify(current) === JSON.stringify(audit) &&
+      authority?.providerEpoch === audit.providerEpoch &&
+      authority.ledgerEpoch === audit.ledgerEpoch &&
+      authority.snapshotSequence === audit.snapshotSequence
+    );
+  });
+}
+
+/**
+ * Settle one planned slice of retained receipts using only proof, or return false without writing
+ * if any receipt or its local owner changed since planning. Proven answers are stamped at `stamp`.
+ * An older ledger's restoration moves to the checkpoint unchanged, and its receipt without an exact
+ * local owner retires, as a finished crawl would do; anything unproven stays exactly as it was.
+ */
+export async function reconcileMessageStateAuditReceiptsWithinTransaction(
+  context: DbTransactionContext,
+  audit: MessageStateAudit,
+  planned: readonly MessageStateAuditReceipt[],
+  answers: ReadonlyMap<string, MessagePresenceAnswer>,
+  stamp: MessageStateAuthority,
+): Promise<boolean> {
+  return runInTransactionContext(context, async (db) => {
+    const last = planned.at(-1);
+    if (!last || planned.length > 25)
+      throw new Error('Message-state audit batch exceeds its bound.');
+    const current = await readMessageStateAuditReceiptsWithinTransaction(
+      context,
+      audit,
+      planned.length + 1,
+      last.guid,
+    );
+    if (JSON.stringify(current) !== JSON.stringify(planned)) return false;
+    for (const receipt of planned) {
+      const answer = answers.get(receipt.guid);
+      if (
+        receipt.providerEpoch === audit.providerEpoch &&
+        receipt.ledgerEpoch === audit.ledgerEpoch
+      ) {
+        // This ledger's deletion from before the checkpoint: only a positive answer in the same
+        // chat restores it, and an ownerless deletion first takes that chat if nothing conflicts.
+        if (
+          answer?.state !== 'active' ||
+          (receipt.chatGuid ?? answer.chatGuid) !== answer.chatGuid ||
+          (receipt.localOwner ?? answer.chatGuid) !== answer.chatGuid ||
+          (receipt.chatGuid == null &&
+            (await hasRetainedMessageOwnerConflictWithinTransaction(
+              context,
+              receipt.guid,
+              answer.chatGuid,
+            )))
+        )
+          continue;
+        await db
+          .update(messageServerStates)
+          .set({
+            chatGuid: answer.chatGuid,
+            kind: 'restored',
+            dateDeleted: null,
+            sequence: stamp.snapshotSequence,
+          })
+          .where(eq(messageServerStates.guid, receipt.guid));
+        await projectMessageStateWithinTransaction(context, receipt.guid, answer.chatGuid, stamp);
+        continue;
+      }
+      if (receipt.chatGuid == null || receipt.chatGuid !== receipt.localOwner) {
+        await db.delete(messageServerStates).where(eq(messageServerStates.guid, receipt.guid));
+        continue;
+      }
+      let settled: { kind: 'restored' | 'deleted'; sequence: string };
+      if (receipt.kind === 'restored')
+        settled = { kind: 'restored', sequence: audit.snapshotSequence };
+      else if (answer?.state === 'active' && answer.chatGuid === receipt.chatGuid)
+        settled = { kind: 'restored', sequence: stamp.snapshotSequence };
+      else if (answer?.state === 'absent')
+        settled = { kind: 'deleted', sequence: stamp.snapshotSequence };
+      // Ambiguous, filed in another chat, or never asked: no proof, so it keeps its old ledger.
+      else continue;
+      await db
+        .update(messageServerStates)
+        .set({
+          providerEpoch: stamp.providerEpoch,
+          ledgerEpoch: stamp.ledgerEpoch,
+          sequence: settled.sequence,
+          kind: settled.kind,
+          dateDeleted: settled.kind === 'restored' ? null : receipt.dateDeleted,
+        })
+        .where(eq(messageServerStates.guid, receipt.guid));
+      await projectMessageStateWithinTransaction(context, receipt.guid, receipt.chatGuid, stamp);
+    }
+    return true;
+  });
+}
+
+/** This ledger's stored transition for one message, if any. */
+export async function getMessageStateTransition(
+  db: AppDatabase,
+  identity: Pick<MessageStateChanged, 'providerEpoch' | 'ledgerEpoch' | 'guid'>,
+): Promise<{ sequence: string; kind: string } | null> {
+  const rows = await db.all<{ sequence: string; kind: string }>(sql`
+    SELECT sequence, kind FROM message_server_states
+     WHERE guid = ${identity.guid} AND provider_epoch = ${identity.providerEpoch}
+       AND ledger_epoch = ${identity.ledgerEpoch}
+     LIMIT 1
+  `);
+  return rows[0] ?? null;
 }
 
 /** Record which messages still need a server check, or clear the record with null. */

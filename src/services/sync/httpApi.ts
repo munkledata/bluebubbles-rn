@@ -26,6 +26,8 @@ export function httpSyncApi(http: HttpClient): SyncApi {
     fetchMessageState: (cursor, signal) => messageStateApi.page(http, cursor, signal),
     fetchActiveMessage: (guid, providerEpoch, signal) =>
       messageStateApi.activeMessage(http, guid, providerEpoch, signal),
+    fetchMessagePresence: (providerEpoch, guids, signal) =>
+      messageStateApi.presence(http, providerEpoch, guids, signal),
     fetchChat: (chatGuid, signal): Promise<Chat> => chatsApi.getChat(http, chatGuid, signal),
     fetchChats: (offset, limit, signal): Promise<Chat[]> =>
       chatsApi.queryChats(http, { offset, limit }, signal),

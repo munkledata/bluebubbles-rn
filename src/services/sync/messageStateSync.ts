@@ -8,6 +8,7 @@ import {
 import {
   applyMessageStateWithinTransaction,
   bindHydratedMessageOwnerWithinTransaction,
+  getMessageStateTransition,
   getMessageStateAuthorityWithinTransaction,
   setMessageStateAuthorityWithinTransaction,
 } from '@db/repositories/messageState';
@@ -119,6 +120,18 @@ export async function syncMessageState(
     const restoredOwners = new Map<string, string>();
     for (const event of latestEvents.values()) {
       if (event.kind !== 'restored' || !api.fetchActiveMessage) continue;
+      const stored = await getMessageStateTransition(db, {
+        providerEpoch: page.providerEpoch,
+        ledgerEpoch: page.ledgerEpoch,
+        guid: event.guid,
+      });
+      // A newer stored transition (for example a presence check's stamp) already decides the
+      // message, and the final owner drops this event, so hydrating it could only fail.
+      if (stored && compareMessageStateSequence(stored.sequence, event.sequence) > 0) continue;
+      // A different transition at this exact position cannot be trusted. Re-establish authority
+      // instead of failing every later sync on the same page.
+      if (stored?.sequence === event.sequence && stored.kind !== event.kind)
+        throw new MessageStateRepairRequiredError();
       const message = await api.fetchActiveMessage(event.guid, page.providerEpoch, options.signal);
       if (!guard()) return;
       if (!message) throw new MessageStateRepairRequiredError();

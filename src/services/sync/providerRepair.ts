@@ -1,7 +1,7 @@
 import { MessageStateRepairRequiredError } from '@core/api/endpoints/messageState';
 import type { ProviderRepairLease } from '@core/api/endpoints/repairSnapshot';
 import { ApiError } from '@core/api/errors';
-import type { MessageStateAuthority } from '@core/models/messageState';
+import { compareMessageStateSequence, type MessageStateAuthority } from '@core/models/messageState';
 import type { ServerInfo } from '@core/models';
 import { logger } from '@core/secure';
 import {
@@ -18,8 +18,16 @@ import {
 } from '@db/repositories';
 import {
   getMessageStateAuthority,
+  getMessageStateAudit,
   getProviderRepairBackoff,
   installCheckpointAuthorityWithinTransaction,
+  messageStateAuditIsCurrentWithinTransaction,
+  readMessageStateAuditCandidates,
+  readMessageStateAuditReceiptsWithinTransaction,
+  reconcileMessageStateAuditReceiptsWithinTransaction,
+  setMessageStateAuditWithinTransaction,
+  type MessagePresenceAnswer,
+  type MessageStateAudit,
   recordProviderRepairFailureWithinTransaction,
   clearProviderRepairBackoffWithinTransaction,
   bindSnapshotMessageOwnersWithinTransaction,
@@ -122,6 +130,218 @@ async function installAuthorityFromCheckpoint(
   );
 }
 
+const MESSAGE_STATE_AUDIT_BUDGET = 2_000;
+const MESSAGE_STATE_AUDIT_TIME_BOX_MS = 15_000;
+const MESSAGE_STATE_AUDIT_REQUEST = 200;
+const MESSAGE_STATE_AUDIT_WRITE_BATCH = 25;
+/** Far longer than any real Apple GUID, yet a full request stays well inside the server's limits. */
+const MESSAGE_STATE_AUDIT_MAX_GUID_LENGTH = 256;
+
+/** One odd local id must never make the server reject, and so stall, a whole batch. */
+function askable(guid: string): boolean {
+  return guid.length > 0 && guid.length <= MESSAGE_STATE_AUDIT_MAX_GUID_LENGTH;
+}
+
+/** Ask for presence and refuse any answer that does not name exactly the requested messages. */
+async function presenceOf(
+  fetchPresence: NonNullable<SyncApi['fetchMessagePresence']>,
+  providerEpoch: string,
+  guids: readonly string[],
+  signal?: AbortSignal,
+): Promise<Awaited<ReturnType<typeof fetchPresence>>> {
+  const answer = await fetchPresence(providerEpoch, guids, signal);
+  if (
+    answer.providerEpoch !== providerEpoch ||
+    answer.results.length !== guids.length ||
+    answer.results.some((result, index) => result.guid !== guids[index])
+  )
+    throw new Error('Message presence answer does not match its request.');
+  return answer;
+}
+
+/** Stamp at the answer's ledger position, which is never older than the audit's checkpoint. */
+function stampAt(authority: MessageStateAuthority, sequence: string): MessageStateAuthority {
+  return compareMessageStateSequence(sequence, authority.snapshotSequence) > 0
+    ? { ...authority, snapshotSequence: sequence }
+    : authority;
+}
+
+/**
+ * Reconcile messages that were already on the phone when a checkpoint authority installed, using
+ * only the server's typed batch presence answers: first settle retained deletions (restoring what
+ * the server positively still has in the same chat), then hide visible messages it positively
+ * reports absent. Ambiguous answers prove nothing. Each write batch rechecks its plan and the audit
+ * inside its own transaction and commits with its progress; any error pauses without advancing.
+ */
+async function auditMessagesOnPhone(
+  db: AppDatabase,
+  options: ProviderSyncOptions,
+  providerEpoch: string,
+): Promise<void> {
+  const { api, serverInfo, shouldAbort, signal } = options;
+  const fetchPresence = api.fetchMessagePresence;
+  if (serverInfo.supports_message_state_presence !== true || !fetchPresence) return;
+  const keepGoing = () => !shouldAbort();
+  let budget = options.auditBudget ?? MESSAGE_STATE_AUDIT_BUDGET;
+  const deadline = Date.now() + MESSAGE_STATE_AUDIT_TIME_BOX_MS;
+  try {
+    while (budget > 0 && !shouldAbort() && Date.now() < deadline) {
+      const audit = await getMessageStateAudit(db);
+      const authority = await getMessageStateAuthority(db);
+      if (
+        !audit ||
+        authority?.providerEpoch !== providerEpoch ||
+        audit.providerEpoch !== providerEpoch ||
+        audit.ledgerEpoch !== authority.ledgerEpoch ||
+        audit.snapshotSequence !== authority.snapshotSequence
+      )
+        return;
+      if (audit.phase === 'restore') {
+        // Planned inside an owner, so another writer's uncommitted rows are never planned.
+        const planned = await withDbTransaction(
+          db,
+          (context) =>
+            readMessageStateAuditReceiptsWithinTransaction(
+              context,
+              audit,
+              Math.min(MESSAGE_STATE_AUDIT_REQUEST, budget),
+            ),
+          keepGoing,
+        );
+        budget -= Math.max(planned.length, 1);
+        if (planned.length === 0) {
+          const advanced = await withDbTransaction(
+            db,
+            async (context) => {
+              if (!(await messageStateAuditIsCurrentWithinTransaction(context, audit)))
+                return false;
+              await setMessageStateAuditWithinTransaction(context, { ...audit, phase: 'hide' });
+              return true;
+            },
+            keepGoing,
+          );
+          if (!advanced) return;
+          continue;
+        }
+        // Ask about every retained deletion a positive answer could settle, including this
+        // ledger's deletions of messages the phone never downloaded.
+        const asked = planned.filter(
+          (receipt) =>
+            receipt.kind === 'deleted' &&
+            askable(receipt.guid) &&
+            ((receipt.providerEpoch === audit.providerEpoch &&
+              receipt.ledgerEpoch === audit.ledgerEpoch) ||
+              (receipt.chatGuid != null && receipt.chatGuid === receipt.localOwner)),
+        );
+        let stamp = authority;
+        const answers = new Map<string, MessagePresenceAnswer>();
+        if (asked.length > 0) {
+          const answer = await presenceOf(
+            fetchPresence,
+            providerEpoch,
+            asked.map((receipt) => receipt.guid),
+            signal,
+          );
+          if (shouldAbort() || answer.ledgerEpoch !== authority.ledgerEpoch) return;
+          stamp = stampAt(authority, answer.sequence);
+          for (const result of answer.results) answers.set(result.guid, result);
+        }
+        let expected = audit;
+        for (let offset = 0; offset < planned.length; offset += MESSAGE_STATE_AUDIT_WRITE_BATCH) {
+          const slice = planned.slice(offset, offset + MESSAGE_STATE_AUDIT_WRITE_BATCH);
+          const settled = expected;
+          const next: MessageStateAudit = { ...settled, afterGuid: slice.at(-1)!.guid };
+          const advanced = await withDbTransaction(
+            db,
+            async (context) => {
+              if (!(await messageStateAuditIsCurrentWithinTransaction(context, settled)))
+                return false;
+              // Writes nothing if a planned receipt or its local owner changed meanwhile.
+              if (
+                !(await reconcileMessageStateAuditReceiptsWithinTransaction(
+                  context,
+                  settled,
+                  slice,
+                  answers,
+                  stamp,
+                ))
+              )
+                return false;
+              await setMessageStateAuditWithinTransaction(context, next);
+              return true;
+            },
+            keepGoing,
+          );
+          if (!advanced) return;
+          expected = next;
+        }
+        continue;
+      }
+      const candidates = await readMessageStateAuditCandidates(
+        db,
+        audit,
+        Math.min(MESSAGE_STATE_AUDIT_REQUEST, budget),
+        Date.now(),
+      );
+      if (candidates.length === 0) {
+        await withDbTransaction(
+          db,
+          async (context) => {
+            if (await messageStateAuditIsCurrentWithinTransaction(context, audit))
+              await setMessageStateAuditWithinTransaction(context, null);
+          },
+          keepGoing,
+        );
+        return;
+      }
+      budget -= candidates.length;
+      const asked = candidates.filter((row) => askable(row.guid));
+      let stamp = authority;
+      const absent = new Set<string>();
+      if (asked.length > 0) {
+        const answer = await presenceOf(
+          fetchPresence,
+          providerEpoch,
+          asked.map((row) => row.guid),
+          signal,
+        );
+        if (shouldAbort() || answer.ledgerEpoch !== authority.ledgerEpoch) return;
+        stamp = stampAt(authority, answer.sequence);
+        for (const result of answer.results) if (result.state === 'absent') absent.add(result.guid);
+      }
+      let planned = audit;
+      for (let offset = 0; offset < candidates.length; offset += MESSAGE_STATE_AUDIT_WRITE_BATCH) {
+        const chunk = candidates.slice(offset, offset + MESSAGE_STATE_AUDIT_WRITE_BATCH);
+        const expected = planned;
+        const next: MessageStateAudit = { ...expected, afterMessageId: chunk.at(-1)!.id };
+        const advanced = await withDbTransaction(
+          db,
+          async (context) => {
+            if (!(await messageStateAuditIsCurrentWithinTransaction(context, expected)))
+              return false;
+            // Ambiguous and elsewhere-filed messages stay visible; only positive absence hides.
+            await hideSnapshotMessagesWithinTransaction(
+              context,
+              chunk.filter((row) => absent.has(row.guid)),
+              stamp,
+            );
+            await setMessageStateAuditWithinTransaction(context, next);
+            return true;
+          },
+          keepGoing,
+        );
+        if (!advanced) return;
+        planned = next;
+      }
+    }
+  } catch (error) {
+    if (shouldAbort()) return;
+    logger.warn('[sync] deleted-message check paused; it resumes on a later sync', {
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    });
+  }
+}
+
 export interface ProviderSyncOptions {
   api: SyncApi;
   /** Pinned transport; the bound reader must verify the server's snapshot header echo. */
@@ -133,6 +353,8 @@ export interface ProviderSyncOptions {
   messagesPerChat?: number;
   /** Set only by this module when the ledger demands a repair mid-run; a failure stays silent. */
   forceRepair?: boolean;
+  /** Most messages one run checks against the server's presence answers. */
+  auditBudget?: number;
   shouldAbort: () => boolean;
   signal?: AbortSignal;
   onProgress?: (progress: SyncProgress) => void;
@@ -344,6 +566,8 @@ export async function syncProviderMessages(
               await setSyncMarkerWithinTransaction(context, marker);
               await setMessageStateAuthorityWithinTransaction(context, nextAuthority);
               await clearProviderRepairBackoffWithinTransaction(context);
+              // A finished crawl reconciled every local row; any pending presence audit is obsolete.
+              await setMessageStateAuditWithinTransaction(context, null);
             },
             fence.commitGuard,
           );
@@ -435,6 +659,8 @@ export async function syncProviderMessages(
       throw error;
     }
   }
+  if (!shouldAbort() && (!needsRepair || repaired || installedFromCheckpoint))
+    await auditMessagesOnPhone(db, options, providerEpoch);
   if (options.repair && repairFailed) throw repairFailure;
   return progress;
 }

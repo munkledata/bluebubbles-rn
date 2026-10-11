@@ -2,7 +2,10 @@ import type Database from 'better-sqlite3';
 import { Chat, Message, ServerInfo } from '@core/models';
 import { logger } from '@core/secure';
 import type { ProviderRepairLease } from '@core/api/endpoints/repairSnapshot';
-import { MessageStateRepairRequiredError } from '@core/api/endpoints/messageState';
+import {
+  MessageStateRepairRequiredError,
+  type MessagePresencePage,
+} from '@core/api/endpoints/messageState';
 import { ApiError } from '@core/api/errors';
 import {
   upsertChats,
@@ -23,9 +26,10 @@ import {
   PROVIDER_REPAIR_BACKOFF_KEY,
   setMessageStateAuthorityWithinTransaction,
 } from '@db/repositories/messageState';
+import * as messageStateRepository from '@db/repositories/messageState';
 import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
-import { syncProviderMessages } from '@/services/sync/providerRepair';
+import { syncProviderMessages, type ProviderSyncOptions } from '@/services/sync/providerRepair';
 import type { SyncApi } from '@/services/sync/types';
 import { createTestDb } from '../support/testDb';
 
@@ -38,6 +42,24 @@ const serverInfo = ServerInfo.parse({
   message_state_sync_version: 1,
   imessage_provider_epoch: providerEpoch,
   supports_provider_repair_snapshot: true,
+});
+/** A server that also answers batch presence; its ledger head has moved past the checkpoint. */
+const presenceInfo = ServerInfo.parse({
+  server_version: '2.0.0',
+  supports_message_state_sync: true,
+  message_state_sync_version: 1,
+  imessage_provider_epoch: providerEpoch,
+  supports_provider_repair_snapshot: true,
+  supports_message_state_presence: true,
+});
+const presenceHead = '12';
+const presencePage = (results: MessagePresencePage['results']): MessagePresencePage => ({
+  version: 1,
+  provider: 'imessage',
+  providerEpoch,
+  ledgerEpoch,
+  sequence: presenceHead,
+  results,
 });
 const lease: ProviderRepairLease = {
   version: 2,
@@ -75,6 +97,35 @@ describe('provider-scoped repair', () => {
     const chats = await upsertChats(db, row.chats!, handles);
     await upsertMessages(db, [row], () => chats.get(owner), handles);
   }
+  /** Deletions recorded under an older ledger, as left by a previous pairing's history. */
+  async function installOldLedgerDeletions(guids: readonly string[]) {
+    const oldLedger = lease.token;
+    await withDbTransaction(db, (context) =>
+      setMessageStateAuthorityWithinTransaction(context, {
+        version: 1,
+        provider: 'imessage',
+        providerEpoch,
+        ledgerEpoch: oldLedger,
+        cursor: 'old-cursor',
+        snapshotSequence: '0',
+        sequence: '0',
+      }),
+    );
+    for (const guid of guids)
+      await withDbTransaction(db, (context) =>
+        applyMessageStateWithinTransaction(context, {
+          version: 1,
+          provider: 'imessage',
+          providerEpoch,
+          ledgerEpoch: oldLedger,
+          sequence: '100',
+          kind: 'deleted',
+          guid,
+          chatGuid,
+          dateDeleted: 100,
+        }),
+      );
+  }
   function fixture(present: string[] = []) {
     const finish = jest.fn(async () => ({
       version: 2 as const,
@@ -92,6 +143,15 @@ describe('provider-scoped repair', () => {
       fetchChats: async () => [],
       fetchChatMessages: async () => [],
       fetchMessagesAfter: async () => [],
+      // The server's typed presence answer agrees with the crawl's present list.
+      fetchMessagePresence: async (_epoch, guids) =>
+        presencePage(
+          guids.map((guid) =>
+            present.includes(guid)
+              ? { guid, state: 'active' as const, chatGuid }
+              : { guid, state: 'absent' as const },
+          ),
+        ),
       fetchMessageState: async () => ({
         version: 1,
         provider: 'imessage',
@@ -133,7 +193,7 @@ describe('provider-scoped repair', () => {
           shouldAbort: () => false,
         }),
       /** An automatic (not user-started) sync that needs a repair because no authority exists. */
-      runAuto: () =>
+      runAuto: (extra: Partial<ProviderSyncOptions> = {}) =>
         syncProviderMessages(db, {
           api: base,
           controlApi: control,
@@ -142,6 +202,7 @@ describe('provider-scoped repair', () => {
           repair: false,
           messagesPerChat: 25,
           shouldAbort: () => false,
+          ...extra,
         }),
     };
   }
@@ -907,6 +968,727 @@ describe('provider-scoped repair', () => {
 
       expect(await kvGet(db, MESSAGE_STATE_AUDIT_KEY)).toBeNull();
       expect(await localCacheDirty(db)).toBe(false);
+    });
+  });
+
+  describe("checking messages with the server's presence answers", () => {
+    beforeEach(() => {
+      jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    });
+    afterEach(() => jest.restoreAllMocks());
+    const dates = () =>
+      raw.prepare('SELECT guid, date_deleted AS d FROM messages ORDER BY guid').all();
+    const record = async () =>
+      JSON.parse((await kvGet(db, MESSAGE_STATE_AUDIT_KEY)) ?? 'null') as {
+        phase: string;
+        afterMessageId: number;
+      } | null;
+    const states = () =>
+      raw
+        .prepare(
+          'SELECT guid, ledger_epoch AS epoch, kind, sequence FROM message_server_states ORDER BY guid',
+        )
+        .all();
+    const withPresence = { serverInfo: presenceInfo };
+
+    it('hides only messages the server reports absent, stamped at its reported position', async () => {
+      await seed('absent');
+      await seed('present');
+      await seed('rcs-local', 'RCS;-;old');
+      const f = fixture(['present']);
+      const lookups = jest.spyOn(f.base, 'fetchMessagePresence');
+
+      await f.runAuto(withPresence);
+
+      expect(dates()).toEqual([
+        { guid: 'absent', d: 0 },
+        { guid: 'present', d: null },
+        { guid: 'rcs-local', d: null },
+      ]);
+      expect(lookups.mock.calls.map(([, guids]) => [...guids].sort())).toEqual([
+        ['absent', 'present'],
+      ]);
+      expect(states()).toEqual([
+        { guid: 'absent', epoch: ledgerEpoch, kind: 'deleted', sequence: presenceHead },
+      ]);
+      expect(await record()).toBeNull();
+    });
+
+    it('leaves ambiguous messages and messages filed in another chat visible', async () => {
+      await seed('twin');
+      await seed('moved');
+      const f = fixture();
+      f.base.fetchMessagePresence = async (_epoch, guids) =>
+        presencePage(
+          guids.map((guid) =>
+            guid === 'twin'
+              ? { guid, state: 'ambiguous' as const }
+              : { guid, state: 'active' as const, chatGuid: 'iMessage;-;elsewhere@example.test' },
+          ),
+        );
+
+      await f.runAuto(withPresence);
+
+      expect(dates()).toEqual([
+        { guid: 'moved', d: null },
+        { guid: 'twin', d: null },
+      ]);
+      expect(await record()).toBeNull();
+    });
+
+    it('pauses without advancing while the server is unavailable, then finishes', async () => {
+      await seed('gone');
+      const f = fixture();
+      f.base.fetchMessagePresence = jest
+        .fn<Promise<MessagePresencePage>, [string, readonly string[], AbortSignal?]>()
+        .mockRejectedValueOnce(
+          new ApiError(
+            'server_error',
+            'busy',
+            503,
+            undefined,
+            undefined,
+            'message_state_unavailable',
+          ),
+        )
+        .mockImplementation(async (_epoch, guids) =>
+          presencePage(guids.map((guid) => ({ guid, state: 'absent' as const }))),
+        );
+
+      await expect(f.runAuto(withPresence)).resolves.toBeDefined();
+      expect(dates()).toEqual([{ guid: 'gone', d: null }]);
+      expect(await record()).toMatchObject({ phase: 'hide', afterMessageId: 0 });
+
+      await f.runAuto(withPresence);
+      expect(dates()).toEqual([{ guid: 'gone', d: 0 }]);
+    });
+
+    it('never treats an untyped not-found or a mismatched answer as a deletion', async () => {
+      await seed('kept');
+      const f = fixture();
+      f.base.fetchMessagePresence = async () => {
+        throw new ApiError('bad_request', 'not found', 404);
+      };
+      await f.runAuto(withPresence);
+      expect(dates()).toEqual([{ guid: 'kept', d: null }]);
+
+      f.base.fetchMessagePresence = async () =>
+        presencePage([{ guid: 'some-other-guid', state: 'absent' as const }]);
+      await f.runAuto(withPresence);
+      expect(dates()).toEqual([{ guid: 'kept', d: null }]);
+      expect(await record()).toMatchObject({ afterMessageId: 0 });
+    });
+
+    it('does nothing until the server advertises presence answers', async () => {
+      await seed('gone');
+      const f = fixture();
+      const lookups = jest.spyOn(f.base, 'fetchMessagePresence');
+
+      await f.runAuto();
+
+      expect(lookups).not.toHaveBeenCalled();
+      expect(dates()).toEqual([{ guid: 'gone', d: null }]);
+      expect(await record()).not.toBeNull();
+    });
+
+    it('resumes across runs within the per-run budget', async () => {
+      for (let index = 0; index < 12; index += 1)
+        await seed(`gone-${String(index).padStart(2, '0')}`);
+      const f = fixture();
+      const hidden = () =>
+        (
+          raw
+            .prepare('SELECT COUNT(*) AS n FROM messages WHERE date_deleted IS NOT NULL')
+            .get() as {
+            n: number;
+          }
+        ).n;
+
+      await f.runAuto({ ...withPresence, auditBudget: 5 });
+      expect(hidden()).toBe(5);
+      await f.runAuto({ ...withPresence, auditBudget: 5 });
+      expect(hidden()).toBe(10);
+      await f.runAuto({ ...withPresence, auditBudget: 5 });
+      expect(hidden()).toBe(12);
+      expect(await record()).toBeNull();
+    });
+
+    it('never hides a message kept for a reminder', async () => {
+      await seed('kept-for-reminder');
+      raw
+        .prepare(
+          `INSERT INTO reminders (message_guid, chat_guid, scheduled_for, notification_id)
+           VALUES ('kept-for-reminder', ?, 1, 'fixture-reminder')`,
+        )
+        .run(chatGuid);
+
+      await fixture().runAuto(withPresence);
+
+      expect(dates()).toEqual([{ guid: 'kept-for-reminder', d: null }]);
+    });
+
+    it('lets a later ledger transition outrank its mark, but not an older one', async () => {
+      await seed('gone');
+      await fixture().runAuto(withPresence);
+      expect(dates()).toEqual([{ guid: 'gone', d: 0 }]);
+
+      const transition = (sequence: string) =>
+        withDbTransaction(db, (context) =>
+          applyMessageStateWithinTransaction(context, {
+            version: 1,
+            provider: 'imessage',
+            providerEpoch,
+            ledgerEpoch,
+            sequence,
+            kind: 'restored',
+            guid: 'gone',
+            chatGuid,
+            dateDeleted: null,
+          }),
+        );
+      await transition('11');
+      expect(dates()).toEqual([{ guid: 'gone', d: 0 }]);
+      await transition('13');
+      expect(dates()).toEqual([{ guid: 'gone', d: null }]);
+    });
+
+    it('restores older-ledger deletions the server still has and keeps absent ones hidden', async () => {
+      await seed('absent');
+      await seed('present');
+      await installOldLedgerDeletions(['absent', 'present']);
+
+      await fixture(['present']).runAuto(withPresence);
+
+      expect(dates()).toEqual([
+        { guid: 'absent', d: 100 },
+        { guid: 'present', d: null },
+      ]);
+      expect(states()).toEqual([
+        { guid: 'absent', epoch: ledgerEpoch, kind: 'deleted', sequence: presenceHead },
+        { guid: 'present', epoch: ledgerEpoch, kind: 'restored', sequence: presenceHead },
+      ]);
+      expect(await record()).toBeNull();
+    });
+
+    it('restores same-ledger deletions from before a re-setup that the server still has', async () => {
+      await seed('restored-in-gap');
+      await withDbTransaction(db, (context) =>
+        setMessageStateAuthorityWithinTransaction(context, {
+          version: 1,
+          provider: 'imessage',
+          providerEpoch,
+          ledgerEpoch,
+          cursor: 'stale-cursor',
+          snapshotSequence: '0',
+          sequence: '5',
+        }),
+      );
+      await withDbTransaction(db, (context) =>
+        applyMessageStateWithinTransaction(context, {
+          version: 1,
+          provider: 'imessage',
+          providerEpoch,
+          ledgerEpoch,
+          sequence: '5',
+          kind: 'deleted',
+          guid: 'restored-in-gap',
+          chatGuid,
+          dateDeleted: 5,
+        }),
+      );
+      const f = fixture(['restored-in-gap']);
+      const readPage = f.base.fetchMessageState!;
+      f.base.fetchMessageState = async (cursor, signal) => {
+        if (cursor === 'stale-cursor') throw new MessageStateRepairRequiredError();
+        return readPage(cursor, signal);
+      };
+
+      await f.runAuto(withPresence);
+
+      expect(dates()).toEqual([{ guid: 'restored-in-gap', d: null }]);
+      expect(states()).toEqual([
+        { guid: 'restored-in-gap', epoch: ledgerEpoch, kind: 'restored', sequence: presenceHead },
+      ]);
+    });
+
+    it('never rebases an older-ledger receipt it did not check', async () => {
+      const guids = Array.from({ length: 26 }, (_, index) => `g-${String(index).padStart(2, '0')}`);
+      for (const guid of guids) await seed(guid);
+      await installOldLedgerDeletions(guids);
+      const f = fixture(guids);
+      const original = f.base.fetchMessagePresence!;
+      f.base.fetchMessagePresence = async (epoch, requested, signal) => {
+        // A realtime transition moves a planned receipt into the new ledger mid-check.
+        await withDbTransaction(db, (context) =>
+          applyMessageStateWithinTransaction(context, {
+            version: 1,
+            provider: 'imessage',
+            providerEpoch,
+            ledgerEpoch,
+            sequence: '11',
+            kind: 'deleted',
+            guid: 'g-00',
+            chatGuid,
+            dateDeleted: 11,
+          }),
+        );
+        return original(epoch, requested, signal);
+      };
+
+      await f.runAuto({ ...withPresence, auditBudget: 25 });
+
+      const unplanned = raw
+        .prepare('SELECT ledger_epoch AS epoch FROM message_server_states WHERE guid = ?')
+        .get('g-25') as { epoch: string };
+      expect(unplanned.epoch).not.toBe(ledgerEpoch);
+    });
+
+    it('discards a batch whose authority was replaced while it was being checked', async () => {
+      await seed('gone');
+      const f = fixture();
+      const original = f.base.fetchMessagePresence!;
+      f.base.fetchMessagePresence = async (epoch, guids, signal) => {
+        await withDbTransaction(db, (context) =>
+          setMessageStateAuthorityWithinTransaction(context, {
+            version: 1,
+            provider: 'imessage',
+            providerEpoch,
+            ledgerEpoch: '44444444-4444-4444-8444-444444444444',
+            cursor: 'replaced-cursor',
+            snapshotSequence: '20',
+            sequence: '20',
+          }),
+        );
+        return original(epoch, guids, signal);
+      };
+
+      await f.runAuto(withPresence);
+
+      expect(dates()).toEqual([{ guid: 'gone', d: null }]);
+    });
+
+    it('never moves an earlier deletion to the chat the server names instead', async () => {
+      await staleDeletion('filed-here', chatGuid);
+      const f = afterStaleCursor(fixture());
+      f.base.fetchMessagePresence = async (_epoch, guids) =>
+        presencePage(
+          guids.map((guid) => ({ guid, state: 'active' as const, chatGuid: elsewhere })),
+        );
+
+      await f.runAuto(withPresence);
+
+      expect(
+        raw.prepare('SELECT chat_guid AS chat, kind, sequence FROM message_server_states').get(),
+      ).toEqual({ chat: chatGuid, kind: 'deleted', sequence: '5' });
+    });
+
+    it('never gives an ownerless deletion a chat other than its local message', async () => {
+      await seed('local-here');
+      await staleDeletion('local-here', null);
+      // An ownerless record beside a local row, as left by an older version.
+      raw.prepare('UPDATE message_server_states SET chat_guid = NULL').run();
+      const f = afterStaleCursor(fixture());
+      f.base.fetchMessagePresence = async (_epoch, guids) =>
+        presencePage(
+          guids.map((guid) => ({ guid, state: 'active' as const, chatGuid: elsewhere })),
+        );
+
+      await f.runAuto(withPresence);
+
+      expect(
+        raw.prepare('SELECT chat_guid AS chat, kind FROM message_server_states').get(),
+      ).toEqual({ chat: null, kind: 'deleted' });
+    });
+
+    it('keeps an older-ledger deletion hidden when the server files the message elsewhere', async () => {
+      await seed('moved-away');
+      await installOldLedgerDeletions(['moved-away']);
+      const f = fixture();
+      f.base.fetchMessagePresence = async (_epoch, guids) =>
+        presencePage(
+          guids.map((guid) => ({ guid, state: 'active' as const, chatGuid: elsewhere })),
+        );
+
+      await f.runAuto(withPresence);
+
+      expect(states()).toEqual([
+        { guid: 'moved-away', epoch: lease.token, kind: 'deleted', sequence: '100' },
+      ]);
+      expect(dates()).toEqual([{ guid: 'moved-away', d: 100 }]);
+    });
+
+    it('discards a restore batch whose authority was replaced while it was being checked', async () => {
+      await seed('kept');
+      await installOldLedgerDeletions(['kept']);
+      const f = fixture(['kept']);
+      const original = f.base.fetchMessagePresence!;
+      f.base.fetchMessagePresence = async (epoch, guids, signal) => {
+        await withDbTransaction(db, (context) =>
+          setMessageStateAuthorityWithinTransaction(context, {
+            version: 1,
+            provider: 'imessage',
+            providerEpoch,
+            ledgerEpoch: '44444444-4444-4444-8444-444444444444',
+            cursor: 'replaced-cursor',
+            snapshotSequence: '20',
+            sequence: '20',
+          }),
+        );
+        return original(epoch, guids, signal);
+      };
+
+      await f.runAuto(withPresence);
+
+      expect(states()).toEqual([
+        { guid: 'kept', epoch: lease.token, kind: 'deleted', sequence: '100' },
+      ]);
+      expect(dates()).toEqual([{ guid: 'kept', d: 100 }]);
+    });
+
+    it('a user-started Full Repair clears a pending check', async () => {
+      await seed('existing');
+      await kvSet(
+        db,
+        MESSAGE_STATE_AUDIT_KEY,
+        JSON.stringify({
+          version: 1,
+          providerEpoch,
+          ledgerEpoch,
+          snapshotSequence: '10',
+          phase: 'hide',
+          afterGuid: null,
+          afterMessageId: 0,
+          throughMessageId: 1,
+        }),
+      );
+
+      await fixture(['existing']).run();
+
+      expect(await kvGet(db, MESSAGE_STATE_AUDIT_KEY)).toBeNull();
+    });
+
+    /** This ledger's deletion recorded before a re-setup, as an earlier sync left it. */
+    async function staleDeletion(guid: string, owner: string | null) {
+      await withDbTransaction(db, (context) =>
+        setMessageStateAuthorityWithinTransaction(context, {
+          version: 1,
+          provider: 'imessage',
+          providerEpoch,
+          ledgerEpoch,
+          cursor: 'stale-cursor',
+          snapshotSequence: '0',
+          sequence: '5',
+        }),
+      );
+      await withDbTransaction(db, (context) =>
+        applyMessageStateWithinTransaction(context, {
+          version: 1,
+          provider: 'imessage',
+          providerEpoch,
+          ledgerEpoch,
+          sequence: '5',
+          kind: 'deleted',
+          guid,
+          chatGuid: owner,
+          dateDeleted: 5,
+        }),
+      );
+    }
+    /** A server that pruned the phone's cursor, so the next sync sets up from its checkpoint. */
+    function afterStaleCursor(f: ReturnType<typeof fixture>) {
+      const readPage = f.base.fetchMessageState!;
+      f.base.fetchMessageState = async (cursor, signal) => {
+        if (cursor === 'stale-cursor') throw new MessageStateRepairRequiredError();
+        return readPage(cursor, signal);
+      };
+      return f;
+    }
+    const otherLedger = '55555555-5555-4555-8555-555555555555';
+    const elsewhere = 'iMessage;-;elsewhere@example.test';
+
+    it('restores an earlier deletion of a message the phone never downloaded', async () => {
+      await staleDeletion('never-downloaded', chatGuid);
+
+      await afterStaleCursor(fixture(['never-downloaded'])).runAuto(withPresence);
+
+      expect(states()).toEqual([
+        { guid: 'never-downloaded', epoch: ledgerEpoch, kind: 'restored', sequence: presenceHead },
+      ]);
+      // Opening the chat later downloads it visible instead of born hidden.
+      await seed('never-downloaded');
+      expect(dates()).toEqual([{ guid: 'never-downloaded', d: null }]);
+    });
+
+    it('gives an ownerless earlier deletion the chat the server reports, then restores it', async () => {
+      await staleDeletion('ownerless', null);
+
+      await afterStaleCursor(fixture(['ownerless'])).runAuto(withPresence);
+
+      expect(
+        raw.prepare('SELECT chat_guid AS chat, kind FROM message_server_states').get(),
+      ).toEqual({ chat: chatGuid, kind: 'restored' });
+      await seed('ownerless');
+      expect(dates()).toEqual([{ guid: 'ownerless', d: null }]);
+    });
+
+    it('leaves an ownerless deletion alone when retained history names another chat', async () => {
+      await staleDeletion('claimed', null);
+      raw
+        .prepare(
+          'INSERT INTO message_deletion_ledger (guid, chat_guid, date_deleted) VALUES (?, ?, 1)',
+        )
+        .run('claimed', 'iMessage;-;other@example.test');
+
+      await afterStaleCursor(fixture(['claimed'])).runAuto(withPresence);
+
+      expect(
+        raw.prepare('SELECT chat_guid AS chat, kind FROM message_server_states').get(),
+      ).toEqual({ chat: null, kind: 'deleted' });
+    });
+
+    it('settles nothing in a batch whose message arrived while the server was asked', async () => {
+      await seed('held');
+      await installOldLedgerDeletions(['arrives-late', 'held']);
+      const f = fixture(['arrives-late', 'held']);
+      const original = f.base.fetchMessagePresence!;
+      let downloaded = false;
+      f.base.fetchMessagePresence = async (epoch, guids, signal) => {
+        if (!downloaded) {
+          downloaded = true;
+          await seed('arrives-late');
+        }
+        return original(epoch, guids, signal);
+      };
+
+      await f.runAuto(withPresence);
+      // It was never asked about, so its batch is dropped instead of hiding the new arrival.
+      expect(dates()).toEqual([
+        { guid: 'arrives-late', d: null },
+        { guid: 'held', d: 100 },
+      ]);
+      expect(
+        raw
+          .prepare('SELECT guid, ledger_epoch AS epoch FROM message_server_states ORDER BY guid')
+          .all(),
+      ).toEqual([
+        { guid: 'arrives-late', epoch: lease.token },
+        { guid: 'held', epoch: lease.token },
+      ]);
+
+      await f.runAuto(withPresence);
+      expect(dates()).toEqual([
+        { guid: 'arrives-late', d: null },
+        { guid: 'held', d: null },
+      ]);
+      expect(states()).toEqual([
+        { guid: 'arrives-late', epoch: ledgerEpoch, kind: 'restored', sequence: presenceHead },
+        { guid: 'held', epoch: ledgerEpoch, kind: 'restored', sequence: presenceHead },
+      ]);
+    });
+
+    it('leaves an older-ledger deletion it cannot settle in its old ledger', async () => {
+      await seed('unsure');
+      await installOldLedgerDeletions(['unsure']);
+      const f = fixture();
+      f.base.fetchMessagePresence = async (_epoch, guids) =>
+        presencePage(guids.map((guid) => ({ guid, state: 'ambiguous' as const })));
+
+      await f.runAuto(withPresence);
+
+      expect(states()).toEqual([
+        { guid: 'unsure', epoch: lease.token, kind: 'deleted', sequence: '100' },
+      ]);
+      expect(dates()).toEqual([{ guid: 'unsure', d: 100 }]);
+      expect(await record()).toBeNull();
+    });
+
+    it("moves an older-ledger restoration to the checkpoint, not the answer's newer position", async () => {
+      await seed('asked');
+      await seed('was-restored');
+      await installOldLedgerDeletions(['asked', 'was-restored']);
+      await withDbTransaction(db, (context) =>
+        applyMessageStateWithinTransaction(context, {
+          version: 1,
+          provider: 'imessage',
+          providerEpoch,
+          ledgerEpoch: lease.token,
+          sequence: '101',
+          kind: 'restored',
+          guid: 'was-restored',
+          chatGuid,
+          dateDeleted: null,
+        }),
+      );
+
+      // The server still has both; only 'asked' carries a deletion that needs its answer.
+      await fixture(['asked', 'was-restored']).runAuto(withPresence);
+
+      expect(states()).toEqual([
+        { guid: 'asked', epoch: ledgerEpoch, kind: 'restored', sequence: presenceHead },
+        { guid: 'was-restored', epoch: ledgerEpoch, kind: 'restored', sequence: lease.sequence },
+      ]);
+    });
+
+    it('ignores an answer from another ledger while settling retained deletions', async () => {
+      await seed('kept');
+      await installOldLedgerDeletions(['kept']);
+      const f = fixture();
+      const original = f.base.fetchMessagePresence!;
+      f.base.fetchMessagePresence = async (epoch, guids, signal) => ({
+        ...(await original(epoch, guids, signal)),
+        ledgerEpoch: otherLedger,
+      });
+
+      await f.runAuto(withPresence);
+
+      expect(states()).toEqual([
+        { guid: 'kept', epoch: lease.token, kind: 'deleted', sequence: '100' },
+      ]);
+      expect(await record()).toMatchObject({ phase: 'restore', afterGuid: null });
+    });
+
+    it('ignores an answer from another ledger while checking visible messages', async () => {
+      await seed('visible');
+      const f = fixture();
+      const original = f.base.fetchMessagePresence!;
+      f.base.fetchMessagePresence = async (epoch, guids, signal) => ({
+        ...(await original(epoch, guids, signal)),
+        ledgerEpoch: otherLedger,
+      });
+
+      await f.runAuto(withPresence);
+
+      expect(dates()).toEqual([{ guid: 'visible', d: null }]);
+      expect(await record()).toMatchObject({ phase: 'hide', afterMessageId: 0 });
+    });
+
+    it('rolls back a hide batch when the sync is stopped while it is written', async () => {
+      await seed('gone');
+      let stopped = false;
+      const hide = messageStateRepository.hideSnapshotMessagesWithinTransaction;
+      jest
+        .spyOn(messageStateRepository, 'hideSnapshotMessagesWithinTransaction')
+        .mockImplementation(async (...args) => {
+          stopped = true;
+          return hide(...args);
+        });
+
+      await fixture().runAuto({ ...withPresence, shouldAbort: () => stopped });
+
+      expect(dates()).toEqual([{ guid: 'gone', d: null }]);
+      expect(await record()).toMatchObject({ phase: 'hide', afterMessageId: 0 });
+    });
+
+    it('never asks about local sends, RCS conversations or very recent unconfirmed sends', async () => {
+      await seed('temp-local-send');
+      await seed('plain-guid-in-rcs', 'RCS;-;someone@example.test');
+      const sent = Message.parse({
+        guid: 'just-sent',
+        isFromMe: true,
+        dateCreated: Date.now(),
+        text: 'fixture',
+        chats: [{ guid: chatGuid, participants: [{ address: 'test@example.test' }] }],
+      });
+      const handles = await upsertHandles(db, [{ address: 'test@example.test' }]);
+      const chats = await upsertChats(db, sent.chats!, handles);
+      await upsertMessages(db, [sent], () => chats.get(chatGuid), handles);
+      await seed('checked');
+      const f = fixture();
+      const lookups = jest.spyOn(f.base, 'fetchMessagePresence');
+
+      await f.runAuto(withPresence);
+
+      expect(lookups.mock.calls.flatMap(([, guids]) => [...guids])).toEqual(['checked']);
+      expect(dates()).toEqual([
+        { guid: 'checked', d: 0 },
+        { guid: 'just-sent', d: null },
+        { guid: 'plain-guid-in-rcs', d: null },
+        { guid: 'temp-local-send', d: null },
+      ]);
+    });
+
+    it('pauses when the server says the pairing needs a repair', async () => {
+      await seed('gone');
+      const f = fixture();
+      f.base.fetchMessagePresence = async () => {
+        throw new MessageStateRepairRequiredError();
+      };
+
+      await f.runAuto(withPresence);
+
+      expect(dates()).toEqual([{ guid: 'gone', d: null }]);
+      expect(await record()).toMatchObject({ phase: 'hide', afterMessageId: 0 });
+    });
+
+    it('writes nothing once the sync is cancelled during a check', async () => {
+      await seed('gone');
+      let stopped = false;
+      const f = fixture();
+      const original = f.base.fetchMessagePresence!;
+      f.base.fetchMessagePresence = async (epoch, guids, signal) => {
+        stopped = true;
+        return original(epoch, guids, signal);
+      };
+
+      await f.runAuto({ ...withPresence, shouldAbort: () => stopped });
+
+      expect(dates()).toEqual([{ guid: 'gone', d: null }]);
+      expect(await record()).toMatchObject({ phase: 'hide', afterMessageId: 0 });
+    });
+
+    it("counts every retained receipt it visits against the run's budget", async () => {
+      const guids = Array.from(
+        { length: 30 },
+        (_, index) => `evicted-${String(index).padStart(2, '0')}`,
+      );
+      // None is on the phone, so each retires without a question to the server.
+      await installOldLedgerDeletions(guids);
+      const remaining = () =>
+        (raw.prepare('SELECT COUNT(*) AS n FROM message_server_states').get() as { n: number }).n;
+
+      await fixture().runAuto({ ...withPresence, auditBudget: 10 });
+
+      expect(remaining()).toBe(20);
+    });
+
+    it('never sends a message id the server would reject', async () => {
+      const long = `long-${'x'.repeat(300)}`;
+      await seed(long);
+      await seed('normal');
+      const f = fixture();
+      const lookups = jest.spyOn(f.base, 'fetchMessagePresence');
+
+      await f.runAuto(withPresence);
+
+      expect(lookups.mock.calls.flatMap(([, guids]) => [...guids])).toEqual(['normal']);
+      expect(dates()).toEqual([
+        { guid: long, d: null },
+        { guid: 'normal', d: 0 },
+      ]);
+      expect(await record()).toBeNull();
+    });
+
+    it('stops checking at its time limit and resumes on a later sync', async () => {
+      await seed('old');
+      await installOldLedgerDeletions(['old']);
+      await seed('visible');
+      const startedAt = Date.now();
+      let asked = false;
+      jest.spyOn(Date, 'now').mockImplementation(() => startedAt + (asked ? 60_000 : 0));
+      const f = fixture(['old']);
+      const original = f.base.fetchMessagePresence!;
+      f.base.fetchMessagePresence = async (epoch, guids, signal) => {
+        asked = true;
+        return original(epoch, guids, signal);
+      };
+
+      await f.runAuto(withPresence);
+
+      expect(await record()).toMatchObject({ phase: 'restore', afterGuid: 'old' });
+      expect(dates()).toEqual([
+        { guid: 'old', d: null },
+        { guid: 'visible', d: null },
+      ]);
     });
   });
 });

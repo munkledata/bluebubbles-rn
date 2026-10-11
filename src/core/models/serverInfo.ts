@@ -83,6 +83,8 @@ export const ServerInfo = z
     message_state_sync_version: z.number().int().nullish(),
     imessage_provider_epoch: z.string().uuid().nullish(),
     supports_provider_repair_snapshot: z.boolean().nullish(),
+    /** Typed batch presence that may prove a deletion of a message the phone already holds. */
+    supports_message_state_presence: z.boolean().nullish(),
     /**
      * Whether the server exposes bounded text search over its live Messages database. Additive;
      * absent/false on older servers, so global search remains local-only until support is explicit.

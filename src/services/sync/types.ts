@@ -2,6 +2,7 @@ import type { DeletedMessage, DeletedMessagePage } from '@core/api/endpoints/mes
 import type { Chat, Message, ServerInfo } from '@core/models';
 import type { SyncCursor } from '@core/sync';
 import type { MessageStatePage } from '@core/models/messageState';
+import type { MessagePresencePage } from '@core/api/endpoints/messageState';
 import type { ProviderRepairLease, ProviderRepairFinish } from '@core/api/endpoints/repairSnapshot';
 
 /**
@@ -27,6 +28,12 @@ export interface SyncApi {
     providerEpoch: string,
     signal?: AbortSignal,
   ): Promise<Message | null>;
+  /** Typed batch presence; present only when the server advertises it. */
+  fetchMessagePresence?(
+    providerEpoch: string,
+    guids: readonly string[],
+    signal?: AbortSignal,
+  ): Promise<MessagePresencePage>;
   /** One exact chat for targeted repair; optional only for legacy/test adapters. */
   fetchChat?(chatGuid: string, signal?: AbortSignal): Promise<Chat>;
   fetchChats(offset: number, limit: number, signal?: AbortSignal): Promise<Chat[]>;

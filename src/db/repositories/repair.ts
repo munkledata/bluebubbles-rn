@@ -8,10 +8,10 @@ import {
 } from '../transaction';
 import type { AppDatabase } from '../types';
 import { DRAFT_KV_PREFIX, FULL_REPAIR_RETIRED_CHAT_KV_PREFIX } from './maintenance';
+import { RECENT_UNFENCED_OUTGOING_GRACE_MS } from './messageState';
 
 const REPAIR_EXPOSURE_PAGE_SIZE = 250;
 const REPAIR_RECONCILE_BATCH_SIZE = 25;
-const RECENT_UNFENCED_OUTGOING_GRACE_MS = 60 * 60 * 1000;
 
 export interface FullRepairChatExposure {
   readonly id: number;

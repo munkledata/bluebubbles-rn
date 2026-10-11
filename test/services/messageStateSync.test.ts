@@ -515,6 +515,20 @@ describe('versioned message state', () => {
     expect(hidden()).toBe(100);
     expect(await getMessageStateAuthority(db)).toEqual(authority);
   });
+  it('does not hydrate a restoration that a newer stored transition already decides', async () => {
+    await seed();
+    await apply('13', 'deleted');
+    const adapter = api(async () => page([event('12', 'restored')]));
+    adapter.fetchActiveMessage = jest.fn(async () => null);
+    await syncMessageState(db, adapter, { providerEpoch });
+    expect(adapter.fetchActiveMessage).not.toHaveBeenCalled();
+    expect(hidden()).toBe(100);
+    expect(raw.prepare('SELECT sequence, kind FROM message_server_states').get()).toEqual({
+      sequence: '13',
+      kind: 'deleted',
+    });
+    expect((await getMessageStateAuthority(db))?.sequence).toBe('12');
+  });
   it('learns an absent restore owner only from exact active hydration', async () => {
     await withDbTransaction(db, (context) =>
       applyMessageStateWithinTransaction(context, { ...changed('11', 'deleted'), chatGuid: null }),
@@ -605,7 +619,7 @@ describe('versioned message state', () => {
       kind: 'restored',
     });
   });
-  it('rejects a hydrated restoration that conflicts with an equal-sequence deletion', async () => {
+  it('requests a repair for a restoration that conflicts with an equal-sequence deletion', async () => {
     await withDbTransaction(db, (context) =>
       applyMessageStateWithinTransaction(context, { ...changed('12', 'deleted'), chatGuid: null }),
     );
@@ -616,7 +630,10 @@ describe('versioned message state', () => {
         text: 'conflicting restore',
         chats: [{ guid: chatGuid }],
       });
-    await expect(syncMessageState(db, adapter, { providerEpoch })).rejects.toThrow();
+    // Fail closed without failing every later sync: a repair re-establishes the authority.
+    await expect(syncMessageState(db, adapter, { providerEpoch })).rejects.toBeInstanceOf(
+      MessageStateRepairRequiredError,
+    );
     expect(raw.prepare('SELECT * FROM messages').all()).toEqual([]);
     expect(
       raw.prepare('SELECT chat_guid, kind, sequence FROM message_server_states').get(),

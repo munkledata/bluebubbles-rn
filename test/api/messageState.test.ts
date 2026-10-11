@@ -210,3 +210,78 @@ it('preserves missing restored-message hydration as null', async () => {
   await expect(messageStateApi.activeMessage(client, 'missing', providerEpoch)).resolves.toBeNull();
   expect(mockKy).toHaveBeenCalledTimes(1);
 });
+
+describe('typed batch presence', () => {
+  const answer = (results: unknown[], overrides: Record<string, unknown> = {}) =>
+    response({
+      version: 1,
+      provider: 'imessage',
+      providerEpoch,
+      ledgerEpoch,
+      sequence: '12',
+      results,
+      ...overrides,
+    });
+
+  it('posts the pairing and GUIDs and returns the typed answer in request order', async () => {
+    mockKy.mockResolvedValueOnce(
+      answer([
+        { guid: 'a', state: 'active', chatGuid: 'iMessage;-;chat' },
+        { guid: 'b', state: 'absent' },
+        { guid: 'c', state: 'ambiguous' },
+      ]),
+    );
+
+    const page = await messageStateApi.presence(client, providerEpoch, ['a', 'b', 'c']);
+
+    expect(mockKy.mock.calls[0][1].json).toEqual({
+      version: 1,
+      provider: 'imessage',
+      providerEpoch,
+      guids: ['a', 'b', 'c'],
+    });
+    expect(page.results.map((result) => result.state)).toEqual(['active', 'absent', 'ambiguous']);
+  });
+
+  it('turns an untyped 404 into an error, never into absence', async () => {
+    mockKy.mockResolvedValueOnce(
+      new Response('<html>tunnel not found</html>', {
+        status: 404,
+        headers: { 'content-type': 'text/html' },
+      }),
+    );
+
+    await expect(messageStateApi.presence(client, providerEpoch, ['a'])).rejects.toBeInstanceOf(
+      ApiError,
+    );
+  });
+
+  it('maps repair_required to the repair error', async () => {
+    mockKy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ error: { type: 'repair_required' } }), {
+        status: 409,
+        headers: { 'content-type': 'application/json' },
+      }),
+    );
+
+    await expect(messageStateApi.presence(client, providerEpoch, ['a'])).rejects.toBeInstanceOf(
+      messageStateApi.MessageStateRepairRequiredError,
+    );
+  });
+
+  it('rejects an answer for another pairing or other GUIDs', async () => {
+    mockKy.mockResolvedValueOnce(
+      answer([{ guid: 'a', state: 'absent' }], {
+        providerEpoch: '33333333-3333-4333-8333-333333333333',
+      }),
+    );
+    await expect(messageStateApi.presence(client, providerEpoch, ['a'])).rejects.toThrow(
+      'does not match its request',
+    );
+
+    mockKy.mockResolvedValueOnce(answer([{ guid: 'other', state: 'absent' }]));
+    await expect(messageStateApi.presence(client, providerEpoch, ['a'])).rejects.toThrow(
+      'does not match its request',
+    );
+  });
+});
