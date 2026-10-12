@@ -256,6 +256,20 @@ function normalizedMessageId(event: NormalizedEvent): string | undefined {
   }
 }
 
+/**
+ * The locked notice says "You have new messages", so it fires only for what notifies when
+ * unlocked and can be told without the database: a new message from someone else, or the
+ * server's push self-test. Receipts, your own messages sent from the Mac, deletions and alerts
+ * must not alert. The payload is already authenticated and decrypted in memory.
+ */
+function lockedNoticeIsDue(eventName: string, plaintext: string): boolean {
+  const event = snapshotIncomingEvent(eventName, plaintext);
+  return (
+    (event?.type === 'new-message' && event.message.isFromMe !== true) ||
+    event?.type === 'test-notification'
+  );
+}
+
 function v3IdentityMatchesPayload(identity: FcmPushEnvelopeIdentityV3, plaintext: string): boolean {
   const event = snapshotIncomingEvent(identity.eventType, plaintext);
   // Server rotation is deliberately socket-only: its URL cannot be replay-claimed without
@@ -411,7 +425,11 @@ async function deliver(
         lockedContext,
         occurrence,
       );
-      if (admission === 'enqueued' && lockedContext.isCurrent()) {
+      if (
+        admission === 'enqueued' &&
+        lockedContext.isCurrent() &&
+        lockedNoticeIsDue(eventName, authenticated.plaintext)
+      ) {
         await postLockedNotification(lockedContext);
       }
       return;
@@ -457,7 +475,9 @@ async function deliver(
   }
   if (!lease.isCurrent()) return;
   if (lockedContext) {
-    if (lockedContext.isCurrent()) await postLockedNotification(lockedContext);
+    if (lockedContext.isCurrent() && lockedNoticeIsDue(eventName, plaintext)) {
+      await postLockedNotification(lockedContext);
+    }
     return;
   }
   // V2 authenticates only `eventName` in the current server foundation. Do not merge any other

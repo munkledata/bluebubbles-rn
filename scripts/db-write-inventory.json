@@ -21714,7 +21714,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#deliver:mutator-call:e737f4b3c52e",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 408,
+      "line": 422,
       "symbol": "deliver",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#persistAuthenticatedLockedFcmV3Event",
@@ -21727,7 +21727,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#deliver:mutator-call:bed88bf25470",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 421,
+      "line": 439,
       "symbol": "deliver",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#dispatchRealtimeEvent",
@@ -21740,7 +21740,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#deliver:mutator-call:fbf723b9add6",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 465,
+      "line": 485,
       "symbol": "deliver",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#dispatchRealtimeEvent",
@@ -21753,7 +21753,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#deliverRespectingLock:mutator-call:6ad0e1b99aa0",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 544,
+      "line": 564,
       "symbol": "deliverRespectingLock",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#deliver",
@@ -21766,7 +21766,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#deliverRespectingLock:mutator-call:23ef353517cd",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 546,
+      "line": 566,
       "symbol": "deliverRespectingLock",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#deliver",
@@ -21779,7 +21779,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#handleIncomingFcm.<callback:c61d5fb7ce>:mutator-call:328a2817af6d",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 586,
+      "line": 606,
       "symbol": "handleIncomingFcm.<callback:c61d5fb7ce>",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#handleIncomingFcm.<callback:c61d5fb7ce>.<callback:4f6d43dd7a>",
@@ -21792,7 +21792,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#handleIncomingFcm.<callback:c61d5fb7ce>.<callback:4f6d43dd7a>:mutator-call:cb1a4da13a12",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 590,
+      "line": 610,
       "symbol": "handleIncomingFcm.<callback:c61d5fb7ce>.<callback:4f6d43dd7a>",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#deliverRespectingLock",
@@ -21805,7 +21805,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#handleIncomingFcm.<callback:c61d5fb7ce>.<callback:4f6d43dd7a>:mutator-call:cb1a4da13a12:2",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 598,
+      "line": 618,
       "symbol": "handleIncomingFcm.<callback:c61d5fb7ce>.<callback:4f6d43dd7a>",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#deliverRespectingLock",
@@ -21818,7 +21818,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#handleBackgroundFcm:mutator-call:bbd38b366234",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 647,
+      "line": 667,
       "symbol": "handleBackgroundFcm",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#handleIncomingFcm",
@@ -21831,7 +21831,7 @@
     {
       "id": "src/services/notifications/fcmMessaging.ts#startFcm.<callback:a43a320bdb>:mutator-call:b2b3d2f6880a",
       "path": "src/services/notifications/fcmMessaging.ts",
-      "line": 668,
+      "line": 688,
       "symbol": "startFcm.<callback:a43a320bdb>",
       "operation": "mutator-call",
       "target": "src/services/notifications/fcmMessaging.ts#handleIncomingFcm",
@@ -22349,19 +22349,6 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/remindersService.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/services/notifications/remindersService.ts#rescheduleReminder.<callback:5632cc03da>:mutator-call:cbb0784d6576",
-      "path": "src/services/notifications/remindersService.ts",
-      "line": 445,
-      "symbol": "rescheduleReminder.<callback:5632cc03da>",
-      "operation": "mutator-call",
-      "target": "src/db/transaction.ts#withDbTransaction",
-      "detectedContext": "transaction-coordinator",
-      "owner": "rescheduleReminder exact-row finalization",
-      "transactionContext": "transaction-coordinator",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/remindersService.test.ts; test/db/withDbTransaction.test.ts"
-    },
-    {
       "id": "src/services/notifications/remindersService.ts#rescheduleReminder.<callback:5632cc03da>:mutator-call:6fa89ed6b038",
       "path": "src/services/notifications/remindersService.ts",
       "line": 445,
@@ -22371,6 +22358,19 @@
       "detectedContext": "withDbTransaction",
       "owner": "rescheduleReminder exact-row finalization",
       "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/remindersService.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "src/services/notifications/remindersService.ts#rescheduleReminder.<callback:5632cc03da>:mutator-call:cbb0784d6576",
+      "path": "src/services/notifications/remindersService.ts",
+      "line": 445,
+      "symbol": "rescheduleReminder.<callback:5632cc03da>",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "rescheduleReminder exact-row finalization",
+      "transactionContext": "transaction-coordinator",
       "disposition": "coordinated",
       "evidence": "scripts/check-db-writes.test.mjs; test/services/remindersService.test.ts; test/db/withDbTransaction.test.ts"
     },

@@ -1152,6 +1152,44 @@ describe('FCM native callback ownership', () => {
     expect(mockDispatchRealtimeEvent).not.toHaveBeenCalled();
   });
 
+  // Each fixture authenticates: the V3 identity must name the same event and message as the payload.
+  it.each([
+    ['your own message', 'new-message', '{"guid":"v3-message","isFromMe":true}'],
+    ['a read receipt', 'updated-message', '{"guid":"v3-message","dateRead":1700000000000}'],
+  ])(
+    'admits locked V3 %s without the generic new-message notice',
+    async (_label, eventName, plaintext) => {
+      jest.spyOn(Date, 'now').mockReturnValue(V3_NOW);
+      configureV3Delivery({
+        locked: true,
+        eventName,
+        plaintext,
+        identity: v3Identity({ eventType: eventName }),
+      });
+
+      await mockBackgroundHandler!(message);
+
+      // Unlocked, neither of these notifies; locked, they must not say "You have new messages".
+      expect(mockPersistAuthenticatedLockedFcmV3Event).toHaveBeenCalledTimes(1);
+      expect(mockPostLockedNotification).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps the generic notice for the server test notification while locked', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(V3_NOW);
+    configureV3Delivery({
+      locked: true,
+      eventName: 'test-notification',
+      plaintext: '{"title":"Gator","body":"Test notification"}',
+      identity: v3Identity({ eventType: 'test-notification', messageId: undefined }),
+    });
+
+    await mockBackgroundHandler!(message);
+
+    expect(mockPersistAuthenticatedLockedFcmV3Event).toHaveBeenCalledTimes(1);
+    expect(mockPostLockedNotification).toHaveBeenCalledTimes(1);
+  });
+
   it('does not re-alert when durable locked V3 admission rejects a replay', async () => {
     jest.spyOn(Date, 'now').mockReturnValue(V3_NOW);
     configureV3Delivery({ locked: true });
@@ -1294,6 +1332,39 @@ describe('FCM native callback ownership', () => {
     expect(mockPersistAuthenticatedLockedFcmV3Event).not.toHaveBeenCalled();
     expect(mockDispatchRealtimeEvent).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['your own message', 'new-message', '{"guid":"v2-own","isFromMe":true}'],
+    ['a read receipt', 'updated-message', '{"guid":"v2-message","dateRead":1700000000000}'],
+  ])(
+    'does not post the generic locked notice for an authenticated V2 %s',
+    async (_label, eventName, plaintext) => {
+      jest.spyOn(Date, 'now').mockReturnValue(FCM_V2_COMPATIBILITY_CUTOFF_MS - 1);
+      const state = activeFcmDeviceEncryptionState(V2_KEY, 'device-v2', 'https://gator.example');
+      mockVaultGet.mockImplementation(async (key: string) => {
+        if (key === 'appLockEnabled') return 'true';
+        if (key === 'fcmPushEncryptionV2') return serializeFcmDeviceEncryptionState(state);
+        return key === 'serverAddress' ? 'https://gator.example' : null;
+      });
+      mockEffectivelyLocked.mockImplementation(
+        (_lockState, storedAppLockEnabled) => storedAppLockEnabled,
+      );
+      mockParseFcmData.mockReturnValueOnce({
+        eventName,
+        body: 'v2-frame',
+        envelopeChatGuid: undefined,
+        encrypted: true,
+        encryptionType: 'AEAD_GCM_V2_DEVICE',
+      });
+      mockDecryptFcmV2Payload.mockResolvedValueOnce(plaintext);
+
+      await mockBackgroundHandler!(message);
+
+      expect(mockDecryptFcmV2Payload).toHaveBeenCalledWith('v2-frame', V2_KEY, eventName);
+      expect(mockPostLockedNotification).not.toHaveBeenCalled();
+      expect(mockDispatchRealtimeEvent).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     {
