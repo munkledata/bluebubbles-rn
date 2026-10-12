@@ -818,6 +818,10 @@ export default function SettingsScreen(): React.JSX.Element {
               </>
             ) : null}
             <NavRow label="Server Management…" onPress={() => router.push('/server-management')} />
+            <NavRow
+              label="Change Server Address…"
+              onPress={() => router.push('/change-server-address')}
+            />
             <NavRow label="Server Health…" onPress={() => router.push('/server-health')} />
             {visibleServerInfo?.supports_imessage_account_status === true && (
               <NavRow

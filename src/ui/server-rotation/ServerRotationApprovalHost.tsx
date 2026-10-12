@@ -3,7 +3,6 @@ import {
   AppState,
   KeyboardAvoidingView,
   Modal,
-  Pressable,
   ScrollView,
   StyleSheet,
   Switch,
@@ -97,8 +96,9 @@ function ServerRotationPrompt({ request }: { request: ServerRotationRequest }): 
       statusBarTranslucent
     >
       <KeyboardAvoidingView style={styles.fill} behavior="padding">
+        {/* No tap-outside dismissal: a stray tap must not drop the change (review item 800). Cancel
+            and Android Back still cancel. */}
         <View style={styles.backdrop}>
-          <Pressable accessible={false} style={styles.backdropDismiss} onPress={cancel} />
           <View
             accessibilityViewIsModal
             style={[
@@ -119,7 +119,7 @@ function ServerRotationPrompt({ request }: { request: ServerRotationRequest }): 
                 Approve server change?
               </Text>
               <Text style={[styles.explanation, { color: theme.color.secondaryLabel }]}>
-                Your current server asked Gator to use a different address. Confirm the exact
+                Gator is about to use a different address for your server. Confirm the exact
                 destination and re-enter your current server password before Gator contacts it.
               </Text>
 
@@ -169,8 +169,10 @@ function ServerRotationPrompt({ request }: { request: ServerRotationRequest }): 
                 secureTextEntry
                 autoCapitalize="none"
                 autoCorrect={false}
-                autoComplete="off"
-                textContentType="none"
+                // A password manager can fill it in place; leaving Gator to copy it cancels the prompt.
+                autoComplete="password"
+                textContentType="password"
+                importantForAutofill="yes"
                 value={password}
                 onChangeText={setPassword}
                 onSubmitEditing={() => {
@@ -225,7 +227,6 @@ const styles = StyleSheet.create({
     paddingVertical: 32,
     backgroundColor: 'rgba(0,0,0,0.68)',
   },
-  backdropDismiss: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
   card: {
     width: '100%',
     maxWidth: 520,

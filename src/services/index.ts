@@ -84,6 +84,7 @@ export {
 } from './groupParticipantService';
 
 export { vault, http, accountHttp, getSecretBox, runCryptoSelfTest } from './clients';
+export { requestServerAddressChange, type ServerAddressChangeRequest } from './serverAddressChange';
 export { ensureDatabase, rotateDatabaseKey } from './databaseControl';
 export {
   createNewChat,

@@ -676,6 +676,7 @@ describe('SettingsScreen — navigation rows', () => {
       ['Privacy & Data Use…', '/storage-privacy'],
       ['Legal & Third-Party Notices…', '/legal-notices'],
       ['Server Management…', '/server-management'],
+      ['Change Server Address…', '/change-server-address'],
       ['Server Health…', '/server-health'],
     ];
     for (const [label, route] of cases) {

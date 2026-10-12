@@ -10,7 +10,9 @@ import {
   type AccountRevocationMarker,
   type SecureVault,
 } from '@core/secure';
-import { connectToServer } from '@/services/connection';
+import { inspectDurableServerSession } from '@/services/boot/durableSession';
+import { connectToServer, persistServerConnection } from '@/services/connection';
+import { ServerInfo } from '@core/models';
 
 const upToDate = { server_version: '1.9.5' };
 const SCOPED_CREDENTIAL = `bbd_device_v1_${'A'.repeat(43)}`;
@@ -309,5 +311,94 @@ describe('connectToServer', () => {
       '[connect] account revocation marker clear failed — session was not activated',
       clearError,
     );
+  });
+});
+
+// Review items 800/808: an approved server-address change for the SAME account reused the
+// new-account commit, whose `writing` barrier turns an interruption into a full local wipe at the
+// next launch. Only the address changes, so one atomic write is enough and always boots.
+describe('persistServerConnection for a same-account address change', () => {
+  const info = ServerInfo.parse({ server_version: '1.9.5' });
+
+  async function liveAccount(password = 'pw'): Promise<InMemoryVault> {
+    const vault = new InMemoryVault();
+    await vault.set('serverSessionState', SERVER_SESSION_STATE.active);
+    await vault.set('serverAddress', 'https://old.example');
+    await vault.set('serverPassword', password);
+    return vault;
+  }
+
+  it('writes only the new address, so any interruption still boots', async () => {
+    const vault = await liveAccount();
+    const set = jest.spyOn(vault, 'set');
+    const clear = jest.spyOn(revocationMarker, 'clear');
+
+    await expect(
+      persistServerConnection('https://new.example', 'pw', info, { vault, revocationMarker }),
+    ).resolves.toMatchObject({ ok: true });
+
+    expect(set.mock.calls).toEqual([['serverAddress', 'https://new.example']]);
+    expect(clear).not.toHaveBeenCalled();
+    await expect(inspectDurableServerSession(vault, revocationMarker)).resolves.toMatchObject({
+      kind: 'ready',
+      session: { origin: 'https://new.example', password: 'pw' },
+    });
+  });
+
+  it('keeps the old address and says so when the write fails', async () => {
+    const vault = await liveAccount();
+    jest.spyOn(vault, 'set').mockRejectedValueOnce(new Error('keystore busy'));
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+    const result = await persistServerConnection('https://new.example', 'pw', info, {
+      vault,
+      revocationMarker,
+    });
+
+    expect(result).toMatchObject({ ok: false, kind: 'unknown' });
+    expect(result.ok ? '' : result.message).toMatch(/still using the old one.*Settings/s);
+    // Never the residual-account wipe: the old session is complete and boots.
+    await expect(inspectDurableServerSession(vault, revocationMarker)).resolves.toMatchObject({
+      kind: 'ready',
+      session: { origin: 'https://old.example' },
+    });
+  });
+
+  it('keeps the full new-account commit when the credential differs', async () => {
+    const vault = await liveAccount('old-pw');
+    const set = jest.spyOn(vault, 'set');
+
+    await expect(
+      persistServerConnection('https://new.example', 'new-pw', info, { vault, revocationMarker }),
+    ).resolves.toMatchObject({ ok: true });
+
+    expect(set.mock.calls[0]).toEqual(['serverSessionState', SERVER_SESSION_STATE.writing]);
+  });
+
+  it('never takes the address-only path while Disconnect has revoked the account', async () => {
+    const vault = await liveAccount();
+    revoked = true;
+    const set = jest.spyOn(vault, 'set');
+
+    await persistServerConnection('https://new.example', 'pw', info, { vault, revocationMarker });
+
+    expect(set.mock.calls[0]).toEqual(['serverSessionState', SERVER_SESSION_STATE.writing]);
+  });
+
+  it('writes nothing when the saved session cannot be read', async () => {
+    const vault = await liveAccount();
+    const get = vault.get.bind(vault);
+    jest
+      .spyOn(vault, 'get')
+      .mockImplementation(async (key) =>
+        key === 'serverPassword' ? Promise.reject(new Error('locked')) : get(key),
+      );
+    const set = jest.spyOn(vault, 'set');
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+    await expect(
+      persistServerConnection('https://new.example', 'pw', info, { vault, revocationMarker }),
+    ).resolves.toMatchObject({ ok: false, kind: 'unknown' });
+    expect(set).not.toHaveBeenCalled();
   });
 });

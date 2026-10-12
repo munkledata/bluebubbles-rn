@@ -127,6 +127,37 @@ describe('ServerRotationApprovalHost', () => {
     expect(screen.getByText(/does not encrypt your password or messages/)).toBeTruthy();
   });
 
+  // Review item 800: a stray tap beside the card cancelled the change, and a lost prompt never came
+  // back. Only the explicit Cancel button or Android Back may cancel.
+  it('ignores taps outside the card', async () => {
+    offer();
+    await renderWithTheme(<ServerRotationApprovalHost />);
+    expect(screen.getByText('Approve server change?')).toBeTruthy();
+
+    // Every pressable host element that is not one of the two labelled buttons.
+    type HostNode = { props: Record<string, unknown>; children: Array<HostNode | string> };
+    const stray: HostNode[] = [];
+    const collect = (node: HostNode): void => {
+      const role = node.props.accessibilityRole ?? node.props.role;
+      if (typeof node.props.onClick === 'function' && role !== 'button') stray.push(node);
+      for (const child of node.children) if (typeof child !== 'string') collect(child);
+    };
+    collect(screen.root as unknown as HostNode);
+    for (const node of stray) await fireEvent.press(node as never);
+
+    expect(serverRotationCoordinator.getSnapshot()).not.toBeNull();
+    expect(screen.getByText('Approve server change?')).toBeTruthy();
+  });
+
+  // A long or QR-provided password used to mean leaving Gator to copy it, which cancels the prompt.
+  it('lets a password manager fill the password in place', async () => {
+    offer();
+    await renderWithTheme(<ServerRotationApprovalHost />);
+
+    expect(passwordInput().props.autoComplete).toBe('password');
+    expect(passwordInput().props.importantForAutofill).toBe('yes');
+  });
+
   it('treats Android Back as cancellation and clears the local password', async () => {
     offer();
     const view = await renderWithTheme(<ServerRotationApprovalHost />);

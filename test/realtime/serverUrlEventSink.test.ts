@@ -7,6 +7,7 @@ jest.mock('@core/secure', () => ({
   SERVER_SESSION_STATE: { writing: 'writing', active: 'active', forgotten: 'forgotten' },
   inspectCredentialUpgradeJournal: jest.fn(() => ({ kind: 'absent' })),
   isScopedDeviceCredential: jest.fn(() => false),
+  readAccountRevocationState: jest.fn(() => 'clear'),
   logger: {
     debug: jest.fn(),
     info: jest.fn(),
@@ -74,7 +75,7 @@ const { serverApi: mockServerApi } = jest.requireMock('@core/api') as {
 const { vault: mockVault, accountRevocationMarker: mockRevocationMarker } = jest.requireMock(
   '@/services/clients',
 ) as {
-  vault: { set: jest.Mock };
+  vault: { set: jest.Mock; get: jest.Mock };
   accountRevocationMarker: { clear: jest.Mock };
 };
 const { candidateClient: mockCandidateClient } = jest.requireMock('@/services/clients') as {
@@ -328,6 +329,7 @@ describe('new-server production admission', () => {
     useSessionStore.setState({ password: 'current-password' });
     mockEnsureDatabase.mockClear();
     mockVault.set.mockReset().mockImplementation(async () => undefined);
+    mockVault.get.mockReset().mockImplementation(async () => null);
     mockCandidateClient.mockReset();
     mockServerApi.serverInfo.mockReset();
     mockRevocationMarker.clear.mockReset();
@@ -403,16 +405,25 @@ describe('new-server production admission', () => {
     expect(useSessionStore.getState().origin).toBe(ORIGINAL_ORIGIN);
   });
 
-  it('wires approved validation into one correlated credential commit before publication', async () => {
+  // Review items 800/808: the vault holds this live account, so an approved change saves only the
+  // address in one atomic write. The new-account `writing` barrier would turn an interruption into
+  // a full local wipe at the next launch.
+  it('wires approved validation into one atomic address save before publication', async () => {
     await activateForegroundSession();
     const candidate = { name: 'candidate-client' };
     const info = { server_version: '1.9.0' };
     mockCandidateClient.mockReturnValue(candidate);
     mockServerApi.serverInfo.mockResolvedValue(info);
-    // Background after the durable tuple becomes active. This prevents unrelated socket startup
-    // while proving an already-approved commit may finish and publish coherently.
-    mockVault.set.mockImplementation(async (key: string, value: string) => {
-      if (key === 'serverSessionState' && value === 'active') pauseRealtime();
+    const savedSession: Record<string, string> = {
+      serverSessionState: 'active',
+      serverAddress: ORIGINAL_ORIGIN,
+      serverPassword: 'current-password',
+    };
+    mockVault.get.mockImplementation(async (key: string) => savedSession[key] ?? null);
+    // Background right after the durable save. This prevents unrelated socket startup while
+    // proving an already-approved commit may finish and publish coherently.
+    mockVault.set.mockImplementation(async (key: string) => {
+      if (key === 'serverAddress') pauseRealtime();
     });
 
     await dispatchRealtimeEvent('new-server', 'HTTPS://NEXT.EXAMPLE:443/', 'socket');
@@ -423,13 +434,8 @@ describe('new-server production admission', () => {
     });
     expect(mockCandidateClient).toHaveBeenCalledWith('https://next.example', 'current-password');
     expect(mockServerApi.serverInfo).toHaveBeenCalledWith(candidate);
-    expect(mockVault.set.mock.calls).toEqual([
-      ['serverSessionState', 'writing'],
-      ['serverAddress', 'https://next.example'],
-      ['serverPassword', 'current-password'],
-      ['serverSessionState', 'active'],
-    ]);
-    expect(mockRevocationMarker.clear).toHaveBeenCalledTimes(1);
+    expect(mockVault.set.mock.calls).toEqual([['serverAddress', 'https://next.example']]);
+    expect(mockRevocationMarker.clear).not.toHaveBeenCalled();
     expect(useSessionStore.getState()).toEqual(
       expect.objectContaining({
         status: 'connected',

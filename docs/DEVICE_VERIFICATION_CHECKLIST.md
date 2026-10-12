@@ -783,6 +783,12 @@ or Do Not Disturb access prompt is an unexpected failure.
       exercise a synthetic received shared-location card; its explicit action may hand its finite
       point to the system Maps app. These server/received-coordinate flows are separate from sending
       this phone's Current Location. Without finite fixtures, leave this result open.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE` (`REVIEW-800`):** Settings → Change Server
+      Address… with the server's new address: the approval prompt opens, the password manager can
+      fill the password, a tap outside the card does not cancel, and approval reconnects with every
+      chat, draft and setting intact. Then repeat and run `adb shell am kill <package>` right after
+      tapping Approve: on reopen Gator must use either the old or the new address, never Setup or a
+      wiped local state.
 - [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE` (`FEAT-05A`):** Confirm the installed package declares
       coarse/fine foreground location but not background location or
       `FOREGROUND_SERVICE_LOCATION`. In a proven existing one-to-one supported conversation, the

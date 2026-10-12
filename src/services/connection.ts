@@ -1,16 +1,18 @@
 // Import from the specific module (not the @core/api barrel) to avoid pulling in
 // the ky-based HttpClient — keeps this unit testable in Node without mocking ky.
 import { ApiError } from '@core/api/errors';
-import { MIN_SERVER_VERSION } from '@core/config';
+import { MIN_SERVER_VERSION, strictServerOrigin } from '@core/config';
 import type { ServerInfo } from '@core/models';
 import {
   ACCOUNT_REVOCATION_CLEAR_FAILURE_MESSAGE,
   inspectCredentialUpgradeJournal,
   logger,
+  readAccountRevocationState,
   SERVER_SESSION_STATE,
   type AccountRevocationMarker,
   type SecureVault,
 } from '@core/secure';
+import { timingSafeEqual, utf8Encode } from '@utils/bytes';
 import { isAtLeast } from '@utils/version';
 
 export type ConnectFailureKind =
@@ -47,6 +49,49 @@ function cancelledResult(): ConnectResult {
     kind: 'cancelled',
     message: 'Connection attempt was cancelled.',
   };
+}
+
+const ADDRESS_CHANGE_NOT_SAVED_MESSAGE =
+  'Could not save the new server address, so Gator is still using the old one. You can try again ' +
+  'from Settings → Change Server Address.';
+
+/** True when the vault holds this exact live account, saved at a different address. */
+async function isSameLiveAccountAtNewAddress(
+  origin: string,
+  password: string,
+  deps: CredentialPersistenceDeps,
+): Promise<boolean> {
+  if (readAccountRevocationState(deps.revocationMarker) !== 'clear') return false;
+  const [sessionState, address, storedPassword] = await Promise.all([
+    deps.vault.get('serverSessionState'),
+    deps.vault.get('serverAddress'),
+    deps.vault.get('serverPassword'),
+  ]);
+  const currentOrigin = strictServerOrigin(address);
+  return (
+    (sessionState === null || sessionState === SERVER_SESSION_STATE.active) &&
+    currentOrigin !== null &&
+    currentOrigin !== strictServerOrigin(origin) &&
+    storedPassword !== null &&
+    timingSafeEqual(utf8Encode(storedPassword), utf8Encode(password))
+  );
+}
+
+/** One atomic SecureStore write: the old or the new address, never a half-written account. */
+async function persistServerAddressChange(
+  origin: string,
+  info: ServerInfo,
+  deps: CredentialPersistenceDeps,
+): Promise<ConnectResult> {
+  try {
+    await deps.vault.set('serverAddress', origin);
+  } catch (err) {
+    if (!attemptIsCurrent(deps)) return cancelledResult();
+    logger.warn('[connect] server address change was not saved; the old address stays active', err);
+    return { ok: false, kind: 'unknown', message: ADDRESS_CHANGE_NOT_SAVED_MESSAGE };
+  }
+  if (!attemptIsCurrent(deps)) return cancelledResult();
+  return { ok: true, serverInfo: info };
 }
 
 /**
@@ -126,6 +171,27 @@ export async function persistServerConnection(
       kind: 'unknown',
       message: 'A saved credential upgrade must be recovered before connecting again.',
     };
+  }
+
+  // Same account at a new address (an approved server change): only the address changes. One
+  // SecureStore write is atomic, so an interruption leaves either the old or the new complete
+  // session, and both boot normally. The new-account `writing` barrier below would instead make an
+  // interruption look like a half-written account and wipe local data at the next launch
+  // (review items 800/808).
+  if (upgrade.kind === 'absent') {
+    let sameAccount: boolean;
+    try {
+      sameAccount = await isSameLiveAccountAtNewAddress(origin, password, deps);
+    } catch (err) {
+      logger.warn('[connect] the saved session could not be read before an address change', err);
+      return {
+        ok: false,
+        kind: 'unknown',
+        message: 'Could not confirm the saved credential state. Please try again.',
+      };
+    }
+    if (!attemptIsCurrent(deps)) return cancelledResult();
+    if (sameAccount) return persistServerAddressChange(origin, info, deps);
   }
 
   // Correlate the two independent SecureStore keys. `writing` is durable BEFORE either credential
