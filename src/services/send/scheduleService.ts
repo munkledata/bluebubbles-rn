@@ -1,3 +1,4 @@
+import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
 // Import the endpoint module directly (not the @core/api barrel) so this stays
 // node-importable in tests without pulling in ky (ESM).
@@ -395,6 +396,23 @@ type Sender = (
 ) => Promise<void>;
 
 /**
+ * Before the hand-off the only network step is the server-capability lookup (a proven one-to-one
+ * iMessage chat needs it). When that cannot reach the server nothing was sent, so the row is
+ * released without spending one of its five attempts, as an RCS capability gap already is.
+ * Offline, the 20 s ticker would otherwise retire the schedule, and a recurring series with it,
+ * within about 100 s. A 4xx refusal or any other error still counts as a failed attempt.
+ */
+function isUnreachableBeforeHandover(error: unknown): boolean {
+  return (
+    error instanceof ApiError &&
+    (error.kind === 'no_connection' ||
+      error.kind === 'timeout' ||
+      error.kind === 'cancelled' ||
+      error.kind === 'server_error')
+  );
+}
+
+/**
  * Fire every due scheduled message: atomically CLAIM the row (pending → sending)
  * so a concurrent tick / the home+chat tickers can't double-send it, send via the
  * normal optimistic path with plain text, then mark it sent. Legacy reply rows are retired by the
@@ -544,7 +562,8 @@ export async function runDueScheduled(
         if (!settled) {
           if (
             e instanceof DbCommitGuardRejectedError ||
-            e instanceof RcsCapabilityUnavailableError
+            e instanceof RcsCapabilityUnavailableError ||
+            isUnreachableBeforeHandover(e)
           ) {
             await deferScheduledClaim(db, m.id, commitGuard);
             continue;

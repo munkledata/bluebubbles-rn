@@ -19,7 +19,7 @@ const PUBLIC_TEXT_INSERT_TARGET = 'src/db/repositories/outgoing.ts#insertOutgoin
 const TRANSACTION_TEXT_INSERT_TARGET =
   'src/db/repositories/outgoing.ts#insertOutgoingTextWithinTransaction';
 const REVIEWED_RUN_DUE_BODY_HASH =
-  '6fcf727f957ebee14c1d31f6110b79f97999cfef6f50689f58768ed800a6b627';
+  '1644ebc20c45adcfa7731bdc1a47abe63954e732c6c3c28b86e3e0d3d86eabb4';
 const REVIEWED_RESERVE_SCHEDULED_RUN_BODY_HASH =
   'd8b2eff4e441b6340e91120123f6a7c76365e0c6dc519561b81305276c42ada2';
 const REVIEWED_ENSURE_SCHEDULED_RECOVERY_BODY_HASH =

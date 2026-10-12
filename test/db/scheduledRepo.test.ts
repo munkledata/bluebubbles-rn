@@ -771,7 +771,8 @@ describe('scheduled messages repo', () => {
       const { db } = await createTestDb();
       await insertScheduled(db, { chatGuid: 'gone', text: 'poison', scheduledFor: 1 });
       const thrower = async (): Promise<void> => {
-        throw new ApiError('no_connection', 'unknown chat', 404);
+        // A refusal the server sent; an unreachable server only defers (no attempt spent).
+        throw ApiError.fromStatus(404, 'unknown chat');
       };
       for (let i = 0; i < SCHED_MAX_ATTEMPTS; i += 1) {
         await runDueScheduled(db, noHttp, 1000, thrower);
@@ -858,7 +859,8 @@ describe('scheduled messages repo', () => {
         recurrence: 'weekly',
       });
       const thrower = async (): Promise<void> => {
-        throw new ApiError('no_connection', 'unknown chat', 404);
+        // A refusal the server sent; an unreachable server only defers (no attempt spent).
+        throw ApiError.fromStatus(404, 'unknown chat');
       };
       for (let i = 0; i < SCHED_MAX_ATTEMPTS; i += 1) {
         await runDueScheduled(db, noHttp, 1000, thrower);

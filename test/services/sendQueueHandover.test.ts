@@ -167,6 +167,37 @@ describe('runDueScheduled — handover to the outgoing queue', () => {
     expect((await getScheduledById(db, id))?.status).toBe('pending');
   });
 
+  it('keeps a schedule pending, spending no attempt, while the server is unreachable before the hand-off', async () => {
+    const { db, raw } = await createTestDb();
+    const id = await insertScheduled(db, { chatGuid: 'c1', text: 'later', scheduledFor: 1 });
+
+    // A proven one-to-one iMessage send looks up server info first; offline, that lookup fails on
+    // every 20 s tick. Six such ticks used to retire the schedule at its five-attempt cap.
+    for (let tick = 0; tick < 6; tick += 1) {
+      const fired = await runDueScheduled(db, noHttp, 1000 + tick, async () => {
+        throw new ApiError('no_connection', 'Network request failed');
+      });
+      expect(fired).toBe(0);
+    }
+
+    expect(
+      raw.prepare('SELECT status, attempts FROM scheduled_messages WHERE id = ?').get(id),
+    ).toEqual({ status: 'pending', attempts: 0 });
+  });
+
+  it('still counts a server refusal before the hand-off as a failed attempt', async () => {
+    const { db, raw } = await createTestDb();
+    const id = await insertScheduled(db, { chatGuid: 'c1', text: 'refused', scheduledFor: 1 });
+
+    await runDueScheduled(db, noHttp, 1000, async () => {
+      throw ApiError.fromStatus(400, 'bad request');
+    });
+
+    expect(
+      raw.prepare('SELECT status, attempts FROM scheduled_messages WHERE id = ?').get(id),
+    ).toEqual({ status: 'pending', attempts: 1 });
+  });
+
   /**
    * The handover's own failure path. `settled` means "the queue owns delivery" and is set BEFORE
    * the terminal write, which is right — but if that write then fails, the row is left at

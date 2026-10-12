@@ -24561,7 +24561,7 @@
     {
       "id": "src/services/send/scheduleService.ts#recoverInterruptedScheduledRows:mutator-call:8fc2072469ba",
       "path": "src/services/send/scheduleService.ts",
-      "line": 195,
+      "line": 196,
       "symbol": "recoverInterruptedScheduledRows",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#resetStuckScheduled",
@@ -24574,7 +24574,7 @@
     {
       "id": "src/services/send/scheduleService.ts#ensureScheduledRecovery.<callback:e4909b0f75>:mutator-call:b9ac52b2d1ee",
       "path": "src/services/send/scheduleService.ts",
-      "line": 238,
+      "line": 239,
       "symbol": "ensureScheduledRecovery.<callback:e4909b0f75>",
       "operation": "mutator-call",
       "target": "src/services/send/scheduleService.ts#recoverInterruptedScheduledRows",
@@ -24587,7 +24587,7 @@
     {
       "id": "src/services/send/scheduleService.ts#scheduleTextMessage:mutator-call:31eb04a40935",
       "path": "src/services/send/scheduleService.ts",
-      "line": 299,
+      "line": 300,
       "symbol": "scheduleTextMessage",
       "operation": "mutator-call",
       "target": "src/services/send/scheduleService.ts#scheduleTextMessage.<callback:bcbf452138>",
@@ -24600,7 +24600,7 @@
     {
       "id": "src/services/send/scheduleService.ts#scheduleTextMessage:mutator-call:c6c6102cb4ec",
       "path": "src/services/send/scheduleService.ts",
-      "line": 299,
+      "line": 300,
       "symbol": "scheduleTextMessage",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -24613,7 +24613,7 @@
     {
       "id": "src/services/send/scheduleService.ts#scheduleTextMessage.<callback:bcbf452138>:mutator-call:ef3b92e88431",
       "path": "src/services/send/scheduleService.ts",
-      "line": 301,
+      "line": 302,
       "symbol": "scheduleTextMessage.<callback:bcbf452138>",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#insertScheduledWithinTransaction",
@@ -24626,7 +24626,7 @@
     {
       "id": "src/services/send/scheduleService.ts#scheduleAttachmentMessage:mutator-call:6f036b81ff0a",
       "path": "src/services/send/scheduleService.ts",
-      "line": 367,
+      "line": 368,
       "symbol": "scheduleAttachmentMessage",
       "operation": "mutator-call",
       "target": "src/services/send/scheduleService.ts#scheduleAttachmentMessage.<callback:4fb59ebbe3>",
@@ -24639,7 +24639,7 @@
     {
       "id": "src/services/send/scheduleService.ts#scheduleAttachmentMessage:mutator-call:e6017b2d0fc4",
       "path": "src/services/send/scheduleService.ts",
-      "line": 367,
+      "line": 368,
       "symbol": "scheduleAttachmentMessage",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -24652,7 +24652,7 @@
     {
       "id": "src/services/send/scheduleService.ts#scheduleAttachmentMessage.<callback:4fb59ebbe3>:mutator-call:227bf75f2417",
       "path": "src/services/send/scheduleService.ts",
-      "line": 370,
+      "line": 371,
       "symbol": "scheduleAttachmentMessage.<callback:4fb59ebbe3>",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#insertScheduledWithinTransaction",
@@ -24665,7 +24665,7 @@
     {
       "id": "src/services/send/scheduleService.ts#runDueScheduled:mutator-call:fe7c5860f178",
       "path": "src/services/send/scheduleService.ts",
-      "line": 451,
+      "line": 469,
       "symbol": "runDueScheduled",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#claimDueScheduled",
@@ -24678,7 +24678,7 @@
     {
       "id": "src/services/send/scheduleService.ts#runDueScheduled.writeTerminal:mutator-call:934d3ba3156d",
       "path": "src/services/send/scheduleService.ts",
-      "line": 490,
+      "line": 508,
       "symbol": "runDueScheduled.writeTerminal",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#rearmScheduled",
@@ -24691,7 +24691,7 @@
     {
       "id": "src/services/send/scheduleService.ts#runDueScheduled.writeTerminal:mutator-call:ae2537472d84",
       "path": "src/services/send/scheduleService.ts",
-      "line": 492,
+      "line": 510,
       "symbol": "runDueScheduled.writeTerminal",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#markScheduledSent",
@@ -24704,7 +24704,7 @@
     {
       "id": "src/services/send/scheduleService.ts#runDueScheduled.settle:mutator-call:57f0ecf6912d",
       "path": "src/services/send/scheduleService.ts",
-      "line": 504,
+      "line": 522,
       "symbol": "runDueScheduled.settle",
       "operation": "mutator-call",
       "target": "src/services/send/scheduleService.ts#runDueScheduled.writeTerminal",
@@ -24717,7 +24717,7 @@
     {
       "id": "src/services/send/scheduleService.ts#runDueScheduled:mutator-reference:28e61216ad29",
       "path": "src/services/send/scheduleService.ts",
-      "line": 519,
+      "line": 537,
       "symbol": "runDueScheduled",
       "operation": "mutator-reference",
       "target": "src/services/send/scheduleService.ts#runDueScheduled.settle",
@@ -24730,7 +24730,7 @@
     {
       "id": "src/services/send/scheduleService.ts#runDueScheduled:mutator-call:4403cba029a2",
       "path": "src/services/send/scheduleService.ts",
-      "line": 523,
+      "line": 541,
       "symbol": "runDueScheduled",
       "operation": "mutator-call",
       "target": "src/services/send/sendService.ts#sendTextMessage",
@@ -24743,7 +24743,7 @@
     {
       "id": "src/services/send/scheduleService.ts#runDueScheduled:mutator-call:2d6c1d03bc6e",
       "path": "src/services/send/scheduleService.ts",
-      "line": 538,
+      "line": 556,
       "symbol": "runDueScheduled",
       "operation": "mutator-call",
       "target": "src/services/send/scheduleService.ts#runDueScheduled.settle",
@@ -24756,7 +24756,7 @@
     {
       "id": "src/services/send/scheduleService.ts#runDueScheduled:mutator-call:d03c79eca4a4",
       "path": "src/services/send/scheduleService.ts",
-      "line": 549,
+      "line": 568,
       "symbol": "runDueScheduled",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#deferScheduledClaim",
@@ -24769,7 +24769,7 @@
     {
       "id": "src/services/send/scheduleService.ts#runDueScheduled:mutator-call:3dac61ecbedb",
       "path": "src/services/send/scheduleService.ts",
-      "line": 567,
+      "line": 586,
       "symbol": "runDueScheduled",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#markScheduledFailed",
@@ -24782,7 +24782,7 @@
     {
       "id": "src/services/send/scheduleService.ts#runDueScheduled:mutator-call:129221ae16e0",
       "path": "src/services/send/scheduleService.ts",
-      "line": 596,
+      "line": 615,
       "symbol": "runDueScheduled",
       "operation": "mutator-call",
       "target": "src/services/send/scheduleService.ts#runDueScheduled.writeTerminal",
