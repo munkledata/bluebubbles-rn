@@ -7778,7 +7778,7 @@
     {
       "id": "src/db/repositories/contacts.ts#applyContactMatchWithinTransaction:drizzle-update:5bf953ebc01e",
       "path": "src/db/repositories/contacts.ts",
-      "line": 328,
+      "line": 343,
       "symbol": "applyContactMatchWithinTransaction",
       "operation": "drizzle-update",
       "target": "handles",
@@ -7791,7 +7791,7 @@
     {
       "id": "src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>:mutator-call:39217d2483ca",
       "path": "src/db/repositories/contacts.ts",
-      "line": 379,
+      "line": 394,
       "symbol": "linkHandlesToContacts.<callback:a29fef076d>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>.<callback:998d60ab14>",
@@ -7804,7 +7804,7 @@
     {
       "id": "src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>:mutator-call:57243fd8d6bd",
       "path": "src/db/repositories/contacts.ts",
-      "line": 379,
+      "line": 394,
       "symbol": "linkHandlesToContacts.<callback:a29fef076d>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -7817,7 +7817,7 @@
     {
       "id": "src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>.<callback:998d60ab14>:mutator-call:2c9931e83a2f",
       "path": "src/db/repositories/contacts.ts",
-      "line": 382,
+      "line": 397,
       "symbol": "linkHandlesToContacts.<callback:a29fef076d>.<callback:998d60ab14>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#applyContactMatchWithinTransaction",
@@ -7830,7 +7830,7 @@
     {
       "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>:mutator-call:4d11d05b9300",
       "path": "src/db/repositories/contacts.ts",
-      "line": 441,
+      "line": 456,
       "symbol": "matchContactsToHandles.<callback:855118c688>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -7843,7 +7843,7 @@
     {
       "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>:mutator-call:85a839fda316",
       "path": "src/db/repositories/contacts.ts",
-      "line": 441,
+      "line": 456,
       "symbol": "matchContactsToHandles.<callback:855118c688>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>.<callback:b160d8104b>",
@@ -7856,7 +7856,7 @@
     {
       "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>.<callback:b160d8104b>:mutator-call:6e98f3765bbd",
       "path": "src/db/repositories/contacts.ts",
-      "line": 442,
+      "line": 457,
       "symbol": "matchContactsToHandles.<callback:855118c688>.<callback:b160d8104b>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#applyContactMatchWithinTransaction",
@@ -7869,7 +7869,7 @@
     {
       "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:fb9ecba88a>:mutator-call:03929b5466d2",
       "path": "src/db/repositories/contacts.ts",
-      "line": 454,
+      "line": 469,
       "symbol": "matchContactsToHandles.<callback:fb9ecba88a>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -7882,7 +7882,7 @@
     {
       "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:fb9ecba88a>:mutator-call:1394e1a87db1",
       "path": "src/db/repositories/contacts.ts",
-      "line": 454,
+      "line": 469,
       "symbol": "matchContactsToHandles.<callback:fb9ecba88a>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:fb9ecba88a>.<callback:032718c953>",
@@ -7895,7 +7895,7 @@
     {
       "id": "src/db/repositories/contacts.ts#matchContactsToHandles:drizzle-update:39efd42dac33",
       "path": "src/db/repositories/contacts.ts",
-      "line": 467,
+      "line": 482,
       "symbol": "matchContactsToHandles",
       "operation": "drizzle-update",
       "target": "handles",
@@ -7908,7 +7908,7 @@
     {
       "id": "src/db/repositories/contacts.ts#setHandleServerAvatar:mutator-call:5488c0f447f3",
       "path": "src/db/repositories/contacts.ts",
-      "line": 531,
+      "line": 546,
       "symbol": "setHandleServerAvatar",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#setHandleServerAvatar.<callback:d9c2c56773>",
@@ -7921,7 +7921,7 @@
     {
       "id": "src/db/repositories/contacts.ts#setHandleServerAvatar:mutator-call:d300dc33591f",
       "path": "src/db/repositories/contacts.ts",
-      "line": 531,
+      "line": 546,
       "symbol": "setHandleServerAvatar",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -7934,7 +7934,7 @@
     {
       "id": "src/db/repositories/contacts.ts#setHandleServerAvatar.<callback:d9c2c56773>:mutator-call:07b1b7ff630f",
       "path": "src/db/repositories/contacts.ts",
-      "line": 532,
+      "line": 547,
       "symbol": "setHandleServerAvatar.<callback:d9c2c56773>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#setHandleServerAvatarWithinTransaction",
@@ -7947,7 +7947,7 @@
     {
       "id": "src/db/repositories/contacts.ts#setHandleServerAvatarWithinTransaction:drizzle-update:6f0e2fd8121c",
       "path": "src/db/repositories/contacts.ts",
-      "line": 545,
+      "line": 560,
       "symbol": "setHandleServerAvatarWithinTransaction",
       "operation": "drizzle-update",
       "target": "handles",

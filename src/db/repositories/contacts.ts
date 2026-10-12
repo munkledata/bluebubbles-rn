@@ -225,8 +225,23 @@ function addContactIndexClaim(
     matches.set(key, candidate);
     return;
   }
+  // Duplicate cards for one person (an import done twice, "Mom" saved again) claim the same number
+  // or email under the same name: one claimant, not an ambiguity. Keep the card with a photo.
+  // Different names stay ambiguous, which also keeps apart unrelated numbers that share their last
+  // ten digits across countries.
+  if (sameContactName(existing.displayName, candidate.displayName)) {
+    if (existing.avatar == null && candidate.avatar != null) matches.set(key, candidate);
+    return;
+  }
   matches.delete(key);
   blocked.set(key, { witnesses: [existing, candidate] });
+}
+
+function sameContactName(a: string | null, b: string | null): boolean {
+  const normalize = (name: string | null): string =>
+    (name ?? '').trim().replace(/\s+/g, ' ').toLocaleLowerCase();
+  const left = normalize(a);
+  return left.length > 0 && left === normalize(b);
 }
 
 /**

@@ -113,6 +113,33 @@ describe('contacts matching', () => {
     ]);
   });
 
+  // Two cards for one person (a duplicate import, "Mom" saved twice) used to block the shared
+  // number: her chats lost her name and photo and became an unknown sender with no notifications.
+  it('treats duplicate cards with the same name as one person', async () => {
+    const { db, raw } = await createTestDb();
+    await upsertHandles(db, [{ address: '+15551234567', displayName: 'Server Phone' }]);
+    await upsertContacts(db, [
+      contact({ sourceId: 'mom-1', displayName: 'Mom', phones: ['+1 (555) 123-4567'] }),
+      contact({
+        sourceId: 'mom-2',
+        displayName: ' mom ',
+        phones: ['555-123-4567'],
+        avatar: 'file:///mom.jpg',
+      }),
+    ]);
+
+    expect(await matchContactsToHandles(db)).toBe(1);
+    const handle = raw
+      .prepare(
+        "SELECT display_name AS name, avatar, contact_id AS contactId FROM handles WHERE address = '+15551234567'",
+      )
+      .get() as { name: string; avatar: string | null; contactId: number | null };
+    expect(handle.contactId).not.toBeNull();
+    expect(handle.name.trim().toLowerCase()).toBe('mom');
+    // The card with a photo wins, so the duplicate doesn't cost her picture.
+    expect(handle.avatar).toBe('file:///mom.jpg');
+  });
+
   it('clears an old contact presentation when a later full sync proves the endpoint ambiguous', async () => {
     const { db, raw } = await createTestDb();
     await upsertHandles(db, [{ address: 'shared@example.com', displayName: 'Server Name' }]);

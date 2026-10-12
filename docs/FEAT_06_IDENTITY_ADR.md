@@ -265,7 +265,10 @@ inventory drift recorded above is not claimed by this slice.
 Automatic contact presentation now uses type-scoped phone and email keys only after rejecting an
 empty normalized value. Rows with the same nonempty device-contact source id are one owner and the
 newest generation supplies that owner's complete endpoint set. Two distinct stable source ids, or
-any claimant without a stable source id, block automatic association. A previously linked handle
+any claimant without a stable source id, block automatic association. Exception (2026-10-12, review
+item 486): device-contact claimants whose names are equal after trimming, collapsing spaces and
+ignoring case are duplicate cards for one person and count as one claimant; the card with a photo
+wins. Different names stay blocked. A previously linked handle
 that becomes ambiguous is restored to its server/raw presentation and has its avatar and
 `contact_id` cleared, so it no longer passes known-contact filtering. The native-contact mapper no
 longer manufactures a position-based id when Android omits or blanks the immutable contact id; it
