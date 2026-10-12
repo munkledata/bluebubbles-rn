@@ -5,7 +5,7 @@ import {
 } from '@db/repositories';
 import { withDbTransaction, type DbTransactionContext } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
-import { attachmentFileName, AUTO_IMAGE_MAX_BYTES } from '@utils/attachment';
+import { attachmentFileName, attachmentKind, AUTO_IMAGE_MAX_BYTES } from '@utils/attachment';
 import type {
   AttachmentCacheAdmission,
   AttachmentCacheReservation,
@@ -393,7 +393,8 @@ export async function ensureDownloadedOutcome(
             maxBytes,
             timeoutMs,
             signal: controller.signal,
-            ...(att.mimeType?.startsWith('image/')
+            // Only formats Android can decode get the decode check; others are plain files.
+            ...(attachmentKind(att.mimeType ?? null) === 'image'
               ? { maxImagePixels: ATTACHMENT_IMAGE_MAX_PIXELS }
               : {}),
           },

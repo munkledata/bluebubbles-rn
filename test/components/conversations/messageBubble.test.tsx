@@ -787,6 +787,19 @@ describe('MessageBubble text rendering', () => {
     expect(screen.getAllByText('ATT')).toHaveLength(2);
   });
 
+  it('keeps the vertical stack when one image format cannot be drawn inline', async () => {
+    const msg = {
+      ...makeMsg({ text: '' }),
+      attachments: [
+        { guid: 'g1', mimeType: 'image/jpeg' } as AttachmentRow,
+        { guid: 'g2', mimeType: 'image/tiff' } as AttachmentRow,
+      ],
+    };
+    await renderWithTheme(<MessageBubble msg={msg} showTail />);
+    expect(screen.queryByText('GRID')).toBeNull();
+    expect(screen.getAllByText('ATT')).toHaveLength(2);
+  });
+
   it('renders a tapback on an attachment-only message (anchored to the attachment)', async () => {
     // Regression for "react to a photo shows no badge": the ReactionCluster used to live only in
     // the text-bubble branch. AttachmentView is mocked to null here, but the cluster sibling must

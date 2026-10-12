@@ -21,6 +21,27 @@ describe('attachmentKind', () => {
     expect(attachmentKind('application/pdf')).toBe('file');
     expect(attachmentKind(null)).toBe('file');
   });
+
+  it('treats image formats the phone cannot decode as ordinary files', () => {
+    // Android has no decoder for these, so the inline image path could never show them and the
+    // download's decode check failed every time.
+    for (const mime of ['image/tiff', 'image/svg+xml', 'image/jxl', 'image/x-icon']) {
+      expect(attachmentKind(mime)).toBe('file');
+    }
+    for (const mime of [
+      'image/jpeg',
+      'image/png',
+      'image/PNG',
+      'image/gif',
+      'image/webp',
+      'image/bmp',
+      'image/heic',
+      'image/heif',
+      'image/avif',
+    ]) {
+      expect(attachmentKind(mime)).toBe('image');
+    }
+  });
 });
 
 describe('friendlySize', () => {
@@ -141,6 +162,9 @@ describe('shouldAutoDownload', () => {
       false,
     );
     expect(shouldAutoDownload({ mimeType: 'video/mp4', totalBytes: 1000, localPath: null })).toBe(
+      false,
+    );
+    expect(shouldAutoDownload({ mimeType: 'image/tiff', totalBytes: 1000, localPath: null })).toBe(
       false,
     );
     expect(

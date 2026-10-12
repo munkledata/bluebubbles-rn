@@ -2,10 +2,34 @@ import { MEDIA_PATH_ENCODED_VALUE_MAX_CHARS } from './mediaPathLimits';
 
 export type AttachmentKind = 'image' | 'video' | 'audio' | 'contact' | 'location' | 'file';
 
+/**
+ * Image types Android's own decoder reads on every supported device (minSdk 36). Only these are
+ * drawn inline and pass the download's decode check. TIFF, SVG, JPEG-XL and any other `image/*`
+ * type are ordinary files that open in another app: the decode check could never pass for them,
+ * and an undecodable picture must not reach an inline renderer. The shared-media queries compare
+ * the lowercased MIME against this same list, so the carousel and Documents page agree.
+ */
+export const INLINE_IMAGE_MIME_TYPES: readonly string[] = [
+  'image/jpeg',
+  'image/jpg',
+  'image/pjpeg',
+  'image/png',
+  'image/gif',
+  'image/webp',
+  'image/bmp',
+  'image/x-ms-bmp',
+  'image/heic',
+  'image/heif',
+  'image/avif',
+];
+const INLINE_IMAGE_MIME_SET = new Set(INLINE_IMAGE_MIME_TYPES);
+
 /** Dispatch an attachment to a render type by MIME. */
 export function attachmentKind(mimeType: string | null): AttachmentKind {
   if (!mimeType) return 'file';
-  if (mimeType.startsWith('image/')) return 'image';
+  if (mimeType.startsWith('image/')) {
+    return INLINE_IMAGE_MIME_SET.has(mimeType.toLowerCase()) ? 'image' : 'file';
+  }
   if (mimeType.startsWith('video/')) return 'video';
   if (mimeType.startsWith('audio/')) return 'audio';
   // An Apple location is a vCard too, so test the more specific type FIRST.
@@ -164,7 +188,7 @@ export function shouldAutoDownload(att: {
   localPath: string | null;
 }): boolean {
   if (att.localPath) return false;
-  if (!att.mimeType?.startsWith('image/')) return false;
+  if (attachmentKind(att.mimeType) !== 'image') return false;
   // Automatic network work must have a trustworthy, finite pre-flight bound. A missing, negative,
   // fractional, or otherwise malformed server length remains available through an explicit tap,
   // where the downloader enforces its larger absolute cap against the ACTUAL bytes.

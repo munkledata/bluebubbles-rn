@@ -3900,7 +3900,7 @@ test('certifies exactly the reviewed attachment-download delegation boundary', (
       'app/(app)/media/[guid].tsx#MediaViewer:mutator-reference:d9da1c4d8c72',
       'app/(app)/media/[guid].tsx#MediaViewer:mutator-reference:f2d99eef8eea',
       'src/services/download/downloadService.ts#ensureDownloaded:mutator-call:aacca386ab26',
-      'src/services/download/downloadService.ts#ensureDownloadedOutcome:mutator-call:61546bdff34b',
+      'src/services/download/downloadService.ts#ensureDownloadedOutcome:mutator-call:c1f5c32eff7f',
       'src/services/download/index.ts#download:mutator-call:31f3d4057a6a',
       'src/services/download/index.ts#downloadScope.reserveCache:mutator-call:9a68094fc094',
       'src/services/download/index.ts#downloadScope.reuseCache:mutator-call:18cfc11c39e4',

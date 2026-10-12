@@ -27,6 +27,7 @@ import { useUrlPreview } from '@features/conversations/useUrlPreview';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { showToast } from '@ui/toast/toastStore';
 import {
+  attachmentKind,
   errorTitleForCode,
   firstUrl,
   interactiveMessageLabel,
@@ -294,7 +295,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   // A message that is ONLY images (≥2) collapses into a single two-column gallery grid bubble
   // (iMessage-style) instead of a tall vertical stack. Mixed image+file messages keep the stack.
   const imageOnlyGallery =
-    atts.length >= 2 && atts.every((a) => (a.mimeType ?? '').startsWith('image/'));
+    atts.length >= 2 && atts.every((a) => attachmentKind(a.mimeType) === 'image');
   const attachmentsNode = imageOnlyGallery ? (
     <AttachmentGalleryGrid
       atts={atts}

@@ -228,6 +228,27 @@ describe('ensureDownloaded', () => {
     expect(requests[1]).not.toHaveProperty('maxImagePixels');
   });
 
+  it('downloads a TIFF as an ordinary file, without the decode check Android cannot pass', async () => {
+    const { db } = await createTestDb();
+    await seedAttachment(db, 'tiff-scan');
+    const requests: Array<AttachmentFetchRequest | undefined> = [];
+    const download = jest.fn(async (...args: Parameters<AttachmentFetcher['download']>) => {
+      requests.push(args[5]);
+      return fetched(`file:///docs/${args[0]}`);
+    });
+    const fetcher: AttachmentFetcher = { exists: () => false, download };
+
+    await ensureDownloaded(db, fetcher, {
+      guid: 'tiff-scan',
+      transferName: 'scan.tiff',
+      localPath: null,
+      mimeType: 'image/tiff',
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).not.toHaveProperty('maxImagePixels');
+  });
+
   it('downloads an attachment whose long non-Latin name used to exceed the local path limit', async () => {
     const { db } = await createTestDb();
     await seedAttachment(db, 'long-name');

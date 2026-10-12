@@ -1,7 +1,7 @@
 import { eq, inArray, sql } from 'drizzle-orm';
 import type { Attachment } from '@core/models';
 import { STICKER_ASSOCIATED_TYPE } from '@core/reactions/reactionType';
-import { firstUrl, mediaSection } from '@utils';
+import { firstUrl, INLINE_IMAGE_MIME_TYPES, mediaSection } from '@utils';
 import { attachments, chats, messages, outgoingQueue } from '../schema';
 import {
   runInTransactionContext,
@@ -418,6 +418,14 @@ export async function getVisibleAttachmentByGuid(
   return queryAttachmentByGuid(db, guid, true);
 }
 
+/** The image types the bubbles draw inline (`attachmentKind`), as an SQL `IN (...)` list. */
+function inlineImageMimeList() {
+  return sql.join(
+    INLINE_IMAGE_MIME_TYPES.map((type) => sql`${type}`),
+    sql`, `,
+  );
+}
+
 /**
  * All IMAGE attachments in the same chat as `guid`, chronological, plus the index of `guid` among
  * them — for the fullscreen swipe-carousel (page left/right through every photo in the chat).
@@ -444,7 +452,7 @@ export async function listChatImageAttachmentsByAttachmentGuid(
         SELECT chat_id FROM messages
         WHERE id = (SELECT message_id FROM attachments WHERE guid = ${guid})
       )
-      AND a.mime_type LIKE 'image/%'
+      AND LOWER(a.mime_type) IN (${inlineImageMimeList()})
       AND a.is_sticker = 0
       AND a.hide_attachment = 0
       AND a.is_retracted = 0
@@ -534,7 +542,7 @@ export async function listChatDocumentAttachmentsPage(
         c.deleted_at IS NULL
         OR (m.date_created IS NOT NULL AND m.date_created > c.deleted_at)
       )
-      AND LOWER(COALESCE(a.mime_type, '')) NOT GLOB 'image/*'
+      AND LOWER(COALESCE(a.mime_type, '')) NOT IN (${inlineImageMimeList()})
       AND LOWER(COALESCE(a.mime_type, '')) NOT GLOB 'video/*'
     ORDER BY (m.date_created IS NULL) ASC, m.date_created DESC, a.id DESC
     LIMIT ${limit + 1}

@@ -350,7 +350,10 @@ describe('listChatDocumentAttachmentsPage (FEAT-07A)', () => {
 });
 
 describe('listChatImageAttachmentsByAttachmentGuid (fullscreen carousel)', () => {
-  async function seedImages(db: AppDatabase): Promise<void> {
+  async function seedImages(
+    db: AppDatabase,
+    extra: ReturnType<typeof Message.parse>[] = [],
+  ): Promise<void> {
     const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);
     const map = await upsertChats(
       db,
@@ -390,6 +393,7 @@ describe('listChatImageAttachmentsByAttachmentGuid (fullscreen carousel)', () =>
           handle: { address: 'a@x.com' },
           attachments: [Attachment.parse({ guid: 'vid-1', mimeType: 'video/mp4' })],
         }),
+        ...extra,
       ],
       () => chatId,
       handles,
@@ -404,5 +408,34 @@ describe('listChatImageAttachmentsByAttachmentGuid (fullscreen carousel)', () =>
     expect(g.items.map((a) => a.guid)).toEqual(['img-1', 'img-2', 'img-3']); // chronological
     expect(g.index).toBe(1); // the tapped photo
     expect(g.items.some((a) => a.guid === 'vid-1')).toBe(false); // video excluded
+  });
+
+  it('lists image formats the phone cannot draw as documents, never as carousel photos', async () => {
+    const { db } = await createTestDb();
+    const fileMessage = (guid: string, dateCreated: number, mimeType: string, name: string) =>
+      Message.parse({
+        guid: `m-${guid}`,
+        dateCreated,
+        hasAttachments: true,
+        handle: { address: 'a@x.com' },
+        attachments: [Attachment.parse({ guid, mimeType, transferName: name })],
+      });
+    await seedImages(db, [
+      fileMessage('tiff-1', 150, 'image/tiff', 'scan.tiff'),
+      fileMessage('svg-1', 160, 'image/svg+xml', 'logo.svg'),
+    ]);
+
+    const carousel = await listChatImageAttachmentsByAttachmentGuid(db, 'img-2');
+    expect(carousel.items.map((a) => a.guid)).toEqual(['img-1', 'img-2', 'img-3']);
+    expect(await listChatImageAttachmentsByAttachmentGuid(db, 'tiff-1')).toMatchObject({
+      index: -1,
+    });
+
+    const documents = await listChatDocumentAttachmentsPage(db, 'c1');
+    expect(documents.items.map((a) => a.guid)).toEqual(['svg-1', 'tiff-1']);
+
+    const strip = await listChatAttachmentsByKind(db, 'c1');
+    expect(strip.photos.map((a) => a.guid)).toEqual(['img-3', 'img-2', 'img-1']);
+    expect(strip.documents.map((a) => a.guid)).toEqual(['svg-1', 'tiff-1']);
   });
 });

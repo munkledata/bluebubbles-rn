@@ -5984,7 +5984,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction:drizzle-insert:fc8d72883c5b",
       "path": "src/db/repositories/attachments.ts",
-      "line": 671,
+      "line": 679,
       "symbol": "insertOutgoingAttachmentWithinTransaction",
       "operation": "drizzle-insert",
       "target": "messages",
@@ -5997,7 +5997,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction:drizzle-insert:eca25accb829",
       "path": "src/db/repositories/attachments.ts",
-      "line": 691,
+      "line": 699,
       "symbol": "insertOutgoingAttachmentWithinTransaction",
       "operation": "drizzle-insert",
       "target": "attachments",
@@ -6010,7 +6010,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction:drizzle-insert:5374f7183358",
       "path": "src/db/repositories/attachments.ts",
-      "line": 701,
+      "line": 709,
       "symbol": "insertOutgoingAttachmentWithinTransaction",
       "operation": "drizzle-insert",
       "target": "outgoingQueue",
@@ -6023,7 +6023,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction:drizzle-update:1de3c8263d4f",
       "path": "src/db/repositories/attachments.ts",
-      "line": 714,
+      "line": 722,
       "symbol": "insertOutgoingAttachmentWithinTransaction",
       "operation": "drizzle-update",
       "target": "chats",
@@ -6036,7 +6036,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachment:mutator-call:060b68f9fb33",
       "path": "src/db/repositories/attachments.ts",
-      "line": 731,
+      "line": 739,
       "symbol": "insertOutgoingAttachment",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#insertOutgoingAttachment.<callback:a5e1fc3fd8>",
@@ -6049,7 +6049,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachment:mutator-call:2109f62f577e",
       "path": "src/db/repositories/attachments.ts",
-      "line": 731,
+      "line": 739,
       "symbol": "insertOutgoingAttachment",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -6062,7 +6062,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachment.<callback:a5e1fc3fd8>:mutator-call:3069c9e0883c",
       "path": "src/db/repositories/attachments.ts",
-      "line": 732,
+      "line": 740,
       "symbol": "insertOutgoingAttachment.<callback:a5e1fc3fd8>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction",
@@ -6075,7 +6075,7 @@
     {
       "id": "src/db/repositories/attachments.ts#updateAttachmentLocalPathWithinTransaction:sql-update:4a6955646223",
       "path": "src/db/repositories/attachments.ts",
-      "line": 747,
+      "line": 755,
       "symbol": "updateAttachmentLocalPathWithinTransaction",
       "operation": "sql-update",
       "target": "attachments",
@@ -6088,7 +6088,7 @@
     {
       "id": "src/db/repositories/attachments.ts#replaceVisibleAttachmentLocalPathWithinTransaction:sql-update:43f358f5c0de",
       "path": "src/db/repositories/attachments.ts",
-      "line": 784,
+      "line": 792,
       "symbol": "replaceVisibleAttachmentLocalPathWithinTransaction",
       "operation": "sql-update",
       "target": "attachments",
@@ -6101,7 +6101,7 @@
     {
       "id": "src/db/repositories/attachments.ts#updateAttachmentLocalPath:mutator-call:420a1a02f6e6",
       "path": "src/db/repositories/attachments.ts",
-      "line": 819,
+      "line": 827,
       "symbol": "updateAttachmentLocalPath",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -6114,7 +6114,7 @@
     {
       "id": "src/db/repositories/attachments.ts#updateAttachmentLocalPath:mutator-call:814cc10efe69",
       "path": "src/db/repositories/attachments.ts",
-      "line": 819,
+      "line": 827,
       "symbol": "updateAttachmentLocalPath",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#updateAttachmentLocalPath.<callback:64ad543547>",
@@ -6127,7 +6127,7 @@
     {
       "id": "src/db/repositories/attachments.ts#updateAttachmentLocalPath.<callback:64ad543547>:mutator-call:8bfa38b73ef8",
       "path": "src/db/repositories/attachments.ts",
-      "line": 820,
+      "line": 828,
       "symbol": "updateAttachmentLocalPath.<callback:64ad543547>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#updateAttachmentLocalPathWithinTransaction",
@@ -20854,12 +20854,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/autoDownloadAttachments.test.ts; test/db/attachmentMediaExports.test.ts; test/services/realtimeSyncedBackground.test.ts"
     },
     {
-      "id": "src/services/download/downloadService.ts#ensureDownloadedOutcome:mutator-call:61546bdff34b",
+      "id": "src/services/download/downloadService.ts#ensureDownloadedOutcome:mutator-call:c1f5c32eff7f",
       "path": "src/services/download/downloadService.ts",
       "line": 336,
       "symbol": "ensureDownloadedOutcome",
       "operation": "mutator-call",
-      "target": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:047f471346>",
+      "target": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:d9c85ca302>",
       "detectedContext": "coordinated-delegation",
       "owner": "ensureDownloadedOutcome",
       "transactionContext": "coordinated-delegation",
@@ -20867,10 +20867,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts; test/services/autoDownloadAttachments.test.ts; test/components/attachments/attachmentView.test.tsx; test/components/attachments/fileChip.test.tsx; test/components/attachments/imageAttachment.test.tsx; test/components/attachments/stickerOverlay.test.tsx; test/components/attachments/videoPlayerLabel.test.tsx; test/components/cards/contactCard.test.tsx; test/components/cards/locationCard.test.tsx"
     },
     {
-      "id": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:047f471346>.persistPathAndLedger:mutator-call:b62da14f0d55",
+      "id": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:d9c85ca302>.persistPathAndLedger:mutator-call:d73938625903",
       "path": "src/services/download/downloadService.ts",
-      "line": 488,
-      "symbol": "ensureDownloadedOutcome.<callback:047f471346>.persistPathAndLedger",
+      "line": 489,
+      "symbol": "ensureDownloadedOutcome.<callback:d9c85ca302>.persistPathAndLedger",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentCache.ts#commitAttachmentCacheReservation",
       "detectedContext": "withDbTransaction",
@@ -20880,10 +20880,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts"
     },
     {
-      "id": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:047f471346>.persistPathAndLedger:mutator-call:01f3173adce4",
+      "id": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:d9c85ca302>.persistPathAndLedger:mutator-call:760537b53237",
       "path": "src/services/download/downloadService.ts",
-      "line": 505,
-      "symbol": "ensureDownloadedOutcome.<callback:047f471346>.persistPathAndLedger",
+      "line": 506,
+      "symbol": "ensureDownloadedOutcome.<callback:d9c85ca302>.persistPathAndLedger",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#replaceVisibleAttachmentLocalPathWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -20893,10 +20893,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts"
     },
     {
-      "id": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:047f471346>.persistPathAndLedger:mutator-call:cfd7461b4388",
+      "id": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:d9c85ca302>.persistPathAndLedger:mutator-call:e4c14a2969c0",
       "path": "src/services/download/downloadService.ts",
-      "line": 510,
-      "symbol": "ensureDownloadedOutcome.<callback:047f471346>.persistPathAndLedger",
+      "line": 511,
+      "symbol": "ensureDownloadedOutcome.<callback:d9c85ca302>.persistPathAndLedger",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#updateAttachmentLocalPathWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -20906,10 +20906,23 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts"
     },
     {
-      "id": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:047f471346>.<callback:f61df74359>:mutator-call:3c041c3d7a51",
+      "id": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:d9c85ca302>.<callback:f61df74359>:mutator-call:50b447b10e45",
       "path": "src/services/download/downloadService.ts",
-      "line": 531,
-      "symbol": "ensureDownloadedOutcome.<callback:047f471346>.<callback:f61df74359>",
+      "line": 532,
+      "symbol": "ensureDownloadedOutcome.<callback:d9c85ca302>.<callback:f61df74359>",
+      "operation": "mutator-call",
+      "target": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:d9c85ca302>.persistPathAndLedger",
+      "detectedContext": "withDbTransaction",
+      "owner": "ensureDownloadedOutcome",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts"
+    },
+    {
+      "id": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:d9c85ca302>.<callback:f61df74359>:mutator-call:ac2669247160",
+      "path": "src/services/download/downloadService.ts",
+      "line": 532,
+      "symbol": "ensureDownloadedOutcome.<callback:d9c85ca302>.<callback:f61df74359>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -20919,48 +20932,35 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts"
     },
     {
-      "id": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:047f471346>.<callback:f61df74359>:mutator-call:e08474c25551",
+      "id": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:d9c85ca302>:mutator-call:7544c31ad96c",
       "path": "src/services/download/downloadService.ts",
-      "line": 531,
-      "symbol": "ensureDownloadedOutcome.<callback:047f471346>.<callback:f61df74359>",
-      "operation": "mutator-call",
-      "target": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:047f471346>.persistPathAndLedger",
-      "detectedContext": "withDbTransaction",
-      "owner": "ensureDownloadedOutcome",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts"
-    },
-    {
-      "id": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:047f471346>:mutator-call:886626e1aa23",
-      "path": "src/services/download/downloadService.ts",
-      "line": 539,
-      "symbol": "ensureDownloadedOutcome.<callback:047f471346>",
-      "operation": "mutator-call",
-      "target": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:047f471346>.persistPathAndLedger",
-      "detectedContext": "withDbTransaction",
-      "owner": "ensureDownloadedOutcome",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts"
-    },
-    {
-      "id": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:047f471346>:mutator-call:d9b292287c4a",
-      "path": "src/services/download/downloadService.ts",
-      "line": 539,
-      "symbol": "ensureDownloadedOutcome.<callback:047f471346>",
+      "line": 540,
+      "symbol": "ensureDownloadedOutcome.<callback:d9c85ca302>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
       "owner": "ensureDownloadedOutcome",
       "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts"
+    },
+    {
+      "id": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:d9c85ca302>:mutator-call:bc6a65fc39bf",
+      "path": "src/services/download/downloadService.ts",
+      "line": 540,
+      "symbol": "ensureDownloadedOutcome.<callback:d9c85ca302>",
+      "operation": "mutator-call",
+      "target": "src/services/download/downloadService.ts#ensureDownloadedOutcome.<callback:d9c85ca302>.persistPathAndLedger",
+      "detectedContext": "withDbTransaction",
+      "owner": "ensureDownloadedOutcome",
+      "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
       "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts"
     },
     {
       "id": "src/services/download/downloadService.ts#ensureDownloaded:mutator-call:aacca386ab26",
       "path": "src/services/download/downloadService.ts",
-      "line": 631,
+      "line": 632,
       "symbol": "ensureDownloaded",
       "operation": "mutator-call",
       "target": "src/services/download/downloadService.ts#ensureDownloadedOutcome",
