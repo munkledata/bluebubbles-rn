@@ -1,4 +1,5 @@
 import {
+  BackupExportLimitError,
   getBackupBaseExportData,
   getBackupV4ExportData,
   restorePreparedBackupWithinTransaction,
@@ -12,6 +13,7 @@ import {
 } from '@core/crypto';
 import { parseThemeTokensJson } from '@core/themeTokens';
 import { utf8Encode } from '@utils/bytes';
+import { z } from 'zod/v4';
 import {
   BACKUP_LIMITS,
   BackupSchema,
@@ -23,6 +25,36 @@ import {
   type BackupV2,
   type BackupV4,
 } from './backupSchema';
+
+export { BackupExportLimitError, type BackupEditableField } from '@db/repositories';
+
+/**
+ * The final schema check counts UTF-16 units, so an emoji-heavy name can pass the SQL probe and be
+ * refused only here. Name the field the person can shorten instead of a bare validation error.
+ */
+function withEditableLimitErrors<T>(parse: () => T): T {
+  try {
+    return parse();
+  } catch (error) {
+    for (const issue of error instanceof z.ZodError ? error.issues : []) {
+      if (issue.code !== 'too_big') continue;
+      const [section, , key] = issue.path;
+      if (section === 'themes' && key === 'name') {
+        throw new BackupExportLimitError(
+          'theme-name',
+          'Backup export theme name exceeds its limit.',
+        );
+      }
+      if (section === 'chatCustomizations' && key === 'customName') {
+        throw new BackupExportLimitError(
+          'chat-nickname',
+          'Backup export chat name exceeds its limit.',
+        );
+      }
+    }
+    throw error;
+  }
+}
 
 export type BackupInputLimitKind =
   'file-size-unavailable' | 'file-too-large' | 'encoded-too-large' | 'plaintext-too-large';
@@ -103,13 +135,15 @@ export async function buildBackup(
   opts: { exportedAt: number; appVersion?: string },
 ): Promise<BackupV2> {
   const snapshot = await getBackupBaseExportData(db, BACKUP_EXPORT_LIMITS);
-  return BackupV2Schema.parse({
-    version: 2,
-    exportedAt: opts.exportedAt,
-    appVersion: opts.appVersion,
-    ...snapshot,
-    kv: snapshot.kv.filter((pair) => isBackupKey(pair.key)),
-  });
+  return withEditableLimitErrors(() =>
+    BackupV2Schema.parse({
+      version: 2,
+      exportedAt: opts.exportedAt,
+      appVersion: opts.appVersion,
+      ...snapshot,
+      kv: snapshot.kv.filter((pair) => isBackupKey(pair.key)),
+    }),
+  );
 }
 
 /** Build the complete encrypted-export payload from one coordinated database snapshot. */
@@ -119,13 +153,15 @@ export async function buildBackupWithCustomFolders(
   ownershipGuard?: DbCommitGuard,
 ): Promise<BackupV4> {
   const snapshot = await getBackupV4ExportData(db, BACKUP_EXPORT_LIMITS, ownershipGuard);
-  return BackupV4Schema.parse({
-    version: 4,
-    exportedAt: opts.exportedAt,
-    appVersion: opts.appVersion,
-    ...snapshot,
-    kv: snapshot.kv.filter((pair) => isBackupKey(pair.key)),
-  });
+  return withEditableLimitErrors(() =>
+    BackupV4Schema.parse({
+      version: 4,
+      exportedAt: opts.exportedAt,
+      appVersion: opts.appVersion,
+      ...snapshot,
+      kv: snapshot.kv.filter((pair) => isBackupKey(pair.key)),
+    }),
+  );
 }
 
 export interface RestoreResult {

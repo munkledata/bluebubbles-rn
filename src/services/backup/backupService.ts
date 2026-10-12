@@ -29,6 +29,8 @@ import {
 const ACCOUNT_CHANGED_MESSAGE = 'backup-account-changed';
 let backupFileSequence = 0;
 
+export { BackupExportLimitError, type BackupEditableField } from './backup';
+
 /** Expected cancellation when a backup screen outlives the account that opened it. */
 export class BackupAccountChangedError extends Error {
   constructor() {

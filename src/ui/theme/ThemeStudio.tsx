@@ -12,6 +12,7 @@ import {
 import { ThemePreviewCard } from './ThemePreviewCard';
 import { useTheme } from './ThemeProvider';
 import { darkThemeOrFallback, type ThemeTokens } from './tokens';
+import { BACKUP_LIMITS } from '@/services/backup/backupSchema';
 
 // ---- Draft model (shared by the global manager + the per-chat studio) -------
 
@@ -282,6 +283,8 @@ export function ThemeStudio({
           <TextInput
             value={draft.name}
             onChangeText={(name) => updateDraft({ ...draft, name })}
+            // A longer name would make every backup fail; keep it within what a backup holds.
+            maxLength={BACKUP_LIMITS.themeNameCharacters}
             accessibilityLabel="Theme name"
             placeholder="Theme name"
             placeholderTextColor={theme.color.tertiaryLabel}

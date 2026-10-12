@@ -863,6 +863,8 @@ describe('ChatSettingsScreen Apple group rename', () => {
 
     expect(screen.getByText('PHONE-LOCAL NICKNAME')).toBeTruthy();
     expect(screen.getByLabelText('Phone-Local Nickname').props.value).toBe(PRIVATE_CUSTOM_TITLE);
+    // The backup holds at most 1,024 UTF-16 units per nickname; never let one be typed longer.
+    expect(screen.getByLabelText('Phone-Local Nickname').props.maxLength).toBe(1_024);
     expect(screen.getByText('APPLE GROUP NAME')).toBeTruthy();
     const input = screen.getByLabelText('Apple Group Name');
     expect(input.props.value).toBe(PRIVATE_SERVER_TITLE);

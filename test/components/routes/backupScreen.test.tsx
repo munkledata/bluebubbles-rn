@@ -38,7 +38,15 @@ jest.mock('@/services/backup/backupService', () => {
       this.issue = issue;
     }
   }
+  class BackupExportLimitError extends Error {
+    field: 'chat-nickname' | 'theme-name' | 'folder-memberships';
+    constructor(field: 'chat-nickname' | 'theme-name' | 'folder-memberships') {
+      super(field);
+      this.field = field;
+    }
+  }
   return {
+    BackupExportLimitError,
     BackupPassphraseRejectedError,
     exportEncryptedBackup: jest.fn(async () => undefined),
     importBackupAuto: jest.fn(),
@@ -153,6 +161,30 @@ describe('BackupScreen passphrase boundary', () => {
     expect(screen.queryByDisplayValue('account-A-passphrase')).toBeNull();
     expect(screen.queryByDisplayValue('account-A-encrypted-backup')).toBeNull();
     expect(screen.queryByPlaceholderText('Passphrase')).toBeNull();
+  });
+
+  it.each([
+    ['chat-nickname', 'A conversation’s phone-local nickname is too long to back up.'],
+    ['theme-name', 'A custom theme’s name is too long to back up.'],
+    ['folder-memberships', 'Your folders hold more chats in total than a backup can include'],
+  ] as const)('says what to change when a %s is too large to back up', async (field, opening) => {
+    const { BackupExportLimitError } = jest.requireMock('@/services/backup/backupService') as {
+      BackupExportLimitError: new (field: string) => Error;
+    };
+    mockExport.mockRejectedValueOnce(new BackupExportLimitError(field));
+    await renderWithTheme(<BackupScreen />);
+    await fireEvent.changeText(screen.getByPlaceholderText('Passphrase'), 'river-lantern-orbit-92');
+    await fireEvent.changeText(
+      screen.getByPlaceholderText('Confirm passphrase'),
+      'river-lantern-orbit-92',
+    );
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Export encrypted backup' }));
+
+    await waitFor(() =>
+      expect(showDialog).toHaveBeenCalledWith('Backup', expect.stringContaining(opening)),
+    );
+    expect(showDialog).not.toHaveBeenCalledWith('Backup', 'Export failed.');
   });
 
   it('keeps a delayed old-account export failure silent', async () => {

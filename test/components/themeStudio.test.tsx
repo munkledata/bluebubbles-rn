@@ -122,6 +122,8 @@ describe('ThemeStudio dark-only editor', () => {
       </SafeAreaProvider>,
     );
 
+    // The backup holds at most 256 UTF-16 units per theme name; never let one be typed longer.
+    expect(screen.getByLabelText('Theme name').props.maxLength).toBe(256);
     await act(async () => {
       fireEvent.changeText(screen.getByLabelText('Theme name'), 'Changed theme');
     });

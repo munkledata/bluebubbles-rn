@@ -3,10 +3,12 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
 import {
+  BackupExportLimitError,
   BackupPassphraseRejectedError,
   exportEncryptedBackup,
   importBackupAuto,
   isBackupAccountChangedError,
+  type BackupEditableField,
 } from '@/services/backup/backupService';
 import { readPickedBackupDocument } from '@/services/backup/pickedBackupDocument';
 import {
@@ -77,6 +79,13 @@ export async function pickBackupFileForLease(
     unsubscribe();
   }
 }
+
+/** Data the person can change that is too large for a backup: say what to change. */
+const EXPORT_LIMIT_MESSAGES: Record<BackupEditableField, string> = {
+  'chat-nickname': `A conversation’s phone-local nickname is too long to back up. Shorten it to ${BACKUP_LIMITS.chatNameCharacters.toLocaleString('en-US')} characters or fewer in that conversation’s settings, then export again.`,
+  'theme-name': `A custom theme’s name is too long to back up. Rename it to ${BACKUP_LIMITS.themeNameCharacters} characters or fewer in Theme Studio, then export again.`,
+  'folder-memberships': `Your folders hold more chats in total than a backup can include (${BACKUP_LIMITS.customFolderMemberships.toLocaleString('en-US')} at most). Remove some chats from folders, then export again.`,
+};
 
 function passphraseIssueMessage(issue: NewBackupPassphraseIssue): string {
   return issue === 'too-short'
@@ -160,6 +169,10 @@ export default function BackupScreen(): React.JSX.Element {
       if (!screenLease.isCurrent() || isBackupAccountChangedError(e)) return;
       if (e instanceof BackupPassphraseRejectedError) {
         showDialog('Backup', passphraseIssueMessage(e.issue));
+        return;
+      }
+      if (e instanceof BackupExportLimitError) {
+        showDialog('Backup', EXPORT_LIMIT_MESSAGES[e.field]);
         return;
       }
       showDialog(

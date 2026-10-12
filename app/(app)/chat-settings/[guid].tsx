@@ -43,6 +43,7 @@ import {
   updateChatCustomization,
   updateHandleColor,
 } from '@/services';
+import { BACKUP_LIMITS } from '@/services/backup/backupSchema';
 import { openChatNotificationSettings } from '@/services/notifications/notifeeService';
 import {
   captureRealtimeDeliveryLease,
@@ -1049,6 +1050,8 @@ function ChatSettingsScreen({
           <TextInput
             value={customName}
             onChangeText={saveName}
+            // A longer nickname would make every backup fail; keep it within what a backup holds.
+            maxLength={BACKUP_LIMITS.chatNameCharacters}
             placeholder={serverTitle || 'Custom name'}
             placeholderTextColor={theme.color.tertiaryLabel}
             accessibilityLabel="Phone-Local Nickname"

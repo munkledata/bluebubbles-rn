@@ -21,8 +21,10 @@ import {
 } from '@core/crypto';
 import { fromBase64, toBase64 } from '@utils/bytes';
 import {
+  BackupExportLimitError,
   BackupInputLimitError,
   buildBackup,
+  buildBackupWithCustomFolders,
   openBackup,
   parseBackup,
   restoreBackup,
@@ -220,8 +222,28 @@ describe('buildBackup', () => {
       .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?, ?, ?, 0)')
       .run(sqlBoundedButJavaScriptOversized, 'dark', '{}');
 
-    await expect(buildBackup(t.db, { exportedAt: 1 })).rejects.toThrow();
+    await expect(buildBackup(t.db, { exportedAt: 1 })).rejects.toThrow(
+      expect.objectContaining({ name: 'BackupExportLimitError', field: 'theme-name' }),
+    );
   });
+
+  it.each([
+    ['caught by the bounded SQL probe', 'n'.repeat(1_025)],
+    ['caught by the exact final check (an emoji counts twice)', `${'a'.repeat(1_023)}😀`],
+  ])(
+    'names an over-long chat nickname so the person can shorten it (%s)',
+    async (_label, nickname) => {
+      const t = await createTestDb();
+      await seedChat(t, 'long-nickname');
+      t.raw
+        .prepare('UPDATE chats SET custom_name = ? WHERE guid = ?')
+        .run(nickname, 'long-nickname');
+
+      const export_ = buildBackupWithCustomFolders(t.db, { exportedAt: 1 });
+      await expect(export_).rejects.toBeInstanceOf(BackupExportLimitError);
+      await expect(export_).rejects.toMatchObject({ field: 'chat-nickname' });
+    },
+  );
 });
 
 describe('restoreBackup round-trip', () => {

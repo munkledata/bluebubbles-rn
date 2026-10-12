@@ -79,6 +79,19 @@ interface ChatCustomizationExportRow extends Omit<ChatCustomizationRow, 'guid'> 
   participantService: string | null;
 }
 
+/** Data the person typed or chose that is too large for a backup; `field` says what to change. */
+export type BackupEditableField = 'chat-nickname' | 'theme-name' | 'folder-memberships';
+
+export class BackupExportLimitError extends Error {
+  constructor(
+    readonly field: BackupEditableField,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'BackupExportLimitError';
+  }
+}
+
 const MAX_BACKUP_CUSTOM_FOLDER_IDENTITIES = 10_000;
 const MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS = 25_000;
 const MAX_BACKUP_CHAT_PARTICIPANTS = 512;
@@ -940,12 +953,19 @@ function readBackupBaseRowsWithinTransaction(
       limits.valueCharacters,
       'kv value',
     );
-    assertProbeStringBound(
-      themeProbe.maxNameCharacters,
-      themeProbe.maxNameBytes,
-      limits.themeNameCharacters,
-      'theme name',
-    );
+    if (
+      !hasProbeStringBound(
+        themeProbe.maxNameCharacters,
+        themeProbe.maxNameBytes,
+        limits.themeNameCharacters,
+        'theme name',
+      )
+    ) {
+      throw new BackupExportLimitError(
+        'theme-name',
+        'Backup export theme name exceeds its safety bound.',
+      );
+    }
     assertProbeStringBound(
       themeProbe.maxModeCharacters,
       themeProbe.maxModeBytes,
@@ -981,12 +1001,19 @@ function readBackupBaseRowsWithinTransaction(
         limits.chatIdentifierCharacters,
         'chat identifier',
       );
-      assertProbeStringBound(
-        chat.customNameCharacters,
-        chat.customNameBytes,
-        limits.chatNameCharacters,
-        'chat name',
-      );
+      if (
+        !hasProbeStringBound(
+          chat.customNameCharacters,
+          chat.customNameBytes,
+          limits.chatNameCharacters,
+          'chat name',
+        )
+      ) {
+        throw new BackupExportLimitError(
+          'chat-nickname',
+          'Backup export chat name exceeds its safety bound.',
+        );
+      }
       assertProbeStringBound(
         chat.customColorCharacters,
         chat.customColorBytes,
@@ -1405,7 +1432,10 @@ function readCustomFolderBackupRowsWithinTransaction(
       'custom folder membership count',
     );
     if (memberCount > MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS) {
-      throw new Error('Custom folder memberships exceed their aggregate backup safety bound.');
+      throw new BackupExportLimitError(
+        'folder-memberships',
+        'Custom folder memberships exceed their aggregate backup safety bound.',
+      );
     }
 
     const memberProbe = await db.all<CustomFolderMemberProbeRow>(sql`
