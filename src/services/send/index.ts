@@ -1204,7 +1204,10 @@ export async function cancelScheduled(
     const stored = await getScheduledById(db, expected.id);
     assertScheduledLease(accountLease);
     if (!stored) return;
-    const identityIsCurrent = captureScheduledChatMutationGuard(stored.chatGuid);
+    // A phone-only row is removed locally and needs no live RCS identity, so a Google re-pair must
+    // not strand it; only a server-backed row needs its current pairing for the remote delete.
+    const identityIsCurrent =
+      stored.serverId == null ? () => true : captureScheduledChatMutationGuard(stored.chatGuid);
     assertScheduledMutationCurrent(accountLease, identityIsCurrent);
     if (
       stored.status !== 'pending' ||
@@ -1250,7 +1253,9 @@ export function clearScheduledHistoryItem(
     const stored = await getScheduledById(db, id);
     assertScheduledLease(accountLease);
     if (!stored) return;
-    const identityIsCurrent = captureScheduledChatMutationGuard(stored.chatGuid);
+    // Clearing history deletes only the local row; a phone-only one needs no live RCS identity.
+    const identityIsCurrent =
+      stored.serverId == null ? () => true : captureScheduledChatMutationGuard(stored.chatGuid);
     assertScheduledMutationCurrent(accountLease, identityIsCurrent);
     await withDbTransaction(
       db,

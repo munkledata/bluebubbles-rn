@@ -193,7 +193,7 @@ it('stores only a server-backed file schedule after a confirmed narrow response'
 });
 
 describe('scheduled-message account ownership', () => {
-  it('keeps old-epoch RCS schedule rows read-only across cancel, edit, and history clear', async () => {
+  it('lets old-epoch phone-only RCS schedules be cancelled or cleared, but not edited', async () => {
     const previousSession = useSessionStore.getState();
     const { db, raw } = await createTestDb();
     (getDatabase as jest.Mock).mockReturnValue(db);
@@ -219,14 +219,7 @@ describe('scheduled-message account ownership', () => {
         ),
       ).toBe(true);
 
-      await expect(
-        cancelScheduled({
-          id: pendingId,
-          serverId: null,
-          chatGuid: rcsChatGuid(RCS_EPOCH_A),
-          scheduledFor: 9_000_000,
-        }),
-      ).rejects.toThrow('previous Google pairing');
+      // Editing a message that can never be sent is refused; removing a phone-only row is not.
       await expect(
         editScheduled(
           {
@@ -238,16 +231,21 @@ describe('scheduled-message account ownership', () => {
           { text: 'must not change', scheduledFor: 9_500_000 },
         ),
       ).rejects.toThrow('previous Google pairing');
-      await expect(clearScheduledHistoryItem(historyId)).rejects.toThrow('previous Google pairing');
-
       expect(await getScheduledById(db, pendingId)).toMatchObject({
         text: 'old pairing pending',
         scheduledFor: 9_000_000,
       });
-      expect(await getScheduledById(db, historyId)).toMatchObject({
-        text: 'old pairing history',
-        status: 'sent',
+
+      await cancelScheduled({
+        id: pendingId,
+        serverId: null,
+        chatGuid: rcsChatGuid(RCS_EPOCH_A),
+        scheduledFor: 9_000_000,
       });
+      await clearScheduledHistoryItem(historyId);
+
+      expect(await getScheduledById(db, pendingId)).toBeNull();
+      expect(await getScheduledById(db, historyId)).toBeNull();
       expect(mockDeleteScheduled).not.toHaveBeenCalled();
       expect(mockCreateScheduled).not.toHaveBeenCalled();
     } finally {

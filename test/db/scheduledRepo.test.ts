@@ -547,6 +547,46 @@ describe('scheduled messages repo', () => {
     });
   });
 
+  describe('scheduled RCS rows from a previous Google pairing', () => {
+    const OLD_EPOCH = `gpe1_${'B'.repeat(43)}`;
+    const OLD_RCS_CHAT_GUID = `RCS;-;g1.${OLD_EPOCH}.${Buffer.from('old-thread').toString('base64url')}`;
+
+    it('counts attempts for a row from another known pairing until it retires', async () => {
+      const { db, raw } = await createTestDb();
+      const id = await insertScheduled(db, {
+        chatGuid: OLD_RCS_CHAT_GUID,
+        text: 'old pairing',
+        scheduledFor: 1,
+      });
+      let http!: HttpClient;
+      http = {
+        pinTransport: () => http,
+        isTransportCurrent: () => true,
+        assertTransportCurrent: () => undefined,
+      } as unknown as HttpClient;
+
+      // The current pairing is known and different: the row can never be sent, so it must not be
+      // deferred forever as if RCS were only temporarily down.
+      await runDueScheduled(db, http, 1_000, undefined, undefined, undefined, () => RCS_CAPABILITY);
+      expect(raw.prepare('SELECT attempts FROM scheduled_messages WHERE id = ?').get(id)).toEqual({
+        attempts: 1,
+      });
+      for (let run = 1; run < 5; run += 1) {
+        await runDueScheduled(
+          db,
+          http,
+          1_000,
+          undefined,
+          undefined,
+          undefined,
+          () => RCS_CAPABILITY,
+        );
+      }
+
+      expect(await getScheduledById(db, id)).toMatchObject({ status: 'error' });
+    });
+  });
+
   describe('runDueScheduled', () => {
     it.each([null, 'daily' as const])(
       'defers an RCS %s schedule without spending an attempt while the bridge is unavailable',

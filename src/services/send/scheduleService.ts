@@ -10,7 +10,7 @@ import {
 } from '@core/models/serverInfo';
 import { asRecurrence, nextOccurrence, type Recurrence } from '@core/schedule';
 import { logger } from '@core/secure';
-import { isCurrentRcsChatGuid } from '@core/rcs/providerIdentity';
+import { currentRcsProviderEpoch, isCurrentRcsChatGuid } from '@core/rcs/providerIdentity';
 import {
   claimDueScheduled,
   deferScheduledClaim,
@@ -396,6 +396,22 @@ type Sender = (
 ) => Promise<void>;
 
 /**
+ * Once the current Google pairing is known, an RCS row from any other pairing can never be sent:
+ * Google may reuse its old source id for someone else. Its failure then counts as an attempt, so
+ * the row retires at the cap instead of being deferred forever like a temporary RCS outage.
+ */
+function belongsToAnotherKnownRcsPairing(
+  chatGuid: string,
+  source: RcsCapabilitySource | undefined,
+): boolean {
+  return (
+    isRcsChatGuid(chatGuid) &&
+    currentRcsProviderEpoch(source?.serverInfo) !== null &&
+    !isCurrentRcsChatGuid(source?.serverInfo, chatGuid)
+  );
+}
+
+/**
  * Before the hand-off the only network step is the server-capability lookup (a proven one-to-one
  * iMessage chat needs it). When that cannot reach the server nothing was sent, so the row is
  * released without spending one of its five attempts, as an RCS capability gap already is.
@@ -562,7 +578,8 @@ export async function runDueScheduled(
         if (!settled) {
           if (
             e instanceof DbCommitGuardRejectedError ||
-            e instanceof RcsCapabilityUnavailableError ||
+            (e instanceof RcsCapabilityUnavailableError &&
+              !belongsToAnotherKnownRcsPairing(m.chatGuid, capabilitySource)) ||
             isUnreachableBeforeHandover(e)
           ) {
             await deferScheduledClaim(db, m.id, commitGuard);

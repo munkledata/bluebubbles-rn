@@ -2269,9 +2269,9 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
   assert.deepEqual(
     scheduledHistoryTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:b9eca62666>.<callback:be2a685944>:mutator-call:8b4ffa7e0233',
-      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:b9eca62666>:mutator-call:248ae638f046',
-      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:b9eca62666>:mutator-call:e7be6efd9c5f',
+      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:bef1f22f9c>.<callback:be2a685944>:mutator-call:3ce6a7d97594',
+      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:bef1f22f9c>:mutator-call:3a9bf17ff09e',
+      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:bef1f22f9c>:mutator-call:fb8283bcf50f',
     ].sort(),
   );
   assert.deepEqual(
@@ -3553,9 +3553,9 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
   assert.deepEqual(
     cancelScheduledTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#cancelScheduled.<callback:e09912a235>.<callback:86b1cd18b6>:mutator-call:b2dcde94a492',
-      'src/services/send/index.ts#cancelScheduled.<callback:e09912a235>:mutator-call:3361f3f0ff16',
-      'src/services/send/index.ts#cancelScheduled.<callback:e09912a235>:mutator-call:8ae567cac219',
+      'src/services/send/index.ts#cancelScheduled.<callback:c253482651>.<callback:86b1cd18b6>:mutator-call:c3c51b3d2327',
+      'src/services/send/index.ts#cancelScheduled.<callback:c253482651>:mutator-call:49cc05f329cf',
+      'src/services/send/index.ts#cancelScheduled.<callback:c253482651>:mutator-call:65dd374558cf',
     ].sort(),
   );
   assert.deepEqual(
@@ -3579,9 +3579,9 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
   assert.deepEqual(
     clearScheduledHistoryTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:b9eca62666>.<callback:be2a685944>:mutator-call:8b4ffa7e0233',
-      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:b9eca62666>:mutator-call:248ae638f046',
-      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:b9eca62666>:mutator-call:e7be6efd9c5f',
+      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:bef1f22f9c>.<callback:be2a685944>:mutator-call:3ce6a7d97594',
+      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:bef1f22f9c>:mutator-call:3a9bf17ff09e',
+      'src/services/send/index.ts#clearScheduledHistoryItem.<callback:bef1f22f9c>:mutator-call:fb8283bcf50f',
     ].sort(),
   );
   assert.deepEqual(
