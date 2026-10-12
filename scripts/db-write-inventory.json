@@ -15589,10 +15589,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/errorReportsRepo.test.ts; test/db/withDbTransaction.test.ts; test/services/errorReportQueueService.test.ts; test/services/errorReportSink.test.ts; test/services/globalErrorHandlers.test.ts; test/state/featureSettingsStore.test.ts; test/services/backgroundSyncTask.test.ts; test/services/backgroundSyncOrchestrator.test.ts; test/services/foregroundBoot.test.ts; test/services/lockService.test.ts; test/components/routes/appLayout.test.tsx"
     },
     {
-      "id": "src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:90014dc595>:mutator-call:e68476a9b725",
+      "id": "src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:98f962fa55>:mutator-call:20cd5bee42e2",
       "path": "src/services/background/realtimePrerequisiteRecovery.ts",
-      "line": 118,
-      "symbol": "recoverRealtimePrerequisite.<callback:90014dc595>",
+      "line": 120,
+      "symbol": "recoverRealtimePrerequisite.<callback:98f962fa55>",
       "operation": "mutator-call",
       "target": "src/services/sync/engine.ts#syncSingleChat",
       "detectedContext": "coordinated-delegation",
@@ -15602,10 +15602,10 @@
       "evidence": "test/services/messageStateSync.test.ts; test/services/providerRepair.test.ts; test/db/outgoingBranches.test.ts; test/db/chatActionsRepo.test.ts; test/db/clearLocalCache.test.ts; test/db/migrations/0053_versioned_server_message_state.test.ts"
     },
     {
-      "id": "src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:90014dc595>:mutator-call:d67f2f617e41",
+      "id": "src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:98f962fa55>:mutator-call:735cf091a801",
       "path": "src/services/background/realtimePrerequisiteRecovery.ts",
-      "line": 127,
-      "symbol": "recoverRealtimePrerequisite.<callback:90014dc595>",
+      "line": 129,
+      "symbol": "recoverRealtimePrerequisite.<callback:98f962fa55>",
       "operation": "mutator-call",
       "target": "src/services/sync/engine.ts#syncChatMessages",
       "detectedContext": "coordinated-delegation",
@@ -15615,10 +15615,10 @@
       "evidence": "test/services/messageStateSync.test.ts; test/services/providerRepair.test.ts; test/db/outgoingBranches.test.ts; test/db/chatActionsRepo.test.ts; test/db/clearLocalCache.test.ts; test/db/migrations/0053_versioned_server_message_state.test.ts"
     },
     {
-      "id": "src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:90014dc595>:mutator-call:1e7ca1dbe100",
+      "id": "src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:98f962fa55>:mutator-call:824da95e3b44",
       "path": "src/services/background/realtimePrerequisiteRecovery.ts",
-      "line": 140,
-      "symbol": "recoverRealtimePrerequisite.<callback:90014dc595>",
+      "line": 142,
+      "symbol": "recoverRealtimePrerequisite.<callback:98f962fa55>",
       "operation": "mutator-call",
       "target": "src/services/sync/engine.ts#syncAllChats",
       "detectedContext": "coordinated-delegation",
@@ -15628,10 +15628,10 @@
       "evidence": "test/services/messageStateSync.test.ts; test/services/providerRepair.test.ts; test/db/outgoingBranches.test.ts; test/db/chatActionsRepo.test.ts; test/db/clearLocalCache.test.ts; test/db/migrations/0053_versioned_server_message_state.test.ts"
     },
     {
-      "id": "src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:90014dc595>:mutator-call:aa834d72dc90",
+      "id": "src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:98f962fa55>:mutator-call:be245a83042d",
       "path": "src/services/background/realtimePrerequisiteRecovery.ts",
-      "line": 155,
-      "symbol": "recoverRealtimePrerequisite.<callback:90014dc595>",
+      "line": 157,
+      "symbol": "recoverRealtimePrerequisite.<callback:98f962fa55>",
       "operation": "mutator-call",
       "target": "src/services/sync/engine.ts#incrementalSync",
       "detectedContext": "coordinated-delegation",
@@ -15641,10 +15641,10 @@
       "evidence": "test/services/messageStateSync.test.ts; test/services/providerRepair.test.ts; test/db/outgoingBranches.test.ts; test/db/chatActionsRepo.test.ts; test/db/clearLocalCache.test.ts; test/db/migrations/0053_versioned_server_message_state.test.ts"
     },
     {
-      "id": "src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:90014dc595>:mutator-call:573c69b6c8dd",
+      "id": "src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:98f962fa55>:mutator-call:2f926c0493ed",
       "path": "src/services/background/realtimePrerequisiteRecovery.ts",
-      "line": 168,
-      "symbol": "recoverRealtimePrerequisite.<callback:90014dc595>",
+      "line": 178,
+      "symbol": "recoverRealtimePrerequisite.<callback:98f962fa55>",
       "operation": "mutator-call",
       "target": "src/services/sync/messageStateSync.ts#syncMessageState",
       "detectedContext": "coordinated-delegation",
@@ -15654,10 +15654,10 @@
       "evidence": "test/services/messageStateSync.test.ts; test/services/providerRepair.test.ts; test/db/outgoingBranches.test.ts; test/db/chatActionsRepo.test.ts; test/db/clearLocalCache.test.ts; test/db/migrations/0053_versioned_server_message_state.test.ts"
     },
     {
-      "id": "src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:90014dc595>:mutator-call:ef45372eb323",
+      "id": "src/services/background/realtimePrerequisiteRecovery.ts#recoverRealtimePrerequisite.<callback:98f962fa55>:mutator-call:2f72367490c7",
       "path": "src/services/background/realtimePrerequisiteRecovery.ts",
-      "line": 174,
-      "symbol": "recoverRealtimePrerequisite.<callback:90014dc595>",
+      "line": 192,
+      "symbol": "recoverRealtimePrerequisite.<callback:98f962fa55>",
       "operation": "mutator-call",
       "target": "src/services/sync/deletionSync.ts#syncDeletedMessages",
       "detectedContext": "coordinated-delegation",

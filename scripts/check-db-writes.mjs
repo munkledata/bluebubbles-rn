@@ -9248,7 +9248,7 @@ function incomingIngressCertifiedNodes({
       .digest('hex') !== '64ef0ee4c27ead97edc14f2ca49d638de4c08666c7867036c77e1f15f1287468' ||
     createHash('sha256')
       .update(normalizedSnippet(prerequisiteRecoveryFile, prerequisiteRecoveryFile))
-      .digest('hex') !== 'd320840770a7e55b8d290c85d04d4b7630e4c49014689dc4b02b933ace4e3539' ||
+      .digest('hex') !== '735245eb0da4a17e53441b2a122743e5a679e640b73a23af5ade5bbe748e1514' ||
     createHash('sha256').update(normalizedSnippet(fileLogFile, fileLogFile)).digest('hex') !==
       '58120b0f2dd9cd52685c83894333ee06db8e32b69569fb76ddcafd8cc13fbdbe' ||
     createHash('sha256')

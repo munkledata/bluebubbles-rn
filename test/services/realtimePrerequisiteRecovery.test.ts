@@ -1,8 +1,10 @@
 /* eslint-disable import/first -- Jest mocks must be registered before importing their consumers. */
-const mockServerInfo = jest.fn(async () => ({
+const mockServerInfo = jest.fn(async (): Promise<Record<string, unknown>> => ({
   server_version: '1.9.0',
   supports_message_deleted: true,
 }));
+const mockGetMessageStateAuthority = jest.fn(async (): Promise<unknown> => null);
+const mockSyncMessageState = jest.fn(async (): Promise<void> => undefined);
 const mockRunTrackedSync = jest.fn((run: () => Promise<void>): Promise<void> => run());
 let mockGenerationInvalidation: (() => void) | undefined;
 const mockReleaseGenerationInvalidation = jest.fn();
@@ -36,7 +38,17 @@ jest.mock('@/services/sync', () => ({
 jest.mock('@/services/background/authorizedRealtimeTransport', () => ({
   resolveAuthorizedRealtimeTransport: mockResolveTransport,
 }));
+jest.mock('@db/repositories/messageState', () => ({
+  ...jest.requireActual('@db/repositories/messageState'),
+  getMessageStateAuthority: () => mockGetMessageStateAuthority(),
+}));
+jest.mock('@/services/sync/messageStateSync', () => ({
+  ...jest.requireActual('@/services/sync/messageStateSync'),
+  syncMessageState: (...args: unknown[]) => (mockSyncMessageState as jest.Mock)(...args),
+}));
 
+import { MessageStateRepairRequiredError } from '@core/api/endpoints/messageState';
+import { MessageStateSyncIncompleteError } from '@/services/sync/messageStateSync';
 import {
   REALTIME_PREREQUISITE_ACCOUNT_MAX_PAGES,
   REALTIME_PREREQUISITE_CHAT_MAX_MESSAGES,
@@ -152,6 +164,51 @@ describe('task-local realtime prerequisite recovery', () => {
       expect.any(Function),
       REALTIME_PREREQUISITE_RECOVERY_BUDGET_MS,
     );
+  });
+
+  describe('deleted-message catch-up on a server with message-state sync', () => {
+    const epoch = '11111111-1111-4111-8111-111111111111';
+    const stateInfo = {
+      server_version: '2.0.0',
+      supports_message_deleted: true,
+      supports_message_state_sync: true,
+      message_state_sync_version: 1,
+      supports_provider_repair_snapshot: true,
+      imessage_provider_epoch: epoch,
+    };
+
+    it('uses the legacy catch-up until the app has set up message-state sync', async () => {
+      mockServerInfo.mockResolvedValueOnce(stateInfo);
+      mockGetMessageStateAuthority.mockResolvedValueOnce(null);
+
+      await expect(
+        recoverRealtimePrerequisite(db, { kind: 'sync-account' }, 23, inertTimer()),
+      ).resolves.toBe('recovered');
+      expect(mockSyncMessageState).not.toHaveBeenCalled();
+      expect(mockSyncDeletedMessages).toHaveBeenCalled();
+    });
+
+    it.each([
+      ['a backlog beyond this push', () => new MessageStateSyncIncompleteError()],
+      ['a repair only the app can run', () => new MessageStateRepairRequiredError()],
+    ])('still recovers the waiting event when catch-up stops at %s', async (_label, failure) => {
+      mockServerInfo.mockResolvedValueOnce(stateInfo);
+      mockGetMessageStateAuthority.mockResolvedValueOnce({ providerEpoch: epoch });
+      mockSyncMessageState.mockRejectedValueOnce(failure());
+
+      await expect(
+        recoverRealtimePrerequisite(db, { kind: 'sync-account' }, 23, inertTimer()),
+      ).resolves.toBe('recovered');
+      expect(mockSyncMessageState).toHaveBeenCalledWith(
+        db,
+        expect.anything(),
+        expect.objectContaining({
+          providerEpoch: epoch,
+          maxPages: REALTIME_PREREQUISITE_DELETION_MAX_PAGES,
+        }),
+      );
+      expect(mockSyncDeletedMessages).not.toHaveBeenCalled();
+    });
   });
 
   it('returns at the headless deadline and aborts a transport that arrives late', async () => {

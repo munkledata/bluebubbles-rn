@@ -1,5 +1,7 @@
 import { serverApi } from '@core/api';
+import { MessageStateRepairRequiredError } from '@core/api/endpoints/messageState';
 import type { IncomingEventConflictRecovery } from '@core/realtime';
+import { getMessageStateAuthority } from '@db/repositories/messageState';
 import type { AppDatabase } from '@db/types';
 import { subscribeRealtimeGenerationInvalidation } from '../realtime/deliveryCoordinator';
 import { runTrackedSync } from '../syncControl';
@@ -13,7 +15,7 @@ import {
 } from '../sync';
 import { resolveAuthorizedRealtimeTransport } from './authorizedRealtimeTransport';
 import { supportsMessageStateSync } from '../sync/providerRepair';
-import { syncMessageState } from '../sync/messageStateSync';
+import { MessageStateSyncIncompleteError, syncMessageState } from '../sync/messageStateSync';
 
 export const REALTIME_PREREQUISITE_RECOVERY_BUDGET_MS = 20_000;
 export const REALTIME_PREREQUISITE_CHAT_RECOVERY_BUDGET_MS = 8_000;
@@ -164,12 +166,28 @@ export async function recoverRealtimePrerequisite(
         outcome = 'stale';
         return;
       }
-      if (supportsMessageStateSync(info) && info.imessage_provider_epoch) {
-        await syncMessageState(db, api, {
-          providerEpoch: info.imessage_provider_epoch,
-          shouldAbort: stopped,
-          signal: controller.signal,
-        });
+      // Message-state catch-up needs the authority only a foreground sync sets up; until then the
+      // legacy helper (a no-op once any authority exists) keeps catching up. A backlog beyond this
+      // push's pages, or a repair only the foreground can run, is not a failure: the chats and
+      // messages above are recovered, so the waiting event can be retried in this callback.
+      const providerEpoch = supportsMessageStateSync(info)
+        ? (info.imessage_provider_epoch ?? null)
+        : null;
+      if (providerEpoch && (await getMessageStateAuthority(db))?.providerEpoch === providerEpoch) {
+        try {
+          await syncMessageState(db, api, {
+            providerEpoch,
+            maxPages: REALTIME_PREREQUISITE_DELETION_MAX_PAGES,
+            shouldAbort: stopped,
+            signal: controller.signal,
+          });
+        } catch (error) {
+          if (
+            !(error instanceof MessageStateSyncIncompleteError) &&
+            !(error instanceof MessageStateRepairRequiredError)
+          )
+            throw error;
+        }
       } else
         await syncDeletedMessages(db, api, {
           supported: info.supports_message_deleted === true,
