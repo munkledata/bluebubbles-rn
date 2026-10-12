@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Share } from 'react-native';
 import {
+  IMESSAGE_UNSEND_WINDOW_MS,
   isAggregateRetractionTombstone,
   isExactMessagePartTopology,
 } from '@core/messages/retraction';
@@ -30,7 +31,6 @@ import type { SelectedMessage } from '@ui';
 import { pickReminderTime } from '@ui/conversations/pickReminderTime';
 import { presentDiscardMessageResult, presentSendIssue } from '@ui/conversations/sendNotices';
 import { showDialog } from '@ui/dialog/dialogStore';
-import { IMESSAGE_UNSEND_WINDOW_MS } from '@core/messages/retraction';
 import { useTransportHealthStore } from '@state/transportHealthStore';
 import { isDevServer } from '@utils/isDev';
 import {

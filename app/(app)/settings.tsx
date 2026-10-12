@@ -148,6 +148,8 @@ export default function SettingsScreen(): React.JSX.Element {
   // Phones still on the shared password lose background notifications at the cutoff; only a paired
   // per-device credential keeps them. The password is classified here, never shown.
   const sharedPasswordSession = accountCurrent && !!password && !isScopedDeviceCredential(password);
+  // Read the clock once per visit, not on every render.
+  const [pushCutoffPassed] = useState(() => Date.now() >= SHARED_PASSWORD_PUSH_CUTOFF_MS);
   const pushCutoffDate = new Date(SHARED_PASSWORD_PUSH_CUTOFF_MS).toLocaleDateString('en-US', {
     month: 'long',
     day: 'numeric',
@@ -804,7 +806,7 @@ export default function SettingsScreen(): React.JSX.Element {
               <>
                 <NoteRow
                   text={
-                    Date.now() >= SHARED_PASSWORD_PUSH_CUTOFF_MS
+                    pushCutoffPassed
                       ? `Background notifications ended on ${pushCutoffDate} for phones that sign in with the shared password. Pair this device to turn them back on.`
                       : `This phone signs in with the shared password. Background notifications for shared-password phones end on ${pushCutoffDate}. Pair this device to keep them.`
                   }
