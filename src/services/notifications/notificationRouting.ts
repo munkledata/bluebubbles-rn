@@ -142,19 +142,23 @@ export async function localRouteForMessageGuid(
   db?: AppDatabase,
 ): Promise<(LocalNotificationRoute & { messageId: number }) | null> {
   const database = db ?? (await notificationDatabase());
+  // Two indexed lookups, the exact guid first, then an alias owned by the message's own chat. An
+  // OR with a chat-dependent subquery made SQLite read every message, and this runs on each send
+  // acknowledgement and own-message echo on the one shared connection.
   const rows = await database.all<{ chatId: number; messageId: number }>(sql`
-    SELECT c.id AS chatId, m.id AS messageId
-      FROM messages m JOIN chats c ON c.id = m.chat_id
-     WHERE m.guid = ${messageGuid}
-        OR m.guid = (
-          SELECT canonical_guid
-            FROM message_guid_aliases a
-           WHERE a.alias_guid = ${messageGuid}
-             AND a.chat_guid = c.guid
-           LIMIT 1
-        )
-     ORDER BY CASE WHEN m.guid = ${messageGuid} THEN 0 ELSE 1 END
-     LIMIT 1
+    SELECT chatId, messageId FROM (
+      SELECT c.id AS chatId, m.id AS messageId, 0 AS preference
+        FROM messages m JOIN chats c ON c.id = m.chat_id
+       WHERE m.guid = ${messageGuid}
+      UNION ALL
+      SELECT c.id AS chatId, m.id AS messageId, 1 AS preference
+        FROM message_guid_aliases a
+        JOIN chats c ON c.guid = a.chat_guid
+        JOIN messages m ON m.guid = a.canonical_guid AND m.chat_id = c.id
+       WHERE a.alias_guid = ${messageGuid}
+    )
+    ORDER BY preference
+    LIMIT 1
   `);
   const chatId = positiveInteger(rows[0]?.chatId);
   const messageId = positiveInteger(rows[0]?.messageId);

@@ -253,6 +253,37 @@ describe('notificationRouting — native privacy boundary', () => {
     );
   });
 
+  it('finds a message through indexes, never by reading every message', async () => {
+    // This runs on every send acknowledgement and own-message echo, on the one shared connection.
+    const queries: { sql: string; params: unknown[] }[] = [];
+    const captured = new Proxy(mockDb, {
+      get(target, property) {
+        const value = Reflect.get(target, property, target);
+        if (property === 'all' && typeof value === 'function') {
+          return (...args: unknown[]) => {
+            const dialect = (
+              target as unknown as {
+                dialect: { sqlToQuery(query: unknown): { sql: string; params: unknown[] } };
+              }
+            ).dialect;
+            queries.push(dialect.sqlToQuery(args[0]));
+            return Reflect.apply(value, target, args);
+          };
+        }
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+
+    await localRouteForMessageGuid('temp-unknown-guid', captured);
+
+    expect(queries).toHaveLength(1);
+    const plan = mockRaw
+      .prepare(`EXPLAIN QUERY PLAN ${queries[0]!.sql}`)
+      .all(...queries[0]!.params) as { detail: string }[];
+    const steps = plan.map((row) => row.detail);
+    expect(steps.some((step) => /^SCAN (m|messages)\b/.test(step))).toBe(false);
+  });
+
   it('does not route through an ownerless legacy message alias', async () => {
     mockRaw
       .prepare(
