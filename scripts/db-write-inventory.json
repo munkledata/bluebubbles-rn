@@ -2,10 +2,10 @@
   "version": 1,
   "entries": [
     {
-      "id": "app/_layout.tsx#RootLayout.<callback:f429780a18>.startOwnedRun:mutator-call:33ee7bd33824",
+      "id": "app/_layout.tsx#RootLayout.<callback:945a20350c>.startOwnedRun:mutator-call:881f6096626a",
       "path": "app/_layout.tsx",
-      "line": 110,
-      "symbol": "RootLayout.<callback:f429780a18>.startOwnedRun",
+      "line": 114,
+      "symbol": "RootLayout.<callback:945a20350c>.startOwnedRun",
       "operation": "mutator-call",
       "target": "src/services/boot/foregroundBoot.ts#startForegroundBoot",
       "detectedContext": "foreground-boot-lifecycle-delegation",
@@ -15,12 +15,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/foregroundBoot.test.ts; test/components/routes/rootLayout.test.tsx; test/services/lockService.test.ts; test/db/dbKeyRotation.test.ts"
     },
     {
-      "id": "app/_layout.tsx#RootLayout.<callback:f429780a18>.<callback:a6d63425a0>:mutator-call:246367c31649",
+      "id": "app/_layout.tsx#RootLayout.<callback:945a20350c>.<callback:a6d63425a0>:mutator-call:35dfd7eeecaa",
       "path": "app/_layout.tsx",
-      "line": 119,
-      "symbol": "RootLayout.<callback:f429780a18>.<callback:a6d63425a0>",
+      "line": 123,
+      "symbol": "RootLayout.<callback:945a20350c>.<callback:a6d63425a0>",
       "operation": "mutator-call",
-      "target": "app/_layout.tsx#RootLayout.<callback:f429780a18>.startOwnedRun",
+      "target": "app/_layout.tsx#RootLayout.<callback:945a20350c>.startOwnedRun",
       "detectedContext": "foreground-boot-lifecycle-delegation",
       "owner": "RootLayout foreground boot authority",
       "transactionContext": "foreground-boot-lifecycle-delegation",
@@ -28,12 +28,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/foregroundBoot.test.ts; test/components/routes/rootLayout.test.tsx; test/services/lockService.test.ts; test/db/dbKeyRotation.test.ts"
     },
     {
-      "id": "app/_layout.tsx#RootLayout.<callback:f429780a18>:mutator-call:09b9cd24cd8c",
+      "id": "app/_layout.tsx#RootLayout.<callback:945a20350c>:mutator-call:c6d256da0aff",
       "path": "app/_layout.tsx",
-      "line": 122,
-      "symbol": "RootLayout.<callback:f429780a18>",
+      "line": 126,
+      "symbol": "RootLayout.<callback:945a20350c>",
       "operation": "mutator-call",
-      "target": "app/_layout.tsx#RootLayout.<callback:f429780a18>.startOwnedRun",
+      "target": "app/_layout.tsx#RootLayout.<callback:945a20350c>.startOwnedRun",
       "detectedContext": "foreground-boot-lifecycle-delegation",
       "owner": "RootLayout foreground boot authority",
       "transactionContext": "foreground-boot-lifecycle-delegation",
@@ -43,7 +43,7 @@
     {
       "id": "app/_layout.tsx#RootLayout:mutator-reference:8e2aa31388d0",
       "path": "app/_layout.tsx",
-      "line": 195,
+      "line": 202,
       "symbol": "RootLayout",
       "operation": "mutator-reference",
       "target": "src/services/lock.ts#completeUnlock",

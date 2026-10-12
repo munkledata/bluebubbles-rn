@@ -1,7 +1,7 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { ExperimentalStack, ThemeProvider as NavThemeProvider } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { completeUnlock } from '@/services/lock';
@@ -76,6 +76,9 @@ export default function RootLayout(): React.JSX.Element {
   const mountedRef = useRef(true);
   const appActiveRef = useRef(hasForegroundAuthority());
   const pendingColdUnlockRunRef = useRef<number | null>(null);
+  // Rendered twin of the ref: the gate keeps its loading cover for this run instead of mounting a
+  // second LockScreen in the gap between the coordinator's 'ready' and the unlock resolving.
+  const [coldUnlockPendingRunId, setColdUnlockPendingRunId] = useState<number | null>(null);
   const restartBootOnActiveRef = useRef(false);
 
   useEffect(() => installServicePresentationAdapter(servicePresentationAdapter), []);
@@ -88,6 +91,7 @@ export default function RootLayout(): React.JSX.Element {
       const pendingRunId = pendingColdUnlockRunRef.current;
       if (pendingRunId !== null) {
         pendingColdUnlockRunRef.current = null;
+        setColdUnlockPendingRunId(null);
         const current = getForegroundBootSnapshot();
         if (current.status !== 'idle' && current.runId === pendingRunId) {
           invalidateForegroundBootRun(pendingRunId);
@@ -161,6 +165,7 @@ export default function RootLayout(): React.JSX.Element {
       return;
     }
     pendingColdUnlockRunRef.current = runId;
+    setColdUnlockPendingRunId(runId);
     try {
       const result = await unlockForegroundBoot(runId);
       if (
@@ -176,6 +181,7 @@ export default function RootLayout(): React.JSX.Element {
       if (pendingColdUnlockRunRef.current === runId) {
         pendingColdUnlockRunRef.current = null;
       }
+      setColdUnlockPendingRunId((current) => (current === runId ? null : current));
     }
   };
 
@@ -191,6 +197,7 @@ export default function RootLayout(): React.JSX.Element {
               lockHydrated={lockHydrated}
               locked={locked}
               foregroundUnlockId={foregroundUnlockId}
+              coldUnlockPendingRunId={coldUnlockPendingRunId}
               onColdUnlock={completeColdUnlock}
               onWarmUnlock={completeUnlock}
               onRetry={(runId) => {

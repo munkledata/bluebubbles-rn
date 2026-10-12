@@ -89,6 +89,30 @@ describe('ForegroundLockGate', () => {
     expect(mockAuthenticate).not.toHaveBeenCalled();
   });
 
+  it('keeps the loading cover, not a second prompt, while this run finishes its cold unlock', async () => {
+    await renderWithTheme(
+      withSafeArea(
+        <ForegroundLockGate
+          bootState={READY_BOOT}
+          lockHydrated
+          locked
+          foregroundUnlockId={0}
+          coldUnlockPendingRunId={READY_BOOT.runId}
+          onColdUnlock={jest.fn()}
+          onWarmUnlock={jest.fn()}
+          onRetry={jest.fn()}
+        >
+          <Text>Private route content</Text>
+        </ForegroundLockGate>,
+      ),
+    );
+
+    expect(screen.getByRole('progressbar', { name: 'Loading Gator' })).toBeTruthy();
+    expect(screen.queryByText('Gator is locked')).toBeNull();
+    expect(screen.queryByText('Private route content')).toBeNull();
+    expect(mockAuthenticate).not.toHaveBeenCalled();
+  });
+
   it('keeps route content unavailable and shows biometrics after a locked decision', async () => {
     await renderWithTheme(gate(true, true, <Text>Private route content</Text>));
 

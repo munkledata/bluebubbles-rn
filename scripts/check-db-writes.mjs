@@ -14252,15 +14252,15 @@ function foregroundBootLifecycleDelegationNodes({
 
   const callExpectations = new Map([
     [
-      'app/_layout.tsx|RootLayout.<callback:f429780a18>.startOwnedRun|mutator-call|src/services/boot/foregroundBoot.ts#startForegroundBoot',
+      'app/_layout.tsx|RootLayout.<callback:945a20350c>.startOwnedRun|mutator-call|src/services/boot/foregroundBoot.ts#startForegroundBoot',
       'coordinated',
     ],
     [
-      'app/_layout.tsx|RootLayout.<callback:f429780a18>.<callback:a6d63425a0>|mutator-call|app/_layout.tsx#RootLayout.<callback:f429780a18>.startOwnedRun',
+      'app/_layout.tsx|RootLayout.<callback:945a20350c>.<callback:a6d63425a0>|mutator-call|app/_layout.tsx#RootLayout.<callback:945a20350c>.startOwnedRun',
       'coordinated',
     ],
     [
-      'app/_layout.tsx|RootLayout.<callback:f429780a18>|mutator-call|app/_layout.tsx#RootLayout.<callback:f429780a18>.startOwnedRun',
+      'app/_layout.tsx|RootLayout.<callback:945a20350c>|mutator-call|app/_layout.tsx#RootLayout.<callback:945a20350c>.startOwnedRun',
       'coordinated',
     ],
     [

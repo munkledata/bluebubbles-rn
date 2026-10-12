@@ -14,6 +14,8 @@ interface ForegroundLockGateProps {
   readonly locked: boolean;
   /** Changes only after a successful foreground authentication decision. */
   readonly foregroundUnlockId: number;
+  /** The run whose cold unlock passed biometrics and is still finishing startup, if any. */
+  readonly coldUnlockPendingRunId?: number | null;
   readonly onColdUnlock: (runId: number) => void | Promise<void>;
   readonly onWarmUnlock: () => void | Promise<void>;
   readonly onRetry: (runId: number) => void | Promise<void>;
@@ -29,6 +31,7 @@ export function ForegroundLockGate({
   lockHydrated,
   locked,
   foregroundUnlockId,
+  coldUnlockPendingRunId = null,
   onColdUnlock,
   onWarmUnlock,
   onRetry,
@@ -48,23 +51,23 @@ export function ForegroundLockGate({
     completeNativeForegroundPrivacyTransition();
   }, [bootState.runId, bootState.status, foregroundUnlockId, lockHydrated, locked]);
 
-  if (bootState.status === 'idle' || bootState.status === 'loading') {
-    return (
-      <View
-        style={[styles.fill, styles.center, { backgroundColor: theme.color.background }]}
-        accessible
-        accessibilityRole="progressbar"
-        accessibilityLabel="Loading Gator"
-        accessibilityState={{ busy: true }}
-      >
-        <ActivityIndicator
-          color={theme.color.tint}
-          accessible={false}
-          importantForAccessibility="no"
-        />
-      </View>
-    );
-  }
+  const loadingCover = (
+    <View
+      style={[styles.fill, styles.center, { backgroundColor: theme.color.background }]}
+      accessible
+      accessibilityRole="progressbar"
+      accessibilityLabel="Loading Gator"
+      accessibilityState={{ busy: true }}
+    >
+      <ActivityIndicator
+        color={theme.color.tint}
+        accessible={false}
+        importantForAccessibility="no"
+      />
+    </View>
+  );
+
+  if (bootState.status === 'idle' || bootState.status === 'loading') return loadingCover;
 
   if (bootState.status === 'failed') {
     const retryable = bootState.failure.kind === 'retryable';
@@ -109,25 +112,13 @@ export function ForegroundLockGate({
     return <LockScreen onUnlock={() => onColdUnlock(bootState.runId)} />;
   }
 
-  if (!lockHydrated) {
-    return (
-      <View
-        style={[styles.fill, styles.center, { backgroundColor: theme.color.background }]}
-        accessible
-        accessibilityRole="progressbar"
-        accessibilityLabel="Loading Gator"
-        accessibilityState={{ busy: true }}
-      >
-        <ActivityIndicator
-          color={theme.color.tint}
-          accessible={false}
-          importantForAccessibility="no"
-        />
-      </View>
-    );
-  }
+  if (!lockHydrated) return loadingCover;
 
   if (locked) {
+    // This run already passed its cold-unlock biometrics. The coordinator announces 'ready' a few
+    // microtasks before that unlock resolves and clears the lock, so keep the cover rather than
+    // mount a second LockScreen, which would prompt for biometrics again.
+    if (coldUnlockPendingRunId === bootState.runId) return loadingCover;
     return <LockScreen onUnlock={onWarmUnlock} />;
   }
 

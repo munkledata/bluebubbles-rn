@@ -395,6 +395,32 @@ describe('RootLayout — foreground boot presentation', () => {
     await waitFor(() => expect(useLockStore.getState().locked).toBe(false));
   });
 
+  it('asks for biometrics once when ready is announced before the cold unlock resolves', async () => {
+    const runId = 7;
+    const unlock = deferred<BootState>();
+    mockBootState = lockedState(runId);
+    useLockStore.setState({ enabled: true, hydrated: true, locked: true });
+    mockUnlockForegroundBoot.mockReturnValue(unlock.promise);
+
+    const view = await render(<RootLayout />);
+    await waitFor(() => expect(mockUnlockForegroundBoot).toHaveBeenCalledWith(runId));
+    expect(mockAuthenticate).toHaveBeenCalledTimes(1);
+
+    // The coordinator tells subscribers 'ready' a few microtasks before unlockForegroundBoot
+    // resolves and the root clears the lock store. React renders in that gap.
+    mockBootState = readyState(runId);
+    await view.rerender(<RootLayout />);
+    expect(mockAuthenticate).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText('Gator is locked')).toBeNull();
+
+    await act(async () => {
+      unlock.resolve(readyState(runId));
+      await unlock.promise;
+    });
+    await waitFor(() => expect(useLockStore.getState().locked).toBe(false));
+    expect(mockAuthenticate).toHaveBeenCalledTimes(1);
+  });
+
   it('routes a ready-run warm unlock through completeUnlock', async () => {
     mockBootState = readyState(8);
     useLockStore.setState({ enabled: true, hydrated: true, locked: true });

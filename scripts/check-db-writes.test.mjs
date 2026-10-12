@@ -6848,9 +6848,9 @@ test('certifies exactly the reviewed foreground-boot lifecycle boundary', () => 
   assert.deepEqual(
     coordinated.map((finding) => finding.id).sort(),
     [
-      'app/_layout.tsx#RootLayout.<callback:f429780a18>.startOwnedRun:mutator-call:33ee7bd33824',
-      'app/_layout.tsx#RootLayout.<callback:f429780a18>.<callback:a6d63425a0>:mutator-call:246367c31649',
-      'app/_layout.tsx#RootLayout.<callback:f429780a18>:mutator-call:09b9cd24cd8c',
+      'app/_layout.tsx#RootLayout.<callback:945a20350c>.startOwnedRun:mutator-call:881f6096626a',
+      'app/_layout.tsx#RootLayout.<callback:945a20350c>.<callback:a6d63425a0>:mutator-call:35dfd7eeecaa',
+      'app/_layout.tsx#RootLayout.<callback:945a20350c>:mutator-call:c6d256da0aff',
       'app/_layout.tsx#RootLayout:mutator-reference:8e2aa31388d0',
       'src/services/boot/foregroundBoot.ts#initializeForegroundBootComposition.<callback:3745c8b485>:mutator-call:60bff6bb7fec',
       'src/services/boot/foregroundBoot.ts#initializeForegroundBootComposition.<callback:58f904a832>:mutator-call:f6945f73aad5',
