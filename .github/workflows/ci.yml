@@ -148,6 +148,11 @@ jobs:
         -fdebug-prefix-map=${{ github.workspace }}=/gator/source
         -ffile-prefix-map=/var/tmp/gator-gradle=/gator/gradle
         -fdebug-prefix-map=/var/tmp/gator-gradle=/gator/gradle
+      GATOR_NATIVE_PATH_MAP_FLAGS: >-
+        -ffile-prefix-map=${{ github.workspace }}=/gator/source
+        -fdebug-prefix-map=${{ github.workspace }}=/gator/source
+        -ffile-prefix-map=/var/tmp/gator-gradle=/gator/gradle
+        -fdebug-prefix-map=/var/tmp/gator-gradle=/gator/gradle
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -189,6 +194,9 @@ jobs:
 
       - name: Verify Expo module discovery
         run: ./node_modules/.bin/expo-modules-autolinking search -p android
+
+      - name: Install native path-map Gradle hook
+        run: node scripts/android-native-path-init.mjs
 
       # Keep packaging variants in separate Gradle invocations. A combined assembleDebug +
       # bundleRelease run has intermittently failed inside PackageAndroidArtifact's incremental

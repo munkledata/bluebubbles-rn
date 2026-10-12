@@ -44,6 +44,10 @@ import {
   runAndroidNativePathCheck,
 } from './check-android-native-paths.mjs';
 import {
+  ANDROID_NATIVE_PATH_INIT_FILE_NAME,
+  ANDROID_NATIVE_PATH_INIT_SCRIPT,
+} from './android-native-path-init.mjs';
+import {
   REQUIRED_EAS_CLI_VERSION,
   REQUIRED_EAS_SUBMIT_CONFIG,
   reviewedEasNpxArgs,
@@ -74,25 +78,6 @@ export const MANAGED_DIRECTORY_REMOVAL_OPTIONS = Object.freeze({
   maxRetries: 10,
   retryDelay: 100,
 });
-const ANDROID_NATIVE_PATH_INIT_SCRIPT = [
-  "def gatorNativePathMapFlags = System.getenv('GATOR_NATIVE_PATH_MAP_FLAGS')",
-  'if (gatorNativePathMapFlags == null || gatorNativePathMapFlags.trim().isEmpty()) {',
-  "    throw new GradleException('GATOR_NATIVE_PATH_MAP_FLAGS must be set')",
-  '}',
-  '',
-  'gradle.beforeProject { project ->',
-  "    ['com.android.application', 'com.android.library'].each { pluginId ->",
-  '        project.pluginManager.withPlugin(pluginId) {',
-  '            project.android.defaultConfig.externalNativeBuild.cmake {',
-  '                arguments "-DCMAKE_C_FLAGS=${gatorNativePathMapFlags}",',
-  '                    "-DCMAKE_CXX_FLAGS=${gatorNativePathMapFlags}",',
-  '                    "-DCMAKE_ASM_FLAGS=${gatorNativePathMapFlags}"',
-  '            }',
-  '        }',
-  '    }',
-  '}',
-  '',
-].join('\n');
 export { isValidReleaseBuildReceipt, isValidReleaseNativePathProof };
 
 function nowIso() {
@@ -677,7 +662,7 @@ export function androidReleaseWorkspacePaths(
   const work = resolve(container, 'work');
   const gradleHome = resolve(container, 'gradle-home');
   const gradleInitDirectory = resolve(gradleHome, 'init.d');
-  const nativePathInitScript = resolve(gradleInitDirectory, 'gator-native-path-map.gradle');
+  const nativePathInitScript = resolve(gradleInitDirectory, ANDROID_NATIVE_PATH_INIT_FILE_NAME);
   const source = resolve(work, 'build');
   assertDescendant(parent, root, 'Android release temporary root');
   assertDescendant(root, container, 'Android release temporary container');

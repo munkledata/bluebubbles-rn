@@ -45,7 +45,16 @@ const ANDROID_NATIVE_PATH_ENV_LINES = [
   '-fdebug-prefix-map=${{ github.workspace }}=/gator/source',
   '-ffile-prefix-map=/var/tmp/gator-gradle=/gator/gradle',
   '-fdebug-prefix-map=/var/tmp/gator-gradle=/gator/gradle',
+  'GATOR_NATIVE_PATH_MAP_FLAGS: >-',
+  '-ffile-prefix-map=${{ github.workspace }}=/gator/source',
+  '-fdebug-prefix-map=${{ github.workspace }}=/gator/source',
+  '-ffile-prefix-map=/var/tmp/gator-gradle=/gator/gradle',
+  '-fdebug-prefix-map=/var/tmp/gator-gradle=/gator/gradle',
 ];
+// Android Gradle passes its own CMAKE_*_FLAGS, so the variables above reach CMake only through
+// this hook (the same one the local release installs).
+const ANDROID_NATIVE_PATH_HOOK_NAME = 'Install native path-map Gradle hook';
+const ANDROID_NATIVE_PATH_HOOK_COMMAND = 'node scripts/android-native-path-init.mjs';
 const LOCAL_NATIVE_COMPILE_TASKS = [
   ':gator-paste-input:compileDebugKotlin',
   ':gator-share-shortcuts:compileDebugKotlin',
@@ -654,6 +663,22 @@ function validateAndroidJob(workflow, errors) {
   );
 
   const nativeBuildName = 'Compile local native modules';
+  const nativePathHook = requireExactNamedStep(
+    android.source,
+    ANDROID_NATIVE_PATH_HOOK_NAME,
+    [`run: ${ANDROID_NATIVE_PATH_HOOK_COMMAND}`],
+    errors,
+    'The Android build job',
+  );
+  requireBlockingUnconditionalStep(nativePathHook, ANDROID_NATIVE_PATH_HOOK_NAME, errors);
+  const hookStepHeaders = topLevelStepHeaders(android.source);
+  const hookIndex = hookStepHeaders.indexOf(`- name: ${ANDROID_NATIVE_PATH_HOOK_NAME}`);
+  if (hookIndex < 0 || hookIndex > hookStepHeaders.indexOf(`- name: ${nativeBuildName}`)) {
+    errors.push(
+      `The Android job must run "${ANDROID_NATIVE_PATH_HOOK_NAME}" before the first Gradle build.`,
+    );
+  }
+
   const nativeBuild = requireExactNamedStep(
     android.source,
     nativeBuildName,

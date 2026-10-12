@@ -675,7 +675,7 @@ test('pins the Android Gradle home and native compiler path maps', () => {
     '-ffile-prefix-map=/var/tmp/gator-gradle=/gator/gradle',
     '-fdebug-prefix-map=/var/tmp/gator-gradle=/gator/gradle',
   ]) {
-    for (const occurrence of [0, 1, 2]) {
+    for (const occurrence of [0, 1, 2, 3]) {
       const mutated = replaceOccurrence(
         workflow,
         flag,
@@ -690,7 +690,7 @@ test('pins the Android Gradle home and native compiler path maps', () => {
     }
   }
 
-  for (const variable of ['CFLAGS', 'CXXFLAGS', 'ASMFLAGS']) {
+  for (const variable of ['CFLAGS', 'CXXFLAGS', 'ASMFLAGS', 'GATOR_NATIVE_PATH_MAP_FLAGS']) {
     const mutated = workflow.replace(`      ${variable}: >-`, `      ${variable}: ''`);
     assert.notEqual(mutated, workflow, `${variable} mutation must change the fixture`);
     assert.ok(
@@ -706,6 +706,50 @@ test('pins the Android Gradle home and native compiler path maps', () => {
   assert.notEqual(extraFlag, workflow);
   assert.ok(
     errorsFor(extraFlag).some((error) => error.includes('native path-scrubbing environment')),
+  );
+});
+
+// Android Gradle passes its own CMAKE_*_FLAGS, so CMake ignores the CFLAGS environment for app and
+// library native builds; only the Gradle hook (shared with the local release) reaches them.
+test('installs the native path-map Gradle hook before the first Gradle build', () => {
+  const header = '      - name: Install native path-map Gradle hook';
+  const step = `${header}\n        run: node scripts/android-native-path-init.mjs\n`;
+  assert.ok(workflow.includes(step), 'the live workflow must install the hook');
+
+  const removed = workflow.replace(step, '');
+  assert.ok(
+    errorsFor(removed).some((error) => error.includes('Install native path-map Gradle hook')),
+  );
+
+  const changedCommand = workflow.replace(
+    'run: node scripts/android-native-path-init.mjs',
+    'run: node scripts/android-native-path-init.mjs || true',
+  );
+  assert.notEqual(changedCommand, workflow);
+  assert.ok(
+    errorsFor(changedCommand).some((error) =>
+      error.includes('Install native path-map Gradle hook'),
+    ),
+  );
+
+  const nativeBuildHeader = '      - name: Compile local native modules';
+  const movedAfterBuild = removed.replace(
+    '      - name: Test local native modules',
+    `${step}      - name: Test local native modules`,
+  );
+  assert.notEqual(movedAfterBuild, removed);
+  assert.ok(movedAfterBuild.indexOf(header) > movedAfterBuild.indexOf(nativeBuildHeader));
+  assert.ok(
+    errorsFor(movedAfterBuild).some((error) => error.includes('before the first Gradle build')),
+  );
+
+  const conditional = workflow.replace(header, `${header}\n        if: false`);
+  assert.ok(errorsFor(conditional).some((error) => error.includes('must run unconditionally')));
+  const ignoredFailure = workflow.replace(header, `${header}\n        continue-on-error: true`);
+  assert.ok(
+    errorsFor(ignoredFailure).some((error) =>
+      error.includes('"Install native path-map Gradle hook" must fail the Android job'),
+    ),
   );
 });
 

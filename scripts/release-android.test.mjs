@@ -35,6 +35,10 @@ import {
   verifyReleaseNativePathProof,
 } from './release-android.mjs';
 import { nativeCompilerPathMappingFlags } from './check-android-native-paths.mjs';
+import {
+  ANDROID_NATIVE_PATH_INIT_SCRIPT,
+  installAndroidNativePathInitScript,
+} from './android-native-path-init.mjs';
 
 test('requires a nonblank local Maps credential without exposing its value', () => {
   const validKey = `AIza${'B'.repeat(34)}C`;
@@ -854,4 +858,45 @@ test('refuses to release source that is unpushed or has no passing CI run', () =
     return { stdout: 'origin/master' };
   };
   assert.throws(() => assertSourceVerifiedByCi(commit, { run: ghMissing }), /gh could not start/);
+});
+
+// CI installs the same reviewed hook as the local release; Gradle applies every init.d script.
+test('installs the shared native path-map hook into the Gradle home for CI', () => {
+  const gradleHome = mkdtempSync(join(tmpdir(), 'gator-ci-gradle-'));
+  try {
+    const flags = '-ffile-prefix-map=/work=/gator/source -fdebug-prefix-map=/work=/gator/source';
+    const installed = installAndroidNativePathInitScript({
+      GRADLE_USER_HOME: gradleHome,
+      GATOR_NATIVE_PATH_MAP_FLAGS: flags,
+    });
+    assert.equal(installed, join(gradleHome, 'init.d', 'gator-native-path-map.gradle'));
+    assert.equal(readFileSync(installed, 'utf8'), ANDROID_NATIVE_PATH_INIT_SCRIPT);
+    assert.match(
+      ANDROID_NATIVE_PATH_INIT_SCRIPT,
+      /-DCMAKE_ASM_FLAGS=\$\{gatorNativePathMapFlags\}/,
+    );
+
+    assert.throws(
+      () => installAndroidNativePathInitScript({ GATOR_NATIVE_PATH_MAP_FLAGS: flags }),
+      /GRADLE_USER_HOME must be an absolute path/,
+    );
+    assert.throws(
+      () =>
+        installAndroidNativePathInitScript({
+          GRADLE_USER_HOME: 'relative/gradle',
+          GATOR_NATIVE_PATH_MAP_FLAGS: flags,
+        }),
+      /GRADLE_USER_HOME must be an absolute path/,
+    );
+    assert.throws(
+      () =>
+        installAndroidNativePathInitScript({
+          GRADLE_USER_HOME: gradleHome,
+          GATOR_NATIVE_PATH_MAP_FLAGS: '  ',
+        }),
+      /GATOR_NATIVE_PATH_MAP_FLAGS must be set/,
+    );
+  } finally {
+    rmSync(gradleHome, { recursive: true, force: true });
+  }
 });
