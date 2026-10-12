@@ -45,6 +45,21 @@ export const INCOMING_EVENT_MAX_ATTEMPTS = 5;
 export const INCOMING_EVENT_LEASE_MS = 120_000;
 /** Expected local dependencies are polled briefly; an acknowledgement also kicks the drain. */
 export const INCOMING_EVENT_DEPENDENCY_RETRY_MS = 5_000;
+/** The longest wait between retries of an event whose local prerequisite is still missing. */
+export const INCOMING_EVENT_DEPENDENCY_RETRY_MAX_MS = 10 * 60 * 1000;
+
+/**
+ * Wait before retrying an event whose local prerequisite is missing: 5 s at first, then a quarter of
+ * the event's age, at most 10 minutes. A prerequisite recovery supplies soon is still picked up
+ * quickly; one that never appears no longer re-runs the event, and the account sync it requests,
+ * every 5 s for the event's whole lifetime (up to 24 hours).
+ */
+export function incomingEventDependencyRetryDelayMs(ageMs: number): number {
+  return Math.min(
+    INCOMING_EVENT_DEPENDENCY_RETRY_MAX_MS,
+    Math.max(INCOMING_EVENT_DEPENDENCY_RETRY_MS, Math.floor(ageMs / 4)),
+  );
+}
 /** Keep one drain bounded even if a large backlog is already due. */
 export const INCOMING_EVENT_MAX_CLAIM_BATCH = 25;
 /** Prevent one synchronous SQLite result from materializing the full 16 MiB pending budget. */
@@ -887,7 +902,11 @@ export async function deferIncomingEventForDependency(
     db,
     async (context) => {
       const now = sampleIncomingEventClock(clock);
-      const retryAt = now + INCOMING_EVENT_DEPENDENCY_RETRY_MS;
+      const received = await db.all<{ receivedAt: number }>(sql`
+        SELECT received_at AS receivedAt FROM incoming_event_queue WHERE id = ${claim.id}
+      `);
+      const retryAt =
+        now + incomingEventDependencyRetryDelayMs(now - (received[0]?.receivedAt ?? now));
       assertTimestamp(retryAt, 'dependencyNextAttemptAt');
       const rows = await db.all<{
         state: IncomingEventState;

@@ -625,6 +625,57 @@ describe('DbEventSink (live path)', () => {
     ).toBe(0);
   });
 
+  it('resolves a chatless durable new-message from its stored row once recovery has saved it', async () => {
+    // A push whose server hydration failed carries no chat. Recovery then stores the message; the
+    // queued copy must find that chat instead of waiting (and re-syncing) until it expires.
+    const { db, raw } = await createTestDb();
+    const hm = await upsertHandles(db, [{ address: 'bob@x.com' }]);
+    await upsertChats(
+      db,
+      [Chat.parse({ guid: 'cRecovered', participants: [{ address: 'bob@x.com' }] })],
+      hm,
+    );
+    await new DbEventSink(db).onEvent(
+      {
+        type: 'new-message',
+        message: Message.parse({
+          guid: 'recovered-later',
+          text: 'stored by recovery',
+          dateCreated: 300,
+          handle: { address: 'bob@x.com' },
+          chatGuid: 'cRecovered',
+        }),
+      },
+      'socket',
+    );
+    const requestRecovery = jest.fn(async () => undefined);
+    const markDbAppliedWithinTransaction = jest.fn(async () => undefined);
+    const context: EventDeliveryContext = {
+      generation: 1,
+      isCurrent: () => true,
+      durableEvent: { dbAppliedAt: null, markDbAppliedWithinTransaction },
+    };
+    const chatless = Message.parse({
+      guid: 'recovered-later',
+      text: 'stored by recovery',
+      dateCreated: 300,
+      handle: { address: 'bob@x.com' },
+    });
+
+    await expect(
+      new DbEventSink(db, undefined, undefined, requestRecovery).onEvent(
+        { type: 'new-message', message: chatless },
+        'fcm',
+        context,
+      ),
+    ).resolves.toBeUndefined();
+    expect(requestRecovery).not.toHaveBeenCalled();
+    expect(markDbAppliedWithinTransaction).toHaveBeenCalled();
+    expect(
+      raw.prepare('SELECT COUNT(*) AS count FROM messages WHERE guid = ?').get('recovered-later'),
+    ).toEqual({ count: 1 });
+  });
+
   it('keeps a durable read retryable and requests targeted recovery when its chat is absent', async () => {
     const { db } = await createTestDb();
     const requestRecovery = jest.fn(async () => undefined);

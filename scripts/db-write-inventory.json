@@ -8870,7 +8870,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#terminalizeExpiredOrExhausted:sql-update:58639c94d1e9",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 280,
+      "line": 295,
       "symbol": "terminalizeExpiredOrExhausted",
       "operation": "sql-update",
       "target": "incoming_event_queue",
@@ -8883,7 +8883,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#trimTerminalReceipts:sql-delete:d9e166b5511b",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 319,
+      "line": 334,
       "symbol": "trimTerminalReceipts",
       "operation": "sql-delete",
       "target": "incoming_event_queue",
@@ -8896,7 +8896,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#trimTerminalReceipts:sql-delete:d143466239e2",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 324,
+      "line": 339,
       "symbol": "trimTerminalReceipts",
       "operation": "sql-delete",
       "target": "incoming_event_queue",
@@ -8909,7 +8909,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#ensureIncomingEventReceiptSlot:sql-delete:04e483d9ff12",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 352,
+      "line": 367,
       "symbol": "ensureIncomingEventReceiptSlot",
       "operation": "sql-delete",
       "target": "incoming_event_queue",
@@ -8922,7 +8922,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#maintainRows.<callback:328bbd9e74>:mutator-call:5744c68d8c71",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 370,
+      "line": 385,
       "symbol": "maintainRows.<callback:328bbd9e74>",
       "operation": "mutator-call",
       "target": "src/db/repositories/incomingEvents.ts#terminalizeExpiredOrExhausted",
@@ -8935,7 +8935,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#maintainRows.<callback:328bbd9e74>:mutator-call:b1d9d85daa5d",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 371,
+      "line": 386,
       "symbol": "maintainRows.<callback:328bbd9e74>",
       "operation": "mutator-call",
       "target": "src/db/repositories/incomingEvents.ts#trimTerminalReceipts",
@@ -8948,7 +8948,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#enqueuePreparedIncomingEvent.<callback:d0232b251d>:mutator-call:e8b0b4bde653",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 432,
+      "line": 447,
       "symbol": "enqueuePreparedIncomingEvent.<callback:d0232b251d>",
       "operation": "mutator-call",
       "target": "src/db/repositories/incomingEvents.ts#ensureIncomingEventReceiptSlot",
@@ -8961,7 +8961,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#enqueuePreparedIncomingEvent:sql-insert:6b90dd548490",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 442,
+      "line": 457,
       "symbol": "enqueuePreparedIncomingEvent",
       "operation": "sql-insert",
       "target": "incoming_event_queue",
@@ -8974,7 +8974,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#enqueuePreparedIncomingEvent.<callback:d0232b251d>:mutator-call:f76d39d6b6f9",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 493,
+      "line": 508,
       "symbol": "enqueuePreparedIncomingEvent.<callback:d0232b251d>",
       "operation": "mutator-call",
       "target": "src/db/repositories/incomingEvents.ts#trimTerminalReceipts",
@@ -8987,7 +8987,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#enqueuePreparedIncomingEvent:sql-update:2794c4adc789",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 507,
+      "line": 522,
       "symbol": "enqueuePreparedIncomingEvent",
       "operation": "sql-update",
       "target": "incoming_event_queue",
@@ -9000,7 +9000,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#enqueuePreparedIncomingEvent.<callback:d0232b251d>:mutator-call:f76d39d6b6f9:2",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 512,
+      "line": 527,
       "symbol": "enqueuePreparedIncomingEvent.<callback:d0232b251d>",
       "operation": "mutator-call",
       "target": "src/db/repositories/incomingEvents.ts#trimTerminalReceipts",
@@ -9013,7 +9013,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#enqueueIncomingEvent:mutator-call:2b132385a1c8",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 538,
+      "line": 553,
       "symbol": "enqueueIncomingEvent",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9026,7 +9026,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#enqueueIncomingEvent:mutator-call:8768c579674f",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 538,
+      "line": 553,
       "symbol": "enqueueIncomingEvent",
       "operation": "mutator-call",
       "target": "src/db/repositories/incomingEvents.ts#enqueueIncomingEvent.<callback:a9ae3e47c4>",
@@ -9039,7 +9039,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#enqueueIncomingEvent.<callback:a9ae3e47c4>:mutator-call:28ad8590eca2",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 542,
+      "line": 557,
       "symbol": "enqueueIncomingEvent.<callback:a9ae3e47c4>",
       "operation": "mutator-call",
       "target": "src/db/repositories/incomingEvents.ts#maintainRows",
@@ -9052,7 +9052,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#enqueueIncomingEvent.<callback:a9ae3e47c4>:mutator-call:65828bb56537",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 543,
+      "line": 558,
       "symbol": "enqueueIncomingEvent.<callback:a9ae3e47c4>",
       "operation": "mutator-call",
       "target": "src/db/repositories/incomingEvents.ts#enqueuePreparedIncomingEvent",
@@ -9065,7 +9065,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#enqueueAndClaimIncomingEventIfQueueEmpty:mutator-call:04254b052b38",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 563,
+      "line": 578,
       "symbol": "enqueueAndClaimIncomingEventIfQueueEmpty",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9078,7 +9078,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#enqueueAndClaimIncomingEventIfQueueEmpty:mutator-call:0cdc2a9068ad",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 563,
+      "line": 578,
       "symbol": "enqueueAndClaimIncomingEventIfQueueEmpty",
       "operation": "mutator-call",
       "target": "src/db/repositories/incomingEvents.ts#enqueueAndClaimIncomingEventIfQueueEmpty.<callback:9d629a5049>",
@@ -9091,7 +9091,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#enqueueAndClaimIncomingEventIfQueueEmpty.<callback:9d629a5049>:mutator-call:f3c48c7f0aa2",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 570,
+      "line": 585,
       "symbol": "enqueueAndClaimIncomingEventIfQueueEmpty.<callback:9d629a5049>",
       "operation": "mutator-call",
       "target": "src/db/repositories/incomingEvents.ts#maintainRows",
@@ -9104,7 +9104,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#enqueueAndClaimIncomingEventIfQueueEmpty.<callback:9d629a5049>:mutator-call:34ac9b36af93",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 577,
+      "line": 592,
       "symbol": "enqueueAndClaimIncomingEventIfQueueEmpty.<callback:9d629a5049>",
       "operation": "mutator-call",
       "target": "src/db/repositories/incomingEvents.ts#enqueuePreparedIncomingEvent",
@@ -9117,7 +9117,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#enqueueAndClaimIncomingEventIfQueueEmpty:sql-update:5f3d3d7c5a4e",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 581,
+      "line": 596,
       "symbol": "enqueueAndClaimIncomingEventIfQueueEmpty",
       "operation": "sql-update",
       "target": "incoming_event_queue",
@@ -9130,7 +9130,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#claimIncomingEvents:mutator-call:6375594a53c5",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 636,
+      "line": 651,
       "symbol": "claimIncomingEvents",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9143,7 +9143,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#claimIncomingEvents:mutator-call:730c689e2b98",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 636,
+      "line": 651,
       "symbol": "claimIncomingEvents",
       "operation": "mutator-call",
       "target": "src/db/repositories/incomingEvents.ts#claimIncomingEvents.<callback:1eb1ef0457>",
@@ -9156,7 +9156,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#claimIncomingEvents.<callback:1eb1ef0457>:mutator-call:2115f459e1d0",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 643,
+      "line": 658,
       "symbol": "claimIncomingEvents.<callback:1eb1ef0457>",
       "operation": "mutator-call",
       "target": "src/db/repositories/incomingEvents.ts#maintainRows",
@@ -9169,7 +9169,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#claimIncomingEvents:sql-update:2238677decf4",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 644,
+      "line": 659,
       "symbol": "claimIncomingEvents",
       "operation": "sql-update",
       "target": "incoming_event_queue",
@@ -9182,7 +9182,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#markIncomingEventDbAppliedWithinTransaction:sql-update:e5c8469dbfa3",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 729,
+      "line": 744,
       "symbol": "markIncomingEventDbAppliedWithinTransaction",
       "operation": "sql-update",
       "target": "incoming_event_queue",
@@ -9195,7 +9195,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#completeIncomingEvent:mutator-call:08a855737927",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 750,
+      "line": 765,
       "symbol": "completeIncomingEvent",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9208,7 +9208,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#completeIncomingEvent:mutator-call:e9b025bf4ef0",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 750,
+      "line": 765,
       "symbol": "completeIncomingEvent",
       "operation": "mutator-call",
       "target": "src/db/repositories/incomingEvents.ts#completeIncomingEvent.<callback:23e8d2ac6e>",
@@ -9221,7 +9221,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#completeIncomingEvent:sql-update:cdd757364d5b",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 754,
+      "line": 769,
       "symbol": "completeIncomingEvent",
       "operation": "sql-update",
       "target": "incoming_event_queue",
@@ -9234,7 +9234,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#completeIncomingEvent.<callback:23e8d2ac6e>:mutator-call:73cd612a4a37",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 764,
+      "line": 779,
       "symbol": "completeIncomingEvent.<callback:23e8d2ac6e>",
       "operation": "mutator-call",
       "target": "src/db/repositories/incomingEvents.ts#trimTerminalReceipts",
@@ -9247,7 +9247,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#poisonIncomingEvent:mutator-call:d62be03190d6",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 784,
+      "line": 799,
       "symbol": "poisonIncomingEvent",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9260,7 +9260,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#poisonIncomingEvent:mutator-call:e335e42e694a",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 784,
+      "line": 799,
       "symbol": "poisonIncomingEvent",
       "operation": "mutator-call",
       "target": "src/db/repositories/incomingEvents.ts#poisonIncomingEvent.<callback:57887e69c1>",
@@ -9273,7 +9273,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#poisonIncomingEvent:sql-update:f716b2ed34d1",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 788,
+      "line": 803,
       "symbol": "poisonIncomingEvent",
       "operation": "sql-update",
       "target": "incoming_event_queue",
@@ -9286,7 +9286,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#poisonIncomingEvent.<callback:57887e69c1>:mutator-call:2596928d7159",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 798,
+      "line": 813,
       "symbol": "poisonIncomingEvent.<callback:57887e69c1>",
       "operation": "mutator-call",
       "target": "src/db/repositories/incomingEvents.ts#trimTerminalReceipts",
@@ -9299,7 +9299,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#failIncomingEvent:mutator-call:0856d70897d7",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 814,
+      "line": 829,
       "symbol": "failIncomingEvent",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9312,7 +9312,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#failIncomingEvent:mutator-call:61d15c0a1cde",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 814,
+      "line": 829,
       "symbol": "failIncomingEvent",
       "operation": "mutator-call",
       "target": "src/db/repositories/incomingEvents.ts#failIncomingEvent.<callback:6f6c74e4c6>",
@@ -9325,7 +9325,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#failIncomingEvent:sql-update:030c88de5a86",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 819,
+      "line": 834,
       "symbol": "failIncomingEvent",
       "operation": "sql-update",
       "target": "incoming_event_queue",
@@ -9338,7 +9338,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#failIncomingEvent.<callback:6f6c74e4c6>:mutator-call:7182bebb960f",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 857,
+      "line": 872,
       "symbol": "failIncomingEvent.<callback:6f6c74e4c6>",
       "operation": "mutator-call",
       "target": "src/db/repositories/incomingEvents.ts#trimTerminalReceipts",
@@ -9349,22 +9349,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/incomingEvents.test.ts; test/services/incomingEventDrain.test.ts; test/services/incomingEventDispatcher.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/db/repositories/incomingEvents.ts#deferIncomingEventForDependency:mutator-call:8b026ec40d62",
+      "id": "src/db/repositories/incomingEvents.ts#deferIncomingEventForDependency:mutator-call:1b996e89baef",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 886,
-      "symbol": "deferIncomingEventForDependency",
-      "operation": "mutator-call",
-      "target": "src/db/repositories/incomingEvents.ts#deferIncomingEventForDependency.<callback:8061275f00>",
-      "detectedContext": "withDbTransaction",
-      "owner": "deferIncomingEventForDependency",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/incomingEvents.test.ts; test/services/incomingEventDrain.test.ts"
-    },
-    {
-      "id": "src/db/repositories/incomingEvents.ts#deferIncomingEventForDependency:mutator-call:ef90c5e6c478",
-      "path": "src/db/repositories/incomingEvents.ts",
-      "line": 886,
+      "line": 901,
       "symbol": "deferIncomingEventForDependency",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9375,9 +9362,22 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/incomingEvents.test.ts; test/services/incomingEventDrain.test.ts"
     },
     {
+      "id": "src/db/repositories/incomingEvents.ts#deferIncomingEventForDependency:mutator-call:24a50f66af99",
+      "path": "src/db/repositories/incomingEvents.ts",
+      "line": 901,
+      "symbol": "deferIncomingEventForDependency",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/incomingEvents.ts#deferIncomingEventForDependency.<callback:4ffdbec53e>",
+      "detectedContext": "withDbTransaction",
+      "owner": "deferIncomingEventForDependency",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/incomingEvents.test.ts; test/services/incomingEventDrain.test.ts"
+    },
+    {
       "id": "src/db/repositories/incomingEvents.ts#deferIncomingEventForDependency:sql-update:c8b416eba8d3",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 892,
+      "line": 911,
       "symbol": "deferIncomingEventForDependency",
       "operation": "sql-update",
       "target": "incoming_event_queue",
@@ -9388,10 +9388,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/incomingEvents.test.ts; test/services/incomingEventDrain.test.ts"
     },
     {
-      "id": "src/db/repositories/incomingEvents.ts#deferIncomingEventForDependency.<callback:8061275f00>:mutator-call:a4982efd5a78",
+      "id": "src/db/repositories/incomingEvents.ts#deferIncomingEventForDependency.<callback:4ffdbec53e>:mutator-call:80625fae1232",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 919,
-      "symbol": "deferIncomingEventForDependency.<callback:8061275f00>",
+      "line": 938,
+      "symbol": "deferIncomingEventForDependency.<callback:4ffdbec53e>",
       "operation": "mutator-call",
       "target": "src/db/repositories/incomingEvents.ts#trimTerminalReceipts",
       "detectedContext": "withDbTransaction",
@@ -9403,7 +9403,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#maintainIncomingEvents:mutator-call:9cabf7bdd9e2",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 938,
+      "line": 957,
       "symbol": "maintainIncomingEvents",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9416,7 +9416,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#maintainIncomingEvents:mutator-call:ce883cde3b8d",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 938,
+      "line": 957,
       "symbol": "maintainIncomingEvents",
       "operation": "mutator-call",
       "target": "src/db/repositories/incomingEvents.ts#maintainIncomingEvents.<callback:e7a6f9bd43>",
@@ -9429,7 +9429,7 @@
     {
       "id": "src/db/repositories/incomingEvents.ts#maintainIncomingEvents.<callback:e7a6f9bd43>:mutator-call:8bef34fc8f21",
       "path": "src/db/repositories/incomingEvents.ts",
-      "line": 940,
+      "line": 959,
       "symbol": "maintainIncomingEvents.<callback:e7a6f9bd43>",
       "operation": "mutator-call",
       "target": "src/db/repositories/incomingEvents.ts#maintainRows",
@@ -22427,7 +22427,20 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/dbEventSink.test.ts; test/db/withDbTransaction.test.ts; test/realtime/dbEventSink.phase6.test.ts; test/services/incomingEventDrain.test.ts; test/services/rcsProviderEpochIngestion.test.ts"
     },
     {
-      "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:37d7d4a0d108",
+      "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:382322fdc9db",
+      "path": "src/services/realtime/dbEventSink.ts",
+      "line": 333,
+      "symbol": "DbEventSink.onEvent",
+      "operation": "mutator-call",
+      "target": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:371a29151c>",
+      "detectedContext": "withDbTransaction",
+      "owner": "DbEventSink.onEvent",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/dbEventSink.test.ts; test/realtime/dbEventSink.phase6.test.ts; test/services/incomingEventDrain.test.ts"
+    },
+    {
+      "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:ff31c30d0fe1",
       "path": "src/services/realtime/dbEventSink.ts",
       "line": 333,
       "symbol": "DbEventSink.onEvent",
@@ -22440,23 +22453,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/dbEventSink.test.ts; test/realtime/dbEventSink.phase6.test.ts; test/services/incomingEventDrain.test.ts"
     },
     {
-      "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:fac228eec209",
-      "path": "src/services/realtime/dbEventSink.ts",
-      "line": 333,
-      "symbol": "DbEventSink.onEvent",
-      "operation": "mutator-call",
-      "target": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:44e49db23b>",
-      "detectedContext": "withDbTransaction",
-      "owner": "DbEventSink.onEvent",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/dbEventSink.test.ts; test/realtime/dbEventSink.phase6.test.ts; test/services/incomingEventDrain.test.ts"
-    },
-    {
-      "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:44e49db23b>:mutator-call:6af42f4eaa3a",
+      "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:371a29151c>:mutator-call:0ac9e92896c7",
       "path": "src/services/realtime/dbEventSink.ts",
       "line": 337,
-      "symbol": "DbEventSink.onEvent.<callback:44e49db23b>",
+      "symbol": "DbEventSink.onEvent.<callback:371a29151c>",
       "operation": "mutator-call",
       "target": "src/db/repositories/handles.ts#upsertHandlesWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -22466,10 +22466,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/dbEventSink.test.ts; test/realtime/dbEventSink.phase6.test.ts; test/services/incomingEventDrain.test.ts"
     },
     {
-      "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:44e49db23b>:mutator-call:c0e0d8ba9118",
+      "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:371a29151c>:mutator-call:c6b21d9ea506",
       "path": "src/services/realtime/dbEventSink.ts",
       "line": 341,
-      "symbol": "DbEventSink.onEvent.<callback:44e49db23b>",
+      "symbol": "DbEventSink.onEvent.<callback:371a29151c>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#upsertChatsWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -22479,10 +22479,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/dbEventSink.test.ts; test/realtime/dbEventSink.phase6.test.ts; test/services/incomingEventDrain.test.ts"
     },
     {
-      "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:44e49db23b>:mutator-call:926e18b39b43",
+      "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:371a29151c>:mutator-call:eaa871b33787",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 371,
-      "symbol": "DbEventSink.onEvent.<callback:44e49db23b>",
+      "line": 374,
+      "symbol": "DbEventSink.onEvent.<callback:371a29151c>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#reconcileEchoByContent",
       "detectedContext": "withDbTransaction",
@@ -22492,10 +22492,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/dbEventSink.test.ts; test/realtime/dbEventSink.phase6.test.ts; test/services/incomingEventDrain.test.ts"
     },
     {
-      "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:44e49db23b>:mutator-call:01555c803c56",
+      "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:371a29151c>:mutator-call:05a40e9bb421",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 376,
-      "symbol": "DbEventSink.onEvent.<callback:44e49db23b>",
+      "line": 379,
+      "symbol": "DbEventSink.onEvent.<callback:371a29151c>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messages.ts#upsertMessagesWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -22507,7 +22507,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:66c205029948",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 461,
+      "line": 464,
       "symbol": "DbEventSink.onEvent",
       "operation": "mutator-call",
       "target": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:a180ff6e0a>",
@@ -22520,7 +22520,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:9a9e27fbf84f",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 461,
+      "line": 464,
       "symbol": "DbEventSink.onEvent",
       "operation": "mutator-call",
       "target": "src/services/realtime/dbEventSink.ts#withCurrentDeliveryTransaction",
@@ -22533,7 +22533,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:a180ff6e0a>:mutator-call:770827794001",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 465,
+      "line": 468,
       "symbol": "DbEventSink.onEvent.<callback:a180ff6e0a>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#applyMessageStateWithinTransaction",
@@ -22546,7 +22546,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:19c0e079b32c",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 510,
+      "line": 513,
       "symbol": "DbEventSink.onEvent",
       "operation": "mutator-call",
       "target": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:3d18ed0ddf>",
@@ -22559,7 +22559,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:4efab14f2e98",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 510,
+      "line": 513,
       "symbol": "DbEventSink.onEvent",
       "operation": "mutator-call",
       "target": "src/services/realtime/dbEventSink.ts#withCurrentDeliveryTransaction",
@@ -22572,7 +22572,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:3d18ed0ddf>:mutator-call:cd852c48617e",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 522,
+      "line": 525,
       "symbol": "DbEventSink.onEvent.<callback:3d18ed0ddf>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messages.ts#markMessageDeletedWithinTransaction",
@@ -22585,7 +22585,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:3c2543da6a96",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 563,
+      "line": 566,
       "symbol": "DbEventSink.onEvent",
       "operation": "mutator-call",
       "target": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:34f0902273>",
@@ -22598,7 +22598,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:a3057097f761",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 563,
+      "line": 566,
       "symbol": "DbEventSink.onEvent",
       "operation": "mutator-call",
       "target": "src/services/realtime/dbEventSink.ts#withCurrentDeliveryTransaction",
@@ -22611,7 +22611,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:34f0902273>:mutator-call:f9d51a0c915a",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 571,
+      "line": 574,
       "symbol": "DbEventSink.onEvent.<callback:34f0902273>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#setLastReadMessageGuidWithinTransaction",
@@ -22624,7 +22624,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:2e1078e9e8c7",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 640,
+      "line": 643,
       "symbol": "DbEventSink.onEvent",
       "operation": "mutator-call",
       "target": "src/services/realtime/dbEventSink.ts#withCurrentDeliveryTransaction",
@@ -22637,7 +22637,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:4b1cd2a39573",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 640,
+      "line": 643,
       "symbol": "DbEventSink.onEvent",
       "operation": "mutator-call",
       "target": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:2eeb4e33d8>",
@@ -22650,7 +22650,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:2eeb4e33d8>:mutator-call:8644088c3aeb",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 699,
+      "line": 702,
       "symbol": "DbEventSink.onEvent.<callback:2eeb4e33d8>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoingRetry.ts#applyServerSendErrorWithinTransaction",
@@ -22663,7 +22663,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:18b50ea5a4f4",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 776,
+      "line": 779,
       "symbol": "DbEventSink.onEvent",
       "operation": "mutator-call",
       "target": "src/services/realtime/dbEventSink.ts#withCurrentDeliveryTransaction",
@@ -22676,7 +22676,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:28c5bdc89452",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 776,
+      "line": 779,
       "symbol": "DbEventSink.onEvent",
       "operation": "mutator-call",
       "target": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:bf7c767cc3>",
@@ -22689,7 +22689,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:bf7c767cc3>:mutator-call:5b2831b6d632",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 780,
+      "line": 783,
       "symbol": "DbEventSink.onEvent.<callback:bf7c767cc3>",
       "operation": "mutator-call",
       "target": "src/db/repositories/handles.ts#upsertHandlesWithinTransaction",
@@ -22702,7 +22702,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:bf7c767cc3>:mutator-call:33bb92d821f7",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 784,
+      "line": 787,
       "symbol": "DbEventSink.onEvent.<callback:bf7c767cc3>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#upsertChatsWithinTransaction",

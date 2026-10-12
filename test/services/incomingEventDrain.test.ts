@@ -11,6 +11,7 @@ import {
 } from '@core/realtime';
 import {
   INCOMING_EVENT_DEPENDENCY_RETRY_MS,
+  incomingEventDependencyRetryDelayMs,
   INCOMING_EVENT_LEASE_MS,
   INCOMING_EVENT_MAX_ATTEMPTS,
   enqueueIncomingEvent,
@@ -302,11 +303,11 @@ describe('incoming event drain', () => {
   it('defers an expected dependency repeatedly without spending poison attempts, until expiry', async () => {
     const { db, raw } = await createTestDb();
     await enqueue(db, message('drain-dependency'));
-    const expiresAt = (
-      raw.prepare(`SELECT expires_at AS expiresAt FROM incoming_event_queue`).get() as {
-        expiresAt: number;
-      }
-    ).expiresAt;
+    const { expiresAt, receivedAt } = raw
+      .prepare(
+        `SELECT expires_at AS expiresAt, received_at AS receivedAt FROM incoming_event_queue`,
+      )
+      .get() as { expiresAt: number; receivedAt: number };
     let clock = START;
     let leaseCounter = 0;
     const permanentFailure = jest.fn();
@@ -348,7 +349,7 @@ describe('incoming event drain', () => {
         payload: expect.any(String),
         attempts: 0,
         claimVersion: wait + 1,
-        nextAttemptAt: clock + INCOMING_EVENT_DEPENDENCY_RETRY_MS,
+        nextAttemptAt: clock + incomingEventDependencyRetryDelayMs(clock - receivedAt),
         lastErrorCode: 'dependency-pending',
       });
       clock = row.nextAttemptAt;

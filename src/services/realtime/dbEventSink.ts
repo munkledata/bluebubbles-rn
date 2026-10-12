@@ -345,14 +345,17 @@ export class DbEventSink implements EventSink {
             );
             // The chat may already exist locally (from a prior sync) even when this event didn't
             // embed it. Real FCM `updated-message` payloads are leaner still: they omit BOTH chats
-            // and chatGuid, so recover their owner from the message row already in the DB.
+            // and chatGuid, so recover their owner from the message row already in the DB. A
+            // `new-message` with no chat reference (its server hydration failed) resolves the same
+            // way once recovery has stored it, instead of waiting until it expires. One that names
+            // a chat keeps that name, so recovery targets the chat rather than the whole account.
             let chatId =
               targetChatGuid == null
                 ? undefined
                 : (chatMap.get(targetChatGuid) ??
                   (await getChatIdByGuid(this.db, targetChatGuid)) ??
                   undefined);
-            if (chatId == null && event.type === 'updated-message') {
+            if (chatId == null && (event.type === 'updated-message' || targetChatGuid == null)) {
               targetChatGuid = await getChatGuidByMessageGuid(this.db, message.guid);
               chatId =
                 targetChatGuid == null

@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import { sql } from 'drizzle-orm';
 import {
   INCOMING_EVENT_DEPENDENCY_RETRY_MS,
+  incomingEventDependencyRetryDelayMs,
   INCOMING_EVENT_LEASE_MS,
   INCOMING_EVENT_LIVE_RECEIPT_EXPIRY_MARGIN_MS,
   INCOMING_EVENT_MAX_CLAIM_PAYLOAD_BYTES,
@@ -1845,7 +1846,7 @@ describe('incoming event queue repository', () => {
       expect(deferred).toEqual({
         status: 'retry-scheduled',
         attempts: 0,
-        nextAttemptAt: deferredAt + INCOMING_EVENT_DEPENDENCY_RETRY_MS,
+        nextAttemptAt: deferredAt + incomingEventDependencyRetryDelayMs(deferredAt - BASE),
       });
       if (deferred.status !== 'retry-scheduled') throw new Error('expected dependency retry');
       claimNow = deferred.nextAttemptAt;
@@ -1869,6 +1870,34 @@ describe('incoming event queue repository', () => {
       expiresAt: EXPIRY,
       lastErrorCode: 'dependency-pending',
     });
+  });
+
+  it('waits longer the longer a dependency stays missing, up to ten minutes', async () => {
+    // Retrying every 5 s for a whole 24-hour lifetime re-ran the event (and its account sync)
+    // about 17,000 times when the prerequisite could not appear.
+    const { db } = await createTestDb();
+    await enqueueIncomingEvent(
+      db,
+      incoming('dependency-backoff', { receivedAt: BASE, expiresAt: BASE + 24 * 3_600_000 }),
+      ALLOW,
+      NOW,
+    );
+    const waitAt = async (now: number) => {
+      const claim = onlyClaim(
+        await claimIncomingEvents(db, { clock: () => now, leaseToken: `wait-${now}` }, ALLOW),
+      );
+      const deferred = await deferIncomingEventForDependency(
+        db,
+        { ...exactClaim(claim), now },
+        ALLOW,
+      );
+      if (deferred.status !== 'retry-scheduled') throw new Error('expected dependency retry');
+      return deferred.nextAttemptAt - now;
+    };
+
+    expect(await waitAt(BASE + 1_000)).toBe(5_000);
+    expect(await waitAt(BASE + 120_000)).toBe(30_000);
+    expect(await waitAt(BASE + 3_600_000)).toBe(600_000);
   });
 
   it('keeps dependency deferral fenced to the exact lease and bounded by event expiry', async () => {
