@@ -292,6 +292,7 @@ function ChatScreenInner({
   // from the participant handle service (not just the guid prefix) so an SMS-only thread reads SMS.
   const chatService = resolveChatService(guid, header.data?.handleServices);
   const rcsAvailable = useSessionStore((s) => isCurrentRcsChatGuid(s.serverInfo, guid));
+  const serverInfoLoaded = useSessionStore((s) => s.serverInfo != null);
   const rcsInteractiveFeaturesAvailable = rcsAvailable && chatService === 'RCS';
   const imessageAttachmentSupported = useSessionStore(
     (s) => s.serverInfo?.supports_imessage_attachment_upload === true,
@@ -1306,11 +1307,22 @@ function ChatScreenInner({
     if (
       !ownedShareBatchId ||
       remainingSharedAttachments.length === 0 ||
-      attachmentFeaturesAvailable
+      attachmentFeaturesAvailable ||
+      // After a cold start server info and the header load in the background; "not loaded yet" is
+      // not "unsupported", and the files appear once they arrive.
+      !serverInfoLoaded ||
+      header.data?.guid !== guid
     )
       return;
     showToast('This conversation cannot accept the shared files. Choose another conversation.');
-  }, [attachmentFeaturesAvailable, ownedShareBatchId, remainingSharedAttachments.length]);
+  }, [
+    attachmentFeaturesAvailable,
+    guid,
+    header.data?.guid,
+    ownedShareBatchId,
+    remainingSharedAttachments.length,
+    serverInfoLoaded,
+  ]);
 
   const [composerRemovalState, setComposerRemovalState] = useState<ComposerRemovalState>({
     hasUnsavedDraftMetadata: false,

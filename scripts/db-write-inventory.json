@@ -121,7 +121,7 @@
     {
       "id": "app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:a2637fe808>.<callback:de6db739c6>:mutator-call:ecf46f2d08d9",
       "path": "app/(app)/chat/[guid].tsx",
-      "line": 657,
+      "line": 658,
       "symbol": "ChatScreenInner.<callback:a2637fe808>.<callback:de6db739c6>",
       "operation": "mutator-call",
       "target": "src/services/messagePreview.ts#readMessagePreview",
@@ -134,7 +134,7 @@
     {
       "id": "app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:c8deb5b511>.<callback:293e0b6208>:mutator-call:a4cbb531c586",
       "path": "app/(app)/chat/[guid].tsx",
-      "line": 1105,
+      "line": 1106,
       "symbol": "ChatScreenInner.<callback:c8deb5b511>.<callback:293e0b6208>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#readShareIntakeReceipt",
@@ -147,7 +147,7 @@
     {
       "id": "app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:414f8cbf59>.<callback:5a7bad110f>:mutator-call:599fa6a378a7",
       "path": "app/(app)/chat/[guid].tsx",
-      "line": 1146,
+      "line": 1147,
       "symbol": "ChatScreenInner.<callback:414f8cbf59>.<callback:5a7bad110f>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#discardShareIntakeItem",
@@ -160,7 +160,7 @@
     {
       "id": "app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:6507bcabdf>.<callback:f613d3ead3>:mutator-call:17abad682076",
       "path": "app/(app)/chat/[guid].tsx",
-      "line": 1197,
+      "line": 1198,
       "symbol": "ChatScreenInner.<callback:6507bcabdf>.<callback:f613d3ead3>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#readShareIntakeReceipt",
@@ -173,7 +173,7 @@
     {
       "id": "app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:b8617f0f25>.<callback:16329d1004>:mutator-call:afd0ed6f1e46",
       "path": "app/(app)/chat/[guid].tsx",
-      "line": 1267,
+      "line": 1268,
       "symbol": "ChatScreenInner.<callback:b8617f0f25>.<callback:16329d1004>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#admitShareIntakeTextDraft",

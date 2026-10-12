@@ -834,6 +834,34 @@ describe('ChatScreen — exact native share handoff', () => {
     expect(mockDiscardShareIntakeBatch).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['still loading after a cold start', null, false],
+    ['known and RCS unavailable', { rcs: false }, true],
+  ] as const)(
+    'warns that the chat cannot take shared files only once capabilities are known (%s)',
+    async (_label, serverInfo, warns) => {
+      configureRcsChat(serverInfo ?? {});
+      if (serverInfo === null) useSessionStore.setState({ serverInfo: null });
+      stageExactShare();
+      mockGetShareIntakeReceipt.mockResolvedValue({
+        destination: { chatGuid: RCS_GUID, routeKind: 'existing_chat' },
+        newChatPlan: null,
+        items: {},
+      });
+
+      await renderWithTheme(<ChatScreen />);
+      await waitFor(() => expect(mockGetShareIntakeReceipt).toHaveBeenCalled());
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      const warning =
+        'This conversation cannot accept the shared files. Choose another conversation.';
+      if (warns) expect(showToast).toHaveBeenCalledWith(warning);
+      else expect(showToast).not.toHaveBeenCalledWith(warning);
+    },
+  );
+
   it('does not mount an editable composer until shared text is durably merged', async () => {
     configureRcsChat();
     const receiptRead = deferred<Record<string, unknown> | null>();
