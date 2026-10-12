@@ -121,6 +121,10 @@ export async function syncMessageState(
     // Network hydration is outside the page owner. Each small transaction binds only the proven
     // owner and body; final per-message transitions and the checkpoint commit in the final owner.
     const restoredOwners = new Map<string, string>();
+    // Restores the Mac no longer has (404). Each is left out of this page's transitions: a later
+    // transition hides the message again or it is gone. A repair here would skip every event up
+    // to the server's checkpoint instead of this one.
+    const notActive = new Set<string>();
     for (const event of latestEvents.values()) {
       if (event.kind !== 'restored' || !api.fetchActiveMessage) continue;
       const stored = await getMessageStateTransition(db, {
@@ -137,7 +141,10 @@ export async function syncMessageState(
         throw new MessageStateRepairRequiredError();
       const message = await api.fetchActiveMessage(event.guid, page.providerEpoch, options.signal);
       if (!guard()) return;
-      if (!message) throw new MessageStateRepairRequiredError();
+      if (!message) {
+        notActive.add(event.sequence);
+        continue;
+      }
       const owner = resolveMessageChatGuid(message);
       if (
         message.guid !== event.guid ||
@@ -191,7 +198,8 @@ export async function syncMessageState(
           current.ledgerEpoch !== previous.ledgerEpoch
         )
           throw new Error('Message-state authority changed while a page was in flight.');
-        for (const event of latestEvents.values())
+        for (const event of latestEvents.values()) {
+          if (notActive.has(event.sequence)) continue;
           await applyMessageStateWithinTransaction(context, {
             version: 1,
             provider: 'imessage',
@@ -200,6 +208,7 @@ export async function syncMessageState(
             ...event,
             chatGuid: restoredOwners.get(event.sequence) ?? event.chatGuid,
           });
+        }
         await setMessageStateAuthorityWithinTransaction(context, next);
       },
       guard,

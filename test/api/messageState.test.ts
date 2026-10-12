@@ -77,6 +77,19 @@ it('binds provider repair begin and finish to the explicit sequence and context'
     token: providerEpoch,
   });
 });
+it('retries the restore read after a dropped connection, since it only reads', async () => {
+  mockKy
+    .mockRejectedValueOnce(new Error('socket hang up'))
+    .mockResolvedValueOnce(
+      response({ message: { guid: 'restored-1', chats: [{ guid: 'iMessage;-;fixture' }] } }),
+    );
+
+  await expect(
+    messageStateApi.activeMessage(client, 'restored-1', providerEpoch),
+  ).resolves.toMatchObject({ guid: 'restored-1' });
+  expect(mockKy).toHaveBeenCalledTimes(2);
+});
+
 it('keeps exact restore identifiers in the request body rather than the URL', async () => {
   mockKy.mockResolvedValue(
     response({ message: { guid: 'a/b?c', chats: [{ guid: 'SMS;-;fixture' }] } }),

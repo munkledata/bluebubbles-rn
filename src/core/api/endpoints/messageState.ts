@@ -48,7 +48,9 @@ export async function activeMessage(
       {
         json: { version: 1, provider: 'imessage', providerEpoch, guid },
         signal,
-        retry: false,
+        // A pure read sent as POST for its body: retry dropped connections and timeouts like a GET.
+        // One blip used to discard the whole page's progress and repeat every hydration next sync.
+        retry: {},
         captureErrorDetail: true,
       },
     );

@@ -513,16 +513,20 @@ describe('versioned message state', () => {
     expect(adapter.fetchActiveMessage).toHaveBeenCalledWith('message-1', providerEpoch, undefined);
     expect((await getMessageStateAuthority(db))?.sequence).toBe('11');
   });
-  it('requires a fresh snapshot when the restored message is no longer active', async () => {
+  it('skips a restore the Mac no longer has instead of repairing everything', async () => {
+    // A recovered conversation deleted again on the Mac answers 404 for its restore events. A
+    // later transition hides it again or it is gone; a full repair would skip far more.
     await seed();
     await apply('11', 'deleted');
     const adapter = api(async () => page([event('12', 'restored')]));
     adapter.fetchActiveMessage = async () => null;
-    await expect(syncMessageState(db, adapter, { providerEpoch })).rejects.toBeInstanceOf(
-      MessageStateRepairRequiredError,
-    );
+    await syncMessageState(db, adapter, { providerEpoch });
     expect(hidden()).toBe(100);
-    expect(await getMessageStateAuthority(db)).toEqual(authority);
+    expect(raw.prepare('SELECT sequence,kind FROM message_server_states').get()).toEqual({
+      sequence: '11',
+      kind: 'deleted',
+    });
+    expect((await getMessageStateAuthority(db))?.sequence).toBe('12');
   });
   it('does not hydrate a restoration that a newer stored transition already decides', async () => {
     await seed();
