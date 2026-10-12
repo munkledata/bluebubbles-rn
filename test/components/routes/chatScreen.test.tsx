@@ -402,7 +402,7 @@ import { useTypingStore } from '@state/typingStore';
 // eslint-disable-next-line import/first
 import { useShareIntentStore } from '@state/shareIntentStore';
 // eslint-disable-next-line import/first
-import { isChatHiddenByDeletion } from '@db/repositories';
+import { getMessagePreviewByGuid, isChatHiddenByDeletion } from '@db/repositories';
 // eslint-disable-next-line import/first
 import {
   captureRealtimeDeliveryLease,
@@ -1680,12 +1680,61 @@ describe('ChatScreen — send routing', () => {
     await run(() => mockCaptured.overlay!.onEdit());
     expect(mockCaptured.composer?.editingText).toBe('Edit target');
     const currentWindow = useMessagesMock.mock.results.at(-1)!.value;
+    // The database confirms the message is gone, not merely outside the loaded window.
+    mockMessagePreview = null;
     useMessagesMock.mockReturnValue({ ...currentWindow, data: [] });
     await view.rerender(<ChatScreen />);
-    expect(mockCaptured.composer?.editingText).toBeUndefined();
+    await waitFor(() => expect(mockCaptured.composer?.editingText).toBeUndefined());
     useMessagesMock.mockReturnValue({ ...currentWindow, data: [target] });
     await view.rerender(<ChatScreen />);
     expect(mockCaptured.composer?.editingText).toBeUndefined();
+  });
+
+  it('keeps an in-progress edit when search moves the window away from its message', async () => {
+    // Search, the unread chip and thread jumps load a window of +-150 messages around their
+    // target; a newer message being edited can fall outside it while it still exists.
+    useSessionStore.setState({
+      serverInfo: { version: 'test', supports_imessage_edit: true } as any,
+    });
+    useChatHeaderMock.mockReturnValue({
+      data: { id: 1, guid: GUID, style: 45, participantCount: 1, handleServices: 'iMessage' },
+      error: null,
+    });
+    const view = await renderWithTheme(<ChatScreen />);
+    const target = makeMsg({
+      guid: 'edit-out-of-window',
+      text: 'Edit target',
+      isFromMe: 1,
+      sendState: 'sent',
+      dateCreated: Date.now(),
+      messagePartTopology: JSON.stringify({
+        complete: true,
+        originalPartIndexes: [0],
+        currentParts: [{ index: 0, kind: 'text' }],
+        attachmentOwnership: [],
+      }),
+    });
+    await longPressMessage(target);
+    await run(() => mockCaptured.overlay!.onEdit());
+    expect(mockCaptured.composer?.editingText).toBe('Edit target');
+    const currentWindow = useMessagesMock.mock.results.at(-1)!.value;
+    const oldHit = makeMsg({ guid: 'weeks-old-hit', text: 'Old search hit', dateCreated: 1 });
+    jest.mocked(getMessagePreviewByGuid).mockClear();
+    useMessagesMock.mockReturnValue({ ...currentWindow, data: [oldHit] });
+    await view.rerender(<ChatScreen />);
+    await waitFor(() =>
+      expect(getMessagePreviewByGuid).toHaveBeenCalledWith(
+        expect.anything(),
+        GUID,
+        'edit-out-of-window',
+        0,
+      ),
+    );
+    await run(() => undefined);
+    expect(mockCaptured.composer?.editingText).toBe('Edit target');
+    useMessagesMock.mockReturnValue({ ...currentWindow, data: [target] });
+    await view.rerender(<ChatScreen />);
+    expect(mockCaptured.composer?.editingText).toBe('Edit target');
   });
 
   it('offers the voice recorder only with the separate iMessage voice capability', async () => {

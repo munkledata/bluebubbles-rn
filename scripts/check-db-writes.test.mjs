@@ -7438,6 +7438,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     selected.map((finding) => finding.id).sort(),
     [
       'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:a2637fe808>.<callback:de6db739c6>:mutator-call:ecf46f2d08d9',
+      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:876664bdf3>.<callback:177d5dd9bd>:mutator-call:3e3d348f4c24',
       'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:6507bcabdf>.<callback:f613d3ead3>:mutator-call:17abad682076',
       'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:414f8cbf59>.<callback:5a7bad110f>:mutator-call:599fa6a378a7',
       'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:b8617f0f25>.<callback:16329d1004>:mutator-call:afd0ed6f1e46',
@@ -7568,7 +7569,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 129);
+  assert.equal(selected.length, 130);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [

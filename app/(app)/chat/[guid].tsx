@@ -670,10 +670,34 @@ function ChatScreenInner({
       alive = false;
     };
   }, [accountLease, guid, imessageRepliesAvailable, replyTargetGuid, replyTargetProof]);
-  if (editing !== null) {
-    const current = messages.find((message) => message.guid === editing.guid);
-    if (!current || isAggregateRetractionTombstone(current)) setEditing(null);
+  const editTargetGuid = editing?.guid ?? null;
+  const editTargetRow = editTargetGuid
+    ? messages.find((message) => message.guid === editTargetGuid)
+    : undefined;
+  if (editTargetRow && isAggregateRetractionTombstone(editTargetRow)) {
+    setEditing(null);
   }
+  // Missing from the loaded window is not the same as deleted: search, the unread chip and thread
+  // jumps load a window around their own target that can leave out a newer message being edited.
+  // Like the reply target, re-read it from the database whenever the window changes, and cancel
+  // only when it is really gone or retracted, so a typed edit is never silently thrown away.
+  const recheckEditTarget = editTargetGuid !== null && editTargetRow === undefined;
+  useEffect(() => {
+    if (!recheckEditTarget || editTargetGuid === null) return;
+    let alive = true;
+    void runTrackedRealtimeWork(accountLease, async () => {
+      const preview = await readMessagePreview(guid, editTargetGuid, 0);
+      if (!alive || !accountLease.isCurrent() || preview) return;
+      setEditing((current) => (current?.guid === editTargetGuid ? null : current));
+    }).catch((error) => {
+      if (alive && accountLease.isCurrent()) {
+        logger.warn('[chat] could not recheck the message being edited', error);
+      }
+    });
+    return () => {
+      alive = false;
+    };
+  }, [accountLease, editTargetGuid, guid, messages, recheckEditTarget]);
   if (recording && !voiceFeaturesAvailable) {
     setRecording(false);
   }
