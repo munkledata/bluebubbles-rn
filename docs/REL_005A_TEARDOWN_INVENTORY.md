@@ -36,10 +36,13 @@ which step 1 aborts synchronously when it retires the generation, so it cannot h
 until its 30 s timeout. Covered: chat read/unread markers, deleteChat's server scheduled-message
 cancels, group rename/participants/photo, remote delete, FaceTime call/link, notification actions,
 in-app sends and scheduled-message operations, the foreground outgoing queue, Server Health actions,
-server backup slots, and FCM registration. Still open: two rare fixed-credential paths (credential
-upgrade and the killed-process notification action); a hung request there can still hold the drain
-until it times out. `test/services/accountHttpCoverage.test.ts` fails if any tracked slot uses the
-shared client. Disconnect's own cleanup uses its own fixed-credential client and is
+server backup slots, and FCM registration's requests. Still open: FCM registration's wait for a new
+Firebase token (it cannot be cancelled), and two rare fixed-credential paths (credential upgrade and
+the killed-process notification action); a hung wait there can still hold the drain until it times
+out. `test/services/accountHttpCoverage.test.ts` scans the listed slot wrappers and fails if one uses
+the shared client (under any import name or a one-level alias), hands it to a function that opens
+its own slot, or creates a fixed-credential client inside it without `.withCancellation`; it does
+not follow helper functions defined outside the slot, so the behaviour tests remain the proof. Disconnect's own cleanup uses its own fixed-credential client and is
 unaffected.
 
 ## Counted work families

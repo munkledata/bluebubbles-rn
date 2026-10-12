@@ -23,11 +23,22 @@ jest.mock('@db/repositories', () => {
     })),
   };
 });
-// accountHttp (review item 1073) returns the same stand-in; accountHttpCoverage.test proves wiring.
-jest.mock('@/services/clients', () => {
-  const http = { account: 'A' };
-  return { http, accountHttp: () => http };
-});
+/** Leases handed to `accountHttp` (review item 1073). */
+const mockAccountHttpLeases: unknown[] = [];
+const mockRunOutgoingQueue = jest.fn(async (..._args: unknown[]) => ({ eligible: 0, sent: 0 }));
+// The shared client has a different shape, so every `{ account: 'A' }` client assertion below
+// proves the request went through the account-bound client.
+jest.mock('@/services/clients', () => ({
+  http: { account: 'A', shared: true },
+  accountHttp: (lease: unknown) => {
+    mockAccountHttpLeases.push(lease);
+    return { account: 'A' };
+  },
+}));
+jest.mock('@/services/send/outgoingQueueService', () => ({
+  ...jest.requireActual('@/services/send/outgoingQueueService'),
+  runOutgoingQueue: (...args: unknown[]) => mockRunOutgoingQueue(...args),
+}));
 jest.mock('@/services/send/sendService', () => ({
   generateTempGuid: jest.fn(() => 'temp-test'),
   sendTextMessage: jest.fn(),
@@ -76,6 +87,7 @@ import {
   editText,
   pickAndSendContact,
   react,
+  recoverOutgoing,
   reply,
   retry,
   send,
@@ -1211,5 +1223,21 @@ describe('UI send account lease', () => {
 
     await expect(pending).resolves.toBeNull();
     expect(mockSendContact).not.toHaveBeenCalled();
+  });
+});
+
+// Review item 1073: the foreground outgoing queue opens its Disconnect drain slot inside
+// runOutgoingQueue, so the client it is handed must be bound to that same account lease.
+describe('recoverOutgoing', () => {
+  it('hands the queue drain the account-bound client for the lease it is admitted with', async () => {
+    mockAccountHttpLeases.length = 0;
+    mockRunOutgoingQueue.mockClear();
+
+    await recoverOutgoing();
+
+    expect(mockRunOutgoingQueue).toHaveBeenCalledTimes(1);
+    const [, client, , , lease] = mockRunOutgoingQueue.mock.calls[0] ?? [];
+    expect(client).toEqual({ account: 'A' });
+    expect(mockAccountHttpLeases).toEqual([lease]);
   });
 });
