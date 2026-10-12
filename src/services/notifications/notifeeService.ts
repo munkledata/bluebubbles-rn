@@ -1361,13 +1361,23 @@ async function sanitizeCurrentDisplayedReminders(context?: EventDeliveryContext)
   }
 }
 
+/**
+ * notify-kit refuses a trigger time that is not in the future, yet a reminder being re-armed can
+ * already be due: Android delivers these inexact alarms minutes late, and one can come due while a
+ * rebuild runs. Fire such a reminder shortly instead of losing it.
+ */
+const REARM_DUE_REMINDER_DELAY_MS = 5_000;
+
 async function armSanitizedReminder(
   { reminder, trigger }: ReminderTriggerPlan,
   context?: EventDeliveryContext,
 ): Promise<void> {
   if (!deliveryIsCurrent(context)) return;
   try {
-    await notifee.createTriggerNotification(reminder.notification, trigger);
+    await notifee.createTriggerNotification(reminder.notification, {
+      ...trigger,
+      timestamp: Math.max(trigger.timestamp, Date.now() + REARM_DUE_REMINDER_DELAY_MS),
+    });
   } catch (createError) {
     // A rejected bridge call is not proof that Android made no change. The id and payload are safe,
     // but cancel the uncertain result before retrying so we never leave an untracked native alarm.

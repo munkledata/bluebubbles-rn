@@ -726,6 +726,39 @@ describe('App Lock notification privacy transition', () => {
     expect(mockCancelTriggersAll).not.toHaveBeenCalled();
   });
 
+  it('re-arms a reminder that came due during startup maintenance instead of losing it', async () => {
+    const now = Date.now();
+    // Real notify-kit rejects any trigger time that is not in the future. Inexact reminder alarms
+    // are routinely still pending after their time, and the startup rebuild re-creates them all.
+    mockCreateTrigger.mockImplementation(
+      async (_notification: unknown, trigger: { timestamp: number }) => {
+        if (trigger.timestamp <= Date.now()) {
+          throw new Error("'trigger.timestamp' date must be in the future.");
+        }
+      },
+    );
+    try {
+      mockListFutureReminderTriggerRoutes.mockResolvedValueOnce([
+        {
+          oldId: 'reminder-old-due',
+          newId: `gator-reminder-message-111-${now - 1_000}`,
+          scheduledFor: now - 1_000,
+          route: { chatId: 11, messageId: 111 },
+          messageDate: 1690000000000,
+        },
+      ]);
+
+      await prepareNotificationPresentationState();
+
+      expect(mockCreateTrigger).toHaveBeenCalledTimes(1);
+      const trigger = mockCreateTrigger.mock.calls[0]![1] as { timestamp: number };
+      expect(trigger.timestamp).toBeGreaterThan(now);
+      expect(trigger.timestamp).toBeLessThan(now + 60_000);
+    } finally {
+      mockCreateTrigger.mockImplementation(async () => undefined);
+    }
+  });
+
   it('still repairs missing generic alarms on connected startup after App Lock unlock', async () => {
     useLockStore.setState({ enabled: true, locked: false });
     mockListFutureReminderTriggerRoutes.mockResolvedValueOnce([
@@ -2616,6 +2649,13 @@ describe('scheduleReminderNotification', () => {
 });
 
 describe('prepareNotificationPresentationState — startup maintenance', () => {
+  // The fixture alarms (5000, 7000, 7100 ms) stand for FUTURE reminders. Run the block on a clock
+  // at least 5 s before them, as real notify-kit only accepts future trigger times and a re-arm
+  // moves an already-due one to 5 s from now.
+  beforeEach(() => {
+    jest.spyOn(Date, 'now').mockReturnValue(0);
+  });
+
   const privateMessage = () => ({
     id: 'chat-existing',
     notification: {
