@@ -103,9 +103,17 @@ export function FindMyMap({
   }, [markers]);
 
   // A new location set gets a useful all-marker viewport. The separate focus effect below wins
-  // on initial mount when a current row-selection request also exists.
+  // on initial mount when a current row-selection request also exists. The screen refreshes every
+  // 60 s with new arrays, so refit only when ids or positions (to about 11 m) really change;
+  // refitting each time zoomed out and closed an open marker popup every minute.
+  const fittedKeyRef = useRef<string | null>(null);
   useEffect(() => {
     if (!mapReady || nativeMarkers.length === 0) return;
+    const key = nativeMarkers
+      .map(({ id, latitude, longitude }) => `${id}@${latitude.toFixed(4)},${longitude.toFixed(4)}`)
+      .join('|');
+    if (key === fittedKeyRef.current) return;
+    fittedKeyRef.current = key;
     if (nativeMarkers.length === 1) {
       const marker = nativeMarkers[0]!;
       mapRef.current?.animateCamera(

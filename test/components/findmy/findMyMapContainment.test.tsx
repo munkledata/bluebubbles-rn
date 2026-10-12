@@ -109,6 +109,21 @@ describe('FindMyMap native containment', () => {
     );
   });
 
+  it('keeps the camera when a refresh republishes the same positions', async () => {
+    // The screen refreshes every 60 s with new arrays; refitting each time zoomed out and closed an
+    // open marker popup every minute.
+    const second: MapMarker = { id: 'second', lat: 39.7392, lng: -104.9903, label: 'Tablet' };
+    const view = await renderWithTheme(<FindMyMap markers={[MARKER, second]} />);
+    await waitFor(() => expect(mockFitToCoordinates).toHaveBeenCalledTimes(1));
+
+    await view.rerender(<FindMyMap markers={[{ ...MARKER }, { ...second }]} />);
+    await view.rerender(<FindMyMap markers={[{ ...MARKER, lat: MARKER.lat + 0.00001 }, second]} />);
+    expect(mockFitToCoordinates).toHaveBeenCalledTimes(1);
+
+    await view.rerender(<FindMyMap markers={[{ ...MARKER, lat: MARKER.lat + 0.01 }, second]} />);
+    await waitFor(() => expect(mockFitToCoordinates).toHaveBeenCalledTimes(2));
+  });
+
   it('bounds native marker count and label size', async () => {
     const markers = Array.from({ length: MAX_FINDMY_MAP_MARKERS + 4 }, (_, index) => ({
       id: `marker-${index}`,
