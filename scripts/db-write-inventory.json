@@ -5399,7 +5399,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#listPastedAttachmentProtectionPaths:mutator-call:543990b98095",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 404,
+      "line": 418,
       "symbol": "listPastedAttachmentProtectionPaths",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -5412,7 +5412,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#recordAttachmentCacheEntry:sql-insert:1d5b6db8c26c",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 437,
+      "line": 451,
       "symbol": "recordAttachmentCacheEntry",
       "operation": "sql-insert",
       "target": "attachment_cache_entries",
@@ -5425,7 +5425,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch:sql-insert:99e2263a1304",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 507,
+      "line": 521,
       "symbol": "adoptAttachmentCacheScanBatch",
       "operation": "sql-insert",
       "target": "attachment_cache_entries",
@@ -5438,7 +5438,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch:sql-delete:045962bd8b71",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 536,
+      "line": 550,
       "symbol": "adoptAttachmentCacheScanBatch",
       "operation": "sql-delete",
       "target": "attachment_media_exports",
@@ -5451,7 +5451,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch:sql-update:9609800f7a37",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 545,
+      "line": 559,
       "symbol": "adoptAttachmentCacheScanBatch",
       "operation": "sql-update",
       "target": "attachments",
@@ -5464,7 +5464,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#recordAttachmentCacheAccess:sql-update:3ca8ab1b4190",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 649,
+      "line": 663,
       "symbol": "recordAttachmentCacheAccess",
       "operation": "sql-update",
       "target": "attachment_cache_entries",
@@ -5477,7 +5477,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#repairMissingActiveAttachmentCacheEntry:sql-delete:c78a3766ee18",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 686,
+      "line": 700,
       "symbol": "repairMissingActiveAttachmentCacheEntry",
       "operation": "sql-delete",
       "target": "attachment_media_exports",
@@ -5490,7 +5490,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#repairMissingActiveAttachmentCacheEntry:sql-update:27b8750a28ca",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 693,
+      "line": 707,
       "symbol": "repairMissingActiveAttachmentCacheEntry",
       "operation": "sql-update",
       "target": "attachments",
@@ -5503,7 +5503,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#repairMissingActiveAttachmentCacheEntry:sql-delete:b9564831e666",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 708,
+      "line": 722,
       "symbol": "repairMissingActiveAttachmentCacheEntry",
       "operation": "sql-delete",
       "target": "attachment_cache_entries",
@@ -5516,7 +5516,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement:sql-delete:ff6e109326d8",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 935,
+      "line": 952,
       "symbol": "claimAttachmentCachePathsForRetirement",
       "operation": "sql-delete",
       "target": "attachment_media_exports",
@@ -5529,7 +5529,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement:sql-update:0fd63f0dd34a",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 945,
+      "line": 962,
       "symbol": "claimAttachmentCachePathsForRetirement",
       "operation": "sql-update",
       "target": "attachment_cache_entries",
@@ -5542,7 +5542,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement:sql-update:300d170b9271",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 962,
+      "line": 979,
       "symbol": "claimAttachmentCachePathsForRetirement",
       "operation": "sql-update",
       "target": "attachments",
@@ -5555,7 +5555,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForDeletedMessage.<callback:acf3a0c5f3>:mutator-call:e802ea4e2e1e",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 1012,
+      "line": 1029,
       "symbol": "claimAttachmentCachePathsForDeletedMessage.<callback:acf3a0c5f3>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement",
@@ -5568,7 +5568,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#scheduleAttachmentCacheRetirementRetry:sql-update:94a4794dc91e",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 1031,
+      "line": 1048,
       "symbol": "scheduleAttachmentCacheRetirementRetry",
       "operation": "sql-update",
       "target": "attachment_cache_entries",
@@ -5581,7 +5581,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#confirmAttachmentCacheEntryDeleted:sql-delete:f009e63ebbd9",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 1080,
+      "line": 1097,
       "symbol": "confirmAttachmentCacheEntryDeleted",
       "operation": "sql-delete",
       "target": "attachment_cache_entries",

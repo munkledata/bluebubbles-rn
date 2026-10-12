@@ -178,6 +178,16 @@ export const ATTACHMENT_CACHE_RECOVERY_BATCH_FILES = 100;
 const MAX_ATTACHMENT_CACHE_REFERENCES_PER_TRANSACTION = 1000;
 const MAX_OUTGOING_ATTACHMENT_ROWS = 1000;
 const MAX_OUTGOING_PAYLOAD_CHARS = 8192;
+/**
+ * A queued attachment payload as the protection scans read it: without its optional caption.
+ * Every remaining field is short (attachment ID, local path, reply target), so the bound above
+ * still covers everything protection needs, while a caption of up to 65,536 bytes can no longer
+ * push a row over it and refuse every cleanup, eviction, and paste snapshot. Shipped migration 0038
+ * already requires these SQLite JSON functions. A payload that is not valid JSON passes through
+ * unchanged, so the JavaScript parser still refuses it exactly as before.
+ */
+const OUTGOING_PAYLOAD_WITHOUT_CAPTION = sql`CASE WHEN json_valid(payload)
+  THEN json_remove(payload, '$.text') ELSE payload END`;
 const MAX_ATTACHMENT_GUID_CHARS = 512;
 const MAX_PATH_CHARS = 4096;
 const MAX_PERSISTED_ATTEMPTS = 1_000_000;
@@ -366,13 +376,17 @@ export function listPastedAttachmentProtectionPathsWithinTransaction(
 
     const queueRows: OutgoingAttachmentQueueRow[] = await db.all<OutgoingAttachmentQueueRow>(sql`
       SELECT id,
-             CASE WHEN length(payload) <= ${MAX_OUTGOING_PAYLOAD_CHARS} THEN payload ELSE NULL END AS payload,
-             length(payload) AS payloadChars
-      FROM outgoing_queue
-      WHERE kind = 'attachment'
-        AND instr(payload, '/pasted-in/') > 0
+             CASE WHEN length(scanned) <= ${MAX_OUTGOING_PAYLOAD_CHARS} THEN scanned ELSE NULL END AS payload,
+             length(scanned) AS payloadChars
+      FROM (
+        SELECT id, ${OUTGOING_PAYLOAD_WITHOUT_CAPTION} AS scanned
+        FROM outgoing_queue
+        WHERE kind = 'attachment'
+          AND instr(payload, '/pasted-in/') > 0
+        ORDER BY id ASC
+        LIMIT ${MAX_OUTGOING_ATTACHMENT_ROWS + 1}
+      )
       ORDER BY id ASC
-      LIMIT ${MAX_OUTGOING_ATTACHMENT_ROWS + 1}
     `);
     if (
       queueRows.length > MAX_OUTGOING_ATTACHMENT_ROWS ||
@@ -800,14 +814,13 @@ export async function getAttachmentCacheQuotaSnapshot(
  * context. It deliberately performs no native work. Preflight refusals make no writes; any
  * post-write invariant error must escape the callback so the outer transaction rolls back.
  *
- * Outgoing protection is intentionally fail-closed without SQLite JSON functions. No op-sqlite
- * build feature is assumed: at most 1000 attachment queue rows of at most 8192 characters are
- * copied into JavaScript and parsed. An oversized/malformed row means the scan cannot prove a path
- * disposable, so the whole claim is refused. The message join separately protects the current
- * attachment path for queued sends and every live outgoing temp message: even a temp row already
- * marked `sent` can receive a delayed retryable server error and rebuild its queue entry. The
- * parsed payload protects the durable `localPath` fallback when that attachment row is absent or
- * was re-pointed.
+ * Outgoing protection is fail-closed: at most 1000 attachment queue rows of at most 8192 characters
+ * (after SQLite drops each optional caption) are copied into JavaScript and parsed. An oversized or
+ * malformed row means the scan cannot prove a path disposable, so the whole claim is refused. The
+ * message join separately protects the current attachment path for queued sends and every live
+ * outgoing temp message: even a temp row already marked `sent` can receive a delayed retryable
+ * server error and rebuild its queue entry. The parsed payload protects the durable `localPath`
+ * fallback when that attachment row is absent or was re-pointed.
  */
 export async function claimAttachmentCachePathsForRetirement(
   context: DbTransactionContext,
@@ -834,12 +847,16 @@ export async function claimAttachmentCachePathsForRetirement(
 
     const queueRows = await db.all<OutgoingAttachmentQueueRow>(sql`
     SELECT id,
-           CASE WHEN length(payload) <= ${MAX_OUTGOING_PAYLOAD_CHARS} THEN payload ELSE NULL END AS payload,
-           length(payload) AS payloadChars
-    FROM outgoing_queue
-    WHERE kind = 'attachment'
+           CASE WHEN length(scanned) <= ${MAX_OUTGOING_PAYLOAD_CHARS} THEN scanned ELSE NULL END AS payload,
+           length(scanned) AS payloadChars
+    FROM (
+      SELECT id, ${OUTGOING_PAYLOAD_WITHOUT_CAPTION} AS scanned
+      FROM outgoing_queue
+      WHERE kind = 'attachment'
+      ORDER BY id ASC
+      LIMIT ${MAX_OUTGOING_ATTACHMENT_ROWS + 1}
+    )
     ORDER BY id ASC
-    LIMIT ${MAX_OUTGOING_ATTACHMENT_ROWS + 1}
   `);
     if (
       queueRows.length > MAX_OUTGOING_ATTACHMENT_ROWS ||

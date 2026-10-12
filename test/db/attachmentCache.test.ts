@@ -27,6 +27,8 @@ import {
 import { createTestDb } from '../support/testDb';
 
 const PATH = 'file:///documents/attachments/aa/file.jpg';
+/** A maximum-size caption (65,536 UTF-8 bytes) with characters JSON must escape. */
+const LONG_CAPTION = `${'Line "one"\n'.repeat(5_957)}${'x'.repeat(9)}`;
 const MAX_REFERENCE_CLEAR_ROWS = 1000;
 type TestDatabase = Awaited<ReturnType<typeof createTestDb>>['raw'];
 
@@ -885,6 +887,28 @@ describe('attachment cache ledger', () => {
     });
   });
 
+  it('keeps the paste-protection snapshot complete while a long-caption send is queued', async () => {
+    const { db, raw } = await createTestDb();
+    const queuedPath = 'file:///data/user/0/app/cache/pasted-in/1002-1/captioned.jpg';
+    raw
+      .prepare(
+        `INSERT INTO outgoing_queue (temp_guid, chat_guid, kind, payload)
+         VALUES ('captioned-paste', 'chat', 'attachment', ?)`,
+      )
+      .run(
+        JSON.stringify({
+          attachmentGuid: 'captioned-paste',
+          localPath: queuedPath,
+          text: LONG_CAPTION,
+        }),
+      );
+
+    await expect(listPastedAttachmentProtectionPaths(db)).resolves.toEqual({
+      status: 'complete',
+      paths: [queuedPath],
+    });
+  });
+
   it('refuses a partial paste-protection snapshot on malformed candidate payloads', async () => {
     const { db, raw } = await createTestDb();
     raw
@@ -955,6 +979,40 @@ describe('attachment cache ledger', () => {
     expect(
       raw.prepare(`SELECT local_path AS localPath FROM attachments WHERE guid = 'retry-att'`).get(),
     ).toEqual({ localPath: PATH });
+  });
+
+  it('judges queued sends by their paths, not by the length of their captions', async () => {
+    // Captions may be up to 65,536 bytes; a long one used to refuse every cleanup and eviction.
+    const { db, raw } = await createTestDb();
+    const queuedPath = 'file:///documents/attachments/bb/queued.jpg';
+    for (const path of [PATH, queuedPath]) {
+      await withDbTransaction(db, (context) =>
+        recordAttachmentCacheEntry(context, { path, bytes: 50, lastUsedAt: 1 }),
+      );
+    }
+    raw
+      .prepare(
+        `INSERT INTO outgoing_queue (temp_guid, chat_guid, kind, payload)
+         VALUES ('temp-captioned', 'chat', 'attachment', ?)`,
+      )
+      .run(
+        JSON.stringify({
+          attachmentGuid: 'captioned',
+          localPath: queuedPath,
+          text: LONG_CAPTION,
+        }),
+      );
+
+    expect(
+      await withDbTransaction(db, (context) =>
+        claimAttachmentCachePathsForRetirement(context, [queuedPath]),
+      ),
+    ).toEqual({ status: 'refused', reason: 'outgoing_protected', paths: [queuedPath] });
+    expect(
+      await withDbTransaction(db, (context) =>
+        claimAttachmentCachePathsForRetirement(context, [PATH]),
+      ),
+    ).toEqual({ status: 'claimed', paths: [PATH], clearedReferences: 0 });
   });
 
   it('fails closed on malformed or oversized attachment queue payloads', async () => {
