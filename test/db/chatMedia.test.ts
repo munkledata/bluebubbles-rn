@@ -269,7 +269,9 @@ describe('listChatDocumentAttachmentsPage (FEAT-07A)', () => {
               Attachment.parse({
                 guid: `${name}-document`,
                 mimeType,
-                transferName: `${name}.bin`,
+                // The extension's own file carries Apple's payload name. An iMessage app's real,
+                // unhidden file (a photo from the Photos drawer) is a user file and does appear.
+                transferName: name === 'plugin' ? `${name}.pluginPayloadAttachment` : `${name}.bin`,
                 isSticker,
                 hideAttachment,
               }),

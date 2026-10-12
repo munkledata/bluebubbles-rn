@@ -31,7 +31,13 @@ import { pickReminderTime } from '@ui/conversations/pickReminderTime';
 import { presentDiscardMessageResult, presentSendIssue } from '@ui/conversations/sendNotices';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { isDevServer } from '@utils/isDev';
-import { buildMessageSnippet, isLocalFileUri, isRcsChatGuid, type BubbleRect } from '@utils';
+import {
+  buildMessageSnippet,
+  isLocalFileUri,
+  isRcsChatGuid,
+  isUserFileAttachment,
+  type BubbleRect,
+} from '@utils';
 import { devSendFakeReaction } from './devSeed';
 import { stageForwardAttachmentHandoff } from './forwardAttachmentHandoff';
 import { buildForwardParams } from './forwardParams';
@@ -41,10 +47,12 @@ function actionContentOf(msg: EnrichedMessage) {
   const bodyRuns = parseAttributedRuns(msg.attributedBody, msg.text);
   const bodyText = bodyTextFromRuns(bodyRuns);
   // Private Messages-extension payloads are not visible user attachments and therefore cannot own
-  // a part in this aggregate action target. Keep the same conservative filter as MessageBubble.
-  const visibleAttachments = msg.balloonBundleId
-    ? []
-    : (msg.attachments ?? []).filter((attachment) => !attachment.hideAttachment);
+  // a part in this aggregate action target. Keep exactly MessageBubble's filter (and the headless
+  // getMessageActionPartLayoutByGuid query), so every surface targets the same parts.
+  const visibleAttachments = (msg.attachments ?? []).filter(
+    (attachment) =>
+      !attachment.hideAttachment && isUserFileAttachment(attachment, msg.balloonBundleId),
+  );
   const visibleAttachmentCount = visibleAttachments.length;
   return {
     bodyRuns,
@@ -296,7 +304,7 @@ export function useMessageActions({
         balloonBundleId: msg.balloonBundleId,
         hasAttachments: msg.hasAttachments,
         // A balloon payload is private extension data even when a lean notification omitted the
-        // attachment's hide flag. Ordinary photos/files have no balloon identifier.
+        // attachment's hide flag; an iMessage app's real photos count like any other.
         hasVisibleAttachments: visibleAttachmentCount > 0 ? 1 : 0,
         attachmentDescription: msg.attachmentDescription,
         isFromMe: msg.isFromMe === 1,
@@ -323,8 +331,8 @@ export function useMessageActions({
         isTemp: msg.guid.startsWith('temp-'),
         sendState: msg.sendState,
         // Keep private Messages-extension payload blobs out of Share/Save/Forward as well as the
-        // bubble. A lean notification can report hideAttachment=0, so balloon identity is the
-        // conservative second signal. Normal photos/files have no balloon identifier.
+        // bubble. A lean notification can report hideAttachment=0, so on an iMessage app message
+        // only real typed files (never Apple's payload file) are offered.
         attachments: visibleAttachments.map((a) => ({
           guid: a.guid,
           localPath: a.localPath,

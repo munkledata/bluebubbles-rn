@@ -59,9 +59,10 @@ function isPresentFlag(value: boolean | number | null | undefined): boolean {
 
 /**
  * Compact message text shared by inbox rows, reply quotes, thread rows, and notifications. Real
- * text wins, then an extension's safe local label. Attachment metadata is considered only for a
- * normal message, so a lean extension payload cannot leak its private attachment description. The
- * final attachment branch preserves the legacy fallback for older projections.
+ * text wins, then an extension's safe local label, or the generic attachment label when an
+ * iMessage app sent real photos. Attachment descriptions are considered only for a normal
+ * message, so a lean extension payload cannot leak its private attachment description. The final
+ * attachment branch preserves the legacy fallback for older projections.
  */
 export function buildMessageSnippet(input: MessageSnippetInput): string {
   if (input.isRetracted) return 'Message unsent';
@@ -69,7 +70,9 @@ export function buildMessageSnippet(input: MessageSnippetInput): string {
   if (body) return body;
 
   const interactiveLabel = interactiveMessageLabel(input.balloonBundleId);
-  if (interactiveLabel) return interactiveLabel;
+  if (interactiveLabel) {
+    return isPresentFlag(input.hasVisibleAttachments) ? '📎 Attachment' : interactiveLabel;
+  }
 
   const attachmentDescription = input.attachmentDescription?.trim();
   if (attachmentDescription) return attachmentDescription;

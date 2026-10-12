@@ -5,8 +5,37 @@ import {
   fileTypeLabel,
   friendlySize,
   isLocalFileUri,
+  isUserFileAttachment,
   shouldAutoDownload,
 } from '@utils';
+
+describe('isUserFileAttachment', () => {
+  const photosApp =
+    'com.apple.messages.MSMessageExtensionBalloonPlugin:0000000000:com.apple.mobileslideshow.PhotosMessagesApp';
+
+  it('keeps every attachment of an ordinary message', () => {
+    expect(isUserFileAttachment({ mimeType: null, transferName: null }, null)).toBe(true);
+  });
+
+  it("shows an iMessage app's typed file but never Apple's payload file", () => {
+    expect(
+      isUserFileAttachment({ mimeType: 'image/heic', transferName: 'IMG_0001.HEIC' }, photosApp),
+    ).toBe(true);
+    expect(
+      isUserFileAttachment(
+        { mimeType: 'image/jpeg', transferName: 'A1B2.PluginPayloadAttachment' },
+        photosApp,
+      ),
+    ).toBe(false);
+    // An old server's push copy can omit the hidden flag and these fields; fail closed.
+    expect(isUserFileAttachment({ mimeType: null, transferName: 'IMG_1.HEIC' }, photosApp)).toBe(
+      false,
+    );
+    expect(isUserFileAttachment({ mimeType: 'image/jpeg', transferName: null }, photosApp)).toBe(
+      false,
+    );
+  });
+});
 
 describe('attachmentKind', () => {
   it('dispatches by MIME', () => {

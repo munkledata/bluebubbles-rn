@@ -24,6 +24,29 @@ export const INLINE_IMAGE_MIME_TYPES: readonly string[] = [
 ];
 const INLINE_IMAGE_MIME_SET = new Set(INLINE_IMAGE_MIME_TYPES);
 
+/** File-name ending Apple gives a Messages extension's own payload file (compared lowercase). */
+export const APPLE_EXTENSION_PAYLOAD_SUFFIX = '.pluginpayloadattachment';
+
+/**
+ * Whether an attachment is a file the user sent, judged by its message's extension identity. An
+ * ordinary message's attachments all qualify. An iMessage app message ("balloon") can carry real
+ * photos (the Photos drawer, iCloud photo links), which Apple leaves unhidden with a file type,
+ * next to the extension's own payload file. An old server's push copy can omit the hidden flag,
+ * so a balloon attachment also needs a file type and a name that is not Apple's payload file.
+ * Callers still check `hideAttachment` themselves. Mirrors `attachmentIsUserFileSql`.
+ */
+export function isUserFileAttachment(
+  attachment: { mimeType?: string | null; transferName?: string | null },
+  balloonBundleId: string | null | undefined,
+): boolean {
+  if (balloonBundleId == null) return true;
+  return (
+    !!attachment.mimeType &&
+    attachment.transferName != null &&
+    !attachment.transferName.toLowerCase().endsWith(APPLE_EXTENSION_PAYLOAD_SUFFIX)
+  );
+}
+
 /** Dispatch an attachment to a render type by MIME. */
 export function attachmentKind(mimeType: string | null): AttachmentKind {
   if (!mimeType) return 'file';

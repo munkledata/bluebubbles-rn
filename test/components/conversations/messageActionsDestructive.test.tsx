@@ -404,6 +404,48 @@ describe('useMessageActions — narrow iMessage actions and RCS reactions', () =
     expect(react).not.toHaveBeenCalled();
   });
 
+  it('offers Share and Save for real photos sent through an iMessage app', async () => {
+    const target = {
+      ...msg('message-photos-app', null),
+      text: null,
+      balloonBundleId:
+        'com.apple.messages.MSMessageExtensionBalloonPlugin:0000000000:com.apple.mobileslideshow.PhotosMessagesApp',
+      hasAttachments: 1,
+      attachments: [
+        {
+          guid: 'photos-app-photo',
+          mimeType: 'image/jpeg',
+          transferName: 'IMG_0001.JPG',
+          localPath: 'file:///cache/photos-app-photo.jpg',
+          hideAttachment: 0,
+        },
+        {
+          guid: 'photos-app-payload',
+          mimeType: null,
+          transferName: 'A1B2.pluginPayloadAttachment',
+          localPath: null,
+          hideAttachment: 0,
+        },
+      ],
+    } as unknown as EnrichedMessage;
+    const { result } = await mount([target]);
+
+    await act(async () => {
+      result.current.onLongPressMessage(target, rect);
+    });
+
+    expect(result.current.selected).toMatchObject({
+      hasVisibleAttachments: 1,
+      attachments: [
+        {
+          guid: 'photos-app-photo',
+          localPath: 'file:///cache/photos-app-photo.jpg',
+          mimeType: 'image/jpeg',
+        },
+      ],
+    });
+  });
+
   it('keeps a lean interactive payload out of local attachment actions', async () => {
     const target = {
       ...msg('message-balloon', null),

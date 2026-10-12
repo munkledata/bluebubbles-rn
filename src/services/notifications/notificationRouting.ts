@@ -1,7 +1,10 @@
 import { sql } from 'drizzle-orm';
 import type { AppDatabase } from '@db/types';
 import { NOTIFICATION_ROUTE_KV_PREFIX } from '@db/repositories';
-import { messageHasVisibleContentSql } from '@db/repositories/chatVisibility';
+import {
+  attachmentIsUserFileSql,
+  messageHasVisibleContentSql,
+} from '@db/repositories/chatVisibility';
 import { withDbTransaction, type DbCommitGuard } from '@db/transaction';
 
 /**
@@ -218,19 +221,18 @@ export async function listMessageNotificationTruth(
              m.text,
              m.subject,
              m.has_attachments AS hasAttachments,
-             CASE WHEN m.balloon_bundle_id IS NULL THEN
-               EXISTS(
-                 SELECT 1
-                   FROM attachments a
-                  WHERE a.message_id = m.id
-                    AND COALESCE(a.hide_attachment, 0) = 0
-                    AND a.is_retracted = 0
-               )
-             ELSE 0 END AS hasVisibleAttachments,
+             EXISTS(
+               SELECT 1
+                 FROM attachments a
+                WHERE a.message_id = m.id
+                  AND COALESCE(a.hide_attachment, 0) = 0
+                  AND a.is_retracted = 0
+                  AND ${attachmentIsUserFileSql('a', 'm')}
+             ) AS hasVisibleAttachments,
              (SELECT a.emoji_image_short_description
                 FROM attachments a
                WHERE a.message_id = m.id
-                 AND m.balloon_bundle_id IS NULL
+                 AND ${attachmentIsUserFileSql('a', 'm')}
                  AND COALESCE(a.hide_attachment, 0) = 0
                  AND a.is_retracted = 0
                  AND a.emoji_image_short_description IS NOT NULL

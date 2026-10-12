@@ -5,6 +5,7 @@ import { chats } from '../schema';
 import { runInTransactionContext, type DbTransactionContext } from '../transaction';
 import type { AppDatabase } from '../types';
 import {
+  attachmentIsUserFileSql,
   chatUnreadCountSql,
   chatVisible,
   inboxFilterSql,
@@ -608,15 +609,14 @@ async function queryChatsForInbox(
       l.associated_message_type AS lastAssociatedType, l.error AS lastError,
       (SELECT a.emoji_image_short_description FROM attachments a
          WHERE a.message_id = l.id
-           AND l.balloon_bundle_id IS NULL
+           AND ${attachmentIsUserFileSql('a', 'l')}
            AND a.hide_attachment = 0
            AND a.is_retracted = 0
            AND a.emoji_image_short_description IS NOT NULL
          ORDER BY a.id ASC LIMIT 1) AS lastAttachmentDescription,
-      CASE WHEN l.balloon_bundle_id IS NULL THEN
-        EXISTS(SELECT 1 FROM attachments a
-                 WHERE a.message_id = l.id AND a.hide_attachment = 0 AND a.is_retracted = 0)
-      ELSE 0 END AS lastHasVisibleAttachments,
+      EXISTS(SELECT 1 FROM attachments a
+               WHERE a.message_id = l.id AND a.hide_attachment = 0 AND a.is_retracted = 0
+                 AND ${attachmentIsUserFileSql('a', 'l')}) AS lastHasVisibleAttachments,
       (SELECT COUNT(*) FROM chat_handles ch WHERE ch.chat_id = c.id) AS participantCount,
       (SELECT json_group_array(participant.name)
          FROM (SELECT COALESCE(h.display_name, h.address) AS name

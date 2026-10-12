@@ -5919,7 +5919,7 @@
     {
       "id": "src/db/repositories/attachments.ts#upsertAttachmentsWithinTransaction:drizzle-delete:899e9481fcb6",
       "path": "src/db/repositories/attachments.ts",
-      "line": 88,
+      "line": 92,
       "symbol": "upsertAttachmentsWithinTransaction",
       "operation": "drizzle-delete",
       "target": "attachments",
@@ -5932,7 +5932,7 @@
     {
       "id": "src/db/repositories/attachments.ts#upsertAttachmentsWithinTransaction:drizzle-update:08e96c608c66",
       "path": "src/db/repositories/attachments.ts",
-      "line": 90,
+      "line": 94,
       "symbol": "upsertAttachmentsWithinTransaction",
       "operation": "drizzle-update",
       "target": "attachments",
@@ -5945,7 +5945,7 @@
     {
       "id": "src/db/repositories/attachments.ts#upsertAttachmentsWithinTransaction:drizzle-insert:60b5aec7b47b",
       "path": "src/db/repositories/attachments.ts",
-      "line": 97,
+      "line": 101,
       "symbol": "upsertAttachmentsWithinTransaction",
       "operation": "drizzle-insert",
       "target": "attachments",
@@ -5958,7 +5958,7 @@
     {
       "id": "src/db/repositories/attachments.ts#upsertAttachments:mutator-call:109ca20347f4",
       "path": "src/db/repositories/attachments.ts",
-      "line": 152,
+      "line": 156,
       "symbol": "upsertAttachments",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -5971,7 +5971,7 @@
     {
       "id": "src/db/repositories/attachments.ts#upsertAttachments:mutator-call:e0117d873e1a",
       "path": "src/db/repositories/attachments.ts",
-      "line": 152,
+      "line": 156,
       "symbol": "upsertAttachments",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#upsertAttachments.<callback:5ac179fc7b>",
@@ -5984,7 +5984,7 @@
     {
       "id": "src/db/repositories/attachments.ts#upsertAttachments.<callback:5ac179fc7b>:mutator-call:10ee6fb7163d",
       "path": "src/db/repositories/attachments.ts",
-      "line": 154,
+      "line": 158,
       "symbol": "upsertAttachments.<callback:5ac179fc7b>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#upsertAttachmentsWithinTransaction",
@@ -5997,7 +5997,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction:drizzle-insert:fc8d72883c5b",
       "path": "src/db/repositories/attachments.ts",
-      "line": 679,
+      "line": 683,
       "symbol": "insertOutgoingAttachmentWithinTransaction",
       "operation": "drizzle-insert",
       "target": "messages",
@@ -6010,7 +6010,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction:drizzle-insert:eca25accb829",
       "path": "src/db/repositories/attachments.ts",
-      "line": 699,
+      "line": 703,
       "symbol": "insertOutgoingAttachmentWithinTransaction",
       "operation": "drizzle-insert",
       "target": "attachments",
@@ -6023,7 +6023,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction:drizzle-insert:5374f7183358",
       "path": "src/db/repositories/attachments.ts",
-      "line": 709,
+      "line": 713,
       "symbol": "insertOutgoingAttachmentWithinTransaction",
       "operation": "drizzle-insert",
       "target": "outgoingQueue",
@@ -6036,7 +6036,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction:drizzle-update:1de3c8263d4f",
       "path": "src/db/repositories/attachments.ts",
-      "line": 722,
+      "line": 726,
       "symbol": "insertOutgoingAttachmentWithinTransaction",
       "operation": "drizzle-update",
       "target": "chats",
@@ -6049,7 +6049,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachment:mutator-call:060b68f9fb33",
       "path": "src/db/repositories/attachments.ts",
-      "line": 739,
+      "line": 743,
       "symbol": "insertOutgoingAttachment",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#insertOutgoingAttachment.<callback:a5e1fc3fd8>",
@@ -6062,7 +6062,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachment:mutator-call:2109f62f577e",
       "path": "src/db/repositories/attachments.ts",
-      "line": 739,
+      "line": 743,
       "symbol": "insertOutgoingAttachment",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -6075,7 +6075,7 @@
     {
       "id": "src/db/repositories/attachments.ts#insertOutgoingAttachment.<callback:a5e1fc3fd8>:mutator-call:3069c9e0883c",
       "path": "src/db/repositories/attachments.ts",
-      "line": 740,
+      "line": 744,
       "symbol": "insertOutgoingAttachment.<callback:a5e1fc3fd8>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction",
@@ -6088,7 +6088,7 @@
     {
       "id": "src/db/repositories/attachments.ts#updateAttachmentLocalPathWithinTransaction:sql-update:4a6955646223",
       "path": "src/db/repositories/attachments.ts",
-      "line": 755,
+      "line": 759,
       "symbol": "updateAttachmentLocalPathWithinTransaction",
       "operation": "sql-update",
       "target": "attachments",
@@ -6101,7 +6101,7 @@
     {
       "id": "src/db/repositories/attachments.ts#replaceVisibleAttachmentLocalPathWithinTransaction:sql-update:43f358f5c0de",
       "path": "src/db/repositories/attachments.ts",
-      "line": 792,
+      "line": 796,
       "symbol": "replaceVisibleAttachmentLocalPathWithinTransaction",
       "operation": "sql-update",
       "target": "attachments",
@@ -6114,7 +6114,7 @@
     {
       "id": "src/db/repositories/attachments.ts#updateAttachmentLocalPath:mutator-call:420a1a02f6e6",
       "path": "src/db/repositories/attachments.ts",
-      "line": 827,
+      "line": 831,
       "symbol": "updateAttachmentLocalPath",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -6127,7 +6127,7 @@
     {
       "id": "src/db/repositories/attachments.ts#updateAttachmentLocalPath:mutator-call:814cc10efe69",
       "path": "src/db/repositories/attachments.ts",
-      "line": 827,
+      "line": 831,
       "symbol": "updateAttachmentLocalPath",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#updateAttachmentLocalPath.<callback:64ad543547>",
@@ -6140,7 +6140,7 @@
     {
       "id": "src/db/repositories/attachments.ts#updateAttachmentLocalPath.<callback:64ad543547>:mutator-call:8bfa38b73ef8",
       "path": "src/db/repositories/attachments.ts",
-      "line": 828,
+      "line": 832,
       "symbol": "updateAttachmentLocalPath.<callback:64ad543547>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#updateAttachmentLocalPathWithinTransaction",
@@ -22143,7 +22143,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#migrateReminderNotificationId:mutator-call:44918d382fdf",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 545,
+      "line": 547,
       "symbol": "migrateReminderNotificationId",
       "operation": "mutator-call",
       "target": "src/services/notifications/notificationRouting.ts#migrateReminderNotificationId.<callback:e98741237f>",
@@ -22156,7 +22156,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#migrateReminderNotificationId:mutator-call:7ac9ad737605",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 545,
+      "line": 547,
       "symbol": "migrateReminderNotificationId",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -22169,7 +22169,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#migrateReminderNotificationId:sql-update:d6c50c44f83d",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 549,
+      "line": 551,
       "symbol": "migrateReminderNotificationId",
       "operation": "sql-update",
       "target": "reminders",
@@ -22182,7 +22182,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#deleteFaceTimeRoute:mutator-call:8f5d1e4c3bf5",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 570,
+      "line": 572,
       "symbol": "deleteFaceTimeRoute",
       "operation": "mutator-call",
       "target": "src/services/notifications/notificationRouting.ts#deleteFaceTimeRoute.<callback:9a6e587f1c>",
@@ -22195,7 +22195,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#deleteFaceTimeRoute:mutator-call:a02fbb26ec7f",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 570,
+      "line": 572,
       "symbol": "deleteFaceTimeRoute",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -22208,7 +22208,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#deleteFaceTimeRoute:sql-delete:cb58d0dd06c4",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 573,
+      "line": 575,
       "symbol": "deleteFaceTimeRoute",
       "operation": "sql-delete",
       "target": "kv",
@@ -22221,7 +22221,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#clearNotificationRoutes:mutator-call:701b9879b8ce",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 583,
+      "line": 585,
       "symbol": "clearNotificationRoutes",
       "operation": "mutator-call",
       "target": "src/services/notifications/notificationRouting.ts#clearNotificationRoutes.<callback:bffe50ba8a>",
@@ -22234,7 +22234,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#clearNotificationRoutes:mutator-call:afd841a9a6e0",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 583,
+      "line": 585,
       "symbol": "clearNotificationRoutes",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -22247,7 +22247,7 @@
     {
       "id": "src/services/notifications/notificationRouting.ts#clearNotificationRoutes:sql-delete:f27d9c134c56",
       "path": "src/services/notifications/notificationRouting.ts",
-      "line": 586,
+      "line": 588,
       "symbol": "clearNotificationRoutes",
       "operation": "sql-delete",
       "target": "kv",

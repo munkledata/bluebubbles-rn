@@ -881,6 +881,43 @@ describe('MessageBubble unsupported interactive fallback', () => {
     expect(attachmentModuleMocks.AttachmentGalleryGrid).not.toHaveBeenCalled();
   });
 
+  it('shows real photos from an iMessage app instead of the unsupported label', async () => {
+    await renderWithTheme(
+      <MessageBubble
+        msg={{
+          ...makeMsg({
+            text: '',
+            balloonBundleId:
+              'com.apple.messages.MSMessageExtensionBalloonPlugin:0000000000:com.apple.mobileslideshow.PhotosMessagesApp',
+          }),
+          attachments: [
+            {
+              guid: 'photos-app-photo',
+              mimeType: 'image/jpeg',
+              transferName: 'IMG_0001.JPG',
+              hideAttachment: 0,
+            } as AttachmentRow,
+            // Apple's own payload file stays hidden even when a push copy omitted its flag.
+            {
+              guid: 'photos-app-payload',
+              mimeType: null,
+              transferName: 'A1B2.pluginPayloadAttachment',
+              hideAttachment: 0,
+            } as AttachmentRow,
+          ],
+        }}
+        showTail
+      />,
+    );
+
+    expect(screen.queryByText('This message type isn’t supported yet.')).toBeNull();
+    expect(attachmentModuleMocks.AttachmentView).toHaveBeenCalled();
+    const shown = attachmentModuleMocks.AttachmentView.mock.calls.map(
+      ([props]) => (props as { att: { guid: string } }).att.guid,
+    );
+    expect(new Set(shown)).toEqual(new Set(['photos-app-photo']));
+  });
+
   it('anchors a tapback to a payload-backed URL card when the card is the only visible content', async () => {
     const reaction: ReactionRow = {
       targetGuid: 'url-balloon',

@@ -11,7 +11,11 @@ import {
 } from '../transaction';
 import type { AppDatabase } from '../types';
 import { dedupeBy } from './_shared';
-import { chatVisible, messageHasVisibleContentSql } from './chatVisibility';
+import {
+  attachmentIsUserFileSql,
+  chatVisible,
+  messageHasVisibleContentSql,
+} from './chatVisibility';
 import { requireChatIdByGuidWithinTransaction } from './chats';
 import type { OutgoingInsertResult } from './outgoing';
 
@@ -230,7 +234,7 @@ export async function listAttachmentsByMessageIds(
     ? sql`AND m.date_deleted IS NULL`
     : sql``;
   const pluginPayloadFilter = options.excludePluginPayloads
-    ? sql`AND a.hide_attachment = 0 AND m.balloon_bundle_id IS NULL`
+    ? sql`AND a.hide_attachment = 0 AND ${attachmentIsUserFileSql('a', 'm')}`
     : sql``;
   const hiddenAttachmentFilter = options.excludeHiddenAttachments
     ? sql`AND a.hide_attachment = 0`
@@ -379,7 +383,7 @@ async function queryAttachmentByGuid(
   const visibilityFilter = visibleOnly
     ? sql`AND a.hide_attachment = 0
           AND a.is_retracted = 0
-          AND m.balloon_bundle_id IS NULL
+          AND ${attachmentIsUserFileSql('a', 'm')}
           AND ${messageHasVisibleContentSql('m')}
           AND m.date_deleted IS NULL`
     : sql``;
@@ -456,7 +460,7 @@ export async function listChatImageAttachmentsByAttachmentGuid(
       AND a.is_sticker = 0
       AND a.hide_attachment = 0
       AND a.is_retracted = 0
-      AND m.balloon_bundle_id IS NULL
+      AND ${attachmentIsUserFileSql('a', 'm')}
       AND ${messageHasVisibleContentSql('m')}
       AND m.date_deleted IS NULL
     ORDER BY m.date_created ASC, a.id ASC
@@ -535,7 +539,7 @@ export async function listChatDocumentAttachmentsPage(
       AND a.is_sticker = 0
       AND a.hide_attachment = 0
       AND a.is_retracted = 0
-      AND m.balloon_bundle_id IS NULL
+      AND ${attachmentIsUserFileSql('a', 'm')}
       AND ${messageHasVisibleContentSql('m')}
       AND m.date_deleted IS NULL
       AND (
@@ -586,7 +590,7 @@ export async function listChatAttachmentsByKind(
       AND a.is_sticker = 0
       AND a.hide_attachment = 0
       AND a.is_retracted = 0
-      AND m.balloon_bundle_id IS NULL
+      AND ${attachmentIsUserFileSql('a', 'm')}
       AND ${messageHasVisibleContentSql('m')}
       AND m.date_deleted IS NULL
     ORDER BY m.date_created DESC, a.id DESC

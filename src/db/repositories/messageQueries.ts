@@ -13,7 +13,11 @@ import { MAX_CUSTOM_FOLDER_MEMBERS } from './customFolders';
 // The ONE definition of "this chat is not under a local deletion tombstone" — search is a reader
 // of it like the inbox is. Import the owning rule rather than restating it; chats.ts does not import
 // message queries, so this dependency stays acyclic.
-import { chatVisible, messageHasVisibleContentSql } from './chatVisibility';
+import {
+  attachmentIsUserFileSql,
+  chatVisible,
+  messageHasVisibleContentSql,
+} from './chatVisibility';
 
 /** Read-only message queries kept separate from mutation and transaction ownership. */
 
@@ -51,7 +55,7 @@ export async function getMessageActionPartLayoutByGuid(
       FROM attachments a JOIN messages m ON m.id = a.message_id
      WHERE m.chat_id = (SELECT id FROM chats WHERE guid = ${chatGuid} LIMIT 1)
        AND m.guid = ${guid}
-       AND m.balloon_bundle_id IS NULL
+       AND ${attachmentIsUserFileSql('a', 'm')}
        AND COALESCE(a.hide_attachment, 0) = 0
        AND a.is_retracted = 0
      ORDER BY a.id ASC
@@ -655,15 +659,14 @@ const MESSAGE_ROW_SELECT = sql`
        WHERE h2.original_row_id = m.other_handle LIMIT 1) AS otherHandleName,
     (SELECT a.emoji_image_short_description FROM attachments a
        WHERE a.message_id = m.id
-         AND m.balloon_bundle_id IS NULL
+         AND ${attachmentIsUserFileSql('a', 'm')}
          AND a.hide_attachment = 0
          AND a.is_retracted = 0
          AND a.emoji_image_short_description IS NOT NULL
        ORDER BY a.id ASC LIMIT 1) AS attachmentDescription,
-    CASE WHEN m.balloon_bundle_id IS NULL THEN
-      EXISTS(SELECT 1 FROM attachments a
-               WHERE a.message_id = m.id AND a.hide_attachment = 0 AND a.is_retracted = 0)
-    ELSE 0 END AS hasVisibleAttachments,
+    EXISTS(SELECT 1 FROM attachments a
+             WHERE a.message_id = m.id AND a.hide_attachment = 0 AND a.is_retracted = 0
+               AND ${attachmentIsUserFileSql('a', 'm')}) AS hasVisibleAttachments,
     h.address AS senderAddress,
     COALESCE(h.display_name, h.address) AS senderName,
     h.avatar AS senderAvatar,
@@ -953,17 +956,16 @@ export async function getMessagePreviewByGuid(
            h.address AS senderAddress,
            (SELECT a.emoji_image_short_description FROM attachments a
               WHERE a.message_id = m.id
-                AND m.balloon_bundle_id IS NULL
+                AND ${attachmentIsUserFileSql('a', 'm')}
                 AND a.hide_attachment = 0
                 AND a.is_retracted = 0
                 ${partFilter}
                 AND a.emoji_image_short_description IS NOT NULL
               ORDER BY a.id ASC LIMIT 1) AS attachmentDescription,
-           CASE WHEN m.balloon_bundle_id IS NULL THEN
-             EXISTS(SELECT 1 FROM attachments a
-                      WHERE a.message_id = m.id AND a.hide_attachment = 0
-                        AND a.is_retracted = 0 ${partFilter})
-           ELSE 0 END AS hasVisibleAttachments
+           EXISTS(SELECT 1 FROM attachments a
+                    WHERE a.message_id = m.id AND a.hide_attachment = 0
+                      AND a.is_retracted = 0 ${partFilter}
+                      AND ${attachmentIsUserFileSql('a', 'm')}) AS hasVisibleAttachments
     FROM messages m LEFT JOIN handles h ON h.id = m.handle_id
     WHERE m.chat_id = (SELECT id FROM chats WHERE guid = ${chatGuid} LIMIT 1)
       AND m.guid = ${guid} AND m.date_deleted IS NULL LIMIT 1

@@ -7,7 +7,7 @@ import {
   type DbCommitGuard,
   type DbTransactionContext,
 } from '../transaction';
-import { messageHasVisibleContentSql } from './chatVisibility';
+import { attachmentIsUserFileSql, messageHasVisibleContentSql } from './chatVisibility';
 
 /** One automatic image export must not pin its app-cache source forever. */
 export const ATTACHMENT_MEDIA_EXPORT_MAX_PENDING_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -141,7 +141,7 @@ export function attachmentMediaExportOwnerEligibleSql() {
     AND m.is_from_me = 0
     AND m.date_deleted IS NULL
     AND m.associated_message_type IS NULL
-    AND m.balloon_bundle_id IS NULL
+    AND ${attachmentIsUserFileSql('a', 'm')}
     AND ${messageHasVisibleContentSql('m')}
     AND (c.deleted_at IS NULL OR m.date_created > c.deleted_at)`;
 }

@@ -1,10 +1,29 @@
 import { sql } from 'drizzle-orm';
 import { normalizeInboxFilters, type InboxFilters, type InboxSenderFilter } from '@core/models';
+import { APPLE_EXTENSION_PAYLOAD_SUFFIX } from '@utils/attachment';
 
 /** Shared chat-list visibility policy, isolated so commands and queries can depend on it. */
 
 export type InboxArchiveFilter = 'active' | 'archived' | 'all';
 export type { InboxSenderFilter } from '@core/models';
+
+/**
+ * SQL form of `isUserFileAttachment`: every attachment of an ordinary message, or on an iMessage
+ * app message only a typed file that is not Apple's payload file. Callers keep their own
+ * `hide_attachment` check. Aliases are fixed internal literals at every caller.
+ */
+export function attachmentIsUserFileSql(attachmentAlias: string, messageAlias: string) {
+  const a = sql.raw(attachmentAlias);
+  const m = sql.raw(messageAlias);
+  return sql`(
+    ${m}.balloon_bundle_id IS NULL
+    OR (
+      COALESCE(${a}.mime_type, '') <> ''
+      AND ${a}.transfer_name IS NOT NULL
+      AND LOWER(${a}.transfer_name) NOT LIKE ${`%${APPLE_EXTENSION_PAYLOAD_SUFFIX}`}
+    )
+  )`;
+}
 
 /**
  * Shared content-visibility rule for inbox/search/unread/notification readers.

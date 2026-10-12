@@ -98,6 +98,8 @@ describe('buildPreview', () => {
         lastBalloonBundleId: 'com.apple.Handwriting.HandwritingProvider',
       }),
     ).toBe('Handwritten message');
+    // Real photos sent through an iMessage app read like any attachment, but an extension's own
+    // description still never outranks the fixed labels.
     expect(
       buildPreview({
         ...base,
@@ -107,7 +109,7 @@ describe('buildPreview', () => {
         lastAttachmentDescription: 'a smiling cat',
         lastBalloonBundleId: 'untrusted.example.extension',
       }),
-    ).toBe('Interactive message');
+    ).toBe('📎 Attachment');
   });
 
   it('relabels reactions', () => {

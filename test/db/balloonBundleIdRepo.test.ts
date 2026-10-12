@@ -1,5 +1,6 @@
 import { Chat, Message } from '@core/models';
 import {
+  getMessageActionPartLayoutByGuid,
   getMessagePreviewByGuid,
   getVisibleAttachmentByGuid,
   listAttachmentsByMessageIds,
@@ -12,10 +13,13 @@ import {
   upsertMessages,
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
+import { listMessageNotificationTruth } from '@/services/notifications/notificationRouting';
 import { interactiveMessageLabel } from '@utils';
 import { createTestDb } from '../support/testDb';
 
 const HANDWRITING = 'com.apple.Handwriting.HandwritingProvider';
+const PHOTOS_APP =
+  'com.apple.messages.MSMessageExtensionBalloonPlugin:0000000000:com.apple.mobileslideshow.PhotosMessagesApp';
 
 async function seedChat(db: AppDatabase): Promise<number> {
   const handles = await upsertHandles(db, [{ address: 'a@example.com' }]);
@@ -130,5 +134,66 @@ describe('balloon bundle identity persistence', () => {
         balloonBundleId: expect.any(String),
       },
     );
+  });
+  it('shows real photos sent through an iMessage app wherever a normal photo appears', async () => {
+    // Real Mac data: photos from the Photos drawer arrive under the PhotosMessagesApp balloon with
+    // hideAttachment=false. Apple's own payload file stays hidden, even when a push copy omitted
+    // its hidden flag.
+    const { db } = await createTestDb();
+    const chatId = await seedChat(db);
+    await upsertMessages(
+      db,
+      [
+        Message.parse({
+          guid: 'photos-app-message',
+          dateCreated: 100,
+          balloonBundleId: PHOTOS_APP,
+          hasAttachments: true,
+          attachments: [
+            {
+              guid: 'photos-app-photo',
+              mimeType: 'image/jpeg',
+              transferName: 'IMG_0001.JPG',
+              totalBytes: 1_000,
+              hideAttachment: false,
+            },
+            { guid: 'photos-app-payload', transferName: 'A1B2.pluginPayloadAttachment' },
+          ],
+        }),
+      ],
+      () => chatId,
+      new Map(),
+    );
+
+    const row = (await listMessagesWithSenders(db, chatId))[0]!;
+    expect(row).toMatchObject({ balloonBundleId: PHOTOS_APP, hasVisibleAttachments: 1 });
+    await expect(getMessagePreviewByGuid(db, 'chat-balloon', row.guid)).resolves.toMatchObject({
+      hasVisibleAttachments: 1,
+    });
+    await expect(listChatsForInbox(db)).resolves.toEqual([
+      expect.objectContaining({ lastBalloonBundleId: PHOTOS_APP, lastHasVisibleAttachments: 1 }),
+    ]);
+    const autoDownload = await listAttachmentsByMessageIds(db, [row.id], undefined, {
+      excludePluginPayloads: true,
+    });
+    expect(autoDownload.get(row.id)?.map((attachment) => attachment.guid)).toEqual([
+      'photos-app-photo',
+    ]);
+    await expect(getVisibleAttachmentByGuid(db, 'photos-app-photo')).resolves.toMatchObject({
+      guid: 'photos-app-photo',
+    });
+    await expect(getVisibleAttachmentByGuid(db, 'photos-app-payload')).resolves.toBeNull();
+    const gallery = await listChatImageAttachmentsByAttachmentGuid(db, 'photos-app-photo');
+    expect(gallery.items.map((item) => item.guid)).toEqual(['photos-app-photo']);
+    expect(gallery.index).toBe(0);
+    const media = await listChatAttachmentsByKind(db, 'chat-balloon');
+    expect(media.photos.map((item) => item.guid)).toEqual(['photos-app-photo']);
+    expect(media.documents).toEqual([]);
+    await expect(
+      getMessageActionPartLayoutByGuid(db, 'chat-balloon', 'photos-app-message'),
+    ).resolves.toMatchObject({ visibleAttachmentGuids: ['photos-app-photo'] });
+    await expect(listMessageNotificationTruth([row.id], db)).resolves.toEqual([
+      expect.objectContaining({ hasVisibleAttachments: 1 }),
+    ]);
   });
 });

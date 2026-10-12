@@ -34,6 +34,7 @@ import {
   isBigEmoji,
   isDeliveryUnconfirmedError,
   isHexColor,
+  isUserFileAttachment,
   resolveBubbleColor,
   type BubbleRect,
 } from '@utils';
@@ -140,10 +141,12 @@ export const MessageBubble = React.memo(function MessageBubble({
   const isSending = msg.sendState === 'sending';
   const interactiveLabel = interactiveMessageLabel(msg.balloonBundleId);
   // Skip iMessage's hidden rich-link / plugin-payload attachments (URL previews, App Store,
-  // Apple Music, …). Lean notification payloads can omit hideAttachment, so a present balloon
-  // identifier is the conservative second signal that these rows are private extension payload,
-  // not user files. Ordinary photos/files have no balloon identifier and are unchanged.
-  const atts = (msg.attachments ?? []).filter((a) => !a.hideAttachment && !interactiveLabel);
+  // Apple Music, …). On an iMessage app message only real typed files show (photos from the
+  // Photos drawer, iCloud photo links), never Apple's payload file, even when a lean push copy
+  // omitted hideAttachment.
+  const atts = (msg.attachments ?? []).filter(
+    (a) => !a.hideAttachment && isUserFileAttachment(a, msg.balloonBundleId),
+  );
   const reactions = msg.reactions ?? [];
   const showReactionCluster = reactions.length > 0;
   const stickers = msg.stickers ?? [];
