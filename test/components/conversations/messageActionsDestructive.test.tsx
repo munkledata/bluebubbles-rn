@@ -130,6 +130,7 @@ async function mount(
   edit?: { enabled: boolean; setEditing: jest.Mock },
   unsendEnabled = false,
   remoteDeleteEnabled = false,
+  refreshMessages?: jest.Mock,
 ) {
   const hook = await renderHook(() => {
     const [liveMessages, setLiveMessages] = useState(messages);
@@ -142,6 +143,7 @@ async function mount(
         imessageUnsendsAvailable: unsendEnabled,
         imessageRemoteDeleteAvailable: remoteDeleteEnabled,
         setEditing: edit?.setEditing,
+        refreshMessages,
       }),
       setLiveMessages,
     };
@@ -293,7 +295,15 @@ describe('useMessageActions — narrow iMessage actions and RCS reactions', () =
         attachmentOwnership: [],
       }),
     } as EnrichedMessage;
-    const { result } = await mount([target], 'iMessage;-;+15550001111', undefined, true);
+    const refreshMessages = jest.fn();
+    const { result } = await mount(
+      [target],
+      'iMessage;-;+15550001111',
+      undefined,
+      true,
+      false,
+      refreshMessages,
+    );
 
     await act(async () => result.current.onLongPressMessage(target, rect));
     expect(result.current.selected?.unsendPartIndex).toBe(0);
@@ -315,6 +325,8 @@ describe('useMessageActions — narrow iMessage actions and RCS reactions', () =
     expect(mockUnsend).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(dialogs.at(-1)?.title).toBe('Unsend Not Confirmed'));
     expect(dialogs.at(-1)?.buttons).toHaveLength(0);
+    // The "not confirmed" note lives outside the message row, so the window re-reads it now.
+    expect(refreshMessages).toHaveBeenCalled();
   });
 
   it('warns about iCloud and never retries an unconfirmed whole-message Mac deletion', async () => {

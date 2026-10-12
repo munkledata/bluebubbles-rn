@@ -1050,6 +1050,7 @@ function ChatScreenInner({
     imessageRemoteDeleteAvailable,
     setReplyTo,
     setEditing,
+    refreshMessages: refreshWindow,
   });
   const actionSelected = useMemo(() => {
     if (!selected) return null;

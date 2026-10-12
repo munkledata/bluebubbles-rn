@@ -3040,6 +3040,7 @@ test('certifies exactly the reviewed deferred-send service delegation edges', ()
       'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:589e678b9fda',
       'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:589e678b9fda:2',
       'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:589e678b9fda:3',
+      'src/services/send/sendEditService.ts#sendUnsendOnce:mutator-call:9c637f0b3244',
       'src/services/send/scheduleService.ts#ensureScheduledRecovery.<callback:e4909b0f75>:mutator-call:b9ac52b2d1ee',
       'src/services/send/scheduleService.ts#recoverInterruptedScheduledRows:mutator-call:8fc2072469ba',
       'src/services/send/scheduleService.ts#runDueScheduled.settle:mutator-call:57f0ecf6912d',

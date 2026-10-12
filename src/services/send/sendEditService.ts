@@ -2,17 +2,20 @@ import { editMessage, unsendMessage } from '@core/api/endpoints/messages';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
 import { plainTextFromAttributedBody } from '@core/richtext';
+import { logger } from '@core/secure';
 import {
   applyLocalEditWithinTransaction,
   applyLocalUnsendWithinTransaction,
   explicitMessageTargetPart,
   MessageTargetUnavailableError,
+  recordUnconfirmedUnsendWithinTransaction,
   resolveMessageTarget,
   resolveMessageTargetWithinTransaction,
   resolvePendingUnsendTarget,
   revertLocalEditWithinTransaction,
   revertLocalUnsendWithinTransaction,
   type MessageTargetServerAuthorization,
+  type UnconfirmedUnsend,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
@@ -351,6 +354,27 @@ export function sendEdit(
   );
 }
 
+/** Best-effort: without the note the message simply stays hidden, as it always did. */
+async function rememberUnconfirmedUnsend(
+  db: AppDatabase,
+  messageGuid: string,
+  record: UnconfirmedUnsend,
+  commitGuard?: DbCommitGuard,
+): Promise<void> {
+  try {
+    await withDbTransaction(
+      db,
+      (context) => recordUnconfirmedUnsendWithinTransaction(context, messageGuid, record),
+      commitGuard,
+    );
+  } catch (error) {
+    if (error instanceof DbCommitGuardRejectedError) throw error;
+    logger.warn('[unsend] could not remember an unconfirmed unsend', {
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    });
+  }
+}
+
 async function sendUnsendOnce(
   db: AppDatabase,
   http: HttpClient,
@@ -424,6 +448,7 @@ async function sendUnsendOnce(
     return { status: 'rejected' };
   }
 
+  let outcomeUnknown = false;
   try {
     // Once the request has started only the account may abort settlement. A capability refresh
     // while it was out says nothing about whether the server applied it: report it unconfirmed.
@@ -433,19 +458,36 @@ async function sendUnsendOnce(
       partIndex: 0,
     });
     if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
-    if (serverAuthorization && !serverAuthorization.isCurrent()) {
-      return { status: 'outcome-unknown' };
+    if (
+      (!serverAuthorization || serverAuthorization.isCurrent()) &&
+      ack.unsent === true &&
+      ack.guid === finalTarget.messageGuid
+    ) {
+      return { status: 'accepted' };
     }
-    return ack.unsent === true && ack.guid === finalTarget.messageGuid
-      ? { status: 'accepted' }
-      : { status: 'outcome-unknown' };
+    outcomeUnknown = true;
   } catch (error) {
     if (error instanceof DbCommitGuardRejectedError) throw error;
     if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
-    if (serverAuthorization && !serverAuthorization.isCurrent()) {
-      return { status: 'outcome-unknown' };
-    }
-    if (unsendOutcomeIsUnknown(error)) return { status: 'outcome-unknown' };
+    outcomeUnknown =
+      (serverAuthorization !== undefined && !serverAuthorization.isCurrent()) ||
+      unsendOutcomeIsUnknown(error);
+  }
+  if (outcomeUnknown) {
+    // The message stays hidden (fail closed), and what a later restore needs is remembered so the
+    // conversation can say "Unsend not confirmed" instead of "You unsent a message" for good.
+    await rememberUnconfirmedUnsend(
+      db,
+      admittedTarget.messageGuid,
+      {
+        chatGuid: args.chatGuid,
+        appliedAt: now,
+        previousDateRetracted: previous.dateRetracted,
+        previousRetractionState: previous.retractionState,
+      },
+      commitGuard,
+    );
+    return { status: 'outcome-unknown' };
   }
 
   await revertOptimisticUnsend(

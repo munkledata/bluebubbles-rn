@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient, RequestOptions } from '@core/api/http';
 import type { AppDatabase } from '@db/types';
+import { listMessagesWithSenders, readUnconfirmedUnsend } from '@db/repositories';
 import { sendEdit, sendUnsend } from '@/services/send/sendEditService';
 import { createTestDb } from '../support/testDb';
 
@@ -364,6 +365,7 @@ describe('narrow one-to-one iMessage edit', () => {
       retractionState: null,
       pendingPartIndex: null,
     });
+    await expect(readUnconfirmedUnsend(db, MESSAGE_GUID)).resolves.toBeNull();
   });
 
   it('keeps the conservative retraction for outcome-unknown without retrying', async () => {
@@ -393,6 +395,25 @@ describe('narrow one-to-one iMessage edit', () => {
       retractionState: 'unknown',
       pendingPartIndex: 0,
     });
+    // Remember what a later restore needs, so the bubble can say "not confirmed" and offer a way
+    // out instead of showing "You unsent a message" for good.
+    await expect(readUnconfirmedUnsend(db, MESSAGE_GUID)).resolves.toEqual({
+      chatGuid: CHAT_GUID,
+      appliedAt: 6_000,
+      previousDateRetracted: null,
+      previousRetractionState: null,
+    });
+    const chatId = (
+      raw.prepare('SELECT id FROM chats WHERE guid = ?').get(CHAT_GUID) as {
+        id: number;
+      }
+    ).id;
+    expect((await listMessagesWithSenders(db, chatId))[0]?.unsendUnconfirmed).toBe(1);
+    // The server's retraction echo clears the fence; the label then disappears by itself.
+    raw
+      .prepare('UPDATE messages SET pending_retraction_part_index = NULL WHERE guid = ?')
+      .run(MESSAGE_GUID);
+    expect((await listMessagesWithSenders(db, chatId))[0]?.unsendUnconfirmed).toBe(0);
   });
 
   it('treats a non-matching unsend ack as outcome-unknown', async () => {

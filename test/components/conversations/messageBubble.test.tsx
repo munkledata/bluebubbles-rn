@@ -1194,3 +1194,17 @@ describe('MessageBubble bubble-effect cleanup on unmount (FlashList recycling)',
     }
   });
 });
+
+describe('MessageBubble unconfirmed unsend', () => {
+  it('says "Unsend not confirmed" on your own unsend whose result is unknown', async () => {
+    const base = makeMsg({ isFromMe: 1, dateRetracted: 5_000, retractionState: 'unknown' });
+    const view = await renderWithTheme(
+      <MessageBubble msg={{ ...base, unsendUnconfirmed: 1 }} showTail />,
+    );
+    expect(screen.getByText('Unsend not confirmed')).toBeTruthy();
+    expect(screen.queryByText('You unsent a message')).toBeNull();
+
+    await view.rerender(<MessageBubble msg={{ ...base, unsendUnconfirmed: 0 }} showTail />);
+    expect(screen.getByText('You unsent a message')).toBeTruthy();
+  });
+});

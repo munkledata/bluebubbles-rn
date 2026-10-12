@@ -322,7 +322,12 @@ export const MessageBubble = React.memo(function MessageBubble({
     return (
       <View style={[styles.anchor, { alignSelf: isFromMe ? 'flex-end' : 'flex-start' }]}>
         <Text style={[styles.tombstone, overlay, pill]}>
-          {isFromMe ? 'You unsent a message' : `${msg.senderName ?? 'They'} unsent a message`}
+          {isFromMe
+            ? // Its result is unknown: the message stays hidden, but it may still be with others.
+              msg.unsendUnconfirmed === 1
+              ? 'Unsend not confirmed'
+              : 'You unsent a message'
+            : `${msg.senderName ?? 'They'} unsent a message`}
         </Text>
       </View>
     );

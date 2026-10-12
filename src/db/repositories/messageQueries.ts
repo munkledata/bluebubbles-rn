@@ -549,6 +549,13 @@ export async function getNewestReceivedGuid(
 }
 
 /** A message row enriched with its sender handle, ready to render a bubble. */
+/**
+ * kv key prefix for this device's own unsend whose result is unknown (device-local, never backed
+ * up). Its value holds what a later restore needs; it counts only while the message's own unsend
+ * fence (pending_retraction_part_index) is still set, which the server's echo clears.
+ */
+export const UNSEND_UNCONFIRMED_KV_PREFIX = 'unsend.unconfirmed.';
+
 export interface MessageRow {
   id: number;
   guid: string;
@@ -563,6 +570,8 @@ export interface MessageRow {
   dateDelivered: number | null;
   dateEdited: number | null;
   dateRetracted: number | null;
+  /** 1 while this device's own unsend has an unknown result (see UNSEND_UNCONFIRMED_KV_PREFIX). */
+  unsendUnconfirmed?: number;
   /** Durable shared aggregate classification; null on migrated legacy/intact rows. */
   retractionState?: string | null;
   /** Raw bounded topology JSON, parsed only by part-aware consumers. */
@@ -634,6 +643,9 @@ const MESSAGE_ROW_SELECT = sql`
     m.date_read AS dateRead, m.date_delivered AS dateDelivered, m.date_edited AS dateEdited,
     m.date_retracted AS dateRetracted,
     m.retraction_state AS retractionState,
+    CASE WHEN m.pending_retraction_part_index IS NULL OR m.is_from_me = 0 THEN 0
+         ELSE EXISTS(SELECT 1 FROM kv WHERE kv.key = ${UNSEND_UNCONFIRMED_KV_PREFIX} || m.guid)
+    END AS unsendUnconfirmed,
     m.message_part_topology AS messagePartTopology,
     m.is_scheduled AS isScheduled,
     m.is_sent AS isSent,

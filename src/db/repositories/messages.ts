@@ -19,10 +19,13 @@ import {
   chats,
   messageDeletionLedger,
   messageServerStates,
+  kv,
   messageGuidAliases,
   messages,
   outgoingQueue,
 } from '../schema';
+import { kvGet } from './kv';
+import { UNSEND_UNCONFIRMED_KV_PREFIX } from './messageQueries';
 import {
   runInTransactionContext,
   withDbTransaction,
@@ -1186,6 +1189,76 @@ export function applyLocalUnsendWithinTransaction(
       pendingRetractionPartIndex: previous.pendingRetractionPartIndex,
       chatGuid: previous.chatGuid,
     };
+  });
+}
+
+/** What restoring an unconfirmed unsend needs; see UNSEND_UNCONFIRMED_KV_PREFIX. */
+export interface UnconfirmedUnsend {
+  readonly chatGuid: string;
+  /** The optimistic unsend's own date_retracted marker (its compare-and-set token). */
+  readonly appliedAt: number;
+  readonly previousDateRetracted: number | null;
+  readonly previousRetractionState: string | null;
+}
+
+/** Remember an unsend with an unknown result, only while its own optimistic fence is still set. */
+export function recordUnconfirmedUnsendWithinTransaction(
+  context: DbTransactionContext,
+  messageGuid: string,
+  record: UnconfirmedUnsend,
+): Promise<boolean> {
+  return runInTransactionContext(context, async (db) => {
+    const rows = await db.all<{ fence: number | null; dateRetracted: number | null }>(sql`
+      SELECT pending_retraction_part_index AS fence, date_retracted AS dateRetracted
+        FROM messages
+       WHERE guid = ${messageGuid}
+       LIMIT 1
+    `);
+    const current = rows[0];
+    if (!current || current.fence !== 0 || current.dateRetracted !== record.appliedAt) return false;
+    await db
+      .insert(kv)
+      .values({
+        key: `${UNSEND_UNCONFIRMED_KV_PREFIX}${messageGuid}`,
+        value: JSON.stringify(record),
+      })
+      .onConflictDoUpdate({ target: kv.key, set: { value: sql`excluded.value` } });
+    return true;
+  });
+}
+
+export async function readUnconfirmedUnsend(
+  db: AppDatabase,
+  messageGuid: string,
+): Promise<UnconfirmedUnsend | null> {
+  const raw = await kvGet(db, `${UNSEND_UNCONFIRMED_KV_PREFIX}${messageGuid}`);
+  if (raw == null) return null;
+  try {
+    const value = JSON.parse(raw) as Record<string, unknown>;
+    const { chatGuid, appliedAt, previousDateRetracted, previousRetractionState } = value;
+    if (
+      typeof chatGuid !== 'string' ||
+      typeof appliedAt !== 'number' ||
+      !Number.isSafeInteger(appliedAt) ||
+      (previousDateRetracted !== null &&
+        (typeof previousDateRetracted !== 'number' ||
+          !Number.isSafeInteger(previousDateRetracted))) ||
+      (previousRetractionState !== null && typeof previousRetractionState !== 'string')
+    ) {
+      return null;
+    }
+    return { chatGuid, appliedAt, previousDateRetracted, previousRetractionState };
+  } catch {
+    return null;
+  }
+}
+
+export function clearUnconfirmedUnsendWithinTransaction(
+  context: DbTransactionContext,
+  messageGuid: string,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    await db.delete(kv).where(eq(kv.key, `${UNSEND_UNCONFIRMED_KV_PREFIX}${messageGuid}`));
   });
 }
 

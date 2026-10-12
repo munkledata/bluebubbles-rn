@@ -210,6 +210,8 @@ export interface MessageActionsArgs {
   setReplyTo?: (preview: MessagePreview | null) => void;
   /** Switch the existing composer into exact-part-zero edit mode. */
   setEditing?: (editing: { guid: string; text: string; partIndex: 0 } | null) => void;
+  /** Re-read the loaded message window (e.g. after an unsend's result became unknown). */
+  refreshMessages?: () => void;
 }
 
 /**
@@ -232,6 +234,7 @@ export function useMessageActions({
   imessageRemoteDeleteAvailable = false,
   setReplyTo,
   setEditing,
+  refreshMessages,
 }: MessageActionsArgs) {
   const router = useRouter();
   const isDev = isDevServer;
@@ -444,6 +447,8 @@ export function useMessageActions({
                 if (result == null || result.status === 'rejected') {
                   showDialog('Unsend Not Sent', 'The message was not retracted.');
                 } else if (result.status === 'outcome-unknown') {
+                  // The "not confirmed" note lives outside the message row; re-read the window.
+                  refreshMessages?.();
                   showDialog(
                     'Unsend Not Confirmed',
                     'It may have been retracted. Check the conversation before taking any further action.',
@@ -452,6 +457,7 @@ export function useMessageActions({
               })
               .catch(() => {
                 if (!screenLease.isCurrent()) return;
+                refreshMessages?.();
                 showDialog(
                   'Unsend Not Confirmed',
                   'Couldn’t confirm whether the message was retracted. Check the conversation before taking any further action.',
