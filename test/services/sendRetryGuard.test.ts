@@ -32,7 +32,8 @@ jest.mock('@/services/clients', () => {
     assertTransportCurrent: () => undefined,
     isTransportCurrent: () => true,
   };
-  return { http };
+  // accountHttp (review item 1073) returns the same stand-in; accountHttpCoverage.test proves wiring.
+  return { http, accountHttp: () => http };
 }); // real one builds the vault
 jest.mock('@/services/contacts/contactsService', () => ({ pickContact: jest.fn() }));
 jest.mock('@/services/send/attachmentUpload', () => ({

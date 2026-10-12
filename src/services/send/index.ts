@@ -36,7 +36,7 @@ import {
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import { useSessionStore } from '@state/sessionStore';
 import { isRcsChatGuid } from '@utils/chat';
-import { http } from '../clients';
+import { accountHttp } from '../clients';
 import { sendTextMessage, type SendTextArgs } from './sendService';
 import {
   sendIMessageReactionMessage,
@@ -379,7 +379,7 @@ export function sendImage(
       const db = getDatabase();
       return sendImageMessage(
         db,
-        http,
+        accountHttp(accountLease),
         snapshot,
         expoAttachmentUploader,
         Date.now(),
@@ -419,7 +419,7 @@ export function sendVoice(
     () =>
       sendImageMessage(
         getDatabase(),
-        http,
+        accountHttp(accountLease),
         snapshot,
         expoAttachmentUploader,
         Date.now(),
@@ -473,7 +473,7 @@ export function sendTextAttachment(
     () =>
       sendImageMessage(
         getDatabase(),
-        http,
+        accountHttp(accountLease),
         snapshot,
         expoAttachmentUploader,
         Date.now(),
@@ -529,7 +529,7 @@ export function sendImages(
           try {
             return await sendImageMessage(
               db,
-              http,
+              accountHttp(accountLease),
               {
                 chatGuid: snapshot.chatGuid,
                 image,
@@ -606,7 +606,7 @@ export function send(
       if (needsPrivateApi) assertPrivateApiAvailable(capability);
       return sendTextMessage(
         getDatabase(),
-        http,
+        accountHttp(accountLease),
         snapshot,
         Date.now(),
         (tempGuid) => {
@@ -651,7 +651,7 @@ export function sendContactCard(
     () =>
       sendContactMessage(
         getDatabase(),
-        http,
+        accountHttp(accountLease),
         {
           chatGuid: snapshot.chatGuid,
           contact: snapshot.contact,
@@ -714,7 +714,7 @@ export async function pickAndSendContact(
     () =>
       sendContactMessage(
         getDatabase(),
-        http,
+        accountHttp(accountLease),
         {
           chatGuid,
           contact: snapshot,
@@ -806,7 +806,7 @@ export async function acquireAndSendCurrentLocation(
     () =>
       sendCurrentLocationMessage(
         getDatabase(),
-        http,
+        accountHttp(accountLease),
         { chatGuid, coordinates },
         Date.now(),
         () => accountLease.isCurrent(),
@@ -855,7 +855,7 @@ export function react(
       if (isRcsChatGuid(snapshot.chatGuid)) {
         return sendReactionMessage(
           getDatabase(),
-          http,
+          accountHttp(accountLease),
           snapshot,
           Date.now(),
           () => accountLease.isCurrent(),
@@ -864,7 +864,7 @@ export function react(
       }
       return sendIMessageReactionMessage(
         getDatabase(),
-        http,
+        accountHttp(accountLease),
         snapshot,
         () => accountLease.isCurrent(),
         serverAuthorization,
@@ -912,7 +912,7 @@ export function reply(
       }
       return sendTextMessage(
         getDatabase(),
-        http,
+        accountHttp(accountLease),
         {
           chatGuid: snapshot.chatGuid,
           text: snapshot.text,
@@ -958,7 +958,7 @@ export function sendEffect(
       }
       return sendIMessageEffect(
         getDatabase(),
-        http,
+        accountHttp(accountLease),
         snapshot,
         Date.now(),
         () => accountLease.isCurrent(),
@@ -994,7 +994,7 @@ export function sendMention(
       }
       return sendIMessageMention(
         getDatabase(),
-        http,
+        accountHttp(accountLease),
         snapshot,
         Date.now(),
         () => accountLease.isCurrent(),
@@ -1033,7 +1033,7 @@ export function sendFormatted(
       }
       return sendIMessageFormatted(
         getDatabase(),
-        http,
+        accountHttp(accountLease),
         snapshot,
         Date.now(),
         () => accountLease.isCurrent(),
@@ -1074,7 +1074,7 @@ export function editText(
     );
     return sendEdit(
       getDatabase(),
-      http,
+      accountHttp(accountLease),
       args,
       Date.now(),
       () => accountLease.isCurrent(),
@@ -1107,7 +1107,7 @@ export function unsend(
     );
     return sendUnsend(
       getDatabase(),
-      http,
+      accountHttp(accountLease),
       args,
       Date.now(),
       () => accountLease.isCurrent(),
@@ -1139,7 +1139,7 @@ export function checkUnsend(
     );
     return checkUnconfirmedUnsend(
       getDatabase(),
-      http,
+      accountHttp(accountLease),
       args,
       Date.now(),
       () => accountLease.isCurrent(),
@@ -1155,7 +1155,13 @@ export function schedule(
 ): Promise<{ id: number; serverId: string | null }> {
   return runScheduledAccountOperation(accountLease, () => {
     const capability = captureSessionRcsCapabilityLease();
-    return scheduleTextMessage(getDatabase(), http, args, accountLease, capability);
+    return scheduleTextMessage(
+      getDatabase(),
+      accountHttp(accountLease),
+      args,
+      accountLease,
+      capability,
+    );
   });
 }
 
@@ -1204,7 +1210,7 @@ export function scheduleAttachment(
     assertScheduledLease(accountLease);
     return scheduleAttachmentMessage(
       getDatabase(),
-      http,
+      accountHttp(accountLease),
       {
         chatGuid: snapshot.chatGuid,
         text: snapshot.text,
@@ -1264,7 +1270,7 @@ export async function cancelScheduled(
     const serverId = stored.serverId;
     if (serverId != null) {
       try {
-        await scheduledApi.deleteScheduled(http, serverId);
+        await scheduledApi.deleteScheduled(accountHttp(accountLease), serverId);
       } catch (error) {
         // The Mac's exact typed absence is idempotent cancellation, never a generic 404.
         if (!(
@@ -1373,7 +1379,7 @@ export async function editScheduled(
     }
     if (row.serverId != null) {
       // No PUT on Gator: delete the old server-side message, then create a replacement.
-      await scheduledApi.deleteScheduled(http, row.serverId); // throws → local untouched, UI alerts
+      await scheduledApi.deleteScheduled(accountHttp(accountLease), row.serverId); // throws → local untouched, UI alerts
       assertMutationCurrent();
       if (patch.recurrence) {
         // Now recurring → keep it local-only so the ticker (which skips server-backed rows)
@@ -1384,7 +1390,7 @@ export async function editScheduled(
       }
       let newServerId: string | null;
       try {
-        const created = await scheduledApi.createScheduled(http, {
+        const created = await scheduledApi.createScheduled(accountHttp(accountLease), {
           chatGuid: row.chatGuid,
           message: patch.text,
           scheduledFor: patch.scheduledFor ?? row.scheduledFor,
@@ -1440,7 +1446,7 @@ export async function syncScheduledFromServer(
       assertScheduledLease(accountLease);
       let items: Awaited<ReturnType<typeof scheduledApi.getScheduled>>;
       try {
-        items = await scheduledApi.getScheduled(http);
+        items = await scheduledApi.getScheduled(accountHttp(accountLease));
       } catch {
         assertScheduledLease(accountLease);
         return false; // older/offline server — keep local rows, but do not call them verified
@@ -1485,7 +1491,7 @@ export async function fireDueScheduled(now = Date.now()): Promise<number> {
     return await runScheduledAccountOperation(accountLease, () =>
       runDueScheduled(
         getDatabase(),
-        http,
+        accountHttp(accountLease),
         now,
         undefined,
         accountLease,
@@ -1507,7 +1513,7 @@ export async function fireDueScheduledWithDevelopmentSender(
 ): Promise<number> {
   try {
     return await runScheduledAccountOperation(accountLease, () =>
-      runDueScheduled(getDatabase(), http, now, sender, accountLease),
+      runDueScheduled(getDatabase(), accountHttp(accountLease), now, sender, accountLease),
     );
   } catch (error) {
     if (error instanceof ScheduledSessionChangedError) return 0;
@@ -1591,7 +1597,7 @@ export async function recoverOutgoing(
     (chatGuid === undefined || /^(?:iMessage|any);-;.+$/u.test(chatGuid));
   return runOutgoingQueue(
     getDatabase(),
-    http,
+    accountHttp(accountLease),
     outgoingQueueIO,
     now,
     accountLease,
@@ -1697,7 +1703,7 @@ export async function retry(
         // The same attempt the drain would make — same payload, same temp guid, same reconcile.
         const outcome = await resendOutgoingRow(
           db,
-          http,
+          accountHttp(accountLease),
           outgoingQueueIO,
           row,
           () => Date.now(),

@@ -2420,7 +2420,7 @@ test('certifies exactly the reviewed migration, handle-color, retry, backup, and
         detectedContext: 'transaction-coordinator',
       },
       {
-        id: 'src/services/send/index.ts#sendMention.<callback:f3e30f8bd8>:mutator-call:addd044d6c91',
+        id: 'src/services/send/index.ts#sendMention.<callback:600cd90cf8>:mutator-call:5f9c3e4a193e',
         target: 'src/services/send/sendMentionService.ts#sendIMessageMention',
         detectedContext: 'coordinated-delegation',
       },
@@ -3164,9 +3164,9 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/services/realtime/incomingEventDrain.ts#IncomingEventDrain.processClaim:mutator-call:b0a846e7dfb7',
       'src/services/realtime/incomingEventDrain.ts#IncomingEventDrain.processClaim:mutator-call:f36bbcf61ec1',
       'src/services/realtime/incomingEventDrain.ts#durableContext.markDbAppliedWithinTransaction:mutator-call:737d7a3d436b',
-      'src/services/send/index.ts#syncScheduledFromServer.<callback:ae558ebd6a>:mutator-call:e6cbeecf109b',
-      'src/services/send/index.ts#syncScheduledFromServer.<callback:ae558ebd6a>:mutator-call:ff05bdbab110',
-      'src/services/send/index.ts#retry.<callback:ae80b2827d>:mutator-call:323fb883d088',
+      'src/services/send/index.ts#syncScheduledFromServer.<callback:db86dd4275>:mutator-call:b57de385513f',
+      'src/services/send/index.ts#syncScheduledFromServer.<callback:db86dd4275>:mutator-call:5c5f52df3aab',
+      'src/services/send/index.ts#retry.<callback:6de70f50b5>:mutator-call:092d6ec9e2b2',
       'src/services/send/scheduleService.ts#recoverInterruptedScheduledRows:mutator-call:8fc2072469ba',
       'src/services/send/scheduleService.ts#runDueScheduled.writeTerminal:mutator-call:934d3ba3156d',
       'src/services/send/scheduleService.ts#runDueScheduled.writeTerminal:mutator-call:ae2537472d84',
@@ -3525,52 +3525,52 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#acquireAndSendCurrentLocation.<callback:33ed800ebd>:mutator-call:e5e55f9928f0',
+      'src/services/send/index.ts#acquireAndSendCurrentLocation.<callback:12318eb957>:mutator-call:c17deda5e81e',
       'src/services/send/index.ts#discardMessage.<callback:d56992311f>:mutator-call:711fed55d46c',
       'src/services/send/index.ts#discardMessage.<callback:d56992311f>:mutator-call:e01b25cdb9f1',
-      'src/services/send/index.ts#editScheduled.<callback:c21c74568c>:mutator-call:28cf22de66d9',
-      'src/services/send/index.ts#editScheduled.<callback:c21c74568c>:mutator-call:28cf22de66d9:2',
-      'src/services/send/index.ts#editScheduled.<callback:c21c74568c>:mutator-call:3a07d80e2cb5',
-      'src/services/send/index.ts#editScheduled.<callback:c21c74568c>:mutator-call:5302aaa99416',
-      'src/services/send/index.ts#fireDueScheduled.<callback:5c87ee99e7>:mutator-call:60a4834011d2',
-      'src/services/send/index.ts#fireDueScheduledWithDevelopmentSender.<callback:0d6a663823>:mutator-call:a9efdbe22d70',
-      'src/services/send/index.ts#pickAndSendContact.<callback:9bcfe7b86a>:mutator-call:a2100e00af93',
-      'src/services/send/index.ts#react.<callback:ee1497bc74>:mutator-call:23bf2daa57df',
-      'src/services/send/index.ts#react.<callback:ee1497bc74>:mutator-call:80dba72fdcd7',
-      'src/services/send/index.ts#recoverOutgoing:mutator-call:81cb22c9c9f3',
-      'src/services/send/index.ts#reply.<callback:f041cfa884>:mutator-call:d65d22823243',
-      'src/services/send/index.ts#retry.<callback:ae80b2827d>:mutator-call:7eb816923e6e',
-      'src/services/send/index.ts#retry.<callback:ae80b2827d>:mutator-call:323fb883d088',
-      'src/services/send/index.ts#schedule.<callback:f60bffc979>:mutator-call:29e6d7bb7f61',
-      'src/services/send/index.ts#scheduleAttachment.<callback:dd8aacac8c>:mutator-call:636217d449b1',
-      'src/services/send/index.ts#send.<callback:939d3d95aa>:mutator-call:9d6fc3b4c735',
-      'src/services/send/index.ts#sendContactCard.<callback:4de55a3dfc>:mutator-call:6b3aa4db6f03',
-      'src/services/send/index.ts#sendEffect.<callback:641db7ef71>:mutator-call:6e5d06d3d0dd',
-      'src/services/send/index.ts#sendImage.<callback:cb0dce58ca>:mutator-call:3f3c0bb5866e',
-      'src/services/send/index.ts#sendFormatted.<callback:08752b6443>:mutator-call:dc5904fad430',
-      'src/services/send/index.ts#sendImages.<callback:f998385e1f>.<callback:df902e5650>:mutator-call:36d0a2a17428',
-      'src/services/send/index.ts#sendMention.<callback:f3e30f8bd8>:mutator-call:addd044d6c91',
-      'src/services/send/index.ts#sendTextAttachment.<callback:d665192176>:mutator-call:db5414457e2a',
-      'src/services/send/index.ts#sendVoice.<callback:8b03b83b03>:mutator-call:f57619a3df8b',
-      'src/services/send/index.ts#syncScheduledFromServer.<callback:ae558ebd6a>:mutator-call:e6cbeecf109b',
-      'src/services/send/index.ts#syncScheduledFromServer.<callback:ae558ebd6a>:mutator-call:ff05bdbab110',
+      'src/services/send/index.ts#editScheduled.<callback:a310ff7f18>:mutator-call:11b6a5ed1c2d',
+      'src/services/send/index.ts#editScheduled.<callback:a310ff7f18>:mutator-call:11b6a5ed1c2d:2',
+      'src/services/send/index.ts#editScheduled.<callback:a310ff7f18>:mutator-call:8396188e7ac0',
+      'src/services/send/index.ts#editScheduled.<callback:a310ff7f18>:mutator-call:0eac966d5fef',
+      'src/services/send/index.ts#fireDueScheduled.<callback:e7099757f6>:mutator-call:26c372898fda',
+      'src/services/send/index.ts#fireDueScheduledWithDevelopmentSender.<callback:9f76132482>:mutator-call:cec9577e2e0d',
+      'src/services/send/index.ts#pickAndSendContact.<callback:6df3acbcc0>:mutator-call:c0107fdf5b74',
+      'src/services/send/index.ts#react.<callback:ce78d92795>:mutator-call:c5a800fcb97b',
+      'src/services/send/index.ts#react.<callback:ce78d92795>:mutator-call:cd884835a9a8',
+      'src/services/send/index.ts#recoverOutgoing:mutator-call:4536e59c3756',
+      'src/services/send/index.ts#reply.<callback:844d9c693f>:mutator-call:5054d34c3fee',
+      'src/services/send/index.ts#retry.<callback:6de70f50b5>:mutator-call:0f717475dd2f',
+      'src/services/send/index.ts#retry.<callback:6de70f50b5>:mutator-call:092d6ec9e2b2',
+      'src/services/send/index.ts#schedule.<callback:dd8870d856>:mutator-call:dce9e26a3293',
+      'src/services/send/index.ts#scheduleAttachment.<callback:3ea104aebd>:mutator-call:9aabf7e999d8',
+      'src/services/send/index.ts#send.<callback:6aa1e44282>:mutator-call:18d1aa8679b5',
+      'src/services/send/index.ts#sendContactCard.<callback:a504472eb8>:mutator-call:a3ad7cbe350d',
+      'src/services/send/index.ts#sendEffect.<callback:63dc1a3ff5>:mutator-call:3ee9a29481e6',
+      'src/services/send/index.ts#sendImage.<callback:2e221a7364>:mutator-call:2642e47a4a2f',
+      'src/services/send/index.ts#sendFormatted.<callback:a6fdee4f2c>:mutator-call:63a9ed12033f',
+      'src/services/send/index.ts#sendImages.<callback:ccc0f295cc>.<callback:fd3d80c880>:mutator-call:60bca36a9256',
+      'src/services/send/index.ts#sendMention.<callback:600cd90cf8>:mutator-call:5f9c3e4a193e',
+      'src/services/send/index.ts#sendTextAttachment.<callback:cb0d92fea3>:mutator-call:4597f463d245',
+      'src/services/send/index.ts#sendVoice.<callback:2b1d4eb2d6>:mutator-call:b8b4b25f8b41',
+      'src/services/send/index.ts#syncScheduledFromServer.<callback:db86dd4275>:mutator-call:b57de385513f',
+      'src/services/send/index.ts#syncScheduledFromServer.<callback:db86dd4275>:mutator-call:5c5f52df3aab',
     ].sort(),
   );
 
   assert.deepEqual(
     cancelScheduledTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#cancelScheduled.<callback:c253482651>.<callback:86b1cd18b6>:mutator-call:c3c51b3d2327',
-      'src/services/send/index.ts#cancelScheduled.<callback:c253482651>:mutator-call:49cc05f329cf',
-      'src/services/send/index.ts#cancelScheduled.<callback:c253482651>:mutator-call:65dd374558cf',
+      'src/services/send/index.ts#cancelScheduled.<callback:475ead4a80>.<callback:86b1cd18b6>:mutator-call:edfb7d1fefd2',
+      'src/services/send/index.ts#cancelScheduled.<callback:475ead4a80>:mutator-call:77551a58e683',
+      'src/services/send/index.ts#cancelScheduled.<callback:475ead4a80>:mutator-call:f0cd4c694619',
     ].sort(),
   );
   assert.deepEqual(
     retryClaimTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#retry.<callback:ae80b2827d>.<callback:d0fc418541>:mutator-call:2c0e30c7ad05',
-      'src/services/send/index.ts#retry.<callback:ae80b2827d>:mutator-call:58bd478d2cc6',
-      'src/services/send/index.ts#retry.<callback:ae80b2827d>:mutator-call:88146f66001f',
+      'src/services/send/index.ts#retry.<callback:6de70f50b5>.<callback:d0fc418541>:mutator-call:4ded97c52ac4',
+      'src/services/send/index.ts#retry.<callback:6de70f50b5>:mutator-call:ee19fafc2f74',
+      'src/services/send/index.ts#retry.<callback:6de70f50b5>:mutator-call:9ccfed42f269',
     ].sort(),
   );
   assert.deepEqual(
@@ -3594,9 +3594,9 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
   assert.deepEqual(
     editScheduledTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#editScheduled.<callback:c21c74568c>.persistPatch.<callback:ba4fa574cc>:mutator-call:f224d6b09efb',
-      'src/services/send/index.ts#editScheduled.<callback:c21c74568c>.persistPatch:mutator-call:6eb451a62c25',
-      'src/services/send/index.ts#editScheduled.<callback:c21c74568c>.persistPatch:mutator-call:acaea6ac29ad',
+      'src/services/send/index.ts#editScheduled.<callback:a310ff7f18>.persistPatch.<callback:ba4fa574cc>:mutator-call:66cf1a402f02',
+      'src/services/send/index.ts#editScheduled.<callback:a310ff7f18>.persistPatch:mutator-call:714c77a32744',
+      'src/services/send/index.ts#editScheduled.<callback:a310ff7f18>.persistPatch:mutator-call:9caef164c0df',
     ].sort(),
   );
   assert.equal(sendFrontDoorFindings.length, 46);
@@ -7026,7 +7026,7 @@ test('certifies exactly the reviewed account-transition delegation boundary', ()
   );
   assert.equal(delegated.length, 3);
   assert.equal(
-    findings.find((finding) => finding.id.endsWith('a9efdbe22d70'))?.detectedContext,
+    findings.find((finding) => finding.id.endsWith('cec9577e2e0d'))?.detectedContext,
     'coordinated-delegation',
   );
   assert.equal(

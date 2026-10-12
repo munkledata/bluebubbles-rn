@@ -32,12 +32,12 @@ jest.mock('ky', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
 jest.mock('@/services/clients', () => {
   const { HttpClient } = jest.requireActual('@core/api/http');
-  return {
-    http: new HttpClient({
-      getOrigin: () => 'https://fixture.invalid',
-      getPassword: () => 'synthetic',
-    }),
-  };
+  const http = new HttpClient({
+    getOrigin: () => 'https://fixture.invalid',
+    getPassword: () => 'synthetic',
+  });
+  // accountHttp (review item 1073) returns the same client; accountHttpCoverage.test proves wiring.
+  return { http, accountHttp: () => http };
 });
 jest.mock('@/services/contacts/contactsService', () => ({ pickContact: jest.fn() }));
 jest.mock('@/services/send/attachmentUpload', () => ({

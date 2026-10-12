@@ -15,7 +15,7 @@ import { isUnimplementedEndpoint } from '@core/api/errors';
 import type { ServerAlert } from '@core/api/endpoints/server';
 import { deriveRcsHealth, RCS_ALERT_TYPES, type RcsSeverity } from '@core/realtime';
 import { isScopedDeviceCredential } from '@core/secure';
-import { http } from '@/services';
+import { accountHttp, http } from '@/services';
 import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
@@ -214,7 +214,7 @@ export default function ServerHealthScreen(): React.JSX.Element {
       try {
         await runTrackedRealtimeWork(accountLease, async (activeLease) => {
           if (!activeLease.isCurrent() || !requestTransport.isCurrent()) return;
-          await serverApi.clearServerAlerts(http);
+          await serverApi.clearServerAlerts(accountHttp(activeLease));
           if (!activeLease.isCurrent() || !requestTransport.isCurrent()) return;
           queryClient.setQueryData<ServerAlert[]>(alertsQueryKey, []);
         });
@@ -450,7 +450,7 @@ function RcsReconnectRow({
       await runTrackedRealtimeWork(accountLease, async (activeLease) => {
         if (!activeLease.isCurrent() || !requestTransport.isCurrent()) return;
         const healthBeforeRequest = useRcsHealthStore.getState();
-        const res = await serverApi.rcsReauthNow(http);
+        const res = await serverApi.rcsReauthNow(accountHttp(activeLease));
         if (!activeLease.isCurrent() || !requestTransport.isCurrent()) return;
         // A confirmed connection supersedes only the GAIA auth alert that prompted this request.
         // It does not prove a phone-offline/fatal condition recovered, and it must not overwrite a

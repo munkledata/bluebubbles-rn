@@ -34,11 +34,14 @@ Requests made inside an admitted account slot should use `accountHttp(lease)` fr
 also stops on its account generation's shared signal (`src/services/realtime/accountCancellation.ts`),
 which step 1 aborts synchronously when it retires the generation, so it cannot hold step 4's drain
 until its 30 s timeout. Covered: chat read/unread markers, deleteChat's server scheduled-message
-cancels, group rename/participants/photo, remote delete, FaceTime call/link, and notification
-actions. Still on the shared client inside a slot (open): in-app sends and scheduled-message
-operations, the foreground outgoing queue, FCM registration, Server Health actions, and credential
-upgrade; a hung request there can still hold the drain until it times out. Disconnect's own cleanup
-uses its own fixed-credential client and is unaffected.
+cancels, group rename/participants/photo, remote delete, FaceTime call/link, notification actions,
+in-app sends and scheduled-message operations, the foreground outgoing queue, Server Health actions,
+and server backup slots. Still open: FCM registration (its file is hash-pinned by the incoming-ingress
+proof, so it moves in its own reviewed change) and two rare fixed-credential paths (credential upgrade
+and the killed-process notification action); a hung request there can still hold the drain until it
+times out. `test/services/accountHttpCoverage.test.ts` fails if a tracked slot uses the shared client
+outside its known open list. Disconnect's own cleanup uses its own fixed-credential client and is
+unaffected.
 
 ## Counted work families
 

@@ -83,7 +83,7 @@ export {
   type RemoveAppleGroupParticipantResult,
 } from './groupParticipantService';
 
-export { vault, http, getSecretBox, runCryptoSelfTest } from './clients';
+export { vault, http, accountHttp, getSecretBox, runCryptoSelfTest } from './clients';
 export { ensureDatabase, rotateDatabaseKey } from './databaseControl';
 export {
   createNewChat,

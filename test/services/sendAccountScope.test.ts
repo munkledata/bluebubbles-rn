@@ -23,7 +23,11 @@ jest.mock('@db/repositories', () => {
     })),
   };
 });
-jest.mock('@/services/clients', () => ({ http: { account: 'A' } }));
+// accountHttp (review item 1073) returns the same stand-in; accountHttpCoverage.test proves wiring.
+jest.mock('@/services/clients', () => {
+  const http = { account: 'A' };
+  return { http, accountHttp: () => http };
+});
 jest.mock('@/services/send/sendService', () => ({
   generateTempGuid: jest.fn(() => 'temp-test'),
   sendTextMessage: jest.fn(),

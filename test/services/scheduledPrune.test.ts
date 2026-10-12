@@ -28,7 +28,11 @@ import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
 
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
-jest.mock('@/services/clients', () => ({ http: {} }));
+// accountHttp (review item 1073) returns the same stand-in; accountHttpCoverage.test proves wiring.
+jest.mock('@/services/clients', () => {
+  const http = {};
+  return { http, accountHttp: () => http };
+});
 jest.mock('@/services/contacts/contactsService', () => ({ pickContact: jest.fn() }));
 jest.mock('@/services/send/attachmentUpload', () => ({
   expoAttachmentUploader: jest.fn(),

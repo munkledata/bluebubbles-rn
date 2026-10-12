@@ -12,7 +12,8 @@ jest.mock('@core/api', () => ({
     deleteSettingsBackup: (...args: unknown[]) => mockDelete(...args),
   },
 }));
-jest.mock('@/services/clients', () => ({ http: mockHttp }));
+// accountHttp (review item 1073) returns the same stand-in; accountHttpCoverage.test proves wiring.
+jest.mock('@/services/clients', () => ({ http: mockHttp, accountHttp: () => mockHttp }));
 jest.mock('@/services/backup/backupService', () => ({
   BackupAccountChangedError: class BackupAccountChangedError extends Error {},
   createEncryptedBackupCiphertext: (...args: unknown[]) => mockCreateCiphertext(...args),

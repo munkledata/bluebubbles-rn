@@ -38,7 +38,11 @@ jest.mock('expo-router', () => ({ useRouter: () => ({ push: mockPush, back: mock
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
-jest.mock('@/services', () => ({ http: {} }));
+// accountHttp (review item 1073) returns the same stand-in; accountHttpCoverage.test proves wiring.
+jest.mock('@/services', () => {
+  const http = {};
+  return { http, accountHttp: () => http };
+});
 // The screen imports `serverApi` from the `@core/api` barrel, whose HttpClient re-export pulls
 // in `ky` (ESM-only — jest-expo doesn't transform it). Never called here (`http` is mocked).
 jest.mock('ky', () => ({ __esModule: true, default: jest.fn() }));

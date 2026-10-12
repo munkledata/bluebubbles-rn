@@ -2,7 +2,7 @@ import { backupsApi } from '@core/api';
 import { ApiError } from '@core/api/errors';
 import type { BackupSlotWire } from '@core/api/endpoints/backups';
 import { isChunkedSecretBoxEnvelope } from '@core/crypto';
-import { http } from '../clients';
+import { accountHttp, http } from '../clients';
 import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
@@ -188,7 +188,11 @@ export async function saveServerBackupSlot(
   const outcome = await runTrackedRealtimeWork(lease, async (activeLease) => {
     const saved = await awaitCurrentMutation(
       activeLease,
-      backupsApi.saveSettingsBackup(http, { name, data: ciphertext, expectedRevision }, signal),
+      backupsApi.saveSettingsBackup(
+        accountHttp(activeLease),
+        { name, data: ciphertext, expectedRevision },
+        signal,
+      ),
     );
     assertCurrent(activeLease);
     if (saved.name !== name || saved.data !== ciphertext || saved.revision === undefined) {
@@ -220,7 +224,7 @@ export async function deleteServerBackupSlot(
   const outcome = await runTrackedRealtimeWork(lease, async (activeLease) => {
     removed = await awaitCurrentMutation(
       activeLease,
-      backupsApi.deleteSettingsBackup(http, { name, expectedRevision }, signal),
+      backupsApi.deleteSettingsBackup(accountHttp(activeLease), { name, expectedRevision }, signal),
     );
     assertCurrent(activeLease);
   });

@@ -60,11 +60,11 @@ const REVIEWED_CALLBACK_DEPENDENCY_FILE_HASHES = new Map([
 const REVIEWED_SCHEDULED_SYNTAX_HASHES = new Map([
   [
     `${SEND_COMPOSITION_PATH}#fireDueScheduled`,
-    '2453fc12396f1670a5a56579838a5d7da3e313348f49a39571a1fb6fff3624b7',
+    '49f69afd93b19652d49711cfa9dcd4035e0ee27b82a210e18423bb27f937f62f',
   ],
   [
     `${SEND_COMPOSITION_PATH}#fireDueScheduledWithDevelopmentSender`,
-    '2aebf4a5980ef6201af855583e6ff1a85f4b3b66aa5f89cf9a727f9dc8e1b260',
+    'c7829eb6a136c1aa36636da0c7e1e6dd3d03fb593d123e62f6381d5c0d9ae933',
   ],
   [
     `${SEND_COMPOSITION_PATH}#runScheduledAccountOperation`,
@@ -2876,7 +2876,7 @@ function reviewedScheduledOwnerErrors(sourceFiles) {
     [CHAT_ROUTE_PATH, 'useState', 'react'],
     [CHAT_ROUTE_PATH, 'captureRealtimeDeliveryLease', '@/services/realtime/deliveryCoordinator'],
     [SEND_COMPOSITION_PATH, 'getDatabase', '@db/database'],
-    [SEND_COMPOSITION_PATH, 'http', '../clients'],
+    [SEND_COMPOSITION_PATH, 'accountHttp', '../clients'],
     [SEND_COMPOSITION_PATH, 'captureRealtimeDeliveryLease', '../realtime/deliveryCoordinator'],
     [SEND_COMPOSITION_PATH, 'runTrackedRealtimeWork', '../realtime/deliveryCoordinator'],
     [SEND_COMPOSITION_PATH, 'captureSessionRcsCapabilityLease', './rcsAttemptCapability'],
