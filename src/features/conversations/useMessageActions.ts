@@ -30,6 +30,7 @@ import type { SelectedMessage } from '@ui';
 import { pickReminderTime } from '@ui/conversations/pickReminderTime';
 import { presentDiscardMessageResult, presentSendIssue } from '@ui/conversations/sendNotices';
 import { showDialog } from '@ui/dialog/dialogStore';
+import { useTransportHealthStore } from '@state/transportHealthStore';
 import { isDevServer } from '@utils/isDev';
 import {
   buildMessageSnippet,
@@ -408,6 +409,15 @@ export function useMessageActions({
       return;
     }
     const targetGuid = initial.guid;
+    // A request that can't leave the phone unsends nothing, yet afterwards it looks the same as a
+    // lost answer and would leave the message hidden as "unsent" for good. Refuse it up front.
+    if (useTransportHealthStore.getState().network === 'offline') {
+      showDialog(
+        'You’re Offline',
+        'Unsending needs a connection to your Mac. Try again when you’re online.',
+      );
+      return;
+    }
     showDialog(
       'Unsend message?',
       'This retracts the message for everyone. You can still delete your local copy separately.',
