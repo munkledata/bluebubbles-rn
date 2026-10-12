@@ -38,6 +38,12 @@ interface GatorShareShortcutsNative {
  */
 const shortcutMutationRevisionBase = Date.now() * 1000;
 let shortcutMutationSequence = 0;
+/**
+ * The records and App Lock flag the native module last accepted. The inbox refreshes shortcuts on
+ * every message and read change; publishing signs each id with a hardware-keystore key and rewrites
+ * Android's shortcut file on the JS thread, so an unchanged list is skipped. Cleared with the rows.
+ */
+let lastPublished: string | null = null;
 
 function nextShortcutMutationRevision(): number {
   shortcutMutationSequence += 1;
@@ -78,6 +84,7 @@ export function clearShareShortcuts(): boolean {
 
 /** Account teardown: scrub legacy/current labels, then rotate the native opaque-id namespace. */
 export function clearAllShareShortcuts(): boolean {
+  lastPublished = null;
   return runMutation('account cleanup', (native, revision) => {
     native.clearAllShareShortcuts(revision);
   });
@@ -85,6 +92,7 @@ export function clearAllShareShortcuts(): boolean {
 
 /** Remove only current-account rows and rotate their opaque-id namespace. */
 export function clearCurrentShareShortcuts(): boolean {
+  lastPublished = null;
   return runMutation('current cleanup', (native, revision) => {
     native.clearCurrentShareShortcuts(revision);
   });
@@ -105,16 +113,18 @@ export function publishShareShortcuts(rows: readonly InboxRow[], appLockEnabled:
     guid: row.guid,
     label: boundedLabel(row),
   }));
-  return runMutation('publish', (native, revision) => {
+  const payload = JSON.stringify([appLockEnabled, records]);
+  if (payload === lastPublished) return true;
+  const published = runMutation('publish', (native, revision) => {
     native.setShareShortcuts(revision, records, appLockEnabled);
   });
+  lastPublished = published ? payload : null;
+  return published;
 }
 
-async function listCanonicalShortcutCandidates(): Promise<InboxRow[]> {
-  const page = await listChatsForInboxPage(getDatabase(), {
-    limit: MAX_RESOLUTION_CANDIDATES,
-    archive: 'active',
-  });
+/** The ordered active-chat list shortcuts are published from and resolved against. */
+async function listCanonicalShortcutCandidates(limit: number): Promise<InboxRow[]> {
+  const page = await listChatsForInboxPage(getDatabase(), { limit, archive: 'active' });
   return page.rows;
 }
 
@@ -130,7 +140,9 @@ export async function refreshShareShortcuts(
   let published = false;
   try {
     const status = await runTrackedRealtimeWork(lease, async (activeLease) => {
-      const rows = appLockEnabled ? [] : await listCanonicalShortcutCandidates();
+      const rows = appLockEnabled
+        ? []
+        : await listCanonicalShortcutCandidates(MAX_PUBLISHED_SHORTCUTS);
       if (!activeLease.isCurrent()) return;
       published = publishShareShortcuts(rows, appLockEnabled);
     });
@@ -159,11 +171,25 @@ export async function resolveShareShortcutTarget(
   let target: string | null = null;
   try {
     const status = await runTrackedRealtimeWork(lease, async (activeLease) => {
-      const rows = await listCanonicalShortcutCandidates();
-      if (!activeLease.isCurrent()) return;
-      const candidates = rows.map((row) => row.guid);
-      const resolved = native.resolveShareShortcutTarget(token, candidates);
-      if (!activeLease.isCurrent() || resolved == null || !candidates.includes(resolved)) return;
+      // Each candidate costs one hardware-keystore HMAC on the JS thread. Published shortcuts are
+      // the first ten of this list, so check those first; the rest only when the chat moved down.
+      let resolved: string | null = null;
+      let checked = 0;
+      for (const limit of [MAX_PUBLISHED_SHORTCUTS, MAX_RESOLUTION_CANDIDATES]) {
+        const rows = await listCanonicalShortcutCandidates(limit);
+        if (!activeLease.isCurrent()) return;
+        const candidates = rows.slice(checked).map((row) => row.guid);
+        const match =
+          candidates.length > 0 ? native.resolveShareShortcutTarget(token, candidates) : null;
+        if (!activeLease.isCurrent()) return;
+        if (match != null && candidates.includes(match)) {
+          resolved = match;
+          break;
+        }
+        if (rows.length < limit) break;
+        checked = rows.length;
+      }
+      if (resolved == null) return;
       try {
         native.reportShareShortcutUsed(token);
       } catch (error) {

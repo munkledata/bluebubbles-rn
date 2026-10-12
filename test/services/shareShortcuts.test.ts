@@ -104,11 +104,26 @@ function inboxRow(overrides: Partial<InboxRow> = {}): InboxRow {
 }
 
 function setVisibleRows(rows: InboxRow[]): void {
-  listInbox.mockResolvedValue({ rows, hasMore: false });
+  listInbox.mockImplementation(async (_db, options) => {
+    const limit = options?.limit ?? rows.length;
+    return { rows: rows.slice(0, limit), hasMore: rows.length > limit };
+  });
+}
+
+function manyRows(count: number): InboxRow[] {
+  return Array.from({ length: count }, (_, index) =>
+    inboxRow({
+      id: index + 1,
+      guid: `iMessage;-;+15550000${String(index).padStart(3, '0')}`,
+      displayName: `Person ${index}`,
+    }),
+  );
 }
 
 beforeEach(() => {
   moduleRef.current = native;
+  // Account cleanup also forgets what was last published, so each test starts unpublished.
+  clearCurrentShareShortcuts();
   Object.values(native).forEach((method) => method.mockReset());
   getDb.mockReset().mockReturnValue(database as never);
   listInbox.mockReset();
@@ -179,12 +194,43 @@ describe('Direct Share shortcut mutation bridge', () => {
     await expect(refreshShareShortcuts(false, lease())).resolves.toBe(true);
 
     expect(runTracked).toHaveBeenCalledTimes(1);
-    expect(listInbox).toHaveBeenCalledWith(database, { limit: 256, archive: 'active' });
+    // The same ordered active-chat list the resolver uses, read only as far as publishing needs.
+    expect(listInbox).toHaveBeenCalledWith(database, { limit: 10, archive: 'active' });
     expect(native.setShareShortcuts).toHaveBeenCalledWith(
       expect.any(Number),
       rows.slice(0, 10).map((row) => ({ guid: row.guid, label: row.displayName })),
       false,
     );
+  });
+
+  it('skips the native publish while the shortcuts have not changed', async () => {
+    // Every inbox update used to re-run keystore signing and ShortcutManager calls on the JS thread.
+    const rows = manyRows(12);
+    expect(publishShareShortcuts(rows, false)).toBe(true);
+    expect(
+      publishShareShortcuts(
+        rows.map((row) => ({ ...row })),
+        false,
+      ),
+    ).toBe(true);
+    expect(native.setShareShortcuts).toHaveBeenCalledTimes(1);
+
+    publishShareShortcuts([{ ...rows[0]!, displayName: 'Renamed' }, ...rows.slice(1)], false);
+    publishShareShortcuts(rows, true);
+    expect(native.setShareShortcuts).toHaveBeenCalledTimes(3);
+
+    clearCurrentShareShortcuts();
+    publishShareShortcuts(rows, true);
+    expect(native.setShareShortcuts).toHaveBeenCalledTimes(4);
+  });
+
+  it('retries a publish the native module refused', () => {
+    native.setShareShortcuts.mockImplementationOnce(() => {
+      throw new TypeError('rate limited');
+    });
+    expect(publishShareShortcuts([inboxRow()], false)).toBe(false);
+    expect(publishShareShortcuts([inboxRow()], false)).toBe(true);
+    expect(native.setShareShortcuts).toHaveBeenCalledTimes(2);
   });
 
   it('clears personalized rows for App Lock without reading the account inbox', async () => {
@@ -244,9 +290,43 @@ describe('Direct Share target resolution', () => {
     await expect(resolveShareShortcutTarget(TARGET_TOKEN, lease())).resolves.toBe(row.guid);
 
     expect(getDb).toHaveBeenCalledTimes(1);
-    expect(listInbox).toHaveBeenCalledWith(database, { limit: 256, archive: 'active' });
+    expect(listInbox).toHaveBeenCalledWith(database, { limit: 10, archive: 'active' });
     expect(native.resolveShareShortcutTarget).toHaveBeenCalledWith(TARGET_TOKEN, [row.guid]);
     expect(native.reportShareShortcutUsed).toHaveBeenCalledWith(TARGET_TOKEN);
+  });
+
+  it('resolves a published shortcut against only the ten chats it could name', async () => {
+    // Each candidate costs one hardware-keystore HMAC on the JS thread; 256 froze the app.
+    const rows = manyRows(40);
+    setVisibleRows(rows);
+    native.resolveShareShortcutTarget.mockImplementation((_token, candidates: string[]) =>
+      candidates.includes(rows[3]!.guid) ? rows[3]!.guid : null,
+    );
+
+    await expect(resolveShareShortcutTarget(TARGET_TOKEN, lease())).resolves.toBe(rows[3]!.guid);
+
+    expect(native.resolveShareShortcutTarget).toHaveBeenCalledTimes(1);
+    expect(native.resolveShareShortcutTarget).toHaveBeenCalledWith(
+      TARGET_TOKEN,
+      rows.slice(0, 10).map((row) => row.guid),
+    );
+  });
+
+  it('falls back to the rest of the active chats when the target has moved down', async () => {
+    const rows = manyRows(40);
+    setVisibleRows(rows);
+    native.resolveShareShortcutTarget.mockImplementation((_token, candidates: string[]) =>
+      candidates.includes(rows[25]!.guid) ? rows[25]!.guid : null,
+    );
+
+    await expect(resolveShareShortcutTarget(TARGET_TOKEN, lease())).resolves.toBe(rows[25]!.guid);
+
+    expect(native.resolveShareShortcutTarget).toHaveBeenCalledTimes(2);
+    expect(native.resolveShareShortcutTarget).toHaveBeenLastCalledWith(
+      TARGET_TOKEN,
+      rows.slice(10).map((row) => row.guid),
+    );
+    expect(listInbox).toHaveBeenLastCalledWith(database, { limit: 256, archive: 'active' });
   });
 
   it('keeps a valid target when best-effort usage reporting fails', async () => {
