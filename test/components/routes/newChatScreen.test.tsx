@@ -203,6 +203,10 @@ const PRIVATE_SHARE_BATCH = '1700000000000-1-0123456789abcdef';
 const SECOND_SHARE_BATCH = '1700000000001-2-fedcba9876543210';
 const ACCOUNT_CHANGED_COPY = 'Account changed. Go back and start a new message again.';
 const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
+// Plain RCS starts carry one stable request id per draft (from the mocked random UUID).
+const STABLE_RCS_ATTEMPT_ID = 'temp-00000000-0000-4000-8000-000000000001';
+const UNCONFIRMED_RCS_COPY =
+  'Gator could not confirm whether the first RCS message was sent. Check Google Messages before trying again. Your draft is still here.';
 const RCS_SERVER_IDENTITY = {
   supports_rcs_epoch_qualified_ids: true,
   rcs_provider_epoch: RCS_PROVIDER_EPOCH,
@@ -459,7 +463,66 @@ describe('NewChatScreen — service-scoped creation boundary', () => {
       fireEvent.press(screen.getByText('Start'));
     });
     await waitFor(() =>
-      expect(mockCreateNewChat).toHaveBeenCalledWith(['+15551230000'], 'hi', expect.anything()),
+      expect(mockCreateNewChat).toHaveBeenCalledWith(
+        ['+15551230000'],
+        'hi',
+        expect.anything(),
+        'RCS',
+        STABLE_RCS_ATTEMPT_ID,
+      ),
+    );
+  });
+
+  it('keeps an RCS draft and its exact request id for retry after an uncertain failure', async () => {
+    jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+    mockCreateNewChat
+      .mockRejectedValueOnce(new ApiError('timeout', 'Request timed out'))
+      .mockResolvedValueOnce('RCS;-;+15551230000');
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient('+15551230000');
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Message'), 'keep this draft');
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Start' }));
+    });
+
+    await waitFor(() => expect(useDialogStore.getState().current?.title).toBe('New message'));
+    expect(useDialogStore.getState().current?.message).toContain(
+      'could not confirm whether the first RCS message was sent',
+    );
+    expect(screen.getByDisplayValue('keep this draft')).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Start' }).props.accessibilityState.disabled).toBe(
+        false,
+      ),
+    );
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Start' }));
+    });
+    await waitFor(() => expect(mockCreateNewChat).toHaveBeenCalledTimes(2));
+    expect(mockCreateNewChat.mock.calls[0]?.[3]).toBe('RCS');
+    expect(mockCreateNewChat.mock.calls[0]?.[4]).toMatch(/^temp-/);
+    expect(mockCreateNewChat.mock.calls[1]?.[4]).toBe(mockCreateNewChat.mock.calls[0]?.[4]);
+  });
+
+  it('reports a known RCS refusal as not started', async () => {
+    jest.spyOn(logger, 'error').mockImplementation(() => undefined);
+    mockCreateNewChat.mockRejectedValueOnce(
+      ApiError.fromStatus(400, 'invalid', undefined, 'validation'),
+    );
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient('+15551230000');
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Message'), 'hi');
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Start' }));
+    });
+
+    await waitFor(() => expect(useDialogStore.getState().current?.title).toBe('New message'));
+    expect(useDialogStore.getState().current?.message).toBe(
+      'Couldn’t start the conversation. Check the address and your server connection.',
     );
   });
 
@@ -485,7 +548,13 @@ describe('NewChatScreen — service-scoped creation boundary', () => {
       fireEvent.press(screen.getByText('Start'));
     });
     await waitFor(() =>
-      expect(mockCreateNewChat).toHaveBeenCalledWith(['+15551230000'], 'hi', expect.anything()),
+      expect(mockCreateNewChat).toHaveBeenCalledWith(
+        ['+15551230000'],
+        'hi',
+        expect.anything(),
+        'RCS',
+        STABLE_RCS_ATTEMPT_ID,
+      ),
     );
   });
 
@@ -978,6 +1047,8 @@ describe('NewChatScreen — recipient entry + create', () => {
         ['+15551234567'],
         'Hello there',
         expect.anything(),
+        'RCS',
+        STABLE_RCS_ATTEMPT_ID,
       ),
     );
     await waitFor(() =>
@@ -1181,6 +1252,8 @@ describe('NewChatScreen — account ownership and handoff lifetime', () => {
         [SECOND_ADDRESS],
         SECOND_MESSAGE,
         expect.anything(),
+        'RCS',
+        STABLE_RCS_ATTEMPT_ID,
       ),
     );
     expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent(SECOND_CREATED_GUID)}`);
@@ -1306,9 +1379,7 @@ describe('NewChatScreen — account ownership and handoff lifetime', () => {
     await fireEvent.press(screen.getByRole('button', { name: 'Start' }));
 
     await waitFor(() => expect(useDialogStore.getState().current?.title).toBe('New message'));
-    expect(useDialogStore.getState().current?.message).toBe(
-      'Couldn’t start the conversation. Check the address and your server connection.',
-    );
+    expect(useDialogStore.getState().current?.message).toBe(UNCONFIRMED_RCS_COPY);
     expect(errorSpy).toHaveBeenCalledWith(
       '[new-chat] createNewChat failed',
       'sfcbzc1wod',
@@ -1481,9 +1552,7 @@ describe('NewChatScreen — create failure', () => {
       fireEvent.press(screen.getByText('Start'));
     });
     await waitFor(() => expect(useDialogStore.getState().current?.title).toBe('New message'));
-    expect(useDialogStore.getState().current?.message).toBe(
-      'Couldn’t start the conversation. Check the address and your server connection.',
-    );
+    expect(useDialogStore.getState().current?.message).toBe(UNCONFIRMED_RCS_COPY);
     expect(error).toHaveBeenCalledWith(
       '[new-chat] createNewChat failed',
       'sfcbzc1wod',
@@ -1569,6 +1638,8 @@ describe('NewChatScreen — Start works on a typed address that was never commit
         ['+15551234567'],
         'Hello there',
         expect.anything(),
+        'RCS',
+        STABLE_RCS_ATTEMPT_ID,
       ),
     );
   });
@@ -1589,6 +1660,8 @@ describe('NewChatScreen — Start works on a typed address that was never commit
         ['someone@example.com'],
         'Hi',
         expect.anything(),
+        'RCS',
+        STABLE_RCS_ATTEMPT_ID,
       ),
     );
   });

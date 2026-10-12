@@ -610,12 +610,26 @@ export default function NewChatScreen(): React.JSX.Element {
         sharePlan = persistedPlan;
         tempGuid = persistedPlan.tempGuid;
         setSharePlanPrepared(true);
-      } else if (selectedService === 'iMessage') {
-        const attemptKey = JSON.stringify([selectedService, address, body]);
-        tempGuid = createAttemptsRef.current.get(attemptKey);
-        if (!tempGuid) {
-          tempGuid = `temp-${Crypto.randomUUID()}`;
-          createAttemptsRef.current.set(attemptKey, tempGuid);
+      } else {
+        // One stable request id per draft, so Start after an uncertain failure replays the first
+        // attempt instead of sending the first message twice. RCS needs the server's attempt
+        // ownership for that, and a re-pair starts a fresh attempt.
+        const serverInfo = useSessionStore.getState().serverInfo;
+        if (
+          selectedService === 'iMessage' ||
+          serverInfo?.supports_rcs_send_attempt_ownership === true
+        ) {
+          const attemptKey = JSON.stringify([
+            selectedService,
+            address,
+            body,
+            selectedService === 'RCS' ? currentRcsProviderEpoch(serverInfo) : null,
+          ]);
+          tempGuid = createAttemptsRef.current.get(attemptKey);
+          if (!tempGuid) {
+            tempGuid = `temp-${Crypto.randomUUID()}`;
+            createAttemptsRef.current.set(attemptKey, tempGuid);
+          }
         }
       }
       const guid =
@@ -624,9 +638,7 @@ export default function NewChatScreen(): React.JSX.Element {
               identity,
               plan: sharePlan,
             })
-          : selectedService === 'RCS'
-            ? await createNewChat([address], body, accountLease)
-            : await createNewChat([address], body, accountLease, 'iMessage', tempGuid);
+          : await createNewChat([address], body, accountLease, selectedService, tempGuid);
       if (!accountLease.isCurrent() || abandonedRef.current) return;
       // Send any shared files into the new (or matched) chat.
       if (staged.length > 0) {
@@ -677,7 +689,9 @@ export default function NewChatScreen(): React.JSX.Element {
             ? knownNotDispatched
               ? 'Couldn’t start the conversation. Check the address and your server connection. Your shared item is still here.'
               : 'Gator could not confirm whether the first RCS message was sent. Check Google Messages. To stop this share, go Back and choose Discard; Gator will not retry it automatically.'
-            : 'Couldn’t start the conversation. Check the address and your server connection.',
+            : knownNotDispatched
+              ? 'Couldn’t start the conversation. Check the address and your server connection.'
+              : 'Gator could not confirm whether the first RCS message was sent. Check Google Messages before trying again. Your draft is still here.',
       );
     } finally {
       submissionInFlightRef.current = false;

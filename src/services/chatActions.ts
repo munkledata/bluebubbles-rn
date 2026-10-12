@@ -510,9 +510,11 @@ export async function createNewChat(
       message,
       service,
       tempGuid,
-      ...(shareIntake && service === 'RCS'
+      // A stable id lets a retry of the same draft or share replay its first attempt instead of
+      // sending the first message again; the receipt proves the server kept that identity.
+      ...(service === 'RCS' && tempGuid
         ? {
-            clientAttemptGeneration: shareIntake.plan.clientAttemptGeneration,
+            clientAttemptGeneration: shareIntake?.plan.clientAttemptGeneration ?? 1,
             requireAttemptReceipt: true,
           }
         : {}),

@@ -127,6 +127,27 @@ describe('createNewChat account lease', () => {
     expect(count(raw, 'chats')).toBe(1);
   });
 
+  it('sends a plain RCS retry id as its first attempt and requires the server receipt', async () => {
+    // Without the id, a create that timed out after Google delivered the first message could only
+    // be retried as a brand-new send, so the contact received it twice.
+    await expect(
+      createNewChat(['old@example.com'], 'hello', undefined, 'RCS', 'temp-plain-rcs'),
+    ).resolves.toBe(rcsChatGuid(RCS_EPOCH_A));
+
+    expect(mockCreateChat).toHaveBeenCalledWith(
+      { account: 'captured-by-http-client' },
+      {
+        address: 'old@example.com',
+        message: 'hello',
+        service: 'RCS',
+        tempGuid: 'temp-plain-rcs',
+        clientAttemptGeneration: 1,
+        requireAttemptReceipt: true,
+        providerEpoch: RCS_EPOCH_A,
+      },
+    );
+  });
+
   it('rejects multiple recipients before DB or HTTP instead of silently dropping one', async () => {
     const invalidAddresses = ['first@example.com', 'second@example.com'] as unknown as [string];
     await expect(createNewChat(invalidAddresses, 'hello')).rejects.toThrow(
