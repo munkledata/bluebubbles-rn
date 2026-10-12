@@ -29,11 +29,16 @@ Disconnect. It complements `docs/SESSION_SCOPED_STATE_INVENTORY.md` (what memory
 An operation accepted by the server before cancellation is outside the client guarantee. Its local
 ack/error continuation is still generation-rejected and the subsequent wipe remains authoritative.
 
-Requests made inside an admitted account slot use `accountHttp(lease)` from
-`src/services/clients.ts`, not the shared `http` (review item 1073, 2026-10-12). Each request also
-stops on its account generation's shared signal (`src/services/realtime/accountCancellation.ts`),
-which step 1 aborts synchronously when it retires the generation. A hung request therefore cannot
-hold step 4's drain until its 30 s timeout. Disconnect's own cleanup requests keep the shared client.
+Requests made inside an admitted account slot should use `accountHttp(lease)` from
+`src/services/clients.ts`, not the shared `http` (review item 1073, 2026-10-12). Each such request
+also stops on its account generation's shared signal (`src/services/realtime/accountCancellation.ts`),
+which step 1 aborts synchronously when it retires the generation, so it cannot hold step 4's drain
+until its 30 s timeout. Covered: chat read/unread markers, deleteChat's server scheduled-message
+cancels, group rename/participants/photo, remote delete, FaceTime call/link, and notification
+actions. Still on the shared client inside a slot (open): in-app sends and scheduled-message
+operations, the foreground outgoing queue, FCM registration, Server Health actions, and credential
+upgrade; a hung request there can still hold the drain until it times out. Disconnect's own cleanup
+uses its own fixed-credential client and is unaffected.
 
 ## Counted work families
 

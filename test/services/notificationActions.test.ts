@@ -92,7 +92,16 @@ jest.mock('@/services/databaseControl', () => ({
 /** Leases handed to `accountHttp`; review item 1073 binds requests to the Disconnect signal. */
 const mockAccountHttpLeases: Array<{ generation: number; isCurrent(): boolean }> = [];
 jest.mock('@/services/clients', () => ({
-  http: { __http: true, pinTransport: jest.fn(() => mockPinnedForegroundHttp) },
+  // A different pinned identity: if an action ever pinned the shared client again, the origin and
+  // revision assertions below would see this instead of the account-bound transport.
+  http: {
+    __sharedHttp: true,
+    pinTransport: jest.fn(() => ({
+      __pinnedSharedHttp: true,
+      snapshotTransport: () => ({ origin: 'https://shared.invalid', transportRevision: 1 }),
+      isTransportCurrent: () => true,
+    })),
+  },
   accountHttp: (lease: { generation: number; isCurrent(): boolean }) => {
     mockAccountHttpLeases.push(lease);
     return { __http: true, pinTransport: () => mockPinnedForegroundHttp };

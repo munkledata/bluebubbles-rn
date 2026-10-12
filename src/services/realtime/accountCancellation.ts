@@ -22,6 +22,8 @@ export function accountCancellationSignal(lease: RealtimeDeliveryLease): AbortSi
       if (current === entry) current = null;
       entry.controller.abort();
     });
+    // The listener may already have run (generation retired): its aborted signal fails closed.
+    return entry.controller.signal;
   }
   return current.controller.signal;
 }

@@ -58,8 +58,10 @@ jest.mock('@db/database', () => ({
 }));
 /** Leases handed to `accountHttp`; review item 1073 binds requests to the Disconnect signal. */
 const mockAccountHttpLeases: Array<{ generation: number; isCurrent(): boolean }> = [];
+// The shared client has a different shape, so every `{ __http: true }` assertion below proves the
+// request went through the account-bound client.
 jest.mock('@/services/clients', () => ({
-  http: { __http: true },
+  http: { __sharedHttp: true },
   accountHttp: (lease: { generation: number; isCurrent(): boolean }) => {
     mockAccountHttpLeases.push(lease);
     return { __http: true };

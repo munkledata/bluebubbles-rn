@@ -58,8 +58,9 @@ const mockDeletedDirs: string[] = [];
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
 /** Leases handed to `accountHttp`; review item 1073 binds requests to the Disconnect signal. */
 const mockAccountHttpLeases: Array<{ generation: number; isCurrent(): boolean }> = [];
+// The shared client has a different shape from the account-bound one asserted below.
 jest.mock('@/services/clients', () => ({
-  http: { __http: true },
+  http: { __sharedHttp: true },
   accountHttp: (lease: { generation: number; isCurrent(): boolean }) => {
     mockAccountHttpLeases.push(lease);
     return { __http: true };
@@ -525,6 +526,7 @@ describe('deleteChat', () => {
     expect(mockAccountHttpLeases).toHaveLength(1);
     expect(mockAccountHttpLeases[0]?.generation).toBe(captureRealtimeDeliveryLease().generation);
     expect(mockAccountHttpLeases[0]?.isCurrent()).toBe(true);
+    expect(mockDeleteScheduled.mock.calls.map((call) => call[0])).toEqual([{ __http: true }]);
     // ONLY the deleted chat's server-backed row is cancelled server-side…
     expect(mockDeleteScheduled.mock.calls.map((c) => c[1])).toEqual(['srv-1']);
     // …and both of c1's rows are gone, while c2's is untouched.

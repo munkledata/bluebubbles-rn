@@ -23,11 +23,17 @@ import {
 
 const mockKy = ky as unknown as jest.Mock;
 
+// Settles anyway after a few seconds, so a broken cancellation fails this test by timing instead of
+// leaving a drain slot that would hang every later test in the file.
 function hangUntilAborted(_url: string, options: { signal: AbortSignal }): Promise<Response> {
-  return new Promise((_resolve, reject) => {
+  return new Promise((resolve, reject) => {
+    const fallback = setTimeout(() => resolve(jsonResponse({ late: true })), 3_000);
     options.signal.addEventListener(
       'abort',
-      () => reject(new DOMException('aborted', 'AbortError')),
+      () => {
+        clearTimeout(fallback);
+        reject(new DOMException('aborted', 'AbortError'));
+      },
       { once: true },
     );
   });
@@ -66,7 +72,9 @@ describe('account requests and Disconnect', () => {
     expect(mockKy).toHaveBeenCalledTimes(1);
 
     // Without cancellation this drain would wait for the request's timeout.
+    const pauseStarted = Date.now();
     await pauseRealtimeDeliveries();
+    expect(Date.now() - pauseStarted).toBeLessThan(1_000);
     await expect(action).resolves.toBe('delivered');
     expect(failure).toMatchObject({ kind: 'cancelled' });
   });

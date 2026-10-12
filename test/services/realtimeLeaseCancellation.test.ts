@@ -36,6 +36,12 @@ describe('account cancellation signal', () => {
     expect(retired.aborted).toBe(true);
   });
 
+  it('fails closed instead of crashing when a lease disagrees with the coordinator', () => {
+    // A hand-made lease that claims to be current for a generation the coordinator never opened.
+    const signal = accountCancellationSignal({ generation: 999_999, isCurrent: () => true });
+    expect(signal.aborted).toBe(true);
+  });
+
   it('is already cancelled for a retired lease or one captured during Disconnect', async () => {
     const retiredLease = captureRealtimeDeliveryLease();
     await pauseRealtimeDeliveries();
