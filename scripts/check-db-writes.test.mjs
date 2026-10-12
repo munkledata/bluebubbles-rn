@@ -6915,6 +6915,7 @@ fullOnlyTest(
           '              lockHydrated={lockHydrated}\n' +
           '              locked={locked}\n' +
           '              foregroundUnlockId={foregroundUnlockId}\n' +
+          '              coldUnlockPendingRunId={coldUnlockPendingRunId}\n' +
           '              onColdUnlock={completeColdUnlock}\n' +
           '              onWarmUnlock={completeUnlock}',
         after:
@@ -6926,6 +6927,7 @@ fullOnlyTest(
           '              lockHydrated={lockHydrated}\n' +
           '              locked={locked}\n' +
           '              foregroundUnlockId={foregroundUnlockId}\n' +
+          '              coldUnlockPendingRunId={coldUnlockPendingRunId}\n' +
           '              onColdUnlock={completeColdUnlock}\n' +
           '              onWarmUnlock={async () => undefined}',
       },
