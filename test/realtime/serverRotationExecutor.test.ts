@@ -163,6 +163,108 @@ describe('approveServerRotation', () => {
     expect(h.reconnect).toHaveBeenCalledTimes(1);
   });
 
+  // Review of items 800/808: a typed address can point at a different Mac that happens to accept the
+  // same password; keeping this phone's data while syncing through it would mix two accounts.
+  describe('server identity', () => {
+    const CURRENT_EPOCH = '11111111-1111-4111-8111-111111111111';
+    const OTHER_EPOCH = '22222222-2222-4222-8222-222222222222';
+
+    function withCurrentEpoch(
+      h: ReturnType<typeof setup>,
+      epoch: string | null,
+    ): ServerRotationExecutorDeps {
+      return {
+        ...h.deps,
+        getCurrentServerInfo: () => ({ ...SERVER_INFO, imessage_provider_epoch: epoch }),
+      };
+    }
+
+    it('refuses an address that answers as a different Messages server', async () => {
+      const h = setup();
+      h.validateCandidate.mockResolvedValue({
+        ok: true,
+        serverInfo: { ...NEXT_SERVER_INFO, imessage_provider_epoch: OTHER_EPOCH },
+      });
+
+      const result = await approveServerRotation(
+        h.requestId,
+        'correct-password',
+        false,
+        withCurrentEpoch(h, CURRENT_EPOCH),
+      );
+
+      expect(result).toMatchObject({ ok: false, kind: 'different-server', terminal: true });
+      expect(h.persistCandidate).not.toHaveBeenCalled();
+      expect(h.publishCandidate).not.toHaveBeenCalled();
+    });
+
+    it('refuses an address that cannot say which Messages server it is', async () => {
+      const h = setup();
+      h.validateCandidate.mockResolvedValue({
+        ok: true,
+        serverInfo: { ...NEXT_SERVER_INFO, imessage_provider_epoch: null },
+      });
+
+      await expect(
+        approveServerRotation(
+          h.requestId,
+          'correct-password',
+          false,
+          withCurrentEpoch(h, CURRENT_EPOCH),
+        ),
+      ).resolves.toMatchObject({ ok: false, kind: 'different-server' });
+      expect(h.persistCandidate).not.toHaveBeenCalled();
+    });
+
+    it('accepts the same Messages server at its new address', async () => {
+      const h = setup();
+      h.validateCandidate.mockResolvedValue({
+        ok: true,
+        serverInfo: { ...NEXT_SERVER_INFO, imessage_provider_epoch: CURRENT_EPOCH },
+      });
+
+      await expect(
+        approveServerRotation(
+          h.requestId,
+          'correct-password',
+          false,
+          withCurrentEpoch(h, CURRENT_EPOCH),
+        ),
+      ).resolves.toEqual({ ok: true });
+      expect(h.persistCandidate).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the earlier behaviour when the current server reports no identity', async () => {
+      const h = setup();
+
+      await expect(
+        approveServerRotation(h.requestId, 'correct-password', false, withCurrentEpoch(h, null)),
+      ).resolves.toEqual({ ok: true });
+    });
+  });
+
+  it('says when a paired device cannot reach its current server to check the password', async () => {
+    const h = setup({ currentPassword: SCOPED_DEVICE_CREDENTIAL });
+    h.validateCandidate.mockResolvedValue({
+      ok: false,
+      kind: 'unreachable',
+      message:
+        'Could not reach your server. Check the URL and that it is accessible from this device.',
+    });
+
+    const result = await approveServerRotation(h.requestId, 'fresh-shared-password', false, h.deps);
+
+    expect(result).toMatchObject({ ok: false, kind: 'validation-failed', terminal: false });
+    expect(result.ok ? '' : result.message).toMatch(/current server/i);
+    // The new address is never contacted with the device credential.
+    expect(h.validateCandidate).toHaveBeenCalledTimes(1);
+    expect(h.validateCandidate).toHaveBeenCalledWith(
+      'https://current.example',
+      'fresh-shared-password',
+      expect.any(Function),
+    );
+  });
+
   it('does not expose a scoped credential when the shared-password proof fails', async () => {
     const h = setup({ currentPassword: SCOPED_DEVICE_CREDENTIAL });
     h.validateCandidate.mockResolvedValue({

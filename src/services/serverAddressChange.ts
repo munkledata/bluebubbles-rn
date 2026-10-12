@@ -4,7 +4,7 @@ import { serverRotationCoordinator } from './realtime/serverRotationCoordinator'
 import { applyNewServerUrl } from './realtimeControl';
 
 export type ServerAddressChangeRequest =
-  'offered' | 'invalid' | 'same-address' | 'insecure-downgrade' | 'unavailable';
+  'offered' | 'invalid' | 'same-address' | 'insecure-downgrade' | 'unverifiable' | 'unavailable';
 
 /**
  * Offer a user-typed server address through the same approval prompt a server-sent change uses
@@ -16,7 +16,8 @@ export type ServerAddressChangeRequest =
 export async function requestServerAddressChange(
   rawAddress: string,
 ): Promise<ServerAddressChangeRequest> {
-  const currentOrigin = strictServerOrigin(useSessionStore.getState().origin);
+  const session = useSessionStore.getState();
+  const currentOrigin = strictServerOrigin(session.origin);
   if (!currentOrigin) return 'unavailable';
   const candidate = sanitizeServerAddress(rawAddress);
   if (!candidate) return 'invalid';
@@ -24,6 +25,9 @@ export async function requestServerAddressChange(
   if (classification.kind === 'invalid') return 'invalid';
   if (classification.kind === 'same-origin') return 'same-address';
   if (classification.kind === 'downgrade') return 'insecure-downgrade';
+  // A typed address could reach a different Mac that accepts the same password. The approval checks
+  // the new address reports this server's Messages-database identity, so it needs a known one.
+  if (!session.serverInfo?.imessage_provider_epoch) return 'unverifiable';
 
   await applyNewServerUrl(classification.candidateOrigin);
   return serverRotationCoordinator.getSnapshot()?.candidateOrigin === classification.candidateOrigin

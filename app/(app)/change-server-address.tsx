@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { KeyboardAvoidingView, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { requestServerAddressChange, type ServerAddressChangeRequest } from '@/services';
 import { useSessionStore } from '@state/sessionStore';
@@ -12,9 +12,12 @@ const RESULT_MESSAGES: Record<Exclude<ServerAddressChangeRequest, 'offered'>, st
   'insecure-downgrade':
     'Gator won’t switch from a secure https address to an insecure http one. To use an http ' +
     'server, disconnect and set it up again.',
+  unverifiable:
+    'Your server doesn’t report which Messages server it is, so Gator can’t safely confirm a new ' +
+    'address. Update your Gator server, then try again.',
   unavailable:
-    'Gator can’t change the address right now. Make sure Gator is connected and unlocked, then ' +
-    'try again.',
+    'Gator can’t change the address right now. Make sure Gator is connected and unlocked, and that ' +
+    'no other server change or credential upgrade is in progress, then try again.',
 };
 
 /**
@@ -30,16 +33,23 @@ export default function ChangeServerAddressScreen(): React.JSX.Element {
   const [address, setAddress] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // State updates land after the frame, so Continue and the keyboard's Go could both get through.
+  const submitting = useRef(false);
 
   const submit = async (): Promise<void> => {
-    if (busy || !address.trim()) return;
+    if (submitting.current || !address.trim()) return;
+    submitting.current = true;
     setBusy(true);
     setError(null);
-    const result = await requestServerAddressChange(address);
-    setBusy(false);
-    // The approval prompt opens over the app; return so it is not hidden behind this screen.
-    if (result === 'offered') router.back();
-    else setError(RESULT_MESSAGES[result]);
+    try {
+      const result = await requestServerAddressChange(address);
+      // On `offered` the approval prompt opens over this screen. Staying here keeps the typed
+      // address, so a lost prompt (a password manager pausing Gator) is one tap to retry.
+      if (result !== 'offered') setError(RESULT_MESSAGES[result]);
+    } finally {
+      submitting.current = false;
+      setBusy(false);
+    }
   };
 
   return (

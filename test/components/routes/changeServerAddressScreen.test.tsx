@@ -35,18 +35,18 @@ describe('ChangeServerAddressScreen', () => {
     useSessionStore.setState({ origin: 'https://old.example' });
   });
 
-  afterEach(() => {
-    useSessionStore.setState(previous);
+  afterEach(async () => {
+    await act(async () => {
+      useSessionStore.setState(previous);
+    });
   });
 
   async function submit(address: string): Promise<void> {
     await fireEvent.changeText(screen.getByPlaceholderText('https://example.com'), address);
-    await act(async () => {
-      fireEvent.press(screen.getByRole('button', { name: 'Continue' }));
-    });
+    await fireEvent.press(screen.getByRole('button', { name: 'Continue' }));
   }
 
-  it('shows the current address and hands an offered change to the approval prompt', async () => {
+  it('shows the current address and stays open while the approval prompt takes over', async () => {
     mockRequestServerAddressChange.mockResolvedValue('offered');
     await renderWithTheme(<ChangeServerAddressScreen />);
 
@@ -54,7 +54,33 @@ describe('ChangeServerAddressScreen', () => {
     await submit('new.example');
 
     expect(mockRequestServerAddressChange).toHaveBeenCalledWith('new.example');
-    expect(mockBack).toHaveBeenCalledTimes(1);
+    // If the prompt is lost (for example a password manager pauses Gator), Continue resubmits.
+    expect(mockBack).not.toHaveBeenCalled();
+    expect(screen.getByDisplayValue('new.example')).toBeTruthy();
+  });
+
+  it('sends one request when Go fires twice in the same frame', async () => {
+    let resolve!: (value: string) => void;
+    mockRequestServerAddressChange.mockReturnValue(
+      new Promise<string>((done) => {
+        resolve = done;
+      }),
+    );
+    await renderWithTheme(<ChangeServerAddressScreen />);
+    const input = screen.getByPlaceholderText('https://example.com');
+    await fireEvent.changeText(input, 'new.example');
+
+    // Both before any re-render: a state-based guard lets the second through.
+    const onSubmitEditing = input.props.onSubmitEditing as () => void;
+    await act(async () => {
+      onSubmitEditing();
+      onSubmitEditing();
+    });
+    await act(async () => {
+      resolve('offered');
+    });
+
+    expect(mockRequestServerAddressChange).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -62,6 +88,7 @@ describe('ChangeServerAddressScreen', () => {
     ['same-address', 'That is already your server address.'],
     ['insecure-downgrade', 'won’t switch from a secure https address'],
     ['unavailable', 'can’t change the address right now'],
+    ['unverifiable', 'can’t safely confirm a new address'],
   ])('explains a %s result and stays open', async (result, text) => {
     mockRequestServerAddressChange.mockResolvedValue(result);
     await renderWithTheme(<ChangeServerAddressScreen />);

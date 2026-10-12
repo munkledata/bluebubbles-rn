@@ -375,12 +375,70 @@ describe('persistServerConnection for a same-account address change', () => {
     expect(set.mock.calls[0]).toEqual(['serverSessionState', SERVER_SESSION_STATE.writing]);
   });
 
-  it('never takes the address-only path while Disconnect has revoked the account', async () => {
+  it('refuses, writing nothing, while Disconnect has revoked the account', async () => {
     const vault = await liveAccount();
     revoked = true;
     const set = jest.spyOn(vault, 'set');
 
-    await persistServerConnection('https://new.example', 'pw', info, { vault, revocationMarker });
+    await expect(
+      persistServerConnection('https://new.example', 'pw', info, { vault, revocationMarker }),
+    ).resolves.toMatchObject({ ok: false, kind: 'unknown' });
+    // Never the new-account `writing` barrier for a live account's address change.
+    expect(set).not.toHaveBeenCalled();
+  });
+
+  it('refuses, writing nothing, when the revocation marker cannot be read', async () => {
+    const vault = await liveAccount();
+    const set = jest.spyOn(vault, 'set');
+    const unreadable: AccountRevocationMarker = {
+      ...revocationMarker,
+      isRevoked: () => {
+        throw new Error('marker unreadable');
+      },
+    };
+
+    await expect(
+      persistServerConnection('https://new.example', 'pw', info, {
+        vault,
+        revocationMarker: unreadable,
+      }),
+    ).resolves.toMatchObject({ ok: false, kind: 'unknown' });
+    expect(set).not.toHaveBeenCalled();
+  });
+
+  it('treats a legacy session without a state value as the same live account', async () => {
+    const vault = await liveAccount();
+    await vault.delete('serverSessionState');
+    const set = jest.spyOn(vault, 'set');
+
+    await expect(
+      persistServerConnection('https://new.example', 'pw', info, { vault, revocationMarker }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(set.mock.calls).toEqual([['serverAddress', 'https://new.example']]);
+  });
+
+  it.each([
+    [
+      'a half-written session',
+      async (vault: InMemoryVault) => vault.set('serverSessionState', SERVER_SESSION_STATE.writing),
+      'https://new.example',
+    ],
+    ['the same address', async () => undefined, 'https://old.example/'],
+    [
+      'a revoked credential-upgrade tombstone',
+      async (vault: InMemoryVault) =>
+        vault.set(
+          'serverCredentialUpgrade',
+          serializeCredentialUpgradeJournal(revokedCredentialUpgradeJournal()),
+        ),
+      'https://new.example',
+    ],
+  ])('keeps the full commit for %s', async (_case, arrange, target) => {
+    const vault = await liveAccount();
+    await arrange(vault);
+    const set = jest.spyOn(vault, 'set');
+
+    await persistServerConnection(target, 'pw', info, { vault, revocationMarker });
 
     expect(set.mock.calls[0]).toEqual(['serverSessionState', SERVER_SESSION_STATE.writing]);
   });

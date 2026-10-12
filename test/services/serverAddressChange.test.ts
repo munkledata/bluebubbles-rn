@@ -9,6 +9,8 @@ import { serverRotationCoordinator } from '@/services/realtime/serverRotationCoo
 import { useSessionStore } from '@state/sessionStore';
 
 const lease = { generation: 0, isCurrent: () => true };
+const CURRENT_EPOCH = '11111111-1111-4111-8111-111111111111';
+const knownServer = { serverInfo: { imessage_provider_epoch: CURRENT_EPOCH } as never };
 
 // Review item 800: a missed or cancelled server-change prompt never came back, and the only other
 // way to change the address was Disconnect, which deletes local data. Settings now offers a typed
@@ -22,7 +24,7 @@ describe('requestServerAddressChange', () => {
     mockApplyNewServerUrl.mockImplementation(async (url) => {
       serverRotationCoordinator.offer(url, 'https://old.example', 1, lease, () => true);
     });
-    useSessionStore.setState({ origin: 'https://old.example' });
+    useSessionStore.setState({ origin: 'https://old.example', ...knownServer });
   });
 
   afterEach(() => {
@@ -42,6 +44,14 @@ describe('requestServerAddressChange', () => {
     await expect(requestServerAddressChange('http://insecure.example')).resolves.toBe(
       'insecure-downgrade',
     );
+    expect(mockApplyNewServerUrl).not.toHaveBeenCalled();
+  });
+
+  // A typed address could reach a different Mac that accepts the same password. Only a server that
+  // reports its Messages-database identity lets the prompt check that it is the same server.
+  it('refuses when the current server cannot report its identity', async () => {
+    useSessionStore.setState({ serverInfo: null });
+    await expect(requestServerAddressChange('https://new.example')).resolves.toBe('unverifiable');
     expect(mockApplyNewServerUrl).not.toHaveBeenCalled();
   });
 

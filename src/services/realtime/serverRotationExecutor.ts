@@ -1,6 +1,7 @@
 import { strictServerOrigin } from '@core/config';
 import type { ServerInfo } from '@core/models';
 import { isScopedDeviceCredential } from '@core/secure';
+import { useSessionStore } from '@state/sessionStore';
 import { timingSafeEqual, utf8Encode } from '@utils/bytes';
 import type { ConnectResult } from '../connection';
 import type { RealtimeDeliveryLease } from './deliveryCoordinator';
@@ -40,6 +41,8 @@ export interface ServerRotationExecutorDeps {
   ) => Promise<void>;
   /** Synchronous handoff after the complete durable tuple is active. */
   readonly publishCandidate: (origin: string, info: ServerInfo) => void;
+  /** The current server's last-known info, for the identity check. Defaults to the live session. */
+  readonly getCurrentServerInfo?: () => ServerInfo | null | undefined;
   readonly reconnect: (lease: RealtimeDeliveryLease, isCurrent: () => boolean) => Promise<void>;
 }
 
@@ -52,6 +55,7 @@ export type ServerRotationApprovalResult =
         | 'password-mismatch'
         | 'cleartext-consent-required'
         | 'validation-failed'
+        | 'different-server'
         | 'persistence-failed'
         | 'reconnect-failed';
       readonly message: string;
@@ -88,6 +92,16 @@ function rotatedSessionMatches(
     passwordsMatch(session.password, expectedPassword)
   );
 }
+
+const CURRENT_SERVER_UNREACHABLE_MESSAGE =
+  'Gator couldn’t reach your current server to check the password. A paired device can change ' +
+  'its server address only while the current server is reachable.';
+const DIFFERENT_SERVER_MESSAGE =
+  'That address answers as a different Messages server, so Gator won’t switch to it. To use a ' +
+  'different server, disconnect and set it up again.';
+
+const currentSessionServerInfo = (): ServerInfo | null | undefined =>
+  useSessionStore.getState().serverInfo;
 
 const staleResult = (): ServerRotationApprovalResult => ({
   ok: false,
@@ -175,7 +189,9 @@ export async function approveServerRotation(
         message:
           passwordProof.kind === 'unauthorized'
             ? 'The password does not match your current server password.'
-            : passwordProof.message,
+            : passwordProof.kind === 'unreachable'
+              ? CURRENT_SERVER_UNREACHABLE_MESSAGE
+              : passwordProof.message,
         terminal: false,
       };
     }
@@ -196,6 +212,23 @@ export async function approveServerRotation(
       kind: 'validation-failed',
       message: validation.message,
       terminal: false,
+    };
+  }
+
+  // The same server installation keeps its Messages-database identity at a new address. A different
+  // Mac that happens to accept the same password must never inherit this phone's local data.
+  const currentProviderEpoch =
+    (deps.getCurrentServerInfo ?? currentSessionServerInfo)()?.imessage_provider_epoch ?? null;
+  if (
+    currentProviderEpoch !== null &&
+    validation.serverInfo.imessage_provider_epoch !== currentProviderEpoch
+  ) {
+    deps.coordinator.cancel(requestId);
+    return {
+      ok: false,
+      kind: 'different-server',
+      message: DIFFERENT_SERVER_MESSAGE,
+      terminal: true,
     };
   }
 

@@ -788,7 +788,9 @@ or Do Not Disturb access prompt is an unexpected failure.
       fill the password, a tap outside the card does not cancel, and approval reconnects with every
       chat, draft and setting intact. Then repeat and run `adb shell am kill <package>` right after
       tapping Approve: on reopen Gator must use either the old or the new address, never Setup or a
-      wiped local state.
+      wiped local state. Afterwards confirm push notifications still arrive. Entering a different
+      Mac that accepts the same password must be refused. With a password manager that opens its
+      own unlock screen, the prompt may close; Continue on the still-open screen offers it again.
 - [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE` (`FEAT-05A`):** Confirm the installed package declares
       coarse/fine foreground location but not background location or
       `FOREGROUND_SERVICE_LOCATION`. In a proven existing one-to-one supported conversation, the

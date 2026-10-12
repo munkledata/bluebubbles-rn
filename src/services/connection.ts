@@ -55,26 +55,34 @@ const ADDRESS_CHANGE_NOT_SAVED_MESSAGE =
   'Could not save the new server address, so Gator is still using the old one. You can try again ' +
   'from Settings → Change Server Address.';
 
-/** True when the vault holds this exact live account, saved at a different address. */
-async function isSameLiveAccountAtNewAddress(
+type AddressChangeDecision = 'address-change' | 'new-account' | 'unconfirmed';
+
+/**
+ * Is this commit the saved live account at a different address? Once it is, never fall back to
+ * the new-account `writing` barrier (an interruption there wipes local data): proceed only with a
+ * readable, clear revocation marker, otherwise refuse (`unconfirmed`).
+ */
+async function classifyAddressChange(
   origin: string,
   password: string,
   deps: CredentialPersistenceDeps,
-): Promise<boolean> {
-  if (readAccountRevocationState(deps.revocationMarker) !== 'clear') return false;
+): Promise<AddressChangeDecision> {
   const [sessionState, address, storedPassword] = await Promise.all([
     deps.vault.get('serverSessionState'),
     deps.vault.get('serverAddress'),
     deps.vault.get('serverPassword'),
   ]);
   const currentOrigin = strictServerOrigin(address);
-  return (
+  const sameLiveAccountAtNewAddress =
     (sessionState === null || sessionState === SERVER_SESSION_STATE.active) &&
     currentOrigin !== null &&
     currentOrigin !== strictServerOrigin(origin) &&
     storedPassword !== null &&
-    timingSafeEqual(utf8Encode(storedPassword), utf8Encode(password))
-  );
+    timingSafeEqual(utf8Encode(storedPassword), utf8Encode(password));
+  if (!sameLiveAccountAtNewAddress) return 'new-account';
+  return readAccountRevocationState(deps.revocationMarker) === 'clear'
+    ? 'address-change'
+    : 'unconfirmed';
 }
 
 /** One atomic SecureStore write: the old or the new address, never a half-written account. */
@@ -179,19 +187,22 @@ export async function persistServerConnection(
   // interruption look like a half-written account and wipe local data at the next launch
   // (review items 800/808).
   if (upgrade.kind === 'absent') {
-    let sameAccount: boolean;
+    let decision: AddressChangeDecision;
     try {
-      sameAccount = await isSameLiveAccountAtNewAddress(origin, password, deps);
+      decision = await classifyAddressChange(origin, password, deps);
     } catch (err) {
       logger.warn('[connect] the saved session could not be read before an address change', err);
+      decision = 'unconfirmed';
+    }
+    if (!attemptIsCurrent(deps)) return cancelledResult();
+    if (decision === 'address-change') return persistServerAddressChange(origin, info, deps);
+    if (decision === 'unconfirmed') {
       return {
         ok: false,
         kind: 'unknown',
         message: 'Could not confirm the saved credential state. Please try again.',
       };
     }
-    if (!attemptIsCurrent(deps)) return cancelledResult();
-    if (sameAccount) return persistServerAddressChange(origin, info, deps);
   }
 
   // Correlate the two independent SecureStore keys. `writing` is durable BEFORE either credential
