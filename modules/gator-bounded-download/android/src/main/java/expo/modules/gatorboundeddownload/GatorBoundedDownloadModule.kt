@@ -810,12 +810,13 @@ class GatorBoundedDownloadModule : Module() {
           output.fd.sync()
         }
       }
-    } catch (error: Exception) {
-      // The streams own both descriptors after construction. A failed constructor is covered by
-      // these idempotent best-effort closes.
+    } finally {
+      // Android's FileInputStream/FileOutputStream(FileDescriptor) do not own the descriptor, so
+      // closing the streams leaves both open, keeping a later-deleted file's space allocated. Close
+      // them on every path. Os.close invalidates the FileDescriptor object before closing, so a
+      // second close is a harmless EBADF and can never close a reused descriptor number.
       runCatching { Os.close(sourceDescriptor) }
       runCatching { Os.close(destinationDescriptor) }
-      throw error
     }
 
     val sourceAfter = ownedFileLstat(source)

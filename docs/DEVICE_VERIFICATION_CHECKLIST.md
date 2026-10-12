@@ -580,6 +580,12 @@ only the product-owned bounded intake described in
 - [x] **`EXACT PLAY V78, PRE-SHARE-02 SUPPORTING CONTROL`:** Ordinary outbound sharing of downloaded
       synthetic media opened Android's chooser under completed `FEAT-07`. Repeat only if the frozen
       SHARE-02 candidate changes the outbound bridge.
+- [ ] **`EXACT PACKAGED CANDIDATE` — copied-share descriptors (added 2026-10-11):** Share and send
+      one synthetic image, let the batch clean up, then run
+      `adb shell ls -l /proc/$(adb shell pidof com.bluegreengatorapps.messages)/fd` and confirm no
+      entry points into `shared-in` or the copied attachment. Before the fix each successful copy
+      left both descriptors open, keeping deleted files' space allocated. Host evidence is only a
+      source-shape test.
 
 ### 7. Received stickers
 
