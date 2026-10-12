@@ -44,8 +44,10 @@ import {
   type SendReactionArgs,
 } from './sendReactionService';
 import {
+  checkUnconfirmedUnsend,
   sendEdit,
   sendUnsend,
+  type CheckUnsendResult,
   type SendEditResult,
   type SendUnsendResult,
 } from './sendEditService';
@@ -336,6 +338,7 @@ export { sendReactionMessage, type SendReactionArgs } from './sendReactionServic
 export {
   sendEdit,
   sendUnsend,
+  type CheckUnsendResult,
   type SendEditArgs,
   type SendEditResult,
   type SendUnsendArgs,
@@ -1103,6 +1106,38 @@ export function unsend(
         capability.serverInfo?.supports_imessage_unsend === true,
     );
     return sendUnsend(
+      getDatabase(),
+      http,
+      args,
+      Date.now(),
+      () => accountLease.isCurrent(),
+      serverAuthorization,
+    );
+  });
+}
+
+/** UI-facing: check again, and finish, your own unsend whose result was unknown. */
+export function checkUnsend(
+  args: { messageGuid: string; chatGuid: string },
+  accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
+): Promise<CheckUnsendResult | null> {
+  return runUiAccountOperation(accountLease, () => {
+    const capability = captureSessionRcsCapabilityLease();
+    if (
+      isRcsChatGuid(args.chatGuid) ||
+      capability?.serverInfo?.supports_imessage_unsend !== true ||
+      !capability.isCurrent()
+    ) {
+      throw new SendCapabilityUnavailableError();
+    }
+    const serverAuthorization = messageTargetServerAuthorization(
+      capability?.serverInfo,
+      () =>
+        accountLease.isCurrent() &&
+        capability.isCurrent() &&
+        capability.serverInfo?.supports_imessage_unsend === true,
+    );
+    return checkUnconfirmedUnsend(
       getDatabase(),
       http,
       args,

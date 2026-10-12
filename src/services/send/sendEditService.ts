@@ -1,4 +1,5 @@
-import { editMessage, unsendMessage } from '@core/api/endpoints/messages';
+import { chatMessages, editMessage, unsendMessage } from '@core/api/endpoints/messages';
+import { IMESSAGE_UNSEND_WINDOW_MS } from '@core/messages/retraction';
 import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
 import { plainTextFromAttributedBody } from '@core/richtext';
@@ -8,6 +9,9 @@ import {
   applyLocalUnsendWithinTransaction,
   explicitMessageTargetPart,
   MessageTargetUnavailableError,
+  clearUnconfirmedUnsendWithinTransaction,
+  readMessageUnsendFence,
+  readUnconfirmedUnsend,
   recordUnconfirmedUnsendWithinTransaction,
   resolveMessageTarget,
   resolveMessageTargetWithinTransaction,
@@ -500,6 +504,126 @@ async function sendUnsendOnce(
     commitGuard,
   );
   return { status: 'rejected' };
+}
+
+export type CheckUnsendResult =
+  /** The Mac shows it unsent, or the server's echo already settled it. */
+  | { readonly status: 'confirmed' }
+  /** It was not unsent and can't be now: the message is shown again. */
+  | { readonly status: 'restored' }
+  | { readonly status: 'outcome-unknown' };
+
+/** Unsends work only within two minutes of sending, so the message is among the newest. */
+const UNSEND_CHECK_RECENT_MESSAGES = 100;
+
+function forgetUnconfirmedUnsend(
+  db: AppDatabase,
+  messageGuid: string,
+  commitGuard?: DbCommitGuard,
+): Promise<void> {
+  return withDbTransaction(
+    db,
+    (context) => clearUnconfirmedUnsendWithinTransaction(context, messageGuid),
+    commitGuard,
+  );
+}
+
+/**
+ * "Check again" for an unsend whose result is unknown. Asks the Mac for its copy, then finishes it:
+ * already unsent → confirmed; not unsent and past Apple's window → the message comes back; still
+ * within the window → one more unsend request, settled like the first. If the Mac can't be asked,
+ * nothing changes.
+ */
+export function checkUnconfirmedUnsend(
+  db: AppDatabase,
+  http: HttpClient,
+  args: { chatGuid: string; messageGuid: string },
+  now: number = Date.now(),
+  commitGuard?: DbCommitGuard,
+  serverAuthorization?: MessageTargetServerAuthorization,
+): Promise<CheckUnsendResult> {
+  // Same per-message queue as edit and unsend, so a double tap or a racing unsend takes turns.
+  return queueMessageMutation(db, args.messageGuid, () =>
+    checkUnconfirmedUnsendOnce(db, http, args, now, commitGuard, serverAuthorization),
+  );
+}
+
+async function checkUnconfirmedUnsendOnce(
+  db: AppDatabase,
+  http: HttpClient,
+  args: { chatGuid: string; messageGuid: string },
+  now: number,
+  commitGuard?: DbCommitGuard,
+  serverAuthorization?: MessageTargetServerAuthorization,
+): Promise<CheckUnsendResult> {
+  const note = await readUnconfirmedUnsend(db, args.messageGuid);
+  if (!note || note.chatGuid !== args.chatGuid) return { status: 'confirmed' };
+  const fence = await readMessageUnsendFence(db, args.messageGuid);
+  if (!fence || fence.pendingPartIndex !== 0 || fence.dateRetracted !== note.appliedAt) {
+    // The server's echo (or another writer) already settled the message; drop the stale note.
+    await forgetUnconfirmedUnsend(db, args.messageGuid, commitGuard);
+    return { status: 'confirmed' };
+  }
+
+  let macCopy;
+  try {
+    const recent = await chatMessages(http, args.chatGuid, { limit: UNSEND_CHECK_RECENT_MESSAGES });
+    macCopy = recent.find((message) => message.guid === args.messageGuid);
+  } catch {
+    if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
+    return { status: 'outcome-unknown' };
+  }
+  if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
+  if (!macCopy) return { status: 'outcome-unknown' };
+  if (macCopy.dateRetracted != null) {
+    await forgetUnconfirmedUnsend(db, args.messageGuid, commitGuard);
+    return { status: 'confirmed' };
+  }
+
+  const tooLate =
+    macCopy.dateCreated == null || now - macCopy.dateCreated > IMESSAGE_UNSEND_WINDOW_MS;
+  if (!tooLate) {
+    try {
+      const ack = await unsendMessage(http, {
+        chatGuid: args.chatGuid,
+        messageGuid: args.messageGuid,
+        partIndex: 0,
+      });
+      if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
+      if (
+        (!serverAuthorization || serverAuthorization.isCurrent()) &&
+        ack.unsent === true &&
+        ack.guid === args.messageGuid
+      ) {
+        await forgetUnconfirmedUnsend(db, args.messageGuid, commitGuard);
+        return { status: 'confirmed' };
+      }
+      return { status: 'outcome-unknown' };
+    } catch (error) {
+      if (error instanceof DbCommitGuardRejectedError) throw error;
+      if (commitGuard && !commitGuard()) throw new DbCommitGuardRejectedError();
+      if (
+        (serverAuthorization !== undefined && !serverAuthorization.isCurrent()) ||
+        unsendOutcomeIsUnknown(error)
+      ) {
+        return { status: 'outcome-unknown' };
+      }
+      // The Mac shows it not unsent, so even "invalid target" is a definite refusal: restore below.
+    }
+  }
+
+  // Not unsent on the Mac and it can't be now: show the message again, as before the unsend.
+  const restored = await revertOptimisticUnsend(
+    db,
+    args.messageGuid,
+    note.appliedAt,
+    note.previousDateRetracted,
+    note.previousRetractionState,
+    null,
+    commitGuard,
+  );
+  await forgetUnconfirmedUnsend(db, args.messageGuid, commitGuard);
+  return { status: restored ? 'restored' : 'confirmed' };
 }
 
 /** Optimistic exact-part-zero unsend. The single POST is never automatically retried. */

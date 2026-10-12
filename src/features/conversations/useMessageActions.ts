@@ -24,12 +24,13 @@ import {
   captureRealtimeDeliveryLease,
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
-import { discardMessage, react, unsend } from '@/services/send';
+import { checkUnsend, discardMessage, react, unsend } from '@/services/send';
 import { useRcsMutationEnabled } from '@state/sessionStore';
 import type { SelectedMessage } from '@ui';
 import { pickReminderTime } from '@ui/conversations/pickReminderTime';
 import { presentDiscardMessageResult, presentSendIssue } from '@ui/conversations/sendNotices';
 import { showDialog } from '@ui/dialog/dialogStore';
+import { IMESSAGE_UNSEND_WINDOW_MS } from '@core/messages/retraction';
 import { useTransportHealthStore } from '@state/transportHealthStore';
 import { isDevServer } from '@utils/isDev';
 import {
@@ -64,7 +65,6 @@ function actionContentOf(msg: EnrichedMessage) {
 }
 
 const IMESSAGE_EDIT_WINDOW_MS = 15 * 60_000;
-const IMESSAGE_UNSEND_WINDOW_MS = 2 * 60_000;
 
 function canEditExactPlainTextPartZero(msg: EnrichedMessage, now: number): boolean {
   const { bodyRuns, bodyText, visibleAttachmentCount } = actionContentOf(msg);
@@ -471,6 +471,49 @@ export function useMessageActions({
       ],
     );
   };
+
+  // Tapping "Unsend not confirmed": ask the Mac and finish the unsend either way.
+  const onCheckUnsend = useCallback(
+    (msg: EnrichedMessage): void => {
+      if (imessageUnsendInFlight.current || !screenLease.isCurrent()) return;
+      if (useTransportHealthStore.getState().network === 'offline') {
+        showDialog(
+          'You’re Offline',
+          'Checking an unsend needs a connection to your Mac. Try again when you’re online.',
+        );
+        return;
+      }
+      const stillUnconfirmed = (): void => {
+        showDialog(
+          'Still Not Confirmed',
+          'Gator couldn’t confirm the unsend with your Mac yet. Try again later.',
+        );
+      };
+      imessageUnsendInFlight.current = true;
+      void checkUnsend({ messageGuid: msg.guid, chatGuid: guid }, screenLease)
+        .then((result) => {
+          if (!screenLease.isCurrent()) return;
+          refreshMessages?.();
+          if (result?.status === 'restored') {
+            showDialog(
+              'Message Not Unsent',
+              'Your Mac never unsent this message and it can no longer be unsent, so it’s shown again.',
+            );
+          } else if (result == null || result.status === 'outcome-unknown') {
+            stillUnconfirmed();
+          }
+        })
+        .catch(() => {
+          if (!screenLease.isCurrent()) return;
+          refreshMessages?.();
+          stillUnconfirmed();
+        })
+        .finally(() => {
+          imessageUnsendInFlight.current = false;
+        });
+    },
+    [guid, refreshMessages, screenLease],
+  );
 
   const onRemoteDeleteSelected = (): void => {
     const initial = currentSelectedMessage();
@@ -906,7 +949,7 @@ export function useMessageActions({
     onLongPressMessage,
     ...(imessageRepliesAvailable ? { onSwipeReply, onReplyToSelected } : {}),
     ...(imessageEditsAvailable ? { onEditSelected } : {}),
-    ...(imessageUnsendsAvailable ? { onUnsendSelected } : {}),
+    ...(imessageUnsendsAvailable ? { onUnsendSelected, onCheckUnsend } : {}),
     ...(imessageRemoteDeleteAvailable ? { onRemoteDeleteSelected } : {}),
     onToggleSelect,
     onEnterSelect,

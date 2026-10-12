@@ -1,4 +1,6 @@
 export const MAX_RETRACTION_PART_INDEX = 10_000;
+/** Apple lets a sent iMessage be unsent for two minutes. */
+export const IMESSAGE_UNSEND_WINDOW_MS = 2 * 60_000;
 export const MAX_RETRACTION_PARTS = 128;
 export const MAX_RETRACTION_ATTACHMENTS = 256;
 export const MAX_RETRACTION_ATTACHMENT_GUID_BYTES = 1_024;

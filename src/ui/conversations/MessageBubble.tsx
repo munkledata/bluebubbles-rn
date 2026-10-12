@@ -65,6 +65,8 @@ interface MessageBubbleProps {
    */
   chatService?: 'iMessage' | 'SMS' | 'RCS' | null;
   onRetry?: () => void;
+  /** Tap on your own unconfirmed unsend: check it again with the Mac. */
+  onCheckUnsend?: () => void;
   /** Long-press the bubble → open the reaction/action menu, anchored to this bubble's
    *  on-screen rectangle (measured here so the floating menu can pin above/below it). */
   onLongPress?: (rect: BubbleRect) => void;
@@ -95,6 +97,7 @@ export const MessageBubble = React.memo(function MessageBubble({
   accentColor,
   chatService,
   onRetry,
+  onCheckUnsend,
   onLongPress,
   onJumpToReply,
   onShowReactions,
@@ -321,14 +324,27 @@ export const MessageBubble = React.memo(function MessageBubble({
   if (isRetracted) {
     return (
       <View style={[styles.anchor, { alignSelf: isFromMe ? 'flex-end' : 'flex-start' }]}>
-        <Text style={[styles.tombstone, overlay, pill]}>
-          {isFromMe
-            ? // Its result is unknown: the message stays hidden, but it may still be with others.
-              msg.unsendUnconfirmed === 1
-              ? 'Unsend not confirmed'
-              : 'You unsent a message'
-            : `${msg.senderName ?? 'They'} unsent a message`}
-        </Text>
+        {isFromMe && msg.unsendUnconfirmed === 1 && onCheckUnsend ? (
+          <Pressable
+            onPress={onCheckUnsend}
+            accessibilityRole="button"
+            accessibilityLabel="Unsend not confirmed. Check again"
+            hitSlop={8}
+          >
+            <Text style={[styles.tombstone, overlay, pill]}>
+              Unsend not confirmed · Tap to check
+            </Text>
+          </Pressable>
+        ) : (
+          <Text style={[styles.tombstone, overlay, pill]}>
+            {isFromMe
+              ? // Its result is unknown: the message stays hidden, but it may still be with others.
+                msg.unsendUnconfirmed === 1
+                ? 'Unsend not confirmed'
+                : 'You unsent a message'
+              : `${msg.senderName ?? 'They'} unsent a message`}
+          </Text>
+        )}
       </View>
     );
   }

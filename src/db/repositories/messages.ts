@@ -1227,6 +1227,20 @@ export function recordUnconfirmedUnsendWithinTransaction(
   });
 }
 
+/** The local unsend fence and its marker, to tell whether an unconfirmed unsend still stands. */
+export async function readMessageUnsendFence(
+  db: AppDatabase,
+  messageGuid: string,
+): Promise<{ pendingPartIndex: number | null; dateRetracted: number | null } | null> {
+  const rows = await db.all<{ pendingPartIndex: number | null; dateRetracted: number | null }>(sql`
+    SELECT pending_retraction_part_index AS pendingPartIndex, date_retracted AS dateRetracted
+      FROM messages
+     WHERE guid = ${messageGuid}
+     LIMIT 1
+  `);
+  return rows[0] ?? null;
+}
+
 export async function readUnconfirmedUnsend(
   db: AppDatabase,
   messageGuid: string,

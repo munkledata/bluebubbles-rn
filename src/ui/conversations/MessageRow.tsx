@@ -41,6 +41,7 @@ interface MessageRowProps {
   // Take the message so the list can pass STABLE callbacks (the per-row binding
   // happens here, inside the memoized row, not in the list's renderItem).
   onRetry?: (msg: EnrichedMessage) => void;
+  onCheckUnsend?: (msg: EnrichedMessage) => void;
   onLongPress?: (msg: EnrichedMessage, rect: BubbleRect) => void;
   onSwipeReply?: (msg: EnrichedMessage) => void;
   /** Jump to a replied-to message by its guid (tap the reply quote). */
@@ -72,6 +73,7 @@ export const MessageRow = React.memo(function MessageRow({
   chatService,
   hasBackground,
   onRetry,
+  onCheckUnsend,
   onLongPress,
   onSwipeReply,
   onJumpToReply,
@@ -114,6 +116,7 @@ export const MessageRow = React.memo(function MessageRow({
   // outer handlers are unchanged — a fresh arrow per render would defeat the bubble's memo.
   const originator = msg.threadOriginatorGuid;
   const handleRetry = useCallback(() => onRetry?.(msg), [onRetry, msg]);
+  const handleCheckUnsend = useCallback(() => onCheckUnsend?.(msg), [onCheckUnsend, msg]);
   const handleLongPress = useCallback(
     (rect: BubbleRect) => onLongPress?.(msg, rect),
     [onLongPress, msg],
@@ -175,6 +178,8 @@ export const MessageRow = React.memo(function MessageRow({
       hasBackground={hasBackground}
       chatService={chatService}
       onRetry={onRetry ? handleRetry : undefined}
+      // Only an unconfirmed unsend gets the tap, so other rows keep an undefined (memo-stable) prop.
+      onCheckUnsend={onCheckUnsend && msg.unsendUnconfirmed === 1 ? handleCheckUnsend : undefined}
       onLongPress={onLongPress ? handleLongPress : undefined}
       onJumpToReply={onJumpToReply && originator ? handleJumpToReply : undefined}
       // Only wire the tap when a handler is provided AND there's something to show, so an

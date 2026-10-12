@@ -1207,4 +1207,19 @@ describe('MessageBubble unconfirmed unsend', () => {
     await view.rerender(<MessageBubble msg={{ ...base, unsendUnconfirmed: 0 }} showTail />);
     expect(screen.getByText('You unsent a message')).toBeTruthy();
   });
+
+  it('lets you check an unconfirmed unsend again by tapping it', async () => {
+    const onCheckUnsend = jest.fn();
+    const base = makeMsg({ isFromMe: 1, dateRetracted: 5_000, retractionState: 'unknown' });
+    await renderWithTheme(
+      <MessageBubble
+        msg={{ ...base, unsendUnconfirmed: 1 }}
+        showTail
+        onCheckUnsend={onCheckUnsend}
+      />,
+    );
+
+    await fireEvent.press(screen.getByRole('button', { name: /Unsend not confirmed/ }));
+    expect(onCheckUnsend).toHaveBeenCalledTimes(1);
+  });
 });

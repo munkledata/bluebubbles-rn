@@ -54,6 +54,7 @@ jest.mock('@state/sessionStore', () => ({
 }));
 jest.mock('@ui/conversations/pickReminderTime', () => ({ pickReminderTime: jest.fn() }));
 jest.mock('@/services/send', () => ({
+  checkUnsend: jest.fn(),
   discardMessage: jest.fn(async () => {}),
   react: jest.fn().mockResolvedValue(null),
   unsend: jest.fn(),
@@ -77,7 +78,7 @@ jest.mock('@ui/dialog/dialogStore', () => ({
 // eslint-disable-next-line import/first
 import { useMessageActions } from '@features/conversations/useMessageActions';
 // eslint-disable-next-line import/first
-import { discardMessage, react, unsend } from '@/services/send';
+import { checkUnsend, discardMessage, react, unsend } from '@/services/send';
 // eslint-disable-next-line import/first
 import { deleteMessageFromMac } from '@/services/remoteMessageDeleteUiService';
 // eslint-disable-next-line import/first
@@ -90,6 +91,7 @@ import { pickReminderTime } from '@ui/conversations/pickReminderTime';
 const mockScheduleMessageReminder = scheduleMessageReminder as jest.Mock;
 const mockPickReminderTime = pickReminderTime as jest.Mock;
 const mockUnsend = unsend as jest.Mock;
+const mockCheckUnsend = checkUnsend as jest.Mock;
 const mockDeleteMessageFromMac = deleteMessageFromMac as jest.Mock;
 
 /** Press the destructive button of the last dialog that was shown. */
@@ -268,6 +270,62 @@ describe('useMessageActions — narrow iMessage actions and RCS reactions', () =
     } finally {
       useTransportHealthStore.setState({ network: 'unknown' });
     }
+  });
+
+  it.each([
+    ['restored', 'Message Not Unsent'],
+    ['outcome-unknown', 'Still Not Confirmed'],
+  ] as const)(
+    'checks an unconfirmed unsend again and explains a %s result',
+    async (status, title) => {
+      mockCheckUnsend.mockResolvedValueOnce({ status });
+      const refreshMessages = jest.fn();
+      const target = {
+        ...msg('message-unconfirmed', 'sent'),
+        unsendUnconfirmed: 1,
+      } as EnrichedMessage;
+      const { result } = await mount(
+        [target],
+        'iMessage;-;+15550001111',
+        undefined,
+        true,
+        false,
+        refreshMessages,
+      );
+
+      await act(async () => result.current.onCheckUnsend?.(target));
+
+      await waitFor(() =>
+        expect(mockCheckUnsend).toHaveBeenCalledWith(
+          { messageGuid: 'message-unconfirmed', chatGuid: 'iMessage;-;+15550001111' },
+          expect.objectContaining({ isCurrent: expect.any(Function) }),
+        ),
+      );
+      await waitFor(() => expect(dialogs.at(-1)?.title).toBe(title));
+      expect(refreshMessages).toHaveBeenCalled();
+    },
+  );
+
+  it('says nothing when the check confirms the unsend', async () => {
+    mockCheckUnsend.mockResolvedValueOnce({ status: 'confirmed' });
+    const refreshMessages = jest.fn();
+    const target = {
+      ...msg('message-unconfirmed', 'sent'),
+      unsendUnconfirmed: 1,
+    } as EnrichedMessage;
+    const { result } = await mount(
+      [target],
+      'iMessage;-;+15550001111',
+      undefined,
+      true,
+      false,
+      refreshMessages,
+    );
+
+    await act(async () => result.current.onCheckUnsend?.(target));
+
+    await waitFor(() => expect(refreshMessages).toHaveBeenCalled());
+    expect(dialogs).toHaveLength(0);
   });
 
   it('requires confirmation before one narrow unsend and warns on unknown outcome', async () => {

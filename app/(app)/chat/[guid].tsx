@@ -1024,6 +1024,7 @@ function ChatScreenInner({
     onReplyToSelected,
     onEditSelected,
     onUnsendSelected,
+    onCheckUnsend,
     onRemoteDeleteSelected,
     onToggleSelect,
     onEnterSelect,
@@ -2194,6 +2195,7 @@ function ChatScreenInner({
       topInset={hasWallpaper ? topBar + BAR_GAP : 0}
       bottomInset={hasWallpaper ? bottomBar + BAR_GAP : 0}
       onLongPressMessage={searchOpen ? undefined : onLongPressMessage}
+      onCheckUnsend={searchOpen ? undefined : onCheckUnsend}
       onSwipeReply={
         !searchOpen && imessageRepliesAvailable && selectedGuids == null ? onSwipeReply : undefined
       }

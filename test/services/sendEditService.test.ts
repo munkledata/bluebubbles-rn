@@ -3,7 +3,8 @@ import { ApiError } from '@core/api/errors';
 import type { HttpClient, RequestOptions } from '@core/api/http';
 import type { AppDatabase } from '@db/types';
 import { listMessagesWithSenders, readUnconfirmedUnsend } from '@db/repositories';
-import { sendEdit, sendUnsend } from '@/services/send/sendEditService';
+import { IMESSAGE_UNSEND_WINDOW_MS } from '@core/messages/retraction';
+import { checkUnconfirmedUnsend, sendEdit, sendUnsend } from '@/services/send/sendEditService';
 import { createTestDb } from '../support/testDb';
 
 const CHAT_GUID = 'iMessage;-;+15551234567';
@@ -470,5 +471,121 @@ describe('narrow one-to-one iMessage edit', () => {
     } finally {
       targetRead.mockRestore();
     }
+  });
+});
+
+// "Check again" on an unsend whose result is unknown: ask the Mac, then finish it either way.
+describe('checking an unconfirmed unsend', () => {
+  let raw: Database.Database;
+  let db: AppDatabase;
+  const SENT_AT = 100;
+
+  beforeEach(async () => {
+    const t = await createTestDb();
+    raw = t.raw;
+    db = t.db;
+    seedExactTextTarget(raw);
+    // Leave an unsend with an unknown result behind (the fence plus its note).
+    const unknown = fakeHttp(async () => {
+      throw new ApiError('timeout', 'no answer', undefined);
+    });
+    await sendUnsend(
+      db,
+      unknown.http,
+      { chatGuid: CHAT_GUID, messageGuid: MESSAGE_GUID, partIndex: 0 },
+      6_000,
+    );
+    expect(await readUnconfirmedUnsend(db, MESSAGE_GUID)).not.toBeNull();
+  });
+
+  function macSays(
+    copy: { dateRetracted: number | null } | null,
+    post?: () => Promise<unknown>,
+  ): { http: HttpClient; get: jest.Mock; post: jest.Mock } {
+    const get = jest.fn(async () => ({
+      messages: copy
+        ? [{ guid: MESSAGE_GUID, dateCreated: SENT_AT, dateRetracted: copy.dateRetracted }]
+        : [],
+    }));
+    const postMock = jest.fn(post ?? (async () => ({ unsent: true, guid: MESSAGE_GUID })));
+    return {
+      http: { get, post: postMock } as unknown as HttpClient,
+      get,
+      post: postMock,
+    };
+  }
+  const args = { chatGuid: CHAT_GUID, messageGuid: MESSAGE_GUID };
+
+  it('confirms when the Mac already shows the message unsent', async () => {
+    const mac = macSays({ dateRetracted: 6_100 });
+    await expect(checkUnconfirmedUnsend(db, mac.http, args, 7_000)).resolves.toEqual({
+      status: 'confirmed',
+    });
+    expect(mac.post).not.toHaveBeenCalled();
+    expect(retractionRow(raw)).toMatchObject({ dateRetracted: 6_000, pendingPartIndex: 0 });
+    await expect(readUnconfirmedUnsend(db, MESSAGE_GUID)).resolves.toBeNull();
+  });
+
+  it('brings the message back when the Mac never unsent it and the window has passed', async () => {
+    const mac = macSays({ dateRetracted: null });
+    await expect(
+      checkUnconfirmedUnsend(db, mac.http, args, SENT_AT + IMESSAGE_UNSEND_WINDOW_MS + 1),
+    ).resolves.toEqual({ status: 'restored' });
+    expect(mac.post).not.toHaveBeenCalled();
+    expect(retractionRow(raw)).toEqual({
+      dateRetracted: null,
+      retractionState: null,
+      pendingPartIndex: null,
+    });
+    await expect(readUnconfirmedUnsend(db, MESSAGE_GUID)).resolves.toBeNull();
+  });
+
+  it('tries the unsend again while Apple still allows it', async () => {
+    const mac = macSays({ dateRetracted: null });
+    await expect(checkUnconfirmedUnsend(db, mac.http, args, SENT_AT + 1_000)).resolves.toEqual({
+      status: 'confirmed',
+    });
+    expect(mac.post).toHaveBeenCalledTimes(1);
+    await expect(readUnconfirmedUnsend(db, MESSAGE_GUID)).resolves.toBeNull();
+  });
+
+  it('brings the message back when the retry is definitely refused', async () => {
+    const mac = macSays({ dateRetracted: null }, async () => {
+      throw new ApiError(
+        'server_error',
+        'unsend unavailable',
+        503,
+        undefined,
+        undefined,
+        'imessage_unsend_unavailable',
+      );
+    });
+    await expect(checkUnconfirmedUnsend(db, mac.http, args, SENT_AT + 1_000)).resolves.toEqual({
+      status: 'restored',
+    });
+    expect(retractionRow(raw).pendingPartIndex).toBeNull();
+    await expect(readUnconfirmedUnsend(db, MESSAGE_GUID)).resolves.toBeNull();
+  });
+
+  it('stays unconfirmed when the Mac cannot be asked', async () => {
+    const mac = macSays(null);
+    mac.get.mockRejectedValueOnce(new ApiError('no_connection', 'offline', undefined));
+    await expect(checkUnconfirmedUnsend(db, mac.http, args, 7_000)).resolves.toEqual({
+      status: 'outcome-unknown',
+    });
+    expect(retractionRow(raw)).toMatchObject({ pendingPartIndex: 0 });
+    await expect(readUnconfirmedUnsend(db, MESSAGE_GUID)).resolves.not.toBeNull();
+  });
+
+  it('settles quietly once the server echo has already cleared the fence', async () => {
+    raw
+      .prepare('UPDATE messages SET pending_retraction_part_index = NULL WHERE guid = ?')
+      .run(MESSAGE_GUID);
+    const mac = macSays({ dateRetracted: null });
+    await expect(checkUnconfirmedUnsend(db, mac.http, args, 7_000)).resolves.toEqual({
+      status: 'confirmed',
+    });
+    expect(mac.get).not.toHaveBeenCalled();
+    await expect(readUnconfirmedUnsend(db, MESSAGE_GUID)).resolves.toBeNull();
   });
 });

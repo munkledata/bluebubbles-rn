@@ -62,6 +62,8 @@ interface MessageListProps {
   /** Same, for the floating composer at the bottom. */
   bottomInset?: number;
   onLongPressMessage?: (msg: EnrichedMessage, rect: BubbleRect) => void;
+  /** Tap on your own unsend whose result is unknown: check it again with the Mac. */
+  onCheckUnsend?: (msg: EnrichedMessage) => void;
   /** Capability-gated plain-text reply selection for exact iMessage part zero. */
   onSwipeReply?: (msg: EnrichedMessage) => void;
   /** Pull-to-refresh action (re-sync this thread). Omit to disable the gesture. */
@@ -103,6 +105,7 @@ export function MessageList({
   topInset = 0,
   bottomInset = 0,
   onLongPressMessage,
+  onCheckUnsend,
   onSwipeReply,
   onRefresh,
   onLoadOlder,
@@ -461,6 +464,7 @@ export function MessageList({
             hasBackground={hasBackground}
             isLastOutgoing={item.id === lastOutgoingId}
             onRetry={handleRetry}
+            onCheckUnsend={onCheckUnsend}
             onLongPress={onLongPressMessage}
             onSwipeReply={onSwipeReply}
             selecting={selectedGuids != null}
