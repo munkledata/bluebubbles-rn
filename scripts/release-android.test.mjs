@@ -492,6 +492,88 @@ test('records sanitized proof from the exact retained EAS native workspace', (t)
   );
 });
 
+// React Native builds Hermes for the DEBUG variant with CMAKE_BUILD_TYPE=Release (a faster build),
+// so a workspace that built both variants (CI assembles the debug APK first) also holds a Hermes
+// database under .cxx/Release whose generated internal_unit.c is gone, like MinSizeRel's.
+test('accepts the debug-variant Hermes database that React Native builds as "Release"', (t) => {
+  const fixture = nativeWorkspaceFixture(t, '-hermes-debug');
+  const paths = prepareManagedEasDirectory(fixture.state, fixture.options);
+  const hermesRoot = join(paths.source, 'node_modules/react-native/ReactAndroid/hermes-engine');
+  const hermesCompileDirectory = join(hermesRoot, '.cxx/Release/fingerprint/arm64-v8a');
+  const bundle = join(paths.source, 'android/app/build/outputs/bundle/release/app-release.aab');
+  const assemblySource = join(paths.source, 'node_modules/react-native/boost.S');
+  const disabledHermesSource = join(
+    hermesCompileDirectory,
+    'lib/InternalJavaScript/internal_unit.c',
+  );
+  const disabledHermesOutput =
+    'lib/InternalJavaScript/CMakeFiles/hermesInternalUnit_obj.dir/internal_unit.c.o';
+  const selectedHermesOutput =
+    'lib/InternalJavaScript/CMakeFiles/hermesInternalBytecode_obj.dir/InternalBytecode.cpp.o';
+  const finalHermesLibrary = join(
+    hermesRoot,
+    'build/intermediates/cxx/Release/fingerprint/obj/arm64-v8a/libhermesvm.so',
+  );
+  mkdirSync(dirname(join(hermesCompileDirectory, selectedHermesOutput)), { recursive: true });
+  mkdirSync(dirname(finalHermesLibrary), { recursive: true });
+  mkdirSync(dirname(bundle), { recursive: true });
+  writeFileSync(assemblySource, '.text\n');
+  writeFileSync(
+    join(hermesCompileDirectory, 'CMakeCache.txt'),
+    'HERMESVM_INTERNAL_JAVASCRIPT_NATIVE:BOOL=OFF\n',
+  );
+  writeFileSync(join(hermesCompileDirectory, selectedHermesOutput), 'selected-bytecode-object');
+  writeFileSync(finalHermesLibrary, 'selected-hermes-library');
+  writeFileSync(
+    join(hermesCompileDirectory, '.ninja_log'),
+    [
+      '# ninja log v5',
+      `1\t2\t3\t${selectedHermesOutput}\t0123456789abcdef`,
+      `2\t3\t4\t${finalHermesLibrary}\tfedcba9876543210`,
+      '',
+    ].join('\n'),
+  );
+  const flags = nativeCompilerPathMappingFlags({
+    sourceRoot: paths.source,
+    gradleHome: paths.gradleHome,
+    includePrivateTmpAlias: true,
+  });
+  writeFileSync(
+    join(hermesCompileDirectory, 'compile_commands.json'),
+    JSON.stringify([
+      {
+        directory: hermesCompileDirectory,
+        arguments: ['clang', ...flags, '-c', assemblySource],
+        file: assemblySource,
+      },
+      {
+        directory: hermesCompileDirectory,
+        arguments: ['clang', ...flags, '-o', disabledHermesOutput, '-c', disabledHermesSource],
+        file: disabledHermesSource,
+        output: disabledHermesOutput,
+      },
+    ]),
+  );
+  writeFileSync(bundle, 'fixture-aab');
+
+  assert.equal(verifyReleaseNativePathProof(paths, bundle).compileCommands, 2);
+
+  // Only Hermes gets this exception: any other Release database naming a missing file fails.
+  const appDirectory = join(paths.source, 'android/app/.cxx/Release/fingerprint/arm64-v8a');
+  mkdirSync(appDirectory, { recursive: true });
+  writeFileSync(
+    join(appDirectory, 'compile_commands.json'),
+    JSON.stringify([
+      {
+        directory: appDirectory,
+        arguments: ['clang++', ...flags, '-c', join(paths.source, 'android/app/src/gone.cpp')],
+        file: join(paths.source, 'android/app/src/gone.cpp'),
+      },
+    ]),
+  );
+  assert.throws(() => verifyReleaseNativePathProof(paths, bundle), /names a missing source file/);
+});
+
 test('retains native evidence and redacts host paths when release proof fails', () => {
   const paths = {
     source: '/private/tmp/gator-android-release-501/run/work/build',

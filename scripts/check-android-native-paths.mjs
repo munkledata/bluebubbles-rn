@@ -39,6 +39,10 @@ const HERMES_DISABLED_NATIVE_OUTPUT =
   'lib/InternalJavaScript/CMakeFiles/hermesInternalUnit_obj.dir/internal_unit.c.o';
 const HERMES_SELECTED_BYTECODE_OUTPUT =
   'lib/InternalJavaScript/CMakeFiles/hermesInternalBytecode_obj.dir/InternalBytecode.cpp.o';
+// React Native builds Hermes for release with CMAKE_BUILD_TYPE=MinSizeRel and, to build faster,
+// for DEBUG with CMAKE_BUILD_TYPE=Release. A workspace that built both variants (CI assembles the
+// debug APK before the release AAB) holds both databases, each with the same generated source.
+const HERMES_CMAKE_BUILD_TYPES = new Set(['MinSizeRel', 'Release']);
 
 function fail(message) {
   throw new Error(`Android native-path proof failed: ${message}`);
@@ -280,7 +284,7 @@ function validateDisabledHermesNativeSource({
     databaseSegments[2] !== 'ReactAndroid' ||
     databaseSegments[3] !== 'hermes-engine' ||
     databaseSegments[4] !== '.cxx' ||
-    databaseSegments[5] !== 'MinSizeRel' ||
+    !HERMES_CMAKE_BUILD_TYPES.has(databaseSegments[5]) ||
     !/^[a-z0-9]+$/i.test(databaseSegments[6] ?? '') ||
     !ANDROID_ABIS.has(databaseSegments[7]) ||
     databaseSegments[8] !== 'compile_commands.json' ||
@@ -295,6 +299,7 @@ function validateDisabledHermesNativeSource({
   const canonicalSourcePath = resolve(realpathSync(sourceParent), 'internal_unit.c');
   if (canonicalSourcePath !== resolve(directory, HERMES_DISABLED_NATIVE_SOURCE)) return false;
 
+  const buildType = databaseSegments[5];
   const fingerprint = databaseSegments[6];
   const abi = databaseSegments[7];
   const disabledObject = resolve(directory, HERMES_DISABLED_NATIVE_OUTPUT);
@@ -333,7 +338,8 @@ function validateDisabledHermesNativeSource({
   const hermesRoot = resolve(sourceRoot, 'node_modules/react-native/ReactAndroid/hermes-engine');
   const finalLibrary = resolve(
     hermesRoot,
-    'build/intermediates/cxx/MinSizeRel',
+    'build/intermediates/cxx',
+    buildType,
     fingerprint,
     'obj',
     abi,
