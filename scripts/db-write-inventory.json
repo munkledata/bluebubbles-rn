@@ -147,7 +147,7 @@
     {
       "id": "app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:c8deb5b511>.<callback:293e0b6208>:mutator-call:a4cbb531c586",
       "path": "app/(app)/chat/[guid].tsx",
-      "line": 1130,
+      "line": 1135,
       "symbol": "ChatScreenInner.<callback:c8deb5b511>.<callback:293e0b6208>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#readShareIntakeReceipt",
@@ -160,7 +160,7 @@
     {
       "id": "app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:414f8cbf59>.<callback:5a7bad110f>:mutator-call:599fa6a378a7",
       "path": "app/(app)/chat/[guid].tsx",
-      "line": 1171,
+      "line": 1176,
       "symbol": "ChatScreenInner.<callback:414f8cbf59>.<callback:5a7bad110f>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#discardShareIntakeItem",
@@ -171,10 +171,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/chatScreen.test.tsx; test/db/shareIntakeReceipts.test.ts; test/services/share/shareIntake.test.ts"
     },
     {
-      "id": "app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:6507bcabdf>.<callback:f613d3ead3>:mutator-call:17abad682076",
+      "id": "app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:1601131854>.<callback:f613d3ead3>:mutator-call:642969df5a8c",
       "path": "app/(app)/chat/[guid].tsx",
-      "line": 1222,
-      "symbol": "ChatScreenInner.<callback:6507bcabdf>.<callback:f613d3ead3>",
+      "line": 1227,
+      "symbol": "ChatScreenInner.<callback:1601131854>.<callback:f613d3ead3>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#readShareIntakeReceipt",
       "detectedContext": "coordinated-delegation",
@@ -184,10 +184,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/chatScreen.test.tsx; test/db/shareIntakeReceipts.test.ts; test/services/share/shareIntake.test.ts"
     },
     {
-      "id": "app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:b8617f0f25>.<callback:16329d1004>:mutator-call:afd0ed6f1e46",
+      "id": "app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:84297bce06>.<callback:16329d1004>:mutator-call:ecdfe71bf90b",
       "path": "app/(app)/chat/[guid].tsx",
-      "line": 1292,
-      "symbol": "ChatScreenInner.<callback:b8617f0f25>.<callback:16329d1004>",
+      "line": 1310,
+      "symbol": "ChatScreenInner.<callback:84297bce06>.<callback:16329d1004>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#admitShareIntakeTextDraft",
       "detectedContext": "coordinated-delegation",

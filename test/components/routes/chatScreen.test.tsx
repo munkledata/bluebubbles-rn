@@ -394,6 +394,7 @@ import {
   drainShareIntake,
   isShareIntakeReceiptComplete,
   readShareIntakeReceipt,
+  discardShareIntakeItem,
 } from '@/services/share/shareIntake';
 // eslint-disable-next-line import/first
 import { useSessionStore } from '@state/sessionStore';
@@ -855,12 +856,85 @@ describe('ChatScreen — exact native share handoff', () => {
         await Promise.resolve();
       });
 
-      const warning =
-        'This conversation cannot accept the shared files. Choose another conversation.';
-      if (warns) expect(showToast).toHaveBeenCalledWith(warning);
-      else expect(showToast).not.toHaveBeenCalledWith(warning);
+      // This batch is already bound here (its receipt names this chat), so it cannot move: the
+      // only way forward for its files is to remove them.
+      if (warns) {
+        expect(showDialog).toHaveBeenCalledWith(
+          'This conversation can’t receive files',
+          expect.any(String),
+          [
+            expect.objectContaining({ text: 'Not Now' }),
+            expect.objectContaining({ text: 'Remove Files' }),
+          ],
+        );
+      } else {
+        expect(showDialog).not.toHaveBeenCalledWith(
+          'This conversation can’t receive files',
+          expect.anything(),
+          expect.anything(),
+        );
+      }
     },
   );
+
+  function filesDialogButtons(): { text: string; onPress?: () => void }[] {
+    const call = jest
+      .mocked(showDialog)
+      .mock.calls.find(([title]) => title === 'This conversation can’t receive files');
+    if (!call) throw new Error('Expected the shared-files dialog');
+    return call[2] as { text: string; onPress?: () => void }[];
+  }
+
+  it('offers another conversation for a share nothing has used yet, keeping its files', async () => {
+    configureRcsChat({ rcs: false });
+    stageExactShare();
+    mockGetShareIntakeReceipt.mockResolvedValue(null);
+
+    await renderWithTheme(<ChatScreen />);
+    await waitFor(() =>
+      expect(filesDialogButtons().map((button) => button.text)).toEqual([
+        'Not Now',
+        'Choose Another Conversation',
+      ]),
+    );
+    await act(async () => {
+      filesDialogButtons().find((button) => button.text === 'Choose Another Conversation')!
+        .onPress!();
+    });
+
+    expect(mockReplace).toHaveBeenCalledWith(`/new-chat?shareBatch=${SHARE_BATCH}`);
+    expect(mockDiscardShareIntakeBatch).not.toHaveBeenCalled();
+  });
+
+  it('holds shared text until the person chooses, then can use only the text here', async () => {
+    configureRcsChat({ rcs: false });
+    stageExactShare(SHARE_BATCH, { text: 'Shared text' });
+    mockGetShareIntakeReceipt.mockResolvedValue(null);
+
+    await renderWithTheme(<ChatScreen />);
+    await waitFor(() =>
+      expect(filesDialogButtons().map((button) => button.text)).toEqual([
+        'Not Now',
+        'Use Text Only',
+        'Choose Another Conversation',
+      ]),
+    );
+    // Merging the text would bind the whole share to this chat and rule out moving it.
+    expect(mockAdmitShareIntakeTextDraft).not.toHaveBeenCalled();
+
+    await act(async () => {
+      filesDialogButtons().find((button) => button.text === 'Use Text Only')!.onPress!();
+    });
+
+    await waitFor(() => expect(mockAdmitShareIntakeTextDraft).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(discardShareIntakeItem).toHaveBeenCalledWith(
+        expect.objectContaining({ itemIndex: SHARED_FILE.shareItemIndex }),
+        expect.any(Function),
+      ),
+    );
+    expect(mockReplace).not.toHaveBeenCalled();
+  });
 
   it('does not mount an editable composer until shared text is durably merged', async () => {
     configureRcsChat();

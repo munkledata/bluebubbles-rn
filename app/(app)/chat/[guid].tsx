@@ -740,6 +740,11 @@ function ChatScreenInner({
   const [shareReceiptLoaded, setShareReceiptLoaded] = useState(ownedShareBatchId === null);
   const [sharedTextReady, setSharedTextReady] = useState(sharedText === null);
   const [sharedTextAlreadyApplied, setSharedTextAlreadyApplied] = useState(false);
+  // The share's receipt already names this chat (its text merged or an item settled here), so the
+  // share can no longer move to another conversation.
+  const [shareBoundHere, setShareBoundHere] = useState(false);
+  // The person chose to keep the shared text here although its files cannot come along.
+  const [sharedTextChosenHere, setSharedTextChosenHere] = useState(false);
   const shareFinalizingRef = useRef(false);
   const screenEffect = useNewScreenEffect(guid, messages);
   const { firstUnread, setFirstUnread, screenFocused } = useChatReadLifecycle({
@@ -1247,6 +1252,7 @@ function ChatScreenInner({
           setSharedTextAlreadyApplied(true);
           setSharedTextReady(true);
         }
+        setShareBoundHere(receipt?.destination?.chatGuid === guid);
         setShareReceiptLoaded(true);
         if (receipt && isShareIntakeReceiptComplete(receipt)) finalizeShareIfReady();
       })
@@ -1270,8 +1276,19 @@ function ChatScreenInner({
     sharedText,
   ]);
 
+  // After a cold start server info and the header load in the background; "not loaded yet" is not
+  // "unsupported", so files count as blocked only once both are known.
+  const sharedFilesBlocked =
+    ownedShareBatchId !== null &&
+    shareReceiptLoaded &&
+    remainingSharedAttachments.length > 0 &&
+    !attachmentFeaturesAvailable &&
+    serverInfoLoaded &&
+    header.data?.guid === guid;
+
   // Text becomes removable from native storage only when its exact draft merge and replay receipt
-  // commit together in the encrypted database.
+  // commit together in the encrypted database. Merging binds the whole share to this chat, so while
+  // its files are known not to fit here it waits for the person's choice.
   const sharedTextPersistStartedRef = useRef(false);
   useEffect(() => {
     if (
@@ -1281,6 +1298,7 @@ function ChatScreenInner({
       draft === null ||
       !shareReceiptLoaded ||
       sharedTextAlreadyApplied ||
+      (sharedFilesBlocked && !shareBoundHere && !sharedTextChosenHere) ||
       sharedTextPersistStartedRef.current ||
       !accountLease.isCurrent()
     ) {
@@ -1304,6 +1322,7 @@ function ChatScreenInner({
       .then((outcome) => {
         if (outcome !== 'delivered' || admittedDraft === null || !accountLease.isCurrent()) return;
         setDraft(admittedDraft);
+        setShareBoundHere(true);
         setSharedTextReady(true);
         finalizeShareIfReady();
       })
@@ -1322,30 +1341,85 @@ function ChatScreenInner({
     guid,
     ownedShareBatchId,
     ownedShareIdentity,
+    shareBoundHere,
     shareReceiptLoaded,
+    sharedFilesBlocked,
     sharedText,
     sharedTextAlreadyApplied,
+    sharedTextChosenHere,
   ]);
 
+  const removeBlockedSharedFiles = useCallback(async (): Promise<void> => {
+    for (const item of remainingSharedAttachments) {
+      if (!(await onRemoveSharedAttachment(item))) return;
+    }
+    if (accountLease.isCurrent()) setRemainingSharedAttachments([]);
+  }, [accountLease, onRemoveSharedAttachment, remainingSharedAttachments]);
+
+  // Shared files this chat can't take used to leave only "Discard": offer a way forward instead.
+  // A share nothing has used yet can still move to another conversation, files and all.
+  const sharedFilesDialogBatchRef = useRef<string | null>(null);
   useEffect(() => {
-    if (
-      !ownedShareBatchId ||
-      remainingSharedAttachments.length === 0 ||
-      attachmentFeaturesAvailable ||
-      // After a cold start server info and the header load in the background; "not loaded yet" is
-      // not "unsupported", and the files appear once they arrive.
-      !serverInfoLoaded ||
-      header.data?.guid !== guid
-    )
+    if (!sharedFilesBlocked || !ownedShareBatchId) return;
+    if (sharedFilesDialogBatchRef.current === ownedShareBatchId) return;
+    sharedFilesDialogBatchRef.current = ownedShareBatchId;
+    const title = 'This conversation can’t receive files';
+    if (shareBoundHere) {
+      showDialog(
+        title,
+        'Part of this share is already in this conversation, which can’t take its files. Remove the files to finish sharing, or leave them for now.',
+        [
+          { text: 'Not Now', style: 'cancel' },
+          {
+            text: 'Remove Files',
+            style: 'destructive',
+            onPress: () => void removeBlockedSharedFiles(),
+          },
+        ],
+      );
       return;
-    showToast('This conversation cannot accept the shared files. Choose another conversation.');
+    }
+    const batchId = ownedShareBatchId;
+    const buttons: DialogButton[] = [
+      {
+        text: 'Not Now',
+        style: 'cancel',
+        // The composer waits for shared text, so "not now" keeps the text here; the files wait.
+        onPress: sharedText ? () => setSharedTextChosenHere(true) : undefined,
+      },
+    ];
+    if (sharedText) {
+      buttons.push({
+        text: 'Use Text Only',
+        onPress: () => {
+          setSharedTextChosenHere(true);
+          void removeBlockedSharedFiles();
+        },
+      });
+    }
+    buttons.push({
+      text: 'Choose Another Conversation',
+      onPress: () => {
+        if (accountLease.isCurrent()) {
+          replaceWithoutPrompt(`/new-chat?shareBatch=${encodeURIComponent(batchId)}`);
+        }
+      },
+    });
+    showDialog(
+      title,
+      sharedText
+        ? 'Send the shared text and files to another conversation, or use only the text here.'
+        : 'Send the shared files to another conversation instead.',
+      buttons,
+    );
   }, [
-    attachmentFeaturesAvailable,
-    guid,
-    header.data?.guid,
+    accountLease,
     ownedShareBatchId,
-    remainingSharedAttachments.length,
-    serverInfoLoaded,
+    removeBlockedSharedFiles,
+    replaceWithoutPrompt,
+    shareBoundHere,
+    sharedFilesBlocked,
+    sharedText,
   ]);
 
   const [composerRemovalState, setComposerRemovalState] = useState<ComposerRemovalState>({
