@@ -54,20 +54,24 @@ export function AttachmentView({
         />
       );
     case 'video':
-      return <VideoPlayer att={att} isFromMe={isFromMe} showTail={showTail} />;
-    case 'contact':
-      return <ContactCard att={att} isFromMe={isFromMe} />;
-    case 'location':
-      return <LocationCard att={att} isFromMe={isFromMe} />;
-    case 'audio':
       return (
-        <LoadErrorBoundary fallback={<FileChip att={att} isFromMe={isFromMe} />}>
-          <Suspense fallback={<FileChip att={att} isFromMe={isFromMe} />}>
-            <AudioAttachment att={att} isFromMe={isFromMe} />
+        <VideoPlayer att={att} isFromMe={isFromMe} showTail={showTail} onLongPress={onLongPress} />
+      );
+    case 'contact':
+      return <ContactCard att={att} isFromMe={isFromMe} onLongPress={onLongPress} />;
+    case 'location':
+      return <LocationCard att={att} isFromMe={isFromMe} onLongPress={onLongPress} />;
+    case 'audio': {
+      const fileChip = <FileChip att={att} isFromMe={isFromMe} onLongPress={onLongPress} />;
+      return (
+        <LoadErrorBoundary fallback={fileChip}>
+          <Suspense fallback={fileChip}>
+            <AudioAttachment att={att} isFromMe={isFromMe} onLongPress={onLongPress} />
           </Suspense>
         </LoadErrorBoundary>
       );
+    }
     default:
-      return <FileChip att={att} isFromMe={isFromMe} />;
+      return <FileChip att={att} isFromMe={isFromMe} onLongPress={onLongPress} />;
   }
 }

@@ -17,6 +17,8 @@ import { readBoundedTextAttachment } from './readBoundedTextAttachment';
 interface ContactCardProps {
   att: AttachmentRow;
   isFromMe: boolean;
+  /** The bubble's message-menu action, fired on a hold instead of the attachment's own tap. */
+  onLongPress?: () => void;
 }
 
 interface ParsedContactState {
@@ -38,7 +40,7 @@ interface ContactOpenOperation {
  * must be downloaded first; once local we read it (expo-file-system `File`) and parse
  * with the pure {@link parseVCard}. Tap downloads (when not local) or opens the card.
  */
-export function ContactCard({ att, isFromMe }: ContactCardProps): React.JSX.Element {
+export function ContactCard({ att, isFromMe, onLongPress }: ContactCardProps): React.JSX.Element {
   const theme = useTheme();
   const status = useDownloadStore((s) => s.status[att.guid]);
   const [accountLease] = useState(() => captureRealtimeDeliveryLease());
@@ -222,6 +224,10 @@ export function ContactCard({ att, isFromMe }: ContactCardProps): React.JSX.Elem
   return (
     <Pressable
       onPress={contentUnavailable ? undefined : onPress}
+      // A hold opens the message menu (Reply/React/Forward/Delete); without it this press target
+      // captured the touch and the bubble's own long-press never fired.
+      onLongPress={onLongPress}
+      delayLongPress={onLongPress ? 350 : undefined}
       disabled={contentUnavailable}
       accessibilityRole="button"
       accessibilityLabel={contentUnavailable ? 'Contact unavailable' : `Contact: ${title}`}

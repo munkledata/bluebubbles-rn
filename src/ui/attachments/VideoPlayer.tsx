@@ -17,6 +17,8 @@ interface VideoPlayerProps {
   att: AttachmentRow;
   isFromMe: boolean;
   showTail: boolean;
+  /** The bubble's message-menu action, fired on a hold instead of the attachment's own tap. */
+  onLongPress?: () => void;
 }
 
 /**
@@ -24,7 +26,12 @@ interface VideoPlayerProps {
  * lazily mounts a native VideoView on first tap. Downloads-then-plays when no local file yet;
  * pauses on blur so a recycled/backgrounded row doesn't keep audio running.
  */
-export function VideoPlayer({ att, isFromMe, showTail }: VideoPlayerProps): React.JSX.Element {
+export function VideoPlayer({
+  att,
+  isFromMe,
+  showTail,
+  onLongPress,
+}: VideoPlayerProps): React.JSX.Element {
   const theme = useTheme();
   const [accountLease] = useState(() => captureRealtimeDeliveryLease());
   const status = useDownloadStore((s) => s.status[att.guid]);
@@ -113,6 +120,10 @@ export function VideoPlayer({ att, isFromMe, showTail }: VideoPlayerProps): Reac
   return (
     <Pressable
       onPress={onPress}
+      // A hold opens the message menu (Reply/React/Forward/Delete); without it this press target
+      // captured the touch and the bubble's own long-press never fired.
+      onLongPress={onLongPress}
+      delayLongPress={onLongPress ? 350 : undefined}
       // Without these the video bubble is a focusable, clickable node with NO name — TalkBack reads
       // it as an anonymous button (verified on device). The label tracks `status`/`localPath`
       // because the tap does three different things: download, retry, or play.

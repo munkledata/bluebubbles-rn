@@ -21,7 +21,14 @@
  * asserted at the safeOpenUrl boundary; parseVLocation stays the REAL util via requireActual).
  */
 import React from 'react';
-import { act, renderWithTheme, screen, fireEvent, waitFor } from '../support/renderWithTheme';
+import {
+  act,
+  renderWithTheme,
+  screen,
+  fireEvent,
+  userEvent,
+  waitFor,
+} from '../support/renderWithTheme';
 import { useDownloadStore } from '@state/downloadStore';
 import type { AttachmentRow } from '@db/repositories';
 
@@ -287,6 +294,16 @@ describe('LocationCard — not-yet-local (status-driven subtitle)', () => {
 });
 
 describe('LocationCard — tap contract', () => {
+  it('opens the message menu on long-press instead of downloading', async () => {
+    const onLongPress = jest.fn();
+    await renderWithTheme(
+      <LocationCard att={makeAtt()} isFromMe={false} onLongPress={onLongPress} />,
+    );
+    await userEvent.setup().longPress(screen.getByLabelText('Location'), { duration: 400 });
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+    expect(download).not.toHaveBeenCalled();
+  });
+
   it('no localPath → download(att), no map opened', async () => {
     const att = makeAtt();
     await renderWithTheme(<LocationCard att={att} isFromMe={false} />);

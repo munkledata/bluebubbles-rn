@@ -92,6 +92,20 @@ describe('AttachmentView — MIME dispatch (attachmentKind)', () => {
     );
     expect(mockLeafProps).toHaveBeenCalledWith('image', expect.objectContaining({ onLongPress }));
   });
+  it.each([
+    ['video', 'video/mp4'],
+    ['contact', 'text/vcard'],
+    ['location', 'text/x-vlocation'],
+    ['file', 'application/pdf'],
+  ])('passes the bubble action handler to its %s press target', async (kind, mime) => {
+    // Each leaf's own press target captured the touch, so long-press never reached the bubble.
+    const onLongPress = jest.fn();
+    await renderWithTheme(
+      <AttachmentView att={makeAtt(mime)} isFromMe={false} showTail onLongPress={onLongPress} />,
+    );
+    expect(mockLeafProps).toHaveBeenCalledWith(kind, expect.objectContaining({ onLongPress }));
+  });
+
   it('renders ImageAttachment for an image/* type', async () => {
     await renderKind('image/png');
     expect(screen.getByText('CHILD:image')).toBeTruthy();

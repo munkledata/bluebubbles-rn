@@ -19,9 +19,12 @@ function fmt(sec: number): string {
 export function AudioAttachment({
   att,
   isFromMe,
+  onLongPress,
 }: {
   att: AttachmentRow;
   isFromMe: boolean;
+  /** The bubble's message-menu action, fired on a hold instead of the attachment's own tap. */
+  onLongPress?: () => void;
 }): React.JSX.Element {
   const theme = useTheme();
   const [accountLease] = React.useState(() => captureRealtimeDeliveryLease());
@@ -56,6 +59,10 @@ export function AudioAttachment({
   return (
     <Pressable
       onPress={onToggle}
+      // A hold opens the message menu (Reply/React/Forward/Delete); without it this press target
+      // captured the touch and the bubble's own long-press never fired.
+      onLongPress={onLongPress}
+      delayLongPress={onLongPress ? 350 : undefined}
       accessibilityRole="button"
       accessibilityLabel={status.playing ? 'Pause audio' : 'Play audio'}
       style={[

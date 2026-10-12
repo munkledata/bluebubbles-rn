@@ -29449,7 +29449,7 @@
     {
       "id": "src/ui/attachments/AudioAttachment.tsx#AudioAttachment.onToggle:mutator-call:14fdf073006e",
       "path": "src/ui/attachments/AudioAttachment.tsx",
-      "line": 38,
+      "line": 41,
       "symbol": "AudioAttachment.onToggle",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -29462,7 +29462,7 @@
     {
       "id": "src/ui/attachments/AudioAttachment.tsx#AudioAttachment:mutator-reference:6c803e2f12fc",
       "path": "src/ui/attachments/AudioAttachment.tsx",
-      "line": 58,
+      "line": 61,
       "symbol": "AudioAttachment",
       "operation": "mutator-reference",
       "target": "src/ui/attachments/AudioAttachment.tsx#AudioAttachment.onToggle",
@@ -29475,7 +29475,7 @@
     {
       "id": "src/ui/attachments/ContactCard.tsx#ContactCard.onPress:mutator-call:1f8dbbc4c7e6",
       "path": "src/ui/attachments/ContactCard.tsx",
-      "line": 156,
+      "line": 158,
       "symbol": "ContactCard.onPress",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -29488,7 +29488,7 @@
     {
       "id": "src/ui/attachments/ContactCard.tsx#ContactCard.onPress:mutator-call:825631505f95",
       "path": "src/ui/attachments/ContactCard.tsx",
-      "line": 176,
+      "line": 178,
       "symbol": "ContactCard.onPress",
       "operation": "mutator-call",
       "target": "src/ui/attachments/ContactCard.tsx#ContactCard.onPress.<callback:c626cc26f6>",
@@ -29501,7 +29501,7 @@
     {
       "id": "src/ui/attachments/ContactCard.tsx#ContactCard.onPress.<callback:c626cc26f6>:mutator-call:d7520b586d39",
       "path": "src/ui/attachments/ContactCard.tsx",
-      "line": 184,
+      "line": 186,
       "symbol": "ContactCard.onPress.<callback:c626cc26f6>",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -29514,7 +29514,7 @@
     {
       "id": "src/ui/attachments/ContactCard.tsx#ContactCard:mutator-reference:6f03b1e5f758",
       "path": "src/ui/attachments/ContactCard.tsx",
-      "line": 224,
+      "line": 226,
       "symbol": "ContactCard",
       "operation": "mutator-reference",
       "target": "src/ui/attachments/ContactCard.tsx#ContactCard.onPress",
@@ -29527,7 +29527,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#FileChip.onPress:mutator-call:fcf22eadb47f",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 65,
+      "line": 67,
       "symbol": "FileChip.onPress",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -29540,7 +29540,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#FileChip.onPress:mutator-call:4783aae969eb",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 70,
+      "line": 72,
       "symbol": "FileChip.onPress",
       "operation": "mutator-call",
       "target": "src/ui/attachments/FileChip.tsx#FileChip.onPress.<callback:08fd24739a>",
@@ -29553,7 +29553,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#FileChip.onPress.<callback:08fd24739a>:mutator-call:b00e65e1611c",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 80,
+      "line": 82,
       "symbol": "FileChip.onPress.<callback:08fd24739a>",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -29566,7 +29566,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#FileChip:mutator-reference:8833b8ec6280",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 92,
+      "line": 94,
       "symbol": "FileChip",
       "operation": "mutator-reference",
       "target": "src/ui/attachments/FileChip.tsx#FileChip.onPress",
@@ -29579,7 +29579,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#SharedDocumentRow.onPress:mutator-call:3ed9d17a6f21",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 229,
+      "line": 235,
       "symbol": "SharedDocumentRow.onPress",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -29592,7 +29592,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#SharedDocumentRow.onPress:mutator-call:fb357510cd01",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 237,
+      "line": 243,
       "symbol": "SharedDocumentRow.onPress",
       "operation": "mutator-call",
       "target": "src/ui/attachments/FileChip.tsx#SharedDocumentRow.onPress.<callback:f4a342b533>",
@@ -29605,7 +29605,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#SharedDocumentRow.onPress.<callback:f4a342b533>:mutator-call:309818d28369",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 244,
+      "line": 250,
       "symbol": "SharedDocumentRow.onPress.<callback:f4a342b533>",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -29618,7 +29618,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#SharedDocumentRow:mutator-reference:70e78024ad82",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 259,
+      "line": 265,
       "symbol": "SharedDocumentRow",
       "operation": "mutator-reference",
       "target": "src/ui/attachments/FileChip.tsx#SharedDocumentRow.onPress",
@@ -29670,7 +29670,7 @@
     {
       "id": "src/ui/attachments/LocationCard.tsx#LocationCard.onPress:mutator-call:d714255e3467",
       "path": "src/ui/attachments/LocationCard.tsx",
-      "line": 164,
+      "line": 166,
       "symbol": "LocationCard.onPress",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -29683,7 +29683,7 @@
     {
       "id": "src/ui/attachments/LocationCard.tsx#LocationCard:mutator-reference:0f964b79c990",
       "path": "src/ui/attachments/LocationCard.tsx",
-      "line": 227,
+      "line": 229,
       "symbol": "LocationCard",
       "operation": "mutator-reference",
       "target": "src/ui/attachments/LocationCard.tsx#LocationCard.onPress",
@@ -29722,7 +29722,7 @@
     {
       "id": "src/ui/attachments/VideoPlayer.tsx#VideoPlayer.onPress:mutator-call:9e1d5a50a2f3",
       "path": "src/ui/attachments/VideoPlayer.tsx",
-      "line": 98,
+      "line": 105,
       "symbol": "VideoPlayer.onPress",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -29735,7 +29735,7 @@
     {
       "id": "src/ui/attachments/VideoPlayer.tsx#VideoPlayer:mutator-reference:53bdc004099c",
       "path": "src/ui/attachments/VideoPlayer.tsx",
-      "line": 115,
+      "line": 122,
       "symbol": "VideoPlayer",
       "operation": "mutator-reference",
       "target": "src/ui/attachments/VideoPlayer.tsx#VideoPlayer.onPress",

@@ -28,6 +28,7 @@ import {
   fireEvent,
   renderWithTheme,
   screen,
+  userEvent,
   waitFor,
   type RenderResult,
 } from '../support/renderWithTheme';
@@ -350,6 +351,20 @@ describe('ContactCard — not-yet-local (status-driven subtitle)', () => {
 });
 
 describe('ContactCard — tap contract', () => {
+  it('opens the message menu on long-press instead of downloading', async () => {
+    const onLongPress = jest.fn();
+    await renderWithTheme(
+      <ContactCard
+        att={makeAtt({ transferName: null })}
+        isFromMe={false}
+        onLongPress={onLongPress}
+      />,
+    );
+    await userEvent.setup().longPress(screen.getByLabelText('Contact: Contact'), { duration: 400 });
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+    expect(download).not.toHaveBeenCalled();
+  });
+
   it('no localPath → download(att)', async () => {
     const att = makeAtt({ transferName: null }); // title defaults to "Contact"
     await renderWithTheme(<ContactCard att={att} isFromMe={false} />);

@@ -23,7 +23,7 @@
  */
 import React from 'react';
 import { StyleSheet, type TextStyle } from 'react-native';
-import { renderWithTheme, screen, fireEvent, waitFor } from '../support/renderWithTheme';
+import { renderWithTheme, screen, fireEvent, userEvent, waitFor } from '../support/renderWithTheme';
 import { useDownloadStore } from '@state/downloadStore';
 import { useUploadStore } from '@state/uploadStore';
 import type { AttachmentRow } from '@db/repositories';
@@ -242,6 +242,18 @@ describe('FileChip — press dispatch', () => {
     useToastStore.setState({ current: null, queue: [] });
     // clearMocks:true clears calls but keeps implementations, so set the result per test.
     mockOpenAttachmentFile.mockResolvedValue({ status: 'opened' });
+  });
+
+  it('opens the message menu on long-press instead of downloading', async () => {
+    const onLongPress = jest.fn();
+    await renderWithTheme(
+      <FileChip att={makeAtt({ localPath: null })} isFromMe={false} onLongPress={onLongPress} />,
+    );
+    await userEvent.setup().longPress(screen.getByRole('button', { name: 'Download report.pdf' }), {
+      duration: 400,
+    });
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+    expect(mockDownload).not.toHaveBeenCalled();
   });
 
   it('downloads on tap when the file is not yet local (and opens nothing)', async () => {

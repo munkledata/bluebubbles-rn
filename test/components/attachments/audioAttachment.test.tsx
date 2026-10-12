@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, renderWithTheme, screen } from '../support/renderWithTheme';
+import { fireEvent, renderWithTheme, screen, userEvent } from '../support/renderWithTheme';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
 
@@ -61,6 +61,16 @@ beforeEach(() => {
     .mockReset()
     .mockReturnValueOnce(mockAccountLease)
     .mockReturnValue(mockNextAccountLease);
+});
+
+it('opens the message menu on long-press instead of downloading', async () => {
+  const onLongPress = jest.fn();
+  await renderWithTheme(
+    <AudioAttachment att={attachment()} isFromMe={false} onLongPress={onLongPress} />,
+  );
+  await userEvent.setup().longPress(screen.getByRole('button'), { duration: 400 });
+  expect(onLongPress).toHaveBeenCalledTimes(1);
+  expect(mockDownload).not.toHaveBeenCalled();
 });
 
 it('forwards the lease captured at mount when an undownloaded audio attachment is pressed', async () => {

@@ -18,7 +18,7 @@
  * from that feature's own tests.
  */
 import React from 'react';
-import { fireEvent, renderWithTheme, screen } from '../support/renderWithTheme';
+import { fireEvent, renderWithTheme, screen, userEvent } from '../support/renderWithTheme';
 import { useDownloadStore } from '@state/downloadStore';
 import type { AttachmentRow } from '@db/repositories';
 
@@ -93,6 +93,23 @@ describe('VideoPlayer — accessibility label tracks what the tap will do (F20)'
       <VideoPlayer att={vid({ localPath: '/data/clip.mp4' })} isFromMe={false} showTail />,
     );
     expect(await screen.findByLabelText('Video, tap to play')).toBeTruthy();
+  });
+
+  it('opens the message menu on long-press instead of downloading', async () => {
+    const onLongPress = jest.fn();
+    await renderWithTheme(
+      <VideoPlayer
+        att={vid({ localPath: null })}
+        isFromMe={false}
+        showTail
+        onLongPress={onLongPress}
+      />,
+    );
+    await userEvent
+      .setup()
+      .longPress(await screen.findByLabelText('Video, not downloaded'), { duration: 400 });
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+    expect(mockDownload).not.toHaveBeenCalled();
   });
 
   it('announces that an undownloaded video is not downloaded', async () => {

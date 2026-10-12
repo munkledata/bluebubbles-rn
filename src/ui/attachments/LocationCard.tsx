@@ -16,6 +16,8 @@ import { readBoundedTextAttachment } from './readBoundedTextAttachment';
 interface LocationCardProps {
   att: AttachmentRow;
   isFromMe: boolean;
+  /** The bubble's message-menu action, fired on a hold instead of the attachment's own tap. */
+  onLongPress?: () => void;
 }
 
 interface ParsedLocationState {
@@ -37,7 +39,7 @@ interface LocationOpenOperation {
  * parsed with the pure {@link parseVLocation}. Tap opens a `geo:` URL (Android-native,
  * consistent with the Find My "Open in Maps" fallback) — no Maps API key needed.
  */
-export function LocationCard({ att, isFromMe }: LocationCardProps): React.JSX.Element {
+export function LocationCard({ att, isFromMe, onLongPress }: LocationCardProps): React.JSX.Element {
   const theme = useTheme();
   const status = useDownloadStore((s) => s.status[att.guid]);
   const [parsed, setParsed] = useState<ParsedLocationState | null>(null);
@@ -225,6 +227,10 @@ export function LocationCard({ att, isFromMe }: LocationCardProps): React.JSX.El
   return (
     <Pressable
       onPress={contentUnavailable ? undefined : onPress}
+      // A hold opens the message menu (Reply/React/Forward/Delete); without it this press target
+      // captured the touch and the bubble's own long-press never fired.
+      onLongPress={onLongPress}
+      delayLongPress={onLongPress ? 350 : undefined}
       disabled={contentUnavailable}
       accessibilityRole="button"
       accessibilityLabel={contentUnavailable ? 'Location unavailable' : 'Location'}

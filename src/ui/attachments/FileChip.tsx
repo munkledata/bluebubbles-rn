@@ -22,10 +22,12 @@ import { useAttachmentCachePathProtection } from './useAttachmentCachePathProtec
 interface FileChipProps {
   att: AttachmentRow;
   isFromMe: boolean;
+  /** The bubble's message-menu action, fired on a hold instead of the attachment's own tap. */
+  onLongPress?: () => void;
 }
 
 /** Generic (non-image) attachment chip: icon + filename + "TYPE • size", with download state. */
-export function FileChip({ att, isFromMe }: FileChipProps): React.JSX.Element {
+export function FileChip({ att, isFromMe, onLongPress }: FileChipProps): React.JSX.Element {
   const theme = useTheme();
   const [accountLease] = React.useState(() => captureRealtimeDeliveryLease());
   const status = useDownloadStore((s) => s.status[att.guid]);
@@ -90,6 +92,10 @@ export function FileChip({ att, isFromMe }: FileChipProps): React.JSX.Element {
   return (
     <Pressable
       onPress={onPress}
+      // A hold opens the message menu (Reply/React/Forward/Delete); without it this press target
+      // captured the touch and the bubble's own long-press never fired.
+      onLongPress={onLongPress}
+      delayLongPress={onLongPress ? 350 : undefined}
       accessible
       accessibilityRole="button"
       accessibilityLabel={`${accessibilityAction} ${fileName}`}
