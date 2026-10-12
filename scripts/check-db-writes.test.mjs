@@ -2090,9 +2090,9 @@ test('certifies exactly the reviewed notification presentation and reminder-effe
   assert.deepEqual(
     rescheduleReminderMoveTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:731021c678>.<callback:e57c656026>:mutator-call:5c5d8cff3f6f',
-      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:731021c678>:mutator-call:89491dc214ed',
-      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:731021c678>:mutator-call:9cce64c14a31',
+      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:5632cc03da>.<callback:e57c656026>:mutator-call:79b8466b9ed4',
+      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:5632cc03da>:mutator-call:cbb0784d6576',
+      'src/services/notifications/remindersService.ts#rescheduleReminder.<callback:5632cc03da>:mutator-call:6fa89ed6b038',
     ].sort(),
   );
   assert.deepEqual(
@@ -2105,9 +2105,9 @@ test('certifies exactly the reviewed notification presentation and reminder-effe
   assert.deepEqual(
     cancelReminderTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/notifications/remindersService.ts#cancelReminder.<callback:fa5a10f480>.<callback:e767effe3c>:mutator-call:023f96b06623',
-      'src/services/notifications/remindersService.ts#cancelReminder.<callback:fa5a10f480>:mutator-call:05b66955ae9e',
-      'src/services/notifications/remindersService.ts#cancelReminder.<callback:fa5a10f480>:mutator-call:62633b738a87',
+      'src/services/notifications/remindersService.ts#cancelReminder.<callback:874375fa5e>.<callback:e767effe3c>:mutator-call:4f3fa0734c19',
+      'src/services/notifications/remindersService.ts#cancelReminder.<callback:874375fa5e>:mutator-call:bcbf7e23e475',
+      'src/services/notifications/remindersService.ts#cancelReminder.<callback:874375fa5e>:mutator-call:d0cd941932cd',
     ].sort(),
   );
 });

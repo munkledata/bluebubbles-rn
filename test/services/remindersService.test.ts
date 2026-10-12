@@ -647,7 +647,9 @@ describe('cancelReminder', () => {
     expect(cancelled).not.toContain(reminderId(9000));
   });
 
-  it('keeps an RCS reminder row when the provider epoch rotates during native cancellation', async () => {
+  it('cancels an RCS reminder even when the provider epoch rotates during native cancellation', async () => {
+    // A reminder is a local row plus a local alarm: deleting it touches nothing on the server, so
+    // a Google re-pair must never strand an unwanted alarm behind a stale pairing.
     const previousSession = useSessionStore.getState();
     const { db } = await createTestDb();
     const native = deferred<void>();
@@ -687,11 +689,42 @@ describe('cancelReminder', () => {
       ).toBe(true);
       native.resolve(undefined);
 
-      await expect(pending).rejects.toBeInstanceOf(ReminderSessionChangedError);
-      expect(await listReminders(db)).toEqual([expect.objectContaining({ id })]);
-      expect(restored).toEqual([reminderId(5_000)]);
+      await expect(pending).resolves.toBeUndefined();
+      expect(await listReminders(db)).toEqual([]);
+      expect(restored).toEqual([]);
     } finally {
       native.resolve(undefined);
+      useSessionStore.setState(previousSession);
+    }
+  });
+
+  it('reschedules and deletes a reminder whose RCS pairing is no longer current', async () => {
+    const previousSession = useSessionStore.getState();
+    const { db } = await createTestDb();
+    const { scheduler, scheduled, cancelled } = fakeScheduler();
+    try {
+      // The session now runs Google pairing B; the reminder was set under pairing A.
+      useSessionStore.getState().connected('https://server.test', 'password', rcsInfo(RCS_EPOCH_B));
+      const id = await createReminder(db, {
+        chatGuid: rcsChatGuid(RCS_EPOCH_A),
+        messageGuid: rcsMessageGuid(RCS_EPOCH_A),
+        messagePreview: null,
+        senderName: null,
+        scheduledFor: 5_000,
+        notificationId: reminderId(5_000),
+        createdAt: 1,
+      });
+      const reminder = (await listReminders(db)).find((candidate) => candidate.id === id)!;
+
+      await expect(rescheduleReminder(db, reminder, 9_000, scheduler)).resolves.toBe(
+        reminderId(9_000),
+      );
+      expect(scheduled).toContain(reminderId(9_000));
+      const moved = (await listReminders(db)).find((candidate) => candidate.id === id)!;
+      await expect(cancelReminder(db, moved, scheduler)).resolves.toBeUndefined();
+      expect(cancelled).toContain(reminderId(9_000));
+      expect(await listReminders(db)).toEqual([]);
+    } finally {
       useSessionStore.setState(previousSession);
     }
   });
@@ -788,7 +821,7 @@ describe('rescheduleReminder', () => {
     });
   });
 
-  it('cancels a qualified RCS reschedule trigger when the provider epoch rotates during native scheduling', async () => {
+  it('finishes rescheduling a qualified RCS reminder when the provider epoch rotates during native scheduling', async () => {
     const previousSession = useSessionStore.getState();
     const { db } = await createTestDb();
     const native = deferred<void>();
@@ -827,12 +860,13 @@ describe('rescheduleReminder', () => {
       ).toBe(true);
       native.resolve(undefined);
 
-      await expect(pending).rejects.toBeInstanceOf(ReminderSessionChangedError);
-      expect(cancelled).toContain(reminderId(12_000));
+      // Local-only: the move completes and retires the old alarm, whatever the pairing does.
+      await expect(pending).resolves.toBe(reminderId(12_000));
+      expect(cancelled).toEqual([reminderId(5_000)]);
       expect(await getReminderByMessageGuid(db, rcsMessageGuid(RCS_EPOCH_A))).toMatchObject({
         id,
-        scheduledFor: 5_000,
-        notificationId: reminderId(5_000),
+        scheduledFor: 12_000,
+        notificationId: reminderId(12_000),
       });
     } finally {
       native.resolve(undefined);
