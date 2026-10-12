@@ -1,4 +1,5 @@
 import { eq, sql } from 'drizzle-orm';
+import { MessageStateRepairRequiredError } from '@core/api/endpoints/messageState';
 import {
   MessageStateAuthority,
   compareMessageStateSequence,
@@ -608,19 +609,21 @@ export async function bindHydratedMessageOwnerWithinTransaction(
       SELECT c.guid AS chatGuid FROM messages m JOIN chats c ON c.id = m.chat_id
        WHERE m.guid = ${event.guid} LIMIT 1
     `);
+    // These conflicts repeat on every sync at this cursor; a repair re-establishes authority instead.
+    const conflict = (reason: string) => new MessageStateRepairRequiredError(new Error(reason));
     if (localOwners[0] && localOwners[0].chatGuid !== event.chatGuid)
-      throw new Error('Restored message owner conflicts with local history.');
+      throw conflict('Restored message owner conflicts with local history.');
     if (await hasRetainedMessageOwnerConflictWithinTransaction(context, event.guid, event.chatGuid))
-      throw new Error('Restored message owner conflicts with retained history.');
+      throw conflict('Restored message owner conflicts with retained history.');
     const prior = await db.all<{ chatGuid: string | null; sequence: string; kind: string }>(sql`
       SELECT chat_guid AS chatGuid, sequence, kind FROM message_server_states
        WHERE guid = ${event.guid} AND provider_epoch = ${event.providerEpoch}
          AND ledger_epoch = ${event.ledgerEpoch} LIMIT 1
     `);
     if (prior[0]?.chatGuid != null && prior[0].chatGuid !== event.chatGuid)
-      throw new Error('Restored message owner conflicts with retained state.');
+      throw conflict('Restored message owner conflicts with retained state.');
     if (prior[0]?.sequence === event.sequence && prior[0].kind !== event.kind)
-      throw new Error('Restored message conflicts with an existing transition.');
+      throw conflict('Restored message conflicts with an existing transition.');
     // A newer deletion can arrive during the request. Bind its exact owner while retaining its
     // sequence, kind, and date, so the following upsert is born hidden instead of losing that delete.
     await db.run(sql`

@@ -824,6 +824,96 @@ describe('provider-scoped repair', () => {
     });
   });
 
+  describe('deleted-message catch-up never stops ordinary sync', () => {
+    async function ordinaryRun(cursor = 'old-cursor') {
+      await withDbTransaction(db, (context) =>
+        setMessageStateAuthorityWithinTransaction(context, {
+          version: 1,
+          provider: 'imessage',
+          providerEpoch,
+          ledgerEpoch,
+          cursor,
+          snapshotSequence: '10',
+          sequence: '10',
+        }),
+      );
+      await setSyncMarker(db, { lastSyncedRowId: 100, lastSyncedTimestamp: 1_000 });
+    }
+    const terminalPage = {
+      version: 1 as const,
+      provider: 'imessage' as const,
+      providerEpoch,
+      ledgerEpoch,
+      cursor: 'terminal-cursor',
+      events: [],
+      hasMore: false,
+      prunedThrough: '0',
+      sequence: '10',
+      boundary: '10',
+    };
+
+    it('still fetches new iMessages when a state page keeps failing', async () => {
+      await ordinaryRun();
+      const f = fixture();
+      f.base.fetchMessageState = async () => {
+        throw new ApiError('server_error', 'state page unavailable', 500);
+      };
+      const catchUp = jest.spyOn(f.base, 'fetchMessagesAfter');
+
+      await expect(f.runAuto()).resolves.toBeDefined();
+      expect(catchUp).toHaveBeenCalled();
+    });
+
+    it('still fetches new iMessages when the chat list cannot be refreshed', async () => {
+      await ordinaryRun('terminal-cursor');
+      const f = fixture();
+      f.base.fetchMessageState = async () => terminalPage;
+      f.base.fetchChats = async () => {
+        throw new ApiError('server_error', 'chat list unavailable', 500);
+      };
+      const catchUp = jest.spyOn(f.base, 'fetchMessagesAfter');
+
+      await expect(f.runAuto()).resolves.toBeDefined();
+      expect(catchUp).toHaveBeenCalled();
+    });
+
+    it('repairs past a page that names two owners for one message instead of failing every sync', async () => {
+      await ordinaryRun();
+      const f = fixture();
+      f.base.fetchMessageState = async (cursor) =>
+        cursor === 'old-cursor'
+          ? {
+              ...terminalPage,
+              cursor: 'after-conflict',
+              events: [
+                {
+                  sequence: '11',
+                  kind: 'deleted' as const,
+                  guid: 'shared-guid',
+                  chatGuid,
+                  dateDeleted: 100,
+                },
+                {
+                  sequence: '12',
+                  kind: 'deleted' as const,
+                  guid: 'shared-guid',
+                  chatGuid: 'iMessage;-;other@example.test',
+                  dateDeleted: 101,
+                },
+              ],
+              sequence: '12',
+              boundary: '12',
+            }
+          : terminalPage;
+      const catchUp = jest.spyOn(f.base, 'fetchMessagesAfter');
+
+      await expect(f.runAuto()).resolves.toBeDefined();
+      expect(catchUp).toHaveBeenCalled();
+      // The automatic repair re-established authority from the server's checkpoint.
+      expect((await getMessageStateAuthority(db))?.cursor).not.toBe('old-cursor');
+    });
+  });
+
   describe('Full Repair on a server with presence answers', () => {
     const history = (count: number) =>
       Array.from({ length: count }, (_, index) =>

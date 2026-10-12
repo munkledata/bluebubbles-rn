@@ -455,7 +455,10 @@ export async function syncProviderMessages(
       });
     } catch (error) {
       if (error instanceof MessageStateRepairRequiredError) needsRepair = true;
-      else throw error;
+      else if (error instanceof DbCommitGuardRejectedError) throw error;
+      // Deleted/edited-message catch-up must not hold back the chat refresh and new iMessages
+      // below. The pass after them tries again and reports what still fails.
+      else logger.debug('[sync] message-state catch-up failed; ordinary sync continues', error);
     }
   }
   if (shouldAbort()) return progress;
@@ -675,35 +678,44 @@ export async function syncProviderMessages(
   // Read before the listing stores each chat's newest server message; see the RCS refresh below.
   const rcsNewestBefore = await listRcsChatNewestMessageGuids(db);
   const rcsNewestListed = new Map<string, string | null>();
-  const chats = await syncAllChats(
-    db,
-    api,
-    200,
-    shouldAbort,
-    signal,
-    (messages, chatGuidByMessage) => {
-      listed = advanceMarker(
-        listed,
-        messages
-          .filter(
-            (message) =>
-              !looksLikeRcsMessageGuid(message.guid) &&
-              !looksLikeRcsChatGuid(chatGuidByMessage.get(message.guid) ?? ''),
-          )
-          .map((message) => ({
-            rowId: message.originalROWID ?? null,
-            timestamp: message.dateCreated ?? null,
-          })),
-      );
-    },
-    (serverChats) => {
-      for (const chat of serverChats)
-        if (looksLikeRcsChatGuid(chat.guid))
-          rcsNewestListed.set(chat.guid, chat.lastMessage?.guid ?? null);
-    },
-    undefined,
-    serverInfo,
-  );
+  // With a bookmark, the chat refresh is best-effort, as in the legacy pipeline: new messages come
+  // from the incremental sync below. A first sync or Full Repair still needs the whole listing.
+  const listingOptional = !refreshAll && hasSyncPosition(await getSyncMarker(db));
+  let chats: Awaited<ReturnType<typeof syncAllChats>> = [];
+  try {
+    chats = await syncAllChats(
+      db,
+      api,
+      200,
+      shouldAbort,
+      signal,
+      (messages, chatGuidByMessage) => {
+        listed = advanceMarker(
+          listed,
+          messages
+            .filter(
+              (message) =>
+                !looksLikeRcsMessageGuid(message.guid) &&
+                !looksLikeRcsChatGuid(chatGuidByMessage.get(message.guid) ?? ''),
+            )
+            .map((message) => ({
+              rowId: message.originalROWID ?? null,
+              timestamp: message.dateCreated ?? null,
+            })),
+        );
+      },
+      (serverChats) => {
+        for (const chat of serverChats)
+          if (looksLikeRcsChatGuid(chat.guid))
+            rcsNewestListed.set(chat.guid, chat.lastMessage?.guid ?? null);
+      },
+      undefined,
+      serverInfo,
+    );
+  } catch (error) {
+    if (!listingOptional || error instanceof DbCommitGuardRejectedError) throw error;
+    logger.debug('[sync] chat-list refresh failed; the iMessage catch-up continues', error);
+  }
   if (!repaired && !shouldAbort()) {
     // Without a marker, incremental sync would page the whole history from the epoch, so an
     // unfinished repair falls back to the ordinary first sync and the user's per-chat cap.
@@ -794,7 +806,10 @@ export async function syncProviderMessages(
       // One bounded repair attempt per run; a source changing again during repair remains retryable.
       if (error instanceof MessageStateRepairRequiredError && !needsRepair)
         return syncProviderMessages(db, { ...options, forceRepair: true });
-      throw error;
+      // New messages above have already arrived; like the legacy deletion catch-up, ordinary sync
+      // only logs this. A user-started repair reports it.
+      if (options.repair || error instanceof DbCommitGuardRejectedError) throw error;
+      logger.warn('[sync] message-state catch-up failed; it will retry on the next sync', error);
     }
   }
   if (!shouldAbort() && (!needsRepair || repaired || installedFromCheckpoint)) {

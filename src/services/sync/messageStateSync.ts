@@ -76,13 +76,16 @@ export async function syncMessageState(
     if (!guard()) return;
     if (page.providerEpoch !== previous.providerEpoch || page.ledgerEpoch !== previous.ledgerEpoch)
       throw new MessageStateRepairRequiredError();
+    // A defect in the page itself repeats on every later sync at this cursor. Like a conflicting
+    // transition below, it re-establishes authority instead of failing each sync on the same page.
+    const defect = (reason: string) => new MessageStateRepairRequiredError(new Error(reason));
     let last = previous.sequence;
     for (const event of page.events) {
       if (
         compareMessageStateSequence(event.sequence, last) <= 0 ||
         compareMessageStateSequence(event.sequence, page.boundary) > 0
       )
-        throw new Error('Message-state events are not strictly ordered within their boundary.');
+        throw defect('Message-state events are not strictly ordered within their boundary.');
       last = event.sequence;
     }
     if (
@@ -96,7 +99,7 @@ export async function syncMessageState(
       compareMessageStateSequence(page.prunedThrough, previous.sequence) > 0 ||
       (page.hasMore && page.cursor === previous.cursor)
     )
-      throw new Error('Message-state continuation is inconsistent.');
+      throw defect('Message-state continuation is inconsistent.');
     boundary = page.boundary;
     // Every event above must validate, but only its message's final state may become visible.
     // Retain an earlier exact owner when the last event lacks one; conflicting owners invalidate
@@ -109,7 +112,7 @@ export async function syncMessageState(
         event.chatGuid != null &&
         earlier.chatGuid !== event.chatGuid
       )
-        throw new Error('Message-state page contains conflicting message owners.');
+        throw defect('Message-state page contains conflicting message owners.');
       latestEvents.set(event.guid, {
         ...event,
         chatGuid: event.chatGuid ?? earlier?.chatGuid ?? null,
@@ -145,7 +148,7 @@ export async function syncMessageState(
         message.chats.some((chat) => chat.guid !== owner) ||
         (message.chatGuid != null && message.chatGuid !== owner)
       )
-        throw new Error('Restored message does not match its exact provider owner.');
+        throw defect('Restored message does not match its exact provider owner.');
       restoredOwners.set(event.sequence, owner);
       await withDbTransaction(
         db,

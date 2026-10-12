@@ -91,6 +91,15 @@ const api = (fetchMessageState: NonNullable<SyncApi['fetchMessageState']>): Sync
   fetchMessageState,
 });
 
+/**
+ * A page defect that would repeat at this cursor now asks for a repair (which re-establishes
+ * authority from the server's checkpoint) instead of failing every sync; its reason is the cause.
+ */
+const repairFor = (reason: RegExp) =>
+  expect.objectContaining({
+    name: 'MessageStateRepairRequiredError',
+    cause: expect.objectContaining({ message: expect.stringMatching(reason) }),
+  });
 describe('versioned message state', () => {
   let db: AppDatabase;
   let raw: Database.Database;
@@ -181,8 +190,8 @@ describe('versioned message state', () => {
           text: 'wrong owner',
           chats: [{ guid: 'iMessage;-;foreign@example.test' }],
         });
-      await expect(syncMessageState(db, adapter, { providerEpoch })).rejects.toThrow(
-        /owner conflicts/,
+      await expect(syncMessageState(db, adapter, { providerEpoch })).rejects.toEqual(
+        repairFor(/owner conflicts/),
       );
       expect(raw.prepare('SELECT * FROM messages').all()).toEqual([]);
       expect(raw.prepare('SELECT chat_guid FROM message_server_states').get()).toEqual({
@@ -432,8 +441,8 @@ describe('versioned message state', () => {
         text: 'foreign payload',
         chats: [{ guid: 'iMessage;-;foreign@example.test' }],
       });
-    await expect(syncMessageState(db, adapter, { providerEpoch })).rejects.toThrow(
-      /exact provider owner/,
+    await expect(syncMessageState(db, adapter, { providerEpoch })).rejects.toEqual(
+      repairFor(/exact provider owner/),
     );
     expect(raw.prepare('SELECT * FROM message_server_states').all()).toEqual([]);
     expect(raw.prepare('SELECT * FROM messages').all()).toEqual([]);
@@ -451,8 +460,8 @@ describe('versioned message state', () => {
       ),
     );
     adapter.fetchActiveMessage = jest.fn(async () => null);
-    await expect(syncMessageState(db, adapter, { providerEpoch })).rejects.toThrow(
-      /conflicting.*owners/,
+    await expect(syncMessageState(db, adapter, { providerEpoch })).rejects.toEqual(
+      repairFor(/conflicting.*owners/),
     );
     expect(adapter.fetchActiveMessage).not.toHaveBeenCalled();
     expect(raw.prepare('SELECT * FROM message_server_states').all()).toEqual([]);
@@ -490,7 +499,7 @@ describe('versioned message state', () => {
         api(async () => page([event('12', 'deleted'), event('11', 'restored')])),
         { providerEpoch },
       ),
-    ).rejects.toThrow('strictly ordered');
+    ).rejects.toEqual(repairFor(/strictly ordered/));
     expect(hidden()).toBeNull();
     expect(await getMessageStateAuthority(db)).toEqual(authority);
   });
