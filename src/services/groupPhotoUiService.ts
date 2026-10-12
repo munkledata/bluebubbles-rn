@@ -1,6 +1,6 @@
 import { getDatabase } from '@db/database';
 import { DbCommitGuardRejectedError } from '@db/transaction';
-import { http } from './clients';
+import { accountHttp } from './clients';
 import {
   prepareExactIMessageGroupPhotoSet,
   removeExactIMessageGroupPhoto,
@@ -59,7 +59,7 @@ export async function prepareAppleGroupPhotoSet(
       }
       preparedHolder.value = await prepareExactIMessageGroupPhotoSet(
         getDatabase(),
-        http,
+        accountHttp(lease),
         chatGuid,
         productionGroupPhotoUploader,
         () => lease.isCurrent(),
@@ -136,7 +136,7 @@ export async function removeAppleGroupPhoto(
       }
       result = await removeExactIMessageGroupPhoto(
         getDatabase(),
-        http,
+        accountHttp(lease),
         snapshot,
         () => lease.isCurrent(),
         capability,

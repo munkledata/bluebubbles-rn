@@ -980,8 +980,8 @@ test('pins the complete background callback dependency chain', () => {
   const droppedHttpLifetimeSignal = mutateRunnerSource('src/core/api/http.ts', (source) =>
     replaceOnce(
       source,
-      '    const linkedSignal = linkAbortSignals(opts.signal, this.cfg.lifetimeSignal);',
-      '    const linkedSignal = linkAbortSignals(opts.signal, undefined);',
+      '      opts.signal,\n      this.cfg.lifetimeSignal,\n      ...(this.cfg.cancellationSignals ?? []),',
+      '      opts.signal,\n      undefined,\n      ...(this.cfg.cancellationSignals ?? []),',
     ),
   );
   assertErrors(

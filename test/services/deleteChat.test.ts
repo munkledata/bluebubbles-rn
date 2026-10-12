@@ -56,7 +56,15 @@ const mockCancelAttachmentDownloads = jest.fn<void, [Iterable<string>, number | 
 const mockDeletedDirs: string[] = [];
 
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
-jest.mock('@/services/clients', () => ({ http: { __http: true } }));
+/** Leases handed to `accountHttp`; review item 1073 binds requests to the Disconnect signal. */
+const mockAccountHttpLeases: Array<{ generation: number; isCurrent(): boolean }> = [];
+jest.mock('@/services/clients', () => ({
+  http: { __http: true },
+  accountHttp: (lease: { generation: number; isCurrent(): boolean }) => {
+    mockAccountHttpLeases.push(lease);
+    return { __http: true };
+  },
+}));
 jest.mock('@/services/databaseControl', () => ({ ensureDatabase: jest.fn(async () => mockDb) }));
 jest.mock('@/services/realtimeControl', () => ({ getSocket: jest.fn(() => null) }));
 jest.mock('@/services/download/downloadService', () => ({
@@ -494,6 +502,7 @@ describe('deleteChat', () => {
   it('cancels a SERVER-backed scheduled message on the Mac before dropping its row', async () => {
     const { db } = await createTestDb();
     mockDb = db;
+    mockAccountHttpLeases.length = 0;
     await seedChat(db, 'c1');
     await seedChat(db, 'c2');
     await insertScheduled(db, {
@@ -512,6 +521,10 @@ describe('deleteChat', () => {
 
     await deleteChat('c1');
 
+    // The cancel request can be stopped by Disconnect: it is bound to this account (item 1073).
+    expect(mockAccountHttpLeases).toHaveLength(1);
+    expect(mockAccountHttpLeases[0]?.generation).toBe(captureRealtimeDeliveryLease().generation);
+    expect(mockAccountHttpLeases[0]?.isCurrent()).toBe(true);
     // ONLY the deleted chat's server-backed row is cancelled server-side…
     expect(mockDeleteScheduled.mock.calls.map((c) => c[1])).toEqual(['srv-1']);
     // …and both of c1's rows are gone, while c2's is untouched.

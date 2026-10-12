@@ -1,6 +1,6 @@
 import { getDatabase } from '@db/database';
 import { DbCommitGuardRejectedError } from '@db/transaction';
-import { http } from './clients';
+import { accountHttp } from './clients';
 import {
   addExactIMessageGroupParticipant,
   leaveExactIMessageGroup,
@@ -41,7 +41,7 @@ export async function addAppleGroupParticipant(
       }
       result = await addExactIMessageGroupParticipant(
         getDatabase(),
-        http,
+        accountHttp(lease),
         snapshot,
         () => lease.isCurrent(),
         capability,
@@ -77,7 +77,7 @@ export async function removeAppleGroupParticipant(
       }
       result = await removeExactIMessageGroupParticipant(
         getDatabase(),
-        http,
+        accountHttp(lease),
         snapshot,
         () => lease.isCurrent(),
         capability,
@@ -113,7 +113,7 @@ export async function leaveAppleGroup(
       }
       result = await leaveExactIMessageGroup(
         getDatabase(),
-        http,
+        accountHttp(lease),
         snapshot,
         () => lease.isCurrent(),
         capability,

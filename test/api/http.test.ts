@@ -100,4 +100,64 @@ describe('HttpClient', () => {
     });
     expect(mockKy).toHaveBeenCalledTimes(1);
   });
+
+  // Review item 1073: Disconnect must be able to stop an account's in-flight requests without
+  // touching the shared client its own cleanup requests still use.
+  describe('withCancellation', () => {
+    function hangUntilAborted(_url: string, options: { signal: AbortSignal }): Promise<Response> {
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener(
+          'abort',
+          () => reject(new DOMException('aborted', 'AbortError')),
+          { once: true },
+        );
+      });
+    }
+
+    beforeEach(() => mockKy.mockReset());
+
+    it('stops in-flight and later requests of the child, never the parent', async () => {
+      const cancellation = new AbortController();
+      mockKy.mockImplementationOnce(hangUntilAborted);
+      const parent = new HttpClient({ getOrigin: () => 'https://x', getPassword: () => 'p' });
+      const child = parent.withCancellation(cancellation.signal);
+
+      const request = child.post('/chat/a/read', z.unknown(), { retry: false });
+      await Promise.resolve();
+      cancellation.abort(new Error('account disconnected'));
+      await expect(request).rejects.toMatchObject({ kind: 'cancelled' });
+      await expect(child.get('/server/info', z.unknown())).rejects.toMatchObject({
+        kind: 'cancelled',
+      });
+
+      mockKy.mockResolvedValueOnce(jsonResponse({ ok: true }));
+      await expect(parent.get('/server/info', z.unknown())).resolves.toEqual({ ok: true });
+      expect(mockKy).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps an existing client lifetime and passes the cancellation to pinned children', async () => {
+      const lifetime = new AbortController();
+      const cancellation = new AbortController();
+      const client = new HttpClient({
+        getOrigin: () => 'https://x',
+        getPassword: () => 'p',
+        lifetimeSignal: lifetime.signal,
+      });
+
+      mockKy.mockImplementationOnce(hangUntilAborted);
+      const pinned = client.withCancellation(cancellation.signal).pinTransport();
+      const cancelled = pinned.get('/server/info', z.unknown());
+      await Promise.resolve();
+      cancellation.abort();
+      await expect(cancelled).rejects.toMatchObject({ kind: 'cancelled' });
+
+      mockKy.mockImplementationOnce(hangUntilAborted);
+      const expiring = client
+        .withCancellation(new AbortController().signal)
+        .get('/server/info', z.unknown());
+      await Promise.resolve();
+      lifetime.abort();
+      await expect(expiring).rejects.toMatchObject({ kind: 'cancelled' });
+    });
+  });
 });

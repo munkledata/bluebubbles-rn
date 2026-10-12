@@ -1,5 +1,5 @@
 import { DbCommitGuardRejectedError } from '@db/transaction';
-import { http } from './clients';
+import { accountHttp } from './clients';
 import {
   startExactFaceTimeCall,
   type FaceTimeCallStartResult,
@@ -32,7 +32,12 @@ export async function startAppleFaceTimeCall(
         completed = true;
         return;
       }
-      result = await startExactFaceTimeCall(http, snapshot, () => lease.isCurrent(), capability);
+      result = await startExactFaceTimeCall(
+        accountHttp(lease),
+        snapshot,
+        () => lease.isCurrent(),
+        capability,
+      );
       if (lease.isCurrent()) completed = true;
     });
     return status === 'delivered' && completed && accountLease.isCurrent() ? result : null;

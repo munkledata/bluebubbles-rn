@@ -56,7 +56,15 @@ jest.mock('@db/database', () => ({
     throw new Error('Database not initialized — getDatabase must not run in a headless handler');
   }),
 }));
-jest.mock('@/services/clients', () => ({ http: { __http: true } }));
+/** Leases handed to `accountHttp`; review item 1073 binds requests to the Disconnect signal. */
+const mockAccountHttpLeases: Array<{ generation: number; isCurrent(): boolean }> = [];
+jest.mock('@/services/clients', () => ({
+  http: { __http: true },
+  accountHttp: (lease: { generation: number; isCurrent(): boolean }) => {
+    mockAccountHttpLeases.push(lease);
+    return { __http: true };
+  },
+}));
 jest.mock('@/services/databaseControl', () => ({ ensureDatabase: jest.fn(async () => mockDb) }));
 jest.mock('@/services/realtimeControl', () => ({ getSocket: jest.fn(() => null) }));
 jest.mock('@state/featureSettingsStore', () => ({
@@ -91,6 +99,7 @@ import { ensureDatabase } from '@/services/databaseControl';
 import { markRead, markUnread, sendTyping } from '@/services/chatActions';
 import { getSocket } from '@/services/realtimeControl';
 import {
+  captureRealtimeDeliveryLease,
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
@@ -290,6 +299,7 @@ describe('markUnread', () => {
   it('clears the local marker before syncing a capable iMessage server', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
+    mockAccountHttpLeases.length = 0;
     const guid = 'iMessage;-;+15551234567';
     await seedChat(db, guid);
     mockImessageReadStateEnabled = true;
@@ -304,6 +314,10 @@ describe('markUnread', () => {
     expect(readMarker(raw, guid)).toBeNull();
     expect(markerAtRemote).toBeNull();
     expect(mockMarkChatUnread).toHaveBeenCalledWith({ __http: true }, guid);
+    // Bound to this account's Disconnect cancellation (review item 1073).
+    expect(mockAccountHttpLeases).toHaveLength(1);
+    expect(mockAccountHttpLeases[0]?.generation).toBe(captureRealtimeDeliveryLease().generation);
+    expect(mockAccountHttpLeases[0]?.isCurrent()).toBe(true);
   });
 
   it('keeps the local unread marker when the capable server call fails', async () => {

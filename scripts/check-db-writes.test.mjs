@@ -3309,7 +3309,7 @@ test('certifies exactly the reviewed coordinated-delegation path additions', () 
         'coordinated-delegation',
       ],
       [
-        'src/services/remoteMessageDeleteUiService.ts#deleteMessageFromMac.<callback:72c537d206>:mutator-call:a09ff9975362',
+        'src/services/remoteMessageDeleteUiService.ts#deleteMessageFromMac.<callback:0b268e76c5>:mutator-call:1a5f03c64d1d',
         'coordinated-delegation',
       ],
     ].sort(),
@@ -3666,17 +3666,17 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
   assert.deepEqual(
     markReadTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/chatActions.ts#markRead.<callback:db679e3065>.<callback:dc5434bf32>:mutator-call:5d77502674b6',
-      'src/services/chatActions.ts#markRead.<callback:db679e3065>:mutator-call:4e18c7d69f11',
-      'src/services/chatActions.ts#markRead.<callback:db679e3065>:mutator-call:b7eeb59b4f3c',
+      'src/services/chatActions.ts#markRead.<callback:a4e2704b5d>.<callback:dc5434bf32>:mutator-call:70a65a51b331',
+      'src/services/chatActions.ts#markRead.<callback:a4e2704b5d>:mutator-call:e19e7a9b24ff',
+      'src/services/chatActions.ts#markRead.<callback:a4e2704b5d>:mutator-call:9272d0b8dcdc',
     ].sort(),
   );
   assert.deepEqual(
     markUnreadTransactions.map((finding) => finding.id).sort(),
     [
-      'src/services/chatActions.ts#markUnread.<callback:2438a8f81e>.<callback:add0a7f05b>:mutator-call:ff13dcdb3b20',
-      'src/services/chatActions.ts#markUnread.<callback:2438a8f81e>:mutator-call:074ca3bcae7b',
-      'src/services/chatActions.ts#markUnread.<callback:2438a8f81e>:mutator-call:1fe3e7e0cbfd',
+      'src/services/chatActions.ts#markUnread.<callback:3bc2e31bcb>.<callback:add0a7f05b>:mutator-call:bf11a78356d7',
+      'src/services/chatActions.ts#markUnread.<callback:3bc2e31bcb>:mutator-call:c24df9ca0ed3',
+      'src/services/chatActions.ts#markUnread.<callback:3bc2e31bcb>:mutator-call:5cc87e2cca05',
     ].sort(),
   );
   assert.deepEqual(

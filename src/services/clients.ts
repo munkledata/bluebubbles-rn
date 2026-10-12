@@ -3,6 +3,8 @@ import { SecretBox } from '@core/crypto';
 import { ExpoAccountRevocationMarker } from '@native/accountRevocationMarker';
 import { ExpoSecureVault } from '@native/secureVault';
 import { sessionAccessors } from '@state/sessionStore';
+import { accountCancellationSignal } from './realtime/accountCancellation';
+import type { RealtimeDeliveryLease } from './realtime/deliveryCoordinator';
 
 /**
  * Composition root.
@@ -23,6 +25,15 @@ export const http = new HttpClient({
   getPassword: sessionAccessors.getPassword,
   getTransportRevision: sessionAccessors.getTransportRevision,
 });
+
+/**
+ * The primary client for one account's work: its requests also stop when Disconnect retires the
+ * lease's account (review item 1073), instead of holding teardown until they time out.
+ */
+export function accountHttp(lease: RealtimeDeliveryLease): HttpClient {
+  const client = http.withCancellation(accountCancellationSignal(lease));
+  return lease.signal ? client.withCancellation(lease.signal) : client;
+}
 
 /** A fixed credential tuple for setup validation or one authorized headless task. */
 export function fixedCredentialClient(

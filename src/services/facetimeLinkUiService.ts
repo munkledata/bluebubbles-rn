@@ -1,5 +1,5 @@
 import { DbCommitGuardRejectedError } from '@db/transaction';
-import { http } from './clients';
+import { accountHttp } from './clients';
 import { createExactFaceTimeLink, type FaceTimeLinkCreationResult } from './facetimeLinkService';
 import {
   captureRealtimeDeliveryLease,
@@ -26,7 +26,11 @@ export async function createAppleFaceTimeLink(
         completed = true;
         return;
       }
-      result = await createExactFaceTimeLink(http, () => lease.isCurrent(), capability);
+      result = await createExactFaceTimeLink(
+        accountHttp(lease),
+        () => lease.isCurrent(),
+        capability,
+      );
       if (lease.isCurrent()) completed = true;
     });
     return status === 'delivered' && completed && accountLease.isCurrent() ? result : null;

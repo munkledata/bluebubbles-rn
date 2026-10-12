@@ -65,6 +65,11 @@ export interface HttpClientConfig {
    */
   lifetimeSignal?: AbortSignal;
   /**
+   * Extra cancellation added by {@link HttpClient.withCancellation}. Like `lifetimeSignal`, each
+   * one stops every request from this client and its pinned children.
+   */
+  cancellationSignals?: readonly AbortSignal[];
+  /**
    * Optional tighter client-wide response cap (primarily for focused tests). It may never raise
    * the production default; a genuinely larger endpoint needs its own reviewed transport design.
    */
@@ -173,12 +178,9 @@ interface LinkedAbortSignal {
   release(): void;
 }
 
-/** Combine per-request and client-lifetime cancellation without relying on AbortSignal.any. */
-function linkAbortSignals(
-  requestSignal?: AbortSignal,
-  lifetimeSignal?: AbortSignal,
-): LinkedAbortSignal {
-  const signals = [...new Set([requestSignal, lifetimeSignal].filter(Boolean))] as AbortSignal[];
+/** Combine per-request and client-wide cancellation without relying on AbortSignal.any. */
+function linkAbortSignals(...candidates: Array<AbortSignal | undefined>): LinkedAbortSignal {
+  const signals = [...new Set(candidates.filter(Boolean))] as AbortSignal[];
   if (signals.length === 0) return { signal: undefined, release: () => undefined };
   if (signals.length === 1) return { signal: signals[0], release: () => undefined };
 
@@ -523,6 +525,19 @@ export class HttpClient {
     return this.createPinnedClient();
   }
 
+  /**
+   * This live client with one more way to cancel: every request from the returned client (and its
+   * pinned children) also stops when `signal` aborts. The parent is unaffected, so Disconnect can
+   * cancel an account's requests while its own cleanup keeps using the shared client.
+   */
+  withCancellation(signal: AbortSignal): HttpClient {
+    return new HttpClient(
+      { ...this.cfg, cancellationSignals: [...(this.cfg.cancellationSignals ?? []), signal] },
+      this.transportStillCurrent,
+      this.requiredResponseHeader,
+    );
+  }
+
   /** True for a live client, or while a pinned client's exact source transport remains current. */
   isTransportCurrent(): boolean {
     return this.transportStillCurrent?.() ?? true;
@@ -597,6 +612,7 @@ export class HttpClient {
         timeoutMs: this.timeoutMs,
         fetch: this.cfg.fetch,
         lifetimeSignal: this.cfg.lifetimeSignal,
+        cancellationSignals: this.cfg.cancellationSignals,
         responseByteLimit: this.responseByteLimit,
       },
       transportStillCurrent,
@@ -627,7 +643,11 @@ export class HttpClient {
     schema: S,
     opts: RequestOptions,
   ): Promise<z.infer<S>> {
-    const linkedSignal = linkAbortSignals(opts.signal, this.cfg.lifetimeSignal);
+    const linkedSignal = linkAbortSignals(
+      opts.signal,
+      this.cfg.lifetimeSignal,
+      ...(this.cfg.cancellationSignals ?? []),
+    );
     const signal = linkedSignal.signal;
     try {
       if (signal?.aborted) throw callerCancellationError(signal);

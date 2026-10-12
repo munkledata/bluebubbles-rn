@@ -1,6 +1,6 @@
 import { getDatabase } from '@db/database';
 import { DbCommitGuardRejectedError } from '@db/transaction';
-import { http } from './clients';
+import { accountHttp } from './clients';
 import {
   renameExactIMessageGroup,
   type RenameAppleGroupArgs,
@@ -35,7 +35,7 @@ export async function renameAppleGroup(
       }
       result = await renameExactIMessageGroup(
         getDatabase(),
-        http,
+        accountHttp(lease),
         snapshot,
         () => lease.isCurrent(),
         capability,

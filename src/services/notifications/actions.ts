@@ -12,7 +12,7 @@ import { isDevServer } from '@utils/isDev';
 import { isRcsChatGuid } from '@utils/chat';
 import { useLockStore } from '@state/lockStore';
 import { sessionAccessors } from '@state/sessionStore';
-import { accountRevocationMarker, fixedCredentialClient, http, vault } from '../clients';
+import { accountHttp, accountRevocationMarker, fixedCredentialClient, vault } from '../clients';
 import { inspectBackgroundSession } from '../background/backgroundSyncOrchestrator';
 import { markRead, type ReadReceiptTransport } from '../chatActions';
 import { ensureDatabase } from '../databaseControl';
@@ -84,7 +84,7 @@ async function resolveNotificationActionTransport(
   assertCurrentAccount(accountLease);
   const capabilitySource = captureSessionRcsCapabilityLease();
   if (capabilitySource) {
-    const actionHttp = http.pinTransport();
+    const actionHttp = accountHttp(accountLease).pinTransport();
     const snapshot = actionHttp.snapshotTransport();
     const accountIsCurrent = (): boolean => accountLease.isCurrent();
     const isCurrent = (): boolean =>

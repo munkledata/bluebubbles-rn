@@ -29,6 +29,12 @@ Disconnect. It complements `docs/SESSION_SCOPED_STATE_INVENTORY.md` (what memory
 An operation accepted by the server before cancellation is outside the client guarantee. Its local
 ack/error continuation is still generation-rejected and the subsequent wipe remains authoritative.
 
+Requests made inside an admitted account slot use `accountHttp(lease)` from
+`src/services/clients.ts`, not the shared `http` (review item 1073, 2026-10-12). Each request also
+stops on its account generation's shared signal (`src/services/realtime/accountCancellation.ts`),
+which step 1 aborts synchronously when it retires the generation. A hung request therefore cannot
+hold step 4's drain until its 30 s timeout. Disconnect's own cleanup requests keep the shared client.
+
 ## Counted work families
 
 |   # | Work family                                                        | Stop/drain owner                                                                                                                                          | Late-result boundary                                                                                                 | Focused evidence                                                                                                                | Host result         |

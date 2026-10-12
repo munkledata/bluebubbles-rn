@@ -45,6 +45,7 @@ import {
   handleNotificationPress,
 } from '@/services/notifications/actions';
 import {
+  captureRealtimeDeliveryLease,
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
@@ -88,8 +89,14 @@ const mockPinnedForegroundHttp = {
 jest.mock('@/services/databaseControl', () => ({
   ensureDatabase: jest.fn(async () => mockDb),
 }));
+/** Leases handed to `accountHttp`; review item 1073 binds requests to the Disconnect signal. */
+const mockAccountHttpLeases: Array<{ generation: number; isCurrent(): boolean }> = [];
 jest.mock('@/services/clients', () => ({
   http: { __http: true, pinTransport: jest.fn(() => mockPinnedForegroundHttp) },
+  accountHttp: (lease: { generation: number; isCurrent(): boolean }) => {
+    mockAccountHttpLeases.push(lease);
+    return { __http: true, pinTransport: () => mockPinnedForegroundHttp };
+  },
   vault: { __vault: true, get: (key: string) => mockVaultGet(key) },
   accountRevocationMarker: { isRevoked: jest.fn(() => false) },
   fixedCredentialClient: jest.fn(() => ({
@@ -366,10 +373,15 @@ describe('handleNotificationAction — App Lock', () => {
 
 describe('handleNotificationAction — reply', () => {
   it('sends the trimmed inline reply through the outgoing send + clears the chat notif', async () => {
+    mockAccountHttpLeases.length = 0;
     await handleNotificationAction(
       safeChatDetail(ACTION_REPLY, { chatGuid: 'c1' }, { input: '  hi there  ' }),
     );
     expect(mockSendText).toHaveBeenCalledTimes(1);
+    // Bound to this account's Disconnect cancellation (review item 1073).
+    expect(mockAccountHttpLeases).toHaveLength(1);
+    expect(mockAccountHttpLeases[0]?.generation).toBe(captureRealtimeDeliveryLease().generation);
+    expect(mockAccountHttpLeases[0]?.isCurrent()).toBe(true);
     expect(mockSendText).toHaveBeenCalledWith(
       mockDb,
       expect.anything(),

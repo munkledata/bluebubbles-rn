@@ -1,6 +1,6 @@
 import { getDatabase } from '@db/database';
 import { DbCommitGuardRejectedError } from '@db/transaction';
-import { http } from './clients';
+import { accountHttp } from './clients';
 import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
@@ -35,7 +35,7 @@ export async function deleteMessageFromMac(
       }
       result = await remoteDeleteExactIMessage(
         getDatabase(),
-        http,
+        accountHttp(lease),
         snapshot,
         Date.now(),
         () => lease.isCurrent(),

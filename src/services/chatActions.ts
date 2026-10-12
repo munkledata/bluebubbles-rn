@@ -45,7 +45,7 @@ import {
 } from '@db/transaction';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { sessionAccessors } from '@state/sessionStore';
-import { http } from './clients';
+import { accountHttp, http } from './clients';
 import { ensureDatabase } from './databaseControl';
 import { createAttachmentCacheAccountScope } from './download/attachmentCacheAccountScope';
 import { cancelAttachmentDownloads } from './download/downloadService';
@@ -881,7 +881,7 @@ export function markRead(
         } else {
           const rcsProviderEpoch = sessionAccessors.rcsProviderEpoch();
           receiptTransport = {
-            http,
+            http: accountHttp(activeLease),
             isCurrent: () => activeLease.isCurrent(),
             rcsProviderEpoch,
             acceptsRcsChat: (guid) => sessionAccessors.acceptsRcsChat(guid),
@@ -899,7 +899,7 @@ export function markRead(
       try {
         receiptTransport = options.resolveReceiptTransport
           ? await options.resolveReceiptTransport()
-          : { http, isCurrent: () => activeLease.isCurrent() };
+          : { http: accountHttp(activeLease), isCurrent: () => activeLease.isCurrent() };
       } catch {
         // The local iMessage marker is authoritative for this device. Vault/client discovery is
         // best-effort and must never restore the unread badge.
@@ -966,7 +966,7 @@ export function markUnread(
     try {
       await readStateSync?.run(async () => {
         if (!activeLease.isCurrent() || !sessionAccessors.imessageReadStateEnabled()) return;
-        await chatsApi.markChatUnread(http, chatGuid);
+        await chatsApi.markChatUnread(accountHttp(activeLease), chatGuid);
       });
     } catch {
       // The local marker remains authoritative for this device when Mac sync is unavailable.
@@ -1200,7 +1200,7 @@ async function cancelServerScheduledForChat(
     const serverId = row.serverId;
     if (serverId == null) continue; // local-only: deleteChatLocal dropping the row IS the cancel
     try {
-      await scheduledApi.deleteScheduled(http, serverId);
+      await scheduledApi.deleteScheduled(accountHttp(accountLease), serverId);
       assertChatActionLease(accountLease);
       await withDbTransaction(
         db,
