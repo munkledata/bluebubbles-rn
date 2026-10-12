@@ -491,24 +491,27 @@ export async function matchContactsToHandles(
 /**
  * Handles with no avatar plus, when `serverAvatarRootUri` is supplied, handles carrying an
  * app-owned server-avatar path that needs revalidation. Device-contact photos are excluded.
- * `rowLimit`, when present, is enforced by SQLite before any handle rows are materialized; empty
- * slots are considered before existing server avatars so revalidation cannot displace new work.
+ * `rowLimit`, when present, is enforced by SQLite before any handle rows are materialized. Rows
+ * come in id order after `afterId`, so a caller can rotate through every handle in bounded windows
+ * instead of re-reading the same first ones.
  */
 export async function handlesNeedingAvatar(
   db: AppDatabase,
   rowLimit?: number,
   serverAvatarRootUri?: string,
+  afterId = 0,
 ): Promise<{ id: number; address: string; avatar: string | null }[]> {
   if (rowLimit !== undefined && (!Number.isSafeInteger(rowLimit) || rowLimit <= 0)) return [];
   const ownedPrefix = serverAvatarRootUri ? `${serverAvatarRootUri.replace(/\/+$/, '')}/` : null;
   return db.all<{ id: number; address: string; avatar: string | null }>(
     sql`SELECT id, address, avatar FROM handles
         WHERE address <> ''
+          AND id > ${afterId}
           AND (
             avatar IS NULL
             OR (${ownedPrefix} IS NOT NULL AND instr(avatar, ${ownedPrefix}) = 1)
           )
-        ORDER BY (avatar IS NOT NULL) ASC, id ASC
+        ORDER BY id ASC
         LIMIT ${rowLimit ?? -1}`,
   );
 }

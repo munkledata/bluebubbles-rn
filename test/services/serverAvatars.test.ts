@@ -202,6 +202,46 @@ describe('backfillServerAvatars', () => {
     expect(mockQuery.mock.calls[0]?.[1]).toHaveLength(SERVER_AVATAR_MAX_FILES_PER_RUN);
   });
 
+  it('asks about the next handles on each run, wrapping around at the end', async () => {
+    // Every run used to ask about the same 64 oldest photo-less handles, so a handle past them
+    // (say, someone just added on the Mac) never got their photo.
+    const t = await createTestDb();
+    const addresses = Array.from(
+      { length: SERVER_AVATAR_MAX_FILES_PER_RUN + 7 },
+      (_unused, index) => `+1555${String(index).padStart(7, '0')}`,
+    );
+    await upsertHandles(
+      t.db,
+      addresses.map((address) => ({ address, displayName: address })),
+    );
+    mockQuery.mockResolvedValue([]);
+
+    for (let run = 0; run < 3; run += 1) await backfillServerAvatars(t.db, http);
+
+    const asked = mockQuery.mock.calls.map((call) => call[1] as string[]);
+    expect(asked[0]).toEqual(addresses.slice(0, SERVER_AVATAR_MAX_FILES_PER_RUN));
+    expect(asked[1]).toEqual(addresses.slice(SERVER_AVATAR_MAX_FILES_PER_RUN));
+    expect(asked[2]).toEqual(addresses.slice(0, SERVER_AVATAR_MAX_FILES_PER_RUN));
+  });
+
+  it('moves past handles whose query the server keeps refusing', async () => {
+    const t = await createTestDb();
+    const addresses = Array.from(
+      { length: SERVER_AVATAR_MAX_FILES_PER_RUN + 3 },
+      (_unused, index) => `+1555${String(index).padStart(7, '0')}`,
+    );
+    await upsertHandles(
+      t.db,
+      addresses.map((address) => ({ address, displayName: address })),
+    );
+    mockQuery.mockRejectedValueOnce(new Error('response over its bound')).mockResolvedValue([]);
+
+    await expect(backfillServerAvatars(t.db, http)).rejects.toThrow('response over its bound');
+    await backfillServerAvatars(t.db, http);
+
+    expect(mockQuery.mock.calls[1]?.[1]).toEqual(addresses.slice(SERVER_AVATAR_MAX_FILES_PER_RUN));
+  });
+
   it('returns 0 when matched contacts carry no usable avatar (no hasAvatar/id)', async () => {
     const t = await seedNeedy();
     mockQuery.mockResolvedValue([{ id: 'c1', hasAvatar: false, phoneNumbers: ['(555) 123-4567'] }]);

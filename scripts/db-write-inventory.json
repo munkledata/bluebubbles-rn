@@ -7895,7 +7895,7 @@
     {
       "id": "src/db/repositories/contacts.ts#setHandleServerAvatar:mutator-call:5488c0f447f3",
       "path": "src/db/repositories/contacts.ts",
-      "line": 528,
+      "line": 531,
       "symbol": "setHandleServerAvatar",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#setHandleServerAvatar.<callback:d9c2c56773>",
@@ -7908,7 +7908,7 @@
     {
       "id": "src/db/repositories/contacts.ts#setHandleServerAvatar:mutator-call:d300dc33591f",
       "path": "src/db/repositories/contacts.ts",
-      "line": 528,
+      "line": 531,
       "symbol": "setHandleServerAvatar",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -7921,7 +7921,7 @@
     {
       "id": "src/db/repositories/contacts.ts#setHandleServerAvatar.<callback:d9c2c56773>:mutator-call:07b1b7ff630f",
       "path": "src/db/repositories/contacts.ts",
-      "line": 529,
+      "line": 532,
       "symbol": "setHandleServerAvatar.<callback:d9c2c56773>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#setHandleServerAvatarWithinTransaction",
@@ -7934,7 +7934,7 @@
     {
       "id": "src/db/repositories/contacts.ts#setHandleServerAvatarWithinTransaction:drizzle-update:6f0e2fd8121c",
       "path": "src/db/repositories/contacts.ts",
-      "line": 542,
+      "line": 545,
       "symbol": "setHandleServerAvatarWithinTransaction",
       "operation": "drizzle-update",
       "target": "handles",
@@ -19062,7 +19062,7 @@
     {
       "id": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:f825ab541f>:mutator-call:5b53f755ddd8",
       "path": "src/services/contacts/serverAvatars.ts",
-      "line": 103,
+      "line": 120,
       "symbol": "backfillServerAvatars.<callback:f825ab541f>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -19075,7 +19075,7 @@
     {
       "id": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:f825ab541f>:mutator-call:b52fdca006d4",
       "path": "src/services/contacts/serverAvatars.ts",
-      "line": 103,
+      "line": 120,
       "symbol": "backfillServerAvatars.<callback:f825ab541f>",
       "operation": "mutator-call",
       "target": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:f825ab541f>.<callback:62e2e33d9c>",
@@ -19088,7 +19088,7 @@
     {
       "id": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:f825ab541f>.<callback:62e2e33d9c>:mutator-call:560760fae756",
       "path": "src/services/contacts/serverAvatars.ts",
-      "line": 105,
+      "line": 122,
       "symbol": "backfillServerAvatars.<callback:f825ab541f>.<callback:62e2e33d9c>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#setHandleServerAvatarWithinTransaction",
@@ -19101,7 +19101,7 @@
     {
       "id": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:c50932e614>:mutator-call:e3874437fe75",
       "path": "src/services/contacts/serverAvatars.ts",
-      "line": 162,
+      "line": 179,
       "symbol": "backfillServerAvatars.<callback:c50932e614>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -19114,7 +19114,7 @@
     {
       "id": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:c50932e614>:mutator-call:e8f26a3863e3",
       "path": "src/services/contacts/serverAvatars.ts",
-      "line": 162,
+      "line": 179,
       "symbol": "backfillServerAvatars.<callback:c50932e614>",
       "operation": "mutator-call",
       "target": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:c50932e614>.<callback:f60ab1f80c>",
@@ -19127,7 +19127,7 @@
     {
       "id": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:c50932e614>.<callback:f60ab1f80c>:mutator-call:41ca6c4297af",
       "path": "src/services/contacts/serverAvatars.ts",
-      "line": 165,
+      "line": 182,
       "symbol": "backfillServerAvatars.<callback:c50932e614>.<callback:f60ab1f80c>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#setHandleServerAvatarWithinTransaction",
@@ -19136,6 +19136,45 @@
       "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
       "evidence": "scripts/check-db-writes.test.mjs; test/db/chatsContactsBranches.test.ts; test/services/serverAvatars.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:040f876c1f>:mutator-call:05e6050537bf",
+      "path": "src/services/contacts/serverAvatars.ts",
+      "line": 219,
+      "symbol": "backfillServerAvatars.<callback:040f876c1f>",
+      "operation": "mutator-call",
+      "target": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:040f876c1f>.<callback:65e7af77ab>",
+      "detectedContext": "withDbTransaction",
+      "owner": "backfillServerAvatars rotation cursor",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/serverAvatars.test.ts"
+    },
+    {
+      "id": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:040f876c1f>:mutator-call:8ece3083bfa0",
+      "path": "src/services/contacts/serverAvatars.ts",
+      "line": 219,
+      "symbol": "backfillServerAvatars.<callback:040f876c1f>",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "backfillServerAvatars rotation cursor",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/serverAvatars.test.ts"
+    },
+    {
+      "id": "src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:040f876c1f>.<callback:65e7af77ab>:mutator-call:ccc901a79e13",
+      "path": "src/services/contacts/serverAvatars.ts",
+      "line": 222,
+      "symbol": "backfillServerAvatars.<callback:040f876c1f>.<callback:65e7af77ab>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
+      "detectedContext": "withDbTransaction",
+      "owner": "backfillServerAvatars rotation cursor",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/serverAvatars.test.ts"
     },
     {
       "id": "src/services/credentialUpgrade.ts#runCredentialUpgrade:mutator-call:b60b6329bbde",

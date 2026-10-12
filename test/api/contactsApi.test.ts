@@ -40,6 +40,22 @@ describe('contactsApi.queryContactsByAddress', () => {
     });
   });
 
+  it('accepts duplicate Mac cards: more contacts than addresses asked about', async () => {
+    const response = {
+      contacts: Array.from({ length: CONTACT_QUERY_MAX_ADDRESSES * 2 }, (_unused, index) => ({
+        id: `contact-${index}`,
+      })),
+    };
+    const post = jest.fn(async (_path: string, schema: { parse(value: unknown): unknown }) =>
+      schema.parse(response),
+    );
+    const http = { post } as unknown as HttpClient;
+
+    await expect(queryContactsByAddress(http, ['+15550000001'])).resolves.toHaveLength(
+      CONTACT_QUERY_MAX_ADDRESSES * 2,
+    );
+  });
+
   it.each([
     [
       'contact results',

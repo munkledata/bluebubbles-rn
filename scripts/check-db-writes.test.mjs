@@ -7602,6 +7602,8 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:f825ab541f>.<callback:62e2e33d9c>:mutator-call:560760fae756',
       'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:f825ab541f>:mutator-call:5b53f755ddd8',
       'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:f825ab541f>:mutator-call:b52fdca006d4',
+      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:040f876c1f>:mutator-call:05e6050537bf',
+      'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:040f876c1f>:mutator-call:8ece3083bfa0',
     ].sort(),
   );
   assert.deepEqual(

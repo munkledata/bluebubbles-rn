@@ -3,8 +3,12 @@ import type { HttpClient, HttpUrlBuilder } from '../http';
 
 /** One automatic backfill run never asks the server about more handles than this. */
 export const CONTACT_QUERY_MAX_ADDRESSES = 64;
-/** Fail closed on a server response that expands one bounded query into an unbounded contact list. */
-export const CONTACT_QUERY_MAX_RESULTS = 64;
+/**
+ * Fail closed on a server response that expands one bounded query into an unbounded contact list.
+ * Duplicate cards on the Mac legitimately return more contacts than addresses asked about; a cap
+ * equal to the address count refused such a window on every run.
+ */
+export const CONTACT_QUERY_MAX_RESULTS = CONTACT_QUERY_MAX_ADDRESSES * 4;
 /** A single malformed contact cannot carry an unbounded phone/email array into the match index. */
 export const CONTACT_QUERY_MAX_VALUES_PER_FIELD = 64;
 
