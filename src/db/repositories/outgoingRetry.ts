@@ -79,10 +79,10 @@ async function reconcileOutgoingErrorForMessageWithinTransaction(
         .where(and(eq(messages.guid, messageGuid), sql`${messages.sendState} IS NOT 'sent'`));
       return false;
     }
-    // This is the legacy/temp-only duplicate defense. Modern attemptGuid copies are deduplicated
-    // durably before this repository; an old event may still supply no shared attempt id. Its first
-    // copy has moved the bubble to this error and advanced/rebuilt a ladder, so accepting a matching
-    // second copy avoids consuming two attempts. A later retry first flips the bubble to
+    // Keep this duplicate defense: a V3 FCM copy and the socket copy of the same send error carry
+    // different intake keys, so both reach this repository, and an old event may supply no shared
+    // attempt id. The first copy has moved the bubble to this error and advanced/rebuilt a ladder,
+    // so accepting a matching second copy avoids consuming two attempts. A later retry first flips the bubble to
     // `sending`/error=0, making its next failure distinguishable again.
     if (
       !imessagePlainTextRetrySafe &&

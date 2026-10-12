@@ -52,8 +52,12 @@ uses `capMessagePushPayload`.
   first-boot failure or server change. The native `onTokenRefresh` callback separately registers a
   rotated FCM token immediately while realtime is active.
 - **Dead targets self-prune.** An FCM 404 / Web Push 410 removes the device row via `onDeadDevice`.
-- **Socket and FCM share normalization, then durable intake deduplicates them.** Canonical occurrence
-  receipts survive process death. On a server that advertises
+- **Socket and FCM share normalization; durable intake deduplicates redeliveries.** Canonical
+  occurrence receipts survive process death. A V3 FCM copy is keyed by its push occurrence id, which
+  never matches the socket copy's content key, so while the app is open both copies of an event are
+  applied. Their effects are idempotent: notifications re-post with `onlyAlertOnce`, the outgoing
+  retry ledger ignores a matching duplicate error, and a capped (`textTruncated`) push copy never
+  replaces a body the socket copy already stored. A shared key needs a server change. On a server that advertises
   `supports_rcs_send_attempt_ownership`, the exact RCS identity is the complete
   `{tempGuid, attemptGuid, clientAttemptGeneration}` tuple. A partial or malformed tuple is marked
   invalid, fails closed instead of falling back to content matching, and gets a distinct durable

@@ -22416,7 +22416,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#withCurrentDeliveryTransaction:mutator-call:61150b0a657c",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 95,
+      "line": 96,
       "symbol": "withCurrentDeliveryTransaction",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -22427,22 +22427,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/dbEventSink.test.ts; test/db/withDbTransaction.test.ts; test/realtime/dbEventSink.phase6.test.ts; test/services/incomingEventDrain.test.ts; test/services/rcsProviderEpochIngestion.test.ts"
     },
     {
-      "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:382322fdc9db",
+      "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:120862e42a2f",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 333,
-      "symbol": "DbEventSink.onEvent",
-      "operation": "mutator-call",
-      "target": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:371a29151c>",
-      "detectedContext": "withDbTransaction",
-      "owner": "DbEventSink.onEvent",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/dbEventSink.test.ts; test/realtime/dbEventSink.phase6.test.ts; test/services/incomingEventDrain.test.ts"
-    },
-    {
-      "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:ff31c30d0fe1",
-      "path": "src/services/realtime/dbEventSink.ts",
-      "line": 333,
+      "line": 334,
       "symbol": "DbEventSink.onEvent",
       "operation": "mutator-call",
       "target": "src/services/realtime/dbEventSink.ts#withCurrentDeliveryTransaction",
@@ -22453,10 +22440,23 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/dbEventSink.test.ts; test/realtime/dbEventSink.phase6.test.ts; test/services/incomingEventDrain.test.ts"
     },
     {
-      "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:371a29151c>:mutator-call:0ac9e92896c7",
+      "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:45514219dea1",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 337,
-      "symbol": "DbEventSink.onEvent.<callback:371a29151c>",
+      "line": 334,
+      "symbol": "DbEventSink.onEvent",
+      "operation": "mutator-call",
+      "target": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:0b854d08de>",
+      "detectedContext": "withDbTransaction",
+      "owner": "DbEventSink.onEvent",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/dbEventSink.test.ts; test/realtime/dbEventSink.phase6.test.ts; test/services/incomingEventDrain.test.ts"
+    },
+    {
+      "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:0b854d08de>:mutator-call:96b3dcf61383",
+      "path": "src/services/realtime/dbEventSink.ts",
+      "line": 338,
+      "symbol": "DbEventSink.onEvent.<callback:0b854d08de>",
       "operation": "mutator-call",
       "target": "src/db/repositories/handles.ts#upsertHandlesWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -22466,10 +22466,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/dbEventSink.test.ts; test/realtime/dbEventSink.phase6.test.ts; test/services/incomingEventDrain.test.ts"
     },
     {
-      "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:371a29151c>:mutator-call:c6b21d9ea506",
+      "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:0b854d08de>:mutator-call:5b3050358dfd",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 341,
-      "symbol": "DbEventSink.onEvent.<callback:371a29151c>",
+      "line": 342,
+      "symbol": "DbEventSink.onEvent.<callback:0b854d08de>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#upsertChatsWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -22479,10 +22479,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/dbEventSink.test.ts; test/realtime/dbEventSink.phase6.test.ts; test/services/incomingEventDrain.test.ts"
     },
     {
-      "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:371a29151c>:mutator-call:eaa871b33787",
+      "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:0b854d08de>:mutator-call:a02b9dee1d60",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 374,
-      "symbol": "DbEventSink.onEvent.<callback:371a29151c>",
+      "line": 383,
+      "symbol": "DbEventSink.onEvent.<callback:0b854d08de>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#reconcileEchoByContent",
       "detectedContext": "withDbTransaction",
@@ -22492,10 +22492,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/dbEventSink.test.ts; test/realtime/dbEventSink.phase6.test.ts; test/services/incomingEventDrain.test.ts"
     },
     {
-      "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:371a29151c>:mutator-call:05a40e9bb421",
+      "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:0b854d08de>:mutator-call:5013c012d5e4",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 379,
-      "symbol": "DbEventSink.onEvent.<callback:371a29151c>",
+      "line": 388,
+      "symbol": "DbEventSink.onEvent.<callback:0b854d08de>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messages.ts#upsertMessagesWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -22507,7 +22507,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:66c205029948",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 464,
+      "line": 473,
       "symbol": "DbEventSink.onEvent",
       "operation": "mutator-call",
       "target": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:a180ff6e0a>",
@@ -22520,7 +22520,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:9a9e27fbf84f",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 464,
+      "line": 473,
       "symbol": "DbEventSink.onEvent",
       "operation": "mutator-call",
       "target": "src/services/realtime/dbEventSink.ts#withCurrentDeliveryTransaction",
@@ -22533,7 +22533,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:a180ff6e0a>:mutator-call:770827794001",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 468,
+      "line": 477,
       "symbol": "DbEventSink.onEvent.<callback:a180ff6e0a>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#applyMessageStateWithinTransaction",
@@ -22546,7 +22546,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:19c0e079b32c",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 513,
+      "line": 522,
       "symbol": "DbEventSink.onEvent",
       "operation": "mutator-call",
       "target": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:3d18ed0ddf>",
@@ -22559,7 +22559,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:4efab14f2e98",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 513,
+      "line": 522,
       "symbol": "DbEventSink.onEvent",
       "operation": "mutator-call",
       "target": "src/services/realtime/dbEventSink.ts#withCurrentDeliveryTransaction",
@@ -22572,7 +22572,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:3d18ed0ddf>:mutator-call:cd852c48617e",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 525,
+      "line": 534,
       "symbol": "DbEventSink.onEvent.<callback:3d18ed0ddf>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messages.ts#markMessageDeletedWithinTransaction",
@@ -22585,7 +22585,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:3c2543da6a96",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 566,
+      "line": 575,
       "symbol": "DbEventSink.onEvent",
       "operation": "mutator-call",
       "target": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:34f0902273>",
@@ -22598,7 +22598,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:a3057097f761",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 566,
+      "line": 575,
       "symbol": "DbEventSink.onEvent",
       "operation": "mutator-call",
       "target": "src/services/realtime/dbEventSink.ts#withCurrentDeliveryTransaction",
@@ -22611,7 +22611,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:34f0902273>:mutator-call:f9d51a0c915a",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 574,
+      "line": 583,
       "symbol": "DbEventSink.onEvent.<callback:34f0902273>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#setLastReadMessageGuidWithinTransaction",
@@ -22624,7 +22624,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:2e1078e9e8c7",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 643,
+      "line": 652,
       "symbol": "DbEventSink.onEvent",
       "operation": "mutator-call",
       "target": "src/services/realtime/dbEventSink.ts#withCurrentDeliveryTransaction",
@@ -22637,7 +22637,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:4b1cd2a39573",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 643,
+      "line": 652,
       "symbol": "DbEventSink.onEvent",
       "operation": "mutator-call",
       "target": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:2eeb4e33d8>",
@@ -22650,7 +22650,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:2eeb4e33d8>:mutator-call:8644088c3aeb",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 702,
+      "line": 711,
       "symbol": "DbEventSink.onEvent.<callback:2eeb4e33d8>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoingRetry.ts#applyServerSendErrorWithinTransaction",
@@ -22663,7 +22663,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:18b50ea5a4f4",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 779,
+      "line": 788,
       "symbol": "DbEventSink.onEvent",
       "operation": "mutator-call",
       "target": "src/services/realtime/dbEventSink.ts#withCurrentDeliveryTransaction",
@@ -22676,7 +22676,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent:mutator-call:28c5bdc89452",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 779,
+      "line": 788,
       "symbol": "DbEventSink.onEvent",
       "operation": "mutator-call",
       "target": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:bf7c767cc3>",
@@ -22689,7 +22689,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:bf7c767cc3>:mutator-call:5b2831b6d632",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 783,
+      "line": 792,
       "symbol": "DbEventSink.onEvent.<callback:bf7c767cc3>",
       "operation": "mutator-call",
       "target": "src/db/repositories/handles.ts#upsertHandlesWithinTransaction",
@@ -22702,7 +22702,7 @@
     {
       "id": "src/services/realtime/dbEventSink.ts#DbEventSink.onEvent.<callback:bf7c767cc3>:mutator-call:33bb92d821f7",
       "path": "src/services/realtime/dbEventSink.ts",
-      "line": 787,
+      "line": 796,
       "symbol": "DbEventSink.onEvent.<callback:bf7c767cc3>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#upsertChatsWithinTransaction",

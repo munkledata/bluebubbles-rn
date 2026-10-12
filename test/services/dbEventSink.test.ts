@@ -676,6 +676,55 @@ describe('DbEventSink (live path)', () => {
     ).toEqual({ count: 1 });
   });
 
+  describe('a capped push copy of a long new message', () => {
+    // The server cuts a long new-message to a preview ending in "…" for FCM (textTruncated). The
+    // socket copy of the same message has a different intake key, so both are applied.
+    const full = `${'Long message body. '.repeat(200)}The end.`;
+    const preview = `${full.slice(0, 120)}…`;
+    async function seedChat(db: AppDatabase) {
+      const hm = await upsertHandles(db, [{ address: 'bob@x.com' }]);
+      await upsertChats(
+        db,
+        [Chat.parse({ guid: 'cCapped', participants: [{ address: 'bob@x.com' }] })],
+        hm,
+      );
+    }
+    const copy = (text: string, textTruncated?: true) =>
+      Message.parse({
+        guid: 'capped-message',
+        text,
+        dateCreated: 400,
+        handle: { address: 'bob@x.com' },
+        chatGuid: 'cCapped',
+        ...(textTruncated ? { textTruncated } : {}),
+      });
+    const storedText = (raw: { prepare(sql: string): { get(guid: string): unknown } }) =>
+      (
+        raw.prepare('SELECT text FROM messages WHERE guid = ?').get('capped-message') as {
+          text: string;
+        }
+      ).text;
+
+    it('never replaces the full body the socket copy already stored', async () => {
+      const { db, raw } = await createTestDb();
+      await seedChat(db);
+      const sink = new DbEventSink(db);
+      await sink.onEvent({ type: 'new-message', message: copy(full) }, 'socket');
+      await sink.onEvent({ type: 'new-message', message: copy(preview, true) }, 'fcm');
+      expect(storedText(raw)).toBe(full);
+    });
+
+    it('still stores its preview when it arrives first', async () => {
+      const { db, raw } = await createTestDb();
+      await seedChat(db);
+      await new DbEventSink(db).onEvent(
+        { type: 'new-message', message: copy(preview, true) },
+        'fcm',
+      );
+      expect(storedText(raw)).toBe(preview);
+    });
+  });
+
   it('keeps a durable read retryable and requests targeted recovery when its chat is absent', async () => {
     const { db } = await createTestDb();
     const requestRecovery = jest.fn(async () => undefined);

@@ -16,6 +16,7 @@ import {
   getMessageStateAuthorityWithinTransaction,
   getChatIdByGuid,
   getChatGuidByMessageGuid,
+  getMessageTextByGuid,
   getNewestReceivedGuid,
   linkHandlesToContacts,
   markMessageDeletedWithinTransaction,
@@ -371,14 +372,22 @@ export class DbEventSink implements EventSink {
             // echo carries no tempGuid, so match by content and promote the `temp-…` row in place
             // (id + attachments + local_path preserved) rather than inserting a duplicate bubble.
             // Live path only — never the sync path (see reconcileEchoByContent).
+            // A capped push copy of a long message carries a cut preview ("…", textTruncated). Its
+            // socket copy has another intake key and may be stored first: keep that whole body.
+            // The preview only fills a row that has no text yet; recovery fetches the rest.
+            const storedText =
+              message.textTruncated === true
+                ? (await getMessageTextByGuid(this.db, message.guid))?.text
+                : null;
+            const applied = storedText ? { ...message, text: storedText } : message;
             const reconciliation = await reconcileEchoByContent(
               transactionContext,
-              message,
+              applied,
               chatId,
             );
             const stored = await upsertMessagesWithinTransaction(
               transactionContext,
-              [message],
+              [applied],
               () => chatId,
               handleMap,
             );
