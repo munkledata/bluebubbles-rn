@@ -1,3 +1,9 @@
+import {
+  currentRcsProviderEpoch,
+  isCurrentRcsChatGuid,
+  type RcsProviderServerInfo,
+} from '@core/rcs/providerIdentity';
+
 export interface TitleInput {
   customName?: string | null;
   displayName: string | null;
@@ -50,6 +56,23 @@ export function resolveTitle(c: TitleInput): string {
  */
 export function isRcsChatGuid(guid: string | null | undefined): boolean {
   return !!guid && guid.startsWith('RCS;-;');
+}
+
+/**
+ * True only when the current Google Messages pairing is known and this RCS chat belongs to an
+ * earlier one, which can never be messaged again (Google may reuse its old id for someone else).
+ * An unknown pairing (server info not loaded yet, bridge down) proves nothing either way. The
+ * scheduled-send runner applies the same rule before retiring such a row.
+ */
+export function isRcsChatFromAnotherKnownPairing(
+  info: RcsProviderServerInfo | null | undefined,
+  guid: string | null | undefined,
+): boolean {
+  return (
+    isRcsChatGuid(guid) &&
+    currentRcsProviderEpoch(info) !== null &&
+    !isCurrentRcsChatGuid(info, guid)
+  );
 }
 
 /**

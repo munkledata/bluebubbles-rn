@@ -17,7 +17,8 @@ import {
 import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import { ActionListRow, Screen, ScreenHeader, useTheme } from '@ui';
 import { SCHEDULE_DELIVERY_TIMING_NOTE } from '@ui/conversations/RecurrenceSheet';
-import { formatChatDate, formatSeparatorDate } from '@utils';
+import { formatChatDate, formatSeparatorDate, isRcsChatFromAnotherKnownPairing } from '@utils';
+import { useSessionStore } from '@state/sessionStore';
 
 /** One flat-list item: a scheduled row or the COMPLETED section header. */
 type ListItem = { kind: 'header'; key: string; label: string } | { kind: 'row'; row: ScheduledRow };
@@ -31,6 +32,7 @@ export default function ScheduledScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
   const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const serverInfo = useSessionStore((s) => s.serverInfo);
   const [serverListVerified, setServerListVerified] = useState<boolean | null>(null);
   // Reconcile server-scheduled rows on open so the list reflects what the server is tracking.
   useEffect(() => {
@@ -71,6 +73,17 @@ export default function ScheduledScreen(): React.JSX.Element {
         label: 'Delivery uncertain — check conversation',
         color: theme.color.secondaryLabel,
       };
+    // Part of the reason a row is stuck or failed: its RCS chat is from an earlier Google pairing.
+    // Cancel or Clear still removes it; it can never be sent.
+    if (
+      (row.status === 'pending' || row.status === 'sending' || row.status === 'error') &&
+      isRcsChatFromAnotherKnownPairing(serverInfo, row.chatGuid)
+    ) {
+      return {
+        label: '✕ Won’t send: from a previous Google Messages pairing',
+        color: theme.color.destructive,
+      };
+    }
     if (row.status === 'error')
       return { label: '✕ Failed to send', color: theme.color.destructive };
     return {

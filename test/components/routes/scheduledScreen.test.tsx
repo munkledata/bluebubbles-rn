@@ -92,6 +92,8 @@ import {
 // eslint-disable-next-line import/first
 import { useDialogStore } from '@ui/dialog/dialogStore';
 // eslint-disable-next-line import/first
+import { useSessionStore } from '@state/sessionStore';
+// eslint-disable-next-line import/first
 import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
@@ -360,5 +362,45 @@ describe('ScheduledScreen', () => {
 
     await waitFor(() => expect(useDialogStore.getState().current?.title).toBe('Scheduled'));
     expect(useDialogStore.getState().current?.message).toBe('Couldn’t clear that history item.');
+  });
+});
+
+describe('ScheduledScreen — RCS chats from a previous Google pairing', () => {
+  const OLD_EPOCH = `gpe1_${'A'.repeat(43)}`;
+  // Canonical base64url: the 43rd character carries only padding bits, so it must be 'A' here.
+  const CURRENT_EPOCH = `gpe1_${'B'.repeat(42)}A`;
+  const OLD_PAIRING_CHAT = `RCS;-;g1.${OLD_EPOCH}.dGhyZWFkLTE`;
+  const currentPairing = {
+    rcs: true,
+    supports_rcs_epoch_qualified_ids: true,
+    rcs_provider_epoch: CURRENT_EPOCH,
+  };
+
+  afterEach(() => {
+    useSessionStore.setState({ serverInfo: null });
+  });
+
+  it('says why a pending or failed message from an earlier pairing will never send', async () => {
+    useSessionStore.setState({ serverInfo: currentPairing as never });
+    setRows(
+      [makeRow({ id: 1, chatGuid: OLD_PAIRING_CHAT, text: 'pending old pairing' })],
+      [makeRow({ id: 2, chatGuid: OLD_PAIRING_CHAT, text: 'failed old pairing', status: 'error' })],
+    );
+
+    await renderWithTheme(<ScheduledScreen />);
+
+    expect(screen.getAllByText(/Won’t send: from a previous Google Messages pairing/)).toHaveLength(
+      2,
+    );
+    expect(screen.queryByText(/Failed to send/)).toBeNull();
+  });
+
+  it('does not claim an earlier pairing before the current pairing is known', async () => {
+    useSessionStore.setState({ serverInfo: null });
+    setRows([makeRow({ id: 1, chatGuid: OLD_PAIRING_CHAT, text: 'pending old pairing' })]);
+
+    await renderWithTheme(<ScheduledScreen />);
+
+    expect(screen.queryByText(/previous Google Messages pairing/)).toBeNull();
   });
 });
