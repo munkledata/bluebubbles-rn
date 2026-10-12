@@ -17,6 +17,7 @@ import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import {
   sendImageMessage,
+  UnsendableAttachmentNameError,
   type AttachmentOwnershipPreparer,
   type AttachmentUploader,
 } from '@/services/send/sendAttachmentService';
@@ -697,6 +698,46 @@ describe('sendImageMessage', () => {
     expect(up.captured).toBeUndefined();
     expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
   });
+
+  it.each([
+    ['an iMessage DM', 'any;-;+15551234567', 'iMessage'],
+    ['an RCS chat', RCS_CHAT_GUID, undefined],
+  ] as const)(
+    'refuses a file name the uploader cannot carry before any bubble or queue row (%s)',
+    async (_label, chatGuid, service) => {
+      // The document picker keeps a provider's display name, quotes included. The uploader used to
+      // reject it only after admission: iMessage then said "may have been sent", RCS retried 5x.
+      const { db, raw } = await createTestDb();
+      if (service === 'iMessage') await seedProvenImessageChat(db, chatGuid);
+      else await seedChat(db, chatGuid);
+      const protect = jest.spyOn(attachmentCacheCoordinator, 'protect');
+      const up = fakeUploader(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+
+      await expect(
+        sendImageMessage(
+          db,
+          dummyHttp,
+          {
+            chatGuid,
+            image: { ...IMG, name: 'Q3 "final".jpg' },
+            ...(service ? { service } : {}),
+          },
+          up.upload,
+          1_000,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          service === 'iMessage' ? imessageCapability() : undefined,
+        ),
+      ).rejects.toBeInstanceOf(UnsendableAttachmentNameError);
+
+      expect(protect).not.toHaveBeenCalled();
+      expect(up.captured).toBeUndefined();
+      expect((one(raw, 'SELECT COUNT(*) c FROM messages') as { c: number }).c).toBe(0);
+      expect((one(raw, 'SELECT COUNT(*) c FROM outgoing_queue') as { c: number }).c).toBe(0);
+    },
+  );
 
   it('rejects an iMessage attachment before DB, cache, or upload when capability is false', async () => {
     const { db, raw } = await createTestDb();

@@ -20,6 +20,7 @@ import { DbCommitGuardRejectedError, withDbTransaction, type DbCommitGuard } fro
 import type { AppDatabase } from '@db/types';
 import { utf8Encode } from '@utils/bytes';
 import { isProvenOneToOneIMessageChat, isRcsChatGuid } from '@utils/chat';
+import { assertSafeUploadFilename } from '@utils/uploadFilename';
 import {
   attachmentCacheCoordinator,
   type AttachmentCacheReservation,
@@ -120,6 +121,14 @@ export type AttachmentOwnershipPreparer = (input: {
 
 const ATTACHMENT_CACHE_PROMOTION_CONFLICT = Symbol('attachment-cache-promotion-conflict');
 
+/** The file's own name cannot be uploaded as is; nothing was written or sent. */
+export class UnsendableAttachmentNameError extends Error {
+  constructor() {
+    super('Choose a file with a valid name of at most 255 UTF-8 bytes.');
+    this.name = 'UnsendableAttachmentNameError';
+  }
+}
+
 export function isSupportedImessageAttachmentFile(image: PickedImage): boolean {
   if (typeof image.mimeType !== 'string' || typeof image.name !== 'string') return false;
   return (
@@ -180,6 +189,14 @@ export async function sendImageMessage(
         ? 'This server cannot send an iMessage attachment reply.'
         : 'This server cannot send an RCS media reply.',
     );
+  }
+  // The uploader sends the file's own name and cannot carry some (quotes, slashes, control
+  // characters, over 255 bytes). Refuse before any bubble or queue row so the person can rename
+  // the file: refused after admission, iMessage read "may have been sent" and RCS retried 5 times.
+  try {
+    assertSafeUploadFilename(args.image.name);
+  } catch {
+    throw new UnsendableAttachmentNameError();
   }
   if (imessageAttachment) {
     const supportedFile = imessageVoice

@@ -1517,7 +1517,9 @@ function ChatScreenInner({
           else if (!reportedFailure && accountLease.isCurrent()) {
             reportedFailure = true;
             showToast(
-              'Couldn’t queue one or more attachments. They’re still in your composer—try again when connected',
+              admission.reason === 'file-name'
+                ? 'A file’s name can’t be sent. Rename it without quotes or slashes (and shorter if it’s very long), then attach it again.'
+                : 'Couldn’t queue one or more attachments. They’re still in your composer—try again when connected',
             );
           }
           if (decidedUris.size === expectedUris.size) finish();

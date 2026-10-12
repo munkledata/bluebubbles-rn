@@ -60,6 +60,7 @@ import {
 } from './scheduleService';
 import {
   sendImageMessage,
+  UnsendableAttachmentNameError,
   type AttachmentTextService,
   type PickedImage,
 } from './sendAttachmentService';
@@ -137,6 +138,8 @@ export interface AttachmentQueueAdmission {
   /** True only after this attachment's optimistic message + queue transaction committed. */
   queued: boolean;
   tempGuid?: string;
+  /** Why an attachment was not queued, when the person can fix it ('file-name': rename it). */
+  reason?: 'file-name';
 }
 export type AttachmentQueueAdmissionObserver = (admission: AttachmentQueueAdmission) => void;
 
@@ -550,7 +553,13 @@ export function sendImages(
           } catch (error) {
             if (!queued && accountLease.isCurrent()) {
               try {
-                onAdmission?.({ uri: image.uri, queued: false });
+                onAdmission?.({
+                  uri: image.uri,
+                  queued: false,
+                  ...(error instanceof UnsendableAttachmentNameError
+                    ? { reason: 'file-name' as const }
+                    : {}),
+                });
               } catch (observerError) {
                 logger.warn('[send] optional attachment admission observer failed', observerError);
               }

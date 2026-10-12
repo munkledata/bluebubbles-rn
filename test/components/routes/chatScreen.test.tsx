@@ -2749,6 +2749,42 @@ describe('ChatScreen — stable composer callbacks (Composer memo contract)', ()
     }
   });
 
+  it('asks the person to rename a file whose name cannot be sent', async () => {
+    configureRcsChat();
+    const loggerWarn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const uri = 'file:///cache/DocumentPicker/quoted.pdf';
+    try {
+      (sendImages as jest.Mock).mockImplementationOnce(
+        async (
+          _args: unknown,
+          _lease: unknown,
+          _reportIssue: unknown,
+          onAdmission?: (admission: { uri: string; queued: boolean; reason?: 'file-name' }) => void,
+        ) => {
+          onAdmission?.({ uri, queued: false, reason: 'file-name' });
+          throw new Error('Choose a file with a valid name of at most 255 UTF-8 bytes.');
+        },
+      );
+      await renderWithTheme(<ChatScreen />);
+
+      await act(async () => {
+        mockCaptured.composer!.onSendAttachments([
+          { uri, name: 'Q3 "final".pdf', mimeType: 'application/pdf', size: 10 },
+        ]);
+        await Promise.resolve();
+      });
+
+      expect(showToast).toHaveBeenCalledWith(
+        'A file’s name can’t be sent. Rename it without quotes or slashes (and shorter if it’s very long), then attach it again.',
+      );
+      expect(showToast).not.toHaveBeenCalledWith(
+        expect.stringContaining('try again when connected'),
+      );
+    } finally {
+      loggerWarn.mockRestore();
+    }
+  });
+
   it('keeps every composer callback identity across an unrelated screen re-render', async () => {
     configureRcsChat();
     await renderWithTheme(<ChatScreen />);
