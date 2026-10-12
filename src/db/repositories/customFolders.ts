@@ -12,6 +12,16 @@ import { chatHasUnreadSql } from './chatVisibility';
 export const MAX_CUSTOM_FOLDERS = 100;
 export const MAX_CUSTOM_FOLDER_NAME_CODE_POINTS = 64;
 export const MAX_CUSTOM_FOLDER_MEMBERS = 5_000;
+/** All folders together; equal to what one backup can hold, so a saved folder set always exports. */
+export const MAX_CUSTOM_FOLDER_MEMBERSHIPS_TOTAL = 25_000;
+
+/** A save would make all folders together hold more chats than a backup can include. */
+export class CustomFolderMembershipLimitError extends Error {
+  constructor() {
+    super(`Folders cannot hold more than ${MAX_CUSTOM_FOLDER_MEMBERSHIPS_TOTAL} chats in total.`);
+    this.name = 'CustomFolderMembershipLimitError';
+  }
+}
 export const MAX_CUSTOM_FOLDER_CHAT_GUID_CODE_POINTS = 4_096;
 
 const MEMBER_WRITE_CHUNK_SIZE = 400;
@@ -424,6 +434,22 @@ export function replaceCustomFolderMembershipWithinTransaction(
     `)) as { chatGuid: string }[];
     if (existing.length > MAX_CUSTOM_FOLDER_MEMBERS) {
       throw new Error('Custom folder membership exceeds its safety bound.');
+    }
+    // Only a save that grows this folder can be refused, so a set already over the total (saved
+    // before this limit existed) can still be trimmed one folder at a time.
+    if (chatGuids.length > existing.length) {
+      const [others] = await db.all<{ rowCount: number }>(sql`
+        WITH other_members AS MATERIALIZED (
+          SELECT 1
+            FROM custom_folder_members
+           WHERE folder_id <> ${folderId}
+           LIMIT ${MAX_CUSTOM_FOLDER_MEMBERSHIPS_TOTAL + 1}
+        )
+        SELECT COUNT(*) AS rowCount FROM other_members
+      `);
+      if ((others?.rowCount ?? 0) + chatGuids.length > MAX_CUSTOM_FOLDER_MEMBERSHIPS_TOTAL) {
+        throw new CustomFolderMembershipLimitError();
+      }
     }
 
     for (let offset = 0; offset < chatGuids.length; offset += MEMBER_WRITE_CHUNK_SIZE) {

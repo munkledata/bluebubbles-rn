@@ -82,8 +82,6 @@ export async function pickBackupFileForLease(
 
 /** Data the person can change that is too large for a backup: say what to change. */
 const EXPORT_LIMIT_MESSAGES: Record<BackupEditableField, string> = {
-  'chat-nickname': `A conversation’s phone-local nickname is too long to back up. Shorten it to ${BACKUP_LIMITS.chatNameCharacters.toLocaleString('en-US')} characters or fewer in that conversation’s settings, then export again.`,
-  'theme-name': `A custom theme’s name is too long to back up. Rename it to ${BACKUP_LIMITS.themeNameCharacters} characters or fewer in Theme Studio, then export again.`,
   'folder-memberships': `Your folders hold more chats in total than a backup can include (${BACKUP_LIMITS.customFolderMemberships.toLocaleString('en-US')} at most). Remove some chats from folders, then export again.`,
 };
 

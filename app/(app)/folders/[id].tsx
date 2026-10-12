@@ -9,6 +9,8 @@ import {
 } from '@db/repositories';
 import { useChats } from '@features/conversations/useChats';
 import {
+  CustomFolderMembershipLimitError,
+  MAX_CUSTOM_FOLDER_MEMBERSHIPS_TOTAL,
   loadCustomFolderMembership,
   loadCustomFolders,
   replaceCustomFolderMembership,
@@ -276,12 +278,15 @@ export default function ConversationFolderMembershipScreen(): React.JSX.Element 
       }
       pendingOutcomeRef.current = { type: 'saved' };
       applyPendingOutcome();
-    } catch {
+    } catch (error) {
       if (accountLease.isCurrent()) {
         // Keep every checkbox exactly as authored so the user can retry without reconstructing it.
         pendingOutcomeRef.current = {
           type: 'error',
-          message: 'Couldn’t save this folder. Your membership changes are still selected.',
+          message:
+            error instanceof CustomFolderMembershipLimitError
+              ? `Folders can hold ${MAX_CUSTOM_FOLDER_MEMBERSHIPS_TOTAL.toLocaleString('en-US')} chats in total, so a backup can include them all. Remove some chats from this or another folder first.`
+              : 'Couldn’t save this folder. Your membership changes are still selected.',
         };
         applyPendingOutcome();
       }

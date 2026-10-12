@@ -12,6 +12,7 @@ import type { AppDatabase } from '../types';
 import {
   MAX_CUSTOM_FOLDER_CHAT_GUID_CODE_POINTS,
   MAX_CUSTOM_FOLDER_MEMBERS,
+  MAX_CUSTOM_FOLDER_MEMBERSHIPS_TOTAL,
   MAX_CUSTOM_FOLDER_NAME_CODE_POINTS,
   MAX_CUSTOM_FOLDERS,
   normalizeCustomFolderName,
@@ -79,8 +80,8 @@ interface ChatCustomizationExportRow extends Omit<ChatCustomizationRow, 'guid'> 
   participantService: string | null;
 }
 
-/** Data the person typed or chose that is too large for a backup; `field` says what to change. */
-export type BackupEditableField = 'chat-nickname' | 'theme-name' | 'folder-memberships';
+/** Data the person chose that is too large for a backup; `field` says what to change. */
+export type BackupEditableField = 'folder-memberships';
 
 export class BackupExportLimitError extends Error {
   constructor(
@@ -93,7 +94,8 @@ export class BackupExportLimitError extends Error {
 }
 
 const MAX_BACKUP_CUSTOM_FOLDER_IDENTITIES = 10_000;
-const MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS = 25_000;
+// Saving folders enforces the same total, so only a set saved before that limit can exceed it.
+const MAX_BACKUP_CUSTOM_FOLDER_ASSOCIATIONS = MAX_CUSTOM_FOLDER_MEMBERSHIPS_TOTAL;
 const MAX_BACKUP_CHAT_PARTICIPANTS = 512;
 // Apply coarse SQL allocation caps before JSON aggregation. The JavaScript check below then
 // mirrors BackupV3Schema's exact UTF-16 string-length semantics without truncating evidence.
@@ -814,14 +816,16 @@ function readBackupBaseRowsWithinTransaction(
                  THEN 1 ELSE 0
                END), 0) AS invalidTypeCount,
                COALESCE(SUM(
-                 length(CAST(selected.name AS BLOB)) +
+                 length(CAST(substr(selected.name, 1, ${limits.themeNameCharacters}) AS BLOB)) +
                  length(CAST(selected.mode AS BLOB)) +
                  length(CAST(selected.tokens AS BLOB))
                ), 0) AS rawBytes,
                COALESCE(MAX(length(substr(
-                 selected.name, 1, ${limits.themeNameCharacters + 1}
+                 selected.name, 1, ${limits.themeNameCharacters}
                ))), 0) AS maxNameCharacters,
-               COALESCE(MAX(length(CAST(selected.name AS BLOB))), 0) AS maxNameBytes,
+               COALESCE(MAX(length(CAST(
+                 substr(selected.name, 1, ${limits.themeNameCharacters}) AS BLOB
+               ))), 0) AS maxNameBytes,
                COALESCE(MAX(length(substr(
                  selected.mode, 1, ${limits.themeModeCharacters + 1}
                ))), 0) AS maxModeCharacters,
@@ -855,7 +859,9 @@ function readBackupBaseRowsWithinTransaction(
              END AS invalidTypeCount,
              length(CAST(c.guid AS BLOB)) +
                length(CAST(COALESCE(c.chat_identifier, '') AS BLOB)) +
-               length(CAST(COALESCE(c.custom_name, '') AS BLOB)) +
+               length(CAST(
+                 substr(COALESCE(c.custom_name, ''), 1, ${limits.chatNameCharacters}) AS BLOB
+               )) +
                length(CAST(COALESCE(c.custom_color, '') AS BLOB)) +
                length(CAST(COALESCE(c.mute_type, '') AS BLOB)) AS metadataRawBytes,
              length(substr(c.guid, 1, ${limits.chatGuidCharacters + 1})) AS guidCharacters,
@@ -865,9 +871,11 @@ function readBackupBaseRowsWithinTransaction(
              )) AS identifierCharacters,
              length(CAST(COALESCE(c.chat_identifier, '') AS BLOB)) AS identifierBytes,
              length(substr(
-               COALESCE(c.custom_name, ''), 1, ${limits.chatNameCharacters + 1}
+               COALESCE(c.custom_name, ''), 1, ${limits.chatNameCharacters}
              )) AS customNameCharacters,
-             length(CAST(COALESCE(c.custom_name, '') AS BLOB)) AS customNameBytes,
+             length(CAST(
+               substr(COALESCE(c.custom_name, ''), 1, ${limits.chatNameCharacters}) AS BLOB
+             )) AS customNameBytes,
              length(substr(
                COALESCE(c.custom_color, ''), 1, ${limits.chatColorCharacters + 1}
              )) AS customColorCharacters,
@@ -953,19 +961,13 @@ function readBackupBaseRowsWithinTransaction(
       limits.valueCharacters,
       'kv value',
     );
-    if (
-      !hasProbeStringBound(
-        themeProbe.maxNameCharacters,
-        themeProbe.maxNameBytes,
-        limits.themeNameCharacters,
-        'theme name',
-      )
-    ) {
-      throw new BackupExportLimitError(
-        'theme-name',
-        'Backup export theme name exceeds its safety bound.',
-      );
-    }
+    // Over-long legacy names are measured and read already cut to the limit, so this holds.
+    assertProbeStringBound(
+      themeProbe.maxNameCharacters,
+      themeProbe.maxNameBytes,
+      limits.themeNameCharacters,
+      'theme name',
+    );
     assertProbeStringBound(
       themeProbe.maxModeCharacters,
       themeProbe.maxModeBytes,
@@ -1001,19 +1003,12 @@ function readBackupBaseRowsWithinTransaction(
         limits.chatIdentifierCharacters,
         'chat identifier',
       );
-      if (
-        !hasProbeStringBound(
-          chat.customNameCharacters,
-          chat.customNameBytes,
-          limits.chatNameCharacters,
-          'chat name',
-        )
-      ) {
-        throw new BackupExportLimitError(
-          'chat-nickname',
-          'Backup export chat name exceeds its safety bound.',
-        );
-      }
+      assertProbeStringBound(
+        chat.customNameCharacters,
+        chat.customNameBytes,
+        limits.chatNameCharacters,
+        'chat name',
+      );
       assertProbeStringBound(
         chat.customColorCharacters,
         chat.customColorBytes,
@@ -1122,7 +1117,8 @@ function readBackupBaseRowsWithinTransaction(
        LIMIT ${limits.kvEntries + 1}
     `);
     const themes = await db.all<ThemeRow>(sql`
-      SELECT name, mode, tokens, is_preset AS isPreset
+      SELECT substr(name, 1, ${limits.themeNameCharacters}) AS name, mode, tokens,
+             is_preset AS isPreset
         FROM themes INDEXED BY themes_backup_export_idx
        WHERE is_preset = 0
        ORDER BY id
@@ -1138,7 +1134,8 @@ function readBackupBaseRowsWithinTransaction(
          LIMIT ${limits.chatCustomizations + 1}
       )
       SELECT c.id AS chatId, c.guid, c.chat_identifier AS chatIdentifier, c.style,
-             c.custom_name AS customName, c.custom_color AS customColor,
+             substr(c.custom_name, 1, ${limits.chatNameCharacters}) AS customName,
+             c.custom_color AS customColor,
              c.mute_type AS muteType, c.is_pinned AS isPinned, c.pin_order AS pinOrder,
              c.is_archived AS isArchived,
              COALESCE(
@@ -2002,17 +1999,39 @@ export async function getCustomFolderBackupData(
   return buildCustomFolderBackupData(rows);
 }
 
+/**
+ * Cut a name to the backup format's UTF-16 limit without splitting an emoji's surrogate pair. SQL
+ * already cut it to that many characters, which an emoji-heavy name can still exceed.
+ */
+function shortenToUtf16Units(value: string, maxUnits: number): string {
+  if (value.length <= maxUnits) return value;
+  const last = value.charCodeAt(maxUnits - 1);
+  return value.slice(0, last >= 0xd800 && last <= 0xdbff ? maxUnits - 1 : maxUnits);
+}
+
 function buildBackupBaseExportData(
   rows: BackupBaseExportRows,
   limits: BackupExportLimits,
 ): BackupBaseExportData {
+  // Nicknames and theme names saved before their editors had length limits used to fail every
+  // backup. The backup copy is shortened instead; the phone keeps the full name. (Two themes
+  // whose names match up to the limit would then restore as one.)
   return {
     kv: rows.kv,
-    themes: rows.themes,
+    themes: rows.themes.map((theme) => ({
+      ...theme,
+      name: shortenToUtf16Units(theme.name, limits.themeNameCharacters),
+    })),
     chatCustomizations: buildBoundedPortableChatCustomizations(
       rows.chatCustomizations,
       limits.chatParticipants,
-    ),
+    ).map((chat) => ({
+      ...chat,
+      customName:
+        chat.customName == null
+          ? chat.customName
+          : shortenToUtf16Units(chat.customName, limits.chatNameCharacters),
+    })),
   };
 }
 

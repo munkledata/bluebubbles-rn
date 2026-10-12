@@ -39,8 +39,8 @@ jest.mock('@/services/backup/backupService', () => {
     }
   }
   class BackupExportLimitError extends Error {
-    field: 'chat-nickname' | 'theme-name' | 'folder-memberships';
-    constructor(field: 'chat-nickname' | 'theme-name' | 'folder-memberships') {
+    field: 'folder-memberships';
+    constructor(field: 'folder-memberships') {
       super(field);
       this.field = field;
     }
@@ -164,8 +164,6 @@ describe('BackupScreen passphrase boundary', () => {
   });
 
   it.each([
-    ['chat-nickname', 'A conversation’s phone-local nickname is too long to back up.'],
-    ['theme-name', 'A custom theme’s name is too long to back up.'],
     ['folder-memberships', 'Your folders hold more chats in total than a backup can include'],
   ] as const)('says what to change when a %s is too large to back up', async (field, opening) => {
     const { BackupExportLimitError } = jest.requireMock('@/services/backup/backupService') as {

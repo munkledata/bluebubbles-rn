@@ -210,38 +210,49 @@ describe('buildBackup', () => {
     );
   });
 
-  it('applies exact JavaScript string limits after the bounded SQL read', async () => {
+  // Names saved before the editors limited their length used to fail the whole backup. The
+  // backup copy is shortened instead (never mid-emoji); the phone keeps the full name.
+  it('shortens an over-long legacy theme name in the backup copy without splitting an emoji', async () => {
     const t = await createTestDb();
-    const sqlBoundedButJavaScriptOversized =
-      'a'.repeat(BACKUP_LIMITS.themeNameCharacters - 1) + '😀';
-    expect(Array.from(sqlBoundedButJavaScriptOversized)).toHaveLength(
-      BACKUP_LIMITS.themeNameCharacters,
-    );
-    expect(sqlBoundedButJavaScriptOversized).toHaveLength(BACKUP_LIMITS.themeNameCharacters + 1);
+    const fitsSqlButNotJavaScript = 'a'.repeat(BACKUP_LIMITS.themeNameCharacters - 1) + '😀';
+    expect(Array.from(fitsSqlButNotJavaScript)).toHaveLength(BACKUP_LIMITS.themeNameCharacters);
+    expect(fitsSqlButNotJavaScript).toHaveLength(BACKUP_LIMITS.themeNameCharacters + 1);
     t.raw
       .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?, ?, ?, 0)')
-      .run(sqlBoundedButJavaScriptOversized, 'dark', '{}');
+      .run(fitsSqlButNotJavaScript, 'dark', '{}');
+    t.raw
+      .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?, ?, ?, 0)')
+      .run('t'.repeat(BACKUP_LIMITS.themeNameCharacters + 50), 'light', '{}');
 
-    await expect(buildBackup(t.db, { exportedAt: 1 })).rejects.toThrow(
-      expect.objectContaining({ name: 'BackupExportLimitError', field: 'theme-name' }),
-    );
+    const backup = await buildBackup(t.db, { exportedAt: 1 });
+
+    expect(backup.themes.map((theme) => theme.name)).toEqual([
+      'a'.repeat(BACKUP_LIMITS.themeNameCharacters - 1),
+      't'.repeat(BACKUP_LIMITS.themeNameCharacters),
+    ]);
+    expect(
+      t.raw.prepare("SELECT name FROM themes WHERE mode = 'dark'").get() as { name: string },
+    ).toEqual({ name: fitsSqlButNotJavaScript });
   });
 
   it.each([
-    ['caught by the bounded SQL probe', 'n'.repeat(1_025)],
-    ['caught by the exact final check (an emoji counts twice)', `${'a'.repeat(1_023)}😀`],
+    ['longer than the limit', 'n'.repeat(1_025), 'n'.repeat(1_024)],
+    ['an emoji straddles the limit', `${'a'.repeat(1_023)}😀`, 'a'.repeat(1_023)],
   ])(
-    'names an over-long chat nickname so the person can shorten it (%s)',
-    async (_label, nickname) => {
+    'shortens an over-long legacy chat nickname in the backup copy (%s)',
+    async (_label, nickname, backedUp) => {
       const t = await createTestDb();
       await seedChat(t, 'long-nickname');
       t.raw
         .prepare('UPDATE chats SET custom_name = ? WHERE guid = ?')
         .run(nickname, 'long-nickname');
 
-      const export_ = buildBackupWithCustomFolders(t.db, { exportedAt: 1 });
-      await expect(export_).rejects.toBeInstanceOf(BackupExportLimitError);
-      await expect(export_).rejects.toMatchObject({ field: 'chat-nickname' });
+      const backup = await buildBackupWithCustomFolders(t.db, { exportedAt: 1 });
+
+      expect(backup.chatCustomizations.map((chat) => chat.customName)).toEqual([backedUp]);
+      expect(
+        t.raw.prepare('SELECT custom_name AS name FROM chats WHERE guid = ?').get('long-nickname'),
+      ).toEqual({ name: nickname });
     },
   );
 });
