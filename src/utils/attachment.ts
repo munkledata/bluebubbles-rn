@@ -100,7 +100,7 @@ export function attachmentFileName(
   guid: string,
   mimeType?: string | null,
 ): string {
-  if (transferName) return transferName;
+  if (transferName) return fitTransferName(transferName, mimeType);
   const extension = extensionForMime(mimeType);
   const candidate = `${guid}${extension}`;
   // Identity already lives in its own directory; an absent server filename need not repeat an
@@ -115,6 +115,39 @@ export function attachmentFileName(
     // The guarded destination calculation owns rejection of malformed identifiers/names.
     return candidate;
   }
+}
+
+/**
+ * A server name whose encoded form exceeds the local filename limit used to make the attachment
+ * permanently undownloadable (about 20 CJK or 15 emoji characters were enough). Its own directory
+ * already holds the identity, so keep the longest whole-character prefix that fits plus the
+ * extension the gallery needs. The DB keeps the full original name for display.
+ */
+function fitTransferName(name: string, mimeType: string | null | undefined): string {
+  let encodedLength: number;
+  try {
+    encodedLength = encodeURIComponent(name).length;
+  } catch {
+    // The guarded destination calculation owns rejection of malformed names.
+    return name;
+  }
+  if (encodedLength <= MEDIA_PATH_ENCODED_VALUE_MAX_CHARS) return name;
+  const dot = name.lastIndexOf('.');
+  const ownExtension = dot > 0 ? name.slice(dot) : '';
+  const keepsOwnExtension = /^\.[A-Za-z0-9]{1,10}$/.test(ownExtension);
+  const extension = keepsOwnExtension ? ownExtension : extensionForMime(mimeType);
+  const stem = keepsOwnExtension ? name.slice(0, dot) : name;
+  const budget = MEDIA_PATH_ENCODED_VALUE_MAX_CHARS - encodeURIComponent(extension).length;
+  let prefix = '';
+  let used = 0;
+  // Iterate whole code points so an emoji is never split into a lone surrogate.
+  for (const character of stem) {
+    const cost = encodeURIComponent(character).length;
+    if (used + cost > budget) break;
+    prefix += character;
+    used += cost;
+  }
+  return `${prefix || 'attachment'}${extension}`;
 }
 
 /**

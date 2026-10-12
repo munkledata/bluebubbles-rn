@@ -64,6 +64,27 @@ describe('attachmentFileName', () => {
   it('leaves malformed Unicode rejection to the guarded destination boundary', () => {
     expect(attachmentFileName(null, '\ud800', 'image/png')).toBe('\ud800.png');
   });
+  it('shortens a long server name to fit, keeping its extension, instead of failing the download', () => {
+    // About 20 CJK characters used to exceed the encoded limit and make the file undownloadable.
+    const longName = `${'季度报告'.repeat(15)}.pdf`;
+    const local = attachmentFileName(longName, 'guid-1', 'application/pdf');
+
+    expect(local.endsWith('.pdf')).toBe(true);
+    expect(encodeURIComponent(local).length).toBeLessThanOrEqual(180);
+    expect(longName.startsWith(local.slice(0, -'.pdf'.length))).toBe(true);
+    expect(attachmentFileName(longName, 'guid-1', 'application/pdf')).toBe(local);
+  });
+
+  it('never splits an emoji, and falls back to the MIME extension when a long name has none', () => {
+    const emoji = attachmentFileName(`${'😀'.repeat(60)}.jpg`, 'guid-2', 'image/jpeg');
+    expect(() => encodeURIComponent(emoji)).not.toThrow();
+    expect(emoji.endsWith('.jpg')).toBe(true);
+    expect(encodeURIComponent(emoji).length).toBeLessThanOrEqual(180);
+
+    const bare = attachmentFileName('x'.repeat(300), 'guid-3', 'image/png');
+    expect(bare).toBe(`${'x'.repeat(176)}.png`);
+  });
+
   it('prefers the server-supplied transfer name', () => {
     expect(attachmentFileName('holiday.jpg', 'guid-1', 'image/jpeg')).toBe('holiday.jpg');
   });

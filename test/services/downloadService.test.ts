@@ -228,6 +228,28 @@ describe('ensureDownloaded', () => {
     expect(requests[1]).not.toHaveProperty('maxImagePixels');
   });
 
+  it('downloads an attachment whose long non-Latin name used to exceed the local path limit', async () => {
+    const { db } = await createTestDb();
+    await seedAttachment(db, 'long-name');
+    const names: string[] = [];
+    const download = jest.fn(async (...args: Parameters<AttachmentFetcher['download']>) => {
+      names.push(args[1]);
+      return fetched(`file:///docs/${args[0]}`);
+    });
+    const fetcher: AttachmentFetcher = { exists: () => false, download };
+
+    await ensureDownloaded(db, fetcher, {
+      guid: 'long-name',
+      transferName: `${'季度财务报告'.repeat(10)}.pdf`,
+      localPath: null,
+      mimeType: 'application/pdf',
+    });
+
+    expect(download).toHaveBeenCalledTimes(1);
+    expect(names[0]!.endsWith('.pdf')).toBe(true);
+    expect(() => encodedMediaPathSegment(names[0]!)).not.toThrow();
+  });
+
   it('dedupes concurrent downloads of the same guid', async () => {
     const { db } = await createTestDb();
     await seedAttachment(db, 'd2');
