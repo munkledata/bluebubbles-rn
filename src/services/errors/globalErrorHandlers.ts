@@ -1,4 +1,8 @@
-import { ERROR_DIAGNOSTIC_SITES, projectCapturedErrorDiagnostic } from '@core/secure';
+import {
+  ERROR_DIAGNOSTIC_SITES,
+  isVerboseLocalLoggingEnabled,
+  projectCapturedErrorDiagnostic,
+} from '@core/secure';
 import { captureError } from './errorReportSink';
 
 /**
@@ -60,8 +64,12 @@ function installErrorUtils(): boolean {
     errorUtils.setGlobalHandler((error, isFatal) => {
       captureError(error, isFatal ? 'fatal' : 'uncaught', { fatal: isFatal });
       // Preserve RN redbox/native fatal reporting without handing that separate native/logcat
-      // path the original message, stack, cause, or custom fields.
-      prev?.(privacySafeGlobalError(error, isFatal), isFatal);
+      // path the original message, stack, cause, or custom fields. A development build keeps the
+      // real error so its red screen and Metro log can locate the bug.
+      prev?.(
+        isVerboseLocalLoggingEnabled() ? error : privacySafeGlobalError(error, isFatal),
+        isFatal,
+      );
     });
     errorUtilsInstalled = true;
     return false;
@@ -73,6 +81,9 @@ function installErrorUtils(): boolean {
 /** Returns true only when a present hook threw and is eligible for the one bounded retry. */
 function installRejectionTracker(): boolean {
   const hermes = (globalThis as unknown as ErrorHandlerGlobals).HermesInternal;
+  // React Native installs its own tracker in development, which prints each unhandled rejection;
+  // replacing it there left developers with no output at all. Release needs ours to capture them.
+  if (isVerboseLocalLoggingEnabled()) return false;
   if (rejectionTrackerInstalled || !hermes?.enablePromiseRejectionTracker) return false;
   try {
     hermes.enablePromiseRejectionTracker({

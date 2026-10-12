@@ -84,6 +84,37 @@ describe('global error-handler privacy boundary', () => {
     ).not.toMatch(/alice@example\.com|AlicePassport|3035550199|private response/);
   });
 
+  it('keeps the real error and React Native rejection warnings in a development build', () => {
+    // Developers saw only "runtime.uncaught [TypeError]" with a fake stack, and unhandled
+    // rejections printed nothing, so a dev-build bug could not be located.
+    const dev = globalThis as { __DEV__?: boolean };
+    const priorDev = dev.__DEV__;
+    dev.__DEV__ = true;
+    try {
+      const previous = jest.fn();
+      let installed: ((error: unknown, isFatal?: boolean) => void) | undefined;
+      const enablePromiseRejectionTracker = jest.fn();
+      globals.ErrorUtils = {
+        getGlobalHandler: () => previous,
+        setGlobalHandler: (handler) => {
+          installed = handler;
+        },
+      };
+      globals.HermesInternal = { enablePromiseRejectionTracker };
+      const { installGlobalErrorHandlers } = loadHandlers();
+      const raw = new TypeError("Cannot read properties of undefined (reading 'guid')");
+
+      installGlobalErrorHandlers();
+      installed?.(raw, false);
+
+      expect(mockCaptureError).toHaveBeenCalledWith(raw, 'uncaught', { fatal: false });
+      expect(previous).toHaveBeenCalledWith(raw, false);
+      expect(enablePromiseRejectionTracker).not.toHaveBeenCalled();
+    } finally {
+      dev.__DEV__ = priorDev;
+    }
+  });
+
   it('does not skip Hermes and automatically retries a throwing ErrorUtils hook once', () => {
     jest.useFakeTimers();
     let installed: ((error: unknown, isFatal?: boolean) => void) | undefined;

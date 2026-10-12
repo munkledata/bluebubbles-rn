@@ -21335,10 +21335,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/errorReportsRepo.test.ts; test/db/withDbTransaction.test.ts; test/services/errorReportQueueService.test.ts; test/services/errorReportSink.test.ts; test/services/globalErrorHandlers.test.ts; test/state/featureSettingsStore.test.ts; test/services/backgroundSyncTask.test.ts; test/services/backgroundSyncOrchestrator.test.ts; test/services/foregroundBoot.test.ts; test/services/lockService.test.ts; test/components/routes/appLayout.test.tsx"
     },
     {
-      "id": "src/services/errors/globalErrorHandlers.ts#installErrorUtils.<callback:b4a5ef749c>:mutator-call:40328b68c92f",
+      "id": "src/services/errors/globalErrorHandlers.ts#installErrorUtils.<callback:e397e0fef7>:mutator-call:81604a405770",
       "path": "src/services/errors/globalErrorHandlers.ts",
-      "line": 61,
-      "symbol": "installErrorUtils.<callback:b4a5ef749c>",
+      "line": 65,
+      "symbol": "installErrorUtils.<callback:e397e0fef7>",
       "operation": "mutator-call",
       "target": "src/services/errors/errorReportSink.ts#captureError",
       "detectedContext": "coordinated-delegation",
@@ -21350,7 +21350,7 @@
     {
       "id": "src/services/errors/globalErrorHandlers.ts#installRejectionTracker.onUnhandled:mutator-call:b340f115e916",
       "path": "src/services/errors/globalErrorHandlers.ts",
-      "line": 80,
+      "line": 91,
       "symbol": "installRejectionTracker.onUnhandled",
       "operation": "mutator-call",
       "target": "src/services/errors/errorReportSink.ts#captureError",
