@@ -563,6 +563,77 @@ it('drains a crash-surviving reserved file instead of reviving it', async () => 
   expect(physical.has(reserved)).toBe(false);
 });
 
+it('stays ready while this process is still deleting and downloading cache files', async () => {
+  // A killed-app push wake recovers the cache and starts work; opening the app in the same process
+  // re-runs recovery. Rows this process still owns are live work, not crash leftovers.
+  const { db } = await createTestDb();
+  const currentLease = lease();
+  const deleting = scoped('deleting-now');
+  await withDbTransaction(db, (context) =>
+    recordAttachmentCacheEntry(context, { path: deleting, bytes: 40, lastUsedAt: 1 }),
+  );
+  const physical = new Map([[deleting, 40]]);
+  let deleteStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    deleteStarted = resolve;
+  });
+  let finishDelete!: () => void;
+  const finished = new Promise<void>((resolve) => {
+    finishDelete = resolve;
+  });
+  const coordinator = new AttachmentCacheCoordinator(
+    nativeBoundary(physical, {
+      deleteFile: jest.fn(async (path: string) => {
+        deleteStarted();
+        await finished;
+        const bytes = physical.get(path) ?? 0;
+        physical.delete(path);
+        return { status: 'deleted' as const, bytes };
+      }),
+    }),
+    () => NOW,
+  );
+  const cleanup = coordinator.retireInactiveEntries(db);
+  await started;
+  const downloading = scoped('downloading-now');
+  await expect(
+    coordinator.reserve(db, { path: downloading, maxBytes: 100 }),
+  ).resolves.toMatchObject({ status: 'reserved' });
+
+  await expect(
+    recoverAttachmentCache(db, currentLease, {
+      coordinator,
+      now: () => NOW,
+      scan: async () => [{ uri: deleting, bytes: 40, mtimeMs: 1 }],
+    }),
+  ).resolves.toMatchObject({ status: 'ready' });
+  expect(isAttachmentCacheRecoveryReady(currentLease)).toBe(true);
+  expect(await getAttachmentCacheEntry(db, downloading)).toMatchObject({ state: 'reserved' });
+
+  finishDelete();
+  await expect(cleanup).resolves.toMatchObject({ status: 'complete', confirmed: 1 });
+  expect(await getAttachmentCacheEntry(db, deleting)).toBeNull();
+});
+
+it('does not re-scan or close readiness once this account generation has recovered', async () => {
+  const { db } = await createTestDb();
+  const currentLease = lease();
+  const coordinator = new AttachmentCacheCoordinator(nativeBoundary(new Map()), () => NOW);
+  const scan = jest.fn(async (): Promise<AttachmentCacheScanFile[]> => []);
+
+  await recoverAttachmentCache(db, currentLease, { coordinator, now: () => NOW, scan });
+  await expect(
+    recoverAttachmentCache(db, currentLease, { coordinator, now: () => NOW, scan }),
+  ).resolves.toMatchObject({ status: 'ready' });
+
+  expect(scan).toHaveBeenCalledTimes(1);
+  expect(isAttachmentCacheRecoveryReady(currentLease)).toBe(true);
+  // A deliberate retry still runs a fresh recovery after explicit invalidation.
+  invalidateAttachmentCacheRecoveryReadiness();
+  await recoverAttachmentCache(db, currentLease, { coordinator, now: () => NOW, scan });
+  expect(scan).toHaveBeenCalledTimes(2);
+});
+
 it('retires a zero-byte completed file instead of publishing an unusable cache hit', async () => {
   const { db, raw } = await createTestDb();
   const currentLease = lease();

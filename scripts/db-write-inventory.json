@@ -20609,7 +20609,7 @@
     {
       "id": "src/services/download/attachmentCacheRecovery.ts#recoverAttachmentCache.<callback:496dd08887>:mutator-call:953608ed77f1",
       "path": "src/services/download/attachmentCacheRecovery.ts",
-      "line": 89,
+      "line": 95,
       "symbol": "recoverAttachmentCache.<callback:496dd08887>",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery",
@@ -20622,7 +20622,7 @@
     {
       "id": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery.<callback:3a2cf5f87f>:mutator-call:1a83da503b5b",
       "path": "src/services/download/attachmentCacheRecovery.ts",
-      "line": 168,
+      "line": 174,
       "symbol": "performAttachmentCacheRecovery.<callback:3a2cf5f87f>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -20635,7 +20635,7 @@
     {
       "id": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery.<callback:3a2cf5f87f>:mutator-call:ffce77753be1",
       "path": "src/services/download/attachmentCacheRecovery.ts",
-      "line": 168,
+      "line": 174,
       "symbol": "performAttachmentCacheRecovery.<callback:3a2cf5f87f>",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery.<callback:3a2cf5f87f>.<callback:e15a4cbca8>",
@@ -20648,7 +20648,7 @@
     {
       "id": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery.<callback:3a2cf5f87f>.<callback:e15a4cbca8>:mutator-call:bae0a0c097d6",
       "path": "src/services/download/attachmentCacheRecovery.ts",
-      "line": 170,
+      "line": 176,
       "symbol": "performAttachmentCacheRecovery.<callback:3a2cf5f87f>.<callback:e15a4cbca8>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch",
@@ -20661,7 +20661,7 @@
     {
       "id": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery.<callback:909eb19064>:mutator-call:95c779ab9d88",
       "path": "src/services/download/attachmentCacheRecovery.ts",
-      "line": 186,
+      "line": 192,
       "symbol": "performAttachmentCacheRecovery.<callback:909eb19064>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -20674,7 +20674,7 @@
     {
       "id": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery:mutator-call:d137fff87abf",
       "path": "src/services/download/attachmentCacheRecovery.ts",
-      "line": 204,
+      "line": 210,
       "symbol": "performAttachmentCacheRecovery",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reuseExisting",
@@ -20687,7 +20687,7 @@
     {
       "id": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery:mutator-call:12f416335881",
       "path": "src/services/download/attachmentCacheRecovery.ts",
-      "line": 214,
+      "line": 220,
       "symbol": "performAttachmentCacheRecovery",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheRecovery.ts#drainCrashOwners",
@@ -20700,7 +20700,7 @@
     {
       "id": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery:mutator-call:5c4827eec261",
       "path": "src/services/download/attachmentCacheRecovery.ts",
-      "line": 218,
+      "line": 224,
       "symbol": "performAttachmentCacheRecovery",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheRecovery.ts#retireInactiveFiles",
@@ -20713,7 +20713,7 @@
     {
       "id": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery:mutator-call:bbf16113995b",
       "path": "src/services/download/attachmentCacheRecovery.ts",
-      "line": 222,
+      "line": 228,
       "symbol": "performAttachmentCacheRecovery",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.conformCurrentQuota",
@@ -20726,7 +20726,7 @@
     {
       "id": "src/services/download/attachmentCacheRecovery.ts#drainCrashOwners:mutator-call:25bf144af248",
       "path": "src/services/download/attachmentCacheRecovery.ts",
-      "line": 245,
+      "line": 252,
       "symbol": "drainCrashOwners",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.drainDueRetirements",
@@ -20739,7 +20739,7 @@
     {
       "id": "src/services/download/attachmentCacheRecovery.ts#retireInactiveFiles:mutator-call:0004c1106585",
       "path": "src/services/download/attachmentCacheRecovery.ts",
-      "line": 268,
+      "line": 279,
       "symbol": "retireInactiveFiles",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries",

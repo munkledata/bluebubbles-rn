@@ -24,6 +24,7 @@ const MAX_RECOVERY_DRAIN_PASSES =
 const MAX_RECOVERY_PATH_CHARS = 4096;
 
 let readyGeneration: number | null = null;
+let readyResult: AttachmentCacheRecoveryResult | null = null;
 interface AttachmentCacheRecoveryFlight {
   readonly db: AppDatabase;
   readonly generation: number;
@@ -61,6 +62,7 @@ export function isAttachmentCacheRecoveryReady(lease: RealtimeDeliveryLease): bo
 /** Explicit invalidation is useful at the start of a retry and for isolated tests. */
 export function invalidateAttachmentCacheRecoveryReadiness(): void {
   readyGeneration = null;
+  readyResult = null;
 }
 
 /**
@@ -77,6 +79,10 @@ export function recoverAttachmentCache(
   dependencies: AttachmentCacheRecoveryDependencies = {},
 ): Promise<AttachmentCacheRecoveryResult> {
   if (!lease.isCurrent()) return Promise.resolve(staleResult());
+  // Every cache operation after a completed recovery keeps the ledger in step, so a second
+  // activation of the same account generation in this process (a killed-app push wake, then
+  // opening the app) has nothing to repair. Re-running would only close readiness meanwhile.
+  if (isAttachmentCacheRecoveryReady(lease) && readyResult) return Promise.resolve(readyResult);
   const existing = recoveryFlights.find(
     (flight) => flight.db === db && flight.generation === lease.generation,
   );
@@ -224,7 +230,7 @@ async function performAttachmentCacheRecovery(
   if (!lease.isCurrent()) return staleResult(manifest.length);
 
   readyGeneration = lease.generation;
-  return {
+  readyResult = {
     status: 'ready',
     scannedFiles: manifest.length,
     adoptedFiles,
@@ -233,6 +239,7 @@ async function performAttachmentCacheRecovery(
     retiredFiles: crashDrain.confirmed + inactiveDrain.confirmed + conformance.confirmed,
     withinQuota: conformance.withinQuota,
   };
+  return readyResult;
 }
 
 async function drainCrashOwners(
@@ -249,8 +256,12 @@ async function drainCrashOwners(
     if (result.status === 'stale') return { status: 'stale', confirmed };
     confirmed += result.confirmed;
     if (result.attempted === 0) {
-      if (result.skipped > 0) {
-        throw new Error('Attachment cache recovery found a protected crash owner.');
+      // Every due row left was skipped: this process still owns it (a live download, cleanup, or
+      // pinned reader) or it changed after the listing. Neither is a crash leftover; its owner
+      // settles it. New reservations are due immediately, so treating them as crashes disabled
+      // downloads for the session. Only a full batch of skips could hide a leftover behind it.
+      if (result.skipped >= ATTACHMENT_CACHE_RECOVERY_BATCH_FILES) {
+        throw new Error('Attachment cache recovery found a full batch of rows still in use.');
       }
       return { status: 'complete', confirmed };
     }
