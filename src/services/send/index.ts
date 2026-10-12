@@ -31,6 +31,7 @@ import {
   type UpdateScheduledPatch,
   type ShareIntakeManifestIdentity,
   type ScheduledCancellationTarget,
+  type ScheduledOccurrence,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import { useSessionStore } from '@state/sessionStore';
@@ -1260,6 +1261,14 @@ export function clearScheduledHistoryItem(
   });
 }
 
+/** The occurrence an editor was opened on already fired, re-armed, moved, or was removed. */
+export class ScheduledEditChangedError extends Error {
+  constructor() {
+    super('Scheduled occurrence changed or already started sending');
+    this.name = 'ScheduledEditChangedError';
+  }
+}
+
 /**
  * Edit a scheduled message's text/time. Gator has NO update endpoint, so for a server-backed
  * row we re-create it: DELETE the old scheduled message, POST a fresh one, then point the local
@@ -1267,32 +1276,53 @@ export function clearScheduledHistoryItem(
  * surface it instead of silently diverging from the server. Local-only rows just update locally.
  * Adding a RECURRENCE to a server-backed row converts it to LOCAL-ONLY (delete server-side, no
  * re-create) — the server can't repeat, so the on-device ticker must own the row to re-arm it.
+ *
+ * Only the exact `occurrence` the editor loaded may be edited. One that fired (and re-armed) or
+ * was removed while the editor was open throws {@link ScheduledEditChangedError}: saving the
+ * loaded time onto a re-armed row would send that slot twice, and a sent one-time row would
+ * otherwise report a save that changed nothing.
  */
 export async function editScheduled(
-  id: number,
+  occurrence: ScheduledOccurrence,
   patch: { text: string; scheduledFor?: number; recurrence?: string | null },
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
 ): Promise<void> {
+  const id = occurrence.id;
+  const expected = {
+    chatGuid: occurrence.chatGuid,
+    serverId: occurrence.serverId,
+    scheduledFor: occurrence.scheduledFor,
+  };
   await runScheduledAccountOperation(accountLease, async () => {
     const db = getDatabase();
     assertScheduledLease(accountLease);
     const row = await getScheduledById(db, id);
     assertScheduledLease(accountLease);
-    if (!row) return;
+    if (!row) throw new ScheduledEditChangedError();
     const identityIsCurrent = captureScheduledChatMutationGuard(row.chatGuid);
     const assertMutationCurrent = (): void =>
       assertScheduledMutationCurrent(accountLease, identityIsCurrent);
-    const persistPatch = (localPatch: UpdateScheduledPatch): Promise<void> =>
-      withDbTransaction(
+    const persistPatch = async (localPatch: UpdateScheduledPatch): Promise<void> => {
+      const result = await withDbTransaction(
         db,
-        (context) => updateScheduledWithinTransaction(context, id, localPatch),
+        (context) => updateScheduledWithinTransaction(context, id, localPatch, expected),
         () => accountLease.isCurrent() && identityIsCurrent(),
       );
+      if (result !== 'updated') throw new ScheduledEditChangedError();
+    };
     assertMutationCurrent();
-    if (row?.attachmentName) {
+    if (row.attachmentName) {
       throw new Error('File schedules cannot be edited; cancel and create a new schedule.');
     }
-    if (row?.serverId != null) {
+    if (
+      row.status !== 'pending' ||
+      row.chatGuid !== expected.chatGuid ||
+      row.serverId !== expected.serverId ||
+      row.scheduledFor !== expected.scheduledFor
+    ) {
+      throw new ScheduledEditChangedError();
+    }
+    if (row.serverId != null) {
       // No PUT on Gator: delete the old server-side message, then create a replacement.
       await scheduledApi.deleteScheduled(http, row.serverId); // throws → local untouched, UI alerts
       assertMutationCurrent();

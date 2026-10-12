@@ -5,8 +5,8 @@ import { asRecurrence, type Recurrence } from '@core/schedule';
 import { logger } from '@core/secure';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { getDatabase } from '@db/database';
-import { getScheduledById } from '@db/repositories';
-import { editScheduled } from '@/services/send';
+import { getScheduledById, type ScheduledOccurrence } from '@db/repositories';
+import { editScheduled, ScheduledEditChangedError } from '@/services/send';
 import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import { Screen, ScreenHeader, useTheme } from '@ui';
 import { RecurrencePicker } from '@ui/conversations/RecurrencePicker';
@@ -33,6 +33,8 @@ export default function ScheduledEditScreen(): React.JSX.Element {
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [initialDraft, setInitialDraft] = useState<ScheduledDraft | null>(null);
+  // The exact occurrence this editor was opened on; Save may only change that one.
+  const [occurrence, setOccurrence] = useState<ScheduledOccurrence | null>(null);
   const [saving, setSaving] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerWhen, setPickerWhen] = useState(0);
@@ -86,6 +88,12 @@ export default function ScheduledEditScreen(): React.JSX.Element {
             when: row.scheduledFor,
             recurrence: nextRecurrence,
           });
+          setOccurrence({
+            id: row.id,
+            chatGuid: row.chatGuid,
+            serverId: row.serverId,
+            scheduledFor: row.scheduledFor,
+          });
         }
       } catch (e) {
         if (!accountLease.isCurrent()) return;
@@ -110,13 +118,18 @@ export default function ScheduledEditScreen(): React.JSX.Element {
     if (!accountLease.isCurrent() || abandonedRef.current || saving || pickerOpenRef.current)
       return;
     const trimmed = text.trim();
-    if (!trimmed) return;
+    if (!trimmed || !occurrence) return;
     setSaving(true);
     // editScheduled mirrors the change to the server first (for server-backed rows); a failed
-    // server update rethrows so we surface it instead of silently diverging.
+    // server update rethrows so we surface it instead of silently diverging. The time goes only
+    // when the user changed it, so a text-only edit never moves the schedule.
     void editScheduled(
-      schedId,
-      { text: trimmed, scheduledFor: when ?? undefined, recurrence },
+      occurrence,
+      {
+        text: trimmed,
+        ...(when != null && when !== occurrence.scheduledFor ? { scheduledFor: when } : {}),
+        recurrence,
+      },
       accountLease,
     )
       .then(() => {
@@ -124,9 +137,14 @@ export default function ScheduledEditScreen(): React.JSX.Element {
           navigateWithoutPrompt(() => router.back());
         }
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (accountLease.isCurrent() && !abandonedRef.current) {
-          showDialog('Scheduled', 'Couldn’t update — the server is unreachable.');
+          showDialog(
+            'Scheduled',
+            error instanceof ScheduledEditChangedError
+              ? 'This message was sent or its schedule changed while you were editing, so your edit was not saved. Open it again to edit what is still scheduled.'
+              : 'Couldn’t update — the server is unreachable.',
+          );
         }
       })
       .finally(() => {

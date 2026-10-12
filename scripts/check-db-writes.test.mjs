@@ -3521,10 +3521,10 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
       'src/services/send/index.ts#acquireAndSendCurrentLocation.<callback:33ed800ebd>:mutator-call:e5e55f9928f0',
       'src/services/send/index.ts#discardMessage.<callback:d56992311f>:mutator-call:711fed55d46c',
       'src/services/send/index.ts#discardMessage.<callback:d56992311f>:mutator-call:e01b25cdb9f1',
-      'src/services/send/index.ts#editScheduled.<callback:99fe429786>:mutator-call:a904c149afd2',
-      'src/services/send/index.ts#editScheduled.<callback:99fe429786>:mutator-call:a904c149afd2:2',
-      'src/services/send/index.ts#editScheduled.<callback:99fe429786>:mutator-call:e134052c57c0',
-      'src/services/send/index.ts#editScheduled.<callback:99fe429786>:mutator-call:2ce18fb2b248',
+      'src/services/send/index.ts#editScheduled.<callback:c21c74568c>:mutator-call:28cf22de66d9',
+      'src/services/send/index.ts#editScheduled.<callback:c21c74568c>:mutator-call:28cf22de66d9:2',
+      'src/services/send/index.ts#editScheduled.<callback:c21c74568c>:mutator-call:3a07d80e2cb5',
+      'src/services/send/index.ts#editScheduled.<callback:c21c74568c>:mutator-call:5302aaa99416',
       'src/services/send/index.ts#fireDueScheduled.<callback:5c87ee99e7>:mutator-call:60a4834011d2',
       'src/services/send/index.ts#fireDueScheduledWithDevelopmentSender.<callback:0d6a663823>:mutator-call:a9efdbe22d70',
       'src/services/send/index.ts#pickAndSendContact.<callback:9bcfe7b86a>:mutator-call:a2100e00af93',
@@ -3587,9 +3587,9 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
   assert.deepEqual(
     editScheduledTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/send/index.ts#editScheduled.<callback:99fe429786>.persistPatch.<callback:4cb2405734>:mutator-call:e89ad51388d0',
-      'src/services/send/index.ts#editScheduled.<callback:99fe429786>.persistPatch:mutator-call:17f8fd722d03',
-      'src/services/send/index.ts#editScheduled.<callback:99fe429786>.persistPatch:mutator-call:cf16b4c78713',
+      'src/services/send/index.ts#editScheduled.<callback:c21c74568c>.persistPatch.<callback:ba4fa574cc>:mutator-call:f224d6b09efb',
+      'src/services/send/index.ts#editScheduled.<callback:c21c74568c>.persistPatch:mutator-call:6eb451a62c25',
+      'src/services/send/index.ts#editScheduled.<callback:c21c74568c>.persistPatch:mutator-call:acaea6ac29ad',
     ].sort(),
   );
   assert.equal(sendFrontDoorFindings.length, 46);
@@ -7629,9 +7629,9 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
   assert.deepEqual(
     updateScheduledTransactions.map((finding) => finding.id).sort(),
     [
-      'src/db/repositories/scheduled.ts#updateScheduled.<callback:45d83ae862>:mutator-call:90bc9a3e87f3',
-      'src/db/repositories/scheduled.ts#updateScheduled:mutator-call:0445ebfc3bea',
-      'src/db/repositories/scheduled.ts#updateScheduled:mutator-call:f53009bb2e28',
+      'src/db/repositories/scheduled.ts#updateScheduled.<callback:df3df4b004>:mutator-call:3ddb94963d3a',
+      'src/db/repositories/scheduled.ts#updateScheduled:mutator-call:b04ac99189f7',
+      'src/db/repositories/scheduled.ts#updateScheduled:mutator-call:a0d37dd560e8',
     ].sort(),
   );
   assert.deepEqual(

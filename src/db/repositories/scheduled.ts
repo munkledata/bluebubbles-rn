@@ -35,11 +35,15 @@ export interface ScheduledRow {
   recurrence?: string | null;
 }
 
-/** The exact occurrence shown when the user chose Cancel. */
-export type ScheduledCancellationTarget = Pick<
+/** One exact occurrence of a scheduled row: what an editor or a cancel button was opened on. */
+export type ScheduledOccurrence = Pick<
   ScheduledRow,
   'id' | 'chatGuid' | 'serverId' | 'scheduledFor'
 >;
+export type ScheduledCancellationTarget = ScheduledOccurrence;
+
+/** 'changed': the row moved on (fired, re-armed, rescheduled); 'missing': it is gone. */
+export type ScheduledEditResult = 'updated' | 'changed' | 'missing';
 
 interface ScheduledPayload {
   text: string;
@@ -283,13 +287,18 @@ export async function reconcileServerScheduled(
  * guard is the correctness lock — a row already claimed/sent can't be edited (mirrors
  * `claimScheduled`). The reply target and its part are preserved through the JSON.
  *
+ * An editor passes the `expected` occurrence it loaded: a recurring row that fired and re-armed
+ * while the editor was open is pending again, and saving the loaded time would move it back to
+ * the slot that already went out. With `expected`, such a row reports 'changed' and is untouched.
+ *
  * The transaction-only form lets an authenticated caller include account ownership in the commit.
  */
 export function updateScheduledWithinTransaction(
   context: DbTransactionContext,
   id: number,
   patch: UpdateScheduledPatch,
-): Promise<void> {
+  expected?: Omit<ScheduledOccurrence, 'id'>,
+): Promise<ScheduledEditResult> {
   return runInTransactionContext(context, async (db) => {
     const set: {
       payload?: string;
@@ -308,20 +317,43 @@ export function updateScheduledWithinTransaction(
     if (patch.scheduledFor !== undefined) set.scheduledFor = patch.scheduledFor;
     if (patch.serverId !== undefined) set.serverId = patch.serverId;
     if (patch.recurrence !== undefined) set.recurrence = patch.recurrence;
-    if (Object.keys(set).length === 0) return;
-    await db
+    if (Object.keys(set).length === 0) return 'updated';
+    const updated = await db
       .update(scheduledMessages)
       .set(set)
-      .where(and(eq(scheduledMessages.id, id), eq(scheduledMessages.status, 'pending')));
+      .where(
+        and(
+          eq(scheduledMessages.id, id),
+          eq(scheduledMessages.status, 'pending'),
+          expected ? eq(scheduledMessages.chatGuid, expected.chatGuid) : undefined,
+          expected ? eq(scheduledMessages.scheduledFor, expected.scheduledFor) : undefined,
+          !expected
+            ? undefined
+            : expected.serverId === null
+              ? isNull(scheduledMessages.serverId)
+              : eq(scheduledMessages.serverId, expected.serverId),
+        ),
+      )
+      .returning({ id: scheduledMessages.id });
+    if (updated.length > 0) return 'updated';
+    const remaining = await db
+      .select({ id: scheduledMessages.id })
+      .from(scheduledMessages)
+      .where(eq(scheduledMessages.id, id))
+      .limit(1);
+    return remaining.length > 0 ? 'changed' : 'missing';
   });
 }
 
-export async function updateScheduled(
+export function updateScheduled(
   db: AppDatabase,
   id: number,
   patch: UpdateScheduledPatch,
-): Promise<void> {
-  await withDbTransaction(db, (context) => updateScheduledWithinTransaction(context, id, patch));
+  expected?: Omit<ScheduledOccurrence, 'id'>,
+): Promise<ScheduledEditResult> {
+  return withDbTransaction(db, (context) =>
+    updateScheduledWithinTransaction(context, id, patch, expected),
+  );
 }
 
 /** Fetch a single scheduled row by id (any status), for the edit screen. */

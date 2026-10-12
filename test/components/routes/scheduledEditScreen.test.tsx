@@ -19,7 +19,10 @@ jest.mock('@ui', () => ({
 }));
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
 jest.mock('@db/repositories', () => ({ getScheduledById: jest.fn() }));
-jest.mock('@/services/send', () => ({ editScheduled: jest.fn() }));
+jest.mock('@/services/send', () => ({
+  ScheduledEditChangedError: class ScheduledEditChangedError extends Error {},
+  editScheduled: jest.fn(),
+}));
 jest.mock('@ui/hooks/useUnsavedChangesGuard', () => ({
   useUnsavedChangesGuard: () => ({ navigateWithoutPrompt: (navigate: () => void) => navigate() }),
 }));
@@ -43,7 +46,7 @@ import { getDatabase } from '@db/database';
 // eslint-disable-next-line import/first
 import { getScheduledById } from '@db/repositories';
 // eslint-disable-next-line import/first
-import { editScheduled } from '@/services/send';
+import { editScheduled, ScheduledEditChangedError } from '@/services/send';
 // eslint-disable-next-line import/first
 import { logger } from '@core/secure';
 // eslint-disable-next-line import/first
@@ -110,6 +113,14 @@ function expectBodyAbsent(tree: unknown, body: string): void {
   expect(screen.queryByDisplayValue(body)).toBeNull();
 }
 
+// The occurrence makeRow() describes: what Save must target.
+const LOADED_OCCURRENCE = {
+  id: 42,
+  chatGuid: 'iMessage;-;+15551230000',
+  serverId: null,
+  scheduledFor: 1_700_000_000_000,
+};
+
 function makeRow(overrides: Partial<ScheduledRow> = {}): ScheduledRow {
   return {
     id: 42,
@@ -166,7 +177,7 @@ describe('ScheduledEditScreen', () => {
     expect(screen.getByText(/Android background work/)).toBeTruthy();
   });
 
-  it('saves id 42 with trimmed text, exact time and recurrence through the original lease', async () => {
+  it('saves the loaded occurrence with trimmed text and recurrence, keeping its time, through the original lease', async () => {
     mockGetScheduledById.mockResolvedValue(
       makeRow({ text: `  ${PRIVATE_BODY}  `, scheduledFor: ORIGINAL_TIME }),
     );
@@ -184,9 +195,10 @@ describe('ScheduledEditScreen', () => {
     const originalLease = mockEditScheduled.mock.calls[0]?.[2];
     expect(originalLease).toEqual(expect.objectContaining({ isCurrent: expect.any(Function) }));
     expect(originalLease.isCurrent()).toBe(true);
+    // An unchanged time is not sent, so a text-only edit can never move the schedule.
     expect(mockEditScheduled).toHaveBeenCalledWith(
-      42,
-      { text: PRIVATE_BODY, scheduledFor: ORIGINAL_TIME, recurrence: 'daily' },
+      LOADED_OCCURRENCE,
+      { text: PRIVATE_BODY, recurrence: 'daily' },
       originalLease,
     );
     await waitFor(() => expect(mockBack).toHaveBeenCalled());
@@ -205,11 +217,27 @@ describe('ScheduledEditScreen', () => {
     });
     await waitFor(() =>
       expect(mockEditScheduled).toHaveBeenCalledWith(
-        42,
+        LOADED_OCCURRENCE,
         expect.objectContaining({ recurrence: null }),
         expect.objectContaining({ isCurrent: expect.any(Function) }),
       ),
     );
+  });
+});
+
+describe('ScheduledEditScreen — occurrence changed while editing', () => {
+  it('says the edit was not saved when the occurrence already went out', async () => {
+    mockGetScheduledById.mockResolvedValue(makeRow({ text: PRIVATE_BODY }));
+    mockEditScheduled.mockRejectedValue(new ScheduledEditChangedError());
+    await renderWithTheme(<ScheduledEditScreen />);
+    await screen.findByDisplayValue(PRIVATE_BODY);
+    await act(async () => {
+      fireEvent.press(screen.getByText('Save'));
+    });
+
+    await waitFor(() => expect(useDialogStore.getState().current?.title).toBe('Scheduled'));
+    expect(useDialogStore.getState().current?.message).toContain('your edit was not saved');
+    expect(mockBack).not.toHaveBeenCalled();
   });
 });
 
@@ -232,7 +260,7 @@ describe('ScheduledEditScreen — picker and account ownership', () => {
     expect(mockEditScheduled).not.toHaveBeenCalled();
     await fireEvent.press(screen.getByRole('button', { name: 'Save' }));
     expect(mockEditScheduled).toHaveBeenCalledWith(
-      42,
+      LOADED_OCCURRENCE,
       { text: PRIVATE_BODY, scheduledFor: PICKED_TIME, recurrence: null },
       expect.objectContaining({ isCurrent: expect.any(Function) }),
     );
@@ -296,7 +324,7 @@ describe('ScheduledEditScreen — picker and account ownership', () => {
     await fireEvent.press(screen.getByRole('button', { name: 'Use this time' }));
     await fireEvent.press(screen.getByRole('button', { name: 'Save' }));
     expect(mockEditScheduled).toHaveBeenCalledWith(
-      42,
+      LOADED_OCCURRENCE,
       { text: 'new-account-draft', scheduledFor: PICKED_TIME, recurrence: null },
       expect.objectContaining({ isCurrent: expect.any(Function) }),
     );

@@ -205,6 +205,25 @@ describe('updateScheduled — status-guarded edit', () => {
     expect(rawServerId(raw, id)).toBeNull();
   });
 
+  it('edits only the exact occurrence the editor loaded', async () => {
+    const { db, raw } = await createTestDb();
+    const id = await insertScheduled(db, { chatGuid: 'cA', text: 'x', scheduledFor: 100 });
+    const loaded = { chatGuid: 'cA', serverId: null, scheduledFor: 100 };
+    // A recurring fire re-armed it for the next occurrence while the editor was open.
+    raw.prepare('UPDATE scheduled_messages SET scheduled_for = 200 WHERE id = ?').run(id);
+
+    await expect(
+      updateScheduled(db, id, { text: 'stale', scheduledFor: 100 }, loaded),
+    ).resolves.toBe('changed');
+    expect(await getScheduledById(db, id)).toMatchObject({ text: 'x', scheduledFor: 200 });
+    await expect(
+      updateScheduled(db, id, { text: 'fresh' }, { ...loaded, scheduledFor: 200 }),
+    ).resolves.toBe('updated');
+    expect(await getScheduledById(db, id)).toMatchObject({ text: 'fresh', scheduledFor: 200 });
+    await deleteScheduled(db, id);
+    await expect(updateScheduled(db, id, { text: 'gone' }, loaded)).resolves.toBe('missing');
+  });
+
   it('re-associates a server id (Gator no-PUT re-create) on a pending row', async () => {
     const { db, raw } = await createTestDb();
     const id = await insertScheduled(db, { chatGuid: 'cA', text: 'x', scheduledFor: 100 });

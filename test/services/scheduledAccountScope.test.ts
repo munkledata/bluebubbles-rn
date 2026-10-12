@@ -228,7 +228,15 @@ describe('scheduled-message account ownership', () => {
         }),
       ).rejects.toThrow('previous Google pairing');
       await expect(
-        editScheduled(pendingId, { text: 'must not change', scheduledFor: 9_500_000 }),
+        editScheduled(
+          {
+            id: pendingId,
+            serverId: null,
+            chatGuid: rcsChatGuid(RCS_EPOCH_A),
+            scheduledFor: 9_000_000,
+          },
+          { text: 'must not change', scheduledFor: 9_500_000 },
+        ),
       ).rejects.toThrow('previous Google pairing');
       await expect(clearScheduledHistoryItem(historyId)).rejects.toThrow('previous Google pairing');
 
@@ -265,7 +273,11 @@ describe('scheduled-message account ownership', () => {
       ),
     ).rejects.toThrow('account session changed');
     await expect(
-      editScheduled(7, { text: 'stale edit', scheduledFor: 9_500_000 }, accountLease),
+      editScheduled(
+        { id: 7, serverId: 'srv-a', chatGuid: 'c1', scheduledFor: 9_000_000 },
+        { text: 'stale edit', scheduledFor: 9_500_000 },
+        accountLease,
+      ),
     ).rejects.toThrow('account session changed');
 
     expect(mockCreateScheduled).not.toHaveBeenCalled();
@@ -546,7 +558,10 @@ describe('scheduled-message account ownership', () => {
     const response = deferred<ReturnType<typeof serverItem>>();
     mockCreateScheduled.mockReturnValue(response.promise);
 
-    const pending = editScheduled(id, { text: 'new text', scheduledFor: 9_500_000 });
+    const pending = editScheduled(
+      { id, serverId: 'srv-old', chatGuid: 'c1', scheduledFor: 9_000_000 },
+      { text: 'new text', scheduledFor: 9_500_000 },
+    );
     await waitUntil(() => mockCreateScheduled.mock.calls.length === 1);
     const rejected = expect(pending).rejects.toThrow('account session changed');
     const drain = pauseRealtimeDeliveries();
@@ -595,7 +610,10 @@ describe('scheduled-message account ownership', () => {
       END
     `);
 
-    const action = editScheduled(id, { text: 'new text', scheduledFor: 9_500_000 });
+    const action = editScheduled(
+      { id, serverId: 'srv-old', chatGuid: 'c1', scheduledFor: 9_000_000 },
+      { text: 'new text', scheduledFor: 9_500_000 },
+    );
     try {
       await expect(action).rejects.toThrow('account session changed');
       if (!drain) throw new Error('scheduled edit did not revoke the account lease');

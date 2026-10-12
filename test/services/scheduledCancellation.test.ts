@@ -16,7 +16,12 @@ import {
 import { scheduledMessages } from '@db/schema';
 import * as scheduledRepository from '@db/repositories/scheduled';
 import { withDbTransaction } from '@db/transaction';
-import { cancelScheduled, ScheduledCancellationChangedError } from '@/services/send';
+import {
+  cancelScheduled,
+  editScheduled,
+  ScheduledCancellationChangedError,
+  ScheduledEditChangedError,
+} from '@/services/send';
 import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
@@ -307,4 +312,38 @@ it('treats a repeated cancellation of an absent occurrence as complete without a
   await cancelScheduled(target);
   expect(mockKy).toHaveBeenCalledTimes(1);
   expect(await getScheduledById(fixture.db, target.id)).toBeNull();
+});
+
+it('edits the exact pending occurrence it was opened on', async () => {
+  const target = await seed(null);
+  await editScheduled(target, { text: 'edited in time' });
+  expect(await getScheduledById(fixture.db, target.id)).toMatchObject({
+    text: 'edited in time',
+    scheduledFor: 1_000,
+    status: 'pending',
+  });
+});
+
+it('refuses an edit once the recurring occurrence it was opened on fired and re-armed', async () => {
+  const target = await seed(null, 'daily');
+  await handoff(target, true);
+
+  // Saving the time the editor loaded would move the series back to the slot that already fired.
+  await expect(
+    editScheduled(target, { text: 'edited too late', scheduledFor: target.scheduledFor }),
+  ).rejects.toBeInstanceOf(ScheduledEditChangedError);
+  expect(await getScheduledById(fixture.db, target.id)).toMatchObject({
+    text: 'synthetic scheduled text',
+    scheduledFor: 86_401_000,
+    status: 'pending',
+  });
+});
+
+it('refuses an edit once its one-time occurrence went out instead of reporting it saved', async () => {
+  const target = await seed(null);
+  await handoff(target);
+
+  await expect(editScheduled(target, { text: 'edited too late' })).rejects.toBeInstanceOf(
+    ScheduledEditChangedError,
+  );
 });
