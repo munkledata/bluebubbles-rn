@@ -637,7 +637,8 @@ async function queryChatsForInbox(
       -- folder unread badges. A re-synced pre-delete history must never become unread again.
       ${chatUnreadCountSql('c')} AS unreadCount,
       EXISTS(SELECT 1 FROM chat_handles ck JOIN handles hk ON hk.id = ck.handle_id
-              WHERE ck.chat_id = c.id AND hk.contact_id IS NOT NULL) AS hasKnownSender
+              WHERE ck.chat_id = c.id
+                AND (hk.contact_id IS NOT NULL OR hk.contact_ambiguous = 1)) AS hasKnownSender
     FROM page p
     JOIN chats c ON c.id = p.id
     LEFT JOIN messages l ON l.id = (
@@ -1079,7 +1080,7 @@ export async function chatHasKnownSender(db: AppDatabase, guid: string): Promise
     SELECT EXISTS(
       SELECT 1 FROM chat_handles ch JOIN handles h ON h.id = ch.handle_id
        WHERE ch.chat_id = (SELECT id FROM chats WHERE guid = ${guid} LIMIT 1)
-         AND h.contact_id IS NOT NULL
+         AND (h.contact_id IS NOT NULL OR h.contact_ambiguous = 1)
     ) AS known
   `);
   return rows[0]?.known === 1;

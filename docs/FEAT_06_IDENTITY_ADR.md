@@ -270,7 +270,12 @@ item 486): device-contact claimants whose names are equal after trimming, collap
 ignoring case are duplicate cards for one person and count as one claimant; the card with a photo
 wins. Different names stay blocked. A previously linked handle
 that becomes ambiguous is restored to its server/raw presentation and has its avatar and
-`contact_id` cleared, so it no longer passes known-contact filtering. The native-contact mapper no
+`contact_id` cleared. Since migration `0054_handle_contact_ambiguous` (review item 486) the handle
+also records `contact_ambiguous = 1`: the number is still in the address book, so Filter Unknown
+Senders and notifications keep treating it as a known sender, without choosing a name or photo.
+Marking, like the cleanup, requires its witness rows to still exist. The full pass marks before it
+clears an old link and unmarks only after writing a new one (or when nothing claims the number), so
+the number never briefly reads as unknown. The native-contact mapper no
 longer manufactures a position-based id when Android omits or blanks the immutable contact id; it
 passes an unusable empty owner through to this fail-closed boundary.
 

@@ -440,8 +440,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         schema: 1,
         suite: 'android-db-runtime-concurrency',
         status: 'pass',
-        migrationCount: 53,
-        migrationHead: '0053_versioned_server_message_state',
+        migrationCount: 54,
+        migrationHead: '0054_handle_contact_ambiguous',
         checks: {
           requestValid: true,
           runStatePersisted: true,
@@ -470,8 +470,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         schema: 1,
         suite: 'android-db-runtime-concurrency',
         status: 'fail',
-        migrationCount: 53,
-        migrationHead: '0053_versioned_server_message_state',
+        migrationCount: 54,
+        migrationHead: '0054_handle_contact_ambiguous',
         checks: {
           requestValid: true,
           runStatePersisted: true,
@@ -572,8 +572,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         schema: 1,
         suite: 'android-backup-restore',
         status: 'pass',
-        migrationCount: 53,
-        migrationHead: '0053_versioned_server_message_state',
+        migrationCount: 54,
+        migrationHead: '0054_handle_contact_ambiguous',
         checks: {
           requestValid: true,
           runStatePersisted: true,
@@ -634,8 +634,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
       expect(mockFiles.get(RESUMING)).toBe(0);
       return {
         status: 'pass',
-        migrationCount: 53,
-        migrationHead: '0053_versioned_server_message_state',
+        migrationCount: 54,
+        migrationHead: '0054_handle_contact_ambiguous',
         checks: resumeChecks,
       };
     });
@@ -661,8 +661,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         suite: 'android-db-relaunch',
         status: 'pass',
         phase: 'resume',
-        migrationCount: 53,
-        migrationHead: '0053_versioned_server_message_state',
+        migrationCount: 54,
+        migrationHead: '0054_handle_contact_ambiguous',
         checks: {
           requestValid: true,
           phaseValid: true,
@@ -725,8 +725,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         expect(mockFiles.get(ACTIVE_MIGRATION_DEATH_RESUMING)).toBe(0);
         return {
           status: 'pass',
-          migrationCount: 53,
-          migrationHead: '0053_versioned_server_message_state',
+          migrationCount: 54,
+          migrationHead: '0054_handle_contact_ambiguous',
           checks: activeMigrationDeathResumeChecks,
         };
       },
@@ -755,8 +755,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
         suite: 'android-db-active-migration-death',
         status: 'pass',
         phase: 'resume',
-        migrationCount: 53,
-        migrationHead: '0053_versioned_server_message_state',
+        migrationCount: 54,
+        migrationHead: '0054_handle_contact_ambiguous',
         checks: {
           requestValid: true,
           phaseValid: true,
@@ -896,8 +896,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
       onReadOnlyVerified();
       return {
         status: 'fail',
-        migrationCount: 53,
-        migrationHead: '0053_versioned_server_message_state',
+        migrationCount: 54,
+        migrationHead: '0054_handle_contact_ambiguous',
         checks: { ...resumeChecks, databaseCleanup: false },
         failureCode: 'database-cleanup',
       };
@@ -930,8 +930,8 @@ describe('DEV DB relaunch durable phase orchestration', () => {
       onReadOnlyVerified();
       return {
         status: 'pass',
-        migrationCount: 53,
-        migrationHead: '0053_versioned_server_message_state',
+        migrationCount: 54,
+        migrationHead: '0054_handle_contact_ambiguous',
         checks: resumeChecks,
       };
     });

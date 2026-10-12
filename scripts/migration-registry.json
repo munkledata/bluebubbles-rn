@@ -265,6 +265,16 @@
       "schemaEvidence": "src/db/schema.ts",
       "cacheWipeEvidence": "test/services/messageStateSync.test.ts",
       "sqlSha256": "3c1481b50eb5b83f5c987c1069a82e21d923ec6116d06539a97f0ffbea0351d8"
+    },
+    {
+      "number": 54,
+      "name": "0054_handle_contact_ambiguous",
+      "task": "REVIEW-486",
+      "branchPr": "master",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0054_handle_contact_ambiguous.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
     }
   ]
 }

@@ -65,6 +65,7 @@ describe('migration 0045_backup_export_indexes', () => {
         '0051_handle_color_backup_index',
         '0052_chat_history_deletion_boundary',
         '0053_versioned_server_message_state',
+        '0054_handle_contact_ambiguous',
       ]);
 
       expect(indexColumns(raw, 'themes_backup_export_idx')).toEqual(['is_preset', 'id']);

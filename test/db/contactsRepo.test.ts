@@ -140,6 +140,180 @@ describe('contacts matching', () => {
     expect(handle.avatar).toBe('file:///mom.jpg');
   });
 
+  // A number shared by differently named contacts (a family landline) links to no contact, but it
+  // is in the address book; the handle records that so it still counts as a known sender.
+  it('flags a number shared by differently named contacts, and clears it once one remains', async () => {
+    const { db, raw } = await createTestDb();
+    await upsertHandles(db, [{ address: '+15551234567', displayName: 'Server Phone' }]);
+    const flags = () =>
+      raw
+        .prepare(
+          "SELECT contact_id AS contactId, contact_ambiguous AS ambiguous FROM handles WHERE address = '+15551234567'",
+        )
+        .get() as { contactId: number | null; ambiguous: number };
+
+    await upsertContacts(db, [
+      contact({ sourceId: 'mom', displayName: 'Mom', phones: ['+1 (555) 123-4567'] }),
+      contact({ sourceId: 'dad', displayName: 'Dad', phones: ['555-123-4567'] }),
+    ]);
+    await matchContactsToHandles(db);
+    expect(flags()).toEqual({ contactId: null, ambiguous: 1 });
+
+    await upsertContacts(db, [
+      contact({ sourceId: 'mom', displayName: 'Mom', phones: ['+1 (555) 123-4567'] }),
+    ]);
+    await matchContactsToHandles(db);
+    expect(flags().contactId).not.toBeNull();
+    expect(flags().ambiguous).toBe(0);
+  });
+
+  it('flags a newly arriving number that differently named contacts share', async () => {
+    const { db, raw } = await createTestDb();
+    await upsertContacts(db, [
+      contact({ sourceId: 'mom', displayName: 'Mom', phones: ['+1 (555) 123-4567'] }),
+      contact({ sourceId: 'dad', displayName: 'Dad', phones: ['555-123-4567'] }),
+    ]);
+    await upsertHandles(db, [{ address: '+15551234567', displayName: 'Server Phone' }]);
+
+    await linkHandlesToContacts(db, ['+15551234567']);
+
+    expect(
+      raw
+        .prepare(
+          "SELECT contact_id AS contactId, contact_ambiguous AS ambiguous FROM handles WHERE address = '+15551234567'",
+        )
+        .get(),
+    ).toEqual({ contactId: null, ambiguous: 1 });
+  });
+
+  it('never shows a shared number as unknown while it moves between linked and ambiguous', async () => {
+    const { db, raw } = await createTestDb();
+    await upsertHandles(db, [{ address: '+15551234567', displayName: 'Server Phone' }]);
+    const state = () =>
+      raw
+        .prepare(
+          "SELECT contact_id AS contactId, contact_ambiguous AS ambiguous FROM handles WHERE address = '+15551234567'",
+        )
+        .get() as { contactId: number | null; ambiguous: number };
+    // Snapshot after every short write, the points where a notification check could read it.
+    const seen: Array<{ contactId: number | null; ambiguous: number }> = [];
+    const runner: ContactDbTaskRunner = async (task) => {
+      const result = await task();
+      seen.push(state());
+      return result;
+    };
+    const mom = contact({ sourceId: 'mom', displayName: 'Mom', phones: ['+1 (555) 123-4567'] });
+    const dad = contact({ sourceId: 'dad', displayName: 'Dad', phones: ['555-123-4567'] });
+
+    await upsertContacts(db, [mom]);
+    await matchContactsToHandles(db);
+    expect(state().contactId).not.toBeNull();
+
+    await upsertContacts(db, [mom, dad]);
+    await matchContactsToHandles(db, runner);
+    expect(state()).toEqual({ contactId: null, ambiguous: 1 });
+
+    await upsertContacts(db, [mom]);
+    await matchContactsToHandles(db, runner);
+    expect(state().contactId).not.toBeNull();
+    expect(state().ambiguous).toBe(0);
+
+    expect(seen.length).toBeGreaterThan(2);
+    for (const snapshot of seen) {
+      expect(snapshot.contactId !== null || snapshot.ambiguous === 1).toBe(true);
+    }
+  });
+
+  it('keeps a shared number known while its new link waits out a race', async () => {
+    const { db, raw } = await createTestDb();
+    await upsertHandles(db, [{ address: '+15551234567', displayName: 'Server Phone' }]);
+    const state = () =>
+      raw
+        .prepare(
+          "SELECT contact_id AS contactId, contact_ambiguous AS ambiguous FROM handles WHERE address = '+15551234567'",
+        )
+        .get() as { contactId: number | null; ambiguous: number };
+    const mom = contact({ sourceId: 'mom', displayName: 'Mom', phones: ['+1 (555) 123-4567'] });
+    const dad = contact({ sourceId: 'dad', displayName: 'Dad', phones: ['555-123-4567'] });
+    await upsertContacts(db, [mom, dad]);
+    await matchContactsToHandles(db);
+    expect(state()).toEqual({ contactId: null, ambiguous: 1 });
+
+    await upsertContacts(db, [mom]);
+    let inserted = false;
+    const runner: ContactDbTaskRunner = async (task) => {
+      const result = await task();
+      if (!inserted) {
+        // Right after the index read an unrelated card arrives, so the link write's recheck refuses.
+        inserted = true;
+        raw
+          .prepare(
+            `INSERT INTO contacts (source_id, display_name, phones, emails)
+             VALUES ('late', 'Late Card', '[]', '["late@example.com"]')`,
+          )
+          .run();
+      }
+      return result;
+    };
+    await matchContactsToHandles(db, runner);
+    // Mom's card alone claims the number, so it stays known while its link waits for the next pass.
+    expect(state()).toEqual({ contactId: null, ambiguous: 1 });
+
+    await matchContactsToHandles(db);
+    expect(state().contactId).not.toBeNull();
+    expect(state().ambiguous).toBe(0);
+  });
+
+  it('does not mark a number ambiguous because of a rolling-back neighbour’s contact', async () => {
+    const { db, raw } = await createTestDb();
+    // The number arrives before Mom's card, so it is still unlinked when the linker runs.
+    await upsertHandles(db, [{ address: '+15551234567', displayName: 'Server Phone' }]);
+    await upsertContacts(db, [
+      contact({ sourceId: 'mom', displayName: 'Mom', phones: ['+1 (555) 123-4567'] }),
+    ]);
+    const neighbour = await holdRollingBackNeighbour(db, () => {
+      raw
+        .prepare(
+          `INSERT INTO contacts (source_id, display_name, phones, emails)
+           VALUES ('phantom-dad', 'Dad', '["555-123-4567"]', '[]')`,
+        )
+        .run();
+    });
+
+    let writeReached!: () => void;
+    const reached = new Promise<void>((resolve) => {
+      writeReached = resolve;
+    });
+    const runner: ContactDbTaskRunner = async (task) => {
+      // As above: calling `task` queues the real write behind the neighbour before its first await.
+      const pending = task();
+      writeReached();
+      return pending;
+    };
+    const linking = linkHandlesToContacts(db, ['+15551234567'], runner);
+    // Release the neighbour whatever happens: a held neighbour keeps the write lock forever.
+    const outcome = await Promise.race([
+      reached.then(() => 'parked'),
+      linking.then(
+        () => 'finished',
+        () => 'failed',
+      ),
+    ]);
+    neighbour.release();
+    await expect(neighbour.finished).rejects.toThrow('neighbour rollback');
+    expect(outcome).toBe('parked');
+    await expect(linking).resolves.toBe(0);
+
+    // The phantom card never committed, so it can't vouch for the number.
+    expect(
+      raw
+        .prepare(
+          "SELECT contact_ambiguous AS ambiguous FROM handles WHERE address = '+15551234567'",
+        )
+        .get(),
+    ).toEqual({ ambiguous: 0 });
+  });
+
   it('clears an old contact presentation when a later full sync proves the endpoint ambiguous', async () => {
     const { db, raw } = await createTestDb();
     await upsertHandles(db, [{ address: 'shared@example.com', displayName: 'Server Name' }]);

@@ -35,4 +35,23 @@ describe('unknown senders (contact-match signal)', () => {
     expect(await chatHasKnownSender(db, 'c-unknown')).toBe(false);
     expect(await chatHasKnownSender(db, 'missing')).toBe(false);
   });
+
+  // Two differently named cards for one number (a family landline) link it to no contact, but the
+  // number is in the address book: it must not be filtered away as an unknown sender.
+  it('counts a number shared by several contacts as a known sender', async () => {
+    const { db } = await createTestDb();
+    const handles = await upsertHandles(db, [{ address: '+15551230000' }]);
+    await upsertChats(
+      db,
+      [Chat.parse({ guid: 'c-landline', participants: [{ address: '+15551230000' }] })],
+      handles,
+    );
+    await db.run(sql`UPDATE handles SET contact_ambiguous = 1 WHERE address = '+15551230000'`);
+
+    const rows = await listChatsForInbox(db);
+    expect(rows.find((row) => row.guid === 'c-landline')?.hasKnownSender).toBe(1);
+    expect(await chatHasKnownSender(db, 'c-landline')).toBe(true);
+    const known = await listChatsForInbox(db, { filters: { sender: 'known' } as never });
+    expect(known.map((row) => row.guid)).toContain('c-landline');
+  });
 });

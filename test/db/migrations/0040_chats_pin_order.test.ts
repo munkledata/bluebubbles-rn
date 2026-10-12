@@ -54,6 +54,7 @@ describe('migration 0040_chats_pin_order', () => {
         '0051_handle_color_backup_index',
         '0052_chat_history_deletion_boundary',
         '0053_versioned_server_message_state',
+        '0054_handle_contact_ambiguous',
       ]);
       expect(
         raw.prepare('SELECT guid, pin_order AS pinOrder FROM chats ORDER BY guid').all(),

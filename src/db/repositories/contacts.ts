@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from 'drizzle-orm';
+import { and, eq, isNull, ne, sql } from 'drizzle-orm';
 import {
   contactEmailMatchKey,
   contactHandleMatchKey,
@@ -361,6 +361,37 @@ function applyContactMatchWithinTransaction(
 }
 
 /**
+ * Record whether this handle's address is claimed ambiguously: by differently named contacts, or
+ * by a contact without a stable id. Such a handle links to no contact (no name or photo), but the
+ * number is in the address book, so it still counts as a known sender. Marking needs every witness
+ * contact to still exist, so rows from a neighbour's rolled-back sync can't vouch for a number.
+ */
+function setHandleContactAmbiguousWithinTransaction(
+  context: DbTransactionContext,
+  handleId: number,
+  ambiguous: 0 | 1,
+  witnessContactIds: readonly number[],
+): Promise<boolean> {
+  return runInTransactionContext(context, async (db) => {
+    if (ambiguous === 1 && witnessContactIds.length === 0) return false;
+    const witnessesExist =
+      ambiguous === 1
+        ? witnessContactIds.map(
+            (id) => sql`EXISTS (SELECT 1 FROM ${contacts} WHERE ${contacts.id} = ${id})`,
+          )
+        : [];
+    const rows = await db
+      .update(handles)
+      .set({ contactAmbiguous: ambiguous })
+      .where(
+        and(eq(handles.id, handleId), ne(handles.contactAmbiguous, ambiguous), ...witnessesExist),
+      )
+      .returning({ id: handles.id });
+    return rows.length > 0;
+  });
+}
+
+/**
  * Opportunistically link freshly-ingested handles to already-synced device contacts (no native
  * call). Reads stay outside the mutex; every possible match owns one short, guarded transaction.
  * `runDbTask` optionally attaches those transactions to an account-lifecycle admission boundary.
@@ -373,7 +404,7 @@ export async function linkHandlesToContacts(
 ): Promise<number> {
   if (addresses.length === 0) return 0;
   const index = await buildContactIndex(db);
-  if (index.matches.size === 0) return 0;
+  if (index.matches.size === 0 && index.blocked.size === 0) return 0;
 
   // Keep both potentially large reads outside the writer queue. Each actual match below owns one
   // short transaction and rechecks its optimistic contact/handle facts before updating.
@@ -383,11 +414,29 @@ export async function linkHandlesToContacts(
       batch.map((address) => sql`${address}`),
       sql`, `,
     );
-    const handleRows = await db.all<{ id: number; address: string }>(
-      sql`SELECT id, address FROM handles WHERE address IN (${inList}) AND contact_id IS NULL`,
+    const handleRows = await db.all<{ id: number; address: string; contactAmbiguous: number }>(
+      sql`SELECT id, address, contact_ambiguous AS contactAmbiguous
+            FROM handles
+           WHERE address IN (${inList}) AND contact_id IS NULL`,
     );
     for (const handle of handleRows) {
-      const match = index.matches.get(contactHandleMatchKey(handle.address));
+      const key = contactHandleMatchKey(handle.address);
+      const block = index.blocked.get(key);
+      if (block) {
+        if (handle.contactAmbiguous !== 1) {
+          const witnessIds = block.witnesses.map((witness) => witness.id);
+          await runDbTask(() =>
+            withDbTransaction(
+              db,
+              (context) =>
+                setHandleContactAmbiguousWithinTransaction(context, handle.id, 1, witnessIds),
+              commitGuard,
+            ),
+          );
+        }
+        continue;
+      }
+      const match = index.matches.get(key);
       if (
         match &&
         (await runDbTask(() =>
@@ -435,6 +484,7 @@ export async function matchContactsToHandles(
       address: string;
       contactId: number | null;
       serverDisplayName: string | null;
+      contactAmbiguous: number;
     }>
   >(() =>
     db.all<{
@@ -442,8 +492,11 @@ export async function matchContactsToHandles(
       address: string;
       contactId: number | null;
       serverDisplayName: string | null;
+      contactAmbiguous: number;
     }>(
-      sql`SELECT id, address, contact_id AS contactId, server_display_name AS serverDisplayName FROM handles`,
+      sql`SELECT id, address, contact_id AS contactId, server_display_name AS serverDisplayName,
+                 contact_ambiguous AS contactAmbiguous
+            FROM handles`,
     ),
   );
   let updated = 0;
@@ -451,6 +504,17 @@ export async function matchContactsToHandles(
     const key = contactHandleMatchKey(h.address);
     const match = index.matches.get(key);
     const blocked = index.blocked.get(key);
+    // A number claimed ambiguously is still in the address book, so it keeps counting as a known
+    // sender (bookkeeping, not counted as an update). Mark it before an old link is cleared below,
+    // and unmark it only after a new link is written, so it never briefly looks unknown.
+    if (blocked && h.contactAmbiguous !== 1) {
+      const witnessIds = blocked.witnesses.map((witness) => witness.id);
+      await runDbTask(() =>
+        withDbTransaction(db, (context) =>
+          setHandleContactAmbiguousWithinTransaction(context, h.id, 1, witnessIds),
+        ),
+      );
+    }
     const wroteMatch = match
       ? await runDbTask(() =>
           withDbTransaction(db, (context) =>
@@ -496,6 +560,15 @@ export async function matchContactsToHandles(
         }),
       );
       if (reverted) updated += 1;
+    }
+    // While one card still claims the number (its link lost a race), it is in the address book and
+    // stays known; unmark only once a link stands in for the flag or nothing claims the number.
+    if (!blocked && h.contactAmbiguous !== 0 && (!match || wroteMatch || h.contactId != null)) {
+      await runDbTask(() =>
+        withDbTransaction(db, (context) =>
+          setHandleContactAmbiguousWithinTransaction(context, h.id, 0, []),
+        ),
+      );
     }
   }
   return updated;

@@ -62,6 +62,7 @@ describe('migration 0051_handle_color_backup_index', () => {
         MIGRATION_NAME,
         '0052_chat_history_deletion_boundary',
         '0053_versioned_server_message_state',
+        '0054_handle_contact_ambiguous',
       ]);
 
       expect(indexColumns(raw, INDEX_NAME)).toEqual(['id']);

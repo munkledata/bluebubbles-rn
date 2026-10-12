@@ -53,6 +53,7 @@ describe('migration 0043_custom_folders', () => {
         '0051_handle_color_backup_index',
         '0052_chat_history_deletion_boundary',
         '0053_versioned_server_message_state',
+        '0054_handle_contact_ambiguous',
       ]);
       raw.prepare("INSERT INTO custom_folders (name, sort_order) VALUES ('Work', 0)").run();
       const folderId = (

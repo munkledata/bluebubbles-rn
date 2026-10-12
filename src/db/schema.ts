@@ -37,6 +37,9 @@ export const handles = sqliteTable(
     /** Contact-sync owned: photo uri + the contact that won the address match. */
     avatar: text('avatar'),
     contactId: integer('contact_id'),
+    /** 1 while the address book claims this address ambiguously (differently named contacts, or a
+        card with no stable id): no contact link, so no name or photo, but still a known sender. */
+    contactAmbiguous: integer('contact_ambiguous').notNull().default(0),
   },
   (t) => ({
     // Identity is (address, service): the same number is a DIFFERENT handle on iMessage vs

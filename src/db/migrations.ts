@@ -1181,4 +1181,14 @@ export const MIGRATIONS: Migration[] = [
       )`,
     ],
   },
+  {
+    // Review item 486: a phone or email claimed by two differently named address-book cards (a
+    // shared family landline) links to no contact, so no name or photo, yet it is in the address
+    // book. Record that, so Filter Unknown Senders and notifications treat it as a known sender.
+    name: '0054_handle_contact_ambiguous',
+    statements: [
+      `ALTER TABLE handles ADD COLUMN contact_ambiguous INTEGER NOT NULL DEFAULT 0
+         CHECK (contact_ambiguous IN (0, 1))`,
+    ],
+  },
 ];

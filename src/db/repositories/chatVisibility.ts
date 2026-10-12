@@ -95,7 +95,7 @@ export function inboxFilterSql(options: {
         : sql`AND c.is_archived = 0`;
   const known = sql`EXISTS(
     SELECT 1 FROM chat_handles ck JOIN handles hk ON hk.id = ck.handle_id
-     WHERE ck.chat_id = c.id AND hk.contact_id IS NOT NULL
+     WHERE ck.chat_id = c.id AND (hk.contact_id IS NOT NULL OR hk.contact_ambiguous = 1)
   )`;
   // Fixed routes may supply a sender scope without a FEAT-01 filter object. When both exist, the
   // fixed route wins so Archived/Unknown Senders cannot accidentally become cross-filtered.

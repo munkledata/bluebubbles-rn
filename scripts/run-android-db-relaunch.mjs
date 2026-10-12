@@ -19,8 +19,8 @@ import {
 export const RELAUNCH_MARKER_PREFIX = 'GATOR_DB_RELAUNCH_V1 ';
 export const RELAUNCH_SUITE = 'android-db-relaunch';
 export const RELAUNCH_SCHEMA = 1;
-export const RELAUNCH_MIGRATION_COUNT = 53;
-export const RELAUNCH_MIGRATION_HEAD = '0053_versioned_server_message_state';
+export const RELAUNCH_MIGRATION_COUNT = 54;
+export const RELAUNCH_MIGRATION_HEAD = '0054_handle_contact_ambiguous';
 export const PREPARE_CHECKS = Object.freeze([
   'requestValid',
   'preCleanup',

@@ -46,6 +46,7 @@ describe('migration 0052_chat_history_deletion_boundary', () => {
       await expect(runMigrations(runner)).resolves.toEqual([
         MIGRATION_NAME,
         '0053_versioned_server_message_state',
+        '0054_handle_contact_ambiguous',
       ]);
 
       expect(

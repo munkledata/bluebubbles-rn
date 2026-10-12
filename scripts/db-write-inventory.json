@@ -1785,7 +1785,7 @@
     {
       "id": "src/db/database.ts#cleanupDbRuntimeConcurrencySelfTestDatabase:native-database-delete:c8b7acd29fe1",
       "path": "src/db/database.ts",
-      "line": 1851,
+      "line": 1850,
       "symbol": "cleanupDbRuntimeConcurrencySelfTestDatabase",
       "operation": "native-database-delete",
       "target": "<database-file>",
@@ -1798,7 +1798,7 @@
     {
       "id": "src/db/database.ts#runDbRuntimeConcurrencySelfTest:mutator-call:6d2f77f00160",
       "path": "src/db/database.ts",
-      "line": 1911,
+      "line": 1910,
       "symbol": "runDbRuntimeConcurrencySelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbRuntimeConcurrencySelfTestDatabase",
@@ -1811,7 +1811,7 @@
     {
       "id": "src/db/database.ts#runDbRuntimeConcurrencySelfTest:sql-pragma:e0e6e9973f0d",
       "path": "src/db/database.ts",
-      "line": 1920,
+      "line": 1919,
       "symbol": "runDbRuntimeConcurrencySelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -1824,7 +1824,7 @@
     {
       "id": "src/db/database.ts#runDbRuntimeConcurrencySelfTest:mutator-call:98c4b223c92b",
       "path": "src/db/database.ts",
-      "line": 1926,
+      "line": 1925,
       "symbol": "runDbRuntimeConcurrencySelfTest",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -1837,7 +1837,7 @@
     {
       "id": "src/db/database.ts#rawRekey:sql-pragma:ddc2470a0581",
       "path": "src/db/database.ts",
-      "line": 1943,
+      "line": 1942,
       "symbol": "rawRekey",
       "operation": "sql-pragma",
       "target": "rekey",
@@ -1850,7 +1850,7 @@
     {
       "id": "src/db/database.ts#runDbRuntimeConcurrencySelfTest:sql-pragma:f7abad6fe3d2",
       "path": "src/db/database.ts",
-      "line": 1982,
+      "line": 1981,
       "symbol": "runDbRuntimeConcurrencySelfTest",
       "operation": "sql-pragma",
       "target": "integrity_check",
@@ -1863,7 +1863,7 @@
     {
       "id": "src/db/database.ts#runDbRuntimeConcurrencySelfTest:sql-pragma:5fe2be0ec9b8",
       "path": "src/db/database.ts",
-      "line": 1983,
+      "line": 1982,
       "symbol": "runDbRuntimeConcurrencySelfTest",
       "operation": "sql-pragma",
       "target": "foreign_key_check",
@@ -1876,7 +1876,7 @@
     {
       "id": "src/db/database.ts#runDbRuntimeConcurrencySelfTest:mutator-call:6d2f77f00160:2",
       "path": "src/db/database.ts",
-      "line": 2020,
+      "line": 2019,
       "symbol": "runDbRuntimeConcurrencySelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbRuntimeConcurrencySelfTestDatabase",
@@ -1889,7 +1889,7 @@
     {
       "id": "src/db/database.ts#cleanupDbBackupRestoreSelfTestDatabase:native-database-delete:5681e65487a3",
       "path": "src/db/database.ts",
-      "line": 2112,
+      "line": 2111,
       "symbol": "cleanupDbBackupRestoreSelfTestDatabase",
       "operation": "native-database-delete",
       "target": "<database-file>",
@@ -1902,7 +1902,7 @@
     {
       "id": "src/db/database.ts#runDbBackupRestoreSelfTest:mutator-call:5136ad3d3514",
       "path": "src/db/database.ts",
-      "line": 2171,
+      "line": 2170,
       "symbol": "runDbBackupRestoreSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbBackupRestoreSelfTestDatabase",
@@ -1915,7 +1915,7 @@
     {
       "id": "src/db/database.ts#runDbBackupRestoreSelfTest:sql-pragma:54c11a09ee78",
       "path": "src/db/database.ts",
-      "line": 2180,
+      "line": 2179,
       "symbol": "runDbBackupRestoreSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -1928,7 +1928,7 @@
     {
       "id": "src/db/database.ts#runDbBackupRestoreSelfTest:mutator-call:61c903cd5df5",
       "path": "src/db/database.ts",
-      "line": 2186,
+      "line": 2185,
       "symbol": "runDbBackupRestoreSelfTest",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -1941,7 +1941,7 @@
     {
       "id": "src/db/database.ts#runDbBackupRestoreSelfTest:sql-pragma:ca31be8c7204",
       "path": "src/db/database.ts",
-      "line": 2226,
+      "line": 2225,
       "symbol": "runDbBackupRestoreSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -1954,7 +1954,7 @@
     {
       "id": "src/db/database.ts#runDbBackupRestoreSelfTest:sql-pragma:0633c398afec",
       "path": "src/db/database.ts",
-      "line": 2227,
+      "line": 2226,
       "symbol": "runDbBackupRestoreSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -1967,7 +1967,7 @@
     {
       "id": "src/db/database.ts#runDbBackupRestoreSelfTest:sql-pragma:0d39686d0196",
       "path": "src/db/database.ts",
-      "line": 2228,
+      "line": 2227,
       "symbol": "runDbBackupRestoreSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_key_check",
@@ -1980,7 +1980,7 @@
     {
       "id": "src/db/database.ts#runDbBackupRestoreSelfTest:sql-pragma:393dadd9a15d",
       "path": "src/db/database.ts",
-      "line": 2233,
+      "line": 2232,
       "symbol": "runDbBackupRestoreSelfTest",
       "operation": "sql-pragma",
       "target": "integrity_check",
@@ -1993,7 +1993,7 @@
     {
       "id": "src/db/database.ts#runDbBackupRestoreSelfTest:mutator-call:5136ad3d3514:2",
       "path": "src/db/database.ts",
-      "line": 2249,
+      "line": 2248,
       "symbol": "runDbBackupRestoreSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbBackupRestoreSelfTestDatabase",
@@ -2006,7 +2006,7 @@
     {
       "id": "src/db/database.ts#cleanupDbProcessRelaunchSelfTestDatabase:native-database-delete:860e30d458b6",
       "path": "src/db/database.ts",
-      "line": 2355,
+      "line": 2354,
       "symbol": "cleanupDbProcessRelaunchSelfTestDatabase",
       "operation": "native-database-delete",
       "target": "<database-file>",
@@ -2019,7 +2019,7 @@
     {
       "id": "src/db/database.ts#prepareDbProcessRelaunchSelfTest:mutator-call:78a96f3a3bed",
       "path": "src/db/database.ts",
-      "line": 2445,
+      "line": 2444,
       "symbol": "prepareDbProcessRelaunchSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbProcessRelaunchSelfTestDatabase",
@@ -2032,7 +2032,7 @@
     {
       "id": "src/db/database.ts#prepareDbProcessRelaunchSelfTest:sql-pragma:98ade7597ab6",
       "path": "src/db/database.ts",
-      "line": 2453,
+      "line": 2452,
       "symbol": "prepareDbProcessRelaunchSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -2045,7 +2045,7 @@
     {
       "id": "src/db/database.ts#prepareDbProcessRelaunchSelfTest:sql-schema:20987ce13c0a",
       "path": "src/db/database.ts",
-      "line": 2454,
+      "line": 2453,
       "symbol": "prepareDbProcessRelaunchSelfTest",
       "operation": "sql-schema",
       "target": "driver_relaunch_contract_state",
@@ -2058,7 +2058,7 @@
     {
       "id": "src/db/database.ts#prepareDbProcessRelaunchSelfTest:sql-insert:d06f16054f08",
       "path": "src/db/database.ts",
-      "line": 2462,
+      "line": 2461,
       "symbol": "prepareDbProcessRelaunchSelfTest",
       "operation": "sql-insert",
       "target": "driver_relaunch_contract_state",
@@ -2071,7 +2071,7 @@
     {
       "id": "src/db/database.ts#prepareDbProcessRelaunchSelfTest:sql-schema:c1f4d0d378ed",
       "path": "src/db/database.ts",
-      "line": 2468,
+      "line": 2467,
       "symbol": "prepareDbProcessRelaunchSelfTest",
       "operation": "sql-schema",
       "target": "attachment_cache_entries_state_lru_idx",
@@ -2084,7 +2084,7 @@
     {
       "id": "src/db/database.ts#prepareDbProcessRelaunchSelfTest:mutator-call:2dc6c9d994e3",
       "path": "src/db/database.ts",
-      "line": 2478,
+      "line": 2477,
       "symbol": "prepareDbProcessRelaunchSelfTest",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -2097,7 +2097,7 @@
     {
       "id": "src/db/database.ts#prepareDbProcessRelaunchSelfTest:mutator-call:78a96f3a3bed:2",
       "path": "src/db/database.ts",
-      "line": 2505,
+      "line": 2504,
       "symbol": "prepareDbProcessRelaunchSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbProcessRelaunchSelfTestDatabase",
@@ -2110,7 +2110,7 @@
     {
       "id": "src/db/database.ts#resumeDbProcessRelaunchSelfTest:sql-pragma:97a60ddc35e9",
       "path": "src/db/database.ts",
-      "line": 2575,
+      "line": 2574,
       "symbol": "resumeDbProcessRelaunchSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -2123,7 +2123,7 @@
     {
       "id": "src/db/database.ts#resumeDbProcessRelaunchSelfTest:sql-pragma:d39bb496244b",
       "path": "src/db/database.ts",
-      "line": 2576,
+      "line": 2575,
       "symbol": "resumeDbProcessRelaunchSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -2136,7 +2136,7 @@
     {
       "id": "src/db/database.ts#resumeDbProcessRelaunchSelfTest:sql-schema:1a0dd42737ff",
       "path": "src/db/database.ts",
-      "line": 2588,
+      "line": 2587,
       "symbol": "resumeDbProcessRelaunchSelfTest",
       "operation": "sql-schema",
       "target": "attachment_cache_entries_state_lru_idx",
@@ -2149,7 +2149,7 @@
     {
       "id": "src/db/database.ts#resumeDbProcessRelaunchSelfTest:sql-schema:de2036f42ae3",
       "path": "src/db/database.ts",
-      "line": 2589,
+      "line": 2588,
       "symbol": "resumeDbProcessRelaunchSelfTest",
       "operation": "sql-schema",
       "target": "driver_relaunch_contract_state",
@@ -2162,7 +2162,7 @@
     {
       "id": "src/db/database.ts#resumeDbProcessRelaunchSelfTest:mutator-call:7703c0036c7a",
       "path": "src/db/database.ts",
-      "line": 2596,
+      "line": 2595,
       "symbol": "resumeDbProcessRelaunchSelfTest",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -2175,7 +2175,7 @@
     {
       "id": "src/db/database.ts#resumeDbProcessRelaunchSelfTest:sql-pragma:9d9f6dc1a811",
       "path": "src/db/database.ts",
-      "line": 2611,
+      "line": 2610,
       "symbol": "resumeDbProcessRelaunchSelfTest",
       "operation": "sql-pragma",
       "target": "integrity_check",
@@ -2188,7 +2188,7 @@
     {
       "id": "src/db/database.ts#resumeDbProcessRelaunchSelfTest:sql-pragma:e8881cdf40b0",
       "path": "src/db/database.ts",
-      "line": 2613,
+      "line": 2612,
       "symbol": "resumeDbProcessRelaunchSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_key_check",
@@ -2201,7 +2201,7 @@
     {
       "id": "src/db/database.ts#resumeDbProcessRelaunchSelfTest:mutator-call:7703c0036c7a:2",
       "path": "src/db/database.ts",
-      "line": 2623,
+      "line": 2622,
       "symbol": "resumeDbProcessRelaunchSelfTest",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -2214,7 +2214,7 @@
     {
       "id": "src/db/database.ts#resumeDbProcessRelaunchSelfTest:mutator-call:a2933f18497f",
       "path": "src/db/database.ts",
-      "line": 2633,
+      "line": 2632,
       "symbol": "resumeDbProcessRelaunchSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbProcessRelaunchSelfTestDatabase",
@@ -2227,7 +2227,7 @@
     {
       "id": "src/db/database.ts#cleanupDbActiveWalWriteDeathSelfTestDatabase:native-database-delete:8e13e65bfb20",
       "path": "src/db/database.ts",
-      "line": 2796,
+      "line": 2795,
       "symbol": "cleanupDbActiveWalWriteDeathSelfTestDatabase",
       "operation": "native-database-delete",
       "target": "<database-file>",
@@ -2240,7 +2240,7 @@
     {
       "id": "src/db/database.ts#retireDbActiveWalWriteDeathSelfTestDatabase:sql-pragma:70acd331c2b4",
       "path": "src/db/database.ts",
-      "line": 2820,
+      "line": 2819,
       "symbol": "retireDbActiveWalWriteDeathSelfTestDatabase",
       "operation": "sql-pragma",
       "target": "wal_checkpoint",
@@ -2253,7 +2253,7 @@
     {
       "id": "src/db/database.ts#retireDbActiveWalWriteDeathSelfTestDatabase:sql-pragma:6610a957a70e",
       "path": "src/db/database.ts",
-      "line": 2822,
+      "line": 2821,
       "symbol": "retireDbActiveWalWriteDeathSelfTestDatabase",
       "operation": "sql-pragma",
       "target": "journal_mode",
@@ -2266,7 +2266,7 @@
     {
       "id": "src/db/database.ts#retireDbActiveWalWriteDeathSelfTestDatabase:sql-pragma:e87e5387e478",
       "path": "src/db/database.ts",
-      "line": 2824,
+      "line": 2823,
       "symbol": "retireDbActiveWalWriteDeathSelfTestDatabase",
       "operation": "sql-pragma",
       "target": "journal_mode",
@@ -2279,7 +2279,7 @@
     {
       "id": "src/db/database.ts#retireDbActiveWalWriteDeathSelfTestDatabase:mutator-call:79dc019c8e8d",
       "path": "src/db/database.ts",
-      "line": 2837,
+      "line": 2836,
       "symbol": "retireDbActiveWalWriteDeathSelfTestDatabase",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveWalWriteDeathSelfTestDatabase",
@@ -2292,7 +2292,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:mutator-call:bd30872c6ced",
       "path": "src/db/database.ts",
-      "line": 2857,
+      "line": 2856,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveWalWriteDeathSelfTestDatabase",
@@ -2305,7 +2305,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:sql-pragma:da4b09e3e792",
       "path": "src/db/database.ts",
-      "line": 2869,
+      "line": 2868,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -2318,7 +2318,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:sql-pragma:842170241933",
       "path": "src/db/database.ts",
-      "line": 2870,
+      "line": 2869,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "sql-pragma",
       "target": "journal_mode",
@@ -2331,7 +2331,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:sql-pragma:94f5ed4904f1",
       "path": "src/db/database.ts",
-      "line": 2871,
+      "line": 2870,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "sql-pragma",
       "target": "journal_mode",
@@ -2344,7 +2344,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:sql-schema:c0583bd16b02",
       "path": "src/db/database.ts",
-      "line": 2878,
+      "line": 2877,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "sql-schema",
       "target": "driver_wal_write_death_contract",
@@ -2357,7 +2357,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:transaction-begin:4424eaa0f4f3",
       "path": "src/db/database.ts",
-      "line": 2885,
+      "line": 2884,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "transaction-begin",
       "target": "<connection>",
@@ -2370,7 +2370,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:sql-insert:0a2d70af725a",
       "path": "src/db/database.ts",
-      "line": 2887,
+      "line": 2886,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "sql-insert",
       "target": "driver_wal_write_death_contract",
@@ -2383,7 +2383,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:transaction-commit:101ad0ef4295",
       "path": "src/db/database.ts",
-      "line": 2892,
+      "line": 2891,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "transaction-commit",
       "target": "<connection>",
@@ -2396,7 +2396,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:sql-pragma:d4d476c6ec97",
       "path": "src/db/database.ts",
-      "line": 2905,
+      "line": 2904,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "sql-pragma",
       "target": "wal_autocheckpoint",
@@ -2409,7 +2409,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:sql-pragma:c21262db8e21",
       "path": "src/db/database.ts",
-      "line": 2906,
+      "line": 2905,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "sql-pragma",
       "target": "wal_checkpoint",
@@ -2422,7 +2422,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:sql-pragma:1296d13830af",
       "path": "src/db/database.ts",
-      "line": 2911,
+      "line": 2910,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "sql-pragma",
       "target": "cache_size",
@@ -2435,7 +2435,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:sql-pragma:6cb3197a0e7f",
       "path": "src/db/database.ts",
-      "line": 2912,
+      "line": 2911,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "sql-pragma",
       "target": "cache_spill",
@@ -2448,7 +2448,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:transaction-begin:4424eaa0f4f3:2",
       "path": "src/db/database.ts",
-      "line": 2913,
+      "line": 2912,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "transaction-begin",
       "target": "<connection>",
@@ -2461,7 +2461,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:sql-insert:7486e5179484",
       "path": "src/db/database.ts",
-      "line": 2918,
+      "line": 2917,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "sql-insert",
       "target": "driver_wal_write_death_contract",
@@ -2474,7 +2474,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:transaction-rollback:ff0044d35701",
       "path": "src/db/database.ts",
-      "line": 2944,
+      "line": 2943,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "transaction-rollback",
       "target": "<connection>",
@@ -2487,7 +2487,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:mutator-call:bd30872c6ced:2",
       "path": "src/db/database.ts",
-      "line": 2954,
+      "line": 2953,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveWalWriteDeathSelfTestDatabase",
@@ -2500,7 +2500,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveWalWriteDeathSelfTest:transaction-rollback:ff0044d35701:2",
       "path": "src/db/database.ts",
-      "line": 2969,
+      "line": 2968,
       "symbol": "prepareDbActiveWalWriteDeathSelfTest",
       "operation": "transaction-rollback",
       "target": "<connection>",
@@ -2513,7 +2513,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveWalWriteDeathSelfTest:sql-pragma:f02cf304acf4",
       "path": "src/db/database.ts",
-      "line": 3000,
+      "line": 2999,
       "symbol": "resumeDbActiveWalWriteDeathSelfTest",
       "operation": "sql-pragma",
       "target": "journal_mode",
@@ -2526,7 +2526,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveWalWriteDeathSelfTest:sql-pragma:09713a4279c2",
       "path": "src/db/database.ts",
-      "line": 3025,
+      "line": 3024,
       "symbol": "resumeDbActiveWalWriteDeathSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -2539,7 +2539,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveWalWriteDeathSelfTest:sql-pragma:15c65a528917",
       "path": "src/db/database.ts",
-      "line": 3028,
+      "line": 3027,
       "symbol": "resumeDbActiveWalWriteDeathSelfTest",
       "operation": "sql-pragma",
       "target": "integrity_check",
@@ -2552,7 +2552,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveWalWriteDeathSelfTest:sql-pragma:192261000ef7",
       "path": "src/db/database.ts",
-      "line": 3033,
+      "line": 3032,
       "symbol": "resumeDbActiveWalWriteDeathSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -2565,7 +2565,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveWalWriteDeathSelfTest:sql-pragma:0fd91424ea23",
       "path": "src/db/database.ts",
-      "line": 3035,
+      "line": 3034,
       "symbol": "resumeDbActiveWalWriteDeathSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_key_check",
@@ -2578,7 +2578,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveWalWriteDeathSelfTest:transaction-begin:20fada601317",
       "path": "src/db/database.ts",
-      "line": 3045,
+      "line": 3044,
       "symbol": "resumeDbActiveWalWriteDeathSelfTest",
       "operation": "transaction-begin",
       "target": "<connection>",
@@ -2591,7 +2591,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveWalWriteDeathSelfTest:sql-insert:ccb9bc2c9d78",
       "path": "src/db/database.ts",
-      "line": 3047,
+      "line": 3046,
       "symbol": "resumeDbActiveWalWriteDeathSelfTest",
       "operation": "sql-insert",
       "target": "driver_wal_write_death_contract",
@@ -2604,7 +2604,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveWalWriteDeathSelfTest:transaction-commit:4ef08fffbb12",
       "path": "src/db/database.ts",
-      "line": 3052,
+      "line": 3051,
       "symbol": "resumeDbActiveWalWriteDeathSelfTest",
       "operation": "transaction-commit",
       "target": "<connection>",
@@ -2617,7 +2617,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveWalWriteDeathSelfTest:transaction-rollback:5973ed080e9b",
       "path": "src/db/database.ts",
-      "line": 3055,
+      "line": 3054,
       "symbol": "resumeDbActiveWalWriteDeathSelfTest",
       "operation": "transaction-rollback",
       "target": "<connection>",
@@ -2630,7 +2630,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveWalWriteDeathSelfTest:mutator-call:2138da1e426f",
       "path": "src/db/database.ts",
-      "line": 3092,
+      "line": 3091,
       "symbol": "resumeDbActiveWalWriteDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#retireDbActiveWalWriteDeathSelfTestDatabase",
@@ -2643,7 +2643,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveWalWriteDeathSelfTest:mutator-call:16f2286de9f7",
       "path": "src/db/database.ts",
-      "line": 3093,
+      "line": 3092,
       "symbol": "resumeDbActiveWalWriteDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveWalWriteDeathSelfTestDatabase",
@@ -2656,7 +2656,7 @@
     {
       "id": "src/db/database.ts#seedDbActiveMigrationFixture:transaction-begin:0180d179a806",
       "path": "src/db/database.ts",
-      "line": 3457,
+      "line": 3456,
       "symbol": "seedDbActiveMigrationFixture",
       "operation": "transaction-begin",
       "target": "<connection>",
@@ -2669,7 +2669,7 @@
     {
       "id": "src/db/database.ts#seedDbActiveMigrationFixture:sql-insert:5bfe29d2deac",
       "path": "src/db/database.ts",
-      "line": 3460,
+      "line": 3459,
       "symbol": "seedDbActiveMigrationFixture",
       "operation": "sql-insert",
       "target": "outgoing_queue",
@@ -2682,7 +2682,7 @@
     {
       "id": "src/db/database.ts#seedDbActiveMigrationFixture:transaction-commit:284a8b93b648",
       "path": "src/db/database.ts",
-      "line": 3466,
+      "line": 3465,
       "symbol": "seedDbActiveMigrationFixture",
       "operation": "transaction-commit",
       "target": "<connection>",
@@ -2695,7 +2695,7 @@
     {
       "id": "src/db/database.ts#seedDbActiveMigrationFixture:transaction-rollback:0211c22bc703",
       "path": "src/db/database.ts",
-      "line": 3469,
+      "line": 3468,
       "symbol": "seedDbActiveMigrationFixture",
       "operation": "transaction-rollback",
       "target": "<connection>",
@@ -2708,7 +2708,7 @@
     {
       "id": "src/db/database.ts#cleanupDbActiveMigrationDeathSelfTestDatabase:native-database-delete:ff711eb9d33c",
       "path": "src/db/database.ts",
-      "line": 3482,
+      "line": 3481,
       "symbol": "cleanupDbActiveMigrationDeathSelfTestDatabase",
       "operation": "native-database-delete",
       "target": "<database-file>",
@@ -2721,7 +2721,7 @@
     {
       "id": "src/db/database.ts#retireDbActiveMigrationDeathSelfTestDatabase:sql-pragma:be383f8cf826",
       "path": "src/db/database.ts",
-      "line": 3502,
+      "line": 3501,
       "symbol": "retireDbActiveMigrationDeathSelfTestDatabase",
       "operation": "sql-pragma",
       "target": "wal_checkpoint",
@@ -2734,7 +2734,7 @@
     {
       "id": "src/db/database.ts#retireDbActiveMigrationDeathSelfTestDatabase:sql-pragma:0aa5a5c36cc7",
       "path": "src/db/database.ts",
-      "line": 3504,
+      "line": 3503,
       "symbol": "retireDbActiveMigrationDeathSelfTestDatabase",
       "operation": "sql-pragma",
       "target": "journal_mode",
@@ -2747,7 +2747,7 @@
     {
       "id": "src/db/database.ts#retireDbActiveMigrationDeathSelfTestDatabase:sql-pragma:f397641246bb",
       "path": "src/db/database.ts",
-      "line": 3506,
+      "line": 3505,
       "symbol": "retireDbActiveMigrationDeathSelfTestDatabase",
       "operation": "sql-pragma",
       "target": "journal_mode",
@@ -2760,7 +2760,7 @@
     {
       "id": "src/db/database.ts#retireDbActiveMigrationDeathSelfTestDatabase:mutator-call:19e578aa2615",
       "path": "src/db/database.ts",
-      "line": 3518,
+      "line": 3517,
       "symbol": "retireDbActiveMigrationDeathSelfTestDatabase",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveMigrationDeathSelfTestDatabase",
@@ -2773,7 +2773,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:mutator-call:141d9a18377f",
       "path": "src/db/database.ts",
-      "line": 3538,
+      "line": 3537,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveMigrationDeathSelfTestDatabase",
@@ -2786,7 +2786,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:sql-pragma:a67fc9cbd417",
       "path": "src/db/database.ts",
-      "line": 3550,
+      "line": 3549,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -2799,7 +2799,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:sql-pragma:35ad534021f8",
       "path": "src/db/database.ts",
-      "line": 3551,
+      "line": 3550,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "journal_mode",
@@ -2812,7 +2812,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:sql-pragma:d5bda51e292b",
       "path": "src/db/database.ts",
-      "line": 3552,
+      "line": 3551,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "journal_mode",
@@ -2825,7 +2825,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:sql-pragma:eaa28d9b10fc",
       "path": "src/db/database.ts",
-      "line": 3556,
+      "line": 3555,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "wal_autocheckpoint",
@@ -2838,7 +2838,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:mutator-call:254b29b633bb",
       "path": "src/db/database.ts",
-      "line": 3563,
+      "line": 3562,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -2851,7 +2851,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:mutator-call:3cfd0e0c8f97",
       "path": "src/db/database.ts",
-      "line": 3579,
+      "line": 3578,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#seedDbActiveMigrationFixture",
@@ -2864,7 +2864,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:sql-pragma:3325773da814",
       "path": "src/db/database.ts",
-      "line": 3590,
+      "line": 3589,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "wal_checkpoint",
@@ -2877,7 +2877,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:sql-pragma:99b1a0573820",
       "path": "src/db/database.ts",
-      "line": 3595,
+      "line": 3594,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "cache_size",
@@ -2890,7 +2890,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:sql-pragma:9892b3f1c7e3",
       "path": "src/db/database.ts",
-      "line": 3596,
+      "line": 3595,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "cache_spill",
@@ -2903,7 +2903,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:mutator-call:c7abb8aa650a",
       "path": "src/db/database.ts",
-      "line": 3597,
+      "line": 3596,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -2916,7 +2916,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:mutator-call:141d9a18377f:2",
       "path": "src/db/database.ts",
-      "line": 3616,
+      "line": 3615,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveMigrationDeathSelfTestDatabase",
@@ -2929,7 +2929,7 @@
     {
       "id": "src/db/database.ts#prepareDbActiveMigrationDeathSelfTest:mutator-call:141d9a18377f:3",
       "path": "src/db/database.ts",
-      "line": 3626,
+      "line": 3625,
       "symbol": "prepareDbActiveMigrationDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveMigrationDeathSelfTestDatabase",
@@ -2942,7 +2942,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest:sql-pragma:c41b1d9e3f5f",
       "path": "src/db/database.ts",
-      "line": 3655,
+      "line": 3654,
       "symbol": "resumeDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "journal_mode",
@@ -2955,7 +2955,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest:sql-pragma:6ffd5dc1ecae",
       "path": "src/db/database.ts",
-      "line": 3668,
+      "line": 3667,
       "symbol": "resumeDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "integrity_check",
@@ -2968,7 +2968,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest:sql-pragma:fa6f6c173b44",
       "path": "src/db/database.ts",
-      "line": 3685,
+      "line": 3684,
       "symbol": "resumeDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -2981,7 +2981,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest:sql-pragma:d603c995b313",
       "path": "src/db/database.ts",
-      "line": 3687,
+      "line": 3686,
       "symbol": "resumeDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -2994,7 +2994,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest:sql-pragma:04e15312f1b5",
       "path": "src/db/database.ts",
-      "line": 3689,
+      "line": 3688,
       "symbol": "resumeDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_key_check",
@@ -3007,7 +3007,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest:mutator-call:6f3aee398a18",
       "path": "src/db/database.ts",
-      "line": 3702,
+      "line": 3701,
       "symbol": "resumeDbActiveMigrationDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -3020,7 +3020,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest:sql-pragma:0b110227b222",
       "path": "src/db/database.ts",
-      "line": 3719,
+      "line": 3718,
       "symbol": "resumeDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "integrity_check",
@@ -3033,7 +3033,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest:sql-pragma:04e15312f1b5:2",
       "path": "src/db/database.ts",
-      "line": 3721,
+      "line": 3720,
       "symbol": "resumeDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "foreign_key_check",
@@ -3046,7 +3046,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest:mutator-call:6f3aee398a18:2",
       "path": "src/db/database.ts",
-      "line": 3730,
+      "line": 3729,
       "symbol": "resumeDbActiveMigrationDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -3059,7 +3059,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest:sql-pragma:c2f4ef1e9fd6",
       "path": "src/db/database.ts",
-      "line": 3747,
+      "line": 3746,
       "symbol": "resumeDbActiveMigrationDeathSelfTest",
       "operation": "sql-pragma",
       "target": "integrity_check",
@@ -3072,7 +3072,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest:mutator-call:5ee851488aef",
       "path": "src/db/database.ts",
-      "line": 3765,
+      "line": 3764,
       "symbol": "resumeDbActiveMigrationDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#retireDbActiveMigrationDeathSelfTestDatabase",
@@ -3085,7 +3085,7 @@
     {
       "id": "src/db/database.ts#resumeDbActiveMigrationDeathSelfTest:mutator-call:9a802871e899",
       "path": "src/db/database.ts",
-      "line": 3766,
+      "line": 3765,
       "symbol": "resumeDbActiveMigrationDeathSelfTest",
       "operation": "mutator-call",
       "target": "src/db/database.ts#cleanupDbActiveMigrationDeathSelfTestDatabase",
@@ -3098,7 +3098,7 @@
     {
       "id": "src/db/database.ts#deletePerf02BenchmarkDatabase:native-database-delete:625cf98f5fe0",
       "path": "src/db/database.ts",
-      "line": 3807,
+      "line": 3806,
       "symbol": "deletePerf02BenchmarkDatabase",
       "operation": "native-database-delete",
       "target": "<database-file>",
@@ -3111,7 +3111,7 @@
     {
       "id": "src/db/database.ts#runPerf02DeviceInboxBenchmark:mutator-call:40f3a5d86089",
       "path": "src/db/database.ts",
-      "line": 3825,
+      "line": 3824,
       "symbol": "runPerf02DeviceInboxBenchmark",
       "operation": "mutator-call",
       "target": "src/db/database.ts#deletePerf02BenchmarkDatabase",
@@ -3124,7 +3124,7 @@
     {
       "id": "src/db/database.ts#runPerf02DeviceInboxBenchmark:sql-pragma:d0b6d4d17bda",
       "path": "src/db/database.ts",
-      "line": 3842,
+      "line": 3841,
       "symbol": "runPerf02DeviceInboxBenchmark",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -3137,7 +3137,7 @@
     {
       "id": "src/db/database.ts#runPerf02DeviceInboxBenchmark:mutator-call:f3670fbe6904",
       "path": "src/db/database.ts",
-      "line": 3843,
+      "line": 3842,
       "symbol": "runPerf02DeviceInboxBenchmark",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -3150,7 +3150,7 @@
     {
       "id": "src/db/database.ts#runPerf02DeviceInboxBenchmark:mutator-call:261695433070",
       "path": "src/db/database.ts",
-      "line": 3882,
+      "line": 3881,
       "symbol": "runPerf02DeviceInboxBenchmark",
       "operation": "mutator-call",
       "target": "src/db/performance/deviceInboxBenchmark.ts#seedDeviceInboxBenchmarkFixture",
@@ -3163,7 +3163,7 @@
     {
       "id": "src/db/database.ts#runPerf02DeviceInboxBenchmark.bump.<callback:b9bbd67d96>:mutator-call:8e9f67feff84",
       "path": "src/db/database.ts",
-      "line": 3931,
+      "line": 3930,
       "symbol": "runPerf02DeviceInboxBenchmark.bump.<callback:b9bbd67d96>",
       "operation": "mutator-call",
       "target": "src/db/performance/deviceInboxBenchmark.ts#bumpDeviceInboxBenchmarkFixture",
@@ -3176,7 +3176,7 @@
     {
       "id": "src/db/database.ts#runPerf02DeviceInboxBenchmark:mutator-call:35d19c00534b",
       "path": "src/db/database.ts",
-      "line": 3953,
+      "line": 3952,
       "symbol": "runPerf02DeviceInboxBenchmark",
       "operation": "mutator-call",
       "target": "src/db/performance/deviceInboxBenchmark.ts#runDeviceInboxBenchmarkFixture",
@@ -3189,7 +3189,7 @@
     {
       "id": "src/db/database.ts#runPerf02DeviceInboxBenchmark:mutator-call:40f3a5d86089:2",
       "path": "src/db/database.ts",
-      "line": 3969,
+      "line": 3968,
       "symbol": "runPerf02DeviceInboxBenchmark",
       "operation": "mutator-call",
       "target": "src/db/database.ts#deletePerf02BenchmarkDatabase",
@@ -3202,7 +3202,7 @@
     {
       "id": "src/db/database.ts#deletePerf01ColdFixture:native-database-delete:9a4d94084922",
       "path": "src/db/database.ts",
-      "line": 3998,
+      "line": 3997,
       "symbol": "deletePerf01ColdFixture",
       "operation": "native-database-delete",
       "target": "<database-file>",
@@ -3215,7 +3215,7 @@
     {
       "id": "src/db/database.ts#preparePerf01ColdFixture:native-database-delete:8405deee85cd",
       "path": "src/db/database.ts",
-      "line": 4012,
+      "line": 4011,
       "symbol": "preparePerf01ColdFixture",
       "operation": "native-database-delete",
       "target": "<database-file>",
@@ -3228,7 +3228,7 @@
     {
       "id": "src/db/database.ts#preparePerf01ColdFixture:sql-pragma:133307a5048f",
       "path": "src/db/database.ts",
-      "line": 4015,
+      "line": 4014,
       "symbol": "preparePerf01ColdFixture",
       "operation": "sql-pragma",
       "target": "foreign_keys",
@@ -3241,7 +3241,7 @@
     {
       "id": "src/db/database.ts#preparePerf01ColdFixture:mutator-call:ea7d253ae9ee",
       "path": "src/db/database.ts",
-      "line": 4016,
+      "line": 4015,
       "symbol": "preparePerf01ColdFixture",
       "operation": "mutator-call",
       "target": "src/db/migrate.ts#runMigrations",
@@ -3254,7 +3254,7 @@
     {
       "id": "src/db/database.ts#preparePerf01ColdFixture:mutator-call:97f3f37435ea",
       "path": "src/db/database.ts",
-      "line": 4018,
+      "line": 4017,
       "symbol": "preparePerf01ColdFixture",
       "operation": "mutator-call",
       "target": "src/db/performance/deviceInboxBenchmark.ts#seedDeviceInboxBenchmarkFixture",
@@ -3267,7 +3267,7 @@
     {
       "id": "src/db/database.ts#preparePerf01ColdFixture:sql-pragma:95a909b0e621",
       "path": "src/db/database.ts",
-      "line": 4027,
+      "line": 4026,
       "symbol": "preparePerf01ColdFixture",
       "operation": "sql-pragma",
       "target": "foreign_key_check",
@@ -3280,7 +3280,7 @@
     {
       "id": "src/db/database.ts#preparePerf01ColdFixture:mutator-call:91dac4eef041",
       "path": "src/db/database.ts",
-      "line": 4036,
+      "line": 4035,
       "symbol": "preparePerf01ColdFixture",
       "operation": "mutator-call",
       "target": "src/db/database.ts#deletePerf01ColdFixture",
@@ -5200,6 +5200,19 @@
       "transactionContext": "startup-migration",
       "disposition": "proven-temporal-exclusion",
       "evidence": "test/services/messageStateSync.test.ts; test/services/providerRepair.test.ts; test/db/outgoingBranches.test.ts; test/db/chatActionsRepo.test.ts; test/db/clearLocalCache.test.ts; test/db/migrations/0053_versioned_server_message_state.test.ts"
+    },
+    {
+      "id": "src/db/migrations.ts#migration:0054_handle_contact_ambiguous:sql-schema:005838dec39d",
+      "path": "src/db/migrations.ts",
+      "line": 1190,
+      "symbol": "migration:0054_handle_contact_ambiguous",
+      "operation": "sql-schema",
+      "target": "handles",
+      "detectedContext": "startup-migration",
+      "owner": "REVIEW-486 ambiguous-contact known-sender flag",
+      "transactionContext": "startup-migration",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "test/db/migrations/0054_handle_contact_ambiguous.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs; scripts/check-db-writes.test.mjs"
     },
     {
       "id": "src/db/performance/deviceInboxBenchmark.ts#seedFixture:mutator-call:1678bfc56fc9",
@@ -7789,9 +7802,61 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/contactsRepo.test.ts; test/db/contactLinkOnIngestion.test.ts"
     },
     {
+      "id": "src/db/repositories/contacts.ts#setHandleContactAmbiguousWithinTransaction:drizzle-update:80acfa15e8ab",
+      "path": "src/db/repositories/contacts.ts",
+      "line": 383,
+      "symbol": "setHandleContactAmbiguousWithinTransaction",
+      "operation": "drizzle-update",
+      "target": "handles",
+      "detectedContext": "withDbTransaction",
+      "owner": "setHandleContactAmbiguousWithinTransaction",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/contactsRepo.test.ts; test/db/unknownSenders.test.ts"
+    },
+    {
+      "id": "src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:455e2efb66>:mutator-call:00ced8589ea2",
+      "path": "src/db/repositories/contacts.ts",
+      "line": 429,
+      "symbol": "linkHandlesToContacts.<callback:455e2efb66>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:455e2efb66>.<callback:386d4f3bbd>",
+      "detectedContext": "withDbTransaction",
+      "owner": "linkHandlesToContacts",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/contactsRepo.test.ts; test/db/contactLinkOnIngestion.test.ts"
+    },
+    {
+      "id": "src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:455e2efb66>:mutator-call:d53ba32311b9",
+      "path": "src/db/repositories/contacts.ts",
+      "line": 429,
+      "symbol": "linkHandlesToContacts.<callback:455e2efb66>",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "linkHandlesToContacts",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/contactsRepo.test.ts; test/db/contactLinkOnIngestion.test.ts"
+    },
+    {
+      "id": "src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:455e2efb66>.<callback:386d4f3bbd>:mutator-call:30be9b356a27",
+      "path": "src/db/repositories/contacts.ts",
+      "line": 432,
+      "symbol": "linkHandlesToContacts.<callback:455e2efb66>.<callback:386d4f3bbd>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/contacts.ts#setHandleContactAmbiguousWithinTransaction",
+      "detectedContext": "withDbTransaction",
+      "owner": "linkHandlesToContacts",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/contactsRepo.test.ts; test/db/contactLinkOnIngestion.test.ts"
+    },
+    {
       "id": "src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>:mutator-call:39217d2483ca",
       "path": "src/db/repositories/contacts.ts",
-      "line": 394,
+      "line": 443,
       "symbol": "linkHandlesToContacts.<callback:a29fef076d>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>.<callback:998d60ab14>",
@@ -7804,7 +7869,7 @@
     {
       "id": "src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>:mutator-call:57243fd8d6bd",
       "path": "src/db/repositories/contacts.ts",
-      "line": 394,
+      "line": 443,
       "symbol": "linkHandlesToContacts.<callback:a29fef076d>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -7817,7 +7882,7 @@
     {
       "id": "src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>.<callback:998d60ab14>:mutator-call:2c9931e83a2f",
       "path": "src/db/repositories/contacts.ts",
-      "line": 397,
+      "line": 446,
       "symbol": "linkHandlesToContacts.<callback:a29fef076d>.<callback:998d60ab14>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#applyContactMatchWithinTransaction",
@@ -7828,9 +7893,48 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/contactsRepo.test.ts; test/db/contactLinkOnIngestion.test.ts"
     },
     {
+      "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:24958c1918>:mutator-call:c20cb4216884",
+      "path": "src/db/repositories/contacts.ts",
+      "line": 513,
+      "symbol": "matchContactsToHandles.<callback:24958c1918>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:24958c1918>.<callback:da28eed3e8>",
+      "detectedContext": "withDbTransaction",
+      "owner": "matchContactsToHandles",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/contactsRepo.test.ts"
+    },
+    {
+      "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:24958c1918>:mutator-call:c55973627832",
+      "path": "src/db/repositories/contacts.ts",
+      "line": 513,
+      "symbol": "matchContactsToHandles.<callback:24958c1918>",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "matchContactsToHandles",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/contactsRepo.test.ts"
+    },
+    {
+      "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:24958c1918>.<callback:da28eed3e8>:mutator-call:b48ed36fb269",
+      "path": "src/db/repositories/contacts.ts",
+      "line": 514,
+      "symbol": "matchContactsToHandles.<callback:24958c1918>.<callback:da28eed3e8>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/contacts.ts#setHandleContactAmbiguousWithinTransaction",
+      "detectedContext": "withDbTransaction",
+      "owner": "matchContactsToHandles",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/contactsRepo.test.ts"
+    },
+    {
       "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>:mutator-call:4d11d05b9300",
       "path": "src/db/repositories/contacts.ts",
-      "line": 456,
+      "line": 520,
       "symbol": "matchContactsToHandles.<callback:855118c688>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -7843,7 +7947,7 @@
     {
       "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>:mutator-call:85a839fda316",
       "path": "src/db/repositories/contacts.ts",
-      "line": 456,
+      "line": 520,
       "symbol": "matchContactsToHandles.<callback:855118c688>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>.<callback:b160d8104b>",
@@ -7856,7 +7960,7 @@
     {
       "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>.<callback:b160d8104b>:mutator-call:6e98f3765bbd",
       "path": "src/db/repositories/contacts.ts",
-      "line": 457,
+      "line": 521,
       "symbol": "matchContactsToHandles.<callback:855118c688>.<callback:b160d8104b>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#applyContactMatchWithinTransaction",
@@ -7869,7 +7973,7 @@
     {
       "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:fb9ecba88a>:mutator-call:03929b5466d2",
       "path": "src/db/repositories/contacts.ts",
-      "line": 469,
+      "line": 533,
       "symbol": "matchContactsToHandles.<callback:fb9ecba88a>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -7882,7 +7986,7 @@
     {
       "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:fb9ecba88a>:mutator-call:1394e1a87db1",
       "path": "src/db/repositories/contacts.ts",
-      "line": 469,
+      "line": 533,
       "symbol": "matchContactsToHandles.<callback:fb9ecba88a>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:fb9ecba88a>.<callback:032718c953>",
@@ -7895,7 +7999,7 @@
     {
       "id": "src/db/repositories/contacts.ts#matchContactsToHandles:drizzle-update:39efd42dac33",
       "path": "src/db/repositories/contacts.ts",
-      "line": 482,
+      "line": 546,
       "symbol": "matchContactsToHandles",
       "operation": "drizzle-update",
       "target": "handles",
@@ -7906,9 +8010,48 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/contactsRepo.test.ts"
     },
     {
+      "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:0447314361>:mutator-call:40914593956c",
+      "path": "src/db/repositories/contacts.ts",
+      "line": 568,
+      "symbol": "matchContactsToHandles.<callback:0447314361>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:0447314361>.<callback:23b79ef8ab>",
+      "detectedContext": "withDbTransaction",
+      "owner": "matchContactsToHandles",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/contactsRepo.test.ts"
+    },
+    {
+      "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:0447314361>:mutator-call:4f6b5f001664",
+      "path": "src/db/repositories/contacts.ts",
+      "line": 568,
+      "symbol": "matchContactsToHandles.<callback:0447314361>",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "matchContactsToHandles",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/contactsRepo.test.ts"
+    },
+    {
+      "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:0447314361>.<callback:23b79ef8ab>:mutator-call:ff9023025a0a",
+      "path": "src/db/repositories/contacts.ts",
+      "line": 569,
+      "symbol": "matchContactsToHandles.<callback:0447314361>.<callback:23b79ef8ab>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/contacts.ts#setHandleContactAmbiguousWithinTransaction",
+      "detectedContext": "withDbTransaction",
+      "owner": "matchContactsToHandles",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/contactsRepo.test.ts"
+    },
+    {
       "id": "src/db/repositories/contacts.ts#setHandleServerAvatar:mutator-call:5488c0f447f3",
       "path": "src/db/repositories/contacts.ts",
-      "line": 546,
+      "line": 619,
       "symbol": "setHandleServerAvatar",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#setHandleServerAvatar.<callback:d9c2c56773>",
@@ -7921,7 +8064,7 @@
     {
       "id": "src/db/repositories/contacts.ts#setHandleServerAvatar:mutator-call:d300dc33591f",
       "path": "src/db/repositories/contacts.ts",
-      "line": 546,
+      "line": 619,
       "symbol": "setHandleServerAvatar",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -7934,7 +8077,7 @@
     {
       "id": "src/db/repositories/contacts.ts#setHandleServerAvatar.<callback:d9c2c56773>:mutator-call:07b1b7ff630f",
       "path": "src/db/repositories/contacts.ts",
-      "line": 547,
+      "line": 620,
       "symbol": "setHandleServerAvatar.<callback:d9c2c56773>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#setHandleServerAvatarWithinTransaction",
@@ -7947,7 +8090,7 @@
     {
       "id": "src/db/repositories/contacts.ts#setHandleServerAvatarWithinTransaction:drizzle-update:6f0e2fd8121c",
       "path": "src/db/repositories/contacts.ts",
-      "line": 560,
+      "line": 633,
       "symbol": "setHandleServerAvatarWithinTransaction",
       "operation": "drizzle-update",
       "target": "handles",

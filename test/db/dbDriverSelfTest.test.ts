@@ -675,8 +675,8 @@ describe('runDbDriverSelfTest', () => {
       schema: 3,
       suite: 'android-db-contract',
       status: 'pass',
-      migrationCount: 53,
-      migrationHead: '0053_versioned_server_message_state',
+      migrationCount: 54,
+      migrationHead: '0054_handle_contact_ambiguous',
       checks: passingChecks,
     });
 
@@ -946,8 +946,8 @@ describe('runDbDriverSelfTest', () => {
       schema: 3,
       suite: 'android-db-contract',
       status: 'fail',
-      migrationCount: 53,
-      migrationHead: '0053_versioned_server_message_state',
+      migrationCount: 54,
+      migrationHead: '0054_handle_contact_ambiguous',
       checks: { oldKeyRejected: true, cleanup: false },
       failureCode: 'cleanup',
     });

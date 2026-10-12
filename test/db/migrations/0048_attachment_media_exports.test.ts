@@ -55,6 +55,7 @@ describe('migration 0048_attachment_media_exports', () => {
         '0051_handle_color_backup_index',
         '0052_chat_history_deletion_boundary',
         '0053_versioned_server_message_state',
+        '0054_handle_contact_ambiguous',
       ]);
       expect(raw.prepare('SELECT COUNT(*) AS rows FROM attachment_media_exports').get()).toEqual({
         rows: 0,

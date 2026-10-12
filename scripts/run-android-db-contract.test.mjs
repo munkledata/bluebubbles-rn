@@ -56,9 +56,9 @@ const target = {
   abi: 'arm64-v8a',
 };
 
-test('requires the reviewed migration 53 boundary and rejects stale device results', () => {
-  assert.equal(CONTRACT_MIGRATION_COUNT, 53);
-  assert.equal(CONTRACT_MIGRATION_HEAD, '0053_versioned_server_message_state');
+test('requires the reviewed migration 54 boundary and rejects stale device results', () => {
+  assert.equal(CONTRACT_MIGRATION_COUNT, 54);
+  assert.equal(CONTRACT_MIGRATION_HEAD, '0054_handle_contact_ambiguous');
   assert.throws(
     () =>
       validateContractResult(
