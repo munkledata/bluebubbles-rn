@@ -102,8 +102,10 @@ jest.mock('@core/api', () => ({
   fcmApi: { registerDevice: mockRegisterDevice },
   serverApi: { serverInfo: mockServerInfo },
 }));
+// Registration must use the Disconnect-cancellable client (review item 1073), never the shared one.
 jest.mock('@/services/clients', () => ({
   http: { kind: 'shared-http-client' },
+  accountHttp: () => ({ kind: 'account-http-client' }),
   vault: { get: mockVaultGet, set: mockVaultSet, delete: mockVaultDelete },
   accountRevocationMarker: { isRevoked: jest.fn(() => false) },
 }));
@@ -283,7 +285,7 @@ describe('FCM registration account ownership', () => {
 
     expect(mockRegisterDevice).toHaveBeenCalledTimes(1);
     expect(mockRegisterDevice).toHaveBeenCalledWith(
-      { kind: 'shared-http-client' },
+      { kind: 'account-http-client' },
       'Gator (Android 35)',
       'account-b-token',
     );
@@ -311,7 +313,7 @@ describe('FCM registration account ownership', () => {
     await expect(registration).resolves.toBe('skipped');
     await expect(pause).resolves.toBeUndefined();
     expect(registrationCall).toEqual([
-      { kind: 'shared-http-client' },
+      { kind: 'account-http-client' },
       'Gator (Android 35)',
       'account-a-token',
     ]);
@@ -353,7 +355,7 @@ describe('FCM registration account ownership', () => {
 
     expect(mockGetToken).toHaveBeenCalledTimes(1);
     expect(mockRegisterDevice).toHaveBeenCalledWith(
-      { kind: 'shared-http-client' },
+      { kind: 'account-http-client' },
       'Gator (Android 35)',
       'fresh-account-b-token',
     );
@@ -391,7 +393,7 @@ describe('FCM registration account ownership', () => {
       },
     });
     expect(mockRegisterDevice).toHaveBeenCalledWith(
-      { kind: 'shared-http-client' },
+      { kind: 'account-http-client' },
       'Gator (Android 35)',
       'fresh-token',
       {
@@ -1047,7 +1049,7 @@ describe('FCM registration account ownership', () => {
 
     await expect(registerFcmToken()).resolves.toBe('registered');
 
-    expect(mockServerInfo).toHaveBeenCalledWith({ kind: 'shared-http-client' });
+    expect(mockServerInfo).toHaveBeenCalledWith({ kind: 'account-http-client' });
     expect(mockRegisterDevice.mock.calls[0]).toHaveLength(4);
     expect(useSessionStore.getState().serverInfo?.supports_fcm_device_encryption).toBe(true);
   });
@@ -1067,7 +1069,7 @@ describe('FCM registration account ownership', () => {
 
     await expect(registerFcmToken()).resolves.toBe('registered');
 
-    expect(mockServerInfo).toHaveBeenCalledWith({ kind: 'shared-http-client' });
+    expect(mockServerInfo).toHaveBeenCalledWith({ kind: 'account-http-client' });
     expect(mockRegisterDevice.mock.calls[0]).toHaveLength(4);
     expect(useSessionStore.getState().serverInfo?.supports_fcm_device_encryption).toBe(true);
   });

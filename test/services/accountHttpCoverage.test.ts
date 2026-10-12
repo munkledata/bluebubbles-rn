@@ -19,11 +19,8 @@ const TRACKED_SLOTS = new Set([
   'runAccountScopedLocalMutation',
 ]);
 const SHARED_CLIENT_MODULE = /(^|\/)clients$|^@\/services$|^@services$/;
-// Still open: FCM registration is hash-pinned by the incoming-ingress proof and moves in its own
-// reviewed change. Remove entries as they are fixed; this list may only shrink.
-const OPEN_SITES: Record<string, number> = {
-  'src/services/notifications/fcmMessaging.ts': 5,
-};
+// Every known site is fixed; a new entry here needs a reason and a follow-up.
+const OPEN_SITES: Record<string, number> = {};
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(path.join(ROOT, dir), { withFileTypes: true }).flatMap((entry) => {

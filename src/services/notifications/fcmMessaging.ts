@@ -37,7 +37,7 @@ import {
 import { inspectCredentialUpgradeJournal, isScopedDeviceCredential, logger } from '@core/secure';
 import { useLockStore } from '@state/lockStore';
 import { useSessionStore } from '@state/sessionStore';
-import { accountRevocationMarker, http, vault } from '../clients';
+import { accountHttp, accountRevocationMarker, vault } from '../clients';
 import {
   beginRealtimeHeadlessEffectCollection,
   REALTIME_HEADLESS_EFFECT_WINDOW_MS,
@@ -803,7 +803,7 @@ export async function registerFcmToken(): Promise<'registered' | 'skipped' | 'fa
               serverInfo?.supports_fcm_push_key_rotation !== true
             : serverInfo?.supports_fcm_device_encryption !== true
         ) {
-          serverInfo = await serverApi.serverInfo(http);
+          serverInfo = await serverApi.serverInfo(accountHttp(accountLease));
           if (!registrationSessionIsCurrent(session, accountLease)) return;
           if (
             !useSessionStore
@@ -933,7 +933,7 @@ export async function registerFcmToken(): Promise<'registered' | 'skipped' | 'fa
               if (!registrationSessionIsCurrent(session, accountLease)) return;
             }
 
-            const ack = await fcmApi.registerDevice(http, DEVICE_NAME, token, {
+            const ack = await fcmApi.registerDevice(accountHttp(accountLease), DEVICE_NAME, token, {
               type: FCM_PUSH_ENCRYPTION_TYPE_V3,
               key: registrationState.key,
               ...(registrationState.status === 'rotating'
@@ -1058,7 +1058,7 @@ export async function registerFcmToken(): Promise<'registered' | 'skipped' | 'fa
             if (!registrationSessionIsCurrent(session, accountLease)) return;
           }
 
-          const ack = await fcmApi.registerDevice(http, DEVICE_NAME, token, {
+          const ack = await fcmApi.registerDevice(accountHttp(accountLease), DEVICE_NAME, token, {
             type: FCM_PUSH_ENCRYPTION_TYPE_V3,
             key,
           });
@@ -1122,7 +1122,7 @@ export async function registerFcmToken(): Promise<'registered' | 'skipped' | 'fa
           );
           if (!registrationSessionIsCurrent(session, accountLease)) return;
 
-          const ack = await fcmApi.registerDevice(http, DEVICE_NAME, token, {
+          const ack = await fcmApi.registerDevice(accountHttp(accountLease), DEVICE_NAME, token, {
             type: FCM_DEVICE_ENCRYPTION_TYPE,
             key,
           });
@@ -1147,7 +1147,7 @@ export async function registerFcmToken(): Promise<'registered' | 'skipped' | 'fa
         if (stored.kind !== 'absent') {
           throw new Error('FCM push-encryption downgrade rejected');
         }
-        await fcmApi.registerDevice(http, DEVICE_NAME, token);
+        await fcmApi.registerDevice(accountHttp(accountLease), DEVICE_NAME, token);
         if (registrationSessionIsCurrent(session, accountLease)) registered = true;
       }),
     );
