@@ -264,6 +264,47 @@ describe('contacts matching', () => {
     expect(state().ambiguous).toBe(0);
   });
 
+  // Found in review: the unmark step trusted the link read before the stale-link cleanup ran.
+  it('keeps a shared number known when its stale link is cleared and the new link loses a race', async () => {
+    const { db, raw } = await createTestDb();
+    await upsertHandles(db, [{ address: '+15551234567', displayName: 'Server Phone' }]);
+    await upsertContacts(db, [
+      contact({ sourceId: 'mom', displayName: 'Mom', phones: ['+1 (555) 123-4567'] }),
+    ]);
+    // Linked to a card that has since been pruned, and still marked from an earlier ambiguity.
+    raw
+      .prepare(
+        "UPDATE handles SET contact_id = 999, contact_ambiguous = 1 WHERE address = '+15551234567'",
+      )
+      .run();
+    let inserted = false;
+    const runner: ContactDbTaskRunner = async (task) => {
+      const result = await task();
+      if (!inserted) {
+        // Right after the index read an unrelated card arrives, so the new link's recheck refuses.
+        inserted = true;
+        raw
+          .prepare(
+            `INSERT INTO contacts (source_id, display_name, phones, emails)
+             VALUES ('late', 'Late Card', '[]', '["late@example.com"]')`,
+          )
+          .run();
+      }
+      return result;
+    };
+
+    await matchContactsToHandles(db, runner);
+
+    // The stale link is gone and Mom's link must wait, but her card still claims the number.
+    expect(
+      raw
+        .prepare(
+          "SELECT contact_id AS contactId, contact_ambiguous AS ambiguous FROM handles WHERE address = '+15551234567'",
+        )
+        .get(),
+    ).toEqual({ contactId: null, ambiguous: 1 });
+  });
+
   it('does not mark a number ambiguous because of a rolling-back neighbour’s contact', async () => {
     const { db, raw } = await createTestDb();
     // The number arrives before Mom's card, so it is still unlinked when the linker runs.

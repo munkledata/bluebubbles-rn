@@ -82,8 +82,8 @@ bounded transactions during successful repair. Legacy delete events cannot super
 
 This section describes the implementation candidate and host-test contract. It does not claim physical
 Android process-death, SQLCipher, or packaged-server acceptance.
-The development-only database self-tests and native result validators target migration 53; their
-historical migration prefixes remain unchanged. Their previous migration-52 pins rejected the newer
+The development-only database self-tests and native result validators target migration 54; their
+historical migration prefixes remain unchanged. Their previous migration-53 pins rejected the newer
 test database, but did not affect ordinary production startup.
 
 _Initial baseline generated 2026-07-01 from a bidirectional API/feature reconciliation between the RN app (`~/github/bluebubbles-rn`) and the Gator server (`~/github/BB/bluebubbles-server`, then-current `master`). Later dated annotations record subsequent verification and closure; counts and `CONFIRMED` labels without a newer date describe that original baseline, not a fresh whole-repository scan._

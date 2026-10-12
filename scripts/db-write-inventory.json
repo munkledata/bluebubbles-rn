@@ -7804,7 +7804,7 @@
     {
       "id": "src/db/repositories/contacts.ts#setHandleContactAmbiguousWithinTransaction:drizzle-update:80acfa15e8ab",
       "path": "src/db/repositories/contacts.ts",
-      "line": 383,
+      "line": 379,
       "symbol": "setHandleContactAmbiguousWithinTransaction",
       "operation": "drizzle-update",
       "target": "handles",
@@ -7815,12 +7815,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/contactsRepo.test.ts; test/db/unknownSenders.test.ts"
     },
     {
-      "id": "src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:455e2efb66>:mutator-call:00ced8589ea2",
+      "id": "src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:35dc306ada>:mutator-call:aa6ed0111bb6",
       "path": "src/db/repositories/contacts.ts",
-      "line": 429,
-      "symbol": "linkHandlesToContacts.<callback:455e2efb66>",
+      "line": 436,
+      "symbol": "linkHandlesToContacts.<callback:35dc306ada>",
       "operation": "mutator-call",
-      "target": "src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:455e2efb66>.<callback:386d4f3bbd>",
+      "target": "src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:35dc306ada>.<callback:e3562cb0fb>",
       "detectedContext": "withDbTransaction",
       "owner": "linkHandlesToContacts",
       "transactionContext": "withDbTransaction",
@@ -7828,10 +7828,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/contactsRepo.test.ts; test/db/contactLinkOnIngestion.test.ts"
     },
     {
-      "id": "src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:455e2efb66>:mutator-call:d53ba32311b9",
+      "id": "src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:35dc306ada>:mutator-call:e0cd6df731e7",
       "path": "src/db/repositories/contacts.ts",
-      "line": 429,
-      "symbol": "linkHandlesToContacts.<callback:455e2efb66>",
+      "line": 436,
+      "symbol": "linkHandlesToContacts.<callback:35dc306ada>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -7841,10 +7841,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/contactsRepo.test.ts; test/db/contactLinkOnIngestion.test.ts"
     },
     {
-      "id": "src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:455e2efb66>.<callback:386d4f3bbd>:mutator-call:30be9b356a27",
+      "id": "src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:35dc306ada>.<callback:e3562cb0fb>:mutator-call:5d75d48e30fb",
       "path": "src/db/repositories/contacts.ts",
-      "line": 432,
-      "symbol": "linkHandlesToContacts.<callback:455e2efb66>.<callback:386d4f3bbd>",
+      "line": 439,
+      "symbol": "linkHandlesToContacts.<callback:35dc306ada>.<callback:e3562cb0fb>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#setHandleContactAmbiguousWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -7856,7 +7856,7 @@
     {
       "id": "src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>:mutator-call:39217d2483ca",
       "path": "src/db/repositories/contacts.ts",
-      "line": 443,
+      "line": 452,
       "symbol": "linkHandlesToContacts.<callback:a29fef076d>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>.<callback:998d60ab14>",
@@ -7869,7 +7869,7 @@
     {
       "id": "src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>:mutator-call:57243fd8d6bd",
       "path": "src/db/repositories/contacts.ts",
-      "line": 443,
+      "line": 452,
       "symbol": "linkHandlesToContacts.<callback:a29fef076d>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -7882,7 +7882,7 @@
     {
       "id": "src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:a29fef076d>.<callback:998d60ab14>:mutator-call:2c9931e83a2f",
       "path": "src/db/repositories/contacts.ts",
-      "line": 446,
+      "line": 455,
       "symbol": "linkHandlesToContacts.<callback:a29fef076d>.<callback:998d60ab14>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#applyContactMatchWithinTransaction",
@@ -7893,23 +7893,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/contactsRepo.test.ts; test/db/contactLinkOnIngestion.test.ts"
     },
     {
-      "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:24958c1918>:mutator-call:c20cb4216884",
+      "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:48930d95c7>:mutator-call:8608dbd04458",
       "path": "src/db/repositories/contacts.ts",
-      "line": 513,
-      "symbol": "matchContactsToHandles.<callback:24958c1918>",
-      "operation": "mutator-call",
-      "target": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:24958c1918>.<callback:da28eed3e8>",
-      "detectedContext": "withDbTransaction",
-      "owner": "matchContactsToHandles",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/contactsRepo.test.ts"
-    },
-    {
-      "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:24958c1918>:mutator-call:c55973627832",
-      "path": "src/db/repositories/contacts.ts",
-      "line": 513,
-      "symbol": "matchContactsToHandles.<callback:24958c1918>",
+      "line": 522,
+      "symbol": "matchContactsToHandles.<callback:48930d95c7>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -7919,10 +7906,23 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/contactsRepo.test.ts"
     },
     {
-      "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:24958c1918>.<callback:da28eed3e8>:mutator-call:b48ed36fb269",
+      "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:48930d95c7>:mutator-call:c4377ed5fa6c",
       "path": "src/db/repositories/contacts.ts",
-      "line": 514,
-      "symbol": "matchContactsToHandles.<callback:24958c1918>.<callback:da28eed3e8>",
+      "line": 522,
+      "symbol": "matchContactsToHandles.<callback:48930d95c7>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:48930d95c7>.<callback:0869422901>",
+      "detectedContext": "withDbTransaction",
+      "owner": "matchContactsToHandles",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/contactsRepo.test.ts"
+    },
+    {
+      "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:48930d95c7>.<callback:0869422901>:mutator-call:2fb6405329f8",
+      "path": "src/db/repositories/contacts.ts",
+      "line": 523,
+      "symbol": "matchContactsToHandles.<callback:48930d95c7>.<callback:0869422901>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#setHandleContactAmbiguousWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -7934,7 +7934,7 @@
     {
       "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>:mutator-call:4d11d05b9300",
       "path": "src/db/repositories/contacts.ts",
-      "line": 520,
+      "line": 531,
       "symbol": "matchContactsToHandles.<callback:855118c688>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -7947,7 +7947,7 @@
     {
       "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>:mutator-call:85a839fda316",
       "path": "src/db/repositories/contacts.ts",
-      "line": 520,
+      "line": 531,
       "symbol": "matchContactsToHandles.<callback:855118c688>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>.<callback:b160d8104b>",
@@ -7960,7 +7960,7 @@
     {
       "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>.<callback:b160d8104b>:mutator-call:6e98f3765bbd",
       "path": "src/db/repositories/contacts.ts",
-      "line": 521,
+      "line": 532,
       "symbol": "matchContactsToHandles.<callback:855118c688>.<callback:b160d8104b>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#applyContactMatchWithinTransaction",
@@ -7973,7 +7973,7 @@
     {
       "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:fb9ecba88a>:mutator-call:03929b5466d2",
       "path": "src/db/repositories/contacts.ts",
-      "line": 533,
+      "line": 544,
       "symbol": "matchContactsToHandles.<callback:fb9ecba88a>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -7986,7 +7986,7 @@
     {
       "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:fb9ecba88a>:mutator-call:1394e1a87db1",
       "path": "src/db/repositories/contacts.ts",
-      "line": 533,
+      "line": 544,
       "symbol": "matchContactsToHandles.<callback:fb9ecba88a>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:fb9ecba88a>.<callback:032718c953>",
@@ -7999,7 +7999,7 @@
     {
       "id": "src/db/repositories/contacts.ts#matchContactsToHandles:drizzle-update:39efd42dac33",
       "path": "src/db/repositories/contacts.ts",
-      "line": 546,
+      "line": 557,
       "symbol": "matchContactsToHandles",
       "operation": "drizzle-update",
       "target": "handles",
@@ -8010,12 +8010,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/contactsRepo.test.ts"
     },
     {
-      "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:0447314361>:mutator-call:40914593956c",
+      "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:d11bf3e4ec>:mutator-call:3c1b1ed40fc9",
       "path": "src/db/repositories/contacts.ts",
-      "line": 568,
-      "symbol": "matchContactsToHandles.<callback:0447314361>",
+      "line": 580,
+      "symbol": "matchContactsToHandles.<callback:d11bf3e4ec>",
       "operation": "mutator-call",
-      "target": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:0447314361>.<callback:23b79ef8ab>",
+      "target": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:d11bf3e4ec>.<callback:f69677d089>",
       "detectedContext": "withDbTransaction",
       "owner": "matchContactsToHandles",
       "transactionContext": "withDbTransaction",
@@ -8023,10 +8023,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/contactsRepo.test.ts"
     },
     {
-      "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:0447314361>:mutator-call:4f6b5f001664",
+      "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:d11bf3e4ec>:mutator-call:dc535468b954",
       "path": "src/db/repositories/contacts.ts",
-      "line": 568,
-      "symbol": "matchContactsToHandles.<callback:0447314361>",
+      "line": 580,
+      "symbol": "matchContactsToHandles.<callback:d11bf3e4ec>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -8036,10 +8036,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/contactsRepo.test.ts"
     },
     {
-      "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:0447314361>.<callback:23b79ef8ab>:mutator-call:ff9023025a0a",
+      "id": "src/db/repositories/contacts.ts#matchContactsToHandles.<callback:d11bf3e4ec>.<callback:f69677d089>:mutator-call:ad9cfd394187",
       "path": "src/db/repositories/contacts.ts",
-      "line": 569,
-      "symbol": "matchContactsToHandles.<callback:0447314361>.<callback:23b79ef8ab>",
+      "line": 581,
+      "symbol": "matchContactsToHandles.<callback:d11bf3e4ec>.<callback:f69677d089>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#setHandleContactAmbiguousWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -8051,7 +8051,7 @@
     {
       "id": "src/db/repositories/contacts.ts#setHandleServerAvatar:mutator-call:5488c0f447f3",
       "path": "src/db/repositories/contacts.ts",
-      "line": 619,
+      "line": 633,
       "symbol": "setHandleServerAvatar",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#setHandleServerAvatar.<callback:d9c2c56773>",
@@ -8064,7 +8064,7 @@
     {
       "id": "src/db/repositories/contacts.ts#setHandleServerAvatar:mutator-call:d300dc33591f",
       "path": "src/db/repositories/contacts.ts",
-      "line": 619,
+      "line": 633,
       "symbol": "setHandleServerAvatar",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -8077,7 +8077,7 @@
     {
       "id": "src/db/repositories/contacts.ts#setHandleServerAvatar.<callback:d9c2c56773>:mutator-call:07b1b7ff630f",
       "path": "src/db/repositories/contacts.ts",
-      "line": 620,
+      "line": 634,
       "symbol": "setHandleServerAvatar.<callback:d9c2c56773>",
       "operation": "mutator-call",
       "target": "src/db/repositories/contacts.ts#setHandleServerAvatarWithinTransaction",
@@ -8090,7 +8090,7 @@
     {
       "id": "src/db/repositories/contacts.ts#setHandleServerAvatarWithinTransaction:drizzle-update:6f0e2fd8121c",
       "path": "src/db/repositories/contacts.ts",
-      "line": 633,
+      "line": 647,
       "symbol": "setHandleServerAvatarWithinTransaction",
       "operation": "drizzle-update",
       "target": "handles",
@@ -18943,19 +18943,6 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
     },
     {
-      "id": "src/services/chatActions.ts#markRead.<callback:a4e2704b5d>:mutator-call:e19e7a9b24ff",
-      "path": "src/services/chatActions.ts",
-      "line": 838,
-      "symbol": "markRead.<callback:a4e2704b5d>",
-      "operation": "mutator-call",
-      "target": "src/services/chatActions.ts#markRead.<callback:a4e2704b5d>.<callback:dc5434bf32>",
-      "detectedContext": "withDbTransaction",
-      "owner": "markRead",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/markUnread.test.ts; test/db/withDbTransaction.test.ts; test/db/chatActionsRepo.test.ts"
-    },
-    {
       "id": "src/services/chatActions.ts#markRead.<callback:a4e2704b5d>:mutator-call:9272d0b8dcdc",
       "path": "src/services/chatActions.ts",
       "line": 838,
@@ -18965,6 +18952,19 @@
       "detectedContext": "transaction-coordinator",
       "owner": "markRead",
       "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/markUnread.test.ts; test/db/withDbTransaction.test.ts; test/db/chatActionsRepo.test.ts"
+    },
+    {
+      "id": "src/services/chatActions.ts#markRead.<callback:a4e2704b5d>:mutator-call:e19e7a9b24ff",
+      "path": "src/services/chatActions.ts",
+      "line": 838,
+      "symbol": "markRead.<callback:a4e2704b5d>",
+      "operation": "mutator-call",
+      "target": "src/services/chatActions.ts#markRead.<callback:a4e2704b5d>.<callback:dc5434bf32>",
+      "detectedContext": "withDbTransaction",
+      "owner": "markRead",
+      "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
       "evidence": "scripts/check-db-writes.test.mjs; test/services/markUnread.test.ts; test/db/withDbTransaction.test.ts; test/db/chatActionsRepo.test.ts"
     },
@@ -18995,19 +18995,6 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
     },
     {
-      "id": "src/services/chatActions.ts#markUnread.<callback:3bc2e31bcb>:mutator-call:c24df9ca0ed3",
-      "path": "src/services/chatActions.ts",
-      "line": 953,
-      "symbol": "markUnread.<callback:3bc2e31bcb>",
-      "operation": "mutator-call",
-      "target": "src/db/transaction.ts#withDbTransaction",
-      "detectedContext": "transaction-coordinator",
-      "owner": "markUnread",
-      "transactionContext": "transaction-coordinator",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/markUnread.test.ts; test/db/withDbTransaction.test.ts; test/db/chatsContactsBranches.test.ts"
-    },
-    {
       "id": "src/services/chatActions.ts#markUnread.<callback:3bc2e31bcb>:mutator-call:5cc87e2cca05",
       "path": "src/services/chatActions.ts",
       "line": 953,
@@ -19017,6 +19004,19 @@
       "detectedContext": "withDbTransaction",
       "owner": "markUnread",
       "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/markUnread.test.ts; test/db/withDbTransaction.test.ts; test/db/chatsContactsBranches.test.ts"
+    },
+    {
+      "id": "src/services/chatActions.ts#markUnread.<callback:3bc2e31bcb>:mutator-call:c24df9ca0ed3",
+      "path": "src/services/chatActions.ts",
+      "line": 953,
+      "symbol": "markUnread.<callback:3bc2e31bcb>",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "markUnread",
+      "transactionContext": "transaction-coordinator",
       "disposition": "coordinated",
       "evidence": "scripts/check-db-writes.test.mjs; test/services/markUnread.test.ts; test/db/withDbTransaction.test.ts; test/db/chatsContactsBranches.test.ts"
     },

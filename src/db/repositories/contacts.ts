@@ -1,4 +1,4 @@
-import { and, eq, isNull, ne, sql } from 'drizzle-orm';
+import { and, eq, isNotNull, isNull, ne, sql } from 'drizzle-orm';
 import {
   contactEmailMatchKey,
   contactHandleMatchKey,
@@ -365,26 +365,33 @@ function applyContactMatchWithinTransaction(
  * by a contact without a stable id. Such a handle links to no contact (no name or photo), but the
  * number is in the address book, so it still counts as a known sender. Marking needs every witness
  * contact to still exist, so rows from a neighbour's rolled-back sync can't vouch for a number.
+ * `onlyIfLinked` keeps the mark until a contact link actually stands in for it at write time.
  */
 function setHandleContactAmbiguousWithinTransaction(
   context: DbTransactionContext,
-  handleId: number,
+  handle: { readonly id: number; readonly address: string },
   ambiguous: 0 | 1,
-  witnessContactIds: readonly number[],
+  guard: { readonly witnessContactIds?: readonly number[]; readonly onlyIfLinked?: boolean },
 ): Promise<boolean> {
   return runInTransactionContext(context, async (db) => {
+    const witnessContactIds = guard.witnessContactIds ?? [];
     if (ambiguous === 1 && witnessContactIds.length === 0) return false;
-    const witnessesExist =
-      ambiguous === 1
-        ? witnessContactIds.map(
-            (id) => sql`EXISTS (SELECT 1 FROM ${contacts} WHERE ${contacts.id} = ${id})`,
-          )
-        : [];
     const rows = await db
       .update(handles)
       .set({ contactAmbiguous: ambiguous })
       .where(
-        and(eq(handles.id, handleId), ne(handles.contactAmbiguous, ambiguous), ...witnessesExist),
+        and(
+          eq(handles.id, handle.id),
+          // A neighbour's rollback can free an id for reuse; the address pins the exact handle.
+          eq(handles.address, handle.address),
+          ne(handles.contactAmbiguous, ambiguous),
+          ...(ambiguous === 1
+            ? witnessContactIds.map(
+                (id) => sql`EXISTS (SELECT 1 FROM ${contacts} WHERE ${contacts.id} = ${id})`,
+              )
+            : []),
+          ...(guard.onlyIfLinked ? [isNotNull(handles.contactId)] : []),
+        ),
       )
       .returning({ id: handles.id });
     return rows.length > 0;
@@ -429,7 +436,9 @@ export async function linkHandlesToContacts(
             withDbTransaction(
               db,
               (context) =>
-                setHandleContactAmbiguousWithinTransaction(context, handle.id, 1, witnessIds),
+                setHandleContactAmbiguousWithinTransaction(context, handle, 1, {
+                  witnessContactIds: witnessIds,
+                }),
               commitGuard,
             ),
           );
@@ -511,7 +520,9 @@ export async function matchContactsToHandles(
       const witnessIds = blocked.witnesses.map((witness) => witness.id);
       await runDbTask(() =>
         withDbTransaction(db, (context) =>
-          setHandleContactAmbiguousWithinTransaction(context, h.id, 1, witnessIds),
+          setHandleContactAmbiguousWithinTransaction(context, h, 1, {
+            witnessContactIds: witnessIds,
+          }),
         ),
       );
     }
@@ -561,12 +572,15 @@ export async function matchContactsToHandles(
       );
       if (reverted) updated += 1;
     }
-    // While one card still claims the number (its link lost a race), it is in the address book and
-    // stays known; unmark only once a link stands in for the flag or nothing claims the number.
-    if (!blocked && h.contactAmbiguous !== 0 && (!match || wroteMatch || h.contactId != null)) {
+    // While one card still claims the number it is in the address book and stays known, so unmark
+    // only once a link stands in for the flag, checked at write time (a link can lose a race, and
+    // the stale-link cleanup above can clear one). With no claimant left, unmark outright.
+    if (!blocked && h.contactAmbiguous !== 0) {
       await runDbTask(() =>
         withDbTransaction(db, (context) =>
-          setHandleContactAmbiguousWithinTransaction(context, h.id, 0, []),
+          setHandleContactAmbiguousWithinTransaction(context, h, 0, {
+            onlyIfLinked: match !== undefined,
+          }),
         ),
       );
     }

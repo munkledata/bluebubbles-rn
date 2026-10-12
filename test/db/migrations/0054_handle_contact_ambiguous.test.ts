@@ -50,6 +50,11 @@ describe(`migration ${MIGRATION_NAME}`, () => {
           .prepare("UPDATE handles SET contact_ambiguous = 2 WHERE address = '+15551234567'")
           .run(),
       ).toThrow(/CHECK constraint failed/);
+      expect(() =>
+        raw
+          .prepare("UPDATE handles SET contact_ambiguous = NULL WHERE address = '+15551234567'")
+          .run(),
+      ).toThrow(/NOT NULL constraint failed/);
     } finally {
       raw.close();
     }

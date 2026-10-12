@@ -10156,18 +10156,18 @@ test('certifies exactly the reviewed ambiguous-contact writes', () => {
       detectedContext: 'startup-migration',
     },
     {
-      id: 'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:455e2efb66>:mutator-call:00ced8589ea2',
+      id: 'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:35dc306ada>:mutator-call:aa6ed0111bb6',
       target:
-        'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:455e2efb66>.<callback:386d4f3bbd>',
+        'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:35dc306ada>.<callback:e3562cb0fb>',
       detectedContext: 'withDbTransaction',
     },
     {
-      id: 'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:455e2efb66>:mutator-call:d53ba32311b9',
+      id: 'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:35dc306ada>:mutator-call:e0cd6df731e7',
       target: 'src/db/transaction.ts#withDbTransaction',
       detectedContext: 'transaction-coordinator',
     },
     {
-      id: 'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:455e2efb66>.<callback:386d4f3bbd>:mutator-call:30be9b356a27',
+      id: 'src/db/repositories/contacts.ts#linkHandlesToContacts.<callback:35dc306ada>.<callback:e3562cb0fb>:mutator-call:5d75d48e30fb',
       target: 'src/db/repositories/contacts.ts#setHandleContactAmbiguousWithinTransaction',
       detectedContext: 'withDbTransaction',
     },
@@ -10188,34 +10188,18 @@ test('certifies exactly the reviewed ambiguous-contact writes', () => {
       detectedContext: 'withDbTransaction',
     },
     {
-      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:0447314361>:mutator-call:40914593956c',
-      target:
-        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:0447314361>.<callback:23b79ef8ab>',
-      detectedContext: 'withDbTransaction',
-    },
-    {
-      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:0447314361>:mutator-call:4f6b5f001664',
+      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:48930d95c7>:mutator-call:8608dbd04458',
       target: 'src/db/transaction.ts#withDbTransaction',
       detectedContext: 'transaction-coordinator',
     },
     {
-      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:0447314361>.<callback:23b79ef8ab>:mutator-call:ff9023025a0a',
-      target: 'src/db/repositories/contacts.ts#setHandleContactAmbiguousWithinTransaction',
-      detectedContext: 'withDbTransaction',
-    },
-    {
-      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:24958c1918>:mutator-call:c20cb4216884',
+      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:48930d95c7>:mutator-call:c4377ed5fa6c',
       target:
-        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:24958c1918>.<callback:da28eed3e8>',
+        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:48930d95c7>.<callback:0869422901>',
       detectedContext: 'withDbTransaction',
     },
     {
-      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:24958c1918>:mutator-call:c55973627832',
-      target: 'src/db/transaction.ts#withDbTransaction',
-      detectedContext: 'transaction-coordinator',
-    },
-    {
-      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:24958c1918>.<callback:da28eed3e8>:mutator-call:b48ed36fb269',
+      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:48930d95c7>.<callback:0869422901>:mutator-call:2fb6405329f8',
       target: 'src/db/repositories/contacts.ts#setHandleContactAmbiguousWithinTransaction',
       detectedContext: 'withDbTransaction',
     },
@@ -10233,6 +10217,22 @@ test('certifies exactly the reviewed ambiguous-contact writes', () => {
     {
       id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:855118c688>.<callback:b160d8104b>:mutator-call:6e98f3765bbd',
       target: 'src/db/repositories/contacts.ts#applyContactMatchWithinTransaction',
+      detectedContext: 'withDbTransaction',
+    },
+    {
+      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:d11bf3e4ec>:mutator-call:3c1b1ed40fc9',
+      target:
+        'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:d11bf3e4ec>.<callback:f69677d089>',
+      detectedContext: 'withDbTransaction',
+    },
+    {
+      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:d11bf3e4ec>:mutator-call:dc535468b954',
+      target: 'src/db/transaction.ts#withDbTransaction',
+      detectedContext: 'transaction-coordinator',
+    },
+    {
+      id: 'src/db/repositories/contacts.ts#matchContactsToHandles.<callback:d11bf3e4ec>.<callback:f69677d089>:mutator-call:ad9cfd394187',
+      target: 'src/db/repositories/contacts.ts#setHandleContactAmbiguousWithinTransaction',
       detectedContext: 'withDbTransaction',
     },
     {
