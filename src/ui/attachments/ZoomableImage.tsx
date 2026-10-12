@@ -6,7 +6,6 @@ import {
   type GestureResponderEvent,
   PanResponder,
   StyleSheet,
-  Text,
   View,
 } from 'react-native';
 
@@ -219,8 +218,9 @@ export function ZoomableImage({
           />
         </Animated.View>
       ) : (
-        // Not downloaded yet: show the blurhash placeholder + a hint (download-on-demand in the
-        // viewer is a separate follow-up; open the photo from the chat bubble to fetch it).
+        // No confirmed file for this page: a neighbour not checked yet, a page being checked, or
+        // media that is not downloaded. The viewer's overlay says which, so no label here; a
+        // "Not downloaded" label was false for photos already on the device.
         <View style={[styles.placeholder, { width, height }]}>
           {blurhash ? (
             <Image
@@ -230,7 +230,6 @@ export function ZoomableImage({
               accessibilityIgnoresInvertColors
             />
           ) : null}
-          <Text style={styles.placeholderText}>Not downloaded</Text>
         </View>
       )}
     </View>
@@ -240,5 +239,4 @@ export function ZoomableImage({
 const styles = StyleSheet.create({
   page: { alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   placeholder: { alignItems: 'center', justifyContent: 'center' },
-  placeholderText: { color: '#fff', fontSize: 14, opacity: 0.8 },
 });

@@ -200,17 +200,19 @@ describe('ZoomableImage', () => {
     expect(onError).toHaveBeenCalledTimes(1);
   });
 
-  it('renders the blurhash placeholder + hint when not downloaded', async () => {
+  // A null uri also means "a neighbour not checked yet" or "this page is being checked", so a
+  // "Not downloaded" label was false for photos on the device. The viewer's overlay owns status.
+  it('renders the blurhash placeholder without a status label when it has no file', async () => {
     await mount({ uri: null, blurhash: 'LKO2?U%2Tw=w' });
-    expect(screen.getByText('Not downloaded')).toBeTruthy();
+    expect(screen.queryByText('Not downloaded')).toBeNull();
     expect(screen.getByTestId('expo-image').props.placeholder).toEqual({
       blurhash: 'LKO2?U%2Tw=w',
     });
   });
 
-  it('renders only the hint when not downloaded and no blurhash exists', async () => {
+  it('renders a neutral empty page when it has neither a file nor a blurhash', async () => {
     await mount({ uri: null });
-    expect(screen.getByText('Not downloaded')).toBeTruthy();
+    expect(screen.queryByText('Not downloaded')).toBeNull();
     expect(screen.queryByTestId('expo-image')).toBeNull();
   });
 

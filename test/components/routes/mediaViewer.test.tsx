@@ -1479,7 +1479,7 @@ describe('MediaViewer gating', () => {
 
     useReturnRead = true;
     await scrollToPage(view, 0);
-    expect(screen.getByRole('progressbar', { name: 'Checking current media' })).toBeTruthy();
+    expect(await screen.findByRole('progressbar', { name: 'Checking current media' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Share media' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Save media' })).toBeDisabled();
     expect(downloadMedia).toHaveBeenCalledTimes(1);
@@ -1517,7 +1517,7 @@ describe('MediaViewer gating', () => {
     useReturnRead = true;
     await scrollToPage(view, 0);
 
-    expect(screen.getByRole('progressbar', { name: 'Checking current media' })).toBeTruthy();
+    expect(await screen.findByRole('progressbar', { name: 'Checking current media' })).toBeTruthy();
     expect(screen.queryByTestId(`img:${PRIVATE_IMAGE_URI}`)).toBeNull();
     expect(screen.getByRole('button', { name: 'Share media' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Save media' })).toBeDisabled();
@@ -1537,6 +1537,30 @@ describe('MediaViewer gating', () => {
     expect(share).not.toHaveBeenCalled();
   });
 
+  it('shows the checking spinner only once a page check is slow', async () => {
+    // A page check is one indexed read; showing the spinner at once flashed it on every swipe.
+    const secondRead = deferred<typeof SECOND_ATT>();
+    listGallery.mockResolvedValue({ items: [ATT, SECOND_ATT], index: 0 });
+    getAtt.mockImplementation((_db, attachmentGuid) =>
+      attachmentGuid === SECOND_ATT.guid ? secondRead.promise : Promise.resolve(ATT),
+    );
+    const view = await renderViewer();
+
+    await scrollToPage(view, 1);
+    expect(screen.queryByRole('progressbar', { name: 'Checking current media' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Share media' })).toBeDisabled();
+    expect(await screen.findByRole('progressbar', { name: 'Checking current media' })).toBeTruthy();
+
+    await act(async () => {
+      secondRead.resolve(SECOND_ATT);
+      await secondRead.promise;
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole('progressbar', { name: 'Checking current media' })).toBeNull(),
+    );
+    expect(await screen.findByTestId(`img:${PRIVATE_SECOND_IMAGE_URI}`)).toBeTruthy();
+  });
+
   it('fails a page refresh closed and retries it with a fresh page lifetime', async () => {
     const firstRead = deferred<typeof SECOND_ATT>();
     let retrying = false;
@@ -1548,7 +1572,7 @@ describe('MediaViewer gating', () => {
     const view = await renderViewer();
 
     await scrollToPage(view, 1);
-    expect(screen.getByRole('progressbar', { name: 'Checking current media' })).toBeTruthy();
+    expect(await screen.findByRole('progressbar', { name: 'Checking current media' })).toBeTruthy();
     expectRenderedMediaToOmit(PRIVATE_SECOND_IMAGE_URI, PRIVATE_SECOND_BLURHASH);
     await act(async () => {
       firstRead.reject(new Error('current-page-refresh-error-47cc'));

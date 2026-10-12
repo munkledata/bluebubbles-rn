@@ -43,6 +43,9 @@ interface MediaGallery {
   index: number;
 }
 
+/** How long a page check may run before the viewer shows its "Checking media…" spinner. */
+const PAGE_CHECK_INDICATOR_DELAY_MS = 300;
+
 interface LoadedMedia {
   routeGuid: string;
   routeLifetime: number;
@@ -1063,6 +1066,22 @@ export default function MediaViewer(): React.JSX.Element {
   const pendingForCurrent =
     pendingDownload && pendingDownloadIsCurrent(pendingDownload) ? pendingDownload : null;
   const pageCheckBusy = visibleLoaded?.pageStatus === 'checking';
+  // A page check is one indexed read that usually finishes before a spinner could be read, so
+  // showing it at once flashed "Checking media…" on every swipe. Show it only once it is slow.
+  const checkingPageKey =
+    visibleLoaded?.pageStatus === 'checking'
+      ? `${visibleLoaded.routeLifetime}:${visibleLoaded.pageLifetime}`
+      : null;
+  const [slowCheckPageKey, setSlowCheckPageKey] = useState<string | null>(null);
+  useEffect(() => {
+    if (checkingPageKey === null) return;
+    const timer = setTimeout(
+      () => setSlowCheckPageKey(checkingPageKey),
+      PAGE_CHECK_INDICATOR_DELAY_MS,
+    );
+    return () => clearTimeout(timer);
+  }, [checkingPageKey]);
+  const showPageCheckIndicator = checkingPageKey !== null && slowCheckPageKey === checkingPageKey;
   const downloadBusy =
     !local &&
     (downloadStatus === 'downloading' ||
@@ -1149,17 +1168,19 @@ export default function MediaViewer(): React.JSX.Element {
       {current && !pageReady ? (
         <View style={styles.downloadOverlay} pointerEvents="box-none">
           {visibleLoaded?.pageStatus === 'checking' ? (
-            <View
-              accessible
-              accessibilityRole="progressbar"
-              accessibilityLabel="Checking current media"
-              accessibilityLiveRegion="polite"
-              style={styles.downloadPanel}
-              pointerEvents="none"
-            >
-              <ProgressRing progress={null} />
-              <Text style={styles.downloadMessage}>Checking media…</Text>
-            </View>
+            showPageCheckIndicator ? (
+              <View
+                accessible
+                accessibilityRole="progressbar"
+                accessibilityLabel="Checking current media"
+                accessibilityLiveRegion="polite"
+                style={styles.downloadPanel}
+                pointerEvents="none"
+              >
+                <ProgressRing progress={null} />
+                <Text style={styles.downloadMessage}>Checking media…</Text>
+              </View>
+            ) : null
           ) : (
             <View style={styles.downloadPanel}>
               <Text accessibilityLiveRegion="polite" style={styles.downloadMessage}>
