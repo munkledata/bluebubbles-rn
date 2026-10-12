@@ -3,6 +3,7 @@ const pauseRealtime = jest.fn();
 const resumeRealtime = jest.fn<Promise<void>, []>(() => Promise.resolve());
 const flushErrorReports = jest.fn<Promise<void>, []>(() => Promise.resolve());
 const reconcileMessageNotificationGroup = jest.fn<Promise<void>, []>(() => Promise.resolve());
+const clearLockedNotification = jest.fn<Promise<void>, []>(() => Promise.resolve());
 const beginAppLockNotificationPrivacy = jest.fn<Promise<void>, []>(() => Promise.resolve());
 const commitAppLockNotificationPrivacy = jest.fn();
 const recoverOutgoing = jest.fn<Promise<{ eligible: number; sent: number }>, []>(async () => ({
@@ -20,6 +21,7 @@ jest.mock('@/services/realtimeControl', () => ({ pauseRealtime, resumeRealtime }
 jest.mock('@/services/errors', () => ({ flushErrorReports }));
 jest.mock('@/services/notifications/notifeeService', () => ({
   reconcileMessageNotificationGroup,
+  clearLockedNotification,
   beginAppLockNotificationPrivacy,
   commitAppLockNotificationPrivacy,
 }));
@@ -57,6 +59,7 @@ beforeEach(() => {
   resumeRealtime.mockReset().mockResolvedValue(undefined);
   flushErrorReports.mockReset().mockResolvedValue(undefined);
   reconcileMessageNotificationGroup.mockReset().mockResolvedValue(undefined);
+  clearLockedNotification.mockReset().mockResolvedValue(undefined);
   beginAppLockNotificationPrivacy.mockReset().mockResolvedValue(undefined);
   commitAppLockNotificationPrivacy.mockReset();
   recoverOutgoing.mockReset().mockResolvedValue({ eligible: 0, sent: 0 });
@@ -315,6 +318,7 @@ describe('completeUnlock', () => {
     expect(resumeRealtime).not.toHaveBeenCalled();
     expect(flushErrorReports).not.toHaveBeenCalled();
     expect(reconcileMessageNotificationGroup).not.toHaveBeenCalled();
+    expect(clearLockedNotification).not.toHaveBeenCalled();
     expect(recoverOutgoing).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
       '[lock] ignored cold unlock without foreground boot run ownership',
@@ -336,6 +340,8 @@ describe('completeUnlock', () => {
     expect(resumeRealtime).toHaveBeenCalledTimes(1);
     expect(flushErrorReports).toHaveBeenCalledTimes(1);
     expect(reconcileMessageNotificationGroup).toHaveBeenCalledTimes(1);
+    // The user is now in the app: a stale "You have new messages" must not linger in the tray.
+    expect(clearLockedNotification).toHaveBeenCalledTimes(1);
     expect(recoverOutgoing).toHaveBeenCalledTimes(1);
     expect(resumeRealtime.mock.invocationCallOrder[0]!).toBeLessThan(
       flushErrorReports.mock.invocationCallOrder[0]!,

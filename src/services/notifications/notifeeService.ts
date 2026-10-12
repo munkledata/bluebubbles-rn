@@ -1882,6 +1882,7 @@ async function displayWithPresentationGuard(
 
 async function containPrivateNotificationIfLocked(
   context?: EventDeliveryContext,
+  quietUpdate = false,
 ): Promise<boolean> {
   if (!privateNotificationMustBeHidden()) return false;
   await postStatusNotification(
@@ -1890,6 +1891,8 @@ async function containPrivateNotificationIfLocked(
     'Gator',
     'You have new messages',
     context,
+    false,
+    quietUpdate,
   );
   return true;
 }
@@ -1899,6 +1902,10 @@ async function containPrivateNotificationIfLocked(
  * A stable id means repeated posts update in place instead of stacking. These carry no private
  * message routing data. RCS/self-test text is app-authored rather than trusted from the server;
  * alias text is user-visible content supplied by its ordinary detailed caller.
+ *
+ * The locked notice alerts on every post that stands for a genuinely new message, like an ordinary
+ * message notification, even while an earlier one is still in the tray; `quietUpdate` keeps a
+ * send failure or a hidden status from re-alerting.
  */
 async function postStatusNotification(
   id: string,
@@ -1907,6 +1914,7 @@ async function postStatusNotification(
   body: string,
   context?: EventDeliveryContext,
   hidePrivateWhenLocked = false,
+  quietUpdate = false,
 ): Promise<void> {
   if (!deliveryIsCurrent(context)) return;
   await ensureChannel();
@@ -1922,7 +1930,7 @@ async function postStatusNotification(
       android: {
         channelId: CHANNEL_NEW_MESSAGE,
         smallIcon: 'ic_stat_gator',
-        ...(hidePrivate || kind === 'locked' ? { onlyAlertOnce: true } : {}),
+        ...(hidePrivate || (kind === 'locked' && quietUpdate) ? { onlyAlertOnce: true } : {}),
         pressAction: { id: PRESS_OPEN, launchActivity: 'default' },
       },
     },
@@ -2094,6 +2102,8 @@ async function postNotificationNow(
       'Gator',
       'You have new messages',
       context,
+      false,
+      intent.kind !== 'message',
     );
     return;
   }
@@ -2286,11 +2296,11 @@ async function postSendFailureNotificationNow(
   if (!deliveryIsCurrent(context) || isActiveChat(intent.chatGuid)) return;
   await ensureChannel();
   if (!deliveryIsCurrent(context)) return;
-  if (await containPrivateNotificationIfLocked(context)) return;
+  if (await containPrivateNotificationIfLocked(context, true)) return;
   if (isActiveChat(intent.chatGuid)) return;
   const target = await localFailedMessageRoute(intent.messageGuid, db);
   if (!deliveryIsCurrent(context)) return;
-  if (await containPrivateNotificationIfLocked(context)) return;
+  if (await containPrivateNotificationIfLocked(context, true)) return;
   if (!target || target.chatGuid !== intent.chatGuid || isActiveChat(intent.chatGuid)) return;
   await displayWithPresentationGuard(
     {
@@ -2506,14 +2516,19 @@ export function cancelAllNotifications(): Promise<void> {
  * A single content-less "you have messages" notification used while the app is locked. This
  * presenter never reads message content. The V3 caller authenticates and durably admits its
  * encrypted-at-rest envelope before invoking it; the temporary pre-cutoff V2 caller also
- * authenticates its frame first but never opens the database. A fixed id plus only-alert-once
- * prevents repeated replacements from re-alerting.
+ * authenticates its frame first but never opens the database. A fixed id keeps one notice in the
+ * tray; each post alerts, because callers post only for a genuinely new message or a self-test.
  */
 export function postLockedNotification(context?: EventDeliveryContext): Promise<void> {
   context ??= captureRealtimeDeliveryLease();
   return enqueueNotificationOperation(() =>
     postStatusNotification(STATUS_LOCKED_ID, 'locked', 'Gator', 'You have new messages', context),
   );
+}
+
+/** Withdraw the generic locked notice once the user has unlocked and can see what arrived. */
+export function clearLockedNotification(): Promise<void> {
+  return enqueueNotificationOperation(() => notifee.cancelNotification(STATUS_LOCKED_ID));
 }
 
 let reminderChannelReady: Promise<string> | null = null;

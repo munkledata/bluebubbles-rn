@@ -47,6 +47,7 @@ import {
   openChatNotificationSettings,
   openNotificationPermissionSettings,
   postLockedNotification,
+  clearLockedNotification,
   postNotification,
   prepareNotificationPresentationState,
   reconcileMessageNotificationGroup,
@@ -440,6 +441,20 @@ describe('App Lock notification privacy transition', () => {
       expect(mockLocalRouteForGuids).not.toHaveBeenCalled();
     },
   );
+
+  it('alerts for each new message behind the generic notice but updates it quietly for others', async () => {
+    useLockStore.setState({ enabled: true, locked: true, lastBackgrounded: Date.now() });
+
+    await postNotification(messageIntent());
+    expect(lastNotif()).toMatchObject({ id: 'bb-locked-messages' });
+    expect(lastNotif().android?.onlyAlertOnce).toBeUndefined();
+
+    await postNotification({ kind: 'alias-removed', aliases: ['PRIVATE_ALIAS'] });
+    expect(lastNotif()).toMatchObject({
+      id: 'bb-locked-messages',
+      android: { onlyAlertOnce: true },
+    });
+  });
 
   it('drops old queued detail and blocks new detail synchronously before the scrub finishes', async () => {
     let finish!: () => void;
@@ -2510,7 +2525,14 @@ describe('postLockedNotification', () => {
       gatorKind: 'locked',
     });
     expect(n.android?.channelId).toBe(CHANNEL_NEW_MESSAGE);
-    expect(n.android?.onlyAlertOnce).toBe(true);
+    // Each locked post is a genuinely new message (receipts and own messages never reach it), so
+    // it alerts even when an earlier notice is still in the tray.
+    expect(n.android?.onlyAlertOnce).toBeUndefined();
+  });
+
+  it('withdraws the generic notice when asked after an unlock', async () => {
+    await clearLockedNotification();
+    expect(mockCancel).toHaveBeenCalledWith('bb-locked-messages');
   });
 
   it('drops a locked-status post whose FCM account lease was revoked in the queue', async () => {

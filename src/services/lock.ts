@@ -9,6 +9,7 @@ import { pauseRealtime, resumeRealtime } from './realtimeControl';
 import { recoverOutgoing } from './send';
 import {
   beginAppLockNotificationPrivacy,
+  clearLockedNotification,
   commitAppLockNotificationPrivacy,
   reconcileMessageNotificationGroup,
 } from './notifications/notifeeService';
@@ -129,6 +130,11 @@ export async function completeUnlock(): Promise<void> {
     return;
   }
   useLockStore.getState().unlock();
+  // The user is now in the app and can see what arrived: withdraw the generic "You have new
+  // messages" notice so it does not linger in the tray after it has been seen.
+  void clearLockedNotification().catch((error: unknown) => {
+    logger.warn('[notif] post-unlock locked-notice clear failed', error);
+  });
   // A warm resume deliberately kept realtime paused while the lock overlay was present. AppState
   // does not emit another `active` transition after biometric success, so resume explicitly now.
   // Cold boot already starts realtime from its coordinator-owned activation after authentication.
