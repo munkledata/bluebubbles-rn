@@ -40,7 +40,7 @@ export interface ExpoLocationAdapter {
   getForegroundPermissionsAsync(): Promise<ForegroundLocationPermission>;
   requestForegroundPermissionsAsync(): Promise<ForegroundLocationPermission>;
   watchPositionAsync(
-    options: { readonly accuracy: number },
+    options: { readonly accuracy: number; readonly mayShowUserSettingsDialog?: boolean },
     callback: (location: CurrentLocationFix) => void,
     errorHandler: (reason: string) => void,
   ): Promise<CurrentLocationSubscription>;
@@ -189,8 +189,11 @@ export function acquireCurrentLocation(
 
         timeout = setTimeout(() => finish({ status: 'timeout' }), CURRENT_LOCATION_TIMEOUT_MS);
 
+        // Never let Play Services open its "turn on location accuracy" dialog: it pauses this
+        // activity, the chat screen treats that as leaving and cancels the send behind it. With
+        // network location off, the request ends as an explicit timeout or error instead.
         const pendingSubscription = location.watchPositionAsync(
-          { accuracy: location.Accuracy.Balanced },
+          { accuracy: location.Accuracy.Balanced, mayShowUserSettingsDialog: false },
           (fix) => finish({ status: 'success', location: fix }),
           () => finish({ status: 'error' }),
         );

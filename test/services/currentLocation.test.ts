@@ -66,7 +66,9 @@ describe('acquireCurrentLocation', () => {
     let publishFix!: (fix: CurrentLocationFix) => void;
     const adapter = makeAdapter({
       watchPositionAsync: jest.fn(async (options, callback) => {
-        expect(options).toEqual({ accuracy: 3 });
+        // Never Google's "location accuracy" dialog: it backgrounds the app, and the chat screen
+        // then cancels its own acquisition behind it, so the send silently never happens.
+        expect(options).toEqual({ accuracy: 3, mayShowUserSettingsDialog: false });
         publishFix = callback;
         return { remove };
       }),

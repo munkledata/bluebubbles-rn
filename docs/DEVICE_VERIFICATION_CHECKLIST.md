@@ -795,6 +795,10 @@ or Do Not Disturb access prompt is an unexpected failure.
       backgrounding before a fix, capability revocation, and Disconnect. Every non-success
       case must create no optimistic message/queue row and make no location POST; no delayed result may
       cross accounts.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE` (`FEAT-05A`, added 2026-10-11):** With Google
+      Location Accuracy off (GPS on), send Current Location. No "turn on location accuracy" dialog
+      may appear; the send either succeeds or shows a timeout/error, never silently does nothing.
+      Before the fix, that dialog backgrounded Gator and the chat screen cancelled the send.
 - [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE` (`FEAT-05A`):** After one successful fix, force a
       temporary server failure and prove the SQLCipher-encrypted outgoing row retains the exact
       coordinate and original idempotency key. Retry must not reacquire location and must stop before
