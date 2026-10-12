@@ -88,3 +88,10 @@ export const SYNC_WITH_QUERY = [
   'messageSummaryInfo',
   'payloadData',
 ] as const;
+
+/**
+ * From this moment phones that sign in with the shared server password get no background (FCM)
+ * notifications; only a paired per-device credential keeps them. Settings warns ahead of it. The
+ * push code enforces its own FCM_V2_COMPATIBILITY_CUTOFF_MS, and a test keeps the two equal.
+ */
+export const SHARED_PASSWORD_PUSH_CUTOFF_MS = 1_801_440_000_000; // 2027-02-01T00:00:00Z

@@ -2,7 +2,8 @@ import { useRouter } from 'expo-router';
 import * as Application from 'expo-application';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { AppState, Platform, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
-import { logger } from '@core/secure';
+import { SHARED_PASSWORD_PUSH_CUTOFF_MS } from '@core/config/constants';
+import { isScopedDeviceCredential, logger } from '@core/secure';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isBiometricAvailable } from '@native/biometrics';
@@ -130,6 +131,7 @@ export default function SettingsScreen(): React.JSX.Element {
   const mpcIndex = Math.max(0, mpcOptions.indexOf(messagesPerChat));
   const origin = useSessionStore((s) => s.origin);
   const serverInfo = useSessionStore((s) => s.serverInfo);
+  const password = useSessionStore((s) => s.password);
   const transportStatus = useTransportHealthStore((s) => s.status);
   // Lease currentness revokes callbacks immediately but is not reactive. Commit a monotonic
   // retired state so account-A server values and routes disappear without waiting for an
@@ -143,6 +145,15 @@ export default function SettingsScreen(): React.JSX.Element {
     [accountLease],
   );
   const accountCurrent = !accountRetired && accountLease.isCurrent();
+  // Phones still on the shared password lose background notifications at the cutoff; only a paired
+  // per-device credential keeps them. The password is classified here, never shown.
+  const sharedPasswordSession = accountCurrent && !!password && !isScopedDeviceCredential(password);
+  const pushCutoffDate = new Date(SHARED_PASSWORD_PUSH_CUTOFF_MS).toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
   const visibleOrigin = accountCurrent ? origin : null;
   const visibleServerInfo = accountCurrent ? serverInfo : null;
   const [syncing, setSyncing] = useState(false);
@@ -789,6 +800,21 @@ export default function SettingsScreen(): React.JSX.Element {
               label="Live Updates"
               value={accountCurrent ? transportHealthStatusLabel(transportStatus) : '—'}
             />
+            {sharedPasswordSession ? (
+              <>
+                <NoteRow
+                  text={
+                    Date.now() >= SHARED_PASSWORD_PUSH_CUTOFF_MS
+                      ? `Background notifications ended on ${pushCutoffDate} for phones that sign in with the shared password. Pair this device to turn them back on.`
+                      : `This phone signs in with the shared password. Background notifications for shared-password phones end on ${pushCutoffDate}. Pair this device to keep them.`
+                  }
+                />
+                <NavRow
+                  label="Pair This Device…"
+                  onPress={() => router.push('/server-management')}
+                />
+              </>
+            ) : null}
             <NavRow label="Server Management…" onPress={() => router.push('/server-management')} />
             <NavRow label="Server Health…" onPress={() => router.push('/server-health')} />
             {visibleServerInfo?.supports_imessage_account_status === true && (

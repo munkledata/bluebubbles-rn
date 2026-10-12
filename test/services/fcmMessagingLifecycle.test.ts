@@ -161,6 +161,7 @@ jest.mock('@/services/realtime/deliveryCoordinator', () => ({
   subscribeRealtimeGenerationInvalidation: mockSubscribeRealtimeGenerationInvalidation,
 }));
 
+import { SHARED_PASSWORD_PUSH_CUTOFF_MS } from '@core/config/constants';
 import { logger } from '@core/secure';
 import {
   activeFcmPushKeyState,
@@ -1521,4 +1522,10 @@ describe('FCM native callback ownership', () => {
       expect.objectContaining({ source: 'foreground', errorName: 'Error' }),
     );
   });
+});
+
+// Settings warns shared-password phones about this date from a light core constant; the push code
+// enforces its own copy. They must never drift apart.
+it('shows the same shared-password push cutoff in Settings as the push code enforces', () => {
+  expect(SHARED_PASSWORD_PUSH_CUTOFF_MS).toBe(FCM_V2_COMPATIBILITY_CUTOFF_MS);
 });

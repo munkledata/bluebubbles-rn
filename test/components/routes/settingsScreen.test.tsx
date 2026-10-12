@@ -24,6 +24,7 @@
  */
 import React from 'react';
 import { renderWithTheme, screen, fireEvent, waitFor, act } from '../support/renderWithTheme';
+import { SHARED_PASSWORD_PUSH_CUTOFF_MS } from '@core/config/constants';
 import { logger } from '@core/secure';
 
 const mockPush = jest.fn();
@@ -1202,5 +1203,49 @@ describe('SettingsScreen — search filter', () => {
       fireEvent.changeText(screen.getByPlaceholderText('Search settings'), 'zzzznope');
     });
     expect(screen.getByText(/No settings match/)).toBeTruthy();
+  });
+});
+
+describe('SettingsScreen — shared-password push deadline', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('warns a shared-password phone before the cutoff and links straight to pairing', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(SHARED_PASSWORD_PUSH_CUTOFF_MS - 30 * DAY);
+    useSessionStore.setState({ ...PRIVATE_SERVER_SESSION, password: 'shared-password-for-test' });
+
+    await renderWithTheme(<SettingsScreen />);
+
+    expect(
+      screen.getByText(/shared-password phones end on February 1, 2027\. Pair this device/),
+    ).toBeTruthy();
+    await act(async () => {
+      fireEvent.press(screen.getByText('Pair This Device…'));
+    });
+    expect(mockPush).toHaveBeenCalledWith('/server-management');
+  });
+
+  it('says notifications ended once the cutoff has passed', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(SHARED_PASSWORD_PUSH_CUTOFF_MS + DAY);
+    useSessionStore.setState({ ...PRIVATE_SERVER_SESSION, password: 'shared-password-for-test' });
+
+    await renderWithTheme(<SettingsScreen />);
+
+    expect(screen.getByText(/Background notifications ended on February 1, 2027/)).toBeTruthy();
+    expect(screen.getByText('Pair This Device…')).toBeTruthy();
+  });
+
+  it('shows nothing for a phone that already has its own device credential', async () => {
+    useSessionStore.setState({
+      ...PRIVATE_SERVER_SESSION,
+      password: `bbd_device_v1_${'A'.repeat(43)}`,
+    });
+
+    await renderWithTheme(<SettingsScreen />);
+
+    expect(screen.queryByText('Pair This Device…')).toBeNull();
+    expect(screen.queryByText(/February 1, 2027/)).toBeNull();
   });
 });
