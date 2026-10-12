@@ -1007,6 +1007,29 @@ export function restoreDeletedChatWithinTransaction(
 }
 
 /**
+ * The guid of the newest stored message of every RCS conversation (null when it has none). Read
+ * before a chat-list refresh stores each chat's newest server message, it lets routine sync re-read
+ * only the RCS conversations whose newest message is one this phone has not seen. Guids, not dates:
+ * a message sent from this phone carries the phone's clock, which can run ahead of the Mac's.
+ */
+export async function listRcsChatNewestMessageGuids(
+  db: AppDatabase,
+): Promise<Map<string, string | null>> {
+  // LIKE is ASCII case-insensitive, matching looksLikeRcsChatGuid's /^rcs;-;/i. The subquery
+  // walks messages_chat_date_idx backwards (the index ends in the rowid tie-breaker).
+  const rows: { guid: string; newest: string | null }[] = await db.all(sql`
+    SELECT c.guid AS guid,
+           (SELECT m.guid FROM messages m
+             WHERE m.chat_id = c.id
+             ORDER BY m.date_created DESC, m.id DESC
+             LIMIT 1) AS newest
+      FROM chats c
+     WHERE c.guid LIKE 'rcs;-;%'
+  `);
+  return new Map(rows.map((row) => [row.guid, row.newest]));
+}
+
+/**
  * The guids of every attachment owned by this chat.
  *
  * This is read before chat deletion both to cancel in-flight transfers (whose `local_path` is still

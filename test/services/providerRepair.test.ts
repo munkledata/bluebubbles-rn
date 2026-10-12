@@ -724,6 +724,106 @@ describe('provider-scoped repair', () => {
     });
   });
 
+  describe('routine RCS history refresh', () => {
+    const rcsEpoch = `gpe1_${'A'.repeat(43)}`;
+    const encoded = (value: string) => Buffer.from(value, 'utf8').toString('base64url');
+    const rcsChat = (name: string) => `RCS;-;g1.${rcsEpoch}.${encoded(name)}`;
+    const rcsInfo = ServerInfo.parse({
+      server_version: '2.0.0',
+      supports_message_state_sync: true,
+      message_state_sync_version: 1,
+      imessage_provider_epoch: providerEpoch,
+      supports_provider_repair_snapshot: true,
+      rcs: true,
+      supports_rcs_epoch_qualified_ids: true,
+      rcs_provider_epoch: rcsEpoch,
+    });
+    const rcsMessage = (chat: string, id: string, dateCreated: number) =>
+      Message.parse({
+        guid: `rcs-g1.${rcsEpoch}.${encoded(id)}`,
+        dateCreated,
+        text: 'fixture',
+        chats: [{ guid: chat }],
+      });
+    /** An ordinary run: current authority and an iMessage bookmark, so incremental sync runs. */
+    async function ordinaryRun() {
+      await withDbTransaction(db, (context) =>
+        setMessageStateAuthorityWithinTransaction(context, {
+          version: 1,
+          provider: 'imessage',
+          providerEpoch,
+          ledgerEpoch,
+          cursor: 'terminal-cursor',
+          snapshotSequence: '10',
+          sequence: '10',
+        }),
+      );
+      await setSyncMarker(db, { lastSyncedRowId: 100, lastSyncedTimestamp: 1_000 });
+    }
+    async function storeRcs(chat: string, id: string, dateCreated: number) {
+      const row = rcsMessage(chat, id, dateCreated);
+      const chats = await upsertChats(db, row.chats!, new Map());
+      await upsertMessages(db, [row], () => chats.get(chat), new Map());
+    }
+    function listing(f: ReturnType<typeof fixture>, rows: { chat: string; newest: Message }[]) {
+      f.base.fetchChats = async (offset) =>
+        offset === 0
+          ? rows.map(({ chat, newest }) =>
+              Chat.parse({
+                guid: chat,
+                participants: [{ address: '+15550000001', service: 'RCS' }],
+                lastMessage: newest,
+              }),
+            )
+          : [];
+    }
+
+    it('keeps the iMessage catch-up when an RCS conversation cannot be read', async () => {
+      await ordinaryRun();
+      const busy = rcsChat('busy');
+      await storeRcs(busy, 'old', 100);
+      const f = fixture();
+      listing(f, [{ chat: busy, newest: rcsMessage(busy, 'new', 200) }]);
+      f.base.fetchChatMessages = async () => {
+        throw new ApiError('no_connection', 'RCS bridge unreachable');
+      };
+      const catchUp = jest.spyOn(f.base, 'fetchMessagesAfter');
+
+      await expect(f.runAuto({ serverInfo: rcsInfo })).resolves.toBeDefined();
+      expect(catchUp).toHaveBeenCalled();
+    });
+
+    it('reads only conversations with something new, after the iMessage catch-up', async () => {
+      await ordinaryRun();
+      const quiet = rcsChat('quiet');
+      const active = rcsChat('active');
+      const fresh = rcsChat('never-seen');
+      const skewed = rcsChat('phone-clock-ahead');
+      await storeRcs(quiet, 'quiet-last', 100);
+      await storeRcs(active, 'active-old', 100);
+      // Sent from a phone whose clock runs ahead: the Mac's newer reply has an earlier date.
+      await storeRcs(skewed, 'skewed-sent', 500);
+      const f = fixture();
+      listing(f, [
+        { chat: quiet, newest: rcsMessage(quiet, 'quiet-last', 100) },
+        { chat: active, newest: rcsMessage(active, 'active-new', 200) },
+        { chat: fresh, newest: rcsMessage(fresh, 'fresh-first', 300) },
+        { chat: skewed, newest: rcsMessage(skewed, 'skewed-reply', 400) },
+      ]);
+      const history = jest.spyOn(f.base, 'fetchChatMessages');
+      const catchUp = jest.spyOn(f.base, 'fetchMessagesAfter');
+
+      await f.runAuto({ serverInfo: rcsInfo });
+
+      expect(history.mock.calls.map(([chat]) => chat).sort()).toEqual(
+        [active, fresh, skewed].sort(),
+      );
+      expect(catchUp.mock.invocationCallOrder[0]!).toBeLessThan(
+        history.mock.invocationCallOrder[0]!,
+      );
+    });
+  });
+
   describe('Full Repair on a server with presence answers', () => {
     const history = (count: number) =>
       Array.from({ length: count }, (_, index) =>

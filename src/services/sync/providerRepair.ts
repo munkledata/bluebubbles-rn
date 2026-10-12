@@ -14,6 +14,7 @@ import { advanceMarker, type SyncMarker } from '@core/sync';
 import {
   captureFullRepairPruneExposure,
   getSyncMarker,
+  listRcsChatNewestMessageGuids,
   setSyncMarkerWithinTransaction,
 } from '@db/repositories';
 import {
@@ -37,7 +38,11 @@ import {
   restoreSnapshotMessagesWithinTransaction,
   setMessageStateAuthorityWithinTransaction,
 } from '@db/repositories/messageState';
-import { captureDbWriteFence, withDbTransaction } from '@db/transaction';
+import {
+  captureDbWriteFence,
+  DbCommitGuardRejectedError,
+  withDbTransaction,
+} from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import {
   fullSync,
@@ -667,6 +672,9 @@ export async function syncProviderMessages(
   // first sync's bookmark there stays below anything that arrives after the listing; a message
   // arriving during a multi-page listing is read by the history pass that follows.
   let listed = NO_SYNC_MARKER;
+  // Read before the listing stores each chat's newest server message; see the RCS refresh below.
+  const rcsNewestBefore = await listRcsChatNewestMessageGuids(db);
+  const rcsNewestListed = new Map<string, string | null>();
   const chats = await syncAllChats(
     db,
     api,
@@ -688,20 +696,14 @@ export async function syncProviderMessages(
           })),
       );
     },
-    undefined,
+    (serverChats) => {
+      for (const chat of serverChats)
+        if (looksLikeRcsChatGuid(chat.guid))
+          rcsNewestListed.set(chat.guid, chat.lastMessage?.guid ?? null);
+    },
     undefined,
     serverInfo,
   );
-  for (const chat of chats) {
-    if (shouldAbort()) return progress;
-    if (looksLikeRcsChatGuid(chat.guid))
-      await syncChatMessages(db, api, chat.guid, {
-        maxMessages: 100,
-        shouldAbort,
-        signal,
-        rcsProviderInfo: serverInfo,
-      });
-  }
   if (!repaired && !shouldAbort()) {
     // Without a marker, incremental sync would page the whole history from the epoch, so an
     // unfinished repair falls back to the ordinary first sync and the user's per-chat cap.
@@ -745,6 +747,33 @@ export async function syncProviderMessages(
           (context) => setSyncMarkerWithinTransaction(context, restart),
           () => !shouldAbort(),
         );
+    }
+  }
+  // RCS history is not part of the Apple bookmark. Re-read it after the iMessage catch-up, only for
+  // conversations the listing shows something new in (every one on a user-started repair), and let
+  // one conversation's failure skip just that conversation. It used to re-read up to 100 messages
+  // of every RCS chat on each sync, before iMessage, and one failure failed the whole run.
+  for (const chat of chats) {
+    if (shouldAbort()) return progress;
+    if (!looksLikeRcsChatGuid(chat.guid)) continue;
+    const seenNewest = rcsNewestBefore.get(chat.guid) ?? null;
+    const listedNewest = rcsNewestListed.get(chat.guid) ?? null;
+    if (
+      !options.repair &&
+      seenNewest != null &&
+      (listedNewest == null || listedNewest === seenNewest)
+    )
+      continue;
+    try {
+      await syncChatMessages(db, api, chat.guid, {
+        maxMessages: 100,
+        shouldAbort,
+        signal,
+        rcsProviderInfo: serverInfo,
+      });
+    } catch (error) {
+      if (error instanceof DbCommitGuardRejectedError) throw error;
+      logger.debug('[sync] an RCS conversation could not be refreshed; the rest continue', error);
     }
   }
   // Message-state catch-up needs a usable authority of this exact provider. One whose repair failed
