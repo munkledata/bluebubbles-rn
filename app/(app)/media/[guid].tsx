@@ -740,11 +740,25 @@ export default function MediaViewer(): React.JSX.Element {
       const task = recoversMediaFailure
         ? redownload(attachment, accountLease)
         : download(target, 'manual', accountLease);
-      void task.catch((error: unknown) => {
-        if (!pendingDownloadIsCurrent(operation)) return;
-        logger.warn('[media] attachment download failed', error);
-        useDownloadStore.getState().fail(operation.source.attachmentGuid);
-      });
+      void task.then(
+        (path) => {
+          if (path != null || !pendingDownloadIsCurrent(operation)) return;
+          // A null result may come from a refusal that never touched the store (e.g. RCS media
+          // from a previous Google pairing), which left "Downloading media…" up with no Retry.
+          // A transfer another owner still runs, or just finished, publishes its own end state.
+          const guid = operation.source.attachmentGuid;
+          const { status, progress } = useDownloadStore.getState();
+          if (status[guid] === 'downloading' || (status[guid] === 'idle' && progress[guid] === 1)) {
+            return;
+          }
+          useDownloadStore.getState().fail(guid);
+        },
+        (error: unknown) => {
+          if (!pendingDownloadIsCurrent(operation)) return;
+          logger.warn('[media] attachment download failed', error);
+          useDownloadStore.getState().fail(operation.source.attachmentGuid);
+        },
+      );
     } catch (error) {
       if (!pendingDownloadIsCurrent(operation)) return;
       logger.warn('[media] attachment download could not start', error);

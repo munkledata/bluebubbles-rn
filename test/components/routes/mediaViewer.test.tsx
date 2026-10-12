@@ -1267,6 +1267,22 @@ describe('MediaViewer gating', () => {
     },
   );
 
+  it('offers Retry when a manual download is refused without ever starting', async () => {
+    const remote = { ...ATT, localPath: null };
+    getAtt.mockResolvedValue(remote);
+    listGallery.mockResolvedValue({ items: [remote], index: 0 });
+    // e.g. RCS media from a previous Google pairing: download() resolves null and never touches
+    // the download store, which used to leave "Downloading media…" up with no way out.
+    downloadMedia.mockResolvedValue(null);
+    await renderWithTheme(<MediaViewer />);
+
+    await fireEvent.press(await screen.findByRole('button', { name: 'Download media' }));
+    await waitFor(() => expect(downloadMedia).toHaveBeenCalledTimes(1));
+
+    expect(await screen.findByRole('button', { name: 'Retry media download' })).toBeTruthy();
+    expect(screen.queryByRole('progressbar', { name: 'Downloading media' })).toBeNull();
+  });
+
   it('deduplicates Download taps and exposes an exact Retry after failure', async () => {
     const remote = { ...ATT, localPath: null };
     getAtt.mockResolvedValue(remote);
