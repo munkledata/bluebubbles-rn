@@ -1,40 +1,51 @@
 import { useRouter } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import { ScrollView, StyleSheet, Text } from 'react-native';
 import { logger } from '@core/secure';
 import { NavRow, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { useForegroundBootState } from '@/features/boot/useForegroundBootState';
 import { resolveAttachmentCacheRecoveryIssue } from '@/services/boot/foregroundBoot';
-import { repairStuckDownloads, type AttachmentCacheRepairResult } from '@/services/download';
+import {
+  getDownloadRepairProgress,
+  repairStuckDownloads,
+  subscribeDownloadRepair,
+  type AttachmentCacheRepairResult,
+} from '@/services/download';
 
 const REPAIR_CONFIRM_MESSAGE =
-  'Gator checks every attachment it has downloaded and removes the oldest ones beyond its normal limits of 2 GiB and 4,096 files. Removed attachments download again when you open them. Files on screen, waiting to be sent, or waiting to be copied to Photos are kept. This can take a few minutes, so keep Gator open.';
+  'Gator checks every attachment it has downloaded and removes the oldest ones beyond its normal limits: 2 GiB, 4,096 files, and at least 512 MiB of the phone’s storage kept free. Removed attachments download again when you open them. Files on screen, waiting to be sent, or waiting to be copied to Photos are kept. This can take a few minutes, so keep Gator open.';
 const REPAIR_FAILED_MESSAGE =
   'Something unexpected in Gator’s download storage stopped the repair. Try again later. If it keeps failing, disconnecting and reconnecting resets downloaded attachments, along with all other data on this phone.';
+
+function removedSentence(removedFiles: number): string {
+  if (removedFiles === 0) return 'No attachments needed to be removed.';
+  const noun = removedFiles === 1 ? 'attachment' : 'attachments';
+  return `Gator removed ${removedFiles.toLocaleString()} older downloaded ${noun}; they download again when you open them.`;
+}
 
 function repairResultDialog(result: AttachmentCacheRepairResult): [string, string] {
   switch (result.status) {
     case 'repaired':
-      return [
-        'Downloads Repaired',
-        result.removedFiles === 0
-          ? 'Downloads work again. No attachments needed to be removed.'
-          : `Downloads work again. Gator removed ${result.removedFiles.toLocaleString()} older downloaded ${
-              result.removedFiles === 1 ? 'attachment' : 'attachments'
-            }; they download again when you open them.`,
-      ];
+      // Independent review of 888: below 512 MiB free, every removable file goes and downloads
+      // can still be refused, so only claim success when the cache is within its limits.
+      return result.withinQuota
+        ? ['Downloads Repaired', `Downloads work again. ${removedSentence(result.removedFiles)}`]
+        : [
+            'Downloads Back On',
+            `${removedSentence(result.removedFiles)} The phone is still low on storage or some attachments are in use, so a new download may be refused until at least 512 MiB is free.`,
+          ];
     case 'not-needed':
       return ['Downloads Already Work', 'Gator had already finished checking its downloads.'];
     case 'blocked':
       return [
         'Couldn’t Finish Repair',
-        'Gator couldn’t remove enough attachments because they’re in use or the phone is low on storage. Free up some space, then try again.',
+        'Too many attachments are in use or were opened in the last few minutes for Gator to remove enough of them. Try again later.',
       ];
     case 'stale':
       return [
         'Repair Stopped',
-        'The repair stopped because Gator was locked or disconnected. Try again from Storage & File Privacy.',
+        'The repair stopped because Gator disconnected from this account. Try again from Storage & File Privacy.',
       ];
   }
 }
@@ -48,17 +59,13 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
   const downloadsPaused = useForegroundBootState().issues.some(
     (issue) => issue.stage === 'attachment-cache',
   );
-  const [repairChecked, setRepairChecked] = useState<number | null>(null);
-  const repairing = useRef(false);
+  // Shared with the service, so leaving and reopening this screen still shows a repair in progress.
+  const repairChecked = useSyncExternalStore(subscribeDownloadRepair, getDownloadRepairProgress);
 
   const runRepair = async (): Promise<void> => {
-    if (repairing.current) return;
-    repairing.current = true;
-    setRepairChecked(0);
+    if (getDownloadRepairProgress() !== null) return;
     try {
-      const result = await repairStuckDownloads((progress) =>
-        setRepairChecked(progress.checkedFiles),
-      );
+      const result = await repairStuckDownloads();
       if (result.status === 'repaired' || result.status === 'not-needed') {
         resolveAttachmentCacheRecoveryIssue();
       }
@@ -67,14 +74,11 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
     } catch (error) {
       logger.warn('[storage] download repair failed', error);
       showDialog('Couldn’t Repair Downloads', REPAIR_FAILED_MESSAGE);
-    } finally {
-      repairing.current = false;
-      setRepairChecked(null);
     }
   };
 
   const confirmRepair = (): void => {
-    if (repairing.current) return;
+    if (getDownloadRepairProgress() !== null) return;
     showDialog('Repair Downloads?', REPAIR_CONFIRM_MESSAGE, [
       { text: 'Cancel', style: 'cancel' },
       { text: 'Repair', onPress: () => void runRepair() },

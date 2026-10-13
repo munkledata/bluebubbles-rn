@@ -491,7 +491,8 @@ legacy-shortcut cleanup path ran. A clean-install result must not be relabeled a
       files were removed, the warning is gone, the seeded files and their emptied folders are gone
       (no message refers to them), and a real attachment now downloads. Relaunch shows no warning.
       With a few real downloads among more than 4,096 files, the oldest are removed first and tap to
-      download again.
+      download again. Also seed about 25,000 empty folders: the repair removes them. With less than
+      512 MiB free, the result must say new downloads may still be refused, not that they work.
 - [ ] **`EXACT PLAY CANDIDATE` (`REVIEW-888`):** With downloads working, Storage & File Privacy shows
       no Repair Downloads row. Do not manufacture an oversized cache on a tester phone; if an upgrade
       naturally shows the paused-downloads warning, run Repair Downloads and record the result.

@@ -274,10 +274,11 @@ async function performAttachmentCacheRecovery(
  * larger old cache failed the same way on every launch. The repair reads the cache in pages with no
  * total. Each page is accounted in the ledger exactly like a startup page, then the ordinary
  * cleanup runs: it deletes files nothing references and the least recently used files beyond the
- * normal 2 GiB / 4,096-file limits, keeps every protection (on screen, in use, outgoing sends,
- * pending Photos copies, recent use), and clears each deleted file's attachment path so its message
- * offers the download again. If cleanup cannot keep the ledger below startup's limit, the repair
- * stops as `blocked` instead of growing it. Serialized with recovery.
+ * normal 2 GiB / 4,096-file / 512 MiB-free limits, keeps every protection (on screen, in use,
+ * outgoing sends, pending Photos copies, recent use), and clears each deleted file's attachment
+ * path so its message offers the download again. Rows already in the ledger are cleaned up first,
+ * and empty folders are removed by the native repair scan. If cleanup cannot keep the ledger below
+ * startup's limit, the repair stops as `blocked` instead of growing it. Serialized with recovery.
  */
 export function repairAttachmentCache(
   db: AppDatabase,
@@ -310,7 +311,15 @@ async function performAttachmentCacheRepair(
   const scope = createAttachmentCacheAccountScope(lease);
   let checkedFiles = 0;
   let removedFiles = 0;
+  const cleanUp = async (): Promise<void> => {
+    const outcome = await cleanUpRepairLedger(db, coordinator, scope);
+    removedFiles += outcome.confirmed;
+    if (outcome.status !== 'complete') throw new AttachmentCacheRepairStop(outcome.status);
+  };
   try {
+    // Rows already in the ledger (for example from a startup check that ran out of time) are
+    // cleaned up before the native scan opens, so its 60-second idle limit covers only one page.
+    await cleanUp();
     await scan(
       async (files) => {
         const observations = scanObservations(files, now);
@@ -323,27 +332,8 @@ async function performAttachmentCacheRepair(
         );
         if (adoption === null) throw new AttachmentCacheRepairStop('stale');
         checkedFiles += files.length;
-
-        const inactive = await retireInactiveFiles(db, coordinator, scope);
-        if (inactive.status === 'stale') throw new AttachmentCacheRepairStop('stale');
-        const conformance = await coordinator.conformCurrentQuota(db, { scope });
-        if (conformance.status === 'stale') throw new AttachmentCacheRepairStop('stale');
-        removedFiles += inactive.confirmed + conformance.confirmed;
+        await cleanUp();
         dependencies.onProgress?.({ checkedFiles, removedFiles });
-
-        if (!conformance.withinQuota) {
-          const usage = await scope.runTracked(() =>
-            withDbTransaction(
-              db,
-              async () => getAttachmentCacheUsage(db),
-              () => scope.isCurrent(),
-            ),
-          );
-          if (usage === null) throw new AttachmentCacheRepairStop('stale');
-          if (usage.files > REPAIR_MAX_LEDGER_FILES) {
-            throw new AttachmentCacheRepairStop('blocked');
-          }
-        }
       },
       () => lease.isCurrent(),
     );
@@ -361,8 +351,16 @@ async function performAttachmentCacheRepair(
     throw error;
   }
 
-  // The cache now fits, so the ordinary recovery can finish and reopen downloads.
-  const recovery = await performAttachmentCacheRecovery(db, lease, dependencies);
+  // The cache now fits, so the ordinary recovery can finish and reopen downloads. Unlike startup,
+  // other cleanup keeps running meanwhile and can remove a folder while that strict scan reads it,
+  // which fails closed; one failure gets one more pass over the settled tree.
+  let recovery: AttachmentCacheRecoveryResult;
+  try {
+    recovery = await performAttachmentCacheRecovery(db, lease, dependencies);
+  } catch {
+    if (!lease.isCurrent()) return { status: 'stale' };
+    recovery = await performAttachmentCacheRecovery(db, lease, dependencies);
+  }
   if (recovery.status === 'stale') return { status: 'stale' };
   return {
     status: 'repaired',
@@ -370,6 +368,29 @@ async function performAttachmentCacheRepair(
     removedFiles: removedFiles + recovery.retiredFiles,
     withinQuota: recovery.withinQuota,
   };
+}
+
+/** The ordinary cleanup between repair pages; `blocked` once the ledger nears startup's limit. */
+async function cleanUpRepairLedger(
+  db: AppDatabase,
+  coordinator: AttachmentCacheCoordinator,
+  scope: AttachmentCacheReservationScope,
+): Promise<{ readonly status: 'complete' | 'stale' | 'blocked'; readonly confirmed: number }> {
+  const inactive = await retireInactiveFiles(db, coordinator, scope);
+  if (inactive.status === 'stale') return { status: 'stale', confirmed: inactive.confirmed };
+  const conformance = await coordinator.conformCurrentQuota(db, { scope });
+  const confirmed = inactive.confirmed + conformance.confirmed;
+  if (conformance.status === 'stale') return { status: 'stale', confirmed };
+  if (conformance.withinQuota) return { status: 'complete', confirmed };
+  const usage = await scope.runTracked(() =>
+    withDbTransaction(
+      db,
+      async () => getAttachmentCacheUsage(db),
+      () => scope.isCurrent(),
+    ),
+  );
+  if (usage === null) return { status: 'stale', confirmed };
+  return { status: usage.files > REPAIR_MAX_LEDGER_FILES ? 'blocked' : 'complete', confirmed };
 }
 
 async function drainCrashOwners(

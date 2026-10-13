@@ -4,13 +4,25 @@ import { act, fireEvent, renderWithTheme, screen } from '../support/renderWithTh
 
 const mockRepairStuckDownloads = jest.fn();
 const mockResolveIssue = jest.fn();
+// Stand-in for the download service's shared repair progress.
+let mockRepairProgress: number | null = null;
+const mockRepairListeners = new Set<() => void>();
+function setMockRepairProgress(value: number | null): void {
+  mockRepairProgress = value;
+  for (const listener of mockRepairListeners) listener();
+}
 const mockShowDialog = jest.fn<number, [string, string?, DialogButton[]?]>(() => 1);
 let mockBootIssues: { stage: string; code: string; level: string }[] = [];
 jest.mock('@/features/boot/useForegroundBootState', () => ({
   useForegroundBootState: () => ({ status: 'ready', runId: 1, issues: mockBootIssues }),
 }));
 jest.mock('@/services/download', () => ({
-  repairStuckDownloads: (onProgress: unknown) => mockRepairStuckDownloads(onProgress),
+  repairStuckDownloads: () => mockRepairStuckDownloads(),
+  getDownloadRepairProgress: () => mockRepairProgress,
+  subscribeDownloadRepair: (listener: () => void) => {
+    mockRepairListeners.add(listener);
+    return () => mockRepairListeners.delete(listener);
+  },
 }));
 jest.mock('@/services/boot/foregroundBoot', () => ({
   resolveAttachmentCacheRecoveryIssue: () => mockResolveIssue(),
@@ -163,10 +175,21 @@ describe('Repair Downloads', () => {
 
   beforeEach(() => {
     mockBootIssues = [];
+    mockRepairProgress = null;
+    mockRepairListeners.clear();
     mockRepairStuckDownloads.mockReset();
     mockResolveIssue.mockReset();
     mockShowDialog.mockClear();
   });
+
+  /** Like the service: progress shows while the repair runs and clears when it settles. */
+  function repairResolvingWith(result: unknown): void {
+    mockRepairStuckDownloads.mockImplementation(async () => {
+      setMockRepairProgress(0);
+      setMockRepairProgress(null);
+      return result;
+    });
+  }
 
   async function confirmRepair(): Promise<void> {
     await fireEvent.press(screen.getByRole('button', { name: 'Repair Downloads' }));
@@ -187,18 +210,20 @@ describe('Repair Downloads', () => {
   it('asks first, shows progress, ignores a second tap, then reports and clears the warning', async () => {
     mockBootIssues = [pausedIssue];
     let finish: (result: unknown) => void = () => undefined;
-    mockRepairStuckDownloads.mockImplementation(
-      (onProgress: (progress: { checkedFiles: number; removedFiles: number }) => void) => {
-        onProgress({ checkedFiles: 1_200, removedFiles: 0 });
-        return new Promise((resolve) => {
-          finish = resolve;
-        });
-      },
-    );
+    mockRepairStuckDownloads.mockImplementation(() => {
+      setMockRepairProgress(1_200);
+      return new Promise((resolve) => {
+        finish = (result) => {
+          setMockRepairProgress(null);
+          resolve(result);
+        };
+      });
+    });
     await renderWithTheme(<StoragePrivacyScreen />);
     expect(screen.getByText(/New downloads are paused/)).toBeTruthy();
 
     await confirmRepair();
+    expect(mockShowDialog.mock.calls[0]?.[1]).toMatch(/at least 512 MiB.*kept free/);
     expect(screen.getByRole('button', { name: 'Repairing… 1,200 checked' })).toBeTruthy();
     await fireEvent.press(screen.getByRole('button', { name: 'Repairing… 1,200 checked' }));
     expect(mockShowDialog).toHaveBeenCalledTimes(1);
@@ -210,9 +235,20 @@ describe('Repair Downloads', () => {
     expect(mockResolveIssue).toHaveBeenCalledTimes(1);
     expect(mockShowDialog).toHaveBeenLastCalledWith(
       'Downloads Repaired',
-      expect.stringMatching(/removed 4,904 older downloaded attachments/),
+      expect.stringMatching(/work again.*removed 4,904 older downloaded attachments/),
       undefined,
     );
+  });
+
+  it('shows a repair already running when the screen is opened again', async () => {
+    mockBootIssues = [pausedIssue];
+    mockRepairProgress = 300;
+    await renderWithTheme(<StoragePrivacyScreen />);
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Repairing… 300 checked' }));
+
+    expect(mockShowDialog).not.toHaveBeenCalled();
+    expect(mockRepairStuckDownloads).not.toHaveBeenCalled();
   });
 
   it('does nothing when the confirmation is cancelled', async () => {
@@ -228,13 +264,46 @@ describe('Repair Downloads', () => {
     expect(mockRepairStuckDownloads).not.toHaveBeenCalled();
   });
 
-  it('keeps the warning and explains when cleanup could not free enough space', async () => {
+  // Independent review of 888: below 512 MiB free the cache is emptied and downloads can still be
+  // refused, so the result must not claim downloads work again.
+  it('says new downloads may still be refused when the phone stays too full', async () => {
     mockBootIssues = [pausedIssue];
-    mockRepairStuckDownloads.mockResolvedValue({
-      status: 'blocked',
-      checkedFiles: 100,
-      removedFiles: 0,
+    repairResolvingWith({
+      status: 'repaired',
+      checkedFiles: 3,
+      removedFiles: 3,
+      withinQuota: false,
     });
+    await renderWithTheme(<StoragePrivacyScreen />);
+
+    await confirmRepair();
+
+    expect(mockResolveIssue).toHaveBeenCalledTimes(1);
+    const [title, message] = mockShowDialog.mock.calls.at(-1) ?? [];
+    expect(title).toBe('Downloads Back On');
+    expect(message).toMatch(/removed 3 older downloaded attachments/);
+    expect(message).toMatch(/may be refused until at least 512 MiB is free/);
+    expect(message).not.toMatch(/work again/);
+  });
+
+  it('retires the warning when downloads already work', async () => {
+    mockBootIssues = [pausedIssue];
+    repairResolvingWith({ status: 'not-needed' });
+    await renderWithTheme(<StoragePrivacyScreen />);
+
+    await confirmRepair();
+
+    expect(mockResolveIssue).toHaveBeenCalledTimes(1);
+    expect(mockShowDialog).toHaveBeenLastCalledWith(
+      'Downloads Already Work',
+      expect.any(String),
+      undefined,
+    );
+  });
+
+  it('keeps the warning and explains when files in use stop the repair', async () => {
+    mockBootIssues = [pausedIssue];
+    repairResolvingWith({ status: 'blocked', checkedFiles: 100, removedFiles: 0 });
     await renderWithTheme(<StoragePrivacyScreen />);
 
     await confirmRepair();
@@ -242,10 +311,25 @@ describe('Repair Downloads', () => {
     expect(mockResolveIssue).not.toHaveBeenCalled();
     expect(mockShowDialog).toHaveBeenLastCalledWith(
       'Couldn’t Finish Repair',
-      expect.stringMatching(/in use or the phone is low on storage/),
+      expect.stringMatching(/in use or were opened in the last few minutes/),
       undefined,
     );
     expect(screen.getByRole('button', { name: 'Repair Downloads' })).toBeTruthy();
+  });
+
+  it('keeps the warning when Disconnect stops the repair', async () => {
+    mockBootIssues = [pausedIssue];
+    repairResolvingWith({ status: 'stale' });
+    await renderWithTheme(<StoragePrivacyScreen />);
+
+    await confirmRepair();
+
+    expect(mockResolveIssue).not.toHaveBeenCalled();
+    expect(mockShowDialog).toHaveBeenLastCalledWith(
+      'Repair Stopped',
+      expect.stringMatching(/disconnected from this account/),
+      undefined,
+    );
   });
 
   it('keeps the warning and says what is left to try when the repair fails', async () => {

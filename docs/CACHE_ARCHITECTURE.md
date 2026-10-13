@@ -194,14 +194,19 @@ content_rowid='id')`, created in migration 0001, kept current by AFTER INSERT/DE
 - If that startup check fails (most often an old pre-ledger cache above 8,192 files or 32,768
   entries), new downloads stay paused and the boot warning points to Settings → Storage & File
   Privacy → **Repair Downloads** (review item 888); restarting repeats the same check. The repair
-  reads the cache through a native repair scan with no totals (same layout and symlink checks, a
-  60-second idle expiry), accounts each 100-file page in the ledger exactly like startup, then runs
-  the ordinary cleanup: unreferenced files are retired and the least recently used files beyond
-  the 2 GiB / 4,096-file limits are evicted, with every protection kept and each deleted file's
-  `local_path` cleared so its message offers the download again. It stops as `blocked` rather than
-  let the ledger pass 8,092 files, and ends by running ordinary recovery, which reopens downloads
-  and retires the warning. Deleting a legacy file also removes its emptied `attachments/{safe-guid}`
-  folder, which would otherwise still count toward the entry limit.
+  first cleans up rows already in the ledger, then reads the cache through a native repair scan
+  with no totals (same layout and symlink checks, a 60-second idle expiry; it also removes folders
+  it finds empty, which older builds left behind). It accounts each 100-file page in the ledger
+  exactly like startup, then runs the ordinary cleanup: unreferenced files are retired and the least
+  recently used files beyond the 2 GiB / 4,096-file / 512 MiB-free limits are evicted, with every
+  protection kept and each deleted file's `local_path` cleared so its message offers the download
+  again. If more than 8,092 files remain in the ledger after a page's cleanup, it stops as
+  `blocked`, so the ledger never passes startup's 8,192. It ends by running ordinary recovery
+  (retried once, because cleanup in the live app can race that strict scan), which reopens
+  downloads and retires the warning. Below 512 MiB free it removes every file it may and says new
+  downloads can still be refused until space is freed. One repair runs at a time. Deleting a
+  legacy file also removes its emptied `attachments/{safe-guid}` folder, which would otherwise still
+  count toward the entry limit.
 - `downloadStore` (zustand) is **presentation-only** byte progress (`0..1 | null`, status) —
   it never carries the path. expo-image runs its own native memory/disk bitmap cache (never
   cleared).

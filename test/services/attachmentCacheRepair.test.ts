@@ -48,8 +48,10 @@ function lease(generation = 7): RealtimeDeliveryLease & { revoke(): void } {
 /** The phone's old download folder: path → bytes and modified time. */
 class FakeCache {
   readonly files = new Map<string, { bytes: number; mtimeMs: number }>();
+  /** Free space on the phone; deleting a file frees its bytes. */
+  freeBytes = 4 * 1024 * MIB;
   readonly io: AttachmentCacheNativeBoundary = {
-    getAvailableBytes: jest.fn(async () => 4 * 1024 * MIB),
+    getAvailableBytes: jest.fn(async () => this.freeBytes),
     statFile: jest.fn(async (path: string) => ({
       exists: this.files.has(path),
       bytes: this.files.get(path)?.bytes ?? 0,
@@ -57,6 +59,7 @@ class FakeCache {
     deleteFile: jest.fn(async (path: string) => {
       const bytes = this.files.get(path)?.bytes ?? 0;
       const found = this.files.delete(path);
+      if (found) this.freeBytes += bytes;
       return { status: found ? ('deleted' as const) : ('missing' as const), bytes };
     }),
   };
@@ -276,4 +279,120 @@ it('reports a failed repair and still lets the next recovery run', async () => {
       now: () => NOW,
     }),
   ).resolves.toMatchObject({ status: 'ready' });
+});
+
+// Independent review of 888: a phone with less than 512 MiB free gets every removable file
+// deleted (the ordinary free-space rule) and still cannot download, so the result must say so.
+it('reports when the phone is still too full for downloads after removing what it can', async () => {
+  const { db, raw } = await createTestDb();
+  const cache = new FakeCache();
+  cache.freeBytes = 100 * MIB;
+  ['a', 'b', 'c'].forEach((name, index) => {
+    cache.add(legacy(name), 50 * MIB, DAY_MS + index);
+    seedReference(raw, `att-${name}`, legacy(name));
+  });
+  const currentLease = lease();
+
+  const result = await repairAttachmentCache(db, currentLease, {
+    scanForRepair: cache.repairScan(2),
+    scan: cache.startupScan,
+    coordinator: new AttachmentCacheCoordinator(cache.io, () => NOW),
+    now: () => NOW,
+  });
+
+  expect(result).toEqual({
+    status: 'repaired',
+    checkedFiles: 3,
+    removedFiles: 3,
+    withinQuota: false,
+  });
+  expect(cache.files.size).toBe(0);
+  expect(localPath(raw, 'att-a')).toBeNull();
+  expect(isAttachmentCacheRecoveryReady(currentLease)).toBe(true);
+});
+
+it('cleans up rows already in the ledger before the native scan opens', async () => {
+  const { db, raw } = await createTestDb();
+  const cache = new FakeCache();
+  const insert = raw.prepare(
+    `INSERT INTO attachment_cache_entries (path, bytes, last_used_at, state, attempts, next_retry_at)
+     VALUES (?, 1, 1, 'active', 0, 0)`,
+  );
+  // Left by a startup check that ran out of time: tracked, but no message refers to them.
+  for (let index = 0; index < 150; index += 1) {
+    cache.add(legacy(`orphan-${index}`), 1, DAY_MS);
+    insert.run(legacy(`orphan-${index}`));
+  }
+  let deletesWhenScanOpened = -1;
+  const scanForRepair = jest.fn(async () => {
+    deletesWhenScanOpened = (cache.io.deleteFile as jest.Mock).mock.calls.length;
+  });
+
+  const result = await repairAttachmentCache(db, lease(), {
+    scanForRepair,
+    scan: cache.startupScan,
+    coordinator: new AttachmentCacheCoordinator(cache.io, () => NOW),
+    now: () => NOW,
+  });
+
+  expect(deletesWhenScanOpened).toBe(150);
+  expect(result).toMatchObject({ status: 'repaired', checkedFiles: 0, removedFiles: 150 });
+});
+
+it('retries the closing check once, because live cleanup can race its strict scan', async () => {
+  const { db, raw } = await createTestDb();
+  const cache = new FakeCache();
+  seedOversizedLegacyCache(cache, raw);
+  const coordinator = new AttachmentCacheCoordinator(cache.io, () => NOW);
+  const raced = new Error('Attachment cache scan corrupt: attachment directory disappeared');
+  cache.startupScan.mockRejectedValueOnce(raced);
+  const currentLease = lease();
+
+  await expect(
+    repairAttachmentCache(db, currentLease, {
+      scanForRepair: cache.repairScan(2),
+      scan: cache.startupScan,
+      coordinator,
+      now: () => NOW,
+    }),
+  ).resolves.toMatchObject({ status: 'repaired' });
+  expect(cache.startupScan).toHaveBeenCalledTimes(2);
+
+  invalidateAttachmentCacheRecoveryReadiness();
+  cache.startupScan.mockClear();
+  cache.startupScan.mockRejectedValueOnce(raced).mockRejectedValueOnce(raced);
+  await expect(
+    repairAttachmentCache(db, currentLease, {
+      scanForRepair: cache.repairScan(2),
+      scan: cache.startupScan,
+      coordinator,
+      now: () => NOW,
+    }),
+  ).rejects.toThrow('disappeared');
+  expect(cache.startupScan).toHaveBeenCalledTimes(2);
+  expect(isAttachmentCacheRecoveryReady(currentLease)).toBe(false);
+});
+
+it('waits behind a startup check that is still running, then repairs', async () => {
+  const { db, raw } = await createTestDb();
+  const cache = new FakeCache();
+  seedOversizedLegacyCache(cache, raw);
+  const coordinator = new AttachmentCacheCoordinator(cache.io, () => NOW);
+  const currentLease = lease();
+
+  const startup = recoverAttachmentCache(db, currentLease, {
+    scan: cache.startupScan,
+    coordinator,
+    now: () => NOW,
+  });
+  const repair = repairAttachmentCache(db, currentLease, {
+    scanForRepair: cache.repairScan(2),
+    scan: cache.startupScan,
+    coordinator,
+    now: () => NOW,
+  });
+
+  await expect(startup).rejects.toThrow('overflow');
+  await expect(repair).resolves.toMatchObject({ status: 'repaired' });
+  expect(isAttachmentCacheRecoveryReady(currentLease)).toBe(true);
 });

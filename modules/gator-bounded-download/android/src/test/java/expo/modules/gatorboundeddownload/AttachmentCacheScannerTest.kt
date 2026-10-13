@@ -130,6 +130,52 @@ class AttachmentCacheScannerTest {
     assertEquals(0, root.list()?.size)
   }
 
+  // Older builds left empty folders behind (failed downloads, and deletes that kept the folder).
+  // Each still counts toward the startup scan's entry limit, so a repair removes them.
+  @Test
+  fun `a repair scan removes the empty folders older builds left behind`() {
+    val root = temporary.newFolder(ATTACHMENT_CACHE_DIRECTORY).canonicalFile
+    repeat(6) { index -> File(root, "failed-download-$index").mkdirs() }
+    File(root, "media-evicted/generation-1").mkdirs()
+    File(root, "media-mixed/generation-1").mkdirs()
+    val kept = cacheFile(File(root, "media-mixed/generation-2").apply { mkdirs() }, "media-a.jpg", 1)
+    val legacy = cacheFile(File(root, "legacy-guid").apply { mkdirs() }, "photo.jpg", 2)
+    val tight = AttachmentCacheScanLimits(
+      maxFilesPerPage = 2,
+      maxNodesPerPage = 4,
+      maxTotalNodes = 8,
+      maxPageMs = 1_000L,
+      sessionTtlMs = 10_000L,
+    )
+    val startup = manager(root = root, ids = ArrayDeque(listOf("before", "after")), limits = tight)
+    assertFailure(AttachmentCacheScanFailure.OVERFLOW) { collectAll(startup) }
+    assertEquals(9, root.list()?.size)
+
+    val repair = manager(
+      root = root,
+      ids = ArrayDeque(listOf("repair")),
+      repairLimits = repairLimits(maxFilesPerPage = 2, maxNodesPerPage = 4),
+    )
+    val entries = collectAll(repair, AttachmentCacheScanMode.REPAIR)
+
+    assertEquals(setOf(kept.path, legacy.path), entries.map { it.file.path }.toSet())
+    assertEquals(setOf("media-mixed", "legacy-guid"), root.list()?.toSet())
+    assertEquals(listOf("generation-2"), File(root, "media-mixed").list()?.toList())
+    assertEquals(setOf(kept.path, legacy.path), collectAll(startup).map { it.file.path }.toSet())
+  }
+
+  @Test
+  fun `a startup scan never removes anything`() {
+    val root = temporary.newFolder(ATTACHMENT_CACHE_DIRECTORY).canonicalFile
+    File(root, "failed-download").mkdirs()
+    File(root, "media-evicted/generation-1").mkdirs()
+
+    assertTrue(collectAll(manager(root)).isEmpty())
+
+    assertTrue(File(root, "failed-download").isDirectory)
+    assertTrue(File(root, "media-evicted/generation-1").isDirectory)
+  }
+
   @Test
   fun `a startup scan still fails closed when a folder it is reading disappears`() {
     val root = temporary.newFolder(ATTACHMENT_CACHE_DIRECTORY).canonicalFile
@@ -552,7 +598,7 @@ class AttachmentCacheScannerTest {
     }
   }
 
-  /** Read every page, deleting each returned file and any folder it empties, as cleanup does. */
+  /** Read every page, deleting each returned file the way the native delete does. */
   private fun drainWhileDeleting(
     manager: AttachmentCacheScanManager,
     mode: AttachmentCacheScanMode,
@@ -565,13 +611,8 @@ class AttachmentCacheScannerTest {
       for (entry in page.files) {
         assertTrue(entry.file.delete())
         removed += entry.file
-        var folder = entry.file.parentFile
-        while (
-          folder != null && folder.path != root.path && folder.list()?.isEmpty() == true
-        ) {
-          assertTrue(folder.delete())
-          folder = folder.parentFile
-        }
+        runCatching { pruneEmptyAttachmentCacheParents(root, entry.file) }
+        runCatching { pruneEmptyLegacyAttachmentCacheDirectory(root, entry.file) }
       }
       if (page.done) return removed
     }

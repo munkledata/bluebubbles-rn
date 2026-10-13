@@ -24,8 +24,9 @@ private const val JS_MAX_SAFE_INTEGER = 9_007_199_254_740_991L
  * STARTUP collects one complete manifest under hard totals. REPAIR backs Storage → Repair
  * Downloads (review item 888): an old cache over those totals made every startup scan overflow, so
  * downloads stayed off. A repair scan keeps every layout and symlink check and the per-page bounds,
- * but has no file or entry totals, its expiry restarts with each page, and a folder that cleanup
- * emptied and removed between pages counts as finished instead of corrupt.
+ * but has no file or entry totals, its expiry restarts with each page, a folder that cleanup
+ * emptied and removed between pages counts as finished instead of corrupt, and it removes a folder
+ * it finds empty.
  */
 internal enum class AttachmentCacheScanMode { STARTUP, REPAIR }
 
@@ -334,7 +335,9 @@ private class AttachmentCacheScanSession(
       if (currentGenerationCursor != null) {
         val child = nextChild(currentGenerationCursor)
         if (child == null) {
+          val finishedDirectory = generationDirectory
           closeGenerationCursor()
+          removeIfEmptyDuringRepair(finishedDirectory)
           continue
         }
         pageNodes += 1
@@ -347,7 +350,9 @@ private class AttachmentCacheScanSession(
       if (currentAttachmentDirectoryCursor != null) {
         val child = nextChild(currentAttachmentDirectoryCursor)
         if (child == null) {
+          val finishedDirectory = attachmentDirectory
           closeAttachmentDirectoryCursor()
+          removeIfEmptyDuringRepair(finishedDirectory)
           continue
         }
         pageNodes += 1
@@ -579,6 +584,18 @@ private class AttachmentCacheScanSession(
    */
   private fun vanishedDuringRepair(directory: File): Boolean =
     mode == AttachmentCacheScanMode.REPAIR && inspect(directory) == null
+
+  /**
+   * Repair only: remove a folder the scan has just finished reading if it is empty. Older builds
+   * left many empty folders behind, and each still counts toward the startup scan's entry limit.
+   * Downloads and paste/share adoption stay closed until the repair finishes, so nothing writes
+   * here meanwhile; `File.delete` removes only an empty directory and never follows a symlink.
+   */
+  private fun removeIfEmptyDuringRepair(directory: File?) {
+    if (mode != AttachmentCacheScanMode.REPAIR || directory == null) return
+    if (directory.path == root.absoluteFile.path) return
+    directory.delete()
+  }
 
   private fun requireDirectChild(parent: File, child: File, label: String) {
     val absolute = child.absoluteFile

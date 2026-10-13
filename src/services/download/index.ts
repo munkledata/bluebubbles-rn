@@ -30,7 +30,6 @@ import {
 import {
   isAttachmentCacheRecoveryReady,
   repairAttachmentCache,
-  type AttachmentCacheRepairProgress,
   type AttachmentCacheRepairResult,
 } from './attachmentCacheRecovery';
 import { expoFetcher } from './expoFetcher';
@@ -41,20 +40,49 @@ export { ensureDownloaded } from './downloadService';
 const productionFetcher: AttachmentFetcher = expoFetcher(http);
 let developmentFetcher: AttachmentFetcher | null = null;
 
-export type { AttachmentCacheRepairProgress, AttachmentCacheRepairResult };
+export type { AttachmentCacheRepairResult };
+
+let repairInFlight: Promise<AttachmentCacheRepairResult> | null = null;
+let repairCheckedFiles: number | null = null;
+const repairListeners = new Set<() => void>();
+
+function setRepairCheckedFiles(value: number | null): void {
+  repairCheckedFiles = value;
+  for (const listener of repairListeners) listener();
+}
+
+/** Files checked by the repair now running, or null when none runs (for the Storage screen). */
+export function getDownloadRepairProgress(): number | null {
+  return repairCheckedFiles;
+}
+
+export function subscribeDownloadRepair(listener: () => void): () => void {
+  repairListeners.add(listener);
+  return () => {
+    repairListeners.delete(listener);
+  };
+}
 
 /**
- * Storage → Repair Downloads (review item 888) for the account connected right now. Does nothing
- * once this account's startup cache check has succeeded.
+ * Storage → Repair Downloads (review item 888) for the account connected right now. One repair
+ * runs at a time: a second request joins it, and getDownloadRepairProgress reports it to a screen
+ * opened meanwhile. Does nothing once this account's startup cache check has succeeded.
  */
-export async function repairStuckDownloads(
-  onProgress?: (progress: AttachmentCacheRepairProgress) => void,
-): Promise<AttachmentCacheRepairResult> {
-  return repairAttachmentCache(
-    getDatabase(),
-    captureRealtimeDeliveryLease(),
-    onProgress ? { onProgress } : {},
-  );
+export function repairStuckDownloads(): Promise<AttachmentCacheRepairResult> {
+  if (repairInFlight) return repairInFlight;
+  setRepairCheckedFiles(0);
+  const run: Promise<AttachmentCacheRepairResult> = (async () =>
+    repairAttachmentCache(getDatabase(), captureRealtimeDeliveryLease(), {
+      onProgress: (progress) => {
+        if (repairInFlight === run) setRepairCheckedFiles(progress.checkedFiles);
+      },
+    }))().finally(() => {
+    if (repairInFlight !== run) return;
+    repairInFlight = null;
+    setRepairCheckedFiles(null);
+  });
+  repairInFlight = run;
+  return run;
 }
 
 /** Register the DEV fixture fetcher. Tests use the same hook while mocking an active DEV session. */

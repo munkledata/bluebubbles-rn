@@ -3859,9 +3859,13 @@ test('certifies exactly the reviewed attachment-cache transaction-context bounda
       'src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery:mutator-call:5c4827eec261',
       'src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery:mutator-call:bbf16113995b',
       'src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery:mutator-call:d137fff87abf',
-      'src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRepair.<callback:b36ac8d3ed>:mutator-call:0f7c4623b752',
-      'src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRepair.<callback:b36ac8d3ed>:mutator-call:1d40210ef396',
+      'src/services/download/attachmentCacheRecovery.ts#cleanUpRepairLedger:mutator-call:28e99257dfe1',
+      'src/services/download/attachmentCacheRecovery.ts#cleanUpRepairLedger:mutator-call:2fbc2502f98b',
+      'src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRepair.<callback:f13a3630bf>:mutator-call:c8f396b127e0',
+      'src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRepair.cleanUp:mutator-call:d5b260b289e2',
       'src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRepair:mutator-call:31df304867f8',
+      'src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRepair:mutator-call:31df304867f8:2',
+      'src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRepair:mutator-call:e82f2887f20d',
       'src/services/download/attachmentCacheRecovery.ts#recoverAttachmentCache.<callback:496dd08887>:mutator-call:953608ed77f1',
       'src/services/download/attachmentCacheRecovery.ts#repairAttachmentCache.<callback:168a30045e>:mutator-call:6e8c74431e5a',
       'src/services/download/attachmentCacheRecovery.ts#retireInactiveFiles:mutator-call:0004c1106585',
@@ -3872,7 +3876,7 @@ test('certifies exactly the reviewed attachment-cache transaction-context bounda
   );
   assert.equal(leaves.length, 16);
   assert.equal(snapshotOwners.length, 1);
-  assert.equal(delegated.length, 24);
+  assert.equal(delegated.length, 28);
   assert.deepEqual(
     findings
       .filter((finding) => finding.path === 'src/services/download/attachmentCacheAccountScope.ts')
