@@ -500,7 +500,6 @@ function hasErrorEvidence(error: Record<string, unknown> | undefined): boolean {
 function buildMeta(
   rawMeta: Record<string, unknown> | undefined,
   definition: EventDefinition | typeof FALLBACK_EVENT,
-  originalMessage: string,
 ): SafeErrorDiagnosticMeta {
   const result: SafeErrorDiagnosticMeta = { schemaVersion: ERROR_REPORT_ENVELOPE_VERSION };
   const code = definition.code;
@@ -609,7 +608,7 @@ function project(
   storedStack?: unknown,
 ): PrivacySafeErrorDiagnostic {
   const definition = eventFor(message);
-  const meta = buildMeta(rawMeta, definition, message);
+  const meta = buildMeta(rawMeta, definition);
   const site = allowedDiagnosticSite(definition, siteEvidence, read(rawMeta, 'stack'), storedStack);
   return {
     message: canonicalMessage(definition.code, meta),
