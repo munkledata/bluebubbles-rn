@@ -1,12 +1,85 @@
 import { useRouter } from 'expo-router';
+import { useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text } from 'react-native';
-import { Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
+import { logger } from '@core/secure';
+import { NavRow, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
+import { showDialog } from '@ui/dialog/dialogStore';
+import { useForegroundBootState } from '@/features/boot/useForegroundBootState';
+import { resolveAttachmentCacheRecoveryIssue } from '@/services/boot/foregroundBoot';
+import { repairStuckDownloads, type AttachmentCacheRepairResult } from '@/services/download';
+
+const REPAIR_CONFIRM_MESSAGE =
+  'Gator checks every attachment it has downloaded and removes the oldest ones beyond its normal limits of 2 GiB and 4,096 files. Removed attachments download again when you open them. Files on screen, waiting to be sent, or waiting to be copied to Photos are kept. This can take a few minutes, so keep Gator open.';
+const REPAIR_FAILED_MESSAGE =
+  'Something unexpected in Gator’s download storage stopped the repair. Try again later. If it keeps failing, disconnecting and reconnecting resets downloaded attachments, along with all other data on this phone.';
+
+function repairResultDialog(result: AttachmentCacheRepairResult): [string, string] {
+  switch (result.status) {
+    case 'repaired':
+      return [
+        'Downloads Repaired',
+        result.removedFiles === 0
+          ? 'Downloads work again. No attachments needed to be removed.'
+          : `Downloads work again. Gator removed ${result.removedFiles.toLocaleString()} older downloaded ${
+              result.removedFiles === 1 ? 'attachment' : 'attachments'
+            }; they download again when you open them.`,
+      ];
+    case 'not-needed':
+      return ['Downloads Already Work', 'Gator had already finished checking its downloads.'];
+    case 'blocked':
+      return [
+        'Couldn’t Finish Repair',
+        'Gator couldn’t remove enough attachments because they’re in use or the phone is low on storage. Free up some space, then try again.',
+      ];
+    case 'stale':
+      return [
+        'Repair Stopped',
+        'The repair stopped because Gator was locked or disconnected. Try again from Storage & File Privacy.',
+      ];
+  }
+}
 
 /** Truthful boundary between SQLCipher rows and ordinary app-private files. */
 export default function StoragePrivacyScreen(): React.JSX.Element {
   const router = useRouter();
   const theme = useTheme();
   const textStyle = [styles.text, { color: theme.color.secondaryLabel }];
+  // Review item 888: startup's attachment check failed, so new downloads stay off until a repair.
+  const downloadsPaused = useForegroundBootState().issues.some(
+    (issue) => issue.stage === 'attachment-cache',
+  );
+  const [repairChecked, setRepairChecked] = useState<number | null>(null);
+  const repairing = useRef(false);
+
+  const runRepair = async (): Promise<void> => {
+    if (repairing.current) return;
+    repairing.current = true;
+    setRepairChecked(0);
+    try {
+      const result = await repairStuckDownloads((progress) =>
+        setRepairChecked(progress.checkedFiles),
+      );
+      if (result.status === 'repaired' || result.status === 'not-needed') {
+        resolveAttachmentCacheRecoveryIssue();
+      }
+      const [title, message] = repairResultDialog(result);
+      showDialog(title, message);
+    } catch (error) {
+      logger.warn('[storage] download repair failed', error);
+      showDialog('Couldn’t Repair Downloads', REPAIR_FAILED_MESSAGE);
+    } finally {
+      repairing.current = false;
+      setRepairChecked(null);
+    }
+  };
+
+  const confirmRepair = (): void => {
+    if (repairing.current) return;
+    showDialog('Repair Downloads?', REPAIR_CONFIRM_MESSAGE, [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Repair', onPress: () => void runRepair() },
+    ]);
+  };
 
   return (
     <Screen>
@@ -164,6 +237,26 @@ export default function StoragePrivacyScreen(): React.JSX.Element {
         </SettingsSection>
 
         <SettingsSection label="CLEANUP" style={styles.gap}>
+          {downloadsPaused ? (
+            <>
+              <Text style={textStyle}>
+                New downloads are paused because Gator couldn’t finish checking the attachments it
+                has already downloaded, usually because an older version kept more than it can
+                check. Repair Downloads removes the oldest ones beyond the limits below so the check
+                can finish.
+              </Text>
+              <NavRow
+                label={
+                  repairChecked === null
+                    ? 'Repair Downloads'
+                    : `Repairing… ${repairChecked.toLocaleString()} checked`
+                }
+                onPress={confirmRepair}
+                chevron={false}
+                disabled={repairChecked !== null}
+              />
+            </>
+          ) : null}
           <Text style={textStyle}>
             Gator limits its ordinary downloaded-attachment cache to 2 GiB and 4,096 files while
             preserving at least 512 MiB of free app storage. A download also needs room for its own

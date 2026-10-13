@@ -550,7 +550,8 @@ describe('foreground boot production adapters', () => {
       stage: 'attachment-cache',
       level: 'degraded',
       code: 'attachment-cache-recovery-unavailable',
-      userMessage: 'Downloaded attachments are temporarily unavailable until the next restart.',
+      userMessage:
+        'New downloads are paused. To fix it, open Settings → Storage & File Privacy → Repair Downloads.',
     });
     expect(useSessionStore.getState().status).toBe('connected');
   });
@@ -974,7 +975,8 @@ describe('hydrateSession() — correlated SecureStore state', () => {
         stage: 'attachment-cache',
         level: 'degraded',
         code: 'attachment-cache-recovery-timeout',
-        userMessage: 'Downloaded attachments are temporarily unavailable until the next restart.',
+        userMessage:
+          'New downloads are paused. To fix it, open Settings → Storage & File Privacy → Repair Downloads.',
       });
       expect(startSync).toHaveBeenCalledTimes(1);
       expect(startRealtime).toHaveBeenCalledTimes(1);

@@ -217,6 +217,13 @@ export function resolvePersistentLogCleanupIssue(): boolean {
   return true;
 }
 
+/** Storage → Repair Downloads reopened downloads; retire this run's paused-downloads warning. */
+export function resolveAttachmentCacheRecoveryIssue(): void {
+  const state = coordinator.getState();
+  const issue = state.issues.find((candidate) => candidate.stage === 'attachment-cache');
+  if (issue) coordinator.resolveIssue(state.runId, issue.stage, issue.code);
+}
+
 function startProcessWork(): void {
   if (processWorkStarted) return;
   processWorkStarted = true;

@@ -636,6 +636,36 @@ describe('production foreground boot singleton', () => {
     expect(foreground.getForegroundBootSnapshot().issues).toEqual([]);
   });
 
+  // Review item 888: Storage → Repair Downloads retires the paused-downloads warning it fixed.
+  it('retires only the paused-downloads warning after a successful download repair', async () => {
+    mockActivateForegroundBootSession.mockImplementationOnce(
+      async (context: { reportIssue(issue: unknown): void }) => {
+        context.reportIssue({
+          stage: 'attachment-cache',
+          level: 'degraded',
+          code: 'attachment-cache-recovery-unavailable',
+          userMessage: 'New downloads are paused.',
+        });
+        context.reportIssue({
+          stage: 'sync',
+          level: 'degraded',
+          code: 'initial-sync-unavailable',
+          userMessage: 'Messages may be out of date until sync retries.',
+        });
+      },
+    );
+    const { foreground } = loadForegroundBoot();
+    await expect(foreground.startForegroundBoot()).resolves.toMatchObject({ status: 'ready' });
+    const stages = (): string[] =>
+      foreground.getForegroundBootSnapshot().issues.map((issue) => issue.stage);
+    expect(stages()).toEqual(['attachment-cache', 'sync']);
+
+    foreground.resolveAttachmentCacheRecoveryIssue();
+    expect(stages()).toEqual(['sync']);
+    foreground.resolveAttachmentCacheRecoveryIssue();
+    expect(stages()).toEqual(['sync']);
+  });
+
   it('does not recreate the cleanup issue when boot initialization rejects after confirmed Clear', async () => {
     const initialization = Promise.withResolvers<void>();
     mockInitPersistentLogs.mockReturnValueOnce(initialization.promise);

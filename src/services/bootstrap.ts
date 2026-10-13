@@ -97,6 +97,9 @@ const SETTINGS_HYDRATION_FAILURE_MESSAGE =
 const DATABASE_BOOT_FAILURE_MESSAGE =
   'Gator could not open your encrypted messages. Try again. If this keeps happening, restart the app.';
 const ATTACHMENT_CACHE_RECOVERY_DEADLINE_MS = 45_000;
+// Review item 888: a restart repeats the same failed check, so point to the repair instead.
+const ATTACHMENT_CACHE_PAUSED_MESSAGE =
+  'New downloads are paused. To fix it, open Settings → Storage & File Privacy → Repair Downloads.';
 const FOREGROUND_DELIVERY_CLEANUP_DEADLINE_MS = 5_000;
 const CONNECT_ACCOUNT_GATE_DEADLINE_MS = 10_000;
 const CONNECT_CANDIDATE_DEADLINE_MS = 45_000;
@@ -570,7 +573,7 @@ async function recoverAttachmentCacheWithinDeadline(
       stage: 'attachment-cache',
       level: 'degraded',
       code: 'attachment-cache-recovery-timeout',
-      userMessage: 'Downloaded attachments are temporarily unavailable until the next restart.',
+      userMessage: ATTACHMENT_CACHE_PAUSED_MESSAGE,
     });
     void recovery.catch((error) => {
       logger.debug(`[${source}] late attachment cache recovery failed after timeout`, error);
@@ -582,7 +585,7 @@ async function recoverAttachmentCacheWithinDeadline(
       stage: 'attachment-cache',
       level: 'degraded',
       code: 'attachment-cache-recovery-unavailable',
-      userMessage: 'Downloaded attachments are temporarily unavailable until the next restart.',
+      userMessage: ATTACHMENT_CACHE_PAUSED_MESSAGE,
     });
   }
   return outcome;
