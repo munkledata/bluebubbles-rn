@@ -122,13 +122,13 @@ The intermediate workaround subscribed directly to `ShareIntentModule`'s `onChan
 rather than reading `useShareIntentContext()`. That still ran too late to contain the library's
 native provider work, so this subscription and its package are no longer present.
 
-| File                    | Role                                                                                                                                         | Node-testable |
-| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
-| `shareIntentPayload.ts` | Pure parser. Prefers `contentUri`; rejects SAF-junk paths; derives a safe filename + extension; defaults mime to `application/octet-stream`. | yes           |
-| `materializeShare.ts`   | Copies each file into app-private cache, then **re-stats** it. IO injected.                                                                  | yes           |
-| `shareFileIo.ts`        | Former Expo binding; now deleted.                                                                                                            | no            |
-| `captureShare.ts`       | parse → copy → stage → clear, with toasts.                                                                                                   | yes           |
-| `index.ts`              | Pure exports only; no production native binding.                                                                                             | yes           |
+| File                    | Role                                                                                                                                          | Node-testable |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------- |
+| `shareIntentPayload.ts` | Now only pure mime/extension and safe-file-name helpers (paste intake and downloads use them); the raw-payload parser was deleted in Phase 6. | yes           |
+| `materializeShare.ts`   | Former copy step; deleted in Phase 6 (recover it from git history).                                                                           | —             |
+| `shareFileIo.ts`        | Former Expo binding; now deleted.                                                                                                             | no            |
+| `captureShare.ts`       | Former parse → copy → stage orchestrator; deleted in Phase 6.                                                                                 | —             |
+| `index.ts`              | Former barrel for the files above; deleted in Phase 6.                                                                                        | —             |
 
 Three rules that are easy to get wrong:
 
@@ -218,19 +218,19 @@ Plus two correctness items:
 
 The pure suites remain useful evidence, but they do not authorize re-enabling native intake.
 
-| Suite                                            | Covers                                                                                                                                                                                                                                                                                |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test/services/shareIntentPayload.test.ts`       | `contentUri` beats a present `filePath`; a bogus `/document/…` with no `contentUri` is **dropped**, not turned into a fake path; the bracket-bug junk element is skipped; filename traversal sanitized; extension derived from mime; malformed payloads return empty without throwing |
-| `test/services/materializeShare.test.ts`         | **copy resolves but nothing landed → file dropped**; size comes from the stat, not the provider's claim; one failure doesn't sink the batch; `alreadyLocal` reuse skips the copy; batch pruning                                                                                       |
-| `test/services/captureShare.test.ts`             | text-only never copies; files staged **before** the native intent is cleared (call-order asserted); all-failed batch toasts and stages nothing; never rejects                                                                                                                         |
-| `test/services/uploadErrors.test.ts`             | the exact expo-file-system wordings classify as local-file; network errors do not                                                                                                                                                                                                     |
-| `test/components/shareIntentHandler.test.tsx`    | dormant navigator behavior only; production layouts never mount it                                                                                                                                                                                                                    |
-| `test/services/shareShortcuts.test.ts`           | cleanup-only bridge; no publish/usage/launch API remains                                                                                                                                                                                                                              |
-| `LegacyShortcutCleanupTest.kt`                   | eight native tests cover dynamic/cached removal, pinned-row sanitization and disablement, unsafe-update failure, re-query failure, and idempotence                                                                                                                                    |
-| `test/services/sendOutcome.test.ts` _(extended)_ | a `local_file` error yields 10009, not 10004                                                                                                                                                                                                                                          |
-| `test/utils/messageStatus.test.ts` _(extended)_  | 10009 → "Attachment Unavailable"                                                                                                                                                                                                                                                      |
-| `test/config/shareIntakeDisabled.test.ts`        | dependency/lock/config/import/layout/publication absence plus root legacy cleanup and retired-shortcut marker enforcement                                                                                                                                                             |
-| `scripts/check-android-build.test.mjs`           | allows harmless outbound `<queries>` ACTION_SEND, rejects inbound surfaces, and requires the cleanup/sanitization DEX markers while forbidding the old publisher markers                                                                                                              |
+| Suite                                            | Covers                                                                                                                                                                   |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `test/services/shareIntentPayload.test.ts`       | safe file names and mime/extension mapping only; the parser decision-table cases were deleted with the parser in Phase 6                                                 |
+| `test/services/materializeShare.test.ts`         | deleted in Phase 6 with the dormant copy step (see git history)                                                                                                          |
+| `test/services/captureShare.test.ts`             | deleted in Phase 6 with the dormant orchestrator (see git history)                                                                                                       |
+| `test/services/uploadErrors.test.ts`             | the exact expo-file-system wordings classify as local-file; network errors do not                                                                                        |
+| `test/components/shareIntentHandler.test.tsx`    | dormant navigator behavior only; production layouts never mount it                                                                                                       |
+| `test/services/shareShortcuts.test.ts`           | cleanup-only bridge; no publish/usage/launch API remains                                                                                                                 |
+| `LegacyShortcutCleanupTest.kt`                   | eight native tests cover dynamic/cached removal, pinned-row sanitization and disablement, unsafe-update failure, re-query failure, and idempotence                       |
+| `test/services/sendOutcome.test.ts` _(extended)_ | a `local_file` error yields 10009, not 10004                                                                                                                             |
+| `test/utils/messageStatus.test.ts` _(extended)_  | 10009 → "Attachment Unavailable"                                                                                                                                         |
+| `test/config/shareIntakeDisabled.test.ts`        | dependency/lock/config/import/layout/publication absence plus root legacy cleanup and retired-shortcut marker enforcement                                                |
+| `scripts/check-android-build.test.mjs`           | allows harmless outbound `<queries>` ACTION_SEND, rejects inbound surfaces, and requires the cleanup/sanitization DEX markers while forbidding the old publisher markers |
 
 ## Historical IPC-01 containment verification
 
