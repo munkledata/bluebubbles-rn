@@ -9,17 +9,6 @@ import {
 import type { AppDatabase } from '../types';
 import { linkHandlesToContacts } from './contacts';
 
-/**
- * The display name to show for a handle: the contact-matched name when present, else the
- * raw address. Mirrors the `COALESCE(display_name, address)` every in-app query uses, so a
- * notification shows the SAME name as the conversation list/chat (the event payload's
- * `handle.displayName` is the server name, which has no device-contact name — that's why
- * notifications were showing a bare phone number). Returns null when the handle is unknown.
- */
-export async function getHandleName(db: AppDatabase, address: string): Promise<string | null> {
-  return (await getHandleProfile(db, address))?.name ?? null;
-}
-
 /** A handle's display name + avatar, for the notification's person entry. */
 export interface HandleProfile {
   name: string;

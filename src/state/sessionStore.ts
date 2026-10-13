@@ -277,9 +277,6 @@ export const sessionAccessors = {
     !!useSessionStore.getState().serverInfo?.supports_error_log_upload,
 };
 
-/** React hook: is the server's RCS bridge enabled? (Gate RCS-specific UI on this.) */
-export const useRcsEnabled = (): boolean => useSessionStore((s) => !!s.serverInfo?.rcs);
-
 /** React hook for RCS actions; legacy/stale conversations remain visible but read-only. */
 export const useRcsMutationEnabled = (chatGuid?: string): boolean =>
   useSessionStore((s) =>
@@ -314,15 +311,5 @@ export const useSendAttachmentTextSupported = (service: string | null | undefine
     return false;
   });
 
-/** Old servers may use the compatibility part-zero heuristic; capable servers must prove topology. */
-export const useMessagePartTopologySupported = (): boolean | null =>
-  useSessionStore((s) =>
-    s.serverInfo == null ? null : s.serverInfo.supports_message_part_topology === true,
-  );
-
 /** Helper-backed iMessage-account endpoints are retired for this release. */
 export const useIcloudAccountSupported = (): boolean => false;
-
-/** React hook: does the server accept error-report uploads? (Gate the Settings toggle's effect.) */
-export const useErrorLogUploadSupported = (): boolean =>
-  useSessionStore((s) => !!s.serverInfo?.supports_error_log_upload);

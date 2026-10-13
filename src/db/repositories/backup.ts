@@ -17,7 +17,6 @@ import {
   MAX_CUSTOM_FOLDERS,
   normalizeCustomFolderName,
 } from './customFolders';
-import { kvSetWithinTransaction, THEME_CUSTOM_KEY } from './kv';
 
 // ---- Backup / restore reads + writes (settings, themes, chat customizations, custom folders) ----
 
@@ -325,134 +324,6 @@ export interface PreparedBackupRestoreResult {
   customFolders: number;
   customFolderMemberships: number;
   handleColors: number;
-}
-
-/**
- * Every kv pair, unfiltered. `kv` also holds per-chat composer drafts and device-local sync
- * bookkeeping, so a generic CALLER decides what may leave the device. Backup export uses the
- * bounded allowlisted snapshot reader below; nothing here may import that service-owned policy
- * because `src/db` must not reach into `src/services`.
- */
-export async function getAllKv(db: AppDatabase): Promise<KvPair[]> {
-  return db.all<KvPair>(sql`SELECT key, value FROM kv ORDER BY key`);
-}
-
-/**
- * User-created themes only (built-in presets are code, not rows).
- *
- * `ORDER BY id` matters beyond tidiness: a backup carries no ids, so `restoreThemes` pairs entries
- * with rows positionally within each (name, mode) group. Exporting in id order — the same order
- * the restore cursor uses — is what keeps two same-named themes from swapping palettes on a
- * restore back onto the device they came from.
- */
-export async function getAllThemes(db: AppDatabase): Promise<ThemeRow[]> {
-  return db.all<ThemeRow>(
-    sql`SELECT name, mode, tokens, is_preset AS isPreset FROM themes WHERE is_preset = 0 ORDER BY id`,
-  );
-}
-
-/**
- * Chats that carry any local customization worth backing up.
- *
- * `marked_unread_at` and `deleted_at` are deliberately NOT among the columns, in either direction.
- * They are per-device STATE, not settings: a stale `deleted_at` carried in from a backup would
- * hide a conversation this device is actively using (the tombstone also floors the unread count),
- * and a backup taken before a deletion would, if it wrote the column back as NULL, RESURRECT every
- * conversation the user had deleted since. Same reasoning that keeps both columns out of
- * `upsertChats`' conflict set — a foreign source of truth must not get a vote on them.
- */
-export async function getChatCustomizations(
-  db: AppDatabase,
-): Promise<PortableChatCustomizationRow[]> {
-  return buildPortableChatCustomizations(await readChatCustomizationExportRows(db));
-}
-
-async function readChatCustomizationExportRows(
-  db: AppDatabase,
-): Promise<ChatCustomizationExportRow[]> {
-  return db.all<ChatCustomizationExportRow>(sql`
-    SELECT c.id AS chatId, c.guid, c.chat_identifier AS chatIdentifier, c.style,
-           c.custom_name AS customName, c.custom_color AS customColor,
-           c.mute_type AS muteType, c.is_pinned AS isPinned, c.pin_order AS pinOrder,
-           c.is_archived AS isArchived,
-           h.address AS participantAddress, h.service AS participantService
-      FROM chats AS c
-      LEFT JOIN chat_handles AS ch ON ch.chat_id = c.id
-      LEFT JOIN handles AS h ON h.id = ch.handle_id
-     WHERE c.custom_name IS NOT NULL OR c.custom_color IS NOT NULL OR c.mute_type IS NOT NULL
-        OR c.is_pinned = 1 OR c.is_archived = 1
-     ORDER BY c.id, h.id
-  `);
-}
-
-function buildPortableChatCustomizations(
-  rows: readonly ChatCustomizationExportRow[],
-): PortableChatCustomizationRow[] {
-  const grouped = new Map<
-    number,
-    {
-      customization: PortableChatCustomizationRow;
-      participants: Set<string>;
-      guid: string;
-      style: number | null;
-    }
-  >();
-  for (const row of rows) {
-    let group = grouped.get(row.chatId);
-    if (!group) {
-      group = {
-        customization: {
-          identity: {
-            version: 1,
-            service: 'iMessage',
-            kind: 'unknown',
-            serverChatIdentifier: row.chatIdentifier?.trim() || null,
-            participants: [],
-          },
-          customName: row.customName,
-          customColor: row.customColor,
-          muteType: row.muteType,
-          isPinned: row.isPinned,
-          pinOrder: row.pinOrder ?? null,
-          isArchived: row.isArchived,
-        },
-        participants: new Set(),
-        guid: row.guid,
-        style: row.style,
-      };
-      grouped.set(row.chatId, group);
-    }
-
-    if (row.participantAddress !== null && row.participantAddress.length > 0) {
-      const participant = {
-        service: row.participantService ?? '',
-        address: row.participantAddress,
-      };
-      const key = JSON.stringify([participant.service, participant.address]);
-      if (!group.participants.has(key)) {
-        group.participants.add(key);
-        group.customization.identity.participants.push(participant);
-      }
-    }
-  }
-  return [...grouped.values()].flatMap(({ customization, guid, style }) => {
-    const participants = customization.identity.participants;
-    const identity = buildPortableChatIdentity(
-      guid,
-      customization.identity.serverChatIdentifier,
-      style,
-      participants,
-    );
-    if (identity.service === 'RCS' && (!identity.providerEpoch || !identity.providerSourceId)) {
-      return [];
-    }
-    return [
-      {
-        ...customization,
-        identity,
-      },
-    ];
-  });
 }
 
 interface BackupBaseExportRows {
@@ -1983,23 +1854,6 @@ function buildCustomFolderBackupData(rows: CustomFolderBackupExportRows): Custom
 }
 
 /**
- * Snapshot ordered folder metadata, complete durable membership counts, and portable identity
- * evidence behind the shared DB coordinator. Temporarily absent members are counted but omitted
- * from the identity registry because an opaque GUID is not portable across rebuilt Macs.
- */
-export async function getCustomFolderBackupData(
-  db: AppDatabase,
-  commitGuard?: DbCommitGuard,
-): Promise<CustomFolderBackupData> {
-  const rows = await withDbTransaction(
-    db,
-    (context) => readCustomFolderBackupRowsWithinTransaction(context),
-    commitGuard,
-  );
-  return buildCustomFolderBackupData(rows);
-}
-
-/**
  * Cut a name to the backup format's UTF-16 limit without splitting an emoji's surrogate pair. SQL
  * already cut it to that many characters, which an emoji-heavy name can still exceed.
  */
@@ -2050,32 +1904,6 @@ export async function getBackupBaseExportData(
   return buildBackupBaseExportData(rows, limits);
 }
 
-/** Read every v3 backup domain from one committed point in time on the shared connection. */
-export async function getBackupV3ExportData(
-  db: AppDatabase,
-  limits: BackupExportLimits,
-  commitGuard?: DbCommitGuard,
-): Promise<BackupV3ExportData> {
-  assertBackupExportLimits(limits);
-  const rows = await withDbTransaction(
-    db,
-    async (context) => {
-      const base = await readBackupBaseRowsWithinTransaction(context, limits);
-      const customFolders = await readCustomFolderBackupRowsWithinTransaction(
-        context,
-        limits,
-        base.estimatedBytes,
-      );
-      return { base, customFolders };
-    },
-    commitGuard,
-  );
-  return {
-    ...buildBackupBaseExportData(rows.base, limits),
-    ...buildCustomFolderBackupData(rows.customFolders),
-  };
-}
-
 /** Read every v4 backup domain from one committed point in time on the shared connection. */
 export async function getBackupV4ExportData(
   db: AppDatabase,
@@ -2106,26 +1934,6 @@ export async function getBackupV4ExportData(
     ...buildCustomFolderBackupData(rows.customFolders),
     handleColors: rows.handleColors.handleColors,
   };
-}
-
-export async function restoreKv(
-  db: AppDatabase,
-  items: KvPair[],
-  commitGuard?: DbCommitGuard,
-): Promise<void> {
-  for (const it of items) {
-    // The active custom-theme id is device-specific — restored themes get fresh ids, so a
-    // backed-up pointer would dangle. Skip it; restoreThemes still brings the themes over.
-    if (it.key === THEME_CUSTOM_KEY) continue;
-    const value = it.value;
-    if (value != null) {
-      await withDbTransaction(
-        db,
-        (context) => kvSetWithinTransaction(context, it.key, value),
-        commitGuard,
-      );
-    }
-  }
 }
 
 /** Pairing key for a backed-up theme. JSON, so no name/mode text can ever forge a separator. */
@@ -3115,25 +2923,4 @@ export function restorePreparedBackupWithinTransaction(
       await db.run(sql`DROP TABLE IF EXISTS temp.gator_backup_resolved_chats`);
     }
   });
-}
-
-/**
- * Public owner: restore at most one chat row per short transaction. The input is backup-controlled
- * and can contain many chats, so no transaction spans the loop. An optional account commit guard
- * rejects a queued/late row before BEGIN or COMMIT.
- */
-export async function restoreChatCustomizations(
-  db: AppDatabase,
-  items: ChatCustomizationRow[],
-  commitGuard?: DbCommitGuard,
-): Promise<number> {
-  let applied = 0;
-  for (const c of items) {
-    applied += await withDbTransaction(
-      db,
-      (context) => restoreChatCustomizationWithinTransaction(context, c),
-      commitGuard,
-    );
-  }
-  return applied;
 }

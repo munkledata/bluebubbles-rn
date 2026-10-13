@@ -210,19 +210,6 @@ export async function isMessageTargetAvailableWithinTransaction(
   return (await resolveMessageTargetWithinTransaction(context, target)) !== null;
 }
 
-/** Standalone committed-read owner used at the last await-free boundary before a network request. */
-export function isMessageTargetAvailable(
-  db: AppDatabase,
-  target: ExactMessageTarget,
-  commitGuard?: DbCommitGuard,
-): Promise<boolean> {
-  return withDbTransaction(
-    db,
-    (context) => isMessageTargetAvailableWithinTransaction(context, target),
-    commitGuard,
-  );
-}
-
 /** Resolve aliases and return the canonical GUID that must be sent on the wire. */
 export function resolveMessageTarget(
   db: AppDatabase,
@@ -234,21 +221,6 @@ export function resolveMessageTarget(
     (context) => resolveMessageTargetWithinTransaction(context, target),
     commitGuard,
   );
-}
-
-/**
- * Verify that this exact optimistic unsend still owns the row immediately before its POST.
- * `applyLocalUnsendWithinTransaction` deliberately changes the ordinary classifier to `unknown`,
- * so the normal visible-part predicate cannot authorize its own follow-up request. The durable
- * pending-part fence is the narrower proof: an accepted exact server echo clears it, while stale
- * or unrelated evidence cannot substitute a different part.
- */
-export function isPendingUnsendTargetAvailable(
-  db: AppDatabase,
-  target: ExactMessageTarget,
-  commitGuard?: DbCommitGuard,
-): Promise<boolean> {
-  return resolvePendingUnsendTarget(db, target, commitGuard).then((resolved) => resolved !== null);
 }
 
 /** Resolve the exact optimistic-unsend fence, including a target GUID promoted to its alias. */

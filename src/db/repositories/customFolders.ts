@@ -188,18 +188,6 @@ export function listCustomFolderSummariesWithinTransaction(
   });
 }
 
-/** Consistency-sensitive aggregate read for the focused folder manager only. */
-export function listCustomFolderSummaries(
-  db: AppDatabase,
-  commitGuard?: DbCommitGuard,
-): Promise<CustomFolderSummaryRow[]> {
-  return withDbTransaction(
-    db,
-    (context) => listCustomFolderSummariesWithinTransaction(context),
-    commitGuard,
-  );
-}
-
 /** Stable membership identity. Rows remain even while their corresponding chat is absent. */
 export function listCustomFolderChatGuidsWithinTransaction(
   context: DbTransactionContext,

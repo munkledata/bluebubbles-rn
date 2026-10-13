@@ -38,11 +38,6 @@ function getNative(): GatorPasteInputNative | null {
   }
 }
 
-/** True when the running build can actually accept pasted files. */
-export function isPasteInputAvailable(): boolean {
-  return getNative() != null;
-}
-
 export interface PasteResult {
   files: SharedAttachment[];
   /** Entries the native side sent that turned out to be unusable. */

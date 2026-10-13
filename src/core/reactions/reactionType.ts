@@ -81,30 +81,6 @@ export function reactionKindKey(base: ReactionKind, emoji?: string | null): stri
  */
 export const STICKER_ASSOCIATED_TYPE = 'sticker';
 
-/** True for a sticker's associated-message type (either direction). */
-export function isStickerType(t: string | null | undefined): boolean {
-  if (!t) return false;
-  return (t.startsWith('-') ? t.slice(1) : t) === STICKER_ASSOCIATED_TYPE;
-}
-
-/**
- * Associated-message types the UI draws as an OVERLAY on the target bubble rather than as a
- * message of its own: the six tapbacks, the arbitrary-emoji tapback, stickers, and each of their
- * `-` removal forms.
- *
- * This is the predicate the chat-thread queries exclude on. It exists because the old blanket
- * `associated_message_type IS NULL` filter was doing two jobs with one test: it correctly hid
- * reactions, and it silently swallowed stickers — and would swallow any future associated type
- * too, including the raw numeric Apple codes the server emits for anything its map doesn't know.
- * Anything NOT in this set now falls through and renders as an ordinary message, which is the
- * safe direction to fail.
- */
-export function isOverlayAssociatedType(t: string | null | undefined): boolean {
-  if (!t) return false;
-  const base = t.startsWith('-') ? t.slice(1) : t;
-  return base === 'emoji' || base === STICKER_ASSOCIATED_TYPE || BASE_SET.has(base);
-}
-
 /**
  * Normalize an `associatedMessageGuid` to the BARE target-message guid.
  *

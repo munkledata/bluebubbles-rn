@@ -3115,7 +3115,7 @@ test('certifies the exact residual repository delegations after explicit-owner c
   );
 
   assert.equal(devFixtures.length, 14);
-  assert.equal(intentionalBoundaries.length, 48);
+  assert.equal(intentionalBoundaries.length, 47);
   assert.equal(scheduledStateMachine.length, 12);
   assert.deepEqual(
     findings.map((finding) => finding.id).sort(),
@@ -3125,7 +3125,6 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/db/repositories/errorReports.ts#insertErrorReport:mutator-call:184b64238855',
       'src/db/repositories/maintenance.ts#clearLocalCache:mutator-call:5111af2df56f',
       'src/db/repositories/maintenance.ts#clearLocalCache:mutator-call:e64441bf4d7f',
-      'src/db/repositories/messageTargets.ts#isPendingUnsendTargetAvailable:mutator-call:280d92fbf22d',
       'src/db/repositories/scheduled.ts#reconcileServerScheduled:mutator-call:6df044728f30',
       'src/features/conversations/devSeed.ts#devSendFake.<callback:aa9d83c161>:mutator-call:bccc7d8e3937',
       'src/features/conversations/devSeed.ts#devSendFakeImage.<callback:9013644e83>:mutator-call:e1c487f58863',
@@ -3230,14 +3229,6 @@ test('certifies exactly the reviewed coordinated-delegation path additions', () 
       ],
       [
         'app/(app)/server-management.tsx#ServerManagementScreen.onSubmitCredential:mutator-call:f08dd1db40ef',
-        'coordinated-delegation',
-      ],
-      [
-        'src/db/repositories/messageTargets.ts#isMessageTargetAvailable:mutator-call:8cb753549069',
-        'transaction-coordinator',
-      ],
-      [
-        'src/db/repositories/messageTargets.ts#isPendingUnsendTargetAvailable:mutator-call:280d92fbf22d',
         'coordinated-delegation',
       ],
       [
@@ -3791,7 +3782,6 @@ test('certifies exactly the reviewed attachment-cache transaction-context bounda
   const findings = scanProjectDbWrites();
   const leafSymbols = new Set([
     'adoptAttachmentCacheScanBatch',
-    'claimAttachmentCachePathsForDeletedMessage',
     'claimAttachmentCachePathsForRetirement',
     'commitAttachmentCacheReservation',
     'confirmAttachmentCacheEntryDeleted',
@@ -3830,7 +3820,6 @@ test('certifies exactly the reviewed attachment-cache transaction-context bounda
       'src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch:sql-delete:045962bd8b71',
       'src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch:sql-insert:99e2263a1304',
       'src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch:sql-update:9609800f7a37',
-      'src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForDeletedMessage.<callback:acf3a0c5f3>:mutator-call:e802ea4e2e1e',
       'src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement:sql-update:0fd63f0dd34a',
       'src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement:sql-update:300d170b9271',
       'src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement:sql-delete:ff6e109326d8',
@@ -3874,7 +3863,7 @@ test('certifies exactly the reviewed attachment-cache transaction-context bounda
       'src/services/send/outgoingPasteOwnership.ts#createOutgoingPasteOwnershipPreparer.<callback:59fde12f29>:mutator-call:98d3bf462332',
     ].sort(),
   );
-  assert.equal(leaves.length, 16);
+  assert.equal(leaves.length, 15);
   assert.equal(snapshotOwners.length, 1);
   assert.equal(delegated.length, 28);
   assert.deepEqual(
@@ -7360,20 +7349,6 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
             'src/db/repositories/outgoing.ts#insertOutgoingReaction.<callback:',
           ))),
   );
-  const insertOutgoingLocationTransactions = findings.filter(
-    (finding) =>
-      finding.path === 'src/db/repositories/outgoing.ts' &&
-      finding.symbol.startsWith('insertOutgoingLocation') &&
-      !finding.symbol.startsWith('insertOutgoingLocationWithinTransaction') &&
-      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
-      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
-        finding.target ===
-          'src/db/repositories/outgoing.ts#insertOutgoingLocationWithinTransaction' ||
-        (finding.detectedContext === 'withDbTransaction' &&
-          finding.target.startsWith(
-            'src/db/repositories/outgoing.ts#insertOutgoingLocation.<callback:',
-          ))),
-  );
   const insertOutgoingContactTransactions = findings.filter(
     (finding) =>
       finding.path === 'src/db/repositories/outgoing.ts' &&
@@ -7714,14 +7689,6 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoing.ts#insertOutgoingContact.<callback:98f48e222c>:mutator-call:09a076f2e3c8',
       'src/db/repositories/outgoing.ts#insertOutgoingContact:mutator-call:bc8c5c28d457',
       'src/db/repositories/outgoing.ts#insertOutgoingContact:mutator-call:d628f90e07c7',
-    ].sort(),
-  );
-  assert.deepEqual(
-    insertOutgoingLocationTransactions.map((finding) => finding.id).sort(),
-    [
-      'src/db/repositories/outgoing.ts#insertOutgoingLocation.<callback:1ed31bb3a2>:mutator-call:69dcc9361df4',
-      'src/db/repositories/outgoing.ts#insertOutgoingLocation:mutator-call:31e99ba4355d',
-      'src/db/repositories/outgoing.ts#insertOutgoingLocation:mutator-call:875e9370d77e',
     ].sort(),
   );
   assert.deepEqual(

@@ -1050,29 +1050,6 @@ export async function listChatAttachmentGuids(
   return rows.map((r) => r.guid);
 }
 
-/**
- * Attachment directories that contain at least one ledger-managed persistent cache file.
- *
- * Read before chat purge so the service can retain its legacy whole-guid cleanup only for files
- * created before the ledger existed. Managed files are always retired by exact path; recursively
- * deleting their parent could remove a path protected by another visible/outgoing reference.
- */
-export async function listChatLedgerManagedAttachmentGuids(
-  db: AppDatabase,
-  chatGuid: string,
-): Promise<string[]> {
-  const rows: Array<{ guid: string }> = await db.all(sql`
-    SELECT DISTINCT a.guid AS guid
-    FROM attachments a
-    JOIN attachment_cache_entries e ON e.path = a.local_path
-    JOIN messages m ON m.id = a.message_id
-    JOIN chats c ON c.id = m.chat_id
-    WHERE c.guid = ${chatGuid}
-    ORDER BY a.guid ASC
-  `);
-  return rows.map((row) => row.guid);
-}
-
 /** How many guids one `listOrphanedAttachmentGuids` probe binds (SQLite caps bound parameters). */
 const ATTACHMENT_GUID_PROBE_CHUNK = 400;
 

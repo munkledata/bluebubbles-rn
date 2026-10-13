@@ -58,7 +58,6 @@ export {
 export {
   prepareExactIMessageGroupPhotoSet,
   removeExactIMessageGroupPhoto,
-  setExactIMessageGroupPhoto,
   type AppleGroupPhotoResult,
   type PickedGroupPhoto,
   type PreparedIMessageGroupPhotoSet,

@@ -343,30 +343,6 @@ export async function prepareExactIMessageGroupPhotoSet(
   });
 }
 
-/**
- * Non-picker convenience for already-owned image sources. Picker UI must call the prepare method
- * above first so its native wait cannot cross an origin/account/capability boundary.
- */
-export async function setExactIMessageGroupPhoto(
-  db: AppDatabase,
-  http: HttpClient,
-  args: SetAppleGroupPhotoArgs,
-  upload: GroupPhotoUploader,
-  accountGuard?: DbCommitGuard,
-  capabilitySource?: RcsCapabilitySource,
-): Promise<AppleGroupPhotoResult> {
-  const prepared = await prepareExactIMessageGroupPhotoSet(
-    db,
-    http,
-    args.chatGuid,
-    upload,
-    accountGuard,
-    capabilitySource,
-  );
-  if (!prepared) return { status: 'rejected', operation: 'set' };
-  return prepared.submit(args.image);
-}
-
 /** Remove one proven Apple-group photo. No automatic retry and no optimistic local mutation. */
 export async function removeExactIMessageGroupPhoto(
   db: AppDatabase,

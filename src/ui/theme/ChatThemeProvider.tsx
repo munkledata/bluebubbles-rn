@@ -76,17 +76,6 @@ export function useChatBackgroundUri(_guid: string): string | null {
 }
 
 /**
- * Whether the effective wallpaper reads as LIGHT or DARK; `null` when unknown or no wallpaper.
- * Reactive (context read — see useChatBackgroundUri). Currently unconsumed: overlay labels moved
- * from luminance-picked halo text to frosted pills (`overlayPillStyle`), which are legible
- * regardless of the image. Kept (with the `background_is_light` column + luminance sampling) for
- * future wallpaper-aware UI, e.g. status bar icon styling.
- */
-export function useChatBackgroundIsLight(_guid: string): boolean | null {
-  return useContext(ChatBackgroundContext).backgroundIsLight;
-}
-
-/**
  * Overrides the active theme for one conversation. If the chat has a valid stored
  * dark theme-tokens blob, a nested ThemeContext.Provider makes `useTheme()` inside the
  * conversation return it; otherwise children inherit the global theme unchanged.

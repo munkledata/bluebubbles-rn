@@ -995,44 +995,6 @@ export async function claimAttachmentCachePathsForRetirement(
   });
 }
 
-/**
- * Claim the ledger-managed files attached to one message after that message was tombstoned.
- *
- * Transaction-only: callers compose this with the tombstone by passing the existing owner's
- * context. More than one hundred physical paths is treated as unprovable/bounded-work overflow and
- * left active for ordinary quota eviction; no partial claim is made.
- */
-export async function claimAttachmentCachePathsForDeletedMessage(
-  context: DbTransactionContext,
-  messageGuid: string,
-): Promise<AttachmentCacheRetirementClaim> {
-  return runInTransactionContext(context, async (db) => {
-    if (messageGuid.length === 0) {
-      throw new RangeError('Attachment cache message guid must not be empty.');
-    }
-    const rows: Array<{ path: string }> = await db.all(sql`
-      SELECT DISTINCT e.path
-      FROM attachment_cache_entries e
-      JOIN attachments a ON a.local_path = e.path
-      JOIN messages m ON m.id = a.message_id
-      WHERE m.guid = ${messageGuid} AND m.date_deleted IS NOT NULL AND e.state = 'active'
-      ORDER BY e.path ASC
-      LIMIT ${MAX_RETIREMENT_BATCH + 1}
-    `);
-    if (rows.length > MAX_RETIREMENT_BATCH) {
-      return {
-        status: 'refused',
-        reason: 'too_many_references',
-        paths: rows.slice(0, MAX_RETIREMENT_BATCH).map((row) => row.path),
-      };
-    }
-    return claimAttachmentCachePathsForRetirement(
-      context,
-      rows.map((row) => row.path),
-    );
-  });
-}
-
 /** Persist a failed native-delete attempt so startup recovery can retry it later. */
 export async function scheduleAttachmentCacheRetirementRetry(
   context: DbTransactionContext,

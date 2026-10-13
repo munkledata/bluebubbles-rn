@@ -665,14 +665,6 @@ export function insertOutgoingLocationWithinTransaction(
   });
 }
 
-/** Standalone optimistic location owner; composing services use the transaction-only body. */
-export function insertOutgoingLocation(
-  db: AppDatabase,
-  args: InsertOutgoingLocationArgs,
-): Promise<OutgoingInsertResult> {
-  return withDbTransaction(db, (context) => insertOutgoingLocationWithinTransaction(context, args));
-}
-
 /**
  * Optimistically insert an outgoing reaction (an associated message row) + its
  * queue row. Unlike a text send this does NOT bump latestMessageDate — a tapback

@@ -57,38 +57,6 @@ function sameStringSet(left: ReadonlySet<string>, right: ReadonlySet<string>): b
   return true;
 }
 
-/** Exact identity/set equality; payload fields are refreshed by the second crawl itself. */
-export function sameFullSyncServerView(
-  left: FullSyncServerView,
-  right: FullSyncServerView,
-): boolean {
-  if (
-    left.chats.size !== right.chats.size ||
-    left.messages.size !== right.messages.size ||
-    left.attachmentsByMessage.size !== right.attachmentsByMessage.size
-  ) {
-    return false;
-  }
-  for (const [guid, rowId] of left.chats) {
-    if (!right.chats.has(guid) || right.chats.get(guid) !== rowId) return false;
-  }
-  for (const [guid, identity] of left.messages) {
-    const other = right.messages.get(guid);
-    if (
-      other == null ||
-      other.chatGuid !== identity.chatGuid ||
-      other.originalRowId !== identity.originalRowId
-    ) {
-      return false;
-    }
-  }
-  for (const [messageGuid, attachmentGuids] of left.attachmentsByMessage) {
-    const other = right.attachmentsByMessage.get(messageGuid);
-    if (other == null || !sameStringSet(attachmentGuids, other)) return false;
-  }
-  return true;
-}
-
 /** A chat this sync stored, plus enough of its payload to finish reconciling it. */
 export interface StoredChat {
   guid: string;

@@ -452,10 +452,6 @@ function eventFor(message: string): EventDefinition | typeof FALLBACK_EVENT {
   return EVENT_DEFINITIONS.find((definition) => definition.matches(bounded)) ?? FALLBACK_EVENT;
 }
 
-export function isClassifiedErrorMessage(message: string): boolean {
-  return eventFor(message) !== FALLBACK_EVENT;
-}
-
 function safeInteger(value: unknown, max: number): number | undefined {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= max
     ? value

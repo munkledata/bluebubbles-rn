@@ -289,15 +289,3 @@ export async function discardAccountBoundShareIntake(db: AppDatabase): Promise<v
     await drainShareIntake();
   }
 }
-
-/** Immutable receipt identity for the currently staged exact native batch, if one exists. */
-export function currentShareIntakeIdentity(): ShareIntakeManifestIdentity | null {
-  const share = useShareIntentStore.getState();
-  if (!share.batchId || share.createdAtMs == null) return null;
-  return {
-    batchId: share.batchId,
-    nativeCreatedAtMs: share.createdAtMs,
-    hasText: share.text !== null,
-    fileCount: share.files.length,
-  };
-}
