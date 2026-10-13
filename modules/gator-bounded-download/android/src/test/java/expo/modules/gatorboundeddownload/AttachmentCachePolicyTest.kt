@@ -369,4 +369,44 @@ class AttachmentCachePolicyTest {
     assertFalse(current.parentFile?.parentFile?.exists() ?: true)
     assertTrue(root.exists())
   }
+
+  // Review item 888: emptied legacy folders still counted toward the startup scan's entry limit.
+  @Test
+  fun `deleting a legacy file removes only its emptied legacy folder`() {
+    val root = temporary.newFolder("legacy-prune-attachments").canonicalFile
+    val lone = File(root, "lone-guid/photo.jpg").apply {
+      parentFile?.mkdirs()
+      writeBytes(byteArrayOf(1))
+    }
+    val shared = File(root, "shared-guid/one.jpg").apply {
+      parentFile?.mkdirs()
+      writeBytes(byteArrayOf(1))
+    }
+    File(root, "shared-guid/two.jpg").writeBytes(byteArrayOf(2))
+    val current = File(root, "media-guid/generation-1/media-photo.jpg")
+    current.parentFile?.mkdirs()
+
+    assertTrue(lone.delete())
+    pruneEmptyLegacyAttachmentCacheDirectory(root, lone)
+    assertFalse(File(root, "lone-guid").exists())
+
+    assertTrue(shared.delete())
+    pruneEmptyLegacyAttachmentCacheDirectory(root, shared)
+    assertTrue(File(root, "shared-guid/two.jpg").exists())
+
+    // Current-layout folders belong to pruneEmptyAttachmentCacheParents.
+    pruneEmptyLegacyAttachmentCacheDirectory(root, current)
+    assertTrue(File(root, "media-guid/generation-1").exists())
+
+    val outside = temporary.newFolder("legacy-prune-outside").canonicalFile
+    val outsideFile = File(outside, "keep.jpg").apply { writeBytes(byteArrayOf(3)) }
+    Files.createSymbolicLink(File(root, "linked-guid").toPath(), outside.toPath())
+    assertTrue(
+      runCatching {
+        pruneEmptyLegacyAttachmentCacheDirectory(root, File(root, "linked-guid/keep.jpg"))
+      }.isFailure,
+    )
+    assertTrue(outsideFile.exists())
+    assertTrue(root.exists())
+  }
 }

@@ -303,6 +303,18 @@ internal fun pruneEmptyAttachmentCacheParents(root: File, target: File) {
   if (media.listFiles()?.isEmpty() == true) media.delete()
 }
 
+/**
+ * Remove a legacy `attachments/{safe-guid}` folder once its last file is deleted (review item
+ * 888). An emptied folder still counts toward the startup scan's entry limit. `File.delete`
+ * removes only an empty directory, and removes a raced symlink itself rather than following it.
+ */
+internal fun pruneEmptyLegacyAttachmentCacheDirectory(root: File, target: File) {
+  val ownedTarget = requireOwnedAttachmentCachePath(root, target)
+  val directory = ownedTarget.parentFile ?: return
+  if (directory.parentFile?.path != root.absoluteFile.path) return
+  directory.delete()
+}
+
 /** Match non-empty canonical output of JavaScript's `encodedMediaPathSegment`. */
 internal fun isEncodedMediaSegment(value: String): Boolean {
   if (!value.startsWith(MEDIA_SEGMENT_PREFIX)) return false

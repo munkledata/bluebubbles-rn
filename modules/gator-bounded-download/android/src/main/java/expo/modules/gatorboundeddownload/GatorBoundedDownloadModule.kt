@@ -290,6 +290,7 @@ class GatorBoundedDownloadModule : Module() {
         // parents but before the source rename. Reserved-owner recovery calls this same exact
         // delete boundary; prune the now-empty current-layout parents in either outcome.
         runCatching { pruneEmptyAttachmentCacheParents(root, target) }
+        runCatching { pruneEmptyLegacyAttachmentCacheDirectory(root, target) }
         outcome
       }
     }.runOnQueue(appContext.backgroundCoroutineScope)
@@ -426,6 +427,16 @@ class GatorBoundedDownloadModule : Module() {
       requireBoundedDirectoryStreamSupport()
       synchronized(attachmentCacheIoLock) {
         val scanId = getAttachmentCacheScanManager().begin()
+        mapOf("ok" to true, "scanId" to scanId)
+      }
+    }.runOnQueue(appContext.backgroundCoroutineScope)
+
+    // Storage → Repair Downloads (review item 888). Pages are read with the ordinary next/close
+    // functions; the shared manager still allows only one scan of either kind at a time.
+    AsyncFunction("beginAttachmentCacheRepairScan") {
+      requireBoundedDirectoryStreamSupport()
+      synchronized(attachmentCacheIoLock) {
+        val scanId = getAttachmentCacheScanManager().begin(AttachmentCacheScanMode.REPAIR)
         mapOf("ok" to true, "scanId" to scanId)
       }
     }.runOnQueue(appContext.backgroundCoroutineScope)

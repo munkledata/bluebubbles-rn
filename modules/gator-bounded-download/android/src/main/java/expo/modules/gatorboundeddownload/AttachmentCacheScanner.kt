@@ -15,9 +15,19 @@ internal const val ATTACHMENT_CACHE_SCAN_MAX_NODES_PER_PAGE = 512
 internal const val ATTACHMENT_CACHE_SCAN_MAX_TOTAL_NODES = 32_768
 internal const val ATTACHMENT_CACHE_SCAN_MAX_PAGE_MS = 50L
 internal const val ATTACHMENT_CACHE_SCAN_TTL_MS = 30_000L
+internal const val ATTACHMENT_CACHE_REPAIR_SCAN_IDLE_TTL_MS = 60_000L
 
 private const val MAX_SCAN_ID_CHARS = 80
 private const val JS_MAX_SAFE_INTEGER = 9_007_199_254_740_991L
+
+/**
+ * STARTUP collects one complete manifest under hard totals. REPAIR backs Storage → Repair
+ * Downloads (review item 888): an old cache over those totals made every startup scan overflow, so
+ * downloads stayed off. A repair scan keeps every layout and symlink check and the per-page bounds,
+ * but has no file or entry totals, its expiry restarts with each page, and a folder that cleanup
+ * emptied and removed between pages counts as finished instead of corrupt.
+ */
+internal enum class AttachmentCacheScanMode { STARTUP, REPAIR }
 
 internal enum class AttachmentCacheScanFailure(val code: String) {
   BUSY("busy"),
@@ -59,6 +69,15 @@ internal data class AttachmentCacheScanLimits(
     require(maxTotalNodes >= maxNodesPerPage)
     require(maxPageMs > 0L)
     require(sessionTtlMs > 0L)
+  }
+
+  companion object {
+    /** Only the totals are lifted; the TTL is an idle limit between pages for this mode. */
+    val REPAIR = AttachmentCacheScanLimits(
+      maxTotalFiles = Int.MAX_VALUE,
+      maxTotalNodes = Int.MAX_VALUE,
+      sessionTtlMs = ATTACHMENT_CACHE_REPAIR_SCAN_IDLE_TTL_MS,
+    )
   }
 }
 
@@ -146,11 +165,12 @@ internal class AttachmentCacheScanManager(
   private val nowMs: () -> Long,
   private val idFactory: () -> String = { UUID.randomUUID().toString() },
   private val limits: AttachmentCacheScanLimits = AttachmentCacheScanLimits(),
+  private val repairLimits: AttachmentCacheScanLimits = AttachmentCacheScanLimits.REPAIR,
 ) {
   private var active: AttachmentCacheScanSession? = null
 
   @Synchronized
-  fun begin(): String {
+  fun begin(mode: AttachmentCacheScanMode = AttachmentCacheScanMode.STARTUP): String {
     val now = nowMs()
     active?.let { existing ->
       if (existing.isExpired(now)) {
@@ -177,7 +197,8 @@ internal class AttachmentCacheScanManager(
       fileSystem = fileSystem,
       nowMs = nowMs,
       startedAtMs = now,
-      limits = limits,
+      mode = mode,
+      limits = if (mode == AttachmentCacheScanMode.REPAIR) repairLimits else limits,
     )
     try {
       session.start()
@@ -256,9 +277,10 @@ private class AttachmentCacheScanSession(
   private val fileSystem: AttachmentCacheFileSystem,
   private val nowMs: () -> Long,
   startedAtMs: Long,
+  private val mode: AttachmentCacheScanMode,
   private val limits: AttachmentCacheScanLimits,
 ) : AutoCloseable {
-  private val expiresAtMs = addSaturated(startedAtMs, limits.sessionTtlMs)
+  private var expiresAtMs = addSaturated(startedAtMs, limits.sessionTtlMs)
   private var rootCursor: AttachmentCacheDirectoryCursor? = null
   private var attachmentDirectoryCursor: AttachmentCacheDirectoryCursor? = null
   private var generationCursor: AttachmentCacheDirectoryCursor? = null
@@ -351,6 +373,10 @@ private class AttachmentCacheScanSession(
       finished = true
     }
 
+    if (mode == AttachmentCacheScanMode.REPAIR) {
+      // Repair cleans up between pages, so its limit is idle time, not total time.
+      expiresAtMs = addSaturated(nowMs(), limits.sessionTtlMs)
+    }
     AttachmentCacheScanPage(files, finished)
   }
 
@@ -390,6 +416,10 @@ private class AttachmentCacheScanSession(
 
   private fun verifyOpenDirectories() {
     attachmentDirectory?.let { directory ->
+      if (vanishedDuringRepair(directory)) {
+        closeAttachmentDirectoryCursor()
+        return
+      }
       verifyDirectory(
         parent = root,
         directory = directory,
@@ -398,6 +428,10 @@ private class AttachmentCacheScanSession(
       )
     }
     generationDirectory?.let { directory ->
+      if (vanishedDuringRepair(directory)) {
+        closeGenerationCursor()
+        return
+      }
       val parent = attachmentDirectory
         ?: fail(AttachmentCacheScanFailure.CORRUPT, "generation parent state is missing")
       if (!isAttachmentCacheIdentitySegment(parent.name)) {
@@ -413,6 +447,7 @@ private class AttachmentCacheScanSession(
   }
 
   private fun openAttachmentDirectory(directory: File) {
+    if (vanishedDuringRepair(directory)) return
     verifyDirectory(
       parent = root,
       directory = directory,
@@ -424,6 +459,7 @@ private class AttachmentCacheScanSession(
   }
 
   private fun openGeneration(directory: File) {
+    if (vanishedDuringRepair(directory)) return
     val parent = attachmentDirectory
       ?: fail(AttachmentCacheScanFailure.CORRUPT, "generation parent state is missing")
     if (!isAttachmentCacheIdentitySegment(parent.name)) {
@@ -536,6 +572,13 @@ private class AttachmentCacheScanSession(
     totalFiles += 1
     return AttachmentCacheScanEntry(owned, node.bytes, node.modifiedAtMs)
   }
+
+  /**
+   * Only a definitely absent folder is tolerated, and only while repairing: cleanup between pages
+   * removes the folders it empties. Anything else that changed still fails closed below.
+   */
+  private fun vanishedDuringRepair(directory: File): Boolean =
+    mode == AttachmentCacheScanMode.REPAIR && inspect(directory) == null
 
   private fun requireDirectChild(parent: File, child: File, label: String) {
     val absolute = child.absoluteFile
