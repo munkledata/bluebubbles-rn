@@ -1,3 +1,4 @@
+import { MIGRATION_COUNT, MIGRATION_HEAD } from '@db/migrationHead';
 const mockOpen = jest.fn();
 const mockRunMigrations = jest.fn();
 
@@ -469,7 +470,7 @@ beforeEach(() => {
 
 describe('DB-03B1 fixed process-relaunch database contract', () => {
   it('pins the exact production migration boundary used across process death', () => {
-    expect(migrationNames).toHaveLength(54);
+    expect(migrationNames).toHaveLength(MIGRATION_COUNT);
     expect(migrationNames[28]).toBe('0029_chats_deleted_at');
     expect(migrationNames[29]).toBe('0030_attachment_cache_entries');
     expect(migrationNames[37]).toBe('0038_scrub_reaction_selected_message_text');
@@ -486,7 +487,7 @@ describe('DB-03B1 fixed process-relaunch database contract', () => {
     expect(migrationNames[50]).toBe('0051_handle_color_backup_index');
     expect(migrationNames[51]).toBe('0052_chat_history_deletion_boundary');
     expect(migrationNames[52]).toBe('0053_versioned_server_message_state');
-    expect(migrationNames[53]).toBe('0054_handle_contact_ambiguous');
+    expect(migrationNames[MIGRATION_COUNT - 1]).toBe(MIGRATION_HEAD);
   });
 
   it('prepares exact 0001-0029 state and keeps the encrypted handle open while READY waits', async () => {
@@ -582,8 +583,8 @@ describe('DB-03B1 fixed process-relaunch database contract', () => {
 
     await expect(resumeDbProcessRelaunchSelfTest(onReadOnlyVerified)).resolves.toEqual({
       status: 'pass',
-      migrationCount: 54,
-      migrationHead: '0054_handle_contact_ambiguous',
+      migrationCount: MIGRATION_COUNT,
+      migrationHead: MIGRATION_HEAD,
       checks: {
         readOnlyContinuityOpen: true,
         sameFileState: true,
@@ -945,7 +946,7 @@ describe('DB-03B2B2 fixed active-migration-death database contract', () => {
   it('pins the exact single-statement 0038 production migration boundary', () => {
     const migrations = (jest.requireActual('@db/migrations') as typeof import('@db/migrations'))
       .MIGRATIONS;
-    expect(migrations).toHaveLength(54);
+    expect(migrations).toHaveLength(MIGRATION_COUNT);
     expect(migrations[36]?.name).toBe('0037_purge_legacy_redacted_mode_setting');
     expect(migrations[37]).toEqual({
       name: '0038_scrub_reaction_selected_message_text',
@@ -973,7 +974,7 @@ describe('DB-03B2B2 fixed active-migration-death database contract', () => {
     expect(migrations[50]?.name).toBe('0051_handle_color_backup_index');
     expect(migrations[51]?.name).toBe('0052_chat_history_deletion_boundary');
     expect(migrations[52]?.name).toBe('0053_versioned_server_message_state');
-    expect(migrations[53]?.name).toBe('0054_handle_contact_ambiguous');
+    expect(migrations[MIGRATION_COUNT - 1]?.name).toBe(MIGRATION_HEAD);
   });
 
   it('runs the real migration boundary, enters READY before ledger COMMIT, then rolls back on callback rejection', async () => {
@@ -1093,8 +1094,8 @@ describe('DB-03B2B2 fixed active-migration-death database contract', () => {
 
     await expect(resumeDbActiveMigrationDeathSelfTest(onReadOnlyVerified)).resolves.toEqual({
       status: 'pass',
-      migrationCount: 54,
-      migrationHead: '0054_handle_contact_ambiguous',
+      migrationCount: MIGRATION_COUNT,
+      migrationHead: MIGRATION_HEAD,
       checks: {
         readOnlyRecoveryOpen: true,
         walMode: true,

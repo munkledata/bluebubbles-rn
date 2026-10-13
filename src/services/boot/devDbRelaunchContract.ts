@@ -35,6 +35,7 @@ import {
 } from '@db/database';
 import { runDbBackupRestoreWave } from '@/services/boot/dbBackupRestoreWave';
 import { runDbRuntimeConcurrencyWave } from '@/services/boot/dbRuntimeConcurrencyWave';
+import { MIGRATION_COUNT, MIGRATION_HEAD } from '@db/migrationHead';
 
 const DB_RELAUNCH_MARKER_PREFIX = 'GATOR_DB_RELAUNCH_V1 ';
 const DB_WAL_WRITE_DEATH_MARKER_PREFIX = 'GATOR_DB_WAL_WRITE_DEATH_V1 ';
@@ -57,8 +58,8 @@ const DB_WAL_WRITE_DEATH_RESUMING_FILE = '.gator-db-wal-write-death-resuming-v1'
 const DB_ACTIVE_MIGRATION_DEATH_PREPARING_FILE = '.gator-db-active-migration-death-preparing-v1';
 const DB_ACTIVE_MIGRATION_DEATH_READY_FILE = '.gator-db-active-migration-death-ready-v1';
 const DB_ACTIVE_MIGRATION_DEATH_RESUMING_FILE = '.gator-db-active-migration-death-resuming-v1';
-const DB_RELAUNCH_MIGRATION_COUNT = 54 as const;
-const DB_RELAUNCH_MIGRATION_HEAD = '0054_handle_contact_ambiguous' as const;
+const DB_RELAUNCH_MIGRATION_COUNT = MIGRATION_COUNT;
+const DB_RELAUNCH_MIGRATION_HEAD = MIGRATION_HEAD;
 const WAIT_FOR_HOST_PROCESS_KILL = new Promise<never>(() => undefined);
 
 type DbRelaunchMarkerFileName =

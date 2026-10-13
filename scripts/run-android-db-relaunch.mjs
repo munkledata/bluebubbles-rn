@@ -6,6 +6,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { get } from 'node:http';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MIGRATION_COUNT, MIGRATION_HEAD } from './migration-head.mjs';
 
 import {
   APP_ACTIVITY,
@@ -19,8 +20,8 @@ import {
 export const RELAUNCH_MARKER_PREFIX = 'GATOR_DB_RELAUNCH_V1 ';
 export const RELAUNCH_SUITE = 'android-db-relaunch';
 export const RELAUNCH_SCHEMA = 1;
-export const RELAUNCH_MIGRATION_COUNT = 54;
-export const RELAUNCH_MIGRATION_HEAD = '0054_handle_contact_ambiguous';
+export const RELAUNCH_MIGRATION_COUNT = MIGRATION_COUNT;
+export const RELAUNCH_MIGRATION_HEAD = MIGRATION_HEAD;
 export const PREPARE_CHECKS = Object.freeze([
   'requestValid',
   'preCleanup',

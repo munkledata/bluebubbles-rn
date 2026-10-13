@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import { runMigrations, type SqlRunner } from '@db/migrate';
+import { migrationNamesFrom } from '../../support/migrationNames';
 
 const MIGRATION_NAME = '0042_message_part_identity';
 const ADD_COLUMN_MARKER = 'ADD COLUMN part_count INTEGER';
@@ -38,21 +39,7 @@ describe('migration 0042_message_part_identity', () => {
         .run(chatId);
 
       stopBefore0042.value = false;
-      await expect(runMigrations(runner)).resolves.toEqual([
-        MIGRATION_NAME,
-        '0043_custom_folders',
-        '0044_custom_folder_unread_badge',
-        '0045_backup_export_indexes',
-        '0046_message_send_attempt_owner',
-        '0047_message_retraction_topology',
-        '0048_attachment_media_exports',
-        '0049_inbox_search_postings',
-        '0050_message_identity_owner_scope',
-        '0051_handle_color_backup_index',
-        '0052_chat_history_deletion_boundary',
-        '0053_versioned_server_message_state',
-        '0054_handle_contact_ambiguous',
-      ]);
+      await expect(runMigrations(runner)).resolves.toEqual(migrationNamesFrom(MIGRATION_NAME));
       expect(
         raw
           .prepare(

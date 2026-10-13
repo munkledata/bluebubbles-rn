@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import { runMigrations, type SqlRunner } from '@db/migrate';
+import { migrationNamesFrom } from '../../support/migrationNames';
 
 const MIGRATION_NAME = '0052_chat_history_deletion_boundary';
 
@@ -43,11 +44,7 @@ describe('migration 0052_chat_history_deletion_boundary', () => {
         .run('sync.fullRepair.retiredChat.repair-shell', '0');
 
       stopBefore0052.value = false;
-      await expect(runMigrations(runner)).resolves.toEqual([
-        MIGRATION_NAME,
-        '0053_versioned_server_message_state',
-        '0054_handle_contact_ambiguous',
-      ]);
+      await expect(runMigrations(runner)).resolves.toEqual(migrationNamesFrom(MIGRATION_NAME));
 
       expect(
         raw

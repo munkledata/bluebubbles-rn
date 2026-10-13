@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import { runMigrations, type SqlRunner } from '@db/migrate';
+import { migrationNamesFrom } from '../../support/migrationNames';
 
 const MIGRATION_NAME = '0045_backup_export_indexes';
 const FIRST_INDEX_MARKER = 'CREATE INDEX themes_backup_export_idx';
@@ -55,18 +56,7 @@ describe('migration 0045_backup_export_indexes', () => {
       raw.prepare('INSERT INTO chats (guid) VALUES (?)').run('chat-ordinary-before-0045');
 
       stopBefore0045.value = false;
-      await expect(runMigrations(runner)).resolves.toEqual([
-        MIGRATION_NAME,
-        '0046_message_send_attempt_owner',
-        '0047_message_retraction_topology',
-        '0048_attachment_media_exports',
-        '0049_inbox_search_postings',
-        '0050_message_identity_owner_scope',
-        '0051_handle_color_backup_index',
-        '0052_chat_history_deletion_boundary',
-        '0053_versioned_server_message_state',
-        '0054_handle_contact_ambiguous',
-      ]);
+      await expect(runMigrations(runner)).resolves.toEqual(migrationNamesFrom(MIGRATION_NAME));
 
       expect(indexColumns(raw, 'themes_backup_export_idx')).toEqual(['is_preset', 'id']);
       expect(indexColumns(raw, 'chats_backup_export_idx')).toEqual(['id']);

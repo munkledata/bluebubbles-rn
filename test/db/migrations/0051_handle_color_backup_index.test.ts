@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import { runMigrations, type SqlRunner } from '@db/migrate';
+import { migrationNamesFrom } from '../../support/migrationNames';
 
 const MIGRATION_NAME = '0051_handle_color_backup_index';
 const INDEX_NAME = 'handles_backup_color_export_idx';
@@ -58,12 +59,7 @@ describe('migration 0051_handle_color_backup_index', () => {
         .run('malformed@example.test', 'iMessage', 'blue');
 
       stopBefore0051.value = false;
-      await expect(runMigrations(runner)).resolves.toEqual([
-        MIGRATION_NAME,
-        '0052_chat_history_deletion_boundary',
-        '0053_versioned_server_message_state',
-        '0054_handle_contact_ambiguous',
-      ]);
+      await expect(runMigrations(runner)).resolves.toEqual(migrationNamesFrom(MIGRATION_NAME));
 
       expect(indexColumns(raw, INDEX_NAME)).toEqual(['id']);
       expect(normalizedIndexSql(raw, INDEX_NAME)).toBe(

@@ -6,14 +6,15 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { get } from 'node:http';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { MIGRATION_COUNT, MIGRATION_HEAD } from './migration-head.mjs';
 
 export const APP_PACKAGE = 'com.bluegreengatorapps.messages';
 export const APP_ACTIVITY = `${APP_PACKAGE}/.MainActivity`;
 export const CONTRACT_MARKER_PREFIX = 'GATOR_DB_CONTRACT_V3 ';
 export const CONTRACT_SUITE = 'android-db-contract';
 export const CONTRACT_SCHEMA = 3;
-export const CONTRACT_MIGRATION_COUNT = 54;
-export const CONTRACT_MIGRATION_HEAD = '0054_handle_contact_ambiguous';
+export const CONTRACT_MIGRATION_COUNT = MIGRATION_COUNT;
+export const CONTRACT_MIGRATION_HEAD = MIGRATION_HEAD;
 const LEGACY_CONTRACT_MARKER_PREFIXES = Object.freeze([
   'GATOR_DB_CONTRACT_V1 ',
   'GATOR_DB_CONTRACT_V2 ',

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { MIGRATION_COUNT, MIGRATION_HEAD } from '@db/migrationHead';
 
 const mockOpen = jest.fn();
 const mockGetRandomBytes = jest.fn();
@@ -675,8 +676,8 @@ describe('runDbDriverSelfTest', () => {
       schema: 3,
       suite: 'android-db-contract',
       status: 'pass',
-      migrationCount: 54,
-      migrationHead: '0054_handle_contact_ambiguous',
+      migrationCount: MIGRATION_COUNT,
+      migrationHead: MIGRATION_HEAD,
       checks: passingChecks,
     });
 
@@ -946,8 +947,8 @@ describe('runDbDriverSelfTest', () => {
       schema: 3,
       suite: 'android-db-contract',
       status: 'fail',
-      migrationCount: 54,
-      migrationHead: '0054_handle_contact_ambiguous',
+      migrationCount: MIGRATION_COUNT,
+      migrationHead: MIGRATION_HEAD,
       checks: { oldKeyRejected: true, cleanup: false },
       failureCode: 'cleanup',
     });

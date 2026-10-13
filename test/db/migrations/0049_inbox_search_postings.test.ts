@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import { runMigrations, type SqlRunner } from '@db/migrate';
+import { migrationNamesFrom } from '../../support/migrationNames';
 
 const MIGRATION_NAME = '0049_inbox_search_postings';
 
@@ -45,14 +46,7 @@ describe('migration 0049_inbox_search_postings', () => {
         .run(chatId, handleId);
 
       stopBefore0049.value = false;
-      await expect(runMigrations(runner)).resolves.toEqual([
-        MIGRATION_NAME,
-        '0050_message_identity_owner_scope',
-        '0051_handle_color_backup_index',
-        '0052_chat_history_deletion_boundary',
-        '0053_versioned_server_message_state',
-        '0054_handle_contact_ambiguous',
-      ]);
+      await expect(runMigrations(runner)).resolves.toEqual(migrationNamesFrom(MIGRATION_NAME));
       const state = () =>
         raw
           .prepare(

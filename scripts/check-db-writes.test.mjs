@@ -6518,7 +6518,7 @@ fullOnlyTest('driver adapter proof fails closed on forwarding, escape, and scope
         replaceFixtureSource(
           root,
           'src/db/database.ts',
-          "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0054_handle_contact_ambiguous' as const;",
+          'const DRIVER_SELF_TEST_MIGRATION_HEAD = MIGRATION_HEAD;',
           "const DRIVER_SELF_TEST_MIGRATION_HEAD = '0039_message_error_message' as const;",
         );
       },

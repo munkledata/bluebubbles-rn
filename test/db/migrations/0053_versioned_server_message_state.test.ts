@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import { runMigrations, type SqlRunner } from '@db/migrate';
+import { migrationNamesFrom } from '../../support/migrationNames';
 
 it('adds reversible server state without reinterpreting historical local deletions', async () => {
   const raw = new Database(':memory:');
@@ -20,10 +21,9 @@ it('adds reversible server state without reinterpreting historical local deletio
       .prepare('INSERT INTO message_deletion_ledger(guid,date_deleted,chat_guid) VALUES (?,?,?)')
       .run('legacy', 123, null);
     stop = false;
-    await expect(runMigrations(runner)).resolves.toEqual([
-      '0053_versioned_server_message_state',
-      '0054_handle_contact_ambiguous',
-    ]);
+    await expect(runMigrations(runner)).resolves.toEqual(
+      migrationNamesFrom('0053_versioned_server_message_state'),
+    );
     expect(raw.prepare('SELECT * FROM message_server_states').all()).toEqual([]);
     expect(raw.prepare('SELECT * FROM message_deletion_ledger').all()).toEqual([
       { guid: 'legacy', date_deleted: 123, chat_guid: null },

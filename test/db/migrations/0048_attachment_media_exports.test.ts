@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import { runMigrations, type SqlRunner } from '@db/migrate';
+import { migrationNamesFrom } from '../../support/migrationNames';
 
 const MIGRATION_NAME = '0048_attachment_media_exports';
 const FIRST_STATEMENT_MARKER = 'CREATE TABLE attachment_media_exports';
@@ -48,15 +49,7 @@ describe('migration 0048_attachment_media_exports', () => {
         .run('attachment-before-0048', message.id, 'image/jpeg', 1234, 'file:///old/image.jpg');
 
       stopBefore0048.value = false;
-      await expect(runMigrations(runner)).resolves.toEqual([
-        MIGRATION_NAME,
-        '0049_inbox_search_postings',
-        '0050_message_identity_owner_scope',
-        '0051_handle_color_backup_index',
-        '0052_chat_history_deletion_boundary',
-        '0053_versioned_server_message_state',
-        '0054_handle_contact_ambiguous',
-      ]);
+      await expect(runMigrations(runner)).resolves.toEqual(migrationNamesFrom(MIGRATION_NAME));
       expect(raw.prepare('SELECT COUNT(*) AS rows FROM attachment_media_exports').get()).toEqual({
         rows: 0,
       });
