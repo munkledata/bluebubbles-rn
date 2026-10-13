@@ -618,30 +618,6 @@ export async function ensureDownloadedOutcome(
   return observeFlight(flight, settled, observer);
 }
 
-/** Compatibility wrapper retained for existing UI and tests that only need path-or-null. */
-export async function ensureDownloaded(
-  db: AppDatabase,
-  fetcher: AttachmentFetcher,
-  att: AttachmentDownloadTarget,
-  onProgress?: (loaded: number, total: number) => void,
-  scope?: AttachmentDownloadScope,
-  mode: AttachmentDownloadMode = 'manual',
-  onVerifiedBytes?: (bytes: number) => void,
-  maxBytesOverride?: number,
-): Promise<string | null> {
-  const outcome = await ensureDownloadedOutcome(
-    db,
-    fetcher,
-    att,
-    onProgress,
-    scope,
-    mode,
-    onVerifiedBytes,
-    maxBytesOverride,
-  );
-  return outcome.status === 'success' ? outcome.localPath : null;
-}
-
 /** Stop transfers whose owning rows are about to be deleted. */
 export function cancelAttachmentDownloads(guids: Iterable<string>, generation?: number): void {
   const targets = new Set(guids);

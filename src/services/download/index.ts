@@ -35,7 +35,6 @@ import {
 import { expoFetcher } from './expoFetcher';
 
 export type { AttachmentFetcher } from './downloadService';
-export { ensureDownloaded } from './downloadService';
 
 const productionFetcher: AttachmentFetcher = expoFetcher(http);
 let developmentFetcher: AttachmentFetcher | null = null;
@@ -133,7 +132,7 @@ function replacementFileExtension(att: AttachmentRow): string {
 /**
  * Ensure an attachment is downloaded locally (UI-bound). Reports progress into
  * `useDownloadStore` so the bubble can show a ring / retry. Returns the local
- * path or null. Re-invoking after a failure retries (ensureDownloaded dedupes
+ * path or null. Re-invoking after a failure retries (ensureDownloadedOutcome dedupes
  * concurrent calls and clears its in-flight entry on settle). A manually requested
  * RCS download gets a bounded backoff retry (see above); a fresh call supersedes the
  * old chain and resets that backoff.

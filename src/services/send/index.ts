@@ -52,7 +52,6 @@ import {
   type SendUnsendResult,
 } from './sendEditService';
 import {
-  ensureScheduledRecovery,
   runDueScheduled,
   scheduleTextMessage,
   scheduleAttachmentMessage,
@@ -708,32 +707,16 @@ export async function pickAndSendContact(
     throw error;
   }
   if (!accountLease.isCurrent() || !contact || !hasContactContent(contact)) return null;
-  const snapshot = snapshotContactCard(contact);
-  return runUiAccountOperation(
+  return sendContactCard(
+    {
+      chatGuid,
+      contact,
+      replyToGuid: targetSnapshot?.replyToGuid,
+      replyToPartIndex: targetSnapshot?.replyToPartIndex,
+    },
     accountLease,
-    () =>
-      sendContactMessage(
-        getDatabase(),
-        accountHttp(accountLease),
-        {
-          chatGuid,
-          contact: snapshot,
-          selectedMessageGuid: targetSnapshot?.replyToGuid,
-          partIndex: targetSnapshot?.replyToPartIndex,
-        },
-        Date.now(),
-        () => accountLease.isCurrent(),
-        captureSessionRcsCapabilityLease(),
-        (tempGuid) => {
-          try {
-            if (accountLease.isCurrent()) onQueued?.(tempGuid);
-          } catch (error) {
-            logger.warn('[send] optional queue observer failed', error);
-          }
-        },
-      ),
-    'logical-send',
     reportIssue,
+    onQueued,
   );
 }
 
@@ -1514,19 +1497,6 @@ export async function fireDueScheduledWithDevelopmentSender(
   try {
     return await runScheduledAccountOperation(accountLease, () =>
       runDueScheduled(getDatabase(), accountHttp(accountLease), now, sender, accountLease),
-    );
-  } catch (error) {
-    if (error instanceof ScheduledSessionChangedError) return 0;
-    throw error;
-  }
-}
-
-/** Join the once-per-account recovery barrier for rows interrupted mid-send. */
-export async function recoverStuckScheduled(): Promise<number> {
-  const accountLease = captureRealtimeDeliveryLease();
-  try {
-    return await runScheduledAccountOperation(accountLease, () =>
-      ensureScheduledRecovery(getDatabase(), accountLease),
     );
   } catch (error) {
     if (error instanceof ScheduledSessionChangedError) return 0;

@@ -42,7 +42,6 @@ import {
   clearScheduledHistoryItem,
   editScheduled,
   fireDueScheduled,
-  recoverStuckScheduled,
   schedule,
   syncScheduledFromServer,
 } from '@/services/send';
@@ -425,8 +424,10 @@ describe('scheduled-message account ownership', () => {
     });
     await started;
 
-    const recovery = recoverStuckScheduled();
-    await Promise.resolve();
+    // Nothing is due at time 0, so this run's only work is recovering the interrupted row.
+    const recovery = fireDueScheduled(0);
+    // Let recovery reach the database queue behind the neighbour before the account changes.
+    await new Promise((resolve) => setImmediate(resolve));
     const drain = pauseRealtimeDeliveries();
     releaseNeighbour();
 

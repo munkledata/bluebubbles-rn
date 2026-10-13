@@ -2,7 +2,6 @@ import { Chat } from '@core/models';
 import { SecretBox } from '@core/crypto';
 import { upsertChats, upsertHandles } from '@db/repositories';
 import {
-  buildBackup,
   buildBackupWithCustomFolders,
   openBackup,
   restoreBackup,
@@ -10,6 +9,7 @@ import {
 } from '@/services/backup/backup';
 import type { Backup } from '@/services/backup/backupSchema';
 import { createLibsodiumBackend } from '../support/libsodiumBackend';
+import { buildV2Backup } from '../support/backupFixtures';
 import { createTestDb } from '../support/testDb';
 import {
   createCustomFolder,
@@ -161,7 +161,7 @@ describe('custom-folder backup v3', () => {
     const localFolder = await createCustomFolder(target.db, 'Keep me');
     await replaceCustomFolderMembership(target.db, localFolder.id, ['temporarily-absent']);
     const empty = await createTestDb();
-    const v2 = await buildBackup(empty.db, { exportedAt: 2 });
+    const v2 = await buildV2Backup(empty.db, { exportedAt: 2 });
     const v1: Backup = {
       version: 1,
       exportedAt: 1,

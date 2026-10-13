@@ -35,7 +35,6 @@ const mockCaptureAccountLease = jest.fn(() => mockAccountLease);
 jest.mock('@/services/download', () => ({
   download: (...args: unknown[]) => mockDownload(...args),
   setAttachmentFetcher: jest.fn(),
-  ensureDownloaded: jest.fn(),
 }));
 jest.mock('@/services/realtime/deliveryCoordinator', () => ({
   captureRealtimeDeliveryLease: () => mockCaptureAccountLease(),

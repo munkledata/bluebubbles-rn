@@ -3102,7 +3102,7 @@ test('certifies the exact residual repository delegations after explicit-owner c
   );
 
   assert.equal(devFixtures.length, 13);
-  assert.equal(intentionalBoundaries.length, 46);
+  assert.equal(intentionalBoundaries.length, 45);
   assert.equal(scheduledStateMachine.length, 12);
   assert.deepEqual(
     findings.map((finding) => finding.id).sort(),
@@ -3125,7 +3125,6 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:c189a52293cc',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:c27d9f7b2550',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:f915d3f0f0ea',
-      'src/services/backup/backup.ts#buildBackup:mutator-call:50677029090e',
       'src/services/backup/backup.ts#buildBackupWithCustomFolders:mutator-call:1204bfcb57bb',
       'src/services/bootstrap.ts#wipeLocalCache:mutator-call:80814999e829',
       'src/services/bootstrap.ts#wipeLocalCache:mutator-call:972629a8899e',
@@ -3510,7 +3509,6 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
       'src/services/send/index.ts#editScheduled.<callback:a310ff7f18>:mutator-call:0eac966d5fef',
       'src/services/send/index.ts#fireDueScheduled.<callback:e7099757f6>:mutator-call:26c372898fda',
       'src/services/send/index.ts#fireDueScheduledWithDevelopmentSender.<callback:9f76132482>:mutator-call:cec9577e2e0d',
-      'src/services/send/index.ts#pickAndSendContact.<callback:6df3acbcc0>:mutator-call:c0107fdf5b74',
       'src/services/send/index.ts#react.<callback:ce78d92795>:mutator-call:c5a800fcb97b',
       'src/services/send/index.ts#react.<callback:ce78d92795>:mutator-call:cd884835a9a8',
       'src/services/send/index.ts#recoverOutgoing:mutator-call:4536e59c3756',
@@ -3575,7 +3573,7 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
       'src/services/send/index.ts#editScheduled.<callback:a310ff7f18>.persistPatch:mutator-call:9caef164c0df',
     ].sort(),
   );
-  assert.equal(sendFrontDoorFindings.length, 46);
+  assert.equal(sendFrontDoorFindings.length, 45);
 });
 
 test('certifies exactly the reviewed conversation-action delegation edges', () => {
@@ -3885,7 +3883,6 @@ test('certifies exactly the reviewed attachment-download delegation boundary', (
       'app/(app)/media/[guid].tsx#MediaViewer.requestDownload:mutator-call:dded74882e63',
       'app/(app)/media/[guid].tsx#MediaViewer:mutator-reference:d9da1c4d8c72',
       'app/(app)/media/[guid].tsx#MediaViewer:mutator-reference:f2d99eef8eea',
-      'src/services/download/downloadService.ts#ensureDownloaded:mutator-call:aacca386ab26',
       'src/services/download/downloadService.ts#ensureDownloadedOutcome:mutator-call:c1f5c32eff7f',
       'src/services/download/index.ts#download:mutator-call:31f3d4057a6a',
       'src/services/download/index.ts#downloadScope.reserveCache:mutator-call:9a68094fc094',
@@ -3920,7 +3917,7 @@ test('certifies exactly the reviewed attachment-download delegation boundary', (
       'src/ui/attachments/VideoPlayer.tsx#VideoPlayer:mutator-reference:53bdc004099c',
     ].sort(),
   );
-  assert.equal(delegated.length, 40);
+  assert.equal(delegated.length, 39);
   assert.equal(
     findings.some((finding) => finding.symbol.includes('runTrackedDownloadTransaction')),
     false,
@@ -7397,14 +7394,13 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction:sql-update:fb0297907ce8',
       'src/db/repositories/chats.ts#setChatUnreadLocalWithinTransaction:drizzle-update:bc72f0e85266',
       'src/db/repositories/sync.ts#setSyncMarkerWithinTransaction:drizzle-update:7582ca63d697',
-      'src/services/backup/backup.ts#buildBackup:mutator-call:50677029090e',
       'src/services/backup/backup.ts#buildBackupWithCustomFolders:mutator-call:1204bfcb57bb',
       'src/services/backup/backupService.ts#buildCurrentBackup.<callback:2bd1ecedc4>:mutator-call:3ea042f4e17e',
       'src/services/backup/backupService.ts#restoreCurrentBackup.<callback:93bf63133c>:mutator-call:27d17cbc08f6',
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 130);
+  assert.equal(selected.length, 129);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [

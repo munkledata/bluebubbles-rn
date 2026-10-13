@@ -136,15 +136,6 @@ export function mergeMessageNotificationHistory(
   return normalizeMessageNotificationHistory([...existing, incoming]);
 }
 
-export function removeMessageFromNotificationHistory(
-  existing: readonly MessageNotificationHistoryEntry[],
-  messageId: number,
-): MessageNotificationHistoryEntry[] {
-  return normalizeMessageNotificationHistory(existing).filter(
-    (entry) => entry.messageId !== messageId,
-  );
-}
-
 /** Encode only local integer ids; line text/name remain in Android's normal MessagingStyle array. */
 export function encodeMessageHistoryIds(
   entries: readonly MessageNotificationHistoryEntry[],

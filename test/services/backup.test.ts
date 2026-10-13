@@ -19,7 +19,6 @@ import { fromBase64, toBase64 } from '@utils/bytes';
 import {
   BackupExportLimitError,
   BackupInputLimitError,
-  buildBackup,
   buildBackupWithCustomFolders,
   openBackup,
   parseBackup,
@@ -38,6 +37,7 @@ import {
 } from '@/services/backup/backupSchema';
 import { createLibsodiumBackend } from '../support/libsodiumBackend';
 import { darkTheme } from '@ui/theme/tokens';
+import { buildV2Backup } from '../support/backupFixtures';
 import { createTestDb } from '../support/testDb';
 import { themeTokens } from '../support/themeTokens';
 import { kvSet, setChatCustomization, setChatPin } from '../support/repositoryWrappers';
@@ -112,7 +112,7 @@ describe('isBackupKey (the export ALLOW-list)', () => {
   });
 });
 
-describe('buildBackup', () => {
+describe('backup export', () => {
   it('gathers kv + themes + chat customizations', async () => {
     const t = await createTestDb();
     await kvSet(t.db, 'theme.preset', 'oledDark');
@@ -123,8 +123,8 @@ describe('buildBackup', () => {
     await seedChat(t, guid, { style: 45 });
     await setChatCustomization(t.db, guid, { customName: 'Best', customColor: '#34C759' });
 
-    const b = await buildBackup(t.db, { exportedAt: 123, appVersion: '1.0.0' });
-    expect(b.version).toBe(2);
+    const b = await buildBackupWithCustomFolders(t.db, { exportedAt: 123, appVersion: '1.0.0' });
+    expect(b.version).toBe(4);
     expect(b.exportedAt).toBe(123);
     expect(b.kv).toContainEqual({ key: 'theme.preset', value: 'oledDark' });
     expect(b.themes).toContainEqual(
@@ -151,7 +151,7 @@ describe('buildBackup', () => {
     await kvSet(t.db, 'server.password', 'hunter2');
     await kvSet(t.db, 'guidAuthKey', 'deadbeef');
 
-    const b = await buildBackup(t.db, { exportedAt: 1 });
+    const b = await buildBackupWithCustomFolders(t.db, { exportedAt: 1 });
     const keys = b.kv.map((p) => p.key);
     expect(keys).toContain('theme.preset');
     expect(keys).not.toContain('server.password');
@@ -170,7 +170,7 @@ describe('buildBackup', () => {
     await kvSet(t.db, 'maintenance.searchTextBackfill.v1', 'done');
     await kvSet(t.db, 'theme.custom', '7');
 
-    const keys = (await buildBackup(t.db, { exportedAt: 1 })).kv.map((p) => p.key);
+    const keys = (await buildBackupWithCustomFolders(t.db, { exportedAt: 1 })).kv.map((p) => p.key);
     expect(keys).toEqual(['theme.preset']);
   });
 
@@ -185,26 +185,10 @@ describe('buildBackup', () => {
       }
     })();
 
-    await expect(buildBackup(t.db, { exportedAt: 1 })).rejects.toThrow(
+    await expect(buildBackupWithCustomFolders(t.db, { exportedAt: 1 })).rejects.toThrow(
       'Backup export theme count exceeds its safety bound.',
     );
     await expect(kvSet(t.db, 'theme.preset', 'writer-after-v2-rejection')).resolves.toBeUndefined();
-  });
-
-  it('does not make a v2 export depend on custom-folder validity', async () => {
-    const t = await createTestDb();
-    const insertFolder = t.raw.prepare(
-      'INSERT INTO custom_folders (name, sort_order, show_unread_badge) VALUES (?, ?, 1)',
-    );
-    t.raw.transaction(() => {
-      for (let index = 0; index <= BACKUP_LIMITS.customFolders; index += 1) {
-        insertFolder.run(`Legacy v2 folder ${index}`, index);
-      }
-    })();
-
-    await expect(buildBackup(t.db, { exportedAt: 1 })).resolves.toEqual(
-      expect.objectContaining({ version: 2 }),
-    );
   });
 
   // Names saved before the editors limited their length used to fail the whole backup. The
@@ -221,7 +205,7 @@ describe('buildBackup', () => {
       .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?, ?, ?, 0)')
       .run('t'.repeat(BACKUP_LIMITS.themeNameCharacters + 50), 'light', '{}');
 
-    const backup = await buildBackup(t.db, { exportedAt: 1 });
+    const backup = await buildBackupWithCustomFolders(t.db, { exportedAt: 1 });
 
     expect(backup.themes.map((theme) => theme.name)).toEqual([
       'a'.repeat(BACKUP_LIMITS.themeNameCharacters - 1),
@@ -263,7 +247,7 @@ describe('restoreBackup round-trip', () => {
     await setChatPin(src.db, 'pin-c', true);
     await swapPinnedChatOrder(src.db, 'pin-c', 'pin-b', 'earlier');
 
-    const backup = await buildBackup(src.db, { exportedAt: 1 });
+    const backup = await buildV2Backup(src.db, { exportedAt: 1 });
     expect(
       backup.chatCustomizations
         .filter((row) => row.isPinned === 1)
@@ -300,7 +284,7 @@ describe('restoreBackup round-trip', () => {
     });
     await setChatCustomization(t.db, guid, { customName: 'Text thread' });
 
-    const backup = await buildBackup(t.db, { exportedAt: 1 });
+    const backup = await buildV2Backup(t.db, { exportedAt: 1 });
     expect(backup.chatCustomizations[0]?.identity.service).toBe('SMS');
     await expect(restoreBackup(t.db, backup)).resolves.toMatchObject({
       chatCustomizations: 1,
@@ -317,7 +301,7 @@ describe('restoreBackup round-trip', () => {
     const guid = 'iMessage;-;a@b.com';
     await seedChat(src, guid);
     await setChatCustomization(src.db, guid, { customName: 'Squad', customColor: '#AF52DE' });
-    const backup = await buildBackup(src.db, { exportedAt: 9 });
+    const backup = await buildV2Backup(src.db, { exportedAt: 9 });
 
     // Restore into a fresh db that already has the same portable chat identity.
     const dst = await createTestDb();
@@ -438,7 +422,7 @@ describe('restoreBackup round-trip', () => {
     await setChatCustomization(src.db, 'iMessage;-;+1 (555) 123-4567', {
       customName: 'Portable',
     });
-    const backup = await buildBackup(src.db, { exportedAt: 1 });
+    const backup = await buildV2Backup(src.db, { exportedAt: 1 });
 
     const dst = await createTestDb();
     await seedChat(dst, 'iMessage;-;5551234567', {
@@ -475,7 +459,7 @@ describe('restoreBackup round-trip', () => {
     const src = await createTestDb();
     await seedChat(src, 'iMessage;+;source-group', { chatIdentifier: null });
     await setChatCustomization(src.db, 'iMessage;+;source-group', { customName: 'Do not guess' });
-    const backup = await buildBackup(src.db, { exportedAt: 1 });
+    const backup = await buildV2Backup(src.db, { exportedAt: 1 });
 
     const dst = await createTestDb();
     await seedChat(dst, 'iMessage;+;candidate-a', { chatIdentifier: null });
@@ -665,7 +649,7 @@ describe('restoreBackup round-trip', () => {
     src.raw
       .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)')
       .run('Mine', 'dark', themeTokens({ a: 1 }));
-    const backup = await buildBackup(src.db, { exportedAt: 1 });
+    const backup = await buildV2Backup(src.db, { exportedAt: 1 });
 
     const dst = await createTestDb();
     await restoreBackup(dst.db, backup);
@@ -783,7 +767,7 @@ describe('restoreBackup round-trip', () => {
     );
     ins.run('My Theme', 'dark', themeTokens({ a: 1 }));
     ins.run('My Theme', 'dark', themeTokens({ b: 2 }));
-    const backup = await buildBackup(src.db, { exportedAt: 1 });
+    const backup = await buildV2Backup(src.db, { exportedAt: 1 });
 
     // Fresh device (the primary use of a backup): BOTH palettes must land, not one.
     const dst = await createTestDb();
@@ -803,7 +787,7 @@ describe('restoreBackup round-trip', () => {
     );
     ins.run('My Theme', 'dark', themeTokens({ a: 1 }));
     ins.run('My Theme', 'dark', themeTokens({ b: 2 }));
-    const backup = await buildBackup(t.db, { exportedAt: 1 });
+    const backup = await buildV2Backup(t.db, { exportedAt: 1 });
 
     await restoreBackup(t.db, backup);
     // Same ids, each with the tokens it was exported with — a hand-built palette is never
@@ -871,7 +855,7 @@ describe('restoreBackup round-trip', () => {
     const guid = 'iMessage;-;a@b.com';
     await seedChat(src, guid);
     await setChatCustomization(src.db, guid, { customName: 'Squad' });
-    const backup = await buildBackup(src.db, { exportedAt: 1 });
+    const backup = await buildV2Backup(src.db, { exportedAt: 1 });
 
     const dst = await createTestDb();
     await seedChat(dst, guid);
@@ -893,7 +877,7 @@ describe('restoreBackup round-trip', () => {
     src.raw
       .prepare('UPDATE chats SET deleted_at = 9000, marked_unread_at = 9000 WHERE guid = ?')
       .run(guid);
-    const backup = await buildBackup(src.db, { exportedAt: 1 });
+    const backup = await buildV2Backup(src.db, { exportedAt: 1 });
     // Both columns are per-device state and are not even in the file.
     expect(backup.chatCustomizations[0]).not.toHaveProperty('deletedAt');
     expect(backup.chatCustomizations[0]).not.toHaveProperty('markedUnreadAt');
@@ -1114,7 +1098,7 @@ describe('encrypted backup (sealBackup/openBackup)', () => {
   it('round-trips in bounded authenticated chunks and leaks no plaintext', async () => {
     const t = await createTestDb();
     await kvSet(t.db, 'theme.preset', 'oledDark');
-    const backup = await buildBackup(t.db, { exportedAt: 7 });
+    const backup = await buildV2Backup(t.db, { exportedAt: 7 });
     backup.themes.push({
       name: 'Large theme',
       mode: 'dark',
@@ -1147,14 +1131,14 @@ describe('encrypted backup (sealBackup/openBackup)', () => {
   it('open rejects a wrong passphrase (authenticated)', async () => {
     const t = await createTestDb();
     const box = await makeBox();
-    const sealed = await sealBackup(box, await buildBackup(t.db, { exportedAt: 1 }), 'right');
+    const sealed = await sealBackup(box, await buildV2Backup(t.db, { exportedAt: 1 }), 'right');
     await expect(openBackup(box, sealed, 'wrong')).rejects.toBeDefined();
   });
 
   it('open rejects a tampered envelope', async () => {
     const t = await createTestDb();
     const box = await makeBox();
-    const sealed = await sealBackup(box, await buildBackup(t.db, { exportedAt: 1 }), 'pp');
+    const sealed = await sealBackup(box, await buildV2Backup(t.db, { exportedAt: 1 }), 'pp');
     const frameStart = sealed.indexOf('.', CHUNKED_SECRET_BOX_PREFIX.length) + 1;
     const tampered = `${sealed.slice(0, frameStart)}${sealed.charAt(frameStart) === 'A' ? 'B' : 'A'}${sealed.slice(frameStart + 1)}`;
     await expect(openBackup(box, tampered, 'pp')).rejects.toBeDefined();
@@ -1309,7 +1293,7 @@ describe('encrypted backup (sealBackup/openBackup)', () => {
   it('the no-secrets guard survives encrypt → decrypt → restore (import-side filter)', async () => {
     const src = await createTestDb();
     await kvSet(src.db, 'theme.preset', 'nord');
-    const backup = await buildBackup(src.db, { exportedAt: 1 });
+    const backup = await buildV2Backup(src.db, { exportedAt: 1 });
     // Forge an old/hostile backup with kv entries that buildBackup would have stripped.
     backup.kv.push({ key: 'server.password', value: 'hunter2' });
     backup.kv.push({ key: 'privacy.redactedMode', value: '1' });

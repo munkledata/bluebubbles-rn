@@ -18,7 +18,6 @@ import {
   MANUAL_ATTACHMENT_MAX_BYTES,
   MANUAL_DOWNLOAD_TIMEOUT_MS,
   cancelAttachmentDownloads,
-  ensureDownloaded,
   ensureDownloadedOutcome,
   setMaxConcurrentDownloads,
   type AttachmentDownloadScope,
@@ -38,6 +37,14 @@ import {
 import { hashNativeAttachmentCacheGuid } from '@native/boundedDownload';
 import { createTestDb } from '../support/testDb';
 import { recordAttachmentCacheEntry } from '../support/repositoryWrappers';
+
+/** Test shorthand: the downloaded file's path, or null for any outcome other than success. */
+async function ensureDownloaded(
+  ...args: Parameters<typeof ensureDownloadedOutcome>
+): Promise<string | null> {
+  const outcome = await ensureDownloadedOutcome(...args);
+  return outcome.status === 'success' ? outcome.localPath : null;
+}
 
 const fetched = (localPath: string, bytes = 1) => ({ localPath, bytes });
 

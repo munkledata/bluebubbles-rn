@@ -1888,21 +1888,6 @@ function buildBackupBaseExportData(
   };
 }
 
-/** Read the folder-independent v2 payload from one bounded, committed database snapshot. */
-export async function getBackupBaseExportData(
-  db: AppDatabase,
-  limits: BackupExportLimits,
-  commitGuard?: DbCommitGuard,
-): Promise<BackupBaseExportData> {
-  assertBackupExportLimits(limits);
-  const rows = await withDbTransaction(
-    db,
-    (context) => readBackupBaseRowsWithinTransaction(context, limits),
-    commitGuard,
-  );
-  return buildBackupBaseExportData(rows, limits);
-}
-
 /** Read every v4 backup domain from one committed point in time on the shared connection. */
 export async function getBackupV4ExportData(
   db: AppDatabase,

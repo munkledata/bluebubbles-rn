@@ -10,7 +10,6 @@ import {
   mergeMessageNotificationHistory,
   normalizeMessageNotificationHistory,
   normalizeMessageNotificationHistoryEntry,
-  removeMessageFromNotificationHistory,
   type MessageNotificationHistoryEntry,
 } from '@/services/notifications/messageHistory';
 
@@ -33,9 +32,6 @@ it('keeps a bounded unique history with an exact opaque-id codec and targeted re
   const encoded = encodeMessageHistoryIds(history);
   expect(decodeMessageHistoryIds(encoded, history.length)).toEqual([2, 3, 4, 5, 6, 7]);
   expect(decodeMessageHistoryIds('2,2', 2)).toBeNull();
-  expect(
-    removeMessageFromNotificationHistory(history, 4).map(({ messageId }) => messageId),
-  ).toEqual([2, 3, 5, 6, 7]);
 });
 
 it('normalizes every native-facing string within code-point and UTF-8 bounds', () => {

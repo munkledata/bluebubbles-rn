@@ -1,8 +1,4 @@
-import {
-  getBackupBaseExportData,
-  getBackupV4ExportData,
-  restorePreparedBackupWithinTransaction,
-} from '@db/repositories';
+import { getBackupV4ExportData, restorePreparedBackupWithinTransaction } from '@db/repositories';
 import { DbCommitGuardRejectedError, type DbCommitGuard, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import {
@@ -15,12 +11,10 @@ import { utf8Encode } from '@utils/bytes';
 import {
   BACKUP_LIMITS,
   BackupSchema,
-  BackupV2Schema,
   BackupV4Schema,
   isBackupKey,
   listBackupKvKeys,
   type Backup,
-  type BackupV2,
   type BackupV4,
 } from './backupSchema';
 
@@ -92,29 +86,14 @@ const BACKUP_EXPORT_LIMITS = {
 };
 
 /**
- * Gather the v2-compatible portion of a backup: settings (kv), custom themes, and per-chat
- * customizations. `buildBackupWithCustomFolders` extends it for complete encrypted export.
+ * Build the complete encrypted-export payload (settings, custom themes, per-chat customizations,
+ * custom folders, and handle colors) from one coordinated database snapshot.
  * SECURITY: kv is exported through the `isBackupKey` ALLOW-list, so only named
  * settings leave the device — never a credential (those live in the SecureVault),
  * never a per-chat draft (unsent text, keyed by the counterparty's address), and
  * never device-local sync bookkeeping. See `backupSchema.ts` for why the list is
  * inverted rather than a deny-list.
  */
-export async function buildBackup(
-  db: AppDatabase,
-  opts: { exportedAt: number; appVersion?: string },
-): Promise<BackupV2> {
-  const snapshot = await getBackupBaseExportData(db, BACKUP_EXPORT_LIMITS);
-  return BackupV2Schema.parse({
-    version: 2,
-    exportedAt: opts.exportedAt,
-    appVersion: opts.appVersion,
-    ...snapshot,
-    kv: snapshot.kv.filter((pair) => isBackupKey(pair.key)),
-  });
-}
-
-/** Build the complete encrypted-export payload from one coordinated database snapshot. */
 export async function buildBackupWithCustomFolders(
   db: AppDatabase,
   opts: { exportedAt: number; appVersion?: string },

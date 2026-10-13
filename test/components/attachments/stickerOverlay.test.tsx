@@ -43,7 +43,6 @@ const mockProtectPath = jest.fn<{ path: string; release: () => void } | null, [s
 jest.mock('@/services/download', () => ({
   download: (...args: unknown[]) => mockDownload(...args),
   setAttachmentFetcher: jest.fn(),
-  ensureDownloaded: jest.fn(),
 }));
 jest.mock('@/services/realtime/deliveryCoordinator', () => ({
   captureRealtimeDeliveryLease: () => mockCaptureAccountLease(),

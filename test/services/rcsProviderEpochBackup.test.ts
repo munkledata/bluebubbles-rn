@@ -1,7 +1,8 @@
 import { Chat } from '@core/models';
 import { upsertChats, upsertHandles } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
-import { buildBackup, restoreBackup } from '@/services/backup/backup';
+import { restoreBackup } from '@/services/backup/backup';
+import { buildV2Backup } from '../support/backupFixtures';
 import { createTestDb } from '../support/testDb';
 import { setChatCustomization } from '../support/repositoryWrappers';
 
@@ -33,7 +34,7 @@ describe('RCS provider-epoch backup identity', () => {
     await seedChat(source.db, chatGuid(EPOCH_A));
     await setChatCustomization(source.db, chatGuid(EPOCH_A), { customName: 'Scoped name' });
 
-    const backup = await buildBackup(source.db, { exportedAt: 1 });
+    const backup = await buildV2Backup(source.db, { exportedAt: 1 });
     expect(backup.chatCustomizations).toHaveLength(1);
     expect(backup.chatCustomizations[0]?.identity).toMatchObject({
       service: 'RCS',
@@ -68,7 +69,7 @@ describe('RCS provider-epoch backup identity', () => {
     await seedChat(source.db, legacyGuid);
     await setChatCustomization(source.db, legacyGuid, { customName: 'Legacy local history' });
 
-    const backup = await buildBackup(source.db, { exportedAt: 1 });
+    const backup = await buildV2Backup(source.db, { exportedAt: 1 });
 
     expect(backup.chatCustomizations).toEqual([]);
     expect(
