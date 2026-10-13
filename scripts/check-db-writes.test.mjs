@@ -7206,17 +7206,6 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
             'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:',
           ))),
   );
-  const createReminderTransactions = findings.filter(
-    (finding) =>
-      finding.path === 'src/db/repositories/reminders.ts' &&
-      finding.symbol.startsWith('createReminder') &&
-      !finding.symbol.startsWith('createReminderWithinTransaction') &&
-      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
-      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
-        finding.target === 'src/db/repositories/reminders.ts#createReminderWithinTransaction' ||
-        (finding.detectedContext === 'withDbTransaction' &&
-          finding.target.startsWith('src/db/repositories/reminders.ts#createReminder.<callback:'))),
-  );
   const updateReminderTimeTransactions = findings.filter(
     (finding) =>
       finding.path === 'src/db/repositories/reminders.ts' &&
@@ -7225,37 +7214,10 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
       finding.snippet.includes('updateReminderTimeWithinTransaction'),
   );
-  const insertScheduledTransactions = findings.filter(
-    (finding) =>
-      finding.path === 'src/db/repositories/scheduled.ts' &&
-      finding.symbol.startsWith('insertScheduled') &&
-      !finding.symbol.startsWith('insertScheduledWithinTransaction') &&
-      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
-      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
-        finding.target === 'src/db/repositories/scheduled.ts#insertScheduledWithinTransaction' ||
-        (finding.detectedContext === 'withDbTransaction' &&
-          finding.target.startsWith(
-            'src/db/repositories/scheduled.ts#insertScheduled.<callback:',
-          ))),
-  );
-  const updateScheduledTransactions = findings.filter(
-    (finding) =>
-      finding.path === 'src/db/repositories/scheduled.ts' &&
-      finding.symbol.startsWith('updateScheduled') &&
-      !finding.symbol.startsWith('updateScheduledWithinTransaction') &&
-      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
-      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
-        finding.target === 'src/db/repositories/scheduled.ts#updateScheduledWithinTransaction' ||
-        (finding.detectedContext === 'withDbTransaction' &&
-          finding.target.startsWith(
-            'src/db/repositories/scheduled.ts#updateScheduled.<callback:',
-          ))),
-  );
   const sendSuccessOwnerTransactions = findings.filter(
     (finding) =>
       finding.path === 'src/db/repositories/outgoing.ts' &&
-      (finding.symbol.startsWith('reconcileOutgoingSuccess') ||
-        finding.symbol.startsWith('markOutgoingSentNoGuid')) &&
+      finding.symbol.startsWith('reconcileOutgoingSuccess') &&
       ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
       (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
         finding.target ===
@@ -7263,12 +7225,9 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
         finding.target ===
           'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction' ||
         (finding.detectedContext === 'withDbTransaction' &&
-          (finding.target.startsWith(
+          finding.target.startsWith(
             'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess.<callback:',
-          ) ||
-            finding.target.startsWith(
-              'src/db/repositories/outgoing.ts#markOutgoingSentNoGuid.<callback:',
-            )))),
+          ))),
   );
   const retryClaimTransactions = findings.filter(
     (finding) =>
@@ -7283,20 +7242,6 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
             'src/db/repositories/outgoing.ts#claimFailedOutgoingForRetry.<callback:',
           ))),
   );
-  const automaticClaimTransactions = findings.filter(
-    (finding) =>
-      finding.path === 'src/db/repositories/outgoingRetry.ts' &&
-      finding.symbol.startsWith('claimOutgoingForSend') &&
-      !finding.symbol.startsWith('claimOutgoingForSendWithinTransaction') &&
-      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
-      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
-        finding.target ===
-          'src/db/repositories/outgoingRetry.ts#claimOutgoingForSendWithinTransaction' ||
-        (finding.detectedContext === 'withDbTransaction' &&
-          finding.target.startsWith(
-            'src/db/repositories/outgoingRetry.ts#claimOutgoingForSend.<callback:',
-          ))),
-  );
   const discardOutgoingTransactions = findings.filter(
     (finding) =>
       finding.path === 'src/db/repositories/outgoing.ts' &&
@@ -7309,17 +7254,6 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
           finding.target.startsWith(
             'src/db/repositories/outgoing.ts#discardOutgoingMessage.<callback:',
           ))),
-  );
-  const retireOutgoingTransactions = findings.filter(
-    (finding) =>
-      finding.path === 'src/db/repositories/outgoing.ts' &&
-      finding.symbol.startsWith('retireOutgoing') &&
-      !finding.symbol.startsWith('retireOutgoingWithinTransaction') &&
-      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
-      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
-        finding.target === 'src/db/repositories/outgoing.ts#retireOutgoingWithinTransaction' ||
-        (finding.detectedContext === 'withDbTransaction' &&
-          finding.target.startsWith('src/db/repositories/outgoing.ts#retireOutgoing.<callback:'))),
   );
   const insertOutgoingAttachmentTransactions = findings.filter(
     (finding) =>
@@ -7347,56 +7281,6 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
         (finding.detectedContext === 'withDbTransaction' &&
           finding.target.startsWith(
             'src/db/repositories/outgoing.ts#insertOutgoingReaction.<callback:',
-          ))),
-  );
-  const insertOutgoingContactTransactions = findings.filter(
-    (finding) =>
-      finding.path === 'src/db/repositories/outgoing.ts' &&
-      finding.symbol.startsWith('insertOutgoingContact') &&
-      !finding.symbol.startsWith('insertOutgoingContactWithinTransaction') &&
-      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
-      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
-        finding.target ===
-          'src/db/repositories/outgoing.ts#insertOutgoingContactWithinTransaction' ||
-        (finding.detectedContext === 'withDbTransaction' &&
-          finding.target.startsWith(
-            'src/db/repositories/outgoing.ts#insertOutgoingContact.<callback:',
-          ))),
-  );
-  const deleteMessageLocalTransactions = findings.filter(
-    (finding) =>
-      finding.path === 'src/db/repositories/messages.ts' &&
-      finding.symbol.startsWith('deleteMessageLocal') &&
-      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
-      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
-        finding.target === 'src/db/repositories/messages.ts#deleteMessageLocalWithinTransaction' ||
-        (finding.detectedContext === 'withDbTransaction' &&
-          finding.target.startsWith(
-            'src/db/repositories/messages.ts#deleteMessageLocal.<callback:',
-          ))),
-  );
-  const applyLocalEditTransactions = findings.filter(
-    (finding) =>
-      finding.path === 'src/db/repositories/messages.ts' &&
-      finding.symbol.startsWith('applyLocalEdit') &&
-      !finding.symbol.startsWith('applyLocalEditWithinTransaction') &&
-      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
-      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
-        finding.target === 'src/db/repositories/messages.ts#applyLocalEditWithinTransaction' ||
-        (finding.detectedContext === 'withDbTransaction' &&
-          finding.target.startsWith('src/db/repositories/messages.ts#applyLocalEdit.<callback:'))),
-  );
-  const applyLocalUnsendTransactions = findings.filter(
-    (finding) =>
-      finding.path === 'src/db/repositories/messages.ts' &&
-      finding.symbol.startsWith('applyLocalUnsend') &&
-      !finding.symbol.startsWith('applyLocalUnsendWithinTransaction') &&
-      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
-      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
-        finding.target === 'src/db/repositories/messages.ts#applyLocalUnsendWithinTransaction' ||
-        (finding.detectedContext === 'withDbTransaction' &&
-          finding.target.startsWith(
-            'src/db/repositories/messages.ts#applyLocalUnsend.<callback:',
           ))),
   );
   const revertLocalEditTransactions = findings.filter(
@@ -7598,14 +7482,6 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     ].sort(),
   );
   assert.deepEqual(
-    createReminderTransactions.map((finding) => finding.id).sort(),
-    [
-      'src/db/repositories/reminders.ts#createReminder.<callback:93ad5d4304>:mutator-call:a479b4f12b8b',
-      'src/db/repositories/reminders.ts#createReminder:mutator-call:237141e4ef46',
-      'src/db/repositories/reminders.ts#createReminder:mutator-call:9cec12455bc4',
-    ].sort(),
-  );
-  assert.deepEqual(
     updateReminderTimeTransactions.map((finding) => finding.id).sort(),
     [
       'src/db/repositories/reminders.ts#updateReminderTime.<callback:01f3a3c07f>:mutator-call:861aece00d05',
@@ -7614,27 +7490,8 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     ].sort(),
   );
   assert.deepEqual(
-    insertScheduledTransactions.map((finding) => finding.id).sort(),
-    [
-      'src/db/repositories/scheduled.ts#insertScheduled.<callback:6909ad3bc5>:mutator-call:1b3e4af90ec4',
-      'src/db/repositories/scheduled.ts#insertScheduled:mutator-call:a7f6784fcded',
-      'src/db/repositories/scheduled.ts#insertScheduled:mutator-call:de8b7dc6408f',
-    ].sort(),
-  );
-  assert.deepEqual(
-    updateScheduledTransactions.map((finding) => finding.id).sort(),
-    [
-      'src/db/repositories/scheduled.ts#updateScheduled.<callback:df3df4b004>:mutator-call:3ddb94963d3a',
-      'src/db/repositories/scheduled.ts#updateScheduled:mutator-call:b04ac99189f7',
-      'src/db/repositories/scheduled.ts#updateScheduled:mutator-call:a0d37dd560e8',
-    ].sort(),
-  );
-  assert.deepEqual(
     sendSuccessOwnerTransactions.map((finding) => finding.id).sort(),
     [
-      'src/db/repositories/outgoing.ts#markOutgoingSentNoGuid.<callback:032122e18d>:mutator-call:07e5137a050a',
-      'src/db/repositories/outgoing.ts#markOutgoingSentNoGuid:mutator-call:c4172f69161a',
-      'src/db/repositories/outgoing.ts#markOutgoingSentNoGuid:mutator-call:d9dedcf418e8',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess.<callback:a142c06cb1>:mutator-call:dd151c6d7808',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess.<callback:3512d97f02>:mutator-call:bb8ac1d4582d',
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess:mutator-call:73a6a7ceb3de',
@@ -7652,27 +7509,11 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     ].sort(),
   );
   assert.deepEqual(
-    automaticClaimTransactions.map((finding) => finding.id).sort(),
-    [
-      'src/db/repositories/outgoingRetry.ts#claimOutgoingForSend.<callback:8b54a95643>:mutator-call:4da8b89b721a',
-      'src/db/repositories/outgoingRetry.ts#claimOutgoingForSend:mutator-call:1dbbf9522fdd',
-      'src/db/repositories/outgoingRetry.ts#claimOutgoingForSend:mutator-call:6041bba0203c',
-    ].sort(),
-  );
-  assert.deepEqual(
     discardOutgoingTransactions.map((finding) => finding.id).sort(),
     [
       'src/db/repositories/outgoing.ts#discardOutgoingMessage.<callback:8d83cb9fc1>:mutator-call:0be1e09bf5c4',
       'src/db/repositories/outgoing.ts#discardOutgoingMessage:mutator-call:6218930bffa9',
       'src/db/repositories/outgoing.ts#discardOutgoingMessage:mutator-call:d96cda348479',
-    ].sort(),
-  );
-  assert.deepEqual(
-    retireOutgoingTransactions.map((finding) => finding.id).sort(),
-    [
-      'src/db/repositories/outgoing.ts#retireOutgoing.<callback:f2328120f0>:mutator-call:298962d2933f',
-      'src/db/repositories/outgoing.ts#retireOutgoing:mutator-call:bc4e8c366140',
-      'src/db/repositories/outgoing.ts#retireOutgoing:mutator-call:c3043ae321f5',
     ].sort(),
   );
   assert.deepEqual(
@@ -7684,43 +7525,11 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     ].sort(),
   );
   assert.deepEqual(
-    insertOutgoingContactTransactions.map((finding) => finding.id).sort(),
-    [
-      'src/db/repositories/outgoing.ts#insertOutgoingContact.<callback:98f48e222c>:mutator-call:09a076f2e3c8',
-      'src/db/repositories/outgoing.ts#insertOutgoingContact:mutator-call:bc8c5c28d457',
-      'src/db/repositories/outgoing.ts#insertOutgoingContact:mutator-call:d628f90e07c7',
-    ].sort(),
-  );
-  assert.deepEqual(
     insertOutgoingReactionTransactions.map((finding) => finding.id).sort(),
     [
       'src/db/repositories/outgoing.ts#insertOutgoingReaction.<callback:f1bafaf13b>:mutator-call:72bc76227c21',
       'src/db/repositories/outgoing.ts#insertOutgoingReaction:mutator-call:64518fc230a9',
       'src/db/repositories/outgoing.ts#insertOutgoingReaction:mutator-call:9142aa33dfcf',
-    ].sort(),
-  );
-  assert.deepEqual(
-    deleteMessageLocalTransactions.map((finding) => finding.id).sort(),
-    [
-      'src/db/repositories/messages.ts#deleteMessageLocal.<callback:2c9cb5d4ae>:mutator-call:c061bbf7d8c4',
-      'src/db/repositories/messages.ts#deleteMessageLocal:mutator-call:231b571b1d67',
-      'src/db/repositories/messages.ts#deleteMessageLocal:mutator-call:c9f4ead00063',
-    ].sort(),
-  );
-  assert.deepEqual(
-    applyLocalEditTransactions.map((finding) => finding.id).sort(),
-    [
-      'src/db/repositories/messages.ts#applyLocalEdit.<callback:883947ca1e>:mutator-call:9cf93eb40606',
-      'src/db/repositories/messages.ts#applyLocalEdit:mutator-call:86ec033b9584',
-      'src/db/repositories/messages.ts#applyLocalEdit:mutator-call:d242660d2423',
-    ].sort(),
-  );
-  assert.deepEqual(
-    applyLocalUnsendTransactions.map((finding) => finding.id).sort(),
-    [
-      'src/db/repositories/messages.ts#applyLocalUnsend.<callback:11057ec3bc>:mutator-call:c0ba6b7961f7',
-      'src/db/repositories/messages.ts#applyLocalUnsend:mutator-call:a2bb71d3173b',
-      'src/db/repositories/messages.ts#applyLocalUnsend:mutator-call:e61ef8e802ac',
     ].sort(),
   );
   assert.deepEqual(

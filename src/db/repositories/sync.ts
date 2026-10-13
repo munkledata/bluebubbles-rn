@@ -1,12 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import type { SyncMarker } from '@core/sync';
 import { syncMarkers } from '../schema';
-import {
-  runInTransactionContext,
-  withDbTransaction,
-  type DbCommitGuard,
-  type DbTransactionContext,
-} from '../transaction';
+import { runInTransactionContext, type DbTransactionContext } from '../transaction';
 import type { AppDatabase } from '../types';
 
 // ---- Sync markers ----------------------------------------------------------
@@ -33,19 +28,6 @@ export function setSyncMarkerWithinTransaction(
       })
       .where(eq(syncMarkers.id, 1));
   });
-}
-
-/** Standalone sync-marker owner. Existing transaction owners use the context-only form above. */
-export async function setSyncMarker(
-  db: AppDatabase,
-  marker: SyncMarker,
-  commitGuard?: DbCommitGuard,
-): Promise<void> {
-  return withDbTransaction(
-    db,
-    (context) => setSyncMarkerWithinTransaction(context, marker),
-    commitGuard,
-  );
 }
 
 /** Derive a sync marker from the highest message rowid/date currently stored. */

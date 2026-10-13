@@ -7,7 +7,6 @@ import {
   type InboxFilters,
 } from '@core/models';
 import {
-  applyLocalUnsend,
   countChatsForInbox,
   listChatsForInbox,
   listChatsForInboxPage,
@@ -19,6 +18,7 @@ import {
 } from '@db/repositories';
 import { participantList } from '@utils';
 import { createTestDb } from '../support/testDb';
+import { applyLocalUnsend } from '../support/repositoryWrappers';
 
 type Db = Awaited<ReturnType<typeof createTestDb>>;
 

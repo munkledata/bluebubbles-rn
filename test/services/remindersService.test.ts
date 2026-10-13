@@ -1,7 +1,5 @@
 import { Chat, Message, ServerInfo } from '@core/models';
 import {
-  createReminder,
-  deleteReminder,
   deleteReminderByNotificationId,
   deleteReminderByNotificationIdWithinTransaction,
   deleteReminderWithinTransaction,
@@ -27,6 +25,7 @@ import {
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
 import { createTestDb } from '../support/testDb';
+import { createReminder, deleteReminder } from '../support/repositoryWrappers';
 
 jest.mock('expo-crypto', () => ({
   randomUUID: jest.fn(() => '7f000000-0000-4000-8000-000000000001'),

@@ -1,11 +1,12 @@
 import { requireChatIdByGuidWithinTransaction } from '@db/repositories/chats';
-import { kvSet, kvSetWithinTransaction } from '@db/repositories/kv';
+import { kvSetWithinTransaction } from '@db/repositories/kv';
 import {
   runInTransactionContext,
   withDbTransaction,
   type DbTransactionContext,
 } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
+import { kvSet } from '../support/repositoryWrappers';
 
 /**
  * Compile-only contract for the DB-02B1 capability boundary.

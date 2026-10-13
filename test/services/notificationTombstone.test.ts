@@ -16,13 +16,13 @@ import { buildMessageIntents } from '@/services/notifications/intents';
 import {
   deleteChatLocal,
   getChatIdByGuid,
-  setChatMute,
   upsertChats,
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
+import { setChatMute } from '../support/repositoryWrappers';
 
 /** An inbound event for chat `c1` from Bob, with whatever message fields the case needs. */
 function inbound(fields: Record<string, unknown>): NormalizedEvent {

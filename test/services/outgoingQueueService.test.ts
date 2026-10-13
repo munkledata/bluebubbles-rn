@@ -11,7 +11,6 @@ import {
   getChatIdByGuid,
   imessagePlainTextQueueState,
   insertOutgoingAttachment,
-  insertOutgoingContact,
   insertOutgoingReaction,
   insertOutgoingText,
   listRetryableOutgoing,
@@ -38,6 +37,7 @@ import {
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
 import { createTestDb } from '../support/testDb';
+import { insertOutgoingContact } from '../support/repositoryWrappers';
 
 jest.mock('@/services/send/sendFailureNotice', () => ({
   clearFailedSendNotice: jest.fn(async () => undefined),

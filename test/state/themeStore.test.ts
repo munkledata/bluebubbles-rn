@@ -1,15 +1,10 @@
 import { getDatabase } from '@db/database';
-import {
-  createCustomTheme,
-  kvGet,
-  kvSet,
-  THEME_CUSTOM_KEY,
-  THEME_PREF_KEY,
-} from '@db/repositories';
+import { kvGet, THEME_CUSTOM_KEY, THEME_PREF_KEY } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import { useThemeStore } from '@state/themeStore';
 import { DEFAULT_PRESET, darkTheme, lightTheme, type ThemeTokens } from '@ui/theme/tokens';
 import { createTestDb } from '../support/testDb';
+import { createCustomTheme, kvSet } from '../support/repositoryWrappers';
 
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
 const mockGetDatabase = getDatabase as jest.Mock;
@@ -292,7 +287,7 @@ describe('themeStore setters', () => {
     });
     useThemeStore.setState({ customThemeId: id, customTokens: TOKENS });
     const edited: ThemeTokens = { ...TOKENS, color: { ...TOKENS.color, tint: '#00FF00' } };
-    const { updateCustomTheme } = await import('@db/repositories');
+    const { updateCustomTheme } = await import('../support/repositoryWrappers');
     await updateCustomTheme(db, id, { name: 'Mine', mode: 'dark', tokens: JSON.stringify(edited) });
     await useThemeStore.getState().reloadCustomTokens();
     expect(useThemeStore.getState().customTokens).toEqual(edited);
@@ -313,7 +308,7 @@ describe('themeStore setters', () => {
       tokens: JSON.stringify(TOKENS),
     });
     useThemeStore.setState({ customThemeId: id, customTokens: TOKENS });
-    const { updateCustomTheme } = await import('@db/repositories');
+    const { updateCustomTheme } = await import('../support/repositoryWrappers');
     await updateCustomTheme(db, id, {
       name: 'Mine',
       mode: 'light',

@@ -2,7 +2,6 @@ import {
   claimScheduled,
   getScheduledById,
   handoverScheduledTextToOutgoing,
-  insertScheduled,
   ScheduledOutgoingClaimLostError,
   ScheduledOutgoingTargetUnavailableError,
   type InsertOutgoingTextArgs,
@@ -10,6 +9,7 @@ import {
 import { DbCommitGuardRejectedError } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
+import { insertScheduled } from '../support/repositoryWrappers';
 
 interface Fixture {
   db: AppDatabase;

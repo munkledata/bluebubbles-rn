@@ -2,7 +2,6 @@ import { Chat, Message } from '@core/models';
 import { sql } from 'drizzle-orm';
 import notifee from 'react-native-notify-kit';
 import {
-  createReminder,
   getReminderByMessageGuid,
   upsertChats,
   upsertHandles,
@@ -29,6 +28,7 @@ import {
 } from '@/services/notifications/notificationRouting';
 import { cancelAllNotifications } from '@/services/notifications/notifeeService';
 import { createTestDb } from '../support/testDb';
+import { createReminder } from '../support/repositoryWrappers';
 
 let mockDb: AppDatabase;
 jest.mock('@/services/databaseControl', () => ({

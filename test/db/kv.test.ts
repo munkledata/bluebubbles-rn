@@ -1,5 +1,6 @@
-import { kvGet, kvSet, THEME_PREF_KEY } from '@db/repositories';
+import { kvGet, THEME_PREF_KEY } from '@db/repositories';
 import { createTestDb } from '../support/testDb';
+import { kvSet } from '../support/repositoryWrappers';
 
 describe('kv prefs', () => {
   it('roundtrips set/get and overwrites', async () => {

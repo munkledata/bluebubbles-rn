@@ -14,21 +14,15 @@ import {
   DRAFT_KV_PREFIX,
   NOTIFICATION_ROUTE_KV_PREFIX,
   clearLocalCache,
-  createCustomFolder,
-  createReminder,
   enqueueAttachmentMediaExport,
   enqueueIncomingEvent,
   getSyncMarker,
   insertErrorReport,
   insertOutgoingText,
-  insertScheduled,
   kvGet,
-  kvSet,
   localCacheDirty,
   recordAttachmentCacheEntry,
-  replaceCustomFolderMembership,
   searchMessages,
-  setSyncMarker,
   SHARE_INTAKE_RECEIPT_KV_PREFIX,
   setUrlPreview,
   THEME_PREF_KEY,
@@ -46,6 +40,14 @@ import {
   DELETIONS_SYNCED_AT_KEY,
 } from '@/services/sync/engine';
 import { createTestDb } from '../support/testDb';
+import {
+  createCustomFolder,
+  createReminder,
+  insertScheduled,
+  kvSet,
+  replaceCustomFolderMembership,
+  setSyncMarker,
+} from '../support/repositoryWrappers';
 
 const SETTING_KEY = 'sync.messagesPerChat';
 const INCOMING_DIGEST = 'a'.repeat(64);

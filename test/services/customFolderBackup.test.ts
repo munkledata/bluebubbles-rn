@@ -1,14 +1,6 @@
 import { Chat } from '@core/models';
 import { SecretBox } from '@core/crypto';
-import {
-  createCustomFolder,
-  listCustomFolderChatGuids,
-  listCustomFolders,
-  replaceCustomFolderMembership,
-  setCustomFolderShowUnreadBadge,
-  upsertChats,
-  upsertHandles,
-} from '@db/repositories';
+import { upsertChats, upsertHandles } from '@db/repositories';
 import {
   buildBackup,
   buildBackupWithCustomFolders,
@@ -19,6 +11,13 @@ import {
 import type { Backup } from '@/services/backup/backupSchema';
 import { createLibsodiumBackend } from '../support/libsodiumBackend';
 import { createTestDb } from '../support/testDb';
+import {
+  createCustomFolder,
+  listCustomFolderChatGuids,
+  listCustomFolders,
+  replaceCustomFolderMembership,
+  setCustomFolderShowUnreadBadge,
+} from '../support/repositoryWrappers';
 
 type TestDb = Awaited<ReturnType<typeof createTestDb>>;
 

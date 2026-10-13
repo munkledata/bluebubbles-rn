@@ -13,7 +13,7 @@
  */
 import { SecretBox } from '@core/crypto';
 import { logger } from '@core/secure';
-import { kvGet, kvSet } from '@db/repositories';
+import { kvGet } from '@db/repositories';
 import { getDatabase } from '@db/database';
 import type { AppDatabase } from '@db/types';
 import { createLibsodiumBackend } from '../support/libsodiumBackend';
@@ -96,6 +96,7 @@ import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
+import { kvSet } from '../support/repositoryWrappers';
 
 const mockShare = Sharing.shareAsync as jest.Mock;
 const mockAvailable = Sharing.isAvailableAsync as jest.Mock;

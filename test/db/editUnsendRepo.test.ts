@@ -1,7 +1,5 @@
 import { Chat, Message, parseMessageSummaryInfo } from '@core/models';
 import {
-  applyLocalEdit,
-  applyLocalUnsend,
   getMessageTextByGuid,
   revertLocalEdit,
   revertLocalUnsend,
@@ -13,6 +11,7 @@ import {
 import type { AppDatabase } from '@db/types';
 import { withDbTransaction } from '@db/transaction';
 import { createTestDb } from '../support/testDb';
+import { applyLocalEdit, applyLocalUnsend } from '../support/repositoryWrappers';
 
 type Outcome<T> = { kind: 'fulfilled'; value: T } | { kind: 'rejected'; error: unknown };
 

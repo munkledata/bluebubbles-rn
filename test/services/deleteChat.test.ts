@@ -30,10 +30,8 @@ import type Database from 'better-sqlite3';
 import { Chat } from '@core/models';
 import { logger } from '@core/secure';
 import {
-  createReminder,
   getAttachmentCacheEntry,
   getChatIdByGuid,
-  insertScheduled,
   listChatsForInbox,
   listReminders,
   listScheduledByChat,
@@ -109,6 +107,7 @@ import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
+import { createReminder, insertScheduled } from '../support/repositoryWrappers';
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;

@@ -606,15 +606,6 @@ export function insertOutgoingContactWithinTransaction(
   });
 }
 
-/** Standalone optimistic contact-card owner; composing services use the transaction-only body. */
-export async function insertOutgoingContact(
-  db: AppDatabase,
-  args: InsertOutgoingContactArgs,
-): Promise<OutgoingInsertResult> {
-  // ONE transaction — see the insert-atomicity note above insertOutgoingText.
-  return withDbTransaction(db, (context) => insertOutgoingContactWithinTransaction(context, args));
-}
-
 export interface InsertOutgoingLocationArgs {
   tempGuid: string;
   chatGuid: string;
@@ -1397,34 +1388,6 @@ export function reconcileOutgoingSuccessWithinTransaction(
   });
 }
 
-/**
- * Reconcile a send that SUCCEEDED but returned no GUID (the AppleScript fallback path).
- * The message left the device, so: drop the queue row (no more retries) and flip the
- * still-temp optimistic bubble to 'sent'. Its identity stays the tempGuid until the socket
- * `new-message` echo (which carries the tempGuid) promotes it to the real guid. Used by the
- * send services and the retry processor for the absent-guid case.
- *
- * The promote and the queue-row delete commit in ONE transaction, for the same reason as
- * {@link reconcileOutgoingSuccess}: as two autocommits, a death in the gap leaves a 'sent' bubble
- * whose queue row survives, and the next launch's drain re-sends a message already delivered.
- *
- * A cancelled send needs no branch here either: the discard already TOMBSTONED the row, and this
- * write touches send_state/error only, so the message stays hidden while keeping the identity the
- * fanout will promote (see the cancelled-send rule at the top of this file).
- */
-export async function markOutgoingSentNoGuid(
-  db: AppDatabase,
-  tempGuid: string,
-  commitGuard?: DbCommitGuard,
-  settlement?: OutgoingAttemptSettlement,
-): Promise<OutgoingAckDisposition> {
-  return withDbTransaction(
-    db,
-    (context) => markOutgoingSentNoGuidWithinTransaction(context, tempGuid, settlement),
-    commitGuard,
-  );
-}
-
 export function markOutgoingSentNoGuidWithinTransaction(
   context: DbTransactionContext,
   tempGuid: string,
@@ -1957,19 +1920,6 @@ export function reconcileOutgoingAttemptAckWithinTransaction(
   });
 }
 
-/** Standalone owner for exact capable-RCS success reconciliation. */
-export function reconcileExactOutgoingAttemptSuccess(
-  db: AppDatabase,
-  success: ExactOutgoingAttemptSuccess,
-  commitGuard?: DbCommitGuard,
-): Promise<ExactOutgoingAttemptSuccessDisposition> {
-  return withDbTransaction(
-    db,
-    (context) => reconcileExactOutgoingAttemptSuccessWithinTransaction(context, success),
-    commitGuard,
-  );
-}
-
 /** The minimal echo fields reconcileEchoByContent needs to correlate to an optimistic row. */
 export interface EchoMatchFields {
   guid: string;
@@ -2302,29 +2252,6 @@ export function retireUncertainOutgoingWithinTransaction(
       .returning({ id: messages.id });
     return marked.length > 0;
   });
-}
-
-/**
- * Permanently retire a queue row (no further automatic retries): attempts jumps to the cap and
- * the bubble is forced to 'error' unless it already reconciled to 'sent'. For failures no retry
- * can ever fix — the attachment's on-disk file is gone, or the row's kind is unknown. The queue
- * row is KEPT, matching the natural attempts-cap retirement (the bubble's 'error' state is what
- * makes it cancellable, and `cancelOutgoing` removes the ladder along with it either way).
- *
- * The optional guard authorizes this standalone commit. Services composing the write use
- * {@link retireOutgoingWithinTransaction} inside their own short guarded owner.
- */
-export async function retireOutgoing(
-  db: AppDatabase,
-  tempGuid: string,
-  errorCode = 1,
-  commitGuard?: DbCommitGuard,
-): Promise<void> {
-  await withDbTransaction(
-    db,
-    (context) => retireOutgoingWithinTransaction(context, tempGuid, errorCode),
-    commitGuard,
-  );
 }
 
 export {

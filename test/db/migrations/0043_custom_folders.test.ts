@@ -1,5 +1,7 @@
 import Database from 'better-sqlite3';
 import { runMigrations, type SqlRunner } from '@db/migrate';
+
+import { createTestDb } from '../../support/testDb';
 import {
   createCustomFolder,
   deleteCustomFolder,
@@ -8,8 +10,7 @@ import {
   renameCustomFolder,
   reorderCustomFolders,
   replaceCustomFolderMembership,
-} from '@db/repositories';
-import { createTestDb } from '../../support/testDb';
+} from '../../support/repositoryWrappers';
 
 const MIGRATION_NAME = '0043_custom_folders';
 const CREATE_TABLE_MARKER = 'CREATE TABLE custom_folders';

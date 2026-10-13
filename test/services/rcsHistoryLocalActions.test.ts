@@ -9,9 +9,7 @@
 import type Database from 'better-sqlite3';
 import { Chat, Message } from '@core/models';
 import {
-  createCustomFolder,
   getChatIdByGuid,
-  insertScheduled,
   listChatsForInbox,
   listScheduledByChat,
   upsertChats,
@@ -53,6 +51,7 @@ import {
   setChatPinned,
 } from '@/services/chatActions';
 import { replaceCustomFolderMembership } from '@/services/customFolderCommands';
+import { createCustomFolder, insertScheduled } from '../support/repositoryWrappers';
 
 const LEGACY_RCS_GUID = 'RCS;-;legacy-conversation';
 const OLD_PAIRING_RCS_GUID = `RCS;-;g1.gpe1_${'B'.repeat(43)}.b2xkLWNvbnZlcnNhdGlvbg`;

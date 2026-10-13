@@ -7,7 +7,6 @@ import {
   isShareIntakeNewChatRetryWindowOpen,
   isShareIntakeReceiptComplete,
   listShareIntakeReceiptBatchIds,
-  prepareShareIntakeNewChatPlan,
   recordShareIntakeNewChatWithinTransaction,
   SHARE_INTAKE_RECEIPT_KV_PREFIX,
   SHARE_INTAKE_NEW_CHAT_RETRY_WINDOW_MS,
@@ -16,6 +15,7 @@ import {
 } from '@db/repositories/shareIntakeReceipts';
 import { withDbTransaction } from '@db/transaction';
 import { createTestDb } from '../support/testDb';
+import { prepareShareIntakeNewChatPlan } from '../support/repositoryWrappers';
 
 const identity = (
   suffix: string,

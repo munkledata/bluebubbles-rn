@@ -5,12 +5,9 @@ import { sql } from 'drizzle-orm';
 import {
   claimDueScheduled,
   claimScheduled,
-  deleteScheduled,
-  deleteScheduledHistory,
   deleteScheduledHistoryWithinTransaction,
   deleteScheduledWithinTransaction,
   getScheduledById,
-  insertScheduled,
   listAllScheduled,
   listDueScheduled,
   listScheduledHistory,
@@ -21,7 +18,6 @@ import {
   reconcileServerScheduled,
   resetStuckScheduled,
   SCHED_MAX_ATTEMPTS,
-  updateScheduled,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import { nextOccurrence } from '@core/schedule';
@@ -30,6 +26,12 @@ import { ScheduledItem } from '@core/api/endpoints/scheduled';
 import { runDueScheduled, scheduleTextMessage } from '@/services/send/scheduleService';
 import { fixedRcsCapabilitySource } from '@/services/send/rcsAttemptCapability';
 import { createTestDb } from '../support/testDb';
+import {
+  deleteScheduled,
+  deleteScheduledHistory,
+  insertScheduled,
+  updateScheduled,
+} from '../support/repositoryWrappers';
 
 const noHttp = {} as unknown as HttpClient;
 const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;

@@ -3,17 +3,19 @@ import {
   cancelOutgoing,
   deleteChatLocal,
   insertOutgoingText,
-  markOutgoingSentNoGuid,
   reconcileEchoByContent,
-  reconcileExactOutgoingAttemptSuccess,
   reconcileOutgoingSuccess,
-  upsertAttachments,
   upsertChats,
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import { createTestDb } from '../support/testDb';
+import {
+  markOutgoingSentNoGuid,
+  reconcileExactOutgoingAttemptSuccess,
+  upsertAttachments,
+} from '../support/repositoryWrappers';
 
 async function seedSeparatedChats() {
   const testDb = await createTestDb();

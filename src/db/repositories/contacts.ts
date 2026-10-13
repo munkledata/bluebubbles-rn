@@ -618,23 +618,6 @@ export async function handlesNeedingAvatar(
   );
 }
 
-/**
- * Write a server-sourced avatar uri onto a handle (only the photo — not display_name /
- * contact_id, which stay device-contact-owned). Used by the server-avatar backfill for
- * handles a device contact didn't supply a photo for. `expectedAvatar` defaults to null for a new
- * fill; revalidation may instead replace or clear one exact app-owned path. The compare-and-swap
- * is checked again after the download, so a device-contact photo that arrived meanwhile wins.
- */
-export async function setHandleServerAvatar(
-  db: AppDatabase,
-  handleId: number,
-  uri: string,
-): Promise<boolean> {
-  return withDbTransaction(db, (context) =>
-    setHandleServerAvatarWithinTransaction(context, handleId, uri),
-  );
-}
-
 export function setHandleServerAvatarWithinTransaction(
   context: DbTransactionContext,
   handleId: number,

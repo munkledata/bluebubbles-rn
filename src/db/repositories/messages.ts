@@ -1036,21 +1036,6 @@ export function deleteMessageLocalWithinTransaction(
   });
 }
 
-/**
- * Record one user-requested local deletion in its own standalone transaction. Callers that already own
- * the transaction must use {@link deleteMessageLocalWithinTransaction} instead of nesting this
- * wrapper.
- */
-export async function deleteMessageLocal(
-  db: AppDatabase,
-  guid: string,
-  now: number,
-): Promise<DeleteMessageLocalResult> {
-  return withDbTransaction(db, (context) =>
-    deleteMessageLocalWithinTransaction(context, guid, now),
-  );
-}
-
 // ---- Edit / Unsend (operate on real guids; mutate in place, reactive watcher updates UI) ----
 
 export interface LocalEditSnapshot {
@@ -1107,18 +1092,6 @@ export function applyLocalEditWithinTransaction(
       chatGuid: previous.chatGuid,
     };
   });
-}
-
-/** Standalone optimistic-edit owner; composing services use the transaction-only body. */
-export async function applyLocalEdit(
-  db: AppDatabase,
-  guid: string,
-  newText: string,
-  now: number,
-): Promise<LocalEditSnapshot | null> {
-  return withDbTransaction(db, (context) =>
-    applyLocalEditWithinTransaction(context, guid, newText, now),
-  );
 }
 
 export interface LocalUnsendSnapshot {
@@ -1274,18 +1247,6 @@ export function clearUnconfirmedUnsendWithinTransaction(
   return runInTransactionContext(context, async (db) => {
     await db.delete(kv).where(eq(kv.key, `${UNSEND_UNCONFIRMED_KV_PREFIX}${messageGuid}`));
   });
-}
-
-/** Standalone optimistic-unsend owner; composing services use the transaction-only body. */
-export async function applyLocalUnsend(
-  db: AppDatabase,
-  guid: string,
-  now: number,
-  partIndex: number = 0,
-): Promise<LocalUnsendSnapshot | null> {
-  return withDbTransaction(db, (context) =>
-    applyLocalUnsendWithinTransaction(context, guid, now, partIndex),
-  );
 }
 
 /**

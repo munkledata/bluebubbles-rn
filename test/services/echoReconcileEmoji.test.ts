@@ -11,7 +11,6 @@ import { EventRouter } from '@core/realtime';
 import {
   insertOutgoingReaction,
   listReactionsByMessageGuids,
-  markOutgoingSentNoGuid,
   upsertChats,
   upsertHandles,
   upsertMessages,
@@ -19,6 +18,7 @@ import {
 import type { AppDatabase } from '@db/types';
 import { DbEventSink } from '@/services/realtime/dbEventSink';
 import { createTestDb } from '../support/testDb';
+import { markOutgoingSentNoGuid } from '../support/repositoryWrappers';
 
 async function seed(db: AppDatabase): Promise<number> {
   const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);

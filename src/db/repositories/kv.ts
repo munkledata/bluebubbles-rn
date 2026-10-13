@@ -1,10 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { kv } from '../schema';
-import {
-  runInTransactionContext,
-  withDbTransaction,
-  type DbTransactionContext,
-} from '../transaction';
+import { runInTransactionContext, type DbTransactionContext } from '../transaction';
 import type { AppDatabase } from '../types';
 
 // ---- Key-value prefs (non-secret) ----
@@ -48,9 +44,4 @@ export async function kvSetWithinTransaction(
       .values({ key, value })
       .onConflictDoUpdate({ target: kv.key, set: { value: sql`excluded.value` } });
   });
-}
-
-/** Standalone key/value upsert. Callers already inside a transaction must use the scoped form. */
-export async function kvSet(db: AppDatabase, key: string, value: string): Promise<void> {
-  await withDbTransaction(db, (context) => kvSetWithinTransaction(context, key, value));
 }

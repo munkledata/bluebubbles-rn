@@ -1,12 +1,6 @@
 import { and, eq, inArray, sql } from 'drizzle-orm';
 import { customFolderMembers, customFolders } from '../schema';
-import {
-  runInTransactionContext,
-  withDbTransaction,
-  type DbCommitGuard,
-  type DbTransactionContext,
-} from '../transaction';
-import type { AppDatabase } from '../types';
+import { runInTransactionContext, type DbTransactionContext } from '../transaction';
 import { chatHasUnreadSql } from './chatVisibility';
 
 export const MAX_CUSTOM_FOLDERS = 100;
@@ -130,18 +124,6 @@ export function listCustomFoldersWithinTransaction(
   });
 }
 
-/** Consistency-sensitive read: queue behind mutations so partial reorder/replacement is invisible. */
-export function listCustomFolders(
-  db: AppDatabase,
-  commitGuard?: DbCommitGuard,
-): Promise<CustomFolderListRow[]> {
-  return withDbTransaction(
-    db,
-    (context) => listCustomFoldersWithinTransaction(context),
-    commitGuard,
-  );
-}
-
 /**
  * Live manager-only summaries. The materialized CTE calculates unread state once per unique saved
  * chat, then overlapping folders reuse that result instead of repeating the message lookup.
@@ -209,19 +191,6 @@ export function listCustomFolderChatGuidsWithinTransaction(
   });
 }
 
-/** Consistency-sensitive read: queue behind add-before-prune membership replacement. */
-export function listCustomFolderChatGuids(
-  db: AppDatabase,
-  folderId: number,
-  commitGuard?: DbCommitGuard,
-): Promise<string[]> {
-  return withDbTransaction(
-    db,
-    (context) => listCustomFolderChatGuidsWithinTransaction(context, folderId),
-    commitGuard,
-  );
-}
-
 export function createCustomFolderWithinTransaction(
   context: DbTransactionContext,
   inputName: string,
@@ -254,18 +223,6 @@ export function createCustomFolderWithinTransaction(
   });
 }
 
-export function createCustomFolder(
-  db: AppDatabase,
-  name: string,
-  commitGuard?: DbCommitGuard,
-): Promise<CustomFolderRow> {
-  return withDbTransaction(
-    db,
-    (context) => createCustomFolderWithinTransaction(context, name),
-    commitGuard,
-  );
-}
-
 export function renameCustomFolderWithinTransaction(
   context: DbTransactionContext,
   folderId: number,
@@ -285,19 +242,6 @@ export function renameCustomFolderWithinTransaction(
       .returning({ id: customFolders.id });
     return updated.length > 0;
   });
-}
-
-export function renameCustomFolder(
-  db: AppDatabase,
-  folderId: number,
-  name: string,
-  commitGuard?: DbCommitGuard,
-): Promise<boolean> {
-  return withDbTransaction(
-    db,
-    (context) => renameCustomFolderWithinTransaction(context, folderId, name),
-    commitGuard,
-  );
 }
 
 /** Toggle only the aggregate folder badge; message read markers remain untouched. */
@@ -320,20 +264,6 @@ export function setCustomFolderShowUnreadBadgeWithinTransaction(
   });
 }
 
-export function setCustomFolderShowUnreadBadge(
-  db: AppDatabase,
-  folderId: number,
-  showUnreadBadge: boolean,
-  commitGuard?: DbCommitGuard,
-): Promise<boolean> {
-  return withDbTransaction(
-    db,
-    (context) =>
-      setCustomFolderShowUnreadBadgeWithinTransaction(context, folderId, showUnreadBadge),
-    commitGuard,
-  );
-}
-
 export function deleteCustomFolderWithinTransaction(
   context: DbTransactionContext,
   folderId: number,
@@ -346,18 +276,6 @@ export function deleteCustomFolderWithinTransaction(
       .returning({ id: customFolders.id });
     return deleted.length > 0;
   });
-}
-
-export function deleteCustomFolder(
-  db: AppDatabase,
-  folderId: number,
-  commitGuard?: DbCommitGuard,
-): Promise<boolean> {
-  return withDbTransaction(
-    db,
-    (context) => deleteCustomFolderWithinTransaction(context, folderId),
-    commitGuard,
-  );
 }
 
 /** Replace the complete visible order only when the caller still names the exact folder set. */
@@ -382,18 +300,6 @@ export function reorderCustomFoldersWithinTransaction(
     }
     return true;
   });
-}
-
-export function reorderCustomFolders(
-  db: AppDatabase,
-  ids: readonly number[],
-  commitGuard?: DbCommitGuard,
-): Promise<boolean> {
-  return withDbTransaction(
-    db,
-    (context) => reorderCustomFoldersWithinTransaction(context, ids),
-    commitGuard,
-  );
 }
 
 /**
@@ -463,17 +369,4 @@ export function replaceCustomFolderMembershipWithinTransaction(
     }
     return true;
   });
-}
-
-export function replaceCustomFolderMembership(
-  db: AppDatabase,
-  folderId: number,
-  chatGuids: readonly string[],
-  commitGuard?: DbCommitGuard,
-): Promise<boolean> {
-  return withDbTransaction(
-    db,
-    (context) => replaceCustomFolderMembershipWithinTransaction(context, folderId, chatGuids),
-    commitGuard,
-  );
 }

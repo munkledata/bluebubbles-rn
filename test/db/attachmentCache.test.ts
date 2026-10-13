@@ -6,7 +6,6 @@ import {
   commitAttachmentCacheReservation,
   confirmAttachmentCacheEntryDeleted,
   createAttachmentCacheReservation,
-  deleteMessageLocal,
   getAttachmentCacheEntry,
   getAttachmentCacheQuotaSnapshot,
   getAttachmentCacheUsage,
@@ -25,6 +24,7 @@ import {
   type DbTransactionContext,
 } from '@db/transaction';
 import { createTestDb } from '../support/testDb';
+import { deleteMessageLocal } from '../support/repositoryWrappers';
 
 const PATH = 'file:///documents/attachments/aa/file.jpg';
 /** A maximum-size caption (65,536 UTF-8 bytes) with characters JSON must escape. */

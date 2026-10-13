@@ -10,7 +10,6 @@ import type { HttpClient } from '@core/api/http';
 import {
   claimScheduled,
   getScheduledById,
-  insertScheduled,
   listAllScheduled,
   upsertChats,
   upsertHandles,
@@ -73,6 +72,7 @@ import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
+import { insertScheduled } from '../support/repositoryWrappers';
 
 interface Deferred<T> {
   promise: Promise<T>;

@@ -6,7 +6,6 @@ import {
   listMessages,
   maxMessageMarker,
   searchMessages,
-  setSyncMarker,
   setSyncMarkerWithinTransaction,
   upsertChats,
   upsertHandles,
@@ -15,6 +14,7 @@ import {
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import { createTestDb } from '../support/testDb';
+import { setSyncMarker } from '../support/repositoryWrappers';
 
 function chat(guid: string, extra: Record<string, unknown> = {}) {
   return Chat.parse({

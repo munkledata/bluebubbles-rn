@@ -1,8 +1,6 @@
 import type Database from 'better-sqlite3';
 import { Attachment, Chat, Message } from '@core/models';
 import {
-  applyLocalUnsend,
-  deleteMessageLocal,
   getChatHeader,
   listThreadMessages,
   getChatIdByGuid,
@@ -13,7 +11,6 @@ import {
   listMessagesAround,
   listMessagesWithSenders,
   markMessageDeleted,
-  markMessageSendError,
   reconcileOutgoingSuccess,
   setLastReadMessageGuid,
   upsertChats,
@@ -25,6 +22,11 @@ import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { buildGroupEventText } from '@utils';
 import { createTestDb } from '../support/testDb';
+import {
+  applyLocalUnsend,
+  deleteMessageLocal,
+  markMessageSendError,
+} from '../support/repositoryWrappers';
 
 async function holdRollingBackTransaction(
   db: AppDatabase,

@@ -2,7 +2,6 @@ import {
   claimAttachmentCachePathsForRetirement,
   commitAttachmentCacheReservation,
   createAttachmentCacheReservation,
-  deleteMessageLocal,
   getAttachmentCacheEntry,
   recordAttachmentCacheEntry,
 } from '@db/repositories';
@@ -20,6 +19,7 @@ import {
   ATTACHMENT_CACHE_MIN_FREE_BYTES,
 } from '@/services/download/attachmentCacheQuotaPolicy';
 import { createTestDb } from '../support/testDb';
+import { deleteMessageLocal } from '../support/repositoryWrappers';
 
 const NOW = 2_000_000;
 const OLD = NOW - 20 * 60 * 1000;

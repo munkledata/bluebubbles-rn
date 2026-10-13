@@ -17,7 +17,6 @@ import {
   listChatImageAttachmentsByAttachmentGuid,
   replaceVisibleAttachmentLocalPathWithinTransaction,
   updateAttachmentLocalPath,
-  upsertAttachments,
   upsertChats,
   upsertHandles,
   upsertMessages,
@@ -26,6 +25,7 @@ import { attachments, chats, messages, outgoingQueue } from '@db/schema';
 import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
+import { upsertAttachments } from '../support/repositoryWrappers';
 
 type OutgoingAttachmentArgs = InsertOutgoingAttachmentArgs & { chatId: number };
 

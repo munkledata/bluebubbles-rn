@@ -1,9 +1,7 @@
 import { Chat, Message } from '@core/models';
 import {
-  createCustomFolder,
   listCustomFolderInboxPageWithinTransaction,
   MAX_CUSTOM_FOLDER_MEMBERS,
-  replaceCustomFolderMembership,
   searchChatGuidsByMessage,
   upsertChats,
   upsertHandles,
@@ -11,6 +9,7 @@ import {
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import { createTestDb } from '../support/testDb';
+import { createCustomFolder, replaceCustomFolderMembership } from '../support/repositoryWrappers';
 
 type TestDb = Awaited<ReturnType<typeof createTestDb>>;
 

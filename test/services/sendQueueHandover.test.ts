@@ -22,7 +22,6 @@ import {
   getChatIdByGuid,
   getScheduledById,
   insertOutgoingText,
-  insertScheduled,
   outgoingBackoffMs,
   upsertChats,
   upsertHandles,
@@ -31,6 +30,7 @@ import type { AppDatabase } from '@db/types';
 import { runDueScheduled } from '@/services/send/scheduleService';
 import { runOutgoingQueue, type OutgoingQueueIO } from '@/services/send/outgoingQueueService';
 import { createTestDb } from '../support/testDb';
+import { insertScheduled } from '../support/repositoryWrappers';
 
 const noHttp = {} as unknown as HttpClient;
 

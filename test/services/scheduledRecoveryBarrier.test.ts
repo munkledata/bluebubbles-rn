@@ -1,5 +1,5 @@
 import type { HttpClient } from '@core/api/http';
-import { claimScheduled, getScheduledById, insertScheduled } from '@db/repositories';
+import { claimScheduled, getScheduledById } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import {
   ensureScheduledRecovery,
@@ -7,6 +7,7 @@ import {
   ScheduledRecoveryIncompleteError,
 } from '@/services/send/scheduleService';
 import { createTestDb } from '../support/testDb';
+import { insertScheduled } from '../support/repositoryWrappers';
 
 const noHttp = {} as HttpClient;
 

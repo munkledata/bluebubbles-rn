@@ -6,7 +6,6 @@ import { attachments, chats, messages, outgoingQueue } from '../schema';
 import {
   runInTransactionContext,
   withDbTransaction,
-  type DbCommitGuard,
   type DbTransactionContext,
 } from '../transaction';
 import type { AppDatabase } from '../types';
@@ -145,19 +144,6 @@ export function upsertAttachmentsWithinTransaction(
         },
       });
   });
-}
-
-/** Public standalone attachment ingestion. Never wrap this helper in another transaction. */
-export async function upsertAttachments(
-  db: AppDatabase,
-  items: Array<{ att: Attachment; messageId: number }>,
-  commitGuard?: DbCommitGuard,
-): Promise<void> {
-  await withDbTransaction(
-    db,
-    (context) => upsertAttachmentsWithinTransaction(context, items),
-    commitGuard,
-  );
 }
 
 // ---- Attachments -----------------------------------------------------------

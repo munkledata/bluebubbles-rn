@@ -325,16 +325,6 @@ export async function getShareIntakeReceipt(
   });
 }
 
-export async function prepareShareIntakeNewChatPlan(
-  db: AppDatabase,
-  identity: ShareIntakeManifestIdentity,
-  plan: ShareIntakeNewChatPlan,
-): Promise<ShareIntakeNewChatPlan> {
-  return withDbTransaction(db, (context) =>
-    prepareShareIntakeNewChatPlanWithinTransaction(context, identity, plan),
-  );
-}
-
 export async function prepareShareIntakeNewChatPlanWithinTransaction(
   context: DbTransactionContext,
   identity: ShareIntakeManifestIdentity,

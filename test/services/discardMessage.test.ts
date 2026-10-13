@@ -15,7 +15,6 @@
 import type Database from 'better-sqlite3';
 import { Chat, Message, ServerInfo } from '@core/models';
 import {
-  deleteMessageLocal,
   getChatIdByGuid,
   insertOutgoingAttachment,
   insertOutgoingText,
@@ -64,6 +63,7 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 // eslint-disable-next-line import/first
 import { getDatabase } from '@db/database';
+import { deleteMessageLocal } from '../support/repositoryWrappers';
 
 jest.setTimeout(120_000);
 

@@ -1,10 +1,8 @@
 import { Chat } from '@core/models';
 import {
-  kvSet,
   listChatsForInbox,
   restoreThemes,
   setChatCustomization,
-  setChatPin,
   swapPinnedChatOrder,
   upsertChats,
   upsertHandles,
@@ -44,6 +42,7 @@ import { createLibsodiumBackend } from '../support/libsodiumBackend';
 import { darkTheme } from '@ui/theme/tokens';
 import { createTestDb } from '../support/testDb';
 import { themeTokens } from '../support/themeTokens';
+import { kvSet, setChatPin } from '../support/repositoryWrappers';
 
 type Db = Awaited<ReturnType<typeof createTestDb>>;
 

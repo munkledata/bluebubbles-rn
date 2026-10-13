@@ -6,7 +6,6 @@ import {
   listChatsForInbox,
   listMessages,
   getSyncMarker,
-  setSyncMarker,
   upsertChats,
   upsertContacts,
   upsertHandles,
@@ -25,6 +24,7 @@ import {
 import type { AppDatabase } from '@db/types';
 import type { SyncApi } from '@/services/sync/types';
 import { createTestDb } from '../support/testDb';
+import { setSyncMarker } from '../support/repositoryWrappers';
 
 function msg(guid: string, rowId: number, text: string, chatGuid: string) {
   return Message.parse({

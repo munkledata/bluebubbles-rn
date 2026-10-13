@@ -19,7 +19,6 @@ import { sql } from 'drizzle-orm';
 import { Chat, Message } from '@core/models';
 import {
   getChatIdByGuid,
-  setChatUnreadLocal,
   setLastReadMessageGuid,
   upsertChats,
   upsertChatsWithinTransaction,
@@ -105,6 +104,7 @@ import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
+import { setChatUnreadLocal } from '../support/repositoryWrappers';
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;

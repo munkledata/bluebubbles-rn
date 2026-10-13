@@ -39,19 +39,6 @@ export function createReminderWithinTransaction(
   });
 }
 
-/** Standalone reminder-creation owner; composing services use the transaction-only body. */
-export async function createReminder(
-  db: AppDatabase,
-  r: CreateReminderArgs,
-  commitGuard?: DbCommitGuard,
-): Promise<number> {
-  return withDbTransaction(
-    db,
-    (context) => createReminderWithinTransaction(context, r),
-    commitGuard,
-  );
-}
-
 const REMINDER_COLS = sql`id, message_guid AS messageGuid, chat_guid AS chatGuid,
   message_preview AS messagePreview, sender_name AS senderName, scheduled_for AS scheduledFor,
   notification_id AS notificationId, created_at AS createdAt`;
@@ -87,19 +74,6 @@ export function deleteReminderWithinTransaction(
       .returning({ id: reminders.id });
     return deleted.length > 0;
   });
-}
-
-export async function deleteReminder(
-  db: AppDatabase,
-  id: number,
-  commitGuard?: DbCommitGuard,
-  expectedNotificationId?: string,
-): Promise<boolean> {
-  return withDbTransaction(
-    db,
-    (context) => deleteReminderWithinTransaction(context, id, expectedNotificationId),
-    commitGuard,
-  );
 }
 
 export function deleteReminderByNotificationIdWithinTransaction(

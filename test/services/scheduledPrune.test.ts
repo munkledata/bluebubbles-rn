@@ -14,12 +14,10 @@
 import { Chat } from '@core/models';
 import {
   getScheduledById,
-  insertScheduled,
   listAllScheduled,
   listScheduledHistory,
   listServerScheduledPruneExposure,
   reconcileServerScheduled,
-  updateScheduled,
   upsertChats,
   upsertHandles,
 } from '@db/repositories';
@@ -54,6 +52,7 @@ import { syncScheduledFromServer } from '@/services/send';
 import { getDatabase } from '@db/database';
 // eslint-disable-next-line import/first
 import { getScheduled } from '@core/api/endpoints/scheduled';
+import { insertScheduled, updateScheduled } from '../support/repositoryWrappers';
 
 const mockGetScheduled = getScheduled as jest.Mock;
 

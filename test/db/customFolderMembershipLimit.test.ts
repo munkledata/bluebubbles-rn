@@ -1,11 +1,13 @@
 import {
   CustomFolderMembershipLimitError,
   MAX_CUSTOM_FOLDER_MEMBERSHIPS_TOTAL,
+} from '@db/repositories';
+import { createTestDb } from '../support/testDb';
+import {
   createCustomFolder,
   listCustomFolderChatGuids,
   replaceCustomFolderMembership,
-} from '@db/repositories';
-import { createTestDb } from '../support/testDb';
+} from '../support/repositoryWrappers';
 
 // Folders used to accept up to 100 × 5,000 members while a backup holds at most 25,000 in total,
 // so a large folder set made every later backup fail. The total is now enforced when saving.

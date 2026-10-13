@@ -85,10 +85,10 @@ jest.mock('@/services/notifications/notifeeService', () => ({
   openNotificationPermissionSettings: jest.fn(),
   requestNotificationPermission: jest.fn(),
 }));
-// Keep every real repository export; only replace kvSet so we can watch the persist calls.
+// Keep every real repository export; only replace kvSetWithinTransaction so we can watch the
+// persist calls.
 jest.mock('@db/repositories', () => ({
   ...jest.requireActual('@db/repositories'),
-  kvSet: jest.fn(async () => undefined),
   kvSetWithinTransaction: jest.fn(async () => undefined),
 }));
 
@@ -116,7 +116,7 @@ import {
 // eslint-disable-next-line import/first
 import { getDatabase } from '@db/database';
 // eslint-disable-next-line import/first
-import { kvSet, kvSetWithinTransaction } from '@db/repositories';
+import { kvSetWithinTransaction } from '@db/repositories';
 // eslint-disable-next-line import/first
 import { ERROR_REPORTING_CONSENT_KEY, useFeatureSettingsStore } from '@state/featureSettingsStore';
 // eslint-disable-next-line import/first
@@ -152,7 +152,6 @@ const mockGetNotificationPermissionState = getNotificationPermissionState as jes
 const mockOpenNotificationPermissionSettings = openNotificationPermissionSettings as jest.Mock;
 const mockRequestNotificationPermission = requestNotificationPermission as jest.Mock;
 const mockGetDatabase = getDatabase as jest.Mock;
-const mockKvSet = kvSet as jest.Mock;
 const mockKvSetWithinTransaction = kvSetWithinTransaction as jest.Mock;
 
 function sqlStatementText(value: unknown): string {
@@ -221,7 +220,6 @@ beforeEach(() => {
   mockOpenNotificationPermissionSettings.mockResolvedValue(undefined);
   mockRequestNotificationPermission.mockResolvedValue(true);
   mockRotate.mockResolvedValue(undefined);
-  mockKvSet.mockResolvedValue(undefined);
   mockKvSetWithinTransaction.mockResolvedValue(undefined);
   mockAccountADb.run.mockResolvedValue(undefined);
   mockAccountBDb.run.mockResolvedValue(undefined);

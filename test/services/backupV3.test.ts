@@ -1,16 +1,5 @@
 import { Chat } from '@core/models';
-import {
-  createCustomFolder,
-  kvGet,
-  kvSet,
-  listCustomFolderChatGuids,
-  listCustomFolders,
-  replaceCustomFolderMembership,
-  setChatCustomization,
-  setCustomFolderShowUnreadBadge,
-  upsertChats,
-  upsertHandles,
-} from '@db/repositories';
+import { kvGet, setChatCustomization, upsertChats, upsertHandles } from '@db/repositories';
 import { MAX_CUSTOM_FOLDER_MEMBERS, MAX_CUSTOM_FOLDERS } from '@db/repositories/customFolders';
 import {
   buildBackupWithCustomFolders,
@@ -30,6 +19,14 @@ import { SecretBox } from '@core/crypto';
 import { createLibsodiumBackend } from '../support/libsodiumBackend';
 import { createTestDb } from '../support/testDb';
 import { themeTokens } from '../support/themeTokens';
+import {
+  createCustomFolder,
+  kvSet,
+  listCustomFolderChatGuids,
+  listCustomFolders,
+  replaceCustomFolderMembership,
+  setCustomFolderShowUnreadBadge,
+} from '../support/repositoryWrappers';
 
 type TestDb = Awaited<ReturnType<typeof createTestDb>>;
 

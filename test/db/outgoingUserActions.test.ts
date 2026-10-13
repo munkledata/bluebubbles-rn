@@ -17,24 +17,26 @@ import { Chat } from '@core/models';
 import {
   cancelOutgoing,
   claimFailedOutgoingForRetry,
-  claimOutgoingForSend,
   claimOutgoingForSendWithinTransaction,
   countOutgoingQueueHealth,
   deferOutgoingSendClaimWithinTransaction,
   discardOutgoingMessage,
-  insertOutgoingContact,
   insertOutgoingText,
   listMessagesWithSenders,
   OUTGOING_MAX_ATTEMPTS,
   reconcileEchoByContent,
   reconcileOutgoingError,
-  retireOutgoing,
   upsertChats,
   upsertHandles,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
+import {
+  claimOutgoingForSend,
+  insertOutgoingContact,
+  retireOutgoing,
+} from '../support/repositoryWrappers';
 
 const OUTGOING_RETRY_LEASE_MS = 120_000;
 const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;

@@ -2,7 +2,6 @@ import type Database from 'better-sqlite3';
 import { resolveExactMessageTargetPartIndex } from '@core/messages/partIndex';
 import { Chat, Message, parseMessagePartTopology } from '@core/models';
 import {
-  applyLocalUnsend,
   getChatIdByGuid,
   getMessagePreviewByGuid,
   listAttachmentsByMessageIds,
@@ -13,6 +12,7 @@ import {
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
+import { applyLocalUnsend } from '../support/repositoryWrappers';
 
 async function seedChat(db: AppDatabase): Promise<{
   chatId: number;

@@ -14,7 +14,6 @@ import {
   markMessageDeleted,
   clearLocalCache,
   localCacheDirty,
-  kvSet,
   insertOutgoingText,
   reconcileOutgoingSuccess,
 } from '@db/repositories';
@@ -36,6 +35,7 @@ import type { SyncApi } from '@/services/sync/types';
 import { DbEventSink } from '@/services/realtime/dbEventSink';
 import { normalizeRealtimeEvent } from '@core/realtime/eventRouter';
 import { createTestDb } from '../support/testDb';
+import { kvSet } from '../support/repositoryWrappers';
 
 const providerEpoch = '11111111-1111-4111-8111-111111111111';
 const ledgerEpoch = '22222222-2222-4222-8222-222222222222';

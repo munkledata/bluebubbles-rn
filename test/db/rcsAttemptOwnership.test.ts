@@ -13,7 +13,6 @@ import {
   insertOutgoingText,
   MESSAGE_GUID_ALIAS_LIMIT,
   OUTGOING_MAX_ATTEMPTS,
-  reconcileExactOutgoingAttemptSuccess,
   reconcileOutgoingAttachmentByContent,
   reconcileOutgoingError,
   recordMessageGuidAliasWithinTransaction,
@@ -27,6 +26,7 @@ import { IncomingEventDependencyPendingError } from '@/services/realtime/incomin
 import { runOutgoingQueue } from '@/services/send/outgoingQueueService';
 import { reconcileSendOutcome } from '@/services/send/sendOutcome';
 import { createTestDb } from '../support/testDb';
+import { reconcileExactOutgoingAttemptSuccess } from '../support/repositoryWrappers';
 
 const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
 const RCS_PROVIDER_INFO = {

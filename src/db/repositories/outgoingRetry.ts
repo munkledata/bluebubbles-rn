@@ -234,21 +234,6 @@ export function markMessageSendErrorWithinTransaction(
   });
 }
 
-/** Standalone server-pushed send-error owner. */
-export async function markMessageSendError(
-  db: AppDatabase,
-  guid: string,
-  errorCode = 1,
-  commitGuard?: DbCommitGuard,
-  errorMessage?: string | null,
-): Promise<boolean> {
-  return withDbTransaction(
-    db,
-    (context) => markMessageSendErrorWithinTransaction(context, guid, errorCode, errorMessage),
-    commitGuard,
-  );
-}
-
 /**
  * Re-enqueue cycle cap. The RCS immediate-ack flow can loop forever on a permanently-failing
  * send: ack marks the bubble 'sent' + deletes the queue row → the async failure re-enqueues →
@@ -1057,25 +1042,6 @@ export function deferOutgoingSendClaimWithinTransaction(
     }
     return true;
   });
-}
-
-/**
- * Standalone automatic-claim owner retained for repository and DEV callers. Production services
- * that compose this write use {@link claimOutgoingForSendWithinTransaction} inside their own short
- * guarded owner instead of nesting this wrapper.
- */
-export async function claimOutgoingForSend(
-  db: AppDatabase,
-  id: number,
-  clock: () => number,
-  commitGuard?: DbCommitGuard,
-): Promise<boolean> {
-  const result = await withDbTransaction(
-    db,
-    (context) => claimOutgoingForSendWithinTransaction(context, id, clock),
-    commitGuard,
-  );
-  return result.claimed;
 }
 
 /** Halves of an optimistic send that lost their partner (see {@link countOutgoingQueueHealth}). */

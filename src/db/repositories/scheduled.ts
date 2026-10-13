@@ -152,10 +152,6 @@ export function insertScheduledWithinTransaction(
   });
 }
 
-export async function insertScheduled(db: AppDatabase, args: InsertScheduledArgs): Promise<number> {
-  return withDbTransaction(db, (context) => insertScheduledWithinTransaction(context, args));
-}
-
 /**
  * Snapshot the exact server-backed rows a later server response may prune. Keeping both columns is
  * load-bearing: an edit can repoint the same local id to a fresh server uuid while the GET is in
@@ -345,17 +341,6 @@ export function updateScheduledWithinTransaction(
   });
 }
 
-export function updateScheduled(
-  db: AppDatabase,
-  id: number,
-  patch: UpdateScheduledPatch,
-  expected?: Omit<ScheduledOccurrence, 'id'>,
-): Promise<ScheduledEditResult> {
-  return withDbTransaction(db, (context) =>
-    updateScheduledWithinTransaction(context, id, patch, expected),
-  );
-}
-
 /** Fetch a single scheduled row by id (any status), for the edit screen. */
 export async function getScheduledById(db: AppDatabase, id: number): Promise<ScheduledRow | null> {
   const rows = await db.all<Parameters<typeof mapScheduled>[0]>(
@@ -393,11 +378,6 @@ export function deleteScheduledHistoryWithinTransaction(
         ),
       );
   });
-}
-
-/** Delete a COMPLETED (sent/error/uncertain) row from the local history list. */
-export async function deleteScheduledHistory(db: AppDatabase, id: number): Promise<void> {
-  await withDbTransaction(db, (context) => deleteScheduledHistoryWithinTransaction(context, id));
 }
 
 export async function listAllScheduled(db: AppDatabase): Promise<ScheduledRow[]> {
@@ -816,8 +796,4 @@ export function deleteScheduledWithinTransaction(
   return runInTransactionContext(context, async (db) => {
     await db.delete(scheduledMessages).where(eq(scheduledMessages.id, id));
   });
-}
-
-export async function deleteScheduled(db: AppDatabase, id: number): Promise<void> {
-  await withDbTransaction(db, (context) => deleteScheduledWithinTransaction(context, id));
 }

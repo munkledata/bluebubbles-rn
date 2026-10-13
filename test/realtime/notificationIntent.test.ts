@@ -7,9 +7,10 @@ import {
 import { buildMessageIntents } from '@/services/notifications/intents';
 import { DbEventSink } from '@/services/realtime/dbEventSink';
 import { NotifyingEventSink } from '@/services/realtime/notifyingEventSink';
-import { setChatMute, upsertContacts } from '@db/repositories';
+import { upsertContacts } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
+import { setChatMute } from '../support/repositoryWrappers';
 
 function wire(db: AppDatabase) {
   const intents: NotificationIntent[] = [];

@@ -15,7 +15,6 @@ import { Chat, Message } from '@core/models';
 import { logger } from '@core/secure';
 import {
   getChatIdByGuid,
-  insertOutgoingContact,
   insertOutgoingText,
   upsertChats,
   upsertHandles,
@@ -54,6 +53,7 @@ import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
+import { insertOutgoingContact } from '../support/repositoryWrappers';
 
 type JsonBody = Record<string, unknown>;
 /** Every POST the retry made: `{ path, body }` (body = the request's `json` payload). */

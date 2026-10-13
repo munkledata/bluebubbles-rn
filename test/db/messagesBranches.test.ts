@@ -7,8 +7,6 @@
 import type Database from 'better-sqlite3';
 import { Chat, Message } from '@core/models';
 import {
-  applyLocalEdit,
-  applyLocalUnsend,
   getChatGuidByMessageGuid,
   getChatIdByGuid,
   getMessageActionPartLayoutByGuid,
@@ -23,6 +21,7 @@ import {
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
+import { applyLocalEdit, applyLocalUnsend } from '../support/repositoryWrappers';
 
 async function seedChat(
   db: AppDatabase,

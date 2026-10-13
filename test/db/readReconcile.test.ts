@@ -4,7 +4,6 @@ import { Chat, Message } from '@core/models';
 import {
   listChatsForInbox,
   markMessageDeleted,
-  setChatUnreadLocal,
   setLastReadMessageGuid,
   upsertChats,
   upsertHandles,
@@ -12,6 +11,7 @@ import {
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
+import { setChatUnreadLocal } from '../support/repositoryWrappers';
 
 /**
  * Schema gap 7: `upsertChats` reconciles the macOS read watermark

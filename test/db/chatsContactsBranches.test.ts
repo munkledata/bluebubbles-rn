@@ -11,12 +11,8 @@ import {
   getChatParticipants,
   handleMapKey,
   handlesNeedingAvatar,
-  markAllChatsReadLocal,
   markAllChatsReadLocalWithinTransaction,
-  persistServerChat,
   searchContactAddresses,
-  setChatUnreadLocal,
-  setHandleServerAvatar,
   setHandleServerAvatarWithinTransaction,
   setLastReadMessageGuid,
   upsertChats,
@@ -26,6 +22,12 @@ import {
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import { createTestDb } from '../support/testDb';
+import {
+  markAllChatsReadLocal,
+  persistServerChat,
+  setChatUnreadLocal,
+  setHandleServerAvatar,
+} from '../support/repositoryWrappers';
 
 describe('persistServerChat + findChatByParticipantAddresses', () => {
   it('persists a server chat with its participant links', async () => {

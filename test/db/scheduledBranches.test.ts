@@ -6,9 +6,7 @@
 import type Database from 'better-sqlite3';
 import {
   claimScheduled,
-  deleteScheduled,
   getScheduledById,
-  insertScheduled,
   listAllScheduled,
   listDueScheduled,
   listScheduledByChat,
@@ -16,9 +14,9 @@ import {
   markScheduledSent,
   reconcileServerScheduled,
   resetStuckScheduled,
-  updateScheduled,
 } from '@db/repositories';
 import { createTestDb } from '../support/testDb';
+import { deleteScheduled, insertScheduled, updateScheduled } from '../support/repositoryWrappers';
 
 const attempts = (raw: Database.Database, id: number): number =>
   (raw.prepare('SELECT attempts a FROM scheduled_messages WHERE id = ?').get(id) as { a: number })

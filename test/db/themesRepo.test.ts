@@ -1,14 +1,13 @@
 import { sql } from 'drizzle-orm';
-import {
-  createCustomTheme,
-  deleteCustomTheme,
-  getCustomThemeById,
-  listCustomThemes,
-  updateCustomTheme,
-} from '@db/repositories';
+import { getCustomThemeById, listCustomThemes } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
+import {
+  createCustomTheme,
+  deleteCustomTheme,
+  updateCustomTheme,
+} from '../support/repositoryWrappers';
 
 const tokens = (tint: string) => JSON.stringify({ mode: 'dark', color: { tint } });
 

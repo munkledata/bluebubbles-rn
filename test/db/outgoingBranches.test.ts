@@ -9,25 +9,21 @@ import {
   applyServerSendError,
   cancelOutgoing,
   claimFailedOutgoingForRetry,
-  claimOutgoingForSend,
   deleteChatLocal,
   discardOutgoingMessage,
   getChatIdByGuid,
   insertOutgoingAttachment,
-  insertOutgoingContact,
   insertOutgoingReaction,
   insertOutgoingText,
   listAttachmentsByMessageIds,
   listMessages,
   listMessagesWithSenders,
   markMessageDeleted,
-  markOutgoingSentNoGuid,
   OUTGOING_MAX_ATTEMPTS,
   reconcileEchoByContent,
   reconcileOutgoingAttachmentByContent,
   reconcileOutgoingError,
   reconcileOutgoingSuccess,
-  retireOutgoing,
   upsertChats,
   upsertHandles,
   upsertMessages,
@@ -37,6 +33,12 @@ import { chats, messages, outgoingQueue } from '@db/schema';
 import type { AppDatabase } from '@db/types';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import { createTestDb } from '../support/testDb';
+import {
+  claimOutgoingForSend,
+  insertOutgoingContact,
+  markOutgoingSentNoGuid,
+  retireOutgoing,
+} from '../support/repositoryWrappers';
 
 const nextEventLoopTurn = (): Promise<void> =>
   new Promise((resolve) => {

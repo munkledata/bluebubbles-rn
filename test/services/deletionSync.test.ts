@@ -9,7 +9,6 @@ import {
 } from '@core/api/endpoints/messages';
 import {
   kvGet,
-  kvSet,
   kvSetWithinTransaction,
   upsertChats,
   upsertHandles,
@@ -29,6 +28,7 @@ import {
 } from '@/services/sync/engine';
 import type { SyncApi } from '@/services/sync/types';
 import { createTestDb } from '../support/testDb';
+import { kvSet } from '../support/repositoryWrappers';
 
 /**
  * R1 deletion catch-up sync (engine-level): a `message-deleted` event that fires while the app is

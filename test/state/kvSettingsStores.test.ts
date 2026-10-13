@@ -3,10 +3,11 @@
  * being open yet (leave `hydrated` false, no throw — the documented launch-order crash class).
  */
 import { getDatabase } from '@db/database';
-import { kvGet, kvSet } from '@db/repositories';
+import { kvGet } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import { SYNC_MESSAGES_PER_CHAT_KEY, useSyncSettingsStore } from '@state/syncSettingsStore';
 import { createTestDb } from '../support/testDb';
+import { kvSet } from '../support/repositoryWrappers';
 
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
 const mockGetDatabase = getDatabase as jest.Mock;

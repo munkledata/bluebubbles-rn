@@ -8,8 +8,6 @@ import {
   claimDueScheduled,
   getScheduledById,
   handoverScheduledTextToOutgoing,
-  insertScheduled,
-  updateScheduled,
   upsertChats,
   type ScheduledCancellationTarget,
 } from '@db/repositories';
@@ -27,6 +25,7 @@ import {
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
 import { createTestDb } from '../support/testDb';
+import { insertScheduled, updateScheduled } from '../support/repositoryWrappers';
 
 jest.mock('ky', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));

@@ -1,14 +1,11 @@
 import { Chat, Message } from '@core/models';
 import {
   claimFailedOutgoingForRetry,
-  claimOutgoingForSend,
   countOutgoingQueueHealth,
-  deleteMessageLocal,
   insertOutgoingText,
   reconcileOutgoingError,
   reconcileOutgoingSuccess,
   resolveMessageTarget,
-  retireOutgoing,
   retireUncertainOutgoingWithinTransaction,
   upsertChats,
   upsertHandles,
@@ -17,6 +14,11 @@ import {
 import { withDbTransaction } from '@db/transaction';
 import { localRouteForMessageGuid } from '@/services/notifications/notificationRouting';
 import { createTestDb } from '../support/testDb';
+import {
+  claimOutgoingForSend,
+  deleteMessageLocal,
+  retireOutgoing,
+} from '../support/repositoryWrappers';
 
 describe('FEAT-06 legacy alias ownership quarantine', () => {
   it('never lets a NULL-scoped alias route, target, retry, retire, or delete a foreign message', async () => {

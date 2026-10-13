@@ -24,7 +24,6 @@ import {
   messageHasVisibleContentSql,
   type InboxSenderFilter,
 } from './chatVisibility';
-import { linkHandlesToContacts } from './contacts';
 import { handleMapKey, upsertHandlesWithinTransaction } from './handles';
 import { DRAFT_KV_PREFIX, FULL_REPAIR_RETIRED_CHAT_KV_PREFIX } from './maintenance';
 import { getMessageStateAuthorityWithinTransaction } from './messageState';
@@ -329,24 +328,6 @@ export function persistServerChatWithinTransaction(
   });
 }
 
-/** Persist a server-returned chat atomically, then apply presentation-only device-contact names. */
-export async function persistServerChat(db: AppDatabase, chat: Chat): Promise<void> {
-  await withDbTransaction(db, (context) => persistServerChatWithinTransaction(context, chat));
-  await linkHandlesToContacts(
-    db,
-    (chat.participants ?? []).map((participant) => participant.address),
-  );
-}
-
-/** Set a chat's local mute preference ('mute' to mute, null to clear). */
-export async function setChatMute(
-  db: AppDatabase,
-  guid: string,
-  muteType: string | null,
-): Promise<void> {
-  await withDbTransaction(db, (context) => setChatMuteWithinTransaction(context, guid, muteType));
-}
-
 export function setChatMuteWithinTransaction(
   context: DbTransactionContext,
   guid: string,
@@ -355,15 +336,6 @@ export function setChatMuteWithinTransaction(
   return runInTransactionContext(context, async (db) => {
     await db.update(chats).set({ muteType }).where(eq(chats.guid, guid));
   });
-}
-
-/**
- * Pin / unpin a chat. Client-local — Gator pin is a device state, not a server
- * concept; kept out of `upsertChats`' conflict set so a re-sync can't clobber it.
- * The inbox sorts pinned chats first (see `listChatsForInbox`).
- */
-export async function setChatPin(db: AppDatabase, guid: string, pinned: boolean): Promise<void> {
-  await withDbTransaction(db, (context) => setChatPinWithinTransaction(context, guid, pinned));
 }
 
 export function setChatPinWithinTransaction(
@@ -471,17 +443,6 @@ export function swapPinnedChatOrderWithinTransaction(
     `);
     return swapped.length === 2;
   });
-}
-
-/** Archive / unarchive a chat (client-local). Archived chats drop out of the main inbox. */
-export async function setChatArchive(
-  db: AppDatabase,
-  guid: string,
-  archived: boolean,
-): Promise<void> {
-  await withDbTransaction(db, (context) =>
-    setChatArchiveWithinTransaction(context, guid, archived),
-  );
 }
 
 export function setChatArchiveWithinTransaction(
@@ -1107,11 +1068,6 @@ export function clearChatTombstoneWithinTransaction(
   });
 }
 
-/** Standalone un-hide. Existing domain transactions must use the explicitly scoped form above. */
-export async function clearChatTombstone(db: AppDatabase, guid: string): Promise<void> {
-  await withDbTransaction(db, (context) => clearChatTombstoneWithinTransaction(context, guid));
-}
-
 export * from './chatAppearance';
 
 export * from './chatQueries';
@@ -1199,16 +1155,6 @@ export function setChatUnreadLocalWithinTransaction(
   });
 }
 
-export async function setChatUnreadLocal(
-  db: AppDatabase,
-  chatGuid: string,
-  now: number = Date.now(),
-): Promise<void> {
-  await withDbTransaction(db, (context) =>
-    setChatUnreadLocalWithinTransaction(context, chatGuid, now),
-  );
-}
-
 /**
  * Mark EVERY chat read locally in one pass: point each chat's read marker at its newest RECEIVED
  * message so all inbox badges clear. Local-only (does not send per-chat read receipts). Uses
@@ -1239,8 +1185,4 @@ export function markAllChatsReadLocalWithinTransaction(
       )
     `);
   });
-}
-
-export async function markAllChatsReadLocal(db: AppDatabase): Promise<void> {
-  await withDbTransaction(db, (context) => markAllChatsReadLocalWithinTransaction(context));
 }

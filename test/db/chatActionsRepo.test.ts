@@ -2,18 +2,14 @@ import type Database from 'better-sqlite3';
 import { sql } from 'drizzle-orm';
 import { Chat, Message } from '@core/models';
 import {
-  clearChatTombstone,
-  createReminder,
   deleteChatLocal,
   findChatByParticipantAddresses,
   getAttachmentCacheEntry,
   getChatHeader,
   getChatIdByGuid,
   insertOutgoingText,
-  insertScheduled,
   isChatHiddenByDeletion,
   kvGet,
-  kvSet,
   listChatAttachmentGuids,
   listDeletedChats,
   listChatsForInbox,
@@ -22,10 +18,8 @@ import {
   recordAttachmentCacheEntry,
   resumeChatPurges,
   restoreDeletedChatWithinTransaction,
-  setChatArchive,
   setChatArchiveWithinTransaction,
   setChatCustomization,
-  setChatPin,
   setChatPinWithinTransaction,
   setChatTheme,
   swapPinnedChatOrder,
@@ -37,6 +31,14 @@ import { kv, outgoingQueue, scheduledMessages } from '@db/schema';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
+import {
+  clearChatTombstone,
+  createReminder,
+  insertScheduled,
+  kvSet,
+  setChatArchive,
+  setChatPin,
+} from '../support/repositoryWrappers';
 
 /** A received (inbound) message, the kind that un-hides a deleted chat. */
 function received(guid: string, dateCreated: number) {
