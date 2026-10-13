@@ -35,6 +35,7 @@ import {
   encodedMediaPathSegment,
 } from '@/services/download/pathSafety';
 import { hashNativeAttachmentCacheGuid } from '@native/boundedDownload';
+import { alwaysCurrentCacheScope } from '../support/attachmentCacheScope';
 import { createTestDb } from '../support/testDb';
 import { recordAttachmentCacheEntry } from '../support/repositoryWrappers';
 
@@ -919,7 +920,11 @@ describe('ensureDownloaded', () => {
       isCurrent: () => true,
       runCommit: (task) => task(),
       reserveCache: async (path, maxBytes) => {
-        const admission = await coordinator.reserve(db, { path, maxBytes });
+        const admission = await coordinator.reserve(db, {
+          path,
+          maxBytes,
+          scope: alwaysCurrentCacheScope(),
+        });
         protectionBeforePromotion = coordinator.protect(path);
         observeCommitWrites = true;
         return admission;

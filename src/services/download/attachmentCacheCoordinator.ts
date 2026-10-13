@@ -152,6 +152,12 @@ function requirePositiveSafeInteger(value: number, label: string): void {
  * Lock order is always this coordinator's gate, then the shared DB transaction lock. Native file
  * deletion happens after both are released. That keeps database callbacks short and avoids the
  * nested-transaction deadlock documented in AGENTS.md.
+ *
+ * Every production caller passes a `scope`. Each transaction still has an unscoped twin on
+ * purpose: the DB-write guard cannot see a transaction inside `scope.runTracked(() => ...)`, so
+ * the twin's direct `withDbTransaction` is what lets it flag a caller that nests this coordinator
+ * inside another transaction. Deleting the twins (Phase 6 tried it) silently drops that check;
+ * remove them only after the guard can see through `runTracked`. Tests use scoped calls.
  */
 export class AttachmentCacheCoordinator {
   private gate: Promise<void> = Promise.resolve();

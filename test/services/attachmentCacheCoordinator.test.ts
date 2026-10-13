@@ -135,7 +135,7 @@ describe('attachment cache quota coordinator', () => {
 
     now += ATTACHMENT_CACHE_ACCESS_TOUCH_INTERVAL_MS / 2;
     const firstReuse = await observeDbAllTransactionState(db, raw, () =>
-      coordinator.reuseExisting(db, { path: reusable }),
+      coordinator.reuseExisting(db, { path: reusable, scope: accountScope(db) }),
     );
     expect(firstReuse.value).toEqual({
       status: 'hit',
@@ -150,7 +150,7 @@ describe('attachment cache quota coordinator', () => {
 
     now += ATTACHMENT_CACHE_ACCESS_TOUCH_INTERVAL_MS / 2;
     const secondReuse = await observeDbAllTransactionState(db, raw, () =>
-      coordinator.reuseExisting(db, { path: reusable }),
+      coordinator.reuseExisting(db, { path: reusable, scope: accountScope(db) }),
     );
     expect(secondReuse.value).toEqual({
       status: 'hit',
@@ -162,7 +162,7 @@ describe('attachment cache quota coordinator', () => {
     });
 
     const missingReuse = await observeDbAllTransactionState(db, raw, () =>
-      coordinator.reuseExisting(db, { path: missing }),
+      coordinator.reuseExisting(db, { path: missing, scope: accountScope(db) }),
     );
     expect(missingReuse.value).toEqual({ status: 'missing' });
     expect(await getAttachmentCacheEntry(db, missing)).toBeNull();
@@ -190,9 +190,11 @@ describe('attachment cache quota coordinator', () => {
     const reusable = path('reuse-retirement-race');
     await seedUsage(db, [{ path: reusable, bytes: 20 }]);
 
-    const reuse = coordinator.reuseExisting(db, { path: reusable });
+    const reuse = coordinator.reuseExisting(db, { path: reusable, scope: accountScope(db) });
     expect(statFile).toHaveBeenCalledWith(reusable);
-    await expect(coordinator.retireInactiveEntries(db)).resolves.toEqual({
+    await expect(
+      coordinator.retireInactiveEntries(db, { scope: accountScope(db) }),
+    ).resolves.toEqual({
       status: 'complete',
       attempted: 0,
       confirmed: 0,
@@ -310,13 +312,19 @@ describe('attachment cache quota coordinator', () => {
       if (claim.status !== 'claimed') throw new Error(`test setup claim refused: ${claim.reason}`);
     });
 
-    await expect(coordinator.reuseExisting(db, { path: untracked })).resolves.toEqual({
+    await expect(
+      coordinator.reuseExisting(db, { path: untracked, scope: accountScope(db) }),
+    ).resolves.toEqual({
       status: 'busy',
     });
-    await expect(coordinator.reuseExisting(db, { path: reserved })).resolves.toEqual({
+    await expect(
+      coordinator.reuseExisting(db, { path: reserved, scope: accountScope(db) }),
+    ).resolves.toEqual({
       status: 'busy',
     });
-    await expect(coordinator.reuseExisting(db, { path: retiring })).resolves.toEqual({
+    await expect(
+      coordinator.reuseExisting(db, { path: retiring, scope: accountScope(db) }),
+    ).resolves.toEqual({
       status: 'busy',
     });
     expect(await getAttachmentCacheEntry(db, untracked)).toBeNull();
@@ -338,7 +346,9 @@ describe('attachment cache quota coordinator', () => {
     });
     const coordinator = new AttachmentCacheCoordinator(nativeBoundary({ statFile }).io, () => NOW);
 
-    await expect(coordinator.reuseExisting(db, { path: raced })).resolves.toEqual({
+    await expect(
+      coordinator.reuseExisting(db, { path: raced, scope: accountScope(db) }),
+    ).resolves.toEqual({
       status: 'busy',
     });
     expect(await getAttachmentCacheEntry(db, raced)).toMatchObject({ state: 'retiring' });
@@ -359,7 +369,7 @@ describe('attachment cache quota coordinator', () => {
     // No in-memory reservation owner survives this simulated restart. The encrypted row is the
     // authority that lets a new process find and exactly delete a possibly promoted final file.
     const restarted = new AttachmentCacheCoordinator(native.io, () => NOW);
-    await expect(restarted.drainDueRetirements(db)).resolves.toEqual({
+    await expect(restarted.drainDueRetirements(db, { scope: accountScope(db) })).resolves.toEqual({
       status: 'complete',
       attempted: 1,
       confirmed: 1,
@@ -408,7 +418,10 @@ describe('attachment cache quota coordinator', () => {
       }
 
       await expect(
-        coordinator.drainDueRetirements(db, { limit: Number.MAX_SAFE_INTEGER }),
+        coordinator.drainDueRetirements(db, {
+          limit: Number.MAX_SAFE_INTEGER,
+          scope: accountScope(db),
+        }),
       ).resolves.toEqual({
         status: 'complete',
         attempted: 100,
@@ -418,7 +431,9 @@ describe('attachment cache quota coordinator', () => {
       });
       expect(remainingDueRows()).toBe(1);
 
-      await expect(coordinator.drainDueRetirements(db)).resolves.toEqual({
+      await expect(
+        coordinator.drainDueRetirements(db, { scope: accountScope(db) }),
+      ).resolves.toEqual({
         status: 'complete',
         attempted: 1,
         confirmed: 1,
@@ -483,7 +498,9 @@ describe('attachment cache quota coordinator', () => {
     }) as AppDatabase['all']);
 
     try {
-      await expect(coordinator.drainDueRetirements(db)).resolves.toEqual({
+      await expect(
+        coordinator.drainDueRetirements(db, { scope: accountScope(db) }),
+      ).resolves.toEqual({
         status: 'complete',
         attempted: 0,
         confirmed: 0,
@@ -618,7 +635,7 @@ describe('attachment cache quota coordinator', () => {
 
     await deleteMessageLocal(db, 'shared-first', NOW - 2);
     const firstRetirement = await observeDbAllTransactionState(db, raw, () =>
-      coordinator.retireInactiveEntries(db),
+      coordinator.retireInactiveEntries(db, { scope: accountScope(db) }),
     );
     expect(firstRetirement.value).toEqual({
       status: 'complete',
@@ -635,7 +652,7 @@ describe('attachment cache quota coordinator', () => {
 
     await deleteMessageLocal(db, 'shared-final', NOW - 1);
     const finalRetirement = await observeDbAllTransactionState(db, raw, () =>
-      coordinator.retireInactiveEntries(db),
+      coordinator.retireInactiveEntries(db, { scope: accountScope(db) }),
     );
     expect(finalRetirement.value).toEqual({
       status: 'complete',
@@ -667,7 +684,9 @@ describe('attachment cache quota coordinator', () => {
     await seedUsage(db, [{ path: inactive, bytes: 20 }]);
     const pin = coordinator.protect(inactive)!;
 
-    await expect(coordinator.retireInactiveEntries(db)).resolves.toEqual({
+    await expect(
+      coordinator.retireInactiveEntries(db, { scope: accountScope(db) }),
+    ).resolves.toEqual({
       status: 'complete',
       attempted: 0,
       confirmed: 0,
@@ -678,7 +697,9 @@ describe('attachment cache quota coordinator', () => {
     expect(await getAttachmentCacheEntry(db, inactive)).toMatchObject({ state: 'active' });
 
     pin.release();
-    await expect(coordinator.retireInactiveEntries(db)).resolves.toEqual({
+    await expect(
+      coordinator.retireInactiveEntries(db, { scope: accountScope(db) }),
+    ).resolves.toEqual({
       status: 'complete',
       attempted: 1,
       confirmed: 1,
@@ -936,8 +957,8 @@ describe('attachment cache quota coordinator', () => {
     const pin = coordinator.protect(protectedPath)!;
 
     const [first, second] = await Promise.all([
-      coordinator.reserve(db, { path: path('first'), maxBytes: 10 }),
-      coordinator.reserve(db, { path: path('second'), maxBytes: 10 }),
+      coordinator.reserve(db, { path: path('first'), maxBytes: 10, scope: accountScope(db) }),
+      coordinator.reserve(db, { path: path('second'), maxBytes: 10, scope: accountScope(db) }),
     ]);
 
     expect(first.status).toBe('reserved');
@@ -951,18 +972,28 @@ describe('attachment cache quota coordinator', () => {
     const { db } = await createTestDb();
     const coordinator = new AttachmentCacheCoordinator(nativeBoundary().io, () => NOW);
     const target = path('aba');
-    const first = await coordinator.reserve(db, { path: target, maxBytes: 10 });
+    const first = await coordinator.reserve(db, {
+      path: target,
+      maxBytes: 10,
+      scope: accountScope(db),
+    });
     expect(first.status).toBe('reserved');
     if (first.status !== 'reserved') throw new Error('expected first reservation');
     await first.reservation.release();
 
-    const second = await coordinator.reserve(db, { path: target, maxBytes: 10 });
+    const second = await coordinator.reserve(db, {
+      path: target,
+      maxBytes: 10,
+      scope: accountScope(db),
+    });
     expect(second.status).toBe('reserved');
     await first.reservation.release();
     expect(first.reservation.beginProtectionHandoff()).toBe(false);
     expect(first.reservation.rollbackProtectionHandoff()).toBe(false);
     expect(coordinator.protect(target)).toBeNull();
-    expect(await coordinator.reserve(db, { path: target, maxBytes: 10 })).toEqual({
+    expect(
+      await coordinator.reserve(db, { path: target, maxBytes: 10, scope: accountScope(db) }),
+    ).toEqual({
       status: 'busy',
     });
     if (second.status === 'reserved') await second.reservation.release();
@@ -972,7 +1003,11 @@ describe('attachment cache quota coordinator', () => {
     const { db } = await createTestDb();
     const coordinator = new AttachmentCacheCoordinator(nativeBoundary().io, () => NOW);
     const target = path('promotion-handoff');
-    const admission = await coordinator.reserve(db, { path: target, maxBytes: 20 });
+    const admission = await coordinator.reserve(db, {
+      path: target,
+      maxBytes: 20,
+      scope: accountScope(db),
+    });
     expect(admission.status).toBe('reserved');
     if (admission.status !== 'reserved') throw new Error('expected reservation');
 
@@ -993,10 +1028,14 @@ describe('attachment cache quota coordinator', () => {
 
     expect(pin).not.toBeNull();
     (pin as { release(): void } | null)?.release();
-    await expect(coordinator.reserve(db, { path: target, maxBytes: 20 })).resolves.toEqual({
+    await expect(
+      coordinator.reserve(db, { path: target, maxBytes: 20, scope: accountScope(db) }),
+    ).resolves.toEqual({
       status: 'busy',
     });
-    await expect(coordinator.retireInactiveEntries(db)).resolves.toEqual({
+    await expect(
+      coordinator.retireInactiveEntries(db, { scope: accountScope(db) }),
+    ).resolves.toEqual({
       status: 'complete',
       attempted: 0,
       confirmed: 0,
@@ -1010,7 +1049,11 @@ describe('attachment cache quota coordinator', () => {
     const { db } = await createTestDb();
     const coordinator = new AttachmentCacheCoordinator(nativeBoundary().io, () => NOW);
     const target = path('promotion-rollback');
-    const admission = await coordinator.reserve(db, { path: target, maxBytes: 20 });
+    const admission = await coordinator.reserve(db, {
+      path: target,
+      maxBytes: 20,
+      scope: accountScope(db),
+    });
     expect(admission.status).toBe('reserved');
     if (admission.status !== 'reserved') throw new Error('expected reservation');
 
@@ -1176,9 +1219,9 @@ describe('attachment cache quota coordinator', () => {
     ]);
     const pin = coordinator.protect(protectedPath)!;
 
-    await expect(coordinator.reserve(db, { path: path('blocked'), maxBytes: 10 })).resolves.toEqual(
-      { status: 'storage' },
-    );
+    await expect(
+      coordinator.reserve(db, { path: path('blocked'), maxBytes: 10, scope: accountScope(db) }),
+    ).resolves.toEqual({ status: 'storage' });
     expect(await getAttachmentCacheEntry(db, old)).toMatchObject({
       state: 'retiring',
       attempts: 1,
@@ -1200,7 +1243,11 @@ describe('attachment cache quota coordinator', () => {
     ]);
     const pin = coordinator.protect(protectedPath)!;
 
-    const admission = await coordinator.reserve(db, { path: path('replacement'), maxBytes: 10 });
+    const admission = await coordinator.reserve(db, {
+      path: path('replacement'),
+      maxBytes: 10,
+      scope: accountScope(db),
+    });
 
     expect(admission.status).toBe('reserved');
     expect(await getAttachmentCacheEntry(db, old)).toBeNull();
@@ -1238,7 +1285,7 @@ describe('attachment cache quota coordinator', () => {
     const pin = coordinator.protect(protectedPath)!;
 
     const observed = await observeDbAllTransactionState(db, raw, () =>
-      coordinator.reserve(db, { path: path('new-safe'), maxBytes: 10 }),
+      coordinator.reserve(db, { path: path('new-safe'), maxBytes: 10, scope: accountScope(db) }),
     );
     const admission = observed.value;
 
@@ -1262,11 +1309,21 @@ describe('attachment cache quota coordinator', () => {
     await seedUsage(db, [{ path: old, bytes: ATTACHMENT_CACHE_MAX_BYTES }]);
     const pin = coordinator.protect(old)!;
 
-    expect(await coordinator.reserve(db, { path: path('while-viewing'), maxBytes: 1 })).toEqual({
+    expect(
+      await coordinator.reserve(db, {
+        path: path('while-viewing'),
+        maxBytes: 1,
+        scope: accountScope(db),
+      }),
+    ).toEqual({
       status: 'storage',
     });
     pin.release();
-    const admitted = await coordinator.reserve(db, { path: path('after-viewing'), maxBytes: 1 });
+    const admitted = await coordinator.reserve(db, {
+      path: path('after-viewing'),
+      maxBytes: 1,
+      scope: accountScope(db),
+    });
     expect(admitted.status).toBe('reserved');
     if (admitted.status === 'reserved') await admitted.reservation.release();
   });
@@ -1282,14 +1339,16 @@ describe('attachment cache quota coordinator', () => {
       { path: recent, bytes: ATTACHMENT_CACHE_MAX_BYTES - 15, lastUsedAt: NOW },
     ]);
 
-    await expect(coordinator.conformCurrentQuota(db)).resolves.toEqual({
-      status: 'complete',
-      withinQuota: true,
-      attempted: 1,
-      confirmed: 1,
-      failed: 0,
-      skipped: 0,
-    });
+    await expect(coordinator.conformCurrentQuota(db, { scope: accountScope(db) })).resolves.toEqual(
+      {
+        status: 'complete',
+        withinQuota: true,
+        attempted: 1,
+        confirmed: 1,
+        failed: 0,
+        skipped: 0,
+      },
+    );
     expect(native.deleteFile).toHaveBeenCalledWith(oldest);
     expect(await getAttachmentCacheEntry(db, oldest)).toBeNull();
     expect(await getAttachmentCacheEntry(db, recent)).toMatchObject({ state: 'active' });
@@ -1312,14 +1371,16 @@ describe('attachment cache quota coordinator', () => {
       }
     })();
 
-    await expect(coordinator.conformCurrentQuota(db)).resolves.toEqual({
-      status: 'complete',
-      withinQuota: true,
-      attempted: 1,
-      confirmed: 1,
-      failed: 0,
-      skipped: 0,
-    });
+    await expect(coordinator.conformCurrentQuota(db, { scope: accountScope(db) })).resolves.toEqual(
+      {
+        status: 'complete',
+        withinQuota: true,
+        attempted: 1,
+        confirmed: 1,
+        failed: 0,
+        skipped: 0,
+      },
+    );
     expect(native.deleteFile).toHaveBeenCalledWith(filePath(0));
     expect(raw.prepare(`SELECT COUNT(*) AS count FROM attachment_cache_entries`).get()).toEqual({
       count: ATTACHMENT_CACHE_MAX_FILES,
@@ -1345,14 +1406,16 @@ describe('attachment cache quota coordinator', () => {
       { path: second, bytes: 2, lastUsedAt: OLD + 1 },
     ]);
 
-    await expect(coordinator.conformCurrentQuota(db)).resolves.toEqual({
-      status: 'complete',
-      withinQuota: true,
-      attempted: 2,
-      confirmed: 2,
-      failed: 0,
-      skipped: 0,
-    });
+    await expect(coordinator.conformCurrentQuota(db, { scope: accountScope(db) })).resolves.toEqual(
+      {
+        status: 'complete',
+        withinQuota: true,
+        attempted: 2,
+        confirmed: 2,
+        failed: 0,
+        skipped: 0,
+      },
+    );
     expect(deleteFile.mock.calls.map(([candidate]) => candidate)).toEqual([first, second]);
     expect(getAvailableBytes).toHaveBeenCalledTimes(2);
   });
@@ -1369,17 +1432,23 @@ describe('attachment cache quota coordinator', () => {
     ]);
     const pin = coordinator.protect(protectedPath)!;
 
-    await expect(coordinator.conformCurrentQuota(db)).resolves.toEqual({
-      status: 'complete',
-      withinQuota: false,
-      attempted: 0,
-      confirmed: 0,
-      failed: 0,
-      skipped: 0,
-    });
+    await expect(coordinator.conformCurrentQuota(db, { scope: accountScope(db) })).resolves.toEqual(
+      {
+        status: 'complete',
+        withinQuota: false,
+        attempted: 0,
+        confirmed: 0,
+        failed: 0,
+        skipped: 0,
+      },
+    );
     expect(native.deleteFile).not.toHaveBeenCalled();
     await expect(
-      coordinator.reserve(db, { path: path('conform-future'), maxBytes: 1 }),
+      coordinator.reserve(db, {
+        path: path('conform-future'),
+        maxBytes: 1,
+        scope: accountScope(db),
+      }),
     ).resolves.toEqual({
       status: 'storage',
     });
@@ -1394,6 +1463,7 @@ describe('attachment cache quota coordinator', () => {
     const admission = await coordinator.reserve(db, {
       path: path('conform-live-reservation'),
       maxBytes: 10,
+      scope: accountScope(db),
     });
     expect(admission.status).toBe('reserved');
     if (admission.status !== 'reserved') throw new Error('expected reservation');
@@ -1401,14 +1471,16 @@ describe('attachment cache quota coordinator', () => {
       { path: path('conform-reserved-recent'), bytes: ATTACHMENT_CACHE_MAX_BYTES, lastUsedAt: NOW },
     ]);
 
-    await expect(coordinator.conformCurrentQuota(db)).resolves.toEqual({
-      status: 'complete',
-      withinQuota: false,
-      attempted: 0,
-      confirmed: 0,
-      failed: 0,
-      skipped: 1,
-    });
+    await expect(coordinator.conformCurrentQuota(db, { scope: accountScope(db) })).resolves.toEqual(
+      {
+        status: 'complete',
+        withinQuota: false,
+        attempted: 0,
+        confirmed: 0,
+        failed: 0,
+        skipped: 1,
+      },
+    );
     expect(native.deleteFile).not.toHaveBeenCalled();
     await admission.reservation.release();
   });
@@ -1432,14 +1504,16 @@ describe('attachment cache quota coordinator', () => {
       )
       .run(JSON.stringify({ attachmentGuid: 'conform-queued-att', localPath: queued }));
 
-    await expect(coordinator.conformCurrentQuota(db)).resolves.toEqual({
-      status: 'complete',
-      withinQuota: true,
-      attempted: 1,
-      confirmed: 1,
-      failed: 0,
-      skipped: 1,
-    });
+    await expect(coordinator.conformCurrentQuota(db, { scope: accountScope(db) })).resolves.toEqual(
+      {
+        status: 'complete',
+        withinQuota: true,
+        attempted: 1,
+        confirmed: 1,
+        failed: 0,
+        skipped: 1,
+      },
+    );
     expect(native.deleteFile).toHaveBeenCalledTimes(1);
     expect(native.deleteFile).toHaveBeenCalledWith(safe);
     expect(await getAttachmentCacheEntry(db, queued)).toMatchObject({ state: 'active' });
@@ -1466,14 +1540,16 @@ describe('attachment cache quota coordinator', () => {
       { path: recent, bytes: ATTACHMENT_CACHE_MAX_BYTES - 35, lastUsedAt: NOW },
     ]);
 
-    await expect(coordinator.conformCurrentQuota(db)).resolves.toEqual({
-      status: 'complete',
-      withinQuota: true,
-      attempted: 2,
-      confirmed: 1,
-      failed: 1,
-      skipped: 0,
-    });
+    await expect(coordinator.conformCurrentQuota(db, { scope: accountScope(db) })).resolves.toEqual(
+      {
+        status: 'complete',
+        withinQuota: true,
+        attempted: 2,
+        confirmed: 1,
+        failed: 1,
+        skipped: 0,
+      },
+    );
     expect(deleteFile.mock.calls.map(([candidate]) => candidate)).toEqual([first, second]);
     expect(await getAttachmentCacheEntry(db, first)).toMatchObject({
       state: 'retiring',
@@ -1720,7 +1796,7 @@ describe('attachment cache quota coordinator', () => {
 
     try {
       const observed = await observeDbAllTransactionState(db, raw, () =>
-        coordinator.conformCurrentQuota(db),
+        coordinator.conformCurrentQuota(db, { scope: accountScope(db) }),
       );
       expect(observed.value).toEqual({
         status: 'complete',
@@ -2063,7 +2139,7 @@ describe('attachment cache quota coordinator', () => {
     });
 
     const observed = await observeDbAllTransactionState(db, raw, () =>
-      coordinator.drainDueRetirements(db),
+      coordinator.drainDueRetirements(db, { scope: accountScope(db) }),
     );
     expect(observed.value).toEqual({
       status: 'complete',

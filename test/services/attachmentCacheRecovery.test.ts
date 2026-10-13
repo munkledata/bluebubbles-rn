@@ -27,6 +27,7 @@ import {
   observePromise,
   type RollingBackDbNeighbour,
 } from '../support/dbOwnershipProof';
+import { alwaysCurrentCacheScope } from '../support/attachmentCacheScope';
 import { createTestDb } from '../support/testDb';
 import { recordAttachmentCacheEntry } from '../support/repositoryWrappers';
 
@@ -593,11 +594,11 @@ it('stays ready while this process is still deleting and downloading cache files
     }),
     () => NOW,
   );
-  const cleanup = coordinator.retireInactiveEntries(db);
+  const cleanup = coordinator.retireInactiveEntries(db, { scope: alwaysCurrentCacheScope() });
   await started;
   const downloading = scoped('downloading-now');
   await expect(
-    coordinator.reserve(db, { path: downloading, maxBytes: 100 }),
+    coordinator.reserve(db, { path: downloading, maxBytes: 100, scope: alwaysCurrentCacheScope() }),
   ).resolves.toMatchObject({ status: 'reserved' });
 
   await expect(
