@@ -16954,10 +16954,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/secure/credentialUpgrade.test.ts; test/services/credentialUpgradeRuntime.test.ts; test/services/credentialUpgradeSingleFlight.test.ts; test/services/realtimePrerequisiteRecovery.test.ts"
     },
     {
-      "id": "src/services/customFolderCommands.ts#loadCustomFolders.<callback:b0bc4a10d9>:mutator-call:a49303054cc9",
+      "id": "src/services/customFolderCommands.ts#loadCustomFolders.<callback:cbc64ab782>:mutator-call:43d478104de5",
       "path": "src/services/customFolderCommands.ts",
-      "line": 66,
-      "symbol": "loadCustomFolders.<callback:b0bc4a10d9>",
+      "line": 46,
+      "symbol": "loadCustomFolders.<callback:cbc64ab782>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
       "detectedContext": "startup-single-flight-delegation",
@@ -16967,10 +16967,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
     },
     {
-      "id": "src/services/customFolderCommands.ts#loadCustomFolders.<callback:b0bc4a10d9>:mutator-call:0d0b094be880",
+      "id": "src/services/customFolderCommands.ts#loadCustomFolders.<callback:cbc64ab782>:mutator-call:f834b6f9ee36",
       "path": "src/services/customFolderCommands.ts",
-      "line": 68,
-      "symbol": "loadCustomFolders.<callback:b0bc4a10d9>",
+      "line": 48,
+      "symbol": "loadCustomFolders.<callback:cbc64ab782>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -16980,10 +16980,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/db/migrations/0043_custom_folders.test.ts"
     },
     {
-      "id": "src/services/customFolderCommands.ts#loadCustomFolderSummaries.<callback:9f7370a04d>:mutator-call:ee341cd98ef7",
+      "id": "src/services/customFolderCommands.ts#loadCustomFolderSummaries.<callback:5342c94b39>:mutator-call:5b1d4a4252b6",
       "path": "src/services/customFolderCommands.ts",
-      "line": 81,
-      "symbol": "loadCustomFolderSummaries.<callback:9f7370a04d>",
+      "line": 61,
+      "symbol": "loadCustomFolderSummaries.<callback:5342c94b39>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
       "detectedContext": "startup-single-flight-delegation",
@@ -16993,10 +16993,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
     },
     {
-      "id": "src/services/customFolderCommands.ts#loadCustomFolderSummaries.<callback:9f7370a04d>:mutator-call:e718952cdb34",
+      "id": "src/services/customFolderCommands.ts#loadCustomFolderSummaries.<callback:5342c94b39>:mutator-call:fbe79b17e3d7",
       "path": "src/services/customFolderCommands.ts",
-      "line": 83,
-      "symbol": "loadCustomFolderSummaries.<callback:9f7370a04d>",
+      "line": 63,
+      "symbol": "loadCustomFolderSummaries.<callback:5342c94b39>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -17006,10 +17006,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; FEAT-04E independent DB review 2026-08-29"
     },
     {
-      "id": "src/services/customFolderCommands.ts#loadCustomFolderMembership.<callback:439f5be933>:mutator-call:5a90f1c22363",
+      "id": "src/services/customFolderCommands.ts#loadCustomFolderMembership.<callback:6d7cc6ae5a>:mutator-call:e2e595938068",
       "path": "src/services/customFolderCommands.ts",
-      "line": 97,
-      "symbol": "loadCustomFolderMembership.<callback:439f5be933>",
+      "line": 77,
+      "symbol": "loadCustomFolderMembership.<callback:6d7cc6ae5a>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
       "detectedContext": "startup-single-flight-delegation",
@@ -17019,10 +17019,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
     },
     {
-      "id": "src/services/customFolderCommands.ts#loadCustomFolderMembership.<callback:439f5be933>:mutator-call:06f27f108537",
+      "id": "src/services/customFolderCommands.ts#loadCustomFolderMembership.<callback:6d7cc6ae5a>:mutator-call:7b9d9d3c9aa8",
       "path": "src/services/customFolderCommands.ts",
-      "line": 99,
-      "symbol": "loadCustomFolderMembership.<callback:439f5be933>",
+      "line": 79,
+      "symbol": "loadCustomFolderMembership.<callback:6d7cc6ae5a>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -17032,10 +17032,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/db/migrations/0043_custom_folders.test.ts"
     },
     {
-      "id": "src/services/customFolderCommands.ts#loadCustomFolderInboxPage.<callback:c993864b73>:mutator-call:86fa5de96fcb",
+      "id": "src/services/customFolderCommands.ts#loadCustomFolderInboxPage.<callback:73a100cecc>:mutator-call:74a41bcb5045",
       "path": "src/services/customFolderCommands.ts",
-      "line": 118,
-      "symbol": "loadCustomFolderInboxPage.<callback:c993864b73>",
+      "line": 98,
+      "symbol": "loadCustomFolderInboxPage.<callback:73a100cecc>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
       "detectedContext": "startup-single-flight-delegation",
@@ -17045,10 +17045,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
     },
     {
-      "id": "src/services/customFolderCommands.ts#loadCustomFolderInboxPage.<callback:c993864b73>:mutator-call:daa4729ea646",
+      "id": "src/services/customFolderCommands.ts#loadCustomFolderInboxPage.<callback:73a100cecc>:mutator-call:f81374c8897d",
       "path": "src/services/customFolderCommands.ts",
-      "line": 120,
-      "symbol": "loadCustomFolderInboxPage.<callback:c993864b73>",
+      "line": 100,
+      "symbol": "loadCustomFolderInboxPage.<callback:73a100cecc>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -17058,10 +17058,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/db/migrations/0043_custom_folders.test.ts"
     },
     {
-      "id": "src/services/customFolderCommands.ts#createCustomFolder.<callback:ce918d173c>:mutator-call:ea556374e3a9",
+      "id": "src/services/customFolderCommands.ts#createCustomFolder.<callback:6aadef4e6a>:mutator-call:83dcf2d67dc2",
       "path": "src/services/customFolderCommands.ts",
-      "line": 133,
-      "symbol": "createCustomFolder.<callback:ce918d173c>",
+      "line": 113,
+      "symbol": "createCustomFolder.<callback:6aadef4e6a>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
       "detectedContext": "startup-single-flight-delegation",
@@ -17071,12 +17071,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
     },
     {
-      "id": "src/services/customFolderCommands.ts#createCustomFolder.<callback:ce918d173c>:mutator-call:09161b686eed",
+      "id": "src/services/customFolderCommands.ts#createCustomFolder.<callback:6aadef4e6a>:mutator-call:f81d5f58275d",
       "path": "src/services/customFolderCommands.ts",
-      "line": 135,
-      "symbol": "createCustomFolder.<callback:ce918d173c>",
+      "line": 115,
+      "symbol": "createCustomFolder.<callback:6aadef4e6a>",
       "operation": "mutator-call",
-      "target": "src/services/customFolderCommands.ts#createCustomFolder.<callback:ce918d173c>.<callback:6212f70e9f>",
+      "target": "src/services/customFolderCommands.ts#createCustomFolder.<callback:6aadef4e6a>.<callback:6212f70e9f>",
       "detectedContext": "withDbTransaction",
       "owner": "createCustomFolder",
       "transactionContext": "withDbTransaction",
@@ -17084,10 +17084,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/db/migrations/0043_custom_folders.test.ts"
     },
     {
-      "id": "src/services/customFolderCommands.ts#createCustomFolder.<callback:ce918d173c>:mutator-call:e41d3692764b",
+      "id": "src/services/customFolderCommands.ts#createCustomFolder.<callback:6aadef4e6a>:mutator-call:84918093aa68",
       "path": "src/services/customFolderCommands.ts",
-      "line": 135,
-      "symbol": "createCustomFolder.<callback:ce918d173c>",
+      "line": 115,
+      "symbol": "createCustomFolder.<callback:6aadef4e6a>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -17097,10 +17097,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/db/migrations/0043_custom_folders.test.ts"
     },
     {
-      "id": "src/services/customFolderCommands.ts#createCustomFolder.<callback:ce918d173c>.<callback:6212f70e9f>:mutator-call:64bd99c9fee6",
+      "id": "src/services/customFolderCommands.ts#createCustomFolder.<callback:6aadef4e6a>.<callback:6212f70e9f>:mutator-call:555a61fdfc46",
       "path": "src/services/customFolderCommands.ts",
-      "line": 137,
-      "symbol": "createCustomFolder.<callback:ce918d173c>.<callback:6212f70e9f>",
+      "line": 117,
+      "symbol": "createCustomFolder.<callback:6aadef4e6a>.<callback:6212f70e9f>",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#createCustomFolderWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -17110,10 +17110,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/db/migrations/0043_custom_folders.test.ts"
     },
     {
-      "id": "src/services/customFolderCommands.ts#renameCustomFolder.<callback:0bf41e242b>:mutator-call:6753ba49a065",
+      "id": "src/services/customFolderCommands.ts#renameCustomFolder.<callback:7ed98dfe35>:mutator-call:8a42d98a0ac4",
       "path": "src/services/customFolderCommands.ts",
-      "line": 149,
-      "symbol": "renameCustomFolder.<callback:0bf41e242b>",
+      "line": 129,
+      "symbol": "renameCustomFolder.<callback:7ed98dfe35>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
       "detectedContext": "startup-single-flight-delegation",
@@ -17123,10 +17123,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
     },
     {
-      "id": "src/services/customFolderCommands.ts#renameCustomFolder.<callback:0bf41e242b>:mutator-call:b561a7b35bb8",
+      "id": "src/services/customFolderCommands.ts#renameCustomFolder.<callback:7ed98dfe35>:mutator-call:16da38f888e7",
       "path": "src/services/customFolderCommands.ts",
-      "line": 151,
-      "symbol": "renameCustomFolder.<callback:0bf41e242b>",
+      "line": 131,
+      "symbol": "renameCustomFolder.<callback:7ed98dfe35>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -17136,12 +17136,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/db/migrations/0043_custom_folders.test.ts"
     },
     {
-      "id": "src/services/customFolderCommands.ts#renameCustomFolder.<callback:0bf41e242b>:mutator-call:fc51ac741c5b",
+      "id": "src/services/customFolderCommands.ts#renameCustomFolder.<callback:7ed98dfe35>:mutator-call:46393aa65104",
       "path": "src/services/customFolderCommands.ts",
-      "line": 151,
-      "symbol": "renameCustomFolder.<callback:0bf41e242b>",
+      "line": 131,
+      "symbol": "renameCustomFolder.<callback:7ed98dfe35>",
       "operation": "mutator-call",
-      "target": "src/services/customFolderCommands.ts#renameCustomFolder.<callback:0bf41e242b>.<callback:7ebe4a9c12>",
+      "target": "src/services/customFolderCommands.ts#renameCustomFolder.<callback:7ed98dfe35>.<callback:7ebe4a9c12>",
       "detectedContext": "withDbTransaction",
       "owner": "renameCustomFolder",
       "transactionContext": "withDbTransaction",
@@ -17149,10 +17149,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/db/migrations/0043_custom_folders.test.ts"
     },
     {
-      "id": "src/services/customFolderCommands.ts#renameCustomFolder.<callback:0bf41e242b>.<callback:7ebe4a9c12>:mutator-call:328e648c1c22",
+      "id": "src/services/customFolderCommands.ts#renameCustomFolder.<callback:7ed98dfe35>.<callback:7ebe4a9c12>:mutator-call:1ae112339ae8",
       "path": "src/services/customFolderCommands.ts",
-      "line": 153,
-      "symbol": "renameCustomFolder.<callback:0bf41e242b>.<callback:7ebe4a9c12>",
+      "line": 133,
+      "symbol": "renameCustomFolder.<callback:7ed98dfe35>.<callback:7ebe4a9c12>",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#renameCustomFolderWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -17162,10 +17162,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/db/migrations/0043_custom_folders.test.ts"
     },
     {
-      "id": "src/services/customFolderCommands.ts#setCustomFolderShowUnreadBadge.<callback:c09468402a>:mutator-call:63b01c7984a3",
+      "id": "src/services/customFolderCommands.ts#setCustomFolderShowUnreadBadge.<callback:9a0e5f64f5>:mutator-call:f804673e723d",
       "path": "src/services/customFolderCommands.ts",
-      "line": 166,
-      "symbol": "setCustomFolderShowUnreadBadge.<callback:c09468402a>",
+      "line": 146,
+      "symbol": "setCustomFolderShowUnreadBadge.<callback:9a0e5f64f5>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
       "detectedContext": "startup-single-flight-delegation",
@@ -17175,12 +17175,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
     },
     {
-      "id": "src/services/customFolderCommands.ts#setCustomFolderShowUnreadBadge.<callback:c09468402a>:mutator-call:4a70a0c375cc",
+      "id": "src/services/customFolderCommands.ts#setCustomFolderShowUnreadBadge.<callback:9a0e5f64f5>:mutator-call:4e39fd29be17",
       "path": "src/services/customFolderCommands.ts",
-      "line": 168,
-      "symbol": "setCustomFolderShowUnreadBadge.<callback:c09468402a>",
+      "line": 148,
+      "symbol": "setCustomFolderShowUnreadBadge.<callback:9a0e5f64f5>",
       "operation": "mutator-call",
-      "target": "src/services/customFolderCommands.ts#setCustomFolderShowUnreadBadge.<callback:c09468402a>.<callback:7e483b89d0>",
+      "target": "src/services/customFolderCommands.ts#setCustomFolderShowUnreadBadge.<callback:9a0e5f64f5>.<callback:7e483b89d0>",
       "detectedContext": "withDbTransaction",
       "owner": "setCustomFolderShowUnreadBadge",
       "transactionContext": "withDbTransaction",
@@ -17188,10 +17188,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; FEAT-04E independent DB review 2026-08-29"
     },
     {
-      "id": "src/services/customFolderCommands.ts#setCustomFolderShowUnreadBadge.<callback:c09468402a>:mutator-call:900f7b3eb437",
+      "id": "src/services/customFolderCommands.ts#setCustomFolderShowUnreadBadge.<callback:9a0e5f64f5>:mutator-call:b7068feede02",
       "path": "src/services/customFolderCommands.ts",
-      "line": 168,
-      "symbol": "setCustomFolderShowUnreadBadge.<callback:c09468402a>",
+      "line": 148,
+      "symbol": "setCustomFolderShowUnreadBadge.<callback:9a0e5f64f5>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -17201,10 +17201,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; FEAT-04E independent DB review 2026-08-29"
     },
     {
-      "id": "src/services/customFolderCommands.ts#setCustomFolderShowUnreadBadge.<callback:c09468402a>.<callback:7e483b89d0>:mutator-call:3d0feca66751",
+      "id": "src/services/customFolderCommands.ts#setCustomFolderShowUnreadBadge.<callback:9a0e5f64f5>.<callback:7e483b89d0>:mutator-call:9e2310e07f82",
       "path": "src/services/customFolderCommands.ts",
-      "line": 171,
-      "symbol": "setCustomFolderShowUnreadBadge.<callback:c09468402a>.<callback:7e483b89d0>",
+      "line": 151,
+      "symbol": "setCustomFolderShowUnreadBadge.<callback:9a0e5f64f5>.<callback:7e483b89d0>",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#setCustomFolderShowUnreadBadgeWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -17214,10 +17214,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; FEAT-04E independent DB review 2026-08-29"
     },
     {
-      "id": "src/services/customFolderCommands.ts#deleteCustomFolder.<callback:46a72ca223>:mutator-call:adf05b87bf46",
+      "id": "src/services/customFolderCommands.ts#deleteCustomFolder.<callback:d83b51c900>:mutator-call:41947b97aced",
       "path": "src/services/customFolderCommands.ts",
-      "line": 182,
-      "symbol": "deleteCustomFolder.<callback:46a72ca223>",
+      "line": 162,
+      "symbol": "deleteCustomFolder.<callback:d83b51c900>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
       "detectedContext": "startup-single-flight-delegation",
@@ -17227,10 +17227,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
     },
     {
-      "id": "src/services/customFolderCommands.ts#deleteCustomFolder.<callback:46a72ca223>:mutator-call:57068a885c03",
+      "id": "src/services/customFolderCommands.ts#deleteCustomFolder.<callback:d83b51c900>:mutator-call:a2504f7c8b79",
       "path": "src/services/customFolderCommands.ts",
-      "line": 184,
-      "symbol": "deleteCustomFolder.<callback:46a72ca223>",
+      "line": 164,
+      "symbol": "deleteCustomFolder.<callback:d83b51c900>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -17240,12 +17240,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/db/migrations/0043_custom_folders.test.ts"
     },
     {
-      "id": "src/services/customFolderCommands.ts#deleteCustomFolder.<callback:46a72ca223>:mutator-call:c2ae8ef50428",
+      "id": "src/services/customFolderCommands.ts#deleteCustomFolder.<callback:d83b51c900>:mutator-call:eef1ab8779a5",
       "path": "src/services/customFolderCommands.ts",
-      "line": 184,
-      "symbol": "deleteCustomFolder.<callback:46a72ca223>",
+      "line": 164,
+      "symbol": "deleteCustomFolder.<callback:d83b51c900>",
       "operation": "mutator-call",
-      "target": "src/services/customFolderCommands.ts#deleteCustomFolder.<callback:46a72ca223>.<callback:50069adf02>",
+      "target": "src/services/customFolderCommands.ts#deleteCustomFolder.<callback:d83b51c900>.<callback:50069adf02>",
       "detectedContext": "withDbTransaction",
       "owner": "deleteCustomFolder",
       "transactionContext": "withDbTransaction",
@@ -17253,10 +17253,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/db/migrations/0043_custom_folders.test.ts"
     },
     {
-      "id": "src/services/customFolderCommands.ts#deleteCustomFolder.<callback:46a72ca223>.<callback:50069adf02>:mutator-call:bcfb02dc1ee9",
+      "id": "src/services/customFolderCommands.ts#deleteCustomFolder.<callback:d83b51c900>.<callback:50069adf02>:mutator-call:5ce231b468b8",
       "path": "src/services/customFolderCommands.ts",
-      "line": 186,
-      "symbol": "deleteCustomFolder.<callback:46a72ca223>.<callback:50069adf02>",
+      "line": 166,
+      "symbol": "deleteCustomFolder.<callback:d83b51c900>.<callback:50069adf02>",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#deleteCustomFolderWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -17266,10 +17266,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/db/migrations/0043_custom_folders.test.ts"
     },
     {
-      "id": "src/services/customFolderCommands.ts#reorderCustomFolders.<callback:74fe5a6a76>:mutator-call:74c5db14c92a",
+      "id": "src/services/customFolderCommands.ts#reorderCustomFolders.<callback:36a6ff0d63>:mutator-call:eb0927885c89",
       "path": "src/services/customFolderCommands.ts",
-      "line": 198,
-      "symbol": "reorderCustomFolders.<callback:74fe5a6a76>",
+      "line": 178,
+      "symbol": "reorderCustomFolders.<callback:36a6ff0d63>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
       "detectedContext": "startup-single-flight-delegation",
@@ -17279,10 +17279,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
     },
     {
-      "id": "src/services/customFolderCommands.ts#reorderCustomFolders.<callback:74fe5a6a76>:mutator-call:3363c8754043",
+      "id": "src/services/customFolderCommands.ts#reorderCustomFolders.<callback:36a6ff0d63>:mutator-call:1c8a4d9041f0",
       "path": "src/services/customFolderCommands.ts",
-      "line": 200,
-      "symbol": "reorderCustomFolders.<callback:74fe5a6a76>",
+      "line": 180,
+      "symbol": "reorderCustomFolders.<callback:36a6ff0d63>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -17292,12 +17292,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/db/migrations/0043_custom_folders.test.ts"
     },
     {
-      "id": "src/services/customFolderCommands.ts#reorderCustomFolders.<callback:74fe5a6a76>:mutator-call:f498f7fd5113",
+      "id": "src/services/customFolderCommands.ts#reorderCustomFolders.<callback:36a6ff0d63>:mutator-call:f9748e20eab6",
       "path": "src/services/customFolderCommands.ts",
-      "line": 200,
-      "symbol": "reorderCustomFolders.<callback:74fe5a6a76>",
+      "line": 180,
+      "symbol": "reorderCustomFolders.<callback:36a6ff0d63>",
       "operation": "mutator-call",
-      "target": "src/services/customFolderCommands.ts#reorderCustomFolders.<callback:74fe5a6a76>.<callback:fd5da13add>",
+      "target": "src/services/customFolderCommands.ts#reorderCustomFolders.<callback:36a6ff0d63>.<callback:fd5da13add>",
       "detectedContext": "withDbTransaction",
       "owner": "reorderCustomFolders",
       "transactionContext": "withDbTransaction",
@@ -17305,10 +17305,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/db/migrations/0043_custom_folders.test.ts"
     },
     {
-      "id": "src/services/customFolderCommands.ts#reorderCustomFolders.<callback:74fe5a6a76>.<callback:fd5da13add>:mutator-call:cd125c1eee31",
+      "id": "src/services/customFolderCommands.ts#reorderCustomFolders.<callback:36a6ff0d63>.<callback:fd5da13add>:mutator-call:df71847a9f39",
       "path": "src/services/customFolderCommands.ts",
-      "line": 202,
-      "symbol": "reorderCustomFolders.<callback:74fe5a6a76>.<callback:fd5da13add>",
+      "line": 182,
+      "symbol": "reorderCustomFolders.<callback:36a6ff0d63>.<callback:fd5da13add>",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#reorderCustomFoldersWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -17318,10 +17318,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/db/migrations/0043_custom_folders.test.ts"
     },
     {
-      "id": "src/services/customFolderCommands.ts#replaceCustomFolderMembership.<callback:526c82060a>:mutator-call:7ae7336e579b",
+      "id": "src/services/customFolderCommands.ts#replaceCustomFolderMembership.<callback:2c40f42a30>:mutator-call:a2e72336605a",
       "path": "src/services/customFolderCommands.ts",
-      "line": 215,
-      "symbol": "replaceCustomFolderMembership.<callback:526c82060a>",
+      "line": 195,
+      "symbol": "replaceCustomFolderMembership.<callback:2c40f42a30>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
       "detectedContext": "startup-single-flight-delegation",
@@ -17331,10 +17331,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
     },
     {
-      "id": "src/services/customFolderCommands.ts#replaceCustomFolderMembership.<callback:526c82060a>:mutator-call:57fcee76349c",
+      "id": "src/services/customFolderCommands.ts#replaceCustomFolderMembership.<callback:2c40f42a30>:mutator-call:2ee896b5a1a4",
       "path": "src/services/customFolderCommands.ts",
-      "line": 219,
-      "symbol": "replaceCustomFolderMembership.<callback:526c82060a>",
+      "line": 199,
+      "symbol": "replaceCustomFolderMembership.<callback:2c40f42a30>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -17344,12 +17344,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/db/migrations/0043_custom_folders.test.ts"
     },
     {
-      "id": "src/services/customFolderCommands.ts#replaceCustomFolderMembership.<callback:526c82060a>:mutator-call:79690526ef55",
+      "id": "src/services/customFolderCommands.ts#replaceCustomFolderMembership.<callback:2c40f42a30>:mutator-call:58acbc02672a",
       "path": "src/services/customFolderCommands.ts",
-      "line": 219,
-      "symbol": "replaceCustomFolderMembership.<callback:526c82060a>",
+      "line": 199,
+      "symbol": "replaceCustomFolderMembership.<callback:2c40f42a30>",
       "operation": "mutator-call",
-      "target": "src/services/customFolderCommands.ts#replaceCustomFolderMembership.<callback:526c82060a>.<callback:3c0c382302>",
+      "target": "src/services/customFolderCommands.ts#replaceCustomFolderMembership.<callback:2c40f42a30>.<callback:3c0c382302>",
       "detectedContext": "withDbTransaction",
       "owner": "replaceCustomFolderMembership",
       "transactionContext": "withDbTransaction",
@@ -17357,10 +17357,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/db/migrations/0043_custom_folders.test.ts"
     },
     {
-      "id": "src/services/customFolderCommands.ts#replaceCustomFolderMembership.<callback:526c82060a>.<callback:3c0c382302>:mutator-call:eef7129eaaff",
+      "id": "src/services/customFolderCommands.ts#replaceCustomFolderMembership.<callback:2c40f42a30>.<callback:3c0c382302>:mutator-call:6fe3bc1dcf84",
       "path": "src/services/customFolderCommands.ts",
-      "line": 221,
-      "symbol": "replaceCustomFolderMembership.<callback:526c82060a>.<callback:3c0c382302>",
+      "line": 201,
+      "symbol": "replaceCustomFolderMembership.<callback:2c40f42a30>.<callback:3c0c382302>",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#replaceCustomFolderMembershipWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -26678,10 +26678,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/backgroundSyncTask.test.ts; test/services/backgroundSyncOrchestrator.test.ts; test/services/syncControlTracking.test.ts; test/services/syncEngine.test.ts; test/services/syncEngineBranches.test.ts; test/services/deletionSync.test.ts; test/services/syncedBackgroundAccountScope.test.ts"
     },
     {
-      "id": "src/services/themeCommands.ts#saveCustomTheme.<callback:dca08fb39f>:mutator-call:26f750dd2aa9",
+      "id": "src/services/themeCommands.ts#saveCustomTheme.<callback:a88e4ab7ad>:mutator-call:0538a33d9bca",
       "path": "src/services/themeCommands.ts",
-      "line": 75,
-      "symbol": "saveCustomTheme.<callback:dca08fb39f>",
+      "line": 55,
+      "symbol": "saveCustomTheme.<callback:a88e4ab7ad>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
       "detectedContext": "startup-single-flight-delegation",
@@ -26691,12 +26691,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
     },
     {
-      "id": "src/services/themeCommands.ts#saveCustomTheme.<callback:dca08fb39f>:mutator-call:6f8aea07208c",
+      "id": "src/services/themeCommands.ts#saveCustomTheme.<callback:a88e4ab7ad>:mutator-call:abdf83f07244",
       "path": "src/services/themeCommands.ts",
-      "line": 80,
-      "symbol": "saveCustomTheme.<callback:dca08fb39f>",
+      "line": 60,
+      "symbol": "saveCustomTheme.<callback:a88e4ab7ad>",
       "operation": "mutator-call",
-      "target": "src/services/themeCommands.ts#saveCustomTheme.<callback:dca08fb39f>.<callback:4b57bc20c7>",
+      "target": "src/services/themeCommands.ts#saveCustomTheme.<callback:a88e4ab7ad>.<callback:371f848906>",
       "detectedContext": "withDbTransaction",
       "owner": "saveCustomTheme",
       "transactionContext": "withDbTransaction",
@@ -26704,10 +26704,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/themesScreen.test.tsx; test/db/themesRepo.test.ts"
     },
     {
-      "id": "src/services/themeCommands.ts#saveCustomTheme.<callback:dca08fb39f>:mutator-call:7e36157926b0",
+      "id": "src/services/themeCommands.ts#saveCustomTheme.<callback:a88e4ab7ad>:mutator-call:4c91668bfb0a",
       "path": "src/services/themeCommands.ts",
-      "line": 80,
-      "symbol": "saveCustomTheme.<callback:dca08fb39f>",
+      "line": 60,
+      "symbol": "saveCustomTheme.<callback:a88e4ab7ad>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -26717,10 +26717,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/themesScreen.test.tsx; test/db/themesRepo.test.ts"
     },
     {
-      "id": "src/services/themeCommands.ts#saveCustomTheme.<callback:dca08fb39f>.<callback:4b57bc20c7>:mutator-call:a8d82e89c127",
+      "id": "src/services/themeCommands.ts#saveCustomTheme.<callback:a88e4ab7ad>.<callback:371f848906>:mutator-call:2f1d61c23f10",
       "path": "src/services/themeCommands.ts",
-      "line": 84,
-      "symbol": "saveCustomTheme.<callback:dca08fb39f>.<callback:4b57bc20c7>",
+      "line": 64,
+      "symbol": "saveCustomTheme.<callback:a88e4ab7ad>.<callback:371f848906>",
       "operation": "mutator-call",
       "target": "src/db/repositories/themes.ts#createCustomThemeWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -26730,10 +26730,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/themesScreen.test.tsx; test/db/themesRepo.test.ts"
     },
     {
-      "id": "src/services/themeCommands.ts#saveCustomTheme.<callback:dca08fb39f>.<callback:4b57bc20c7>:mutator-call:c4e169748968",
+      "id": "src/services/themeCommands.ts#saveCustomTheme.<callback:a88e4ab7ad>.<callback:371f848906>:mutator-call:9582413b23c6",
       "path": "src/services/themeCommands.ts",
-      "line": 90,
-      "symbol": "saveCustomTheme.<callback:dca08fb39f>.<callback:4b57bc20c7>",
+      "line": 70,
+      "symbol": "saveCustomTheme.<callback:a88e4ab7ad>.<callback:371f848906>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -26743,10 +26743,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/themesScreen.test.tsx; test/db/themesRepo.test.ts"
     },
     {
-      "id": "src/services/themeCommands.ts#saveCustomTheme.<callback:dca08fb39f>:mutator-call:21be7fd749a7",
+      "id": "src/services/themeCommands.ts#saveCustomTheme.<callback:a88e4ab7ad>:mutator-call:b00a9251d79c",
       "path": "src/services/themeCommands.ts",
-      "line": 99,
-      "symbol": "saveCustomTheme.<callback:dca08fb39f>",
+      "line": 79,
+      "symbol": "saveCustomTheme.<callback:a88e4ab7ad>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -26756,12 +26756,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/themesScreen.test.tsx; test/db/themesRepo.test.ts"
     },
     {
-      "id": "src/services/themeCommands.ts#saveCustomTheme.<callback:dca08fb39f>:mutator-call:4be05f479b7f",
+      "id": "src/services/themeCommands.ts#saveCustomTheme.<callback:a88e4ab7ad>:mutator-call:9e8ad3787006",
       "path": "src/services/themeCommands.ts",
-      "line": 99,
-      "symbol": "saveCustomTheme.<callback:dca08fb39f>",
+      "line": 79,
+      "symbol": "saveCustomTheme.<callback:a88e4ab7ad>",
       "operation": "mutator-call",
-      "target": "src/services/themeCommands.ts#saveCustomTheme.<callback:dca08fb39f>.<callback:379283038e>",
+      "target": "src/services/themeCommands.ts#saveCustomTheme.<callback:a88e4ab7ad>.<callback:7cc52f0804>",
       "detectedContext": "withDbTransaction",
       "owner": "saveCustomTheme",
       "transactionContext": "withDbTransaction",
@@ -26769,10 +26769,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/themesScreen.test.tsx; test/db/themesRepo.test.ts"
     },
     {
-      "id": "src/services/themeCommands.ts#saveCustomTheme.<callback:dca08fb39f>.<callback:379283038e>:mutator-call:13fc4bbb1a0c",
+      "id": "src/services/themeCommands.ts#saveCustomTheme.<callback:a88e4ab7ad>.<callback:7cc52f0804>:mutator-call:2194604833aa",
       "path": "src/services/themeCommands.ts",
-      "line": 103,
-      "symbol": "saveCustomTheme.<callback:dca08fb39f>.<callback:379283038e>",
+      "line": 83,
+      "symbol": "saveCustomTheme.<callback:a88e4ab7ad>.<callback:7cc52f0804>",
       "operation": "mutator-call",
       "target": "src/db/repositories/themes.ts#updateCustomThemeWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -26782,10 +26782,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/themesScreen.test.tsx; test/db/themesRepo.test.ts"
     },
     {
-      "id": "src/services/themeCommands.ts#deleteCustomTheme.<callback:9a09bd6e2f>:mutator-call:697a845c4d62",
+      "id": "src/services/themeCommands.ts#deleteCustomTheme.<callback:5c46f29daf>:mutator-call:ab4d68e5214d",
       "path": "src/services/themeCommands.ts",
-      "line": 122,
-      "symbol": "deleteCustomTheme.<callback:9a09bd6e2f>",
+      "line": 102,
+      "symbol": "deleteCustomTheme.<callback:5c46f29daf>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
       "detectedContext": "startup-single-flight-delegation",
@@ -26795,10 +26795,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
     },
     {
-      "id": "src/services/themeCommands.ts#deleteCustomTheme.<callback:9a09bd6e2f>:mutator-call:03ffc9945368",
+      "id": "src/services/themeCommands.ts#deleteCustomTheme.<callback:5c46f29daf>:mutator-call:53090df31a0e",
       "path": "src/services/themeCommands.ts",
-      "line": 124,
-      "symbol": "deleteCustomTheme.<callback:9a09bd6e2f>",
+      "line": 104,
+      "symbol": "deleteCustomTheme.<callback:5c46f29daf>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -26808,12 +26808,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/themesScreen.test.tsx; test/db/themesRepo.test.ts"
     },
     {
-      "id": "src/services/themeCommands.ts#deleteCustomTheme.<callback:9a09bd6e2f>:mutator-call:06bc5b3270a8",
+      "id": "src/services/themeCommands.ts#deleteCustomTheme.<callback:5c46f29daf>:mutator-call:fcd8b309829a",
       "path": "src/services/themeCommands.ts",
-      "line": 124,
-      "symbol": "deleteCustomTheme.<callback:9a09bd6e2f>",
+      "line": 104,
+      "symbol": "deleteCustomTheme.<callback:5c46f29daf>",
       "operation": "mutator-call",
-      "target": "src/services/themeCommands.ts#deleteCustomTheme.<callback:9a09bd6e2f>.<callback:efec348705>",
+      "target": "src/services/themeCommands.ts#deleteCustomTheme.<callback:5c46f29daf>.<callback:a1e4dd9949>",
       "detectedContext": "withDbTransaction",
       "owner": "deleteCustomTheme",
       "transactionContext": "withDbTransaction",
@@ -26821,10 +26821,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/themesScreen.test.tsx; test/db/themesRepo.test.ts"
     },
     {
-      "id": "src/services/themeCommands.ts#deleteCustomTheme.<callback:9a09bd6e2f>.<callback:efec348705>:mutator-call:e1b68ba465d2",
+      "id": "src/services/themeCommands.ts#deleteCustomTheme.<callback:5c46f29daf>.<callback:a1e4dd9949>:mutator-call:45f62eceda17",
       "path": "src/services/themeCommands.ts",
-      "line": 130,
-      "symbol": "deleteCustomTheme.<callback:9a09bd6e2f>.<callback:efec348705>",
+      "line": 110,
+      "symbol": "deleteCustomTheme.<callback:5c46f29daf>.<callback:a1e4dd9949>",
       "operation": "mutator-call",
       "target": "src/db/repositories/themes.ts#deleteCustomThemeWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -26834,10 +26834,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/themesScreen.test.tsx; test/db/themesRepo.test.ts"
     },
     {
-      "id": "src/services/themeCommands.ts#deleteCustomTheme.<callback:9a09bd6e2f>.<callback:efec348705>:mutator-call:6256edf53d96",
+      "id": "src/services/themeCommands.ts#deleteCustomTheme.<callback:5c46f29daf>.<callback:a1e4dd9949>:mutator-call:2120f5c2a960",
       "path": "src/services/themeCommands.ts",
-      "line": 133,
-      "symbol": "deleteCustomTheme.<callback:9a09bd6e2f>.<callback:efec348705>",
+      "line": 113,
+      "symbol": "deleteCustomTheme.<callback:5c46f29daf>.<callback:a1e4dd9949>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -26847,10 +26847,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/themesScreen.test.tsx; test/db/themesRepo.test.ts"
     },
     {
-      "id": "src/services/themeCommands.ts#selectCustomTheme.<callback:8ef6e3f48f>:mutator-call:2bc0c713a934",
+      "id": "src/services/themeCommands.ts#selectCustomTheme.<callback:c82e91098d>:mutator-call:045e5cdbb165",
       "path": "src/services/themeCommands.ts",
-      "line": 148,
-      "symbol": "selectCustomTheme.<callback:8ef6e3f48f>",
+      "line": 128,
+      "symbol": "selectCustomTheme.<callback:c82e91098d>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
       "detectedContext": "startup-single-flight-delegation",
@@ -26860,12 +26860,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
     },
     {
-      "id": "src/services/themeCommands.ts#selectCustomTheme.<callback:8ef6e3f48f>:mutator-call:23269e389b76",
+      "id": "src/services/themeCommands.ts#selectCustomTheme.<callback:c82e91098d>:mutator-call:77b1831d50e8",
       "path": "src/services/themeCommands.ts",
-      "line": 150,
-      "symbol": "selectCustomTheme.<callback:8ef6e3f48f>",
+      "line": 130,
+      "symbol": "selectCustomTheme.<callback:c82e91098d>",
       "operation": "mutator-call",
-      "target": "src/services/themeCommands.ts#selectCustomTheme.<callback:8ef6e3f48f>.<callback:c861cd37c3>",
+      "target": "src/services/themeCommands.ts#selectCustomTheme.<callback:c82e91098d>.<callback:3e2f00fc6d>",
       "detectedContext": "withDbTransaction",
       "owner": "selectCustomTheme",
       "transactionContext": "withDbTransaction",
@@ -26873,10 +26873,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/themesScreen.test.tsx; test/db/themesRepo.test.ts"
     },
     {
-      "id": "src/services/themeCommands.ts#selectCustomTheme.<callback:8ef6e3f48f>:mutator-call:d02779fc8b8a",
+      "id": "src/services/themeCommands.ts#selectCustomTheme.<callback:c82e91098d>:mutator-call:bb19ed6f5d9a",
       "path": "src/services/themeCommands.ts",
-      "line": 150,
-      "symbol": "selectCustomTheme.<callback:8ef6e3f48f>",
+      "line": 130,
+      "symbol": "selectCustomTheme.<callback:c82e91098d>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -26886,10 +26886,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/themesScreen.test.tsx; test/db/themesRepo.test.ts"
     },
     {
-      "id": "src/services/themeCommands.ts#selectCustomTheme.<callback:8ef6e3f48f>.<callback:c861cd37c3>:mutator-call:2a83c1d324cf",
+      "id": "src/services/themeCommands.ts#selectCustomTheme.<callback:c82e91098d>.<callback:3e2f00fc6d>:mutator-call:dd192cc7b85c",
       "path": "src/services/themeCommands.ts",
-      "line": 159,
-      "symbol": "selectCustomTheme.<callback:8ef6e3f48f>.<callback:c861cd37c3>",
+      "line": 139,
+      "symbol": "selectCustomTheme.<callback:c82e91098d>.<callback:3e2f00fc6d>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -26899,10 +26899,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/themesScreen.test.tsx; test/db/themesRepo.test.ts"
     },
     {
-      "id": "src/services/themeCommands.ts#revertCustomTheme.<callback:f44f08a9f6>:mutator-call:126b5e5e1e3b",
+      "id": "src/services/themeCommands.ts#revertCustomTheme.<callback:43868417a1>:mutator-call:445f03b3efec",
       "path": "src/services/themeCommands.ts",
-      "line": 172,
-      "symbol": "revertCustomTheme.<callback:f44f08a9f6>",
+      "line": 152,
+      "symbol": "revertCustomTheme.<callback:43868417a1>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
       "detectedContext": "startup-single-flight-delegation",
@@ -26912,12 +26912,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
     },
     {
-      "id": "src/services/themeCommands.ts#revertCustomTheme.<callback:f44f08a9f6>:mutator-call:8726badb2b48",
+      "id": "src/services/themeCommands.ts#revertCustomTheme.<callback:43868417a1>:mutator-call:307084873279",
       "path": "src/services/themeCommands.ts",
-      "line": 174,
-      "symbol": "revertCustomTheme.<callback:f44f08a9f6>",
+      "line": 154,
+      "symbol": "revertCustomTheme.<callback:43868417a1>",
       "operation": "mutator-call",
-      "target": "src/services/themeCommands.ts#revertCustomTheme.<callback:f44f08a9f6>.<callback:5ae5058a90>",
+      "target": "src/services/themeCommands.ts#revertCustomTheme.<callback:43868417a1>.<callback:2d27087bae>",
       "detectedContext": "withDbTransaction",
       "owner": "revertCustomTheme",
       "transactionContext": "withDbTransaction",
@@ -26925,10 +26925,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/themesScreen.test.tsx; test/db/themesRepo.test.ts"
     },
     {
-      "id": "src/services/themeCommands.ts#revertCustomTheme.<callback:f44f08a9f6>:mutator-call:b5ef87264efd",
+      "id": "src/services/themeCommands.ts#revertCustomTheme.<callback:43868417a1>:mutator-call:36930d1ebff7",
       "path": "src/services/themeCommands.ts",
-      "line": 174,
-      "symbol": "revertCustomTheme.<callback:f44f08a9f6>",
+      "line": 154,
+      "symbol": "revertCustomTheme.<callback:43868417a1>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -26938,10 +26938,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/themesScreen.test.tsx; test/db/themesRepo.test.ts"
     },
     {
-      "id": "src/services/themeCommands.ts#revertCustomTheme.<callback:f44f08a9f6>.<callback:5ae5058a90>:mutator-call:060454b4f272",
+      "id": "src/services/themeCommands.ts#revertCustomTheme.<callback:43868417a1>.<callback:2d27087bae>:mutator-call:b5dfa845ea7f",
       "path": "src/services/themeCommands.ts",
-      "line": 178,
-      "symbol": "revertCustomTheme.<callback:f44f08a9f6>.<callback:5ae5058a90>",
+      "line": 158,
+      "symbol": "revertCustomTheme.<callback:43868417a1>.<callback:2d27087bae>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
       "detectedContext": "withDbTransaction",

@@ -22,40 +22,20 @@ import { withDbTransaction } from '@db/transaction';
 import { ensureDatabase } from './databaseControl';
 import {
   captureRealtimeDeliveryLease,
-  runTrackedRealtimeWork,
   type RealtimeDeliveryLease,
 } from './realtime/deliveryCoordinator';
-
-/** Private rollback/control-flow signal for a folder command whose account is being retired. */
-const STALE_CUSTOM_FOLDER_COMMAND = Symbol('stale-custom-folder-command');
+import { assertAccountOperationCurrent, runAccountOperation } from './realtime/accountOperation';
 
 export type CustomFolderCommandResult<T> =
   { readonly status: 'committed'; readonly value: T } | { readonly status: 'stale' };
-
-function assertCustomFolderCommandLease(lease: RealtimeDeliveryLease): void {
-  if (!lease.isCurrent()) throw STALE_CUSTOM_FOLDER_COMMAND;
-}
 
 /** Admit one short folder read/write under the Disconnect teardown barrier. */
 async function runCustomFolderCommand<T>(
   lease: RealtimeDeliveryLease,
   command: (activeLease: RealtimeDeliveryLease) => Promise<T>,
 ): Promise<CustomFolderCommandResult<T>> {
-  let value: T | undefined;
-  let completed = false;
-  try {
-    const status = await runTrackedRealtimeWork(lease, async (activeLease) => {
-      assertCustomFolderCommandLease(activeLease);
-      value = await command(activeLease);
-      assertCustomFolderCommandLease(activeLease);
-      completed = true;
-    });
-    if (status === 'paused' || !completed || !lease.isCurrent()) return { status: 'stale' };
-    return { status: 'committed', value: value as T };
-  } catch (error) {
-    if (error === STALE_CUSTOM_FOLDER_COMMAND || !lease.isCurrent()) return { status: 'stale' };
-    throw error;
-  }
+  const result = await runAccountOperation(lease, command);
+  return result.ok ? { status: 'committed', value: result.value } : { status: 'stale' };
 }
 
 /** Read all ordered folders for the mounted account. */
@@ -64,7 +44,7 @@ export function loadCustomFolders(
 ): Promise<CustomFolderCommandResult<CustomFolderListRow[]>> {
   return runCustomFolderCommand(accountLease, async (activeLease) => {
     const db = await ensureDatabase();
-    assertCustomFolderCommandLease(activeLease);
+    assertAccountOperationCurrent(activeLease);
     return withDbTransaction(
       db,
       (context) => listCustomFoldersWithinTransaction(context),
@@ -79,7 +59,7 @@ export function loadCustomFolderSummaries(
 ): Promise<CustomFolderCommandResult<CustomFolderSummaryRow[]>> {
   return runCustomFolderCommand(accountLease, async (activeLease) => {
     const db = await ensureDatabase();
-    assertCustomFolderCommandLease(activeLease);
+    assertAccountOperationCurrent(activeLease);
     return withDbTransaction(
       db,
       (context) => listCustomFolderSummariesWithinTransaction(context),
@@ -95,7 +75,7 @@ export function loadCustomFolderMembership(
 ): Promise<CustomFolderCommandResult<string[]>> {
   return runCustomFolderCommand(accountLease, async (activeLease) => {
     const db = await ensureDatabase();
-    assertCustomFolderCommandLease(activeLease);
+    assertAccountOperationCurrent(activeLease);
     return withDbTransaction(
       db,
       (context) => listCustomFolderChatGuidsWithinTransaction(context, folderId),
@@ -116,7 +96,7 @@ export function loadCustomFolderInboxPage(
 ): Promise<CustomFolderCommandResult<CustomFolderInboxPage | null>> {
   return runCustomFolderCommand(accountLease, async (activeLease) => {
     const db = await ensureDatabase();
-    assertCustomFolderCommandLease(activeLease);
+    assertAccountOperationCurrent(activeLease);
     return withDbTransaction(
       db,
       (context) => listCustomFolderInboxPageWithinTransaction(context, folderId, limit, searchText),
@@ -131,7 +111,7 @@ export function createCustomFolder(
 ): Promise<CustomFolderCommandResult<CustomFolderRow>> {
   return runCustomFolderCommand(accountLease, async (activeLease) => {
     const db = await ensureDatabase();
-    assertCustomFolderCommandLease(activeLease);
+    assertAccountOperationCurrent(activeLease);
     return withDbTransaction(
       db,
       (context) => createCustomFolderWithinTransaction(context, name),
@@ -147,7 +127,7 @@ export function renameCustomFolder(
 ): Promise<CustomFolderCommandResult<boolean>> {
   return runCustomFolderCommand(accountLease, async (activeLease) => {
     const db = await ensureDatabase();
-    assertCustomFolderCommandLease(activeLease);
+    assertAccountOperationCurrent(activeLease);
     return withDbTransaction(
       db,
       (context) => renameCustomFolderWithinTransaction(context, folderId, name),
@@ -164,7 +144,7 @@ export function setCustomFolderShowUnreadBadge(
 ): Promise<CustomFolderCommandResult<boolean>> {
   return runCustomFolderCommand(accountLease, async (activeLease) => {
     const db = await ensureDatabase();
-    assertCustomFolderCommandLease(activeLease);
+    assertAccountOperationCurrent(activeLease);
     return withDbTransaction(
       db,
       (context) =>
@@ -180,7 +160,7 @@ export function deleteCustomFolder(
 ): Promise<CustomFolderCommandResult<boolean>> {
   return runCustomFolderCommand(accountLease, async (activeLease) => {
     const db = await ensureDatabase();
-    assertCustomFolderCommandLease(activeLease);
+    assertAccountOperationCurrent(activeLease);
     return withDbTransaction(
       db,
       (context) => deleteCustomFolderWithinTransaction(context, folderId),
@@ -196,7 +176,7 @@ export function reorderCustomFolders(
   const snapshot = [...folderIds];
   return runCustomFolderCommand(accountLease, async (activeLease) => {
     const db = await ensureDatabase();
-    assertCustomFolderCommandLease(activeLease);
+    assertAccountOperationCurrent(activeLease);
     return withDbTransaction(
       db,
       (context) => reorderCustomFoldersWithinTransaction(context, snapshot),
@@ -213,7 +193,7 @@ export function replaceCustomFolderMembership(
   const snapshot = [...chatGuids];
   return runCustomFolderCommand(accountLease, async (activeLease) => {
     const db = await ensureDatabase();
-    assertCustomFolderCommandLease(activeLease);
+    assertAccountOperationCurrent(activeLease);
     // Membership is local state keyed by exact chat guid, so an RCS chat from any Google pairing can
     // join or leave a folder. A false result therefore means only that the folder no longer exists.
     return withDbTransaction(
