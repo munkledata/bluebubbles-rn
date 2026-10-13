@@ -77,8 +77,7 @@ export function deriveRcsHealth(
 
 /**
  * Map a single `rcs-alert` alertType to its health display, or `null` for a benign/recovery/unknown
- * alert (which leaves the bridge looking healthy). Shared by the alert-only `deriveRcsHealth`
- * fallback and the richer `deriveRcsHealthFromStatus`.
+ * alert (which leaves the bridge looking healthy). Used by `deriveRcsHealth`.
  */
 function mapAlert(alertType: string | null | undefined): RcsHealthDisplay | null {
   switch (alertType) {
@@ -111,117 +110,4 @@ function mapAlert(alertType: string | null | undefined): RcsHealthDisplay | null
     default:
       return null;
   }
-}
-
-/**
- * The non-admin `get-rcs-status` block (from the server's `get-rcs-status` admin-command channel).
- * All fields optional/nullish so a version-skewed server degrades instead of throwing.
- */
-export interface RcsStatusSnapshot {
-  enabled?: boolean | null;
-  running?: boolean | null;
-  paired?: boolean | null;
-  connected?: boolean | null;
-  phoneResponding?: boolean | null;
-  state?: string | null;
-  phoneID?: string | null;
-  browserActive?: boolean | null;
-  lastAlert?: string | null;
-  /**
-   * Why the sidecar child last exited, when the server knows (`state:'failed'`). Server-authored
-   * and safe to display — it never carries credentials.
-   */
-  error?: string | null;
-}
-
-/**
- * Derive the Server Health RCS row from the RICH `get-rcs-status` block — the accurate source of
- * truth for enabled / paired / connected / phoneResponding — with an optional FRESH `rcs-alert`
- * socket signal (`liveAlertType`) as an immediacy override so a just-arrived alert updates the card
- * between refetches.
- *
- * REAUTH-RECOVERY: the boolean flags win over any stale alert. When a refetch reports
- * `connected===true`, the row shows "Connected" even if a prior `GAIA_LOGGED_OUT` (from the socket
- * store OR the block's own `lastAlert`) is still around — so after a dashboard cookie re-auth the
- * card recovers on the next refetch WITHOUT needing a recovery alert (the old alert-only limitation).
- *
- * Order: disabled → fresh socket alert (override) → starting → disconnected/auth-expired →
- * phone offline → browser idle → connected → not-paired → healthy default.
- * The caller passes `liveAlertType` ONLY when the socket alert is newer than this fetch (otherwise a
- * stale alert would defeat the recovery above).
- */
-export function deriveRcsHealthFromStatus(
-  s: RcsStatusSnapshot,
-  liveAlertType?: string | null,
-): RcsHealthDisplay {
-  if (!s.enabled) return { severity: 'off', status: 'Off' };
-
-  // A fresh socket alert (immediacy override) — reflect it at once, even if the last fetched block
-  // still looked healthy. Benign/recovery alerts return null and fall through to the block.
-  if (liveAlertType) {
-    const overridden = mapAlert(liveAlertType);
-    if (overridden) return overridden;
-  }
-
-  // The sidecar process itself is failing to start. This MUST be checked before the
-  // `running === false` branch below, or a crash-looping bridge renders as the reassuring
-  // "Starting…" forever — which is exactly what this surface told the user for four days
-  // during the 2026-07-23 outage while the supervisor had long since given up.
-  if (s.state === 'failed' && s.running === false) {
-    return {
-      severity: 'error',
-      status: 'Not running',
-      detail: s.error
-        ? `RCS bridge keeps failing to start (${s.error}) — check the server dashboard.`
-        : 'RCS bridge keeps failing to start — check the server dashboard.',
-    };
-  }
-
-  // Starting / not yet running.
-  if (s.state === 'starting' || s.running === false) {
-    return { severity: 'warn', status: 'Starting', detail: 'RCS bridge is starting…' };
-  }
-
-  // Disconnected / auth-expired: paired but the connection is down. The phone asks the server to
-  // retry with the server's own Firefox cookies; those credentials never leave the Mac.
-  if (s.paired && s.connected === false) {
-    return {
-      severity: 'error',
-      status: 'Disconnected',
-      detail: 'RCS bridge disconnected — tap Re-authenticate below.',
-    };
-  }
-
-  // Phone offline — the paired Android phone must be online.
-  if (s.phoneResponding === false) {
-    return {
-      severity: 'warn',
-      status: 'Phone offline',
-      detail: 'Phone not responding — your Android phone must be online.',
-    };
-  }
-
-  // Paired + connected → healthy (booleans win over any stale block.lastAlert → recovery resolved).
-  if (s.paired && s.connected) return { severity: 'ok', status: 'Connected' };
-
-  // Enabled but not yet paired — pair Google Messages on the dashboard.
-  if (s.paired === false) {
-    return {
-      severity: 'warn',
-      status: 'Not paired',
-      detail: 'RCS bridge is not paired — pair Google Messages on the server dashboard.',
-    };
-  }
-
-  // Flags indeterminate (version skew): fall back to the block's own lastAlert. With no alert
-  // either, say Unknown — a green "Connected" derived from missing fields is the same
-  // false-green as the alert-only path above.
-  const mapped = mapAlert(s.lastAlert);
-  if (mapped) return mapped;
-  if (s.lastAlert) return { severity: 'ok', status: 'Connected' };
-  return {
-    severity: 'warn',
-    status: 'Unknown',
-    detail: 'The server did not report a usable RCS bridge state.',
-  };
 }

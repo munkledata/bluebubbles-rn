@@ -1,7 +1,6 @@
 import {
   adoptAttachmentCacheScanBatch,
   ATTACHMENT_CACHE_RETIREMENT_RETRY_MAX_MS,
-  attachmentCacheRetirementBackoffMs,
   claimAttachmentCachePathsForRetirement,
   commitAttachmentCacheReservation,
   confirmAttachmentCacheEntryDeleted,
@@ -1129,9 +1128,6 @@ describe('attachment cache ledger', () => {
       claimAttachmentCachePathsForRetirement(context, [PATH]),
     );
 
-    expect(attachmentCacheRetirementBackoffMs(1)).toBe(5_000);
-    expect(attachmentCacheRetirementBackoffMs(2)).toBe(10_000);
-    expect(attachmentCacheRetirementBackoffMs(100)).toBe(ATTACHMENT_CACHE_RETIREMENT_RETRY_MAX_MS);
     expect(
       await withDbTransaction(db, (context) =>
         scheduleAttachmentCacheRetirementRetry(context, PATH, 1_000),
@@ -1186,6 +1182,5 @@ describe('attachment cache ledger', () => {
         claimAttachmentCachePathsForRetirement(context, [PATH, PATH]),
       ),
     ).rejects.toThrow('must be unique');
-    expect(() => attachmentCacheRetirementBackoffMs(0)).toThrow('positive safe integer');
   });
 });

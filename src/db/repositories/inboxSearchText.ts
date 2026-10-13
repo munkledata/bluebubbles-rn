@@ -19,8 +19,3 @@ export function uniqueInboxSearchBigrams(foldedText: string): number[] {
   }
   return [...grams];
 }
-
-export function firstInboxSearchBigram(foldedQuery: string): number {
-  if (foldedQuery.length < 2) throw new RangeError('Inbox search needs two UTF-16 units.');
-  return bigramAt(foldedQuery, 0);
-}

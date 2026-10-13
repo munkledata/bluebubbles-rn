@@ -9,7 +9,6 @@ import {
   claimErrorReports,
   clearErrorReports,
   deleteErrorReports,
-  errorReportBackoffMs,
   insertErrorReport,
   insertErrorReports,
   listRetryableErrorReports,
@@ -111,14 +110,6 @@ async function waitForDriverStart(check: () => boolean, label: string): Promise<
   }
   throw new Error(`${label} did not start within 20 event-loop turns`);
 }
-
-describe('errorReportBackoffMs', () => {
-  it('doubles per attempt and caps at 1h', () => {
-    expect(errorReportBackoffMs(1)).toBe(30_000);
-    expect(errorReportBackoffMs(2)).toBe(60_000);
-    expect(errorReportBackoffMs(99)).toBe(3_600_000);
-  });
-});
 
 describe('error_reports repo', () => {
   it('inserts + lists eligible rows oldest-first', async () => {

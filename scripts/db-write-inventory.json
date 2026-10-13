@@ -5438,7 +5438,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#recordAttachmentCacheEntry:sql-insert:1d5b6db8c26c",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 451,
+      "line": 439,
       "symbol": "recordAttachmentCacheEntry",
       "operation": "sql-insert",
       "target": "attachment_cache_entries",
@@ -5451,7 +5451,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch:sql-insert:99e2263a1304",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 521,
+      "line": 509,
       "symbol": "adoptAttachmentCacheScanBatch",
       "operation": "sql-insert",
       "target": "attachment_cache_entries",
@@ -5464,7 +5464,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch:sql-delete:045962bd8b71",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 550,
+      "line": 538,
       "symbol": "adoptAttachmentCacheScanBatch",
       "operation": "sql-delete",
       "target": "attachment_media_exports",
@@ -5477,7 +5477,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch:sql-update:9609800f7a37",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 559,
+      "line": 547,
       "symbol": "adoptAttachmentCacheScanBatch",
       "operation": "sql-update",
       "target": "attachments",
@@ -5490,7 +5490,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#recordAttachmentCacheAccess:sql-update:3ca8ab1b4190",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 663,
+      "line": 651,
       "symbol": "recordAttachmentCacheAccess",
       "operation": "sql-update",
       "target": "attachment_cache_entries",
@@ -5503,7 +5503,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#repairMissingActiveAttachmentCacheEntry:sql-delete:c78a3766ee18",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 700,
+      "line": 688,
       "symbol": "repairMissingActiveAttachmentCacheEntry",
       "operation": "sql-delete",
       "target": "attachment_media_exports",
@@ -5516,7 +5516,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#repairMissingActiveAttachmentCacheEntry:sql-update:27b8750a28ca",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 707,
+      "line": 695,
       "symbol": "repairMissingActiveAttachmentCacheEntry",
       "operation": "sql-update",
       "target": "attachments",
@@ -5529,7 +5529,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#repairMissingActiveAttachmentCacheEntry:sql-delete:b9564831e666",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 722,
+      "line": 710,
       "symbol": "repairMissingActiveAttachmentCacheEntry",
       "operation": "sql-delete",
       "target": "attachment_cache_entries",
@@ -5542,7 +5542,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement:sql-delete:ff6e109326d8",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 952,
+      "line": 940,
       "symbol": "claimAttachmentCachePathsForRetirement",
       "operation": "sql-delete",
       "target": "attachment_media_exports",
@@ -5555,7 +5555,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement:sql-update:0fd63f0dd34a",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 962,
+      "line": 950,
       "symbol": "claimAttachmentCachePathsForRetirement",
       "operation": "sql-update",
       "target": "attachment_cache_entries",
@@ -5568,7 +5568,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#claimAttachmentCachePathsForRetirement:sql-update:300d170b9271",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 979,
+      "line": 967,
       "symbol": "claimAttachmentCachePathsForRetirement",
       "operation": "sql-update",
       "target": "attachments",
@@ -5581,7 +5581,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#scheduleAttachmentCacheRetirementRetry:sql-update:94a4794dc91e",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 1010,
+      "line": 998,
       "symbol": "scheduleAttachmentCacheRetirementRetry",
       "operation": "sql-update",
       "target": "attachment_cache_entries",
@@ -5594,7 +5594,7 @@
     {
       "id": "src/db/repositories/attachmentCache.ts#confirmAttachmentCacheEntryDeleted:sql-delete:f009e63ebbd9",
       "path": "src/db/repositories/attachmentCache.ts",
-      "line": 1059,
+      "line": 1047,
       "symbol": "confirmAttachmentCacheEntryDeleted",
       "operation": "sql-delete",
       "target": "attachment_cache_entries",
@@ -7726,7 +7726,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#insertErrorReportsWithinTransaction:drizzle-insert:d00f2ee94ed5",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 100,
+      "line": 95,
       "symbol": "insertErrorReportsWithinTransaction",
       "operation": "drizzle-insert",
       "target": "errorReports",
@@ -7739,7 +7739,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#insertErrorReportsWithinTransaction.<callback:f6ac841d23>:mutator-call:94aede357e37",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 111,
+      "line": 106,
       "symbol": "insertErrorReportsWithinTransaction.<callback:f6ac841d23>",
       "operation": "mutator-call",
       "target": "src/db/repositories/errorReports.ts#trimErrorReportsWithinTransaction",
@@ -7752,7 +7752,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#insertErrorReports:mutator-call:5583884b2221",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 122,
+      "line": 117,
       "symbol": "insertErrorReports",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -7765,7 +7765,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#insertErrorReports:mutator-call:6ad660de01c0",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 122,
+      "line": 117,
       "symbol": "insertErrorReports",
       "operation": "mutator-call",
       "target": "src/db/repositories/errorReports.ts#insertErrorReports.<callback:e23b174989>",
@@ -7778,7 +7778,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#insertErrorReports.<callback:e23b174989>:mutator-call:b596e462ac77",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 123,
+      "line": 118,
       "symbol": "insertErrorReports.<callback:e23b174989>",
       "operation": "mutator-call",
       "target": "src/db/repositories/errorReports.ts#insertErrorReportsWithinTransaction",
@@ -7791,7 +7791,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#insertErrorReport:mutator-call:184b64238855",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 133,
+      "line": 128,
       "symbol": "insertErrorReport",
       "operation": "mutator-call",
       "target": "src/db/repositories/errorReports.ts#insertErrorReports",
@@ -7804,7 +7804,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#trimErrorReportsWithinTransaction:sql-delete:3d52ddc66eff",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 155,
+      "line": 150,
       "symbol": "trimErrorReportsWithinTransaction",
       "operation": "sql-delete",
       "target": "error_reports",
@@ -7817,7 +7817,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#trimErrorReports:mutator-call:4dcd8c7f7fbe",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 194,
+      "line": 189,
       "symbol": "trimErrorReports",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -7830,7 +7830,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#trimErrorReports:mutator-call:8b9242dab1cd",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 194,
+      "line": 189,
       "symbol": "trimErrorReports",
       "operation": "mutator-call",
       "target": "src/db/repositories/errorReports.ts#trimErrorReports.<callback:7e0bd14cdf>",
@@ -7843,7 +7843,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#trimErrorReports.<callback:7e0bd14cdf>:mutator-call:f22b9901cd46",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 195,
+      "line": 190,
       "symbol": "trimErrorReports.<callback:7e0bd14cdf>",
       "operation": "mutator-call",
       "target": "src/db/repositories/errorReports.ts#trimErrorReportsWithinTransaction",
@@ -7856,7 +7856,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#clearErrorReports:mutator-call:626a1b8b560e",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 210,
+      "line": 205,
       "symbol": "clearErrorReports",
       "operation": "mutator-call",
       "target": "src/db/repositories/errorReports.ts#clearErrorReports.<callback:df5455005c>",
@@ -7869,7 +7869,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#clearErrorReports:mutator-call:dfaeb4c138a5",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 210,
+      "line": 205,
       "symbol": "clearErrorReports",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -7882,7 +7882,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#clearErrorReports.<callback:df5455005c>:mutator-call:8a84fcd4b67a",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 212,
+      "line": 207,
       "symbol": "clearErrorReports.<callback:df5455005c>",
       "operation": "mutator-call",
       "target": "src/db/repositories/errorReports.ts#clearErrorReportsWithinTransaction",
@@ -7895,7 +7895,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#clearErrorReportsWithinTransaction:sql-delete:7d19162f2f44",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 222,
+      "line": 217,
       "symbol": "clearErrorReportsWithinTransaction",
       "operation": "sql-delete",
       "target": "error_reports",
@@ -7908,7 +7908,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#listRetryableErrorReportsWithinTransaction.<callback:6d0d0f76a3>:mutator-call:38305fef3c77",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 245,
+      "line": 240,
       "symbol": "listRetryableErrorReportsWithinTransaction.<callback:6d0d0f76a3>",
       "operation": "mutator-call",
       "target": "src/db/repositories/errorReports.ts#trimErrorReportsWithinTransaction",
@@ -7921,7 +7921,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#listRetryableErrorReports:mutator-call:231b4b71f6c6",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 268,
+      "line": 263,
       "symbol": "listRetryableErrorReports",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -7934,7 +7934,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#listRetryableErrorReports:mutator-call:2538e5c2e5d3",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 268,
+      "line": 263,
       "symbol": "listRetryableErrorReports",
       "operation": "mutator-call",
       "target": "src/db/repositories/errorReports.ts#listRetryableErrorReports.<callback:34ae7037fb>",
@@ -7947,7 +7947,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#listRetryableErrorReports.<callback:34ae7037fb>:mutator-call:fa1851fb1552",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 270,
+      "line": 265,
       "symbol": "listRetryableErrorReports.<callback:34ae7037fb>",
       "operation": "mutator-call",
       "target": "src/db/repositories/errorReports.ts#listRetryableErrorReportsWithinTransaction",
@@ -7960,7 +7960,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#claimErrorReportsWithinTransaction:sql-update:a6cadd1370ec",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 291,
+      "line": 286,
       "symbol": "claimErrorReportsWithinTransaction",
       "operation": "sql-update",
       "target": "error_reports",
@@ -7973,7 +7973,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#claimErrorReports:mutator-call:25becb5bc7ba",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 313,
+      "line": 308,
       "symbol": "claimErrorReports",
       "operation": "mutator-call",
       "target": "src/db/repositories/errorReports.ts#claimErrorReports.<callback:c9aa239408>",
@@ -7986,7 +7986,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#claimErrorReports:mutator-call:c48fe530c9bc",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 313,
+      "line": 308,
       "symbol": "claimErrorReports",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -7999,7 +7999,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#claimErrorReports.<callback:c9aa239408>:mutator-call:80199932a94d",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 315,
+      "line": 310,
       "symbol": "claimErrorReports.<callback:c9aa239408>",
       "operation": "mutator-call",
       "target": "src/db/repositories/errorReports.ts#claimErrorReportsWithinTransaction",
@@ -8012,7 +8012,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#markErrorReportsFailedWithinTransaction:sql-update:fafc5a007c8e",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 337,
+      "line": 332,
       "symbol": "markErrorReportsFailedWithinTransaction",
       "operation": "sql-update",
       "target": "error_reports",
@@ -8025,7 +8025,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#markErrorReportsFailedWithinTransaction:sql-delete:b6a752ef4ffa",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 348,
+      "line": 343,
       "symbol": "markErrorReportsFailedWithinTransaction",
       "operation": "sql-delete",
       "target": "error_reports",
@@ -8038,7 +8038,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#markErrorReportsFailed:mutator-call:8312ba5644a2",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 367,
+      "line": 362,
       "symbol": "markErrorReportsFailed",
       "operation": "mutator-call",
       "target": "src/db/repositories/errorReports.ts#markErrorReportsFailed.<callback:de20fdbd27>",
@@ -8051,7 +8051,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#markErrorReportsFailed:mutator-call:ba127dd07f32",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 367,
+      "line": 362,
       "symbol": "markErrorReportsFailed",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -8064,7 +8064,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#markErrorReportsFailed.<callback:de20fdbd27>:mutator-call:1f1e7f013451",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 369,
+      "line": 364,
       "symbol": "markErrorReportsFailed.<callback:de20fdbd27>",
       "operation": "mutator-call",
       "target": "src/db/repositories/errorReports.ts#markErrorReportsFailedWithinTransaction",
@@ -8077,7 +8077,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#deleteErrorReportsWithinTransaction:sql-delete:bb847c13001b",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 386,
+      "line": 381,
       "symbol": "deleteErrorReportsWithinTransaction",
       "operation": "sql-delete",
       "target": "error_reports",
@@ -8090,7 +8090,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#deleteErrorReports:mutator-call:317f3471e7da",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 398,
+      "line": 393,
       "symbol": "deleteErrorReports",
       "operation": "mutator-call",
       "target": "src/db/repositories/errorReports.ts#deleteErrorReports.<callback:5ff1fe5664>",
@@ -8103,7 +8103,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#deleteErrorReports:mutator-call:f0097ddea70a",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 398,
+      "line": 393,
       "symbol": "deleteErrorReports",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -8116,7 +8116,7 @@
     {
       "id": "src/db/repositories/errorReports.ts#deleteErrorReports.<callback:5ff1fe5664>:mutator-call:95b001f7a2ae",
       "path": "src/db/repositories/errorReports.ts",
-      "line": 400,
+      "line": 395,
       "symbol": "deleteErrorReports.<callback:5ff1fe5664>",
       "operation": "mutator-call",
       "target": "src/db/repositories/errorReports.ts#deleteErrorReportsWithinTransaction",

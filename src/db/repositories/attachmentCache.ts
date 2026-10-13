@@ -420,18 +420,6 @@ export function listPastedAttachmentProtectionPaths(
   );
 }
 
-/** Delay for the persisted failure count (attempt one waits five seconds). */
-export function attachmentCacheRetirementBackoffMs(attempts: number): number {
-  if (!Number.isSafeInteger(attempts) || attempts <= 0) {
-    throw new RangeError('Attachment cache retirement attempts must be a positive safe integer.');
-  }
-  const exponent = Math.min(30, attempts - 1);
-  return Math.min(
-    ATTACHMENT_CACHE_RETIREMENT_RETRY_MAX_MS,
-    ATTACHMENT_CACHE_RETIREMENT_RETRY_BASE_MS * 2 ** exponent,
-  );
-}
-
 /**
  * Record a file only after the native download has completed and been re-statted.
  *

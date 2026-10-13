@@ -107,8 +107,3 @@ export function parseServerErrorBody(bodyText: string): ParsedServerErrorBody | 
   if (detail === undefined && type === undefined) return undefined;
   return Object.freeze({ ...(detail === undefined ? {} : { detail }), ...(type ? { type } : {}) });
 }
-
-/** Compatibility helper for existing UI-detail consumers. */
-export function parseServerErrorDetailBody(bodyText: string): string | undefined {
-  return parseServerErrorBody(bodyText)?.detail;
-}

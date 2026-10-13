@@ -2,7 +2,7 @@ import {
   MAX_SERVER_ERROR_BODY_BYTES,
   MAX_SERVER_ERROR_DETAIL_BYTES,
   MAX_SERVER_ERROR_DETAIL_CODE_POINTS,
-  parseServerErrorDetailBody,
+  parseServerErrorBody,
   projectServerErrorDetail,
 } from '@core/api/serverErrorDetail';
 import { ApiError } from '@core/api/errors';
@@ -11,17 +11,17 @@ import { redact } from '@core/secure/redact';
 describe('server error detail projection', () => {
   it('accepts only the reviewed nested error.message envelope field', () => {
     expect(
-      parseServerErrorDetailBody(
+      parseServerErrorBody(
         JSON.stringify({
           status: 422,
           message: 'ignored outer message',
           error: { type: 'send_failed', message: 'Messages rejected this send.' },
         }),
-      ),
+      )?.detail,
     ).toBe('Messages rejected this send.');
-    expect(parseServerErrorDetailBody(JSON.stringify({ message: 'outer only' }))).toBeUndefined();
-    expect(parseServerErrorDetailBody(JSON.stringify({ error: 'plain string' }))).toBeUndefined();
-    expect(parseServerErrorDetailBody('{not-json')).toBeUndefined();
+    expect(parseServerErrorBody(JSON.stringify({ message: 'outer only' }))?.detail).toBeUndefined();
+    expect(parseServerErrorBody(JSON.stringify({ error: 'plain string' }))?.detail).toBeUndefined();
+    expect(parseServerErrorBody('{not-json')?.detail).toBeUndefined();
   });
 
   it('normalizes controls and redacts identities, credentials, hosts, and private paths', () => {
@@ -60,7 +60,7 @@ describe('server error detail projection', () => {
   it('rejects an error body before parsing when its UTF-8 payload exceeds 4 KiB', () => {
     const body = JSON.stringify({ error: { message: '界'.repeat(MAX_SERVER_ERROR_BODY_BYTES) } });
     expect(new TextEncoder().encode(body).byteLength).toBeGreaterThan(MAX_SERVER_ERROR_BODY_BYTES);
-    expect(parseServerErrorDetailBody(body)).toBeUndefined();
+    expect(parseServerErrorBody(body)?.detail).toBeUndefined();
   });
 
   it('rejects an oversized direct source before normalization', () => {

@@ -1,8 +1,4 @@
-import {
-  firstInboxSearchBigram,
-  foldInboxSearchText,
-  uniqueInboxSearchBigrams,
-} from '@db/repositories/inboxSearchText';
+import { foldInboxSearchText, uniqueInboxSearchBigrams } from '@db/repositories/inboxSearchText';
 
 describe('inbox search text and index keys', () => {
   it('uses the same whole-string NFC and lowercase order as the current inbox search', () => {
@@ -19,12 +15,14 @@ describe('inbox search text and index keys', () => {
     const foldedText = foldInboxSearchText(text);
     const foldedQuery = foldInboxSearchText(query);
     expect(foldedText.includes(foldedQuery)).toBe(true);
-    expect(uniqueInboxSearchBigrams(foldedText)).toContain(firstInboxSearchBigram(foldedQuery));
+    expect(uniqueInboxSearchBigrams(foldedText)).toContain(
+      uniqueInboxSearchBigrams(foldedQuery)[0],
+    );
   });
 
   it('deduplicates pairs and rejects a query without a pair', () => {
     expect(uniqueInboxSearchBigrams('aaaa')).toEqual([97 * 65_536 + 97]);
     expect(uniqueInboxSearchBigrams('')).toEqual([]);
-    expect(() => firstInboxSearchBigram('a')).toThrow(RangeError);
+    expect(uniqueInboxSearchBigrams('a')).toEqual([]);
   });
 });

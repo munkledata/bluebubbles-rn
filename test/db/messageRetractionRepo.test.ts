@@ -1,5 +1,4 @@
 import type Database from 'better-sqlite3';
-import { resolveExactMessageTargetPartIndex } from '@core/messages/partIndex';
 import { Chat, Message, parseMessagePartTopology } from '@core/models';
 import {
   getChatIdByGuid,
@@ -261,16 +260,6 @@ describe('message retraction persistence', () => {
       .get('ordinary-edited-message') as { topology: string };
     const invalidTopology = parseMessagePartTopology(invalidated.topology);
     expect(invalidTopology?.complete).toBe(false);
-    expect(
-      resolveExactMessageTargetPartIndex({
-        attachmentCount: 0,
-        hasText: true,
-        partCount: 1,
-        topology: invalidTopology,
-        topologySupported: true,
-        visibleAttachmentGuids: [],
-      }),
-    ).toBeUndefined();
   });
 
   it('keeps intact exact reply previews scoped to their owned part', async () => {

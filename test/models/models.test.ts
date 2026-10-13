@@ -6,10 +6,6 @@ import {
   parseMessageSummaryInfo,
   parsePayloadData,
 } from '@core/models';
-import {
-  resolveExactMessageTargetPartIndex,
-  resolveTargetPartIndex,
-} from '@core/messages/partIndex';
 
 describe('Message model', () => {
   it('parses a minimal message and coerces string timestamps', () => {
@@ -46,67 +42,6 @@ describe('Message model', () => {
       }).associatedMessagePart,
     ).toBe(4);
     expect(Message.parse({ guid: 'bounded', partCount: 10_001 }).partCount).toBeUndefined();
-
-    expect(resolveTargetPartIndex({ attachmentCount: 2, hasText: true, partCount: 3 })).toBe(2);
-    expect(resolveTargetPartIndex({ attachmentCount: 2, hasText: true, partCount: null })).toBe(0);
-    expect(resolveTargetPartIndex({ attachmentCount: 2, hasText: false, partCount: 3 })).toBe(0);
-  });
-
-  it('targets only one exact rendered part on a topology-capable server', () => {
-    const topology = {
-      complete: true as const,
-      originalPartIndexes: [3],
-      currentParts: [{ index: 3, kind: 'text' as const }],
-      attachmentOwnership: [],
-    };
-    expect(
-      resolveExactMessageTargetPartIndex({
-        attachmentCount: 0,
-        hasText: true,
-        partCount: 1,
-        topology,
-        topologySupported: true,
-        visibleAttachmentGuids: [],
-      }),
-    ).toBe(3);
-    expect(
-      resolveExactMessageTargetPartIndex({
-        attachmentCount: 1,
-        hasText: true,
-        partCount: 2,
-        topology: {
-          complete: true,
-          originalPartIndexes: [3, 4],
-          currentParts: [
-            { index: 3, kind: 'text' },
-            { index: 4, kind: 'attachment', attachmentGuids: ['a'] },
-          ],
-          attachmentOwnership: [{ attachmentGuid: 'a', partIndex: 4 }],
-        },
-        topologySupported: true,
-        visibleAttachmentGuids: ['a'],
-      }),
-    ).toBeUndefined();
-    expect(
-      resolveExactMessageTargetPartIndex({
-        attachmentCount: 0,
-        hasText: true,
-        partCount: 1,
-        topology: null,
-        topologySupported: null,
-        visibleAttachmentGuids: [],
-      }),
-    ).toBeUndefined();
-    expect(
-      resolveExactMessageTargetPartIndex({
-        attachmentCount: 2,
-        hasText: true,
-        partCount: 3,
-        topology: null,
-        topologySupported: false,
-        visibleAttachmentGuids: ['a', 'b'],
-      }),
-    ).toBe(2);
   });
 
   it('marks an aggregate topology above the one-megabyte storage bound invalid', () => {

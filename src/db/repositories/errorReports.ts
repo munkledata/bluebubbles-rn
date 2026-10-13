@@ -61,11 +61,6 @@ function boundedErrorReportIds(ids: number[]): number[] {
   return uniqueIds;
 }
 
-/** Exponential backoff for attempt N (1-based): 30s, 60s, 120s, 240s, 480s — capped at 1h. */
-export function errorReportBackoffMs(attempt: number): number {
-  return Math.min(30_000 * 2 ** Math.max(0, attempt - 1), 3_600_000);
-}
-
 export interface NewErrorReport {
   level: string;
   message: string;
