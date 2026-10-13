@@ -2189,7 +2189,7 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
   assert.deepEqual(
     delegated.map((finding) => finding.id).sort(),
     [
-      'src/services/featureSettingsCommands.ts#finishPermissionOnboarding.<callback:709a896369>:mutator-call:4fd32f61a8df',
+      'src/services/featureSettingsCommands.ts#finishPermissionOnboarding.<callback:ea787146bd>:mutator-call:1e37d2d4d2cc',
     ].sort(),
   );
   assert.deepEqual(

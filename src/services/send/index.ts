@@ -94,6 +94,7 @@ import {
   subscribeRealtimeGenerationInvalidation,
   type RealtimeDeliveryLease,
 } from '../realtime/deliveryCoordinator';
+import { runAccountOperation } from '../realtime/accountOperation';
 import { expoAttachmentUploader, expoFileExists } from './attachmentUpload';
 import { uploadRegistry } from './uploadControl';
 import { resendOutgoingRow, runOutgoingQueue, type OutgoingQueueIO } from './outgoingQueueService';
@@ -280,19 +281,12 @@ async function runUiAccountOperation<T>(
   mode: 'immediate' | 'logical-send' = 'immediate',
   reportIssue?: SendIssueReporter,
 ): Promise<T | null> {
-  let completed = false;
-  let result!: T;
   try {
-    const status = await runTrackedRealtimeWork(lease, async () => {
-      if (!lease.isCurrent()) return;
-      result = await (mode === 'logical-send' ? logicalSendQueue.run(lease, task) : task());
-      if (!lease.isCurrent()) return;
-      completed = true;
-    });
-    if (status === 'paused' || !completed || !lease.isCurrent()) return null;
-    return result;
+    const result = await runAccountOperation(lease, () =>
+      mode === 'logical-send' ? logicalSendQueue.run(lease, task) : task(),
+    );
+    return result.ok ? result.value : null;
   } catch (error) {
-    if (!lease.isCurrent()) return null;
     if (
       error instanceof MessageTargetUnavailableError ||
       error instanceof MessageTargetCapabilityUnknownError ||

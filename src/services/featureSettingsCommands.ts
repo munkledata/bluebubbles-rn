@@ -9,6 +9,7 @@ import {
   runAccountScopedLocalMutation,
   type RealtimeDeliveryLease,
 } from './realtime/deliveryCoordinator';
+import { runAccountOperation } from './realtime/accountOperation';
 
 // Destination choices can wait behind Android permission UI. Invalidate them synchronously when a
 // newer destination or auto-download toggle is chosen, before either command reaches its first
@@ -32,15 +33,11 @@ export async function finishPermissionOnboarding(
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
   isRouteCurrent: () => boolean = () => accountLease.isCurrent(),
 ): Promise<boolean> {
-  let completed = false;
   const canCommit = (): boolean => accountLease.isCurrent() && isRouteCurrent();
-  await runAccountScopedLocalMutation(accountLease, async () => {
-    completed = await commitPermissionOnboarding({
-      db: getDatabase(),
-      shouldCommit: canCommit,
-    });
-  });
-  return completed && canCommit();
+  const result = await runAccountOperation(accountLease, () =>
+    commitPermissionOnboarding({ db: getDatabase(), shouldCommit: canCommit }),
+  );
+  return result.ok && result.value && canCommit();
 }
 
 /** Persist and publish the explicit error-reporting consent choice for one account. */
