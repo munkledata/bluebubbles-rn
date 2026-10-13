@@ -1533,7 +1533,7 @@ const CERTIFIED_ERROR_DIAGNOSTIC_COMMONJS_LOAD = Object.freeze({
 });
 
 const CERTIFIED_GROUP_PHOTO_UPLOAD_COMMONJS_LOAD = Object.freeze({
-  importerHash: '79334121ce1932dd923f32f291f1c14b21ee72a5df64d414bfd1718ef2472e13',
+  importerHash: '4cb175d7813a16e01be22c12fc08aaf695a66d4d0c51fa60c0c8c7e2943168cd',
   importerPath: 'src/services/groupPhotoUiService.ts',
   loaderName: 'productionGroupPhotoUploader',
   loaderHash: '23080b86ad63d69429dfc914e804456c8599a877a5499cd2d57e015d6af30c4b',

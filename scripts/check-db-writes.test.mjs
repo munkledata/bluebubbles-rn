@@ -3284,7 +3284,7 @@ test('certifies exactly the reviewed coordinated-delegation path additions', () 
         'coordinated-delegation',
       ],
       [
-        'src/services/remoteMessageDeleteUiService.ts#deleteMessageFromMac.<callback:0b268e76c5>:mutator-call:1a5f03c64d1d',
+        'src/services/remoteMessageDeleteUiService.ts#deleteMessageFromMac.<callback:7c393bfd1a>:mutator-call:5aa5d83d4e24',
         'coordinated-delegation',
       ],
     ].sort(),

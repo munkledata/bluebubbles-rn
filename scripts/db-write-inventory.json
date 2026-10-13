@@ -21335,10 +21335,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/remoteMessageDeleteService.test.ts; test/services/discardMessage.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/services/remoteMessageDeleteUiService.ts#deleteMessageFromMac.<callback:0b268e76c5>:mutator-call:1a5f03c64d1d",
+      "id": "src/services/remoteMessageDeleteUiService.ts#deleteMessageFromMac.<callback:7c393bfd1a>:mutator-call:5aa5d83d4e24",
       "path": "src/services/remoteMessageDeleteUiService.ts",
-      "line": 36,
-      "symbol": "deleteMessageFromMac.<callback:0b268e76c5>",
+      "line": 24,
+      "symbol": "deleteMessageFromMac.<callback:7c393bfd1a>",
       "operation": "mutator-call",
       "target": "src/services/remoteMessageDeleteService.ts#remoteDeleteExactIMessage",
       "detectedContext": "coordinated-delegation",
