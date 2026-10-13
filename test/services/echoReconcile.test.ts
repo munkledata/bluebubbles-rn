@@ -3,7 +3,6 @@ import { Chat, Message } from '@core/models';
 import { EventRouter } from '@core/realtime';
 import {
   getChatIdByGuid,
-  insertOutgoingAttachment,
   insertOutgoingText,
   listAttachmentsByMessageIds,
   reconcileOutgoingSuccess,
@@ -15,6 +14,7 @@ import type { AppDatabase } from '@db/types';
 import { DbEventSink } from '@/services/realtime/dbEventSink';
 import { createTestDb } from '../support/testDb';
 import {
+  insertOutgoingAttachment,
   listMessages,
   markMessageSendError,
   markOutgoingSentNoGuid,

@@ -7226,20 +7226,6 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
             'src/db/repositories/outgoing.ts#discardOutgoingMessage.<callback:',
           ))),
   );
-  const insertOutgoingAttachmentTransactions = findings.filter(
-    (finding) =>
-      finding.path === 'src/db/repositories/attachments.ts' &&
-      finding.symbol.startsWith('insertOutgoingAttachment') &&
-      !finding.symbol.startsWith('insertOutgoingAttachmentWithinTransaction') &&
-      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
-      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
-        finding.target ===
-          'src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction' ||
-        (finding.detectedContext === 'withDbTransaction' &&
-          finding.target.startsWith(
-            'src/db/repositories/attachments.ts#insertOutgoingAttachment.<callback:',
-          ))),
-  );
   const insertOutgoingReactionTransactions = findings.filter(
     (finding) =>
       finding.path === 'src/db/repositories/outgoing.ts' &&
@@ -7463,14 +7449,6 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoing.ts#discardOutgoingMessage.<callback:8d83cb9fc1>:mutator-call:0be1e09bf5c4',
       'src/db/repositories/outgoing.ts#discardOutgoingMessage:mutator-call:6218930bffa9',
       'src/db/repositories/outgoing.ts#discardOutgoingMessage:mutator-call:d96cda348479',
-    ].sort(),
-  );
-  assert.deepEqual(
-    insertOutgoingAttachmentTransactions.map((finding) => finding.id).sort(),
-    [
-      'src/db/repositories/attachments.ts#insertOutgoingAttachment.<callback:a5e1fc3fd8>:mutator-call:3069c9e0883c',
-      'src/db/repositories/attachments.ts#insertOutgoingAttachment:mutator-call:060b68f9fb33',
-      'src/db/repositories/attachments.ts#insertOutgoingAttachment:mutator-call:2109f62f577e',
     ].sort(),
   );
   assert.deepEqual(

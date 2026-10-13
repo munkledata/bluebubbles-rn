@@ -721,16 +721,6 @@ export function insertOutgoingAttachmentWithinTransaction(
   });
 }
 
-/** Standalone optimistic attachment owner; composing services use the transaction-only body. */
-export async function insertOutgoingAttachment(
-  db: AppDatabase,
-  args: InsertOutgoingAttachmentArgs,
-): Promise<OutgoingInsertResult> {
-  return withDbTransaction(db, (context) =>
-    insertOutgoingAttachmentWithinTransaction(context, args),
-  );
-}
-
 /**
  * Transaction-scoped form of {@link updateAttachmentLocalPath}. Use only when the caller already
  * owns the process-wide DB transaction and needs this path change to commit atomically with other

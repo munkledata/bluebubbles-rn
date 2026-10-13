@@ -11,7 +11,6 @@ import {
   deleteChatLocal,
   discardOutgoingMessage,
   getChatIdByGuid,
-  insertOutgoingAttachment,
   insertOutgoingReaction,
   insertOutgoingText,
   listAttachmentsByMessageIds,
@@ -34,6 +33,7 @@ import { createTestDb } from '../support/testDb';
 import {
   applyServerSendError,
   claimOutgoingForSend,
+  insertOutgoingAttachment,
   insertOutgoingContact,
   listMessages,
   markOutgoingSentNoGuid,

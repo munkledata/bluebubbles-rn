@@ -1,7 +1,6 @@
 import { getDatabase } from '@db/database';
 import {
   getChatIdByGuid,
-  insertOutgoingAttachment,
   insertOutgoingReaction,
   insertOutgoingText,
   listChatsForInbox,
@@ -30,7 +29,6 @@ const mockDb = { __db: true };
 jest.mock('@db/database', () => ({ getDatabase: jest.fn(() => mockDb) }));
 jest.mock('@db/repositories', () => ({
   getChatIdByGuid: jest.fn(async () => 7),
-  insertOutgoingAttachment: jest.fn(async () => undefined),
   insertOutgoingReaction: jest.fn(async () => undefined),
   insertOutgoingText: jest.fn(async () => undefined),
   listChatsForInbox: jest.fn(async () => []),
@@ -54,7 +52,6 @@ jest.mock('@utils/isDev', () => ({ isDevServer: jest.fn(() => true) }));
 
 const mockGetDatabase = getDatabase as jest.Mock;
 const mockGetChatId = getChatIdByGuid as jest.Mock;
-const mockInsertAttachment = insertOutgoingAttachment as jest.Mock;
 const mockInsertReaction = insertOutgoingReaction as jest.Mock;
 const mockInsertOutgoing = insertOutgoingText as jest.Mock;
 const mockListChatsForInbox = listChatsForInbox as jest.Mock;
@@ -77,7 +74,6 @@ beforeEach(() => {
   jest.clearAllMocks();
   mockGetDatabase.mockReturnValue(mockDb);
   mockGetChatId.mockResolvedValue(7);
-  mockInsertAttachment.mockResolvedValue(undefined);
   mockInsertReaction.mockResolvedValue(undefined);
   mockInsertOutgoing.mockResolvedValue(undefined);
   mockListChatsForInbox.mockResolvedValue([

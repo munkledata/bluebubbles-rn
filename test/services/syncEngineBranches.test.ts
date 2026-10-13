@@ -7,7 +7,6 @@
 import { Chat, Message } from '@core/models';
 import {
   getChatIdByGuid,
-  insertOutgoingAttachment,
   listAttachmentsByMessageIds,
   upsertChats,
   upsertHandles,
@@ -15,7 +14,7 @@ import {
 import { syncAllChats, syncChatMessages } from '@/services/sync/engine';
 import type { SyncApi } from '@/services/sync/types';
 import { createTestDb } from '../support/testDb';
-import { listChats, listMessages } from '../support/repositoryWrappers';
+import { insertOutgoingAttachment, listChats, listMessages } from '../support/repositoryWrappers';
 
 const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
 const rcsChatGuid = (sourceId: string): string =>

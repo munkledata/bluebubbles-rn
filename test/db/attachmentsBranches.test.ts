@@ -9,7 +9,6 @@ import { Attachment, Chat, Message } from '@core/models';
 import {
   getAttachmentByGuid,
   getChatIdByGuid,
-  insertOutgoingAttachment,
   type InsertOutgoingAttachmentArgs,
   type OutgoingInsertResult,
   listAttachmentsByMessageIds,
@@ -25,7 +24,7 @@ import { attachments, chats, messages, outgoingQueue } from '@db/schema';
 import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
-import { upsertAttachments } from '../support/repositoryWrappers';
+import { insertOutgoingAttachment, upsertAttachments } from '../support/repositoryWrappers';
 
 type OutgoingAttachmentArgs = InsertOutgoingAttachmentArgs & { chatId: number };
 

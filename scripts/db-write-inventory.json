@@ -5995,48 +5995,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/attachmentsBranches.test.ts; test/services/sendAttachmentService.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/db/repositories/attachments.ts#insertOutgoingAttachment:mutator-call:060b68f9fb33",
-      "path": "src/db/repositories/attachments.ts",
-      "line": 729,
-      "symbol": "insertOutgoingAttachment",
-      "operation": "mutator-call",
-      "target": "src/db/repositories/attachments.ts#insertOutgoingAttachment.<callback:a5e1fc3fd8>",
-      "detectedContext": "withDbTransaction",
-      "owner": "insertOutgoingAttachment",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/attachmentsBranches.test.ts; test/services/sendAttachmentService.test.ts; test/db/withDbTransaction.test.ts"
-    },
-    {
-      "id": "src/db/repositories/attachments.ts#insertOutgoingAttachment:mutator-call:2109f62f577e",
-      "path": "src/db/repositories/attachments.ts",
-      "line": 729,
-      "symbol": "insertOutgoingAttachment",
-      "operation": "mutator-call",
-      "target": "src/db/transaction.ts#withDbTransaction",
-      "detectedContext": "transaction-coordinator",
-      "owner": "insertOutgoingAttachment",
-      "transactionContext": "transaction-coordinator",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/attachmentsBranches.test.ts; test/services/sendAttachmentService.test.ts; test/db/withDbTransaction.test.ts"
-    },
-    {
-      "id": "src/db/repositories/attachments.ts#insertOutgoingAttachment.<callback:a5e1fc3fd8>:mutator-call:3069c9e0883c",
-      "path": "src/db/repositories/attachments.ts",
-      "line": 730,
-      "symbol": "insertOutgoingAttachment.<callback:a5e1fc3fd8>",
-      "operation": "mutator-call",
-      "target": "src/db/repositories/attachments.ts#insertOutgoingAttachmentWithinTransaction",
-      "detectedContext": "withDbTransaction",
-      "owner": "insertOutgoingAttachment",
-      "transactionContext": "withDbTransaction",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/db/attachmentsBranches.test.ts; test/services/sendAttachmentService.test.ts; test/db/withDbTransaction.test.ts"
-    },
-    {
       "id": "src/db/repositories/attachments.ts#updateAttachmentLocalPathWithinTransaction:sql-update:4a6955646223",
       "path": "src/db/repositories/attachments.ts",
-      "line": 745,
+      "line": 735,
       "symbol": "updateAttachmentLocalPathWithinTransaction",
       "operation": "sql-update",
       "target": "attachments",
@@ -6049,7 +6010,7 @@
     {
       "id": "src/db/repositories/attachments.ts#replaceVisibleAttachmentLocalPathWithinTransaction:sql-update:43f358f5c0de",
       "path": "src/db/repositories/attachments.ts",
-      "line": 782,
+      "line": 772,
       "symbol": "replaceVisibleAttachmentLocalPathWithinTransaction",
       "operation": "sql-update",
       "target": "attachments",
@@ -6062,7 +6023,7 @@
     {
       "id": "src/db/repositories/attachments.ts#updateAttachmentLocalPath:mutator-call:420a1a02f6e6",
       "path": "src/db/repositories/attachments.ts",
-      "line": 817,
+      "line": 807,
       "symbol": "updateAttachmentLocalPath",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -6075,7 +6036,7 @@
     {
       "id": "src/db/repositories/attachments.ts#updateAttachmentLocalPath:mutator-call:814cc10efe69",
       "path": "src/db/repositories/attachments.ts",
-      "line": 817,
+      "line": 807,
       "symbol": "updateAttachmentLocalPath",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#updateAttachmentLocalPath.<callback:64ad543547>",
@@ -6088,7 +6049,7 @@
     {
       "id": "src/db/repositories/attachments.ts#updateAttachmentLocalPath.<callback:64ad543547>:mutator-call:8bfa38b73ef8",
       "path": "src/db/repositories/attachments.ts",
-      "line": 818,
+      "line": 808,
       "symbol": "updateAttachmentLocalPath.<callback:64ad543547>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#updateAttachmentLocalPathWithinTransaction",

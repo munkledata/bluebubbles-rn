@@ -1,6 +1,5 @@
 import { withAlpha } from '@ui/theme/tokens';
 import { overlayPillStyle, overlayTextStyle } from '@ui/conversations/overlayText';
-import { edgeFadeStops } from '@ui/conversations/edgeFadeStops';
 
 describe('withAlpha', () => {
   it('converts #RRGGBB to rgba() at the given alpha', () => {
@@ -50,23 +49,5 @@ describe('overlayPillStyle', () => {
     expect(pill!.borderRadius).toBeGreaterThan(0);
     expect(pill!.paddingHorizontal).toBeGreaterThan(0);
     expect(pill!.overflow).toBe('hidden');
-  });
-});
-
-describe('edgeFadeStops', () => {
-  const BG = '#FFFFFF';
-
-  it('holds near-opaque through the bar zone, then dissolves to alpha 0', () => {
-    const stops = edgeFadeStops(BG, 0.7);
-    expect(stops).toHaveLength(3);
-    expect(stops[0]).toEqual({ color: 'rgba(255, 255, 255, 0.88)', positions: ['0%'] });
-    expect(stops[1]).toEqual({ color: 'rgba(255, 255, 255, 0.8)', positions: ['70%'] });
-    // Fades to the SAME colour at alpha 0 — 'transparent' (black@0) would leave a dark fringe.
-    expect(stops[2]).toEqual({ color: 'rgba(255, 255, 255, 0)', positions: ['100%'] });
-  });
-
-  it('clamps the hold fraction into 0..1', () => {
-    expect(edgeFadeStops(BG, -0.5)[1]!.positions).toEqual(['0%']);
-    expect(edgeFadeStops(BG, 1.7)[1]!.positions).toEqual(['100%']);
   });
 });

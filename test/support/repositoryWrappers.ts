@@ -118,6 +118,10 @@ import {
 } from '@db/repositories/outgoingRetry';
 import { updateReminderTimeWithinTransaction } from '@db/repositories/reminders';
 import { setUrlPreviewWithinTransaction } from '@db/repositories/urlPreviews';
+import {
+  insertOutgoingAttachmentWithinTransaction,
+  type InsertOutgoingAttachmentArgs,
+} from '@db/repositories/attachments';
 import { chats, messages, scheduledMessages } from '@db/schema';
 import { runInTransactionContext, type DbTransactionContext } from '@db/transaction';
 
@@ -888,5 +892,12 @@ export async function setBackgroundIsLight(
 ): Promise<void> {
   await withDbTransaction(db, (context) =>
     setChatAppearanceWithinTransaction(context, guid, { backgroundIsLight: isLight }),
+  );
+}
+
+/** Insert one optimistic outgoing attachment in its own transaction (services compose the body). */
+export function insertOutgoingAttachment(db: AppDatabase, args: InsertOutgoingAttachmentArgs) {
+  return withDbTransaction(db, (context) =>
+    insertOutgoingAttachmentWithinTransaction(context, args),
   );
 }
