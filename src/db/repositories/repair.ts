@@ -9,6 +9,7 @@ import {
 import type { AppDatabase } from '../types';
 import { DRAFT_KV_PREFIX, FULL_REPAIR_RETIRED_CHAT_KV_PREFIX } from './maintenance';
 import { RECENT_UNFENCED_OUTGOING_GRACE_MS } from './messageState';
+import { chatLatestMessageDateSql } from './chatVisibility';
 
 const REPAIR_EXPOSURE_PAGE_SIZE = 250;
 const REPAIR_RECONCILE_BATCH_SIZE = 25;
@@ -260,13 +261,7 @@ function removeRepairMessagesWithinTransaction(
     for (const chatId of affectedChatIds) {
       await db.run(sql`
         UPDATE chats
-           SET latest_message_date = COALESCE(
-             (SELECT MAX(date_created) FROM messages
-               WHERE chat_id = ${chatId} AND date_deleted IS NULL
-                 AND associated_message_type IS NULL),
-             (SELECT MAX(date_created) FROM messages
-               WHERE chat_id = ${chatId} AND date_deleted IS NULL)
-           )
+           SET latest_message_date = ${chatLatestMessageDateSql(chatId)}
          WHERE id = ${chatId}
       `);
     }

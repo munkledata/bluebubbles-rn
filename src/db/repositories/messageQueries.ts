@@ -13,6 +13,7 @@ import { MAX_CUSTOM_FOLDER_MEMBERS } from './customFolders';
 // message queries, so this dependency stays acyclic.
 import {
   attachmentIsUserFileSql,
+  chatUnreadMessagePredicateSql,
   chatVisible,
   messageHasVisibleContentSql,
 } from './chatVisibility';
@@ -993,11 +994,8 @@ export async function getChatGuidByMessageGuid(
 /**
  * Re-check whether one stored message is still unread and present before (re)presenting its
  * notification. Durable delivery may replay presentation minutes after the DB phase committed;
- * in that gap the user can read/delete the message or the sender can retract it.
- *
- * Keep this predicate byte-for-byte aligned with the inbox unread filters in
- * `listChatsForInbox`: received, ordinary, non-retracted/non-deleted content newer than both the
- * read marker and a local chat-deletion floor.
+ * in that gap the user can read/delete the message or the sender can retract it. Uses the same
+ * unread rule as the inbox filters and badges (`chatUnreadMessagePredicateSql`).
  */
 export async function isMessageNotificationEligible(
   db: AppDatabase,
@@ -1008,13 +1006,7 @@ export async function isMessageNotificationEligible(
       SELECT 1
         FROM messages m JOIN chats c ON c.id = m.chat_id
        WHERE m.guid = ${messageGuid}
-         AND m.is_from_me = 0
-         AND m.associated_message_type IS NULL
-         AND ${messageHasVisibleContentSql('m')}
-         AND m.date_deleted IS NULL
-         AND m.date_created > COALESCE(
-           (SELECT lm.date_created FROM messages lm WHERE lm.guid = c.last_read_message_guid), 0)
-         AND (c.deleted_at IS NULL OR m.date_created > c.deleted_at)
+         AND ${chatUnreadMessagePredicateSql('c', 'm')}
     ) AS eligible`);
   return rows[0]?.eligible === 1;
 }

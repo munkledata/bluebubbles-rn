@@ -10,6 +10,7 @@ import { runInTransactionContext, type DbTransactionContext } from '../transacti
 import type { AppDatabase } from '../types';
 import { kvGet, kvGetWithinTransaction, kvSetWithinTransaction } from './kv';
 import type { FullRepairMessageExposure } from './repair';
+import { chatLatestMessageDateSql } from './chatVisibility';
 
 export const MESSAGE_STATE_AUTHORITY_KEY = 'sync.messageState.imessage';
 /** A recent outgoing row with no source row id may not have reached chat.db yet; never judge it. */
@@ -461,10 +462,8 @@ export async function projectMessageStateWithinTransaction(
       ) WHERE guid = ${guid} AND chat_id = (SELECT id FROM chats WHERE guid = ${chatGuid})
     `);
     await db.run(sql`
-      UPDATE chats SET latest_message_date = COALESCE(
-        (SELECT MAX(date_created) FROM messages WHERE chat_id = chats.id AND date_deleted IS NULL AND associated_message_type IS NULL),
-        (SELECT MAX(date_created) FROM messages WHERE chat_id = chats.id AND date_deleted IS NULL)
-      ) WHERE guid = ${chatGuid}
+      UPDATE chats SET latest_message_date = ${chatLatestMessageDateSql(sql.raw('chats.id'))}
+       WHERE guid = ${chatGuid}
     `);
   });
 }

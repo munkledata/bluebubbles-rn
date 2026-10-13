@@ -38,6 +38,7 @@ import { upsertAttachmentsWithinTransaction } from './attachments';
 import { clearSupersededTombstonesWithinTransaction } from './chats';
 import { handleMapKey } from './handles';
 import { getMessageStateAuthorityWithinTransaction } from './messageState';
+import { chatLatestMessageDateSql } from './chatVisibility';
 
 type PersistedRetractionState = Exclude<MessageRetractionState, 'intact'>;
 
@@ -890,9 +891,7 @@ export function upsertMessagesWithinTransaction(
       await db
         .update(chats)
         .set({
-          latestMessageDate: sql`COALESCE(
-          (SELECT MAX(date_created) FROM messages WHERE messages.chat_id = chats.id AND date_deleted IS NULL AND associated_message_type IS NULL),
-          (SELECT MAX(date_created) FROM messages WHERE messages.chat_id = chats.id AND date_deleted IS NULL))`,
+          latestMessageDate: chatLatestMessageDateSql(sql.raw('chats.id')),
         })
         .where(inArray(chats.id, latestDateChatIds));
       // Retire a local deletion tombstone the moment real new content lands, rather than leaving the
@@ -1385,9 +1384,9 @@ export function revertLocalUnsendWithinTransaction(
  * REACTION rows (a tapback must never OUTRANK a real message; the inbox preview + unread count skip
  * them too), falling back to the unfiltered MAX when that filter leaves no candidate at all, so a
  * chat whose only surviving row is a tapback keeps a real sort key instead of a NULL that sinks it
- * to the bottom of the inbox. The expression must stay identical to upsertMessages' own
- * MAX(date_created) recompute — the two write the same column and any drift shows up as a chat that
- * jumps position on delete and jumps back on the next sync.
+ * to the bottom of the inbox. This and upsertMessages both use the one shared rule,
+ * `chatLatestMessageDateSql`; any drift between writers would show up as a chat that jumps position
+ * on delete and jumps back on the next sync.
  *
  * Returns true if a local row matched the exact owner and was tombstoned. False means there was no
  * local row or the supplied/retained owner conflicted. An unknown owner is retained as a NULL-
@@ -1467,17 +1466,12 @@ export function markMessageDeletedWithinTransaction(
     );
     const chatId = rows[0]?.chatId;
     if (chatId == null) return false;
-    // Recompute the inbox sort key over the surviving (non-deleted, non-reaction) rows, with the same
-    // COALESCE fallback upsertMessages uses so an all-reactions remainder yields a date rather than
-    // the NULL that sorts a chat last. db.run — a non-returning UPDATE (db.all would throw "use
-    // run()" under better-sqlite3).
+    // Recompute the inbox sort key with the shared `chatLatestMessageDateSql` rule, so an
+    // all-reactions remainder yields a date rather than the NULL that sorts a chat last. db.run — a
+    // non-returning UPDATE (db.all would throw "use run()" under better-sqlite3).
     await db.run(
       sql`UPDATE chats
-        SET latest_message_date = COALESCE(
-          (SELECT MAX(date_created) FROM messages
-            WHERE chat_id = ${chatId} AND date_deleted IS NULL AND associated_message_type IS NULL),
-          (SELECT MAX(date_created) FROM messages
-            WHERE chat_id = ${chatId} AND date_deleted IS NULL))
+        SET latest_message_date = ${chatLatestMessageDateSql(chatId)}
         WHERE id = ${chatId}`,
     );
     // Cache retirement is deliberately post-commit in AttachmentCacheCoordinator. This DB layer

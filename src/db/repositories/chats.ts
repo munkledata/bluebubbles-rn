@@ -19,10 +19,11 @@ import type { AppDatabase } from '../types';
 import { dedupeBy } from './_shared';
 import { getChatIdByGuid } from './chatQueries';
 import {
+  chatLatestMessageDateSql,
   chatVisible,
   inboxFilterSql,
-  messageHasVisibleContentSql,
   type InboxSenderFilter,
+  messageHasVisibleContentSql,
 } from './chatVisibility';
 import { handleMapKey, upsertHandlesWithinTransaction } from './handles';
 import { DRAFT_KV_PREFIX, FULL_REPAIR_RETIRED_CHAT_KV_PREFIX } from './maintenance';
@@ -946,12 +947,7 @@ export function restoreDeletedChatWithinTransaction(
                              AND lm.chat_id = chats.id), 0)
                  ORDER BY fm.date_created DESC, fm.id DESC LIMIT 1),
                chats.last_read_message_guid),
-             latest_message_date = COALESCE(
-               (SELECT MAX(lm.date_created) FROM messages lm
-                 WHERE lm.chat_id = chats.id AND lm.date_deleted IS NULL
-                   AND lm.associated_message_type IS NULL),
-               (SELECT MAX(lm.date_created) FROM messages lm
-                 WHERE lm.chat_id = chats.id AND lm.date_deleted IS NULL)),
+             latest_message_date = ${chatLatestMessageDateSql(sql.raw('chats.id'))},
              deleted_at = NULL,
              history_deleted_at = NULL
        WHERE id = ${candidate.id}

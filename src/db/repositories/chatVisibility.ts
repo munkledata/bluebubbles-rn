@@ -1,4 +1,4 @@
-import { sql } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 import { normalizeInboxFilters, type InboxFilters, type InboxSenderFilter } from '@core/models';
 import { APPLE_EXTENSION_PAYLOAD_SUFFIX } from '@utils/attachment';
 
@@ -52,7 +52,7 @@ export function messageHasVisibleContentSql(alias: string) {
  * another cutoff; Mark as Unread clears `last_read_message_guid`, which makes the existing stored
  * incoming messages count again.
  */
-function chatUnreadMessagePredicateSql(chatAlias: string, messageAlias: string) {
+export function chatUnreadMessagePredicateSql(chatAlias: string, messageAlias: string) {
   const c = sql.raw(chatAlias);
   const m = sql.raw(messageAlias);
   return sql`${m}.chat_id = ${c}.id AND ${m}.is_from_me = 0
@@ -64,6 +64,22 @@ function chatUnreadMessagePredicateSql(chatAlias: string, messageAlias: string) 
       0
     )
     AND (${c}.deleted_at IS NULL OR ${m}.date_created > ${c}.deleted_at)`;
+}
+
+/**
+ * A chat's inbox sort date: its newest visible non-reaction message, or its newest visible message
+ * of any kind when it holds only reactions. Every writer that changes message visibility
+ * recomputes `chats.latest_message_date` with this one rule, so a chat never jumps between a
+ * delete and the next sync. `chatId` is a correlated column (`sql.raw('chats.id')`) or a bound id.
+ */
+export function chatLatestMessageDateSql(chatId: SQL | number) {
+  return sql`COALESCE(
+    (SELECT MAX(sm.date_created) FROM messages sm
+      WHERE sm.chat_id = ${chatId} AND sm.date_deleted IS NULL
+        AND sm.associated_message_type IS NULL),
+    (SELECT MAX(sm.date_created) FROM messages sm
+      WHERE sm.chat_id = ${chatId} AND sm.date_deleted IS NULL)
+  )`;
 }
 
 /** One shared answer for unread-chat filters and folder badges. */
