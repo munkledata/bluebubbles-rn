@@ -1,6 +1,5 @@
 import { Chat, Message } from '@core/models';
 import {
-  getMessageActionPartLayoutByGuid,
   getMessagePreviewByGuid,
   getVisibleAttachmentByGuid,
   listAttachmentsByMessageIds,
@@ -189,9 +188,6 @@ describe('balloon bundle identity persistence', () => {
     const media = await listChatAttachmentsByKind(db, 'chat-balloon');
     expect(media.photos.map((item) => item.guid)).toEqual(['photos-app-photo']);
     expect(media.documents).toEqual([]);
-    await expect(
-      getMessageActionPartLayoutByGuid(db, 'chat-balloon', 'photos-app-message'),
-    ).resolves.toMatchObject({ visibleAttachmentGuids: ['photos-app-photo'] });
     await expect(listMessageNotificationTruth([row.id], db)).resolves.toEqual([
       expect.objectContaining({ hasVisibleAttachments: 1 }),
     ]);

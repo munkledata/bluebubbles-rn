@@ -9,14 +9,13 @@ import {
   getChatIdByGuid,
   insertOutgoingAttachment,
   listAttachmentsByMessageIds,
-  listChats,
-  listMessages,
   upsertChats,
   upsertHandles,
 } from '@db/repositories';
 import { syncAllChats, syncChatMessages } from '@/services/sync/engine';
 import type { SyncApi } from '@/services/sync/types';
 import { createTestDb } from '../support/testDb';
+import { listChats, listMessages } from '../support/repositoryWrappers';
 
 const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
 const rcsChatGuid = (sourceId: string): string =>

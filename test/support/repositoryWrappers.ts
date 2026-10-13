@@ -85,6 +85,41 @@ import {
 } from '@db/repositories/themes';
 import { withDbTransaction, type DbCommitGuard } from '@db/transaction';
 import { type AppDatabase } from '@db/types';
+import { and, eq, sql } from 'drizzle-orm';
+import { toFtsQuery } from '@db/repositories/_shared';
+import { type AttachmentCacheState } from '@db/repositories/attachmentCache';
+import {
+  setChatAppearanceWithinTransaction,
+  setChatCustomizationWithinTransaction,
+  setSyncedBackgroundLuminanceIfCurrentWithinTransaction,
+  setSyncedBackgroundUriIfCurrentWithinTransaction,
+  type ChatAppearancePatch,
+} from '@db/repositories/chatAppearance';
+import { chatVisible, messageHasVisibleContentSql } from '@db/repositories/chatVisibility';
+import {
+  claimErrorReportsWithinTransaction as claimErrorReportsInTx,
+  clearErrorReportsWithinTransaction as clearErrorReportsInTx,
+  deleteErrorReportsWithinTransaction,
+  insertErrorReports,
+  listRetryableErrorReportsWithinTransaction,
+  markErrorReportsFailedWithinTransaction as markErrorReportsFailedInTx,
+  trimErrorReportsWithinTransaction as trimErrorReportsInTx,
+  ERROR_REPORT_CAPACITY as REPORT_CAPACITY,
+  ERROR_REPORT_QUEUE_BYTE_BUDGET as REPORT_BYTE_BUDGET,
+  ERROR_REPORT_UPLOAD_BATCH_SIZE,
+  type ErrorReportClock as ReportClock,
+  type NewErrorReport,
+} from '@db/repositories/errorReports';
+import { notAnOverlayMessage } from '@db/repositories/messageQueries';
+import { revertLocalUnsendWithinTransaction } from '@db/repositories/messages';
+import {
+  applyServerSendErrorWithinTransaction,
+  type ServerSendAttemptIdentity,
+} from '@db/repositories/outgoingRetry';
+import { updateReminderTimeWithinTransaction } from '@db/repositories/reminders';
+import { setUrlPreviewWithinTransaction } from '@db/repositories/urlPreviews';
+import { chats, messages, scheduledMessages } from '@db/schema';
+import { runInTransactionContext, type DbTransactionContext } from '@db/transaction';
 
 /** Public standalone attachment ingestion. Never wrap this helper in another transaction. */
 export async function upsertAttachments(
@@ -518,4 +553,340 @@ export async function updateCustomTheme(
 /** Public standalone delete. Never wrap this helper in another transaction. */
 export async function deleteCustomTheme(db: AppDatabase, id: number): Promise<void> {
   await withDbTransaction(db, (context) => deleteCustomThemeWithinTransaction(context, id));
+}
+
+// ---- Moved in Phase 6 slice 5: wrappers whose cores already validate, plus test fixtures/readers.
+
+export async function setSyncedBackgroundUri(
+  db: AppDatabase,
+  guid: string,
+  uri: string | null,
+): Promise<void> {
+  await withDbTransaction(db, () =>
+    db.update(chats).set({ syncedBackgroundUri: uri }).where(eq(chats.guid, guid)),
+  );
+}
+
+export function setSyncedBackgroundUriIfCurrent(
+  db: AppDatabase,
+  guid: string,
+  expectedChannel: string | null,
+  expectedUri: string | null,
+  nextUri: string | null,
+): Promise<boolean> {
+  return withDbTransaction(db, (context) =>
+    setSyncedBackgroundUriIfCurrentWithinTransaction(
+      context,
+      guid,
+      expectedChannel,
+      expectedUri,
+      nextUri,
+    ),
+  );
+}
+
+export function setSyncedBackgroundLuminanceIfCurrent(
+  db: AppDatabase,
+  guid: string,
+  expectedChannel: string,
+  expectedUri: string,
+  isLight: boolean,
+): Promise<boolean> {
+  return withDbTransaction(db, (context) =>
+    setSyncedBackgroundLuminanceIfCurrentWithinTransaction(
+      context,
+      guid,
+      expectedChannel,
+      expectedUri,
+      isLight,
+    ),
+  );
+}
+
+export async function insertErrorReport(
+  db: AppDatabase,
+  report: NewErrorReport,
+  now = Date.now(),
+): Promise<void> {
+  await insertErrorReports(db, [report], now);
+}
+
+export async function trimErrorReports(
+  db: AppDatabase,
+  capacity = REPORT_CAPACITY,
+  now?: number,
+  byteBudget = REPORT_BYTE_BUDGET,
+): Promise<void> {
+  await withDbTransaction(db, (context) =>
+    trimErrorReportsInTx(context, capacity, now, byteBudget),
+  );
+}
+
+export async function clearErrorReports(
+  db: AppDatabase,
+  commitGuard?: DbCommitGuard,
+): Promise<void> {
+  await withDbTransaction(db, (context) => clearErrorReportsInTx(context), commitGuard);
+}
+
+export function listRetryableErrorReports(
+  db: AppDatabase,
+  clock: ReportClock = Date.now,
+  limit = ERROR_REPORT_UPLOAD_BATCH_SIZE,
+  commitGuard?: DbCommitGuard,
+) {
+  return withDbTransaction(
+    db,
+    (context) => listRetryableErrorReportsWithinTransaction(context, clock, limit),
+    commitGuard,
+  );
+}
+
+export function claimErrorReports(
+  db: AppDatabase,
+  ids: number[],
+  clock: ReportClock = Date.now,
+  commitGuard?: DbCommitGuard,
+): Promise<number[]> {
+  return withDbTransaction(
+    db,
+    (context) => claimErrorReportsInTx(context, ids, clock),
+    commitGuard,
+  );
+}
+
+export async function markErrorReportsFailed(
+  db: AppDatabase,
+  ids: number[],
+  clock: ReportClock = Date.now,
+  commitGuard?: DbCommitGuard,
+): Promise<void> {
+  await withDbTransaction(
+    db,
+    (context) => markErrorReportsFailedInTx(context, ids, clock),
+    commitGuard,
+  );
+}
+
+export async function deleteErrorReports(
+  db: AppDatabase,
+  ids: number[],
+  commitGuard?: DbCommitGuard,
+): Promise<void> {
+  await withDbTransaction(
+    db,
+    (context) => deleteErrorReportsWithinTransaction(context, ids),
+    commitGuard,
+  );
+}
+
+/** Seed one active ledger row (production records entries when a download commits). */
+export function recordAttachmentCacheEntry(
+  context: DbTransactionContext,
+  input: { path: string; bytes: number; lastUsedAt: number },
+): Promise<boolean> {
+  return runInTransactionContext(context, async (db) => {
+    const rows = await db.all<{ state: AttachmentCacheState }>(sql`
+      INSERT INTO attachment_cache_entries (path, bytes, last_used_at, state, attempts, next_retry_at)
+      VALUES (${input.path}, ${input.bytes}, ${input.lastUsedAt}, 'active', 0, 0)
+      ON CONFLICT(path) DO UPDATE SET
+        bytes = CASE
+          WHEN excluded.last_used_at >= attachment_cache_entries.last_used_at THEN excluded.bytes
+          ELSE attachment_cache_entries.bytes
+        END,
+        last_used_at = MAX(attachment_cache_entries.last_used_at, excluded.last_used_at)
+      WHERE attachment_cache_entries.state = 'active'
+      RETURNING state
+    `);
+    return rows[0]?.state === 'active';
+  });
+}
+
+export function listChats(db: AppDatabase, opts: { includeArchived?: boolean } = {}) {
+  const visible = chatVisible('chats');
+  return db
+    .select()
+    .from(chats)
+    .where(opts.includeArchived ? visible : and(eq(chats.isArchived, false), visible))
+    .orderBy(sql`${chats.latestMessageDate} DESC NULLS LAST`);
+}
+
+export function listMessages(db: AppDatabase, chatId: number, limit = 100) {
+  return db
+    .select()
+    .from(messages)
+    .where(eq(messages.chatId, chatId))
+    .orderBy(sql`${messages.dateCreated} DESC`)
+    .limit(limit);
+}
+
+/** Local full-text search over visible, non-deleted messages (the FTS index keeps tombstones). */
+export async function searchMessages(
+  db: AppDatabase,
+  queryText: string,
+  limit = 50,
+): Promise<Array<Record<string, unknown>>> {
+  const match = toFtsQuery(queryText);
+  if (!match) return [];
+  return db.all<Record<string, unknown>>(
+    sql`SELECT m.* FROM messages_fts f JOIN messages m ON m.id = f.rowid
+        WHERE messages_fts MATCH ${match}
+          AND ${notAnOverlayMessage()}
+          AND ${messageHasVisibleContentSql('m')}
+          AND m.date_deleted IS NULL
+        ORDER BY rank LIMIT ${limit}`,
+  );
+}
+
+export async function listOrphanedAttachmentGuids(
+  db: AppDatabase,
+  guids: string[],
+): Promise<string[]> {
+  if (guids.length === 0) return [];
+  const surviving = new Set<string>();
+  for (let i = 0; i < guids.length; i += 400) {
+    const inList = sql.join(
+      guids.slice(i, i + 400).map((g) => sql`${g}`),
+      sql`, `,
+    );
+    const rows: Array<{ guid: string }> = await db.all(
+      sql`SELECT guid FROM attachments WHERE guid IN (${inList})`,
+    );
+    for (const r of rows) surviving.add(r.guid);
+  }
+  return guids.filter((g) => !surviving.has(g));
+}
+
+/** Move one pending scheduled row to `sending` (production claims due rows with claimDueScheduled). */
+export function claimScheduled(
+  db: AppDatabase,
+  id: number,
+  commitGuard?: DbCommitGuard,
+): Promise<boolean> {
+  return withDbTransaction(
+    db,
+    async () => {
+      const rows = await db
+        .update(scheduledMessages)
+        .set({ status: 'sending' })
+        .where(and(eq(scheduledMessages.id, id), eq(scheduledMessages.status, 'pending')))
+        .returning({ id: scheduledMessages.id });
+      return rows.length > 0;
+    },
+    commitGuard,
+  );
+}
+
+export function revertLocalUnsend(
+  db: AppDatabase,
+  guid: string,
+  appliedAt: number,
+  previousDateRetracted?: number | null,
+  previousRetractionState?: string | null,
+  previousPendingRetractionPartIndex?: number | null,
+  expectedAppliedPartIndex?: number,
+): Promise<boolean> {
+  return withDbTransaction(db, (context) =>
+    revertLocalUnsendWithinTransaction(
+      context,
+      guid,
+      appliedAt,
+      previousDateRetracted,
+      previousRetractionState,
+      previousPendingRetractionPartIndex,
+      expectedAppliedPartIndex,
+    ),
+  );
+}
+
+export async function applyServerSendError(
+  db: AppDatabase,
+  guid: string,
+  errorCode = 1,
+  now: number = Date.now(),
+  retryable = false,
+  requeueScope: string | number = 'process',
+  errorMessage?: string | null,
+  attemptIdentity?: ServerSendAttemptIdentity,
+): Promise<boolean> {
+  const result = await withDbTransaction(db, (context) =>
+    applyServerSendErrorWithinTransaction(
+      context,
+      guid,
+      errorCode,
+      now,
+      retryable,
+      requeueScope,
+      errorMessage,
+      attemptIdentity,
+    ),
+  );
+  result.onCommitted?.();
+  return result.matched;
+}
+
+export function updateReminderTime(
+  db: AppDatabase,
+  id: number,
+  scheduledFor: number,
+  notificationId: string,
+  commitGuard?: DbCommitGuard,
+  expectedNotificationId?: string,
+): Promise<boolean> {
+  return withDbTransaction(
+    db,
+    (context) =>
+      updateReminderTimeWithinTransaction(
+        context,
+        id,
+        scheduledFor,
+        notificationId,
+        expectedNotificationId,
+      ),
+    commitGuard,
+  );
+}
+
+export async function setUrlPreview(
+  db: AppDatabase,
+  url: string,
+  data: Parameters<typeof setUrlPreviewWithinTransaction>[2],
+  now: number,
+  commitGuard?: DbCommitGuard,
+): Promise<void> {
+  await withDbTransaction(
+    db,
+    (context) => setUrlPreviewWithinTransaction(context, url, data, now),
+    commitGuard,
+  );
+}
+
+export async function setChatCustomization(
+  db: AppDatabase,
+  guid: string,
+  patch: Parameters<typeof setChatCustomizationWithinTransaction>[2],
+): Promise<void> {
+  await withDbTransaction(db, (context) =>
+    setChatCustomizationWithinTransaction(context, guid, patch),
+  );
+}
+
+export async function setChatTheme(
+  db: AppDatabase,
+  guid: string,
+  patch: Pick<ChatAppearancePatch, 'themeTokens' | 'backgroundUri'>,
+): Promise<void> {
+  await withDbTransaction(db, (context) =>
+    setChatAppearanceWithinTransaction(context, guid, patch),
+  );
+}
+
+export async function setBackgroundIsLight(
+  db: AppDatabase,
+  guid: string,
+  isLight: boolean | null,
+): Promise<void> {
+  await withDbTransaction(db, (context) =>
+    setChatAppearanceWithinTransaction(context, guid, { backgroundIsLight: isLight }),
+  );
 }

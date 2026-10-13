@@ -12,7 +12,6 @@ import {
   listInactiveAttachmentCachePaths,
   listDueAttachmentCacheRetirements,
   listPastedAttachmentProtectionPaths,
-  recordAttachmentCacheEntry,
   recordAttachmentCacheAccess,
   repairMissingActiveAttachmentCacheEntry,
   scheduleAttachmentCacheRetirementRetry,
@@ -23,7 +22,7 @@ import {
   type DbTransactionContext,
 } from '@db/transaction';
 import { createTestDb } from '../support/testDb';
-import { deleteMessageLocal } from '../support/repositoryWrappers';
+import { deleteMessageLocal, recordAttachmentCacheEntry } from '../support/repositoryWrappers';
 
 const PATH = 'file:///documents/attachments/aa/file.jpg';
 /** A maximum-size caption (65,536 UTF-8 bytes) with characters JSON must escape. */
@@ -1157,20 +1156,6 @@ describe('attachment cache ledger', () => {
 
   it('rejects invalid repository inputs before they reach SQLite', async () => {
     const { db } = await createTestDb();
-    await expect(
-      withDbTransaction(db, (context) =>
-        recordAttachmentCacheEntry(context, { path: '', bytes: 1, lastUsedAt: 1 }),
-      ),
-    ).rejects.toThrow('path must not be empty');
-    await expect(
-      withDbTransaction(db, (context) =>
-        recordAttachmentCacheEntry(context, {
-          path: PATH,
-          bytes: Number.MAX_SAFE_INTEGER + 1,
-          lastUsedAt: 1,
-        }),
-      ),
-    ).rejects.toThrow('non-negative safe integer');
     await expect(listDueAttachmentCacheRetirements(db, 1, -1)).rejects.toThrow(
       'non-negative safe integer',
     );

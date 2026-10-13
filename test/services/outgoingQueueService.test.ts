@@ -6,7 +6,6 @@ import { Chat, Message } from '@core/models';
 import { logger } from '@core/secure';
 import { ClientErrorCode } from '@utils';
 import {
-  applyServerSendError,
   claimFailedOutgoingForRetry,
   getChatIdByGuid,
   imessagePlainTextQueueState,
@@ -37,7 +36,7 @@ import {
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
 import { createTestDb } from '../support/testDb';
-import { insertOutgoingContact } from '../support/repositoryWrappers';
+import { applyServerSendError, insertOutgoingContact } from '../support/repositoryWrappers';
 
 jest.mock('@/services/send/sendFailureNotice', () => ({
   clearFailedSendNotice: jest.fn(async () => undefined),

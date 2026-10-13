@@ -1,12 +1,10 @@
-import { eq, sql, type SQL } from 'drizzle-orm';
+import { sql, type SQL } from 'drizzle-orm';
 import {
   isAggregateRetractionTombstone,
   isExactMessagePartTopology,
-  MAX_RETRACTION_ATTACHMENTS,
 } from '@core/messages/retraction';
 import { parseMessagePartTopology } from '@core/models';
 import { REACTION_BASE_TYPES, STICKER_ASSOCIATED_TYPE } from '@core/reactions/reactionType';
-import { messages } from '../schema';
 import type { AppDatabase } from '../types';
 import { toFtsQuery } from './_shared';
 import { MAX_CUSTOM_FOLDER_MEMBERS } from './customFolders';
@@ -18,91 +16,6 @@ import {
   chatVisible,
   messageHasVisibleContentSql,
 } from './chatVisibility';
-
-/** Read-only message queries kept separate from mutation and transaction ownership. */
-
-export interface MessageActionPartLayoutRow {
-  text: string | null;
-  attributedBody: string | null;
-  partCount: number | null;
-  messagePartTopology: string | null;
-  visibleAttachmentCount: number;
-  visibleAttachmentGuids: string[];
-}
-
-/** Minimal aggregate layout needed by a headless notification reaction action. */
-export async function getMessageActionPartLayoutByGuid(
-  db: AppDatabase,
-  chatGuid: string,
-  guid: string,
-): Promise<MessageActionPartLayoutRow | null> {
-  const rows = await db.all<
-    Omit<MessageActionPartLayoutRow, 'visibleAttachmentCount' | 'visibleAttachmentGuids'>
-  >(sql`
-    SELECT m.text, m.attributed_body AS attributedBody, m.part_count AS partCount,
-           m.message_part_topology AS messagePartTopology
-      FROM messages m
-     WHERE m.chat_id = (SELECT id FROM chats WHERE guid = ${chatGuid} LIMIT 1)
-       AND m.guid = ${guid} AND m.date_deleted IS NULL
-       AND ${messageHasVisibleContentSql('m')}
-     LIMIT 1
-  `);
-  const row = rows[0];
-  if (!row) return null;
-
-  const attachmentRows = await db.all<{ guid: string }>(sql`
-    SELECT a.guid
-      FROM attachments a JOIN messages m ON m.id = a.message_id
-     WHERE m.chat_id = (SELECT id FROM chats WHERE guid = ${chatGuid} LIMIT 1)
-       AND m.guid = ${guid}
-       AND ${attachmentIsUserFileSql('a', 'm')}
-       AND COALESCE(a.hide_attachment, 0) = 0
-       AND a.is_retracted = 0
-     ORDER BY a.id ASC
-     LIMIT ${MAX_RETRACTION_ATTACHMENTS + 1}
-  `);
-  // A corrupt row set above the wire/storage bound cannot be mapped exactly; abort the action.
-  if (attachmentRows.length > MAX_RETRACTION_ATTACHMENTS) return null;
-  const visibleAttachmentGuids = attachmentRows.map(
-    (attachment: { guid: string }) => attachment.guid,
-  );
-  return {
-    ...row,
-    visibleAttachmentCount: visibleAttachmentGuids.length,
-    visibleAttachmentGuids,
-  };
-}
-
-/** Messages for a chat, newest first. */
-export function listMessages(db: AppDatabase, chatId: number, limit = 100) {
-  return db
-    .select()
-    .from(messages)
-    .where(eq(messages.chatId, chatId))
-    .orderBy(sql`${messages.dateCreated} DESC`)
-    .limit(limit);
-}
-
-/** Full-text search over message bodies (FTS5), ranked. */
-export async function searchMessages(
-  db: AppDatabase,
-  queryText: string,
-  limit = 50,
-): Promise<Array<Record<string, unknown>>> {
-  const match = toFtsQuery(queryText);
-  if (!match) return [];
-  const rows = await db.all<Record<string, unknown>>(
-    // The FTS index still holds a tombstoned message's text (setting date_deleted only re-indexes
-    // the unchanged text), so a deleted message must be excluded at QUERY time — it VANISHES.
-    sql`SELECT m.* FROM messages_fts f JOIN messages m ON m.id = f.rowid
-        WHERE messages_fts MATCH ${match}
-          AND ${notAnOverlayMessage()}
-          AND ${messageHasVisibleContentSql('m')}
-          AND m.date_deleted IS NULL
-        ORDER BY rank LIMIT ${limit}`,
-  );
-  return rows;
-}
 
 export const CHAT_SEARCH_PAGE_SIZE = 50;
 
@@ -707,7 +620,7 @@ const OVERLAY_ASSOCIATED_TYPES: string[] = [
  * codes the server emits for anything its own map doesn't recognise. Anything not in this list now
  * falls through and renders as an ordinary message — the safe direction to fail.
  */
-const notAnOverlayMessage = (): SQL => {
+export const notAnOverlayMessage = (): SQL => {
   const list = sql.join(
     OVERLAY_ASSOCIATED_TYPES.map((t) => sql`${t}`),
     sql`, `,

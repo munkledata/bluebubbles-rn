@@ -1,10 +1,6 @@
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import { chats } from '../schema';
-import {
-  runInTransactionContext,
-  withDbTransaction,
-  type DbTransactionContext,
-} from '../transaction';
+import { runInTransactionContext, type DbTransactionContext } from '../transaction';
 import type { AppDatabase } from '../types';
 
 /** Chat customization, theme, and local/synced background persistence. */
@@ -33,18 +29,6 @@ function normalizeChatCustomizationPatch(patch: ChatCustomizationPatch): ChatCus
   return set;
 }
 
-export async function setChatCustomization(
-  db: AppDatabase,
-  guid: string,
-  patch: ChatCustomizationPatch,
-): Promise<void> {
-  const set = normalizeChatCustomizationPatch(patch);
-  if (Object.keys(set).length === 0) return;
-  await withDbTransaction(db, (context) =>
-    setChatCustomizationWithinTransaction(context, guid, set),
-  );
-}
-
 export function setChatCustomizationWithinTransaction(
   context: DbTransactionContext,
   guid: string,
@@ -69,21 +53,6 @@ function normalizeChatAppearancePatch(patch: ChatAppearancePatch): ChatAppearanc
   if (patch.backgroundUri !== undefined) set.backgroundUri = patch.backgroundUri;
   if (patch.backgroundIsLight !== undefined) set.backgroundIsLight = patch.backgroundIsLight;
   return set;
-}
-
-/**
- * Set a chat's per-chat theme override and/or chat-background image. Pass a field
- * as `undefined` to leave it unchanged, or `null` to clear it (revert to the global
- * theme / no background). Device-local — excluded from upsertChats' conflict set.
- */
-export async function setChatTheme(
-  db: AppDatabase,
-  guid: string,
-  patch: Pick<ChatAppearancePatch, 'themeTokens' | 'backgroundUri'>,
-): Promise<void> {
-  const set = normalizeChatAppearancePatch(patch);
-  if (Object.keys(set).length === 0) return;
-  await withDbTransaction(db, (context) => setChatAppearanceWithinTransaction(context, guid, set));
 }
 
 export function setChatAppearanceWithinTransaction(
@@ -127,17 +96,6 @@ export async function getChatTheme(
   return rows[0] ?? null;
 }
 
-/** Store the effective wallpaper's luminance (true = light → dark overlay text; null = unknown). */
-export async function setBackgroundIsLight(
-  db: AppDatabase,
-  guid: string,
-  isLight: boolean | null,
-): Promise<void> {
-  await withDbTransaction(db, (context) =>
-    setChatAppearanceWithinTransaction(context, guid, { backgroundIsLight: isLight }),
-  );
-}
-
 /**
  * The macOS 26 synced-background state for a chat: the server's current `channel` (the version)
  * and the `uri` of the local file already downloaded for it. The background-sync service compares
@@ -152,40 +110,6 @@ export async function getSyncedBackgroundState(
           FROM chats WHERE guid = ${guid} LIMIT 1`,
   );
   return rows[0] ?? null;
-}
-
-/** Set (or clear, with null) the local file path of a chat's downloaded synced background. */
-export async function setSyncedBackgroundUri(
-  db: AppDatabase,
-  guid: string,
-  uri: string | null,
-): Promise<void> {
-  await withDbTransaction(db, () =>
-    db.update(chats).set({ syncedBackgroundUri: uri }).where(eq(chats.guid, guid)),
-  );
-}
-
-/**
- * Move the downloaded-background pointer only while BOTH server channel and prior local URI still
- * match the caller's snapshot. Network/native work stays outside the process-wide DB mutex; only
- * the final bounded compare-and-swap claims the serialized transaction.
- */
-export async function setSyncedBackgroundUriIfCurrent(
-  db: AppDatabase,
-  guid: string,
-  expectedChannel: string | null,
-  expectedUri: string | null,
-  nextUri: string | null,
-): Promise<boolean> {
-  return withDbTransaction(db, (context) =>
-    setSyncedBackgroundUriIfCurrentWithinTransaction(
-      context,
-      guid,
-      expectedChannel,
-      expectedUri,
-      nextUri,
-    ),
-  );
 }
 
 export function setSyncedBackgroundUriIfCurrentWithinTransaction(
@@ -213,29 +137,6 @@ export function setSyncedBackgroundUriIfCurrentWithinTransaction(
       .returning({ guid: chats.guid });
     return rows.length > 0;
   });
-}
-
-/**
- * Store luminance only for the exact synced file/channel that was measured, and only while no
- * device-local background has taken precedence. A changed channel, URI replacement, or local pick
- * makes this a no-op rather than letting a stale image overwrite the active theme's contrast.
- */
-export async function setSyncedBackgroundLuminanceIfCurrent(
-  db: AppDatabase,
-  guid: string,
-  expectedChannel: string,
-  expectedUri: string,
-  isLight: boolean,
-): Promise<boolean> {
-  return withDbTransaction(db, (context) =>
-    setSyncedBackgroundLuminanceIfCurrentWithinTransaction(
-      context,
-      guid,
-      expectedChannel,
-      expectedUri,
-      isLight,
-    ),
-  );
 }
 
 export function setSyncedBackgroundLuminanceIfCurrentWithinTransaction(

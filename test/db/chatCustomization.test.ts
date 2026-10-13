@@ -2,7 +2,6 @@ import { Chat } from '@core/models';
 import {
   getChatHeader,
   listChatsForInbox,
-  setChatCustomization,
   setChatCustomizationWithinTransaction,
   setChatMuteWithinTransaction,
   upsertChats,
@@ -11,7 +10,7 @@ import {
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import { isHexColor, resolveBubbleColor } from '@utils';
 import { createTestDb } from '../support/testDb';
-import { setChatMute } from '../support/repositoryWrappers';
+import { setChatCustomization, setChatMute } from '../support/repositoryWrappers';
 
 type Db = Awaited<ReturnType<typeof createTestDb>>;
 

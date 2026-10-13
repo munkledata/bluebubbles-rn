@@ -1,7 +1,6 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import { normalizeInboxFilters, type InboxFilters } from '@core/models';
 import { resolveTitle } from '@utils/chat';
-import { chats } from '../schema';
 import { runInTransactionContext, type DbTransactionContext } from '../transaction';
 import type { AppDatabase } from '../types';
 import {
@@ -18,27 +17,6 @@ import { foldInboxSearchText, uniqueInboxSearchBigrams } from './inboxSearchText
 import { searchCustomFolderChatGuidsByMessage } from './messageQueries';
 
 export type { InboxArchiveFilter, InboxSenderFilter } from './chatVisibility';
-
-/** Read-only inbox and conversation queries, separate from chat mutation ownership. */
-
-// ---- Queries ---------------------------------------------------------------
-
-/** Inbox: non-archived chats, most-recent first. Locally deleted chats are hidden (chatVisible). */
-export function listChats(db: AppDatabase, opts: { includeArchived?: boolean } = {}) {
-  const visible = chatVisible('chats');
-  if (opts.includeArchived) {
-    return db
-      .select()
-      .from(chats)
-      .where(visible)
-      .orderBy(sql`${chats.latestMessageDate} DESC NULLS LAST`);
-  }
-  return db
-    .select()
-    .from(chats)
-    .where(and(eq(chats.isArchived, false), visible))
-    .orderBy(sql`${chats.latestMessageDate} DESC NULLS LAST`);
-}
 
 /**
  * One row per chat, ready to render a conversation tile: chat metadata, the

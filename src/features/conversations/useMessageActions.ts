@@ -49,8 +49,8 @@ function actionContentOf(msg: EnrichedMessage) {
   const bodyRuns = parseAttributedRuns(msg.attributedBody, msg.text);
   const bodyText = bodyTextFromRuns(bodyRuns);
   // Private Messages-extension payloads are not visible user attachments and therefore cannot own
-  // a part in this aggregate action target. Keep exactly MessageBubble's filter (and the headless
-  // getMessageActionPartLayoutByGuid query), so every surface targets the same parts.
+  // a part in this aggregate action target. Keep exactly MessageBubble's filter, so every surface
+  // targets the same parts.
   const visibleAttachments = (msg.attachments ?? []).filter(
     (attachment) =>
       !attachment.hideAttachment && isUserFileAttachment(attachment, msg.balloonBundleId),

@@ -1,8 +1,9 @@
 import { Chat } from '@core/models';
-import { setChatCustomization, upsertChats, upsertHandles } from '@db/repositories';
+import { upsertChats, upsertHandles } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { buildBackup, restoreBackup } from '@/services/backup/backup';
 import { createTestDb } from '../support/testDb';
+import { setChatCustomization } from '../support/repositoryWrappers';
 
 const EPOCH_A = `gpe1_${'A'.repeat(43)}`;
 const EPOCH_B = `gpe1_${'B'.repeat(42)}A`;

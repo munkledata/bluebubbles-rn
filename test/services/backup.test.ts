@@ -1,8 +1,6 @@
 import { Chat } from '@core/models';
 import {
   listChatsForInbox,
-  restoreThemes,
-  setChatCustomization,
   swapPinnedChatOrder,
   upsertChats,
   upsertHandles,
@@ -42,7 +40,7 @@ import { createLibsodiumBackend } from '../support/libsodiumBackend';
 import { darkTheme } from '@ui/theme/tokens';
 import { createTestDb } from '../support/testDb';
 import { themeTokens } from '../support/themeTokens';
-import { kvSet, setChatPin } from '../support/repositoryWrappers';
+import { kvSet, setChatCustomization, setChatPin } from '../support/repositoryWrappers';
 
 type Db = Awaited<ReturnType<typeof createTestDb>>;
 
@@ -558,42 +556,6 @@ describe('restoreBackup round-trip', () => {
     ]);
   });
 
-  it('queues theme restore behind a rolling-back neighbour instead of joining it', async () => {
-    const t = await createTestDb();
-    let neighbourStarted!: () => void;
-    let releaseNeighbour!: () => void;
-    const started = new Promise<void>((resolve) => {
-      neighbourStarted = resolve;
-    });
-    const release = new Promise<void>((resolve) => {
-      releaseNeighbour = resolve;
-    });
-    const neighbour = withDbTransaction(t.db, async () => {
-      t.raw
-        .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)')
-        .run('Mine', 'dark', themeTokens({ phantom: 1 }));
-      neighbourStarted();
-      await release;
-      throw new Error('neighbour rollback');
-    });
-    await started;
-
-    const restore = restoreThemes(t.db, [
-      { name: 'Mine', mode: 'dark', tokens: themeTokens({ safe: 1 }), isPreset: 0 },
-    ]);
-    await Promise.resolve();
-    expect(t.raw.prepare("SELECT tokens FROM themes WHERE name='Mine'").get()).toEqual({
-      tokens: themeTokens({ phantom: 1 }),
-    });
-
-    releaseNeighbour();
-    await expect(neighbour).rejects.toThrow('neighbour rollback');
-    await restore;
-    expect(t.raw.prepare("SELECT tokens FROM themes WHERE name='Mine'").get()).toEqual({
-      tokens: themeTokens({ safe: 1 }),
-    });
-  });
-
   it('ignores retired keys and rolls back every KV row when ownership is revoked', async () => {
     const t = await createTestDb();
     let current = true;
@@ -696,65 +658,6 @@ describe('restoreBackup round-trip', () => {
       leaseToken: 'rollback-lease',
       leaseExpiresAt: receiptCreatedAt + 120_000,
     });
-  });
-
-  it('tracks duplicate-theme cursors per name and mode when identities are interleaved', async () => {
-    const t = await createTestDb();
-    const insert = t.raw.prepare(
-      'INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)',
-    );
-    insert.run('A', 'dark', themeTokens({ oldA1: 1 }));
-    insert.run('B', 'light', themeTokens({ oldB: 1 }));
-    insert.run('A', 'dark', themeTokens({ oldA2: 1 }));
-
-    await restoreThemes(t.db, [
-      { name: 'A', mode: 'dark', tokens: themeTokens({ newA1: 1 }), isPreset: 0 },
-      { name: 'A', mode: 'dark', tokens: themeTokens({ newA2: 1 }), isPreset: 0 },
-      { name: 'B', mode: 'light', tokens: themeTokens({ newB: 1 }), isPreset: 0 },
-    ]);
-
-    expect(t.raw.prepare('SELECT id, tokens FROM themes ORDER BY id').all()).toEqual([
-      { id: 1, tokens: themeTokens({ newA1: 1 }) },
-      { id: 2, tokens: themeTokens({ newB: 1 }) },
-      { id: 3, tokens: themeTokens({ newA2: 1 }) },
-    ]);
-  });
-
-  it('does not claim a same-name theme created after the restore cutoff', async () => {
-    const t = await createTestDb();
-    let neighbourStarted!: () => void;
-    let releaseNeighbour!: () => void;
-    const started = new Promise<void>((resolve) => {
-      neighbourStarted = resolve;
-    });
-    const release = new Promise<void>((resolve) => {
-      releaseNeighbour = resolve;
-    });
-    const neighbour = withDbTransaction(t.db, async () => {
-      neighbourStarted();
-      await release;
-    });
-    await started;
-
-    // restoreThemes claims its cutoff queue slot synchronously. This editor write queues after the
-    // cutoff but before the restore's per-item transaction.
-    const restore = restoreThemes(t.db, [
-      { name: 'Mine', mode: 'dark', tokens: themeTokens({ backup: 1 }), isPreset: 0 },
-    ]);
-    const editorInsert = withDbTransaction(t.db, async () => {
-      t.raw
-        .prepare('INSERT INTO themes (name, mode, tokens, is_preset) VALUES (?,?,?,0)')
-        .run('Mine', 'dark', themeTokens({ editor: 1 }));
-    });
-
-    releaseNeighbour();
-    await neighbour;
-    await editorInsert;
-    await restore;
-    expect(t.raw.prepare("SELECT tokens FROM themes WHERE name='Mine' ORDER BY id").all()).toEqual([
-      { tokens: themeTokens({ editor: 1 }) },
-      { tokens: themeTokens({ backup: 1 }) },
-    ]);
   });
 
   it('restoring the SAME backup twice does not duplicate themes (upsert, not insert)', async () => {

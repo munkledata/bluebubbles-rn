@@ -2,9 +2,7 @@ import { Chat, Message } from '@core/models';
 import { logger } from '@core/secure';
 import { GuidDeduper, type SyncCursor } from '@core/sync';
 import {
-  listChats,
   listChatsForInbox,
-  listMessages,
   getSyncMarker,
   upsertChats,
   upsertContacts,
@@ -24,7 +22,7 @@ import {
 import type { AppDatabase } from '@db/types';
 import type { SyncApi } from '@/services/sync/types';
 import { createTestDb } from '../support/testDb';
-import { setSyncMarker } from '../support/repositoryWrappers';
+import { listChats, listMessages, setSyncMarker } from '../support/repositoryWrappers';
 
 function msg(guid: string, rowId: number, text: string, chatGuid: string) {
   return Message.parse({

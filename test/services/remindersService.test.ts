@@ -5,7 +5,6 @@ import {
   deleteReminderWithinTransaction,
   getReminderByMessageGuid,
   listReminders,
-  updateReminderTime,
   upsertChats,
   upsertHandles,
   upsertMessages,
@@ -25,7 +24,7 @@ import {
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
 import { createTestDb } from '../support/testDb';
-import { createReminder, deleteReminder } from '../support/repositoryWrappers';
+import { createReminder, deleteReminder, updateReminderTime } from '../support/repositoryWrappers';
 
 jest.mock('expo-crypto', () => ({
   randomUUID: jest.fn(() => '7f000000-0000-4000-8000-000000000001'),

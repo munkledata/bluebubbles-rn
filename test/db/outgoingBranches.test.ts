@@ -6,7 +6,6 @@
 import type Database from 'better-sqlite3';
 import { Chat, Message } from '@core/models';
 import {
-  applyServerSendError,
   cancelOutgoing,
   claimFailedOutgoingForRetry,
   deleteChatLocal,
@@ -16,7 +15,6 @@ import {
   insertOutgoingReaction,
   insertOutgoingText,
   listAttachmentsByMessageIds,
-  listMessages,
   listMessagesWithSenders,
   markMessageDeleted,
   OUTGOING_MAX_ATTEMPTS,
@@ -34,8 +32,10 @@ import type { AppDatabase } from '@db/types';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import { createTestDb } from '../support/testDb';
 import {
+  applyServerSendError,
   claimOutgoingForSend,
   insertOutgoingContact,
+  listMessages,
   markOutgoingSentNoGuid,
   retireOutgoing,
 } from '../support/repositoryWrappers';

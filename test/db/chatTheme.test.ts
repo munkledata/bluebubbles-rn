@@ -2,18 +2,20 @@ import { Chat } from '@core/models';
 import {
   getChatTheme,
   getSyncedBackgroundState,
-  setBackgroundIsLight,
   setChatAppearanceWithinTransaction,
-  setChatTheme,
-  setSyncedBackgroundLuminanceIfCurrent,
   setSyncedBackgroundLuminanceIfCurrentWithinTransaction,
-  setSyncedBackgroundUri,
-  setSyncedBackgroundUriIfCurrent,
   setSyncedBackgroundUriIfCurrentWithinTransaction,
   upsertChats,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import { createTestDb } from '../support/testDb';
+import {
+  setBackgroundIsLight,
+  setChatTheme,
+  setSyncedBackgroundLuminanceIfCurrent,
+  setSyncedBackgroundUri,
+  setSyncedBackgroundUriIfCurrent,
+} from '../support/repositoryWrappers';
 
 /** Seed one chat row so the theme update has a target. */
 async function seedChat(db: Awaited<ReturnType<typeof createTestDb>>['db']): Promise<void> {

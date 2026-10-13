@@ -1367,29 +1367,6 @@ export function revertLocalUnsendWithinTransaction(
   });
 }
 
-/** Standalone optimistic-unsend revert owner; composing services use the transaction-only body. */
-export async function revertLocalUnsend(
-  db: AppDatabase,
-  guid: string,
-  appliedAt: number,
-  previousDateRetracted?: number | null,
-  previousRetractionState?: string | null,
-  previousPendingRetractionPartIndex?: number | null,
-  expectedAppliedPartIndex?: number,
-): Promise<boolean> {
-  return withDbTransaction(db, (context) =>
-    revertLocalUnsendWithinTransaction(
-      context,
-      guid,
-      appliedAt,
-      previousDateRetracted,
-      previousRetractionState,
-      previousPendingRetractionPartIndex,
-      expectedAppliedPartIndex,
-    ),
-  );
-}
-
 /**
  * Apply a server `message-deleted` event (macOS "Recently Deleted"): TOMBSTONE the message by
  * setting `date_deleted` (Unix ms), then recompute the owning chat's denormalized

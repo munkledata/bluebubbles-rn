@@ -655,33 +655,6 @@ export async function applyServerSendErrorWithinTransaction(
   });
 }
 
-/** Public server-error reconciliation owns one short transaction. */
-export async function applyServerSendError(
-  db: AppDatabase,
-  guid: string,
-  errorCode = 1,
-  now: number = Date.now(),
-  retryable = false,
-  requeueScope: string | number = 'process',
-  errorMessage?: string | null,
-  attemptIdentity?: ServerSendAttemptIdentity,
-): Promise<boolean> {
-  const result = await withDbTransaction(db, (context) =>
-    applyServerSendErrorWithinTransaction(
-      context,
-      guid,
-      errorCode,
-      now,
-      retryable,
-      requeueScope,
-      errorMessage,
-      attemptIdentity,
-    ),
-  );
-  result.onCommitted?.();
-  return result.matched;
-}
-
 export interface RetryableOutgoing {
   id: number;
   tempGuid: string;

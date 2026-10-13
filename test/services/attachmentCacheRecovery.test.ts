@@ -2,7 +2,6 @@ import {
   createAttachmentCacheReservation,
   getAttachmentCacheEntry,
   listAttachmentCacheEntriesForRecovery,
-  recordAttachmentCacheEntry,
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
@@ -29,6 +28,7 @@ import {
   type RollingBackDbNeighbour,
 } from '../support/dbOwnershipProof';
 import { createTestDb } from '../support/testDb';
+import { recordAttachmentCacheEntry } from '../support/repositoryWrappers';
 
 const NOW = 10_000;
 const OVER_LIMIT_REFERENCES = 1001;

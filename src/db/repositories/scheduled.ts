@@ -447,33 +447,6 @@ export class ScheduledOutgoingTargetUnavailableError extends Error {
 }
 
 /**
- * Atomically claim a pending row for sending (pending → sending). The
- * `status = 'pending'` guard makes this the concurrency lock: a second caller
- * (overlapping tick, or the home + chat tickers racing) finds the row already
- * 'sending' and gets back `false`, so the same message is never sent twice.
- * Retained for compatibility and explicit repository state transitions; the production due ticker
- * must use `claimDueScheduled`, which also re-checks time and local ownership.
- */
-export async function claimScheduled(
-  db: AppDatabase,
-  id: number,
-  commitGuard?: DbCommitGuard,
-): Promise<boolean> {
-  return withDbTransaction(
-    db,
-    async () => {
-      const rows = await db
-        .update(scheduledMessages)
-        .set({ status: 'sending' })
-        .where(and(eq(scheduledMessages.id, id), eq(scheduledMessages.status, 'pending')))
-        .returning({ id: scheduledMessages.id });
-      return rows.length > 0;
-    },
-    commitGuard,
-  );
-}
-
-/**
  * Claim one row only when it is still a due, local pending message, and return the exact row that
  * won the claim. The due-list is only a bounded candidate snapshot: an edit may move a row into the
  * future, change its payload, or hand it to the server before this transaction reaches SQLite.

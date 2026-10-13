@@ -13,15 +13,11 @@ import {
   listChatAttachmentGuids,
   listDeletedChats,
   listChatsForInbox,
-  listOrphanedAttachmentGuids,
   markMessageDeleted,
-  recordAttachmentCacheEntry,
   resumeChatPurges,
   restoreDeletedChatWithinTransaction,
   setChatArchiveWithinTransaction,
-  setChatCustomization,
   setChatPinWithinTransaction,
-  setChatTheme,
   swapPinnedChatOrder,
   upsertChats,
   upsertHandles,
@@ -36,8 +32,12 @@ import {
   createReminder,
   insertScheduled,
   kvSet,
+  listOrphanedAttachmentGuids,
+  recordAttachmentCacheEntry,
   setChatArchive,
+  setChatCustomization,
   setChatPin,
+  setChatTheme,
 } from '../support/repositoryWrappers';
 
 /** A received (inbound) message, the kind that un-hides a deleted chat. */

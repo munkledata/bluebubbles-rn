@@ -17,14 +17,10 @@ import {
   enqueueAttachmentMediaExport,
   enqueueIncomingEvent,
   getSyncMarker,
-  insertErrorReport,
   insertOutgoingText,
   kvGet,
   localCacheDirty,
-  recordAttachmentCacheEntry,
-  searchMessages,
   SHARE_INTAKE_RECEIPT_KV_PREFIX,
-  setUrlPreview,
   THEME_PREF_KEY,
   upsertChats,
   upsertContacts,
@@ -43,10 +39,14 @@ import { createTestDb } from '../support/testDb';
 import {
   createCustomFolder,
   createReminder,
+  insertErrorReport,
   insertScheduled,
   kvSet,
+  recordAttachmentCacheEntry,
   replaceCustomFolderMembership,
+  searchMessages,
   setSyncMarker,
+  setUrlPreview,
 } from '../support/repositoryWrappers';
 
 const SETTING_KEY = 'sync.messagesPerChat';

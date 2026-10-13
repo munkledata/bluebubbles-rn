@@ -4,7 +4,6 @@ import {
   createAttachmentCacheReservation,
   getAttachmentByGuid,
   getAttachmentCacheEntry,
-  recordAttachmentCacheEntry,
   updateAttachmentLocalPath,
   upsertChats,
   upsertHandles,
@@ -38,6 +37,7 @@ import {
 } from '@/services/download/pathSafety';
 import { hashNativeAttachmentCacheGuid } from '@native/boundedDownload';
 import { createTestDb } from '../support/testDb';
+import { recordAttachmentCacheEntry } from '../support/repositoryWrappers';
 
 const fetched = (localPath: string, bytes = 1) => ({ localPath, bytes });
 

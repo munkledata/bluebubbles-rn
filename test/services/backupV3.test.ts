@@ -1,5 +1,5 @@
 import { Chat } from '@core/models';
-import { kvGet, setChatCustomization, upsertChats, upsertHandles } from '@db/repositories';
+import { kvGet, upsertChats, upsertHandles } from '@db/repositories';
 import { MAX_CUSTOM_FOLDER_MEMBERS, MAX_CUSTOM_FOLDERS } from '@db/repositories/customFolders';
 import {
   buildBackupWithCustomFolders,
@@ -25,6 +25,7 @@ import {
   listCustomFolderChatGuids,
   listCustomFolders,
   replaceCustomFolderMembership,
+  setChatCustomization,
   setCustomFolderShowUnreadBadge,
 } from '../support/repositoryWrappers';
 

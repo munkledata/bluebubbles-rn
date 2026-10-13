@@ -1011,39 +1011,6 @@ export async function listChatAttachmentGuids(
   return rows.map((r) => r.guid);
 }
 
-/** How many guids one `listOrphanedAttachmentGuids` probe binds (SQLite caps bound parameters). */
-const ATTACHMENT_GUID_PROBE_CHUNK = 400;
-
-/**
- * Of `guids`, the ones whose `attachments` row is GONE — i.e. nothing in the database points at
- * their file any more.
- *
- * The delete path reads the candidates before the purge and deletes files after it, and those are
- * not the same instant: the purge is bounded at the tombstone stamp and can be interrupted, so a row
- * can legitimately survive. Deleting its file anyway would leave a message rendering a permanently
- * broken image. Re-checking is what makes "the purge orphaned it" the actual condition instead of an
- * assumption. `guid` is UNIQUE in `attachments`, so a surviving row means exactly that.
- */
-export async function listOrphanedAttachmentGuids(
-  db: AppDatabase,
-  guids: string[],
-): Promise<string[]> {
-  if (guids.length === 0) return [];
-  const surviving = new Set<string>();
-  for (let i = 0; i < guids.length; i += ATTACHMENT_GUID_PROBE_CHUNK) {
-    const chunk = guids.slice(i, i + ATTACHMENT_GUID_PROBE_CHUNK);
-    const inList = sql.join(
-      chunk.map((g) => sql`${g}`),
-      sql`, `,
-    );
-    const rows: Array<{ guid: string }> = await db.all(
-      sql`SELECT guid FROM attachments WHERE guid IN (${inList})`,
-    );
-    for (const r of rows) surviving.add(r.guid);
-  }
-  return guids.filter((g) => !surviving.has(g));
-}
-
 /**
  * Lift a chat's deletion tombstone (no-op when it isn't tombstoned).
  *

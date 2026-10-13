@@ -7,13 +7,7 @@
  */
 import { Chat, ServerInfo } from '@core/models';
 import type { HttpClient } from '@core/api/http';
-import {
-  claimScheduled,
-  getScheduledById,
-  listAllScheduled,
-  upsertChats,
-  upsertHandles,
-} from '@db/repositories';
+import { getScheduledById, listAllScheduled, upsertChats, upsertHandles } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { useSessionStore } from '@state/sessionStore';
@@ -72,7 +66,7 @@ import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
-import { insertScheduled } from '../support/repositoryWrappers';
+import { claimScheduled, insertScheduled } from '../support/repositoryWrappers';
 
 interface Deferred<T> {
   promise: Promise<T>;

@@ -115,7 +115,6 @@ import { Chat } from '@core/models';
 import {
   getChatTheme,
   getSyncedBackgroundState,
-  setSyncedBackgroundUri,
   upsertChats,
   upsertContacts,
 } from '@db/repositories';
@@ -126,6 +125,7 @@ import {
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
 import { createTestDb } from '../support/testDb';
+import { setSyncedBackgroundUri } from '../support/repositoryWrappers';
 
 const http = {
   snapshotTransport: () => ({ headers: {}, buildUrl: (path: string) => path }),

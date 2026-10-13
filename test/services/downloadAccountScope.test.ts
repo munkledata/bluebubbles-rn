@@ -15,7 +15,6 @@ import {
   createAttachmentCacheReservation,
   getAttachmentByGuid,
   getAttachmentCacheEntry,
-  recordAttachmentCacheEntry,
   updateAttachmentLocalPath,
   upsertChats,
   upsertHandles,
@@ -54,6 +53,7 @@ import {
   type RollingBackDbNeighbour,
 } from '../support/dbOwnershipProof';
 import { createTestDb } from '../support/testDb';
+import { recordAttachmentCacheEntry } from '../support/repositoryWrappers';
 
 type Outcome<T> = { kind: 'fulfilled'; value: T } | { kind: 'rejected'; error: unknown };
 

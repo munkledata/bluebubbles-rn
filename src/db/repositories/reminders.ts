@@ -127,26 +127,3 @@ export function updateReminderTimeWithinTransaction(
     return rows.length > 0;
   });
 }
-
-/** Standalone reminder-move owner; composing services use the transaction-only body. */
-export async function updateReminderTime(
-  db: AppDatabase,
-  id: number,
-  scheduledFor: number,
-  notificationId: string,
-  commitGuard?: DbCommitGuard,
-  expectedNotificationId?: string,
-): Promise<boolean> {
-  return withDbTransaction(
-    db,
-    (context) =>
-      updateReminderTimeWithinTransaction(
-        context,
-        id,
-        scheduledFor,
-        notificationId,
-        expectedNotificationId,
-      ),
-    commitGuard,
-  );
-}

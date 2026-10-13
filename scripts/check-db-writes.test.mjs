@@ -1776,11 +1776,10 @@ test('certifies exactly the reviewed error-report ownership and outer lifecycle 
     (finding) => finding.detectedContext === 'error-report-lifecycle-delegation',
   );
 
-  assert.equal(local.length, 16);
+  assert.equal(local.length, 15);
   assert.deepEqual(
     local.map((finding) => finding.id).sort(),
     [
-      'src/db/repositories/errorReports.ts#insertErrorReport:mutator-call:184b64238855',
       'src/services/errors/errorReportQueueService.ts#runErrorReportQueue.<callback:1146394e6d>:mutator-call:94a3c2f0ecbf',
       'src/services/errors/errorReportQueueService.ts#runErrorReportQueue:mutator-call:6ab4a7e8d484',
       'src/services/errors/errorReportSink.ts#ErrorReportSink.flushToDb:mutator-call:e3fd2f80780c',
@@ -1801,26 +1800,14 @@ test('certifies exactly the reviewed error-report ownership and outer lifecycle 
   assert.deepEqual(
     repositoryTransactions.map((finding) => finding.id).sort(),
     [
-      'src/db/repositories/errorReports.ts#claimErrorReports.<callback:c9aa239408>:mutator-call:80199932a94d',
-      'src/db/repositories/errorReports.ts#claimErrorReports:mutator-call:25becb5bc7ba',
-      'src/db/repositories/errorReports.ts#claimErrorReports:mutator-call:c48fe530c9bc',
       'src/db/repositories/errorReports.ts#claimErrorReportsWithinTransaction:sql-update:a6cadd1370ec',
-      'src/db/repositories/errorReports.ts#deleteErrorReports.<callback:5ff1fe5664>:mutator-call:95b001f7a2ae',
-      'src/db/repositories/errorReports.ts#deleteErrorReports:mutator-call:317f3471e7da',
-      'src/db/repositories/errorReports.ts#deleteErrorReports:mutator-call:f0097ddea70a',
       'src/db/repositories/errorReports.ts#deleteErrorReportsWithinTransaction:sql-delete:bb847c13001b',
-      'src/db/repositories/errorReports.ts#listRetryableErrorReports.<callback:34ae7037fb>:mutator-call:fa1851fb1552',
-      'src/db/repositories/errorReports.ts#listRetryableErrorReports:mutator-call:231b4b71f6c6',
-      'src/db/repositories/errorReports.ts#listRetryableErrorReports:mutator-call:2538e5c2e5d3',
       'src/db/repositories/errorReports.ts#listRetryableErrorReportsWithinTransaction.<callback:6d0d0f76a3>:mutator-call:38305fef3c77',
-      'src/db/repositories/errorReports.ts#markErrorReportsFailed.<callback:de20fdbd27>:mutator-call:1f1e7f013451',
-      'src/db/repositories/errorReports.ts#markErrorReportsFailed:mutator-call:8312ba5644a2',
-      'src/db/repositories/errorReports.ts#markErrorReportsFailed:mutator-call:ba127dd07f32',
       'src/db/repositories/errorReports.ts#markErrorReportsFailedWithinTransaction:sql-delete:b6a752ef4ffa',
       'src/db/repositories/errorReports.ts#markErrorReportsFailedWithinTransaction:sql-update:fafc5a007c8e',
     ].sort(),
   );
-  assert.equal(repositoryTransactions.length, 17);
+  assert.equal(repositoryTransactions.length, 5);
   assert.deepEqual(
     queueTransactions.map((finding) => finding.id).sort(),
     [
@@ -3115,14 +3102,13 @@ test('certifies the exact residual repository delegations after explicit-owner c
   );
 
   assert.equal(devFixtures.length, 13);
-  assert.equal(intentionalBoundaries.length, 47);
+  assert.equal(intentionalBoundaries.length, 46);
   assert.equal(scheduledStateMachine.length, 12);
   assert.deepEqual(
     findings.map((finding) => finding.id).sort(),
     [
       'src/db/repositories/chats.ts#deleteChatLocal:mutator-call:4f80cbb6f44f',
       'src/db/repositories/chats.ts#resumeChatPurges:mutator-call:9e5da82015da',
-      'src/db/repositories/errorReports.ts#insertErrorReport:mutator-call:184b64238855',
       'src/db/repositories/maintenance.ts#clearLocalCache:mutator-call:5111af2df56f',
       'src/db/repositories/maintenance.ts#clearLocalCache:mutator-call:e64441bf4d7f',
       'src/db/repositories/scheduled.ts#reconcileServerScheduled:mutator-call:6df044728f30',
@@ -3785,7 +3771,6 @@ test('certifies exactly the reviewed attachment-cache transaction-context bounda
     'confirmAttachmentCacheEntryDeleted',
     'createAttachmentCacheReservation',
     'recordAttachmentCacheAccess',
-    'recordAttachmentCacheEntry',
     'repairMissingActiveAttachmentCacheEntry',
     'scheduleAttachmentCacheRetirementRetry',
   ]);
@@ -3826,7 +3811,6 @@ test('certifies exactly the reviewed attachment-cache transaction-context bounda
       'src/db/repositories/attachmentCache.ts#createAttachmentCacheReservation:sql-insert:23906c8fe812',
       'src/db/repositories/attachmentCache.ts#listPastedAttachmentProtectionPaths:mutator-call:543990b98095',
       'src/db/repositories/attachmentCache.ts#recordAttachmentCacheAccess:sql-update:3ca8ab1b4190',
-      'src/db/repositories/attachmentCache.ts#recordAttachmentCacheEntry:sql-insert:1d5b6db8c26c',
       'src/db/repositories/attachmentCache.ts#repairMissingActiveAttachmentCacheEntry:sql-delete:b9564831e666',
       'src/db/repositories/attachmentCache.ts#repairMissingActiveAttachmentCacheEntry:sql-delete:c78a3766ee18',
       'src/db/repositories/attachmentCache.ts#repairMissingActiveAttachmentCacheEntry:sql-update:27b8750a28ca',
@@ -3861,7 +3845,7 @@ test('certifies exactly the reviewed attachment-cache transaction-context bounda
       'src/services/send/outgoingPasteOwnership.ts#createOutgoingPasteOwnershipPreparer.<callback:59fde12f29>:mutator-call:98d3bf462332',
     ].sort(),
   );
-  assert.equal(leaves.length, 15);
+  assert.equal(leaves.length, 14);
   assert.equal(snapshotOwners.length, 1);
   assert.equal(delegated.length, 28);
   assert.deepEqual(
@@ -7204,14 +7188,6 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
             'src/services/contacts/serverAvatars.ts#backfillServerAvatars.<callback:',
           ))),
   );
-  const updateReminderTimeTransactions = findings.filter(
-    (finding) =>
-      finding.path === 'src/db/repositories/reminders.ts' &&
-      finding.symbol.startsWith('updateReminderTime') &&
-      !finding.symbol.startsWith('updateReminderTimeWithinTransaction') &&
-      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
-      finding.snippet.includes('updateReminderTimeWithinTransaction'),
-  );
   const sendSuccessOwnerTransactions = findings.filter(
     (finding) =>
       finding.path === 'src/db/repositories/outgoing.ts' &&
@@ -7291,19 +7267,6 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
         finding.target === 'src/db/repositories/messages.ts#revertLocalEditWithinTransaction' ||
         (finding.detectedContext === 'withDbTransaction' &&
           finding.target.startsWith('src/db/repositories/messages.ts#revertLocalEdit.<callback:'))),
-  );
-  const revertLocalUnsendTransactions = findings.filter(
-    (finding) =>
-      finding.path === 'src/db/repositories/messages.ts' &&
-      finding.symbol.startsWith('revertLocalUnsend') &&
-      !finding.symbol.startsWith('revertLocalUnsendWithinTransaction') &&
-      ['transaction-coordinator', 'withDbTransaction'].includes(finding.detectedContext) &&
-      (finding.target === 'src/db/transaction.ts#withDbTransaction' ||
-        finding.target === 'src/db/repositories/messages.ts#revertLocalUnsendWithinTransaction' ||
-        (finding.detectedContext === 'withDbTransaction' &&
-          finding.target.startsWith(
-            'src/db/repositories/messages.ts#revertLocalUnsend.<callback:',
-          ))),
   );
 
   assert.deepEqual(
@@ -7480,14 +7443,6 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     ].sort(),
   );
   assert.deepEqual(
-    updateReminderTimeTransactions.map((finding) => finding.id).sort(),
-    [
-      'src/db/repositories/reminders.ts#updateReminderTime.<callback:01f3a3c07f>:mutator-call:861aece00d05',
-      'src/db/repositories/reminders.ts#updateReminderTime:mutator-call:1516cdcafef5',
-      'src/db/repositories/reminders.ts#updateReminderTime:mutator-call:920049d903c2',
-    ].sort(),
-  );
-  assert.deepEqual(
     sendSuccessOwnerTransactions.map((finding) => finding.id).sort(),
     [
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccess.<callback:a142c06cb1>:mutator-call:dd151c6d7808',
@@ -7536,14 +7491,6 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/messages.ts#revertLocalEdit.<callback:db18ec7032>:mutator-call:2c433275da29',
       'src/db/repositories/messages.ts#revertLocalEdit:mutator-call:a093dbcecc09',
       'src/db/repositories/messages.ts#revertLocalEdit:mutator-call:bf0de4f4d033',
-    ].sort(),
-  );
-  assert.deepEqual(
-    revertLocalUnsendTransactions.map((finding) => finding.id).sort(),
-    [
-      'src/db/repositories/messages.ts#revertLocalUnsend.<callback:c5ee555dd6>:mutator-call:9a40a139e444',
-      'src/db/repositories/messages.ts#revertLocalUnsend:mutator-call:0cad95bcc0f4',
-      'src/db/repositories/messages.ts#revertLocalUnsend:mutator-call:76b9fc4dfb2e',
     ].sort(),
   );
   assert.equal(

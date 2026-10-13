@@ -2,10 +2,7 @@ import { Chat, Message } from '@core/models';
 import {
   getSyncMarker,
   handleMapKey,
-  listChats,
-  listMessages,
   maxMessageMarker,
-  searchMessages,
   setSyncMarkerWithinTransaction,
   upsertChats,
   upsertHandles,
@@ -14,7 +11,12 @@ import {
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import { createTestDb } from '../support/testDb';
-import { setSyncMarker } from '../support/repositoryWrappers';
+import {
+  listChats,
+  listMessages,
+  searchMessages,
+  setSyncMarker,
+} from '../support/repositoryWrappers';
 
 function chat(guid: string, extra: Record<string, unknown> = {}) {
   return Chat.parse({

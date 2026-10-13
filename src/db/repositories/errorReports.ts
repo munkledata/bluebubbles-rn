@@ -3,7 +3,6 @@ import { errorReports } from '../schema';
 import {
   runInTransactionContext,
   withDbTransaction,
-  type DbCommitGuard,
   type DbTransactionContext,
 } from '../transaction';
 import type { AppDatabase } from '../types';
@@ -119,15 +118,6 @@ export async function insertErrorReports(
   );
 }
 
-/** Insert one captured report. Kept for repository callers that do not already hold a batch. */
-export async function insertErrorReport(
-  db: AppDatabase,
-  r: NewErrorReport,
-  now = Date.now(),
-): Promise<void> {
-  await insertErrorReports(db, [r], now);
-}
-
 /**
  * Retain only the newest rows that satisfy all three durable bounds: item count, maximum age, and
  * aggregate conservative serialized bytes.
@@ -136,7 +126,7 @@ export async function insertErrorReport(
  * no report bodies cross the JS boundary, including when cleaning an oversized legacy table.
  * `now` is optional only for item-cap maintenance callers; production writes/reads always supply it.
  */
-async function trimErrorReportsWithinTransaction(
+export async function trimErrorReportsWithinTransaction(
   context: DbTransactionContext,
   capacity = ERROR_REPORT_CAPACITY,
   now?: number,
@@ -179,36 +169,6 @@ async function trimErrorReportsWithinTransaction(
   });
 }
 
-/** Enforce all durable queue bounds in one owned transaction. Never call from another transaction. */
-export async function trimErrorReports(
-  db: AppDatabase,
-  capacity = ERROR_REPORT_CAPACITY,
-  now?: number,
-  byteBudget = ERROR_REPORT_QUEUE_BYTE_BUDGET,
-): Promise<void> {
-  await withDbTransaction(db, (context) =>
-    trimErrorReportsWithinTransaction(context, capacity, now, byteBudget),
-  );
-}
-
-/**
- * Purge every queued diagnostic after consent is withdrawn.
- *
- * Own the shared write lock for this single bounded statement so it cannot silently join and be
- * resurrected by another writer's rollback. The uploader re-checks consent before every outcome
- * mutation, so no aborted request can recreate or advance a row after this returns.
- */
-export async function clearErrorReports(
-  db: AppDatabase,
-  commitGuard?: DbCommitGuard,
-): Promise<void> {
-  await withDbTransaction(
-    db,
-    (context) => clearErrorReportsWithinTransaction(context),
-    commitGuard,
-  );
-}
-
 /** Delete the queue inside the caller's exact consent/revocation transaction. */
 export async function clearErrorReportsWithinTransaction(
   context: DbTransactionContext,
@@ -249,24 +209,6 @@ export function listRetryableErrorReportsWithinTransaction(
   });
 }
 
-/** Reports eligible for an upload attempt: under the attempt cap and past their backoff. */
-export async function listRetryableErrorReports(
-  db: AppDatabase,
-  clock: ErrorReportClock = Date.now,
-  limit = ERROR_REPORT_UPLOAD_BATCH_SIZE,
-  commitGuard?: DbCommitGuard,
-): Promise<RetryableErrorReport[]> {
-  // Reads are also a cleanup boundary, so a quiet app with no newly captured errors still retires
-  // old/legacy rows before any upload claim is assembled. Own a short transaction here: a naked
-  // DELETE could silently join an error-sink transaction already open on the shared connection and
-  // be undone by its rollback. Callers must therefore never invoke this helper inside a transaction.
-  return withDbTransaction(
-    db,
-    (context) => listRetryableErrorReportsWithinTransaction(context, clock, limit),
-    commitGuard,
-  );
-}
-
 /** Transaction-only lease claim for one bounded upload batch. */
 export function claimErrorReportsWithinTransaction(
   context: DbTransactionContext,
@@ -288,28 +230,6 @@ export function claimErrorReportsWithinTransaction(
       WHERE id IN (${inList}) AND next_retry_at <= ${now} RETURNING id`);
     return rows.map((row: { id: number }) => row.id);
   });
-}
-
-/**
- * Atomically lease rows for an upload attempt by pushing next_retry_at into the future. Exactly one
- * caller wins each row (the `next_retry_at <= now` guard); the rest skip. Returns the ids actually
- * claimed. The uploader supplies at most 100 ids and claims them with one bounded
- * `IN (...) RETURNING` statement, keeping the transaction short. The optional guard revokes an
- * account-scoped commit; it never decides whether this public writer takes the shared DB queue.
- */
-export async function claimErrorReports(
-  db: AppDatabase,
-  ids: number[],
-  clock: ErrorReportClock = Date.now,
-  commitGuard?: DbCommitGuard,
-): Promise<number[]> {
-  const uniqueIds = boundedErrorReportIds(ids);
-  if (uniqueIds.length === 0) return [];
-  return withDbTransaction(
-    db,
-    (context) => claimErrorReportsWithinTransaction(context, uniqueIds, clock),
-    commitGuard,
-  );
 }
 
 /** Transaction-only failed-attempt settlement for one bounded upload batch. */
@@ -346,26 +266,6 @@ export function markErrorReportsFailedWithinTransaction(
   });
 }
 
-/**
- * Bump attempts + schedule a backoff on the given rows; drop any that hit the attempt cap.
- * IDs are set-like: duplicates still represent one failed upload attempt, and missing rows are
- * ignored.
- */
-export async function markErrorReportsFailed(
-  db: AppDatabase,
-  ids: number[],
-  clock: ErrorReportClock = Date.now,
-  commitGuard?: DbCommitGuard,
-): Promise<void> {
-  const uniqueIds = boundedErrorReportIds(ids);
-  if (uniqueIds.length === 0) return;
-  await withDbTransaction(
-    db,
-    (context) => markErrorReportsFailedWithinTransaction(context, uniqueIds, clock),
-    commitGuard,
-  );
-}
-
 /** Transaction-only successful deletion for one bounded upload batch. */
 export function deleteErrorReportsWithinTransaction(
   context: DbTransactionContext,
@@ -380,19 +280,4 @@ export function deleteErrorReportsWithinTransaction(
     );
     await db.run(sql`DELETE FROM error_reports WHERE id IN (${inList})`);
   });
-}
-
-/** Delete the given rows (after a successful upload). */
-export async function deleteErrorReports(
-  db: AppDatabase,
-  ids: number[],
-  commitGuard?: DbCommitGuard,
-): Promise<void> {
-  const uniqueIds = boundedErrorReportIds(ids);
-  if (uniqueIds.length === 0) return;
-  await withDbTransaction(
-    db,
-    (context) => deleteErrorReportsWithinTransaction(context, uniqueIds),
-    commitGuard,
-  );
 }

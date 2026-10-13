@@ -4,14 +4,13 @@ import {
   getChatIdByGuid,
   getMessagePreviewByGuid,
   listAttachmentsByMessageIds,
-  searchMessages,
   upsertChats,
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
-import { applyLocalUnsend } from '../support/repositoryWrappers';
+import { applyLocalUnsend, searchMessages } from '../support/repositoryWrappers';
 
 async function seedChat(db: AppDatabase): Promise<{
   chatId: number;

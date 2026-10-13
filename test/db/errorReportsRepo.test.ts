@@ -6,18 +6,20 @@ import {
   ERROR_REPORT_SERIALIZED_ROW_OVERHEAD_BYTES,
   ERROR_REPORT_TEXT_ESCAPE_MULTIPLIER,
   ERROR_REPORT_UPLOAD_BATCH_SIZE,
-  claimErrorReports,
-  clearErrorReports,
-  deleteErrorReports,
-  insertErrorReport,
   insertErrorReports,
-  listRetryableErrorReports,
-  markErrorReportsFailed,
-  trimErrorReports,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
+import {
+  claimErrorReports,
+  clearErrorReports,
+  deleteErrorReports,
+  insertErrorReport,
+  listRetryableErrorReports,
+  markErrorReportsFailed,
+  trimErrorReports,
+} from '../support/repositoryWrappers';
 
 const count = (raw: Database.Database): number =>
   (raw.prepare('SELECT COUNT(*) c FROM error_reports').get() as { c: number }).c;

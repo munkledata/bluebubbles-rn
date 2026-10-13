@@ -4,8 +4,6 @@ import { logger } from '@core/secure';
 import {
   getChatIdByGuid,
   insertOutgoingAttachment,
-  listChats,
-  listMessages,
   listMessagesWithSenders,
   upsertChats,
   upsertContacts,
@@ -21,6 +19,7 @@ import {
 } from '@/services/realtime/dbEventSink';
 import { buildMessageIntents } from '@/services/notifications/intents';
 import { createTestDb } from '../support/testDb';
+import { listChats, listMessages } from '../support/repositoryWrappers';
 
 const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
 const RCS_PROVIDER_INFO = {

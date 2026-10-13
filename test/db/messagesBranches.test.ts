@@ -9,19 +9,17 @@ import { Chat, Message } from '@core/models';
 import {
   getChatGuidByMessageGuid,
   getChatIdByGuid,
-  getMessageActionPartLayoutByGuid,
   getMessagePreviewByGuid,
   getMessageTextByGuid,
   listMessagesAround,
   listMessagesWithSenders,
-  revertLocalUnsend,
   upsertChats,
   upsertHandles,
   upsertMessages,
 } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
-import { applyLocalEdit, applyLocalUnsend } from '../support/repositoryWrappers';
+import { applyLocalEdit, applyLocalUnsend, revertLocalUnsend } from '../support/repositoryWrappers';
 
 async function seedChat(
   db: AppDatabase,
@@ -213,12 +211,6 @@ describe('read-null helpers + edit/unsend', () => {
     ).resolves.toMatchObject({ text: 'private owner-chat preview' });
     await expect(
       getMessagePreviewByGuid(db, 'RCS;-;google-conversation-1', 'scoped-reply-target', 0),
-    ).resolves.toBeNull();
-    await expect(
-      getMessageActionPartLayoutByGuid(db, 'iMessage;-;+15550000001', 'scoped-reply-target'),
-    ).resolves.toMatchObject({ text: 'private owner-chat preview' });
-    await expect(
-      getMessageActionPartLayoutByGuid(db, 'RCS;-;google-conversation-1', 'scoped-reply-target'),
     ).resolves.toBeNull();
   });
 

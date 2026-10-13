@@ -1,7 +1,7 @@
 import type Database from 'better-sqlite3';
 import type { HttpClient } from '@core/api/http';
 import { ServerInfo } from '@core/models';
-import { claimScheduled } from '@db/repositories';
+
 import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { sendImageMessage, type AttachmentUploader } from '@/services/send/sendAttachmentService';
@@ -10,7 +10,7 @@ import { sendReactionMessage } from '@/services/send/sendReactionService';
 import { sendTextMessage } from '@/services/send/sendService';
 import { fixedRcsCapabilitySource } from '@/services/send/rcsAttemptCapability';
 import { createTestDb } from '../support/testDb';
-import { insertScheduled } from '../support/repositoryWrappers';
+import { claimScheduled, insertScheduled } from '../support/repositoryWrappers';
 
 type SendKind = 'text' | 'contact' | 'reaction' | 'attachment';
 

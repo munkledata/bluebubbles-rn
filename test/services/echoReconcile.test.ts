@@ -6,7 +6,6 @@ import {
   insertOutgoingAttachment,
   insertOutgoingText,
   listAttachmentsByMessageIds,
-  listMessages,
   reconcileOutgoingSuccess,
   upsertChats,
   upsertHandles,
@@ -15,7 +14,11 @@ import {
 import type { AppDatabase } from '@db/types';
 import { DbEventSink } from '@/services/realtime/dbEventSink';
 import { createTestDb } from '../support/testDb';
-import { markMessageSendError, markOutgoingSentNoGuid } from '../support/repositoryWrappers';
+import {
+  listMessages,
+  markMessageSendError,
+  markOutgoingSentNoGuid,
+} from '../support/repositoryWrappers';
 
 // Gator's `new-message` echo carries NO tempGuid (chat.db ROWID-watcher emission), so the
 // live echo of our own send is correlated to its optimistic `temp-…` row by CONTENT

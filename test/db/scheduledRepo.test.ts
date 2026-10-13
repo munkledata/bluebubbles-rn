@@ -4,7 +4,6 @@ import { ServerInfo } from '@core/models';
 import { sql } from 'drizzle-orm';
 import {
   claimDueScheduled,
-  claimScheduled,
   deleteScheduledHistoryWithinTransaction,
   deleteScheduledWithinTransaction,
   getScheduledById,
@@ -27,6 +26,7 @@ import { runDueScheduled, scheduleTextMessage } from '@/services/send/scheduleSe
 import { fixedRcsCapabilitySource } from '@/services/send/rcsAttemptCapability';
 import { createTestDb } from '../support/testDb';
 import {
+  claimScheduled,
   deleteScheduled,
   deleteScheduledHistory,
   insertScheduled,

@@ -421,38 +421,6 @@ export function listPastedAttachmentProtectionPaths(
 }
 
 /**
- * Record a file only after the native download has completed and been re-statted.
- *
- * Returns false when this path is already retiring. That state is intentionally sticky: a late
- * completion from an older operation must not resurrect a file while a delete is in flight. For an
- * active duplicate, the newest observation wins and last-used time can only move forward.
- */
-export async function recordAttachmentCacheEntry(
-  context: DbTransactionContext,
-  input: { path: string; bytes: number; lastUsedAt: number },
-): Promise<boolean> {
-  return runInTransactionContext(context, async (db) => {
-    requirePath(input.path);
-    requireNonnegativeSafeInteger(input.bytes, 'Attachment cache bytes');
-    requireNonnegativeSafeInteger(input.lastUsedAt, 'Attachment cache lastUsedAt');
-
-    const rows = await db.all<{ state: AttachmentCacheState }>(sql`
-      INSERT INTO attachment_cache_entries (path, bytes, last_used_at, state, attempts, next_retry_at)
-      VALUES (${input.path}, ${input.bytes}, ${input.lastUsedAt}, 'active', 0, 0)
-      ON CONFLICT(path) DO UPDATE SET
-        bytes = CASE
-          WHEN excluded.last_used_at >= attachment_cache_entries.last_used_at THEN excluded.bytes
-          ELSE attachment_cache_entries.bytes
-        END,
-        last_used_at = MAX(attachment_cache_entries.last_used_at, excluded.last_used_at)
-      WHERE attachment_cache_entries.state = 'active'
-      RETURNING state
-    `);
-    return rows[0]?.state === 'active';
-  });
-}
-
-/**
  * Account one bounded page from a fully collected native startup manifest.
  *
  * Transaction-only: startup passes each page the context from one short account-guarded owner.

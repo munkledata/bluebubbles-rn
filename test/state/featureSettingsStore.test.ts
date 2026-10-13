@@ -1,5 +1,5 @@
 import { getDatabase } from '@db/database';
-import { insertErrorReport, kvGet } from '@db/repositories';
+import { kvGet } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import {
@@ -22,7 +22,7 @@ import {
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
 import { createTestDb } from '../support/testDb';
-import { kvSet } from '../support/repositoryWrappers';
+import { insertErrorReport, kvSet } from '../support/repositoryWrappers';
 
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
 // Keep the real cap constants; spy the semaphore push so we can assert it fires on hydrate + set.

@@ -35,7 +35,6 @@ import {
   listChatsForInbox,
   listReminders,
   listScheduledByChat,
-  recordAttachmentCacheEntry,
   upsertChats,
   upsertHandles,
 } from '@db/repositories';
@@ -107,7 +106,11 @@ import {
   pauseRealtimeDeliveries,
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
-import { createReminder, insertScheduled } from '../support/repositoryWrappers';
+import {
+  createReminder,
+  insertScheduled,
+  recordAttachmentCacheEntry,
+} from '../support/repositoryWrappers';
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;

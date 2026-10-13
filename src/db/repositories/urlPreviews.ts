@@ -4,12 +4,7 @@ import {
   MAX_URL_PREVIEW_IMAGE_DATA_URL_CHARS,
 } from '@core/api/endpoints/urlPreviews';
 import { urlPreviews } from '../schema';
-import {
-  runInTransactionContext,
-  withDbTransaction,
-  type DbCommitGuard,
-  type DbTransactionContext,
-} from '../transaction';
+import { runInTransactionContext, type DbTransactionContext } from '../transaction';
 import type { AppDatabase } from '../types';
 
 // ---- URL preview cache ----
@@ -169,20 +164,4 @@ export function setUrlPreviewWithinTransaction(
         )
       `);
   });
-}
-
-export async function setUrlPreview(
-  db: AppDatabase,
-  url: string,
-  data: UrlPreviewWriteData,
-  now: number,
-  commitGuard?: DbCommitGuard,
-): Promise<void> {
-  // Reject programmer mistakes without needlessly claiming the global writer queue.
-  assertValidPreviewTimestamp(now);
-  await withDbTransaction(
-    db,
-    (context) => setUrlPreviewWithinTransaction(context, url, data, now),
-    commitGuard,
-  );
 }

@@ -32,7 +32,7 @@ import { ApiError } from '@core/api/errors';
 import type { HttpClient } from '@core/api/http';
 import type { ServerInfo } from '@core/models';
 import { ERROR_DIAGNOSTIC_SITES, logger } from '@core/secure';
-import { insertErrorReport, listRetryableErrorReports } from '@db/repositories';
+
 import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { ERROR_REPORTING_CONSENT_KEY, useFeatureSettingsStore } from '@state/featureSettingsStore';
@@ -46,7 +46,7 @@ import {
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
 import { createTestDb } from '../support/testDb';
-import { kvSet } from '../support/repositoryWrappers';
+import { insertErrorReport, kvSet, listRetryableErrorReports } from '../support/repositoryWrappers';
 
 const { getDatabase: mockGetDatabase } = jest.requireMock('@db/database') as {
   getDatabase: jest.Mock;

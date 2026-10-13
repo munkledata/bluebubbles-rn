@@ -4,7 +4,6 @@ import type { HttpClient, HttpTransportSnapshot } from '@core/api/http';
 import { Chat, Message, ServerInfo } from '@core/models';
 import { logger } from '@core/secure';
 import {
-  claimScheduled,
   getScheduledById,
   OUTGOING_MAX_ATTEMPTS,
   upsertChats,
@@ -20,7 +19,7 @@ import {
 } from '@/services/send/rcsAttemptCapability';
 import { generateTempGuid, sendTextMessage } from '@/services/send/sendService';
 import { createTestDb } from '../support/testDb';
-import { insertScheduled } from '../support/repositoryWrappers';
+import { claimScheduled, insertScheduled } from '../support/repositoryWrappers';
 
 const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
 const rcsChatGuid = (sourceId: string): string =>

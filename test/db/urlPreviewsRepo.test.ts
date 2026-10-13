@@ -1,6 +1,5 @@
 import {
   getUrlPreview,
-  setUrlPreview,
   URL_PREVIEW_CACHE_MAX_BYTES,
   URL_PREVIEW_CACHE_MAX_ENTRIES,
   URL_PREVIEW_NEGATIVE_TTL_MS,
@@ -8,6 +7,7 @@ import {
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import { createTestDb } from '../support/testDb';
+import { setUrlPreview } from '../support/repositoryWrappers';
 
 const URL = 'https://example.com/article';
 const PNG_DATA_URL =
