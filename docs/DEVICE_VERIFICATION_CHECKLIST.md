@@ -482,6 +482,19 @@ legacy-shortcut cleanup path ran. A clean-install result must not be relabeled a
       phone. API 24/25 is outside the owner-selected product boundary; retain the native fail-closed
       path as defense in depth, and prove the exact candidate on Android 16 / API 36 and Android 17 /
       API 37 instead.
+- [ ] **`LOCAL-DEV SUPPORTING ONLY` (`REVIEW-888`):** On a disposable debuggable build, seed more
+      than 8,192 small legacy files with `adb shell run-as <dev-package>` (for example 9,000
+      `files/attachments/legacy-N/photo.jpg`), then repeat with about 17,000 one-file folders so the
+      32,768-entry limit also overflows. Relaunch: the "New downloads are paused…" warning appears on
+      every launch and a tap on a not-yet-downloaded image does not download. Settings → Storage &
+      File Privacy → **Repair Downloads** → Repair: progress counts up, the result names how many
+      files were removed, the warning is gone, the seeded files and their emptied folders are gone
+      (no message refers to them), and a real attachment now downloads. Relaunch shows no warning.
+      With a few real downloads among more than 4,096 files, the oldest are removed first and tap to
+      download again.
+- [ ] **`EXACT PLAY CANDIDATE` (`REVIEW-888`):** With downloads working, Storage & File Privacy shows
+      no Repair Downloads row. Do not manufacture an oversized cache on a tester phone; if an upgrade
+      naturally shows the paused-downloads warning, run Repair Downloads and record the result.
 
 ### 4. Multipart uploads, concurrency, and cancellation
 

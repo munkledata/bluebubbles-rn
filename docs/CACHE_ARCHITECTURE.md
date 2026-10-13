@@ -191,6 +191,17 @@ content_rowid='id')`, created in migration 0001, kept current by AFTER INSERT/DE
   API-below-26 failure branch remains defense in depth, not an advertised degraded support mode.
   Release configuration, generated manifest/AAB metadata, Play targeting, and store copy must all
   enforce the API 36 floor before the boundary is considered proven.
+- If that startup check fails (most often an old pre-ledger cache above 8,192 files or 32,768
+  entries), new downloads stay paused and the boot warning points to Settings → Storage & File
+  Privacy → **Repair Downloads** (review item 888); restarting repeats the same check. The repair
+  reads the cache through a native repair scan with no totals (same layout and symlink checks, a
+  60-second idle expiry), accounts each 100-file page in the ledger exactly like startup, then runs
+  the ordinary cleanup: unreferenced files are retired and the least recently used files beyond
+  the 2 GiB / 4,096-file limits are evicted, with every protection kept and each deleted file's
+  `local_path` cleared so its message offers the download again. It stops as `blocked` rather than
+  let the ledger pass 8,092 files, and ends by running ordinary recovery, which reopens downloads
+  and retires the warning. Deleting a legacy file also removes its emptied `attachments/{safe-guid}`
+  folder, which would otherwise still count toward the entry limit.
 - `downloadStore` (zustand) is **presentation-only** byte progress (`0..1 | null`, status) —
   it never carries the path. expo-image runs its own native memory/disk bitmap cache (never
   cleared).
