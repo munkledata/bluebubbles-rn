@@ -239,6 +239,19 @@ it('refuses to publish when the encrypted DB changes during inspection', async (
   ).rejects.toThrow('Download integrity state changed during inspection.');
 });
 
+it('drops a DB snapshot failure that lands after the account changed', async () => {
+  let current = true;
+  const lease = { generation: 7, isCurrent: () => current };
+  const readDbSnapshot = jest.fn(async (): Promise<DownloadIntegrityDbSnapshot> => {
+    current = false;
+    throw new Error('database closed by Disconnect');
+  });
+
+  await expect(
+    collectDownloadIntegrityDiagnostics(lease, dependencies(readDbSnapshot)),
+  ).resolves.toBeNull();
+});
+
 it('discards native results and cleans up when the account is invalidated mid-scan', async () => {
   const readDbSnapshot = jest.fn(async () => snapshot());
   const deps = dependencies(readDbSnapshot);

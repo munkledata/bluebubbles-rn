@@ -16,10 +16,10 @@ import {
   type SyncedBackgroundCacheInspection,
 } from '@native/boundedDownload';
 import {
-  runTrackedRealtimeWork,
   subscribeRealtimeGenerationInvalidation,
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
+import { runAccountOperation } from '@/services/realtime/accountOperation';
 import {
   attachmentCacheCoordinator,
   type AttachmentCacheCoordinatorDiagnostics,
@@ -428,14 +428,7 @@ async function readTrackedDbSnapshot(
   lease: RealtimeDeliveryLease,
   dependencies: DownloadIntegrityDependencies,
 ): Promise<DownloadIntegrityDbSnapshot | null> {
-  let snapshot: DownloadIntegrityDbSnapshot | null = null;
-  let completed = false;
-  const status = await runTrackedRealtimeWork(lease, async (activeLease) => {
-    if (!activeLease.isCurrent()) return;
-    const next = await dependencies.readDbSnapshot();
-    if (!activeLease.isCurrent()) return;
-    snapshot = next;
-    completed = true;
-  });
-  return status === 'delivered' && completed && lease.isCurrent() ? snapshot : null;
+  // A snapshot, or a read failure, that lands after the account changed belongs to the old account.
+  const result = await runAccountOperation(lease, () => dependencies.readDbSnapshot());
+  return result.ok ? result.value : null;
 }
