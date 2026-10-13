@@ -23,7 +23,7 @@ import {
 } from '@ui/findmy/FindMyMap';
 import { showExternalOpenFailure } from '@ui/toast/external-open-feedback';
 import { useFindMyPolling } from '@/features/findmy/use-find-my-polling';
-import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 /** Find My: devices/items/people with last location, battery, and explicit system-map actions. */
 export default function FindMyScreen(): React.JSX.Element {
@@ -43,7 +43,7 @@ export default function FindMyScreen(): React.JSX.Element {
   const [routeFocused, setRouteFocused] = useState(false);
   const [appState, setAppState] = useState<AppStateStatus>(AppState.currentState);
   const focusRevisionRef = useRef(0);
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const mountedRef = useRef(true);
   const routeFocusedRef = useRef(false);
   const activeMapOpenRef = useRef<{ token: symbol; url: string } | null>(null);

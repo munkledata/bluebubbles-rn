@@ -4,7 +4,6 @@ import { useVideoPlayer, VideoView, type VideoThumbnail } from 'expo-video';
 import React, { useCallback, useEffect, useState } from 'react';
 import { Dimensions, Pressable, StyleSheet, View } from 'react-native';
 import { download } from '@/services/download';
-import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
 import { useUploadStore } from '@state/uploadStore';
@@ -12,6 +11,7 @@ import { Icon } from '../primitives';
 import { readableTextOn, useTheme } from '../theme';
 import { ProgressRing } from './ProgressRing';
 import { UploadProgressOverlay } from './UploadProgressOverlay';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 interface VideoPlayerProps {
   att: AttachmentRow;
@@ -33,7 +33,7 @@ export function VideoPlayer({
   onLongPress,
 }: VideoPlayerProps): React.JSX.Element {
   const theme = useTheme();
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const status = useDownloadStore((s) => s.status[att.guid]);
   const progress = useDownloadStore((s) => s.progress[att.guid]);
   // Present only while this file is being SENT. An entry exists for the duration of one upload

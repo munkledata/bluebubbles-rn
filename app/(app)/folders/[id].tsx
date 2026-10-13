@@ -16,10 +16,7 @@ import {
   replaceCustomFolderMembership,
   setCustomFolderShowUnreadBadge,
 } from '@/services/customFolderCommands';
-import {
-  captureRealtimeDeliveryLease,
-  subscribeRealtimeGenerationInvalidation,
-} from '@/services/realtime/deliveryCoordinator';
+import { subscribeRealtimeGenerationInvalidation } from '@/services/realtime/deliveryCoordinator';
 import { resolveTitle } from '@utils';
 import {
   Avatar,
@@ -32,6 +29,7 @@ import {
 } from '@ui';
 import { InboxSeparator } from '@ui/conversations/FilteredChatListScreen';
 import { useUnsavedChangesGuard } from '@ui/hooks/useUnsavedChangesGuard';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 function parseFolderId(value: string | string[] | undefined): number | null {
   const raw = Array.isArray(value) ? value[0] : value;
@@ -64,7 +62,7 @@ export default function ConversationFolderMembershipScreen(): React.JSX.Element 
   const router = useRouter();
   const params = useLocalSearchParams<{ id?: string | string[] }>();
   const folderId = parseFolderId(params.id);
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const [accountRetired, setAccountRetired] = useState(() => !accountLease.isCurrent());
   const [folder, setFolder] = useState<CustomFolderListRow | null>(null);
   const [baseline, setBaseline] = useState<Set<string>>(() => new Set());

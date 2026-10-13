@@ -40,7 +40,6 @@ import {
   type NotificationPermissionState,
 } from '@/services/notifications/notifeeService';
 import {
-  captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
   subscribeRealtimeGenerationInvalidation,
 } from '@/services/realtime/deliveryCoordinator';
@@ -72,6 +71,7 @@ import {
   showContactsPermissionRecovery,
 } from '@ui/permissions/contactsPermission';
 import { PRESET_ORDER, PRESETS } from '@ui/theme/tokens';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 /** Where auto-downloaded images are additionally saved (the picker in the DOWNLOADS section). */
 const AUTO_DOWNLOAD_DEST_OPTIONS: { value: AutoDownloadDestination; label: string }[] = [
@@ -102,7 +102,7 @@ export default function SettingsScreen(): React.JSX.Element {
   const insets = useSafeAreaInsets();
   // Native permission/address-book reads can outlive this route. Keep their eventual DB result and
   // dialog bound to the account that mounted this screen instance.
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const mountedRef = useRef(true);
   const screenCurrent = (): boolean => mountedRef.current && accountLease.isCurrent();
   const [accountRetired, setAccountRetired] = useState(() => !accountLease.isCurrent());

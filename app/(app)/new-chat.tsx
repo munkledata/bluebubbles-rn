@@ -27,7 +27,6 @@ import {
   readShareIntakeReceipt,
 } from '@/services/share/shareIntake';
 import {
-  captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
   subscribeRealtimeGenerationInvalidation,
 } from '@/services/realtime/deliveryCoordinator';
@@ -41,6 +40,7 @@ import { Icon, readableTextOn, Screen, ScreenHeader, useTheme } from '@ui';
 import { ContactSuggestionList } from '@ui/ContactSuggestionList';
 import { presentSendIssue } from '@ui/conversations/sendNotices';
 import { useUnsavedChangesGuard } from '@ui/hooks/useUnsavedChangesGuard';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 /** A chosen recipient chip: an address plus its best display name. */
 interface Recipient {
@@ -91,7 +91,7 @@ export default function NewChatScreen(): React.JSX.Element {
   const router = useRouter();
   // Bind this mounted composer (including its delayed Start callback) to the account that opened
   // it. Capturing at tap time would let a stale A screen silently adopt B after reconnect.
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const [accountInvalidated, setAccountInvalidated] = useState(() => !accountLease.isCurrent());
   // A forwarded message pre-fills the composer. File paths stay out of this public route: the
   // only attachment parameter is an opaque, one-time key into a process-local handoff.

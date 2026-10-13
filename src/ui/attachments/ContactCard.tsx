@@ -1,10 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { download } from '@/services/download';
-import {
-  captureRealtimeDeliveryLease,
-  subscribeRealtimeGenerationInvalidation,
-} from '@/services/realtime/deliveryCoordinator';
+import { subscribeRealtimeGenerationInvalidation } from '@/services/realtime/deliveryCoordinator';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
 import { openAttachmentFile } from '@/services/openFile';
@@ -13,6 +10,7 @@ import { Icon } from '../primitives';
 import { readableTextOn, useTheme } from '../theme';
 import { showToast } from '../toast/toastStore';
 import { readBoundedTextAttachment } from './readBoundedTextAttachment';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 interface ContactCardProps {
   att: AttachmentRow;
@@ -43,7 +41,7 @@ interface ContactOpenOperation {
 export function ContactCard({ att, isFromMe, onLongPress }: ContactCardProps): React.JSX.Element {
   const theme = useTheme();
   const status = useDownloadStore((s) => s.status[att.guid]);
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const [accountRetired, setAccountRetired] = useState(() => !accountLease.isCurrent());
   const [parsed, setParsed] = useState<ParsedContactState | null>(null);
   const sourceLifetimeRef = useRef(0);

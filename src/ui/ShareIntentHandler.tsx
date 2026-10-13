@@ -1,10 +1,7 @@
 import { useRouter } from 'expo-router';
 import React, { useEffect, useRef, useState } from 'react';
 import { logger } from '@core/secure';
-import {
-  captureRealtimeDeliveryLease,
-  runTrackedRealtimeWork,
-} from '@/services/realtime/deliveryCoordinator';
+import { runTrackedRealtimeWork } from '@/services/realtime/deliveryCoordinator';
 import {
   consumeShareIntakeBatchIfComplete,
   drainShareIntake,
@@ -17,6 +14,7 @@ import { useShareIntentStore } from '@state/shareIntentStore';
 import { showToast } from './toast/toastStore';
 import { useChatNavigator } from './useChatNavigator';
 import { LoadErrorBoundary } from './LoadErrorBoundary';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 /**
  * Native capture lives above App Lock. It stages only complete app-private batches and never opens
@@ -57,7 +55,7 @@ function ShareIntentNavigatorInner(): null {
   const text = useShareIntentStore((state) => state.text);
   const files = useShareIntentStore((state) => state.files);
   const failureReason = useShareIntentStore((state) => state.failureReason);
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const [routeRetryNonce, setRouteRetryNonce] = useState(0);
   const routedBatchRef = useRef<string | null>(null);
   const routeFailuresRef = useRef<{ batchId: string | null; count: number }>({

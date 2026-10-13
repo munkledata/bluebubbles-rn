@@ -15,7 +15,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { InboxRow } from '@db/repositories';
 import { useCustomFolderChats } from '@features/conversations/useCustomFolderChats';
 import {
-  captureRealtimeDeliveryLease,
   subscribeRealtimeGenerationInvalidation,
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
@@ -26,6 +25,7 @@ import { useChatNavigator } from '../useChatNavigator';
 import { ChatActionsSheet, type ChatActionTarget, toChatActionTarget } from './ChatActionsSheet';
 import { ConversationTile } from './ConversationTile';
 import { InboxSeparator } from './FilteredChatListScreen';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 interface FolderConversationListScreenProps {
   folderId: number | null;
@@ -51,7 +51,7 @@ function normalizeFolderSearchInput(value: string): string {
 export function FolderConversationListScreen({
   folderId,
 }: FolderConversationListScreenProps): React.JSX.Element {
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const [accountRetired, setAccountRetired] = useState(() => !accountLease.isCurrent());
 
   useLayoutEffect(

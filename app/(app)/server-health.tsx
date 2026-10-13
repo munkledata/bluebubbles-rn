@@ -17,7 +17,6 @@ import { deriveRcsHealth, RCS_ALERT_TYPES, type RcsSeverity } from '@core/realti
 import { isScopedDeviceCredential } from '@core/secure';
 import { accountHttp, http } from '@/services';
 import {
-  captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
   subscribeRealtimeGenerationInvalidation,
   type RealtimeDeliveryLease,
@@ -30,6 +29,7 @@ import {
 import { useRcsHealthStore } from '@state/rcsHealthStore';
 import { showToast } from '@ui/toast';
 import { InfoRow, NavRow, NoteRow, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 const yesNo = (v: boolean | null | undefined): string => (v == null ? '—' : v ? 'Yes' : 'No');
 
@@ -76,7 +76,7 @@ export default function ServerHealthScreen(): React.JSX.Element {
   const serverInfo = useSessionStore((s) => s.serverInfo);
   const password = useSessionStore((s) => s.password);
   const transportRevision = useSessionStore((s) => s.transportRevision);
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const [accountRetired, setAccountRetired] = useState(() => !accountLease.isCurrent());
   const healthQueryPrefix = [
     'server',

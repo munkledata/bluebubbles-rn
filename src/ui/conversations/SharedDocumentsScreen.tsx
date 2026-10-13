@@ -13,13 +13,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { ChatDocumentRow } from '@db/repositories';
 import { useSharedDocuments } from '@features/conversations/useSharedDocuments';
 import {
-  captureRealtimeDeliveryLease,
   subscribeRealtimeGenerationInvalidation,
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
 import { SharedDocumentRow } from '../attachments/FileChip';
 import { Screen, ScreenHeader } from '../primitives';
 import { useTheme } from '../theme';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 interface SharedDocumentsScreenProps {
   chatGuid: string | null;
@@ -37,7 +37,7 @@ const ACCOUNT_CHANGED_COPY = 'Conversation account changed. Go back and reopen S
 export function SharedDocumentsScreen({ chatGuid }: SharedDocumentsScreenProps): React.JSX.Element {
   const router = useRouter();
   const theme = useTheme();
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const ownerMountedRef = useRef(true);
   const accountRetiredRef = useRef(!accountLease.isCurrent());
   const [accountRetired, setAccountRetired] = useState(accountRetiredRef.current);

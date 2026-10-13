@@ -3330,7 +3330,7 @@ test('certifies exactly the reviewed SHARE-02 intake delegation edges', () => {
         'coordinated-delegation',
       ],
       [
-        'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:c8deb5b511>.<callback:293e0b6208>:mutator-call:a4cbb531c586',
+        'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:81fa7f80e0>.<callback:a5be709a07>:mutator-call:0475af637400',
         'src/services/share/shareIntake.ts#readShareIntakeReceipt',
         'coordinated-delegation',
       ],
@@ -7260,7 +7260,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:1601131854>.<callback:f613d3ead3>:mutator-call:642969df5a8c',
       'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:414f8cbf59>.<callback:5a7bad110f>:mutator-call:599fa6a378a7',
       'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:84297bce06>.<callback:16329d1004>:mutator-call:ecdfe71bf90b',
-      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:c8deb5b511>.<callback:293e0b6208>:mutator-call:a4cbb531c586',
+      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:81fa7f80e0>.<callback:a5be709a07>:mutator-call:0475af637400',
       'app/(app)/new-chat.tsx#NewChatScreen.<callback:0c40702b3c>.<callback:ae3680910a>:mutator-call:f73d80d7970d',
       'app/(app)/new-chat.tsx#NewChatScreen.<callback:6cde4fbfd5>:mutator-call:b4a563a44345',
       'app/(app)/new-chat.tsx#NewChatScreen.onStart.<callback:aa379435cb>:mutator-call:f07a3220abc4',

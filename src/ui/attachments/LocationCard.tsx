@@ -1,10 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import { download } from '@/services/download';
-import {
-  captureRealtimeDeliveryLease,
-  subscribeRealtimeGenerationInvalidation,
-} from '@/services/realtime/deliveryCoordinator';
+import { subscribeRealtimeGenerationInvalidation } from '@/services/realtime/deliveryCoordinator';
 import type { AttachmentRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
 import { parseVLocation, resolveDisplayPoint, safeOpenUrl, type VLocationData } from '@utils';
@@ -12,6 +9,7 @@ import { Icon } from '../primitives';
 import { readableTextOn, useTheme } from '../theme';
 import { showExternalOpenFailure } from '../toast/external-open-feedback';
 import { readBoundedTextAttachment } from './readBoundedTextAttachment';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 interface LocationCardProps {
   att: AttachmentRow;
@@ -43,7 +41,7 @@ export function LocationCard({ att, isFromMe, onLongPress }: LocationCardProps):
   const theme = useTheme();
   const status = useDownloadStore((s) => s.status[att.guid]);
   const [parsed, setParsed] = useState<ParsedLocationState | null>(null);
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const [accountRetired, setAccountRetired] = useState(() => !accountLease.isCurrent());
   const sourceLifetimeRef = useRef(0);
   // The ref revokes old native callbacks synchronously. Committed state gives a recycled row a

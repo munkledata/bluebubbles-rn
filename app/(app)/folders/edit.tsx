@@ -16,12 +16,10 @@ import {
   loadCustomFolders,
   renameCustomFolder,
 } from '@/services/customFolderCommands';
-import {
-  captureRealtimeDeliveryLease,
-  subscribeRealtimeGenerationInvalidation,
-} from '@/services/realtime/deliveryCoordinator';
+import { subscribeRealtimeGenerationInvalidation } from '@/services/realtime/deliveryCoordinator';
 import { Screen, ScreenHeader, TextField, useTheme } from '@ui';
 import { useUnsavedChangesGuard } from '@ui/hooks/useUnsavedChangesGuard';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 function parseFolderId(value: string | string[] | undefined): {
   id: number | null;
@@ -56,7 +54,7 @@ export default function ConversationFolderEditScreen(): React.JSX.Element {
   const parsed = parseFolderId(params.folderId);
   const folderId = parsed.id;
   const creating = params.folderId == null;
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const [accountRetired, setAccountRetired] = useState(() => !accountLease.isCurrent());
   const [loading, setLoading] = useState(!creating && !parsed.invalid);
   const [loadFailed, setLoadFailed] = useState(false);

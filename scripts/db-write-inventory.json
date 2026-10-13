@@ -121,7 +121,7 @@
     {
       "id": "app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:a2637fe808>.<callback:de6db739c6>:mutator-call:ecf46f2d08d9",
       "path": "app/(app)/chat/[guid].tsx",
-      "line": 658,
+      "line": 659,
       "symbol": "ChatScreenInner.<callback:a2637fe808>.<callback:de6db739c6>",
       "operation": "mutator-call",
       "target": "src/services/messagePreview.ts#readMessagePreview",
@@ -134,7 +134,7 @@
     {
       "id": "app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:876664bdf3>.<callback:177d5dd9bd>:mutator-call:3e3d348f4c24",
       "path": "app/(app)/chat/[guid].tsx",
-      "line": 689,
+      "line": 690,
       "symbol": "ChatScreenInner.<callback:876664bdf3>.<callback:177d5dd9bd>",
       "operation": "mutator-call",
       "target": "src/services/messagePreview.ts#readMessagePreview",
@@ -145,10 +145,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/chatScreen.test.tsx; test/db/messageRetractionRepo.test.ts; test/db/messagesBranches.test.ts"
     },
     {
-      "id": "app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:c8deb5b511>.<callback:293e0b6208>:mutator-call:a4cbb531c586",
+      "id": "app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:81fa7f80e0>.<callback:a5be709a07>:mutator-call:0475af637400",
       "path": "app/(app)/chat/[guid].tsx",
       "line": 1137,
-      "symbol": "ChatScreenInner.<callback:c8deb5b511>.<callback:293e0b6208>",
+      "symbol": "ChatScreenInner.<callback:81fa7f80e0>.<callback:a5be709a07>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#readShareIntakeReceipt",
       "detectedContext": "coordinated-delegation",
@@ -251,7 +251,7 @@
     {
       "id": "app/(app)/media/[guid].tsx#MediaViewer.requestDownload:mutator-call:3d37a02ebe19",
       "path": "app/(app)/media/[guid].tsx",
-      "line": 744,
+      "line": 715,
       "symbol": "MediaViewer.requestDownload",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#redownload",
@@ -264,7 +264,7 @@
     {
       "id": "app/(app)/media/[guid].tsx#MediaViewer.requestDownload:mutator-call:dded74882e63",
       "path": "app/(app)/media/[guid].tsx",
-      "line": 745,
+      "line": 716,
       "symbol": "MediaViewer.requestDownload",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -277,7 +277,7 @@
     {
       "id": "app/(app)/media/[guid].tsx#MediaViewer.onShare:mutator-call:5677683b31c4",
       "path": "app/(app)/media/[guid].tsx",
-      "line": 994,
+      "line": 965,
       "symbol": "MediaViewer.onShare",
       "operation": "mutator-call",
       "target": "app/(app)/media/[guid].tsx#MediaViewer.requestDownload",
@@ -290,7 +290,7 @@
     {
       "id": "app/(app)/media/[guid].tsx#MediaViewer.onSave:mutator-call:c81dabe3f471",
       "path": "app/(app)/media/[guid].tsx",
-      "line": 1004,
+      "line": 975,
       "symbol": "MediaViewer.onSave",
       "operation": "mutator-call",
       "target": "app/(app)/media/[guid].tsx#MediaViewer.requestDownload",
@@ -303,7 +303,7 @@
     {
       "id": "app/(app)/media/[guid].tsx#MediaViewer.<callback:8d26753ace>:mutator-call:a0bbdb31db62",
       "path": "app/(app)/media/[guid].tsx",
-      "line": 1229,
+      "line": 1200,
       "symbol": "MediaViewer.<callback:8d26753ace>",
       "operation": "mutator-call",
       "target": "app/(app)/media/[guid].tsx#MediaViewer.requestDownload",
@@ -316,7 +316,7 @@
     {
       "id": "app/(app)/media/[guid].tsx#MediaViewer:mutator-reference:f2d99eef8eea",
       "path": "app/(app)/media/[guid].tsx",
-      "line": 1265,
+      "line": 1236,
       "symbol": "MediaViewer",
       "operation": "mutator-reference",
       "target": "app/(app)/media/[guid].tsx#MediaViewer.onShare",
@@ -329,7 +329,7 @@
     {
       "id": "app/(app)/media/[guid].tsx#MediaViewer:mutator-reference:d9da1c4d8c72",
       "path": "app/(app)/media/[guid].tsx",
-      "line": 1277,
+      "line": 1248,
       "symbol": "MediaViewer",
       "operation": "mutator-reference",
       "target": "app/(app)/media/[guid].tsx#MediaViewer.onSave",
@@ -16956,7 +16956,7 @@
     {
       "id": "src/services/customFolderCommands.ts#loadCustomFolders.<callback:cbc64ab782>:mutator-call:43d478104de5",
       "path": "src/services/customFolderCommands.ts",
-      "line": 46,
+      "line": 47,
       "symbol": "loadCustomFolders.<callback:cbc64ab782>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -16969,7 +16969,7 @@
     {
       "id": "src/services/customFolderCommands.ts#loadCustomFolders.<callback:cbc64ab782>:mutator-call:f834b6f9ee36",
       "path": "src/services/customFolderCommands.ts",
-      "line": 48,
+      "line": 49,
       "symbol": "loadCustomFolders.<callback:cbc64ab782>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -16982,7 +16982,7 @@
     {
       "id": "src/services/customFolderCommands.ts#loadCustomFolderSummaries.<callback:5342c94b39>:mutator-call:5b1d4a4252b6",
       "path": "src/services/customFolderCommands.ts",
-      "line": 61,
+      "line": 62,
       "symbol": "loadCustomFolderSummaries.<callback:5342c94b39>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -16995,7 +16995,7 @@
     {
       "id": "src/services/customFolderCommands.ts#loadCustomFolderSummaries.<callback:5342c94b39>:mutator-call:fbe79b17e3d7",
       "path": "src/services/customFolderCommands.ts",
-      "line": 63,
+      "line": 64,
       "symbol": "loadCustomFolderSummaries.<callback:5342c94b39>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -17008,7 +17008,7 @@
     {
       "id": "src/services/customFolderCommands.ts#loadCustomFolderMembership.<callback:6d7cc6ae5a>:mutator-call:e2e595938068",
       "path": "src/services/customFolderCommands.ts",
-      "line": 77,
+      "line": 78,
       "symbol": "loadCustomFolderMembership.<callback:6d7cc6ae5a>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -17021,7 +17021,7 @@
     {
       "id": "src/services/customFolderCommands.ts#loadCustomFolderMembership.<callback:6d7cc6ae5a>:mutator-call:7b9d9d3c9aa8",
       "path": "src/services/customFolderCommands.ts",
-      "line": 79,
+      "line": 80,
       "symbol": "loadCustomFolderMembership.<callback:6d7cc6ae5a>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -17034,7 +17034,7 @@
     {
       "id": "src/services/customFolderCommands.ts#loadCustomFolderInboxPage.<callback:73a100cecc>:mutator-call:74a41bcb5045",
       "path": "src/services/customFolderCommands.ts",
-      "line": 98,
+      "line": 99,
       "symbol": "loadCustomFolderInboxPage.<callback:73a100cecc>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -17047,7 +17047,7 @@
     {
       "id": "src/services/customFolderCommands.ts#loadCustomFolderInboxPage.<callback:73a100cecc>:mutator-call:f81374c8897d",
       "path": "src/services/customFolderCommands.ts",
-      "line": 100,
+      "line": 101,
       "symbol": "loadCustomFolderInboxPage.<callback:73a100cecc>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -17060,7 +17060,7 @@
     {
       "id": "src/services/customFolderCommands.ts#createCustomFolder.<callback:6aadef4e6a>:mutator-call:83dcf2d67dc2",
       "path": "src/services/customFolderCommands.ts",
-      "line": 113,
+      "line": 114,
       "symbol": "createCustomFolder.<callback:6aadef4e6a>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -17073,7 +17073,7 @@
     {
       "id": "src/services/customFolderCommands.ts#createCustomFolder.<callback:6aadef4e6a>:mutator-call:84918093aa68",
       "path": "src/services/customFolderCommands.ts",
-      "line": 115,
+      "line": 116,
       "symbol": "createCustomFolder.<callback:6aadef4e6a>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -17086,7 +17086,7 @@
     {
       "id": "src/services/customFolderCommands.ts#createCustomFolder.<callback:6aadef4e6a>:mutator-call:f81d5f58275d",
       "path": "src/services/customFolderCommands.ts",
-      "line": 115,
+      "line": 116,
       "symbol": "createCustomFolder.<callback:6aadef4e6a>",
       "operation": "mutator-call",
       "target": "src/services/customFolderCommands.ts#createCustomFolder.<callback:6aadef4e6a>.<callback:6212f70e9f>",
@@ -17099,7 +17099,7 @@
     {
       "id": "src/services/customFolderCommands.ts#createCustomFolder.<callback:6aadef4e6a>.<callback:6212f70e9f>:mutator-call:555a61fdfc46",
       "path": "src/services/customFolderCommands.ts",
-      "line": 117,
+      "line": 118,
       "symbol": "createCustomFolder.<callback:6aadef4e6a>.<callback:6212f70e9f>",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#createCustomFolderWithinTransaction",
@@ -17112,7 +17112,7 @@
     {
       "id": "src/services/customFolderCommands.ts#renameCustomFolder.<callback:7ed98dfe35>:mutator-call:8a42d98a0ac4",
       "path": "src/services/customFolderCommands.ts",
-      "line": 129,
+      "line": 130,
       "symbol": "renameCustomFolder.<callback:7ed98dfe35>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -17125,7 +17125,7 @@
     {
       "id": "src/services/customFolderCommands.ts#renameCustomFolder.<callback:7ed98dfe35>:mutator-call:16da38f888e7",
       "path": "src/services/customFolderCommands.ts",
-      "line": 131,
+      "line": 132,
       "symbol": "renameCustomFolder.<callback:7ed98dfe35>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -17138,7 +17138,7 @@
     {
       "id": "src/services/customFolderCommands.ts#renameCustomFolder.<callback:7ed98dfe35>:mutator-call:46393aa65104",
       "path": "src/services/customFolderCommands.ts",
-      "line": 131,
+      "line": 132,
       "symbol": "renameCustomFolder.<callback:7ed98dfe35>",
       "operation": "mutator-call",
       "target": "src/services/customFolderCommands.ts#renameCustomFolder.<callback:7ed98dfe35>.<callback:7ebe4a9c12>",
@@ -17151,7 +17151,7 @@
     {
       "id": "src/services/customFolderCommands.ts#renameCustomFolder.<callback:7ed98dfe35>.<callback:7ebe4a9c12>:mutator-call:1ae112339ae8",
       "path": "src/services/customFolderCommands.ts",
-      "line": 133,
+      "line": 134,
       "symbol": "renameCustomFolder.<callback:7ed98dfe35>.<callback:7ebe4a9c12>",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#renameCustomFolderWithinTransaction",
@@ -17164,7 +17164,7 @@
     {
       "id": "src/services/customFolderCommands.ts#setCustomFolderShowUnreadBadge.<callback:9a0e5f64f5>:mutator-call:f804673e723d",
       "path": "src/services/customFolderCommands.ts",
-      "line": 146,
+      "line": 147,
       "symbol": "setCustomFolderShowUnreadBadge.<callback:9a0e5f64f5>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -17177,7 +17177,7 @@
     {
       "id": "src/services/customFolderCommands.ts#setCustomFolderShowUnreadBadge.<callback:9a0e5f64f5>:mutator-call:4e39fd29be17",
       "path": "src/services/customFolderCommands.ts",
-      "line": 148,
+      "line": 149,
       "symbol": "setCustomFolderShowUnreadBadge.<callback:9a0e5f64f5>",
       "operation": "mutator-call",
       "target": "src/services/customFolderCommands.ts#setCustomFolderShowUnreadBadge.<callback:9a0e5f64f5>.<callback:7e483b89d0>",
@@ -17190,7 +17190,7 @@
     {
       "id": "src/services/customFolderCommands.ts#setCustomFolderShowUnreadBadge.<callback:9a0e5f64f5>:mutator-call:b7068feede02",
       "path": "src/services/customFolderCommands.ts",
-      "line": 148,
+      "line": 149,
       "symbol": "setCustomFolderShowUnreadBadge.<callback:9a0e5f64f5>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -17203,7 +17203,7 @@
     {
       "id": "src/services/customFolderCommands.ts#setCustomFolderShowUnreadBadge.<callback:9a0e5f64f5>.<callback:7e483b89d0>:mutator-call:9e2310e07f82",
       "path": "src/services/customFolderCommands.ts",
-      "line": 151,
+      "line": 152,
       "symbol": "setCustomFolderShowUnreadBadge.<callback:9a0e5f64f5>.<callback:7e483b89d0>",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#setCustomFolderShowUnreadBadgeWithinTransaction",
@@ -17216,7 +17216,7 @@
     {
       "id": "src/services/customFolderCommands.ts#deleteCustomFolder.<callback:d83b51c900>:mutator-call:41947b97aced",
       "path": "src/services/customFolderCommands.ts",
-      "line": 162,
+      "line": 163,
       "symbol": "deleteCustomFolder.<callback:d83b51c900>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -17229,7 +17229,7 @@
     {
       "id": "src/services/customFolderCommands.ts#deleteCustomFolder.<callback:d83b51c900>:mutator-call:a2504f7c8b79",
       "path": "src/services/customFolderCommands.ts",
-      "line": 164,
+      "line": 165,
       "symbol": "deleteCustomFolder.<callback:d83b51c900>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -17242,7 +17242,7 @@
     {
       "id": "src/services/customFolderCommands.ts#deleteCustomFolder.<callback:d83b51c900>:mutator-call:eef1ab8779a5",
       "path": "src/services/customFolderCommands.ts",
-      "line": 164,
+      "line": 165,
       "symbol": "deleteCustomFolder.<callback:d83b51c900>",
       "operation": "mutator-call",
       "target": "src/services/customFolderCommands.ts#deleteCustomFolder.<callback:d83b51c900>.<callback:50069adf02>",
@@ -17255,7 +17255,7 @@
     {
       "id": "src/services/customFolderCommands.ts#deleteCustomFolder.<callback:d83b51c900>.<callback:50069adf02>:mutator-call:5ce231b468b8",
       "path": "src/services/customFolderCommands.ts",
-      "line": 166,
+      "line": 167,
       "symbol": "deleteCustomFolder.<callback:d83b51c900>.<callback:50069adf02>",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#deleteCustomFolderWithinTransaction",
@@ -17268,7 +17268,7 @@
     {
       "id": "src/services/customFolderCommands.ts#reorderCustomFolders.<callback:36a6ff0d63>:mutator-call:eb0927885c89",
       "path": "src/services/customFolderCommands.ts",
-      "line": 178,
+      "line": 179,
       "symbol": "reorderCustomFolders.<callback:36a6ff0d63>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -17281,7 +17281,7 @@
     {
       "id": "src/services/customFolderCommands.ts#reorderCustomFolders.<callback:36a6ff0d63>:mutator-call:1c8a4d9041f0",
       "path": "src/services/customFolderCommands.ts",
-      "line": 180,
+      "line": 181,
       "symbol": "reorderCustomFolders.<callback:36a6ff0d63>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -17294,7 +17294,7 @@
     {
       "id": "src/services/customFolderCommands.ts#reorderCustomFolders.<callback:36a6ff0d63>:mutator-call:f9748e20eab6",
       "path": "src/services/customFolderCommands.ts",
-      "line": 180,
+      "line": 181,
       "symbol": "reorderCustomFolders.<callback:36a6ff0d63>",
       "operation": "mutator-call",
       "target": "src/services/customFolderCommands.ts#reorderCustomFolders.<callback:36a6ff0d63>.<callback:fd5da13add>",
@@ -17307,7 +17307,7 @@
     {
       "id": "src/services/customFolderCommands.ts#reorderCustomFolders.<callback:36a6ff0d63>.<callback:fd5da13add>:mutator-call:df71847a9f39",
       "path": "src/services/customFolderCommands.ts",
-      "line": 182,
+      "line": 183,
       "symbol": "reorderCustomFolders.<callback:36a6ff0d63>.<callback:fd5da13add>",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#reorderCustomFoldersWithinTransaction",
@@ -17320,7 +17320,7 @@
     {
       "id": "src/services/customFolderCommands.ts#replaceCustomFolderMembership.<callback:2c40f42a30>:mutator-call:a2e72336605a",
       "path": "src/services/customFolderCommands.ts",
-      "line": 195,
+      "line": 196,
       "symbol": "replaceCustomFolderMembership.<callback:2c40f42a30>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -17333,7 +17333,7 @@
     {
       "id": "src/services/customFolderCommands.ts#replaceCustomFolderMembership.<callback:2c40f42a30>:mutator-call:2ee896b5a1a4",
       "path": "src/services/customFolderCommands.ts",
-      "line": 199,
+      "line": 200,
       "symbol": "replaceCustomFolderMembership.<callback:2c40f42a30>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -17346,7 +17346,7 @@
     {
       "id": "src/services/customFolderCommands.ts#replaceCustomFolderMembership.<callback:2c40f42a30>:mutator-call:58acbc02672a",
       "path": "src/services/customFolderCommands.ts",
-      "line": 199,
+      "line": 200,
       "symbol": "replaceCustomFolderMembership.<callback:2c40f42a30>",
       "operation": "mutator-call",
       "target": "src/services/customFolderCommands.ts#replaceCustomFolderMembership.<callback:2c40f42a30>.<callback:3c0c382302>",
@@ -17359,7 +17359,7 @@
     {
       "id": "src/services/customFolderCommands.ts#replaceCustomFolderMembership.<callback:2c40f42a30>.<callback:3c0c382302>:mutator-call:6fe3bc1dcf84",
       "path": "src/services/customFolderCommands.ts",
-      "line": 201,
+      "line": 202,
       "symbol": "replaceCustomFolderMembership.<callback:2c40f42a30>.<callback:3c0c382302>",
       "operation": "mutator-call",
       "target": "src/db/repositories/customFolders.ts#replaceCustomFolderMembershipWithinTransaction",
@@ -27512,7 +27512,7 @@
     {
       "id": "src/ui/attachments/ContactCard.tsx#ContactCard.onPress:mutator-call:1f8dbbc4c7e6",
       "path": "src/ui/attachments/ContactCard.tsx",
-      "line": 158,
+      "line": 156,
       "symbol": "ContactCard.onPress",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -27525,7 +27525,7 @@
     {
       "id": "src/ui/attachments/ContactCard.tsx#ContactCard.onPress:mutator-call:825631505f95",
       "path": "src/ui/attachments/ContactCard.tsx",
-      "line": 178,
+      "line": 176,
       "symbol": "ContactCard.onPress",
       "operation": "mutator-call",
       "target": "src/ui/attachments/ContactCard.tsx#ContactCard.onPress.<callback:c626cc26f6>",
@@ -27538,7 +27538,7 @@
     {
       "id": "src/ui/attachments/ContactCard.tsx#ContactCard.onPress.<callback:c626cc26f6>:mutator-call:d7520b586d39",
       "path": "src/ui/attachments/ContactCard.tsx",
-      "line": 186,
+      "line": 184,
       "symbol": "ContactCard.onPress.<callback:c626cc26f6>",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -27551,7 +27551,7 @@
     {
       "id": "src/ui/attachments/ContactCard.tsx#ContactCard:mutator-reference:6f03b1e5f758",
       "path": "src/ui/attachments/ContactCard.tsx",
-      "line": 226,
+      "line": 224,
       "symbol": "ContactCard",
       "operation": "mutator-reference",
       "target": "src/ui/attachments/ContactCard.tsx#ContactCard.onPress",
@@ -27707,7 +27707,7 @@
     {
       "id": "src/ui/attachments/LocationCard.tsx#LocationCard.onPress:mutator-call:d714255e3467",
       "path": "src/ui/attachments/LocationCard.tsx",
-      "line": 166,
+      "line": 164,
       "symbol": "LocationCard.onPress",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -27720,7 +27720,7 @@
     {
       "id": "src/ui/attachments/LocationCard.tsx#LocationCard:mutator-reference:0f964b79c990",
       "path": "src/ui/attachments/LocationCard.tsx",
-      "line": 229,
+      "line": 227,
       "symbol": "LocationCard",
       "operation": "mutator-reference",
       "target": "src/ui/attachments/LocationCard.tsx#LocationCard.onPress",
@@ -27876,7 +27876,7 @@
     {
       "id": "src/ui/ShareIntentHandler.tsx#ShareIntentNavigatorInner.<callback:6c24eb213d>.<callback:6762af135c>.<callback:b17f885e16>:mutator-call:e7bd003c6756",
       "path": "src/ui/ShareIntentHandler.tsx",
-      "line": 108,
+      "line": 106,
       "symbol": "ShareIntentNavigatorInner.<callback:6c24eb213d>.<callback:6762af135c>.<callback:b17f885e16>",
       "operation": "mutator-call",
       "target": "src/services/share/shareIntake.ts#readShareIntakeReceipt",

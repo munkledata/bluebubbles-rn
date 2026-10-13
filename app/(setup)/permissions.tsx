@@ -9,10 +9,6 @@ import {
   type ContactsPermissionState,
 } from '@/services/contacts/contactsService';
 import {
-  captureRealtimeDeliveryLease,
-  type RealtimeDeliveryLease,
-} from '@/services/realtime/deliveryCoordinator';
-import {
   getNotificationPermissionState,
   openNotificationPermissionSettings,
   requestNotificationPermission,
@@ -26,6 +22,7 @@ import {
 import { showDialog } from '@ui/dialog/dialogStore';
 import { Button, Screen, useTheme } from '@ui';
 import { createI18n, type I18n } from '@utils/i18n';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 type NotificationUiState = NotificationPermissionState | 'loading' | 'unavailable';
 type ContactsUiState =
@@ -62,7 +59,7 @@ export default function PermissionsScreen(): React.JSX.Element {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const i18n = useMemo(() => createI18n(), []);
-  const [accountLease] = useState<RealtimeDeliveryLease>(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const mountedRef = useRef(true);
   const [notification, setNotification] = useState<NotificationUiState>('loading');
   const [contacts, setContacts] = useState<ContactsUiState>({

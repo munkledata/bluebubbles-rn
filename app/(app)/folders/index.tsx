@@ -5,17 +5,15 @@ import { showDialog } from '@ui/dialog/dialogStore';
 import type { CustomFolderSummaryRow } from '@db/repositories';
 import { useCustomFolderSummaries } from '@features/conversations/useCustomFolderSummaries';
 import { reorderCustomFolders } from '@/services/customFolderCommands';
-import {
-  captureRealtimeDeliveryLease,
-  subscribeRealtimeGenerationInvalidation,
-} from '@/services/realtime/deliveryCoordinator';
+import { subscribeRealtimeGenerationInvalidation } from '@/services/realtime/deliveryCoordinator';
 import { readableTextOn, Screen, ScreenHeader, useTheme } from '@ui';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 /** Manage the small, explicitly bounded ordered set of device-local conversation folders. */
 export default function ConversationFoldersScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const [accountRetired, setAccountRetired] = useState(() => !accountLease.isCurrent());
   const [busyFolderId, setBusyFolderId] = useState<number | null>(null);
   const [optimisticReorder, setOptimisticReorder] = useState<{

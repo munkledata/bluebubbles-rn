@@ -14,10 +14,6 @@ import {
   type CustomFolderRow,
   type CustomFolderSummaryRow,
 } from '@db/repositories';
-export {
-  CustomFolderMembershipLimitError,
-  MAX_CUSTOM_FOLDER_MEMBERSHIPS_TOTAL,
-} from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import { ensureDatabase } from './databaseControl';
 import {
@@ -25,6 +21,11 @@ import {
   type RealtimeDeliveryLease,
 } from './realtime/deliveryCoordinator';
 import { assertAccountOperationCurrent, runAccountOperation } from './realtime/accountOperation';
+
+export {
+  CustomFolderMembershipLimitError,
+  MAX_CUSTOM_FOLDER_MEMBERSHIPS_TOTAL,
+} from '@db/repositories';
 
 export type CustomFolderCommandResult<T> =
   { readonly status: 'committed'; readonly value: T } | { readonly status: 'stale' };

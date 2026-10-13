@@ -1,13 +1,11 @@
-import React, { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
+import React, { createContext, useContext, useMemo, type ReactNode } from 'react';
 import { getDatabase } from '@db/database';
 import { getChatTheme } from '@db/repositories';
 import { useReactiveQuery } from '@db/useReactiveQuery';
-import {
-  captureRealtimeDeliveryLease,
-  type RealtimeDeliveryLease,
-} from '@/services/realtime/deliveryCoordinator';
+import { type RealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import { ThemeContext, useTheme } from './ThemeProvider';
 import { darkThemeOrFallback, safeParseTokens, type ThemeTokens } from './tokens';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 interface ChatThemeProviderProps {
   guid: string;
@@ -84,7 +82,7 @@ export function useChatBackgroundUri(_guid: string): string | null {
  */
 export function ChatThemeProvider({ guid, children }: ChatThemeProviderProps): React.JSX.Element {
   const globalTheme = useTheme();
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const { themeTokens, backgroundUri, syncedBackgroundUri, backgroundIsLight } = useChatTheme(
     guid,
     accountLease,

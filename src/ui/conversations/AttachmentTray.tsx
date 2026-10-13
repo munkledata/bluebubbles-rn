@@ -16,14 +16,11 @@ import {
   View,
 } from 'react-native';
 import { logger } from '@core/secure';
-import {
-  captureRealtimeDeliveryLease,
-  subscribeRealtimeGenerationInvalidation,
-  type RealtimeDeliveryLease,
-} from '@/services/realtime/deliveryCoordinator';
+import { subscribeRealtimeGenerationInvalidation } from '@/services/realtime/deliveryCoordinator';
 import { Icon } from '../primitives';
 import { useTheme } from '../theme';
 import { showToast } from '../toast/toastStore';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 /** A photo/video/file the composer has staged but not yet sent (shape sendImages accepts). */
 export interface PendingAttachment {
@@ -99,7 +96,7 @@ export function AttachmentTray({
   imessageImageOnly = false,
 }: AttachmentTrayProps): React.JSX.Element {
   const theme = useTheme();
-  const [accountLease] = useState<RealtimeDeliveryLease>(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const mountedRef = useRef(true);
   const awaitingSettingsRef = useRef(false);
   const mediaRequestInFlightRef = useRef(false);

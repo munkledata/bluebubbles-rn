@@ -7,12 +7,12 @@ import { showDialog } from '@ui/dialog/dialogStore';
 import { getDatabase } from '@db/database';
 import { getScheduledById, type ScheduledOccurrence } from '@db/repositories';
 import { editScheduled, ScheduledEditChangedError } from '@/services/send';
-import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import { Screen, ScreenHeader, useTheme } from '@ui';
 import { RecurrencePicker } from '@ui/conversations/RecurrencePicker';
 import { ScheduleSheet, SCHEDULE_DELIVERY_TIMING_NOTE } from '@ui/conversations/RecurrenceSheet';
 import { formatChatDate, formatTime } from '@utils';
 import { useUnsavedChangesGuard } from '@ui/hooks/useUnsavedChangesGuard';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 interface ScheduledDraft {
   text: string;
@@ -26,7 +26,7 @@ export default function ScheduledEditScreen(): React.JSX.Element {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const schedId = Number(id);
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const [text, setText] = useState('');
   const [when, setWhen] = useState<number | null>(null);
   const [recurrence, setRecurrence] = useState<Recurrence | null>(null);

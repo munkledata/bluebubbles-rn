@@ -14,11 +14,11 @@ import {
   syncScheduledFromServer,
   ScheduledCancellationChangedError,
 } from '@/services/send';
-import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import { ActionListRow, Screen, ScreenHeader, useTheme } from '@ui';
 import { SCHEDULE_DELIVERY_TIMING_NOTE } from '@ui/conversations/RecurrenceSheet';
 import { formatChatDate, formatSeparatorDate, isRcsChatFromAnotherKnownPairing } from '@utils';
 import { useSessionStore } from '@state/sessionStore';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 /** One flat-list item: a scheduled row or the COMPLETED section header. */
 type ListItem = { kind: 'header'; key: string; label: string } | { kind: 'row'; row: ScheduledRow };
@@ -31,7 +31,7 @@ type ListItem = { kind: 'header'; key: string; label: string } | { kind: 'row'; 
 export default function ScheduledScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const serverInfo = useSessionStore((s) => s.serverInfo);
   const [serverListVerified, setServerListVerified] = useState<boolean | null>(null);
   // Reconcile server-scheduled rows on open so the list reflects what the server is tracking.

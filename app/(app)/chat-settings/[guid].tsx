@@ -46,8 +46,6 @@ import {
 import { BACKUP_LIMITS } from '@/services/backup/backupSchema';
 import { openChatNotificationSettings } from '@/services/notifications/notifeeService';
 import {
-  captureRealtimeDeliveryLease,
-  runTrackedRealtimeWork,
   subscribeRealtimeGenerationInvalidation,
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
@@ -75,6 +73,8 @@ import {
   safeParseTokens,
   type ThemeTokens,
 } from '@ui/theme/tokens';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
+import { runAccountOperation } from '@/services/realtime/accountOperation';
 /** Preset accent colors for the per-chat bubble color (plus "Default"). */
 const SWATCHES = ['#1982FC', '#34C759', '#AF52DE', '#FF2D55', '#FF9500', '#5E81AC'] as const;
 const SWATCH_NAMES: Record<(typeof SWATCHES)[number], string> = {
@@ -147,7 +147,7 @@ export default function ChatSettingsRoute(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
   const { guid } = useLocalSearchParams<{ guid: string }>();
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const reduceMotion = useReduceMotionPreferenceRef();
   const ownerMountedRef = useRef(true);
   const accountRetiredRef = useRef(!accountLease.isCurrent());
@@ -277,22 +277,9 @@ function ChatSettingsScreen({
     task: (activeLease: RealtimeDeliveryLease) => Promise<T | null>,
   ): Promise<T | null> => {
     if (!grantIsCurrent(grant)) return null;
-    let completed = false;
-    let value: T | null = null;
-    try {
-      const status = await runTrackedRealtimeWork(accountLease, async (lease) => {
-        if (!lease.isCurrent()) return;
-        const nextValue = await task(lease);
-        if (!lease.isCurrent()) return;
-        value = nextValue;
-        completed = true;
-      });
-      return status === 'delivered' && completed && accountLease.isCurrent() ? value : null;
-    } catch (error) {
-      // A revoked screen should not surface its write error in the replacement account.
-      if (!accountLease.isCurrent()) return null;
-      throw error;
-    }
+    // A revoked screen never surfaces its write error in the replacement account.
+    const result = await runAccountOperation(accountLease, task);
+    return result.ok ? result.value : null;
   };
   const queueScreenCommand = (grant: ChatSettingsGrant, command: () => Promise<void>): void => {
     if (!grantIsCurrent(grant)) return;

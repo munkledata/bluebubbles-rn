@@ -7,13 +7,11 @@ import { getDatabase } from '@db/database';
 import { listDeletedChats, type DeletedChatRow } from '@db/repositories';
 import { useReactiveQuery } from '@db/useReactiveQuery';
 import { restoreDeletedChat } from '@/services';
-import {
-  captureRealtimeDeliveryLease,
-  subscribeRealtimeGenerationInvalidation,
-} from '@/services/realtime/deliveryCoordinator';
+import { subscribeRealtimeGenerationInvalidation } from '@/services/realtime/deliveryCoordinator';
 import { resolveTitle } from '@utils';
 import { Screen, ScreenHeader } from '../primitives';
 import { readableTextOn, useTheme } from '../theme';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 const PAGE_SIZE = 50;
 const TABLES = ['chats', 'messages', 'chat_handles', 'handles', 'kv'];
@@ -24,7 +22,7 @@ const ACCOUNT_CHANGED_COPY =
 export function DeletedChatsScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const [accountRetired, setAccountRetired] = useState(() => !accountLease.isCurrent());
   const [limit, setLimit] = useState(PAGE_SIZE);
   const [restoringGuid, setRestoringGuid] = useState<string | null>(null);

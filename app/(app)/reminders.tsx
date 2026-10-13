@@ -1,6 +1,5 @@
 import { FlashList } from '@shopify/flash-list';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
 import { StyleSheet, Text } from 'react-native';
 import { showDialog } from '@ui/dialog/dialogStore';
 import type { Reminder } from '@core/models';
@@ -11,16 +10,16 @@ import {
   cancelMessageReminder,
   rescheduleMessageReminder,
 } from '@/services/notifications/remindersService';
-import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import { ActionListRow, Screen, ScreenHeader, useTheme } from '@ui';
 import { pickReminderTime } from '@ui/conversations/pickReminderTime';
 import { reminderSubtitle } from '@utils';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 /** Saved message reminders, reactive; tap to reschedule, Delete to cancel. */
 export default function RemindersScreen(): React.JSX.Element {
   const theme = useTheme();
   const router = useRouter();
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const { data } = useReactiveQuery<Reminder[]>(
     () => listReminders(getDatabase()),
     ['reminders'],

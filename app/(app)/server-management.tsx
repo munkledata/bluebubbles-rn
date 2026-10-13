@@ -28,7 +28,6 @@ import {
   startSync,
 } from '@/services';
 import {
-  captureRealtimeDeliveryLease,
   subscribeRealtimeGenerationInvalidation,
   type RealtimeDeliveryLease,
 } from '@/services/realtime/deliveryCoordinator';
@@ -39,6 +38,7 @@ import {
 } from '@state/sessionStore';
 import { useSyncStore, type SyncRepairStatus } from '@state/syncStore';
 import { InfoRow, PairingQr, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 /**
  * Read-only queries do not hold Disconnect open. Their account-generation and transport-revision
@@ -138,7 +138,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
   // Every query/callback created by this screen belongs to the account that mounted it. A global
   // confirm dialog can retain its button callback after navigation, so checking only mounted state
   // is insufficient.
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const [accountRetired, setAccountRetired] = useState(() => !accountLease.isCurrent());
 
   const [busy, setBusy] = useState<string | null>(null); // label of the in-flight action

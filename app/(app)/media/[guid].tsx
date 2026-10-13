@@ -22,12 +22,7 @@ import {
 } from '@db/repositories';
 import { download, redownload } from '@/services/download';
 import { saveAttachmentsToPhotos, shareAttachment } from '@/services/media';
-import {
-  captureRealtimeDeliveryLease,
-  runTrackedRealtimeWork,
-  subscribeRealtimeGenerationInvalidation,
-  type RealtimeDeliveryLease,
-} from '@/services/realtime/deliveryCoordinator';
+import { subscribeRealtimeGenerationInvalidation } from '@/services/realtime/deliveryCoordinator';
 import { useDownloadStore } from '@state/downloadStore';
 import { ProgressRing } from '@ui/attachments/ProgressRing';
 import { ZoomableImage } from '@ui/attachments/ZoomableImage';
@@ -35,8 +30,8 @@ import { useAttachmentCachePathProtection } from '@ui/attachments/useAttachmentC
 import { showDialog } from '@ui/dialog/dialogStore';
 import { showToast } from '@ui/toast/toastStore';
 import { isLocalFileUri } from '@utils';
-
-type AccountTaskResult<T> = { owned: true; value: T } | { owned: false };
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
+import { runAccountOperation } from '@/services/realtime/accountOperation';
 
 interface MediaGallery {
   items: AttachmentRow[];
@@ -95,30 +90,6 @@ function sameMediaSource(left: MediaSourceGrant, right: MediaSourceGrant): boole
   );
 }
 
-/** Keep a media read/native action attached to the account that mounted this route. */
-async function runMediaAccountTask<T>(
-  lease: RealtimeDeliveryLease,
-  task: () => Promise<T>,
-): Promise<AccountTaskResult<T>> {
-  let value: T | undefined;
-  let completed = false;
-  try {
-    const status = await runTrackedRealtimeWork(lease, async (activeLease) => {
-      if (!activeLease.isCurrent()) return;
-      value = await task();
-      if (!activeLease.isCurrent()) return;
-      completed = true;
-    });
-    if (status === 'paused' || !completed || !lease.isCurrent()) return { owned: false };
-    return { owned: true, value: value as T };
-  } catch (error) {
-    // Disconnect owns failures from account-A work after its lease is retired. Surfacing them in
-    // account B would be both confusing and an account-existence leak.
-    if (!lease.isCurrent()) return { owned: false };
-    throw error;
-  }
-}
-
 /**
  * Fullscreen media viewer. Images open in a swipe-carousel across EVERY photo in the chat (with an
  * "N of M" counter), each pinch-to-zoomable; a video opens singly with native controls. Share +
@@ -129,7 +100,7 @@ export default function MediaViewer(): React.JSX.Element {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const win = useWindowDimensions();
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const mountAliveRef = useRef(true);
   const accountRetiredRef = useRef(!accountLease.isCurrent());
   const [accountRetired, setAccountRetired] = useState(accountRetiredRef.current);
@@ -250,7 +221,7 @@ export default function MediaViewer(): React.JSX.Element {
     let alive = true;
     void (async () => {
       try {
-        const result = await runMediaAccountTask(accountLease, async () => {
+        const result = await runAccountOperation(accountLease, async () => {
           const db = getDatabase();
           // Route params are public input. Admit only a real visible attachment here; internal
           // transfer/retry code keeps its separate unrestricted GUID lookup.
@@ -268,7 +239,7 @@ export default function MediaViewer(): React.JSX.Element {
           items[index] = attachment;
           return { attachment, galleryResult: { items, index } };
         });
-        if (!alive || !result.owned || !routeGrantIsCurrent(loadRouteGuid, loadRouteLifetime)) {
+        if (!alive || !result.ok || !routeGrantIsCurrent(loadRouteGuid, loadRouteLifetime)) {
           return;
         }
         const galleryResult = result.value.galleryResult;
@@ -358,12 +329,12 @@ export default function MediaViewer(): React.JSX.Element {
     let alive = true;
     void (async () => {
       try {
-        const result = await runMediaAccountTask(accountLease, () =>
+        const result = await runAccountOperation(accountLease, () =>
           getVisibleAttachmentByGuid(getDatabase(), pageGrant.attachmentGuid),
         );
         if (
           !alive ||
-          !result.owned ||
+          !result.ok ||
           !pageGrantIsCurrent(
             pageGrant.routeGuid,
             pageGrant.routeLifetime,
@@ -571,10 +542,10 @@ export default function MediaViewer(): React.JSX.Element {
         failFinishedDownloadIfStillCurrent(attachmentGuid);
       };
       try {
-        const result = await runMediaAccountTask(accountLease, () =>
+        const result = await runAccountOperation(accountLease, () =>
           getVisibleAttachmentByGuid(getDatabase(), attachmentGuid),
         );
-        if (!result.owned || !pendingDownloadIsCurrent(operation)) return;
+        if (!result.ok || !pendingDownloadIsCurrent(operation)) return;
         if (exactDownloadTransitioned) {
           // Any exact-GUID transition during the await makes this read older than the latest
           // owner. Discard even a valid-looking local path, then reread if that owner is terminal.
@@ -903,10 +874,10 @@ export default function MediaViewer(): React.JSX.Element {
       const operationIsCurrent = (): boolean =>
         sharing.current?.token === operation.token && sourceGrantIsCurrent(operation.source);
       try {
-        const result = await runMediaAccountTask(accountLease, () =>
+        const result = await runAccountOperation(accountLease, () =>
           shareAttachment(localPath, source.mimeType, operationIsCurrent),
         );
-        if (!result.owned || !operationIsCurrent() || result.value.ok) {
+        if (!result.ok || !operationIsCurrent() || result.value.ok) {
           return;
         }
         showDialog(
@@ -945,10 +916,10 @@ export default function MediaViewer(): React.JSX.Element {
       const operationIsCurrent = (): boolean =>
         saving.current?.token === operation.token && sourceGrantIsCurrent(operation.source);
       try {
-        const result = await runMediaAccountTask(accountLease, () =>
+        const result = await runAccountOperation(accountLease, () =>
           saveAttachmentsToPhotos([localPath], operationIsCurrent),
         );
-        if (!result.owned || !operationIsCurrent()) return;
+        if (!result.ok || !operationIsCurrent()) return;
         if (result.value.status === 'saved') showToast('Saved to Photos');
         else if (result.value.status === 'denied')
           showDialog('Save', 'Photos permission is required to save attachments.');

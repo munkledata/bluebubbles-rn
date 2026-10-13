@@ -131,6 +131,7 @@ import {
   resolveChatService,
   resolveTitle,
 } from '@utils';
+import { runAccountOperation } from '@/services/realtime/accountOperation';
 
 interface DocumentPickerModule {
   getDocumentAsync(options: {
@@ -1132,17 +1133,16 @@ function ChatScreenInner({
     if (!ownedShareBatchId || !shareBatchPending || !accountLease.isCurrent()) return;
     if (!ownedShareIdentity || shareFinalizingRef.current) return;
     shareFinalizingRef.current = true;
-    let completed = false;
-    void runTrackedRealtimeWork(accountLease, async () => {
+    void runAccountOperation(accountLease, async () => {
       const receipt = await readShareIntakeReceipt(ownedShareIdentity);
-      if (!receipt || !isShareIntakeReceiptComplete(receipt)) return;
-      completed = await consumeShareIntakeBatch(ownedShareBatchId, {
+      if (!receipt || !isShareIntakeReceiptComplete(receipt)) return false;
+      return consumeShareIntakeBatch(ownedShareBatchId, {
         lease: accountLease,
         drainNext: false,
       });
     })
-      .then((outcome) => {
-        if (outcome === 'delivered' && completed && accountLease.isCurrent()) {
+      .then((result) => {
+        if (result.ok && result.value) {
           setShareBatchPending(false);
           void drainShareIntake();
         } else {

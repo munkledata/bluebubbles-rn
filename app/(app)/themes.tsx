@@ -10,11 +10,6 @@ import {
   saveCustomTheme,
   selectCustomTheme,
 } from '@/services/themeCommands';
-import {
-  captureRealtimeDeliveryLease,
-  runTrackedRealtimeWork,
-  type RealtimeDeliveryLease,
-} from '@/services/realtime/deliveryCoordinator';
 import { useThemeStore } from '@state/themeStore';
 import { Screen, ScreenHeader, ThemeStudio, useTheme } from '@ui';
 import { useReduceMotionPreferenceRef } from '@ui/hooks/useReduceMotionPreference';
@@ -25,40 +20,11 @@ import {
   safeParseTokens,
   type ThemeTokens,
 } from '@ui/theme/tokens';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
+import { runAccountOperation } from '@/services/realtime/accountOperation';
 
 /** Which theme the studio is editing, with motion policy captured for this exact opening. */
 type Editing = { row: CustomThemeRow | null; animationType: 'none' | 'slide' };
-type AccountTaskResult<T> = { owned: true; value: T } | { owned: false };
-
-/**
- * Attach a Themes-screen read to the account that mounted the screen.
- *
- * A dialog or Modal callback can run much later than the tap that created it. The captured lease
- * makes that old callback a quiet no-op after Disconnect, while the tracked slot makes Disconnect
- * wait for a short DB operation that was already admitted. Writes cross the theme-command service
- * boundary below, which owns its transaction and commit guard.
- */
-async function runThemesAccountRead<T>(
-  lease: RealtimeDeliveryLease,
-  task: (activeLease: RealtimeDeliveryLease) => Promise<T>,
-): Promise<AccountTaskResult<T>> {
-  let value: T | undefined;
-  let completed = false;
-  try {
-    const status = await runTrackedRealtimeWork(lease, async (activeLease) => {
-      if (!activeLease.isCurrent()) return;
-      value = await task(activeLease);
-      if (!activeLease.isCurrent()) return;
-      completed = true;
-    });
-    if (status === 'paused' || !completed || !lease.isCurrent()) return { owned: false };
-    return { owned: true, value: value as T };
-  } catch (error) {
-    // Never let a read failure from the retired screen surface in the replacement account.
-    if (!lease.isCurrent()) return { owned: false };
-    throw error;
-  }
-}
 
 /** F-12: create/edit/delete custom themes and pick the active one (live recolor). */
 export default function ThemesScreen(): React.JSX.Element {
@@ -68,7 +34,7 @@ export default function ThemesScreen(): React.JSX.Element {
   const presetKey = useThemeStore((s) => s.preset);
   // This lease belongs to this mounted screen, not to whichever account happens to be connected
   // when a retained dialog/Modal callback eventually runs.
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
 
   const [rows, setRows] = useState<CustomThemeRow[]>([]);
   const [editing, setEditing] = useState<Editing | null>(null);
@@ -83,10 +49,8 @@ export default function ThemesScreen(): React.JSX.Element {
 
   const refresh = useCallback(async () => {
     try {
-      const result = await runThemesAccountRead(accountLease, () =>
-        listCustomThemes(getDatabase()),
-      );
-      if (result.owned) setRows(result.value);
+      const result = await runAccountOperation(accountLease, () => listCustomThemes(getDatabase()));
+      if (result.ok) setRows(result.value);
     } catch {
       // keep the current list on a transient read error
     }
@@ -94,9 +58,9 @@ export default function ThemesScreen(): React.JSX.Element {
 
   useEffect(() => {
     let mounted = true;
-    void runThemesAccountRead(accountLease, () => listCustomThemes(getDatabase()))
+    void runAccountOperation(accountLease, () => listCustomThemes(getDatabase()))
       .then((result) => {
-        if (mounted && result.owned) setRows(result.value);
+        if (mounted && result.ok) setRows(result.value);
       })
       .catch(() => {
         // Keep the empty initial list on a transient read error.

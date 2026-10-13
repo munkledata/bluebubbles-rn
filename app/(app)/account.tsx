@@ -5,13 +5,11 @@ import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from
 import { serverApi } from '@core/api';
 import { ApiError, isUnimplementedEndpoint } from '@core/api/errors';
 import { http } from '@/services';
-import {
-  captureRealtimeDeliveryLease,
-  subscribeRealtimeGenerationInvalidation,
-} from '@/services/realtime/deliveryCoordinator';
+import { subscribeRealtimeGenerationInvalidation } from '@/services/realtime/deliveryCoordinator';
 import { captureSessionTransportLease, useSessionStore } from '@state/sessionStore';
 import { showConfirm, showDialog } from '@ui/dialog/dialogStore';
 import { InfoRow, NavRow, NoteRow, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 /** Account identity is sensitive, so a result belongs to both its account and exact server URL. */
 export default function AccountScreen(): React.JSX.Element {
@@ -20,7 +18,7 @@ export default function AccountScreen(): React.JSX.Element {
   const queryClient = useQueryClient();
   const serverInfo = useSessionStore((s) => s.serverInfo);
   const transportRevision = useSessionStore((s) => s.transportRevision);
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const [accountRetired, setAccountRetired] = useState(() => !accountLease.isCurrent());
   const [changingAlias, setChangingAlias] = useState(false);
   const aliasRequest = useRef<AbortController | null>(null);

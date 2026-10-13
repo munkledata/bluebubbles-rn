@@ -3,12 +3,12 @@ import * as Network from 'expo-network';
 import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { download } from '@/services/download';
-import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
 import type { StickerRow } from '@db/repositories';
 import { useDownloadStore } from '@state/downloadStore';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useTheme } from '../theme';
 import { useAttachmentCachePathProtection } from './useAttachmentCachePathProtection';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 /** A sticker tile is a fixed dp box — never a percentage, which would resolve to width 0. */
 const STICKER_SIZE = 72;
@@ -62,7 +62,7 @@ function StickerTile({
   onDismiss: () => void;
 }): React.JSX.Element {
   const theme = useTheme();
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const att = sticker.attachment;
   const status = useDownloadStore((s) => (att ? s.status[att.guid] : undefined));
   const autoDownload = useFeatureSettingsStore((s) => s.autoDownloadAttachments);

@@ -3,7 +3,6 @@ import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-nati
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isAggregateRetractionTombstone } from '@core/messages/retraction';
 import {
-  captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
   subscribeRealtimeGenerationInvalidation,
   type RealtimeDeliveryLease,
@@ -13,6 +12,7 @@ import { listThreadMessages, type MessageRow } from '@db/repositories';
 import { useReactiveQuery } from '@db/useReactiveQuery';
 import { buildMessageSnippet, formatTime } from '@utils';
 import { useTheme } from '../theme';
+import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 interface ThreadSheetProps {
   /** Exact conversation owner for every row returned by the thread lookup. */
@@ -72,7 +72,7 @@ export function ThreadSheet({
 }: ThreadSheetProps): React.JSX.Element {
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const [accountLease] = useState(() => captureRealtimeDeliveryLease());
+  const accountLease = useScreenAccountLease();
   const openLifetimeRef = useRef(0);
   // The ref revokes synchronously; committed state gives a reopened sheet fresh callbacks.
   const [renderOpenLifetime, setRenderOpenLifetime] = useState(0);
