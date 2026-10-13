@@ -14,7 +14,8 @@ describe('formatDiagnosticLogsForShare', () => {
   it('exports only strictly reprojected diagnostics in chronological order', () => {
     const text = formatDiagnosticLogsForShare([
       entry({
-        message: '[share] capture failed: alice@example.com opened file:///private/photo.jpg',
+        message:
+          '[lock] unlock failed after a successful auth: alice@example.com opened file:///private/photo.jpg',
         meta: JSON.stringify({
           error: {
             name: 'ApiError',
@@ -78,8 +79,8 @@ describe('formatDiagnosticLogsForShare', () => {
       {
         timestamp: '2026-08-06T12:35:00.000Z',
         level: 'error',
-        message: 'share.capture_failed [ApiError|timeout]',
-        tag: 'share',
+        message: 'lock.unlock_failed [ApiError|timeout]',
+        tag: 'lock',
         meta: { schemaVersion: 1, errorName: 'ApiError', errorCode: 'timeout' },
       },
     ]);

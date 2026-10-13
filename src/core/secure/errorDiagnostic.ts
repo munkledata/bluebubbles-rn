@@ -13,9 +13,6 @@ export const DIAGNOSTIC_EVENT_ENVELOPE_VERSION = 1 as const;
  * receiving an enumerable source location.
  */
 export const ERROR_DIAGNOSTIC_SITES = {
-  shareNoCacheDirectory: 'st1ncp1gde',
-  shareAllFilesUnreadable: 'sz3en37b70',
-  shareCaptureFailed: 'sj1gzvygll',
   dbForegroundInitialization: 'syjo8z3ok4',
   dbSessionInitialization: 'solmtuzd5x',
   connectDatabaseInitialization: 'skjyhvynmb',
@@ -42,9 +39,6 @@ export type ErrorDiagnosticSiteToken =
 
 /** Compile-time pairing for every approved production `logger.error` call. */
 export interface ErrorDiagnosticSiteByMessage {
-  '[share] no cache directory available — cannot accept shared files': typeof ERROR_DIAGNOSTIC_SITES.shareNoCacheDirectory;
-  '[share] all shared files were unreadable': typeof ERROR_DIAGNOSTIC_SITES.shareAllFilesUnreadable;
-  '[share] capture failed': typeof ERROR_DIAGNOSTIC_SITES.shareCaptureFailed;
   '[db] initialization failed':
     | typeof ERROR_DIAGNOSTIC_SITES.dbForegroundInitialization
     | typeof ERROR_DIAGNOSTIC_SITES.dbSessionInitialization;
@@ -90,13 +84,6 @@ const either =
   (message: string): boolean =>
     predicates.some((predicate) => predicate(message));
 
-const unreadableShareCount = (message: string): number | undefined => {
-  const match = /^\[share\] all (\d{1,3}) shared file\(s\) were unreadable$/.exec(message);
-  if (!match) return undefined;
-  const count = Number(match[1]);
-  return Number.isSafeInteger(count) ? count : undefined;
-};
-
 /**
  * Finite vocabulary for retained ERROR diagnostics.
  *
@@ -104,27 +91,6 @@ const unreadableShareCount = (message: string): number | undefined => {
  * is an Error. The suffix is never copied. New explicit call sites use the exact static forms.
  */
 const EVENT_DEFINITIONS: readonly EventDefinition[] = [
-  {
-    code: 'share.no_cache_directory',
-    tag: 'share',
-    siteTokens: [ERROR_DIAGNOSTIC_SITES.shareNoCacheDirectory],
-    matches: exact('[share] no cache directory available — cannot accept shared files'),
-  },
-  {
-    code: 'share.all_files_unreadable',
-    tag: 'share',
-    siteTokens: [ERROR_DIAGNOSTIC_SITES.shareAllFilesUnreadable],
-    matches: either(
-      exact('[share] all shared files were unreadable'),
-      (message) => unreadableShareCount(message) !== undefined,
-    ),
-  },
-  {
-    code: 'share.capture_failed',
-    tag: 'share',
-    siteTokens: [ERROR_DIAGNOSTIC_SITES.shareCaptureFailed],
-    matches: either(exact('[share] capture failed'), begins('[share] capture failed:')),
-  },
   {
     code: 'db.initialization_failed',
     tag: 'db',
@@ -251,7 +217,6 @@ const ERROR_DIAGNOSTIC_SITE_TOKENS = new Set<string>(Object.values(ERROR_DIAGNOS
 const ERROR_DIAGNOSTIC_SITE_FRAME = /^at gator\.site\.(s[a-z0-9]{9})$/;
 
 const ERROR_DETAIL_EVENT_CODES = new Set([
-  'share.capture_failed',
   'db.initialization_failed',
   'connect.database_initialization_failed',
   'new_chat.create_failed',
@@ -352,7 +317,6 @@ export interface SafeErrorDiagnosticMeta {
   retryable?: boolean;
   fatal?: boolean;
   eventName?: string;
-  affectedCount?: number;
   waitedMs?: number;
   waiting?: number;
   releasedWhileWaiting?: number;
@@ -576,12 +540,6 @@ function buildMeta(
       safeSetValue(read(rawMeta, 'eventName'), SERVER_EVENT_NAMES) ??
       safeSetValue(read(rawMeta, 'event'), SERVER_EVENT_NAMES);
     if (eventName !== undefined) result.eventName = eventName;
-  }
-
-  if (code === 'share.all_files_unreadable') {
-    const affectedCount =
-      safeInteger(read(rawMeta, 'affectedCount'), 200) ?? unreadableShareCount(originalMessage);
-    if (affectedCount !== undefined) result.affectedCount = affectedCount;
   }
 
   if (code === 'db.write_queue_wedged') {

@@ -268,8 +268,8 @@ describe('runErrorReportQueue', () => {
       db,
       {
         level: 'error',
-        message: '[share] capture failed: +13035550199 could not be copied',
-        tag: 'share',
+        message: '[lock] unlock failed after a successful auth: +13035550199 could not be copied',
+        tag: 'lock',
         meta: 'Unable to resolve host "old.private.example" for +13035550199',
         createdAt: uploadNow - 1,
       },
@@ -293,8 +293,8 @@ describe('runErrorReportQueue', () => {
       status: 503,
     });
     expect(fallbackReport).toMatchObject({
-      message: 'share.capture_failed',
-      tag: 'share',
+      message: 'lock.unlock_failed',
+      tag: 'lock',
       meta: JSON.stringify({ schemaVersion: 1 }),
     });
     expect(JSON.stringify(sent)).not.toMatch(

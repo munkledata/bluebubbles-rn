@@ -1528,7 +1528,7 @@ const CERTIFIED_ERROR_DIAGNOSTIC_COMMONJS_LOAD = Object.freeze({
   loaderName: 'loadErrorDiagnosticApi',
   loaderHash: '3400aa7c47d860d8e3bdba99a2cd6d52a20e58ff11c2ca7e478672ab453105d7',
   specifier: '@core/secure/errorDiagnostic',
-  targetHash: 'e98b2772d911c0bb16d0d6f20f466aebe86b6114511890aa35e4bc03a3b45eb3',
+  targetHash: '7673395c199d4d635f2145c91ba02ebf2f2dc21a346f7e0b4344e0d1f7e6c488',
   targetPath: 'src/core/secure/errorDiagnostic.ts',
 });
 

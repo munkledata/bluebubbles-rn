@@ -8,9 +8,6 @@ import ts from 'typescript';
 
 /** Exact committed registry: public opaque labels, never hashes of user or runtime input. */
 export const EXPECTED_ERROR_DIAGNOSTIC_SITES = Object.freeze({
-  shareNoCacheDirectory: 'st1ncp1gde',
-  shareAllFilesUnreadable: 'sz3en37b70',
-  shareCaptureFailed: 'sj1gzvygll',
   dbForegroundInitialization: 'syjo8z3ok4',
   dbSessionInitialization: 'solmtuzd5x',
   connectDatabaseInitialization: 'skjyhvynmb',
@@ -34,9 +31,6 @@ export const EXPECTED_ERROR_DIAGNOSTIC_SITES = Object.freeze({
 
 /** Every production ERROR call must use its exact developer-owned event/site pair. */
 export const ALLOWED_ERROR_SITE_PROPERTIES_BY_MESSAGE = new Map([
-  ['[share] no cache directory available — cannot accept shared files', ['shareNoCacheDirectory']],
-  ['[share] all shared files were unreadable', ['shareAllFilesUnreadable']],
-  ['[share] capture failed', ['shareCaptureFailed']],
   ['[db] initialization failed', ['dbForegroundInitialization', 'dbSessionInitialization']],
   ['[connect] database initialization failed', ['connectDatabaseInitialization']],
   ['[new-chat] createNewChat failed', ['newChatCreate']],

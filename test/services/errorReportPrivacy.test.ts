@@ -13,17 +13,6 @@ const parsedMeta = (report: { meta: string }): Record<string, unknown> =>
 describe('error-report structured privacy envelope', () => {
   it.each([
     [
-      '[share] no cache directory available — cannot accept shared files',
-      'share.no_cache_directory',
-      ERROR_DIAGNOSTIC_SITES.shareNoCacheDirectory,
-    ],
-    [
-      '[share] all shared files were unreadable',
-      'share.all_files_unreadable',
-      ERROR_DIAGNOSTIC_SITES.shareAllFilesUnreadable,
-    ],
-    ['[share] capture failed', 'share.capture_failed', ERROR_DIAGNOSTIC_SITES.shareCaptureFailed],
-    [
       '[db] initialization failed',
       'db.initialization_failed',
       ERROR_DIAGNOSTIC_SITES.dbForegroundInitialization,
@@ -244,11 +233,6 @@ describe('error-report structured privacy envelope', () => {
   });
 
   it('keeps bounded counts only for the events that own those fields', () => {
-    const share = projectCapturedErrorReport('[share] all shared files were unreadable', {
-      affectedCount: 37,
-    });
-    expect(parsedMeta(share)).toEqual({ schemaVersion: 1, affectedCount: 37 });
-
     const lock = projectCapturedErrorReport('[db] write queue appears wedged', {
       waitedMs: 60_000,
       waiting: 4,
