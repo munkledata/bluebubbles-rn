@@ -124,6 +124,7 @@ interface GatorBoundedDownloadNative {
   ): Promise<NativeAdoptedPastedAttachmentResult>;
   getAttachmentCacheAvailableBytes(): Promise<NativeAttachmentCacheAvailableBytesResult>;
   beginAttachmentCacheScan(): Promise<NativeAttachmentCacheScanBeginResult>;
+  beginAttachmentCacheRepairScan(): Promise<NativeAttachmentCacheScanBeginResult>;
   nextAttachmentCacheScanPage(scanId: string): Promise<NativeAttachmentCacheScanPageResult>;
   closeAttachmentCacheScan(scanId: string): Promise<NativeAttachmentCacheScanCloseResult>;
   addListener(
@@ -231,6 +232,8 @@ const ATTACHMENT_CACHE_SCAN_MAX_TOTAL_FILES = 8192;
 // Native consumes at least one of its 32,768 bounded nodes on every non-complete page. Keep an
 // independent JavaScript ceiling too, so a malformed bridge can never make startup loop forever.
 const ATTACHMENT_CACHE_SCAN_MAX_PAGES = 32769;
+// A repair scan has no native total; this only guarantees the loop ends if a bridge never says done.
+const ATTACHMENT_CACHE_REPAIR_SCAN_MAX_PAGES = 1_000_000;
 
 let requestSequence = 0;
 
@@ -556,26 +559,10 @@ export async function scanNativeAttachmentCacheFiles(
   const native = getNative();
   if (!native) throw new NativeBoundedDownloadError('unavailable');
 
-  const current = (): boolean => {
-    try {
-      return shouldContinue();
-    } catch {
-      return false;
-    }
-  };
+  const current = guardedContinue(shouldContinue);
   if (!current()) throw new NativeBoundedDownloadError('cancelled');
 
-  const begin = await native.beginAttachmentCacheScan();
-  if (
-    begin?.ok !== true ||
-    typeof begin.scanId !== 'string' ||
-    begin.scanId.length === 0 ||
-    begin.scanId.length > ATTACHMENT_CACHE_SCAN_MAX_ID_CHARS
-  ) {
-    throw new NativeBoundedDownloadError('unavailable');
-  }
-
-  const scanId = begin.scanId;
+  const scanId = validScanId(await native.beginAttachmentCacheScan());
   const files: AttachmentCacheScanFile[] = [];
   const seen = new Set<string>();
   try {
@@ -583,25 +570,11 @@ export async function scanNativeAttachmentCacheFiles(
       if (!current()) throw new NativeBoundedDownloadError('cancelled');
       const page = await native.nextAttachmentCacheScanPage(scanId);
       if (!current()) throw new NativeBoundedDownloadError('cancelled');
-      if (
-        page?.ok !== true ||
-        typeof page.done !== 'boolean' ||
-        page.overflow !== false ||
-        !Array.isArray(page.files) ||
-        page.files.length > ATTACHMENT_CACHE_SCAN_MAX_FILES_PER_PAGE
-      ) {
-        throw new NativeBoundedDownloadError('unavailable');
-      }
+      if (!isValidScanPage(page)) throw new NativeBoundedDownloadError('unavailable');
 
       for (const candidate of page.files) {
         if (
-          candidate == null ||
-          typeof candidate !== 'object' ||
-          typeof candidate.uri !== 'string' ||
-          candidate.uri.length === 0 ||
-          candidate.uri.length > ATTACHMENT_CACHE_SCAN_MAX_URI_CHARS ||
-          !isNonNegativeSafeInteger(candidate.bytes) ||
-          !isNonNegativeSafeInteger(candidate.mtimeMs) ||
+          !isValidScanFile(candidate) ||
           seen.has(candidate.uri) ||
           files.length >= ATTACHMENT_CACHE_SCAN_MAX_TOTAL_FILES
         ) {
@@ -626,4 +599,105 @@ export async function scanNativeAttachmentCacheFiles(
       // backstop; never mask the page validation error with a best-effort close error.
     }
   }
+}
+
+/**
+ * Read the whole attachment cache one page at a time for Storage → Repair Downloads (review item
+ * 888).
+ *
+ * Unlike the startup manifest there is no file total and nothing is kept: each validated page goes
+ * to `onPage`, which may delete files before the next page is requested. Native ends a repair scan
+ * after 60 seconds without a page request. The opaque native session is always closed best-effort.
+ */
+export async function scanNativeAttachmentCacheForRepair(
+  onPage: (files: readonly AttachmentCacheScanFile[]) => Promise<void>,
+  shouldContinue: () => boolean = () => true,
+): Promise<void> {
+  const native = getNative();
+  if (!native || typeof native.beginAttachmentCacheRepairScan !== 'function') {
+    throw new NativeBoundedDownloadError('unavailable');
+  }
+
+  const current = guardedContinue(shouldContinue);
+  if (!current()) throw new NativeBoundedDownloadError('cancelled');
+
+  const scanId = validScanId(await native.beginAttachmentCacheRepairScan());
+  try {
+    for (let pageNumber = 0; pageNumber < ATTACHMENT_CACHE_REPAIR_SCAN_MAX_PAGES; pageNumber += 1) {
+      if (!current()) throw new NativeBoundedDownloadError('cancelled');
+      const page = await native.nextAttachmentCacheScanPage(scanId);
+      if (!current()) throw new NativeBoundedDownloadError('cancelled');
+      if (!isValidScanPage(page)) throw new NativeBoundedDownloadError('unavailable');
+
+      const seen = new Set<string>();
+      const files: AttachmentCacheScanFile[] = [];
+      for (const candidate of page.files) {
+        if (!isValidScanFile(candidate) || seen.has(candidate.uri)) {
+          throw new NativeBoundedDownloadError('unavailable');
+        }
+        seen.add(candidate.uri);
+        files.push({ uri: candidate.uri, bytes: candidate.bytes, mtimeMs: candidate.mtimeMs });
+      }
+      if (files.length > 0) await onPage(files);
+      if (page.done) return;
+    }
+    throw new NativeBoundedDownloadError('unavailable');
+  } finally {
+    try {
+      await native.closeAttachmentCacheScan(scanId);
+    } catch {
+      // As for the startup scan, never mask the real error with a best-effort close error.
+    }
+  }
+}
+
+function guardedContinue(shouldContinue: () => boolean): () => boolean {
+  return () => {
+    try {
+      return shouldContinue();
+    } catch {
+      return false;
+    }
+  };
+}
+
+function validScanId(begin: NativeAttachmentCacheScanBeginResult | null | undefined): string {
+  if (
+    begin?.ok !== true ||
+    typeof begin.scanId !== 'string' ||
+    begin.scanId.length === 0 ||
+    begin.scanId.length > ATTACHMENT_CACHE_SCAN_MAX_ID_CHARS
+  ) {
+    throw new NativeBoundedDownloadError('unavailable');
+  }
+  return begin.scanId;
+}
+
+function isValidScanPage(
+  page: NativeAttachmentCacheScanPageResult | null | undefined,
+): page is NativeAttachmentCacheScanPageResult & {
+  done: boolean;
+  files: (NativeAttachmentCacheScanFileResult | null | undefined)[];
+} {
+  return (
+    page?.ok === true &&
+    typeof page.done === 'boolean' &&
+    page.overflow === false &&
+    Array.isArray(page.files) &&
+    page.files.length <= ATTACHMENT_CACHE_SCAN_MAX_FILES_PER_PAGE
+  );
+}
+
+function isValidScanFile(
+  candidate: NativeAttachmentCacheScanFileResult | null | undefined,
+): candidate is AttachmentCacheScanFile {
+  return (
+    candidate != null &&
+    typeof candidate === 'object' &&
+    typeof candidate.uri === 'string' &&
+    candidate.uri.length > 0 &&
+    candidate.uri.length <= ATTACHMENT_CACHE_SCAN_MAX_URI_CHARS &&
+    isNonNegativeSafeInteger(candidate.bytes) &&
+    isNonNegativeSafeInteger(candidate.mtimeMs)
+  );
 }

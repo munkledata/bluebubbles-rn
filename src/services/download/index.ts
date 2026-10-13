@@ -8,6 +8,7 @@ import { extensionForMime, isLocalFileUri } from '@utils';
 import { isDevServer } from '@utils/isDev';
 import { http } from '../clients';
 import {
+  captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
   subscribeRealtimeGenerationInvalidation,
   type RealtimeDeliveryLease,
@@ -26,7 +27,12 @@ import {
   attachmentCacheCoordinator,
   type AttachmentCacheReservationScope,
 } from './attachmentCacheCoordinator';
-import { isAttachmentCacheRecoveryReady } from './attachmentCacheRecovery';
+import {
+  isAttachmentCacheRecoveryReady,
+  repairAttachmentCache,
+  type AttachmentCacheRepairProgress,
+  type AttachmentCacheRepairResult,
+} from './attachmentCacheRecovery';
 import { expoFetcher } from './expoFetcher';
 
 export type { AttachmentFetcher } from './downloadService';
@@ -34,6 +40,22 @@ export { ensureDownloaded } from './downloadService';
 
 const productionFetcher: AttachmentFetcher = expoFetcher(http);
 let developmentFetcher: AttachmentFetcher | null = null;
+
+export type { AttachmentCacheRepairProgress, AttachmentCacheRepairResult };
+
+/**
+ * Storage → Repair Downloads (review item 888) for the account connected right now. Does nothing
+ * once this account's startup cache check has succeeded.
+ */
+export async function repairStuckDownloads(
+  onProgress?: (progress: AttachmentCacheRepairProgress) => void,
+): Promise<AttachmentCacheRepairResult> {
+  return repairAttachmentCache(
+    getDatabase(),
+    captureRealtimeDeliveryLease(),
+    onProgress ? { onProgress } : {},
+  );
+}
 
 /** Register the DEV fixture fetcher. Tests use the same hook while mocking an active DEV session. */
 export function setAttachmentFetcher(f: AttachmentFetcher): void {

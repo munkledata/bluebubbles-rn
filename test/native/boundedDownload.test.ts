@@ -18,6 +18,7 @@ const native = {
   adoptPastedAttachment: jest.fn(),
   getAttachmentCacheAvailableBytes: jest.fn(),
   beginAttachmentCacheScan: jest.fn(),
+  beginAttachmentCacheRepairScan: jest.fn(),
   nextAttachmentCacheScanPage: jest.fn(),
   closeAttachmentCacheScan: jest.fn(),
   addListener: jest.fn(
@@ -51,6 +52,7 @@ import {
   prepareNativeSyncedBackgroundCacheForDownload,
   pruneNativeSyncedBackgroundCache,
   scanNativeAttachmentCacheFiles,
+  scanNativeAttachmentCacheForRepair,
   statNativeAttachmentCacheFile,
   validateNativeSyncedBackgroundCacheFile,
 } from '../../src/native/boundedDownload';
@@ -119,6 +121,10 @@ beforeEach(() => {
   native.beginAttachmentCacheScan.mockReset().mockResolvedValue({
     ok: true,
     scanId: 'opaque-scan-id',
+  });
+  native.beginAttachmentCacheRepairScan.mockReset().mockResolvedValue({
+    ok: true,
+    scanId: 'opaque-repair-id',
   });
   native.nextAttachmentCacheScanPage.mockReset().mockResolvedValue({
     ok: true,
@@ -606,6 +612,92 @@ it('rejects duplicate attachment-cache scan URIs across pages', async () => {
   await expect(scanNativeAttachmentCacheFiles()).rejects.toEqual(
     expect.objectContaining<Partial<NativeBoundedDownloadError>>({ reason: 'unavailable' }),
   );
+});
+
+// Review item 888: Storage → Repair Downloads reads an over-limit cache page by page.
+describe('repair scan pages', () => {
+  const file = (name: string, bytes = 1) => ({
+    uri: `file:///private/attachments/${name}/${name}.jpg`,
+    bytes,
+    mtimeMs: 100,
+  });
+
+  it('hands each page to the caller without a file total, then closes the scan', async () => {
+    native.nextAttachmentCacheScanPage
+      .mockResolvedValueOnce({
+        ok: true,
+        done: false,
+        overflow: false,
+        files: [file('a'), file('b')],
+      })
+      .mockResolvedValueOnce({ ok: true, done: false, overflow: false, files: [] })
+      .mockResolvedValueOnce({ ok: true, done: false, overflow: false, files: [file('a')] })
+      .mockResolvedValueOnce({ ok: true, done: true, overflow: false, files: [file('c')] });
+    const pages: string[][] = [];
+
+    await scanNativeAttachmentCacheForRepair(async (files) => {
+      pages.push(files.map((entry) => entry.uri));
+    });
+
+    // Cleanup runs between pages, so a later page may see a path again; it is not collected.
+    expect(pages).toEqual([[file('a').uri, file('b').uri], [file('a').uri], [file('c').uri]]);
+    expect(native.beginAttachmentCacheRepairScan).toHaveBeenCalledWith();
+    expect(native.beginAttachmentCacheScan).not.toHaveBeenCalled();
+    expect(native.nextAttachmentCacheScanPage).toHaveBeenCalledWith('opaque-repair-id');
+    expect(native.closeAttachmentCacheScan).toHaveBeenCalledWith('opaque-repair-id');
+  });
+
+  it.each([
+    { ok: true, done: true, overflow: false, files: [file('a'), file('a')] },
+    { ok: true, done: true, overflow: true, files: [] },
+    { ok: true, done: true, overflow: false, files: [{ uri: '', bytes: 1, mtimeMs: 1 }] },
+  ])('rejects a malformed repair page %# and closes the scan', async (page) => {
+    native.nextAttachmentCacheScanPage.mockResolvedValueOnce(page);
+    const onPage = jest.fn(async () => undefined);
+
+    await expect(scanNativeAttachmentCacheForRepair(onPage)).rejects.toEqual(
+      expect.objectContaining<Partial<NativeBoundedDownloadError>>({ reason: 'unavailable' }),
+    );
+    expect(onPage).not.toHaveBeenCalled();
+    expect(native.closeAttachmentCacheScan).toHaveBeenCalledWith('opaque-repair-id');
+  });
+
+  it('closes the scan when cleanup of a page fails or the account changes', async () => {
+    native.nextAttachmentCacheScanPage.mockResolvedValue({
+      ok: true,
+      done: false,
+      overflow: false,
+      files: [file('a')],
+    });
+    await expect(
+      scanNativeAttachmentCacheForRepair(async () => {
+        throw new Error('cleanup failed');
+      }),
+    ).rejects.toThrow('cleanup failed');
+    expect(native.closeAttachmentCacheScan).toHaveBeenCalledTimes(1);
+
+    let current = true;
+    await expect(
+      scanNativeAttachmentCacheForRepair(
+        async () => {
+          current = false;
+        },
+        () => current,
+      ),
+    ).rejects.toEqual(
+      expect.objectContaining<Partial<NativeBoundedDownloadError>>({ reason: 'cancelled' }),
+    );
+    expect(native.closeAttachmentCacheScan).toHaveBeenCalledTimes(2);
+  });
+
+  it('is unavailable on a native build without the repair scan', async () => {
+    moduleRef.current = { ...native, beginAttachmentCacheRepairScan: undefined } as never;
+
+    await expect(scanNativeAttachmentCacheForRepair(async () => undefined)).rejects.toEqual(
+      expect.objectContaining<Partial<NativeBoundedDownloadError>>({ reason: 'unavailable' }),
+    );
+    expect(native.nextAttachmentCacheScanPage).not.toHaveBeenCalled();
+  });
 });
 
 it.each([

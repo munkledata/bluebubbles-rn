@@ -2,13 +2,16 @@ import {
   adoptAttachmentCacheScanBatch,
   ATTACHMENT_CACHE_RECOVERY_BATCH_FILES,
   ATTACHMENT_CACHE_RECOVERY_MAX_FILES,
+  getAttachmentCacheUsage,
   listAttachmentCacheEntriesForRecovery,
   type AttachmentCacheScanAdoption,
+  type AttachmentCacheScanObservation,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import {
   scanNativeAttachmentCacheFiles,
+  scanNativeAttachmentCacheForRepair,
   type AttachmentCacheScanFile,
 } from '@native/boundedDownload';
 import { type RealtimeDeliveryLease } from '../realtime/deliveryCoordinator';
@@ -22,6 +25,9 @@ import {
 const MAX_RECOVERY_DRAIN_PASSES =
   Math.ceil(ATTACHMENT_CACHE_RECOVERY_MAX_FILES / ATTACHMENT_CACHE_RECOVERY_BATCH_FILES) + 2;
 const MAX_RECOVERY_PATH_CHARS = 4096;
+// A repair stops before one more page could push the ledger past startup recovery's limit.
+const REPAIR_MAX_LEDGER_FILES =
+  ATTACHMENT_CACHE_RECOVERY_MAX_FILES - ATTACHMENT_CACHE_RECOVERY_BATCH_FILES;
 
 let readyGeneration: number | null = null;
 let readyResult: AttachmentCacheRecoveryResult | null = null;
@@ -52,6 +58,48 @@ export interface AttachmentCacheRecoveryDependencies {
   readonly scan?: () => Promise<AttachmentCacheScanFile[]>;
   readonly coordinator?: AttachmentCacheCoordinator;
   readonly now?: () => number;
+}
+
+export interface AttachmentCacheRepairProgress {
+  /** Files read so far. */
+  readonly checkedFiles: number;
+  /** Files the ordinary cleanup has deleted so far. */
+  readonly removedFiles: number;
+}
+
+export type AttachmentCacheRepairResult =
+  | {
+      readonly status: 'repaired';
+      readonly checkedFiles: number;
+      readonly removedFiles: number;
+      /** False means files still in use keep the cache over its limits for now. */
+      readonly withinQuota: boolean;
+    }
+  | {
+      /** Cleanup could not free files fast enough: they are in use or the phone is low on space. */
+      readonly status: 'blocked';
+      readonly checkedFiles: number;
+      readonly removedFiles: number;
+    }
+  | { readonly status: 'not-needed' | 'stale' };
+
+export interface AttachmentCacheRepairDependencies extends AttachmentCacheRecoveryDependencies {
+  readonly scanForRepair?: (
+    onPage: (files: readonly AttachmentCacheScanFile[]) => Promise<void>,
+    shouldContinue: () => boolean,
+  ) => Promise<void>;
+  readonly onProgress?: (progress: AttachmentCacheRepairProgress) => void;
+}
+
+/** Ends a repair's native scan early from inside a page; always mapped to a result. */
+class AttachmentCacheRepairStop extends Error {
+  readonly outcome: 'stale' | 'blocked';
+
+  constructor(outcome: 'stale' | 'blocked') {
+    super(`Attachment cache repair stopped: ${outcome}`);
+    this.name = 'AttachmentCacheRepairStop';
+    this.outcome = outcome;
+  }
 }
 
 /** New persistent downloads stay closed until this account generation completes startup repair. */
@@ -130,32 +178,8 @@ async function performAttachmentCacheRecovery(
     throw new RangeError('Attachment cache recovery manifest exceeds its hard file limit.');
   }
 
-  const physicalPaths = new Set<string>();
-  const observations = manifest.map((file) => {
-    if (
-      file == null ||
-      typeof file !== 'object' ||
-      typeof file.uri !== 'string' ||
-      file.uri.length === 0 ||
-      file.uri.length > MAX_RECOVERY_PATH_CHARS ||
-      !Number.isSafeInteger(file.bytes) ||
-      file.bytes < 0 ||
-      !Number.isSafeInteger(file.mtimeMs) ||
-      file.mtimeMs < 0 ||
-      physicalPaths.has(file.uri)
-    ) {
-      throw new RangeError(
-        'Attachment cache recovery manifest is malformed or contains duplicates.',
-      );
-    }
-    physicalPaths.add(file.uri);
-    return {
-      path: file.uri,
-      bytes: file.bytes,
-      // A future filesystem timestamp must not make an orphan permanently too recent to evict.
-      lastUsedAt: Math.min(file.mtimeMs, now),
-    };
-  });
+  const observations = scanObservations(manifest, now);
+  const physicalPaths = new Set(observations.map((observation) => observation.path));
 
   // Validation of the ENTIRE manifest above is deliberately before this first mutation-capable
   // scope. A duplicate or malformed last page can therefore never leave an adopted first page.
@@ -242,6 +266,112 @@ async function performAttachmentCacheRecovery(
   return readyResult;
 }
 
+/**
+ * Storage → Repair Downloads (review item 888): bring an oversized old cache back within the
+ * limits startup recovery needs, then run that recovery so downloads turn back on.
+ *
+ * Startup recovery reads a complete manifest of at most 8,192 files before changing anything, so a
+ * larger old cache failed the same way on every launch. The repair reads the cache in pages with no
+ * total. Each page is accounted in the ledger exactly like a startup page, then the ordinary
+ * cleanup runs: it deletes files nothing references and the least recently used files beyond the
+ * normal 2 GiB / 4,096-file limits, keeps every protection (on screen, in use, outgoing sends,
+ * pending Photos copies, recent use), and clears each deleted file's attachment path so its message
+ * offers the download again. If cleanup cannot keep the ledger below startup's limit, the repair
+ * stops as `blocked` instead of growing it. Serialized with recovery.
+ */
+export function repairAttachmentCache(
+  db: AppDatabase,
+  lease: RealtimeDeliveryLease,
+  dependencies: AttachmentCacheRepairDependencies = {},
+): Promise<AttachmentCacheRepairResult> {
+  if (!lease.isCurrent()) return Promise.resolve({ status: 'stale' });
+  const promise = recoveryTail.then(() => performAttachmentCacheRepair(db, lease, dependencies));
+  recoveryTail = promise.then(
+    () => undefined,
+    () => undefined,
+  );
+  return promise;
+}
+
+async function performAttachmentCacheRepair(
+  db: AppDatabase,
+  lease: RealtimeDeliveryLease,
+  dependencies: AttachmentCacheRepairDependencies,
+): Promise<AttachmentCacheRepairResult> {
+  if (!lease.isCurrent()) return { status: 'stale' };
+  if (isAttachmentCacheRecoveryReady(lease)) return { status: 'not-needed' };
+  const scan = dependencies.scanForRepair ?? scanNativeAttachmentCacheForRepair;
+  const coordinator = dependencies.coordinator ?? attachmentCacheCoordinator;
+  const now = (dependencies.now ?? Date.now)();
+  if (!Number.isSafeInteger(now) || now < 0) {
+    throw new RangeError('Attachment cache repair time must be a non-negative safe integer.');
+  }
+
+  const scope = createAttachmentCacheAccountScope(lease);
+  let checkedFiles = 0;
+  let removedFiles = 0;
+  try {
+    await scan(
+      async (files) => {
+        const observations = scanObservations(files, now);
+        const adoption = await scope.runTracked(() =>
+          withDbTransaction(
+            db,
+            (context) => adoptAttachmentCacheScanBatch(context, observations, now),
+            () => scope.isCurrent(),
+          ),
+        );
+        if (adoption === null) throw new AttachmentCacheRepairStop('stale');
+        checkedFiles += files.length;
+
+        const inactive = await retireInactiveFiles(db, coordinator, scope);
+        if (inactive.status === 'stale') throw new AttachmentCacheRepairStop('stale');
+        const conformance = await coordinator.conformCurrentQuota(db, { scope });
+        if (conformance.status === 'stale') throw new AttachmentCacheRepairStop('stale');
+        removedFiles += inactive.confirmed + conformance.confirmed;
+        dependencies.onProgress?.({ checkedFiles, removedFiles });
+
+        if (!conformance.withinQuota) {
+          const usage = await scope.runTracked(() =>
+            withDbTransaction(
+              db,
+              async () => getAttachmentCacheUsage(db),
+              () => scope.isCurrent(),
+            ),
+          );
+          if (usage === null) throw new AttachmentCacheRepairStop('stale');
+          if (usage.files > REPAIR_MAX_LEDGER_FILES) {
+            throw new AttachmentCacheRepairStop('blocked');
+          }
+        }
+      },
+      () => lease.isCurrent(),
+    );
+  } catch (error) {
+    if (error instanceof AttachmentCacheRepairStop && error.outcome === 'blocked') {
+      return { status: 'blocked', checkedFiles, removedFiles };
+    }
+    if (
+      error instanceof AttachmentCacheRepairStop ||
+      error instanceof DbCommitGuardRejectedError ||
+      !lease.isCurrent()
+    ) {
+      return { status: 'stale' };
+    }
+    throw error;
+  }
+
+  // The cache now fits, so the ordinary recovery can finish and reopen downloads.
+  const recovery = await performAttachmentCacheRecovery(db, lease, dependencies);
+  if (recovery.status === 'stale') return { status: 'stale' };
+  return {
+    status: 'repaired',
+    checkedFiles,
+    removedFiles: removedFiles + recovery.retiredFiles,
+    withinQuota: recovery.withinQuota,
+  };
+}
+
 async function drainCrashOwners(
   db: AppDatabase,
   coordinator: AttachmentCacheCoordinator,
@@ -290,6 +420,39 @@ async function retireInactiveFiles(
 interface RecoveryDrainOutcome {
   readonly status: 'complete' | 'stale';
   readonly confirmed: number;
+}
+
+/** Validate a startup manifest or one repair page before any mutation. */
+function scanObservations(
+  files: readonly AttachmentCacheScanFile[],
+  now: number,
+): AttachmentCacheScanObservation[] {
+  const paths = new Set<string>();
+  return files.map((file) => {
+    if (
+      file == null ||
+      typeof file !== 'object' ||
+      typeof file.uri !== 'string' ||
+      file.uri.length === 0 ||
+      file.uri.length > MAX_RECOVERY_PATH_CHARS ||
+      !Number.isSafeInteger(file.bytes) ||
+      file.bytes < 0 ||
+      !Number.isSafeInteger(file.mtimeMs) ||
+      file.mtimeMs < 0 ||
+      paths.has(file.uri)
+    ) {
+      throw new RangeError(
+        'Attachment cache recovery manifest is malformed or contains duplicates.',
+      );
+    }
+    paths.add(file.uri);
+    return {
+      path: file.uri,
+      bytes: file.bytes,
+      // A future filesystem timestamp must not make an orphan permanently too recent to evict.
+      lastUsedAt: Math.min(file.mtimeMs, now),
+    };
+  });
 }
 
 function staleResult(scannedFiles = 0): AttachmentCacheRecoveryResult {

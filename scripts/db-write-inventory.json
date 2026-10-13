@@ -20830,7 +20830,7 @@
     {
       "id": "src/services/download/attachmentCacheRecovery.ts#recoverAttachmentCache.<callback:496dd08887>:mutator-call:953608ed77f1",
       "path": "src/services/download/attachmentCacheRecovery.ts",
-      "line": 95,
+      "line": 143,
       "symbol": "recoverAttachmentCache.<callback:496dd08887>",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery",
@@ -20843,7 +20843,7 @@
     {
       "id": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery.<callback:3a2cf5f87f>:mutator-call:1a83da503b5b",
       "path": "src/services/download/attachmentCacheRecovery.ts",
-      "line": 174,
+      "line": 198,
       "symbol": "performAttachmentCacheRecovery.<callback:3a2cf5f87f>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -20856,7 +20856,7 @@
     {
       "id": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery.<callback:3a2cf5f87f>:mutator-call:ffce77753be1",
       "path": "src/services/download/attachmentCacheRecovery.ts",
-      "line": 174,
+      "line": 198,
       "symbol": "performAttachmentCacheRecovery.<callback:3a2cf5f87f>",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery.<callback:3a2cf5f87f>.<callback:e15a4cbca8>",
@@ -20869,7 +20869,7 @@
     {
       "id": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery.<callback:3a2cf5f87f>.<callback:e15a4cbca8>:mutator-call:bae0a0c097d6",
       "path": "src/services/download/attachmentCacheRecovery.ts",
-      "line": 176,
+      "line": 200,
       "symbol": "performAttachmentCacheRecovery.<callback:3a2cf5f87f>.<callback:e15a4cbca8>",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch",
@@ -20882,7 +20882,7 @@
     {
       "id": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery.<callback:909eb19064>:mutator-call:95c779ab9d88",
       "path": "src/services/download/attachmentCacheRecovery.ts",
-      "line": 192,
+      "line": 216,
       "symbol": "performAttachmentCacheRecovery.<callback:909eb19064>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -20895,7 +20895,7 @@
     {
       "id": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery:mutator-call:d137fff87abf",
       "path": "src/services/download/attachmentCacheRecovery.ts",
-      "line": 210,
+      "line": 234,
       "symbol": "performAttachmentCacheRecovery",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reuseExisting",
@@ -20908,7 +20908,7 @@
     {
       "id": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery:mutator-call:12f416335881",
       "path": "src/services/download/attachmentCacheRecovery.ts",
-      "line": 220,
+      "line": 244,
       "symbol": "performAttachmentCacheRecovery",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheRecovery.ts#drainCrashOwners",
@@ -20921,7 +20921,7 @@
     {
       "id": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery:mutator-call:5c4827eec261",
       "path": "src/services/download/attachmentCacheRecovery.ts",
-      "line": 224,
+      "line": 248,
       "symbol": "performAttachmentCacheRecovery",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheRecovery.ts#retireInactiveFiles",
@@ -20934,7 +20934,7 @@
     {
       "id": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery:mutator-call:bbf16113995b",
       "path": "src/services/download/attachmentCacheRecovery.ts",
-      "line": 228,
+      "line": 252,
       "symbol": "performAttachmentCacheRecovery",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.conformCurrentQuota",
@@ -20945,9 +20945,113 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/attachmentCache.test.ts; test/db/withDbTransaction.test.ts; test/services/attachmentCacheCoordinator.test.ts; test/services/attachmentCacheRecovery.test.ts; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts; test/db/chatActionsRepo.test.ts; test/db/clearLocalCache.test.ts; test/services/deleteChat.test.ts"
     },
     {
+      "id": "src/services/download/attachmentCacheRecovery.ts#repairAttachmentCache.<callback:168a30045e>:mutator-call:6e8c74431e5a",
+      "path": "src/services/download/attachmentCacheRecovery.ts",
+      "line": 288,
+      "symbol": "repairAttachmentCache.<callback:168a30045e>",
+      "operation": "mutator-call",
+      "target": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRepair",
+      "detectedContext": "coordinated-delegation",
+      "owner": "repairAttachmentCache",
+      "transactionContext": "coordinated-delegation",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/attachmentCacheRepair.test.ts (oversized legacy cache repaired oldest-first, outgoing file kept, Disconnect stops it, blocked stop before the ledger limit, failure releases the recovery queue); test/services/attachmentCacheRecovery.test.ts"
+    },
+    {
+      "id": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRepair.<callback:b36ac8d3ed>.<callback:a3fc544dc6>:mutator-call:39cdec35aa39",
+      "path": "src/services/download/attachmentCacheRecovery.ts",
+      "line": 318,
+      "symbol": "performAttachmentCacheRepair.<callback:b36ac8d3ed>.<callback:a3fc544dc6>",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "performAttachmentCacheRepair",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/attachmentCacheRepair.test.ts (oversized legacy cache repaired oldest-first, outgoing file kept, Disconnect stops it, blocked stop before the ledger limit, failure releases the recovery queue); test/services/attachmentCacheRecovery.test.ts"
+    },
+    {
+      "id": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRepair.<callback:b36ac8d3ed>.<callback:a3fc544dc6>:mutator-call:4c68b9f245da",
+      "path": "src/services/download/attachmentCacheRecovery.ts",
+      "line": 318,
+      "symbol": "performAttachmentCacheRepair.<callback:b36ac8d3ed>.<callback:a3fc544dc6>",
+      "operation": "mutator-call",
+      "target": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRepair.<callback:b36ac8d3ed>.<callback:a3fc544dc6>.<callback:96213d75fd>",
+      "detectedContext": "withDbTransaction",
+      "owner": "performAttachmentCacheRepair",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/attachmentCacheRepair.test.ts (oversized legacy cache repaired oldest-first, outgoing file kept, Disconnect stops it, blocked stop before the ledger limit, failure releases the recovery queue); test/services/attachmentCacheRecovery.test.ts"
+    },
+    {
+      "id": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRepair.<callback:b36ac8d3ed>.<callback:a3fc544dc6>.<callback:96213d75fd>:mutator-call:98410d7592ed",
+      "path": "src/services/download/attachmentCacheRecovery.ts",
+      "line": 320,
+      "symbol": "performAttachmentCacheRepair.<callback:b36ac8d3ed>.<callback:a3fc544dc6>.<callback:96213d75fd>",
+      "operation": "mutator-call",
+      "target": "src/db/repositories/attachmentCache.ts#adoptAttachmentCacheScanBatch",
+      "detectedContext": "withDbTransaction",
+      "owner": "performAttachmentCacheRepair",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/attachmentCacheRepair.test.ts (oversized legacy cache repaired oldest-first, outgoing file kept, Disconnect stops it, blocked stop before the ledger limit, failure releases the recovery queue); test/services/attachmentCacheRecovery.test.ts"
+    },
+    {
+      "id": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRepair.<callback:b36ac8d3ed>:mutator-call:1d40210ef396",
+      "path": "src/services/download/attachmentCacheRecovery.ts",
+      "line": 327,
+      "symbol": "performAttachmentCacheRepair.<callback:b36ac8d3ed>",
+      "operation": "mutator-call",
+      "target": "src/services/download/attachmentCacheRecovery.ts#retireInactiveFiles",
+      "detectedContext": "coordinated-delegation",
+      "owner": "performAttachmentCacheRepair",
+      "transactionContext": "coordinated-delegation",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/attachmentCacheRepair.test.ts (oversized legacy cache repaired oldest-first, outgoing file kept, Disconnect stops it, blocked stop before the ledger limit, failure releases the recovery queue); test/services/attachmentCacheRecovery.test.ts"
+    },
+    {
+      "id": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRepair.<callback:b36ac8d3ed>:mutator-call:0f7c4623b752",
+      "path": "src/services/download/attachmentCacheRecovery.ts",
+      "line": 329,
+      "symbol": "performAttachmentCacheRepair.<callback:b36ac8d3ed>",
+      "operation": "mutator-call",
+      "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.conformCurrentQuota",
+      "detectedContext": "coordinated-delegation",
+      "owner": "performAttachmentCacheRepair",
+      "transactionContext": "coordinated-delegation",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/attachmentCacheRepair.test.ts (oversized legacy cache repaired oldest-first, outgoing file kept, Disconnect stops it, blocked stop before the ledger limit, failure releases the recovery queue); test/services/attachmentCacheRecovery.test.ts"
+    },
+    {
+      "id": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRepair.<callback:b36ac8d3ed>.<callback:d8fcd57a4c>:mutator-call:0dd6296edc57",
+      "path": "src/services/download/attachmentCacheRecovery.ts",
+      "line": 336,
+      "symbol": "performAttachmentCacheRepair.<callback:b36ac8d3ed>.<callback:d8fcd57a4c>",
+      "operation": "mutator-call",
+      "target": "src/db/transaction.ts#withDbTransaction",
+      "detectedContext": "transaction-coordinator",
+      "owner": "performAttachmentCacheRepair",
+      "transactionContext": "transaction-coordinator",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/attachmentCacheRepair.test.ts (oversized legacy cache repaired oldest-first, outgoing file kept, Disconnect stops it, blocked stop before the ledger limit, failure releases the recovery queue); test/services/attachmentCacheRecovery.test.ts"
+    },
+    {
+      "id": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRepair:mutator-call:31df304867f8",
+      "path": "src/services/download/attachmentCacheRecovery.ts",
+      "line": 365,
+      "symbol": "performAttachmentCacheRepair",
+      "operation": "mutator-call",
+      "target": "src/services/download/attachmentCacheRecovery.ts#performAttachmentCacheRecovery",
+      "detectedContext": "coordinated-delegation",
+      "owner": "performAttachmentCacheRepair",
+      "transactionContext": "coordinated-delegation",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/attachmentCacheRepair.test.ts (oversized legacy cache repaired oldest-first, outgoing file kept, Disconnect stops it, blocked stop before the ledger limit, failure releases the recovery queue); test/services/attachmentCacheRecovery.test.ts"
+    },
+    {
       "id": "src/services/download/attachmentCacheRecovery.ts#drainCrashOwners:mutator-call:25bf144af248",
       "path": "src/services/download/attachmentCacheRecovery.ts",
-      "line": 252,
+      "line": 382,
       "symbol": "drainCrashOwners",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.drainDueRetirements",
@@ -20960,7 +21064,7 @@
     {
       "id": "src/services/download/attachmentCacheRecovery.ts#retireInactiveFiles:mutator-call:0004c1106585",
       "path": "src/services/download/attachmentCacheRecovery.ts",
-      "line": 279,
+      "line": 409,
       "symbol": "retireInactiveFiles",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries",
@@ -21194,7 +21298,7 @@
     {
       "id": "src/services/download/index.ts#download:mutator-call:31f3d4057a6a",
       "path": "src/services/download/index.ts",
-      "line": 99,
+      "line": 121,
       "symbol": "download",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#downloadWithFetcher",
@@ -21207,7 +21311,7 @@
     {
       "id": "src/services/download/index.ts#downloadWithClient:mutator-call:9b2b0d3d3d27",
       "path": "src/services/download/index.ts",
-      "line": 118,
+      "line": 140,
       "symbol": "downloadWithClient",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#downloadWithFetcher",
@@ -21220,7 +21324,7 @@
     {
       "id": "src/services/download/index.ts#downloadWithFetcher:mutator-call:240f9d6148ae",
       "path": "src/services/download/index.ts",
-      "line": 168,
+      "line": 190,
       "symbol": "downloadWithFetcher",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#runDownload",
@@ -21233,7 +21337,7 @@
     {
       "id": "src/services/download/index.ts#redownload:mutator-call:e09cebc88e10",
       "path": "src/services/download/index.ts",
-      "line": 235,
+      "line": 257,
       "symbol": "redownload",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#runDownload",
@@ -21246,7 +21350,7 @@
     {
       "id": "src/services/download/index.ts#downloadScope.reserveCache:mutator-call:9a68094fc094",
       "path": "src/services/download/index.ts",
-      "line": 290,
+      "line": 312,
       "symbol": "downloadScope.reserveCache",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reserve",
@@ -21259,7 +21363,7 @@
     {
       "id": "src/services/download/index.ts#downloadScope.reuseCache:mutator-call:18cfc11c39e4",
       "path": "src/services/download/index.ts",
-      "line": 298,
+      "line": 320,
       "symbol": "downloadScope.reuseCache",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reuseExisting",
@@ -21272,7 +21376,7 @@
     {
       "id": "src/services/download/index.ts#runDownload:mutator-call:ea7e1163b248",
       "path": "src/services/download/index.ts",
-      "line": 386,
+      "line": 408,
       "symbol": "runDownload",
       "operation": "mutator-call",
       "target": "src/services/download/downloadService.ts#ensureDownloadedOutcome",
@@ -21285,7 +21389,7 @@
     {
       "id": "src/services/download/index.ts#runDownload.<callback:f07558eb37>.<callback:795e53be0d>:mutator-call:cab0a3e0fcab",
       "path": "src/services/download/index.ts",
-      "line": 432,
+      "line": 454,
       "symbol": "runDownload.<callback:f07558eb37>.<callback:795e53be0d>",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#runDownload",
