@@ -262,27 +262,6 @@ export interface ParticipantDetails {
   colors: (string | null)[];
 }
 
-/**
- * Collapse duplicate participants in the two positionally-aligned name/uri arrays (from the
- * inbox `group_concat`s). A group member reachable via multiple handles (phone + email, two
- * numbers) is stored as multiple handle rows, so the collage would otherwise draw them twice.
- *
- * Two collapse rules:
- *  - Same [name, uri] pair — the common case where both handles resolved to the same contact.
- *  - Same NON-NULL photo uri, regardless of name — a member who ISN'T saved as a named device
- *    contact gets each handle labelled with its own raw address (so the names differ), yet both
- *    handles share the one downloaded contact photo. A photo uri is per-contact, so a shared
- *    non-null photo reliably means one person. (Null/absent photos are never merged — that would
- *    collapse distinct un-photographed people into one tile.)
- */
-export function dedupeParticipants(
-  names: string[],
-  uris: (string | null)[],
-): { names: string[]; uris: (string | null)[] } {
-  const { names: dedupedNames, uris: dedupedUris } = dedupeParticipantDetails(names, uris, []);
-  return { names: dedupedNames, uris: dedupedUris };
-}
-
 /** Collapse participant rows while retaining aligned avatar colors for the surviving handles. */
 export function dedupeParticipantDetails(
   names: string[],

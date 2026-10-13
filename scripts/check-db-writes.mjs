@@ -8695,7 +8695,6 @@ function incomingIngressCertifiedNodes({
   const devQueue = fn(devPath, 'devQueueIncomingMessageWithoutDrain');
   const devResumeQueued = fn(devPath, 'devResumeQueuedIncomingMessages');
   const injectMessage = fn(devPath, 'injectMessage');
-  const injectEffect = fn(devPath, 'devInjectEffect');
   const required = [
     dispatchRealtimeEvent,
     persistAuthenticatedLockedFcmV3Event,
@@ -8805,7 +8804,6 @@ function incomingIngressCertifiedNodes({
     devQueue,
     devResumeQueued,
     injectMessage,
-    injectEffect,
   ];
   if (
     required.some((callable) => !callable?.body) ||
@@ -11853,7 +11851,6 @@ function incomingIngressCertifiedNodes({
     [devQueue, devPersist],
     [devResumeQueued, devResume],
     [injectMessage, devPushInject],
-    [injectEffect, devPushInject],
   ];
   const devOuterNodes = [];
   const devCallbacks = [];
@@ -14036,7 +14033,7 @@ function incomingIngressCertifiedNodes({
     return empty();
   }
   const certified = new Set(approved);
-  if (approved.length !== 28 || certified.size !== 28) return empty();
+  if (approved.length !== 27 || certified.size !== 27) return empty();
 
   const protectedOwners = new Set([
     dispatchRealtimeEvent,

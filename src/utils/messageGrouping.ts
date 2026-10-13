@@ -34,11 +34,6 @@ export function showTail(msg: MessageRow, newer: MessageRow | null): boolean {
   return Math.abs((newer.dateCreated ?? 0) - (msg.dateCreated ?? 0)) > TAIL_GAP_MS;
 }
 
-/** Avatar shows at the bottom of a received group (group chats only). */
-export function showAvatar(msg: MessageRow, newer: MessageRow | null, isGroup: boolean): boolean {
-  return isGroup && !msg.isFromMe && showTail(msg, newer);
-}
-
 /** Date separator above `msg` when there's a >30-min gap AND a new calendar day. */
 export function showDateSeparator(msg: MessageRow, older: MessageRow | null): boolean {
   if (!older) return true;

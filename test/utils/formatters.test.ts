@@ -2,7 +2,6 @@ import {
   avatarSeed,
   buildPreview,
   chatServiceFromGuid,
-  dedupeParticipants,
   formatChatDate,
   isGroupRow,
   resolveChatService,
@@ -200,31 +199,6 @@ describe('chat resolution', () => {
         participantNames: 'Alice',
       }),
     ).toBe('Alice');
-  });
-});
-
-describe('dedupeParticipants', () => {
-  it('collapses a member that appears twice (two handles, same photo)', () => {
-    // Carol is reachable via two handles → same name + same avatar repeated.
-    const parts = dedupeParticipants(['Carol', 'Carol', 'Bob'], ['c.jpg', 'c.jpg', 'b.jpg']);
-    expect(parts.names).toEqual(['Carol', 'Bob']);
-    expect(parts.uris).toEqual(['c.jpg', 'b.jpg']);
-  });
-
-  it('keeps distinct people whose names differ', () => {
-    const parts = dedupeParticipants(['Alice', 'Bob'], [null, null]);
-    expect(parts.names).toEqual(['Alice', 'Bob']);
-    expect(parts.uris).toEqual([null, null]);
-  });
-
-  it('does not collapse same name with different photos', () => {
-    const parts = dedupeParticipants(['Sam', 'Sam'], ['a.jpg', 'b.jpg']);
-    expect(parts.names).toEqual(['Sam', 'Sam']);
-  });
-
-  it('handles empty and single-element inputs', () => {
-    expect(dedupeParticipants([], [])).toEqual({ names: [], uris: [] });
-    expect(dedupeParticipants(['Alice'], [null])).toEqual({ names: ['Alice'], uris: [null] });
   });
 });
 

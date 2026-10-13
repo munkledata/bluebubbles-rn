@@ -90,10 +90,6 @@ const UpdateCheck = z
   .nullish();
 export type UpdateCheck = z.infer<typeof UpdateCheck>;
 
-/** GET /server/update/check — newer server version available? UNIMPLEMENTED on Gator. */
-export const checkUpdate = (_http: HttpClient): Promise<UpdateCheck> =>
-  Promise.reject(new UnimplementedEndpointError('/server/update/check'));
-
 export interface StatTotals {
   messages: number;
   images: number;

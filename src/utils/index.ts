@@ -3,7 +3,6 @@ export * from './version';
 export * from './date';
 export * from './message';
 export * from './emoji';
-export * from './mentions';
 export * from './swipeGesture';
 export * from './scrollPin';
 export * from './chatNavigation';

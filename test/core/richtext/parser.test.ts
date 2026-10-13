@@ -1,4 +1,4 @@
-import { hasMention, parseAttributedRuns, plainTextFromAttributedBody } from '@core/richtext';
+import { parseAttributedRuns, plainTextFromAttributedBody } from '@core/richtext';
 
 // A realistic Gator attributedBody for "Hey @Alice!" where "@Alice" is a
 // confirmed mention. range is NSRange [start, length]; the only meaningful
@@ -33,7 +33,6 @@ describe('parseAttributedRuns', () => {
   it('splits a mention out of the surrounding text by NSRange [start, length]', () => {
     const runs = parseAttributedRuns(MENTION_BODY, 'Hey @Alice!');
     expect(runs).toEqual([{ text: 'Hey ' }, { text: '@Alice', mention: true }, { text: '!' }]);
-    expect(hasMention(runs)).toBe(true);
   });
 
   it('treats a part with no runs as one plain run', () => {
@@ -54,7 +53,6 @@ describe('parseAttributedRuns', () => {
     const runs = parseAttributedRuns(body, '');
     expect(runs[0]).toEqual({ text: '￼', attachment: true });
     expect(runs[1]).toEqual({ text: ' photo' });
-    expect(hasMention(runs)).toBe(false);
   });
 
   it('ignores unknown attribute keys (forward compatible) → plain text', () => {

@@ -8,11 +8,9 @@ import {
   reconcileOutgoingSuccess,
 } from '@db/repositories';
 import {
-  devInjectEffect,
   devQueueIncomingMessageWithoutDrain,
   devResumeQueuedIncomingMessages,
   devSendFake,
-  devSendFakeImage,
   devSendFakeReaction,
   injectMessage,
 } from '@features/conversations/devSeed';
@@ -124,18 +122,6 @@ describe('DEV fake sends — account ownership', () => {
     expect(mockReconcile).not.toHaveBeenCalled();
   });
 
-  it('drops a delayed image acknowledgement after its account lease is retired', async () => {
-    const accountA = captureRealtimeDeliveryLease();
-    await devSendFakeImage('chat-a', accountA);
-    expect(mockInsertAttachment).toHaveBeenCalledTimes(1);
-
-    await pauseRealtimeDeliveries();
-    resumeRealtimeDeliveries();
-    await jest.advanceTimersByTimeAsync(700);
-
-    expect(mockReconcile).not.toHaveBeenCalled();
-  });
-
   it('tracks the reaction acknowledgement and preserves its null delivery timestamp', async () => {
     const reconcileA = deferred();
     mockReconcile.mockReturnValueOnce(reconcileA.promise);
@@ -170,9 +156,8 @@ describe('DEV fake sends — account ownership', () => {
     const accountA = captureRealtimeDeliveryLease();
 
     await injectMessage(accountA);
-    await devInjectEffect('chat-a', accountA);
 
-    expect(mockDevPushInject).toHaveBeenCalledTimes(2);
+    expect(mockDevPushInject).toHaveBeenCalledTimes(1);
     for (const call of mockDevPushInject.mock.calls) {
       const payload = call[1] as { guid?: string; uuid?: string };
       const eventId = payload.guid ?? payload.uuid;

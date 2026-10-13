@@ -2,7 +2,6 @@ import type { MessageRow } from '@db/repositories';
 import {
   GROUP_BREAK_MS,
   sameSender,
-  showAvatar,
   showDateSeparator,
   showSenderHeader,
   showTail,
@@ -83,14 +82,6 @@ describe('showSenderHeader', () => {
         true,
       ),
     ).toBe(true);
-  });
-});
-
-describe('showAvatar', () => {
-  it('shows at the bottom of a received group only', () => {
-    expect(showAvatar(m({ isFromMe: 0 }), null, true)).toBe(true);
-    expect(showAvatar(m({ isFromMe: 0 }), null, false)).toBe(false);
-    expect(showAvatar(m({ isFromMe: 1 }), null, true)).toBe(false);
   });
 });
 

@@ -1,4 +1,3 @@
-import type { MessageSummaryInfo } from '../models/message';
 import { MAX_MESSAGE_PART_INDEX } from '../reactions/reactionType';
 import { isExactMessagePartTopology, type MessagePartTopology } from './retraction';
 
@@ -78,15 +77,4 @@ export function resolveExactMessageTargetPartIndex(
 
   if (layout.topologySupported !== false) return undefined;
   return resolveTargetPartIndex(layout);
-}
-
-/**
- * A re-edit must target the part Apple already recorded. Ambiguous/malformed histories return null
- * so callers can fall back to the strict visible-layout resolver.
- */
-export function editedPartFromSummary(info: MessageSummaryInfo | null | undefined): number | null {
-  const keys = Object.keys(info?.editedParts ?? {});
-  if (keys.length !== 1 || !/^(0|[1-9]\d*)$/.test(keys[0] ?? '')) return null;
-  const partIndex = Number(keys[0]);
-  return Number.isSafeInteger(partIndex) && partIndex <= MAX_MESSAGE_PART_INDEX ? partIndex : null;
 }

@@ -96,15 +96,3 @@ export function showConfirm(opts: {
     },
   ]);
 }
-
-/** Ergonomic single-button info/error alert. */
-export function showAlert(opts: {
-  title: string;
-  message?: string;
-  buttonText?: string;
-  onDismiss?: () => void;
-}): number {
-  return showDialog(opts.title, opts.message, [
-    { text: opts.buttonText ?? 'OK', style: 'default', onPress: opts.onDismiss },
-  ]);
-}

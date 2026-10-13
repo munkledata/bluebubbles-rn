@@ -111,15 +111,6 @@ describe('server-management support boundaries', () => {
     expect(serverApi).not.toHaveProperty('serverLogs');
     expect(serverApi).not.toHaveProperty('zrokStatus');
   });
-
-  it('checkUpdate stays unimplemented (no HTTP call)', async () => {
-    const err = await serverApi.checkUpdate(client()).then(
-      () => null,
-      (e: unknown) => e,
-    );
-    expect(isUnimplementedEndpoint(err)).toBe(true);
-    expect(mockKy).not.toHaveBeenCalled();
-  });
 });
 
 describe('serverStatTotals uses the typed statistics route', () => {

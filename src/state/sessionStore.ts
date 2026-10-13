@@ -285,10 +285,6 @@ export const useRcsMutationEnabled = (chatGuid?: string): boolean =>
       : isCurrentRcsChatGuid(s.serverInfo, chatGuid),
   );
 
-/** React hook: can the server emit `message-deleted`? (For future deletion affordances.) */
-export const useMessageDeletedSupported = (): boolean =>
-  useSessionStore((s) => !!s.serverInfo?.supports_message_deleted);
-
 /** React hook: can global search include bounded message-text matches from the Mac? */
 export const useMessageSearchSupported = (): boolean =>
   useSessionStore((s) => !!s.serverInfo?.supports_message_search);
@@ -310,6 +306,3 @@ export const useSendAttachmentTextSupported = (service: string | null | undefine
     }
     return false;
   });
-
-/** Helper-backed iMessage-account endpoints are retired for this release. */
-export const useIcloudAccountSupported = (): boolean => false;

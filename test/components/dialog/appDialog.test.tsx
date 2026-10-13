@@ -2,7 +2,7 @@
  * AppDialog (src/ui/dialog/AppDialog.tsx) driven END-TO-END through the REAL dialog store
  * (src/ui/dialog/dialogStore.ts) — the store is NEVER mocked. Contract exercised here:
  *   - nothing renders while no dialog is active (host returns null);
- *   - showDialog / showAlert / showConfirm set the title + optional message text;
+ *   - showDialog / showConfirm set the title + optional message text;
  *   - pressing a button fires that button's onPress AND closes the dialog (store.current → null);
  *   - a cancel button fires its onPress (if any) and closes;
  *   - destructive vs default vs cancel buttons get their themed text color/weight;
@@ -17,7 +17,7 @@ import React from 'react';
 import { StyleSheet } from 'react-native';
 import { renderWithTheme, screen, fireEvent, act, waitFor } from '../support/renderWithTheme';
 import { AppDialog } from '@ui/dialog/AppDialog';
-import { useDialogStore, showDialog, showAlert, showConfirm } from '@ui/dialog/dialogStore';
+import { useDialogStore, showDialog, showConfirm } from '@ui/dialog/dialogStore';
 import { resolvePreset, DEFAULT_PRESET } from '@ui/theme/tokens';
 
 // The harness default preset — used to derive the EXPECTED button colors from the source tokens
@@ -81,7 +81,7 @@ describe('AppDialog (driven through the real dialogStore)', () => {
   it('omits the message row when no message is given', async () => {
     await renderWithTheme(<AppDialog />);
     await act(async () => {
-      showAlert({ title: 'Just a title' });
+      showDialog('Just a title');
     });
     expect(await screen.findByText('Just a title')).toBeTruthy();
     // The card should hold only the title text + the button text — no stray secondary line.
@@ -153,7 +153,7 @@ describe('AppDialog (driven through the real dialogStore)', () => {
       showConfirm({
         title: 'Step 1',
         confirmText: 'Next',
-        onConfirm: () => showAlert({ title: 'Step 2 done' }),
+        onConfirm: () => showDialog('Step 2 done'),
       });
     });
     fireEvent.press(await screen.findByText('Next'));

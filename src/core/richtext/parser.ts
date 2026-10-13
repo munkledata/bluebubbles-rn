@@ -83,11 +83,6 @@ export function parseAttributedRuns(
   return out.length > 0 ? out : fallback();
 }
 
-/** True if any run is a confirmed mention (gates the rich renderer). */
-export function hasMention(runs: TextRun[]): boolean {
-  return runs.some((r) => r.mention);
-}
-
 /** Renderable/editable body text: exclude attachment runs and Apple's U+FFFC placeholders. */
 export function bodyTextFromRuns(runs: TextRun[]): string {
   return runs

@@ -1690,7 +1690,7 @@ test('certifies exactly the reviewed direct incoming-ingress edge nodes', () => 
     (finding) => finding.detectedContext === 'incoming-ingress-delegation',
   );
 
-  assert.equal(ingress.length, 28);
+  assert.equal(ingress.length, 27);
   assert.deepEqual(
     Object.fromEntries(
       [...new Set(ingress.map((finding) => finding.path))]
@@ -1698,7 +1698,7 @@ test('certifies exactly the reviewed direct incoming-ingress edge nodes', () => 
         .map((path) => [path, ingress.filter((finding) => finding.path === path).length]),
     ),
     {
-      'src/features/conversations/devSeed.ts': 4,
+      'src/features/conversations/devSeed.ts': 3,
       'src/services/notifications/fcmMessaging.ts': 10,
       'src/services/notifications/registerFcmBackgroundHandler.ts': 1,
       'src/services/realtimeControl.ts': 13,
@@ -3114,7 +3114,7 @@ test('certifies the exact residual repository delegations after explicit-owner c
     (finding) => !devFixtures.includes(finding) && !scheduledStateMachine.includes(finding),
   );
 
-  assert.equal(devFixtures.length, 14);
+  assert.equal(devFixtures.length, 13);
   assert.equal(intentionalBoundaries.length, 47);
   assert.equal(scheduledStateMachine.length, 12);
   assert.deepEqual(
@@ -3127,7 +3127,6 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/db/repositories/maintenance.ts#clearLocalCache:mutator-call:e64441bf4d7f',
       'src/db/repositories/scheduled.ts#reconcileServerScheduled:mutator-call:6df044728f30',
       'src/features/conversations/devSeed.ts#devSendFake.<callback:aa9d83c161>:mutator-call:bccc7d8e3937',
-      'src/features/conversations/devSeed.ts#devSendFakeImage.<callback:9013644e83>:mutator-call:e1c487f58863',
       'src/features/conversations/devSeed.ts#devSendFakeReaction.<callback:191d06baf6>:mutator-call:d7f94c27bd01',
       'src/features/conversations/devSeed.ts#queueDevSendReconcile.<callback:23210be24c>.reconcile:mutator-call:3bcd92c0614f',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:263f9a2cf920',
@@ -3628,7 +3627,6 @@ test('certifies exactly the reviewed conversation-action delegation edges', () =
     delegated.map((finding) => finding.id).sort(),
     [
       'src/features/conversations/devSeed.ts#devSendFake.<callback:aa9d83c161>:mutator-call:bccc7d8e3937',
-      'src/features/conversations/devSeed.ts#devSendFakeImage.<callback:9013644e83>:mutator-call:e1c487f58863',
       'src/features/conversations/devSeed.ts#devSendFakeReaction.<callback:191d06baf6>:mutator-call:d7f94c27bd01',
       'src/features/conversations/devSeed.ts#queueDevSendReconcile.<callback:23210be24c>.reconcile:mutator-call:3bcd92c0614f',
       'src/features/conversations/devSeed.ts#queueDevSendReconcile.<callback:23210be24c>:mutator-reference:ccd50e1f6192',

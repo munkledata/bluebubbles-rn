@@ -10,7 +10,6 @@ import { StyleSheet } from 'react-native';
 import { renderWithTheme, screen } from '../support/renderWithTheme';
 import { GroupAvatar } from '@ui/primitives/GroupAvatar';
 import { darkTheme } from '@ui/theme/tokens';
-import { dedupeParticipants } from '@utils/chat';
 
 describe('GroupAvatar', () => {
   it('draws the first two participants (back + front)', async () => {
@@ -68,15 +67,5 @@ describe('GroupAvatar', () => {
   it('falls back to "?" for both tiles with an empty participant list', async () => {
     await renderWithTheme(<GroupAvatar names={[]} />);
     expect(screen.getAllByText('?')).toHaveLength(2);
-  });
-
-  it('after dedupeParticipants collapses a repeated person, the collage shows two DISTINCT people', async () => {
-    // Same person reachable via two handles (same name+photo) collapses to one entry, so the
-    // second tile is the genuinely different next person — not a duplicate of the first.
-    const { names } = dedupeParticipants(['Alice', 'Alice', 'Bob'], [null, null, null]);
-    expect(names).toEqual(['Alice', 'Bob']);
-    await renderWithTheme(<GroupAvatar names={names} />);
-    expect(screen.getByText('A')).toBeTruthy();
-    expect(screen.getByText('B')).toBeTruthy();
   });
 });

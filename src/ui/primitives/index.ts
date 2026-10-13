@@ -1,5 +1,4 @@
 export * from './Screen';
-export * from './Bubble';
 export * from './Avatar';
 export * from './GroupAvatar';
 export * from './Icon';

@@ -2,7 +2,6 @@ import { Attachment, Chat, Message } from '@core/models';
 import { getDatabase } from '@db/database';
 import {
   getChatIdByGuid,
-  insertOutgoingAttachment,
   insertOutgoingReaction,
   insertOutgoingText,
   listChatsForInbox,
@@ -460,39 +459,6 @@ function queueDevSendReconcile(
   }, delayMs);
 }
 
-/** DEV: optimistically send an image (rendered from a remote URL, reconciled locally). */
-export async function devSendFakeImage(
-  chatGuid: string,
-  accountLease: RealtimeDeliveryLease,
-): Promise<void> {
-  await runDevAccountWrite(accountLease, async () => {
-    const db = getDatabase();
-    const chatId = await getChatIdByGuid(db, chatGuid);
-    if (chatId == null || !accountLease.isCurrent()) return;
-    const tempGuid = generateTempGuid();
-    const now = Date.now();
-    await insertOutgoingAttachment(db, {
-      tempGuid,
-      attachmentGuid: `${tempGuid}-att`,
-      chatId,
-      chatGuid,
-      localPath: `https://picsum.photos/seed/${tempGuid}/800/600`,
-      mimeType: 'image/jpeg',
-      transferName: 'photo.jpg',
-      totalBytes: 180_000,
-      width: 800,
-      height: 600,
-      now,
-    });
-    queueDevSendReconcile(db, tempGuid, now, {
-      delayMs: 700,
-      delivered: true,
-      chatGuid,
-      accountLease,
-    });
-  });
-}
-
 /**
  * DEV: optimistic send with a simulated server round-trip (no real server).
  * Inserts the temp message (`sending`), then reconciles to `sent` after a delay
@@ -649,66 +615,6 @@ export async function injectMessage(accountLease: RealtimeDeliveryLease): Promis
         isFromMe: false,
         dateCreated: Date.now(),
         originalROWID: 100_000 + injectCounter,
-        handle: { address: 'live@x.com', displayName: 'Live Sender' },
-        chats: [
-          {
-            guid: target.guid,
-            chatIdentifier: target.chatIdentifier,
-            displayName: target.displayName,
-            style: target.style,
-            isArchived: !!target.isArchived,
-            isPinned: !!target.isPinned,
-            muteType: target.muteType,
-          },
-        ],
-      },
-      accountLease,
-      { transportOccurrenceId: `dev:${messageGuid}` },
-    );
-  });
-}
-
-// Cycle through bubble + screen effects so repeated dev taps demo each one.
-const EFFECT_CYCLE = [
-  'com.apple.MobileSMS.expressivesend.impact', // slam
-  'com.apple.MobileSMS.expressivesend.loud',
-  'com.apple.MobileSMS.expressivesend.gentle',
-  'com.apple.MobileSMS.expressivesend.invisibleink',
-  'com.apple.messages.effect.CKConfettiEffect',
-  'com.apple.messages.effect.CKHappyBirthdayEffect', // balloons
-  'com.apple.messages.effect.CKFireworksEffect',
-];
-let effectIdx = 0;
-
-/**
- * DEV: inject an inbound message carrying the next send-effect into a specific
- * chat (cycles through bubble + screen effects). Injecting into the OPEN chat lets
- * both the bubble animation and the full-screen overlay play in place.
- */
-export async function devInjectEffect(
-  chatGuid: string,
-  accountLease: RealtimeDeliveryLease,
-): Promise<void> {
-  if (!isDevServer()) return;
-  await runDevAccountWrite(accountLease, async () => {
-    const db = getDatabase();
-    const inbox = await listChatsForInbox(db, { includeArchived: true });
-    if (!accountLease.isCurrent()) return;
-    const target = inbox.find((c) => c.guid === chatGuid) ?? inbox[0];
-    if (!target) return;
-    const effectId = EFFECT_CYCLE[effectIdx % EFFECT_CYCLE.length]!;
-    effectIdx += 1;
-    injectCounter += 1;
-    const messageGuid = `fx-${injectCounter}-${target.guid}`;
-    await devPush.inject(
-      'new-message',
-      {
-        guid: messageGuid,
-        text: effectId.split('.').pop() ?? 'effect',
-        isFromMe: false,
-        dateCreated: Date.now(),
-        originalROWID: 100_000 + injectCounter,
-        expressiveSendStyleId: effectId,
         handle: { address: 'live@x.com', displayName: 'Live Sender' },
         chats: [
           {

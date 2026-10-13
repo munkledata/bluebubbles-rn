@@ -13784,7 +13784,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#seedFixtures:mutator-call:9baf717e8519",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 165,
+      "line": 164,
       "symbol": "seedFixtures",
       "operation": "mutator-call",
       "target": "src/db/repositories/handles.ts#upsertHandles",
@@ -13797,7 +13797,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#seedFixtures:mutator-call:c27d9f7b2550",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 169,
+      "line": 168,
       "symbol": "seedFixtures",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#upsertChats",
@@ -13810,7 +13810,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#seedFixtures:mutator-call:263f9a2cf920",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 185,
+      "line": 184,
       "symbol": "seedFixtures",
       "operation": "mutator-call",
       "target": "src/db/repositories/messages.ts#upsertMessages",
@@ -13823,7 +13823,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#seedFixtures:mutator-call:71542bb99e88",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 201,
+      "line": 200,
       "symbol": "seedFixtures",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#setLastReadMessageGuid",
@@ -13836,7 +13836,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#seedFixtures:mutator-call:737bc3296081",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 209,
+      "line": 208,
       "symbol": "seedFixtures",
       "operation": "mutator-call",
       "target": "src/db/repositories/handles.ts#upsertHandles",
@@ -13849,7 +13849,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#seedFixtures:mutator-call:98585f0a84d3",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 230,
+      "line": 229,
       "symbol": "seedFixtures",
       "operation": "mutator-call",
       "target": "src/db/repositories/messages.ts#upsertMessages",
@@ -13862,7 +13862,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#seedFixtures:mutator-call:c189a52293cc",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 247,
+      "line": 246,
       "symbol": "seedFixtures",
       "operation": "mutator-call",
       "target": "src/db/repositories/messages.ts#upsertMessages",
@@ -13875,7 +13875,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#seedFixtures:mutator-call:4663da7605da",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 302,
+      "line": 301,
       "symbol": "seedFixtures",
       "operation": "mutator-call",
       "target": "src/db/repositories/messages.ts#upsertMessages",
@@ -13888,7 +13888,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#seedFixtures:mutator-call:f915d3f0f0ea",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 406,
+      "line": 405,
       "symbol": "seedFixtures",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#updateAttachmentLocalPath",
@@ -13901,7 +13901,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#seedFixtures:mutator-call:2d1329c7ad6c",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 412,
+      "line": 411,
       "symbol": "seedFixtures",
       "operation": "mutator-call",
       "target": "src/db/repositories/attachments.ts#updateAttachmentLocalPath",
@@ -13914,7 +13914,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#queueDevSendReconcile.<callback:23210be24c>.reconcile:mutator-call:3bcd92c0614f",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 445,
+      "line": 444,
       "symbol": "queueDevSendReconcile.<callback:23210be24c>.reconcile",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#reconcileOutgoingSuccess",
@@ -13927,7 +13927,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#queueDevSendReconcile.<callback:23210be24c>:mutator-reference:ccd50e1f6192",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 456,
+      "line": 455,
       "symbol": "queueDevSendReconcile.<callback:23210be24c>",
       "operation": "mutator-reference",
       "target": "src/features/conversations/devSeed.ts#queueDevSendReconcile.<callback:23210be24c>.reconcile",
@@ -13938,22 +13938,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/features/conversations/devSeedAccountScope.test.ts; test/features/conversations/devSeedTransaction.test.ts; test/services/deleteChat.test.ts; test/services/markUnread.test.ts; test/services/notificationActions.test.ts; test/services/attachmentCacheCoordinator.test.ts; test/services/scheduledAccountScope.test.ts"
     },
     {
-      "id": "src/features/conversations/devSeed.ts#devSendFakeImage.<callback:9013644e83>:mutator-call:e1c487f58863",
-      "path": "src/features/conversations/devSeed.ts",
-      "line": 474,
-      "symbol": "devSendFakeImage.<callback:9013644e83>",
-      "operation": "mutator-call",
-      "target": "src/db/repositories/attachments.ts#insertOutgoingAttachment",
-      "detectedContext": "coordinated-delegation",
-      "owner": "devSendFakeImage",
-      "transactionContext": "coordinated-delegation",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/features/conversations/devSeedAccountScope.test.ts; test/features/conversations/devSeedTransaction.test.ts; test/services/deleteChat.test.ts; test/services/markUnread.test.ts; test/services/notificationActions.test.ts; test/services/attachmentCacheCoordinator.test.ts; test/services/scheduledAccountScope.test.ts"
-    },
-    {
       "id": "src/features/conversations/devSeed.ts#devSendFake.<callback:aa9d83c161>:mutator-call:bccc7d8e3937",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 514,
+      "line": 480,
       "symbol": "devSendFake.<callback:aa9d83c161>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#insertOutgoingText",
@@ -13966,7 +13953,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#devSendFakeReaction.<callback:191d06baf6>:mutator-call:d7f94c27bd01",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 540,
+      "line": 506,
       "symbol": "devSendFakeReaction.<callback:191d06baf6>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#insertOutgoingReaction",
@@ -13979,7 +13966,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#devQueueIncomingMessageWithoutDrain.<callback:54ecf68772>:mutator-call:36d6d37aad05",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 581,
+      "line": 547,
       "symbol": "devQueueIncomingMessageWithoutDrain.<callback:54ecf68772>",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#devPersistRealtimeEventWithoutDrain",
@@ -13992,7 +13979,7 @@
     {
       "id": "src/features/conversations/devSeed.ts#devResumeQueuedIncomingMessages.<callback:7d48074c07>:mutator-call:184b77fd26ef",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 621,
+      "line": 587,
       "symbol": "devResumeQueuedIncomingMessages.<callback:7d48074c07>",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#devResumePersistedRealtimeEvents",
@@ -14005,25 +13992,12 @@
     {
       "id": "src/features/conversations/devSeed.ts#injectMessage.<callback:73729e174f>:mutator-call:c8a56ff545c6",
       "path": "src/features/conversations/devSeed.ts",
-      "line": 644,
+      "line": 610,
       "symbol": "injectMessage.<callback:73729e174f>",
       "operation": "mutator-call",
       "target": "src/services/realtimeControl.ts#inject",
       "detectedContext": "incoming-ingress-delegation",
       "owner": "injectMessage",
-      "transactionContext": "incoming-ingress-delegation",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/realtimeStartupOptional.test.ts; test/services/fcmMessagingLifecycle.test.ts; test/realtime/socketDispatchFailure.test.ts; test/realtime/socketEscalation.test.ts; test/features/conversations/devSeedAccountScope.test.ts; test/components/routes/chatScreen.test.tsx"
-    },
-    {
-      "id": "src/features/conversations/devSeed.ts#devInjectEffect.<callback:8cbe838310>:mutator-call:586201c30c9c",
-      "path": "src/features/conversations/devSeed.ts",
-      "line": 703,
-      "symbol": "devInjectEffect.<callback:8cbe838310>",
-      "operation": "mutator-call",
-      "target": "src/services/realtimeControl.ts#inject",
-      "detectedContext": "incoming-ingress-delegation",
-      "owner": "devInjectEffect",
       "transactionContext": "incoming-ingress-delegation",
       "disposition": "coordinated",
       "evidence": "scripts/check-db-writes.test.mjs; test/services/realtimeStartupOptional.test.ts; test/services/fcmMessagingLifecycle.test.ts; test/realtime/socketDispatchFailure.test.ts; test/realtime/socketEscalation.test.ts; test/features/conversations/devSeedAccountScope.test.ts; test/components/routes/chatScreen.test.tsx"

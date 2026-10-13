@@ -1,14 +1,12 @@
 import {
   Chat,
   ChatSummary,
-  isGroup,
   isReaction,
   Message,
   parseMessageSummaryInfo,
   parsePayloadData,
 } from '@core/models';
 import {
-  editedPartFromSummary,
   resolveExactMessageTargetPartIndex,
   resolveTargetPartIndex,
 } from '@core/messages/partIndex';
@@ -52,8 +50,6 @@ describe('Message model', () => {
     expect(resolveTargetPartIndex({ attachmentCount: 2, hasText: true, partCount: 3 })).toBe(2);
     expect(resolveTargetPartIndex({ attachmentCount: 2, hasText: true, partCount: null })).toBe(0);
     expect(resolveTargetPartIndex({ attachmentCount: 2, hasText: false, partCount: 3 })).toBe(0);
-    expect(editedPartFromSummary({ editedParts: { '2': [] } })).toBe(2);
-    expect(editedPartFromSummary({ editedParts: { '1': [], '2': [] } })).toBeNull();
   });
 
   it('targets only one exact rendered part on a topology-capable server', () => {
@@ -226,16 +222,6 @@ describe('Message model', () => {
 });
 
 describe('Chat model', () => {
-  it('identifies group chats by iMessage style (43=group, 45=DM) or participant count', () => {
-    expect(isGroup(Chat.parse({ guid: 'c', style: 43 }))).toBe(true); // 43 = group
-    expect(isGroup(Chat.parse({ guid: 'c', style: 45 }))).toBe(false); // 45 = 1:1 DM
-    // no style → fall back to participant count
-    expect(
-      isGroup(Chat.parse({ guid: 'c', participants: [{ address: 'a' }, { address: 'b' }] })),
-    ).toBe(true);
-    expect(isGroup(Chat.parse({ guid: 'c', participants: [{ address: 'a' }] }))).toBe(false);
-  });
-
   it('accepts and preserves the macOS read watermark (lastReadMessageTimestamp, Unix ms)', () => {
     const m = Chat.parse({ guid: 'c', lastReadMessageTimestamp: 1718900002000 });
     expect(m.lastReadMessageTimestamp).toBe(1718900002000);

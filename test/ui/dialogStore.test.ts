@@ -1,4 +1,4 @@
-import { showAlert, showConfirm, showDialog, useDialogStore } from '@ui/dialog/dialogStore';
+import { showConfirm, showDialog, useDialogStore } from '@ui/dialog/dialogStore';
 
 beforeEach(() => {
   useDialogStore.setState({ current: null, queue: [] });
@@ -40,13 +40,6 @@ describe('dialog store', () => {
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
-  it('showAlert builds a single default button', () => {
-    showAlert({ title: 'Heads up', message: 'Done' });
-    const btns = useDialogStore.getState().current!.buttons;
-    expect(btns).toHaveLength(1);
-    expect(btns[0]!.style).toBe('default');
-  });
-
   it('a dialog opened from a button handler survives via the queue', () => {
     // Simulates a confirm whose action then reports success (the "nested alert" case): while the
     // first is current, dismiss + enqueue in one flow leaves the second showing.
@@ -54,7 +47,7 @@ describe('dialog store', () => {
       title: 'Rotate key?',
       onConfirm: () => {
         useDialogStore.getState().dismiss();
-        showAlert({ title: 'Done', message: 'Key rotated.' });
+        showDialog('Done', 'Key rotated.');
       },
     });
     const confirm = useDialogStore.getState().current!;
