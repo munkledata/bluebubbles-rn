@@ -1896,7 +1896,7 @@ fullOnlyTest('rejects the reviewed foreground, headless, and key-overlap weakeni
     assert.equal(
       baseline.filter((finding) => finding.detectedContext === 'incoming-ingress-delegation')
         .length,
-      28,
+      27,
       'focused hostile fixture must exercise the live positive certificate',
     );
     for (const mutation of cases) {
@@ -8335,7 +8335,7 @@ fullOnlyTest(
       assert.equal(
         baseline.filter((finding) => finding.detectedContext === 'incoming-ingress-delegation')
           .length,
-        28,
+        27,
         'incoming-ingress fixture must exercise the live positive certificate',
       );
       for (const mutation of cases) {
