@@ -38,7 +38,7 @@ import { upsertAttachmentsWithinTransaction } from './attachments';
 import { clearSupersededTombstonesWithinTransaction } from './chats';
 import { handleMapKey } from './handles';
 import { getMessageStateAuthorityWithinTransaction } from './messageState';
-import { chatLatestMessageDateSql } from './chatVisibility';
+import { chatLatestMessageDateSql, deletionRecordApplies } from './chatVisibility';
 
 type PersistedRetractionState = Exclude<MessageRetractionState, 'intact'>;
 
@@ -387,11 +387,10 @@ export function upsertMessagesWithinTransaction(
           : serverState.chatGuid !== destination.guid)
       )
         return false;
+      // A message with a deletion record is stored only when that record applies to it here.
       if (
         canonicalDeletion &&
-        (canonicalDeletion.chatGuid == null
-          ? existing == null
-          : canonicalDeletion.chatGuid !== destination.guid)
+        !deletionRecordApplies(canonicalDeletion.chatGuid, destination.guid, existing != null)
       ) {
         return false;
       }
@@ -429,8 +428,11 @@ export function upsertMessagesWithinTransaction(
         .filter(
           (row): row is NonNullable<typeof row> =>
             row != null &&
-            (row.chatGuid === destination.guid ||
-              (row.chatGuid == null && existingLocationByGuid.has(m.guid))),
+            deletionRecordApplies(
+              row.chatGuid,
+              destination.guid,
+              existingLocationByGuid.has(m.guid),
+            ),
         )
         .map((row) => row.dateDeleted);
       const retainedDeletionDate =

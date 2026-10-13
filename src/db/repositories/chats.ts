@@ -1,14 +1,6 @@
 import { and, eq, inArray, isNull, ne, notInArray, or, sql } from 'drizzle-orm';
 import type { Chat, ChatSummary } from '@core/models';
-import {
-  chatHandles,
-  chats,
-  kv,
-  messageDeletionLedger,
-  messages,
-  outgoingQueue,
-  scheduledMessages,
-} from '../schema';
+import { chatHandles, chats, kv, messages, outgoingQueue, scheduledMessages } from '../schema';
 import {
   runInTransactionContext,
   withDbTransaction,
@@ -21,6 +13,7 @@ import { getChatIdByGuid } from './chatQueries';
 import {
   chatLatestMessageDateSql,
   chatVisible,
+  deletionRecordAppliesSql,
   inboxFilterSql,
   type InboxSenderFilter,
   messageHasVisibleContentSql,
@@ -901,7 +894,7 @@ export function restoreDeletedChatWithinTransaction(
                          AND NOT EXISTS (
                                SELECT 1 FROM message_deletion_ledger mdl
                                 WHERE mdl.guid = fm.guid
-                                  AND mdl.chat_guid = chats.guid
+                                  AND ${deletionRecordAppliesSql('mdl', sql.raw('chats.guid'))}
                              ))
          )
        LIMIT 1
@@ -909,16 +902,17 @@ export function restoreDeletedChatWithinTransaction(
     const candidate = candidates[0];
     if (!candidate) return false;
 
-    // Remove only chat-history-derived hiding. A genuine scoped message-deletion receipt remains
-    // authoritative and is projected back onto the row in the same transaction.
+    // Remove only chat-history-derived hiding. A message-deletion record for this chat (scoped, or
+    // ownerless: see deletionRecordAppliesSql) stays authoritative and is projected back onto the
+    // row in the same transaction, so restoring a chat never brings back a message deleted on its own.
     await db
       .update(messages)
       .set({
         dateDeleted: sql`(SELECT MAX(value) FROM (
-          SELECT ${messageDeletionLedger.dateDeleted} AS value
-            FROM ${messageDeletionLedger}
-           WHERE ${messageDeletionLedger.guid} = ${messages.guid}
-             AND ${messageDeletionLedger.chatGuid} = ${target.guid}
+          SELECT mdl.date_deleted AS value
+            FROM message_deletion_ledger mdl
+           WHERE mdl.guid = ${messages.guid}
+             AND ${deletionRecordAppliesSql('mdl', target.guid)}
           UNION ALL
           SELECT COALESCE(date_deleted, 0) FROM message_server_states
            WHERE guid = ${messages.guid} AND chat_guid = ${target.guid} AND kind = 'deleted'

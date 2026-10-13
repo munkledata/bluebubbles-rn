@@ -1148,6 +1148,43 @@ describe('chat actions repo', () => {
     expect(await isChatHiddenByDeletion(db, 'c1')).toBe(true);
   });
 
+  it('keeps a stored message hidden after restore when its only deletion record names no chat', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const chatId = (await getChatIdByGuid(db, 'c1'))!;
+    const handles = await upsertHandles(db, [{ address: 'a@b.com' }]);
+    await upsertMessages(db, [received('h1', 1000), received('h2', 2000)], () => chatId, handles);
+    // An older app version deleted h1 without recording which chat it belonged to.
+    raw
+      .prepare(
+        'INSERT INTO message_deletion_ledger (guid, date_deleted, chat_guid) VALUES (?, ?, NULL)',
+      )
+      .run('h1', 4000);
+    raw.prepare('UPDATE messages SET date_deleted = 4000 WHERE guid = ?').run('h1');
+    // The chat was then deleted, but its row purge was interrupted: the tombstone committed and
+    // both stored rows survived. (After a completed purge, h1 could not even be re-imported.)
+    raw
+      .prepare('UPDATE chats SET deleted_at = 5000, history_deleted_at = 5000 WHERE guid = ?')
+      .run('c1');
+
+    const restored = await withDbTransaction(db, (context) =>
+      restoreDeletedChatWithinTransaction(context, {
+        guid: 'c1',
+        expectedDeletedAt: 5000,
+        historyExhausted: true,
+        repairedReadFloor: null,
+      }),
+    );
+
+    expect(restored).toBe(true);
+    expect(
+      raw.prepare('SELECT guid, date_deleted AS dateDeleted FROM messages ORDER BY guid').all(),
+    ).toEqual([
+      { guid: 'h1', dateDeleted: 4000 },
+      { guid: 'h2', dateDeleted: null },
+    ]);
+  });
+
   it('a LIVE un-hide counts only the new message, even when the history backfills later', async () => {
     const { db, raw } = await createTestDb();
     await seedChat(db, 'c1');

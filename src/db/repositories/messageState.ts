@@ -10,7 +10,7 @@ import { runInTransactionContext, type DbTransactionContext } from '../transacti
 import type { AppDatabase } from '../types';
 import { kvGet, kvGetWithinTransaction, kvSetWithinTransaction } from './kv';
 import type { FullRepairMessageExposure } from './repair';
-import { chatLatestMessageDateSql } from './chatVisibility';
+import { chatLatestMessageDateSql, deletionRecordAppliesSql } from './chatVisibility';
 
 export const MESSAGE_STATE_AUTHORITY_KEY = 'sync.messageState.imessage';
 /** A recent outgoing row with no source row id may not have reached chat.db yet; never judge it. */
@@ -448,8 +448,8 @@ export async function projectMessageStateWithinTransaction(
     await db.run(sql`
       UPDATE messages SET date_deleted = (
         SELECT MAX(value) FROM (
-          SELECT date_deleted AS value FROM message_deletion_ledger
-           WHERE guid = ${guid} AND (chat_guid = ${chatGuid} OR chat_guid IS NULL)
+          SELECT mdl.date_deleted AS value FROM message_deletion_ledger mdl
+           WHERE mdl.guid = ${guid} AND ${deletionRecordAppliesSql('mdl', chatGuid)}
           UNION ALL
           SELECT COALESCE(date_deleted, 0) FROM message_server_states
            WHERE guid = ${guid} AND chat_guid = ${chatGuid} AND kind = 'deleted'

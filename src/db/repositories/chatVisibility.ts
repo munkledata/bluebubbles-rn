@@ -82,6 +82,29 @@ export function chatLatestMessageDateSql(chatId: SQL | number) {
   )`;
 }
 
+/**
+ * Whether a message-deletion record (`message_deletion_ledger` row) applies to a message in
+ * `chatGuid`: a record scoped to that chat, or an ownerless one (left by an older app version, or by
+ * a delete notice that arrived before its message) when the message is ALREADY STORED. Every path
+ * uses this one rule, so sync, server-state updates and chat restore agree: an applied record keeps
+ * the message hidden. upsertMessages uses the JavaScript form, `deletionRecordApplies`: a NEW message
+ * whose record does not apply (ownerless, or another chat's) is not stored at all, and an applied
+ * ownerless record is turned into a scoped one. The SQL callers only touch stored rows.
+ */
+export function deletionRecordAppliesSql(ledgerAlias: string, chatGuid: SQL | string) {
+  const l = sql.raw(ledgerAlias);
+  return sql`(${l}.chat_guid = ${chatGuid} OR ${l}.chat_guid IS NULL)`;
+}
+
+/** JavaScript form of `deletionRecordAppliesSql` for batch ingestion. */
+export function deletionRecordApplies(
+  recordChatGuid: string | null,
+  chatGuid: string,
+  messageAlreadyStored: boolean,
+): boolean {
+  return recordChatGuid === chatGuid || (recordChatGuid == null && messageAlreadyStored);
+}
+
 /** One shared answer for unread-chat filters and folder badges. */
 export function chatHasUnreadSql(alias: string) {
   return sql`EXISTS(

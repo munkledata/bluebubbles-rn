@@ -41,6 +41,7 @@ import {
 // Imported from the module that owns it rather than restated here, so the two can't drift;
 // messages.ts imports nothing from this file, so there is no cycle.
 import { markMessageDeletedWithinTransaction } from './messages';
+import { deletionRecordAppliesSql } from './chatVisibility';
 
 export {
   MESSAGE_GUID_ALIAS_LIMIT,
@@ -361,7 +362,7 @@ async function handoverOutgoingIdentityWithinTransaction(
     await db.run(sql`
       DELETE FROM message_deletion_ledger
        WHERE guid = ${tempGuid}
-         AND (chat_guid IS NULL OR chat_guid = ${ownerChatGuid})
+         AND ${deletionRecordAppliesSql('message_deletion_ledger', ownerChatGuid)}
     `);
     return serverDate == null ? dateDeleted : Math.max(dateDeleted, serverDate);
   });
