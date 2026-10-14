@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { Message } from '@core/models';
-import type { EventDeliveryContext } from '@core/realtime';
+import { EventRouter, type EventDeliveryContext, type EventSink } from '@core/realtime';
 import { getSyncMarker, kvGet, upsertChats, upsertHandles, upsertMessages } from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { DbEventSink } from '@/services/realtime/dbEventSink';
@@ -226,6 +226,82 @@ describe('RCS provider-epoch ingestion admission', () => {
     expect(innerContext?.isCurrent()).toBe(false);
     liveInfo = providerInfo(EPOCH_A);
     expect(innerContext?.isCurrent()).toBe(false);
+  });
+
+  describe('when provider authority becomes unknown mid-event (it did not change)', () => {
+    /** An inner chain like DbEventSink then NotifyingEventSink: commit, then post if still current. */
+    function innerChain(onCommitted: () => void) {
+      const trace: string[] = [];
+      const sink: EventSink = {
+        async onEvent(_event, _source, context) {
+          if (context && !context.isCurrent()) return;
+          trace.push('committed');
+          onCommitted();
+          if (context && !context.isCurrent()) {
+            trace.push('notification-skipped');
+            return;
+          }
+          trace.push('notified');
+        },
+      };
+      return { sink, trace };
+    }
+
+    it('hands a durable row back for a retry instead of reporting it processed', async () => {
+      let liveInfo: ReturnType<typeof providerInfo> | null = providerInfo(EPOCH_A);
+      const { sink: inner, trace } = innerChain(() => {
+        // A killed-app push lent the pairing for its own callback and has just released it.
+        liveInfo = null;
+      });
+      const router = new EventRouter(new RcsProviderEpochEventSink(inner, () => liveInfo));
+
+      await expect(
+        router.handleNormalized(
+          { type: 'new-message', message: rcsMessage(EPOCH_A) },
+          'socket',
+          durableContext(),
+        ),
+      ).rejects.toBeInstanceOf(IncomingEventDependencyPendingError);
+      expect(trace).toEqual(['committed', 'notification-skipped']);
+    });
+
+    it('does not retry a live delivery that has no durable row to retry', async () => {
+      let liveInfo: ReturnType<typeof providerInfo> | null = providerInfo(EPOCH_A);
+      const { sink: inner, trace } = innerChain(() => {
+        liveInfo = null;
+      });
+      const sink = new RcsProviderEpochEventSink(inner, () => liveInfo);
+
+      await expect(
+        sink.onEvent({ type: 'new-message', message: rcsMessage(EPOCH_A) }, 'socket', {
+          generation: 1,
+          isCurrent: () => true,
+        }),
+      ).resolves.toBeUndefined();
+      expect(trace).toEqual(['committed', 'notification-skipped']);
+    });
+
+    it('does not retry once the delivery itself lost ownership', async () => {
+      let liveInfo: ReturnType<typeof providerInfo> | null = providerInfo(EPOCH_A);
+      let deliveryCurrent = true;
+      const inner: EventSink = {
+        async onEvent(_event, _source, context) {
+          liveInfo = null;
+          // Authority is unknown first, so this check revokes the event's provider admission...
+          expect(context?.isCurrent()).toBe(false);
+          // ...and then the delivery's own owner (for example Disconnect) retires its attempt.
+          deliveryCurrent = false;
+        },
+      };
+      const sink = new RcsProviderEpochEventSink(inner, () => liveInfo);
+
+      await expect(
+        sink.onEvent({ type: 'new-message', message: rcsMessage(EPOCH_A) }, 'socket', {
+          ...durableContext(),
+          isCurrent: () => deliveryCurrent,
+        }),
+      ).resolves.toBeUndefined();
+    });
   });
 
   it('drops stale live rows before DB and defers a current row while provider authority is unavailable', async () => {

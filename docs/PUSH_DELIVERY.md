@@ -445,11 +445,16 @@ pairing-less fetch leaves the event queued exactly as before. FCM callbacks are 
 `fcmAdmissionTail`, so the short wait before persistence cannot reorder deliveries. The locked V3
 enqueue path keeps its own fetch.
 
-Known limits, tracked as follow-ups: RCS attachment auto-download (including Gallery/Album export)
+Known limit, tracked as a follow-up: RCS attachment auto-download (including Gallery/Album export)
 still requires foreground authority, so it is skipped for RCS messages processed while the app is
-killed; images still download when the chat is opened. A row admitted under the loan can still lose
-authority mid-event if another delivery flight is processing it when the loan is released, which
-requires opening the app during that push.
+killed; images still download when the chat is opened.
+
+A row admitted under the loan can lose authority mid-event when the loan is released while another
+delivery flight is still processing it (the app was opened during that push). Since 2026-10-14
+`RcsProviderEpochEventSink` hands such a durable row back for the ordinary dependency retry instead
+of reporting it processed, because unknown authority is not proof the event is stale; a changed
+pairing still drops the event. The replay skips a database phase that already committed, and a
+repeated message post replaces its notification line without alerting again.
 
 Host tests cover the loan reaching both admission layers, Apple and warm pushes fetching nothing,
 fetch failure, the deadline, callback and Disconnect cancellation, a pairing-less response,

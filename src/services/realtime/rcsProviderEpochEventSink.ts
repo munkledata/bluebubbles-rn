@@ -26,11 +26,18 @@ export class RcsProviderEpochEventSink implements EventSink {
     // Wrap the delivery lease so every inner post-commit layer (notifications, UI publication,
     // group repair) observes provider rotation as a one-way revocation too.
     let revoked = false;
+    // Set when authority became unknown (no live server info, e.g. a killed-app push released the
+    // pairing it lent) rather than changed. The inner layers then stopped without proof that the
+    // event is stale, so a durable row is retried instead of being reported processed.
+    let authorityBecameUnknown = false;
     const providerAdmissionIsCurrent = (): boolean => {
       if (revoked) return false;
       const live = classifyRcsEventAdmission(this.getServerInfo(), event);
       const current = admission === 'current' ? live === 'current' : live === 'non-rcs';
-      if (!current) revoked = true;
+      if (!current) {
+        revoked = true;
+        authorityBecameUnknown = live === 'unavailable';
+      }
       return current;
     };
     const providerContext: EventDeliveryContext = {
@@ -44,6 +51,15 @@ export class RcsProviderEpochEventSink implements EventSink {
         return providerAdmissionIsCurrent();
       },
     };
-    return this.inner.onEvent(event, source, providerContext);
+    const retryIfAuthorityBecameUnknown = (): void => {
+      // A replay skips a database phase that already committed; notification posts are keyed by
+      // message, so a repeated post replaces its line without alerting again.
+      if (authorityBecameUnknown && context.durableEvent && context.isCurrent()) {
+        throw new IncomingEventDependencyPendingError();
+      }
+    };
+    const outcome = this.inner.onEvent(event, source, providerContext);
+    if (outcome instanceof Promise) return outcome.then(retryIfAuthorityBecameUnknown);
+    retryIfAuthorityBecameUnknown();
   }
 }
