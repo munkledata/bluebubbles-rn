@@ -14,7 +14,14 @@
  */
 import React from 'react';
 import { StyleSheet } from 'react-native';
-import { act, fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
+import {
+  act,
+  fireEvent,
+  renderWithTheme,
+  screen,
+  userEvent,
+  waitFor,
+} from '../support/renderWithTheme';
 import type { UrlPreviewRow } from '@db/repositories';
 
 jest.mock('@utils', () => ({ ...jest.requireActual('@utils'), safeOpenUrl: jest.fn() }));
@@ -284,6 +291,23 @@ describe('UrlPreviewCard', () => {
     const style = StyleSheet.flatten(card.props.style);
     expect(style.width).toBeDefined();
     expect(style.width).not.toBe('auto');
+  });
+
+  it('a long press opens the message menu instead of the browser', async () => {
+    const onLongPress = jest.fn();
+    await renderWithTheme(
+      <UrlPreviewCard
+        url="https://www.example.com/article"
+        preview={row()}
+        isFromMe={false}
+        onLongPress={onLongPress}
+      />,
+    );
+
+    await userEvent.setup().longPress(screen.getByRole('link'), { duration: 400 });
+
+    expect(onLongPress).toHaveBeenCalledTimes(1);
+    expect(safeOpenUrl).not.toHaveBeenCalled();
   });
 
   it('marks an international destination, which can imitate a familiar name', async () => {

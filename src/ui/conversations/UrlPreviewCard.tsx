@@ -32,6 +32,8 @@ interface UrlPreviewCardProps {
   externalOpenIsCurrent?: () => boolean;
   /** Optional absolutely-positioned content (for example a tapback) anchored to this card. */
   overlay?: React.ReactNode;
+  /** The message bubble's long-press (the message menu); a hold must not open the browser. */
+  onLongPress?: () => void;
 }
 
 /** A compact Open Graph link card under a message bubble; hidden until metadata loads. */
@@ -41,6 +43,7 @@ export function UrlPreviewCard({
   isFromMe,
   externalOpenIsCurrent = ALWAYS_CURRENT,
   overlay,
+  onLongPress,
 }: UrlPreviewCardProps): React.JSX.Element | null {
   const theme = useTheme();
   const mountedRef = useRef(true);
@@ -117,6 +120,8 @@ export function UrlPreviewCard({
     <Pressable
       testID="url-preview-card"
       onPress={sourceTransitionPending ? undefined : openUrl}
+      onLongPress={onLongPress}
+      delayLongPress={onLongPress ? 350 : undefined}
       disabled={sourceTransitionPending}
       accessible
       accessibilityRole="link"

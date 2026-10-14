@@ -547,6 +547,7 @@ export const MessageBubble = React.memo(function MessageBubble({
           preview={preview}
           isFromMe={isFromMe}
           externalOpenIsCurrent={externalOpenIsCurrent}
+          onLongPress={onLongPress ? handleLongPress : undefined}
           overlay={
             cardOverlayAnchor ? (
               <ReactionCluster

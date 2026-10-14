@@ -16,7 +16,7 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import type { TestInstance } from 'test-renderer';
-import { renderWithTheme, screen, fireEvent, act } from '../support/renderWithTheme';
+import { renderWithTheme, screen, fireEvent, act, userEvent } from '../support/renderWithTheme';
 import type {
   AttachmentRow,
   MessageRow,
@@ -605,6 +605,30 @@ describe('MessageBubble accessibility actions', () => {
         nativeEvent: { actionName: 'longpress' },
       });
     });
+    expect(onLongPress).toHaveBeenCalledWith(rect);
+  });
+
+  it('holding the link preview card opens the message menu', async () => {
+    const onLongPress = jest.fn();
+    const rect = { x: 5, y: 6, width: 7, height: 8 };
+    mockMeasureInWindow.mockImplementationOnce(
+      (callback: (x: number, y: number, width: number, height: number) => void) =>
+        callback(rect.x, rect.y, rect.width, rect.height),
+    );
+    await renderWithTheme(
+      <MessageBubble
+        msg={makeMsg({
+          text: '',
+          balloonBundleId: 'com.apple.messages.URLBalloonProvider',
+          payloadData: PRIVATE_PAYLOAD,
+        })}
+        showTail
+        onLongPress={onLongPress}
+      />,
+    );
+
+    await userEvent.setup().longPress(screen.getByTestId('url-preview-card'), { duration: 400 });
+
     expect(onLongPress).toHaveBeenCalledWith(rect);
   });
 });
