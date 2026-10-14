@@ -1,7 +1,7 @@
 import { useRouter } from 'expo-router';
 import { useLayoutEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
-import { showDialog } from '@ui/dialog/dialogStore';
+import { showConfirm, showDialog } from '@ui/dialog/dialogStore';
 import {
   BackupExportLimitError,
   BackupPassphraseRejectedError,
@@ -200,6 +200,17 @@ export default function BackupScreen(): React.JSX.Element {
     }
   };
 
+  const confirmImport = (): void => {
+    if (!screenLease.isCurrent() || !paste.trim()) return;
+    showConfirm({
+      title: 'Restore this backup?',
+      message:
+        'Its settings, themes, chat customizations and folders are applied to this phone, replacing the matching ones. This can’t be undone.',
+      confirmText: 'Restore',
+      onConfirm: () => void onImport(),
+    });
+  };
+
   const onImport = async (): Promise<void> => {
     if (!screenLease.isCurrent()) return;
     if (!paste.trim()) return;
@@ -312,11 +323,7 @@ export default function BackupScreen(): React.JSX.Element {
           />
         </SettingsSection>
         <SettingsSection style={styles.gapSm}>
-          <Pressable
-            onPress={() => void onImport()}
-            disabled={busy || !paste.trim()}
-            style={styles.row}
-          >
+          <Pressable onPress={confirmImport} disabled={busy || !paste.trim()} style={styles.row}>
             <Text
               style={[
                 styles.rowLabel,

@@ -24,6 +24,18 @@ import {
   act,
   within,
 } from '../support/renderWithTheme';
+import { useDialogStore } from '@ui/dialog/dialogStore';
+
+/** Answer the current app dialog the way AppDialog does: close it, then run the chosen button. */
+async function answerDialog(buttonText: string): Promise<void> {
+  const dialog = useDialogStore.getState().current;
+  const button = dialog?.buttons.find((candidate) => candidate.text === buttonText);
+  if (!dialog || !button) throw new Error(`Expected a dialog with a ${buttonText} button`);
+  await act(async () => {
+    useDialogStore.getState().dismissById(dialog.id);
+    button.onPress?.();
+  });
+}
 
 const mockPush = jest.fn();
 const mockBack = jest.fn();
@@ -306,6 +318,7 @@ beforeAll(() =>
 afterAll(() => notifyManager.setNotifyFunction((callback) => callback()));
 
 beforeEach(() => {
+  useDialogStore.setState({ current: null, queue: [] });
   resumeRealtimeDeliveries();
   jest.clearAllMocks();
   useSessionStore.setState({ serverInfo: null, password: 'health-legacy-password' });
@@ -581,6 +594,7 @@ describe('ServerHealthScreen — query-backed cards', () => {
     await renderScreen();
     expect(await screen.findByText('Helper crashed')).toBeTruthy();
     await fireEvent.press(screen.getByText('Clear Alerts'));
+    await answerDialog('Clear Alerts');
     await waitFor(() => expect(mocks.clearServerAlerts).toHaveBeenCalled());
     expect(await screen.findByText('None')).toBeTruthy();
     expect(screen.queryByText('Helper crashed')).toBeNull();
@@ -596,6 +610,8 @@ describe('ServerHealthScreen — query-backed cards', () => {
     expect(await screen.findByText('Helper crashed')).toBeTruthy();
 
     await fireEvent.press(screen.getByText('Clear Alerts'));
+
+    await answerDialog('Clear Alerts');
     expect(mocks.clearServerAlerts).toHaveBeenCalledTimes(1);
     await waitFor(() =>
       expect(useToastStore.getState().current?.message).toBe('Could not clear server alerts.'),
@@ -610,6 +626,7 @@ describe('ServerHealthScreen — query-backed cards', () => {
       ).not.toBe(true),
     );
     await fireEvent.press(screen.getByRole('button', { name: 'Clear Alerts' }));
+    await answerDialog('Clear Alerts');
     await waitFor(() => expect(mocks.clearServerAlerts).toHaveBeenCalledTimes(2));
     expect(await screen.findByText('None')).toBeTruthy();
     expect(screen.queryByText('Helper crashed')).toBeNull();
@@ -643,6 +660,7 @@ describe('ServerHealthScreen — query-backed cards', () => {
       const { client } = await renderScreen();
       expect(await screen.findByText(alert.value)).toBeTruthy();
       await fireEvent.press(screen.getByText('Clear Alerts'));
+      await answerDialog('Clear Alerts');
       await waitFor(() => expect(mocks.clearServerAlerts).toHaveBeenCalledTimes(1));
 
       let drained = false;
@@ -782,6 +800,8 @@ describe('ServerHealthScreen — ordinary presentation and account ownership', (
     for (const readMock of healthReadMocks) expect(readMock).toHaveBeenCalledTimes(2);
 
     await fireEvent.press(screen.getByRole('button', { name: 'Clear Alerts' }));
+
+    await answerDialog('Clear Alerts');
     await waitFor(() => expect(mocks.clearServerAlerts).toHaveBeenCalledTimes(1));
     expect(await screen.findByText('None')).toBeTruthy();
 
@@ -878,6 +898,7 @@ describe('ServerHealthScreen — ordinary presentation and account ownership', (
     await drainHealthObservers(renderedB.client);
     for (const readMock of healthReadMocks) expect(readMock).toHaveBeenCalledTimes(2);
     await fireEvent.press(screen.getByRole('button', { name: 'Clear Alerts' }));
+    await answerDialog('Clear Alerts');
     await waitFor(() => expect(mocks.clearServerAlerts).toHaveBeenCalledTimes(1));
     await fireEvent.press(screen.getByRole('button', { name: /Re-authenticate/ }));
     await waitFor(() => expect(mocks.rcsReauthNow).toHaveBeenCalledTimes(1));

@@ -392,9 +392,22 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/serverManagementScreen.test.tsx; test/secure/credentialUpgrade.test.ts; test/services/credentialUpgradeRuntime.test.ts; test/services/credentialUpgradeSingleFlight.test.ts"
     },
     {
+      "id": "app/(app)/server-management.tsx#ServerManagementScreen.confirmDiscardCredential.onConfirm:mutator-call:ffe1420d9aaf",
+      "path": "app/(app)/server-management.tsx",
+      "line": 499,
+      "symbol": "ServerManagementScreen.confirmDiscardCredential.onConfirm",
+      "operation": "mutator-call",
+      "target": "app/(app)/server-management.tsx#ServerManagementScreen.onDiscardCredential",
+      "detectedContext": "coordinated-delegation",
+      "owner": "ServerManagementScreen credential-upgrade action",
+      "transactionContext": "coordinated-delegation",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/serverManagementScreen.test.tsx; test/secure/credentialUpgrade.test.ts; test/services/credentialUpgradeRuntime.test.ts; test/services/credentialUpgradeSingleFlight.test.ts"
+    },
+    {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.onDiscardCredential:mutator-call:cff6cdb98796",
       "path": "app/(app)/server-management.tsx",
-      "line": 492,
+      "line": 507,
       "symbol": "ServerManagementScreen.onDiscardCredential",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#discardScopedCredentialUpgradeCandidate",
@@ -405,22 +418,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/serverManagementScreen.test.tsx; test/secure/credentialUpgrade.test.ts; test/services/credentialUpgradeRuntime.test.ts; test/services/credentialUpgradeSingleFlight.test.ts"
     },
     {
-      "id": "app/(app)/server-management.tsx#ServerManagementScreen.<callback:f06986b185>:mutator-call:7417ee3fbf38",
-      "path": "app/(app)/server-management.tsx",
-      "line": 851,
-      "symbol": "ServerManagementScreen.<callback:f06986b185>",
-      "operation": "mutator-call",
-      "target": "app/(app)/server-management.tsx#ServerManagementScreen.onDiscardCredential",
-      "detectedContext": "coordinated-delegation",
-      "owner": "ServerManagementScreen credential-upgrade action",
-      "transactionContext": "coordinated-delegation",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/components/routes/serverManagementScreen.test.tsx; test/secure/credentialUpgrade.test.ts; test/services/credentialUpgradeRuntime.test.ts; test/services/credentialUpgradeSingleFlight.test.ts"
-    },
-    {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.<callback:7bf4151522>:mutator-call:6b73b09a1510",
       "path": "app/(app)/server-management.tsx",
-      "line": 858,
+      "line": 873,
       "symbol": "ServerManagementScreen.<callback:7bf4151522>",
       "operation": "mutator-call",
       "target": "app/(app)/server-management.tsx#ServerManagementScreen.onSubmitCredential",

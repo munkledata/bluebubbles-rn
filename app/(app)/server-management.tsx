@@ -12,7 +12,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { showDialog } from '@ui/dialog/dialogStore';
+import { showConfirm, showDialog } from '@ui/dialog/dialogStore';
 import { serverApi } from '@core/api';
 import { isUnimplementedEndpoint } from '@core/api/errors';
 import { isScopedDeviceCredential } from '@core/secure';
@@ -485,6 +485,21 @@ export default function ServerManagementScreen(): React.JSX.Element {
     }
   };
 
+  const confirmDiscardCredential = (): void => {
+    if (credentialWorking || !accountLease.isCurrent()) return;
+    showConfirm({
+      title: scopedCredentialSession
+        ? 'Revoke the replacement credential?'
+        : 'Revoke this credential?',
+      message: scopedCredentialSession
+        ? 'The server stops accepting it, and it is removed from this phone. This phone keeps using its current paired-client credential.'
+        : 'The server stops accepting it, and it is removed from this phone. This phone keeps using the shared server password.',
+      confirmText: 'Revoke and Remove',
+      destructive: true,
+      onConfirm: () => void onDiscardCredential(),
+    });
+  };
+
   const onDiscardCredential = async (): Promise<void> => {
     if (credentialWorking || !accountLease.isCurrent()) return;
     setCredentialWorking(true);
@@ -848,7 +863,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
                   disabled={credentialWorking}
                   busy={credentialWorking}
                   destructive
-                  onPress={() => void onDiscardCredential()}
+                  onPress={confirmDiscardCredential}
                 />
               ) : !credentialSaved ? (
                 <ActionRow

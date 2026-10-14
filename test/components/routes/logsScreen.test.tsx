@@ -77,8 +77,18 @@ jest.mock('@/services/logging/fileLogSink', () => ({
     clear: () => mockClearLogs(),
   },
 }));
+// Confirmations answer themselves unless a test holds them to inspect the question first.
+const mockConfirm: {
+  hold: boolean;
+  requests: { title: string; confirmText?: string; onConfirm: () => void }[];
+} = { hold: false, requests: [] };
 jest.mock('@ui/dialog/dialogStore', () => ({
   showDialog: (title: string, message?: string) => mockShowDialog(title, message),
+  showConfirm: (request: { title: string; confirmText?: string; onConfirm: () => void }) => {
+    mockConfirm.requests.push(request);
+    if (!mockConfirm.hold) request.onConfirm();
+    return mockConfirm.requests.length;
+  },
 }));
 
 // eslint-disable-next-line import/first
@@ -109,6 +119,8 @@ describe('LogsScreen diagnostic sharing', () => {
   let shareSpy: jest.SpyInstance;
 
   beforeEach(() => {
+    mockConfirm.hold = false;
+    mockConfirm.requests = [];
     mockBootIssues = [];
     mockClearLogs.mockResolvedValue(true);
     mockResolvePersistentLogCleanupIssue.mockImplementation(() => {
@@ -173,6 +185,21 @@ describe('LogsScreen diagnostic sharing', () => {
     expect(JSON.stringify(mockShowDialog.mock.calls)).not.toContain(
       'private Android share failure',
     );
+  });
+
+  it('asks before clearing the saved logs', async () => {
+    entriesSpy.mockReturnValue([errorEntry]);
+    mockConfirm.hold = true;
+    await renderWithTheme(<LogsScreen />);
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Clear' }));
+
+    expect(mockConfirm.requests).toEqual([
+      expect.objectContaining({ title: 'Clear app logs?', confirmText: 'Clear' }),
+    ]);
+    expect(mockClearLogs).not.toHaveBeenCalled();
+    await act(async () => mockConfirm.requests[0]?.onConfirm());
+    await waitFor(() => expect(mockClearLogs).toHaveBeenCalledTimes(1));
   });
 
   it('surfaces a saved-file clear failure instead of silently claiming success', async () => {

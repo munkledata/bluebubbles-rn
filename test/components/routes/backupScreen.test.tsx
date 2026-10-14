@@ -14,7 +14,19 @@ jest.mock('expo-router', () => ({ useRouter: () => ({ back: mockBack }) }));
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
-jest.mock('@ui/dialog/dialogStore', () => ({ showDialog: jest.fn() }));
+// Confirmations answer themselves unless a test holds them to inspect the question first.
+const mockConfirm: {
+  hold: boolean;
+  requests: { title: string; confirmText?: string; onConfirm: () => void }[];
+} = { hold: false, requests: [] };
+jest.mock('@ui/dialog/dialogStore', () => ({
+  showDialog: jest.fn(),
+  showConfirm: (request: { title: string; confirmText?: string; onConfirm: () => void }) => {
+    mockConfirm.requests.push(request);
+    if (!mockConfirm.hold) request.onConfirm();
+    return mockConfirm.requests.length;
+  },
+}));
 jest.mock('@/ui/backup/ServerBackupSlotsSection', () => ({
   ServerBackupSlotsSection: () => null,
 }));
@@ -85,6 +97,8 @@ function deferred<T>(): Deferred<T> {
 }
 
 beforeEach(() => {
+  mockConfirm.hold = false;
+  mockConfirm.requests = [];
   jest.clearAllMocks();
   mockAccountCurrent = true;
   mockInvalidateAccount = null;
@@ -204,6 +218,24 @@ describe('BackupScreen passphrase boundary', () => {
     });
 
     expect(showDialog).not.toHaveBeenCalled();
+  });
+
+  it('asks before restoring a backup over this phone', async () => {
+    mockConfirm.hold = true;
+    await renderWithTheme(<BackupScreen />);
+    await fireEvent.changeText(
+      screen.getByPlaceholderText('…or paste backup contents here'),
+      'encrypted-backup',
+    );
+
+    await fireEvent.press(screen.getByText('Restore from backup'));
+
+    expect(mockConfirm.requests).toEqual([
+      expect.objectContaining({ title: 'Restore this backup?', confirmText: 'Restore' }),
+    ]);
+    expect(mockImport).not.toHaveBeenCalled();
+    await act(async () => mockConfirm.requests[0]?.onConfirm());
+    await waitFor(() => expect(mockImport).toHaveBeenCalledTimes(1));
   });
 
   it('keeps a delayed old-account restore failure silent', async () => {

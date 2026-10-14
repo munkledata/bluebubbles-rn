@@ -3200,7 +3200,7 @@ test('certifies exactly the reviewed coordinated-delegation path additions', () 
         'coordinated-delegation',
       ],
       [
-        'app/(app)/server-management.tsx#ServerManagementScreen.<callback:f06986b185>:mutator-call:7417ee3fbf38',
+        'app/(app)/server-management.tsx#ServerManagementScreen.confirmDiscardCredential.onConfirm:mutator-call:ffe1420d9aaf',
         'coordinated-delegation',
       ],
       [

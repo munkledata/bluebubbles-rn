@@ -27,6 +27,7 @@ import {
   useSessionStore,
 } from '@state/sessionStore';
 import { useRcsHealthStore } from '@state/rcsHealthStore';
+import { showConfirm } from '@ui/dialog/dialogStore';
 import { showToast } from '@ui/toast';
 import { InfoRow, NavRow, NoteRow, Screen, ScreenHeader, SettingsSection, useTheme } from '@ui';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
@@ -205,6 +206,17 @@ export default function ServerHealthScreen(): React.JSX.Element {
     });
   }, [accountLease, queryClient, transportRevision]);
 
+  const confirmClearAlerts = (): void => {
+    if (clearingAlerts || scopedCredentialSession || !accountLease.isCurrent()) return;
+    showConfirm({
+      title: 'Clear server alerts?',
+      message: 'This removes every alert from the server’s alert list.',
+      confirmText: 'Clear Alerts',
+      destructive: true,
+      onConfirm: onClearAlerts,
+    });
+  };
+
   const onClearAlerts = (): void => {
     if (clearingAlerts || scopedCredentialSession || !accountLease.isCurrent()) return;
     const requestTransport = captureSessionTransportLease();
@@ -347,7 +359,7 @@ export default function ServerHealthScreen(): React.JSX.Element {
                 label={clearingAlerts ? 'Clearing Alerts…' : 'Clear Alerts'}
                 chevron={false}
                 disabled={clearingAlerts}
-                onPress={onClearAlerts}
+                onPress={confirmClearAlerts}
               />
             ) : null}
           </SettingsSection>

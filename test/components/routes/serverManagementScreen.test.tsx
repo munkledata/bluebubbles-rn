@@ -100,6 +100,17 @@ import { useSyncStore } from '@state/syncStore';
 import { startSync } from '@/services';
 // eslint-disable-next-line import/first
 import { useDialogStore } from '@ui/dialog/dialogStore';
+
+/** Answer the current app dialog the way AppDialog does: close it, then run the chosen button. */
+async function answerDialog(buttonText: string): Promise<void> {
+  const dialog = useDialogStore.getState().current;
+  const button = dialog?.buttons.find((candidate) => candidate.text === buttonText);
+  if (!dialog || !button) throw new Error(`Expected a dialog with a ${buttonText} button`);
+  await act(async () => {
+    useDialogStore.getState().dismissById(dialog.id);
+    button.onPress?.();
+  });
+}
 // eslint-disable-next-line import/first
 import {
   pauseRealtimeDeliveries,
@@ -574,6 +585,11 @@ describe('ServerManagementScreen — ordinary sensitive presentation and account
     expect(await screen.findByText(/server could not verify it/)).toBeTruthy();
     expect(screen.getByLabelText('Paired-client credential').props.value).toBe('');
     await fireEvent.press(screen.getByRole('button', { name: 'Revoke and Remove Replacement' }));
+    expect(useDialogStore.getState().current).toMatchObject({
+      title: 'Revoke the replacement credential?',
+    });
+    expect(mockDiscardScopedCredentialUpgradeCandidate).not.toHaveBeenCalled();
+    await answerDialog('Revoke and Remove');
     expect(mockDiscardScopedCredentialUpgradeCandidate).toHaveBeenCalledTimes(1);
     expect(useDialogStore.getState().current).toMatchObject({
       title: 'Credential removed',
@@ -667,6 +683,12 @@ describe('ServerManagementScreen — ordinary sensitive presentation and account
     expect(screen.queryByLabelText('Paired-client credential')?.props.editable).toBe(false);
 
     await fireEvent.press(screen.getByRole('button', { name: 'Revoke and Remove Credential' }));
+    expect(useDialogStore.getState().current).toMatchObject({ title: 'Revoke this credential?' });
+    await answerDialog('Cancel');
+    expect(mockDiscardScopedCredentialUpgradeCandidate).not.toHaveBeenCalled();
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Revoke and Remove Credential' }));
+    await answerDialog('Revoke and Remove');
     await waitFor(() => {
       expect(mockDiscardScopedCredentialUpgradeCandidate).toHaveBeenCalledTimes(1);
     });

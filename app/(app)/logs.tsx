@@ -9,7 +9,7 @@ import { fileLogSink } from '@/services/logging/fileLogSink';
 import { formatDiagnosticLogsForShare } from '@/services/logging/shareLogs';
 import { formatTime } from '@utils';
 import { readableTextOn, Screen, ScreenHeader, useTheme } from '@ui';
-import { showDialog } from '@ui/dialog/dialogStore';
+import { showConfirm, showDialog } from '@ui/dialog/dialogStore';
 
 type LevelFilter = 'all' | 'info' | 'warn' | 'error';
 
@@ -192,7 +192,15 @@ export default function LogsScreen(): React.JSX.Element {
           </Pressable>
           <Pressable
             style={styles.actionButton}
-            onPress={onClear}
+            onPress={() =>
+              showConfirm({
+                title: 'Clear app logs?',
+                message: 'This deletes Gator’s saved diagnostic logs from this phone.',
+                confirmText: 'Clear',
+                destructive: true,
+                onConfirm: onClear,
+              })
+            }
             disabled={isClearing || isSharing}
             hitSlop={8}
             accessibilityRole="button"
