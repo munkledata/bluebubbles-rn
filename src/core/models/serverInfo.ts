@@ -67,8 +67,11 @@ export const ServerInfo = z
     supports_rcs_send_attempt_ownership: z.boolean().nullish(),
     /** Whether all app-facing RCS ids carry the current persisted Google pairing epoch. */
     supports_rcs_epoch_qualified_ids: z.boolean().nullish(),
-    /** Opaque current Google pairing epoch; null while the RCS identity is unavailable. */
-    rcs_provider_epoch: z.string().refine(isRcsProviderEpoch).nullable().optional(),
+    /**
+     * Opaque current Google pairing epoch; null while the RCS identity is unavailable. A malformed
+     * value reads as null rather than rejecting the whole reply (that blocked connecting).
+     */
+    rcs_provider_epoch: z.string().refine(isRcsProviderEpoch).nullable().optional().catch(null),
     /**
      * Whether the server can detect message deletions (macOS "Recently Deleted") and emit the
      * `message-deleted` event. Additive; absent/false on older servers, which simply never emit the
@@ -81,7 +84,8 @@ export const ServerInfo = z
     supports_repair_snapshot: z.boolean().nullish(),
     supports_message_state_sync: z.boolean().nullish(),
     message_state_sync_version: z.number().int().nullish(),
-    imessage_provider_epoch: z.string().uuid().nullish(),
+    /** Messages-database identity. Like rcs_provider_epoch, a malformed value reads as null. */
+    imessage_provider_epoch: z.string().uuid().nullish().catch(null),
     supports_provider_repair_snapshot: z.boolean().nullish(),
     /** Typed batch presence that may prove a deletion of a message the phone already holds. */
     supports_message_state_presence: z.boolean().nullish(),
