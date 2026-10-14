@@ -79,9 +79,9 @@ import {
 } from '@/services/send';
 import { logger } from '@core/secure';
 import { MAX_IMESSAGE_VOICE_UPLOAD_BYTES } from '@core/models/serverInfo';
-import { isCurrentRcsChatGuid } from '@core/rcs/providerIdentity';
-import { useSendAttachmentTextSupported, useSessionStore } from '@state/sessionStore';
+import { useSessionStore } from '@state/sessionStore';
 import { devSendFake } from '@features/conversations/devSeed';
+import { useChatCapabilities } from '@features/conversations/useChatCapabilities';
 import { useChatHeader } from '@features/conversations/useChatHeader';
 import { useChatSearch } from '@features/conversations/useChatSearch';
 import { useMessageActions } from '@features/conversations/useMessageActions';
@@ -123,14 +123,7 @@ import { presentSendIssue } from '@ui/conversations/sendNotices';
 import type { ComposerAdmissionResult } from '@ui/conversations/useComposerAuthoringSession';
 import { useTypingStore } from '@state/typingStore';
 import { useShareIntentStore } from '@state/shareIntentStore';
-import {
-  isGroupRow,
-  isProvenIMessageGroupChat,
-  isProvenOneToOneIMessageChat,
-  participantList,
-  resolveChatService,
-  resolveTitle,
-} from '@utils';
+import { isGroupRow, isProvenOneToOneIMessageChat, resolveChatService, resolveTitle } from '@utils';
 import { runAccountOperation } from '@/services/realtime/accountOperation';
 
 interface DocumentPickerModule {
@@ -292,149 +285,31 @@ function ChatScreenInner({
   // The chat's service for the badge, composer placeholder, and outgoing-bubble colour. Resolved
   // from the participant handle service (not just the guid prefix) so an SMS-only thread reads SMS.
   const chatService = resolveChatService(guid, header.data?.handleServices);
-  const rcsAvailable = useSessionStore((s) => isCurrentRcsChatGuid(s.serverInfo, guid));
-  const serverInfoLoaded = useSessionStore((s) => s.serverInfo != null);
-  const rcsInteractiveFeaturesAvailable = rcsAvailable && chatService === 'RCS';
-  const imessageAttachmentSupported = useSessionStore(
-    (s) => s.serverInfo?.supports_imessage_attachment_upload === true,
-  );
-  const imessagePdfSupported = useSessionStore(
-    (s) => s.serverInfo?.supports_imessage_pdf_attachment_upload === true,
-  );
-  const imessageReactionSupported = useSessionStore(
-    (s) => s.serverInfo?.supports_imessage_reactions === true,
-  );
-  const imessageReplySupported = useSessionStore(
-    (s) => s.serverInfo?.supports_imessage_replies === true,
-  );
-  const imessageEditSupported = useSessionStore(
-    (s) => s.serverInfo?.supports_imessage_edit === true,
-  );
-  const imessageUnsendSupported = useSessionStore(
-    (s) => s.serverInfo?.supports_imessage_unsend === true,
-  );
-  const imessageRemoteDeleteSupported = useSessionStore(
-    (s) => s.serverInfo?.supports_imessage_remote_delete === true,
-  );
-  const imessageEffectsSupported = useSessionStore(
-    (s) => s.serverInfo?.supports_imessage_effects === true,
-  );
-  const imessageMentionsSupported = useSessionStore(
-    (s) => s.serverInfo?.supports_imessage_mentions === true,
-  );
-  const imessageFormattedSupported = useSessionStore(
-    (s) => s.serverInfo?.supports_imessage_formatted_messages === true,
-  );
-  const imessageTypingSupported = useSessionStore(
-    (s) => s.serverInfo?.supports_imessage_typing === true,
-  );
-  const imessageVoiceSupported = useSessionStore(
-    (s) => s.serverInfo?.supports_imessage_voice_upload === true,
-  );
-  const imessageScheduledAttachmentSupported = useSessionStore(
-    (s) => s.serverInfo?.supports_imessage_scheduled_attachment === true,
-  );
-  const imessageContactSupported = useSessionStore(
-    (s) => s.serverInfo?.supports_send_contact === true,
-  );
-  const imessageLocationSupported = useSessionStore(
-    (s) => s.serverInfo?.supports_imessage_location === true,
-  );
-  const imessageAttachmentFeaturesAvailable =
-    imessageAttachmentSupported &&
-    chatService === 'iMessage' &&
-    header.data?.guid === guid &&
-    isProvenOneToOneIMessageChat(header.data);
-  const imessagePdfFeaturesAvailable = imessageAttachmentFeaturesAvailable && imessagePdfSupported;
-  const imessageReactionsAvailable =
-    imessageReactionSupported &&
-    chatService === 'iMessage' &&
-    header.data?.guid === guid &&
-    isProvenOneToOneIMessageChat(header.data);
-  const imessageRepliesAvailable =
-    imessageReplySupported &&
-    chatService === 'iMessage' &&
-    header.data?.guid === guid &&
-    isProvenOneToOneIMessageChat(header.data);
-  const imessageEditsAvailable =
-    imessageEditSupported &&
-    chatService === 'iMessage' &&
-    header.data?.guid === guid &&
-    isProvenOneToOneIMessageChat(header.data);
-  const imessageUnsendsAvailable =
-    imessageUnsendSupported &&
-    chatService === 'iMessage' &&
-    header.data?.guid === guid &&
-    isProvenOneToOneIMessageChat(header.data);
-  const imessageRemoteDeleteAvailable =
-    imessageRemoteDeleteSupported &&
-    chatService === 'iMessage' &&
-    header.data?.guid === guid &&
-    (isProvenOneToOneIMessageChat(header.data) || isProvenIMessageGroupChat(header.data));
-  const imessageEffectsAvailable =
-    imessageEffectsSupported &&
-    chatService === 'iMessage' &&
-    header.data?.guid === guid &&
-    header.data.participantCount === 1 &&
-    isProvenOneToOneIMessageChat(header.data);
-  const imessageFormattedAvailable =
-    imessageFormattedSupported &&
-    chatService === 'iMessage' &&
-    header.data?.guid === guid &&
-    isProvenOneToOneIMessageChat(header.data);
-  const imessageMentionsAvailable =
-    imessageMentionsSupported &&
-    chatService === 'iMessage' &&
-    header.data?.guid === guid &&
-    isProvenIMessageGroupChat(header.data);
-  const mentionParticipants = useMemo(() => {
-    if (!imessageMentionsAvailable || !header.data) return [];
-    const names = participantList(header.data.participantNames);
-    const addresses = (header.data.participantAddresses ?? '').split('|||');
-    if (
-      addresses.length !== header.data.participantCount ||
-      names.length !== header.data.participantCount
-    ) {
-      return [];
-    }
-    const participants = addresses.map((rawAddress, index) => {
-      const address = rawAddress;
-      const rawName = names[index]?.trim() ?? '';
-      const label = rawName && !/[\u0000-\u001f\u007f-\u009f]/u.test(rawName) ? rawName : address;
-      return { address, label };
-    });
-    const hasUniqueAddresses =
-      new Set(participants.map((participant) => participant.address)).size === participants.length;
-    return hasUniqueAddresses &&
-      participants.every(
-        (participant) =>
-          participant.address.length > 0 &&
-          participant.address === participant.address.trim() &&
-          !/[\u0000-\u001f\u007f-\u009f]/u.test(participant.address) &&
-          participant.label.length > 0,
-      )
-      ? participants
-      : [];
-  }, [header.data, imessageMentionsAvailable]);
-  const imessageTypingAvailable =
-    imessageTypingSupported &&
-    chatService === 'iMessage' &&
-    header.data?.guid === guid &&
-    isProvenOneToOneIMessageChat(header.data);
-  const typingFeaturesAvailable = rcsInteractiveFeaturesAvailable || imessageTypingAvailable;
-  const imessageVoiceAvailable =
-    imessageVoiceSupported &&
-    chatService === 'iMessage' &&
-    header.data?.guid === guid &&
-    isProvenOneToOneIMessageChat(header.data);
-  const voiceFeaturesAvailable = rcsInteractiveFeaturesAvailable || imessageVoiceAvailable;
-  const imessageScheduledAttachmentsAvailable =
-    imessageAttachmentFeaturesAvailable && imessageScheduledAttachmentSupported;
-  const attachmentFeaturesAvailable =
-    rcsInteractiveFeaturesAvailable || imessageAttachmentFeaturesAvailable;
-  const supportsSendAttachmentText = useSendAttachmentTextSupported(chatService);
-  const imessageCaptionFeaturesAvailable =
-    imessageAttachmentFeaturesAvailable && supportsSendAttachmentText;
+  const {
+    rcsAvailable,
+    serverInfoLoaded,
+    rcsInteractiveFeaturesAvailable,
+    imessageContactSupported,
+    imessageLocationSupported,
+    supportsSendAttachmentText,
+    imessageAttachmentFeaturesAvailable,
+    imessagePdfFeaturesAvailable,
+    imessageScheduledAttachmentsAvailable,
+    imessageCaptionFeaturesAvailable,
+    imessageReactionsAvailable,
+    imessageRepliesAvailable,
+    imessageEditsAvailable,
+    imessageUnsendsAvailable,
+    imessageRemoteDeleteAvailable,
+    imessageEffectsAvailable,
+    imessageFormattedAvailable,
+    imessageMentionsAvailable,
+    mentionParticipants,
+    imessageVoiceAvailable,
+    typingFeaturesAvailable,
+    voiceFeaturesAvailable,
+    attachmentFeaturesAvailable,
+  } = useChatCapabilities(guid, header.data, chatService);
   // Search hits, reminders, unread jumps, and thread jumps all use exact message identity. The DB
   // resolves that identity to a stable (date,id) window, so null/equal timestamps cannot strand the
   // requested bubble outside the loaded context.
