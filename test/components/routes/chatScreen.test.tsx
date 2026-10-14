@@ -1683,6 +1683,40 @@ describe('ChatScreen — send routing', () => {
     expect(cancel).toHaveBeenCalledTimes(1);
   });
 
+  it('shows progress while reading the location, and Cancel stops it', async () => {
+    configureLocationChat();
+    const cancel = jest.fn();
+    (acquireAndSendCurrentLocation as jest.Mock).mockImplementationOnce((_guid, options) => {
+      options.foregroundLifecycle.subscribeToInactive(cancel);
+      return new Promise(() => undefined);
+    });
+    await renderWithTheme(<ChatScreen />);
+    await act(async () => mockCaptured.composer?.onShareLocation());
+    await act(async () => mockShowConfirm.mock.calls[0]?.[0].onConfirm());
+
+    const progress = jest.mocked(showDialog).mock.calls.at(-1);
+    expect(progress?.[0]).toBe('Getting Your Location');
+    const buttons = (progress?.[2] ?? []) as { text: string; onPress?: () => void }[];
+    await act(async () => buttons.find((button) => button.text === 'Cancel')?.onPress?.());
+
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+
+  it('says so when the location button is tapped again while a location is being read', async () => {
+    configureLocationChat();
+    (acquireAndSendCurrentLocation as jest.Mock).mockImplementationOnce(
+      () => new Promise(() => undefined),
+    );
+    await renderWithTheme(<ChatScreen />);
+    await act(async () => mockCaptured.composer?.onShareLocation());
+    await act(async () => mockShowConfirm.mock.calls[0]?.[0].onConfirm());
+
+    await act(async () => mockCaptured.composer?.onShareLocation());
+
+    expect(showToast).toHaveBeenCalledWith('Already getting your location');
+    expect(acquireAndSendCurrentLocation).toHaveBeenCalledTimes(1);
+  });
+
   it('offers iMessage typing only for a proven chat with its separate live capability', async () => {
     useSessionStore.setState({
       serverInfo: { version: 'test', supports_imessage_typing: true } as any,

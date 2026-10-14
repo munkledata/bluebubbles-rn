@@ -14,6 +14,7 @@ import {
 import { captureSessionRcsCapabilityLease } from '@/services/send/rcsAttemptCapability';
 import { acquireAndSendCurrentLocation, type ShareCurrentLocationResult } from '@/services/send';
 import { useSessionStore } from '@state/sessionStore';
+import { showToast } from '@ui';
 import { presentSendIssue } from '@ui/conversations/sendNotices';
 import { showConfirm, showDialog, useDialogStore, type DialogButton } from '@ui/dialog/dialogStore';
 
@@ -45,8 +46,12 @@ export function useShareCurrentLocation(
   const onShareCurrentLocation = useCallback((): void => {
     const screen = locationScreenRef.current;
     const capability = captureSessionRcsCapabilityLease();
+    if (locationFlowRef.current) {
+      // A dialog normally covers the button meanwhile; a tap that still lands says why it waits.
+      showToast('Already getting your location');
+      return;
+    }
     if (
-      locationFlowRef.current ||
       !screen ||
       !currentLocationAvailable ||
       !accountLease.isCurrent() ||
@@ -98,6 +103,8 @@ export function useShareCurrentLocation(
       };
     const explain = (title: string, message: string, buttons?: DialogButton[]): void => {
       if (!foreground()) return;
+      // A result replaces the progress dialog instead of queueing behind it.
+      if (dialogId !== null) useDialogStore.getState().dismissById(dialogId);
       const token = {};
       dialogToken = token;
       dialogId = showDialog(
@@ -175,6 +182,13 @@ export function useShareCurrentLocation(
     };
     const sendLocation = (): void => {
       if (!foreground()) return;
+      // Reading a fresh location can take up to 15 seconds. Show that, and let Cancel stop it the
+      // way leaving the screen does (it can stop only the reading, never a queued send).
+      explain(
+        'Getting Your Location',
+        'This can take up to 15 seconds. Nothing has been sent yet.',
+        [{ text: 'Cancel', style: 'cancel', onPress: finish }],
+      );
       void acquireAndSendCurrentLocation(guid, {
         foregroundLifecycle: {
           isActive: foreground,
