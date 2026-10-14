@@ -609,7 +609,9 @@ export function ConversationListScreen({
               refreshControl={fixtureMode ? undefined : refreshControl}
               renderItem={renderInboxItem}
               ListHeaderComponent={listHeader}
-              ListFooterComponent={!fixtureMode && listData.length > 0 ? ListFooter : null}
+              // Shown even when the visible list is empty: with every chat archived or from an
+              // unknown sender, these links are the only way to reach them.
+              ListFooterComponent={!fixtureMode && !isLoading ? ListFooter : null}
               ItemSeparatorComponent={InboxSeparator}
               // The convergence loop (see requestScrollToTop): re-issue the corrective scroll on
               // every content-size change until a drag — or the arm window closing — hands the

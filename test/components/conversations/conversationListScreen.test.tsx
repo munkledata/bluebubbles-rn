@@ -353,6 +353,19 @@ describe('ConversationListScreen — list states', () => {
     expect(screen.getByText('No Conversations')).toBeTruthy();
   });
 
+  it('keeps the Archived link reachable when every conversation is archived', async () => {
+    setChats({ data: [], isLoading: false });
+    await renderWithTheme(<ConversationListScreen />);
+    expect(screen.getByText('No Conversations')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Archived conversations' })).toBeTruthy();
+  });
+
+  it('shows the footer links only once the inbox has loaded', async () => {
+    setChats({ data: undefined, isLoading: true });
+    await renderWithTheme(<ConversationListScreen />);
+    expect(screen.queryByRole('button', { name: 'Archived conversations' })).toBeNull();
+  });
+
   it('shows neither empty nor error copy while loading (the spinner branch)', async () => {
     setChats({ data: undefined, isLoading: true });
     const view = await renderWithTheme(<ConversationListScreen />);
