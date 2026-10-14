@@ -163,6 +163,12 @@ export interface ComposerRemovalState {
   dismissAttachmentTray?: () => void;
 }
 
+function sameRemovalState(a: ComposerRemovalState, b: ComposerRemovalState): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]) as Set<keyof ComposerRemovalState>;
+  for (const key of keys) if (a[key] !== b[key]) return false;
+  return true;
+}
+
 /**
  * Message composer: optional RCS attachment button + plain-text input + send button.
  * Memoized: it re-renders on every keystroke from its own state, but the chat screen re-renders
@@ -511,11 +517,15 @@ export const Composer = React.memo(function Composer({
     setTrayOpen(false);
     setPendingSchedule(null);
   }, [isEditing]);
+  const lastRemovalReportRef = useRef<{
+    report: ComposerProps['onRemovalStateChange'];
+    state: ComposerRemovalState;
+  } | null>(null);
   useEffect(() => {
     const hasOpenAttachmentTray = active && trayOpen && !isEditing;
     const hasSuspendedFormattingMetadata = (preEditFormattingRef.current?.length ?? 0) > 0;
     const hasSuspendedMentionMetadata = (preEditMentionsRef.current?.length ?? 0) > 0;
-    onRemovalStateChange?.({
+    const state: ComposerRemovalState = {
       ...(isEditing ? { hasUnsavedEdit: text !== editingText } : {}),
       hasUnsavedDraftMetadata:
         pending.length > 0 ||
@@ -531,7 +541,15 @@ export const Composer = React.memo(function Composer({
         : {}),
       hasOpenAttachmentTray,
       ...(hasOpenAttachmentTray ? { dismissAttachmentTray } : {}),
-    });
+    };
+    // The text changes on every keystroke, but the screen re-renders on every report. Report only
+    // when the state itself changed (or to a new receiver).
+    const last = lastRemovalReportRef.current;
+    if (last && last.report === onRemovalStateChange && sameRemovalState(last.state, state)) {
+      return;
+    }
+    lastRemovalReportRef.current = { report: onRemovalStateChange, state };
+    onRemovalStateChange?.(state);
   }, [
     active,
     dismissAttachmentTray,

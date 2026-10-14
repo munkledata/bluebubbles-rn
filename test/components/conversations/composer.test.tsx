@@ -512,6 +512,49 @@ describe('Composer — typing enables send + trimmed send + clear', () => {
   );
 });
 
+describe('Composer — unsaved-state report', () => {
+  it('reports only when the state changes, so typing does not re-render the chat screen', async () => {
+    const onRemovalStateChange = jest.fn();
+    await renderWithTheme(
+      <Composer onSend={jest.fn()} onRemovalStateChange={onRemovalStateChange} />,
+    );
+    const reportsAfterMount = onRemovalStateChange.mock.calls.length;
+    expect(reportsAfterMount).toBeGreaterThan(0);
+
+    await fireEvent.changeText(input(), 'h');
+    await fireEvent.changeText(input(), 'he');
+    await fireEvent.changeText(input(), 'hey');
+
+    expect(onRemovalStateChange).toHaveBeenCalledTimes(reportsAfterMount);
+  });
+
+  it('still reports the moment an edit gains unsaved changes', async () => {
+    const onRemovalStateChange = jest.fn();
+    await renderWithTheme(
+      <Composer
+        onSend={jest.fn()}
+        editingText="Original"
+        onCancelEdit={jest.fn()}
+        onRemovalStateChange={onRemovalStateChange}
+      />,
+    );
+    await waitFor(() =>
+      expect(onRemovalStateChange).toHaveBeenLastCalledWith(
+        expect.objectContaining({ hasUnsavedEdit: false }),
+      ),
+    );
+    const before = onRemovalStateChange.mock.calls.length;
+
+    await fireEvent.changeText(input(), 'Original!');
+    await fireEvent.changeText(input(), 'Original!!');
+
+    expect(onRemovalStateChange).toHaveBeenCalledTimes(before + 1);
+    expect(onRemovalStateChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ hasUnsavedEdit: true }),
+    );
+  });
+});
+
 describe('Composer — formatted messages', () => {
   it('formats only the selected text and submits through the dedicated callback', async () => {
     const onSend = jest.fn();
