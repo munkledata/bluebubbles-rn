@@ -18,9 +18,10 @@
  * is stubbed to a plain host View.
  */
 import React from 'react';
-import { AppState, Linking, type AppStateStatus } from 'react-native';
+import { AppState, Linking, StyleSheet, type AppStateStatus } from 'react-native';
 import { act, renderWithTheme, screen, fireEvent, waitFor } from '../support/renderWithTheme';
 import { logger } from '@core/secure';
+import { readableTextOn } from '@ui/theme';
 
 let mockLeaseCurrent = true;
 let mockGenerationInvalidation: (() => void) | undefined;
@@ -115,6 +116,13 @@ function grantWith(assets: unknown[]): void {
   getAssets.mockResolvedValue({ assets });
 }
 
+/** After a denial the tray only shows its access tile; the user opens the explanation from it. */
+async function openAccessReview(): Promise<void> {
+  await fireEvent.press(
+    await screen.findByRole('button', { name: 'Review photo and video access' }),
+  );
+}
+
 async function waitForMediaCheckToSettle(): Promise<void> {
   await waitFor(() => expect(screen.queryByLabelText('Review photo and video access')).toBeNull());
 }
@@ -130,7 +138,24 @@ describe('AttachmentTray — always-visible controls', () => {
     await renderWithTheme(<AttachmentTray onPick={jest.fn()} onPickFiles={jest.fn()} />);
     expect(screen.getByLabelText('Take a photo')).toBeTruthy();
     expect(screen.getByLabelText('Attach a file')).toBeTruthy();
+    await openAccessReview();
     expect(await screen.findByLabelText('Open Settings')).toBeTruthy();
+  });
+
+  it('does not pop the access explanation up on every open after a denial', async () => {
+    getPerm.mockResolvedValue({
+      status: 'denied',
+      granted: false,
+      canAskAgain: true,
+      accessPrivileges: 'none',
+    });
+    await renderWithTheme(<AttachmentTray onPick={jest.fn()} onPickFiles={jest.fn()} />);
+
+    expect(
+      await screen.findByRole('button', { name: 'Review photo and video access' }),
+    ).toBeTruthy();
+    expect(screen.queryByText(/Gator can show recent photos and videos/)).toBeNull();
+    expect(requestPerm).not.toHaveBeenCalled();
   });
 
   it('fires onPickFiles when Files is tapped', async () => {
@@ -174,6 +199,14 @@ describe('AttachmentTray — media library', () => {
       ),
     ).toBeTruthy();
     expect(requestPerm).not.toHaveBeenCalled();
+    const continueButton = StyleSheet.flatten(
+      screen.getByRole('button', { name: 'Continue' }).props.style,
+    ) as { backgroundColor?: string };
+    const continueText = StyleSheet.flatten(screen.getByText('Continue').props.style) as {
+      color?: string;
+    };
+    if (typeof continueButton.backgroundColor !== 'string') throw new Error('Expected a fill');
+    expect(continueText.color).toBe(readableTextOn(continueButton.backgroundColor));
 
     await fireEvent.press(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(requestPerm).toHaveBeenCalledWith(false, ['photo', 'video']));
@@ -275,6 +308,7 @@ describe('AttachmentTray — media library', () => {
     });
     const openSettings = jest.spyOn(Linking, 'openSettings').mockResolvedValue(undefined);
     await renderWithTheme(<AttachmentTray onPick={jest.fn()} onPickFiles={jest.fn()} />);
+    await openAccessReview();
     expect(await screen.findByText(/Android won't ask again/)).toBeTruthy();
     expect(screen.getByText(/Gator can show recent photos and videos/)).toBeTruthy();
     expect(screen.getByLabelText('Take a photo')).toBeTruthy();
@@ -299,6 +333,7 @@ describe('AttachmentTray — media library', () => {
     });
 
     await renderWithTheme(<AttachmentTray onPick={jest.fn()} onPickFiles={jest.fn()} />);
+    await openAccessReview();
     expect(await screen.findByText(/Gator can show recent photos and videos/)).toBeTruthy();
     expect(screen.getByText(/Android previously denied access/)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Open Settings' })).toBeTruthy();
@@ -331,6 +366,7 @@ describe('AttachmentTray — media library', () => {
     const openSettings = jest.spyOn(Linking, 'openSettings').mockResolvedValue(undefined);
 
     await renderWithTheme(<AttachmentTray onPick={jest.fn()} onPickFiles={jest.fn()} />);
+    await openAccessReview();
     await fireEvent.press(await screen.findByRole('button', { name: 'Open Settings' }));
     await waitFor(() => expect(openSettings).toHaveBeenCalledTimes(1));
     await act(async () => {

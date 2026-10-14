@@ -18,7 +18,7 @@ import {
 import { logger } from '@core/secure';
 import { subscribeRealtimeGenerationInvalidation } from '@/services/realtime/deliveryCoordinator';
 import { Icon } from '../primitives';
-import { useTheme } from '../theme';
+import { readableTextOn, useTheme } from '../theme';
 import { showToast } from '../toast/toastStore';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
@@ -162,7 +162,9 @@ export function AttachmentTray({
             ? 'retry'
             : 'settings';
       setMediaPermission(nextState);
-      setPermissionDialogVisible(true);
+      // Explain once, before Android has asked. After the user said no, the access tile offers the
+      // same explanation; opening it on every tray open would nag about optional access.
+      if (nextState === 'rationale') setPermissionDialogVisible(true);
     } catch (error) {
       if (!isCurrent()) return;
       logger.warn('[attachment-tray] could not check media-library permission', error);
@@ -542,7 +544,9 @@ export function AttachmentTray({
                   accessibilityRole="button"
                   accessibilityLabel={permissionRequestAction}
                 >
-                  <Text style={[styles.dialogButtonText, { color: theme.color.background }]}>
+                  <Text
+                    style={[styles.dialogButtonText, { color: readableTextOn(theme.color.tint) }]}
+                  >
                     {permissionRequestAction}
                   </Text>
                 </Pressable>
