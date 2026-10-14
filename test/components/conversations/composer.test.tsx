@@ -90,6 +90,8 @@ jest.mock('@ui/conversations/AttachmentTray', () => {
 import { Composer } from '@ui/conversations/Composer';
 // eslint-disable-next-line import/first
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
+// eslint-disable-next-line import/first
+import { useToastStore } from '@ui/toast/toastStore';
 
 /** The two items the mock tray stages via onPick (must equal the mock's A/B by value). */
 const ITEM_A: PendingAttachment = {
@@ -539,6 +541,41 @@ describe('Composer — formatted messages', () => {
     ]);
     expect(onSend).not.toHaveBeenCalled();
     await waitFor(() => expect(input().props.value).toBe(''));
+  });
+
+  it('says a reply goes out as plain text when the draft is formatted', async () => {
+    useToastStore.setState({ current: null, queue: [] });
+    const onSend = jest.fn(() => true);
+    const view = await renderWithTheme(
+      <Composer onSend={onSend} onSendFormatted={jest.fn(() => true)} />,
+    );
+    await fireEvent.changeText(input(), 'Hello world');
+    await fireEvent(input(), 'selectionChange', {
+      nativeEvent: { selection: { start: 0, end: 5 } },
+    });
+    await fireEvent.press(await screen.findByLabelText('Bold'));
+    expect(useToastStore.getState().current).toBeNull();
+
+    await view.rerender(
+      <Composer onSend={onSend} replyTo={REPLY_TARGET} onCancelReply={jest.fn()} />,
+    );
+
+    expect(useToastStore.getState().current?.message).toBe(
+      'Replies are sent as plain text, without formatting or mentions',
+    );
+  });
+
+  it('says nothing when a plain draft becomes a reply', async () => {
+    useToastStore.setState({ current: null, queue: [] });
+    const onSend = jest.fn(() => true);
+    const view = await renderWithTheme(<Composer onSend={onSend} />);
+    await fireEvent.changeText(input(), 'Hello world');
+
+    await view.rerender(
+      <Composer onSend={onSend} replyTo={REPLY_TARGET} onCancelReply={jest.fn()} />,
+    );
+
+    expect(useToastStore.getState().current).toBeNull();
   });
 
   it('keeps formatting through a refused reply and never sends that reply as formatted', async () => {

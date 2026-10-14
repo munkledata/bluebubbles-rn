@@ -344,6 +344,21 @@ export const Composer = React.memo(function Composer({
     // mention sending is withheld. Outside reply/edit, losing mention support drops them.
     if (!mentionParticipantsAvailable && !replyTo && !editing) replaceMentions([]);
   }, [active, editingText, mentionParticipantIdentity, mentionParticipantsAvailable, replyTo]);
+  // Declared after the formatting and mention effects, so it sees what reply mode kept.
+  const replyingRef = useRef(false);
+  useEffect(() => {
+    const replying = replyTo != null;
+    const wasReplying = replyingRef.current;
+    replyingRef.current = replying;
+    // A reply carries neither, so say so before sending rather than dropping them silently.
+    if (
+      replying &&
+      !wasReplying &&
+      (textFormattingRef.current.length > 0 || mentionsRef.current.length > 0)
+    ) {
+      showToast('Replies are sent as plain text, without formatting or mentions');
+    }
+  }, [replyTo]);
 
   const addPending = (item: PendingAttachment): void => {
     // A native picker can resolve after capability loss and after its tray has unmounted. Read the
