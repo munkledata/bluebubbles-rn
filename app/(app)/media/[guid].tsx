@@ -1,94 +1,45 @@
-import { useEventListener } from 'expo';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useVideoPlayer, VideoView } from 'expo-video';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   FlatList,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
-  Pressable,
   StyleSheet,
-  Text,
   useWindowDimensions,
   View,
 } from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { logger } from '@core/secure';
 import { getDatabase } from '@db/database';
 import {
   getVisibleAttachmentByGuid,
   listChatImageAttachmentsByAttachmentGuid,
-  type AttachmentRow,
 } from '@db/repositories';
 import { download, redownload } from '@/services/download';
-import { saveAttachmentsToPhotos, shareAttachment } from '@/services/media';
 import { subscribeRealtimeGenerationInvalidation } from '@/services/realtime/deliveryCoordinator';
 import { useDownloadStore } from '@state/downloadStore';
-import { ProgressRing } from '@ui/attachments/ProgressRing';
-import { ZoomableImage } from '@ui/attachments/ZoomableImage';
+import {
+  activePageAttachment,
+  PAGE_CHECK_INDICATOR_DELAY_MS,
+  sameMediaSource,
+  withRefreshedActivePage,
+  type LoadedMedia,
+  type MediaDownloadIntent,
+  type MediaDownloadOperation,
+  type MediaLoadFailure,
+  type MediaSourceGrant,
+} from '@ui/attachments/mediaViewerModel';
+import {
+  MediaDownloadOverlay,
+  MediaPageCheckOverlay,
+  MediaViewerTopBar,
+} from '@ui/attachments/MediaViewerControls';
+import { ProtectedFullscreenVideo, ProtectedZoomableImage } from '@ui/attachments/MediaViewerPages';
 import { useAttachmentCachePathProtection } from '@ui/attachments/useAttachmentCachePathProtection';
-import { showDialog } from '@ui/dialog/dialogStore';
-import { showToast } from '@ui/toast/toastStore';
+import { useMediaShareSave } from '@ui/attachments/useMediaShareSave';
 import { isLocalFileUri } from '@utils';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
+import { useShownAfterDelay } from '@ui/hooks/useShownAfterDelay';
 import { runAccountOperation } from '@/services/realtime/accountOperation';
-
-interface MediaGallery {
-  items: AttachmentRow[];
-  index: number;
-}
-
-/** How long a page check may run before the viewer shows its "Checking media…" spinner. */
-const PAGE_CHECK_INDICATOR_DELAY_MS = 300;
-
-interface LoadedMedia {
-  routeGuid: string;
-  routeLifetime: number;
-  attachment: AttachmentRow | null;
-  gallery: MediaGallery | null;
-  pageIndex: number;
-  pageLifetime: number;
-  pageStatus: 'checking' | 'ready' | 'error';
-}
-
-interface MediaSourceGrant {
-  routeGuid: string;
-  routeLifetime: number;
-  pageLifetime: number;
-  attachmentGuid: string;
-  localPath: string | null;
-  mimeType: string | null;
-}
-
-interface MediaActionOperation {
-  token: symbol;
-  source: MediaSourceGrant;
-}
-
-type MediaDownloadIntent = 'download' | 'share' | 'save';
-
-interface MediaDownloadOperation {
-  token: symbol;
-  intent: MediaDownloadIntent;
-  phase: 'downloading' | 'adopted';
-  recoversMediaFailure: boolean;
-  source: MediaSourceGrant;
-}
-
-interface MediaLoadFailure {
-  source: MediaSourceGrant;
-}
-
-function sameMediaSource(left: MediaSourceGrant, right: MediaSourceGrant): boolean {
-  return (
-    left.routeGuid === right.routeGuid &&
-    left.routeLifetime === right.routeLifetime &&
-    left.pageLifetime === right.pageLifetime &&
-    left.attachmentGuid === right.attachmentGuid &&
-    left.localPath === right.localPath &&
-    left.mimeType === right.mimeType
-  );
-}
 
 /**
  * Fullscreen media viewer. Images open in a swipe-carousel across EVERY photo in the chat (with an
@@ -98,7 +49,6 @@ function sameMediaSource(left: MediaSourceGrant, right: MediaSourceGrant): boole
 export default function MediaViewer(): React.JSX.Element {
   const { guid } = useLocalSearchParams<{ guid: string }>();
   const router = useRouter();
-  const insets = useSafeAreaInsets();
   const win = useWindowDimensions();
   const accountLease = useScreenAccountLease();
   const mountAliveRef = useRef(true);
@@ -112,8 +62,6 @@ export default function MediaViewer(): React.JSX.Element {
   const [loaded, setLoaded] = useState<LoadedMedia | null>(null);
   const [pagingEnabled, setPagingEnabled] = useState(true);
   const [cacheProtectionEpoch, setCacheProtectionEpoch] = useState(0);
-  const sharing = useRef<MediaActionOperation | null>(null);
-  const saving = useRef<MediaActionOperation | null>(null);
   const pendingDownloadRef = useRef<MediaDownloadOperation | null>(null);
   const downloadRefreshRef = useRef<symbol | null>(null);
   const [downloadRefreshEpoch, setDownloadRefreshEpoch] = useState(0);
@@ -284,9 +232,7 @@ export default function MediaViewer(): React.JSX.Element {
   ]);
 
   // The item the action bar (share/save) + counter refer to = the visible page (else the tapped att).
-  // Never fall back from an invalid gallery index to the tapped attachment: that would make the
-  // action bar operate on media that is not actually visible.
-  const current = visibleGallery ? (visibleGallery.items[pageIndex] ?? null) : visibleAtt;
+  const current = visibleLoaded ? activePageAttachment(visibleLoaded) : null;
   const pageReady = visibleLoaded?.pageStatus === 'ready';
 
   const pageGrantIsCurrent = useCallback(
@@ -307,10 +253,7 @@ export default function MediaViewer(): React.JSX.Element {
       ) {
         return false;
       }
-      const activeAttachment = active.gallery
-        ? (active.gallery.items[active.pageIndex] ?? null)
-        : active.attachment;
-      return activeAttachment?.guid === attachmentGuid;
+      return activePageAttachment(active)?.guid === attachmentGuid;
     },
     [routeGrantIsCurrent],
   );
@@ -355,20 +298,7 @@ export default function MediaViewer(): React.JSX.Element {
           return;
         }
 
-        const nextGallery = active.gallery
-          ? {
-              ...active.gallery,
-              items: active.gallery.items.map((item, index) =>
-                index === active.pageIndex ? attachment : item,
-              ),
-            }
-          : null;
-        const nextLoaded: LoadedMedia = {
-          ...active,
-          attachment: active.attachment?.guid === attachment.guid ? attachment : active.attachment,
-          gallery: nextGallery,
-          pageStatus: 'ready',
-        };
+        const nextLoaded = withRefreshedActivePage(active, attachment);
         activeLoadedRef.current = nextLoaded;
         setCacheProtectionEpoch((epoch) => epoch + 1);
         setLoaded(nextLoaded);
@@ -445,9 +375,7 @@ export default function MediaViewer(): React.JSX.Element {
       ) {
         return false;
       }
-      const activeAttachment = active.gallery
-        ? (active.gallery.items[active.pageIndex] ?? null)
-        : active.attachment;
+      const activeAttachment = activePageAttachment(active);
       return (
         activeAttachment?.guid === source.attachmentGuid &&
         activeAttachment.localPath === source.localPath &&
@@ -569,25 +497,9 @@ export default function MediaViewer(): React.JSX.Element {
 
         const active = activeLoadedRef.current;
         if (!active || !pendingDownloadIsCurrent(operation)) return;
-        const activeAttachment = active.gallery
-          ? (active.gallery.items[active.pageIndex] ?? null)
-          : active.attachment;
-        if (activeAttachment?.guid !== attachment.guid) return;
+        if (activePageAttachment(active)?.guid !== attachment.guid) return;
 
-        const nextGallery = active.gallery
-          ? {
-              ...active.gallery,
-              items: active.gallery.items.map((item, index) =>
-                index === active.pageIndex ? attachment : item,
-              ),
-            }
-          : null;
-        const nextLoaded: LoadedMedia = {
-          ...active,
-          attachment: active.attachment?.guid === attachment.guid ? attachment : active.attachment,
-          gallery: nextGallery,
-          pageStatus: 'ready',
-        };
+        const nextLoaded = withRefreshedActivePage(active, attachment);
         if (!isLocalFileUri(attachment.localPath)) {
           // A replacement can lose because another owner cleared the stale source instead of
           // installing a new file. Adopt that authoritative remote row, leave corrupt-recovery
@@ -809,9 +721,7 @@ export default function MediaViewer(): React.JSX.Element {
   const onScrollBeginDrag = useCallback((): void => {
     if (!visibleLoaded || !current) return;
     const active = activeLoadedRef.current;
-    const activeAttachment = active?.gallery
-      ? (active.gallery.items[active.pageIndex] ?? null)
-      : active?.attachment;
+    const activeAttachment = active ? activePageAttachment(active) : null;
     if (
       !active ||
       active.routeGuid !== visibleLoaded.routeGuid ||
@@ -847,91 +757,7 @@ export default function MediaViewer(): React.JSX.Element {
     setPendingDownload(genericOperation);
   }, [current, routeGrantIsCurrent, visibleLoaded]);
 
-  // Both actions REPORT their outcome. They used to `await` the helper and discard its answer,
-  // which made a successful save pixel-identical to a dead button (and hid every failure), so the
-  // pills read as broken even when they worked. A toast for the happy path (non-blocking, and the
-  // host is `pointerEvents:'none'` so it can't eat a swipe), a dialog when there is something the
-  // user has to act on.
-  //
-  // The in-flight guards matter BECAUSE of that reporting: a user whose buttons appear dead taps
-  // twice, and expo-sharing throws "sharing already in progress" on a concurrent call — which
-  // would now raise a "couldn't open the share sheet" dialog (and upload an error report) for a
-  // sheet that opened perfectly on the first tap. Per-action refs, not one shared flag, so a share
-  // that never settles can't also disable saving.
-  const performShare = useCallback(
-    async (source: MediaSourceGrant): Promise<void> => {
-      if (
-        !source.localPath ||
-        !isLocalFileUri(source.localPath) ||
-        sharing.current ||
-        !sourceGrantIsCurrent(source)
-      ) {
-        return;
-      }
-      const operation: MediaActionOperation = { token: Symbol('media-share'), source };
-      sharing.current = operation;
-      const localPath = source.localPath;
-      const operationIsCurrent = (): boolean =>
-        sharing.current?.token === operation.token && sourceGrantIsCurrent(operation.source);
-      try {
-        const result = await runAccountOperation(accountLease, () =>
-          shareAttachment(localPath, source.mimeType, operationIsCurrent),
-        );
-        if (!result.ok || !operationIsCurrent() || result.value.ok) {
-          return;
-        }
-        showDialog(
-          'Share',
-          result.value.reason === 'unavailable'
-            ? 'Sharing isn’t available on this device.'
-            : 'Couldn’t open the share sheet for this photo. The details are in Settings → App Logs.',
-        );
-      } catch {
-        if (operationIsCurrent()) {
-          showDialog(
-            'Share',
-            'Couldn’t open the share sheet for this photo. The details are in Settings → App Logs.',
-          );
-        }
-      } finally {
-        if (sharing.current?.token === operation.token) sharing.current = null;
-      }
-    },
-    [accountLease, sourceGrantIsCurrent],
-  );
-
-  const performSave = useCallback(
-    async (source: MediaSourceGrant): Promise<void> => {
-      if (
-        !source.localPath ||
-        !isLocalFileUri(source.localPath) ||
-        saving.current ||
-        !sourceGrantIsCurrent(source)
-      ) {
-        return;
-      }
-      const operation: MediaActionOperation = { token: Symbol('media-save'), source };
-      saving.current = operation;
-      const localPath = source.localPath;
-      const operationIsCurrent = (): boolean =>
-        saving.current?.token === operation.token && sourceGrantIsCurrent(operation.source);
-      try {
-        const result = await runAccountOperation(accountLease, () =>
-          saveAttachmentsToPhotos([localPath], operationIsCurrent),
-        );
-        if (!result.ok || !operationIsCurrent()) return;
-        if (result.value.status === 'saved') showToast('Saved to Photos');
-        else if (result.value.status === 'denied')
-          showDialog('Save', 'Photos permission is required to save attachments.');
-        else showToast('Couldn’t save this photo');
-      } catch {
-        if (operationIsCurrent()) showToast('Couldn’t save this photo');
-      } finally {
-        if (saving.current?.token === operation.token) saving.current = null;
-      }
-    },
-    [accountLease, sourceGrantIsCurrent],
-  );
+  const { performShare, performSave } = useMediaShareSave(accountLease, sourceGrantIsCurrent);
 
   useEffect(() => {
     const operation = pendingDownload;
@@ -980,9 +806,7 @@ export default function MediaViewer(): React.JSX.Element {
 
   const retryCurrentPageRefresh = (): void => {
     const active = activeLoadedRef.current;
-    const attachment = active?.gallery
-      ? (active.gallery.items[active.pageIndex] ?? null)
-      : (active?.attachment ?? null);
+    const attachment = active ? activePageAttachment(active) : null;
     if (
       !active ||
       active.pageStatus !== 'error' ||
@@ -1022,18 +846,6 @@ export default function MediaViewer(): React.JSX.Element {
     router.back();
   };
 
-  const closeButton = (
-    <Pressable
-      onPress={revokeViewerBeforeClose}
-      hitSlop={12}
-      style={styles.pill}
-      accessibilityRole="button"
-      accessibilityLabel="Close media viewer"
-    >
-      <Text style={styles.glyph}>✕</Text>
-    </Pressable>
-  );
-
   const pendingForCurrent =
     pendingDownload && pendingDownloadIsCurrent(pendingDownload) ? pendingDownload : null;
   const pageCheckBusy = visibleLoaded?.pageStatus === 'checking';
@@ -1043,16 +855,7 @@ export default function MediaViewer(): React.JSX.Element {
     visibleLoaded?.pageStatus === 'checking'
       ? `${visibleLoaded.routeLifetime}:${visibleLoaded.pageLifetime}`
       : null;
-  const [slowCheckPageKey, setSlowCheckPageKey] = useState<string | null>(null);
-  useEffect(() => {
-    if (checkingPageKey === null) return;
-    const timer = setTimeout(
-      () => setSlowCheckPageKey(checkingPageKey),
-      PAGE_CHECK_INDICATOR_DELAY_MS,
-    );
-    return () => clearTimeout(timer);
-  }, [checkingPageKey]);
-  const showPageCheckIndicator = checkingPageKey !== null && slowCheckPageKey === checkingPageKey;
+  const showPageCheckIndicator = useShownAfterDelay(checkingPageKey, PAGE_CHECK_INDICATOR_DELAY_MS);
   const downloadBusy =
     !local &&
     (downloadStatus === 'downloading' ||
@@ -1061,19 +864,7 @@ export default function MediaViewer(): React.JSX.Element {
   const mediaActionsAvailable =
     !!currentSource && sourceGrantIsCurrent(currentSource) && !mediaActionBusy;
   const downloadIntent = pendingForCurrent?.intent ?? 'download';
-  const downloadPurpose =
-    downloadIntent === 'share'
-      ? 'Downloading media to share'
-      : downloadIntent === 'save'
-        ? 'Downloading media to save'
-        : 'Downloading media';
   const retryingExistingPath = isLocalFileUri(currentSource?.localPath);
-  const retryLabel =
-    downloadIntent === 'share'
-      ? 'Retry download and share media'
-      : downloadIntent === 'save'
-        ? 'Retry download and save media'
-        : 'Retry media download';
 
   return (
     <View style={styles.root}>
@@ -1137,264 +928,35 @@ export default function MediaViewer(): React.JSX.Element {
       ) : null}
 
       {current && !pageReady ? (
-        <View style={styles.downloadOverlay} pointerEvents="box-none">
-          {visibleLoaded?.pageStatus === 'checking' ? (
-            showPageCheckIndicator ? (
-              <View
-                accessible
-                accessibilityRole="progressbar"
-                accessibilityLabel="Checking current media"
-                accessibilityLiveRegion="polite"
-                style={styles.downloadPanel}
-                pointerEvents="none"
-              >
-                <ProgressRing progress={null} />
-                <Text style={styles.downloadMessage}>Checking media…</Text>
-              </View>
-            ) : null
-          ) : (
-            <View style={styles.downloadPanel}>
-              <Text accessibilityLiveRegion="polite" style={styles.downloadMessage}>
-                Couldn’t refresh media
-              </Text>
-              <Pressable
-                onPress={retryCurrentPageRefresh}
-                style={styles.downloadButton}
-                accessibilityRole="button"
-                accessibilityLabel="Retry media refresh"
-              >
-                <Text style={styles.downloadButtonText}>Retry</Text>
-              </Pressable>
-            </View>
-          )}
-        </View>
+        <MediaPageCheckOverlay
+          checking={visibleLoaded?.pageStatus === 'checking'}
+          showIndicator={showPageCheckIndicator}
+          onRetry={retryCurrentPageRefresh}
+        />
       ) : currentSource && !local ? (
-        <View style={styles.downloadOverlay} pointerEvents="box-none">
-          {downloadBusy ? (
-            <View
-              accessible
-              accessibilityRole="progressbar"
-              accessibilityLabel={downloadPurpose}
-              accessibilityLiveRegion="polite"
-              accessibilityValue={
-                typeof downloadProgress === 'number'
-                  ? { min: 0, max: 100, now: Math.round(downloadProgress * 100) }
-                  : undefined
-              }
-              style={styles.downloadPanel}
-              pointerEvents="none"
-            >
-              <ProgressRing progress={downloadProgress ?? null} />
-              <Text style={styles.downloadMessage}>{downloadPurpose}…</Text>
-            </View>
-          ) : (
-            <View style={styles.downloadPanel}>
-              <Text accessibilityLiveRegion="polite" style={styles.downloadMessage}>
-                {downloadStatus === 'error' || pendingForCurrent?.phase === 'adopted'
-                  ? 'Download failed'
-                  : retryingExistingPath
-                    ? 'Media file unavailable'
-                    : 'Not downloaded'}
-              </Text>
-              <Pressable
-                onPress={() => requestDownload(downloadIntent, pendingForCurrent?.token)}
-                style={styles.downloadButton}
-                accessibilityRole="button"
-                accessibilityLabel={
-                  downloadStatus === 'error' ||
-                  pendingForCurrent?.phase === 'adopted' ||
-                  retryingExistingPath
-                    ? retryLabel
-                    : 'Download media'
-                }
-              >
-                <Text style={styles.downloadButtonText}>
-                  {downloadStatus === 'error' ||
-                  pendingForCurrent?.phase === 'adopted' ||
-                  retryingExistingPath
-                    ? 'Retry'
-                    : 'Download'}
-                </Text>
-              </Pressable>
-            </View>
-          )}
-        </View>
+        <MediaDownloadOverlay
+          intent={downloadIntent}
+          busy={downloadBusy}
+          progress={downloadProgress}
+          failed={downloadStatus === 'error' || pendingForCurrent?.phase === 'adopted'}
+          fileMissing={retryingExistingPath}
+          onDownload={() => requestDownload(downloadIntent, pendingForCurrent?.token)}
+        />
       ) : null}
 
-      <View style={[styles.bar, { top: insets.top + 6 }]} pointerEvents="box-none">
-        {closeButton}
-        {/* "N of M" while paging through more than one photo. */}
-        {visibleGallery && visibleGallery.items.length > 1 ? (
-          <View style={styles.counter} pointerEvents="none">
-            <Text style={styles.counterText}>
-              {pageIndex + 1} of {visibleGallery.items.length}
-            </Text>
-          </View>
-        ) : null}
-        <View style={styles.actions} pointerEvents="box-none">
-          <Pressable
-            onPress={onShare}
-            disabled={!mediaActionsAvailable}
-            hitSlop={12}
-            style={[styles.pill, !mediaActionsAvailable && styles.disabled]}
-            accessibilityRole="button"
-            accessibilityLabel="Share media"
-            accessibilityHint="Downloads this media first when needed"
-            accessibilityState={{ disabled: !mediaActionsAvailable, busy: mediaActionBusy }}
-          >
-            <Text style={styles.glyph}>⤴</Text>
-          </Pressable>
-          <Pressable
-            onPress={onSave}
-            disabled={!mediaActionsAvailable}
-            hitSlop={12}
-            style={[styles.pill, !mediaActionsAvailable && styles.disabled]}
-            accessibilityRole="button"
-            accessibilityLabel="Save media"
-            accessibilityHint="Downloads this media first when needed"
-            accessibilityState={{ disabled: !mediaActionsAvailable, busy: mediaActionBusy }}
-          >
-            <Text style={styles.glyph}>⤓</Text>
-          </Pressable>
-        </View>
-      </View>
+      <MediaViewerTopBar
+        pageNumber={pageIndex + 1}
+        pageCount={visibleGallery?.items.length ?? 0}
+        actionsAvailable={mediaActionsAvailable}
+        actionsBusy={mediaActionBusy}
+        onClose={revokeViewerBeforeClose}
+        onShare={onShare}
+        onSave={onSave}
+      />
     </View>
-  );
-}
-
-/** FlatList mounts adjacent carousel pages too; every mounted native image owns a distinct pin. */
-function ProtectedZoomableImage({
-  uri,
-  blurhash,
-  width,
-  height,
-  active,
-  protectionEpoch,
-  onError,
-  onZoomChange,
-}: {
-  uri: string | null;
-  blurhash: string | null;
-  width: number;
-  height: number;
-  active: boolean;
-  protectionEpoch: number;
-  onError: () => void;
-  onZoomChange: (zoomed: boolean) => void;
-}): React.JSX.Element {
-  const protectedUri = useAttachmentCachePathProtection(uri, protectionEpoch);
-  return (
-    <ZoomableImage
-      uri={isLocalFileUri(protectedUri) ? protectedUri : null}
-      blurhash={blurhash}
-      width={width}
-      height={height}
-      active={active}
-      onError={onError}
-      onZoomChange={onZoomChange}
-    />
-  );
-}
-
-/** Do not construct expo-video's native player until the cache path has a live reader pin. */
-function ProtectedFullscreenVideo({
-  uri,
-  protectionEpoch,
-  onError,
-}: {
-  uri: string;
-  protectionEpoch: number;
-  onError: () => void;
-}): React.JSX.Element | null {
-  const protectedUri = useAttachmentCachePathProtection(uri, protectionEpoch);
-  return isLocalFileUri(protectedUri) ? (
-    <FullscreenVideo uri={protectedUri} onError={onError} />
-  ) : null;
-}
-
-/** Fullscreen native video with controls; autoplays on mount. useVideoPlayer auto-releases
- *  on unmount, so no manual cleanup is needed (this screen owns the player for its lifetime). */
-function FullscreenVideo({
-  uri,
-  onError,
-}: {
-  uri: string;
-  onError: () => void;
-}): React.JSX.Element {
-  const win = useWindowDimensions();
-  const player = useVideoPlayer(uri, (p) => {
-    p.loop = false;
-    p.play();
-  });
-  useEventListener(player, 'statusChange', ({ status }) => {
-    if (status === 'error') onError();
-  });
-  return (
-    <VideoView
-      player={player}
-      nativeControls
-      contentFit="contain"
-      style={{ width: win.width, height: win.height }}
-    />
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000' },
-  bar: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  counter: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 14,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-  },
-  counterText: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  downloadOverlay: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  downloadPanel: {
-    minWidth: 164,
-    maxWidth: '80%',
-    alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderRadius: 18,
-    backgroundColor: 'rgba(0,0,0,0.72)',
-  },
-  downloadMessage: { color: '#fff', fontSize: 15, fontWeight: '600', textAlign: 'center' },
-  downloadButton: {
-    minHeight: 44,
-    minWidth: 112,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 20,
-    borderRadius: 22,
-    backgroundColor: '#fff',
-  },
-  downloadButtonText: { color: '#000', fontSize: 15, fontWeight: '700' },
-  actions: { flexDirection: 'row', gap: 10 },
-  pill: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  disabled: { opacity: 0.35 },
-  glyph: { color: '#fff', fontSize: 20, fontWeight: '600' },
 });
