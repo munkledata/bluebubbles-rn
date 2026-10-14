@@ -269,6 +269,19 @@ describe('error mapping', () => {
     await expect(client.get('/p', z.unknown())).rejects.toMatchObject({ kind: 'timeout' });
   });
 
+  it("maps ky's own TimeoutError, the error ky really throws, to a 'timeout' ApiError", async () => {
+    // ky 1.x throws `class TimeoutError extends Error` (not a DOMException) when its timeout fires.
+    class KyTimeoutError extends Error {
+      constructor() {
+        super('Request timed out: GET https://x/p');
+        this.name = 'TimeoutError';
+      }
+    }
+    mockKy.mockRejectedValue(new KyTimeoutError());
+    const client = new HttpClient({ getOrigin: () => 'https://x', getPassword: () => 'p' });
+    await expect(client.get('/p', z.unknown())).rejects.toMatchObject({ kind: 'timeout' });
+  });
+
   it('maps a generic transport failure to "no_connection"', async () => {
     mockKy.mockRejectedValue(new Error('socket hang up'));
     const client = new HttpClient({ getOrigin: () => 'https://x', getPassword: () => 'p' });

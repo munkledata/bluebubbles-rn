@@ -692,7 +692,9 @@ export class HttpClient {
             });
           } catch (err) {
             if (signal?.aborted) throw callerCancellationError(signal);
-            if (err instanceof DOMException && err.name === 'TimeoutError') {
+            // ky throws its own TimeoutError (an Error subclass, not a DOMException); a fetch-level
+            // timeout can surface as a DOMException of the same name. Both are a timeout.
+            if ((err as { name?: unknown } | null)?.name === 'TimeoutError') {
               throw new ApiError('timeout', 'Request timed out', undefined, err);
             }
             throw new ApiError('no_connection', 'Network request failed', undefined, err);
