@@ -5019,7 +5019,7 @@ function perf02InboxBenchmarkCertificateCandidate({
     sha(reactiveFile, reactiveFile) !==
       '052cde3cfd637a3aed40f083910a8fb126f92be445c5ff3650b6fc1be34a406e' ||
     sha(listFile, listFile) !==
-      'cc19a10523a66fe2b93b95557c674aceadcdcae3c6f9bf074c7215d4a16bce64' ||
+      'a7ec3609167bdeeedac173e9bc7babc178e4917c6da7e4ec65aa5c937961991d' ||
     sha(tileFile, tileFile) !==
       'bfe8887f3c0a23ca1b01c5ab03f9f0e5057bec215be80f95e7bc122491c943e4' ||
     !(nameState.declarationList.flags & ts.NodeFlags.Const) ||
