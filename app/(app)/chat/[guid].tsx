@@ -9,8 +9,6 @@ import {
 } from 'expo-router';
 import { usePreventRemove } from 'expo-router/react-navigation';
 import { isAggregateRetractionTombstone } from '@core/messages/retraction';
-import type { IMessageTextFormattingRange } from '@core/api/endpoints/messages';
-import type { Recurrence } from '@core/schedule';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -59,17 +57,9 @@ import {
 import {
   hasLogicalSendCapacity,
   acquireAndSendCurrentLocation,
-  editText,
   isContactsPermissionDeniedError,
   isSupportedImessageAttachmentFile,
   pickAndSendContact,
-  reply,
-  schedule,
-  scheduleAttachment,
-  send,
-  sendEffect,
-  sendFormatted,
-  sendMention,
   sendImage,
   sendImages,
   sendVoice,
@@ -80,8 +70,9 @@ import {
 import { logger } from '@core/secure';
 import { MAX_IMESSAGE_VOICE_UPLOAD_BYTES } from '@core/models/serverInfo';
 import { useSessionStore } from '@state/sessionStore';
-import { devSendFake } from '@features/conversations/devSeed';
+import { observeQueueAdmission } from '@features/conversations/observeQueueAdmission';
 import { useChatCapabilities } from '@features/conversations/useChatCapabilities';
+import { useChatComposerSends } from '@features/conversations/useChatComposerSends';
 import { useChatHeader } from '@features/conversations/useChatHeader';
 import { useChatSearchSession } from '@features/conversations/useChatSearchSession';
 import { useMessageActions } from '@features/conversations/useMessageActions';
@@ -143,52 +134,6 @@ interface DocumentPickerModule {
 }
 
 type DocumentPickerLoader = () => Promise<DocumentPickerModule>;
-
-/**
- * Resolve at the DB queue handoff rather than at the much later network response. A rejection
- * before that callback means the caller still owns the only authored copy and must retain it.
- */
-function observeQueueAdmission(
-  start: (onQueued: () => void) => Promise<unknown>,
-  onQueued: () => void,
-  onRejectedBeforeQueue: (error: unknown) => void,
-): Promise<boolean> {
-  return new Promise((resolve) => {
-    let queued = false;
-    const markQueued = (): void => {
-      if (queued) return;
-      queued = true;
-      try {
-        onQueued();
-      } catch (error) {
-        logger.warn('[chat] queue handoff observer failed', error);
-      }
-      resolve(true);
-    };
-
-    let operation: Promise<unknown>;
-    try {
-      operation = Promise.resolve(start(markQueued));
-    } catch (error) {
-      onRejectedBeforeQueue(error);
-      resolve(false);
-      return;
-    }
-    void operation.then(
-      () => {
-        if (!queued) resolve(false);
-      },
-      (error: unknown) => {
-        if (!queued) {
-          onRejectedBeforeQueue(error);
-          resolve(false);
-        }
-        // After markQueued, the bubble + retry queue are the user-visible owner. The service logs
-        // and reconciles normal transport failures; account retirement is intentionally silent.
-      },
-    );
-  });
-}
 
 /**
  * Open the account-neutral OS picker, then accept its result only if the screen that opened it
@@ -285,6 +230,7 @@ function ChatScreenInner({
   // The chat's service for the badge, composer placeholder, and outgoing-bubble colour. Resolved
   // from the participant handle service (not just the guid prefix) so an SMS-only thread reads SMS.
   const chatService = resolveChatService(guid, header.data?.handleServices);
+  const capabilities = useChatCapabilities(guid, header.data, chatService);
   const {
     rcsAvailable,
     serverInfoLoaded,
@@ -309,7 +255,7 @@ function ChatScreenInner({
     typingFeaturesAvailable,
     voiceFeaturesAvailable,
     attachmentFeaturesAvailable,
-  } = useChatCapabilities(guid, header.data, chatService);
+  } = capabilities;
   // Search hits, reminders, unread jumps, and thread jumps all use exact message identity. The DB
   // resolves that identity to a stable (date,id) window, so null/equal timestamps cannot strand the
   // requested bubble outside the loaded context.
@@ -494,255 +440,16 @@ function ChatScreenInner({
   const isDev = isDevServer;
   useChatScheduledCatchup(accountLease);
 
-  // useCallback-stable: these feed the memoized Composer, so a reactive tick re-rendering the
-  // screen doesn't re-render the composer through fresh closures.
-  const onSchedule = useCallback(
-    (text: string, scheduledFor: number, recurrence?: Recurrence | null): void => {
-      void schedule(
-        {
-          chatGuid: guid,
-          text,
-          scheduledFor,
-          recurrence,
-        },
-        accountLease,
-      ).catch((error: unknown) => {
-        if (!accountLease.isCurrent()) return;
-        logger.warn('[chat] could not schedule message', error);
-        showDialog('Scheduled', 'Couldn’t schedule that message.');
-      });
-    },
-    [accountLease, guid],
-  );
-
-  const onScheduleAttachment = useCallback(
-    async (text: string, item: PendingAttachment, scheduledFor: number): Promise<boolean> => {
-      if (!imessageScheduledAttachmentsAvailable || !accountLease.isCurrent()) return false;
-      try {
-        await scheduleAttachment(
-          { chatGuid: guid, text, scheduledFor, attachment: { ...item } },
-          accountLease,
-        );
-        return accountLease.isCurrent();
-      } catch (error) {
-        if (accountLease.isCurrent()) {
-          logger.warn('[chat] file schedule could not be confirmed', error);
-          showDialog(
-            'Scheduled file',
-            'Couldn’t confirm this schedule. Check Scheduled before trying again; your draft and file are still here.',
-          );
-        }
-        return false;
-      }
-    },
-    [accountLease, guid, imessageScheduledAttachmentsAvailable],
-  );
-
-  const onSend = useCallback(
-    (text: string): Promise<boolean> => {
-      const editTarget = editing;
-      if (editTarget) {
-        if (!imessageEditsAvailable || editTarget.partIndex !== 0) {
-          showToast('Editing is unavailable right now. Your changes are still here');
-          return Promise.resolve(false);
-        }
-        return editText(
-          {
-            chatGuid: guid,
-            messageGuid: editTarget.guid,
-            newText: text,
-            partIndex: 0,
-          },
-          accountLease,
-        )
-          .then((result) => {
-            if (!accountLease.isCurrent()) return false;
-            if (result == null || result.status === 'rejected') {
-              showDialog('Edit Not Sent', 'Your edited text is still here so you can try again.');
-              return false;
-            }
-            setEditing((current) => (current?.guid === editTarget.guid ? null : current));
-            if (result.status === 'outcome-unknown') {
-              showDialog(
-                'Edit Not Confirmed',
-                'It may have been applied. Check the conversation before trying another edit.',
-              );
-            }
-            return true;
-          })
-          .catch((error: unknown) => {
-            if (accountLease.isCurrent()) {
-              logger.warn('[chat] edit submission failed', error);
-              showDialog('Edit Not Sent', 'Your edited text is still here so you can try again.');
-            }
-            return false;
-          });
-      }
-      const target = replyTo;
-      if (target) {
-        if (!imessageRepliesAvailable || target.targetPartIndex !== 0) {
-          return Promise.resolve(false);
-        }
-        return observeQueueAdmission(
-          (onQueued) =>
-            reply(
-              {
-                chatGuid: guid,
-                text,
-                replyToGuid: target.guid,
-                replyToPartIndex: 0,
-              },
-              accountLease,
-              presentSendIssue,
-              onQueued,
-            ).then((result) => {
-              if (result == null && accountLease.isCurrent()) {
-                throw new Error('The iMessage reply capability changed before queue admission.');
-              }
-              return result;
-            }),
-          () => {
-            setReplyTo((current) => (current?.guid === target.guid ? null : current));
-          },
-          (error) => {
-            if (!accountLease.isCurrent()) return;
-            logger.warn('[chat] reply queue admission failed', error);
-            showToast('Couldn’t queue that reply. Your draft is still here');
-          },
-        );
-      }
-      // DEV: when on the local dev session, simulate the server round-trip so the
-      // optimistic → sent flow is visible without a real Gator server.
-      return observeQueueAdmission(
-        (onQueued) => {
-          if (isDev()) {
-            return devSendFake(guid, text, undefined, accountLease, onQueued);
-          }
-          return send({ chatGuid: guid, text }, accountLease, presentSendIssue, onQueued);
-        },
-        () => undefined,
-        (error) => {
-          if (!accountLease.isCurrent()) return;
-          logger.warn('[chat] message queue admission failed', error);
-          showToast(
-            'Couldn’t queue that message. Your draft is still here—try again when connected',
-          );
-        },
-      );
-    },
-    [accountLease, editing, guid, imessageEditsAvailable, imessageRepliesAvailable, isDev, replyTo],
-  );
-
-  const onSendEffect = useCallback(
-    async (text: string, effectId: string): Promise<boolean> => {
-      if (!imessageEffectsAvailable || !accountLease.isCurrent()) return false;
-      try {
-        const result = await sendEffect(
-          { chatGuid: guid, text, effectId },
-          accountLease,
-          presentSendIssue,
-        );
-        if (!accountLease.isCurrent()) return false;
-        if (result == null || result.status === 'rejected') {
-          showDialog('Effect Not Sent', 'Your message is still here so you can try again.');
-          return false;
-        }
-        if (result.status === 'outcome-unknown') {
-          showDialog(
-            'Effect Not Confirmed',
-            'It may have been delivered. Check the conversation before sending another copy.',
-          );
-        }
-        return true;
-      } catch (error) {
-        if (accountLease.isCurrent()) {
-          logger.warn('[chat] effect submission failed', error);
-          showDialog('Effect Not Sent', 'Your message is still here so you can try again.');
-        }
-        return false;
-      }
-    },
-    [accountLease, guid, imessageEffectsAvailable],
-  );
-
-  const onSendMention = useCallback(
-    async (
-      text: string,
-      mentions: Array<{ start: number; length: number; address: string }>,
-    ): Promise<boolean> => {
-      if (
-        !imessageMentionsAvailable ||
-        mentionParticipants.length < 2 ||
-        !accountLease.isCurrent()
-      ) {
-        return false;
-      }
-      try {
-        const result = await sendMention(
-          { chatGuid: guid, text, mentions },
-          accountLease,
-          presentSendIssue,
-        );
-        if (!accountLease.isCurrent()) return false;
-        if (result == null || result.status === 'rejected') {
-          showDialog('Mention Not Sent', 'Your message is still here so you can try again.');
-          return false;
-        }
-        if (result.status === 'outcome-unknown') {
-          showDialog(
-            'Mention Not Confirmed',
-            'It may have been delivered. Check the conversation before sending another copy.',
-          );
-        }
-        return true;
-      } catch (error) {
-        if (accountLease.isCurrent()) {
-          logger.warn('[chat] mention submission failed', error);
-          showDialog('Mention Not Sent', 'Your message is still here so you can try again.');
-        }
-        return false;
-      }
-    },
-    [accountLease, guid, imessageMentionsAvailable, mentionParticipants.length],
-  );
-
-  const onSendFormatted = useCallback(
-    async (text: string, textFormatting: IMessageTextFormattingRange[]): Promise<boolean> => {
-      if (!imessageFormattedAvailable || !accountLease.isCurrent()) return false;
-      try {
-        const result = await sendFormatted(
-          { chatGuid: guid, text, textFormatting },
-          accountLease,
-          presentSendIssue,
-        );
-        if (!accountLease.isCurrent()) return false;
-        if (result == null || result.status === 'rejected') {
-          showDialog(
-            'Formatted Message Not Sent',
-            'Your message is still here so you can try again.',
-          );
-          return false;
-        }
-        if (result.status === 'outcome-unknown') {
-          showDialog(
-            'Formatted Message Not Confirmed',
-            'It may have been delivered. Check the conversation before sending another copy.',
-          );
-        }
-        return true;
-      } catch (error) {
-        if (accountLease.isCurrent()) {
-          logger.warn('[chat] formatted-message submission failed', error);
-          showDialog(
-            'Formatted Message Not Sent',
-            'Your message is still here so you can try again.',
-          );
-        }
-        return false;
-      }
-    },
-    [accountLease, guid, imessageFormattedAvailable],
-  );
+  const { onSchedule, onScheduleAttachment, onSend, onSendEffect, onSendMention, onSendFormatted } =
+    useChatComposerSends({
+      guid,
+      accountLease,
+      capabilities,
+      editing,
+      setEditing,
+      replyTo,
+      setReplyTo,
+    });
 
   // Long-press and multi-select handlers. Stable callbacks feed the memoized list/row chain.
   const {
