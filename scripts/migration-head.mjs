@@ -8,7 +8,11 @@ import { readFileSync } from 'node:fs';
 const registry = JSON.parse(
   readFileSync(new URL('./migration-registry.json', import.meta.url), 'utf8'),
 );
-const newest = registry.allocations?.at(-1);
+// The highest allocation number is the newest migration, whatever order the file lists them in.
+const newest = (registry.allocations ?? []).reduce(
+  (best, allocation) => (best === undefined || allocation.number > best.number ? allocation : best),
+  undefined,
+);
 if (!newest || !Number.isSafeInteger(newest.number) || typeof newest.name !== 'string') {
   throw new Error('scripts/migration-registry.json has no newest migration allocation.');
 }

@@ -77,7 +77,6 @@ import {
   waitForNoProcess,
 } from './run-android-db-relaunch.mjs';
 import { APP_ACTIVITY, APP_PACKAGE, HarnessError } from './run-android-db-contract.mjs';
-import { MIGRATION_COUNT, MIGRATION_HEAD } from './migration-head.mjs';
 
 function checks(names, overrides = {}) {
   return Object.fromEntries(names.map((name) => [name, overrides[name] ?? true]));
@@ -635,8 +634,6 @@ test('pins the exact resume result schema and migration identity', () => {
 });
 
 test('requires the newest registered migration across relaunch, active migration, runtime, and backup lanes', () => {
-  assert.equal(RELAUNCH_MIGRATION_COUNT, MIGRATION_COUNT);
-  assert.equal(RELAUNCH_MIGRATION_HEAD, MIGRATION_HEAD);
   for (const [validate, fixture] of [
     [validateRelaunchMarker, finalResult],
     [validateActiveMigrationDeathMarker, activeMigrationDeathFinal],

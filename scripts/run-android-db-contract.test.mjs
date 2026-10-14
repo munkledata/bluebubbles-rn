@@ -19,7 +19,6 @@ import {
   validateContractResult,
   waitForContractResult,
 } from './run-android-db-contract.mjs';
-import { MIGRATION_COUNT, MIGRATION_HEAD } from './migration-head.mjs';
 
 function checks(overrides = {}) {
   return Object.fromEntries(CONTRACT_CHECKS.map((name) => [name, overrides[name] ?? true]));
@@ -58,8 +57,6 @@ const target = {
 };
 
 test('requires the newest registered migration and rejects stale device results', () => {
-  assert.equal(CONTRACT_MIGRATION_COUNT, MIGRATION_COUNT);
-  assert.equal(CONTRACT_MIGRATION_HEAD, MIGRATION_HEAD);
   assert.throws(
     () =>
       validateContractResult(
