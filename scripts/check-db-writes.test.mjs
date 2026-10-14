@@ -4066,13 +4066,9 @@ test('certifies exactly the reviewed outer-lifecycle delegation boundary', () =>
       'src/services/bootstrap.ts#connect:mutator-call:e75fcdcefedc',
       'src/services/bootstrap.ts#forget:mutator-call:fde5b98b6a5c',
       'src/services/bootstrap.ts#forgetOnThisPhoneOnly:mutator-call:aa633e0b631a',
-      'src/services/bootstrap.ts#hydrateSession:mutator-call:8cea0fe82b02',
-      'src/services/bootstrap.ts#hydrateSession:mutator-call:8cea0fe82b02:2',
-      'src/services/bootstrap.ts#hydrateSession:mutator-call:c52a509eefea',
       'src/services/bootstrap.ts#inspectForegroundBootSession:mutator-call:106ee7ea858e',
       'src/services/bootstrap.ts#prepareCandidateConnection:mutator-call:21c31fa08724',
       'src/services/bootstrap.ts#prepareCandidateConnection:mutator-call:a35e092f20bd',
-      'src/services/bootstrap.ts#resolveBootSession:mutator-call:4be60ae765e3',
       'src/services/bootstrap.ts#runForget:mutator-call:8d5a9e357850',
       'src/services/bootstrap.ts#runOrAwaitForget:mutator-call:a0e09cd34906',
       'src/services/bootstrap.ts#startForget:mutator-call:56e44cd9d18f',
@@ -4090,7 +4086,7 @@ test('certifies exactly the reviewed outer-lifecycle delegation boundary', () =>
       'src/services/realtimeControl.ts#startRealtime.<callback:edf3121ba2>:mutator-call:3cd6e7e8d376',
     ].sort(),
   );
-  assert.equal(delegated.length, 44);
+  assert.equal(delegated.length, 40);
 
   for (const suffix of [
     '8c40f7e0add0',

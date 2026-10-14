@@ -1,4 +1,3 @@
-const hydrateSession = jest.fn<Promise<void>, []>(() => Promise.resolve());
 const pauseRealtime = jest.fn();
 const resumeRealtime = jest.fn<Promise<void>, []>(() => Promise.resolve());
 const flushErrorReports = jest.fn<Promise<void>, []>(() => Promise.resolve());
@@ -16,7 +15,6 @@ const vaultSet = jest.fn<Promise<void>, [string, string]>(async () => undefined)
 const setNativeAppLockEnabled = jest.fn(() => true);
 const clearCurrentShareShortcuts = jest.fn(() => true);
 
-jest.mock('@/services/bootstrap', () => ({ hydrateSession }));
 jest.mock('@/services/realtimeControl', () => ({ pauseRealtime, resumeRealtime }));
 jest.mock('@/services/errors', () => ({ flushErrorReports }));
 jest.mock('@/services/notifications/notifeeService', () => ({
@@ -54,7 +52,6 @@ import {
 
 beforeEach(() => {
   resumeRealtimeDeliveries();
-  hydrateSession.mockReset().mockResolvedValue(undefined);
   pauseRealtime.mockReset();
   resumeRealtime.mockReset().mockResolvedValue(undefined);
   flushErrorReports.mockReset().mockResolvedValue(undefined);
@@ -313,7 +310,6 @@ describe('completeUnlock', () => {
 
     await completeUnlock();
 
-    expect(hydrateSession).not.toHaveBeenCalled();
     expect(useLockStore.getState().locked).toBe(true);
     expect(resumeRealtime).not.toHaveBeenCalled();
     expect(flushErrorReports).not.toHaveBeenCalled();
@@ -335,7 +331,6 @@ describe('completeUnlock', () => {
 
     await completeUnlock();
 
-    expect(hydrateSession).not.toHaveBeenCalled();
     expect(useLockStore.getState().locked).toBe(false);
     expect(resumeRealtime).toHaveBeenCalledTimes(1);
     expect(flushErrorReports).toHaveBeenCalledTimes(1);

@@ -14,7 +14,6 @@ export const DIAGNOSTIC_EVENT_ENVELOPE_VERSION = 1 as const;
  */
 export const ERROR_DIAGNOSTIC_SITES = {
   dbForegroundInitialization: 'syjo8z3ok4',
-  dbSessionInitialization: 'solmtuzd5x',
   connectDatabaseInitialization: 'skjyhvynmb',
   newChatCreate: 'sfcbzc1wod',
   mediaShareSourceUnprotected: 'sexrkdbhts',
@@ -39,9 +38,7 @@ export type ErrorDiagnosticSiteToken =
 
 /** Compile-time pairing for every approved production `logger.error` call. */
 export interface ErrorDiagnosticSiteByMessage {
-  '[db] initialization failed':
-    | typeof ERROR_DIAGNOSTIC_SITES.dbForegroundInitialization
-    | typeof ERROR_DIAGNOSTIC_SITES.dbSessionInitialization;
+  '[db] initialization failed': typeof ERROR_DIAGNOSTIC_SITES.dbForegroundInitialization;
   '[connect] database initialization failed': typeof ERROR_DIAGNOSTIC_SITES.connectDatabaseInitialization;
   '[new-chat] createNewChat failed': typeof ERROR_DIAGNOSTIC_SITES.newChatCreate;
   '[media] share source could not be protected': typeof ERROR_DIAGNOSTIC_SITES.mediaShareSourceUnprotected;
@@ -94,10 +91,7 @@ const EVENT_DEFINITIONS: readonly EventDefinition[] = [
   {
     code: 'db.initialization_failed',
     tag: 'db',
-    siteTokens: [
-      ERROR_DIAGNOSTIC_SITES.dbForegroundInitialization,
-      ERROR_DIAGNOSTIC_SITES.dbSessionInitialization,
-    ],
+    siteTokens: [ERROR_DIAGNOSTIC_SITES.dbForegroundInitialization],
     matches: exact('[db] initialization failed'),
   },
   {

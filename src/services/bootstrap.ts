@@ -312,28 +312,6 @@ function connectedForegroundAttempt(
   });
 }
 
-/** Put boot on the setup route without interpreting an I/O failure as permission to erase data. */
-function quarantineSessionRestore(
-  inspection: Extract<DurableSessionInspection, { kind: 'unavailable' | 'upgrade-quarantined' }>,
-): void {
-  if (inspection.kind === 'upgrade-quarantined') {
-    logger.warn('[boot] credential-upgrade recovery is quarantined', {
-      reason: inspection.reason,
-    });
-  } else if (inspection.source === 'marker') {
-    logger.warn('[boot] account revocation marker unreadable — session restore blocked');
-  } else {
-    logger.warn(
-      '[boot] secure session state unreadable — session restore blocked',
-      inspection.error,
-    );
-  }
-  void pauseRealtimeDeliveries();
-  const store = useSessionStore.getState();
-  store.hydrated(null);
-  store.failed(ACCOUNT_STATE_UNAVAILABLE_MESSAGE);
-}
-
 /**
  * Reconcile persistent media before account UI, sync, or socket work can use it.
  *
@@ -358,36 +336,6 @@ async function recoverAttachmentCacheForActivation(
     );
     return 'unavailable';
   }
-}
-
-/** Resolve the pre-DB/activation boot gate. A null result means boot must stop here. */
-async function resolveBootSession(
-  inspection: DurableSessionInspection,
-): Promise<ForegroundSessionSnapshot | null> {
-  if (inspection.kind === 'unavailable' || inspection.kind === 'upgrade-quarantined') {
-    quarantineSessionRestore(inspection);
-    return null;
-  }
-  if (inspection.kind === 'empty') {
-    // A clean first launch should reach setup without opening a brand-new encrypted DB merely to
-    // discover it has no session. Explicit connect performs the idempotent wipe, because an empty
-    // vault alone cannot prove a legacy/broken cleanup did not leave account-scoped rows behind.
-    void pauseRealtimeDeliveries();
-    useSessionStore.getState().hydrated(null);
-    return null;
-  }
-  if (inspection.kind === 'revoked' || inspection.kind === 'cleanup-required') {
-    // A tombstone is written BEFORE the local wipe, so `forgotten` means "cleanup may have been
-    // interrupted", not "cleanup is complete". Resume the whole idempotent wipe before any DB
-    // hydration, search backfill, sync, or candidate connection can touch the old account.
-    if (lastSuccessfulForgetEpoch === connectionAttemptEpoch) return null;
-    const outcome = await runOrAwaitForget();
-    if (!outcome.ok) {
-      logger.warn('[boot] residual-account cleanup remains incomplete', outcome.error);
-    }
-    return null;
-  }
-  return inspection.session;
 }
 
 /** Inspect the durable account boundary for one coordinator-owned foreground run. */
@@ -680,116 +628,6 @@ export async function activateForegroundBootSession(
       userMessage: 'Live updates are unavailable; pull to refresh while Gator retries.',
     });
   });
-}
-
-/** Load stored credentials from the vault at boot and resolve the initial route. */
-export async function hydrateSession(): Promise<void> {
-  // Capture before the first await. A Disconnect that starts during any durable-session or DB read
-  // owns the result, even if this run happened to read the old active tuple first.
-  const activationEpoch = connectionAttemptEpoch;
-  const isActivationCurrent = (): boolean => activationEpoch === connectionAttemptEpoch;
-  const store = useSessionStore.getState();
-  const preDbSession = await resolveBootSession(
-    await inspectDurableServerSession(vault, accountRevocationMarker),
-  );
-  if (!preDbSession || !isActivationCurrent()) return;
-
-  // Open the encrypted store first so cached data is available offline. A
-  // failure must not activate UI/sync/realtime with unhydrated settings defaults.
-  let db: AppDatabase;
-  try {
-    db = await ensureDatabase();
-  } catch (e: unknown) {
-    logger.error('[db] initialization failed', 'solmtuzd5x', e);
-    if (isActivationCurrent()) {
-      void pauseRealtimeDeliveries();
-      store.failed(SETTINGS_HYDRATION_FAILURE_MESSAGE);
-    }
-    return;
-  }
-  if (!isActivationCurrent()) return;
-  // FIRST point the kv store is readable: every store's `hydrate()` calls `getDatabase()`, which
-  // THROWS until the DB is open, so the root layout's pre-boot pass always no-ops on a cold launch
-  // and the settings stay at their module defaults until the home screen's re-hydrate. Awaited
-  // HERE because `runSync` reads `messagesPerChat` and `void startSync()` is fired below — without
-  // this, a user who chose 25/chat silently got the default 100 on the first sync after every
-  // relaunch. Theme remains a safe-dark, never-blank fallback; the critical settings below are
-  // activation requirements because their defaults are not authoritative persisted choices.
-  try {
-    await hydrateAllStores({
-      shouldCommit: isActivationCurrent,
-      onError: (error) => logger.warn('[boot] settings hydration failed', error),
-    });
-  } catch (error) {
-    // Stores currently contain their own expected DB/read failures. Keep this outer boundary for a
-    // future store regression so boot still publishes a recoverable, fail-closed state.
-    if (!isActivationCurrent()) return;
-    logger.warn('[boot] settings hydration registry failed', error);
-    void pauseRealtimeDeliveries();
-    store.failed(SETTINGS_HYDRATION_FAILURE_MESSAGE);
-    return;
-  }
-  if (!isActivationCurrent()) return;
-  if (!areCriticalSettingsHydrated()) {
-    void pauseRealtimeDeliveries();
-    store.failed(SETTINGS_HYDRATION_FAILURE_MESSAGE);
-    return;
-  }
-
-  // Reinspect after the DB/store awaits, immediately before admitting any backfill, sync, socket,
-  // or server-info work. If Disconnect raced boot, its marker/tombstone wins and the wipe resumes.
-  const activationSession = await resolveBootSession(
-    await inspectDurableServerSession(vault, accountRevocationMarker),
-  );
-  if (!activationSession || !isActivationCurrent()) return;
-  if (!sameForegroundSession(preDbSession, activationSession)) {
-    void pauseRealtimeDeliveries();
-    store.failed(ACCOUNT_STATE_UNAVAILABLE_MESSAGE);
-    return;
-  }
-  const { sessionState, origin, password } = activationSession;
-  if (hasActiveServerSession(sessionState, origin, password) && origin && password) {
-    resumeRealtimeDeliveries();
-    const cacheLease = captureRealtimeDeliveryLease();
-    const cacheRecovery = await recoverAttachmentCacheForActivation(db, cacheLease, 'boot');
-    if (cacheRecovery === 'stale' || !cacheLease.isCurrent() || !isActivationCurrent()) {
-      return;
-    }
-    store.hydrated({ origin, password });
-    // Make older edited/SMS messages searchable only after BOTH durable session gates authorize
-    // this account. A revoked restart must run its residual wipe without this stale writer racing.
-    void runSearchTextBackfillOnce(cacheLease);
-    void runInboxSearchIndexRebuildOnce(cacheLease);
-    // `hydrated` restores creds but NOT serverInfo (only first-setup `connect` sets it), so
-    // Settings' Version/macOS/Private-API rows stayed blank on every relaunch. Re-fetch it in
-    // the background so those screens populate — best-effort, never blocks boot.
-    const serverInfoLease = captureRealtimeDeliveryLease();
-    const serverInfoTransport = captureSessionTransportLease();
-    void serverApi
-      .serverInfo(http)
-      .then((info) => {
-        if (!serverInfoLease.isCurrent() || !serverInfoTransport.origin) return;
-        useSessionStore
-          .getState()
-          .setServerInfoForTransport(
-            serverInfoTransport.origin,
-            serverInfoTransport.revision,
-            info,
-          );
-      })
-      .catch((e) => {
-        if (serverInfoLease.isCurrent() && serverInfoTransport.isCurrent()) {
-          logger.debug('[boot] server-info refresh failed', e);
-        }
-      });
-    void startSync();
-    void startRealtime();
-  } else {
-    // Close this live JS context too. A future killed-app context starts open but independently
-    // fails the vault session gate; a successful explicit connection reopens admission below.
-    void pauseRealtimeDeliveries();
-    store.hydrated(null);
-  }
 }
 
 /** Only one candidate may validate and commit the four-part SecureStore tuple at a time. */

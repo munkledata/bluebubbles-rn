@@ -9,7 +9,6 @@ import ts from 'typescript';
 /** Exact committed registry: public opaque labels, never hashes of user or runtime input. */
 export const EXPECTED_ERROR_DIAGNOSTIC_SITES = Object.freeze({
   dbForegroundInitialization: 'syjo8z3ok4',
-  dbSessionInitialization: 'solmtuzd5x',
   connectDatabaseInitialization: 'skjyhvynmb',
   newChatCreate: 'sfcbzc1wod',
   mediaShareSourceUnprotected: 'sexrkdbhts',
@@ -31,7 +30,7 @@ export const EXPECTED_ERROR_DIAGNOSTIC_SITES = Object.freeze({
 
 /** Every production ERROR call must use its exact developer-owned event/site pair. */
 export const ALLOWED_ERROR_SITE_PROPERTIES_BY_MESSAGE = new Map([
-  ['[db] initialization failed', ['dbForegroundInitialization', 'dbSessionInitialization']],
+  ['[db] initialization failed', ['dbForegroundInitialization']],
   ['[connect] database initialization failed', ['connectDatabaseInitialization']],
   ['[new-chat] createNewChat failed', ['newChatCreate']],
   ['[media] share source could not be protected', ['mediaShareSourceUnprotected']],

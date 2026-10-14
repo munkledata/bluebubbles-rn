@@ -339,12 +339,13 @@ describe('error-report structured privacy envelope', () => {
       undefined,
       ERROR_DIAGNOSTIC_SITES.dbForegroundInitialization,
     );
-    const session = projectCapturedErrorReport(
-      '[db] initialization failed',
+    const connect = projectCapturedErrorReport(
+      '[connect] database initialization failed',
       undefined,
-      ERROR_DIAGNOSTIC_SITES.dbSessionInitialization,
+      ERROR_DIAGNOSTIC_SITES.connectDatabaseInitialization,
     );
-    expect(foreground.stack).not.toBe(session.stack);
+    expect(foreground.stack).toBeDefined();
+    expect(foreground.stack).not.toBe(connect.stack);
   });
 
   it('preserves only an exact event-owned site frame from either durable carrier', () => {
@@ -376,16 +377,17 @@ describe('error-report structured privacy envelope', () => {
         }),
       }).stack,
     ).toBeUndefined();
+    // A frame naming another event's site is ignored: it can never replace the event-owned site.
     expect(
       projectStoredErrorReport({
         message: 'db.initialization_failed',
         stack: `at gator.site.${ERROR_DIAGNOSTIC_SITES.dbForegroundInitialization}`,
         meta: JSON.stringify({
           schemaVersion: 1,
-          stack: `at gator.site.${ERROR_DIAGNOSTIC_SITES.dbSessionInitialization}`,
+          stack: `at gator.site.${ERROR_DIAGNOSTIC_SITES.connectDatabaseInitialization}`,
         }),
       }).stack,
-    ).toBeUndefined();
+    ).toBe(`at gator.site.${ERROR_DIAGNOSTIC_SITES.dbForegroundInitialization}`);
   });
 
   it('allows only non-identifying client context buckets', () => {

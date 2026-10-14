@@ -302,7 +302,6 @@ import {
   forgetOnThisPhoneOnly,
   hydrateForegroundBootSettings,
   PREVIOUS_CREDENTIAL_UNREVOKED_MESSAGE,
-  hydrateSession,
   inspectForegroundBootSession,
   openForegroundBootDatabase,
   type ForegroundBootAttempt,
@@ -438,6 +437,31 @@ async function productionBootAttempt(context: BootStageContext): Promise<Foregro
   const outcome = await inspectForegroundBootSession(context);
   if (outcome.kind !== 'connected') throw new Error('expected a connected boot attempt');
   return outcome.session;
+}
+
+type SavedSessionBoot =
+  | { readonly kind: 'setup' }
+  | { readonly kind: 'connected' }
+  | { readonly kind: 'failed'; readonly error: unknown };
+
+/**
+ * Boot the saved session through the real foreground stages in the order app start runs them:
+ * inspect the durable account, open the database, hydrate settings, then activate. A stage failure
+ * is returned instead of thrown, the way the boot coordinator receives it; the coordinator (tested
+ * in foregroundBoot.test.ts) turns it into the user-facing failure.
+ */
+async function bootSavedSession(): Promise<SavedSessionBoot> {
+  const { context } = productionBootContext();
+  try {
+    const outcome = await inspectForegroundBootSession(context);
+    if (outcome.kind !== 'connected') return { kind: 'setup' };
+    await openForegroundBootDatabase(context, outcome.session);
+    await hydrateForegroundBootSettings(context, outcome.session);
+    await activateForegroundBootSession(context, outcome.session);
+    return { kind: 'connected' };
+  } catch (error) {
+    return { kind: 'failed', error };
+  }
 }
 
 function seedQuarantinedCredentialUpgradeSession(): void {
@@ -602,27 +626,7 @@ describe('foreground boot production adapters', () => {
   });
 });
 
-describe('hydrateSession() — correlated SecureStore state', () => {
-  it('fails legacy hydration closed on a quarantined credential upgrade without wiping it', async () => {
-    seedQuarantinedCredentialUpgradeSession();
-    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
-
-    await expect(hydrateSession()).resolves.toBeUndefined();
-
-    expect(useSessionStore.getState()).toMatchObject({
-      status: 'error',
-      origin: null,
-      password: null,
-      error: expect.stringMatching(/No saved data was changed/i),
-    });
-    expect(ensureDatabase).not.toHaveBeenCalled();
-    expect(markerMarkRevoked).not.toHaveBeenCalled();
-    expect(clearLocalCache).not.toHaveBeenCalled();
-    expect(vaultSet).not.toHaveBeenCalled();
-    expect(vaultDelete).not.toHaveBeenCalled();
-    expect(vaultValues.get('serverCredentialUpgrade')).toBe('not-json');
-  });
-
+describe('saved-session boot and connect — correlated SecureStore state', () => {
   it('blocks a new connection on a quarantined credential upgrade without auto-wiping it', async () => {
     seedQuarantinedCredentialUpgradeSession();
     jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
@@ -669,7 +673,7 @@ describe('hydrateSession() — correlated SecureStore state', () => {
   });
 
   it('routes a complete empty vault to setup without opening a needless database', async () => {
-    await hydrateSession();
+    await expect(bootSavedSession()).resolves.toEqual({ kind: 'setup' });
 
     expect(useSessionStore.getState()).toMatchObject({
       status: 'unauthenticated',
@@ -689,7 +693,7 @@ describe('hydrateSession() — correlated SecureStore state', () => {
     vaultValues.set('serverAddress', 'https://old.example');
     vaultValues.set('serverPassword', 'hunter2');
 
-    await hydrateSession();
+    await expect(bootSavedSession()).resolves.toEqual({ kind: 'setup' });
 
     expect(useSessionStore.getState()).toMatchObject({
       status: 'unauthenticated',
@@ -708,13 +712,13 @@ describe('hydrateSession() — correlated SecureStore state', () => {
       throw new Error('documents directory unavailable');
     });
 
-    await hydrateSession();
-
-    expect(useSessionStore.getState()).toMatchObject({
-      status: 'error',
-      origin: null,
-      password: null,
-      error: expect.stringMatching(/could not safely verify the saved connection/i),
+    await expect(bootSavedSession()).resolves.toMatchObject({
+      kind: 'failed',
+      error: {
+        name: 'ForegroundBootOperationalError',
+        code: 'durable-session-unavailable',
+        userMessage: expect.stringMatching(/could not safely verify the saved connection/i),
+      },
     });
     expect(vaultGet).not.toHaveBeenCalled();
     expect(ensureDatabase).not.toHaveBeenCalled();
@@ -735,7 +739,7 @@ describe('hydrateSession() — correlated SecureStore state', () => {
       vaultValues.set('serverAddress', 'https://old.example');
       vaultValues.set('serverPassword', 'hunter2');
 
-      await hydrateSession();
+      await expect(bootSavedSession()).resolves.toEqual({ kind: 'setup' });
 
       expect(useSessionStore.getState()).toMatchObject({
         status: 'unauthenticated',
@@ -757,7 +761,7 @@ describe('hydrateSession() — correlated SecureStore state', () => {
       vaultValues.set('serverAddress', 'https://old.example');
       vaultValues.set('serverPassword', 'hunter2');
 
-      await hydrateSession();
+      await expect(bootSavedSession()).resolves.toEqual({ kind: 'connected' });
 
       expect(useSessionStore.getState()).toMatchObject({
         status: 'connected',
@@ -789,7 +793,7 @@ describe('hydrateSession() — correlated SecureStore state', () => {
         }),
     );
 
-    const hydration = hydrateSession();
+    const hydration = bootSavedSession();
     for (let i = 0; i < 100 && releaseHydration == null; i += 1) await Promise.resolve();
     expect(releaseHydration).toEqual(expect.any(Function));
     expect(startSync).not.toHaveBeenCalled();
@@ -801,7 +805,10 @@ describe('hydrateSession() — correlated SecureStore state', () => {
     await forget();
     expect(options?.shouldCommit?.()).toBe(false);
     releaseHydration();
-    await hydration;
+    await expect(hydration).resolves.toMatchObject({
+      kind: 'failed',
+      error: { name: 'ForegroundBootSupersededError' },
+    });
 
     expect(useSessionStore.getState().status).toBe('unauthenticated');
     expect(startSync).not.toHaveBeenCalled();
@@ -871,7 +878,7 @@ describe('hydrateSession() — correlated SecureStore state', () => {
         }),
     );
 
-    const hydration = hydrateSession();
+    const hydration = bootSavedSession();
     for (let i = 0; i < 100 && releaseRecovery == null; i += 1) await Promise.resolve();
 
     expect(releaseRecovery).toEqual(expect.any(Function));
@@ -880,7 +887,7 @@ describe('hydrateSession() — correlated SecureStore state', () => {
     expect(startRealtime).not.toHaveBeenCalled();
 
     releaseRecovery();
-    await hydration;
+    await expect(hydration).resolves.toEqual({ kind: 'connected' });
 
     expect(useSessionStore.getState().status).toBe('connected');
     expect(startSync).toHaveBeenCalledTimes(1);
@@ -1295,7 +1302,7 @@ describe('hydrateSession() — correlated SecureStore state', () => {
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     recoverAttachmentCache.mockRejectedValueOnce(failure);
 
-    await hydrateSession();
+    await expect(bootSavedSession()).resolves.toEqual({ kind: 'connected' });
 
     expect(useSessionStore.getState().status).toBe('connected');
     expect(startSync).toHaveBeenCalledTimes(1);
@@ -1334,13 +1341,14 @@ describe('hydrateSession() — correlated SecureStore state', () => {
         }),
     );
 
-    const hydration = hydrateSession();
+    const hydration = bootSavedSession();
     for (let i = 0; i < 100 && releaseRecovery == null; i += 1) await Promise.resolve();
     expect(releaseRecovery).toEqual(expect.any(Function));
 
     const disconnect = forget();
     releaseRecovery();
     await Promise.all([hydration, disconnect]);
+    await expect(hydration).resolves.toMatchObject({ kind: 'failed' });
 
     expect(invalidateAttachmentCacheRecoveryReadiness).toHaveBeenCalled();
     expect(useSessionStore.getState().status).toBe('unauthenticated');
@@ -1393,17 +1401,19 @@ describe('hydrateSession() — correlated SecureStore state', () => {
     vaultValues.set('serverPassword', 'hunter2');
     areCriticalSettingsHydrated.mockReturnValue(false);
 
-    await hydrateSession();
+    const boot = await bootSavedSession();
 
     expect(hydrateAllStores).toHaveBeenCalledTimes(1);
     expect(resumeRealtimeDeliveries).not.toHaveBeenCalled();
     expect(startSync).not.toHaveBeenCalled();
     expect(startRealtime).not.toHaveBeenCalled();
-    expect(useSessionStore.getState()).toMatchObject({
-      status: 'error',
-      origin: null,
-      password: null,
-      error: expect.stringMatching(/could not safely load local settings/i),
+    expect(boot).toMatchObject({
+      kind: 'failed',
+      error: {
+        name: 'ForegroundBootOperationalError',
+        code: 'critical-settings-unavailable',
+        userMessage: expect.stringMatching(/could not safely load local settings/i),
+      },
     });
   });
 
@@ -1444,15 +1454,19 @@ describe('hydrateSession() — correlated SecureStore state', () => {
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     hydrateAllStores.mockRejectedValueOnce(failure);
 
-    await expect(hydrateSession()).resolves.toBeUndefined();
+    const boot = await bootSavedSession();
 
     expect(warn).toHaveBeenCalledWith('[boot] settings hydration registry failed', failure);
     expect(resumeRealtimeDeliveries).not.toHaveBeenCalled();
     expect(startSync).not.toHaveBeenCalled();
     expect(startRealtime).not.toHaveBeenCalled();
-    expect(useSessionStore.getState()).toMatchObject({
-      status: 'error',
-      error: expect.stringMatching(/could not safely load local settings/i),
+    expect(boot).toMatchObject({
+      kind: 'failed',
+      error: {
+        name: 'ForegroundBootOperationalError',
+        code: 'settings-hydration-failed',
+        userMessage: expect.stringMatching(/could not safely load local settings/i),
+      },
     });
   });
 
@@ -1505,17 +1519,19 @@ describe('hydrateSession() — correlated SecureStore state', () => {
       return sessions[inspection]?.[key as keyof (typeof sessions)[number]] ?? null;
     });
 
-    await hydrateSession();
+    const boot = await bootSavedSession();
 
     expect(vaultGet).toHaveBeenCalledTimes(8);
     expect(resumeRealtimeDeliveries).not.toHaveBeenCalled();
     expect(startSync).not.toHaveBeenCalled();
     expect(startRealtime).not.toHaveBeenCalled();
-    expect(useSessionStore.getState()).toMatchObject({
-      status: 'error',
-      origin: null,
-      password: null,
-      error: expect.stringMatching(/could not safely verify the saved connection/i),
+    expect(boot).toMatchObject({
+      kind: 'failed',
+      error: {
+        name: 'ForegroundBootOperationalError',
+        code: 'durable-session-changed',
+        userMessage: expect.stringMatching(/could not safely verify the saved connection/i),
+      },
     });
   });
 
@@ -1531,7 +1547,7 @@ describe('hydrateSession() — correlated SecureStore state', () => {
         }),
     );
 
-    await hydrateSession();
+    await expect(bootSavedSession()).resolves.toEqual({ kind: 'connected' });
     expect(serverInfo).toHaveBeenCalledTimes(1);
     expect(captureRealtimeDeliveryLease).toHaveBeenCalledTimes(2);
 
@@ -1578,7 +1594,7 @@ describe('hydrateSession() — correlated SecureStore state', () => {
       return { ok: false, kind: 'unknown', message: 'test stop' };
     });
 
-    const hydration = hydrateSession();
+    const hydration = bootSavedSession();
     // Disconnect deliberately crosses several bounded cleanup barriers before it opens the DB.
     // Poll the observable callback instead of depending on an exact microtask count.
     for (let i = 0; i < 100 && releaseWipe == null; i += 1) await Promise.resolve();
@@ -1604,13 +1620,13 @@ describe('hydrateSession() — correlated SecureStore state', () => {
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
     vaultGet.mockRejectedValueOnce(readError);
 
-    await expect(hydrateSession()).resolves.toBeUndefined();
-
-    expect(useSessionStore.getState()).toMatchObject({
-      status: 'error',
-      origin: null,
-      password: null,
-      error: expect.stringMatching(/could not safely verify the saved connection/i),
+    await expect(bootSavedSession()).resolves.toMatchObject({
+      kind: 'failed',
+      error: {
+        name: 'ForegroundBootOperationalError',
+        code: 'durable-session-unavailable',
+        userMessage: expect.stringMatching(/could not safely verify the saved connection/i),
+      },
     });
     expect(ensureDatabase).not.toHaveBeenCalled();
     expect(hydrateAllStores).not.toHaveBeenCalled();
@@ -1643,7 +1659,7 @@ describe('hydrateSession() — correlated SecureStore state', () => {
       return { ok: false, kind: 'unknown', message: 'test stop' };
     });
 
-    const hydration = hydrateSession();
+    const hydration = bootSavedSession();
     for (let i = 0; i < 100 && releaseWipe == null; i += 1) await Promise.resolve();
     expect(clearLocalCache).toHaveBeenCalledTimes(1);
     expect(hydrateAllStores).not.toHaveBeenCalled();
@@ -1671,8 +1687,13 @@ describe('hydrateSession() — correlated SecureStore state', () => {
       return accountRevoked;
     });
 
-    await hydrateSession();
-    expect(useSessionStore.getState().status).toBe('error');
+    await expect(bootSavedSession()).resolves.toMatchObject({
+      kind: 'failed',
+      error: {
+        name: 'ForegroundBootOperationalError',
+        code: 'durable-session-unavailable',
+      },
+    });
     expect(clearLocalCache).not.toHaveBeenCalled();
 
     markerReadable = true;
@@ -1710,7 +1731,13 @@ describe('hydrateSession() — correlated SecureStore state', () => {
     vaultValues.set('serverAddress', 'https://old.example');
     vaultValues.set('serverPassword', 'hunter2');
 
-    await hydrateSession();
+    await expect(bootSavedSession()).resolves.toMatchObject({
+      kind: 'failed',
+      error: {
+        name: 'ForegroundBootOperationalError',
+        code: 'durable-session-unavailable',
+      },
+    });
     markerIsRevoked.mockImplementation(() => false);
     await connect('https://new.example', 'new-secret');
 
@@ -1736,7 +1763,13 @@ describe('hydrateSession() — correlated SecureStore state', () => {
       message: 'test stop',
     });
 
-    await hydrateSession();
+    await expect(bootSavedSession()).resolves.toMatchObject({
+      kind: 'failed',
+      error: {
+        name: 'ForegroundBootOperationalError',
+        code: 'durable-session-unavailable',
+      },
+    });
     markerIsRevoked.mockImplementation(() => false);
     await connect('https://old.example', 'hunter2');
 
@@ -2031,7 +2064,7 @@ describe('hydrateSession() — correlated SecureStore state', () => {
     expect(startRealtime).not.toHaveBeenCalled();
 
     // A restart still sees the terminal marker and cannot restore the cancelled candidate.
-    await hydrateSession();
+    await expect(bootSavedSession()).resolves.toEqual({ kind: 'setup' });
     expect(vaultValues.get('serverAddress')).toBeUndefined();
     expect(useSessionStore.getState().status).toBe('unauthenticated');
   });
@@ -3171,7 +3204,12 @@ describe('forget() — a vault failure must not abort the Disconnect', () => {
     await expect(
       readFcmSessionState({ get: vaultGet }, { isRevoked: markerIsRevoked }),
     ).resolves.toBe('forgotten');
-    await hydrateSession();
+    // The restart retries the unfinished cleanup, which still cannot retire the credentials, so
+    // it fails closed instead of restoring the old session.
+    await expect(bootSavedSession()).resolves.toMatchObject({
+      kind: 'failed',
+      error: { name: 'ForegroundBootOperationalError', code: 'residual-account-cleanup-failed' },
+    });
     expect(useSessionStore.getState().status).toBe('unauthenticated');
   });
 
