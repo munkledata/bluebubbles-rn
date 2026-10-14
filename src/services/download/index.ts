@@ -199,6 +199,9 @@ function downloadWithFetcher(
 ): Promise<string | null> {
   const scope = downloadScope(deliveryLease, ownerFetcher, att, owner?.acceptsRcsAttachment);
   const key = retryKey(att.guid, scope);
+  // A background owner never takes a photo over from the user's own RCS retry chain: cancelling
+  // the chain below would leave nobody to report its result. The chain finishes the download.
+  if (owner?.quietFailure && rcsRetryStates.has(key)) return Promise.resolve(null);
   // A forced copy-on-write replacement owns both the damaged source pin and the terminal viewer
   // transition. A stale ordinary request must not revoke it merely to discover that the flight
   // layer considers the two destinations incompatible.
@@ -214,7 +217,9 @@ function downloadWithFetcher(
   if (!attachmentMetadataAllowsDownload(att.totalBytes, mode)) {
     // An automatic skip is not a failed user action. An explicit tap over the absolute cap should
     // expose the retry/error affordance instead of pretending a transfer started.
-    if (mode === 'manual' && scope.isCurrent()) useDownloadStore.getState().fail(att.guid);
+    if (mode === 'manual' && scope.isCurrent() && !owner?.quietFailure) {
+      useDownloadStore.getState().fail(att.guid);
+    }
     return Promise.resolve(null);
   }
   if (
@@ -458,6 +463,14 @@ function runDownload(
   }
   if (retryOwner !== undefined && !ownsRcsRetry(key, retryOwner)) return Promise.resolve(null);
   const { start, setProgress, finish, fail, clear } = useDownloadStore.getState();
+  // A quiet (background) attempt leaves no failed mark or stuck spinner, but never touches the
+  // next account's entry for the same attachment after a Disconnect.
+  const accountAtStart = captureRealtimeDeliveryLease();
+  const clearQuietly = (): void => {
+    if (accountAtStart.isCurrent() && accountAtStart.generation === scope.generation) {
+      clear(att.guid);
+    }
+  };
   start(att.guid);
   return ensureDownloadedOutcome(
     getDatabase(),
@@ -476,7 +489,7 @@ function runDownload(
     if (!scope.isCurrent()) {
       if (retryOwner !== undefined) cancelRcsRetry(key, retryOwner);
       // A background owner whose lifetime ended must not leave a spinner that never finishes.
-      if (quietFailure) clear(att.guid);
+      if (quietFailure) clearQuietly();
       return null;
     }
     if (outcome.status === 'success') {
@@ -516,6 +529,7 @@ function runDownload(
             maxBytesOverride,
             retryOwner,
             replacement,
+            quietFailure,
           );
         }, delay);
         return null;
@@ -524,7 +538,7 @@ function runDownload(
     } else if (retryOwner !== undefined) {
       cancelRcsRetry(key, retryOwner);
     }
-    if (quietFailure) clear(att.guid);
+    if (quietFailure) clearQuietly();
     else fail(att.guid);
     return null;
   });

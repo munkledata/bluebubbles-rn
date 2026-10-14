@@ -265,6 +265,37 @@ describe('RCS provider-epoch ingestion admission', () => {
       expect(trace).toEqual(['committed', 'notification-skipped']);
     });
 
+    it('still waits for an inner sink whose result is not a native Promise', async () => {
+      let liveInfo: ReturnType<typeof providerInfo> | null = providerInfo(EPOCH_A);
+      let settle!: () => void;
+      const inner = {
+        onEvent(_event: unknown, _source: unknown, context?: EventDeliveryContext) {
+          // A promise-like result from another realm or library, settled only after authority
+          // has become unknown during this event.
+          return {
+            then(onFulfilled: () => void) {
+              settle = () => {
+                liveInfo = null;
+                expect(context?.isCurrent()).toBe(false);
+                onFulfilled();
+              };
+            },
+          } as unknown as Promise<void>;
+        },
+      } satisfies EventSink;
+      const sink = new RcsProviderEpochEventSink(inner, () => liveInfo);
+
+      const delivery = sink.onEvent(
+        { type: 'new-message', message: rcsMessage(EPOCH_A) },
+        'socket',
+        durableContext(),
+      );
+      await Promise.resolve();
+      settle();
+
+      await expect(delivery).rejects.toBeInstanceOf(IncomingEventDependencyPendingError);
+    });
+
     it('does not retry a live delivery that has no durable row to retry', async () => {
       let liveInfo: ReturnType<typeof providerInfo> | null = providerInfo(EPOCH_A);
       const { sink: inner, trace } = innerChain(() => {

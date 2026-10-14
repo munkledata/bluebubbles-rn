@@ -59,7 +59,7 @@ export class RcsProviderEpochEventSink implements EventSink {
       }
     };
     const outcome = this.inner.onEvent(event, source, providerContext);
-    if (outcome instanceof Promise) return outcome.then(retryIfAuthorityBecameUnknown);
+    if (outcome != null) return Promise.resolve(outcome).then(retryIfAuthorityBecameUnknown);
     retryIfAuthorityBecameUnknown();
   }
 }

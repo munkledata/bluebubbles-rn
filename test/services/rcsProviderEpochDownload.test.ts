@@ -15,7 +15,11 @@ import {
   AttachmentFetchError,
   type AttachmentFetchRequest,
 } from '@/services/download/downloadService';
-import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
+import {
+  captureRealtimeDeliveryLease,
+  pauseRealtimeDeliveries,
+  resumeRealtimeDeliveries,
+} from '@/services/realtime/deliveryCoordinator';
 import { useDownloadStore } from '@state/downloadStore';
 import { useSessionStore } from '@state/sessionStore';
 
@@ -117,12 +121,10 @@ describe('RCS provider-epoch attachment fetch admission', () => {
     });
 
     it('leaves no failed mark when a quiet attempt fails, so an opened chat retries itself', async () => {
-      setAttachmentFetcher({
-        exists: () => false,
-        download: async () => {
-          throw new AttachmentFetchError('missing');
-        },
+      const fetch = jest.fn(async () => {
+        throw new AttachmentFetchError('missing');
       });
+      setAttachmentFetcher({ exists: () => false, download: fetch });
       const photo = attachment(attachmentGuid(EPOCH_A));
       const accepts = { acceptsRcsAttachment: () => true };
 
@@ -135,6 +137,7 @@ describe('RCS provider-epoch attachment fetch admission', () => {
         undefined,
         { ...accepts, quietFailure: true },
       );
+      expect(fetch).toHaveBeenCalledTimes(1);
       expect(useDownloadStore.getState().status[photo.guid]).toBeUndefined();
 
       await downloadWithClient(
@@ -197,6 +200,85 @@ describe('RCS provider-epoch attachment fetch admission', () => {
 
       await expect(task).resolves.toBeNull();
       expect(useDownloadStore.getState().status[photo.guid]).toBeUndefined();
+    });
+
+    it('leaves the photo to a retry the user already started', async () => {
+      jest.useFakeTimers();
+      // The user is in the app and tapped the photo, so the foreground session holds the pairing.
+      useSessionStore.getState().connected('https://server.test', 'password', info(EPOCH_A));
+      const fetch = jest.fn(async () => {
+        throw new AttachmentFetchError('missing');
+      });
+      setAttachmentFetcher({ exists: () => false, download: fetch });
+      const photo = attachment(attachmentGuid(EPOCH_A));
+
+      // The tap fails for now, so its RCS retry waits for the next try and keeps the spinner.
+      await expect(download(photo, 'manual', captureRealtimeDeliveryLease())).resolves.toBeNull();
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(useDownloadStore.getState().status[photo.guid]).toBe('downloading');
+
+      // A background push download for the same photo must not cancel that retry.
+      await expect(
+        downloadWithClient(
+          {} as never,
+          photo,
+          'automatic',
+          captureRealtimeDeliveryLease(),
+          undefined,
+          undefined,
+          { acceptsRcsAttachment: () => true, quietFailure: true },
+        ),
+      ).resolves.toBeNull();
+      expect(fetch).toHaveBeenCalledTimes(1);
+      expect(useDownloadStore.getState().status[photo.guid]).toBe('downloading');
+
+      // The user's retries still run, and their final failure is the one the bubble shows.
+      await jest.advanceTimersByTimeAsync(2500 + 6000 + 12000);
+      expect(fetch).toHaveBeenCalledTimes(4);
+      expect(useDownloadStore.getState().status[photo.guid]).toBe('error');
+    });
+
+    it('never clears the next account’s entry after a Disconnect', async () => {
+      jest.useFakeTimers();
+      let fetchStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        fetchStarted = resolve;
+      });
+      setAttachmentFetcher({
+        exists: () => false,
+        download: async (_guid, _name, _progress, _service, _generation, limits) => {
+          if (!limits) throw new Error('expected bounded fetch request');
+          fetchStarted();
+          return new Promise<never>((_resolve, reject) => {
+            limits.signal.addEventListener(
+              'abort',
+              () => reject(new AttachmentFetchError('cancelled')),
+              { once: true },
+            );
+          });
+        },
+      });
+      const photo = attachment(attachmentGuid(EPOCH_A));
+      const task = downloadWithClient(
+        {} as never,
+        photo,
+        'automatic',
+        captureRealtimeDeliveryLease(),
+        undefined,
+        undefined,
+        { acceptsRcsAttachment: () => true, quietFailure: true },
+      );
+      await started;
+
+      // Disconnect retires the account and resets download state; the next session starts again.
+      await pauseRealtimeDeliveries();
+      useDownloadStore.getState().reset();
+      resumeRealtimeDeliveries();
+      useDownloadStore.getState().start(photo.guid);
+      await jest.advanceTimersByTimeAsync(101);
+
+      await expect(task).resolves.toBeNull();
+      expect(useDownloadStore.getState().status[photo.guid]).toBe('downloading');
     });
   });
 

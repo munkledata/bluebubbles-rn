@@ -18815,7 +18815,7 @@
     {
       "id": "src/services/download/index.ts#downloadWithFetcher:mutator-call:4a127214478e",
       "path": "src/services/download/index.ts",
-      "line": 232,
+      "line": 237,
       "symbol": "downloadWithFetcher",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#runDownload",
@@ -18828,7 +18828,7 @@
     {
       "id": "src/services/download/index.ts#redownload:mutator-call:e09cebc88e10",
       "path": "src/services/download/index.ts",
-      "line": 309,
+      "line": 314,
       "symbol": "redownload",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#runDownload",
@@ -18841,7 +18841,7 @@
     {
       "id": "src/services/download/index.ts#downloadScope.reserveCache:mutator-call:9a68094fc094",
       "path": "src/services/download/index.ts",
-      "line": 365,
+      "line": 370,
       "symbol": "downloadScope.reserveCache",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reserve",
@@ -18854,7 +18854,7 @@
     {
       "id": "src/services/download/index.ts#downloadScope.reuseCache:mutator-call:18cfc11c39e4",
       "path": "src/services/download/index.ts",
-      "line": 373,
+      "line": 378,
       "symbol": "downloadScope.reuseCache",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reuseExisting",
@@ -18867,7 +18867,7 @@
     {
       "id": "src/services/download/index.ts#runDownload:mutator-call:ea7e1163b248",
       "path": "src/services/download/index.ts",
-      "line": 462,
+      "line": 475,
       "symbol": "runDownload",
       "operation": "mutator-call",
       "target": "src/services/download/downloadService.ts#ensureDownloadedOutcome",
@@ -18878,10 +18878,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts; test/services/autoDownloadAttachments.test.ts; test/components/attachments/attachmentView.test.tsx; test/components/attachments/fileChip.test.tsx; test/components/attachments/imageAttachment.test.tsx; test/components/attachments/stickerOverlay.test.tsx; test/components/attachments/videoPlayerLabel.test.tsx; test/components/cards/contactCard.test.tsx; test/components/cards/locationCard.test.tsx"
     },
     {
-      "id": "src/services/download/index.ts#runDownload.<callback:c362530151>.<callback:795e53be0d>:mutator-call:f09a7eb5f31f",
+      "id": "src/services/download/index.ts#runDownload.<callback:057d651a7b>.<callback:4de753a7f9>:mutator-call:7d3fcb8cdfc5",
       "path": "src/services/download/index.ts",
-      "line": 510,
-      "symbol": "runDownload.<callback:c362530151>.<callback:795e53be0d>",
+      "line": 523,
+      "symbol": "runDownload.<callback:057d651a7b>.<callback:4de753a7f9>",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#runDownload",
       "detectedContext": "coordinated-delegation",

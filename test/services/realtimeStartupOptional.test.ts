@@ -1796,11 +1796,42 @@ describe('killed-process RCS provider authority', () => {
     expect(options?.isEffectCurrent?.()).toBe(true);
     expect(options?.downloadOwner?.quietFailure).toBe(true);
     expect(options?.downloadOwner?.acceptsRcsAttachment?.(photo)).toBe(true);
-    // A foreground launch that reports a different pairing ends the download for good.
+    // A foreground launch that confirms the same pairing keeps it going.
+    mockSessionServerInfo = PROVIDER_INFO;
+    expect(options?.isEffectCurrent?.()).toBe(true);
+    expect(options?.downloadOwner?.acceptsRcsAttachment?.(photo)).toBe(true);
+    // One that reports a different pairing ends the download for good.
     mockSessionServerInfo = { ...PROVIDER_INFO, rcs_provider_epoch: `gpe1_${'F'.repeat(42)}A` };
     expect(options?.downloadOwner?.acceptsRcsAttachment?.(photo)).toBe(false);
     expect(options?.isEffectCurrent?.()).toBe(false);
     mockSessionServerInfo = PROVIDER_INFO;
+    expect(options?.isEffectCurrent?.()).toBe(false);
+  });
+
+  it('never lets a socket-delivered message keep a pairing the app no longer knows', async () => {
+    // A socket delivery runs in the open app, whose session holds the pairing.
+    mockSessionServerInfo = PROVIDER_INFO;
+    await dispatchFcm('new-message', {
+      guid: 'apple-message',
+      chatGuid: 'iMessage;-;apple@example.com',
+    });
+    let options: { isEffectCurrent?: () => boolean } | undefined;
+    mockAutoDownloadForRealtimeEvent.mockImplementationOnce(async (...args: unknown[]) => {
+      options = args[3] as { isEffectCurrent?: () => boolean };
+      return { savedImages: 0, destination: null };
+    });
+
+    await mockMessageStored?.(421, 'socket', {
+      generation: 0,
+      isCurrent: () => true,
+      isProviderCurrent: () =>
+        (mockEdgeProviderInfo?.() as { rcs_provider_epoch?: unknown } | null | undefined)
+          ?.rcs_provider_epoch === EPOCH,
+    });
+
+    expect(options?.isEffectCurrent?.()).toBe(true);
+    // Only a killed-app push remembers its pairing; here unknown means stop.
+    mockSessionServerInfo = null;
     expect(options?.isEffectCurrent?.()).toBe(false);
   });
 

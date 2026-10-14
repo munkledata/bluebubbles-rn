@@ -453,9 +453,18 @@ good, as a re-pair does in the foreground. The background download carries its o
 (`AttachmentDownloadOwner`), because the downloader otherwise asks the foreground session, which a
 killed process never fills. It also fails quietly: a failed or cut-off background attempt removes
 the photo's in-memory download entry instead of marking it failed, so a chat opened later in the
-same process fetches the photo by itself instead of showing Retry. The killed-process path still
-stores only the app-cache copy plus the Gallery/Album receipt, which the next unlocked foreground
-activation fulfills.
+same process fetches the photo by itself instead of showing Retry. It never clears an entry after
+Disconnect, and it never takes a photo over from an RCS retry the user already started, because
+taking over would cancel that retry and leave nobody to report its result. The killed-process path
+still stores only the app-cache copy plus the Gallery/Album receipt, which the next unlocked
+foreground activation fulfills.
+
+Known limits of the photo download: if authority becomes unknown between the message commit and
+the post-store hook, the hook is skipped and the retried row replays without it, so that photo gets
+no background download or Gallery/Album receipt (the open app's own socket copy of the event
+normally covers it). A download waiting in the queue can also miss a different pairing that was
+visible only during another push's short loan; the server still refuses media from a pairing that
+is no longer current.
 
 A row admitted under the loan can lose authority mid-event when the loan is released while another
 delivery flight is still processing it (the app was opened during that push). Since 2026-10-14
