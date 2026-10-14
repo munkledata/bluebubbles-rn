@@ -931,6 +931,12 @@ function ChatScreenInner({
                   'Microphone access is unavailable. Try again or enable it in system settings.',
                 )
               }
+              onStartError={() =>
+                showDialog(
+                  'Microphone',
+                  'Recording couldn’t start. Another app may be using the microphone; try again.',
+                )
+              }
               onSend={onSendVoice}
             />
           </Suspense>

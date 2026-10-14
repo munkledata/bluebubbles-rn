@@ -162,6 +162,56 @@ describe('VoiceRecorder permissions', () => {
     expect(record).not.toHaveBeenCalled();
   });
 
+  it('closes with an error instead of freezing when recording cannot start', async () => {
+    mockRequestRecordingPermissionsAsync.mockResolvedValueOnce({ granted: true });
+    const record = jest.fn();
+    mockUseAudioRecorder.mockReturnValue({
+      prepareToRecordAsync: jest.fn().mockRejectedValue(new Error('microphone busy')),
+      record,
+      stop: jest.fn().mockResolvedValue(undefined),
+      uri: null,
+    });
+    const onClose = jest.fn();
+    const onStartError = jest.fn();
+
+    await renderWithTheme(
+      <VoiceRecorder onClose={onClose} onSend={jest.fn()} onStartError={onStartError} />,
+    );
+
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(onStartError).toHaveBeenCalledTimes(1);
+    expect(record).not.toHaveBeenCalled();
+  });
+
+  it('says a recording too large to send is final instead of offering Try Again', async () => {
+    mockRequestRecordingPermissionsAsync.mockResolvedValueOnce({ granted: true });
+    const record = jest.fn();
+    mockUseAudioRecorder.mockReturnValue({
+      prepareToRecordAsync: jest.fn().mockResolvedValue(undefined),
+      record,
+      stop: jest.fn().mockResolvedValue(undefined),
+      uri: 'file://voice.m4a',
+    });
+    const onSend = jest.fn().mockResolvedValue('too-large');
+    const onClose = jest.fn();
+
+    await renderWithTheme(<VoiceRecorder onClose={onClose} onSend={onSend} />);
+    await waitFor(() => expect(record).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      fireEvent.press(screen.getByText('Send'));
+    });
+
+    expect(
+      await screen.findByText('This recording is too long to send. Record a shorter one.'),
+    ).toBeTruthy();
+    expect(screen.queryByText('Try Again')).toBeNull();
+    await act(async () => {
+      fireEvent.press(screen.getByText('Discard'));
+    });
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(onSend).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps a stopped recording for retry until queue admission succeeds', async () => {
     mockRequestRecordingPermissionsAsync.mockResolvedValueOnce({ granted: true });
     const stop = jest.fn().mockResolvedValue(undefined);

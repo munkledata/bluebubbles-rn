@@ -285,7 +285,7 @@ export function useChatAttachmentSends({
     ],
   );
   const onSendVoice = useCallback(
-    async (uri: string): Promise<boolean> => {
+    async (uri: string): Promise<boolean | 'too-large'> => {
       if (!accountLease.isCurrent() || !voiceFeaturesAvailable) return false;
       if (imessageVoiceAvailable) {
         if (!uri.startsWith('file://') || !/\.m4a$/i.test(uri)) return false;
@@ -297,11 +297,12 @@ export function useChatAttachmentSends({
             !accountLease.isCurrent() ||
             !info.exists ||
             !Number.isSafeInteger(info.size) ||
-            info.size <= 0 ||
-            info.size > MAX_IMESSAGE_VOICE_UPLOAD_BYTES
+            info.size <= 0
           ) {
             return false;
           }
+          // No retry makes a longer note fit, so the recorder must not offer Try Again.
+          if (info.size > MAX_IMESSAGE_VOICE_UPLOAD_BYTES) return 'too-large';
           return observeQueueAdmission(
             (onQueued) =>
               sendVoice(

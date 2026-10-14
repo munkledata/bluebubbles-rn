@@ -22,12 +22,18 @@ export function VoiceRecorder({
   onSend,
   onPermissionDenied,
   onPermissionError,
+  onStartError,
 }: {
   onClose: () => void;
-  /** Only explicit `true` proves a durable queue row owns the recording; every other path retains it. */
-  onSend: (uri: string) => Promise<boolean>;
+  /**
+   * Only explicit `true` proves a durable queue row owns the recording; every other path retains
+   * it for another try, except 'too-large', which no retry can fix.
+   */
+  onSend: (uri: string) => Promise<boolean | 'too-large'>;
   onPermissionDenied?: () => void;
   onPermissionError?: () => void;
+  /** The recorder could not start (for example, another app holds the microphone). */
+  onStartError?: () => void;
 }): React.JSX.Element {
   const theme = useTheme();
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
@@ -37,6 +43,7 @@ export function VoiceRecorder({
   const [recordingActive, setRecordingActive] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [sendFailed, setSendFailed] = useState(false);
+  const [tooLarge, setTooLarge] = useState(false);
   const started = useRef(false);
   const finished = useRef(false);
   const stopPending = useRef(false);
@@ -73,9 +80,18 @@ export function VoiceRecorder({
       // Re-check after every await: the user may have cancelled/sent (finished) or the modal may
       // have unmounted before recording actually started.
       if (!active || finished.current) return;
-      await recorder.prepareToRecordAsync();
-      if (!active || finished.current) return;
-      recorder.record();
+      try {
+        await recorder.prepareToRecordAsync();
+        if (!active || finished.current) return;
+        recorder.record();
+      } catch {
+        // Without this the sheet froze on 'Recording 0:00' with nothing to send.
+        if (!active || finished.current) return;
+        finished.current = true;
+        onStartError?.();
+        onClose();
+        return;
+      }
       started.current = true;
       setRecordingReady(true);
       setRecordingActive(true);
@@ -142,9 +158,12 @@ export function VoiceRecorder({
     const uri = await stopAndRetain();
     if (!mounted.current || finished.current) return;
     let admitted = false;
+    let rejectedAsTooLarge = false;
     if (uri) {
       try {
-        admitted = (await onSend(uri)) === true;
+        const result = await onSend(uri);
+        admitted = result === true;
+        rejectedAsTooLarge = result === 'too-large';
       } catch {
         admitted = false;
       }
@@ -161,6 +180,7 @@ export function VoiceRecorder({
     if (!mounted.current || finished.current) return;
     setSubmitting(false);
     setSendFailed(true);
+    setTooLarge(rejectedAsTooLarge);
   };
 
   const requestSystemCancel = (): void => {
@@ -208,7 +228,9 @@ export function VoiceRecorder({
               </Text>
               {sendFailed ? (
                 <Text style={[styles.status, { color: theme.color.secondaryLabel }]}>
-                  It wasn’t queued. You can try again without re-recording.
+                  {tooLarge
+                    ? 'This recording is too long to send. Record a shorter one.'
+                    : 'It wasn’t queued. You can try again without re-recording.'}
                 </Text>
               ) : null}
               <View style={styles.row}>
@@ -217,20 +239,25 @@ export function VoiceRecorder({
                     {sendFailed ? 'Discard' : 'Cancel'}
                   </Text>
                 </Pressable>
-                <Pressable
-                  onPress={() => void send()}
-                  disabled={submitting || !recordingReady}
-                  accessibilityRole="button"
-                  accessibilityState={{ disabled: submitting || !recordingReady, busy: submitting }}
-                  style={[
-                    styles.send,
-                    { backgroundColor: theme.color.tint, opacity: submitting ? 0.55 : 1 },
-                  ]}
-                >
-                  <Text style={[styles.sendText, { color: readableTextOn(theme.color.tint) }]}>
-                    {sendFailed ? 'Try Again' : submitting ? 'Queueing…' : 'Send'}
-                  </Text>
-                </Pressable>
+                {tooLarge ? null : (
+                  <Pressable
+                    onPress={() => void send()}
+                    disabled={submitting || !recordingReady}
+                    accessibilityRole="button"
+                    accessibilityState={{
+                      disabled: submitting || !recordingReady,
+                      busy: submitting,
+                    }}
+                    style={[
+                      styles.send,
+                      { backgroundColor: theme.color.tint, opacity: submitting ? 0.55 : 1 },
+                    ]}
+                  >
+                    <Text style={[styles.sendText, { color: readableTextOn(theme.color.tint) }]}>
+                      {sendFailed ? 'Try Again' : submitting ? 'Queueing…' : 'Send'}
+                    </Text>
+                  </Pressable>
+                )}
               </View>
             </>
           )}
