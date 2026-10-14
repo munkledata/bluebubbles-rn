@@ -368,7 +368,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.onSubmitCredential:mutator-call:1e716ab98ac5",
       "path": "app/(app)/server-management.tsx",
-      "line": 350,
+      "line": 349,
       "symbol": "ServerManagementScreen.onSubmitCredential",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#beginScopedCredentialReplacement",
@@ -381,7 +381,7 @@
     {
       "id": "app/(app)/server-management.tsx#ServerManagementScreen.onSubmitCredential:mutator-call:f08dd1db40ef",
       "path": "app/(app)/server-management.tsx",
-      "line": 351,
+      "line": 350,
       "symbol": "ServerManagementScreen.onSubmitCredential",
       "operation": "mutator-call",
       "target": "src/services/credentialUpgrade.ts#beginScopedCredentialUpgrade",

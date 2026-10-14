@@ -338,9 +338,8 @@ export default function ServerManagementScreen(): React.JSX.Element {
       return;
     }
 
-    // Keep an unconfirmed replacement in the form so the owner can retry without losing the
-    // Mac's one-time bearer. Once durable custody is confirmed, remove it from component state.
-    if (!replacing) setCredentialText('');
+    // Keep an unconfirmed credential in the form so the owner can retry without losing the Mac's
+    // one-time bearer. Once durable custody is confirmed, remove it from component state.
     setCredentialIssue(null);
     setCredentialSaved(false);
     setCredentialDiscardable(false);
@@ -383,6 +382,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
         if (outcome.stage === 'candidate-validation' || outcome.stage === 'adoption') {
           setCredentialSaved(true);
           setCredentialDiscardable(outcome.stage === 'candidate-validation');
+          setCredentialText('');
           setCredentialIssue(
             outcome.stage === 'candidate-validation'
               ? 'The credential was saved securely, but the server could not verify it. Gator will retry when it reconnects.'
@@ -395,6 +395,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
         const confirmedSaved = status.kind === 'candidate' || status.kind === 'in-progress';
         setCredentialSaved(confirmedSaved);
         setCredentialDiscardable(status.kind === 'candidate');
+        if (confirmedSaved) setCredentialText('');
         setCredentialIssue(
           confirmedSaved
             ? 'The credential is saved securely, but this phone could not finish the secure update. Gator will retry when it reconnects.'
@@ -429,6 +430,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
         }
         setCredentialSaved(true);
         setCredentialDiscardable(true);
+        setCredentialText('');
         setCredentialIssue(
           outcome.reason === 'scoped-credentials'
             ? 'This server does not support paired-client credentials yet. Update the server, or revoke and remove the saved credential below.'
@@ -441,9 +443,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
         if (!accountLease.isCurrent()) return;
         setCredentialSaved(status.kind === 'candidate' || status.kind === 'in-progress');
         setCredentialDiscardable(status.kind === 'candidate');
-        if (replacing && (status.kind === 'candidate' || status.kind === 'in-progress')) {
-          setCredentialText('');
-        }
+        if (status.kind === 'candidate' || status.kind === 'in-progress') setCredentialText('');
         setCredentialIssue(
           replacing
             ? 'A replacement is already saved for this phone. Gator will retry it automatically; the old credential was not revoked automatically.'

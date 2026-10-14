@@ -671,6 +671,42 @@ describe('ServerManagementScreen — ordinary sensitive presentation and account
     });
   });
 
+  it('keeps a first-time credential in the form until it is safely stored', async () => {
+    arrangePrivateServer();
+    await renderScreen();
+    expect(await screen.findByText(PRIVATE_INFO.server_version)).toBeTruthy();
+    await fireEvent.press(screen.getByRole('button', { name: 'Pair This Device' }));
+    await fireEvent.changeText(
+      await screen.findByLabelText('Paired-client credential'),
+      PRIVATE_SCOPED_CREDENTIAL,
+    );
+    const entry = () => screen.getByLabelText('Paired-client credential').props.value;
+
+    // Nothing was stored, so the Mac's one-time credential must still be here to retry.
+    mockBeginScopedCredentialUpgrade.mockResolvedValueOnce({ kind: 'busy' });
+    await fireEvent.press(screen.getByRole('button', { name: 'Use Credential' }));
+    expect(await screen.findByText(/Another secure connection change is in progress/)).toBeTruthy();
+    expect(entry()).toBe(PRIVATE_SCOPED_CREDENTIAL);
+
+    mockBeginScopedCredentialUpgrade.mockResolvedValueOnce({ kind: 'retry', stage: 'storage' });
+    await fireEvent.press(screen.getByRole('button', { name: 'Use Credential' }));
+    expect(await screen.findByText(/could not confirm that the credential was saved/)).toBeTruthy();
+    expect(entry()).toBe(PRIVATE_SCOPED_CREDENTIAL);
+
+    // Once it is stored securely, the form lets go of it.
+    mockBeginScopedCredentialUpgrade.mockResolvedValueOnce({
+      kind: 'retry',
+      stage: 'candidate-validation',
+    });
+    await fireEvent.press(screen.getByRole('button', { name: 'Use Credential' }));
+    expect(
+      await screen.findByText(/saved securely, but the server could not verify it/),
+    ).toBeTruthy();
+    expect(entry()).toBe('');
+    expect(mockBeginScopedCredentialUpgrade).toHaveBeenCalledTimes(3);
+    expect(mockBeginScopedCredentialUpgrade).toHaveBeenLastCalledWith(PRIVATE_SCOPED_CREDENTIAL);
+  });
+
   it('restores a persisted candidate after process death and can revoke it without another paste', async () => {
     arrangePrivateServer();
     mockInspectScopedCredentialUpgradeStatus.mockResolvedValue({ kind: 'candidate' });
