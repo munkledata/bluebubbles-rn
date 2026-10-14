@@ -337,6 +337,114 @@ describe('Composer — typing enables send + trimmed send + clear', () => {
     expect(onSend).not.toHaveBeenCalled();
   });
 
+  describe('across reply and edit mode', () => {
+    const PARTICIPANTS = [
+      { address: 'alice@example.test', label: 'Alice' },
+      { address: '+15551234567', label: 'Bob' },
+    ];
+    const ALICE = [{ start: 6, length: 5, address: 'alice@example.test' }];
+
+    async function draftMentioningAlice(
+      onSend: jest.Mock,
+      onSendMention: jest.Mock,
+    ): Promise<Awaited<ReturnType<typeof renderWithTheme>>> {
+      const view = await renderWithTheme(
+        <Composer
+          onSend={onSend}
+          onSendMention={onSendMention}
+          mentionParticipants={PARTICIPANTS}
+        />,
+      );
+      await fireEvent.changeText(input(), 'Hello @ali');
+      await fireEvent.press(await screen.findByLabelText('Mention Alice'));
+      return view;
+    }
+
+    it('keeps a mention through a cancelled reply', async () => {
+      const onSend = jest.fn(() => true);
+      const onSendMention = jest.fn(() => true);
+      const view = await draftMentioningAlice(onSend, onSendMention);
+
+      // Like the chat screen, a reply withholds mention sending.
+      await view.rerender(
+        <Composer
+          onSend={onSend}
+          mentionParticipants={PARTICIPANTS}
+          replyTo={REPLY_TARGET}
+          onCancelReply={jest.fn()}
+        />,
+      );
+      await view.rerender(
+        <Composer
+          onSend={onSend}
+          onSendMention={onSendMention}
+          mentionParticipants={PARTICIPANTS}
+        />,
+      );
+      await fireEvent.press(await screen.findByLabelText('Send message'));
+
+      expect(onSendMention).toHaveBeenCalledWith('Hello Alice', ALICE);
+      expect(onSend).not.toHaveBeenCalled();
+    });
+
+    it('sends a reply as plain text, then drops the mention it carried', async () => {
+      const onSend = jest.fn(() => true);
+      const onSendMention = jest.fn(() => true);
+      const view = await draftMentioningAlice(onSend, onSendMention);
+
+      await view.rerender(
+        <Composer
+          onSend={onSend}
+          mentionParticipants={PARTICIPANTS}
+          replyTo={REPLY_TARGET}
+          onCancelReply={jest.fn()}
+        />,
+      );
+      await fireEvent.press(await screen.findByLabelText('Send message'));
+      expect(onSend).toHaveBeenCalledWith('Hello Alice');
+      await waitFor(() => expect(input().props.value).toBe(''));
+
+      await view.rerender(
+        <Composer
+          onSend={onSend}
+          onSendMention={onSendMention}
+          mentionParticipants={PARTICIPANTS}
+        />,
+      );
+      await fireEvent.changeText(input(), 'Next message');
+      await fireEvent.press(await screen.findByLabelText('Send message'));
+      expect(onSend).toHaveBeenLastCalledWith('Next message');
+      expect(onSendMention).not.toHaveBeenCalled();
+    });
+
+    it('restores a mention after edit mode temporarily replaces the draft', async () => {
+      const onSend = jest.fn(() => true);
+      const onSendMention = jest.fn(() => true);
+      const view = await draftMentioningAlice(onSend, onSendMention);
+
+      await view.rerender(
+        <Composer
+          onSend={onSend}
+          mentionParticipants={PARTICIPANTS}
+          editingText="Original message"
+          onCancelEdit={jest.fn()}
+        />,
+      );
+      await waitFor(() => expect(input().props.value).toBe('Original message'));
+      await view.rerender(
+        <Composer
+          onSend={onSend}
+          onSendMention={onSendMention}
+          mentionParticipants={PARTICIPANTS}
+        />,
+      );
+      await waitFor(() => expect(input().props.value).toBe('Hello Alice'));
+      await fireEvent.press(await screen.findByLabelText('Send message'));
+
+      expect(onSendMention).toHaveBeenCalledWith('Hello Alice', ALICE);
+    });
+  });
+
   it('dismisses an unfinished mention query across inactivity without losing draft text', async () => {
     const props = {
       onSend: jest.fn(),

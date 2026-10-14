@@ -241,6 +241,8 @@ export const Composer = React.memo(function Composer({
   const textFormattingRef = useRef<IMessageTextFormattingRange[]>([]);
   textFormattingRef.current = textFormatting;
   const preEditFormattingRef = useRef<IMessageTextFormattingRange[] | null>(null);
+  const editingMentionsActiveRef = useRef(false);
+  const preEditMentionsRef = useRef<MessageMention[] | null>(null);
   const editingFormattingActiveRef = useRef(editingText != null);
   const [mentionQuery, setMentionQuery] = useState<MentionQuery | null>(null);
   const mentionParticipantsAvailable = !!onSendMention && (mentionParticipants?.length ?? 0) >= 2;
@@ -308,15 +310,39 @@ export const Composer = React.memo(function Composer({
     const participantIdentityChanged =
       previousMentionParticipantIdentityRef.current !== mentionParticipantIdentity;
     previousMentionParticipantIdentityRef.current = mentionParticipantIdentity;
+    const editing = editingText != null;
+    const wasEditing = editingMentionsActiveRef.current;
+    editingMentionsActiveRef.current = editing;
     // Search, selection and focus changes hide suggestions without changing the saved draft.
     if (!active) setMentionQuery(null);
-    if (!participantIdentityChanged && mentionParticipantsAvailable && !editingText && !replyTo) {
+    const replaceMentions = (next: MessageMention[]): void => {
+      mentionsRef.current = next;
+      setMentions(next);
+      setMentionQuery(null);
+    };
+    if (participantIdentityChanged) {
+      // A participant change removes only the metadata. The visible words stay in the ordinary
+      // saved draft, but stale participant identities can never ride a later send.
+      preEditMentionsRef.current = null;
+      replaceMentions([]);
       return;
     }
-    // A capability/participant change removes only the metadata. The visible words stay in the
-    // ordinary saved draft, but stale participant identities can never ride a later send.
-    setMentions([]);
-    setMentionQuery(null);
+    if (editing && !wasEditing) {
+      // Edit mode replaces the draft text. Keep its mentions to restore with it, as formatting is.
+      preEditMentionsRef.current = mentionsRef.current;
+      replaceMentions([]);
+      return;
+    }
+    if (!editing && wasEditing) {
+      const preserved = preEditMentionsRef.current;
+      preEditMentionsRef.current = null;
+      // An edit -> reply transition restores them too; the reply itself is sent as plain text.
+      replaceMentions((mentionParticipantsAvailable || replyTo) && preserved ? preserved : []);
+      return;
+    }
+    // Reply mode keeps the draft text in place, so its mentions stay and keep reconciling while
+    // mention sending is withheld. Outside reply/edit, losing mention support drops them.
+    if (!mentionParticipantsAvailable && !replyTo && !editing) replaceMentions([]);
   }, [active, editingText, mentionParticipantIdentity, mentionParticipantsAvailable, replyTo]);
 
   const addPending = (item: PendingAttachment): void => {
@@ -473,14 +499,18 @@ export const Composer = React.memo(function Composer({
   useEffect(() => {
     const hasOpenAttachmentTray = active && trayOpen && !isEditing;
     const hasSuspendedFormattingMetadata = (preEditFormattingRef.current?.length ?? 0) > 0;
+    const hasSuspendedMentionMetadata = (preEditMentionsRef.current?.length ?? 0) > 0;
     onRemovalStateChange?.({
       ...(isEditing ? { hasUnsavedEdit: text !== editingText } : {}),
       hasUnsavedDraftMetadata:
         pending.length > 0 ||
         mentions.length > 0 ||
+        hasSuspendedMentionMetadata ||
         textFormatting.length > 0 ||
         hasSuspendedFormattingMetadata,
-      ...(mentions.length > 0 ? { hasUnsavedMentionMetadata: true } : {}),
+      ...(mentions.length > 0 || hasSuspendedMentionMetadata
+        ? { hasUnsavedMentionMetadata: true }
+        : {}),
       ...(textFormatting.length > 0 || hasSuspendedFormattingMetadata
         ? { hasUnsavedFormattingMetadata: true }
         : {}),
@@ -529,23 +559,24 @@ export const Composer = React.memo(function Composer({
     );
     onChangeText(next);
   };
-  const consumeFormattingOnAdmission = (
-    admission: ComposerTextAdmission,
-  ): ComposerTextAdmission => {
-    const clearFormatting = (): void => {
+  /** The draft's formatting and mentions go with it once a send consumes the draft. */
+  const consumeMetadataOnAdmission = (admission: ComposerTextAdmission): ComposerTextAdmission => {
+    const clearMetadata = (): void => {
       textFormattingRef.current = [];
       setTextFormatting([]);
+      mentionsRef.current = [];
+      setMentions([]);
     };
     if (
       admission != null &&
       typeof (admission as PromiseLike<void | boolean>).then === 'function'
     ) {
       return Promise.resolve(admission).then((accepted) => {
-        if (accepted !== false) clearFormatting();
+        if (accepted !== false) clearMetadata();
         return accepted;
       });
     }
-    if (admission !== false) clearFormatting();
+    if (admission !== false) clearMetadata();
     return admission;
   };
   const submit = (): void => {
@@ -561,14 +592,15 @@ export const Composer = React.memo(function Composer({
         return;
       }
       void submitAuthored((captured) => {
-        return consumeFormattingOnAdmission(submitFormatted(captured, normalized));
+        return consumeMetadataOnAdmission(submitFormatted(captured, normalized));
       });
       return;
     }
-    if (replyTo && textFormattingRef.current.length > 0) {
-      // Formatted replies are not an admitted operation. Send through the existing plain reply
-      // callback, consume the ranges only when that reply is admitted, and retain them on refusal.
-      void submitAuthored((captured) => consumeFormattingOnAdmission(onSend(captured)));
+    if (replyTo && (textFormattingRef.current.length > 0 || mentionsRef.current.length > 0)) {
+      // Replies are plain text: formatted or mentioning replies are not an admitted operation.
+      // Send through the plain reply callback, consume the metadata only when that reply is
+      // admitted, and retain it on refusal.
+      void submitAuthored((captured) => consumeMetadataOnAdmission(onSend(captured)));
       return;
     }
     if (mentionsRef.current.length === 0) {
