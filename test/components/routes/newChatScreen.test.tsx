@@ -47,6 +47,7 @@ let mockUnsavedChangesOptions:
       onAfterDiscardNavigation?: () => void;
       title?: string;
       message?: string;
+      blocked?: { readonly title: string; readonly message: string } | null;
     }
   | undefined;
 const mockNavigateWithoutPrompt = jest.fn((navigate: () => void): void => navigate());
@@ -443,6 +444,41 @@ describe('NewChatScreen — opening an existing conversation', () => {
     // The real guard asks "Discard new message?" for this replace; it never touches a share.
     expect(mockNavigateWithoutPrompt).not.toHaveBeenCalled();
     expect(mockReplace).toHaveBeenCalledWith(`/chat/${encodeURIComponent(PRIVATE_EXISTING_GUID)}`);
+  });
+});
+
+describe('NewChatScreen — leaving while the send runs', () => {
+  it('blocks Back with one neutral wait message instead of a discard prompt', async () => {
+    const creating = deferred<string>();
+    mockCreateNewChat.mockReturnValueOnce(creating.promise);
+    await renderWithTheme(<NewChatScreen />);
+    await addRecipient('+15551230000');
+    await act(async () => {
+      fireEvent.changeText(screen.getByPlaceholderText('Message'), 'hi');
+    });
+    expect(mockUnsavedChangesOptions?.blocked).toBeNull();
+    expect(mockUnsavedChangesOptions?.title).toBe('Discard new message?');
+
+    await act(async () => {
+      fireEvent.press(screen.getByText('Start'));
+    });
+    await waitFor(() => expect(mockCreateNewChat).toHaveBeenCalledTimes(1));
+
+    const waitMessage = {
+      title: 'Still starting the conversation',
+      message: 'Wait for the send to finish before leaving this screen.',
+    };
+    expect(mockUnsavedChangesOptions?.blocked).toEqual(waitMessage);
+    // A discard confirmed in the instant before the send began still refuses, with the same copy.
+    await act(async () => {
+      await expect(mockUnsavedChangesOptions?.onDiscard?.()).resolves.toBe(false);
+    });
+    expect(useDialogStore.getState().current).toMatchObject(waitMessage);
+
+    await act(async () => {
+      creating.resolve('RCS;-;+15551230000');
+      await creating.promise;
+    });
   });
 });
 

@@ -56,6 +56,46 @@ it('deduplicates removal attempts and replays the exact action only after explic
   expect(mockDispatch).toHaveBeenCalledWith(action);
 });
 
+it('while blocked, explains once and never offers Discard or leaves', async () => {
+  const onDiscard = jest.fn();
+  function BlockedProbe(): React.JSX.Element {
+    useUnsavedChangesGuard({
+      enabled: true,
+      blocked: { title: 'Still sending', message: 'Wait for the send to finish.' },
+      onDiscard,
+    });
+    return <View />;
+  }
+  await renderWithTheme(
+    <>
+      <BlockedProbe />
+      <AppDialog />
+    </>,
+  );
+  const guardCall = mockUsePreventRemove.mock.calls[mockUsePreventRemove.mock.calls.length - 1];
+  const action = { type: 'GO_BACK', source: 'new-chat' };
+
+  await act(async () => {
+    guardCall?.[1]({ data: { action } });
+    guardCall?.[1]({ data: { action } });
+  });
+
+  expect(screen.getByText('Still sending')).toBeTruthy();
+  expect(screen.queryByText('Discard')).toBeNull();
+  expect(useDialogStore.getState().queue).toHaveLength(0);
+  await act(async () => {
+    fireEvent.press(screen.getByText('OK'));
+  });
+  expect(mockDispatch).not.toHaveBeenCalled();
+  expect(onDiscard).not.toHaveBeenCalled();
+
+  // Back again asks again: the first explanation was answered.
+  await act(async () => {
+    guardCall?.[1]({ data: { action } });
+  });
+  expect(screen.getByText('Still sending')).toBeTruthy();
+});
+
 it('keeps the route mounted when asynchronous discard cleanup fails', async () => {
   function FailingGuardProbe(): React.JSX.Element {
     useUnsavedChangesGuard({ enabled: true, onDiscard: async () => false });

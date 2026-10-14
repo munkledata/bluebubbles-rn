@@ -69,6 +69,12 @@ function looksLikeIMessageAddress(raw: string): boolean {
 
 const MAX_INITIAL_IMESSAGE_TEXT_BYTES = 64 * 1024;
 
+/** Leaving mid-send would abandon the send's result, so Back waits until the send settles. */
+const SEND_IN_PROGRESS = {
+  title: 'Still starting the conversation',
+  message: 'Wait for the send to finish before leaving this screen.',
+} as const;
+
 /** Only these paired-server status/type pairs are known to reject before helper dispatch. */
 function isKnownPreDispatchNewChatError(error: unknown): boolean {
   if (!(error instanceof ApiError)) return false;
@@ -269,13 +275,12 @@ export default function NewChatScreen(): React.JSX.Element {
       staged.length > 0);
   const { navigateWithoutPrompt } = useUnsavedChangesGuard({
     enabled: hasUnsavedChanges,
-    title: busy ? 'Leave while starting the conversation?' : 'Discard new message?',
-    message: busy
-      ? 'The send may already be in progress, but this screen will not reopen after you leave.'
-      : 'The recipients, message, and attachments in this draft will be cleared.',
+    title: 'Discard new message?',
+    message: 'The recipients, message, and attachments in this draft will be cleared.',
+    blocked: busy ? SEND_IN_PROGRESS : null,
     onDiscard: async () => {
       if (submissionInFlightRef.current || busy) {
-        showDialog('Shared item', 'Wait for the current send attempt to finish before leaving.');
+        showDialog(SEND_IN_PROGRESS.title, SEND_IN_PROGRESS.message);
         return false;
       }
       if (initialContent.batchId) {

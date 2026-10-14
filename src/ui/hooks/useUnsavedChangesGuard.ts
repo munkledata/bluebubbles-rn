@@ -1,13 +1,18 @@
 import { useNavigation } from 'expo-router';
 import { usePreventRemove } from 'expo-router/react-navigation';
 import { useCallback, useEffect, useRef } from 'react';
-import { showConfirm, useDialogStore } from '../dialog/dialogStore';
+import { showConfirm, showDialog, useDialogStore } from '../dialog/dialogStore';
 
 export interface UnsavedChangesGuardOptions {
   /** Whether removing the current route would discard user-authored state. */
   enabled: boolean;
   title?: string;
   message?: string;
+  /**
+   * While set, leaving is not possible yet (for example, a send is still running). Back shows this
+   * explanation with a single OK instead of offering Discard, and the route stays mounted.
+   */
+  blocked?: { readonly title: string; readonly message: string } | null;
   /** Runs only after the user explicitly confirms the discard. */
   /** Return false or reject to keep the route mounted when external cleanup did not finish. */
   onDiscard?: () => void | boolean | Promise<void | boolean>;
@@ -29,6 +34,7 @@ export function useUnsavedChangesGuard({
   enabled,
   title = 'Discard changes?',
   message = 'Your unsaved changes will be lost.',
+  blocked = null,
   onDiscard,
   onAfterDiscardNavigation,
 }: UnsavedChangesGuardOptions): UnsavedChangesGuard {
@@ -64,6 +70,18 @@ export function useUnsavedChangesGuard({
     // A rapid second Back must not queue a second destructive confirmation behind the first.
     if (confirmationPendingRef.current) return;
     confirmationPendingRef.current = true;
+    if (blocked) {
+      confirmationIdRef.current = showDialog(blocked.title, blocked.message, [
+        {
+          text: 'OK',
+          onPress: () => {
+            confirmationIdRef.current = null;
+            confirmationPendingRef.current = false;
+          },
+        },
+      ]);
+      return;
+    }
     confirmationIdRef.current = showConfirm({
       title,
       message,
