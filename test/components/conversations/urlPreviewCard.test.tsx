@@ -27,7 +27,7 @@ jest.mock('expo-image', () => {
 });
 
 // eslint-disable-next-line import/first
-import { UrlPreviewCard } from '@ui/conversations/UrlPreviewCard';
+import { previewDestinationLabel, UrlPreviewCard } from '@ui/conversations/UrlPreviewCard';
 // eslint-disable-next-line import/first
 import { safeOpenUrl } from '@utils';
 // eslint-disable-next-line import/first
@@ -284,6 +284,32 @@ describe('UrlPreviewCard', () => {
     const style = StyleSheet.flatten(card.props.style);
     expect(style.width).toBeDefined();
     expect(style.width).not.toBe('auto');
+  });
+
+  it('marks an international destination, which can imitate a familiar name', async () => {
+    await renderWithTheme(
+      <UrlPreviewCard
+        url="https://xn--pple-43d.com/login"
+        preview={row({ title: 'Apple', siteName: 'Apple' })}
+        isFromMe={false}
+      />,
+    );
+
+    expect(screen.getByText('xn--pple-43d.com (international domain)')).toBeTruthy();
+    expect(
+      screen.getByRole('link', {
+        name: 'Link preview: Apple. Destination: xn--pple-43d.com (international domain)',
+      }),
+    ).toBeTruthy();
+  });
+
+  it('labels the Unicode and punycode forms of a host the same way, whatever the URL parser', () => {
+    // Android's URL keeps the Unicode form (a Cyrillic 'а' here); Node's returns punycode.
+    expect(previewDestinationLabel('\u0430pple.com')).toBe('\u0430pple.com (international domain)');
+    expect(previewDestinationLabel('xn--pple-43d.com')).toBe(
+      'xn--pple-43d.com (international domain)',
+    );
+    expect(previewDestinationLabel('www.example.com')).toBe('example.com');
   });
 
   it('tapping the card opens the message URL through safeOpenUrl (the scheme allowlist)', async () => {

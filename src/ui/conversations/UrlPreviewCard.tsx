@@ -10,6 +10,19 @@ import { showExternalOpenFailure } from '../toast/external-open-feedback';
 
 const ALWAYS_CURRENT = (): boolean => true;
 
+/**
+ * The card's Destination text. A host with non-ASCII letters can imitate a familiar name (a
+ * Cyrillic 'а' in 'аpple.com'), so it is marked. Android's URL keeps that Unicode form while
+ * Node's returns punycode ('xn--…'), so both forms count.
+ */
+export function previewDestinationLabel(hostname: string): string {
+  const domain = hostname.replace(/^www\./, '');
+  const international =
+    [...domain].some((character) => character.charCodeAt(0) > 0x7f) ||
+    domain.split('.').some((label) => label.toLowerCase().startsWith('xn--'));
+  return international ? `${domain} (international domain)` : domain;
+}
+
 interface UrlPreviewCardProps {
   url: string;
   /** The already-fetched preview row (the parent bubble owns the hook so it runs once). */
@@ -97,7 +110,7 @@ export function UrlPreviewCard({
   )
     return null;
 
-  const domain = destination.hostname.replace(/^www\./, '');
+  const domain = previewDestinationLabel(destination.hostname);
   const descriptiveLabel = preview.title ?? preview.siteName;
 
   const card = (
