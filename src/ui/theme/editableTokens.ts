@@ -76,14 +76,7 @@ export const EDITABLE_COLORS: EditableColorField[] = [
       t.color.bubble.senderBackground = v;
     },
   },
-  {
-    key: 'senderText',
-    label: 'Sent bubble text',
-    read: (t) => t.color.bubble.senderText,
-    write: (t, v) => {
-      t.color.bubble.senderText = v;
-    },
-  },
+  // No sent-text row: every sent bubble picks readable text from its own fill (readableTextOn).
   {
     key: 'receivedBackgroundTop',
     label: 'Received bubble (top)',

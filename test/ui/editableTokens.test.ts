@@ -16,7 +16,6 @@ const EXPECTED_PATH: Record<string, (t: ThemeTokens) => string> = {
   separator: (t) => t.color.separator,
   destructive: (t) => t.color.destructive,
   senderBackground: (t) => t.color.bubble.senderBackground,
-  senderText: (t) => t.color.bubble.senderText,
   receivedBackgroundTop: (t) => t.color.bubble.receivedBackgroundTop,
   receivedBackgroundBottom: (t) => t.color.bubble.receivedBackgroundBottom,
   receivedText: (t) => t.color.bubble.receivedText,
@@ -57,6 +56,11 @@ describe('EDITABLE_COLORS catalog', () => {
       expect(typeof field.read).toBe('function');
       expect(typeof field.write).toBe('function');
     }
+  });
+
+  it('does not offer sent bubble text, which every sent bubble picks from its own fill', () => {
+    expect(EDITABLE_COLORS.map((f) => f.key)).not.toContain('senderText');
+    expect(EDITABLE_COLORS.map((f) => f.label)).not.toContain('Sent bubble text');
   });
 
   it('every field key has a documented expected path (catalog matches the token tree)', () => {
