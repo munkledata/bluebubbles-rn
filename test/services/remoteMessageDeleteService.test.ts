@@ -106,6 +106,33 @@ describe('whole-message remote deletion', () => {
     },
   );
 
+  it('reports a deletion the Mac confirmed even when the connection changed meanwhile', async () => {
+    seedChatAndMessage(raw, DM_GUID, 45);
+    let transportCurrent = true;
+    const transport = fakeHttp(async () => {
+      // The server address or password is replaced while the confirmed request is in flight.
+      transportCurrent = false;
+      return { deleted: true, guid: MESSAGE_GUID };
+    });
+    (transport.http as unknown as { isTransportCurrent: () => boolean }).isTransportCurrent = () =>
+      transportCurrent;
+
+    await expect(
+      remoteDeleteExactIMessage(
+        db,
+        transport.http,
+        { chatGuid: DM_GUID, messageGuid: MESSAGE_GUID },
+        6_000,
+        undefined,
+        capability(),
+      ),
+    ).resolves.toEqual({ status: 'accepted' });
+    // No local write under a changed connection; the Mac's deletion reaches the phone by sync.
+    expect(
+      raw.prepare('SELECT date_deleted FROM messages WHERE guid = ?').get(MESSAGE_GUID),
+    ).toEqual({ date_deleted: null });
+  });
+
   it('leaves the phone row visible after one definite server refusal', async () => {
     seedChatAndMessage(raw, DM_GUID, 45);
     const transport = fakeHttp(async () => {

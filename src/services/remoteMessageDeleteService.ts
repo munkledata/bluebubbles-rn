@@ -153,7 +153,9 @@ export async function remoteDeleteExactIMessage(
     let acknowledged = false;
     try {
       const ack = await postRemoteDeleteMessage(transport.http, args);
-      if (!transport.admissionGuard()) throw new DbCommitGuardRejectedError();
+      // A retired account stays silent. A same-account connection change is handled below: this
+      // one-shot request has already reached the Mac.
+      if (accountGuard?.() === false) throw new DbCommitGuardRejectedError();
       if (ack.guid !== args.messageGuid) return { status: 'outcome-unknown' };
       acknowledged = true;
     } catch (error) {
@@ -165,6 +167,10 @@ export async function remoteDeleteExactIMessage(
     }
 
     if (!acknowledged) return { status: 'outcome-unknown' };
+    // The Mac confirmed this exact message, so never report it as not deleted. After a connection
+    // change the phone tombstone is skipped (it must not be written through a retired connection);
+    // the Mac's deletion reaches the phone by sync.
+    if (!transport.admissionGuard()) return { status: 'accepted' };
     try {
       await withDbTransaction(
         db,
