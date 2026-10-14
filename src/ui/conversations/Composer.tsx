@@ -103,7 +103,12 @@ interface ComposerProps {
   onShareLocation?: () => void;
   /** When set, a 📅 button offers to schedule the typed text for a future time
    *  (recurrence: null/undefined = send once, else repeat daily/weekly/monthly). */
-  onSchedule?: (text: string, scheduledFor: number, recurrence?: Recurrence | null) => void;
+  /** Resolves false when the schedule was not saved, so the composer keeps the text. */
+  onSchedule?: (
+    text: string,
+    scheduledFor: number,
+    recurrence?: Recurrence | null,
+  ) => Promise<boolean> | void;
   /** One server-owned file schedule; false leaves the draft and staged file untouched. */
   onScheduleAttachment?: (
     text: string,
@@ -435,7 +440,6 @@ export const Composer = React.memo(function Composer({
 
   const {
     text,
-    setText,
     trimmed,
     isEditing,
     canSend,
@@ -1193,9 +1197,31 @@ export const Composer = React.memo(function Composer({
                 });
               return;
             }
-            if (!sched.onSchedule) return;
-            setText('');
-            sched.onSchedule(sched.text, when, recurrence);
+            const submitSchedule = sched.onSchedule;
+            if (!submitSchedule) return;
+            scheduleSavingRef.current = true;
+            setScheduleSaving(true);
+            void Promise.resolve(submitSchedule(sched.text, when, recurrence))
+              .then((accepted) => {
+                if (
+                  accepted === false ||
+                  !mountedRef.current ||
+                  sched.owner?.() === false ||
+                  scheduleContext.current.isSubmitOwnerCurrent !== sched.owner ||
+                  scheduleContext.current.onSchedule !== submitSchedule ||
+                  scheduleContext.current.isSubmitOwnerCurrent?.() === false
+                )
+                  return;
+                // Through the authoring session, so the saved draft is cleared as well.
+                if (currentTextRef.current === sched.draft) onChangeText('');
+              })
+              .catch(() => {
+                // The screen owns the visible error; keep the authored text for another try.
+              })
+              .finally(() => {
+                scheduleSavingRef.current = false;
+                if (mountedRef.current) setScheduleSaving(false);
+              });
           }}
         />
       ) : null}

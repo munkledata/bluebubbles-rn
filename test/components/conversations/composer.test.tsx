@@ -966,6 +966,38 @@ describe('Composer — themed scheduling', () => {
     expect(input().props.value).toBe('');
   });
 
+  it('keeps the text until the schedule is saved, then clears the saved draft too', async () => {
+    const saved = deferred<boolean>();
+    const onSchedule = jest.fn(() => saved.promise);
+    const onDraftChange = jest.fn();
+    await renderWithTheme(
+      <Composer onSend={jest.fn()} onSchedule={onSchedule} onDraftChange={onDraftChange} />,
+    );
+    await fireEvent.changeText(input(), 'see you at nine');
+    await fireEvent.press(screen.getByLabelText('Schedule message'));
+    await chooseTime();
+    await fireEvent.press(screen.getByRole('button', { name: 'Schedule' }));
+
+    expect(onSchedule).toHaveBeenCalledWith('see you at nine', future, null);
+    expect(input().props.value).toBe('see you at nine');
+
+    await act(async () => saved.resolve(true));
+    await waitFor(() => expect(input().props.value).toBe(''));
+    await waitFor(() => expect(onDraftChange).toHaveBeenLastCalledWith(''));
+  });
+
+  it('keeps the text when the schedule could not be saved', async () => {
+    const onSchedule = jest.fn(async () => false);
+    await renderWithTheme(<Composer onSend={jest.fn()} onSchedule={onSchedule} />);
+    await fireEvent.changeText(input(), 'keep for later');
+    await fireEvent.press(screen.getByLabelText('Schedule message'));
+    await chooseTime();
+    await fireEvent.press(screen.getByRole('button', { name: 'Schedule' }));
+
+    await waitFor(() => expect(onSchedule).toHaveBeenCalledTimes(1));
+    expect(input().props.value).toBe('keep for later');
+  });
+
   it('changing repeat does not send until the separate Schedule action', async () => {
     const onSchedule = jest.fn();
     await renderWithTheme(<Composer onSend={jest.fn()} onSchedule={onSchedule} />);

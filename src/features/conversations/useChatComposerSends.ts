@@ -76,20 +76,29 @@ export function useChatComposerSends({
   // useCallback-stable: these feed the memoized Composer, so a reactive tick re-rendering the
   // screen doesn't re-render the composer through fresh closures.
   const onSchedule = useCallback(
-    (text: string, scheduledFor: number, recurrence?: Recurrence | null): void => {
-      void schedule(
-        {
-          chatGuid: guid,
-          text,
-          scheduledFor,
-          recurrence,
-        },
-        accountLease,
-      ).catch((error: unknown) => {
-        if (!accountLease.isCurrent()) return;
-        logger.warn('[chat] could not schedule message', error);
-        showDialog('Scheduled', 'Couldn’t schedule that message.');
-      });
+    async (
+      text: string,
+      scheduledFor: number,
+      recurrence?: Recurrence | null,
+    ): Promise<boolean> => {
+      try {
+        await schedule(
+          {
+            chatGuid: guid,
+            text,
+            scheduledFor,
+            recurrence,
+          },
+          accountLease,
+        );
+        return accountLease.isCurrent();
+      } catch (error) {
+        if (accountLease.isCurrent()) {
+          logger.warn('[chat] could not schedule message', error);
+          showDialog('Scheduled', 'Couldn’t schedule that message.');
+        }
+        return false;
+      }
     },
     [accountLease, guid],
   );
