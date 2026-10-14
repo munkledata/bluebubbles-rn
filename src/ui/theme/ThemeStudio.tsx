@@ -378,9 +378,12 @@ const styles = StyleSheet.create({
   contrastTitle: { fontSize: 16, fontWeight: '600' },
   contrastSummary: { fontSize: 14, lineHeight: 19 },
   contrastRole: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  // Minimums, not a fixed box: the 'Aa' sample must grow with the user's font scale.
   contrastSample: {
-    width: 44,
-    height: 36,
+    minWidth: 44,
+    minHeight: 36,
+    paddingHorizontal: 6,
+    paddingVertical: 4,
     borderRadius: 7,
     borderWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',

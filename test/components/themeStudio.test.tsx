@@ -1,4 +1,5 @@
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { act, fireEvent, renderWithTheme, screen, waitFor } from './support/renderWithTheme';
 import { ThemeStudio } from '@ui/theme/ThemeStudio';
@@ -107,6 +108,30 @@ describe('ThemeStudio dark-only editor', () => {
 
     await fireEvent.press(screen.getByRole('button', { name: 'Apply unreadable theme anyway' }));
     await waitFor(() => expect(onApply).toHaveBeenCalledTimes(1));
+  });
+
+  it('lets the contrast sample grow with large text instead of clipping it', async () => {
+    await renderWithTheme(
+      <SafeAreaProvider
+        initialMetrics={{
+          frame: { x: 0, y: 0, width: 390, height: 844 },
+          insets: { top: 0, right: 0, bottom: 0, left: 0 },
+        }}
+      >
+        <ThemeStudio
+          initialTokens={darkThemeWithPrimaryText('#747474')}
+          initialName="Large text"
+          onApply={jest.fn()}
+          onCancel={jest.fn()}
+        />
+      </SafeAreaProvider>,
+      { preset: 'gator' },
+    );
+
+    const sampleBox = StyleSheet.flatten(screen.getAllByText('Aa')[0]?.parent?.props.style);
+    expect(sampleBox).toEqual(expect.objectContaining({ minWidth: 44, minHeight: 36 }));
+    expect(sampleBox.width).toBeUndefined();
+    expect(sampleBox.height).toBeUndefined();
   });
 
   it('requires an in-studio discard choice after theme fields change', async () => {
