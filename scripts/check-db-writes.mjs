@@ -96,6 +96,7 @@ const COORDINATED_DELEGATION_PATHS = new Set([
   'src/db/repositories/outgoing.ts',
   'src/features/conversations/devFixtureSession.ts',
   'src/features/conversations/useChatScheduledCatchup.ts',
+  'src/features/conversations/useChatShareIntake.ts',
   'src/services/backup/backup.ts',
   'src/services/backup/backupService.ts',
   'src/services/boot/foregroundBoot.ts',

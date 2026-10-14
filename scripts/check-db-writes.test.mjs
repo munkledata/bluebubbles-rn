@@ -3302,6 +3302,7 @@ test('certifies exactly the reviewed SHARE-02 intake delegation edges', () => {
     if (finding.path === 'app/(app)/chat/[guid].tsx') {
       return finding.target !== 'src/services/messagePreview.ts#readMessagePreview';
     }
+    if (finding.path === 'src/features/conversations/useChatShareIntake.ts') return true;
     if (finding.path === 'app/(app)/new-chat.tsx') {
       return (
         finding.target !== 'src/services/chatActions.ts#createNewChat' &&
@@ -3315,26 +3316,6 @@ test('certifies exactly the reviewed SHARE-02 intake delegation edges', () => {
     findings.map(({ id, target, detectedContext }) => [id, target, detectedContext]).sort(),
     [
       [
-        'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:1601131854>.<callback:f613d3ead3>:mutator-call:642969df5a8c',
-        'src/services/share/shareIntake.ts#readShareIntakeReceipt',
-        'coordinated-delegation',
-      ],
-      [
-        'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:414f8cbf59>.<callback:5a7bad110f>:mutator-call:599fa6a378a7',
-        'src/services/share/shareIntake.ts#discardShareIntakeItem',
-        'coordinated-delegation',
-      ],
-      [
-        'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:84297bce06>.<callback:16329d1004>:mutator-call:ecdfe71bf90b',
-        'src/services/share/shareIntake.ts#admitShareIntakeTextDraft',
-        'coordinated-delegation',
-      ],
-      [
-        'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:81fa7f80e0>.<callback:a5be709a07>:mutator-call:0475af637400',
-        'src/services/share/shareIntake.ts#readShareIntakeReceipt',
-        'coordinated-delegation',
-      ],
-      [
         'app/(app)/new-chat.tsx#NewChatScreen.<callback:0c40702b3c>.<callback:ae3680910a>:mutator-call:f73d80d7970d',
         'src/services/share/shareIntake.ts#readShareIntakeReceipt',
         'coordinated-delegation',
@@ -3347,6 +3328,26 @@ test('certifies exactly the reviewed SHARE-02 intake delegation edges', () => {
       [
         'app/(app)/new-chat.tsx#NewChatScreen.removeStaged.<callback:381edc2f98>:mutator-call:28ee2d86f7a3',
         'src/services/share/shareIntake.ts#discardShareIntakeItem',
+        'coordinated-delegation',
+      ],
+      [
+        'src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:1601131854>.<callback:f613d3ead3>:mutator-call:cbcee720e66e',
+        'src/services/share/shareIntake.ts#readShareIntakeReceipt',
+        'coordinated-delegation',
+      ],
+      [
+        'src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:414f8cbf59>.<callback:5a7bad110f>:mutator-call:08da8e75312d',
+        'src/services/share/shareIntake.ts#discardShareIntakeItem',
+        'coordinated-delegation',
+      ],
+      [
+        'src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:81fa7f80e0>.<callback:a5be709a07>:mutator-call:c383ac695596',
+        'src/services/share/shareIntake.ts#readShareIntakeReceipt',
+        'coordinated-delegation',
+      ],
+      [
+        'src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:84297bce06>.<callback:16329d1004>:mutator-call:ce62f399b8c2',
+        'src/services/share/shareIntake.ts#admitShareIntakeTextDraft',
         'coordinated-delegation',
       ],
       [
@@ -7085,6 +7086,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     'app/(app)/chat/[guid].tsx',
     'app/(app)/new-chat.tsx',
     'src/db/repositories/chats.ts',
+    'src/features/conversations/useChatShareIntake.ts',
     'src/db/repositories/outgoing.ts',
     'src/services/backup/backup.ts',
     'src/services/backup/backupService.ts',
@@ -7257,10 +7259,6 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
     [
       'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:a2637fe808>.<callback:de6db739c6>:mutator-call:ecf46f2d08d9',
       'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:876664bdf3>.<callback:177d5dd9bd>:mutator-call:3e3d348f4c24',
-      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:1601131854>.<callback:f613d3ead3>:mutator-call:642969df5a8c',
-      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:414f8cbf59>.<callback:5a7bad110f>:mutator-call:599fa6a378a7',
-      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:84297bce06>.<callback:16329d1004>:mutator-call:ecdfe71bf90b',
-      'app/(app)/chat/[guid].tsx#ChatScreenInner.<callback:81fa7f80e0>.<callback:a5be709a07>:mutator-call:0475af637400',
       'app/(app)/new-chat.tsx#NewChatScreen.<callback:0c40702b3c>.<callback:ae3680910a>:mutator-call:f73d80d7970d',
       'app/(app)/new-chat.tsx#NewChatScreen.<callback:6cde4fbfd5>:mutator-call:b4a563a44345',
       'app/(app)/new-chat.tsx#NewChatScreen.onStart.<callback:aa379435cb>:mutator-call:f07a3220abc4',
@@ -7380,6 +7378,10 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoing.ts#reconcileOutgoingSuccessWithinTransaction:sql-update:fb0297907ce8',
       'src/db/repositories/chats.ts#setChatUnreadLocalWithinTransaction:drizzle-update:bc72f0e85266',
       'src/db/repositories/sync.ts#setSyncMarkerWithinTransaction:drizzle-update:7582ca63d697',
+      'src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:1601131854>.<callback:f613d3ead3>:mutator-call:cbcee720e66e',
+      'src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:414f8cbf59>.<callback:5a7bad110f>:mutator-call:08da8e75312d',
+      'src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:81fa7f80e0>.<callback:a5be709a07>:mutator-call:c383ac695596',
+      'src/features/conversations/useChatShareIntake.ts#useChatShareIntake.<callback:84297bce06>.<callback:16329d1004>:mutator-call:ce62f399b8c2',
       'src/services/backup/backup.ts#buildBackupWithCustomFolders:mutator-call:1204bfcb57bb',
       'src/services/backup/backupService.ts#buildCurrentBackup.<callback:2bd1ecedc4>:mutator-call:3ea042f4e17e',
       'src/services/backup/backupService.ts#restoreCurrentBackup.<callback:93bf63133c>:mutator-call:27d17cbc08f6',
