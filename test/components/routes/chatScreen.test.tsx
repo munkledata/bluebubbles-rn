@@ -382,6 +382,7 @@ import {
 import { showToast } from '@ui';
 // eslint-disable-next-line import/first
 import { presentSendIssue } from '@ui/conversations/sendNotices';
+import { useToastStore } from '@ui/toast/toastStore';
 // eslint-disable-next-line import/first
 import { devSendFake } from '@features/conversations/devSeed';
 // eslint-disable-next-line import/first
@@ -1372,8 +1373,17 @@ describe('ChatScreen — send routing', () => {
     expect(send).toHaveBeenCalledWith(
       { chatGuid: GUID, text: 'hello' },
       expect.objectContaining({ isCurrent: expect.any(Function) }),
-      presentSendIssue,
       expect.any(Function),
+      expect.any(Function),
+    );
+    // The plain send wraps the shared issue notice (so a refusal is announced once); it must
+    // still show that notice.
+    useToastStore.setState({ current: null, queue: [] });
+    const reportIssue = jest.mocked(send).mock.calls[0]?.[2] as
+      ((issue: 'queue-capacity') => void) | undefined;
+    reportIssue?.('queue-capacity');
+    expect(useToastStore.getState().current?.message).toBe(
+      'Too many messages are waiting—try again in a moment',
     );
   });
 
@@ -1403,7 +1413,7 @@ describe('ChatScreen — send routing', () => {
     expect(send).toHaveBeenCalledWith(
       { chatGuid: GUID, text: 'plain still works' },
       expect.objectContaining({ isCurrent: expect.any(Function) }),
-      presentSendIssue,
+      expect.any(Function),
       expect.any(Function),
     );
 
@@ -1849,7 +1859,7 @@ describe('ChatScreen — send routing', () => {
     expect(send).toHaveBeenCalledWith(
       { chatGuid: GUID, text: 'party' },
       expect.objectContaining({ isCurrent: expect.any(Function) }),
-      presentSendIssue,
+      expect.any(Function),
       expect.any(Function),
     );
   });
