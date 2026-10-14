@@ -2628,7 +2628,7 @@ function dbProcessRelaunchCertificateCandidate({
     [dbEventSinkConstructor, '96103a4c091104c1b661ae2272312893db59c8de80e38eacdbc87ae2b23134c2'],
     [dbEventSinkLinkContacts, '0815eb9769042c9b5d8be504720e727f05cdde857fd255d692afdb391b3e3e2d'],
     [dbEventSinkOnEvent, '707e79079b452d31ca517ec2d6e8cc263d02bb3aa9b0a2d3530904e9a0c39d32'],
-    [restoreBackup, '6a394c00cd1f710d0cd02fd7c6a6788d331bbf290407e23234becc3b91638f07'],
+    [restoreBackup, 'afe947d418d3b5d0c940d03ceb4670bfd793fc28f3ca0e87a15b675c7be5cc49'],
     [
       restorePreparedBackupWithinTransaction,
       '3b5fec9cbdb126021831009ff232e9c5a96a9fdea74c1e35eb089df42ed9f490',

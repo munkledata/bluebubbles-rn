@@ -7388,9 +7388,9 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [
-      'src/services/backup/backup.ts#restoreBackup.<callback:0154bc3d51>:mutator-call:7ecb8b973875',
-      'src/services/backup/backup.ts#restoreBackup:mutator-call:712f6a809fbc',
-      'src/services/backup/backup.ts#restoreBackup:mutator-call:cedfc911f115',
+      'src/services/backup/backup.ts#restoreBackup.<callback:210239e086>:mutator-call:a89d928180be',
+      'src/services/backup/backup.ts#restoreBackup:mutator-call:36cf4f4647c4',
+      'src/services/backup/backup.ts#restoreBackup:mutator-call:f6c5d92a4da2',
     ].sort(),
   );
   assert.deepEqual(

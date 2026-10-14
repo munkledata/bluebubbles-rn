@@ -197,17 +197,22 @@ export async function restoreBackup(
   assertRestoreOwned(ownershipGuard);
   const applied = await withDbTransaction(
     db,
-    (context) => restorePreparedBackupWithinTransaction(context, prepared),
+    async (context) => {
+      const result = await restorePreparedBackupWithinTransaction(context, prepared);
+      // Checked inside the transaction so an impossible result rolls back instead of being
+      // reported as a failed restore after it was already committed.
+      if (
+        result.chatCustomizations > backup.chatCustomizations.length ||
+        result.customFolders > customFolders.length ||
+        result.customFolderMemberships > sourceFolderMembershipCount ||
+        result.handleColors > handleColors.length
+      ) {
+        throw new Error('Backup restore returned counts outside the validated source bounds.');
+      }
+      return result;
+    },
     ownershipGuard,
   );
-  if (
-    applied.chatCustomizations > backup.chatCustomizations.length ||
-    applied.customFolders > customFolders.length ||
-    applied.customFolderMemberships > sourceFolderMembershipCount ||
-    applied.handleColors > handleColors.length
-  ) {
-    throw new Error('Backup restore returned counts outside the validated source bounds.');
-  }
   return {
     kv: kv.length,
     themes: themes.length,

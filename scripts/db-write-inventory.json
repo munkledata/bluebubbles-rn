@@ -13561,7 +13561,7 @@
       "evidence": "docs/WORK_PLAN_2026-08-03.md (HANDLE-COLOR-01); test/services/backupV4HandleColors.test.ts (v4 exact-service colors, bounds, ownership); test/services/backupV3.test.ts (preserved atomic snapshot and bounded-probe regressions); scripts/check-db-writes.test.mjs (exact delegation sets); independent high-risk review"
     },
     {
-      "id": "src/services/backup/backup.ts#restoreBackup:mutator-call:712f6a809fbc",
+      "id": "src/services/backup/backup.ts#restoreBackup:mutator-call:36cf4f4647c4",
       "path": "src/services/backup/backup.ts",
       "line": 198,
       "symbol": "restoreBackup",
@@ -13574,12 +13574,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/backup.test.ts; test/services/backupService.test.ts"
     },
     {
-      "id": "src/services/backup/backup.ts#restoreBackup:mutator-call:cedfc911f115",
+      "id": "src/services/backup/backup.ts#restoreBackup:mutator-call:f6c5d92a4da2",
       "path": "src/services/backup/backup.ts",
       "line": 198,
       "symbol": "restoreBackup",
       "operation": "mutator-call",
-      "target": "src/services/backup/backup.ts#restoreBackup.<callback:0154bc3d51>",
+      "target": "src/services/backup/backup.ts#restoreBackup.<callback:210239e086>",
       "detectedContext": "withDbTransaction",
       "owner": "restoreBackup",
       "transactionContext": "withDbTransaction",
@@ -13587,10 +13587,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/withDbTransaction.test.ts; test/services/backup.test.ts; test/services/backupService.test.ts"
     },
     {
-      "id": "src/services/backup/backup.ts#restoreBackup.<callback:0154bc3d51>:mutator-call:7ecb8b973875",
+      "id": "src/services/backup/backup.ts#restoreBackup.<callback:210239e086>:mutator-call:a89d928180be",
       "path": "src/services/backup/backup.ts",
-      "line": 200,
-      "symbol": "restoreBackup.<callback:0154bc3d51>",
+      "line": 201,
+      "symbol": "restoreBackup.<callback:210239e086>",
       "operation": "mutator-call",
       "target": "src/db/repositories/backup.ts#restorePreparedBackupWithinTransaction",
       "detectedContext": "withDbTransaction",
