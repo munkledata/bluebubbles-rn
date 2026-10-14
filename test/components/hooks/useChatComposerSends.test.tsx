@@ -34,6 +34,7 @@ jest.mock('@ui/conversations/sendNotices', () => ({ presentSendIssue: jest.fn() 
 jest.mock('@core/secure', () => ({ logger: { warn: jest.fn() } }));
 
 import type { MessagePreview } from '@db/repositories';
+import { presentSendIssue } from '@ui/conversations/sendNotices';
 import {
   useChatComposerSends,
   type ChatComposerSendOptions,
@@ -173,6 +174,39 @@ describe('useChatComposerSends', () => {
     expect(mockShowToast).toHaveBeenCalledWith(
       'Couldn’t queue that reply. Your draft is still here',
     );
+  });
+
+  it('tells you when a plain message never reached the queue, and keeps the draft', async () => {
+    // A capability refresh during queue admission makes send() resolve null without queueing.
+    mockSend.mockResolvedValue(null);
+    const { onSend } = await sends();
+
+    await expect(onSend('hello')).resolves.toBe(false);
+
+    expect(mockShowToast).toHaveBeenCalledTimes(1);
+    expect(mockShowToast).toHaveBeenCalledWith(
+      'Couldn’t queue that message. Your draft is still here—try again when connected',
+    );
+  });
+
+  it('shows only the queue-full notice when a send or reply is refused for capacity', async () => {
+    const refusedForCapacity = (...args: unknown[]) => {
+      (args[2] as (issue: string) => void)('queue-capacity');
+      return Promise.resolve(null);
+    };
+    mockSend.mockImplementation(refusedForCapacity);
+    mockReply.mockImplementation(refusedForCapacity);
+    const plain = await sends();
+    const replying = await sends({ replyTo: preview('msg-2') });
+
+    await expect(plain.onSend('hello')).resolves.toBe(false);
+    await expect(replying.onSend('hi')).resolves.toBe(false);
+
+    expect(jest.mocked(presentSendIssue).mock.calls).toEqual([
+      ['queue-capacity'],
+      ['queue-capacity'],
+    ]);
+    expect(mockShowToast).not.toHaveBeenCalled();
   });
 
   it('sends plain text, or the dev fake on the local dev server', async () => {

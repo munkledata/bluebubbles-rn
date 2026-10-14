@@ -13,6 +13,7 @@ import {
   sendEffect,
   sendFormatted,
   sendMention,
+  type SendOperationIssue,
 } from '@/services/send';
 import { showToast, type PendingAttachment } from '@ui';
 import { presentSendIssue } from '@ui/conversations/sendNotices';
@@ -156,6 +157,13 @@ export function useChatComposerSends({
             return false;
           });
       }
+      // A send refused before the queue (for example, capabilities refreshed mid-admission) resolves
+      // null. Say so once; a queue-capacity refusal has already shown its own notice.
+      let issuePresented = false;
+      const reportIssue = (issue: SendOperationIssue): void => {
+        issuePresented = true;
+        presentSendIssue(issue);
+      };
       const target = replyTo;
       if (target) {
         if (!imessageRepliesAvailable || target.targetPartIndex !== 0) {
@@ -171,10 +179,10 @@ export function useChatComposerSends({
                 replyToPartIndex: 0,
               },
               accountLease,
-              presentSendIssue,
+              reportIssue,
               onQueued,
             ).then((result) => {
-              if (result == null && accountLease.isCurrent()) {
+              if (result == null && accountLease.isCurrent() && !issuePresented) {
                 throw new Error('The iMessage reply capability changed before queue admission.');
               }
               return result;
@@ -196,7 +204,14 @@ export function useChatComposerSends({
           if (isDevServer()) {
             return devSendFake(guid, text, undefined, accountLease, onQueued);
           }
-          return send({ chatGuid: guid, text }, accountLease, presentSendIssue, onQueued);
+          return send({ chatGuid: guid, text }, accountLease, reportIssue, onQueued).then(
+            (result) => {
+              if (result == null && accountLease.isCurrent() && !issuePresented) {
+                throw new Error('Send capabilities changed before queue admission.');
+              }
+              return result;
+            },
+          );
         },
         () => undefined,
         (error) => {
