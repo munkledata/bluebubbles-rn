@@ -36,3 +36,15 @@ export function presentManualRetryResult(result: ManualRetryResult): void {
 export function presentDiscardMessageResult(result: DiscardMessageResult): void {
   if (result === 'message-changed') showToast('Message changed—select it again');
 }
+
+/**
+ * Removing a message failed for the current account, so it is still in the conversation. A bulk
+ * delete passes how many of its selected messages failed.
+ */
+export function presentDiscardMessageFailure(failedOfSelection?: number): void {
+  showToast(
+    failedOfSelection === undefined
+      ? 'Couldn’t remove that message—try again'
+      : `Couldn’t delete ${failedOfSelection} of the selected messages—try again`,
+  );
+}

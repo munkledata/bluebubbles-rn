@@ -16,6 +16,7 @@ import {
 import { parseReactionType, type ReactionBaseType } from '@core/reactions/reactionType';
 import { parseRcsChatGuid, parseRcsMessageGuid } from '@core/rcs/providerIdentity';
 import { bodyTextFromRuns, parseAttributedRuns } from '@core/richtext';
+import { logger } from '@core/secure';
 import type { MessagePreview } from '@db/repositories';
 import { saveAttachmentsToPhotos, shareAttachment } from '@/services/media';
 import { attachmentCacheCoordinator } from '@/services/download/attachmentCacheCoordinator';
@@ -29,7 +30,11 @@ import { checkUnsend, discardMessage, react, unsend } from '@/services/send';
 import { useRcsMutationEnabled } from '@state/sessionStore';
 import type { SelectedMessage } from '@ui';
 import { pickReminderTime } from '@ui/conversations/pickReminderTime';
-import { presentDiscardMessageResult, presentSendIssue } from '@ui/conversations/sendNotices';
+import {
+  presentDiscardMessageFailure,
+  presentDiscardMessageResult,
+  presentSendIssue,
+} from '@ui/conversations/sendNotices';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { useTransportHealthStore } from '@state/transportHealthStore';
 import { isDevServer } from '@utils/isDev';
@@ -680,10 +685,18 @@ export function useMessageActions({
             // whose POST is still in flight, and that one also has to take its retry ladder with
             // it or the queue re-POSTs the message the user just deleted.
             void (async () => {
+              // One failure must not silently stop the rest; report every failure once at the end.
+              let failed = 0;
               for (const g of set) {
-                const result = await discardMessage(g, now, screenLease);
-                if (screenLease.isCurrent()) presentDiscardMessageResult(result);
+                try {
+                  const result = await discardMessage(g, now, screenLease);
+                  if (screenLease.isCurrent()) presentDiscardMessageResult(result);
+                } catch (error) {
+                  failed += 1;
+                  logger.warn('[chat] message delete failed', error);
+                }
               }
+              if (failed > 0 && screenLease.isCurrent()) presentDiscardMessageFailure(failed);
             })();
             setSelectedGuids(null);
           },
@@ -715,9 +728,16 @@ export function useMessageActions({
           text: sending ? 'Cancel Sending' : 'Remove',
           style: 'destructive',
           onPress: () => {
-            void discardMessage(g, Date.now(), screenLease).then((result) => {
-              if (screenLease.isCurrent()) presentDiscardMessageResult(result);
-            });
+            void discardMessage(g, Date.now(), screenLease).then(
+              (result) => {
+                if (screenLease.isCurrent()) presentDiscardMessageResult(result);
+              },
+              (error: unknown) => {
+                if (!screenLease.isCurrent()) return;
+                logger.warn('[chat] message remove failed', error);
+                presentDiscardMessageFailure();
+              },
+            );
           },
         },
       ],
@@ -830,9 +850,16 @@ export function useMessageActions({
         text: 'Delete',
         style: 'destructive',
         onPress: () => {
-          void discardMessage(g, Date.now(), screenLease).then((result) => {
-            if (screenLease.isCurrent()) presentDiscardMessageResult(result);
-          });
+          void discardMessage(g, Date.now(), screenLease).then(
+            (result) => {
+              if (screenLease.isCurrent()) presentDiscardMessageResult(result);
+            },
+            (error: unknown) => {
+              if (!screenLease.isCurrent()) return;
+              logger.warn('[chat] message delete failed', error);
+              presentDiscardMessageFailure();
+            },
+          );
         },
       },
     ]);

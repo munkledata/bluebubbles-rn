@@ -78,6 +78,8 @@ jest.mock('@ui/dialog/dialogStore', () => ({
 // eslint-disable-next-line import/first
 import { useMessageActions } from '@features/conversations/useMessageActions';
 // eslint-disable-next-line import/first
+import { useToastStore } from '@ui/toast/toastStore';
+// eslint-disable-next-line import/first
 import { checkUnsend, discardMessage, react, unsend } from '@/services/send';
 // eslint-disable-next-line import/first
 import { deleteMessageFromMac } from '@/services/remoteMessageDeleteUiService';
@@ -162,7 +164,14 @@ beforeEach(() => {
   mockUnsend.mockResolvedValue({ status: 'accepted' });
   mockDeleteMessageFromMac.mockResolvedValue({ status: 'accepted' });
   dialogs.length = 0;
+  useToastStore.setState({ current: null, queue: [] });
 });
+
+/** Every toast message shown so far, oldest first. */
+function toastMessages(): string[] {
+  const { current, queue } = useToastStore.getState();
+  return [current, ...queue].flatMap((toast) => (toast ? [toast.message] : []));
+}
 
 describe('useMessageActions — narrow iMessage actions and RCS reactions', () => {
   it('never exposes or sends an iMessage reaction, even when RCS exists elsewhere', async () => {
@@ -667,6 +676,26 @@ describe('useMessageActions — "Cancel Sending" / "Remove"', () => {
     );
   });
 
+  it('says so when removing the message failed, instead of closing silently', async () => {
+    (discardMessage as jest.Mock).mockRejectedValueOnce(new Error('database busy'));
+    const sending = msg('temp-stuck', 'sending');
+    const { result } = await mount([sending]);
+
+    await act(async () => {
+      result.current.onLongPressMessage(sending, rect);
+    });
+    await act(async () => {
+      result.current.onCancelSelected();
+    });
+    await act(async () => {
+      pressDestructive();
+    });
+
+    await waitFor(() =>
+      expect(toastMessages()).toEqual(['Couldn’t remove that message—try again']),
+    );
+  });
+
   it('uses the same write for the errored "Remove" wording', async () => {
     const errored = msg('temp-err', 'error');
     const { result } = await mount([errored]);
@@ -736,5 +765,57 @@ describe('useMessageActions — bulk Delete', () => {
     expect(new Set(stamps).size).toBe(1);
     // …and multi-select exits.
     expect(result.current.selectedGuids).toBeNull();
+  });
+
+  it('keeps going past a failed message and reports the failures once at the end', async () => {
+    (discardMessage as jest.Mock).mockImplementation(async (g: string) => {
+      if (g === 'a' || g === 'b') throw new Error('database busy');
+    });
+    const rows = ['a', 'b', 'c'].map((g) => msg(g, null));
+    const { result } = await mount(rows);
+    await act(async () => {
+      result.current.onLongPressMessage(rows[0]!, rect);
+    });
+    await act(async () => {
+      result.current.onEnterSelect();
+    });
+    await act(async () => {
+      result.current.onToggleSelect(rows[1]!);
+      result.current.onToggleSelect(rows[2]!);
+    });
+    await act(async () => {
+      result.current.onBulkDelete();
+    });
+    await act(async () => {
+      pressDestructive();
+    });
+
+    await waitFor(() => expect(discardMessage).toHaveBeenCalledTimes(3));
+    await waitFor(() =>
+      expect(toastMessages()).toEqual(['Couldn’t delete 2 of the selected messages—try again']),
+    );
+  });
+});
+
+describe('useMessageActions — single Delete', () => {
+  it('says so when deleting the message failed', async () => {
+    (discardMessage as jest.Mock).mockRejectedValueOnce(new Error('database busy'));
+    const sent = msg('sent-1', null);
+    const { result } = await mount([sent]);
+
+    await act(async () => {
+      result.current.onLongPressMessage(sent, rect);
+    });
+    await act(async () => {
+      result.current.onDeleteSelected();
+    });
+    expect(dialogs[dialogs.length - 1]?.title).toBe('Delete message?');
+    await act(async () => {
+      pressDestructive();
+    });
+
+    await waitFor(() =>
+      expect(toastMessages()).toEqual(['Couldn’t remove that message—try again']),
+    );
   });
 });

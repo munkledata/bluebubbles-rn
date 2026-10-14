@@ -159,6 +159,8 @@ jest.mock('@ui/conversations/ReactionDetailsSheet', () => ({ ReactionDetailsShee
 import { MessageList } from '@ui/conversations/MessageList';
 // eslint-disable-next-line import/first
 import { retry, discardMessage } from '@/services/send';
+// eslint-disable-next-line import/first
+import { useToastStore } from '@ui/toast/toastStore';
 
 function make(over: Partial<EnrichedMessage> = {}): EnrichedMessage {
   return {
@@ -553,6 +555,24 @@ describe('MessageList — failed-message flow', () => {
       'x',
       expect.any(Number),
       expect.objectContaining({ isCurrent: expect.any(Function) }),
+    );
+  });
+
+  it('says so when deleting the failed message did not work', async () => {
+    useToastStore.setState({ current: null, queue: [] });
+    jest.mocked(discardMessage).mockRejectedValueOnce(new Error('database busy'));
+    const messages = [make({ id: 1, guid: 'x', text: 'oops', isFromMe: 1, sendState: 'error' })];
+    await renderWithTheme(
+      <MessageList chatGuid="iMessage;-;+15550001111" isGroup={false} messages={messages} />,
+    );
+    fireEvent.press(screen.getByTestId('retry-x'));
+    await screen.findByTestId('sheet');
+    fireEvent.press(screen.getByTestId('sheet-delete'));
+
+    await waitFor(() =>
+      expect(useToastStore.getState().current?.message).toBe(
+        'Couldn’t remove that message—try again',
+      ),
     );
   });
 

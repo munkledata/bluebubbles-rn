@@ -9,6 +9,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { logger } from '@core/secure';
 import { discardMessage, retry } from '@/services/send';
 import {
   captureRealtimeDeliveryLease,
@@ -40,7 +41,11 @@ import { MessageRow } from './MessageRow';
 import { FailedMessageSheet } from './FailedMessageSheet';
 import { ReactionDetailsSheet } from './ReactionDetailsSheet';
 import { overlayPillStyle, overlayTextStyle } from './overlayText';
-import { presentDiscardMessageResult, presentManualRetryResult } from './sendNotices';
+import {
+  presentDiscardMessageFailure,
+  presentDiscardMessageResult,
+  presentManualRetryResult,
+} from './sendNotices';
 
 interface MessageListProps {
   chatGuid: string;
@@ -552,9 +557,16 @@ export function MessageList({
         }}
         onDelete={() => {
           if (stillFailed && failed) {
-            void discardMessage(failed.guid, Date.now(), screenLease).then((result) => {
-              if (screenLease.isCurrent()) presentDiscardMessageResult(result);
-            });
+            void discardMessage(failed.guid, Date.now(), screenLease).then(
+              (result) => {
+                if (screenLease.isCurrent()) presentDiscardMessageResult(result);
+              },
+              (error: unknown) => {
+                if (!screenLease.isCurrent()) return;
+                logger.warn('[chat] failed-message delete failed', error);
+                presentDiscardMessageFailure();
+              },
+            );
           }
         }}
       />
