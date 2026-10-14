@@ -359,12 +359,12 @@ describe('ConversationHeader — affordances', () => {
     expect(screen.getByText('3')).toBeTruthy();
     expect(
       screen.getByRole('button', {
-        name: 'View 3 scheduled messages for this conversation',
+        name: 'View all scheduled messages (3 in this conversation)',
       }),
     ).toBeEnabled();
   });
 
-  it('uses singular wording for one scheduled message', async () => {
+  it('names the whole list it opens even when one message is scheduled here', async () => {
     mockHeaderData = makeHeader();
     mockUseScheduledMessageCount.mockReturnValue(1);
 
@@ -374,7 +374,7 @@ describe('ConversationHeader — affordances', () => {
 
     expect(
       screen.getByRole('button', {
-        name: 'View 1 scheduled message for this conversation',
+        name: 'View all scheduled messages (1 in this conversation)',
       }),
     ).toBeEnabled();
   });
@@ -390,7 +390,7 @@ describe('ConversationHeader — affordances', () => {
     expect(screen.getByText('99+')).toBeTruthy();
     expect(
       screen.getByRole('button', {
-        name: 'View 120 scheduled messages for this conversation',
+        name: 'View all scheduled messages (120 in this conversation)',
       }),
     ).toBeEnabled();
   });

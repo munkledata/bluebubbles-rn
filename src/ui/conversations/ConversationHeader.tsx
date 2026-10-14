@@ -45,10 +45,10 @@ export function ConversationHeader({
   const insets = useSafeAreaInsets();
   const scheduledMessageCount = useScheduledMessageCount(chatGuid);
   const scheduledBadgeLabel = scheduledMessageCount > 99 ? '99+' : String(scheduledMessageCount);
-  const scheduledMessageNoun = scheduledMessageCount === 1 ? 'message' : 'messages';
+  // The button opens every scheduled message; the badge counts only this conversation's.
   const scheduledActionLabel =
     scheduledMessageCount > 0
-      ? `View ${scheduledMessageCount} scheduled ${scheduledMessageNoun} for this conversation`
+      ? `View all scheduled messages (${scheduledMessageCount} in this conversation)`
       : 'View scheduled messages';
   const title = data ? resolveTitle(data) : '';
   const group = data ? isGroupRow(data) : false;
