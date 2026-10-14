@@ -26,9 +26,14 @@ export interface ChatShareIntakeOptions {
   /** The `shareBatch` route param: the native share this chat was opened for, if any. */
   shareBatchId: string | undefined;
   accountLease: RealtimeDeliveryLease;
+  /** Must keep one identity across renders (the screen passes `useRouter()`). */
   router: Pick<ReturnType<typeof useRouter>, 'replace'>;
   /** The chat's saved draft (null until loaded). Shared text is merged into it. */
   draft: string | null;
+  /**
+   * Must keep one identity across renders (the screen passes its `useState` setter): the receipt
+   * load and the shared-text merge re-run whenever `router` or `setDraft` changes identity.
+   */
   setDraft: (draft: string) => void;
   attachmentFeaturesAvailable: boolean;
   serverInfoLoaded: boolean;
