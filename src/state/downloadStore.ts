@@ -22,6 +22,8 @@ interface DownloadState {
   setProgress: (guid: string, loaded: number, total: number) => void;
   finish: (guid: string) => void;
   fail: (guid: string) => void;
+  /** Forget one attachment, so a mounted bubble treats it as never tried and fetches by itself. */
+  clear: (guid: string) => void;
   /** Account teardown: discard presentation-only status from the previous server. */
   reset: () => void;
 }
@@ -44,5 +46,11 @@ export const useDownloadStore = create<DownloadState>((set) => ({
   finish: (g) =>
     set((s) => ({ status: { ...s.status, [g]: 'idle' }, progress: { ...s.progress, [g]: 1 } })),
   fail: (g) => set((s) => ({ status: { ...s.status, [g]: 'error' } })),
+  clear: (g) =>
+    set((s) => {
+      const { [g]: _status, ...status } = s.status;
+      const { [g]: _progress, ...progress } = s.progress;
+      return { status, progress };
+    }),
   reset: () => set({ progress: {}, status: {} }),
 }));

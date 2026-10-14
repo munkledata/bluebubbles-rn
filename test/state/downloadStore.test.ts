@@ -39,6 +39,19 @@ describe('useDownloadStore', () => {
     expect(useDownloadStore.getState().status['g1']).not.toBe('error');
   });
 
+  it('forgets one attachment so it reads as never tried, leaving the others', () => {
+    const state = useDownloadStore.getState();
+    state.start('quiet');
+    state.setProgress('quiet', 1, 4);
+    state.start('other');
+
+    state.clear('quiet');
+
+    expect(useDownloadStore.getState().status['quiet']).toBeUndefined();
+    expect(useDownloadStore.getState().progress['quiet']).toBeUndefined();
+    expect(useDownloadStore.getState().status['other']).toBe('downloading');
+  });
+
   it('clears all account-scoped presentation state', () => {
     const state = useDownloadStore.getState();
     state.start('old-account-attachment');

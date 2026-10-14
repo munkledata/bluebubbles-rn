@@ -1746,6 +1746,64 @@ describe('killed-process RCS provider authority', () => {
     expect(mockDbProviderInfo?.()).toBeNull();
   });
 
+  it('lets the adopted photo download keep the pairing its push was admitted under', async () => {
+    const encoded = (value: string): string => Buffer.from(value, 'utf8').toString('base64url');
+    const photo = `rcs-media-g1.${EPOCH}.${encoded('message')}.${encoded('photo')}`;
+    let adoptedEffect: ((lifetime: MockDeliveryContext) => Promise<unknown>) | undefined;
+    mockAdoptRealtimeHeadlessEffect.mockImplementationOnce(
+      (
+        _generation: number,
+        _key: string,
+        effect: (lifetime: MockDeliveryContext) => Promise<unknown>,
+      ) => {
+        adoptedEffect = effect;
+        return { status: 'adopted', task: Promise.resolve() };
+      },
+    );
+    let lentWhileStored: unknown;
+    mockDurableHandle.mockImplementationOnce(async () => {
+      lentWhileStored = mockEdgeProviderInfo?.();
+      await mockMessageStored?.(420, 'fcm', {
+        generation: 0,
+        isCurrent: () => true,
+        // Like the real provider sink: current only while live info shows the admitted pairing,
+        // so an unknown pairing is never a current one.
+        isProviderCurrent: () =>
+          (mockEdgeProviderInfo?.() as { rcs_provider_epoch?: unknown } | null | undefined)
+            ?.rcs_provider_epoch === EPOCH,
+      });
+    });
+
+    await dispatchFcm('new-message', RCS_MESSAGE);
+
+    // The message was stored under the loan, which ended with the push, before the download.
+    expect(lentWhileStored).toEqual(PROVIDER_INFO);
+    expect(mockEdgeProviderInfo?.()).toBeNull();
+    type DownloadOptions = {
+      isEffectCurrent?: () => boolean;
+      downloadOwner?: {
+        acceptsRcsAttachment?: (attachmentGuid: string) => boolean;
+        quietFailure?: boolean;
+      };
+    };
+    let options: DownloadOptions | undefined;
+    mockAutoDownloadForRealtimeEvent.mockImplementationOnce(async (...args: unknown[]) => {
+      options = args[3] as DownloadOptions;
+      return { savedImages: 0, destination: null };
+    });
+    await adoptedEffect?.({ generation: 0, isCurrent: () => true });
+
+    expect(options?.isEffectCurrent?.()).toBe(true);
+    expect(options?.downloadOwner?.quietFailure).toBe(true);
+    expect(options?.downloadOwner?.acceptsRcsAttachment?.(photo)).toBe(true);
+    // A foreground launch that reports a different pairing ends the download for good.
+    mockSessionServerInfo = { ...PROVIDER_INFO, rcs_provider_epoch: `gpe1_${'F'.repeat(42)}A` };
+    expect(options?.downloadOwner?.acceptsRcsAttachment?.(photo)).toBe(false);
+    expect(options?.isEffectCurrent?.()).toBe(false);
+    mockSessionServerInfo = PROVIDER_INFO;
+    expect(options?.isEffectCurrent?.()).toBe(false);
+  });
+
   it('fetches nothing for an Apple push or when the foreground already holds the pairing', async () => {
     await dispatchFcm('new-message', {
       guid: 'apple-message',

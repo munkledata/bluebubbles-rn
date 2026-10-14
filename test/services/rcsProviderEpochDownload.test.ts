@@ -10,12 +10,13 @@ jest.mock('@utils/isDev', () => ({ isDevServer: () => true }));
 
 import { ServerInfo } from '@core/models';
 import type { AttachmentRow } from '@db/repositories';
-import { download, setAttachmentFetcher } from '@/services/download';
+import { download, downloadWithClient, setAttachmentFetcher } from '@/services/download';
 import {
   AttachmentFetchError,
   type AttachmentFetchRequest,
 } from '@/services/download/downloadService';
 import { captureRealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
+import { useDownloadStore } from '@state/downloadStore';
 import { useSessionStore } from '@state/sessionStore';
 
 const EPOCH_A = `gpe1_${'A'.repeat(43)}`;
@@ -80,6 +81,123 @@ describe('RCS provider-epoch attachment fetch admission', () => {
     }
 
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  describe('a background owner (a killed-app push)', () => {
+    beforeEach(() => {
+      // A killed-app process never runs the foreground bootstrap, so it holds no server info.
+      useSessionStore.setState({ serverInfo: null });
+      useDownloadStore.getState().reset();
+    });
+
+    it('fetches current RCS media only when the owner confirms the pairing', async () => {
+      const fetch = jest.fn(async () => {
+        throw new AttachmentFetchError('missing');
+      });
+      setAttachmentFetcher({ exists: () => false, download: fetch });
+      const photo = attachment(attachmentGuid(EPOCH_A));
+
+      await expect(
+        downloadWithClient({} as never, photo, 'automatic', captureRealtimeDeliveryLease()),
+      ).resolves.toBeNull();
+      expect(fetch).not.toHaveBeenCalled();
+
+      await expect(
+        downloadWithClient(
+          {} as never,
+          photo,
+          'automatic',
+          captureRealtimeDeliveryLease(),
+          undefined,
+          undefined,
+          { acceptsRcsAttachment: (guid) => guid === photo.guid },
+        ),
+      ).resolves.toBeNull();
+      expect(fetch).toHaveBeenCalledTimes(1);
+    });
+
+    it('leaves no failed mark when a quiet attempt fails, so an opened chat retries itself', async () => {
+      setAttachmentFetcher({
+        exists: () => false,
+        download: async () => {
+          throw new AttachmentFetchError('missing');
+        },
+      });
+      const photo = attachment(attachmentGuid(EPOCH_A));
+      const accepts = { acceptsRcsAttachment: () => true };
+
+      await downloadWithClient(
+        {} as never,
+        photo,
+        'automatic',
+        captureRealtimeDeliveryLease(),
+        undefined,
+        undefined,
+        { ...accepts, quietFailure: true },
+      );
+      expect(useDownloadStore.getState().status[photo.guid]).toBeUndefined();
+
+      await downloadWithClient(
+        {} as never,
+        photo,
+        'automatic',
+        captureRealtimeDeliveryLease(),
+        undefined,
+        undefined,
+        accepts,
+      );
+      expect(useDownloadStore.getState().status[photo.guid]).toBe('error');
+    });
+
+    it('leaves no spinner behind when the quiet owner stops mid-transfer', async () => {
+      jest.useFakeTimers();
+      let fetchStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        fetchStarted = resolve;
+      });
+      setAttachmentFetcher({
+        exists: () => false,
+        download: async (_guid, _name, _progress, _service, _generation, limits) => {
+          if (!limits) throw new Error('expected bounded fetch request');
+          fetchStarted();
+          return new Promise<never>((_resolve, reject) => {
+            limits.signal.addEventListener(
+              'abort',
+              () => reject(new AttachmentFetchError('cancelled')),
+              { once: true },
+            );
+          });
+        },
+      });
+      const photo = attachment(attachmentGuid(EPOCH_A));
+      const delivery = captureRealtimeDeliveryLease();
+      // A killed-app owner's bounded lifetime ends while its transfer is still running.
+      let ownerCurrent = true;
+      const lease = {
+        generation: delivery.generation,
+        isCurrent: () => ownerCurrent && delivery.isCurrent(),
+      };
+
+      const task = downloadWithClient(
+        {} as never,
+        photo,
+        'automatic',
+        lease,
+        undefined,
+        undefined,
+        {
+          acceptsRcsAttachment: () => true,
+          quietFailure: true,
+        },
+      );
+      await started;
+      expect(useDownloadStore.getState().status[photo.guid]).toBe('downloading');
+      ownerCurrent = false;
+      await jest.advanceTimersByTimeAsync(101);
+
+      await expect(task).resolves.toBeNull();
+      expect(useDownloadStore.getState().status[photo.guid]).toBeUndefined();
+    });
   });
 
   it('aborts a current RCS media fetch when the provider epoch rotates', async () => {

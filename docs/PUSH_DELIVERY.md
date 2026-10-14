@@ -445,9 +445,17 @@ pairing-less fetch leaves the event queued exactly as before. FCM callbacks are 
 `fcmAdmissionTail`, so the short wait before persistence cannot reorder deliveries. The locked V3
 enqueue path keeps its own fetch.
 
-Known limit, tracked as a follow-up: RCS attachment auto-download (including Gallery/Album export)
-still requires foreground authority, so it is skipped for RCS messages processed while the app is
-killed; images still download when the chat is opened.
+RCS photo auto-download, including the Gallery/Album receipt, starts only after the push's loan is
+released. Since 2026-10-14 the post-store hook remembers the pairing the message was stored under,
+and the adopted background download keeps using it while no live server info exists: missing info
+means unknown, not changed. Live info that shows a different pairing still ends the download for
+good, as a re-pair does in the foreground. The background download carries its own pairing check
+(`AttachmentDownloadOwner`), because the downloader otherwise asks the foreground session, which a
+killed process never fills. It also fails quietly: a failed or cut-off background attempt removes
+the photo's in-memory download entry instead of marking it failed, so a chat opened later in the
+same process fetches the photo by itself instead of showing Retry. The killed-process path still
+stores only the app-cache copy plus the Gallery/Album receipt, which the next unlocked foreground
+activation fulfills.
 
 A row admitted under the loan can lose authority mid-event when the loan is released while another
 delivery flight is still processing it (the app was opened during that push). Since 2026-10-14
@@ -458,9 +466,11 @@ repeated message post replaces its notification line without alerting again.
 
 Host tests cover the loan reaching both admission layers, Apple and warm pushes fetching nothing,
 fetch failure, the deadline, callback and Disconnect cancellation, a pairing-less response,
-foreground precedence, a foreground launch mid-push, the dependency retry, and release on failure.
-The incoming-ingress certificate pins the loan around the unchanged dispatch body. Exact Android
-killed-process execution remains device-only evidence.
+foreground precedence, a foreground launch mid-push, the dependency retry, release on failure, the
+background photo download keeping its stored pairing until live info shows another one, and quiet
+background failure. The incoming-ingress certificate pins the loan around the unchanged dispatch
+body and the post-store download hook. Exact Android killed-process execution remains device-only
+evidence.
 
 ---
 

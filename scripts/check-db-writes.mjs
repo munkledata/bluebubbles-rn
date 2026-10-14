@@ -9213,10 +9213,10 @@ function incomingIngressCertifiedNodes({
   }
   if (
     createHash('sha256').update(normalizedSnippet(controlFile, controlFile)).digest('hex') !==
-      '7a4fe302ff73f0e0b68c3cb26a0512f3e3d22272765f9eb10e89970f6772cf25' ||
+      '59cc0ed98e433057b8155cf3c0e7b38b9c285e06fd708ca9715c9887fc7465e9' ||
     createHash('sha256')
       .update(normalizedSnippet(autoDownloadFile, autoDownloadFile))
-      .digest('hex') !== 'dfc68841889263b004ffd03f2f819fa8eb783ac3fac9689327dbdd78c6863fc9' ||
+      .digest('hex') !== '55909d52f17e7e73d7ec600c9f18b9ab4dea322963e84ecf1e4700971ef42ff0' ||
     createHash('sha256')
       .update(normalizedSnippet(claimRealtimeForegroundIntent, controlFile))
       .digest('hex') !== 'd51eec3879f0a2cdd48c51cb63e6787d848420b80430e3d25e716c841a107fdb' ||
@@ -10714,7 +10714,7 @@ function incomingIngressCertifiedNodes({
     realtimeAutoDownloadCalls.length !== 2 ||
     createHash('sha256')
       .update(normalizedSnippet(realtimeAutoDownloadCallback, controlFile))
-      .digest('hex') !== 'd8c17dcb979e6c9590142b505643e23832d2083b2b1ad7247856f12f97805f2c' ||
+      .digest('hex') !== '89559db620aa97550e58fdda305b48926a726305920aa5a7aec3596f3e840814' ||
     !sameSymbol(
       unwrapExpression(dbEventSinkConstruction.arguments[0]),
       realtimeSinkDbParameter.name,

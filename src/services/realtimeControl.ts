@@ -7,6 +7,7 @@ import {
   admitsCurrentRcsEvent,
   classifyRcsEventAdmission,
   currentRcsProviderEpoch,
+  isCurrentRcsAttachmentGuid,
 } from '@core/rcs';
 import {
   captureIncomingEvent,
@@ -590,10 +591,18 @@ function realtimeSink(db: AppDatabase, accountGeneration: number): EventSink {
                     // The durable receipt itself can settle while a deliberately adopted download
                     // continues. Retain only the provider identity from that receipt, and latch its
                     // first revocation so an A -> B -> A re-pair cannot reopen native/network work.
+                    // A killed-app push lends its server-confirmed pairing only while its sink chain
+                    // runs, and this hook fires inside that chain. Remember that pairing now: after
+                    // the loan ends, missing live info means unknown, not changed, so the download
+                    // keeps it until live info shows a different pairing.
+                    const admittedInfo = source === 'fcm' ? realtimeRcsProviderInfo() : null;
+                    const admittedEpoch = currentRcsProviderEpoch(admittedInfo);
                     let providerRevoked = false;
                     const providerIsCurrent = (): boolean => {
                       if (providerRevoked) return false;
-                      const current = context?.isProviderCurrent?.() ?? true;
+                      const current =
+                        (admittedEpoch !== null && realtimeRcsProviderInfo() == null) ||
+                        (context?.isProviderCurrent?.() ?? true);
                       if (!current) providerRevoked = true;
                       return current;
                     };
@@ -615,6 +624,17 @@ function realtimeSink(db: AppDatabase, accountGeneration: number): EventSink {
                               // expo-media-library exposes no abort signal. Keep a killed-process
                               // owner strictly bounded by persisting only the app-cache copy.
                               allowExternalMediaSave: false,
+                              downloadOwner: {
+                                // A killed process has no foreground session to hold the pairing.
+                                acceptsRcsAttachment: (attachmentGuid) =>
+                                  isCurrentRcsAttachmentGuid(
+                                    realtimeRcsProviderInfo() ?? admittedInfo,
+                                    attachmentGuid,
+                                  ),
+                                // Nobody sees a background failure. Leave no failed mark, so the
+                                // chat fetches the photo by itself once it is opened.
+                                quietFailure: true,
+                              },
                             },
                           );
                           if (effectIsCurrent()) presentAutoDownloadOutcome(outcome);

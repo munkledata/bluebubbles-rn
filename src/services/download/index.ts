@@ -155,6 +155,18 @@ export function download(
   );
 }
 
+/**
+ * A background owner's own answers for one download. A killed-app push has no foreground session,
+ * so the session's RCS pairing check would refuse every RCS attachment, and nobody is looking at a
+ * failed mark it leaves behind.
+ */
+export interface AttachmentDownloadOwner {
+  /** Replaces the foreground session's current-pairing check for RCS attachments. */
+  readonly acceptsRcsAttachment?: (attachmentGuid: string) => boolean;
+  /** Leave no failed mark or stuck spinner, so a chat opened later fetches the attachment itself. */
+  readonly quietFailure?: boolean;
+}
+
 /** Killed-process/realtime variant whose fetcher is bound to one authorized task-local client. */
 export function downloadWithClient(
   client: HttpClient,
@@ -163,6 +175,7 @@ export function downloadWithClient(
   deliveryLease: RealtimeDeliveryLease,
   onVerifiedBytes?: (bytes: number) => void,
   maxBytesOverride?: number,
+  owner?: AttachmentDownloadOwner,
 ): Promise<string | null> {
   return downloadWithFetcher(
     attachmentFetcherForInvocation(client),
@@ -171,6 +184,7 @@ export function downloadWithClient(
     deliveryLease,
     onVerifiedBytes,
     maxBytesOverride,
+    owner,
   );
 }
 
@@ -181,8 +195,9 @@ function downloadWithFetcher(
   deliveryLease: RealtimeDeliveryLease,
   onVerifiedBytes?: (bytes: number) => void,
   maxBytesOverride?: number,
+  owner?: AttachmentDownloadOwner,
 ): Promise<string | null> {
-  const scope = downloadScope(deliveryLease, ownerFetcher, att);
+  const scope = downloadScope(deliveryLease, ownerFetcher, att, owner?.acceptsRcsAttachment);
   const key = retryKey(att.guid, scope);
   // A forced copy-on-write replacement owns both the damaged source pin and the terminal viewer
   // transition. A stale ordinary request must not revoke it merely to discover that the flight
@@ -214,7 +229,17 @@ function downloadWithFetcher(
     isRcsAttachment(att) && mode === 'manual'
       ? beginRcsRetry(key, scope.generation, destinationIdentity)
       : undefined;
-  return runDownload(att, scope, ownerFetcher, mode, onVerifiedBytes, maxBytesOverride, retryOwner);
+  return runDownload(
+    att,
+    scope,
+    ownerFetcher,
+    mode,
+    onVerifiedBytes,
+    maxBytesOverride,
+    retryOwner,
+    undefined,
+    owner?.quietFailure === true,
+  );
 }
 
 /**
@@ -314,9 +339,10 @@ function downloadScope(
   lease: RealtimeDeliveryLease,
   ownerFetcher: AttachmentFetcher,
   att: Pick<AttachmentRow, 'guid' | 'service'>,
+  acceptsRcsAttachment: (attachmentGuid: string) => boolean = sessionAccessors.acceptsRcsAttachment,
 ): AttachmentDownloadScope {
   const isCurrent = (): boolean =>
-    lease.isCurrent() && (!isRcsAttachment(att) || sessionAccessors.acceptsRcsAttachment(att.guid));
+    lease.isCurrent() && (!isRcsAttachment(att) || acceptsRcsAttachment(att.guid));
   const cacheScope: AttachmentCacheReservationScope = {
     generation: lease.generation,
     isCurrent,
@@ -423,6 +449,7 @@ function runDownload(
   maxBytesOverride?: number,
   retryOwner?: symbol,
   replacement?: AttachmentDownloadReplacement,
+  quietFailure = false,
 ): Promise<string | null> {
   const key = retryKey(att.guid, scope);
   if (!scope.isCurrent()) {
@@ -430,7 +457,7 @@ function runDownload(
     return Promise.resolve(null);
   }
   if (retryOwner !== undefined && !ownsRcsRetry(key, retryOwner)) return Promise.resolve(null);
-  const { start, setProgress, finish, fail } = useDownloadStore.getState();
+  const { start, setProgress, finish, fail, clear } = useDownloadStore.getState();
   start(att.guid);
   return ensureDownloadedOutcome(
     getDatabase(),
@@ -448,6 +475,8 @@ function runDownload(
     if (retryOwner !== undefined && !ownsRcsRetry(key, retryOwner)) return null;
     if (!scope.isCurrent()) {
       if (retryOwner !== undefined) cancelRcsRetry(key, retryOwner);
+      // A background owner whose lifetime ended must not leave a spinner that never finishes.
+      if (quietFailure) clear(att.guid);
       return null;
     }
     if (outcome.status === 'success') {
@@ -495,7 +524,8 @@ function runDownload(
     } else if (retryOwner !== undefined) {
       cancelRcsRetry(key, retryOwner);
     }
-    fail(att.guid);
+    if (quietFailure) clear(att.guid);
+    else fail(att.guid);
     return null;
   });
 }

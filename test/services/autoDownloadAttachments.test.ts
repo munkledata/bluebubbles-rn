@@ -170,8 +170,21 @@ describe('autoDownloadMessageAttachments', () => {
       taskLease,
       expect.any(Function),
       MAX_AUTO_DOWNLOAD_BYTES_PER_MESSAGE,
+      undefined,
     );
     expect(mockDownload).not.toHaveBeenCalled();
+  });
+
+  it("hands a background owner's pairing check and quiet failures to the downloader", async () => {
+    const taskLease = { generation: 73, isCurrent: () => true };
+    mockResolveTransport.mockResolvedValue({ http: { task: 'http' }, lease: taskLease });
+    mockList.mockResolvedValue(new Map([[1, [imageRow()]]]));
+    const downloadOwner = { acceptsRcsAttachment: () => true, quietFailure: true };
+
+    await autoDownloadMessageAttachmentsForRealtimeEvent(db, 1, 73, { downloadOwner });
+
+    expect(mockDownloadWithClient).toHaveBeenCalledTimes(1);
+    expect(mockDownloadWithClient.mock.calls[0]?.[6]).toBe(downloadOwner);
   });
 
   it('composes a bounded headless-effect lifetime with the authorized transport lease', async () => {

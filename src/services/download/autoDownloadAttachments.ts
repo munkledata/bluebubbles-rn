@@ -9,6 +9,7 @@ import {
   captureRealtimeDeliveryLease,
   type RealtimeDeliveryLease,
 } from '../realtime/deliveryCoordinator';
+import type { AttachmentDownloadOwner } from './index';
 
 export const MAX_AUTO_DOWNLOAD_FILES_PER_MESSAGE = 16;
 export const MAX_AUTO_DOWNLOAD_BYTES_PER_MESSAGE = 40 * 1024 * 1024; // 40 MiB
@@ -23,6 +24,8 @@ const NO_SAVED_IMAGES: AutoDownloadOutcome = { savedImages: 0, destination: null
 interface AutoDownloadExecutionOptions {
   /** Native Photos writes have no cancellation signal and are therefore foreground-only. */
   readonly allowExternalMediaSave?: boolean;
+  /** A background owner's own pairing check and failure handling; needs a task-local client. */
+  readonly downloadOwner?: AttachmentDownloadOwner;
 }
 
 /**
@@ -172,7 +175,15 @@ export async function autoDownloadMessageAttachments(
       };
       const path = await (
         taskHttp
-          ? downloadWithClient(taskHttp, att, 'automatic', lease, onVerifiedBytes, remainingBytes)
+          ? downloadWithClient(
+              taskHttp,
+              att,
+              'automatic',
+              lease,
+              onVerifiedBytes,
+              remainingBytes,
+              options.downloadOwner,
+            )
           : download(att, 'automatic', lease, onVerifiedBytes, remainingBytes)
       ).catch(() => null);
       if (path) actualDownloadedBytes += verifiedBytes;
@@ -205,6 +216,7 @@ export async function autoDownloadMessageAttachmentsForRealtimeEvent(
   options: {
     readonly isEffectCurrent?: () => boolean;
     readonly allowExternalMediaSave?: boolean;
+    readonly downloadOwner?: AttachmentDownloadOwner;
   } = {},
 ): Promise<AutoDownloadOutcome> {
   if (options.isEffectCurrent?.() === false) return NO_SAVED_IMAGES;
@@ -223,6 +235,7 @@ export async function autoDownloadMessageAttachmentsForRealtimeEvent(
     : transport.lease;
   return autoDownloadMessageAttachments(db, messageId, lease, transport.http, {
     allowExternalMediaSave: options.allowExternalMediaSave,
+    downloadOwner: options.downloadOwner,
   });
 }
 
