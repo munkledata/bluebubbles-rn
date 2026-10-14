@@ -345,12 +345,14 @@ export const Composer = React.memo(function Composer({
   useEffect(() => {
     if (!active || !attachmentsEnabled || inputTag == null) return;
     return attachPasteListener(inputTag, ({ files, dropped }) => {
-      if (
-        scheduleSavingRef.current ||
-        mentionsRef.current.length > 0 ||
-        textFormattingRef.current.length > 0
-      )
+      if (scheduleSavingRef.current) return;
+      if (mentionsRef.current.length > 0 || textFormattingRef.current.length > 0) {
+        // Files can't go with a mention or formatted text. Say why instead of ignoring the paste.
+        if (files.length > 0 || dropped > 0) {
+          showToast('Remove mentions and formatting to attach files');
+        }
         return;
+      }
       // Only `setPending` (stable) is used here, so the listener never needs re-attaching when
       // the composer re-renders — which would otherwise churn the native registration on every
       // keystroke.

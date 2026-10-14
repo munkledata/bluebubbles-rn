@@ -241,6 +241,29 @@ describe('Composer paste', () => {
     expect(useToastStore.getState().current).toBeNull();
   });
 
+  it('says why a paste was not attached while the draft has a mention', async () => {
+    await renderComposer({
+      onSendMention: jest.fn(() => true),
+      mentionParticipants: [
+        { address: 'alice@example.test', label: 'Alice' },
+        { address: '+15551234567', label: 'Bob' },
+      ],
+    });
+    await fireEvent.changeText(screen.getByPlaceholderText('iMessage'), 'Hello @ali');
+    await fireEvent.press(await screen.findByLabelText('Mention Alice'));
+    await fireInputLayout();
+    await waitFor(() => expect(mockPaste.fire).not.toBeNull());
+
+    await act(async () => {
+      mockPaste.fire?.({ files: [PASTED_IMAGE], dropped: 0 });
+    });
+
+    expect(useToastStore.getState().current?.message).toBe(
+      'Remove mentions and formatting to attach files',
+    );
+    expect(screen.queryByLabelText('Remove attachment')).toBeNull();
+  });
+
   it('tears the native registration down on unmount', async () => {
     const view = await renderComposer();
     await fireInputLayout();
