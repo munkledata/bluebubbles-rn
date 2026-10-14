@@ -79,6 +79,8 @@ const ENGLISH_MESSAGES = {
   'scan.error.invalid': 'Invalid QR code.',
   'scan.error.invalidJson': 'That code is not a valid {appName} setup QR code.',
   'scan.error.invalidShape': 'That {appName} QR code has an invalid format.',
+  'scan.error.insecure':
+    'This code uses an insecure http:// address. Choose Enter Manually and turn on Allow insecure connection to use it.',
   'scan.error.missingCredentials':
     'The QR code does not contain a valid server URL and password or paired-client credential.',
   'scan.instruction.pointCamera': 'Point your camera at the server QR code',

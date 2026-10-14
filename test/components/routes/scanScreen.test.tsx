@@ -90,6 +90,35 @@ describe('ScanScreen', () => {
     expect(screen.getByText('SERVER_CANARY_42')).toBeTruthy();
   });
 
+  it('explains an http:// setup code instead of connecting, and keeps scanning open', async () => {
+    mockPermission = { granted: true };
+    await renderWithTheme(<ScanScreen />);
+    const scan = mockCameraViewProps.onBarcodeScanned;
+
+    // The camera reports the same code repeatedly while it stays in view.
+    for (let index = 0; index < 2; index += 1) {
+      await act(async () => {
+        scan?.({ data: JSON.stringify(['secret', 'http://gator.local:1234']) });
+      });
+    }
+
+    expect(mockConnect).not.toHaveBeenCalled();
+    expect(
+      screen.getByText(
+        'This code uses an insecure http:// address. Choose Enter Manually and turn on Allow insecure connection to use it.',
+      ),
+    ).toBeTruthy();
+    await fireEvent.press(screen.getByText('Enter Manually'));
+    expect(mockReplace).toHaveBeenCalledWith('/manual');
+
+    // Scanning is not locked: a secure code still connects.
+    await act(async () => {
+      scan?.({ data: JSON.stringify(['secret', 'https://gator.example']) });
+    });
+    expect(mockConnect).toHaveBeenCalledTimes(1);
+    expect(mockConnect).toHaveBeenCalledWith('https://gator.example', 'secret');
+  });
+
   it('maps every parser code to safe copy and remains ready to rescan', async () => {
     mockPermission = { granted: true };
     await renderWithTheme(<ScanScreen />);

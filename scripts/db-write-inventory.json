@@ -511,7 +511,7 @@
     {
       "id": "app/(setup)/scan.tsx#Scan.onBarcodeScanned:mutator-call:a94b6122a495",
       "path": "app/(setup)/scan.tsx",
-      "line": 56,
+      "line": 65,
       "symbol": "Scan.onBarcodeScanned",
       "operation": "mutator-call",
       "target": "src/services/bootstrap.ts#connect",
@@ -524,7 +524,7 @@
     {
       "id": "app/(setup)/scan.tsx#Scan:mutator-reference:1cff632b86f3",
       "path": "app/(setup)/scan.tsx",
-      "line": 104,
+      "line": 114,
       "symbol": "Scan",
       "operation": "mutator-reference",
       "target": "app/(setup)/scan.tsx#Scan.onBarcodeScanned",
@@ -537,7 +537,7 @@
     {
       "id": "app/(setup)/scan.tsx#Scan:mutator-reference:2e00f574c549",
       "path": "app/(setup)/scan.tsx",
-      "line": 119,
+      "line": 137,
       "symbol": "Scan",
       "operation": "mutator-reference",
       "target": "src/services/bootstrap.ts#forgetOnThisPhoneOnly",

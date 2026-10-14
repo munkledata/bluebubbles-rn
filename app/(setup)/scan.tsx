@@ -38,6 +38,7 @@ export default function Scan(): React.JSX.Element {
   const [permission, requestPermission] = useCameraPermissions();
   const scanned = useRef(false);
   const [scanError, setScanError] = useState<string | null>(null);
+  const [insecureCode, setInsecureCode] = useState(false);
   const status = useSessionStore((s) => s.status);
   const connectError = useSessionStore((s) => s.error);
 
@@ -51,10 +52,19 @@ export default function Scan(): React.JSX.Element {
     if (scanned.current || status === 'connecting') return;
     try {
       const { origin, password } = parseSetupQr(data);
+      // connect() refuses http:// before it reports 'connecting', so scanning would stay locked.
+      // Insecure connections are allowed only by the explicit switch on the Manual screen.
+      if (/^http:\/\//i.test(origin)) {
+        setInsecureCode(true);
+        setScanError(i18n.text('scan.error.insecure'));
+        return;
+      }
       scanned.current = true;
+      setInsecureCode(false);
       setScanError(null);
       void connect(origin, password);
     } catch (error) {
+      setInsecureCode(false);
       setScanError(scanErrorText(i18n, error));
     }
   };
@@ -113,6 +123,14 @@ export default function Scan(): React.JSX.Element {
         </Text>
         <View style={styles.reticle} />
         {message ? <Text style={styles.error}>{message}</Text> : <View />}
+        {insecureCode && scanError ? (
+          <Button
+            title={i18n.text('scan.action.manual')}
+            variant="plain"
+            onPress={() => router.replace('/manual')}
+            style={styles.spaced}
+          />
+        ) : null}
         {!scanError && connectError === PREVIOUS_CREDENTIAL_UNREVOKED_MESSAGE ? (
           <ForgetPreviousServerAction
             previousServerOrigin={previousUnrevokedServerOrigin}
