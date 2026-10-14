@@ -41,6 +41,7 @@ jest.mock('@shopify/flash-list', () => {
     renderItem?: (info: { item: unknown; index: number }) => unknown;
     keyExtractor?: (item: unknown) => string;
     ListEmptyComponent?: unknown;
+    ListFooterComponent?: unknown;
   }) => {
     mockListProps.current = props as unknown as Record<string, unknown>;
     const data = props.data ?? [];
@@ -54,7 +55,12 @@ jest.mock('@shopify/flash-list', () => {
               props.renderItem?.({ item, index }),
             ),
           );
-    return ReactLib.createElement(View, { testID: 'deleted-conversations-list' }, body);
+    return ReactLib.createElement(
+      View,
+      { testID: 'deleted-conversations-list' },
+      body,
+      asNode(props.ListFooterComponent),
+    );
   };
   return { FlashList };
 });
@@ -229,6 +235,35 @@ it('queries every dependency at 50 rows, renders accessible rows, and caps growt
 
   await fireEvent.press(screen.getByText('‹ Back'));
   expect(mockBack).toHaveBeenCalledTimes(1);
+});
+
+it('says so when more deleted conversations exist than the 250 it can list', async () => {
+  const capNotice = 'Only the 250 most recently deleted conversations are shown.';
+  await renderWithTheme(<DeletedChatsScreen />);
+  expect(screen.queryByText(capNotice)).toBeNull();
+
+  await act(async () => {
+    for (let index = 0; index < 5; index += 1) latestListEndReached()();
+  });
+
+  expect(latestQueryCall()[2]).toEqual([250]);
+  expect(screen.getByText(capNotice)).toBeTruthy();
+});
+
+it('shows no cap notice once every deleted conversation is listed', async () => {
+  const view = await renderWithTheme(<DeletedChatsScreen />);
+  await act(async () => {
+    for (let index = 0; index < 5; index += 1) latestListEndReached()();
+  });
+  expect(latestQueryCall()[2]).toEqual([250]);
+
+  // Restoring some leaves no more than the 250 the screen can list.
+  mockQueryState = readyState(false);
+  await act(async () => {
+    await view.rerender(<DeletedChatsScreen />);
+  });
+
+  expect(screen.queryByText(/most recently deleted conversations are shown/)).toBeNull();
 });
 
 it('announces loading and failure while retaining a truthful empty state', async () => {

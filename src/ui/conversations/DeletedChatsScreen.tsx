@@ -14,6 +14,8 @@ import { readableTextOn, useTheme } from '../theme';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
 
 const PAGE_SIZE = 50;
+/** listDeletedChats never returns more rows than this. */
+const MAX_ROWS = 250;
 const TABLES = ['chats', 'messages', 'chat_handles', 'handles', 'kv'];
 const ACCOUNT_CHANGED_COPY =
   'Conversation account changed. Go back and reopen Deleted Conversations.';
@@ -142,7 +144,7 @@ export function DeletedChatsScreen(): React.JSX.Element {
           keyExtractor={(row: DeletedChatRow) => row.guid}
           renderItem={renderItem}
           onEndReached={() => {
-            if (data?.hasMore) setLimit((current) => Math.min(current + PAGE_SIZE, 250));
+            if (data?.hasMore) setLimit((current) => Math.min(current + PAGE_SIZE, MAX_ROWS));
           }}
           onEndReachedThreshold={0.5}
           ListEmptyComponent={
@@ -167,6 +169,13 @@ export function DeletedChatsScreen(): React.JSX.Element {
                 </Text>
               )}
             </View>
+          }
+          ListFooterComponent={
+            limit >= MAX_ROWS && data?.hasMore ? (
+              <Text style={[styles.capNotice, { color: theme.color.secondaryLabel }]}>
+                Only the {MAX_ROWS} most recently deleted conversations are shown.
+              </Text>
+            ) : null
           }
           contentContainerStyle={styles.content}
         />
@@ -200,4 +209,5 @@ const styles = StyleSheet.create({
   restoreText: { fontSize: 14, fontWeight: '600' },
   empty: { paddingTop: 80, alignItems: 'center', gap: 12 },
   emptyText: { fontSize: 16, textAlign: 'center' },
+  capNotice: { fontSize: 13, textAlign: 'center', paddingHorizontal: 16, paddingVertical: 12 },
 });
