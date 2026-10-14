@@ -1,26 +1,17 @@
 import { Image } from 'expo-image';
-import {
-  useFocusEffect,
-  useLocalSearchParams,
-  useNavigation,
-  useRoute,
-  useRouter,
-  type Href,
-} from 'expo-router';
+import { useLocalSearchParams, useNavigation, useRoute, useRouter, type Href } from 'expo-router';
 import { usePreventRemove } from 'expo-router/react-navigation';
 import { isAggregateRetractionTombstone } from '@core/messages/retraction';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  AppState,
   KeyboardAvoidingView,
-  Linking,
   Pressable,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
-import { showConfirm, showDialog, useDialogStore, type DialogButton } from '@ui/dialog/dialogStore';
+import { showConfirm, showDialog, type DialogButton } from '@ui/dialog/dialogStore';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   DRAFT_KV_PREFIX,
@@ -32,18 +23,10 @@ import {
 import { saveChatDraft, sendTyping } from '@/services';
 import { readMessagePreview } from '@/services/messagePreview';
 import { getDatabase } from '@db/database';
-import { getContactsPermissionState } from '@/services/contacts/contactsService';
 import {
   captureRealtimeDeliveryLease,
   runTrackedRealtimeWork,
-  subscribeRealtimeGenerationInvalidation,
 } from '@/services/realtime/deliveryCoordinator';
-import {
-  prepareCurrentLocationPermission,
-  type CurrentLocationPermissionOutcome,
-} from '@/services/location/currentLocation';
-import { getExpoLocationAdapter } from '@/services/location/expoLocationAdapter';
-import { captureSessionRcsCapabilityLease } from '@/services/send/rcsAttemptCapability';
 import {
   admitShareIntakeTextDraft,
   consumeShareIntakeBatch,
@@ -54,25 +37,13 @@ import {
   isShareIntakeReceiptComplete,
   readShareIntakeReceipt,
 } from '@/services/share/shareIntake';
-import {
-  hasLogicalSendCapacity,
-  acquireAndSendCurrentLocation,
-  isContactsPermissionDeniedError,
-  isSupportedImessageAttachmentFile,
-  pickAndSendContact,
-  sendImage,
-  sendImages,
-  sendVoice,
-  sendTextAttachment,
-  type AttachmentQueueAdmission,
-  type ShareCurrentLocationResult,
-} from '@/services/send';
+import { hasLogicalSendCapacity } from '@/services/send';
 import { logger } from '@core/secure';
-import { MAX_IMESSAGE_VOICE_UPLOAD_BYTES } from '@core/models/serverInfo';
-import { useSessionStore } from '@state/sessionStore';
-import { observeQueueAdmission } from '@features/conversations/observeQueueAdmission';
 import { useChatCapabilities } from '@features/conversations/useChatCapabilities';
+import { useChatAttachmentSends } from '@features/conversations/useChatAttachmentSends';
 import { useChatComposerSends } from '@features/conversations/useChatComposerSends';
+import { usePickAndSendContact } from '@features/conversations/usePickAndSendContact';
+import { useShareCurrentLocation } from '@features/conversations/useShareCurrentLocation';
 import { useChatHeader } from '@features/conversations/useChatHeader';
 import { useChatSearchSession } from '@features/conversations/useChatSearchSession';
 import { useMessageActions } from '@features/conversations/useMessageActions';
@@ -105,73 +76,12 @@ import {
 import { ChatThemeProvider, useChatBackgroundUri } from '@ui/theme/ChatThemeProvider';
 import { readableTextOn } from '@ui/theme/adaptiveFromImage';
 import { useKeyboardVisible } from '@ui/hooks/useKeyboardVisible';
-import {
-  showContactsPermissionRationale,
-  showContactsPermissionRecovery,
-} from '@ui/permissions/contactsPermission';
 import { LoadErrorBoundary } from '@ui/LoadErrorBoundary';
-import { presentSendIssue } from '@ui/conversations/sendNotices';
 import type { ComposerAdmissionResult } from '@ui/conversations/useComposerAuthoringSession';
 import { useTypingStore } from '@state/typingStore';
 import { useShareIntentStore } from '@state/shareIntentStore';
-import { isGroupRow, isProvenOneToOneIMessageChat, resolveChatService, resolveTitle } from '@utils';
+import { isGroupRow, resolveChatService, resolveTitle } from '@utils';
 import { runAccountOperation } from '@/services/realtime/accountOperation';
-
-interface DocumentPickerModule {
-  getDocumentAsync(options: {
-    multiple: boolean;
-    copyToCacheDirectory: boolean;
-    type?: string[];
-  }): Promise<{
-    canceled: boolean;
-    assets: Array<{
-      uri: string;
-      name: string;
-      mimeType?: string | null;
-      size?: number | null;
-    }> | null;
-  }>;
-}
-
-type DocumentPickerLoader = () => Promise<DocumentPickerModule>;
-
-/**
- * Open the account-neutral OS picker, then accept its result only if the screen that opened it
- * still owns the active account. The loader is injectable solely to make the delayed native-return
- * boundary deterministic in Node tests; production retains the lazy native import.
- */
-export async function pickDocumentFilesForLease(
-  accountLease: { isCurrent(): boolean },
-  loadPicker: DocumentPickerLoader = () => import('expo-document-picker'),
-  imessageAttachmentOnly = false,
-  imessagePdfAvailable = false,
-): Promise<PendingAttachment[]> {
-  try {
-    const DocumentPicker = await loadPicker();
-    if (!accountLease.isCurrent()) return [];
-    const res = await DocumentPicker.getDocumentAsync({
-      multiple: !imessageAttachmentOnly,
-      copyToCacheDirectory: true,
-      ...(imessageAttachmentOnly
-        ? {
-            type: ['image/jpeg', 'image/png', ...(imessagePdfAvailable ? ['application/pdf'] : [])],
-          }
-        : {}),
-    });
-    if (!accountLease.isCurrent() || res.canceled || !res.assets || res.assets.length === 0) {
-      return [];
-    }
-    return res.assets.map((asset) => ({
-      uri: asset.uri,
-      name: asset.name,
-      mimeType: asset.mimeType ?? 'application/octet-stream',
-      size: asset.size ?? 0,
-    }));
-  } catch {
-    if (accountLease.isCurrent()) showDialog('Attach', 'Couldn’t open the file picker.');
-    return [];
-  }
-}
 
 // Lazy: expo-audio (native) is only pulled in when the user actually records a voice memo,
 // so the chat opens fine on a build that hasn't linked the module yet.
@@ -235,13 +145,11 @@ function ChatScreenInner({
     rcsAvailable,
     serverInfoLoaded,
     rcsInteractiveFeaturesAvailable,
-    imessageContactSupported,
-    imessageLocationSupported,
+    contactCardAvailable,
+    currentLocationAvailable,
     supportsSendAttachmentText,
     imessageAttachmentFeaturesAvailable,
-    imessagePdfFeaturesAvailable,
     imessageScheduledAttachmentsAvailable,
-    imessageCaptionFeaturesAvailable,
     imessageReactionsAvailable,
     imessageRepliesAvailable,
     imessageEditsAvailable,
@@ -251,7 +159,6 @@ function ChatScreenInner({
     imessageFormattedAvailable,
     imessageMentionsAvailable,
     mentionParticipants,
-    imessageVoiceAvailable,
     typingFeaturesAvailable,
     voiceFeaturesAvailable,
     attachmentFeaturesAvailable,
@@ -1021,177 +928,8 @@ function ChatScreenInner({
     });
   });
 
-  // The inline tray's "Files" button — pick documents and return them to STAGE as pending
-  // previews (the tray handles photos/videos itself; this covers PDFs/other files). No popup
-  // beyond the OS document picker itself.
-  const pickFiles = useCallback(
-    (): Promise<PendingAttachment[]> =>
-      attachmentFeaturesAvailable
-        ? pickDocumentFilesForLease(
-            accountLease,
-            undefined,
-            imessageAttachmentFeaturesAvailable,
-            imessagePdfFeaturesAvailable,
-          )
-        : Promise.resolve([]),
-    [
-      accountLease,
-      attachmentFeaturesAvailable,
-      imessageAttachmentFeaturesAvailable,
-      imessagePdfFeaturesAvailable,
-    ],
-  );
-
-  // The rest of the Composer's callback props, useCallback-stable for the same memo reason.
-  const onSendAttachments = useCallback(
-    (items: PendingAttachment[]): Promise<readonly string[]> => {
-      if (!attachmentFeaturesAvailable) return Promise.resolve([]);
-      if (imessageAttachmentFeaturesAvailable) {
-        if (
-          items.length !== 1 ||
-          !isSupportedImessageAttachmentFile(items[0]!) ||
-          (items[0]!.mimeType === 'application/pdf' && !imessagePdfFeaturesAvailable)
-        ) {
-          showToast(
-            imessagePdfFeaturesAvailable
-              ? 'Choose one JPEG, PNG, or PDF file no larger than 10 MiB'
-              : 'Choose one JPEG or PNG image no larger than 10 MiB',
-          );
-          return Promise.resolve([]);
-        }
-      }
-      const expectedUris = new Set(items.map((item) => item.uri));
-      const decidedUris = new Set<string>();
-      const queuedUris = new Set<string>();
-      let reportedFailure = false;
-
-      return new Promise((resolve) => {
-        let settled = false;
-        const finish = (): void => {
-          if (settled) return;
-          settled = true;
-          resolve([...queuedUris]);
-        };
-        const onAdmission = (admission: AttachmentQueueAdmission): void => {
-          if (!accountLease.isCurrent()) return;
-          if (!expectedUris.has(admission.uri) || decidedUris.has(admission.uri)) return;
-          decidedUris.add(admission.uri);
-          if (admission.queued) queuedUris.add(admission.uri);
-          else if (!reportedFailure && accountLease.isCurrent()) {
-            reportedFailure = true;
-            showToast(
-              admission.reason === 'file-name'
-                ? 'A file’s name can’t be sent. Rename it without quotes or slashes (and shorter if it’s very long), then attach it again.'
-                : 'Couldn’t queue one or more attachments. They’re still in your composer—try again when connected',
-            );
-          }
-          if (decidedUris.size === expectedUris.size) finish();
-        };
-
-        let operation: Promise<unknown>;
-        try {
-          operation = Promise.resolve(
-            sendImages(
-              {
-                chatGuid: guid,
-                images: items,
-                shareIntake: ownedShareIdentity ?? undefined,
-                ...(imessageAttachmentFeaturesAvailable ? { service: 'iMessage' as const } : {}),
-              },
-              accountLease,
-              presentSendIssue,
-              onAdmission,
-            ),
-          );
-        } catch (error) {
-          if (accountLease.isCurrent()) {
-            logger.warn('[chat] attachment queue admission failed', error);
-            showToast(
-              'Couldn’t queue those attachments. They’re still in your composer—try again when connected',
-            );
-          }
-          finish();
-          return;
-        }
-
-        void operation.then(
-          () => finish(),
-          (error: unknown) => {
-            if (!settled && accountLease.isCurrent()) {
-              logger.warn('[chat] attachment queue admission failed', error);
-              if (!reportedFailure) {
-                showToast(
-                  'Couldn’t queue one or more attachments. They’re still in your composer—try again when connected',
-                );
-              }
-            }
-            finish();
-          },
-        );
-      });
-    },
-    [
-      accountLease,
-      attachmentFeaturesAvailable,
-      guid,
-      imessageAttachmentFeaturesAvailable,
-      imessagePdfFeaturesAvailable,
-      ownedShareIdentity,
-    ],
-  );
-  const onSendTextAttachment = useCallback(
-    (text: string, item: PendingAttachment): Promise<boolean> | false => {
-      if (!attachmentFeaturesAvailable) return false;
-      if (chatService === 'iMessage') {
-        if (!imessageCaptionFeaturesAvailable) return false;
-        if (
-          !isSupportedImessageAttachmentFile(item) ||
-          (item.mimeType === 'application/pdf' && !imessagePdfFeaturesAvailable)
-        ) {
-          showToast(
-            imessagePdfFeaturesAvailable
-              ? 'Choose one JPEG, PNG, or PDF file no larger than 10 MiB'
-              : 'Choose one JPEG or PNG image no larger than 10 MiB',
-          );
-          return false;
-        }
-      } else if (chatService !== 'RCS') {
-        return false;
-      }
-      return observeQueueAdmission(
-        (onQueued) =>
-          sendTextAttachment(
-            {
-              chatGuid: guid,
-              image: item,
-              text,
-              service: chatService,
-              shareIntake: item.origin === 'share' ? (ownedShareIdentity ?? undefined) : undefined,
-            },
-            accountLease,
-            presentSendIssue,
-            onQueued,
-          ),
-        () => undefined,
-        (error) => {
-          if (!accountLease.isCurrent()) return;
-          logger.warn('[chat] text-attachment queue admission failed', error);
-          showToast(
-            'Couldn’t queue that text and attachment. They’re still in your composer—try again',
-          );
-        },
-      );
-    },
-    [
-      accountLease,
-      attachmentFeaturesAvailable,
-      chatService,
-      guid,
-      imessageCaptionFeaturesAvailable,
-      imessagePdfFeaturesAvailable,
-      ownedShareIdentity,
-    ],
-  );
+  const { pickFiles, onSendAttachments, onSendTextAttachment, onSendVoice } =
+    useChatAttachmentSends({ guid, accountLease, chatService, capabilities, ownedShareIdentity });
   const onTyping = useCallback(
     (active: boolean): void => {
       // Composer debounce/unmount callbacks can run after Disconnect. The socket emit itself is
@@ -1205,357 +943,14 @@ function ChatScreenInner({
   const onStartVoice = useCallback((): void => {
     if (voiceFeaturesAvailable) setRecording(true);
   }, [voiceFeaturesAvailable]);
-  const onSendVoice = useCallback(
-    async (uri: string): Promise<boolean> => {
-      if (!accountLease.isCurrent() || !voiceFeaturesAvailable) return false;
-      if (imessageVoiceAvailable) {
-        if (!uri.startsWith('file://') || !/\.m4a$/i.test(uri)) return false;
-        try {
-          const FileSystem = await import('expo-file-system/legacy');
-          if (!accountLease.isCurrent()) return false;
-          const info = await FileSystem.getInfoAsync(uri);
-          if (
-            !accountLease.isCurrent() ||
-            !info.exists ||
-            !Number.isSafeInteger(info.size) ||
-            info.size <= 0 ||
-            info.size > MAX_IMESSAGE_VOICE_UPLOAD_BYTES
-          ) {
-            return false;
-          }
-          return observeQueueAdmission(
-            (onQueued) =>
-              sendVoice(
-                {
-                  chatGuid: guid,
-                  audio: {
-                    uri,
-                    name: uri.split('/').pop() ?? 'voice.m4a',
-                    mimeType: 'audio/mp4',
-                    size: info.size,
-                  },
-                },
-                accountLease,
-                presentSendIssue,
-                onQueued,
-              ),
-            () => undefined,
-            (error) => {
-              if (!accountLease.isCurrent()) return;
-              logger.warn('[chat] voice note queue admission failed', error);
-              showToast('Couldn’t queue that recording. It’s still here—try again when connected');
-            },
-          );
-        } catch (error) {
-          if (accountLease.isCurrent()) logger.warn('[chat] voice note file check failed', error);
-          return false;
-        }
-      }
-      return observeQueueAdmission(
-        (onQueued) =>
-          sendImage(
-            {
-              chatGuid: guid,
-              image: {
-                uri,
-                name: uri.split('/').pop() ?? 'voice.m4a',
-                mimeType: 'audio/mp4',
-                size: 0,
-              },
-            },
-            accountLease,
-            presentSendIssue,
-            onQueued,
-          ),
-        () => undefined,
-        (error) => {
-          if (!accountLease.isCurrent()) return;
-          logger.warn('[chat] voice message queue admission failed', error);
-          showToast('Couldn’t queue that recording. It’s still here—try again when connected');
-        },
-      );
-    },
-    [accountLease, voiceFeaturesAvailable, imessageVoiceAvailable, guid],
+
+  const onPickContact = usePickAndSendContact(guid, accountLease, contactCardAvailable);
+
+  const onShareCurrentLocation = useShareCurrentLocation(
+    guid,
+    accountLease,
+    currentLocationAvailable,
   );
-
-  const imessageContactAvailable =
-    imessageContactSupported &&
-    chatService === 'iMessage' &&
-    header.data?.guid === guid &&
-    isProvenOneToOneIMessageChat(header.data);
-  const contactCardAvailable = rcsInteractiveFeaturesAvailable || imessageContactAvailable;
-  const runContactPicker = useCallback((): void => {
-    if (!contactCardAvailable) return;
-    const attempt = (): void => {
-      void observeQueueAdmission(
-        (onQueued) => pickAndSendContact(guid, accountLease, presentSendIssue, undefined, onQueued),
-        () => undefined,
-        (e) => {
-          if (!accountLease.isCurrent()) return;
-          if (isContactsPermissionDeniedError(e)) {
-            showContactsPermissionRecovery({
-              canAskAgain: e.canAskAgain,
-              isCurrent: () => accountLease.isCurrent(),
-              onTryAgain: attempt,
-            });
-            return;
-          }
-          logger.warn('[chat] contact pick/send failed', e);
-        },
-      );
-    };
-    attempt();
-  }, [accountLease, contactCardAvailable, guid]);
-  const onPickContact = useCallback((): void => {
-    void getContactsPermissionState()
-      .then((permission) => {
-        if (!accountLease.isCurrent()) return;
-        if (permission.status === 'granted') {
-          runContactPicker();
-          return;
-        }
-        if (permission.status === 'denied' && !permission.canAskAgain) {
-          showContactsPermissionRecovery({
-            canAskAgain: false,
-            isCurrent: () => accountLease.isCurrent(),
-            onTryAgain: runContactPicker,
-          });
-          return;
-        }
-        showContactsPermissionRationale({
-          purpose: 'share',
-          isCurrent: () => accountLease.isCurrent(),
-          onContinue: runContactPicker,
-        });
-      })
-      .catch((error) => {
-        if (accountLease.isCurrent()) {
-          logger.warn('[chat] contact permission check failed', error);
-          showDialog(
-            'Contacts',
-            'Contacts access is unavailable. You can keep messaging without sharing a contact card.',
-          );
-        }
-      });
-  }, [accountLease, runContactPicker]);
-
-  const currentLocationAvailable =
-    imessageLocationSupported &&
-    chatService === 'iMessage' &&
-    header.data?.guid === guid &&
-    isProvenOneToOneIMessageChat(header.data);
-  const locationScreenRef = useRef<object | null>(null);
-  const locationFlowRef = useRef<{ cancel(): void } | null>(null);
-  useFocusEffect(
-    useCallback(() => {
-      if (!currentLocationAvailable || !accountLease.isCurrent()) return;
-      locationScreenRef.current = { guid };
-      return () => {
-        locationScreenRef.current = null;
-        locationFlowRef.current?.cancel();
-      };
-    }, [accountLease, currentLocationAvailable, guid]),
-  );
-  const onShareCurrentLocation = useCallback((): void => {
-    const screen = locationScreenRef.current;
-    const capability = captureSessionRcsCapabilityLease();
-    if (
-      locationFlowRef.current ||
-      !screen ||
-      !currentLocationAvailable ||
-      !accountLease.isCurrent() ||
-      AppState.currentState !== 'active' ||
-      capability?.isCurrent() !== true ||
-      capability.serverInfo?.supports_imessage_location !== true
-    )
-      return;
-
-    const controller = new AbortController();
-    let alive = true;
-    let permissionOnly = false;
-    let pendingFeedback: (() => void) | null = null;
-    let dialogId: number | null = null;
-    let dialogToken: object | null = null;
-    let cancelAcquisition: (() => void) | null = null;
-    const cleanups: Array<() => void> = [];
-    const current = (): boolean =>
-      alive &&
-      locationScreenRef.current === screen &&
-      accountLease.isCurrent() &&
-      capability.isCurrent();
-    const foreground = (): boolean => current() && AppState.currentState === 'active';
-    const finish = (): void => {
-      if (!alive) return;
-      alive = false;
-      controller.abort();
-      cancelAcquisition?.();
-      pendingFeedback = null;
-      dialogToken = null;
-      if (dialogId !== null) useDialogStore.getState().dismissById(dialogId);
-      for (const cleanup of cleanups) cleanup();
-      if (locationFlowRef.current === flow) locationFlowRef.current = null;
-    };
-    const flow = { cancel: finish };
-    locationFlowRef.current = flow;
-    const registerCleanup = (cleanup: () => void): void => {
-      if (alive) cleanups.push(cleanup);
-      else cleanup();
-    };
-    // One-shot callbacks remain owned even though AppDialog dismisses before invoking them.
-    const guardButton =
-      (action: () => void, token: object): (() => void) =>
-      () => {
-        if (dialogToken !== token || !foreground()) return;
-        dialogToken = null;
-        dialogId = null;
-        action();
-      };
-    const explain = (title: string, message: string, buttons?: DialogButton[]): void => {
-      if (!foreground()) return;
-      const token = {};
-      dialogToken = token;
-      dialogId = showDialog(
-        title,
-        message,
-        (buttons ?? [{ text: 'OK' }]).map((button) => ({
-          ...button,
-          onPress: guardButton(button.onPress ?? finish, token),
-        })),
-      );
-    };
-    const confirm = (action: () => void, afterPermission = false): void => {
-      if (!foreground()) return;
-      const token = {};
-      dialogToken = token;
-      dialogId = showConfirm({
-        title: 'Send Current Location?',
-        message: afterPermission
-          ? 'Location access is allowed. Tap Send Location to get one current location and send it to this conversation. Nothing has been sent yet.'
-          : 'Gator will request one current location and send it to this conversation through your server. It does not track your location in the background.',
-        confirmText: 'Send Location',
-        onConfirm: guardButton(action, token),
-        onCancel: guardButton(finish, token),
-      });
-    };
-    const openSettings = (): void => {
-      if (!foreground()) return;
-      finish();
-      void Linking.openSettings().catch(() => undefined);
-    };
-    const report = (
-      result:
-        | Exclude<CurrentLocationPermissionOutcome, { status: 'granted' }>
-        | ShareCurrentLocationResult,
-    ): void => {
-      if (!foreground()) return;
-      if (result.status === 'queued' || result.status === 'cancelled') {
-        finish();
-        return;
-      }
-      if (result.status === 'unavailable') {
-        explain(
-          'Location Sharing Unavailable',
-          'The connected server no longer offers current-location sharing.',
-        );
-      } else if (result.status === 'services-off') {
-        explain('Location Services Are Off', 'Turn on location services, then try again.', [
-          { text: 'Not Now', style: 'cancel' },
-          { text: 'Open Settings', onPress: openSettings },
-        ]);
-      } else if (result.status === 'denied') {
-        explain(
-          'Location Permission Needed',
-          'Gator needs foreground location access to send your current location. No location is read in the background.',
-          [
-            { text: 'Not Now', style: 'cancel' },
-            result.canAskAgain
-              ? { text: 'Try Again', onPress: prepare }
-              : { text: 'Open Settings', onPress: openSettings },
-          ],
-        );
-      } else {
-        explain(
-          'Couldn’t Get Location',
-          result.status === 'timeout'
-            ? 'Gator did not get a current location within 15 seconds. Nothing was sent.'
-            : 'Gator could not read a current location. Nothing was sent.',
-        );
-      }
-    };
-    const fail = (error: unknown): void => {
-      if (!foreground()) return;
-      logger.warn('[chat] current-location send failed', error);
-      explain('Couldn’t Send Location', 'Your location was not queued. Please try again.');
-    };
-    const sendLocation = (): void => {
-      if (!foreground()) return;
-      void acquireAndSendCurrentLocation(guid, {
-        foregroundLifecycle: {
-          isActive: foreground,
-          subscribeToInactive: (cancel) => {
-            cancelAcquisition = cancel;
-            if (!foreground()) cancel();
-            return () => {
-              if (cancelAcquisition === cancel) cancelAcquisition = null;
-            };
-          },
-        },
-        accountLease,
-        reportIssue: presentSendIssue,
-      })
-        .then(report)
-        .catch(fail);
-    };
-    const prepare = (): void => {
-      if (!foreground()) return;
-      void (async () => {
-        const result = await prepareCurrentLocationPermission(getExpoLocationAdapter(), {
-          signal: controller.signal,
-          isCurrent: () => current() && (permissionOnly || AppState.currentState === 'active'),
-          beforePrompt: () => {
-            if (!foreground()) return false;
-            permissionOnly = true;
-            return true;
-          },
-        });
-        if (!current()) return;
-        const present = (): void => {
-          if (!foreground()) return;
-          permissionOnly = false;
-          if (result.status === 'granted') {
-            if (result.prompted) confirm(sendLocation, true);
-            else sendLocation();
-          } else report(result);
-        };
-        if (foreground()) present();
-        else pendingFeedback = present;
-      })().catch(fail);
-    };
-    const appStateSubscription = AppState.addEventListener('change', (state) => {
-      if (!current()) {
-        finish();
-        return;
-      }
-      if (state !== 'active') {
-        // Android's permission Activity also pauses us. This phase can only prepare feedback;
-        // even a granted late result must ask for a new send intent on a current foreground screen.
-        if (!permissionOnly) finish();
-      } else {
-        const present = pendingFeedback;
-        pendingFeedback = null;
-        present?.();
-      }
-    });
-    registerCleanup(() => appStateSubscription.remove());
-    registerCleanup(subscribeRealtimeGenerationInvalidation(accountLease.generation, finish));
-    registerCleanup(
-      useSessionStore.subscribe(() => {
-        if (!current()) finish();
-      }),
-    );
-    if (!foreground()) finish();
-    else confirm(prepare);
-  }, [accountLease, currentLocationAvailable, guid]);
 
   // Only let the KeyboardAvoidingView pad WHILE the keyboard is up, so it can't leave a residual
   // gap under the composer after a show/hide cycle (Android edge-to-edge). Same fix as the inbox.

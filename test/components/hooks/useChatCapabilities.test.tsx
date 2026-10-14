@@ -3,7 +3,7 @@ import type { ChatHeaderRow } from '@db/repositories';
 import { useChatCapabilities } from '@features/conversations/useChatCapabilities';
 import { useSessionStore } from '@state/sessionStore';
 import { resolveChatService } from '@utils';
-import { renderHook } from '../support/renderWithTheme';
+import { act, renderHook } from '../support/renderWithTheme';
 
 const ONE_TO_ONE = 'iMessage;-;+15550001111';
 const GROUP = 'iMessage;+;chat-1234';
@@ -95,8 +95,8 @@ describe('useChatCapabilities', () => {
       typingFeaturesAvailable: true,
       voiceFeaturesAvailable: true,
       attachmentFeaturesAvailable: true,
-      imessageContactSupported: true,
-      imessageLocationSupported: true,
+      contactCardAvailable: true,
+      currentLocationAvailable: true,
       imessageMentionsAvailable: false,
       rcsInteractiveFeaturesAvailable: false,
     });
@@ -110,8 +110,8 @@ describe('useChatCapabilities', () => {
     expect(caps.imessageRepliesAvailable).toBe(false);
     expect(caps.imessageAttachmentFeaturesAvailable).toBe(false);
     expect(caps.attachmentFeaturesAvailable).toBe(false);
-    // Server-level switches do not depend on the header.
-    expect(caps.imessageContactSupported).toBe(true);
+    expect(caps.contactCardAvailable).toBe(false);
+    expect(caps.currentLocationAvailable).toBe(false);
   });
 
   it('turns each feature off when the server stops advertising it', async () => {
@@ -162,27 +162,33 @@ describe('useChatCapabilities', () => {
     expect(missing.mentionParticipants).toEqual([]);
   });
 
-  it('offers RCS interactive features only for a chat owned by the current RCS provider', async () => {
+  it('turns RCS features off as soon as the RCS provider changes while the chat is open', async () => {
     const rcsHeader = header({ guid: RCS_GUID, handleServices: 'RCS' });
     serverInfo({
       rcs: true,
       supports_rcs_epoch_qualified_ids: true,
       rcs_provider_epoch: RCS_PROVIDER_EPOCH,
     });
-
-    const current = await capabilitiesFor(RCS_GUID, rcsHeader);
-    serverInfo({ rcs: true, supports_rcs_epoch_qualified_ids: true, rcs_provider_epoch: null });
-    const otherProvider = await capabilitiesFor(RCS_GUID, rcsHeader);
-
-    expect(current).toMatchObject({
+    const { result } = await renderHook(() =>
+      useChatCapabilities(RCS_GUID, rcsHeader, resolveChatService(RCS_GUID, 'RCS')),
+    );
+    expect(result.current).toMatchObject({
       rcsAvailable: true,
       rcsInteractiveFeaturesAvailable: true,
       typingFeaturesAvailable: true,
       voiceFeaturesAvailable: true,
       attachmentFeaturesAvailable: true,
+      contactCardAvailable: true,
+      currentLocationAvailable: false,
       imessageRepliesAvailable: false,
     });
-    expect(otherProvider.rcsInteractiveFeaturesAvailable).toBe(false);
-    expect(otherProvider.attachmentFeaturesAvailable).toBe(false);
+
+    await act(async () => {
+      serverInfo({ rcs: true, supports_rcs_epoch_qualified_ids: true, rcs_provider_epoch: null });
+    });
+
+    expect(result.current.rcsInteractiveFeaturesAvailable).toBe(false);
+    expect(result.current.attachmentFeaturesAvailable).toBe(false);
+    expect(result.current.contactCardAvailable).toBe(false);
   });
 });

@@ -345,7 +345,9 @@ jest.mock('@/services/send', () => ({
 }));
 
 // eslint-disable-next-line import/first
-import ChatScreen, { pickDocumentFilesForLease } from '../../../app/(app)/chat/[guid]';
+import ChatScreen from '../../../app/(app)/chat/[guid]';
+// eslint-disable-next-line import/first
+import { pickDocumentFilesForLease } from '@features/conversations/useChatAttachmentSends';
 // eslint-disable-next-line import/first
 import { useMessages } from '@features/conversations/useMessages';
 // eslint-disable-next-line import/first

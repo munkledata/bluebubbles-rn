@@ -21,8 +21,10 @@ export interface ChatCapabilities {
   serverInfoLoaded: boolean;
   /** RCS-only interactive features (reactions, typing, voice, attachments) for an RCS chat. */
   rcsInteractiveFeaturesAvailable: boolean;
-  imessageContactSupported: boolean;
-  imessageLocationSupported: boolean;
+  /** Send Contact: RCS, or an iMessage one-to-one chat whose server can send contact cards. */
+  contactCardAvailable: boolean;
+  /** Send Current Location: an iMessage one-to-one chat whose server can send locations. */
+  currentLocationAvailable: boolean;
   supportsSendAttachmentText: boolean;
   imessageAttachmentFeaturesAvailable: boolean;
   imessagePdfFeaturesAvailable: boolean;
@@ -80,8 +82,8 @@ export function useChatCapabilities(
   const typingSupported = useServerSupports('supports_imessage_typing');
   const voiceSupported = useServerSupports('supports_imessage_voice_upload');
   const scheduledAttachmentSupported = useServerSupports('supports_imessage_scheduled_attachment');
-  const imessageContactSupported = useServerSupports('supports_send_contact');
-  const imessageLocationSupported = useServerSupports('supports_imessage_location');
+  const contactSupported = useServerSupports('supports_send_contact');
+  const locationSupported = useServerSupports('supports_imessage_location');
   const supportsSendAttachmentText = useSendAttachmentTextSupported(chatService);
 
   // The header must be this chat's own row, so a recycled screen never borrows another chat's proof.
@@ -123,8 +125,8 @@ export function useChatCapabilities(
     rcsAvailable,
     serverInfoLoaded,
     rcsInteractiveFeaturesAvailable,
-    imessageContactSupported,
-    imessageLocationSupported,
+    contactCardAvailable: rcsInteractiveFeaturesAvailable || (contactSupported && oneToOne),
+    currentLocationAvailable: locationSupported && oneToOne,
     supportsSendAttachmentText,
     imessageAttachmentFeaturesAvailable,
     imessagePdfFeaturesAvailable: imessageAttachmentFeaturesAvailable && pdfSupported,
