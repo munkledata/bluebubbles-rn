@@ -3868,7 +3868,7 @@ test('certifies exactly the reviewed attachment-download delegation boundary', (
     delegated.map((finding) => finding.id).sort(),
     [
       'app/(app)/media/[guid].tsx#MediaViewer.<callback:8d26753ace>:mutator-call:a0bbdb31db62',
-      'app/(app)/media/[guid].tsx#MediaViewer.<callback:c7621d2ab7>:mutator-call:56e6776175c7',
+      'app/(app)/media/[guid].tsx#MediaViewer.<callback:af8c219de1>:mutator-call:a3953d024151',
       'app/(app)/media/[guid].tsx#MediaViewer.onSave:mutator-call:c81dabe3f471',
       'app/(app)/media/[guid].tsx#MediaViewer.onShare:mutator-call:5677683b31c4',
       'app/(app)/media/[guid].tsx#MediaViewer.requestDownload:mutator-call:3d37a02ebe19',

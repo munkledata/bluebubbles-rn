@@ -437,19 +437,24 @@ export default function MediaViewer(): React.JSX.Element {
 
   /** Publish the end of a transfer this viewer started, unless a newer request replaced it. */
   const followViewerTransfer = useCallback(
-    (operation: MediaDownloadOperation, task: Promise<string | null>): void => {
+    (
+      operation: MediaDownloadOperation,
+      task: Promise<string | null>,
+      revisionBefore: number,
+    ): void => {
       void task.then(
         (path) => {
           if (path != null || !pendingDownloadIsCurrent(operation)) return;
           // A null result may come from a refusal that never touched the store (e.g. RCS media
           // from a previous Google pairing), which left "Downloading media…" up with no Retry.
           // A transfer another owner still runs, or just finished, publishes its own end state,
-          // and so does a failure the downloader already recorded with its reason (too large).
+          // and so does a failure the downloader recorded during THIS transfer with its reason
+          // (too large). An older failure must not lend its reason to an unrelated refusal.
           const guid = operation.source.attachmentGuid;
-          const { status, progress } = useDownloadStore.getState();
+          const { status, progress, revision } = useDownloadStore.getState();
           if (
             status[guid] === 'downloading' ||
-            status[guid] === 'error' ||
+            (status[guid] === 'error' && (revision[guid] ?? 0) !== revisionBefore) ||
             (status[guid] === 'idle' && progress[guid] === 1)
           ) {
             return;
@@ -527,9 +532,11 @@ export default function MediaViewer(): React.JSX.Element {
           setPendingDownload(restarted);
           useDownloadStore.getState().clear(attachmentGuid);
           try {
+            const revisionBefore = useDownloadStore.getState().revision[attachmentGuid] ?? 0;
             followViewerTransfer(
               restarted,
               download({ ...attachment, localPath: null }, 'manual', accountLease),
+              revisionBefore,
             );
           } catch (error) {
             logger.warn('[media] attachment download could not start', error);
@@ -681,10 +688,12 @@ export default function MediaViewer(): React.JSX.Element {
       ? attachment
       : { ...attachment, localPath: null };
     try {
+      const revisionBefore =
+        useDownloadStore.getState().revision[operation.source.attachmentGuid] ?? 0;
       const task = recoversMediaFailure
         ? redownload(attachment, accountLease)
         : download(target, 'manual', accountLease);
-      followViewerTransfer(operation, task);
+      followViewerTransfer(operation, task, revisionBefore);
     } catch (error) {
       if (!pendingDownloadIsCurrent(operation)) return;
       logger.warn('[media] attachment download could not start', error);

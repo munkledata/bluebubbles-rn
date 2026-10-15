@@ -1302,6 +1302,24 @@ describe('MediaViewer gating', () => {
     expect(useDownloadStore.getState().failure[remote.guid]).toBe('too-large');
   });
 
+  it('does not keep an earlier failure’s reason after a refusal that never touched the store', async () => {
+    const remote = { ...ATT, localPath: null };
+    getAtt.mockResolvedValue(remote);
+    listGallery.mockResolvedValue({ items: [remote], index: 0 });
+    // An earlier attempt ran out of storage. This Retry is refused before it starts (for example
+    // RCS media from a previous Google pairing), so "Not enough storage" would now be wrong.
+    useDownloadStore.getState().fail(remote.guid, 'storage-full');
+    downloadMedia.mockResolvedValue(null);
+    await renderWithTheme(<MediaViewer />);
+
+    await fireEvent.press(await screen.findByRole('button', { name: 'Retry media download' }));
+    await waitFor(() => expect(downloadMedia).toHaveBeenCalledTimes(1));
+
+    expect(await screen.findByRole('button', { name: 'Retry media download' })).toBeTruthy();
+    await waitFor(() => expect(useDownloadStore.getState().failure[remote.guid]).toBeUndefined());
+    expect(useDownloadStore.getState().status[remote.guid]).toBe('error');
+  });
+
   it('deduplicates Download taps and exposes an exact Retry after failure', async () => {
     const remote = { ...ATT, localPath: null };
     getAtt.mockResolvedValue(remote);

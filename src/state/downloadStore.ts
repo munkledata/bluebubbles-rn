@@ -23,12 +23,21 @@ function without<T>(record: Record<string, T>, key: string): Record<string, T> {
   return rest;
 }
 
+function bump(record: Record<string, number>, key: string): Record<string, number> {
+  return { ...record, [key]: (record[key] ?? 0) + 1 };
+}
+
 interface DownloadState {
   /** null = indeterminate (spinner); 0..1 = determinate ring. */
   progress: Record<string, number | null>;
   status: Record<string, DownloadStatus>;
   /** The reason behind an 'error' status, only when it is one the owner can act on. */
   failure: Record<string, DownloadFailureReason>;
+  /**
+   * Counts every start/finish/fail/clear of an attachment (not progress ticks), so an owner can
+   * tell whether its transfer published an end state or an older one is still showing.
+   */
+  revision: Record<string, number>;
   start: (guid: string) => void;
   setProgress: (guid: string, loaded: number, total: number) => void;
   finish: (guid: string) => void;
@@ -48,11 +57,13 @@ export const useDownloadStore = create<DownloadState>((set) => ({
   progress: {},
   status: {},
   failure: {},
+  revision: {},
   start: (g) =>
     set((s) => ({
       status: { ...s.status, [g]: 'downloading' },
       progress: { ...s.progress, [g]: 0 },
       failure: without(s.failure, g),
+      revision: bump(s.revision, g),
     })),
   setProgress: (g, loaded, total) =>
     set((s) => ({ progress: { ...s.progress, [g]: progressRatio(loaded, total) } })),
@@ -61,17 +72,20 @@ export const useDownloadStore = create<DownloadState>((set) => ({
       status: { ...s.status, [g]: 'idle' },
       progress: { ...s.progress, [g]: 1 },
       failure: without(s.failure, g),
+      revision: bump(s.revision, g),
     })),
   fail: (g, reason) =>
     set((s) => ({
       status: { ...s.status, [g]: 'error' },
       failure: reason ? { ...s.failure, [g]: reason } : without(s.failure, g),
+      revision: bump(s.revision, g),
     })),
   clear: (g) =>
     set((s) => ({
       status: without(s.status, g),
       progress: without(s.progress, g),
       failure: without(s.failure, g),
+      revision: bump(s.revision, g),
     })),
-  reset: () => set({ progress: {}, status: {}, failure: {} }),
+  reset: () => set({ progress: {}, status: {}, failure: {}, revision: {} }),
 }));
