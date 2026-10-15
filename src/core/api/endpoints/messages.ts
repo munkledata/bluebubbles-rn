@@ -24,7 +24,7 @@ export const MessageList = z.object({ messages: z.array(Message).nullish() });
 export const SERVER_MESSAGE_SEARCH_LIMIT = 50;
 export const ServerMessageSearchList = z
   .object({ messages: z.array(Message).max(SERVER_MESSAGE_SEARCH_LIMIT) })
-  .strict();
+  .loose();
 
 /**
  * The Gator write ops (send/react/attachment) return a `SendResult`, NOT a Message:
@@ -52,16 +52,14 @@ export const IMessagePlainTextAck = z
     tempGuid: z.string().min(1),
     viaPrivateApi: z.literal(true),
   })
-  .strict();
+  .loose();
 export type IMessagePlainTextAck = z.infer<typeof IMessagePlainTextAck>;
 
 const IMessageEffectAck = z.object({ guid: z.string(), viaPrivateApi: z.literal(true) }).loose();
 
-const IMessageMentionAck = z.object({ guid: z.string(), viaPrivateApi: z.literal(true) }).strict();
+const IMessageMentionAck = z.object({ guid: z.string(), viaPrivateApi: z.literal(true) }).loose();
 
-const IMessageFormattedAck = z
-  .object({ guid: z.string(), viaPrivateApi: z.literal(true) })
-  .strict();
+const IMessageFormattedAck = z.object({ guid: z.string(), viaPrivateApi: z.literal(true) }).loose();
 
 const DEFINITE_IMESSAGE_MENTION_ERRORS = new Map<string, number>([
   ['imessage_mention_invalid_target', 400],
@@ -150,7 +148,7 @@ export type UnsendAck = z.infer<typeof UnsendAck>;
 /** A remote delete is successful only when the server confirms the exact whole-message target. */
 export const RemoteDeleteAck = z
   .object({ deleted: z.literal(true), guid: z.string().min(1).max(1_024) })
-  .strict();
+  .loose();
 export type RemoteDeleteAck = z.infer<typeof RemoteDeleteAck>;
 
 function requireMessagePartIndex(partIndex: number): number {
@@ -1035,14 +1033,14 @@ const ContinuedDeletedMessageList = z
     cursor: z.string().min(1).max(512),
     hasMore: z.boolean(),
   })
-  .strict();
+  .loose();
 const LegacyDeletedMessageList = z
   .object({
     deleted: DeletedMessageRows.nullish(),
     cursor: z.undefined().optional(),
     hasMore: z.undefined().optional(),
   })
-  .strict();
+  .loose();
 
 export const DeletedMessageList = z.union([ContinuedDeletedMessageList, LegacyDeletedMessageList]);
 

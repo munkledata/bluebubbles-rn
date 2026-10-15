@@ -92,19 +92,20 @@ describe('message mention endpoint', () => {
     expect(malformedError).toBeInstanceOf(ApiError);
     expect((malformedError as ApiError).serverErrorType).toBe('imessage_mention_outcome_unknown');
 
+    // A field a newer server adds is ignored; the exact required fields still decide success.
     const widened = fakeHttp({
       guid: 'real-mention-guid',
       viaPrivateApi: true,
       unexpected: 'not part of the narrow acknowledgement',
     });
-    const widenedError = await sendMention(widened.http, {
-      chatGuid: CHAT_GUID,
-      tempGuid: TEMP_GUID,
-      message: 'Hello Alice',
-      mentions: [{ start: 6, length: 5, address: 'alice@example.test' }],
-    }).catch((error: unknown) => error);
-    expect(widenedError).toBeInstanceOf(ApiError);
-    expect((widenedError as ApiError).serverErrorType).toBe('imessage_mention_outcome_unknown');
+    await expect(
+      sendMention(widened.http, {
+        chatGuid: CHAT_GUID,
+        tempGuid: TEMP_GUID,
+        message: 'Hello Alice',
+        mentions: [{ start: 6, length: 5, address: 'alice@example.test' }],
+      }),
+    ).resolves.toMatchObject({ guid: 'real-mention-guid', viaPrivateApi: true });
 
     const rejected = ApiError.fromStatus(409, 'rejected', undefined, 'imessage_mention_rejected');
     const post = jest.fn(async () => {
