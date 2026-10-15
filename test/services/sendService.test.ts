@@ -502,6 +502,45 @@ describe('sendTextMessage', () => {
     expect(raw.prepare('SELECT guid FROM messages').get()).toEqual({ guid });
   });
 
+  it('sends a text the narrow route cannot carry through the ordinary route instead of refusing it', async () => {
+    const { db, raw } = await createTestDb();
+    const chatGuid = 'any;-;+15551234567';
+    // U+FFFC is the placeholder Apple uses for an inline attachment; the narrow route refuses it.
+    const text = 'see \ufffc attached';
+    await seedProvenIMessageChat(db, chatGuid);
+    const post = jest.fn(async () => ({ guid: null }));
+    let client!: HttpClient;
+    client = {
+      post,
+      pinTransport: () => client,
+      isTransportCurrent: () => true,
+      assertTransportCurrent: () => undefined,
+    } as unknown as HttpClient;
+
+    await sendTextMessage(
+      db,
+      client,
+      { chatGuid, text },
+      1_000,
+      undefined,
+      undefined,
+      undefined,
+      fixedRcsCapabilitySource(
+        ServerInfo.parse({ version: '2.0.0', supports_imessage_plain_text: true }),
+      ),
+    );
+
+    expect(post).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledWith(
+      '/message/text',
+      expect.anything(),
+      expect.objectContaining({
+        json: expect.objectContaining({ chatGuid, method: 'apple-script', text }),
+      }),
+    );
+    expect(raw.prepare('SELECT text FROM messages').get()).toEqual({ text });
+  });
+
   it('arms one narrow retry only for the exact pre-dispatch unavailable response', async () => {
     const { db, raw } = await createTestDb();
     const chatGuid = 'iMessage;-;+15551234567';

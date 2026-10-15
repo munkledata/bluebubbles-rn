@@ -24275,7 +24275,7 @@
     {
       "id": "src/services/send/sendService.ts#sendTextMessage:mutator-call:8e8d9434e3c4",
       "path": "src/services/send/sendService.ts",
-      "line": 195,
+      "line": 208,
       "symbol": "sendTextMessage",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#handoverScheduledTextToOutgoing",
@@ -24288,7 +24288,7 @@
     {
       "id": "src/services/send/sendService.ts#sendTextMessage:mutator-call:8592261ca87e",
       "path": "src/services/send/sendService.ts",
-      "line": 204,
+      "line": 217,
       "symbol": "sendTextMessage",
       "operation": "mutator-call",
       "target": "src/services/send/sendService.ts#sendTextMessage.<callback:737ff5c650>",
@@ -24301,7 +24301,7 @@
     {
       "id": "src/services/send/sendService.ts#sendTextMessage:mutator-call:e3c2a8db0c93",
       "path": "src/services/send/sendService.ts",
-      "line": 204,
+      "line": 217,
       "symbol": "sendTextMessage",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -24314,7 +24314,7 @@
     {
       "id": "src/services/send/sendService.ts#sendTextMessage.<callback:737ff5c650>:mutator-call:6d9769953a27",
       "path": "src/services/send/sendService.ts",
-      "line": 213,
+      "line": 226,
       "symbol": "sendTextMessage.<callback:737ff5c650>",
       "operation": "mutator-call",
       "target": "src/db/repositories/outgoing.ts#insertOutgoingTextWithinTransaction",
@@ -24327,7 +24327,7 @@
     {
       "id": "src/services/send/sendService.ts#sendTextMessage:mutator-call:c05517b0fccc",
       "path": "src/services/send/sendService.ts",
-      "line": 235,
+      "line": 248,
       "symbol": "sendTextMessage",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageTargets.ts#resolveMessageTarget",
@@ -24340,7 +24340,7 @@
     {
       "id": "src/services/send/sendService.ts#sendTextMessage:mutator-call:b26271a03910",
       "path": "src/services/send/sendService.ts",
-      "line": 238,
+      "line": 251,
       "symbol": "sendTextMessage",
       "operation": "mutator-call",
       "target": "src/services/send/sendOutcome.ts#retireUnavailableMessageTarget",
@@ -24353,7 +24353,7 @@
     {
       "id": "src/services/send/sendService.ts#sendTextMessage:mutator-call:78177249e6a1",
       "path": "src/services/send/sendService.ts",
-      "line": 278,
+      "line": 291,
       "symbol": "sendTextMessage",
       "operation": "mutator-call",
       "target": "src/services/send/sendOutcome.ts#reconcileSendOutcome",
@@ -24366,7 +24366,7 @@
     {
       "id": "src/services/send/sendService.ts#sendTextMessage:mutator-call:b33c4cc8cb99",
       "path": "src/services/send/sendService.ts",
-      "line": 294,
+      "line": 307,
       "symbol": "sendTextMessage",
       "operation": "mutator-call",
       "target": "src/services/send/sendOutcome.ts#handleSendFailure",
