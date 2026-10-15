@@ -73,6 +73,18 @@ const SAVE_OR_ROLL_BACK_FLAGS: ReadonlySet<FeatureFlag> = new Set<FeatureFlag>([
   'messageNotifications',
 ]);
 
+/**
+ * Saves of one flag that overlap (a quick Off-then-On). Only the newest may switch back or report,
+ * and it switches back to the last value actually saved, never to an older choice that was itself
+ * still saving. The entry exists only while saves are in flight, so nothing carries over.
+ */
+interface FlagSaveBurst {
+  inFlight: number;
+  newest: number;
+  saved: boolean;
+}
+const flagSaveBursts = new Map<FeatureFlag, FlagSaveBurst>();
+
 const RETIRED_PRIVATE_API_MASTER_KEY = 'privateApi.enabled';
 const RETIRED_PRIVATE_API_SUBJECT_KEY = 'privateApi.sendSubjectLines';
 
@@ -358,7 +370,10 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
     }
   },
   setFlag: async (flag, value, context) => {
-    const previous = get()[flag];
+    const burst = flagSaveBursts.get(flag) ?? { inFlight: 0, newest: 0, saved: get()[flag] };
+    flagSaveBursts.set(flag, burst);
+    burst.inFlight += 1;
+    const generation = ++burst.newest;
     set({ [flag]: value } as Partial<FeatureSettingsState>); // optimistic
     try {
       await withDbTransaction(
@@ -371,12 +386,20 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
         },
         context ? () => canCommitHydration(context) : undefined,
       );
+      burst.saved = value;
     } catch (error) {
       // best-effort persist for the rest; the in-memory toggle still applies this session
       if (!SAVE_OR_ROLL_BACK_FLAGS.has(flag)) return;
       if (context !== undefined && !canCommitHydration(context)) return;
-      if (get()[flag] === value) set({ [flag]: previous } as Partial<FeatureSettingsState>);
+      // A newer choice for this flag is still saving; it decides what the switch shows.
+      if (generation !== burst.newest) return;
+      if (get()[flag] === value) set({ [flag]: burst.saved } as Partial<FeatureSettingsState>);
+      // Nothing to report: what is saved already matches this choice (an overtaken one failed).
+      if (burst.saved === value) return;
       throw error;
+    } finally {
+      burst.inFlight -= 1;
+      if (burst.inFlight === 0) flagSaveBursts.delete(flag);
     }
   },
   setErrorReportingConsent: async (value, context) => {

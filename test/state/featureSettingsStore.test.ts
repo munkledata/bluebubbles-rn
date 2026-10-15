@@ -235,6 +235,53 @@ describe('featureSettingsStore', () => {
       expect(useFeatureSettingsStore.getState()[flag]).toBe(before);
     },
   );
+
+  /** Make every save of the read-receipt choice fail, or only saves of one value. */
+  function rejectReadReceiptSaves(raw: import('better-sqlite3').Database, onlyValue?: '0' | '1') {
+    const when = `NEW.key = 'privateApi.sendReadReceipts'${onlyValue ? ` AND NEW.value = '${onlyValue}'` : ''}`;
+    raw.exec(`
+      CREATE TRIGGER reject_receipts_insert BEFORE INSERT ON kv WHEN ${when}
+      BEGIN SELECT RAISE(ABORT, 'RECEIPTS_WRITE_CANARY'); END;
+      CREATE TRIGGER reject_receipts_update BEFORE UPDATE OF value ON kv WHEN ${when}
+      BEGIN SELECT RAISE(ABORT, 'RECEIPTS_WRITE_CANARY'); END;
+    `);
+  }
+  const settle = (save: Promise<void>) =>
+    save.then(
+      () => 'resolved',
+      (error: Error) => error.message,
+    );
+
+  it('a quick Off-then-On whose saves both fail ends on the saved value, with nothing to report', async () => {
+    const { db, raw } = await openTestContext();
+    await useFeatureSettingsStore.getState().hydrate();
+    expect(useFeatureSettingsStore.getState().sendReadReceipts).toBe(true);
+    rejectReadReceiptSaves(raw);
+
+    const off = settle(useFeatureSettingsStore.getState().setFlag('sendReadReceipts', false));
+    const on = settle(useFeatureSettingsStore.getState().setFlag('sendReadReceipts', true));
+
+    // The older save was overtaken and the newer one asked for what is already saved.
+    expect(await Promise.all([off, on])).toEqual(['resolved', 'resolved']);
+    expect(useFeatureSettingsStore.getState().sendReadReceipts).toBe(true);
+    expect(await kvGet(db, 'privateApi.sendReadReceipts')).toBeNull();
+  });
+
+  it('a failed newer choice switches back to the older choice that was saved', async () => {
+    const { db, raw } = await openTestContext();
+    await useFeatureSettingsStore.getState().hydrate();
+    rejectReadReceiptSaves(raw, '1');
+
+    const off = settle(useFeatureSettingsStore.getState().setFlag('sendReadReceipts', false));
+    const on = settle(useFeatureSettingsStore.getState().setFlag('sendReadReceipts', true));
+
+    expect(await Promise.all([off, on])).toEqual([
+      'resolved',
+      expect.stringContaining('RECEIPTS_WRITE_CANARY'),
+    ]);
+    expect(useFeatureSettingsStore.getState().sendReadReceipts).toBe(false);
+    expect(await kvGet(db, 'privateApi.sendReadReceipts')).toBe('0');
+  });
 });
 
 describe('featureSettingsStore — permission onboarding completion', () => {
