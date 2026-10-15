@@ -11,6 +11,7 @@ import {
   reconcileFullRepairPruneExposure,
   restoreDeletedChatWithinTransaction,
   setSyncMarkerWithinTransaction,
+  waitForChatPurgeResumes,
   type FullRepairPruneExposure,
 } from '@db/repositories';
 import {
@@ -359,6 +360,12 @@ function startTargetedChatRepair(
       throw new Error('Conversation repair stopped before the chat was refreshed.');
     }
 
+    if (options.expectedDeletedAt != null) {
+      // An interrupted delete may still be purging this chat's old rows, and the history below
+      // lands under the same boundary: let that purge finish first (review of M061).
+      await waitForChatPurgeResumes();
+      if (stopped()) throw new Error('Conversation repair stopped before completion.');
+    }
     const history = await syncChatMessageRange(db, api, guid, {
       maxMessages: TARGETED_CHAT_REPAIR_MAX_MESSAGES,
       shouldAbort: stopped,

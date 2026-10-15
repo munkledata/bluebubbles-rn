@@ -744,17 +744,39 @@ export async function resumeChatPurges(
   db: AppDatabase,
   commitGuard?: DbCommitGuard,
 ): Promise<void> {
-  if (commitGuard && !commitGuard()) return;
-  const pending: Array<{ id: number; historyDeletedAt: number }> = await db.all(sql`
-    SELECT c.id, c.history_deleted_at AS historyDeletedAt
-      FROM chats c
-     WHERE c.history_deleted_at IS NOT NULL
-       AND EXISTS (SELECT 1 FROM messages m
-                    WHERE m.chat_id = c.id
-                      AND (m.date_created IS NULL OR m.date_created <= c.history_deleted_at))
-  `);
-  if (commitGuard && !commitGuard()) return;
-  for (const c of pending) await purgeChatMessages(db, c.id, c.historyDeletedAt, commitGuard);
+  let finished!: () => void;
+  const running = new Promise<void>((resolve) => {
+    finished = resolve;
+  });
+  runningChatPurgeResumes.add(running);
+  try {
+    if (commitGuard && !commitGuard()) return;
+    const pending: Array<{ id: number; historyDeletedAt: number }> = await db.all(sql`
+      SELECT c.id, c.history_deleted_at AS historyDeletedAt
+        FROM chats c
+       WHERE c.history_deleted_at IS NOT NULL
+         AND EXISTS (SELECT 1 FROM messages m
+                      WHERE m.chat_id = c.id
+                        AND (m.date_created IS NULL OR m.date_created <= c.history_deleted_at))
+    `);
+    if (commitGuard && !commitGuard()) return;
+    for (const c of pending) await purgeChatMessages(db, c.id, c.historyDeletedAt, commitGuard);
+  } finally {
+    runningChatPurgeResumes.delete(running);
+    finished();
+  }
+}
+
+/** Interrupted-purge resumes running now (see waitForChatPurgeResumes). */
+const runningChatPurgeResumes = new Set<Promise<void>>();
+
+/**
+ * Resolves once no interrupted-purge resume is running. Restoring a deleted chat downloads its
+ * history as hidden rows under the same boundary, so a resume still purging that chat would delete
+ * them, possibly including the read floor the restore needs (review of M061). Never rejects.
+ */
+export async function waitForChatPurgeResumes(): Promise<void> {
+  await Promise.all(runningChatPurgeResumes);
 }
 
 /**

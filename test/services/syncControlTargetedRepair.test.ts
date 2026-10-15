@@ -6,6 +6,7 @@
 const mockSyncSingleChat = jest.fn();
 const mockSyncChatMessageRange = jest.fn();
 const mockRestoreDeletedChatWithinTransaction = jest.fn();
+const mockWaitForChatPurgeResumes = jest.fn(async (): Promise<void> => undefined);
 const mockChatExistsAndIsVisible = jest.fn();
 const mockGetSyncMarker = jest.fn();
 const mockSetSyncMarkerWithinTransaction = jest.fn();
@@ -39,6 +40,7 @@ jest.mock('@db/repositories', () => ({
   reconcileFullRepairPruneExposure: mockReconcileFullRepairPruneExposure,
   restoreDeletedChatWithinTransaction: mockRestoreDeletedChatWithinTransaction,
   setSyncMarkerWithinTransaction: mockSetSyncMarkerWithinTransaction,
+  waitForChatPurgeResumes: mockWaitForChatPurgeResumes,
 }));
 jest.mock('@db/transaction', () => ({ withDbTransaction: mockWithDbTransaction }));
 jest.mock('@/services/clients', () => ({ http: { testId: 'http-client' } }));
@@ -208,6 +210,23 @@ it('validates before publishing work and runs one exact bounded repair for concu
   expect(mockReconcileMessageNotifications).toHaveBeenCalledWith(mockDb, mockLease);
   await awaitSyncIdle();
   expect(mockInvalidationReleases[0]).toHaveBeenCalledTimes(1);
+});
+
+it('lets an interrupted purge finish before a deleted-chat restore downloads history', async () => {
+  // Review of M061: a resumed purge deletes rows under the chat's history boundary, which is where
+  // the restore's downloaded history lands until the restore commits.
+  const purge = deferred<void>();
+  mockWaitForChatPurgeResumes.mockImplementationOnce(() => purge.promise);
+
+  const restoring = restoreDeletedChat('deleted-chat-a', 1_726_000_000_000);
+  await flushMicrotasks();
+  expect(mockWaitForChatPurgeResumes).toHaveBeenCalledTimes(1);
+  expect(mockSyncChatMessageRange).not.toHaveBeenCalled();
+
+  purge.resolve(undefined);
+  await expect(restoring).resolves.toMatchObject({ restored: true });
+  expect(mockSyncChatMessageRange).toHaveBeenCalledTimes(1);
+  await awaitSyncIdle();
 });
 
 it('passes restore proof through one guarded transaction and fails closed after a false fallback', async () => {
