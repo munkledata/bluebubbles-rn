@@ -394,6 +394,48 @@ describe('provider-scoped repair', () => {
       { guid: 'kept', d: null },
     ]);
   });
+  it('keeps trusting an unfinished repair after a later repair for another ledger starts', async () => {
+    // Review of M053: repair B stops before installing, then repair C for a different ledger records
+    // itself as pending. Until C moves B's rows, they must stay trusted, or C failing early
+    // re-exposes B's server deletions to ordinary sync.
+    await seed('gone');
+    await seed('kept');
+    await installOldLedgerDeletions([]);
+    const install = messageStateRepository.setMessageStateAuthorityWithinTransaction;
+    const stopBeforeInstall = jest
+      .spyOn(messageStateRepository, 'setMessageStateAuthorityWithinTransaction')
+      .mockImplementation(async (context, authority) => {
+        if (authority.ledgerEpoch === ledgerEpoch) throw new Error('stopped before install');
+        return install(context, authority);
+      });
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    try {
+      await fixture(['kept'])
+        .run()
+        .catch(() => undefined);
+    } finally {
+      stopBeforeInstall.mockRestore();
+    }
+    await withDbTransaction(db, (context) =>
+      messageStateRepository.setPendingMessageStateRepairWithinTransaction(context, {
+        version: 1,
+        provider: 'imessage',
+        providerEpoch,
+        ledgerEpoch: '33333333-3333-4333-8333-333333333333',
+        cursor: lease.checkpoint,
+        snapshotSequence: lease.sequence,
+        sequence: lease.sequence,
+      }),
+    );
+
+    await seed('gone');
+    expect(raw.prepare('SELECT guid, date_deleted AS d FROM messages ORDER BY guid').all()).toEqual(
+      [
+        { guid: 'gone', d: 0 },
+        { guid: 'kept', d: null },
+      ],
+    );
+  });
   it('hydrates a snapshot message whose server deletion receipt had no owner', async () => {
     await withDbTransaction(db, (context) =>
       setMessageStateAuthorityWithinTransaction(context, {

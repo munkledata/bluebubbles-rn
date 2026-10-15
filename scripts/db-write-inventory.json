@@ -9570,10 +9570,10 @@
       "evidence": "test/services/messageStateSync.test.ts; test/services/providerRepair.test.ts; test/db/outgoingBranches.test.ts; test/db/chatActionsRepo.test.ts; test/db/clearLocalCache.test.ts; test/db/migrations/0053_versioned_server_message_state.test.ts"
     },
     {
-      "id": "src/db/repositories/messageState.ts#setPendingMessageStateRepairWithinTransaction.<callback:1abff6f72e>:mutator-call:39de6b424e28",
+      "id": "src/db/repositories/messageState.ts#setPendingMessageStateRepairWithinTransaction.<callback:48b7b40c93>:mutator-call:e44c4d06af86",
       "path": "src/db/repositories/messageState.ts",
-      "line": 81,
-      "symbol": "setPendingMessageStateRepairWithinTransaction.<callback:1abff6f72e>",
+      "line": 117,
+      "symbol": "setPendingMessageStateRepairWithinTransaction.<callback:48b7b40c93>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -9585,7 +9585,7 @@
     {
       "id": "src/db/repositories/messageState.ts#clearPendingMessageStateRepairWithinTransaction:drizzle-delete:38b115dd1ba3",
       "path": "src/db/repositories/messageState.ts",
-      "line": 93,
+      "line": 129,
       "symbol": "clearPendingMessageStateRepairWithinTransaction",
       "operation": "drizzle-delete",
       "target": "kv",
@@ -9598,7 +9598,7 @@
     {
       "id": "src/db/repositories/messageState.ts#recordProviderRepairFailureWithinTransaction.<callback:79fd12ca65>:mutator-call:7d7680529fde",
       "path": "src/db/repositories/messageState.ts",
-      "line": 188,
+      "line": 225,
       "symbol": "recordProviderRepairFailureWithinTransaction.<callback:79fd12ca65>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
@@ -9611,7 +9611,7 @@
     {
       "id": "src/db/repositories/messageState.ts#clearProviderRepairBackoffWithinTransaction:drizzle-delete:4ee89eba2639",
       "path": "src/db/repositories/messageState.ts",
-      "line": 197,
+      "line": 234,
       "symbol": "clearProviderRepairBackoffWithinTransaction",
       "operation": "drizzle-delete",
       "target": "kv",
@@ -9624,7 +9624,7 @@
     {
       "id": "src/db/repositories/messageState.ts#reconcileMessageStateAuditReceiptsWithinTransaction:drizzle-update:2afd31e2ea2f",
       "path": "src/db/repositories/messageState.ts",
-      "line": 384,
+      "line": 421,
       "symbol": "reconcileMessageStateAuditReceiptsWithinTransaction",
       "operation": "drizzle-update",
       "target": "messageServerStates",
@@ -9637,7 +9637,7 @@
     {
       "id": "src/db/repositories/messageState.ts#reconcileMessageStateAuditReceiptsWithinTransaction.<callback:af90f3a5c9>:mutator-call:c778dce0c3b3",
       "path": "src/db/repositories/messageState.ts",
-      "line": 393,
+      "line": 430,
       "symbol": "reconcileMessageStateAuditReceiptsWithinTransaction.<callback:af90f3a5c9>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#projectMessageStateWithinTransaction",
@@ -9650,7 +9650,7 @@
     {
       "id": "src/db/repositories/messageState.ts#reconcileMessageStateAuditReceiptsWithinTransaction:drizzle-delete:b028f9b88852",
       "path": "src/db/repositories/messageState.ts",
-      "line": 397,
+      "line": 434,
       "symbol": "reconcileMessageStateAuditReceiptsWithinTransaction",
       "operation": "drizzle-delete",
       "target": "messageServerStates",
@@ -9663,7 +9663,7 @@
     {
       "id": "src/db/repositories/messageState.ts#reconcileMessageStateAuditReceiptsWithinTransaction:drizzle-update:2afd31e2ea2f:2",
       "path": "src/db/repositories/messageState.ts",
-      "line": 409,
+      "line": 446,
       "symbol": "reconcileMessageStateAuditReceiptsWithinTransaction",
       "operation": "drizzle-update",
       "target": "messageServerStates",
@@ -9676,7 +9676,7 @@
     {
       "id": "src/db/repositories/messageState.ts#reconcileMessageStateAuditReceiptsWithinTransaction.<callback:af90f3a5c9>:mutator-call:164cdd81d77d",
       "path": "src/db/repositories/messageState.ts",
-      "line": 419,
+      "line": 456,
       "symbol": "reconcileMessageStateAuditReceiptsWithinTransaction.<callback:af90f3a5c9>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#projectMessageStateWithinTransaction",
@@ -9689,7 +9689,7 @@
     {
       "id": "src/db/repositories/messageState.ts#setMessageStateAuditWithinTransaction.<callback:23b5cc97e3>:mutator-call:5b49e60ff965",
       "path": "src/db/repositories/messageState.ts",
-      "line": 446,
+      "line": 483,
       "symbol": "setMessageStateAuditWithinTransaction.<callback:23b5cc97e3>",
       "operation": "mutator-call",
       "target": "src/db/repositories/kv.ts#kvSetWithinTransaction",
@@ -9702,7 +9702,7 @@
     {
       "id": "src/db/repositories/messageState.ts#setMessageStateAuditWithinTransaction:drizzle-delete:7e28a060ea67",
       "path": "src/db/repositories/messageState.ts",
-      "line": 447,
+      "line": 484,
       "symbol": "setMessageStateAuditWithinTransaction",
       "operation": "drizzle-delete",
       "target": "kv",
@@ -9715,7 +9715,7 @@
     {
       "id": "src/db/repositories/messageState.ts#installCheckpointAuthorityWithinTransaction.<callback:482fe0d92f>:mutator-call:f88972c8dc2d",
       "path": "src/db/repositories/messageState.ts",
-      "line": 478,
+      "line": 515,
       "symbol": "installCheckpointAuthorityWithinTransaction.<callback:482fe0d92f>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#setMessageStateAuthorityWithinTransaction",
@@ -9728,7 +9728,7 @@
     {
       "id": "src/db/repositories/messageState.ts#installCheckpointAuthorityWithinTransaction.<callback:482fe0d92f>:mutator-call:24ed01629381",
       "path": "src/db/repositories/messageState.ts",
-      "line": 480,
+      "line": 517,
       "symbol": "installCheckpointAuthorityWithinTransaction.<callback:482fe0d92f>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#clearPendingMessageStateRepairWithinTransaction",
@@ -9741,7 +9741,7 @@
     {
       "id": "src/db/repositories/messageState.ts#installCheckpointAuthorityWithinTransaction.<callback:482fe0d92f>:mutator-call:06bb7e68a4c4",
       "path": "src/db/repositories/messageState.ts",
-      "line": 481,
+      "line": 518,
       "symbol": "installCheckpointAuthorityWithinTransaction.<callback:482fe0d92f>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#clearProviderRepairBackoffWithinTransaction",
@@ -9754,7 +9754,7 @@
     {
       "id": "src/db/repositories/messageState.ts#installCheckpointAuthorityWithinTransaction.<callback:482fe0d92f>:mutator-call:b01a88fb227b",
       "path": "src/db/repositories/messageState.ts",
-      "line": 482,
+      "line": 519,
       "symbol": "installCheckpointAuthorityWithinTransaction.<callback:482fe0d92f>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#setMessageStateAuditWithinTransaction",
@@ -9767,7 +9767,7 @@
     {
       "id": "src/db/repositories/messageState.ts#projectMessageStateWithinTransaction:sql-update:17a55244ec52",
       "path": "src/db/repositories/messageState.ts",
-      "line": 532,
+      "line": 569,
       "symbol": "projectMessageStateWithinTransaction",
       "operation": "sql-update",
       "target": "messages",
@@ -9780,7 +9780,7 @@
     {
       "id": "src/db/repositories/messageState.ts#projectMessageStateWithinTransaction:sql-update:739c386c8f9d",
       "path": "src/db/repositories/messageState.ts",
-      "line": 548,
+      "line": 585,
       "symbol": "projectMessageStateWithinTransaction",
       "operation": "sql-update",
       "target": "chats",
@@ -9793,7 +9793,7 @@
     {
       "id": "src/db/repositories/messageState.ts#hideSnapshotMessagesWithinTransaction:drizzle-insert:27523bc264e7",
       "path": "src/db/repositories/messageState.ts",
-      "line": 586,
+      "line": 623,
       "symbol": "hideSnapshotMessagesWithinTransaction",
       "operation": "drizzle-insert",
       "target": "messageServerStates",
@@ -9806,7 +9806,7 @@
     {
       "id": "src/db/repositories/messageState.ts#hideSnapshotMessagesWithinTransaction.<callback:8ed2cca574>:mutator-call:0e1d22a45d76",
       "path": "src/db/repositories/messageState.ts",
-      "line": 608,
+      "line": 645,
       "symbol": "hideSnapshotMessagesWithinTransaction.<callback:8ed2cca574>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#projectMessageStateWithinTransaction",
@@ -9819,7 +9819,7 @@
     {
       "id": "src/db/repositories/messageState.ts#applyMessageStateWithinTransaction:drizzle-insert:a480352ce3fb",
       "path": "src/db/repositories/messageState.ts",
-      "line": 647,
+      "line": 684,
       "symbol": "applyMessageStateWithinTransaction",
       "operation": "drizzle-insert",
       "target": "messageServerStates",
@@ -9832,7 +9832,7 @@
     {
       "id": "src/db/repositories/messageState.ts#applyMessageStateWithinTransaction.<callback:c788e12c5b>:mutator-call:1ab315b9910d",
       "path": "src/db/repositories/messageState.ts",
-      "line": 669,
+      "line": 706,
       "symbol": "applyMessageStateWithinTransaction.<callback:c788e12c5b>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#projectMessageStateWithinTransaction",
@@ -9845,7 +9845,7 @@
     {
       "id": "src/db/repositories/messageState.ts#bindHydratedMessageOwnerWithinTransaction:sql-update:d0bb9118d0d5",
       "path": "src/db/repositories/messageState.ts",
-      "line": 712,
+      "line": 749,
       "symbol": "bindHydratedMessageOwnerWithinTransaction",
       "operation": "sql-update",
       "target": "message_server_states",
@@ -9858,7 +9858,7 @@
     {
       "id": "src/db/repositories/messageState.ts#restoreSnapshotMessagesWithinTransaction:sql-update:342184bafa2b",
       "path": "src/db/repositories/messageState.ts",
-      "line": 729,
+      "line": 766,
       "symbol": "restoreSnapshotMessagesWithinTransaction",
       "operation": "sql-update",
       "target": "message_server_states",
@@ -9871,7 +9871,7 @@
     {
       "id": "src/db/repositories/messageState.ts#restoreSnapshotMessagesWithinTransaction.<callback:581b831f2c>:mutator-call:759c805c8f40",
       "path": "src/db/repositories/messageState.ts",
-      "line": 739,
+      "line": 776,
       "symbol": "restoreSnapshotMessagesWithinTransaction.<callback:581b831f2c>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#projectMessageStateWithinTransaction",
@@ -9884,7 +9884,7 @@
     {
       "id": "src/db/repositories/messageState.ts#bindSnapshotMessageOwnersWithinTransaction:sql-update:656988790011",
       "path": "src/db/repositories/messageState.ts",
-      "line": 754,
+      "line": 791,
       "symbol": "bindSnapshotMessageOwnersWithinTransaction",
       "operation": "sql-update",
       "target": "message_server_states",
@@ -9897,7 +9897,7 @@
     {
       "id": "src/db/repositories/messageState.ts#rebaseOldMessageStateBatchWithinTransaction:drizzle-delete:b2df5a4c672d",
       "path": "src/db/repositories/messageState.ts",
-      "line": 783,
+      "line": 820,
       "symbol": "rebaseOldMessageStateBatchWithinTransaction",
       "operation": "drizzle-delete",
       "target": "messageServerStates",
@@ -9910,7 +9910,7 @@
     {
       "id": "src/db/repositories/messageState.ts#rebaseOldMessageStateBatchWithinTransaction:drizzle-update:b36f18620076",
       "path": "src/db/repositories/messageState.ts",
-      "line": 787,
+      "line": 824,
       "symbol": "rebaseOldMessageStateBatchWithinTransaction",
       "operation": "drizzle-update",
       "target": "messageServerStates",
@@ -9923,7 +9923,7 @@
     {
       "id": "src/db/repositories/messageState.ts#rebaseOldMessageStateBatchWithinTransaction.<callback:9d885189fc>:mutator-call:14216fa2b3f7",
       "path": "src/db/repositories/messageState.ts",
-      "line": 799,
+      "line": 836,
       "symbol": "rebaseOldMessageStateBatchWithinTransaction.<callback:9d885189fc>",
       "operation": "mutator-call",
       "target": "src/db/repositories/messageState.ts#projectMessageStateWithinTransaction",

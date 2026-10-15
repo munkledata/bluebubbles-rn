@@ -19,7 +19,7 @@ export const RECENT_UNFENCED_OUTGOING_GRACE_MS = 60 * 60 * 1000;
 export const MESSAGE_STATE_AUDIT_KEY = 'sync.messageState.imessage.audit';
 /** When an automatic provider repair may next run after a failure, for one provider pairing. */
 export const PROVIDER_REPAIR_BACKOFF_KEY = 'sync.messageState.imessage.repairBackoff';
-/** The ledger an unfinished provider repair is moving rows into (see setPendingMessageStateRepair…). */
+/** Ledgers unfinished provider repairs are moving rows into (see setPendingMessageStateRepair…). */
 export const MESSAGE_STATE_PENDING_REPAIR_KEY = 'sync.messageState.imessage.pendingRepair';
 
 function parseAuthority(raw: string | null): MessageStateAuthority | null {
@@ -65,23 +65,59 @@ export interface MessageStateLedger {
   readonly ledgerEpoch: string;
 }
 
+/** Unfinished repairs remembered at once; installing any ledger forgets them all. */
+const MAX_PENDING_REPAIR_LEDGERS = 8;
+
+function isMessageStateLedger(value: unknown): value is MessageStateLedger {
+  const ledger = value as Partial<MessageStateLedger> | null;
+  return (
+    typeof ledger === 'object' &&
+    ledger !== null &&
+    typeof ledger.providerEpoch === 'string' &&
+    ledger.providerEpoch.length > 0 &&
+    typeof ledger.ledgerEpoch === 'string' &&
+    ledger.ledgerEpoch.length > 0
+  );
+}
+
+/** Pending repair ledgers, oldest first. A single object is the record's first stored form. */
+function parsePendingRepairLedgers(raw: string | null): MessageStateLedger[] {
+  if (raw == null) return [];
+  try {
+    const value: unknown = JSON.parse(raw);
+    return (Array.isArray(value) ? value : [value])
+      .filter(isMessageStateLedger)
+      .map(({ providerEpoch, ledgerEpoch }) => ({ providerEpoch, ledgerEpoch }));
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Record the ledger a provider repair is moving rows into, before its first row moves (review M053).
  *
  * The repair re-tags, restores and hides rows in bounded steps and installs its ledger last. Those
  * rows come from a finished snapshot, so until the install they are as trustworthy as the installed
  * ledger's. Without this record, a repair stopped between steps left them ignored, and ordinary sync
- * un-hid the server deletions they held. Installing a ledger (repair finish or checkpoint) clears it.
+ * un-hid the server deletions they held. The record is a list: a later repair for another ledger
+ * must not drop an earlier unfinished one whose rows it has not moved yet. Installing a ledger
+ * (repair finish or checkpoint) clears the whole list.
  */
 export async function setPendingMessageStateRepairWithinTransaction(
   context: DbTransactionContext,
   authority: MessageStateAuthority,
 ): Promise<void> {
   return runInTransactionContext(context, async () => {
+    const { providerEpoch, ledgerEpoch } = MessageStateAuthority.parse(authority);
+    const ledgers = parsePendingRepairLedgers(
+      await kvGetWithinTransaction(context, MESSAGE_STATE_PENDING_REPAIR_KEY),
+    );
+    if (!isTrustedMessageStateLedger({ providerEpoch, ledgerEpoch }, ledgers))
+      ledgers.push({ providerEpoch, ledgerEpoch });
     await kvSetWithinTransaction(
       context,
       MESSAGE_STATE_PENDING_REPAIR_KEY,
-      JSON.stringify(MessageStateAuthority.parse(authority)),
+      JSON.stringify(ledgers.slice(-MAX_PENDING_REPAIR_LEDGERS)),
     );
   });
 }
@@ -94,20 +130,21 @@ export async function clearPendingMessageStateRepairWithinTransaction(
   });
 }
 
-/** Ledgers whose rows count as server evidence: the installed one and an unfinished repair's. */
+/** Ledgers whose rows count as server evidence: the installed one and unfinished repairs'. */
 export async function getTrustedMessageStateLedgersWithinTransaction(
   context: DbTransactionContext,
 ): Promise<readonly MessageStateLedger[]> {
   return runInTransactionContext(context, async () => {
-    const ledgers: MessageStateLedger[] = [];
-    for (const key of [MESSAGE_STATE_AUTHORITY_KEY, MESSAGE_STATE_PENDING_REPAIR_KEY]) {
-      const authority = parseAuthority(await kvGetWithinTransaction(context, key));
-      if (authority && !isTrustedMessageStateLedger(authority, ledgers))
-        ledgers.push({
-          providerEpoch: authority.providerEpoch,
-          ledgerEpoch: authority.ledgerEpoch,
-        });
-    }
+    const installed = parseAuthority(
+      await kvGetWithinTransaction(context, MESSAGE_STATE_AUTHORITY_KEY),
+    );
+    const ledgers: MessageStateLedger[] = installed
+      ? [{ providerEpoch: installed.providerEpoch, ledgerEpoch: installed.ledgerEpoch }]
+      : [];
+    for (const pending of parsePendingRepairLedgers(
+      await kvGetWithinTransaction(context, MESSAGE_STATE_PENDING_REPAIR_KEY),
+    ))
+      if (!isTrustedMessageStateLedger(pending, ledgers)) ledgers.push(pending);
     return ledgers;
   });
 }
