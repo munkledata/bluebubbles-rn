@@ -15461,7 +15461,7 @@
     {
       "id": "src/services/boot/foregroundBoot.ts#<module>:mutator-reference:ace67f713c95",
       "path": "src/services/boot/foregroundBoot.ts",
-      "line": 130,
+      "line": 131,
       "symbol": "<module>",
       "operation": "mutator-reference",
       "target": "src/services/bootstrap.ts#inspectForegroundBootSession",
@@ -15474,7 +15474,7 @@
     {
       "id": "src/services/boot/foregroundBoot.ts#<module>:mutator-reference:fcf356fa69c2",
       "path": "src/services/boot/foregroundBoot.ts",
-      "line": 131,
+      "line": 132,
       "symbol": "<module>",
       "operation": "mutator-reference",
       "target": "src/services/bootstrap.ts#openForegroundBootDatabase",
@@ -15487,7 +15487,7 @@
     {
       "id": "src/services/boot/foregroundBoot.ts#<module>:mutator-reference:ca17968027de",
       "path": "src/services/boot/foregroundBoot.ts",
-      "line": 133,
+      "line": 134,
       "symbol": "<module>",
       "operation": "mutator-reference",
       "target": "src/services/bootstrap.ts#activateForegroundBootSession",
@@ -15500,7 +15500,7 @@
     {
       "id": "src/services/boot/foregroundBoot.ts#initializeForegroundBootComposition.<callback:3745c8b485>:mutator-call:60bff6bb7fec",
       "path": "src/services/boot/foregroundBoot.ts",
-      "line": 158,
+      "line": 159,
       "symbol": "initializeForegroundBootComposition.<callback:3745c8b485>",
       "operation": "mutator-call",
       "target": "src/services/boot/foregroundBoot.ts#startForegroundBoot",
@@ -15513,7 +15513,7 @@
     {
       "id": "src/services/boot/foregroundBoot.ts#initializeForegroundBootComposition.<callback:58f904a832>:mutator-call:f6945f73aad5",
       "path": "src/services/boot/foregroundBoot.ts",
-      "line": 167,
+      "line": 168,
       "symbol": "initializeForegroundBootComposition.<callback:58f904a832>",
       "operation": "mutator-call",
       "target": "src/services/boot/foregroundBoot.ts#startForegroundBoot",
@@ -15526,7 +15526,7 @@
     {
       "id": "src/services/boot/foregroundBoot.ts#startProcessWork:mutator-call:cf8efda7183b",
       "path": "src/services/boot/foregroundBoot.ts",
-      "line": 250,
+      "line": 251,
       "symbol": "startProcessWork",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#initErrorReporting",
@@ -15539,7 +15539,7 @@
     {
       "id": "src/services/boot/foregroundBoot.ts#startProcessWork:mutator-call:aa8863fe1bcb",
       "path": "src/services/boot/foregroundBoot.ts",
-      "line": 313,
+      "line": 314,
       "symbol": "startProcessWork",
       "operation": "mutator-call",
       "target": "src/db/database.ts#runDbDriverSelfTest",
@@ -15552,7 +15552,7 @@
     {
       "id": "src/services/boot/foregroundBoot.ts#startForegroundBoot:mutator-call:165c37fb47c7",
       "path": "src/services/boot/foregroundBoot.ts",
-      "line": 325,
+      "line": 326,
       "symbol": "startForegroundBoot",
       "operation": "mutator-call",
       "target": "src/services/boot/devDbRelaunchContract.ts#startDevDbRelaunchContractIfRequested",
@@ -15565,7 +15565,7 @@
     {
       "id": "src/services/boot/foregroundBoot.ts#startForegroundBoot:mutator-call:0337c4c095d4",
       "path": "src/services/boot/foregroundBoot.ts",
-      "line": 329,
+      "line": 330,
       "symbol": "startForegroundBoot",
       "operation": "mutator-call",
       "target": "src/services/boot/foregroundBoot.ts#startProcessWork",

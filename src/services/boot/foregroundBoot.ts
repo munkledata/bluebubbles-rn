@@ -82,13 +82,14 @@ function classifyForegroundBootFailure(
   }
   if (error instanceof BootStageTimeoutError && stage === 'database') {
     // `ensureDatabase` deliberately retains a non-settling first open so a second SQLCipher
-    // connection cannot race its migrations. Only a process restart can safely replace it.
+    // connection cannot race its migrations. A retry therefore waits on that same open, which lets
+    // a slow first open (a long migration) finish; only a truly stuck open needs a process restart.
     return {
-      kind: 'fatal',
+      kind: 'retryable',
       failClosed: true,
       code: 'database-timeout',
       userMessage:
-        'Gator could not finish opening your encrypted messages. Fully close and reopen Gator to try again.',
+        'Gator is still opening your encrypted messages. Try again in a moment, or fully close and reopen Gator if this keeps happening.',
     };
   }
   if (error instanceof BootStageTimeoutError) {

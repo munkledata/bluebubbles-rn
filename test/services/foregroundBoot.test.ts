@@ -526,7 +526,9 @@ describe('production foreground boot singleton', () => {
     ).not.toContain(driverFailure.message);
   });
 
-  it('makes a non-settling database open fatal because a second native open is unsafe', async () => {
+  it('lets a slow database open be retried, because a retry rejoins the same open', async () => {
+    // ensureDatabase shares one in-flight open between callers (ensureDatabaseSingleFlight.test.ts),
+    // so a retry waits on the first open instead of starting a second native connection.
     jest.useFakeTimers();
     try {
       mockOpenForegroundBootDatabase.mockImplementationOnce(
@@ -547,19 +549,19 @@ describe('production foreground boot singleton', () => {
         runId: 1,
         failure: {
           stage: 'database',
-          kind: 'fatal',
+          kind: 'retryable',
           failClosed: true,
           code: 'database-timeout',
           userMessage:
-            'Gator could not finish opening your encrypted messages. Fully close and reopen Gator to try again.',
+            'Gator is still opening your encrypted messages. Try again in a moment, or fully close and reopen Gator if this keeps happening.',
         },
       });
       await expect(foreground.retryForegroundBoot(1)).resolves.toMatchObject({
-        status: 'failed',
-        runId: 1,
-        failure: { kind: 'fatal', code: 'database-timeout' },
+        status: 'ready',
+        mode: 'connected',
+        runId: 2,
       });
-      expect(mockOpenForegroundBootDatabase).toHaveBeenCalledTimes(1);
+      expect(mockOpenForegroundBootDatabase).toHaveBeenCalledTimes(2);
     } finally {
       jest.useRealTimers();
     }
