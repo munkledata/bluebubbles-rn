@@ -443,10 +443,15 @@ export default function MediaViewer(): React.JSX.Element {
           if (path != null || !pendingDownloadIsCurrent(operation)) return;
           // A null result may come from a refusal that never touched the store (e.g. RCS media
           // from a previous Google pairing), which left "Downloading media…" up with no Retry.
-          // A transfer another owner still runs, or just finished, publishes its own end state.
+          // A transfer another owner still runs, or just finished, publishes its own end state,
+          // and so does a failure the downloader already recorded with its reason (too large).
           const guid = operation.source.attachmentGuid;
           const { status, progress } = useDownloadStore.getState();
-          if (status[guid] === 'downloading' || (status[guid] === 'idle' && progress[guid] === 1)) {
+          if (
+            status[guid] === 'downloading' ||
+            status[guid] === 'error' ||
+            (status[guid] === 'idle' && progress[guid] === 1)
+          ) {
             return;
           }
           useDownloadStore.getState().fail(guid);

@@ -1283,6 +1283,25 @@ describe('MediaViewer gating', () => {
     expect(screen.queryByRole('progressbar', { name: 'Downloading media' })).toBeNull();
   });
 
+  it('keeps the reason a manual download was refused for, so the chat can say why', async () => {
+    const remote = { ...ATT, localPath: null };
+    getAtt.mockResolvedValue(remote);
+    listGallery.mockResolvedValue({ items: [remote], index: 0 });
+    // The downloader publishes its own failure, with a reason the owner can act on, then resolves
+    // null. The viewer must not overwrite that published end state with a reasonless failure.
+    downloadMedia.mockImplementation((att: typeof remote) => {
+      useDownloadStore.getState().fail(att.guid, 'too-large');
+      return Promise.resolve(null);
+    });
+    await renderWithTheme(<MediaViewer />);
+
+    await fireEvent.press(await screen.findByRole('button', { name: 'Download media' }));
+    await waitFor(() => expect(downloadMedia).toHaveBeenCalledTimes(1));
+
+    expect(await screen.findByRole('button', { name: 'Retry media download' })).toBeTruthy();
+    expect(useDownloadStore.getState().failure[remote.guid]).toBe('too-large');
+  });
+
   it('deduplicates Download taps and exposes an exact Retry after failure', async () => {
     const remote = { ...ATT, localPath: null };
     getAtt.mockResolvedValue(remote);
