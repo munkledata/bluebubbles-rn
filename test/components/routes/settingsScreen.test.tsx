@@ -258,6 +258,29 @@ describe('SettingsScreen — toggles wire to the real stores + persist', () => {
     );
   });
 
+  it('switches a privacy preference back and says so when it cannot be saved', async () => {
+    mockKvSetWithinTransaction.mockRejectedValueOnce(new Error('disk full'));
+    await renderWithTheme(<SettingsScreen />);
+
+    await act(async () => {
+      fireEvent(
+        screen.getByLabelText(
+          'Let others see when you have read their messages on supported services',
+        ),
+        'valueChange',
+        false,
+      );
+    });
+
+    await waitFor(() =>
+      expect(useDialogStore.getState().current).toMatchObject({
+        title: 'Setting not saved',
+        message: 'Gator could not save this change, so it was switched back. Try again.',
+      }),
+    );
+    expect(useFeatureSettingsStore.getState().sendReadReceipts).toBe(true);
+  });
+
   it('steps the Parallel Downloads cap up through the store', async () => {
     await renderWithTheme(<SettingsScreen />);
     expect(screen.getByText(/remembers a queued Photos or Gator Album copy/)).toBeTruthy();

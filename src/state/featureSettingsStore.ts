@@ -61,6 +61,18 @@ const FLAGS: Record<FeatureFlag, { key: string; def: boolean }> = {
   filterUnknownSenders: { key: 'chatList.filterUnknownSenders', def: false },
 };
 
+/**
+ * A failed save of these flags is switched back and reported instead of applying only until the
+ * next launch: a silent revert would quietly undo a privacy choice, and turning auto-download off
+ * also cancels pending exports. Other flags stay best-effort for the session.
+ */
+const SAVE_OR_ROLL_BACK_FLAGS: ReadonlySet<FeatureFlag> = new Set<FeatureFlag>([
+  'autoDownloadAttachments',
+  'sendReadReceipts',
+  'sendTypingIndicators',
+  'messageNotifications',
+]);
+
 const RETIRED_PRIVATE_API_MASTER_KEY = 'privateApi.enabled';
 const RETIRED_PRIVATE_API_SUBJECT_KEY = 'privateApi.sendSubjectLines';
 
@@ -360,16 +372,11 @@ export const useFeatureSettingsStore = create<FeatureSettingsState>((set, get) =
         context ? () => canCommitHydration(context) : undefined,
       );
     } catch (error) {
-      if (flag === 'autoDownloadAttachments') {
-        if (context === undefined || canCommitHydration(context)) {
-          if (get()[flag] === value) {
-            set({ [flag]: previous } as Partial<FeatureSettingsState>);
-          }
-          throw error;
-        }
-        return;
-      }
-      // best-effort persist; the in-memory toggle still applies this session
+      // best-effort persist for the rest; the in-memory toggle still applies this session
+      if (!SAVE_OR_ROLL_BACK_FLAGS.has(flag)) return;
+      if (context !== undefined && !canCommitHydration(context)) return;
+      if (get()[flag] === value) set({ [flag]: previous } as Partial<FeatureSettingsState>);
+      throw error;
     }
   },
   setErrorReportingConsent: async (value, context) => {

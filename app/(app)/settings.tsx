@@ -125,6 +125,19 @@ export default function SettingsScreen(): React.JSX.Element {
   const messageNotifications = useFeatureSettingsStore((s) => s.messageNotifications);
   const errorReportingEnabled = useFeatureSettingsStore((s) => s.errorReportingEnabled);
   const setFlag = useFeatureSettingsStore((s) => s.setFlag);
+  // The store switches a privacy choice back when it cannot be saved; say so instead of nothing.
+  const savePrivacyFlag = (
+    flag: 'sendTypingIndicators' | 'sendReadReceipts' | 'messageNotifications',
+    value: boolean,
+  ): void => {
+    void setFlag(flag, value).catch(() => {
+      if (!screenCurrent()) return;
+      showDialog(
+        'Setting not saved',
+        'Gator could not save this change, so it was switched back. Try again.',
+      );
+    });
+  };
   const messagesPerChat = useSyncSettingsStore((s) => s.messagesPerChat);
   const setMessagesPerChat = useSyncSettingsStore((s) => s.setMessagesPerChat);
   const mpcOptions = MESSAGES_PER_CHAT_OPTIONS as readonly number[];
@@ -633,13 +646,13 @@ export default function SettingsScreen(): React.JSX.Element {
             <SwitchRow
               label="Send Typing Indicators"
               value={sendTypingIndicators}
-              onValueChange={(v) => void setFlag('sendTypingIndicators', v)}
+              onValueChange={(v) => savePrivacyFlag('sendTypingIndicators', v)}
               accessibilityLabel="Let others see when you are typing on supported services"
             />
             <SwitchRow
               label="Send Read Receipts"
               value={sendReadReceipts}
-              onValueChange={(v) => void setFlag('sendReadReceipts', v)}
+              onValueChange={(v) => savePrivacyFlag('sendReadReceipts', v)}
               accessibilityLabel="Let others see when you have read their messages on supported services"
             />
             <NoteRow text="These preferences apply only when the connected messaging service supports them. They do not enable retired Private API features." />
@@ -692,7 +705,7 @@ export default function SettingsScreen(): React.JSX.Element {
             <SwitchRow
               label="Message Notifications"
               value={messageNotifications}
-              onValueChange={(v) => void setFlag('messageNotifications', v)}
+              onValueChange={(v) => savePrivacyFlag('messageNotifications', v)}
               accessibilityLabel="Show notifications for new messages"
             />
             <NavRow

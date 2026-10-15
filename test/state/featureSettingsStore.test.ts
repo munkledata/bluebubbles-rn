@@ -219,6 +219,22 @@ describe('featureSettingsStore', () => {
     await useFeatureSettingsStore.getState().setFlag('compactChatList', true);
     expect(useFeatureSettingsStore.getState().compactChatList).toBe(true);
   });
+
+  it.each(['sendReadReceipts', 'sendTypingIndicators', 'messageNotifications'] as const)(
+    'setFlag switches the %s privacy choice back and rejects when the persist fails',
+    async (flag) => {
+      // A silent revert at the next launch would quietly undo what the owner turned off.
+      mockGetDatabase.mockImplementation(() => {
+        throw new Error('Database not initialized');
+      });
+      const before = useFeatureSettingsStore.getState()[flag];
+
+      await expect(useFeatureSettingsStore.getState().setFlag(flag, !before)).rejects.toThrow(
+        'Database not initialized',
+      );
+      expect(useFeatureSettingsStore.getState()[flag]).toBe(before);
+    },
+  );
 });
 
 describe('featureSettingsStore — permission onboarding completion', () => {
