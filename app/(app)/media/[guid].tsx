@@ -435,6 +435,32 @@ export default function MediaViewer(): React.JSX.Element {
     }
   }, []);
 
+  /** Publish the end of a transfer this viewer started, unless a newer request replaced it. */
+  const followViewerTransfer = useCallback(
+    (operation: MediaDownloadOperation, task: Promise<string | null>): void => {
+      void task.then(
+        (path) => {
+          if (path != null || !pendingDownloadIsCurrent(operation)) return;
+          // A null result may come from a refusal that never touched the store (e.g. RCS media
+          // from a previous Google pairing), which left "Downloading media…" up with no Retry.
+          // A transfer another owner still runs, or just finished, publishes its own end state.
+          const guid = operation.source.attachmentGuid;
+          const { status, progress } = useDownloadStore.getState();
+          if (status[guid] === 'downloading' || (status[guid] === 'idle' && progress[guid] === 1)) {
+            return;
+          }
+          useDownloadStore.getState().fail(guid);
+        },
+        (error: unknown) => {
+          if (!pendingDownloadIsCurrent(operation)) return;
+          logger.warn('[media] attachment download failed', error);
+          useDownloadStore.getState().fail(operation.source.attachmentGuid);
+        },
+      );
+    },
+    [pendingDownloadIsCurrent],
+  );
+
   const refreshDownloadedAttachment = useCallback(
     async (operation: MediaDownloadOperation): Promise<void> => {
       if (
@@ -482,6 +508,30 @@ export default function MediaViewer(): React.JSX.Element {
         }
 
         const attachment = result.value;
+        if (
+          operation.joinedFinishedMarker &&
+          attachment &&
+          attachment.guid === operation.source.attachmentGuid &&
+          !isLocalFileUri(attachment.localPath)
+        ) {
+          // The request found only a finished marker, and the DB proves that file is gone (cache
+          // eviction or Repair Downloads). Nothing is transferring, so start the requested
+          // download instead of reporting a failure nothing attempted. It restarts only once.
+          const restarted: MediaDownloadOperation = { ...operation, joinedFinishedMarker: false };
+          pendingDownloadRef.current = restarted;
+          setPendingDownload(restarted);
+          useDownloadStore.getState().clear(attachmentGuid);
+          try {
+            followViewerTransfer(
+              restarted,
+              download({ ...attachment, localPath: null }, 'manual', accountLease),
+            );
+          } catch (error) {
+            logger.warn('[media] attachment download could not start', error);
+            useDownloadStore.getState().fail(attachmentGuid);
+          }
+          return;
+        }
         if (
           !attachment ||
           attachment.guid !== operation.source.attachmentGuid ||
@@ -549,6 +599,7 @@ export default function MediaViewer(): React.JSX.Element {
       clearMediaLoadFailure,
       clearPendingDownload,
       failFinishedDownloadIfStillCurrent,
+      followViewerTransfer,
       pendingDownloadIsCurrent,
     ],
   );
@@ -593,27 +644,29 @@ export default function MediaViewer(): React.JSX.Element {
       return;
     }
 
+    const liveDownloadState = useDownloadStore.getState();
+    const liveStatus = liveDownloadState.status[source.attachmentGuid];
+    const joinedFinishedMarker =
+      !recoversMediaFailure &&
+      liveStatus === 'idle' &&
+      liveDownloadState.progress[source.attachmentGuid] === 1;
     const operation: MediaDownloadOperation = {
       token: Symbol(`media-${intent}-download`),
       intent,
       phase: 'downloading',
       recoversMediaFailure,
       source,
+      joinedFinishedMarker,
     };
     pendingDownloadRef.current = operation;
     downloadRefreshRef.current = null;
     setPendingDownload(operation);
 
-    const liveDownloadState = useDownloadStore.getState();
-    const liveStatus = liveDownloadState.status[source.attachmentGuid];
-    const liveProgress = liveDownloadState.progress[source.attachmentGuid];
-    if (
-      !recoversMediaFailure &&
-      (liveStatus === 'downloading' || (liveStatus === 'idle' && liveProgress === 1))
-    ) {
+    if (!recoversMediaFailure && (liveStatus === 'downloading' || joinedFinishedMarker)) {
       // Another surface already owns the transfer, or just finished it. Keep this requested intent
       // and let the existing terminal-state effect re-read the authoritative DB row; invoking the
       // public front door again here would cancel an RCS backoff owner or collide with its path.
+      // That re-read starts the transfer itself when a finished marker outlived its file.
       return;
     }
 
@@ -626,25 +679,7 @@ export default function MediaViewer(): React.JSX.Element {
       const task = recoversMediaFailure
         ? redownload(attachment, accountLease)
         : download(target, 'manual', accountLease);
-      void task.then(
-        (path) => {
-          if (path != null || !pendingDownloadIsCurrent(operation)) return;
-          // A null result may come from a refusal that never touched the store (e.g. RCS media
-          // from a previous Google pairing), which left "Downloading media…" up with no Retry.
-          // A transfer another owner still runs, or just finished, publishes its own end state.
-          const guid = operation.source.attachmentGuid;
-          const { status, progress } = useDownloadStore.getState();
-          if (status[guid] === 'downloading' || (status[guid] === 'idle' && progress[guid] === 1)) {
-            return;
-          }
-          useDownloadStore.getState().fail(guid);
-        },
-        (error: unknown) => {
-          if (!pendingDownloadIsCurrent(operation)) return;
-          logger.warn('[media] attachment download failed', error);
-          useDownloadStore.getState().fail(operation.source.attachmentGuid);
-        },
-      );
+      followViewerTransfer(operation, task);
     } catch (error) {
       if (!pendingDownloadIsCurrent(operation)) return;
       logger.warn('[media] attachment download could not start', error);

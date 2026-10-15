@@ -51,6 +51,11 @@ export interface MediaDownloadOperation {
   phase: 'downloading' | 'adopted';
   recoversMediaFailure: boolean;
   source: MediaSourceGrant;
+  /**
+   * The request found only a finished-transfer marker and started nothing. That marker can outlive
+   * its file, so the authoritative re-read starts the transfer once if the row has no local file.
+   */
+  joinedFinishedMarker?: boolean;
 }
 
 export interface MediaLoadFailure {

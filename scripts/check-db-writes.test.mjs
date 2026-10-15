@@ -3878,6 +3878,7 @@ test('certifies exactly the reviewed attachment-download delegation boundary', (
     delegated.map((finding) => finding.id).sort(),
     [
       'app/(app)/media/[guid].tsx#MediaViewer.<callback:8d26753ace>:mutator-call:a0bbdb31db62',
+      'app/(app)/media/[guid].tsx#MediaViewer.<callback:c7621d2ab7>:mutator-call:56e6776175c7',
       'app/(app)/media/[guid].tsx#MediaViewer.onSave:mutator-call:c81dabe3f471',
       'app/(app)/media/[guid].tsx#MediaViewer.onShare:mutator-call:5677683b31c4',
       'app/(app)/media/[guid].tsx#MediaViewer.requestDownload:mutator-call:3d37a02ebe19',
@@ -3918,7 +3919,7 @@ test('certifies exactly the reviewed attachment-download delegation boundary', (
       'src/ui/attachments/VideoPlayer.tsx#VideoPlayer:mutator-reference:53bdc004099c',
     ].sort(),
   );
-  assert.equal(delegated.length, 39);
+  assert.equal(delegated.length, 40);
   assert.equal(
     findings.some((finding) => finding.symbol.includes('runTrackedDownloadTransaction')),
     false,

@@ -1378,6 +1378,37 @@ describe('MediaViewer gating', () => {
     expect(downloadMedia).not.toHaveBeenCalled();
   });
 
+  it('starts a real download on the first tap when a finished marker outlived its file', async () => {
+    // A past transfer finished, then its file was removed (cache eviction or Repair Downloads).
+    // Its presentation marker remains, but the authoritative row has no local file.
+    const remote = { ...ATT, localPath: null };
+    const downloaded = { ...remote, localPath: 'file:///docs/refetched-att-1.jpg' };
+    let authoritative: typeof remote | typeof downloaded = remote;
+    getAtt.mockImplementation(() => Promise.resolve(authoritative));
+    listGallery.mockResolvedValue({ items: [remote], index: 0 });
+    downloadMedia.mockImplementation((att: typeof remote) => {
+      useDownloadStore.getState().start(att.guid);
+      return Promise.resolve(null);
+    });
+    await act(async () => useDownloadStore.getState().finish(remote.guid));
+    await renderWithTheme(<MediaViewer />);
+
+    await fireEvent.press(await screen.findByRole('button', { name: 'Download media' }));
+
+    await waitFor(() => expect(downloadMedia).toHaveBeenCalledTimes(1));
+    expect(downloadMedia).toHaveBeenCalledWith(remote, 'manual', expect.anything());
+    expect(useDownloadStore.getState().status[remote.guid]).toBe('downloading');
+
+    // The transfer it started is adopted like any other, without a second download.
+    authoritative = downloaded;
+    await act(async () => {
+      useDownloadStore.getState().finish(remote.guid);
+      await flush();
+    });
+    expect(await screen.findByTestId(`img:${downloaded.localPath}`)).toBeTruthy();
+    expect(downloadMedia).toHaveBeenCalledTimes(1);
+  });
+
   it('does not overwrite a newer start-and-finish cycle when an older reread is stale', async () => {
     const remote = { ...ATT, localPath: null };
     const staleDownloaded = { ...remote, localPath: 'file:///docs/stale-external-att-1.jpg' };
@@ -1447,6 +1478,10 @@ describe('MediaViewer gating', () => {
       await flush();
     });
 
+    // The re-read still counts: the row has no file, so the viewer tried a real download, and the
+    // mocked front door refused it without touching the store.
+    expect(downloadMedia).toHaveBeenCalledTimes(1);
+    expect(downloadMedia).toHaveBeenCalledWith(remote, 'manual', expect.anything());
     expect(useDownloadStore.getState().status[remote.guid]).toBe('error');
   });
 
