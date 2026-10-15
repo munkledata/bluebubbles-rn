@@ -85,6 +85,11 @@ describe('deliveredQuietly (2.2)', () => {
 });
 
 describe('errorTitleForCode (2.4)', () => {
+  it('names local retirement and interrupted sends instead of calling them server errors', () => {
+    expect(errorTitleForCode(10021)).toBe('Can’t Be Sent');
+    expect(errorTitleForCode(10022)).toBe('Send Interrupted');
+  });
+
   it('maps client error codes (≥10000) to friendly titles', () => {
     expect(errorTitleForCode(10001)).toBe('Client Error');
     expect(errorTitleForCode(10002)).toBe('Bad Gateway');

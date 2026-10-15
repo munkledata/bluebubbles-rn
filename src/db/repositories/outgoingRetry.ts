@@ -1,5 +1,6 @@
 import { and, eq, sql } from 'drizzle-orm';
 import { CURRENT_LOCATION_MAX_REPLAY_AGE_MS } from '@core/api/endpoints/messages';
+import { ClientErrorCode } from '@utils';
 import { isRcsChatGuid } from '@utils/chat';
 import { messages, outgoingQueue } from '../schema';
 import {
@@ -892,7 +893,7 @@ export function claimOutgoingForSendWithinTransaction(
         .where(eq(outgoingQueue.id, id));
       await db
         .update(messages)
-        .set({ sendState: 'error', error: 1, errorMessage: null })
+        .set({ sendState: 'error', error: ClientErrorCode.cannotBeSent, errorMessage: null })
         .where(eq(messages.guid, owner.guid));
       return { claimed: false };
     }

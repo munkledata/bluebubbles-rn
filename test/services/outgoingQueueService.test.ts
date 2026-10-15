@@ -1588,6 +1588,33 @@ describe('runOutgoingQueue', () => {
     expect(posts).toBe(0);
     expect(attemptsOf(raw, 'temp-stale-target')).toBe(OUTGOING_MAX_ATTEMPTS);
     expect(stateOf(raw, 'temp-stale-target')).toBe('error');
+    expect(errorOf(raw, 'temp-stale-target')).toBe(ClientErrorCode.cannotBeSent);
+  });
+
+  it('marks a manual Try Again whose reaction target is gone as "Can’t Be Sent"', async () => {
+    const { db, raw } = await createTestDb();
+    await seedChat(db, 'c1');
+    const chatId = await getChatIdByGuid(db, 'c1');
+    // The reacted-to message is gone (sync removed it) by the time the owner taps Try Again.
+    await insertOutgoingReaction(db, {
+      tempGuid: 'temp-react-gone',
+      chatId: chatId!,
+      chatGuid: 'c1',
+      targetGuid: 'gone-target',
+      reaction: 'love',
+      now: 1_000,
+    });
+    raw
+      .prepare(
+        "UPDATE messages SET send_state = 'error', error = 502 WHERE guid = 'temp-react-gone'",
+      )
+      .run();
+
+    await expect(claimFailedOutgoingForRetry(db, 'temp-react-gone')).resolves.toEqual({
+      claim: 'unsendable',
+    });
+    expect(stateOf(raw, 'temp-react-gone')).toBe('error');
+    expect(errorOf(raw, 'temp-react-gone')).toBe(ClientErrorCode.cannotBeSent);
   });
 
   it('applies an explicit oldest-first cap to a background drain', async () => {
@@ -2034,6 +2061,7 @@ describe('runOutgoingQueue — attachment resend', () => {
     expect(attemptsOf(raw, 'temp-gone')).toBe(OUTGOING_MAX_ATTEMPTS);
     expect((await listRetryableOutgoing(db, 9_999_999_999)).length).toBe(0);
     expect(stateOf(raw, 'temp-gone')).toBe('error');
+    expect(errorOf(raw, 'temp-gone')).toBe(ClientErrorCode.attachmentUnreadable);
     expect(queueCount(raw)).toBe(1); // row kept (cancellable / visible to diagnostics)
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn).toHaveBeenCalledWith('[queue] attachment retry has no local file — retiring');
@@ -2421,7 +2449,7 @@ describe('outgoing queue — account revocation while a DB commit waits', () => 
     raw.exec(`
       CREATE TRIGGER pause_automatic_retry_during_retirement
       AFTER UPDATE OF send_state ON messages
-      WHEN OLD.guid = '${tempGuid}' AND NEW.send_state = 'error' AND NEW.error = 1
+      WHEN OLD.guid = '${tempGuid}' AND NEW.send_state = 'error' AND NEW.error = ${ClientErrorCode.cannotBeSent}
       BEGIN
         SELECT pause_automatic_retry_during_retirement();
       END
@@ -2457,7 +2485,7 @@ describe('outgoing queue — account revocation while a DB commit waits', () => 
 
       expect(attemptsOf(raw, tempGuid)).toBe(OUTGOING_MAX_ATTEMPTS);
       expect(stateOf(raw, tempGuid)).toBe('error');
-      expect(errorOf(raw, tempGuid)).toBe(1);
+      expect(errorOf(raw, tempGuid)).toBe(ClientErrorCode.cannotBeSent);
       expect(queueCount(raw)).toBe(1);
       expect(noticeRanInsideTransaction).toBe(false);
       expect(mockNotifyFailedSend).toHaveBeenCalledWith(db, 'c1', tempGuid, expect.any(Function));

@@ -359,10 +359,11 @@ async function retireUnsendableOutgoing(
   chatGuid: string,
   tempGuid: string,
   commitGuard?: DbCommitGuard,
+  code: number = ClientErrorCode.cannotBeSent,
 ): Promise<void> {
   await withDbTransaction(
     db,
-    (context) => retireOutgoingWithinTransaction(context, tempGuid, 1),
+    (context) => retireOutgoingWithinTransaction(context, tempGuid, code),
     commitGuard,
   );
   await notifyFailedSend(db, chatGuid, tempGuid, commitGuard);
@@ -639,7 +640,13 @@ export async function resendOutgoingRow(
         // and the sheet's Delete still works.
         logger.warn(`[queue] attachment retry has no local file — retiring`);
         return (await runAccountCommit(accountLease, (guard) =>
-          retireUnsendableOutgoing(db, row.chatGuid, row.tempGuid, guard),
+          retireUnsendableOutgoing(
+            db,
+            row.chatGuid,
+            row.tempGuid,
+            guard,
+            ClientErrorCode.attachmentUnreadable,
+          ),
         ))
           ? 'unsendable'
           : 'paused';

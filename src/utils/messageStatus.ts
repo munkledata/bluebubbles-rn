@@ -39,6 +39,13 @@ export const ClientErrorCode = {
   contactDeliveryUnconfirmed: 10019,
   /** The server proved a one-shot iMessage contact card was refused before dispatch. */
   contactRejected: 10020,
+  /**
+   * This app retired a queued send that it can never deliver: a retired feature, a reply or
+   * reaction whose exact target is gone, or queued data it cannot read. Not a server error.
+   */
+  cannotBeSent: 10021,
+  /** The connection or server configuration changed while sending; the owner did not cancel. */
+  sendInterrupted: 10022,
 } as const;
 
 /** One-shot sends that may have reached Messages: never "not delivered", never retried. */
@@ -95,6 +102,8 @@ const CLIENT_ERROR_TITLES: Record<number, string> = {
   [ClientErrorCode.messageRejected]: 'Message Not Sent',
   [ClientErrorCode.contactDeliveryUnconfirmed]: 'Delivery Unconfirmed',
   [ClientErrorCode.contactRejected]: 'Contact Card Not Sent',
+  [ClientErrorCode.cannotBeSent]: 'Can’t Be Sent',
+  [ClientErrorCode.sendInterrupted]: 'Send Interrupted',
 };
 
 /**

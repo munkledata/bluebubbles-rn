@@ -426,6 +426,25 @@ describe('handleSendFailure', () => {
     expect(msgRow(raw, 'temp-timeout0000')?.e).not.toBe(ClientErrorCode.connectionRefused);
   });
 
+  it('maps a cancelled request to "Send Interrupted", not "Manually Canceled"', async () => {
+    // Cancel Sending removes the bubble, so a cancellation that reaches a bubble came from a
+    // connection or configuration change the owner did not ask for.
+    const { db, raw } = await createTestDb();
+    await seedOutgoing(db, 'temp-cancel000', 1000);
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+    await handleSendFailure(
+      db,
+      'temp-cancel000',
+      new ApiError('cancelled', 'Request configuration changed during pinned operation'),
+      'queue',
+      'c1',
+    );
+
+    expect(msgRow(raw, 'temp-cancel000')?.e).toBe(ClientErrorCode.sendInterrupted);
+    expect(msgRow(raw, 'temp-cancel000')?.e).not.toBe(ClientErrorCode.userCanceled);
+  });
+
   it('maps a non-HTTP throw to the connection error code (no HTTP part in the log)', async () => {
     const { db, raw } = await createTestDb();
     await seedOutgoing(db, 'temp-eeee0000', 1000);

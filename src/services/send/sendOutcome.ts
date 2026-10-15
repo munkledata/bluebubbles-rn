@@ -335,7 +335,9 @@ export async function handleSendFailure(
     kind === 'local_file'
       ? ClientErrorCode.attachmentUnreadable
       : kind === 'cancelled'
-        ? ClientErrorCode.userCanceled
+        ? // Cancel Sending removes the bubble, so a cancellation recorded here is a connection or
+          // configuration change, never the owner's choice.
+          ClientErrorCode.sendInterrupted
         : kind === 'timeout'
           ? ClientErrorCode.gatewayTimeout
           : kind === 'parse_error'

@@ -1039,7 +1039,7 @@ export function claimFailedOutgoingForRetryWithinTransaction(
         .where(eq(outgoingQueue.id, row.id));
       await db
         .update(messages)
-        .set({ sendState: 'error', error: 1, errorMessage: null })
+        .set({ sendState: 'error', error: ClientErrorCode.cannotBeSent, errorMessage: null })
         .where(eq(messages.guid, current.guid));
       return { claim: 'unsendable' };
     }
