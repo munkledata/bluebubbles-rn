@@ -108,8 +108,19 @@ function classifyForegroundBootFailure(
 }
 
 async function lockStage(context: BootStageContext): Promise<'locked' | 'unlocked'> {
-  await hydrateLock({ shouldCommit: () => !context.stageSignal.aborted });
+  const { notificationCleanupFailed } = await hydrateLock({
+    shouldCommit: () => !context.stageSignal.aborted,
+  });
   if (context.stageSignal.aborted) throw new ForegroundBootSupersededError();
+  if (notificationCleanupFailed) {
+    context.reportIssue({
+      stage: 'lock',
+      level: 'degraded',
+      code: 'app-lock-notification-cleanup-failed',
+      userMessage:
+        'App Lock is on, but some older notifications could not be cleared. Remove them from the notification shade.',
+    });
+  }
   return useLockStore.getState().locked ? 'locked' : 'unlocked';
 }
 

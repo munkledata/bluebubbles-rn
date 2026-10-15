@@ -256,7 +256,7 @@ beforeEach(() => {
   mockLockState.locked = false;
 
   const attempt = privateAttempt();
-  mockHydrateLock.mockResolvedValue(undefined);
+  mockHydrateLock.mockResolvedValue({ notificationCleanupFailed: false });
   mockInspectForegroundBootSession.mockResolvedValue(connected(attempt));
   mockOpenForegroundBootDatabase.mockResolvedValue(undefined);
   mockHydrateForegroundBootSettings.mockResolvedValue(undefined);
@@ -389,6 +389,28 @@ describe('production foreground boot singleton', () => {
       status: 'idle',
       runId: 1,
     });
+  });
+
+  it('starts locked with a warning when App Lock could not clear older notifications', async () => {
+    mockLockState.locked = true;
+    mockHydrateLock.mockResolvedValueOnce({ notificationCleanupFailed: true });
+    const { foreground } = loadForegroundBoot();
+
+    void foreground.startForegroundBoot();
+    const locked = await waitForBootState(
+      foreground.getForegroundBootSnapshot,
+      (state) => state.status === 'locked',
+    );
+
+    expect(locked.issues).toEqual([
+      {
+        stage: 'lock',
+        level: 'degraded',
+        code: 'app-lock-notification-cleanup-failed',
+        userMessage:
+          'App Lock is on, but some older notifications could not be cleared. Remove them from the notification shade.',
+      },
+    ]);
   });
 
   it('keeps a locked run pending and resumes only its exact rendered run id', async () => {

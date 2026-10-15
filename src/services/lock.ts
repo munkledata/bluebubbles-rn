@@ -55,17 +55,37 @@ function beginLockPolicyOperation(): void {
   lockPolicyOperationPending = true;
 }
 
+export interface LockHydration {
+  /**
+   * App Lock is on but clearing already-shown notifications failed. The app still starts locked and
+   * the notification privacy barrier stays up; only notifications shown before this start remain.
+   */
+  readonly notificationCleanupFailed: boolean;
+}
+
 /** Read the persisted app-lock setting from the vault (no DB needed) and apply it. */
-export async function hydrateLock(options: { shouldCommit?: () => boolean } = {}): Promise<void> {
+export async function hydrateLock(
+  options: { shouldCommit?: () => boolean } = {},
+): Promise<LockHydration> {
   beginLockPolicyOperation();
+  let notificationCleanupFailed = false;
   try {
     const v = await vault.get('appLockEnabled');
     if (v !== null && v !== 'true' && v !== 'false') throw new InvalidAppLockSettingError();
-    if (options.shouldCommit && !options.shouldCommit()) return;
+    if (options.shouldCommit && !options.shouldCommit()) return { notificationCleanupFailed };
     const enabled = v === 'true';
     if (enabled) {
-      await beginAppLockNotificationPrivacy();
-      if (options.shouldCommit && !options.shouldCommit()) return;
+      try {
+        await beginAppLockNotificationPrivacy();
+      } catch (error) {
+        // Blocking startup protects nothing more: App Lock already hides private notification
+        // content, and the barrier installed above stays up. Start locked and warn instead.
+        logger.warn('[lock] App Lock notification cleanup failed at startup', {
+          errorName: error instanceof Error ? error.name : 'UnknownError',
+        });
+        notificationCleanupFailed = true;
+      }
+      if (options.shouldCommit && !options.shouldCommit()) return { notificationCleanupFailed };
     }
     // App Lock cannot publish while account-derived Direct Share labels remain visible in Android's
     // chooser. Clear them synchronously before the protected React tree can render or unmount.
@@ -75,7 +95,9 @@ export async function hydrateLock(options: { shouldCommit?: () => boolean } = {}
     // protection until rebuilt and device-verified.
     syncNativeAppLockPolicy(enabled);
     useLockStore.getState().hydrate(enabled);
-    commitAppLockNotificationPrivacy();
+    // Lift the barrier only after a verified sweep.
+    if (!notificationCleanupFailed) commitAppLockNotificationPrivacy();
+    return { notificationCleanupFailed };
   } finally {
     lockPolicyOperationPending = false;
   }

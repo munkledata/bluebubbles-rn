@@ -220,12 +220,17 @@ describe('setAppLockEnabled', () => {
     expect(setNativeAppLockEnabled).not.toHaveBeenCalled();
   });
 
-  it('rejects failed cold cleanup without publishing hydrated state', async () => {
+  it('starts locked after a failed cold cleanup, keeps the privacy barrier, and reports it', async () => {
     useLockStore.setState({ enabled: false, locked: false, hydrated: false });
     vaultGet.mockResolvedValueOnce('true');
     beginAppLockNotificationPrivacy.mockRejectedValueOnce(new Error('native cleanup'));
-    await expect(hydrateLock()).rejects.toThrow('native cleanup');
-    expect(useLockStore.getState().hydrated).toBe(false);
+
+    await expect(hydrateLock()).resolves.toEqual({ notificationCleanupFailed: true });
+
+    expect(useLockStore.getState()).toMatchObject({ enabled: true, locked: true, hydrated: true });
+    expect(clearCurrentShareShortcuts).toHaveBeenCalledTimes(1);
+    expect(setNativeAppLockEnabled).toHaveBeenCalledWith(true);
+    // The barrier stays up until a later sweep is verified.
     expect(commitAppLockNotificationPrivacy).not.toHaveBeenCalled();
   });
 
