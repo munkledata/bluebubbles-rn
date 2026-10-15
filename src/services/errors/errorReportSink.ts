@@ -31,13 +31,16 @@ const RETIRED_DRAIN = new Error('retired error-report drain');
 
 interface PendingReport extends PrivacySafeErrorReport {
   createdAt: number;
+  /** Accept order, so a caller can tell when its own report has been saved. Never stored. */
+  seq: number;
 }
 
 export class ErrorReportSink implements LogSink {
   private ring: PendingReport[] = [];
   private drainTimer: ReturnType<typeof setTimeout> | null = null;
   private busy = false; // true while enqueuing OR draining — drops re-entrant error logs
-  private accepted = 0; // reports taken into the ring; lets a replay confirm it was not dropped
+  private accepted = 0; // reports taken into the ring; each report's seq is its accept number
+  private savedThrough = 0; // seq of the newest report whose insert committed
   private sessionGeneration = 0;
   private readonly activeDrains = new Set<Promise<void>>();
 
@@ -59,6 +62,7 @@ export class ErrorReportSink implements LogSink {
         // discarded before the encrypted queue sees them.
         ...projectCapturedErrorReport(message, meta),
         createdAt: Date.now(),
+        seq: this.accepted + 1,
       });
       this.accepted += 1;
       if (this.ring.length > RING_CAPACITY) this.ring.splice(0, this.ring.length - RING_CAPACITY);
@@ -70,9 +74,14 @@ export class ErrorReportSink implements LogSink {
     }
   }
 
-  /** Reports accepted so far. A replay compares it before and after logging to know it landed. */
+  /** Reports accepted so far; the newest accepted report's seq. */
   get acceptedReports(): number {
     return this.accepted;
+  }
+
+  /** Seq of the newest report saved to the database queue (0 before any save). */
+  get savedReportsThrough(): number {
+    return this.savedThrough;
   }
 
   private scheduleDrain(): void {
@@ -160,6 +169,7 @@ export class ErrorReportSink implements LogSink {
         // callback's final check and the coordinator issuing COMMIT.
         () => generation === this.sessionGeneration && hasErrorReportingConsent(),
       );
+      this.savedThrough = Math.max(this.savedThrough, batch[batch.length - 1]?.seq ?? 0);
     } catch {
       // Best-effort diagnostics: a failed/stale batch is deliberately dropped rather than retried
       // forever or allowed to cross an account boundary.

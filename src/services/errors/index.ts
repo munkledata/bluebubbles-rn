@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 import { logSinks } from '@core/secure';
 import { getDatabase } from '@db/database';
 import { clearErrorReportsWithinTransaction } from '@db/repositories';
-import { reportWriteQueueWedge, withDbTransaction } from '@db/transaction';
+import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { sessionAccessors, useSessionStore } from '@state/sessionStore';
 import { hasErrorReportingConsent, useFeatureSettingsStore } from '@state/featureSettingsStore';
@@ -14,8 +14,9 @@ import {
 } from '../realtime/deliveryCoordinator';
 import {
   clearRecordedDbWriteWedge,
-  hasEarlierRunDbWriteWedge,
   installDbWriteWedgeRecord,
+  replayEarlierRunDbWriteWedge,
+  settleReplayedDbWriteWedge,
 } from './dbWriteWedgeRecord';
 import { errorReportSink } from './errorReportSink';
 import { installGlobalErrorHandlers } from './globalErrorHandlers';
@@ -115,23 +116,6 @@ export function initErrorReporting(): void {
   );
 }
 
-/**
- * Re-report a write-queue wedge an earlier run recorded outside SQLite but could not save (review
- * M045). Called only while this account's reporting is live. The record is cleared only once the
- * sink took the report, so a replay skipped while another save was running retries next flush.
- */
-function replayEarlierRunDbWriteWedge(): void {
-  if (!hasEarlierRunDbWriteWedge()) return;
-  const accepted = errorReportSink.acceptedReports;
-  reportWriteQueueWedge();
-  if (errorReportSink.acceptedReports <= accepted) return;
-  try {
-    clearRecordedDbWriteWedge();
-  } catch {
-    // The report is queued; a file that would not delete only means one more replay next launch.
-  }
-}
-
 /** This device's constant context for the upload envelope (Android RN client). */
 function clientContext(): ClientContext {
   return {
@@ -192,6 +176,9 @@ export async function flushErrorReports(): Promise<void> {
       }
     }
     if (!runIsCurrent()) return;
+    // A wedge an earlier run recorded outside SQLite (review M045): forget a replay saved since the
+    // last flush, or queue the replay now.
+    settleReplayedDbWriteWedge();
     replayEarlierRunDbWriteWedge();
     const { origin, password } = useSessionStore.getState();
     if (!origin || !password) return; // not connected — no auth to POST with
@@ -201,6 +188,7 @@ export async function flushErrorReports(): Promise<void> {
     controller = uploadController;
     activeUploadController = uploadController;
     await errorReportSink.flushToDb(); // persist the in-memory ring first
+    settleReplayedDbWriteWedge();
     if (!runIsCurrent() || !hasErrorReportingConsent()) return;
     await runErrorReportQueue(db, http, Date.now(), clientContext(), accountLease, {
       isUploadAllowed: hasErrorReportingConsent,

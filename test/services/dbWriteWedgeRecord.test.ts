@@ -36,10 +36,12 @@ jest.mock('@/services/errors/globalErrorHandlers', () => ({
 }));
 
 import type Database from 'better-sqlite3';
+import type { ServerInfo } from '@core/models';
 import { ERROR_DIAGNOSTIC_SITES, logger } from '@core/secure';
 import * as transaction from '@db/transaction';
 import { useFeatureSettingsStore } from '@state/featureSettingsStore';
 import { useSessionStore } from '@state/sessionStore';
+import { http } from '@/services/clients';
 import { flushErrorReports, initErrorReporting } from '@/services/errors';
 import { errorReportSink } from '@/services/errors/errorReportSink';
 import {
@@ -86,7 +88,7 @@ beforeEach(() => {
   resumeRealtimeDeliveries();
   useFeatureSettingsStore.setState({ errorReportingEnabled: true, hydrated: true });
   // Not connected: the replay must not depend on an upload being possible right now.
-  useSessionStore.setState({ origin: null, password: null });
+  useSessionStore.setState({ origin: null, password: null, serverInfo: null });
 });
 
 it('replays a wedge an earlier run recorded, once reporting is live, then deletes the record', async () => {
@@ -95,10 +97,13 @@ it('replays a wedge an earlier run recorded, once reporting is live, then delete
 
   initErrorReporting();
   await flushErrorReports();
+  // Queued, not yet saved: the record stays until the sink saves the report.
+  expect(mockMarker.marked).toBe(true);
 
-  expect(mockMarker.marked).toBe(false);
   await errorReportSink.flushToDb();
   expect(storedMessages(raw)).toEqual([WEDGE]);
+  await flushErrorReports();
+  expect(mockMarker.marked).toBe(false);
 
   // Replayed once: a later flush in the same run does not report it again.
   await flushErrorReports();
@@ -135,9 +140,54 @@ it('keeps the record when the report could not be taken, and replays it on a lat
   await neighbour.cleanup();
   await saving;
   await flushErrorReports();
-  expect(mockMarker.marked).toBe(false);
   await errorReportSink.flushToDb();
   expect(storedMessages(raw)).toEqual(['sync.run_failed', WEDGE]);
+  await flushErrorReports();
+  expect(mockMarker.marked).toBe(false);
+});
+
+it('deletes the record only after the replayed report is saved', async () => {
+  // Review of M045: deleting the record when the report merely entered memory lost it if the app
+  // was killed before the save.
+  const raw = await freshDb();
+  mockMarker.marked = true;
+  initErrorReporting();
+
+  // Connected to a server that takes reports, so the flush saves the queued replay itself before
+  // its (here failing) upload; another transaction holds the lock meanwhile.
+  useSessionStore.setState({
+    origin: 'https://server.example',
+    password: 'pw',
+    serverInfo: { supports_error_log_upload: true } as unknown as ServerInfo,
+  });
+  (http.post as jest.Mock).mockRejectedValue(new Error('offline'));
+  const neighbour = holdRollingBackDbNeighbour(mockDb as never, () => undefined);
+  await neighbour.entered;
+  const flushing = flushErrorReports();
+  for (let turn = 0; turn < 20; turn += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  // The report is queued but cannot be saved while the lock is held.
+  expect(mockMarker.marked).toBe(true);
+
+  await neighbour.cleanup();
+  await flushing;
+  expect(storedMessages(raw)).toEqual([WEDGE]);
+  expect(mockMarker.marked).toBe(false);
+});
+
+it("does not replay an earlier wedge while this run's own queue is wedged", async () => {
+  // Review of M045: the replay could never be saved then, and deleting the record would also erase
+  // the only trace of this run's wedge, which shares the same file.
+  await freshDb();
+  mockMarker.marked = true;
+  initErrorReporting();
+
+  installedWedgeListener()();
+  await flushErrorReports();
+
+  expect(mockMarker.clear).not.toHaveBeenCalled();
+  expect(mockMarker.marked).toBe(true);
 });
 
 it('records nothing without consent or after Disconnect, and both delete an existing record', async () => {
