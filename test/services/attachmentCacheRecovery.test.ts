@@ -5,7 +5,7 @@ import {
 } from '@db/repositories';
 import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
-import type { AttachmentCacheScanFile } from '@native/boundedDownload';
+import { NativeBoundedDownloadError, type AttachmentCacheScanFile } from '@native/boundedDownload';
 import { sql } from 'drizzle-orm';
 import {
   AttachmentCacheCoordinator,
@@ -267,6 +267,33 @@ it('queues each adoption owner behind a rolling-back neighbour and commits indep
     resolveScan?.([]);
     await neighbour?.cleanup();
     if (recovery) await Promise.allSettled([recovery]);
+    raw.close();
+  }
+});
+
+it('stops the startup scan once the account is revoked and reports it as stale', async () => {
+  const { db, raw } = await createTestDb();
+  let current = true;
+  const lease = { generation: 0, isCurrent: () => current };
+  const coordinator = new AttachmentCacheCoordinator(nativeBoundary(new Map()), () => NOW);
+  let scanContinues: (() => boolean) | undefined;
+  try {
+    const recovery = recoverAttachmentCache(db, lease, {
+      coordinator,
+      now: () => NOW,
+      scan: async (shouldContinue?: () => boolean) => {
+        scanContinues = shouldContinue;
+        // Disconnect or the startup deadline revokes the lease mid-scan; the native wrapper checks
+        // its continue callback between pages and stops with 'cancelled' (review M151).
+        current = false;
+        if (!shouldContinue?.()) throw new NativeBoundedDownloadError('cancelled');
+        return [];
+      },
+    });
+
+    await expect(recovery).resolves.toMatchObject({ status: 'stale' });
+    expect(scanContinues?.()).toBe(false);
+  } finally {
     raw.close();
   }
 });

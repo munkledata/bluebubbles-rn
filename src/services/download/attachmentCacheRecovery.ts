@@ -55,7 +55,7 @@ export interface AttachmentCacheRecoveryResult {
 }
 
 export interface AttachmentCacheRecoveryDependencies {
-  readonly scan?: () => Promise<AttachmentCacheScanFile[]>;
+  readonly scan?: (shouldContinue?: () => boolean) => Promise<AttachmentCacheScanFile[]>;
   readonly coordinator?: AttachmentCacheCoordinator;
   readonly now?: () => number;
 }
@@ -171,8 +171,16 @@ async function performAttachmentCacheRecovery(
     throw new RangeError('Attachment cache recovery time must be a non-negative safe integer.');
   }
 
-  // This await is intentionally before the first DB transaction or coordinator deletion.
-  const manifest = await scan();
+  // This await is intentionally before the first DB transaction or coordinator deletion. The native
+  // scan checks the lease between pages, so Disconnect or the startup deadline stops it instead of
+  // reading the whole cache for an account that is gone; that stop is stale, not a failure (M151).
+  let manifest: AttachmentCacheScanFile[];
+  try {
+    manifest = await scan(() => lease.isCurrent());
+  } catch (error) {
+    if (!lease.isCurrent()) return staleResult();
+    throw error;
+  }
   if (!lease.isCurrent()) return staleResult(manifest.length);
   if (manifest.length > ATTACHMENT_CACHE_RECOVERY_MAX_FILES) {
     throw new RangeError('Attachment cache recovery manifest exceeds its hard file limit.');
