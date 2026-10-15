@@ -618,6 +618,68 @@ describe('markRead', () => {
     expect(mockMarkChatRead).toHaveBeenCalledWith(killedProcessHttp, guid);
   });
 
+  it.each([
+    { capability: true, sends: true },
+    { capability: false, sends: false },
+    { capability: undefined, sends: false },
+  ])(
+    'a killed-process iMessage read follows its own server answer ($capability → receipt $sends)',
+    async ({ capability, sends }) => {
+      const { db, raw } = await createTestDb();
+      mockDb = db;
+      const guid = 'iMessage;-;+15551234567';
+      const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);
+      await upsertChats(db, [Chat.parse({ guid, participants: [{ address: 'a@x.com' }] })], hm);
+      const chatId = (await getChatIdByGuid(db, guid))!;
+      await upsertMessages(
+        db,
+        [
+          Message.parse({
+            guid: 'imessage-killed',
+            text: 'hi',
+            isFromMe: false,
+            dateCreated: 1000,
+          }),
+        ],
+        () => chatId,
+        hm,
+      );
+      // A killed-app wake never hydrates the session, so the session capability reads as absent.
+      mockImessageReadStateEnabled = false;
+      const killedProcessHttp = { __http: 'vault' } as never;
+      const resolveReceiptTransport = jest.fn(async () => ({
+        http: killedProcessHttp,
+        isCurrent: () => true,
+        ...(capability === undefined ? {} : { imessageReadStateEnabled: capability }),
+      }));
+
+      await markRead(guid, undefined, { resolveReceiptTransport });
+
+      expect(readMarker(raw, guid)).toBe('imessage-killed');
+      expect(resolveReceiptTransport).toHaveBeenCalledTimes(1);
+      expect(mockMarkChatRead.mock.calls).toEqual(sends ? [[killedProcessHttp, guid]] : []);
+    },
+  );
+
+  it('never resolves a killed-process iMessage transport while read receipts are off', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    const guid = 'iMessage;-;+15551234567';
+    await seedChat(db, guid);
+    mockSendReadReceipts = false;
+    const resolveReceiptTransport = jest.fn(async () => ({
+      http: { __http: 'vault' } as never,
+      isCurrent: () => true,
+      imessageReadStateEnabled: true,
+    }));
+
+    await markRead(guid, undefined, { resolveReceiptTransport });
+
+    expect(readMarker(raw, guid)).toBeNull();
+    expect(resolveReceiptTransport).not.toHaveBeenCalled();
+    expect(mockMarkChatRead).not.toHaveBeenCalled();
+  });
+
   it('commits an RCS read locally but sends no receipt while provider authority is revoked', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;

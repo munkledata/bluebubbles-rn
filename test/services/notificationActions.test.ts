@@ -15,6 +15,7 @@
  */
 import type { EventDetail } from 'react-native-notify-kit';
 import notifee from 'react-native-notify-kit';
+import { serverApi } from '@core/api';
 import { logger } from '@core/secure';
 import { getDatabase } from '@db/database';
 import { deleteReminderByNotificationId } from '@db/repositories';
@@ -584,6 +585,43 @@ describe('handleNotificationAction — mark-read', () => {
     );
     expect(mockNotifeeCancel).toHaveBeenCalledWith('gator-message-7');
   });
+
+  it.each([
+    { supports: true, enabled: true },
+    { supports: false, enabled: false },
+    { supports: undefined, enabled: false },
+  ])(
+    'gives a killed-process iMessage read its own server answer ($supports → $enabled)',
+    async ({ supports, enabled }) => {
+      const taskHttp = { __taskHttp: 'mark-read', isTransportCurrent: () => true };
+      let resolvedTransport: unknown;
+      mockCaptureCapability.mockReturnValueOnce(undefined);
+      mockFixedClient.mockReturnValueOnce(taskHttp);
+      mockInspectSession.mockResolvedValueOnce({
+        kind: 'ready',
+        session: { origin: 'https://vault.example', password: 'vault-secret' },
+      });
+      (serverApi.serverInfo as jest.Mock).mockResolvedValueOnce({
+        version: 'test',
+        private_api: false,
+        rcs: false,
+        ...(supports === undefined ? {} : { supports_imessage_read_state: supports }),
+      });
+      mockMarkRead.mockImplementationOnce(async (...args: unknown[]) => {
+        const options = args[2] as { resolveReceiptTransport?: () => Promise<unknown> };
+        resolvedTransport = await options.resolveReceiptTransport?.();
+      });
+
+      await handleNotificationAction(
+        safeChatDetail(ACTION_MARK_READ, { chatGuid: 'iMessage;-;+15551230000' }),
+      );
+
+      expect(serverApi.serverInfo).toHaveBeenCalledWith(taskHttp);
+      expect(resolvedTransport).toEqual(
+        expect.objectContaining({ http: taskHttp, imessageReadStateEnabled: enabled }),
+      );
+    },
+  );
 });
 
 describe('handleNotificationAction — love (tapback)', () => {

@@ -76,10 +76,12 @@ function assertCurrentTransport(transport: NotificationActionTransport): void {
  * headless process instead re-authorizes an immutable vault tuple and never hydrates/publishes the
  * foreground store. The separate account guard deliberately survives only transport rotation so a
  * durable outgoing row can still settle to retryable/error instead of being stranded as sending.
+ * Given a chat, a cold process also asks that server for its own capability answer (RCS pairing
+ * and iMessage read state), because it has no hydrated session to read them from.
  */
 async function resolveNotificationActionTransport(
   accountLease: RealtimeDeliveryLease,
-  rcsChatGuid?: string,
+  capabilityChatGuid?: string,
 ): Promise<NotificationActionTransport> {
   assertCurrentAccount(accountLease);
   const capabilitySource = captureSessionRcsCapabilityLease();
@@ -121,7 +123,7 @@ async function resolveNotificationActionTransport(
   );
   const isCurrent = (): boolean => accountIsCurrent() && actionHttp.isTransportCurrent();
   if (!isCurrent()) throw STALE_NOTIFICATION_ACTION;
-  if (!rcsChatGuid) return Object.freeze({ http: actionHttp, accountIsCurrent, isCurrent });
+  if (!capabilityChatGuid) return Object.freeze({ http: actionHttp, accountIsCurrent, isCurrent });
 
   const info = retirePrivateApiCapabilities(await serverApi.serverInfo(actionHttp));
   if (!isCurrent()) throw STALE_NOTIFICATION_ACTION;
@@ -132,6 +134,8 @@ async function resolveNotificationActionTransport(
     capabilitySource: fixedRcsCapabilitySource(info),
     rcsProviderEpoch: currentRcsProviderEpoch(info),
     acceptsRcsChat: (guid: string) => isCurrent() && isCurrentRcsChatGuid(info, guid),
+    // Killed-app Mark as read has no hydrated session, so this server answer decides (review M199).
+    imessageReadStateEnabled: info.supports_imessage_read_state === true,
   });
 }
 

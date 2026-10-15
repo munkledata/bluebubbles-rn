@@ -16395,10 +16395,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/createNewChatAccountScope.test.ts; test/db/shareIntakeReceipts.test.ts; test/components/routes/newChatScreen.test.tsx"
     },
     {
-      "id": "src/services/chatActions.ts#markRead.<callback:a4e2704b5d>:mutator-call:7edc1d66ddda",
+      "id": "src/services/chatActions.ts#markRead.<callback:72c1be0046>:mutator-call:c1e141866426",
       "path": "src/services/chatActions.ts",
-      "line": 836,
-      "symbol": "markRead.<callback:a4e2704b5d>",
+      "line": 841,
+      "symbol": "markRead.<callback:72c1be0046>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
       "detectedContext": "startup-single-flight-delegation",
@@ -16408,10 +16408,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/ensureDatabaseSingleFlight.test.ts; test/db/databaseInitRetry.test.ts; test/db/dbKeyRotation.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs"
     },
     {
-      "id": "src/services/chatActions.ts#markRead.<callback:a4e2704b5d>:mutator-call:9272d0b8dcdc",
+      "id": "src/services/chatActions.ts#markRead.<callback:72c1be0046>:mutator-call:c97774fbd806",
       "path": "src/services/chatActions.ts",
-      "line": 838,
-      "symbol": "markRead.<callback:a4e2704b5d>",
+      "line": 843,
+      "symbol": "markRead.<callback:72c1be0046>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
       "detectedContext": "transaction-coordinator",
@@ -16421,12 +16421,12 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/markUnread.test.ts; test/db/withDbTransaction.test.ts; test/db/chatActionsRepo.test.ts"
     },
     {
-      "id": "src/services/chatActions.ts#markRead.<callback:a4e2704b5d>:mutator-call:e19e7a9b24ff",
+      "id": "src/services/chatActions.ts#markRead.<callback:72c1be0046>:mutator-call:d0229de2b31b",
       "path": "src/services/chatActions.ts",
-      "line": 838,
-      "symbol": "markRead.<callback:a4e2704b5d>",
+      "line": 843,
+      "symbol": "markRead.<callback:72c1be0046>",
       "operation": "mutator-call",
-      "target": "src/services/chatActions.ts#markRead.<callback:a4e2704b5d>.<callback:dc5434bf32>",
+      "target": "src/services/chatActions.ts#markRead.<callback:72c1be0046>.<callback:dc5434bf32>",
       "detectedContext": "withDbTransaction",
       "owner": "markRead",
       "transactionContext": "withDbTransaction",
@@ -16434,10 +16434,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/markUnread.test.ts; test/db/withDbTransaction.test.ts; test/db/chatActionsRepo.test.ts"
     },
     {
-      "id": "src/services/chatActions.ts#markRead.<callback:a4e2704b5d>.<callback:dc5434bf32>:mutator-call:70a65a51b331",
+      "id": "src/services/chatActions.ts#markRead.<callback:72c1be0046>.<callback:dc5434bf32>:mutator-call:4c4dd515596f",
       "path": "src/services/chatActions.ts",
-      "line": 847,
-      "symbol": "markRead.<callback:a4e2704b5d>.<callback:dc5434bf32>",
+      "line": 852,
+      "symbol": "markRead.<callback:72c1be0046>.<callback:dc5434bf32>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#setLastReadMessageGuidWithinTransaction",
       "detectedContext": "withDbTransaction",
@@ -16449,7 +16449,7 @@
     {
       "id": "src/services/chatActions.ts#markUnread.<callback:3bc2e31bcb>:mutator-call:552374401e02",
       "path": "src/services/chatActions.ts",
-      "line": 950,
+      "line": 963,
       "symbol": "markUnread.<callback:3bc2e31bcb>",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -16462,7 +16462,7 @@
     {
       "id": "src/services/chatActions.ts#markUnread.<callback:3bc2e31bcb>:mutator-call:5cc87e2cca05",
       "path": "src/services/chatActions.ts",
-      "line": 953,
+      "line": 966,
       "symbol": "markUnread.<callback:3bc2e31bcb>",
       "operation": "mutator-call",
       "target": "src/services/chatActions.ts#markUnread.<callback:3bc2e31bcb>.<callback:add0a7f05b>",
@@ -16475,7 +16475,7 @@
     {
       "id": "src/services/chatActions.ts#markUnread.<callback:3bc2e31bcb>:mutator-call:c24df9ca0ed3",
       "path": "src/services/chatActions.ts",
-      "line": 953,
+      "line": 966,
       "symbol": "markUnread.<callback:3bc2e31bcb>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -16488,7 +16488,7 @@
     {
       "id": "src/services/chatActions.ts#markUnread.<callback:3bc2e31bcb>.<callback:add0a7f05b>:mutator-call:bf11a78356d7",
       "path": "src/services/chatActions.ts",
-      "line": 957,
+      "line": 970,
       "symbol": "markUnread.<callback:3bc2e31bcb>.<callback:add0a7f05b>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#setChatUnreadLocalWithinTransaction",
@@ -16501,7 +16501,7 @@
     {
       "id": "src/services/chatActions.ts#deleteChat.<callback:f472676191>:mutator-call:7a4702559112",
       "path": "src/services/chatActions.ts",
-      "line": 1010,
+      "line": 1023,
       "symbol": "deleteChat.<callback:f472676191>",
       "operation": "mutator-call",
       "target": "src/services/chatActions.ts#deleteChatForAccount",
@@ -16514,7 +16514,7 @@
     {
       "id": "src/services/chatActions.ts#deleteChatForAccount:mutator-call:3353590d42c6",
       "path": "src/services/chatActions.ts",
-      "line": 1017,
+      "line": 1030,
       "symbol": "deleteChatForAccount",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -16527,7 +16527,7 @@
     {
       "id": "src/services/chatActions.ts#deleteChatForAccount:mutator-call:5e3ebbd49e5d",
       "path": "src/services/chatActions.ts",
-      "line": 1036,
+      "line": 1049,
       "symbol": "deleteChatForAccount",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#deleteChatLocal",
@@ -16540,7 +16540,7 @@
     {
       "id": "src/services/chatActions.ts#deleteChatForAccount:mutator-call:3c4dc28c8ea2",
       "path": "src/services/chatActions.ts",
-      "line": 1038,
+      "line": 1051,
       "symbol": "deleteChatForAccount",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries",
@@ -16553,7 +16553,7 @@
     {
       "id": "src/services/chatActions.ts#deleteChatForAccount:mutator-call:8ed8e4254d1b",
       "path": "src/services/chatActions.ts",
-      "line": 1041,
+      "line": 1054,
       "symbol": "deleteChatForAccount",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.drainDueRetirements",
@@ -16566,7 +16566,7 @@
     {
       "id": "src/services/chatActions.ts#deleteChatForAccount:mutator-call:d3a2be781833",
       "path": "src/services/chatActions.ts",
-      "line": 1069,
+      "line": 1082,
       "symbol": "deleteChatForAccount",
       "operation": "mutator-call",
       "target": "src/services/chatActions.ts#cancelServerScheduledForChat",
@@ -16579,7 +16579,7 @@
     {
       "id": "src/services/chatActions.ts#deleteChatForAccount:mutator-call:547b14db746a",
       "path": "src/services/chatActions.ts",
-      "line": 1072,
+      "line": 1085,
       "symbol": "deleteChatForAccount",
       "operation": "mutator-call",
       "target": "src/services/chatActions.ts#cancelRemindersForChat",
@@ -16592,7 +16592,7 @@
     {
       "id": "src/services/chatActions.ts#deleteChatForAccount:mutator-call:207621cba542",
       "path": "src/services/chatActions.ts",
-      "line": 1076,
+      "line": 1089,
       "symbol": "deleteChatForAccount",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#resumeChatPurges",
@@ -16605,7 +16605,7 @@
     {
       "id": "src/services/chatActions.ts#deleteChatForAccount:mutator-call:3c4dc28c8ea2:2",
       "path": "src/services/chatActions.ts",
-      "line": 1080,
+      "line": 1093,
       "symbol": "deleteChatForAccount",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.retireInactiveEntries",
@@ -16618,7 +16618,7 @@
     {
       "id": "src/services/chatActions.ts#deleteChatForAccount:mutator-call:8ed8e4254d1b:2",
       "path": "src/services/chatActions.ts",
-      "line": 1083,
+      "line": 1096,
       "symbol": "deleteChatForAccount",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.drainDueRetirements",
@@ -16631,7 +16631,7 @@
     {
       "id": "src/services/chatActions.ts#cancelRemindersForChat:mutator-call:10e5ab4c9101",
       "path": "src/services/chatActions.ts",
-      "line": 1151,
+      "line": 1164,
       "symbol": "cancelRemindersForChat",
       "operation": "mutator-call",
       "target": "src/services/chatActions.ts#cancelRemindersForChat.<callback:9d59a41411>",
@@ -16644,7 +16644,7 @@
     {
       "id": "src/services/chatActions.ts#cancelRemindersForChat:mutator-call:f4f2756f3147",
       "path": "src/services/chatActions.ts",
-      "line": 1151,
+      "line": 1164,
       "symbol": "cancelRemindersForChat",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -16657,7 +16657,7 @@
     {
       "id": "src/services/chatActions.ts#cancelRemindersForChat.<callback:9d59a41411>:mutator-call:4d7918588245",
       "path": "src/services/chatActions.ts",
-      "line": 1153,
+      "line": 1166,
       "symbol": "cancelRemindersForChat.<callback:9d59a41411>",
       "operation": "mutator-call",
       "target": "src/db/repositories/reminders.ts#deleteReminderByNotificationIdWithinTransaction",
@@ -16670,7 +16670,7 @@
     {
       "id": "src/services/chatActions.ts#cancelServerScheduledForChat:mutator-call:1837e71127eb",
       "path": "src/services/chatActions.ts",
-      "line": 1205,
+      "line": 1218,
       "symbol": "cancelServerScheduledForChat",
       "operation": "mutator-call",
       "target": "src/services/chatActions.ts#cancelServerScheduledForChat.<callback:dc7ea326bb>",
@@ -16683,7 +16683,7 @@
     {
       "id": "src/services/chatActions.ts#cancelServerScheduledForChat:mutator-call:716a5525b26b",
       "path": "src/services/chatActions.ts",
-      "line": 1205,
+      "line": 1218,
       "symbol": "cancelServerScheduledForChat",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -16696,7 +16696,7 @@
     {
       "id": "src/services/chatActions.ts#cancelServerScheduledForChat.<callback:dc7ea326bb>:mutator-call:0d29d38fd70c",
       "path": "src/services/chatActions.ts",
-      "line": 1207,
+      "line": 1220,
       "symbol": "cancelServerScheduledForChat.<callback:dc7ea326bb>",
       "operation": "mutator-call",
       "target": "src/db/repositories/scheduled.ts#deleteScheduledWithinTransaction",
@@ -19413,7 +19413,7 @@
     {
       "id": "src/services/notifications/actions.ts#handleNotificationAction.<callback:383ea8d776>:mutator-call:f5e067703ee5",
       "path": "src/services/notifications/actions.ts",
-      "line": 191,
+      "line": 195,
       "symbol": "handleNotificationAction.<callback:383ea8d776>",
       "operation": "mutator-call",
       "target": "src/services/notifications/actions.ts#handleNotificationActionForAccount",
@@ -19426,7 +19426,7 @@
     {
       "id": "src/services/notifications/actions.ts#handleNotificationActionForAccount:mutator-call:d1008c7afb46",
       "path": "src/services/notifications/actions.ts",
-      "line": 267,
+      "line": 271,
       "symbol": "handleNotificationActionForAccount",
       "operation": "mutator-call",
       "target": "src/services/notifications/actions.ts#replyTo",
@@ -19439,7 +19439,7 @@
     {
       "id": "src/services/notifications/actions.ts#handleNotificationActionForAccount:mutator-call:6c2fa704827f",
       "path": "src/services/notifications/actions.ts",
-      "line": 288,
+      "line": 292,
       "symbol": "handleNotificationActionForAccount",
       "operation": "mutator-call",
       "target": "src/services/notifications/actions.ts#loveMessage",
@@ -19452,7 +19452,7 @@
     {
       "id": "src/services/notifications/actions.ts#handleNotificationPress.<callback:57842c3968>:mutator-call:34d83832cc06",
       "path": "src/services/notifications/actions.ts",
-      "line": 329,
+      "line": 333,
       "symbol": "handleNotificationPress.<callback:57842c3968>",
       "operation": "mutator-call",
       "target": "src/services/notifications/actions.ts#handleNotificationPressForAccount",
@@ -19465,7 +19465,7 @@
     {
       "id": "src/services/notifications/actions.ts#handleNotificationPressForAccount:mutator-call:44e77ef8d7a9",
       "path": "src/services/notifications/actions.ts",
-      "line": 378,
+      "line": 382,
       "symbol": "handleNotificationPressForAccount",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -19478,7 +19478,7 @@
     {
       "id": "src/services/notifications/actions.ts#handleNotificationPressForAccount:mutator-call:b83aedcb7b5e",
       "path": "src/services/notifications/actions.ts",
-      "line": 380,
+      "line": 384,
       "symbol": "handleNotificationPressForAccount",
       "operation": "mutator-call",
       "target": "src/db/repositories/reminders.ts#deleteReminderByNotificationId",
@@ -19491,7 +19491,7 @@
     {
       "id": "src/services/notifications/actions.ts#replyTo:mutator-call:ef1e4d9c2bf6",
       "path": "src/services/notifications/actions.ts",
-      "line": 416,
+      "line": 420,
       "symbol": "replyTo",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -19504,7 +19504,7 @@
     {
       "id": "src/services/notifications/actions.ts#replyTo:mutator-call:16685310e2e9",
       "path": "src/services/notifications/actions.ts",
-      "line": 419,
+      "line": 423,
       "symbol": "replyTo",
       "operation": "mutator-call",
       "target": "src/services/send/sendService.ts#sendTextMessage",
@@ -19517,7 +19517,7 @@
     {
       "id": "src/services/notifications/actions.ts#loveMessage:mutator-call:ba76a076dbe4",
       "path": "src/services/notifications/actions.ts",
-      "line": 445,
+      "line": 449,
       "symbol": "loveMessage",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -19530,7 +19530,7 @@
     {
       "id": "src/services/notifications/actions.ts#loveMessage:mutator-call:24b12380d8b6",
       "path": "src/services/notifications/actions.ts",
-      "line": 480,
+      "line": 484,
       "symbol": "loveMessage",
       "operation": "mutator-call",
       "target": "src/services/send/sendReactionService.ts#sendReactionMessage",

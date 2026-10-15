@@ -766,13 +766,18 @@ export interface ReadReceiptTransport {
   readonly rcsProviderEpoch?: string | null;
   /** Required for RCS: proves this exact conversation still belongs to the current pairing. */
   acceptsRcsChat?(chatGuid: string): boolean;
+  /**
+   * This transport's own server answer for the narrow iMessage read-state capability. A killed-app
+   * task sets it because it never hydrates the session; when it is absent, the live session decides.
+   */
+  readonly imessageReadStateEnabled?: boolean;
 }
 
 export interface MarkReadOptions {
   /**
-   * Resolve the exact transport used by a best-effort receipt. RCS resolves this before its local
-   * marker write because an old Google pairing is read-only; iMessage keeps the lazy path after
-   * the local marker commits and only when receipts are enabled.
+   * Resolve the exact transport used by a best-effort receipt, only after the local marker commits
+   * and only when receipts are enabled. When supplied, the iMessage capability check waits for it,
+   * and a server answer it carries overrides the session.
    */
   resolveReceiptTransport?: () => Promise<ReadReceiptTransport | null>;
 }
@@ -857,7 +862,15 @@ export function markRead(
     assertChatActionLease(activeLease);
     if (!target.chatExists) return;
     const isIMessage = isIMessageReadStateGuid(chatGuid);
-    if (!isRcs && (!isIMessage || !sessionAccessors.imessageReadStateEnabled())) return;
+    if (!isRcs && !isIMessage) return;
+    // A killed-app notification action never hydrates the session, so the transport it resolves
+    // reports the iMessage capability from its own server answer (review M199). Until then, only a
+    // caller without such a transport can rule the receipt out from the session.
+    const imessageReadStateEnabled = (): boolean =>
+      receiptTransport?.imessageReadStateEnabled ?? sessionAccessors.imessageReadStateEnabled();
+    const sessionRulesOutIMessage = (): boolean =>
+      !options.resolveReceiptTransport && !sessionAccessors.imessageReadStateEnabled();
+    if (isIMessage && sessionRulesOutIMessage()) return;
 
     let fs: FeatureSettings;
     try {
@@ -870,7 +883,7 @@ export function markRead(
     // Hydration deliberately leaves `hydrated=false` on a DB/read failure. The module defaults are
     // enabled for normal first use, but they are not proof of the user's persisted privacy choice.
     if (!fs.hydrated || !fs.sendReadReceipts) return;
-    if (isIMessage && !sessionAccessors.imessageReadStateEnabled()) return;
+    if (isIMessage && sessionRulesOutIMessage()) return;
 
     if (isRcs) {
       // A killed-process notification action has no hydrated foreground ServerInfo, so RCS
@@ -907,7 +920,7 @@ export function markRead(
       }
     }
     if (!receiptIsCurrent() || !receiptTransport?.isCurrent()) return;
-    if (isIMessage && !sessionAccessors.imessageReadStateEnabled()) return;
+    if (isIMessage && !imessageReadStateEnabled()) return;
     try {
       if (isIMessage && readStateSync) {
         await readStateSync.run(async () => {
@@ -917,7 +930,7 @@ export function markRead(
             !currentSettings.sendReadReceipts ||
             !activeLease.isCurrent() ||
             !receiptTransport.isCurrent() ||
-            !sessionAccessors.imessageReadStateEnabled()
+            !imessageReadStateEnabled()
           ) {
             return;
           }

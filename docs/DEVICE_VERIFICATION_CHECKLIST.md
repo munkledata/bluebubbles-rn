@@ -1003,6 +1003,9 @@ Send yourself (or have someone send) a normal iMessage while the app is in the b
 - [ ] Tap the **Reply** field on the notification, type a message, send it — it actually goes
       out and appears in the chat (routes to `sendTextMessage`).
 - [ ] Tap **Mark as read** — the notification clears and the chat's unread marker advances.
+- [ ] With **Send Read Receipts** on, close Gator with `adb shell am kill <package>`, receive an
+      iMessage, and tap **Mark as read** — the notification clears and the sender's iPhone shows
+      the message as **Read** (review M199). With the setting off, no Read receipt appears.
 - [ ] Tap **♥ Love** — a Love tapback is applied to that message (routes to
       `sendReactionMessage`).
 - [ ] Open **per-chat notification settings**: from a conversation's settings, open its

@@ -320,9 +320,12 @@ outgoing queue row commit. An existing iMessage chat sends that plain text with 
 chat uses its separately advertised transport. A supported RCS Love action uses the same fixed
 client, while its database settlement keeps the separate account/revocation guard so a later tunnel
 rotation becomes an ordinary durable retry instead of stranding a sending row. iMessage Love,
-FaceTime Answer/link creation, and every other helper-dependent action are absent. Mark as read and
-Mark Unread commit only the local marker and never resolve a receipt transport. Stale feature
-settings cannot restore remote read-state effects.
+FaceTime Answer/link creation, and every other helper-dependent action are absent. Mark as read
+commits the local marker first. Only when the saved Send Read Receipts setting is on does it then
+resolve the same explicit transport for the receipt: an RCS chat must still belong to the current
+pairing, and an iMessage chat needs the server's own read-state capability. A killed process has no
+hydrated session, so it takes that capability from the server's answer to its task-local request
+(review M199). Stale feature settings cannot restore remote read-state effects.
 
 The notification may expose Love from a cold process when both route identities are canonical
 (`RCS;-;…` chat and `rcs-…` message); it does not depend on the empty foreground Zustand cache.
