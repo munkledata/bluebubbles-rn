@@ -3,7 +3,6 @@ import {
   deleteCustomFolderWithinTransaction,
   listCustomFolderChatGuidsWithinTransaction,
   listCustomFolderInboxPageWithinTransaction,
-  searchCustomFolderMessageMatches,
   listCustomFolderSummariesWithinTransaction,
   listCustomFoldersWithinTransaction,
   renameCustomFolderWithinTransaction,
@@ -99,20 +98,9 @@ export function loadCustomFolderInboxPage(
   return runCustomFolderCommand(accountLease, async (activeLease) => {
     const db = await ensureDatabase();
     assertAccountOperationCurrent(activeLease);
-    // The full-text match is the expensive part of a folder search, so it runs before the global
-    // write lock; membership and counts below stay one consistent snapshot (review M060).
-    const messageMatches = await searchCustomFolderMessageMatches(db, folderId, searchText);
-    assertAccountOperationCurrent(activeLease);
     return withDbTransaction(
       db,
-      (context) =>
-        listCustomFolderInboxPageWithinTransaction(
-          context,
-          folderId,
-          limit,
-          searchText,
-          messageMatches,
-        ),
+      (context) => listCustomFolderInboxPageWithinTransaction(context, folderId, limit, searchText),
       () => activeLease.isCurrent(),
     );
   });

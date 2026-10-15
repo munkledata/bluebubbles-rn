@@ -917,28 +917,11 @@ export async function searchChatsForInboxPage(
  * share the exact membership state, so add-before-prune replacement cannot leak its intermediate
  * superset to the UI.
  */
-/**
- * The message-text half of a folder search, for callers to run BEFORE taking the write lock: the
- * full-text match walks every matching message in every chat (review M060). Undefined when the
- * search text is too short to search message bodies.
- */
-export async function searchCustomFolderMessageMatches(
-  db: AppDatabase,
-  folderId: number,
-  searchText = '',
-): Promise<ReadonlySet<string> | undefined> {
-  const searchQuery = normalizeCustomFolderSearch(searchText);
-  if (!searchQuery) return undefined;
-  return new Set(await searchCustomFolderChatGuidsByMessage(db, folderId, searchQuery));
-}
-
 export function listCustomFolderInboxPageWithinTransaction(
   context: DbTransactionContext,
   folderId: number,
   requestedLimit = 50,
   searchText = '',
-  /** From searchCustomFolderMessageMatches, computed outside the lock; queried here if absent. */
-  messageMatches?: ReadonlySet<string>,
 ): Promise<CustomFolderInboxPage | null> {
   return runInTransactionContext(context, async (db) => {
     requireCustomFolderId(folderId);
@@ -1006,9 +989,9 @@ export function listCustomFolderInboxPageWithinTransaction(
         throw new Error('Custom folder search candidates do not match availability.');
       }
       const foldedQuery = searchQuery.toLowerCase();
-      const messageMatchGuids =
-        messageMatches ??
-        new Set(await searchCustomFolderChatGuidsByMessage(db, folderId, searchQuery));
+      const messageMatchGuids = new Set(
+        await searchCustomFolderChatGuidsByMessage(db, folderId, searchQuery),
+      );
       matchingChatGuids = candidates
         .filter(
           (candidate: CustomFolderSearchCandidate) =>
