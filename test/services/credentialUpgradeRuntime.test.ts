@@ -123,6 +123,27 @@ function dependencies(
 }
 
 describe('scoped credential upgrade runtime', () => {
+  it('says whether the saved attempt blocking a new one holds that exact credential', async () => {
+    const vault = await activeVault();
+    const deps = dependencies(vault, {
+      fetchCandidateServerInfo: async () => {
+        throw new ApiError('no_connection', 'offline');
+      },
+    });
+    // The first try saves CANDIDATE and stops at validation, so its attempt stays saved.
+    await expect(beginCredentialUpgradeRuntime(CANDIDATE, deps)).resolves.toMatchObject({
+      kind: 'retry',
+    });
+
+    await expect(beginCredentialUpgradeRuntime(CANDIDATE, deps)).resolves.toEqual({
+      kind: 'conflict',
+      sameCandidate: true,
+    });
+    await expect(
+      beginCredentialUpgradeRuntime(`bbd_device_v1_${'C'.repeat(43)}`, deps),
+    ).resolves.toEqual({ kind: 'conflict', sameCandidate: false });
+  });
+
   it('persists every V3 adoption boundary before the matching mutation and promotes last', async () => {
     const vault = await activeVault();
 

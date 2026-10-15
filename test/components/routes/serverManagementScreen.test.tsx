@@ -720,7 +720,10 @@ describe('ServerManagementScreen — ordinary sensitive presentation and account
 
     // The status read when the screen opened missed an older saved attempt. A conflict is decided
     // before anything is stored, so this entry was never saved and must stay.
-    mockBeginScopedCredentialUpgrade.mockResolvedValueOnce({ kind: 'conflict' });
+    mockBeginScopedCredentialUpgrade.mockResolvedValueOnce({
+      kind: 'conflict',
+      sameCandidate: false,
+    });
     mockInspectScopedCredentialUpgradeStatus.mockResolvedValueOnce({ kind: 'candidate' });
     await fireEvent.press(screen.getByRole('button', { name: 'Use Credential' }));
     expect(await screen.findByText(/Another credential is already saved/)).toBeTruthy();
@@ -742,6 +745,29 @@ describe('ServerManagementScreen — ordinary sensitive presentation and account
       expect(mockBeginScopedCredentialUpgrade).toHaveBeenLastCalledWith(PRIVATE_SCOPED_CREDENTIAL);
     });
     expect(mockBeginScopedCredentialUpgrade).toHaveBeenCalledTimes(2);
+  });
+
+  it('clears an entry an earlier try already saved when that save is what blocks it', async () => {
+    arrangePrivateServer();
+    await renderScreen();
+    expect(await screen.findByText(PRIVATE_INFO.server_version)).toBeTruthy();
+    await fireEvent.press(screen.getByRole('button', { name: 'Pair This Device' }));
+    await fireEvent.changeText(
+      await screen.findByLabelText('Paired-client credential'),
+      PRIVATE_SCOPED_CREDENTIAL,
+    );
+
+    // An earlier try stored this credential but its confirmation was lost, so it is in custody.
+    mockBeginScopedCredentialUpgrade.mockResolvedValueOnce({
+      kind: 'conflict',
+      sameCandidate: true,
+    });
+    mockInspectScopedCredentialUpgradeStatus.mockResolvedValueOnce({ kind: 'candidate' });
+    await fireEvent.press(screen.getByRole('button', { name: 'Use Credential' }));
+
+    expect(await screen.findByText(/This credential is already saved securely/)).toBeTruthy();
+    expect(screen.getByLabelText('Paired-client credential').props.value).toBe('');
+    expect(screen.getByRole('button', { name: 'Revoke and Remove Credential' })).toBeTruthy();
   });
 
   it('restores a persisted candidate after process death and can revoke it without another paste', async () => {

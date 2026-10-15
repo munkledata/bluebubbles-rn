@@ -439,12 +439,22 @@ export default function ServerManagementScreen(): React.JSX.Element {
         return;
       }
       if (outcome.kind === 'conflict') {
-        // An older saved attempt refused this entry before anything was stored, so the entry stays
-        // for a retry once that attempt finishes or is revoked. The status describes the older one.
+        // A saved attempt refused this entry before anything new was stored. If that attempt holds
+        // this very entry (an earlier try whose confirmation was lost), it is already in custody;
+        // otherwise the entry stays for a retry once the older attempt finishes or is revoked.
         const status = await inspectScopedCredentialUpgradeStatus();
         if (!accountLease.isCurrent()) return;
         setCredentialSaved(status.kind === 'candidate' || status.kind === 'in-progress');
         setCredentialDiscardable(status.kind === 'candidate');
+        if (outcome.sameCandidate === true) {
+          setCredentialText('');
+          setCredentialIssue(
+            replacing
+              ? 'This replacement is already saved securely. Gator will retry it automatically; the old credential was not revoked automatically.'
+              : 'This credential is already saved securely. Gator will finish pairing automatically, or you can revoke and remove it below.',
+          );
+          return;
+        }
         setCredentialIssue(
           replacing
             ? 'A replacement is already saved for this phone. Gator will retry it automatically; the old credential was not revoked automatically.'

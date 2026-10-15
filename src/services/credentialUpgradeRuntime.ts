@@ -66,7 +66,11 @@ export type CredentialUpgradeRuntimeOutcome =
   | { readonly kind: 'revoked' }
   | { readonly kind: 'busy' }
   | { readonly kind: 'discarded' }
-  | { readonly kind: 'conflict' }
+  | {
+      readonly kind: 'conflict';
+      /** A begin only: whether the saved attempt that blocked it holds this exact credential. */
+      readonly sameCandidate?: boolean;
+    }
   | { readonly kind: 'blocked'; readonly reason: 'push-target-owned' }
   | {
       readonly kind: 'retry';
@@ -137,6 +141,18 @@ function terminalResolutionOutcome(
     return { kind: 'quarantined', reason: resolution.reason };
   }
   return null;
+}
+
+function savedAttemptHoldsCandidate(
+  resolution: CredentialUpgradeResolution,
+  candidateCredential: string,
+): boolean {
+  return (
+    (resolution.kind === 'resume-candidate' ||
+      resolution.kind === 'retry-adoption' ||
+      resolution.kind === 'finish-promotion') &&
+    resolution.journal.candidateCredential === candidateCredential
+  );
 }
 
 function isExactJournal(
@@ -370,7 +386,15 @@ async function beginCredentialTransitionRuntime(
   const snapshot = await readJournalSnapshot(deps);
   if (!snapshot) return { kind: 'cancelled' };
   const terminal = terminalResolutionOutcome(snapshot.resolution);
-  if (terminal?.kind !== 'idle') return terminal ?? { kind: 'conflict' };
+  if (terminal?.kind !== 'idle') {
+    if (terminal) return terminal;
+    // An earlier attempt is still saved. Its credential may be this very entry (stored by a try
+    // whose confirmation was lost); say so without letting the saved secret leave this module.
+    return {
+      kind: 'conflict',
+      sameCandidate: savedAttemptHoldsCandidate(snapshot.resolution, candidateCredential),
+    };
+  }
   if (!snapshot.storedSession) {
     return {
       kind: 'quarantined',
