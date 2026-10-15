@@ -5145,15 +5145,41 @@ fullOnlyTest('BACKUP-02 restore-abort proof fails closed on native and lifetime 
       before:
         '  const applied = await withDbTransaction(\n' +
         '    db,\n' +
-        '    (context) => restorePreparedBackupWithinTransaction(context, prepared),\n' +
+        '    async (context) => {\n' +
+        '      const result = await restorePreparedBackupWithinTransaction(context, prepared);\n' +
+        '      // Checked inside the transaction so an impossible result rolls back instead of being\n' +
+        '      // reported as a failed restore after it was already committed.\n' +
+        '      if (\n' +
+        '        result.chatCustomizations > backup.chatCustomizations.length ||\n' +
+        '        result.customFolders > customFolders.length ||\n' +
+        '        result.customFolderMemberships > sourceFolderMembershipCount ||\n' +
+        '        result.handleColors > handleColors.length\n' +
+        '      ) {\n' +
+        "        throw new Error('Backup restore returned counts outside the validated source bounds.');\n" +
+        '      }\n' +
+        '      return result;\n' +
+        '    },\n' +
         '    ownershipGuard,\n' +
         '  );',
       after:
         '  const applied = await Promise.resolve().then(() =>\n' +
         '    withDbTransaction(\n' +
-        '      db,\n' +
-        '      (context) => restorePreparedBackupWithinTransaction(context, prepared),\n' +
-        '      ownershipGuard,\n' +
+        '    db,\n' +
+        '    async (context) => {\n' +
+        '      const result = await restorePreparedBackupWithinTransaction(context, prepared);\n' +
+        '      // Checked inside the transaction so an impossible result rolls back instead of being\n' +
+        '      // reported as a failed restore after it was already committed.\n' +
+        '      if (\n' +
+        '        result.chatCustomizations > backup.chatCustomizations.length ||\n' +
+        '        result.customFolders > customFolders.length ||\n' +
+        '        result.customFolderMemberships > sourceFolderMembershipCount ||\n' +
+        '        result.handleColors > handleColors.length\n' +
+        '      ) {\n' +
+        "        throw new Error('Backup restore returned counts outside the validated source bounds.');\n" +
+        '      }\n' +
+        '      return result;\n' +
+        '    },\n' +
+        '    ownershipGuard,\n' +
         '    ),\n' +
         '  );',
     },
