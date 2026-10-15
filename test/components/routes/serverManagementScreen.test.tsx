@@ -707,6 +707,43 @@ describe('ServerManagementScreen — ordinary sensitive presentation and account
     expect(mockBeginScopedCredentialUpgrade).toHaveBeenLastCalledWith(PRIVATE_SCOPED_CREDENTIAL);
   });
 
+  it('keeps a first-time entry an older saved attempt blocked, for use once that one is revoked', async () => {
+    arrangePrivateServer();
+    await renderScreen();
+    expect(await screen.findByText(PRIVATE_INFO.server_version)).toBeTruthy();
+    await fireEvent.press(screen.getByRole('button', { name: 'Pair This Device' }));
+    await fireEvent.changeText(
+      await screen.findByLabelText('Paired-client credential'),
+      PRIVATE_SCOPED_CREDENTIAL,
+    );
+    const entry = () => screen.getByLabelText('Paired-client credential').props.value;
+
+    // The status read when the screen opened missed an older saved attempt. A conflict is decided
+    // before anything is stored, so this entry was never saved and must stay.
+    mockBeginScopedCredentialUpgrade.mockResolvedValueOnce({ kind: 'conflict' });
+    mockInspectScopedCredentialUpgradeStatus.mockResolvedValueOnce({ kind: 'candidate' });
+    await fireEvent.press(screen.getByRole('button', { name: 'Use Credential' }));
+    expect(await screen.findByText(/Another credential is already saved/)).toBeTruthy();
+    expect(entry()).toBe(PRIVATE_SCOPED_CREDENTIAL);
+
+    await fireEvent.press(screen.getByRole('button', { name: 'Revoke and Remove Credential' }));
+    await answerDialog('Revoke and Remove');
+    await waitFor(() => {
+      expect(mockDiscardScopedCredentialUpgradeCandidate).toHaveBeenCalledTimes(1);
+    });
+    expect(screen.queryByTestId('device-credential-modal')).toBeNull();
+
+    // Reopening the form still holds the new entry, ready to use.
+    await fireEvent.press(screen.getByRole('button', { name: 'Pair This Device' }));
+    expect(entry()).toBe(PRIVATE_SCOPED_CREDENTIAL);
+    mockBeginScopedCredentialUpgrade.mockResolvedValueOnce({ kind: 'adopted' });
+    await fireEvent.press(screen.getByRole('button', { name: 'Use Credential' }));
+    await waitFor(() => {
+      expect(mockBeginScopedCredentialUpgrade).toHaveBeenLastCalledWith(PRIVATE_SCOPED_CREDENTIAL);
+    });
+    expect(mockBeginScopedCredentialUpgrade).toHaveBeenCalledTimes(2);
+  });
+
   it('restores a persisted candidate after process death and can revoke it without another paste', async () => {
     arrangePrivateServer();
     mockInspectScopedCredentialUpgradeStatus.mockResolvedValue({ kind: 'candidate' });
