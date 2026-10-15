@@ -6,6 +6,7 @@ import { useSyncStore } from '@state/syncStore';
 import { useTransportHealthStore } from '@state/transportHealthStore';
 import { useTypingStore } from '@state/typingStore';
 import { useUploadStore } from '@state/uploadStore';
+import { clearRecordedDbWriteWedge } from './errors/dbWriteWedgeRecord';
 import { errorReportSink } from './errors/errorReportSink';
 import { resetActiveChat } from './notifications/activeChat';
 import { resetPendingNotification } from './notifications/pendingNav';
@@ -47,6 +48,8 @@ export function resetSessionScopedState(): SessionScopedResetResult {
   let errorReportsIdle = Promise.resolve();
   try {
     errorReportsIdle = errorReportSink.resetSession();
+    // A wedge recorded for this account must not be replayed under the next one.
+    clearRecordedDbWriteWedge();
   } catch {
     failedSurfaces.push('error-reports');
   }

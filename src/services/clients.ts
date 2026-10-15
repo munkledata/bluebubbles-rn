@@ -1,6 +1,7 @@
 import { HttpClient } from '@core/api';
 import { SecretBox } from '@core/crypto';
 import { ExpoAccountRevocationMarker } from '@native/accountRevocationMarker';
+import { ExpoDbWriteWedgeMarker } from '@native/dbWriteWedgeMarker';
 import { ExpoSecureVault } from '@native/secureVault';
 import { sessionAccessors } from '@state/sessionStore';
 import { accountCancellationSignal } from './realtime/accountCancellation';
@@ -18,6 +19,8 @@ import type { RealtimeDeliveryLease } from './realtime/deliveryCoordinator';
 export const vault = new ExpoSecureVault();
 /** Non-secret, filesystem-backed disconnect gate independent of Android Keystore/SecureStore. */
 export const accountRevocationMarker = new ExpoAccountRevocationMarker();
+/** Non-secret, filesystem-backed record of a wedged DB write queue, replayed next launch. */
+export const dbWriteWedgeMarker = new ExpoDbWriteWedgeMarker();
 
 /** The primary client, bound to the connected session. */
 export const http = new HttpClient({

@@ -37,6 +37,7 @@ export class ErrorReportSink implements LogSink {
   private ring: PendingReport[] = [];
   private drainTimer: ReturnType<typeof setTimeout> | null = null;
   private busy = false; // true while enqueuing OR draining — drops re-entrant error logs
+  private accepted = 0; // reports taken into the ring; lets a replay confirm it was not dropped
   private sessionGeneration = 0;
   private readonly activeDrains = new Set<Promise<void>>();
 
@@ -59,6 +60,7 @@ export class ErrorReportSink implements LogSink {
         ...projectCapturedErrorReport(message, meta),
         createdAt: Date.now(),
       });
+      this.accepted += 1;
       if (this.ring.length > RING_CAPACITY) this.ring.splice(0, this.ring.length - RING_CAPACITY);
       this.scheduleDrain();
     } catch {
@@ -66,6 +68,11 @@ export class ErrorReportSink implements LogSink {
     } finally {
       this.busy = false;
     }
+  }
+
+  /** Reports accepted so far. A replay compares it before and after logging to know it landed. */
+  get acceptedReports(): number {
+    return this.accepted;
   }
 
   private scheduleDrain(): void {

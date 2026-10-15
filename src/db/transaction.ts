@@ -27,6 +27,12 @@ let lockReleases = 0;
  * an unguarded escalation would POST the same report once per blocked writer, forever.
  */
 let wedgeReported = false;
+/**
+ * Told once, right after the wedge is reported. The report itself cannot be saved while the queue
+ * is wedged (saving it needs this queue), so error reporting installs a listener that keeps a
+ * record outside SQLite for the next launch (review M045).
+ */
+let writeQueueWedgeListener: (() => void) | null = null;
 
 /**
  * Optional last-moment ownership check for account-scoped transactions. Returning `false` aborts
@@ -126,6 +132,22 @@ function assertCommitAllowed(guard?: DbCommitGuard): void {
  */
 const LOCK_WAIT_WARN_MS = 10_000;
 
+/** Install (or with `null` remove) the one wedge listener. See {@link writeQueueWedgeListener}. */
+export function setWriteQueueWedgeListener(listener: (() => void) | null): void {
+  writeQueueWedgeListener = listener;
+}
+
+/**
+ * The one place a wedge is reported. Error reporting also calls it on a later launch to replay a
+ * wedge an earlier run recorded but could not save; `waiting` is then unknown and omitted.
+ */
+export function reportWriteQueueWedge(waiting?: number): void {
+  logger.error('[db] write queue appears wedged', 's9d54bjxmi', {
+    waitedMs: 2 * LOCK_WAIT_WARN_MS,
+    ...(waiting === undefined ? {} : { waiting }),
+  });
+}
+
 /**
  * Arm the wait watchdog for the caller that is about to park on the queue. Returns the disarm.
  *
@@ -147,10 +169,12 @@ function armLockWatchdog(): () => void {
       // queue drains; this does not.
       if (lockReleases !== releasesAtEntry || wedgeReported) return;
       wedgeReported = true;
-      logger.error('[db] write queue appears wedged', 's9d54bjxmi', {
-        waitedMs: 2 * LOCK_WAIT_WARN_MS,
-        waiting: waitingForLock,
-      });
+      reportWriteQueueWedge(waitingForLock);
+      try {
+        writeQueueWedgeListener?.();
+      } catch {
+        // Keeping the record is best effort; the watchdog itself must never throw.
+      }
     }, LOCK_WAIT_WARN_MS);
   }, LOCK_WAIT_WARN_MS);
   return () => {

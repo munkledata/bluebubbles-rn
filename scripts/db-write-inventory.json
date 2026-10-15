@@ -12874,7 +12874,7 @@
     {
       "id": "src/db/transaction.ts#withDbTransaction:transaction-begin:8ed78b4958b5",
       "path": "src/db/transaction.ts",
-      "line": 256,
+      "line": 280,
       "symbol": "withDbTransaction",
       "operation": "transaction-begin",
       "target": "<connection>",
@@ -12887,7 +12887,7 @@
     {
       "id": "src/db/transaction.ts#withDbTransaction:transaction-commit:a56dd61d015f",
       "path": "src/db/transaction.ts",
-      "line": 264,
+      "line": 288,
       "symbol": "withDbTransaction",
       "operation": "transaction-commit",
       "target": "<connection>",
@@ -12900,7 +12900,7 @@
     {
       "id": "src/db/transaction.ts#withDbTransaction:transaction-rollback:ee138e1288e4",
       "path": "src/db/transaction.ts",
-      "line": 268,
+      "line": 292,
       "symbol": "withDbTransaction",
       "operation": "transaction-rollback",
       "target": "<connection>",
@@ -19140,7 +19140,7 @@
     {
       "id": "src/services/errors/errorReportSink.ts#ErrorReportSink.scheduleDrain.<callback:1067ca9296>:mutator-call:c0f2f41e3a9e",
       "path": "src/services/errors/errorReportSink.ts",
-      "line": 75,
+      "line": 82,
       "symbol": "ErrorReportSink.scheduleDrain.<callback:1067ca9296>",
       "operation": "mutator-call",
       "target": "src/services/errors/errorReportSink.ts#ErrorReportSink.flushToDb",
@@ -19153,7 +19153,7 @@
     {
       "id": "src/services/errors/errorReportSink.ts#ErrorReportSink.flushToDb:mutator-call:e3fd2f80780c",
       "path": "src/services/errors/errorReportSink.ts",
-      "line": 120,
+      "line": 127,
       "symbol": "ErrorReportSink.flushToDb",
       "operation": "mutator-call",
       "target": "src/services/errors/errorReportSink.ts#ErrorReportSink.persistBatch",
@@ -19166,7 +19166,7 @@
     {
       "id": "src/services/errors/errorReportSink.ts#ErrorReportSink.persistBatch:mutator-call:06eb409e4d8d",
       "path": "src/services/errors/errorReportSink.ts",
-      "line": 140,
+      "line": 147,
       "symbol": "ErrorReportSink.persistBatch",
       "operation": "mutator-call",
       "target": "src/services/errors/errorReportSink.ts#ErrorReportSink.persistBatch.<callback:1dff19cd0c>",
@@ -19179,7 +19179,7 @@
     {
       "id": "src/services/errors/errorReportSink.ts#ErrorReportSink.persistBatch:mutator-call:7d8512b6a01a",
       "path": "src/services/errors/errorReportSink.ts",
-      "line": 140,
+      "line": 147,
       "symbol": "ErrorReportSink.persistBatch",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -19192,7 +19192,7 @@
     {
       "id": "src/services/errors/errorReportSink.ts#ErrorReportSink.persistBatch.<callback:1dff19cd0c>:mutator-call:f63481bd7d44",
       "path": "src/services/errors/errorReportSink.ts",
-      "line": 146,
+      "line": 153,
       "symbol": "ErrorReportSink.persistBatch.<callback:1dff19cd0c>",
       "operation": "mutator-call",
       "target": "src/db/repositories/errorReports.ts#insertErrorReportsWithinTransaction",
@@ -19205,7 +19205,7 @@
     {
       "id": "src/services/errors/errorReportSink.ts#captureError:mutator-call:a8184e42b9cb",
       "path": "src/services/errors/errorReportSink.ts",
-      "line": 198,
+      "line": 205,
       "symbol": "captureError",
       "operation": "mutator-call",
       "target": "src/services/errors/errorReportSink.ts#ErrorReportSink.flushToDb",
@@ -19244,7 +19244,7 @@
     {
       "id": "src/services/errors/index.ts#revokeErrorReporting:mutator-call:df9a116f1f15",
       "path": "src/services/errors/index.ts",
-      "line": 52,
+      "line": 62,
       "symbol": "revokeErrorReporting",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#revokeErrorReporting.<callback:6ba16ab0fa>",
@@ -19257,7 +19257,7 @@
     {
       "id": "src/services/errors/index.ts#revokeErrorReporting.<callback:6ba16ab0fa>:mutator-call:00b329553e04",
       "path": "src/services/errors/index.ts",
-      "line": 57,
+      "line": 67,
       "symbol": "revokeErrorReporting.<callback:6ba16ab0fa>",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -19270,7 +19270,7 @@
     {
       "id": "src/services/errors/index.ts#revokeErrorReporting.<callback:6ba16ab0fa>:mutator-call:3cd60f103698",
       "path": "src/services/errors/index.ts",
-      "line": 57,
+      "line": 67,
       "symbol": "revokeErrorReporting.<callback:6ba16ab0fa>",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#revokeErrorReporting.<callback:6ba16ab0fa>.<callback:df5455005c>",
@@ -19283,7 +19283,7 @@
     {
       "id": "src/services/errors/index.ts#revokeErrorReporting.<callback:6ba16ab0fa>.<callback:df5455005c>:mutator-call:0af467bde68f",
       "path": "src/services/errors/index.ts",
-      "line": 59,
+      "line": 69,
       "symbol": "revokeErrorReporting.<callback:6ba16ab0fa>.<callback:df5455005c>",
       "operation": "mutator-call",
       "target": "src/db/repositories/errorReports.ts#clearErrorReportsWithinTransaction",
@@ -19296,7 +19296,7 @@
     {
       "id": "src/services/errors/index.ts#ensureConsentObserver.<callback:a350d282b8>:mutator-call:81274b260511",
       "path": "src/services/errors/index.ts",
-      "line": 85,
+      "line": 95,
       "symbol": "ensureConsentObserver.<callback:a350d282b8>",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#revokeErrorReporting",
@@ -19309,7 +19309,7 @@
     {
       "id": "src/services/errors/index.ts#ensureConsentObserver:mutator-call:5631fb0106eb",
       "path": "src/services/errors/index.ts",
-      "line": 89,
+      "line": 99,
       "symbol": "ensureConsentObserver",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#revokeErrorReporting",
@@ -19322,7 +19322,7 @@
     {
       "id": "src/services/errors/index.ts#initErrorReporting:mutator-call:e859266a73cf",
       "path": "src/services/errors/index.ts",
-      "line": 99,
+      "line": 109,
       "symbol": "initErrorReporting",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#ensureConsentObserver",
@@ -19335,7 +19335,7 @@
     {
       "id": "src/services/errors/index.ts#flushErrorReports:mutator-call:1ae42da375cc",
       "path": "src/services/errors/index.ts",
-      "line": 122,
+      "line": 153,
       "symbol": "flushErrorReports",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#ensureConsentObserver",
@@ -19348,7 +19348,7 @@
     {
       "id": "src/services/errors/index.ts#flushErrorReports:mutator-call:a82e15453f42",
       "path": "src/services/errors/index.ts",
-      "line": 158,
+      "line": 189,
       "symbol": "flushErrorReports",
       "operation": "mutator-call",
       "target": "src/services/errors/index.ts#revokeErrorReporting",
@@ -19361,7 +19361,7 @@
     {
       "id": "src/services/errors/index.ts#flushErrorReports:mutator-call:4c82a62c3bba",
       "path": "src/services/errors/index.ts",
-      "line": 171,
+      "line": 203,
       "symbol": "flushErrorReports",
       "operation": "mutator-call",
       "target": "src/services/errors/errorReportSink.ts#ErrorReportSink.flushToDb",
@@ -19374,7 +19374,7 @@
     {
       "id": "src/services/errors/index.ts#flushErrorReports:mutator-call:35b3c74315d6",
       "path": "src/services/errors/index.ts",
-      "line": 173,
+      "line": 205,
       "symbol": "flushErrorReports",
       "operation": "mutator-call",
       "target": "src/services/errors/errorReportQueueService.ts#runErrorReportQueue",

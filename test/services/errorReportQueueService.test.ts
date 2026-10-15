@@ -15,7 +15,10 @@ jest.mock('react-native', () => ({
   Platform: { OS: 'android', Version: 34, constants: { Model: 'Pixel 9' } },
 }));
 jest.mock('@db/database', () => ({ getDatabase: jest.fn() }));
-jest.mock('@/services/clients', () => ({ http: { post: jest.fn() } }));
+jest.mock('@/services/clients', () => ({
+  http: { post: jest.fn() },
+  dbWriteWedgeMarker: { isMarked: () => false, mark: jest.fn(), clear: jest.fn() },
+}));
 jest.mock('@/services/errors/errorReportSink', () => ({
   errorReportSink: {
     flushToDb: jest.fn(async () => {}),
