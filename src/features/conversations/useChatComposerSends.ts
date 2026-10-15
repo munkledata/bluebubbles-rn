@@ -1,5 +1,8 @@
 import { useCallback, type Dispatch, type SetStateAction } from 'react';
-import type { IMessageTextFormattingRange } from '@core/api/endpoints/messages';
+import {
+  UnsupportedIMessageTextError,
+  type IMessageTextFormattingRange,
+} from '@core/api/endpoints/messages';
 import type { Recurrence } from '@core/schedule';
 import { logger } from '@core/secure';
 import type { MessagePreview } from '@db/repositories';
@@ -227,7 +230,9 @@ export function useChatComposerSends({
           if (!accountLease.isCurrent()) return;
           logger.warn('[chat] message queue admission failed', error);
           showToast(
-            'Couldn’t queue that message. Your draft is still here—try again when connected',
+            error instanceof UnsupportedIMessageTextError
+              ? 'iMessage can’t send this text. Remove hidden attachment or control characters, or shorten it. Your draft is still here.'
+              : 'Couldn’t queue that message. Your draft is still here—try again when connected',
           );
         },
       );

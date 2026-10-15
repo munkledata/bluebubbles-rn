@@ -6,7 +6,6 @@ import {
   sendIMessagePlainText,
   sendText,
   type MessageMention,
-  type SendIMessagePlainTextParams,
 } from '@core/api/endpoints/messages';
 import { MAX_SEND_ATTACHMENT_TEXT_BYTES } from '@core/models/serverInfo';
 import {
@@ -45,16 +44,6 @@ export function chooseSendMethod(needsPrivateApi: boolean): 'apple-script' {
     throw new Error('Private API message features were retired in this release.');
   }
   return 'apple-script';
-}
-
-/** Whether the narrow iMessage text route accepts this exact request. */
-function narrowIMessageTextRouteCarries(request: SendIMessagePlainTextParams): boolean {
-  try {
-    requireIMessagePlainTextRequest(request);
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 /** "temp-{8 lowercase alnum}" — a client-generated id for optimistic sends. */
@@ -186,13 +175,11 @@ export async function sendTextMessage(
       throw new Error('A proven existing one-to-one iMessage chat is required.');
     }
   }
-  // The narrow route cannot carry every text (an attachment placeholder U+FFFC, control
-  // characters, or more than 64 KiB). Those keep the ordinary AppleScript route that every chat
-  // used before the narrow route existed, instead of failing before the message is queued.
   const useIMessagePlainText =
-    provenPlainTextChat &&
-    capability.serverInfo?.supports_imessage_plain_text === true &&
-    narrowIMessageTextRouteCarries({ chatGuid: args.chatGuid, message: args.text, tempGuid });
+    provenPlainTextChat && capability.serverInfo?.supports_imessage_plain_text === true;
+  if (useIMessagePlainText) {
+    requireIMessagePlainTextRequest({ chatGuid: args.chatGuid, message: args.text, tempGuid });
+  }
   const outgoing = {
     tempGuid,
     chatGuid: args.chatGuid,

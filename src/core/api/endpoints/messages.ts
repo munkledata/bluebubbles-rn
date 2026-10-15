@@ -174,6 +174,11 @@ const DISALLOWED_MENTION_CONTROL_CHARACTER =
 const IMESSAGE_PLAIN_TEXT_DISALLOWED_CHARACTER =
   /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\ufffc]/u;
 
+function isWellFormedBoundedUtf8(value: string, maxBytes: number): boolean {
+  const bytes = utf8Encode(value);
+  return bytes.byteLength > 0 && bytes.byteLength <= maxBytes && utf8Decode(bytes) === value;
+}
+
 function requireWellFormedBoundedUtf8(value: string, maxBytes: number, label: string): string {
   const bytes = utf8Encode(value);
   if (bytes.byteLength === 0 || bytes.byteLength > maxBytes || utf8Decode(bytes) !== value) {
@@ -209,6 +214,17 @@ function requireNarrowReply(params: SendTextParams): void {
   );
 }
 
+/**
+ * The text itself cannot go through the narrow iMessage route (blank, a control or inline-attachment
+ * character, a broken character, or more than 64 KiB). Retrying or reconnecting cannot fix it.
+ */
+export class UnsupportedIMessageTextError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UnsupportedIMessageTextError';
+  }
+}
+
 export interface SendIMessagePlainTextParams {
   chatGuid: string;
   message: string;
@@ -228,17 +244,13 @@ export function requireIMessagePlainTextRequest(params: SendIMessagePlainTextPar
   requireWellFormedBoundedUtf8(params.chatGuid, IMESSAGE_REPLY_ID_MAX_BYTES, 'chatGuid');
   if (
     params.message.trim().length === 0 ||
-    IMESSAGE_PLAIN_TEXT_DISALLOWED_CHARACTER.test(params.message)
+    IMESSAGE_PLAIN_TEXT_DISALLOWED_CHARACTER.test(params.message) ||
+    !isWellFormedBoundedUtf8(params.message, IMESSAGE_REPLY_TEXT_MAX_BYTES)
   ) {
-    throw new Error(
-      'A narrow iMessage text cannot be blank or contain unsupported control or attachment characters.',
+    throw new UnsupportedIMessageTextError(
+      'A narrow iMessage text cannot be blank, contain unsupported control or attachment characters, or exceed 65,536 well-formed UTF-8 bytes.',
     );
   }
-  requireWellFormedBoundedUtf8(
-    params.message,
-    IMESSAGE_REPLY_TEXT_MAX_BYTES,
-    'plain iMessage text',
-  );
   if (params.tempGuid.length === 0) {
     throw new Error('A narrow iMessage text needs a nonempty temporary identity.');
   }

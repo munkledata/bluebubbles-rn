@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { ApiError } from '@core/api/errors';
+import { UnsupportedIMessageTextError } from '@core/api/endpoints/messages';
 import type { HttpClient, HttpTransportSnapshot } from '@core/api/http';
 import { Chat, Message, ServerInfo } from '@core/models';
 import { logger } from '@core/secure';
@@ -502,13 +503,13 @@ describe('sendTextMessage', () => {
     expect(raw.prepare('SELECT guid FROM messages').get()).toEqual({ guid });
   });
 
-  it('sends a text the narrow route cannot carry through the ordinary route instead of refusing it', async () => {
+  it('refuses a text the narrow route cannot carry with a specific error, before saving anything', async () => {
     const { db, raw } = await createTestDb();
     const chatGuid = 'any;-;+15551234567';
     // U+FFFC is the placeholder Apple uses for an inline attachment; the narrow route refuses it.
     const text = 'see \ufffc attached';
     await seedProvenIMessageChat(db, chatGuid);
-    const post = jest.fn(async () => ({ guid: null }));
+    const post = jest.fn();
     let client!: HttpClient;
     client = {
       post,
@@ -517,28 +518,22 @@ describe('sendTextMessage', () => {
       assertTransportCurrent: () => undefined,
     } as unknown as HttpClient;
 
-    await sendTextMessage(
-      db,
-      client,
-      { chatGuid, text },
-      1_000,
-      undefined,
-      undefined,
-      undefined,
-      fixedRcsCapabilitySource(
-        ServerInfo.parse({ version: '2.0.0', supports_imessage_plain_text: true }),
+    await expect(
+      sendTextMessage(
+        db,
+        client,
+        { chatGuid, text },
+        1_000,
+        undefined,
+        undefined,
+        undefined,
+        fixedRcsCapabilitySource(
+          ServerInfo.parse({ version: '2.0.0', supports_imessage_plain_text: true }),
+        ),
       ),
-    );
-
-    expect(post).toHaveBeenCalledTimes(1);
-    expect(post).toHaveBeenCalledWith(
-      '/message/text',
-      expect.anything(),
-      expect.objectContaining({
-        json: expect.objectContaining({ chatGuid, method: 'apple-script', text }),
-      }),
-    );
-    expect(raw.prepare('SELECT text FROM messages').get()).toEqual({ text });
+    ).rejects.toBeInstanceOf(UnsupportedIMessageTextError);
+    expect(post).not.toHaveBeenCalled();
+    expect(countMessages(raw)).toBe(0);
   });
 
   it('arms one narrow retry only for the exact pre-dispatch unavailable response', async () => {

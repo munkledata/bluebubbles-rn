@@ -33,6 +33,7 @@ jest.mock('@ui/dialog/dialogStore', () => ({
 jest.mock('@ui/conversations/sendNotices', () => ({ presentSendIssue: jest.fn() }));
 jest.mock('@core/secure', () => ({ logger: { warn: jest.fn() } }));
 
+import { UnsupportedIMessageTextError } from '@core/api/endpoints/messages';
 import type { MessagePreview } from '@db/repositories';
 import { presentSendIssue } from '@ui/conversations/sendNotices';
 import {
@@ -186,6 +187,18 @@ describe('useChatComposerSends', () => {
     expect(mockShowToast).toHaveBeenCalledTimes(1);
     expect(mockShowToast).toHaveBeenCalledWith(
       'Couldn’t queue that message. Your draft is still here—try again when connected',
+    );
+  });
+
+  it('says the text itself cannot be sent, instead of blaming the connection', async () => {
+    mockSend.mockRejectedValue(new UnsupportedIMessageTextError('unsupported characters'));
+    const { onSend } = await sends();
+
+    await expect(onSend('see \ufffc attached')).resolves.toBe(false);
+
+    expect(mockShowToast).toHaveBeenCalledTimes(1);
+    expect(mockShowToast).toHaveBeenCalledWith(
+      'iMessage can’t send this text. Remove hidden attachment or control characters, or shorten it. Your draft is still here.',
     );
   });
 
