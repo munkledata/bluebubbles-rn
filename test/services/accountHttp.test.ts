@@ -3,6 +3,7 @@
 jest.mock('ky', () => ({ __esModule: true, default: jest.fn() }));
 jest.mock('@native/secureVault', () => ({ ExpoSecureVault: class {} }));
 jest.mock('@native/accountRevocationMarker', () => ({ ExpoAccountRevocationMarker: class {} }));
+jest.mock('@native/dbWriteWedgeMarker', () => ({ ExpoDbWriteWedgeMarker: class {} }));
 jest.mock('@state/sessionStore', () => ({
   sessionAccessors: {
     getOrigin: () => 'https://mac.example',
