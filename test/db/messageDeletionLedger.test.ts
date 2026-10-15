@@ -1,4 +1,5 @@
 import { Chat, Message } from '@core/models';
+import { logger } from '@core/secure';
 import {
   markMessageDeleted,
   markMessageDeletedWithinTransaction,
@@ -67,6 +68,32 @@ describe('message deletion ledger', () => {
     expect(
       raw.prepare("SELECT date_deleted FROM messages WHERE guid = 'late-message'").get(),
     ).toEqual({ date_deleted: 5000 });
+  });
+
+  it('logs a count, never the message, when an ownership check withholds an incoming row', async () => {
+    const { db } = await createTestDb();
+    const { chatId, handles } = await seedChat(db);
+    // A deletion recorded in another chat must not be applied to, or leak into, this chat.
+    await markMessageDeleted(db, 'foreign-owned', 5000, undefined, 'chat-other');
+    const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    try {
+      const stored = await withDbTransaction(db, (context) =>
+        upsertMessagesWithinTransaction(context, [message('foreign-owned')], () => chatId, handles),
+      );
+
+      expect(stored.size).toBe(0);
+      expect(warn).toHaveBeenCalledWith(
+        '[messages] withheld incoming rows that failed ownership checks',
+        {
+          deletionOwner: 1,
+        },
+      );
+      const logged = JSON.stringify(warn.mock.calls);
+      expect(logged).not.toContain('foreign-owned');
+      expect(logged).not.toContain('must stay hidden');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('keeps the later timestamp across repeated, out-of-order deletion events', async () => {

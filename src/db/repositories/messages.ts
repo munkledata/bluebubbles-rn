@@ -13,6 +13,7 @@ import {
   type Message,
 } from '@core/models';
 import { plainTextFromAttributedBody } from '@core/richtext';
+import { logger } from '@core/secure';
 import {
   attachments as attachmentRows,
   chatHandles,
@@ -39,6 +40,10 @@ import { clearSupersededTombstonesWithinTransaction } from './chats';
 import { handleMapKey } from './handles';
 import { getMessageStateAuthorityWithinTransaction } from './messageState';
 import { chatLatestMessageDateSql, deletionRecordApplies } from './chatVisibility';
+
+/** Why an incoming row was not stored; logged only as counts (review M058). */
+type WithheldReason =
+  'noChat' | 'serverStateOwner' | 'deletionOwner' | 'tempDeletionOwner' | 'aliasOwner';
 
 type PersistedRetractionState = Exclude<MessageRetractionState, 'intact'>;
 
@@ -374,9 +379,16 @@ export function upsertMessagesWithinTransaction(
             .where(inArray(messageGuidAliases.aliasGuid, tempGuids));
     const aliasByTempGuid = new Map(tempAliases.map((row) => [row.aliasGuid, row]));
 
+    // Rows withheld by an ownership or quarantine check are counted per reason, never named, so a
+    // silently missing message leaves a privacy-safe trace in the logs (review M058).
+    const withheld: Partial<Record<WithheldReason, number>> = {};
+    const withhold = (reason: WithheldReason): false => {
+      withheld[reason] = (withheld[reason] ?? 0) + 1;
+      return false;
+    };
     const withChat = rowOwnerCandidates.filter(({ m, chatId }) => {
       const destination = destinationChatById.get(chatId);
-      if (!destination) return false;
+      if (!destination) return withhold('noChat');
       const existing = existingLocationByGuid.get(m.guid);
       const canonicalDeletion = deletionByIdentity.get(m.guid);
       const serverState = serverStateByGuid.get(m.guid);
@@ -386,18 +398,18 @@ export function upsertMessagesWithinTransaction(
           ? existing == null
           : serverState.chatGuid !== destination.guid)
       )
-        return false;
+        return withhold('serverStateOwner');
       // A message with a deletion record is stored only when that record applies to it here.
       if (
         canonicalDeletion &&
         !deletionRecordApplies(canonicalDeletion.chatGuid, destination.guid, existing != null)
       ) {
-        return false;
+        return withhold('deletionOwner');
       }
       if (m.tempGuid) {
         const tempDeletion = deletionByIdentity.get(m.tempGuid);
         if (tempDeletion?.chatGuid == null || tempDeletion?.chatGuid !== destination.guid) {
-          if (tempDeletion) return false;
+          if (tempDeletion) return withhold('tempDeletionOwner');
         }
         const exactAlias = aliasByTempGuid.get(m.tempGuid);
         if (
@@ -406,16 +418,19 @@ export function upsertMessagesWithinTransaction(
             exactAlias.chatGuid == null ||
             exactAlias.chatGuid !== destination.guid)
         ) {
-          return false;
+          return withhold('aliasOwner');
         }
       }
       for (const alias of aliasesByCanonical.get(m.guid) ?? []) {
         if (alias.chatGuid == null ? existing == null : alias.chatGuid !== destination.guid) {
-          return false;
+          return withhold('aliasOwner');
         }
       }
       return true;
     });
+    if (Object.keys(withheld).length > 0) {
+      logger.warn('[messages] withheld incoming rows that failed ownership checks', withheld);
+    }
     if (withChat.length === 0) return map;
 
     const deletionByGuid = new Map<string, number>();
