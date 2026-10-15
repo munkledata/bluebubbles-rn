@@ -1,5 +1,6 @@
 import Database from 'better-sqlite3';
 import { runMigrations, type SqlRunner } from '@db/migrate';
+import { migrationNamesFrom } from '../../support/migrationNames';
 
 const MIGRATION_NAME = '0054_handle_contact_ambiguous';
 
@@ -36,11 +37,8 @@ describe(`migration ${MIGRATION_NAME}`, () => {
         .run();
 
       stopBefore0054.value = false;
-      await runMigrations(runner);
-
-      expect(raw.prepare('SELECT name FROM _migrations ORDER BY rowid DESC LIMIT 1').get()).toEqual(
-        { name: MIGRATION_NAME },
-      );
+      // This migration and every later one apply, so a newer migration cannot break this test.
+      await expect(runMigrations(runner)).resolves.toEqual(migrationNamesFrom(MIGRATION_NAME));
       expect(raw.prepare('SELECT contact_ambiguous AS flag FROM handles').get()).toEqual({
         flag: 0,
       });

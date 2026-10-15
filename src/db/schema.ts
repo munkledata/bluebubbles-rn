@@ -351,6 +351,10 @@ export const messages = sqliteTable(
     chatDateIdx: index('messages_chat_date_idx').on(t.chatId, t.dateCreated),
     rowIdIdx: index('messages_row_id_idx').on(t.originalRowId),
     assocIdx: index('messages_assoc_idx').on(t.associatedMessageGuid),
+    // Migration 0055 (review M048): delayed send failures find their message by attempt id.
+    activeSendAttemptIdx: index('messages_active_send_attempt_idx')
+      .on(t.activeSendAttemptGuid)
+      .where(sql`${t.activeSendAttemptGuid} IS NOT NULL`),
     errorMessageBounded: check(
       'messages_error_message_bounded',
       sql`${t.errorMessage} IS NULL OR (length(${t.errorMessage}) BETWEEN 1 AND 240 AND length(CAST(${t.errorMessage} AS BLOB)) <= 512)`,

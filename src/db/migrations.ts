@@ -1191,4 +1191,15 @@ export const MIGRATIONS: Migration[] = [
          CHECK (contact_ambiguous IN (0, 1))`,
     ],
   },
+  {
+    // Review M048: once a send's temp alias is pruned, a delayed failure finds its message by the
+    // active attempt id. Without an index that lookup read every message under the write lock.
+    // Only in-flight sends carry an attempt id, so the partial index stays small.
+    name: '0055_messages_active_send_attempt_index',
+    statements: [
+      `CREATE INDEX messages_active_send_attempt_idx
+         ON messages (active_send_attempt_guid)
+         WHERE active_send_attempt_guid IS NOT NULL`,
+    ],
+  },
 ];

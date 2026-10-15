@@ -275,6 +275,16 @@
       "upgradeTest": "test/db/migrations/0054_handle_contact_ambiguous.test.ts",
       "schemaEvidence": "src/db/schema.ts",
       "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
+    },
+    {
+      "number": 55,
+      "name": "0055_messages_active_send_attempt_index",
+      "task": "REVIEW-M048",
+      "branchPr": "master",
+      "status": "prepared",
+      "upgradeTest": "test/db/migrations/0055_messages_active_send_attempt_index.test.ts",
+      "schemaEvidence": "src/db/schema.ts",
+      "cacheWipeEvidence": "test/db/clearLocalCache.test.ts"
     }
   ]
 }

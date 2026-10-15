@@ -5176,6 +5176,19 @@
       "evidence": "test/db/migrations/0054_handle_contact_ambiguous.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs; scripts/check-db-writes.test.mjs"
     },
     {
+      "id": "src/db/migrations.ts#migration:0055_messages_active_send_attempt_index:sql-schema:7671894ce79c",
+      "path": "src/db/migrations.ts",
+      "line": 1200,
+      "symbol": "migration:0055_messages_active_send_attempt_index",
+      "operation": "sql-schema",
+      "target": "messages_active_send_attempt_idx",
+      "detectedContext": "startup-migration",
+      "owner": "REVIEW-M048 active send-attempt lookup index",
+      "transactionContext": "startup-migration",
+      "disposition": "proven-temporal-exclusion",
+      "evidence": "test/db/migrations/0055_messages_active_send_attempt_index.test.ts; test/db/rcsAttemptOwnership.test.ts; test/db/migrations.test.ts; scripts/check-migrations.test.mjs; scripts/check-db-writes.test.mjs"
+    },
+    {
       "id": "src/db/performance/deviceInboxBenchmark.ts#seedFixture:mutator-call:1678bfc56fc9",
       "path": "src/db/performance/deviceInboxBenchmark.ts",
       "line": 98,

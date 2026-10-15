@@ -1266,6 +1266,12 @@ describe('RCS active send-attempt ownership', () => {
         dateDelivered: null,
       });
       raw.prepare('DELETE FROM message_guid_aliases WHERE alias_guid = ?').run(tempGuid);
+      const statements: string[] = [];
+      const prepare = raw.prepare.bind(raw);
+      const capture = jest.spyOn(raw, 'prepare').mockImplementation(((source: string) => {
+        statements.push(source);
+        return prepare(source);
+      }) as typeof raw.prepare);
       const afterPrune = await withDbTransaction(db, (context) =>
         applyServerSendErrorWithinTransaction(
           context,
@@ -1281,8 +1287,21 @@ describe('RCS active send-attempt ownership', () => {
             clientAttemptGeneration: 1,
           },
         ),
-      );
+      ).finally(() => capture.mockRestore());
       expect(afterPrune.disposition).toBe('applied');
+      // With the alias pruned, the owner is found by its attempt id. That lookup runs under the
+      // global write lock, so it must use an index instead of reading every message (review M048).
+      const attemptLookups = statements.filter((statement) =>
+        /WHERE\s+m\.active_send_attempt_guid\s*=\s*\?/.test(statement),
+      );
+      expect(attemptLookups).toHaveLength(1);
+      const plan = (
+        raw
+          .prepare(`EXPLAIN QUERY PLAN ${attemptLookups[0]}`)
+          .all(...(attemptLookups[0]!.match(/\?/g) ?? []).map(() => null)) as { detail: string }[]
+      ).map((row) => row.detail);
+      expect(plan.filter((detail) => /^SCAN m\b/.test(detail))).toEqual([]);
+      expect(plan.some((detail) => detail.includes('messages_active_send_attempt_idx'))).toBe(true);
       afterPrune.onCommitted?.();
       expect(ownerState(raw, 'rcs-retained-a')?.sendState).toBe('error');
       expect(

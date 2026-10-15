@@ -6,5 +6,5 @@
  * It lives apart from migrations.ts because the DB-write guard requires database.ts to import
  * exactly one name, MIGRATIONS, from that module.
  */
-export const MIGRATION_HEAD = '0054_handle_contact_ambiguous' as const;
-export const MIGRATION_COUNT = 54 as const;
+export const MIGRATION_HEAD = '0055_messages_active_send_attempt_index' as const;
+export const MIGRATION_COUNT = 55 as const;
