@@ -1,6 +1,8 @@
 import type { Message } from '@core/models';
+import { logger } from '@core/secure';
 import {
   boundSearchResultSnippet,
+  linkHandlesToContacts,
   searchMessagesEnrichedByGuids,
   upsertChatsWithinTransaction,
   upsertHandlesWithinTransaction,
@@ -92,6 +94,7 @@ export async function adoptServerMessageSearchHits(
   const hitTextByGuid = new Map(hits.map((hit) => [hit.guid, hit.text ?? null]));
 
   const adoptedGuids: string[] = [];
+  const adoptedAddresses: string[] = [];
   let adoptedRows: SearchResultRow[] = [];
   const outcome = await runTrackedRealtimeWork(lease, async (activeLease) => {
     for (let index = 0; index < hits.length; index += SERVER_SEARCH_TX_CHUNK) {
@@ -123,8 +126,19 @@ export async function adoptServerMessageSearchHits(
         () => activeLease.isCurrent() && shouldContinue(),
       );
       adoptedGuids.push(...stored.keys());
+      adoptedAddresses.push(...sliceHandles.map((handle) => handle.address));
     }
 
+    if (!activeLease.isCurrent() || !shouldContinue()) return;
+    // Handles this search created link to saved contacts only after their transaction commits:
+    // building the contact index reads the whole address book (review M057). Best effort.
+    const linkIsCurrent = (): boolean => activeLease.isCurrent() && shouldContinue();
+    await linkHandlesToContacts(db, adoptedAddresses, undefined, linkIsCurrent).catch(
+      (error: unknown) => {
+        if (linkIsCurrent())
+          logger.debug('[search] contact linking for search results skipped', error);
+      },
+    );
     if (!activeLease.isCurrent() || !shouldContinue()) return;
     adoptedRows = await searchMessagesEnrichedByGuids(db, adoptedGuids);
   });

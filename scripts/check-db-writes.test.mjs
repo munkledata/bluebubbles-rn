@@ -6984,11 +6984,11 @@ test('certifies exactly the reviewed server-search adoption transaction', () => 
   assert.deepEqual(
     findings.map((finding) => finding.id).sort(),
     [
-      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:97df078e7a>:mutator-call:7d230b526f88',
-      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:97df078e7a>:mutator-call:90186d35af9b',
-      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:97df078e7a>.<callback:23d601c0e7>:mutator-call:192bcb4b55a6',
-      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:97df078e7a>.<callback:23d601c0e7>:mutator-call:440356496de4',
-      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:97df078e7a>.<callback:23d601c0e7>:mutator-call:5efed3c36e62',
+      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:ca86dfd094>:mutator-call:7dc7fa3db20e',
+      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:ca86dfd094>:mutator-call:98315c753c9e',
+      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:ca86dfd094>.<callback:23d601c0e7>:mutator-call:eff11cf61723',
+      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:ca86dfd094>.<callback:23d601c0e7>:mutator-call:2778da0a94b7',
+      'src/services/search/serverMessageSearchOperation.ts#adoptServerMessageSearchHits.<callback:ca86dfd094>.<callback:23d601c0e7>:mutator-call:c5a2deb38ff2',
     ].sort(),
   );
   assert.equal(

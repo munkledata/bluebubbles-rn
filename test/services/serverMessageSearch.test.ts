@@ -1,5 +1,5 @@
 import { Message } from '@core/models';
-import { getChatIdByGuid } from '@db/repositories';
+import { getChatIdByGuid, upsertContacts } from '@db/repositories';
 import {
   adoptServerMessageSearchHits,
   searchAndAdoptServerMessagesWith,
@@ -40,6 +40,30 @@ describe('server message search adoption', () => {
     expect(results[0]?.chatGuid).toBe('iMessage;-;+15551234567');
     expect(results[0]?.senderName).toBe('+15551234567');
     expect(await getChatIdByGuid(db, 'iMessage;-;+15551234567')).not.toBeNull();
+  });
+
+  it('names a sender this search introduces when the number is a saved contact', async () => {
+    const { db } = await createTestDb();
+    await upsertContacts(db, [
+      {
+        sourceId: 'saved-sender',
+        displayName: 'Saved Sender',
+        givenName: 'Saved',
+        familyName: 'Sender',
+        phones: ['+1 (555) 123-4567'],
+        emails: [],
+        avatar: null,
+      },
+    ]);
+
+    const results = await adoptServerMessageSearchHits(
+      db,
+      [remoteHit],
+      lease(() => true),
+    );
+
+    // The search created this sender's handle; it is linked once its transaction commits (M057).
+    expect(results[0]?.senderName).toBe('Saved Sender');
   });
 
   it('does not write a hit owned by a retired account lease', async () => {

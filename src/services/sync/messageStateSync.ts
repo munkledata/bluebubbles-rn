@@ -13,10 +13,12 @@ import {
   setMessageStateAuthorityWithinTransaction,
 } from '@db/repositories/messageState';
 import {
+  linkHandlesToContacts,
   upsertChatsWithinTransaction,
   upsertHandlesWithinTransaction,
   upsertMessagesWithinTransaction,
 } from '@db/repositories';
+import { logger } from '@core/secure';
 import { resolveMessageChatGuid } from '@core/models';
 import { classifyRcsMessageRecord } from '@core/rcs';
 import { withDbTransaction, type DbCommitGuard } from '@db/transaction';
@@ -121,6 +123,7 @@ export async function syncMessageState(
     // Network hydration is outside the page owner. Each small transaction binds only the proven
     // owner and body; final per-message transitions and the checkpoint commit in the final owner.
     const restoredOwners = new Map<string, string>();
+    const hydratedAddresses: string[] = [];
     // Restores the Mac no longer has (404). Each is left out of this page's transitions: a later
     // transition hides the message again or it is gone. A repair here would skip every event up
     // to the server's checkpoint instead of this one.
@@ -157,6 +160,11 @@ export async function syncMessageState(
       )
         throw defect('Restored message does not match its exact provider owner.');
       restoredOwners.set(event.sequence, owner);
+      const chats = message.chats ?? [];
+      const messageHandles = [
+        ...chats.flatMap((chat) => chat.participants ?? []),
+        ...(message.handle ? [message.handle] : []),
+      ];
       await withDbTransaction(
         db,
         async (context) => {
@@ -170,11 +178,7 @@ export async function syncMessageState(
             ...event,
             chatGuid: owner,
           });
-          const chats = message.chats ?? [];
-          const handles = await upsertHandlesWithinTransaction(context, [
-            ...chats.flatMap((chat) => chat.participants ?? []),
-            ...(message.handle ? [message.handle] : []),
-          ]);
+          const handles = await upsertHandlesWithinTransaction(context, messageHandles);
           const chatIds = await upsertChatsWithinTransaction(context, chats, handles);
           await upsertMessagesWithinTransaction(
             context,
@@ -185,6 +189,7 @@ export async function syncMessageState(
         },
         guard,
       );
+      hydratedAddresses.push(...messageHandles.map((handle) => handle.address));
     }
     const next = { ...previous, cursor: page.cursor, sequence: page.sequence };
     await withDbTransaction(
@@ -214,6 +219,11 @@ export async function syncMessageState(
       guard,
     );
     authority = next;
+    // Handles that hydration created link to saved contacts only after their transactions commit:
+    // building the contact index reads the whole address book (review M057). Best effort.
+    await linkHandlesToContacts(db, hydratedAddresses, undefined, guard).catch((error: unknown) => {
+      if (guard()) logger.debug('[sync] contact linking for restored messages skipped', error);
+    });
     if (!page.hasMore) return;
   }
   throw new MessageStateSyncIncompleteError();

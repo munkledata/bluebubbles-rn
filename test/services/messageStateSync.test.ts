@@ -9,6 +9,7 @@ import {
 import { MessageStateRepairRequiredError } from '@core/api/endpoints/messageState';
 import {
   upsertChats,
+  upsertContacts,
   upsertHandles,
   upsertMessages,
   markMessageDeleted,
@@ -214,6 +215,44 @@ describe('versioned message state', () => {
       expect((await getMessageStateAuthority(db))?.sequence).toBe('12');
     },
   );
+  it('links a sender that hydration introduces to a saved contact once it commits', async () => {
+    await evictRetainingOwner('alias');
+    await upsertContacts(db, [
+      {
+        sourceId: 'bob',
+        displayName: 'Bob Saved',
+        givenName: 'Bob',
+        familyName: 'Saved',
+        phones: [],
+        emails: ['bob@example.test'],
+        avatar: null,
+      },
+    ]);
+    await withDbTransaction(db, (context) =>
+      applyMessageStateWithinTransaction(context, {
+        ...changed('12', 'restored'),
+        chatGuid: null,
+      }),
+    );
+    const adapter = api(async () => page([{ ...event('12', 'restored'), chatGuid: null }]));
+    adapter.fetchActiveMessage = async () =>
+      Message.parse({
+        guid: 'message-1',
+        text: 'restored from a new sender',
+        handle: { address: 'bob@example.test' },
+        chats: [{ guid: chatGuid, participants: [{ address: 'alice@example.test' }] }],
+      });
+
+    await syncMessageState(db, adapter, { providerEpoch });
+
+    // The hydration transaction created Bob's handle; linking runs after it commits (M057).
+    expect(
+      raw
+        .prepare('SELECT display_name AS name FROM handles WHERE address = ?')
+        .get('bob@example.test'),
+    ).toEqual({ name: 'Bob Saved' });
+  });
+
   it.each(['ledger', 'alias'] as const)(
     'rejects foreign snapshot binding without poisoning evicted %s ownership',
     async (kind) => {
