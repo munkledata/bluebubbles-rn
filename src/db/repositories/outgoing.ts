@@ -314,12 +314,17 @@ async function handoverOutgoingIdentityWithinTransaction(
        WHERE guid IN (${tempGuid}, ${realGuid})
     `);
     await recordMessageGuidAliasWithinTransaction(context, tempGuid, realGuid, ownerChatGuid);
+    // Hiding inherited from the chat's deleted history is not a message deletion: an explicit chat
+    // restore must still undo it, so it is not carried onto the real identity (review of M069).
+    // A cancelled send's tombstone also has its own ledger record, read above.
     const messageTombstones: Array<{ dateDeleted: number }> = await db.all(sql`
-      SELECT date_deleted AS dateDeleted
-        FROM messages
-       WHERE guid = ${tempGuid}
-         AND date_deleted IS NOT NULL
-         AND chat_id = (SELECT id FROM chats WHERE guid = ${ownerChatGuid} LIMIT 1)
+      SELECT m.date_deleted AS dateDeleted
+        FROM messages m
+        JOIN chats c ON c.id = m.chat_id
+       WHERE m.guid = ${tempGuid}
+         AND m.date_deleted IS NOT NULL
+         AND c.guid = ${ownerChatGuid}
+         AND m.date_deleted IS NOT c.history_deleted_at
     `);
     const dateDeleted = tombstones.reduce<number | null>(
       (latest, row) => (latest == null || row.dateDeleted > latest ? row.dateDeleted : latest),
@@ -1719,7 +1724,15 @@ function reconcileExactOutgoingAttemptSuccessCoreWithinTransaction(
         .update(messages)
         .set({
           guid: success.guid,
-          dateCreated: success.dateCreated ?? undefined,
+          // A send hidden by its chat's deletion keeps a date inside that deleted history, so an
+          // explicit restore still shows it (review of M069).
+          dateCreated:
+            success.dateCreated == null
+              ? undefined
+              : sql`CASE WHEN ${messages.dateDeleted} IS NOT NULL AND ${messages.dateDeleted} = (
+                  SELECT c.history_deleted_at FROM chats c WHERE c.id = ${messages.chatId}
+                ) THEN MIN(${success.dateCreated}, ${messages.dateDeleted})
+                ELSE ${success.dateCreated} END`,
           dateDelivered: success.dateDelivered ?? null,
           isFromMe: true,
           activeSendAttemptGuid: success.attemptGuid,
