@@ -61,7 +61,8 @@ export default function RemindersScreen(): React.JSX.Element {
         data={rows}
         keyExtractor={(r: Reminder) => String(r.id)}
         renderItem={({ item }: { item: Reminder }) => {
-          const subtitle = reminderSubtitle(item.scheduledFor);
+          const when = reminderSubtitle(item.scheduledFor);
+          const subtitle = item.senderName ? `${item.senderName} · ${when}` : when;
           return (
             <ActionListRow
               title={item.messagePreview || 'Message'}

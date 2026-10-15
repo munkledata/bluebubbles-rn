@@ -8,6 +8,7 @@ import {
   type DbTransactionContext,
 } from '../transaction';
 import type { AppDatabase } from '../types';
+import { messageHasVisibleContentSql } from './chatVisibility';
 
 // ---- Reminders -------------------------------------------------------------
 
@@ -43,9 +44,25 @@ const REMINDER_COLS = sql`id, message_guid AS messageGuid, chat_guid AS chatGuid
   message_preview AS messagePreview, sender_name AS senderName, scheduled_for AS scheduledFor,
   notification_id AS notificationId, created_at AS createdAt`;
 
-/** All reminders, soonest first. */
+/**
+ * All reminders, soonest first, each with its message's LIVE text and sender. Rows store no copy, so
+ * an unsent message shows no text and a locally deleted or missing one shows neither.
+ */
 export async function listReminders(db: AppDatabase): Promise<Reminder[]> {
-  return db.all<Reminder>(sql`SELECT ${REMINDER_COLS} FROM reminders ORDER BY scheduled_for ASC`);
+  return db.all<Reminder>(sql`
+    SELECT r.id, r.message_guid AS messageGuid, r.chat_guid AS chatGuid,
+           CASE WHEN ${messageHasVisibleContentSql('m')} THEN NULLIF(TRIM(m.text), '') END
+             AS messagePreview,
+           CASE WHEN m.is_from_me = 0 THEN COALESCE(h.display_name, h.address) END AS senderName,
+           r.scheduled_for AS scheduledFor, r.notification_id AS notificationId,
+           r.created_at AS createdAt
+      FROM reminders r
+      LEFT JOIN messages m
+        ON m.guid = r.message_guid
+       AND m.date_deleted IS NULL
+       AND m.chat_id = (SELECT c.id FROM chats c WHERE c.guid = r.chat_guid LIMIT 1)
+      LEFT JOIN handles h ON h.id = m.handle_id
+     ORDER BY r.scheduled_for ASC`);
 }
 
 export async function getReminderByMessageGuid(

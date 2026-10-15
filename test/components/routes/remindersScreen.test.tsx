@@ -152,8 +152,13 @@ function setRows(rows: Reminder[]): void {
   mockUseReactiveQuery.mockReturnValue({ data: rows, isLoading: false, error: null });
 }
 
+function reminderRowSubtitle(row: Reminder): string {
+  const when = reminderSubtitle(row.scheduledFor);
+  return row.senderName ? `${row.senderName} · ${when}` : when;
+}
+
 function reminderA11yName(row: Reminder): string {
-  return `${row.messagePreview || 'Message'} ${reminderSubtitle(row.scheduledFor)}`;
+  return `${row.messagePreview || 'Message'} ${reminderRowSubtitle(row)}`;
 }
 
 beforeEach(() => {
@@ -178,7 +183,8 @@ describe('RemindersScreen', () => {
     await renderWithTheme(<RemindersScreen />);
 
     expect(screen.getByText(PRIVATE_PREVIEW)).toBeTruthy();
-    expect(screen.getByText(reminderSubtitle(row.scheduledFor))).toBeTruthy();
+    expect(screen.getByText(reminderRowSubtitle(row))).toBeTruthy();
+    expect(screen.getByText(`Private Sender · ${reminderSubtitle(row.scheduledFor)}`)).toBeTruthy();
     expect(screen.getByRole('button', { name: reminderA11yName(row) })).toBeTruthy();
     await act(async () => {
       fireEvent.press(screen.getByText('‹ Back'));
