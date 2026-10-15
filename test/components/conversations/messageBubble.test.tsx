@@ -92,6 +92,7 @@ jest.mock('@ui/attachments', () => {
 // suite.
 jest.mock('@features/conversations/useUrlPreview', () => ({
   useUrlPreview: jest.fn(() => null),
+  useUrlPreviewProxySupported: jest.fn(() => false),
 }));
 
 // eslint-disable-next-line import/first
@@ -480,7 +481,8 @@ describe('MessageBubble content paths', () => {
     expect(attachmentModuleMocks.AttachmentView).toHaveBeenCalledTimes(1);
     expect(attachmentModuleMocks.AttachmentGalleryGrid).toHaveBeenCalledTimes(1);
     expect(attachmentModuleMocks.StickerOverlay).toHaveBeenCalledTimes(1);
-    expect(mockUseUrlPreview).toHaveBeenCalledWith(PRIVATE_ATTRIBUTED_LINK);
+    // An incoming link from a sender who is not a saved contact waits for a tap (M212).
+    expect(mockUseUrlPreview).toHaveBeenCalledWith(PRIVATE_ATTRIBUTED_LINK, { network: false });
     expect(configuredLongPress(screen.getByText(PRIVATE_PLAIN))).toEqual(expect.any(Function));
     expect(onLongPress).not.toHaveBeenCalled();
 

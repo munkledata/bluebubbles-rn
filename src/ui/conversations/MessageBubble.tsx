@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, Text, View, type AccessibilityActionEvent } from 'react-native';
 import { isUrlPreviewRequestUrl } from '@core/api/endpoints/urlPreviews';
 import { bubbleEffectOf } from '@core/effects';
@@ -23,7 +23,7 @@ import {
   performMessageEntityAction,
   type MessageEntityActionRequest,
 } from '@/services/messageEntityActions';
-import { useUrlPreview } from '@features/conversations/useUrlPreview';
+import { useUrlPreview, useUrlPreviewProxySupported } from '@features/conversations/useUrlPreview';
 import { showDialog } from '@ui/dialog/dialogStore';
 import { showToast } from '@ui/toast/toastStore';
 import {
@@ -226,7 +226,14 @@ export const MessageBubble = React.memo(function MessageBubble({
       ? previewUrl
       : null
     : (payloadPreview?.url ?? null);
-  const fetched = useUrlPreview(previewLookupUrl);
+  // A preview asks the Gator server to fetch the page, which a sender could use to learn that the
+  // message was opened. Your own and saved contacts' links load automatically; an unknown sender's
+  // link waits for a tap (owner decision M212). The tap belongs to one message, so a recycled list
+  // row cannot carry it to the next.
+  const [previewTapGuid, setPreviewTapGuid] = useState<string | null>(null);
+  const previewNeedsTap = !isFromMe && msg.senderKnown !== 1 && previewTapGuid !== msg.guid;
+  const previewProxySupported = useUrlPreviewProxySupported();
+  const fetched = useUrlPreview(previewLookupUrl, { network: !previewNeedsTap });
   // useReactiveQuery deliberately keeps the previous dependency's data until the next read
   // resolves. A recycled FlashList row may therefore briefly carry URL A's cached preview while
   // rendering URL B. Adopt cache data only when its exact key matches the current message URL.
@@ -251,6 +258,13 @@ export const MessageBubble = React.memo(function MessageBubble({
     !!preview &&
     preview.error !== 1 &&
     (!!preview.title || !!preview.description || !!preview.siteName || !!preview.imageUrl);
+  // A cached answer, even a failed fetch, means a tap would load nothing new until it expires.
+  const showPreviewTap =
+    !!cardUrl &&
+    previewNeedsTap &&
+    previewProxySupported &&
+    !previewLoaded &&
+    !fetchedForCurrentUrl;
   const hasIndependentAction = hasActionableEntities || (!!cardUrl && previewLoaded);
   const urlOnly = useMemo(
     () =>
@@ -558,6 +572,20 @@ export const MessageBubble = React.memo(function MessageBubble({
             ) : undefined
           }
         />
+      ) : null}
+      {showPreviewTap ? (
+        <Pressable
+          onPress={() => setPreviewTapGuid(msg.guid)}
+          hitSlop={8}
+          accessible
+          accessibilityRole="button"
+          accessibilityLabel="Load link preview"
+          style={styles.previewTap}
+        >
+          <Text style={[styles.previewTapText, overlay, pill, { color: theme.color.tint }]}>
+            Load link preview
+          </Text>
+        </Pressable>
       ) : null}
     </Pressable>
   );
@@ -929,6 +957,9 @@ const styles = StyleSheet.create({
   bigEmoji: { marginHorizontal: 6, marginVertical: 2 },
   tombstone: { fontStyle: 'italic', fontSize: 13, marginHorizontal: 14, marginVertical: 4 },
   edited: { fontSize: 11, marginTop: 2, marginHorizontal: 14 },
+  // Only incoming messages ask for a tap, so the button sits on the received side.
+  previewTap: { alignSelf: 'flex-start', marginTop: 4, marginHorizontal: 14 },
+  previewTapText: { fontSize: 13 },
   // Same footprint as the "Edited" label — a small caption under the bubble.
   scheduled: { fontSize: 11, marginTop: 2, marginHorizontal: 14 },
   errorRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' },

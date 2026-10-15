@@ -533,6 +533,8 @@ export interface MessageRow {
   /** Device-owned color for the exact sender handle identity. */
   senderColor?: string | null;
   senderService: string | null;
+  /** 1 when the sender's handle matched a saved contact (the same rule as known-sender chats). */
+  senderKnown?: number | null;
   // Group/chat-event fields (utils/groupEvent.ts). Optional so hand-built test literals need not
   // set them; the SELECT below always provides them at runtime. `otherHandleName` is resolved from
   // `other_handle` (a server ROWID) to the affected participant's display name.
@@ -597,7 +599,8 @@ const MESSAGE_ROW_SELECT = sql`
     COALESCE(h.display_name, h.address) AS senderName,
     h.avatar AS senderAvatar,
     h.color AS senderColor,
-    NULLIF(h.service, '') AS senderService
+    NULLIF(h.service, '') AS senderService,
+    CASE WHEN h.contact_id IS NOT NULL OR h.contact_ambiguous = 1 THEN 1 ELSE 0 END AS senderKnown
   FROM messages m
   LEFT JOIN handles h ON h.id = m.handle_id`;
 

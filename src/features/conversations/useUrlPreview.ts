@@ -9,14 +9,26 @@ import { readUrlPreviewAndLoad } from '@/services/urlPreviewLoader';
 
 const TABLES = ['url_previews'];
 
+/** Whether the connected Gator server can fetch link previews on the phone's behalf. */
+export function useUrlPreviewProxySupported(): boolean {
+  return useSessionStore(
+    (state) =>
+      state.status === 'connected' && state.serverInfo?.supports_url_preview_proxy === true,
+  );
+}
+
 /**
  * URL-preview cache lookup with a capability-gated automatic refresh.
  *
  * The phone asks only its authenticated Gator server; arbitrary link/image hosts remain entirely
  * behind the server's bounded proxy. Cache writes wake this reactive query after the loader has
- * atomically published the complete text + optional data-image result.
+ * atomically published the complete text + optional data-image result. With `network: false` it
+ * only reads this phone's cache, so nothing is fetched until the caller allows it.
  */
-export function useUrlPreview(url: string | null): UrlPreviewRow | null {
+export function useUrlPreview(
+  url: string | null,
+  { network = true }: { network?: boolean } = {},
+): UrlPreviewRow | null {
   const [expiryRevision, setExpiryRevision] = useState(0);
   // A bubble owns the account that mounted it. If navigation teardown briefly leaves that old
   // component alive after an account switch, it must become inert rather than pairing A's URL prop
@@ -29,10 +41,8 @@ export function useUrlPreview(url: string | null): UrlPreviewRow | null {
     accountEpoch: sessionAccessors.getEpoch(),
     lease: captureRealtimeDeliveryLease(),
   };
-  const previewProxySupported = useSessionStore(
-    (state) =>
-      state.status === 'connected' && state.serverInfo?.supports_url_preview_proxy === true,
-  );
+  // Ask the server only when it can fetch previews and the caller allows a request (M212).
+  const loadThroughServer = useUrlPreviewProxySupported() && network;
   const accountEpoch = useSessionStore((state) => state.epoch);
   const transportRevision = useSessionStore((state) => state.transportRevision);
   const ownerCurrent =
@@ -42,7 +52,7 @@ export function useUrlPreview(url: string | null): UrlPreviewRow | null {
       if (!url) return null;
       // The capable path captures account, transport, cancellation, and DB before its cache await.
       // A miss therefore stays a raw link while a safe background completion wakes this query.
-      const cached = previewProxySupported
+      const cached = loadThroughServer
         ? await readUrlPreviewAndLoad(url, {
             accountEpoch: ownerRef.current!.accountEpoch,
             transportRevision,
@@ -57,7 +67,7 @@ export function useUrlPreview(url: string | null): UrlPreviewRow | null {
       return { ...cached, title };
     },
     TABLES,
-    [url, previewProxySupported, accountEpoch, transportRevision, ownerCurrent, expiryRevision],
+    [url, loadThroughServer, accountEpoch, transportRevision, ownerCurrent, expiryRevision],
     // No URL → no query AND no url_previews subscription (every bubble mounts this hook).
     { enabled: url != null && ownerCurrent },
   );

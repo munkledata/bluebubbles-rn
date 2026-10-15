@@ -553,9 +553,12 @@ arbitrary web requests from the phone. A capable server advertises
 validated HTTP(S) URL. The response contains bounded title, description, site name, final URL, and
 an optional validated JPEG/PNG data URI; it never gives the app a remote image URL to mount.
 
-The app automatically asks that endpoint for links in messages, displays the hostname from the
-message as the immutable destination label, and keeps a bounded positive/negative cache in the
-encrypted database. Older servers remain compatible: without the capability, the app uses only an
+The app automatically asks that endpoint for links in your own messages and in messages from saved
+contacts, displays the hostname from the message as the immutable destination label, and keeps a
+bounded positive/negative cache in the encrypted database. Since review item M212 (2026-10-14), a
+link from a sender who is not a saved contact waits for a tap on **Load link preview**, because the
+server's fetch could tell that sender the message was opened; an unexpired cached preview still
+shows without a request. Older servers remain compatible: without the capability, the app uses only an
 already-safe, unexpired cached or sender-supplied text preview. App commit `4b89431` and server
 commit `76097f75` complete the host implementation, and independent safety reviews are green.
 Google Play `0.1.46` / version code `63` then passed the controlled 20-case Android matrix, native

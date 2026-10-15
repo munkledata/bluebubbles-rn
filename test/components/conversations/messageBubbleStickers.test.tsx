@@ -34,6 +34,7 @@ jest.mock('@ui/attachments', () => {
 // sticker-wiring suite, matching the direct MessageBubble component tests.
 jest.mock('@features/conversations/useUrlPreview', () => ({
   useUrlPreview: jest.fn(() => null),
+  useUrlPreviewProxySupported: jest.fn(() => false),
 }));
 
 // eslint-disable-next-line import/first
