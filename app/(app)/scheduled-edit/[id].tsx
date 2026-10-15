@@ -13,6 +13,18 @@ import { ScheduleSheet, SCHEDULE_DELIVERY_TIMING_NOTE } from '@ui/conversations/
 import { formatChatDate, formatTime } from '@utils';
 import { useUnsavedChangesGuard } from '@ui/hooks/useUnsavedChangesGuard';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
+import { serverFailureKind } from '@ui/serverFailure';
+
+function editFailureMessage(error: unknown): string {
+  if (error instanceof ScheduledEditChangedError) {
+    return 'This message was sent or its schedule changed while you were editing, so your edit was not saved. Open it again to edit what is still scheduled.';
+  }
+  const kind = serverFailureKind(error);
+  if (kind === 'unreachable') return 'Couldn’t update — the server is unreachable.';
+  if (kind === 'rejected')
+    return 'The server didn’t accept this change, so your edit was not saved.';
+  return 'Couldn’t save your edit. Try again.';
+}
 
 interface ScheduledDraft {
   text: string;
@@ -139,12 +151,7 @@ export default function ScheduledEditScreen(): React.JSX.Element {
       })
       .catch((error: unknown) => {
         if (accountLease.isCurrent() && !abandonedRef.current) {
-          showDialog(
-            'Scheduled',
-            error instanceof ScheduledEditChangedError
-              ? 'This message was sent or its schedule changed while you were editing, so your edit was not saved. Open it again to edit what is still scheduled.'
-              : 'Couldn’t update — the server is unreachable.',
-          );
+          showDialog('Scheduled', editFailureMessage(error));
         }
       })
       .finally(() => {

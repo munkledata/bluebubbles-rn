@@ -105,6 +105,14 @@ let lastSyncAt = 0;
 const RESUME_MIN_INTERVAL_MS = 10_000;
 const TARGETED_CHAT_REPAIR_MAX_MESSAGES = 500;
 
+/** A deleted conversation cannot be restored safely from the bounded recent server history. */
+export class DeletedChatRestoreUnsafeError extends Error {
+  constructor() {
+    super('This conversation could not be restored safely from the bounded server history.');
+    this.name = 'DeletedChatRestoreUnsafeError';
+  }
+}
+
 /** Keep the sync graph React-free until a completed write pass actually needs native cleanup. */
 async function reconcileSyncedMessageNotifications(
   db: import('@db/types').AppDatabase,
@@ -382,11 +390,7 @@ function startTargetedChatRepair(
           throw new Error('Conversation repair stopped because the account changed.');
         }
       }
-      if (!restored) {
-        throw new Error(
-          'This conversation could not be restored safely from the bounded server history.',
-        );
-      }
+      if (!restored) throw new DeletedChatRestoreUnsafeError();
     }
 
     if (stopped()) throw new Error('Conversation repair stopped because the account changed.');

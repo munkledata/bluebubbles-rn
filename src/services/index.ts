@@ -112,6 +112,7 @@ export {
   ensureChatSynced,
   startChatRepair,
   restoreDeletedChat,
+  DeletedChatRestoreUnsafeError,
   startFullRepair,
   cancelFullRepair,
   type ChatRepairResult,

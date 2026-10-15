@@ -3719,8 +3719,8 @@ test('certifies exactly the reviewed sync delegation edges', () => {
       'src/services/syncControl.ts#runSync:mutator-call:f2bc335e17da:3',
       'src/services/syncControl.ts#startFullRepair.<callback:a019ed9cf6>:mutator-call:7349d6139eeb',
       'src/services/syncControl.ts#startSync.<callback:4c2f340da4>:mutator-call:7042cc5b18c2',
-      'src/services/syncControl.ts#startTargetedChatRepair.<callback:53a6bf4b67>:mutator-call:aeccb187738d',
-      'src/services/syncControl.ts#startTargetedChatRepair.<callback:53a6bf4b67>:mutator-call:d8a6f64d5ae8',
+      'src/services/syncControl.ts#startTargetedChatRepair.<callback:774b3d9376>:mutator-call:acb58dee8b3b',
+      'src/services/syncControl.ts#startTargetedChatRepair.<callback:774b3d9376>:mutator-call:cae6556cdcec',
     ].sort(),
   );
   assert.deepEqual(

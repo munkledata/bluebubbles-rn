@@ -46,6 +46,8 @@ import { getDatabase } from '@db/database';
 // eslint-disable-next-line import/first
 import { getScheduledById } from '@db/repositories';
 // eslint-disable-next-line import/first
+// eslint-disable-next-line import/first
+import { ApiError } from '@core/api/errors';
 import { editScheduled, ScheduledEditChangedError } from '@/services/send';
 // eslint-disable-next-line import/first
 import { logger } from '@core/secure';
@@ -345,13 +347,41 @@ describe('ScheduledEditScreen — picker and account ownership', () => {
       expect(useDialogStore.getState().current).toEqual(
         expect.objectContaining({
           title: 'Scheduled',
-          message: 'Couldn’t update — the server is unreachable.',
+          message: 'Couldn’t save your edit. Try again.',
         }),
       ),
     );
     expect(mockBack).not.toHaveBeenCalled();
     expect(screen.getByDisplayValue(PRIVATE_BODY)).toBeTruthy();
     expect(JSON.stringify(useDialogStore.getState().current)).not.toContain(SAVE_ERROR_CANARY);
+  });
+
+  it.each([
+    [
+      'cannot reach the server',
+      () => new ApiError('no_connection', 'offline'),
+      'Couldn’t update — the server is unreachable.',
+    ],
+    [
+      'gets a refusal from the server',
+      () => new ApiError('server_error', 'refused', 500),
+      'The server didn’t accept this change, so your edit was not saved.',
+    ],
+  ] as const)('says when Save %s', async (_label, makeError, message) => {
+    mockGetScheduledById.mockResolvedValue(makeRow({ text: PRIVATE_BODY }));
+    mockEditScheduled.mockRejectedValue(makeError());
+    await renderWithTheme(<ScheduledEditScreen />);
+    await screen.findByDisplayValue(PRIVATE_BODY);
+
+    await act(async () => {
+      fireEvent.press(screen.getByRole('button', { name: 'Save' }));
+    });
+
+    await waitFor(() =>
+      expect(useDialogStore.getState().current).toEqual(
+        expect.objectContaining({ title: 'Scheduled', message }),
+      ),
+    );
   });
 
   it.each(['row', 'error'] as const)(

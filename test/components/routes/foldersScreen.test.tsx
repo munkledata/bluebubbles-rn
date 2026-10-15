@@ -1,5 +1,5 @@
 import React from 'react';
-import { fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
+import { act, fireEvent, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
 import type { CustomFolderSummaryRow } from '@db/repositories';
 import type { CustomFolderSummariesState } from '@features/conversations/useCustomFolderSummaries';
 
@@ -75,6 +75,10 @@ jest.mock('@ui', () => {
 import ConversationFoldersScreen from '../../../app/(app)/folders';
 // eslint-disable-next-line import/first
 import ConversationFolderEditScreen from '../../../app/(app)/folders/edit';
+// eslint-disable-next-line import/first
+import { CustomFolderInputError } from '@core/customFolderInputError';
+// eslint-disable-next-line import/first
+import { createCustomFolder } from '@/services/customFolderCommands';
 
 const INITIAL_ROWS: CustomFolderSummaryRow[] = [
   {
@@ -144,5 +148,33 @@ describe('ConversationFolderEditScreen accessibility', () => {
     const input = screen.getByLabelText('Folder name');
     expect(input.props.accessibilityLabel).toBe('Folder name');
     expect(input.props.accessibilityLabelledBy).toBeUndefined();
+  });
+});
+
+describe('ConversationFolderEditScreen save failures', () => {
+  it('shows a name problem in the owner’s words but never a raw internal error', async () => {
+    mockIsCurrent.mockReturnValue(true);
+    const create = jest.mocked(createCustomFolder);
+    create.mockRejectedValueOnce(new TypeError('Cannot read properties of undefined (reading id)'));
+    await renderWithTheme(<ConversationFolderEditScreen />);
+
+    await act(async () => {
+      fireEvent.changeText(screen.getByLabelText('Folder name'), 'Work');
+    });
+    await act(async () => {
+      fireEvent.press(screen.getByText('Save'));
+    });
+    expect(
+      await screen.findByText('Couldn’t save the folder. Your changes are still here.'),
+    ).toBeTruthy();
+    expect(screen.queryByText(/Cannot read properties/)).toBeNull();
+
+    create.mockRejectedValueOnce(
+      new CustomFolderInputError('A folder with that name already exists.'),
+    );
+    await act(async () => {
+      fireEvent.press(screen.getByText('Save'));
+    });
+    expect(await screen.findByText('A folder with that name already exists.')).toBeTruthy();
   });
 });

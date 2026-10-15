@@ -10,7 +10,8 @@ import type { DialogButton } from '@ui/dialog/dialogStore';
 import { contrastRatio, readableTextOn } from '@ui/theme/adaptiveFromImage';
 import type { DeletedChatPage, DeletedChatRow } from '@db/repositories';
 import { listDeletedChats } from '@db/repositories';
-import { restoreDeletedChat } from '@/services';
+import { ApiError } from '@core/api/errors';
+import { DeletedChatRestoreUnsafeError, restoreDeletedChat } from '@/services';
 
 const mockBack = jest.fn();
 const mockShowDialog = jest.fn();
@@ -76,7 +77,10 @@ jest.mock('@db/useReactiveQuery', () => ({
   useReactiveQuery: (...args: unknown[]) => mockUseReactiveQuery(...args),
 }));
 jest.mock('@db/repositories', () => ({ listDeletedChats: jest.fn() }));
-jest.mock('@/services', () => ({ restoreDeletedChat: jest.fn() }));
+jest.mock('@/services', () => ({
+  restoreDeletedChat: jest.fn(),
+  DeletedChatRestoreUnsafeError: class DeletedChatRestoreUnsafeError extends Error {},
+}));
 jest.mock('@/services/realtime/deliveryCoordinator', () => ({
   captureRealtimeDeliveryLease: () => mockLease,
   subscribeRealtimeGenerationInvalidation: (generation: number, listener: () => void) => {
@@ -324,6 +328,29 @@ it('confirms the bounded restore, locks every row while busy, and reports succes
   ).toEqual({ disabled: false, busy: false });
 });
 
+it.each([
+  [
+    'an unsafe restore',
+    () => new DeletedChatRestoreUnsafeError(),
+    'Gator could not safely restore this conversation from its recent history. Run Local Cache Repair, then try again.',
+  ],
+  [
+    'an unreachable Mac',
+    () => new ApiError('no_connection', 'offline'),
+    'Gator couldn’t reach your Mac. Check the connection, then try again.',
+  ],
+] as const)('says what stopped %s', async (_label, makeError, message) => {
+  mockRestoreDeletedChat.mockRejectedValue(makeError());
+  await renderWithTheme(<DeletedChatsScreen />);
+
+  await fireEvent.press(screen.getByRole('button', { name: `Restore ${PRIVATE_TITLE}` }));
+  await act(async () => {
+    dialogAction(lastDialog(), 'Restore')();
+  });
+  await waitFor(() => expect(lastDialog().title).toBe('Restore Stopped'));
+  expect(lastDialog().message).toBe(message);
+});
+
 it('reports a fixed safe failure and releases the restore controls', async () => {
   const rawError = 'private restore transport details 5f2a';
   mockRestoreDeletedChat.mockRejectedValue(new Error(rawError));
@@ -334,9 +361,7 @@ it('reports a fixed safe failure and releases the restore controls', async () =>
     dialogAction(lastDialog(), 'Restore')();
   });
   await waitFor(() => expect(lastDialog().title).toBe('Restore Stopped'));
-  expect(lastDialog().message).toBe(
-    'Gator could not prove a safe unread boundary from the bounded history. Run Local Cache Repair, then try again.',
-  );
+  expect(lastDialog().message).toBe('The restore stopped before it finished. Try again.');
   expect(JSON.stringify(mockShowDialog.mock.calls)).not.toContain(rawError);
   expect(
     screen.getByRole('button', { name: `Restore ${PRIVATE_TITLE}` }).props.accessibilityState,

@@ -6,12 +6,23 @@ import { showDialog } from '@ui/dialog/dialogStore';
 import { getDatabase } from '@db/database';
 import { listDeletedChats, type DeletedChatRow } from '@db/repositories';
 import { useReactiveQuery } from '@db/useReactiveQuery';
-import { restoreDeletedChat } from '@/services';
+import { DeletedChatRestoreUnsafeError, restoreDeletedChat } from '@/services';
 import { subscribeRealtimeGenerationInvalidation } from '@/services/realtime/deliveryCoordinator';
 import { resolveTitle } from '@utils';
 import { Screen, ScreenHeader } from '../primitives';
 import { readableTextOn, useTheme } from '../theme';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
+import { serverFailureKind } from '@ui/serverFailure';
+
+function restoreFailureMessage(error: unknown): string {
+  if (error instanceof DeletedChatRestoreUnsafeError) {
+    return 'Gator could not safely restore this conversation from its recent history. Run Local Cache Repair, then try again.';
+  }
+  if (serverFailureKind(error) === 'unreachable') {
+    return 'Gator couldn’t reach your Mac. Check the connection, then try again.';
+  }
+  return 'The restore stopped before it finished. Try again.';
+}
 
 const PAGE_SIZE = 50;
 /** listDeletedChats never returns more rows than this. */
@@ -71,12 +82,9 @@ export function DeletedChatsScreen(): React.JSX.Element {
                     `${result.messages.toLocaleString()} recent messages were refreshed.`,
                   );
                 })
-                .catch(() => {
+                .catch((error: unknown) => {
                   if (accountLease.isCurrent()) {
-                    showDialog(
-                      'Restore Stopped',
-                      'Gator could not prove a safe unread boundary from the bounded history. Run Local Cache Repair, then try again.',
-                    );
+                    showDialog('Restore Stopped', restoreFailureMessage(error));
                   }
                 })
                 .finally(() => {

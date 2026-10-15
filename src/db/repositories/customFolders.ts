@@ -2,6 +2,9 @@ import { and, eq, inArray, sql } from 'drizzle-orm';
 import { customFolderMembers, customFolders } from '../schema';
 import { runInTransactionContext, type DbTransactionContext } from '../transaction';
 import { chatHasUnreadSql } from './chatVisibility';
+import { CustomFolderInputError } from '@core/customFolderInputError';
+
+export { CustomFolderInputError };
 
 export const MAX_CUSTOM_FOLDERS = 100;
 export const MAX_CUSTOM_FOLDER_NAME_CODE_POINTS = 64;
@@ -49,14 +52,14 @@ function requireFolderId(id: number): void {
 export function normalizeCustomFolderName(input: string): string {
   if (typeof input !== 'string') throw new TypeError('Folder name must be text.');
   const name = input.normalize('NFC').trim();
-  if (name.length === 0) throw new RangeError('Folder name cannot be empty.');
+  if (name.length === 0) throw new CustomFolderInputError('Folder name cannot be empty.');
   if (Array.from(name).length > MAX_CUSTOM_FOLDER_NAME_CODE_POINTS) {
-    throw new RangeError(
+    throw new CustomFolderInputError(
       `Folder name cannot exceed ${MAX_CUSTOM_FOLDER_NAME_CODE_POINTS} characters.`,
     );
   }
   if (CONTROL_CHARACTER.test(name)) {
-    throw new RangeError('Folder name cannot contain control characters.');
+    throw new CustomFolderInputError('Folder name cannot contain control characters.');
   }
   return name;
 }
@@ -204,7 +207,9 @@ export function createCustomFolderWithinTransaction(
     const count = summary[0]?.count ?? 0;
     const maxSortOrder = summary[0]?.maxSortOrder ?? -1;
     if (count >= MAX_CUSTOM_FOLDERS) {
-      throw new RangeError(`No more than ${MAX_CUSTOM_FOLDERS} custom folders are allowed.`);
+      throw new CustomFolderInputError(
+        `No more than ${MAX_CUSTOM_FOLDERS} custom folders are allowed.`,
+      );
     }
     if (!Number.isSafeInteger(maxSortOrder) || maxSortOrder < -1) {
       throw new Error('Custom folder order is invalid.');
@@ -212,7 +217,9 @@ export function createCustomFolderWithinTransaction(
     const duplicate = await db.all<{ id: number }>(
       sql`SELECT id FROM custom_folders WHERE name = ${name} LIMIT 1`,
     );
-    if (duplicate.length > 0) throw new Error('A folder with that name already exists.');
+    if (duplicate.length > 0) {
+      throw new CustomFolderInputError('A folder with that name already exists.');
+    }
 
     const sortOrder = maxSortOrder + 1;
     const created = await db
@@ -234,7 +241,9 @@ export function renameCustomFolderWithinTransaction(
     const duplicate = await db.all<{ id: number }>(sql`
       SELECT id FROM custom_folders WHERE name = ${name} AND id <> ${folderId} LIMIT 1
     `);
-    if (duplicate.length > 0) throw new Error('A folder with that name already exists.');
+    if (duplicate.length > 0) {
+      throw new CustomFolderInputError('A folder with that name already exists.');
+    }
     const updated = await db
       .update(customFolders)
       .set({ name })

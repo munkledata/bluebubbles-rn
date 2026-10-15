@@ -79,6 +79,7 @@ import { useSessionStore } from '@state/sessionStore';
 // eslint-disable-next-line import/first
 import {
   awaitSyncIdle,
+  DeletedChatRestoreUnsafeError,
   restoreDeletedChat,
   startChatRepair,
   type ChatRepairResult,
@@ -250,8 +251,8 @@ it('passes restore proof through one guarded transaction and fails closed after 
 
   mockRestoreDeletedChatWithinTransaction.mockResolvedValueOnce(false);
   mockChatExistsAndIsVisible.mockResolvedValueOnce(false);
-  await expect(restoreDeletedChat('deleted-chat-b', deletedAt + 1)).rejects.toThrow(
-    'could not be restored safely',
+  await expect(restoreDeletedChat('deleted-chat-b', deletedAt + 1)).rejects.toBeInstanceOf(
+    DeletedChatRestoreUnsafeError,
   );
   await awaitSyncIdle();
 });

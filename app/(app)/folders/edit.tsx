@@ -9,6 +9,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { CustomFolderInputError } from '@core/customFolderInputError';
 import { showDialog } from '@ui/dialog/dialogStore';
 import {
   createCustomFolder,
@@ -32,10 +33,8 @@ function parseFolderId(value: string | string[] | undefined): {
 }
 
 function folderNameError(error: unknown): string {
-  if (error instanceof RangeError || error instanceof TypeError) return error.message;
-  if (error instanceof Error && error.message === 'A folder with that name already exists.') {
-    return error.message;
-  }
+  // Only input problems the owner can fix carry owner-facing text; never show an internal error.
+  if (error instanceof CustomFolderInputError) return error.message;
   return 'Couldn’t save the folder. Your changes are still here.';
 }
 
