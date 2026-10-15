@@ -1,5 +1,5 @@
 import React, { Suspense } from 'react';
-import { View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import type { AttachmentRow } from '@db/repositories';
 import { attachmentKind, isLocalFileUri } from '@utils';
 import { LoadErrorBoundary } from '../LoadErrorBoundary';
@@ -40,8 +40,15 @@ export function AttachmentView({
   if (isLocalFileUri(att.localPath) && protectedPath !== att.localPath) {
     // Do not mount a leaf with a synthetic `localPath:null`: ImageAttachment would interpret that
     // transient value as undownloaded and could start an unnecessary auto-download before this
-    // layout-effect gate settles. A refused path remains a neutral, non-reading placeholder.
-    return <View />;
+    // layout-effect gate settles. A refused path remains a neutral, non-reading placeholder, sized
+    // like the bubble's minimum so a brief refusal does not collapse it.
+    const kind = attachmentKind(att.mimeType);
+    return (
+      <View
+        testID="attachment-pin-placeholder"
+        style={kind === 'image' || kind === 'video' ? styles.mediaPlaceholder : styles.placeholder}
+      />
+    );
   }
   switch (attachmentKind(att.mimeType)) {
     case 'image':
@@ -75,3 +82,9 @@ export function AttachmentView({
       return <FileChip att={att} isFromMe={isFromMe} onLongPress={onLongPress} />;
   }
 }
+
+const styles = StyleSheet.create({
+  // ImageAttachment's own minimum size; chips and cards are at least one row tall.
+  mediaPlaceholder: { minWidth: 120, minHeight: 80 },
+  placeholder: { minHeight: 44 },
+});

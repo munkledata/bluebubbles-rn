@@ -1,6 +1,6 @@
 import React from 'react';
 import { Text } from 'react-native';
-import { render } from '@testing-library/react-native';
+import { act, render } from '@testing-library/react-native';
 
 const mockRelease = jest.fn();
 const mockProtect = jest.fn<{ path: string; release: () => void } | null, [string]>(() => ({
@@ -62,7 +62,7 @@ it('fails closed when retirement already owns the local path', async () => {
   expect(mockRelease).not.toHaveBeenCalled();
 });
 
-it('retries protection for the same path only after the caller changes its refresh key', async () => {
+it('retries protection for the same path at once when the caller changes its refresh key', async () => {
   const path = 'file:///documents/attachments/recovered.jpg';
   mockProtect.mockReturnValueOnce(null);
   const view = await render(<Harness path={path} />);
@@ -73,6 +73,33 @@ it('retries protection for the same path only after the caller changes its refre
   expect(view.getByTestId('protected-path').props.children).toBe(path);
   await view.unmount();
   expect(mockRelease).toHaveBeenCalledTimes(1);
+});
+
+it('retries a refused pin on its own until it lands, so a brief refusal leaves no blank bubble', async () => {
+  jest.useFakeTimers();
+  try {
+    const path = 'file:///documents/attachments/briefly-retiring.jpg';
+    mockProtect.mockReturnValueOnce(null).mockReturnValueOnce(null);
+    const view = await render(<Harness path={path} />);
+    expect(view.getByTestId('protected-path').props.children).toBe('none');
+
+    await act(async () => {
+      jest.advanceTimersByTime(500);
+    });
+    expect(mockProtect).toHaveBeenCalledTimes(2);
+    expect(view.getByTestId('protected-path').props.children).toBe('none');
+
+    await act(async () => {
+      jest.advanceTimersByTime(500);
+    });
+    expect(mockProtect).toHaveBeenCalledTimes(3);
+    expect(view.getByTestId('protected-path').props.children).toBe(path);
+
+    await view.unmount();
+    expect(mockRelease).toHaveBeenCalledTimes(1);
+  } finally {
+    jest.useRealTimers();
+  }
 });
 
 it('passes a remote URL through without allocating a cache protection', async () => {
@@ -86,12 +113,22 @@ it('passes a remote URL through without allocating a cache protection', async ()
 });
 
 it('fails closed instead of crashing when protect rejects a malformed path', async () => {
-  mockProtect.mockImplementationOnce(() => {
-    throw new RangeError('bad path');
-  });
-  const view = await render(<Harness path="file:///bad" />);
+  jest.useFakeTimers();
+  try {
+    mockProtect.mockImplementationOnce(() => {
+      throw new RangeError('bad path');
+    });
+    const view = await render(<Harness path="file:///bad" />);
 
-  expect(view.getByTestId('protected-path').props.children).toBe('none');
-  await view.unmount();
-  expect(mockRelease).not.toHaveBeenCalled();
+    expect(view.getByTestId('protected-path').props.children).toBe('none');
+    // An untrusted path is refused for good; it is not retried on a timer.
+    await act(async () => {
+      jest.advanceTimersByTime(2_000);
+    });
+    expect(mockProtect).toHaveBeenCalledTimes(1);
+    await view.unmount();
+    expect(mockRelease).not.toHaveBeenCalled();
+  } finally {
+    jest.useRealTimers();
+  }
 });

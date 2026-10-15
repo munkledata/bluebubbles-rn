@@ -17,7 +17,7 @@
  * AudioAttachment leaf itself would require an on-device run (out of scope per the plan).
  */
 import React from 'react';
-import { renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
+import { act, renderWithTheme, screen, waitFor } from '../support/renderWithTheme';
 import type { AttachmentRow } from '@db/repositories';
 
 const mockLeafProps = jest.fn();
@@ -173,6 +173,29 @@ describe('AttachmentView — MIME dispatch (attachmentKind)', () => {
     expect(mockProtectPath).toHaveBeenCalledWith('file:///cache/retiring.jpg');
     expect(screen.queryByText('CHILD:image')).toBeNull();
     expect(mockLeafProps.mock.calls.some(([kind]) => kind === 'image')).toBe(false);
+  });
+
+  it('keeps the bubble sized while a refused pin is retried, then shows the media', async () => {
+    jest.useFakeTimers();
+    try {
+      mockProtectPath.mockReturnValueOnce(null);
+      const local = { ...makeAtt('image/jpeg'), localPath: 'file:///cache/briefly-retiring.jpg' };
+      await renderWithTheme(<AttachmentView att={local} isFromMe={false} showTail />);
+
+      expect(screen.queryByText('CHILD:image')).toBeNull();
+      expect(screen.getByTestId('attachment-pin-placeholder')).toHaveStyle({
+        minWidth: 120,
+        minHeight: 80,
+      });
+
+      await act(async () => {
+        jest.advanceTimersByTime(500);
+      });
+      expect(screen.getByText('CHILD:image')).toBeTruthy();
+      expect(screen.queryByTestId('attachment-pin-placeholder')).toBeNull();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('falls back to the FileChip for an audio/* type (lazy AudioAttachment chunk rejects under jest → LoadErrorBoundary)', async () => {

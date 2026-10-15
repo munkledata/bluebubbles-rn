@@ -11,18 +11,23 @@ import { isLocalFileUri } from '@utils';
  * image/video/file reader can race the unlink. Remote URLs are not owned by this cache and pass
  * through unchanged.
  *
- * `refreshKey` lets a caller retry protection after an explicit recovery attempt returns the same
- * path string (for example, a cache retirement temporarily refused the first pin).
+ * A refused pin (retirement briefly owns the path) is retried on its own every
+ * {@link REFUSED_PIN_RETRY_MS} until it lands or the row changes, so a short refusal never leaves a
+ * blank bubble. `refreshKey` lets a caller retry at once after an explicit recovery attempt returns
+ * the same path string.
  *
  * Cleanup is identity-checked by the coordinator, so a recycled row can release its old path
  * without removing a newer component's protection for that same file.
  */
+export const REFUSED_PIN_RETRY_MS = 500;
+
 export function useAttachmentCachePathProtection(
   path: string | null | undefined,
   refreshKey = 0,
 ): string | null {
   const localPath = isLocalFileUri(path) ? path : null;
   const [protectedPath, setProtectedPath] = useState<string | null>(null);
+  const [refusalRetry, setRefusalRetry] = useState(0);
 
   useLayoutEffect(() => {
     if (!localPath) {
@@ -34,16 +39,24 @@ export function useAttachmentCachePathProtection(
     }
 
     let protection: ReturnType<typeof attachmentCacheCoordinator.protect> = null;
+    let untrusted = false;
     try {
       protection = attachmentCacheCoordinator.protect(localPath);
     } catch {
       // Malformed or overlong persisted paths are untrusted input. Fail closed instead of taking
       // down the whole message list while trying to protect one attachment.
+      untrusted = true;
     }
     // Deliberately re-render before paint only after the external cache protection is established.
     setProtectedPath(protection ? localPath : null);
-    return () => protection?.release();
-  }, [localPath, refreshKey]);
+    const pin = protection;
+    if (pin) return () => pin.release();
+    if (untrusted) return undefined;
+    // Retirement owns the path for now. Try again shortly: the pin lands once retirement lets go,
+    // or the row changes (its file was removed) and this effect re-runs for the new path.
+    const timer = setTimeout(() => setRefusalRetry((attempt) => attempt + 1), REFUSED_PIN_RETRY_MS);
+    return () => clearTimeout(timer);
+  }, [localPath, refreshKey, refusalRetry]);
 
   if (!path) return null;
   if (!localPath) return path;
