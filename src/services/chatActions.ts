@@ -4,6 +4,8 @@ import type { HttpClient } from '@core/api/http';
 import { parseRcsChatGuid } from '@core/rcs/providerIdentity';
 import { logger } from '@core/secure';
 import {
+  ATTACHMENT_CACHE_RECOVERY_MAX_FILES,
+  ATTACHMENT_CACHE_RECOVERY_BATCH_FILES,
   clearChatTombstoneWithinTransaction,
   DRAFT_KV_PREFIX,
   deleteChatLocal,
@@ -1023,6 +1025,9 @@ export function deleteChat(
   return runChatAction(accountLease, (activeLease) => deleteChatForAccount(chatGuid, activeLease));
 }
 
+const DELETED_CHAT_CACHE_MAX_PASSES =
+  Math.ceil(ATTACHMENT_CACHE_RECOVERY_MAX_FILES / ATTACHMENT_CACHE_RECOVERY_BATCH_FILES) + 2;
+
 async function deleteChatForAccount(
   chatGuid: string,
   accountLease: RealtimeDeliveryLease,
@@ -1090,13 +1095,22 @@ async function deleteChatForAccount(
       if (accountLease.isCurrent()) logger.warn('[chats] purge resume failed', e);
     });
     assertChatActionLease(accountLease);
-    await attachmentCacheCoordinator
-      .retireInactiveEntries(db, { scope: attachmentCacheScope })
-      .catch((e) => logger.warn('[chats] resumed-purge cache cleanup deferred', e));
-    await attachmentCacheCoordinator
-      .drainDueRetirements(db, { scope: attachmentCacheScope })
-      .catch((e) => logger.warn('[chats] resumed-purge exact delete deferred', e));
-    assertChatActionLease(accountLease);
+    // One coordinator pass stops at its batch cap, so a large chat kept the rest of its files until
+    // the next startup scan. Repeat until a pass finds nothing, bounded by the cache's own file
+    // cap (review M149).
+    for (let pass = 0; pass < DELETED_CHAT_CACHE_MAX_PASSES; pass += 1) {
+      const retired = await attachmentCacheCoordinator
+        .retireInactiveEntries(db, { scope: attachmentCacheScope })
+        .catch((e) => {
+          logger.warn('[chats] resumed-purge cache cleanup deferred', e);
+          return null;
+        });
+      await attachmentCacheCoordinator
+        .drainDueRetirements(db, { scope: attachmentCacheScope })
+        .catch((e) => logger.warn('[chats] resumed-purge exact delete deferred', e));
+      assertChatActionLease(accountLease);
+      if (retired?.status !== 'complete' || retired.attempted === 0) break;
+    }
   } finally {
     if (deleteFailed) throw deleteError;
   }

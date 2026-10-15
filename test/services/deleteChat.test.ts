@@ -220,6 +220,69 @@ describe('deleteChat', () => {
     }
   });
 
+  it('keeps cleaning a large deleted chat cache until a pass finds nothing left', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    await seedChat(db, 'c-large');
+    const pass = (attempted: number) => ({
+      status: 'complete' as const,
+      attempted,
+      confirmed: attempted,
+      failed: 0,
+      skipped: 0,
+    });
+    // One coordinator pass stops at its batch cap (review M149): 100 right after the delete, then
+    // the final cleanup repeats until a pass finds nothing.
+    const retire = jest
+      .spyOn(attachmentCacheCoordinator, 'retireInactiveEntries')
+      .mockResolvedValueOnce(pass(100))
+      .mockResolvedValueOnce(pass(100))
+      .mockResolvedValueOnce(pass(37))
+      .mockResolvedValue(pass(0));
+    const drain = jest
+      .spyOn(attachmentCacheCoordinator, 'drainDueRetirements')
+      .mockResolvedValue(pass(0));
+    try {
+      await deleteChat('c-large', captureRealtimeDeliveryLease());
+
+      expect(retire).toHaveBeenCalledTimes(4);
+      expect(drain).toHaveBeenCalledTimes(4);
+    } finally {
+      retire.mockRestore();
+      drain.mockRestore();
+      raw.close();
+    }
+  });
+
+  it('stops cleaning after the bounded number of passes even if every pass is full', async () => {
+    const { db, raw } = await createTestDb();
+    mockDb = db;
+    await seedChat(db, 'c-endless');
+    const full = {
+      status: 'complete' as const,
+      attempted: 100,
+      confirmed: 100,
+      failed: 0,
+      skipped: 0,
+    };
+    const retire = jest
+      .spyOn(attachmentCacheCoordinator, 'retireInactiveEntries')
+      .mockResolvedValue(full);
+    const drain = jest
+      .spyOn(attachmentCacheCoordinator, 'drainDueRetirements')
+      .mockResolvedValue({ ...full, attempted: 0, confirmed: 0 });
+    try {
+      await deleteChat('c-endless', captureRealtimeDeliveryLease());
+
+      // One pass right after the delete, then at most ceil(8192 / 100) + 2 = 84 cleanup passes.
+      expect(retire).toHaveBeenCalledTimes(1 + 84);
+    } finally {
+      retire.mockRestore();
+      drain.mockRestore();
+      raw.close();
+    }
+  });
+
   it('rolls back a queued inactive claim after account revocation and lets a fresh delete retry', async () => {
     const { db, raw } = await createTestDb();
     mockDb = db;
