@@ -225,6 +225,9 @@ before POST, sends `{pushEncryption:{type:'AEAD_GCM_V2_DEVICE',key}}`, and activ
 after the server returns the exact encryption type and a bounded device id. Registration is FIFO,
 so reconnect and token-refresh calls cannot create competing keys; a lost response retries the same
 pending key. An absent or cached-false capability is refreshed so a server upgrade can enroll V2.
+A server that still reports no encryption support is not registered at all: its plaintext pushes
+would carry message content through FCM only to be dropped on arrival. Registration reports
+failure instead, so the app shows "Push updates are unavailable" and sync remains the fallback.
 
 Pending and active V2 records accept only canonical standard-base64 V2 frames. The app decrypts
 `version(2) | IV(12) | tag(16) | ciphertext` with the stored raw 32-byte key and authenticates the

@@ -200,18 +200,31 @@ function setConnectedSession(
   });
 }
 
+/** A server that cannot encrypt push payloads, both in the cached session and when asked live. */
+function useNonEncryptingServer(): void {
+  setConnectedSession('https://account-a.test', 'password-a', 101, false);
+  mockServerInfo.mockResolvedValue({
+    server_version: '2.0.15',
+    supports_fcm_device_encryption: false,
+  });
+}
+
 beforeEach(async () => {
   jest.spyOn(Date, 'now').mockReturnValue(FCM_V2_COMPATIBILITY_CUTOFF_MS - 1);
   await pauseRealtimeDeliveries();
   resumeRealtimeDeliveries();
-  setConnectedSession('https://account-a.test', 'password-a', 101);
+  // Plaintext push registration is retired, so the ordinary server here can encrypt pushes.
+  setConnectedSession('https://account-a.test', 'password-a', 101, true);
   mockTokenRefreshHandler = undefined;
   mockFlushPersistentLogs.mockResolvedValue(true);
   mockGetToken.mockResolvedValue('fresh-token');
-  mockRegisterDevice.mockResolvedValue({ id: 'device-1', pushEncryptionType: null });
+  mockRegisterDevice.mockResolvedValue({
+    id: 'device-1',
+    pushEncryptionType: FCM_DEVICE_ENCRYPTION_TYPE,
+  });
   mockServerInfo.mockReset().mockResolvedValue({
     server_version: '2.0.15',
-    supports_fcm_device_encryption: false,
+    supports_fcm_device_encryption: true,
   });
   vaultValues.clear();
   mockVaultGet.mockImplementation(async (key: string) => vaultValues.get(key) ?? null);
@@ -278,7 +291,7 @@ describe('FCM registration account ownership', () => {
       expect.anything(),
     );
 
-    setConnectedSession('https://account-b.test', 'password-b', 102);
+    setConnectedSession('https://account-b.test', 'password-b', 102, true);
     resumeRealtimeDeliveries();
     mockGetToken.mockResolvedValueOnce('account-b-token');
     await registerFcmToken();
@@ -288,6 +301,7 @@ describe('FCM registration account ownership', () => {
       { kind: 'account-http-client' },
       'Gator (Android 35)',
       'account-b-token',
+      expect.objectContaining({ type: FCM_DEVICE_ENCRYPTION_TYPE }),
     );
   });
 
@@ -316,6 +330,7 @@ describe('FCM registration account ownership', () => {
       { kind: 'account-http-client' },
       'Gator (Android 35)',
       'account-a-token',
+      expect.objectContaining({ type: FCM_DEVICE_ENCRYPTION_TYPE }),
     ]);
     expect(warn).not.toHaveBeenCalledWith('[fcm] device token registration failed', staleFailure);
   });
@@ -345,7 +360,7 @@ describe('FCM registration account ownership', () => {
     await settle();
     expect(mockGetToken).not.toHaveBeenCalled();
 
-    setConnectedSession('https://account-b.test', 'password-b', 102);
+    setConnectedSession('https://account-b.test', 'password-b', 102, true);
     resumeRealtimeDeliveries();
     mockGetToken.mockResolvedValueOnce('fresh-account-b-token');
     mockTokenRefreshHandler!('stale-callback-argument');
@@ -358,6 +373,7 @@ describe('FCM registration account ownership', () => {
       { kind: 'account-http-client' },
       'Gator (Android 35)',
       'fresh-account-b-token',
+      expect.objectContaining({ type: FCM_DEVICE_ENCRYPTION_TYPE }),
     );
     expect(mockRegisterDevice).not.toHaveBeenCalledWith(
       expect.anything(),
@@ -1055,6 +1071,7 @@ describe('FCM registration account ownership', () => {
   });
 
   it('refreshes cached false capability so a server upgrade can enroll V2', async () => {
+    setConnectedSession('https://account-a.test', 'password-a', 101, false);
     mockServerInfo.mockResolvedValueOnce({
       server_version: '2.0.16',
       supports_fcm_device_encryption: true,
@@ -1084,7 +1101,19 @@ describe('FCM registration account ownership', () => {
     expect(mockRegisterDevice).not.toHaveBeenCalled();
   });
 
+  it('never registers plaintext push with a server that cannot encrypt, and reports it unavailable', async () => {
+    // Every unencrypted push would be dropped on arrival, so registering could only make the
+    // server send message content through FCM unencrypted.
+    useNonEncryptingServer();
+
+    await expect(registerFcmToken()).resolves.toBe('failed');
+
+    expect(mockRegisterDevice).not.toHaveBeenCalled();
+    expect(vaultValues.has('fcmPushEncryptionV2')).toBe(false);
+  });
+
   it('rejects a legacy downgrade when any migration record is already present', async () => {
+    useNonEncryptingServer();
     const existing = activeFcmDeviceEncryptionState(
       'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8',
       'device-v2',
@@ -1098,6 +1127,7 @@ describe('FCM registration account ownership', () => {
   });
 
   it('rejects a same-origin legacy reconnect after Disconnect retained a revoked tombstone', async () => {
+    useNonEncryptingServer();
     vaultValues.set(
       'fcmPushEncryptionV2',
       serializeFcmDeviceEncryptionState(revokedFcmDeviceEncryptionState()),

@@ -1144,11 +1144,14 @@ export async function registerFcmToken(): Promise<'registered' | 'skipped' | 'fa
           return;
         }
 
-        if (stored.kind !== 'absent') {
-          throw new Error('FCM push-encryption downgrade rejected');
-        }
-        await fcmApi.registerDevice(accountHttp(accountLease), DEVICE_NAME, token);
-        if (registrationSessionIsCurrent(session, accountLease)) registered = true;
+        // deliver() drops every push without an enrolled random-key state: plaintext and
+        // password-derived pushes are retired. A plaintext registration would only make this server
+        // send message content through FCM unencrypted, so report push as unavailable instead.
+        throw new Error(
+          stored.kind === 'absent'
+            ? 'server cannot encrypt FCM pushes'
+            : 'FCM push-encryption downgrade rejected',
+        );
       }),
     );
     const result = await tracked;
