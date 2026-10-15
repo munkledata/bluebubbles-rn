@@ -146,6 +146,7 @@ const COORDINATED_DELEGATION_PATHS = new Set([
   'src/db/repositories/scheduled.ts',
   'src/services/download/attachmentCacheCoordinator.ts',
   'src/services/download/attachmentCacheRecovery.ts',
+  'src/services/download/attachmentCacheViews.ts',
   'src/services/download/attachmentMediaExportQueue.ts',
   'src/services/download/autoDownloadAttachments.ts',
   'src/services/download/downloadService.ts',

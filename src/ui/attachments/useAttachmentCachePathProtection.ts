@@ -1,5 +1,6 @@
 import { useLayoutEffect, useState } from 'react';
 import { attachmentCacheCoordinator } from '@/services/download/attachmentCacheCoordinator';
+import { recordAttachmentCacheView } from '@/services/download/attachmentCacheViews';
 import { isLocalFileUri } from '@utils';
 
 /**
@@ -18,6 +19,9 @@ import { isLocalFileUri } from '@utils';
  *
  * Cleanup is identity-checked by the coordinator, so a recycled row can release its old path
  * without removing a newer component's protection for that same file.
+ *
+ * A successful pin also records the view (throttled, best effort), so least-recently-used storage
+ * cleanup counts files people look at, not only when they downloaded.
  */
 export const REFUSED_PIN_RETRY_MS = 500;
 
@@ -50,7 +54,10 @@ export function useAttachmentCachePathProtection(
     // Deliberately re-render before paint only after the external cache protection is established.
     setProtectedPath(protection ? localPath : null);
     const pin = protection;
-    if (pin) return () => pin.release();
+    if (pin) {
+      void recordAttachmentCacheView(localPath);
+      return () => pin.release();
+    }
     if (untrusted) return undefined;
     // Retirement owns the path for now. Try again shortly: the pin lands once retirement lets go,
     // or the row changes (its file was removed) and this effect re-runs for the new path.

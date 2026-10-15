@@ -3179,6 +3179,7 @@ test('certifies exactly the reviewed coordinated-delegation path additions', () 
     'src/features/conversations/useChatScheduledCatchup.ts',
     'src/services/background/realtimePrerequisiteRecovery.ts',
     'src/services/credentialUpgrade.ts',
+    'src/services/download/attachmentCacheViews.ts',
     'src/services/remoteMessageDeleteUiService.ts',
   ]);
   const findings = scanProjectDbWrites().filter((finding) => reviewedPaths.has(finding.path));
@@ -3272,6 +3273,10 @@ test('certifies exactly the reviewed coordinated-delegation path additions', () 
       ],
       [
         'src/services/credentialUpgrade.ts#runCredentialUpgrade:mutator-call:b60b6329bbde',
+        'coordinated-delegation',
+      ],
+      [
+        'src/services/download/attachmentCacheViews.ts#recordAttachmentCacheView.<callback:095d3a7bd5>:mutator-call:c87018e013c9',
         'coordinated-delegation',
       ],
       [

@@ -18631,6 +18631,19 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/attachmentCache.test.ts; test/db/withDbTransaction.test.ts; test/services/attachmentCacheCoordinator.test.ts; test/services/attachmentCacheRecovery.test.ts; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts; test/db/chatActionsRepo.test.ts; test/db/clearLocalCache.test.ts; test/services/deleteChat.test.ts"
     },
     {
+      "id": "src/services/download/attachmentCacheViews.ts#recordAttachmentCacheView.<callback:095d3a7bd5>:mutator-call:c87018e013c9",
+      "path": "src/services/download/attachmentCacheViews.ts",
+      "line": 52,
+      "symbol": "recordAttachmentCacheView.<callback:095d3a7bd5>",
+      "operation": "mutator-call",
+      "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reuseExisting",
+      "detectedContext": "coordinated-delegation",
+      "owner": "recordAttachmentCacheView",
+      "transactionContext": "coordinated-delegation",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/attachmentCacheViews.test.ts; test/components/attachments/attachmentCachePathProtection.test.tsx"
+    },
+    {
       "id": "src/services/download/attachmentMediaExportQueue.ts#settleFailedExport:mutator-call:f9d37772cbae",
       "path": "src/services/download/attachmentMediaExportQueue.ts",
       "line": 91,

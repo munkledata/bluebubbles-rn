@@ -163,8 +163,10 @@ content_rowid='id')`, created in migration 0001, kept current by AFTER INSERT/DE
   maximum bytes. The global ordinary-attachment cache is limited to **2 GiB / 4,096 files** and
   preserves at least **512 MiB free**. Deterministic least-recently-used eviction protects files
   used in the last ten minutes, mounted/current readers, in-flight identities, and outgoing
-  send/retry inputs. If protected or cleanup-pending files prevent proof of capacity, the new
-  download is refused rather than bypassing the limit.
+  send/retry inputs. A file counts as used when a download creates or reuses it and when it is
+  shown on screen; views are recorded at most once a minute per file, one at a time, and only after
+  startup recovery for the current account (review M145). If protected or cleanup-pending files
+  prevent proof of capacity, the new download is refused rather than bypassing the limit.
 - All shipped native file-download routes share the same actual-byte/timeout boundary: attachment
   transfers use 2-minute automatic or 15-minute manual deadlines; server contact thumbnails use
   5 MiB / 30 seconds; synced chat wallpapers use 10 MiB / 60 seconds. Each route downloads to a

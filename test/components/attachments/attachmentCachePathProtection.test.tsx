@@ -11,6 +11,10 @@ const mockProtect = jest.fn<{ path: string; release: () => void } | null, [strin
 jest.mock('@/services/download/attachmentCacheCoordinator', () => ({
   attachmentCacheCoordinator: { protect: (path: string) => mockProtect(path) },
 }));
+const mockRecordView = jest.fn<Promise<void>, [string]>(() => Promise.resolve());
+jest.mock('@/services/download/attachmentCacheViews', () => ({
+  recordAttachmentCacheView: (path: string) => mockRecordView(path),
+}));
 
 // eslint-disable-next-line import/first
 import { useAttachmentCachePathProtection } from '@ui/attachments/useAttachmentCachePathProtection';
@@ -23,6 +27,7 @@ function Harness({ path, refreshKey = 0 }: { path: string | null; refreshKey?: n
 beforeEach(() => {
   mockProtect.mockClear();
   mockRelease.mockClear();
+  mockRecordView.mockClear();
   mockProtect.mockReturnValue({ path: 'unused', release: mockRelease });
 });
 
@@ -43,11 +48,17 @@ it('pins a mounted path, transfers the pin on path change, and releases it on un
 
   await view.unmount();
   expect(mockRelease).toHaveBeenCalledTimes(2);
+  // Showing a cached file counts as using it for storage cleanup (review M145).
+  expect(mockRecordView.mock.calls).toEqual([
+    ['file:///documents/attachments/a.jpg'],
+    ['file:///documents/attachments/b.jpg'],
+  ]);
 });
 
 it('does not allocate a protection for a missing path', async () => {
   const view = await render(<Harness path={null} />);
   expect(mockProtect).not.toHaveBeenCalled();
+  expect(mockRecordView).not.toHaveBeenCalled();
   await view.unmount();
   expect(mockRelease).not.toHaveBeenCalled();
 });
@@ -58,6 +69,8 @@ it('fails closed when retirement already owns the local path', async () => {
 
   expect(mockProtect).toHaveBeenCalledWith('file:///documents/attachments/retiring.jpg');
   expect(view.getByTestId('protected-path').props.children).toBe('none');
+  // A file retirement already owns is not shown, so it is not recorded as used either.
+  expect(mockRecordView).not.toHaveBeenCalled();
   await view.unmount();
   expect(mockRelease).not.toHaveBeenCalled();
 });
@@ -109,6 +122,7 @@ it('passes a remote URL through without allocating a cache protection', async ()
     'https://dev.local/attachment.jpg',
   );
   expect(mockProtect).not.toHaveBeenCalled();
+  expect(mockRecordView).not.toHaveBeenCalled();
   await view.unmount();
 });
 
