@@ -12,6 +12,7 @@ import {
   DELETION_SNAPSHOT_INITIALIZED_KV_KEY,
   DELETIONS_WATERMARK_KV_KEY,
   DRAFT_KV_PREFIX,
+  MESSAGE_STATE_PENDING_REPAIR_KEY,
   NOTIFICATION_ROUTE_KV_PREFIX,
   clearLocalCache,
   enqueueAttachmentMediaExport,
@@ -314,6 +315,18 @@ describe('clearLocalCache', () => {
     expect(await kvGet(db, THEME_PREF_KEY)).toBe('gator');
     expect(await kvGet(db, SETTING_KEY)).toBe('25');
     expect(count(raw, 'contacts')).toBe(1);
+  });
+
+  it("drops an unfinished provider repair's pending ledger with the account", async () => {
+    // Review M053: the pending ledger is account-relative, like the installed authority.
+    const { db } = await createTestDb();
+    await kvSet(db, MESSAGE_STATE_PENDING_REPAIR_KEY, '{"version":1}');
+    expect(await localCacheDirty(db)).toBe(true);
+
+    await clearLocalCache(db);
+
+    expect(await kvGet(db, MESSAGE_STATE_PENDING_REPAIR_KEY)).toBeNull();
+    expect(await localCacheDirty(db)).toBe(false);
   });
 
   it('drops a deferred share-intake receipt after native account cleanup succeeds', async () => {

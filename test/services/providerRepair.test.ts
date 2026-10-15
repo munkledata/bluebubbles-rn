@@ -336,6 +336,64 @@ describe('provider-scoped repair', () => {
       { guid: 'present', d: null },
     ]);
   });
+  it('keeps a server-deleted message hidden when a repair stops before installing its result', async () => {
+    // Review M053: the repair re-tags and hides rows under its new ledger in bounded steps, and
+    // installs that ledger last. Stopping in between must not let ordinary sync un-hide them.
+    await seed('gone');
+    await seed('kept');
+    await installOldLedgerDeletions([]);
+    const install = messageStateRepository.setMessageStateAuthorityWithinTransaction;
+    const stopBeforeInstall = jest
+      .spyOn(messageStateRepository, 'setMessageStateAuthorityWithinTransaction')
+      .mockImplementation(async (context, authority) => {
+        if (authority.ledgerEpoch === ledgerEpoch) throw new Error('stopped before install');
+        return install(context, authority);
+      });
+    jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
+    const dates = () =>
+      raw.prepare('SELECT guid, date_deleted AS d FROM messages ORDER BY guid').all();
+    try {
+      await fixture(['kept'])
+        .run()
+        .catch(() => undefined);
+    } finally {
+      stopBeforeInstall.mockRestore();
+    }
+    expect((await messageStateRepository.getMessageStateAuthority(db))?.ledgerEpoch).toBe(
+      lease.token,
+    );
+    expect(dates()).toEqual([
+      { guid: 'gone', d: 0 },
+      { guid: 'kept', d: null },
+    ]);
+
+    const pending = () =>
+      raw
+        .prepare('SELECT COUNT(*) AS n FROM kv WHERE key = ?')
+        .get(messageStateRepository.MESSAGE_STATE_PENDING_REPAIR_KEY);
+    expect(pending()).toEqual({ n: 1 });
+
+    // Ordinary sync then receives the message again, and its visibility is recomputed.
+    await seed('gone');
+    await withDbTransaction(db, (context) =>
+      messageStateRepository.projectMessageStateWithinTransaction(context, 'gone', chatGuid),
+    );
+    expect(dates()).toEqual([
+      { guid: 'gone', d: 0 },
+      { guid: 'kept', d: null },
+    ]);
+
+    // The next repair finishes: it installs the ledger and retires the pending record.
+    await fixture(['kept']).run();
+    expect((await messageStateRepository.getMessageStateAuthority(db))?.ledgerEpoch).toBe(
+      ledgerEpoch,
+    );
+    expect(pending()).toEqual({ n: 0 });
+    expect(dates()).toEqual([
+      { guid: 'gone', d: 0 },
+      { guid: 'kept', d: null },
+    ]);
+  });
   it('hydrates a snapshot message whose server deletion receipt had no owner', async () => {
     await withDbTransaction(db, (context) =>
       setMessageStateAuthorityWithinTransaction(context, {

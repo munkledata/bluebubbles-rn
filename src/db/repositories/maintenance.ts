@@ -7,6 +7,7 @@ import { setSyncMarkerWithinTransaction } from './sync';
 import {
   MESSAGE_STATE_AUDIT_KEY,
   MESSAGE_STATE_AUTHORITY_KEY,
+  MESSAGE_STATE_PENDING_REPAIR_KEY,
   PROVIDER_REPAIR_BACKOFF_KEY,
 } from './messageState';
 
@@ -404,6 +405,7 @@ export async function clearLocalCache(db: AppDatabase): Promise<void> {
           DELETIONS_WATERMARK_KV_KEY,
           DELETION_SNAPSHOT_INITIALIZED_KV_KEY,
           MESSAGE_STATE_AUTHORITY_KEY,
+          MESSAGE_STATE_PENDING_REPAIR_KEY,
           PROVIDER_REPAIR_BACKOFF_KEY,
           MESSAGE_STATE_AUDIT_KEY,
         ]),
@@ -539,6 +541,7 @@ export async function localCacheDirty(db: AppDatabase): Promise<boolean> {
                        WHERE key = ${DELETIONS_WATERMARK_KV_KEY}
                           OR key = ${DELETION_SNAPSHOT_INITIALIZED_KV_KEY}
                           OR key = ${MESSAGE_STATE_AUTHORITY_KEY}
+                          OR key = ${MESSAGE_STATE_PENDING_REPAIR_KEY}
                           OR key = ${PROVIDER_REPAIR_BACKOFF_KEY}
                           OR key = ${MESSAGE_STATE_AUDIT_KEY}
                           OR key LIKE ${`${DRAFT_KV_PREFIX}%`}

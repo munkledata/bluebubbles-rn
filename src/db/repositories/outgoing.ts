@@ -16,7 +16,8 @@ import {
 import type { AppDatabase } from '../types';
 import {
   projectMessageStateWithinTransaction,
-  getMessageStateAuthorityWithinTransaction,
+  getTrustedMessageStateLedgersWithinTransaction,
+  trustedMessageStateLedgerSql,
 } from './messageState';
 import { requireChatIdByGuidWithinTransaction } from './chats';
 import {
@@ -214,7 +215,7 @@ async function hasOutgoingIdentityHandoverConflictWithinTransaction(
 ): Promise<boolean> {
   return runInTransactionContext(context, async (db) => {
     if (tempGuid === realGuid) return false;
-    const serverAuthority = await getMessageStateAuthorityWithinTransaction(context);
+    const trustedLedgers = await getTrustedMessageStateLedgersWithinTransaction(context);
     const messageOwners: Array<{ guid: string; chatGuid: string }> = await db.all(sql`
       SELECT m.guid, c.guid AS chatGuid
         FROM messages m
@@ -230,7 +231,7 @@ async function hasOutgoingIdentityHandoverConflictWithinTransaction(
       UNION ALL
       SELECT guid, chat_guid AS chatGuid FROM message_server_states
        WHERE guid = ${realGuid}
-         AND provider_epoch = ${serverAuthority?.providerEpoch ?? null} AND ledger_epoch = ${serverAuthority?.ledgerEpoch ?? null}
+         AND ${trustedMessageStateLedgerSql('message_server_states', trustedLedgers)}
     `);
     for (const tombstone of tombstones) {
       if (tombstone.chatGuid != null && tombstone.chatGuid !== ownerChatGuid) {
@@ -324,11 +325,11 @@ async function handoverOutgoingIdentityWithinTransaction(
       (latest, row) => (latest == null || row.dateDeleted > latest ? row.dateDeleted : latest),
       messageTombstones[0]?.dateDeleted ?? null,
     );
-    const serverAuthority = await getMessageStateAuthorityWithinTransaction(context);
+    const trustedLedgers = await getTrustedMessageStateLedgersWithinTransaction(context);
     const serverStates = await db.all<{ dateDeleted: number }>(sql`
       SELECT COALESCE(date_deleted, 0) AS dateDeleted FROM message_server_states
        WHERE guid = ${realGuid} AND chat_guid = ${ownerChatGuid} AND kind = 'deleted'
-         AND provider_epoch = ${serverAuthority?.providerEpoch ?? null} AND ledger_epoch = ${serverAuthority?.ledgerEpoch ?? null}
+         AND ${trustedMessageStateLedgerSql('message_server_states', trustedLedgers)}
        LIMIT 1
     `);
     const serverDate = serverStates[0]?.dateDeleted ?? null;

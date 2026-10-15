@@ -37,6 +37,8 @@ import {
   hideSnapshotMessagesWithinTransaction,
   restoreSnapshotMessagesWithinTransaction,
   setMessageStateAuthorityWithinTransaction,
+  setPendingMessageStateRepairWithinTransaction,
+  clearPendingMessageStateRepairWithinTransaction,
 } from '@db/repositories/messageState';
 import {
   captureDbWriteFence,
@@ -586,6 +588,13 @@ export async function syncProviderMessages(
             guid,
             chatGuid: owner.chatGuid,
           }));
+          // Trust this repair's rows from its first step: if it stops before the install below,
+          // ordinary sync must still honour the deletions it already recorded (review M053).
+          await withDbTransaction(
+            db,
+            (context) => setPendingMessageStateRepairWithinTransaction(context, nextAuthority),
+            fence.commitGuard,
+          );
           let rebaseAfter: string | null = null;
           do {
             const after: string | null = rebaseAfter;
@@ -640,6 +649,7 @@ export async function syncProviderMessages(
             async (context) => {
               await setSyncMarkerWithinTransaction(context, marker);
               await setMessageStateAuthorityWithinTransaction(context, nextAuthority);
+              await clearPendingMessageStateRepairWithinTransaction(context);
               await clearProviderRepairBackoffWithinTransaction(context);
               // A finished crawl reconciled every local row; any pending presence audit is obsolete.
               await setMessageStateAuditWithinTransaction(context, null);

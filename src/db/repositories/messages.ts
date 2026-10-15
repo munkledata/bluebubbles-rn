@@ -38,7 +38,11 @@ import { dedupeBy } from './_shared';
 import { upsertAttachmentsWithinTransaction } from './attachments';
 import { clearSupersededTombstonesWithinTransaction } from './chats';
 import { handleMapKey } from './handles';
-import { getMessageStateAuthorityWithinTransaction } from './messageState';
+import {
+  getTrustedMessageStateLedgersWithinTransaction,
+  isTrustedMessageStateLedger,
+  trustedMessageStateLedgerSql,
+} from './messageState';
 import { chatLatestMessageDateSql, deletionRecordApplies } from './chatVisibility';
 
 /** Why an incoming row was not stored; logged only as counts (review M058). */
@@ -335,14 +339,10 @@ export function upsertMessagesWithinTransaction(
       .select()
       .from(messageServerStates)
       .where(inArray(messageServerStates.guid, canonicalGuids));
-    const serverAuthority = await getMessageStateAuthorityWithinTransaction(context);
+    const trustedLedgers = await getTrustedMessageStateLedgersWithinTransaction(context);
     const serverStateByGuid = new Map(
       serverStateRows
-        .filter(
-          (row) =>
-            row.providerEpoch === serverAuthority?.providerEpoch &&
-            row.ledgerEpoch === serverAuthority?.ledgerEpoch,
-        )
+        .filter((row) => isTrustedMessageStateLedger(row, trustedLedgers))
         .map((row) => [row.guid, row]),
     );
 
@@ -695,7 +695,7 @@ export function upsertMessagesWithinTransaction(
           // history boundary; keep the later timestamp across an out-of-order repeat.
           dateDeleted: sql`CASE WHEN EXISTS (
             SELECT 1 FROM message_server_states s WHERE s.guid = ${messages.guid}
-              AND NOT (s.provider_epoch IS ${serverAuthority?.providerEpoch ?? null} AND s.ledger_epoch IS ${serverAuthority?.ledgerEpoch ?? null})
+              AND NOT ${trustedMessageStateLedgerSql('s', trustedLedgers)}
           ) THEN excluded.date_deleted ELSE COALESCE(MAX(${messages.dateDeleted}, excluded.date_deleted), ${messages.dateDeleted}, excluded.date_deleted) END`,
           // Reflect the LATEST server value (plain overwrite, not COALESCE-preserve like the delivery
           // tiers). The server emits is_scheduled=true for a schedule_type=2 row both while pending AND

@@ -79,6 +79,9 @@ revealing cached content or advancing that page. Proven ownership and payload ma
 page finishes, while transition sequence/kind and the REST cursor remain in its final transaction.
 Old provider/ledger state is retired or rebased in
 bounded transactions during successful repair. Legacy delete events cannot supersede the new authority.
+Before the first row moves, the repair records its ledger as pending; until the final install, rows
+in either the installed or the pending ledger count as evidence, so a repair stopped midway cannot
+let ordinary sync un-hide the deletions it already recorded (review M053).
 
 This section describes the implementation candidate and host-test contract. It does not claim physical
 Android process-death, SQLCipher, or packaged-server acceptance.

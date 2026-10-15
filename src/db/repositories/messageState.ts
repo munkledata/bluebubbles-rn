@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { eq, sql, type SQL } from 'drizzle-orm';
 import { MessageStateRepairRequiredError } from '@core/api/endpoints/messageState';
 import {
   MessageStateAuthority,
@@ -19,6 +19,8 @@ export const RECENT_UNFENCED_OUTGOING_GRACE_MS = 60 * 60 * 1000;
 export const MESSAGE_STATE_AUDIT_KEY = 'sync.messageState.imessage.audit';
 /** When an automatic provider repair may next run after a failure, for one provider pairing. */
 export const PROVIDER_REPAIR_BACKOFF_KEY = 'sync.messageState.imessage.repairBackoff';
+/** The ledger an unfinished provider repair is moving rows into (see setPendingMessageStateRepair…). */
+export const MESSAGE_STATE_PENDING_REPAIR_KEY = 'sync.messageState.imessage.pendingRepair';
 
 function parseAuthority(raw: string | null): MessageStateAuthority | null {
   if (raw == null) return null;
@@ -55,6 +57,85 @@ export async function setMessageStateAuthorityWithinTransaction(
       JSON.stringify(MessageStateAuthority.parse(authority)),
     );
   });
+}
+
+/** One server message-state ledger. */
+export interface MessageStateLedger {
+  readonly providerEpoch: string;
+  readonly ledgerEpoch: string;
+}
+
+/**
+ * Record the ledger a provider repair is moving rows into, before its first row moves (review M053).
+ *
+ * The repair re-tags, restores and hides rows in bounded steps and installs its ledger last. Those
+ * rows come from a finished snapshot, so until the install they are as trustworthy as the installed
+ * ledger's. Without this record, a repair stopped between steps left them ignored, and ordinary sync
+ * un-hid the server deletions they held. Installing a ledger (repair finish or checkpoint) clears it.
+ */
+export async function setPendingMessageStateRepairWithinTransaction(
+  context: DbTransactionContext,
+  authority: MessageStateAuthority,
+): Promise<void> {
+  return runInTransactionContext(context, async () => {
+    await kvSetWithinTransaction(
+      context,
+      MESSAGE_STATE_PENDING_REPAIR_KEY,
+      JSON.stringify(MessageStateAuthority.parse(authority)),
+    );
+  });
+}
+
+export async function clearPendingMessageStateRepairWithinTransaction(
+  context: DbTransactionContext,
+): Promise<void> {
+  return runInTransactionContext(context, async (db) => {
+    await db.delete(kv).where(eq(kv.key, MESSAGE_STATE_PENDING_REPAIR_KEY));
+  });
+}
+
+/** Ledgers whose rows count as server evidence: the installed one and an unfinished repair's. */
+export async function getTrustedMessageStateLedgersWithinTransaction(
+  context: DbTransactionContext,
+): Promise<readonly MessageStateLedger[]> {
+  return runInTransactionContext(context, async () => {
+    const ledgers: MessageStateLedger[] = [];
+    for (const key of [MESSAGE_STATE_AUTHORITY_KEY, MESSAGE_STATE_PENDING_REPAIR_KEY]) {
+      const authority = parseAuthority(await kvGetWithinTransaction(context, key));
+      if (authority && !isTrustedMessageStateLedger(authority, ledgers))
+        ledgers.push({
+          providerEpoch: authority.providerEpoch,
+          ledgerEpoch: authority.ledgerEpoch,
+        });
+    }
+    return ledgers;
+  });
+}
+
+export function isTrustedMessageStateLedger(
+  row: MessageStateLedger,
+  ledgers: readonly MessageStateLedger[],
+): boolean {
+  return ledgers.some(
+    (ledger) =>
+      ledger.providerEpoch === row.providerEpoch && ledger.ledgerEpoch === row.ledgerEpoch,
+  );
+}
+
+/** SQL that is true for a `message_server_states` row (as `table`) in one of `ledgers`. */
+export function trustedMessageStateLedgerSql(
+  table: 's' | 'message_server_states',
+  ledgers: readonly MessageStateLedger[],
+): SQL {
+  if (ledgers.length === 0) return sql`0`;
+  const provider = sql.raw(`${table}.provider_epoch`);
+  const ledger = sql.raw(`${table}.ledger_epoch`);
+  return sql`(${sql.join(
+    ledgers.map(
+      (row) => sql`(${provider} = ${row.providerEpoch} AND ${ledger} = ${row.ledgerEpoch})`,
+    ),
+    sql` OR `,
+  )})`;
 }
 
 export interface ProviderRepairBackoff {
@@ -395,6 +476,8 @@ export async function installCheckpointAuthorityWithinTransaction(
       `)
     )[0];
     await setMessageStateAuthorityWithinTransaction(context, authority);
+    // Rows an unfinished repair moved are retained rows now; the audit below checks them.
+    await clearPendingMessageStateRepairWithinTransaction(context);
     await clearProviderRepairBackoffWithinTransaction(context);
     await setMessageStateAuditWithinTransaction(
       context,
@@ -443,8 +526,9 @@ export async function projectMessageStateWithinTransaction(
   snapshotAuthority?: MessageStateAuthority,
 ): Promise<void> {
   return runInTransactionContext(context, async (db) => {
-    const authority =
-      snapshotAuthority ?? (await getMessageStateAuthorityWithinTransaction(context));
+    const ledgers = snapshotAuthority
+      ? [snapshotAuthority]
+      : await getTrustedMessageStateLedgersWithinTransaction(context);
     await db.run(sql`
       UPDATE messages SET date_deleted = (
         SELECT MAX(value) FROM (
@@ -453,7 +537,7 @@ export async function projectMessageStateWithinTransaction(
           UNION ALL
           SELECT COALESCE(date_deleted, 0) FROM message_server_states
            WHERE guid = ${guid} AND chat_guid = ${chatGuid} AND kind = 'deleted'
-             AND provider_epoch = ${authority?.providerEpoch ?? null} AND ledger_epoch = ${authority?.ledgerEpoch ?? null}
+             AND ${trustedMessageStateLedgerSql('message_server_states', ledgers)}
           UNION ALL
           SELECT history_deleted_at FROM chats
            WHERE guid = ${chatGuid} AND history_deleted_at IS NOT NULL
