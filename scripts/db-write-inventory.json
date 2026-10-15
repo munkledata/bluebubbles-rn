@@ -18802,7 +18802,7 @@
     {
       "id": "src/services/download/index.ts#download:mutator-call:31f3d4057a6a",
       "path": "src/services/download/index.ts",
-      "line": 148,
+      "line": 150,
       "symbol": "download",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#downloadWithFetcher",
@@ -18815,7 +18815,7 @@
     {
       "id": "src/services/download/index.ts#downloadWithClient:mutator-call:20130e1ea150",
       "path": "src/services/download/index.ts",
-      "line": 180,
+      "line": 182,
       "symbol": "downloadWithClient",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#downloadWithFetcher",
@@ -18828,7 +18828,7 @@
     {
       "id": "src/services/download/index.ts#downloadWithFetcher:mutator-call:4a127214478e",
       "path": "src/services/download/index.ts",
-      "line": 237,
+      "line": 239,
       "symbol": "downloadWithFetcher",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#runDownload",
@@ -18841,7 +18841,7 @@
     {
       "id": "src/services/download/index.ts#redownload:mutator-call:e09cebc88e10",
       "path": "src/services/download/index.ts",
-      "line": 314,
+      "line": 316,
       "symbol": "redownload",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#runDownload",
@@ -18854,7 +18854,7 @@
     {
       "id": "src/services/download/index.ts#downloadScope.reserveCache:mutator-call:9a68094fc094",
       "path": "src/services/download/index.ts",
-      "line": 370,
+      "line": 372,
       "symbol": "downloadScope.reserveCache",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reserve",
@@ -18867,7 +18867,7 @@
     {
       "id": "src/services/download/index.ts#downloadScope.reuseCache:mutator-call:18cfc11c39e4",
       "path": "src/services/download/index.ts",
-      "line": 378,
+      "line": 380,
       "symbol": "downloadScope.reuseCache",
       "operation": "mutator-call",
       "target": "src/services/download/attachmentCacheCoordinator.ts#AttachmentCacheCoordinator.reuseExisting",
@@ -18880,7 +18880,7 @@
     {
       "id": "src/services/download/index.ts#runDownload:mutator-call:ea7e1163b248",
       "path": "src/services/download/index.ts",
-      "line": 475,
+      "line": 477,
       "symbol": "runDownload",
       "operation": "mutator-call",
       "target": "src/services/download/downloadService.ts#ensureDownloadedOutcome",
@@ -18891,10 +18891,10 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/downloadService.test.ts; test/services/downloadAccountScope.test.ts; test/services/autoDownloadAttachments.test.ts; test/components/attachments/attachmentView.test.tsx; test/components/attachments/fileChip.test.tsx; test/components/attachments/imageAttachment.test.tsx; test/components/attachments/stickerOverlay.test.tsx; test/components/attachments/videoPlayerLabel.test.tsx; test/components/cards/contactCard.test.tsx; test/components/cards/locationCard.test.tsx"
     },
     {
-      "id": "src/services/download/index.ts#runDownload.<callback:057d651a7b>.<callback:4de753a7f9>:mutator-call:7d3fcb8cdfc5",
+      "id": "src/services/download/index.ts#runDownload.<callback:3ae8b39b7a>.<callback:4de753a7f9>:mutator-call:3b45f1720a39",
       "path": "src/services/download/index.ts",
-      "line": 523,
-      "symbol": "runDownload.<callback:057d651a7b>.<callback:4de753a7f9>",
+      "line": 525,
+      "symbol": "runDownload.<callback:3ae8b39b7a>.<callback:4de753a7f9>",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#runDownload",
       "detectedContext": "coordinated-delegation",
@@ -27460,7 +27460,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#FileChip.onPress:mutator-call:fcf22eadb47f",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 67,
+      "line": 73,
       "symbol": "FileChip.onPress",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -27473,7 +27473,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#FileChip.onPress:mutator-call:4783aae969eb",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 72,
+      "line": 78,
       "symbol": "FileChip.onPress",
       "operation": "mutator-call",
       "target": "src/ui/attachments/FileChip.tsx#FileChip.onPress.<callback:08fd24739a>",
@@ -27486,7 +27486,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#FileChip.onPress.<callback:08fd24739a>:mutator-call:b00e65e1611c",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 82,
+      "line": 88,
       "symbol": "FileChip.onPress.<callback:08fd24739a>",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -27499,7 +27499,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#FileChip:mutator-reference:8833b8ec6280",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 94,
+      "line": 100,
       "symbol": "FileChip",
       "operation": "mutator-reference",
       "target": "src/ui/attachments/FileChip.tsx#FileChip.onPress",
@@ -27512,7 +27512,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#SharedDocumentRow.onPress:mutator-call:3ed9d17a6f21",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 235,
+      "line": 241,
       "symbol": "SharedDocumentRow.onPress",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -27525,7 +27525,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#SharedDocumentRow.onPress:mutator-call:fb357510cd01",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 243,
+      "line": 249,
       "symbol": "SharedDocumentRow.onPress",
       "operation": "mutator-call",
       "target": "src/ui/attachments/FileChip.tsx#SharedDocumentRow.onPress.<callback:f4a342b533>",
@@ -27538,7 +27538,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#SharedDocumentRow.onPress.<callback:f4a342b533>:mutator-call:309818d28369",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 250,
+      "line": 256,
       "symbol": "SharedDocumentRow.onPress.<callback:f4a342b533>",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -27551,7 +27551,7 @@
     {
       "id": "src/ui/attachments/FileChip.tsx#SharedDocumentRow:mutator-reference:70e78024ad82",
       "path": "src/ui/attachments/FileChip.tsx",
-      "line": 265,
+      "line": 271,
       "symbol": "SharedDocumentRow",
       "operation": "mutator-reference",
       "target": "src/ui/attachments/FileChip.tsx#SharedDocumentRow.onPress",
@@ -27564,7 +27564,7 @@
     {
       "id": "src/ui/attachments/ImageAttachment.tsx#ImageAttachment.<callback:3ce78bcbe6>:mutator-call:d25f31bcd5a6",
       "path": "src/ui/attachments/ImageAttachment.tsx",
-      "line": 59,
+      "line": 62,
       "symbol": "ImageAttachment.<callback:3ce78bcbe6>",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -27577,7 +27577,7 @@
     {
       "id": "src/ui/attachments/ImageAttachment.tsx#ImageAttachment.onPress:mutator-call:75c9a2b2048c",
       "path": "src/ui/attachments/ImageAttachment.tsx",
-      "line": 105,
+      "line": 108,
       "symbol": "ImageAttachment.onPress",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -27590,7 +27590,7 @@
     {
       "id": "src/ui/attachments/ImageAttachment.tsx#ImageAttachment:mutator-reference:82a46914061d",
       "path": "src/ui/attachments/ImageAttachment.tsx",
-      "line": 110,
+      "line": 113,
       "symbol": "ImageAttachment",
       "operation": "mutator-reference",
       "target": "src/ui/attachments/ImageAttachment.tsx#ImageAttachment.onPress",
@@ -27655,7 +27655,7 @@
     {
       "id": "src/ui/attachments/VideoPlayer.tsx#VideoPlayer.onPress:mutator-call:9e1d5a50a2f3",
       "path": "src/ui/attachments/VideoPlayer.tsx",
-      "line": 105,
+      "line": 107,
       "symbol": "VideoPlayer.onPress",
       "operation": "mutator-call",
       "target": "src/services/download/index.ts#download",
@@ -27668,7 +27668,7 @@
     {
       "id": "src/ui/attachments/VideoPlayer.tsx#VideoPlayer:mutator-reference:53bdc004099c",
       "path": "src/ui/attachments/VideoPlayer.tsx",
-      "line": 122,
+      "line": 124,
       "symbol": "VideoPlayer",
       "operation": "mutator-reference",
       "target": "src/ui/attachments/VideoPlayer.tsx#VideoPlayer.onPress",

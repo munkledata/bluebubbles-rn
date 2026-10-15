@@ -9,6 +9,7 @@ import { useDownloadStore } from '@state/downloadStore';
 import { useUploadStore } from '@state/uploadStore';
 import { Icon } from '../primitives';
 import { readableTextOn, useTheme } from '../theme';
+import { downloadFailureText } from './downloadFailureText';
 import { ProgressRing } from './ProgressRing';
 import { UploadProgressOverlay } from './UploadProgressOverlay';
 import { useScreenAccountLease } from '@ui/hooks/useScreenAccountLease';
@@ -35,6 +36,7 @@ export function VideoPlayer({
   const theme = useTheme();
   const accountLease = useScreenAccountLease();
   const status = useDownloadStore((s) => s.status[att.guid]);
+  const failure = useDownloadStore((s) => s.failure[att.guid]);
   const progress = useDownloadStore((s) => s.progress[att.guid]);
   // Present only while this file is being SENT. An entry exists for the duration of one upload
   // attempt and is removed when it settles, so its presence is the whole condition.
@@ -134,7 +136,9 @@ export function VideoPlayer({
           : status === 'downloading'
             ? 'Video, downloading'
             : status === 'error'
-              ? 'Video, download failed, tap to retry'
+              ? failure === 'too-large'
+                ? 'Video, too large to download'
+                : `Video, ${downloadFailureText(failure)?.toLowerCase() ?? 'download failed'}, tap to retry`
               : att.localPath
                 ? 'Video, tap to play'
                 : 'Video, not downloaded'

@@ -3882,7 +3882,7 @@ test('certifies exactly the reviewed attachment-download delegation boundary', (
       'src/services/download/index.ts#downloadWithClient:mutator-call:20130e1ea150',
       'src/services/download/index.ts#downloadWithFetcher:mutator-call:4a127214478e',
       'src/services/download/index.ts#redownload:mutator-call:e09cebc88e10',
-      'src/services/download/index.ts#runDownload.<callback:057d651a7b>.<callback:4de753a7f9>:mutator-call:7d3fcb8cdfc5',
+      'src/services/download/index.ts#runDownload.<callback:3ae8b39b7a>.<callback:4de753a7f9>:mutator-call:3b45f1720a39',
       'src/services/download/index.ts#runDownload:mutator-call:ea7e1163b248',
       'src/ui/attachments/AudioAttachment.tsx#AudioAttachment.onToggle:mutator-call:14fdf073006e',
       'src/ui/attachments/AudioAttachment.tsx#AudioAttachment:mutator-reference:6c803e2f12fc',

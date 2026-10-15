@@ -99,7 +99,7 @@ beforeEach(() => {
     .mockReturnValueOnce(mockAccountLease)
     .mockReturnValue(mockNextAccountLease);
   (safeOpenUrl as jest.Mock).mockClear();
-  useDownloadStore.setState({ progress: {}, status: {} });
+  useDownloadStore.setState({ progress: {}, status: {}, failure: {} });
   useUploadStore.setState({ byGuid: {} });
 });
 
@@ -144,6 +144,20 @@ describe('FileChip — name + subtitle rendering', () => {
 });
 
 describe('FileChip — download-state affordances', () => {
+  it.each([
+    ['too-large', 'Too large to download'],
+    ['storage-full', 'Not enough storage'],
+  ] as const)('says why the download failed (%s)', async (reason, text) => {
+    useDownloadStore.setState({
+      status: { 'att-1': 'error' },
+      progress: {},
+      failure: { 'att-1': reason },
+    });
+    await renderWithTheme(<FileChip att={makeAtt({})} isFromMe={false} />);
+    expect(screen.getByText(text)).toBeTruthy();
+    expect(screen.queryByText('Tap to retry')).toBeNull();
+  });
+
   it.each([
     ['Download report.pdf', {}, null, false],
     ['Retry report.pdf', {}, 'error', false],

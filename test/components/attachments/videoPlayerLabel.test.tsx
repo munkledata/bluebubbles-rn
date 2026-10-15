@@ -79,7 +79,7 @@ function vid(overrides: Partial<AttachmentRow> = {}): AttachmentRow {
 }
 
 beforeEach(() => {
-  useDownloadStore.setState({ status: {}, progress: {} });
+  useDownloadStore.setState({ status: {}, progress: {}, failure: {} });
   mockDownload.mockClear();
   mockCaptureAccountLease
     .mockReset()
@@ -134,6 +134,16 @@ describe('VideoPlayer — accessibility label tracks what the tap will do (F20)'
     useDownloadStore.setState({ status: { 'v-1': 'error' }, progress: {} });
     await renderWithTheme(<VideoPlayer att={vid({ localPath: null })} isFromMe={false} showTail />);
     expect(await screen.findByLabelText('Video, download failed, tap to retry')).toBeTruthy();
+  });
+
+  it('says when a video is too large to download', async () => {
+    useDownloadStore.setState({
+      status: { 'v-1': 'error' },
+      progress: {},
+      failure: { 'v-1': 'too-large' },
+    });
+    await renderWithTheme(<VideoPlayer att={vid({ localPath: null })} isFromMe={false} showTail />);
+    expect(await screen.findByLabelText('Video, too large to download')).toBeTruthy();
   });
 
   it('an error wins over a present localPath — the tap really does retry', async () => {

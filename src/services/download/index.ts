@@ -1,8 +1,9 @@
 import * as Crypto from 'expo-crypto';
 import type { HttpClient } from '@core/api';
+import { logger } from '@core/secure';
 import { getDatabase } from '@db/database';
 import type { AttachmentRow } from '@db/repositories';
-import { useDownloadStore } from '@state/downloadStore';
+import { useDownloadStore, type DownloadFailureReason } from '@state/downloadStore';
 import { sessionAccessors } from '@state/sessionStore';
 import { extensionForMime, isLocalFileUri } from '@utils';
 import { isDevServer } from '@utils/isDev';
@@ -17,6 +18,7 @@ import {
   attachmentDownloadDestinationIdentity,
   attachmentMetadataAllowsDownload,
   ensureDownloadedOutcome,
+  type AttachmentDownloadFailure,
   type AttachmentDownloadMode,
   type AttachmentDownloadOutcome,
   type AttachmentDownloadReplacement,
@@ -218,7 +220,7 @@ function downloadWithFetcher(
     // An automatic skip is not a failed user action. An explicit tap over the absolute cap should
     // expose the retry/error affordance instead of pretending a transfer started.
     if (mode === 'manual' && scope.isCurrent() && !owner?.quietFailure) {
-      useDownloadStore.getState().fail(att.guid);
+      useDownloadStore.getState().fail(att.guid, 'too-large');
     }
     return Promise.resolve(null);
   }
@@ -538,10 +540,23 @@ function runDownload(
     } else if (retryOwner !== undefined) {
       cancelRcsRetry(key, retryOwner);
     }
+    // The reason is logged (never a path) and kept, so the bubble can say why when it can.
+    logger.warn('[download] attachment download failed', { status: outcome.status, mode });
     if (quietFailure) clearQuietly();
-    else fail(att.guid);
+    else fail(att.guid, downloadFailureReason(outcome.status, mode));
     return null;
   });
+}
+
+/** The failures a bubble can name; every other outcome stays a generic retry. */
+export function downloadFailureReason(
+  status: AttachmentDownloadFailure,
+  mode: AttachmentDownloadMode,
+): DownloadFailureReason | undefined {
+  if (status === 'storage') return 'storage-full';
+  // An automatic attempt has a smaller cap than a tap, so only a tap proves the file too large.
+  if (status === 'size' && mode === 'manual') return 'too-large';
+  return undefined;
 }
 
 function isTransientRcsOutcome(outcome: AttachmentDownloadOutcome): boolean {

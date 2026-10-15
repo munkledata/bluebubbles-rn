@@ -62,4 +62,25 @@ describe('useDownloadStore', () => {
     expect(useDownloadStore.getState().status).toEqual({});
     expect(useDownloadStore.getState().progress).toEqual({});
   });
+
+  it('remembers why a download failed until the next attempt, a clear, or a reset', () => {
+    const store = useDownloadStore.getState();
+    store.fail('g-reason', 'storage-full');
+    expect(useDownloadStore.getState().status['g-reason']).toBe('error');
+    expect(useDownloadStore.getState().failure['g-reason']).toBe('storage-full');
+
+    store.start('g-reason');
+    expect(useDownloadStore.getState().failure['g-reason']).toBeUndefined();
+
+    store.fail('g-reason');
+    expect(useDownloadStore.getState().failure['g-reason']).toBeUndefined();
+
+    store.fail('g-reason', 'too-large');
+    store.clear('g-reason');
+    expect(useDownloadStore.getState().failure['g-reason']).toBeUndefined();
+
+    store.fail('g-reason', 'too-large');
+    store.reset();
+    expect(useDownloadStore.getState().failure).toEqual({});
+  });
 });

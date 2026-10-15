@@ -2,6 +2,9 @@ import { create } from 'zustand';
 
 export type DownloadStatus = 'idle' | 'downloading' | 'error';
 
+/** Why a download failed, when the owner can act on it. Any other failure is a generic retry. */
+export type DownloadFailureReason = 'too-large' | 'storage-full';
+
 /**
  * Pure: bytes → ratio in [0,1]. Returns null (indeterminate) when the total is
  * unknown — expo-file-system reports totalBytes === -1 when the server omits
@@ -14,14 +17,22 @@ export function progressRatio(loaded: number, total: number): number | null {
   return Math.min(1, Math.max(0, r));
 }
 
+function without<T>(record: Record<string, T>, key: string): Record<string, T> {
+  if (!(key in record)) return record;
+  const { [key]: _removed, ...rest } = record;
+  return rest;
+}
+
 interface DownloadState {
   /** null = indeterminate (spinner); 0..1 = determinate ring. */
   progress: Record<string, number | null>;
   status: Record<string, DownloadStatus>;
+  /** The reason behind an 'error' status, only when it is one the owner can act on. */
+  failure: Record<string, DownloadFailureReason>;
   start: (guid: string) => void;
   setProgress: (guid: string, loaded: number, total: number) => void;
   finish: (guid: string) => void;
-  fail: (guid: string) => void;
+  fail: (guid: string, reason?: DownloadFailureReason) => void;
   /** Forget one attachment, so a mounted bubble treats it as never tried and fetches by itself. */
   clear: (guid: string) => void;
   /** Account teardown: discard presentation-only status from the previous server. */
@@ -36,21 +47,31 @@ interface DownloadState {
 export const useDownloadStore = create<DownloadState>((set) => ({
   progress: {},
   status: {},
+  failure: {},
   start: (g) =>
     set((s) => ({
       status: { ...s.status, [g]: 'downloading' },
       progress: { ...s.progress, [g]: 0 },
+      failure: without(s.failure, g),
     })),
   setProgress: (g, loaded, total) =>
     set((s) => ({ progress: { ...s.progress, [g]: progressRatio(loaded, total) } })),
   finish: (g) =>
-    set((s) => ({ status: { ...s.status, [g]: 'idle' }, progress: { ...s.progress, [g]: 1 } })),
-  fail: (g) => set((s) => ({ status: { ...s.status, [g]: 'error' } })),
+    set((s) => ({
+      status: { ...s.status, [g]: 'idle' },
+      progress: { ...s.progress, [g]: 1 },
+      failure: without(s.failure, g),
+    })),
+  fail: (g, reason) =>
+    set((s) => ({
+      status: { ...s.status, [g]: 'error' },
+      failure: reason ? { ...s.failure, [g]: reason } : without(s.failure, g),
+    })),
   clear: (g) =>
-    set((s) => {
-      const { [g]: _status, ...status } = s.status;
-      const { [g]: _progress, ...progress } = s.progress;
-      return { status, progress };
-    }),
-  reset: () => set({ progress: {}, status: {} }),
+    set((s) => ({
+      status: without(s.status, g),
+      progress: without(s.progress, g),
+      failure: without(s.failure, g),
+    })),
+  reset: () => set({ progress: {}, status: {}, failure: {} }),
 }));

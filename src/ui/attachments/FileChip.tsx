@@ -17,6 +17,7 @@ import {
 import { Icon } from '../primitives';
 import { readableTextOn, useTheme } from '../theme';
 import { showToast } from '../toast/toastStore';
+import { downloadFailureText } from './downloadFailureText';
 import { useAttachmentCachePathProtection } from './useAttachmentCachePathProtection';
 
 interface FileChipProps {
@@ -31,6 +32,7 @@ export function FileChip({ att, isFromMe, onLongPress }: FileChipProps): React.J
   const theme = useTheme();
   const [accountLease] = React.useState(() => captureRealtimeDeliveryLease());
   const status = useDownloadStore((s) => s.status[att.guid]);
+  const failure = useDownloadStore((s) => s.failure[att.guid]);
   // Present only while this file is being SENT — the entry is removed once the attempt settles.
   const upload = useUploadStore((s) => s.byGuid[att.guid]);
   const label = fileTypeLabel(att.mimeType, att.transferName);
@@ -44,7 +46,11 @@ export function FileChip({ att, isFromMe, onLongPress }: FileChipProps): React.J
   // Upload wins: a file we are SENDING came from this device and can never be downloading too.
   const sub =
     uploadSub ??
-    (status === 'downloading' ? 'Downloading…' : status === 'error' ? 'Tap to retry' : baseSub);
+    (status === 'downloading'
+      ? 'Downloading…'
+      : status === 'error'
+        ? (downloadFailureText(failure) ?? 'Tap to retry')
+        : baseSub);
   const fileName = att.transferName ?? 'file';
   const transferBusy = Boolean(upload) || status === 'downloading';
   const accessibilityAction = upload

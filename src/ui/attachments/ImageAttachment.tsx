@@ -12,6 +12,7 @@ import { useUploadStore } from '@state/uploadStore';
 import { shouldAutoDownload } from '@utils';
 import { Icon } from '../primitives';
 import { useTheme } from '../theme';
+import { downloadFailureText } from './downloadFailureText';
 import { ProgressRing } from './ProgressRing';
 import { UploadProgressOverlay } from './UploadProgressOverlay';
 
@@ -38,6 +39,8 @@ export function ImageAttachment({
   const [accountLease] = React.useState(() => captureRealtimeDeliveryLease());
   const router = useRouter();
   const status = useDownloadStore((s) => s.status[att.guid]);
+  const failure = useDownloadStore((s) => s.failure[att.guid]);
+  const failureText = status === 'error' ? downloadFailureText(failure) : null;
   const progress = useDownloadStore((s) => s.progress[att.guid]);
   // Present only while this file is being SENT. An entry exists for the duration of one upload
   // attempt and is removed when it settles, so its presence is the whole condition.
@@ -120,7 +123,15 @@ export function ImageAttachment({
       accessibilityRole="imagebutton"
       accessibilityLabel={
         att.emojiImageShortDescription ??
-        (upload ? 'Photo, uploading' : att.localPath ? 'Photo' : 'Photo, not downloaded')
+        (upload
+          ? 'Photo, uploading'
+          : failure === 'too-large' && status === 'error'
+            ? 'Photo, too large to download'
+            : failureText
+              ? `Photo, ${failureText.toLowerCase()}, tap to retry`
+              : att.localPath
+                ? 'Photo'
+                : 'Photo, not downloaded')
       }
       style={[
         styles.wrap,
@@ -161,6 +172,9 @@ export function ImageAttachment({
           <View style={styles.retry}>
             <Icon name="refresh-outline" size={24} color="#fff" />
           </View>
+          {failureText && !cellSize && !isGenmoji ? (
+            <Text style={styles.failureText}>{failureText}</Text>
+          ) : null}
         </View>
       ) : null}
       {att.hasLivePhoto ? (
@@ -191,6 +205,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.45)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  failureText: {
+    marginTop: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    color: '#fff',
+    fontSize: 12,
+    textAlign: 'center',
   },
   liveBadge: {
     position: 'absolute',

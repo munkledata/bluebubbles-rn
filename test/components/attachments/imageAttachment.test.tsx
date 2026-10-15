@@ -104,7 +104,7 @@ beforeEach(() => {
     .mockReturnValue(mockNextAccountLease);
   mockPush.mockClear();
   mockNet.type = 'WIFI';
-  useDownloadStore.setState({ progress: {}, status: {} });
+  useDownloadStore.setState({ progress: {}, status: {}, failure: {} });
   useUploadStore.getState().reset();
   // Feature-settings defaults: autoDownload ON, WiFi-only OFF (the app's prior behavior).
   useFeatureSettingsStore.setState({
@@ -226,6 +226,19 @@ describe('ImageAttachment — download-state overlays', () => {
     );
     expect(screen.getByText('ICON:refresh-outline')).toBeTruthy();
     expect(spinners(r)).toHaveLength(0);
+  });
+
+  it('says why a photo could not download', async () => {
+    useDownloadStore.setState({
+      status: { 'img-1': 'error' },
+      progress: {},
+      failure: { 'img-1': 'storage-full' },
+    });
+    await renderWithTheme(
+      <ImageAttachment att={makeImg({ localPath: null })} isFromMe={false} showTail />,
+    );
+    expect(screen.getByText('Not enough storage')).toBeTruthy();
+    expect(screen.getByLabelText('Photo, not enough storage, tap to retry')).toBeTruthy();
   });
 
   it('shows no overlay at rest (a downloaded image with no active status)', async () => {
