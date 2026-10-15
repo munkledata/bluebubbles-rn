@@ -1591,9 +1591,14 @@ export async function approveNewServerUrl(
       });
     },
     publishCandidate: (origin, info) => {
-      socket?.disconnect();
-      socket = null;
-      useSessionStore.getState().rotateOrigin(origin, info);
+      try {
+        socket?.disconnect();
+      } finally {
+        // The approved address is already saved: never leave the live session (or the old socket)
+        // on the previous server, even when closing that socket throws.
+        socket = null;
+        useSessionStore.getState().rotateOrigin(origin, info);
+      }
     },
     reconnect: async (_lease, isCurrent) => {
       if (!isCurrent() || !realtimeForegroundActive || realtimeIntakeLocked()) return;

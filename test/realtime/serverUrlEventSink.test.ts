@@ -453,6 +453,40 @@ describe('new-server production admission', () => {
     expect(mockEnsureDatabase).not.toHaveBeenCalled();
   });
 
+  it('moves the live session to the saved address even when the old socket fails to close', async () => {
+    await activateForegroundSession();
+    mockCandidateClient.mockReturnValue({ name: 'candidate-client' });
+    mockServerApi.serverInfo.mockResolvedValue({ server_version: '1.9.0' });
+    const savedSession: Record<string, string> = {
+      serverSessionState: 'active',
+      serverAddress: ORIGINAL_ORIGIN,
+      serverPassword: 'current-password',
+    };
+    mockVault.get.mockImplementation(async (key: string) => savedSession[key] ?? null);
+    // No pause here: the old socket must still be installed when the change is published.
+    const closeOldSocket = jest.fn(() => {
+      throw new Error('native socket close failed');
+    });
+    setSocket({
+      disconnect: closeOldSocket,
+    } as unknown as Parameters<typeof setSocket>[0]);
+
+    await dispatchRealtimeEvent('new-server', 'HTTPS://NEXT.EXAMPLE:443/', 'socket');
+    const requestId = serverRotationCoordinator.getSnapshot()!.id;
+
+    await expect(approveNewServerUrl(requestId, 'current-password', false)).resolves.toEqual({
+      ok: false,
+      kind: 'reconnect-failed',
+      message: 'The server changed, but live updates could not restart. Reopen Gator to retry.',
+      terminal: true,
+    });
+    expect(closeOldSocket).toHaveBeenCalledTimes(1);
+    // The saved and live addresses agree, so reopening Gator finishes the change.
+    expect(mockVault.set.mock.calls).toEqual([['serverAddress', 'https://next.example']]);
+    expect(useSessionStore.getState().origin).toBe('https://next.example');
+    expect(serverRotationCoordinator.getSnapshot()).toBeNull();
+  });
+
   it('drops a foreign event without durable deferral when foreground authority is absent', async () => {
     await activateForegroundSession();
     pauseRealtime();

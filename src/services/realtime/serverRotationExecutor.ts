@@ -268,7 +268,18 @@ export async function approveServerRotation(
     );
     if (!durableCommitCurrent()) return staleResult();
 
-    deps.publishCandidate(request.candidateOrigin, persistence.serverInfo);
+    try {
+      deps.publishCandidate(request.candidateOrigin, persistence.serverInfo);
+    } catch {
+      // The new address is saved, so reopening Gator finishes the change cleanly.
+      if (!lease.isCurrent()) return staleResult();
+      return {
+        ok: false,
+        kind: 'reconnect-failed',
+        message: 'The server changed, but live updates could not restart. Reopen Gator to retry.',
+        terminal: true,
+      };
+    }
     const rotatedCurrent = (): boolean =>
       lease.isCurrent() && rotatedSessionMatches(request, currentPassword, deps.getSession());
     if (!rotatedCurrent()) return staleResult();

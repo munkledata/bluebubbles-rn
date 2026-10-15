@@ -9213,7 +9213,7 @@ function incomingIngressCertifiedNodes({
   }
   if (
     createHash('sha256').update(normalizedSnippet(controlFile, controlFile)).digest('hex') !==
-      '59cc0ed98e433057b8155cf3c0e7b38b9c285e06fd708ca9715c9887fc7465e9' ||
+      '0cbe32c3b55434bca03d14e59f4c947f5ea4a3f6242e2160a046ca109f7e91da' ||
     createHash('sha256')
       .update(normalizedSnippet(autoDownloadFile, autoDownloadFile))
       .digest('hex') !== '55909d52f17e7e73d7ec600c9f18b9ab4dea322963e84ecf1e4700971ef42ff0' ||

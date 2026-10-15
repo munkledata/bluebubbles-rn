@@ -396,6 +396,26 @@ describe('approveServerRotation', () => {
     expect(h.deps.coordinator.getSnapshot()).toBeNull();
   });
 
+  it('reports a failed live handoff as a terminal reopen message instead of throwing', async () => {
+    const h = setup();
+    h.publishCandidate.mockImplementationOnce((origin: string) => {
+      // The session already moved to the saved address; closing the old socket then threw.
+      h.session.origin = origin;
+      throw new Error('native socket close failed');
+    });
+
+    await expect(
+      approveServerRotation(h.requestId, 'correct-password', false, h.deps),
+    ).resolves.toEqual({
+      ok: false,
+      kind: 'reconnect-failed',
+      message: 'The server changed, but live updates could not restart. Reopen Gator to retry.',
+      terminal: true,
+    });
+    expect(h.reconnect).not.toHaveBeenCalled();
+    expect(h.deps.coordinator.getSnapshot()).toBeNull();
+  });
+
   it('keeps the exclusive rotation slot while persistence is suspended', async () => {
     const h = setup();
     let resolvePersistence!: (result: ConnectResult) => void;
