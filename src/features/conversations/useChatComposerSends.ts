@@ -3,7 +3,7 @@ import {
   UnsupportedIMessageTextError,
   type IMessageTextFormattingRange,
 } from '@core/api/endpoints/messages';
-import type { Recurrence } from '@core/schedule';
+import { ScheduledCreateUncertainError, type Recurrence } from '@core/schedule';
 import { logger } from '@core/secure';
 import type { MessagePreview } from '@db/repositories';
 import type { RealtimeDeliveryLease } from '@/services/realtime/deliveryCoordinator';
@@ -98,7 +98,12 @@ export function useChatComposerSends({
       } catch (error) {
         if (accountLease.isCurrent()) {
           logger.warn('[chat] could not schedule message', error);
-          showDialog('Scheduled', 'Couldn’t schedule that message.');
+          showDialog(
+            'Scheduled',
+            error instanceof ScheduledCreateUncertainError
+              ? 'Couldn’t confirm this schedule. Check Scheduled before trying again; your draft is still here.'
+              : 'Couldn’t schedule that message.',
+          );
         }
         return false;
       }

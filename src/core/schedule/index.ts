@@ -5,3 +5,4 @@ export {
   RECURRENCE_VALUES,
   type Recurrence,
 } from './recurrence';
+export { ScheduledCreateUncertainError } from './scheduledCreateUncertainError';

@@ -34,6 +34,7 @@ jest.mock('@ui/conversations/sendNotices', () => ({ presentSendIssue: jest.fn() 
 jest.mock('@core/secure', () => ({ logger: { warn: jest.fn() } }));
 
 import { UnsupportedIMessageTextError } from '@core/api/endpoints/messages';
+import { ScheduledCreateUncertainError } from '@core/schedule';
 import type { MessagePreview } from '@db/repositories';
 import { presentSendIssue } from '@ui/conversations/sendNotices';
 import {
@@ -257,6 +258,16 @@ describe('useChatComposerSends', () => {
     const supported = await sends();
     await expect(supported.onSendEffect('boom', 'effect-id')).resolves.toBe(false);
     expect(mockShowDialog).toHaveBeenLastCalledWith('Effect Not Sent', expect.any(String));
+  });
+
+  it('asks to check Scheduled when the Mac may already have saved the message', async () => {
+    mockSchedule.mockRejectedValue(new ScheduledCreateUncertainError());
+    const scheduled = await sends();
+    await expect(scheduled.onSchedule('later', 1_900_000_000_000)).resolves.toBe(false);
+    expect(mockShowDialog).toHaveBeenCalledWith(
+      'Scheduled',
+      'Couldn’t confirm this schedule. Check Scheduled before trying again; your draft is still here.',
+    );
   });
 
   it('reports a schedule that fails, and refuses a file schedule the chat cannot do', async () => {

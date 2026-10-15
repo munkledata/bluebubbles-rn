@@ -8,7 +8,12 @@ import {
   MAX_IMESSAGE_SCHEDULED_ATTACHMENT_BYTES,
   isSupportedImessageAttachmentType,
 } from '@core/models/serverInfo';
-import { asRecurrence, nextOccurrence, type Recurrence } from '@core/schedule';
+import {
+  asRecurrence,
+  nextOccurrence,
+  ScheduledCreateUncertainError,
+  type Recurrence,
+} from '@core/schedule';
 import { logger } from '@core/secure';
 import { currentRcsProviderEpoch, isCurrentRcsChatGuid } from '@core/rcs/providerIdentity';
 import {
@@ -247,10 +252,52 @@ export function ensureScheduledRecovery(
 }
 
 /**
+ * Only a refusal the server sent proves it saved nothing. A timeout, a dropped connection, or a
+ * server or reply-format error can follow a create the Mac already stored.
+ */
+function scheduledCreateMayHaveLanded(error: unknown): boolean {
+  return !(
+    error instanceof ApiError &&
+    (error.kind === 'bad_request' || error.kind === 'unauthorized')
+  );
+}
+
+/**
+ * After a create whose reply was lost, find the Mac's copy so the phone does not keep a second one
+ * that would also send (review M095). Returns its id, or null when the Mac has none. When the list
+ * cannot be read either, a create that never reached the Mac (no connection) keeps the phone copy
+ * as before; any other outcome stops, because only the owner can check Scheduled and try again.
+ */
+async function findServerScheduledCopy(
+  http: HttpClient,
+  args: ScheduleArgs,
+  createError: unknown,
+  accountScope: ScheduledOperationScope | undefined,
+): Promise<string | null> {
+  let items: scheduledApi.ScheduledItem[];
+  try {
+    items = await scheduledApi.getScheduled(http);
+  } catch {
+    assertScheduledScope(accountScope);
+    if (createError instanceof ApiError && createError.kind === 'no_connection') return null;
+    throw new ScheduledCreateUncertainError();
+  }
+  assertScheduledScope(accountScope);
+  const copy = items.find(
+    (item) =>
+      item.chatGuid === args.chatGuid &&
+      item.text === args.text &&
+      item.scheduledFor === args.scheduledFor,
+  );
+  return copy?.id ?? null;
+}
+
+/**
  * Schedule a message. Prefers SERVER-side scheduling (Gator fires it on time even if the
  * phone is asleep), recording the returned uuid so the on-device worker SKIPS it (no
  * double-send). Reply targets are rejected. Plain RCS and recurring messages are local-only;
- * ordinary iMessage text also falls back locally when the server is older or offline.
+ * ordinary iMessage text also falls back locally when the server is older or offline. A create
+ * whose reply was lost first looks for the Mac's copy (findServerScheduledCopy).
  */
 export async function scheduleTextMessage(
   db: AppDatabase,
@@ -293,7 +340,12 @@ export async function scheduleTextMessage(
       // A revoked request is not an ordinary offline fallback. Falling through would insert the
       // old account's message as a local-only row and let the next account's ticker send it.
       assertScheduledScope(accountScope);
-      logger.debug('[sched] server-side schedule failed; using on-device fallback', e);
+      if (scheduledCreateMayHaveLanded(e)) {
+        serverId = await findServerScheduledCopy(http, args, e, accountScope);
+      }
+      if (serverId === null) {
+        logger.debug('[sched] server-side schedule failed; using on-device fallback', e);
+      }
     }
   }
   assertScheduledScope(accountScope);

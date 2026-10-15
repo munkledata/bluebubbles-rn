@@ -19,7 +19,7 @@ import {
   SCHED_MAX_ATTEMPTS,
 } from '@db/repositories';
 import { DbCommitGuardRejectedError, withDbTransaction } from '@db/transaction';
-import { nextOccurrence } from '@core/schedule';
+import { nextOccurrence, ScheduledCreateUncertainError } from '@core/schedule';
 import * as scheduledApi from '@core/api/endpoints/scheduled';
 import { ScheduledItem } from '@core/api/endpoints/scheduled';
 import { runDueScheduled, scheduleTextMessage } from '@/services/send/scheduleService';
@@ -960,6 +960,93 @@ describe('scheduled messages repo', () => {
       } finally {
         spy.mockRestore();
       }
+    });
+
+    describe('a scheduled create whose reply was lost (M095)', () => {
+      const ARGS = {
+        chatGuid: 'iMessage;-;+15550001111',
+        text: 'see you at 8',
+        scheduledFor: 5_000,
+      };
+      const macCopy = (over: Partial<ScheduledItem> = {}): ScheduledItem => ({
+        id: 'mac-copy-uuid',
+        chatGuid: ARGS.chatGuid,
+        text: ARGS.text,
+        scheduledFor: ARGS.scheduledFor,
+        status: 'pending',
+        ...over,
+      });
+
+      async function scheduleAfter(
+        createError: unknown,
+        list: () => Promise<ScheduledItem[]>,
+      ): Promise<{ outcome: unknown; serverIds: unknown[]; listCalls: number }> {
+        const { db, raw } = await createTestDb();
+        const create = jest.spyOn(scheduledApi, 'createScheduled').mockRejectedValue(createError);
+        const getList = jest.spyOn(scheduledApi, 'getScheduled').mockImplementation(list);
+        try {
+          const outcome = await scheduleTextMessage(db, noHttp, ARGS).then(
+            (value) => value.serverId,
+            (error: unknown) => error,
+          );
+          const serverIds = (
+            raw.prepare('SELECT server_id AS serverId FROM scheduled_messages').all() as {
+              serverId: unknown;
+            }[]
+          ).map((row) => row.serverId);
+          return { outcome, serverIds, listCalls: getList.mock.calls.length };
+        } finally {
+          create.mockRestore();
+          getList.mockRestore();
+        }
+      }
+
+      it('adopts the Mac’s copy instead of keeping a second one that would also send', async () => {
+        const result = await scheduleAfter(new ApiError('timeout', 'timed out'), async () => [
+          macCopy({ id: 'other-text', text: 'something else' }),
+          macCopy(),
+        ]);
+
+        expect(result).toEqual({
+          outcome: 'mac-copy-uuid',
+          serverIds: ['mac-copy-uuid'],
+          listCalls: 1,
+        });
+      });
+
+      it('keeps a phone copy when the Mac has no matching message', async () => {
+        const result = await scheduleAfter(new ApiError('server_error', 'boom'), async () => [
+          macCopy({ scheduledFor: 6_000 }),
+          macCopy({ chatGuid: 'iMessage;-;+15550002222' }),
+        ]);
+
+        expect(result).toEqual({ outcome: null, serverIds: [null], listCalls: 1 });
+      });
+
+      it('keeps a phone copy while offline, when the Mac could not be reached at all', async () => {
+        const result = await scheduleAfter(new ApiError('no_connection', 'offline'), async () => {
+          throw new ApiError('no_connection', 'offline');
+        });
+
+        expect(result).toEqual({ outcome: null, serverIds: [null], listCalls: 1 });
+      });
+
+      it('stores nothing and asks to check Scheduled when the Mac cannot be asked', async () => {
+        const result = await scheduleAfter(new ApiError('timeout', 'timed out'), async () => {
+          throw new ApiError('no_connection', 'offline');
+        });
+
+        expect(result.outcome).toBeInstanceOf(ScheduledCreateUncertainError);
+        expect(result.serverIds).toEqual([]);
+      });
+
+      it('keeps a phone copy without asking the Mac after a definite refusal', async () => {
+        const result = await scheduleAfter(ApiError.fromStatus(404, 'no route'), async () => [
+          macCopy(),
+        ]);
+
+        expect(result).toEqual({ outcome: null, serverIds: [null], listCalls: 0 });
+      });
     });
 
     it('rearmScheduled only re-arms a CLAIMED row (preserves the claim contract)', async () => {
