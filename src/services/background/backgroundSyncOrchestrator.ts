@@ -198,8 +198,8 @@ function elapsedTimeMs(): number {
 /**
  * Deterministic, store-free background bootstrap and work ordering.
  *
- * Only `ready` durable state reaches `createClient`; that client captures one coherent credential
- * pair before the encrypted DB is opened. Sync runs in the sync teardown slot. The schedule and
+ * Only `ready` or `locked` durable state (App Lock gates the screen, not the data; M183) reaches
+ * `createClient`; that client captures one coherent credential pair before the encrypted DB opens. Sync runs in the sync teardown slot. The schedule and
  * outgoing implementations retain their own realtime-account barriers and receive marker-bound
  * scopes, so a rapid Disconnect/reconnect cannot turn account-A continuations into account-B
  * work. Deadline-aware phases additionally stop admitting work when this wake's budget expires.
