@@ -3092,7 +3092,7 @@ test('certifies the exact residual repository delegations after explicit-owner c
   );
 
   assert.equal(devFixtures.length, 13);
-  assert.equal(intentionalBoundaries.length, 45);
+  assert.equal(intentionalBoundaries.length, 46);
   assert.equal(scheduledStateMachine.length, 12);
   assert.deepEqual(
     findings.map((finding) => finding.id).sort(),
@@ -3116,6 +3116,7 @@ test('certifies the exact residual repository delegations after explicit-owner c
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:c27d9f7b2550',
       'src/features/conversations/devSeed.ts#seedFixtures:mutator-call:f915d3f0f0ea',
       'src/services/backup/backup.ts#buildBackupWithCustomFolders:mutator-call:1204bfcb57bb',
+      'src/services/bootstrap.ts#activateForegroundBootSession:mutator-call:8f03db7d6c0e',
       'src/services/bootstrap.ts#wipeLocalCache:mutator-call:80814999e829',
       'src/services/bootstrap.ts#wipeLocalCache:mutator-call:972629a8899e',
       'src/services/chatActions.ts#movePinnedChat.<callback:f539212418>:mutator-call:d3f83b7bb36a',
@@ -4051,6 +4052,7 @@ test('certifies exactly the reviewed outer-lifecycle delegation boundary', () =>
       'src/services/boot/foregroundBoot.ts#<module>:mutator-reference:ace67f713c95',
       'src/services/boot/foregroundBoot.ts#<module>:mutator-reference:ca17968027de',
       'src/services/boot/foregroundBoot.ts#<module>:mutator-reference:fcf356fa69c2',
+      'src/services/bootstrap.ts#activateForegroundBootSession:mutator-call:8f03db7d6c0e',
       'src/services/bootstrap.ts#activateForegroundBootSession:mutator-call:f0181c470642',
       'src/services/bootstrap.ts#cleanupAccountDatabase:mutator-call:9c87d79ec275',
       'src/services/bootstrap.ts#connect:mutator-call:0215e207799e',
@@ -4077,7 +4079,7 @@ test('certifies exactly the reviewed outer-lifecycle delegation boundary', () =>
       'src/services/realtimeControl.ts#startRealtime.<callback:edf3121ba2>:mutator-call:3cd6e7e8d376',
     ].sort(),
   );
-  assert.equal(delegated.length, 40);
+  assert.equal(delegated.length, 41);
 
   for (const suffix of [
     '8c40f7e0add0',

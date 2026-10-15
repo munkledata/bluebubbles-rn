@@ -12,6 +12,7 @@
 const clearLocalCache = jest.fn(async () => undefined);
 const localCacheDirty = jest.fn(async () => false);
 const listReminders = jest.fn(async () => [] as unknown[]);
+const resumeChatPurges = jest.fn<Promise<void>, [unknown, () => boolean]>(async () => undefined);
 const discardAccountBoundShareIntake = jest.fn(async () => undefined);
 const clearShareShortcuts = jest.fn(() => true);
 const vaultValues = new Map<string, string>();
@@ -192,7 +193,12 @@ jest.mock('@core/api', () => ({
   deviceCredentialsApi: { revokeSelf },
   serverApi: { serverInfo },
 }));
-jest.mock('@db/repositories', () => ({ clearLocalCache, localCacheDirty, listReminders }));
+jest.mock('@db/repositories', () => ({
+  clearLocalCache,
+  localCacheDirty,
+  listReminders,
+  resumeChatPurges,
+}));
 jest.mock('@core/realtime', () => ({
   get FCM_ENABLED(): boolean {
     return mockFcmEnabled;
@@ -352,6 +358,7 @@ beforeEach(async () => {
   clearShareShortcuts.mockReturnValue(true);
   ensureDatabase.mockResolvedValue({});
   runSearchTextBackfillOnce.mockReset().mockResolvedValue(undefined);
+  resumeChatPurges.mockReset().mockResolvedValue(undefined);
   pauseRealtimeDeliveries.mockImplementation(async () => {
     if (mockDeliveriesAccepting) {
       mockDeliveriesAccepting = false;
@@ -527,10 +534,15 @@ describe('foreground boot production adapters', () => {
     expect(startRealtime).toHaveBeenCalledWith(
       expect.objectContaining({ reportIssue: expect.any(Function) }),
     );
+    // A chat delete interrupted by a killed process is finished after launch (review M061).
+    expect(resumeChatPurges).toHaveBeenCalledWith(database, expect.any(Function));
+    const purgeIsCurrent = resumeChatPurges.mock.calls[0]?.[1];
+    expect(purgeIsCurrent?.()).toBe(true);
     expect(disposers).toHaveLength(1);
 
     disposers[0]?.();
     expect(recoveryLease?.isCurrent()).toBe(false);
+    expect(purgeIsCurrent?.()).toBe(false);
   });
 
   it('maps real database and critical-settings failures to safe operational errors', async () => {

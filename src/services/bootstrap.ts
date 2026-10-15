@@ -13,7 +13,12 @@ import {
   serializeCredentialUpgradeJournal,
   SERVER_SESSION_STATE,
 } from '@core/secure';
-import { clearLocalCache, listReminders, localCacheDirty } from '@db/repositories';
+import {
+  clearLocalCache,
+  listReminders,
+  localCacheDirty,
+  resumeChatPurges,
+} from '@db/repositories';
 import type { AppDatabase } from '@db/types';
 import { areCriticalSettingsHydrated, hydrateAllStores } from '@state/hydrateStores';
 import { captureSessionTransportLease, useSessionStore } from '@state/sessionStore';
@@ -589,6 +594,14 @@ export async function activateForegroundBootSession(
 
   void runSearchTextBackfillOnce(deliveryLease);
   void runInboxSearchIndexRebuildOnce(deliveryLease);
+  // A chat delete interrupted by a killed process leaves old rows under the chat's history
+  // boundary. Deleting another chat finishes them, but a chat revived before then would show them
+  // again (review M061). One query when nothing was interrupted; every chunk commits only while
+  // this account is current.
+  void resumeChatPurges(db, () => deliveryLease.isCurrent()).catch((error: unknown) => {
+    if (deliveryLease.isCurrent())
+      logger.warn('[boot] interrupted chat purge resume failed', error);
+  });
   const serverInfoLease = captureRealtimeDeliveryLease();
   const serverInfoTransport = captureSessionTransportLease();
   void serverApi
