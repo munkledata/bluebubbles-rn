@@ -7368,6 +7368,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/db/repositories/outgoing.ts#insertOutgoingReactionWithinTransaction:drizzle-insert:8ad15d9f2163',
       'src/db/repositories/outgoing.ts#retireOutgoingWithinTransaction:drizzle-update:235ea7732450',
       'src/db/repositories/outgoing.ts#retireOutgoingWithinTransaction:drizzle-update:c06b002a01f7',
+      'src/db/repositories/outgoing.ts#retireOutgoingWithinTransaction:drizzle-update:c06b002a01f7:2',
       'src/db/repositories/messages.ts#deleteMessageLocalWithinTransaction.<callback:1313ced55a>:mutator-call:73723ad397ea',
       'src/db/repositories/messages.ts#deleteMessageLocalWithinTransaction:drizzle-delete:d78d925090ff',
       'src/db/repositories/messages.ts#applyLocalEditWithinTransaction:drizzle-update:a52bab6f4d6f',
@@ -7403,7 +7404,7 @@ test('certifies exactly the reviewed repository-context and thin-delegation boun
       'src/services/databaseControl.ts#updateSearchTextBatch:sql-update:3f71f4710a3f',
     ].sort(),
   );
-  assert.equal(selected.length, 129);
+  assert.equal(selected.length, 130);
   assert.deepEqual(
     restoreTransaction.map((finding) => finding.id).sort(),
     [

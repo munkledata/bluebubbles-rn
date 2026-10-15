@@ -11327,7 +11327,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#retireOutgoingWithinTransaction:drizzle-update:235ea7732450",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 2212,
+      "line": 2225,
       "symbol": "retireOutgoingWithinTransaction",
       "operation": "drizzle-update",
       "target": "outgoingQueue",
@@ -11340,7 +11340,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#retireOutgoingWithinTransaction:drizzle-update:c06b002a01f7",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 2216,
+      "line": 2231,
       "symbol": "retireOutgoingWithinTransaction",
       "operation": "drizzle-update",
       "target": "messages",
@@ -11351,9 +11351,22 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/db/outgoingBranches.test.ts; test/services/outgoingQueueService.test.ts"
     },
     {
+      "id": "src/db/repositories/outgoing.ts#retireOutgoingWithinTransaction:drizzle-update:c06b002a01f7:2",
+      "path": "src/db/repositories/outgoing.ts",
+      "line": 2235,
+      "symbol": "retireOutgoingWithinTransaction",
+      "operation": "drizzle-update",
+      "target": "messages",
+      "detectedContext": "withDbTransaction",
+      "owner": "retireOutgoingWithinTransaction",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/db/outgoingBranches.test.ts; test/services/outgoingQueueService.test.ts; test/db/outgoingRetireIndexing.test.ts"
+    },
+    {
       "id": "src/db/repositories/outgoing.ts#retireUncertainOutgoingWithinTransaction:drizzle-update:98c22dc4c6a9",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 2242,
+      "line": 2251,
       "symbol": "retireUncertainOutgoingWithinTransaction",
       "operation": "drizzle-update",
       "target": "outgoingQueue",
@@ -11366,7 +11379,7 @@
     {
       "id": "src/db/repositories/outgoing.ts#retireUncertainOutgoingWithinTransaction:drizzle-update:fbdbbd19969f",
       "path": "src/db/repositories/outgoing.ts",
-      "line": 2248,
+      "line": 2258,
       "symbol": "retireUncertainOutgoingWithinTransaction",
       "operation": "drizzle-update",
       "target": "messages",
@@ -11375,6 +11388,19 @@
       "transactionContext": "withDbTransaction",
       "disposition": "coordinated",
       "evidence": "scripts/check-db-writes.test.mjs; test/services/sendAttachmentService.test.ts; test/db/withDbTransaction.test.ts"
+    },
+    {
+      "id": "src/db/repositories/outgoing.ts#retireUncertainOutgoingWithinTransaction:drizzle-update:fbdbbd19969f:2",
+      "path": "src/db/repositories/outgoing.ts",
+      "line": 2263,
+      "symbol": "retireUncertainOutgoingWithinTransaction",
+      "operation": "drizzle-update",
+      "target": "messages",
+      "detectedContext": "withDbTransaction",
+      "owner": "retireUncertainOutgoingWithinTransaction exact message error marker",
+      "transactionContext": "withDbTransaction",
+      "disposition": "coordinated",
+      "evidence": "scripts/check-db-writes.test.mjs; test/services/sendAttachmentService.test.ts; test/db/withDbTransaction.test.ts; test/db/outgoingRetireIndexing.test.ts"
     },
     {
       "id": "src/db/repositories/outgoingAttemptOwnership.ts#recordMessageGuidAliasWithinTransaction:drizzle-delete:92bb5137d557",

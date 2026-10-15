@@ -2202,6 +2202,19 @@ export async function reconcileOutgoingAttachmentByContent(
   );
 }
 
+/**
+ * The canonical row a temp GUID's alias points to, only when the alias is scoped to that row's own
+ * chat (an ownerless alias never matches). Looked up by message id through indexes.
+ */
+function scopedAliasCanonicalRowSql(tempGuid: string) {
+  return sql`${messages.id} IN (
+    SELECT m.id FROM message_guid_aliases a
+      JOIN messages m ON m.guid = a.canonical_guid
+      JOIN chats c ON c.id = m.chat_id AND c.guid = a.chat_guid
+     WHERE a.alias_guid = ${tempGuid}
+  )`;
+}
+
 /** Permanently retire all outgoing state for one temporary GUID inside its owning transaction. */
 export function retireOutgoingWithinTransaction(
   context: DbTransactionContext,
@@ -2213,20 +2226,16 @@ export function retireOutgoingWithinTransaction(
       .update(outgoingQueue)
       .set({ attempts: OUTGOING_MAX_ATTEMPTS })
       .where(eq(outgoingQueue.tempGuid, tempGuid));
+    // Two indexed updates (the temp row, then its scoped alias's canonical row). One OR with a
+    // correlated alias subquery made SQLite scan every message under the global lock (M066).
     await db
       .update(messages)
       .set({ sendState: 'error', error: errorCode, errorMessage: null })
-      .where(
-        and(
-          sql`(${messages.guid} = ${tempGuid} OR EXISTS (
-            SELECT 1 FROM message_guid_aliases a
-            JOIN chats c ON c.id = messages.chat_id
-             WHERE a.alias_guid = ${tempGuid} AND a.canonical_guid = ${messages.guid}
-               AND a.chat_guid = c.guid
-          ))`,
-          ne(messages.sendState, 'sent'),
-        ),
-      );
+      .where(and(eq(messages.guid, tempGuid), ne(messages.sendState, 'sent')));
+    await db
+      .update(messages)
+      .set({ sendState: 'error', error: errorCode, errorMessage: null })
+      .where(and(scopedAliasCanonicalRowSql(tempGuid), ne(messages.sendState, 'sent')));
   });
 }
 
@@ -2245,22 +2254,18 @@ export function retireUncertainOutgoingWithinTransaction(
       .where(eq(outgoingQueue.tempGuid, tempGuid))
       .returning({ id: outgoingQueue.id });
     if (owned.length === 0) return false;
-    const marked = await db
+    // Same two indexed updates as retireOutgoingWithinTransaction (M066).
+    const markedTemp = await db
       .update(messages)
       .set({ sendState: 'error', error: errorCode, errorMessage: detail })
-      .where(
-        and(
-          sql`(${messages.guid} = ${tempGuid} OR EXISTS (
-            SELECT 1 FROM message_guid_aliases a
-            JOIN chats c ON c.id = messages.chat_id
-             WHERE a.alias_guid = ${tempGuid} AND a.canonical_guid = ${messages.guid}
-               AND a.chat_guid = c.guid
-          ))`,
-          ne(messages.sendState, 'sent'),
-        ),
-      )
+      .where(and(eq(messages.guid, tempGuid), ne(messages.sendState, 'sent')))
       .returning({ id: messages.id });
-    return marked.length > 0;
+    const markedCanonical = await db
+      .update(messages)
+      .set({ sendState: 'error', error: errorCode, errorMessage: detail })
+      .where(and(scopedAliasCanonicalRowSql(tempGuid), ne(messages.sendState, 'sent')))
+      .returning({ id: messages.id });
+    return markedTemp.length + markedCanonical.length > 0;
   });
 }
 
