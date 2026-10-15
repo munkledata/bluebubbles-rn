@@ -15,6 +15,7 @@ import {
   reconcileOutgoingAttachmentByContent,
   reconcileOutgoingError,
   recordMessageGuidAliasWithinTransaction,
+  restoreDeletedChatWithinTransaction,
   upsertChats,
   upsertHandles,
 } from '@db/repositories';
@@ -89,6 +90,71 @@ async function seedChat(db: AppDatabase): Promise<number> {
 }
 
 describe('RCS active send-attempt ownership', () => {
+  it('keeps a send hidden when its late ack arrives after the whole chat was deleted', async () => {
+    const { db, raw } = await createTestDb();
+    try {
+      const chatId = await seedChat(db);
+      const tempGuid = 'temp-chat-deleted-mid-send';
+      const inserted = await insertOutgoingText(db, {
+        tempGuid,
+        chatId,
+        chatGuid: CHAT_GUID,
+        text: 'sent just before the chat was deleted',
+        now: 1_000,
+        attemptAware: true,
+      });
+      // No cancel: deleting the chat purges the in-flight send's rows and records only the chat's
+      // history boundary, with no per-message deletion record.
+      await deleteChatLocal(db, CHAT_GUID, 2_500);
+      expect(ownerState(raw, tempGuid)).toBeUndefined();
+      expect(queueState(raw, tempGuid)).toBeUndefined();
+
+      await reconcileSendOutcome(
+        db,
+        tempGuid,
+        {
+          guid: tempGuid,
+          attemptGuid: 'attempt-chat-deleted',
+          clientAttemptGeneration: inserted.attemptOwnerToken!.generation,
+        },
+        3_000,
+        undefined,
+        {
+          attemptOwnerToken: inserted.attemptOwnerToken!,
+          expectedChatGuid: CHAT_GUID,
+          failureNoticeMode: 'suppressed',
+        },
+      );
+
+      const row = () =>
+        raw
+          .prepare(
+            'SELECT date_created AS dateCreated, date_deleted AS dateDeleted FROM messages WHERE guid = ?',
+          )
+          .get(tempGuid);
+      // It stays inside the deleted history, so it neither shows nor brings the chat back.
+      expect(row()).toEqual({ dateCreated: 2_500, dateDeleted: 2_500 });
+      expect(
+        raw.prepare('SELECT deleted_at AS deletedAt FROM chats WHERE guid = ?').get(CHAT_GUID),
+      ).toEqual({ deletedAt: 2_500 });
+
+      // An explicit restore brings it back with the rest of the history.
+      await expect(
+        withDbTransaction(db, (context) =>
+          restoreDeletedChatWithinTransaction(context, {
+            guid: CHAT_GUID,
+            expectedDeletedAt: 2_500,
+            historyExhausted: true,
+            repairedReadFloor: null,
+          }),
+        ),
+      ).resolves.toBe(true);
+      expect(row()).toEqual({ dateCreated: 2_500, dateDeleted: null });
+    } finally {
+      raw.close();
+    }
+  });
+
   it('recreates the exact chat owner when a capable ack arrives after local purge', async () => {
     const { db, raw } = await createTestDb();
     try {

@@ -1808,8 +1808,8 @@ export function reconcileOutgoingAttemptAckWithinTransaction(
         await db.delete(outgoingQueue).where(eq(outgoingQueue.tempGuid, tempGuid));
         return 'missing';
       }
-      const sourceChat = await db.all<{ id: number }>(sql`
-        SELECT id
+      const sourceChat = await db.all<{ id: number; historyDeletedAt: number | null }>(sql`
+        SELECT id, history_deleted_at AS historyDeletedAt
           FROM chats
          WHERE guid = ${sourceChatGuid}
          LIMIT 1
@@ -1862,13 +1862,22 @@ export function reconcileOutgoingAttemptAckWithinTransaction(
         }
         dateDeleted = deletion[0]?.dateDeleted ?? null;
       }
+      // A whole-chat delete hides history through chats.history_deleted_at, not per-message
+      // records, and it is what purged this request's rows. Keep the recreated row inside that
+      // deleted history (dated no later than its boundary) so it neither shows nor revives the
+      // chat, and an explicit restore still brings it back with the rest (review M069).
+      const historyFloor = sourceChat[0]?.historyDeletedAt ?? null;
+      const hiddenByChatDelete = dateDeleted === null && historyFloor !== null;
       await db.insert(messages).values({
         guid: distinctGuid ?? tempGuid,
         chatId: sourceChatId,
         isFromMe: true,
-        dateCreated: ack.dateCreated,
+        dateCreated:
+          hiddenByChatDelete && (ack.dateCreated === null || ack.dateCreated > historyFloor)
+            ? historyFloor
+            : ack.dateCreated,
         dateDelivered: ack.dateDelivered,
-        dateDeleted,
+        dateDeleted: hiddenByChatDelete ? historyFloor : dateDeleted,
         sendState: 'sent',
         error: 0,
         activeSendAttemptGuid: ack.attemptGuid,
