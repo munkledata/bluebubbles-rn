@@ -44,7 +44,12 @@ export interface ResolvedMessageTarget {
   readonly messageGuid: string;
   readonly partIndex: number;
   readonly partKind?: MessageTargetPartKind;
-  readonly basis: 'exact-topology' | 'legacy-part-zero' | 'rcs-whole-message';
+  /**
+   * What proved this target. Only 'exact-topology' verifies Apple's current part layout;
+   * 'pending-unsend-fence' proves only that this row holds the caller's own pending unsend.
+   */
+  readonly basis:
+    'exact-topology' | 'legacy-part-zero' | 'rcs-whole-message' | 'pending-unsend-fence';
 }
 
 /** A target could not be proved safe from the durable message-part projection. */
@@ -265,7 +270,9 @@ export function resolvePendingUnsendTarget(
           messageGuid: row.guid,
           partIndex: target.partIndex,
           partKind: target.partKind,
-          basis: 'exact-topology',
+          // The fence re-locates the row (possibly promoted to its alias); it does not re-check
+          // part topology, so it must not claim that proof (review M056).
+          basis: 'pending-unsend-fence',
         };
       }),
     commitGuard,

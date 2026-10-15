@@ -9884,7 +9884,7 @@
     {
       "id": "src/db/repositories/messageTargets.ts#resolveMessageTarget:mutator-call:58d44bbb756a",
       "path": "src/db/repositories/messageTargets.ts",
-      "line": 219,
+      "line": 224,
       "symbol": "resolveMessageTarget",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -9895,9 +9895,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/sendService.test.ts; test/services/sendAttachmentService.test.ts; test/services/sendEditService.test.ts; test/services/outgoingQueueService.test.ts; test/services/sendRetryGuard.test.ts"
     },
     {
-      "id": "src/db/repositories/messageTargets.ts#resolvePendingUnsendTarget:mutator-call:c91a3ca106a8",
+      "id": "src/db/repositories/messageTargets.ts#resolvePendingUnsendTarget:mutator-call:cb624232ade0",
       "path": "src/db/repositories/messageTargets.ts",
-      "line": 232,
+      "line": 237,
       "symbol": "resolvePendingUnsendTarget",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",

@@ -3,6 +3,7 @@ import {
   getMessageTextByGuid,
   revertLocalEdit,
   listMessagesWithSenders,
+  resolvePendingUnsendTarget,
   upsertChats,
   upsertHandles,
   upsertMessages,
@@ -40,6 +41,23 @@ describe('edit/unsend repo fns', () => {
     expect(row.text).toBe('edited!');
     expect(row.dateEdited).toBe(5000);
     expect(row.dateRetracted).toBeNull();
+  });
+
+  it('labels a pending-unsend match as the fence it is, not as a verified part topology', async () => {
+    const { db } = await createTestDb();
+    await seed(db);
+    await applyLocalUnsend(db, 'm1', 7000);
+
+    // The fence proves only which pending unsend this is. Callers that need verified Apple part
+    // topology (replies, reactions, previews) must not mistake it for that proof (review M056).
+    await expect(
+      resolvePendingUnsendTarget(db, { chatGuid: 'c1', messageGuid: 'm1', partIndex: 0 }),
+    ).resolves.toEqual({
+      messageGuid: 'm1',
+      partIndex: 0,
+      partKind: undefined,
+      basis: 'pending-unsend-fence',
+    });
   });
 
   it('applyLocalUnsend snapshots and restores the exact prior dateRetracted', async () => {
