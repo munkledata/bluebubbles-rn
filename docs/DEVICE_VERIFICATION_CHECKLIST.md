@@ -326,10 +326,15 @@ owns lock-screen presentation, and App Lock's limited generic-new-delivery behav
       Earlier candidate limitations remain historical evidence, not the replacement candidate's policy.
 - [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE`:** Record one observable, synthetic catch-up result
       after the app has been backgrounded long enough for Android to choose whether to run work.
-      Disable App Lock before this branch: a fresh background worker with persisted App Lock enabled
-      stops before DB/sync work. Registration uses a 15-minute minimum interval, not an exact
+      Since review item M183, a fresh background worker runs the same DB/sync work with persisted
+      App Lock enabled. Registration uses a 15-minute minimum interval, not an exact
       schedule. Success must come from staged-server/UI state or an approved finite diagnostic,
       never absence of free-form release logs.
+- [ ] **`STAGED-SERVER` + `EXACT PLAY CANDIDATE` (review M183):** With App Lock enabled, schedule a
+      local message a few minutes ahead and leave a failed send queued, then background Gator and
+      lock the phone. Once Android runs background work, the scheduled message and the retry are
+      delivered without unlocking. Any notice on the lock screen shows no sender, chat title, or
+      message text.
 
 ### 8. FaceTime — conditional on capability and `PLAY-02`
 

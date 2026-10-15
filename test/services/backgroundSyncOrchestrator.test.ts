@@ -141,17 +141,38 @@ describe('headless background bootstrap', () => {
     expect(useSessionStore.getState()).toMatchObject({ origin: null, password: null });
   });
 
-  it('fails closed on a persisted app lock before opening the database', async () => {
+  it('runs the same work under a persisted App Lock, which gates the screen, not the data', async () => {
+    // Owner decision M183: scheduled sends and failed-send retries must not wait for an unlock.
+    // Locked notices stay generic in the presentation layer, not by skipping the work.
     const vault = new InMemoryVault();
     await setValidSession(vault);
     await vault.set('appLockEnabled', 'true');
     const events: string[] = [];
+    const deps = makeDependencies(vault, new TestRevocationMarker(), events);
+    const clients: TestClient[] = [];
+    deps.createClient = (session) => {
+      events.push('client');
+      const client = { ...session };
+      clients.push(client);
+      return client;
+    };
 
-    await expect(
-      runBackgroundSync(makeDependencies(vault, new TestRevocationMarker(), events)),
-    ).resolves.toEqual({ result: 'success', reason: 'app-locked' });
+    await expect(runBackgroundSync(deps)).resolves.toEqual({
+      result: 'success',
+      reason: 'completed',
+    });
 
-    expect(events).toEqual(['tracked']);
+    expect(clients).toEqual([{ origin: 'https://server.example', password: 'vault-password' }]);
+    expect(events).toEqual([
+      'tracked',
+      'client',
+      'db',
+      'server-info',
+      'sync:1.9.0',
+      'schedules',
+      'outgoing',
+      'diagnostics',
+    ]);
   });
 
   it.each([

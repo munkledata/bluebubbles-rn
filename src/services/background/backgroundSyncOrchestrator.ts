@@ -28,13 +28,7 @@ export type BackgroundSessionInspection =
 export type BackgroundRunOutcome =
   | {
       result: 'success';
-      reason:
-        | 'completed'
-        | 'no-session'
-        | 'app-locked'
-        | 'unsafe-session'
-        | 'revoked'
-        | 'account-changed';
+      reason: 'completed' | 'no-session' | 'unsafe-session' | 'revoked' | 'account-changed';
     }
   | {
       result: 'retry';
@@ -153,8 +147,9 @@ export async function inspectBackgroundSession(
     origin: upgrade.session.origin,
     password: upgrade.session.credential,
   });
-  // Keep the validated tuple separate from permission to run background work. Authenticated
-  // locked V3 intake may use it to enqueue only; ordinary consumers still require kind: 'ready'.
+  // Keep the validated tuple separate from each consumer's permission. Background sync runs on it
+  // (App Lock gates the screen, not the data; owner decision M183) and authenticated locked V3
+  // intake may use it to enqueue only; notification actions still require kind: 'ready'.
   if (appLockEnabled === 'true') return { kind: 'locked', session };
   return {
     kind: 'ready',
@@ -180,11 +175,13 @@ function stoppedOutcome(
 function inspectionOutcome(inspection: BackgroundSessionInspection): BackgroundRunOutcome | null {
   switch (inspection.kind) {
     case 'ready':
+    // Scheduled sends and failed-send retries must not wait for an unlock (M183). This work posts
+    // nothing private: failure notices use fixed copy, and under the persisted lock the tray
+    // reconciliation may only cancel message notices, never rebuild them.
+    case 'locked':
       return null;
     case 'empty':
       return { result: 'success', reason: 'no-session' };
-    case 'locked':
-      return { result: 'success', reason: 'app-locked' };
     case 'unsafe':
       return { result: 'success', reason: 'unsafe-session' };
     case 'revoked':
@@ -256,7 +253,7 @@ export async function runBackgroundSync<Database, Client, ServerInfo>(
 
       const inspection = await inspectBackgroundSession(deps.vault, deps.revocationMarker);
       terminalOutcome = inspectionOutcome(inspection) ?? undefined;
-      if (terminalOutcome || inspection.kind !== 'ready') return;
+      if (terminalOutcome || (inspection.kind !== 'ready' && inspection.kind !== 'locked')) return;
 
       terminalOutcome =
         stoppedOutcome(baseScope, deps.revocationMarker, budgetExpired) ?? undefined;
