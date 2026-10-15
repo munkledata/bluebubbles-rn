@@ -23558,20 +23558,7 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/sendFormattedService.test.ts; test/services/outgoingQueueService.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/services/send/sendFormattedService.ts#sendIMessageFormatted:mutator-call:42597f5417ba",
-      "path": "src/services/send/sendFormattedService.ts",
-      "line": 191,
-      "symbol": "sendIMessageFormatted",
-      "operation": "mutator-call",
-      "target": "src/services/send/sendFormattedService.ts#sendIMessageFormatted.retireOutcomeUnknown",
-      "detectedContext": "coordinated-delegation",
-      "owner": "sendIMessageFormatted outcome-unknown retirement",
-      "transactionContext": "coordinated-delegation",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/sendFormattedService.test.ts; test/services/outgoingQueueService.test.ts; test/db/withDbTransaction.test.ts"
-    },
-    {
-      "id": "src/services/send/sendFormattedService.ts#sendIMessageFormatted:mutator-call:a6c52263cb34",
+      "id": "src/services/send/sendFormattedService.ts#sendIMessageFormatted:mutator-call:3baae1c3b13d",
       "path": "src/services/send/sendFormattedService.ts",
       "line": 194,
       "symbol": "sendIMessageFormatted",
@@ -23584,22 +23571,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/sendFormattedService.test.ts; test/services/outgoingQueueService.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/services/send/sendFormattedService.ts#sendIMessageFormatted:mutator-call:a399ebbca17c",
-      "path": "src/services/send/sendFormattedService.ts",
-      "line": 197,
-      "symbol": "sendIMessageFormatted",
-      "operation": "mutator-call",
-      "target": "src/services/send/sendFormattedService.ts#sendIMessageFormatted.retireOutcomeUnknown",
-      "detectedContext": "coordinated-delegation",
-      "owner": "sendIMessageFormatted outcome-unknown retirement",
-      "transactionContext": "coordinated-delegation",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/sendFormattedService.test.ts; test/services/outgoingQueueService.test.ts; test/db/withDbTransaction.test.ts"
-    },
-    {
       "id": "src/services/send/sendFormattedService.ts#sendIMessageFormatted:mutator-call:661cfc7a1be5",
       "path": "src/services/send/sendFormattedService.ts",
-      "line": 213,
+      "line": 212,
       "symbol": "sendIMessageFormatted",
       "operation": "mutator-call",
       "target": "src/services/send/sendOutcome.ts#reconcileSendOutcome",
@@ -23610,9 +23584,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/sendFormattedService.test.ts; test/services/outgoingQueueService.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/services/send/sendFormattedService.ts#sendIMessageFormatted:mutator-call:42597f5417ba:2",
+      "id": "src/services/send/sendFormattedService.ts#sendIMessageFormatted:mutator-call:42597f5417ba",
       "path": "src/services/send/sendFormattedService.ts",
-      "line": 218,
+      "line": 217,
       "symbol": "sendIMessageFormatted",
       "operation": "mutator-call",
       "target": "src/services/send/sendFormattedService.ts#sendIMessageFormatted.retireOutcomeUnknown",
@@ -23623,9 +23597,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/sendFormattedService.test.ts; test/services/outgoingQueueService.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/services/send/sendFormattedService.ts#sendIMessageFormatted:mutator-call:a6c52263cb34:2",
+      "id": "src/services/send/sendFormattedService.ts#sendIMessageFormatted:mutator-call:a6c52263cb34",
       "path": "src/services/send/sendFormattedService.ts",
-      "line": 221,
+      "line": 220,
       "symbol": "sendIMessageFormatted",
       "operation": "mutator-call",
       "target": "src/services/send/sendFormattedService.ts#discardDefiniteAttempt",
@@ -23636,9 +23610,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/sendFormattedService.test.ts; test/services/outgoingQueueService.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/services/send/sendFormattedService.ts#sendIMessageFormatted:mutator-call:a399ebbca17c:2",
+      "id": "src/services/send/sendFormattedService.ts#sendIMessageFormatted:mutator-call:a399ebbca17c",
       "path": "src/services/send/sendFormattedService.ts",
-      "line": 224,
+      "line": 223,
       "symbol": "sendIMessageFormatted",
       "operation": "mutator-call",
       "target": "src/services/send/sendFormattedService.ts#sendIMessageFormatted.retireOutcomeUnknown",
@@ -23649,9 +23623,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/sendFormattedService.test.ts; test/services/outgoingQueueService.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/services/send/sendFormattedService.ts#sendIMessageFormatted:mutator-call:42597f5417ba:3",
+      "id": "src/services/send/sendFormattedService.ts#sendIMessageFormatted:mutator-call:42597f5417ba:2",
       "path": "src/services/send/sendFormattedService.ts",
-      "line": 228,
+      "line": 227,
       "symbol": "sendIMessageFormatted",
       "operation": "mutator-call",
       "target": "src/services/send/sendFormattedService.ts#sendIMessageFormatted.retireOutcomeUnknown",
@@ -23857,20 +23831,7 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/sendMentionService.test.ts; test/services/outgoingQueueService.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:08f657773d2b",
-      "path": "src/services/send/sendMentionService.ts",
-      "line": 230,
-      "symbol": "sendIMessageMention",
-      "operation": "mutator-call",
-      "target": "src/services/send/sendMentionService.ts#sendIMessageMention.retireOutcomeUnknown",
-      "detectedContext": "coordinated-delegation",
-      "owner": "sendIMessageMention outcome-unknown retirement",
-      "transactionContext": "coordinated-delegation",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/sendMentionService.test.ts; test/services/outgoingQueueService.test.ts; test/db/withDbTransaction.test.ts"
-    },
-    {
-      "id": "src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:67aa22727ed1",
+      "id": "src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:bc32ca46eaa2",
       "path": "src/services/send/sendMentionService.ts",
       "line": 233,
       "symbol": "sendIMessageMention",
@@ -23883,22 +23844,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/sendMentionService.test.ts; test/services/outgoingQueueService.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:6c8548c9139f",
-      "path": "src/services/send/sendMentionService.ts",
-      "line": 236,
-      "symbol": "sendIMessageMention",
-      "operation": "mutator-call",
-      "target": "src/services/send/sendMentionService.ts#sendIMessageMention.retireOutcomeUnknown",
-      "detectedContext": "coordinated-delegation",
-      "owner": "sendIMessageMention outcome-unknown retirement",
-      "transactionContext": "coordinated-delegation",
-      "disposition": "coordinated",
-      "evidence": "scripts/check-db-writes.test.mjs; test/services/sendMentionService.test.ts; test/services/outgoingQueueService.test.ts; test/db/withDbTransaction.test.ts"
-    },
-    {
       "id": "src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:df3cb27d8c35",
       "path": "src/services/send/sendMentionService.ts",
-      "line": 251,
+      "line": 250,
       "symbol": "sendIMessageMention",
       "operation": "mutator-call",
       "target": "src/services/send/sendOutcome.ts#reconcileSendOutcome",
@@ -23909,9 +23857,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/sendMentionService.test.ts; test/services/outgoingQueueService.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:08f657773d2b:2",
+      "id": "src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:08f657773d2b",
       "path": "src/services/send/sendMentionService.ts",
-      "line": 256,
+      "line": 255,
       "symbol": "sendIMessageMention",
       "operation": "mutator-call",
       "target": "src/services/send/sendMentionService.ts#sendIMessageMention.retireOutcomeUnknown",
@@ -23922,9 +23870,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/sendMentionService.test.ts; test/services/outgoingQueueService.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:67aa22727ed1:2",
+      "id": "src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:67aa22727ed1",
       "path": "src/services/send/sendMentionService.ts",
-      "line": 259,
+      "line": 258,
       "symbol": "sendIMessageMention",
       "operation": "mutator-call",
       "target": "src/services/send/sendMentionService.ts#discardDefiniteAttempt",
@@ -23935,9 +23883,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/sendMentionService.test.ts; test/services/outgoingQueueService.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:6c8548c9139f:2",
+      "id": "src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:6c8548c9139f",
       "path": "src/services/send/sendMentionService.ts",
-      "line": 262,
+      "line": 261,
       "symbol": "sendIMessageMention",
       "operation": "mutator-call",
       "target": "src/services/send/sendMentionService.ts#sendIMessageMention.retireOutcomeUnknown",
@@ -23948,9 +23896,9 @@
       "evidence": "scripts/check-db-writes.test.mjs; test/services/sendMentionService.test.ts; test/services/outgoingQueueService.test.ts; test/db/withDbTransaction.test.ts"
     },
     {
-      "id": "src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:08f657773d2b:3",
+      "id": "src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:08f657773d2b:2",
       "path": "src/services/send/sendMentionService.ts",
-      "line": 266,
+      "line": 265,
       "symbol": "sendIMessageMention",
       "operation": "mutator-call",
       "target": "src/services/send/sendMentionService.ts#sendIMessageMention.retireOutcomeUnknown",

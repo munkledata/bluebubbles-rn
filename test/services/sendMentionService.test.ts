@@ -298,6 +298,38 @@ describe('sendIMessageMention', () => {
     expect(transport.post).toHaveBeenCalledTimes(1);
   });
 
+  it('reports a connection change before dispatch as not sent, never "may have been delivered"', async () => {
+    const transport = fakeHttp(async () => ({ guid: 'must-not-send', viaPrivateApi: true }));
+    // The server connection changes after the optimistic row commits, before the network call.
+    let connectionChanged = false;
+    (transport.http as unknown as { isTransportCurrent: () => boolean }).isTransportCurrent =
+      () => {
+        if (raw.inTransaction) return true;
+        const admitted =
+          (raw.prepare('SELECT COUNT(*) AS c FROM outgoing_queue').get() as { c: number }).c > 0;
+        if (admitted) connectionChanged = true;
+        return !admitted;
+      };
+
+    await expect(
+      sendIMessageMention(
+        db,
+        transport.http,
+        { chatGuid: CHAT_GUID, text: TEXT, mentions: MENTIONS },
+        10_000,
+        undefined,
+        capability(),
+      ),
+    ).resolves.toMatchObject({ status: 'rejected' });
+
+    expect(connectionChanged).toBe(true);
+    expect(transport.post).not.toHaveBeenCalled();
+    expect(one(raw, 'SELECT COUNT(*) AS c FROM messages WHERE date_deleted IS NULL')).toEqual({
+      c: 0,
+    });
+    expect(one(raw, 'SELECT COUNT(*) AS c FROM outgoing_queue')).toEqual({ c: 0 });
+  });
+
   it('retires a late acknowledgement as outcome-unknown after capability ownership changes', async () => {
     const response = deferred<unknown>();
     const started = deferred<void>();

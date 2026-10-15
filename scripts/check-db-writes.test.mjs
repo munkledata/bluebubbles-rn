@@ -2607,11 +2607,6 @@ test('certifies exactly the reviewed one-shot mention service boundary', () => {
         detectedContext: 'coordinated-delegation',
       },
       {
-        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:08f657773d2b:3',
-        target: 'src/services/send/sendMentionService.ts#sendIMessageMention.retireOutcomeUnknown',
-        detectedContext: 'coordinated-delegation',
-      },
-      {
         id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:0f419c7f91f6',
         target: 'src/db/transaction.ts#withDbTransaction',
         detectedContext: 'transaction-coordinator',
@@ -2627,17 +2622,12 @@ test('certifies exactly the reviewed one-shot mention service boundary', () => {
         detectedContext: 'coordinated-delegation',
       },
       {
-        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:67aa22727ed1:2',
+        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:bc32ca46eaa2',
         target: 'src/services/send/sendMentionService.ts#discardDefiniteAttempt',
         detectedContext: 'coordinated-delegation',
       },
       {
         id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:6c8548c9139f',
-        target: 'src/services/send/sendMentionService.ts#sendIMessageMention.retireOutcomeUnknown',
-        detectedContext: 'coordinated-delegation',
-      },
-      {
-        id: 'src/services/send/sendMentionService.ts#sendIMessageMention:mutator-call:6c8548c9139f:2',
         target: 'src/services/send/sendMentionService.ts#sendIMessageMention.retireOutcomeUnknown',
         detectedContext: 'coordinated-delegation',
       },

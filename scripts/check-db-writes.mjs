@@ -2613,8 +2613,8 @@ function dbProcessRelaunchCertificateCandidate({
       'f160a0844999ab354cb68ff35f1a2de1d06f34c78edb39b197c423313e3b9985',
     ],
     [sendIMessageEffect, '1c039d7607e2fa1092c8401a8f0a382c522f434ef9811f673ef6481abfd2ddc0'],
-    [sendIMessageMention, 'bfd922d5ff2918e6911ae7f7939b4ee1fc894cca10d779a88cdce9ca848b0bbd'],
-    [sendIMessageFormatted, '6c53108d0cdd11091b68ae3119de718bd1c94220d6cf3204bafbe0e03bf8a68d'],
+    [sendIMessageMention, 'c0af9c442fba104785d2ae685894d07264da27c6aad2125970cab7cd8631e1b0'],
+    [sendIMessageFormatted, 'cf64954748fc0a92dd4a00fd8d72f8111062fbead8fbcf575434513d428e4a54'],
     [reconcileSendOutcome, 'aedfc0bb25afbf331d39a1eb1e425b726dee99a5878b04a4fbb9bdca5f9636b1'],
     [handleSendFailure, 'f15ed881134c6a2b31fee3d185b6811708f4d913ccfd2ecad327915eb84a1178'],
     [

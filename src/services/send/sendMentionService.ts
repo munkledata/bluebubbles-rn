@@ -225,17 +225,16 @@ export async function sendIMessageMention(
       if (!targetCurrent) return { status: 'rejected', tempGuid };
       transport.assertNetworkCurrent();
       if (!capabilityGuard()) throw new DbCommitGuardRejectedError();
-    } catch (error) {
-      if (!capabilityGuard() || error instanceof DbCommitGuardRejectedError) {
-        return retireOutcomeUnknown(error);
-      }
+    } catch {
+      // Nothing has been dispatched yet, so this attempt is definitely unsent even when the
+      // capability or connection changed meanwhile. Discard it under the account guard alone: an
+      // account teardown keeps ownership of its rows, and the result is still "not sent".
       try {
-        await discardDefiniteAttempt(db, tempGuid, now, capabilityGuard);
-        return { status: 'rejected', tempGuid };
+        await discardDefiniteAttempt(db, tempGuid, now, accountSettlementGuard);
       } catch (settlementError) {
-        if (!capabilityGuard()) return retireOutcomeUnknown(settlementError);
-        throw settlementError;
+        if (accountSettlementGuard()) throw settlementError;
       }
+      return { status: 'rejected', tempGuid };
     }
 
     try {
