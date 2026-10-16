@@ -4,6 +4,8 @@ import { createTestDb } from '../support/testDb';
 
 jest.mock('expo-crypto', () => ({
   getRandomBytes: (length: number) => new Uint8Array(length).fill(7),
+  // Temporary send ids come from randomUUID (review M090).
+  randomUUID: () => jest.requireActual<typeof import('node:crypto')>('node:crypto').randomUUID(),
 }));
 jest.mock('@/services/send/sendFailureNotice', () => ({
   clearFailedSendNotice: jest.fn(async () => undefined),

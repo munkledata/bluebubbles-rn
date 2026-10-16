@@ -21,6 +21,8 @@ const NEW_KEY = '09'.repeat(32);
 
 jest.mock('expo-crypto', () => ({
   getRandomBytes: (length: number) => new Uint8Array(length).fill(9),
+  // Temporary send ids come from randomUUID (review M090).
+  randomUUID: () => jest.requireActual<typeof import('node:crypto')>('node:crypto').randomUUID(),
 }));
 
 let dummyHttp!: HttpClient;
