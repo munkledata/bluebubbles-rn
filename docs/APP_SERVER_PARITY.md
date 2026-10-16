@@ -46,6 +46,9 @@ the crawl. This is host-test evidence only; it claims no device or packaged-serv
 
 ## Versioned provider recovery — 2026-10-03 candidate
 
+The stored data model (tables, epochs, projection precedence, repair interruption) is in
+[MESSAGE_STATE_PROTOCOL.md](MESSAGE_STATE_PROTOCOL.md).
+
 Since 2026-10-11, automatic repairs and Full Repair on presence servers no longer use this crawl; see
 the section above.
 
