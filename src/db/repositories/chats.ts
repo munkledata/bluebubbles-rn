@@ -514,89 +514,21 @@ export function clearSupersededTombstonesWithinTransaction(
 }
 
 /**
- * Locally delete a chat: TOMBSTONE the chat row, then destroy the chat-scoped rows this layer can
- * safely destroy — messages, pending outgoing-queue rows, locally-owned scheduled messages and the
- * composer draft. Does NOT delete on the server (iMessage threads aren't server-deletable), and
- * does not touch state whose cancellation needs the native/network layer (see the exclusions
- * below) — that is the `deleteChat` service wrapper's job.
+ * Locally delete a chat: tombstone the chat row, then destroy the chat-scoped rows this layer can
+ * safely destroy (messages, pending outgoing-queue rows, locally owned scheduled messages and the
+ * composer draft). Nothing is deleted on the server, and state whose cancellation needs the native
+ * or network layer (server-backed scheduled messages, reminders) is left to the `deleteChat`
+ * service wrapper.
  *
- * TOMBSTONE, NOT A ROW DELETE, for the same reason `markMessageDeleted` is one: the delete is
- * local-only, so the server keeps returning the chat and the very next `syncAllChats` takes
- * `upsertChats`' INSERT branch — which seeds ONLY server fields. The thread came back with its
- * pin, archive, mute, custom name and colour, per-chat theme, wallpaper and read marker all reset
- * to NULL, permanently (no re-sync can restore device-local columns), so the only thing the delete
- * durably accomplished was destroying the user's own settings. Keeping the row keeps all of it.
- *
- * `chat_handles` is deliberately NOT deleted: the row survives now, and a chat with zero
- * participant links has an empty participant-name array, so if it ever un-hides `resolveTitle`
- * falls through to the raw phone number.
- *
- * THE DECISIONS ARE ONE TRANSACTION; THE BULK PURGE IS NOT. Everything that decides what the chat
- * IS after the delete — the tombstone stamp, the read-marker handover, and the queue/scheduled/draft
- * deletes — is a fixed handful of statements and runs together, because there is a single shared
- * connection: as bare autocommits they silently JOINED whatever transaction a concurrent socket/FCM
- * handler happened to have open, and a rollback on THAT side erased the tombstone, leaving the
- * conversation the user deleted simply still there with nothing reported (the UI calls this as
- * `void deleteChat(...)`). The half-states are just as bad in the other direction: a process death
- * between the tombstone and the queue purge left the chat hidden while its scheduled send survived
- * to fire into it and un-hide it again.
- *
- * The MESSAGE purge is deliberately outside it, in bounded chunks, because its row count is
- * UNBOUNDED — a long-running thread reaches five figures, every deleted row fires the `messages_ad`
- * FTS trigger and cascades to `attachments`, and the transaction mutex is PROCESS-WIDE. Holding it
- * for that stalls every send, every live message, every sync slice and every queue claim, and drags
- * every unrelated autocommit issued in that window (a read marker, a download's local path) into an
- * atomicity it has nothing to do with. Chunking is safe here precisely because the tombstone has
- * ALREADY committed: a partially-purged chat is invisible either way (every surviving row is
- * `<= history_deleted_at` by the floor below, so `chatVisible` stays false).
- *
- * THE FLIP SIDE OF CHUNKING IS THAT THE LOOP CAN BE INTERRUPTED — Android reclaims the process while
- * the tile has already vanished from the inbox — and the chunks already committed do not tell anyone
- * where it stopped. Nothing re-enters this function on its own, so the leftovers (rows, their
- * cascaded `attachments` rows and their FTS entries) would survive after the chat revives.
- * `resumeChatPurges` is the resume: it finds every chat whose persistent history boundary still
- * has purgeable rows under it and re-runs exactly this loop with the STORED stamp.
- * Re-entry is safe by construction — the bound is a stored value, not a fresh clock reading, so a
- * second pass can only finish what the first started.
- *
- * THE STAMP IS FLOORED AT THE CHAT'S NEWEST MESSAGE DATE, computed inside the statement. `now` is
- * the DEVICE clock; `messages.date_created` is the SERVER's Apple-derived timestamp, and the two
- * are never reconciled. With the Mac even seconds ahead, the message the user just read carried a
- * date GREATER than the deletion stamp — so the next sync's unconditional `lastMessage` re-insert
- * satisfied `date_created > deleted_at` and the conversation came back, deterministically, every
- * sync, with no user action. Flooring makes the stamp at least as new as anything already stored,
- * so no re-synced row can ever out-date it. NOTE WHICH DIRECTION THAT COVERS: it fixes the SERVER
- * being ahead (spurious resurrection). The opposite skew — a DEVICE clock ahead of the Mac by Δ —
- * is NOT addressed: the stamp lands Δ into the future of the server's timeline, so genuinely new
- * messages arriving in the next Δ are `<= deleted_at` and the chat stays hidden while its
- * notifications arrive. Both clocks are normally NTP-synced, so Δ is sub-second; clamping the
- * device component instead would need a tolerance constant that is itself a guess, and it would
- * mis-floor a chat with no stored messages, so the skew is documented rather than papered over.
- *
- * THE UNREAD FLOOR IS HANDED TO THE READ MARKER IN THE SAME STATEMENT. `deleted_at` does two jobs:
- * it hides the chat, and it floors the unread count (`listChatsForInbox` counts only
- * `um.date_created > c.deleted_at`). Whoever un-hides the chat later drops the stamp and would
- * retire the second job with the first — and doing the handover THERE is too late, because by then
- * this purge has destroyed every message that could serve as the marker. So the boundary is pinned
- * while it still exists, into the one mechanism designed to hold a "read up to here" position and
- * to survive the row purge (the marker is a GUID: the message re-resolves the moment a backfill
- * re-inserts it). Without this, deleting a never-opened thread — the spam/unknown-sender case
- * people actually delete, whose marker is NULL — and later re-composing to the same person badged
- * the ENTIRE re-synced history. Strictly-newer guard, so it can only ever move the marker forward.
- *
- * The deletes exist because NONE of these tables has a foreign key to `chats`, so nothing cascades:
- * a scheduled message still fires into a deleted conversation and the old draft is still pre-filled
- * if the chat ever returns. Two exclusions are deliberate:
- *  - SERVER-BACKED pending scheduled messages (`server_id` set) are kept. The Mac fires those, so a
- *    local delete doesn't cancel anything — it just destroys the only handle the user had to cancel
- *    it. `deleteChat` cancels them server-side first and removes the rows it got confirmation for;
- *    whatever it couldn't reach stays listed on the Scheduled screen, still cancellable.
- *  - `reminders` are not touched here at all. A reminder's trigger notification is OS state that
- *    outlives its row, and once the row is gone NOTHING can find the alarm again — not the
- *    Reminders screen, not `forget()`, both of which enumerate via `listReminders`. So the row may
- *    only be removed by whoever actually cancelled the alarm: the `deleteChat` service wrapper
- *    (`src/services/chatActions.ts`), mirroring how `forget()` does it. `src/db` can't do it
- *    itself — it must stay free of React and native modules.
+ * The rules, each explained with the bug it prevents in docs/CHAT_DELETION.md:
+ *  - A tombstone, never a row delete, so a re-sync cannot reset the user's chat settings.
+ *    `chat_handles` stays too.
+ *  - The decisions (stamp, read-marker handover, queue/scheduled/draft deletes) are one
+ *    transaction. The message purge runs after it in bounded chunks, and `resumeChatPurges`
+ *    finishes an interrupted purge with the stored boundary.
+ *  - The stamp is floored at the chat's newest stored message date, for a server clock ahead of
+ *    the device. A device clock ahead of the Mac is a known, documented gap.
+ *  - The unread floor is handed to the read marker in the same statement, only ever forward.
  */
 export async function deleteChatLocal(
   db: AppDatabase,
@@ -679,9 +611,9 @@ const MESSAGE_PURGE_CHUNK = 500;
  * Destroy a chat's messages in bounded chunks, each its own short transaction.
  *
  * `DELETE FROM messages WHERE chat_id = ?` is one statement but UNBOUNDED work (per-row FTS trigger
- * + attachment cascade), and the transaction mutex is process-wide — see the note on
- * `deleteChatLocal`. `WHERE id IN (SELECT … LIMIT n)` rather than `DELETE … LIMIT n` because the
- * latter needs SQLITE_ENABLE_UPDATE_DELETE_LIMIT, which neither driver is guaranteed to have.
+ * + attachment cascade), and the transaction mutex is process-wide (see docs/CHAT_DELETION.md).
+ * `WHERE id IN (SELECT … LIMIT n)` rather than `DELETE … LIMIT n` because the latter needs
+ * SQLITE_ENABLE_UPDATE_DELETE_LIMIT, which neither driver is guaranteed to have.
  * A short chunk means "fewer rows matched than we asked for", i.e. nothing is left — the loop is
  * therefore self-terminating without a second confirming query.
  *

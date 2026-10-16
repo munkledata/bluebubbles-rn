@@ -6608,7 +6608,7 @@
     {
       "id": "src/db/repositories/chats.ts#deleteChatLocal:mutator-call:0303f03b3296",
       "path": "src/db/repositories/chats.ts",
-      "line": 607,
+      "line": 539,
       "symbol": "deleteChatLocal",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#deleteChatLocal.<callback:237720b51c>",
@@ -6621,7 +6621,7 @@
     {
       "id": "src/db/repositories/chats.ts#deleteChatLocal:mutator-call:c27d24fe4286",
       "path": "src/db/repositories/chats.ts",
-      "line": 607,
+      "line": 539,
       "symbol": "deleteChatLocal",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -6634,7 +6634,7 @@
     {
       "id": "src/db/repositories/chats.ts#deleteChatLocal:sql-update:ffea42dc4b9f",
       "path": "src/db/repositories/chats.ts",
-      "line": 627,
+      "line": 559,
       "symbol": "deleteChatLocal",
       "operation": "sql-update",
       "target": "chats",
@@ -6647,7 +6647,7 @@
     {
       "id": "src/db/repositories/chats.ts#deleteChatLocal:drizzle-delete:e08e7ff22a05",
       "path": "src/db/repositories/chats.ts",
-      "line": 653,
+      "line": 585,
       "symbol": "deleteChatLocal",
       "operation": "drizzle-delete",
       "target": "outgoingQueue",
@@ -6660,7 +6660,7 @@
     {
       "id": "src/db/repositories/chats.ts#deleteChatLocal:drizzle-delete:722f3f6a331f",
       "path": "src/db/repositories/chats.ts",
-      "line": 654,
+      "line": 586,
       "symbol": "deleteChatLocal",
       "operation": "drizzle-delete",
       "target": "scheduledMessages",
@@ -6673,7 +6673,7 @@
     {
       "id": "src/db/repositories/chats.ts#deleteChatLocal:drizzle-delete:b43e5ed870f6",
       "path": "src/db/repositories/chats.ts",
-      "line": 662,
+      "line": 594,
       "symbol": "deleteChatLocal",
       "operation": "drizzle-delete",
       "target": "kv",
@@ -6686,7 +6686,7 @@
     {
       "id": "src/db/repositories/chats.ts#deleteChatLocal:mutator-call:4f80cbb6f44f",
       "path": "src/db/repositories/chats.ts",
-      "line": 668,
+      "line": 600,
       "symbol": "deleteChatLocal",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#purgeChatMessages",
@@ -6699,7 +6699,7 @@
     {
       "id": "src/db/repositories/chats.ts#purgeChatMessages:mutator-call:11ad968acb7c",
       "path": "src/db/repositories/chats.ts",
-      "line": 703,
+      "line": 635,
       "symbol": "purgeChatMessages",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#purgeChatMessages.<callback:3043c2502d>",
@@ -6712,7 +6712,7 @@
     {
       "id": "src/db/repositories/chats.ts#purgeChatMessages:mutator-call:d5d37ebc3f7d",
       "path": "src/db/repositories/chats.ts",
-      "line": 703,
+      "line": 635,
       "symbol": "purgeChatMessages",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -6725,7 +6725,7 @@
     {
       "id": "src/db/repositories/chats.ts#purgeChatMessages:sql-delete:51b862eb1740",
       "path": "src/db/repositories/chats.ts",
-      "line": 706,
+      "line": 638,
       "symbol": "purgeChatMessages",
       "operation": "sql-delete",
       "target": "messages",
@@ -6738,7 +6738,7 @@
     {
       "id": "src/db/repositories/chats.ts#resumeChatPurges:mutator-call:9e5da82015da",
       "path": "src/db/repositories/chats.ts",
-      "line": 763,
+      "line": 695,
       "symbol": "resumeChatPurges",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#purgeChatMessages",
@@ -6751,7 +6751,7 @@
     {
       "id": "src/db/repositories/chats.ts#restoreDeletedChatWithinTransaction:drizzle-update:754c4fa26f87",
       "path": "src/db/repositories/chats.ts",
-      "line": 933,
+      "line": 865,
       "symbol": "restoreDeletedChatWithinTransaction",
       "operation": "drizzle-update",
       "target": "messages",
@@ -6764,7 +6764,7 @@
     {
       "id": "src/db/repositories/chats.ts#restoreDeletedChatWithinTransaction:sql-update:b7e452100ef7",
       "path": "src/db/repositories/chats.ts",
-      "line": 954,
+      "line": 886,
       "symbol": "restoreDeletedChatWithinTransaction",
       "operation": "sql-update",
       "target": "chats",
@@ -6777,7 +6777,7 @@
     {
       "id": "src/db/repositories/chats.ts#clearChatTombstoneWithinTransaction:drizzle-update:ad50456e4d5a",
       "path": "src/db/repositories/chats.ts",
-      "line": 1049,
+      "line": 981,
       "symbol": "clearChatTombstoneWithinTransaction",
       "operation": "drizzle-update",
       "target": "chats",
@@ -6790,7 +6790,7 @@
     {
       "id": "src/db/repositories/chats.ts#setLastReadMessageGuidWithinTransaction:drizzle-update:123c9387c445",
       "path": "src/db/repositories/chats.ts",
-      "line": 1091,
+      "line": 1023,
       "symbol": "setLastReadMessageGuidWithinTransaction",
       "operation": "drizzle-update",
       "target": "chats",
@@ -6803,7 +6803,7 @@
     {
       "id": "src/db/repositories/chats.ts#setLastReadMessageGuid:mutator-call:44feaed1a174",
       "path": "src/db/repositories/chats.ts",
-      "line": 1108,
+      "line": 1040,
       "symbol": "setLastReadMessageGuid",
       "operation": "mutator-call",
       "target": "src/db/transaction.ts#withDbTransaction",
@@ -6816,7 +6816,7 @@
     {
       "id": "src/db/repositories/chats.ts#setLastReadMessageGuid:mutator-call:ca89bbbeb45f",
       "path": "src/db/repositories/chats.ts",
-      "line": 1108,
+      "line": 1040,
       "symbol": "setLastReadMessageGuid",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#setLastReadMessageGuid.<callback:6d0ba97f8e>",
@@ -6829,7 +6829,7 @@
     {
       "id": "src/db/repositories/chats.ts#setLastReadMessageGuid.<callback:6d0ba97f8e>:mutator-call:34081c4de815",
       "path": "src/db/repositories/chats.ts",
-      "line": 1109,
+      "line": 1041,
       "symbol": "setLastReadMessageGuid.<callback:6d0ba97f8e>",
       "operation": "mutator-call",
       "target": "src/db/repositories/chats.ts#setLastReadMessageGuidWithinTransaction",
@@ -6842,7 +6842,7 @@
     {
       "id": "src/db/repositories/chats.ts#setChatUnreadLocalWithinTransaction:drizzle-update:bc72f0e85266",
       "path": "src/db/repositories/chats.ts",
-      "line": 1133,
+      "line": 1065,
       "symbol": "setChatUnreadLocalWithinTransaction",
       "operation": "drizzle-update",
       "target": "chats",
@@ -6855,7 +6855,7 @@
     {
       "id": "src/db/repositories/chats.ts#markAllChatsReadLocalWithinTransaction:sql-update:52eca3e393a6",
       "path": "src/db/repositories/chats.ts",
-      "line": 1158,
+      "line": 1090,
       "symbol": "markAllChatsReadLocalWithinTransaction",
       "operation": "sql-update",
       "target": "chats",

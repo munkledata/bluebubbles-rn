@@ -36,7 +36,7 @@ A message's `messages.date_deleted` is the latest of:
 2. a server `deleted` row in a trusted ledger: the installed one, or one an unfinished repair is
    moving rows into;
 3. the chat's history-deletion boundary (`chats.history_deleted_at`), for messages created at or
-   before it.
+   before it ([CHAT_DELETION.md](CHAT_DELETION.md) explains how a chat delete sets it).
 
 A server `restored` row contributes nothing, so it can never undo a local deletion or a chat-history
 deletion. Only exact owners are projected: an ownerless row stays quarantined and cannot hide another
