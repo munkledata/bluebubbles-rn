@@ -690,9 +690,11 @@ export function upsertMessagesWithinTransaction(
           WHEN ${messages.retractionState} IS NOT NULL THEN ${messages.messagePartTopology}
           ELSE COALESCE(excluded.message_part_topology, ${messages.messagePartTopology})
         END`,
-          // Deletion is local durable knowledge, not a MessageV1 field. `excluded.date_deleted`
-          // comes from either a genuine message-deletion receipt or the destination chat's durable
-          // history boundary; keep the later timestamp across an out-of-order repeat.
+          // Deletion is durable stored knowledge, not a MessageV1 field. `excluded.date_deleted` is
+          // the latest of a genuine message-deletion receipt, the destination chat's history
+          // boundary and a trusted server 'deleted' verdict (message_server_states). Keep the later
+          // timestamp across an out-of-order repeat, except where a verdict from an untrusted
+          // ledger may have set the stored value: then the recomputed value replaces it.
           dateDeleted: sql`CASE WHEN EXISTS (
             SELECT 1 FROM message_server_states s WHERE s.guid = ${messages.guid}
               AND NOT ${trustedMessageStateLedgerSql('s', trustedLedgers)}
@@ -766,10 +768,11 @@ export function upsertMessagesWithinTransaction(
           // ONLY by the send/outgoing layer, which both sets it (markMessageSendError) and clears it
           // on every promotion/retry — so leaving it out of the set can't strand a stale code.
           //
-          // NOTE — `date_deleted` is deliberately sourced only from local deletion provenance,
-          // never the wire model. MessageV1 has no deletion field. Genuine per-message events use
-          // message_deletion_ledger; a chat delete uses chats.history_deleted_at so an explicit
-          // restore can distinguish and clear only the latter.
+          // NOTE — `date_deleted` is deliberately never taken from the wire model: MessageV1 has no
+          // deletion field. It has three stored sources: genuine per-message events in
+          // message_deletion_ledger, a chat delete in chats.history_deleted_at (so an explicit
+          // restore can distinguish and clear only that), and the server's trusted 'deleted'
+          // verdicts in message_server_states (docs/MESSAGE_STATE_PROTOCOL.md).
         },
       })
       .returning({ id: messages.id, guid: messages.guid });
