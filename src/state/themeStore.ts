@@ -28,12 +28,6 @@ interface ThemeState {
   hydrate: (options?: HydrationOptions) => Promise<void>;
   /** Select a built-in preset (also clears any active custom theme). */
   setPreset: (key: PresetKey) => Promise<void>;
-  /** Make a custom theme active (overrides the preset). */
-  setCustomTheme: (id: number, tokens: ThemeTokens) => Promise<void>;
-  /** Re-load the active custom theme's tokens from the DB (live recolor after an edit). */
-  reloadCustomTokens: () => Promise<void>;
-  /** Revert to the selected preset. */
-  clearCustomTheme: () => Promise<void>;
 }
 
 /** A stored custom theme that is corrupt or incomplete falls back to the preset (never crashes). */
@@ -45,9 +39,10 @@ function parseTokens(json: string): ThemeTokens | null {
  * App-wide theme selection. The Settings/theme screens and ThemeProvider share this
  * store, so a change recolors the whole tree. A built-in preset key is persisted in
  * `kv` (theme.preset); when a user picks a custom theme its id is persisted (theme.custom)
- * and its parsed tokens override the preset.
+ * and its parsed tokens override the preset. The theme screens write custom-theme choices
+ * through themeCommands and then update this store (review M251).
  */
-export const useThemeStore = create<ThemeState>((set, get) => ({
+export const useThemeStore = create<ThemeState>((set) => ({
   preset: DEFAULT_PRESET,
   customThemeId: null,
   customTokens: null,
@@ -89,41 +84,6 @@ export const useThemeStore = create<ThemeState>((set, get) => ({
       });
     } catch {
       // best-effort persist; the in-memory selection still applies this session
-    }
-  },
-  setCustomTheme: async (id, tokens) => {
-    if (!isDarkThemeTokens(tokens)) {
-      throw new Error('Light themes are unavailable while Gator is dark-only.');
-    }
-    set({ customThemeId: id, customTokens: tokens }); // optimistic
-    try {
-      await withDbTransaction(getDatabase(), (context) =>
-        kvSetWithinTransaction(context, THEME_CUSTOM_KEY, String(id)),
-      );
-    } catch {
-      // best-effort persist
-    }
-  },
-  reloadCustomTokens: async () => {
-    const id = get().customThemeId;
-    if (id == null) return;
-    try {
-      const row = await getCustomThemeById(getDatabase(), id);
-      const tokens = row ? parseTokens(row.tokens) : null;
-      if (isDarkThemeTokens(tokens)) set({ customTokens: tokens });
-      else set({ customThemeId: null, customTokens: null }); // missing, corrupt, or unavailable light
-    } catch {
-      // keep the current tokens on a transient read error
-    }
-  },
-  clearCustomTheme: async () => {
-    set({ customThemeId: null, customTokens: null });
-    try {
-      await withDbTransaction(getDatabase(), (context) =>
-        kvSetWithinTransaction(context, THEME_CUSTOM_KEY, ''),
-      );
-    } catch {
-      // best-effort persist
     }
   },
 }));

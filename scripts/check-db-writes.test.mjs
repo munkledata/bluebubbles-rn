@@ -2242,16 +2242,11 @@ test('certifies exactly the reviewed interactive leaf-delegation edges', () => {
       'src/state/featureSettingsStore.ts#completePermissionOnboarding:mutator-call:a81286d61932',
     ].sort(),
   );
+  // The store's custom-theme setters were deleted (review M251); custom themes are written through
+  // themeCommands. Any reappearance must be reviewed again.
   assert.deepEqual(
-    customThemeTransactions.map((finding) => finding.id).sort(),
-    [
-      'src/state/themeStore.ts#<callback:2281b2e3e0>.clearCustomTheme.<callback:3d4db5413f>:mutator-call:48f115f8f4e7',
-      'src/state/themeStore.ts#<callback:2281b2e3e0>.clearCustomTheme:mutator-call:07ee3458db41',
-      'src/state/themeStore.ts#<callback:2281b2e3e0>.clearCustomTheme:mutator-call:9c61595b9b7e',
-      'src/state/themeStore.ts#<callback:2281b2e3e0>.setCustomTheme.<callback:096d9b3756>:mutator-call:1207f46aa710',
-      'src/state/themeStore.ts#<callback:2281b2e3e0>.setCustomTheme:mutator-call:07c82ca7ed59',
-      'src/state/themeStore.ts#<callback:2281b2e3e0>.setCustomTheme:mutator-call:8783edd1784f',
-    ].sort(),
+    customThemeTransactions.map((finding) => finding.id),
+    [],
   );
   assert.deepEqual(
     scheduledHistoryTransactions.map((finding) => finding.id).sort(),

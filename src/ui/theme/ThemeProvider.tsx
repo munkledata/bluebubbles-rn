@@ -37,8 +37,9 @@ export function ThemeProvider({
     () => ({ theme: darkThemeOrFallback(customTokens, resolvePreset(preset)) }),
     [preset, customTokens],
   );
-  // Hold the first paint until the persisted theme has loaded, so a custom-theme user
-  // doesn't see a flash of the default preset before hydration recolors the tree.
+  // Without renderWithFallbackTheme this holds the first paint until the persisted theme loads.
+  // The app root opts out so a stalled hydration can never leave a blank screen; every preset is
+  // dark, so the brief default-preset paint before a custom theme applies is cosmetic.
   return (
     <ThemeContext.Provider value={value}>
       {hydrated || renderWithFallbackTheme ? (
