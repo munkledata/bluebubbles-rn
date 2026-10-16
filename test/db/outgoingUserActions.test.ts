@@ -37,14 +37,10 @@ import {
   insertOutgoingContact,
   retireOutgoing,
 } from '../support/repositoryWrappers';
+import { nextEventLoopTurn } from '../support/async';
 
 const OUTGOING_RETRY_LEASE_MS = 120_000;
 const RCS_PROVIDER_EPOCH = `gpe1_${'A'.repeat(43)}`;
-
-const nextEventLoopTurn = (): Promise<void> =>
-  new Promise((resolve) => {
-    setImmediate(resolve);
-  });
 
 async function seedChat(db: AppDatabase, guid: string): Promise<number> {
   const handles = await upsertHandles(db, [{ address: 'a@x.com' }]);

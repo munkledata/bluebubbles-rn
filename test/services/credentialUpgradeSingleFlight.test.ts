@@ -92,6 +92,7 @@ import {
   discardScopedCredentialUpgradeCandidate,
   resumeScopedCredentialUpgrade,
 } from '@/services/credentialUpgrade';
+import { flushMicrotasks } from '../support/async';
 
 interface Deferred<T> {
   readonly promise: Promise<T>;
@@ -104,10 +105,6 @@ function deferred<T>(): Deferred<T> {
     resolve = done;
   });
   return { promise, resolve };
-}
-
-async function settle(): Promise<void> {
-  for (let index = 0; index < 8; index += 1) await Promise.resolve();
 }
 
 beforeEach(() => {
@@ -198,7 +195,7 @@ it('joins an in-flight resume while begin and discard remain busy', async () => 
   mockResumeCredentialUpgradeRuntime.mockReturnValueOnce(recovery.promise);
 
   const first = resumeScopedCredentialUpgrade({ restartRealtime: false });
-  await settle();
+  await flushMicrotasks();
   const joined = resumeScopedCredentialUpgrade({ restartRealtime: false });
 
   expect(joined).toBe(first);
@@ -214,7 +211,7 @@ it('joins an in-flight resume while begin and discard remain busy', async () => 
 
   recovery.resolve({ kind: 'idle' });
   await expect(Promise.all([first, joined])).resolves.toEqual([{ kind: 'idle' }, { kind: 'idle' }]);
-  await settle();
+  await flushMicrotasks();
 });
 
 it('routes a scoped replacement through the serialized transition; only the runtime revokes', async () => {
@@ -245,7 +242,7 @@ it('preserves begin and discard transitions plus their one post-settlement resta
   });
   expect(mockPauseRealtimeForCredentialUpgrade).toHaveBeenCalledTimes(1);
   expect(mockResumeRealtimeAfterCredentialUpgrade).toHaveBeenCalledTimes(1);
-  await settle();
+  await flushMicrotasks();
 
   mockDiscardCredentialUpgradeCandidateRuntime.mockImplementationOnce(
     async (dependencies: { beginExclusiveTransition(): boolean }) => {
@@ -515,7 +512,7 @@ describe('replaced-credential wiring (M130)', () => {
     await expect(resumeScopedCredentialUpgrade({ restartRealtime: false })).resolves.toEqual({
       kind: 'idle',
     });
-    await settle();
+    await flushMicrotasks();
     expect(mockRevokeReplacedCredentialRuntime).toHaveBeenCalledTimes(1);
 
     // A resume that finishes a promotion revokes inline once and schedules nothing more.
@@ -523,7 +520,7 @@ describe('replaced-credential wiring (M130)', () => {
     await expect(resumeScopedCredentialUpgrade({ restartRealtime: false })).resolves.toEqual({
       kind: 'adopted',
     });
-    await settle();
+    await flushMicrotasks();
     expect(mockRevokeReplacedCredentialRuntime).toHaveBeenCalledTimes(2);
   });
 });

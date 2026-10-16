@@ -86,6 +86,7 @@ import {
   startChatRepair,
   type ChatRepairResult,
 } from '@/services/syncControl';
+import { flushMicrotasks } from '../support/async';
 
 const SERVER_INFO: ServerInfo = { server_version: '1.9.0' };
 
@@ -103,10 +104,6 @@ function deferred<T>(): Deferred<T> {
     reject = fail;
   });
   return { promise, resolve, reject };
-}
-
-async function flushMicrotasks(): Promise<void> {
-  for (let index = 0; index < 8; index += 1) await Promise.resolve();
 }
 
 function lastInvalidationListener(): () => void {

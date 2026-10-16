@@ -178,6 +178,7 @@ import {
   startFcm,
 } from '@/services/notifications/fcmMessaging';
 import '@/services/notifications/registerFcmBackgroundHandler';
+import { flushMicrotasks } from '../support/async';
 
 const message = { messageId: 'provider-message-1', data: { type: 'new-message' } };
 const V2_KEY = 'AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8';
@@ -231,10 +232,6 @@ function configureV3Delivery(options: {
     plaintext: options.plaintext ?? '{"guid":"v3-message"}',
     identity: options.identity ?? v3Identity(),
   });
-}
-
-async function settle(): Promise<void> {
-  for (let i = 0; i < 12; i += 1) await Promise.resolve();
 }
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
@@ -412,7 +409,7 @@ describe('FCM native callback ownership', () => {
     mockReadFcmSessionState.mockReturnValueOnce(sessionGate.promise);
 
     const handled = mockBackgroundHandler!(message);
-    await settle();
+    await flushMicrotasks(12);
     leaseCurrent = false;
     sessionGate.resolve('active');
     await handled;
@@ -442,7 +439,7 @@ describe('FCM native callback ownership', () => {
     );
 
     const handled = mockBackgroundHandler!(message);
-    await settle();
+    await flushMicrotasks(12);
     expect(mockVaultGet).toHaveBeenCalledWith('appLockEnabled');
 
     leaseCurrent = false;
@@ -501,7 +498,7 @@ describe('FCM native callback ownership', () => {
       messageId: 'native-second',
       data: { type: 'new-message' },
     });
-    await settle();
+    await flushMicrotasks(12);
 
     // Both callbacks are already registered with teardown, but the later one cannot pass its
     // session gate or dispatch until the earlier callback completes admission.
@@ -541,14 +538,14 @@ describe('FCM native callback ownership', () => {
           data: { type: 'new-message' },
         }),
       );
-      await settle();
+      await flushMicrotasks(12);
 
       expect(mockRunTrackedRealtimeDelivery).toHaveBeenCalledTimes(2);
       expect(mockReadFcmSessionState).toHaveBeenCalledTimes(1);
       expect(mockDispatchRealtimeEvent).not.toHaveBeenCalled();
 
       jest.advanceTimersByTime(FCM_HEADLESS_DELIVERY_WINDOW_MS);
-      await settle();
+      await flushMicrotasks(12);
       await expect(Promise.all([first, second])).resolves.toEqual([undefined, undefined]);
       expect(mockDispatchRealtimeEvent).not.toHaveBeenCalled();
 
@@ -558,7 +555,7 @@ describe('FCM native callback ownership', () => {
           data: { type: 'new-message' },
         }),
       );
-      await settle();
+      await flushMicrotasks(12);
       expect(mockRunTrackedRealtimeDelivery).toHaveBeenCalledTimes(3);
       expect(mockReadFcmSessionState).toHaveBeenCalledTimes(1);
 
@@ -572,7 +569,7 @@ describe('FCM native callback ownership', () => {
     } finally {
       firstSessionGate.resolve('active');
       jest.runOnlyPendingTimers();
-      await settle();
+      await flushMicrotasks(12);
       await Promise.allSettled(
         [first, second, third].filter((value): value is Promise<void> => !!value),
       );
@@ -594,11 +591,11 @@ describe('FCM native callback ownership', () => {
           data: { type: 'new-message' },
         }),
       );
-      await settle();
+      await flushMicrotasks(12);
       expect(mockReadFcmSessionState).toHaveBeenCalledTimes(1);
 
       jest.advanceTimersByTime(FCM_HEADLESS_DELIVERY_WINDOW_MS);
-      await settle();
+      await flushMicrotasks(12);
       await expect(first).resolves.toBeUndefined();
 
       expect(
@@ -607,7 +604,7 @@ describe('FCM native callback ownership', () => {
           data: { type: 'new-message' },
         }),
       ).toBeUndefined();
-      await settle();
+      await flushMicrotasks(12);
       expect(mockRunTrackedRealtimeDelivery).toHaveBeenCalledTimes(2);
       expect(mockReadFcmSessionState).toHaveBeenCalledTimes(1);
 
@@ -618,7 +615,7 @@ describe('FCM native callback ownership', () => {
       const teardownWait = foregroundTracked?.finally(() => {
         teardownWaitSettled = true;
       });
-      await settle();
+      await flushMicrotasks(12);
       expect(teardownWaitSettled).toBe(false);
 
       invalidateActiveGeneration();
@@ -626,7 +623,7 @@ describe('FCM native callback ownership', () => {
       expect(mockDispatchRealtimeEvent).not.toHaveBeenCalled();
 
       firstSessionGate.resolve('active');
-      await settle();
+      await flushMicrotasks(12);
       expect(mockDispatchRealtimeEvent).not.toHaveBeenCalled();
 
       leaseCurrent = true;
@@ -644,7 +641,7 @@ describe('FCM native callback ownership', () => {
     } finally {
       firstSessionGate.resolve('active');
       leaseCurrent = true;
-      await settle();
+      await flushMicrotasks(12);
       await Promise.allSettled([first, fresh].filter((value): value is Promise<void> => !!value));
       jest.clearAllTimers();
       jest.useRealTimers();
@@ -1490,7 +1487,7 @@ describe('FCM native callback ownership', () => {
 
     const returned = mockForegroundHandler!(message);
     expect(returned).toBeUndefined();
-    await settle();
+    await flushMicrotasks(12);
 
     expect(mockRunTrackedRealtimeDelivery).toHaveBeenCalledTimes(1);
     expect(mockDispatchRealtimeEvent).toHaveBeenCalledTimes(1);
@@ -1515,7 +1512,7 @@ describe('FCM native callback ownership', () => {
     await startFcm();
 
     expect(mockForegroundHandler!(message)).toBeUndefined();
-    await settle();
+    await flushMicrotasks(12);
 
     expect(warn).toHaveBeenCalledWith(
       '[fcm] push delivery failed; sync may recover server state, but a one-time event may be lost',

@@ -1,4 +1,5 @@
 import type { BootState } from '@/services/boot/bootStateMachine';
+import { flushMicrotasks } from '../support/async';
 
 const mockLockState = { locked: false };
 const mockHydrateLock = jest.fn();
@@ -245,10 +246,6 @@ async function waitForBootState(
   throw new Error(`boot state did not settle: ${JSON.stringify(read())}`);
 }
 
-async function flushMicrotasks(count = 12): Promise<void> {
-  for (let index = 0; index < count; index += 1) await Promise.resolve();
-}
-
 beforeEach(() => {
   jest.resetModules();
   jest.clearAllMocks();
@@ -276,7 +273,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  await flushMicrotasks();
+  await flushMicrotasks(12);
 });
 
 afterAll(() => {
@@ -504,7 +501,7 @@ describe('production foreground boot singleton', () => {
       status: 'failed',
       runId: 1,
     });
-    await flushMicrotasks();
+    await flushMicrotasks(12);
     await expect(foreground.retryForegroundBoot(1)).resolves.toMatchObject({
       status: 'ready',
       runId: 2,
@@ -542,7 +539,7 @@ describe('production foreground boot singleton', () => {
         (state) => state.status === 'loading' && state.stage === 'database',
       );
       jest.advanceTimersByTime(30_000);
-      await flushMicrotasks();
+      await flushMicrotasks(12);
 
       await expect(first).resolves.toMatchObject({
         status: 'failed',
@@ -614,7 +611,7 @@ describe('production foreground boot singleton', () => {
       runId: 1,
     });
     backgroundRegistration.resolve('unavailable');
-    await flushMicrotasks();
+    await flushMicrotasks(12);
     expect(foreground.getForegroundBootSnapshot()).toMatchObject({ status: 'failed', runId: 1 });
 
     await expect(foreground.retryForegroundBoot(1)).resolves.toMatchObject({
@@ -643,7 +640,7 @@ describe('production foreground boot singleton', () => {
       runId: 1,
     });
     initialization.reject(new Error('private legacy log cleanup failure'));
-    await flushMicrotasks();
+    await flushMicrotasks(12);
     expect(foreground.getForegroundBootSnapshot().issues).toContainEqual({
       stage: 'persistent-logs',
       level: 'degraded',
@@ -703,7 +700,7 @@ describe('production foreground boot singleton', () => {
     expect(foreground.resolvePersistentLogCleanupIssue()).toBe(true);
 
     initialization.reject(new Error('late private legacy log cleanup failure'));
-    await flushMicrotasks();
+    await flushMicrotasks(12);
     expect(foreground.getForegroundBootSnapshot().issues).toEqual([]);
   });
 
@@ -725,7 +722,7 @@ describe('production foreground boot singleton', () => {
     await expect(first).resolves.toMatchObject({ status: 'idle', runId: 1 });
 
     backgroundRegistration.resolve('unavailable');
-    await flushMicrotasks();
+    await flushMicrotasks(12);
     expect(foreground.getForegroundBootSnapshot()).toMatchObject({ status: 'idle', runId: 1 });
 
     expect(transition.restartForegroundBootAfterAccountTransition()).toBe(true);
@@ -744,7 +741,7 @@ describe('production foreground boot singleton', () => {
     });
 
     firstSession.resolve(connected(privateAttempt()));
-    await flushMicrotasks();
+    await flushMicrotasks(12);
     expect(foreground.getForegroundBootSnapshot()).toMatchObject({
       status: 'ready',
       mode: 'setup',

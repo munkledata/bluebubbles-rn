@@ -20,6 +20,7 @@ import {
   markErrorReportsFailed,
   trimErrorReports,
 } from '../support/repositoryWrappers';
+import { nextEventLoopTurn } from '../support/async';
 
 const count = (raw: Database.Database): number =>
   (raw.prepare('SELECT COUNT(*) c FROM error_reports').get() as { c: number }).c;
@@ -99,11 +100,6 @@ async function finishAfterQueuedObservation<T>(
   expect(String(neighbourError)).toContain('neighbour rollback');
   return results;
 }
-
-const nextEventLoopTurn = (): Promise<void> =>
-  new Promise((resolve) => {
-    setImmediate(resolve);
-  });
 
 async function waitForDriverStart(check: () => boolean, label: string): Promise<void> {
   for (let turn = 0; turn < 20; turn += 1) {

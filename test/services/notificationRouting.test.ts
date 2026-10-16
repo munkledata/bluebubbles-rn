@@ -29,6 +29,7 @@ import {
 import { cancelAllNotifications } from '@/services/notifications/notifeeService';
 import { createTestDb } from '../support/testDb';
 import { createReminder } from '../support/repositoryWrappers';
+import { nextEventLoopTurn } from '../support/async';
 
 let mockDb: AppDatabase;
 jest.mock('@/services/databaseControl', () => ({
@@ -48,11 +49,6 @@ jest.mock('react-native-notify-kit', () => ({
 const mockCancelAllNotifications = notifee.cancelAllNotifications as jest.Mock;
 type RawDb = Awaited<ReturnType<typeof createTestDb>>['raw'];
 let mockRaw: RawDb;
-
-const nextEventLoopTurn = (): Promise<void> =>
-  new Promise((resolve) => {
-    setImmediate(resolve);
-  });
 
 function retiredFaceTimeData(token: string): Record<string, string> {
   return {

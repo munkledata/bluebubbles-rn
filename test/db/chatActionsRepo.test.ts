@@ -41,6 +41,7 @@ import {
   setChatPin,
   setChatTheme,
 } from '../support/repositoryWrappers';
+import { nextEventLoopTurn } from '../support/async';
 
 /** A received (inbound) message, the kind that un-hides a deleted chat. */
 function received(guid: string, dateCreated: number) {
@@ -81,11 +82,6 @@ const col = (raw: Database.Database, guid: string, c: string): number | string |
   null;
 const counts = (raw: Database.Database, table: string): number =>
   (raw.prepare(`SELECT COUNT(*) c FROM ${table}`).get() as { c: number }).c;
-
-const nextEventLoopTurn = (): Promise<void> =>
-  new Promise((resolve) => {
-    setImmediate(resolve);
-  });
 
 interface DriverGate {
   didStart: boolean;

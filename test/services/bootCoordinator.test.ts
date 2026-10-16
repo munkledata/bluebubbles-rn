@@ -9,6 +9,7 @@ import {
   type BootStageContext,
 } from '@/services/boot/bootCoordinator';
 import type { CoreBootStage } from '@/services/boot/bootStateMachine';
+import { flushMicrotasks } from '../support/async';
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -22,10 +23,6 @@ function deferred<T>(): {
     reject = onReject;
   });
   return { promise, resolve, reject };
-}
-
-async function flushMicrotasks(count = 8): Promise<void> {
-  for (let index = 0; index < count; index += 1) await Promise.resolve();
 }
 
 interface TestBootSession {

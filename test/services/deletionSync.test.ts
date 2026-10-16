@@ -29,6 +29,7 @@ import {
 import type { SyncApi } from '@/services/sync/types';
 import { createTestDb } from '../support/testDb';
 import { kvSet } from '../support/repositoryWrappers';
+import { nextEventLoopTurn } from '../support/async';
 
 /**
  * R1 deletion catch-up sync (engine-level): a `message-deleted` event that fires while the app is
@@ -88,11 +89,6 @@ function tombstones(raw: Database.Database): Map<string, number | null> {
   }[];
   return new Map(rows.map((r) => [r.guid, r.d]));
 }
-
-const nextEventLoopTurn = (): Promise<void> =>
-  new Promise((resolve) => {
-    setImmediate(resolve);
-  });
 
 async function expectProtocolError(
   promise: Promise<unknown>,

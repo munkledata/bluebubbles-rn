@@ -1,3 +1,4 @@
+import { flushMicrotasks } from '../support/async';
 /* Optional native setup must report degradation without rejecting realtime startup. */
 const mockGetNotificationPermissionState = jest.fn<
   Promise<'not-determined' | 'denied' | 'granted'>,
@@ -411,10 +412,6 @@ jest.mock('@/services/realtime/socketService', () => ({
   },
 }));
 
-async function settle(): Promise<void> {
-  for (let index = 0; index < 12; index += 1) await Promise.resolve();
-}
-
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => {
@@ -428,7 +425,7 @@ async function startFreshRealtime(): Promise<jest.Mock> {
   const reportIssue = jest.fn();
   const { startRealtime } = await import('@/services/realtimeControl');
   await expect(startRealtime({ reportIssue })).resolves.toBeUndefined();
-  await settle();
+  await flushMicrotasks(12);
   return reportIssue;
 }
 
@@ -821,7 +818,7 @@ describe('realtime notification callback ownership', () => {
       const { context, retire } = deliveryContext();
 
       const run = Promise.resolve(notify(MESSAGE_INTENT, context));
-      await settle();
+      await flushMicrotasks(12);
       if (deferredStep === 'feature hydration') {
         expect(mockFeatureHydrate).toHaveBeenCalledTimes(1);
       } else {
@@ -890,7 +887,7 @@ describe('startRealtime optional setup containment', () => {
     jest.resetModules();
     const { resumeRealtime, startRealtime } = await import('@/services/realtimeControl');
     await startRealtime();
-    await settle();
+    await flushMicrotasks(12);
     if (!mockRecoveryRequest) throw new Error('DB sink did not register its recovery callback');
     const callback = new AbortController();
     let callbackCurrent = true;
@@ -901,7 +898,7 @@ describe('startRealtime optional setup containment', () => {
     };
 
     await mockRecoveryRequest(null, context);
-    await settle();
+    await flushMicrotasks(12);
 
     expect(mockRecoverRealtimePrerequisite).toHaveBeenCalledWith(
       expect.anything(),
@@ -957,7 +954,7 @@ describe('startRealtime optional setup containment', () => {
         ).then(() => {
           settled = true;
         });
-        await settle();
+        await flushMicrotasks(12);
 
         expect(mockRecoverRealtimePrerequisite).toHaveBeenCalledWith(
           expect.anything(),
@@ -973,14 +970,14 @@ describe('startRealtime optional setup containment', () => {
 
         if (order === 'delay-first') {
           jest.advanceTimersByTime(5_000);
-          await settle();
+          await flushMicrotasks(12);
           expect(mockDurableResume).not.toHaveBeenCalled();
           recovery.resolve('recovered');
         } else {
           recovery.resolve('recovered');
-          await settle();
+          await flushMicrotasks(12);
           jest.advanceTimersByTime(4_999);
-          await settle();
+          await flushMicrotasks(12);
           expect(mockDurableResume).not.toHaveBeenCalled();
           jest.advanceTimersByTime(1);
         }
@@ -1007,7 +1004,7 @@ describe('startRealtime optional setup containment', () => {
       const { pauseRealtimeDeliveries, resumeRealtimeDeliveries } =
         await import('@/services/realtime/deliveryCoordinator');
       const dispatch = dispatchRealtimeEvent('new-message', { guid: 'retired-recovery' }, 'fcm');
-      await settle();
+      await flushMicrotasks(12);
 
       const retirement = pauseRealtimeDeliveries();
       await expect(dispatch).resolves.toBeUndefined();
@@ -1032,7 +1029,7 @@ describe('startRealtime optional setup containment', () => {
         { guid: 'wait-only-dependency' },
         'fcm',
       );
-      await settle();
+      await flushMicrotasks(12);
 
       expect(mockRecoverRealtimePrerequisite).not.toHaveBeenCalled();
       expect(mockDurableResume).not.toHaveBeenCalled();
@@ -1052,7 +1049,7 @@ describe('startRealtime optional setup containment', () => {
     const { pauseRealtime, startRealtime } = await import('@/services/realtimeControl');
 
     const startup = startRealtime();
-    await settle();
+    await flushMicrotasks(12);
     expect(mockEnsureDatabase).toHaveBeenCalledTimes(1);
     pauseRealtime();
     databaseOpen.resolve({});
@@ -1068,7 +1065,7 @@ describe('startRealtime optional setup containment', () => {
     const { pauseRealtime, startRealtime } = await import('@/services/realtimeControl');
 
     const startup = startRealtime();
-    await settle();
+    await flushMicrotasks(12);
     expect(mockResumeScopedCredentialUpgrade).toHaveBeenCalledWith({ restartRealtime: false });
     expect(mockEnsureDatabase).not.toHaveBeenCalled();
 
@@ -1087,13 +1084,13 @@ describe('startRealtime optional setup containment', () => {
     const realtime = await import('@/services/realtimeControl');
 
     const firstStartup = realtime.startRealtime();
-    await settle();
+    await flushMicrotasks(12);
     expect(mockResumeScopedCredentialUpgrade).toHaveBeenCalledTimes(1);
     expect(mockEnsureDatabase).not.toHaveBeenCalled();
 
     realtime.pauseRealtime();
     const currentResume = realtime.resumeRealtime();
-    await settle();
+    await flushMicrotasks(12);
     expect(mockResumeScopedCredentialUpgrade).toHaveBeenCalledTimes(2);
     expect(mockEnsureDatabase).not.toHaveBeenCalled();
     expect(mockSocketConnect).not.toHaveBeenCalled();
@@ -1170,7 +1167,7 @@ describe('startRealtime optional setup containment', () => {
     jest.resetModules();
     const { startRealtime } = await import('@/services/realtimeControl');
     await startRealtime();
-    await settle();
+    await flushMicrotasks(12);
     expect(mockSocketConnect).toHaveBeenCalledWith('https://server.example', 'secret', {
       headers: {},
     });
@@ -1214,7 +1211,7 @@ describe('startRealtime optional setup containment', () => {
     const { pauseRealtime, retryRealtimeConnection, startRealtime } =
       await import('@/services/realtimeControl');
     await startRealtime();
-    await settle();
+    await flushMicrotasks(12);
     mockEnsureDatabase.mockClear();
     mockSocketRetryConnection.mockClear();
     mockRetryTransport.mockClear();
@@ -1472,14 +1469,14 @@ describe('startRealtime optional setup containment', () => {
       context,
       { transportOccurrenceId: 'dev:tracked-supplied-context' },
     );
-    await settle();
+    await flushMicrotasks(12);
     expect(mockDurableHandle).toHaveBeenCalledTimes(1);
 
     let teardownSettled = false;
     const teardown = pauseRealtimeDeliveries().then(() => {
       teardownSettled = true;
     });
-    await settle();
+    await flushMicrotasks(12);
     expect(teardownSettled).toBe(false);
 
     durableWrite.resolve(undefined);
@@ -1495,7 +1492,7 @@ describe('startRealtime optional setup containment', () => {
       await import('@/services/realtime/deliveryCoordinator');
 
     await startRealtime();
-    await settle();
+    await flushMicrotasks(12);
     expect(mockDurableConstruct).toHaveBeenCalledTimes(1);
     expect(mockDurableDispose).not.toHaveBeenCalled();
 
@@ -1504,7 +1501,7 @@ describe('startRealtime optional setup containment', () => {
 
     resumeRealtimeDeliveries();
     await resumeRealtime();
-    await settle();
+    await flushMicrotasks(12);
     expect(mockDurableConstruct).toHaveBeenCalledTimes(2);
     expect(mockDurableDispose).toHaveBeenCalledTimes(1);
   });
@@ -1877,9 +1874,9 @@ describe('killed-process RCS provider authority', () => {
       jest.resetModules();
       const { dispatchRealtimeEvent } = await import('@/services/realtimeControl');
       const dispatch = dispatchRealtimeEvent('new-message', RCS_MESSAGE, 'fcm');
-      await settle();
+      await flushMicrotasks(12);
       jest.advanceTimersByTime(4_999);
-      await settle();
+      await flushMicrotasks(12);
       expect(mockDurableHandle).not.toHaveBeenCalled();
 
       jest.advanceTimersByTime(1);
@@ -1962,7 +1959,7 @@ describe('killed-process RCS provider authority', () => {
       jest.resetModules();
       const { dispatchRealtimeEvent } = await import('@/services/realtimeControl');
       const dispatch = dispatchRealtimeEvent('new-message', RCS_MESSAGE, 'fcm');
-      await settle();
+      await flushMicrotasks(12);
       jest.advanceTimersByTime(5_000);
 
       await expect(dispatch).resolves.toBeUndefined();
@@ -1999,7 +1996,7 @@ describe('killed-process RCS provider authority', () => {
         signal: callback.signal,
         isCurrent: () => true,
       });
-      await settle();
+      await flushMicrotasks(12);
       expect(mockDurableHandle).not.toHaveBeenCalled();
 
       callback.abort();
@@ -2026,7 +2023,7 @@ describe('killed-process RCS provider authority', () => {
       const { pauseRealtimeDeliveries, resumeRealtimeDeliveries } =
         await import('@/services/realtime/deliveryCoordinator');
       const dispatch = dispatchRealtimeEvent('new-message', RCS_MESSAGE, 'fcm');
-      await settle();
+      await flushMicrotasks(12);
 
       // No timer advanced: retiring the account aborts the fetch instead of waiting five seconds.
       const retirement = pauseRealtimeDeliveries();

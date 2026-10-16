@@ -39,6 +39,7 @@ import {
 } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
+import { nextEventLoopTurn } from '../support/async';
 
 const BASE = 1_000;
 const NOW = 10_000;
@@ -79,11 +80,6 @@ interface ClaimQueueRow {
   terminalAt: number | null;
   lastErrorCode: string | null;
 }
-
-const nextEventLoopTurn = (): Promise<void> =>
-  new Promise((resolve) => {
-    setImmediate(resolve);
-  });
 
 function incoming(eventKey: string, overrides: Partial<NewIncomingEvent> = {}): NewIncomingEvent {
   return {

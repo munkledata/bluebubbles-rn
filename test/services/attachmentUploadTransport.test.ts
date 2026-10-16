@@ -44,6 +44,7 @@ import { DbCommitGuardRejectedError } from '@db/transaction';
 import { expoAttachmentUploader } from '@/services/send/attachmentUpload';
 // eslint-disable-next-line import/first
 import { uploadGate, uploadRegistry } from '@/services/send/uploadControl';
+import { flushMicrotasks } from '../support/async';
 
 let finishFileCheck!: (value: { exists: boolean; size?: number }) => void;
 
@@ -106,10 +107,6 @@ function upload(
     signal: options.signal,
     timeoutMs: options.timeoutMs,
   });
-}
-
-async function flushMicrotasks(count = 8): Promise<void> {
-  for (let index = 0; index < count; index += 1) await Promise.resolve();
 }
 
 describe('native attachment upload account scope', () => {

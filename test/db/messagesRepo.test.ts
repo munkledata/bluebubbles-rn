@@ -27,6 +27,7 @@ import {
   deleteMessageLocal,
   markMessageSendError,
 } from '../support/repositoryWrappers';
+import { nextEventLoopTurn } from '../support/async';
 
 async function holdRollingBackTransaction(
   db: AppDatabase,
@@ -56,11 +57,6 @@ async function holdRollingBackTransaction(
   await started;
   return { release, failure };
 }
-
-const nextEventLoopTurn = (): Promise<void> =>
-  new Promise((resolve) => {
-    setImmediate(resolve);
-  });
 
 interface DriverGate {
   didStart: boolean;

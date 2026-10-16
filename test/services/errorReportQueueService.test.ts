@@ -50,6 +50,7 @@ import {
 } from '@/services/realtime/deliveryCoordinator';
 import { createTestDb } from '../support/testDb';
 import { insertErrorReport, kvSet, listRetryableErrorReports } from '../support/repositoryWrappers';
+import { nextEventLoopTurn } from '../support/async';
 
 const { getDatabase: mockGetDatabase } = jest.requireMock('@db/database') as {
   getDatabase: jest.Mock;
@@ -183,11 +184,6 @@ async function holdRollingBackDbTransaction(db: AppDatabase): Promise<{
   await started;
   return { release, failure };
 }
-
-const nextEventLoopTurn = (): Promise<void> =>
-  new Promise((resolve) => {
-    setImmediate(resolve);
-  });
 
 async function waitForCondition(check: () => boolean, label: string): Promise<void> {
   for (let turn = 0; turn < 20; turn += 1) {

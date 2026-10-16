@@ -49,6 +49,7 @@ import {
   setSyncMarker,
   setUrlPreview,
 } from '../support/repositoryWrappers';
+import { nextEventLoopTurn } from '../support/async';
 
 const SETTING_KEY = 'sync.messagesPerChat';
 const INCOMING_DIGEST = 'a'.repeat(64);
@@ -173,11 +174,6 @@ async function seed(db: AppDatabase): Promise<void> {
 type RawDb = Awaited<ReturnType<typeof createTestDb>>['raw'];
 const count = (raw: RawDb, table: string): number =>
   (raw.prepare(`SELECT COUNT(*) c FROM ${table}`).get() as { c: number }).c;
-
-const nextEventLoopTurn = (): Promise<void> =>
-  new Promise((resolve) => {
-    setImmediate(resolve);
-  });
 
 interface DriverGate {
   didStart: boolean;

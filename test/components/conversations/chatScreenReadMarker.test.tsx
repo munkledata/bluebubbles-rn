@@ -27,6 +27,7 @@
  * The mock preamble mirrors test/components/routes/chatScreen.test.tsx: every child is a probe and
  * the data hooks / service surface are jest.fns, so the assertions are about the ROUTE's logic.
  */
+import '../support/chatScreenServiceMocks';
 import React from 'react';
 
 const GUID = 'iMessage;-;+15551234567';
@@ -50,19 +51,6 @@ jest.mock('expo-router/react-navigation', () => ({ usePreventRemove: jest.fn() }
 jest.mock('react-native-safe-area-context', () => ({
   useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
 }));
-
-jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn() }));
-jest.mock('expo-media-library', () => ({
-  requestPermissionsAsync: jest.fn(),
-  saveToLibraryAsync: jest.fn(),
-}));
-jest.mock('expo-image', () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const R = require('react');
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { View } = require('react-native');
-  return { Image: (props: Record<string, unknown>) => R.createElement(View, props) };
-});
 
 jest.mock('@ui', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -142,20 +130,6 @@ jest.mock('@/services', () => ({
   http: {},
   markRead: jest.fn(),
   sendTyping: jest.fn(),
-}));
-jest.mock('@/services/contacts/contactsService', () => ({
-  getContactsPermissionState: jest.fn(),
-}));
-jest.mock('@/services/notifications/notifeeService', () => ({ clearChatNotification: jest.fn() }));
-jest.mock('@/services/notifications/remindersService', () => ({
-  scheduleMessageReminder: jest.fn(),
-}));
-jest.mock('@/services/remoteMessageDeleteUiService', () => ({
-  deleteMessageFromMac: jest.fn(),
-}));
-jest.mock('@/services/media', () => ({
-  shareAttachment: jest.fn(),
-  saveAttachmentsToPhotos: jest.fn(),
 }));
 jest.mock('@/services/send', () => ({
   cancelOutgoing: jest.fn(),

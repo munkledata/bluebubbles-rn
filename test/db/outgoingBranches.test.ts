@@ -39,11 +39,7 @@ import {
   markOutgoingSentNoGuid,
   retireOutgoing,
 } from '../support/repositoryWrappers';
-
-const nextEventLoopTurn = (): Promise<void> =>
-  new Promise((resolve) => {
-    setImmediate(resolve);
-  });
+import { nextEventLoopTurn } from '../support/async';
 
 async function seedChat(db: AppDatabase, guid: string): Promise<number> {
   const hm = await upsertHandles(db, [{ address: 'a@x.com' }]);

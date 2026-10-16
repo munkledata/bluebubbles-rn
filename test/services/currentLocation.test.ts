@@ -7,6 +7,7 @@ import {
   type ExpoLocationAdapter,
   type ForegroundLocationPermission,
 } from '@/services/location/currentLocation';
+import { flushMicrotasks } from '../support/async';
 
 interface Deferred<T> {
   readonly promise: Promise<T>;
@@ -51,10 +52,6 @@ function makeAdapter(overrides: Partial<ExpoLocationAdapter> = {}): ExpoLocation
   };
 }
 
-async function settle(): Promise<void> {
-  for (let index = 0; index < 8; index += 1) await Promise.resolve();
-}
-
 describe('acquireCurrentLocation', () => {
   afterEach(() => {
     jest.clearAllTimers();
@@ -75,7 +72,7 @@ describe('acquireCurrentLocation', () => {
     });
 
     const pending = acquireCurrentLocation(adapter);
-    await settle();
+    await flushMicrotasks();
     publishFix(FIX);
 
     await expect(pending).resolves.toEqual({ status: 'success', location: FIX });
@@ -141,7 +138,7 @@ describe('acquireCurrentLocation', () => {
     });
 
     const pending = acquireCurrentLocation(adapter);
-    await settle();
+    await flushMicrotasks();
     publishError('provider unavailable');
 
     await expect(pending).resolves.toEqual({ status: 'error' });
@@ -159,7 +156,7 @@ describe('acquireCurrentLocation', () => {
 
     const pending = acquireCurrentLocation(adapter);
     void pending.then(observed);
-    await settle();
+    await flushMicrotasks();
 
     await jest.advanceTimersByTimeAsync(CURRENT_LOCATION_TIMEOUT_MS - 1);
     expect(observed).not.toHaveBeenCalled();
@@ -168,7 +165,7 @@ describe('acquireCurrentLocation', () => {
     expect(remove).not.toHaveBeenCalled();
 
     lateSubscription.resolve({ remove });
-    await settle();
+    await flushMicrotasks();
     expect(remove).toHaveBeenCalledTimes(1);
   });
 
@@ -184,14 +181,14 @@ describe('acquireCurrentLocation', () => {
     });
 
     const pending = acquireCurrentLocation(adapter, { signal: controller.signal });
-    await settle();
+    await flushMicrotasks();
     controller.abort();
 
     await expect(pending).resolves.toEqual({ status: 'cancelled' });
     expect(remove).toHaveBeenCalledTimes(1);
 
     publishFix(FIX);
-    await settle();
+    await flushMicrotasks();
     await expect(pending).resolves.toEqual({ status: 'cancelled' });
     expect(remove).toHaveBeenCalledTimes(1);
   });
@@ -205,12 +202,12 @@ describe('acquireCurrentLocation', () => {
     });
 
     const pending = acquireCurrentLocation(adapter, { signal: controller.signal });
-    await settle();
+    await flushMicrotasks();
     controller.abort();
     await expect(pending).resolves.toEqual({ status: 'cancelled' });
 
     lateSubscription.resolve({ remove });
-    await settle();
+    await flushMicrotasks();
     expect(remove).toHaveBeenCalledTimes(1);
   });
 
@@ -226,12 +223,12 @@ describe('acquireCurrentLocation', () => {
     });
 
     const pending = acquireCurrentLocation(adapter);
-    await settle();
+    await flushMicrotasks();
     publishFix(FIX);
     await expect(pending).resolves.toEqual({ status: 'success', location: FIX });
 
     lateSubscription.resolve({ remove });
-    await settle();
+    await flushMicrotasks();
     expect(remove).toHaveBeenCalledTimes(1);
   });
 
@@ -243,12 +240,12 @@ describe('acquireCurrentLocation', () => {
     });
 
     const pending = acquireCurrentLocation(adapter, { signal: controller.signal });
-    await settle();
+    await flushMicrotasks();
     controller.abort();
     await expect(pending).resolves.toEqual({ status: 'cancelled' });
 
     permission.resolve(GRANTED);
-    await settle();
+    await flushMicrotasks();
     expect(adapter.requestForegroundPermissionsAsync).not.toHaveBeenCalled();
     expect(adapter.watchPositionAsync).not.toHaveBeenCalled();
   });
@@ -325,7 +322,7 @@ describe('prepareCurrentLocationPermission', () => {
       ...options(),
       isCurrent: () => current,
     });
-    await settle();
+    await flushMicrotasks();
     current = false;
     permission.resolve({ granted: false, canAskAgain: true });
     await expect(pending).resolves.toEqual({ status: 'cancelled' });
@@ -354,12 +351,12 @@ describe('prepareCurrentLocationPermission', () => {
       requestForegroundPermissionsAsync: jest.fn(() => permission.promise),
     });
     const pending = prepareCurrentLocationPermission(adapter, options(controller));
-    await settle();
+    await flushMicrotasks();
     expect(adapter.requestForegroundPermissionsAsync).toHaveBeenCalledTimes(1);
     controller.abort();
     await expect(pending).resolves.toEqual({ status: 'cancelled' });
     permission.resolve(GRANTED);
-    await settle();
+    await flushMicrotasks();
     expect(adapter.watchPositionAsync).not.toHaveBeenCalled();
   });
 });

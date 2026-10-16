@@ -1,4 +1,5 @@
 import { MIGRATION_COUNT, MIGRATION_HEAD } from '@db/migrationHead';
+import { flushMicrotasks } from '../support/async';
 const mockFiles = new Map<string, number>();
 const mockFileCreateFailures = new Set<string>();
 const mockFileDeleteFailures = new Set<string>();
@@ -274,10 +275,6 @@ function parsedBackupRestoreMarkers(): Record<string, unknown>[] {
   });
 }
 
-async function flushMicrotasks(count = 12): Promise<void> {
-  for (let index = 0; index < count; index += 1) await Promise.resolve();
-}
-
 beforeEach(() => {
   jest.resetModules();
   jest.clearAllMocks();
@@ -316,7 +313,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
 
     const first = contract.startDevDbRelaunchContractIfRequested();
     const second = contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(first).toBe(second);
     expect(mockPrepareDatabase).toHaveBeenCalledTimes(1);
@@ -354,7 +351,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
 
     const first = contract.startDevDbRelaunchContractIfRequested();
     const second = contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(first).toBe(second);
     expect(mockPrepareWalWriteDeathDatabase).toHaveBeenCalledTimes(1);
@@ -391,7 +388,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
 
     const first = contract.startDevDbRelaunchContractIfRequested();
     const second = contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(first).toBe(second);
     expect(mockPrepareActiveMigrationDeathDatabase).toHaveBeenCalledTimes(1);
@@ -430,7 +427,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
 
     const first = contract.startDevDbRelaunchContractIfRequested();
     const second = contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(first).toBe(second);
     expect(mockRunRuntimeConcurrencyDatabase).toHaveBeenCalledTimes(1);
@@ -463,7 +460,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
     const contract = loadContract();
 
     contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(mockFiles.size).toBe(0);
     expect(parsedRuntimeConcurrencyMarkers()).toEqual([
@@ -490,7 +487,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
     const contract = loadContract();
 
     contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(mockRunRuntimeConcurrencyDatabase).not.toHaveBeenCalled();
     expect(mockPrepareDatabase).not.toHaveBeenCalled();
@@ -512,7 +509,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
     const contract = loadContract();
 
     contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(mockRunRuntimeConcurrencyDatabase).not.toHaveBeenCalled();
     expect(mockCleanupRuntimeConcurrencyDatabase).toHaveBeenCalledTimes(1);
@@ -534,7 +531,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
     const contract = loadContract();
 
     contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(mockRunRuntimeConcurrencyDatabase).not.toHaveBeenCalled();
     expect(mockPrepareDatabase).not.toHaveBeenCalled();
@@ -561,7 +558,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
 
     const first = contract.startDevDbRelaunchContractIfRequested();
     const second = contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(first).toBe(second);
     expect(mockRunBackupRestoreDatabase).toHaveBeenCalledTimes(1);
@@ -590,7 +587,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
     const contract = loadContract();
 
     contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(mockRunBackupRestoreDatabase).not.toHaveBeenCalled();
     expect(mockCleanupBackupRestoreDatabase).toHaveBeenCalledTimes(1);
@@ -611,7 +608,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
     const contract = loadContract();
 
     contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(mockRunBackupRestoreDatabase).not.toHaveBeenCalled();
     expect(mockPrepareDatabase).not.toHaveBeenCalled();
@@ -643,7 +640,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
     const contract = loadContract();
 
     contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(mockResumeDatabase).toHaveBeenCalledTimes(1);
     expect(mockFiles.size).toBe(0);
@@ -684,7 +681,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
     const contract = loadContract();
 
     contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(mockResumeWalWriteDeathDatabase).toHaveBeenCalledTimes(1);
     expect(mockResumeDatabase).not.toHaveBeenCalled();
@@ -735,7 +732,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
     const contract = loadContract();
 
     contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(mockResumeActiveMigrationDeathDatabase).toHaveBeenCalledTimes(1);
     expect(mockResumeWalWriteDeathDatabase).not.toHaveBeenCalled();
@@ -773,7 +770,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
     const contract = loadContract();
 
     contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(mockPrepareDatabase).not.toHaveBeenCalled();
     expect(mockPrepareWalWriteDeathDatabase).not.toHaveBeenCalled();
@@ -810,7 +807,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
     const contract = loadContract();
 
     contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(mockPrepareDatabase).not.toHaveBeenCalled();
     expect(mockPrepareWalWriteDeathDatabase).not.toHaveBeenCalled();
@@ -835,7 +832,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
     const contract = loadContract();
 
     contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(mockPrepareActiveMigrationDeathDatabase).not.toHaveBeenCalled();
     expect(mockResumeActiveMigrationDeathDatabase).not.toHaveBeenCalled();
@@ -856,7 +853,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
     const contract = loadContract();
 
     contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(mockPrepareWalWriteDeathDatabase).not.toHaveBeenCalled();
     expect(mockResumeWalWriteDeathDatabase).not.toHaveBeenCalled();
@@ -876,7 +873,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
     const contract = loadContract();
 
     contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(mockResumeDatabase).not.toHaveBeenCalled();
     expect(mockResumeWalWriteDeathDatabase).not.toHaveBeenCalled();
@@ -906,7 +903,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
     const contract = loadContract();
 
     contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(mockFiles).toEqual(
       new Map([
@@ -939,7 +936,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
     const contract = loadContract();
 
     contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(mockFiles.has(REQUEST)).toBe(true);
     expect(mockFiles.has(PREPARING)).toBe(true);
@@ -979,7 +976,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
       const contract = loadContract();
 
       contract.startDevDbRelaunchContractIfRequested();
-      await flushMicrotasks();
+      await flushMicrotasks(12);
 
       expect(mockCleanupDatabase).toHaveBeenCalledTimes(1);
       expect(mockPrepareDatabase).not.toHaveBeenCalled();
@@ -1004,7 +1001,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
     const contract = loadContract();
 
     contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(parsedMarkers()[0]).toMatchObject({
       status: 'fail',
@@ -1026,7 +1023,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
     const contract = loadContract();
 
     contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(mockCleanupDatabase).toHaveBeenCalledTimes(1);
     expect(mockFiles.size).toBe(0);
@@ -1043,7 +1040,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
     const contract = loadContract();
 
     contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(mockPrepareDatabase).not.toHaveBeenCalled();
     expect(mockResumeDatabase).not.toHaveBeenCalled();
@@ -1066,7 +1063,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
     const contract = loadContract();
 
     contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(mockPrepareDatabase).not.toHaveBeenCalled();
     expect(mockResumeDatabase).not.toHaveBeenCalled();
@@ -1096,7 +1093,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
     const contract = loadContract();
 
     contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(mockFiles.has(REQUEST)).toBe(true);
     expect(mockFiles.has(PREPARING)).toBe(true);
@@ -1114,7 +1111,7 @@ describe('DEV DB relaunch durable phase orchestration', () => {
     const contract = loadContract();
 
     contract.startDevDbRelaunchContractIfRequested();
-    await flushMicrotasks();
+    await flushMicrotasks(12);
 
     expect(mockFiles.has(REQUEST)).toBe(true);
     expect(mockFiles.has(PREPARING)).toBe(true);

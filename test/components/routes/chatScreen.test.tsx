@@ -24,6 +24,7 @@
  *
  * The REAL `useTypingStore` (zustand) is driven via setState to exercise the typing-bubble branch.
  */
+import '../support/chatScreenServiceMocks';
 import React from 'react';
 import { AppState } from 'react-native';
 import { renderWithTheme, screen, act, fireEvent, waitFor } from '../support/renderWithTheme';
@@ -171,19 +172,6 @@ jest.mock('react-native/Libraries/Components/Keyboard/KeyboardAvoidingView', () 
   };
 });
 
-jest.mock('expo-clipboard', () => ({ setStringAsync: jest.fn() }));
-jest.mock('expo-media-library', () => ({
-  requestPermissionsAsync: jest.fn(),
-  saveToLibraryAsync: jest.fn(),
-}));
-jest.mock('expo-image', () => {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const R = require('react');
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { View } = require('react-native');
-  return { Image: (props: Record<string, unknown>) => R.createElement(View, props) };
-});
-
 // The whole UI tree as prop-capturing probes (keeps the native-pulling real barrel out).
 jest.mock('@ui', () => {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -267,13 +255,6 @@ jest.mock('@/services', () => ({
   saveChatDraft: jest.fn().mockResolvedValue(undefined),
   sendTyping: jest.fn(),
 }));
-jest.mock('@/services/notifications/notifeeService', () => ({ clearChatNotification: jest.fn() }));
-jest.mock('@/services/notifications/remindersService', () => ({
-  scheduleMessageReminder: jest.fn(),
-}));
-jest.mock('@/services/remoteMessageDeleteUiService', () => ({
-  deleteMessageFromMac: jest.fn(),
-}));
 jest.mock('@/services/share/shareIntake', () => ({
   admitShareIntakeTextDraft: jest.fn(async () => ({ draft: 'Shared text' })),
   consumeShareIntakeBatch: jest.fn(),
@@ -286,13 +267,6 @@ jest.mock('@/services/share/shareIntake', () => ({
   ),
   isShareIntakeReceiptComplete: jest.fn(() => false),
   readShareIntakeReceipt: jest.fn(async () => null),
-}));
-jest.mock('@/services/contacts/contactsService', () => ({
-  getContactsPermissionState: jest.fn(),
-}));
-jest.mock('@/services/media', () => ({
-  shareAttachment: jest.fn(),
-  saveAttachmentsToPhotos: jest.fn(),
 }));
 jest.mock('@/services/send', () => ({
   acquireAndSendCurrentLocation: jest.fn(),

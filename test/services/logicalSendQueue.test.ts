@@ -7,6 +7,7 @@ import {
   type LogicalSendInvalidationSubscriber,
   type LogicalSendLease,
 } from '@/services/send/logicalSendQueue';
+import { flushMicrotasks } from '../support/async';
 
 interface Deferred<T> {
   readonly promise: Promise<T>;
@@ -19,10 +20,6 @@ function deferred<T>(): Deferred<T> {
     resolve = done;
   });
   return { promise, resolve };
-}
-
-async function settle(): Promise<void> {
-  for (let i = 0; i < 8; i += 1) await Promise.resolve();
 }
 
 function generationHarness(): {
@@ -87,7 +84,7 @@ describe('logical send queue', () => {
       return 'image-result';
     });
 
-    await settle();
+    await flushMicrotasks();
     expect(starts).toEqual(['text']);
     expect(queue.waiting).toBe(2);
 
@@ -136,7 +133,7 @@ describe('logical send queue', () => {
         starts.push('successor');
         return 'successor-result';
       });
-      await settle();
+      await flushMicrotasks();
 
       await jest.advanceTimersByTimeAsync(LOGICAL_SEND_ORDER_WINDOW_MS - 1);
       expect(starts).toEqual(['stalled']);
@@ -169,7 +166,7 @@ describe('logical send queue', () => {
     const newest = jest.fn(async () => 'must-not-start');
     const one = queue.run(owner.lease(), () => first.promise);
     const two = queue.run(owner.lease(), () => second.promise);
-    await settle();
+    await flushMicrotasks();
 
     expect(queue.canRetain(1)).toBe(false);
     expect(queue.canRetain(2)).toBe(false);
@@ -182,7 +179,7 @@ describe('logical send queue', () => {
 
     first.resolve('one');
     await expect(one).resolves.toBe('one');
-    await settle();
+    await flushMicrotasks();
     expect(queue.canRetain(1)).toBe(true);
     second.resolve('two');
     await expect(two).resolves.toBe('two');
@@ -200,7 +197,7 @@ describe('logical send queue', () => {
     const aQueuedTask = jest.fn(async () => 'must-not-start');
     const aQueued = queue.run(owner.lease(), aQueuedTask);
     const queuedRejection = expect(aQueued).rejects.toBeInstanceOf(LogicalSendQueueCancelledError);
-    await settle();
+    await flushMicrotasks();
 
     owner.retire();
     owner.resume();

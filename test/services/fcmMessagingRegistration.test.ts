@@ -32,10 +32,6 @@ function settlementProbe(promise: Promise<unknown>): { isSettled: () => boolean 
   return { isSettled: () => settled };
 }
 
-async function settle(): Promise<void> {
-  for (let index = 0; index < 8; index += 1) await Promise.resolve();
-}
-
 let mockTokenRefreshHandler: TokenRefreshHandler | undefined;
 let mockBackgroundHandler: NativeHandler | undefined;
 const mockGetToken = jest.fn(async (): Promise<string> => 'fresh-token');
@@ -176,6 +172,7 @@ import {
   retireFcmDeviceEncryptionState,
 } from '@/services/notifications/fcmEncryptionState';
 import '@/services/notifications/registerFcmBackgroundHandler';
+import { flushMicrotasks } from '../support/async';
 
 function setConnectedSession(
   origin: string,
@@ -273,12 +270,12 @@ describe('FCM registration account ownership', () => {
     const warn = jest.spyOn(logger, 'warn').mockImplementation(() => undefined);
 
     const registration = registerFcmToken();
-    await settle();
+    await flushMicrotasks();
     const tokenLookupsBeforePause = mockGetToken.mock.calls.length;
 
     const pause = pauseRealtimeDeliveries();
     const pauseProbe = settlementProbe(pause);
-    await settle();
+    await flushMicrotasks();
     expect(pauseProbe.isSettled()).toBe(false);
 
     tokenGate.resolve('account-a-token');
@@ -315,12 +312,12 @@ describe('FCM registration account ownership', () => {
     void responseGate.promise.catch(() => undefined);
 
     const registration = registerFcmToken();
-    await settle();
+    await flushMicrotasks();
     const registrationCall = mockRegisterDevice.mock.calls[0];
 
     const pause = pauseRealtimeDeliveries();
     const pauseProbe = settlementProbe(pause);
-    await settle();
+    await flushMicrotasks();
     expect(pauseProbe.isSettled()).toBe(false);
 
     responseGate.reject(staleFailure);
@@ -340,7 +337,7 @@ describe('FCM registration account ownership', () => {
     mockGetToken.mockReturnValueOnce(tokenGate.promise);
 
     const registration = registerFcmToken();
-    await settle();
+    await flushMicrotasks();
     const tokenLookupsBeforeIdentityChange = mockGetToken.mock.calls.length;
 
     setConnectedSession('https://account-b.test', 'password-b', 102);
@@ -357,7 +354,7 @@ describe('FCM registration account ownership', () => {
 
     await pauseRealtimeDeliveries();
     mockTokenRefreshHandler!('unowned-native-token');
-    await settle();
+    await flushMicrotasks();
     expect(mockGetToken).not.toHaveBeenCalled();
 
     setConnectedSession('https://account-b.test', 'password-b', 102, true);
@@ -771,7 +768,7 @@ describe('FCM registration account ownership', () => {
     for (let index = 0; index < 50 && mockRegisterDevice.mock.calls.length < 2; index += 1) {
       await Promise.resolve();
     }
-    await settle();
+    await flushMicrotasks();
 
     expect(mockRegisterDevice.mock.calls[1]?.[3]).toEqual({
       type: FCM_PUSH_ENCRYPTION_TYPE_V3,

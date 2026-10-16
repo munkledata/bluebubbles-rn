@@ -5,6 +5,7 @@ import {
   stopDeviceNetworkWatch,
   type ExpoNetworkAdapter,
 } from '@/services/networkReachability';
+import { flushMicrotasks } from '../support/async';
 
 interface Deferred<T> {
   promise: Promise<T>;
@@ -50,10 +51,6 @@ function fakeAdapter(initial: Promise<NetworkState>): {
   };
 }
 
-async function settle(): Promise<void> {
-  for (let index = 0; index < 8; index += 1) await Promise.resolve();
-}
-
 afterEach(() => {
   stopDeviceNetworkWatch();
   jest.restoreAllMocks();
@@ -82,7 +79,7 @@ describe('device network reachability', () => {
     const onStateChange = jest.fn();
 
     startDeviceNetworkWatch(onStateChange, async () => fake.adapter);
-    await settle();
+    await flushMicrotasks();
 
     expect(onStateChange).toHaveBeenCalledTimes(1);
     expect(onStateChange).toHaveBeenCalledWith('online');
@@ -93,11 +90,11 @@ describe('device network reachability', () => {
     const fake = fakeAdapter(initial.promise);
     const onStateChange = jest.fn();
     startDeviceNetworkWatch(onStateChange, async () => fake.adapter);
-    await settle();
+    await flushMicrotasks();
 
     fake.emit(networkState('WIFI', true, true));
     initial.resolve(networkState('NONE', false, false));
-    await settle();
+    await flushMicrotasks();
 
     expect(onStateChange.mock.calls.map(([state]) => state)).toEqual(['online']);
   });
@@ -111,7 +108,7 @@ describe('device network reachability', () => {
 
     stopDeviceNetworkWatch();
     moduleResult.resolve(fake.adapter);
-    await settle();
+    await flushMicrotasks();
 
     fake.emit(networkState('WIFI', true, true));
     expect(onStateChange).not.toHaveBeenCalled();
@@ -124,9 +121,9 @@ describe('device network reachability', () => {
     const onAccountB = jest.fn();
 
     startDeviceNetworkWatch(onAccountA, async () => accountA.adapter);
-    await settle();
+    await flushMicrotasks();
     startDeviceNetworkWatch(onAccountB, async () => accountB.adapter);
-    await settle();
+    await flushMicrotasks();
     onAccountA.mockClear();
     onAccountB.mockClear();
 

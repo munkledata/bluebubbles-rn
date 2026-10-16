@@ -25,13 +25,9 @@ import { withDbTransaction } from '@db/transaction';
 import type { AppDatabase } from '@db/types';
 import { createTestDb } from '../support/testDb';
 import { insertOutgoingAttachment, upsertAttachments } from '../support/repositoryWrappers';
+import { nextEventLoopTurn } from '../support/async';
 
 type OutgoingAttachmentArgs = InsertOutgoingAttachmentArgs & { chatId: number };
-
-const nextEventLoopTurn = (): Promise<void> =>
-  new Promise((resolve) => {
-    setImmediate(resolve);
-  });
 
 function errorMessageChain(error: unknown): unknown[] {
   const messages: unknown[] = [];

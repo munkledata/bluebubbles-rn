@@ -76,6 +76,7 @@ import {
   resumeRealtimeDeliveries,
 } from '@/services/realtime/deliveryCoordinator';
 import '@/services/notifications/registerFcmBackgroundHandler';
+import { flushMicrotasks } from '../support/async';
 
 function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
   let resolve!: (value: T) => void;
@@ -83,10 +84,6 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
     resolve = done;
   });
   return { promise, resolve };
-}
-
-async function settle(): Promise<void> {
-  for (let index = 0; index < 8; index += 1) await Promise.resolve();
 }
 
 describe('FCM delivery coordinator integration', () => {
@@ -108,13 +105,13 @@ describe('FCM delivery coordinator integration', () => {
       messageId: 'admitted-before-pause',
       data: { type: 'new-message' },
     });
-    await settle();
+    await flushMicrotasks();
 
     let pauseSettled = false;
     const pause = pauseRealtimeDeliveries().then(() => {
       pauseSettled = true;
     });
-    await settle();
+    await flushMicrotasks();
     // Teardown retires the tracked wait immediately. The callback's real session-gate continuation
     // remains the private FIFO fence, so a later account can never overtake it.
     expect(pauseSettled).toBe(true);
@@ -130,7 +127,7 @@ describe('FCM delivery coordinator integration', () => {
     expect(mockReadFcmSessionState).toHaveBeenCalledTimes(1);
 
     sessionGate.resolve('active');
-    await settle();
+    await flushMicrotasks();
     expect(mockDispatchRealtimeEvent).not.toHaveBeenCalled();
     expect(mockFlushHeadlessLogs).toHaveBeenCalledTimes(2);
   });
