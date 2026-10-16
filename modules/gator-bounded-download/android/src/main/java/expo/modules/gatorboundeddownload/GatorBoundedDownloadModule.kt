@@ -667,15 +667,15 @@ class GatorBoundedDownloadModule : Module() {
     }
   }
 
-  /** Accept only canonical files under this app's private files/cache roots. */
+  /** Accept only one canonical partial file in this app's bounded-download cache folder. */
   private fun ownedDestination(context: Context, rawUri: String): File {
     val uri = Uri.parse(rawUri)
     if (uri.scheme != "file") throw DownloadFailure(REASON_UNAVAILABLE)
     val rawPath = uri.path ?: throw DownloadFailure(REASON_UNAVAILABLE)
     val destination = File(rawPath).canonicalFile
-    val roots = listOf(context.filesDir.canonicalFile, context.cacheDir.canonicalFile)
-    val owned = roots.any { root -> destination.path.startsWith(root.path + File.separator) }
-    if (!owned) throw DownloadFailure(REASON_UNAVAILABLE)
+    if (!isOwnedBoundedDownloadPartial(context.cacheDir.canonicalFile, destination)) {
+      throw DownloadFailure(REASON_UNAVAILABLE)
+    }
     return destination
   }
 

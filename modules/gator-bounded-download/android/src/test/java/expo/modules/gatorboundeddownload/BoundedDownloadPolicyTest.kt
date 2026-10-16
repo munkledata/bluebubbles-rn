@@ -1,5 +1,6 @@
 package expo.modules.gatorboundeddownload
 
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -30,5 +31,29 @@ class BoundedDownloadPolicyTest {
     assertEquals(2, imageValidationSampleSize(1025, 1025, 1024L * 1024))
     assertEquals(8, imageValidationSampleSize(8000, 6000, 1024L * 1024))
     assertEquals(16, imageValidationSampleSize(16_384, 16_384, 1024L * 1024))
+  }
+
+  @Test
+  fun `a download may only write its own partial file`() {
+    val cache = File("/data/user/0/app/cache")
+    val parts = File(cache, "bounded-download-parts")
+    assertTrue(isOwnedBoundedDownloadPartial(cache, File(parts, "request-1700000000000-1.part")))
+    assertTrue(isOwnedBoundedDownloadPartial(cache, File(parts, "request-1-12345.part")))
+
+    // Review M160: any other file in the app's private folders is out of bounds.
+    assertFalse(isOwnedBoundedDownloadPartial(cache, File(cache, "request-1-1.part")))
+    assertFalse(isOwnedBoundedDownloadPartial(cache, File(File(cache, "other"), "request-1-1.part")))
+    assertFalse(isOwnedBoundedDownloadPartial(cache, File(File(parts, "nested"), "request-1-1.part")))
+    assertFalse(isOwnedBoundedDownloadPartial(cache, File(parts, "request-1-1.tmp")))
+    assertFalse(isOwnedBoundedDownloadPartial(cache, File(parts, "request-1.part")))
+    assertFalse(isOwnedBoundedDownloadPartial(cache, File(parts, "request-a-1.part")))
+    assertFalse(isOwnedBoundedDownloadPartial(cache, File(parts, "gator.db")))
+    assertFalse(isOwnedBoundedDownloadPartial(cache, parts))
+    assertFalse(
+      isOwnedBoundedDownloadPartial(
+        cache,
+        File("/data/user/0/app/files/bounded-download-parts/request-1-1.part"),
+      ),
+    )
   }
 }

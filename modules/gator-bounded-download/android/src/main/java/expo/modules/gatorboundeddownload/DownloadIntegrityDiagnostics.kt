@@ -8,6 +8,15 @@ private const val MAX_PARTIAL_FILES = 16
 private const val JS_MAX_SAFE_INTEGER = 9_007_199_254_740_991L
 private val PARTIAL_FILE_NAME = Regex("request-[0-9]{1,16}-[0-9]{1,10}\\.part")
 
+/**
+ * The only file a bounded download may create, overwrite or delete: one partial directly inside
+ * `<cache>/bounded-download-parts`, named the way the JavaScript caller names it (review M160).
+ * Both paths must already be canonical.
+ */
+internal fun isOwnedBoundedDownloadPartial(cacheRoot: File, destination: File): Boolean =
+  destination.parentFile?.path == File(cacheRoot, BOUNDED_DOWNLOAD_PARTIAL_DIRECTORY).path &&
+    PARTIAL_FILE_NAME.matches(destination.name)
+
 internal data class BoundedDownloadPartialsInspection(
   val files: Long,
   val bytes: Long,
