@@ -42,6 +42,7 @@ import {
   cancelNotificationById,
 } from './notifeeService';
 import type { EventDetail } from './nativeNotificationAdapter';
+import type { NotificationPressOccurrence, PostponedNotificationPress } from './pendingNav';
 import {
   chatNotificationId,
   isSafeReminderNotificationId,
@@ -178,7 +179,10 @@ async function appLockForbidsNotificationActions(): Promise<boolean> {
   }
 }
 
-type CurrentChatPress = (data: Record<string, unknown>) => void;
+type CurrentChatPress = (
+  data: Record<string, unknown>,
+  postponedPress?: PostponedNotificationPress,
+) => void;
 
 /**
  * Handle a notification action press (foreground or headless background).
@@ -324,7 +328,7 @@ async function handleNotificationActionForAccount(
  * press, and deleteReminderByNotificationId is a no-op on an already-removed row).
  */
 export async function handleNotificationPress(
-  detail: EventDetail,
+  detail: NotificationPressOccurrence,
   onCurrentChatPress?: CurrentChatPress,
 ): Promise<void> {
   const accountLease = captureRealtimeDeliveryLease();
@@ -338,7 +342,7 @@ export async function handleNotificationPress(
 }
 
 async function handleNotificationPressForAccount(
-  detail: EventDetail,
+  detail: NotificationPressOccurrence,
   accountLease: RealtimeDeliveryLease,
   onCurrentChatPress?: CurrentChatPress,
 ): Promise<void> {
@@ -355,6 +359,20 @@ async function handleNotificationPressForAccount(
     return;
   }
   if (!hasPrivateRouteSchema(data, ['message', 'send-failure', 'reminder'])) return;
+  // From the background, with App Lock on: never open the encrypted database before the owner
+  // unlocks (review M102). Only stash the tap; after unlock the drain resolves its route and runs
+  // the postponed reminder cleanup.
+  if (onCurrentChatPress && (await appLockForbidsNotificationActions())) {
+    if (!data || !accountLease.isCurrent()) return;
+    const notificationId = detail.notification?.id;
+    onCurrentChatPress(
+      data,
+      isReminderPress && notificationId != null && isSafeReminderNotificationId(notificationId)
+        ? { actionId: PRESS_REMINDER, notificationId }
+        : undefined,
+    );
+    return;
+  }
 
   let route: Awaited<ReturnType<typeof resolveNotificationData>>;
   try {

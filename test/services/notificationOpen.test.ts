@@ -316,6 +316,43 @@ describe('drainNotificationTap', () => {
     expect(navigate.openInbox).not.toHaveBeenCalled();
   });
 
+  it('runs press side effects postponed under App Lock once the stashed tap opens (M102)', async () => {
+    const navigate = notificationNavigation();
+    const press = jest.fn();
+    const data = { chatGuid: 'c5', messageGuid: 'm5', reminder: '1' };
+    const tap = pendingTap(data);
+    stashPendingNotification(tap, {
+      actionId: 'reminder',
+      notificationId: 'gator-reminder-message-5-9000',
+    });
+    await drainNotificationTap(async () => null, takePendingNotification, press, navigate);
+
+    expect(navigate.openChat).toHaveBeenCalledTimes(1);
+    expect(press).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notification: { id: 'gator-reminder-message-5-9000', data },
+        pressAction: { id: 'reminder' },
+      }),
+    );
+  });
+
+  it('runs a postponed press once even when its first open fails and is retried (M102)', async () => {
+    const navigate = notificationNavigation();
+    const press = jest.fn();
+    const tap = pendingTap({ chatGuid: 'c6', messageGuid: 'm6', reminder: '1' });
+    stashPendingNotification(tap, {
+      actionId: 'reminder',
+      notificationId: 'gator-reminder-message-6-9000',
+    });
+    mockResolveNotificationData.mockRejectedValueOnce(new Error('database not ready'));
+    await drainNotificationTap(async () => null, takePendingNotification, press, navigate);
+    expect(navigate.openChat).not.toHaveBeenCalled();
+
+    await drainNotificationTap(async () => null, takePendingNotification, press, navigate);
+    expect(navigate.openChat).toHaveBeenCalledTimes(1);
+    expect(press).toHaveBeenCalledTimes(1);
+  });
+
   it('drains BOTH sources but navigates only once (same press, no double-push)', async () => {
     const navigate = notificationNavigation();
     const press = jest.fn();

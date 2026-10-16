@@ -34,7 +34,10 @@ notifee.onBackgroundEvent(async ({ type, detail }) => {
       // Reserve before the handler's first DB await. Its validated callback may arrive after the
       // initial/foreground copy has already navigated; the consumed occurrence then rejects it.
       const tap = reserveNotificationTap(detail, accountLease);
-      await handleNotificationPress(detail, tap ? () => stashPendingNotification(tap) : undefined);
+      await handleNotificationPress(
+        detail,
+        tap ? (_data, postponedPress) => stashPendingNotification(tap, postponedPress) : undefined,
+      );
       if (accountLease.isCurrent()) {
         await reconcileMessageNotificationGroupAfterRemoval(detail.notification);
       }

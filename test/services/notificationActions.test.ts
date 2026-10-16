@@ -813,6 +813,33 @@ describe('handleNotificationPress — reminder body tap (EventType.PRESS)', () =
     expect(mockNotifeeCancel).not.toHaveBeenCalled();
   });
 
+  it('with App Lock on, a background tap only stashes; the reminder is deleted after unlock', async () => {
+    // Review M102: the background handler must not open the encrypted database before the owner
+    // unlocks. It stashes the tap with the postponed reminder press for the post-unlock drain.
+    useLockStore.setState({ enabled: true, locked: true });
+    const stash = jest.fn();
+    const data = {
+      gatorOwner: 'gator',
+      gatorSchema: '2',
+      gatorKind: 'reminder',
+      chatId: '7',
+      messageId: '11',
+      messageDate: '4000',
+    };
+    await handleNotificationPress(
+      chatDetail(PRESS_REMINDER, data, { id: 'gator-reminder-message-11-5000' }),
+      stash,
+    );
+    expect(stash).toHaveBeenCalledWith(data, {
+      actionId: PRESS_REMINDER,
+      notificationId: 'gator-reminder-message-11-5000',
+    });
+    expect(mockEnsureDatabase).not.toHaveBeenCalled();
+    expect(mockDb.all).not.toHaveBeenCalled();
+    expect(mockDeleteReminder).not.toHaveBeenCalled();
+    useLockStore.setState({ enabled: false, locked: false });
+  });
+
   it('does nothing when the reminder notification has no id', async () => {
     const detail = safeChatDetail(PRESS_REMINDER, {
       chatGuid: 'c3',

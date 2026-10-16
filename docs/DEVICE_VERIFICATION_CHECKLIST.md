@@ -321,6 +321,11 @@ owns lock-screen presentation, and App Lock's limited generic-new-delivery behav
 - [ ] **`EXACT PLAY CANDIDATE`:** Tap the fired reminder and confirm it opens the correct
       chat/message and removes that reminder from Gator. Repeat after an ordinary package kill if the
       approved session has enough time; do not use force-stop.
+- [ ] **`EXACT PLAY CANDIDATE`:** With App Lock on, let a reminder fire, background the app past
+      the lock timeout (or kill it with `adb shell am kill`), then tap the reminder. Since review item
+      M102 the tap does no database work before unlock: the lock screen appears, and only after
+      unlocking does the chat open and the reminder leave the Reminders list. Unlocking is what
+      removes it; if the app is closed again before unlocking, the reminder stays listed.
 - [ ] **`EXACT PLAY CANDIDATE`:** On a candidate containing the 2026-10-03 privacy repair, verify
       enabling App Lock preserves an already-scheduled generic reminder and cancels unsafe legacy
       detailed triggers. Keep native alarm/enable races and cancellation failures open until observed.

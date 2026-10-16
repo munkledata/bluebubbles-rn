@@ -72,7 +72,11 @@ describe('notification background event registration', () => {
     expect(stashPendingNotification).not.toHaveBeenCalled();
     const validated = jest.mocked(handleNotificationPress).mock.calls[0]?.[1];
     validated?.({ gatorOwner: 'gator', gatorSchema: '2' });
-    expect(stashPendingNotification).toHaveBeenCalledWith(tap);
+    expect(stashPendingNotification).toHaveBeenCalledWith(tap, undefined);
+    // Under App Lock the handler postpones a reminder's cleanup; the stash must carry it (M102).
+    const postponed = { actionId: 'reminder', notificationId: 'gator-reminder-message-11-5000' };
+    validated?.({ gatorOwner: 'gator', gatorSchema: '2' }, postponed);
+    expect(stashPendingNotification).toHaveBeenLastCalledWith(tap, postponed);
     expect(mockFlushPersistentLogs).toHaveBeenCalledTimes(1);
   });
 

@@ -4,10 +4,16 @@ import {
 } from '../realtime/deliveryCoordinator';
 
 export interface NotificationPressOccurrence {
-  notification?: { data?: Record<string, unknown> };
+  notification?: { id?: string; data?: Record<string, unknown> };
   pressAction?: { id?: string };
   /** Native process UUID plus increasing receipt sequence, shared by both delivery channels. */
   pressOccurrenceId?: unknown;
+}
+
+/** A press whose side effects (a reminder's cleanup) App Lock postponed until after unlock. */
+export interface PostponedNotificationPress {
+  readonly actionId: string;
+  readonly notificationId: string;
 }
 
 export interface NotificationTapReservation {
@@ -26,6 +32,8 @@ let nativeEpoch: string | null = null;
 let highWaterSequence = 0;
 let active: ActiveTap | null = null;
 let pending: NotificationTapReservation | null = null;
+// Kept beside the tap, not on it: a successful open releases `active` before the drain runs these.
+let postponed: { tap: NotificationTapReservation; press: PostponedNotificationPress } | null = null;
 
 function parseOccurrence(value: unknown): { id: string; epoch: string; sequence: number } | null {
   if (typeof value !== 'string') return null;
@@ -58,6 +66,7 @@ export function reserveNotificationTap(
   highWaterSequence = occurrence.sequence;
   // A newer physical press supersedes an older pending or in-flight route, even for the same chat.
   pending = null;
+  postponed = null;
   active = { data, occurrenceId: occurrence.id, accountLease, navigating: false };
   return active;
 }
@@ -84,8 +93,23 @@ export function settleNotificationTap(tap: NotificationTapReservation, handled: 
 }
 
 /** Publish only an already-reserved, account-validated tap; a late consumed copy is a no-op. */
-export function stashPendingNotification(tap: NotificationTapReservation): void {
-  if (isCurrentNotificationTap(tap)) pending = tap;
+export function stashPendingNotification(
+  tap: NotificationTapReservation,
+  postponedPress?: PostponedNotificationPress,
+): void {
+  if (!isCurrentNotificationTap(tap)) return;
+  if (postponedPress) postponed = { tap, press: postponedPress };
+  pending = tap;
+}
+
+/** Take the side effects App Lock postponed for this tap, so they run at most once. */
+export function takePostponedNotificationPress(
+  tap: NotificationTapReservation,
+): PostponedNotificationPress | null {
+  if (postponed?.tap !== tap || !tap.accountLease.isCurrent()) return null;
+  const { press } = postponed;
+  postponed = null;
+  return press;
 }
 
 /** Destructive read of the newest validated tap, including a retry after a failed route lookup. */
@@ -99,4 +123,5 @@ export function takePendingNotification(): NotificationTapReservation | null {
 export function resetPendingNotification(): void {
   active = null;
   pending = null;
+  postponed = null;
 }

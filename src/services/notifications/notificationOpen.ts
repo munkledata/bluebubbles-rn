@@ -9,6 +9,7 @@ import {
   reserveNotificationTap,
   settleNotificationTap,
   stashPendingNotification,
+  takePostponedNotificationPress,
   type NotificationPressOccurrence,
   type NotificationTapReservation,
 } from './pendingNav';
@@ -192,7 +193,7 @@ function isRealPress(initial: TappedNotification | null): boolean {
 export async function drainNotificationTap<T extends TappedNotification>(
   getInitial: () => Promise<T | null>,
   takePending: () => NotificationTapReservation | null,
-  runPressSideEffects: (detail: T) => void | Promise<void>,
+  runPressSideEffects: (detail: TappedNotification) => void | Promise<void>,
   navigation: NotificationNavigation,
   restorePending: (tap: NotificationTapReservation) => void = stashPendingNotification,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
@@ -211,5 +212,16 @@ export async function drainNotificationTap<T extends TappedNotification>(
   if (!result.handled) restorePending(tap);
   // A cleanup failure is still reported to the layout-level task boundary, but only after the
   // one-shot route either opened successfully or was preserved for a later retry.
-  if (initial && initialTap === tap && accountLease.isCurrent()) await runPressSideEffects(initial);
+  // Side effects the background handler postponed under App Lock (review M102) are taken here,
+  // once: the app is unlocked now, and a retried open must not repeat them.
+  const postponedPress = takePostponedNotificationPress(tap);
+  if (initial && initialTap === tap && accountLease.isCurrent()) {
+    await runPressSideEffects(initial);
+  } else if (postponedPress && accountLease.isCurrent()) {
+    await runPressSideEffects({
+      notification: { id: postponedPress.notificationId, data: tap.data },
+      pressAction: { id: postponedPress.actionId },
+      pressOccurrenceId: tap.occurrenceId,
+    });
+  }
 }
