@@ -109,12 +109,8 @@ jest.mock('@features/conversations/useChatSearch', () => ({
   }),
 }));
 jest.mock('@features/conversations/devSeed', () => ({
-  devEditFake: jest.fn(),
-  devInjectEffect: jest.fn(),
   devSendFake: jest.fn(),
   devSendFakeReaction: jest.fn(),
-  devSendFakeReply: jest.fn(),
-  devUnsendFake: jest.fn(),
 }));
 jest.mock('@utils/isDev', () => ({
   isDevServer: () => false,

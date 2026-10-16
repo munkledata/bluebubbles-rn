@@ -129,24 +129,13 @@ jest.mock('@/services/notifications/notificationRouting', () => {
   const messageGuids = Object.fromEntries(
     Object.entries(messageIds).map(([guid, id]) => [id, guid]),
   );
-  const marker = (kind: string) => ({
-    gatorOwner: 'gator',
-    gatorSchema: '2',
-    gatorKind: kind,
-  });
+  const actual = jest.requireActual<typeof import('@/services/notifications/notificationRouting')>(
+    '@/services/notifications/notificationRouting',
+  );
   return {
-    NOTIFICATION_DATA_OWNER: 'gator',
-    NOTIFICATION_DATA_SCHEMA: '2',
-    MAX_MESSAGE_NOTIFICATION_TRUTH_IDS: 512,
-    chatChannelIdForLocalId: (id: number) =>
-      `com.bluegreengatorapps.messages.new_messages.chat.route_${id}`,
-    chatNotificationId: (id: number) => `gator-message-${id}`,
-    sendFailureNotificationId: (id: number) => `gator-send-failure-${id}`,
-    faceTimeNotificationId: (token: string) => `gator-facetime-${token}`,
-    reminderNotificationId: (key: string | number, time: number) => `gator-reminder-${key}-${time}`,
-    isSafeReminderNotificationId: (id?: string) =>
-      /^gator-reminder-(?:message|row)-\d+-\d+$/.test(id ?? '') ||
-      /^gator-reminder-random-[0-9a-f-]+-\d+$/.test(id ?? ''),
+    // The pure id and payload builders are the real ones, so these tests cannot drift from them
+    // (review M006). Only the functions that read the encrypted database are faked below.
+    ...actual,
     localRouteForGuids: jest.fn(async (chatGuid: string, messageGuid?: string) => ({
       chatId: chatIds[chatGuid] ?? 99,
       ...(messageGuid ? { messageId: messageIds[messageGuid] ?? 199 } : {}),
@@ -166,17 +155,6 @@ jest.mock('@/services/notifications/notificationRouting', () => {
         },
       };
     }),
-    nativeRouteData: (
-      kind: string,
-      route: { chatId: number; messageId?: number },
-      date?: unknown,
-    ) => ({
-      ...marker(kind),
-      chatId: String(route.chatId),
-      ...(route.messageId == null ? {} : { messageId: String(route.messageId) }),
-      ...(date == null ? {} : { messageDate: String(date) }),
-    }),
-    nativeStatusData: (kind: string) => marker(kind),
     findFaceTimeRoute: jest.fn(async () => '7f000000-0000-4000-8000-000000000001'),
     deleteFaceTimeRoute: jest.fn(async () => undefined),
     clearNotificationRoutes: jest.fn(async () => undefined),
