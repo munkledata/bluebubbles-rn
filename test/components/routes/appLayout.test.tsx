@@ -11,7 +11,11 @@ import React from 'react';
 const mockRedirect = jest.fn((_props: { href: string }) => null);
 const mockServerRotationApprovalHost = jest.fn(() => null);
 const mockConnectionBanner = jest.fn(
-  (_props: { onRetry: () => unknown; onHeightChange: (height: number) => void }) => null,
+  (_props: {
+    onRetry: () => unknown;
+    onManageServer?: () => void;
+    onHeightChange: (height: number) => void;
+  }) => null,
 );
 const mockShareIntentNavigator = jest.fn(() => null);
 const mockRouteInsets = jest.fn();
@@ -27,6 +31,8 @@ jest.mock('react-native-safe-area-context', () => {
 });
 const mockOpenChat = jest.fn();
 const mockDismissTo = jest.fn();
+const mockNavigate = jest.fn();
+const mockPush = jest.fn();
 const mockLoggerWarn = jest.fn();
 const mockForegroundHandlers: ((event: {
   type: number;
@@ -63,7 +69,7 @@ jest.mock('expo-router', () => ({
     mockRedirect(props);
     return null;
   },
-  useRouter: () => ({ dismissTo: mockDismissTo }),
+  useRouter: () => ({ dismissTo: mockDismissTo, navigate: mockNavigate, push: mockPush }),
 }));
 jest.mock('@core/secure', () => ({ logger: { warn: mockLoggerWarn } }));
 jest.mock('@/services', () => ({
@@ -97,6 +103,7 @@ jest.mock('@/services/notifications/notifeeService', () => ({
 jest.mock('@ui/connection', () => ({
   ConnectionBanner: (props: {
     onRetry: () => unknown;
+    onManageServer?: () => void;
     onHeightChange: (height: number) => void;
   }) => {
     mockBannerInsets(
@@ -333,6 +340,14 @@ describe('AppLayout — active AppState lock gate', () => {
     expect(mockConnectionBanner).toHaveBeenCalledTimes(1);
     expect(mockConnectionBanner.mock.calls[0]?.[0].onRetry).toBe(mockRetryRealtime);
     expect(mockConnectionBanner.mock.calls[0]?.[0].onHeightChange).toEqual(expect.any(Function));
+  });
+
+  it("opens Server Management from the banner's Fix without stacking a second copy", async () => {
+    // Review M118: the banner also shows on Server Management itself, where push would add another.
+    await mountLayout();
+    mockConnectionBanner.mock.calls[0]?.[0].onManageServer?.();
+    expect(mockNavigate).toHaveBeenCalledWith('/server-management');
+    expect(mockPush).not.toHaveBeenCalled();
   });
 
   it('changes only route top clearance and restores it without remounting the navigator', async () => {
