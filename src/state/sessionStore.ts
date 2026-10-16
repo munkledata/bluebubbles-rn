@@ -251,27 +251,9 @@ export const sessionAccessors = {
   /** Existing one-to-one iMessage read state only; absent/false always fails closed. */
   imessageReadStateEnabled: (): boolean =>
     useSessionStore.getState().serverInfo?.supports_imessage_read_state === true,
-  /** One-file existing-chat helper capability, independent of the broad retired API. */
-  imessageAttachmentUploadEnabled: (): boolean =>
-    useSessionStore.getState().serverInfo?.supports_imessage_attachment_upload === true,
   /** Whether this server supplies exact RCS success/error attempt correlation. */
   rcsSendAttemptOwnershipSupported: (): boolean =>
     useSessionStore.getState().serverInfo?.supports_rcs_send_attempt_ownership === true,
-  /**
-   * Whether the connected server can emit `message-deleted` (macOS "Recently Deleted"; schema gap
-   * 6). Absent/false on older servers. Informational for now — the DbEventSink tombstones deletions
-   * unconditionally (an old server never sends the event); this is for future deletion affordances.
-   */
-  messageDeletedSupported: (): boolean =>
-    !!useSessionStore.getState().serverInfo?.supports_message_deleted,
-  /** Whether the connected server can run the bounded message-text search endpoint. */
-  messageSearchSupported: (): boolean =>
-    !!useSessionStore.getState().serverInfo?.supports_message_search,
-  /** Whether this server supplies exact multipart topology for safe action targeting. */
-  messagePartTopologySupported: (): boolean =>
-    useSessionStore.getState().serverInfo?.supports_message_part_topology === true,
-  /** Helper-backed iMessage-account endpoints are retired for this release. */
-  icloudAccountSupported: (): boolean => false,
   /** Whether the connected server accepts client error-report uploads. */
   errorLogUploadSupported: (): boolean =>
     !!useSessionStore.getState().serverInfo?.supports_error_log_upload,

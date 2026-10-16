@@ -2,53 +2,6 @@ import { ServerInfo } from '@core/models';
 import { captureSessionRcsCapabilityLease } from '@/services/send/rcsAttemptCapability';
 import { sessionAccessors, useSessionStore } from '@state/sessionStore';
 
-/**
- * The `supports_message_deleted` capability (schema gap 6). No UI gates on it yet — DbEventSink
- * applies deletions unconditionally — so this locks in only the boolean accessor's semantics: it is
- * true ONLY when the connected server advertised the flag, and safely false in every other shape
- * (no server info, flag omitted, or explicitly false).
- */
-describe('sessionAccessors.messageDeletedSupported', () => {
-  beforeEach(() => useSessionStore.setState({ serverInfo: null }));
-
-  it('is false when there is no server info', () => {
-    expect(sessionAccessors.messageDeletedSupported()).toBe(false);
-  });
-
-  it('is false when the server omits the flag', () => {
-    useSessionStore.setState({ serverInfo: ServerInfo.parse({ version: '1.9.0' }) });
-    expect(sessionAccessors.messageDeletedSupported()).toBe(false);
-  });
-
-  it('is false when the server reports it false', () => {
-    useSessionStore.setState({
-      serverInfo: ServerInfo.parse({ version: '1.9.0', supports_message_deleted: false }),
-    });
-    expect(sessionAccessors.messageDeletedSupported()).toBe(false);
-  });
-
-  it('is true only when the server advertises the capability', () => {
-    useSessionStore.setState({
-      serverInfo: ServerInfo.parse({ version: '1.9.0', supports_message_deleted: true }),
-    });
-    expect(sessionAccessors.messageDeletedSupported()).toBe(true);
-  });
-});
-
-describe('sessionAccessors.messageSearchSupported', () => {
-  beforeEach(() => useSessionStore.setState({ serverInfo: null }));
-
-  it('is false unless the connected server explicitly advertises bounded search', () => {
-    expect(sessionAccessors.messageSearchSupported()).toBe(false);
-    useSessionStore.setState({ serverInfo: ServerInfo.parse({ version: '1.9.0' }) });
-    expect(sessionAccessors.messageSearchSupported()).toBe(false);
-    useSessionStore.setState({
-      serverInfo: ServerInfo.parse({ version: '1.9.0', supports_message_search: true }),
-    });
-    expect(sessionAccessors.messageSearchSupported()).toBe(true);
-  });
-});
-
 describe('sessionAccessors.imessageReadStateEnabled', () => {
   beforeEach(() => useSessionStore.setState({ serverInfo: null }));
 
@@ -65,54 +18,6 @@ describe('sessionAccessors.imessageReadStateEnabled', () => {
       }),
     });
     expect(sessionAccessors.imessageReadStateEnabled()).toBe(true);
-  });
-});
-
-describe('sessionAccessors.messagePartTopologySupported', () => {
-  beforeEach(() => useSessionStore.setState({ serverInfo: null }));
-
-  it('is true only when the server explicitly advertises exact part topology', () => {
-    expect(sessionAccessors.messagePartTopologySupported()).toBe(false);
-    useSessionStore.setState({ serverInfo: ServerInfo.parse({ version: '1.9.0' }) });
-    expect(sessionAccessors.messagePartTopologySupported()).toBe(false);
-    useSessionStore.setState({
-      serverInfo: ServerInfo.parse({
-        version: '1.9.0',
-        supports_message_part_topology: true,
-      }),
-    });
-    expect(sessionAccessors.messagePartTopologySupported()).toBe(true);
-  });
-});
-
-/**
- * The helper-backed iMessage account surface is permanently retired for this release. An old or
- * forged server advertisement cannot restore it.
- */
-describe('sessionAccessors.icloudAccountSupported', () => {
-  beforeEach(() => useSessionStore.setState({ serverInfo: null }));
-
-  it('is false when there is no server info', () => {
-    expect(sessionAccessors.icloudAccountSupported()).toBe(false);
-  });
-
-  it('is false when the server omits the flag', () => {
-    useSessionStore.setState({ serverInfo: ServerInfo.parse({ version: '1.9.0' }) });
-    expect(sessionAccessors.icloudAccountSupported()).toBe(false);
-  });
-
-  it('is false when the server reports it false', () => {
-    useSessionStore.setState({
-      serverInfo: ServerInfo.parse({ version: '1.9.0', supports_icloud_account: false }),
-    });
-    expect(sessionAccessors.icloudAccountSupported()).toBe(false);
-  });
-
-  it('stays false when an old server advertises the retired capability', () => {
-    useSessionStore.setState({
-      serverInfo: ServerInfo.parse({ version: '1.9.0', supports_icloud_account: true }),
-    });
-    expect(sessionAccessors.icloudAccountSupported()).toBe(false);
   });
 });
 
@@ -151,6 +56,9 @@ describe('session transport-scoped server info', () => {
 });
 
 describe('session send-capability leases', () => {
+  const uploadAdvertised = (): boolean =>
+    useSessionStore.getState().serverInfo?.supports_imessage_attachment_upload === true;
+
   it('invalidates an in-flight send when the narrow iMessage upload flag turns off', () => {
     const previousSession = useSessionStore.getState();
     const enabled = ServerInfo.parse({
@@ -161,7 +69,7 @@ describe('session send-capability leases', () => {
     const disabled = ServerInfo.parse({ version: '2.0.15-bbd' });
     try {
       useSessionStore.getState().connected('https://same-transport.test', 'password', enabled);
-      expect(sessionAccessors.imessageAttachmentUploadEnabled()).toBe(true);
+      expect(uploadAdvertised()).toBe(true);
       expect(useSessionStore.getState().serverInfo?.private_api).toBe(false);
       const lease = captureSessionRcsCapabilityLease();
       if (!lease) throw new Error('expected connected capability lease');
@@ -171,7 +79,7 @@ describe('session send-capability leases', () => {
           .setServerInfoForTransport(lease.origin, lease.revision, disabled),
       ).toBe(true);
       expect(lease.isCurrent()).toBe(false);
-      expect(sessionAccessors.imessageAttachmentUploadEnabled()).toBe(false);
+      expect(uploadAdvertised()).toBe(false);
     } finally {
       useSessionStore.setState(previousSession);
     }
