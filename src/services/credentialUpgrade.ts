@@ -383,6 +383,24 @@ async function revokeReplacedAfterPromotion(
     : outcome;
 }
 
+/**
+ * Before an approved server-address change saves the new address, revoke a replaced credential at
+ * the current address, where it was issued (review M130). Both address-change paths require this
+ * server to be reachable, so this normally completes at once; 'pending' makes the change wait.
+ */
+export async function settleReplacedCredentialBeforeAddressChange(
+  isCurrent: () => boolean,
+): Promise<'settled' | 'pending' | 'cancelled'> {
+  const session = captureLiveUpgradeSession();
+  if (!session || !isCurrent()) return 'cancelled';
+  const current = (): boolean => isCurrent() && sameLiveUpgradeSession(session);
+  const revocation = await revokeReplacedCredentialRuntime(
+    createRuntimeDependencies(session, current, () => undefined),
+  );
+  if (revocation === 'cancelled') return 'cancelled';
+  return revocation === 'pending' ? 'pending' : 'settled';
+}
+
 let replacedRevocationInFlight: Promise<void> | null = null;
 
 /**

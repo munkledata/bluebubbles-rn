@@ -31,6 +31,10 @@ function setup(
     Promise<void>,
     Parameters<ServerRotationExecutorDeps['moveFcmPushKeyState']>
   >;
+  settleReplacedCredential: jest.Mock<
+    Promise<'settled' | 'pending' | 'cancelled'>,
+    Parameters<ServerRotationExecutorDeps['settleReplacedCredential']>
+  >;
   publishCandidate: jest.Mock;
   reconnect: jest.Mock;
 } {
@@ -65,6 +69,10 @@ function setup(
     Promise<void>,
     Parameters<ServerRotationExecutorDeps['moveFcmPushKeyState']>
   >(async () => undefined);
+  const settleReplacedCredential = jest.fn<
+    Promise<'settled' | 'pending' | 'cancelled'>,
+    Parameters<ServerRotationExecutorDeps['settleReplacedCredential']>
+  >(async () => 'settled');
   const publishCandidate = jest.fn((origin: string) => {
     session.origin = origin;
   });
@@ -76,6 +84,7 @@ function setup(
     validateCandidate,
     persistCandidate,
     moveFcmPushKeyState,
+    settleReplacedCredential,
     publishCandidate,
     reconnect,
   };
@@ -93,12 +102,69 @@ function setup(
     validateCandidate,
     persistCandidate,
     moveFcmPushKeyState,
+    settleReplacedCredential,
     publishCandidate,
     reconnect,
   };
 }
 
 describe('approveServerRotation', () => {
+  describe('a replaced credential still waiting for revocation (review M130)', () => {
+    it('is revoked at the current address after validation, before the new address is saved', async () => {
+      const { deps, requestId, validateCandidate, settleReplacedCredential, persistCandidate } =
+        setup();
+      let currentWhileSettling: boolean | undefined;
+      settleReplacedCredential.mockImplementationOnce(async (isCurrent) => {
+        currentWhileSettling = isCurrent();
+        return 'settled';
+      });
+
+      await expect(
+        approveServerRotation(requestId, 'correct-password', false, deps),
+      ).resolves.toEqual({ ok: true });
+
+      expect(settleReplacedCredential).toHaveBeenCalledTimes(1);
+      expect(currentWhileSettling).toBe(true);
+      expect(validateCandidate.mock.invocationCallOrder.at(-1)!).toBeLessThan(
+        settleReplacedCredential.mock.invocationCallOrder[0]!,
+      );
+      expect(settleReplacedCredential.mock.invocationCallOrder[0]!).toBeLessThan(
+        persistCandidate.mock.invocationCallOrder[0]!,
+      );
+    });
+
+    it('keeps the change waiting, retryable, while that revocation cannot finish', async () => {
+      const { deps, requestId, settleReplacedCredential, persistCandidate, publishCandidate } =
+        setup();
+      settleReplacedCredential.mockResolvedValueOnce('pending');
+
+      await expect(
+        approveServerRotation(requestId, 'correct-password', false, deps),
+      ).resolves.toMatchObject({
+        ok: false,
+        kind: 'previous-credential-pending',
+        terminal: false,
+      });
+      expect(persistCandidate).not.toHaveBeenCalled();
+      expect(publishCandidate).not.toHaveBeenCalled();
+      // The prompt can try again once the revocation goes through.
+      expect(deps.coordinator.current(requestId)).not.toBeNull();
+      await expect(
+        approveServerRotation(requestId, 'correct-password', false, deps),
+      ).resolves.toEqual({ ok: true });
+    });
+
+    it('drops the change when ownership moves during that revocation', async () => {
+      const { deps, requestId, settleReplacedCredential, persistCandidate } = setup();
+      settleReplacedCredential.mockResolvedValueOnce('cancelled');
+
+      await expect(
+        approveServerRotation(requestId, 'correct-password', false, deps),
+      ).resolves.toMatchObject({ ok: false, kind: 'stale' });
+      expect(persistCandidate).not.toHaveBeenCalled();
+    });
+  });
+
   it('rejects a mismatched reconfirmation before candidate network or persistence', async () => {
     const h = setup();
 

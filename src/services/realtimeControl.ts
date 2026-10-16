@@ -1577,6 +1577,11 @@ export async function approveNewServerUrl(
       });
       return delivery === 'paused' ? cancelledRotationResult() : result;
     },
+    // Loaded on demand like the other credential-upgrade calls here, which avoids an import cycle.
+    settleReplacedCredential: (isCurrent) =>
+      import('./credentialUpgrade').then((module) =>
+        module.settleReplacedCredentialBeforeAddressChange(isCurrent),
+      ),
     moveFcmPushKeyState: async (fromOrigin, toOrigin, lease, isCurrent) => {
       // Tracked so Disconnect's key retirement drains this write instead of racing it.
       await runTrackedRealtimeWork(lease, async (activeLease) => {

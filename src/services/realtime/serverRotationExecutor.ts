@@ -39,6 +39,14 @@ export interface ServerRotationExecutorDeps {
     lease: RealtimeDeliveryLease,
     isCurrent: () => boolean,
   ) => Promise<void>;
+  /**
+   * Before the new address is saved, revoke a replaced credential still waiting for revocation at
+   * the current address, where it was issued (review M130). 'pending' means that could not finish,
+   * so the change waits; nothing is ever sent to the new address on its behalf.
+   */
+  readonly settleReplacedCredential: (
+    isCurrent: () => boolean,
+  ) => Promise<'settled' | 'pending' | 'cancelled'>;
   /** Synchronous handoff after the complete durable tuple is active. */
   readonly publishCandidate: (origin: string, info: ServerInfo) => void;
   /** The current server's last-known info, for the identity check. Defaults to the live session. */
@@ -56,6 +64,7 @@ export type ServerRotationApprovalResult =
         | 'cleartext-consent-required'
         | 'validation-failed'
         | 'different-server'
+        | 'previous-credential-pending'
         | 'persistence-failed'
         | 'reconnect-failed';
       readonly message: string;
@@ -99,6 +108,10 @@ const CURRENT_SERVER_UNREACHABLE_MESSAGE =
 const DIFFERENT_SERVER_MESSAGE =
   'That address answers as a different Messages server, so Gator won’t switch to it. To use a ' +
   'different server, disconnect and set it up again.';
+
+const PREVIOUS_CREDENTIAL_PENDING_MESSAGE =
+  'Gator is still revoking this phone’s previous credential on your current server, and it must ' +
+  'finish there first. Try again in a moment; the current address keeps working.';
 
 const currentSessionServerInfo = (): ServerInfo | null | undefined =>
   useSessionStore.getState().serverInfo;
@@ -229,6 +242,22 @@ export async function approveServerRotation(
       kind: 'different-server',
       message: DIFFERENT_SERVER_MESSAGE,
       terminal: true,
+    };
+  }
+
+  // A replaced credential still waiting for revocation can be revoked only where it was issued, so
+  // finish that at the current address before the new one is saved (review M130).
+  const previousCredential = await deps.settleReplacedCredential(beforeCommitCurrent);
+  if (previousCredential === 'cancelled' || !beforeCommitCurrent()) {
+    deps.coordinator.cancel(requestId);
+    return staleResult();
+  }
+  if (previousCredential === 'pending') {
+    return {
+      ok: false,
+      kind: 'previous-credential-pending',
+      message: PREVIOUS_CREDENTIAL_PENDING_MESSAGE,
+      terminal: false,
     };
   }
 

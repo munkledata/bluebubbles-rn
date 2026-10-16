@@ -93,6 +93,7 @@ import {
   beginScopedCredentialUpgrade,
   discardScopedCredentialUpgradeCandidate,
   resumeScopedCredentialUpgrade,
+  settleReplacedCredentialBeforeAddressChange,
 } from '@/services/credentialUpgrade';
 import { flushMicrotasks } from '../support/async';
 
@@ -527,6 +528,25 @@ describe('replaced-credential wiring (M130)', () => {
       { kind: 'fixed-candidate-client' },
       expect.any(AbortSignal),
     );
+  });
+
+  it('settles a waiting revocation before an address change, at the current address', async () => {
+    for (const [runtime, expected] of [
+      ['revoked', 'settled'],
+      ['none', 'settled'],
+      ['pending', 'pending'],
+      ['cancelled', 'cancelled'],
+    ] as const) {
+      mockRevokeReplacedCredentialRuntime.mockResolvedValueOnce(runtime);
+      await expect(settleReplacedCredentialBeforeAddressChange(() => true)).resolves.toBe(expected);
+    }
+    expect(mockRevokeReplacedCredentialRuntime).toHaveBeenCalledTimes(4);
+
+    // A change that is no longer current never reaches the server.
+    await expect(settleReplacedCredentialBeforeAddressChange(() => false)).resolves.toBe(
+      'cancelled',
+    );
+    expect(mockRevokeReplacedCredentialRuntime).toHaveBeenCalledTimes(4);
   });
 
   it('revokes the replaced bearer once the new credential is live, as pending when that fails', async () => {
