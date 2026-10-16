@@ -1,9 +1,5 @@
 import { create } from 'zustand';
-import {
-  retirePrivateApiCapabilities,
-  serverSendCapabilityKey,
-  type ServerInfo,
-} from '@core/models';
+import { serverSendCapabilityKey, type ServerInfo } from '@core/models';
 import {
   currentRcsProviderEpoch,
   isCurrentRcsAttachmentGuid,
@@ -125,7 +121,7 @@ export const useSessionStore = create<SessionState>((set) => ({
       status: 'connected',
       origin,
       password,
-      serverInfo: retirePrivateApiCapabilities(info),
+      serverInfo: info,
       error: null,
       epoch: s.epoch + 1,
       transportRevision: s.transportRevision + 1,
@@ -137,13 +133,12 @@ export const useSessionStore = create<SessionState>((set) => ({
       if (s.origin !== expectedOrigin || s.transportRevision !== expectedTransportRevision) {
         return s;
       }
-      const retiredInfo = retirePrivateApiCapabilities(info);
       published = true;
       return {
-        serverInfo: retiredInfo,
+        serverInfo: info,
         sendCapabilityRevision:
           s.sendCapabilityRevision +
-          (serverSendCapabilityKey(s.serverInfo) === serverSendCapabilityKey(retiredInfo) ? 0 : 1),
+          (serverSendCapabilityKey(s.serverInfo) === serverSendCapabilityKey(info) ? 0 : 1),
       };
     });
     return published;
@@ -175,14 +170,13 @@ export const useSessionStore = create<SessionState>((set) => ({
   },
   rotateOrigin: (origin, info) =>
     set((s) => {
-      const retiredInfo = retirePrivateApiCapabilities(info);
       return {
         origin,
-        serverInfo: retiredInfo,
+        serverInfo: info,
         transportRevision: s.transportRevision + 1,
         sendCapabilityRevision:
           s.sendCapabilityRevision +
-          (serverSendCapabilityKey(s.serverInfo) === serverSendCapabilityKey(retiredInfo) ? 0 : 1),
+          (serverSendCapabilityKey(s.serverInfo) === serverSendCapabilityKey(info) ? 0 : 1),
       };
     }),
   failed: (message) => set({ status: 'error', error: message }),

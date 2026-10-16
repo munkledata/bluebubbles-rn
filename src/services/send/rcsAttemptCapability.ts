@@ -7,11 +7,7 @@
  */
 import { serverInfo as fetchServerInfo } from '@core/api/endpoints/server';
 import type { HttpClient, HttpTransportSnapshot } from '@core/api/http';
-import {
-  retirePrivateApiCapabilities,
-  serverSendCapabilityKey,
-  type ServerInfo,
-} from '@core/models/serverInfo';
+import { serverSendCapabilityKey, type ServerInfo } from '@core/models/serverInfo';
 import { isCurrentRcsChatGuid } from '@core/rcs/providerIdentity';
 import type { MessageTargetServerAuthorization } from '@db/repositories';
 import { DbCommitGuardRejectedError, type DbCommitGuard } from '@db/transaction';
@@ -60,7 +56,7 @@ export function fixedRcsCapabilitySource(
 ): FixedRcsCapabilitySource {
   return Object.freeze({
     kind: 'fixed',
-    serverInfo: serverInfo ? retirePrivateApiCapabilities(serverInfo) : null,
+    serverInfo,
   });
 }
 
@@ -188,9 +184,7 @@ export async function resolveRcsAttemptOwnership(
   options?: SendCapabilityResolutionOptions,
 ): Promise<RcsAttemptOwnershipResolution> {
   assertCurrentCapabilitySource(http, commitGuard, capabilitySource);
-  let info = capabilitySource?.serverInfo
-    ? retirePrivateApiCapabilities(capabilitySource.serverInfo)
-    : null;
+  let info = capabilitySource?.serverInfo ?? null;
   const isRcs = isRcsChatGuid(chatGuid);
   if (!isRcs && options?.requireServerInfo !== true) {
     return { attemptAware: false, serverInfo: info };
@@ -198,7 +192,7 @@ export async function resolveRcsAttemptOwnership(
 
   if (!info) {
     try {
-      info = retirePrivateApiCapabilities(await fetchServerInfo(http));
+      info = await fetchServerInfo(http);
     } catch (error) {
       // Prefer the ownership error when Disconnect happened during discovery. That prevents the
       // retired account's network failure from being presented as a current-account send failure.

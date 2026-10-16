@@ -1,6 +1,5 @@
 import { serverApi } from '@core/api';
 import type { HttpClient } from '@core/api/http';
-import { retirePrivateApiCapabilities } from '@core/models';
 import {
   currentRcsProviderEpoch,
   isCurrentRcsChatGuid,
@@ -126,7 +125,7 @@ async function resolveNotificationActionTransport(
   if (!isCurrent()) throw STALE_NOTIFICATION_ACTION;
   if (!capabilityChatGuid) return Object.freeze({ http: actionHttp, accountIsCurrent, isCurrent });
 
-  const info = retirePrivateApiCapabilities(await serverApi.serverInfo(actionHttp));
+  const info = await serverApi.serverInfo(actionHttp);
   if (!isCurrent()) throw STALE_NOTIFICATION_ACTION;
   return Object.freeze({
     http: actionHttp,

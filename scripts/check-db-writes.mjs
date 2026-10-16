@@ -2635,7 +2635,7 @@ function dbProcessRelaunchCertificateCandidate({
     ],
     [
       resolveRcsAttemptOwnership,
-      '5f96b040cff345e58ff94c856558695ecf28e42436dbfa427a2a9c886a39a21d',
+      '5d7f04d99284601ea4e24f08721f82b10b487bb27b76bac52be167853d944193',
     ],
     [pinSendTransport, 'd5b3d2ce63b16eecf6c7490f69f8368de8d6847833898258a89efa0af97d2aa6'],
   ]);

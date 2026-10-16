@@ -199,27 +199,6 @@ export const ServerInfo = z
 // those incoming fields optional so task-local fixtures and partial capability snapshots stay valid.
 export type ServerInfo = z.input<typeof ServerInfo>;
 
-/**
- * Apply the current release's permanent Private API retirement to any already-typed capability
- * object. This covers task-local/test-injected capability sources that did not cross the wire
- * schema, so an old or forged server response cannot restore helper authority.
- */
-export function retirePrivateApiCapabilities(info: ServerInfo): ServerInfo {
-  if (
-    info.private_api === false &&
-    info.supports_imessage_text_with_attachment === false &&
-    info.supports_icloud_account === false
-  ) {
-    return info;
-  }
-  return {
-    ...info,
-    private_api: false,
-    supports_imessage_text_with_attachment: false,
-    supports_icloud_account: false,
-  };
-}
-
 /** Stable identity for only the server flags that can change outgoing-send safety or encoding. */
 export function serverSendCapabilityKey(info: ServerInfo | null | undefined): string {
   if (!info) return 'unknown';

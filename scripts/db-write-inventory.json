@@ -19517,7 +19517,7 @@
     {
       "id": "src/services/notifications/actions.ts#handleNotificationAction.<callback:383ea8d776>:mutator-call:f5e067703ee5",
       "path": "src/services/notifications/actions.ts",
-      "line": 199,
+      "line": 198,
       "symbol": "handleNotificationAction.<callback:383ea8d776>",
       "operation": "mutator-call",
       "target": "src/services/notifications/actions.ts#handleNotificationActionForAccount",
@@ -19530,7 +19530,7 @@
     {
       "id": "src/services/notifications/actions.ts#handleNotificationActionForAccount:mutator-call:d1008c7afb46",
       "path": "src/services/notifications/actions.ts",
-      "line": 275,
+      "line": 274,
       "symbol": "handleNotificationActionForAccount",
       "operation": "mutator-call",
       "target": "src/services/notifications/actions.ts#replyTo",
@@ -19543,7 +19543,7 @@
     {
       "id": "src/services/notifications/actions.ts#handleNotificationActionForAccount:mutator-call:6c2fa704827f",
       "path": "src/services/notifications/actions.ts",
-      "line": 296,
+      "line": 295,
       "symbol": "handleNotificationActionForAccount",
       "operation": "mutator-call",
       "target": "src/services/notifications/actions.ts#loveMessage",
@@ -19556,7 +19556,7 @@
     {
       "id": "src/services/notifications/actions.ts#handleNotificationPress.<callback:57842c3968>:mutator-call:34d83832cc06",
       "path": "src/services/notifications/actions.ts",
-      "line": 337,
+      "line": 336,
       "symbol": "handleNotificationPress.<callback:57842c3968>",
       "operation": "mutator-call",
       "target": "src/services/notifications/actions.ts#handleNotificationPressForAccount",
@@ -19569,7 +19569,7 @@
     {
       "id": "src/services/notifications/actions.ts#handleNotificationPressForAccount:mutator-call:44e77ef8d7a9",
       "path": "src/services/notifications/actions.ts",
-      "line": 400,
+      "line": 399,
       "symbol": "handleNotificationPressForAccount",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -19582,7 +19582,7 @@
     {
       "id": "src/services/notifications/actions.ts#handleNotificationPressForAccount:mutator-call:b83aedcb7b5e",
       "path": "src/services/notifications/actions.ts",
-      "line": 402,
+      "line": 401,
       "symbol": "handleNotificationPressForAccount",
       "operation": "mutator-call",
       "target": "src/db/repositories/reminders.ts#deleteReminderByNotificationId",
@@ -19595,7 +19595,7 @@
     {
       "id": "src/services/notifications/actions.ts#replyTo:mutator-call:ef1e4d9c2bf6",
       "path": "src/services/notifications/actions.ts",
-      "line": 438,
+      "line": 437,
       "symbol": "replyTo",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -19608,7 +19608,7 @@
     {
       "id": "src/services/notifications/actions.ts#replyTo:mutator-call:16685310e2e9",
       "path": "src/services/notifications/actions.ts",
-      "line": 441,
+      "line": 440,
       "symbol": "replyTo",
       "operation": "mutator-call",
       "target": "src/services/send/sendService.ts#sendTextMessage",
@@ -19621,7 +19621,7 @@
     {
       "id": "src/services/notifications/actions.ts#loveMessage:mutator-call:ba76a076dbe4",
       "path": "src/services/notifications/actions.ts",
-      "line": 467,
+      "line": 466,
       "symbol": "loveMessage",
       "operation": "mutator-call",
       "target": "src/services/databaseControl.ts#ensureDatabase",
@@ -19634,7 +19634,7 @@
     {
       "id": "src/services/notifications/actions.ts#loveMessage:mutator-call:24b12380d8b6",
       "path": "src/services/notifications/actions.ts",
-      "line": 502,
+      "line": 501,
       "symbol": "loveMessage",
       "operation": "mutator-call",
       "target": "src/services/send/sendReactionService.ts#sendReactionMessage",
