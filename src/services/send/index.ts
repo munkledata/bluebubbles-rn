@@ -164,12 +164,6 @@ class SendCapabilityUnavailableError extends Error {
   }
 }
 
-function assertPrivateApiAvailable(
-  _capability: ReturnType<typeof captureSessionRcsCapabilityLease>,
-): void {
-  throw new SendCapabilityUnavailableError();
-}
-
 /** Development sender injected into the scheduled runner instead of the real HTTP send path. */
 export type ScheduledDevelopmentSender = (
   chatGuid: string,
@@ -579,9 +573,13 @@ export function sendImages(
   );
 }
 
-/** UI-facing send: bound to the composition-root DB + HttpClient. */
+/**
+ * UI-facing plain-text send: bound to the composition-root DB + HttpClient. Replies, effects,
+ * subjects and mentions need the retired private API, so the type admits only chat and text
+ * (review M087).
+ */
 export function send(
-  args: SendTextArgs,
+  args: Pick<SendTextArgs, 'chatGuid' | 'text'>,
   accountLease: RealtimeDeliveryLease = captureRealtimeDeliveryLease(),
   reportIssue?: SendIssueReporter,
   onQueued?: SendQueuedObserver,
@@ -591,12 +589,6 @@ export function send(
     accountLease,
     () => {
       const capability = captureSessionRcsCapabilityLease();
-      const needsPrivateApi =
-        snapshot.selectedMessageGuid != null ||
-        !!snapshot.effectId ||
-        !!snapshot.subject ||
-        !!snapshot.mentions?.length;
-      if (needsPrivateApi) assertPrivateApiAvailable(capability);
       return sendTextMessage(
         getDatabase(),
         accountHttp(accountLease),

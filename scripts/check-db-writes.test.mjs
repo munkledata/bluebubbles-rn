@@ -3509,7 +3509,7 @@ test('certifies exactly the reviewed send front-door delegation edges', () => {
       'src/services/send/index.ts#retry.<callback:6de70f50b5>:mutator-call:092d6ec9e2b2',
       'src/services/send/index.ts#schedule.<callback:dd8870d856>:mutator-call:dce9e26a3293',
       'src/services/send/index.ts#scheduleAttachment.<callback:3ea104aebd>:mutator-call:9aabf7e999d8',
-      'src/services/send/index.ts#send.<callback:6aa1e44282>:mutator-call:18d1aa8679b5',
+      'src/services/send/index.ts#send.<callback:e0a63c8c1b>:mutator-call:2c41f7ab3722',
       'src/services/send/index.ts#sendContactCard.<callback:a504472eb8>:mutator-call:a3ad7cbe350d',
       'src/services/send/index.ts#sendEffect.<callback:63dc1a3ff5>:mutator-call:3ee9a29481e6',
       'src/services/send/index.ts#sendImage.<callback:2e221a7364>:mutator-call:2642e47a4a2f',

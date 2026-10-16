@@ -429,9 +429,6 @@ describe('UI send account lease', () => {
       unsend({ chatGuid: 'iMessage;-;+15551234567', messageGuid: 'm1', partIndex: 0 }),
     ).resolves.toBeNull();
     await expect(
-      send({ chatGuid: 'iMessage;-;+15551234567', text: 'party', effectId: 'confetti' }),
-    ).resolves.toBeNull();
-    await expect(
       reply({
         chatGuid: 'iMessage;-;+15551234567',
         text: 'reply',
