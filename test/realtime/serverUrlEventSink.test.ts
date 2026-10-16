@@ -43,6 +43,14 @@ jest.mock('@/services/notifications/notifeeService', () => ({
   postNotification: jest.fn(async () => {}),
   getNotificationPermissionState: jest.fn(async () => 'granted'),
 }));
+// realtimeControl loads the credential module on demand, and it cannot load in this project (its
+// import graph reaches react-native's Flow source), so the two functions it calls are faked:
+// recovery finds nothing to do, and no replaced credential is waiting (review M130). Both have
+// their own tests.
+jest.mock('@/services/credentialUpgrade', () => ({
+  resumeScopedCredentialUpgrade: jest.fn(async () => ({ kind: 'idle' })),
+  settleReplacedCredentialBeforeAddressChange: jest.fn(async () => 'settled'),
+}));
 
 // Jest mocks must be registered before importing the realtime source graph.
 /* eslint-disable import/first */
@@ -72,6 +80,10 @@ import {
 const { serverApi: mockServerApi } = jest.requireMock('@core/api') as {
   serverApi: { serverInfo: jest.Mock };
 };
+const { settleReplacedCredentialBeforeAddressChange: mockSettleReplacedCredential } =
+  jest.requireMock('@/services/credentialUpgrade') as {
+    settleReplacedCredentialBeforeAddressChange: jest.Mock;
+  };
 const { vault: mockVault, accountRevocationMarker: mockRevocationMarker } = jest.requireMock(
   '@/services/clients',
 ) as {
@@ -435,6 +447,11 @@ describe('new-server production admission', () => {
     expect(mockCandidateClient).toHaveBeenCalledWith('https://next.example', 'current-password');
     expect(mockServerApi.serverInfo).toHaveBeenCalledWith(candidate);
     expect(mockVault.set.mock.calls).toEqual([['serverAddress', 'https://next.example']]);
+    // A replaced credential still waiting is revoked at the current address first (review M130).
+    expect(mockSettleReplacedCredential).toHaveBeenCalledTimes(1);
+    expect(mockSettleReplacedCredential.mock.invocationCallOrder[0]!).toBeLessThan(
+      mockVault.set.mock.invocationCallOrder[0]!,
+    );
     expect(mockRevocationMarker.clear).not.toHaveBeenCalled();
     expect(useSessionStore.getState()).toEqual(
       expect.objectContaining({
@@ -451,6 +468,25 @@ describe('new-server production admission', () => {
     );
     expect(serverRotationCoordinator.getSnapshot()).toBeNull();
     expect(mockEnsureDatabase).not.toHaveBeenCalled();
+  });
+
+  it('keeps the current address, retryable, while a replaced credential is still being revoked (review M130)', async () => {
+    await activateForegroundSession();
+    mockCandidateClient.mockReturnValue({ name: 'candidate-client' });
+    mockServerApi.serverInfo.mockResolvedValue({ server_version: '1.9.0' });
+    mockSettleReplacedCredential.mockResolvedValueOnce('pending');
+
+    await dispatchRealtimeEvent('new-server', 'HTTPS://NEXT.EXAMPLE:443/', 'socket');
+    const requestId = serverRotationCoordinator.getSnapshot()!.id;
+
+    await expect(approveNewServerUrl(requestId, 'current-password', false)).resolves.toMatchObject({
+      ok: false,
+      kind: 'previous-credential-pending',
+      terminal: false,
+    });
+    expect(mockVault.set).not.toHaveBeenCalled();
+    expect(useSessionStore.getState().origin).toBe(ORIGINAL_ORIGIN);
+    expect(serverRotationCoordinator.getSnapshot()?.id).toBe(requestId);
   });
 
   it('moves the live session to the saved address even when the old socket fails to close', async () => {
