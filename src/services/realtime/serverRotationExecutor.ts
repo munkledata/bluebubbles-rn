@@ -127,8 +127,10 @@ const staleResult = (): ServerRotationApprovalResult => ({
  * Execute a user-approved rotation without retaining the entered password.
  *
  * Local password and cleartext checks happen before the first candidate-client call. Candidate
- * validation remains cancellable and non-durable. Only after it succeeds do we claim the prompt
- * and enter the caller's short account-tracked correlated-vault commit.
+ * validation remains cancellable and non-durable. After it succeeds, a replaced credential still
+ * waiting for revocation is revoked at the current address (a server-side effect, review M130).
+ * Only then do we claim the prompt and enter the caller's short account-tracked correlated-vault
+ * commit.
  */
 export async function approveServerRotation(
   requestId: number,
@@ -247,7 +249,14 @@ export async function approveServerRotation(
 
   // A replaced credential still waiting for revocation can be revoked only where it was issued, so
   // finish that at the current address before the new one is saved (review M130).
-  const previousCredential = await deps.settleReplacedCredential(beforeCommitCurrent);
+  let previousCredential: 'settled' | 'pending' | 'cancelled';
+  try {
+    previousCredential = await deps.settleReplacedCredential(beforeCommitCurrent);
+  } catch {
+    // An unexpected failure must not leave the prompt waiting: treat it like a revocation that
+    // could not finish, which the user can retry.
+    previousCredential = 'pending';
+  }
   if (previousCredential === 'cancelled' || !beforeCommitCurrent()) {
     deps.coordinator.cancel(requestId);
     return staleResult();

@@ -379,7 +379,11 @@ export default function ServerManagementScreen(): React.JSX.Element {
         if (replacing) {
           const status = await inspectScopedCredentialUpgradeStatus();
           if (!accountLease.isCurrent()) return;
-          const confirmedSaved = status.kind === 'candidate' || status.kind === 'in-progress';
+          // A paused outcome proves the adopting journal was saved, even if the check below cannot.
+          const confirmedSaved =
+            outcome.notificationsPaused === true ||
+            status.kind === 'candidate' ||
+            status.kind === 'in-progress';
           setCredentialSaved(confirmedSaved);
           setCredentialDiscardable(status.kind === 'candidate');
           if (confirmedSaved) setCredentialText('');
@@ -389,7 +393,7 @@ export default function ServerManagementScreen(): React.JSX.Element {
               : confirmedSaved && outcome.notificationsPaused
                 ? 'The replacement is saved securely, but this phone’s notifications are paused until Gator finishes it. Gator retries the next time you open it; the old credential still works until then.'
                 : confirmedSaved
-                  ? 'The replacement is saved securely. Gator will retry it when it reconnects; the old credential still works until then.'
+                  ? 'The replacement is saved securely. Gator retries it the next time you open it; the old credential still works until then.'
                   : 'Gator could not confirm that the replacement was saved. Your entry is still here so you can retry.',
           );
           return;
@@ -421,7 +425,10 @@ export default function ServerManagementScreen(): React.JSX.Element {
       if (replacing && outcome.kind === 'blocked' && outcome.reason === 'push-target-owned') {
         const status = await inspectScopedCredentialUpgradeStatus();
         if (!accountLease.isCurrent()) return;
-        const confirmedSaved = status.kind === 'candidate' || status.kind === 'in-progress';
+        const confirmedSaved =
+          outcome.notificationsPaused === true ||
+          status.kind === 'candidate' ||
+          status.kind === 'in-progress';
         setCredentialSaved(confirmedSaved);
         setCredentialDiscardable(false);
         if (confirmedSaved) setCredentialText('');

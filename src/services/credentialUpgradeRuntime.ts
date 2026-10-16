@@ -80,7 +80,7 @@ export interface CredentialUpgradeRuntimeDependencies {
 export type CredentialUpgradeRuntimeOutcome =
   | { readonly kind: 'adopted' }
   | { readonly kind: 'adopted-cleanup-pending' }
-  /** The replacement is live; revoking the old bearer is retried on later reconnects. */
+  /** The replacement is live; revoking the old bearer is retried when the app next resumes. */
   | { readonly kind: 'adopted-revocation-pending' }
   | { readonly kind: 'idle' }
   | { readonly kind: 'cancelled' }
@@ -405,7 +405,7 @@ async function finishPromotion(
   }
 
   // A scoped replacement keeps custody of the old bearer in its own record before the journal
-  // goes away, so it can be revoked now or on a later reconnect (review M130). Until that record
+  // goes away, so it can be revoked now or on a later resume (review M130). Until that record
   // is confirmed, the journal keeps custody instead and a later resume moves it.
   const replacement = journal.version === 2;
   const custodyMoved =

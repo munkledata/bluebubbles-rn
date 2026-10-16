@@ -408,8 +408,9 @@ export async function settleReplacedCredentialBeforeAddressChange(
 let replacedRevocationInFlight: Promise<void> | null = null;
 
 /**
- * Retry revoking a replaced bearer after an ordinary reconnect, without holding up realtime
- * startup (review M130). Tracked like other account work, so Disconnect waits for it.
+ * Retry revoking a replaced bearer when the app starts or returns to the foreground with no
+ * credential change pending, without holding up realtime startup (review M130). Tracked like other
+ * account work, so Disconnect waits for it.
  */
 function revokeReplacedCredentialInBackground(): void {
   if (replacedRevocationInFlight) return;

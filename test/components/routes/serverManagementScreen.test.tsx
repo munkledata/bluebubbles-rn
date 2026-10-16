@@ -586,6 +586,32 @@ describe('ServerManagementScreen — ordinary sensitive presentation and account
     expect(screen.queryByText(/remove only the old notification registration/)).toBeNull();
   });
 
+  it.each([
+    [
+      'a retry',
+      { kind: 'retry', stage: 'adoption', notificationsPaused: true },
+      /notifications are paused until Gator finishes it/,
+    ],
+    [
+      'an owned target',
+      { kind: 'blocked', reason: 'push-target-owned', notificationsPaused: true },
+      /so they are paused/,
+    ],
+  ])(
+    'treats %s with paused notifications as saved even when the saved state cannot be read (M130 second review)',
+    async (_label, outcome, message) => {
+      mockInspectScopedCredentialUpgradeStatus
+        .mockResolvedValueOnce({ kind: 'none' })
+        .mockResolvedValue({ kind: 'unavailable' });
+      await replaceWith(outcome);
+      expect(await screen.findByText(message)).toBeTruthy();
+      // Saved: the entry is cleared and locked, so the same credential is not submitted again.
+      expect(screen.getByLabelText('Paired-client credential').props.value).toBe('');
+      expect(screen.getByLabelText('Paired-client credential').props.editable).toBe(false);
+      expect(screen.queryByRole('button', { name: 'Use New Credential' })).toBeNull();
+    },
+  );
+
   it('keeps the entry while an earlier replacement still revokes its old credential (M130)', async () => {
     const newCredential = await replaceWith({ kind: 'retry', stage: 'previous-revocation' });
     expect(await screen.findByText(/previous replacement is still revoking/)).toBeTruthy();

@@ -154,6 +154,21 @@ describe('approveServerRotation', () => {
       ).resolves.toEqual({ ok: true });
     });
 
+    it('keeps the change waiting, retryable, when that revocation fails unexpectedly (M130 second review)', async () => {
+      const { deps, requestId, settleReplacedCredential, persistCandidate } = setup();
+      settleReplacedCredential.mockRejectedValueOnce(new Error('module failed to load'));
+
+      await expect(
+        approveServerRotation(requestId, 'correct-password', false, deps),
+      ).resolves.toMatchObject({
+        ok: false,
+        kind: 'previous-credential-pending',
+        terminal: false,
+      });
+      expect(persistCandidate).not.toHaveBeenCalled();
+      expect(deps.coordinator.current(requestId)).not.toBeNull();
+    });
+
     it('drops the change when ownership moves during that revocation', async () => {
       const { deps, requestId, settleReplacedCredential, persistCandidate } = setup();
       settleReplacedCredential.mockResolvedValueOnce('cancelled');
